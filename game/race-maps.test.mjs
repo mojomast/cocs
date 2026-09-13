@@ -25,6 +25,14 @@ const pointInPolygon=(polygon,{x,z})=>{
  }
  return inside;
 };
+const segmentDistance=(p,a,b)=>{
+ const dx=b.x-a.x,dz=b.z-a.z,len2=dx*dx+dz*dz;
+ const t=len2?Math.max(0,Math.min(1,((p.x-a.x)*dx+(p.z-a.z)*dz)/len2)):0;
+ return Math.hypot(p.x-(a.x+dx*t),p.z-(a.z+dz*t));
+};
+const nearestCenterline=(p,polygon)=>Math.min(...polygon.map((a,i)=>segmentDistance(p,a,polygon[(i+1)%polygon.length])));
+const insideSolid=(p,arena)=>arena.blocks.some(b=>Math.abs(p.x-b.x)<b.w/2&&Math.abs(p.z-b.z)<b.d/2);
+const closestPair=(points)=>Math.min(...points.flatMap((p,i)=>points.slice(i+1).map(q=>Math.hypot(p.x-q.x,p.z-q.z))));
 const railBoxes=side=>arena.blocks.filter(b=>b.kind==='race-rail'&&b.side===side);
 
 test('Puma Circuit is immutable and exclusively registered for racing, including fallback metadata',()=>{
@@ -54,11 +62,34 @@ test('race gates, grid and eight Puma templates satisfy the ground contract',()=
   assert.deepEqual(arena.spawns[id],[p.x,p.z]);
   assert.deepEqual(arena.vehicles[id],{id,kind:'puma',x:p.x,y:0,z:p.z,yaw:p.heading});
  }
- assert.equal(new Set(itemBoxes.map(p=>p.id)).size,itemBoxes.length);assert.ok(itemBoxes.length>=6);
+ assert.equal(new Set(itemBoxes.map(p=>p.id)).size,itemBoxes.length);assert.equal(itemBoxes.length,10);
  assert.deepEqual(arena.pickups,[]);
  for(const p of [...centerline,...gates,...grid,...itemBoxes,...arena.navNodes,...arena.vehicles]){
   assert.equal(floorAt(p.x,p.z,arena),0);assert.equal(obstructed(p.x,0,p.z,2.1,arena),false,JSON.stringify(p));
  }
+});
+
+test('track furniture is deeply frozen, spaced, and clear on the racing line',()=>{
+ const {boostPads,coins,itemBoxes,centerline}=arena.race;
+ assert.equal(itemBoxes.length,10);
+ assert.ok(boostPads.length>=8&&boostPads.length<=10,`boost pads ${boostPads.length}`);
+ assert.ok(coins.length>=16&&coins.length<=24,`coins ${coins.length}`);
+ assert.ok(Object.isFrozen(arena.race));
+ for(const list of [boostPads,coins,itemBoxes]){
+  assert.ok(Object.isFrozen(list)&&list.every(Object.isFrozen));
+ }
+ const furniture=[...boostPads,...coins,...itemBoxes],ids=furniture.map(p=>p.id);
+ assert.equal(new Set(ids).size,ids.length,'furniture ids unique');
+ for(const p of furniture){
+  assert.ok(Number.isFinite(p.x)&&Number.isFinite(p.z),JSON.stringify(p));
+  assert.equal(floorAt(p.x,p.z,arena),0,`${p.id} floor 0`);
+  assert.equal(obstructed(p.x,0,p.z,2.1,arena),false,`${p.id} clear for radius 2.1`);
+  assert.equal(insideSolid(p,arena),false,`${p.id} not inside a solid block`);
+  assert.ok(nearestCenterline(p,centerline)<=8,`${p.id} sits on the racing line`);
+ }
+ assert.ok(closestPair(boostPads)>=6-1e-9,'boost pads stay 6 apart');
+ for(const pad of boostPads)for(const box of itemBoxes)assert.ok(Math.hypot(pad.x-box.x,pad.z-box.z)>=6-1e-9,`${pad.id} crowds ${box.id}`);
+ for(const coin of coins)for(const other of [...boostPads,...itemBoxes])assert.ok(Math.hypot(coin.x-other.x,coin.z-other.z)>=2-1e-9,`${coin.id} overlaps ${other.id}`);
 });
 
 test('Puma-sized sweeps clear every segment and corner across the racing lanes',()=>{

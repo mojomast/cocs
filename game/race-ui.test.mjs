@@ -40,10 +40,27 @@ test('race and combat HUDs render one shared online chat with working Enter and 
 test('race display uses official positions, laps and winner, never frags or practice',()=>{
  const snapshot={config:{mode:'puma-race',botCount:0},actors:[{id:0,name:'You',frags:100},{id:2,name:'Rival',frags:0}],race:{phase:'countdown',countdown:2.2,laps:3,elapsed:0,winnerId:null,gates:Array(12),standings:[{actorId:0,position:2,lap:2,completedLaps:1,nextGate:4,finishTime:null,item:'oil',effects:{turbo:1.2,shield:0}},{actorId:2,position:1,lap:3,completedLaps:2,nextGate:0,finishTime:null}]}};
  assert.deepEqual(raceStandings(snapshot).map(r=>r.actorId),[2,0]);assert.equal(snapshot.race.standings[0].actorId,0);
- const display=raceDisplay(snapshot,0);assert.equal(display.position,2);assert.equal(display.countdown,'3');assert.equal(display.checkpoint,5);assert.equal(display.item,'OIL');assert.equal(display.effects,'TURBO 1.2s');
+ const display=raceDisplay(snapshot,0);assert.equal(display.position,2);assert.equal(display.countdown,'3');assert.equal(display.checkpoint,5);assert.equal(display.item,'OIL SLICK');assert.equal(display.effects,'TURBO 1.2s');
  snapshot.race.phase='finished';snapshot.race.winnerId=2;assert.equal(raceResult(snapshot,0),'Rival WINS.');snapshot.race.winnerId=0;assert.equal(raceResult(snapshot,0),'YOU WIN THE RACE.');snapshot.race.winnerId=null;assert.equal(raceResult(snapshot,0),'RACE COMPLETE.');
 });
 test('race time and absent snapshot are readable',()=>{assert.equal(raceTime(61.25),'01:01.25');assert.equal(raceTime(-1),'00:00.00');assert.equal(raceDisplay(null).item,'NO ITEM');});
+test('race display exposes coins, friendly item labels and star effects',()=>{
+ const labelSnapshot=id=>({config:{mode:'puma-race'},race:{phase:'racing',elapsed:5,laps:3,gates:Array(12),standings:[{actorId:0,position:1,lap:1,nextGate:0,item:id,coins:6,effects:{star:2.1}}]}});
+ for(const [id,label] of [['turbo','TURBO'],['shield','SHIELD'],['oil','OIL SLICK'],['pulse','HOMING PULSE'],['mine','MINE'],['triple','TRIPLE PULSE'],['bolt','LIGHTNING'],['star','STAR']])assert.equal(raceDisplay(labelSnapshot(id),0).item,label);
+ const display=raceDisplay(labelSnapshot('triple'),0);assert.equal(display.coins,6);assert.equal(display.effects,'STAR 2.1s');
+ assert.equal(raceDisplay({race:{standings:[{actorId:0,position:1}]}},0).coins,0);assert.equal(raceDisplay(null).coins,0);
+});
+test('rendered race HUD shows a COINS readout and friendly item labels',async()=>{
+ const file=new URL('../app/page.tsx',import.meta.url),source=await readFile(file,'utf8'),ast=ts.createSourceFile(file.pathname,source,ts.ScriptTarget.Latest,true,ts.ScriptKind.TSX);let hud;
+ const find=node=>{if(ts.isJsxElement(node)&&node.openingElement.getText(ast).includes('race-hud'))hud=node;ts.forEachChild(node,find);};find(ast);assert.ok(hud);
+ const markup=ts.createPrinter().printNode(ts.EmitHint.Expression,hud,ast);
+ const {outputText}=ts.transpileModule(`import {raceDisplay} from '${new URL('./race-ui.mjs',import.meta.url).href}';export function renderRaceHud({race,touchControls,raceControls}){return (${markup});}`,{compilerOptions:{jsx:ts.JsxEmit.ReactJSX,module:ts.ModuleKind.ESNext}});
+ const executable=outputText.replace('"react/jsx-runtime"',JSON.stringify(import.meta.resolve('react/jsx-runtime'))),{renderRaceHud}=await import(`data:text/javascript;base64,${Buffer.from(executable).toString('base64')}`);
+ const snapshotFor=id=>({config:{mode:'puma-race'},race:{phase:'racing',elapsed:5,gates:Array(12),standings:[{actorId:0,position:1,lap:1,nextGate:0,item:id,coins:7,effects:{star:2.1}}]}});
+ const render=id=>renderToStaticMarkup(renderRaceHud({race:raceDisplay(snapshotFor(id),0),touchControls:false,raceControls:''}));
+ const html=render('triple');assert.ok(html.includes('COINS'));assert.ok(html.includes('>7<'));assert.ok(html.includes('TRIPLE PULSE'));assert.ok(html.includes('STAR 2.1s'));
+ for(const [id,label] of [['turbo','TURBO'],['shield','SHIELD'],['oil','OIL SLICK'],['pulse','HOMING PULSE'],['mine','MINE'],['triple','TRIPLE PULSE'],['bolt','LIGHTNING'],['star','STAR']])assert.ok(render(id).includes(label),label);
+});
 test('persisted eight-driver history keeps names and never labels actor zero as YOU',async()=>{
  const standings=Array.from({length:8},(_,actorId)=>({actorId,position:8-actorId,completedLaps:3,finishTime:90+actorId}));
  const history={mode:'puma-race',race:{standings,laps:3,phase:'finished',winnerId:7},players:standings.map(row=>({actorId:row.actorId,name:`Driver ${row.actorId}`,race:row})).reverse()};

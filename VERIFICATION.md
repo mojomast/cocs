@@ -1,5 +1,28 @@
 # COCS verification report
 
+## Release 2.64 - Kart items, coins and boost pads
+
+- Expanded the item set from four to eight: Turbo, Shield, Oil Slick, Homing
+  Pulse, Mine (stationary harder-slow trap), Triple Pulse (next three ahead),
+  Lightning (all ahead), and Star (speed + immunity to every slow). Position
+  weighting was retuned so the leader draws mostly defensive items and the
+  trailer draws catch-up items (catch-up mass ~0.26 leader vs ~0.78 trailer).
+- Added coins: each gives +1.2% top speed up to +12% at ten, and a slow hit
+  drops two. Added always-on boost pads that grant a free short turbo on contact
+  with a per-racer cooldown. Item boxes increased from six to ten.
+- Track now authors 10 boost pads, 24 coins and 10 item boxes, all floor 0,
+  clear for a 2.1-radius car, away from rails, and inside the racing line; boost
+  pads are >=6 units apart. Snapshot exposes `race.coins`, per-racer `coins`, and
+  `effects.star`, and hazards carry `type` (oil or mine).
+- Rendering: flat glowing chevron boost pads oriented along the centerline,
+  spinning gold coins that hide/dispose when collected and freeze under reduced
+  motion, and a distinct spiked mine model vs the oil slick.
+- HUD: race metrics gained a COINS readout, and item/effect text uses friendly
+  labels for all eight items, including active Star time.
+- Verification: focused race/map/render/UI/network suite **147/147**; full game
+  suite **820/820**; server **118/118**; `tsc --noEmit` clean. No browser/WebGL
+  playtest of the new visuals or a live driving balance pass.
+
 ## Release 2.63 - Race balance, collisions, track render, demo camera
 
 - Balanced the race so the early leader is catchable: a clamped rubber-band pace

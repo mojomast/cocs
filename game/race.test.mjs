@@ -4,12 +4,13 @@ import {initializeRace, stepRace, raceSnapshot, raceStandings, crossRaceGates, r
   ITEMS, CAR_RADIUS, MIN_CAR_SEPARATION, paceMultiplier, itemWeights, rollItem, resolveCarCollisions,
   PACE_LEADER, PACE_TRAILER} from './race.mjs';
 
-function fixture(count=2, bots=false, seed=7) {
+function fixture(count=2, bots=false, seed=7, extras={}) {
   const centerline=Array.from({length:12},(_,i)=>({x:60*Math.sin(i*Math.PI/6),z:-48*Math.cos(i*Math.PI/6)}));
   const gates=centerline.map((p,i)=>{const dx=60*Math.cos(i*Math.PI/6),dz=48*Math.sin(i*Math.PI/6),len=Math.hypot(dx,dz);return {...p,nx:dx/len,nz:dz/len,halfWidth:12};});
   const grid=Array.from({length:8},(_,i)=>({x:-4-Math.floor(i/2)*5,z:-48+(i%2?3:-3),heading:Math.PI/2}));
+  const track={centerline,gates,grid,itemBoxes:[{id:'box',x:20,z:-46}],...extras};
   let state=seed;
-  const match={arena:{race:{centerline,gates,grid,itemBoxes:[{id:'box',x:20,z:-46}]}},
+  const match={arena:{race:track},
     actors:Array.from({length:count},(_,id)=>({id,ammo:[1],bot:bots?{}:null})),config:{fragLimit:2,timeLimit:180},
     random(){state=(Math.imul(state,1664525)+1013904223)>>>0;return state/2**32;},time:0,over:false,
     vehicleById(id){return this.vehicles.find(v=>v.id===id);},
@@ -235,12 +236,105 @@ test('mystery box rolls are weighted toward the trailer by rank',()=>{
     for(let i=0;i<4000;i++){state=(Math.imul(state,1664525)+1013904223)>>>0;counts[rollItem(()=>state/2**32,t)]++;}
     return counts;
   };
-  const leader=sample(0),trailer=sample(1),catchup=c=>c.turbo+c.pulse;
+  const CATCHUP=['turbo','pulse','bolt','triple','star'],DENIAL=['shield','oil','mine'];
+  const leader=sample(0),trailer=sample(1),catchup=c=>CATCHUP.reduce((s,item)=>s+c[item],0);
   assert.ok(catchup(trailer)>catchup(leader)*2,`leader ${JSON.stringify(leader)} trailer ${JSON.stringify(trailer)}`);
   assert.ok(catchup(leader)/4000<.35&&catchup(trailer)/4000>.65);
-  for(const item of ITEMS)assert.ok(trailer[item]>leader[item]||(item!=='turbo'&&item!=='pulse'));
+  for(const item of CATCHUP)assert.ok(trailer[item]>leader[item],`${item} should favor the trailer`);
+  for(const item of DENIAL)assert.ok(leader[item]>trailer[item],`${item} should favor the leader`);
   const weights=itemWeights(.5),total=ITEMS.reduce((s,item)=>s+weights[item],0);
   assert.ok(Math.abs(total-1)<1e-9&&ITEMS.every(item=>weights[item]>=0));
+  assert.equal(ITEMS.join(','),'turbo,shield,oil,pulse,mine,triple,bolt,star');
+});
+
+test('triple slows exactly the next three ahead; bolt slows every opponent ahead',()=>{
+  const triple=fixture(5);stepRace(triple,3);
+  const [a,b,c,d,e]=triple.race.racers;
+  Object.assign(a,{progress:0,item:'triple'});Object.assign(b,{progress:1});Object.assign(c,{progress:2});Object.assign(d,{progress:3});Object.assign(e,{progress:4});
+  stepRace(triple,1/60,{fire:true});
+  for(const r of [b,c,d])assert.equal(r.effects.slow,1.5,`racer ${r.actorId} slowed`);
+  assert.equal(e.effects.slow,0,'fourth ahead is untouched');
+  const bolt=fixture(5);stepRace(bolt,3);
+  const [f,g,h,i,j]=bolt.race.racers;
+  Object.assign(f,{progress:0,item:'bolt'});Object.assign(g,{progress:1});Object.assign(h,{progress:2});Object.assign(i,{progress:3});Object.assign(j,{progress:4});
+  stepRace(bolt,1/60,{power:true});
+  for(const r of [g,h,i,j])assert.equal(r.effects.slow,2,`racer ${r.actorId} slowed`);
+  assert.equal(f.effects.slow,0,'the caster is never slowed');
+});
+
+test('star grants immunity to pulse, bolt and oil slow',()=>{
+  const m=fixture(3);stepRace(m,3);
+  const [a,b,c]=m.race.racers;
+  Object.assign(a,{progress:0,item:'pulse'});b.progress=1;c.progress=2;b.effects.star=3.5;
+  stepRace(m,1/60,{fire:true});assert.equal(b.effects.slow,0,'star blocks pulse');
+  stepRace(m,1/60);Object.assign(a,{progress:0,item:'bolt'});b.progress=1;c.progress=2;b.effects.star=0;c.effects.star=3.5;
+  stepRace(m,1/60,{fire:true});assert.equal(c.effects.slow,0,'star blocks bolt');assert.ok(b.effects.slow>0,'plain racer still slowed');
+  stepRace(m,1/60);Object.assign(c,{effects:{...c.effects,star:3.5,slow:0,shield:0}});
+  a.item='oil';stepRace(m,1/60,{fire:true});
+  const h=m.race.hazards.find(x=>x.type==='oil');
+  Object.assign(m.vehicles[2].position,{x:h.x,z:h.z});stepRace(m,1/60);assert.equal(c.effects.slow,0,'star blocks oil');
+});
+
+test('mine drops a stationary trap; only non-immune cars are slowed for its value',()=>{
+  const m=fixture(3);stepRace(m,3);
+  const [a,b,c]=m.race.racers,v=m.vehicles[0];
+  Object.assign(v.position,{x:5,z:5});a.item='mine';stepRace(m,1/60,{fire:true});
+  const h=m.race.hazards.find(x=>x.type==='mine');
+  assert.ok(h);assert.equal(h.x,5);assert.equal(h.z,5);assert.equal(h.ttl,12);
+  assert.equal(h.slow,2.5);assert.equal(h.radius,3.5);assert.equal(h.owner,a.actorId);
+  Object.assign(m.vehicles[1].position,{x:5,z:5});b.effects.star=3.5;b.effects.shield=0;
+  stepRace(m,1/60);assert.equal(b.effects.slow,0,'star immune to mine');
+  Object.assign(m.vehicles[2].position,{x:5,z:5});c.effects.shield=0;
+  stepRace(m,1/60);assert.equal(c.effects.slow,2.5,'mine applies its slow');
+});
+
+test('coins collect, cap at ten, feed the speed multiplier, and drop two on a slow',()=>{
+  const coins=[{id:'c0',x:5,z:5}];
+  const m=fixture(1,false,7,{coins});stepRace(m,3);
+  const a=m.race.racers[0],c0=m.race.coins[0];
+  Object.assign(m.vehicles[0].position,{x:5,z:5});stepRace(m,1/60);
+  assert.equal(a.coins,1);assert.equal(c0.wait,10);
+  stepRace(m,1/60);assert.equal(a.coins,1,'cooldown blocks a second collect');
+  a.coins=10;c0.wait=0;Object.assign(m.vehicles[0].position,{x:5,z:5});stepRace(m,1/60);
+  assert.equal(a.coins,10,'cap holds at ten');
+  const travel=n=>{const f=fixture(1,false,7);stepRace(f,3);f.race.racers[0].coins=n;
+    const v=f.vehicles[0],start=f.arena.race.grid[0].x;stepRace(f,1,{x:1,yaw:-Math.PI/2});
+    return Math.abs(v.position.x-start);};
+  assert.ok(travel(10)>travel(0),'coins add speed');
+  const slow=fixture(2);stepRace(slow,3);
+  const [x,y]=slow.race.racers;Object.assign(x,{progress:0,item:'bolt'});y.progress=1;y.coins=5;
+  stepRace(slow,1/60,{fire:true});assert.equal(y.coins,3,'slow drops two coins');
+  y.coins=1;y.effects.slow=0;x.effects.slow=0;stepRace(slow,1/60);
+  Object.assign(x,{progress:0,item:'bolt'});y.progress=1;
+  stepRace(slow,1/60,{fire:true});assert.equal(y.coins,0,'coins never drop below zero');
+});
+
+test('boost pads trigger turbo with a per-racer cooldown and never go negative',()=>{
+  const boostPads=[{id:'p0',x:5,z:5}];
+  const m=fixture(1,false,7,{boostPads});stepRace(m,3);
+  const r=m.race.racers[0];
+  Object.assign(m.vehicles[0].position,{x:5,z:5});stepRace(m,1/60);
+  assert.equal(r.effects.turbo,1.2);assert.equal(m.race.boostPads.length,1);
+  assert.ok(r.boostPadWait>0&&r.boostPadWait<=1.2);
+  stepRace(m,1/60);assert.ok(r.effects.turbo<1.2&&r.effects.turbo>1,'cooldown blocks re-trigger');
+  const wait=r.boostPadWait;stepRace(m,wait+.02);
+  assert.ok(r.effects.turbo>1,'pad re-triggers after its cooldown');
+  assert.ok(r.boostPadWait>=0&&r.boostPadWait<=1.2);
+});
+
+test('snapshot exposes coins, star effects and hazard types; values stay finite',()=>{
+  const m=fixture(2,false,7,{coins:[{id:'c0',x:5,z:5}],boostPads:[{id:'p0',x:9,z:9}]});
+  stepRace(m,3);
+  m.race.racers[0].coins=4;m.race.racers[0].item='mine';stepRace(m,1/60,{fire:true});
+  const snap=raceSnapshot(m.race);
+  assert.equal(snap.coins.length,1);assert.equal(typeof snap.coins[0].ready,'boolean');
+  assert.ok(Number.isFinite(snap.coins[0].x)&&Number.isFinite(snap.coins[0].z));
+  const row=snap.standings.find(r=>r.actorId===0);
+  assert.equal(row.coins,4);assert.equal(row.effects.star,0);
+  assert.ok(snap.hazards.length>=1&&snap.hazards.every(h=>typeof h.type==='string'));
+  assert.ok(snap.hazards.every(h=>Number.isFinite(h.ttl)&&Number.isFinite(h.x)&&Number.isFinite(h.z)));
+  m.race.racers[0].item='star';stepRace(m,1/60);stepRace(m,1/60,{fire:true});
+  assert.ok(raceSnapshot(m.race).standings.find(r=>r.actorId===0).effects.star>3);
 });
 
 test('rubber-band pace is bounded and always helps the trailer',()=>{

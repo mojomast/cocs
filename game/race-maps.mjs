@@ -1,4 +1,11 @@
 const centerline=[[0,-48],[50,-48],[80,-28],[88,0],[80,28],[50,48],[0,48],[-50,48],[-80,28],[-88,0],[-80,-28],[-50,-48]].map(([x,z])=>({x,z}));
+const segmentLengths=centerline.map((p,i)=>{const q=centerline[(i+1)%centerline.length];return Math.hypot(q.x-p.x,q.z-p.z);});
+const lapLength=segmentLengths.reduce((sum,length)=>sum+length,0);
+// Furniture is authored on the racing line: trackPoint walks a segment and
+// shifts laterally by lane so pads/coins reward a clean line without leaving
+// the road. lapPoint addresses the whole 12-checkpoint loop by arc distance.
+const trackPoint=(index,t,lane=0)=>{const a=centerline[index],b=centerline[(index+1)%centerline.length],length=segmentLengths[index],dx=(b.x-a.x)/length,dz=(b.z-a.z)/length;return{x:a.x+(b.x-a.x)*t-dz*lane,z:a.z+(b.z-a.z)*t+dx*lane};};
+const lapPoint=(distance,lane=0)=>{let s=((distance%lapLength)+lapLength)%lapLength,index=0;while(s>segmentLengths[index]){s-=segmentLengths[index];index++;}return trackPoint(index,s/segmentLengths[index],lane);};
 const tangents=centerline.map((p,i)=>{
  const q=centerline[(i+1)%centerline.length],length=Math.hypot(q.x-p.x,q.z-p.z);
  return {x:(q.x-p.x)/length,z:(q.z-p.z)/length};
@@ -8,7 +15,21 @@ const gates=centerline.map((p,i)=>{
  return {...p,nx:(a.x+b.x)/length,nz:(a.z+b.z)/length,halfWidth:12};
 });
 const grid=Array.from({length:8},(_,id)=>({x:-8-6*Math.floor(id/2),z:-48+(id%2?3:-3),heading:Math.PI/2}));
-const itemBoxes=[1,3,5,7,9,11].map((index,id)=>({id:`race-box-${id}`,...centerline[index]}));
+// Ten item boxes, evenly phased around the twelve checkpoint segments.
+const itemBoxes=Array.from({length:10},(_,id)=>({id:`race-box-${id}`,...lapPoint((id+.5)*lapLength/10)}));
+// Boost pads sit on straights and on the exits of the long sweeps, kept clear
+// of each other and of the item boxes so a clean line is actually rewarded.
+const boostPads=[[0,.18],[0,.72],[1,.8],[2,.5],[3,.55],[5,.22],[5,.78],[6,.2],[9,.5],[11,.3]]
+ .map(([index,t],id)=>({id:`race-boost-${id}`,...trackPoint(index,t)}));
+// Coins form short rows on the straights and curved spreads through the four
+// long corners; lane offsets tuck them toward the apex of the bend.
+const coinSpecs=[
+ [0,.42,4],[0,.47,4],[0,.52,4],[5,.42,4],[5,.47,4],[5,.52,4],
+ [6,.42,4],[6,.47,4],[6,.52,4],[11,.42,4],[11,.47,4],[11,.52,4],
+ [1,.35,-4],[1,.75,-4],[2,.35,-4],[3,.35,-4],[3,.75,-4],[4,.35,-4],
+ [7,.35,4],[7,.75,4],[8,.35,4],[9,.35,4],[9,.75,4],[10,.35,4],
+];
+const coins=coinSpecs.map(([index,t,lane],id)=>({id:`race-coin-${id}`,...trackPoint(index,t,lane)}));
 const blocks=[],navNodes=[];
 const bounds={minX:-104,maxX:104,minZ:-64,maxZ:64};
 // Mitered offsets keep a constant-width road through the bends, without wedges.
@@ -65,11 +86,14 @@ navNodes.push(...grid.map(({x,z})=>({x,z})),...itemBoxes.map(({x,z})=>({x,z})));
 
 for(const polygon of [boundary.outer,boundary.inner]){polygon.forEach(Object.freeze);Object.freeze(polygon);}
 Object.freeze(boundary);
+for(const furniture of [itemBoxes,boostPads,coins])furniture.forEach(Object.freeze);
+Object.freeze(itemBoxes);Object.freeze(boostPads);Object.freeze(coins);
+const race={centerline,gates,grid,itemBoxes,boostPads,coins,boundary};
 export const PUMA_CIRCUIT={
  id:'puma-circuit',name:'Puma Circuit',tag:'RACING / PUMA',description:'Eight Pumas, a sweeping charcoal circuit, and a checkered sprint to the finish.',
  color:'#ffba59',background:'#10151c',floorColor:'#292d34',raised:false,bounds,
  blocks,spawns:grid.map(({x,z})=>[x,z]),pickups:[],navNodes,
  vehicles:grid.map(({x,z,heading},id)=>({id,kind:'puma',x,y:0,z,yaw:heading})),
- race:{centerline,gates,grid,itemBoxes,boundary},
+ race,
 };
 export const RACE_MAPS=[PUMA_CIRCUIT];

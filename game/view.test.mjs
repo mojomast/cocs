@@ -412,3 +412,83 @@ test('cinematic race demo cycles camera rigs while the non-cinematic chase is un
  assert.ok(view.camera.position.distanceTo(new T.Vector3(0,5,-9))<1e-9,'local race chase is unchanged');
  view.disposeObject(view.scene);for(const resource of view.sharedResources??[])resource.dispose();
 });
+
+test('raceTrackModel draws one flat chevron group per boost pad facing the centerline',()=>{
+ const race={gates:[],grid:[],centerline:[{x:-10,z:0},{x:0,z:0},{x:0,z:10}],boostPads:[{id:'boost-1',x:0,z:5},{id:'boost-2',x:-5,z:0}]};
+ const model=raceTrackModel(race,'#ffba59');
+ const pads=model.children.filter(n=>n.userData.raceBoost!==undefined);
+ assert.equal(pads.length,2,'one group per boost pad');
+ for(const pad of pads){
+  assert.equal(pad.children.length,3,'each pad is a flat chevron set');
+  assert.equal(pad.position.y,.06,'pads sit flush on the track');
+  pad.traverse(n=>assert.equal(n.userData.objective,true,'boost pads never block the occlusion ray'));
+  pad.traverse(n=>{if(n.geometry)assert.ok([...n.geometry.attributes.position.array].every(Number.isFinite));});
+ }
+ const straight=Object.fromEntries(pads.map(p=>[p.userData.raceBoost,p]));
+ assert.ok(Math.abs(straight['boost-1'].rotation.y-0)<1e-9,'nearest straight is +z');
+ assert.ok(Math.abs(straight['boost-2'].rotation.y-Math.PI/2)<1e-9,'nearest straight is +x');
+ const reversed=raceTrackModel({gates:[],grid:[],centerline:[{x:0,z:10},{x:0,z:0}],boostPads:[{id:'r',x:0,z:5}]},'#ffba59');
+ const back=reversed.children.find(n=>n.userData.raceBoost!==undefined);
+ assert.ok(Math.abs(back.rotation.y-Math.PI)<1e-9,'pad follows the centerline direction, not its winding');
+ ArenaView.prototype.disposeObject.call({},model);
+ ArenaView.prototype.disposeObject.call({},reversed);
+});
+
+test('coins spin in place, hide when not ready and dispose when they expire',()=>{
+ const view=Object.assign(Object.create(ArenaView.prototype),{worldGroup:new T.Group(),reduced:()=>false});
+ const match={race:{boxes:[],hazards:[],coins:[{id:'c1',x:1,z:1,ready:true},{id:'c2',x:2,z:2,ready:false}]}};
+ view.updateRace(match,0);
+ const coin=view.raceModels.get('coin:c1'),hidden=view.raceModels.get('coin:c2');
+ assert.ok(coin&&hidden,'ready and hidden coins both exist while present');
+ assert.equal(coin.visible,true);assert.equal(hidden.visible,false);
+ assert.equal(coin.position.y,1.2,'coins float above the track');
+ assert.equal(coin.children[0].geometry.type,'CylinderGeometry');
+ const spun=coin.rotation.y;view.updateRace(match,2);
+ assert.ok(coin.rotation.y>spun,'coins rotate with time');
+ let disposed=0;for(const child of hidden.children)child.geometry?.addEventListener('dispose',()=>disposed++);
+ match.race.coins=[{id:'c1',x:1,z:1,ready:false}];view.updateRace(match,3);
+ assert.equal(view.raceModels.has('coin:c2'),false,'expired coin is removed');
+ assert.ok(disposed>=2,'expired coin geometry is disposed');
+ assert.equal(view.raceModels.get('coin:c1').visible,false);
+ view.updateRace({},4);assert.equal(view.worldGroup.children.length,0);
+});
+
+test('reduced motion freezes coin spin',()=>{
+ const view=Object.assign(Object.create(ArenaView.prototype),{worldGroup:new T.Group(),reduced:()=>true});
+ const match={race:{boxes:[],hazards:[],coins:[{id:'r',x:0,z:0,ready:true}]}};
+ view.updateRace(match,0);const coin=view.raceModels.get('coin:r'),before=coin.rotation.y;
+ view.updateRace(match,9);assert.equal(coin.rotation.y,before,'reduced motion holds the coin static');
+ view.updateRace({},10);assert.equal(view.worldGroup.children.length,0);
+});
+
+test('oil and mine hazards render distinct models and dispose with the lifecycle',()=>{
+ const view=Object.assign(Object.create(ArenaView.prototype),{worldGroup:new T.Group(),reduced:()=>false});
+ const match={race:{boxes:[],hazards:[{id:'o',x:1,z:2,ttl:3,type:'oil'},{id:'m',x:4,z:5,ttl:3,type:'mine'}]}};
+ view.updateRace(match,1);
+ const oil=view.raceModels.get('oil:o'),mine=view.raceModels.get('mine:m');
+ assert.ok(oil&&mine,'each hazard type keeps its own keyed model');
+ assert.notEqual(oil,mine);
+ assert.equal(oil.children[0].geometry.type,'CylinderGeometry','oil keeps its slick as the first child');
+ assert.equal(mine.children.length,8,'mine is a core, six spikes and a halo');
+ assert.equal(mine.children[7].geometry.type,'TorusGeometry');
+ assert.equal(mine.position.y,0);assert.equal(oil.position.y,.1);
+ const pulsing=mine.userData.ring.scale.x;
+ view.updateRace(match,1.2);assert.notEqual(mine.userData.ring.scale.x,pulsing,'mine halo pulses');
+ view.updateRace({},2);assert.equal(view.worldGroup.children.length,0);
+});
+
+test('race model lifecycles reuse models and dispose each resource exactly once',()=>{
+ const view=Object.assign(Object.create(ArenaView.prototype),{worldGroup:new T.Group(),reduced:()=>false});
+ const match={race:{boxes:[{id:'b',x:0,z:0,ready:true}],hazards:[{id:'o',x:0,z:0,ttl:4,type:'oil'},{id:'m',x:1,z:1,ttl:4,type:'mine'}],coins:[{id:'c',x:2,z:2,ready:true}]}};
+ view.updateRace(match,0);
+ const box=view.raceModels.get('box:b'),oil=view.raceModels.get('oil:o'),mine=view.raceModels.get('mine:m'),coin=view.raceModels.get('coin:c');
+ view.updateRace(match,1);
+ assert.equal(view.raceModels.get('box:b'),box);assert.equal(view.raceModels.get('oil:o'),oil);
+ assert.equal(view.raceModels.get('mine:m'),mine);assert.equal(view.raceModels.get('coin:c'),coin,'models are reused across frames');
+ const resources=new Set();for(const model of [box,oil,mine,coin])model.traverse(n=>{if(n.geometry)resources.add(n.geometry);if(n.material)resources.add(n.material);});
+ const disposed=new Map();for(const resource of resources){disposed.set(resource,0);resource.addEventListener('dispose',()=>disposed.set(resource,disposed.get(resource)+1));}
+ match.race.boxes=[];match.race.hazards=[];match.race.coins=[];
+ view.updateRace(match,2);
+ assert.ok([...disposed.values()].every(count=>count===1),'each live resource is disposed exactly once');
+ assert.equal(view.raceModels.size,0);assert.equal(view.worldGroup.children.length,0);
+});

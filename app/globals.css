@@ -742,6 +742,7 @@ html, body { overscroll-behavior: none; }
 .race-metrics>div,.race-item{padding:12px 18px;background:#101923eb;border-top:3px solid #ffba59}
 .race-hud small{display:block;font-size:11px;letter-spacing:2px;color:#ffd496;margin-bottom:5px}
 .race-metrics strong{font-size:clamp(22px,3vw,38px);font-variant-numeric:tabular-nums}.race-metrics em{font-size:15px;font-style:normal;color:#bfc7cd}
+.race-metrics .race-coins{border-top-color:#ffe08a}.race-coins strong{color:#ffe08a}
 .race-countdown{position:absolute;left:50%;top:35%;transform:translate(-50%,-50%);font-size:clamp(52px,10vw,110px);font-weight:bold;color:#ffce73;background:#101923dc;padding:12px 28px;border-bottom:4px solid #ffba59}
 .race-item{position:absolute;left:24px;bottom:90px;display:grid;gap:6px;min-width:210px}.race-item strong{font-size:26px}.race-item span{font-size:12px;color:#c4d3df}
 .race-help{position:absolute;bottom:14px;left:24px;right:24px;font:12px/1.8 monospace;color:#f2dfc0;background:#101923da;padding:8px 12px}

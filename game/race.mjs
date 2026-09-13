@@ -3,7 +3,7 @@ import {createVehicle, PUMA, respawnVehicle, takeVehicleSeat, stepVehicle} from 
 const clamp = (n, a, b) => Math.max(a, Math.min(b, n));
 const distance = (a, b) => Math.hypot(a.x - b.x, a.z - b.z);
 const angle = n => Math.atan2(Math.sin(n), Math.cos(n));
-export const ITEMS = ['turbo', 'shield', 'oil', 'pulse'];
+export const ITEMS = ['turbo', 'shield', 'oil', 'pulse', 'mine', 'triple', 'bolt', 'star'];
 
 // Cars collide as equal-radius circles. The Puma is 2.1 x 3.6; a 1.7 radius
 // wraps the chassis so a pack can rub without feeling like bumper cars.
@@ -22,10 +22,10 @@ export function paceMultiplier(t) {
 }
 
 // Mystery boxes bend toward the back of the field: the leader mostly draws
-// defensive items, the trailer mostly draws catch-up items. Linear blend
+// defensive/denial items, the trailer mostly draws catch-up items. Linear blend
 // between rank 0 and rank 1, in ITEMS order; deterministic via match.random.
-const LEADER_WEIGHTS = {turbo: .15, shield: .4, oil: .35, pulse: .1};
-const TRAILER_WEIGHTS = {turbo: .45, shield: .15, oil: .1, pulse: .3};
+const LEADER_WEIGHTS = {turbo: .06, shield: .30, oil: .22, pulse: .08, mine: .22, triple: .05, bolt: .04, star: .03};
+const TRAILER_WEIGHTS = {turbo: .20, shield: .08, oil: .07, pulse: .16, mine: .07, triple: .14, bolt: .15, star: .13};
 export function itemWeights(t) {
   const rank = clamp(Number.isFinite(t) ? t : 0, 0, 1);
   const weights = {};
@@ -37,6 +37,23 @@ export function rollItem(random, t) {
   let roll = clamp(typeof random === 'function' ? random() : 0, 0, 1 - 1e-9);
   for (const item of ITEMS) { roll -= weights[item]; if (roll < 0) return item; }
   return ITEMS[ITEMS.length - 1];
+}
+
+// Opponents still racing that are physically ahead on the circuit, nearest
+// first. A racer with a finish time is already done and cannot be targeted.
+function opponentsAhead(state, racer) {
+  return state.racers
+    .filter(r => r.actorId !== racer.actorId && r.finishTime === null && r.progress > racer.progress)
+    .sort((a, b) => a.progress - b.progress || a.actorId - b.actorId);
+}
+
+// A slow only lands when the target has neither star immunity nor a shield.
+// The victim sheds two coins (never below zero). Returns whether it landed.
+function applySlow(racer, duration) {
+  if (!racer || racer.effects.star > 0 || racer.effects.shield > 0) return false;
+  racer.effects.slow = Math.max(racer.effects.slow, duration);
+  racer.coins = Math.max(0, racer.coins - 2);
+  return true;
 }
 
 // Normalized rank for every racer in one standings pass: leader 0, last 1.
@@ -93,6 +110,7 @@ export function initializeRace(match) {
     phase: 'countdown', countdown: 3, laps: match.config.fragLimit, elapsed: 0,
     winnerId: null, gates: track.gates.map(g => ({...g})), centerline: track.centerline,
     boxes: track.itemBoxes.map(b => ({...b, wait: 0})), hazards: [], serial: 0, racers: [],
+    coins: (track.coins || []).map(c => ({...c, wait: 0})), boostPads: [...(track.boostPads || [])],
     gridMinSeparation: Infinity, gridNudged: false, contacts: 0
   };
   // Authored grid slots are used as-is. If a future map ever packs them closer
@@ -124,7 +142,8 @@ export function initializeRace(match) {
     // Seeded in actor order from match.random so a fixed seed is reproducible.
     match.race.racers.push({actorId: actor.id, vehicleId: vehicle.id, lap: 1, completedLaps: 0,
       nextGate: 0, passed: 0, started: false, progress: -1, finishTime: null, item: null,
-      effects: {turbo: 0, shield: 0, slow: 0}, resetWait: 0, stuck: 0, checkpointAge: 0,
+      coins: 0, boostPadWait: 0,
+      effects: {turbo: 0, shield: 0, slow: 0, star: 0}, resetWait: 0, stuck: 0, checkpointAge: 0,
       anchor: {...grid}, useHeld: false, resetHeld: false,
       skill: 0.95 + match.random() * 0.1, lane: match.random() * 6 - 3});
   });
@@ -138,7 +157,7 @@ export function raceStandings(state) {
     return b.progress - a.progress || a.actorId - b.actorId;
   }).map((r,index) => ({actorId: r.actorId, vehicleId: r.vehicleId, position: index + 1,
     lap: r.lap, completedLaps: r.completedLaps, nextGate: r.nextGate, progress: r.progress,
-    finishTime: r.finishTime, item: r.item, effects: {...r.effects}}));
+    finishTime: r.finishTime, item: r.item, coins: r.coins, effects: {...r.effects}}));
 }
 
 export function raceSnapshot(state) {
@@ -146,7 +165,8 @@ export function raceSnapshot(state) {
   return {phase: state.phase, countdown: state.countdown, laps: state.laps, elapsed: state.elapsed,
     winnerId: state.winnerId, standings: raceStandings(state),
     boxes: state.boxes.map(({id,x,z,wait}) => ({id,x,z,ready: wait <= 0})),
-    hazards: state.hazards.map(({id,x,z,ttl}) => ({id,x,z,ttl})), gates: state.gates.map(g => ({...g}))};
+    coins: state.coins.map(({id,x,z,wait}) => ({id,x,z,ready: wait <= 0})),
+    hazards: state.hazards.map(({id,x,z,ttl,type}) => ({id,x,z,ttl,type})), gates: state.gates.map(g => ({...g}))};
 }
 
 // Only the expected gate can advance progress. Intersections use the swept center,
@@ -226,13 +246,14 @@ function useItem(match, racer) {
   racer.item=null;
   if (item==='turbo') racer.effects.turbo=2;
   if (item==='shield') {racer.effects.shield=5; racer.effects.slow=0;}
-  if (item==='oil') state.hazards.push({id:++state.serial,owner:racer.actorId,
-    x:vehicle.position.x-Math.sin(vehicle.heading)*4,z:vehicle.position.z-Math.cos(vehicle.heading)*4,ttl:8});
-  if (item==='pulse') {
-    const target=state.racers.filter(r=>r.actorId!==racer.actorId&&r.progress>racer.progress&&r.finishTime===null)
-      .sort((a,b)=>a.progress-b.progress||a.actorId-b.actorId)[0];
-    if (target && target.effects.shield<=0) target.effects.slow=2;
-  }
+  if (item==='oil') state.hazards.push({id:++state.serial,owner:racer.actorId,type:'oil',
+    x:vehicle.position.x-Math.sin(vehicle.heading)*4,z:vehicle.position.z-Math.cos(vehicle.heading)*4,ttl:8,slow:2,radius:3});
+  if (item==='pulse') { const target=opponentsAhead(state,racer)[0]; if (target) applySlow(target,2); }
+  if (item==='mine') state.hazards.push({id:++state.serial,owner:racer.actorId,type:'mine',
+    x:vehicle.position.x,z:vehicle.position.z,ttl:12,slow:2.5,radius:3.5});
+  if (item==='triple') for (const target of opponentsAhead(state,racer).slice(0,3)) applySlow(target,1.5);
+  if (item==='bolt') for (const target of opponentsAhead(state,racer)) applySlow(target,2);
+  if (item==='star') racer.effects.star=3.5;
 }
 
 export function stepRace(match, dt, inputs={}) {
@@ -254,6 +275,7 @@ export function stepRace(match, dt, inputs={}) {
     const start=state.elapsed;
     state.elapsed+=step; match.time+=step; remaining-=step;
     for (const box of state.boxes) box.wait=Math.max(0,box.wait-step);
+    for (const coin of state.coins) coin.wait=Math.max(0,coin.wait-step);
     for (const hazard of state.hazards) hazard.ttl-=step;
     state.hazards=state.hazards.filter(h=>h.ttl>0);
     for (const r of state.racers) for (const effect of Object.keys(r.effects)) r.effects[effect]=Math.max(0,r.effects[effect]-step);
@@ -266,15 +288,17 @@ export function stepRace(match, dt, inputs={}) {
       if (reset&&!r.resetHeld) resetRaceRacer(match,r);
       if (use&&!r.useHeld&&r.resetWait<=0) useItem(match,r);
       r.useHeld=use; r.resetHeld=reset;
+      if (r.boostPadWait>0) r.boostPadWait=Math.max(0,r.boostPadWait-step);
       if (r.resetWait>0) {r.resetWait=Math.max(0,r.resetWait-step); continue;}
       const from={...vehicle.position};
       const automatic=actor.bot&&!external;
       const rank=ranks.get(r.actorId)??0;
       const throttle=automatic?controls.throttle:clamp(-(controls.x||0)*Math.sin(actor.yaw)-(controls.z||0)*Math.cos(actor.yaw),-1,1);
       const steer=automatic?controls.steer:clamp(-(controls.x||0)*Math.cos(actor.yaw)+(controls.z||0)*Math.sin(actor.yaw),-1,1);
-      const itemScale=r.effects.slow>0?.5:r.effects.turbo>0?1.6:1;
+      const itemScale=(r.effects.slow>0?.5:r.effects.turbo>0?1.6:1)*(r.effects.star>0?1.35:1);
+      const coinScale=1+.012*clamp(r.coins,0,10);
       const skill=automatic&&Number.isFinite(r.skill)?r.skill:1;
-      const speedScale=clamp(itemScale*paceMultiplier(rank)*skill,.1,2);
+      const speedScale=clamp(itemScale*coinScale*paceMultiplier(rank)*skill,.1,2);
       stepVehicle(vehicle,{throttle,steer,brake:controls.jump===true||controls.crouch===true,
         boost:controls.sprint===true,speedScale,boostScale:speedScale,fire:false},step,
         next=>match.vehicleCollision(next,vehicle),()=>0);
@@ -284,7 +308,13 @@ export function stepRace(match, dt, inputs={}) {
       for (const box of state.boxes) if (!r.item&&box.wait<=0&&distance(vehicle.position,box)<3) {
         r.item=rollItem(match.random,rank); box.wait=8;
       }
-      for (const h of state.hazards) if (h.owner!==r.actorId&&r.effects.shield<=0&&distance(vehicle.position,h)<3) r.effects.slow=2;
+      for (const coin of state.coins) if (coin.wait<=0&&distance(vehicle.position,coin)<2.2) {
+        r.coins=Math.min(10,r.coins+1); coin.wait=10;
+      }
+      if (r.boostPadWait<=0&&r.effects.star<=0) for (const pad of state.boostPads) if (distance(vehicle.position,pad)<2.6) {
+        r.effects.turbo=Math.max(r.effects.turbo,1.2); r.boostPadWait=1.2; break;
+      }
+      for (const h of state.hazards) if (h.owner!==r.actorId&&distance(vehicle.position,h)<(h.radius??3)) applySlow(r,h.slow??2);
       r.stuck=Math.abs(throttle)>.1&&distance(from,vehicle.position)<.015?r.stuck+step:0;
       r.checkpointAge+=step;
       if (r.finishTime===null&&(r.stuck>3||r.checkpointAge>20||!Number.isFinite(vehicle.position.x)||!Number.isFinite(vehicle.position.z))) resetRaceRacer(match,r);

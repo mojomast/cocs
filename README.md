@@ -46,14 +46,22 @@ and every racer starts already seated in their assigned driver seat.
   pace gain and the leader a small pace ease, both clamped and applied to bots
   and humans alike, and each driver has a seeded skill/racing-line variance so
   they do not drive identical lines.
-- Mystery boxes grant one held item and respawn after eight seconds. Rolls are
-  weighted by position: the leader mostly draws defensive items, while the back
-  of the field draws catch-up items such as Turbo and Homing Pulse.
+- Ten mystery boxes ring the circuit and grant one held item, respawning after
+  eight seconds. Rolls are weighted by position: the leader mostly draws
+  defensive items, while the back of the field draws catch-up items.
 - **Turbo:** two seconds of extra speed, stackable with the normal chassis boost.
 - **Shield:** five seconds of protection from race items; clears an existing slow.
 - **Oil Slick:** leaves an eight-second hazard behind you that slows opponents.
-- **Homing Pulse:** slows the nearest rival ahead in race progress for two seconds,
-  unless shielded. This is a nonlethal effect, not a combat projectile.
+- **Mine:** drops a stationary, longer-lasting trap that slows harder than oil.
+- **Homing Pulse:** slows the nearest rival ahead in race progress for two seconds.
+- **Triple Pulse:** slows the next three rivals ahead.
+- **Lightning:** slows every rival ahead of you, a strong catch-up comeback tool.
+- **Star:** brief invincibility plus speed; immune to every slow effect.
+  All item effects are nonlethal; they slow and spin rivals, never kill.
+- **Coins** line the racing line: each coin gives a small permanent top-speed
+  bonus (up to +12% at ten) and you drop two coins when hit by an item.
+- **Boost pads** on the straights and corner exits fire a free turbo when driven
+  over, rewarding a clean line.
 - Manual checkpoint reset and automatic stuck recovery keep your banked progress,
   with a two-second stationary reset penalty.
 - Chase camera, live place/lap/checkpoint/time/item HUD, race standings, results,
@@ -69,7 +77,7 @@ infantry-style local prediction. Reconnect retains the assigned car and race
 state, but input response depends on network latency. No browser/device driving
 playtest has been performed yet.
 
-For this host, deploy with `DEPLOY_VERSION=v2.63 npm run deploy -- --with-game-server`.
+For this host, deploy with `DEPLOY_VERSION=v2.64 npm run deploy -- --with-game-server`.
 This rebuilds, reloads both services, and checks the public HTML and linked CSS/JS
 assets. Restarting the game service disconnects active players; see
 `deploy/README.md` for web-only deployment and verification commands.
