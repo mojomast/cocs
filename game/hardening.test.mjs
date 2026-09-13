@@ -285,6 +285,28 @@ test('death and falling clear traversal and streak state', () => {
   assert.equal(c.traversalFlight, false);
 });
 
+test('assault credits objective time and captures to attackers on the active sector', () => {
+  const m = new Match('chatgpt', 'openclaw', seeded(), 'rampart', { mode: 'assault', botCount: 0, humanCount: 2, fragLimit: 3, timeLimit: 60 });
+  const state = m.objectiveState, sector = state.sectors[state.active], attacker = m.actors.find(a => a.team === state.attacker);
+  Object.assign(attacker, { x: sector.x, y: sector.y ?? 0, z: sector.z, health: 100, protection: 0 });
+  for (let i = 0; i < 7 * 60 && !m.over; i++) m.updateAssault(1 / 60);
+  assert.ok(attacker.scoreStats.objectiveTime > 5, `sector time should accrue (${attacker.scoreStats.objectiveTime})`);
+  assert.ok(attacker.scoreStats.objectiveCaptures >= 1, `a fallen sector credits present attackers (${attacker.scoreStats.objectiveCaptures})`);
+});
+
+test('a flag dropped over the void falls back to reachable ground', () => {
+  const m = new Match('chatgpt', 'openclaw', seeded(), 'skybreak', { mode: 'ctf', botCount: 0, humanCount: 2, timeLimit: 30 });
+  const carrier = m.actors[0], flag = m.flags[1], x = -48, z = -30;
+  assert.equal(floorAt(x, z, m.arena), null, 'probe point is over the void');
+  Object.assign(carrier, { x, y: 12, z, health: 100, grounded: false, lastValid: { x: 0, y: floorAt(0, 0, m.arena) ?? 0, z: 0 } });
+  flag.state = 'carried'; flag.carrier = carrier.id;
+  m.dropFlag(carrier, { x, y: 12, z });
+  assert.equal(flag.carrier, null, 'carrier releases the flag');
+  assert.notEqual(flag.state, 'carried');
+  assert.ok(floorAt(flag.x, flag.z, m.arena) !== null, `flag must rest on support (${flag.x},${flag.y},${flag.z})`);
+  assert.deepEqual([flag.x, flag.z], [0, 0], 'flag falls back to the carrier lastValid');
+});
+
 test('an assault breach does not inflate the scoreboard past the capture count', () => {
   const m = new Match('chatgpt', 'openclaw', seeded(), 'rampart', {mode: 'assault', botCount: 0, humanCount: 2, fragLimit: 9, timeLimit: 60});
   const state = m.objectiveState;

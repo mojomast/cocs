@@ -489,6 +489,77 @@ test('race model lifecycles reuse models and dispose each resource exactly once'
  const disposed=new Map();for(const resource of resources){disposed.set(resource,0);resource.addEventListener('dispose',()=>disposed.set(resource,disposed.get(resource)+1));}
  match.race.boxes=[];match.race.hazards=[];match.race.coins=[];
  view.updateRace(match,2);
- assert.ok([...disposed.values()].every(count=>count===1),'each live resource is disposed exactly once');
- assert.equal(view.raceModels.size,0);assert.equal(view.worldGroup.children.length,0);
+  assert.ok([...disposed.values()].every(count=>count===1),'each live resource is disposed exactly once');
+  assert.equal(view.raceModels.size,0);assert.equal(view.worldGroup.children.length,0);
+});
+
+function payloadView(reduced=false){
+ const view=Object.assign(Object.create(ArenaView.prototype),{scene:new T.Scene(),worldGroup:new T.Group(),motionQuery:{matches:reduced},renderer:{isSoftware:true},display:{...DEFAULT_DISPLAY}});
+ view.scene.add(view.worldGroup);
+ return view;
+}
+const payloadArena={id:'crosswire',color:'#55ddcc'};
+const rawPayload={kind:'payload',attacker:0,defender:1,contested:false,position:{x:1,y:2,z:3},distance:5,total:50,path:[{x:0,y:2,z:0},{x:10,y:2,z:0}],waypointDistance:[0,10]};
+
+test('payload pig renders from a raw objectiveState, hovers with a bob and hides when idle',()=>{
+ const view=payloadView();
+ view.updatePayloadModel({objectiveState:rawPayload},payloadArena,0);
+ const pig=view.payloadModel;
+ assert.ok(pig&&pig.userData.payload,'raw objectiveState builds the pig without a snapshot');
+ assert.equal(pig.visible,true);
+ let meshes=0;pig.traverse(n=>{if(n.isMesh)meshes++;});
+ assert.ok(meshes>=10,`pig is assembled from detailed sub-meshes (${meshes})`);
+ assert.equal(pig.userData.wings.length,2);assert.equal(pig.userData.trotters.length,4);
+ pig.traverse(n=>{if(n.isMesh)assert.equal(n.userData.objective,true,'every pig sub-mesh is ignored by camera occlusion');});
+ assert.ok(Math.abs(pig.position.y-(2+1.35))<1e-9,'pig hovers 1.35m above the ground point');
+ assert.equal(pig.position.x,1);assert.equal(pig.position.z,3);
+ assert.ok(Math.abs(pig.rotation.y-Math.PI/2)<1e-6,'pig yaws along the route tangent');
+ view.updatePayloadModel({objectiveState:rawPayload},payloadArena,1);
+ assert.ok(Math.abs(pig.position.y-(2+1.35+Math.sin(1*2.5)*.18))<1e-9,'the hover adds a gentle bob');
+ view.updatePayloadModel({objectiveState:{kind:'koth',zones:[]}},payloadArena,2);
+ assert.equal(pig.visible,false,'pig hides without a payload objective');
+ view.disposeObject(view.scene);
+});
+
+test('reduced motion freezes the payload bob and wing flap while keeping the hover',()=>{
+ const view=payloadView(true);
+ view.updatePayloadModel({objectiveState:rawPayload},payloadArena,0);
+ const pig=view.payloadModel,wing=pig.userData.wings[0],baseY=pig.position.y,beat=wing.rotation.z;
+ assert.equal(baseY,2+1.35,'reduced motion keeps a static hover height');
+ view.updatePayloadModel({objectiveState:rawPayload},payloadArena,3);
+ assert.equal(pig.position.y,baseY,'no bob under reduced motion');
+ assert.equal(wing.rotation.z,beat,'no wing flap under reduced motion');
+ view.disposeObject(view.scene);
+});
+
+test('in-world objective markers render from a raw objectiveState Match',()=>{
+ const view=Object.assign(Object.create(ArenaView.prototype),{scene:new T.Scene(),worldGroup:new T.Group(),objectiveModels:new Map(),motionQuery:{matches:true},renderer:{isSoftware:true},display:{...DEFAULT_DISPLAY}});
+ view.scene.add(view.worldGroup);
+ view.updateObjectives({objectiveState:{kind:'koth',zones:[{id:'hill',x:2,y:1,z:-3,radius:4,owner:0,captureTeam:0,progress:40}]}},payloadArena);
+ const hill=view.objectiveModels.get('hill');
+ assert.ok(hill&&hill.userData.objective,'raw objectiveState produces the hill marker');
+ assert.equal(hill.position.y,1);
+ assert.equal(hill.userData.baseMat.color.getHexString(),'ed514b');
+ view.disposeObject(view.scene);
+});
+
+test('the active assault sector is highlighted while inactive sectors are dimmed',()=>{
+ const view=Object.assign(Object.create(ArenaView.prototype),{scene:new T.Scene(),worldGroup:new T.Group(),objectiveModels:new Map(),motionQuery:{matches:false},renderer:{isSoftware:true},display:{...DEFAULT_DISPLAY}});
+ view.scene.add(view.worldGroup);
+ const zones=[{id:'alpha',x:0,y:0,z:0,radius:3,owner:0,progress:100,captureTeam:null},{id:'bravo',x:6,y:0,z:0,radius:3,owner:null,progress:0,captureTeam:null},{id:'charlie',x:12,y:0,z:0,radius:3,owner:null,progress:0,captureTeam:null}];
+ view.updateObjectives({time:1,objectiveState:{kind:'assault',attacker:0,defender:1,active:1,zones}},payloadArena);
+ const alpha=view.objectiveModels.get('alpha'),bravo=view.objectiveModels.get('bravo'),charlie=view.objectiveModels.get('charlie');
+ assert.equal(bravo.userData.assaultActive,true);
+ assert.equal(alpha.userData.assaultActive,false);
+ assert.equal(charlie.userData.assaultActive,false);
+ assert.ok(bravo.userData.baseMat.emissiveIntensity>alpha.userData.baseMat.emissiveIntensity,'active sector is brighter than captured sectors');
+ assert.ok(bravo.userData.baseMat.emissiveIntensity>charlie.userData.baseMat.emissiveIntensity,'active sector is brighter than future sectors');
+ assert.ok(bravo.userData.areaMat.opacity>charlie.userData.areaMat.opacity,'inactive sectors are dimmed');
+ const before=bravo.scale.y;
+ view.updateObjectives({time:1.3,objectiveState:{kind:'assault',attacker:0,defender:1,active:1,zones}},payloadArena);
+ assert.notEqual(bravo.scale.y,before,'the active sector pulses without reduced motion');
+ view.motionQuery={matches:true};
+ view.updateObjectives({time:1.6,objectiveState:{kind:'assault',attacker:0,defender:1,active:1,zones}},payloadArena);
+ assert.equal(bravo.scale.y,1,'reduced motion holds the active sector pulse');
+ view.disposeObject(view.scene);
 });

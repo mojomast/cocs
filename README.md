@@ -82,6 +82,33 @@ This rebuilds, reloads both services, and checks the public HTML and linked CSS/
 assets. Restarting the game service disconnects active players; see
 `deploy/README.md` for web-only deployment and verification commands.
 
+## Objective clarity and bot variety
+
+This pass fixes several objective modes and makes combat bots play differently:
+
+- **Local objective markers fixed.** Offline play was handing the renderer the raw
+  `Match`, so KOTH/domination/assault zone rings and the payload never appeared
+  locally (only online). The renderer now accepts the live `objectiveState` too,
+  and the payload is the floating pig described above.
+- **Every mode states its goal.** Combined Arms no longer shows deathmatch copy,
+  Arms Race shows a ladder brief and rung counter, instagib/rockets/arsenal name
+  their frag target, the match start banner includes the goal, and assault,
+  combined-arms and arms-race scoreboards show their objective columns and team
+  score. Assault highlights and labels the active sector; domination zones are
+  labelled A/B/C on the radar.
+- **Arms Race ranks by the ladder,** not frags, on time expiry and sudden death, so
+  the correct player wins (also fixed in progression and history).
+- **Assault honours the configured sector count** (1-9) instead of always three,
+  and now credits capture/objective-time stats.
+- **CTF flags never soft-lock** over the void on the island maps: an unsupported
+  drop falls back to the carrier's last solid position or the flag base.
+- **Distinct bot archetypes.** Each bot resolves operator role + harness
+  personality + slot jitter into an archetype (rusher, flanker, defender, support,
+  sharpshooter) with its own engagement band, strafe pattern, weapon-band
+  preference, replan tempo, objective focus and retreat threshold, so a lobby no
+  longer plays like the same bot eight times. Difficulty still governs aim,
+  reaction and tempo; archetypes change tactics, never raw damage or health.
+
 ## Run locally
 
 Requires Node.js 22.13+ and npm. Install with `npm ci`, launch with `npm run dev`, then open the URL printed by Vite. Use `npm run build` for the production Worker build and `npm run start` to serve it. In the managed Sites environment, the supervised preview is started with `sites-preview start /workspace/sites/token-arena`.
@@ -146,11 +173,13 @@ Not yet included: accounts/matchmaking.
 - **Domination:** capture three control zones, neutralize enemy-held zones, and earn
   one point per second for every zone your team owns. Objective state is authoritative
   and visible in the HUD, world markers, snapshots, and match history.
-- **Payload:** attackers escort a cart along an authored route across the arena;
-  standing with it pushes it forward, checkpoints bank progress, and the defenders
-  stall it and roll it back to the last checkpoint. Attackers win on delivery;
-  defenders win if the clock runs out. The cart has its own world model, HUD
-  brief ("ESCORT / STOP THE PAYLOAD"), and checkpoint scoreboarding.
+- **Payload:** attackers escort a **floating pig** along an authored route across
+  the arena; standing with it pushes it forward, checkpoints bank progress, and the
+  defenders stall it and roll it back to the last checkpoint. Attackers win on
+  delivery; defenders win if the clock runs out. The pig hovers and bobs ~2.5m tall
+  with a beacon and ground ring so it is always findable, pushes at a slower
+  100-150s full-route pace, and has its own HUD brief, checkpoint rings, and a
+  distinct radar contact. Cart push time now scores, so the CART TIME column works.
 - Easy and Normal bots now react and turn more slowly, fire less frequently, and
   aim less accurately. Breaking line of sight gives a fresh reaction delay.
   Existing saved difficulty choices are retained; select Casual Skirmish for the

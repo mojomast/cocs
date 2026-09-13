@@ -392,6 +392,9 @@
 .mode-scoreboard-ctf > .score-row { min-width: 590px; grid-template-columns: minmax(150px, 1fr) repeat(6, minmax(42px, auto)); }
 .mode-scoreboard-koth > .score-row { min-width: 500px; grid-template-columns: minmax(150px, 1fr) repeat(5, minmax(52px, auto)); }
 .mode-scoreboard-domination > .score-row { min-width: 555px; grid-template-columns: minmax(145px, 1fr) repeat(6, minmax(48px, auto)); }
+.mode-scoreboard-combined-arms > .score-row { min-width: 555px; grid-template-columns: minmax(145px, 1fr) repeat(6, minmax(48px, auto)); }
+.mode-scoreboard-assault > .score-row { min-width: 500px; grid-template-columns: minmax(150px, 1fr) repeat(4, minmax(52px, auto)); }
+.mode-scoreboard-armsrace > .score-row { min-width: 500px; grid-template-columns: minmax(150px, 1fr) repeat(4, minmax(56px, auto)); }
 .mode-scoreboard-teamdeathmatch > .score-row { grid-template-columns: minmax(150px, 1fr) repeat(2, minmax(52px, auto)); }
 .mode-scoreboard .score-row.labels { color: #9db9ad; }
 .team-score-banner { display: flex; align-items: baseline; flex-wrap: wrap; gap: 8px 16px; padding: 10px 4px 12px; border-bottom: 1px solid #83f4d533; color: #ccecdf; font: 12px monospace; letter-spacing: 1px; }
@@ -406,6 +409,9 @@
 .history-match .mode-scoreboard-ctf > .score-row { min-width: 590px; }
 .history-match .mode-scoreboard-koth > .score-row { min-width: 500px; }
 .history-match .mode-scoreboard-domination > .score-row { min-width: 555px; }
+.history-match .mode-scoreboard-combined-arms > .score-row { min-width: 555px; }
+.history-match .mode-scoreboard-assault > .score-row { min-width: 500px; }
+.history-match .mode-scoreboard-armsrace > .score-row { min-width: 500px; }
 
 /* Live command layer keeps the current order distinct from the game telemetry. */
 .lobby-chat .chat-lines { overscroll-behavior: contain; overflow-anchor: none; scrollbar-width: thin; }

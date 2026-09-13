@@ -121,7 +121,9 @@ export function payloadTemplate(arena,{segments=3,radius=4.5,speed:requestedSpee
  for(let i=1;i<path.length;i++){const previous=path[i-1],point=path[i];waypointDistance.push(waypointDistance[i-1]+Math.hypot(point.x-previous.x,(point.y??0)-(previous.y??0),point.z-previous.z));}
  const total=waypointDistance[waypointDistance.length-1]||0;
  const requested=Number(requestedSpeed);
- const speed=Number.isFinite(requested)&&requested>0?requested:Math.max(3,Math.min(14,total/30));
+ // Default pace targets a ~100-150s unopposed full route: total/150 with a
+ // bounded 1.5-4.0 speed. Endless 14 u/s carts ended rounds in seconds.
+ const speed=Number.isFinite(requested)&&requested>0?requested:Math.max(1.5,Math.min(4,total/150));
  const checkpointCount=Math.max(1,Math.min(6,Math.round(segments)||1));
  const checkpointDistances=routing.navigation?Array.from({length:checkpointCount},(_,i)=>total*((i+1)/checkpointCount)):waypointDistance.slice(1);
  const checkpoints=checkpointDistances.map((distance,index)=>{const point=payloadPosition({path,waypointDistance,distance});return {id:`cp${index+1}`,x:point.x,z:point.z,y:routing.navigation?routing.floorAt(point.x,point.z,arena):point.y??0,radius,owner:null,captureTeam:null,progress:0,distance};});

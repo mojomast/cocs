@@ -51,6 +51,10 @@ test('history leaders use the mode objective ranking and retain legacy entries',
  assert.equal(ctf.leader,'Carrier');
  const koth=h.record({config:{mode:'koth'},actors:[{name:'Objective',frags:1,scoreStats:{...stats,objectiveTime:4}},{name:'Slayer',frags:8,scoreStats:{...stats,objectiveTime:3}}]});
  assert.equal(koth.leader,'Objective');
+ const arms=h.record({config:{mode:'armsrace',fragLimit:10},actors:[{name:'FragLeader',frags:9,ladder:1},{name:'RungLeader',frags:1,ladder:5}]});
+ assert.equal(arms.leader,'RungLeader','arms race ranks by ladder, not frags');
+ const armsTie=h.record({config:{mode:'armsrace',fragLimit:10},actors:[{name:'Lower',frags:9,ladder:2},{name:'Higher',frags:4,ladder:2}]});
+ assert.equal(armsTie.leader,'Lower','frags break a ladder tie');
  const legacy={id:'legacy',players:[{name:'Old',frags:2,deaths:1}]};
  h.matches.push(legacy);
  assert.deepEqual(h.all().at(-1),legacy);

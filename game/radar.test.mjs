@@ -71,3 +71,20 @@ test('radar preserves the requested range even when the player is invalid',()=>{
   assert.equal(radarContacts({actors:[]},{x:NaN,z:0},{range:120}).range,120);
   assert.equal(radarContacts(null,null,{range:90}).range,90);
 });
+
+test('domination and koth zones carry A/B/C labels while the payload becomes its own clamped contact',()=>{
+  const zones={actors:[],objectives:{zones:[{id:'alpha',x:5,z:0,owner:0},{id:'bravo',x:0,z:5,owner:1},{id:'hill',x:-5,z:0,owner:null,contested:true}]}};
+  const labelled=radarContacts(zones,player,{range:20}).contacts.filter(c=>c.kind==='zone');
+  assert.deepEqual(labelled.map(c=>c.label),['A','B','K']);
+  assert.equal(labelled[2].contested,true);
+  const payloadHud={actors:[],objectives:{kind:'payload',payload:{position:{x:200,z:0},contested:true,pushing:1,progress:42}}};
+  const payload=radarContacts(payloadHud,player,{range:55}).contacts.find(c=>c.kind==='payload');
+  assert.ok(payload,'payload emits a dedicated contact');
+  assert.equal(payload.label,'PAY');assert.equal(payload.icon,'payload');
+  assert.equal(payload.clamped,true,'far payload is clamped to the rim so it stays findable');
+  assert.equal(payload.progress,42);assert.equal(payload.delivered,false);
+  assert.equal(radarBlipColor(payload,player),RADAR_COLORS.default.contested);
+  assert.equal(radarBlipColor({kind:'payload',contested:false},player),RADAR_COLORS.default.payload);
+  const rawPayload={actors:[],objectives:{kind:'payload',position:{x:3,z:4},contested:false}};
+  assert.ok(radarContacts(rawPayload,player,{range:20}).contacts.some(c=>c.kind==='payload'&&c.contested===false),'raw objectiveState payload renders too');
+});

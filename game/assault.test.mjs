@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {ASSAULT_MODE_ID,assaultTemplate,assignAssaultTeams,assaultActiveSector,assaultSectors,stepAssault} from './assault.mjs';
+import {ASSAULT_MODE_ID,assaultTemplate,assignAssaultTeams,assaultActiveSector,assaultSectors,assaultSectorIds,stepAssault} from './assault.mjs';
 
 const arena=(navNodes=[],blocks=[])=>({id:'proving',bounds:{minX:-10,maxX:10,minZ:-10,maxZ:10},blocks,navNodes});
 const inField=s=>s.x>=-10&&s.x<=10&&s.z>=-10&&s.z<=10;
@@ -89,6 +89,26 @@ test('template prefers ordered objectiveZones metadata',()=>{
  const state=assaultTemplate({objectiveZones:zones});
  assert.deepEqual(state.sectors.map(s=>[s.x,s.z,s.radius,s.y]),[[-8,0,2,1],[0,0,3,2],[8,0,4,3]]);
  assert.deepEqual(state.sectors.map(s=>s.id),['alpha','bravo','charlie']);
+});
+
+test('configured sector counts build exactly that many ordered sectors and breach on the last',()=>{
+ const state=assaultTemplate(arena([{x:-8,z:0},{x:-4,z:0},{x:0,z:0},{x:4,z:0},{x:8,z:0}]),assaultSectorIds(5));
+ assignAssaultTeams(state);
+ assert.equal(state.sectors.length,5);
+ assert.deepEqual(state.sectors.map(s=>s.id),['alpha','bravo','charlie','delta','echo']);
+ let result=null;
+ for(let i=0;i<5;i++)result=captureActive(state);
+ assert.equal(result.breached,true,'all configured sectors must breach the final one');
+ assert.equal(state.winner,0);
+ assert.equal(state.active,5);
+});
+
+test('sector id helper clamps to the supported 1-9 range',()=>{
+ assert.deepEqual(assaultSectorIds(1),['alpha']);
+ assert.equal(assaultSectorIds(0).length,1);
+ assert.equal(assaultSectorIds(99).length,9);
+ assert.equal(assaultSectorIds(9).at(-1),'india');
+ assert.equal(assaultSectorIds(12).at(-1),'india');
 });
 
 test('authored assault zones are sanitized onto valid ground',()=>{

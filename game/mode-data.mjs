@@ -1,6 +1,6 @@
 import {modeRule} from './config.mjs';
 import {terrainSupportAt} from './terrain.mjs';
-import {assaultTemplate,assignAssaultTeams} from './assault.mjs';
+import {assaultTemplate,assignAssaultTeams,assaultSectorIds} from './assault.mjs';
 import {payloadTemplate} from './payload.mjs';
 const point=(x,z,id,rules,radius=3.5,y=0)=>({id,x,z,radius,owner:null,captureTeam:null,progress:0,captureSeconds:rules.objective?.captureSeconds??5,y});
 const boundsOf=arena=>arena.bounds||{minX:-13.55,maxX:13.55,minZ:-13.55,maxZ:13.55};
@@ -86,7 +86,7 @@ export function objectiveTemplate(mode,arena,config){
   return {kind:'koth',zones:[clearZone(arena,{...source,id:'hill',captureSeconds:rules.objective.captureSeconds})],winner:null};
  }
  if(kind==='domination')return {kind:'domination',zones:authored.map(zone=>clearZone(arena,zone)),winner:null};
- if(kind==='assault'){const template=assaultTemplate(arena);template.zones=template.sectors;return assignAssaultTeams(template);}
+ if(kind==='assault'){const count=config?.fragLimit??rules.fragLimit??3;const template=assaultTemplate(arena,assaultSectorIds(count));template.zones=template.sectors;return assignAssaultTeams(template);}
  if(kind==='payload')return payloadTemplate(arena,{segments:Math.max(1,Math.min(6,Math.round(config?.fragLimit??rules.fragLimit??3)))});
  return null;
 }

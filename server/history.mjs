@@ -16,6 +16,7 @@ const leaderRank = (actor, mode) => {
  const stats = scoreStatsOf(actor) ?? Object.fromEntries(SCORE_STAT_FIELDS.map(field => [field, 0]));
  if (mode === 'ctf') return [stats.captures, objectiveActions(stats), Number(actor.frags) || 0];
  if (mode === 'koth' || mode === 'domination') return [stats.objectiveTime, stats.objectiveCaptures, Number(actor.frags) || 0];
+ if (mode === 'armsrace') return [Number(actor.ladder) || 0, Number(actor.frags) || 0];
  return [Number(actor.frags) || 0];
 };
 const compareRanks = (a, b) => { for (let i = 0; i < a.length; i++) if (a[i] !== b[i]) return b[i] - a[i]; return 0; };

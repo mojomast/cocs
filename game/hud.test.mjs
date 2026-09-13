@@ -1,7 +1,8 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {vehicleHud, escapeHint, voiceHint, reloadProgress, dynamicCrosshairGap, lowAmmo, postureLabel, hitMarker, projectToScreen, damageNumberStyle, boundList, damageBearing, killBanner, weaponTag, ammoText, matchStartBanner, suddenDeathBanner, grenadeStatus, killstreakCallout, ladderStatus, streakStatus, audioCaption, scoreAnnouncer, multikillLabel, spreeLabel, recentKills, killCallout, matchAwards, killFeedWeapon, connectionQuality, spectateActor, nextSpectateTarget, spectatorBoard, weaponRangeInfo, weaponRangeLabel} from './hud.mjs';
+import {vehicleHud, escapeHint, voiceHint, reloadProgress, dynamicCrosshairGap, lowAmmo, postureLabel, hitMarker, projectToScreen, damageNumberStyle, boundList, damageBearing, killBanner, weaponTag, ammoText, commandBrief, isTeamMode, matchStartBanner, modeColumns, modeGoal, modePrimary, objectiveCopy, suddenDeathBanner, grenadeStatus, killstreakCallout, ladderStatus, streakStatus, audioCaption, scoreAnnouncer, multikillLabel, spreeLabel, recentKills, killCallout, matchAwards, killFeedWeapon, connectionQuality, spectateActor, nextSpectateTarget, spectatorBoard, weaponRangeInfo, weaponRangeLabel} from './hud.mjs';
 import {WEAPONS} from './data.mjs';
+import {GAME_MODES} from './config.mjs';
 
 const player = {id:0, health:100, x:0, z:0, vehicleId:null};
 const ride = {id:0, health:200, maxHealth:300, x:2, z:0, driver:null, respawnTimer:0, heat:.8, overheated:true};
@@ -313,4 +314,94 @@ test('the spectator board lists live actors and marks the followed one',()=>{
  const actors=[{id:0,name:'A',health:100,team:0},{id:1,name:'B',health:0,team:1},{id:2,health:50,team:1}];
  assert.deepEqual(spectatorBoard(actors,2),[{id:0,name:'A',team:0,health:100,current:false},{id:2,name:'A2',team:1,health:50,current:true}]);
  assert.deepEqual(spectatorBoard(null,0),[]);
+});
+
+const modeById = id => GAME_MODES.find(m => m.id === id);
+
+test('modeGoal names the scoring objective for every mode', () => {
+  assert.equal(modeGoal(modeById('deathmatch')), 'FRAGS');
+  assert.equal(modeGoal(modeById('ctf')), 'CAPTURES');
+  assert.equal(modeGoal(modeById('koth')), 'HILL CONTROL');
+  assert.equal(modeGoal(modeById('domination')), 'ZONE CONTROL');
+  assert.equal(modeGoal(modeById('assault')), 'SECTORS');
+  assert.equal(modeGoal(modeById('teamdeathmatch')), 'TEAM FRAGS');
+  assert.equal(modeGoal(modeById('payload')), 'CHECKPOINTS');
+  assert.equal(modeGoal(modeById('puma-race')), 'LAPS');
+  assert.equal(modeGoal(modeById('combined-arms')), 'ZONE CONTROL');
+  assert.equal(modeGoal(modeById('armsrace')), 'LADDER');
+  assert.equal(modeGoal(modeById('instagib')), 'FRAGS');
+  assert.equal(modeGoal(modeById('rockets')), 'FRAGS');
+  assert.equal(modeGoal(modeById('arsenal')), 'FRAGS');
+});
+
+test('isTeamMode distinguishes shared-score modes from free-for-alls', () => {
+  assert.equal(isTeamMode(modeById('ctf')), true);
+  assert.equal(isTeamMode(modeById('domination')), true);
+  assert.equal(isTeamMode(modeById('combined-arms')), true);
+  assert.equal(isTeamMode(modeById('deathmatch')), false);
+  assert.equal(isTeamMode(modeById('armsrace')), false);
+  assert.equal(isTeamMode(modeById('instagib')), false);
+});
+
+test('commandBrief routes combined-arms through zone control with a status', () => {
+  const hud = {config: {mode: 'combined-arms', fragLimit: 200}, objectives: {kind: 'domination', zones: [
+    {id: 'alpha', owner: 0, contested: false},
+    {id: 'bravo', owner: 1, contested: true},
+    {id: 'charlie', owner: null, contested: false},
+  ]}, teamScores: {0: 40, 1: 25}};
+  const brief = commandBrief(hud, {team: 0}, modeById('combined-arms'));
+  assert.ok(brief.detail.includes('ZONES'), brief.detail);
+  assert.ok(brief.detail.includes('40'), brief.detail);
+  assert.ok(brief.status && /OWNED/.test(brief.status), brief.status);
+});
+
+test('commandBrief gives arms race a ladder brief with current and next weapon', () => {
+  const brief = commandBrief({config: {mode: 'armsrace', fragLimit: 10}}, {team: 0, ladder: 3, weapon: 3}, modeById('armsrace'));
+  assert.equal(brief.title, 'CLIMB THE LADDER');
+  assert.ok(brief.detail.includes('LADDER 4/10'), brief.detail);
+  assert.ok(brief.detail.includes(WEAPONS[3].name), brief.detail);
+  assert.ok(brief.status.includes('NEXT WEAPON'), brief.status);
+  assert.ok(brief.status.includes(WEAPONS[4].name), brief.status);
+});
+
+test('commandBrief appends the frag target to instagib, rockets and arsenal', () => {
+  for (const id of ['instagib', 'rockets', 'arsenal']) {
+    const brief = commandBrief({config: {mode: id, fragLimit: 20}}, {team: 0}, modeById(id));
+    assert.ok(brief.detail.includes('FIRST TO 20 FRAGS'), `${id}: ${brief.detail}`);
+  }
+});
+
+test('matchStartBanner adds the objective target alongside mode and map', () => {
+  const banner = matchStartBanner({time: .5, modeName: 'Instagib', mapName: 'Exchange', config: {mode: 'instagib', fragLimit: 20}}, 2.6, modeById('instagib'));
+  assert.equal(banner.text, 'FIGHT');
+  assert.equal(banner.detail, 'INSTAGIB · EXCHANGE · FIRST TO 20 FRAGS');
+  assert.equal(matchStartBanner({time: .5, modeName: 'Arms Race', mapName: 'Yard', config: {mode: 'armsrace', fragLimit: 10}}, 2.6, modeById('armsrace')).detail, 'ARMS RACE · YARD · CLIMB THE LADDER');
+  assert.equal(matchStartBanner({time: .5, modeName: 'Capture the Flag', mapName: 'Exchange'}).detail, 'CAPTURE THE FLAG · EXCHANGE');
+});
+
+test('modeColumns covers the new objective and ladder scoreboards', () => {
+  assert.deepEqual(modeColumns('assault'), [['objectiveCaptures', 'SECTORS'], ['objectiveTime', 'SECTOR TIME']]);
+  assert.deepEqual(modeColumns('combined-arms'), [['objectiveTime', 'ZONE TIME'], ['objectiveCaptures', 'CAP'], ['objectiveNeutralizations', 'NEUT'], ['objectiveContests', 'CONTEST']]);
+  assert.deepEqual(modeColumns('armsrace'), [['ladder', 'RUNG'], ['weapon', 'WEAPON']]);
+  assert.deepEqual(modeColumns('deathmatch'), []);
+  assert.deepEqual(modeColumns('puma-race'), []);
+  assert.equal(modeColumns('ctf').length, 4);
+  assert.equal(modeColumns('koth').length, 3);
+  assert.equal(modeColumns('domination').length, 4);
+  assert.equal(modeColumns('payload').length, 2);
+});
+
+test('modePrimary sorts each mode by the objective it scores', () => {
+  const actor = {frags: 2, ladder: 4, weapon: 2, scoreStats: {objectiveCaptures: 3, objectiveTime: 12.5, captures: 1, flagPickups: 1, flagReturns: 1}};
+  assert.deepEqual(modePrimary('assault', actor), [3, 12.5]);
+  assert.deepEqual(modePrimary('combined-arms', actor), [12.5, 3]);
+  assert.deepEqual(modePrimary('armsrace', actor), [4, 2]);
+  assert.deepEqual(modePrimary('deathmatch', actor), [0]);
+});
+
+test('objectiveCopy explains every scoring model the setup screen offers', () => {
+  for (const score of ['laps', 'frags', 'teamFrags', 'captures', 'hillTime', 'zoneTime', 'sectors', 'ladder', 'payload']) {
+    assert.ok(typeof objectiveCopy(score) === 'string' && objectiveCopy(score).length > 0, score);
+  }
+  assert.equal(objectiveCopy('unknown'), null);
 });

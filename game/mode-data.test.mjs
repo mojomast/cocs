@@ -41,6 +41,20 @@ test('objective modes dispatch on the mode rules, not the mode name',()=>{
   assert.equal(assault.sectors.length,3);
 });
 
+test('assault objective builds exactly the configured fragLimit sector count',()=>{
+ const map=MAPS.find(value=>value.id==='rampart');
+ const names=['alpha','bravo','charlie','delta','echo','foxtrot','golf','hotel','india'];
+ for(const count of [1,3,5,9]){
+  const state=objectiveTemplate('assault',map,{fragLimit:count});
+  assert.equal(state.kind,'assault');
+  assert.equal(state.sectors.length,count,`fragLimit ${count} sector count`);
+  assert.equal(state.zones,state.sectors,'zones mirror sectors for the HUD');
+  assert.equal(state.attacker,0);
+  assert.equal(state.defender,1);
+  assert.deepEqual(state.sectors.map(s=>s.id),names.slice(0,count));
+ }
+});
+
 test('KOTH places the hill at the authored center on next-gen maps',()=>{
   for(const id of ['sunken-hill','colosseum','catacombs','forge']){
     const map=MAPS.find(value=>value.id===id),hill=objectiveTemplate('koth',map).zones[0];

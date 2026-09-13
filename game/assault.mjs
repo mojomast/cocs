@@ -1,20 +1,23 @@
 export const ASSAULT_MODE_ID='assault';
-const DEFAULT_IDS=['alpha','bravo','charlie'];
+export const ASSAULT_SECTOR_IDS=['alpha','bravo','charlie','delta','echo','foxtrot','golf','hotel','india'];
+const DEFAULT_IDS=ASSAULT_SECTOR_IDS.slice(0,3);
+// Config fragLimit drives the sector count (UI exposes 1-9). Named ids keep the
+// HUD, event payloads and history stable for the legacy three-sector default.
+export const assaultSectorIds=(count=DEFAULT_IDS.length)=>{const requested=Number(count),total=Math.max(1,Math.min(ASSAULT_SECTOR_IDS.length,Math.floor(Number.isFinite(requested)?requested:DEFAULT_IDS.length)));return Array.from({length:total},(_,i)=>ASSAULT_SECTOR_IDS[i]??`sector-${i+1}`);};
 const boundsOf=arena=>arena.bounds||{minX:-13.55,maxX:13.55,minZ:-13.55,maxZ:13.55};
 const insideBlock=(arena,x,z,y=0)=>(arena.blocks||[]).some(block=>Math.abs(x-block.x)<=block.w/2&&Math.abs(z-block.z)<=block.d/2&&y<block.h-1e-6);
 const inBounds=(arena,x,z)=>{const b=boundsOf(arena);return x>=b.minX&&x<=b.maxX&&z>=b.minZ&&z<=b.maxZ;};
 const sector=(id,point,captureSeconds)=>({id,x:point.x,z:point.z,radius:point.radius??3.5,y:point.y??0,progress:0,owner:null,captureTeam:null,captureSeconds});
 const candidatePoints=arena=>{const values=[];for(const node of arena.navNodes||[])values.push({x:node.x,z:node.z,y:node.y});for(const spawn of arena.spawns||[])values.push({x:spawn[0],z:spawn[1]});for(const pickup of arena.pickups||[])values.push({x:pickup[1],z:pickup[2]});const b=boundsOf(arena);values.push({x:(b.minX+b.maxX)/2,z:(b.minZ+b.maxZ)/2,y:0});return values;};
 export function assaultTemplate(arena,ids=DEFAULT_IDS){
- const source=arena||{},zones=source.objectiveZones,captureSeconds=6;
+ const source=arena||{},zones=Array.isArray(source.objectiveZones)?source.objectiveZones:[],captureSeconds=6;
  const valid=point=>Boolean(point)&&Number.isFinite(point.x)&&Number.isFinite(point.z)&&inBounds(source,point.x,point.z)&&!insideBlock(source,point.x,point.z,point.y??0);
  const safe=candidatePoints(source).filter(valid),pool=safe.length?safe:[{x:0,z:0,y:0}];
- if(Array.isArray(zones)&&zones.length>=ids.length){
-  let fallback=0;
-  const sectors=ids.map((id,index)=>{const zone=zones[index];return sector(id,valid(zone)?zone:pool[fallback++%pool.length],captureSeconds);});
-  return {kind:'assault',attacker:null,defender:null,sectors,active:0,breached:false,winner:null};
- }
- return {kind:'assault',attacker:null,defender:null,sectors:ids.map((id,index)=>sector(id,pool[index%pool.length],captureSeconds)),active:0,breached:false,winner:null};
+ // Reuse authored zones in order and top the sector list up from candidate/nav
+ // points so the configured count is always honoured exactly.
+ let fallback=0;
+ const sectors=ids.map((id,index)=>{const zone=zones[index];return sector(id,valid(zone)?zone:pool[fallback++%pool.length],captureSeconds);});
+ return {kind:'assault',attacker:null,defender:null,sectors,active:0,breached:false,winner:null};
 }
 export function assignAssaultTeams(state){if(state){if(state.attacker==null)state.attacker=0;if(state.defender==null)state.defender=1;}return state;}
 export function assaultActiveSector(state){return state?.sectors?.[state.active]??null;}

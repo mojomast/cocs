@@ -30,6 +30,63 @@ const PERSONALITY_ARCHETYPES=freeze({
 const DEFAULT=ROLE_ARCHETYPES.adaptive;
 const TAU=Math.PI*2;
 
+// Deterministic combat archetypes layered on top of role + harness personality.
+// Role and personality each vote for an archetype; a small stable per-id noise
+// term breaks ties (and nudges near-ties) without ever using Math.random, so a
+// given id+role+personality always resolves to the same archetype.
+const ARCHETYPE_ORDER=freeze(['rusher','flanker','defender','support','sharpshooter']);
+const ROLE_ARCHETYPE_WEIGHTS=freeze({
+ adaptive: {rusher:1, flanker:2, defender:1, support:2, sharpshooter:1},
+ anchor:    {defender:3, support:1},
+ disruptor: {rusher:3, flanker:1},
+ connector: {support:3, defender:1},
+ duelist:   {sharpshooter:3, flanker:1},
+ ambusher:  {flanker:3, sharpshooter:1},
+ flanker:   {flanker:3, rusher:1},
+ orbiter:   {sharpshooter:3, support:1},
+ optimizer: {support:2, defender:2},
+});
+const PERSONALITY_ARCHETYPE_WEIGHTS=freeze({
+ brawler:    {rusher:3, flanker:1},
+ skirmisher: {flanker:2, rusher:2, sharpshooter:1},
+ suppressor: {sharpshooter:3, defender:1},
+ sentinel:   {defender:3, support:1},
+ opportunist:{sharpshooter:2, flanker:1, support:1},
+ flanker:    {flanker:3, rusher:1},
+ controller: {support:2, defender:2},
+});
+
+// Bounded movement/engagement presets. `inner`/`outer` are fractions of the
+// bot's already-jittered range band; patterns are 0 sine, 1 serpentine, 2 jitter.
+const ARCHETYPE_PROFILES=freeze({
+ rusher:      {strafePattern:2, strafePeriod:1.4, weaponBand:'close', innerFrac:0,   outerFrac:.35, thinkScale:.82},
+ flanker:     {strafePattern:1, strafePeriod:2,   weaponBand:'mid',   innerFrac:.12, outerFrac:.55, thinkScale:.95},
+ defender:    {strafePattern:0, strafePeriod:2.8, weaponBand:'mid',   innerFrac:.2,  outerFrac:.68, thinkScale:1.1},
+ support:     {strafePattern:0, strafePeriod:3.4, weaponBand:'mid',   innerFrac:.3,  outerFrac:.8,  thinkScale:1.05},
+ sharpshooter:{strafePattern:2, strafePeriod:3,   weaponBand:'long',  innerFrac:.45, outerFrac:1,   thinkScale:1.15},
+});
+
+// Weapon index preferences per engagement band. Core only adopts a preference
+// whose ammo is still available and otherwise falls back to its distance ladder.
+const WEAPON_BANDS=freeze({close:[9,7,3,4,0],mid:[0,4,1,6,9,8],long:[2,8,6,0,4]});
+
+export function botWeaponBandPick(ammo,band){
+ for(const index of WEAPON_BANDS[band]||[])if(ammo&&ammo[index]>0)return index;
+ return -1;
+}
+
+export function botArchetype(role,personality,id=0){
+ const roleWeights=ROLE_ARCHETYPE_WEIGHTS[role]||ROLE_ARCHETYPE_WEIGHTS.adaptive;
+ const personalityWeights=PERSONALITY_ARCHETYPE_WEIGHTS[personality]||PERSONALITY_ARCHETYPE_WEIGHTS.brawler;
+ const numericId=Number.isFinite(id)?id|0:0;
+ let best=ARCHETYPE_ORDER[0],bestScore=-Infinity;
+ ARCHETYPE_ORDER.forEach((name,index)=>{
+  const score=(roleWeights[name]||0)+(personalityWeights[name]||0)+(botNoise(numericId,40+index)-.5)*.9;
+  if(score>bestScore){bestScore=score;best=name;}
+ });
+ return best;
+}
+
 export function botNoise(id,salt=0){
  const seed=Math.imul((Number.isFinite(id)?id|0:0)+1,2654435761)+Math.imul(salt|0,40503);
  let n=seed>>>0;
@@ -48,12 +105,27 @@ export function botBehavior(actor){
  const jitter=(salt,amount)=>1+(botNoise(id,salt)-.5)*amount;
  const lo=blend(r.range[0],p.range[0])*jitter(1,.24);
  const hi=blend(r.range[1],p.range[1])*jitter(2,.18);
+ const rangeLo=Math.max(2,Math.min(lo,hi-.5)),rangeHi=Math.max(lo+.5,hi);
+ const archetype=botArchetype(role||'adaptive',personality||'adaptive',id);
+ const profile=ARCHETYPE_PROFILES[archetype]||ARCHETYPE_PROFILES.support;
+ const span=Math.max(.5,rangeHi-rangeLo);
+ const innerFrac=clamp(profile.innerFrac+(botNoise(id,14)-.5)*.12,0,1);
+ const outerFrac=clamp(profile.outerFrac+(botNoise(id,15)-.5)*.14,innerFrac,1);
+ const engageOuter=clamp(rangeLo+span*outerFrac,rangeLo+.5,rangeHi);
+ const engageInner=clamp(rangeLo+span*innerFrac,rangeLo,engageOuter-.5);
  return freeze({
   id,
   role:role||'adaptive',
   personality:personality||'adaptive',
   label:r.label,
   suffix:p.label,
+  archetype,
+  strafePattern:profile.strafePattern,
+  strafePeriod:clamp(profile.strafePeriod*jitter(16,.3),.8,5),
+  strafePhase:botNoise(id,17)*TAU,
+  weaponBand:profile.weaponBand,
+  engageBand:[engageInner,engageOuter],
+  thinkScale:clamp(profile.thinkScale*jitter(18,.16),.7,1.4),
   aggression:clamp(blend(r.aggression,p.aggression)+(botNoise(id,3)-.5)*.18,0,1),
   hold:clamp(blend(r.hold,p.hold)+(botNoise(id,4)-.5)*.18,0,1),
   flank:clamp(blend(r.flank,p.flank)+(botNoise(id,5)-.5)*.2,0,1),

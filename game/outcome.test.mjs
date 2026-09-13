@@ -31,6 +31,32 @@ test('frag modes award the highest frag count including ties', () => {
   assert.equal(actorWon(result(null, [actor(undefined, 3), actor(undefined, 1)]), 'rockets', actor(undefined, 3)), true);
 });
 
+test('arms race awards the ladder leader, not the frag leader', () => {
+  const ladderLeader = { frags: 1, ladder: 3 }, fragLeader = { frags: 9, ladder: 1 };
+  const state = result(null, [ladderLeader, fragLeader]);
+  assert.equal(actorWon(state, 'armsrace', ladderLeader), true, 'higher rung wins');
+  assert.equal(actorWon(state, 'armsrace', fragLeader), false, 'frag leader on a lower rung loses');
+  const tie = result(null, [{ frags: 9, ladder: 2 }, { frags: 4, ladder: 2 }]);
+  assert.equal(actorWon(tie, 'armsrace', { frags: 9, ladder: 2 }), true, 'frags break a ladder tie');
+  assert.equal(actorWon(tie, 'armsrace', { frags: 4, ladder: 2 }), false);
+  assert.equal(actorWon(result(null, [{ frags: 0, ladder: 0 }]), 'armsrace', { frags: 0, ladder: 0 }), false, 'a scoreless match is a draw');
+});
+
+test('arms race leaders and the timeout winner follow the ladder without frag sudden death', () => {
+  const m = new Match('chatgpt', 'openclaw', rng(), 'proving-grounds', { mode: 'armsrace', botCount: 0, humanCount: 2, timeLimit: 60, suddenDeath: true });
+  m.actors[0].ladder = 4; m.actors[0].frags = 1;
+  m.actors[1].ladder = 2; m.actors[1].frags = 9;
+  assert.deepEqual(m.leaders().map(a => a.id), [0], 'leaders rank by ladder first');
+  m.time = m.config.timeLimit - 1 / 60;
+  m.step(1 / 60);
+  assert.equal(m.suddenDeath, false, 'arms race must not enter frag sudden death');
+  assert.equal(m.over, true);
+  assert.equal(m.snapshot().overReason, 'time');
+  const state = m.snapshot();
+  assert.equal(actorWon(state, 'armsrace', state.actors.find(a => a.id === 0)), true);
+  assert.equal(actorWon(state, 'armsrace', state.actors.find(a => a.id === 1)), false);
+});
+
 test('missing inputs never award a win', () => {
   assert.equal(actorWon(null, 'ctf', actor(0, 1)), false);
   assert.equal(actorWon(result(0, []), 'ctf', null), false);

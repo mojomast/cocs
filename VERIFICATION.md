@@ -1,5 +1,35 @@
 # COCS verification report
 
+## Release 2.65 - Payload pig, objective clarity, bot variety
+
+- Fixed local objective rendering: view now reads `objectives ?? objectiveState`, so
+  KOTH/domination/assault markers and the payload render in offline play, not only
+  over the network. The payload is rebuilt as a ~2.5m floating pig with bob, wing
+  flap and beacon (all reduced-motion gated), a ground ring, and a distinct radar
+  contact. Active assault sectors are highlighted and labelled; zones carry A/B/C.
+- Slowed payload pacing from `total/30` (rounds ended in 14-68s) to a bounded
+  `total/150` clamped `[1.5,4.0]`, giving ~67-123s full routes on the tested maps,
+  and payload push time now accumulates `objectiveTime` so CART TIME is live.
+- Assault now builds exactly `config.fragLimit` (1-9) sectors, credits
+  capture/objective-time stats, and the HUD/scoreboard show the objective.
+- Arms Race ranks by ladder (not frags) in `leaders()`, sudden-death/tie-break,
+  `actorWon`, and history `leaderRank`, so a lower-ladder player cannot win on the
+  clock. CTF flags dropped unsupported over the void now fall back to the carrier's
+  last solid position or base instead of soft-locking the objective.
+- Objective clarity: `commandBrief` keys on objective kind, adds Combined Arms
+  (zone control) and Arms Race (ladder) branches, and instagib/rockets/arsenal name
+  their frag target; `matchStartBanner` includes the goal; assault/combined-arms/
+  arms-race scoreboards gained objective columns and team banners; setup copy added
+  for frags/teamFrags/sectors/ladder and the weapon-locked modes.
+- Bot variety: deterministic archetypes (rusher, flanker, defender, support,
+  sharpshooter) resolved from operator role + harness personality + slot jitter,
+  wired into engagement band (with hysteresis), strafe patterns, weapon-band
+  preference, replan tempo, objective focus and retreat; difficulty still owns
+  accuracy/reaction/tempo. Added `game/bot-archetypes.test.mjs`.
+- Verification: full game suite **848/848**, server **118/118**, focused
+  wave-one suite **204/204**, bot suite **80/80** plus a 96-test smoke, and
+  `tsc --noEmit` clean. No browser/WebGL playtest of the pig or live balance.
+
 ## Release 2.64 - Kart items, coins and boost pads
 
 - Expanded the item set from four to eight: Turbo, Shield, Oil Slick, Homing

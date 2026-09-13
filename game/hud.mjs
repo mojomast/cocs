@@ -1,3 +1,6 @@
+import {raceDisplay} from './race-ui.mjs';
+import {WEAPONS} from './data.mjs';
+
 export function vehicleHud(player, vehicles = [], flags = [], spectate = false) {
   if (spectate || !player || !(player.health > 0)) return {vehicle: null, prompt: ''};
   const vehicle = vehicles.find(v => v.id === player.vehicleId && v.driver === player.id && v.health > 0);
@@ -124,7 +127,7 @@ export function killFeedWeapon(entry, weapons = []) {
   return weapons[entry.weapon]?.short ?? null;
 }
 
-const teamLabel = team => Number(team) === 0 ? 'RED' : Number(team) === 1 ? 'BLUE' : `TEAM ${team}`;
+export const teamName = team => Number(team) === 0 ? 'RED' : Number(team) === 1 ? 'BLUE' : `TEAM ${team}`;
 
 export function suddenDeathBanner(hud) {
   return hud?.suddenDeath === true && hud?.over !== true ? { text: 'SUDDEN DEATH', detail: 'NEXT SCORE WINS' } : null;
@@ -152,10 +155,12 @@ export function grenadeStatus(player) {
   return { ready: cooldown <= 0, cooldown, label: cooldown <= 0 ? 'FRAG READY' : `FRAG ${cooldown.toFixed(1)}s` };
 }
 
-export function matchStartBanner(hud, duration = 2.6) {
+export function matchStartBanner(hud, duration = 2.6, mode) {
   const time = Number(hud?.time), limit = Number.isFinite(duration) && duration > 0 ? duration : 2.6;
   if (!Number.isFinite(time) || time < 0 || time >= limit) return null;
-  const detail = [hud?.modeName, hud?.mapName].filter(Boolean).join(' · ').toUpperCase();
+  const target = Number(hud?.config?.fragLimit);
+  const objective = mode ? modeTargetText(mode, target) : null;
+  const detail = [hud?.modeName, hud?.mapName, objective].filter(Boolean).join(' · ').toUpperCase();
   return {text: 'FIGHT', detail, age: time, duration: limit};
 }
 
@@ -204,7 +209,7 @@ export function scoreAnnouncer(hud, prevScores) {
   for (const team of [0, 1]) {
     const before = Math.floor(Number(prevScores[team])), after = Math.floor(Number(scores[team]));
     if (!Number.isFinite(before) || !Number.isFinite(after) || after <= before) continue;
-    return {team, kind: capture ? 'capture' : 'score', text: capture ? 'FLAG CAPTURED' : `${teamLabel(team)} SCORES`, score: after, amount: after - before};
+    return {team, kind: capture ? 'capture' : 'score', text: capture ? 'FLAG CAPTURED' : `${teamName(team)} SCORES`, score: after, amount: after - before};
   }
   return null;
 }
@@ -274,4 +279,105 @@ export function nextSpectateTarget(actors, currentId, step = 1) {
   if (cur < 0) return live[step >= 0 ? 0 : live.length - 1].id;
   const index = ((cur + (step >= 0 ? 1 : -1)) + live.length) % live.length;
   return live[index].id;
+}
+
+// ---------------------------------------------------------------------------
+// Objective clarity helpers shared by the HUD and the match-setup screen.
+
+export const isTeamMode = mode => Boolean(mode?.rules?.team || mode?.team || mode?.teams || mode?.objective === 'ctf' || /ctf|capture|team|hill|domination/i.test(mode?.id || ''));
+
+export const modeGoal = mode => {
+  const score = mode?.rules?.score;
+  if (score === 'laps') return 'LAPS';
+  if (score === 'captures') return 'CAPTURES';
+  if (score === 'hillTime') return 'HILL CONTROL';
+  if (score === 'zoneTime') return 'ZONE CONTROL';
+  if (score === 'sectors') return 'SECTORS';
+  if (score === 'payload') return 'CHECKPOINTS';
+  if (score === 'teamFrags') return 'TEAM FRAGS';
+  if (score === 'ladder') return 'LADDER';
+  return isTeamMode(mode) ? 'TEAM FRAGS' : 'FRAGS';
+};
+
+// One-line target readout reused by the match-start banner and the top bar.
+export const modeTargetText = (mode, target) => {
+  const limit = Number(target);
+  if (mode?.id === 'armsrace') return 'CLIMB THE LADDER';
+  const goal = modeGoal(mode);
+  return Number.isFinite(limit) ? `FIRST TO ${limit} ${goal}` : goal;
+};
+
+export const scoreText = value => Number.isInteger(Number(value)) ? String(Number(value)) : Number(value || 0).toFixed(1);
+export const teamScore = (hud, team) => Number(hud?.teamScores?.[team] ?? 0);
+export const teamScoreText = scores => Array.isArray(scores)
+  ? scores.map(s => `${s.name ?? s.team ?? 'TEAM'} ${scoreText(s.score ?? s.captures ?? s.frags ?? 0)}`).join('  ·  ')
+  : scores && typeof scores === 'object'
+    ? Object.entries(scores).map(([team, score]) => `${teamName(team)} ${scoreText(score)}`).join('  ·  ')
+    : '';
+
+export const SCORE_STAT_FIELDS = ['captures', 'flagPickups', 'flagReturns', 'flagDrops', 'objectiveTime', 'objectiveCaptures', 'objectiveNeutralizations', 'objectiveContests'];
+export const scoreStats = actor => Object.fromEntries(SCORE_STAT_FIELDS.map(field => [field, Number.isFinite(Number(actor?.scoreStats?.[field])) ? Number(actor.scoreStats[field]) : 0]));
+
+const zoneName = (zone, index) => String(zone?.id ?? '').toLowerCase() === 'alpha' ? 'A' : String(zone?.id ?? '').toLowerCase() === 'bravo' ? 'B' : String(zone?.id ?? '').toLowerCase() === 'charlie' ? 'C' : String.fromCharCode(65 + index);
+export const dominationZoneText = (zones, playerTeam) => zones.map((zone, index) => `${zoneName(zone, index)} ${zone?.contested ? 'CONTESTED' : zone?.owner === null || zone?.owner === undefined ? 'NEUTRAL' : zone.owner === playerTeam ? 'YOUR CONTROL' : `${teamName(zone.owner)} CONTROL`}`).join(' · ');
+export const flagText = hud => {
+  if (!Array.isArray(hud?.flags) || !hud.flags.length) return '';
+  return hud.flags.map(f => {
+    const carrier = hud?.actors?.find(a => a.id === f.carrier);
+    return `${teamName(f.team)} FLAG ${f.state === 'at-base' ? 'HOME' : f.state === 'carried' ? `CARRIED BY ${carrier?.name?.toUpperCase() || `A${f.carrier}`}` : 'DROPPED'}`;
+  }).join('  ·  ');
+};
+
+export const modeColumns = mode => mode === 'ctf' ? [['captures', 'CAP'], ['flagPickups', 'PICK'], ['flagReturns', 'RET'], ['flagDrops', 'DROP']]
+  : mode === 'koth' ? [['objectiveTime', 'HILL TIME'], ['objectiveCaptures', 'CAP'], ['objectiveContests', 'CONTEST']]
+    : mode === 'domination' || mode === 'combined-arms' ? [['objectiveTime', 'ZONE TIME'], ['objectiveCaptures', 'CAP'], ['objectiveNeutralizations', 'NEUT'], ['objectiveContests', 'CONTEST']]
+      : mode === 'assault' ? [['objectiveCaptures', 'SECTORS'], ['objectiveTime', 'SECTOR TIME']]
+        : mode === 'payload' ? [['objectiveCaptures', 'CHECKPOINTS'], ['objectiveTime', 'CART TIME']]
+          : mode === 'armsrace' ? [['ladder', 'RUNG'], ['weapon', 'WEAPON']]
+            : [];
+
+export const modePrimary = (mode, actor) => {
+  const stats = scoreStats(actor);
+  if (mode === 'ctf') return [stats.captures, stats.flagPickups + stats.flagReturns + stats.flagDrops];
+  if (mode === 'koth' || mode === 'domination' || mode === 'combined-arms') return [stats.objectiveTime, stats.objectiveCaptures];
+  if (mode === 'assault' || mode === 'payload') return [stats.objectiveCaptures, stats.objectiveTime];
+  if (mode === 'armsrace') return [Number(actor?.ladder) || 0, Number(actor?.frags) || 0];
+  return [0];
+};
+
+// Match-rules copy for each scoring model. Null means the mode needs no extra note.
+export const objectiveCopy = score => ({
+  laps: 'Race through every numbered checkpoint in order. First across the line wins. Mystery boxes hold turbo, shield, oil or pulse. All racers use equal Puma chassis; operator, harness and combat gear give no advantage.',
+  frags: 'First operator to the frag target wins. Eliminate opponents to bank frags; every death sets your own count back.',
+  teamFrags: 'Both teams race to the shared team-frag target. Kill together and avoid friendly fire to keep the lead.',
+  captures: 'Capture the enemy flag and return it to your base. Your team scores when the enemy flag reaches home while your flag is safe.',
+  hillTime: 'Hold the central hill to earn one point per second for your team. Contest it to stop the other team from scoring.',
+  zoneTime: 'Capture and hold the three control zones. Your team earns one point per second for every zone it owns.',
+  sectors: 'Attackers capture sectors in order while defenders hold them. Breach the final sector to win; defenders win on the clock.',
+  payload: 'Escort the payload cart down the track to the final point. Standing with the cart pushes it forward; the defenders stall it and roll it back. Attackers win on delivery, defenders on the clock.',
+  ladder: 'Every elimination promotes you one rung up the weapon rack. Reach the final rung to win; there is no frag target to chase.',
+})[score] || null;
+
+export function commandBrief(hud, player, mode) {
+  const id = mode?.id ?? hud?.config?.mode, objective = hud?.objectives, kind = objective?.kind, team = teamName(player?.team), target = hud?.config?.fragLimit ?? 0;
+  const carrying = Array.isArray(hud?.flags) && hud.flags.some(f => f.carrier === player?.id);
+  const enemyFlag = Array.isArray(hud?.flags) ? hud.flags.find(f => f.team !== player?.team) : null;
+  const ownFlag = Array.isArray(hud?.flags) ? hud.flags.find(f => f.team === player?.team) : null;
+  if (id === 'puma-race') { const race = raceDisplay(hud, player?.id); return {title: 'FOLLOW THE CIRCUIT', action: 'Pass every numbered gate in order. Collect mystery boxes and use your item.', detail: `LAP ${race.lap} / ${race.laps}`, status: `CHECKPOINT ${race.checkpoint} / ${race.gates}`}; }
+  if (id === 'ctf') return {title: carrying ? 'RETURN THE FLAG' : 'BREAK THEIR LINE', action: carrying ? 'Reach your base to capture.' : enemyFlag?.state === 'carried' ? 'Escort the carrier home.' : ownFlag?.state === 'dropped' ? 'Recover your flag.' : 'Take the enemy flag.', detail: `${team} ${carrying ? 'CARRIER' : 'DEFENSE'} · ${flagText(hud)}`, status: `${teamScore(hud, player?.team)} / ${target} CAPTURES`};
+  if (id === 'armsrace') {
+    const ladder = ladderStatus(player, WEAPONS.length);
+    const current = WEAPONS[Number(player?.weapon)]?.name;
+    const next = WEAPONS[Number(player?.weapon) + 1]?.name;
+    return {title: 'CLIMB THE LADDER', action: 'Score an elimination to advance one weapon up the rack. Reach the final rung to win.', detail: `${ladder.label} · ${current ?? 'STARTING WEAPON'}`, status: next ? `NEXT WEAPON · ${next}` : 'FINAL RUNG · LAST WEAPON'};
+  }
+  if (kind === 'koth' || id === 'koth') { const zone = objective?.zones?.[0], owner = zone?.owner === null || zone?.owner === undefined ? 'NEUTRAL' : teamName(zone.owner), held = zone?.owner === player?.team; return {title: zone?.contested ? 'CONTEST THE HILL' : held ? 'HOLD THE HILL' : zone?.owner === null ? 'CAPTURE THE HILL' : 'BREAK THEIR CONTROL', action: zone?.contested ? 'Clear the enemy from the hill to restart scoring.' : held ? 'Stay inside the hill and protect the zone.' : 'Push the hill and deny their control.', detail: `${team} ${scoreText(teamScore(hud, player?.team))} / ${target} · HILL ${owner}`, status: `${Math.round(zone?.progress ?? 0)}% CAPTURED · ${zone?.contested ? 'CONTESTED' : owner + ' CONTROL'}`}; }
+  if (kind === 'domination' || id === 'domination' || id === 'combined-arms') { const zones = objective?.zones ?? [], owned = zones.filter(z => z.owner === player?.team).length, contested = zones.filter(z => z.contested).length, enemy = zones.filter(z => z.owner !== null && z.owner !== undefined && z.owner !== player?.team).length; return {title: contested ? 'BREAK THE CONTEST' : owned ? 'LOCK THE ZONES' : 'TAKE A CONTROL POINT', action: contested ? 'Collapse the contested point before the enemy retakes it.' : owned ? 'Hold your captured zones and rotate to the next weak point.' : 'Enter a control zone to begin the capture.', detail: `${team} ${scoreText(teamScore(hud, player?.team))} / ${target} · ${owned}/${zones.length} ZONES · ${dominationZoneText(zones, player?.team)}`, status: `${owned} OWNED · ${enemy} ENEMY · ${contested} CONTESTED`}; }
+  if (kind === 'assault' || id === 'assault') { const st = hud?.objectives, sectors = st?.zones ?? [], total = Math.max(1, sectors.length), index = Math.min(st?.active ?? 0, total - 1), active = sectors[index], attacking = player?.team === st?.attacker, secured = sectors.filter(s => s.owner === player?.team).length; return {title: st?.breached ? 'FORTRESS BREACHED' : attacking ? 'BREACH THE NEXT SECTOR' : 'HOLD THE LINE', action: st?.breached ? 'The final sector has fallen.' : attacking ? 'Push into the active sector and capture it before the defenders reset it.' : 'Hold the active sector and deny the attackers their next breach.', detail: `${team} ${attacking ? 'ATTACKER' : 'DEFENDER'} · SECTOR ${index + 1} / ${total} · ${Math.round(active?.progress ?? 0)}% SECURED`, status: `${secured} SECTOR${secured === 1 ? '' : 'S'} HELD · ${attacking ? 'PUSH FORWARD' : 'HOLD POSITION'}`}; }
+  if (kind === 'payload' || id === 'payload') { const st = hud?.objectives, p = st?.payload, attacking = player?.team === (st?.attacker ?? 0), total = Math.max(1, p?.checkpointCount ?? st?.zones?.length ?? target), reached = p?.checkpointsReached ?? 0, pct = Math.round(p?.progress ?? 0); return {title: p?.delivered ? 'PAYLOAD DELIVERED' : attacking ? (p?.contested ? 'CLEAR THE CART' : 'ESCORT THE PAYLOAD') : (p?.contested ? 'HOLD THE CART' : 'STOP THE PAYLOAD'), action: attacking ? (p?.contested ? 'Both teams are on the cart. Clear the defenders to get it moving again.' : 'Stay with the cart and push it through the next checkpoint before the clock runs out.') : (p?.contested ? 'You are on the cart. Keep the attackers off it to hold the line.' : 'Get bodies on the cart to stall it, then roll it back to the last checkpoint.'), detail: `${team} ${attacking ? 'ATTACKER' : 'DEFENDER'} · PAYLOAD ${pct}% · CHECKPOINT ${Math.min(reached + 1, total)} / ${total}`, status: `${reached} / ${total} CHECKPOINTS · ${p?.contested ? 'CONTESTED' : p?.delivered ? 'DELIVERED' : p?.pushing === player?.team ? 'MOVING' : 'HALTED'}`}; }
+  if (id === 'teamdeathmatch') return {title: 'HOLD THE LINE', action: 'Stay with your team and take the next fight.', detail: `${team} FIRETEAM · FIRST TO ${target} TEAM FRAGS`, status: `${teamScore(hud, player?.team)} / ${target} TEAM FRAGS`};
+  if (id === 'instagib') return {title: 'ONE SHOT. NO SECOND CHANCE.', action: 'Keep the rail angle. Land the first hit.', detail: `RAIL ONLY · UNLIMITED AMMO · POWERS OFF · FIRST TO ${target} FRAGS`};
+  if (id === 'rockets') return {title: 'CONTROL THE BLAST ZONE', action: 'Take height, then force the next rocket duel.', detail: `ROCKETS LOCKED · HEALTH + ARMOR ACTIVE · FIRST TO ${target} FRAGS`};
+  if (id === 'arsenal') return {title: 'OWN THE LOADOUT', action: 'Choose the weapon for the next engagement.', detail: `FULL ARSENAL · UNLIMITED AMMO · FIRST TO ${target} FRAGS`};
+  return {title: 'HUNT THE NEXT TOKEN', action: 'Find an angle and secure the next frag.', detail: `FIRST TO ${target} FRAGS`};
 }

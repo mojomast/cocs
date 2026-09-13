@@ -44,10 +44,20 @@ test('payload template builds an anchored route with ordered checkpoints',()=>{
  assert.equal(payloadProgress(state),0);
 });
 
+test('payload pace targets a 90-240s unopposed route and is never instant',()=>{
+ for(const id of ['blood-gulch','frostline','ashen-rift','trenchline','derelict-station']){
+  const state=payloadTemplate(getMap(id),{segments:3});
+  assert.ok(state.total>1e-6,`${id} route has length`);
+  const time=state.total/state.speed;
+  assert.ok(time>=90&&time<=240,`${id} pace ${time.toFixed(1)}s outside the 90-240s target`);
+ }
+});
+
 test('attackers advance the cart and bank checkpoints',()=>{
  const arena=getMap('sunscar-canyon'),state=payloadTemplate(arena,{segments:3});
- const events=[],scores={0:0,1:0},attacker={id:0,team:state.attacker,health:100,...state.position};
- for(let i=0;i<900;i++){const pos=payloadPosition(state);Object.assign(attacker,{x:pos.x,y:pos.y,z:pos.z});stepPayload(state,[attacker],1/60,{emit:type=>events.push(type),teamScores:scores,scoreLimit:3});}
+ const events=[],scores={0:0,1:0},attacker={id:0,team:state.attacker,health:100,scoreStats:{objectiveTime:0,objectiveCaptures:0},...state.position};
+ // Slower default pace (fix 1) needs a longer window to reach the first checkpoint.
+ for(let i=0;i<3000;i++){const pos=payloadPosition(state);Object.assign(attacker,{x:pos.x,y:pos.y,z:pos.z});stepPayload(state,[attacker],1/60,{emit:type=>events.push(type),teamScores:scores,scoreLimit:3});}
  assert.ok(state.distance>0);
  assert.ok(events.includes('payload-checkpoint'));
  assert.ok(state.checkpointsReached>=1);
@@ -55,11 +65,19 @@ test('attackers advance the cart and bank checkpoints',()=>{
  assert.ok(payloadProgress(state)>0);
 });
 
+test('core accumulates cart time for attackers standing on the payload',()=>{
+ const m=new Match('chatgpt','openclaw',()=>.5,'convoy-line',{mode:'payload',botCount:0,humanCount:2,timeLimit:60,fragLimit:3});
+ const state=m.objectiveState,attacker=m.actors.find(a=>a.team===state.attacker);
+ for(let i=0;i<120;i++){Object.assign(attacker,{x:state.position.x,y:state.position.y,z:state.position.z,health:100});m.updatePayload(1/60);}
+ assert.ok(attacker.scoreStats.objectiveTime>1,`cart time accrued (${attacker.scoreStats.objectiveTime})`);
+});
+
 test('defenders stall the cart and roll it back to the last checkpoint',()=>{
  const arena=getMap('sunscar-canyon'),state=payloadTemplate(arena,{segments:3});
  const attacker={id:0,team:0,health:100,...state.position};
- for(let i=0;i<600;i++){const pos=payloadPosition(state);Object.assign(attacker,pos);stepPayload(state,[attacker],1/60,{teamScores:{0:0,1:0}});}
- assert.ok(state.checkpointsReached>=1);
+ // Slower pace requires a longer push before the second checkpoint is banked.
+ for(let i=0;i<3000;i++){const pos=payloadPosition(state);Object.assign(attacker,pos);stepPayload(state,[attacker],1/60,{teamScores:{0:0,1:0}});}
+ assert.ok(state.checkpointsReached>=2);
  const floor=state.checkpoints[state.checkpointsReached-1].distance;
  assert.ok(state.distance>floor);
  const defender={id:1,team:1,health:100,...payloadPosition(state)};
