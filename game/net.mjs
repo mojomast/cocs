@@ -202,7 +202,14 @@ export class NetClient {
    this._adapt();
    while (this.buffer.length > this.bufferTarget) this.buffer.shift();
   this.state = msg.state;
-  const actors = Array.isArray(msg.state?.actors) ? msg.state.actors : [];
+   const actors = Array.isArray(msg.state?.actors) ? msg.state.actors : [];
+   if (msg.state?.race) {
+    // Race IDs, inventory and standings belong exclusively to the server.
+    this.shadow = null;
+    this.resynced = this.actorId !== null && actors.some(a => a.id === this.actorId);
+    const ack = msg.acks?.[this.actorId];
+    if (Number.isInteger(ack)) this.pendingInputs = this.pendingInputs.filter(item => item.seq > ack);
+   }
   if (this.shadow && this.actorId !== null) {
    const own = actors.find(a => a.id === this.actorId);
     if (own) {
@@ -257,8 +264,8 @@ export class NetClient {
   if (desiredBuffer > this.bufferTarget) this.bufferTarget = Math.min(desiredBuffer, this.bufferTarget + 1);
   else if (desiredBuffer < this.bufferTarget) this.bufferTarget = Math.max(desiredBuffer, this.bufferTarget - 1);
  }
- createShadow(mapId, config) {
-   this.shadow = new Match('chatgpt', 'openclaw', Math.random, getMap(mapId).id, { ...(config || {}), humanCount: 1, botCount: 0 });
+  createShadow(mapId, config) {
+    this.shadow = config?.mode === 'puma-race' ? null : new Match('chatgpt', 'openclaw', Math.random, getMap(mapId).id, { ...(config || {}), humanCount: 1, botCount: 0 });
    this.resynced = false;
    this.inputSeq = 0;
    this.pendingInputs = [];
@@ -296,7 +303,7 @@ export class NetClient {
  viewMatch() {
   const st = this.state;
   const mapId = st?.mapId || this.mapId;
-   return { arena: getMap(mapId), actors: st ? st.actors : [], vehicles: st ? st.vehicles ?? [] : [], pickups: st ? st.pickups : [], rockets: [], events: [], serial: 0 };
+    return { arena: getMap(mapId), actors: st ? st.actors : [], vehicles: st ? st.vehicles ?? [] : [], pickups: st ? st.pickups : [], ...(st?.race ? { race: st.race } : {}), rockets: [], events: [], serial: 0 };
   }
  renderState(now = performance.now()) {
   const b = this.buffer;
@@ -319,7 +326,7 @@ export class NetClient {
    const prev = s1.state;
    actors = base.actors.map(actor => {
     const before = (prev.actors ?? []).find(x => x.id === actor.id);
-     if (!before||actor.id===this.actorId) return actor;
+      if (!before||(actor.id===this.actorId&&this.shadow&&this.resynced)) return actor;
     return { ...actor, x: lerp(before.x, actor.x, alpha), y: lerp(before.y, actor.y, alpha), z: lerp(before.z, actor.z, alpha),
      yaw: before.yaw + turn(before.yaw, actor.yaw) * alpha, pitch: lerp(before.pitch, actor.pitch, alpha) };
    });

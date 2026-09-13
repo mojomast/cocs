@@ -14,6 +14,7 @@ export const ARENA_SCALES={skirmish:{bots:3,label:'Skirmish'},battle:{bots:7,lab
 export const DEFAULT_MAX_BOTS=8;
 
 const AUTHOR={
+ 'puma-circuit':{group:'vehicle',scale:'battle',play:['puma-race']},
  exchange:{group:'arena',legacy:true,scale:'skirmish',play:['deathmatch','teamdeathmatch','instagib','rockets','arsenal','armsrace','koth','domination']},
  crosswire:{group:'arena',legacy:true,scale:'skirmish',play:['deathmatch','teamdeathmatch','instagib','rockets','arsenal','armsrace','koth','domination']},
  foundry:{group:'arena',legacy:true,scale:'skirmish',play:['deathmatch','teamdeathmatch','instagib','rockets','arsenal','armsrace','koth','domination']},
@@ -23,8 +24,9 @@ const AUTHOR={
  skybreak:{group:'island',scale:'battle',play:['ctf','teamdeathmatch','deathmatch','koth','domination']},
  aether:{group:'island',scale:'battle',play:['ctf','teamdeathmatch','deathmatch','koth','domination']},
  'sunscar-canyon':{group:'outdoor',scale:'battle',play:['ctf','teamdeathmatch','deathmatch','koth','domination','combined-arms','payload']},
- 'ironfall-megastructure':{group:'outdoor',scale:'warzone',play:['ctf','teamdeathmatch','deathmatch','koth','domination','combined-arms','payload']},
- 'longreach-plateau':{group:'outdoor',scale:'warzone',play:['ctf','teamdeathmatch','deathmatch','koth','domination','combined-arms','payload']},
+ // Launcher-connected islands have no continuous ground route for a payload.
+ 'ironfall-megastructure':{group:'outdoor',scale:'warzone',play:['ctf','teamdeathmatch','deathmatch','koth','domination','combined-arms']},
+ 'longreach-plateau':{group:'outdoor',scale:'warzone',play:['ctf','teamdeathmatch','deathmatch','koth','domination','combined-arms']},
  frostline:{group:'outdoor',scale:'warzone',play:['ctf','teamdeathmatch','deathmatch','koth','domination','combined-arms','payload']},
  'derelict-station':{group:'indoor',scale:'warzone',play:['ctf','teamdeathmatch','deathmatch','koth','domination','combined-arms','payload']},
  'ashen-rift':{group:'outdoor',scale:'warzone',play:['ctf','teamdeathmatch','deathmatch','koth','domination','combined-arms','payload']},
@@ -64,7 +66,7 @@ export function arenaMeta(mapOrId){
  const author=AUTHOR[arena.id]||{};
  return {id:arena.id,group:author.group??derivedGroup(arena),scale:author.scale??derivedScale(arena),legacy:author.legacy===true,play:author.play??null,scaleBots:ARENA_SCALES[author.scale??derivedScale(arena)].bots};
 }
-export function arenaSupportsMode(mapId,mode){const meta=arenaMeta(mapId);if(!meta)return false;return !meta.play||meta.play.includes(mode);}
+export function arenaSupportsMode(mapId,mode){const meta=arenaMeta(mapId);if(!meta)return false;if(mode==='puma-race')return meta.play?.includes(mode)===true;return !meta.play||meta.play.includes(mode);}
 export function maxBotsFor(mode){return modeRule(mode)?.maxBots??DEFAULT_MAX_BOTS;}
 export function recommendedBots(mode,mapId){const meta=arenaMeta(mapId);const cap=maxBotsFor(mode),base=meta?.scaleBots??ARENA_SCALES.skirmish.bots;return Math.max(0,Math.min(cap,base));}
 export function mapsForMode(mode,{legacy=false}={}){return MAPS.filter(map=>arenaSupportsMode(map.id,mode)&&(legacy||!arenaMeta(map.id).legacy));}

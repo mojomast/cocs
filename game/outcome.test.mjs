@@ -36,6 +36,23 @@ test('missing inputs never award a win', () => {
   assert.equal(actorWon(result(0, []), 'ctf', null), false);
 });
 
+test('race wins follow the racer ID, including zero, without requiring frags', () => {
+  const racers = [{ id: 0, team: 1, frags: 0 }, { id: 7, team: 0, frags: 0 }, { id: 9, team: 7, frags: 20 }];
+  for (const winnerId of [7, 0]) {
+    for (const state of [{ winner: winnerId, actors: racers }, { winner: winnerId, race: { winnerId }, actors: racers }]) {
+      for (const racer of racers) assert.equal(actorWon(state, 'puma-race', racer), racer.id === winnerId);
+    }
+  }
+});
+
+test('race wins require a result and an actual winner', () => {
+  for (const state of [null, {}, { winner: null }, { race: { winnerId: null } }]) {
+    assert.equal(actorWon(state, 'puma-race', { id: 0, frags: 10 }), false);
+    assert.equal(actorWon(state, 'puma-race', { frags: 10 }), false);
+  }
+  assert.equal(actorWon({ winner: 0 }, 'puma-race', null), false);
+});
+
 test('a score-limit team finish is reported as a frag ending', () => {
   const m = new Match('chatgpt', 'openclaw', rng(), 'crosswire', { mode: 'teamdeathmatch', botCount: 0, humanCount: 2, fragLimit: 5, timeLimit: 60 });
   m.actors[0].team = 0; m.actors[1].team = 1;

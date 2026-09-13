@@ -42,8 +42,9 @@ test('applyTouchAction tracks held buttons and latches one-shot actions',()=>{
  applyTouchAction(runtime,'ads',true);
  applyTouchAction(runtime,'crouch',true);
  applyTouchAction(runtime,'voice',true);
- assert.equal(runtime.fire,true);
- assert.equal(runtime.ads,true);
+  assert.equal(runtime.touch.fire,true);
+  assert.equal(runtime.touch.ads,true);
+  assert.equal(runtime.fireTap,true);
  assert.equal(runtime.touch.crouch,true);
  assert.deepEqual(runtime.voice.talking,[true]);
  applyTouchAction(runtime,'jump',true);
@@ -64,8 +65,9 @@ test('applyTouchAction tracks held buttons and latches one-shot actions',()=>{
  applyTouchAction(runtime,'ads',false);
  applyTouchAction(runtime,'crouch',false);
  applyTouchAction(runtime,'voice',false);
- assert.equal(runtime.fire,false);
- assert.equal(runtime.ads,false);
+  assert.equal(runtime.touch.fire,false);
+  assert.equal(runtime.touch.ads,false);
+  assert.equal(runtime.fireTap,true, 'release preserves the unconsumed tap');
  assert.equal(runtime.touch.crouch,false);
  assert.deepEqual(runtime.voice.talking,[true,false]);
  assert.equal(applyTouchAction(null,'fire',true),null);

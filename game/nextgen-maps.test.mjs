@@ -3,9 +3,9 @@ import assert from 'node:assert/strict';
 import {NEXTGEN_MAPS} from './nextgen-maps.mjs';
 import {MAPS,getMap} from './maps.mjs';
 import {GAME_MODES} from './config.mjs';
-import {floorAt,obstructed,moveActor,navigation} from './core.mjs';
+import {floorAt,obstructed,moveActor,navigation,walkEdge} from './core.mjs';
 import {arenaMeta,arenaSupportsMode} from './arenas.mjs';
-import {mulberry32,fbm} from './levelgen.mjs';
+import {createLevel,terrainField,mulberry32,fbm} from './levelgen.mjs';
 
 const finite = value => typeof value === 'number' && Number.isFinite(value);
 const within = (map, x, z) => x >= map.bounds.minX && x <= map.bounds.maxX && z >= map.bounds.minZ && z <= map.bounds.maxZ;
@@ -58,30 +58,38 @@ test('next-gen spawns stand on supported, unobstructed ground', () => {
   }
 });
 
-test('next-gen team spawns sit in the main navigation component', () => {
+test('every required next-gen placement walk-connects to retained navigation', () => {
   for (const map of NEXTGEN_MAPS) {
     const { nodes, edges } = navigation(map);
     const seen = new Set([0]), queue = [0];
     while (queue.length) for (const next of edges[queue.shift()]) if (!seen.has(next)) { seen.add(next); queue.push(next); }
     const main = nodes.filter((_, index) => seen.has(index));
-    const team = Object.values(map.teamSpawns || {}).flat();
-    const spawns = team.length ? team : map.spawns;
-    assert.ok(spawns.length, `${map.id} has spawns`);
-    for (const [x, z] of spawns) {
-      const nearest = Math.min(...main.map(node => Math.hypot(node.x - x, node.z - z)));
-      assert.ok(nearest <= 8, `${map.id} spawn ${x},${z} reachable (nearest main node ${nearest.toFixed(1)}m)`);
+    const placements = [
+      ...map.spawns.map(p => ['spawn', ...p]),
+      ...Object.values(map.teamSpawns || {}).flat().map(p => ['team spawn', ...p]),
+      ...Object.values(map.flagSpawns || {}).map(p => ['flag', ...p]),
+      ...map.pickups,
+      ...map.objectiveZones.map(p => ['zone', p.x, p.z]),
+    ];
+    assert.ok(main.length > 8, `${map.id} has retained navigation`);
+    for (const [kind, x, z] of placements) {
+      const y = floorAt(x, z, map), label = `${map.id} ${kind} at ${x},${z}`;
+      assert.notEqual(y, null, `${label} support`);
+      assert.equal(obstructed(x, y, z, .6, map), false, `${label} clearance`);
+      // Exclude the placement itself: a zero-length edge can hide an island.
+      assert.ok(main.some(node => Math.hypot(node.x - x, node.z - z) > .1 && walkEdge({x, y, z}, node, map) && walkEdge(node, {x, y, z}, map)), `${label} walk-connects to main component`);
     }
   }
 });
 
-test('next-gen objectives sit clear of walls and rocks', () => {
+test('next-gen objectives sit clear of all ground-level solids, including decks', () => {
   for (const map of NEXTGEN_MAPS) {
     for (const zone of map.objectiveZones) {
       const y = floorAt(zone.x, zone.z, map);
       assert.notEqual(y, null, `${map.id} objective support at ${zone.x},${zone.z}`);
       assert.ok(Number.isFinite(zone.y), `${map.id} objective height at ${zone.x},${zone.z}`);
-      const buried = map.blocks.some(block => block.kind !== 'deck' && Math.abs(zone.x - block.x) < block.w / 2 + 0.6 && Math.abs(zone.z - block.z) < block.d / 2 + 0.6 && y < block.h - 1e-6);
-      assert.equal(buried, false, `${map.id} objective clearance at ${zone.x},${zone.z}`);
+      assert.equal(zone.y, y, `${map.id} objective uses runtime floor height`);
+      assert.equal(obstructed(zone.x, y, zone.z, .6, map), false, `${map.id} objective clearance at ${zone.x},${zone.z}`);
     }
   }
 });
@@ -118,4 +126,52 @@ test('the CTF next-gen map keeps its authored flag bases and picks up its centre
   assert.deepEqual(frost.flagSpawns[0], [-48, 0]);
   assert.deepEqual(frost.flagSpawns[1], [48, 0]);
   assert.deepEqual(frost.flags, frost.flagSpawns);
+});
+
+test('rotated team bases face inward and Frost Gate has an unobstructed central route', () => {
+  for (const id of ['frost-gate', 'titan-valley', 'convoy-line']) {
+    const map = NEXTGEN_MAPS.find(map => map.id === id);
+    for (const base of map.structures.filter(s => s.type === 'building' && Math.abs(s.x) >= 48 && s.z === 0)) {
+      assert.equal(base.door, 'north', `${id} local north faces centre after rotation`);
+      const sign = -Math.sign(base.x), doorX = base.x + sign * (base.d / 2 - .25);
+      const a = {x: doorX - sign, z: 0}, b = {x: doorX + sign, z: 0};
+      a.y = floorAt(a.x, a.z, map); b.y = floorAt(b.x, b.z, map);
+      assert.ok(walkEdge(a, b, map), `${id} doorway is physically passable`);
+    }
+  }
+  const frost = NEXTGEN_MAPS.find(map => map.id === 'frost-gate');
+  for (let x = -48; x < 48; x += 2) {
+    assert.ok(walkEdge({x, y: floorAt(x, 0, frost), z: 0}, {x: x + 2, y: floorAt(x + 2, 0, frost), z: 0}, frost), `Frost Gate central route at ${x}`);
+  }
+});
+
+test('automatic team powerups and cover have exact mirrored partners', () => {
+  for (const map of NEXTGEN_MAPS.filter(map => map.teamSpawns)) {
+    for (const kind of ['haste', 'overcharge', 'overshield', 'recon', 'cloak']) {
+      const supplies = map.pickups.filter(p => p[0] === kind);
+      assert.equal(supplies.length, 2, `${map.id} paired ${kind}`);
+      assert.equal(supplies[0][1], -supplies[1][1], `${map.id} ${kind} mirrored x`);
+      assert.equal(supplies[0][2], -supplies[1][2], `${map.id} ${kind} mirrored z`);
+    }
+    const cover = map.blocks.filter(b => b.kind === 'cover');
+    for (const block of cover) assert.ok(cover.some(b => b !== block && b.x === -block.x && b.z === -block.z && b.w === block.w && b.d === block.d), `${map.id} mirrored cover`);
+  }
+});
+
+test('final placement repair uses triangulated ground and includes decks and later cover', () => {
+  const bounds = {minX: -20, maxX: 20, minZ: -20, maxZ: 20};
+  const terrain = terrainField(bounds, {height: () => 0, amplitude: 0});
+  // The source noise function is not the runtime triangle support surface.
+  terrain.height = () => 9;
+  const map = createLevel({id: 'placement-fixture', bounds, terrain, layout(ctx) {
+    ctx.addBlock({x: 0, z: 0, w: 4, d: 4, h: 3, kind: 'deck'});
+    ctx.addSpawn(0, 0);
+    ctx.addObjective(0, 0);
+    ctx.addObjective(-5, 4); // Automatic cover is added here after layout.
+    ctx.addPickup('health', 0, 0);
+    ctx.flagSpawns = {0: [0, 0], 1: [-5, 4]};
+  }});
+  const points = [...map.spawns, ...map.pickups.map(p => p.slice(1)), ...Object.values(map.flagSpawns), ...map.objectiveZones.map(p => [p.x, p.z])];
+  for (const [x, z] of points) assert.equal(obstructed(x, floorAt(x, z, map), z, .6, map), false, `repaired fixture placement ${x},${z}`);
+  for (const zone of map.objectiveZones) assert.equal(zone.y, 0);
 });

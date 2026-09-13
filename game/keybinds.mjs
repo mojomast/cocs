@@ -38,6 +38,15 @@ export function normalizeBindings(value) {
   return out;
 }
 
+export function rebindAction(bindings, action, code) {
+  const next = normalizeBindings(bindings);
+  if (!KEYBIND_ACTIONS.includes(action) || !isKeybindCode(code)) return next;
+  const occupied = actionForCode(next, code);
+  if (occupied) next[occupied] = next[action];
+  next[action] = code;
+  return next;
+}
+
 export function actionForCode(bindings, code) {
   if (typeof code !== 'string') return null;
   for (const action of KEYBIND_ACTIONS) if (bindings?.[action] === code) return action;

@@ -147,3 +147,61 @@ test('an explicit ending reason overrides the score-limit inference',()=>{
  const frag=h.record({config:{mode:'teamdeathmatch',fragLimit:30,timeLimit:60},time:60,actors,teamScores:{0:30,1:0},winner:0,endingReason:'frag'});
  assert.equal(frag.endedBy,'frag');
 });
+
+test('race finish and timeout winners survive copying and file round-trip',()=>{
+ const dir=tmpDir(),file=path.join(dir,'race.json');
+ try {
+  const h=new MatchHistory(file);
+  for(const [winnerId,overReason] of [[7,'race-finish'],[0,'time']]){
+   const result={config:{mode:'puma-race',fragLimit:3,timeLimit:120},mapId:'puma-circuit',time:120,over:true,overReason,winner:winnerId,
+    teamScores:{0:0,1:0},actors:[{...actors[0],id:0,team:7,frags:0},{...actors[1],id:7,team:0,frags:0}],
+    race:{winnerId,elapsed:117,laps:3,phase:'finished',gates:[{x:99}],hazards:[{x:42}],standings:[winnerId,winnerId===0?7:0].map((actorId,index)=>({
+     actorId,vehicleId:`puma-${actorId}`,position:index+1,lap:index===0?3:2,completedLaps:index===0&&overReason==='race-finish'?3:1,nextGate:2,progress:20-index,
+     finishTime:index===0&&overReason==='race-finish'?116.5:null,item:index===0?'shield':null,effects:{turbo:0,shield:2,slow:0},internal:'omit'
+    }))}};
+   const entry=h.record({roomId:'RACE',result});
+   assert.equal(entry.winnerActorId,winnerId);
+   assert.equal(entry.leader,winnerId===0?'Alice':'Bob');
+   assert.equal(entry.endedBy,overReason);
+   assert.equal(entry.mode,'puma-race');
+   assert.equal(entry.duration,120);
+   assert.equal(entry.mapId,'puma-circuit');
+   assert.equal('winner' in entry,false,'race winner is not a team winner');
+   assert.equal('teamScores' in entry,false);
+   assert.deepEqual(Object.keys(entry.race).sort(),['elapsed','laps','phase','standings','winnerId']);
+   assert.equal('internal' in entry.race.standings[0],false);
+   for(const player of entry.players){
+    assert.deepEqual(player.race,entry.race.standings.find(s=>s.actorId===player.actorId));
+    assert.equal(player.race.position,player.actorId===winnerId?1:2);
+   }
+   const expected=structuredClone(entry);
+   result.race.standings[0].effects.shield=99;
+   result.race.standings[0].position=99;
+   result.race.standings.push({actorId:99});
+   const copy=h.all()[0];
+   copy.race.standings[0].effects.shield=100;
+   copy.race.standings.pop();
+   copy.players[0].race.effects.shield=100;
+   assert.deepEqual(h.all()[0],expected);
+   const reloaded=new MatchHistory(file);
+   assert.deepEqual(reloaded.all(),h.all());
+   reloaded.all()[0].players[0].race.effects.shield=200;
+   assert.deepEqual(reloaded.all()[0],expected);
+  }
+ } finally {fs.rmSync(dir,{recursive:true,force:true});}
+});
+
+test('race history supports explicit race data and missing legacy race fields',()=>{
+ const h=new MatchHistory();
+ const entry=h.record({config:{mode:'puma-race'},actors:[{...actors[0],id:0}],race:{winnerId:0,standings:[{actorId:0,position:1,finishTime:10}]}});
+ assert.equal(entry.winnerActorId,0);
+ assert.equal(entry.leader,'Alice');
+ assert.equal(entry.endedBy,'race-finish');
+ const missing=h.record({config:{mode:'puma-race'},actors:[{...actors[0],id:0}]});
+ assert.equal(missing.winnerActorId,null);
+ assert.equal(missing.leader,'Arena');
+ assert.equal('race' in missing,false);
+ const legacy={id:'old-race',mode:'puma-race',players:[{name:'Old'}]};
+ h.matches.push(legacy);
+ assert.deepEqual(h.all().at(-1),legacy);
+});

@@ -82,7 +82,7 @@ export function objectiveTemplate(mode,arena,config){
  const rules=modeRule(mode),kind=rules.objective?.kind,authored=authoredPoints(arena,['alpha','bravo','charlie'],rules);
  if(kind==='koth'){
   const b=boundsOf(arena),centerX=(b.minX+b.maxX)/2,centerZ=(b.minZ+b.maxZ)/2;
-  const source=authored.slice().sort((p,q)=>Math.hypot(p.x-centerX,p.z-centerZ)-Math.hypot(q.x-centerX,q.z-centerZ))[0];
+  const source=arena.id==='crosswire'?authored[1]:authored.slice().sort((p,q)=>Math.hypot(p.x-centerX,p.z-centerZ)-Math.hypot(q.x-centerX,q.z-centerZ))[0];
   return {kind:'koth',zones:[clearZone(arena,{...source,id:'hill',captureSeconds:rules.objective.captureSeconds})],winner:null};
  }
  if(kind==='domination')return {kind:'domination',zones:authored.map(zone=>clearZone(arena,zone)),winner:null};

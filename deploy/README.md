@@ -20,23 +20,37 @@ Both are user units under `~/.config/systemd/user/` with linger enabled for `moj
 The running web service loads its server bundle and asset manifest at startup.
 Rebuilding `dist/` does not reload it: old HTML can reference deleted CSS and
 JavaScript assets, leaving the public site unstyled or unable to initialize.
-Restart the web service immediately after a successful build:
+Use the deployment command so a successful build is immediately followed by a
+web restart and public HTML/CSS/JavaScript verification:
 
 ```
-npm run build && systemctl --user restart token-arena-web.service
+DEPLOY_VERSION='v2.62' npm run deploy
 ```
 
 Restart the game server only when deploying server changes; doing so disconnects
 active multiplayer clients:
 
 ```
-systemctl --user restart token-arena-server.service
+DEPLOY_VERSION='v2.62' npm run deploy -- --with-game-server
 ```
 
 `npm test` also rebuilds `dist/`. Run build/test work in a separate checkout when
 the live service must remain uninterrupted. If run in this deployment checkout,
 the web service must be restarted after the build before considering verification
 complete. Verify the public URL and its linked assets, not just the local dev server.
+
+`DEPLOY_VERSION` is optional but recommended: it rejects an old HTML release even
+when its assets still work. `DEPLOY_URL` defaults to `https://arena.ussyco.de`.
+To check an already-running deployment without building or restarting anything:
+
+```
+npm run verify:deployment -- https://arena.ussyco.de v2.62
+```
+
+The verifier requires HTTP 200 and the correct content type for every CSS and JS
+asset referenced by HTML, including preload and streamed RSC references. This
+catches stale manifest failures that an HTML-only smoke test misses. The rendered
+HTML test also verifies that every referenced asset exists in the build directory.
 
 ## Notes
 

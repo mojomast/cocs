@@ -2,10 +2,35 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {MAPS} from './maps.mjs';
 import {objectiveTemplate} from './mode-data.mjs';
-import {floorAt,obstructed} from './core.mjs';
+import {floorAt,Match,obstructed} from './core.mjs';
 import {RULES} from './data.mjs';
 
 const canonicalObjectiveMaps=['exchange','crosswire','foundry','launchpad','citadel','blood-gulch','skybreak','aether','sunscar-canyon','ironfall-megastructure','longreach-plateau'];
+
+test('Crosswire explicitly uses the north hill without changing domination order',()=>{
+  const map=MAPS.find(map=>map.id==='crosswire');
+  const hill=objectiveTemplate('koth',map).zones[0];
+  assert.deepEqual([hill.x,hill.z,hill.y],[0,-9,0]);
+  assert.deepEqual(objectiveTemplate('domination',map).zones.map(p=>[p.id,p.x,p.z]),[['alpha',-9,0],['bravo',0,-9],['charlie',9,0]]);
+});
+
+test('classic team spawn pools preserve mirrored hill distances and equal high/low access at runtime',()=>{
+  for(const id of ['exchange','foundry','crosswire']){
+    const match=new Match('chatgpt','openclaw',()=>.5,id,{mode:'koth',bots:0});
+    const {arena,teamSpawns}=match,hill=match.objectiveState.zones[0];
+    assert.deepEqual(teamSpawns,arena.teamSpawns,`${id} authored pools used`);
+    assert.deepEqual(teamSpawns[0].map(([x,z])=>[-x,z]),teamSpawns[1],`${id} mirrored pools`);
+    const heights=Object.values(teamSpawns).map(pool=>pool.map(([x,z])=>floorAt(x,z,arena)));
+    assert.deepEqual(heights[0],heights[1],`${id} elevation parity`);
+    if(arena.raised){assert.ok(heights[0].includes(0));assert.ok(heights[0].includes(3.8));}
+    const distances=Object.values(teamSpawns).map(pool=>pool.map(([x,z])=>Math.hypot(x-hill.x,z-hill.z,floorAt(x,z,arena)-hill.y)));
+    assert.deepEqual(distances[0],distances[1],`${id} hill distance parity`);
+    for(const pool of Object.values(teamSpawns))for(const [x,z] of pool){
+      assert.notEqual(x,0,`${id} no exclusive center spawn`);
+      assert.ok(Math.hypot(x-hill.x,z-hill.z)>hill.radius,`${id} no hill spawn`);
+    }
+  }
+});
 
 test('objective modes dispatch on the mode rules, not the mode name',()=>{
   const combined=objectiveTemplate('combined-arms',MAPS.find(map=>map.id==='titan-valley'));

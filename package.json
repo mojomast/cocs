@@ -11,6 +11,8 @@
     "server": "node server/game-server.mjs",
     "demo": "node server/demo-client.mjs",
     "build": "bash scripts/build-verified.sh",
+    "deploy": "bash scripts/deploy.sh",
+    "verify:deployment": "node scripts/verify-deployment.mjs",
     "start": "WRANGLER_LOG_PATH=.wrangler/wrangler.log vinext start",
     "test": "npm run test:game && npm run test:server && npm run typecheck && npm run build && node --test tests/*.test.mjs",
     "lint": "bash scripts/sites-env.sh -- eslint . --ignore-pattern dist --ignore-pattern .next",

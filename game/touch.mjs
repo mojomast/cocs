@@ -36,8 +36,8 @@ export const isTouchDevice=()=>typeof window!=='undefined'&&(window.matchMedia?.
 export function applyTouchAction(runtime,action,pressed){
  if(!runtime)return null;
  runtime.touch??={};
- if(action==='fire')runtime.fire=pressed;
- else if(action==='ads')runtime.ads=pressed;
+  if(action==='fire'){runtime.touch.fire=pressed;if(pressed)runtime.fireTap=true;}
+  else if(action==='ads')runtime.touch.ads=pressed;
  else if(action==='crouch')runtime.touch.crouch=pressed;
  else if(action==='voice')runtime.voice?.setPushToTalk?.(pressed);
  else if(pressed){

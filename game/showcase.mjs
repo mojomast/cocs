@@ -1,16 +1,9 @@
 import {activeMaps,maxBotsFor} from './arenas.mjs';
 import {vehicleSeatFor,vehicleMounted} from './vehicles.mjs';
 
-// The title screen cycles a reel of action-packed scenarios so the menu shows off
-// the game's range: objective modes, vehicle battles, explosive modes and the
-// signature rail beam. Scenarios stay short so the reel rotates.
+// The title screen loops a full eight-driver Puma Circuit race.
 export const SHOWCASES=[
- {id:'combined',label:'Combined Arms',mode:'combined-arms',maps:['skyfall-basin','trenchline','signal-ridge','warfront'],bots:16,difficulty:'normal',timeLimit:120,fragLimit:200,seatVehicles:.7},
- {id:'rail',label:'Instagib Rails',mode:'instagib',maps:['catacombs','neon-vertical','substation','atrium'],bots:12,difficulty:'hard',timeLimit:120,fragLimit:25,seatVehicles:0},
- {id:'rockets',label:'Rocket Arena',mode:'rockets',maps:['slagworks','catacombs','colosseum','atrium'],bots:12,difficulty:'normal',timeLimit:120,fragLimit:40,seatVehicles:.3},
- {id:'ctf',label:'Capture the Flag',mode:'ctf',maps:['frost-gate','sunken-hill','skybreak','aether','frostline'],bots:12,difficulty:'normal',timeLimit:150,fragLimit:3,seatVehicles:.35},
- {id:'payload',label:'Payload',mode:'payload',maps:['convoy-line','riverbend','titan-valley'],bots:12,difficulty:'normal',timeLimit:150,fragLimit:3,seatVehicles:.35},
- {id:'assault',label:'Assault',mode:'assault',maps:['rampart','catwalk-breach','fortress','trenchline'],bots:10,difficulty:'normal',timeLimit:150,fragLimit:3,seatVehicles:.3},
+ {id:'puma-race',label:'Puma Circuit',mode:'puma-race',maps:['puma-circuit'],bots:7,difficulty:'normal',timeLimit:180,fragLimit:2,seatVehicles:0},
 ];
 
 export function pickShowcase(index,random=Math.random,{legacy=false}={}){

@@ -1,5 +1,138 @@
 # COCS verification report
 
+## Release 2.62 - Puma Circuit menu and deployment
+
+- Main-menu showcase now runs only Puma Circuit: eight AI drivers, two laps,
+  four seconds of fixed-tick warmup, and automatic restart after the finish.
+  Cinematic title rendering uses the vehicle chase camera; menu diagnostics are
+  exposed under `window.tokenArenaSnapshot().showcase`.
+- Preserved disabled-showcase, reduced-motion and software-renderer fallbacks.
+  Showcase/race-UI/view regression run passed **41/41**, including repeated
+  completed races and title rendering without a local gameplay match.
+- Release review caught and fixed an online race chat trap: T/Enter previously
+  opened chat state while the race HUD omitted its input. Race and combat now
+  share one visible chat panel. Updated race UI tests passed **12/12**.
+- Reproduced the live CSS failure: the running web process referenced the deleted
+  `/assets/index-Mzs69FxE.css`, which returned HTTP 502; service logs showed
+  ENOENT for that stylesheet and old JavaScript chunks. The cause was rebuilding
+  `dist` without reloading the running asset manifest, not invalid CSS syntax.
+- Added `npm run deploy` to pair build/restart with public linked-asset checks,
+  optionally restarting the game server. Deployment verifier tests **3/3** catch
+  missing CSS, stale release HTML and HTML fallback responses for asset requests.
+  Rendered-HTML tests now also check local build asset existence.
+- This release includes the preceding map, gameplay/control and racing changes
+  described below. Their unreleased labels record their original verification
+  state before this combined release.
+
+## Puma Circuit racing - 2026-09-13 (unreleased)
+
+- Added `puma-race` and exclusive `puma-circuit` map: a closed flat circuit with
+  continuous solid boundaries, distinct infield/apron, eight Puma grid slots,
+  twelve checkpoint gates and six respawning mystery boxes. Vehicle-sized sweeps
+  validate lane/corner clearance and authored navigation connects the full loop.
+- Race-only simulation auto-mounts drivers, caps humans plus bots at eight, runs
+  a three-second countdown and bypasses combat. All racers share chassis tuning.
+  Ordered swept crossings include direction, gate width and height validation;
+  reset teleports cannot score. Finish order resolves sub-tick crossing times.
+- Turbo, Shield, Oil Slick and Homing Pulse use one held slot and rising-edge
+  activation. Normal chassis boost and handbrake work offline and online.
+  Checkpoint recovery preserves progress and imposes a two-second wait.
+- Bots drive actual laps on the registered circuit without recovery resets in
+  the deterministic completion test. The UI defaults to seven rivals on mode
+  entry and exposes 0-7 rivals, without advertising unused combat difficulty.
+- Race HUD, mobile actions, chase camera, numbered gate frames, checkered start,
+  grid markings, item boxes and oil hazards are integrated. History names and
+  winner awards handle actor IDs, including zero, rather than team/frag scores.
+- Race clients do not construct an invalid single-racer prediction shadow.
+  Server-authoritative snapshots interpolate all cars and preserve countdown,
+  items, standings and slot-seven reconnect state. Held handbrake stays held;
+  held item activation cannot consume a newly acquired item without release.
+- Initial integrated race/config/network/history check: **102/102 passed**.
+  Updated race UI/configuration/geometry tests: **10/10 passed**. Registry,
+  presentation, touch, replay and progression check: **57/57 passed**, including
+  all **35 maps / 256 supported map-mode combinations**. Full server suite:
+  **118/118 passed**. Typecheck, final production build and rendered HTML
+  (**1/1**) passed. The existing large-client-chunk build warning remains.
+- Race setup avoids infantry navigation construction; independent public track
+  navigation uses authored nodes instead of scanning the full arena. Isolated
+  diagnostics reduced that validation from about 31 seconds to under a second.
+- Limits: cars deliberately ghost rather than ram; the round ends at the first
+  finisher and remaining racers are DNF. Multiplayer steering is interpolated,
+  not locally predicted. No browser/device driving or high-latency playtest yet.
+  Earlier uncommitted map/control repairs remain intact; no commit or deployment.
+
+## Gameplay and controls improvements - 2026-09-13 (unreleased)
+
+- Piercing rounds now continue beyond the first victim, with remaining weapon
+  range and world occlusion enforced. Tests cover aligned victims, walls and
+  targets beyond range.
+- CTF pickup, return and capture require vertical proximity. Flag height follows
+  the carrier and survives drops, events and snapshots. Drops select support
+  below their actual position rather than teleporting onto nearby wall roofs;
+  elevated bases and blocktop drops remain usable.
+- Offline number-key, wheel and touch weapon selection now queues the same
+  simulation input as multiplayer, preserving reload cancellation and equip
+  delay. Rapid cycling starts from the pending selection.
+- Mouse and touch fire/ADS holds are independent; touch fire taps latch until
+  the next simulation tick. Pause/blur clears both sources and push-to-talk.
+- Added the missing rendered GRENADE touch button, with an actual TSX-rendering
+  test covering every declared touch action. Explicitly disabling touch controls
+  persists on touch devices, and touch look respects ADS sensitivity.
+- Occupied-key remapping swaps the two actions atomically and explains that
+  behavior in settings, instead of silently normalizing away the user's choice.
+- Spectator target buttons accept pointer input and have 44px minimum heights.
+  An on-screen Return to Lobby button remains available with the HUD hidden.
+  Spectator shortcuts precede voice handling, ignore repeat, and hidden HUD state
+  no longer leaks into ordinary play.
+- Final affected gameplay/input/rendering suites: **148/148 passed**. Full server
+  suite: **110/110 passed**. Rendered HTML: **1/1 passed**. Typecheck and production
+  build passed. The full game
+  suite was not repeated after the preceding map pass; verification here targets
+  the changed systems. Existing large-client-chunk build warning remains.
+- No browser/device interaction playtest, commit or production restart performed.
+  Pause-dialog focus management and remaining hardcoded remapped-key HUD prompts
+  were identified by the audit but are outside this batch.
+
+## Map layout repairs - 2026-09-13 (unreleased)
+
+- Generated layouts now include short doorway and tunnel navigation chains and
+  a 4m scaffold. Required placements must have actual bidirectional walking
+  connections to retained navigation, not merely a nearby node across a wall.
+- Frost Gate, Titan Valley and Convoy Line base doors face inward. Frost Gate's
+  central approach is protected from solid props; Riverbend and Catacombs tunnel
+  approaches are realigned. Forge workshop spawns connect through their doors.
+- Final generated placement repair uses triangulated runtime terrain, includes
+  decks, walls and late-added cover, repairs flags, and rejects exhausted repairs.
+  Slagworks' ground objective is outside its deck-enclosed pocket.
+- Automatic team supplies and cover have mirrored partners. Exchange, Foundry
+  and Crosswire have explicit mirrored team spawn pools; Crosswire KOTH uses the
+  north objective rather than favoring the west team through array-order ties.
+- Launchpad launchers clear the reactor and land opposite their source, with
+  authored bot links and sampled physical flight tests at 60/120/240 Hz.
+  Launchpad, Citadel, Ironfall, Skybreak and Aether pickups/landing positions were
+  cleared of navigation margins and solids. Skybreak/Aether authored spawn pools
+  no longer depend on runtime emergency relocation to escape walls.
+- Runtime payload routes follow clearance-validated walking edges and ground
+  height, including Blood Gulch's hill and Convoy Line's obstacles. Checkpoints
+  remain independent of path bends. Ironfall Megastructure and Longreach Plateau
+  no longer advertise Payload because their crossings require launchers over void.
+- Verified routes are cached for immutable runtime navigation identities, with
+  independent per-match mutable state. Warm Riverbend/Convoy Match setup measured
+  roughly 7-21ms instead of 1-1.7s; first-use route validation is still synchronous.
+- `game/map-layout.test.mjs`: 34 maps, 255 supported map/mode combinations,
+  10,258 placement inspections deduplicated to 976 distinct positions. Checks
+  original spawn pools and final actors, objectives, flags and pickups against
+  support, clearance, exact walking connectors and outward/return graph reach.
+- `game/payload-layout.test.mjs`: all 19 advertised payload maps pass continuous
+  ground/clearance and grounded-escort delivery checks; obstacle, curved-ground,
+  disconnected-route and cache-isolation fixtures are included.
+- Final gates: full game **734/734**, server **110/110**, rendered HTML **1/1**;
+  `npm run typecheck`, production build and whitespace checks passed. Build still
+  reports a large-client-chunk warning. No service restart or deployment performed.
+- Limits: no browser/WebGL playthrough, statistical side-swapped win-rate study,
+  or exhaustive vehicle swept-volume audit. Resource/spawn symmetry and connected
+  objectives address structural advantages, not proof of complete combat balance.
+
 ## Bug-fix pass 2.61 - 2026-09-12
 
 Three parallel read-only audits of the new features, input/UI wiring and core

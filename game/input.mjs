@@ -45,11 +45,11 @@ export function controlsFromState(state = {}) {
   const right = analog ? Math.max(-1, Math.min(1, move.x)) : (held('right') ? 1 : 0) - (held('left') ? 1 : 0);
   const yaw = Number.isFinite(state.yaw) ? state.yaw : Number.isFinite(look.yaw) ? look.yaw : 0;
   const pitch = Number.isFinite(state.pitch) ? state.pitch : Number.isFinite(look.pitch) ? look.pitch : 0;
-  const controls = { x: -Math.sin(yaw) * forward + Math.cos(yaw) * right, z: -Math.cos(yaw) * forward - Math.sin(yaw) * right, yaw, pitch, fire: state.fire === true || state.fireTap === true };
+  const controls = { x: -Math.sin(yaw) * forward + Math.cos(yaw) * right, z: -Math.cos(yaw) * forward - Math.sin(yaw) * right, yaw, pitch, fire: state.fire === true || state.touch?.fire === true || state.fireTap === true };
   const { sprint, crouch } = posture(codes, bindings);
   if (sprint || state.sprint === true) controls.sprint = true;
   if (crouch || state.crouch === true) controls.crouch = true;
-  if (state.ads) controls.ads = true;
+  if (state.ads || state.touch?.ads === true) controls.ads = true;
   if (state.reload) controls.reload = true;
   // Holding jump auto-hops: the buffer re-arms on every landing frame.
   if (state.jump || held('jump')) controls.jump = true;

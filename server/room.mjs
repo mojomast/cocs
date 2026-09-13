@@ -159,7 +159,8 @@ export class Room {
   const mapId = resolveMapForMode(this.mapId, mode, { legacy: true });
   if (mapId !== this.mapId) this.mapId = mapId;
   const humanCount = Math.min(PLAYER_LIMIT, players.length);
-   this.match = new Match('chatgpt', 'openclaw', this.random, this.mapId, { ...this.config ?? {}, humanCount, loadouts: players.map(p => { const profile = this.progression?.get(p.playerId); return { character: p.character, harness: p.harness, gear: profile?.gear, attachments: profile?.attachments }; }) });
+    this.match = new Match('chatgpt', 'openclaw', this.random, this.mapId, { ...this.config ?? {}, humanCount, loadouts: players.map(p => { const profile = this.progression?.get(p.playerId); return { character: p.character, harness: p.harness, gear: profile?.gear, attachments: profile?.attachments }; }) });
+   if (this.match.race) this.config = { ...this.match.config };
   let i = 0;
    for (const p of players) { p.actorId = i; this.match.actors[i].name = p.name; p.latest = null; p.receivedSeq = p.latestSeq = p.appliedSeq = 0; p.lastSerial = 0; p.edgeJump = p.edgePower = p.edgeInteract = false; p.lastJump = p.lastPower = p.lastInteract = false; p.edgeMelee = p.lastMelee = false; p.edgeReload = p.lastReload = false; p.edgeGrenade = false; p.lastGrenade = false; i++; }
    for (const p of this.peers.values()) { p.edgeFire = false; p.edgeReload = p.lastReload = false; p.edgeGrenade = false; p.lastGrenade = false; if (p.spectate) p.lastSerial = 0; }
@@ -187,7 +188,8 @@ export class Room {
    peer.receivedSeq = seq;
     const axis = value => { const n = Number(value); return Number.isFinite(n) ? Math.max(-1, Math.min(1, n)) : 0; };
     const x = axis(i.x), z = axis(i.z);
-    const ext = { x, z, fire: i.fire === true };
+     const ext = { x, z, fire: i.fire === true };
+   if (this.match.race) Object.assign(ext, { jump: i.jump === true, power: i.power === true, interact: i.interact === true });
   if (Number.isFinite(i.yaw)) ext.yaw = i.yaw;
   if (Number.isFinite(i.pitch)) ext.pitch = Math.max(-1.45, Math.min(1.45, i.pitch));
   if (Number.isInteger(i.weapon)) ext.weapon = i.weapon;
@@ -196,12 +198,12 @@ export class Room {
   if (i.ads === true) ext.ads = true;
     peer.latest = ext;
     peer.latestSeq = seq;
-   if (ext.fire) peer.edgeFire = true;
-  if (i.jump === true && !peer.lastJump) peer.edgeJump = true;
+    if (ext.fire && !this.match.race) peer.edgeFire = true;
+   if (i.jump === true && !peer.lastJump && !this.match.race) peer.edgeJump = true;
   peer.lastJump = i.jump === true;
-   if (i.power === true && !peer.lastPower) peer.edgePower = true;
+    if (i.power === true && !peer.lastPower && !this.match.race) peer.edgePower = true;
    peer.lastPower = i.power === true;
-   if (i.interact === true && !peer.lastInteract) peer.edgeInteract = true;
+    if (i.interact === true && !peer.lastInteract && !this.match.race) peer.edgeInteract = true;
    peer.lastInteract = i.interact === true;
    if (i.reload === true && !peer.lastReload) peer.edgeReload = true;
    peer.lastReload = i.reload === true;
@@ -344,7 +346,7 @@ export class Room {
       this.roundOver = true;
       const result = this.match.snapshot();
       const mode = this.match.config.mode;
-      try { this.history?.record({ roomId: this.id, mapId: this.match.arena.id, config: this.match.config, time: this.match.time, actors: result.actors, teamScores: result.teamScores, winner: result.winner, endingReason: result.overReason ?? null }); }
+       try { this.history?.record({ roomId: this.id, mapId: this.match.arena.id, config: this.match.config, time: this.match.time, actors: result.actors, teamScores: result.teamScores, winner: result.winner, endingReason: result.overReason ?? null, result }); }
       catch (error) { this.lastPersistError = error; }
       if (this.progression) {
        for (const p of this.peers.values()) {

@@ -42,12 +42,14 @@ const frostGate = createLevel({
   layout(ctx, rng) {
     ctx.teamSpawns = { 0: [[-38, -16], [-38, 16], [-46, -22], [-46, 22]], 1: [[38, 16], [38, -16], [46, 22], [46, -22]] };
     ctx.flagSpawns = { 0: { x: -48, z: 0 }, 1: { x: 48, z: 0 } };
-    ctx.addBuilding({ x: -48, z: 0, w: 16, d: 18, h: 7, rot: Math.PI / 2, roof: 'gable', door: 'east', floors: 1, color: '#cfe8ff' });
-    ctx.addBuilding({ x: 48, z: 0, w: 16, d: 18, h: 7, rot: -Math.PI / 2, roof: 'gable', door: 'west', floors: 1, color: '#cfe8ff' });
-    ctx.addTunnel([[-38, undefined, 0], [-14, undefined, 0], [14, undefined, 0], [38, undefined, 0]], 3.2);
+    ctx.addBuilding({ x: -48, z: 0, w: 16, d: 18, h: 7, rot: Math.PI / 2, roof: 'gable', door: 'north', floors: 1, color: '#cfe8ff' });
+    ctx.addBuilding({ x: 48, z: 0, w: 16, d: 18, h: 7, rot: -Math.PI / 2, roof: 'gable', door: 'north', floors: 1, color: '#cfe8ff' });
+    ctx.addTunnel([[-34, undefined, 0], [-14, undefined, 0], [14, undefined, 0], [34, undefined, 0]], 3.2);
     ctx.addCavern({ x: 0, z: -20, radius: 13, height: 9 });
-    ring(ctx, 0, 0, 26, 10, (c, x, z) => c.addRock({ x, z, scale: 1.4 + rng() * 1.2 }));
-    scatter(ctx, 22, rng, 8, (c, x, z) => (rng() > .45 ? c.addTree({ x, z, scale: .9 + rng() * .6 }) : c.addRock({ x, z, scale: .7 + rng() * .6 })));
+    // Reserve the tunnel and both mouths, including each prop's collision extent.
+    const outsideTunnel = (x, z, radius) => Math.abs(x) > 40 + radius || Math.abs(z) > 3.2 + radius;
+    ring(ctx, 0, 0, 26, 10, (c, x, z) => { const scale = 1.4 + rng() * 1.2; if (outsideTunnel(x, z, scale)) c.addRock({ x, z, scale }); });
+    scatter(ctx, 22, rng, 8, (c, x, z) => { const tree = rng() > .45, scale = tree ? .9 + rng() * .6 : .7 + rng() * .6; if (outsideTunnel(x, z, tree ? .25 : scale)) (tree ? c.addTree : c.addRock)({ x, z, scale }); });
     ctx.addObjective(-30, 0, 3.5); ctx.addObjective(0, 0, 4); ctx.addObjective(30, 0, 3.5);
     ctx.addPickup('rail', 0, 22); ctx.addPickup('rocket', -18, -18); ctx.addPickup('rocket', 18, 18); ctx.addPickup('health', -48, 12); ctx.addPickup('health', 48, -12); ctx.addPickup('armor', 0, -20);
   },
@@ -80,7 +82,7 @@ const riverbend = createLevel({
     ctx.teamSpawns = { 0: [[-44, -22], [-44, 22], [-36, -18]], 1: [[44, 22], [44, -22], [36, 18]] };
     const towns = [[-34, 0, 12, 10], [-14, -26, 10, 9], [14, 26, 10, 9], [34, 0, 12, 10], [-4, 0, 9, 8], [12, -6, 8, 8], [-16, 10, 8, 8]];
     for (const [x, z, w, d] of towns) ctx.addBuilding({ x, z, w, d, h: 5.5, rot: rng() > .5 ? 0 : Math.PI / 2, roof: 'gable', door: rng() > .5 ? 'south' : 'west', floors: 1 });
-    ctx.addTunnel([[-46, undefined, 0], [-20, undefined, 0], [20, undefined, 0], [46, undefined, 0]], 3);
+    ctx.addTunnel([[-46, undefined, -12], [-20, undefined, -12], [20, undefined, -12], [46, undefined, -12]], 3);
     scatter(ctx, 14, rng, 10, (c, x, z) => c.addCrate({ x, z, scale: .8 + rng() * .5 }));
     ctx.addObjective(-30, 0, 5); ctx.addObjective(0, 0, 5); ctx.addObjective(30, 0, 5);
     ctx.addPickup('rocket', 0, -30); ctx.addPickup('rocket', 0, 30); ctx.addPickup('rail', -30, -20); ctx.addPickup('rail', 30, 20); ctx.addPickup('health', -8, 0); ctx.addPickup('armor', 8, 0);
@@ -130,7 +132,8 @@ const catacombs = createLevel({
   layout(ctx, rng) {
     const hubs = [[-26, -26], [26, -26], [26, 26], [-26, 26], [0, 0]];
     for (const [x, z] of hubs) ctx.addCavern({ x, z, radius: 10, height: 7 });
-    for (let i = 0; i < hubs.length; i++) for (let j = i + 1; j < hubs.length; j++) { if ((i + j) % 2) continue; ctx.addTunnel([[hubs[i][0], undefined, hubs[i][1]], [hubs[j][0], undefined, hubs[j][1]]], 2.4); }
+    // East/west crypt openings must meet the lanes, not diagonal solid walls.
+    for (const z of [-26, 0, 26]) ctx.addTunnel([[-40, undefined, z], [40, undefined, z]], 2.4);
     scatter(ctx, 16, rng, 8, (c, x, z) => c.addRuin({ x, z, scale: .7 + rng() * .6 }));
     ctx.addObjective(0, 0, 4); ctx.addObjective(-26, -26, 3.5); ctx.addObjective(26, 26, 3.5);
     for (const [x, z] of [[-40, 0], [40, 0], [0, -40], [0, 40], [-40, -40], [40, -40], [-40, 40], [40, 40]]) ctx.addSpawn(x, z);
@@ -149,7 +152,7 @@ const slagworks = createLevel({
     ctx.addBridge({ x: 0, z: 0, y: 5, w: 40, d: 4, rot: Math.PI / 2, thickness: .5 });
     ring(ctx, 0, 0, 9, 6, (c, x, z) => c.addRock({ x, z, scale: 1.2 }));
     scatter(ctx, 14, rng, 10, (c, x, z) => c.addBarrel({ x, z, scale: .9 + rng() * .4 }));
-    ctx.addObjective(-24, 0, 3.5); ctx.addObjective(0, 0, 4); ctx.addObjective(24, 0, 3.5);
+    ctx.addObjective(-24, 0, 3.5); ctx.addObjective(0, 24, 4); ctx.addObjective(24, 0, 3.5);
     ctx.addPickup('rocket', -30, -20); ctx.addPickup('rocket', 30, 20); ctx.addPickup('rocket', 0, -30); ctx.addPickup('rocket', 0, 30); ctx.addPickup('health', -12, 0); ctx.addPickup('armor', 12, 0);
   },
 });
@@ -177,8 +180,8 @@ const titanValley = createLevel({
   description: 'A vast mixed-arms basin: rolling terrain, fortified bunkers, a central tunnel and armour lanes for Pumas and Hornets.',
   layout(ctx, rng) {
     ctx.teamSpawns = { 0: [[-60, -20], [-60, 0], [-60, 20], [-50, 34], [-50, -34]], 1: [[60, -20], [60, 0], [60, 20], [50, 34], [50, -34]] };
-    ctx.addBuilding({ x: -60, z: 0, w: 20, d: 24, h: 8, rot: Math.PI / 2, roof: 'flat', door: 'east', doorWidth: 3.4, floors: 1 });
-    ctx.addBuilding({ x: 60, z: 0, w: 20, d: 24, h: 8, rot: -Math.PI / 2, roof: 'flat', door: 'west', doorWidth: 3.4, floors: 1 });
+    ctx.addBuilding({ x: -60, z: 0, w: 20, d: 24, h: 8, rot: Math.PI / 2, roof: 'flat', door: 'north', doorWidth: 3.4, floors: 1 });
+    ctx.addBuilding({ x: 60, z: 0, w: 20, d: 24, h: 8, rot: -Math.PI / 2, roof: 'flat', door: 'north', doorWidth: 3.4, floors: 1 });
     for (const [x, z] of [[-28, -30], [28, 30], [-28, 30], [28, -30]]) { ctx.addBuilding({ x, z, w: 12, d: 12, h: 4.5, roof: 'flat', door: 'south', floors: 1 }); ctx.addRock({ x: x + 8, z: z + 8, scale: 1.6 }); }
     ctx.addTunnel([[-24, undefined, 0], [-12, undefined, 5], [12, undefined, -5], [24, undefined, 0]], 3.4);
     ctx.addCavern({ x: 0, z: -30, radius: 12, height: 11 });
@@ -198,8 +201,8 @@ const convoyLine = createLevel({
   description: 'A long industrial convoy route. Attackers push the cart from a western depot, across a central bridge and tunnel, to the eastern fuel yard.',
   layout(ctx, rng) {
     ctx.teamSpawns = { 0: [[-66, -12], [-66, 12], [-72, -24], [-72, 24]], 1: [[66, 12], [66, -12], [72, 24], [72, -24]] };
-    ctx.addBuilding({ x: -64, z: 0, w: 18, d: 18, h: 6, rot: Math.PI / 2, roof: 'flat', door: 'east', doorWidth: 3.4, floors: 1 });
-    ctx.addBuilding({ x: 64, z: 0, w: 18, d: 18, h: 7, rot: -Math.PI / 2, roof: 'gable', door: 'west', doorWidth: 3.4, floors: 1 });
+    ctx.addBuilding({ x: -64, z: 0, w: 18, d: 18, h: 6, rot: Math.PI / 2, roof: 'flat', door: 'north', doorWidth: 3.4, floors: 1 });
+    ctx.addBuilding({ x: 64, z: 0, w: 18, d: 18, h: 7, rot: -Math.PI / 2, roof: 'gable', door: 'north', doorWidth: 3.4, floors: 1 });
     for (const [x, z] of [[-36, -20], [-36, 20], [-8, -24], [-8, 24], [22, -20], [22, 20], [46, -22], [46, 22]]) ctx.addBuilding({ x, z, w: 11, d: 9, h: 5, rot: rng() > .5 ? 0 : Math.PI / 2, roof: 'flat', door: rng() > .5 ? 'south' : 'north', floors: 1 });
     ctx.addTunnel([[-48, undefined, 0], [-18, undefined, 0], [18, undefined, 0], [48, undefined, 0]], 3.2);
     ctx.addBridge({ x: 0, z: 0, y: ctx.ground(0, 0) + 1.4, w: 16, d: 10, rot: 0, thickness: .5 });

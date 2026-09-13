@@ -5,6 +5,10 @@ import {teamMode} from './config.mjs';
 // frag modes award everyone tied on the highest frag count (existing behavior).
 export function actorWon(result, mode, actor) {
   if (!result || !actor) return false;
+  if (mode === 'puma-race') {
+    const winner = result.race?.winnerId ?? result.winner;
+    return winner !== null && winner !== undefined && winner === actor.id;
+  }
   if (teamMode(mode)) return result.winner !== null && result.winner !== undefined && result.winner === actor.team;
   const frags = (result.actors ?? []).map(item => Number(item.frags) || 0);
   const max = frags.length ? Math.max(...frags) : 0;

@@ -1,6 +1,24 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {DEFAULT_BINDINGS, KEYBIND_ACTIONS, KEYBIND_OPTIONS, actionForCode, bindingConflicts, normalizeBindings} from './keybinds.mjs';
+import {DEFAULT_BINDINGS, KEYBIND_ACTIONS, KEYBIND_OPTIONS, actionForCode, bindingConflicts, normalizeBindings, rebindAction} from './keybinds.mjs';
+
+test('explicit rebinding swaps occupied keys regardless of action order', () => {
+  for (const [action, occupied] of [['forward', 'back'], ['back', 'forward']]) {
+    const original = {...DEFAULT_BINDINGS};
+    const rebound = rebindAction(original, action, original[occupied]);
+    assert.deepEqual(rebound, {...original, [action]:original[occupied], [occupied]:original[action]});
+    assert.deepEqual(original, DEFAULT_BINDINGS, 'does not mutate input');
+    assert.deepEqual(bindingConflicts(rebound), []);
+    assert.deepEqual(normalizeBindings(rebound), rebound, 'UI normalization preserves the swap');
+  }
+});
+
+test('rebinding accepts free keys and ignores invalid actions or reserved keys', () => {
+  assert.deepEqual(rebindAction(DEFAULT_BINDINGS, 'jump', 'ArrowUp'), {...DEFAULT_BINDINGS, jump:'ArrowUp'});
+  assert.deepEqual(rebindAction(DEFAULT_BINDINGS, 'unknown', 'ArrowUp'), DEFAULT_BINDINGS);
+  assert.deepEqual(rebindAction(DEFAULT_BINDINGS, 'jump', 'Tab'), DEFAULT_BINDINGS);
+  assert.deepEqual(rebindAction(DEFAULT_BINDINGS, 'jump', 'Space'), DEFAULT_BINDINGS);
+});
 
 test('bindings normalize to valid defaults and reject junk', () => {
   assert.deepEqual(normalizeBindings(null), {...DEFAULT_BINDINGS});

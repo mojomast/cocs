@@ -1,6 +1,32 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {hasAmmo, cycleWeapon, blocksGameplay, posture, controlsFromState, INPUT_CODES} from './input.mjs';
+import {applyTouchAction} from './touch.mjs';
+
+test('mouse and touch holds are independent and short touch taps survive release', () => {
+  const state = {fire:true, ads:true, fireTap:false};
+  applyTouchAction(state, 'fire', true);
+  applyTouchAction(state, 'ads', true);
+  applyTouchAction(state, 'fire', false);
+  applyTouchAction(state, 'ads', false);
+  state.fireTap = false;
+  assert.equal(controlsFromState(state).fire, true, 'touch release preserves mouse fire');
+  assert.equal(controlsFromState(state).ads, true, 'touch release preserves mouse ADS');
+  applyTouchAction(state, 'fire', true);
+  applyTouchAction(state, 'ads', true);
+  state.fire = state.ads = state.fireTap = false;
+  assert.equal(controlsFromState(state).fire, true, 'mouse release preserves touch fire');
+  assert.equal(controlsFromState(state).ads, true, 'mouse release preserves touch ADS');
+  applyTouchAction(state, 'fire', false);
+  applyTouchAction(state, 'ads', false);
+  assert.equal(controlsFromState(state).fire, false);
+  assert.equal(controlsFromState(state).ads, undefined);
+  applyTouchAction(state, 'fire', true);
+  applyTouchAction(state, 'fire', false);
+  assert.equal(controlsFromState(state).fire, true, 'tap survives until consumed');
+  state.fireTap = false;
+  assert.equal(controlsFromState(state).fire, false);
+});
 
 test('cycling accepts live and serialized unlimited ammo, skips empty slots and wraps', () => {
   assert.equal(hasAmmo(Infinity), true);

@@ -1,6 +1,8 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { GAME_MODES } from "../game/config.mjs";
+import {readFile} from 'node:fs/promises';
+import {linkedAssets} from '../scripts/verify-deployment.mjs';
 
 const developmentPreviewMeta =
   /<meta(?=[^>]*\bname=["']codex-preview["'])(?=[^>]*\bcontent=["']development["'])[^>]*>/i;
@@ -31,6 +33,13 @@ test("serves the game selection screen without starter metadata", async () => {
     /^text\/html\b/i,
   );
   const html = await response.text();
+  const assets = linkedAssets(html);
+  assert.ok(assets.some(path => path.endsWith('.css')));
+  assert.ok(assets.some(path => path.endsWith('.js')));
+  for (const path of assets) {
+    const content = await readFile(new URL(`../dist/client${path}`, import.meta.url), 'utf8');
+    assert.ok(content.length, `${path} exists in this build`);
+  }
   assert.doesNotMatch(html, developmentPreviewMeta);
   assert.match(html, /Colosseum Of Competitive Slop|COCS/);
   assert.match(html, /Choose your intelligence/);

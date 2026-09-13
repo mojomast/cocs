@@ -4,6 +4,7 @@ import {Match} from './core.mjs';
 import {payloadTemplate,payloadPath,payloadPosition,payloadProgress,stepPayload} from './payload.mjs';
 import {getMap} from './maps.mjs';
 import {GAME_MODES,normalizeConfig} from './config.mjs';
+import {arenaSupportsMode,mapsForMode,resolveMapForMode} from './arenas.mjs';
 const rng=()=>.5;
 
 test('payload config exposes the mode with sane checkpoint limits',()=>{
@@ -11,6 +12,22 @@ test('payload config exposes the mode with sane checkpoint limits',()=>{
  assert.equal(normalizeConfig({mode:'payload'}).fragLimit,3);
  assert.equal(normalizeConfig({mode:'payload',fragLimit:9}).fragLimit,6);
  assert.equal(normalizeConfig({mode:'payload',fragLimit:0}).fragLimit,1);
+});
+
+test('launcher-only island maps remain available for combat but not payload selection',()=>{
+ for(const id of ['ironfall-megastructure','longreach-plateau']){
+  assert.equal(arenaSupportsMode(id,'payload'),false,id);
+  for(const mode of ['ctf','teamdeathmatch','deathmatch','koth','domination','combined-arms']){
+   assert.equal(arenaSupportsMode(id,mode),true,`${id} retains ${mode}`);
+   assert.equal(resolveMapForMode(id,mode),id);
+  }
+  for(const legacy of [false,true]){
+   assert.ok(!mapsForMode('payload',{legacy}).some(map=>map.id===id));
+   const replacement=resolveMapForMode(id,'payload',{legacy});
+   assert.notEqual(replacement,id);
+   assert.equal(arenaSupportsMode(replacement,'payload'),true);
+  }
+ }
 });
 
 test('payload template builds an anchored route with ordered checkpoints',()=>{
@@ -75,7 +92,7 @@ test('delivery reaches the total distance and declares the attacker winner',()=>
 });
 
 test('payload matches run to completion on supported arenas and publish a payload snapshot',()=>{
- for(const id of ['launchpad','sunscar-canyon','ironfall-megastructure','warfront','riverbend']){
+  for(const id of ['launchpad','sunscar-canyon','convoy-line','warfront','riverbend']){
   const match=new Match('chatgpt','openclaw',rng,id,{mode:'payload',botCount:2,timeLimit:60,fragLimit:3});
   const participants=match.actors.length;
   for(let i=0;i<3721&&!match.over;i++)match.step(1/60);

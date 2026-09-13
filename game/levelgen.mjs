@@ -13,6 +13,8 @@
 // authored layout change.
 
 import {cavernOpening} from './structures.mjs';
+import {terrainSupportAt, terrainWallSegments} from './terrain.mjs';
+import {RULES} from './data.mjs';
 
 export function mulberry32(seed) {
   let a = (seed >>> 0) || 0x6d2b79f5;
@@ -170,6 +172,13 @@ export function createLevel(spec) {
     }
     for (let f = 1; f < floors; f++) { const yy = baseY + f * (h / floors); const [fx, fz] = rotateLocal(0, 0, q); ctx.addBlock({ x: x + fx, z: z + fz, w: w - wall, d: d - wall, h: yy, kind: 'floor' }); }
     ctx.addStructure({ type: 'building', x, z, y: baseY, w, d, h, rot, roof, color, windows, floors, door });
+    // Follow the actual local doorway through its quarter-turn, not the wall
+    // nearest the map centre. Short steps preserve narrow entrances in nav.
+    if (sides[door]) {
+      const [dx, dz] = sides[door], length = Math.hypot(dx, dz);
+      const [nx, nz] = rotateLocal(dx / length, dz / length, q);
+      for (let t = 0; t <= length + 4; t += 1.5) ctx.addNav(x + nx * t, z + nz * t);
+    }
     if (windows) for (const name of Object.keys(sides)) { if (name === door) continue; const [cx, cz] = sides[name]; const [rx, rz] = rotateLocal(cx, cz, q); ctx.addStructure({ type: 'windows', x: x + rx, z: z + rz, y: baseY + h * 0.45, w: (name === 'north' || name === 'south') ? w : d, rot, rows: Math.max(1, Math.floor(h / 3)) }); }
     return x;
   };
@@ -185,6 +194,7 @@ export function createLevel(spec) {
       const nx = Math.cos(along), nz = -Math.sin(along), count = Math.max(1, Math.ceil(len / 1.2));
       for (let k = 0; k <= count; k++) {
         const t = k / count, px = a[0] + dx * t, pz = a[2] + dz * t, py = a[1] + dy * t;
+        ctx.addNav(px, pz);
         for (const side of [-1, 1]) ctx.addBlock({ x: px + nx * side * radius, z: pz + nz * side * radius, w: 1.6, d: 1.6, h: py + radius + 1.4, kind: 'tunnel' });
       }
     }
@@ -207,9 +217,10 @@ export function createLevel(spec) {
   ctx.addArch = (o) => ctx.addStructure({ type: 'arch', ...o });
   ctx.addColumn = (o) => { ctx.addStructure({ type: 'column', ...o }); if (o.collide !== false) ctx.addBlock({ x: o.x, z: o.z, w: (o.radius ?? 0.6) * 2, d: (o.radius ?? 0.6) * 2, h: (o.y ?? terrain.height(o.x, o.z)) + (o.height ?? 5), kind: 'column' }); };
   ctx.addBridge = (o) => { ctx.addStructure({ type: 'bridge', ...o }); const q = quarter(o.rot ?? 0), [w, d] = q % 2 === 0 ? [o.w, o.d] : [o.d, o.w]; ctx.addBlock({ x: o.x, z: o.z, w, d, h: (o.y ?? terrain.height(o.x, o.z)) + (o.thickness ?? 0.4), kind: 'deck' }); };
-  ctx.addRock = (o = {}) => { const x = o.x, z = o.z, s = o.scale ?? 1; ctx.addProp({ type: 'rock', x, z, y: o.y ?? terrain.height(x, z), scale: s, seed: Math.floor(rng() * 1e6) }); if (o.collide !== false && s > 0.8) ctx.addBlock({ x, z, w: s * 2, d: s * 2, h: (o.y ?? terrain.height(x, z)) + s * 1.4, kind: 'rock' }); };
-  ctx.addTree = (o = {}) => { const x = o.x, z = o.z, s = o.scale ?? 1; ctx.addProp({ type: 'tree', x, z, y: o.y ?? terrain.height(x, z), scale: s, seed: Math.floor(rng() * 1e6) }); if (o.collide !== false) ctx.addBlock({ x, z, w: .5, d: .5, h: (o.y ?? terrain.height(x, z)) + 2.4, kind: 'tree' }); };
-  ctx.addCrate = (o = {}) => { const x = o.x, z = o.z, s = o.scale ?? 1; ctx.addProp({ type: 'crate', x, z, y: o.y ?? terrain.height(x, z), scale: s }); if (o.collide !== false) ctx.addBlock({ x, z, w: s * 1.4, d: s * 1.4, h: (o.y ?? terrain.height(x, z)) + s * 1.4, kind: 'crate' }); };
+  const blocksApproach = (x, z, radius) => ctx.navNodes.some(p => Math.abs(x - p.x) < radius + 1 && Math.abs(z - p.z) < radius + 1);
+  ctx.addRock = (o = {}) => { const x = o.x, z = o.z, s = o.scale ?? 1, seed = Math.floor(rng() * 1e6); if (o.collide !== false && s > .8 && blocksApproach(x, z, s)) return; ctx.addProp({ type: 'rock', x, z, y: o.y ?? terrain.height(x, z), scale: s, seed }); if (o.collide !== false && s > 0.8) ctx.addBlock({ x, z, w: s * 2, d: s * 2, h: (o.y ?? terrain.height(x, z)) + s * 1.4, kind: 'rock' }); };
+  ctx.addTree = (o = {}) => { const x = o.x, z = o.z, s = o.scale ?? 1, seed = Math.floor(rng() * 1e6); if (o.collide !== false && blocksApproach(x, z, .25)) return; ctx.addProp({ type: 'tree', x, z, y: o.y ?? terrain.height(x, z), scale: s, seed }); if (o.collide !== false) ctx.addBlock({ x, z, w: .5, d: .5, h: (o.y ?? terrain.height(x, z)) + 2.4, kind: 'tree' }); };
+  ctx.addCrate = (o = {}) => { const x = o.x, z = o.z, s = o.scale ?? 1; if (o.collide !== false && blocksApproach(x, z, s * .7)) return; ctx.addProp({ type: 'crate', x, z, y: o.y ?? terrain.height(x, z), scale: s }); if (o.collide !== false) ctx.addBlock({ x, z, w: s * 1.4, d: s * 1.4, h: (o.y ?? terrain.height(x, z)) + s * 1.4, kind: 'crate' }); };
   ctx.addBarrel = (o = {}) => { const x = o.x, z = o.z; ctx.addProp({ type: 'barrel', x, z, y: o.y ?? terrain.height(x, z), scale: o.scale ?? 1 }); };
   ctx.addRuin = (o = {}) => ctx.addProp({ type: 'ruin', x: o.x, z: o.z, y: o.y ?? terrain.height(o.x, o.z), scale: o.scale ?? 1, rot: o.rot ?? 0, seed: Math.floor(rng() * 1e6) });
 
@@ -221,57 +232,67 @@ export function createLevel(spec) {
   }
   if (ctx.teamSpawns[0].length && !ctx.teamSpawns[1].length) ctx.teamSpawns[1] = ctx.teamSpawns[0].map(([x, z]) => [-x, -z]);
   if (!ctx.objectiveZones.length) ctx.objectiveZones = [{ x: 0, z: 0, radius: 4, y: terrain.height(0, 0) }, { x: -size.w * 0.25, z: 0, radius: 3.5, y: terrain.height(-size.w * 0.25, 0) }, { x: size.w * 0.25, z: 0, radius: 3.5, y: terrain.height(size.w * 0.25, 0) }];
-  // Capture points must sit on standable ground. Nudge any zone that landed
-  // inside a non-deck solid (rock, building) to the nearest clear spot. Decks
-  // (bridges/catwalks) are excluded so objectives may sit on the raised centre
-  // platforms layouts author.
-  const blockedObjective = (x, z, r) => { const y = terrain.height(x, z); return ctx.blocks.some(b => b.kind !== 'deck' && Math.abs(x - b.x) < b.w / 2 + r && Math.abs(z - b.z) < b.d / 2 + r && y < b.h - 1e-6); };
-  for (const zone of ctx.objectiveZones) {
-    for (let ring = 1; ring <= 16 && blockedObjective(zone.x, zone.z, 0.6); ring++) for (let a = 0; a < 8; a++) {
-      const nx = zone.x + Math.cos(a / 8 * Math.PI * 2) * ring, nz = zone.z + Math.sin(a / 8 * Math.PI * 2) * ring;
-      if (nx > bounds.minX + 1 && nx < bounds.maxX - 1 && nz > bounds.minZ + 1 && nz < bounds.maxZ - 1 && !blockedObjective(nx, nz, 0.6)) { zone.x = nx; zone.z = nz; zone.y = terrain.height(nx, nz); break; }
-    }
-  }
+  const teamMap = ctx.teamSpawns[0].length > 0;
   // Scatter low cover near the action so lanes read and the turbo-jump cover
   // behaviour has anchors on every generated map.
   if (!ctx.blocks.some(b => b.kind === 'cover')) {
-    const coverPoints = [...(ctx.spawns.length ? ctx.spawns : Object.values(ctx.teamSpawns).flat()), ...ctx.objectiveZones.map(z => [z.x, z.z])];
-    for (let i = 0; i < Math.min(6, Math.max(1, coverPoints.length)); i++) {
+    const coverPoints = teamMap ? ctx.teamSpawns[0] : [...ctx.spawns, ...ctx.objectiveZones.map(z => [z.x, z.z])];
+    for (let i = 0; i < Math.min(teamMap ? 3 : 6, Math.max(1, coverPoints.length)); i++) {
       const [ax, az] = coverPoints[i % coverPoints.length] || [0, 0];
       const x = clamp(ax + (i % 2 ? 5 : -5), bounds.minX + 3, bounds.maxX - 3), z = clamp(az + (i % 3 ? -4 : 4), bounds.minZ + 3, bounds.maxZ - 3);
+      if (blocksApproach(x, z, 1.5) || (teamMap && blocksApproach(-x, -z, 1.5))) continue;
       ctx.addBlock({ x, z, w: 3, d: 1.4, h: terrain.height(x, z) + 1.9, kind: 'cover' });
+      if (teamMap) ctx.addBlock({ x: -x, z: -z, w: 3, d: 1.4, h: terrain.height(-x, -z) + 1.9, kind: 'cover' });
     }
   }
-  // A walkable navigation scaffold spans the bounds at a coarse resolution.
-  if (!ctx.navNodes.length) {
-    for (let x = bounds.minX + 6; x < bounds.maxX; x += 7) for (let z = bounds.minZ + 6; z < bounds.maxZ; z += 7) ctx.addNav(x, z);
-  }
+  // Supplement authored approach chains; even diagonal grid edges fit walkEdge.
+  for (let x = bounds.minX + 2; x < bounds.maxX; x += 4) for (let z = bounds.minZ + 2; z < bounds.maxZ; z += 4) ctx.addNav(x, z);
   // Guarantee the supplies a match expects (weapon tiers, health/armor and
   // powerups) and place any missing spawn points on supported ground.
   const anchors = [...ctx.objectiveZones.map(z => [z.x, z.z]).sort((a, b) => Math.hypot(a[0], a[1]) - Math.hypot(b[0], b[1])), ...ctx.spawns, ...Object.values(ctx.teamSpawns).flat()];
   const anchor = (i) => anchors.length ? anchors[i % anchors.length] : [0, 0];
+  const pairedSupplies = [];
+  const addSupply = kind => {
+    const [ax, az] = teamMap ? ctx.teamSpawns[0][pairedSupplies.length % ctx.teamSpawns[0].length] : anchor(ctx.pickups.length);
+    ctx.addPickup(kind, ax, az);
+    if (teamMap) { const first = ctx.pickups.at(-1); ctx.addPickup(kind, -ax, -az); pairedSupplies.push([first, ctx.pickups.at(-1)]); }
+  };
   const required = ['rocket', 'rail', 'scatter', 'plasma', 'health', 'armor', 'haste', 'overcharge', 'overshield', 'recon', 'cloak'];
   for (const kind of required) {
     if (ctx.pickups.some(([existing]) => existing === kind)) continue;
-    const [ax, az] = anchor(ctx.pickups.length);
-    ctx.addPickup(kind, ax, az);
+    addSupply(kind);
   }
   const filler = ['grenade', 'shock', 'flak', 'marksman', 'smg', 'health', 'armor'];
-  while (ctx.pickups.length < 16) { const [ax, az] = anchor(ctx.pickups.length); ctx.addPickup(filler[ctx.pickups.length % filler.length], ax, az); }
+  while (ctx.pickups.length < 16) addSupply(filler[ctx.pickups.length % filler.length]);
   // Nudge any supply or spawn clear of collision boxes so matches never start a
   // player or pickup inside a wall.
-  const blockedAt = (x, z, r) => { const y = terrain.height(x, z); return ctx.blocks.some(b => Math.abs(x - b.x) < b.w / 2 + r && Math.abs(z - b.z) < b.d / 2 + r && y < b.h - 1e-6); };
-  const clearSpot = (x, z, r) => {
-    if (!blockedAt(x, z, r)) return [x, z];
+  // Use the same triangulated support and wall segments as runtime, without
+  // importing core (core -> maps -> levelgen). Decks are solids at ground level.
+  const floor = (x, z) => terrainSupportAt(x, z, terrain, terrain.maxSlope ?? .9)?.y ?? null;
+  const blockedAt = (x, z, r) => {
+    if (x < bounds.minX + r || x > bounds.maxX - r || z < bounds.minZ + r || z > bounds.maxZ - r) return true;
+    const y = floor(x, z);
+    return y === null || ctx.blocks.some(b => Math.abs(x - b.x) < b.w / 2 + r && Math.abs(z - b.z) < b.d / 2 + r && y < b.h - 1e-6 && y + RULES.height > 0) || terrainWallSegments(terrain).some(({a, b}) => {
+      const dx = b.x - a.x, dz = b.z - a.z, length = dx * dx + dz * dz;
+      const t = length > 1e-9 ? clamp(((x - a.x) * dx + (z - a.z) * dz) / length, 0, 1) : 0;
+      return y < Math.max(a.y, b.y) - 1e-6 && y + RULES.height > Math.min(a.y, b.y) + 1e-6 && Math.hypot(x - a.x - t * dx, z - a.z - t * dz) < r;
+    });
+  };
+  const clearSpot = (x, z, r, mirrored = false) => {
+    const clear = (x, z) => !blockedAt(x, z, r) && (!mirrored || !blockedAt(-x, -z, r));
+    if (clear(x, z)) return [x, z];
     for (let ring = 1; ring <= 16; ring++) for (let a = 0; a < 8; a++) {
       const nx = x + Math.cos(a / 8 * Math.PI * 2) * ring, nz = z + Math.sin(a / 8 * Math.PI * 2) * ring;
-      if (nx > bounds.minX + 1 && nx < bounds.maxX - 1 && nz > bounds.minZ + 1 && nz < bounds.maxZ - 1 && !blockedAt(nx, nz, r)) return [nx, nz];
+      if (clear(nx, nz)) return [nx, nz];
     }
-    return null;
+    throw new Error(`${spec.id}: no clear required placement near ${x},${z}`);
   };
-  for (const p of ctx.pickups) { const spot = clearSpot(p[1], p[2], .5); if (spot) { p[1] = spot[0]; p[2] = spot[1]; } }
+  const paired = new Set(pairedSupplies.flat());
+  for (const [a, b] of pairedSupplies) { const [x, z] = clearSpot(a[1], a[2], .65, true); a[1] = x; a[2] = z; b[1] = -x; b[2] = -z; }
+  for (const p of ctx.pickups) if (!paired.has(p)) { const spot = clearSpot(p[1], p[2], .65); p[1] = spot[0]; p[2] = spot[1]; }
   for (const s of ctx.spawns) { const spot = clearSpot(s[0], s[1], .6); if (spot) { s[0] = spot[0]; s[1] = spot[1]; } }
   for (const team of [0, 1]) for (const s of ctx.teamSpawns[team]) { const spot = clearSpot(s[0], s[1], .6); if (spot) { s[0] = spot[0]; s[1] = spot[1]; } }
+  for (const zone of ctx.objectiveZones) { [zone.x, zone.z] = clearSpot(zone.x, zone.z, .65); zone.y = floor(zone.x, zone.z); }
 
   const map = {
     id: spec.id, name: spec.name, tag: spec.tag, description: spec.description, color: spec.color, background: spec.background,
@@ -289,5 +310,9 @@ export function createLevel(spec) {
     map.flagSpawns = { 0: pair(authoredFlags[0]), 1: pair(authoredFlags[1]) }; map.flags = map.flagSpawns;
   } else if (spec.flagSpawns) { map.flagSpawns = spec.flagSpawns; map.flags = spec.flagSpawns; }
   else if (ctx.teamSpawns[0].length) { map.flagSpawns = { 0: ctx.teamSpawns[0][0], 1: ctx.teamSpawns[1][0] }; }
+  if (map.flagSpawns) {
+    map.flagSpawns = Object.fromEntries(Object.entries(map.flagSpawns).map(([team, point]) => [team, clearSpot(...pair(point), .65)]));
+    map.flags = map.flagSpawns;
+  }
   return map;
 }

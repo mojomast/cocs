@@ -10,6 +10,58 @@ Every operator and harness blurb is affectionate parody — jokes about the vibe
 
 The production build is served at `https://arena.ussyco.de` from this host (nginx → `vinext start` on `127.0.0.1:3000`, with `/ws` proxied to the Node game server on `127.0.0.1:4000`). Both run as `mojo` user systemd units (`token-arena-web.service`, `token-arena-server.service`). After a successful `npm run build`, restart the web unit so it reloads the bundle and asset manifest; restart the game-server unit only when server code changes, since that disconnects active multiplayer clients. See `deploy/README.md` for the full procedure.
 
+## Map layout validation
+
+Run `node --test game/map-layout.test.mjs game/classic-layout.test.mjs game/nextgen-maps.test.mjs game/payload-layout.test.mjs`
+to check authored placements, final runtime objectives, bidirectional navigation
+connections, launcher flights, mirrored team resources, and continuous payload
+escort routes. The registry check covers all 35 maps and all 256 advertised
+map/mode combinations rather than accepting proximity to a node across a wall.
+Ironfall Megastructure and Longreach Plateau retain their launcher-only crossings
+but no longer advertise Payload, which requires a continuous walking route.
+
+## Puma Circuit racing
+
+The main-menu demo now follows an eight-bot Puma race with a chase camera. It
+starts already in motion and automatically begins another race at the finish.
+
+Choose **Puma Circuit** in Match Setup to race the dedicated circuit. Switching
+into the mode selects seven AI rivals by default; choose 0-7 rivals for practice
+or smaller races. Online rooms support up to eight humans, with excess bots
+removed so there are never more than eight racers. Eight Pumas occupy the grid,
+and every racer starts already seated in their assigned driver seat.
+
+- Three-second countdown; three laps by default, configurable from 1 to 10.
+- Twelve directional checkpoint gates prevent skipped laps and reverse-line
+  farming. The first finisher wins; a timeout uses validated race progress.
+- Equal vehicle tuning for everyone. Weapons, harness advantages and combat
+  modifiers are inactive. Cars ghost through each other; item attacks still work.
+- Mystery boxes grant one held item and respawn after eight seconds.
+- **Turbo:** two seconds of extra speed, stackable with the normal chassis boost.
+- **Shield:** five seconds of protection from race items; clears an existing slow.
+- **Oil Slick:** leaves an eight-second hazard behind you that slows opponents.
+- **Homing Pulse:** slows the nearest rival ahead in race progress for two seconds,
+  unless shielded. This is a nonlethal effect, not a combat projectile.
+- Manual checkpoint reset and automatic stuck recovery keep your banked progress,
+  with a two-second stationary reset penalty.
+- Chase camera, live place/lap/checkpoint/time/item HUD, race standings, results,
+  history and winner progression use race data rather than kill counts.
+
+Default controls: **W/S** throttle/reverse, **A/D** steer, **Space or Ctrl**
+handbrake, **Shift** chassis boost, **left click or Q** use item, **E** reset,
+**Tab** standings. Remapped controls are supported. Mobile has dedicated item,
+reset and brake buttons; pushing the joystick fully requests chassis boost.
+
+Multiplayer race vehicles use authoritative interpolated snapshots rather than
+infantry-style local prediction. Reconnect retains the assigned car and race
+state, but input response depends on network latency. No browser/device driving
+playtest has been performed yet.
+
+For this host, deploy with `DEPLOY_VERSION=v2.62 npm run deploy -- --with-game-server`.
+This rebuilds, reloads both services, and checks the public HTML and linked CSS/JS
+assets. Restarting the game service disconnects active players; see
+`deploy/README.md` for web-only deployment and verification commands.
+
 ## Run locally
 
 Requires Node.js 22.13+ and npm. Install with `npm ci`, launch with `npm run dev`, then open the URL printed by Vite. Use `npm run build` for the production Worker build and `npm run start` to serve it. In the managed Sites environment, the supervised preview is started with `sites-preview start /workspace/sites/token-arena`.
