@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {ArenaView,vehicleModel,weaponModel,robotModel,shadowTick} from './view.mjs';
+import {ArenaView,raceTrackModel,vehicleModel,weaponModel,robotModel,shadowTick} from './view.mjs';
+import {RACE_DEMO_MODE_SECONDS} from './race-camera.mjs';
 import {SoftwareRenderer} from './software.mjs';
 import {ModelAssets,CameraShake,MuzzleLightPool,LowHealthOverlay,DeathPool} from './effects-fx.mjs';
 import {DEFAULT_DISPLAY} from './config.mjs';
@@ -351,4 +352,63 @@ test('flags recolor with the team palette and rebuild their geometry after an ar
  view.updateFlags(flags,arena);
  assert.notEqual(view.flagAssets.pole,firstPole,'flag geometry recreated after a rebuild');
  renderer.dispose();
+});
+
+test('boundary rails merge into clean non-duplicated wall geometry, dispose once and fall back to gates',()=>{
+ const boundary={
+  outer:[{x:0,z:-40},{x:40,z:-40},{x:40,z:40},{x:0,z:40}],
+  inner:[{x:0,z:-20},{x:20,z:-20},{x:20,z:20},{x:0,z:20}],
+ };
+ const race={gates:[{x:0,z:-40,nx:0,nz:1,halfWidth:12}],grid:[],centerline:[{x:0,z:-40},{x:0,z:40}],boundary};
+ const model=raceTrackModel(race,'#ffba59');
+ const walls=[];model.traverse(n=>{if(n.userData.raceBarrier)walls.push(n);});
+ const stripes=[];model.traverse(n=>{if(n.userData.raceStripe)stripes.push(n);});
+ assert.equal(walls.length,2,'one merged wall per boundary polygon');
+ assert.equal(stripes.length,2);
+ for(const wall of walls){
+  assert.ok(wall.geometry.attributes.normal,'wall normals are computed');
+  const positions=wall.geometry.attributes.position.array;
+  assert.ok(positions.length>0&&[...positions].every(Number.isFinite));
+  const seen=new Set();
+  for(let i=0;i<positions.length;i+=9){
+   const key=Array.from(positions.slice(i,i+9)).map(value=>Math.round(value*1e4)).join(',');
+   assert.ok(!seen.has(key),'no duplicated coplanar wall triangle');seen.add(key);
+  }
+ }
+ const finite=node=>[...node.geometry.attributes.position.array].every(Number.isFinite);
+ assert.ok(stripes.every(stripe=>finite(stripe)));
+ model.traverse(node=>assert.equal(node.userData.objective,true,'race geometry never blocks the occlusion ray'));
+ const resources=new Set();model.traverse(n=>{if(n.geometry)resources.add(n.geometry);if(n.material)resources.add(n.material);});
+ let disposed=0;for(const resource of resources)resource.addEventListener('dispose',()=>disposed++);
+ ArenaView.prototype.disposeObject.call({},model);
+ assert.equal(disposed,resources.size,'every wall resource is disposed exactly once');
+ const fallback=raceTrackModel({gates:[{x:0,z:0,nx:0,nz:1,halfWidth:12},{x:20,z:0,nx:1,nz:0,halfWidth:12}],grid:[],centerline:[]},'#ffba59');
+ let fallbackWalls=0;fallback.traverse(n=>{if(n.userData.raceBarrier)fallbackWalls++;});
+ assert.equal(fallbackWalls,2,'older fixtures rebuild both rails from gate normals');
+ fallback.traverse(n=>{if(n.geometry)assert.ok(finite(n));});
+ ArenaView.prototype.disposeObject.call({},fallback);
+});
+
+test('cinematic race demo cycles camera rigs while the non-cinematic chase is untouched',t=>{
+ const previous=Object.getOwnPropertyDescriptor(globalThis,'window');
+ Object.defineProperty(globalThis,'window',{configurable:true,value:{}});
+ t.after(()=>{if(previous)Object.defineProperty(globalThis,'window',previous);else delete globalThis.window;});
+ const view=Object.assign(Object.create(ArenaView.prototype),{scene:new T.Scene(),worldGroup:new T.Group(),camera:new T.PerspectiveCamera(),hands:new T.Group(),renderer:{render(){}},resize(){},actorModels:new Map(),pickupModels:[],playerId:-1,currentWeapon:-1,lastEvent:0,motionQuery:{matches:false},_renderPreview(){}});
+ view.scene.add(view.worldGroup,view.camera);view.camera.add(view.hands);
+ const vehicles=Array.from({length:8},(_,id)=>({id,kind:'puma',x:id*5,y:0,z:0,yaw:0}));
+ const centerline=Array.from({length:8},(_,i)=>({x:Math.cos(i/8*Math.PI*2)*30,z:Math.sin(i/8*Math.PI*2)*30}));
+ const match={actors:[{id:0,vehicleId:0,weapon:0,health:100,x:0,y:0,z:0}],vehicles,race:{boxes:[],hazards:[],centerline},mapId:'puma-circuit',time:0};
+ view.setShowcase(match);view.setCinema(true);view.setDirector({tour:true,update:()=>({x:0,y:50,z:0,pitch:0,yaw:0,roll:0,fov:70})});
+ const positions=[],directions=[],modes=[];
+ for(const time of [0,1,RACE_DEMO_MODE_SECONDS,RACE_DEMO_MODE_SECONDS*2,RACE_DEMO_MODE_SECONDS*3,RACE_DEMO_MODE_SECONDS*4]){
+  match.time=time;view.render('selection',null,.05,time);
+  positions.push(view.camera.position.clone());directions.push(view.camera.getWorldDirection(new T.Vector3()));modes.push(view._raceCam.mode);
+ }
+ assert.deepEqual(modes,['chase','chase','orbit','flyover','trackside','chase']);
+ assert.ok(positions.some((position,index)=>index>0&&position.distanceTo(positions[index-1])>1),'the demo camera moves between rigs');
+ assert.ok(directions.some((direction,index)=>index>0&&direction.distanceTo(directions[index-1])>1e-3),'the demo look direction changes');
+ view.setCinema(false);view.playerId=0;match.time=40;
+ view.render('playing',match,.016,40);
+ assert.ok(view.camera.position.distanceTo(new T.Vector3(0,5,-9))<1e-9,'local race chase is unchanged');
+ view.disposeObject(view.scene);for(const resource of view.sharedResources??[])resource.dispose();
 });

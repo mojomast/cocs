@@ -3,7 +3,86 @@ import {createVehicle, PUMA, respawnVehicle, takeVehicleSeat, stepVehicle} from 
 const clamp = (n, a, b) => Math.max(a, Math.min(b, n));
 const distance = (a, b) => Math.hypot(a.x - b.x, a.z - b.z);
 const angle = n => Math.atan2(Math.sin(n), Math.cos(n));
-const ITEMS = ['turbo', 'shield', 'oil', 'pulse'];
+export const ITEMS = ['turbo', 'shield', 'oil', 'pulse'];
+
+// Cars collide as equal-radius circles. The Puma is 2.1 x 3.6; a 1.7 radius
+// wraps the chassis so a pack can rub without feeling like bumper cars.
+export const CAR_RADIUS = 1.7;
+export const MIN_CAR_SEPARATION = CAR_RADIUS * 2;
+
+// Rubber-band pace, indexed by normalized rank t (0 = leader, 1 = last). The
+// leader runs a little under stock pace so the pack can reel them in; the
+// trailer runs a little over so one bad corner is recoverable. The band is
+// deliberately small and clamped so skill, items, walls and contacts dominate.
+export const PACE_LEADER = 0.93;
+export const PACE_TRAILER = 1.10;
+export function paceMultiplier(t) {
+  const rank = clamp(Number.isFinite(t) ? t : 0, 0, 1);
+  return clamp(PACE_LEADER + (PACE_TRAILER - PACE_LEADER) * rank, PACE_LEADER, PACE_TRAILER);
+}
+
+// Mystery boxes bend toward the back of the field: the leader mostly draws
+// defensive items, the trailer mostly draws catch-up items. Linear blend
+// between rank 0 and rank 1, in ITEMS order; deterministic via match.random.
+const LEADER_WEIGHTS = {turbo: .15, shield: .4, oil: .35, pulse: .1};
+const TRAILER_WEIGHTS = {turbo: .45, shield: .15, oil: .1, pulse: .3};
+export function itemWeights(t) {
+  const rank = clamp(Number.isFinite(t) ? t : 0, 0, 1);
+  const weights = {};
+  for (const item of ITEMS) weights[item] = LEADER_WEIGHTS[item] + (TRAILER_WEIGHTS[item] - LEADER_WEIGHTS[item]) * rank;
+  return weights;
+}
+export function rollItem(random, t) {
+  const weights = itemWeights(t);
+  let roll = clamp(typeof random === 'function' ? random() : 0, 0, 1 - 1e-9);
+  for (const item of ITEMS) { roll -= weights[item]; if (roll < 0) return item; }
+  return ITEMS[ITEMS.length - 1];
+}
+
+// Normalized rank for every racer in one standings pass: leader 0, last 1.
+function rankFractions(state) {
+  const order = [...state.racers].sort((a, b) => b.progress - a.progress || a.actorId - b.actorId);
+  const ranks = new Map();
+  order.forEach((racer, index) => ranks.set(racer.actorId, order.length > 1 ? index / (order.length - 1) : 0));
+  return ranks;
+}
+
+function gridSeparation(slots) {
+  let min = Infinity;
+  for (let i = 0; i < slots.length; i++) for (let j = i + 1; j < slots.length; j++)
+    min = Math.min(min, distance(slots[i], slots[j]));
+  return min;
+}
+
+// Push authored grid slots apart only if the map packs them too tight. A slot
+// only moves if match.vehicleCollision accepts it, so a nudge can never spawn a
+// car inside world geometry. Returns whether any slot actually moved.
+function separateGrid(match, slots) {
+  const probe = {config: PUMA};
+  let nudged = false;
+  for (let pass = 0; pass < 6; pass++) {
+    let moved = false;
+    for (let i = 0; i < slots.length; i++) for (let j = i + 1; j < slots.length; j++) {
+      const dx = slots[j].x - slots[i].x, dz = slots[j].z - slots[i].z, d = Math.hypot(dx, dz);
+      if (d >= MIN_CAR_SEPARATION) continue;
+      const nx = d > 1e-6 ? dx / d : 1, nz = d > 1e-6 ? dz / d : 0;
+      const half = (MIN_CAR_SEPARATION - d) / 2 + 1e-3;
+      const movedI = acceptSlot(match, probe, slots[i].x - nx * half, slots[i].z - nz * half);
+      const movedJ = acceptSlot(match, probe, slots[j].x + nx * half, slots[j].z + nz * half);
+      if (movedI) { slots[i].x = movedI.x; slots[i].z = movedI.z; moved = nudged = true; }
+      if (movedJ) { slots[j].x = movedJ.x; slots[j].z = movedJ.z; moved = nudged = true; }
+    }
+    if (!moved) break;
+  }
+  return nudged;
+}
+
+function acceptSlot(match, probe, x, z) {
+  if (!Number.isFinite(x) || !Number.isFinite(z) || typeof match.vehicleCollision !== 'function') return null;
+  const resolved = match.vehicleCollision({x, y: 0, z}, probe);
+  if (resolved && Number.isFinite(resolved.x) && Number.isFinite(resolved.z)) return resolved;
+  return null;
+}
 
 export function initializeRace(match) {
   const track = match.arena.race;
@@ -13,18 +92,28 @@ export function initializeRace(match) {
   match.race = {
     phase: 'countdown', countdown: 3, laps: match.config.fragLimit, elapsed: 0,
     winnerId: null, gates: track.gates.map(g => ({...g})), centerline: track.centerline,
-    boxes: track.itemBoxes.map(b => ({...b, wait: 0})), hazards: [], serial: 0, racers: []
+    boxes: track.itemBoxes.map(b => ({...b, wait: 0})), hazards: [], serial: 0, racers: [],
+    gridMinSeparation: Infinity, gridNudged: false, contacts: 0
   };
-  // Each racer owns a chassis; cars deliberately ghost through one another.
+  // Authored grid slots are used as-is. If a future map ever packs them closer
+  // than one car diameter we nudge them apart in-game (never editing the map)
+  // and only keep a moved slot when the world accepts it. Never NaN.
+  const slots = track.grid.slice(0, 8).map(g => ({x: g.x, z: g.z, heading: g.heading}));
+  match.race.gridMinSeparation = gridSeparation(slots);
+  if (match.race.gridMinSeparation <= MIN_CAR_SEPARATION) {
+    match.race.gridNudged = separateGrid(match, slots);
+    match.race.gridMinSeparation = gridSeparation(slots);
+  }
+  // Each racer owns a chassis; overlaps are resolved in stepRace, not ghosted.
   match.vehicles = Array.from({length: 8}, (_,id) => {
-    const vehicle = createVehicle(PUMA), grid = track.grid[id];
+    const grid = slots[id], vehicle = createVehicle(PUMA);
     vehicle.id = id; vehicle.kind = 'puma';
     vehicle.spawn = {x: grid.x, y: 0, z: grid.z};
     respawnVehicle(vehicle, vehicle.spawn, grid.heading);
     return vehicle;
   });
   match.actors.forEach((actor, index) => {
-    const vehicle = match.vehicles[index], grid = track.grid[index];
+    const vehicle = match.vehicles[index], grid = slots[index];
     takeVehicleSeat(vehicle, actor.id, 'driver');
     actor.yaw = grid.heading - Math.PI;
     actor.active = actor.cooldown = actor.temporaryShield = actor.armor = 0;
@@ -32,10 +121,12 @@ export function initializeRace(match) {
     actor.harnessSpeedMultiplier = actor.harnessDamageMultiplier = actor.speedMultiplier = 1;
     actor.harnessResistance = 0;
     match.syncVehicleActor(actor, vehicle);
+    // Seeded in actor order from match.random so a fixed seed is reproducible.
     match.race.racers.push({actorId: actor.id, vehicleId: vehicle.id, lap: 1, completedLaps: 0,
       nextGate: 0, passed: 0, started: false, progress: -1, finishTime: null, item: null,
       effects: {turbo: 0, shield: 0, slow: 0}, resetWait: 0, stuck: 0, checkpointAge: 0,
-      anchor: {...grid}, useHeld: false, resetHeld: false});
+      anchor: {...grid}, useHeld: false, resetHeld: false,
+      skill: 0.95 + match.random() * 0.1, lane: match.random() * 6 - 3});
   });
   return match.race;
 }
@@ -117,8 +208,15 @@ function botControls(state, racer, vehicle) {
     look -= len-along; along=0; index=(index+1)%n;
   }
   target ||= b;
+  // Shift the lookahead target sideways along the racing line so seeded racers
+  // do not all chase the exact same geometric point.
+  const lane = Number.isFinite(racer.lane) ? racer.lane : 0;
+  if (lane && length > 1e-6) {
+    target = {x: target.x + (dz / length) * lane, z: target.z - (dx / length) * lane};
+  }
   const error = angle(Math.atan2(target.x-vehicle.position.x,target.z-vehicle.position.z)-vehicle.heading);
-  return {throttle: Math.abs(error)>1 ? .35 : .85, steer: clamp(error*1.8,-1,1),
+  const throttleBase = Math.abs(error)>1 ? .35 : .85;
+  return {throttle: clamp(throttleBase * (Number.isFinite(racer.skill) ? racer.skill : 1), 0, 1), steer: clamp(error*1.8,-1,1),
     sprint: Math.abs(error)<.08&&distance(vehicle.position,b)>18, fire: Boolean(racer.item)&&!racer.useHeld};
 }
 
@@ -159,6 +257,7 @@ export function stepRace(match, dt, inputs={}) {
     for (const hazard of state.hazards) hazard.ttl-=step;
     state.hazards=state.hazards.filter(h=>h.ttl>0);
     for (const r of state.racers) for (const effect of Object.keys(r.effects)) r.effects[effect]=Math.max(0,r.effects[effect]-step);
+    const ranks=rankFractions(state);
     for (const r of state.racers) {
       const actor=match.actors.find(a=>a.id===r.actorId), vehicle=match.vehicleById(r.vehicleId);
       const external=given[actor.id], controls=external||(actor.bot?botControls(state,r,vehicle):{});
@@ -170,9 +269,12 @@ export function stepRace(match, dt, inputs={}) {
       if (r.resetWait>0) {r.resetWait=Math.max(0,r.resetWait-step); continue;}
       const from={...vehicle.position};
       const automatic=actor.bot&&!external;
+      const rank=ranks.get(r.actorId)??0;
       const throttle=automatic?controls.throttle:clamp(-(controls.x||0)*Math.sin(actor.yaw)-(controls.z||0)*Math.cos(actor.yaw),-1,1);
       const steer=automatic?controls.steer:clamp(-(controls.x||0)*Math.cos(actor.yaw)+(controls.z||0)*Math.sin(actor.yaw),-1,1);
-      const speedScale=r.effects.slow>0?.5:r.effects.turbo>0?1.6:1;
+      const itemScale=r.effects.slow>0?.5:r.effects.turbo>0?1.6:1;
+      const skill=automatic&&Number.isFinite(r.skill)?r.skill:1;
+      const speedScale=clamp(itemScale*paceMultiplier(rank)*skill,.1,2);
       stepVehicle(vehicle,{throttle,steer,brake:controls.jump===true||controls.crouch===true,
         boost:controls.sprint===true,speedScale,boostScale:speedScale,fire:false},step,
         next=>match.vehicleCollision(next,vehicle),()=>0);
@@ -180,13 +282,16 @@ export function stepRace(match, dt, inputs={}) {
       match.syncVehicleActor(actor,vehicle);
       crossRaceGates(state,r,from,vehicle.position,start,step);
       for (const box of state.boxes) if (!r.item&&box.wait<=0&&distance(vehicle.position,box)<3) {
-        r.item=ITEMS[Math.min(3,Math.floor(match.random()*4))]; box.wait=8;
+        r.item=rollItem(match.random,rank); box.wait=8;
       }
       for (const h of state.hazards) if (h.owner!==r.actorId&&r.effects.shield<=0&&distance(vehicle.position,h)<3) r.effects.slow=2;
       r.stuck=Math.abs(throttle)>.1&&distance(from,vehicle.position)<.015?r.stuck+step:0;
       r.checkpointAge+=step;
       if (r.finishTime===null&&(r.stuck>3||r.checkpointAge>20||!Number.isFinite(vehicle.position.x)||!Number.isFinite(vehicle.position.z))) resetRaceRacer(match,r);
     }
+    // Contacts settle after every racer moved and banked gates, so a push can
+    // never re-run a crossing or duplicate progress.
+    state.contacts += resolveCarCollisions(match,state,2);
     // Resolve after every racer moved, using sub-tick crossing times, not actor order.
     const order=raceStandings(state);
     if (order[0]?.finishTime!==null || state.elapsed>=match.config.timeLimit) {
@@ -194,4 +299,97 @@ export function stepRace(match, dt, inputs={}) {
       match.endMatch(order[0]?.finishTime!==null?'race-finish':'time');
     }
   }
+}
+
+// Place a car candidate only when the world accepts it. Returns the resolved
+// position, or null when blocked (never a NaN or a wall clip).
+function tryPlace(match, vehicle, x, z) {
+  if (!Number.isFinite(x) || !Number.isFinite(z) || typeof match.vehicleCollision !== 'function') return null;
+  const y = Number.isFinite(vehicle.position?.y) ? vehicle.position.y : 0;
+  const resolved = match.vehicleCollision({x, y, z}, vehicle);
+  if (resolved && Number.isFinite(resolved.x) && Number.isFinite(resolved.z)) return resolved;
+  return null;
+}
+
+function applyPlace(vehicle, resolved) {
+  vehicle.position.x = resolved.x;
+  vehicle.position.z = resolved.z;
+  if (Number.isFinite(resolved.y)) vehicle.position.y = resolved.y;
+}
+
+// Nudge one velocity component onto `target` along the contact normal.
+function setNormalSpeed(velocity, nx, nz, target) {
+  const current = velocity.x * nx + velocity.z * nz;
+  const delta = target - current;
+  if (!Number.isFinite(delta)) return;
+  velocity.x += nx * delta;
+  velocity.z += nz * delta;
+  if (!Number.isFinite(velocity.x)) velocity.x = 0;
+  if (!Number.isFinite(velocity.z)) velocity.z = 0;
+}
+
+// Resolve one overlapping pair. Positions are pushed apart symmetrically; if a
+// side is pinned by world geometry the other takes the full (still guarded)
+// correction. Normal velocity is made equal so the pair cannot immediately
+// re-overlap or tunnel through one another.
+function resolveCarPair(match, racerA, racerB) {
+  const va = match.vehicleById(racerA.vehicleId), vb = match.vehicleById(racerB.vehicleId);
+  if (!va || !vb) return false;
+  const pa = va.position, pb = vb.position;
+  if (!Number.isFinite(pa?.x) || !Number.isFinite(pa?.z) || !Number.isFinite(pb?.x) || !Number.isFinite(pb?.z)) return false;
+  let dx = pb.x - pa.x, dz = pb.z - pa.z, d = Math.hypot(dx, dz);
+  if (d >= MIN_CAR_SEPARATION) return false;
+  let nx, nz;
+  if (d > 1e-6) { nx = dx / d; nz = dz / d; }
+  else if ((racerA.actorId ?? 0) >= (racerB.actorId ?? 0)) { nx = 1; nz = 0; }
+  else { nx = -1; nz = 0; }
+  const penetration = MIN_CAR_SEPARATION - d, half = penetration / 2;
+  let ga = tryPlace(match, va, pa.x - nx * half, pa.z - nz * half);
+  let gb = tryPlace(match, vb, pb.x + nx * half, pb.z + nz * half);
+  if (ga && !gb) {
+    const full = tryPlace(match, va, pa.x - nx * penetration, pa.z - nz * penetration);
+    if (full) ga = full;
+  } else if (!ga && gb) {
+    const full = tryPlace(match, vb, pb.x + nx * penetration, pb.z + nz * penetration);
+    if (full) gb = full;
+  }
+  if (!ga && !gb) return false;
+  // Remove the closing normal velocity (fully inelastic contact): both cars
+  // leave the contact at the same normal speed, so separation only grows.
+  if (va.velocity && vb.velocity) {
+    const closing = (va.velocity.x - vb.velocity.x) * nx + (va.velocity.z - vb.velocity.z) * nz;
+    if (closing > 0) {
+      const vaN = va.velocity.x * nx + va.velocity.z * nz;
+      const vbN = vb.velocity.x * nx + vb.velocity.z * nz;
+      const target = (vaN + vbN) / 2;
+      setNormalSpeed(va.velocity, nx, nz, target);
+      setNormalSpeed(vb.velocity, nx, nz, target);
+    }
+  }
+  if (ga) applyPlace(va, ga);
+  if (gb) applyPlace(vb, gb);
+  const actorA = match.actors?.find(a => a.id === racerA.actorId);
+  const actorB = match.actors?.find(a => a.id === racerB.actorId);
+  if (ga && actorA) match.syncVehicleActor(actorA, va);
+  if (gb && actorB) match.syncVehicleActor(actorB, vb);
+  return true;
+}
+
+export function resolveCarCollisions(match, state, passes = 2) {
+  if (!state?.racers?.length) return 0;
+  let resolved = 0;
+  for (let pass = 0; pass < passes; pass++) {
+    let moved = false;
+    for (let i = 0; i < state.racers.length; i++) {
+      const a = state.racers[i];
+      if (a.resetWait > 0) continue;
+      for (let j = i + 1; j < state.racers.length; j++) {
+        const b = state.racers[j];
+        if (b.resetWait > 0) continue;
+        if (resolveCarPair(match, a, b)) { moved = true; resolved++; }
+      }
+    }
+    if (!moved) break;
+  }
+  return resolved;
 }

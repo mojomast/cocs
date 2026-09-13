@@ -288,7 +288,7 @@ export default function Home(){
     <div className="title-start" role="button" aria-label="Press any key or click to enter"><span className="title-pulse"/>PRESS ANY KEY <small>or click to enter</small></div>
     <div className="title-meta"><span>{selectableMaps.length} ARENAS</span><span>{CHARACTERS.length} OPERATORS</span><span>{HARNESSES.length} HARNESSES</span><span>{GAME_MODES.length} MODES</span></div>
    </div>
-   <div className="title-footer"><span>v2.62 · PUMA CIRCUIT</span>{githubLink}</div>
+   <div className="title-footer"><span>v2.63 · RACE POLISH</span>{githubLink}</div>
   </div>}
   {mode==='selection'&&<div className={`selection-screen${showcaseLive?' has-showcase':''}${entered?'':' awaiting-start'}`}>
   <header className="topbar"><Wordmark sub="CUSTOM MATCH / 03"/><div className="header-right"><button className="icon-button title-return" aria-label="Return to title screen" title="Return to title screen" onClick={exitToTitle}><X size={18}/></button>{settingsButton}<button className="icon-button" aria-label={muted?'Unmute audio':'Mute audio'} onClick={()=>saveSettings(sensitivity,!muted)}>{muted?<VolumeX size={19}/>:<Volume2 size={19}/>}</button>{githubLink}</div></header>

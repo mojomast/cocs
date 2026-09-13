@@ -10,11 +10,14 @@ import {createLevel,terrainField,mulberry32,fbm} from './levelgen.mjs';
 const finite = value => typeof value === 'number' && Number.isFinite(value);
 const within = (map, x, z) => x >= map.bounds.minX && x <= map.bounds.maxX && z >= map.bounds.minZ && z <= map.bounds.maxZ;
 
-test('there is exactly one next-gen map per game mode', () => {
-  assert.equal(NEXTGEN_MAPS.length, GAME_MODES.length);
+test('there is exactly one next-gen map per combat game mode', () => {
+  // Puma Race ships its own dedicated circuit (RACE_MAPS) rather than a
+  // procedurally generated combat arena, so it is excluded from this count.
+  const combatModes = GAME_MODES.filter(mode => mode.id !== 'puma-race');
+  assert.equal(NEXTGEN_MAPS.length, combatModes.length);
   assert.equal(new Set(NEXTGEN_MAPS.map(map => map.id)).size, NEXTGEN_MAPS.length);
   const modes = new Set(NEXTGEN_MAPS.map(map => map.mode));
-  for (const mode of GAME_MODES) assert.ok(modes.has(mode.id), `missing next-gen map for ${mode.id}`);
+  for (const mode of combatModes) assert.ok(modes.has(mode.id), `missing next-gen map for ${mode.id}`);
   for (const map of NEXTGEN_MAPS) assert.equal(getMap(map.id), map, `${map.id} is registered`);
 });
 

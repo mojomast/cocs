@@ -22,8 +22,11 @@ but no longer advertise Payload, which requires a continuous walking route.
 
 ## Puma Circuit racing
 
-The main-menu demo now follows an eight-bot Puma race with a chase camera. It
-starts already in motion and automatically begins another race at the finish.
+The main-menu demo follows an eight-bot Puma race and its camera cycles so the
+reel keeps moving: it chases a car for 7 seconds, then orbits one, then flies
+along the circuit ahead of the pack, then watches from trackside, rotating to a
+different Puma each segment. It starts already in motion and automatically
+begins another race at the finish. Reduced-motion falls back to a gentle chase.
 
 Choose **Puma Circuit** in Match Setup to race the dedicated circuit. Switching
 into the mode selects seven AI rivals by default; choose 0-7 rivals for practice
@@ -34,9 +37,18 @@ and every racer starts already seated in their assigned driver seat.
 - Three-second countdown; three laps by default, configurable from 1 to 10.
 - Twelve directional checkpoint gates prevent skipped laps and reverse-line
   farming. The first finisher wins; a timeout uses validated race progress.
-- Equal vehicle tuning for everyone. Weapons, harness advantages and combat
-  modifiers are inactive. Cars ghost through each other; item attacks still work.
-- Mystery boxes grant one held item and respawn after eight seconds.
+- Equal base vehicle tuning for everyone. Weapons, harness advantages and combat
+  modifiers are inactive.
+- Pumas are solid: cars push apart on contact instead of ghosting or piling up,
+  so the pack jostles and overtakes rather than stacking. Each racer holds their
+  own grid slot at the start.
+- Race balance keeps the field close. Trailing racers get a small rubber-band
+  pace gain and the leader a small pace ease, both clamped and applied to bots
+  and humans alike, and each driver has a seeded skill/racing-line variance so
+  they do not drive identical lines.
+- Mystery boxes grant one held item and respawn after eight seconds. Rolls are
+  weighted by position: the leader mostly draws defensive items, while the back
+  of the field draws catch-up items such as Turbo and Homing Pulse.
 - **Turbo:** two seconds of extra speed, stackable with the normal chassis boost.
 - **Shield:** five seconds of protection from race items; clears an existing slow.
 - **Oil Slick:** leaves an eight-second hazard behind you that slows opponents.
@@ -57,7 +69,7 @@ infantry-style local prediction. Reconnect retains the assigned car and race
 state, but input response depends on network latency. No browser/device driving
 playtest has been performed yet.
 
-For this host, deploy with `DEPLOY_VERSION=v2.62 npm run deploy -- --with-game-server`.
+For this host, deploy with `DEPLOY_VERSION=v2.63 npm run deploy -- --with-game-server`.
 This rebuilds, reloads both services, and checks the public HTML and linked CSS/JS
 assets. Restarting the game service disconnects active players; see
 `deploy/README.md` for web-only deployment and verification commands.

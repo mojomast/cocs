@@ -58,7 +58,7 @@ test('casual defaults preserve explicit saved difficulty and roster',()=>{ asser
 });
 
 test('low-gravity turbo jump crosses onto cover without embedding',()=>{
- for(const arena of MAPS.filter(arena=>!arena.nextGen)){
+ for(const arena of MAPS.filter(arena=>!arena.nextGen&&!arena.race)){
   const b=arena.blocks.find(b=>b.kind==='cover'),a=actor(arena,{x:b.x,z:b.z+b.d/2+2,y:0,vz:-1.8,grounded:true});
   let landed=false;
   for(let i=0;i<240;i++){

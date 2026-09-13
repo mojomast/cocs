@@ -16,12 +16,31 @@ const boundaries=[-13,13].map(offset=>gates.map((p,i)=>{
  const tangent=tangents[i],scale=offset/(p.nx*tangent.x+p.nz*tangent.z);
  return {x:p.x-p.nz*scale,z:p.z+p.nx*scale};
 }));
-for(const [side,polygon] of boundaries.entries())for(let i=0;i<polygon.length;i++){
- const a=polygon[i],b=polygon[(i+1)%polygon.length],steps=Math.ceil(Math.hypot(b.x-a.x,b.z-a.z)/1.5);
- for(let j=0;j<steps;j++)blocks.push({x:a.x+(b.x-a.x)*j/steps,z:a.z+(b.z-a.z)*j/steps,w:2,d:2,h:2.6,kind:'race-rail',side:side===0?'outer':'inner'});
+// Exported for the renderer: the two mitered offset loops. They stay unmerged so
+// tools get the authored 12-gate outline; rails merge them per straight edge below.
+const boundary={outer:boundaries[0].map(p=>({x:p.x,z:p.z})),inner:boundaries[1].map(p=>({x:p.x,z:p.z}))};
+const mergeCollinear=polygon=>{
+ const merged=[];
+ for(let i=0;i<polygon.length;i++){
+  const a=polygon[(i+polygon.length-1)%polygon.length],b=polygon[i],c=polygon[(i+1)%polygon.length];
+  const cross=(b.x-a.x)*(c.z-b.z)-(b.z-a.z)*(c.x-b.x),span=Math.hypot(c.x-a.x,c.z-a.z)||1;
+  if(Math.abs(cross)/span>1e-9)merged.push(b);
+ }
+ return merged;
+};
+// Collision rails run per merged straight EDGE. Boxes are 2x2 and spaced 2.0 so
+// adjacent faces abut instead of stacking coplanar 2-wide geometry (which z-fights).
+const RAIL_SPACING=2,RAIL_HALF=1;
+for(const [side,polygon] of boundaries.entries()){
+ const merged=mergeCollinear(polygon),label=side===0?'outer':'inner';
+ for(let i=0;i<merged.length;i++){
+  const a=merged[i],b=merged[(i+1)%merged.length],length=Math.hypot(b.x-a.x,b.z-a.z),steps=Math.max(1,Math.ceil(length/RAIL_SPACING));
+  for(let j=0;j<steps;j++){const t=j/steps;blocks.push({x:a.x+(b.x-a.x)*t,z:a.z+(b.z-a.z)*t,w:2,d:2,h:2.6,kind:'race-rail',side:label});}
+ }
 }
-// Fill both non-driving regions with solid strips. Rails cover the conservative
-// strip edges; unlike a bounding-box infield these cannot cut across a corner.
+// Fill both non-driving regions with solid strips. Strips stop one rail half-width
+// short of the boundary so the guaranteed perimeter abuts the rails rather than
+// stacking a second coplanar face against them.
 for(let z=bounds.minZ;z<bounds.maxZ;z++){
  const spans=boundaries.map(polygon=>{
   const xs=[];
@@ -34,9 +53,9 @@ for(let z=bounds.minZ;z<bounds.maxZ;z++){
  });
  const add=(left,right,kind)=>{if(right>left)blocks.push({x:(left+right)/2,z:z+.5,w:right-left,d:1,h:3,kind});};
  const outer=spans[0],inner=spans[1];
- if(outer){add(bounds.minX,outer[0],'race-apron');add(outer[1],bounds.maxX,'race-apron');}
+ if(outer){add(bounds.minX,outer[0]-RAIL_HALF,'race-apron');add(outer[1]+RAIL_HALF,bounds.maxX,'race-apron');}
  else add(bounds.minX,bounds.maxX,'race-apron');
- if(inner)add(inner[0]+1,inner[1]-1,'race-infield');
+ if(inner)add(inner[0]+RAIL_HALF,inner[1]-RAIL_HALF,'race-infield');
 }
 for(let i=0;i<centerline.length;i++){
  const a=centerline[i],b=centerline[(i+1)%centerline.length],steps=Math.ceil(Math.hypot(b.x-a.x,b.z-a.z)/3);
@@ -44,11 +63,13 @@ for(let i=0;i<centerline.length;i++){
 }
 navNodes.push(...grid.map(({x,z})=>({x,z})),...itemBoxes.map(({x,z})=>({x,z})));
 
+for(const polygon of [boundary.outer,boundary.inner]){polygon.forEach(Object.freeze);Object.freeze(polygon);}
+Object.freeze(boundary);
 export const PUMA_CIRCUIT={
  id:'puma-circuit',name:'Puma Circuit',tag:'RACING / PUMA',description:'Eight Pumas, a sweeping charcoal circuit, and a checkered sprint to the finish.',
  color:'#ffba59',background:'#10151c',floorColor:'#292d34',raised:false,bounds,
  blocks,spawns:grid.map(({x,z})=>[x,z]),pickups:[],navNodes,
  vehicles:grid.map(({x,z,heading},id)=>({id,kind:'puma',x,y:0,z,yaw:heading})),
- race:{centerline,gates,grid,itemBoxes},
+ race:{centerline,gates,grid,itemBoxes,boundary},
 };
 export const RACE_MAPS=[PUMA_CIRCUIT];

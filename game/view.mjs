@@ -12,6 +12,7 @@ import {terrainTriangles,terrainWallTriangles} from './terrain.mjs';
 import {TEAM_PALETTE,teamPresentation,teamMark,updateTeamMark,applyActorTeam} from './team-presentation.mjs';
 import {spectateActor} from './hud.mjs';
 import {cavernShell} from './structures.mjs';
+import {raceDemoMode,raceDemoPose,RACE_DEMO_MODE_SECONDS} from './race-camera.mjs';
 import {occlusionDistance} from './camera.mjs';
 import {postStage,applyComposerSize,disposeComposer,reducedMotion} from './post.mjs';
 import {surfaceTextures,clearSurfaceTextures} from './textures.mjs';
@@ -252,7 +253,7 @@ export class ArenaView{
    setSpectator(on){this.spectator=on===true;}
   setSpectatorTarget(id){this.spectatorTarget=Number.isInteger(id)?id:null;}
   setSpectatorThird(value){this.spectatorThird=value===true;}
-   setCinema(on){this.cinema=on===true;if(!this.cinema)this._camWant=undefined;}
+   setCinema(on){this.cinema=on===true;if(!this.cinema){this._camWant=undefined;this._raceCam=undefined;}}
    setDirector(director){this.director=director||null;}
    setShowcase(state){this.showcaseState=state||null;}
    setPreviewRect(rect){this.previewRect=rect||null;}
@@ -313,7 +314,9 @@ export class ArenaView{
   if(raceMats)palette.push(...Object.values(raceMats));
   for(const [index,b] of arena.blocks.entries()){
    const rock=arena.id==='blood-gulch'&&(['cover','landmark','rock','boulder'].includes(b.kind)),bunker=b.kind?.startsWith('base-')||b.kind==='cliff-outpost',raceMat=raceMats?.[b.kind],blockMat=variant('block',raceMat??(rock?rockMat:wall),{map:textured&&!raceMat,kind:rock?'rock':'metal'}),body=box(world,b.w,b.h,b.d,b.x,b.h/2,b.z,blockMat);paintGeometry(body.geometry,arenaSeed+index*13+1,.16);body.userData.block=index;body.castShadow=true;body.receiveShadow=true;
-   if(raceMat){if(b.kind==='race-rail'){detail(b.w,.04,b.d,b.x,b.h+.02,b.z,raceMats.stripe);for(const sign of [-1,1]){detail(b.w,.4,.024,b.x,b.h*.62,b.z+sign*(b.d/2+.012),raceMats.stripe);detail(.024,.4,b.d,b.x+sign*(b.w/2+.012),b.h*.62,b.z,raceMats.stripe);}}continue;}
+    // Rails are continuous collision runs of overlapping boxes; render the
+    // smooth barrier walls in raceTrackModel instead so they never z-fight.
+    if(raceMat){if(b.kind==='race-rail'){body.visible=false;body.castShadow=false;body.receiveShadow=false;}continue;}
    // Next-gen maps keep these as invisible collision proxies and draw smooth geometry in buildNextGen.
    if(arena.nextGen===true&&NEXTGEN_PROXY.has(b.kind)){body.visible=false;continue;}
    // Keep the complete collision box visible: rock fractures and armor are surface treatments.
@@ -346,7 +349,7 @@ export class ArenaView{
  if(arena.id==='foundry')for(const x of [-4,4]){for(const z of [-2,0,2])box(world,1.8,.03,.35,x,5.77,z,glow);textLabel(world,'HOT',x,4,2.52,.35,'#ffc684');}
     if(!islands&&!arena.terrain){const edge=legacy?13.94:maxX-.06;textLabel(world,arena.name.toUpperCase(),(minX+maxX)/2,6.5,minZ+.06,1.3);textLabel(world,'02',minX+.06,5.8,(minZ+maxZ)/2,1.2,arena.color,Math.PI/2);textLabel(world,'01',maxX-.06,5.8,(minZ+maxZ)/2,1.2,arena.color,-Math.PI/2);for(const x of legacy?[-7,7]:[(minX+maxX)/2-width*.25,(minX+maxX)/2+width])box(world,.07,.04,depth*.77,x,.06,(minZ+maxZ)/2,glow);for(const z of legacy?[-10,0,10]:[minZ+depth/6,(minZ+maxZ)/2,maxZ-depth/6]){box(world,width,.3,.35,(minX+maxX)/2,8.5,z,trim);box(world,width*.72,.05,.15,(minX+maxX)/2,8.32,z,glow);}for(const x of legacy?[-12,12]:[minX+2,maxX-2]){const light=new T.PointLight(arena.color,28,15,2);light.position.set(x,5,(minZ+maxZ)/2);world.add(light);}}
     this.raceModels=new Map();
-    if(arena.race)world.add(raceTrackModel(arena.race,arena.color));
+    if(arena.race)raceTrackModel(arena.race,arena.color,world);
     this.buildNextGen(world,arena);
    this.addTraversal(world,arena,glow);
    // Unused family colors never reach the scene's normal disposal traversal.
@@ -534,11 +537,43 @@ export class ArenaView{
     cam.set(head.x+out.x*this._camWant,head.y+out.y*this._camWant,head.z+out.z*this._camWant);
     this.camera.rotation.set(Math.max(-1.45,Math.min(1.45,Math.asin(Math.max(-1,Math.min(1,dy/dist))))),Math.atan2(-dx,-dz),0,'YXZ');
    }
+   // Cinematic race demo: alternate rigs and featured cars on a fixed cadence.
+   // Reduced motion collapses to the original gentle single follow so the shot
+   // stays stable; the first frame and every rig/car change snap, then damp.
+   _raceDemoCamera(match,arena,player,delta,time,reduced){
+    const vehicles=(match.vehicles||[]).filter(Boolean);
+    const vehicle=vehicles.find(v=>v.id===player.vehicleId)||vehicles[0]||null;
+    if(!vehicle)return false;
+    const centerline=arena?.race?.centerline||match.race?.centerline||match.arena?.race?.centerline||[];
+    if(reduced){
+     const pose=raceDemoPose({mode:'chase',centerline,vehicle,vehicles,elapsed:0});
+     this.camera.position.set(pose.x,pose.y,pose.z);
+     this.camera.lookAt(pose.lookX,pose.lookY,pose.lookZ);
+     this._raceCam=null;
+     return true;
+    }
+    const elapsed=Number.isFinite(match.time)?Math.max(0,match.time):(Number.isFinite(time)?Math.max(0,time):0);
+    const mode=raceDemoMode(elapsed),target=raceDemoPose({mode,centerline,vehicle,vehicles,elapsed});
+    const segment=Math.floor(elapsed/RACE_DEMO_MODE_SECONDS),previous=this._raceCam;
+    if(!previous||previous.mode!==mode||previous.segment!==segment){
+     this.camera.position.set(target.x,target.y,target.z);
+     this.camera.lookAt(target.lookX,target.lookY,target.lookZ);
+     this._raceCam={mode,segment,x:target.x,y:target.y,z:target.z,lookX:target.lookX,lookY:target.lookY,lookZ:target.lookZ};
+     return true;
+    }
+    const dt=Math.min(Math.max(Number(delta)||0,0),.1),k=1-Math.exp(-6*dt);
+    const x=previous.x+(target.x-previous.x)*k,y=previous.y+(target.y-previous.y)*k,z=previous.z+(target.z-previous.z)*k;
+    const lookX=previous.lookX+(target.lookX-previous.lookX)*k,lookY=previous.lookY+(target.lookY-previous.lookY)*k,lookZ=previous.lookZ+(target.lookZ-previous.lookZ)*k;
+    this.camera.position.set(x,y,z);
+    this.camera.lookAt(lookX,lookY,lookZ);
+    this._raceCam={mode,segment,x,y,z,lookX,lookY,lookZ};
+    return true;
+   }
    render(mode,match,delta,time){this.motionQuery??=window.matchMedia?.('(prefers-reduced-motion: reduce)');this.resize();const reduced=this.reduced();if(mode==='selection'&&!this.showcaseState){const m=this.menu.model;m.rotation.y=Math.PI+.25+(reduced?0:Math.sin(time*.25)*.2);m.position.y=.17+(reduced?0:Math.sin(time)*.025);m.userData.rig?.update({dt:Math.max(0,Math.min(.1,delta||0)),time,speed:0,maxSpeed:8,grounded:true});this.renderer.render(this.menu.scene,this.menu.camera);return;}if((mode==='selection'||mode==='theater')&&!match)match=this.showcaseState;
       if(!match)return;const cinematic=this.cinema===true&&!!this.director;const actors=match.actors||[];let player=cinematic?actors[0]:(actors.find(a=>a.id===this.playerId)||actors[0]);if(this.spectator&&!cinematic)player=spectateActor(actors,this.spectatorTarget)||player;if(!player)return;const arena=match.arena||MAPS.find(a=>a.id===match.mapId)||MAPS[0];const savedPlayerId=this.playerId;this.updateFlags(match,arena);this.updateObjectives(match,arena);this.updatePayloadModel(match,arena);if(cinematic)this.playerId=-1;const cinemaPose=cinematic?this.director.update(match,Math.max(0,delta),match.events||[]):null;if(cinematic){this.camera.position.set(cinemaPose.x,cinemaPose.y,cinemaPose.z);this.camera.rotation.set(cinemaPose.pitch,cinemaPose.yaw,cinemaPose.roll||0,'YXZ');this._clearCamera(player,delta,cinemaPose.cut);}else{const eyeY=(player.y||0)+(player.health>0?(player.eyeHeight??1.45):.65),yaw=(player.yaw||0)+(player.punchYaw||0),pitch=(player.pitch||0)+(player.punchPitch||0);if(this.spectator&&this.spectatorThird===true){const dist=4.6,cos=Math.cos(pitch);this.camera.position.set((player.x||0)+Math.sin(yaw)*dist*cos,eyeY+1.1-Math.sin(pitch)*dist,(player.z||0)+Math.cos(yaw)*dist*cos);}else this.camera.position.set(player.x||0,eyeY,player.z||0);this.camera.rotation.set(pitch,yaw,0,'YXZ');}this.cameraShake??=new CameraShake();const aiming=this.aim===true||player.ads===true,baseFov=this.display?.fov??82,targetFov=aiming?Math.max(55,baseFov*.82):player.sprinting===true?baseFov+5:baseFov,fovBlend=1-Math.exp(-8*Math.min(Math.max(delta||0,0),.1));this.camera.fov=Math.max(55,this.camera.fov+(targetFov-this.camera.fov)*fovBlend);if(cinematic)this.camera.fov=Math.max(50,Math.min(100,cinemaPose.fov||this.camera.fov));this.camera.updateProjectionMatrix();if(!cinematic){this.cameraShake.apply(this.camera,time,reduced);this.cameraShake.update(Math.max(0,delta));this.lowHealth=player.health>0&&player.health<=(player.maxHealth??100)*.35;this.lowHealthOverlay?.update(this.lowHealth,time,delta,reduced,this.camera);}else this.lowHealthOverlay?.update(false,time,delta,reduced,this.camera);
       actors.forEach((a,i)=>{const m=this.actorModels.get(a.id);if(!m)return;const mounted=a.vehicleId!=null;if(a.health<=0){this.poseCorpse(m,a,match);return;}this.deathContext.delete(a.id);this.reviveCorpse(m);m.visible=a.id!==this.playerId;m.position.set(a.x||0,(a.y||0)+.04,a.z||0);if(mounted){const rider=match.vehicles?.find(v=>v.id===a.vehicleId);m.rotation.y=(rider?.yaw??a.yaw??0)-Math.PI;}else m.rotation.y=Number.isFinite(a.bodyYaw)?a.bodyYaw:(a.yaw||0);const bodyYaw=Number.isFinite(a.bodyYaw)?a.bodyYaw:(a.yaw||0),speed=Math.hypot(a.vx||0,a.vz||0),localX=(a.vx||0)*Math.cos(bodyYaw)-(a.vz||0)*Math.sin(bodyYaw),localZ=-((a.vx||0)*Math.sin(bodyYaw)+(a.vz||0)*Math.cos(bodyYaw));m.userData.rig?.update({dt:Math.max(0,Math.min(.1,delta||0)),time,speed:mounted?0:speed,maxSpeed:a.moveSpeed||8,grounded:mounted?true:a.grounded!==false,crouch:!mounted&&a.crouching===true,ads:!mounted&&a.ads===true,strafe:mounted?0:Math.max(-1,Math.min(1,localX/3)),forward:mounted?0:Math.max(-1,Math.min(1,localZ/3)),focusYaw:Math.atan2(Math.sin((a.yaw||0)-bodyYaw),Math.cos((a.yaw||0)-bodyYaw)),focusPitch:-(a.pitch||0),bank:reduced?0:Math.max(-1,Math.min(1,((a.yaw||0)-bodyYaw)*1.1)),hit:!reduced&&(m.userData.hitUntil??0)>performance.now()?1:0});if(m.userData.gunAnchor)m.userData.gunAnchor.rotation.x=reduced?0:Math.max(-.7,Math.min(.7,-(a.pitch||0)));if(!reduced&&a.health>0&&a.active>0&&a.harness==='hermes'&&(match.time||0)-(m.userData.trailAt||0)>.1){m.userData.trailAt=match.time;this.effectPool??=new EffectPool(this.scene);this.effectPool.add({pos:V(a.x,a.y+.4,a.z),color:m.userData.color,size:.11,life:.3});}m.userData.torso.material.emissive.set(a.active>0&&['opencode','codex','cline','roo'].includes(a.harness)?m.userData.color:'#000000');m.userData.torso.material.emissiveIntensity=a.active>0?.7:0;m.userData.shield.material.color.set(a.slow>0?'#d89aff':m.userData.color);m.userData.shield.visible=a.slow>0||a.protection>0||(a.harness==='claudecode'&&a.active>0);if(m.userData.weapon.userData.type!==a.weapon){m.userData.gunAnchor.remove(m.userData.weapon);this.disposeObject(m.userData.weapon);m.userData.weapon=weaponModel(a.weapon,this.modelAssets,a.attachments?.visual,a.finish);this._trackAssets();m.userData.weapon.scale.setScalar(.7);m.userData.gunAnchor.add(m.userData.weapon);}m.userData.weapon.userData.flash.visible=!reduced&&(m.userData.flashUntil??0)>performance.now();});
    this.updateRace(match,time);
-   if(match.race){const car=match.vehicles?.find(v=>v.id===player.vehicleId);if(car){const p=car.position||car,yaw=car.yaw??car.heading??0;this.camera.position.set(p.x-Math.sin(yaw)*9,(p.y??0)+5,p.z-Math.cos(yaw)*9);this.camera.lookAt(p.x+Math.sin(yaw)*6,(p.y??0)+1,p.z+Math.cos(yaw)*6);}}
+   if(match.race){if(cinematic)this._raceDemoCamera(match,arena,player,delta,time,reduced);else{const car=match.vehicles?.find(v=>v.id===player.vehicleId);if(car){const p=car.position||car,yaw=car.yaw??car.heading??0;this.camera.position.set(p.x-Math.sin(yaw)*9,(p.y??0)+5,p.z-Math.cos(yaw)*9);this.camera.lookAt(p.x+Math.sin(yaw)*6,(p.y??0)+1,p.z+Math.cos(yaw)*6);}}}
    for(const actor of actors){const model=this.actorModels.get(actor.id);if(model)applyActorTeam(model,actor.team,this.display?.teamPalette);}
    for(const zone of match.objectives?.zones||[]){const model=this.objectiveModels?.get(String(zone.id));if(!model)continue;const mark=model.userData.teamMark??=teamMark();if(!mark.parent){mark.position.y=1.45;mark.scale.setScalar(2);model.add(mark);}updateTeamMark(mark,zone.contested?null:zone.owner);}
    (match.pickups||[]).forEach((p,i)=>{const m=this.pickupModels[i];if(!m)return;m.visible=(p.wait||0)<=0;m.rotation.y=reduced?0:time*.8;m.position.y=(p.y||0)+(reduced?0:Math.sin(time*2+i)*.07);});
@@ -559,13 +594,64 @@ export class ArenaView{
     _renderPreview(time,reduced){const rect=this.previewRect;if(!rect||rect.width<12||rect.height<12||!(this.renderer instanceof T.WebGLRenderer))return;const renderer=this.renderer,w=this.width,h=this.height;if(w<=0||h<=0)return;const x=Math.max(0,Math.round(rect.left)),y=Math.max(0,Math.round(h-rect.bottom)),vw=Math.max(1,Math.round(rect.width)),vh=Math.max(1,Math.round(rect.height));const m=this.menu.model;m.rotation.y=Math.PI+.25+(reduced?0:Math.sin(time*.4)*.22);m.position.y=.17;const cam=this.menu.camera;cam.aspect=Math.max(.2,vw/vh);cam.updateProjectionMatrix();const prevAuto=renderer.autoClear;renderer.setScissorTest(true);renderer.setViewport(x,y,vw,vh);renderer.setScissor(x,y,vw,vh);renderer.autoClear=true;renderer.render(this.menu.scene,cam);renderer.setScissorTest(false);renderer.setViewport(0,0,w,h);renderer.setScissor(0,0,w,h);renderer.autoClear=prevAuto;}
           dispose(){this.clearObjectiveMarkers();this.effectPool?.dispose();this.projectilePool?.dispose();this.railPool?.dispose();this.deathPool?.dispose();disposeComposer(this.composer);this.composer=null;this.muzzleLights?.dispose();this.lowHealthOverlay?.dispose();this.disposeObject(this.scene);this.disposeObject(this.menu.scene);this.environmentRT?.dispose?.();for(const resource of this.renderResources||[])resource.dispose();this.renderResources?.clear();for(const resource of this.sharedResources||[])resource.dispose();this.sharedResources?.clear();this.modelAssets?.materials.clear();this.modelAssets?.geometries.clear();this.modelAssets?.resources.clear();this.renderer.dispose();}
 }
-export function raceTrackModel(race,color='#83f4d5'){
+// Barrier polygons come from race.boundary (outer/inner loops) and fall back to
+// offsetting the gate normals by halfWidth for older fixtures.
+function raceBarrierPolygons(race){
+ const boundary=race?.boundary;
+ if(boundary&&Array.isArray(boundary.outer)&&boundary.outer.length>1){
+  const polygons=[{points:boundary.outer,side:'outer'}];
+  if(Array.isArray(boundary.inner)&&boundary.inner.length>1)polygons.push({points:boundary.inner,side:'inner'});
+  return polygons;
+ }
+ const gates=Array.isArray(race?.gates)?race.gates:[];
+ if(gates.length<2)return [];
+ const halfWidth=Math.max(1,Number(gates[0].halfWidth)||12);
+ const offset=sign=>gates.map(p=>({x:p.x-p.nz*sign*halfWidth,z:p.z+p.nx*sign*halfWidth}));
+ return [{points:offset(-1),side:'outer'},{points:offset(1),side:'inner'}];
+}
+// One merged wall per polygon: vertical quads along every edge plus a top cap,
+// with a separate thin stripe band floated 0.03 off the wall plane.
+function raceBarrierGeometry(points,side,height=2.7){
+ const positions=[],stripes=[];
+ const area=points.reduce((sum,p,i)=>{const q=points[(i+1)%points.length];return sum+(p.x*q.z-q.x*p.z);},0);
+ const ccw=area>=0,capWidth=.34,stripeOffset=.03,stripeTop=height-.1,stripeBottom=height-.42;
+ for(let i=0;i<points.length;i++){
+  const a=points[i],b=points[(i+1)%points.length],dx=b.x-a.x,dz=b.z-a.z,length=Math.hypot(dx,dz);
+  if(!(length>1e-6))continue;
+  let nx=-dz/length,nz=dx/length;
+  if(!ccw){nx=-nx;nz=-nz;}
+  const facing=side==='inner'?-1:1,tx=nx*facing,tz=nz*facing;
+  positions.push(a.x,0,a.z,b.x,0,b.z,b.x,height,b.z,a.x,0,a.z,b.x,height,b.z,a.x,height,a.z);
+  const cx0=a.x+tx*capWidth,cz0=a.z+tz*capWidth,cx1=b.x+tx*capWidth,cz1=b.z+tz*capWidth;
+  positions.push(a.x,height,a.z,b.x,height,b.z,cx1,height,cz1,a.x,height,a.z,cx1,height,cz1,cx0,height,cz0);
+  stripes.push(a.x+tx*stripeOffset,stripeBottom,a.z+tz*stripeOffset,b.x+tx*stripeOffset,stripeBottom,b.z+tz*stripeOffset,b.x+tx*stripeOffset,stripeTop,b.z+tz*stripeOffset,a.x+tx*stripeOffset,stripeBottom,a.z+tz*stripeOffset,b.x+tx*stripeOffset,stripeTop,b.z+tz*stripeOffset,a.x+tx*stripeOffset,stripeTop,a.z+tz*stripeOffset);
+ }
+ const wall=new T.BufferGeometry();wall.setAttribute('position',new T.Float32BufferAttribute(positions,3));wall.computeVertexNormals();
+ const stripe=new T.BufferGeometry();stripe.setAttribute('position',new T.Float32BufferAttribute(stripes,3));stripe.computeVertexNormals();
+ return {wall,stripe};
+}
+export function raceTrackModel(race,color='#83f4d5',parent){
  const group=new T.Group(),white=material('#ffffff'),black=material('#10151b'),accent=material(color,.4,.3,true);
  const gates=race.gates??[],start=gates[0];
  if(start){const line=new T.Group();line.position.set(start.x,.08,start.z);line.rotation.y=Math.atan2(start.nx,start.nz);for(let row=0;row<2;row++)for(let col=0;col<12;col++)box(line,2,.025,1.2,(col-5.5)*2,0,(row-.5)*1.2,(row+col)%2?white:black);group.add(line);}
  for(const [index,p] of (race.grid??[]).entries()){const slot=new T.Group();slot.position.set(p.x,.08,p.z);slot.rotation.y=p.heading??p.yaw??0;slot.userData.raceGrid=index;for(const x of [-2,2])box(slot,.12,.03,5,x,0,0,white);for(const z of [-2.5,2.5])box(slot,4,.03,.12,0,0,z,white);group.add(slot);}
  for(const [index,gate] of gates.entries()){const frame=new T.Group(),width=gate.halfWidth??12,mat=index===0?accent:material(index%2?'#ffce73':'#b28cff',.4,.3,true);frame.position.set(gate.x,0,gate.z);frame.rotation.y=Math.atan2(gate.nx,gate.nz);frame.userData.raceGate=index;for(const x of [-width,width])box(frame,.25,6,.25,x,3,0,mat);box(frame,width*2,.25,.25,0,6,0,mat);if(typeof document!=='undefined'){textLabel(frame,index===0?'1 / FINISH':String(index+1),0,6.8,0,1.4,'#ffffff');textLabel(frame,String(index+1),0,6.8,0,1.4,'#ffffff',Math.PI);}group.add(frame);}
  const points=race.centerline??[];for(let i=0;i<points.length;i++){const a=points[i],b=points[(i+1)%points.length],dx=b.x-a.x,dz=b.z-a.z,length=Math.hypot(dx,dz);if(!length)continue;const stripe=box(group,.16,.025,length,(a.x+b.x)/2,.07,(a.z+b.z)/2,accent);stripe.rotation.y=Math.atan2(dx,dz);}
+ const host=parent||group,polygons=raceBarrierPolygons(race);
+ if(polygons.length){
+  const barrierMat=material('#e78b30',.08,.78),stripeMat=material('#f4eddb',.05,.85);
+  if(barrierMat.side!==T.DoubleSide)barrierMat.side=T.DoubleSide;
+  if(stripeMat.side!==T.DoubleSide)stripeMat.side=T.DoubleSide;
+  for(const {points,side} of polygons){
+   if(!(points.length>1))continue;
+   const {wall,stripe}=raceBarrierGeometry(points,side);
+   const wallMesh=new T.Mesh(wall,barrierMat);wallMesh.userData.raceBarrier=side;host.add(wallMesh);
+   const stripeMesh=new T.Mesh(stripe,stripeMat);stripeMesh.userData.raceStripe=true;stripeMesh.userData.arenaDetail=true;host.add(stripeMesh);
+  }
+ }
+ if(parent&&group.parent!==parent)parent.add(group);
  // Markers are visual only and must not shorten the camera's occlusion ray.
- group.traverse(n=>{n.userData.objective=true;});return group;
+ group.traverse(n=>{n.userData.objective=true;});
+ if(host!==group)for(const n of host.children)if(n.userData.raceBarrier||n.userData.raceStripe)n.userData.objective=true;
+ return group;
 }

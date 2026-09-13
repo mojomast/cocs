@@ -1,15 +1,17 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {initializeRace, stepRace, raceSnapshot, raceStandings, crossRaceGates, resetRaceRacer} from './race.mjs';
+import {initializeRace, stepRace, raceSnapshot, raceStandings, crossRaceGates, resetRaceRacer,
+  ITEMS, CAR_RADIUS, MIN_CAR_SEPARATION, paceMultiplier, itemWeights, rollItem, resolveCarCollisions,
+  PACE_LEADER, PACE_TRAILER} from './race.mjs';
 
-function fixture(count=2, bots=false) {
+function fixture(count=2, bots=false, seed=7) {
   const centerline=Array.from({length:12},(_,i)=>({x:60*Math.sin(i*Math.PI/6),z:-48*Math.cos(i*Math.PI/6)}));
   const gates=centerline.map((p,i)=>{const dx=60*Math.cos(i*Math.PI/6),dz=48*Math.sin(i*Math.PI/6),len=Math.hypot(dx,dz);return {...p,nx:dx/len,nz:dz/len,halfWidth:12};});
   const grid=Array.from({length:8},(_,i)=>({x:-4-Math.floor(i/2)*5,z:-48+(i%2?3:-3),heading:Math.PI/2}));
-  let seed=7;
+  let state=seed;
   const match={arena:{race:{centerline,gates,grid,itemBoxes:[{id:'box',x:20,z:-46}]}},
     actors:Array.from({length:count},(_,id)=>({id,ammo:[1],bot:bots?{}:null})),config:{fragLimit:2,timeLimit:180},
-    random(){seed=(Math.imul(seed,1664525)+1013904223)>>>0;return seed/2**32;},time:0,over:false,
+    random(){state=(Math.imul(state,1664525)+1013904223)>>>0;return state/2**32;},time:0,over:false,
     vehicleById(id){return this.vehicles.find(v=>v.id===id);},
     vehicleCollision(next){return next;},syncVehicleActor(a,v){Object.assign(a,v.position,{vehicleId:v.id,vehicleSeat:'driver'});},
     endMatch(reason){this.over=true;this.overReason=reason;}};
@@ -119,8 +121,8 @@ test('reset preserves validated gates, freezes two seconds, and never sweeps tel
 test('items are seeded, single-slot, edge triggered, respawn after eight seconds',()=>{
   const m=fixture(),r=m.race.racers[0],box=m.race.boxes[0];stepRace(m,3);
   Object.assign(m.vehicles[0].position,{x:box.x,z:box.z});stepRace(m,1/60);
-  assert.equal(r.item,'turbo');assert.equal(box.wait,8);assert.equal(raceSnapshot(m.race).boxes[0].ready,false);
-  stepRace(m,1/60,{fire:true});assert.equal(r.item,null);assert.equal(r.effects.turbo,2);
+  assert.ok(ITEMS.includes(r.item));assert.equal(box.wait,8);assert.equal(raceSnapshot(m.race).boxes[0].ready,false);
+  r.item='turbo';stepRace(m,1/60,{fire:true});assert.equal(r.item,null);assert.equal(r.effects.turbo,2);
   r.item='shield';stepRace(m,1/60,{fire:true});assert.equal(r.item,'shield');
   stepRace(m,1/60);stepRace(m,1/60,{power:true});assert.equal(r.item,null);assert.equal(r.effects.shield,5);
   r.item='oil';stepRace(m,8);assert.equal(box.wait,0);assert.equal(r.item,'oil');
@@ -174,4 +176,108 @@ test('eight bots complete actual driving laps deterministically without recovery
     return raceSnapshot(m.race);
   };
   assert.deepEqual(run(),run());
+});
+
+function carPositions(m){return m.race.racers.map(r=>m.vehicleById(r.vehicleId).position);}
+function closestPair(m){
+  const p=carPositions(m);let min=Infinity,pair=null;
+  for(let i=0;i<p.length;i++)for(let j=i+1;j<p.length;j++){
+    const d=Math.hypot(p[i].x-p[j].x,p[i].z-p[j].z);if(d<min){min=d;pair=[i,j];}
+  }
+  return {min,pair};
+}
+
+test('after countdown all eight cars hold distinct, non-overlapping grid slots',()=>{
+  const m=fixture(8,true),grid=m.arena.race.grid;
+  stepRace(m,3,{inputs:{}});
+  assert.equal(m.race.phase,'racing');
+  const p=carPositions(m);
+  for(let i=0;i<p.length;i++)for(let j=i+1;j<p.length;j++){
+    const d=Math.hypot(p[i].x-p[j].x,p[i].z-p[j].z);
+    assert.ok(d>MIN_CAR_SEPARATION,`cars ${i},${j} only ${d.toFixed(3)} apart`);
+  }
+  assert.ok(m.race.gridMinSeparation>MIN_CAR_SEPARATION,`grid min ${m.race.gridMinSeparation}`);
+  assert.equal(m.race.gridNudged,false);
+  // Authored fixture grid (x stagger 5, z stagger 6) already clears 2*radius.
+  assert.ok(grid.length>=8);
+});
+
+test('racing contacts keep every car separated, finite and on its chassis',()=>{
+  const m=fixture(8,true,11);stepRace(m,3,{inputs:{}});
+  let resets=0;
+  for(let i=0;i<300;i++){stepRace(m,1/30,{inputs:{}});if(m.race.racers.some(r=>r.resetWait>0))resets++;}
+  for(const p of carPositions(m))assert.ok(Number.isFinite(p.x)&&Number.isFinite(p.z),'position finite');
+  for(const r of m.race.racers){
+    const v=m.vehicleById(r.vehicleId),a=m.actors.find(a=>a.id===r.actorId);
+    assert.equal(v.driver,r.actorId);assert.equal(a.vehicleId,v.id);
+  }
+  const {min,pair}=closestPair(m);
+  assert.ok(min>=MIN_CAR_SEPARATION-.03,`cars ${pair} only ${min.toFixed(4)} apart after 10s`);
+  assert.ok(resets===0,`unexpected recoveries: ${resets}`);
+});
+
+test('pole position does not always win across fixed seeds',()=>{
+  const winners=[],order=[];
+  for(const seed of [1,7,13,29,101,777]){
+    const m=fixture(8,true,seed);
+    for(let i=0;i<14000&&!m.over;i++)stepRace(m,1/30,{inputs:{}});
+    assert.equal(m.overReason,'race-finish');
+    winners.push(m.race.winnerId);
+    order.push(raceStandings(m.race).map(r=>r.actorId).join(''));
+  }
+  assert.ok(new Set(winners).size>1,`all seeds won by ${winners[0]} (${winners})`);
+  assert.ok(winners.some(w=>w!==0),`pole racer 0 won every seed (${winners})`);
+});
+
+test('mystery box rolls are weighted toward the trailer by rank',()=>{
+  const sample=t=>{
+    let state=1234567;const counts=Object.fromEntries(ITEMS.map(item=>[item,0]));
+    for(let i=0;i<4000;i++){state=(Math.imul(state,1664525)+1013904223)>>>0;counts[rollItem(()=>state/2**32,t)]++;}
+    return counts;
+  };
+  const leader=sample(0),trailer=sample(1),catchup=c=>c.turbo+c.pulse;
+  assert.ok(catchup(trailer)>catchup(leader)*2,`leader ${JSON.stringify(leader)} trailer ${JSON.stringify(trailer)}`);
+  assert.ok(catchup(leader)/4000<.35&&catchup(trailer)/4000>.65);
+  for(const item of ITEMS)assert.ok(trailer[item]>leader[item]||(item!=='turbo'&&item!=='pulse'));
+  const weights=itemWeights(.5),total=ITEMS.reduce((s,item)=>s+weights[item],0);
+  assert.ok(Math.abs(total-1)<1e-9&&ITEMS.every(item=>weights[item]>=0));
+});
+
+test('rubber-band pace is bounded and always helps the trailer',()=>{
+  assert.equal(paceMultiplier(-1),PACE_LEADER);assert.equal(paceMultiplier(0),PACE_LEADER);
+  assert.equal(paceMultiplier(1),PACE_TRAILER);assert.equal(paceMultiplier(5),PACE_TRAILER);
+  for(let i=0;i<=20;i++){const p=paceMultiplier(i/20);assert.ok(Number.isFinite(p)&&p>=PACE_LEADER&&p<=PACE_TRAILER);}
+  assert.ok(paceMultiplier(0)<paceMultiplier(.5)&&paceMultiplier(.5)<paceMultiplier(1));
+  assert.ok(PACE_LEADER>=.93&&PACE_TRAILER<=1.11);
+});
+
+test('contacts push apart symmetrically, kill closing speed, and respect geometry',()=>{
+  const m=fixture(2);stepRace(m,3,{inputs:{}});
+  const a=m.vehicles[0],b=m.vehicles[1];
+  a.position={x:0,y:0,z:0};b.position={x:1,y:0,z:0};
+  a.velocity={x:6,z:0};b.velocity={x:-6,z:0};
+  assert.ok(resolveCarCollisions(m,m.race,2)>0);
+  assert.ok(Math.hypot(a.position.x-b.position.x,a.position.z-b.position.z)>=MIN_CAR_SEPARATION-1e-6);
+  assert.ok((a.velocity.x-b.velocity.x)<=1e-9,'closing normal velocity removed');
+  assert.ok(Number.isFinite(a.velocity.x)&&Number.isFinite(b.velocity.x));
+  // A world-blocked push is rejected rather than clipping through geometry.
+  a.position={x:0,y:0,z:0};b.position={x:.5,y:0,z:0};m.vehicleCollision=()=>false;
+  assert.equal(resolveCarCollisions(m,m.race,2),0);
+  assert.deepEqual([a.position.x,a.position.z],[0,0]);
+  assert.deepEqual([b.position.x,b.position.z],[.5,0]);
+  assert.ok(Number.isFinite(a.position.x)&&Number.isFinite(b.position.z));
+  // Reset-frozen cars are skipped entirely.
+  m.vehicleCollision=next=>next;m.race.racers[1].resetWait=1;
+  assert.equal(resolveCarCollisions(m,m.race,2),0);
+});
+
+test('collisions never duplicate or skip a racer gate/progress state',()=>{
+  const m=fixture(8,true,5),s=m.race;stepRace(m,3,{inputs:{}});
+  for(let i=0;i<900;i++)stepRace(m,1/30,{inputs:{}});
+  for(const r of s.racers){
+    assert.ok(Number.isInteger(r.passed)&&r.passed>=0);
+    assert.ok(Number.isInteger(r.nextGate)&&r.nextGate>=0&&r.nextGate<s.gates.length);
+    assert.equal(r.lap,Math.min(s.laps,r.completedLaps+1));
+    assert.ok(r.completedLaps<=s.laps);
+  }
 });

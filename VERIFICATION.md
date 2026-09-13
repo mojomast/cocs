@@ -1,5 +1,35 @@
 # COCS verification report
 
+## Release 2.63 - Race balance, collisions, track render, demo camera
+
+- Balanced the race so the early leader is catchable: a clamped rubber-band pace
+  (0.93 leader .. 1.10 trailer) applies to bots and humans, and each racer has a
+  seeded skill factor (0.95-1.05) and racing-line offset so bots do not drive one
+  identical line. Six fixed seeds produced multiple winners; the pole racer won
+  0/6 in the fixture, versus a deterministic runaway before.
+- Cars are solid. A guarded pairwise contact resolver pushes overlapping Pumas
+  apart to a 3.4-unit separation along the contact normal and equalizes their
+  normal velocity without pushing either into world geometry. After a 10 s race
+  no pair overlaps (max residual 0.02 units), all positions stay finite, and the
+  eight grid slots start 6.0 units apart. No grid nudge was needed.
+- Mystery-box item rolls are position-weighted: the leader draws mostly shield/oil
+  and the trailer mostly turbo/pulse (8k seeded draws: trailer catch-up items
+  74.5% vs leader 24.8%), replacing the uniform roll.
+- Fixed the flat-wall artifacts: the track no longer renders ~470 overlapping
+  2x2x2.6 collision boxes. Rails are hidden collision boxes and the walls/stripes
+  are drawn as continuous merged barrier geometry from `race.boundary` (outer and
+  inner polygons, 12 points each). Collision boxes still seal the perimeter for a
+  2.1-radius car with no car-sized gaps.
+- The main-menu demo camera now alternates every 7 s through chase, orbit, flyover
+  and trackside, rotating the featured car each segment, with damped transitions
+  and a reduced-motion chase fallback. Non-cinematic local races keep the chase.
+- Verification: focused race/camera/render/network/map suite **133/133**; full
+  game suite fixed three fixture regressions caused by the race-only circuit
+  (generic combat tests now skip maps with `arena.race`; the next-gen per-mode
+  count excludes the dedicated `puma-race` circuit) and then passed **806/806**;
+  server **118/118**; `tsc --noEmit` clean. No browser/WebGL playtest of wall
+  geometry or the demo camera; collisions are sim-verified, not device-verified.
+
 ## Release 2.62 - Puma Circuit menu and deployment
 
 - Main-menu showcase now runs only Puma Circuit: eight AI drivers, two laps,
