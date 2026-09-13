@@ -265,3 +265,47 @@ test('bots do not acquire cloaked enemies at range', () => {
   for (let i = 0; i < 12; i++) { bot.bot.think = 0; m.step(1 / 60); }
   assert.notEqual(bot.bot.target, enemy.id, 'a cloaked enemy is not acquired at range');
 });
+
+test('death and falling clear traversal and streak state', () => {
+  const m = new Match('chatgpt', 'openclaw', seeded(), 'crosswire', {mode: 'deathmatch', botCount: 0, humanCount: 2, timeLimit: 60});
+  const [a] = m.actors;
+  a.streak = 4; a.zipRide = {t: 0, duration: 1, from: {x: 0, y: 0, z: 0}, to: {x: 1, y: 0, z: 1}}; a.traversalFlight = true;
+  m.fall(a);
+  assert.equal(a.streak, 0, 'fall resets the streak');
+  assert.equal(a.zipRide, null, 'fall clears the zipline');
+  assert.equal(a.traversalFlight, false);
+
+  const m2 = new Match('chatgpt', 'openclaw', seeded(), 'crosswire', {mode: 'deathmatch', botCount: 0, humanCount: 2, timeLimit: 60});
+  const [c, d] = m2.actors;
+  c.streak = 3; c.zipRide = {t: 0, duration: 1, from: {x: 0, y: 0, z: 0}, to: {x: 1, y: 0, z: 1}}; c.traversalFlight = true;
+  Object.assign(c, {health: 1, protection: 0, armor: 0});
+  m2.damage(c, 999, d);
+  assert.equal(c.streak, 0, 'death resets the streak');
+  assert.equal(c.zipRide, null, 'death clears the zipline');
+  assert.equal(c.traversalFlight, false);
+});
+
+test('an assault breach does not inflate the scoreboard past the capture count', () => {
+  const m = new Match('chatgpt', 'openclaw', seeded(), 'rampart', {mode: 'assault', botCount: 0, humanCount: 2, fragLimit: 9, timeLimit: 60});
+  const state = m.objectiveState;
+  state.winner = state.attacker;
+  m.updateAssault(1 / 60);
+  assert.equal(m.over, true);
+  assert.equal(m.snapshot().winner, state.attacker);
+  assert.ok(m.teamScores[state.attacker] < 9, `score reflects captures (${m.teamScores[state.attacker]})`);
+});
+
+test('a simultaneous objective score-limit tie is not awarded to team 0', () => {
+  const m = new Match('chatgpt', 'openclaw', seeded(), 'crosswire', {mode: 'domination', botCount: 0, humanCount: 2, fragLimit: 5, timeLimit: 60});
+  const state = m.objectiveState, [a, b] = m.actors;
+  const [z0, z1] = state.zones;
+  Object.assign(z0, {owner: 0, progress: 100, captureTeam: null});
+  Object.assign(z1, {owner: 1, progress: 100, captureTeam: null});
+  Object.assign(a, {team: 0, x: z0.x, z: z0.z, y: z0.y ?? 0, health: 100, protection: 0});
+  Object.assign(b, {team: 1, x: z1.x, z: z1.z, y: z1.y ?? 0, health: 100, protection: 0});
+  m.teamScores[0] = m.config.fragLimit - 0.001;
+  m.teamScores[1] = m.config.fragLimit - 0.001;
+  m.updateObjectives(1 / 60);
+  assert.equal(m.over, false, 'a tie does not end the match');
+  assert.equal(m.teamScores[0], m.teamScores[1]);
+});

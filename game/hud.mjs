@@ -134,7 +134,7 @@ const CAPTION_EVENTS = Object.freeze({shot:'Gunfire',explosion:'Explosion','vehi
 export function ladderStatus(player, total = 10) {
   const rung = Math.max(0, Math.floor(Number(player?.ladder) || 0));
   const size = Math.max(1, Math.floor(Number(total) || 10));
-  return { rung, total: size, label: `LADDER ${Math.min(size, rung + 1)}/${size}` };
+  return { rung, total: size, label: rung >= size - 1 ? 'LADDER FINAL' : `LADDER ${rung + 1}/${size}` };
 }
 
 export function streakStatus(player) {

@@ -66,3 +66,8 @@ test('cloaked enemies drop off radar except up close',()=>{
   player.powerups={recon:5};
   assert.ok(radarContacts(far,player,{range:55}).contacts.some(c=>c.id===1),'recon reveals cloaked enemies');
 });
+
+test('radar preserves the requested range even when the player is invalid',()=>{
+  assert.equal(radarContacts({actors:[]},{x:NaN,z:0},{range:120}).range,120);
+  assert.equal(radarContacts(null,null,{range:90}).range,90);
+});

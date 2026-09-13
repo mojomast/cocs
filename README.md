@@ -252,6 +252,8 @@ Version 2.0 adds progression, unlocks and gear:
 - **Gear for Combined Arms.** Equip one item per slot (weapon kit, armour, utility) to tweak health, armour, speed, damage and spread. Gear is applied to your actor on solo and hosted matches.
 - **Server persistence.** A stable local player id is sent on join; `server/progression.mjs` stores XP, levels, unlocks and saved gear to a JSON store (like match history), awarding results authoritatively at match end and pushing a `progression` update to each player.
 
+Version 2.61 is a bug-fix pass over the new systems: Arms Race keeps ladder progress across respawns and ignores weapon pickups; bounty frags can no longer end an Arms Race; random loadout works with unlimited ammo; simultaneous objective score ties are no longer awarded to team 0; assault breaches no longer inflate the scoreboard; death and falling clear traversal/streak state; keybind normalization can no longer create duplicate keys (reserved shell keys are rejected, voice is remappable, and the in-game legend follows your binds); plus a grenade press-latch, fall streak reset and spectator/radar fixes.
+
 Version 2.60 adds **remappable controls**: every action (movement, jump, sprint, crouch, reload, melee, frag, ability, interact, voice) can be rebound in Settings with duplicate detection and a one-tap reset. Bindings persist on the device.
 
 Version 2.59 improves spectating: a target board lists every live actor for one-tap following, **P** switches between first- and third-person, and **H** hides the HUD for a clean view.

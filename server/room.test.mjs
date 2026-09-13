@@ -501,3 +501,17 @@ test('game inputs are rate limited per peer',()=>{
  room.input(1,{seq:200,x:0,z:0});
  assert.equal(peer.receivedSeq,200);
 });
+test('grenade is a one-shot edge and cannot auto-repeat while held',()=>{
+ const room=new Room('r',rng(),{graceMs:1000});
+ room.join(1,'A');room.host(1,{botCount:0,timeLimit:30},'crosswire');room.start(1);
+ const peer=room.peers.get(1);
+ room.input(1,{grenade:true});
+ assert.equal(peer.edgeGrenade,true,'first press arms the edge');
+ room.tick(1/60);
+ assert.equal(peer.edgeGrenade,false,'tick consumes the edge');
+ room.input(1,{grenade:true});
+ assert.equal(peer.edgeGrenade,false,'holding does not re-arm');
+ room.input(1,{grenade:false});
+ room.input(1,{grenade:true});
+ assert.equal(peer.edgeGrenade,true,'a fresh press re-arms');
+});

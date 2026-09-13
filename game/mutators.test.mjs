@@ -58,3 +58,11 @@ test('berserk boosts damage at a three kill streak', () => {
   const boosted = 100 - zb.health;
   assert.ok(boosted > normal, `berserk increases damage (${normal} -> ${boosted})`);
 });
+
+test('random loadout with unlimited ammo spawns a usable infinite gun', () => {
+  const m = new Match('chatgpt', 'openclaw', seeded(), 'crosswire', {mode: 'deathmatch', botCount: 0, humanCount: 1, randomLoadout: true, unlimitedAmmo: true, timeLimit: 60});
+  const a = m.actors[0];
+  assert.equal(a.ammo[a.weapon], Infinity, 'random weapon has infinite ammo');
+  a.shotWait = 0;
+  assert.equal(m.fire(a), true, 'the random weapon can fire');
+});

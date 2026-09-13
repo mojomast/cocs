@@ -14,9 +14,9 @@ const teamKey = team => Number(team) === 1 ? 'blue' : 'red';
 // Projects the world onto a yaw-relative unit circle: +y is ahead, +x is the player's right.
 export function radarContacts(hud, player, {range = DEFAULT_RANGE} = {}) {
   const contacts = [];
-  const px = Number(player?.x), pz = Number(player?.z);
-  if (!hud || !Number.isFinite(px) || !Number.isFinite(pz)) return {contacts, range: DEFAULT_RANGE};
   const span = Number(range) > 0 ? Number(range) : DEFAULT_RANGE;
+  const px = Number(player?.x), pz = Number(player?.z);
+  if (!hud || !Number.isFinite(px) || !Number.isFinite(pz)) return {contacts, range: span};
   const yaw = Number(player.yaw) || 0, cos = Math.cos(yaw), sin = Math.sin(yaw);
   const reveal = (Number(player?.powerups?.recon) || 0) > 0;
   const place = (x, z, always = false) => {

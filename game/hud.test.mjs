@@ -301,7 +301,8 @@ test('audio captions describe events and ignore silent ones',()=>{
 
 test('ladder and streak status describe arms race and killstreaks',()=>{
  assert.deepEqual(ladderStatus({ladder:3},10),{rung:3,total:10,label:'LADDER 4/10'});
- assert.equal(ladderStatus({ladder:99},10).label,'LADDER 10/10');
+ assert.equal(ladderStatus({ladder:9},10).label,'LADDER FINAL');
+ assert.equal(ladderStatus({ladder:99},10).label,'LADDER FINAL');
  assert.equal(ladderStatus({},10).label,'LADDER 1/10');
  assert.deepEqual(streakStatus({streak:4}),{streak:4,label:'4 STREAK'});
  assert.equal(streakStatus({streak:1}),null);

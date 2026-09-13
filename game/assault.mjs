@@ -7,9 +7,13 @@ const sector=(id,point,captureSeconds)=>({id,x:point.x,z:point.z,radius:point.ra
 const candidatePoints=arena=>{const values=[];for(const node of arena.navNodes||[])values.push({x:node.x,z:node.z,y:node.y});for(const spawn of arena.spawns||[])values.push({x:spawn[0],z:spawn[1]});for(const pickup of arena.pickups||[])values.push({x:pickup[1],z:pickup[2]});const b=boundsOf(arena);values.push({x:(b.minX+b.maxX)/2,z:(b.minZ+b.maxZ)/2,y:0});return values;};
 export function assaultTemplate(arena,ids=DEFAULT_IDS){
  const source=arena||{},zones=source.objectiveZones,captureSeconds=6;
- if(Array.isArray(zones)&&zones.length>=ids.length)return {kind:'assault',attacker:null,defender:null,sectors:ids.map((id,index)=>sector(id,zones[index],captureSeconds)),active:0,breached:false,winner:null};
- const safe=candidatePoints(source).filter(point=>Number.isFinite(point.x)&&Number.isFinite(point.z)&&inBounds(source,point.x,point.z)&&!insideBlock(source,point.x,point.z,point.y??0));
- const pool=safe.length?safe:[{x:0,z:0,y:0}];
+ const valid=point=>Boolean(point)&&Number.isFinite(point.x)&&Number.isFinite(point.z)&&inBounds(source,point.x,point.z)&&!insideBlock(source,point.x,point.z,point.y??0);
+ const safe=candidatePoints(source).filter(valid),pool=safe.length?safe:[{x:0,z:0,y:0}];
+ if(Array.isArray(zones)&&zones.length>=ids.length){
+  let fallback=0;
+  const sectors=ids.map((id,index)=>{const zone=zones[index];return sector(id,valid(zone)?zone:pool[fallback++%pool.length],captureSeconds);});
+  return {kind:'assault',attacker:null,defender:null,sectors,active:0,breached:false,winner:null};
+ }
  return {kind:'assault',attacker:null,defender:null,sectors:ids.map((id,index)=>sector(id,pool[index%pool.length],captureSeconds)),active:0,breached:false,winner:null};
 }
 export function assignAssaultTeams(state){if(state){if(state.attacker==null)state.attacker=0;if(state.defender==null)state.defender=1;}return state;}

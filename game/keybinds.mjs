@@ -10,20 +10,31 @@ export const DEFAULT_BINDINGS = Object.freeze({
 
 export const KEYBIND_ACTIONS = Object.freeze(Object.keys(DEFAULT_BINDINGS));
 
+// Keys the shell owns (scoreboard, pause, chat, weapons, digits, crouch-alt).
+export const RESERVED_CODES = Object.freeze(['Tab', 'Escape', 'Enter', 'KeyT', 'KeyC', 'BracketLeft', 'BracketRight', 'Digit0', 'Digit1', 'Digit2', 'Digit3', 'Digit4', 'Digit5', 'Digit6', 'Digit7', 'Digit8', 'Digit9']);
+const RESERVED = new Set(RESERVED_CODES);
+
 const CODE = /^(Key[A-Z]|Digit[0-9]|Arrow(Up|Down|Left|Right)|Space|ShiftLeft|ShiftRight|ControlLeft|ControlRight|AltLeft|AltRight|Tab|Enter|BracketLeft|BracketRight|Semicolon|Quote|Comma|Period|Slash|Backslash|Backquote|Minus|Equal)$/;
-const isCode = value => typeof value === 'string' && CODE.test(value);
+
+// The single source of truth for both validation and the settings dropdown, so
+// every accepted binding is representable and no reserved key is offered.
+const EXTRA_CODES = ['KeyH', 'KeyI', 'KeyJ', 'KeyK', 'KeyL', 'KeyM', 'KeyN', 'KeyO', 'KeyP', 'KeyU', 'KeyY', 'KeyZ', 'ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', 'ShiftRight', 'ControlRight', 'AltLeft', 'AltRight', 'Semicolon', 'Quote', 'Comma', 'Period', 'Slash', 'Backquote', 'Minus', 'Equal'];
+export const KEYBIND_OPTIONS = Object.freeze([...new Set([...Object.values(DEFAULT_BINDINGS), ...EXTRA_CODES])].filter(code => !RESERVED.has(code)));
+
+export const isKeybindCode = value => typeof value === 'string' && CODE.test(value) && !RESERVED.has(value);
 
 export function normalizeBindings(value) {
   const source = value && typeof value === 'object' && !Array.isArray(value) ? value : {};
-  const out = {}, used = new Set();
+  const used = new Set(), out = {};
   for (const action of KEYBIND_ACTIONS) {
-    let candidate = isCode(source[action]) ? source[action] : DEFAULT_BINDINGS[action];
-    if (used.has(candidate)) candidate = DEFAULT_BINDINGS[action];
-    if (used.has(candidate)) candidate = Object.keys(out).length ? null : candidate;
-    if (candidate) { out[action] = candidate; used.add(candidate); }
+    let candidate = isKeybindCode(source[action]) ? source[action] : DEFAULT_BINDINGS[action];
+    if (used.has(candidate)) candidate = null;
+    if (!candidate) candidate = Object.values(DEFAULT_BINDINGS).find(code => !used.has(code)) || null;
+    if (!candidate) candidate = KEYBIND_OPTIONS.find(code => !used.has(code)) || null;
+    if (!candidate) candidate = DEFAULT_BINDINGS[action];
+    out[action] = candidate;
+    used.add(candidate);
   }
-  // Guarantee every action has a key even in pathological inputs.
-  for (const action of KEYBIND_ACTIONS) if (!out[action]) out[action] = DEFAULT_BINDINGS[action];
   return out;
 }
 

@@ -1,5 +1,27 @@
 # COCS verification report
 
+## Bug-fix pass 2.61 - 2026-09-12
+
+Three parallel read-only audits of the new features, input/UI wiring and core
+lifecycle produced these fixes, each with a regression test verified failing
+against the pre-fix source:
+
+- Arms Race: ladder/weapon/ammo persist across respawn; weapon pickups do not
+  bypass the lock; bounty frags (and any non-frag score mode) cannot end the
+  match before the ladder finishes.
+- Scoring: simultaneous objective score-limit ties are no longer awarded to
+  team 0; assault breaches no longer inflate `teamScores` to the target.
+- Actor lifecycle: death and falling clear `zipRide`/`traversalFlight` and reset
+  the streak; spawn clears stale traversal cooldown/pad/event and `burstLeft`.
+- Mutators: random loadout respects unlimited ammo.
+- Keybinds: normalization is duplicate-free, reserved shell keys are rejected,
+  the options list is shared with validation, `voice` is remappable, and the
+  pause/settings legend derives from the active binds.
+- Misc: grenade is a latched one-shot server edge; `radarContacts` preserves the
+  requested range on invalid frames; `ladderStatus` distinguishes the final
+  rung; preset buttons have accessible names.
+- Suites: full game **665/665**, server **110/110**, SSR 1/1, build/`tsc` clean.
+
 ## Remappable keybinds 2.60 - 2026-09-12
 
 - Pure `keybinds.mjs` (`normalizeBindings`, `actionForCode`,

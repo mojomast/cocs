@@ -90,3 +90,12 @@ test('template prefers ordered objectiveZones metadata',()=>{
  assert.deepEqual(state.sectors.map(s=>[s.x,s.z,s.radius,s.y]),[[-8,0,2,1],[0,0,3,2],[8,0,4,3]]);
  assert.deepEqual(state.sectors.map(s=>s.id),['alpha','bravo','charlie']);
 });
+
+test('authored assault zones are sanitized onto valid ground',()=>{
+ const arena={bounds:{minX:-20,maxX:20,minZ:-20,maxZ:20},blocks:[{x:0,z:0,w:8,d:8,h:5}],navNodes:[{x:12,z:10},{x:-12,z:-10}],spawns:[[-10,-10]],pickups:[],objectiveZones:[{x:NaN,z:NaN,y:1},{x:0,z:0,y:1},{x:15,z:0,y:1}]};
+ const state=assaultTemplate(arena);
+ for(const s of state.sectors){
+  assert.ok(Number.isFinite(s.x)&&Number.isFinite(s.z),'sector is finite');
+  assert.ok(!(Math.abs(s.x)<4&&Math.abs(s.z)<4),'sector is not inside the block');
+ }
+});

@@ -40,3 +40,33 @@ test('bots during arms race keep their promoted ladder weapon', () => {
   for (let i = 0; i < 120; i++) m.step(1 / 60);
   assert.equal(bot.weapon, bot.ladder, 'bot uses its ladder weapon');
 });
+
+test('arms race keeps ladder progress across a respawn', () => {
+  const m = new Match('chatgpt', 'openclaw', seeded(), 'proving-grounds', {mode: 'armsrace', botCount: 0, humanCount: 2, timeLimit: 60});
+  const [a, b] = m.actors;
+  kill(m, a, b); kill(m, a, b);
+  assert.equal(a.ladder, 2);
+  Object.assign(a, {health: 1, protection: 0, armor: 0});
+  m.damage(a, 999, b);
+  assert.ok(a.health <= 0, 'actor died');
+  m.spawn(a);
+  assert.equal(a.ladder, 2, 'ladder progress survives death');
+  assert.equal(a.weapon, 2, 'respawns on the current rung');
+  assert.ok(a.ammo[2] > 0, 'current rung has ammunition');
+});
+
+test('arms race ignores weapon pickups so the ladder stays authoritative', () => {
+  const m = new Match('chatgpt', 'openclaw', seeded(), 'proving-grounds', {mode: 'armsrace', botCount: 0, humanCount: 1, timeLimit: 60});
+  const a = m.actors[0];
+  assert.equal(a.weapon, 0);
+  m.collect(a, {kind: 'rocket', x: a.x, z: a.z, y: a.y, wait: 0});
+  assert.equal(a.weapon, 0, 'pickup does not switch the arms race weapon');
+});
+
+test('bounty frags cannot end an arms race before the ladder finishes', () => {
+  const m = new Match('chatgpt', 'openclaw', seeded(), 'proving-grounds', {mode: 'armsrace', botCount: 0, humanCount: 2, bounty: true, timeLimit: 120});
+  const [a, b] = m.actors;
+  for (let i = 0; i < 5; i++) { Object.assign(b, {health: 1, streak: 4, protection: 0, armor: 0}); m.damage(b, 999, a); }
+  assert.equal(m.over, false, 'bounty frags must not win arms race');
+  assert.ok(a.ladder >= 5);
+});
