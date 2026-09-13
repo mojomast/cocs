@@ -155,18 +155,28 @@ export class DemoRecorder {
     return this.lastTime;
   }
 
-  frame(state, events = []) {
-    this.lastTime = state?.time ?? this.lastTime;
+  pushEvents(events, maxTime) {
     for (const event of events) {
       if (!event) continue;
+      if (maxTime !== null && (typeof event.time !== 'number' || event.time > maxTime)) continue;
       if (event.id !== undefined) {
         if (this.eventIds.has(event.id)) continue;
         this.eventIds.add(event.id);
       }
       this.events.push({ ...event });
     }
-    if (!state || typeof state.time !== 'number') return false;
-    if (this.maxSeconds > 0 && this.keyframes.length > 0 && state.time - this.keyframes[0].time > this.maxSeconds) return false;
+  }
+
+  frame(state, events = []) {
+    this.lastTime = state?.time ?? this.lastTime;
+    const hasTime = !!state && typeof state.time === 'number';
+    const first = this.keyframes[0];
+    if (hasTime && this.maxSeconds > 0 && first && state.time - first.time > this.maxSeconds) {
+      this.pushEvents(events, first.time + this.maxSeconds);
+      return false;
+    }
+    this.pushEvents(events, null);
+    if (!hasTime) return false;
     const interval = 1 / this.recordHz;
     if (this.lastKeyframeTime === null || state.time - this.lastKeyframeTime >= interval - 1e-9) {
       this.keyframes.push({ time: state.time, state: cloneRounded(state) });

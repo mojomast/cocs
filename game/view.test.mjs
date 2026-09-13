@@ -9,6 +9,8 @@ import * as T from 'three';
 import BLOOD_GULCH from './blood-gulch.mjs';
 import {MAPS} from './maps.mjs';
 import {terrainTriangles,terrainWallTriangles} from './terrain.mjs';
+import {resolveAttachments} from './attachments.mjs';
+import {surfaceTextures,clearSurfaceTextures} from './textures.mjs';
 
 function fixture(t,{dpr=1,software=false,width=800,height=450}={}){
  const previous=Object.getOwnPropertyDescriptor(globalThis,'window');
@@ -593,4 +595,43 @@ test('the active assault sector is highlighted while inactive sectors are dimmed
  view.updateObjectives({time:1.6,objectiveState:{kind:'assault',attacker:0,defender:1,active:1,zones}},payloadArena);
  assert.equal(bravo.scale.y,1,'reduced motion holds the active sector pulse');
  view.disposeObject(view.scene);
+});
+
+test('underbarrel attachments add a distinct mesh and honor their visual color',()=>{
+ const underbarrels=['quickdraw-grip','burst-module','grenade-launcher','homing-beacon','chain-capacitor'];
+ let base=0;weaponModel(0).traverse(n=>{if(n.isMesh)base++;});
+ for(const id of underbarrels){
+  const {visual}=resolveAttachments([id]);
+  const model=weaponModel(0,undefined,visual);
+  let meshes=0;const colors=new Set();
+  model.traverse(n=>{if(!n.isMesh)return;meshes++;if(n.material?.color)colors.add(n.material.color.getHexString());});
+  assert.ok(meshes>base,`${id} produces extra underbarrel geometry`);
+  assert.ok(colors.has((resolveAttachments([id]).visual.color||'').replace('#','')),`${id} paints the attachment with its visual color`);
+  model.traverse(n=>{if(n.geometry)n.geometry.dispose();if(n.material){for(const m of Array.isArray(n.material)?n.material:[n.material])m.dispose();}});
+ }
+});
+
+test('dispose clears the global surface-texture cache',t=>{
+ const previous=Object.getOwnPropertyDescriptor(globalThis,'document');
+ const ctx={createImageData:(w,h)=>({data:new Uint8ClampedArray(w*h*4)}),putImageData(){}};
+ Object.defineProperty(globalThis,'document',{configurable:true,value:{createElement:()=>({width:0,height:0,getContext:()=>ctx})}});
+ t.after(()=>{if(previous)Object.defineProperty(globalThis,'document',previous);else delete globalThis.document;});
+ const first=surfaceTextures('rock',{seed:21,repeat:[1,1]});assert.ok(first);
+ const view=Object.assign(Object.create(ArenaView.prototype),{scene:new T.Scene(),menu:{scene:new T.Scene()},renderResources:new Set(),sharedResources:new Set(),modelAssets:new ModelAssets(),renderer:{dispose(){}}});
+ view.dispose();
+ assert.notEqual(surfaceTextures('rock',{seed:21,repeat:[1,1]}),first,'dispose drops cached canvas textures');
+ clearSurfaceTextures();
+});
+
+test('race builds reuse cached geometry for identical tiles',()=>{
+ const race={gates:[{x:0,z:0,nx:0,nz:1,halfWidth:12},{x:20,z:0,nx:1,nz:0,halfWidth:12}],grid:[{x:0,z:0,heading:0},{x:4,z:0,heading:0}],centerline:[]};
+ const assets=new ModelAssets();
+ const buckets=model=>{const map=new Map();model.traverse(n=>{if(!n.isMesh||n.geometry?.type!=='BoxGeometry')return;const p=n.geometry.parameters,key=`${p.width}|${p.height}|${p.depth}`;const entry=map.get(key)||{count:0,geometries:new Set()};entry.count++;entry.geometries.add(n.geometry);map.set(key,entry);});return map;};
+ const first=raceTrackModel(race,'#83f4d5',undefined,assets),repeated=[...buckets(first).entries()].filter(([,entry])=>entry.count>1);
+ assert.ok(repeated.length>0,'the track has repeated tile dimensions');
+ for(const [key,entry] of repeated)assert.equal(entry.geometries.size,1,`${key} shares one geometry across ${entry.count} tiles`);
+ const firstGeometries=new Set();first.traverse(n=>{if(n.geometry)firstGeometries.add(n.geometry);});
+ const second=raceTrackModel(race,'#83f4d5',undefined,assets),secondGeometries=new Set();second.traverse(n=>{if(n.geometry)secondGeometries.add(n.geometry);});
+ assert.ok([...secondGeometries].some(geometry=>firstGeometries.has(geometry)),'a rebuild reuses cached geometry instances');
+ ArenaView.prototype.disposeObject.call({},first);ArenaView.prototype.disposeObject.call({},second);assets.dispose();
 });

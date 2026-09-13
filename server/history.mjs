@@ -15,7 +15,8 @@ const scoreStatsOf = actor => {
 const leaderRank = (actor, mode) => {
  const stats = scoreStatsOf(actor) ?? Object.fromEntries(SCORE_STAT_FIELDS.map(field => [field, 0]));
  if (mode === 'ctf') return [stats.captures, objectiveActions(stats), Number(actor.frags) || 0];
- if (mode === 'koth' || mode === 'domination') return [stats.objectiveTime, stats.objectiveCaptures, Number(actor.frags) || 0];
+ if (mode === 'koth' || mode === 'domination' || mode === 'combined-arms') return [stats.objectiveTime, stats.objectiveCaptures, Number(actor.frags) || 0];
+ if (mode === 'assault' || mode === 'payload') return [stats.objectiveCaptures, stats.objectiveTime, Number(actor.frags) || 0];
  if (mode === 'armsrace') return [Number(actor.ladder) || 0, Number(actor.frags) || 0];
  return [Number(actor.frags) || 0];
 };

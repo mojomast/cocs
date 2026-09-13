@@ -84,6 +84,16 @@ export function weaponModel(type=0,assets,visual=null,finish=null){return withAs
    else if(visual.barrel==='dual'){for(const x of [-.14,.14]){const b=cylinder(g,.04,.04,.42,x,.02,-.8,mod,8);b.rotation.x=Math.PI/2;ring(g,.05,.012,x,.02,-.99,acc,0);}}
    if(visual.magazine==='drum'){const d=cylinder(g,.15,.15,.26,0,-.24,-.14,mod,12);d.rotation.z=Math.PI/2;ring(g,.155,.018,0,-.24,-.14,acc,Math.PI/2);}
    else if(visual.magazine==='extended'){box(g,.11,.26,.13,0,-.26,-.1,mod);}
+   const rail=visual.underbarrel;
+   if(rail&&rail!=='none'){
+    box(g,.05,.07,.2,0,-.16,-.04,mod);
+    if(rail==='quickdraw-grip'){box(g,.045,.17,.045,0,-.26,-.02,acc);box(g,.07,.045,.1,0,-.35,.01,acc);}
+    else if(rail==='burst-module'){box(g,.11,.11,.16,0,-.2,-.05,acc);ring(g,.055,.012,0,-.2,-.14,mod,0);for(const x of [-.035,.035])box(g,.018,.05,.05,x,-.2,-.14,acc);}
+    else if(rail==='grenade-launcher'){const tube=cylinder(g,.052,.056,.36,0,-.2,-.36,mod,8);tube.rotation.x=Math.PI/2;ring(g,.058,.014,0,-.2,-.55,acc,0);box(g,.08,.08,.16,0,-.2,-.12,acc);}
+    else if(rail==='homing-beacon'){box(g,.075,.14,.1,0,-.22,-.02,acc);const mast=cylinder(g,.012,.012,.18,0,-.08,-.02,acc,6);const tip=new T.Mesh(new T.OctahedronGeometry(.035),acc);tip.position.set(0,-.02,-.02);g.add(tip);}
+    else if(rail==='chain-capacitor'){box(g,.1,.1,.18,0,-.2,-.08,acc);for(const z of [-.02,-.12])ring(g,.05,.012,0,-.2,z,acc,0);box(g,.02,.16,.14,.06,-.2,-.08,mod);}
+    else{box(g,.09,.12,.22,0,-.21,-.06,acc);}
+   }
   }
   return g;});}
 function hornetModel(){const g=new T.Group();g.name='hornet';const hull=material('#3c4652',.7,.4),dark=material('#20262e',.6,.5),accent=material('#ffb35c',.4,.3,true),glass=material('#20323d',.6,.12);
@@ -281,7 +291,8 @@ export class ArenaView{
      this.renderer.setSize(Math.max(w,1/ratio),Math.max(h,1/ratio),false);this.width=w;this.height=h;this.pixelRatio=ratio;
      this.camera.aspect=w/h;this.camera.updateProjectionMatrix();this.menu.camera.aspect=w/h;this.menu.camera.updateProjectionMatrix();this._syncPost?.();}
     _syncPost(){const eligible=this.renderer instanceof T.WebGLRenderer,want=postStage({eligible,reduced:this.reduced(),scale:this.display?.resolutionScale});if(!want){if(this.composer){disposeComposer(this.composer);this.composer=null;}this._postW=0;this._postH=0;this._postRatio=0;return;}if(!this.composer){try{const composer=new EffectComposer(this.renderer);composer.addPass(new RenderPass(this.scene,this.camera));composer.addPass(new UnrealBloomPass(new T.Vector2(1,1),.38,.7,.85));const vignette=new ShaderPass(VignetteShader);vignette.uniforms.offset.value=1.05;vignette.uniforms.darkness.value=1.05;composer.addPass(vignette);composer.addPass(new OutputPass());this.composer=composer;this._postW=0;this._postH=0;this._postRatio=0;}catch{this.composer=null;return;}}const w=Math.max(1,this.renderer.domElement.clientWidth),h=Math.max(1,this.renderer.domElement.clientHeight),ratio=this.pixelRatio??1;if(this._postW!==w||this._postH!==h||this._postRatio!==ratio){applyComposerSize(this.composer,w,h,ratio);this._postW=w;this._postH=h;this._postRatio=ratio;}}
-    buildArena(arena=MAPS[0]){if(this.worldGroup){this.scene.remove(this.worldGroup);this.disposeObject(this.worldGroup);for(const resource of this.renderResources||[])resource.dispose();this.renderResources?.clear();this.flagAssets=null;}this.objectiveModels=new Map();this.mapId=arena.id;const world=new T.Group();this.worldGroup=world;this.scene.add(world);this.scene.background=new T.Color(arena.background);this.scene.fog=new T.FogExp2(arena.background,.018);const bounds=arenaBounds(arena),legacy=!arena.bounds,minX=bounds.minX,maxX=bounds.maxX,minZ=bounds.minZ,maxZ=bounds.maxZ,width=maxX-minX,depth=maxZ-minZ;
+    buildArena(arena=MAPS[0]){return withAssets(this.arenaAssets??=new ModelAssets(),()=>this._buildArena(arena));}
+    _buildArena(arena=MAPS[0]){if(this.worldGroup){this.scene.remove(this.worldGroup);this.disposeObject(this.worldGroup);for(const resource of this.renderResources||[])resource.dispose();this.renderResources?.clear();this.flagAssets=null;}this.objectiveModels=new Map();this.mapId=arena.id;const world=new T.Group();this.worldGroup=world;this.scene.add(world);this.scene.background=new T.Color(arena.background);this.scene.fog=new T.FogExp2(arena.background,.018);const bounds=arenaBounds(arena),legacy=!arena.bounds,minX=bounds.minX,maxX=bounds.maxX,minZ=bounds.minZ,maxZ=bounds.maxZ,width=maxX-minX,depth=maxZ-minZ;
     const look=arenaLooks[arena.id]||arenaLooks.exchange,[floorColor,wallColor,trimColor,skyColor,groundColor,fogDensity,metal]=look;
     this.scene.fog.density=fogDensity;world.userData.look=arena.id;
     for(const light of this.scene.children){if(light.isHemisphereLight){light.color.set(skyColor);light.groundColor.set(groundColor);light.intensity=arena.terrain?2.5:1.8;}if(light.isDirectionalLight){light.color.set(skyColor);light.intensity=arena.terrain?3.1:2.4;light.position.set(arena.id==='aether'?-18:18,24,arena.id==='foundry'?-12:10);}}
@@ -659,7 +670,7 @@ export class ArenaView{
       for(const [key,model] of this.raceModels)if(!active.has(key)){this.worldGroup.remove(model);this.disposeObject(model);this.raceModels.delete(key);}
      }
     _renderPreview(time,reduced){const rect=this.previewRect;if(!rect||rect.width<12||rect.height<12||!(this.renderer instanceof T.WebGLRenderer))return;const renderer=this.renderer,w=this.width,h=this.height;if(w<=0||h<=0)return;const x=Math.max(0,Math.round(rect.left)),y=Math.max(0,Math.round(h-rect.bottom)),vw=Math.max(1,Math.round(rect.width)),vh=Math.max(1,Math.round(rect.height));const m=this.menu.model;m.rotation.y=Math.PI+.25+(reduced?0:Math.sin(time*.4)*.22);m.position.y=.17;const cam=this.menu.camera;cam.aspect=Math.max(.2,vw/vh);cam.updateProjectionMatrix();const prevAuto=renderer.autoClear;renderer.setScissorTest(true);renderer.setViewport(x,y,vw,vh);renderer.setScissor(x,y,vw,vh);renderer.autoClear=true;renderer.render(this.menu.scene,cam);renderer.setScissorTest(false);renderer.setViewport(0,0,w,h);renderer.setScissor(0,0,w,h);renderer.autoClear=prevAuto;}
-          dispose(){this.clearObjectiveMarkers();this.effectPool?.dispose();this.projectilePool?.dispose();this.railPool?.dispose();this.deathPool?.dispose();disposeComposer(this.composer);this.composer=null;this.muzzleLights?.dispose();this.lowHealthOverlay?.dispose();this.disposeObject(this.scene);this.disposeObject(this.menu.scene);this.environmentRT?.dispose?.();for(const resource of this.renderResources||[])resource.dispose();this.renderResources?.clear();for(const resource of this.sharedResources||[])resource.dispose();this.sharedResources?.clear();this.modelAssets?.materials.clear();this.modelAssets?.geometries.clear();this.modelAssets?.resources.clear();this.renderer.dispose();}
+          dispose(){this.clearObjectiveMarkers();this.effectPool?.dispose();this.projectilePool?.dispose();this.railPool?.dispose();this.deathPool?.dispose();disposeComposer(this.composer);this.composer=null;this.muzzleLights?.dispose();this.lowHealthOverlay?.dispose();this.disposeObject(this.scene);this.disposeObject(this.menu.scene);this.environmentRT?.dispose?.();for(const resource of this.renderResources||[])resource.dispose();this.renderResources?.clear();for(const resource of this.sharedResources||[])resource.dispose();this.sharedResources?.clear();this.modelAssets?.materials.clear();this.modelAssets?.geometries.clear();this.modelAssets?.resources.clear();this.arenaAssets?.materials.clear();this.arenaAssets?.geometries.clear();this.arenaAssets?.resources.clear();clearSurfaceTextures();this.renderer.dispose();}
 }
 // Barrier polygons come from race.boundary (outer/inner loops) and fall back to
 // offsetting the gate normals by halfWidth for older fixtures.
@@ -730,7 +741,8 @@ function boostPadModel(pad,centerline){
  for(let i=0;i<3;i++){const chevron=new T.Mesh(geometry,glow);chevron.rotation.x=Math.PI/2;chevron.position.z=(i-1)*.66;group.add(chevron);}
  return group;
 }
-export function raceTrackModel(race,color='#83f4d5',parent){
+export function raceTrackModel(race,color='#83f4d5',parent,assets){const cache=assets??currentAssets()??new ModelAssets();return withAssets(cache,()=>raceTrackBody(race,color,parent));}
+function raceTrackBody(race,color='#83f4d5',parent){
  const group=new T.Group(),white=material('#ffffff'),black=material('#10151b'),accent=material(color,.4,.3,true);
  const gates=race.gates??[],start=gates[0];
  if(start){const line=new T.Group();line.position.set(start.x,.08,start.z);line.rotation.y=Math.atan2(start.nx,start.nz);for(let row=0;row<2;row++)for(let col=0;col<12;col++)box(line,2,.025,1.2,(col-5.5)*2,0,(row-.5)*1.2,(row+col)%2?white:black);group.add(line);}

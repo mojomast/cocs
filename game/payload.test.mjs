@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {Match} from './core.mjs';
-import {payloadTemplate,payloadPath,payloadPosition,payloadProgress,stepPayload} from './payload.mjs';
+import {payloadTemplate,payloadPath,payloadPosition,payloadProgress,stepPayload,standing} from './payload.mjs';
 import {getMap} from './maps.mjs';
 import {GAME_MODES,normalizeConfig} from './config.mjs';
 import {arenaSupportsMode,mapsForMode,resolveMapForMode} from './arenas.mjs';
@@ -70,6 +70,21 @@ test('core accumulates cart time for attackers standing on the payload',()=>{
  const state=m.objectiveState,attacker=m.actors.find(a=>a.team===state.attacker);
  for(let i=0;i<120;i++){Object.assign(attacker,{x:state.position.x,y:state.position.y,z:state.position.z,health:100});m.updatePayload(1/60);}
  assert.ok(attacker.scoreStats.objectiveTime>1,`cart time accrued (${attacker.scoreStats.objectiveTime})`);
+});
+
+test('payload objective credit requires an actor at cart height',()=>{
+ const arena=getMap('sunscar-canyon'),state=payloadTemplate(arena,{segments:3});
+ state.position=payloadPosition(state);
+ const atCart={id:0,team:state.attacker,health:100,x:state.position.x,y:state.position.y,z:state.position.z};
+ const above={...atCart,y:state.position.y+50};
+ const scores={0:0,1:0};
+ stepPayload(state,[above],1/60,{teamScores:scores});
+ assert.equal(state.distance,0,'an actor far above the cart does not push it');
+ stepPayload(state,[atCart],1/60,{teamScores:scores});
+ assert.ok(state.distance>0,'an actor at cart height pushes it');
+ const objectiveTime=actor=>{let time=0;for(let i=0;i<120;i++)if(standing(state,actor))time+=1/60;return time;};
+ assert.equal(objectiveTime(above),0,'an actor far above the cart earns no objective time');
+ assert.ok(objectiveTime(atCart)>1,'an actor at cart height earns objective time');
 });
 
 test('defenders stall the cart and roll it back to the last checkpoint',()=>{

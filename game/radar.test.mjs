@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {radarContacts, radarPalette, radarBlipColor, RADAR_COLORS} from './radar.mjs';
+import {radarContacts, radarPalette, radarBlipColor, radarBlip, RADAR_COLORS} from './radar.mjs';
 
 const player = {id: 0, x: 0, z: 0, yaw: 0, team: 0};
 const hud = {actors: [{id: 0, x: 0, z: 0, health: 100, team: 0}, {id: 1, x: 10, z: 0, health: 100, team: 1}, {id: 2, x: 0, z: -10, health: 0, team: 0, vehicleId: 3}]};
@@ -87,4 +87,28 @@ test('domination and koth zones carry A/B/C labels while the payload becomes its
   assert.equal(radarBlipColor({kind:'payload',contested:false},player),RADAR_COLORS.default.payload);
   const rawPayload={actors:[],objectives:{kind:'payload',position:{x:3,z:4},contested:false}};
   assert.ok(radarContacts(rawPayload,player,{range:20}).contacts.some(c=>c.kind==='payload'&&c.contested===false),'raw objectiveState payload renders too');
+});
+
+test('radarBlip surfaces zone labels and the payload icon/progress/clamp state for the SVG',()=>{
+ const zone=radarBlip({kind:'zone',id:'alpha',label:'A',x:.25,y:-.5,owner:1},player);
+ assert.equal(zone.shape,'rect');
+ assert.equal(zone.label,'A');
+ assert.equal(zone.cx,.25);
+ assert.equal(zone.cy,.5);
+ assert.equal(zone.fill,RADAR_COLORS.default.blue);
+ const actor=radarBlip({kind:'actor',self:true,x:0,y:0,dead:false,revealed:true},player);
+ assert.equal(actor.shape,'circle');assert.equal(actor.r,.07);assert.equal(actor.revealed,true);
+ const dead=radarBlip({kind:'actor',self:false,team:1,x:0,y:0,dead:true},player);
+ assert.equal(dead.r,.05);assert.equal(dead.dead,true);
+ const flag=radarBlip({kind:'flag',team:0,index:2,x:-.4,y:.2,carried:true},player);
+ assert.equal(flag.shape,'triangle');assert.equal(flag.carried,true);assert.equal(flag.team,0);
+ assert.match(flag.points,/,-?[\d.]+/);
+ const payload=radarBlip({kind:'payload',label:'PAY',icon:'payload',x:.6,y:-.2,progress:42,delivered:false,clamped:true,contested:false},player);
+ assert.equal(payload.shape,'payload');assert.equal(payload.icon,'payload');assert.equal(payload.label,'PAY');
+ assert.equal(payload.progress,42);assert.equal(payload.progressRatio,.42);
+ assert.equal(payload.delivered,false);assert.equal(payload.clamped,true);
+ assert.equal(payload.fill,RADAR_COLORS.default.payload);
+ assert.equal(payload.ring.progress,42);
+ const delivered=radarBlip({kind:'payload',x:0,y:0,progress:null,delivered:true},player);
+ assert.equal(delivered.progress,null);assert.equal(delivered.progressRatio,null);assert.equal(delivered.delivered,true);
 });

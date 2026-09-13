@@ -321,10 +321,17 @@ export class VoiceChat {
     return peer.queue;
   }
 
-  send(peer, payload) {
-    if (this.validPeer(peer)) return this.net.voiceSignal(peer.id, {
+  async send(peer, payload) {
+    if (!this.validPeer(peer)) return false;
+    const sent = await this.net.voiceSignal(peer.id, {
       session: peer.localSession, targetSession: peer.session, ...payload,
     });
+    if (sent === false) {
+      this.closePeer(peer);
+      this.fail(new Error('Voice signaling failed because the connection is closed or busy. Disable and enable voice to retry.'));
+      return false;
+    }
+    return true;
   }
 
   // Server envelope: {roomId, from, session, targetSession, description | candidate}.

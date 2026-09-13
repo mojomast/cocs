@@ -161,6 +161,16 @@ test('automatic team powerups and cover have exact mirrored partners', () => {
   }
 });
 
+test('next-gen supplies are never stacked and tunnel collision is not doubled', () => {
+  const key = (x, z) => `${Math.round(x * 100) / 100}:${Math.round(z * 100) / 100}`;
+  for (const map of NEXTGEN_MAPS) {
+    const supplies = map.pickups.map(([, x, z]) => key(x, z));
+    assert.equal(new Set(supplies).size, supplies.length, `${map.id} supplies share no quantized coordinate`);
+    const tunnels = map.blocks.filter(block => block.kind === 'tunnel').map(block => key(block.x, block.z));
+    assert.equal(new Set(tunnels).size, tunnels.length, `${map.id} tunnel collision blocks are unique`);
+  }
+});
+
 test('final placement repair uses triangulated ground and includes decks and later cover', () => {
   const bounds = {minX: -20, maxX: 20, minZ: -20, maxZ: 20};
   const terrain = terrainField(bounds, {height: () => 0, amplitude: 0});

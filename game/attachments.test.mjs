@@ -78,6 +78,14 @@ test('resolveAttachments clamps modifiers, orders behaviors by slot and merges v
  const visual=resolveAttachments(['scope','long-barrel','extended-mag']).visual;
  assert.equal(visual.optic,'scope');assert.equal(visual.barrel,'long');assert.equal(visual.magazine,'extended');
  assert.equal(resolveAttachments([]).visual.optic,'none');
+ assert.equal(resolveAttachments([]).visual.underbarrel,'none');
+ const grip=resolveAttachments(['quickdraw-grip']);
+ assert.equal(grip.visual.underbarrel,'quickdraw-grip');
+ assert.equal(grip.visual.color,'#4a5a62');
+ assert.equal(resolveAttachments(['scope','grenade-launcher']).visual.underbarrel,'grenade-launcher');
+ assert.equal(resolveAttachments(['burst-module']).visual.underbarrel,'burst-module');
+ assert.equal(resolveAttachments(['homing-beacon']).visual.underbarrel,'homing-beacon');
+ assert.equal(resolveAttachments(['chain-capacitor']).visual.underbarrel,'chain-capacitor');
 });
 
 test('applyAttachmentsToWeapon never mutates input and applies known values',()=>{

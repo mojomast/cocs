@@ -59,6 +59,24 @@ test('history leaders use the mode objective ranking and retain legacy entries',
  h.matches.push(legacy);
  assert.deepEqual(h.all().at(-1),legacy);
 });
+test('history leaders rank assault, payload and combined-arms by objective stats',()=>{
+ const h=new MatchHistory();
+ const assault=h.record({config:{mode:'assault'},actors:[
+  {name:'Slayer',frags:9,scoreStats:{...stats,objectiveCaptures:0,objectiveTime:0}},
+  {name:'Breacher',frags:1,scoreStats:{...stats,objectiveCaptures:2,objectiveTime:1}}
+ ]});
+ assert.equal(assault.leader,'Breacher','assault ranks by sectors and objective stats');
+ const payload=h.record({config:{mode:'payload'},actors:[
+  {name:'Slayer',frags:9,scoreStats:{...stats,objectiveCaptures:0,objectiveTime:0}},
+  {name:'Escort',frags:1,scoreStats:{...stats,objectiveCaptures:2,objectiveTime:1}}
+ ]});
+ assert.equal(payload.leader,'Escort','payload ranks by checkpoints and objective stats');
+ const combined=h.record({config:{mode:'combined-arms'},actors:[
+  {name:'Slayer',frags:9,scoreStats:{...stats,objectiveTime:0,objectiveCaptures:0}},
+  {name:'Holder',frags:1,scoreStats:{...stats,objectiveTime:4,objectiveCaptures:0}}
+ ]});
+ assert.equal(combined.leader,'Holder','combined-arms ranks by zone time');
+});
 test('team deathmatch derives team scores without changing deathmatch entries',()=>{
  const h=new MatchHistory();
  const entry=h.record({config:{mode:'teamdeathmatch',fragLimit:5,timeLimit:60},time:12,actors:[

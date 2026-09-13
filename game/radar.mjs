@@ -81,3 +81,27 @@ export function radarBlipColor(contact, player, palette = RADAR_COLORS.default) 
   if (player?.team !== null && player?.team !== undefined && contact.team !== null && contact.team !== undefined) return colors[teamKey(contact.team)];
   return colors.hostile;
 }
+
+// SVG-ready mapping for a single contact. The HUD only needs `shape`, the
+// anchor, `fill` and the per-kind extras (zone label, flag triangle, payload
+// icon/progress/delivered/clamped) instead of re-deriving them in JSX.
+const radarAnchor = contact => {
+  const x = Number(contact?.x), y = Number(contact?.y);
+  const px = Number.isFinite(x) ? x : 0, py = Number.isFinite(y) ? y : 0;
+  return {x: px, y: py, cx: px, cy: -py};
+};
+
+/** @param {{red:string,blue:string,hostile:string,self:string,teammate:string,neutral:string,contested:string,payload:string}} [palette] */
+export function radarBlip(contact, player, palette = RADAR_COLORS.default) {
+  const colors = palette ?? RADAR_COLORS.default;
+  const fill = radarBlipColor(contact, player, colors);
+  const anchor = radarAnchor(contact);
+  if (contact?.kind === 'actor') return {kind: 'actor', shape: 'circle', ...anchor, r: contact.self ? .07 : .05, fill, dead: contact.dead === true, revealed: contact.revealed === true, self: contact.self === true};
+  if (contact?.kind === 'zone') return {kind: 'zone', shape: 'rect', ...anchor, rect: {x: anchor.cx - .06, y: anchor.cy - .06, width: .12, height: .12}, fill, label: contact.label ?? null, owner: contact.owner ?? null, contested: contact.contested === true};
+  if (contact?.kind === 'payload') {
+    const progress = Number.isFinite(contact.progress) ? contact.progress : null;
+    return {kind: 'payload', shape: 'payload', ...anchor, fill, icon: contact.icon ?? 'payload', label: contact.label ?? 'PAY', progress, progressRatio: progress === null ? null : Math.max(0, Math.min(1, progress / 100)), delivered: contact.delivered === true, clamped: contact.clamped === true, contested: contact.contested === true, pushing: contact.pushing ?? null, ring: {r: .095, thickness: .022, progress}};
+  }
+  return {kind: 'flag', shape: 'triangle', ...anchor, fill, points: `${anchor.cx},${anchor.cy - .075} ${anchor.cx - .06},${anchor.cy + .05} ${anchor.cx + .06},${anchor.cy + .05}`, team: contact?.team ?? null, carried: contact?.carried === true, state: contact?.state ?? null, index: contact?.index ?? null};
+}
+export const radarContactVisual = radarBlip;

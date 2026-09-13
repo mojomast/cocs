@@ -363,6 +363,22 @@ test('vehicle resync applies vy, flight, altitude, gunner and passengers',()=>{
  assert.deepEqual(v.passengers,[3,4]);
 });
 
+test('voiceSignal propagates a rejected send instead of reporting success',t=>{
+ class Socket{constructor(){this.readyState=1;this.bufferedAmount=0;this.sent=[];}send(text){this.sent.push(text);}}
+ Socket.OPEN=1;
+ t.mock.method(globalThis,'WebSocket',Socket);
+ const client=new NetClient('ws://voice:1');
+ assert.equal(client.voiceSignal(2,{description:{type:'offer',sdp:'x'}}),false,'no socket reports failure');
+ client.ws=new Socket();
+ const oversized={description:{type:'offer',sdp:'x'.repeat(70000)}};
+ assert.equal(client.voiceSignal(2,oversized),false,'oversized signal is rejected');
+ assert.equal(client.ws.sent.length,0,'oversized signal is never written');
+ assert.equal(client.voiceSignal(2,null),false,'malformed payload reports failure');
+ assert.equal(client.voiceSignal(2,{description:{type:'offer',sdp:'ok'}}),true,'valid signal reports success');
+ assert.equal(client.ws.sent.length,1);
+ assert.equal(JSON.parse(client.ws.sent[0]).type,'voice-signal');
+});
+
 test('progression token is generated, transported and persisted',t=>{
  const store=new Map();
  const storage={getItem:k=>store.get(k)??null,setItem:(k,v)=>store.set(k,v),removeItem:k=>store.delete(k)};

@@ -453,6 +453,18 @@ test('resume rejection is consumed while permission is pending and cleans late c
   assert.equal(h.contexts[0].closed, true);
 });
 
+test('a rejected voice signal closes the peer and surfaces the failure', async t => {
+  const h = setup(t);
+  await h.voice.enable();
+  h.net.voiceSignal = () => false;
+  h.connections[0].onicecandidate({candidate: {toJSON: () => ({candidate: 'outgoing'})}});
+  await h.settle();
+  assert.equal(h.connections[0].closed, true);
+  assert.equal(h.voice.peers.size, 0);
+  assert.equal(h.voice.state.status, 'error');
+  assert.match(h.voice.state.error, /Voice signaling failed/);
+});
+
 test('unbounded pre-description ICE is rejected and peer resources are closed', async t => {
   const h = setup(t);
   await h.voice.enable();

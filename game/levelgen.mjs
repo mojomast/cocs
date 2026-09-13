@@ -192,7 +192,7 @@ export function createLevel(spec) {
       const a = points[i], b = points[i + 1];
       const dx = b[0] - a[0], dy = b[1] - a[1], dz = b[2] - a[2], len = Math.hypot(dx, dz) || 1, along = Math.atan2(dx, dz);
       const nx = Math.cos(along), nz = -Math.sin(along), count = Math.max(1, Math.ceil(len / 1.2));
-      for (let k = 0; k <= count; k++) {
+      for (let k = i === 0 ? 0 : 1; k <= count; k++) {
         const t = k / count, px = a[0] + dx * t, pz = a[2] + dz * t, py = a[1] + dy * t;
         ctx.addNav(px, pz);
         for (const side of [-1, 1]) ctx.addBlock({ x: px + nx * side * radius, z: pz + nz * side * radius, w: 1.6, d: 1.6, h: py + radius + 1.4, kind: 'tunnel' });
@@ -252,8 +252,17 @@ export function createLevel(spec) {
   const anchors = [...ctx.objectiveZones.map(z => [z.x, z.z]).sort((a, b) => Math.hypot(a[0], a[1]) - Math.hypot(b[0], b[1])), ...ctx.spawns, ...Object.values(ctx.teamSpawns).flat()];
   const anchor = (i) => anchors.length ? anchors[i % anchors.length] : [0, 0];
   const pairedSupplies = [];
+  const supplyOffset = i => {
+    if (i === 0) return [0, 0];
+    const ring = Math.ceil(i / 6), a = ((i - 1) % 6) / 6 * Math.PI * 2, radius = 1.8 * ring;
+    return [Math.cos(a) * radius, Math.sin(a) * radius];
+  };
+  let supplyIndex = 0;
   const addSupply = kind => {
-    const [ax, az] = teamMap ? ctx.teamSpawns[0][pairedSupplies.length % ctx.teamSpawns[0].length] : anchor(ctx.pickups.length);
+    const base = teamMap ? ctx.teamSpawns[0][supplyIndex % ctx.teamSpawns[0].length] : anchor(supplyIndex);
+    const [ox, oz] = supplyOffset(supplyIndex);
+    supplyIndex++;
+    const ax = base[0] + ox, az = base[1] + oz;
     ctx.addPickup(kind, ax, az);
     if (teamMap) { const first = ctx.pickups.at(-1); ctx.addPickup(kind, -ax, -az); pairedSupplies.push([first, ctx.pickups.at(-1)]); }
   };
@@ -278,8 +287,9 @@ export function createLevel(spec) {
       return y < Math.max(a.y, b.y) - 1e-6 && y + RULES.height > Math.min(a.y, b.y) + 1e-6 && Math.hypot(x - a.x - t * dx, z - a.z - t * dz) < r;
     });
   };
-  const clearSpot = (x, z, r, mirrored = false) => {
-    const clear = (x, z) => !blockedAt(x, z, r) && (!mirrored || !blockedAt(-x, -z, r));
+  const supplyKey = (x, z) => `${Math.round(x * 100) / 100}:${Math.round(z * 100) / 100}`;
+  const clearSpot = (x, z, r, mirrored = false, used = null) => {
+    const clear = (x, z) => !blockedAt(x, z, r) && (!mirrored || !blockedAt(-x, -z, r)) && (!used || !used.has(supplyKey(x, z)));
     if (clear(x, z)) return [x, z];
     for (let ring = 1; ring <= 16; ring++) for (let a = 0; a < 8; a++) {
       const nx = x + Math.cos(a / 8 * Math.PI * 2) * ring, nz = z + Math.sin(a / 8 * Math.PI * 2) * ring;
@@ -287,9 +297,14 @@ export function createLevel(spec) {
     }
     throw new Error(`${spec.id}: no clear required placement near ${x},${z}`);
   };
+  const usedSupplies = new Set();
   const paired = new Set(pairedSupplies.flat());
-  for (const [a, b] of pairedSupplies) { const [x, z] = clearSpot(a[1], a[2], .65, true); a[1] = x; a[2] = z; b[1] = -x; b[2] = -z; }
-  for (const p of ctx.pickups) if (!paired.has(p)) { const spot = clearSpot(p[1], p[2], .65); p[1] = spot[0]; p[2] = spot[1]; }
+  for (const [a, b] of pairedSupplies) {
+    const [x, z] = clearSpot(a[1], a[2], .65, true, usedSupplies);
+    a[1] = x; a[2] = z; b[1] = -x; b[2] = -z;
+    usedSupplies.add(supplyKey(a[1], a[2])); usedSupplies.add(supplyKey(b[1], b[2]));
+  }
+  for (const p of ctx.pickups) if (!paired.has(p)) { const spot = clearSpot(p[1], p[2], .65, false, usedSupplies); p[1] = spot[0]; p[2] = spot[1]; usedSupplies.add(supplyKey(p[1], p[2])); }
   for (const s of ctx.spawns) { const spot = clearSpot(s[0], s[1], .6); if (spot) { s[0] = spot[0]; s[1] = spot[1]; } }
   for (const team of [0, 1]) for (const s of ctx.teamSpawns[team]) { const spot = clearSpot(s[0], s[1], .6); if (spot) { s[0] = spot[0]; s[1] = spot[1]; } }
   for (const zone of ctx.objectiveZones) { [zone.x, zone.z] = clearSpot(zone.x, zone.z, .65); zone.y = floor(zone.x, zone.z); }

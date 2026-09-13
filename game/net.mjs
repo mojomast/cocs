@@ -123,8 +123,8 @@ export class NetClient {
   gear(gear, attachments, finish) { this.send({ type: 'gear', gear, ...(attachments !== undefined ? { attachments } : {}), ...(finish !== undefined ? { finish } : {}) }); }
   voiceState(enabled) { return typeof enabled === 'boolean' && this.send({ type: 'voice-state', enabled }); }
   voiceSignal(to, payload) {
-   if (!payload || typeof payload !== 'object' || Array.isArray(payload)) return;
-   this.send({ ...payload, type: 'voice-signal', roomId: this.roomId, to });
+   if (!payload || typeof payload !== 'object' || Array.isArray(payload)) return false;
+   return this.send({ ...payload, type: 'voice-signal', roomId: this.roomId, to });
   }
  leave() {
   this.send({ type: 'leave' });

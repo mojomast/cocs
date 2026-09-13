@@ -258,3 +258,17 @@ test('recorder stops sampling keyframes once the max duration is reached', () =>
   assert.equal(recorder.frameCount, 3);
   assert.equal(recorder.keyframes.at(-1).time, 2);
 });
+
+test('recorder stops appending events once past maxSeconds and keeps pre-cutoff events', () => {
+  const recorder = new DemoRecorder({ recordHz: 10, maxSeconds: 1 });
+  for (let i = 0; i <= 100; i++) {
+    const time = i / 10;
+    recorder.frame(stateAt(time), [{ type: 'shot', id: i, time }]);
+  }
+  const demo = recorder.finish({ createdAt: '2020-01-01T00:00:00.000Z' });
+  const cutoff = demo.keyframes[0].time + 1;
+  assert.equal(recorder.duration, 1);
+  assert.equal(demo.events.length, 11);
+  assert.ok(demo.events.every(event => event.time <= cutoff));
+  assert.ok(demo.events.every(event => event.time <= demo.keyframes.at(-1).time));
+});

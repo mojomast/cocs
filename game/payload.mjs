@@ -146,13 +146,13 @@ export function payloadPosition(state){
  return {x,y:routeFloors.get(state)?.(x,z)??((from.y??0)+((to.y??0)-(from.y??0))*t),z};
 }
 export const payloadProgress=state=>state&&state.total>0?Math.max(0,Math.min(100,state.distance/state.total*100)):0;
-function standing(actors,position,radius){return (actors||[]).filter(actor=>actor&&actor.health>0&&Math.hypot(actor.x-position.x,actor.z-position.z)<=radius&&Math.abs((actor.y??0)-position.y)<=5);}
+export const standing=(state,actor,margin=0)=>{const position=state?.position??payloadPosition(state);return Boolean(actor&&actor.health>0&&Math.hypot(actor.x-position.x,actor.z-position.z)<=(state?.radius??0)+margin&&Math.abs((actor.y??0)-position.y)<=5);};
 export function stepPayload(state,actors,dt,options={}){
  const {emit,teamScores,scoreLimit}=options;
  if(!state||state.delivered)return {moved:0,checkpoint:null,delivered:state?.delivered??false};
  const attacker=state.attacker??0,defender=state.defender??1,position=payloadPosition(state);
  state.position=position;
- const nearby=standing(actors,position,state.radius),attackers=nearby.filter(actor=>actor.team===attacker).length,defenders=nearby.filter(actor=>actor.team===defender).length;
+ const nearby=(actors||[]).filter(actor=>standing(state,actor)),attackers=nearby.filter(actor=>actor.team===attacker).length,defenders=nearby.filter(actor=>actor.team===defender).length;
  let moved=0;
  if(attackers>0&&defenders>0){state.contested=true;state.pushing=null;}
  else if(attackers>0){

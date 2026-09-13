@@ -46,7 +46,7 @@ export function resolveAttachments(ids){
  const items=resolveList(ids),modifiers={};
  for(const key of MULTIPLICATIVE)modifiers[key]=1;
  for(const key of ADDITIVE)modifiers[key]=0;
- const behaviors=[],visual={optic:'none',barrel:'stock',magazine:'stock'};
+ const behaviors=[],visual={optic:'none',barrel:'stock',magazine:'stock',underbarrel:'none'};
  for(const item of items){
   for(const [key,value] of Object.entries(item.modifiers)){
    if(ADDITIVE.includes(key))modifiers[key]+=value;
@@ -54,6 +54,7 @@ export function resolveAttachments(ids){
   }
   if(item.behavior?.mode)behaviors.push({slot:item.slot,...item.behavior});
   if(item.visual)Object.assign(visual,item.visual);
+  if(item.slot==='underbarrel')visual.underbarrel=item.id;
  }
  for(const [key,[min,max]] of Object.entries(MODIFIER_RANGES))modifiers[key]=ADDITIVE.includes(key)?Math.round(Math.max(min,Math.min(max,modifiers[key]))):Math.max(min,Math.min(max,modifiers[key]));
  return {items,modifiers,behaviors,visual};

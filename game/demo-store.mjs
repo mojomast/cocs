@@ -1,3 +1,5 @@
+import { compressDemo, decompressDemo, trimDemo } from './demo.mjs';
+
 const DB_NAME = 'token-arena-demos';
 const DB_VERSION = 1;
 const META_STORE = 'meta';
@@ -32,6 +34,47 @@ function requestResult(request) {
   });
 }
 
+function createIndexedDbStorage() {
+  return {
+    async save(summary, record) {
+      const db = await openDb();
+      const tx = db.transaction([META_STORE, DATA_STORE], 'readwrite');
+      tx.objectStore(META_STORE).put(summary);
+      tx.objectStore(DATA_STORE).put(record);
+      await transactionDone(tx);
+      db.close();
+    },
+    async list() {
+      const db = await openDb();
+      const tx = db.transaction(META_STORE, 'readonly');
+      const all = await requestResult(tx.objectStore(META_STORE).getAll());
+      db.close();
+      return all || [];
+    },
+    async get(id) {
+      const db = await openDb();
+      const tx = db.transaction(DATA_STORE, 'readonly');
+      const record = await requestResult(tx.objectStore(DATA_STORE).get(id));
+      db.close();
+      return record || null;
+    },
+    async remove(id) {
+      const db = await openDb();
+      const tx = db.transaction([META_STORE, DATA_STORE], 'readwrite');
+      tx.objectStore(META_STORE).delete(id);
+      tx.objectStore(DATA_STORE).delete(id);
+      await transactionDone(tx);
+      db.close();
+    },
+  };
+}
+
+let storage = createIndexedDbStorage();
+
+export function setDemoStorage(next) {
+  storage = next && typeof next === 'object' ? next : createIndexedDbStorage();
+}
+
 export function demoSummary(demo) {
   const header = demo?.header || {};
   const frames = Array.isArray(demo?.keyframes) ? demo.keyframes : [];
@@ -50,39 +93,36 @@ export function demoSummary(demo) {
   };
 }
 
+function trimSeconds(demo) {
+  const limit = demo?.header?.config?.timeLimit ?? demo?.meta?.maxSeconds;
+  return Number.isFinite(limit) && limit > 0 ? limit : null;
+}
+
 export async function saveDemo(demo) {
   const id = demo.id || `demo-${String(demo.createdAt || Date.now()).replace(/[^0-9]/g, '')}-${Math.random().toString(36).slice(2, 8)}`;
   const record = { ...demo, id };
-  const db = await openDb();
-  const tx = db.transaction([META_STORE, DATA_STORE], 'readwrite');
-  tx.objectStore(META_STORE).put(demoSummary(record));
-  tx.objectStore(DATA_STORE).put(record);
-  await transactionDone(tx);
-  db.close();
-  return demoSummary(record);
+  const maxSeconds = trimSeconds(record);
+  const finished = maxSeconds === null ? record : trimDemo(record, maxSeconds);
+  const summary = demoSummary(finished);
+  const bytes = await compressDemo(finished);
+  await storage.save(summary, { id, bytes });
+  return summary;
 }
 
 export async function listDemos() {
-  const db = await openDb();
-  const tx = db.transaction(META_STORE, 'readonly');
-  const all = await requestResult(tx.objectStore(META_STORE).getAll());
-  db.close();
+  const all = await storage.list();
   return (all || []).sort((a, b) => String(b.createdAt || '').localeCompare(String(a.createdAt || '')));
 }
 
 export async function getDemo(id) {
-  const db = await openDb();
-  const tx = db.transaction(DATA_STORE, 'readonly');
-  const demo = await requestResult(tx.objectStore(DATA_STORE).get(id));
-  db.close();
-  return demo || null;
+  const record = await storage.get(id);
+  if (!record) return null;
+  const bytes = record.bytes ?? record.data ?? record;
+  const demo = await decompressDemo(bytes);
+  if (!demo.id) demo.id = record.id || id;
+  return demo;
 }
 
 export async function deleteDemo(id) {
-  const db = await openDb();
-  const tx = db.transaction([META_STORE, DATA_STORE], 'readwrite');
-  tx.objectStore(META_STORE).delete(id);
-  tx.objectStore(DATA_STORE).delete(id);
-  await transactionDone(tx);
-  db.close();
+  await storage.remove(id);
 }
