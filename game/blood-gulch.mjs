@@ -1,12 +1,5 @@
 import {terrainSupportAt} from './terrain.mjs';
-
-const freeze=value=>{
-  if(value&&typeof value==='object'&&!Object.isFrozen(value)){
-    Object.values(value).forEach(freeze);
-    Object.freeze(value);
-  }
-  return value;
-};
+import {freeze,wall,cover,teamSpawns,flagSpawns} from './map-schema.mjs';
 
 const smooth=t=>t<=0?0:t>=1?1:t*t*(3-2*t);
 const clamp01=t=>Math.max(0,Math.min(1,t));
@@ -80,13 +73,11 @@ for(const x of [55,73])walls.push(wallZ(`cave-b-${x}`,x,19,35,-1,9));
 
 const terrain={maxSlope:.9,surfaces,walls};
 
-const wall=(x,z,w,d,h=2.4,kind='base-wall')=>({x,z,w,d,h,kind});
-const cover=(x,z,w=3,d=2,h=1.8,kind='cover')=>({x,z,w,d,h,kind});
 const point=(x,z)=>({x,z,y:terrainSupportAt(x,z,terrain,terrain.maxSlope).y});
 
 const baseWalls=bases.flatMap(({cx,out,kx})=>[
-  wall(cx-4.25,6,5.5,1,5.5),wall(cx+4.25,6,5.5,1,5.5),
-  wall(cx-4.25,-6,5.5,1,5.5),wall(cx+4.25,-6,5.5,1,5.5),
+  wall(cx-4.25,6,5.5,1,5.5,'base-wall'),wall(cx+4.25,6,5.5,1,5.5,'base-wall'),
+  wall(cx-4.25,-6,5.5,1,5.5,'base-wall'),wall(cx+4.25,-6,5.5,1,5.5,'base-wall'),
   wall(cx-out*7,0,1,12,5.5,'deck'),
   wall(kx,0,6,6,4.5,'deck')
 ]);
@@ -102,8 +93,6 @@ const roofLinks=[
   link('blue-roof-tele',point(66,0),point(40,0))
 ];
 
-const teamSpawns={0:[[-75,5],[-75,-5],[-64,-27]],1:[[75,-5],[75,5],[64,27]],red:[[-75,5],[-75,-5],[-64,-27]],blue:[[75,-5],[75,5],[64,27]]};
-const flagSpawns={0:{x:-64,z:0},1:{x:64,z:0},red:{x:-64,z:0},blue:{x:64,z:0}};
 
 const bloodGulch={
   id:'blood-gulch',
@@ -114,8 +103,8 @@ const bloodGulch={
   background:'#8ec6df',
   bounds:{minX:-80,maxX:80,minZ:-35,maxZ:35},voidY:-10,
   terrain,
-  teamSpawns,
-  flagSpawns,
+  teamSpawns:teamSpawns([[-75,5],[-75,-5],[-64,-27]],[[75,-5],[75,5],[64,27]]),
+  flagSpawns:flagSpawns(-64,64),
   spawns:[[-40,0],[-20,-18],[0,18],[20,18],[40,0],[0,-18],[-20,18],[20,-18],[-48,-7],[48,7]],
   pickups:[
     ['health',-64,-9],['health',64,9],['armor',-64,9],['armor',64,-9],

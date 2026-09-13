@@ -1,18 +1,7 @@
 // Arsenal maps are immutable templates matching the MAPS schema. They are
 // authored independently so no existing map module is imported here.
-const freeze=value=>{
- if(value&&typeof value==='object'&&!Object.isFrozen(value)){
-  Object.values(value).forEach(freeze);
-  Object.freeze(value);
- }
- return value;
-};
-const wall=(x,z,w,d,h=9,kind='wall')=>({x,z,w,d,h,kind});
-const cover=(x,z,w=3,d=2,h=2,kind='cover')=>({x,z,w,d,h,kind});
-const pad=(id,x,z,power=18)=>({id,x,z,y:0,power,cooldown:2});
-const tp=(id,x,z,tx,tz,y=0,ty=0)=>({id,x,z,y,target:{x:tx,y:ty,z:tz},cooldown:1});
+import {freeze,wall,cover,pad,tp,zone} from './map-schema.mjs';
 const zip=(id,from,to,speed=15)=>({id,from,to,speed,cooldown:1.2});
-const zone=(x,z,radius=3.5,label='')=>({x,z,y:0,radius,label});
 const vehicle=(id,kind,x,z,yaw)=>({id,kind,x,z,yaw});
 
 const trenchline={

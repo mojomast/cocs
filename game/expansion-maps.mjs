@@ -1,14 +1,4 @@
-const freeze=value=>{
-  if(value&&typeof value==='object'&&!Object.isFrozen(value)){
-    Object.values(value).forEach(freeze);
-    Object.freeze(value);
-  }
-  return value;
-};
-const platform=(x,z,w,d,route,y=0)=>({x,z,w,d,y,thickness:.7,kind:'platform',route});
-const cover=(x,z,w=3,d=2,h=2.5,kind='cover')=>({x,z,w,d,h,kind});
-const teams=(west,east)=>({0:west,1:east,red:west,blue:east});
-const flags=(west,east)=>({0:{x:west,z:0},1:{x:east,z:0},red:{x:west,z:0},blue:{x:east,z:0}});
+import {freeze,cover,platform,teamSpawns,flagSpawns} from './map-schema.mjs';
 const point=(x,z,y=0)=>({x,z,y});
 const launcher=(id,x,z,dir,target,y=0,vy=11)=>({id,x,z,y,dir,power:26,vy,cooldown:2,target});
 const link=(id,source,target,route)=>({id,source,target,traversal:id,route});
@@ -41,7 +31,7 @@ const canyon={
   id:'sunscar-canyon',name:'Sunscar Canyon',tag:'OUTDOOR / VERTICAL CANYON CTF',
   description:'An outdoor vertical canyon CTF arena with a contested valley, high shelves, ramp routes, and launchable cliff crossings.',
   color:'#e6a45d',background:'#7bb8c4',bounds:{minX:-58,maxX:58,minZ:-29,maxZ:29},voidY:-8,terrain:canyonTerrain,
-  teamSpawns:teams([[-50,-4],[-50,4]],[[50,-4],[50,4]]),flagSpawns:flags(-53,53),
+  teamSpawns:teamSpawns([[-50,-4],[-50,4]],[[50,-4],[50,4]]),flagSpawns:flagSpawns(-53,53),
   spawns:[[-50,-4],[-50,4],[50,-4],[50,4],[-28,-22],[28,-22],[-28,22],[28,22],[0,-5],[0,5]],
   objectiveZones:[point(-28,0,0),point(0,0,0),point(28,0,0)],
   blocks:[cover(-42,0,5,4,3.5,'base-bunker'),cover(42,0,5,4,3.5,'base-bunker'),cover(-10,0,4,2.5,2.5),cover(10,0,4,2.5,2.5),cover(0,-21,5,2.5,3,'cliff-outpost'),cover(0,21,5,2.5,3,'cliff-outpost')],
@@ -58,7 +48,7 @@ const megastructure={
   description:'A broken industrial megastructure CTF arena of staggered decks, reactor towers, exposed service gaps, and three brutal approach routes.',
   color:'#d77b63',background:'#111923',bounds:{minX:-52,maxX:52,minZ:-34,maxZ:34},voidY:-10,
   platforms:[platform(-43,0,16,24,'west',0),platform(43,0,16,24,'east',0),platform(0,0,18,12,'middle',0),platform(-22,-23,18,9,'upper',7),platform(22,-23,18,9,'upper',7),platform(-22,23,18,9,'lower',7),platform(22,23,18,9,'lower',7),platform(0,-23,12,6,'upper',10),platform(0,23,12,6,'lower',10)],
-  teamSpawns:teams([[-47,-5],[-47,5]],[[47,-5],[47,5]]),flagSpawns:flags(-49,49),
+  teamSpawns:teamSpawns([[-47,-5],[-47,5]],[[47,-5],[47,5]]),flagSpawns:flagSpawns(-49,49),
   spawns:[[-47,-5],[-47,5],[47,-5],[47,5],[-22,-23],[22,-23],[-22,23],[22,23],[0,-23],[0,23]],
   blocks:[cover(0,4,3,2,2,'cover'),cover(-43,0,5,5,4,'base-core'),cover(43,0,5,5,4,'base-core'),cover(-9,0,3,5,5,'reactor'),cover(9,0,3,5,5,'reactor'),cover(-22,-23,4,2,3,'machinery'),cover(22,23,4,2,3,'machinery'),cover(-22,23,4,2,3,'machinery'),cover(22,-23,4,2,3,'machinery')],
   vehicles:[{id:'ironfall-puma-w',kind:'puma',x:-46,z:-6,yaw:Math.PI/2},{id:'ironfall-puma-e',kind:'puma',x:46,z:6,yaw:-Math.PI/2},{id:'ironfall-hornet-n',kind:'hornet',x:-22,y:7,z:-26,yaw:0},{id:'ironfall-hornet-s',kind:'hornet',x:22,y:7,z:26,yaw:Math.PI}],
@@ -76,7 +66,7 @@ const plateau={
   description:'A wide outdoor island and plateau route map for CTF, with a broad central table, twin flank causeways, and long sightlines.',
   color:'#77c99b',background:'#547f9c',bounds:{minX:-64,maxX:64,minZ:-42,maxZ:42},voidY:-10,
   platforms:[platform(-52,0,20,30,'west'),platform(52,0,20,30,'east'),platform(0,0,48,18,'middle'),platform(-25,-30,24,10,'north'),platform(0,-34,20,7,'north'),platform(25,-30,24,10,'north'),platform(-25,30,24,10,'south'),platform(0,34,20,7,'south'),platform(25,30,24,10,'south')],
-  teamSpawns:teams([[-58,-6],[-58,6]],[[58,-6],[58,6]]),flagSpawns:flags(-61,61),
+  teamSpawns:teamSpawns([[-58,-6],[-58,6]],[[58,-6],[58,6]]),flagSpawns:flagSpawns(-61,61),
   spawns:[[-58,-6],[-58,6],[58,-6],[58,6],[-25,-30],[25,-30],[-25,30],[25,30],[0,-34],[0,34]],
   blocks:[cover(-52,0,6,6,4,'base-bunker'),cover(52,0,6,6,4,'base-bunker'),cover(-17,0,4,3,3),cover(17,0,4,3,3),cover(0,-7,5,2,2.7,'lookout'),cover(0,7,5,2,2.7,'lookout'),cover(0,-31,4,2,2.5,'lookout'),cover(0,31,4,2,2.5,'lookout')],
   vehicles:[{id:'longreach-puma-w',kind:'puma',x:-45,z:-8,yaw:Math.PI/2},{id:'longreach-puma-e',kind:'puma',x:45,z:8,yaw:-Math.PI/2},{id:'longreach-hornet-n',kind:'hornet',x:-25,z:-30,yaw:0},{id:'longreach-hornet-s',kind:'hornet',x:25,z:30,yaw:Math.PI}],

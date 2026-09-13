@@ -1,0 +1,13 @@
+export const freeze=value=>{if(value&&typeof value==='object'&&!Object.isFrozen(value)){Object.values(value).forEach(freeze);Object.freeze(value);}return value;};
+export const wall=(x,z,w,d,h=9,kind='wall')=>({x,z,w,d,h,kind});
+export const cover=(x,z,w=3,d=2,h=2,kind='cover')=>({x,z,w,d,h,kind});
+export const coverBuilder=({h:height=2}={})=>((x,z,w=3,d=2,h=height,kind='cover')=>({x,z,w,d,h,kind}));
+export const platform=(x,z,w,d,route,y=0)=>({x,z,w,d,y,thickness:.7,kind:'platform',route});
+export const pad=(id,x,z,power=18)=>({id,x,z,y:0,power,cooldown:2});
+export const tp=(id,x,z,tx,tz,y=0,ty=0)=>({id,x,z,y,target:{x:tx,y:ty,z:tz},cooldown:1});
+export const teleporter=({to,target,...rest})=>({...rest,target:target??to});
+export const zone=(x,z,radius=3.5,label)=>(label===undefined?{x,z,y:0,radius}:{x,z,y:0,radius,label});
+export const teamSpawns=(west,east)=>({0:west,1:east,red:west,blue:east});
+export const teamData=teamSpawns;
+export const flagSpawns=(west,east)=>({0:{x:west,z:0},1:{x:east,z:0},red:{x:west,z:0},blue:{x:east,z:0}});
+export const flagData=flagSpawns;

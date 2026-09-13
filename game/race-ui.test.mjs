@@ -11,29 +11,17 @@ import ts from 'typescript';
 import {DEFAULT_CONFIG} from './config.mjs';
 
 test('race and combat HUDs render one shared online chat with working Enter and Escape',async()=>{
- const file=new URL('../app/page.tsx',import.meta.url),source=await readFile(file,'utf8'),ast=ts.createSourceFile(file.pathname,source,ts.ScriptTarget.Latest,true,ts.ScriptKind.TSX);let hudNode;
- const find=node=>{if(ts.isJsxExpression(node)&&node.expression?.getText(ast).startsWith("(mode==='playing'||mode==='paused')"))hudNode=node.expression;ts.forEachChild(node,find);};find(ast);assert.ok(hudNode);
- // Retain the actual chat markup and its enclosing mode/HUD conditions; omit
- // unrelated combat widgets rather than mocking their dozens of dependencies.
- const transformed=ts.transform(hudNode,[context=>{
-  const empty=()=>ts.factory.createJsxFragment(ts.factory.createJsxOpeningFragment(),[],ts.factory.createJsxJsxClosingFragment());
-  const visit=node=>{
-   if(ts.isJsxElement(node)&&node.openingElement.getText(ast).includes('game-chat '))return node;
-   if((ts.isJsxElement(node)||ts.isJsxSelfClosingElement(node))&&!node.getText(ast).includes('game-chat '))return empty();
-   if(ts.isJsxExpression(node)&&!node.getText(ast).includes('game-chat '))return ts.factory.createJsxExpression(undefined,undefined);
-   return ts.visitEachChild(node,visit,context);
-  };return node=>ts.visitNode(node,visit);
- }]);
- const expression=ts.createPrinter().printNode(ts.EmitHint.Expression,transformed.transformed[0],ast);transformed.dispose();
- const {outputText}=ts.transpileModule(`export function renderHud({mode,player,isRace,hud,hideHud=false,chatOpen,chatLog,chatInputRef,chatDraft,sendChat,setChatOpen,setChatDraft}){return (${expression});}`,{compilerOptions:{jsx:ts.JsxEmit.ReactJSX,module:ts.ModuleKind.ESNext}});
- const executable=outputText.replace('"react/jsx-runtime"',JSON.stringify(import.meta.resolve('react/jsx-runtime'))),{renderHud}=await import(`data:text/javascript;base64,${Buffer.from(executable).toString('base64')}`);
+ const file=new URL('../app/game-ui/game-chat.tsx',import.meta.url),source=await readFile(file,'utf8');
+ const {outputText}=ts.transpileModule(source,{compilerOptions:{jsx:ts.JsxEmit.ReactJSX,module:ts.ModuleKind.ESNext}});
+ const executable=outputText.replace(/from (["'])([^"']+)\1/g,(_,quote,specifier)=>`from ${quote}${specifier.startsWith('.')?new URL(specifier,file).href:import.meta.resolve(specifier)}${quote}`);
+ const {GameChat}=await import(`data:text/javascript;base64,${Buffer.from(executable).toString('base64')}`);
  const nodes=element=>!element||typeof element!=='object'?[]:[element,...[element.props?.children].flat(Infinity).flatMap(nodes)];
  for(const isRace of [true,false]){
   let sent=0,closed=false,stopped=0;const props={mode:'playing',player:{id:7},isRace,hud:{net:true},chatOpen:true,chatLog:[{name:'Driver',text:'Ready to race'}],chatInputRef:{current:null},chatDraft:'Hello',sendChat:()=>sent++,setChatOpen:value=>{closed=value===false;},setChatDraft(){}};
-  const tree=renderHud(props),html=renderToStaticMarkup(tree);assert.equal((html.match(/class="game-chat /g)??[]).length,1);assert.equal((html.match(/aria-label="Chat message"/g)??[]).length,1);assert.ok(html.includes('Ready to race'));
+  const tree=GameChat(props),html=renderToStaticMarkup(tree);assert.equal((html.match(/class="game-chat /g)??[]).length,1);assert.equal((html.match(/aria-label="Chat message"/g)??[]).length,1);assert.ok(html.includes('Ready to race'));
   const input=nodes(tree).find(node=>node.type==='input');input.props.onKeyDown({key:'Enter',stopPropagation:()=>stopped++});input.props.onKeyDown({key:'Escape',stopPropagation:()=>stopped++});assert.equal(sent,1);assert.equal(closed,true);assert.equal(stopped,2);
-  const collapsed=renderToStaticMarkup(renderHud({...props,chatOpen:false}));assert.equal((collapsed.match(/class="game-chat /g)??[]).length,1);assert.ok(collapsed.includes('T / ENTER'));assert.ok(!collapsed.includes('Chat message'));
-  assert.ok(!renderToStaticMarkup(renderHud({...props,hud:{net:false}})).includes('game-chat'));
+  const collapsed=renderToStaticMarkup(GameChat({...props,chatOpen:false}));assert.equal((collapsed.match(/class="game-chat /g)??[]).length,1);assert.ok(collapsed.includes('T / ENTER'));assert.ok(!collapsed.includes('Chat message'));
+  assert.ok(!renderToStaticMarkup(GameChat({...props,hud:{net:false}})).includes('game-chat'));
  }
 });
 
@@ -51,13 +39,12 @@ test('race display exposes coins, friendly item labels and star effects',()=>{
  assert.equal(raceDisplay({race:{standings:[{actorId:0,position:1}]}},0).coins,0);assert.equal(raceDisplay(null).coins,0);
 });
 test('rendered race HUD shows a COINS readout and friendly item labels',async()=>{
- const file=new URL('../app/page.tsx',import.meta.url),source=await readFile(file,'utf8'),ast=ts.createSourceFile(file.pathname,source,ts.ScriptTarget.Latest,true,ts.ScriptKind.TSX);let hud;
- const find=node=>{if(ts.isJsxElement(node)&&node.openingElement.getText(ast).includes('race-hud'))hud=node;ts.forEachChild(node,find);};find(ast);assert.ok(hud);
- const markup=ts.createPrinter().printNode(ts.EmitHint.Expression,hud,ast);
- const {outputText}=ts.transpileModule(`import {raceDisplay} from '${new URL('./race-ui.mjs',import.meta.url).href}';export function renderRaceHud({race,touchControls,raceControls}){return (${markup});}`,{compilerOptions:{jsx:ts.JsxEmit.ReactJSX,module:ts.ModuleKind.ESNext}});
- const executable=outputText.replace('"react/jsx-runtime"',JSON.stringify(import.meta.resolve('react/jsx-runtime'))),{renderRaceHud}=await import(`data:text/javascript;base64,${Buffer.from(executable).toString('base64')}`);
+ const file=new URL('../app/game-ui/race-hud.tsx',import.meta.url),source=await readFile(file,'utf8');
+ const {outputText}=ts.transpileModule(source,{compilerOptions:{jsx:ts.JsxEmit.ReactJSX,module:ts.ModuleKind.ESNext}});
+ const executable=outputText.replace(/from (["'])([^"']+)\1/g,(_,quote,specifier)=>`from ${quote}${specifier.startsWith('.')?new URL(specifier,file).href:import.meta.resolve(specifier)}${quote}`);
+ const {RaceHud}=await import(`data:text/javascript;base64,${Buffer.from(executable).toString('base64')}`);
  const snapshotFor=id=>({config:{mode:'puma-race'},race:{phase:'racing',elapsed:5,gates:Array(12),standings:[{actorId:0,position:1,lap:1,nextGate:0,item:id,coins:7,effects:{star:2.1}}]}});
- const render=id=>renderToStaticMarkup(renderRaceHud({race:raceDisplay(snapshotFor(id),0),touchControls:false,raceControls:''}));
+ const render=id=>renderToStaticMarkup(RaceHud({race:raceDisplay(snapshotFor(id),0),touchControls:false,raceControls:''}));
  const html=render('triple');assert.ok(html.includes('COINS'));assert.ok(html.includes('>7<'));assert.ok(html.includes('TRIPLE PULSE'));assert.ok(html.includes('STAR 2.1s'));
  for(const [id,label] of [['turbo','TURBO'],['shield','SHIELD'],['oil','OIL SLICK'],['pulse','HOMING PULSE'],['mine','MINE'],['triple','TRIPLE PULSE'],['bolt','LIGHTNING'],['star','STAR']])assert.ok(render(id).includes(label),label);
 });
@@ -65,10 +52,7 @@ test('persisted eight-driver history keeps names and never labels actor zero as 
  const standings=Array.from({length:8},(_,actorId)=>({actorId,position:8-actorId,completedLaps:3,finishTime:90+actorId}));
  const history={mode:'puma-race',race:{standings,laps:3,phase:'finished',winnerId:7},players:standings.map(row=>({actorId:row.actorId,name:`Driver ${row.actorId}`,race:row})).reverse()};
  assert.deepEqual(raceStandings(history).map(row=>row.name),Array.from({length:8},(_,i)=>`Driver ${7-i}`));assert.equal(raceResult(history,null),'Driver 7 WINS.');
- const file=new URL('../app/page.tsx',import.meta.url),source=await readFile(file,'utf8'),ast=ts.createSourceFile(file.pathname,source,ts.ScriptTarget.Latest,true,ts.ScriptKind.TSX);let declaration;
- const visit=node=>{if(ts.isVariableDeclaration(node)&&node.name.getText(ast)==='renderScoreboard')declaration=node;ts.forEachChild(node,visit);};visit(ast);assert.ok(declaration);
- const {outputText}=ts.transpileModule(`import {raceStandings,raceTime} from '${new URL('./race-ui.mjs',import.meta.url).href}';export const ${declaration.getText(ast)};`,{compilerOptions:{jsx:ts.JsxEmit.ReactJSX,module:ts.ModuleKind.ESNext}});
- const executable=outputText.replace('"react/jsx-runtime"',JSON.stringify(import.meta.resolve('react/jsx-runtime'))),{renderScoreboard}=await import(`data:text/javascript;base64,${Buffer.from(executable).toString('base64')}`);
+ const {renderScoreboard}=await import('./scoreboard.mjs');
  const html=renderToStaticMarkup(renderScoreboard(history,true));for(const player of history.players)assert.ok(html.includes(player.name));assert.ok(!html.includes('YOU'));assert.ok(!html.includes('race-score-row you'));
  assert.ok(renderToStaticMarkup(renderScoreboard({...history,actorId:3},false)).includes('Driver 3 / YOU'));
 });

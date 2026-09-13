@@ -205,19 +205,18 @@ export function createGameServer({ port = 0, random, tickDt = 1 / 60, tickMs = 1
    for (const room of registry.rooms.values()) for (const p of room.peers.values()) if (p.playerId) pinned.add(p.playerId);
    progression.setPinned?.(pinned);
   } catch {}
-  try { history.flush?.(); } catch (error) { console.error('history flush failed', error); }
-  try { progression.flush?.(); } catch (error) { console.error('progression flush failed', error); }
+  Promise.resolve(history.flush?.()).catch(error => console.error('history flush failed', error));
+  Promise.resolve(progression.flush?.()).catch(error => console.error('progression flush failed', error));
   try { flush(); } catch (error) { console.error('outbound flush failed', error); }
  }, tickMs);
  const heartbeat = setInterval(() => { for (const ws of wss.clients) { if (ws.isAlive === false) { ws.terminate(); continue; } ws.isAlive = false; try { ws.ping(); } catch {} } }, HEARTBEAT_MS);
- function close() {
+ async function close() {
   clearInterval(timer);
   clearInterval(heartbeat);
-  try { history.flush?.(); } catch {}
-  try { progression.flush?.(); } catch {}
   for (const ws of wss.clients) ws.close();
   wss.close();
   server.close();
+  await Promise.allSettled([Promise.resolve(history.flush?.()), Promise.resolve(progression.flush?.())]);
  }
  return { server, wss, close, registry, history, progression };
 }
@@ -229,5 +228,5 @@ if (isEntry) {
   console.log(`COCS game server listening on ws://0.0.0.0:${port} (http://localhost:${port})`);
   console.log('Join from the browser client at ws://localhost:' + port);
  });
- for (const signal of ['SIGTERM', 'SIGINT']) process.on(signal, () => { close(); process.exit(0); });
+ for (const signal of ['SIGTERM', 'SIGINT']) process.on(signal, async () => { await close(); process.exit(0); });
 }

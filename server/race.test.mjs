@@ -100,7 +100,7 @@ for(const button of ['fire','power'])test(`held ${button} consumes one race item
  assert.equal(room.match.stats.shots,0);
 });
 
-test('room forwards final race standings through result.race to history exactly once',t=>{
+test('room forwards final race standings through result.race to history exactly once',async t=>{
  const dir=mkdtempSync(join(tmpdir(),'race-history-'));
  t.after(()=>rmSync(dir,{recursive:true,force:true}));
  const file=join(dir,'matches.json'),history=new MatchHistory(file);
@@ -117,6 +117,7 @@ test('room forwards final race standings through result.race to history exactly 
  assert.deepEqual(records[0].result.race,result.race);
  assert.equal(records[0].winner,7);assert.equal(records[0].endingReason,'time');
  assert.equal(records[0].result.race.standings[0].completedLaps,1);
+ await history.whenPersisted();
  const saved=new MatchHistory(file).all()[0];
  assert.equal(saved.winnerActorId,7);assert.equal(saved.leader,'Racer 8');
  assert.equal(saved.race.winnerId,7);assert.equal(saved.race.standings[0].actorId,7);

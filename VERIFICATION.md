@@ -1,5 +1,27 @@
 # COCS verification report
 
+## Release 2.70 - Module extraction, map schema and async persistence
+
+Follow-up to the audit release. Baseline `7c1769d`; commits for this pass.
+
+- Tests no longer parse `app/page.tsx`. `buildShowcase` moved to
+  `game/showcase-build.mjs`, `renderScoreboard` to `game/scoreboard.mjs`, and the
+  game-chat and race-HUD JSX to `app/game-ui/game-chat.tsx` and
+  `app/game-ui/race-hud.tsx`; `game/race-ui.test.mjs` and
+  `game/showcase.test.mjs` import them directly. `rg "app/page.tsx" game/*.test.mjs
+  tests/*.test.mjs` returns nothing.
+- Added `game/map-schema.mjs` and moved the duplicated `freeze`/`wall`/`cover`/
+  `pad`/`tp`/`zone`/team/flag builders onto it; teleporters normalize to a
+  canonical `target` field. Emitted map data was diffed against the pre-refactor
+  snapshot and is identical apart from the intended `to` -> `target` keys.
+- History and progression persistence is now async and coalesced: `record`/
+  `award`/`setGear` update memory and schedule a single in-flight atomic write,
+  with `flush()`/`whenPersisted()` for quiescence and graceful shutdown. Match-end
+  writes no longer block the simulation tick.
+
+Verification: game **924/924**, server **123/123**, SSR `tests/*.test.mjs` 4/4,
+`tsc --noEmit` clean, `npm run lint` 0 errors, production build succeeds.
+
 ## Release 2.69 - Whole-codebase audit: security, correctness, architecture
 
 Baseline `685b99f`; findings consolidated in `IMPROVEMENT_PLAN.md` from seven

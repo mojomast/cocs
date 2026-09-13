@@ -1,5 +1,6 @@
-const platform=(x,z,w,d,route)=>({x,z,w,d,y:0,thickness:.7,kind:'platform',route});
-const cover=(x,z,w=3,d=2,h=2.2,kind='cover')=>({x,z,w,d,h,kind});
+import {freeze,coverBuilder,platform,teamSpawns,flagSpawns} from './map-schema.mjs';
+
+const cover=coverBuilder({h:2.2});
 const point=(x,z)=>({x,z,y:0});
 const boost=(id,x,z,dir,power,vy)=>({id,x,z,y:0,dir,power,vy,cooldown:2});
 const link=(id,source,target,traversal,route)=>({id,source:point(...source),target:point(...target),traversal,route});
@@ -14,10 +15,6 @@ const alignLauncherDirections=map=>{
   });
   return map;
 };
-
-// Numeric aliases keep CTF metadata compatible with the current Match helpers.
-const teamData=(west,east)=>({0:west,1:east,red:west,blue:east});
-const flagData=(west,east)=>({0:{x:west,z:0},1:{x:east,z:0},red:{x:west,z:0},blue:{x:east,z:0}});
 
 const skybreakTrampolines=[
  {id:'skybreak-west-hop-n',x:-42,z:-7,y:0,power:15,cooldown:2},{id:'skybreak-east-hop-n',x:42,z:-7,y:0,power:15,cooldown:2},
@@ -42,7 +39,7 @@ const skybreak={
   platform(-18,-18,14,9,'north'),platform(18,-18,14,9,'north'),platform(-18,18,14,9,'south'),platform(18,18,14,9,'south'),
  ],
  blocks:[cover(-39,-7,4,2.5,2.8,'landmark'),cover(39,7,4,2.5,2.8,'landmark'),cover(-34,4,3,2),cover(34,-4,3,2),cover(-18,-18,2.5,2),cover(18,-18,2.5,2),cover(-18,18,2.5,2),cover(18,18,2.5,2),cover(0,0,3,2.5,2.6,'landmark')],
- teamSpawns:teamData([[-42,-4],[-42,4]],[[42,-4],[42,4]]),flagSpawns:flagData(-43,43),
+ teamSpawns:teamSpawns([[-42,-4],[-42,4]],[[42,-4],[42,4]]),flagSpawns:flagSpawns(-43,43),
  spawns:[[-42,-4],[-42,4],[42,-4],[42,4],[-18,-20],[18,-20],[-18,20],[18,20]],
  pickups:[['health',-43,-8],['health',43,8],['armor',-34,8],['armor',34,-8],['rocket',-18,-16],['rocket',18,16],['rail',18,-16],['rail',-18,16],['scatter',-4,0],['scatter',4,0],['plasma',-2,2],['plasma',2,-2],['grenade',-21,-18],['grenade',21,18],['shock',-21,18],['shock',21,-18],['flak',0,-2],['flak',0,2],['haste',-34,-2],['overcharge',34,2],['overshield',0,3]],
  traversal:{trampolines:skybreakTrampolines,boostLaunchers:skybreakBoosts},
@@ -84,7 +81,7 @@ const aether={
   platform(-19,18,12,8,'south'),platform(0,22,10,6,'south'),platform(19,18,12,8,'south'),
  ],
   blocks:[cover(-35,-2,2.5,2.5,2.8,'landmark'),cover(35,2,2.5,2.5,2.8,'landmark'),cover(-34,4,2.5,2),cover(34,-4,2.5,2),cover(-19,-18,2.5,2),cover(19,-18,2.5,2),cover(-19,18,2.5,2),cover(19,18,2.5,2),cover(0,0,3,3,2.5,'landmark')],
- teamSpawns:teamData([[-37,-4],[-37,4]],[[37,-4],[37,4]]),flagSpawns:flagData(-36,36),
+ teamSpawns:teamSpawns([[-37,-4],[-37,4]],[[37,-4],[37,4]]),flagSpawns:flagSpawns(-36,36),
  spawns:[[-37,-4],[-37,4],[37,-4],[37,4],[-19,-20],[19,-20],[-19,20],[19,20]],
  pickups:[['health',-34,-8],['health',34,8],['armor',-34,8],['armor',34,-8],['rocket',-19,-16],['rocket',19,16],['rail',19,-16],['rail',-19,16],['scatter',-4,0],['scatter',4,0],['plasma',-2,2.25],['plasma',2,-2.25],['grenade',-2,-22],['grenade',2,22],['shock',-2,22],['shock',2,-22],['flak',0,-22],['flak',0,22],['haste',-29,0],['overcharge',29,0],['overshield',0,3]],
  traversal:{trampolines:aetherTrampolines,boostLaunchers:aetherBoosts},
@@ -107,5 +104,4 @@ const aether={
 alignLauncherDirections(skybreak);
 alignLauncherDirections(aether);
 
-const freeze=value=>{if(value&&typeof value==='object'&&!Object.isFrozen(value)){Object.freeze(value);Object.values(value).forEach(freeze);}return value;};
 export const ISLAND_MAPS=freeze([skybreak,aether]);

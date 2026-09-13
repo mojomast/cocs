@@ -1,6 +1,6 @@
 # COCS — Colosseum Of Competitive Slop
 
-> **Release status (v2.69).** The current footer version in `app/page.tsx` is **v2.69**. The feature descriptions below are kept current, but the long version log is a historical record. See [VERIFICATION.md](VERIFICATION.md) for dated evidence and the remaining validation gaps (there is no browser/GPU verification in this environment).
+> **Release status (v2.70).** The current footer version in `app/page.tsx` is **v2.70**. The feature descriptions below are kept current, but the long version log is a historical record. See [VERIFICATION.md](VERIFICATION.md) for dated evidence and the remaining validation gaps (there is no browser/GPU verification in this environment).
 
 A local Three.js first-person arena-shooter where nine famous language models settle their differences with guns. Select an AI operator, strap on one of seven agent harnesses, choose an arena, and configure a match with zero to sixteen bots (mode-dependent). New setups default to two Easy bots, first to 15 frags or highest score after five minutes. Claude always uses Claude Code; everyone else can equip any harness.
 

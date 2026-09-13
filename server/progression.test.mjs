@@ -16,7 +16,7 @@ test('player ids are validated before storage',()=>{
  assert.equal(validPlayerId(42),false);
 });
 
-test('awards accumulate xp, levels and unlocks and persist across reload',()=>{
+test('awards accumulate xp, levels and unlocks and persist across reload',async()=>{
  const file=tempFile(),store=new ProgressionStore(file);
  assert.equal(store.get(ID),null);
  const first=store.award(ID,{win:true,actor:{frags:40,scoreStats:{captures:1}}});
@@ -24,6 +24,7 @@ test('awards accumulate xp, levels and unlocks and persist across reload',()=>{
  assert.ok(first.levelUp);
  assert.equal(first.profile.matches,1);
  assert.equal(first.profile.wins,1);
+ await store.whenPersisted();
  assert.ok(fs.existsSync(file));
  const reloaded=new ProgressionStore(file);
  assert.equal(reloaded.get(ID).xp,first.profile.xp);
@@ -31,7 +32,7 @@ test('awards accumulate xp, levels and unlocks and persist across reload',()=>{
  assert.equal(reloaded.get(ID).matches,1);
 });
 
-test('gear is level-gated and saved',()=>{
+test('gear is level-gated and saved',async()=>{
  const file=tempFile(),store=new ProgressionStore(file);
  store.ensure(ID);
  assert.deepEqual(store.setGear(ID,{armor:'plating'}).gear,{});
@@ -40,6 +41,7 @@ test('gear is level-gated and saved',()=>{
  assert.ok(saved.level>=8,`level ${saved.level}`);
  assert.equal(saved.gear.armor,'plating');
  assert.equal(saved.gear.primary,'heavy-barrel');
+ await store.whenPersisted();
  const reloaded=new ProgressionStore(file);
  assert.equal(reloaded.get(ID).gear.primary,'heavy-barrel');
 });
@@ -55,7 +57,7 @@ test('invalid ids never create profiles and all() returns copies',()=>{
  assert.equal(store.get(ID).gear.armor,undefined);
 });
 
-test('a completed room awards persistent progression to its players',()=>{
+test('a completed room awards persistent progression to its players',async()=>{
  const file=tempFile(),store=new ProgressionStore(file),room=new Room('local',()=>.5,{progression:store});
  room.join(1,'Kyle','chatgpt','openclaw','',false,ID);
  room.host(1,{mode:'deathmatch',fragLimit:1,timeLimit:60,botCount:0},'exchange');
@@ -66,6 +68,7 @@ test('a completed room awards persistent progression to its players',()=>{
  assert.ok(messages.some(item=>item.to===1&&item.msg.type==='progression'),'progression message queued');
  assert.equal(store.get(ID).matches,1);
  assert.ok(store.get(ID).xp>0);
+ await store.whenPersisted();
  const reloaded=new ProgressionStore(file);
  assert.equal(reloaded.get(ID).xp,store.get(ID).xp);
 });

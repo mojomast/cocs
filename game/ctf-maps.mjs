@@ -1,12 +1,5 @@
 import {terrainSupportAt} from './terrain.mjs';
-
-const freeze=value=>{
-  if(value&&typeof value==='object'&&!Object.isFrozen(value)){
-    Object.values(value).forEach(freeze);
-    Object.freeze(value);
-  }
-  return value;
-};
+import {freeze,wall,teamSpawns,flagSpawns} from './map-schema.mjs';
 
 const smooth=t=>t<=0?0:t>=1?1:t*t*(3-2*t);
 const clamp01=t=>Math.max(0,Math.min(1,t));
@@ -16,7 +9,6 @@ const cave=(x,z,cx,cz,r)=>{
 };
 
 const flat=(id,x0,x1,z0,z1,y,material='concrete')=>({id,material,vertices:[[x0,y,z0],[x0,y,z1],[x1,y,z1],[x1,y,z0]]});
-const wall=(x,z,w,d,h=2.4,kind='cover')=>({x,z,w,d,h,kind});
 const wallX=(id,z,x0,x1,bottom,top)=>({id,material:'cliff',vertices:[[x0,bottom,z],[x1,bottom,z],[x1,top,z],[x0,top,z]]});
 const wallZ=(id,x,z0,z1,bottom,top)=>({id,material:'cliff',vertices:[[x,bottom,z0],[x,bottom,z1],[x,top,z1],[x,top,z0]]});
 
@@ -61,8 +53,6 @@ const compound=(cx,out,pad=2.5)=>[
 const boost=(id,terrain,x,z,dir,power,vy)=>({id,...pointFor(terrain,x,z),dir,power,vy,cooldown:2});
 const link=(id,source,target)=>({id,source,target,traversal:id});
 const pointFor=(terrain,x,z)=>({x,z,y:terrainSupportAt(x,z,terrain,terrain.maxSlope).y});
-const teamData=(west,east)=>({0:west,1:east,red:west,blue:east});
-const flagData=(west,east)=>({0:{x:west,z:0},1:{x:east,z:0},red:{x:west,z:0},blue:{x:east,z:0}});
 
 /* ---------------- Frostline ---------------- */
 const frostXs=[-100,-80,-60,-40,-30,-20,-10,-6,0,6,10,20,30,40,60,80,100];
@@ -101,8 +91,8 @@ const frostline={
   description:'A frozen canyon CTF map with twin forts, a frozen river mid lane, ice-cave flanks, and a crevasse bridge holding the rocket.',
   color:'#9fd4ff',background:'#cfe9f7',
   bounds:{minX:-100,maxX:100,minZ:-40,maxZ:40},voidY:-12,terrain:frostTerrain,
-  teamSpawns:teamData([[-88,-4],[-88,4],[-60,30]],[[88,-4],[88,4],[60,-30]]),
-  flagSpawns:flagData(-88,88),
+  teamSpawns:teamSpawns([[-88,-4],[-88,4],[-60,30]],[[88,-4],[88,4],[60,-30]]),
+  flagSpawns:flagSpawns(-88,88),
   spawns:[[-88,-4],[-88,4],[88,-4],[88,4],[-60,30],[60,-30],[-40,0],[40,0],[0,0],[12,18],[12,-18]],
   pickups:[
     ['health',-88,-9],['health',88,9],['armor',-88,9],['armor',88,-9],
@@ -167,8 +157,8 @@ const derelict={
   description:'An infantry-focused orbital CTF station with three deck lanes at different heights linked by boost lifts and hangar strongpoints.',
   color:'#8fe3d0',background:'#0b1a24',
   bounds:{minX:-85,maxX:85,minZ:-45,maxZ:45},voidY:-14,terrain:derelictTerrain,
-  teamSpawns:teamData([[-74,-4],[-74,4],[-70,20]],[[74,-4],[74,4],[70,-20]]),
-  flagSpawns:flagData(-74,74),
+  teamSpawns:teamSpawns([[-74,-4],[-74,4],[-70,20]],[[74,-4],[74,4],[70,-20]]),
+  flagSpawns:flagSpawns(-74,74),
   spawns:[[-74,-4],[-74,4],[74,-4],[74,4],[-70,20],[70,-20],[-40,0],[40,0],[0,0],[0,20],[0,-20],[-20,20],[20,-20]],
   pickups:[
     ['health',-74,-10],['health',74,10],['armor',-74,10],['armor',74,-10],
@@ -237,8 +227,8 @@ const ashen={
   description:'An asymmetric volcanic CTF rift: a high western fortress overlooks a low eastern refinery across a lava bridge and collapsed tunnel lanes.',
   color:'#e0704a',background:'#2a1208',
   bounds:{minX:-95,maxX:95,minZ:-45,maxZ:45},voidY:-12,terrain:ashenTerrain,
-  teamSpawns:teamData([[-80,-4],[-80,4],[-20,-32]],[[80,-4],[80,4],[20,32]]),
-  flagSpawns:flagData(-80,80),
+  teamSpawns:teamSpawns([[-80,-4],[-80,4],[-20,-32]],[[80,-4],[80,4],[20,32]]),
+  flagSpawns:flagSpawns(-80,80),
   spawns:[[-80,-4],[-80,4],[80,-4],[80,4],[-20,-32],[20,32],[-46,0],[46,0],[0,0],[12,15],[12,-15]],
   pickups:[
     ['health',-80,-10],['health',80,10],['armor',-80,10],['armor',80,-10],

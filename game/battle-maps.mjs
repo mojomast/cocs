@@ -1,19 +1,14 @@
-const cover=(x,z,w=3,d=2,h=2,kind='cover')=>({x,z,w,d,h,kind});
-const wall=(x,z,w,d,h=9,kind='wall')=>({x,z,w,d,h,kind});
+import {freeze,wall,cover,pad,tp,zone,teamSpawns,flagSpawns} from './map-schema.mjs';
+
 const ceiling=(x,z,w,d,y=9,h=.6)=>({x,z,w,d,y,h});
-const pad=(id,x,z,power=18)=>({id,x,z,y:0,power,cooldown:2});
 const launch=(id,x,z,dir,power,target,y=0,vy=19)=>({id,x,z,y,dir,power,vy,cooldown:2,target});
-const tp=(id,x,z,tx,tz,y=0,ty=0)=>({id,x,z,y,to:{x:tx,y:ty,z:tz},cooldown:1});
 const zip=(id,from,to,speed=15)=>({id,from,to,speed,cooldown:1.2});
-const teams=(west,east)=>({0:west,1:east,red:west,blue:east});
-const flags=(west,east)=>({0:{x:west,z:0},1:{x:east,z:0},red:{x:west,z:0},blue:{x:east,z:0}});
-const zone=(x,z,radius=3.5)=>({x,z,y:0,radius});
 
 const neonVertical={
  id:'neon-vertical',name:'Neon Vertical',tag:'URBAN / ROOFTOPS + ZIPLINES',
  description:'A neon city block with jump pads, rooftop ziplines and teleporters threading dense vertical firefights.',
  color:'#7fb2ff',background:'#0a0f1e',bounds:{minX:-48,maxX:48,minZ:-36,maxZ:36},
- teamSpawns:teams([[-44,-6],[-44,6],[-40,0]],[[44,-6],[44,6],[40,0]]),flagSpawns:flags(-46,46),
+ teamSpawns:teamSpawns([[-44,-6],[-44,6],[-40,0]],[[44,-6],[44,6],[40,0]]),flagSpawns:flagSpawns(-46,46),
  spawns:[[-44,0],[44,0],[0,-32],[0,32],[-22,0],[22,0],[-40,-30],[40,30]],
  blocks:[
   wall(0,0,14,14,8,'tower'),
@@ -54,7 +49,7 @@ const substation={
  id:'substation',name:'Substation 7',tag:'INDOOR / BULKHEADS',
  description:'An enclosed substation of pillars, bulkheads and crates under a low ceiling, linked by service teleporters.',
  color:'#8fe0c4',background:'#0c1713',bounds:{minX:-44,maxX:44,minZ:-30,maxZ:30},
- teamSpawns:teams([[-38,-6],[-38,6],[-34,0]],[[38,-6],[38,6],[34,0]]),flagSpawns:flags(-40,40),
+ teamSpawns:teamSpawns([[-38,-6],[-38,6],[-34,0]],[[38,-6],[38,6],[34,0]]),flagSpawns:flagSpawns(-40,40),
  spawns:[[-38,0],[38,0],[0,-25],[0,25],[-22,22],[22,-22],[-22,-22],[22,22]],
  blocks:[
   wall(0,-29,88,2,10),wall(0,29,88,2,10),wall(-43,0,2,58,10),wall(43,0,2,58,10),
@@ -81,7 +76,7 @@ const warfront={
  id:'warfront',name:'Warfront Delta',tag:'COMBINED ARMS / ARMOUR',
  description:'A wide combined-arms battlefield of fortified bases, a central reactor and armour lanes built for large battles.',
  color:'#e6b56a',background:'#1a1408',bounds:{minX:-64,maxX:64,minZ:-44,maxZ:44},
- teamSpawns:teams([[-58,-6],[-58,6],[-56,0]],[[58,-6],[58,6],[56,0]]),flagSpawns:flags(-60,60),
+ teamSpawns:teamSpawns([[-58,-6],[-58,6],[-56,0]],[[58,-6],[58,6],[56,0]]),flagSpawns:flagSpawns(-60,60),
  spawns:[[-58,0],[58,0],[0,-38],[0,38],[-30,-34],[30,34],[-30,34],[30,-34],[-44,0],[44,0]],
  blocks:[
   wall(-50,0,10,18,5,'base-core'),wall(50,0,10,18,5,'base-core'),
@@ -112,7 +107,7 @@ const skyfallBasin={
  id:'skyfall-basin',name:'Skyfall Basin',tag:'COMBINED ARMS / AIR SUPERIORITY',
  description:'The largest combined-arms basin: fortified bases, a central mesa, armour lanes and two Hornet air pads per side.',
  color:'#9fd0ff',background:'#0a1622',bounds:{minX:-72,maxX:72,minZ:-52,maxZ:52},
- teamSpawns:teams([[-70,-8],[-70,8]],[[70,-8],[70,8]]),flagSpawns:flags(-70,70),
+ teamSpawns:teamSpawns([[-70,-8],[-70,8]],[[70,-8],[70,8]]),flagSpawns:flagSpawns(-70,70),
  spawns:[[-70,0],[70,0],[0,-42],[0,42],[-30,-40],[30,40],[-30,40],[30,-40],[-44,0],[44,0]],
  blocks:[
   wall(-60,0,14,24,6,'base-core'),wall(60,0,14,24,6,'base-core'),
@@ -139,6 +134,5 @@ const skyfallBasin={
  landmarks:[{label:'WEST BASE',x:-60,z:0,y:7},{label:'THE MESA',x:0,z:0,y:9},{label:'EAST BASE',x:60,z:0,y:7}],
 };
 
-const freeze=value=>{if(value&&typeof value==='object'&&!Object.isFrozen(value)){Object.values(value).forEach(freeze);Object.freeze(value);}return value;};
 export const BATTLE_MAPS=freeze([neonVertical,substation,warfront,skyfallBasin]);
 export default BATTLE_MAPS;

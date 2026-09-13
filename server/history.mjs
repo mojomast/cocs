@@ -1,4 +1,5 @@
 import fs from 'node:fs';
+import fsp from 'node:fs/promises';
 import path from 'node:path';
 import {randomUUID} from 'node:crypto';
 import {teamMode} from '../game/config.mjs';
@@ -13,6 +14,12 @@ export class MatchHistory {
   this.max = Math.max(1, options.max ?? HISTORY_CAP);
   this.matches = [];
   this.version = 0;
+  this._dirty = false;
+  this._rev = 0;
+  this._writing = null;
+  this._retryAt = 0;
+  this._failures = 0;
+  this.lastPersistError = null;
   if (this.file) this.load();
  }
  load() {
@@ -78,33 +85,54 @@ export class MatchHistory {
   this.matches.unshift(entry);
   this.matches = this.matches.slice(0, this.max);
   this.version++;
-  this.persist();
+  this._dirty = true;
+  this._rev++;
+  this.flush();
   return entry;
  }
  persist() {
-  if (!this.file) return true;
-  const dir = path.dirname(this.file);
+  if (!this.file) return Promise.resolve(true);
+  if (this._writing) return this._writing;
   const tmp = `${this.file}.${process.pid}.${Math.random().toString(36).slice(2)}.tmp`;
-  try {
-   fs.mkdirSync(dir, { recursive: true });
-   fs.writeFileSync(tmp, JSON.stringify(this.matches, null, 1));
-   fs.renameSync(tmp, this.file);
-   this._dirty = false; this._retryAt = 0; this._failures = 0; this.lastPersistError = null;
-   return true;
-  } catch (error) {
-   // Keep the newest in-memory record and retry later instead of throwing out
-   // of the room tick (which would take the whole server process down).
-   this._dirty = true; this.lastPersistError = error;
-   this._failures = (this._failures ?? 0) + 1;
-   this._retryAt = Date.now() + Math.min(30000, 1000 * 2 ** Math.min(this._failures - 1, 5));
-   try { fs.unlinkSync(tmp); } catch {}
-   return false;
-  }
+  this._writing = (async () => {
+   try {
+    await fsp.mkdir(path.dirname(this.file), { recursive: true });
+    const rev = this._rev;
+    await fsp.writeFile(tmp, JSON.stringify(this.matches, null, 1));
+    await fsp.rename(tmp, this.file);
+    if (this._rev === rev) this._dirty = false;
+    this._retryAt = 0; this._failures = 0; this.lastPersistError = null;
+    return true;
+   } catch (error) {
+    // Keep the newest in-memory record and retry later instead of throwing out
+    // of the room tick (which would take the whole server process down).
+    this._dirty = true; this.lastPersistError = error;
+    this._failures = (this._failures ?? 0) + 1;
+    this._retryAt = Date.now() + Math.min(30000, 1000 * 2 ** Math.min(this._failures - 1, 5));
+    try { await fsp.unlink(tmp); } catch {}
+    return false;
+   } finally {
+    this._writing = null;
+    if (this._dirty && (!this._retryAt || Date.now() >= this._retryAt)) this.flush();
+   }
+  })();
+  return this._writing;
  }
  flush() {
-  if (!this.file || !this._dirty) return true;
-  if (this._retryAt && Date.now() < this._retryAt) return false;
+  if (!this.file) return Promise.resolve(true);
+  if (this._writing) return this._writing;
+  if (!this._dirty) return Promise.resolve(true);
+  if (this._retryAt && Date.now() < this._retryAt) return Promise.resolve(false);
   return this.persist();
+ }
+ async whenPersisted() {
+  if (!this.file) return true;
+  while (true) {
+   if (this._writing) { await this._writing; continue; }
+   if (!this._dirty) return true;
+   if (this._retryAt && Date.now() < this._retryAt) return false;
+   await this.flush();
+  }
  }
    all() { return structuredClone(this.matches); }
 }

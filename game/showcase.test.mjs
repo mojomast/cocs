@@ -4,11 +4,10 @@ import {Match} from './core.mjs';
 import {pickShowcase,seatShowcaseVehicles,SHOWCASES} from './showcase.mjs';
 import {raceDemoMode,raceDemoPose} from './race-camera.mjs';
 import {maxBotsFor} from './arenas.mjs';
-import {readFile} from 'node:fs/promises';
-import ts from 'typescript';
 import {DEFAULT_CONFIG,normalizeConfig} from './config.mjs';
 import {RULES} from './data.mjs';
 import {CinematicDirector} from './director.mjs';
+import {buildShowcase as buildShowcaseFactory} from './showcase-build.mjs';
 
 test('showcase reel cycles through every scenario', () => {
   assert.equal(SHOWCASES.length,1);
@@ -51,18 +50,11 @@ test('combined arms showcase seats bots inside vehicles', () => {
   assert.ok(match.actors.some(actor => actor.vehicleId == null), 'some bots should stay on foot');
 });
 
-test('menu builder warms eight bots, progresses through two laps and restarts the full race',async()=>{
-  const source=await readFile(new URL('../app/page.tsx',import.meta.url),'utf8');
-  const ast=ts.createSourceFile('page.tsx',source,ts.ScriptTarget.Latest,true,ts.ScriptKind.TSX);let builder,restart;
-  const visit=node=>{
-    if(ts.isVariableDeclaration(node)&&node.name.getText(ast)==='buildShowcase')builder=node.initializer.getText(ast);
-    if(ts.isIfStatement(node)&&node.expression.getText(ast)==='sc.match.over')restart=node.getText(ast);
-    ts.forEachChild(node,visit);
-  };visit(ast);assert.ok(builder);assert.ok(restart);
+test('menu builder warms eight bots, progresses through two laps and restarts the full race',()=>{
   const r={},view={setMatch(){},setPlayerId(){},setDirector(){},setCinema(){},setShowcase(snapshot){this.showcase=snapshot;}};
   const deps={r,view,showcaseOk:()=>true,makeRng:()=>()=>.25,pickShowcase,normalizeConfig,DEFAULT_CONFIG,Match,seatShowcaseVehicles,RULES,CinematicDirector,reducedMotion:()=>false,setShowcaseLive(){}};
-  const buildShowcase=Function(...Object.keys(deps),`return (${builder});`)(...Object.values(deps));
-  const update=Function('sc','buildShowcase','view',restart);
+  const buildShowcase=buildShowcaseFactory(deps);
+  const update=sc=>{if(sc.match.over)buildShowcase();};
   buildShowcase();
   for(let loop=0;loop<2;loop++){
     const m=r.showcase.match;
@@ -76,7 +68,7 @@ test('menu builder warms eight bots, progresses through two laps and restarts th
     assert.ok(m.race.racers.every(racer=>racer.nextGate>0));
     for(let tick=0;tick<Math.ceil(180/RULES.dt)&&!m.over;tick++)m.step(RULES.dt,{inputs:{}});
     assert.equal(m.overReason,'race-finish');assert.equal(m.snapshot().race.standings[0].completedLaps,2);
-    update(r.showcase,buildShowcase,view);
+    update(r.showcase);
     assert.notEqual(r.showcase.match,m);assert.equal(r.showcase.match.over,false);assert.equal(r.showcase.time,0);
   }
   assert.equal(r.showcaseIndex,3);

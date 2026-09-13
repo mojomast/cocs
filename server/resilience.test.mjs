@@ -13,37 +13,39 @@ function rng(){let n=23;return()=>((n=(Math.imul(n,1664525)+1013904223)>>>0)/429
 function blockedPath(){const dir=fs.mkdtempSync(path.join(os.tmpdir(),'token-arena-block-'));const blocker=path.join(dir,'blocker');fs.writeFileSync(blocker,'x');return {blocker,file:path.join(blocker,'store.json')};}
 const ID='player-0001-test';
 
-test('a failing history write keeps the record in memory and retries later',()=>{
+test('a failing history write keeps the record in memory and retries later',async()=>{
  const {blocker,file}=blockedPath();
  const history=new MatchHistory(file);
  const entry=history.record({roomId:'A',mapId:'crosswire',config:{mode:'deathmatch',fragLimit:5,timeLimit:60},time:10,actors:[{name:'Alice',character:'chatgpt',harness:'openclaw',frags:3,deaths:1}]});
  assert.equal(entry.mode,'deathmatch');
  assert.equal(history.all().length,1,'the record survives in memory');
+ await history.whenPersisted();
  assert.ok(history.lastPersistError,'the write failure is observable');
- assert.equal(history.flush(),false,'backoff prevents an immediate retry');
+ assert.equal(await history.flush(),false,'backoff prevents an immediate retry');
  fs.rmSync(blocker);
  delete history._retryAt;
- assert.equal(history.flush(),true,'the retry succeeds once the filesystem recovers');
+ assert.equal(await history.flush(),true,'the retry succeeds once the filesystem recovers');
  const reloaded=new MatchHistory(file);
  assert.equal(reloaded.all().length,1,'the recovered record is durable');
 });
 
-test('a failing progression write keeps the award and does not double-award',()=>{
+test('a failing progression write keeps the award and does not double-award',async()=>{
  const {blocker,file}=blockedPath();
  const store=new ProgressionStore(file);
  const first=store.award(ID,{win:true,actor:{frags:5,deaths:2},mode:'deathmatch'});
  assert.ok(first,'the award is returned despite the write failure');
+ await store.whenPersisted();
  assert.ok(store.lastPersistError,'the write failure is observable');
  const level=store.get(ID).level;
- const retry=store.flush();
+ const retry=await store.flush();
  if(retry===false) delete store._retryAt;
  fs.rmSync(blocker);
- assert.equal(store.flush(),true,'the retry succeeds once the filesystem recovers');
+ assert.equal(await store.flush(),true,'the retry succeeds once the filesystem recovers');
  const reloaded=new ProgressionStore(file);
  assert.equal(reloaded.get(ID).level,level,'the recovered award is durable and not duplicated');
 });
 
-test('a failing persistence write cannot stop results or other rooms',()=>{
+test('a failing persistence write cannot stop results or other rooms',async()=>{
  const {file}=blockedPath();
  const history=new MatchHistory(file);
  const progression=new ProgressionStore(null);
@@ -58,6 +60,7 @@ test('a failing persistence write cannot stop results or other rooms',()=>{
  const messages=room.drain();
  assert.ok(messages.some(m=>m.msg.type==='results'),'results are still broadcast');
  assert.equal(history.all().length,1,'the failed write still retains the record in memory');
+ await history.whenPersisted();
  assert.ok(history.lastPersistError,'the store reports the failed write');
 
  const other=registry.create('B');

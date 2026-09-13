@@ -1,0 +1,18 @@
+import {createElement} from 'react';
+import {CHARACTERS,WEAPONS} from './data.mjs';
+import {modeColumns,modePrimary,scoreStats,scoreText,teamName} from './hud.mjs';
+import {raceStandings,raceTime} from './race-ui.mjs';
+
+const metricText=(field,value,actor)=>field==='objectiveTime'?`${value.toFixed(1)}s`:field==='ladder'?`RUNG ${Math.max(1,(Number(actor?.ladder)||0)+1)}`:field==='weapon'?String(WEAPONS[Number(actor?.weapon)]?.short??actor?.weapon??'-'):scoreText(value);
+const compareActors=(mode,a,b,teamScores)=>{if(mode==='teamdeathmatch'){const as=Number(teamScores?.[a?.team]??0),bs=Number(teamScores?.[b?.team]??0);if(as!==bs)return bs-as;}const ar=modePrimary(mode,a),br=modePrimary(mode,b);for(let i=0;i<Math.max(ar.length,br.length);i++)if(ar[i]!==br[i])return br[i]-ar[i];return (Number(b?.frags)||0)-(Number(a?.frags)||0)||(Number(a?.deaths)||0)-(Number(b?.deaths)||0)||String(a?.name??'').localeCompare(String(b?.name??''))||(Number(a?.id)||0)-(Number(b?.id)||0);};
+
+export function renderScoreboard(source,history=false){
+ if(source?.config?.mode==='puma-race'||source?.mode==='puma-race')return createElement('div',{className:'scoreboard race-standings','aria-label':'Race standings'},
+  createElement('div',{className:'race-score-row labels'},createElement('span',null,'PLACE / DRIVER'),createElement('span',null,'LAPS DONE'),createElement('span',null,'FINISH')),
+  raceStandings(source).map(row=>{const you=!history&&row.actorId===(source.actorId??0);return createElement('div',{className:`race-score-row ${you?'you':''}`,key:row.actorId},createElement('span',null,createElement('b',null,row.position),' ',row.name,you?' / YOU':''),createElement('span',null,row.completedLaps,' / ',source.race.laps),createElement('span',null,row.finishTime==null?(source.race.phase==='finished'?'DNF':'RACING'):raceTime(row.finishTime)));}));
+ const modeId=source?.config?.mode??source?.mode??'deathmatch',columns=modeColumns(modeId),teamScores=source?.teamScores,actors=[...(source?.actors??source?.players??[])].sort((a,b)=>compareActors(modeId,a,b,teamScores)),actorId=history?null:source?.actorId;
+ return createElement('div',{className:`scoreboard mode-scoreboard mode-scoreboard-${modeId}`,'aria-label':`${modeId} ${history?'match history':'standings'}`},
+  (modeId==='teamdeathmatch'||modeId==='assault'||modeId==='combined-arms')&&createElement('div',{className:'team-score-banner','aria-label':'Team scores'},createElement('strong',null,modeId==='assault'?'SECTOR SCORE':modeId==='combined-arms'?'ZONE SCORE':'TEAM SCORE'),createElement('span',null,teamName(0),' ',scoreText(teamScores?.[0]??0)),createElement('span',null,teamName(1),' ',scoreText(teamScores?.[1]??0)),source?.winner!==null&&source?.winner!==undefined&&createElement('b',null,teamName(source.winner),' WINS')),
+  createElement('div',{className:'score-row labels',role:'row'},createElement('span',null,'OPERATOR'),createElement('strong',null,'KILLS'),createElement('span',null,'DEATHS'),columns.map(([,label])=>createElement('span',{key:label},label))),
+  actors.map((a,i)=>{const stats=scoreStats(a);return createElement('div',{className:`score-row ${a.id===actorId?'you':''}`,key:a.id??`${a.name}-${i}`,role:'row'},createElement('span',null,createElement('b',null,String(i+1).padStart(2,'0')),createElement('i',{style:{background:CHARACTERS.find(c=>c.id===a.character)?.color}}),a.name,a.id===actorId&&createElement('small',null,'YOU')),createElement('strong',null,Number(a.frags)||0),createElement('span',null,Number(a.deaths)||0),columns.map(([field])=>createElement('span',{key:field},metricText(field,stats[field],a))));}));
+}

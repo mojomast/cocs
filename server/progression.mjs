@@ -1,4 +1,5 @@
 import fs from 'node:fs';
+import fsp from 'node:fs/promises';
 import path from 'node:path';
 import {randomBytes,randomUUID} from 'node:crypto';
 import {awardMatch,defaultProgression,normalizeGear,normalizeProgression} from '../game/progression.mjs';
@@ -17,6 +18,12 @@ export class ProgressionStore{
   this.players=new Map();
   this.tokens=new Map();
   this.pinned=new Set();
+  this._dirty=false;
+  this._rev=0;
+  this._writing=null;
+  this._retryAt=0;
+  this._failures=0;
+  this.lastPersistError=null;
   if(this.file)this.load();
  }
  load(){
@@ -58,7 +65,7 @@ export class ProgressionStore{
   profile.gear=normalizeGear(gear&&typeof gear==='object'?gear:{},profile.level);
   if(attachments!==undefined)profile.attachments=normalizeAttachments(attachments&&typeof attachments==='object'?attachments:{},profile.level);
   if(finish!==undefined)profile.finish=FINISH_IDS.includes(finish)?finish:null;
-  this.persist();
+  this._dirty=true;this._rev++;this.flush();
   return this.get(id);
  }
  setGearOwned(id,token,gear,attachments,finish){return this.getOwned(id,token)?this.setGear(id,gear,attachments,finish):null;}
@@ -72,7 +79,7 @@ export class ProgressionStore{
   if(token)awarded.profile.ownerToken=token;
   this.players.set(id,awarded.profile);
   this.trim();
-  this.persist();
+  this._dirty=true;this._rev++;this.flush();
   return {profile:this.get(id),gained:awarded.gained,levelUp:awarded.levelUp,unlocked:awarded.unlocked,progress:awarded.progress,toNext:awarded.toNext};
  }
  awardOwned(id,token,result){return this.getOwned(id,token)?this.award(id,result):null;}
@@ -86,26 +93,46 @@ export class ProgressionStore{
   }
  }
  persist(){
-  if(!this.file)return true;
+  if(!this.file)return Promise.resolve(true);
+  if(this._writing)return this._writing;
   const tmp=`${this.file}.${process.pid}.${Math.random().toString(36).slice(2)}.tmp`;
-  try{
-   fs.mkdirSync(path.dirname(this.file),{recursive:true});
-   fs.writeFileSync(tmp,JSON.stringify([...this.players.values()],null,1));
-   fs.renameSync(tmp,this.file);
-   this._dirty=false;this._retryAt=0;this._failures=0;this.lastPersistError=null;
-   return true;
-  }catch(error){
-   this._dirty=true;this.lastPersistError=error;
-   this._failures=(this._failures??0)+1;
-   this._retryAt=Date.now()+Math.min(30000,1000*2**Math.min(this._failures-1,5));
-   try{fs.unlinkSync(tmp);}catch{}
-   return false;
-  }
+  this._writing=(async()=>{
+   try{
+    await fsp.mkdir(path.dirname(this.file),{recursive:true});
+    const rev=this._rev;
+    await fsp.writeFile(tmp,JSON.stringify([...this.players.values()],null,1));
+    await fsp.rename(tmp,this.file);
+    if(this._rev===rev)this._dirty=false;
+    this._retryAt=0;this._failures=0;this.lastPersistError=null;
+    return true;
+   }catch(error){
+    this._dirty=true;this.lastPersistError=error;
+    this._failures=(this._failures??0)+1;
+    this._retryAt=Date.now()+Math.min(30000,1000*2**Math.min(this._failures-1,5));
+    try{await fsp.unlink(tmp);}catch{}
+    return false;
+   }finally{
+    this._writing=null;
+    if(this._dirty&&(!this._retryAt||Date.now()>=this._retryAt))this.flush();
+   }
+  })();
+  return this._writing;
  }
  flush(){
-  if(!this.file||!this._dirty)return true;
-  if(this._retryAt&&Date.now()<this._retryAt)return false;
+  if(!this.file)return Promise.resolve(true);
+  if(this._writing)return this._writing;
+  if(!this._dirty)return Promise.resolve(true);
+  if(this._retryAt&&Date.now()<this._retryAt)return Promise.resolve(false);
   return this.persist();
+ }
+ async whenPersisted(){
+  if(!this.file)return true;
+  while(true){
+   if(this._writing){await this._writing;continue;}
+   if(!this._dirty)return true;
+   if(this._retryAt&&Date.now()<this._retryAt)return false;
+   await this.flush();
+  }
  }
  all(){return [...this.players.values()].map(profile=>({...profile,gear:{...profile.gear},attachments:{...profile.attachments},unlocks:{...profile.unlocks}}));}
 }

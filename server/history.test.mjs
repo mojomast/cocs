@@ -98,12 +98,13 @@ test('malformed persisted history entries are ignored',()=>{
  const h=new MatchHistory(file);
  assert.deepEqual(h.all().map(entry=>entry.id),['good']);
 });
-test('file round-trip loads matches at boot and persists atomically',()=>{
+test('file round-trip loads matches at boot and persists atomically',async()=>{
  const dir=tmpDir();
  const file=path.join(dir,'history.json');
  const h=new MatchHistory(file);
  assert.equal(h.all().length,0,'missing file boots empty');
  h.record({roomId:'WXYZ',mapId:'exchange',config:{mode:'deathmatch',fragLimit:10,timeLimit:120},time:12,actors:[{name:'Nia',character:'gemini',harness:'cline',frags:3,deaths:2}]});
+ await h.whenPersisted();
  assert.ok(fs.existsSync(file));
  const reloaded=new MatchHistory(file);
  assert.equal(reloaded.all().length,1);
@@ -111,10 +112,11 @@ test('file round-trip loads matches at boot and persists atomically',()=>{
  assert.equal(reloaded.all()[0].players[0].name,'Nia');
  assert.ok(fs.readdirSync(dir).every(f=>!f.includes('.tmp')),'no stray temp files');
 });
-test('cap enforcement keeps only the newest matches',()=>{
+test('cap enforcement keeps only the newest matches',async()=>{
  const dir=tmpDir();
  const h=new MatchHistory(path.join(dir,'h.json'),{max:3});
  for(let i=0;i<7;i++)h.record({roomId:'ROOM',mapId:'crosswire',config:{mode:'deathmatch',fragLimit:5,timeLimit:60},time:i,actors:[{name:`P${i}`,character:'chatgpt',harness:'openclaw',frags:i,deaths:0}]});
+ await h.whenPersisted();
  const all=h.all();
  assert.equal(all.length,3);
  assert.equal(all[0].players[0].name,'P6','newest first');
@@ -170,7 +172,7 @@ test('an explicit ending reason overrides the score-limit inference',()=>{
  assert.equal(frag.endedBy,'frag');
 });
 
-test('race finish and timeout winners survive copying and file round-trip',()=>{
+test('race finish and timeout winners survive copying and file round-trip',async()=>{
  const dir=tmpDir(),file=path.join(dir,'race.json');
  try {
   const h=new MatchHistory(file);
@@ -205,6 +207,7 @@ test('race finish and timeout winners survive copying and file round-trip',()=>{
    copy.race.standings.pop();
    copy.players[0].race.effects.shield=100;
    assert.deepEqual(h.all()[0],expected);
+   await h.whenPersisted();
    const reloaded=new MatchHistory(file);
    assert.deepEqual(reloaded.all(),h.all());
    reloaded.all()[0].players[0].race.effects.shield=200;
