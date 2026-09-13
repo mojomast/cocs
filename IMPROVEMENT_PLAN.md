@@ -23,6 +23,31 @@ Severity:
 
 Effort: **S** <= half day, **M** ~1-2 days, **L** > 2 days.
 
+## Status (2026-09-13, release v2.69)
+
+Implemented and deployed: SEC-1..4, BUG-1..12, OPS-1, TEST-1, PERF-1..3,
+BUG-10..12, NET-1..3, REN-1, REN-2, ARCH-2, ARCH-3 (math/team/interpolation
+partially), ARCH-4 (protocol; map-schema not), ARCH-5, DEAD-1..4, DEAD-6,
+ROBUST-1, SEC-5, TEST-3 (partial), DOC-1, UX-1 (partial). Game 916/916, server
+123/123, SSR 4/4, typecheck clean, lint 0 errors, live deploy verified.
+
+Explicitly deferred (still valid, not started):
+- ARCH-1: split `core.mjs` / `view.mjs` / `page.tsx` into modules (L, high risk).
+- ARCH-4 remainder: a single `map-schema.mjs` plus a shared layout-test harness
+  (the five `freeze` copies and duplicated map builders remain).
+- ARCH-6 remainder: client code-splitting and `globals.css` decomposition
+  (geometry caching and texture disposal landed).
+- DEAD-5 remainder: collision for arch/barrel/ruin props and ceilings.
+- TEST-2: replace the TSX-source-parsing tests with importable units.
+- ROBUST-2 remainder: move match-end persistence off the simulation tick.
+- ARCH-3 remainder: the ternary `clamp` variants in `director.mjs`,
+  `bot-personalities.mjs`, `race-camera.mjs` and the `clamp01` copies in
+  `ctf-maps.mjs`/`blood-gulch.mjs` were intentionally left because their
+  inverted-range semantics differ.
+
+These remaining items are larger structural refactors; the scripted defects and
+all P0/P1 findings are resolved.
+
 ---
 
 ## Phase 0 - Critical: security, data loss, broken shipped flows

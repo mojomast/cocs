@@ -1,5 +1,54 @@
 # COCS verification report
 
+## Release 2.69 - Whole-codebase audit: security, correctness, architecture
+
+Baseline `685b99f`; findings consolidated in `IMPROVEMENT_PLAN.md` from seven
+read-only audits. Shipped across commits `590f0a1`, `a7441d9`, `20e21db`,
+`2130048`, `7c1769d`, `51c6c37`.
+
+Security and lifecycle:
+- Progression is now bound to a server-issued secret token instead of a
+  client-chosen `playerId`; a wrong token gets a fresh identity and can never read
+  or write another profile. Connected profiles are pinned against LRU eviction.
+- Essential server messages coalesce by type instead of FIFO-evicting
+  `welcome`/`start`/`results`; control frames are rate-limited, clients are capped,
+  and dropped event batches rewind `lastSerial` so the delta is resent.
+- Deploy now backs up `dist/`, health-gates both systemd units, verifies assets and
+  rolls back on failure; nginx/Next add CSP and security headers; the app has
+  route-level and global error boundaries.
+
+Correctness and performance:
+- Fixed the Arms Race finisher award, bot melee, on-foot interact movement,
+  self-kill stats, void kill-feed timestamps, weapon-finish rendering and online
+  finish/gear plumbing, local race coins, next-arena mode safety, renderer-init
+  recovery, connect-before-open hangs and malformed-snapshot crashes.
+- Payload objective credit now uses the cart stand check; leaders rank objective
+  modes correctly and share one implementation; navigation construction is
+  faster and bots use the filtered nav graph; supply placement no longer stacks;
+  demos are event-capped and compressed; radar labels/progress and underbarrel
+  meshes render.
+
+Architecture and cleanup:
+- Extracted shared `game/math.mjs`, `game/protocol.mjs`, canonical team palettes,
+  and a single ranking API; cached core traversal tables and coalesced server
+  event clones and snapshot quantization.
+- Removed 57 unreachable shadcn components, dead scaffolding (`chatgpt-auth`,
+  drizzle/db/examples/vendor), unused dependencies, dead map/generator fields and
+  the unused lag-compensation path.
+- Lint is now a real gate (0 errors; remaining client-interop findings are
+  warnings) and `.github/workflows/ci.yml` runs typecheck, tests, build and lint.
+
+Verification: game **916/916**, server **123/123**, SSR `tests/*.test.mjs`
+**4/4**, `tsc --noEmit` clean, `npm run lint` exit 0, production build succeeds,
+and the live deploy verified v2.69 (HTML + 9 assets 200; web and game services
+active; game-server HTTP 200).
+
+Known gaps not addressed in this pass: the `core.mjs`/`view.mjs`/`page.tsx`
+monolith split, full map-builder schema consolidation, client code-splitting/CSS
+decomposition, replacing the TSX-source-parsing tests with importable units, and
+moving match-end persistence off the simulation tick. No browser/WebGL playtest
+was possible, so visual and balance claims remain unit/geometry-verified only.
+
 ## Documentation drift and headless tests - 2026-09-13 (unreleased)
 
 - README drift corrected: `game/data.mjs` documents **five** powerups (haste,
