@@ -14,7 +14,7 @@ const primaryMode = map => arenaMeta(map.id).play[0];
 test('there is exactly one next-gen map per combat game mode', () => {
   // Puma Race ships its own dedicated circuit (RACE_MAPS) rather than a
   // procedurally generated combat arena, so it is excluded from this count.
-  const combatModes = GAME_MODES.filter(mode => mode.id !== 'puma-race');
+  const combatModes = GAME_MODES.filter(mode => mode.id !== 'puma-race' && mode.id !== 'puma-soccer');
   assert.equal(NEXTGEN_MAPS.length, combatModes.length);
   assert.equal(new Set(NEXTGEN_MAPS.map(map => map.id)).size, NEXTGEN_MAPS.length);
   const modes = new Set(NEXTGEN_MAPS.map(primaryMode));

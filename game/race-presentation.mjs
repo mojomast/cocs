@@ -4,12 +4,22 @@ import {material,box,ring,textLabel,V} from './view.mjs';
 
 export function updateRace(view,match,time){
  view.raceModels??=new Map();const active=new Set(),reduced=view.reduced();
- for(const entry of match.race?.boxes??[]){
+ const soccer=match.race?.kind==='soccer';
+ if(soccer){
+  const ball=match.race?.ball;
+  if(ball&&Number.isFinite(ball.x)&&Number.isFinite(ball.z)){
+   const key='soccer-ball',radius=Math.max(.2,Number.isFinite(ball.r)?ball.r:1.1);active.add(key);let model=view.raceModels.get(key);
+   if(!model){model=new T.Group();model.name='soccer-ball';const shell=new T.Mesh(new T.SphereGeometry(radius,18,14),material('#f3f6fa',.15,.5));model.add(shell);const patchMat=material('#141922',.3,.6);for(const [px,py,pz] of [[.58,.34,.74],[-.6,.42,.6],[.08,.78,-.62]]){const patch=new T.Mesh(new T.SphereGeometry(radius*.28,8,6),patchMat);patch.position.set(px*radius,py*radius,pz*radius);model.add(patch);}model.traverse(n=>{n.userData.objective=true;n.userData.noCameraOcclusion=true;});view.worldGroup.add(model);view.raceModels.set(key,model);}
+   model.position.set(ball.x,Number.isFinite(ball.y)?ball.y:radius,ball.z);
+   if(!reduced){model.rotation.x=time*.9;model.rotation.y=time*1.4;}
+  }
+ }
+ if(!soccer)for(const entry of match.race?.boxes??[]){
   const key=`box:${entry.id}`;active.add(key);let model=view.raceModels.get(key);
   if(!model){model=new T.Group();box(model,1.7,1.7,1.7,0,0,0,material('#b28cff',.3,.4,true));if(typeof document!=='undefined')for(const yaw of [0,Math.PI/2,Math.PI,Math.PI*1.5]){const face=new T.Group();face.rotation.y=yaw;textLabel(face,'?',0,0,.87,1.1,'#ffffff');model.add(face);}model.traverse(n=>{n.userData.objective=true;n.userData.noCameraOcclusion=true;});view.worldGroup.add(model);view.raceModels.set(key,model);}
   model.visible=entry.ready??entry.wait<=0;model.position.set(entry.x,2.2+(reduced?0:Math.sin(time*2)*.25),entry.z);model.rotation.y=reduced?0:time*.65;
  }
- for(const entry of match.race?.hazards??[]){
+ if(!soccer)for(const entry of match.race?.hazards??[]){
   const kind=entry.type==='mine'?'mine':'oil',key=`${kind}:${entry.id}`;active.add(key);let model=view.raceModels.get(key);
   if(!model){model=new T.Group();
    if(kind==='mine'){const core=new T.Mesh(new T.IcosahedronGeometry(.55,1),material('#1b1d24',.7,.45));core.position.y=.55;model.add(core);for(let i=0;i<6;i++){const a=i*Math.PI/3,axis=V(Math.cos(a),0,Math.sin(a)),spike=new T.Mesh(new T.ConeGeometry(.09,.44,5),material('#3a3f4a',.6,.5));spike.position.set(axis.x*.52,.55,axis.z*.52);spike.quaternion.setFromUnitVectors(V(0,1,0),axis);model.add(spike);}const halo=new T.Mesh(new T.TorusGeometry(.72,.08,8,24),material('#ff4d4d',.3,.3,true));halo.rotation.x=Math.PI/2;halo.position.y=.06;model.add(halo);model.userData.ring=halo;}
@@ -18,7 +28,7 @@ export function updateRace(view,match,time){
   model.visible=entry.ttl>0;model.position.set(entry.x,kind==='mine'?0:.1,entry.z);
   if(kind==='mine'&&model.userData.ring)model.userData.ring.scale.setScalar(reduced?1:1+.14*Math.sin(time*6));
  }
- for(const entry of match.race?.coins??[]){
+ if(!soccer)for(const entry of match.race?.coins??[]){
   const key=`coin:${entry.id}`;active.add(key);let model=view.raceModels.get(key);
   if(!model){model=new T.Group();const disc=new T.Mesh(new T.CylinderGeometry(.42,.42,.09,20),material('#ffd35c',.85,.25,true));disc.rotation.z=Math.PI/2;model.add(disc);const rim=new T.Mesh(new T.TorusGeometry(.42,.05,8,24),material('#fff3b0',.7,.3,true));rim.rotation.y=Math.PI/2;model.add(rim);model.traverse(n=>{n.userData.objective=true;n.userData.noCameraOcclusion=true;});view.worldGroup.add(model);view.raceModels.set(key,model);}
   model.visible=entry.ready??entry.wait<=0;model.position.set(entry.x,1.2,entry.z);model.rotation.y=reduced?0:time*2.6;
@@ -94,15 +104,44 @@ function boostPadModel(pad,centerline){
  for(let i=0;i<3;i++){const chevron=new T.Mesh(geometry,glow);chevron.rotation.x=Math.PI/2;chevron.position.z=(i-1)*.66;group.add(chevron);}
  return group;
 }
+// Soccer reuses the same flat-shell treatment: mown stripes and paint sit under
+// the play area, while the goal frames stay real occluders for the chase camera.
+function soccerPitchBody(parent,race){
+ const pitch=race.pitch||{},minX=Number.isFinite(pitch.minX)?pitch.minX:-30,maxX=Number.isFinite(pitch.maxX)?pitch.maxX:30,minZ=Number.isFinite(pitch.minZ)?pitch.minZ:-18,maxZ=Number.isFinite(pitch.maxZ)?pitch.maxZ:18;
+ const width=maxX-minX,depth=maxZ-minZ,cx=(minX+maxX)/2,cz=(minZ+maxZ)/2;
+ const grass=material('#2c7038',.02,.96),mown=material('#337d40',.02,.96),line=material('#eaf7ee',.05,.85),postMat=material('#eef2f6',.35,.4),netMat=material('#bfe0c8',.05,.9);
+ const paint=(w,h,d,x,y,z,mat)=>{const mesh=box(parent,w,h,d,x,y,z,mat);mesh.userData.arenaDetail=true;return mesh;};
+ const stripes=8,stripeWidth=width/stripes;
+ for(let i=0;i<stripes;i++)paint(stripeWidth,.05,depth,minX+stripeWidth*(i+.5),.03,cz,i%2?mown:grass);
+ paint(width+.3,.06,.18,cx,.05,minZ,line);paint(width+.3,.06,.18,cx,.05,maxZ,line);
+ paint(.18,.06,depth+.3,minX,.05,cz,line);paint(.18,.06,depth+.3,maxX,.05,cz,line);
+ paint(.18,.06,depth,cx,.05,cz,line);
+ const circle=ring(parent,Math.min(width,depth)*.16,.08,cx,.06,cz,line);circle.userData.arenaDetail=true;
+ const spot=new T.Mesh(new T.CylinderGeometry(.35,.35,.05,16),line);spot.position.set(cx,.06,cz);spot.userData.arenaDetail=true;parent.add(spot);
+ for(const goal of race.goals||[]){
+  const halfWidth=Math.max(1,Number(goal.halfWidth)||6),height=Math.max(1,Number(goal.height)||4),goalDepth=Math.max(.4,Number(goal.depth)||2),goalZ=Number.isFinite(goal.z)?goal.z:cz;
+  const dir=Math.sign(goal.nx)||(goal.x<=cx?-1:1),boxDepth=Math.max(6,halfWidth*1.4),innerX=goal.x-dir*boxDepth;
+  paint(boxDepth,.06,.16,(goal.x+innerX)/2,.05,goalZ+halfWidth,line);
+  paint(boxDepth,.06,.16,(goal.x+innerX)/2,.05,goalZ-halfWidth,line);
+  paint(.16,.06,halfWidth*2,innerX,.05,goalZ,line);
+  const frame=new T.Group();frame.position.set(goal.x,0,goalZ);frame.rotation.y=Math.atan2(goal.nx,goal.nz);
+  for(const x of [-halfWidth,halfWidth])box(frame,.2,height,.2,x,height/2,0,postMat).userData.soccerPost=true;
+  box(frame,halfWidth*2,.2,.2,0,height,0,postMat).userData.soccerPost=true;
+  for(const net of [box(frame,halfWidth*2,height,.05,0,height/2,goalDepth,netMat),box(frame,.05,height,goalDepth,-halfWidth,height/2,goalDepth/2,netMat),box(frame,.05,height,goalDepth,halfWidth,height/2,goalDepth/2,netMat),box(frame,halfWidth*2,.05,goalDepth,0,height,goalDepth/2,netMat)])net.userData.soccerNet=true;
+  parent.add(frame);
+ }
+}
 export function raceTrackModel(race,color='#83f4d5',parent,assets){const cache=assets??currentAssets()??new ModelAssets();return withAssets(cache,()=>raceTrackBody(race,color,parent));}
 function raceTrackBody(race,color='#83f4d5',parent){
  const group=new T.Group(),white=material('#ffffff'),black=material('#10151b'),accent=material(color,.4,.3,true);
- const gates=race.gates??[],start=gates[0];
- if(start){const line=new T.Group();line.position.set(start.x,.08,start.z);line.rotation.y=Math.atan2(start.nx,start.nz);for(let row=0;row<2;row++)for(let col=0;col<12;col++)box(line,2,.025,1.2,(col-5.5)*2,0,(row-.5)*1.2,(row+col)%2?white:black);group.add(line);}
- for(const [index,p] of (race.grid??[]).entries()){const slot=new T.Group();slot.position.set(p.x,.08,p.z);slot.rotation.y=p.heading??p.yaw??0;slot.userData.raceGrid=index;for(const x of [-2,2])box(slot,.12,.03,5,x,0,0,white);for(const z of [-2.5,2.5])box(slot,4,.03,.12,0,0,z,white);group.add(slot);}
- for(const [index,gate] of gates.entries()){const frame=new T.Group(),width=gate.halfWidth??12,mat=index===0?accent:material(index%2?'#ffce73':'#b28cff',.4,.3,true);frame.position.set(gate.x,0,gate.z);frame.rotation.y=Math.atan2(gate.nx,gate.nz);frame.userData.raceGate=index;for(const x of [-width,width])box(frame,.25,6,.25,x,3,0,mat);box(frame,width*2,.25,.25,0,6,0,mat);if(typeof document!=='undefined'){textLabel(frame,index===0?'1 / FINISH':String(index+1),0,6.8,0,1.4,'#ffffff');textLabel(frame,String(index+1),0,6.8,0,1.4,'#ffffff',Math.PI);}group.add(frame);}
- const points=race.centerline??[];for(let i=0;i<points.length;i++){const a=points[i],b=points[(i+1)%points.length],dx=b.x-a.x,dz=b.z-a.z,length=Math.hypot(dx,dz);if(!length)continue;const stripe=box(group,.16,.025,length,(a.x+b.x)/2,.07,(a.z+b.z)/2,accent);stripe.rotation.y=Math.atan2(dx,dz);}
- for(const pad of race.boostPads??[])group.add(boostPadModel(pad,points));
+ if(race.kind==='soccer')soccerPitchBody(group,race);else{
+  const gates=race.gates??[],start=gates[0];
+  if(start){const line=new T.Group();line.position.set(start.x,.08,start.z);line.rotation.y=Math.atan2(start.nx,start.nz);for(let row=0;row<2;row++)for(let col=0;col<12;col++)box(line,2,.025,1.2,(col-5.5)*2,0,(row-.5)*1.2,(row+col)%2?white:black);group.add(line);}
+  for(const [index,p] of (race.grid??[]).entries()){const slot=new T.Group();slot.position.set(p.x,.08,p.z);slot.rotation.y=p.heading??p.yaw??0;slot.userData.raceGrid=index;for(const x of [-2,2])box(slot,.12,.03,5,x,0,0,white);for(const z of [-2.5,2.5])box(slot,4,.03,.12,0,0,z,white);group.add(slot);}
+  for(const [index,gate] of gates.entries()){const frame=new T.Group(),width=gate.halfWidth??12,mat=index===0?accent:material(index%2?'#ffce73':'#b28cff',.4,.3,true);frame.position.set(gate.x,0,gate.z);frame.rotation.y=Math.atan2(gate.nx,gate.nz);frame.userData.raceGate=index;for(const x of [-width,width])box(frame,.25,6,.25,x,3,0,mat);box(frame,width*2,.25,.25,0,6,0,mat);if(typeof document!=='undefined'){textLabel(frame,index===0?'1 / FINISH':String(index+1),0,6.8,0,1.4,'#ffffff');textLabel(frame,String(index+1),0,6.8,0,1.4,'#ffffff',Math.PI);}group.add(frame);}
+  const points=race.centerline??[];for(let i=0;i<points.length;i++){const a=points[i],b=points[(i+1)%points.length],dx=b.x-a.x,dz=b.z-a.z,length=Math.hypot(dx,dz);if(!length)continue;const stripe=box(group,.16,.025,length,(a.x+b.x)/2,.07,(a.z+b.z)/2,accent);stripe.rotation.y=Math.atan2(dx,dz);}
+  for(const pad of race.boostPads??[])group.add(boostPadModel(pad,points));
+ }
  const host=parent||group,polygons=raceBarrierPolygons(race);
  if(polygons.length){
   const barrierMat=material('#e78b30',.08,.78),stripeMat=material('#f4eddb',.05,.85);
@@ -118,7 +157,7 @@ function raceTrackBody(race,color='#83f4d5',parent){
  if(parent&&group.parent!==parent)parent.add(group);
  // Markers are visual only and must not shorten the camera's occlusion ray; the
  // solid rail walls stay occluders so the camera can pull in front of them.
- group.traverse(n=>{if(n.userData.raceBarrier)return;n.userData.objective=true;n.userData.noCameraOcclusion=true;});
+ group.traverse(n=>{if(n.userData.raceBarrier||n.userData.soccerPost)return;n.userData.objective=true;n.userData.noCameraOcclusion=true;});
  if(host!==group)for(const n of host.children)if(n.userData.raceStripe){n.userData.objective=true;n.userData.noCameraOcclusion=true;}
  return group;
 }

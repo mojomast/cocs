@@ -7,6 +7,7 @@ import {rankLeaders, scoreStatsOf} from '../game/outcome.mjs';
 
 export const HISTORY_CAP = 50;
 const RACE_STANDING_FIELDS = ['actorId', 'vehicleId', 'position', 'lap', 'completedLaps', 'nextGate', 'progress', 'finishTime', 'item', 'effects'];
+const SOCCER_STANDING_FIELDS = ['actorId', 'team', 'goals', 'vehicleId'];
 
 export class MatchHistory {
  constructor(file = null, options = {}) {
@@ -37,6 +38,12 @@ export class MatchHistory {
      ...Object.fromEntries(['winnerId', 'elapsed', 'laps', 'phase'].filter(field => field in raceSource).map(field => [field, raceSource[field]])),
      standings: (raceSource.standings ?? []).map(standing => structuredClone(Object.fromEntries(RACE_STANDING_FIELDS.filter(field => field in standing).map(field => [field, standing[field]]))))
     } : null;
+     const soccerSource = mode === 'puma-soccer' ? race ?? result?.race : null;
+     const soccerResult = soccerSource ? {
+      ...Object.fromEntries(['winnerTeam', 'phase', 'elapsed', 'goalLimit', 'timeLimit'].filter(field => field in soccerSource).map(field => [field, soccerSource[field]])),
+      scores: soccerSource.scores && typeof soccerSource.scores === 'object' ? { 0: Number(soccerSource.scores[0]) || 0, 1: Number(soccerSource.scores[1]) || 0 } : null,
+      standings: (soccerSource.standings ?? []).map(standing => structuredClone(Object.fromEntries(SOCCER_STANDING_FIELDS.filter(field => field in standing).map(field => [field, standing[field]]))))
+     } : null;
     const winnerActorId = raceResult?.winnerId ?? result?.winner ?? winner;
    const scores = teamScores ?? result?.teamScores;
     let normalizedScores = scores && typeof scores === 'object' ? { 0: Number(scores[0]), 1: Number(scores[1]) } : null;
@@ -48,10 +55,11 @@ export class MatchHistory {
     normalizedScores = { 0: 0, 1: 0 };
     for (const actor of actors) if (actor.team === 0 || actor.team === 1) normalizedScores[actor.team] += Number(actor.frags) || 0;
    }
+    if (soccerResult) soccerResult.scores = normalizedScores ?? soccerResult.scores;
    const scoreWinner = normalizedScores && normalizedScores[0] !== normalizedScores[1]
     ? (normalizedScores[0] > normalizedScores[1] ? 0 : 1) : null;
    const scoreReached = normalizedScores && fragLimit > 0 && [0, 1].some(team => normalizedScores[team] >= fragLimit);
-    const reason = endingReason ?? result?.endingReason ?? (mode === 'puma-race' ? result?.overReason ?? (raceResult?.standings.some(s => s.finishTime != null) ? 'race-finish' : 'time') : null) ?? (isTeamMode
+     const reason = endingReason ?? result?.endingReason ?? (mode === 'puma-race' ? result?.overReason ?? (raceResult?.standings.some(s => s.finishTime != null) ? 'race-finish' : 'time') : mode === 'puma-soccer' ? result?.overReason ?? (scoreReached ? 'score' : 'time') : null) ?? (isTeamMode
     ? (scoreReached ? (mode === 'ctf' ? 'capture' : mode === 'teamdeathmatch' ? 'frag' : 'objective') : 'time')
     : (fragLimit > 0 && actors.some(a => a.frags >= fragLimit) ? 'frag' : 'time'));
    const entry = {
@@ -63,10 +71,14 @@ export class MatchHistory {
    timeLimit: Number.isFinite(config.timeLimit) ? config.timeLimit : 0,
     endedBy: reason,
    duration: Math.round(time * 10) / 10,
-     leader: (() => {
-      if (mode === 'puma-race') return actors.find(actor => actor.id === winnerActorId)?.name || 'Arena';
-     return rankLeaders(actors, mode).map(actor => actor.name).join(' & ') || 'Arena';
-    })(),
+      leader: (() => {
+       if (mode === 'puma-soccer') {
+        const top = [...(soccerResult?.standings ?? [])].sort((a, b) => (b.goals || 0) - (a.goals || 0) || a.actorId - b.actorId)[0];
+        return actors.find(actor => actor.id === top?.actorId)?.name || 'Arena';
+       }
+       if (mode === 'puma-race') return actors.find(actor => actor.id === winnerActorId)?.name || 'Arena';
+      return rankLeaders(actors, mode).map(actor => actor.name).join(' & ') || 'Arena';
+     })(),
     players: actors.map(a => ({ name: a.name, character: a.character, harness: a.harness, frags: a.frags, deaths: a.deaths, ...(scoreStatsOf(a) ? { scoreStats: scoreStatsOf(a) } : {}) }))
     };
     if (mode === 'puma-race') {
@@ -78,7 +90,18 @@ export class MatchHistory {
       if (standing) player.race = structuredClone(standing);
      });
     }
-   if (isTeamMode && normalizedScores) {
+    if (mode === 'puma-soccer') {
+     entry.winnerTeam = soccerResult?.winnerTeam ?? result?.winner ?? winner ?? scoreWinner;
+     const soccerScores = soccerResult?.scores ?? normalizedScores;
+     if (soccerScores) entry.scores = { ...soccerScores };
+     if (soccerResult) entry.race = soccerResult;
+     entry.players.forEach((player, index) => {
+      player.actorId = actors[index].id;
+      const standing = soccerResult?.standings.find(standing => standing.actorId === player.actorId);
+      if (standing) { player.goals = standing.goals; player.race = structuredClone(standing); }
+     });
+    }
+   if (isTeamMode && normalizedScores && mode !== 'puma-soccer') {
     entry.teamScores = normalizedScores;
     entry.winner = winner ?? result?.winner ?? scoreWinner;
    }

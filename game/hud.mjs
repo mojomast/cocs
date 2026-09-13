@@ -1,4 +1,4 @@
-import {raceDisplay} from './race-ui.mjs';
+import {raceDisplay,soccerDisplay} from './race-ui.mjs';
 import {WEAPONS} from './data.mjs';
 import {teamMode} from './config.mjs';
 
@@ -134,7 +134,7 @@ export function suddenDeathBanner(hud) {
   return hud?.suddenDeath === true && hud?.over !== true ? { text: 'SUDDEN DEATH', detail: 'NEXT SCORE WINS' } : null;
 }
 
-const CAPTION_EVENTS = Object.freeze({shot:'Gunfire',explosion:'Explosion','vehicle-shot':'Vehicle gunfire',grenade:'Grenade out',melee:'Melee',reload:'Reloading',pickup:'Pickup',powerup:'Powerup','vehicle-destroyed':'Vehicle destroyed','zone-capture':'Zone captured','zone-score':'Objective scoring','zone-neutralized':'Zone neutralized','flag-pickup':'Flag taken','flag-return':'Flag returned','flag-drop':'Flag dropped',capture:'Flag captured','assault-breach':'Sector breached','payload-checkpoint':'Checkpoint reached','payload-delivered':'Payload delivered','killstreak':'Killstreak',death:'Elimination'});
+const CAPTION_EVENTS = Object.freeze({shot:'Gunfire',explosion:'Explosion','vehicle-shot':'Vehicle gunfire',grenade:'Grenade out',melee:'Melee',reload:'Reloading',pickup:'Pickup',powerup:'Powerup','vehicle-destroyed':'Vehicle destroyed','zone-capture':'Zone captured','zone-score':'Objective scoring','zone-neutralized':'Zone neutralized','flag-pickup':'Flag taken','flag-return':'Flag returned','flag-drop':'Flag dropped',capture:'Flag captured','assault-breach':'Sector breached','payload-checkpoint':'Checkpoint reached','payload-delivered':'Payload delivered','soccer-goal':'Goal','killstreak':'Killstreak',death:'Elimination'});
 export function ladderStatus(player, total = 10) {
   const rung = Math.max(0, Math.floor(Number(player?.ladder) || 0));
   const size = Math.max(1, Math.floor(Number(total) || 10));
@@ -206,11 +206,11 @@ export function killCallout(kills, now, {window = 4} = {}) {
 export function scoreAnnouncer(hud, prevScores) {
   const scores = hud?.teamScores;
   if (!scores || !prevScores) return null;
-  const mode = hud?.config?.mode ?? hud?.mode, capture = mode === 'ctf';
+  const mode = hud?.config?.mode ?? hud?.mode, capture = mode === 'ctf', soccer = mode === 'puma-soccer';
   for (const team of [0, 1]) {
     const before = Math.floor(Number(prevScores[team])), after = Math.floor(Number(scores[team]));
     if (!Number.isFinite(before) || !Number.isFinite(after) || after <= before) continue;
-    return {team, kind: capture ? 'capture' : 'score', text: capture ? 'FLAG CAPTURED' : `${teamName(team)} SCORES`, score: after, amount: after - before};
+    return {team, kind: soccer ? 'goal' : capture ? 'capture' : 'score', text: soccer ? `${teamName(team)} GOAL` : capture ? 'FLAG CAPTURED' : `${teamName(team)} SCORES`, score: after, amount: after - before};
   }
   return null;
 }
@@ -297,6 +297,7 @@ export const modeGoal = mode => {
   if (score === 'payload') return 'CHECKPOINTS';
   if (score === 'teamFrags') return 'TEAM FRAGS';
   if (score === 'ladder') return 'LADDER';
+  if (score === 'goals') return 'GOALS';
   return isTeamMode(mode) ? 'TEAM FRAGS' : 'FRAGS';
 };
 
@@ -335,7 +336,8 @@ export const modeColumns = mode => mode === 'ctf' ? [['captures', 'CAP'], ['flag
       : mode === 'assault' ? [['objectiveCaptures', 'SECTORS'], ['objectiveTime', 'SECTOR TIME']]
         : mode === 'payload' ? [['objectiveCaptures', 'CHECKPOINTS'], ['objectiveTime', 'CART TIME']]
           : mode === 'armsrace' ? [['ladder', 'RUNG'], ['weapon', 'WEAPON']]
-            : [];
+            : mode === 'puma-soccer' ? [['goals', 'GOALS']]
+              : [];
 
 export const modePrimary = (mode, actor) => {
   const stats = scoreStats(actor);
@@ -343,6 +345,7 @@ export const modePrimary = (mode, actor) => {
   if (mode === 'koth' || mode === 'domination' || mode === 'combined-arms') return [stats.objectiveTime, stats.objectiveCaptures];
   if (mode === 'assault' || mode === 'payload') return [stats.objectiveCaptures, stats.objectiveTime];
   if (mode === 'armsrace') return [Number(actor?.ladder) || 0, Number(actor?.frags) || 0];
+  if (mode === 'puma-soccer') return [Number(actor?.goals) || Number(actor?.scoreStats?.goals) || 0];
   return [0];
 };
 
@@ -357,6 +360,7 @@ export const objectiveCopy = score => ({
   sectors: 'Attackers capture sectors in order while defenders hold them. Breach the final sector to win; defenders win on the clock.',
   payload: 'Escort the payload cart down the track to the final point. Standing with the cart pushes it forward; the defenders stall it and roll it back. Attackers win on delivery, defenders on the clock.',
   ladder: 'Every elimination promotes you one rung up the weapon rack. Reach the final rung to win; there is no frag target to chase.',
+  goals: 'Both teams fight over one ball and smash it into the enemy goal. The first team to the goal target wins; each goal restarts play from the centre circle.',
 })[score] || null;
 
 export function commandBrief(hud, player, mode) {
@@ -365,6 +369,12 @@ export function commandBrief(hud, player, mode) {
   const enemyFlag = Array.isArray(hud?.flags) ? hud.flags.find(f => f.team !== player?.team) : null;
   const ownFlag = Array.isArray(hud?.flags) ? hud.flags.find(f => f.team === player?.team) : null;
   if (id === 'puma-race') { const race = raceDisplay(hud, player?.id); return {title: 'FOLLOW THE CIRCUIT', action: 'Pass every numbered gate in order. Collect mystery boxes and use your item.', detail: `LAP ${race.lap} / ${race.laps}`, status: `CHECKPOINT ${race.checkpoint} / ${race.gates}`}; }
+  if (id === 'puma-soccer') {
+    const soccer = soccerDisplay(hud, player?.id), mine = soccer.team, theirs = mine === 0 ? 1 : 0, myGoals = soccer.scores?.[mine] ?? 0, theirGoals = soccer.scores?.[theirs] ?? 0;
+    const title = soccer.phase === 'kickoff' ? 'KICK OFF' : soccer.phase === 'over' ? (soccer.winner === mine ? 'YOU WIN' : soccer.winner === null || soccer.winner === undefined ? 'DRAW' : 'DEFEAT') : 'GO FOR GOAL';
+    const action = soccer.phase === 'over' ? 'Full time. Check the final score and the standings.' : soccer.phase === 'kickoff' ? 'Hold the kickoff, win the ball and drive it at the enemy goal.' : 'Smash the ball into the enemy goal and fall back to defend your own.';
+    return {title, action, detail: `${teamName(mine)} ${myGoals} \u2013 ${theirGoals} ${teamName(theirs)} \u00b7 GOALS ${myGoals} / ${soccer.goalLimit}`, status: `${soccer.ballInPlay ? 'BALL LIVE' : String(soccer.phase).toUpperCase()} \u00b7 ${soccer.time}`};
+  }
   if (id === 'ctf') return {title: carrying ? 'RETURN THE FLAG' : 'BREAK THEIR LINE', action: carrying ? 'Reach your base to capture.' : enemyFlag?.state === 'carried' ? 'Escort the carrier home.' : ownFlag?.state === 'dropped' ? 'Recover your flag.' : 'Take the enemy flag.', detail: `${team} ${carrying ? 'CARRIER' : 'DEFENSE'} · ${flagText(hud)}`, status: `${teamScore(hud, player?.team)} / ${target} CAPTURES`};
   if (id === 'armsrace') {
     const ladder = ladderStatus(player, WEAPONS.length);

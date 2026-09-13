@@ -47,6 +47,8 @@ test("serves the game selection screen without starter metadata", async () => {
   assert.match(html, /github\.com\/mojomast\/tokenarena/);
   for (const label of ["MATCH SETUP", "Bot count", "Bot difficulty", "Your callsign", "Movement speed", "Casual Skirmish", "Warmup", "Rocket Party", "SHUFFLE LOADOUT / MAP"]) assert.ok(html.includes(label), label);
   assert.ok(GAME_MODES.filter((mode) => html.includes(mode.name)).length >= 4);
+  const soccer = GAME_MODES.find((mode) => mode.id === "puma-soccer");
+  if (soccer) assert.ok(html.includes(soccer.name), `${soccer.name} mode is listed`);
   if (GAME_MODES.some((mode) => html.includes(mode.name) && /ctf|capture/i.test(`${mode.id} ${mode.objective ?? ""}`))) {
     assert.match(html, /Capture the enemy flag|captures/i);
   }

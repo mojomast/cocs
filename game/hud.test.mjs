@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import {vehicleHud, escapeHint, voiceHint, reloadProgress, dynamicCrosshairGap, lowAmmo, postureLabel, hitMarker, projectToScreen, damageNumberStyle, boundList, damageBearing, killBanner, weaponTag, ammoText, commandBrief, isTeamMode, matchStartBanner, modeColumns, modeGoal, modePrimary, objectiveCopy, suddenDeathBanner, grenadeStatus, killstreakCallout, ladderStatus, streakStatus, audioCaption, scoreAnnouncer, multikillLabel, spreeLabel, recentKills, killCallout, matchAwards, killFeedWeapon, connectionQuality, spectateActor, nextSpectateTarget, spectatorBoard, weaponRangeInfo, weaponRangeLabel} from './hud.mjs';
 import {WEAPONS} from './data.mjs';
 import {GAME_MODES,teamMode} from './config.mjs';
+import {soccerDisplay,soccerResult} from './race-ui.mjs';
 
 const player = {id:0, health:100, x:0, z:0, vehicleId:null};
 const ride = {id:0, health:200, maxHealth:300, x:2, z:0, driver:null, respawnTimer:0, heat:.8, overheated:true};
@@ -408,8 +409,40 @@ test('modePrimary sorts each mode by the objective it scores', () => {
 });
 
 test('objectiveCopy explains every scoring model the setup screen offers', () => {
-  for (const score of ['laps', 'frags', 'teamFrags', 'captures', 'hillTime', 'zoneTime', 'sectors', 'ladder', 'payload']) {
+  for (const score of ['laps', 'frags', 'teamFrags', 'captures', 'hillTime', 'zoneTime', 'sectors', 'ladder', 'payload', 'goals']) {
     assert.ok(typeof objectiveCopy(score) === 'string' && objectiveCopy(score).length > 0, score);
   }
   assert.equal(objectiveCopy('unknown'), null);
+});
+
+test('puma soccer routes through the goals objective across the HUD helpers', () => {
+  const mode = modeById('puma-soccer');
+  assert.equal(modeGoal(mode), 'GOALS');
+  assert.deepEqual(modeColumns('puma-soccer'), [['goals', 'GOALS']]);
+  assert.deepEqual(modePrimary('puma-soccer', {goals: 4}), [4]);
+});
+
+test('soccer display and result read the race snapshot and local side', () => {
+  const race = {kind: 'soccer', phase: 'playing', countdown: 0, elapsed: 65, timeLimit: 180, goalLimit: 5, scores: {0: 2, 1: 1}, winnerTeam: null, ball: {x: 0, y: 1, z: 0, r: 1.1}, standings: [{actorId: 0, team: 0, goals: 2, vehicleId: 0}, {actorId: 3, team: 1, goals: 1, vehicleId: 3}]};
+  const display = soccerDisplay({race}, 0);
+  assert.equal(display.phase, 'playing');
+  assert.equal(display.time, '01:05.00');
+  assert.deepEqual(display.scores, {0: 2, 1: 1});
+  assert.equal(display.team, 0);
+  assert.equal(display.winner, null);
+  assert.equal(display.goalLimit, 5);
+  assert.equal(display.ballInPlay, true);
+  assert.equal(soccerResult({race}, 0), 'DRAW 2\u20131.');
+  assert.equal(soccerResult({race: {...race, winnerTeam: 1}}, 0), 'BLUE WINS 1\u20132.');
+  assert.equal(soccerResult({race: {...race, winnerTeam: 0}}, 0), 'YOU WIN 2\u20131.');
+});
+
+test('soccer command brief and goal announcer read the soccer snapshot', () => {
+  const hud = {config: {mode: 'puma-soccer', fragLimit: 5}, race: {kind: 'soccer', phase: 'playing', elapsed: 65, goalLimit: 5, scores: {0: 2, 1: 1}, winnerTeam: null, ball: {x: 0, y: 1, z: 0, r: 1.1}, standings: [{actorId: 0, team: 0, goals: 2, vehicleId: 0}, {actorId: 3, team: 1, goals: 1, vehicleId: 3}]}};
+  const brief = commandBrief(hud, {id: 0, team: 0}, modeById('puma-soccer'));
+  assert.equal(brief.title, 'GO FOR GOAL');
+  assert.ok(brief.detail.includes('RED 2'), brief.detail);
+  assert.ok(brief.status.includes('BALL LIVE'), brief.status);
+  assert.equal(audioCaption({type: 'soccer-goal'}).text, 'Goal');
+  assert.deepEqual(scoreAnnouncer({teamScores: {0: 2, 1: 1}, config: {mode: 'puma-soccer'}}, {0: 1, 1: 1}), {team: 0, kind: 'goal', text: 'RED GOAL', score: 2, amount: 1});
 });

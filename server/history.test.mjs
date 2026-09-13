@@ -8,7 +8,7 @@ import {Room} from './room.mjs';
 function rng(){let n=11;return()=>((n=(Math.imul(n,1664525)+1013904223)>>>0)/4294967296);}
 const tmpDir=()=>fs.mkdtempSync(path.join(os.tmpdir(),'token-arena-history-'));
 const actors=[{name:'Alice',character:'chatgpt',harness:'openclaw',frags:7,deaths:3},{name:'Bob',character:'claude',harness:'claudecode',frags:4,deaths:6},{name:'Bot-1',character:'gemini',harness:'cline',frags:2,deaths:5}];
-const stats={captures:2,flagPickups:3,flagReturns:4,flagDrops:1,objectiveTime:12.5,objectiveCaptures:2,objectiveNeutralizations:1,objectiveContests:3};
+const stats={captures:2,flagPickups:3,flagReturns:4,flagDrops:1,objectiveTime:12.5,objectiveCaptures:2,objectiveNeutralizations:1,objectiveContests:3,goals:0};
 test('record builds a complete history entry and leader',()=>{
  const h=new MatchHistory();
  const entry=h.record({roomId:'ABCD',mapId:'crosswire',config:{mode:'deathmatch',fragLimit:5,timeLimit:60},time:42.3,actors});
@@ -229,4 +229,45 @@ test('race history supports explicit race data and missing legacy race fields',(
  const legacy={id:'old-race',mode:'puma-race',players:[{name:'Old'}]};
  h.matches.push(legacy);
  assert.deepEqual(h.all().at(-1),legacy);
+});
+
+test('soccer history records team goals, the winning team and the top scorer',()=>{
+ const h=new MatchHistory();
+ const result={config:{mode:'puma-soccer',fragLimit:3,timeLimit:180},mapId:'puma-pitch',time:95,over:true,overReason:'score',winner:1,
+  teamScores:{0:2,1:3},
+  actors:[{...actors[0],id:0,team:0,frags:0},{...actors[1],id:1,team:1,frags:0},{name:'Bot-9',character:'gemini',harness:'cline',id:2,team:1,frags:0}],
+  race:{kind:'soccer',phase:'over',countdown:0,elapsed:95,timeLimit:180,goalLimit:3,winnerTeam:1,scores:{0:2,1:3},
+   ball:{x:0,y:1.1,z:0,vx:0,vz:0,r:1.1},goals:[{team:0}],pitch:{minX:-30,maxX:30,minZ:-18,maxZ:18},
+   standings:[{actorId:0,team:0,goals:2,vehicleId:0,internal:'drop'},{actorId:1,team:1,goals:1,vehicleId:1},{actorId:2,team:1,goals:3,vehicleId:2}]}};
+ const entry=h.record({roomId:'PITCH',result});
+ assert.equal(entry.mode,'puma-soccer');
+ assert.equal(entry.endedBy,'score');
+ assert.equal(entry.winnerTeam,1);
+ assert.deepEqual(entry.scores,{0:2,1:3});
+ assert.equal(entry.leader,'Bot-9','leader is the top scorer, not the winning team');
+ assert.equal('teamScores' in entry,false,'soccer uses scores, not the generic team path');
+ assert.equal('winner' in entry,false);
+ assert.deepEqual(Object.keys(entry.race).sort(),['elapsed','goalLimit','phase','scores','standings','timeLimit','winnerTeam']);
+ assert.deepEqual(entry.race.standings.map(standing=>standing.actorId),[0,1,2]);
+ assert.equal('internal' in entry.race.standings[0],false);
+ assert.deepEqual(Object.fromEntries(entry.players.map(player=>[player.actorId,player.goals])),{0:2,1:1,2:3});
+ assert.deepEqual(entry.players[2].race,entry.race.standings[2]);
+ const expected=structuredClone(entry);
+ result.race.standings[2].goals=99;
+ result.race.scores[1]=99;
+ assert.deepEqual(h.all()[0],expected);
+});
+
+test('soccer history infers a score ending and tolerates missing standings',()=>{
+ const h=new MatchHistory();
+ const reached=h.record({config:{mode:'puma-soccer',fragLimit:3},time:12,actors:[{...actors[0],id:0,team:0}],teamScores:{0:3,1:1},winner:0,
+  race:{kind:'soccer',phase:'over',goalLimit:3,scores:{0:3,1:1},winnerTeam:0,standings:[{actorId:0,team:0,goals:3,vehicleId:0}]}});
+ assert.equal(reached.endedBy,'score');
+ assert.equal(reached.winnerTeam,0);
+ assert.equal(reached.leader,'Alice');
+ const missing=h.record({config:{mode:'puma-soccer'},actors:[{...actors[0],id:0,team:0}]});
+ assert.equal(missing.winnerTeam,null);
+ assert.equal(missing.leader,'Arena');
+ assert.equal('race' in missing,false);
+ assert.equal('scores' in missing,false);
 });

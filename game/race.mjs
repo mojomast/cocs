@@ -106,7 +106,7 @@ export function initializeRace(match) {
   match.pickups = [];
   match.rockets = [];
   match.race = {
-    phase: 'countdown', countdown: 3, laps: match.config.fragLimit, elapsed: 0,
+    kind: 'race', phase: 'countdown', countdown: 3, laps: match.config.fragLimit, elapsed: 0,
     winnerId: null, gates: track.gates.map(g => ({...g})), centerline: track.centerline,
     boxes: track.itemBoxes.map(b => ({...b, wait: 0})), hazards: [], serial: 0, racers: [],
     coins: (track.coins || []).map(c => ({...c, wait: 0})), boostPads: [...(track.boostPads || [])],

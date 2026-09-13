@@ -2,6 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {Room,PLAYER_LIMIT} from './room.mjs';
 import {MatchHistory} from './history.mjs';
+import {RULES} from '../game/data.mjs';
 function rng(){let n=11;return()=>((n=(Math.imul(n,1664525)+1013904223)>>>0)/4294967296);}
 const find=(msgs,type,to)=>msgs.find(m=>m.msg.type===type&&(to===undefined||m.to===to))?.msg;
 const last=(msgs,type)=>[...msgs].reverse().find(m=>m.msg.type===type)?.msg;
@@ -346,7 +347,7 @@ test('final results and history preserve cloned scoreStats',()=>{
  room.join(1,'A');const token=find(room.drain(),'welcome',1).token;
  room.host(1,{botCount:0,timeLimit:30},'crosswire');room.start(1);room.drain();
  const stats=room.match.actors[0].scoreStats;
- stats.captures=2;stats.objectiveTime=7.5;
+ stats.captures=2;stats.objectiveTime=7.5;stats.goals=stats.goals??0;
  room.match.over=true;room.tick(1/60);
  const result=find(room.drain(),'results').state;
  assert.deepEqual(result.actors[0].scoreStats,{...stats});
@@ -367,6 +368,40 @@ test('history records the map actually played, not a pending mid-match change',(
  room.match.over=true;room.tick(1/60);room.drain();
  assert.equal(history.all()[0].mapId,'crosswire','history records the map that was played');
 });
+test('a soccer room starts, scores through the sim and records the team result',()=>{
+ const history=new MatchHistory();
+ const room=new Room('soccer',rng(),{history});
+ room.join(1,'Alice');room.join(2,'Bob');
+ room.host(1,{mode:'puma-soccer',botCount:0,fragLimit:1,timeLimit:60},'puma-pitch');
+ room.start(1);
+ assert.equal(room.mapId,'puma-pitch');
+ assert.equal(room.match.config.mode,'puma-soccer');
+ assert.equal(room.match.race.kind,'soccer');
+ assert.equal(room.match.race.racers.length,2);
+ for(let i=0;i<Math.ceil(3/RULES.dt)+10&&room.match.race.phase!=='playing';i++)room.tick(RULES.dt);
+ assert.equal(room.match.race.phase,'playing','kickoff countdown runs on room ticks');
+ const scorer=room.match.race.racers.find(racer=>racer.team===0);
+ room.match.race.lastTouch=scorer.actorId;
+ const ball=room.match.race.ball;
+ ball.x=29.9;ball.z=0;ball.y=1.1;ball.vx=12;ball.vz=0;
+ for(let i=0;i<240&&!room.roundOver;i++)room.tick(RULES.dt);
+ assert.equal(room.match.race.scores[0],1);
+ assert.equal(room.match.race.winnerTeam,0);
+ assert.equal(room.roundOver,true);
+ const results=room.drain().filter(m=>m.msg.type==='results');
+ assert.equal(results.length,1);
+ assert.equal(results[0].msg.state.winner,0);
+ assert.equal(results[0].msg.state.race.kind,'soccer');
+ const entry=history.all()[0];
+ assert.equal(entry.mode,'puma-soccer');
+ assert.equal(entry.mapId,'puma-pitch');
+ assert.equal(entry.winnerTeam,0);
+ assert.deepEqual(entry.scores,{0:1,1:0});
+ assert.equal(entry.leader,'Alice');
+ assert.equal(entry.players[0].goals,1);
+ assert.equal(entry.race.standings.find(standing=>standing.actorId===scorer.actorId).goals,1);
+});
+
 test('snapshot broadcast rate defaults to 30 Hz and is configurable',()=>{
  const count=(options,steps)=>{
   const room=new Room('r',rng(),options);

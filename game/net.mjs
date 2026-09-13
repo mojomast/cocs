@@ -14,6 +14,8 @@ const BUFFER_MIN = 4;
 const BUFFER_MAX = 16;
 const JITTER_REF = 50;
 const turn = (a, b) => ((((b - a) % (Math.PI * 2)) + Math.PI * 3) % (Math.PI * 2)) - Math.PI;
+const VEHICLE_MODES = new Set(['puma-race', 'puma-soccer']);
+const isVehicleMode = mode => VEHICLE_MODES.has(mode);
 
 export class NetClient {
  constructor(url = DEFAULT_SERVER_URL, options = {}) {
@@ -271,7 +273,7 @@ export class NetClient {
   else if (desiredBuffer < this.bufferTarget) this.bufferTarget = Math.max(desiredBuffer, this.bufferTarget - 1);
  }
   createShadow(mapId, config) {
-    this.shadow = config?.mode === 'puma-race' ? null : new Match('chatgpt', 'openclaw', Math.random, getMap(mapId).id, { ...(config || {}), humanCount: 1, botCount: 0 });
+    this.shadow = isVehicleMode(config?.mode) ? null : new Match('chatgpt', 'openclaw', Math.random, getMap(mapId).id, { ...(config || {}), humanCount: 1, botCount: 0 });
    this.resynced = false;
    this.inputSeq = 0;
    this.pendingInputs = [];

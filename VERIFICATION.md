@@ -1,5 +1,33 @@
 # COCS verification report
 
+## Release 2.72 - Puma Soccer
+
+New `puma-soccer` team mode on the `puma-pitch` map (the Puma Circuit with its
+infield opened into a pitch).
+
+- `game/soccer.mjs` implements deterministic 60 Hz car soccer on the existing
+  Puma substrate: 4v4 kickoff seating, race-style throttle/steer/boost/brake
+  controls, a ground-locked ball with friction and car-contact impulses, swept
+  goal-line detection, goal/time endings, and per-driver goal stats. It stores
+  state on `match.race` with `kind:'soccer'`, so combat is off, snapshots
+  replicate it, and the server stays authoritative with no protocol change.
+- `game/soccer-maps.mjs` derives `PUMA_PITCH` from `PUMA_CIRCUIT`, keeping the
+  rails and apron but removing the solid infield fill, and adds goal frames plus
+  kickoff slots.
+- Mode/core wiring: `GAME_MODES` entry (team, score `goals`, max 8 bots),
+  neutralized combat config, strict `arenaSupportsMode`, map registration, core
+  `initializeSoccer`/`stepSoccer` dispatch on `race.kind`, `rankTuple`/outcome
+  goals, async history recording of scores and per-driver goals.
+- Presentation/client: pitch + ball + goal rendering in `race-presentation.mjs`,
+  `soccerDisplay`/`soccerResult` HUD helpers, `commandBrief`/caption/scoreboard
+  support, a `SoccerHud`, setup controls (team size / goal limit / time limit)
+  and a soccer touch cluster.
+
+Verification: game **948/948**, server **126/126**, SSR `tests/*.test.mjs` 4/4,
+`tsc --noEmit` clean, `npm run lint` 0 errors, production build succeeds. No
+browser/WebGL playtest was possible; the ball physics, pitch rendering and
+balance are unit/geometry-verified only.
+
 ## Release 2.71 - Split core, bots, objectives, race presentation; chunk the client
 
 Baseline `fa14a66`.

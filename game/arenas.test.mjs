@@ -100,6 +100,13 @@ test('CTF matches place both flags at the authored bases',()=>{
   assert.notDeepEqual(match.flagSpawns[0],match.flagSpawns[1],`${id} distinct bases`);
  }
 });
+test('puma-soccer is confined to its pitch and does not bleed into other vehicle maps',()=>{
+ assert.deepEqual(mapsForMode('puma-soccer').map(map=>map.id),['puma-pitch']);
+ assert.equal(arenaSupportsMode('puma-pitch','puma-soccer'),true);
+ assert.equal(arenaSupportsMode('puma-circuit','puma-soccer'),false);
+ assert.equal(arenaSupportsMode('puma-pitch','puma-race'),false);
+ assert.equal(maxBotsFor('puma-soccer'),8);
+});
 test('payload is enabled on route-capable arenas and reconciles an incompatible one',()=>{
  const payload=mapsForMode('payload');
  assert.ok(payload.length>=8,'payload has a broad arena rotation');

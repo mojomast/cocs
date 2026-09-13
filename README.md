@@ -1,6 +1,6 @@
 # COCS — Colosseum Of Competitive Slop
 
-> **Release status (v2.71).** The current footer version in `app/page.tsx` is **v2.71**. The feature descriptions below are kept current, but the long version log is a historical record. See [VERIFICATION.md](VERIFICATION.md) for dated evidence and the remaining validation gaps (there is no browser/GPU verification in this environment).
+> **Release status (v2.72).** The current footer version in `app/page.tsx` is **v2.72**. The feature descriptions below are kept current, but the long version log is a historical record. See [VERIFICATION.md](VERIFICATION.md) for dated evidence and the remaining validation gaps (there is no browser/GPU verification in this environment).
 
 A local Three.js first-person arena-shooter where nine famous language models settle their differences with guns. Select an AI operator, strap on one of seven agent harnesses, choose an arena, and configure a match with zero to sixteen bots (mode-dependent). New setups default to two Easy bots, first to 15 frags or highest score after five minutes. Claude always uses Claude Code; everyone else can equip any harness.
 
@@ -85,6 +85,16 @@ version is read from the `app/page.tsx` footer automatically; set
 both services, and checks the public HTML and linked CSS/JS assets. Restarting
 the game service disconnects active players; see `deploy/README.md` for web-only
 deployment and verification commands.
+
+## Puma Soccer
+
+Choose **Puma Soccer** in Match Setup for car soccer on the Puma Circuit infield.
+The circuit's middle is opened into a 60x36 pitch with a halfway line, centre
+circle and penalty boxes, and two goals on the long axis. Two teams of up to four
+Pumas per side (eight cars total) fight for the ball; drive into it to pass and
+shoot, boost to strike harder, and handbrake to turn. First team to the goal
+limit wins, otherwise the highest score at full time. Stored results record team
+scores and per-driver goals.
 
 ## Objective clarity and bot variety
 

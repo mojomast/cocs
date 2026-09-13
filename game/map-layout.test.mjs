@@ -54,7 +54,8 @@ for(const arena of MAPS)test(`registry runtime placements: ${arena.id}`,t=>{
       assert.equal(obstructed(x,y,z,RULES.radius,arena),false,`${label}: actor clearance`);
       assert.equal(obstructed(x,y,z,.65,arena),false,`${label}: navigation clearance`);
       const p={x,y,z};
-      assert.ok(roundTrip.some(node=>{
+      // A car pitch is driven, not walked; only ground modes must connect on foot.
+      if(!arena.race||arena.race.kind!=='soccer')assert.ok(roundTrip.some(node=>{
         const distance=Math.hypot(node.x-x,node.z-z);
         return distance>.1&&distance<=6.5&&walkEdge(p,node,arena)&&walkEdge(node,p,arena);
       }),`${label}: nonzero exact bidirectional walking connector with outbound/return graph paths`);

@@ -139,4 +139,22 @@ test('rendered race setup offers 0-7 rivals without difficulty and defaults only
  const raceTree=MatchConfiguration({config,onChange});nodes(raceTree).find(node=>node.props?.label==='Rival drivers').props.onChange(2);assert.equal(changed.botCount,2);
  modeControl(MatchConfiguration({config:changed,onChange})).props.onValueChange('puma-race');assert.equal(changed.botCount,2);
  modeControl(MatchConfiguration({config:changed,onChange})).props.onValueChange('deathmatch');assert.equal(changed.botCount,2);
+ changed=undefined;
+ const soccerConfig={...DEFAULT_CONFIG,mode:'puma-soccer',botCount:0};
+ const soccerHtml=renderToStaticMarkup(createElement(MatchConfiguration,{config:soccerConfig,onChange}));
+ assert.match(soccerHtml,/Team size/);assert.match(soccerHtml,/Goal limit<output>15<\/output>/);assert.match(soccerHtml,/Time limit/);
+ assert.ok(soccerHtml.includes('human drivers replace excess bots'));assert.ok(!soccerHtml.includes('Bot difficulty'));assert.ok(!soccerHtml.includes('Starting weapon'));
+ modeControl(MatchConfiguration({config:{...DEFAULT_CONFIG,mode:'deathmatch',botCount:0},onChange})).props.onValueChange('puma-soccer');assert.equal(changed.botCount,7);
+});
+test('rendered soccer HUD shows team score, match clock, phase and local goals',async()=>{
+ const file=new URL('../app/game-ui/soccer-hud.tsx',import.meta.url),source=await readFile(file,'utf8');
+ const {outputText}=ts.transpileModule(source,{compilerOptions:{jsx:ts.JsxEmit.ReactJSX,module:ts.ModuleKind.ESNext}});
+ const executable=outputText.replace(/from (["'])([^"']+)\1/g,(_,quote,specifier)=>`from ${quote}${specifier.startsWith('.')?new URL(specifier,file).href:import.meta.resolve(specifier)}${quote}`);
+ const {SoccerHud}=await import(`data:text/javascript;base64,${Buffer.from(executable).toString('base64')}`);
+ const state={kind:'soccer',phase:'playing',countdown:0,elapsed:65,timeLimit:180,goalLimit:5,scores:{0:2,1:1},winnerTeam:null,standings:[{actorId:0,team:0,goals:2,vehicleId:0},{actorId:3,team:1,goals:1,vehicleId:3}]};
+ const html=renderToStaticMarkup(SoccerHud({soccer:state,actorId:0,touchControls:false,controls:'WASD throttle'}));
+ assert.ok(html.includes('race-hud'));assert.ok(html.includes('RED'));assert.ok(html.includes('BLUE'));assert.ok(html.includes('01:05.00'));
+ assert.ok(html.includes('2 GOALS'));assert.ok(html.includes('WASD throttle'));assert.ok(!html.includes('race-countdown'));
+ const kick=renderToStaticMarkup(SoccerHud({soccer:{...state,phase:'kickoff',countdown:2.2,elapsed:0},actorId:0}));
+ assert.ok(kick.includes('race-countdown'));assert.ok(kick.includes('>3<'));
 });

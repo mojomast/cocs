@@ -69,7 +69,7 @@ test('two archetypes actually strafe differently over time',()=>{
 });
 
 test('every combat mode still completes with archetype bots at every difficulty',()=>{
- for(const mode of GAME_MODES.filter(mode=>mode.rules?.score!=='laps'))for(const difficulty of DIFFICULTIES){
+ for(const mode of GAME_MODES.filter(mode=>mode.rules?.score!=='laps'&&mode.id!=='puma-soccer'))for(const difficulty of DIFFICULTIES){
   const m=new Match('kimi','roo',rng(),resolveMapForMode('crosswire',mode.id,{legacy:true}),{mode:mode.id,difficulty:difficulty.id,botCount:8,timeLimit:60,fragLimit:5});
   for(let i=0;i<3601&&!m.over;i++)m.step(1/60);
   assert.ok(m.over,`${mode.id}/${difficulty.id}`);

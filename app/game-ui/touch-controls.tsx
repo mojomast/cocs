@@ -10,7 +10,7 @@ const ACTIONS=['ads','jump','crouch','reload','power','melee','grenade','interac
 const LABELS:Record<string,string>={ads:'ADS',jump:'JUMP',crouch:'SLIDE',reload:'RELOAD',power:'POWER',interact:'USE',swap:'SWAP',voice:'TALK',melee:'MELEE',grenade:'GRENADE'};
 
 export function TouchControls({runtime,visible,onLook,onSwap,onPause,mode}:{runtime:any;visible:boolean;onLook:(dx:number,dy:number)=>void;onSwap:()=>void;onPause:()=>void;mode?:string}){
- const race=mode==='puma-race',actions=race?['crouch','interact']:ACTIONS,labels=race?{...LABELS,crouch:'BRAKE',interact:'RESET'}:LABELS;
+ const race=mode==='puma-race',soccer=mode==='puma-soccer',car=race||soccer,actions=soccer?['power','crouch','interact']:race?['crouch','interact']:ACTIONS,labels=soccer?{...LABELS,power:'BOOST',crouch:'BRAKE',interact:'RESET'}:race?{...LABELS,crouch:'BRAKE',interact:'RESET'}:LABELS;
  const stick=useRef<HTMLDivElement|null>(null),knob=useRef<HTMLDivElement|null>(null),state=useRef({stickId:null as number|null,lookId:null as number|null,center:{x:0,y:0},last:{x:0,y:0}});
  const move=(x:number,y:number,sprint:boolean)=>{const r=runtime.current;if(!r)return;r.touch??={};r.touch.moveX=x;r.touch.moveY=y;r.touch.sprint=sprint;};
  const setKnob=(x:number,y:number)=>{const el=knob.current;if(el)el.style.transform=`translate(${x}px, ${y}px)`;};
@@ -25,12 +25,12 @@ export function TouchControls({runtime,visible,onLook,onSwap,onPause,mode}:{runt
  const release=(action:string)=>{applyTouchAction(runtime.current,action,false);};
  const holdProps=(action:string)=>({onPointerDown:(e:ReactPointerEvent<HTMLButtonElement>)=>{e.preventDefault();e.stopPropagation();(e.currentTarget as HTMLElement).setPointerCapture?.(e.pointerId);press(action);},onPointerUp:(e:ReactPointerEvent<HTMLButtonElement>)=>{e.stopPropagation();release(action);},onPointerCancel:()=>release(action),onLostPointerCapture:()=>release(action)});
  if(!visible)return null;
-  return <div className={`touch-layer${race?' touch-race':''}`} onContextMenu={e=>e.preventDefault()}>
+  return <div className={`touch-layer${car?' touch-race':''}${soccer?' touch-soccer':''}`} onContextMenu={e=>e.preventDefault()}>
   <div className="touch-look" aria-hidden="true" onPointerDown={lookDown} onPointerMove={lookMove} onPointerUp={lookUp} onPointerCancel={lookUp} onLostPointerCapture={lookUp}/>
   <div className="touch-stick" ref={stick} aria-hidden="true" onPointerDown={stickDown} onPointerMove={stickMove} onPointerUp={stickUp} onPointerCancel={stickUp} onLostPointerCapture={stickUp}><i className="touch-knob" ref={knob}/></div>
   <div className="touch-buttons">
    {actions.map(action=><button key={action} type="button" className={`touch-button touch-${action}`} aria-label={labels[action]} {...holdProps(action)}>{labels[action]}</button>)}
-   <button type="button" className="touch-button touch-fire" aria-label={race?'Use item':'Fire'} {...holdProps('fire')}>{race?'USE ITEM':'FIRE'}</button>
+   {!soccer&&<button type="button" className="touch-button touch-fire" aria-label={race?'Use item':'Fire'} {...holdProps('fire')}>{race?'USE ITEM':'FIRE'}</button>}
    <button type="button" className="touch-button touch-pause" aria-label="Pause" onPointerDown={(e)=>{e.preventDefault();e.stopPropagation();onPause();}}>II</button>
   </div>
  </div>;

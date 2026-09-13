@@ -13,6 +13,7 @@ export const GAME_MODES = [
   {id:'combined-arms',name:'Combined Arms',description:'Command infantry, armour and aircraft across the largest battlefields. Hold the zones together.',rules:{team:true,score:'zoneTime',fragLimit:200,minFragLimit:50,maxFragLimit:900,objective:{kind:'domination',captureSeconds:6},maxBots:16}},
   {id:'payload',name:'Payload',description:'Escort the payload cart down the track to the final point. Checkpoints bank progress; defenders stall it and roll it back. Attackers win on delivery, defenders on the clock.',rules:{team:true,score:'payload',fragLimit:3,minFragLimit:1,maxFragLimit:6,objective:{kind:'payload',captureSeconds:5}}},
  {id:'puma-race',name:'Puma Circuit',description:'Race Pumas around the circuit. Cross every gate in order and finish the lap target first.',rules:{team:false,score:'laps',fragLimit:3,minFragLimit:1,maxFragLimit:10,maxBots:7}},
+ {id:'puma-soccer',name:'Puma Soccer',description:'Team car soccer on the circuit infield. Fling the ball into the enemy goal while defending your own.',rules:{team:true,score:'goals',fragLimit:5,minFragLimit:1,maxFragLimit:15,maxBots:8}},
 ];
 export const DIFFICULTIES = [
  {id:'easy',name:'Easy',description:'Relaxed reactions, loose aim and plenty of breathing room.',reaction:1.2,think:.5,error:.3,fireDelay:.48},
@@ -29,7 +30,7 @@ export const teamMode=modeOrConfig=>Boolean(modeRule(typeof modeOrConfig==='stri
 export function normalizeConfig(value={}){
  const c=value&&typeof value==='object'?{...value}:{};
   const mode=choice(c.mode,GAME_MODES.map(m=>m.id),'deathmatch');
- if(mode==='puma-race')Object.assign(c,{speed:1,gravity:1,damage:1,fastPowers:false,lifeSteal:false,unlimitedAmmo:false,suddenDeath:false,randomLoadout:false,oneShot:false,bounty:false,berserk:false,startingWeapon:0});
+ if(mode==='puma-race'||mode==='puma-soccer')Object.assign(c,{speed:1,gravity:1,damage:1,fastPowers:false,lifeSteal:false,unlimitedAmmo:false,suddenDeath:false,randomLoadout:false,oneShot:false,bounty:false,berserk:false,startingWeapon:0});
     const rules=modeRule(mode),minGoal=rules.minFragLimit??(mode==='ctf'?1:5),maxGoal=rules.maxFragLimit??50;
     return {mode,botCount:Math.round(number(c.botCount,DEFAULT_CONFIG.botCount,0,rules.maxBots??8)),difficulty:choice(c.difficulty,DIFFICULTIES.map(d=>d.id),DEFAULT_CONFIG.difficulty),fragLimit:Math.round(number(c.fragLimit,rules.fragLimit??15,minGoal,maxGoal)),timeLimit:Math.round(number(c.timeLimit,300,60,900)),respawn:number(c.respawn,2,1,5),speed:choice(c.speed,[.75,1,1.25,1.5],1),gravity:choice(c.gravity,[.4,.7,1],1),damage:choice(c.damage,[.5,1,1.5,2],1),fastPowers:c.fastPowers===true,lifeSteal:c.lifeSteal===true,unlimitedAmmo:c.unlimitedAmmo===true,suddenDeath:c.suddenDeath===true,randomLoadout:c.randomLoadout===true,oneShot:c.oneShot===true,bounty:c.bounty===true,berserk:c.berserk===true,startingWeapon:Math.round(number(c.startingWeapon,0,0,Math.max(0,WEAPONS.length-1))),playerName:typeof c.playerName==='string'?c.playerName.replace(/[\u0000-\u001f\u007f]/g,'').trim().slice(0,20):''};
 }

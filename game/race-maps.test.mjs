@@ -43,6 +43,8 @@ test('Puma Circuit is immutable and exclusively registered for racing, including
  assert.equal(resolveMapForMode('exchange','puma-race'),'puma-circuit');
  for(const map of MAPS)assert.equal(arenaSupportsMode(map.id,'puma-race'),map===arena);
  for(const mode of GAME_MODES)assert.equal(arenaSupportsMode(arena.id,mode.id),mode.id==='puma-race');
+ assert.equal(arenaSupportsMode(arena.id,'puma-soccer'),false);
+ assert.equal(arenaSupportsMode('puma-pitch','puma-race'),false);
  assert.equal(arenaSupportsMode({id:'unlisted',blocks:[]},'puma-race'),false);
  assert.equal(arenaSupportsMode({id:'unlisted',blocks:[]},'deathmatch'),true);
 });

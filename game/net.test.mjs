@@ -325,6 +325,28 @@ test('race disables shadows, acknowledges input and interpolates the local drive
  assert.deepEqual(second,original);
 });
 
+test('soccer disables the prediction shadow and forwards the authoritative race state',()=>{
+ const client=new NetClient();
+ client.createShadow('crosswire',config);
+ assert.notEqual(client.shadow,null,'combat modes still build a prediction shadow');
+ client.onMessage(JSON.stringify({type:'start',mapId:'puma-pitch',config:{mode:'puma-soccer',botCount:0}}));
+ assert.equal(client.shadow,null,'never construct a one-player soccer shadow');
+ assert.equal(client.resynced,false);
+ client.actorId=0;
+ const match=new Match('chatgpt','openclaw',rng(),'puma-pitch',{mode:'puma-soccer',humanCount:2,botCount:0});
+ const snap=JSON.parse(JSON.stringify(match.snapshot()));
+ assert.equal(snap.race.kind,'soccer');
+ client.input({jump:true,power:true,fire:true});
+ client.push({seq:1,acks:{0:1},state:snap});
+ assert.equal(client.shadow,null,'a soccer snapshot never re-enables prediction');
+ assert.equal(client.resynced,true,'input sending remains enabled without prediction');
+ assert.equal(client.pendingInputs.length,0);
+ const view=client.viewMatch();
+ assert.equal(view.race.kind,'soccer');
+ assert.deepEqual(view.race,client.state.race);
+ assert.equal(client.renderState(performance.now()).race.kind,'soccer');
+});
+
 test('connect rejects when the socket closes before opening',async t=>{
  const sockets=[];
  class Socket{constructor(){this.readyState=0;sockets.push(this);}close(){this.readyState=3;}}

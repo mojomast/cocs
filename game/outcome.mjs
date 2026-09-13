@@ -2,7 +2,7 @@ import {teamMode} from './config.mjs';
 
 // Shared end-of-match ranking so the in-match leaderboard (Match.leaders), the
 // award path (actorWon) and match history all read the same ordering.
-const SCORE_STAT_FIELDS = ['captures', 'flagPickups', 'flagReturns', 'flagDrops', 'objectiveTime', 'objectiveCaptures', 'objectiveNeutralizations', 'objectiveContests'];
+const SCORE_STAT_FIELDS = ['captures', 'flagPickups', 'flagReturns', 'flagDrops', 'objectiveTime', 'objectiveCaptures', 'objectiveNeutralizations', 'objectiveContests', 'goals'];
 const ZERO_STATS = Object.freeze(Object.fromEntries(SCORE_STAT_FIELDS.map(field => [field, 0])));
 const objectiveActions = stats => SCORE_STAT_FIELDS.filter(field => field !== 'captures').reduce((total, field) => total + stats[field], 0);
 
@@ -20,6 +20,7 @@ export const rankTuple = (actor, mode) => {
     if (mode === 'assault' || mode === 'payload') return [stats.objectiveCaptures, stats.objectiveTime, frags];
     return [stats.objectiveTime, stats.objectiveCaptures, frags];
   }
+  if (mode === 'puma-soccer') return [scoreStatsOf(actor)?.goals ?? 0, frags];
   if (mode === 'armsrace') return [Number(actor?.ladder) || 0, frags];
   return [frags];
 };

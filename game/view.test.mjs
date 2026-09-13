@@ -663,3 +663,30 @@ test('first-person viewmodel rebuilds when attachments or finish change',t=>{
  view.disposeObject(view.scene);
 });
 
+test('soccer presentation renders one keyed ball and skips race pickups',()=>{
+ const view=Object.assign(Object.create(ArenaView.prototype),{worldGroup:new T.Group(),reduced:()=>false});
+ const match={race:{kind:'soccer',ball:{x:1,y:2,z:3,vx:4,vz:5,r:1.1},boxes:[{id:'b',x:0,z:0,ready:true}],coins:[{id:'c',x:0,z:0,ready:true}],hazards:[{id:'h',x:0,z:0,ttl:1,type:'oil'}]}};
+ view.updateRace(match,0);
+ const ball=view.raceModels.get('soccer-ball');
+ assert.ok(ball&&ball.name==='soccer-ball','the ball keeps its keyed model');
+ assert.deepEqual(ball.position.toArray(),[1,2,3]);
+ assert.equal(ball.children[0].geometry.type,'SphereGeometry');
+ assert.equal(ball.children[0].geometry.parameters.radius,1.1);
+ ball.traverse(node=>{assert.equal(node.userData.objective,true);assert.equal(node.userData.noCameraOcclusion,true);});
+ assert.equal(view.raceModels.size,1,'soccer skips race boxes, hazards and coins');
+ view.updateRace({race:{kind:'soccer',ball:{x:5,y:1,z:6,r:1.1}}},1);assert.equal(ball.position.x,5);
+ view.updateRace({},2);assert.equal(view.raceModels.size,0);assert.equal(view.worldGroup.children.length,0);
+});
+
+test('soccer pitch draws markings and goals while posts still occlude the camera',()=>{
+ const race={kind:'soccer',pitch:{minX:-30,maxX:30,minZ:-18,maxZ:18},goals:[{team:0,x:-30,z:0,nx:-1,nz:0,halfWidth:6,height:4,depth:2},{team:1,x:30,z:0,nx:1,nz:0,halfWidth:6,height:4,depth:2}],boundary:{outer:[{x:-34,z:-22},{x:34,z:-22},{x:34,z:22},{x:-34,z:22}]}};
+ const model=raceTrackModel(race,'#55ddcc'),posts=[],nets=[],paint=[];
+ model.traverse(node=>{if(node.userData.soccerPost)posts.push(node);if(node.userData.soccerNet)nets.push(node);if(node.isMesh&&node.userData.arenaDetail)paint.push(node);});
+ assert.equal(posts.length,6,'each goal contributes two posts and a crossbar');
+ assert.equal(nets.length,8,'each goal contributes four net panels');
+ assert.ok(paint.length>0,'pitch paint is flat arena detail');
+ for(const post of posts)assert.notEqual(post.userData.noCameraOcclusion,true,'solid posts stay occluders');
+ for(const net of nets)assert.equal(net.userData.noCameraOcclusion,true);
+ ArenaView.prototype.disposeObject.call({},model);
+});
+
