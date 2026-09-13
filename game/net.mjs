@@ -34,7 +34,6 @@ export class NetClient {
   this.onClose = null;
   this.onProgression = null;
   this.onVoiceSignal = null;
-  this.onVoiceConfig = null;
   this.baseRenderDelay = clamp(Number(options.renderDelay) || RENDER_DELAY_DEFAULT, RENDER_DELAY_MIN, RENDER_DELAY_MAX);
   this._pendingReject = null;
   this.reset();
@@ -146,7 +145,6 @@ export class NetClient {
      server && typeof server === 'object' && !Array.isArray(server) &&
      (typeof server.urls === 'string' || (Array.isArray(server.urls) && server.urls.every(url => typeof url === 'string'))))) break;
     this.voiceIceServers = msg.iceServers;
-    this.onVoiceConfig?.(msg);
     break;
    case MESSAGE.WELCOME:
     this.peerId = msg.peerId;

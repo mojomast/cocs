@@ -144,11 +144,5 @@ export function botBehaviorKey(actor){
  return `${behavior.role}/${behavior.personality}`;
 }
 
-export function botBehaviorSummary(actor){
- const behavior=botBehavior(actor);
- return `${behavior.label}·${behavior.suffix}`;
-}
-
 export const BOT_ROLE_COUNT=Object.keys(ROLE_ARCHETYPES).length;
 export const BOT_PERSONALITY_COUNT=Object.keys(PERSONALITY_ARCHETYPES).length;
-export {TAU as BOT_TAU};

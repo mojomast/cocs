@@ -1,5 +1,28 @@
 # COCS verification report
 
+## Documentation drift and headless tests - 2026-09-13 (unreleased)
+
+- README drift corrected: `game/data.mjs` documents **five** powerups (haste,
+  overcharge, overshield, recon, cloak) instead of three; the pickup list names all
+  ten weapons; the false "there are no touch gameplay controls" line is replaced
+  with the actual coarse-pointer behavior; and a release-status banner near the top
+  points at this file and the `app/page.tsx` footer version (v2.68). Historical
+  version notes are untouched.
+- `DEVPLAN.md` and `SPEC.md` now carry a prominent historical-baseline banner
+  pointing here; their v1.4-era five-weapon/three-arena history is preserved.
+- New headless tests: `game/environment.test.mjs` checks that the sky dome,
+  instanced mountains and instanced terrain scatter build finite, environment-tagged
+  scene graphs, skip missing/unsupported terrain, and do not throw with
+  reduced-motion options; `game/battle-maps.test.mjs` checks the four battle maps'
+  unique ids, in-bounds geometry, clear spawns/objectives/supplies and vehicle
+  clearance where vehicles are declared. **13/13 pass**.
+- `server/network.test.mjs` flake fix: room-list assertions now poll for room
+  expiry/creation to settle (`waitForRooms`) instead of sleeping a fixed 1600 ms,
+  and the two-room simultaneous-match result wait is 90 s. `node --test
+  server/network.test.mjs` **12/12**.
+- Limits: no browser/WebGL/GPU verification was performed; these are headless
+  smoke and metadata checks only.
+
 ## Release 2.65 - Payload pig, objective clarity, bot variety
 
 - Fixed local objective rendering: view now reads `objectives ?? objectiveState`, so

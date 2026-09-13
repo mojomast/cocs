@@ -120,7 +120,8 @@ test('KOTH and Domination objective areas show state and clean stale zones',()=>
   const arena={id:'crosswire',color:'#55ddcc'};
   view.updateObjectives({time:2,objectives:{kind:'koth',zones:[{id:'hill',x:2,y:1,z:-3,radius:4,owner:0,captureTeam:0,progress:40}]}},arena);
   const hill=view.objectiveModels.get('hill');
-    assert.ok(hill&&hill.userData.objective);assert.equal(hill.position.y,1);assert.equal(hill.scale.y,1);assert.equal(hill.userData.radius,4);assert.equal(hill.userData.area.geometry.parameters.radiusTop,4);assert.equal(hill.userData.base.geometry.parameters.radius,4);assert.equal(hill.userData.identifier,'hill');assert.ok(hill.userData.emblem.visible);
+     assert.ok(hill&&hill.userData.objective);assert.equal(hill.position.y,1);assert.equal(hill.scale.y,1);assert.equal(hill.userData.radius,4);assert.equal(hill.userData.area.geometry.parameters.radiusTop,4);assert.equal(hill.userData.base.geometry.parameters.radius,4);assert.equal(hill.userData.identifier,'hill');assert.ok(hill.userData.emblem.visible);
+     hill.traverse(n=>assert.equal(n.userData.noCameraOcclusion,true,'objective zone children never block the camera ray'));
     assert.ok(hill.userData.area.material.opacity>0,'neutral and owned areas have a filled footprint');
     assert.equal(hill.userData.progress.visible,true);assert.equal(hill.userData.baseMat.color.getHexString(),'ed514b');
    const progressGeometry=hill.userData.progress.geometry;
@@ -410,7 +411,7 @@ test('boundary rails merge into clean non-duplicated wall geometry, dispose once
  }
  const finite=node=>[...node.geometry.attributes.position.array].every(Number.isFinite);
  assert.ok(stripes.every(stripe=>finite(stripe)));
- model.traverse(node=>assert.equal(node.userData.objective,true,'race geometry never blocks the occlusion ray'));
+ model.traverse(node=>{if(node.userData.raceBarrier)assert.notEqual(node.userData.noCameraOcclusion,true,'solid race rails still occlude the camera');else assert.equal(node.userData.noCameraOcclusion,true,'decorative race geometry never blocks the occlusion ray');});
  const resources=new Set();model.traverse(n=>{if(n.geometry)resources.add(n.geometry);if(n.material)resources.add(n.material);});
  let disposed=0;for(const resource of resources)resource.addEventListener('dispose',()=>disposed++);
  ArenaView.prototype.disposeObject.call({},model);
@@ -623,15 +624,42 @@ test('dispose clears the global surface-texture cache',t=>{
  clearSurfaceTextures();
 });
 
-test('race builds reuse cached geometry for identical tiles',()=>{
- const race={gates:[{x:0,z:0,nx:0,nz:1,halfWidth:12},{x:20,z:0,nx:1,nz:0,halfWidth:12}],grid:[{x:0,z:0,heading:0},{x:4,z:0,heading:0}],centerline:[]};
- const assets=new ModelAssets();
- const buckets=model=>{const map=new Map();model.traverse(n=>{if(!n.isMesh||n.geometry?.type!=='BoxGeometry')return;const p=n.geometry.parameters,key=`${p.width}|${p.height}|${p.depth}`;const entry=map.get(key)||{count:0,geometries:new Set()};entry.count++;entry.geometries.add(n.geometry);map.set(key,entry);});return map;};
- const first=raceTrackModel(race,'#83f4d5',undefined,assets),repeated=[...buckets(first).entries()].filter(([,entry])=>entry.count>1);
- assert.ok(repeated.length>0,'the track has repeated tile dimensions');
- for(const [key,entry] of repeated)assert.equal(entry.geometries.size,1,`${key} shares one geometry across ${entry.count} tiles`);
- const firstGeometries=new Set();first.traverse(n=>{if(n.geometry)firstGeometries.add(n.geometry);});
- const second=raceTrackModel(race,'#83f4d5',undefined,assets),secondGeometries=new Set();second.traverse(n=>{if(n.geometry)secondGeometries.add(n.geometry);});
- assert.ok([...secondGeometries].some(geometry=>firstGeometries.has(geometry)),'a rebuild reuses cached geometry instances');
- ArenaView.prototype.disposeObject.call({},first);ArenaView.prototype.disposeObject.call({},second);assets.dispose();
+ test('race builds reuse cached geometry for identical tiles',()=>{
+  const race={gates:[{x:0,z:0,nx:0,nz:1,halfWidth:12},{x:20,z:0,nx:1,nz:0,halfWidth:12}],grid:[{x:0,z:0,heading:0},{x:4,z:0,heading:0}],centerline:[]};
+  const assets=new ModelAssets();
+  const buckets=model=>{const map=new Map();model.traverse(n=>{if(!n.isMesh||n.geometry?.type!=='BoxGeometry')return;const p=n.geometry.parameters,key=`${p.width}|${p.height}|${p.depth}`;const entry=map.get(key)||{count:0,geometries:new Set()};entry.count++;entry.geometries.add(n.geometry);map.set(key,entry);});return map;};
+  const first=raceTrackModel(race,'#83f4d5',undefined,assets),repeated=[...buckets(first).entries()].filter(([,entry])=>entry.count>1);
+  assert.ok(repeated.length>0,'the track has repeated tile dimensions');
+  for(const [key,entry] of repeated)assert.equal(entry.geometries.size,1,`${key} shares one geometry across ${entry.count} tiles`);
+  const firstGeometries=new Set();first.traverse(n=>{if(n.geometry)firstGeometries.add(n.geometry);});
+  const second=raceTrackModel(race,'#83f4d5',undefined,assets),secondGeometries=new Set();second.traverse(n=>{if(n.geometry)secondGeometries.add(n.geometry);});
+  assert.ok([...secondGeometries].some(geometry=>firstGeometries.has(geometry)),'a rebuild reuses cached geometry instances');
+  ArenaView.prototype.disposeObject.call({},first);ArenaView.prototype.disposeObject.call({},second);assets.dispose();
 });
+
+test('reduced motion keeps the static arena backdrop while freezing animation',t=>{
+ const previous=Object.getOwnPropertyDescriptor(globalThis,'document');
+ const ctx={fillRect(){},fillText(){}};
+ Object.defineProperty(globalThis,'document',{configurable:true,value:{createElement:()=>({getContext:()=>ctx})}});
+ t.after(()=>{if(previous)Object.defineProperty(globalThis,'document',previous);else delete globalThis.document;});
+ const view=Object.create(ArenaView.prototype);
+ Object.assign(view,{scene:new T.Scene(),renderResources:new Set(),renderer:{isSoftware:false},reduced:()=>true});
+ view.buildArena(MAPS[0]);
+ const environment=[];view.worldGroup.traverse(n=>{if(n.userData.environment)environment.push(n);});
+ assert.ok(environment.some(n=>n.userData.sky),'reduced motion keeps the sky dome');
+ assert.ok(environment.some(n=>n.userData.mountains),'reduced motion keeps the mountain ring');
+ view.disposeObject(view.worldGroup);for(const resource of view.renderResources)resource.dispose();
+});
+
+test('first-person viewmodel rebuilds when attachments or finish change',t=>{
+ const {view}=playable(t);
+ const base={id:7,weapon:0,health:100,x:0,y:0,z:0,yaw:0,pitch:0,vx:0,vy:0,vz:0,grounded:true};
+ const frame=player=>view.render('playing',{actors:[player],pickups:[],rockets:[],time:1,events:[]},.016,1);
+ frame(base);const initial=view.firstPerson;
+ frame(base);assert.equal(view.firstPerson,initial,'unchanged gear keeps the same viewmodel');
+ const scoped={...base,attachments:{visual:{optic:'scope',barrel:'stock',magazine:'stock',underbarrel:'none'}}};
+ frame(scoped);const afterScope=view.firstPerson;assert.notEqual(afterScope,initial,'an attachment change rebuilds the viewmodel');
+ frame({...scoped,finish:'finish-ion'});assert.notEqual(view.firstPerson,afterScope,'a finish change rebuilds the viewmodel');
+ view.disposeObject(view.scene);
+});
+

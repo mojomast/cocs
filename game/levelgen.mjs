@@ -129,7 +129,7 @@ export function createLevel(spec) {
   const size = spec.size ?? { w: 90, d: 90 };
   const bounds = { minX: -(size.w / 2), maxX: size.w / 2, minZ: -(size.d / 2), maxZ: size.d / 2, ...(spec.bounds ?? {}) };
   const ctx = {
-    rng, bounds, structures: [], props: [], blocks: [], roofs: [],
+    rng, bounds, structures: [], props: [], blocks: [],
     spawns: [], teamSpawns: { 0: [], 1: [] }, flagSpawns: {}, pickups: [], navNodes: [], objectiveZones: [], vehicles: [],
     traversal: { trampolines: [], boostLaunchers: [], teleporters: [], ziplines: [] },
     ground: (x, z) => terrain.height(x, z),
@@ -147,10 +147,10 @@ export function createLevel(spec) {
   ctx.terrain = terrain;
   ctx.ground = (x, z) => terrain.height(x, z);
 
-  // A building composed of four walls with an optional doorway, plus a roof and
-  // a floor slab. Collision wall boxes leave a real, walkable door gap.
+  // A building composed of four walls with an optional doorway and a roof.
+  // Collision wall boxes leave a real, walkable door gap.
   ctx.addBuilding = (o) => {
-    const { x, z, w, d, h = 6, wall = 0.5, rot = 0, roof = 'gable', door = 'south', doorWidth = 2.2, floors = 1, color, windows = true } = o;
+    const { x, z, w, d, h = 6, wall = 0.5, rot = 0, roof = 'gable', door = 'south', doorWidth = 2.2, color, windows = true } = o;
     const q = quarter(rot), groundY = terrain.height(x, z), baseY = o.y ?? groundY;
     const place = (lx, lz, sw, sd, kind, hh = h, yy = baseY) => {
       const [rx, rz] = rotateLocal(lx, lz, q);
@@ -169,8 +169,7 @@ export function createLevel(spec) {
         else { place(cx, cz - (doorWidth / 2 + seg / 2), sw, seg, 'building'); place(cx, cz + (doorWidth / 2 + seg / 2), sw, seg, 'building'); }
       } else place(cx, cz, sw, sd, 'building');
     }
-    for (let f = 1; f < floors; f++) { const yy = baseY + f * (h / floors); const [fx, fz] = rotateLocal(0, 0, q); ctx.addBlock({ x: x + fx, z: z + fz, w: w - wall, d: d - wall, h: yy, kind: 'floor' }); }
-    ctx.addStructure({ type: 'building', x, z, y: baseY, w, d, h, rot, roof, color, windows, floors, door });
+    ctx.addStructure({ type: 'building', x, z, y: baseY, w, d, h, rot, roof, color, windows, door });
     // Follow the actual local doorway through its quarter-turn, not the wall
     // nearest the map centre. Short steps preserve narrow entrances in nav.
     if (sides[door]) {
@@ -178,7 +177,7 @@ export function createLevel(spec) {
       const [nx, nz] = rotateLocal(dx / length, dz / length, q);
       for (let t = 0; t <= length + 4; t += 1.5) ctx.addNav(x + nx * t, z + nz * t);
     }
-    if (windows) for (const name of Object.keys(sides)) { if (name === door) continue; const [cx, cz] = sides[name]; const [rx, rz] = rotateLocal(cx, cz, q); ctx.addStructure({ type: 'windows', x: x + rx, z: z + rz, y: baseY + h * 0.45, w: (name === 'north' || name === 'south') ? w : d, rot, rows: Math.max(1, Math.floor(h / 3)) }); }
+    if (windows) for (const name of Object.keys(sides)) { if (name === door) continue; const [cx, cz] = sides[name]; const [rx, rz] = rotateLocal(cx, cz, q); const alongX = name === 'north' || name === 'south'; ctx.addStructure({ type: 'windows', x: x + rx, z: z + rz, y: baseY + h * 0.45, w: q % 2 === 0 ? (alongX ? w : d) : (alongX ? d : w), rot, rows: Math.max(1, Math.floor(h / 3)) }); }
     return x;
   };
 
@@ -312,8 +311,7 @@ export function createLevel(spec) {
     id: spec.id, name: spec.name, tag: spec.tag, description: spec.description, color: spec.color, background: spec.background,
     bounds, terrain, blocks: ctx.blocks, spawns: ctx.spawns, pickups: ctx.pickups, navNodes: ctx.navNodes,
     objectiveZones: ctx.objectiveZones, vehicles: ctx.vehicles, traversal: ctx.traversal,
-    structures: ctx.structures, props: ctx.props, roofs: ctx.roofs,
-    group: spec.group, scale: spec.scale, mode: spec.mode, nextGen: true,
+    structures: ctx.structures, props: ctx.props, nextGen: true,
     // A kill plane below the terrain so any impossible fall still resolves to a death.
     voidY: spec.voidY ?? (terrain.base - terrain.amplitude - (spec.relief ?? 1.6) - 16),
   };
@@ -323,7 +321,7 @@ export function createLevel(spec) {
   if (authoredFlags && pair(authoredFlags[0]) && pair(authoredFlags[1])) {
     map.flagSpawns = { 0: pair(authoredFlags[0]), 1: pair(authoredFlags[1]) }; map.flags = map.flagSpawns;
   } else if (spec.flagSpawns) { map.flagSpawns = spec.flagSpawns; map.flags = spec.flagSpawns; }
-  else if (ctx.teamSpawns[0].length) { map.flagSpawns = { 0: ctx.teamSpawns[0][0], 1: ctx.teamSpawns[1][0] }; }
+  else if (spec.ctf === true && ctx.teamSpawns[0].length) { map.flagSpawns = { 0: ctx.teamSpawns[0][0], 1: ctx.teamSpawns[1][0] }; }
   if (map.flagSpawns) {
     map.flagSpawns = Object.fromEntries(Object.entries(map.flagSpawns).map(([team, point]) => [team, clearSpot(...pair(point), .65)]));
     map.flags = map.flagSpawns;

@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {hasAmmo, cycleWeapon, blocksGameplay, posture, controlsFromState, INPUT_CODES} from './input.mjs';
+import {hasAmmo, cycleWeapon, blocksGameplay, posture, controlsFromState} from './input.mjs';
 import {applyTouchAction} from './touch.mjs';
 
 test('mouse and touch holds are independent and short touch taps survive release', () => {
@@ -51,10 +51,6 @@ test('posture reads sprint and crouch from held keys in sets or arrays', () => {
   assert.deepEqual(posture(new Set(['ControlLeft'])), {sprint:false,crouch:true});
   assert.deepEqual(posture(['KeyC','ShiftLeft']), {sprint:true,crouch:true});
   assert.deepEqual(posture(undefined), {sprint:false,crouch:false});
-});
-
-test('input codes cover every movement, stance, interact and reload key', () => {
-  for (const code of ['ShiftLeft','ControlLeft','KeyC','KeyR','Space','KeyW','KeyA','KeyS','KeyD','KeyQ','KeyE']) assert.ok(INPUT_CODES.includes(code));
 });
 
 test('controlsFromState builds movement and only sets active flags', () => {

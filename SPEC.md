@@ -1,5 +1,7 @@
 # COCS — Colosseum Of Competitive Slop — game specification
 
+> **Historical baseline — see [VERIFICATION.md](VERIFICATION.md) for current status.** This specification records the original MVP design and authorized expansions up to the v1.4-era content ceiling (five weapons, three arenas). It is retained as history and is not a description of the current build.
+
 Status: MVP implementation complete; verification evidence and environment limitations are tracked separately in DEVPLAN.md and VERIFICATION.md. All identities are fictional robot adaptations, not claims about products.
 
 ## Pillars [MVP]

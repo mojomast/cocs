@@ -43,7 +43,7 @@ test('race display uses official positions, laps and winner, never frags or prac
  const display=raceDisplay(snapshot,0);assert.equal(display.position,2);assert.equal(display.countdown,'3');assert.equal(display.checkpoint,5);assert.equal(display.item,'OIL SLICK');assert.equal(display.effects,'TURBO 1.2s');
  snapshot.race.phase='finished';snapshot.race.winnerId=2;assert.equal(raceResult(snapshot,0),'Rival WINS.');snapshot.race.winnerId=0;assert.equal(raceResult(snapshot,0),'YOU WIN THE RACE.');snapshot.race.winnerId=null;assert.equal(raceResult(snapshot,0),'RACE COMPLETE.');
 });
-test('race time and absent snapshot are readable',()=>{assert.equal(raceTime(61.25),'01:01.25');assert.equal(raceTime(-1),'00:00.00');assert.equal(raceDisplay(null).item,'NO ITEM');});
+test('race time and absent snapshot are readable',()=>{assert.equal(raceTime(61.25),'01:01.25');assert.equal(raceTime(-1),'00:00.00');assert.equal(raceDisplay(null).item,'NO ITEM');assert.equal(raceDisplay({race:{standings:[{actorId:0,position:1}]}},0).checkpoint,1,'missing nextGate never leaks NaN');assert.equal(raceDisplay({race:{standings:[{actorId:3,position:1,nextGate:7}]}},3).checkpoint,8);});
 test('race display exposes coins, friendly item labels and star effects',()=>{
  const labelSnapshot=id=>({config:{mode:'puma-race'},race:{phase:'racing',elapsed:5,laps:3,gates:Array(12),standings:[{actorId:0,position:1,lap:1,nextGate:0,item:id,coins:6,effects:{star:2.1}}]}});
  for(const [id,label] of [['turbo','TURBO'],['shield','SHIELD'],['oil','OIL SLICK'],['pulse','HOMING PULSE'],['mine','MINE'],['triple','TRIPLE PULSE'],['bolt','LIGHTNING'],['star','STAR']])assert.equal(raceDisplay(labelSnapshot(id),0).item,label);
@@ -76,7 +76,7 @@ test('circuit geometry has eight oriented slots and twelve passable frames',()=>
  const model=raceTrackModel(PUMA_CIRCUIT.race,PUMA_CIRCUIT.color),slots=model.children.filter(n=>n.userData.raceGrid!==undefined),gates=model.children.filter(n=>n.userData.raceGate!==undefined);
  assert.equal(slots.length,8);assert.equal(gates.length,12);assert.equal(slots[0].rotation.y,Math.PI/2);
  assert.equal(gates[0].children.length,3);assert.equal(gates[0].children[0].position.x,-12);assert.equal(gates[0].children[1].position.x,12);
- model.traverse(n=>{assert.equal(n.userData.objective,true);if(n.geometry)assert.ok([...n.geometry.attributes.position.array].every(Number.isFinite));});ArenaView.prototype.disposeObject.call({},model);
+ model.traverse(n=>{if(n.userData.raceBarrier)assert.notEqual(n.userData.noCameraOcclusion,true,'solid rails still occlude the camera');else assert.equal(n.userData.noCameraOcclusion,true);if(n.geometry)assert.ok([...n.geometry.attributes.position.array].every(Number.isFinite));});ArenaView.prototype.disposeObject.call({},model);
 });
 test('live boxes hide on collection and expired hazards are disposed',()=>{
  const view=Object.assign(Object.create(ArenaView.prototype),{worldGroup:new T.Group(),reduced:()=>true});

@@ -2,7 +2,6 @@
 // stalls and rolls it back. Pure and engine-free, like assault.mjs, so the sim,
 // replay, network and tests share the same rules.
 import {terrainSupportAt} from './terrain.mjs';
-export const PAYLOAD_MODE_ID='payload';
 const boundsOf=arena=>arena.bounds||{minX:-13.55,maxX:13.55,minZ:-13.55,maxZ:13.55};
 // Route points must sit on the ground so the cart and checkpoint rings are not
 // buried on terrain maps (titan-valley, riverbend, convoy-line).

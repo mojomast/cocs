@@ -377,23 +377,6 @@ test('snapshot broadcast rate defaults to 30 Hz and is configurable',()=>{
  assert.equal(count(undefined,60),30,'default broadcast is 30 Hz');
  assert.equal(count({snapshotHz:20},60),20,'broadcast rate is configurable');
 });
-test('lag compensation transform history is opt-in and bounded',()=>{
- const room=new Room('r',rng());
- room.join(1,'A');room.host(1,{botCount:0,timeLimit:300},'crosswire');room.start(1);room.drain();
- for(let i=0;i<5;i++)room.tick(1/60);
- assert.equal(room.transformHistory.length,0,'history is disabled by default and changes no behavior');
- room.enableLagCompensation(true);
- for(let i=0;i<40;i++)room.tick(1/60);
- assert.ok(room.transformHistory.length>0,'history records once enabled');
- assert.ok(room.transformHistory.length<=room.transformHistoryLimit,'history stays bounded');
- const frame=room.transformsAt(room.match.time);
- assert.ok(frame,'latest frame is retrievable');
- assert.equal(frame.actors.length,room.match.actors.length,'frame carries every actor transform');
- assert.equal(room.transformsAt(room.transformHistory[0].time-1),null,'queries before the first frame return null');
- room.enableLagCompensation(false);
- room.tick(1/60);
- assert.equal(room.transformHistory.length,0,'disabling clears history');
-});
 test('a spectator joining mid-match does not replay buffered events',()=>{
  const room=new Room('r',rng(),{graceMs:1000});
  room.join(1,'Host');room.host(1,{botCount:2,timeLimit:60,fragLimit:5},'crosswire');room.start(1);

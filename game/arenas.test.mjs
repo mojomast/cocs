@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {MAPS} from './maps.mjs';
 import {GAME_MODES} from './config.mjs';
-import {ARENA_GROUPS,ARENA_SCALES,DEFAULT_MAX_BOTS,activeMaps,arenaMeta,arenaSupportsMode,arenaVariant,groupedMaps,mapsForMode,maxBotsFor,modeMapSummary,recommendedBots,resolveMapForMode} from './arenas.mjs';
+import {ARENA_GROUPS,ARENA_SCALES,DEFAULT_MAX_BOTS,activeMaps,arenaMeta,arenaSupportsMode,groupedMaps,mapsForMode,maxBotsFor,modeMapSummary,recommendedBots,resolveMapForMode} from './arenas.mjs';
 import {shuffleSelection,nextArenaSelection} from './replay.mjs';
 import {Match} from './core.mjs';
 
@@ -17,6 +17,9 @@ test('every arena has a valid group, scale and play list',()=>{
   for(const mode of meta.play||[])assert.ok(modes.has(mode),`${map.id} play ${mode}`);
  }
  assert.equal(arenaMeta('missing-map'),null);
+});
+test('maps do not ship dead schema the runtime never reads',()=>{
+ for(const map of MAPS)for(const field of ['objectiveNodes','variants','roofs','group','scale','mode'])assert.equal(map[field],undefined,`${map.id} ${field}`);
 });
 
 test('legacy arenas are archived unless explicitly enabled',()=>{
@@ -38,6 +41,13 @@ test('combined arms is vehicle-biased, supports the big maps and allows a larger
  assert.equal(recommendedBots('combined-arms','longreach-plateau'),11);
  assert.ok(recommendedBots('combined-arms','exchange')<=16);
 });
+test('every arena advertising combined arms declares vehicles',()=>{
+ const modes=new Set(GAME_MODES.map(mode=>mode.id));
+ assert.ok(modes.has('combined-arms'));
+ const advertised=MAPS.filter(map=>arenaSupportsMode(map.id,'combined-arms'));
+ assert.ok(advertised.length>=3);
+ for(const map of advertised)assert.ok((map.vehicles||[]).length>0,`${map.id} declares vehicles`);
+});
 
 test('mode map summaries and grouping render valid metadata',()=>{
  for(const map of MAPS){const summary=modeMapSummary('domination',map.id);assert.equal(summary.mapId,map.id);assert.ok(ARENA_GROUPS.some(group=>group.id===summary.group));assert.ok(summary.maxBots>=8);assert.ok(summary.recommendedBots>=0&&summary.recommendedBots<=summary.maxBots);}
@@ -53,7 +63,6 @@ test('mode filtering hides unsupported maps and honours legacy',()=>{
  assert.ok(ctf.length>0);
  assert.ok(ctf.every(map=>arenaSupportsMode(map.id,'ctf')));
  assert.ok(mapsForMode('deathmatch',{legacy:true}).length>=activeMaps().length);
- assert.equal(arenaVariant('exchange','deathmatch').id,'exchange');
 });
 
 test('legacy gating excludes archived arenas from shuffle and rotation',()=>{

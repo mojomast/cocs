@@ -13,7 +13,7 @@ export function raceStandings(snapshot){
 }
 export function raceDisplay(snapshot,actorId=0){
  const race=snapshot?.race,row=race?.standings?.find(a=>a.actorId===actorId),laps=race?.laps??snapshot?.config?.fragLimit??3;
- return {position:row?.position??'-',total:race?.standings?.length??8,lap:Math.min(laps,row?.lap??1),laps,checkpoint:row?row.nextGate+1:1,gates:race?.gates?.length??0,time:raceTime(row?.finishTime??race?.elapsed??0),item:raceItemLabel(row?.item),coins:Number(row?.coins)||0,countdown:race?.phase==='countdown'?String(Math.max(1,Math.ceil(race.countdown))):race?.phase==='finished'?'FINISHED':race?.elapsed<1?'GO!':'',effects:Object.entries(row?.effects??{}).filter(([,v])=>v>0).map(([key,v])=>`${raceItemLabel(key)} ${v.toFixed(1)}s`).join(' / ')};
+ return {position:row?.position??'-',total:race?.standings?.length??8,lap:Math.min(laps,row?.lap??1),laps,checkpoint:row&&Number.isFinite(row.nextGate)?row.nextGate+1:1,gates:race?.gates?.length??0,time:raceTime(row?.finishTime??race?.elapsed??0),item:raceItemLabel(row?.item),coins:Number(row?.coins)||0,countdown:race?.phase==='countdown'?String(Math.max(1,Math.ceil(race.countdown))):race?.phase==='finished'?'FINISHED':race?.elapsed<1?'GO!':'',effects:Object.entries(row?.effects??{}).filter(([,v])=>v>0).map(([key,v])=>`${raceItemLabel(key)} ${v.toFixed(1)}s`).join(' / ')};
 }
 export function raceResult(snapshot,actorId=0){
  const winner=snapshot?.race?.winnerId,rows=raceStandings(snapshot);

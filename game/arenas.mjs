@@ -18,17 +18,17 @@ const AUTHOR={
  exchange:{group:'arena',legacy:true,scale:'skirmish',play:['deathmatch','teamdeathmatch','instagib','rockets','arsenal','armsrace','koth','domination']},
  crosswire:{group:'arena',legacy:true,scale:'skirmish',play:['deathmatch','teamdeathmatch','instagib','rockets','arsenal','armsrace','koth','domination']},
  foundry:{group:'arena',legacy:true,scale:'skirmish',play:['deathmatch','teamdeathmatch','instagib','rockets','arsenal','armsrace','koth','domination']},
- launchpad:{group:'arena',legacy:true,scale:'battle',play:['ctf','teamdeathmatch','deathmatch','koth','domination','arsenal','combined-arms','payload']},
+ launchpad:{group:'arena',legacy:true,scale:'battle',play:['ctf','teamdeathmatch','deathmatch','koth','domination','arsenal','payload']},
  citadel:{group:'arena',legacy:true,scale:'battle',play:['ctf','teamdeathmatch','deathmatch','koth','domination','arsenal','payload']},
  'blood-gulch':{group:'outdoor',legacy:true,scale:'battle',play:['ctf','teamdeathmatch','deathmatch','koth','domination','combined-arms','payload']},
  skybreak:{group:'island',scale:'battle',play:['ctf','teamdeathmatch','deathmatch','koth','domination']},
  aether:{group:'island',scale:'battle',play:['ctf','teamdeathmatch','deathmatch','koth','domination']},
- 'sunscar-canyon':{group:'outdoor',scale:'battle',play:['ctf','teamdeathmatch','deathmatch','koth','domination','combined-arms','payload']},
+ 'sunscar-canyon':{group:'outdoor',scale:'battle',play:['ctf','teamdeathmatch','deathmatch','koth','domination','payload']},
  // Launcher-connected islands have no continuous ground route for a payload.
  'ironfall-megastructure':{group:'outdoor',scale:'warzone',play:['ctf','teamdeathmatch','deathmatch','koth','domination','combined-arms']},
  'longreach-plateau':{group:'outdoor',scale:'warzone',play:['ctf','teamdeathmatch','deathmatch','koth','domination','combined-arms']},
  frostline:{group:'outdoor',scale:'warzone',play:['ctf','teamdeathmatch','deathmatch','koth','domination','combined-arms','payload']},
- 'derelict-station':{group:'indoor',scale:'warzone',play:['ctf','teamdeathmatch','deathmatch','koth','domination','combined-arms','payload']},
+ 'derelict-station':{group:'indoor',scale:'warzone',play:['ctf','teamdeathmatch','deathmatch','koth','domination','payload']},
  'ashen-rift':{group:'outdoor',scale:'warzone',play:['ctf','teamdeathmatch','deathmatch','koth','domination','combined-arms','payload']},
  'neon-vertical':{group:'urban',scale:'battle',play:['deathmatch','teamdeathmatch','instagib','rockets','arsenal','koth','domination','ctf','payload']},
  substation:{group:'indoor',scale:'battle',play:['deathmatch','teamdeathmatch','instagib','rockets','arsenal','koth','domination','ctf','payload']},
@@ -40,17 +40,17 @@ const AUTHOR={
  'catwalk-breach':{group:'urban',scale:'battle',play:['assault','deathmatch','teamdeathmatch','instagib','rockets','arsenal','koth','domination']},
  // Next-generation procedural maps (levelgen.mjs). One per mode.
  colosseum:{group:'arena',scale:'battle',play:['deathmatch','teamdeathmatch','instagib','rockets','arsenal','armsrace','koth','domination']},
- 'frost-gate':{group:'outdoor',scale:'warzone',play:['ctf','teamdeathmatch','deathmatch','koth','domination','combined-arms','arsenal','payload']},
- 'sunken-hill':{group:'outdoor',scale:'battle',play:['koth','domination','deathmatch','teamdeathmatch','ctf','combined-arms','payload']},
- riverbend:{group:'urban',scale:'warzone',play:['domination','koth','deathmatch','teamdeathmatch','ctf','combined-arms','arsenal','payload']},
+ 'frost-gate':{group:'outdoor',scale:'warzone',play:['ctf','teamdeathmatch','deathmatch','koth','domination','arsenal','payload']},
+ 'sunken-hill':{group:'outdoor',scale:'battle',play:['koth','domination','deathmatch','teamdeathmatch','ctf','payload']},
+ riverbend:{group:'urban',scale:'warzone',play:['domination','koth','deathmatch','teamdeathmatch','arsenal','payload']},
  fortress:{group:'indoor',scale:'warzone',play:['assault','deathmatch','teamdeathmatch','koth','domination','arsenal']},
- atrium:{group:'indoor',scale:'battle',play:['teamdeathmatch','deathmatch','koth','domination','ctf','instagib','rockets','arsenal','payload']},
+ atrium:{group:'indoor',scale:'battle',play:['teamdeathmatch','deathmatch','koth','domination','instagib','rockets','arsenal','payload']},
  catacombs:{group:'indoor',scale:'battle',play:['instagib','rockets','deathmatch','teamdeathmatch','arsenal','koth','domination']},
  slagworks:{group:'urban',scale:'battle',play:['rockets','deathmatch','teamdeathmatch','koth','domination','arsenal','instagib']},
  forge:{group:'arena',scale:'battle',play:['arsenal','armsrace','deathmatch','teamdeathmatch','koth','domination','instagib','rockets']},
  'proving-grounds':{group:'arena',scale:'skirmish',play:['armsrace','deathmatch','teamdeathmatch','instagib','rockets','arsenal','koth','domination']},
- 'titan-valley':{group:'combined',scale:'warzone',play:['combined-arms','ctf','teamdeathmatch','deathmatch','koth','domination','arsenal','assault','payload']},
- 'convoy-line':{group:'urban',scale:'warzone',play:['payload','combined-arms','ctf','teamdeathmatch','deathmatch','koth','domination','arsenal']},
+ 'titan-valley':{group:'combined',scale:'warzone',play:['combined-arms','teamdeathmatch','deathmatch','koth','domination','arsenal','assault','payload']},
+ 'convoy-line':{group:'urban',scale:'warzone',play:['payload','combined-arms','teamdeathmatch','deathmatch','koth','domination','arsenal']},
 };
 
 const span=arena=>{
@@ -77,6 +77,5 @@ export function resolveMapForMode(mapId,mode,options={}){
 }
 export function activeMaps({legacy=false}={}){return legacy?[...MAPS]:MAPS.filter(map=>!arenaMeta(map.id).legacy);}
 export function groupedMaps(maps=MAPS){const groups=[];for(const group of ARENA_GROUPS){const entries=maps.filter(map=>(arenaMeta(map.id).group)===group.id);if(entries.length)groups.push({...group,maps:entries});}return groups;}
-export function arenaVariant(mapOrId,mode){const arena=typeof mapOrId==='string'?MAPS.find(map=>map.id===mapOrId):mapOrId;if(!arena)return null;const override=arena.variants?.[mode];if(!override)return arena;return {...arena,...override,id:arena.id,bounds:override.bounds??arena.bounds};}
 export function modeMapSummary(mode,mapId){const meta=arenaMeta(mapId);const group=ARENA_GROUPS.find(entry=>entry.id===meta.group);return {mapId,group:meta.group,groupName:group?.name??'Arena',scale:meta.scale,recommendedBots:recommendedBots(mode,mapId),maxBots:maxBotsFor(mode),legacy:meta.legacy};}
 export const MODE_IDS=GAME_MODES.map(mode=>mode.id);

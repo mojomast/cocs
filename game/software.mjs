@@ -27,7 +27,7 @@ export class SoftwareRenderer{
     const ix=cached.indices;
     if(obj.isLine||obj.isLineSegments){for(let i=0;i<ix.length-1;i+=obj.isLineSegments?2:1){const a=vertices[ix[i]],b=vertices[ix[i+1]];if(a[2]>=-.1||b[2]>=-.1)continue;const p=project(a),q=project(b);if((p[0]<0&&q[0]<0)||(p[0]>w&&q[0]>w)||(p[1]<0&&q[1]<0)||(p[1]>h&&q[1]>h))continue;draw.push({depth:-(a[2]+b[2])*.5,points:[p,q],color:color(mat,1,mat.opacity),line:true});}continue;}
     if(!obj.isMesh)continue;
-    for(let i=0;i<ix.length;i+=3){const a=vertices[ix[i]],b=vertices[ix[i+1]],c=vertices[ix[i+2]];if(!a||!b||!c||(a[2]>=-.1&&b[2]>=-.1&&c[2]>=-.1))continue;const poly=clip([a,b,c]);if(poly.length<3)continue;const p=poly.map(project),area=(p[1][0]-p[0][0])*(p[2][1]-p[0][1])-(p[1][1]-p[0][1])*(p[2][0]-p[0][0]);if((mat.side!==T.DoubleSide&&area>=0)||Math.abs(area)<.06)continue;
+    for(let i=0;i<ix.length;i+=3){const a=vertices[ix[i]],b=vertices[ix[i+1]],c=vertices[ix[i+2]];if(!a||!b||!c||(a[2]>=-.1&&b[2]>=-.1&&c[2]>=-.1))continue;const poly=clip([a,b,c]);if(poly.length<3)continue;const p=poly.map(project),area=(p[1][0]-p[0][0])*(p[2][1]-p[0][1])-(p[1][1]-p[0][1])*(p[2][0]-p[0][0]),back=mat.side===T.BackSide;if(((mat.side===T.FrontSide||back)&&(back?area<=0:area>=0))||Math.abs(area)<.06)continue;
      if(p.every(v=>v[0]<0)||p.every(v=>v[0]>w)||p.every(v=>v[1]<0)||p.every(v=>v[1]>h))continue;
      const ux=b[0]-a[0],uy=b[1]-a[1],uz=b[2]-a[2],vx=c[0]-a[0],vy=c[1]-a[1],vz=c[2]-a[2],nx=uy*vz-uz*vy,ny=uz*vx-ux*vz,nz=ux*vy-uy*vx,nl=Math.hypot(nx,ny,nz)||1;
      const light=mat.isMeshBasicMaterial||mat.emissiveIntensity>0&&mat.emissive?.getHex()>0?1:Math.max(.4,.7+(nx*.25+ny*.7+nz*.55)/nl*.4);

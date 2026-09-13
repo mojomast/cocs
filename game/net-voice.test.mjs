@@ -15,14 +15,13 @@ test('voice callbacks survive reset and reconnect; ICE configuration updates bef
  t.mock.method(globalThis, 'WebSocket', function () { return new Socket(); });
  const client = new NetClient();
  assert.equal(client.onVoiceSignal, null);
- assert.equal(client.onVoiceConfig, null);
- const signals = [], configs = [];
- const onSignal = msg => signals.push(msg), onConfig = msg => configs.push(msg);
- client.onVoiceSignal = onSignal; client.onVoiceConfig = onConfig;
+ const signals = [];
+ const onSignal = msg => signals.push(msg);
+ client.onVoiceSignal = onSignal;
  const config = { type: 'voice-config', iceServers: [{ urls: ['turn:example.com'], username: 'time:1', credential: 'temporary' }] };
  for (let attempt = 0; attempt < 2; attempt++) {
   await client.connect();
-  assert.equal(client.onVoiceSignal, onSignal); assert.equal(client.onVoiceConfig, onConfig);
+  assert.equal(client.onVoiceSignal, onSignal);
   assert.deepEqual(client.voiceIceServers, [{ urls: 'stun:stun.l.google.com:19302' }]);
   client.onMessage(JSON.stringify(config));
   assert.deepEqual(client.voiceIceServers, config.iceServers);
@@ -30,7 +29,7 @@ test('voice callbacks survive reset and reconnect; ICE configuration updates bef
   client.onMessage(JSON.stringify({ type: 'lobby', players: [] }));
   const relay = { type: 'voice-signal', roomId: 'local', from: 2, session: 'session', targetSession: 'target', candidate: null };
   client.onMessage(JSON.stringify(relay));
-  assert.deepEqual(signals[attempt], relay); assert.deepEqual(configs[attempt], config);
+  assert.deepEqual(signals[attempt], relay);
   client.roomId = 'local';
   assert.equal(client.voiceState(true), true);
   assert.equal(client.voiceState(false), true);
@@ -57,12 +56,11 @@ test('voice callbacks survive reset and reconnect; ICE configuration updates bef
   assert.equal(client.voiceState(true), false);
   assert.equal(client.voiceState(false), false);
  }
- client.reset(); assert.equal(client.onVoiceSignal, onSignal); assert.equal(client.onVoiceConfig, onConfig);
+ client.reset(); assert.equal(client.onVoiceSignal, onSignal);
 });
 
 test('parsed null, arrays, and malformed ICE configs are ignored', () => {
  const client = new NetClient();
- client.onVoiceConfig = () => assert.fail('invalid config delivered');
  for (const msg of [null, [], 1, { type: 'voice-config', iceServers: null },
   { type: 'voice-config', iceServers: [null] }, { type: 'voice-config', iceServers: [[]] },
   { type: 'voice-config', iceServers: [{ urls: [1] }] }]) assert.doesNotThrow(() => client.onMessage(JSON.stringify(msg)));

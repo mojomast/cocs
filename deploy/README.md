@@ -34,6 +34,14 @@ active multiplayer clients:
 npm run deploy -- --with-game-server
 ```
 
+Before building, `deploy.sh` copies the current `dist/` to a temporary backup.
+After the build it restarts the web service (and game server with
+`--with-game-server`), then gates on `systemctl --user is-active` for each
+restarted unit and runs the HTML/asset verifier over `DEPLOY_URL`. If the build,
+a service gate, or verification fails, it restores the backup, restarts the
+services, and exits non-zero. Without a previous `dist/` there is nothing to
+restore, so a first deploy only reports the failure.
+
 `npm test` also rebuilds `dist/`. Run build/test work in a separate checkout when
 the live service must remain uninterrupted. If run in this deployment checkout,
 the web service must be restarted after the build before considering verification

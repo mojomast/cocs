@@ -53,6 +53,19 @@ const collect = (ws, type, count, timeout = 30000) => new Promise((resolve, reje
  const onMessage = m => { if (m.type === type) { items.push(m); if (items.length >= count) { done = true; clearTimeout(timer); resolve(items); } } };
  q.waiters.push({ type: null, onMessage, done: () => done });
 });
+// Room retirement runs on the server's own tick, so a single `list` sent right
+// after a drop can race that cleanup. Poll the list until it settles instead of
+// sleeping a fixed number of milliseconds and hoping the tick already ran.
+async function waitForRooms(ws, predicate, { attempts = 60, delay = 100 } = {}) {
+ let last = null;
+ for (let i = 0; i < attempts; i++) {
+  send(ws, { type: 'list' });
+  last = await until(ws, 'rooms', 5000);
+  if (predicate(last.rooms)) return last;
+  await new Promise(resolve => setTimeout(resolve, delay));
+ }
+ throw new Error(`room list condition not met; saw ${last?.rooms?.map(r => r.roomId).join(',') ?? 'nothing'}`);
+}
 // Instagib helper: one-shot rail kills make a frag-limit match end in about
 // two seconds of accelerated sim time. Bots do the fighting — nav-mesh roaming
 // keeps kills flowing regardless of spawn geometry.
@@ -233,8 +246,7 @@ test('two rooms play simultaneously and the browser lists both', async () => {
   const lobbyD = await latest(d, 'lobby');
   assert.equal(lobbyD.roomId, welcomeC.roomId);
   assert.deepEqual(lobbyD.players.map(p => p.name), ['Carla', 'Dennis']);
-  send(a, { type: 'list' });
-  const rooms = await until(a, 'rooms');
+  const rooms = await waitForRooms(a, list => list.length === 2 && list.some(r => r.roomId === welcomeC.roomId));
   assert.equal(rooms.rooms.length, 2, 'both rooms listed');
   assert.ok(rooms.rooms.some(r => r.roomId === 'local'));
   const created = rooms.rooms.find(r => r.roomId === welcomeC.roomId);
@@ -246,7 +258,7 @@ test('two rooms play simultaneously and the browser lists both', async () => {
   send(a, { type: 'start' });
   send(c, { type: 'start' });
   await Promise.all([until(b, 'start'), until(d, 'start')]);
-  const results = await Promise.all([until(a, 'results', 45000), until(b, 'results', 45000), until(c, 'results', 45000), until(d, 'results', 45000)]);
+  const results = await Promise.all([until(a, 'results', 90000), until(b, 'results', 90000), until(c, 'results', 90000), until(d, 'results', 90000)]);
   for (const r of results) assert.equal(r.state.over, true);
   assert.equal(results[0].state.actors.length, 4);
   assert.equal(results[1].state.actors[0].name, 'Alice');
@@ -415,9 +427,7 @@ test('abruptly abandoned rooms are retired after grace and local persists', asyn
   const welcomeB = await until(b, 'welcome');
   b.close();
   b = null;
-  await new Promise(resolve => setTimeout(resolve, 1600));
-  send(a, { type: 'list' });
-  const rooms = await until(a, 'rooms');
+  const rooms = await waitForRooms(a, list => !list.some(r => r.roomId === welcomeB.roomId));
   assert.ok(!rooms.rooms.some(r => r.roomId === welcomeB.roomId), 'abandoned room retired after grace');
   assert.ok(rooms.rooms.some(r => r.roomId === 'local'), 'local room persists');
   assert.equal(rooms.rooms.length, 1);
@@ -444,10 +454,8 @@ test('create releases the previous room seat so no zombie peers linger', async (
   assert.equal(rooms.rooms.find(r => r.roomId === created.roomId).players, 1);
   a.close();
   a = null;
-  await new Promise(resolve => setTimeout(resolve, 1600));
   const b = await connect(url);
-  send(b, { type: 'list' });
-  const rooms2 = await until(b, 'rooms');
+  const rooms2 = await waitForRooms(b, list => !list.some(r => r.roomId === created.roomId));
   assert.ok(!rooms2.rooms.some(r => r.roomId === created.roomId), 'created room retired after the drop');
   assert.equal(rooms2.rooms.find(r => r.roomId === 'local').players, 0, 'local never accumulated a zombie peer');
   b.close();

@@ -29,8 +29,6 @@ const MULTIPLICATIVE=['damage','spread','interval','range','bloomPerShot','bloom
 const ADDITIVE=['cap','pellets','burst'];
 const MODIFIER_RANGES={damage:[.25,3],spread:[.2,2],interval:[.2,2],range:[.4,3],bloomPerShot:[.2,2],bloomMax:[.2,2],recoilKick:[.2,2],reload:[.3,2],cap:[0,200],pellets:[0,20],burst:[0,8]};
 export function attachmentById(id){return BY_ID.get(id)||null;}
-export function unlockedAttachments(level){const l=Math.max(1,Math.round(level));return ATTACHMENTS.filter(item=>item.level<=l);}
-export function attachmentsForWeapon(weaponIndex,level){const l=Math.max(1,Math.round(level));return ATTACHMENTS.filter(item=>item.level<=l&&(item.weapons.length===0||item.weapons.includes(weaponIndex)));}
 export function normalizeAttachments(value,level=1){
  const source=value&&typeof value==='object'?value:{},l=Math.max(1,Math.round(level)),out={};
  for(const slot of SLOT_IDS){const item=attachmentById(source[slot]);if(!item||item.slot!==slot||item.level>l)continue;out[slot]=item.id;}

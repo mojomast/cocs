@@ -1,8 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {Match,NAV,EDGES,moveActor,rayWorld,visible,eye,aim,floorAt,obstructed} from './core.mjs';
+import {Match,navigation,moveActor,rayWorld,visible,eye,aim,floorAt,obstructed} from './core.mjs';
 import {CHARACTERS,HARNESSES,validLoadout,resolveLoadout,RULES} from './data.mjs';
-import {DEATH_STYLES} from './deaths.mjs';
 function rng(){let n=42;return()=>((n=(Math.imul(n,1664525)+1013904223)>>>0)/4294967296);}
 const fresh=()=>new Match('chatgpt','openclaw',rng(),'exchange',{botCount:4,difficulty:'normal'});
 function isolate(m){m.actors.forEach((a,i)=>Object.assign(a,{x:10+i*.1,y:0,z:10,protection:0,health:100,armor:0,harnessDamageMultiplier:1}));return m.actors;}
@@ -15,7 +14,7 @@ test('pulse respects cover and applies damage and knockback in range',()=>{const
 test('powers expire on fixed time; Parallel Burst respects ammo',()=>{for(const h of HARNESSES){const m=new Match('qwen',h.id,rng()),a=m.actors[0];m.actors.slice(1).forEach(b=>{b.health=0;b.dead=100;});a.protection=0;assert.ok(m.power(a));for(let i=0;i<241;i++)m.step(1/60);assert.equal(a.active,0);assert.ok(a.cooldown>0);m.spawn(a);assert.equal(a.cooldown,0);}const m=fresh(),a=m.actors[0];a.harness='opencode';a.protection=0;a.shotWait=0;a.ammo[2]=1;a.weapon=2;m.power(a);m.fire(a);assert.equal(a.ammo[2],0);assert.ok(a.shotWait<1);a.shotWait=0;m.fire(a);assert.equal(a.weapon,2);assert.equal(a.reloading,true);});
 test('rockets use swept hits, explode on solids, cause self splash',()=>{const m=fresh(),[a,b]=isolate(m);Object.assign(a,{x:0,y:0,z:3.3,weapon:1,ammo:[Infinity,2,0],shotWait:0,yaw:0,pitch:0});Object.assign(b,{x:0,y:0,z:-3.3});m.fire(a);for(let i=0;i<8;i++)m.step(1/60);assert.equal(m.rockets.length,0);assert.ok(a.health<100);assert.equal(b.health,100);assert.ok(m.events.some(e=>e.type==='explosion'));});
 test('movement has equal diagonal cap, collision, jump, and both ramps reach deck',()=>{const m=fresh(),a=m.actors[0];const setup=(x,z)=>Object.assign(a,{x,y:floorAt(x,z),z,vx:0,vy:0,vz:0,grounded:true,jumpBuffer:0,coyote:0});setup(0,10);for(let i=0;i<35;i++)moveActor(a,{x:1,z:0},1/60);const speed=Math.hypot(a.vx,a.vz);setup(0,10);for(let i=0;i<35;i++)moveActor(a,{x:1,z:1},1/60);assert.ok(Math.abs(Math.hypot(a.vx,a.vz)-speed)<.01);setup(0,7);moveActor(a,{jump:true},1/60);assert.ok(a.y>0);for(let i=0;i<120;i++)moveActor(a,{},1/60);assert.equal(a.y,0);setup(0,5);for(let i=0;i<120;i++)moveActor(a,{z:-1},1/60);assert.ok(a.z>=2.4);for(const x of [-11,11]){setup(x,7);for(let i=0;i<160;i++)moveActor(a,{z:-1},1/60);assert.equal(a.y,3.8);assert.ok(a.z<-9);}assert.ok(!obstructed(a.x,a.y,a.z));});
-test('entire navigation graph is connected, including upper deck',()=>{const seen=new Set([0]),q=[0];while(q.length)for(const n of EDGES[q.shift()])if(!seen.has(n)){seen.add(n);q.push(n);}assert.equal(seen.size,NAV.length);assert.ok(NAV.some(n=>n.y===3.8));});
+test('entire navigation graph is connected, including upper deck',()=>{const NAV=navigation().nodes,EDGES=navigation().edges;const seen=new Set([0]),q=[0];while(q.length)for(const n of EDGES[q.shift()])if(!seen.has(n)){seen.add(n);q.push(n);}assert.equal(seen.size,NAV.length);assert.ok(NAV.some(n=>n.y===3.8));});
 test('pickup usefulness, timed respawn, complete fresh match reset',()=>{const m=fresh(),a=m.actors[0],p=m.pickups[0];assert.equal(m.collect(a,p),false);a.health=20;assert.equal(m.collect(a,p),true);assert.equal(a.health,55);assert.equal(p.wait,12);m.damage(a,500,a);m.rockets.push({});const n=fresh();assert.equal(n.time,0);assert.equal(n.rockets.length,0);assert.ok(n.pickups.every(p=>p.wait===0));assert.ok(n.actors.every(a=>a.frags===0&&a.deaths===0&&a.cooldown===0&&a.active===0&&a.health===a.maxHealth));});
 test('four bots complete deterministic deathmatch with supplies, powers and respawns',()=>{const m=fresh();let elevated=false;for(let i=0;i<18001&&!m.over;i++){m.step(1/60);elevated||=m.actors.slice(1).some(a=>a.y>3.5);}assert.ok(m.over);assert.ok(m.stats.kills>=15);assert.ok(m.stats.pickups>4);assert.ok(m.stats.powers>4);assert.ok(m.stats.respawns>5);assert.ok(elevated);console.log('Simulated match:',m.time.toFixed(2),'seconds',m.stats);});
 test('deaths carry a deterministic varied style, weapon and direction',()=>{
@@ -23,7 +22,7 @@ test('deaths carry a deterministic varied style, weapon and direction',()=>{
  m.damage(b,400,a);
  const death=m.events.find(e=>e.type==='death'&&e.actor===b.id);
  assert.ok(death,'death event emitted');
- assert.ok(DEATH_STYLES.includes(death.style),`style ${death.style}`);
+ assert.ok(['ragdoll','headpop','gibs','burst','combust','vaporize','splatter','electrocute'].includes(death.style),`style ${death.style}`);
  assert.equal(death.weapon,1);
  assert.ok(death.overkill>200);
  assert.equal(death.self,false);

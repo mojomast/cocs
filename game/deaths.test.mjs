@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {DEATH_STYLES,OVERKILL_GIB,deathPlan,deathStyleFor,hashSeed,hashUnit} from './deaths.mjs';
+import {OVERKILL_GIB,deathPlan,deathStyleFor,hashSeed,hashUnit} from './deaths.mjs';
 
 test('death hashing is deterministic and well distributed',()=>{
  assert.equal(hashSeed(1,2,3),hashSeed(1,2,3));
@@ -13,7 +13,7 @@ test('every weapon maps to a valid death style and plan',()=>{
  for(let weapon=0;weapon<=9;weapon++){
   for(let seed=0;seed<8;seed++){
    const plan=deathPlan({weapon,overkill:seed*4,seed});
-   assert.ok(DEATH_STYLES.includes(plan.style),`weapon ${weapon} -> ${plan.style}`);
+   assert.ok(['ragdoll','headpop','gibs','burst','combust','vaporize','splatter','electrocute'].includes(plan.style),`weapon ${weapon} -> ${plan.style}`);
    assert.ok(Number.isInteger(plan.pieces)&&plan.pieces>=0);
    assert.ok(Number.isInteger(plan.gore)&&plan.gore>=0);
    assert.ok(Number.isFinite(plan.force)&&plan.force>=0);

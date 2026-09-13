@@ -1,7 +1,7 @@
 import {test} from 'node:test';
 import assert from 'node:assert/strict';
 import {WEAPONS} from './data.mjs';
-import {ATTACHMENT_SLOTS,ATTACHMENTS,applyAttachmentsToWeapon,attachmentById,attachmentsForWeapon,normalizeAttachments,resolveAttachments,unlockedAttachments} from './attachments.mjs';
+import {ATTACHMENT_SLOTS,ATTACHMENTS,applyAttachmentsToWeapon,attachmentById,normalizeAttachments,resolveAttachments} from './attachments.mjs';
 
 const close=(actual,expected,eps=1e-9)=>assert.ok(Math.abs(actual-expected)<eps,`${actual} !== ${expected}`);
 const SLOT_IDS=ATTACHMENT_SLOTS.map(slot=>slot.id);
@@ -24,27 +24,6 @@ test('definitions use unique ids, valid slots, weapon indices 0..9, positive lev
   assert.equal(attachmentById(item.id),item);
  }
  for(const required of ['long-barrel','suppressor','extended-mag','drum-mag','quickdraw-grip','grenade-launcher','scope','holo-sight','burst-module','charge-coil','piercing-rounds','explosive-tips','homing-beacon','chain-capacitor'])assert.ok(ids.has(required),required);
-});
-
-test('attachmentsForWeapon respects weapon fit and level gating',()=>{
- const level1=attachmentsForWeapon(0,1).map(item=>item.id);
- assert.ok(level1.includes('extended-mag'));
- assert.ok(!level1.includes('holo-sight'));
- const maxed=attachmentsForWeapon(0,30).map(item=>item.id);
- assert.ok(maxed.includes('long-barrel')&&maxed.includes('grenade-launcher')&&maxed.includes('scope'));
- assert.ok(!maxed.includes('charge-coil'),'charge-coil is not a pulse-rifle attachment');
- const smg=attachmentsForWeapon(9,30).map(item=>item.id);
- assert.ok(smg.includes('grenade-launcher')&&smg.includes('drum-mag'));
- const shotgun=attachmentsForWeapon(3,30).map(item=>item.id);
- assert.ok(!shotgun.includes('drum-mag'),'drum only for automatics');
- assert.ok(!shotgun.includes('scope'),'scope only for ranged weapons');
- const grenade=attachmentsForWeapon(5,30).map(item=>item.id);
- assert.ok(grenade.includes('quickdraw-grip'),'universal attachments fit every weapon');
- assert.ok(!grenade.includes('drum-mag'));
- assert.ok(attachmentsForWeapon(8,13).every(item=>item.id!=='piercing-rounds'));
- assert.ok(attachmentsForWeapon(8,14).some(item=>item.id==='piercing-rounds'));
- assert.ok(unlockedAttachments(1).every(item=>item.level===1));
- assert.equal(unlockedAttachments(30).length,ATTACHMENTS.length);
 });
 
 test('resolveAttachments aggregates modifiers, ignores unknown ids and is order-independent',()=>{

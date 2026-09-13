@@ -1,15 +1,10 @@
 import {activeMaps,maxBotsFor} from './arenas.mjs';
 import {vehicleSeatFor,vehicleMounted} from './vehicles.mjs';
-import {RACE_DEMO_MODES,RACE_DEMO_MODE_SECONDS} from './race-camera.mjs';
 
 // The title screen loops a full eight-driver Puma Circuit race.
 export const SHOWCASES=[
  {id:'puma-race',label:'Puma Circuit',mode:'puma-race',maps:['puma-circuit'],bots:7,difficulty:'normal',timeLimit:180,fragLimit:2,seatVehicles:0},
 ];
-
-// The menu race uses the shared cycling demo camera; exported so the showcase
-// reel and the renderer agree on the rig order and cadence.
-export const SHOWCASE_DEMO_CAMERA=Object.freeze({modes:Object.freeze([...RACE_DEMO_MODES]),cycleSeconds:RACE_DEMO_MODE_SECONDS});
 
 export function pickShowcase(index,random=Math.random,{legacy=false}={}){
  const n=SHOWCASES.length;

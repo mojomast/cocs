@@ -1,5 +1,7 @@
 # COCS — Colosseum Of Competitive Slop — development plan
 
+> **Historical baseline — see [VERIFICATION.md](VERIFICATION.md) for current status.** This plan records the original MVP checkpoint and the authorized expansions up to the v1.4-era content ceiling (five weapons, three arenas). It is retained as history and is not a description of the current build.
+
 MVP implementation complete. Automated gates pass. Browser gates passed on the software compatibility renderer, with the explicit limits in VERIFICATION.md. Hardware WebGL2 visual/performance validation remains unverified in this environment; it is not represented as passed. This opening table records the original MVP checkpoint; authorized expansions are recorded below.
 
 | Step | Depends on | Delivered scope | Evidence | Status |

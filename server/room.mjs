@@ -63,9 +63,6 @@ export class Room {
   this.broadcastAt = 0;
   this.snapshotHz = Math.max(1, Math.min(120, Number(options.snapshotHz) || 30));
   this.snapshotInterval = 1 / this.snapshotHz;
-  this.transformHistory = [];
-  this.transformHistoryLimit = Math.max(4, Math.min(240, Number(options.transformHistoryLimit) || 32));
-  this.lagCompEnabled = false;
   this.seq = 0;
   this.out = [];
  }
@@ -95,10 +92,8 @@ export class Room {
    if (existing) {
     if (existing.disconnectedAt === null) {
      // A reconnect can arrive before the old socket's close event is processed.
-     // Newest connection wins: adopt the peer and seat on this socket instead of
-     // rejecting the reattach. The old socket's later close is a no-op because
-     // the peer id is reassigned below.
-     if (existing.id === peerId) { this.send(peerId, { type: 'error', message: 'session is already connected' }); return; }
+     // Newest connection wins: adopt the peer and seat on this socket. The old
+     // socket's later close is a no-op because the peer id is reassigned below.
      existing.disconnectedAt = Date.now();
     }
     const oldId = existing.id;
@@ -322,23 +317,6 @@ export class Room {
   if (this.hostId === peerId) this.hostId = this.nextConnectedHost();
   this.broadcast(this.lobby());
  }
- enableLagCompensation(enabled = true) {
-  this.lagCompEnabled = enabled === true;
-  if (!this.lagCompEnabled) this.transformHistory = [];
- }
- recordTransforms(time) {
-  if (!this.lagCompEnabled || !this.match) return;
-  this.transformHistory.push({ time, actors: this.match.actors.map(a => ({ id: a.id, x: a.x, y: a.y, z: a.z })) });
-  while (this.transformHistory.length > this.transformHistoryLimit) this.transformHistory.shift();
- }
- transformsAt(time) {
-  let found = null;
-  for (const frame of this.transformHistory) {
-   if (frame.time <= time) found = frame;
-   else break;
-  }
-  return found;
- }
  deliverEvents() {
   let first = Infinity;
   for (const p of this.peers.values()) {
@@ -379,7 +357,6 @@ export class Room {
     inputs[p.actorId] = ext;
    }
      this.match.step(RULES.dt, { inputs });
-     if (this.lagCompEnabled) this.recordTransforms(this.match.time);
     for (const p of this.peers.values()) if (p.actorId !== null && p.latest) p.appliedSeq = p.latestSeq;
    this.tickAcc -= RULES.dt;
    steps++;
@@ -393,14 +370,14 @@ export class Room {
    const result = this.match.snapshot();
    const mode = this.match.config.mode;
     try { this.history?.record({ roomId: this.id, mapId: this.match.arena.id, config: this.match.config, time: this.match.time, actors: result.actors, teamScores: result.teamScores, winner: result.winner, endingReason: result.overReason ?? null, result }); }
-   catch (error) { this.lastPersistError = error; }
+   catch {}
    if (this.progression) {
     for (const p of this.peers.values()) {
      if (!p.playerId || p.actorId === null || p.spectate) continue;
      const actor = result.actors.find(a => a.id === p.actorId);
      const win = actorWon(result, mode, actor);
      try { const award = this.progression.awardOwned(p.playerId, p.playerToken, { win, actor, mode }); if (award) this.send(p.id, { type: 'progression', ...award }); }
-     catch (error) { this.lastPersistError = error; }
+     catch {}
     }
    }
    this.broadcast({ type: 'results', state: result });

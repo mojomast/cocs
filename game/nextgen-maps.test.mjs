@@ -9,6 +9,7 @@ import {createLevel,terrainField,mulberry32,fbm} from './levelgen.mjs';
 
 const finite = value => typeof value === 'number' && Number.isFinite(value);
 const within = (map, x, z) => x >= map.bounds.minX && x <= map.bounds.maxX && z >= map.bounds.minZ && z <= map.bounds.maxZ;
+const primaryMode = map => arenaMeta(map.id).play[0];
 
 test('there is exactly one next-gen map per combat game mode', () => {
   // Puma Race ships its own dedicated circuit (RACE_MAPS) rather than a
@@ -16,7 +17,7 @@ test('there is exactly one next-gen map per combat game mode', () => {
   const combatModes = GAME_MODES.filter(mode => mode.id !== 'puma-race');
   assert.equal(NEXTGEN_MAPS.length, combatModes.length);
   assert.equal(new Set(NEXTGEN_MAPS.map(map => map.id)).size, NEXTGEN_MAPS.length);
-  const modes = new Set(NEXTGEN_MAPS.map(map => map.mode));
+  const modes = new Set(NEXTGEN_MAPS.map(primaryMode));
   for (const mode of combatModes) assert.ok(modes.has(mode.id), `missing next-gen map for ${mode.id}`);
   for (const map of NEXTGEN_MAPS) assert.equal(getMap(map.id), map, `${map.id} is registered`);
 });
@@ -99,9 +100,41 @@ test('next-gen objectives sit clear of all ground-level solids, including decks'
 
 test('next-gen maps advertise only modes they can actually play', () => {
   for (const map of NEXTGEN_MAPS) {
-    assert.ok(arenaSupportsMode(map.id, map.mode), `${map.id} supports its own mode`);
-    assert.ok(arenaMeta(map.id).play.includes(map.mode), `${map.id} play list`);
+    const mode = primaryMode(map);
+    assert.ok(arenaSupportsMode(map.id, mode), `${map.id} supports its own mode`);
+    assert.ok(arenaMeta(map.id).play.includes(mode), `${map.id} play list`);
   }
+});
+
+test('next-gen flag metadata only ships on maps that advertise CTF', () => {
+  for (const map of NEXTGEN_MAPS) assert.equal(Boolean(map.flagSpawns), arenaSupportsMode(map.id, 'ctf'), `${map.id} flag metadata matches ctf`);
+});
+
+test('the ctf opt-in synthesizes flag bases from team spawns', () => {
+  const bounds = {minX: -30, maxX: 30, minZ: -30, maxZ: 30};
+  const terrain = terrainField(bounds, {height: () => 0, amplitude: 0});
+  const fixture = ctf => createLevel({id: 'ctf-fixture', bounds, terrain, ctf, layout(ctx) {
+    ctx.teamSpawns[0] = [[-10, 0]]; ctx.teamSpawns[1] = [[10, 0]];
+  }});
+  assert.ok(fixture(true).flagSpawns, 'opt-in map synthesizes flag bases');
+  assert.equal(fixture(false).flagSpawns, undefined, 'opt-out map ships no flag metadata');
+});
+
+test('quarter-turned buildings size window props to the rotated wall', () => {
+  const bounds = {minX: -30, maxX: 30, minZ: -30, maxZ: 30};
+  const terrain = terrainField(bounds, {height: () => 0, amplitude: 0});
+  const map = createLevel({id: 'window-fixture', bounds, terrain, layout(ctx) {
+    ctx.addBuilding({x: 0, z: 0, w: 10, d: 6, h: 5, rot: 0, door: 'east'});
+    ctx.addBuilding({x: 20, z: 0, w: 10, d: 6, h: 5, rot: Math.PI / 2, door: 'east'});
+  }});
+  const windows = map.structures.filter(s => s.type === 'windows');
+  const span = (x, z) => windows.find(s => Math.abs(s.x - x) < .01 && Math.abs(s.z - z) < .01)?.w;
+  assert.equal(span(0, -2.75), 10);
+  assert.equal(span(0, 2.75), 10);
+  assert.equal(span(-4.75, 0), 6);
+  assert.equal(span(22.75, 0), 6);
+  assert.equal(span(17.25, 0), 6);
+  assert.equal(span(20, -4.75), 10);
 });
 
 test('level generation is deterministic for a fixed seed', () => {

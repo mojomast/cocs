@@ -200,8 +200,6 @@ function matchNavigation(arena){
  }
  return navigationCache.get(arena);
 }
-const defaultNavigation=matchNavigation(MAPS[0]);
-export const NAV=defaultNavigation.nodes,EDGES=defaultNavigation.edges;
 function nearest(p,nodes){let id=0,best=Infinity;nodes.forEach((n,i)=>{const d=dist(p,n);if(d<best){id=i;best=d;}});return id;}
 function path(a,b,nodes,edges){const from=nearest(a,nodes),to=nearest(b,nodes),queue=[from],prev=new Map([[from,-1]]);for(let head=0;head<queue.length;head++){const n=queue[head];if(n===to)break;for(const j of edges[n])if(!prev.has(j)){prev.set(j,n);queue.push(j);}}if(!prev.has(to))return [from];const route=[];for(let n=to;n!==-1;n=prev.get(n))route.unshift(n);return route;}
 function applyHarnessProfile(a){const passive=harnessPassive(a.harness),ability=harnessAbility(a.harness);a.harnessSpeedMultiplier=passive?.speed??1;a.harnessResistance=passive?.resistance??0;a.harnessDamageMultiplier=passive?.damage??1;a.activeSpeedMultiplier=ability?.speed??(a.harness==='hermes'?1.6:1);}

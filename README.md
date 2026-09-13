@@ -1,5 +1,7 @@
 # COCS — Colosseum Of Competitive Slop
 
+> **Release status (v2.68).** The current footer version in `app/page.tsx` is **v2.68**. The feature descriptions below are kept current, but the long version log is a historical record. See [VERIFICATION.md](VERIFICATION.md) for dated evidence and the remaining validation gaps (there is no browser/GPU verification in this environment).
+
 A local Three.js first-person arena-shooter where nine famous language models settle their differences with guns. Select an AI operator, strap on one of seven agent harnesses, choose an arena, and configure a match with zero to sixteen bots (mode-dependent). New setups default to two Easy bots, first to 15 frags or highest score after five minutes. Claude always uses Claude Code; everyone else can equip any harness.
 
 Every operator and harness blurb is affectionate parody — jokes about the vibes and internet lore around each tool, not claims about what they actually do. AI names represent fictional robots, not factual product comparisons.
@@ -219,9 +221,9 @@ Not yet included: accounts/matchmaking.
 | Tab | Hold scoreboard |
 | Escape | Pause and release mouse |
 
-Choose an operator, harness and arena, then Enter Arena. All operators are in an uncropped grid; on small screens, scroll the menu to reach further sections. Graphics & settings includes resolution scale, field of view, crosshair controls, mouse sensitivity and audio mute, saved on this device. If mouse capture is denied, hold left mouse to aim and fire, or use Capture mouse. Keyboard and mouse are required; there are no touch gameplay controls.
+Choose an operator, harness and arena, then Enter Arena. All operators are in an uncropped grid; on small screens, scroll the menu to reach further sections. Graphics & settings includes resolution scale, field of view, crosshair controls, mouse sensitivity and audio mute, saved on this device. If mouse capture is denied, hold left mouse to aim and fire, or use Capture mouse. Keyboard and mouse remain the primary desktop controls; touch controls switch on automatically on coarse-pointer devices and can be forced from Graphics & settings (see the touch-controls details above).
 
- Pulse Rifle has unlimited ammo. Collect orange Rocket Launchers, violet Rail Lances, gold Scatterguns, blue Plasma Drivers, red Grenade Launchers, cyan Shock Beams, and gold Flak Cannons to unlock them with limited ammo. Green crosses restore health and blue diamonds grant armor. Haste, Overcharge, and Overshield pickups temporarily modify movement/fire cadence, damage, or shielding. The Exchange and The Foundry have ramps to a north deck; Crosswire and Citadel use ground-level cross lanes; Launchpad uses trampoline and boost-launcher routes; Skybreak Isles and Aether Ring use disconnected platforms and authored void jumps. Pickups respawn. Death respawns you automatically after two seconds with brief protection; firing or Q ends that protection. Falling on an outdoor island drops a carried flag before respawn.
+ Pulse Rifle has unlimited ammo. Collect orange Rocket Launchers, violet Rail Lances, gold Scatterguns, blue Plasma Drivers, red Grenade Launchers, cyan Shock Beams, gold Flak Cannons, tan Marksman Rifles, and mint Submachine Guns to unlock them with limited ammo. Green crosses restore health and blue diamonds grant armor. The five pickups — Haste, Overcharge, Overshield, Recon Pulse, and Cloak — temporarily modify movement/fire cadence, damage, shielding, radar, or visibility. The Exchange and The Foundry have ramps to a north deck; Crosswire and Citadel use ground-level cross lanes; Launchpad uses trampoline and boost-launcher routes; Skybreak Isles and Aether Ring use disconnected platforms and authored void jumps. Pickups respawn. Death respawns you automatically after two seconds with brief protection; firing or Q ends that protection. Falling on an outdoor island drops a carried flag before respawn.
 
 OpenClaw: close pulse and knockback. Hermes: temporary speed boost and trail. OpenCode: temporary faster firing. Claude Code: temporary 50% damage reduction. Codex: instant health repair. Cline: collision-safe forward dash. Roo Code: a line-of-sight slowing pulse. AI names represent fictional robots, not factual product comparisons.
 
@@ -244,7 +246,7 @@ Claude receives a modest stat bonus because its harness is locked to Claude Code
 - `app/page.tsx`: game state menus, HUD, input, audio events and fixed-step accumulator. Rendering is RAF-driven; simulation advances at 60Hz with five-step catch-up bound.
 - `game/hud.mjs`: pure HUD derivations — vehicle prompts, reload/crosshair/ammo helpers, kill banners, the match/objective announcer, killstreak and multikill callouts, and post-match superlatives.
 - `game/radar.mjs`: pure yaw-relative projection of actors, objectives and flags onto the tactical radar, plus the default and colorblind palettes.
-- `game/data.mjs`: roster, ten weapons, three powerups, harness parameters, weapon feel metadata and loadout validation.
+- `game/data.mjs`: roster, ten weapons, five powerups, harness parameters, weapon feel metadata and loadout validation.
 - `game/character-anim.mjs`: engine-free procedural character animation — damped gait phase, bounded pose solver and the joint rig used by the renderer, plus the bot facing helpers.
 - `game/levelgen.mjs`: deterministic next-generation level generator — heightfield terrain, cliff faces, buildings/tunnels/caverns/bridges and props, emitted as the existing map schema plus a smooth visual layer.
 - `game/nextgen-maps.mjs`: one generated map per game mode; the legacy arenas are unchanged.

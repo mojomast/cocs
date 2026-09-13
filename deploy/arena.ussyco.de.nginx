@@ -27,6 +27,15 @@ server {
     include /etc/letsencrypt/options-ssl-nginx.conf;
     ssl_dhparam /etc/letsencrypt/ssl-dhparams.pem;
 
+    # Security headers. Values mirror next.config.ts; identical duplicates from
+    # the upstream app are harmless. script-src/style-src keep 'unsafe-inline'
+    # for the framework's hydration payload and the game's dynamic styles.
+    add_header Content-Security-Policy "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self' data:; media-src 'self' blob:; worker-src 'self' blob:; connect-src 'self' https: wss: ws:; object-src 'none'; base-uri 'self'; form-action 'self'; frame-ancestors 'none'" always;
+    add_header X-Content-Type-Options "nosniff" always;
+    add_header Referrer-Policy "strict-origin-when-cross-origin" always;
+    add_header Permissions-Policy "camera=(), microphone=(self), geolocation=(), payment=(), usb=()" always;
+    add_header X-Frame-Options "DENY" always;
+
     # Game server WebSocket (room browser, snapshots, results)
     location /ws {
         proxy_pass http://127.0.0.1:4000;

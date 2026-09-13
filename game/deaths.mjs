@@ -1,6 +1,5 @@
 // Deterministic death-plan selection. Pure and engine-free so the sim, replay,
 // network and renderer all pick the same style from the same kill context.
-export const DEATH_STYLES=['ragdoll','headpop','gibs','burst','combust','vaporize','splatter','electrocute'];
 export const OVERKILL_GIB=55;
 // A weapon suggests a family of deaths; the hash then varies within it so the
 // same gun does not always produce the same mess.

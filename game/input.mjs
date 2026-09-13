@@ -20,8 +20,6 @@ export function blocksGameplay(chatOpen, spectate, target, activeElement) {
   return Boolean(chatOpen || spectate || isEditable(target) || isEditable(activeElement));
 }
 
-export const INPUT_CODES = Object.freeze(['Space', 'KeyW', 'KeyA', 'KeyS', 'KeyD', 'KeyQ', 'KeyE', 'ShiftLeft', 'ControlLeft', 'KeyC', 'KeyR']);
-
 function codeSet(keys) {
   if (!keys) return new Set();
   if (typeof keys.has === 'function') return keys;

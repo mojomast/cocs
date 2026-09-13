@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import {Match} from './core.mjs';
-import {pickShowcase,seatShowcaseVehicles,SHOWCASES,SHOWCASE_DEMO_CAMERA} from './showcase.mjs';
+import {pickShowcase,seatShowcaseVehicles,SHOWCASES} from './showcase.mjs';
 import {raceDemoMode,raceDemoPose} from './race-camera.mjs';
 import {maxBotsFor} from './arenas.mjs';
 import {readFile} from 'node:fs/promises';
@@ -28,13 +28,11 @@ test('showcase reel cycles through every scenario', () => {
 });
 
 test('puma showcase opts into the cycling demo camera with a rotating featured car', () => {
-  assert.equal(SHOWCASES[0].mode, 'puma-race');
-  assert.equal(SHOWCASE_DEMO_CAMERA.cycleSeconds, 7);
-  assert.deepEqual(SHOWCASE_DEMO_CAMERA.modes, ['chase', 'orbit', 'flyover', 'trackside']);
-  assert.deepEqual(
-    [0, 7, 14, 21].map(elapsed => raceDemoMode(elapsed)),
-    SHOWCASE_DEMO_CAMERA.modes,
-  );
+ assert.equal(SHOWCASES[0].mode, 'puma-race');
+ assert.deepEqual(
+   [0, 7, 14, 21].map(elapsed => raceDemoMode(elapsed)),
+   ['chase', 'orbit', 'flyover', 'trackside'],
+ );
   const centerline = [{ x: 0, z: -40 }, { x: 40, z: -40 }, { x: 40, z: 40 }, { x: 0, z: 40 }];
   const vehicles = Array.from({ length: 8 }, (_, id) => ({ id, kind: 'puma', x: id * 3, y: 0, z: 0, yaw: 0 }));
   const first = raceDemoPose({ mode: 'chase', centerline, vehicles, elapsed: 0 });

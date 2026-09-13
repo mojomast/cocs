@@ -50,6 +50,14 @@ test('spawns and supplies have support and are not embedded in authored blocks',
   }
 });
 
+test('expansion vehicles sit on supported, clear ground',()=>{
+  for(const map of EXPANSION_MAPS)for(const vehicle of map.vehicles||[]){
+    const floor=floorAt(vehicle.x,vehicle.z,map);
+    assert.notEqual(floor,null,`${map.id} vehicle support ${vehicle.id}`);
+    assert.equal(obstructed(vehicle.x,floor,vehicle.z,2.1,map),false,`${map.id} vehicle clearance ${vehicle.id}`);
+  }
+});
+
 test('terrain-backed canyon has valid non-degenerate support geometry',()=>{
   const canyon=EXPANSION_MAPS.find(map=>map.id==='sunscar-canyon');
   const bounds=terrainBounds(canyon.terrain);
