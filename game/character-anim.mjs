@@ -13,10 +13,11 @@
 // - Keep every angle bounded and symmetric; contra-lateral limbs swing opposite
 //   so the walk never reads as a "puppet" flail.
 
+import {clamp, lerp} from './math.mjs';
+
 export const TAU = Math.PI * 2;
 
-export const clamp = (value, min, max) => Math.max(min, Math.min(max, value));
-export const lerp = (a, b, t) => a + (b - a) * t;
+export {clamp, lerp};
 
 // Frame-rate independent exponential smoothing toward a target.
 export function damp(current, target, lambda, dt) {

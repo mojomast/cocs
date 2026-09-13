@@ -2,7 +2,7 @@
 // the cinematic director so the camera can follow a fight inside a building,
 // cavern or tunnel instead of orbiting the roof. Pure and three.js-free.
 
-const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
+import {clamp} from './math.mjs';
 const num = (v, d = 0) => Number.isFinite(v) ? v : d;
 
 export function buildInteriors(structures = []) {

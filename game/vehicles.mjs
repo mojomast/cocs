@@ -114,8 +114,9 @@ const VEHICLE_KINDS = { puma: PUMA, hornet: HORNET };
 const vehicleConfig = vehicle => VEHICLE_KINDS[vehicle?.config?.kind] || VEHICLE_KINDS[vehicle?.kind] || vehicle?.config || GUNTRUCK;
 export { vehicleConfig };
 
+import {clamp} from './math.mjs';
+
 const number = (value, fallback) => Number.isFinite(value) ? value : fallback;
-const clamp = (value, min, max) => Math.max(min, Math.min(max, value));
 const approach = (value, target, amount) =>
   value < target ? Math.min(value + amount, target) : Math.max(value - amount, target);
 const wrapAngle = value => {

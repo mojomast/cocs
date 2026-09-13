@@ -15,6 +15,7 @@
 import {cavernOpening} from './structures.mjs';
 import {terrainSupportAt, terrainWallSegments} from './terrain.mjs';
 import {RULES} from './data.mjs';
+import {clamp, lerp} from './math.mjs';
 
 export function mulberry32(seed) {
   let a = (seed >>> 0) || 0x6d2b79f5;
@@ -26,8 +27,6 @@ export function mulberry32(seed) {
   };
 }
 
-const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
-const lerp = (a, b, t) => a + (b - a) * t;
 const smooth = t => t * t * (3 - 2 * t);
 
 // Deterministic hash-based value noise (no Math.random, stable across runs).

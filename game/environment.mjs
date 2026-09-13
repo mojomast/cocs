@@ -1,11 +1,11 @@
 import * as T from 'three';
 import {terrainSupportAt} from './terrain.mjs';
+import {clamp} from './math.mjs';
 
 // Procedural backdrop: a vertex-colored gradient dome, a single-draw-call ring
 // of distant low-poly mountains, and instanced terrain scatter. Nothing here is
 // loaded from disk and every mesh is disposable by the caller's world teardown.
 
-const clamp=(value,min,max)=>Math.max(min,Math.min(max,value));
 const rng=seed=>{let state=seed>>>0;return()=>{state=(state+0x6d2b79f5)|0;let t=Math.imul(state^(state>>>15),1|state);t=(t+Math.imul(t^(t>>>7),61|t))^t;return((t^(t>>>14))>>>0)/4294967296;};};
 
 export function addSky(world,{background='#090f17',radius=185}={}){

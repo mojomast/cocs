@@ -1,6 +1,7 @@
 import {getMap} from './maps.mjs';
 import {Match} from './core.mjs';
 import {RULES} from './data.mjs';
+import {clamp, lerp} from './math.mjs';
 
 export const DEFAULT_SERVER_URL = 'ws://localhost:4000';
 const createPlayerId=()=>{try{return globalThis.crypto?.randomUUID?.()??`p-${Math.random().toString(36).slice(2)}-${Date.now().toString(36)}`;}catch{return `p-${Math.random().toString(36).slice(2)}-${Date.now().toString(36)}`;}};
@@ -11,8 +12,6 @@ const RENDER_DELAY_MAX = 160;
 const BUFFER_MIN = 4;
 const BUFFER_MAX = 16;
 const JITTER_REF = 50;
-const clamp = (value, min, max) => Math.max(min, Math.min(max, value));
-const lerp = (a, b, t) => a + (b - a) * t;
 const turn = (a, b) => ((((b - a) % (Math.PI * 2)) + Math.PI * 3) % (Math.PI * 2)) - Math.PI;
 
 export class NetClient {

@@ -1,5 +1,6 @@
 import {raceDisplay} from './race-ui.mjs';
 import {WEAPONS} from './data.mjs';
+import {teamMode} from './config.mjs';
 
 export function vehicleHud(player, vehicles = [], flags = [], spectate = false) {
   if (spectate || !player || !(player.health > 0)) return {vehicle: null, prompt: ''};
@@ -284,7 +285,7 @@ export function nextSpectateTarget(actors, currentId, step = 1) {
 // ---------------------------------------------------------------------------
 // Objective clarity helpers shared by the HUD and the match-setup screen.
 
-export const isTeamMode = mode => Boolean(mode?.rules?.team || mode?.team || mode?.teams || mode?.objective === 'ctf' || /ctf|capture|team|hill|domination/i.test(mode?.id || ''));
+export const isTeamMode = mode => teamMode(typeof mode === 'string' ? mode : (mode?.id ?? mode?.mode));
 
 export const modeGoal = mode => {
   const score = mode?.rules?.score;

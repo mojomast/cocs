@@ -4,7 +4,6 @@ import {actorWon} from '../game/outcome.mjs';
 import {getMap} from '../game/maps.mjs';
 import {resolveMapForMode} from '../game/arenas.mjs';
 import {CHARACTERS,resolveLoadout,RULES} from '../game/data.mjs';
-import {quantizeNumbers} from '../game/quantize.mjs';
 import {randomUUID} from 'node:crypto';
 import {validPlayerId} from './progression.mjs';
 
@@ -16,6 +15,34 @@ export const INPUT_RATE_LIMIT = 120;
 const clean = name => String(name ?? '').replace(/[\u0000-\u001f\u007f]/g, '').trim().slice(0, 20);
 const object = value => value !== null && typeof value === 'object' && !Array.isArray(value);
 const bounded = (value, max) => typeof value === 'string' && value.length <= max;
+// Match.snapshot() shares mutable or deeply frozen nested branches (powerups,
+// objectiveNodes, ...), so quantizing it in place would corrupt authoritative
+// state or throw on frozen map data. Copy and round in one pass instead of
+// structuredClone followed by a second walk over the whole tree.
+const quantizedCopy = (value, precision = 3) => {
+ const factor = 10 ** precision;
+ const round = n => Math.round(n * factor) / factor;
+ const copy = node => {
+  if (Array.isArray(node)) {
+   const out = new Array(node.length);
+   for (let i = 0; i < node.length; i++) {
+    const v = node[i];
+    out[i] = typeof v === 'number' ? (Number.isFinite(v) ? round(v) : v) : v && typeof v === 'object' ? copy(v) : v;
+   }
+   return out;
+  }
+  if (node && typeof node === 'object') {
+   const out = {};
+   for (const key of Object.keys(node)) {
+    const v = node[key];
+    out[key] = typeof v === 'number' ? (Number.isFinite(v) ? round(v) : v) : v && typeof v === 'object' ? copy(v) : v;
+   }
+   return out;
+  }
+  return node;
+ };
+ return copy(value);
+};
 
 export class Room {
  constructor(id = 'local', random = Math.random, options = {}) {
@@ -49,11 +76,11 @@ export class Room {
  summary() {
   return { roomId: this.id, name: this.name, players: [...this.peers.values()].filter(p => p.disconnectedAt === null).length, started: this.started, mapId: this.mapId, config: this.config ? { ...this.config } : null };
  }
- // Outbound snapshots are quantized from a deep clone so the authoritative match
+ // Outbound snapshots are quantized from a deep copy so the authoritative match
  // state (shared nested references such as powerups/gear) is never mutated.
  wireState() {
   if (!this.match) return null;
-  return quantizeNumbers(structuredClone(this.match.snapshot()));
+  return quantizedCopy(this.match.snapshot());
  }
  lobby() {
   return { type: 'lobby', roomId: this.id, name: this.name, hostId: this.hostId, started: this.started,
@@ -315,11 +342,32 @@ export class Room {
   }
   return found;
  }
+ deliverEvents() {
+  let first = Infinity;
+  for (const p of this.peers.values()) {
+   if (p.disconnectedAt !== null || (p.actorId === null && !p.spectate)) continue;
+   if (p.lastSerial < first) first = p.lastSerial;
+  }
+  if (first === Infinity) return;
+  const items = this.match.events.filter(e => e.id > first);
+  if (!items.length) return;
+  const shared = quantizedCopy(items);
+  const newest = shared[shared.length - 1].id;
+  for (const p of this.peers.values()) {
+   if (p.disconnectedAt !== null || (p.actorId === null && !p.spectate) || p.lastSerial >= newest) continue;
+   let index = 0;
+   while (shared[index].id <= p.lastSerial) index++;
+   const delta = shared.slice(index);
+   p.lastSerial = newest;
+   this.send(p.id, { type: 'events', items: delta });
+  }
+ }
  tick(dt) {
   if (!this.match || this.roundOver) return;
   this.tickAcc += Math.min(dt, .25);
   let steps = 0;
   let broadcasted = false;
+  let ended = false;
   while (this.tickAcc >= RULES.dt && steps < 5) {
      const inputs = {};
      for (const p of this.peers.values()) if (p.actorId !== null && (p.latest || p.edgeFire || p.edgeJump || p.edgePower || p.edgeInteract || p.edgeReload || p.edgeMelee || p.edgeGrenade)) {
@@ -338,29 +386,27 @@ export class Room {
     for (const p of this.peers.values()) if (p.actorId !== null && p.latest) p.appliedSeq = p.latestSeq;
    this.tickAcc -= RULES.dt;
    steps++;
-    for (const p of this.peers.values()) if (p.actorId !== null || p.spectate) {
-     const items = this.match.events.filter(e => e.id > p.lastSerial);
-     if (items.length) { p.lastSerial = items[items.length - 1].id; this.send(p.id, { type: 'events', items: quantizeNumbers(structuredClone(items)) }); }
-    }
     this.broadcastAt += RULES.dt;
      if (!broadcasted && this.broadcastAt >= this.snapshotInterval) { broadcasted = true; this.broadcastAt = 0; const acks = {}; for (const p of this.peers.values()) if (p.actorId !== null) acks[p.actorId] = p.appliedSeq; this.broadcast({ type: 'snapshot', seq: ++this.seq, acks, state: this.wireState() }); }
-     if (this.match.over) {
-      this.roundOver = true;
-      const result = this.match.snapshot();
-      const mode = this.match.config.mode;
-       try { this.history?.record({ roomId: this.id, mapId: this.match.arena.id, config: this.match.config, time: this.match.time, actors: result.actors, teamScores: result.teamScores, winner: result.winner, endingReason: result.overReason ?? null, result }); }
-      catch (error) { this.lastPersistError = error; }
-      if (this.progression) {
-       for (const p of this.peers.values()) {
-        if (!p.playerId || p.actorId === null || p.spectate) continue;
-        const actor = result.actors.find(a => a.id === p.actorId);
-        const win = actorWon(result, mode, actor);
-        try { const award = this.progression.awardOwned(p.playerId, p.playerToken, { win, actor, mode }); if (award) this.send(p.id, { type: 'progression', ...award }); }
-        catch (error) { this.lastPersistError = error; }
-       }
-      }
-      this.broadcast({ type: 'results', state: result }); break;
+     if (this.match.over) { ended = true; break; }
+  }
+  this.deliverEvents();
+  if (ended) {
+   this.roundOver = true;
+   const result = this.match.snapshot();
+   const mode = this.match.config.mode;
+    try { this.history?.record({ roomId: this.id, mapId: this.match.arena.id, config: this.match.config, time: this.match.time, actors: result.actors, teamScores: result.teamScores, winner: result.winner, endingReason: result.overReason ?? null, result }); }
+   catch (error) { this.lastPersistError = error; }
+   if (this.progression) {
+    for (const p of this.peers.values()) {
+     if (!p.playerId || p.actorId === null || p.spectate) continue;
+     const actor = result.actors.find(a => a.id === p.actorId);
+     const win = actorWon(result, mode, actor);
+     try { const award = this.progression.awardOwned(p.playerId, p.playerToken, { win, actor, mode }); if (award) this.send(p.id, { type: 'progression', ...award }); }
+     catch (error) { this.lastPersistError = error; }
     }
+   }
+   this.broadcast({ type: 'results', state: result });
   }
  }
 }

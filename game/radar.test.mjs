@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {radarContacts, radarPalette, radarBlipColor, radarBlip, RADAR_COLORS} from './radar.mjs';
+import {radarContacts, radarPalette, radarBlipColor, radarBlip, RADAR_COLORS, NEUTRAL} from './radar.mjs';
+import {TEAM_PALETTE, TEAM_PALETTE_COLORBLIND, NEUTRAL as SHARED_NEUTRAL} from './team-presentation.mjs';
 
 const player = {id: 0, x: 0, z: 0, yaw: 0, team: 0};
 const hud = {actors: [{id: 0, x: 0, z: 0, health: 100, team: 0}, {id: 1, x: 10, z: 0, health: 100, team: 1}, {id: 2, x: 0, z: -10, health: 0, team: 0, vehicleId: 3}]};
@@ -31,6 +32,16 @@ test('radarContacts carries objectives and flags without inventing positions', (
   assert.equal(contacts.find(c => c.kind === 'flag').carried, false);
   assert.deepEqual(radarContacts(null, player).contacts, []);
   assert.deepEqual(radarContacts(hud, null).contacts, []);
+});
+
+test('radar team colors derive from the canonical palettes and share one neutral color', () => {
+  assert.equal(RADAR_COLORS.default.red, TEAM_PALETTE[0].color);
+  assert.equal(RADAR_COLORS.default.blue, TEAM_PALETTE[1].color);
+  assert.equal(RADAR_COLORS.colorblind.red, TEAM_PALETTE_COLORBLIND[0].color);
+  assert.equal(RADAR_COLORS.colorblind.blue, TEAM_PALETTE_COLORBLIND[1].color);
+  assert.equal(RADAR_COLORS.default.neutral, NEUTRAL);
+  assert.equal(RADAR_COLORS.colorblind.neutral, NEUTRAL);
+  assert.equal(NEUTRAL, SHARED_NEUTRAL);
 });
 
 test('radarPalette swaps hostile reds for colorblind amber and blip colors follow teams', () => {

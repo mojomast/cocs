@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {actorWon} from './outcome.mjs';
+import {actorWon, rankTuple, compareRanks, rankLeaders} from './outcome.mjs';
 import {Match} from './core.mjs';
 
 const result = (winner, actors) => ({ winner, actors });
@@ -87,6 +87,33 @@ test('a score-limit team finish is reported as a frag ending', () => {
   m.damage(m.actors[1], 1000, m.actors[0]);
   assert.equal(m.over, true);
   assert.equal(m.snapshot().overReason, 'frag');
+});
+
+test('leaders() and the shared rankTuple agree for every ranked mode', () => {
+  const cases = [
+    { mode: 'deathmatch', setup: a => { a[0].frags = 5; a[1].frags = 2; } },
+    { mode: 'instagib', setup: a => { a[0].frags = 1; a[1].frags = 4; } },
+    { mode: 'armsrace', setup: a => { a[0].ladder = 3; a[0].frags = 1; a[1].ladder = 1; a[1].frags = 9; } },
+    { mode: 'ctf', team: true, setup: a => { a[0].scoreStats.captures = 2; a[1].scoreStats.captures = 0; } },
+    { mode: 'koth', team: true, setup: a => { a[0].scoreStats.objectiveTime = 5; a[1].scoreStats.objectiveTime = 1; } },
+    { mode: 'domination', team: true, setup: a => { a[0].scoreStats.objectiveTime = 5; a[1].scoreStats.objectiveTime = 1; } },
+    { mode: 'combined-arms', team: true, setup: a => { a[0].scoreStats.objectiveTime = 5; a[1].scoreStats.objectiveTime = 1; } },
+    { mode: 'assault', team: true, setup: a => { a[0].scoreStats.objectiveCaptures = 2; a[1].scoreStats.objectiveCaptures = 0; } },
+    { mode: 'payload', team: true, setup: a => { a[0].scoreStats.objectiveCaptures = 2; a[1].scoreStats.objectiveCaptures = 0; } },
+  ];
+  for (const { mode, team, setup } of cases) {
+    const m = new Match('chatgpt', 'openclaw', rng(), 'exchange', { mode: 'deathmatch', botCount: 0, humanCount: 2 });
+    m.config.mode = mode;
+    m.actors[0].team = team ? 0 : undefined;
+    m.actors[1].team = team ? 1 : undefined;
+    m.actors.forEach(a => { a.frags = 0; a.ladder = 0; a.scoreStats = { ...a.scoreStats, captures: 0, objectiveTime: 0, objectiveCaptures: 0 }; });
+    setup(m.actors);
+    if (team) m.teamScores = { 0: 3, 1: 1 };
+    const best = m.actors.reduce((top, a) => { const rank = rankTuple(a, mode); return !top || compareRanks(rank, top) < 0 ? rank : top; }, null);
+    const topIds = m.actors.filter(a => compareRanks(rankTuple(a, mode), best) === 0).map(a => a.id);
+    assert.deepEqual(rankLeaders(m.actors, mode).map(a => a.id), topIds, `${mode}: rankLeaders matches rankTuple maxima`);
+    assert.deepEqual(m.leaders().map(a => a.id), topIds, `${mode}: leaders() matches the shared ranking`);
+  }
 });
 
 test('a timed team finish is reported as a time ending even with a winner', () => {

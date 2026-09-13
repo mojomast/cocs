@@ -1,10 +1,10 @@
 import {HARNESSES, WEAPONS} from './data.mjs';
+import {clamp} from './math.mjs';
 
 // Harness tuning is deliberately small. Core can apply one passive profile,
 // one weapon adjustment, and one active ability at a time without compound
 // multipliers becoming the new source of balance problems.
 const WEAPON_IDS = Object.freeze(WEAPONS.map((_, index) => index));
-const clamp = (value, min, max) => Math.max(min, Math.min(max, value));
 const freeze = value => Object.freeze(value);
 
 const rawProfiles = {

@@ -2,7 +2,7 @@
 // head, the camera position and the distance at which scenery first blocks the
 // line back from the head, return a camera position pulled in front of that
 // obstruction (and re-aimed at the head). Null means no adjustment is needed.
-const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
+import {clamp} from './math.mjs';
 
 function geometry(head, camera, options = {}) {
   const margin = Number.isFinite(options.margin) ? options.margin : .4;

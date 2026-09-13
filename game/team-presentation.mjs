@@ -1,5 +1,6 @@
 import * as T from 'three';
 
+export const NEUTRAL='#55ddcc';
 export const TEAM_PALETTE=Object.freeze([
  Object.freeze({id:0,key:'red',label:'RED / I',color:'#ed514b',bars:1}),
  Object.freeze({id:1,key:'blue',label:'BLUE / II',color:'#438eff',bars:2}),

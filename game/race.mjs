@@ -1,6 +1,5 @@
 import {createVehicle, PUMA, respawnVehicle, takeVehicleSeat, stepVehicle} from './vehicles.mjs';
-
-const clamp = (n, a, b) => Math.max(a, Math.min(b, n));
+import {clamp} from './math.mjs';
 const distance = (a, b) => Math.hypot(a.x - b.x, a.z - b.z);
 const angle = n => Math.atan2(Math.sin(n), Math.cos(n));
 export const ITEMS = ['turbo', 'shield', 'oil', 'pulse', 'mine', 'triple', 'bolt', 'star'];

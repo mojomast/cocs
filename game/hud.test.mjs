@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {vehicleHud, escapeHint, voiceHint, reloadProgress, dynamicCrosshairGap, lowAmmo, postureLabel, hitMarker, projectToScreen, damageNumberStyle, boundList, damageBearing, killBanner, weaponTag, ammoText, commandBrief, isTeamMode, matchStartBanner, modeColumns, modeGoal, modePrimary, objectiveCopy, suddenDeathBanner, grenadeStatus, killstreakCallout, ladderStatus, streakStatus, audioCaption, scoreAnnouncer, multikillLabel, spreeLabel, recentKills, killCallout, matchAwards, killFeedWeapon, connectionQuality, spectateActor, nextSpectateTarget, spectatorBoard, weaponRangeInfo, weaponRangeLabel} from './hud.mjs';
 import {WEAPONS} from './data.mjs';
-import {GAME_MODES} from './config.mjs';
+import {GAME_MODES,teamMode} from './config.mjs';
 
 const player = {id:0, health:100, x:0, z:0, vehicleId:null};
 const ride = {id:0, health:200, maxHealth:300, x:2, z:0, driver:null, respawnTimer:0, heat:.8, overheated:true};
@@ -341,6 +341,14 @@ test('isTeamMode distinguishes shared-score modes from free-for-alls', () => {
   assert.equal(isTeamMode(modeById('deathmatch')), false);
   assert.equal(isTeamMode(modeById('armsrace')), false);
   assert.equal(isTeamMode(modeById('instagib')), false);
+});
+
+test('isTeamMode mirrors the canonical teamMode for every mode id and mode object', () => {
+  for (const mode of GAME_MODES) {
+    const expected = teamMode(mode.id);
+    assert.equal(isTeamMode(mode.id), expected, `${mode.id} id`);
+    assert.equal(isTeamMode(mode), expected, `${mode.id} object`);
+  }
 });
 
 test('commandBrief routes combined-arms through zone control with a status', () => {

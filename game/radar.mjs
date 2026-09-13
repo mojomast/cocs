@@ -1,8 +1,23 @@
+import {TEAM_PALETTE,TEAM_PALETTE_COLORBLIND,NEUTRAL} from './team-presentation.mjs';
+
+export {NEUTRAL};
+
 const DEFAULT_RANGE = 55;
 
+const radarColors = palette => ({
+  red: palette[0].color,
+  blue: palette[1].color,
+  hostile: palette === TEAM_PALETTE ? '#ff6b6b' : '#ffb000',
+  self: '#8dffb0',
+  teammate: '#7fe7ff',
+  neutral: NEUTRAL,
+  contested: '#ffd166',
+  payload: palette === TEAM_PALETTE ? '#ff9f43' : '#ffc04d',
+});
+
 export const RADAR_COLORS = Object.freeze({
-  default: Object.freeze({red: '#ed514b', blue: '#438eff', hostile: '#ff6b6b', self: '#8dffb0', teammate: '#7fe7ff', neutral: '#55ddcc', contested: '#ffd166', payload: '#ff9f43'}),
-  colorblind: Object.freeze({red: '#ff9d2e', blue: '#2f9bff', hostile: '#ffb000', self: '#8dffb0', teammate: '#7fe7ff', neutral: '#55ddcc', contested: '#ffd166', payload: '#ffc04d'}),
+  default: Object.freeze(radarColors(TEAM_PALETTE)),
+  colorblind: Object.freeze(radarColors(TEAM_PALETTE_COLORBLIND)),
 });
 
 export function radarPalette(mode) {

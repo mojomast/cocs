@@ -1,4 +1,4 @@
-const clamp = value => Math.max(0, Math.min(1, value));
+import {clamp01} from './math.mjs';
 const eligible = player => player?.connected === true && !player.spectate;
 const stop = stream => { for (const track of stream?.getTracks() ?? []) { track.onended = null; track.stop(); } };
 const disconnect = node => { try { node?.disconnect(); } catch {} };
@@ -174,12 +174,12 @@ export class VoiceChat {
 
   setVolume(value) {
     if (!Number.isFinite(value)) return;
-    this.volume = clamp(value);
+    this.volume = clamp01(value);
     if (this.audio?.master) this.audio.master.gain.setTargetAtTime(this.volume, this.audio.context.currentTime, .03);
   }
 
   setThreshold(value) {
-    if (Number.isFinite(value)) this.threshold = clamp(value);
+    if (Number.isFinite(value)) this.threshold = clamp01(value);
   }
 
   setGate(open) {
@@ -383,7 +383,7 @@ export class VoiceChat {
       if (active) {
         const player = this.players.find(p => p.peerId === peer.id);
         const remote = actors.find(a => a.id === player?.actorId);
-        gain = gain && alive(local) && alive(remote) ? clamp((30 - Math.hypot(
+        gain = gain && alive(local) && alive(remote) ? clamp01((30 - Math.hypot(
           local.x - remote.x, local.y - remote.y, local.z - remote.z)) / 25) : 0;
       }
       peer.gain.gain.setTargetAtTime(gain, this.audio.context.currentTime, .03);
