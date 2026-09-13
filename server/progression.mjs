@@ -4,10 +4,10 @@ import {randomBytes,randomUUID} from 'node:crypto';
 import {awardMatch,defaultProgression,normalizeGear,normalizeProgression} from '../game/progression.mjs';
 import {normalizeAttachments} from '../game/attachments.mjs';
 import {FINISH_IDS} from '../game/cosmetics.mjs';
+import {validPlayerId,validProgressToken} from '../game/protocol.mjs';
 
 export const PLAYER_CAP=500;
-export const validPlayerId=id=>typeof id==='string'&&/^[A-Za-z0-9-]{8,64}$/.test(id);
-const validProgressToken=token=>typeof token==='string'&&/^[A-Za-z0-9_-]{16,128}$/.test(token);
+export {validPlayerId,validProgressToken};
 const newToken=()=>randomBytes(24).toString('hex');
 
 export class ProgressionStore{

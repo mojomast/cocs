@@ -27,6 +27,7 @@ export function stepAssault(state,actors,dt,options={}){
  if(!state||state.breached)return {scored:0,captured:[],breached:state?.breached??false,active:state?.active??0};
  const active=assaultActiveSector(state);
  if(!active)return {scored:0,captured:[],breached:state.breached,active:state.active};
+ let dirty=!Array.isArray(state.captured);
  const attacker=state.attacker??0,defender=state.defender??1;
  const captureSeconds=active.captureSeconds||rules?.objective?.captureSeconds||6;
  const rate=100*dt/captureSeconds;
@@ -35,20 +36,20 @@ export function stepAssault(state,actors,dt,options={}){
  let scored=0;
  if(attackers>0&&defenders>0){
   active.progress=Math.max(0,active.progress-rate*.6);
-  if(active.progress===0&&active.owner!==null){emit?.('assault-sector-lost',{sector:active.id,team:active.owner,active:state.active});active.owner=null;active.captureTeam=null;}
+  if(active.progress===0&&active.owner!==null){emit?.('assault-sector-lost',{sector:active.id,team:active.owner,active:state.active});active.owner=null;active.captureTeam=null;dirty=true;}
  }else if(attackers>0){
   active.progress=Math.min(100,active.progress+rate);
   if(active.progress>=100){
-   active.progress=100;active.owner=attacker;active.captureTeam=null;state.active+=1;scored+=1;
+   active.progress=100;active.owner=attacker;active.captureTeam=null;state.active+=1;scored+=1;dirty=true;
    emit?.('assault-sector-captured',{sector:active.id,team:attacker,active:state.active});
    if(state.active>=state.sectors.length){state.breached=true;state.winner=attacker;emit?.('assault-breach',{winner:attacker});}
   }
  }else if(defenders>0){
   active.progress=Math.max(0,active.progress-rate);
-  if(active.progress===0&&active.owner===attacker){active.owner=defender;emit?.('assault-sector-lost',{sector:active.id,team:attacker,active:state.active});}
+  if(active.progress===0&&active.owner===attacker){active.owner=defender;dirty=true;emit?.('assault-sector-lost',{sector:active.id,team:attacker,active:state.active});}
  }
  if(scored>0&&teamScores)teamScores[attacker]=(teamScores[attacker]||0)+scored;
  if(scored>0&&scoreLimit&&teamScores&&teamScores[attacker]>=scoreLimit)state.winner=attacker;
- const captured=state.sectors.filter(value=>value.owner===attacker).map(value=>value.id);
- return {scored,captured,breached:state.breached,active:state.active};
+ if(dirty)state.captured=state.sectors.filter(value=>value.owner===attacker).map(value=>value.id);
+ return {scored,captured:state.captured,breached:state.breached,active:state.active};
 }

@@ -2,6 +2,7 @@ import {getMap} from './maps.mjs';
 import {Match} from './core.mjs';
 import {RULES} from './data.mjs';
 import {clamp, lerp} from './math.mjs';
+import {MESSAGE, validPlayerId, validProgressToken} from './protocol.mjs';
 
 export const DEFAULT_SERVER_URL = 'ws://localhost:4000';
 const createPlayerId=()=>{try{return globalThis.crypto?.randomUUID?.()??`p-${Math.random().toString(36).slice(2)}-${Date.now().toString(36)}`;}catch{return `p-${Math.random().toString(36).slice(2)}-${Date.now().toString(36)}`;}};
@@ -64,9 +65,9 @@ export class NetClient {
   this.actorId = null;
   this.token = this.storage ? this.storage.getItem(this.storageKey) : null;
   this.roomId = this.storage ? this.storage.getItem(this.roomKey) : null;
-  this.playerId = (()=>{if(!this.storage)return createPlayerId();const saved=this.storage.getItem(this.playerKey);if(saved&&/^[A-Za-z0-9-]{8,64}$/.test(saved))return saved;const created=createPlayerId();try{this.storage.setItem(this.playerKey,created);}catch{}return created;})();
+  this.playerId = (()=>{if(!this.storage)return createPlayerId();const saved=this.storage.getItem(this.playerKey);if(saved&&validPlayerId(saved))return saved;const created=createPlayerId();try{this.storage.setItem(this.playerKey,created);}catch{}return created;})();
   this.progressToken = this.storage ? this.storage.getItem(this.progressKey) : null;
-  if (!this.progressToken || this.progressToken.length < 32) { this.progressToken = createProgressToken(); if (this.storage) { try { this.storage.setItem(this.progressKey, this.progressToken); } catch {} } }
+  if (!validProgressToken(this.progressToken)) { this.progressToken = createProgressToken(); if (this.storage) { try { this.storage.setItem(this.progressKey, this.progressToken); } catch {} } }
   this.progression = null;
    this.buffer = [];
    this.snapshotSeq = 0;
@@ -108,7 +109,7 @@ export class NetClient {
  send(msg) {
   if (!this.ws || this.ws.readyState !== WebSocket.OPEN) return false;
   const text = JSON.stringify(msg);
-  if (msg.type === 'voice-signal' &&
+  if (msg.type === MESSAGE.VOICE_SIGNAL &&
    new TextEncoder().encode(text).length + (this.ws.bufferedAmount ?? 0) > 64 * 1024) return false;
   this.ws.send(text);
   return true;
@@ -139,15 +140,15 @@ export class NetClient {
   if (!msg || typeof msg !== 'object' || Array.isArray(msg)) return;
   try {
   switch (msg.type) {
-   case 'voice-signal': this.onVoiceSignal?.(msg); break;
-   case 'voice-config':
+   case MESSAGE.VOICE_SIGNAL: this.onVoiceSignal?.(msg); break;
+   case MESSAGE.VOICE_CONFIG:
     if (!Array.isArray(msg.iceServers) || msg.iceServers.length > 16 || !msg.iceServers.every(server =>
      server && typeof server === 'object' && !Array.isArray(server) &&
      (typeof server.urls === 'string' || (Array.isArray(server.urls) && server.urls.every(url => typeof url === 'string'))))) break;
     this.voiceIceServers = msg.iceServers;
     this.onVoiceConfig?.(msg);
     break;
-   case 'welcome':
+   case MESSAGE.WELCOME:
     this.peerId = msg.peerId;
     this.isHost = msg.host;
     this.spectate = msg.spectate === true;
@@ -156,7 +157,7 @@ export class NetClient {
     if (typeof msg.progressToken === 'string' && msg.progressToken) { this.progressToken = msg.progressToken; if (this.storage) { try { this.storage.setItem(this.progressKey, msg.progressToken); } catch {} } }
     if (msg.profile) { this.progression = msg.profile; this.onProgression?.({ profile: msg.profile, reconnected: msg.reconnected === true }); }
     break;
-   case 'lobby':
+   case MESSAGE.LOBBY:
     this.players = Array.isArray(msg.players) ? msg.players.filter(p => p && typeof p === 'object') : [];
     this.hostId = msg.hostId;
     this.isHost = this.peerId === msg.hostId;
@@ -167,9 +168,9 @@ export class NetClient {
     this.actorId = this.players.find(p => p.peerId === this.peerId)?.actorId ?? null;
     this.onLobby?.(msg);
     break;
-   case 'rooms': this.rooms = Array.isArray(msg.rooms) ? msg.rooms : []; this.onRooms?.(msg); break;
-   case 'history': this.matches = Array.isArray(msg.matches) ? msg.matches : []; this.onHistory?.(msg); break;
-   case 'start':
+   case MESSAGE.ROOMS: this.rooms = Array.isArray(msg.rooms) ? msg.rooms : []; this.onRooms?.(msg); break;
+   case MESSAGE.HISTORY: this.matches = Array.isArray(msg.matches) ? msg.matches : []; this.onHistory?.(msg); break;
+   case MESSAGE.START:
     this.started = true;
     this.roundOver = false;
      this.buffer = [];
@@ -182,19 +183,19 @@ export class NetClient {
     this.createShadow(msg.mapId, msg.config);
     this.onStart?.(msg);
     break;
-   case 'events':
+   case MESSAGE.EVENTS:
     for (const item of (Array.isArray(msg.items) ? msg.items : [])) this.events.push(item);
     if (this.events.length > 300) this.events.splice(0, this.events.length - 300);
     break;
-    case 'snapshot': this.push(msg); break;
-     case 'progression': this.progression = msg.profile ?? this.progression; this.onProgression?.(msg); break;
-     case 'results': this.roundOver = true; this.state = msg.state; this.onResults?.(msg); break;
-    case 'chat':
+    case MESSAGE.SNAPSHOT: this.push(msg); break;
+     case MESSAGE.PROGRESSION: this.progression = msg.profile ?? this.progression; this.onProgression?.(msg); break;
+     case MESSAGE.RESULTS: this.roundOver = true; this.state = msg.state; this.onResults?.(msg); break;
+    case MESSAGE.CHAT:
      this.chatLog.push(msg);
      if (this.chatLog.length > 100) this.chatLog.splice(0, this.chatLog.length - 100);
      this.onChat?.(msg);
      break;
-    case 'error': this.lastError = msg.message; this.onError?.(msg); break;
+    case MESSAGE.ERROR: this.lastError = msg.message; this.onError?.(msg); break;
    }
    } catch {}
    }

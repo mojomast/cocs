@@ -4,6 +4,7 @@ import { WebSocketServer } from 'ws';
 import { RoomRegistry } from './rooms.mjs';
 import { MatchHistory } from './history.mjs';
 import { ProgressionStore } from './progression.mjs';
+import { MESSAGE } from '../game/protocol.mjs';
 import { createHmac } from 'node:crypto';
 
 export function voiceConfig(peerId, env = process.env, now = Date.now()) {
@@ -43,7 +44,7 @@ export function createGameServer({ port = 0, random, tickDt = 1 / 60, tickMs = 1
  // (welcome/start/results/lobby/errors) are not. Essential messages that hit a
  // congested socket are coalesced by type and pumped once the buffer drains,
  // rather than being silently dropped.
- const REPLACEABLE = new Set(['snapshot', 'events', 'voice-signal', 'voice-config']);
+ const REPLACEABLE = new Set([MESSAGE.SNAPSHOT, MESSAGE.EVENTS, MESSAGE.VOICE_SIGNAL, MESSAGE.VOICE_CONFIG]);
  function queueEssential(ws, text, type) {
   const queue = ws.pendingEssential || (ws.pendingEssential = []);
   // Tag with the peer's room so messages queued for one room are never
@@ -70,10 +71,10 @@ export function createGameServer({ port = 0, random, tickDt = 1 / 60, tickMs = 1
   }
   function deliver(ws, msg, text = JSON.stringify(msg)) {
    if (!ws || ws.readyState !== ws.OPEN) return false;
-   const voice = msg?.type === 'voice-signal' || msg?.type === 'voice-config';
+   const voice = msg?.type === MESSAGE.VOICE_SIGNAL || msg?.type === MESSAGE.VOICE_CONFIG;
    const limit = voice ? VOICE_BUFFER_LIMIT : TRAFFIC_BUFFER_LIMIT;
    if (ws.bufferedAmount + Buffer.byteLength(text) <= limit) { ws.send(text); return true; }
-   if (REPLACEABLE.has(msg?.type)) { if (msg?.type === 'voice-config') ws.terminate(); return false; }
+   if (REPLACEABLE.has(msg?.type)) { if (msg?.type === MESSAGE.VOICE_CONFIG) ws.terminate(); return false; }
    queueEssential(ws, text, msg?.type);
    return false;
   }
@@ -112,43 +113,43 @@ export function createGameServer({ port = 0, random, tickDt = 1 / 60, tickMs = 1
  }
  function dispatch(peerId, msg, ws) {
   if (!msg || typeof msg !== 'object' || Array.isArray(msg)) return;
-  if (msg.type !== 'input' && !controlAllowed(ws)) {
+  if (msg.type !== MESSAGE.INPUT && !controlAllowed(ws)) {
    if (++ws.protocolErrors > 20) { ws.terminate(); return; }
    sendTo(peerId, { type: 'error', message: 'rate limit exceeded' });
    return;
   }
   switch (msg.type) {
-   case 'voice-state': peerRoom.get(peerId)?.voiceState(peerId, msg.enabled, voiceConfig); break;
-   case 'voice-signal': peerRoom.get(peerId)?.voiceSignal(peerId, msg); break;
-  case 'join': joinPeer(peerId, msg); break;
-  case 'create': createRoom(peerId, msg); break;
-  case 'list': sendTo(peerId, { type: 'rooms', rooms: registry.list() }); break;
-  case 'history': {
+   case MESSAGE.VOICE_STATE: peerRoom.get(peerId)?.voiceState(peerId, msg.enabled, voiceConfig); break;
+   case MESSAGE.VOICE_SIGNAL: peerRoom.get(peerId)?.voiceSignal(peerId, msg); break;
+  case MESSAGE.JOIN: joinPeer(peerId, msg); break;
+  case MESSAGE.CREATE: createRoom(peerId, msg); break;
+  case MESSAGE.LIST: sendTo(peerId, { type: 'rooms', rooms: registry.list() }); break;
+  case MESSAGE.HISTORY: {
    if (!historyCache || historyCacheVersion !== history.version) { historyCache = history.all(); historyCacheVersion = history.version; }
    sendTo(peerId, { type: 'history', matches: historyCache });
    break;
   }
-    case 'host': peerRoom.get(peerId)?.host(peerId, msg.config, msg.mapId); break;
-    case 'gear': peerRoom.get(peerId)?.setGear(peerId, msg.gear, msg.attachments, undefined, msg.finish); break;
-   case 'start': peerRoom.get(peerId)?.start(peerId); break;
-    case 'input': peerRoom.get(peerId)?.input(peerId, { ...(msg.input ?? msg), seq: msg.seq ?? msg.input?.seq }); break;
-    case 'chat': {
+    case MESSAGE.HOST: peerRoom.get(peerId)?.host(peerId, msg.config, msg.mapId); break;
+    case MESSAGE.GEAR: peerRoom.get(peerId)?.setGear(peerId, msg.gear, msg.attachments, undefined, msg.finish); break;
+   case MESSAGE.START: peerRoom.get(peerId)?.start(peerId); break;
+    case MESSAGE.INPUT: peerRoom.get(peerId)?.input(peerId, msg); break;
+    case MESSAGE.CHAT: {
      const room = peerRoom.get(peerId);
      if (room) room.chat(peerId, msg.text);
      else sendTo(peerId, { type: 'error', message: 'not in a room' });
      break;
     }
-   case 'leave': {
+   case MESSAGE.LEAVE: {
     const room = peerRoom.get(peerId);
     if (room) { room.leave(peerId); peerRoom.delete(peerId); registry.removeIfEmpty(room); }
     break;
    }
-   case 'ping': sendTo(peerId, { type: 'pong', time: Date.now() }); break;
+   case MESSAGE.PING: sendTo(peerId, { type: 'pong', time: Date.now() }); break;
    default: sendTo(peerId, { type: 'error', message: `unknown message type: ${msg.type}` });
   }
  }
  function rewindEvents(room, peerId, msg) {
-  if (msg.type !== 'events' || !Array.isArray(msg.items) || !msg.items.length) return;
+  if (msg.type !== MESSAGE.EVENTS || !Array.isArray(msg.items) || !msg.items.length) return;
   const peer = room.peers.get(peerId);
   const first = msg.items[0]?.id;
   if (peer && Number.isInteger(first) && first > 0) peer.lastSerial = Math.min(peer.lastSerial, first - 1);
@@ -156,7 +157,7 @@ export function createGameServer({ port = 0, random, tickDt = 1 / 60, tickMs = 1
  function flush() {
   for (const room of registry.rooms.values()) {
     for (const { to, msg } of room.drain()) {
-     if (msg.type === 'voice-signal' && (!room.voicePeers(msg.from, to, msg) ||
+     if (msg.type === MESSAGE.VOICE_SIGNAL && (!room.voicePeers(msg.from, to, msg) ||
       peerRoom.get(msg.from) !== room || peerRoom.get(to) !== room ||
       sockets.get(msg.from)?.readyState !== 1)) continue;
       const text = JSON.stringify(msg);
@@ -164,7 +165,7 @@ export function createGameServer({ port = 0, random, tickDt = 1 / 60, tickMs = 1
       for (const ws of wss.clients) if (ws.readyState === ws.OPEN && peerRoom.get(socketPeer.get(ws)) === room) deliver(ws, msg, text);
      } else {
        const ws = sockets.get(to);
-       if (msg.type === 'voice-config' && peerRoom.get(to) !== room) continue;
+       if (msg.type === MESSAGE.VOICE_CONFIG && peerRoom.get(to) !== room) continue;
        if (!ws || ws.readyState !== ws.OPEN) { rewindEvents(room, to, msg); continue; }
        if (!deliver(ws, msg, text)) rewindEvents(room, to, msg);
      }

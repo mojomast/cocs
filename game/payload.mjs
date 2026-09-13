@@ -165,7 +165,7 @@ export function stepPayload(state,actors,dt,options={}){
   const rollback=state.speed*.5*dt,next=Math.max(floor,state.distance-rollback);
   moved=next-state.distance;state.distance=next;
  }else{state.contested=false;state.pushing=null;}
- state.position=payloadPosition(state);
+ if(moved!==0)state.position=payloadPosition(state);
  let checkpoint=null;
  while(state.checkpointsReached<state.checkpoints.length&&state.distance>=state.checkpoints[state.checkpointsReached].distance-1e-6){
   checkpoint=state.checkpoints[state.checkpointsReached];

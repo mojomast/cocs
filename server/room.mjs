@@ -5,14 +5,13 @@ import {getMap} from '../game/maps.mjs';
 import {resolveMapForMode} from '../game/arenas.mjs';
 import {CHARACTERS,resolveLoadout,RULES} from '../game/data.mjs';
 import {randomUUID} from 'node:crypto';
-import {validPlayerId} from './progression.mjs';
+import {validPlayerId,sanitizeText,parseInputEnvelope} from '../game/protocol.mjs';
 
 export const PLAYER_LIMIT = 8;
 export const SPECTATOR_LIMIT = 24;
 // Clients send inputs at 60 Hz; allow generous headroom and drop the excess so a
 // flooding client cannot burn simulation time or unbounded server work.
 export const INPUT_RATE_LIMIT = 120;
-const clean = name => String(name ?? '').replace(/[\u0000-\u001f\u007f]/g, '').trim().slice(0, 20);
 const object = value => value !== null && typeof value === 'object' && !Array.isArray(value);
 const bounded = (value, max) => typeof value === 'string' && value.length <= max;
 // Match.snapshot() shares mutable or deeply frozen nested branches (powerups,
@@ -136,7 +135,7 @@ export class Room {
   if (isSpectator && [...this.peers.values()].filter(p => p.spectate === true).length >= SPECTATOR_LIMIT) { this.send(peerId, { type: 'error', message: 'spectator limit reached' }); return; }
   const l = resolveLoadout(character, harness) || { character: 'chatgpt', harness: 'openclaw' };
   const identity = this.progression ? this.progression.identify(validPlayerId(playerId) ? playerId : '', progressToken) : null;
-  const peer = { id: peerId, name: clean(name) || CHARACTERS.find(c => c.id === l.character).name,
+  const peer = { id: peerId, name: sanitizeText(name, 20) || CHARACTERS.find(c => c.id === l.character).name,
     character: l.character, harness: l.harness, actorId: null, ready: false, latest: null, receivedSeq: 0, latestSeq: 0, appliedSeq: 0, lastSerial: active ? this.match.serial : 0,
      lastJump: false, lastPower: false, lastInteract: false, lastReload: false, edgeFire: false, edgeJump: false, edgePower: false, edgeInteract: false, edgeMelee: false, lastMelee: false, edgeReload: false, edgeGrenade: false, lastGrenade: false,
    token: randomUUID(), disconnectedAt: null, spectate: isSpectator, voiceSession: null, playerId: identity?.profile.id ?? null, playerToken: identity?.token ?? null };
@@ -206,39 +205,37 @@ export class Room {
   if (!peer.inputRate || now - peer.inputRate.at >= 1000) peer.inputRate = { at: now, count: 0 };
   if (peer.inputRate.count >= INPUT_RATE_LIMIT) return;
   peer.inputRate.count++;
-  const i = input && typeof input === 'object' ? input : {};
-   const requested = Number.isInteger(i.seq) && i.seq > 0 ? i.seq : peer.receivedSeq + 1;
+  const i = parseInputEnvelope(input);
+   const requested = i.seq ?? peer.receivedSeq + 1;
    // A rogue or buggy client could jump its sequence far ahead, after which every
    // real input looks stale. Accept modest forward progress only; a stale or
    // duplicate sequence is ignored as before.
    const seq = requested > peer.receivedSeq + 600 ? peer.receivedSeq + 1 : requested;
    if (seq <= peer.receivedSeq) return;
    peer.receivedSeq = seq;
-    const axis = value => { const n = Number(value); return Number.isFinite(n) ? Math.max(-1, Math.min(1, n)) : 0; };
-    const x = axis(i.x), z = axis(i.z);
-     const ext = { x, z, fire: i.fire === true };
-   if (this.match.race) Object.assign(ext, { jump: i.jump === true, power: i.power === true, interact: i.interact === true });
-  if (Number.isFinite(i.yaw)) ext.yaw = i.yaw;
-  if (Number.isFinite(i.pitch)) ext.pitch = Math.max(-1.45, Math.min(1.45, i.pitch));
-  if (Number.isInteger(i.weapon)) ext.weapon = i.weapon;
-  if (i.sprint === true) ext.sprint = true;
-  if (i.crouch === true) ext.crouch = true;
-  if (i.ads === true) ext.ads = true;
+     const ext = { x: i.x, z: i.z, fire: i.fire };
+   if (this.match.race) Object.assign(ext, { jump: i.jump, power: i.power, interact: i.interact });
+  if (i.yaw !== undefined) ext.yaw = i.yaw;
+  if (i.pitch !== undefined) ext.pitch = i.pitch;
+  if (i.weapon !== undefined) ext.weapon = i.weapon;
+  if (i.sprint) ext.sprint = true;
+  if (i.crouch) ext.crouch = true;
+  if (i.ads) ext.ads = true;
     peer.latest = ext;
     peer.latestSeq = seq;
-    if (ext.fire && !this.match.race) peer.edgeFire = true;
-   if (i.jump === true && !peer.lastJump && !this.match.race) peer.edgeJump = true;
-  peer.lastJump = i.jump === true;
-    if (i.power === true && !peer.lastPower && !this.match.race) peer.edgePower = true;
-   peer.lastPower = i.power === true;
-    if (i.interact === true && !peer.lastInteract && !this.match.race) peer.edgeInteract = true;
-   peer.lastInteract = i.interact === true;
-   if (i.reload === true && !peer.lastReload) peer.edgeReload = true;
-   peer.lastReload = i.reload === true;
-   if (i.melee === true && !peer.lastMelee) peer.edgeMelee = true;
-   peer.lastMelee = i.melee === true;
-   if (i.grenade === true && !peer.lastGrenade) peer.edgeGrenade = true;
-   peer.lastGrenade = i.grenade === true;
+    if (i.fire && !this.match.race) peer.edgeFire = true;
+   if (i.jump && !peer.lastJump && !this.match.race) peer.edgeJump = true;
+  peer.lastJump = i.jump;
+    if (i.power && !peer.lastPower && !this.match.race) peer.edgePower = true;
+   peer.lastPower = i.power;
+    if (i.interact && !peer.lastInteract && !this.match.race) peer.edgeInteract = true;
+   peer.lastInteract = i.interact;
+   if (i.reload && !peer.lastReload) peer.edgeReload = true;
+   peer.lastReload = i.reload;
+   if (i.melee && !peer.lastMelee) peer.edgeMelee = true;
+   peer.lastMelee = i.melee;
+   if (i.grenade && !peer.lastGrenade) peer.edgeGrenade = true;
+   peer.lastGrenade = i.grenade;
  }
  setGear(peerId, gear, attachments, now = Date.now(), finish) {
   const peer = this.peers.get(peerId);
@@ -251,7 +248,7 @@ export class Room {
  chat(peerId, text, now = Date.now()) {
   const peer = this.peers.get(peerId);
   if (!peer) return;
-  const clean = String(text ?? '').replace(/[\u0000-\u001f\u007f]/g, '').trim().slice(0, 200);
+  const clean = sanitizeText(text, 200);
   if (!clean) return;
   if (peer.lastChatAt && now - peer.lastChatAt < 300) return;
   peer.lastChatAt = now;
