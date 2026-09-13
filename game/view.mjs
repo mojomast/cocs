@@ -19,6 +19,8 @@ import {occlusionDistance} from './camera.mjs';
 import {postStage,applyComposerSize,disposeComposer,reducedMotion} from './post.mjs';
 import {surfaceTextures,clearSurfaceTextures} from './textures.mjs';
 import {addSky,addMountains,addScatter} from './environment.mjs';
+import {raceTrackModel,updateRace as syncRacePresentation} from './race-presentation.mjs';
+export {raceTrackModel};
 import {RoomEnvironment} from 'three/addons/environments/RoomEnvironment.js';
 import {EffectComposer} from 'three/addons/postprocessing/EffectComposer.js';
 import {RenderPass} from 'three/addons/postprocessing/RenderPass.js';
@@ -31,14 +33,14 @@ export {SynthAudio} from './feedback.mjs';
 // bake still refreshes immediately on build, and moving actors lag at most one step.
 export const SHADOW_REFRESH_INTERVAL=2;
 export function shadowTick(previous,interval=SHADOW_REFRESH_INTERVAL){const step=Math.max(1,interval),next=(Number.isFinite(previous)?previous:0)+1;return next>=step?{tick:0,refresh:true}:{tick:next,refresh:false};}
-const V=(x=0,y=0,z=0)=>new T.Vector3(x,y,z);
+export const V=(x=0,y=0,z=0)=>new T.Vector3(x,y,z);
 const buildMaterial=(color,metal=.5,rough=.42,emissive=false)=>new T.MeshStandardMaterial({color,metalness:metal,roughness:rough,...(emissive?{emissive:color,emissiveIntensity:1.6}:{})});
 // Arena/palette materials stay uncached; shared model assets opt into the cache via withAssets.
-const material=(color,metal=.5,rough=.42,emissive=false)=>{const assets=currentAssets();return assets?assets.material(`${color}|${metal}|${rough}|${emissive?1:0}`,()=>buildMaterial(color,metal,rough,emissive)):buildMaterial(color,metal,rough,emissive);};
+export const material=(color,metal=.5,rough=.42,emissive=false)=>{const assets=currentAssets();return assets?assets.material(`${color}|${metal}|${rough}|${emissive?1:0}`,()=>buildMaterial(color,metal,rough,emissive)):buildMaterial(color,metal,rough,emissive);};
 function geometry(scope,key,make){const assets=scope===undefined?currentAssets():scope;return assets?assets.geometry(key,make):make();}
-function box(parent,w,h,d,x,y,z,mat,assets){const m=new T.Mesh(geometry(assets,`b|${w}|${h}|${d}`,()=>new T.BoxGeometry(w,h,d)),mat);m.position.set(x,y,z);parent.add(m);return m;}
+export function box(parent,w,h,d,x,y,z,mat,assets){const m=new T.Mesh(geometry(assets,`b|${w}|${h}|${d}`,()=>new T.BoxGeometry(w,h,d)),mat);m.position.set(x,y,z);parent.add(m);return m;}
 function cylinder(parent,r1,r2,h,x,y,z,mat,segments=12,assets){const m=new T.Mesh(geometry(assets,`c|${r1}|${r2}|${h}|${segments}`,()=>new T.CylinderGeometry(r1,r2,h,segments)),mat);m.position.set(x,y,z);parent.add(m);return m;}
-function ring(parent,r,t,x,y,z,mat,rx=Math.PI/2,assets){const m=new T.Mesh(geometry(assets,`t|${r}|${t}`,()=>new T.TorusGeometry(r,t,6,32)),mat);m.position.set(x,y,z);m.rotation.x=rx;parent.add(m);return m;}
+export function ring(parent,r,t,x,y,z,mat,rx=Math.PI/2,assets){const m=new T.Mesh(geometry(assets,`t|${r}|${t}`,()=>new T.TorusGeometry(r,t,6,32)),mat);m.position.set(x,y,z);m.rotation.x=rx;parent.add(m);return m;}
 function tube(parent,ax,ay,az,bx,by,bz,r,mat,segments=6,assets){const start=V(ax,ay,az),dir=V(bx-ax,by-ay,bz-az),length=dir.length()||.0001,m=new T.Mesh(geometry(assets,`u|${r}|${length}|${segments}`,()=>new T.CylinderGeometry(r,r,length,segments)),mat);m.position.copy(start).addScaledVector(dir,.5);m.quaternion.setFromUnitVectors(V(0,1,0),dir.normalize());parent.add(m);return m;}
 const shadeHash=(x,y,z,seed)=>{let h=Math.imul((x|0)+374761393,668265263)^Math.imul((y|0)+1274126177,2246822519)^Math.imul((z|0)+2654435761,3266489917)^Math.imul(seed|0,668265263);h=Math.imul(h^(h>>>13),1274126177);h^=h>>>16;return (h>>>0)/4294967295;};
 // Deterministic per-vertex luminance jitter plus a per-triangle tint. Seeded, never Math.random.
@@ -211,7 +213,7 @@ export function robotModel(id,assets){return withAssets(assets,()=>{const c=CHAR
  g.traverse(n=>{if(n.isMesh){n.castShadow=true;n.receiveShadow=true;}});
  const joints={root,rootBaseY:0,hips,torso,chest,head,armUpperL:arms.L.upper,armUpperR:arms.R.upper,forearmL:arms.L.fore,forearmR:arms.R.fore,legUpperL:legs.L.upper,legUpperR:legs.R.upper,legLowerL:legs.L.lower,legLowerR:legs.R.lower,footL:legs.L.foot,footR:legs.R.foot};
  g.userData={limbs:[],head,torso:torsoMesh,chest,torsoGroup:torso,gunAnchor,weapon,shield,color:c.color,armor,armorColor:c.accent,base,teamMarks,rig:new CharacterRig(joints),joints};return g;});}
-function textLabel(parent,text,x,y,z,size=1,color='#8ad9d3',ry=0){const canvas=document.createElement('canvas');canvas.width=512;canvas.height=128;const ctx=canvas.getContext('2d');ctx.font='bold 78px monospace';ctx.textAlign='center';ctx.fillStyle=color;ctx.fillText(text,256,90);const tex=new T.CanvasTexture(canvas);const m=new T.Mesh(new T.PlaneGeometry(size*4,size),new T.MeshBasicMaterial({map:tex,transparent:true,depthWrite:false}));m.position.set(x,y,z);m.rotation.y=ry;m.userData.label=text;m.userData.labelSize=size*.6;parent.add(m);return m;}
+export function textLabel(parent,text,x,y,z,size=1,color='#8ad9d3',ry=0){const canvas=document.createElement('canvas');canvas.width=512;canvas.height=128;const ctx=canvas.getContext('2d');ctx.font='bold 78px monospace';ctx.textAlign='center';ctx.fillStyle=color;ctx.fillText(text,256,90);const tex=new T.CanvasTexture(canvas);const m=new T.Mesh(new T.PlaneGeometry(size*4,size),new T.MeshBasicMaterial({map:tex,transparent:true,depthWrite:false}));m.position.set(x,y,z);m.rotation.y=ry;m.userData.label=text;m.userData.labelSize=size*.6;parent.add(m);return m;}
 function pointOf(value){if(Array.isArray(value))return {x:+value[0]||0,y:value.length>2?(+value[1]||0):0,z:+value[value.length>2?2:1]||0};return value?.position||value||{};}
 // Payload yaw follows the route tangent. Local play exposes the full route on
 // objectiveState while snapshots only carry the current position, so fall back to
@@ -648,126 +650,7 @@ export class ArenaView{
    this.effectPool?.update(Math.max(0,delta));this.railPool?.update(Math.max(0,delta));this.deathPool?.update(Math.max(0,delta));
        this.hands.visible=player.health>0&&this.showWeapon!==false&&!this.spectator&&!cinematic&&player.vehicleId==null;const weaponSig=`${player.finish??''}|${weaponVisualKey(player.attachments?.visual)}`;if(this.currentWeapon!==player.weapon||this._viewWeaponSig!==weaponSig){for(const c of [...this.hands.children]){this.hands.remove(c);this.disposeObject(c);}this.firstPerson=weaponModel(player.weapon,undefined,player.attachments?.visual,player.finish);this.firstPerson.scale.setScalar(1.1);this.hands.add(this.firstPerson);this.currentWeapon=player.weapon;this._viewWeaponSig=weaponSig;this.firstPerson.traverse(m=>{if(m.isMesh){m.renderOrder=100;m.material.depthTest=false;}});}
   this.feedback??=new WeaponFeedback();const pose=this.feedback.update(player,delta,reduced,this.hands.visible);this.hands.position.set(.37+pose.x,-.36+pose.y,-.58+pose.z);this.hands.rotation.set(pose.pitch,0,pose.roll);this.firstPerson.userData.flash.visible=!reduced&&this.hands.visible&&this.flashUntil>performance.now();this.muzzleLights?.update(Math.max(0,delta));if(this.renderer.shadowMap?.autoUpdate===false){const st=shadowTick(this._shadowTick);this._shadowTick=st.tick;if(st.refresh)this.renderer.shadowMap.needsUpdate=true;}if(this.composer)this.composer.render();else this.renderer.render(this.scene,this.camera);if(cinematic)this.playerId=savedPlayerId;if(mode==='selection'&&this.showcaseState)this._renderPreview(time,reduced);}
-     updateRace(match,time){
-      this.raceModels??=new Map();const active=new Set(),reduced=this.reduced();
-      for(const entry of match.race?.boxes??[]){
-       const key=`box:${entry.id}`;active.add(key);let model=this.raceModels.get(key);
-       if(!model){model=new T.Group();box(model,1.7,1.7,1.7,0,0,0,material('#b28cff',.3,.4,true));if(typeof document!=='undefined')for(const yaw of [0,Math.PI/2,Math.PI,Math.PI*1.5]){const face=new T.Group();face.rotation.y=yaw;textLabel(face,'?',0,0,.87,1.1,'#ffffff');model.add(face);}model.traverse(n=>{n.userData.objective=true;n.userData.noCameraOcclusion=true;});this.worldGroup.add(model);this.raceModels.set(key,model);}
-       model.visible=entry.ready??entry.wait<=0;model.position.set(entry.x,2.2+(reduced?0:Math.sin(time*2)*.25),entry.z);model.rotation.y=reduced?0:time*.65;
-      }
-      for(const entry of match.race?.hazards??[]){
-       const kind=entry.type==='mine'?'mine':'oil',key=`${kind}:${entry.id}`;active.add(key);let model=this.raceModels.get(key);
-       if(!model){model=new T.Group();
-        if(kind==='mine'){const core=new T.Mesh(new T.IcosahedronGeometry(.55,1),material('#1b1d24',.7,.45));core.position.y=.55;model.add(core);for(let i=0;i<6;i++){const a=i*Math.PI/3,axis=V(Math.cos(a),0,Math.sin(a)),spike=new T.Mesh(new T.ConeGeometry(.09,.44,5),material('#3a3f4a',.6,.5));spike.position.set(axis.x*.52,.55,axis.z*.52);spike.quaternion.setFromUnitVectors(V(0,1,0),axis);model.add(spike);}const halo=new T.Mesh(new T.TorusGeometry(.72,.08,8,24),material('#ff4d4d',.3,.3,true));halo.rotation.x=Math.PI/2;halo.position.y=.06;model.add(halo);model.userData.ring=halo;}
-        else{const slick=new T.Mesh(new T.CylinderGeometry(3.2,3.2,.035,24),material('#191322',.12,.6));model.add(slick);ring(model,3.2,.07,0,.03,0,material('#b28cff',.3,.4,true));}
-        model.traverse(n=>{n.userData.objective=true;n.userData.noCameraOcclusion=true;});this.worldGroup.add(model);this.raceModels.set(key,model);}
-       model.visible=entry.ttl>0;model.position.set(entry.x,kind==='mine'?0:.1,entry.z);
-       if(kind==='mine'&&model.userData.ring)model.userData.ring.scale.setScalar(reduced?1:1+.14*Math.sin(time*6));
-      }
-      for(const entry of match.race?.coins??[]){
-       const key=`coin:${entry.id}`;active.add(key);let model=this.raceModels.get(key);
-       if(!model){model=new T.Group();const disc=new T.Mesh(new T.CylinderGeometry(.42,.42,.09,20),material('#ffd35c',.85,.25,true));disc.rotation.z=Math.PI/2;model.add(disc);const rim=new T.Mesh(new T.TorusGeometry(.42,.05,8,24),material('#fff3b0',.7,.3,true));rim.rotation.y=Math.PI/2;model.add(rim);model.traverse(n=>{n.userData.objective=true;n.userData.noCameraOcclusion=true;});this.worldGroup.add(model);this.raceModels.set(key,model);}
-       model.visible=entry.ready??entry.wait<=0;model.position.set(entry.x,1.2,entry.z);model.rotation.y=reduced?0:time*2.6;
-      }
-      for(const [key,model] of this.raceModels)if(!active.has(key)){this.worldGroup.remove(model);this.disposeObject(model);this.raceModels.delete(key);}
-     }
+      updateRace(match,time){syncRacePresentation(this,match,time);}
     _renderPreview(time,reduced){const rect=this.previewRect;if(!rect||rect.width<12||rect.height<12||!(this.renderer instanceof T.WebGLRenderer))return;const renderer=this.renderer,w=this.width,h=this.height;if(w<=0||h<=0)return;const x=Math.max(0,Math.round(rect.left)),y=Math.max(0,Math.round(h-rect.bottom)),vw=Math.max(1,Math.round(rect.width)),vh=Math.max(1,Math.round(rect.height));const m=this.menu.model;m.rotation.y=Math.PI+.25+(reduced?0:Math.sin(time*.4)*.22);m.position.y=.17;const cam=this.menu.camera;cam.aspect=Math.max(.2,vw/vh);cam.updateProjectionMatrix();const prevAuto=renderer.autoClear;renderer.setScissorTest(true);renderer.setViewport(x,y,vw,vh);renderer.setScissor(x,y,vw,vh);renderer.autoClear=true;renderer.render(this.menu.scene,cam);renderer.setScissorTest(false);renderer.setViewport(0,0,w,h);renderer.setScissor(0,0,w,h);renderer.autoClear=prevAuto;}
           dispose(){this.clearObjectiveMarkers();this.effectPool?.dispose();this.projectilePool?.dispose();this.railPool?.dispose();this.deathPool?.dispose();disposeComposer(this.composer);this.composer=null;this.muzzleLights?.dispose();this.lowHealthOverlay?.dispose();this.disposeObject(this.scene);this.disposeObject(this.menu.scene);this.environmentRT?.dispose?.();for(const resource of this.renderResources||[])resource.dispose();this.renderResources?.clear();for(const resource of this.sharedResources||[])resource.dispose();this.sharedResources?.clear();this.modelAssets?.materials.clear();this.modelAssets?.geometries.clear();this.modelAssets?.resources.clear();this.arenaAssets?.materials.clear();this.arenaAssets?.geometries.clear();this.arenaAssets?.resources.clear();clearSurfaceTextures();this.renderer.dispose();}
-}
-// Barrier polygons come from race.boundary (outer/inner loops) and fall back to
-// offsetting the gate normals by halfWidth for older fixtures.
-function raceBarrierPolygons(race){
- const boundary=race?.boundary;
- if(boundary&&Array.isArray(boundary.outer)&&boundary.outer.length>1){
-  const polygons=[{points:boundary.outer,side:'outer'}];
-  if(Array.isArray(boundary.inner)&&boundary.inner.length>1)polygons.push({points:boundary.inner,side:'inner'});
-  return polygons;
- }
- const gates=Array.isArray(race?.gates)?race.gates:[];
- if(gates.length<2)return [];
- const halfWidth=Math.max(1,Number(gates[0].halfWidth)||12);
- const offset=sign=>gates.map(p=>({x:p.x-p.nz*sign*halfWidth,z:p.z+p.nx*sign*halfWidth}));
- return [{points:offset(-1),side:'outer'},{points:offset(1),side:'inner'}];
-}
-// One merged wall per polygon: vertical quads along every edge plus a top cap,
-// with a separate thin stripe band floated 0.03 off the wall plane.
-function raceBarrierGeometry(points,side,height=2.7){
- const positions=[],stripes=[];
- const area=points.reduce((sum,p,i)=>{const q=points[(i+1)%points.length];return sum+(p.x*q.z-q.x*p.z);},0);
- const ccw=area>=0,capWidth=.34,stripeOffset=.03,stripeTop=height-.1,stripeBottom=height-.42;
- for(let i=0;i<points.length;i++){
-  const a=points[i],b=points[(i+1)%points.length],dx=b.x-a.x,dz=b.z-a.z,length=Math.hypot(dx,dz);
-  if(!(length>1e-6))continue;
-  let nx=-dz/length,nz=dx/length;
-  if(!ccw){nx=-nx;nz=-nz;}
-  const facing=side==='inner'?-1:1,tx=nx*facing,tz=nz*facing;
-  positions.push(a.x,0,a.z,b.x,0,b.z,b.x,height,b.z,a.x,0,a.z,b.x,height,b.z,a.x,height,a.z);
-  const cx0=a.x+tx*capWidth,cz0=a.z+tz*capWidth,cx1=b.x+tx*capWidth,cz1=b.z+tz*capWidth;
-  positions.push(a.x,height,a.z,b.x,height,b.z,cx1,height,cz1,a.x,height,a.z,cx1,height,cz1,cx0,height,cz0);
-  stripes.push(a.x+tx*stripeOffset,stripeBottom,a.z+tz*stripeOffset,b.x+tx*stripeOffset,stripeBottom,b.z+tz*stripeOffset,b.x+tx*stripeOffset,stripeTop,b.z+tz*stripeOffset,a.x+tx*stripeOffset,stripeBottom,a.z+tz*stripeOffset,b.x+tx*stripeOffset,stripeTop,b.z+tz*stripeOffset,a.x+tx*stripeOffset,stripeTop,a.z+tz*stripeOffset);
- }
- const wall=new T.BufferGeometry();wall.setAttribute('position',new T.Float32BufferAttribute(positions,3));wall.computeVertexNormals();
- const stripe=new T.BufferGeometry();stripe.setAttribute('position',new T.Float32BufferAttribute(stripes,3));stripe.computeVertexNormals();
- return {wall,stripe};
-}
-// Nearest-centerline tangent for a boost pad, so the chevrons point along the
-// local racing direction rather than a fixed world axis.
-function centerlineDirection(x,z,points){
- if(!points?.length)return {x:0,z:1};
- let best=null,bestDist=Infinity;
- for(let i=0;i<points.length;i++){
-  const a=points[i],b=points[(i+1)%points.length],dx=b.x-a.x,dz=b.z-a.z,length2=dx*dx+dz*dz;
-  if(!(length2>1e-9))continue;
-  const t=Math.max(0,Math.min(1,((x-a.x)*dx+(z-a.z)*dz)/length2)),px=a.x+dx*t,pz=a.z+dz*t,dist=(x-px)**2+(z-pz)**2;
-  if(dist<bestDist){bestDist=dist;best={x:dx,z:dz};}
- }
- if(!best)return {x:0,z:1};
- const length=Math.hypot(best.x,best.z)||1;
- return {x:best.x/length,z:best.z/length};
-}
-// A flat V-chevron laid on the track; +Y in shape space becomes +Z once the
-// mesh is tilted flat, which matches the group yaw convention used below.
-function boostChevronGeometry(width=.72,height=.6,thickness=.24){
- const shape=new T.Shape();
- shape.moveTo(0,0);shape.lineTo(width,-height);shape.lineTo(width,-height+thickness);
- shape.lineTo(0,thickness);shape.lineTo(-width,-height+thickness);shape.lineTo(-width,-height);
- shape.closePath();
- return new T.ShapeGeometry(shape);
-}
-// One pad group per boost pad, drawn flat at y=.06 so it can never z-fight the
-// floor. Three chevrons keep the direction legible at race speed.
-function boostPadModel(pad,centerline){
- const group=new T.Group(),dir=centerlineDirection(pad.x,pad.z,centerline);
- group.position.set(pad.x,.06,pad.z);group.rotation.y=Math.atan2(dir.x,dir.z);group.userData.raceBoost=pad.id;
- const geometry=boostChevronGeometry(),glow=new T.MeshBasicMaterial({color:'#a8f7ff',transparent:true,opacity:.92,side:T.DoubleSide,depthWrite:false});
- for(let i=0;i<3;i++){const chevron=new T.Mesh(geometry,glow);chevron.rotation.x=Math.PI/2;chevron.position.z=(i-1)*.66;group.add(chevron);}
- return group;
-}
-export function raceTrackModel(race,color='#83f4d5',parent,assets){const cache=assets??currentAssets()??new ModelAssets();return withAssets(cache,()=>raceTrackBody(race,color,parent));}
-function raceTrackBody(race,color='#83f4d5',parent){
- const group=new T.Group(),white=material('#ffffff'),black=material('#10151b'),accent=material(color,.4,.3,true);
- const gates=race.gates??[],start=gates[0];
- if(start){const line=new T.Group();line.position.set(start.x,.08,start.z);line.rotation.y=Math.atan2(start.nx,start.nz);for(let row=0;row<2;row++)for(let col=0;col<12;col++)box(line,2,.025,1.2,(col-5.5)*2,0,(row-.5)*1.2,(row+col)%2?white:black);group.add(line);}
- for(const [index,p] of (race.grid??[]).entries()){const slot=new T.Group();slot.position.set(p.x,.08,p.z);slot.rotation.y=p.heading??p.yaw??0;slot.userData.raceGrid=index;for(const x of [-2,2])box(slot,.12,.03,5,x,0,0,white);for(const z of [-2.5,2.5])box(slot,4,.03,.12,0,0,z,white);group.add(slot);}
- for(const [index,gate] of gates.entries()){const frame=new T.Group(),width=gate.halfWidth??12,mat=index===0?accent:material(index%2?'#ffce73':'#b28cff',.4,.3,true);frame.position.set(gate.x,0,gate.z);frame.rotation.y=Math.atan2(gate.nx,gate.nz);frame.userData.raceGate=index;for(const x of [-width,width])box(frame,.25,6,.25,x,3,0,mat);box(frame,width*2,.25,.25,0,6,0,mat);if(typeof document!=='undefined'){textLabel(frame,index===0?'1 / FINISH':String(index+1),0,6.8,0,1.4,'#ffffff');textLabel(frame,String(index+1),0,6.8,0,1.4,'#ffffff',Math.PI);}group.add(frame);}
- const points=race.centerline??[];for(let i=0;i<points.length;i++){const a=points[i],b=points[(i+1)%points.length],dx=b.x-a.x,dz=b.z-a.z,length=Math.hypot(dx,dz);if(!length)continue;const stripe=box(group,.16,.025,length,(a.x+b.x)/2,.07,(a.z+b.z)/2,accent);stripe.rotation.y=Math.atan2(dx,dz);}
- for(const pad of race.boostPads??[])group.add(boostPadModel(pad,points));
- const host=parent||group,polygons=raceBarrierPolygons(race);
- if(polygons.length){
-  const barrierMat=material('#e78b30',.08,.78),stripeMat=material('#f4eddb',.05,.85);
-  if(barrierMat.side!==T.DoubleSide)barrierMat.side=T.DoubleSide;
-  if(stripeMat.side!==T.DoubleSide)stripeMat.side=T.DoubleSide;
-  for(const {points,side} of polygons){
-   if(!(points.length>1))continue;
-   const {wall,stripe}=raceBarrierGeometry(points,side);
-   const wallMesh=new T.Mesh(wall,barrierMat);wallMesh.userData.raceBarrier=side;host.add(wallMesh);
-   const stripeMesh=new T.Mesh(stripe,stripeMat);stripeMesh.userData.raceStripe=true;stripeMesh.userData.arenaDetail=true;host.add(stripeMesh);
-  }
- }
- if(parent&&group.parent!==parent)parent.add(group);
- // Markers are visual only and must not shorten the camera's occlusion ray; the
- // solid rail walls stay occluders so the camera can pull in front of them.
- group.traverse(n=>{if(n.userData.raceBarrier)return;n.userData.objective=true;n.userData.noCameraOcclusion=true;});
- if(host!==group)for(const n of host.children)if(n.userData.raceStripe){n.userData.objective=true;n.userData.noCameraOcclusion=true;}
- return group;
 }

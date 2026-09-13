@@ -1,5 +1,32 @@
 # COCS verification report
 
+## Release 2.71 - Split core, bots, objectives, race presentation; chunk the client
+
+Baseline `fa14a66`.
+
+- `game/core.mjs` no longer owns bot AI or objective updates: `game/bots.mjs`
+  (`botInput` plus `defensivePost`/`flankDestination`/`patrolPoint`/`separation`/
+  `spreadBias`/`zoneSlot`/`zoneDefense`/`path`) and `game/objectives.mjs`
+  (`updateAssault`/`updatePayload`/`updateObjectives`) hold them, with the `Match`
+  methods now thin delegations. Bodies moved verbatim.
+- `game/view.mjs` no longer owns race presentation: `game/race-presentation.mjs`
+  holds `raceTrackModel` and the per-frame race sync; `ArenaView.prototype.updateRace`
+  delegates and `view.mjs` re-exports `raceTrackModel`. `view.mjs` dropped from
+  773 to 656 lines. The objective/marker lifecycle was left in `view.mjs` because
+  it is coupled to the public `objectiveColor`, software-renderer draw ranges and
+  the flag/payload models.
+- `vite.config.ts` now adds Rolldown `codeSplitting` groups for the client
+  (`three.core`, `three`, director/demo/progression/showcase). The largest chunk
+  fell from 839kB (`post-*`) to 365kB (`three-*`); the >500kB build warning is
+  gone. Scoped to the client environment so rsc/ssr/worker manifests are
+  unchanged.
+
+Verification: game **924/924**, server **123/123**, SSR `tests/*.test.mjs` 4/4,
+`tsc --noEmit` clean, `npm run lint` 0 errors, production build succeeds with no
+chunk-size warning. Residual note: `core.mjs`<->`bots.mjs`/`objectives.mjs` and
+`view.mjs`<->`race-presentation.mjs` are runtime-safe ESM cycles; all cross-module
+access is inside called functions.
+
 ## Release 2.70 - Module extraction, map schema and async persistence
 
 Follow-up to the audit release. Baseline `7c1769d`; commits for this pass.

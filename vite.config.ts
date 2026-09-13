@@ -51,6 +51,36 @@ export default defineConfig(async () => {
         ? { watch: { useFsEvents: false, usePolling: true } }
         : {}),
     },
+    // vinext owns client chunking through rolldown `codeSplitting`, so extend
+    // its groups (rather than `manualChunks`, which rolldown ignores once
+    // `codeSplitting` is set). Scoped to the client environment so the SSR and
+    // worker manifests keep their existing layout.
+    environments: {
+      client: {
+        build: {
+          rolldownOptions: {
+            output: {
+              codeSplitting: {
+                groups: [
+                  {
+                    name: "three-core",
+                    test: /node_modules[\\/]three[\\/]build[\\/]three\.core\.js/,
+                  },
+                  {
+                    name: "three",
+                    test: /node_modules[\\/]three[\\/]/,
+                  },
+                  {
+                    name: "director",
+                    test: /[\\/]game[\\/](?:director|demo|demo-store|progression|cosmetics|showcase|showcase-build|replay)\.mjs/,
+                  },
+                ],
+              },
+            },
+          },
+        },
+      },
+    },
     plugins: [
       vinext(),
       sites(),

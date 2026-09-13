@@ -23,7 +23,7 @@ Severity:
 
 Effort: **S** <= half day, **M** ~1-2 days, **L** > 2 days.
 
-## Status (2026-09-13, release v2.70)
+## Status (2026-09-13, release v2.71)
 
 Implemented and deployed (v2.69): SEC-1..4, BUG-1..12, OPS-1, TEST-1, PERF-1..3,
 BUG-10..12, NET-1..3, REN-1, REN-2, ARCH-2, ARCH-3 (math/team/interpolation
@@ -31,31 +31,35 @@ partially), ARCH-4 (protocol; map-schema not), ARCH-5, DEAD-1..4, DEAD-6,
 ROBUST-1, SEC-5, TEST-3 (partial), DOC-1, UX-1 (partial). Game 916/916, server
 123/123, SSR 4/4, typecheck clean, lint 0 errors, live deploy verified.
 
-Implemented in v2.70 (resume):
-- TEST-2: `app/page.tsx` is no longer parsed by tests. Extracted `buildShowcase`
-  into `game/showcase-build.mjs`, `renderScoreboard` into `game/scoreboard.mjs`,
-  and the game-chat / race-HUD JSX into `app/game-ui/game-chat.tsx` and
-  `app/game-ui/race-hud.tsx`; the tests import them directly.
-- ARCH-4 remainder: added `game/map-schema.mjs` and refactored the map modules
-  onto shared `freeze`/`wall`/`cover`/`pad`/`tp`/`zone`/team/flag builders with a
-  canonical teleporter `target` field.
-- ROBUST-2 remainder: history/progression persistence is now async and coalesced
-  off the simulation tick with `whenPersisted()`/`flush()` and graceful shutdown.
-  Game 924/924, server 123/123, build + SSR clean, lint 0 errors.
+v2.70 (resume): TEST-2 (page tests no longer parse `app/page.tsx`; extracted
+`showcase-build.mjs`, `scoreboard.mjs`, `app/game-ui/game-chat.tsx`,
+`app/game-ui/race-hud.tsx`), ARCH-4 remainder (`game/map-schema.mjs` + map
+refactor), ROBUST-2 remainder (async coalesced persistence).
+
+v2.71 (resume): ARCH-1 (`game/bots.mjs`, `game/objectives.mjs` extracted from
+`core.mjs`; `game/race-presentation.mjs` extracted from `view.mjs`; `page.tsx`
+was modularized in v2.70), ARCH-6 remainder (Rolldown `codeSplitting` groups for
+`three`/`three-core`/director; max chunk dropped from 839kB to 365kB, no >500kB
+warning). Game 924/924, server 123/123, build + SSR clean, lint 0 errors.
 
 Explicitly deferred (still valid, not started):
-- ARCH-1 remainder: split `game/core.mjs` and `game/view.mjs` (page.tsx is now
-  partly modularized via the extracted UI units).
-- ARCH-6 remainder: client code-splitting and `globals.css` decomposition
-  (geometry caching and texture disposal landed).
-- DEAD-5 remainder: collision for arch/barrel/ruin props and ceilings.
-- ARCH-3 remainder: the ternary `clamp` variants in `director.mjs`,
-  `bot-personalities.mjs`, `race-camera.mjs` and the `clamp01` copies in
-  `ctf-maps.mjs`/`blood-gulch.mjs` were intentionally left because their
-  inverted-range semantics differ.
+- ARCH-6 CSS remainder: decompose the monolithic `globals.css` (build chunking
+  is done; CSS rule de-duplication was not, because cascade equivalence cannot be
+  verified without a browser).
+- DEAD-5 remainder: collision for arch/barrel/ruin props and ceilings (the audit
+  marked the decorative intent ambiguous; adding AABBs would change nav/balance).
+- ARCH-3 remainder: ternary `clamp` variants and `clamp01` copies with differing
+  inverted-range semantics, intentionally left.
+
+Residual risk from v2.71: `core.mjs` <-> `bots.mjs`/`objectives.mjs` and
+`view.mjs` <-> `race-presentation.mjs` are now runtime-safe ESM cycles (all
+cross-module access happens inside called functions). They pass the full suite
+and lint, but a future change that reads an imported binding at module top level
+would need to break the cycle.
 
 These remaining items are large structural refactors or intentionally-divergent
 code; the scripted defects and all P0/P1 findings are resolved.
+
 
 
 ---
