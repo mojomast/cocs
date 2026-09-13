@@ -324,3 +324,63 @@ test('race disables shadows, acknowledges input and interpolates the local drive
  assert.deepEqual(client.viewMatch().race,second.race);
  assert.deepEqual(second,original);
 });
+
+test('connect rejects when the socket closes before opening',async t=>{
+ const sockets=[];
+ class Socket{constructor(){this.readyState=0;sockets.push(this);}close(){this.readyState=3;}}
+ t.mock.method(globalThis,'WebSocket',function(){return new Socket();});
+ const client=new NetClient();
+ const pending=client.connect();
+ const ws=sockets[0];
+ ws.readyState=3;
+ ws.onclose?.();
+ await assert.rejects(pending,/connection closed before open/);
+ assert.equal(client.connected,false);
+ assert.equal(client._pendingReject,null);
+});
+
+test('malformed snapshots do not throw or block subsequent valid frames',()=>{
+ const client=new NetClient();
+ client.createShadow('crosswire',config);
+ client.actorId=0;
+ assert.doesNotThrow(()=>client.onMessage(JSON.stringify({type:'snapshot',seq:1,acks:{0:0},state:{time:0,over:false,actors:[{id:0,ammo:null},null],vehicles:[null],rockets:[]}})));
+ assert.equal(client.resynced,true);
+ assert.doesNotThrow(()=>client.onMessage(JSON.stringify({type:'snapshot',seq:2,acks:{0:0},state:{time:0,over:false,actors:[{id:0,x:1,y:0,z:5,ammo:[Infinity,0,0,0,0]}],vehicles:[null],rockets:[]}})));
+ assert.equal(client.shadow.actors[0].x,1);
+ assert.equal(client.shadow.actors[0].ammo[0],Infinity);
+});
+
+test('vehicle resync applies vy, flight, altitude, gunner and passengers',()=>{
+ const client=new NetClient();
+ client.createShadow('crosswire',config);
+ client.shadow.vehicles=[{id:'v1',position:{x:0,y:0,z:0},velocity:{x:0,z:0},heading:0,health:100,maxHealth:100,driver:null,gunner:null,passengers:[],vy:0}];
+ client.resyncVehicles([{id:'v1',x:1,y:2,z:3,vx:4,vz:5,yaw:6,vy:7,flight:true,altitude:8,gunner:2,passengers:[3,4]}]);
+ const v=client.shadow.vehicles[0];
+ assert.equal(v.vy,7);
+ assert.equal(v.flight,true);
+ assert.equal(v.altitude,8);
+ assert.equal(v.gunner,2);
+ assert.deepEqual(v.passengers,[3,4]);
+});
+
+test('progression token is generated, transported and persisted',t=>{
+ const store=new Map();
+ const storage={getItem:k=>store.get(k)??null,setItem:(k,v)=>store.set(k,v),removeItem:k=>store.delete(k)};
+ const sent=[];
+ class Socket{constructor(){this.readyState=1;}send(text){sent.push(JSON.parse(text));}}
+ Socket.OPEN=1;
+ t.mock.method(globalThis,'WebSocket',Socket);
+ const client=new NetClient('ws://test:3',{storage});
+ client.ws=new Socket();
+ const token=client.progressToken;
+ assert.equal(typeof token,'string');
+ assert.ok(token.length>=32,`token is at least 32 chars: ${token}`);
+ assert.equal(store.get('token-arena-progress-token'),token);
+ client.join('n','chatgpt','openclaw');
+ client.create('n','chatgpt','openclaw');
+ assert.equal(sent[0].progressToken,token);
+ assert.equal(sent[1].progressToken,token);
+ client.onMessage(JSON.stringify({type:'welcome',peerId:1,host:true,progressToken:'server-issued-token-abcdefghijklmnopqrstuvwxyz'}));
+ assert.equal(client.progressToken,'server-issued-token-abcdefghijklmnopqrstuvwxyz');
+ assert.equal(store.get('token-arena-progress-token'),'server-issued-token-abcdefghijklmnopqrstuvwxyz');
+});

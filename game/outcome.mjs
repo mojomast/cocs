@@ -11,6 +11,8 @@ export function actorWon(result, mode, actor) {
   }
   if (teamMode(mode)) return result.winner !== null && result.winner !== undefined && result.winner === actor.team;
   if (mode === 'armsrace') {
+    // An explicit finisher outranks any re-derived ladder/frag ranking.
+    if (result.winner !== null && result.winner !== undefined) return result.winner === actor.id;
     // Rank by ladder first, then frags, mirroring Match.leaders so the awarded
     // winner matches the in-match leaderboard on time/sudden-death endings.
     const ladder = item => Number(item.ladder) || 0;

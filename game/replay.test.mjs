@@ -1,9 +1,9 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {QUICK_MATCH_PRESETS,presetConfig,shuffleSelection,nextArenaSelection} from './replay.mjs';
+import {mapsForMode} from './arenas.mjs';
 import {normalizeConfig} from './config.mjs';
 import {CHARACTERS,HARNESSES,validLoadout} from './data.mjs';
-import {MAPS} from './maps.mjs';
 
 test('presets are normalized, reset modifiers and preserve callsign',()=>{
  for(const preset of QUICK_MATCH_PRESETS){
@@ -20,24 +20,34 @@ test('presets are normalized, reset modifiers and preserve callsign',()=>{
 test('shuffle is deterministic with injected RNG and covers compatible choices',()=>{
  const sequence=()=>{let i=0;return ()=>[.2,.7,.9][i++%3];};
  assert.deepEqual(shuffleSelection(sequence()),shuffleSelection(sequence()));
- for(let c=0;c<CHARACTERS.length;c++)for(let h=0;h<HARNESSES.length;h++)for(let m=0;m<MAPS.length;m++){
-  const values=[(c+.5)/CHARACTERS.length,(h+.5)/HARNESSES.length,(m+.5)/MAPS.length];
+ const pool=mapsForMode('deathmatch',{legacy:true});
+ for(let c=0;c<CHARACTERS.length;c++)for(let h=0;h<HARNESSES.length;h++)for(let m=0;m<pool.length;m++){
+  const values=[(c+.5)/CHARACTERS.length,(h+.5)/HARNESSES.length,(m+.5)/pool.length];
   const selection=shuffleSelection(()=>values.shift());
   assert.equal(selection.character,CHARACTERS[c].id);
-  assert.equal(selection.mapId,MAPS[m].id);
+  assert.equal(selection.mapId,pool[m].id);
   assert.ok(validLoadout(selection.character,selection.harness));
   if(selection.character==='claude')assert.equal(selection.harness,'claudecode');
  }
 });
 
 test('next arena always rotates, wraps and retains compatible random loadouts',()=>{
- assert.ok(MAPS.length>1);
- for(let i=0;i<MAPS.length;i++)for(const roll of [0,.25,.5,.999999]){
-  const next=nextArenaSelection(MAPS[i].id,()=>roll);
-  assert.equal(next.mapId,MAPS[(i+1)%MAPS.length].id);
-  assert.notEqual(next.mapId,MAPS[i].id);
+ const pool=mapsForMode('deathmatch',{legacy:true});
+ assert.ok(pool.length>1);
+ for(let i=0;i<pool.length;i++)for(const roll of [0,.25,.5,.999999]){
+  const next=nextArenaSelection(pool[i].id,()=>roll);
+  assert.equal(next.mapId,pool[(i+1)%pool.length].id);
+  assert.notEqual(next.mapId,pool[i].id);
   assert.ok(validLoadout(next.character,next.harness));
-  assert.deepEqual(next,nextArenaSelection(MAPS[i].id,()=>roll));
+  assert.deepEqual(next,nextArenaSelection(pool[i].id,()=>roll));
  }
- assert.equal(nextArenaSelection('unknown',()=>0).mapId,MAPS[0].id);
+ assert.equal(nextArenaSelection('unknown',()=>0).mapId,pool[0].id);
+});
+
+test('next arena restricts the rotation to maps that support the active mode',()=>{
+ for(let k=0;k<40;k++)assert.notEqual(nextArenaSelection('convoy-line',()=>k/40,{legacy:true,mode:'deathmatch'}).mapId,'puma-circuit');
+ assert.notEqual(nextArenaSelection('convoy-line',()=>0.5,{legacy:true,mode:'deathmatch'}).mapId,'puma-circuit');
+ assert.ok(mapsForMode('deathmatch',{legacy:true}).every(map=>map.id!=='puma-circuit'));
+ assert.equal(nextArenaSelection('convoy-line',()=>0.5,{legacy:true,mode:'puma-race'}).mapId,'puma-circuit');
+ assert.equal(shuffleSelection(()=>0.5,{legacy:true,mode:'puma-race'}).mapId,'puma-circuit');
 });

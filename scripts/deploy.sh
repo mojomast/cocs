@@ -14,8 +14,20 @@ if [[ "${1:-}" == "--with-game-server" ]]; then
   systemctl --user restart token-arena-server.service
 fi
 
+deploy_version="${DEPLOY_VERSION:-}"
+if [[ -z "${deploy_version}" ]]; then
+  if ! deploy_version="$(node scripts/read-version.mjs)"; then
+    printf 'Could not read the release version from app/page.tsx via scripts/read-version.mjs.\n' >&2
+    exit 1
+  fi
+  if [[ -z "${deploy_version}" ]]; then
+    printf 'Release version footer is missing from app/page.tsx.\n' >&2
+    exit 1
+  fi
+fi
+
 for attempt in {1..10}; do
-  if node scripts/verify-deployment.mjs "${DEPLOY_URL:-https://arena.ussyco.de}" "${DEPLOY_VERSION:-}"; then
+  if node scripts/verify-deployment.mjs "${DEPLOY_URL:-https://arena.ussyco.de}" "${deploy_version}"; then
     exit 0
   fi
   sleep 2

@@ -26,6 +26,7 @@ export class MatchHistory {
   this.file = file ? path.resolve(file) : null;
   this.max = Math.max(1, options.max ?? HISTORY_CAP);
   this.matches = [];
+  this.version = 0;
   if (this.file) this.load();
  }
  load() {
@@ -92,6 +93,7 @@ export class MatchHistory {
    }
   this.matches.unshift(entry);
   this.matches = this.matches.slice(0, this.max);
+  this.version++;
   this.persist();
   return entry;
  }

@@ -1,0 +1,29 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  build-and-test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - name: Install dependencies
+        run: npm ci
+      - name: Typecheck
+        run: npm run typecheck
+      - name: Game tests
+        run: npm run test:game
+      - name: Server tests
+        run: npm run test:server
+      - name: Build
+        run: npm run build
+      - name: Rendered HTML and deployment asset tests
+        run: node --test tests/*.test.mjs
+      - name: Lint
+        run: npm run lint
+        continue-on-error: false

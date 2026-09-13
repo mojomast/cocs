@@ -4,6 +4,7 @@ import {RULES} from './data.mjs';
 
 export const DEFAULT_SERVER_URL = 'ws://localhost:4000';
 const createPlayerId=()=>{try{return globalThis.crypto?.randomUUID?.()??`p-${Math.random().toString(36).slice(2)}-${Date.now().toString(36)}`;}catch{return `p-${Math.random().toString(36).slice(2)}-${Date.now().toString(36)}`;}};
+const createProgressToken=()=>{let token=createPlayerId();while(token.length<32)token+=createPlayerId().replace(/^p-/,'');return token.slice(0,64);};
 const RENDER_DELAY_DEFAULT = 100;
 const RENDER_DELAY_MIN = 90;
 const RENDER_DELAY_MAX = 160;
@@ -21,6 +22,8 @@ export class NetClient {
   this.storageKey = `token-arena-net:${url}`;
   this.roomKey = `token-arena-room:${url}`;
   this.playerKey = 'token-arena-player-id';
+  this.progressKey = 'token-arena-progress-token';
+  this.progressToken = null;
   this.onStart = null;
   this.onResults = null;
   this.onLobby = null;
@@ -63,6 +66,8 @@ export class NetClient {
   this.token = this.storage ? this.storage.getItem(this.storageKey) : null;
   this.roomId = this.storage ? this.storage.getItem(this.roomKey) : null;
   this.playerId = (()=>{if(!this.storage)return createPlayerId();const saved=this.storage.getItem(this.playerKey);if(saved&&/^[A-Za-z0-9-]{8,64}$/.test(saved))return saved;const created=createPlayerId();try{this.storage.setItem(this.playerKey,created);}catch{}return created;})();
+  this.progressToken = this.storage ? this.storage.getItem(this.progressKey) : null;
+  if (!this.progressToken || this.progressToken.length < 32) { this.progressToken = createProgressToken(); if (this.storage) { try { this.storage.setItem(this.progressKey, this.progressToken); } catch {} } }
   this.progression = null;
    this.buffer = [];
    this.snapshotSeq = 0;
@@ -96,7 +101,7 @@ export class NetClient {
    this._pendingReject = reject;
    ws.onopen = () => { if (!current()) return; this._pendingReject = null; this.connected = true; resolve(); };
    ws.onerror = () => { if (!current()) return; this._pendingReject = null; if (!this.connected) reject(new Error('connection failed')); };
-   ws.onclose = () => { if (!current()) return; this._pendingReject = null; this.connected = false; if (this.onClose && !this.closedByUser) this.onClose(); };
+   ws.onclose = () => { if (!current()) return; const reject = this._pendingReject; this._pendingReject = null; this.connected = false; if (reject) reject(new Error('connection closed before open')); if (this.onClose && !this.closedByUser) this.onClose(); };
    ws.onmessage = e => { if (!current()) return; this.onMessage(e.data); };
   });
  }
@@ -109,13 +114,13 @@ export class NetClient {
   this.ws.send(text);
   return true;
  }
- join(name, character, harness, opts = {}) { this.send({ type: 'join', name, character, harness, token: this.token ?? '', roomId: opts.roomId || this.roomId || 'local', spectate: opts.spectate === true, playerId: this.playerId }); }
-  create(name, character, harness, playerName = '') { this.send({ type: 'create', name, playerName, character, harness, token: this.token ?? '', roomId: '', playerId: this.playerId }); }
+ join(name, character, harness, opts = {}) { this.send({ type: 'join', name, character, harness, token: this.token ?? '', roomId: opts.roomId || this.roomId || 'local', spectate: opts.spectate === true, playerId: this.playerId, progressToken: this.progressToken ?? '' }); }
+ create(name, character, harness, playerName = '') { this.send({ type: 'create', name, playerName, character, harness, token: this.token ?? '', roomId: '', playerId: this.playerId, progressToken: this.progressToken ?? '' }); }
  list() { this.send({ type: 'list' }); }
  history() { this.send({ type: 'history' }); }
  host(config, mapId) { this.send({ type: 'host', config, mapId }); }
   start() { this.send({ type: 'start' }); }
-  gear(gear, attachments) { this.send({ type: 'gear', gear, ...(attachments !== undefined ? { attachments } : {}) }); }
+  gear(gear, attachments, finish) { this.send({ type: 'gear', gear, ...(attachments !== undefined ? { attachments } : {}), ...(finish !== undefined ? { finish } : {}) }); }
   voiceState(enabled) { return typeof enabled === 'boolean' && this.send({ type: 'voice-state', enabled }); }
   voiceSignal(to, payload) {
    if (!payload || typeof payload !== 'object' || Array.isArray(payload)) return;
@@ -133,6 +138,7 @@ export class NetClient {
   let msg;
   try { msg = JSON.parse(data); } catch { return; }
   if (!msg || typeof msg !== 'object' || Array.isArray(msg)) return;
+  try {
   switch (msg.type) {
    case 'voice-signal': this.onVoiceSignal?.(msg); break;
    case 'voice-config':
@@ -148,10 +154,11 @@ export class NetClient {
     this.spectate = msg.spectate === true;
     if (msg.roomId) { this.roomId = msg.roomId; if (this.storage) this.storage.setItem(this.roomKey, msg.roomId); }
     if (msg.token) { this.token = msg.token; if (this.storage) this.storage.setItem(this.storageKey, msg.token); }
+    if (typeof msg.progressToken === 'string' && msg.progressToken) { this.progressToken = msg.progressToken; if (this.storage) { try { this.storage.setItem(this.progressKey, msg.progressToken); } catch {} } }
     if (msg.profile) { this.progression = msg.profile; this.onProgression?.({ profile: msg.profile, reconnected: msg.reconnected === true }); }
     break;
    case 'lobby':
-    this.players = Array.isArray(msg.players) ? msg.players : [];
+    this.players = Array.isArray(msg.players) ? msg.players.filter(p => p && typeof p === 'object') : [];
     this.hostId = msg.hostId;
     this.isHost = this.peerId === msg.hostId;
     this.config = msg.config;
@@ -188,10 +195,11 @@ export class NetClient {
      if (this.chatLog.length > 100) this.chatLog.splice(0, this.chatLog.length - 100);
      this.onChat?.(msg);
      break;
-   case 'error': this.lastError = msg.message; this.onError?.(msg); break;
-  }
-  }
-  push(msg) {
+    case 'error': this.lastError = msg.message; this.onError?.(msg); break;
+   }
+   } catch {}
+   }
+   push(msg) {
    if (Number.isInteger(msg.seq) && msg.seq > 0 && msg.seq <= this.snapshotSeq) return;
    if (Number.isInteger(msg.seq) && msg.seq > 0) this.snapshotSeq = msg.seq;
    msg.recvAt = performance.now();
@@ -202,7 +210,7 @@ export class NetClient {
    this._adapt();
    while (this.buffer.length > this.bufferTarget) this.buffer.shift();
   this.state = msg.state;
-   const actors = Array.isArray(msg.state?.actors) ? msg.state.actors : [];
+   const actors = Array.isArray(msg.state?.actors) ? msg.state.actors.filter(a => a && typeof a === 'object') : [];
    if (msg.state?.race) {
     // Race IDs, inventory and standings belong exclusively to the server.
     this.shadow = null;
@@ -213,8 +221,8 @@ export class NetClient {
   if (this.shadow && this.actorId !== null) {
    const own = actors.find(a => a.id === this.actorId);
     if (own) {
-     this.resync(own);
-     this.resyncVehicles(msg.state.vehicles);
+      this.resync(own);
+      this.resyncVehicles(msg.state?.vehicles);
      // Prediction runs on a shadow match, so restore its clock and terminal
      // state before replaying pending inputs; otherwise each replay counts the
      // same elapsed time again until the shadow times out and freezes.
@@ -273,13 +281,15 @@ export class NetClient {
    this._resetTiming();
  }
   resync(actor) {
+  if (!this.shadow || !actor || typeof actor !== 'object') return;
   const p = this.shadow.actors[0];
    Object.assign(p, structuredClone(actor));
-   p.ammo = actor.ammo.map(n => Number.isFinite(n) ? n : Infinity);
+   p.ammo = Array.isArray(actor.ammo) ? actor.ammo.map(n => Number.isFinite(n) ? n : Infinity) : p.ammo;
   }
    resyncVehicles(vehicles = []) {
    if (!this.shadow) return;
     for (const state of Array.isArray(vehicles) ? vehicles : []) {
+     if (!state || typeof state !== 'object') continue;
      const vehicle = this.shadow.vehicles.find(item => item.id === state.id);
      if (!vehicle) continue;
      vehicle.position = { x: Number.isFinite(state.x) ? state.x : vehicle.position.x, y: Number.isFinite(state.y) ? state.y : vehicle.position.y, z: Number.isFinite(state.z) ? state.z : vehicle.position.z };
@@ -287,6 +297,11 @@ export class NetClient {
      vehicle.heading = Number.isFinite(state.yaw) ? state.yaw : vehicle.heading;
      vehicle.health = Number.isFinite(state.health) ? state.health : vehicle.health;
      vehicle.maxHealth = Number.isFinite(state.maxHealth) ? state.maxHealth : vehicle.maxHealth;
+     if (Number.isFinite(state.vy)) vehicle.vy = state.vy;
+     if (typeof state.flight === 'boolean') vehicle.flight = state.flight;
+     if (Number.isFinite(state.altitude)) vehicle.altitude = state.altitude;
+     if (state.gunner !== undefined) vehicle.gunner = state.gunner;
+     if (Array.isArray(state.passengers)) vehicle.passengers = [...state.passengers];
     vehicle.driver = state.driver;
     vehicle.heat = state.heat;
     vehicle.overheated = state.overheated;

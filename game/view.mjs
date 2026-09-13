@@ -7,6 +7,7 @@ import {normalizeDisplay} from './config.mjs';
 import {WeaponFeedback,EffectPool} from './feedback.mjs';
 import {ModelAssets,withAssets,currentAssets,CameraShake,MuzzleLightPool,LowHealthOverlay,RailBeamPool,DeathPool} from './effects-fx.mjs';
 import {deathPlan,hashUnit} from './deaths.mjs';
+import {resolveFinish} from './cosmetics.mjs';
 import {CharacterRig} from './character-anim.mjs';
 import {terrainTriangles,terrainWallTriangles} from './terrain.mjs';
 import {TEAM_PALETTE,teamPresentation,teamMark,updateTeamMark,applyActorTeam} from './team-presentation.mjs';
@@ -53,7 +54,7 @@ const terrainTextureKind=key=>({grass:'grass',dirt:'sand',rock:'rock',cliff:'roc
 // Collision proxies that next-gen maps render as smooth geometry instead of a box.
 const NEXTGEN_PROXY=new Set(['cave','tunnel','rock','tree','crate','column']);
 const weaponInfo=type=>WEAPONS[type]||{color:['#ff6f91','#e8ff71','#ff9f43'][Math.abs(type)%3],name:`Weapon ${type}`,short:`W${type}`,feel:{}};
-export function weaponModel(type=0,assets,visual=null,finish=null){return withAssets(assets,()=>{type=Number.isInteger(type)&&type>=0?type:0;const info=weaponInfo(type),g=new T.Group(),dark=material('#222f37'),light=material('#73848a'),glow=material(finish||info.color,.3,.3,true);g.userData.type=type;
+export function weaponModel(type=0,assets,visual=null,finish=null){return withAssets(assets,()=>{type=Number.isInteger(type)&&type>=0?type:0;const info=weaponInfo(type),finishColors=resolveFinish(finish,null),g=new T.Group(),dark=material(finishColors?.secondary||'#222f37'),light=material(finishColors?.accent||'#73848a'),glow=material(finishColors?.primary||info.color,.3,.3,true);g.userData.type=type;
   if(type===0){box(g,.2,.23,.62,0,0,-.15,dark);box(g,.24,.1,.34,0,.16,-.18,light);box(g,.07,.045,.48,.105,.06,-.2,glow);const barrel=cylinder(g,.07,.07,.5,0,.01,-.6,light);barrel.rotation.x=Math.PI/2;box(g,.09,.17,.12,0,.25,-.03,dark);box(g,.09,.2,.14,0,-.19,.03,dark);}
  if(type===1){const barrel=cylinder(g,.22,.24,.9,0,0,-.25,dark);barrel.rotation.x=Math.PI/2;ring(g,.205,.037,0,0,-.72,glow,0);box(g,.3,.09,.55,0,.23,-.15,light);box(g,.15,.25,.19,0,-.26,.02,light);for(const x of [-.24,.24])box(g,.04,.24,.38,x,0,-.25,glow);}
  if(type===2){box(g,.21,.22,.7,0,0,-.26,dark);for(const x of [-.14,.14]){box(g,.075,.1,.92,x,.025,-.58,light);box(g,.035,.045,.8,x,.085,-.58,glow);}box(g,.15,.08,.25,0,.2,-.17,glow);box(g,.08,.2,.13,0,-.2,0,dark);}
@@ -653,7 +654,7 @@ export class ArenaView{
       for(const entry of match.race?.coins??[]){
        const key=`coin:${entry.id}`;active.add(key);let model=this.raceModels.get(key);
        if(!model){model=new T.Group();const disc=new T.Mesh(new T.CylinderGeometry(.42,.42,.09,20),material('#ffd35c',.85,.25,true));disc.rotation.z=Math.PI/2;model.add(disc);const rim=new T.Mesh(new T.TorusGeometry(.42,.05,8,24),material('#fff3b0',.7,.3,true));rim.rotation.y=Math.PI/2;model.add(rim);model.traverse(n=>{n.userData.objective=true;});this.worldGroup.add(model);this.raceModels.set(key,model);}
-       model.visible=entry.ready!==false;model.position.set(entry.x,1.2,entry.z);model.rotation.y=reduced?0:time*2.6;
+       model.visible=entry.ready??entry.wait<=0;model.position.set(entry.x,1.2,entry.z);model.rotation.y=reduced?0:time*2.6;
       }
       for(const [key,model] of this.raceModels)if(!active.has(key)){this.worldGroup.remove(model);this.disposeObject(model);this.raceModels.delete(key);}
      }

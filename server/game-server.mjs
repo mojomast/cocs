@@ -1,5 +1,5 @@
 import http from 'node:http';
-import { pathToFileURL } from 'node:url';
+import { pathToFileURL, fileURLToPath } from 'node:url';
 import { WebSocketServer } from 'ws';
 import { RoomRegistry } from './rooms.mjs';
 import { MatchHistory } from './history.mjs';
@@ -19,33 +19,41 @@ export function voiceConfig(peerId, env = process.env, now = Date.now()) {
 const VOICE_BUFFER_LIMIT = 64 * 1024;
 export const TRAFFIC_BUFFER_LIMIT = 512 * 1024;
 export const HEARTBEAT_MS = 15000;
+export const CONTROL_RATE_LIMIT = 60;
+export const CONTROL_RATE_WINDOW = 1000;
+export const MAX_CLIENTS = 256;
 
-export function createGameServer({ port = 0, random, tickDt = 1 / 60, tickMs = 1000 / 60, graceMs, snapshotHz, historyPath = null, progressionPath = null } = {}) {
+export function createGameServer({ port = 0, random, tickDt = 1 / 60, tickMs = 1000 / 60, graceMs, snapshotHz, historyPath = null, progressionPath = null, maxClients = MAX_CLIENTS } = {}) {
  const history = new MatchHistory(historyPath);
  const progression = new ProgressionStore(progressionPath);
  const registry = new RoomRegistry({ random, graceMs, history, progression, snapshotHz, onError: (error, room) => console.error(`room ${room?.id ?? '?'} tick failed`, error) });
  const sockets = new Map();
  const socketPeer = new WeakMap();
  const peerRoom = new Map();
+ let historyCache = null;
+ let historyCacheVersion = -1;
  const server = http.createServer((req, res) => {
   res.setHeader('content-type', 'application/json');
   const players = [...registry.rooms.values()].reduce((n, r) => n + r.peers.size, 0);
   res.end(JSON.stringify({ service: 'token-arena-game-server', rooms: registry.rooms.size, players, port: server.address()?.port ?? port }));
  });
-  const wss = new WebSocketServer({ server, maxPayload: 64 * 1024 });
-  let nextPeer = 1;
-  // Snapshots and voice traffic are replaceable; protocol transitions
-  // (welcome/start/results/lobby/errors) are not. Essential messages that hit a
-  // congested socket are retained in a small per-socket queue and pumped once
-  // the buffer drains, rather than being silently dropped.
-  const REPLACEABLE = new Set(['snapshot', 'events', 'voice-signal', 'voice-config']);
-  function queueEssential(ws, text) {
-   const queue = ws.pendingEssential || (ws.pendingEssential = []);
-   if (queue.length >= 64) queue.shift();
-   // Tag with the peer's room so messages queued for one room are never
-   // delivered after the peer has switched to another.
-   queue.push({ text, room: peerRoom.get(socketPeer.get(ws)) ?? null });
-  }
+ const wss = new WebSocketServer({ server, maxPayload: 64 * 1024 });
+ let nextPeer = 1;
+ // Snapshots and voice traffic are replaceable; protocol transitions
+ // (welcome/start/results/lobby/errors) are not. Essential messages that hit a
+ // congested socket are coalesced by type and pumped once the buffer drains,
+ // rather than being silently dropped.
+ const REPLACEABLE = new Set(['snapshot', 'events', 'voice-signal', 'voice-config']);
+ function queueEssential(ws, text, type) {
+  const queue = ws.pendingEssential || (ws.pendingEssential = []);
+  // Tag with the peer's room so messages queued for one room are never
+  // delivered after the peer has switched to another.
+  const entry = { text, room: peerRoom.get(socketPeer.get(ws)) ?? null, type };
+  const index = queue.findIndex(item => item.type === type);
+  if (index >= 0) queue[index] = entry;
+  else if (queue.length >= 64) queue.shift();
+  else queue.push(entry);
+ }
   function pumpEssential(ws) {
    const queue = ws.pendingEssential;
    if (!queue?.length || ws.readyState !== ws.OPEN) return;
@@ -66,7 +74,7 @@ export function createGameServer({ port = 0, random, tickDt = 1 / 60, tickMs = 1
    const limit = voice ? VOICE_BUFFER_LIMIT : TRAFFIC_BUFFER_LIMIT;
    if (ws.bufferedAmount + Buffer.byteLength(text) <= limit) { ws.send(text); return true; }
    if (REPLACEABLE.has(msg?.type)) { if (msg?.type === 'voice-config') ws.terminate(); return false; }
-   queueEssential(ws, text);
+   queueEssential(ws, text, msg?.type);
    return false;
   }
   function sendTo(peerId, msg) {
@@ -82,7 +90,7 @@ export function createGameServer({ port = 0, random, tickDt = 1 / 60, tickMs = 1
   const roomId = typeof msg.roomId === 'string' && msg.roomId ? msg.roomId : 'local';
   const room = registry.get(roomId);
   if (!room) { sendTo(peerId, { type: 'error', message: `room not found: ${roomId}` }); return; }
-  room.join(peerId, msg.name, msg.character, msg.harness, msg.token, msg.spectate === true, msg.playerId);
+  room.join(peerId, msg.name, msg.character, msg.harness, msg.token, msg.spectate === true, msg.playerId, msg.progressToken);
   if (!room.peers.has(peerId)) return;
   if (peerRoom.get(peerId) !== room) releaseSeat(peerId);
   peerRoom.set(peerId, room);
@@ -90,22 +98,38 @@ export function createGameServer({ port = 0, random, tickDt = 1 / 60, tickMs = 1
  function createRoom(peerId, msg) {
   const room = registry.create(msg.name);
   if (!room) { sendTo(peerId, { type: 'error', message: 'server is at the room limit' }); return; }
-  room.join(peerId, msg.playerName ?? msg.name, msg.character, msg.harness, msg.token, false, msg.playerId);
+  room.join(peerId, msg.playerName ?? msg.name, msg.character, msg.harness, msg.token, false, msg.playerId, msg.progressToken);
   if (!room.peers.has(peerId)) return;
   releaseSeat(peerId);
   peerRoom.set(peerId, room);
  }
-  function dispatch(peerId, msg) {
-   if (!msg || typeof msg !== 'object' || Array.isArray(msg)) return;
-   switch (msg.type) {
-    case 'voice-state': peerRoom.get(peerId)?.voiceState(peerId, msg.enabled, voiceConfig); break;
-    case 'voice-signal': peerRoom.get(peerId)?.voiceSignal(peerId, msg); break;
-   case 'join': joinPeer(peerId, msg); break;
-   case 'create': createRoom(peerId, msg); break;
-   case 'list': sendTo(peerId, { type: 'rooms', rooms: registry.list() }); break;
-   case 'history': sendTo(peerId, { type: 'history', matches: history.all() }); break;
+ function controlAllowed(ws, now = Date.now()) {
+  if (ws.controlRate && now - ws.controlRate.at < CONTROL_RATE_WINDOW) {
+   if (ws.controlRate.count >= CONTROL_RATE_LIMIT) return false;
+  } else ws.controlRate = { at: now, count: 0 };
+  ws.controlRate.count++;
+  return true;
+ }
+ function dispatch(peerId, msg, ws) {
+  if (!msg || typeof msg !== 'object' || Array.isArray(msg)) return;
+  if (msg.type !== 'input' && !controlAllowed(ws)) {
+   if (++ws.protocolErrors > 20) { ws.terminate(); return; }
+   sendTo(peerId, { type: 'error', message: 'rate limit exceeded' });
+   return;
+  }
+  switch (msg.type) {
+   case 'voice-state': peerRoom.get(peerId)?.voiceState(peerId, msg.enabled, voiceConfig); break;
+   case 'voice-signal': peerRoom.get(peerId)?.voiceSignal(peerId, msg); break;
+  case 'join': joinPeer(peerId, msg); break;
+  case 'create': createRoom(peerId, msg); break;
+  case 'list': sendTo(peerId, { type: 'rooms', rooms: registry.list() }); break;
+  case 'history': {
+   if (!historyCache || historyCacheVersion !== history.version) { historyCache = history.all(); historyCacheVersion = history.version; }
+   sendTo(peerId, { type: 'history', matches: historyCache });
+   break;
+  }
     case 'host': peerRoom.get(peerId)?.host(peerId, msg.config, msg.mapId); break;
-    case 'gear': peerRoom.get(peerId)?.setGear(peerId, msg.gear, msg.attachments); break;
+    case 'gear': peerRoom.get(peerId)?.setGear(peerId, msg.gear, msg.attachments, undefined, msg.finish); break;
    case 'start': peerRoom.get(peerId)?.start(peerId); break;
     case 'input': peerRoom.get(peerId)?.input(peerId, { ...(msg.input ?? msg), seq: msg.seq ?? msg.input?.seq }); break;
     case 'chat': {
@@ -123,6 +147,12 @@ export function createGameServer({ port = 0, random, tickDt = 1 / 60, tickMs = 1
    default: sendTo(peerId, { type: 'error', message: `unknown message type: ${msg.type}` });
   }
  }
+ function rewindEvents(room, peerId, msg) {
+  if (msg.type !== 'events' || !Array.isArray(msg.items) || !msg.items.length) return;
+  const peer = room.peers.get(peerId);
+  const first = msg.items[0]?.id;
+  if (peer && Number.isInteger(first) && first > 0) peer.lastSerial = Math.min(peer.lastSerial, first - 1);
+ }
  function flush() {
   for (const room of registry.rooms.values()) {
     for (const { to, msg } of room.drain()) {
@@ -135,14 +165,15 @@ export function createGameServer({ port = 0, random, tickDt = 1 / 60, tickMs = 1
      } else {
        const ws = sockets.get(to);
        if (msg.type === 'voice-config' && peerRoom.get(to) !== room) continue;
-       if (!ws || ws.readyState !== ws.OPEN) continue;
-       deliver(ws, msg, text);
+       if (!ws || ws.readyState !== ws.OPEN) { rewindEvents(room, to, msg); continue; }
+       if (!deliver(ws, msg, text)) rewindEvents(room, to, msg);
      }
     }
   }
   for (const ws of wss.clients) if (ws.pendingEssential?.length) pumpEssential(ws);
  }
  wss.on('connection', ws => {
+  if (wss.clients.size > maxClients) { try { ws.close(1013, 'server full'); } catch {} return; }
   const peerId = nextPeer++;
   ws.isAlive = true;
   sockets.set(peerId, ws);
@@ -153,7 +184,7 @@ export function createGameServer({ port = 0, random, tickDt = 1 / 60, tickMs = 1
    let msg;
    try { msg = JSON.parse(data.toString()); }
    catch { if (++ws.protocolErrors > 20) { ws.terminate(); return; } sendTo(peerId, { type: 'error', message: 'invalid JSON' }); return; }
-   try { dispatch(peerId, msg); }
+   try { dispatch(peerId, msg, ws); }
    catch (e) { if (++ws.protocolErrors > 20) { ws.terminate(); return; } sendTo(peerId, { type: 'error', message: String(e?.message ?? e) }); }
    flush();
   });
@@ -168,6 +199,11 @@ export function createGameServer({ port = 0, random, tickDt = 1 / 60, tickMs = 1
  const timer = setInterval(() => {
   try { registry.tickAll(tickDt); registry.expireAll(); }
   catch (error) { console.error('server tick failed', error); }
+  try {
+   const pinned = new Set();
+   for (const room of registry.rooms.values()) for (const p of room.peers.values()) if (p.playerId) pinned.add(p.playerId);
+   progression.setPinned?.(pinned);
+  } catch {}
   try { history.flush?.(); } catch (error) { console.error('history flush failed', error); }
   try { progression.flush?.(); } catch (error) { console.error('progression flush failed', error); }
   try { flush(); } catch (error) { console.error('outbound flush failed', error); }
@@ -176,6 +212,8 @@ export function createGameServer({ port = 0, random, tickDt = 1 / 60, tickMs = 1
  function close() {
   clearInterval(timer);
   clearInterval(heartbeat);
+  try { history.flush?.(); } catch {}
+  try { progression.flush?.(); } catch {}
   for (const ws of wss.clients) ws.close();
   wss.close();
   server.close();
@@ -185,9 +223,10 @@ export function createGameServer({ port = 0, random, tickDt = 1 / 60, tickMs = 1
 
 const isEntry = process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href;
 if (isEntry) {
- const { server } = createGameServer({ port: Number(process.env.PORT) || 4000, historyPath: new URL('./history.json', import.meta.url).pathname, progressionPath: new URL('./progression.json', import.meta.url).pathname }); server.listen(Number(process.env.PORT) || 4000, () => {
+ const { server, close } = createGameServer({ port: Number(process.env.PORT) || 4000, historyPath: fileURLToPath(new URL('./history.json', import.meta.url)), progressionPath: fileURLToPath(new URL('./progression.json', import.meta.url)) }); server.listen(Number(process.env.PORT) || 4000, () => {
   const { port } = server.address();
   console.log(`COCS game server listening on ws://0.0.0.0:${port} (http://localhost:${port})`);
   console.log('Join from the browser client at ws://localhost:' + port);
  });
+ for (const signal of ['SIGTERM', 'SIGINT']) process.on(signal, () => { close(); process.exit(0); });
 }

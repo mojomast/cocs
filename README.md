@@ -77,10 +77,12 @@ infantry-style local prediction. Reconnect retains the assigned car and race
 state, but input response depends on network latency. No browser/device driving
 playtest has been performed yet.
 
-For this host, deploy with `DEPLOY_VERSION=v2.64 npm run deploy -- --with-game-server`.
-This rebuilds, reloads both services, and checks the public HTML and linked CSS/JS
-assets. Restarting the game service disconnects active players; see
-`deploy/README.md` for web-only deployment and verification commands.
+For this host, deploy with `npm run deploy -- --with-game-server`. The release
+version is read from the `app/page.tsx` footer automatically; set
+`DEPLOY_VERSION=vX.YZ` only to verify a specific release. This rebuilds, reloads
+both services, and checks the public HTML and linked CSS/JS assets. Restarting
+the game service disconnects active players; see `deploy/README.md` for web-only
+deployment and verification commands.
 
 ## Objective clarity and bot variety
 

@@ -91,6 +91,15 @@ test('resolveFinish returns colors or fallback',()=>{
  assert.equal(resolveFinish('unknown',fallback),fallback);
 });
 
+test('resolveFinish resolves finish ids and preserves the fallback for null or unknown',()=>{
+ const ion=resolveFinish('finish-ion');
+ assert.ok(ion,'a known finish id resolves to its palette');
+ assert.equal(ion.primary,'#22d3ee');
+ const fallback={primary:'#123456'};
+ assert.equal(resolveFinish(null,fallback),fallback);
+ assert.equal(resolveFinish(undefined,fallback),fallback);
+});
+
 test('finishRgb returns channels or null for unknown',()=>{
  const rgb=finishRgb('finish-crimson');
  assert.ok(Array.isArray(rgb)&&rgb.length===3);

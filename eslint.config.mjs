@@ -12,7 +12,21 @@ const eslintConfig = defineConfig([
     "out/**",
     "build/**",
     "next-env.d.ts",
+    // Generated and runtime output that is not linted:
+    "game/**/*.test.mjs",
+    ".sites-runtime/**",
+    ".wrangler/**",
+    "dist/**",
+    "coverage/**",
   ]),
+  {
+    files: ["game/**/*.mjs"],
+    rules: {
+      // The game engine is plain JavaScript, not React. This rule is also
+      // pathologically slow on large modules (game/race.mjs), blocking lint.
+      "react-hooks/rules-of-hooks": "off",
+    },
+  },
   {
     files: ["components/ui/**/*.{ts,tsx}", "hooks/use-mobile.ts"],
     rules: {

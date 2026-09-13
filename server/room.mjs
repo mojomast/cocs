@@ -61,7 +61,8 @@ export class Room {
    players: [...this.peers.values()].map(p => ({ peerId: p.id, name: p.name, character: p.character, harness: p.harness, actorId: p.actorId, ready: p.ready, connected: p.disconnectedAt === null, spectate: p.spectate === true, voiceSession: p.voiceSession })) };
  }
  nextConnectedHost() { for (const p of this.peers.values()) if (p.spectate !== true && p.disconnectedAt === null) return p.id; return null; }
- join(peerId, name = '', character = 'chatgpt', harness = 'openclaw', token = '', spectate = false, playerId = '') {
+ progressProfile(peer) { if (!this.progression || !peer?.playerId || !peer.playerToken) return null; return this.progression.getOwned(peer.playerId, peer.playerToken); }
+ join(peerId, name = '', character = 'chatgpt', harness = 'openclaw', token = '', spectate = false, playerId = '', progressToken = '') {
   if (this.peers.has(peerId)) return;
   if (token) {
    const existing = [...this.peers.values()].find(p => p.token === token);
@@ -76,10 +77,9 @@ export class Room {
     }
     const oldId = existing.id;
     this.peers.delete(oldId);
-    existing.id = peerId;
-     existing.disconnectedAt = null;
-     if (validPlayerId(playerId)) existing.playerId = playerId;
-     existing.voiceSession = null;
+     existing.id = peerId;
+      existing.disconnectedAt = null;
+      existing.voiceSession = null;
      existing.inputRate = null;
      existing.latest = null;
      existing.receivedSeq = existing.appliedSeq = existing.latestSeq = 0;
@@ -89,7 +89,7 @@ export class Room {
     this.peers.set(peerId, existing);
     if (this.hostId === oldId) this.hostId = peerId;
     else if (!this.hostId && existing.spectate !== true) this.hostId = peerId;
-    this.send(peerId, { type: 'welcome', peerId, roomId: this.id, host: peerId === this.hostId, reconnected: true, token: existing.token, spectate: existing.spectate === true, profile: this.progression?.get(existing.playerId) ?? null });
+    this.send(peerId, { type: 'welcome', peerId, roomId: this.id, host: peerId === this.hostId, reconnected: true, token: existing.token, spectate: existing.spectate === true, profile: this.progressProfile(existing), progressToken: existing.playerToken ?? null });
     this.broadcast(this.lobby());
     if (this.started && !this.roundOver && this.match) {
      this.send(peerId, { type: 'start', config: { ...this.match.config }, mapId: this.match.arena.id });
@@ -108,13 +108,14 @@ export class Room {
   if (requestedPlayer && active) isSpectator = true;
   if (isSpectator && [...this.peers.values()].filter(p => p.spectate === true).length >= SPECTATOR_LIMIT) { this.send(peerId, { type: 'error', message: 'spectator limit reached' }); return; }
   const l = resolveLoadout(character, harness) || { character: 'chatgpt', harness: 'openclaw' };
+  const identity = this.progression ? this.progression.identify(validPlayerId(playerId) ? playerId : '', progressToken) : null;
   const peer = { id: peerId, name: clean(name) || CHARACTERS.find(c => c.id === l.character).name,
     character: l.character, harness: l.harness, actorId: null, ready: false, latest: null, receivedSeq: 0, latestSeq: 0, appliedSeq: 0, lastSerial: active ? this.match.serial : 0,
      lastJump: false, lastPower: false, lastInteract: false, lastReload: false, edgeFire: false, edgeJump: false, edgePower: false, edgeInteract: false, edgeMelee: false, lastMelee: false, edgeReload: false, edgeGrenade: false, lastGrenade: false,
-   token: randomUUID(), disconnectedAt: null, spectate: isSpectator, voiceSession: null, playerId: validPlayerId(playerId) ? playerId : null };
+   token: randomUUID(), disconnectedAt: null, spectate: isSpectator, voiceSession: null, playerId: identity?.profile.id ?? null, playerToken: identity?.token ?? null };
   this.peers.set(peerId, peer);
   if (!this.hostId && !isSpectator) this.hostId = peerId;
-  this.send(peerId, { type: 'welcome', peerId, roomId: this.id, host: peerId === this.hostId, token: peer.token, spectate: isSpectator, profile: this.progression?.get(peer.playerId) ?? null });
+  this.send(peerId, { type: 'welcome', peerId, roomId: this.id, host: peerId === this.hostId, token: peer.token, spectate: isSpectator, profile: identity?.profile ?? null, progressToken: peer.playerToken });
   this.broadcast(this.lobby());
   if (requestedPlayer && active) this.send(peerId, { type: 'error', message: 'Match in progress — you joined as a spectator.' });
   if (isSpectator && this.started && !this.roundOver && this.match) {
@@ -159,7 +160,7 @@ export class Room {
   const mapId = resolveMapForMode(this.mapId, mode, { legacy: true });
   if (mapId !== this.mapId) this.mapId = mapId;
   const humanCount = Math.min(PLAYER_LIMIT, players.length);
-    this.match = new Match('chatgpt', 'openclaw', this.random, this.mapId, { ...this.config ?? {}, humanCount, loadouts: players.map(p => { const profile = this.progression?.get(p.playerId); return { character: p.character, harness: p.harness, gear: profile?.gear, attachments: profile?.attachments }; }) });
+    this.match = new Match('chatgpt', 'openclaw', this.random, this.mapId, { ...this.config ?? {}, humanCount, loadouts: players.map(p => { const profile = this.progressProfile(p); return { character: p.character, harness: p.harness, gear: profile?.gear, attachments: profile?.attachments, finish: profile?.finish }; }) });
    if (this.match.race) this.config = { ...this.match.config };
   let i = 0;
    for (const p of players) { p.actorId = i; this.match.actors[i].name = p.name; p.latest = null; p.receivedSeq = p.latestSeq = p.appliedSeq = 0; p.lastSerial = 0; p.edgeJump = p.edgePower = p.edgeInteract = false; p.lastJump = p.lastPower = p.lastInteract = false; p.edgeMelee = p.lastMelee = false; p.edgeReload = p.lastReload = false; p.edgeGrenade = false; p.lastGrenade = false; i++; }
@@ -212,12 +213,12 @@ export class Room {
    if (i.grenade === true && !peer.lastGrenade) peer.edgeGrenade = true;
    peer.lastGrenade = i.grenade === true;
  }
- setGear(peerId, gear, attachments, now = Date.now()) {
+ setGear(peerId, gear, attachments, now = Date.now(), finish) {
   const peer = this.peers.get(peerId);
   if (!peer || !peer.playerId || !this.progression || peer.spectate || peer.disconnectedAt !== null) return;
   if (peer.lastGearAt && now - peer.lastGearAt < 500) return;
   peer.lastGearAt = now;
-  const profile = this.progression.setGear(peer.playerId, gear, attachments);
+  const profile = this.progression.setGearOwned(peer.playerId, peer.playerToken, gear, attachments, finish);
   if (profile) this.send(peerId, { type: 'progression', profile, gear: profile.gear, attachments: profile.attachments });
  }
  chat(peerId, text, now = Date.now()) {
@@ -292,6 +293,7 @@ export class Room {
    peer.edgeMelee = peer.lastMelee = false; peer.edgeReload = peer.lastReload = false; peer.edgeGrenade = false; peer.lastGrenade = false;
   peer.actorId = null;
   peer.voiceSession = null;
+  peer.playerToken = null;
   this.peers.delete(peerId);
   if (this.hostId === peerId) this.hostId = this.nextConnectedHost();
   this.broadcast(this.lobby());
@@ -353,7 +355,7 @@ export class Room {
         if (!p.playerId || p.actorId === null || p.spectate) continue;
         const actor = result.actors.find(a => a.id === p.actorId);
         const win = actorWon(result, mode, actor);
-        try { const award = this.progression.award(p.playerId, { win, actor, mode }); if (award) this.send(p.id, { type: 'progression', ...award }); }
+        try { const award = this.progression.awardOwned(p.playerId, p.playerToken, { win, actor, mode }); if (award) this.send(p.id, { type: 'progression', ...award }); }
         catch (error) { this.lastPersistError = error; }
        }
       }

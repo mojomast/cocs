@@ -140,6 +140,37 @@ test('unknown weapons produce typed models and effects do not index past weapon 
  const actor={id:1,weapon:7,health:100,x:0,y:0,z:0,yaw:0,pitch:0,vx:0,vy:0,vz:0,grounded:true};view.render('playing',{actors:[actor],pickups:[],rockets:[{weapon:7,pos:{x:0,y:1,z:0}}],events:[{id:1,type:'shot',weapon:7,actor:1,pos:{x:0,y:1,z:0}}]},.016,1);assert.ok(view.firstPerson.userData.flash);view.effectPool?.dispose();view.projectilePool?.dispose();
   });
 
+test('weapon finishes resolve to palette colors instead of parsing the finish id',()=>{
+ const warnings=[],original=console.warn;
+ console.warn=(...args)=>warnings.push(args.join(' '));
+ try{
+  const model=weaponModel(0,undefined,null,'finish-ion');
+  const colors=new Set();
+  model.traverse(node=>{if(!node.material)return;for(const mat of Array.isArray(node.material)?node.material:[node.material])if(mat.color)colors.add(mat.color.getHexString());});
+  assert.ok(colors.has('22d3ee'),'the ion primary colors the glow');
+  assert.ok(colors.has('0e7490'),'the ion secondary colors the dark accents');
+  assert.ok(colors.has('a5f3fc'),'the ion accent colors the light accents');
+  assert.ok(!warnings.some(line=>/Unknown color/.test(line)),'a finish id never reaches the color parser');
+  const fallback=weaponModel(0,undefined,null,null),fallbackColors=new Set();
+  fallback.traverse(node=>{if(node.material?.color)fallbackColors.add(node.material.color.getHexString());});
+  assert.ok(fallbackColors.has('70ffe6'),'an absent finish keeps the weapon fallback color');
+  weaponModel(0,undefined,null,'finish-missing');
+  assert.ok(!warnings.some(line=>/Unknown color/.test(line)),'an unknown finish keeps the weapon fallback color without warnings');
+ }finally{console.warn=original;}
+});
+
+test('local Puma coins hide until their wait elapses while snapshots use ready',()=>{
+ const local=Object.assign(Object.create(ArenaView.prototype),{worldGroup:new T.Group(),reduced:()=>false});
+ local.updateRace({race:{boxes:[],hazards:[],coins:[{id:'l1',x:0,z:0,wait:5},{id:'l2',x:1,z:1,wait:0}]}},0);
+ assert.equal(local.raceModels.get('coin:l1').visible,false,'a local coin still waiting stays hidden');
+ assert.equal(local.raceModels.get('coin:l2').visible,true,'a local coin with no wait shows immediately');
+ const snapshot=Object.assign(Object.create(ArenaView.prototype),{worldGroup:new T.Group(),reduced:()=>false});
+ snapshot.updateRace({race:{boxes:[],hazards:[],coins:[{id:'s1',x:0,z:0,ready:true},{id:'s2',x:1,z:1,ready:false}]}},0);
+ assert.equal(snapshot.raceModels.get('coin:s1').visible,true,'ready snapshots stay visible');
+ assert.equal(snapshot.raceModels.get('coin:s2').visible,false,'unready snapshots stay hidden');
+ local.updateRace({},1);snapshot.updateRace({},1);
+});
+
 test('Puma model exposes two readable side chainguns',()=>{
   const model=vehicleModel('puma');
   assert.equal(model.userData.vehicle,true);
