@@ -1,5 +1,28 @@
 # COCS verification report
 
+## Release 2.80 - Enemy tuning and a non-overlapping single-player HUD
+
+- **Varied, softer enemies.** Every enemy deploy now rolls a per-actor speed
+  spread (`ENEMY_SPEED_VARIANCE`, +/-22% around the class base) so a wave mixes
+  rushers and stragglers. Enemy firepower was damped across the board: Husk
+  damage x0.32 / melee 8, Spitter x0.40, Brute x0.75, WARDEN x1.0. The profile
+  flows through `gearDamage` in `Match.spawn`, so it applies to every shot and
+  the melee path uses `actor.meleeDamage`.
+- **Edge-anchored HUD.** `SinglePlayerHud` no longer borrows the race HUD (which
+  overlaid the top match bar and the bottom vitals). It now has its own `.sp-hud`
+  layout: the objective chain sits on the left edge, a compact status strip
+  (objective/wave, hostiles, lives, kills, waypoint distance) runs along the top
+  edge under the match bar, boss and hold bars sit directly beneath it, and story
+  lines sit low-centre above the bottom HUD. The centre viewport stays clear and
+  the redundant full-width control hint was removed. Responsive rules move the
+  objective panel to the left-bottom on narrow screens and hide the step list.
+
+Verification: game **993/993**, server **126/126**, SSR 4/4, `tsc` clean, lint 0
+errors, build clean, live deploy verified. New tests assert the speed spread
+stays inside its variance band and that enemy damage lands below 1x on the
+weapon pipeline. No browser/WebGL playtest, so the exact edge spacing is
+unit/layout-verified only and worth a visual pass.
+
 ## Release 2.79 - Single-player campaign as a distinct, story-driven mode
 
 - **Distinct enemies.** `game/enemy-types.mjs` defines frozen enemy classes

@@ -1,6 +1,6 @@
 import {CHARACTERS} from './data.mjs';
 import {CAMPAIGN_MISSIONS,missionFor} from './campaign-data.mjs';
-import {applyEnemyFields,enemyById,DEFAULT_ENEMY_ID} from './enemy-types.mjs';
+import {applyEnemyFields,enemyById,ENEMY_SPEED_VARIANCE,DEFAULT_ENEMY_ID} from './enemy-types.mjs';
 
 // Single-player simulation. Horde spawns escalating waves of fragile enemies;
 // campaign runs a linear, story-driven sequence of objectives with world
@@ -55,6 +55,7 @@ export function spawnGroup(match,state,spec,{team}){
   const actor=match.actor(id,character,harness);
   actor.team=team;actor.isNpc=true;
   applyEnemyFields(actor,type);
+  actor.npcProfile={...actor.npcProfile,speedMult:(actor.npcProfile.speedMult||1)*(1+(match.random()*2-1)*ENEMY_SPEED_VARIANCE)};
   if(request.elite){actor.npcProfile={...actor.npcProfile,health:Math.round(actor.npcProfile.health*1.8),armor:(actor.npcProfile.armor||0)+40};actor.name=`${actor.name} · ELITE`;}
   match.actors.push(actor);
   match.spawn(actor);

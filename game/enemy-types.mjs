@@ -7,34 +7,37 @@ import {botBehavior} from './bot-personalities.mjs';
 export const ENEMY_TYPES = Object.freeze({
  husk: Object.freeze({
   id:'husk', name:'Husk', role:'SWARM',
-  health:30, armor:0, speedMult:1.1, damageMult:.55,
-  kind:'swarmer', meleeOnly:true, meleeRange:2.5, meleeDamage:11,
+  health:30, armor:0, speedMult:1.1, damageMult:.32,
+  kind:'swarmer', meleeOnly:true, meleeRange:2.5, meleeDamage:8,
   range:[1.4,3], hold:.05, aggression:1,
   scale:.72, color:'#ff5c7a', accent:'#3a0d18', points:1,
   character:'chatgpt', harness:'openclaw',
  }),
  spitter: Object.freeze({
   id:'spitter', name:'Spitter', role:'RANGED',
-  health:45, armor:5, speedMult:.95, damageMult:.8,
+  health:45, armor:5, speedMult:.95, damageMult:.4,
   kind:'ranged', range:[14,28], hold:.62, aggression:.42,
   scale:.9, color:'#ffb03e', accent:'#3a2407', points:1,
   character:'meta', harness:'openclaw',
  }),
  brute: Object.freeze({
   id:'brute', name:'Brute', role:'HEAVY',
-  health:140, armor:40, speedMult:.62, damageMult:1.35,
+  health:140, armor:40, speedMult:.62, damageMult:.75,
   kind:'heavy', range:[6,16], hold:.55, aggression:.72,
   scale:1.32, color:'#b060ff', accent:'#2a1140', points:3,
   character:'deepseek', harness:'openclaw',
  }),
  warden: Object.freeze({
   id:'warden', name:'WARDEN', role:'BOSS', boss:true,
-  health:450, armor:100, speedMult:.85, damageMult:1.55,
+  health:450, armor:100, speedMult:.85, damageMult:1,
   kind:'heavy', range:[6,18], hold:.5, aggression:.8,
   scale:1.6, color:'#ff3b3b', accent:'#2a0808', points:10,
   character:'grok', harness:'openclaw',
  }),
 });
+// Every enemy rolls a small speed spread on deploy, so a wave is never a
+// uniform herd: some rush, some lag. Health stays fixed for predictability.
+export const ENEMY_SPEED_VARIANCE = .22;
 export const ENEMY_TYPE_IDS = Object.keys(ENEMY_TYPES);
 export const DEFAULT_ENEMY_ID = 'spitter';
 export const enemyById = id => ENEMY_TYPES[id] || ENEMY_TYPES[DEFAULT_ENEMY_ID];

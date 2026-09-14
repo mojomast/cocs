@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import {Match} from './core.mjs';
 import {GAME_MODES,normalizeConfig,DEFAULT_CONFIG} from './config.mjs';
 import {CAMPAIGN_MISSIONS,missionFor} from './campaign-data.mjs';
-import {ENEMY_TYPES,enemyById,applyEnemyFields,enemyBehavior} from './enemy-types.mjs';
+import {ENEMY_TYPES,ENEMY_SPEED_VARIANCE,enemyById,applyEnemyFields,enemyBehavior} from './enemy-types.mjs';
 import {initializeSinglePlayer,hordeWaveSize,isSinglePlayerMode,singlePlayerSnapshot,spawnGroup,SINGLEPLAYER_MODES} from './singleplayer.mjs';
 
 const make=(mode,options={})=>new Match('chatgpt','openclaw',()=>.5,options.mapId||'convoy-line',{mode,botCount:3,humanCount:1,timeLimit:300,...options});
@@ -147,4 +147,23 @@ test('enemy fields build a fragile, differentiated enemy',()=>{
  assert.equal(behavior.meleeOnly,true);
  assert.ok(behavior.meleeRange>2);
  assert.equal(enemyById('missing').id,'spitter');
+});
+
+test('enemy deploys vary speed within a class and carry reduced firepower',()=>{
+ let n=987654321;const random=()=>((n=(Math.imul(n,1664525)+1013904223)>>>0)/4294967296);
+ const match=new Match('chatgpt','openclaw',random,'convoy-line',{mode:'campaign',botCount:0,humanCount:1,mission:'convoy-run'});
+ const state=match.modeState;
+ spawnGroup(match,state,{type:'spitter',count:8},{team:1});
+ const enemies=match.actors.filter(actor=>actor.isNpc);
+ const speeds=enemies.map(actor=>actor.npcProfile.speedMult);
+ assert.ok(speeds.length===8);
+ assert.ok(new Set(speeds.map(speed=>speed.toFixed(4))).size>1,'speeds are not uniform');
+ const base=ENEMY_TYPES.spitter.speedMult;
+ assert.ok(speeds.every(speed=>speed>base*(1-ENEMY_SPEED_VARIANCE)-1e-9&&speed<base*(1+ENEMY_SPEED_VARIANCE)+1e-9),'speed stays inside the variance band');
+ for(const actor of enemies){
+  assert.ok(actor.gearDamage<1,'enemy hits softer than a normal actor');
+  assert.ok(Math.abs(actor.gearDamage-actor.npcProfile.damageMult)<1e-9,'damage multiplier reaches the weapon pipeline');
+ }
+ assert.ok(ENEMY_TYPES.husk.damageMult<.5&&ENEMY_TYPES.spitter.damageMult<.5,'swarm classes are heavily damped');
+ assert.ok(ENEMY_TYPES.brute.damageMult<1&&ENEMY_TYPES.warden.damageMult<=1,'heavies are damped too');
 });
