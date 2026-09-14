@@ -1,5 +1,20 @@
 # COCS verification report
 
+## Release 2.73 - Menu demo shows a variety of modes
+
+The title-screen showcase is now a reel of eight distinct modes instead of a
+single Puma race: Puma Race, Puma Soccer, Deathmatch, Team Deathmatch, Capture
+the Flag, King of the Hill, Combined Arms and Payload. `SHOWCASES` carries a
+mode-appropriate map pool per scenario; `pickShowcase` picks an available map that
+actually supports the mode, and the existing rotation rebuilds the next scenario
+when the current match ends. Vehicle scenarios keep the cycling car demo camera;
+combat scenarios use the cinematic director.
+
+Verification: game **948/948** plus updated `game/showcase.test.mjs` (5/5:
+variety, valid map-per-mode, mode rotation, car-mode camera, full-race restart),
+SSR `tests/*.test.mjs` 4/4, `tsc --noEmit` clean, production build succeeds. No
+browser/WebGL playtest was possible; the reel is unit-verified only.
+
 ## Release 2.72 - Puma Soccer
 
 New `puma-soccer` team mode on the `puma-pitch` map (the Puma Circuit with its

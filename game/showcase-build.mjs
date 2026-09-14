@@ -1,4 +1,6 @@
-// The title screen alternates a Combined Arms battle and an Instagib rail match.
+// Builds the next menu-demo scenario (see SHOWCASES): a bot match with the
+// camera driven by the cinematic director, or the car demo camera for the
+// vehicle modes (match.race).
 export function buildShowcase({r,view,showcaseOk,makeRng,pickShowcase,normalizeConfig,DEFAULT_CONFIG,Match,seatShowcaseVehicles,RULES,CinematicDirector,reducedMotion,setShowcaseLive}){
  return ()=>{if(!showcaseOk()){r.showcase=null;r.showcaseMatchedId=null;view.setShowcase(null);view.setCinema(false);view.setDirector(null);setShowcaseLive(false);return;}const rng=makeRng();const spec=pickShowcase(r.showcaseIndex||0,rng,{legacy:r.legacyArenas===true});r.showcaseIndex=(r.showcaseIndex||0)+1;const cfg=normalizeConfig({...DEFAULT_CONFIG,mode:spec.mode,botCount:spec.botCount,difficulty:spec.difficulty,timeLimit:spec.timeLimit,fragLimit:spec.fragLimit});const m=new Match('chatgpt','openclaw',rng,spec.mapId,cfg);for(const a of m.actors)if(!a.bot)a.bot={route:[],think:0,target:-1,memory:0,reaction:0,stuck:0,last:{x:0,y:0,z:0},state:'roam',patrol:0,flank:null,flankDone:false,recover:0,suppressed:0,threat:-1,standoff:null,strafeReverse:-99};if(spec.seatVehicles)seatShowcaseVehicles(m,spec.seatVehicles);
  // Clear the countdown and start the cars moving before the first menu frame.

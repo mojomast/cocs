@@ -1,6 +1,6 @@
 # COCS — Colosseum Of Competitive Slop
 
-> **Release status (v2.72).** The current footer version in `app/page.tsx` is **v2.72**. The feature descriptions below are kept current, but the long version log is a historical record. See [VERIFICATION.md](VERIFICATION.md) for dated evidence and the remaining validation gaps (there is no browser/GPU verification in this environment).
+> **Release status (v2.73).** The current footer version in `app/page.tsx` is **v2.73**. The feature descriptions below are kept current, but the long version log is a historical record. See [VERIFICATION.md](VERIFICATION.md) for dated evidence and the remaining validation gaps (there is no browser/GPU verification in this environment).
 
 A local Three.js first-person arena-shooter where nine famous language models settle their differences with guns. Select an AI operator, strap on one of seven agent harnesses, choose an arena, and configure a match with zero to sixteen bots (mode-dependent). New setups default to two Easy bots, first to 15 frags or highest score after five minutes. Claude always uses Claude Code; everyone else can equip any harness.
 
@@ -24,11 +24,14 @@ but no longer advertise Payload, which requires a continuous walking route.
 
 ## Puma Circuit racing
 
-The main-menu demo follows an eight-bot Puma race and its camera cycles so the
-reel keeps moving: it chases a car for 7 seconds, then orbits one, then flies
-along the circuit ahead of the pack, then watches from trackside, rotating to a
-different Puma each segment. It starts already in motion and automatically
-begins another race at the finish. Reduced-motion falls back to a gentle chase.
+The main-menu demo is a reel of distinct modes: an eight-bot Puma race, Puma
+Soccer, Deathmatch, Team Deathmatch, Capture the Flag, King of the Hill, Combined
+Arms and Payload. Each scenario runs as a live bot match on a mode-appropriate map
+and the camera switches rigs while it plays; when a match ends the next scenario is
+built. The car modes use the cycling chase/orbit/flyover/trackside demo camera
+(the racing reel chases a car for 7 seconds, then orbits one, then flies along the
+circuit ahead of the pack, then watches from trackside, rotating to a different
+Puma each segment). Reduced-motion falls back to a gentle chase.
 
 Choose **Puma Circuit** in Match Setup to race the dedicated circuit. Switching
 into the mode selects seven AI rivals by default; choose 0-7 rivals for practice
