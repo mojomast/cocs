@@ -1,5 +1,25 @@
 # COCS verification report
 
+## Release 3.10 - Mobile touch controls rebuild
+
+- **Both sticks are floating.** The move stick and the look stick now appear
+  wherever the thumb lands inside their zone and use a fixed base radius, so the
+  axis can never saturate from a collapsed element. This fixes the reported
+  "any touch on the left snaps the stick full forward" bug: `stickAxis` floors
+  the radius (`game/touch.mjs`) and is unit-tested.
+- **No overlap.** The look surface stops above the button strip; the move zone
+  and look zone are on opposite thirds. Fire and jump (boost/item while racing)
+  are the large thumb buttons with the remaining actions as small buttons.
+- **Multi-touch.** Every control captures its own pointer id, so both sticks plus
+  any buttons work at once.
+- **Fullscreen button** added to the top-right cluster (`toggleFullscreen` in
+  `app/page.tsx`, with vendor fallbacks).
+- **Racing simplified.** Car modes show only brake/reset plus boost/item and hide
+  the look stick and combat cluster (`touch-car`).
+
+Verification: game **965/965**, server **126/126**, `tests/` **5/5**, `tsc` clean,
+lint 0 errors, build clean.
+
 ## Release 3.9 - Safer display defaults and quick start activities
 
 - **Glow off by default.** `DEFAULT_DISPLAY` now has `postFx:false` and

@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {TOUCH_BUTTONS,applyLook,applyTouchAction,joystickVector,lookStep,moveAxis} from './touch.mjs';
+import {TOUCH_BUTTONS,applyLook,applyTouchAction,joystickVector,lookStep,moveAxis,stickAxis} from './touch.mjs';
 
 test('joystick vectors clamp to the unit circle',()=>{
  assert.deepEqual(joystickVector(0,0,50),{x:0,y:0,magnitude:0});
@@ -18,6 +18,19 @@ test('move axis applies a deadzone, forward sign and sprint threshold',()=>{
  assert.equal(moveAxis(0,-100,100).sprint,true);
  assert.ok(moveAxis(60,0,100).x>0);
  assert.ok(moveAxis(-60,0,100).x<0);
+});
+
+test('stick axis never saturates from a collapsed base and clamps knob travel',()=>{
+ const idle=stickAxis(0,0,0);
+ assert.deepEqual(idle,{x:0,y:0,sprint:false,magnitude:0,knobX:0,knobY:0});
+ const pushed=stickAxis(1,1,0);
+ assert.ok(pushed.magnitude<.5&&pushed.x===0&&pushed.y===0,'a tiny offset stays inside the deadzone even with a zero radius');
+ const full=stickAxis(1000,0,0);
+ assert.equal(full.magnitude,1);
+ assert.ok(full.x>0&&full.sprint===true);
+ assert.ok(Math.hypot(full.knobX,full.knobY)<=56.0001,'knob stays within the base');
+ const big=stickAxis(0,-50,66,29);
+ assert.ok(big.y>0&&big.magnitude<1&&Math.hypot(big.knobX,big.knobY)<=37.0001);
 });
 
 test('look steps accumulate yaw and clamp pitch',()=>{

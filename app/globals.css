@@ -760,21 +760,52 @@ a.icon-button.github-link>span{position:absolute;width:1px;height:1px;overflow:h
 @media(max-width:600px){.vitals{min-width:0;padding:10px}.health strong{font-size:clamp(28px,9vw,44px)}.match-clock,.frag-counter strong{font-size:clamp(22px,7vw,34px)}.weapon-hud strong{font-size:clamp(26px,8vw,42px)}.objective-announcer strong{font-size:clamp(30px,11vw,52px)}}
 @media(prefers-reduced-motion:reduce){.objective-announcer,.kill-banner,.kill-feed>div,.objective-announcer::before,.objective-announcer::after{animation:none}}
 
-/* Touch controls (mobile): thumbstick, drag-look surface and action cluster. */
+/* Touch controls (mobile): a move stick, a floating look stick and a
+   prioritised action cluster. The look surface stops above the button strip so
+   the sticks and buttons never overlap, and every control captures its own
+   pointer id for multi-touch. */
 html, body { overscroll-behavior: none; }
-.touch-layer { position: absolute; inset: 0; z-index: 6; touch-action: none; user-select: none; -webkit-user-select: none; -webkit-tap-highlight-color: transparent; }
-.touch-look { position: absolute; top: 0; right: 0; bottom: 0; left: 38%; touch-action: none; }
-.touch-stick { position: absolute; left: max(20px, env(safe-area-inset-left)); bottom: max(24px, env(safe-area-inset-bottom)); width: 132px; height: 132px; border-radius: 50%; background: #08181a55; border: 2px solid #7fe3d055; box-shadow: 0 0 0 1px #0006 inset; touch-action: none; }
+.touch-layer { position: absolute; inset: 0; z-index: 6; pointer-events: none; touch-action: none; user-select: none; -webkit-user-select: none; -webkit-tap-highlight-color: transparent; }
+.touch-layer * { touch-action: none; user-select: none; -webkit-user-select: none; }
+.touch-move-zone { position: absolute; left: 0; bottom: 0; width: 48%; height: 54%; pointer-events: auto; }
+.touch-hint { position: absolute; width: 132px; height: 132px; border-radius: 50%; border: 2px dashed #7fe3d055; background: #08181a33; pointer-events: none; }
+.touch-hint--move { left: max(18px, env(safe-area-inset-left)); bottom: max(20px, env(safe-area-inset-bottom)); }
+.touch-hint--look { left: 50%; bottom: max(18px, env(safe-area-inset-bottom)); transform: translateX(-50%); }
 .touch-knob { position: absolute; left: 50%; top: 50%; width: 58px; height: 58px; margin: -29px 0 0 -29px; border-radius: 50%; background: #9ff0dd44; border: 2px solid #a9f7e2aa; transition: transform .04s linear; }
-.touch-buttons { position: absolute; right: max(18px, env(safe-area-inset-right)); bottom: max(20px, env(safe-area-inset-bottom)); display: grid; grid-template-columns: repeat(3, auto); gap: 10px; align-items: end; justify-items: center; touch-action: none; }
-.touch-button { pointer-events: auto; touch-action: none; border: 1px solid #9ff0dd55; background: #0b1c1fc9; color: #dffcf4; font: 700 11px monospace; letter-spacing: 1px; padding: 14px 12px; border-radius: 12px; min-width: 56px; min-height: 52px; user-select: none; -webkit-user-select: none; }
+.touch-look { position: absolute; left: 50%; right: 0; top: 0; bottom: 220px; pointer-events: auto; }
+.touch-move-base, .touch-look-base { position: fixed; width: 132px; height: 132px; margin: -66px 0 0 -66px; border-radius: 50%; background: #08181a66; border: 2px solid #7fe3d0aa; box-shadow: 0 0 0 1px #0006 inset; opacity: 0; transition: opacity .12s ease; pointer-events: none; }
+.touch-look-base { width: 120px; height: 120px; margin: -60px 0 0 -60px; border-style: dashed; }
+.touch-look-base .touch-knob { width: 54px; height: 54px; margin: -27px 0 0 -27px; }
+.touch-actions { position: absolute; right: max(18px, env(safe-area-inset-right)); bottom: calc(max(20px, env(safe-area-inset-bottom)) + 92px); display: grid; grid-template-columns: repeat(5, auto); gap: 7px; justify-items: end; pointer-events: none; }
+.touch-primary { position: absolute; right: max(18px, env(safe-area-inset-right)); bottom: max(20px, env(safe-area-inset-bottom)); display: flex; gap: 10px; align-items: flex-end; pointer-events: none; }
+.touch-util { position: absolute; top: max(12px, env(safe-area-inset-top)); right: max(14px, env(safe-area-inset-right)); display: flex; gap: 8px; pointer-events: none; }
+.touch-actions > *, .touch-primary > *, .touch-util > * { pointer-events: auto; }
+.touch-button { border: 1px solid #9ff0dd55; background: #0b1c1fd0; color: #dffcf4; font: 700 10px monospace; letter-spacing: .5px; padding: 0; border-radius: 11px; width: 46px; height: 46px; display: grid; place-items: center; user-select: none; -webkit-user-select: none; -webkit-tap-highlight-color: transparent; }
 .touch-button:active, .touch-button:focus { background: #1d4740d9; border-color: #b4f6e2; }
-.touch-fire { grid-column: span 2; min-width: 128px; min-height: 78px; background: #3a1517cc; border-color: #ff8f8f66; color: #ffe2e2; font-size: 15px; }
-.touch-fire:active { background: #6a2226e6; }
+.touch-primary .touch-button { width: 74px; height: 74px; font-size: 13px; border-radius: 50%; }
+.touch-primary .touch-fire { background: #3a1517cc; border-color: #ff8f8f66; color: #ffe2e2; }
+.touch-primary .touch-fire:active { background: #6a2226e6; }
+.touch-primary .touch-jump { background: #12283acc; border-color: #8fd0ff66; color: #dff1ff; }
+.touch-primary .touch-jump:active { background: #1d4a6ae6; }
 .touch-voice { border-color: #8fd0ff66; color: #dff1ff; }
 .touch-voice:active, .touch-voice:focus { background: #123a52d9; border-color: #a9dcff; }
-.touch-pause { min-width: 46px; padding: 12px 8px; }
-@media (max-width: 420px) { .touch-stick { width: 112px; height: 112px; } .touch-knob { width: 50px; height: 50px; margin: -25px 0 0 -25px; } .touch-button { min-width: 50px; padding: 12px 9px; } }
+.touch-util .touch-button { width: 42px; height: 42px; border-radius: 10px; }
+.touch-car .touch-actions { grid-template-columns: repeat(3, auto); }
+.touch-car .touch-primary .touch-button { width: 82px; height: 82px; }
+@media (max-width: 420px) {
+  .touch-hint { width: 112px; height: 112px; }
+  .touch-knob { width: 50px; height: 50px; margin: -25px 0 0 -25px; }
+  .touch-button { width: 42px; height: 42px; }
+  .touch-primary .touch-button { width: 66px; height: 66px; }
+}
+@media (max-height: 480px) {
+  .touch-look { bottom: 190px; }
+  .touch-actions { bottom: calc(max(18px, env(safe-area-inset-bottom)) + 82px); }
+  .touch-hint { width: 112px; height: 112px; }
+  .touch-knob { width: 50px; height: 50px; margin: -25px 0 0 -25px; }
+  .touch-button { width: 40px; height: 40px; }
+  .touch-primary .touch-button { width: 62px; height: 62px; }
+}
 .arsenal-list em{display:inline-block;font-style:normal;font-size:10px;letter-spacing:.5px;color:#9ad9c4;margin:2px 0 0 8px;border:1px solid #4f7d6c66;border-radius:4px;padding:1px 5px}
 .net-quality{border:1px solid #6fa89a55;border-radius:4px;padding:2px 7px;letter-spacing:1px}
 .net-quality.good{color:#9ff0c4;border-color:#6fe0a455}
@@ -793,7 +824,7 @@ html, body { overscroll-behavior: none; }
 .race-item{position:absolute;left:24px;bottom:90px;display:grid;gap:6px;min-width:210px}.race-item strong{font-size:26px}.race-item span{font-size:12px;color:#c4d3df}
 .race-help{position:absolute;bottom:14px;left:24px;right:24px;font:12px/1.8 monospace;color:#f2dfc0;background:#101923da;padding:8px 12px}
 .race-score-row{display:grid;grid-template-columns:minmax(0,1fr) 95px 100px;gap:12px;padding:13px 10px;border-bottom:1px solid #ffffff20;font:13px monospace}.race-score-row>span:first-child{overflow-wrap:anywhere}.race-score-row b{color:#ffba59}.race-score-row.you{background:#ffba5918;color:#ffda9f}.race-score-row.labels{font-size:10px;color:#aebbc5}
-.touch-race .touch-buttons{max-width:220px}.touch-race .touch-fire{font-size:14px;min-width:100px}.touch-race .touch-crouch{border-color:#ffba59;color:#ffda9f}
+.touch-car .touch-actions .touch-button{border-color:#ffba5955}.touch-car .touch-power{background:#3a2c12cc;border-color:#ffba5966;color:#ffe6bd}
 @media(max-width:700px){.race-metrics{padding:10px;gap:6px;flex-wrap:wrap}.race-metrics>div{padding:8px 10px;flex:1 1 40%}.race-metrics strong{font-size:23px}.race-item{left:10px;bottom:210px;min-width:0;padding:8px 12px}.race-item strong{font-size:19px}.race-help{left:10px;right:10px;bottom:auto;top:135px;font-size:10px}.race-countdown{top:44%;font-size:48px}.race-score-row{grid-template-columns:minmax(0,1fr) 66px 82px;gap:6px;font-size:11px}}
 @media(max-height:500px){.race-metrics{flex-wrap:nowrap}.race-metrics>div{flex:1;padding:5px 9px}.race-help{top:74px;bottom:auto;font-size:10px}.race-item{left:155px;bottom:18px;padding:8px;min-width:0}.race-item strong{font-size:18px}.race-countdown{font-size:45px}}
 /* Single-player HUD: edge-anchored panels keep the centre viewport clear. */
@@ -883,8 +914,7 @@ html, body { overscroll-behavior: none; }
 .race-help{bottom:var(--safe-bottom);left:var(--safe-left);right:var(--safe-right)}
 
 /* --- Mobile: touch layer must not swallow taps on real controls. --- */
-.touch-layer{z-index:var(--z-touch);pointer-events:none}
-.touch-look,.touch-stick,.touch-buttons,.touch-button{pointer-events:auto}
+.touch-layer{z-index:var(--z-touch)}
 .game-voice,.spectator-return,.game-chat.open,.spectator-board{z-index:7}
 
 /* --- Mobile: race/soccer help line flows under the strip instead of colliding. --- */

@@ -3,6 +3,18 @@
 export const TOUCH_DEADZONE=.14;
 export const TOUCH_SPRINT=.9;
 export const TOUCH_LOOK_SCALE=.004;
+// The stick base is measured from the DOM. A collapsed or as-yet-unlaid-out base
+// reports a tiny radius, which used to divide the pointer offset up to a full
+// phantom tilt (the reported "any touch snaps the stick forward"). Floor the
+// radius and derive the visible knob travel from it.
+export const TOUCH_STICK_RADIUS_MIN=28;
+export const TOUCH_STICK_RADIUS_MAX=96;
+// Convert a pointer offset into a movement axis plus a clamped knob offset.
+export function stickAxis(dx,dy,radius,knobRadius=24){
+ const r=Math.max(TOUCH_STICK_RADIUS_MIN,Math.min(TOUCH_STICK_RADIUS_MAX,Number(radius)||0));
+ const vector=joystickVector(dx,dy,r),axis=moveAxis(dx,dy,r),travel=Math.max(4,r-(Number(knobRadius)||0));
+ return {x:axis.x,y:axis.y,sprint:axis.sprint,magnitude:vector.magnitude,knobX:vector.x*travel,knobY:vector.y*travel};
+}
 export const TOUCH_BUTTONS=Object.freeze(['fire','ads','jump','crouch','reload','power','melee','grenade','interact','swap','voice']);
 // Screen-space joystick vector: x right, y down, magnitude clamped to 1.
 export function joystickVector(dx,dy,radius=1){

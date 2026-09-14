@@ -588,6 +588,12 @@ Version 2.23 shows your connection quality online:
 
 - **Latency chip.** Network matches display a colour-coded `GOOD` / `FAIR` / `POOR` chip with the current interpolation delay, graded from the same jitter and packet-loss estimators the netcode already uses (`connectionQuality` in `game/hud.mjs`). It turns amber or red before the connection becomes unplayable.
 
+Version 3.10 rebuilds the mobile touch controls:
+
+- **Floating dual sticks** (move left, look right) with a fixed base radius, fixing the bug where any touch on the left flung the stick full forward.
+- Fire and jump are the large thumb buttons with the other actions as small buttons around them; the sticks and buttons no longer overlap, and both sticks work together under multi-touch.
+- Added a **fullscreen** button and a **simplified racing layout** (brake/reset plus boost/item, no look stick or combat cluster).
+
 Version 3.9 changes the out-of-the-box defaults and the main menu:
 
 - **Glow is off by default** and **resolution scaling defaults to 50%** for lighter rendering; both remain adjustable in Graphics & settings.
