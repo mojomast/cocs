@@ -121,29 +121,38 @@ The director rigs work in combat and objective matches, and on the car maps too
 
 ## Single player: Horde and Campaign
 
-**SINGLE PLAYER** on the title screen opens a solo operation with two flavours,
-both built on the existing arenas and the shared bot brain. Every enemy is a
-normal actor on the hostile team, so NPCs path, take cover, use weapons and
-harnesses exactly like multiplayer bots — they simply never respawn.
+**SINGLE PLAYER** opens a solo operation that is its own thing — different
+enemies, its own pacing, and its own progression. Enemies are *not* normal
+multiplayer bots: they are themed husks with tiny health pools and per-class
+behaviour (`game/enemy-types.mjs`), deployed from authored encounter points.
 
-- **Horde** — pick any combat arena and hold out against escalating waves.
-  Waves grow in size (and go elite every fifth), they deploy around you, and you
-  have three lives for the whole run. Clear the wave target to win; lose all
-  lives and the arena takes you.
-- **Campaign** — six scripted missions, each reusing an existing map and layering
-  a timeline of NPC garrisons, reinforcements, bosses and objective changes on
-  top: clear the floor, survive a timed assault, assassinate a Warden, hold a
-  capture point, clear then extract, and a combined-arms finale. Missions have
-  their own win/lose conditions, lives and briefs.
+- **Horde** — pick any combat arena and hold out against escalating waves of
+  husks, spitters and the occasional brute. Three lives for the whole run; clear
+  the wave target to win.
+- **Campaign** — a linear, story-driven operation across the biggest maps. You
+  start at a fixed spot, follow an in-world waypoint from objective to
+  objective, and fight through scripted encounters. Two missions ship now:
+  **The Long Haul** (`convoy-line`, an escort/assault run down a 152 m road) and
+  **Reactor Run** (`titan-valley`, a ridge-to-reactor push ending with a Warden).
+  Each step has a briefing, story lines, a marker and a completion rule
+  (reach / clear the group / hold the zone / kill the boss).
 
-The live HUD shows the wave or mission, hostiles remaining, lives, kills,
-objective and any scripted message, plus a Warden health bar on assassination
-missions. Match Setup and the on-screen controls are otherwise unchanged.
+Enemy classes: **Husk** (30 HP, melee-only swarmer), **Spitter** (45 HP, keeps
+its distance), **Brute** (140 HP, slow heavy) and **WARDEN** (450 HP boss). They
+share the bot brain for pathing and aim but use their own stat block and
+behaviour profile, so they read as a different kind of threat.
 
-Mission data (maps, briefs, garrisons, win conditions and script triggers) lives
-in `game/campaign-data.mjs`; the wave/script simulation and snapshot live in
-`game/singleplayer.mjs`. Zones are snapped to the map's navigation graph, so a
-mission cannot place an unreachable objective.
+The HUD shows the current objective and step count, hostiles alive, lives,
+kills, a compass-style waypoint distance, hold timers, Warden health and the
+current story line. Clearing a mission unlocks the next one and is saved locally
+(`token-arena-campaign`), with a **NEXT MISSION** button on the results screen.
+
+Enemy classes live in `game/enemy-types.mjs`, mission data in
+`game/campaign-data.mjs`, the wave/step runtime in `game/singleplayer.mjs`, and
+local progress in `game/campaign-progress.mjs`. Waypoints and objective zones
+are snapped to the map's navigation graph, so a mission cannot place an
+unreachable objective. Single-player modes are local-only and rejected by the
+network server.
 
 ## Objective clarity and bot variety
 

@@ -1,96 +1,90 @@
-// Single-player campaign missions. Each mission reuses an existing arena and the
-// shared bot brain, layering a scripted timeline of NPC deployments, objective
-// changes and win/lose conditions on top. Zones are snapped to the map's
-// navigation graph at runtime, so coordinates only need to be roughly in-bounds.
+// Linear, story-driven campaign missions. Each mission reuses a large arena,
+// starts the player at an authored spot, then walks them through an ordered
+// list of objectives with world waypoints, scripted enemy deployments and
+// story beats. Enemy classes live in `game/enemy-types.mjs` and are referenced
+// by `type`; the runtime steps `steps` in `game/singleplayer.mjs`.
 //
-// Script event fields:
-//   id        unique string
-//   at        fire when match.time reaches this many seconds
-//   after     fire this many seconds after the previous event (or mission start)
-//   when      fire on a condition: 'cleared' | 'boss-dead' | 'enemiesAtMost:N' | 'player-in-zone'
-//   announce  show a mission message
-//   objective replace the objective text
-//   spawn     deploy enemy NPCs: {count, elite?, boss?, character?, harness?, x?, z?}
-//   ally      deploy friendly NPCs (same shape)
-//   win/lose  end the mission immediately
-//   lives     change remaining player lives
+// Step action fields:
+//   story:{speaker,text}   queue a story line
+//   announce:'...'         short banner message
+//   objective:'...'        replace the current objective text
+//   spawn:{type,count,elite?,x?,z?,group}   deploy enemies and track the group
+//   win:'...' / lose:'...' end the mission
+//   checkpoint:true        mark a resumable checkpoint
+//   lives:n                change remaining lives
+//
+// Step completion kinds: enter-zone | group-dead | boss-dead | timer | hold
 export const CAMPAIGN_MISSIONS = Object.freeze([
  {
-  id:'boot-camp',name:'Boot Camp',mapId:'colosseum',tag:'TRAINING',
-  brief:'A cluster of rogue tokens has gone hostile on the arena floor. Clear them out and get a feel for live fire.',
-  objective:'Eliminate all hostile tokens.',
-  lives:2,
-  enemies:{count:5},
-  win:{kind:'eliminate'},
-  script:[
-   {id:'brief',at:1,announce:'Weapons free. Contacts on the floor.'},
-   {id:'mid',when:'enemiesAtMost:3',announce:'Half of them are down. Keep pushing.'},
-   {id:'done',when:'cleared',announce:'Floor secure. Welcome to the Colosseum.'},
-  ],
- },
- {
-  id:'reinforce',name:'Reinforcements',mapId:'substation',tag:'SURVIVAL',
-  brief:'Hold the substation against a swarm that only grows. There is no retreat and nowhere to reload but here.',
-  objective:'Survive the assault for 75 seconds.',
-  lives:2,
-  enemies:{count:4},
-  win:{kind:'survive',seconds:75},
-  script:[
-   {id:'a',at:15,spawn:{count:4},announce:'Second wave through the doors.'},
-   {id:'b',at:40,spawn:{count:5,elite:true},announce:'Heavy units deployed. Hold the line.'},
-   {id:'c',at:70,announce:'Thirty seconds. Do not break now.'},
-  ],
- },
- {
-  id:'high-value-target',name:'High Value Target',mapId:'catacombs',tag:'ELIMINATION',
-  brief:'A Warden-class token is sheltering deep in the catacombs. Its guard will not negotiate.',
-  objective:'Eliminate the Warden.',
-  lives:2,
-  enemies:{count:7},
-  win:{kind:'assassinate'},
-  script:[
-   {id:'vip',at:1,spawn:{count:1,boss:true},announce:'WARDEN signature detected.'},
-   {id:'guard',at:20,spawn:{count:4},announce:'Guard patrol inbound.'},
-  ],
- },
- {
-  id:'hold-the-line',name:'Hold The Line',mapId:'foundry',tag:'DEFENSE',
-  brief:'Plant yourself on the foundry core. If the enemy takes it, the line collapses.',
-  objective:'Hold the core for 45 seconds.',
-  lives:2,
-  enemies:{count:6},
-  win:{kind:'defend',seconds:45,x:0,z:0,radius:7},
-  script:[
-   {id:'a',at:14,spawn:{count:5},announce:'Push from the east.'},
-   {id:'b',at:30,spawn:{count:6,elite:true},announce:'They want this core badly.'},
-  ],
- },
- {
-  id:'extraction',name:'Extraction',mapId:'frost-gate',tag:'ESCORT',
-  brief:'Clear the ridge, then fall back to the extraction beacon before the second wave lands on your head.',
-  objective:'Clear the ridge.',
-  lives:2,
-  enemies:{count:6},
-  win:{kind:'reach',x:0,z:0,radius:6,requireCleared:true},
-  script:[
-   {id:'push',when:'cleared',objective:'Reach the extraction beacon.',spawn:{count:5,elite:true},announce:'LZ is hot — fall back to the beacon.'},
-   {id:'in',when:'player-in-zone',announce:'Extraction inbound. Hold position.'},
-  ],
- },
- {
-  id:'last-stand',name:'Last Stand',mapId:'titan-valley',tag:'FINALE',
-  brief:'The whole cluster is coming, and the Warden is leading them. Break the assault and the head that drives it.',
-  objective:'Destroy the hostile cluster.',
+  id:'convoy-run',order:1,chapter:'ACT I',name:'The Long Haul',mapId:'convoy-line',tag:'ESCORT',
+  brief:'Relay seven has gone dark. Run the only road east and light it before the cluster closes in.',
+  objective:'Rally at the west depot.',
   lives:3,
-  enemies:{count:8,elite:true},
-  win:{kind:'eliminate'},
-  script:[
-   {id:'w1',at:25,spawn:{count:6},announce:'Reinforcements on the horizon.'},
-   {id:'vip',at:45,spawn:{count:1,boss:true},announce:'WARDEN online.'},
-   {id:'w2',at:80,spawn:{count:8,elite:true},announce:'Final push. Break them.'},
+  start:{x:-66,z:-12,yaw:-1.5708},
+  intro:{speaker:'DISPATCH',lines:[
+   'Relay seven is dark. No signal, no convoy, no mercy.',
+   'Get to the east yard and bring it back online. The road is held — shoot through.',
+  ]},
+  outro:{speaker:'RELAY',lines:['Relay seven online.','Wait. The long-range sweep just lit up. Something big is crossing Titan Valley.']},
+  steps:[
+   {id:'rally',label:'WEST DEPOT',text:'Rally at the west depot',detail:'Follow the beacon east.',marker:{x:-64,z:0,radius:5,label:'DEPOT'},
+    onStart:[{story:{speaker:'DISPATCH',text:'Road ahead is crawling. Move up.'}},{spawn:{type:'husk',count:2,group:'opening',x:-60,z:-6}},{spawn:{type:'spitter',count:1,group:'opening',x:-54,z:-16}}],
+    complete:{kind:'enter-zone'},
+    onComplete:[{story:{speaker:'DISPATCH',text:'Contact! Hostiles in the tenements — they only do melee.'}}]},
+   {id:'tenements',label:'TENEMENTS',text:'Clear the tenement roadblock',detail:'Husks rush; Spitters hang back.',marker:{x:-32,z:0,radius:6,label:'TENEMENTS'},
+    onStart:[{spawn:{type:'husk',count:5,group:'tenements',x:-36,z:-18}},{spawn:{type:'spitter',count:2,group:'tenements',x:-24,z:8}}],
+    complete:{kind:'group-dead',group:'tenements'},
+    onComplete:[{objective:'Hold the central bridge while the convoy rolls.'},{story:{speaker:'DISPATCH',text:'Bridge ahead. Hold it — the convoy is ours to protect.'}}]},
+   {id:'bridge',label:'CENTRAL BRIDGE',text:'Hold the central bridge',detail:'Survive the push for 20 seconds.',marker:{x:0,z:6,radius:7,label:'BRIDGE'},
+    onStart:[{spawn:{type:'husk',count:4,group:'bridge',x:-8,z:0}},{spawn:{type:'spitter',count:3,group:'bridge',x:8,z:12}}],
+    complete:{kind:'hold',seconds:20},
+    onComplete:[{objective:'Break the east roadblock.'},{story:{speaker:'DISPATCH',text:'Convoy through. Now break their roadblock.'}}]},
+   {id:'roadblock',label:'EAST ROADBLOCK',text:'Break the east roadblock',detail:'Elites are dug in.',marker:{x:34,z:0,radius:6,label:'ROADBLOCK'},
+    onStart:[{spawn:{type:'husk',count:4,elite:true,group:'roadblock',x:40,z:-14}},{spawn:{type:'brute',count:1,elite:true,group:'roadblock',x:28,z:12}}],
+    complete:{kind:'group-dead',group:'roadblock'},
+    onComplete:[{objective:'Secure the fuel yard.'},{story:{speaker:'RELAY',text:'The Yardmaster is holding the console. Take it down.'}}]},
+   {id:'yard',label:'FUEL YARD',text:'Secure the fuel yard',detail:'Kill the Yardmaster.',marker:{x:58,z:0,radius:7,label:'YARD'},
+    onStart:[{spawn:{type:'warden',count:1,x:64,z:0,group:'yard'}},{spawn:{type:'brute',count:2,elite:true,group:'yard',x:48,z:-18}}],
+    complete:{kind:'group-dead',group:'yard'},
+    onComplete:[{win:'Relay seven online.'},{checkpoint:true}]},
+  ],
+ },
+ {
+  id:'reactor-run',order:2,chapter:'ACT I',name:'Reactor Run',mapId:'titan-valley',tag:'ASSAULT',
+  brief:'The cluster is massing around the Titan Valley reactor. Cross the ridge, take the core, and end the Warden.',
+  objective:'Secure the west outpost.',
+  lives:3,
+  start:{x:-60,z:0,yaw:-1.5708},
+  intro:{speaker:'DISPATCH',lines:[
+   'Sweep says the cluster is massing on the reactor line.',
+   'Take the valley piece by piece. The Warden holds the east base.',
+  ]},
+  outro:{speaker:'WARDEN',lines:['You think this is the cluster?','I am one node. We are already inside your relay.']},
+  steps:[
+   {id:'outpost',label:'WEST OUTPOST',text:'Secure the west outpost',detail:'Clear the ridge.',marker:{x:-28,z:-30,radius:6,label:'OUTPOST'},
+    onStart:[{story:{speaker:'DISPATCH',text:'Eyes on the outpost. Clear it.'}},{spawn:{type:'spitter',count:4,group:'outpost',x:-28,z:-30}},{spawn:{type:'husk',count:3,group:'outpost',x:-16,z:-20}}],
+    complete:{kind:'group-dead',group:'outpost'},
+    onComplete:[{objective:'Take the central reactor.'},{story:{speaker:'DISPATCH',text:'Outpost clear. Reactor is dead ahead.'}}]},
+   {id:'reactor',label:'REACTOR',text:'Take the central reactor',detail:'Heavy resistance at the core.',marker:{x:0,z:0,radius:7,label:'REACTOR'},
+    onStart:[{spawn:{type:'brute',count:2,group:'reactor',x:-8,z:8}},{spawn:{type:'spitter',count:4,group:'reactor',x:10,z:-8}},{spawn:{type:'husk',count:4,group:'reactor',x:0,z:16}}],
+    complete:{kind:'group-dead',group:'reactor'},
+    onComplete:[{objective:'Hold the north cavern.'},{story:{speaker:'DISPATCH',text:'Reactor ours. Contacts pouring out of the north cavern — dig in.'}}]},
+   {id:'cavern',label:'NORTH CAVERN',text:'Hold the north cavern',detail:'Survive the ambush for 25 seconds.',marker:{x:0,z:-30,radius:9,label:'CAVERN'},
+    onStart:[{spawn:{type:'husk',count:6,group:'cavernA',x:0,z:-24}},{spawn:{type:'spitter',count:3,group:'cavernA',x:0,z:-38}}],
+    complete:{kind:'hold',seconds:25},
+    onComplete:[{objective:'Secure the south outpost.'},{story:{speaker:'DISPATCH',text:'Ambush broken. South outpost is exposed — hit it now.'}}]},
+   {id:'south',label:'SOUTH OUTPOST',text:'Secure the south outpost',detail:'Flank and clear.',marker:{x:28,z:30,radius:6,label:'OUTPOST'},
+    onStart:[{spawn:{type:'brute',count:1,group:'south',x:28,z:30}},{spawn:{type:'spitter',count:4,elite:true,group:'south',x:20,z:22}}],
+    complete:{kind:'group-dead',group:'south'},
+    onComplete:[{objective:'Assault the east base. Kill the Warden.'},{story:{speaker:'DISPATCH',text:'Last push. The Warden is in the east base.'}}]},
+   {id:'warden',label:'EAST BASE',text:'Kill the Warden',detail:'Boss fight.',marker:{x:60,z:0,radius:8,label:'WARDEN'},
+    onStart:[{spawn:{type:'warden',count:1,x:60,z:0,group:'warden'}},{spawn:{type:'brute',count:3,elite:true,group:'warden',x:50,z:-30}}],
+    complete:{kind:'group-dead',group:'warden'},
+    onComplete:[{win:'The Warden falls.'},{checkpoint:true}]},
   ],
  },
 ]);
 export const CAMPAIGN_MISSION_IDS = CAMPAIGN_MISSIONS.map(mission => mission.id);
 export const DEFAULT_MISSION_ID = CAMPAIGN_MISSIONS[0].id;
+export const campaignOrder = () => CAMPAIGN_MISSIONS.slice().sort((a,b)=>(a.order??0)-(b.order??0)).map(mission => mission.id);
 export const missionFor = id => CAMPAIGN_MISSIONS.find(mission => mission.id === id) || CAMPAIGN_MISSIONS[0];

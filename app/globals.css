@@ -757,3 +757,14 @@ html, body { overscroll-behavior: none; }
 .touch-race .touch-buttons{max-width:220px}.touch-race .touch-fire{font-size:14px;min-width:100px}.touch-race .touch-crouch{border-color:#ffba59;color:#ffda9f}
 @media(max-width:700px){.race-metrics{padding:10px;gap:6px;flex-wrap:wrap}.race-metrics>div{padding:8px 10px;flex:1 1 40%}.race-metrics strong{font-size:23px}.race-item{left:10px;bottom:210px;min-width:0;padding:8px 12px}.race-item strong{font-size:19px}.race-help{left:10px;right:10px;bottom:auto;top:135px;font-size:10px}.race-countdown{top:44%;font-size:48px}.race-score-row{grid-template-columns:minmax(0,1fr) 66px 82px;gap:6px;font-size:11px}}
 @media(max-height:500px){.race-metrics{flex-wrap:nowrap}.race-metrics>div{flex:1;padding:5px 9px}.race-help{top:74px;bottom:auto;font-size:10px}.race-item{left:155px;bottom:18px;padding:8px;min-width:0}.race-item strong{font-size:18px}.race-countdown{font-size:45px}}
+.singleplayer-hud .waypoint-item{left:auto;right:24px;text-align:right}.singleplayer-hud .waypoint-item strong{color:#ffe066}
+.story-line{margin:6px 0 0;padding:8px 12px;background:#101923e6;border-left:3px solid #ffe066;font:13px/1.5 monospace;color:#f7f2df;max-width:min(560px,80vw)}
+.story-line b{color:#ffe066;letter-spacing:1px;margin-right:10px}
+.mission-brief{background:#0c141b;border:1px solid #ffffff1f;padding:14px 16px;display:grid;gap:10px}
+.mission-brief p{margin:0;color:#cfe0ec;font-size:13px}
+.mission-story{margin:0;padding-left:18px;display:grid;gap:6px;font:12px/1.5 monospace;color:#f2dfc0}
+.mission-story b{color:#ffce73;letter-spacing:1px;margin-right:8px}
+.mission-objectives{margin:0;padding-left:20px;display:grid;gap:4px;font:12px/1.5 monospace;color:#bfd2de;columns:2}
+.mode-option.locked{opacity:.45;filter:grayscale(.5)}
+@media(max-width:700px){.singleplayer-hud .waypoint-item{left:10px;right:10px;text-align:left}.mission-objectives{columns:1}}
+

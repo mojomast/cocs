@@ -5,15 +5,24 @@ export function singlePlayerDisplay(hud){
  if(!state)return null;
  const horde=state.kind==='horde';
  const mission=state.mission;
+ const player=(Array.isArray(hud?.actors)?hud.actors.find(actor=>actor.id===(hud.actorId??0)):null)||hud?.actors?.[0];
+ const waypoint=state.waypoint?{...state.waypoint,distance:player&&Number.isFinite(Number(player.x))?Math.round(Math.hypot(Number(player.x)-state.waypoint.x,Number(player.z)-state.waypoint.z)):null}:null;
  const waveTarget=Math.max(1,state.waveTarget||1);
+ const steps=Array.isArray(state.steps)?state.steps:[];
  return {
   horde,
   kind:state.kind,
   phase:state.phase,
   tag:horde?'SURVIVAL':(mission?.tag||'MISSION'),
   title:horde?'HORDE':(mission?.name||'Mission'),
+  chapter:mission?.chapter||'',
   objective:state.objective||'',
   message:state.message||'',
+  story:state.story||null,
+  waypoint,
+  steps,
+  stepIndex:steps.filter(step=>step.done).length,
+  stepTotal:steps.length,
   wave:state.wave||0,
   waveTarget,
   waveProgress:Math.min(1,(state.wave||0)/waveTarget),
@@ -26,7 +35,8 @@ export function singlePlayerDisplay(hud){
   elapsed:Math.round(state.elapsed||0),
   missionIndex:mission?(mission.index+1):0,
   missionTotal:mission?.total||0,
-  missionLabel:mission?`MISSION ${mission.index+1} / ${mission.total}`:'',
+  missionLabel:mission?`${mission.chapter||'MISSION'} ${mission.index+1} / ${mission.total}`:'',
+  hold:state.hold?{seconds:state.hold.seconds,progress:state.hold.progress,ratio:state.hold.seconds?Math.min(1,state.hold.progress/state.hold.seconds):0}:null,
   boss:state.boss&&state.boss.alive?{name:state.boss.name,hp:state.boss.hp,maxHp:state.boss.maxHp,ratio:state.boss.maxHp?Math.max(0,state.boss.hp/state.boss.maxHp):0}:null,
   defend:state.defend?{seconds:state.defend.seconds,progress:state.defend.progress,ratio:state.defend.seconds?Math.min(1,state.defend.progress/state.defend.seconds):0}:null,
   status:state.phase==='intermission'?`NEXT WAVE IN ${Math.max(0,Math.ceil(state.waveTimer||0))}S`:state.phase==='wave'?'WAVE ACTIVE':state.phase==='won'?'MISSION COMPLETE':state.phase==='lost'?'MISSION FAILED':state.phase==='active'?'IN PROGRESS':'STANDBY',
@@ -46,4 +56,10 @@ export function singlePlayerSummary(hud){
  if(state.kind==='horde')return `Cleared ${Math.max(0,(state.wave||1)-1)} of ${state.waveTarget} waves · ${state.kills||0} kills.`;
  const won=state.winner===0;
  return `${won?'Objective complete':'Objective failed'} · ${state.kills||0} kills · ${Math.round(state.elapsed||0)}s.`;
+}
+export function missionBrief(hud){
+ const state=hud?.singleplayer;
+ const mission=state?.mission;
+ if(!mission)return null;
+ return {name:mission.name,tag:mission.tag,chapter:mission.chapter||'',brief:mission.brief||'',intro:mission.intro||null,outro:mission.outro||null};
 }

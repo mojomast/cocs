@@ -1,5 +1,47 @@
 # COCS verification report
 
+## Release 2.79 - Single-player campaign as a distinct, story-driven mode
+
+- **Distinct enemies.** `game/enemy-types.mjs` defines frozen enemy classes
+  (`husk` 30 HP melee swarmer, `spitter` 45 HP ranged, `brute` 140 HP heavy,
+  `warden` 450 HP boss) that are far weaker than normal bots and carry their own
+  behaviour profile. `Match.spawn` now honours `actor.npcProfile` (health,
+  armour, speed/damage multipliers that survive respawn), `Match.melee` honours
+  `actor.meleeDamage`, and `botInput` swaps `botBehavior` for `enemyBehavior`
+  per `actor.npcType` with a melee-only branch. All hooks are inert for
+  multiplayer actors, so bots are unchanged.
+- **Linear story runtime.** `game/singleplayer.mjs` gained a step machine:
+  ordered objectives with an in-world waypoint, `onStart`/`onComplete` actions
+  (story lines, objective text, typed enemy groups, win/lose, checkpoints) and
+  completion rules `enter-zone`, `group-dead`, `boss-dead`, `timer`, `hold`.
+  Campaign missions start the player at an authored `{x,z,yaw}`, and the runtime
+  exposes `match.waypoint` for world/radar/HUD guidance and a story line queue.
+- **Big-map missions.** `game/campaign-data.mjs` was rewritten with two full
+  levels: *The Long Haul* on `convoy-line` (152 m west-depot→east-yard escort
+  with a bridge hold and a Yardmaster) and *Reactor Run* on `titan-valley`
+  (outpost → reactor → cavern hold → south outpost → Warden). Enemies deploy
+  from authored coordinates that snap to the navigation graph.
+- **Local progression.** `game/campaign-progress.mjs` stores unlocks, best
+  time/score and a checkpoint under `token-arena-campaign`; the picker locks
+  missions until the previous one is cleared and the results screen offers
+  **NEXT MISSION**.
+- **Presentation.** `ArenaView.styleActor` scales/tints enemy models by class,
+  `ArenaView.updateWaypoint` renders the objective beacon, radar gained a pinned
+  waypoint blip, `SinglePlayerHud` shows objective steps, waypoint distance,
+  hold/Warden bars and the current story line, and the briefing lists the
+  mission's intro lines and objectives.
+- **Hardening.** `server/room.mjs` rejects single-player modes from network
+  hosting.
+
+Verification: game **991/991**, server **126/126**, SSR 4/4, `tsc` clean, lint 0
+errors, build clean, live deploy verified. New tests cover the enemy classes and
+behaviour differentiation, campaign data well-formedness (unique ids, valid
+enemy types, large maps), local progress/unlocking, the linear runtime (start
+position, waypoints, story, themed spawns, both missions played to a win) and
+the HUD display adapters. `map-layout` validates every arena and the all-mode
+loops still complete. No browser/WebGL playtest, so enemy pacing, mission
+difficulty and waypoint visibility are unit-verified only.
+
 ## Release 2.78 - Single player: Horde and Campaign
 
 - Two new modes, `horde` and `campaign`, join the registry with `team:true` so a

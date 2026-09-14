@@ -1,17 +1,19 @@
-import {CHARACTERS,HARNESSES} from './data.mjs';
+import {CHARACTERS} from './data.mjs';
 import {CAMPAIGN_MISSIONS,missionFor} from './campaign-data.mjs';
+import {applyEnemyFields,enemyById,DEFAULT_ENEMY_ID} from './enemy-types.mjs';
 
-// Single-player simulation. Horde mode spawns escalating waves of hostile NPCs
-// around the lone player; campaign mode runs a scripted mission timeline of NPC
-// deployments, objective changes and win/lose conditions. Both reuse the shared
-// bot brain and the existing arenas, so an NPC is just a normal actor flagged
-// `isNpc` and placed on the enemy team.
+// Single-player simulation. Horde spawns escalating waves of fragile enemies;
+// campaign runs a linear, story-driven sequence of objectives with world
+// waypoints and scripted enemy deployments. Both use `enemy-types.mjs` so the
+// enemies are a different class than multiplayer bots (tiny health pools and
+// per-type behaviour) and reuse the shared bot brain for pathing and aim.
 export const SINGLEPLAYER_MODES = Object.freeze(['horde','campaign']);
 export const isSinglePlayerMode = mode => SINGLEPLAYER_MODES.includes(mode);
 
 export const HORDE_CONFIG = Object.freeze({firstWaveDelay:4,intermission:5,maxAlive:18,baseWave:3,growth:1.4});
 // Marked on NPCs so the base respawn timer can never revive them.
 const NPC_DEAD = 1e9;
+const STORY_SECONDS = 7;
 
 export const hordeWaveSize = wave => Math.min(HORDE_CONFIG.maxAlive,HORDE_CONFIG.baseWave+Math.floor(Math.max(0,wave-1)*HORDE_CONFIG.growth));
 
@@ -28,37 +30,43 @@ function placeAt(match,actor,x,z){
  actor.lastValid=null;actor.vx=0;actor.vy=0;actor.vz=0;
 }
 
-function snapZone(match,zone){
- if(!zone)return zone;
+function snapPoint(match,point){
+ if(!point)return point;
  let best=null,bestDistance=Infinity;
- for(const node of match.nav||[]){const distance=Math.hypot((node.x??0)-(zone.x??0),(node.z??0)-(zone.z??0));if(distance<bestDistance){bestDistance=distance;best=node;}}
- return best?{...zone,x:best.x,z:best.z}:zone;
+ for(const node of match.nav||[]){const distance=Math.hypot((node.x??0)-(point.x??0),(node.z??0)-(point.z??0));if(distance<bestDistance){bestDistance=distance;best=node;}}
+ return best?{...point,x:best.x,z:best.z}:point;
 }
-const inZone = (match,zone) => { const player=match.actors[0]; if(!player)return false; return Math.hypot(player.x-(zone.x??0),player.z-(zone.z??0))<=(zone.radius??3.5); };
+const snapZone = (match,zone) => snapPoint(match,zone);
+const snapStep = (match,step) => step.marker ? {...step,marker:snapPoint(match,step.marker)} : {...step};
+const inZone = (match,zone) => { const player=match.actors[0]; if(!player||!zone)return false; return Math.hypot(player.x-(zone.x??0),player.z-(zone.z??0))<=(zone.radius??3.5); };
 
 function win(match,state,text){if(match.over)return;state.phase='won';state.winner=0;state.message={text,at:match.time};match.objectiveState.winner=0;match.teamScores[0]=Math.max(match.teamScores[0]||0,1);match.emit('mission-won',{text});match.endMatch('objective');}
 function lose(match,state,text){if(match.over)return;state.phase='lost';state.winner=1;state.message={text,at:match.time};match.objectiveState.winner=1;match.teamScores[1]=Math.max(match.teamScores[1]||0,1);match.emit('mission-lost',{text});match.endMatch('objective');}
 
 export function spawnGroup(match,state,spec,{team}){
- const count=Math.max(0,Math.min(24,Math.round(spec?.count??1)));
+ const request=spec||{};
+ const count=Math.max(0,Math.min(24,Math.round(request.count??1)));
+ const ids=[];
  for(let i=0;i<count;i++){
   const id=state.nextId++;
-  const character=spec.character??CHARACTERS[id%CHARACTERS.length].id;
-  const harness=spec.harness??HARNESSES[id%HARNESSES.length].id;
+  const type=enemyById(request.type||(request.boss?DEFAULT_ENEMY_ID:undefined));
+  const character=request.character??type.character??CHARACTERS[id%CHARACTERS.length].id;
+  const harness=request.harness??type.harness??'openclaw';
   const actor=match.actor(id,character,harness);
   actor.team=team;actor.isNpc=true;
-  if(spec.boss){actor.isBoss=true;actor.name='WARDEN';}
-  else if(spec.elite)actor.name=`${actor.name} · ELITE`;
+  applyEnemyFields(actor,type);
+  if(request.elite){actor.npcProfile={...actor.npcProfile,health:Math.round(actor.npcProfile.health*1.8),armor:(actor.npcProfile.armor||0)+40};actor.name=`${actor.name} · ELITE`;}
   match.actors.push(actor);
   match.spawn(actor);
-  if(spec.boss){actor.maxHealth=Math.round((actor.maxHealth||100)*5);actor.health=actor.maxHealth;actor.armor=100;actor.protection=1.5;}
-  else if(spec.elite){actor.maxHealth=Math.round((actor.maxHealth||100)*1.8);actor.health=actor.maxHealth;actor.armor=Math.min(100,(actor.armor||0)+40);}
-  if(Number.isFinite(spec.x)&&Number.isFinite(spec.z))placeAt(match,actor,spec.x,spec.z);
+  if(Number.isFinite(request.x)&&Number.isFinite(request.z))placeAt(match,actor,request.x,request.z);
+  ids.push(id);
   if(team===1)state.enemies.push(id);else state.allies.push(id);
-  if(spec.boss&&state.boss==null)state.boss=id;
+  if(actor.isBoss&&state.boss==null)state.boss=id;
  }
+ if(request.group&&ids.length)state.groups[request.group]=(state.groups[request.group]||[]).concat(ids);
  if(team===1&&count>0)state.everHadEnemies=true;
- match.emit('npc-deploy',{team,count,boss:Boolean(spec?.boss),elite:Boolean(spec?.elite)});
+ match.emit('npc-deploy',{team,count,boss:Boolean(request.boss),elite:Boolean(request.elite),type:request.type||null});
+ return ids;
 }
 
 export function initializeSinglePlayer(match){
@@ -67,19 +75,20 @@ export function initializeSinglePlayer(match){
  match.humanCount=1;
  match.config.botCount=0;
  const mode=match.config.mode;
- const state={kind:mode,playerId:0,phase:'intermission',timer:0,elapsed:0,lives:2,deaths:0,nextId:1,enemies:[],allies:[],everHadEnemies:false,boss:null,winner:null,message:null,objective:'',script:[],fired:{},defendProgress:0,lastEvent:0};
+ const state={kind:mode,playerId:0,phase:'intermission',timer:0,elapsed:0,lives:2,deaths:0,nextId:1,enemies:[],allies:[],groups:{},entered:{},everHadEnemies:false,boss:null,winner:null,message:null,objective:'',script:[],fired:{},defendProgress:0,lastEvent:0,steps:[],stepIndex:0,stepElapsed:0,holdProgress:0,waypoint:null,storyLine:null};
  if(mode==='horde'){
   state.waveTarget=Math.max(1,Math.round(match.config.fragLimit||10));
-  state.wave=0;state.timer=HORDE_CONFIG.firstWaveDelay;state.phase='intermission';
+  state.wave=0;state.timer=HORDE_CONFIG.firstWaveDelay;state.phase='intermission';state.lives=3;
   state.objective=`Survive ${state.waveTarget} hostile waves.`;
  } else {
   const mission=missionFor(match.config.mission);
-  state.mission=mission;state.phase='active';state.lives=mission.lives??2;
+  state.mission=mission;state.phase='active';state.lives=mission.lives??3;
   state.objective=mission.objective;state.win=snapZone(match,mission.win);state.timer=0;
   state.script=(mission.script||[]).map(event=>({...event}));
   for(const event of state.script)if(event.when==='player-in-zone')Object.assign(event,snapZone(match,event));
-  if(mission.allies)spawnGroup(match,state,mission.allies,{team:0});
-  if(mission.enemies)spawnGroup(match,state,mission.enemies,{team:1});
+  state.steps=(mission.steps||[]).map(step=>snapStep(match,step));
+  const player=match.actors[0];
+  if(player&&mission.start){placeAt(match,player,mission.start.x,mission.start.z);if(Number.isFinite(mission.start.yaw)){player.yaw=mission.start.yaw;player.bodyYaw=mission.start.yaw;}}
  }
  match.modeState=state;
  match.objectiveState={kind:mode,zones:[],winner:null,singleplayer:true};
@@ -95,8 +104,10 @@ function releaseDead(match,state){
 
 function startWave(match,state){
  state.wave+=1;state.phase='wave';state.timer=0;state.enemies=[];
- const count=hordeWaveSize(state.wave);
- spawnGroup(match,state,{count,elite:state.wave%5===0},{team:1});
+ const count=hordeWaveSize(state.wave), husks=Math.ceil(count*.6), spitters=Math.max(0,count-husks);
+ spawnGroup(match,state,{type:'husk',count:husks},{team:1});
+ spawnGroup(match,state,{type:'spitter',count:spitters},{team:1});
+ if(state.wave%5===0)spawnGroup(match,state,{type:'brute',count:1,elite:true},{team:1});
  match.emit('horde-wave',{wave:state.wave,target:state.waveTarget,count});
 }
 
@@ -111,6 +122,43 @@ function stepHorde(match,state,dt){
  match.emit('horde-wave-cleared',{wave:state.wave});
  if(state.wave>=state.waveTarget){win(match,state,`You survived ${state.waveTarget} waves.`);return;}
  state.phase='intermission';state.timer=HORDE_CONFIG.intermission;releaseDead(match,state);
+}
+
+function runStepActions(match,state,actions){
+ if(!actions)return;
+ for(const action of actions){
+  if(!action)continue;
+  if(action.story){state.storyLine={speaker:action.story.speaker||'OPS',text:action.story.text||'',at:match.time};match.emit('story-line',{speaker:state.storyLine.speaker,text:state.storyLine.text});}
+  if(action.announce){state.message={text:action.announce,at:match.time};match.emit('mission-message',{text:action.announce});}
+  if(action.objective)state.objective=action.objective;
+  if(Number.isFinite(action.lives))state.lives=Math.max(0,Math.round(action.lives));
+  if(action.spawn)spawnGroup(match,state,action.spawn,{team:1});
+  if(action.ally)spawnGroup(match,state,action.ally,{team:0});
+  if(action.checkpoint)state.checkpoint=state.stepIndex;
+  if(action.lose)lose(match,state,action.lose===true?'Mission failed.':String(action.lose));
+  if(action.win)win(match,state,action.win===true?'Mission complete.':String(action.win));
+  if(match.over)return;
+ }
+}
+
+function stepComplete(match,state,step,dt){
+ const complete=step.complete;if(!complete)return false;
+ if(complete.kind==='enter-zone')return inZone(match,step.marker);
+ if(complete.kind==='group-dead'){const ids=state.groups[complete.group];return Boolean(ids&&ids.length)&&ids.every(id=>!aliveById(match,id));}
+ if(complete.kind==='boss-dead')return state.boss!=null&&!aliveById(match,state.boss);
+ if(complete.kind==='timer')return state.stepElapsed>=(complete.seconds||0);
+ if(complete.kind==='hold'){const on=step.marker?inZone(match,step.marker):true;state.holdProgress=on?(state.holdProgress||0)+dt:0;return state.holdProgress>=(complete.seconds||0);}
+ return false;
+}
+
+function stepLinear(match,state,dt){
+ const step=state.steps[state.stepIndex];
+ if(!step){match.waypoint=null;state.waypoint=null;return;}
+ if(!state.entered[step.id]){state.entered[step.id]=true;runStepActions(match,state,step.onStart);if(match.over)return;}
+ state.stepElapsed+=dt;
+ state.waypoint=step.marker?{id:step.id,x:step.marker.x,y:step.marker.y??0,z:step.marker.z,radius:step.marker.radius??4,label:step.marker.label||step.label||'OBJECTIVE'}:null;
+ match.waypoint=state.waypoint;
+ if(stepComplete(match,state,step,dt)){state.stepIndex+=1;state.stepElapsed=0;state.holdProgress=0;runStepActions(match,state,step.onComplete);}
 }
 
 function triggered(match,state,event,time){
@@ -146,6 +194,7 @@ function evaluateWin(match,state,dt,time){
 }
 
 function stepCampaign(match,state,dt){
+ if(state.steps.length){stepLinear(match,state,dt);if(match.over)return;}
  for(const event of state.script){
   if(state.fired[event.id])continue;
   if(!triggered(match,state,event,state.elapsed))continue;
@@ -154,7 +203,7 @@ function stepCampaign(match,state,dt){
   if(match.over)return;
  }
  if(state.mission?.timeLimit&&state.elapsed>=state.mission.timeLimit){lose(match,state,'Time expired.');return;}
- evaluateWin(match,state,dt,state.elapsed);
+ if(state.win)evaluateWin(match,state,dt,state.elapsed);
 }
 
 function onPlayerDeath(match,state){
@@ -180,5 +229,9 @@ export function singlePlayerSnapshot(state,match){
  const enemiesAlive=aliveEnemies(match,state);
  const player=match.actors[0];
  const boss=state.boss!=null?actorById(match,state.boss):null;
- return {kind:state.kind,phase:state.phase,elapsed:state.elapsed,wave:state.wave||0,waveTarget:state.waveTarget||0,waveTimer:state.timer||0,enemiesAlive,enemiesTotal:state.enemies.length,kills:player?.frags||0,deaths:player?.deaths||0,lives:state.lives,objective:state.objective||'',message:state.message&&match.time-state.message.at<5?state.message.text:'',winner:state.winner??null,mission:state.mission?{id:state.mission.id,name:state.mission.name,tag:state.mission.tag,index:CAMPAIGN_MISSIONS.findIndex(mission=>mission.id===state.mission.id),total:CAMPAIGN_MISSIONS.length,brief:state.mission.brief}:null,boss:boss?{name:boss.name,hp:Math.max(0,Math.round(boss.health)),maxHp:boss.maxHealth,alive:boss.health>0}:null,defend:state.win?.kind==='defend'?{seconds:state.win.seconds??30,progress:Math.min(state.win.seconds??30,Math.round(state.defendProgress||0))}:null};
+ const step=state.steps[state.stepIndex];
+ const missionIndex=state.mission?CAMPAIGN_MISSIONS.findIndex(mission=>mission.id===state.mission.id):-1;
+ const story=state.storyLine&&match.time-state.storyLine.at<STORY_SECONDS?{speaker:state.storyLine.speaker,text:state.storyLine.text}:null;
+ const hold=step?.complete?.kind==='hold'?{seconds:step.complete.seconds||0,progress:Math.min(step.complete.seconds||0,state.holdProgress||0)}:null;
+ return {kind:state.kind,phase:state.phase,elapsed:state.elapsed,wave:state.wave||0,waveTarget:state.waveTarget||0,waveTimer:state.timer||0,enemiesAlive,enemiesTotal:state.enemies.length,kills:player?.frags||0,deaths:player?.deaths||0,lives:state.lives,objective:state.objective||'',message:state.message&&match.time-state.message.at<5?state.message.text:'',story,waypoint:state.waypoint?{id:state.waypoint.id,x:state.waypoint.x,z:state.waypoint.z,label:state.waypoint.label}:null,winner:state.winner??null,mission:state.mission?{id:state.mission.id,name:state.mission.name,tag:state.mission.tag,chapter:state.mission.chapter||'',index:missionIndex,total:CAMPAIGN_MISSIONS.length,brief:state.mission.brief,intro:state.mission.intro||null,outro:state.mission.outro||null}:null,steps:state.steps.map((item,index)=>({id:item.id,label:item.label||'',text:item.text||'',detail:item.detail||'',active:index===state.stepIndex,done:index<state.stepIndex})),hold,boss:boss?{name:boss.name,hp:Math.max(0,Math.round(boss.health)),maxHp:boss.maxHealth,alive:boss.health>0}:null,defend:state.win?.kind==='defend'?{seconds:state.win.seconds??30,progress:Math.min(state.win.seconds??30,Math.round(state.defendProgress||0))}:null};
 }

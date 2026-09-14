@@ -13,6 +13,7 @@ const radarColors = palette => ({
   neutral: NEUTRAL,
   contested: '#ffd166',
   payload: palette === TEAM_PALETTE ? '#ff9f43' : '#ffc04d',
+  waypoint: '#ffe066',
 });
 
 export const RADAR_COLORS = Object.freeze({
@@ -68,6 +69,13 @@ export function radarContacts(hud, player, {range = DEFAULT_RANGE} = {}) {
     if (!point) continue;
     contacts.push({kind: 'zone', id: zone.id, label: zoneLabel(zone.id), x: point.x, y: point.y, owner: zone.owner ?? null, contested: zone.contested === true});
   }
+  // The current mission waypoint is always pinned to the rim so the player can
+  // navigate toward it from anywhere, even before it comes into radar range.
+  const waypoint = hud.singleplayer?.waypoint;
+  if (waypoint && Number.isFinite(Number(waypoint.x)) && Number.isFinite(Number(waypoint.z))) {
+    const point = place(waypoint.x, waypoint.z, true);
+    if (point) contacts.push({kind: 'waypoint', id: waypoint.id ?? 'waypoint', label: waypoint.label ?? 'OBJ', x: point.x, y: point.y, distance: point.dist, clamped: point.clamped === true});
+  }
   // The payload cart is always findable: clamp it to the rim like a revealed
   // contact so players can navigate toward it from anywhere on the map.
   const objective = hud.objectives;
@@ -89,6 +97,7 @@ export function radarContacts(hud, player, {range = DEFAULT_RANGE} = {}) {
 export function radarBlipColor(contact, player, palette = RADAR_COLORS.default) {
   const colors = palette ?? RADAR_COLORS.default;
   if (contact.kind === 'payload') return contact.contested ? colors.contested : colors.payload;
+  if (contact.kind === 'waypoint') return colors.waypoint ?? colors.self;
   if (contact.kind === 'zone') return contact.contested ? colors.contested : contact.owner === null || contact.owner === undefined ? colors.neutral : colors[teamKey(contact.owner)];
   if (contact.kind === 'flag') return colors[teamKey(contact.team)];
   if (contact.self) return colors.self;
@@ -117,6 +126,7 @@ export function radarBlip(contact, player, palette = RADAR_COLORS.default) {
     const progress = Number.isFinite(contact.progress) ? contact.progress : null;
     return {kind: 'payload', shape: 'payload', ...anchor, fill, icon: contact.icon ?? 'payload', label: contact.label ?? 'PAY', progress, progressRatio: progress === null ? null : Math.max(0, Math.min(1, progress / 100)), delivered: contact.delivered === true, clamped: contact.clamped === true, contested: contact.contested === true, pushing: contact.pushing ?? null, ring: {r: .095, thickness: .022, progress}};
   }
+  if (contact?.kind === 'waypoint') return {kind: 'waypoint', shape: 'polygon', ...anchor, fill, label: contact.label ?? 'OBJ', points: `${anchor.cx},${anchor.cy - .09} ${anchor.cx - .08},${anchor.cy} ${anchor.cx},${anchor.cy + .09} ${anchor.cx + .08},${anchor.cy}`, distance: contact.distance ?? null, clamped: contact.clamped === true};
   return {kind: 'flag', shape: 'triangle', ...anchor, fill, points: `${anchor.cx},${anchor.cy - .075} ${anchor.cx - .06},${anchor.cy + .05} ${anchor.cx + .06},${anchor.cy + .05}`, team: contact?.team ?? null, carried: contact?.carried === true, state: contact?.state ?? null, index: contact?.index ?? null};
 }
 export const radarContactVisual = radarBlip;

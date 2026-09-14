@@ -1,5 +1,6 @@
 import {Match} from '../game/core.mjs';
 import {normalizeConfig} from '../game/config.mjs';
+import {isSinglePlayerMode} from '../game/singleplayer.mjs';
 import {actorWon} from '../game/outcome.mjs';
 import {getMap} from '../game/maps.mjs';
 import {resolveMapForMode} from '../game/arenas.mjs';
@@ -166,6 +167,8 @@ export class Room {
   if (peer.spectate) { this.send(peerId, { type: 'error', message: 'spectators cannot change match settings' }); return; }
   if (peerId !== this.hostId) { this.send(peerId, { type: 'error', message: 'only the host can change match settings' }); return; }
   this.config = normalizeConfig(config);
+  // Single-player modes are local-only; never let a network host start one.
+  if (isSinglePlayerMode(this.config.mode)) { this.send(peerId, { type: 'error', message: 'single-player modes are local only' }); this.config.mode = 'deathmatch'; }
   this.mapId = resolveMapForMode(getMap(mapId).id, this.config.mode, { legacy: true });
   this.broadcast(this.lobby());
  }
