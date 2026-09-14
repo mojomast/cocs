@@ -1,5 +1,46 @@
 # COCS verification report
 
+## Release 2.81 - Design system, HUD unification and mobile/safe-area fixes
+
+- **Design tokens.** `app/globals.css` `:root` now carries the full semantic
+  set (surfaces, text tiers, accent/warn/danger/info, borders, radii, elevation,
+  font families and a `--z-*` layering scale) and the Tailwind v4 `@theme inline`
+  block maps the shadcn/Radix tokens that were previously undefined
+  (`popover`, `accent`, `border`, `destructive`, `muted-foreground`, `card`,
+  `secondary`) so select/radio/slider primitives render with the mint palette
+  instead of unresolved colours.
+- **Shared HUD primitives.** One structure now backs every in-match mode:
+  `.hud-strip`/`.hud-cell` (top metrics), `.hud-panel` (edge panels),
+  `.hud-bar` (progress tracks), `.hud-count` (countdown) and `.hud-note`
+  (help line), each scoped by a per-mode `--accent` (race/soccer keep amber,
+  single-player stays mint). Race, soccer and single-player HUDs were migrated
+  to these primitives.
+- **Previously unstyled elements.** `.audio-caption`, `.grenade-chip`,
+  `.soccer-standings`/`.soccer-score-row`/`.race-standings` and the inline
+  spectate camera panel now have real rules; the spectate panel's inline styles
+  were moved to CSS.
+- **Mobile + safe areas.** `.touch-layer` no longer swallows taps
+  (`pointer-events:none`, with only the stick/buttons/look surface interactive)
+  and the voice dock, spectator return, spectator board and open chat were
+  raised above it. Safe-area insets now cover the command panel, radar, ladder/
+  streak/posture chips, kill feed, race metrics/help and every `.sp-*` panel.
+  On phones the race/soccer help line flows under the wrapped metric strip
+  instead of colliding with it, and the single-player panels stack at the top so
+  the bottom stays clear for touch controls.
+- **Accessibility + correctness.** The single-player modal and onboarding now
+  participate in the Tab focus trap and Escape handling (they previously did
+  not); the spectator target board uses valid roles (a `group` of buttons, not
+  `listitem` buttons); the title start control is a real `<button>`; back
+  affordances use left-pointing icons; the match-setup section is numbered
+  `03` consistently; and the per-frame `data-snapshot` JSON attribute was removed
+  from the canvas (perf + no leaking full state into the DOM).
+
+Verification: game **955/955**, server **126/126**, SSR 4/4, `tsc` clean, lint 0
+errors, build clean. No browser/WebGL playtest in this environment, so spacing,
+touch ergonomics and the new palette are unit/layout-verified and the rendered
+soccer/race/single-player HUDs are covered by the existing render tests; a visual
+pass on a real phone is still advised.
+
 ## Release 2.80 - Enemy tuning and a non-overlapping single-player HUD
 
 - **Varied, softer enemies.** Every enemy deploy now rolls a per-actor speed

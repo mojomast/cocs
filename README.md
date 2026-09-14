@@ -588,6 +588,12 @@ Version 2.23 shows your connection quality online:
 
 - **Latency chip.** Network matches display a colour-coded `GOOD` / `FAIR` / `POOR` chip with the current interpolation delay, graded from the same jitter and packet-loss estimators the netcode already uses (`connectionQuality` in `game/hud.mjs`). It turns amber or red before the connection becomes unplayable.
 
+Version 2.81 is a full UI/HUD overhaul:
+
+- **Design tokens and a shared HUD language.** `app/globals.css` now defines a semantic token layer (surfaces, text tiers, accent/warn/danger/info, borders, radii, elevation, fonts and a `--z-*` scale) and completes the Tailwind `@theme` mapping so the Radix/shadcn select, radio and slider primitives resolve to the mint palette instead of undefined colours. Every in-match mode is built from the same `.hud-strip`/`.hud-cell`, `.hud-panel`, `.hud-bar`, `.hud-count` and `.hud-note` primitives, scoped by a per-mode `--accent` (race/soccer amber, single-player mint).
+- **Mobile and safe areas.** The touch layer no longer intercepts taps meant for the voice dock, chat or spectator controls; safe-area insets now cover the command panel, radar, HUD chips, kill feed and every race/single-player panel; the race/soccer help line flows under the wrapped metric strip and the single-player panels stack at the top so thumbs have the bottom edge.
+- **Accessibility and correctness.** The single-player and onboarding dialogs now join the focus trap and close on Escape, the spectator board uses valid button roles, the title start control is a real button, back affordances point left, and the per-frame `data-snapshot` blob was removed from the canvas.
+
 Version 2.22 adds a melee attack:
 
 - **Point-blank finisher.** Every loadout can now swing a short forward arc (`F`, or the touch `MELEE` button): 2.4m range, 45 damage, 0.6s cooldown, no ammo. It rewards closing the distance and finishing hurt targets instead of reloading into them.

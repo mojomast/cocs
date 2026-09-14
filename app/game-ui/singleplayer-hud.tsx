@@ -7,7 +7,7 @@
 export function SinglePlayerHud({single}:{single?:any}){
  if(!single)return null;
  return <div className="sp-hud" aria-label="Mission status">
-  <section className="sp-objectives">
+  <section className="sp-objectives hud-panel">
    <p className="sp-kicker">{single.horde?'HORDE':`${single.chapter?single.chapter+' / ':''}${single.tag}`}</p>
    <h2 className="sp-title">{single.title}</h2>
    <p className="sp-objective">{single.objective}</p>
@@ -21,8 +21,8 @@ export function SinglePlayerHud({single}:{single?:any}){
    {single.waypoint&&<span className="sp-waypoint"><small>NEXT</small><b>{single.waypoint.label}{single.waypoint.distance!==null?` · ${single.waypoint.distance}m`:''}</b></span>}
   </div>
   {(single.boss||single.hold)&&<div className="sp-bars">
-   {single.boss&&<div className="sp-boss"><small>WARDEN · {single.boss.hp} / {single.boss.maxHp}</small><i><b style={{width:`${Math.round(single.boss.ratio*100)}%`}}/></i></div>}
-   {single.hold&&<div className="sp-hold"><small>HOLD · {Math.max(0,Math.ceil(single.hold.seconds-single.hold.progress))}s</small><i><b style={{width:`${Math.round(single.hold.ratio*100)}%`}}/></i></div>}
+   {single.boss&&<div className="sp-boss"><small>WARDEN · {single.boss.hp} / {single.boss.maxHp}</small><span className="hud-bar"><i style={{width:`${Math.round(single.boss.ratio*100)}%`}}/></span></div>}
+   {single.hold&&<div className="sp-hold"><small>HOLD · {Math.max(0,Math.ceil(single.hold.seconds-single.hold.progress))}s</small><span className="hud-bar"><i style={{width:`${Math.round(single.hold.ratio*100)}%`}}/></span></div>}
   </div>}
   {single.story&&<p className="sp-story" role="status" aria-live="polite"><b>{single.story.speaker}</b>{single.story.text}</p>}
  </div>;

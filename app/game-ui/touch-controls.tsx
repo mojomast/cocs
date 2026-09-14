@@ -28,7 +28,7 @@ export function TouchControls({runtime,visible,onLook,onSwap,onPause,mode}:{runt
   return <div className={`touch-layer${car?' touch-race':''}${soccer?' touch-soccer':''}`} onContextMenu={e=>e.preventDefault()}>
   <div className="touch-look" aria-hidden="true" onPointerDown={lookDown} onPointerMove={lookMove} onPointerUp={lookUp} onPointerCancel={lookUp} onLostPointerCapture={lookUp}/>
   <div className="touch-stick" ref={stick} aria-hidden="true" onPointerDown={stickDown} onPointerMove={stickMove} onPointerUp={stickUp} onPointerCancel={stickUp} onLostPointerCapture={stickUp}><i className="touch-knob" ref={knob}/></div>
-  <div className="touch-buttons">
+  <div className="touch-buttons" style={race?undefined:{gridTemplateColumns:'repeat(4, auto)'}}>
    {actions.map(action=><button key={action} type="button" className={`touch-button touch-${action}`} aria-label={labels[action]} {...holdProps(action)}>{labels[action]}</button>)}
    {!soccer&&<button type="button" className="touch-button touch-fire" aria-label={race?'Use item':'Fire'} {...holdProps('fire')}>{race?'USE ITEM':'FIRE'}</button>}
    <button type="button" className="touch-button touch-pause" aria-label="Pause" onPointerDown={(e)=>{e.preventDefault();e.stopPropagation();onPause();}}>II</button>
