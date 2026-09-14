@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import * as T from 'three';
-import {addSky,addMountains,addScatter,updateScatterSway,ambientProfile,smokeAnchors,AMBIENT_KINDS,skyPalette,skyGradientAt,skyPhase,WEATHER_KINDS,PRECIP_KINDS,selectWeather,weatherPreset,timeOfDayAt,biomeAmbience,precipParticleAdds} from './environment.mjs';
+import {addSky,addMountains,addScatter,updateScatterSway,ambientProfile,smokeAnchors,AMBIENT_KINDS,skyPalette,skyGradientAt,skyPhase,WEATHER_KINDS,PRECIP_KINDS,selectWeather,weatherPreset,timeOfDayAt,biomeAmbience,precipParticleAdds,BIOME_PROP_FAMILIES,SCATTER_TRIANGLE_BUDGET,biomePropFamilies,scatterTriangles} from './environment.mjs';
 import {ArenaView} from './view.mjs';
 
 const bounds={minX:-40,maxX:40,minZ:-40,maxZ:40};
@@ -264,6 +264,50 @@ test('the cheap CPU weather guard skips particle spawns for the software rendere
  assert.equal(fx.update(.05,origin,{reduced:true}),0,'reduced motion spawns no precipitation');
  assert.ok(fx.update(.05,origin,{quality:1})>0,'the hardware path still precipitates');
  pool.dispose();
+});
+
+test('biome prop families are pure, named and available for every scatter biome',()=>{
+ for(const biome of Object.keys(BIOME_PROP_FAMILIES)){
+  const families=biomePropFamilies(biome);
+  assert.ok(Array.isArray(families));
+  assert.deepEqual(families,biomePropFamilies(biome),'the family list is pure');
+  for(const family of families){
+   assert.equal(typeof family.kind,'string');
+   assert.ok(family.count>0);
+   assert.match(family.color,/^#[0-9a-f]{6}$/i);
+  }
+ }
+ assert.deepEqual(biomePropFamilies('unknown-biome'),BIOME_PROP_FAMILIES.canyon,'an unknown biome falls back to canyon');
+});
+
+test('biome scatter adds named families and respects the triangle budget',()=>{
+ const meshes=addScatter(new T.Group(),{terrain:flatTerrain(),bounds,seed:31,biome:'volcanic'});
+ const kinds=new Set(meshes.map(mesh=>mesh.userData.scatterKind));
+ assert.ok(kinds.has('lavaRock'),`volcanic scatter includes lava rock (${[...kinds].join(',')})`);
+ assert.ok(kinds.has('emberVent'),'volcanic scatter includes ember vents');
+ assert.ok(scatterTriangles(meshes)<=SCATTER_TRIANGLE_BUDGET,`scatter ${scatterTriangles(meshes)} stays within ${SCATTER_TRIANGLE_BUDGET}`);
+ const snow=addScatter(new T.Group(),{terrain:flatTerrain(),bounds,seed:31,biome:'snow'});
+ assert.ok(new Set(snow.map(mesh=>mesh.userData.scatterKind)).has('ice'),'snow scatter includes ice');
+});
+
+test('a tight triangle budget trims whole families without changing placement',()=>{
+ const full=addScatter(new T.Group(),{terrain:flatTerrain(),bounds,seed:41,biome:'volcanic'});
+ const trimmed=addScatter(new T.Group(),{terrain:flatTerrain(),bounds,seed:41,biome:'volcanic',triangleBudget:1});
+ assert.ok(trimmed.length<full.length,'the budget drops families');
+ assert.equal(trimmed.length,0,'a one-triangle budget keeps nothing');
+ assert.ok(scatterTriangles(full)>0);
+});
+
+test('an explicit arena biome drives ambience and weather deterministically',()=>{
+ assert.equal(ambientProfile({id:'dune-ravine',biome:'canyon'},'day').kind,'dust');
+ assert.equal(ambientProfile({id:'ember-caldera',biome:'volcanic'},'day').kind,'ember');
+ assert.equal(biomeAmbience({id:'dune-ravine',biome:'canyon'}).biome,'canyon');
+ assert.equal(biomeAmbience({id:'ember-caldera',biome:'volcanic'}).mood,'hot');
+ const snow=selectWeather({id:'ember-caldera',biome:'snow'},'day',2);
+ assert.equal(snow.kind,'snow','an explicit biome overrides the id pattern');
+ const volcanic=selectWeather({id:'ember-caldera',biome:'volcanic'},'day',2);
+ assert.equal(volcanic.kind,'ash','a volcanic biome rolls ash');
+ assert.equal(selectWeather({id:'ember-caldera',biome:'volcanic'},'day',2),volcanic,'selection is deterministic');
 });
 
 test('mountain detail scales the cone shell resolution',()=>{

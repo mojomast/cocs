@@ -1,6 +1,34 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {GEAR,MAX_LEVEL,awardMatch,defaultProgression,gearById,levelFromXp,matchRewardSummary,matchXp,nextUnlockFor,normalizeGear,normalizeProgression,rankTitle,resolveGear,unlockedItems,xpForLevel} from './progression.mjs';
+import {readFile} from 'node:fs/promises';
+import {
+ ACHIEVEMENTS,
+ GEAR,
+ MAX_LEVEL,
+ PRESTIGE_MAX_TIER,
+ PRESTIGE_TIERS,
+ PRESTIGE_XP,
+ achievementContext,
+ achievementStatus,
+ awardMatch,
+ defaultProgression,
+ gearById,
+ levelFromXp,
+ matchRewardSummary,
+ matchXp,
+ nextUnlockFor,
+ normalizeGear,
+ normalizeProgression,
+ prestigeFromXp,
+ prestigeTier,
+ prestigeXpBonus,
+ rankTitle,
+ resolveGear,
+ totalXpForLevel,
+ unlockedAchievements,
+ unlockedItems,
+ xpForLevel,
+} from './progression.mjs';
 
 test('xp curve is monotonic and levelFromXp tracks exact boundaries',()=>{
  for(let level=1;level<MAX_LEVEL-1;level++)assert.ok(xpForLevel(level+1)>xpForLevel(level));
@@ -105,6 +133,102 @@ test('awardMatch records explicit per-mode career stats and round-trips',()=>{
  assert.deepEqual(round.byMode,ctf.profile.byMode);
  assert.deepEqual(normalizeProgression({byMode:{deathmatch:{matches:-1,wins:'2',kills:1.9,best:NaN},'':'x'}}).byMode,{deathmatch:{matches:0,wins:2,kills:1,best:0}});
 });
+test('prestige banks one rank per PRESTIGE_XP of overflow and caps at the last tier',()=>{
+ const capXp=totalXpForLevel(MAX_LEVEL);
+ assert.equal(levelFromXp(capXp).level,MAX_LEVEL);
+ assert.equal(prestigeFromXp(capXp).rank,0);
+ assert.equal(prestigeFromXp(capXp+PRESTIGE_XP-1).rank,0);
+ assert.equal(prestigeFromXp(capXp+PRESTIGE_XP).rank,1);
+ assert.equal(prestigeFromXp(capXp+PRESTIGE_XP*2).rank,2);
+ assert.equal(prestigeFromXp(capXp+PRESTIGE_XP*2).tier.name,'Silver');
+ const maxed=prestigeFromXp(capXp+PRESTIGE_XP*PRESTIGE_MAX_TIER+PRESTIGE_XP*5);
+ assert.equal(maxed.rank,PRESTIGE_MAX_TIER);
+ assert.equal(maxed.maxed,true);
+ assert.equal(maxed.progress,1);
+ assert.equal(maxed.toNext,0);
+ assert.equal(prestigeFromXp(-50).rank,0);
+ assert.equal(prestigeTier(0),null);
+ assert.equal(prestigeTier(1).name,PRESTIGE_TIERS[0].name);
+ assert.equal(prestigeTier(99).name,PRESTIGE_TIERS[PRESTIGE_MAX_TIER-1].name);
+ assert.equal(prestigeXpBonus(0),0);
+ assert.ok(prestigeXpBonus(3)>prestigeXpBonus(1));
+});
+
+test('awardMatch pays a prestige XP bonus once the cap is reached',()=>{
+ const capXp=totalXpForLevel(MAX_LEVEL);
+ const base=awardMatch(normalizeProgression({xp:capXp}),{actor:{frags:0,scoreStats:{}}});
+ assert.equal(base.prestigeBonus,0,'no prestige yet, no bonus');
+ const prestiged=awardMatch(normalizeProgression({xp:capXp+PRESTIGE_XP}),{actor:{frags:0,scoreStats:{}}});
+ assert.ok(prestiged.prestigeBonus>0,'prestige rank grants a bonus');
+ assert.equal(prestiged.profile.prestige,1);
+ assert.equal(prestiged.profile.prestigeTier,PRESTIGE_TIERS[0].name);
+});
+
+test('achievements unlock deterministically from career context and pay XP once',()=>{
+ const profile=normalizeProgression({xp:0,matches:0,wins:0,kills:0});
+ assert.deepEqual(unlockedAchievements(profile).map(a=>a.id),[]);
+ const first=awardMatch(profile,{win:true,actor:{frags:5,deaths:0,scoreStats:{}}});
+ assert.ok(first.achievements.some(a=>a.id==='first-blood'),'first win unlocks First Blood');
+ assert.ok(first.achievements.some(a=>a.id==='flawless'),'flawless win unlocks Flawless');
+ assert.ok(first.achievementXp>=350);
+ assert.equal(first.profile.achievements['first-blood'],true);
+ const again=awardMatch(first.profile,{win:true,actor:{frags:5,deaths:0,scoreStats:{}}});
+ assert.equal(again.achievements.some(a=>a.id==='first-blood'),false,'an unlocked achievement never re-fires');
+ assert.equal(again.achievementXp,0);
+ assert.equal(achievementStatus(first.profile).find(a=>a.id==='first-blood').unlocked,true);
+});
+
+test('achievement context derives best kills, modes, challenges and campaign progress',()=>{
+ const profile=normalizeProgression({xp:0,matches:30,wins:12,kills:120,bestStreak:11,flawlessWins:2,challengesCompleted:10,byMode:{deathmatch:{matches:10,wins:6,kills:60,best:27},ctf:{matches:5,wins:3,kills:20,best:8},koth:{matches:5,wins:1,kills:10,best:4},rocket:{matches:5,wins:1,kills:15,best:5},instagib:{matches:5,wins:1,kills:15,best:3}}});
+ const ctx=achievementContext(profile,{campaignDone:6,campaignTotal:6});
+ assert.equal(ctx.bestKills,27);
+ assert.equal(ctx.modes,5);
+ assert.equal(ctx.challenges,10);
+ const ids=unlockedAchievements(profile,{campaignDone:6,campaignTotal:6}).map(a=>a.id);
+ for(const expected of ['first-blood','veteran','gladiator','centurion','sharpshooter','flawless','streak-master','mode-explorer','challenger','campaign-clear'])assert.ok(ids.includes(expected),expected);
+ assert.equal(ids.includes('ascendant'),false,'prestige achievement needs a prestige rank');
+ assert.equal(unlockedAchievements(profile,{campaignDone:5,campaignTotal:6}).some(a=>a.id==='campaign-clear'),false);
+});
+
+test('achievementStatus reports eligibility without mutating the profile',()=>{
+ const profile=normalizeProgression({xp:0,matches:1,wins:1,kills:5});
+ const status=achievementStatus(profile);
+ assert.equal(status.length,ACHIEVEMENTS.length);
+ const first=status.find(a=>a.id==='first-blood');
+ assert.equal(first.unlocked,false);
+ assert.equal(first.eligible,true);
+ assert.equal(profile.achievements['first-blood'],undefined);
+ const round=normalizeProgression(JSON.parse(JSON.stringify(awardMatch(profile,{win:true,actor:{frags:5,scoreStats:{}}}).profile)));
+ assert.equal(round.achievements['first-blood'],true);
+ assert.equal(round.prestige,0);
+});
+
+test('career panels expose prestige/achievement aria and the page provides every field they read',async()=>{
+ const root=new URL('../',import.meta.url);
+ const screen=await readFile(new URL('app/ui/screens/ProgressionScreen.tsx',root),'utf8');
+ const page=await readFile(new URL('app/page.tsx',root),'utf8');
+ const results=await readFile(new URL('app/ui/screens/ResultModals.tsx',root),'utf8');
+ // The career tabs, prestige pips and achievement rows are labelled for AT.
+ assert.match(screen,/ariaLabel="Career track"/);
+ assert.match(screen,/achievement-row/);
+ assert.match(screen,/prestige-row/);
+ assert.match(screen,/prestige-pip/);
+ assert.match(results,/aria-label="Match rewards"/);
+ assert.match(results,/NEW ACHIEVEMENTS/);
+ // Every ui.* field the screens read must exist in the page bag.
+ const start=page.indexOf('const ui:UiBag={'),end=page.indexOf('};',start);
+ assert.ok(start>=0&&end>start,'ui bag literal found');
+ const bag=page.slice(start,end);
+ const has=name=>new RegExp('(^|[,{\\s])'+name+'\\s*[:,}]').test(bag);
+ for(const src of [screen,results]){
+  const names=new Set();
+  for(const m of src.matchAll(/const \{([^}]*)\}\s*=\s*ui;/g))for(const part of m[1].split(',')){const name=part.trim().split(':').pop().trim();if(name&&!name.includes('='))names.add(name);}
+  for(const m of src.matchAll(/\bui\.([A-Za-z0-9_]+)/g))names.add(m[1]);
+  const missing=[...names].filter(name=>!has(name));
+  assert.deepEqual(missing,[],`page ui bag is missing: ${missing.join(', ')}`);
+ }
+});
+
 test('normalizeProgression clamps, recomputes level and re-validates gear',()=>{
  const profile=normalizeProgression({xp:xpForLevel(1)+xpForLevel(2),level:99,matches:-3,gear:{primary:'heavy-barrel',armor:'plating',utility:'stim'},unlocks:{'gear-scope':true}});
  assert.equal(profile.xp,1250);

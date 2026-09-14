@@ -2,6 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {Match,moveActor} from './core.mjs';
 import {normalizeConfig,GAME_MODES} from './config.mjs';
+import {pickupWeapon} from './maps.mjs';
 
 const rng=()=>.5;
 const map={id:'mode-test',name:'Mode Test',raised:false,blocks:[],spawns:[[-10,0],[10,0]],pickups:[],bounds:{minX:-20,maxX:20,minZ:-6,maxZ:6},teamSpawns:{0:[[-10,0]],1:[[10,0]]},flagSpawns:{0:[-10,0],1:[10,0]},trampolines:[{x:0,z:0,power:12,cooldown:1}],boostLaunchers:[{x:3,z:0,dir:[1,0],power:16,cooldown:2}]};
@@ -87,6 +88,46 @@ test('CTF carriers move slower and cannot activate powers',()=>{
   const runner={...a,carryingFlag:false,carrySpeedMultiplier:1,x:-5,z:0,y:0,grounded:true,vx:0,vy:0,vz:0};
   for(let i=0;i<60;i++){moveActor(carrier,{z:-1},1/60,map,m.config);moveActor(runner,{z:-1},1/60,map,m.config);}
   assert.ok(Math.hypot(carrier.vx,carrier.vz)<Math.hypot(runner.vx,runner.vz),'a carrier reaches a lower top speed');
+});
+
+test('bots pick only weapons the mode loadout allows',()=>{
+ const m=new Match('chatgpt','openclaw',rng,'crosswire',{mode:'deathmatch',botCount:1,humanCount:1,loadout:{weapons:[2,8],start:2,infinite:true},timeLimit:60});
+ const bot=m.actors.find(a=>a.bot),human=m.actors.find(a=>!a.bot);
+ Object.assign(bot,{x:-11,z:10,health:bot.maxHealth,vx:0,vz:0});
+ Object.assign(human,{x:-11,z:6,health:100});
+ Object.assign(bot.bot,{target:human.id,memory:1.5,think:0,route:[],destination:null,state:'engage'});
+ for(const distance of [4,12,30]){
+  Object.assign(human,{x:bot.x,z:bot.z-distance});
+  bot.bot.think=0;
+  m.botInput(bot,1/60);
+  assert.ok([2,8].includes(bot.weapon),`sniper-only bot picked ${bot.weapon} at ${distance}m`);
+ }
+});
+
+test('a sniper-only loadout strips disallowed weapon pickups from the map',()=>{
+ const m=new Match('chatgpt','openclaw',rng,'crosswire',{mode:'deathmatch',botCount:0,loadout:{weapons:[2,8],start:2,infinite:true},timeLimit:60});
+ const weaponKinds=m.pickups.filter(p=>pickupWeapon(p.kind)!==undefined).map(p=>pickupWeapon(p.kind));
+ assert.ok(weaponKinds.every(index=>[2,8].includes(index)),`unexpected weapon pickups ${weaponKinds}`);
+ assert.ok(m.pickups.some(p=>p.kind==='health'),'health supplies remain');
+});
+
+test('a no-ADS loadout suppresses aim-down-sights for bots and humans',()=>{
+ const m=new Match('chatgpt','openclaw',rng,'crosswire',{mode:'deathmatch',botCount:1,humanCount:1,loadout:{weapons:[2,8],start:2,infinite:true,noAds:true},timeLimit:60});
+ const bot=m.actors.find(a=>a.bot),human=m.actors.find(a=>!a.bot);
+ Object.assign(bot,{x:-11,z:10,health:bot.maxHealth,vx:0,vz:0});
+ Object.assign(human,{x:-11,z:6,health:100});
+ Object.assign(bot.bot,{target:human.id,memory:1.5,think:0,route:[],destination:null,state:'engage'});
+ const input=m.botInput(bot,1/60)||{};
+ assert.notEqual(input.ads,true,'a no-ADS loadout never aims down sights');
+});
+
+test('bots raise their retreat threshold when a one-shot mutator is active',()=>{
+ const base=new Match('chatgpt','openclaw',rng,'crosswire',{mode:'deathmatch',botCount:1,humanCount:1,timeLimit:60});
+ const lethal=new Match('chatgpt','openclaw',rng,'crosswire',{mode:'deathmatch',botCount:1,humanCount:1,oneShot:true,timeLimit:60});
+ const setup=m=>{const bot=m.actors.find(a=>a.bot),human=m.actors.find(a=>!a.bot);m.pickups=[];Object.assign(bot,{health:bot.maxHealth*.78,x:-11,z:10,vx:0,vz:0});Object.assign(human,{health:100,x:-8,z:10});Object.assign(bot.bot,{target:human.id,memory:1.5,think:0,route:[],destination:null,state:'engage'});return {bot,human};};
+ const a=setup(base),b=setup(lethal);
+ base.botInput(a.bot,1/60);lethal.botInput(b.bot,1/60);
+ assert.ok(b.bot.bot.standoff>a.bot.bot.standoff,'lethal mutators push bots to keep their distance');
 });
 
 test('bounds and traversal launch are deterministic, swept and cooldown gated',()=>{

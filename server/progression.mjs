@@ -44,7 +44,7 @@ export class ProgressionStore{
   }catch{this.players=new Map();this.tokens=new Map();}
  }
  touch(id){const profile=this.players.get(id);if(profile){this.players.delete(id);this.players.set(id,profile);}return profile;}
- clone(profile){return profile?{...profile,byMode:Object.fromEntries(Object.entries(profile.byMode||{}).map(([mode,stats])=>[mode,{...(stats||{})}])),gear:{...profile.gear},attachments:{...profile.attachments},unlocks:{...profile.unlocks}}:null;}
+ clone(profile){return profile?{...profile,byMode:Object.fromEntries(Object.entries(profile.byMode||{}).map(([mode,stats])=>[mode,{...(stats||{})}])),gear:{...profile.gear},attachments:{...profile.attachments},unlocks:{...profile.unlocks},achievements:{...(profile.achievements||{})}}:null;}
  get(id){if(!validPlayerId(id)||!this.players.has(id))return null;return this.clone(this.touch(id));}
  getOwned(id,token){if(!validPlayerId(id)||!validProgressToken(token))return null;const profile=this.players.get(id);if(!profile||profile.ownerToken!==token)return null;return this.clone(this.touch(id));}
  setPinned(ids){this.pinned=ids instanceof Set?ids:new Set(ids??[]);}
@@ -80,7 +80,7 @@ export class ProgressionStore{
   this.players.set(id,awarded.profile);
   this.trim();
   this._dirty=true;this._rev++;this.flush();
-  return {profile:this.get(id),gained:awarded.gained,levelUp:awarded.levelUp,unlocked:awarded.unlocked,progress:awarded.progress,toNext:awarded.toNext};
+  return {profile:this.get(id),gained:awarded.gained,baseGained:awarded.baseGained,prestigeBonus:awarded.prestigeBonus,achievementXp:awarded.achievementXp,levelUp:awarded.levelUp,prestigeUp:awarded.prestigeUp,unlocked:awarded.unlocked,achievements:awarded.achievements,progress:awarded.progress,toNext:awarded.toNext};
  }
  awardOwned(id,token,result){return this.getOwned(id,token)?this.award(id,result):null;}
  trim(){
@@ -134,5 +134,5 @@ export class ProgressionStore{
    await this.flush();
   }
  }
- all(){return [...this.players.values()].map(profile=>({...profile,byMode:Object.fromEntries(Object.entries(profile.byMode||{}).map(([mode,stats])=>[mode,{...(stats||{})}])),gear:{...profile.gear},attachments:{...profile.attachments},unlocks:{...profile.unlocks}}));}
+ all(){return [...this.players.values()].map(profile=>({...profile,byMode:Object.fromEntries(Object.entries(profile.byMode||{}).map(([mode,stats])=>[mode,{...(stats||{})}])),gear:{...profile.gear},attachments:{...profile.attachments},unlocks:{...profile.unlocks},achievements:{...(profile.achievements||{})}}));}
 }

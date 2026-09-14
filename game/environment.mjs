@@ -126,7 +126,44 @@ export function addMountains(world,{background='#090f17',radius=150,count=26,see
  return mesh;
 }
 
-export function addScatter(world,{terrain,bounds,seed=1,software=false,wind=false,density=1,detail=1}={}){
+// Per-biome scatter families. These layer richer ground detail (mesas, ice,
+// lava rock, undergrowth, rubble, stalagmites) on top of the shared grass/rock/
+// fern pass. Counts are deliberately small and `addScatter` trims the whole
+// scatter to a triangle budget so the CPU renderer never inherits a huge bill.
+export const SCATTER_TRIANGLE_BUDGET=120000;
+export const BIOME_PROP_FAMILIES=Object.freeze({
+ canyon:Object.freeze([
+  Object.freeze({kind:'mesa',count:22,color:'#b08a5a',shape:'mesa'}),
+  Object.freeze({kind:'shard',count:30,color:'#9a7a52',shape:'shard'}),
+ ]),
+ snow:Object.freeze([
+  Object.freeze({kind:'ice',count:26,color:'#bcd8e8',shape:'ice'}),
+  Object.freeze({kind:'drift',count:24,color:'#e8f2fa',shape:'drift'}),
+ ]),
+ volcanic:Object.freeze([
+  Object.freeze({kind:'lavaRock',count:26,color:'#4a2a20',shape:'rock',emissive:'#ff6a2a'}),
+  Object.freeze({kind:'emberVent',count:12,color:'#2a1a14',shape:'vent',emissive:'#ff8a3c'}),
+ ]),
+ forest:Object.freeze([
+  Object.freeze({kind:'bush',count:36,color:'#4f8f4a',shape:'bush'}),
+ ]),
+ ruins:Object.freeze([
+  Object.freeze({kind:'rubble',count:28,color:'#8a8378',shape:'rubble'}),
+ ]),
+ urban:Object.freeze([]),
+ cavern:Object.freeze([
+  Object.freeze({kind:'stalag',count:20,color:'#6a6258',shape:'stalag'}),
+ ]),
+});
+export function biomePropFamilies(biome){return BIOME_PROP_FAMILIES[biome]||BIOME_PROP_FAMILIES.canyon;}
+
+// Deterministic triangle cost of a scatter list, used to trim the bill without
+// changing the placement layout (families are dropped whole, largest last).
+export function scatterTriangles(meshes){
+ return (Array.isArray(meshes)?meshes:[]).reduce((sum,mesh)=>sum+mesh.count*(mesh.geometry.index?mesh.geometry.index.count:mesh.geometry.attributes.position.count)/3,0);
+}
+
+export function addScatter(world,{terrain,bounds,seed=1,software=false,wind=false,density=1,detail=1,biome=null,triangleBudget=SCATTER_TRIANGLE_BUDGET}={}){
  if(!terrain||!bounds)return [];
  const minX=bounds.minX??-40,maxX=bounds.maxX??40,minZ=bounds.minZ??-40,maxZ=bounds.maxZ??40,width=maxX-minX,depth=maxZ-minZ;
  // WebGL gets the rounded rocks and denser cones; the CPU guard keeps the base
@@ -134,10 +171,11 @@ export function addScatter(world,{terrain,bounds,seed=1,software=false,wind=fals
  // `density` scales instance counts and `detail` the shell tessellation so a
  // quality tier can shrink the triangle bill without changing placement layout.
  const spread=Math.max(0,Math.min(2,Number.isFinite(density)?density:1)),lod=Math.max(0,Math.min(1,Number.isFinite(detail)?detail:1));
+ const budget=Number.isFinite(triangleBudget)&&triangleBudget>0?triangleBudget:SCATTER_TRIANGLE_BUDGET;
  const countFor=base=>Math.max(0,Math.round(base*spread));
  const coneSegments=software?3:clamp(Math.round(lod*5),3,5),rockDetail=software?0:lod>=.75?1:0;
  const reserved=Math.min(width,depth)*.3,random=rng(seed+977),meshes=[];
- const swaying=new Set(['grass','fern']);
+ const swaying=new Set(['grass','fern','bush']);
  const windRandom=rng((seed>>>0)+1313);
  const build=(kind,geometry,material,count,filter,place)=>{
   const mesh=new T.InstancedMesh(geometry,material,count),dummy=new T.Object3D(),color=new T.Color();
@@ -177,7 +215,47 @@ export function addScatter(world,{terrain,bounds,seed=1,software=false,wind=fals
  build('fern',new T.ConeGeometry(.07,.32,coneSegments),new T.MeshStandardMaterial({color:'#6f9a4e',roughness:.95,metalness:0,flatShading:true}),countFor(220),
   support=>support.normal[1]>.8&&support.material!=='cliff'&&support.material!=='concrete',
   (dummy,color,x,z,support,random)=>{dummy.position.set(x,support.y+.12,z);dummy.rotation.set((random()-.5)*.3,random()*Math.PI*2,(random()-.5)*.3);dummy.scale.set(.7+random()*.8,.6+random()*.9,.7+random()*.8);color.setRGB(.34+random()*.16,.5+random()*.2,.24+random()*.12);});
+ // Biome-specific families. Each is a single instanced draw using the same
+ // terrain-support filter, so a mesa/ice/lava layer reads as part of the ground
+ // rather than a placed prop. `emissive` families glow (lava, ember vents).
+ for(const family of biome?biomePropFamilies(biome):[]){
+  const {kind,shape,color:hex,emissive}=family,count=countFor(family.count);
+  if(count<=0)continue;
+  const material=new T.MeshStandardMaterial({color:hex,roughness:.95,metalness:0,flatShading:true,...(emissive?{emissive,emissiveIntensity:1.1}:{})});
+  const geometry=scatterShape(shape,coneSegments,rockDetail);
+  const filter=support=>shape==='ice'?support.normal[1]>.55:support.normal[1]>.6;
+  build(kind,geometry,material,count,filter,(dummy,c,x,z,support,random)=>{
+   const y=support.y+(shape==='mesa'?.5:shape==='drift'?.05:shape==='vent'?.02:.16);
+   dummy.position.set(x,y,z);
+   dummy.rotation.set(shape==='mesa'?0:(random()-.5)*.4,random()*Math.PI*2,shape==='mesa'?0:(random()-.5)*.4);
+   const s=.7+random()*.7;
+   dummy.scale.set(shape==='mesa'?s*1.4:s,s*(shape==='mesa'?1.1:shape==='stalag'?1.5:.8),shape==='mesa'?s*1.4:s);
+   c.set(hex);c.offsetHSL(0,0,(random()-.5)*.08);
+  });
+ }
+ // Hard triangle ceiling: drop whole families (largest first) until the bill
+ // fits. Placement layout is untouched; only the trailing detail layer shrinks.
+ while(meshes.length&&scatterTriangles(meshes)>budget){
+  const largest=meshes.reduce((a,b)=>scatterTriangles([b])>scatterTriangles([a])?b:a);
+  world.remove(largest);meshes.splice(meshes.indexOf(largest),1);largest.geometry.dispose();largest.material.dispose();
+ }
  return meshes;
+}
+
+// Scatter shell shapes. Kept as small helpers so the biome families share the
+// same low-poly vocabulary and the software renderer always gets cheap shells.
+function scatterShape(shape,coneSegments,rockDetail){
+ switch(shape){
+  case 'mesa':return new T.CylinderGeometry(.55,.85,1.1,coneSegments+1,1);
+  case 'shard':return new T.ConeGeometry(.28,.9,coneSegments);
+  case 'ice':return new T.ConeGeometry(.4,1.1,coneSegments);
+  case 'drift':return new T.SphereGeometry(.5,coneSegments+1,Math.max(2,coneSegments-1));
+  case 'bush':return new T.IcosahedronGeometry(.42,rockDetail);
+  case 'rubble':return new T.IcosahedronGeometry(.34,rockDetail);
+  case 'stalag':return new T.ConeGeometry(.22,1.2,coneSegments);
+  case 'vent':return new T.CylinderGeometry(.26,.4,.5,coneSegments);
+  default:return new T.IcosahedronGeometry(.34,rockDetail);
+ }
 }
 
 // Subtle wind sway for the tagged vegetation instanced meshes. Mutates only the
@@ -214,15 +292,21 @@ const AMBIENT_TABLE=Object.freeze({
  snow:{color:'#eef6ff',size:.045,life:5.4,rate:6,drift:.9,rise:-.06,additive:false,smoke:null},
  spore:{color:'#a8f0c0',size:.035,life:4.4,rate:4,drift:.5,rise:.1,additive:true,smoke:null},
 });
+// Explicit biome -> ambient particle mapping. An authored `arena.biome` wins so
+// procedural maps (dune-ravine, ember-caldera) pick the right motes even when
+// their id does not match a legacy regex.
+const BIOME_AMBIENT=Object.freeze({canyon:'dust',forest:'leaf',snow:'snow',volcanic:'ember',urban:'dust',ruins:'ash',cavern:'dust'});
 export function ambientProfile(arena={},phase='day'){
- const id=String(arena?.id||'').toLowerCase();
- let kind='dust';
- if(/snow|frost|ice|glacier|tundra/.test(id))kind='snow';
- else if(/lava|forge|slag|foundry|ember|ashen|sunscar|gauntlet|magma/.test(id))kind='ember';
- else if(/ash|warfront|trench|convoy|derelict|exchange|substation|signal|ironfall/.test(id))kind='ash';
- else if(/gulch|river|titan|sunken|proving|plateau|colosseum|catacomb|atrium|throne|citadel|fortress|longreach/.test(id))kind='leaf';
- else if(/neon|aether|skybreak|skyfall/.test(id))kind='spore';
- else if(phase==='night')kind='dust';
+ const id=String(arena?.id||'').toLowerCase(),declared=BIOME_AMBIENT[String(arena?.biome||'').toLowerCase()];
+ let kind=declared||'dust';
+ if(!declared){
+  if(/snow|frost|ice|glacier|tundra/.test(id))kind='snow';
+  else if(/lava|forge|slag|foundry|ember|ashen|sunscar|gauntlet|magma/.test(id))kind='ember';
+  else if(/ash|warfront|trench|convoy|derelict|exchange|substation|signal|ironfall/.test(id))kind='ash';
+  else if(/gulch|river|titan|sunken|proving|plateau|colosseum|catacomb|atrium|throne|citadel|fortress|longreach/.test(id))kind='leaf';
+  else if(/neon|aether|skybreak|skyfall/.test(id))kind='spore';
+  else if(phase==='night')kind='dust';
+ }
  const table=AMBIENT_TABLE[kind]||AMBIENT_TABLE.dust;
  return Object.freeze({kind,...table});
 }
@@ -257,7 +341,8 @@ const hashUnit2=(seed,salt=0)=>{let h=(Math.imul(seed>>>0||1,2654435761)^Math.im
 // Biome ambience for the arena. Ids win over the raw terrain material so the
 // hand-authored maps stay distinct, then the ambient profile is the fallback.
 export function biomeAmbience(arena={}){
- const id=String(arena?.id||'').toLowerCase();
+ const id=String(arena?.id||'').toLowerCase(),declared=String(arena?.biome||'').toLowerCase();
+ if(BIOME_TABLE[declared]){const base=BIOME_TABLE[declared];return Object.freeze({biome:base.biome,mood:base.mood,tint:base.tint,particles:base.particles});}
  const byId=(pattern,biome)=>(pattern.test(id)?BIOME_TABLE[biome]:null);
  const direct=byId(/frost|snow|ice|glacier|tundra/,'snow')||byId(/lava|forge|slag|foundry|ember|sunscar|gauntlet|magma|ashen/,'volcanic')||byId(/warfront|trench|ash|derelict|exchange|substation|signal|ironfall/,'ruins')||byId(/gulch|river|titan|sunken|proving|plateau|colosseum|catacomb|atrium|throne|citadel|fortress|longreach/,'forest')||byId(/neon|aether|skybreak|skyfall/,'urban')||byId(/canyon|sunscar|dune/,'canyon');
  const base=direct||BIOME_TABLE.canyon;
@@ -273,10 +358,16 @@ export function weatherPreset(kind){return WEATHER_PRESETS[kind]||WEATHER_PRESET
 export function selectWeather(arena={},timeOfDay={},seed=1,{reduced=false}={}){
  const id=String(arena?.id||'').toLowerCase();
  if(reduced||arena?.reducedMotion===true)return WEATHER_PRESETS.clear;
- const wet=biomeAmbience(arena).mood;
+ const wet=biomeAmbience(arena).mood,biome=String(arena?.biome||'').toLowerCase();
  const roll=hashUnit2(seed,Math.round(Number(timeOfDay?.t)||0));
  let kind='clear';
- if(/snow|frost|ice|glacier|tundra/.test(id))kind=roll<.55?'snow':'clear';
+ if(biome==='snow')kind=roll<.55?'snow':'clear';
+ else if(biome==='volcanic')kind=roll<.36?'ash':'clear';
+ else if(biome==='canyon')kind=roll<.3?'overcast':'clear';
+ else if(biome==='forest')kind=roll<.3?'overcast':'clear';
+ else if(biome==='cavern')kind=roll<.25?'overcast':'clear';
+ else if(biome==='ruins')kind=roll<.42?'ash':'clear';
+ else if(/snow|frost|ice|glacier|tundra/.test(id))kind=roll<.55?'snow':'clear';
  else if(/lava|forge|slag|foundry|ember|sunscar|ashen|gauntlet|magma/.test(id))kind=roll<.36?'ash':'clear';
  else if(/gulch|river|titan|sunken|proving|plateau|atrium/.test(id))kind=roll<.3?'overcast':'clear';
  else if(/neon|aether|skybreak|skyfall|storm/.test(id))kind=roll<.22?'storm':roll<.5?'rain':roll<.72?'overcast':'clear';

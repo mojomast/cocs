@@ -54,8 +54,10 @@ export function ResultsModal({ui}:ScreenProps){
  const rewardStrip=reward?<div className="reward-strip row" role="group" aria-label="Match rewards">
   <strong className="reward-xp">+{Math.max(0,Number(reward.gained)||0)} XP</strong>
   <Chip tone="accent">LEVEL {Number(reward.level)||1}</Chip>
+  {Number(reward.prestige)>0&&<Chip tone="warn">PRESTIGE {Number(reward.prestige)}{reward.prestigeTier?` · ${String(reward.prestigeTier.name).toUpperCase()}`:''}</Chip>}
   <Meter ratio={Number(reward.progress)||0}/>
-  <span className="field-note">{Number(reward.toNext)>0?`${Number(reward.toNext)} XP TO LEVEL ${(Number(reward.level)||1)+1}`:'MAX LEVEL'}</span>
+  <span className="field-note">{reward.prestigeMaxed?'MAX PRESTIGE':Number(reward.toNext)>0?`${Number(reward.toNext)} XP TO LEVEL ${(Number(reward.level)||1)+1}`:`${Number(reward.prestigeToNext)||0} XP TO PRESTIGE ${(Number(reward.prestige)||0)+1}`}</span>
+  {Number(reward.achievementXp)>0&&<Chip tone="accent">ACHIEVEMENTS +{Number(reward.achievementXp)} XP</Chip>}
   {reward.nextUnlock?<Chip>NEXT UNLOCK · {reward.nextUnlock.name} · LV {reward.nextUnlock.level}</Chip>:<Chip tone="accent">ALL UNLOCKS CLAIMED</Chip>}
  </div>:null;
  const footer=<>
@@ -71,7 +73,7 @@ export function ResultsModal({ui}:ScreenProps){
   <Tabs value={tab} onChange={setTab} ariaLabel="Match results" tabs={[{value:'scoreboard',label:'Scoreboard'},{value:'stats',label:'Your stats'},{value:'awards',label:`Awards${awardCount?` · ${awardCount}`:''}`}]}/>
   <div className="stack">
    {tab==='scoreboard'&&scoreboard}
-   {tab==='stats'&&(statItems?<div className="stack"><Stats items={statItems}/><div className="stack stack--tight"><span className="label">MEDALS EARNED</span><MedalStrip awards={awards} player={player}/></div></div>:<div className="match-awards">{awardsNode}</div>)}
+   {tab==='stats'&&(statItems?<div className="stack"><Stats items={statItems}/>{Array.isArray(reward?.achievements)&&reward.achievements.length>0&&<div className="stack stack--tight"><span className="label">NEW ACHIEVEMENTS</span><div className="achievement-strip" role="list">{reward.achievements.map((a:any)=><div key={a.id} className="achievement-row unlocked" role="listitem"><span className="achievement-icon" aria-hidden="true">★</span><span className="card-main"><span className="card-name">{a.name}<small>{a.description}</small></span></span><span className="label">+{a.xp} XP</span></div>)}</div></div>}<div className="stack stack--tight"><span className="label">MEDALS EARNED</span><MedalStrip awards={awards} player={player}/></div></div>:<div className="match-awards">{awardsNode}</div>)}
    {tab==='awards'&&<MedalStrip awards={awards} player={player}/>}
   </div>
  </Modal>;

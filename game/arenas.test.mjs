@@ -107,6 +107,17 @@ test('puma-soccer is confined to its pitch and does not bleed into other vehicle
  assert.equal(arenaSupportsMode('puma-pitch','puma-race'),false);
  assert.equal(maxBotsFor('puma-soccer'),3);
 });
+test('the biome next-gen maps are active outdoor arenas with distinct groups',()=>{
+ for(const id of ['dune-ravine','ember-caldera']){
+  const meta=arenaMeta(id);
+  assert.ok(meta,`${id} is registered`);
+  assert.equal(meta.legacy,false,`${id} is active`);
+  assert.equal(meta.group,'outdoor');
+  assert.ok(meta.play.includes('deathmatch')||meta.play.includes('rockets'),`${id} advertises a primary mode`);
+  assert.ok(activeMaps().some(map=>map.id===id),`${id} is in the active rotation`);
+ }
+});
+
 test('payload is enabled on route-capable arenas and reconciles an incompatible one',()=>{
  const payload=mapsForMode('payload');
  assert.ok(payload.length>=8,'payload has a broad arena rotation');

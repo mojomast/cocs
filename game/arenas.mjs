@@ -54,6 +54,9 @@ const AUTHOR={
  'convoy-line':{group:'urban',scale:'warzone',play:['payload','combined-arms','teamdeathmatch','deathmatch','koth','domination','arsenal']},
  throne:{group:'arena',scale:'battle',play:['juggernaut','deathmatch','teamdeathmatch','instagib','rockets','arsenal','koth','domination','vip-escort']},
  gauntlet:{group:'indoor',scale:'warzone',play:['team-elimination','teamdeathmatch','deathmatch','koth','domination','arsenal','instagib','vip-escort']},
+ // Second biome wave: a desert canyon and a frozen volcanic caldera.
+ 'dune-ravine':{group:'outdoor',scale:'battle',play:['deathmatch','teamdeathmatch','instagib','rockets','arsenal','koth','domination']},
+ 'ember-caldera':{group:'outdoor',scale:'battle',play:['rockets','deathmatch','teamdeathmatch','instagib','arsenal','koth','domination']},
 };
 
 const span=arena=>{

@@ -11,16 +11,22 @@ const finite = value => typeof value === 'number' && Number.isFinite(value);
 const within = (map, x, z) => x >= map.bounds.minX && x <= map.bounds.maxX && z >= map.bounds.minZ && z <= map.bounds.maxZ;
 const primaryMode = map => arenaMeta(map.id).play[0];
 
-test('there is exactly one next-gen map per combat game mode', () => {
+test('every combat game mode has a next-gen map and the canonical set is one-per-mode', () => {
   // Puma Race ships its own dedicated circuit (RACE_MAPS) rather than a
   // procedurally generated combat arena, and the single-player Horde/Campaign
   // modes reuse the existing arenas. VIP Escort is an objective mode layered on
   // the Gauntlet next-gen arena, so it reuses an existing combat map too.
   const combatModes = GAME_MODES.filter(mode => !['puma-race','puma-soccer','horde','campaign','vip-escort'].includes(mode.id));
-  assert.equal(NEXTGEN_MAPS.length, combatModes.length);
   assert.equal(new Set(NEXTGEN_MAPS.map(map => map.id)).size, NEXTGEN_MAPS.length);
   const modes = new Set(NEXTGEN_MAPS.map(primaryMode));
   for (const mode of combatModes) assert.ok(modes.has(mode.id), `missing next-gen map for ${mode.id}`);
+  // Maps flagged `variant` extend the rotation without claiming a mode slot, so
+  // the canonical set must still cover every combat mode exactly once.
+  const canonical = NEXTGEN_MAPS.filter(map => map.variant !== true);
+  assert.equal(canonical.length, combatModes.length, 'one canonical next-gen map per combat mode');
+  assert.equal(new Set(canonical.map(primaryMode)).size, canonical.length, 'canonical modes are unique');
+  assert.ok(NEXTGEN_MAPS.length >= combatModes.length);
+  assert.ok(NEXTGEN_MAPS.some(map => map.variant === true), 'biome variants exist');
   for (const map of NEXTGEN_MAPS) assert.equal(getMap(map.id), map, `${map.id} is registered`);
 });
 
@@ -230,6 +236,33 @@ test('the campaign finale arena is large enough for a next-gen mission',()=>{
  assert.ok(span>=100,`throne is mission scale (${span}m)`);
  assert.ok(arenaSupportsMode('throne','campaign'),'throne hosts campaign missions');
  assert.ok(arenaSupportsMode('throne','juggernaut'),'throne keeps its primary mode');
+});
+
+test('the biome next-gen maps ship distinct biomes, props and hazards', () => {
+  const dune = NEXTGEN_MAPS.find(map => map.id === 'dune-ravine');
+  const caldera = NEXTGEN_MAPS.find(map => map.id === 'ember-caldera');
+  assert.equal(dune.biome, 'canyon');
+  assert.equal(caldera.biome, 'volcanic');
+  assert.notEqual(dune.biome, caldera.biome, 'the two new maps occupy distinct biomes');
+  for (const map of [dune, caldera]) {
+    assert.ok(map.props.some(prop => prop.type === 'lavaCrack'), `${map.id} has lava cracks`);
+    assert.ok(map.props.some(prop => prop.type === 'iceSpike'), `${map.id} has ice spikes`);
+    assert.ok(map.props.some(prop => prop.type === 'crate'), `${map.id} has breakable crates`);
+    assert.ok(map.props.some(prop => prop.type === 'barrel'), `${map.id} has breakable barrels`);
+    assert.ok(map.blocks.some(block => block.kind === 'ridge'), `${map.id} has terrain ridges`);
+    assert.ok(map.objectiveZones.length >= 3, `${map.id} objectives`);
+    assert.ok(map.spawns.length >= 8, `${map.id} spawns`);
+  }
+  assert.ok(dune.blocks.some(block => block.kind === 'terrace'), 'the desert mesa has tiered terraces');
+});
+
+test('the biome maps advertise only their authored combat modes', () => {
+  for (const id of ['dune-ravine', 'ember-caldera']) {
+    const meta = arenaMeta(id);
+    assert.ok(meta && meta.play.length >= 4, `${id} has an authored play list`);
+    for (const mode of meta.play) assert.ok(arenaSupportsMode(id, mode), `${id} supports ${mode}`);
+    assert.ok(arenaSupportsMode(id, meta.play[0]), `${id} primary mode`);
+  }
 });
 
 test('the new objective maps carry layered cover and dressing', () => {

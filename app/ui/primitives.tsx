@@ -1,5 +1,5 @@
 'use client';
-import type {ReactNode,ButtonHTMLAttributes} from 'react';
+import type {ReactNode,ButtonHTMLAttributes,KeyboardEvent as ReactKeyboardEvent} from 'react';
 import {Crosshair,X} from 'lucide-react';
 
 export function TopBar({sub,children}:{sub:ReactNode;children?:ReactNode}){
@@ -31,12 +31,30 @@ export function Btn({variant='secondary',size='md',className='',children,...rest
  return <button type="button" className={`btn btn-${variant}${size==='sm'?' btn-sm':''}${size==='lg'?' btn--primary-lg':''}${className?' '+className:''}`} {...rest}>{children}</button>;
 }
 
+function tabKeyNav(event:ReactKeyboardEvent<HTMLDivElement>,values:string[],current:string,onChange:(v:string)=>void){
+ const index=values.indexOf(current),last=values.length-1;
+ if(index<0||last<0)return;
+ let next=-1;
+ if(event.key==='ArrowRight'||event.key==='ArrowDown')next=index>=last?0:index+1;
+ else if(event.key==='ArrowLeft'||event.key==='ArrowUp')next=index<=0?last:index-1;
+ else if(event.key==='Home')next=0;
+ else if(event.key==='End')next=last;
+ if(next<0)return;
+ event.preventDefault();
+ const target=values[next];
+ onChange(target);
+ const buttons=event.currentTarget.querySelectorAll<HTMLButtonElement>('[role="tab"]');
+ buttons[next]?.focus();
+}
+
 export function Segmented({value,onChange,options,ariaLabel}:{value:string;onChange:(v:string)=>void;options:{value:string;label:ReactNode}[];ariaLabel?:string}){
- return <div className="segmented" role="tablist" aria-label={ariaLabel}>{options.map(o=><button key={o.value} type="button" role="tab" aria-selected={value===o.value} className={value===o.value?'active':''} onClick={()=>onChange(o.value)}>{o.label}</button>)}</div>;
+ const values=options.map(o=>o.value);
+ return <div className="segmented" role="tablist" aria-label={ariaLabel} onKeyDown={e=>tabKeyNav(e,values,value,onChange)}>{options.map(o=><button key={o.value} type="button" role="tab" tabIndex={value===o.value?0:-1} aria-selected={value===o.value} className={value===o.value?'active':''} onClick={()=>onChange(o.value)}>{o.label}</button>)}</div>;
 }
 
 export function Tabs({value,onChange,tabs,ariaLabel}:{value:string;onChange:(v:string)=>void;tabs:{value:string;label:ReactNode}[];ariaLabel?:string}){
- return <div className="tabs" role="tablist" aria-label={ariaLabel}>{tabs.map(t=><button key={t.value} type="button" role="tab" aria-selected={value===t.value} className={value===t.value?'active':''} onClick={()=>onChange(t.value)}>{t.label}</button>)}</div>;
+ const values=tabs.map(t=>t.value);
+ return <div className="tabs" role="tablist" aria-label={ariaLabel} onKeyDown={e=>tabKeyNav(e,values,value,onChange)}>{tabs.map(t=><button key={t.value} type="button" role="tab" tabIndex={value===t.value?0:-1} aria-selected={value===t.value} className={value===t.value?'active':''} onClick={()=>onChange(t.value)}>{t.label}</button>)}</div>;
 }
 
 export function Stats({items,className=''}:{items:{label:ReactNode;value:ReactNode;hint?:ReactNode}[];className?:string}){

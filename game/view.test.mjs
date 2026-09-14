@@ -746,6 +746,52 @@ test('next-gen props carry paintGeometry vertex colors that the CPU renderer rea
  view.disposeObject(world);for(const resource of view.renderResources)resource.dispose();
 });
 
+test('destructible props break deterministically into pooled debris and never move collision',()=>{
+ const ctx={fillRect(){},fillText(){},beginPath(){},moveTo(){},lineTo(){},closePath(){},stroke(){},fill(){}};
+ const build=()=>{
+  const view=Object.assign(Object.create(ArenaView.prototype),{renderResources:new Set(),renderer:{isSoftware:false},scene:new T.Scene(),motionQuery:{matches:false},display:{...DEFAULT_DISPLAY}});
+  view.qualitySettings={tier:2,deaths:72};
+  const world=new T.Group();view.worldGroup=world;view.scene.add(world);
+  const props=[{type:'crate',x:0,z:0,y:0,seed:1},{type:'barrel',x:3,z:0,y:0,seed:2},{type:'rock',x:-3,z:0,y:0,seed:3}];
+  view.buildNextGen(world,{color:'#55ddcc',terrain:{height:()=>0},structures:[],props});
+  return {view,world};
+ };
+ const first=build(),second=build();
+ const a=first.view.breakPropsAt({x:0,y:0,z:0},{radius:5,amount:40,serial:1});
+ const b=second.view.breakPropsAt({x:0,y:0,z:0},{radius:5,amount:40,serial:1});
+ assert.equal(a,2,'the crate and barrel both shatter');
+ assert.equal(b,a,'the same hit breaks the same props');
+ assert.equal(first.view.breakPropsAt({x:0,y:0,z:0},{radius:5,amount:40,serial:2}),0,'an already-broken prop never re-breaks');
+ assert.ok(first.view.debrisPool,'debris is pooled on WebGL');
+ assert.deepEqual(first.view.debrisPool.slots.map(s=>s.obj.position.toArray()),second.view.debrisPool.slots.map(s=>s.obj.position.toArray()),'debris transforms are deterministic');
+ assert.ok(first.view.debrisPool.slots.every(s=>[s.obj.position.x,s.obj.position.y,s.obj.position.z].every(Number.isFinite)));
+ assert.ok(first.view.debrisPool.slots.length<=first.view.debrisPool.limit,'debris stays within the pool limit');
+ // The collision blocks are untouched: breaking is presentation only.
+ assert.equal(first.world.blocks,undefined,'props carry no collision blocks');
+ first.view.disposeObject(first.world);first.view.debrisPool.dispose();
+ second.view.disposeObject(second.world);second.view.debrisPool.dispose();
+});
+
+test('prop breaks and debris are skipped entirely on the software renderer',()=>{
+ const view=Object.assign(Object.create(ArenaView.prototype),{renderResources:new Set(),renderer:{isSoftware:true},scene:new T.Scene(),motionQuery:{matches:false},display:{...DEFAULT_DISPLAY}});
+ view.qualitySettings={tier:0,deaths:36};
+ const world=new T.Group();view.worldGroup=world;view.scene.add(world);
+ view.buildNextGen(world,{color:'#55ddcc',terrain:{height:()=>0},structures:[],props:[{type:'crate',x:0,z:0,y:0,seed:1}]});
+ assert.equal(view.breakPropsAt({x:0,y:0,z:0},{radius:5,amount:40,serial:1}),0,'the CPU renderer never shatters props');
+ assert.ok(!view.debrisPool,'the CPU renderer never allocates debris');
+ assert.equal(view._updateDebris(.1),0);
+ view.disposeObject(world);
+});
+
+test('reduced motion suppresses prop debris',()=>{
+ const view=Object.assign(Object.create(ArenaView.prototype),{renderResources:new Set(),renderer:{isSoftware:false},scene:new T.Scene(),motionQuery:{matches:false},display:{...DEFAULT_DISPLAY}});
+ view.qualitySettings={tier:2,deaths:72};
+ const world=new T.Group();view.worldGroup=world;view.scene.add(world);
+ view.buildNextGen(world,{color:'#55ddcc',terrain:{height:()=>0},structures:[],props:[{type:'crate',x:0,z:0,y:0,seed:1}]});
+ assert.equal(view.breakPropsAt({x:0,y:0,z:0},{radius:5,amount:40,serial:1,reduced:true}),0,'reduced motion emits no debris');
+ view.disposeObject(world);
+});
+
 test('free camera seeds from the live camera, clamps its look and resets cleanly',()=>{
  const view=Object.create(ArenaView.prototype);
  view.camera=new T.PerspectiveCamera();view.camera.rotation.order='YXZ';

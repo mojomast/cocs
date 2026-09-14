@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {Match,moveActor} from './core.mjs';
 import {resolveMapForMode} from './arenas.mjs';
-import {DEFAULT_CONFIG,DEFAULT_DISPLAY,normalizeConfig,normalizeDisplay,GAME_MODES,DIFFICULTIES,modeRule} from './config.mjs';
+import {DEFAULT_CONFIG,DEFAULT_DISPLAY,normalizeConfig,normalizeDisplay,GAME_MODES,DIFFICULTIES,modeRule,MUTATORS,MUTATOR_IDS,activeMutators,mutatorEffects,applyMutators,loadoutFor,loadoutRule,loadoutAllows,loadoutStart,spawnInventory,spawnLoadout,LOADOUT_PRESETS} from './config.mjs';
 const rng=()=>{let n=123;return()=>((n=(Math.imul(n,1664525)+1013904223)>>>0)/4294967296);};
 function fixture(options={}){const m=new Match('chatgpt','hermes',()=>.75,'crosswire',{botCount:1,...options});const [a,b]=m.actors;Object.assign(a,{x:0,z:8,y:0,health:100,armor:0,protection:0,shotWait:0,yaw:0,pitch:0});if(b)Object.assign(b,{x:0,z:5,y:0,health:100,armor:0,protection:0,shotWait:0,yaw:Math.PI,pitch:0});return [m,a,b];}
 
@@ -122,7 +122,141 @@ test('display clarity and caption preferences default safely',()=>{
  assert.equal(d.showRadar,true);
  const on=normalizeDisplay({captions:true,showKillFeed:false,showDamageNumbers:false,showRadar:false});
  assert.equal(on.captions,true);
- assert.equal(on.showKillFeed,false);
- assert.equal(on.showDamageNumbers,false);
- assert.equal(on.showRadar,false);
+  assert.equal(on.showKillFeed,false);
+  assert.equal(on.showDamageNumbers,false);
+  assert.equal(on.showRadar,false);
+});
+
+test('mutators unify the legacy flags into one canonical, ordered set',()=>{
+ const c=normalizeConfig({mutators:['noRecoil','turbo','oneShot','bigHead','lowGravity']});
+ assert.equal(c.speed,1.25);
+ assert.equal(c.gravity,.4);
+ assert.equal(c.oneShot,true);
+ assert.equal(c.bigHead,true);
+ assert.equal(c.noRecoil,true);
+ assert.deepEqual(c.mutators,['turbo','lowGravity','oneShot','bigHead','noRecoil']);
+ assert.deepEqual(activeMutators(c),c.mutators,'activeMutators follows the canonical order');
+ assert.ok(Object.isFrozen(c.mutators));
+ // Explicit flags and the list compose; a bare flag still surfaces as a mutator.
+ const flags=normalizeConfig({fastPowers:true,lifeSteal:true,unlimitedAmmo:true});
+ assert.deepEqual(flags.mutators,['fastPowers','lifeSteal','unlimitedAmmo']);
+ // Unknown ids are ignored, duplicates collapse, and the list never leaks through.
+ const unknown=normalizeConfig({mutators:['turbo','turbo','bogus']});
+ assert.deepEqual(unknown.mutators,['turbo']);
+ assert.equal(normalizeConfig({}).mutators.length,0);
+ assert.deepEqual(DEFAULT_CONFIG.mutators,[]);
+ assert.equal(MUTATOR_IDS.length,MUTATORS.length);
+ assert.equal(new Set(MUTATOR_IDS).size,MUTATOR_IDS.length,'mutator ids stay unique');
+});
+
+test('mutatorEffects folds the canonical order into one deterministic effect view',()=>{
+ const a=mutatorEffects(normalizeConfig({mutators:['turbo','lowGravity','doubleDamage','oneShot','noRecoil','bigHead']}));
+ assert.equal(a.speedMultiplier,1.25);
+ assert.equal(a.gravityMultiplier,.4);
+ assert.equal(a.damageMultiplier,1.5);
+ assert.equal(a.oneShot,true);
+ assert.equal(a.noRecoil,true);
+ assert.equal(a.bigHead,true);
+ assert.ok(Object.isFrozen(a)&&Object.isFrozen(a.active));
+ // Instagib implies one-shot even without the flag, and the mode alone supplies it.
+ const mode=mutatorEffects(normalizeConfig({mode:'instagib'}));
+ assert.equal(mode.instagib,true);
+ assert.equal(mode.oneShot,true);
+ assert.ok(mode.active.includes('instagib'));
+ // Two equivalent spellings resolve byte-for-byte.
+ assert.deepEqual(mutatorEffects(normalizeConfig({mutators:['oneShot']})),mutatorEffects(normalizeConfig({oneShot:true})));
+});
+
+test('applyMutators sets canonical flags for every mutator id',()=>{
+ const target={};
+ applyMutators(target,MUTATOR_IDS);
+ for(const mutator of MUTATORS){
+  if(mutator.id==='turbo')assert.equal(target.speed,1.25);
+  else if(mutator.id==='lowGravity')assert.equal(target.gravity,.4);
+  else if(mutator.id==='doubleDamage')assert.equal(target.damage,1.5);
+  else assert.equal(target[mutator.field],true,`${mutator.id} sets ${mutator.field}`);
+ }
+});
+
+test('mode loadouts pin weapons, ammo and pickup availability without breaking legacy modes',()=>{
+ const instagib=loadoutFor('instagib');
+ assert.deepEqual(instagib.weapons,[2]);
+ assert.equal(instagib.infinite,true);
+ assert.equal(instagib.noPickups,true);
+ assert.equal(loadoutRule('instagib').start,2);
+ assert.equal(loadoutStart({mode:'instagib'}),2);
+ assert.deepEqual(spawnInventory({mode:'instagib'}),[0,0,Infinity,0,0,0,0,0,0,0]);
+ const rockets=spawnLoadout({mode:'rockets'});
+ assert.equal(rockets.weapon,1);
+ assert.equal(rockets.ammo[1],Infinity);
+ const arsenal=spawnLoadout({mode:'arsenal'});
+ assert.equal(arsenal.weapon,0);
+ assert.ok(arsenal.ammo.every(n=>n===Infinity));
+ assert.equal(loadoutFor('deathmatch'),null,'deathmatch keeps the classic free arsenal');
+ assert.equal(loadoutRule('ctf'),null);
+});
+
+test('loadout overrides accept presets and validated objects and never mutate the tables',()=>{
+ const sniper=loadoutFor('deathmatch','sniperOnly');
+ assert.deepEqual(sniper.weapons,[2,8]);
+ assert.equal(sniper.start,2);
+ assert.equal(sniper.noAds,true);
+ assert.equal(loadoutAllows(sniper,2),true);
+ assert.equal(loadoutAllows(sniper,0),false);
+ assert.equal(loadoutAllows(null,9),true,'no loadout allows everything');
+ const pistols=loadoutFor('deathmatch',{weapons:[9,0,9],start:0,infinite:true});
+ assert.deepEqual(pistols.weapons,[0,9],'weapon list is filtered, sorted and de-duplicated');
+ assert.equal(loadoutFor('deathmatch',{weapons:[]}),null,'an empty weapon list is rejected');
+ assert.equal(loadoutFor('deathmatch',{weapons:[99]}),null,'out-of-range weapons are rejected');
+ assert.equal(loadoutFor('deathmatch','bogus'),null);
+ assert.equal(loadoutFor('deathmatch',{noAds:true}).noAds,true);
+ const before=JSON.stringify(LOADOUT_PRESETS);
+ loadoutFor('deathmatch','sniperOnly').weapons.push(0);
+ assert.equal(JSON.stringify(LOADOUT_PRESETS),before,'resolved arrays are copies');
+ // Mode rules and overrides merge field-by-field.
+ const merged=loadoutFor('instagib',{noAds:true});
+ assert.equal(merged.noPickups,true);
+ assert.equal(merged.noAds,true);
+});
+
+test('a match applies its mode loadout to every actor and the pickup field',()=>{
+ const [m,a]=fixture({botCount:0,loadout:{weapons:[2,8],start:8,infinite:true,noAds:true}});
+ assert.equal(a.weapon,8);
+ assert.equal(a.ammo[8],Infinity);
+ assert.ok(m.pickups.every(p=>['health','armor','megahealth','ammo'].includes(p.kind)||[2,8].includes({rocket:1,rail:2,scatter:3,plasma:4,grenade:5,shock:6,flak:7,marksman:8,smg:9}[p.kind])),'only allowed weapon pickups survive');
+ // A stale weapon switch cannot bypass the restriction.
+ a.weapon=0;a.shotWait=0;a.ammo[0]=5;
+ m.fire(a);
+ assert.equal(a.weapon,8,'fire falls back to the allowed starting weapon');
+});
+
+test('mirrored loadout pins every actor to the configured starting weapon',()=>{
+ const [m,a,b]=fixture({botCount:1,humanCount:2,startingWeapon:4,mutators:['mirrorLoadout']});
+ assert.equal(a.weapon,4);
+ assert.equal(b.weapon,4);
+ assert.equal(a.ammo[4],24);
+ assert.equal(b.ammo[4],24);
+ m.spawn(a);m.spawn(b);
+ assert.equal(a.weapon,4,'mirror survives respawn');
+ assert.equal(b.weapon,4);
+});
+
+test('the instagib mutator forces the rail-only loadout on any mode',()=>{
+ const [m,a,b]=fixture({botCount:0,humanCount:2,mutators:['instagib']});
+ assert.equal(a.weapon,2);
+ assert.deepEqual(a.ammo,[0,0,Infinity,0,0,0,0,0,0,0]);
+ assert.equal(m.pickups.length,0,'no supplies under the instagib mutator');
+ assert.equal(m.power(a),false,'powers are disabled');
+ b.protection=0;b.armor=100;a.shotWait=0;m.fire(a);
+ assert.equal(b.health,0,'one unprotected hit is lethal');
+});
+
+test('big head enlarges hitboxes and no recoil removes kick and bloom',()=>{
+ const [m,a,b]=fixture({botCount:0,humanCount:2,mutators:['bigHead']});
+ assert.equal(a.hitScale,1.5);
+ assert.equal(b.hitScale,1.5);
+ const [n,c]=fixture({botCount:0,humanCount:2,mutators:['noRecoil']});
+ c.shotWait=0;c.weapon=0;c.ammo[0]=Infinity;n.fire(c);
+ assert.equal(c.punchPitch,0,'no recoil leaves no vertical kick');
+ assert.equal(c.spread,0,'no recoil leaves no bloom');
 });

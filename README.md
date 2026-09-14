@@ -588,6 +588,12 @@ Version 2.23 shows your connection quality online:
 
 - **Latency chip.** Network matches display a colour-coded `GOOD` / `FAIR` / `POOR` chip with the current interpolation delay, graded from the same jitter and packet-loss estimators the netcode already uses (`connectionQuality` in `game/hud.mjs`). It turns amber or red before the connection becomes unplayable.
 
+Version 4.3 deepens gameplay, world and career:
+
+- **Mutators** (low gravity, turbo, instagib, one-shot, mirror loadout, big head, no recoil) compose on any mode, plus per-mode loadouts and sniper/pistol presets with new ammo/megahealth supplies.
+- **Two new maps** (Dune Ravine, Ember Caldera) with biome props and deterministic destructible crates/barrels.
+- **Prestige ranks** after max level and twelve achievements with unlock toasts and a Career track panel.
+
 Version 4.2 expands campaign, world variety and the meta loop:
 
 - **Five campaign missions** with stealth, duel and boss-phase content; horde gains lancer, sentinel and Harbinger enemies plus new wave modifiers.

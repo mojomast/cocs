@@ -1,5 +1,32 @@
 # COCS verification report
 
+## Release 4.3 - Mutators, biomes, destructibles, prestige and achievements
+
+**Gameplay**
+- Composable **mutators** (low gravity, turbo, instagib, one-shot, mirror
+  loadout, big head, no recoil, plus the legacy flags unified into one ordered
+  set) with deterministic composition and `mutators:[...]` config.
+- **Mode/loadout rules**: per-mode starting weapons, ammo, ADS/pickup
+  restrictions and sniper/pistol presets; new `ammo` and `megahealth` supplies.
+- Bots pick loadout-allowed weapons, retreat under one-shot/instagib and finish
+  wounded targets.
+
+**World**
+- Two new next-gen maps: **Dune Ravine** (desert canyon) and **Ember Caldera**
+  (frozen volcanic), with biome prop families, mesas/ridges/lava cracks/ice
+  spikes and breakable crates/barrels.
+- Deterministic **destructible props** (pooled debris, WebGL-gated,
+  quality-budgeted) that never affect authoritative movement.
+
+**Meta**
+- **Prestige** ranks after max level with permanent XP bonuses, and twelve
+  deterministic **achievements** with unlock toasts and a Career track panel.
+- Roving-tabindex keyboard navigation for tabs/segmented controls; onboarding
+  and help updated for mutators, career and the new maps.
+
+Verification: game **1199/1199**, server **128/128**, `tests/` **5/5**, `tsc`
+clean, lint 0 errors, build clean.
+
 ## Release 4.2 - Campaign, weather, history and challenge expansion
 
 **Campaign / PvE**

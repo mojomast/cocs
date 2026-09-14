@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {Match} from './core.mjs';
-import {normalizeConfig} from './config.mjs';
+import {normalizeConfig,activeMutators,mutatorEffects} from './config.mjs';
 
 const seeded = (n = 31) => { let a = n; return () => ((a = (Math.imul(a, 1664525) + 1013904223) >>> 0) / 4294967296); };
 
@@ -65,4 +65,37 @@ test('random loadout with unlimited ammo spawns a usable infinite gun', () => {
   assert.equal(a.ammo[a.weapon], Infinity, 'random weapon has infinite ammo');
   a.shotWait = 0;
   assert.equal(m.fire(a), true, 'the random weapon can fire');
+});
+
+test('mutators compose in a deterministic order regardless of list order', () => {
+  const one = normalizeConfig({mutators: ['bigHead', 'turbo', 'oneShot', 'lowGravity', 'noRecoil']});
+  const two = normalizeConfig({mutators: ['noRecoil', 'lowGravity', 'oneShot', 'turbo', 'bigHead']});
+  assert.deepEqual(activeMutators(one), activeMutators(two), 'the canonical order is input-order independent');
+  assert.deepEqual(mutatorEffects(one), mutatorEffects(two), 'the folded effect view is input-order independent');
+  assert.deepEqual(activeMutators(one), ['turbo', 'lowGravity', 'oneShot', 'bigHead', 'noRecoil']);
+});
+
+test('a mutator stack layers movement, lethality and recoil in one match', () => {
+  const m = new Match('chatgpt', 'openclaw', seeded(), 'crosswire', {mode: 'deathmatch', botCount: 0, humanCount: 2, mutators: ['turbo', 'lowGravity', 'oneShot', 'noRecoil', 'bigHead'], timeLimit: 60});
+  const [a, b] = m.actors;
+  assert.equal(m.mutators.speedMultiplier, 1.25);
+  assert.equal(m.mutators.gravityMultiplier, .4);
+  assert.equal(m.mutators.oneShot, true);
+  assert.equal(m.mutators.noRecoil, true);
+  assert.equal(a.hitScale, 1.5);
+  Object.assign(b, {health: 100, protection: 0, armor: 0});
+  m.damage(b, 1, a);
+  assert.ok(b.health <= 0, 'one-shot still applies inside a stack');
+  const [n, c] = [m, a];
+  c.weapon = 0; c.ammo[0] = Infinity; c.shotWait = 0;
+  n.fire(c);
+  assert.equal(c.punchPitch, 0, 'no-recoil still applies inside a stack');
+  assert.equal(c.spread, 0, 'no-recoil clears bloom inside a stack');
+});
+
+test('the mutators list and explicit flags produce identical matches', () => {
+  const viaList = new Match('chatgpt', 'openclaw', seeded(), 'crosswire', {mode: 'deathmatch', botCount: 0, humanCount: 2, mutators: ['oneShot', 'bigHead'], timeLimit: 60});
+  const viaFlags = new Match('chatgpt', 'openclaw', seeded(), 'crosswire', {mode: 'deathmatch', botCount: 0, humanCount: 2, oneShot: true, bigHead: true, timeLimit: 60});
+  assert.deepEqual(viaList.mutators, viaFlags.mutators);
+  assert.equal(viaList.actors[0].hitScale, viaFlags.actors[0].hitScale);
 });

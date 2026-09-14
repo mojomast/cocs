@@ -7,6 +7,8 @@ export const ONBOARDING_STEPS = Object.freeze([
   Object.freeze({id: 'fight', title: 'FIGHT', detail: 'Left mouse fires, right mouse aims, R reloads, F melees and G throws a frag. Scroll or use 1-0 to switch weapons.'}),
   Object.freeze({id: 'objective', title: 'PLAY THE OBJECTIVE', detail: 'Hold the hill, carry the flag, or push the payload cart. The current goal and score run along the top of the screen.'}),
   Object.freeze({id: 'systems', title: 'NEW SYSTEMS', detail: 'Juggernaut, Team Elimination and VIP Escort remix the objective; Horde waves grant lasting upgrades; dailies and Theater highlights track progress.'}),
+  Object.freeze({id: 'mutators', title: 'MUTATORS & WEATHER', detail: 'Match Setup toggles mutators like One-shot, Bounty, Berserk, Random weapon and Sudden death. Arenas pick their own weather — rain, snow, ash or storms — and time of day; reduce motion clears it.'}),
+  Object.freeze({id: 'career', title: 'PRESTIGE & ACHIEVEMENTS', detail: 'Milestones unlock achievements for bonus XP, and overflow XP past level 60 banks prestige ranks with permanent XP bonuses. Track both under Rank → Career track.'}),
   Object.freeze({id: 'adapt', title: 'MAKE IT YOURS', detail: 'Set invert look, sensitivity, captions, HUD clarity and colourblind team colours in Settings at any time.'}),
 ]);
 
@@ -36,6 +38,26 @@ export const HELP_SECTIONS = Object.freeze([
     ]),
   }),
   Object.freeze({
+    id: 'mutators',
+    title: 'MUTATORS & WEATHER',
+    summary: 'Remix the rules and read the sky.',
+    items: Object.freeze([
+      'MATCH SETUP → Modifiers toggles One-shot kills, Bounty on sprees, Berserk, Random starting weapon, Sudden death, Life steal, Unlimited ammo and Half cooldowns.',
+      'WEATHER · Every arena selects rain, snow, ash, storm or clear skies from its biome and time of day. Reduce motion forces clear weather.',
+      'Arenas rotate through day, dusk and night; halo maps like Aether Ring and Skybreak Isles add a bright ring sky.',
+    ]),
+  }),
+  Object.freeze({
+    id: 'career',
+    title: 'PRESTIGE & ACHIEVEMENTS',
+    summary: 'Long-term goals beyond the level cap.',
+    items: Object.freeze([
+      'ACHIEVEMENTS · First Blood, Centurion (100 kills), Flawless, Streak Master, Campaign Clear and more unlock automatically and pay bonus XP.',
+      'PRESTIGE · Once you hit level 60, overflow XP banks a prestige rank every 6000 XP, each tier granting a permanent match-XP bonus.',
+      'Rank → Career track lists every achievement and prestige tier with its reward.',
+    ]),
+  }),
+  Object.freeze({
     id: 'challenges',
     title: 'DAILY CHALLENGES',
     summary: 'Rotating bonus objectives that pay XP.',
@@ -55,6 +77,17 @@ export const HELP_SECTIONS = Object.freeze([
     ]),
   }),
   Object.freeze({
+    id: 'maps',
+    title: 'ARENAS & NEW MAPS',
+    summary: 'From stone colosseums to orbital rings.',
+    items: Object.freeze([
+      'CLASSIC · The Colosseum, Frost Gate, Sunken Hill, Riverbend, Iron Fortress, The Atrium, The Catacombs, Slagworks and The Forge.',
+      'BATTLEFIELDS · Neon Vertical, Substation 7, Warfront Delta and Skyfall Basin add rooftops, bulkheads, armour and air superiority.',
+      'ISLES · Skybreak Isles and Aether Ring offer three-route island layouts with trampolines and boost launchers.',
+      'OBJECTIVE · The Throne (Juggernaut), The Gauntlet (Elimination), Convoy Line (Payload), Proving Grounds (Arms Race) and Titan Valley (Combined Arms).',
+    ]),
+  }),
+  Object.freeze({
     id: 'access',
     title: 'ACCESSIBILITY',
     summary: 'Make the arena readable for you.',
@@ -62,6 +95,7 @@ export const HELP_SECTIONS = Object.freeze([
       'View & crosshair holds resolution scale, glow, brightness, FOV, crosshair shape and colour.',
       'Subtitles / audio captions, reduce motion and the colourblind team palette live there too.',
       'Remap any action under Controls; touch controls have their own sensitivity slider.',
+      'Every menu tab, panel and modal is keyboard reachable; Tab cycles focus and Escape closes the active dialog.',
     ]),
   }),
 ]);

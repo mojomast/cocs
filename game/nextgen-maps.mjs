@@ -2,6 +2,12 @@
 // a deterministic seed and a small imperative layout, so the maps share an
 // engine but not a silhouette. The legacy maps remain untouched in MAPS.
 import {createLevel, mulberry32} from './levelgen.mjs';
+import {terrainSupportAt} from './terrain.mjs';
+
+// Runtime triangulated support, so authored cover sits on the surface the
+// simulation actually walks on (raw noise height can differ by metres on the
+// high-amplitude biome maps).
+const runtimeFloor = (ctx, x, z) => terrainSupportAt(x, z, ctx.terrain, ctx.terrain.maxSlope ?? .9)?.y ?? ctx.ground(x, z);
 
 const ring = (ctx, x, z, radius, count, place) => {
   for (let i = 0; i < count; i++) { const a = (i / count) * Math.PI * 2; place(ctx, x + Math.cos(a) * radius, z + Math.sin(a) * radius, a, i); }
@@ -273,4 +279,71 @@ const gauntlet = createLevel({
   },
 });
 
-export const NEXTGEN_MAPS = [colosseum, frostGate, sunkenHill, riverbend, fortress, atrium, catacombs, slagworks, forge, provingGrounds, titanValley, convoyLine, throne, gauntlet];
+// 15. Deathmatch — a desert canyon of mesas, a dry ravine and wind-cut ridges.
+const duneRavine = createLevel({
+  id: 'dune-ravine', name: 'Dune Ravine', tag: 'DEATHMATCH / DESERT CANYON', color: '#e0b06a', background: '#1a120a', seed: 1515,
+  group: 'outdoor', scale: 'battle', mode: 'deathmatch', size: { w: 104, d: 104 }, biome: 'canyon', amplitude: 6.5, relief: 1.8, step: 7,
+  description: 'A wind-cut desert canyon. Flat-topped mesas overlook a dry ravine, and every ridge is a firing step.',
+  layout(ctx, rng) {
+    // Central mesa: a flat-topped plateau with four ramps down to the sand.
+    ring(ctx, 0, 0, 17, 12, (c, x, z, a, i) => {
+      if (i % 4 === 0) return; // gaps keep the plateau walkable
+      c.addBlock({ x, z, w: 6.5, d: 6.5, h: c.ground(x, z) + 3.4, kind: 'terrace' });
+    });
+    for (let i = 0; i < 4; i++) { const a = (i / 4) * Math.PI * 2 + .4; ctx.addBridge({ x: Math.cos(a) * 22, z: Math.sin(a) * 22, y: ctx.ground(Math.cos(a) * 22, Math.sin(a) * 22) + 1.6, w: 12, d: 4, rot: -a + Math.PI / 2, thickness: .5 }); }
+    // Wind-cut ridges frame the ravine running north to south.
+    for (const [x, z, w, d] of [[-34, 0, 7, 34], [34, 0, 7, 34], [0, -38, 30, 7], [0, 38, 30, 7]]) ctx.addBlock({ x, z, w, d, h: ctx.ground(x, z) + 4.6, kind: 'ridge' });
+    // Lava-lit cracks and ice pockets read the two extremes of the canyon.
+    for (const [x, z, rot, scale] of [[-22, 18, .4, 1.1], [20, -20, -.6, 1.3], [-14, -26, 1.1, .9], [26, 24, .2, 1]]) ctx.addProp({ type: 'lavaCrack', x, z, y: ctx.ground(x, z), rot, scale });
+    for (const [x, z, scale] of [[-28, -12, .9], [16, 30, 1.1], [-8, 34, .8]]) ctx.addProp({ type: 'iceSpike', x, z, y: ctx.ground(x, z), scale });
+    scatter(ctx, 20, rng, 9, (c, x, z) => c.addRock({ x, z, scale: .7 + rng() * .9 }));
+    scatter(ctx, 10, rng, 10, (c, x, z) => c.addCrate({ x, z, scale: .8 + rng() * .4 }));
+    scatter(ctx, 8, rng, 10, (c, x, z) => c.addBarrel({ x, z, scale: .9 + rng() * .4 }));
+    // Mirrored low cover on the triangulated surface, so it is solid from above
+    // and anchors the open lanes between the mesas.
+    for (const [x, z] of [[-14, 6], [14, -6], [-14, -6], [14, 6], [-6, 16], [6, -16], [6, 16], [-6, -16]]) ctx.addBlock({ x, z, w: 3.6, d: 1.6, h: runtimeFloor(ctx, x, z) + 2.1, kind: 'cover' });
+    ctx.addObjective(0, 0, 5); ctx.addObjective(-30, -22, 4); ctx.addObjective(30, 22, 4);
+    for (let i = 0; i < 8; i++) { const a = (i / 8) * Math.PI * 2 + .2; ctx.addSpawn(Math.cos(a) * 40, Math.sin(a) * 40); }
+    ctx.addPickup('rocket', -12, 0); ctx.addPickup('rail', 12, 0); ctx.addPickup('scatter', 0, -12); ctx.addPickup('plasma', 0, 12);
+    ctx.addPickup('health', -34, 0); ctx.addPickup('health', 34, 0); ctx.addPickup('armor', 0, -34); ctx.addPickup('armor', 0, 34);
+  },
+});
+
+// 16. Rocket Arena — a frozen volcanic caldera where lava cracks split old ice.
+const emberCaldera = createLevel({
+  id: 'ember-caldera', name: 'Ember Caldera', tag: 'ROCKETS / FROZEN VOLCANIC', color: '#ff7a4d', background: '#160b07', seed: 1616,
+  group: 'outdoor', scale: 'battle', mode: 'rockets', size: { w: 96, d: 96 }, biome: 'volcanic', amplitude: 5, relief: 1.6, step: 7,
+  description: 'A collapsed caldera half-frozen and half-molten. Catwalks cross the crater while ice shelves and lava cracks split the rim.',
+  layout(ctx, rng) {
+    // The caldera rim: a broken ring of cooled rock with four wide crossings so
+    // the centre is always walk-connected to the outer lanes.
+    ring(ctx, 0, 0, 24, 16, (c, x, z, a, i) => {
+      if (i % 4 < 2) return;
+      c.addBlock({ x, z, w: 6, d: 6, h: runtimeFloor(ctx, x, z) + (i % 3 === 0 ? 3.2 : 5.4), kind: 'ridge' });
+    });
+    // Catwalks span the crater so rockets have open duelling lanes.
+    ctx.addBridge({ x: 0, z: 0, y: 5.5, w: 40, d: 4, rot: 0, thickness: .5 });
+    ctx.addBridge({ x: 0, z: 0, y: 5.5, w: 40, d: 4, rot: Math.PI / 2, thickness: .5 });
+    // Molten cracks and frozen shelves alternate around the floor.
+    for (const [x, z, rot, scale] of [[-12, -12, .3, 1.4], [12, 12, -.5, 1.5], [-13, 12, .9, 1.1], [13, -12, 1.4, 1.2], [0, -18, .1, 1.3]]) ctx.addProp({ type: 'lavaCrack', x, z, y: ctx.ground(x, z), rot, scale });
+    for (const [x, z, scale] of [[-18, 0, 1.2], [18, 0, 1], [0, 18, 1.3], [0, -18, .9]]) ctx.addProp({ type: 'iceSpike', x, z, y: ctx.ground(x, z), scale });
+    scatter(ctx, 16, rng, 10, (c, x, z) => c.addRock({ x, z, scale: .7 + rng() * .8 }));
+    scatter(ctx, 12, rng, 10, (c, x, z) => c.addBarrel({ x, z, scale: .9 + rng() * .4 }));
+    scatter(ctx, 6, rng, 11, (c, x, z) => c.addCrate({ x, z, scale: .8 + rng() * .3 }));
+    for (const [x, z] of [[-12, 6], [12, -6], [-12, -6], [12, 6], [-6, 14], [6, -14], [6, 14], [-6, -14]]) ctx.addBlock({ x, z, w: 3.6, d: 1.6, h: runtimeFloor(ctx, x, z) + 2.1, kind: 'cover' });
+    ctx.addObjective(-26, 0, 3.5); ctx.addObjective(0, 26, 4); ctx.addObjective(26, 0, 3.5);
+    for (let i = 0; i < 8; i++) { const a = (i / 8) * Math.PI * 2; ctx.addSpawn(Math.cos(a) * 38, Math.sin(a) * 38); }
+    ctx.addPickup('rocket', -32, -18); ctx.addPickup('rocket', 32, 18); ctx.addPickup('rocket', 0, -32); ctx.addPickup('rocket', 0, 32);
+    // Supplies sit on the open crossings, clear of the ridge ring and catwalks.
+    ctx.addPickup('health', -6, -12); ctx.addPickup('health', 6, 12); ctx.addPickup('armor', -6, 12); ctx.addPickup('armor', 6, -12);
+  },
+});
+
+// `createLevel` emits the simulation schema but not the decorative biome tag, so
+// the two biome maps carry it explicitly for the environment/weather layer. They
+// are marked `variant` so the canonical one-map-per-combat-mode set stays exact;
+// variants extend the rotation without claiming a new mode slot.
+duneRavine.biome = 'canyon';duneRavine.variant = true;
+emberCaldera.biome = 'volcanic';emberCaldera.variant = true;
+
+export const NEXTGEN_MAPS = [colosseum, frostGate, sunkenHill, riverbend, fortress, atrium, catacombs, slagworks, forge, provingGrounds, titanValley, convoyLine, throne, gauntlet, duneRavine, emberCaldera];

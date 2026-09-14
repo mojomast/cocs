@@ -7,9 +7,11 @@ const resultTone=(result:string)=>result==='win'?'accent':result==='draw'?'warn'
 const shortDate=(at:number)=>at?new Date(at).toISOString().slice(0,10):'—';
 
 export function ProgressionScreen({ui}:ScreenProps){
- const {profile,UNLOCKS,UNLOCK_GROUPS,GEAR,GEAR_SLOTS,ATTACHMENTS,ATTACHMENT_SLOTS,WEAPON_FINISHES,CROSSHAIR_STYLES,levelFromXp,rankTitle,rankBlurb,unlockedItems,chooseGear,chooseAttachment,chooseFinish,chooseCrosshair,selected,changeMode,notice,headActions,previewRef,challenges=[],weeklyChallenges=[],history={entries:[]},historyTotals,historyLeaderboard=[],clearHistory,campaignMissions=[],campaignSummary,startCampaignMission,setSingleOpen,setSingleSub,GAME_MODES=[]}=ui;
+ const {profile,UNLOCKS,UNLOCK_GROUPS,GEAR,GEAR_SLOTS,ATTACHMENTS,ATTACHMENT_SLOTS,WEAPON_FINISHES,CROSSHAIR_STYLES,levelFromXp,rankTitle,rankBlurb,unlockedItems,chooseGear,chooseAttachment,chooseFinish,chooseCrosshair,selected,changeMode,notice,headActions,previewRef,challenges=[],weeklyChallenges=[],history={entries:[]},historyTotals,historyLeaderboard=[],clearHistory,campaignMissions=[],campaignSummary,startCampaignMission,setSingleOpen,setSingleSub,GAME_MODES=[],prestige,PRESTIGE_TIERS=[],PRESTIGE_XP=6000,prestigeTier,prestigeXpBonus,achievements=[],ACHIEVEMENTS=[]}=ui;
  const [tab,setTab]=useState('gear');
+ const [careerTab,setCareerTab]=useState('achievements');
  const level=levelFromXp(profile.xp);
+ const careerTabs=[{value:'achievements',label:`Achievements${achievements.length?` · ${achievements.filter((a:any)=>a.unlocked).length}/${achievements.length}`:''}`},{value:'prestige',label:'Prestige'}];
  const modeName=(id:string)=>GAME_MODES.find((m:any)=>m.id===id)?.name||String(id||'unknown').replace(/[-_]+/g,' ').replace(/\b\w/g,(c:string)=>c.toUpperCase());
  const modeRows=Object.entries(profile.byMode||{}).map(([id,stats]:any)=>[id,stats]).sort((a:any,b:any)=>(b[1].matches||0)-(a[1].matches||0));
  const renderItems=(items:any[],isSelected:(item:any)=>boolean,isLocked:(item:any)=>boolean,onPick:(item:any)=>void)=>(
@@ -32,13 +34,14 @@ export function ProgressionScreen({ui}:ScreenProps){
    {notice&&<Banner>{notice}</Banner>}
     <div className="layout progression-grid layout--sticky">
      <div className="stack">
-     <Panel label="RANK" meta={`LEVEL ${profile.level} / 60`}>
+     <Panel label="RANK" meta={prestige?.rank>0?`PRESTIGE ${prestige.rank} · LEVEL ${profile.level} / 60`:`LEVEL ${profile.level} / 60`}>
      <div className="stack">
       <div className="row row--between"><h2 className="panel-title">{rankTitle(profile.level)}</h2>{selected&&<Chip tone="accent"><i/>{selected.name}</Chip>}</div>
-      <div className="row row--between"><span className="label">{profile.xp} XP</span><span className="label">{level.toNext} XP TO LEVEL {profile.level+1}</span></div>
+      {prestige?.rank>0&&<div className="row row--between"><span className="label" style={{color:prestige.tier?.color}}>{prestige.tier?.name?.toUpperCase()||'PRESTIGE'} {prestige.rank}</span><span className="label">+{Math.round((prestigeXpBonus?.(prestige.rank)||0)*100)}% XP</span></div>}
+      <div className="row row--between"><span className="label">{profile.xp} XP</span><span className="label">{prestige?.maxed?'MAX PRESTIGE':level.toNext>0?`${level.toNext} XP TO LEVEL ${profile.level+1}`:`${prestige?.toNext} XP TO PRESTIGE ${(prestige?.rank||0)+1}`}</span></div>
       <Meter ratio={level.progress}/>
       <p className="field-note">{rankBlurb(profile.level)}</p>
-      <Stats items={[{label:'MATCHES',value:profile.matches},{label:'WINS',value:profile.wins},{label:'KILLS',value:profile.kills}]}/>
+      <Stats items={[{label:'MATCHES',value:profile.matches},{label:'WINS',value:profile.wins},{label:'KILLS',value:profile.kills},{label:'PRESTIGE',value:prestige?.rank||0}]}/>
      </div>
      </Panel>
      <div ref={previewRef} className="preview-stage" aria-label={`${selected?.name??'Operator'} animated 3D model`}>
@@ -87,6 +90,25 @@ export function ProgressionScreen({ui}:ScreenProps){
        </div>;
        })}
      </div>
+     </Panel>
+     <Panel label="CAREER TRACK" meta={achievements.length?`${achievements.filter((a:any)=>a.unlocked).length} / ${achievements.length} UNLOCKED`:'MILESTONES'}>
+      <div className="stack">
+       <Tabs value={careerTab} onChange={setCareerTab} ariaLabel="Career track" tabs={careerTabs}/>
+       {careerTab==='achievements'&&<div className="stack stack--tight">{achievements.length?achievements.map((a:any)=><div key={a.id} className={`achievement-row${a.unlocked?' unlocked':''}`}>
+        <span className="achievement-icon" aria-hidden="true">{a.unlocked?'★':'☆'}</span>
+        <span className="card-main"><span className="card-name">{a.name}<small>{a.description}</small></span></span>
+        <span className="label">{a.unlocked?'UNLOCKED':`+${a.xp} XP`}</span>
+       </div>):<p className="field-note">Achievements load with your profile. Win matches, bank kills and clear the campaign to unlock them.</p>}</div>}
+       {careerTab==='prestige'&&<div className="stack stack--tight">
+        {prestige?.rank>0?<div className="row row--between"><span className="label" style={{color:prestige.tier?.color}}>{prestige.tier?.name?.toUpperCase()||'PRESTIGE'} {prestige.rank}</span><span className="label">{prestige.maxed?'MAX TIER':`${prestige.into} / ${PRESTIGE_XP} TO ${(prestige.rank||0)+1}`}</span></div>:<p className="field-note">Reach level 60 to begin banking prestige. Overflow XP past the cap earns one rank per {PRESTIGE_XP} XP, each with a permanent XP bonus.</p>}
+        {prestige?.rank>0&&<Meter ratio={prestige.progress}/>}
+        <div className="stack stack--tight">{PRESTIGE_TIERS.map((tier:any)=>{const reached=(prestige?.rank||0)>=tier.level;return <div key={tier.level} className={`prestige-row${reached?' reached':''}`}>
+         <span className="prestige-pip" style={{background:reached?tier.color:'transparent',borderColor:tier.color}} aria-hidden="true">{tier.level}</span>
+         <span className="card-main"><span className="card-name" style={{color:reached?tier.color:undefined}}>{tier.name}<small>{tier.reward} · {tier.perk}</small></span></span>
+         <span className="label">{reached?'CLAIMED':`PRESTIGE ${tier.level}`}</span>
+        </div>;})}</div>
+       </div>}
+      </div>
      </Panel>
      <Panel label="DAILY CHALLENGES" meta={`${challenges.filter((c:any)=>c.done).length} / ${challenges.length} CLAIMED`}>
       {renderChallenges(challenges,'Daily challenges rotate each day. Finish matches to advance them and bank bonus XP.')}

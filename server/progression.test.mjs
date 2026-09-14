@@ -62,6 +62,22 @@ test('per-mode career stats round-trip through persistence',async()=>{
  assert.equal(store.get(ID).byMode.deathmatch.kills,7,'all() returns copied mode stats');
 });
 
+test('achievements and prestige mirror through the server store and persistence',async()=>{
+ const file=tempFile(),store=new ProgressionStore(file);
+ const first=store.award(ID,{win:true,actor:{frags:5,deaths:0,scoreStats:{}}});
+ assert.ok(first.achievements.some(a=>a.id==='first-blood'),'first win unlocks an achievement server-side');
+ assert.ok(first.achievementXp>0);
+ const second=store.award(ID,{win:true,actor:{frags:5,deaths:0,scoreStats:{}}});
+ assert.equal(second.achievements.some(a=>a.id==='first-blood'),false,'achievements pay once');
+ await store.whenPersisted();
+ const reloaded=new ProgressionStore(file);
+ assert.equal(reloaded.get(ID).achievements['first-blood'],true);
+ assert.equal(reloaded.get(ID).prestige,0);
+ const copies=store.all();
+ copies[0].achievements['first-blood']=false;
+ assert.equal(store.get(ID).achievements['first-blood'],true,'all() copies achievements');
+});
+
 test('invalid ids never create profiles and all() returns copies',()=>{
  const store=new ProgressionStore();
  assert.equal(store.award('bad',{actor:{frags:1}}),null);
