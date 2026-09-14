@@ -923,3 +923,24 @@ html, body { overscroll-behavior: none; }
   .hud-bar>i{transition:none}
 }
 
+
+/* HUD layering + touch clearance (v3.1): combat feedback must never be
+   occluded by HUD panels, and the bottom readouts clear the thumb lane. */
+.game-hud .crosshair,
+.game-hud .hitmarker,
+.game-hud .damage-numbers,
+.game-hud .damage-direction,
+.game-hud .damage-flash,
+.game-hud .reload-indicator,
+.game-hud .posture-chip,
+.game-hud .death-message { z-index: var(--z-board); }
+.game-hud .objective-announcer,
+.game-hud .kill-banner,
+.game-hud .kill-callout { z-index: var(--z-panel); }
+.game-hud .match-top { z-index: var(--z-panel); }
+.game-hud .command-panel { z-index: var(--z-hud); }
+@media (max-width: 760px) {
+  .game-hud.touch-mode .hud-lower { bottom: calc(var(--safe-bottom) + 176px); max-height: 34dvh; }
+  .game-hud.touch-mode .hud-bottom-note { display: none; }
+  .game-hud.touch-mode .kill-feed { max-height: 10dvh; }
+}

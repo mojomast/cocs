@@ -588,6 +588,12 @@ Version 2.23 shows your connection quality online:
 
 - **Latency chip.** Network matches display a colour-coded `GOOD` / `FAIR` / `POOR` chip with the current interpolation delay, graded from the same jitter and packet-loss estimators the netcode already uses (`connectionQuality` in `game/hud.mjs`). It turns amber or red before the connection becomes unplayable.
 
+Version 3.1 redesigns the modals, theater and HUD layering:
+
+- **Modals on the new primitives.** Match setup (two-column arena + rules, sticky footer), single-player (segmented Horde/Campaign with a briefing pane), pause, results (tabbed scoreboard/stats/awards with a sticky action footer) and onboarding all use the `app/ui` `Modal`/`Panel`/`Btn`/`Tabs`/`Stats` primitives.
+- **Theater.** Recorded matches become a responsive card grid; playback uses a safe-area dock with one transport row and a camera-rig rail.
+- **HUD readability.** Combat feedback (crosshair, hitmarker, damage numbers/direction, reload, posture) now layers above HUD panels, and on touch screens the bottom readouts lift above the thumb lane.
+
 Version 3.0 rebuilds the menus on a new design system:
 
 - **New primitives and shell.** `app/ui/primitives.tsx` plus the namespaced `ui-*` design system in `app/styles/ui.css` give every screen one `Shell` (sticky header / scrolling body / sticky action rail), one `Panel`, one `Btn`, one `Modal` and shared `Stats`/`Tabs`/`Segmented`/`Chip`/`Meter` primitives.

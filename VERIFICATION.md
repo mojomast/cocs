@@ -1,5 +1,27 @@
 # COCS verification report
 
+## Release 3.1 - Modals, theater and HUD layering on the new design system
+
+- **Modals rebuilt** on the `app/ui` primitives: match setup (two-column arena
+  cards + rules, sticky footer, still mounts `MatchConfiguration` hidden so the
+  SSR-pinned strings survive), single-player (segmented Horde/Campaign with a
+  briefing pane), pause (actions + settings two-column), results (tabs for
+  scoreboard / your stats / awards with a sticky action footer), and first-run
+  onboarding. Old inline modal markup is gone from `app/page.tsx`.
+- **Theater rebuilt**: recorded matches are now a responsive card grid instead of
+  full-width rows, and playback uses a safe-area dock with a single transport
+  row and a camera-rig chip rail.
+- **HUD layering fixed**: combat feedback (crosshair, hitmarker, damage numbers,
+  damage direction/flash, reload, posture) now sits at `--z-board`, above the
+  command panel/announcer layer, so HUD panels can no longer paint over it.
+  On touch screens the bottom readouts lift above the thumb lane
+  (`.game-hud.touch-mode`) and the bottom note is hidden.
+- **Reactive net state** from 3.0 is extended to the new lobby/results screens.
+
+Verification: game **955/955**, server **126/126**, SSR 4/4, `tsc` clean, lint 0
+errors, build clean. No browser/WebGL playtest: the modal/theater layouts are
+type/SSR-verified, and the HUD layering is CSS-only.
+
 ## Release 3.0 - Ground-up menu redesign (new app shell + design system)
 
 - **New design system.** `app/ui/primitives.tsx` (`Shell`, `TopBar`, `PageHead`,
