@@ -119,6 +119,32 @@ cinematic director. No player is on the field, so you just watch the fight.
 The director rigs work in combat and objective matches, and on the car maps too
 (the free camera overrides the race chase camera).
 
+## Single player: Horde and Campaign
+
+**SINGLE PLAYER** on the title screen opens a solo operation with two flavours,
+both built on the existing arenas and the shared bot brain. Every enemy is a
+normal actor on the hostile team, so NPCs path, take cover, use weapons and
+harnesses exactly like multiplayer bots — they simply never respawn.
+
+- **Horde** — pick any combat arena and hold out against escalating waves.
+  Waves grow in size (and go elite every fifth), they deploy around you, and you
+  have three lives for the whole run. Clear the wave target to win; lose all
+  lives and the arena takes you.
+- **Campaign** — six scripted missions, each reusing an existing map and layering
+  a timeline of NPC garrisons, reinforcements, bosses and objective changes on
+  top: clear the floor, survive a timed assault, assassinate a Warden, hold a
+  capture point, clear then extract, and a combined-arms finale. Missions have
+  their own win/lose conditions, lives and briefs.
+
+The live HUD shows the wave or mission, hostiles remaining, lives, kills,
+objective and any scripted message, plus a Warden health bar on assassination
+missions. Match Setup and the on-screen controls are otherwise unchanged.
+
+Mission data (maps, briefs, garrisons, win conditions and script triggers) lives
+in `game/campaign-data.mjs`; the wave/script simulation and snapshot live in
+`game/singleplayer.mjs`. Zones are snapped to the map's navigation graph, so a
+mission cannot place an unreachable objective.
+
 ## Objective clarity and bot variety
 
 This pass fixes several objective modes and makes combat bots play differently:

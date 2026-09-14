@@ -1,5 +1,39 @@
 # COCS verification report
 
+## Release 2.78 - Single player: Horde and Campaign
+
+- Two new modes, `horde` and `campaign`, join the registry with `team:true` so a
+  lone human (team 0) is hostile to NPCs (team 1) with friendly fire off.
+- `game/singleplayer.mjs` drives both: `initializeSinglePlayer` trims the match to
+  the player and pre-deploys campaign garrisons, while `updateSinglePlayer` runs
+  each tick from `Match.step` after objectives. Horde schedules escalating waves
+  (`hordeWaveSize`), pins dead NPCs out of the respawn queue and releases them
+  between waves. Campaign runs a data-driven timeline (`at`/`after`/`when`
+  triggers) of announcements, objective changes, NPC/ally deployments, bosses
+  and explicit win/lose, then evaluates the mission condition (`eliminate`,
+  `survive`, `assassinate`, `reach`, `defend`).
+- `game/campaign-data.mjs` defines six missions on existing arenas with briefs,
+  garrisons, bosses and scripted events. Zones snap to the navigation graph at
+  init so objectives are always reachable.
+- `game/config.mjs` registers the modes and carries a sanitized `mission` field;
+  `game/arenas.mjs` lets both modes run on every combat arena (never the Puma
+  maps). `Match` exposes the state as `snapshot().singleplayer`, `leaders()`
+  returns the player, and `objectiveState.winner` flows into `snapshot().winner`.
+- `ArenaView.syncActors` models and disposes NPCs added or removed mid-match (the
+  local loop calls it each frame), so Horde waves and campaign reinforcements
+  render without rebuilding the scene.
+- UI: a **SINGLE PLAYER** entry with a Horde/Campaign setup modal, a
+  `SinglePlayerHud` panel (wave/mission, hostiles, lives, kills, objective,
+  scripted messages, Warden bar, defend timer) and single-player result copy.
+
+Verification: game **979/979**, server **126/126**, SSR 4/4, `tsc` clean, lint 0
+errors, build clean, live deploy verified. New tests cover wave growth and wins,
+NPC no-respawn/release, life loss, every campaign mission's deployment, boot-camp
+elimination, Warden assassination, survive/defend timers, extraction gating,
+boss/elite scaling and the HUD display/result adapters. `map-layout` validates
+both modes on every arena. No browser/WebGL playtest, so NPC pacing and mission
+difficulty are unit-verified only.
+
 ## Release 2.77 - Spectate bot matches with camera controls and free cam
 
 - **SPECTATE BOTS** on the title screen starts a local all-bot match from the
