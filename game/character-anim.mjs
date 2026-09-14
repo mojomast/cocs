@@ -223,7 +223,9 @@ export class CharacterRig {
 
   apply(pose) {
     const j = this.joints;
-    const ro = (node, x, y, z) => { if (!node) return; node.rotation.set(x ?? 0, y ?? 0, z ?? 0); };
+    // The robot mesh faces -Z, but the rig poses are authored for a +Z front, so
+    // negate the pitch axis on application (yaw/roll are unaffected).
+    const ro = (node, x, y, z) => { if (!node) return; node.rotation.set(-(x ?? 0), y ?? 0, z ?? 0); };
     if (j.root && pose.rootY !== undefined) j.root.position.y = (j.rootBaseY ?? 0) + pose.rootY;
     ro(j.hips, pose.hips.x, pose.hips.y, pose.hips.z);
     ro(j.torso, pose.torso.x, pose.torso.y, pose.torso.z);

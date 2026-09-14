@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {Match} from './core.mjs';
+import {Match,floorAt} from './core.mjs';
 import {GAME_MODES,normalizeConfig,DEFAULT_CONFIG} from './config.mjs';
 import {CAMPAIGN_MISSIONS,missionFor} from './campaign-data.mjs';
 import {ENEMY_TYPES,ENEMY_SPEED_VARIANCE,enemyById,applyEnemyFields,enemyBehavior} from './enemy-types.mjs';
@@ -166,4 +166,71 @@ test('enemy deploys vary speed within a class and carry reduced firepower',()=>{
  }
  assert.ok(ENEMY_TYPES.husk.damageMult<.5&&ENEMY_TYPES.spitter.damageMult<.5,'swarm classes are heavily damped');
  assert.ok(ENEMY_TYPES.brute.damageMult<1&&ENEMY_TYPES.warden.damageMult<=1,'heavies are damped too');
+});
+
+test('area confinement keeps zoned NPCs inside their leash when the player is far',()=>{
+ const match=make('horde',{fragLimit:2,mapId:'colosseum'});
+ const state=match.modeState,zone={x:0,z:0,r:8,leash:12,kind:'spawn'};
+ const player=match.actors[0];
+ player.x=-42;player.z=-42;player.y=floorAt(-42,-42,match.arena)??0;player.protection=1e9;
+ const ids=spawnGroup(match,state,{type:'spitter',count:6,zone},{team:1});
+ assert.equal(ids.length,6);
+ for(let i=0;i<1800;i++)match.step(1/60,{inputs:{}});
+ for(const id of ids){
+  const actor=match.actors.find(candidate=>candidate.id===id);
+  if(!actor||actor.health<=0)continue;
+  const distance=Math.hypot(actor.x-zone.x,actor.z-zone.z);
+  assert.ok(distance<=zone.leash+1,`enemy ${id} strayed ${distance.toFixed(2)}m (leash ${zone.leash})`);
+ }
+});
+
+test('hard patrol zones loop NPCs inside their radius instead of wandering the map',()=>{
+ const match=make('horde',{fragLimit:2,mapId:'colosseum'});
+ const zone={x:0,z:0,r:8,leash:12,kind:'patrol'};
+ const ids=spawnGroup(match,match.modeState,{type:'husk',count:4,zone},{team:1});
+ const seen=new Set();
+ for(let i=0;i<1800;i++){
+  match.step(1/60,{inputs:{}});
+  if(i%120===0)for(const id of ids){const actor=match.actors.find(candidate=>candidate.id===id);if(actor&&actor.health>0)seen.add(`${actor.x.toFixed(1)}|${actor.z.toFixed(1)}`);}
+ }
+ for(const id of ids){
+  const actor=match.actors.find(candidate=>candidate.id===id);
+  if(!actor||actor.health<=0)continue;
+  assert.ok(Math.hypot(actor.x-zone.x,actor.z-zone.z)<=zone.leash+1,`patrol ${id} held its leash`);
+ }
+ assert.ok(seen.size>1,'patrollers keep moving instead of freezing in place');
+});
+
+test('group spawns de-clump onto distinct in-radius floor points',()=>{
+ const match=make('horde',{fragLimit:2,mapId:'colosseum'});
+ const zone={x:0,z:0,r:8,leash:12,kind:'hold'};
+ const ids=spawnGroup(match,match.modeState,{type:'husk',count:8,zone},{team:1});
+ const actors=ids.map(id=>match.actors.find(candidate=>candidate.id===id));
+ const keys=new Set(actors.map(actor=>`${actor.x.toFixed(3)}|${actor.z.toFixed(3)}`));
+ assert.equal(keys.size,8,'every member occupies a distinct position');
+ for(const actor of actors){
+  assert.ok(Math.hypot(actor.x-zone.x,actor.z-zone.z)<=zone.r+1e-6,'member stays inside the spawn radius');
+  assert.notEqual(floorAt(actor.x,actor.z,match.arena),null,'member snaps to the floor');
+ }
+ for(let i=0;i<actors.length;i++)for(let j=i+1;j<actors.length;j++)assert.ok(Math.hypot(actors[i].x-actors[j].x,actors[i].z-actors[j].z)>1,'members are pairwise separated');
+});
+
+test('campaign scripts fire a timed reinforcement and bark exactly once',()=>{
+ const match=make('campaign',{mission:'convoy-run',mapId:'convoy-line'});
+ const state=match.modeState;
+ match.actors[0].protection=1e9;
+ const event=state.script.find(candidate=>Number.isFinite(candidate.at)&&candidate.bark&&candidate.spawn);
+ assert.ok(event,'convoy-run authors a timed, barked reinforcement');
+ const captured=[],original=match.emit.bind(match);
+ match.emit=(type,data)=>{captured.push({type,...data});original(type,data);};
+ const before=match.actors.length;
+ const barkCount=()=>captured.filter(entry=>entry.type==='npc-bark'&&entry.text===event.bark.text).length;
+ for(let i=0;i<Math.ceil((event.at+2)*60);i++)match.step(1/60,{inputs:{}});
+ assert.equal(barkCount(),1,'the timed bark fires once');
+ assert.ok(match.actors.length>before,'the timed reinforcement deployed actors');
+ assert.equal(state.fired[event.id],true,'the script event is marked fired');
+ const actorsAfter=match.actors.length;
+ for(let i=0;i<180;i++)match.step(1/60,{inputs:{}});
+ assert.equal(barkCount(),1,'the one-shot script event never fires twice');
+ assert.equal(match.actors.length,actorsAfter,'no duplicate reinforcements');
 });

@@ -588,6 +588,14 @@ Version 2.23 shows your connection quality online:
 
 - **Latency chip.** Network matches display a colour-coded `GOOD` / `FAIR` / `POOR` chip with the current interpolation delay, graded from the same jitter and packet-loss estimators the netcode already uses (`connectionQuality` in `game/hud.mjs`). It turns amber or red before the connection becomes unplayable.
 
+Version 4.0 is a major improvement pass across single-player, modes, graphics and rewards:
+
+- **Single-player:** enemies spawn in authored areas and stay within a per-type leash, groups fan out instead of stacking, horde waves use a per-difficulty composition table, and both campaign missions now run scripted timelines (timed reinforcements, ambushes, boss phases with adds, NPC barks) with real win conditions.
+- **Modes:** vehicles only spawn in vehicle modes (Combined Arms is no longer a Domination clone); CTF carriers are slowed and cannot use powers; KOTH's hill rotates and zone ownership grants buffs; Arms Race demotes on death with a catch-up bonus.
+- **Graphics:** a high-poly truncated-icosahedron soccer ball that rolls; the CPU software renderer now honours per-vertex colours.
+- **Fixes:** spectate mouse look is no longer inverted; bot rig pitch/lean/ADS and mounted-rider facing are corrected; actor weapons aim correctly.
+- **Rewards:** the results screen shows XP/level/next-unlock, unlocks queue as toasts, the menu shows your next unlock, Next Arena keeps your loadout (Surprise Me randomises), and theater demos list jump-to highlights.
+
 Version 3.10 rebuilds the mobile touch controls:
 
 - **Floating dual sticks** (move left, look right) with a fixed base radius, fixing the bug where any touch on the left flung the stick full forward.

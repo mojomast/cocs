@@ -75,6 +75,42 @@ export function setDemoStorage(next) {
   storage = next && typeof next === 'object' ? next : createIndexedDbStorage();
 }
 
+const HIGHLIGHT_EVENTS = new Set(['death', 'capture', 'killstreak']);
+
+function actorNames(demo) {
+  const names = new Map();
+  const frames = Array.isArray(demo?.keyframes) ? demo.keyframes : [];
+  for (const frame of frames) {
+    const actors = frame?.state?.actors;
+    if (!Array.isArray(actors)) continue;
+    for (const actor of actors) {
+      if (actor && actor.id !== undefined && !names.has(actor.id)) names.set(actor.id, actor.name || `Actor ${actor.id}`);
+    }
+  }
+  return names;
+}
+
+export function demoHighlights(demo) {
+  const events = Array.isArray(demo?.events) ? demo.events : [];
+  const names = actorNames(demo);
+  const label = id => names.get(id) || `Actor ${id}`;
+  const highlights = [];
+  for (const event of events) {
+    if (!event || typeof event.time !== 'number' || !HIGHLIGHT_EVENTS.has(event.type)) continue;
+    if (event.type === 'death') {
+      const victim = label(event.actor);
+      const killer = event.self === true ? null : event.killerName || (event.killer !== null && event.killer !== undefined ? label(event.killer) : null);
+      highlights.push({ time: event.time, label: killer ? `${killer} eliminated ${victim}` : `${victim} was eliminated`, actor: event.killer ?? event.actor });
+    } else if (event.type === 'capture') {
+      highlights.push({ time: event.time, label: `${label(event.actor)} captured the flag`, actor: event.actor });
+    } else {
+      const streak = Number(event.streak) || 0;
+      highlights.push({ time: event.time, label: `${label(event.actor)} hit a ${streak} killstreak`, actor: event.actor });
+    }
+  }
+  return highlights.sort((a, b) => a.time - b.time);
+}
+
 export function demoSummary(demo) {
   const header = demo?.header || {};
   const frames = Array.isArray(demo?.keyframes) ? demo.keyframes : [];
@@ -90,6 +126,7 @@ export function demoSummary(demo) {
     network: demo?.meta?.net === true,
     duration,
     frames: frames.length,
+    highlights: demoHighlights(demo),
   };
 }
 

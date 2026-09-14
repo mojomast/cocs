@@ -86,3 +86,46 @@ test('assault defenders win the round if time expires without a breach', () => {
   assert.equal(m.over, true);
   assert.equal(m.snapshot().winner, m.objectiveState.defender);
 });
+
+test('combined-arms fields vehicles on a vehicle map while zone modes do not',()=>{
+  const domination=new Match('chatgpt','openclaw',rng,'titan-valley',{mode:'domination',botCount:0});
+  assert.equal(domination.vehicles.length,0,'domination must not clone the combined-arms vehicle field');
+  const combined=new Match('chatgpt','openclaw',rng,'titan-valley',{mode:'combined-arms',botCount:0});
+  assert.ok(combined.vehicles.length>0,'combined-arms keeps its armour');
+  assert.equal(modeRule('combined-arms').vehicles,true);
+  assert.equal(modeRule('domination').vehicles,false);
+});
+
+test('KOTH rotates the hill between authored points after the interval',()=>{
+  const m=new Match('chatgpt','openclaw',rng,'titan-valley',{mode:'koth',botCount:0});
+  const state=m.objectiveState,hill=state.zones[0];
+  assert.ok(Array.isArray(state.rotation)&&state.rotation.length>1,'authored hill rotation points are loaded');
+  const before={id:hill.id,x:hill.x,z:hill.z};
+  state.rotationTimer=0;
+  m.updateObjectives(1/60);
+  assert.notEqual(hill.id,before.id,'the hill identity changes with the rotation');
+  assert.ok(Math.hypot(hill.x-before.x,hill.z-before.z)>1e-6,'the hill position moves');
+  assert.ok(Math.abs(state.rotationTimer-state.rotationEvery)<1e-9,'the rotation timer resets');
+  assert.ok(m.events.some(e=>e.type==='hill-rotate'));
+});
+
+test('domination and KOTH ownership grants the mapped powerup to occupants',()=>{
+  const domination=new Match('chatgpt','openclaw',rng,'crosswire',{mode:'domination',botCount:0});
+  const [a]=domination.actors,alpha=domination.objectiveState.zones.find(z=>z.id==='alpha');
+  Object.assign(a,{team:0,x:alpha.x,z:alpha.z,y:alpha.y??0,health:100});
+  for(let i=0;i<12;i++)domination.updateObjectives(.5);
+  assert.equal(alpha.owner,0);
+  a.powerups={};
+  domination.updateObjectives(.5);
+  assert.ok(a.powerups.overshield>0,'alpha grants overshield');
+
+  const koth=new Match('chatgpt','openclaw',rng,'crosswire',{mode:'koth',botCount:0});
+  const [k]=koth.actors,hill=koth.objectiveState.zones[0];
+  Object.assign(k,{team:0,x:hill.x,z:hill.z,y:hill.y??0,health:100});
+  for(let i=0;i<12;i++)koth.updateObjectives(.5);
+  assert.equal(hill.owner,0);
+  k.powerups={};
+  koth.updateObjectives(.5);
+  assert.ok(k.powerups.haste>0,'the hill grants its mapped powerup');
+});
+

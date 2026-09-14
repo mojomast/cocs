@@ -23,6 +23,7 @@ export function SelectionScreen({ui}:ScreenProps){
   <span className="chip">{power?.name}</span>
   <span className="chip">{ui.selectedMap?.name}</span>
   <span className="chip">{ui.selectedMode?.name?.toUpperCase()} · {config?.botCount} BOTS</span>
+  {ui.nextUnlock&&<span className="chip">NEXT UNLOCK · {ui.nextUnlock.name} · LV {ui.nextUnlock.level}</span>}
   {netConnected&&<span className="chip chip--accent"><i/>ONLINE</span>}
  </>}>
   <Btn size="sm" variant="ghost" onClick={()=>changeMode('progression')} disabled={!ui.ready||!!ui.error}><Sparkles size={14}/>RANK · LV {profile?.level}</Btn>

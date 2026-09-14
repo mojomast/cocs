@@ -2,6 +2,33 @@ import * as T from 'three';
 import {withAssets,currentAssets,ModelAssets} from './effects-fx.mjs';
 import {material,box,ring,textLabel,V} from './view.mjs';
 
+// A truncated-icosahedron soccer ball: the Voronoi cells of an icosahedron's 12
+// vertices are 12 pentagons and the cells of its 20 face centres are 20 hexagons,
+// exactly the classic panel layout. We split a high-detail icosahedron's
+// triangles into the two shells by nearest panel direction. Two meshes (not a
+// multi-material group) so the CPU SoftwareRenderer, which reads only the first
+// material and no vertex colours, still shows white and black panels.
+function soccerBallPanels(radius,detail){
+ const base=new T.IcosahedronGeometry(1,0),bp=base.attributes.position,pent=[],hex=[],seen=new Set();
+ for(let i=0;i<bp.count;i+=3){
+  const v=V(bp.getX(i),bp.getY(i),bp.getZ(i)).normalize(),key=`${v.x.toFixed(3)}|${v.y.toFixed(3)}|${v.z.toFixed(3)}`;
+  if(!seen.has(key)){seen.add(key);pent.push(v);}
+  hex.push(V((bp.getX(i)+bp.getX(i+1)+bp.getX(i+2))/3,(bp.getY(i)+bp.getY(i+1)+bp.getY(i+2))/3,(bp.getZ(i)+bp.getZ(i+1)+bp.getZ(i+2))/3).normalize());
+ }
+ base.dispose();
+ const src=new T.IcosahedronGeometry(radius,detail),p=src.attributes.position,pentPos=[],hexPos=[];
+ for(let i=0;i<p.count;i+=3){
+  const c=V((p.getX(i)+p.getX(i+1)+p.getX(i+2))/3,(p.getY(i)+p.getY(i+1)+p.getY(i+2))/3,(p.getZ(i)+p.getZ(i+1)+p.getZ(i+2))/3).normalize();
+  let pentBest=-2,hexBest=-2;
+  for(const d of pent)pentBest=Math.max(pentBest,c.dot(d));
+  for(const d of hex)hexBest=Math.max(hexBest,c.dot(d));
+  (pentBest>hexBest?pentPos:hexPos).push(p.getX(i),p.getY(i),p.getZ(i),p.getX(i+1),p.getY(i+1),p.getZ(i+1),p.getX(i+2),p.getY(i+2),p.getZ(i+2));
+ }
+ src.dispose();
+ const build=array=>{const g=new T.BufferGeometry();g.setAttribute('position',new T.Float32BufferAttribute(array,3));g.computeVertexNormals();return g;};
+ return {pent:build(pentPos),hex:build(hexPos)};
+}
+
 export function updateRace(view,match,time){
  view.raceModels??=new Map();const active=new Set(),reduced=view.reduced();
  const soccer=match.race?.kind==='soccer';
@@ -9,9 +36,12 @@ export function updateRace(view,match,time){
   const ball=match.race?.ball;
   if(ball&&Number.isFinite(ball.x)&&Number.isFinite(ball.z)){
    const key='soccer-ball',radius=Math.max(.2,Number.isFinite(ball.r)?ball.r:1.1);active.add(key);let model=view.raceModels.get(key);
-   if(!model){model=new T.Group();model.name='soccer-ball';const shell=new T.Mesh(new T.SphereGeometry(radius,18,14),material('#f3f6fa',.15,.5));model.add(shell);const patchMat=material('#141922',.3,.6);for(const [px,py,pz] of [[.58,.34,.74],[-.6,.42,.6],[.08,.78,-.62]]){const patch=new T.Mesh(new T.SphereGeometry(radius*.28,8,6),patchMat);patch.position.set(px*radius,py*radius,pz*radius);model.add(patch);}model.traverse(n=>{n.userData.objective=true;n.userData.noCameraOcclusion=true;});view.worldGroup.add(model);view.raceModels.set(key,model);}
-   model.position.set(ball.x,Number.isFinite(ball.y)?ball.y:radius,ball.z);
-   if(!reduced){model.rotation.x=time*.9;model.rotation.y=time*1.4;}
+   if(!model){model=new T.Group();model.name='soccer-ball';const assets=view.modelAssets??=new ModelAssets(),software=view.renderer?.isSoftware===true,panels=soccerBallPanels(radius,software?6:15);withAssets(assets,()=>{assets.register(panels.pent);assets.register(panels.hex);const white=material('#f3f6fa',.15,.5),black=material('#141922',.3,.6);model.add(new T.Mesh(panels.hex,white),new T.Mesh(panels.pent,black));});view._trackAssets?.(assets);model.userData.rollTime=time;model.traverse(n=>{n.userData.objective=true;n.userData.noCameraOcclusion=true;});view.worldGroup.add(model);view.raceModels.set(key,model);}
+    model.position.set(ball.x,Number.isFinite(ball.y)?ball.y:radius,ball.z);
+    // Roll without slipping about the horizontal axis perpendicular to travel.
+    const lastRoll=model.userData.rollTime,dt=Number.isFinite(lastRoll)?Math.max(0,Math.min(.1,time-lastRoll)):0;model.userData.rollTime=time;
+    const vx=Number(ball.vx)||0,vz=Number(ball.vz)||0,speed=Math.hypot(vx,vz);
+    if(!reduced&&dt>0&&speed>1e-3)model.rotateOnWorldAxis(V(vz,0,-vx).normalize(),speed*dt/radius);
   }
  }
  if(!soccer)for(const entry of match.race?.boxes??[]){

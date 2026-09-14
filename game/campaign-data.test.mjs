@@ -42,3 +42,32 @@ test('the authored campaign starts on the bigger maps',()=>{
  }
  assert.equal(missionFor('missing').id,CAMPAIGN_MISSIONS[0].id);
 });
+
+test('campaign missions author scripts, barks, boss phases and win conditions',()=>{
+ const winKinds=new Set(['eliminate','survive','assassinate','reach','defend']);
+ for(const mission of CAMPAIGN_MISSIONS){
+  assert.ok(mission.win&&winKinds.has(mission.win.kind),`${mission.id} win condition`);
+  assert.ok(Array.isArray(mission.script)&&mission.script.length>0,`${mission.id} has a script`);
+  const scriptIds=new Set();
+  for(const event of mission.script){
+   assert.ok(event.id&&!scriptIds.has(event.id),`${mission.id} unique script id`);
+   scriptIds.add(event.id);
+   assert.ok(Number.isFinite(event.at)||Number.isFinite(event.after)||typeof event.when==='string',`${mission.id}/${event.id} trigger`);
+   if(event.spawn){
+    assert.ok(ENEMY_TYPE_IDS.includes(event.spawn.type)||event.spawn.boss===true,`${mission.id}/${event.id} spawn type`);
+    assert.ok(Number.isFinite(event.spawn.x)&&Number.isFinite(event.spawn.z),`${mission.id}/${event.id} spawn point`);
+   }
+   if(event.bark)assert.ok(typeof event.bark.text==='string'&&event.bark.text.length>0,`${mission.id}/${event.id} bark text`);
+   if(event.bossPhase!==undefined)assert.ok(Number.isFinite(event.bossPhase)&&event.bossPhase>0,`${mission.id}/${event.id} boss phase`);
+   if(typeof event.when==='string'&&event.when.startsWith('boss-hp:'))assert.match(event.when,/^boss-hp:\d+(?:\.\d+)?$/);
+  }
+ }
+ const convoy=missionFor('convoy-run');
+ assert.ok(convoy.script.some(event=>Number.isFinite(event.at)&&event.bark),'timed barked reinforcement');
+ assert.ok(convoy.script.some(event=>event.when==='cleared'||event.when==='player-in-zone'),'conditional ambush');
+ assert.ok(convoy.script.some(event=>typeof event.when==='string'&&event.when.startsWith('boss-hp:')&&Number.isFinite(event.bossPhase)),'boss phase beats');
+ assert.equal(convoy.win.kind,'reach');
+ const reactor=missionFor('reactor-run');
+ assert.equal(reactor.win.kind,'assassinate');
+ assert.ok(reactor.script.some(event=>typeof event.when==='string'&&event.when.startsWith('boss-hp:')),'warden phases');
+});

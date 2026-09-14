@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {ENEMY_TYPES,ENEMY_TYPE_IDS,DEFAULT_ENEMY_ID,enemyById,applyEnemyFields,enemyBehavior} from './enemy-types.mjs';
+import {ENEMY_TYPES,ENEMY_TYPE_IDS,DEFAULT_ENEMY_ID,enemyById,enemyLeash,applyEnemyFields,enemyBehavior,NPC_ZONE_KINDS} from './enemy-types.mjs';
 import {CHARACTERS} from './data.mjs';
 
 const bot=()=>({route:[],think:0,target:-1,memory:0,reaction:0,stuck:0,last:{x:0,y:0,z:0},state:'roam',patrol:0,flank:null,flankDone:false,recover:0,suppressed:0,threat:-1,standoff:null,strafeReverse:-99});
@@ -26,6 +26,18 @@ test('enemyById falls back to the default type',()=>{
  assert.equal(enemyById('husk').id,'husk');
  assert.equal(enemyById('nope').id,DEFAULT_ENEMY_ID);
  assert.equal(enemyById(undefined).id,DEFAULT_ENEMY_ID);
+});
+
+test('enemy classes expose finite default NPC-zone leashes',()=>{
+ assert.deepEqual([...NPC_ZONE_KINDS],['spawn','patrol','hold']);
+ for(const id of ENEMY_TYPE_IDS){
+  const type=ENEMY_TYPES[id];
+  assert.ok(Number.isFinite(type.leash)&&type.leash>0,`${id} has a default leash`);
+  assert.equal(enemyLeash(id),type.leash,`${id} leash resolves by id`);
+ }
+ assert.ok(ENEMY_TYPES.spitter.leash>=ENEMY_TYPES.husk.leash,'ranged enemies get a longer tether');
+ assert.ok(ENEMY_TYPES.warden.leash>=ENEMY_TYPES.brute.leash,'the boss gets the longest tether');
+ assert.equal(enemyLeash('missing'),ENEMY_TYPES.spitter.leash,'unknown leashes fall back to the default type');
 });
 
 test('applyEnemyFields sets the profile and respawn-surviving stats',()=>{

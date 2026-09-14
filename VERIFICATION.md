@@ -1,5 +1,39 @@
 # COCS verification report
 
+## Release 4.0 - Major improvement pass (single-player, modes, graphics, rewards)
+
+A five-agent research wave followed by four implementation agents.
+
+**Single-player / NPCs**
+- **Area confinement:** spawned NPCs carry an `npcZone` (`spawn`/`patrol`/`hold`) with a per-type leash; pathing samples nav nodes inside the zone, destinations are clamped to the leash, strays return home, and stuck-recovery stays in-zone. Hard zones never leave; soft zones break leash only while engaging nearby.
+- **De-clumped group spawns** (`placeGroup` picks distinct on-floor nav nodes, pairwise >1m) instead of stacking every member on one node.
+- **Wave composition + difficulty pacing:** horde waves come from a per-difficulty table (size/growth/cap/intermission/elite cadence), so Easy → Nightmare actually changes the survival curve.
+- **Scripted events:** both campaign missions now author `script` timelines (timed reinforcements, `cleared`/`player-in-zone`/`enemiesAtMost:N` ambushes, Warden `boss-hp` phases with adds, NPC barks) and real `win` conditions. `bark`/`boss-phase`/`story-line` actions and captions were added.
+- New tests: confinement loop, de-clump, timed-spawn + bark-once, script/win well-formedness.
+
+**Game-mode differentiation**
+- **Vehicle gating:** vehicles only spawn where a mode allows them (`combined-arms`, `puma-*`), so Combined Arms is no longer a Domination clone.
+- **CTF carrier** moves at 0.9× and cannot use its harness power.
+- **KOTH** hill rotates between authored points every 30s; **Domination/KOTH** zone ownership grants a mapped powerup to occupants.
+- **Arms Race:** dying demotes one rung; a trailing killer gains a bonus rung.
+- New/updated tests in `extra-modes`, `modes`, `armsrace`, `config`.
+
+**Graphics**
+- **High-poly soccer ball:** a truncated-icosahedron panel ball (Voronoi split of a high-detail icosahedron into 12 pentagon + 20 hexagon shells, ~5.1k tris on WebGL / ~980 on CPU) that rolls without slipping, routed through `ModelAssets` so sharing/disposal invariants hold.
+- **Software renderer vertex colors:** the CPU renderer now averages per-vertex colors into the material tint, so all existing `paintGeometry` detail is visible on CPU as well as WebGL.
+
+**Rigging / orientation / spectate**
+- **Spectate mouse no longer inverted:** the spectate/free-cam look now matches the normal path's yaw sign and honours `invertY`; touch look is disabled while spectating.
+- **Character rig** pitch axis corrected at application (the robot mesh faces -Z but poses were authored +Z), so bots lean/ADS/head-track correctly.
+- **Actor weapons** aim with the correct pitch and now track aim yaw; **mounted riders** face chassis-forward using `heading` (fixing backwards local/spectated riders).
+
+**Interface / replayability / progression**
+- Results screen shows a reward strip (`+XP`, level meter, next unlock); unlocks queue as sequential toasts; the selection rail shows the next unlock.
+- **Next Arena** keeps your operator/harness (map only); a new **Surprise Me** randomises loadout + mode.
+- Theater demos derive highlight moments from the recorded event stream with jump-to buttons.
+
+Verification: game **984/984**, server **126/126**, `tests/` **5/5**, `tsc` clean, lint 0 errors, build clean.
+
 ## Release 3.10 - Mobile touch controls rebuild
 
 - **Both sticks are floating.** The move stick and the look stick now appear

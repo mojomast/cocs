@@ -65,3 +65,17 @@ export function awardMatch(profile,result={}){
  for(const item of unlockedItems(level.level))if(!next.unlocks[item.id]){next.unlocks[item.id]=true;unlocked.push(item);}
  return {profile:next,gained,levelUp:level.level>before,unlocked,progress:level.progress,toNext:level.toNext};
 }
+export function nextUnlockFor(profile){
+ const unlocked=(profile&&typeof profile.unlocks==='object'&&profile.unlocks)||{};
+ return UNLOCKS.filter(item=>unlocked[item.id]!==true).sort((a,b)=>a.level-b.level||String(a.name).localeCompare(String(b.name)))[0]||null;
+}
+export function matchRewardSummary(award={}){
+ const profile=award&&award.profile?award.profile:defaultProgression(),level=levelFromXp(profile.xp),next=nextUnlockFor(profile);
+ return {
+  gained:Math.max(0,Math.floor(Number(award?.gained)||0)),
+  xp:level.total,level:level.level,into:level.into,needed:level.needed,
+  progress:level.progress,toNext:level.toNext,levelUp:award?.levelUp===true,
+  unlocked:Array.isArray(award?.unlocked)?award.unlocked:[],
+  nextUnlock:next?{id:next.id,kind:next.kind,name:next.name,level:next.level}:null,
+ };
+}

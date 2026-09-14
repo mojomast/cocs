@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {Match,moveActor} from './core.mjs';
 import {resolveMapForMode} from './arenas.mjs';
-import {DEFAULT_CONFIG,DEFAULT_DISPLAY,normalizeConfig,normalizeDisplay,GAME_MODES,DIFFICULTIES} from './config.mjs';
+import {DEFAULT_CONFIG,DEFAULT_DISPLAY,normalizeConfig,normalizeDisplay,GAME_MODES,DIFFICULTIES,modeRule} from './config.mjs';
 const rng=()=>{let n=123;return()=>((n=(Math.imul(n,1664525)+1013904223)>>>0)/4294967296);};
 function fixture(options={}){const m=new Match('chatgpt','hermes',()=>.75,'crosswire',{botCount:1,...options});const [a,b]=m.actors;Object.assign(a,{x:0,z:8,y:0,health:100,armor:0,protection:0,shotWait:0,yaw:0,pitch:0});if(b)Object.assign(b,{x:0,z:5,y:0,health:100,armor:0,protection:0,shotWait:0,yaw:Math.PI,pitch:0});return [m,a,b];}
 
@@ -63,6 +63,20 @@ test('Puma Soccer clamps the roster and neutralizes combat modifiers without mut
  assert.equal(mode.name,'Puma Soccer');assert.equal(mode.rules.team,true);assert.equal(mode.rules.score,'goals');
 });
 test('starting weapon accepts the full ten-weapon arsenal',()=>{assert.equal(normalizeConfig({startingWeapon:9}).startingWeapon,9);assert.equal(normalizeConfig({startingWeapon:99}).startingWeapon,9);assert.equal(normalizeConfig({startingWeapon:-3}).startingWeapon,0);assert.equal(normalizeConfig({startingWeapon:8}).startingWeapon,8);});
+test('mode rules gate vehicles, carrier speed and zone buffs without touching other modes',()=>{
+  assert.equal(modeRule('combined-arms').vehicles,true);
+  assert.equal(modeRule('puma-race').vehicles,true);
+  assert.equal(modeRule('puma-soccer').vehicles,true);
+  assert.equal(modeRule('domination').vehicles,false);
+  assert.equal(modeRule('koth').vehicles,false);
+  assert.equal(modeRule('ctf').carrierSpeed,.9);
+  assert.equal(modeRule('domination').zoneBuffs.alpha,'overshield');
+  assert.equal(modeRule('domination').zoneBuffs.bravo,'haste');
+  assert.equal(modeRule('domination').zoneBuffs.charlie,'overcharge');
+  assert.equal(modeRule('koth').zoneBuff,'haste');
+  assert.equal(modeRule('deathmatch').vehicles,undefined,'untouched modes keep current vehicle defaults');
+});
+
 test('display configuration accepts a manual reduce-motion override', () => {
  const d = normalizeDisplay({ reducedMotion: true });
  assert.equal(d.reducedMotion, true);

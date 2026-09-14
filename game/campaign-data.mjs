@@ -6,14 +6,30 @@
 //
 // Step action fields:
 //   story:{speaker,text}   queue a story line
+//   bark:{speaker,text}    in-world NPC transmission (caption event npc-bark)
+//   bossPhase:n            announce a boss phase change (caption boss-phase)
 //   announce:'...'         short banner message
 //   objective:'...'        replace the current objective text
-//   spawn:{type,count,elite?,x?,z?,group}   deploy enemies and track the group
+//   spawn:{type,count,elite?,x?,z?,group,zone?}   deploy enemies and track the group
+//   ally:{...}             deploy a friendly NPC
 //   win:'...' / lose:'...' end the mission
 //   checkpoint:true        mark a resumable checkpoint
 //   lives:n                change remaining lives
 //
 // Step completion kinds: enter-zone | group-dead | boss-dead | timer | hold
+//
+// Mission `script:[...]` events are one-shot, ordered and id-tagged. A trigger
+// is one of:
+//   at:seconds        elapsed mission time
+//   after:seconds     seconds since the previous fired event
+//   when:'cleared' | 'boss-dead' | 'player-in-zone' |
+//        'enemiesAtMost:N' | 'boss-hp:<fraction>'
+// and may carry any of the action fields above. `spawn.zone` (or a bare x,z)
+// confines that group: `kind:'patrol'`/`'hold'` are hard leashes, `'spawn'` is
+// a soft leash that only breaks to engage a nearby player.
+//
+// Mission `win:{kind,...}` is the runtime fallback win condition:
+//   eliminate | survive:{seconds} | assassinate | reach:{x,z,radius,requireCleared?} | defend:{seconds}
 export const CAMPAIGN_MISSIONS = Object.freeze([
  {
   id:'convoy-run',order:1,chapter:'ACT I',name:'The Long Haul',mapId:'convoy-line',tag:'ESCORT',
@@ -21,11 +37,20 @@ export const CAMPAIGN_MISSIONS = Object.freeze([
   objective:'Rally at the west depot.',
   lives:3,
   start:{x:-66,z:-12,yaw:-1.5708},
+  win:{kind:'reach',x:58,z:0,radius:10,requireCleared:true,label:'RELAY'},
   intro:{speaker:'DISPATCH',lines:[
    'Relay seven is dark. No signal, no convoy, no mercy.',
    'Get to the east yard and bring it back online. The road is held — shoot through.',
   ]},
   outro:{speaker:'RELAY',lines:['Relay seven online.','Wait. The long-range sweep just lit up. Something big is crossing Titan Valley.']},
+  script:[
+   {id:'convoy-reinforce-1',at:6,spawn:{type:'husk',count:2,x:-58,z:8,group:'script-convoy-reinforce',zone:{x:-58,z:8,r:9,leash:13,kind:'spawn'}},bark:{speaker:'DISPATCH',text:'Drones on the ridge — more husks on the road.'}},
+   {id:'convoy-ambush-cleared',when:'cleared',spawn:{type:'spitter',count:2,x:-32,z:-6,group:'script-convoy-ambush',zone:{x:-32,z:-6,r:10,leash:16,kind:'patrol'}},bark:{speaker:'RELAY',text:'They were waiting in the tenements. Watch the windows.'}},
+   {id:'convoy-bridge-ambush',when:'player-in-zone',x:0,z:6,radius:22,spawn:{type:'husk',count:3,x:0,z:12,group:'script-convoy-bridge',zone:{x:0,z:12,r:10,leash:14,kind:'hold'}},bark:{speaker:'DISPATCH',text:'Bridge is hot — they came up from the riverbed!'}},
+   {id:'convoy-yard-phase2',when:'boss-hp:0.6',bossPhase:2,spawn:{type:'husk',count:2,x:58,z:0,group:'script-convoy-phase2',zone:{x:58,z:0,r:12,leash:16,kind:'spawn'}},bark:{speaker:'WARDEN',text:'You should have stayed on the road!'}},
+   {id:'convoy-yard-phase3',when:'boss-hp:0.3',bossPhase:3,spawn:{type:'brute',count:1,elite:true,x:58,z:0,group:'script-convoy-phase3',zone:{x:58,z:0,r:12,leash:16,kind:'spawn'}},bark:{speaker:'WARDEN',text:'The cluster knows your name now.'}},
+   {id:'convoy-relay-online',when:'boss-dead',objective:'Relay seven is online — hold for extraction.',announce:'Relay seven online.'},
+  ],
   steps:[
    {id:'rally',label:'WEST DEPOT',text:'Rally at the west depot',detail:'Follow the beacon east.',marker:{x:-64,z:0,radius:5,label:'DEPOT'},
     onStart:[{story:{speaker:'DISPATCH',text:'Road ahead is crawling. Move up.'}},{spawn:{type:'husk',count:2,group:'opening',x:-60,z:-6}},{spawn:{type:'spitter',count:1,group:'opening',x:-54,z:-16}}],
@@ -55,11 +80,19 @@ export const CAMPAIGN_MISSIONS = Object.freeze([
   objective:'Secure the west outpost.',
   lives:3,
   start:{x:-60,z:0,yaw:-1.5708},
+  win:{kind:'assassinate'},
   intro:{speaker:'DISPATCH',lines:[
    'Sweep says the cluster is massing on the reactor line.',
    'Take the valley piece by piece. The Warden holds the east base.',
   ]},
   outro:{speaker:'WARDEN',lines:['You think this is the cluster?','I am one node. We are already inside your relay.']},
+  script:[
+   {id:'reactor-reinforce-1',at:8,spawn:{type:'husk',count:3,x:-28,z:-30,group:'script-reactor-reinforce',zone:{x:-28,z:-30,r:10,leash:14,kind:'spawn'}},bark:{speaker:'DISPATCH',text:'Outpost guard just went active — break them fast.'}},
+   {id:'reactor-cavern-ambush',when:'player-in-zone',x:0,z:-30,radius:22,spawn:{type:'spitter',count:3,x:0,z:-38,group:'script-reactor-cavern',zone:{x:0,z:-38,r:12,leash:18,kind:'patrol'}},bark:{speaker:'RELAY',text:'Contact in the cavern — they use the dark.'}},
+   {id:'reactor-low-count',when:'enemiesAtMost:2',spawn:{type:'brute',count:1,elite:true,x:0,z:-30,group:'script-reactor-low',zone:{x:0,z:-30,r:10,leash:15,kind:'hold'}},bark:{speaker:'WARDEN',text:'I see you, operator.'}},
+   {id:'reactor-warden-phase2',when:'boss-hp:0.5',bossPhase:2,spawn:{type:'husk',count:3,x:60,z:0,group:'script-reactor-phase2',zone:{x:60,z:0,r:12,leash:18,kind:'spawn'}},bark:{speaker:'WARDEN',text:'Then let the cluster burn with me!'}},
+   {id:'reactor-warden-phase3',when:'boss-hp:0.2',bossPhase:3,spawn:{type:'brute',count:1,elite:true,x:60,z:0,group:'script-reactor-phase3',zone:{x:60,z:0,r:12,leash:18,kind:'spawn'}},bark:{speaker:'WARDEN',text:'We are one node. We are legion.'}},
+  ],
   steps:[
    {id:'outpost',label:'WEST OUTPOST',text:'Secure the west outpost',detail:'Clear the ridge.',marker:{x:-28,z:-30,radius:6,label:'OUTPOST'},
     onStart:[{story:{speaker:'DISPATCH',text:'Eyes on the outpost. Clear it.'}},{spawn:{type:'spitter',count:4,group:'outpost',x:-28,z:-30}},{spawn:{type:'husk',count:3,group:'outpost',x:-16,z:-20}}],

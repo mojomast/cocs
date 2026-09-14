@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { DEMO_VERSION, demoHeader, compressDemo } from './demo.mjs';
-import { setDemoStorage, saveDemo, getDemo, listDemos, deleteDemo } from './demo-store.mjs';
+import { setDemoStorage, saveDemo, getDemo, listDemos, deleteDemo, demoSummary, demoHighlights } from './demo-store.mjs';
 
 function createMemoryStorage() {
   const meta = new Map();
@@ -75,6 +75,35 @@ test('saveDemo stores a compressed, trimmed record and getDemo parses it back', 
   await deleteDemo(summary.id);
   assert.equal(await getDemo(summary.id), null);
   assert.equal((await listDemos()).length, 0);
+});
+
+test('demoSummary derives theater highlights from death, capture and killstreak events', () => {
+  const base = {
+    config: { mode: 'ctf', timeLimit: 5 },
+    modeName: 'Capture the Flag',
+    mapId: 'exchange',
+    mapName: 'Exchange',
+    teamScores: { 0: 0, 1: 0 },
+    actors: [{ id: 0, name: 'Claude' }, { id: 1, name: 'ChatGPT' }],
+  };
+  const keyframes = [
+    { time: 0, state: { ...base, time: 0 } },
+    { time: 2, state: { ...base, time: 2 } },
+  ];
+  const events = [
+    { type: 'shot', id: 1, time: 0.5 },
+    { type: 'capture', id: 2, time: 1, actor: 0, team: 0 },
+    { type: 'death', id: 3, time: 1.5, actor: 1, killer: 0, killerName: 'Claude' },
+    { type: 'killstreak', id: 4, time: 1.8, actor: 0, streak: 3, reward: 'scavenger' },
+  ];
+  const summary = demoSummary({ version: DEMO_VERSION, header: demoHeader(base), keyframes, events });
+  assert.deepEqual(summary.highlights.map(h => h.time), [1, 1.5, 1.8]);
+  assert.match(summary.highlights[0].label, /Claude captured the flag/);
+  assert.match(summary.highlights[1].label, /Claude eliminated ChatGPT/);
+  assert.match(summary.highlights[2].label, /3 killstreak/);
+  assert.deepEqual(summary.highlights.map(h => h.actor), [0, 0, 0]);
+  assert.deepEqual(demoHighlights({ events: [] }), []);
+  assert.deepEqual(demoHighlights({ events: [{ type: 'death', id: 9, time: 1, actor: 3 }] }).map(h => h.label), ['Actor 3 was eliminated']);
 });
 
 test('getDemo validates DEMO_VERSION on load', async () => {

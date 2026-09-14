@@ -46,6 +46,23 @@ test('team deathmatch wins by team score without changing deathmatch scoring',()
  const d=new Match('chatgpt','openclaw',rng,'exchange',{mode:'deathmatch',botCount:1,fragLimit:5});d.actors[1].protection=0;d.damage(d.actors[1],1000,d.actors[0]);assert.equal(d.actors[0].frags,1);assert.deepEqual(d.teamScores,{0:0,1:0});
 });
 
+test('CTF carriers move slower and cannot activate powers',()=>{
+  const m=new Match('chatgpt','openclaw',rng,'exchange',{mode:'ctf',botCount:0});
+  const a=m.actors[0];
+  Object.assign(a,{x:m.flags[1].x,z:m.flags[1].z});
+  m.objective(a);
+  assert.equal(a.carryingFlag,true);
+  assert.equal(a.carrySpeedMultiplier,.9);
+  assert.equal(m.power(a),false,'a flag carrier cannot activate powers');
+  m.dropFlag(a);
+  assert.equal(a.carryingFlag,false);
+  assert.equal(m.power(a),true,'dropping the flag restores the power');
+  const carrier={...a,carryingFlag:true,carrySpeedMultiplier:.9,x:-5,z:0,y:0,grounded:true,vx:0,vy:0,vz:0};
+  const runner={...a,carryingFlag:false,carrySpeedMultiplier:1,x:-5,z:0,y:0,grounded:true,vx:0,vy:0,vz:0};
+  for(let i=0;i<60;i++){moveActor(carrier,{z:-1},1/60,map,m.config);moveActor(runner,{z:-1},1/60,map,m.config);}
+  assert.ok(Math.hypot(carrier.vx,carrier.vz)<Math.hypot(runner.vx,runner.vz),'a carrier reaches a lower top speed');
+});
+
 test('bounds and traversal launch are deterministic, swept and cooldown gated',()=>{
  const m=new Match('chatgpt','openclaw',rng,'exchange',{botCount:0});const a=m.actors[0];Object.assign(a,{x:0,z:0,y:0,grounded:true,vx:0,vy:0,vz:0});
  moveActor(a,{},1/60,map,m.config);assert.ok(a.vy>0);const first=a.vy;assert.equal(a.traversalPad,'t0');

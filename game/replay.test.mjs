@@ -1,8 +1,8 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {QUICK_MATCH_PRESETS,presetConfig,shuffleSelection,nextArenaSelection} from './replay.mjs';
+import {QUICK_MATCH_PRESETS,presetConfig,shuffleSelection,nextArenaSelection,surpriseSelection} from './replay.mjs';
 import {mapsForMode} from './arenas.mjs';
-import {normalizeConfig} from './config.mjs';
+import {GAME_MODES,normalizeConfig} from './config.mjs';
 import {CHARACTERS,HARNESSES,validLoadout} from './data.mjs';
 
 test('presets are normalized, reset modifiers and preserve callsign',()=>{
@@ -31,17 +31,37 @@ test('shuffle is deterministic with injected RNG and covers compatible choices',
  }
 });
 
-test('next arena always rotates, wraps and retains compatible random loadouts',()=>{
+test('next arena rotates only the map and leaves the loadout untouched',()=>{
  const pool=mapsForMode('deathmatch',{legacy:true});
  assert.ok(pool.length>1);
  for(let i=0;i<pool.length;i++)for(const roll of [0,.25,.5,.999999]){
   const next=nextArenaSelection(pool[i].id,()=>roll);
-  assert.equal(next.mapId,pool[(i+1)%pool.length].id);
+  assert.deepEqual(next,{mapId:pool[(i+1)%pool.length].id});
   assert.notEqual(next.mapId,pool[i].id);
-  assert.ok(validLoadout(next.character,next.harness));
-  assert.deepEqual(next,nextArenaSelection(pool[i].id,()=>roll));
  }
  assert.equal(nextArenaSelection('unknown',()=>0).mapId,pool[0].id);
+ assert.deepEqual(nextArenaSelection('unknown',()=>0),{mapId:pool[0].id});
+});
+
+test('next arena can opt into a compatible random loadout',()=>{
+ const pool=mapsForMode('deathmatch',{legacy:true});
+ for(let i=0;i<pool.length;i++)for(const roll of [0,.25,.5,.999999]){
+  const next=nextArenaSelection(pool[i].id,()=>roll,{randomize:true});
+  assert.equal(next.mapId,pool[(i+1)%pool.length].id);
+  assert.ok(validLoadout(next.character,next.harness));
+  assert.deepEqual(next,nextArenaSelection(pool[i].id,()=>roll,{randomize:true}));
+ }
+});
+
+test('surprise selection randomises mode plus a compatible loadout',()=>{
+ const sequence=()=>{let i=0;return ()=>[0,.2,.7,.9][i++%4];};
+ const first=surpriseSelection(sequence()),second=surpriseSelection(sequence());
+ assert.deepEqual(first,second);
+ assert.ok(GAME_MODES.some(mode=>mode.id===first.mode));
+ assert.ok(validLoadout(first.character,first.harness));
+ assert.ok(first.mapId);
+ assert.equal(surpriseSelection(()=>0,{mode:'puma-race'}).mode,'puma-race');
+ assert.equal(surpriseSelection(()=>0,{mode:'puma-race'}).mapId,'puma-circuit');
 });
 
 test('next arena restricts the rotation to maps that support the active mode',()=>{

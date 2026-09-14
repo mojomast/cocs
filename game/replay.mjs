@@ -1,4 +1,4 @@
-import {DEFAULT_CONFIG,normalizeConfig} from './config.mjs';
+import {DEFAULT_CONFIG,GAME_MODES,normalizeConfig} from './config.mjs';
 import {CHARACTERS,HARNESSES,validLoadout,resolveLoadout} from './data.mjs';
 import {MAPS} from './maps.mjs';
 import {activeMaps,mapsForMode} from './arenas.mjs';
@@ -28,8 +28,15 @@ export function shuffleSelection(random=Math.random,{legacy=true,mode='deathmatc
  return {...resolveLoadout(character,harness),mapId:pool[Math.floor(random()*pool.length)].id};
 }
 
-export function nextArenaSelection(mapId,random=Math.random,{legacy=true,mode='deathmatch'}={}){
+export function nextArenaSelection(mapId,random=Math.random,{legacy=true,mode='deathmatch',randomize=false}={}){
  const pool=selectionPool({legacy,mode});
  const current=pool.findIndex(m=>m.id===mapId),next=((current+1)%pool.length+pool.length)%pool.length;
- return {...shuffleSelection(random,{legacy,mode}),mapId:pool[next].id};
+ const base=randomize?shuffleSelection(random,{legacy,mode}):{};
+ return {...base,mapId:pool[next].id};
+}
+
+export function surpriseSelection(random=Math.random,{legacy=true,mode=null}={}){
+ const modes=mode?[mode]:GAME_MODES.map(item=>item.id);
+ const picked=modes[Math.floor(random()*modes.length)];
+ return {...shuffleSelection(random,{legacy,mode:picked}),mode:picked};
 }

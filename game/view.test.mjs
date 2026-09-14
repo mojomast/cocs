@@ -670,11 +670,17 @@ test('soccer presentation renders one keyed ball and skips race pickups',()=>{
  const ball=view.raceModels.get('soccer-ball');
  assert.ok(ball&&ball.name==='soccer-ball','the ball keeps its keyed model');
  assert.deepEqual(ball.position.toArray(),[1,2,3]);
- assert.equal(ball.children[0].geometry.type,'SphereGeometry');
- assert.equal(ball.children[0].geometry.parameters.radius,1.1);
+ const [hex,pent]=ball.children;
+ assert.equal(hex.geometry.type,'BufferGeometry');
+ assert.ok(hex.geometry.attributes.position.count/3>=1000,'the ball has a high-poly panel shell');
+ assert.notEqual(pent.material.color.getHexString(),hex.material.color.getHexString(),'panels use a contrasting colour');
+ assert.ok(view.sharedResources.has(hex.geometry)&&view.sharedResources.has(pent.geometry),'ball geometry is shared, not owned by the model');
  ball.traverse(node=>{assert.equal(node.userData.objective,true);assert.equal(node.userData.noCameraOcclusion,true);});
  assert.equal(view.raceModels.size,1,'soccer skips race boxes, hazards and coins');
- view.updateRace({race:{kind:'soccer',ball:{x:5,y:1,z:6,r:1.1}}},1);assert.equal(ball.position.x,5);
+ const before=ball.quaternion.toArray();
+ view.updateRace({race:{kind:'soccer',ball:{x:5,y:1,z:6,r:1.1,vx:4,vz:0}}},1);
+ assert.equal(ball.position.x,5);
+ assert.notDeepEqual(ball.quaternion.toArray(),before,'the ball rolls when it moves');
  view.updateRace({},2);assert.equal(view.raceModels.size,0);assert.equal(view.worldGroup.children.length,0);
 });
 

@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {GEAR,MAX_LEVEL,awardMatch,defaultProgression,gearById,levelFromXp,matchXp,normalizeGear,normalizeProgression,rankTitle,resolveGear,unlockedItems,xpForLevel} from './progression.mjs';
+import {GEAR,MAX_LEVEL,awardMatch,defaultProgression,gearById,levelFromXp,matchRewardSummary,matchXp,nextUnlockFor,normalizeGear,normalizeProgression,rankTitle,resolveGear,unlockedItems,xpForLevel} from './progression.mjs';
 
 test('xp curve is monotonic and levelFromXp tracks exact boundaries',()=>{
  for(let level=1;level<MAX_LEVEL-1;level++)assert.ok(xpForLevel(level+1)>xpForLevel(level));
@@ -60,6 +60,32 @@ test('awardMatch levels up, records stats and grants unlocks once',()=>{
  const second=awardMatch(first.profile,{actor:{frags:0,scoreStats:{}}});
  assert.equal(second.profile.matches,2);
  assert.equal(second.unlocked.filter(item=>item.id===first.unlocked[0].id).length,0);
+});
+test('matchRewardSummary surfaces XP, level progress and the next unlock',()=>{
+ const profile=normalizeProgression({xp:500}),summary=matchRewardSummary({profile,gained:500,levelUp:true,unlocked:[{id:'gear-scope',kind:'gear',name:'Precision Scope',level:2}]});
+ assert.equal(summary.gained,500);
+ assert.equal(summary.xp,500);
+ assert.equal(summary.level,2);
+ assert.equal(summary.into,0);
+ assert.equal(summary.needed,xpForLevel(2));
+ assert.equal(summary.progress,0);
+ assert.equal(summary.toNext,xpForLevel(2));
+ assert.equal(summary.levelUp,true);
+ assert.equal(summary.unlocked.length,1);
+ assert.ok(summary.nextUnlock&&typeof summary.nextUnlock.name==='string');
+ assert.ok(summary.nextUnlock.level>=2);
+ assert.equal(profile.unlocks[summary.nextUnlock.id],undefined);
+ assert.equal(nextUnlockFor(profile).id,summary.nextUnlock.id);
+ const empty=matchRewardSummary();
+ assert.equal(empty.gained,0);
+ assert.equal(empty.level,1);
+ assert.ok(empty.nextUnlock);
+ const award=awardMatch(defaultProgression(),{win:true,actor:{frags:40,scoreStats:{captures:1}}});
+ const live=matchRewardSummary(award);
+ assert.equal(live.gained,award.gained);
+ assert.equal(live.level,award.profile.level);
+ assert.ok(live.progress>=0&&live.progress<=1);
+ assert.deepEqual(live.unlocked,award.unlocked);
 });
 test('normalizeProgression clamps, recomputes level and re-validates gear',()=>{
  const profile=normalizeProgression({xp:xpForLevel(1)+xpForLevel(2),level:99,matches:-3,gear:{primary:'heavy-barrel',armor:'plating',utility:'stim'},unlocks:{'gear-scope':true}});
