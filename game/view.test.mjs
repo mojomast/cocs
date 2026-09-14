@@ -757,3 +757,17 @@ test('free camera renders over a race match and restores the normal path when di
  assert.deepEqual(view.camera.position.toArray(),[0,1.45,0],'the first-person path returns');
 });
 
+test('single-player waypoint marker is created, moved and cleared',t=>{
+ const {view,renderer}=fixture(t);view.scene=new T.Scene();view.renderer=renderer;
+ view.updateWaypoint({waypoint:{id:'objective-a',x:3,y:0,z:-4,radius:5,label:'GO'}},MAPS[0]);
+ assert.ok(view.waypointModel,'waypoint model created');
+ assert.equal(view.waypointModel.position.x,3);
+ view.updateWaypoint({waypoint:{id:'objective-a',x:9,y:0,z:-4,radius:5,label:'GO'}},MAPS[0]);
+ assert.equal(view.waypointModel.position.x,9,'same waypoint moves');
+ const first=view.waypointModel;
+ view.updateWaypoint({waypoint:{id:'objective-b',x:1,y:0,z:1,radius:5,label:'NEXT'}},MAPS[0]);
+ assert.notEqual(view.waypointModel,first,'new objective rebuilds the beacon');
+ view.updateWaypoint({waypoint:null},MAPS[0]);
+ assert.equal(view.waypointModel,null,'cleared with no waypoint');
+});
+
