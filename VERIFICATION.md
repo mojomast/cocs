@@ -1,5 +1,26 @@
 # COCS verification report
 
+## Release 3.5 - Granular video options, scrollable menus
+
+- **Glow is now a real setting.** Post-processing used to be gated on resolution
+  scale (`>= 100%`), so the only way to reduce bloom was to lower the resolution,
+  which switched glow off entirely. `postStage` no longer looks at scale.
+  `DEFAULT_DISPLAY`/`normalizeDisplay` gain `postFx`, `bloom` (0–1) and `exposure`
+  (0.6–1.8), and Graphics & settings exposes a post-processing toggle, a glow
+  strength slider and a brightness slider. `ArenaView._syncPost` applies the
+  bloom strength live (no composer rebuild) and `setDisplay` applies
+  `toneMappingExposure`.
+- **Menus scroll again.** `html,body{overflow:hidden}` meant the app shell had no
+  scroll container, so anything below the fold (the harness column, the whole
+  unlock track) was unreachable. `.shell` is now `height:100dvh;overflow:hidden`
+  with `.shell-body` as the scrolling region between the sticky header and the
+  action rail. This is why the harness selection and unlocks were cut off.
+- **Operator model preview** continues to render through the translucent
+  selection shell from 3.4.
+
+Verification: game **962/962**, server **126/126**, `tests/` **5/5**, `tsc` clean,
+lint 0 errors, build clean. `post.test.mjs` updated for the new glow policy.
+
 ## Release 3.4 - Corner stat cards, objective compass and the operator preview
 
 - **Objective card moved out of the centre.** The top-centre command panel is

@@ -5,10 +5,11 @@ export function reducedMotion(appPreference, osPreference) {
   return appPreference === true || osPreference === true;
 }
 
-// Post-processing is only worth its cost on a hardware renderer at full
-// resolution and when neither the app nor the OS asks for reduced motion.
-export function postStage({ eligible = false, reduced = false, scale = 1 } = {}) {
-  return eligible === true && reduced !== true && (Number(scale) || 1) >= 1;
+// Post-processing runs on a hardware renderer whenever the player keeps it on
+// and asks for some glow. Resolution scale no longer switches it off, so glow is
+// independent of the render scale.
+export function postStage({ eligible = false, reduced = false, postFx = true, bloom = .34 } = {}) {
+  return eligible === true && reduced !== true && postFx !== false && (Number(bloom) || 0) > 0;
 }
 
 // EffectComposer already multiplies the size it is given by its own pixel

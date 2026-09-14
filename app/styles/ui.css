@@ -6,7 +6,7 @@
    ========================================================================== */
 
 /* ---------- Shell: header / scrolling body / sticky action rail ---------- */
-.shell{display:flex;flex-direction:column;min-height:100dvh;min-height:100svh;background:
+.shell{display:flex;flex-direction:column;height:100dvh;height:100svh;overflow:hidden;background:
   radial-gradient(120% 90% at 12% 0%, rgba(131,244,213,.06), transparent 60%),
   linear-gradient(180deg, var(--surface-0), #050c10 70%);
   color:var(--text)}
@@ -16,10 +16,11 @@
   border-bottom:1px solid var(--ui-line);
   background:linear-gradient(180deg, rgba(6,13,17,.94), rgba(6,13,17,.72));
   backdrop-filter:blur(14px);-webkit-backdrop-filter:blur(14px)}
-.shell-body{flex:1;min-height:0;width:100%;max-width:1440px;margin-inline:auto;
+.shell-body{flex:1;min-height:0;width:100%;max-width:1440px;margin-inline:auto;overflow-y:auto;overscroll-behavior:contain;
+  scrollbar-gutter:stable;scrollbar-width:thin;
   padding:var(--ui-gap-5) max(var(--edge), var(--safe-right)) var(--ui-gap-6) max(var(--edge), var(--safe-left))}
 .shell-body--flush{padding-inline:0;max-width:none}
-.shell-rail{position:sticky;bottom:0;z-index:10;display:flex;align-items:center;gap:var(--ui-gap-4);
+.shell-rail{position:relative;flex:none;z-index:10;display:flex;align-items:center;gap:var(--ui-gap-4);
   padding:12px max(var(--edge), var(--safe-right)) calc(12px + var(--safe-bottom)) max(var(--edge), var(--safe-left));
   border-top:1px solid var(--ui-line);
   background:linear-gradient(0deg, rgba(6,13,17,.96), rgba(6,13,17,.78));

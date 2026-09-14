@@ -588,6 +588,11 @@ Version 2.23 shows your connection quality online:
 
 - **Latency chip.** Network matches display a colour-coded `GOOD` / `FAIR` / `POOR` chip with the current interpolation delay, graded from the same jitter and packet-loss estimators the netcode already uses (`connectionQuality` in `game/hud.mjs`). It turns amber or red before the connection becomes unplayable.
 
+Version 3.5 adds granular video options and fixes menu scrolling:
+
+- **Glow controls.** Post-processing has its own toggle plus glow-strength and brightness sliders, independent of resolution scale (`postFx`/`bloom`/`exposure` in the display config).
+- **Scrolling fixed.** The app shell now has a real scroll region, so the harness column and the unlock track are reachable again.
+
 Version 3.4 reshapes the in-match HUD and fixes the operator preview:
 
 - **Objective out of the centre.** A bottom-centre objective bar with a compass arrow pointing at the current objective replaces the top-centre command panel.
