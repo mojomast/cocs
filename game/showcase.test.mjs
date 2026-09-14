@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import {Match} from './core.mjs';
-import {pickShowcase,seatShowcaseVehicles,SHOWCASES} from './showcase.mjs';
+import {pickShowcase,seatShowcaseVehicles,SHOWCASES,SHOWCASE_MAX_SECONDS} from './showcase.mjs';
 import {raceDemoMode,raceDemoPose} from './race-camera.mjs';
 import {maxBotsFor,arenaSupportsMode} from './arenas.mjs';
 import {DEFAULT_CONFIG,normalizeConfig} from './config.mjs';
@@ -11,6 +11,7 @@ import {buildShowcase as buildShowcaseFactory} from './showcase-build.mjs';
 
 test('showcase reel cycles through a variety of modes and valid maps', () => {
  assert.ok(SHOWCASES.length >= 6, 'the demo should show a variety of modes');
+ assert.ok(SHOWCASE_MAX_SECONDS > 0 && SHOWCASE_MAX_SECONDS <= 90, 'no scenario should hog the menu');
  assert.equal(new Set(SHOWCASES.map(s => s.mode)).size, SHOWCASES.length, 'each scenario demonstrates a distinct mode');
  for (const legacy of [false, true]) for (const index of [-10, -1, 0, 1, 20, 999]) {
   const spec = pickShowcase(index, () => .99, {legacy});
@@ -84,12 +85,12 @@ test('menu race scenario runs a full race and the next build restarts the reel',
  assert.equal(m.arena.id,'puma-circuit');
  assert.equal(m.actors.length,8);
  assert.ok(m.actors.every(a=>a.bot));
- assert.equal(m.race.laps,2);
+ assert.equal(m.race.laps,1);
  assert.equal(m.race.phase,'racing');
  assert.ok(m.vehicles.every(v=>v.speed>0));
  for(let tick=0;tick<Math.ceil(180/RULES.dt)&&!m.over;tick++)m.step(RULES.dt,{inputs:{}});
  assert.equal(m.overReason,'race-finish');
- assert.equal(m.snapshot().race.standings[0].completedLaps,2);
+ assert.equal(m.snapshot().race.standings[0].completedLaps,1);
  buildShowcase();
  assert.notEqual(r.showcase.match,m);
  assert.equal(r.showcase.match.over,false);

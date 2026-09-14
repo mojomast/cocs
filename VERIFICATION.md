@@ -1,5 +1,26 @@
 # COCS verification report
 
+## Release 2.75 - Menu demo actually rotates through the modes
+
+The reel was built for eight modes, but two things made it look like it only ever
+showed Puma Soccer:
+- the `ready` settings effect re-ran `buildShowcase` once the renderer finished
+  initialising, immediately replacing the opening Puma race with the second
+  scenario (soccer) and restarting the reel on every settings change;
+- scenarios could run for up to two minutes, and soccer's clock was the longest.
+
+Fixes: the settings effect now keys on `legacyArenas|reducedMotion|showcase` and
+never rebuilds the reel while a showcase already exists (only real setting changes
+and showcase-off/on do); each scenario's limits were shortened (race is now a
+one-lap sprint, combat caps at 60s) and the page force-advances after
+`SHOWCASE_MAX_SECONDS` (75s) even if the bot match has not finished, so no mode
+can hog the menu.
+
+Verification: game **951/951**, server **126/126**, SSR 4/4, `tsc` clean, lint 0
+errors, build clean, live verified. A headless simulation of the builder now
+reports the reel as race (~21s) -> soccer -> deathmatch -> teamdeathmatch -> ctf
+-> koth -> combined arms -> payload, each 43-75s. No browser/WebGL playtest.
+
 ## Release 2.74 - Puma Soccer: 2v2, pitch boards and smarter bots
 
 - **2 v 2.** Soccer is now four Pumas total (two per side). `puma-soccer` caps at
