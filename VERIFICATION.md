@@ -1,5 +1,27 @@
 # COCS verification report
 
+## Release 3.4 - Corner stat cards, objective compass and the operator preview
+
+- **Objective card moved out of the centre.** The top-centre command panel is
+  gone. The objective now lives in a bottom-centre bar (title, action, detail
+  chips) with a **compass ring** whose arrow points toward the current objective
+  (waypoint > payload > zone > flag) using the radar's yaw-relative bearing.
+- **Normalized corner readouts.** Health and armor are equal-sized `.stat-card`s
+  in the bottom-left corner; ammo is the matching card in the bottom-right, each
+  with a value and a fill bar. Streak/Arms Race pills live just above the left
+  cards.
+- **Frag + ability gauges.** The ability card and the frag (grenade) card sit next
+  to ammo with radial `conic-gradient` cooldown rings; both **pop** when ready
+  (`is-ready`). Frag uses the real 7s cooldown from `Match.throwGrenade`.
+- **Operator preview fixed.** The selection shell had an opaque background that
+  covered the canvas, so the live 3D operator model never showed. The selection
+  screen now uses a translucent `.shell--showcase`, and the operator/harness
+  cards remain in the loadout column as before.
+
+Verification: game **962/962**, server **126/126**, `tests/` **5/5**, `tsc` clean,
+lint 0 errors, build clean. HUD geometry/CSS is not browser-verified here; a
+visual pass is advised.
+
 ## Release 3.3 - Animated boot logo, living skies and objective occlusion
 
 - **Boot logo.** The title wordmark is now four oversized glyphs that slide in one

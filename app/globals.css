@@ -944,3 +944,82 @@ html, body { overscroll-behavior: none; }
   .game-hud.touch-mode .hud-bottom-note { display: none; }
   .game-hud.touch-mode .kill-feed { max-height: 10dvh; }
 }
+
+/* ==========================================================================
+   v3.4 in-match HUD: corner stat cards, a bottom-centre objective bar with a
+   compass, and radial ability/frag cooldown gauges.
+   ========================================================================== */
+.hud-lower{bottom:calc(var(--safe-bottom) + 148px);max-height:32dvh}
+.hud-bottom{position:absolute;left:var(--safe-left);right:var(--safe-right);bottom:calc(var(--safe-bottom) + 26px);z-index:var(--z-panel);
+  display:grid;grid-template-columns:minmax(0,1fr) minmax(0,560px) minmax(0,1fr);align-items:end;gap:14px;pointer-events:none}
+.hud-corner{display:flex;align-items:flex-end;gap:10px;min-width:0}
+.hud-corner--left{justify-content:flex-start}
+.hud-corner--right{justify-content:flex-end}
+.hud-pills{display:flex;flex-direction:column;gap:4px}
+.hud-pill{display:inline-flex;align-items:center;gap:7px;padding:5px 10px;border:1px solid var(--border);border-radius:999px;
+  background:#0a1b1acc;font:600 11px var(--font-mono);color:var(--text-dim);white-space:nowrap}
+.hud-pill b{color:var(--accent-soft)}
+.hud-pill--warn{border-color:rgba(255,209,102,.5);color:var(--warn-soft)}
+.stat-card{position:relative;display:grid;gap:5px;min-width:118px;padding:9px 13px;border:1px solid var(--border);
+  border-radius:var(--radius-md);background:linear-gradient(180deg,#0a2020d9,#061314d9);box-shadow:0 8px 22px #0008;text-shadow:0 2px 4px #000}
+.stat-card .stat-label{display:flex;align-items:center;gap:6px;font:10px var(--font-mono);letter-spacing:.16em;text-transform:uppercase;color:var(--text-mute)}
+.stat-card .stat-value{font:700 clamp(22px,2.2vw,36px)/1 var(--font-mono);font-variant-numeric:tabular-nums;color:#eafff5}
+.stat-card .stat-note{font:10px var(--font-mono);letter-spacing:.08em;color:var(--text-dim)}
+.stat-card .stat-bar{display:block;height:4px;border-radius:999px;background:#00000070;overflow:hidden}
+.stat-card .stat-bar>i{display:block;height:100%;background:var(--accent);transition:width .12s linear}
+.stat-card--health .stat-value{color:#b6ffd9}
+.stat-card--health .stat-bar>i{background:#6ff0b0}
+.stat-card--armor .stat-value{color:#9fd0ff}
+.stat-card--armor .stat-bar>i{background:#6dbfff}
+.stat-card--ammo{min-width:150px}
+.stat-card--ammo .stat-value{color:#ffe6b0}
+.stat-card--ammo .stat-bar>i{background:#ffd166}
+.stat-card--ammo.is-empty{border-color:rgba(255,107,107,.5)}
+.stat-card--ammo.is-empty .stat-value{color:#ffb4b4}
+.ability-card{display:grid;justify-items:center;gap:4px;min-width:86px;padding:9px 11px;border:1px solid var(--border);
+  border-radius:var(--radius-md);background:linear-gradient(180deg,#0a2020d9,#061314d9);box-shadow:0 8px 22px #0008;text-shadow:0 2px 4px #000}
+.ability-card .stat-label{justify-content:center}
+.ability-card .stat-note{text-align:center;white-space:nowrap}
+.ability-ring{--fill:0turn;position:relative;display:grid;place-items:center;width:52px;height:52px;border-radius:50%;
+  background:conic-gradient(var(--accent) var(--fill),rgba(131,244,213,.14) 0)}
+.ability-ring::before{content:'';position:absolute;inset:5px;border-radius:50%;background:#061314f2}
+.ability-ring>svg,.ability-ring>b{position:relative;color:#d9ffef}
+.ability-card.is-ready{border-color:var(--accent);box-shadow:0 0 0 1px var(--accent) inset,0 8px 22px #0008;animation:ability-pop .5s ease}
+.ability-card.is-ready .ability-ring{background:conic-gradient(var(--accent) 1turn,rgba(131,244,213,.14) 0)}
+.ability-card.is-active .ability-ring{background:conic-gradient(#b6ffd9 1turn,rgba(131,244,213,.14) 0)}
+.ability-card.is-disabled{opacity:.55}
+.frag-card .ability-ring>b{font:700 16px var(--font-mono)}
+@keyframes ability-pop{0%{transform:translateY(0) scale(1)}45%{transform:translateY(-3px) scale(1.1)}100%{transform:translateY(0) scale(1)}}
+.objective-bar{justify-self:center;display:grid;justify-items:center;gap:6px;max-width:min(560px,52vw);text-align:center;text-shadow:0 2px 5px #000}
+.compass{position:relative;display:grid;place-items:center;width:38px;height:38px;border-radius:50%;border:1px solid var(--border);
+  background:radial-gradient(circle,#0a1b1acc,#061214e6)}
+.compass>i{position:absolute;left:50%;top:50%;width:0;height:0;transform:translate(-50%,-50%) rotate(var(--bearing,0rad))}
+.compass>i::before{content:'';position:absolute;left:-5px;top:-16px;border-left:5px solid transparent;border-right:5px solid transparent;
+  border-bottom:13px solid var(--accent);filter:drop-shadow(0 0 4px rgba(131,244,213,.8))}
+.objective-copy{display:grid;gap:2px}
+.objective-copy strong{font:800 clamp(13px,1.15vw,18px)/1.2 var(--font-ui);letter-spacing:.02em;color:#eafff5}
+.objective-copy small{font:11px/1.4 var(--font-ui);color:var(--text-dim);max-width:52ch}
+.objective-tags{display:flex;flex-wrap:wrap;justify-content:center;gap:6px}
+.game-hud.hide-hud :is(.hud-bottom,.objective-bar,.stat-card,.ability-card,.hud-pills,.hud-bottom-note){display:none}
+@media (max-width:760px){
+  .hud-bottom{grid-template-columns:minmax(0,1fr) minmax(0,1fr);grid-template-areas:'objective objective' 'left right';gap:8px}
+  .objective-bar{grid-area:objective;max-width:94vw}
+  .hud-corner--left{grid-area:left}
+  .hud-corner--right{grid-area:right}
+  .stat-card{min-width:0;padding:7px 10px}
+  .stat-card .stat-value{font-size:clamp(18px,6vw,26px)}
+  .stat-card--ammo{min-width:0}
+  .ability-ring{width:44px;height:44px}
+  .objective-copy small{display:none}
+  .hud-lower{bottom:calc(var(--safe-bottom) + 220px)}
+}
+@media (max-width:760px){
+  .game-hud.touch-mode .hud-bottom{bottom:calc(var(--safe-bottom) + 188px)}
+  .game-hud.touch-mode .hud-lower{bottom:calc(var(--safe-bottom) + 320px)}
+}
+
+/* Translucent selection shell so the live 3D operator preview (rendered on the
+   canvas behind the menus) is visible through the layout. */
+.shell--showcase{background:
+  radial-gradient(120% 90% at 12% 0%, rgba(131,244,213,.06), transparent 60%),
+  linear-gradient(90deg, rgba(5,10,13,.94) 0%, rgba(5,10,13,.66) 38%, rgba(5,10,13,.34) 68%, rgba(5,10,13,.86) 100%)}

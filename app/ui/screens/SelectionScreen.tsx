@@ -21,7 +21,7 @@ export function SelectionScreen({ui}:ScreenProps){
   <Btn variant="secondary" onClick={()=>setSetupOpen(true)}><span>MATCH SETUP</span><ChevronRight size={14}/></Btn>
   <Btn variant="primary" onClick={()=>start()} disabled={!ui.ready||!!ui.error}>ENTER ARENA <small>{ui.selectedMode?.name?.toUpperCase()} · {ui.selectedMap?.name?.toUpperCase()}</small><ArrowUpRight size={20}/></Btn>
  </ActionRail>;
- return <Shell className={entered?'':'shell--awaiting'} head={<TopBar sub="CUSTOM MATCH">{headActions}</TopBar>} rail={rail}>
+ return <Shell className={`shell--showcase${entered?'':' shell--awaiting'}`} head={<TopBar sub="CUSTOM MATCH">{headActions}</TopBar>} rail={rail}>
   <div className="stack">
    <PageHead eyebrow="COLOSSEUM SETUP" title={<>Choose your intelligence<span>.</span></>} lede="Pick an operator, strap on a harness, then tune the rules. Nine rival models are already talking trash — only one leaves with bragging rights."/>
    {notice&&<Banner>{notice}</Banner>}

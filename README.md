@@ -588,6 +588,13 @@ Version 2.23 shows your connection quality online:
 
 - **Latency chip.** Network matches display a colour-coded `GOOD` / `FAIR` / `POOR` chip with the current interpolation delay, graded from the same jitter and packet-loss estimators the netcode already uses (`connectionQuality` in `game/hud.mjs`). It turns amber or red before the connection becomes unplayable.
 
+Version 3.4 reshapes the in-match HUD and fixes the operator preview:
+
+- **Objective out of the centre.** A bottom-centre objective bar with a compass arrow pointing at the current objective replaces the top-centre command panel.
+- **Corner readouts.** Health and armor share one style bottom-left, ammo bottom-right, all the same size with fill bars.
+- **Radial gauges.** The ability and frag cards sit next to ammo with conic cooldown rings and pop when ready.
+- **Operator preview.** The selection shell is now translucent so the live 3D operator model renders through it.
+
 Version 3.3 is the boot-logo and sky pass:
 
 - **Animated boot logo.** Oversized letters slide in one at a time, each with a cyan period and its word beneath, plus a sheen sweep.
