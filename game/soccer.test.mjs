@@ -156,3 +156,19 @@ test('bot controls aim the car at the ball and opponent goal',()=>{
  assert.ok(controls.throttle>0);
  assert.ok(controls.steer>=-1&&controls.steer<=1);
 });
+
+test('a ball pinned between two idle Pumas works itself free',()=>{
+ const m=fixture(4,{bot:false,goalLimit:99,timeLimit:999});
+ start(m);
+ const ball=m.race.ball,cars=m.race.racers.map(r=>m.vehicleById(r.vehicleId));
+ ball.x=0;ball.z=0;ball.vx=0;ball.vz=0;
+ cars[0].position.x=-2.75;cars[0].position.z=0;cars[0].heading=Math.PI/2;cars[0].velocity.x=0;cars[0].velocity.z=0;
+ cars[1].position.x=2.75;cars[1].position.z=0;cars[1].heading=-Math.PI/2;cars[1].velocity.x=0;cars[1].velocity.z=0;
+ const x0=ball.x,z0=ball.z;
+ for(let i=0;i<300;i++) stepSoccer(m,1/60);
+ const moved=Math.hypot(ball.x-x0,ball.z-z0);
+ assert.ok(moved>.5,`the ball escaped the pin (moved ${moved.toFixed(2)})`);
+ assert.ok([ball.x,ball.z,ball.vx,ball.vz].every(Number.isFinite),'ball state stays finite');
+ assert.ok(ball.x>=m.race.pitch.minX&&ball.x<=m.race.pitch.maxX,'ball stays on the pitch');
+});
+

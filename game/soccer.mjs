@@ -7,6 +7,10 @@ export const SOCCER_KICKOFF=3;
 const SLICE=1/60;
 const BALL_FRICTION=0.6;
 const BALL_BOUNCE=0.55;
+const BALL_SPIN=0.45;
+const BALL_REST_SPEED=1.1;
+const BALL_REST_TIME=1;
+const BALL_ESCAPE=7;
 const DEFAULT_PITCH={minX:-30,maxX:30,minZ:-18,maxZ:18};
 const DEFAULT_GOALS=[
  {team:0,x:-30,z:0,nx:-1,nz:0,halfWidth:6,height:4,depth:2},
@@ -36,6 +40,7 @@ function resetBall(match,state){
  ball.x=0;ball.z=0;ball.vx=0;ball.vz=0;
  ball.y=groundY(match,0,0)+r;
  if(!Number.isFinite(ball.y)) ball.y=r;
+ state.ballRest=0;state.ballContact=false;state.ballEscapes=0;
 }
 
 function slotPool(pitch,arena,team){
@@ -163,22 +168,30 @@ export function soccerBotControls(match,racer){
 
 function resolveBallCars(match,state){
  const ball=state.ball,contact=CAR_RADIUS+ball.r;
- let hits=0;
+ let hits=0;state.ballContact=false;
  for(const racer of state.racers){
   const vehicle=match.vehicleById?.(racer.vehicleId);
   if(!vehicle||vehicle.driver==null) continue;
   const p=vehicle.position;
   if(!Number.isFinite(p?.x)||!Number.isFinite(p?.z)||!Number.isFinite(ball.x)||!Number.isFinite(ball.z)) continue;
   const dx=ball.x-p.x,dz=ball.z-p.z,d=Math.hypot(dx,dz);
+  if(d<contact+0.4) state.ballContact=true;
   if(!(d<contact)) continue;
   let nx,nz;
   if(d>1e-6){nx=dx/d;nz=dz/d;}
   else{nx=Math.sin(vehicle.heading);nz=Math.cos(vehicle.heading);if(!Number.isFinite(nx)||!Number.isFinite(nz)||(nx===0&&nz===0)){nx=1;nz=0;}}
-  ball.x=p.x+nx*contact;
-  ball.z=p.z+nz*contact;
-  const carN=(vehicle.velocity?.x||0)*nx+(vehicle.velocity?.z||0)*nz;
+  // Clear the chassis by a hair so the next tick is not a zero-length
+  // re-collision, which is what left the ball pinned in place.
+  ball.x=p.x+nx*(contact+.05);
+  ball.z=p.z+nz*(contact+.05);
+  const cvx=vehicle.velocity?.x||0,cvz=vehicle.velocity?.z||0;
+  const carN=cvx*nx+cvz*nz;
   const ballN=ball.vx*nx+ball.vz*nz;
   if(carN>ballN) setBallNormalSpeed(ball,nx,nz,carN);
+  // A glancing hit adds a slice of the chassis's sideways speed, so the ball
+  // deflects out of a scrum instead of being bulldozed straight into it.
+  const tx=cvx-carN*nx,tz=cvz-carN*nz;
+  if(Number.isFinite(tx)&&Number.isFinite(tz)){ball.vx+=tx*BALL_SPIN;ball.vz+=tz*BALL_SPIN;}
   state.lastTouch=racer.actorId;
   hits++;
  }
@@ -231,7 +244,30 @@ function stepBall(match,state,dt){
  resolveBallBounds(ball,state.pitch,state.goals);
  resolveBallBlocks(ball,match.arena?.blocks||[]);
  ball.y=groundY(match,ball.x,ball.z)+ball.r;
- if(!Number.isFinite(ball.x)||!Number.isFinite(ball.z)||!Number.isFinite(ball.y)) resetBall(match,state);
+ if(!Number.isFinite(ball.x)||!Number.isFinite(ball.z)||!Number.isFinite(ball.y)){resetBall(match,state);return;}
+ // Anti-stuck: a ball wedged against a board or a crowd of idle chassis can sit
+ // at rest forever. If it is slow while touching a car or a board, give it a
+ // shove away from the obstruction; if that keeps failing, reset to the centre.
+ const speed=Math.hypot(ball.vx,ball.vz),pitch=state.pitch;
+ const nearBoard=pitch&&(ball.x<pitch.minX+ball.r+.7||ball.x>pitch.maxX-ball.r-.7||ball.z<pitch.minZ+ball.r+.7||ball.z>pitch.maxZ-ball.r-.7);
+ state.ballRest=speed<BALL_REST_SPEED?(state.ballRest||0)+dt:0;
+ if(state.ballRest>=BALL_REST_TIME&&(state.ballContact||nearBoard)){
+  let nearest=null,nearestDistance=Infinity;
+  for(const racer of state.racers){const vehicle=match.vehicleById?.(racer.vehicleId);if(!vehicle)continue;const distance=Math.hypot(ball.x-vehicle.position.x,ball.z-vehicle.position.z);if(distance<nearestDistance){nearestDistance=distance;nearest=vehicle;}}
+  let ex,ez;
+  if(nearest&&nearestDistance<CAR_RADIUS+ball.r+2.5){
+   const dx=ball.x-nearest.position.x,dz=ball.z-nearest.position.z,d=Math.hypot(dx,dz)||1;
+   ex=(dx/d)*BALL_ESCAPE+Math.cos(nearest.heading)*BALL_ESCAPE*.5;
+   ez=(dz/d)*BALL_ESCAPE-Math.sin(nearest.heading)*BALL_ESCAPE*.5;
+  }else{
+   const centreX=pitch?(pitch.minX+pitch.maxX)/2:0,centreZ=pitch?(pitch.minZ+pitch.maxZ)/2:0;
+   const dx=centreX-ball.x,dz=centreZ-ball.z,d=Math.hypot(dx,dz)||1;
+   ex=(dx/d)*BALL_ESCAPE;ez=(dz/d)*BALL_ESCAPE;
+  }
+  ball.vx+=ex;ball.vz+=ez;
+  state.ballRest=0;state.ballEscapes=(state.ballEscapes||0)+1;
+  if(state.ballEscapes>8){resetBall(match,state);return;}
+ }
 }
 
 function crossSoccerGoals(state,from,to){

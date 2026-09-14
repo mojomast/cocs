@@ -1,5 +1,24 @@
 # COCS verification report
 
+## Release 2.76 - Soccer ball no longer pins
+
+The ball could sit in the same spot when a chassis resolved to exactly the contact
+distance with no relative speed, so every tick re-collided without moving it
+(worst between two cars or a car and a board). Changes in `game/soccer.mjs`:
+- car contact now clears the chassis by a hair so the next tick is not a
+  zero-length re-collision;
+- a glancing hit adds a slice of the chassis's tangential speed (`BALL_SPIN`), so
+  the ball deflects out of a scrum instead of being ploughed into it;
+- an anti-stuck shove fires when the ball is slow while touching a car or a board
+  for a second: it is kicked away from the nearest chassis (with a tangential
+  component) or toward the centre, and after repeated failures it resets to the
+  centre. `resetBall` clears the anti-stuck state.
+
+Verification: game **952/952**, server **126/126**, SSR 4/4, `tsc` clean, lint 0
+errors, build clean. New test pins the ball between two idle Pumas and asserts it
+works itself free and stays finite/on-pitch. No browser/WebGL playtest, so the
+feel of the shove is unit-verified only.
+
 ## Release 2.75 - Menu demo actually rotates through the modes
 
 The reel was built for eight modes, but two things made it look like it only ever
