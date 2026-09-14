@@ -1,5 +1,17 @@
 # COCS verification report
 
+## Release 3.2.1 - Startup shows the title screen (modal fix)
+
+- The keep-mounted match-setup modal was visible on launch and could not be
+  dismissed: `.modal--hidden{display:none}` was declared before `.modal
+  {display:grid}`, so at equal specificity the later grid rule won. The selector
+  is now `.modal.modal--hidden`, which properly hides the closed setup modal.
+  The game now starts on the title screen with no dialog over it; the setup
+  strings remain in the server-rendered HTML (the modal is still mounted).
+
+Verification: build clean, SSR 4/4 (all pinned setup strings still present),
+`tsc` clean, lint 0 errors.
+
 ## Release 3.2 - In-match HUD extraction and the settings dialog
 
 - **In-match HUD extracted and unified.** The default (non-race/soccer) HUD now
