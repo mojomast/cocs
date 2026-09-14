@@ -1,5 +1,29 @@
 # COCS verification report
 
+## Release 2.77 - Spectate bot matches with camera controls and free cam
+
+- **SPECTATE BOTS** on the title screen starts a local all-bot match from the
+  current Match Setup config and drives the camera entirely with the cinematic
+  director (`game/spectate-build.mjs` forces every actor to AI and warms the
+  match, mirroring the menu showcase).
+- `game/camera-modes.mjs` adds `CAMERA_MODES` (`auto`, every director rig, `free`),
+  labels, `cycleCameraMode` and `cameraModeRig`. `CinematicDirector` gained an
+  `autoCut` option/setter so a spectator can lock a single rig instead of the
+  director re-picking on every cut.
+- `ArenaView` gained a **free-fly camera**: `setFreeCam`/`freeLook`/`updateFreeCam`
+  (yaw/pitch movement, vertical, boost), a `setDirectorLock`, and a render branch
+  that takes priority over the director and the race chase override. Disabling
+  free cam (or cinema/dispose) resets the state.
+- Controls: `B` cycles camera mode, `[`/`]` cycle the followed bot, `F` toggles
+  free cam; WASD/Space/Ctrl/Shift fly and the mouse looks. The spectator reuses
+  the existing `playing` mode with a local flag so pointer-lock, HUD and render
+  plumbing stay intact.
+
+Verification: game **964/964**, server **126/126**, SSR 4/4, `tsc` clean, lint 0
+errors, build clean, live deploy verified. New tests cover the all-bot builder,
+director rig locking, the camera-mode cycler and the free-cam render path. No
+browser/WebGL playtest, so the free-cam feel is unit-verified only.
+
 ## Release 2.76 - Soccer ball no longer pins
 
 The ball could sit in the same spot when a chassis resolved to exactly the contact

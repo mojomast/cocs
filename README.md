@@ -102,6 +102,23 @@ presses the ball while the other covers, and bots steer around each other instea
 of piling up. First team to the goal limit wins, otherwise the highest score at
 full time. Stored results record team scores and per-driver goals.
 
+## Spectating bot matches
+
+**SPECTATE BOTS** on the title screen starts a local all-bot match using your
+current Match Setup (mode, map and rules) and hands the camera entirely to the
+cinematic director. No player is on the field, so you just watch the fight.
+
+- **B** cycles the camera: `Auto Cut` (the director auto-picks rigs and cuts),
+  each director rig on its own (`Orbit`, `Chase`, `Dolly`, `Crane`, `Tripod`,
+  `Follow`, `First Person`, `Flyover`), and `Free Cam`.
+- **`[` / `]`** cycle which bot the director follows.
+- **F** toggles **Free Cam**; while free, `WASD` flies, `Space`/`Ctrl` move up and
+  down, `Shift` boosts, and the mouse looks around. Turning free cam off returns
+  the director.
+
+The director rigs work in combat and objective matches, and on the car maps too
+(the free camera overrides the race chase camera).
+
 ## Objective clarity and bot variety
 
 This pass fixes several objective modes and makes combat bots play differently:

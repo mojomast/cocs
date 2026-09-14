@@ -212,3 +212,31 @@ test('the tour flies inside a structure when the fight is indoors',()=>{
  assert.ok(pose.y<6,`indoor camera should stay under the roof, y=${pose.y.toFixed(2)}`);
  assert.ok(Math.abs(pose.x)<=8&&Math.abs(pose.z)<=8,`indoor camera should stay in the room, ${pose.x.toFixed(1)},${pose.z.toFixed(1)}`);
 });
+
+test('autoCut:false keeps the rig and target across automatic cuts',()=>{
+ const d=new CinematicDirector({random:seeded(77),cutEvery:.5,autoCut:false});
+ const actors=[actor(1,0,0),actor(2,5,3),actor(3,-4,2)];
+ d.reframe(state(0,actors));
+ assert.equal(d.autoCut,false);
+ d.update(state(0,actors),1/60,[]);
+ d.setRig('chase');
+ d.setTarget(1);
+ const first=finite(d.update(state(.1,actors),1/60,[]));
+ const second=finite(d.update(state(1,actors),1/60,[]));
+ assert.equal(second.cut,true);
+ assert.equal(second.rig,'chase');
+ assert.equal(second.target,1);
+ assert.equal(first.rig,'chase');
+ assert.equal(first.target,1);
+ d.setAutoCut(true);
+ assert.equal(d.autoCut,true);
+});
+
+test('autoCut:true lets automatic cuts change the rig',()=>{
+ const d=new CinematicDirector({random:seeded(13),cutEvery:.1});
+ const actors=[actor(1,0,0),actor(2,5,3),actor(3,-4,2)];
+ d.reframe(state(0,actors));
+ const seen=new Set();
+ for(let i=0;i<200;i++)seen.add(d.update(state(i*.02,actors),1/60,[]).rig);
+ assert.ok(seen.size>1,`expected multiple rigs, saw ${[...seen].join(',')}`);
+});

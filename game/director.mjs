@@ -35,6 +35,7 @@ export class CinematicDirector{
   this._forceCut=false;
   this._seen=new Set();
   this.tour=options.tour===true;
+  this._autoCut=options.autoCut!==false;
   this.tourRadius=Number.isFinite(options.tourRadius)?Math.max(6,options.tourRadius):Math.max(14,this.radius*2.2);
   this.aim={x:this.center.x,y:1.5,z:this.center.z};
   this._action=null;
@@ -47,8 +48,11 @@ export class CinematicDirector{
  get rig(){return this._rig;}
  get targetId(){return this._targetId??null;}
  get poiIndex(){return this._poiIndex;}
+ get autoCut(){return this._autoCut;}
 
  setReduced(value){this.reduced=value===true;return this.reduced;}
+
+ setAutoCut(value){this._autoCut=value!==false;return this._autoCut;}
 
  setRig(name){if(!CAMERA_RIGS.includes(name))return false;this._rig=name;return true;}
 
@@ -128,7 +132,7 @@ export class CinematicDirector{
   const autoCut=this._needsCut||timeCut||highlightCut;
   const cutoff=autoCut||this._forceCut;
   if(autoCut){
-   if(!this.tour){this._rig=this._pickRig(this._rig);this._targetId=this._pickTarget(highlight);target=this._actorById(this._targetId);}
+   if(!this.tour&&this._autoCut){this._rig=this._pickRig(this._rig);this._targetId=this._pickTarget(highlight);target=this._actorById(this._targetId);}
    this._lastCutTime=time;
    this._needsCut=false;
   }

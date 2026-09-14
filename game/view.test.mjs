@@ -690,3 +690,70 @@ test('soccer pitch draws markings and goals while posts still occlude the camera
  ArenaView.prototype.disposeObject.call({},model);
 });
 
+test('free camera seeds from the live camera, clamps its look and resets cleanly',()=>{
+ const view=Object.create(ArenaView.prototype);
+ view.camera=new T.PerspectiveCamera();view.camera.rotation.order='YXZ';
+ view.camera.position.set(3,7,-2);view.camera.rotation.set(.3,.8,0,'YXZ');
+ assert.equal(view.freeCam,false);assert.equal(view.directorLock,false);
+ view.setFreeCam(true);
+ assert.equal(view.freeCam,true);
+ assert.deepEqual(view.freePose,{x:3,y:7,z:-2,yaw:.8,pitch:.3},'enabling seeds the pose without a jump');
+ view.camera.position.set(9,9,9);view.camera.rotation.set(0,0,0,'YXZ');
+ view.setFreeCam(true);
+ assert.equal(view.freePose.x,3,'a repeated enable keeps the seeded pose');
+ view.setDirectorLock(true);assert.equal(view.directorLock,true);
+ view._camWant={};view._raceCam={};
+ view.setFreeCam(false);
+ assert.equal(view.freeCam,false);assert.equal(view._camWant,undefined);assert.equal(view._raceCam,undefined,'disabling clears cached camera state');
+ view.resetFreeCam();assert.deepEqual(view.freePose,{x:0,y:6,z:0,yaw:0,pitch:0});
+ view.setFreeCam(true);view.freeLook(0,9);assert.ok(Math.abs(view.freePose.pitch-1.5)<1e-9,'pitch clamps looking up');
+ view.freeLook(0,-9);assert.ok(Math.abs(view.freePose.pitch+1.5)<1e-9,'pitch clamps looking down');
+ view.freeLook(.4,0);assert.ok(Math.abs(view.freePose.yaw-.4)<1e-9);
+});
+
+test('updateFreeCam flies along yaw/pitch, clamps dt and keeps the pose finite',()=>{
+ const view=Object.create(ArenaView.prototype);
+ view.freePose={x:0,y:6,z:0,yaw:0,pitch:0};
+ view.updateFreeCam(.1,{forward:1});
+ assert.ok(Math.abs(view.freePose.x)<1e-9);assert.ok(Math.abs(view.freePose.y-6)<1e-9);assert.ok(Math.abs(view.freePose.z+1.6)<1e-9,'forward flies along the look direction at yaw 0');
+ view.freePose={x:0,y:6,z:0,yaw:Math.PI/2,pitch:0};
+ view.updateFreeCam(.1,{forward:1});
+ assert.ok(Math.abs(view.freePose.x+1.6)<1e-9,'yaw turns the flight direction');assert.ok(Math.abs(view.freePose.z)<1e-9);
+ view.freePose={x:0,y:6,z:0,yaw:0,pitch:0};
+ view.updateFreeCam(.1,{right:1});
+ assert.ok(Math.abs(view.freePose.x-1.6)<1e-9,'strafe uses the horizontal right vector');
+ view.freePose={x:0,y:6,z:0,yaw:0,pitch:0};
+ view.updateFreeCam(.1,{up:1});
+ assert.ok(Math.abs(view.freePose.y-7.6)<1e-9,'vertical movement uses world up');
+ view.freePose={x:0,y:6,z:0,yaw:0,pitch:0};
+ view.updateFreeCam(10,{forward:1});
+ assert.ok(Math.abs(view.freePose.z+1.6)<1e-9,'dt clamps to .1');
+ view.freePose={x:0,y:6,z:0,yaw:0,pitch:0};
+ view.updateFreeCam(.1,{forward:1,boost:true});
+ assert.ok(Math.abs(view.freePose.z+3.84)<1e-9,'boost multiplies speed by 2.4');
+ view.freePose={x:0,y:.1,z:0,yaw:0,pitch:0};
+ view.updateFreeCam(.1,{up:-1});
+ assert.equal(view.freePose.y,.4,'the camera never dips below the floor');
+ view.freePose={x:NaN,y:6,z:0,yaw:0,pitch:0};
+ view.updateFreeCam(.1,{forward:1});
+ assert.ok(Number.isFinite(view.freePose.x)&&Number.isFinite(view.freePose.y)&&Number.isFinite(view.freePose.z));
+});
+
+test('free camera renders over a race match and restores the normal path when disabled',t=>{
+ const {view}=playable(t,{fov:80});
+ const actor={id:7,weapon:0,health:100,x:0,y:0,z:0,yaw:0,pitch:0,vx:0,vy:0,vz:0,grounded:true,vehicleId:1};
+ const match={actors:[actor],pickups:[],rockets:[],vehicles:[{id:1,kind:'puma',x:5,y:0,z:1,yaw:0}],race:{boxes:[],hazards:[],coins:[],centerline:[{x:0,z:0},{x:0,z:10}]},time:1,events:[]};
+ view.setFreeCam(true);
+ view.freePose={x:11,y:9,z:-7,yaw:.5,pitch:-.25};
+ view.render('playing',match,.016,1);
+ assert.deepEqual(view.camera.position.toArray(),[11,9,-7],'the race chase never overrides the free pose');
+ assert.equal(view.camera.rotation.x,-.25);assert.equal(view.camera.rotation.y,.5);assert.equal(view.camera.rotation.order,'YXZ');
+ assert.equal(view.hands.visible,false,'free cam hides the viewmodel');
+ view.setFreeCam(false);
+ assert.equal(view.freeCam,false);
+ view.render('playing',match,.016,1.016);
+ assert.ok(view.camera.position.distanceTo(new T.Vector3(11,9,-7))>1,'disabling free cam leaves the free pose behind');
+ view.render('playing',{...match,actors:[{...actor,vehicleId:undefined}],vehicles:[]},.016,1.032);
+ assert.deepEqual(view.camera.position.toArray(),[0,1.45,0],'the first-person path returns');
+});
+
