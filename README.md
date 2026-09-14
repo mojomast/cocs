@@ -588,6 +588,13 @@ Version 2.23 shows your connection quality online:
 
 - **Latency chip.** Network matches display a colour-coded `GOOD` / `FAIR` / `POOR` chip with the current interpolation delay, graded from the same jitter and packet-loss estimators the netcode already uses (`connectionQuality` in `game/hud.mjs`). It turns amber or red before the connection becomes unplayable.
 
+Version 4.2 expands campaign, world variety and the meta loop:
+
+- **Five campaign missions** with stealth, duel and boss-phase content; horde gains lancer, sentinel and Harbinger enemies plus new wave modifiers.
+- **Weather and time of day** add deterministic rain, snow, ash and storm ambience with pooled visuals and dynamic audio intensity.
+- **Meta loop:** local match history, per-mode leaderboards, weekly challenges, campaign stars/medals, mission bests, expanded results medals and an Arsenal inspector.
+- **Quality tiers** are now persisted and selectable: Auto, Low, Medium, High.
+
 Version 4.1 expands and refines the game after v4.0:
 
 - **New modes/objectives:** Juggernaut, Team Elimination and VIP Escort; multi-phase Warden bosses; sudden-death timers so every mode terminates.

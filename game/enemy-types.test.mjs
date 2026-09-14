@@ -181,3 +181,44 @@ test('the Warden escalates through distinct, telegraphed boss phases',()=>{
  assert.equal(staged.bossPhaseMax,3);
  assert.ok(!ENEMY_TYPES.phases,'ENEMY_TYPES stays a type map');
 });
+
+test('the flanker, shield-bearer and summoner archetypes carry distinct payloads',()=>{
+ for(const id of ['lancer','sentinel','harbinger']){
+  const type=ENEMY_TYPES[id];
+  assert.ok(type,`${id} exists`);
+  assert.ok(type.health>0&&Number.isFinite(type.leash)&&Number.isFinite(type.scan),`${id} stats`);
+  assert.ok(type.character&&type.harness,`${id} loadout`);
+  assert.equal(hasEnemyRole(id),true,`${id} has a runtime role`);
+ }
+ assert.ok(ENEMY_TYPES.lancer.flank.chargeDistance>0&&ENEMY_TYPES.lancer.flank.cooldown>0&&ENEMY_TYPES.lancer.flank.telegraph>0,'the lancer flanks on a cooldown');
+ assert.ok(ENEMY_TYPES.sentinel.phalanx.shield>0&&ENEMY_TYPES.sentinel.phalanx.radius>0&&ENEMY_TYPES.sentinel.phalanx.interval>0,'the sentinel projects a formation shield');
+ assert.equal(ENEMY_TYPES.harbinger.boss,true);
+ assert.equal(bossMaxPhase('harbinger'),3);
+ assert.ok(ENEMY_TYPES.harbinger.summon.count>0&&ENEMY_TYPES.harbinger.summon.maxAlive>0,'the Harbinger summons bounded adds');
+});
+
+test('applyEnemyFields installs the new role payloads and enemyBehavior flags them',()=>{
+ const make=(id,character)=>({id,character:character||ENEMY_TYPES[id].character,harness:ENEMY_TYPES[id].harness,npcType:id,bot:bot()});
+ assert.equal(enemyBehavior(make('lancer')).flanker,true);
+ assert.equal(enemyBehavior(make('sentinel')).phalanx,true);
+ assert.equal(enemyBehavior(make('harbinger')).flanker,false);
+ const lancer={character:'mistral',harness:'openclaw'};applyEnemyFields(lancer,'lancer');
+ assert.ok(lancer.npcFlank&&lancer.npcFlank.chargeDistance>0);
+ const sentinel={character:'kimi',harness:'openclaw'};applyEnemyFields(sentinel,'sentinel');
+ assert.ok(sentinel.npcPhalanx&&sentinel.npcPhalanx.shield>0);
+ const boss={character:'qwen',harness:'openclaw'};applyEnemyFields(boss,'harbinger');
+ assert.ok(boss.npcSummon&&boss.isBoss);
+ assert.equal(boss.bossPhase,1);
+ assert.equal(boss.bossPhaseMax,3);
+});
+
+test('the Harbinger escalates through distinct named phases without a stomp',()=>{
+ const one=bossPhaseProfile('harbinger',1),two=bossPhaseProfile('harbinger',2),three=bossPhaseProfile('harbinger',3);
+ assert.ok(one&&two&&three,'every authored phase resolves');
+ assert.equal(two.name,'SWARMLORD');
+ assert.equal(three.name,'OBLIVION');
+ assert.ok(two.speedMult>one.speedMult&&three.speedMult>two.speedMult,'later phases accelerate');
+ assert.ok(two.damageMult>one.damageMult&&three.damageMult>two.damageMult,'later phases hit harder');
+ assert.ok(!one.stomp&&!three.stomp,'the Harbinger summons instead of ground-slamming');
+ assert.equal(bossPhaseProfile('lancer',2),null,'non-bosses have no phase profile');
+});

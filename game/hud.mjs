@@ -232,6 +232,15 @@ export function matchAwards(hud) {
   if (stat(runner, 'captures') + stat(runner, 'flagReturns') + stat(runner, 'flagPickups') > 0) awards.push({id: 'flag', label: 'FLAG RUNNER', name: runner.name, value: `${stat(runner, 'captures')} CAP · ${stat(runner, 'flagReturns')} RET`});
   const accurate = top(ratio);
   if (ratio(accurate) >= 1) awards.push({id: 'ratio', label: 'BEST K/D', name: accurate.name, value: ratio(accurate).toFixed(2)});
+  const flagHands = top(actor => stat(actor, 'captures'));
+  if (stat(flagHands, 'captures') > 0) awards.push({id: 'captures', label: 'MOST CAPTURES', name: flagHands.name, value: `${stat(flagHands, 'captures')} CAP`});
+  const sharpshooter = top(actor => { const shots = stat(actor, 'shots'); return shots > 0 ? stat(actor, 'hits') / shots : 0; });
+  const shots = stat(sharpshooter, 'shots');
+  if (shots > 0) awards.push({id: 'accuracy', label: 'BEST ACCURACY', name: sharpshooter.name, value: `${Math.round((stat(sharpshooter, 'hits') / shots) * 100)}%`});
+  const bruiser = top(actor => stat(actor, 'damage'));
+  if (stat(bruiser, 'damage') > 0) awards.push({id: 'damage', label: 'MOST DAMAGE', name: bruiser.name, value: `${Math.round(stat(bruiser, 'damage'))}`});
+  const survivor = top(actor => (Number(actor.frags) || 0) > 0 && (Number(actor.deaths) || 0) === 0 ? 1 : 0);
+  if ((Number(survivor.frags) || 0) > 0 && (Number(survivor.deaths) || 0) === 0) awards.push({id: 'flawless', label: 'UNTOUCHABLE · NO DEATHS', name: survivor.name, value: '0 DEATHS'});
   const generous = top(actor => Number(actor.deaths) || 0);
   if ((Number(generous.deaths) || 0) > 0) awards.push({id: 'deaths', label: 'FEED PROVIDER', name: generous.name, value: `${Number(generous.deaths) || 0} DEATHS`});
   return awards;

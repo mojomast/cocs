@@ -99,3 +99,43 @@ test('campaign missions author checkpoints and named boss phases',()=>{
  const named=CAMPAIGN_MISSIONS.flatMap(mission=>mission.script).filter(event=>event.bossPhase!==undefined&&event.name);
  assert.ok(named.length>=2,'boss phases carry presentation names');
 });
+
+test('the campaign fields five missions with distinct tags and verbs',()=>{
+ assert.equal(CAMPAIGN_MISSIONS.length,5);
+ for(const id of ['convoy-run','reactor-run','throne-siege','ghost-wire','crown-duel'])assert.ok(CAMPAIGN_MISSION_IDS.includes(id),`${id} exists`);
+ const tags=CAMPAIGN_MISSIONS.map(mission=>mission.tag);
+ assert.equal(new Set(tags).size,tags.length,'every mission has a distinct tag');
+ const kinds=new Set(CAMPAIGN_MISSIONS.flatMap(mission=>mission.steps.map(step=>step.complete.kind)));
+ for(const kind of ['enter-zone','group-dead','hold'])assert.ok(kinds.has(kind),`the campaign uses ${kind} objectives`);
+});
+
+test('ghost-wire is a checkpointed stealth mission with a no-kill exfil',()=>{
+ const mission=missionFor('ghost-wire');
+ assert.equal(mission.mapId,'frost-gate');
+ assert.equal(mission.tag,'STEALTH');
+ assert.equal(mission.win.kind,'reach');
+ assert.equal(mission.win.requireCleared,false,'the exfil does not require clearing the map');
+ assert.ok(mission.steps.every(step=>step.complete.kind!=='group-dead'),'stealth steps never require a wipe');
+ assert.ok(mission.steps.some(step=>step.complete.kind==='hold'),'the relay splice is a hold');
+ const spawns=mission.steps.flatMap(step=>[...(step.onStart||[]),...(step.onComplete||[])]).filter(action=>action.spawn).map(action=>action.spawn.type);
+ assert.ok(spawns.includes('lancer'),'the stealth route fields flankers');
+ assert.ok(spawns.includes('sentinel'),'the stealth route fields a shield-bearer');
+ const actions=[...(mission.script||[]),...mission.steps.flatMap(step=>[...(step.onStart||[]),...(step.onComplete||[])])];
+ assert.ok(actions.some(action=>action.checkpoint),'the stealth mission banks a checkpoint');
+ assert.ok(mission.script.some(event=>event.bark),'the stealth mission barks guidance');
+});
+
+test('crown-duel is a checkpointed Harbinger boss duel with named phases',()=>{
+ const mission=missionFor('crown-duel');
+ assert.equal(mission.mapId,'fortress');
+ assert.equal(mission.tag,'DUEL');
+ assert.equal(mission.win.kind,'assassinate');
+ assert.ok(mission.script.some(event=>event.when==='boss-hp:0.65'&&event.bossPhase===2&&event.name),'named phase two');
+ assert.ok(mission.script.some(event=>event.when==='boss-hp:0.3'&&event.bossPhase===3&&event.name),'named phase three');
+ const spawns=mission.steps.flatMap(step=>[...(step.onStart||[]),...(step.onComplete||[])]).filter(action=>action.spawn).map(action=>action.spawn.type);
+ assert.ok(spawns.includes('harbinger'),'the duel fields the new boss');
+ assert.ok(spawns.includes('sentinel')&&spawns.includes('lancer'),'the duel fields the new roles');
+ const actions=[...(mission.script||[]),...mission.steps.flatMap(step=>[...(step.onStart||[]),...(step.onComplete||[])])];
+ assert.ok(actions.some(action=>action.checkpoint),'the duel banks a checkpoint');
+ assert.ok(mission.script.some(event=>event.bark&&event.spawn),'the duel barks in reinforcements');
+});

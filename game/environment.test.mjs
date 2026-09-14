@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import * as T from 'three';
-import {addSky,addMountains,addScatter,updateScatterSway,ambientProfile,smokeAnchors,AMBIENT_KINDS,skyPalette,skyGradientAt} from './environment.mjs';
+import {addSky,addMountains,addScatter,updateScatterSway,ambientProfile,smokeAnchors,AMBIENT_KINDS,skyPalette,skyGradientAt,skyPhase,WEATHER_KINDS,PRECIP_KINDS,selectWeather,weatherPreset,timeOfDayAt,biomeAmbience,precipParticleAdds} from './environment.mjs';
 import {ArenaView} from './view.mjs';
 
 const bounds={minX:-40,maxX:40,minZ:-40,maxZ:40};
@@ -197,6 +197,73 @@ test('scatter density and detail scale the triangle bill without changing the la
  assert.ok(triangles(sparse)<triangles(full),'the sparse tier draws fewer triangles');
  const zero=addScatter(new T.Group(),{terrain:flatTerrain(),bounds,seed:21,density:0});
  assert.equal(zero.length,0,'a zero density builds nothing');
+});
+
+test('weather selection stays within the known kinds, respects the biome and is deterministic',()=>{
+ assert.deepEqual(WEATHER_KINDS,['clear','overcast','rain','snow','ash','storm']);
+ for(const arena of [{id:'frostline'},{id:'warfront'},{id:'aether'},{id:'blood-gulch'},{},null]){
+  const first=selectWeather(arena,'day',9),second=selectWeather(arena,'day',9);
+  assert.equal(first,second,'same arena, phase and seed reuse the frozen preset');
+  assert.ok(WEATHER_KINDS.includes(first.kind));
+  assert.ok(Object.isFrozen(first));
+  assert.equal(weatherPreset(first.kind),first);
+ }
+ assert.equal(selectWeather({id:'frostline'},'day',2).kind,'snow','snow maps prefer snow');
+ assert.equal(selectWeather({id:'warfront'},'day',2).kind,'ash','ashen maps prefer ash');
+ assert.ok(['rain','storm','overcast','clear'].includes(selectWeather({id:'aether'},'night',2).kind));
+ assert.equal(selectWeather({id:'frostline'},'day',2,{reduced:true}).kind,'clear','reduced motion forces clear skies');
+ assert.deepEqual([...PRECIP_KINDS].sort(),['ash','rain','snow','storm']);
+ assert.equal(PRECIP_KINDS.has('clear'),false,'clear skies never precipitate');
+});
+
+test('time-of-day transitions are deterministic and pin under reduced motion',()=>{
+ const arena={id:'exchange',background:'#090f17'};
+ assert.deepEqual(timeOfDayAt(arena,12,'playing'),timeOfDayAt(arena,12,'playing'),'the sample is a pure function');
+ assert.ok(Object.isFrozen(timeOfDayAt(arena,12,'playing')));
+ const phases=new Set();
+ for(let i=0;i<40;i++)phases.add(timeOfDayAt(arena,i*10,'selection').phase);
+ for(const phase of ['day','dusk','night'])assert.ok(phases.has(phase),`the menu cycle reaches ${phase}`);
+ const pinned=timeOfDayAt({...arena,reducedMotion:true},500,'selection');
+ assert.equal(pinned.phase,skyPhase(arena),'reduced motion pins the authored phase');
+ assert.equal(timeOfDayAt({...arena,timeOfDayOverride:false},500).phase,skyPhase(arena),'an explicit override pins too');
+ const sample=timeOfDayAt(arena,1234,'playing');
+ assert.ok(sample.blend>=0&&sample.blend<=1,'the phase blend stays normalized');
+});
+
+test('biome ambience gives each map family a distinct mood, tint and particle',()=>{
+ const snow=biomeAmbience({id:'frostline'}),volcanic=biomeAmbience({id:'foundry'}),forest=biomeAmbience({id:'riverbend'}),urban=biomeAmbience({id:'neon-vertical'});
+ assert.equal(snow.biome,'snow');assert.equal(snow.mood,'cold');assert.equal(snow.particles,'snow');
+ assert.equal(volcanic.biome,'volcanic');assert.equal(volcanic.mood,'hot');assert.equal(volcanic.particles,'ember');
+ assert.equal(forest.biome,'forest');assert.equal(forest.particles,'leaf');
+ assert.equal(urban.biome,'urban');
+ assert.notDeepEqual(snow,volcanic,'different biomes describe differently');
+ assert.deepEqual(snow,biomeAmbience({id:'frostline'}),'the descriptor is pure');
+ for(const ambience of [snow,volcanic,forest,urban]){assert.match(ambience.tint,/^#[0-9a-f]{6}$/i);assert.ok(Object.isFrozen(ambience));}
+ assert.equal(biomeAmbience({id:'custom-map'}).particles,'dust','an unknown map falls back to dust');
+});
+
+test('precipitation spawns are deterministic, fall and stay inside the radius',()=>{
+ const origin={x:2,y:1,z:-3},a=precipParticleAdds(4,'rain',origin,9),b=precipParticleAdds(4,'rain',origin,9),c=precipParticleAdds(5,'rain',origin,9);
+ assert.ok(a.length>0);
+ assert.deepEqual(a,b,'the same serial emits identical particles');
+ assert.notDeepEqual(a,c,'a new serial advances the stream');
+ for(const add of a){
+  assert.ok(Number.isFinite(add.pos.x)&&Number.isFinite(add.pos.y)&&Number.isFinite(add.pos.z));
+  assert.ok(add.velocity.y<0,'precipitation falls');
+  assert.ok(add.size>0&&add.life>0);
+  assert.ok(Math.abs(add.pos.x-origin.x)<=9.5&&Math.abs(add.pos.z-origin.z)<=9.5);
+ }
+ assert.deepEqual(precipParticleAdds(1,'clear',origin,9),[],'clear weather emits nothing');
+});
+
+test('the cheap CPU weather guard skips particle spawns for the software renderer',async()=>{
+ const {WeatherFX}=await import('./feedback.mjs');
+ const {EffectPool}=await import('./feedback.mjs');
+ const pool=new EffectPool(new T.Scene(),24),fx=new WeatherFX(pool,{seed:2,preset:weatherPreset('rain'),cap:8}),origin={x:0,y:0,z:0};
+ assert.equal(fx.update(.05,origin,{software:true}),0,'the CPU renderer spawns no precipitation');
+ assert.equal(fx.update(.05,origin,{reduced:true}),0,'reduced motion spawns no precipitation');
+ assert.ok(fx.update(.05,origin,{quality:1})>0,'the hardware path still precipitates');
+ pool.dispose();
 });
 
 test('mountain detail scales the cone shell resolution',()=>{

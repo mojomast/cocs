@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {PRESET_LIMIT, addPreset, descriptivePresetName, findPreset, normalizeLoadout, normalizePreset, normalizePresets, removePreset} from './presets.mjs';
+import {DISPLAY_PRESETS,PRESET_LIMIT,addPreset,applyDisplayPreset,descriptivePresetName,findPreset,normalizeLoadout,normalizePreset,normalizePresets,removePreset} from './presets.mjs';
 
 const options = {characters: ['chatgpt', 'claude'], harnesses: ['openclaw', 'cline'], maps: ['exchange', 'forge']};
 
@@ -42,4 +42,23 @@ test('removing and finding presets works by id', () => {
   assert.equal(findPreset(list, 'b').name, 'B');
   assert.equal(findPreset(list, 'z'), null);
   assert.deepEqual(removePreset(list, 'a').map(p => p.id), ['b']);
+});
+
+test('display presets apply quality tiers without dropping unrelated options', () => {
+  assert.deepEqual(DISPLAY_PRESETS.map(p => p.id), ['performance', 'balanced', 'quality']);
+  const base = {fov: 90, crosshair: 'dot', color: '#fff', resolutionScale: .5, postFx: false, bloom: 0};
+  const quality = applyDisplayPreset(base, 'quality');
+  assert.equal(quality.resolutionScale, 1.25);
+  assert.equal(quality.postFx, true);
+  assert.equal(quality.bloom, .5);
+  assert.equal(quality.quality, 'high');
+  assert.equal(quality.fov, 90, 'custom values survive the preset');
+  assert.equal(quality.crosshair, 'dot');
+  assert.equal(base.resolutionScale, .5, 'input is not mutated');
+  const performance = applyDisplayPreset({}, 'performance');
+  assert.equal(performance.resolutionScale, .5);
+  assert.equal(performance.quality, 'low');
+  assert.equal(performance.showFps, true);
+  assert.deepEqual(applyDisplayPreset({fov: 70}, 'nope'), {fov: 70});
+  assert.deepEqual(applyDisplayPreset(undefined, 'balanced'), {resolutionScale: .85, postFx: true, bloom: .34, quality: 'medium', showFps: false});
 });

@@ -1,7 +1,23 @@
 'use client';
 import {useState} from 'react';
+import {Award,Crosshair,Flag,Shield,Skull,Target,Trophy,Zap} from 'lucide-react';
 import {Modal,Panel,Btn,Stats,Tabs,Chip,Meter} from '../primitives';
 import type {ScreenProps} from '../contract';
+
+const MEDAL_ICONS:any={mvp:Trophy,objective:Target,flag:Flag,captures:Flag,accuracy:Crosshair,damage:Zap,flawless:Shield,ratio:Crosshair,deaths:Skull};
+const medalIcon=(id:string)=>{const Icon=MEDAL_ICONS[id]||Award;return <Icon size={16}/>;};
+
+export function MedalStrip({awards,player}:any){
+ const list=Array.isArray(awards)?awards:[];
+ if(!list.length)return <p className="field-note">Play a full match against at least one opponent to collect medals.</p>;
+ return <div className="medal-strip" role="list" aria-label="Match medals">
+  {list.map((award:any)=><div key={award.id} className={`medal medal--${award.id}${award.name===player?.name?' you':''}`} role="listitem" aria-label={`${award.label}: ${award.name}, ${award.value}`}>
+   <span className="medal-icon" aria-hidden="true">{medalIcon(award.id)}</span>
+   <span className="medal-main"><small>{award.label}</small><strong>{award.name}</strong></span>
+   <em>{award.value}</em>
+  </div>)}
+ </div>;
+}
 
 export function PauseModal({ui}:ScreenProps){
  const {mode,resume,changeMode,prefs,modalRef}=ui;
@@ -30,6 +46,7 @@ export function ResultsModal({ui}:ScreenProps){
   ...(Number.isFinite(Number(localActor.shots))?[{label:'SHOTS',value:Number(localActor.shots)}]:[]),
   {label:'ROUND TIME',value:Math.round(Number(hud?.time)||0)}
  ]:null;
+ const awardCount=Array.isArray(awards)?awards.length:0;
  const awardsNode=Array.isArray(awards)
   ?awards.map((a:any)=><div key={a.id} className={a.name===player?.name?'you':''}><small>{a.label}</small><strong>{a.name}</strong><em>{a.value}</em></div>)
   :awards;
@@ -51,11 +68,11 @@ export function ResultsModal({ui}:ScreenProps){
  </>;
  return <Modal open={!!hud&&mode==='results'} onClose={()=>changeMode('selection')} size="lg" eyebrow="MATCH COMPLETE" title={hud?resultTitle(hud,player):undefined} description={hud?resultDescription(hud,player):undefined} panelRef={modalRef} footer={footer}>
   {rewardStrip}
-  <Tabs value={tab} onChange={setTab} ariaLabel="Match results" tabs={[{value:'scoreboard',label:'Scoreboard'},{value:'stats',label:'Your stats'},{value:'awards',label:'Awards'}]}/>
+  <Tabs value={tab} onChange={setTab} ariaLabel="Match results" tabs={[{value:'scoreboard',label:'Scoreboard'},{value:'stats',label:'Your stats'},{value:'awards',label:`Awards${awardCount?` · ${awardCount}`:''}`}]}/>
   <div className="stack">
    {tab==='scoreboard'&&scoreboard}
-   {tab==='stats'&&(statItems?<Stats items={statItems}/>:<div className="match-awards">{awardsNode}</div>)}
-   {tab==='awards'&&<div className="match-awards">{awardsNode}</div>}
+   {tab==='stats'&&(statItems?<div className="stack"><Stats items={statItems}/><div className="stack stack--tight"><span className="label">MEDALS EARNED</span><MedalStrip awards={awards} player={player}/></div></div>:<div className="match-awards">{awardsNode}</div>)}
+   {tab==='awards'&&<MedalStrip awards={awards} player={player}/>}
   </div>
  </Modal>;
 }

@@ -4,7 +4,7 @@ import {CHARACTERS,WEAPONS} from './data.mjs';
 import {aim} from './core.mjs';
 import {MAPS,pickupWeapon} from './maps.mjs';
 import {normalizeDisplay} from './config.mjs';
-import {WeaponFeedback,EffectPool,AmbientFX} from './feedback.mjs';
+import {WeaponFeedback,EffectPool,AmbientFX,WeatherFX} from './feedback.mjs';
 import {ModelAssets,withAssets,currentAssets,CameraShake,MuzzleLightPool,LowHealthOverlay,RailBeamPool,DeathPool,DecalPool,killcamPose,KILLCAM_DURATION} from './effects-fx.mjs';
 import {deathPlan,hashUnit} from './deaths.mjs';
 import {resolveFinish} from './cosmetics.mjs';
@@ -20,7 +20,7 @@ import {raceDemoMode,raceDemoPose,RACE_DEMO_MODE_SECONDS} from './race-camera.mj
 import {occlusionDistance} from './camera.mjs';
 import {postStage,applyComposerSize,disposeComposer,reducedMotion,normalizeQuality,qualitySettings,qualityIndex,nextQualityTier,QUALITY_LEVELS} from './post.mjs';
 import {surfaceTextures,clearSurfaceTextures} from './textures.mjs';
-import {addSky,addMountains,addScatter,updateScatterSway,ambientProfile,smokeAnchors,skyPhase,HALO_MAPS} from './environment.mjs';
+import {addSky,addMountains,addScatter,updateScatterSway,ambientProfile,smokeAnchors,skyPhase,HALO_MAPS,skyPalette,biomeAmbience,selectWeather,timeOfDayAt,weatherPreset,WEATHER_KINDS} from './environment.mjs';
 import {raceTrackModel,updateRace as syncRacePresentation} from './race-presentation.mjs';
 export {raceTrackModel};
 import {RoomEnvironment} from 'three/addons/environments/RoomEnvironment.js';
@@ -326,6 +326,8 @@ export class ArenaView{
        _onQualityChange(){
         if(this.sun?.shadow){const size=this.qualitySettings.shadowMap??2048;this.sun.shadow.mapSize.set(size,size);if(this.renderer?.shadowMap)this.renderer.shadowMap.needsUpdate=true;}
         if(this.renderer?.setScreenArea)this.renderer.setScreenArea(this.qualitySettings.tier===0?.12:this.qualitySettings.tier===1?.09:.06);
+        if(this.ambientFx)this.ambientFx.moteCap=Math.max(1,this.qualitySettings.ambientMotes??3);
+        if(this.weatherFx)this.weatherFx.cap=Math.max(2,Math.round((this.qualitySettings.ambientMotes??3)*2));
        }
        setQuality(level){this._qualityOverride=level==null?null:level;return this._applyQuality();}
        qualityTier(){return this._quality().tier;}
@@ -374,6 +376,11 @@ export class ArenaView{
     const look=arenaLooks[arena.id]||arenaLooks.exchange,[floorColor,wallColor,trimColor,skyColor,groundColor,fogDensity,metal]=look;
     this.scene.fog.density=fogDensity;world.userData.look=arena.id;
     for(const light of this.scene.children){if(light.userData?.rimLight)continue;if(light.isHemisphereLight){light.color.set(skyColor);light.groundColor.set(groundColor);light.intensity=arena.terrain?2.5:1.8;}if(light.isDirectionalLight){light.color.set(skyColor);light.intensity=arena.terrain?3.1:2.4;light.position.set(arena.id==='aether'?-18:18,24,arena.id==='foundry'?-12:10);}}
+    // Snapshot the authored look so weather/time-of-day tinting always lerps
+    // from the arena's own values instead of accumulating frame to frame.
+    const hemi=this.scene.children.find(light=>light.isHemisphereLight),sunLight=this.scene.children.find(light=>light.isDirectionalLight&&!light.userData?.rimLight);
+    this._arenaLook={background:arena.background||'#0a0f1e',fog:arena.background||'#0a0f1e',fogDensity,sky:skyColor,ground:groundColor,metal,exposure:Number(this.display?.exposure)||1.15};
+    this._arenaLight={hemi:hemi?.intensity??1.8,sun:sunLight?.intensity??2.4,hemiColor:new T.Color(hemi?.color||skyColor),sunColor:new T.Color(sunLight?.color||skyColor),groundColor:new T.Color(hemi?.groundColor||groundColor)};
     const floor=material(arena.floorColor??floorColor,metal,.78),wall=material(wallColor,metal,.72),trim=material(trimColor,metal,.58),glow=material(arena.color,.4,.3,true),islands=arena.platforms?.length>0;
     const palette=[floor,wall,trim,glow],detailBatches=new Map(),indexedUnit=new T.BoxGeometry(1,1,1),unit=indexedUnit.toNonIndexed();indexedUnit.dispose();
     const arenaSeed=arenaSeedOf(arena),textured=this.renderer?.isSoftware!==true&&typeof document!=='undefined'&&!this.reduced();
@@ -459,9 +466,10 @@ export class ArenaView{
    this.addTraversal(world,arena,glow);
    // Unused family colors never reach the scene's normal disposal traversal.
    const usedMaterials=new Set();world.traverse(n=>{if(n.material)usedMaterials.add(n.material);});for(const mat of new Set(palette))if(!usedMaterials.has(mat))mat.dispose();
-   const skyPhaseName=skyPhase(arena),halo=HALO_MAPS.has(arena.id),sunDir=arena.id==='aether'?[-18,24,-12]:arena.id==='foundry'?[18,24,-12]:[18,24,10],quality=this._quality();this.scene.userData.sky={background:arena.background,phase:skyPhaseName,seed:arenaSeed,halo,sunDir};if(this.renderer?.isSoftware!==true){this.sky=addSky(world,{background:arena.background,radius:185,phase:skyPhaseName,seed:arenaSeed,starCount:Math.round((skyPhaseName==='night'?520:0)*quality.stars),halo,sunDir});this.mountains=addMountains(world,{background:arena.background,seed:arenaSeed,radius:150,count:Math.max(8,Math.round(26*quality.scatter)),base:-12,detail:quality.scatterDetail});if(arena.terrain)this.scatterWind=addScatter(world,{terrain:arena.terrain,bounds,seed:arenaSeed,wind:true,density:quality.scatter,detail:quality.scatterDetail})||[];}
+   const skyPhaseName=skyPhase(arena),halo=HALO_MAPS.has(arena.id),sunDir=arena.id==='aether'?[-18,24,-12]:arena.id==='foundry'?[18,24,-12]:[18,24,10],quality=this._quality();this.scene.userData.sky={background:arena.background,phase:skyPhaseName,seed:arenaSeed,halo,sunDir,mood:biomeAmbience(arena).mood,weather:this.weatherState?this.weatherState.kind:'clear'};if(this.renderer?.isSoftware!==true){this.sky=addSky(world,{background:arena.background,radius:185,phase:skyPhaseName,seed:arenaSeed,starCount:Math.round((skyPhaseName==='night'?520:0)*quality.stars),halo,sunDir});this.mountains=addMountains(world,{background:arena.background,seed:arenaSeed,radius:150,count:Math.max(8,Math.round(26*quality.scatter)),base:-12,detail:quality.scatterDetail});if(arena.terrain)this.scatterWind=addScatter(world,{terrain:arena.terrain,bounds,seed:arenaSeed,wind:true,density:quality.scatter,detail:quality.scatterDetail})||[];}
     else this.scatterWind=[];
     this.ambientFx=null;this.ambientPool?.dispose?.();this.ambientPool=null;this.ambientConfig=ambientProfile(arena,skyPhaseName);this.ambientSeed=arenaSeed;this.ambientAnchors=smokeAnchors(bounds,arenaSeed,4);
+    this.weatherFx=null;this.weatherPool?.dispose?.();this.weatherPool=null;this.initWeather(arena);
    if(this.renderer?.shadowMap)this.renderer.shadowMap.needsUpdate=true;
   }
     addTraversal(world,arena,glow){const pads=[...traversalItems(arena,'trampolines'),...traversalItems(arena,'jumpPads'),...traversalItems(arena,'pads')],launchers=[...traversalItems(arena,'boostLaunchers'),...traversalItems(arena,'launchers')],links=arena.jumpLinks||[];const shared=this.renderResources??=new Set(),padGeo=new T.CylinderGeometry(.7,.7,.12,16),padMat=material(arena.color,.25,.25,true),launchGeo=new T.BoxGeometry(.8,.1,1.3),launchMat=material(arena.color,.25,.25,true);shared.add(padGeo).add(padMat).add(launchGeo).add(launchMat);for(const raw of pads){const p=pointOf(raw),y=p.y??0,m=new T.Mesh(padGeo,padMat);m.position.set(p.x,y+.06,p.z);m.userData.traversal='trampoline';world.add(m);ring(world,.78,.035,p.x,y+.13,p.z,padMat); }for(const raw of launchers){const p=pointOf(raw),y=p.y??0,m=new T.Mesh(launchGeo,launchMat),id=raw.id??raw.traversal??raw.traversalId??raw.traversalID,link=links.find(item=>(item.traversal??item.traversalId??item.traversalID)===id),from=link&&pointOf(link.source),to=link&&pointOf(link.target);m.position.set(p.x,y+.05,p.z);m.rotation.y=from&&to?Math.atan2(to.x-from.x,to.z-from.z):raw.rotation??raw.yaw??(Array.isArray(raw.dir)?Math.atan2(raw.dir[0],raw.dir[1]):0);m.userData.traversal='boost-launcher';world.add(m);m.userData.stripes=[-.25,.25].map(x=>box(m,.06,.04,.9,x,.08,0,glow));}for(const link of links){const from=pointOf(link.source),to=pointOf(link.target),mid=V((from.x+to.x)/2,Math.max(from.y??0,to.y??0)+4,(from.z+to.z)/2),geo=new T.BufferGeometry().setFromPoints([V(from.x,(from.y??0)+.14,from.z),mid,V(to.x,(to.y??0)+.14,to.z)]),arc=new T.Line(geo,glow);arc.userData.traversal='jump-link';world.add(arc);}const teleporters=traversalItems(arena,'teleporters');if(teleporters.length){const padGeo2=new T.CylinderGeometry(.9,.9,.16,20),padMat2=material(arena.color,.3,.25,true);shared.add(padGeo2).add(padMat2);for(const raw of teleporters){const p=pointOf(raw),y=p.y??0,m=new T.Mesh(padGeo2,padMat2);m.position.set(p.x,y+.08,p.z);m.userData.traversal='teleporter';world.add(m);ring(world,1,.04,p.x,y+.16,p.z,padMat2);ring(world,1.35,.03,p.x,y+.16,p.z,padMat2);}}const ziplines=traversalItems(arena,'ziplines');if(ziplines.length){const cableMat=material(arena.color,.6,.3,true),anchorMat=material('#c9d6dd',.85,.3);shared.add(cableMat).add(anchorMat);for(const raw of ziplines){const from=pointOf(raw.from??raw.a),to=pointOf(raw.to??raw.b),ay=(from.y??0)+2.4,by=(to.y??0)+2.4,cable=tube(world,from.x,ay,from.z,to.x,by,to.z,.035,cableMat,5);cable.userData.traversal='zipline';for(const anchor of [[from.x,ay,from.z],[to.x,by,to.z]]){const post=cylinder(world,.07,.09,2.4,anchor[0],anchor[1]-1.2,anchor[2],anchorMat,8);post.userData.traversal='zipline';}ring(world,.22,.03,from.x,ay,from.z,cableMat,0);ring(world,.22,.03,to.x,by,to.z,cableMat,0);}}}
@@ -612,6 +620,9 @@ export class ArenaView{
       if(e.type==='damage'){const victim=this.actorModels?.get(e.actor);if(victim)victim.userData.hitUntil=performance.now()+220;}
       if(e.type==='damage'&&e.actor===this.playerId&&Number(e.amount)>=10&&!reduced){this.cameraShake??=new CameraShake();this.cameraShake.add(Math.min(1,Number(e.amount)/70));}
       if(e.type==='death'&&!reduced){this.cameraShake??=new CameraShake();if(e.actor===this.playerId)this.cameraShake.add(1);else{const local=this.actorModels?.get(this.playerId),p=e.pos;if(local&&p){const distance=Math.hypot(local.position.x-(p.x||0),local.position.z-(p.z||0));if(distance<8)this.cameraShake.add(.55*(1-distance/8));}}}
+      // Optional announcer cue. The audio object owns the voice cap and mute
+      // handling; the view only decides which mode events are announceable.
+      if(!reduced&&this.viewAudio?.announcerCue&&['capture','flag-pickup','flag-return','goal','killstreak','multikill'].includes(e.type))this.viewAudio.announcerCue(e.type);
  }
    shotEffect(e,info,reduced){this.effectPool??=new EffectPool(this.scene);const from=e.from,to=e.to??e.pos,weapon=e.weapon??0,feel=info.feel||{},color=e.type==='vehicle-shot'?'#ffd166':(info.color||'#c2ffea'),tracerScale=this._quality().tracers,tracer=feel.tracer||[.085,.055];
     if(e.type==='dash'){if(from&&to)this.effectPool.add({from,to,color:'#c99aff',life:.12,size:.08});return;}
@@ -729,11 +740,66 @@ export class ArenaView{
     this._raceCam={mode,segment,x,y,z,lookX,lookY,lookZ};
     return true;
    }
+   setAudio(audio){this.viewAudio=audio||null;return this.viewAudio;}
+   // Nearby-combat signal for the dynamic music/bed layer. Near action spikes
+   // the value to one, then it decays over a fixed window. Pure arithmetic so a
+   // caller without audio still gets the same deterministic value.
+   audioIntensity(time){
+    if(!Number.isFinite(this._nearActionAt))return 0;
+    const dt=Number(time)-this._nearActionAt;
+    if(!(dt>=0)||dt>5)return 0;
+    const decay=1-dt/5,peak=Math.max(0,Math.min(1,this._nearAction||0));
+    return Math.max(0,Math.min(1,peak*decay*decay));
+   }
+   _noteNearAction(audio,time){if(!audio)return;const value=this.audioIntensity(time);if(Math.abs((audio.intensity||0)-value)>.02)audio.setIntensity?.(value);}
    updateSky(){if(this.sky)this.sky.position.copy(this.camera.position);if(this.mountains)this.mountains.position.copy(this.camera.position);}
    // WebGL-only ambient pass: wind sway on tagged vegetation and pooled motes.
    // Both are skipped entirely for the CPU renderer and reduced motion.
    _updateWind(time,reduced){if(this.renderer?.isSoftware===true||reduced||!this.scatterWind?.length)return 0;return updateScatterSway(this.scatterWind,time);}
    _updateAmbient(match,delta,time,reduced){if(this.renderer?.isSoftware===true||reduced||!this.ambientConfig)return 0;const origin=this.camera?.position;if(!origin)return 0;if(!this.ambientFx){this.ambientPool??=new EffectPool(this.scene,64);this.ambientFx=new AmbientFX(this.ambientPool,{profile:this.ambientConfig,seed:this.ambientSeed??1,anchors:this.ambientAnchors,moteCap:this._quality().ambientMotes});}return this.ambientFx.update(delta,origin,{radius:9});}
+   // Deterministic weather + smooth time-of-day. The clock advances by frame
+   // delta and is seeded per arena, so repeated runs produce identical phases.
+   // Reduced motion and the CPU renderer still get the tint/sway-free sky blend;
+   // only the pooled precipitation pass is gated off for them.
+   setWeather(kind){this._weatherOverride=kind==null?null:(WEATHER_KINDS.includes(kind)?kind:null);return this._weatherOverride;}
+   initWeather(arena=MAPS[0]){const seed=this.ambientSeed??arenaSeedOf(arena),tod=timeOfDayAt(arena,0,'playing'),reduced=this.reduced?.()===true,preset=this._weatherOverride?weatherPreset(this._weatherOverride):selectWeather(arena,tod,seed,{reduced});this.weatherState={clock:0,kind:preset.kind,preset,wetness:preset.material?.wet??0,applied:-Infinity,phase:tod.phase,timeOfDay:tod};this.weatherFx=null;this.weatherPool=null;this._weatherSeed=seed;this._nearActionAt=undefined;this._nearAction=0;return this.weatherState;}
+   _weatherState(){return this.weatherState??(this.weatherState={clock:0,kind:'clear',preset:selectWeather(MAPS[0],'day',1),wetness:undefined,phase:'day',timeOfDay:null});}
+   _applyArenaLook(state){const base=this._arenaLook;if(!base)return;const palette=skyPalette(base.background,state.phase),material=state.preset?.material||{tint:'#000000',wet:0,dark:0},wet=Math.max(0,Math.min(1,Number(state.wetness)||0)),dark=Math.max(0,Math.min(1,Number(material.dark)||0)),fogScale=Number(state.preset?.density)||1;
+    if(this.scene){if(this.scene.background)this.scene.background.copy(new T.Color(base.background)).lerp(new T.Color(material.tint),wet*.5+dark*.5);if(this.scene.fog){this.scene.fog.color.copy(new T.Color(base.fog)).lerp(new T.Color(material.tint),wet*.5+dark*.5);this.scene.fog.density=base.fogDensity*fogScale;}}
+    this._applyLookLighting(wet,dark);
+    if(this.sky)this._tintSky(this.sky,palette,state.timeOfDay,Math.max(wet,dark));
+    if('toneMappingExposure' in this.renderer)this.renderer.toneMappingExposure=base.exposure*(1+(Number(state.preset?.exposure??1)-1)*.85);
+   }
+   _applyLookLighting(wet,dark){const base=this._arenaLight;if(!base)return;const tint=new T.Color(base.dark||'#000000');for(const light of this.scene?.children||[]){if(light.isHemisphereLight){light.intensity=base.hemi*(1-dark*.22);if(light.color)light.color.copy(base.hemiColor).lerp(tint,wet*.2+dark*.3);if(light.groundColor)light.groundColor.copy(base.groundColor);}else if(light.isDirectionalLight&&!light.userData?.rimLight){light.intensity=base.sun*(1-dark*.5);if(light.color)light.color.copy(base.sunColor).lerp(tint,wet*.3+dark*.55);}}}
+   _blendedSkyPalette(blend){const background=this._arenaLook?.background||'#0a0f1e',from=blend?.from||blend?.phase||'day',to=blend?.to||from,k=Number.isFinite(blend?.blend)?Math.max(0,Math.min(1,blend.blend)):0,a=skyPalette(background,from),b=skyPalette(background,to),out={};for(const key of Object.keys(a))out[key]='#'+new T.Color(a[key]).lerp(new T.Color(b[key]),k).getHexString();return out;}
+   _tintSky(sky,palette,blend,darken){if(!sky)return;const blended=this._blendedSkyPalette(blend),from=blend?.from||blend?.phase||'day',to=blend?.to||from,k=Number.isFinite(blend?.blend)?Math.max(0,Math.min(1,blend.blend)):0;
+    if(sky.userData.stars){const stars=sky.children?.find(child=>child.userData?.stars);if(stars){const nightWeight=g=>g==='night'?1:g==='dusk'?.4:0;const visibility=1-(nightWeight(from)*(1-k)+nightWeight(to)*k);stars.visible=visibility>.4;if(stars.material)stars.material.opacity=Math.max(0,visibility);}}
+    const disc=sky.children?.find(child=>child.userData?.sun);if(disc?.material)disc.material.color.copy(new T.Color(blended.disk));
+    const haze=sky.children?.find(child=>child.userData?.atmosphere);if(haze?.material)haze.material.color.copy(new T.Color(blended.horizon));
+    if(darken>.01&&typeof document!=='undefined'&&!sky.userData.overcast){sky.material=sky.material.clone();sky.material.color.setScalar(1-darken*.42);sky.userData.overcast=true;}
+    return blended;
+   }
+   _updateWeather(arena=MAPS[0],delta=0,mode='playing'){const dt=Math.max(0,Math.min(Number(delta)||0,.25)),state=this._weatherState();state.clock+=dt;
+    const tod=timeOfDayAt(arena,state.clock,mode);state.timeOfDay=tod;state.phase=tod.phase;
+    // Weather is resolved once per time-of-day phase (or when pinned) so the
+    // hash roll never flickers mid-phase; the palette pass only runs when the
+    // phase, kind or wetness band actually changes.
+    const reducedMotion=this.reduced?.()===true;
+    if(state.phase!==tod.phase||this._weatherResolved==null||this._weatherOverride!==this._weatherResolvedOverride){
+     const preset=this._weatherOverride?weatherPreset(this._weatherOverride):selectWeather(arena,tod,this._weatherSeed??1,{reduced:reducedMotion});
+     state.kind=preset.kind;state.preset=preset;this._weatherResolved=preset.kind;this._weatherResolvedOverride=this._weatherOverride;state.phase=tod.phase;
+    }
+    const target=state.preset?.material?.wet??0;state.wetness=state.wetness===undefined?target:state.wetness+(target-state.wetness)*(1-Math.exp(-.7*dt));
+    if(state.phase!==state.applied||state.kind!==state.appliedKind||Math.abs((state._wetApplied??-1)-state.wetness)>.02||state.clock-state._lookAt>2){state.applied=state.phase;state.appliedKind=state.kind;state._wetApplied=state.wetness;state._lookAt=state.clock;this._applyArenaLook(state);}
+    const mood=state.preset?.audio||'default';if(this.viewAudio?.setBedMood&&this._audioMood!==mood){this.viewAudio.setBedMood(mood);this._audioMood=mood;}
+    return state;
+   }
+   _updateWeatherFx(delta,reduced,quality){if(this.renderer?.isSoftware===true||reduced)return 0;const state=this._weatherState();if(!(state.preset?.particles>0))return 0;const origin=this.camera?.position;if(!origin)return 0;if(!this.weatherFx){this.weatherPool??=new EffectPool(this.scene,48);this.weatherFx=new WeatherFX(this.weatherPool,{seed:this._weatherSeed??1,cap:Math.max(2,Math.round((quality?.ambientMotes??3)*2))});}this.weatherFx.setPreset(state.preset);return this.weatherFx.update(delta,origin,{radius:10,quality:quality?.particles??1,software:false,reduced:false});}
+   _nearbyAction(match,time){const events=match?.events,from=Number.isFinite(this.lastEvent)?this.lastEvent:-1;if(Array.isArray(events)&&events.length){for(const event of events){if(!(event.id>from)||!event)continue;if(!['shot','vehicle-shot','launch','explosion','death','melee'].includes(event.type))continue;const pos=event.pos||event.from;const origin=this.actorModels?.get(this.playerId)?.position;if(origin&&pos&&Math.hypot((pos.x||0)-origin.x,(pos.z||0)-origin.z)>34)continue;this._nearActionAt=time;this._nearAction=event.type==='explosion'||event.type==='death'?1:Math.max(this._nearAction||0,.72);break;}}
+    const origin=this.actorModels?.get(this.playerId)?.position||this.camera?.position;let proximity=0;if(origin)for(const rocket of (match?.rockets||[])){const position=rocket?.pos;if(position&&Math.hypot((position.x||0)-origin.x,(position.z||0)-origin.z)<18)proximity=Math.max(proximity,.85);}
+    return Math.max(this.audioIntensity(time),proximity);
+   }
+   _updateAudio(match,time){const audio=this.viewAudio;if(!audio?.setIntensity)return 0;const value=this._nearbyAction(match,time);if(Math.abs((audio.intensity||0)-value)>.02)audio.setIntensity(value);return audio.intensity||0;}
    setKillcam(on){this.killcamEnabled=on!==false;if(!this.killcamEnabled)this._killcam=null;}
    get killcam(){return this._killcam;}
    killcamActive(){return this._killcam!==null;}
@@ -751,8 +817,8 @@ if(this.freeCam){this.lowHealthOverlay?.update(false,time,delta,reduced,this.cam
   for(const e of (match.events||[]))if(e.id>this.lastEvent){this.effect(e);this.lastEvent=e.id;}
    this.effectPool?.update(Math.max(0,delta));this.railPool?.update(Math.max(0,delta));this.deathPool?.update(Math.max(0,delta));this.decalPool?.update(Math.max(0,delta));
        this.hands.visible=player.health>0&&this.showWeapon!==false&&!this.spectator&&!cinematic&&!this.freeCam&&player.vehicleId==null;const weaponSig=`${player.finish??''}|${weaponVisualKey(player.attachments?.visual)}`;if(this.currentWeapon!==player.weapon||this._viewWeaponSig!==weaponSig){for(const c of [...this.hands.children]){this.hands.remove(c);this.disposeObject(c);}this.firstPerson=weaponModel(player.weapon,undefined,player.attachments?.visual,player.finish);this.firstPerson.scale.setScalar(1.1);this.hands.add(this.firstPerson);this.currentWeapon=player.weapon;this._viewWeaponSig=weaponSig;this.firstPerson.traverse(m=>{if(m.isMesh){m.renderOrder=100;m.material.depthTest=false;}});}
-  this.feedback??=new WeaponFeedback();const pose=this.feedback.update(player,delta,reduced,this.hands.visible);this.hands.position.set(.37+pose.x,-.36+pose.y,-.58+pose.z);this.hands.rotation.set(pose.pitch,0,pose.roll);this.firstPerson.userData.flash.visible=!reduced&&this.hands.visible&&this.flashUntil>performance.now();this.muzzleLights?.update(Math.max(0,delta));if(this.renderer.shadowMap?.autoUpdate===false){const st=shadowTick(this._shadowTick,this._quality().shadows);this._shadowTick=st.tick;if(st.refresh)this.renderer.shadowMap.needsUpdate=true;}this.updateSky();this._updateWind(time,reduced);this._updateAmbient(match,delta,time,reduced);if(this.composer)this.composer.render();else this.renderer.render(this.scene,this.camera);if(cinematic)this.playerId=savedPlayerId;if(mode==='selection'&&this.showcaseState)this._renderPreview(time,reduced);}
+  this.feedback??=new WeaponFeedback();const pose=this.feedback.update(player,delta,reduced,this.hands.visible);this.hands.position.set(.37+pose.x,-.36+pose.y,-.58+pose.z);this.hands.rotation.set(pose.pitch,0,pose.roll);this.firstPerson.userData.flash.visible=!reduced&&this.hands.visible&&this.flashUntil>performance.now();this.muzzleLights?.update(Math.max(0,delta));if(this.renderer.shadowMap?.autoUpdate===false){const st=shadowTick(this._shadowTick,this._quality().shadows);this._shadowTick=st.tick;if(st.refresh)this.renderer.shadowMap.needsUpdate=true;}this.updateSky();this._updateWind(time,reduced);this._updateAmbient(match,delta,time,reduced);this._updateWeather(arena,delta,mode);this._updateWeatherFx(delta,reduced,this._quality());this._updateAudio(match,time);if(this.composer)this.composer.render();else this.renderer.render(this.scene,this.camera);if(cinematic)this.playerId=savedPlayerId;if(mode==='selection'&&this.showcaseState)this._renderPreview(time,reduced);}
       updateRace(match,time){syncRacePresentation(this,match,time);}
     _renderPreview(time,reduced){const rect=this.previewRect;if(!rect||rect.width<12||rect.height<12||!(this.renderer instanceof T.WebGLRenderer))return;const renderer=this.renderer,w=this.width,h=this.height;if(w<=0||h<=0)return;const x=Math.max(0,Math.round(rect.left)),y=Math.max(0,Math.round(h-rect.bottom)),vw=Math.max(1,Math.round(rect.width)),vh=Math.max(1,Math.round(rect.height));const m=this.menu.model;m.rotation.y=Math.PI+.25+(reduced?0:Math.sin(time*.4)*.22);m.position.y=.17;const cam=this.menu.camera;cam.aspect=Math.max(.2,vw/vh);cam.updateProjectionMatrix();const prevAuto=renderer.autoClear;renderer.setScissorTest(true);renderer.setViewport(x,y,vw,vh);renderer.setScissor(x,y,vw,vh);renderer.autoClear=true;renderer.render(this.menu.scene,cam);renderer.setScissorTest(false);renderer.setViewport(0,0,w,h);renderer.setScissor(0,0,w,h);renderer.autoClear=prevAuto;}
-          dispose(){this.clearObjectiveMarkers();this.effectPool?.dispose();this.projectilePool?.dispose();this.railPool?.dispose();this.deathPool?.dispose();this.decalPool?.dispose();this.ambientPool?.dispose();this.ambientFx=null;this._killcam=null;disposeComposer(this.composer);this.composer=null;this.muzzleLights?.dispose();this.lowHealthOverlay?.dispose();this.disposeObject(this.scene);this.disposeObject(this.menu.scene);this.environmentRT?.dispose?.();for(const resource of this.renderResources||[])resource.dispose();this.renderResources?.clear();for(const resource of this.sharedResources||[])resource.dispose();this.sharedResources?.clear();this.modelAssets?.materials.clear();this.modelAssets?.geometries.clear();this.modelAssets?.resources.clear();this.arenaAssets?.materials.clear();this.arenaAssets?.geometries.clear();this.arenaAssets?.resources.clear();clearSurfaceTextures();this._freeCam=false;this._directorLock=false;this.resetFreeCam();this.renderer.dispose();}
+          dispose(){this.clearObjectiveMarkers();this.effectPool?.dispose();this.projectilePool?.dispose();this.railPool?.dispose();this.deathPool?.dispose();this.decalPool?.dispose();this.ambientPool?.dispose();this.weatherPool?.dispose();this.ambientFx=null;this.weatherFx=null;this._killcam=null;disposeComposer(this.composer);this.composer=null;this.muzzleLights?.dispose();this.lowHealthOverlay?.dispose();this.disposeObject(this.scene);this.disposeObject(this.menu.scene);this.environmentRT?.dispose?.();for(const resource of this.renderResources||[])resource.dispose();this.renderResources?.clear();for(const resource of this.sharedResources||[])resource.dispose();this.sharedResources?.clear();this.modelAssets?.materials.clear();this.modelAssets?.geometries.clear();this.modelAssets?.resources.clear();this.arenaAssets?.materials.clear();this.arenaAssets?.geometries.clear();this.arenaAssets?.resources.clear();clearSurfaceTextures();this._freeCam=false;this._directorLock=false;this.resetFreeCam();this.renderer.dispose();}
 }

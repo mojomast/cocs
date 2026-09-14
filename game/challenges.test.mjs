@@ -3,15 +3,24 @@ import assert from 'node:assert/strict';
 import {
   CHALLENGE_COUNT,
   CHALLENGE_POOL,
+  WEEKLY_CHALLENGE_COUNT,
+  WEEKLY_POOL,
   applyMatch,
+  applyMatchAll,
+  applyWeeklyMatch,
   challengeMatches,
   challengeStatus,
   completedChallenges,
+  completedWeeklyChallenges,
   currentDaySeed,
+  currentWeekSeed,
   dailyChallenges,
   daySeedFor,
   metricsFor,
   normalizeChallengeState,
+  weekSeedFor,
+  weeklyChallenges,
+  weeklyStatus,
 } from './challenges.mjs';
 
 // A match result that only advances the "play matches" objective, so reward
@@ -51,10 +60,13 @@ test('day seeds are stable per day and normalize strings/numbers', () => {
 
 test('metricsFor extracts career counters from a match result', () => {
   const metrics = metricsFor({win: true, bestStreak: 7, actor: {frags: 12, deaths: 3, streak: 4, scoreStats: {captures: 2, flagReturns: 1, objectiveCaptures: 3, objectiveTime: 42}}});
-  assert.deepEqual(metrics, {matches: 1, wins: 1, kills: 12, deaths: 3, captures: 2, flagReturns: 1, objectiveCaptures: 3, objectiveTime: 42, bestStreak: 7});
+  assert.deepEqual(metrics, {matches: 1, wins: 1, flawlessWins: 0, kills: 12, deaths: 3, captures: 2, flagReturns: 1, objectiveCaptures: 3, objectiveTime: 42, bestStreak: 7});
   assert.equal(metricsFor({}).matches, 1);
   assert.equal(metricsFor({actor: {frags: -5}}).kills, 0);
   assert.equal(metricsFor({actor: {streak: 4}}).bestStreak, 4);
+  assert.equal(metricsFor({win: true, actor: {frags: 5, deaths: 0}}).flawlessWins, 1);
+  assert.equal(metricsFor({win: false, actor: {frags: 5, deaths: 0}}).flawlessWins, 0);
+  assert.equal(metricsFor({win: true, actor: {frags: 5, deaths: 2}}).flawlessWins, 0);
 });
 
 test('applyMatch advances counters and grants bonus XP exactly once', () => {
@@ -114,4 +126,61 @@ test('challengeStatus and completedChallenges summarize progress', () => {
   assert.equal(entry.progress, play.target);
   assert.ok(status.every(c => c.progress <= c.target));
   assert.equal(completedChallenges(state).some(c => c.id === play.id), true);
+});
+
+test('weeklyChallenges is deterministic, distinct from the daily draw and more varied', () => {
+  const first = weeklyChallenges(4242);
+  assert.deepEqual(first, weeklyChallenges(4242));
+  assert.equal(first.length, WEEKLY_CHALLENGE_COUNT);
+  assert.equal(new Set(first.map(c => c.id)).size, WEEKLY_CHALLENGE_COUNT);
+  assert.ok(WEEKLY_POOL.length >= WEEKLY_CHALLENGE_COUNT);
+  for (const challenge of first) {
+    assert.match(challenge.id, /^week-/);
+    assert.ok(challenge.reward >= 250);
+    assert.doesNotMatch(challenge.label, /\{target\}/);
+  }
+  assert.notDeepEqual(first.map(c => c.id), weeklyChallenges(4243).map(c => c.id));
+  // The same numeric seed must not produce the daily draw.
+  assert.notDeepEqual(first.map(c => c.id), dailyChallenges(4242).map(c => c.id));
+});
+
+test('week seeds are stable per calendar week and normalize strings/numbers', () => {
+  assert.equal(weekSeedFor(new Date('2024-03-04T01:00:00Z')), weekSeedFor(new Date('2024-03-10T23:00:00Z')));
+  assert.notEqual(weekSeedFor(new Date('2024-03-04T12:00:00Z')), weekSeedFor(new Date('2024-03-11T12:00:00Z')));
+  assert.equal(typeof currentWeekSeed(), 'number');
+  assert.equal(typeof weeklyChallenges('week-text')[0].id, 'string');
+});
+
+test('applyWeeklyMatch advances weekly counters and pays once per objective', () => {
+  let week = 0;
+  for (; week < 500; week++) if (weeklyChallenges(week).some(c => c.id === 'week-matches')) break;
+  const def = weeklyChallenges(week).find(c => c.id === 'week-matches');
+  let state = normalizeChallengeState(null, 0, week), total = 0;
+  for (let i = 1; i <= def.target; i++) {
+    const result = applyWeeklyMatch(state, matchOnly);
+    state = result.state;
+    total += result.gained;
+    assert.equal(state.weeklyProgress[def.id], i);
+    if (i === def.target) assert.equal(result.completed.some(c => c.id === def.id), true);
+    else assert.equal(result.gained, 0, 'weekly objective only pays on completion');
+  }
+  assert.equal(total, def.reward);
+  assert.equal(applyWeeklyMatch(state, matchOnly).gained, 0);
+  assert.equal(weeklyStatus(state).length, WEEKLY_CHALLENGE_COUNT);
+  assert.equal(completedWeeklyChallenges(state).some(c => c.id === def.id), true);
+});
+
+test('applyMatchAll advances daily and weekly without cross-contaminating them', () => {
+  const day = playDay();
+  const dailyPlay = dailyChallenges(day).find(c => c.id === 'play-matches');
+  const state = normalizeChallengeState(null, day, 7);
+  const dailyBefore = state.progress[dailyPlay.id];
+  const result = applyMatchAll(state, matchOnly);
+  assert.equal(result.state.progress[dailyPlay.id], dailyBefore + 1);
+  assert.equal(result.gained, result.daily.gained + result.weekly.gained);
+  // applyMatch never touches the weekly bucket and vice versa.
+  const dailyOnly = applyMatch(state, matchOnly);
+  assert.deepEqual(dailyOnly.state.weeklyProgress, state.weeklyProgress);
+  const weeklyOnly = applyWeeklyMatch(state, matchOnly);
+  assert.deepEqual(weeklyOnly.state.progress, state.progress);
 });

@@ -84,3 +84,47 @@ export function missionBrief(hud){
  if(!mission)return null;
  return {name:mission.name,tag:mission.tag,chapter:mission.chapter||'',brief:mission.brief||'',intro:mission.intro||null,outro:mission.outro||null};
 }
+// Campaign mission select. A mission's par time is a deterministic function of
+// its step count so three stars stay comparable across devices and sessions.
+export function campaignMissionPar(mission){
+ const steps=Array.isArray(mission?.steps)?mission.steps.length:0;
+ return 120+steps*45;
+}
+// A completed mission earns one star; beating par adds the rest. The stored
+// entry only carries best time/score, so the derivation is version-stable.
+export function campaignMissionStars(entry,par){
+ if(!entry)return 0;
+ const time=Number(entry.bestTime);
+ if(!Number.isFinite(par)||par<=0)return 1;
+ if(Number.isFinite(time)&&time<=par)return 3;
+ if(Number.isFinite(time)&&time<=par*1.5)return 2;
+ return 1;
+}
+export function campaignMissionView(missions=[],progress={},selectedId=null){
+ const list=Array.isArray(missions)?missions:[],completed=progress?.completed||{};
+ return list.map((mission,index)=>{
+  const entry=completed[mission.id]||null,previous=index>0?list[index-1]:null,par=campaignMissionPar(mission);
+  return {
+   id:mission.id,
+   order:index+1,
+   name:mission.name,
+   chapter:mission.chapter||'',
+   tag:mission.tag||'',
+   brief:mission.brief||'',
+   index,
+   selected:selectedId===mission.id,
+   unlocked:index===0||Boolean(completed[previous?.id]),
+   completed:Boolean(entry),
+   stars:campaignMissionStars(entry,par),
+   parTime:par,
+   bestTime:Number.isFinite(Number(entry?.bestTime))?Number(entry.bestTime):null,
+   bestScore:Number.isFinite(Number(entry?.bestScore))?Number(entry.bestScore):null,
+   attempts:Math.max(0,Math.round(Number(entry?.attempts)||0)),
+   wins:Math.max(0,Math.round(Number(entry?.wins)||0)),
+  };
+ });
+}
+export function campaignProgressSummary(missions=[],progress={}){
+ const views=campaignMissionView(missions,progress,null),total=views.length,stars=views.reduce((sum,view)=>sum+view.stars,0);
+ return {total,done:views.filter(view=>view.completed).length,stars,maxStars:total*3,ratio:total?views.filter(view=>view.completed).length/total:0};
+}

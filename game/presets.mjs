@@ -75,3 +75,17 @@ export function removePreset(list, id) {
 export function findPreset(list, id) {
   return (Array.isArray(list) ? list : []).find(item => item.id === id) || null;
 }
+
+// Quick display profiles. Kept beside the loadout presets so the menu can offer
+// one-tap quality tiers without hard-coding values in the component.
+export const DISPLAY_PRESETS = Object.freeze([
+  {id: 'performance', name: 'Performance', detail: 'Low resolution, low detail, FPS on.', values: {resolutionScale: .5, postFx: false, bloom: 0, quality: 'low', showFps: true}},
+  {id: 'balanced', name: 'Balanced', detail: 'Standard resolution with a soft glow.', values: {resolutionScale: .85, postFx: true, bloom: .34, quality: 'medium', showFps: false}},
+  {id: 'quality', name: 'Quality', detail: 'High resolution and a strong glow.', values: {resolutionScale: 1.25, postFx: true, bloom: .5, quality: 'high', showFps: false}},
+]);
+
+export function applyDisplayPreset(display, id) {
+  const base = display && typeof display === 'object' ? {...display} : {};
+  const preset = DISPLAY_PRESETS.find(item => item.id === id);
+  return preset ? {...base, ...preset.values} : base;
+}

@@ -90,6 +90,46 @@ export const ENEMY_TYPES = Object.freeze({
   character:'claude', harness:'openclaw',
   artillery:Object.freeze({radius:5.5, damage:36, telegraph:1.2, cooldown:5.5, interval:5.5, minRange:9, maxRange:46}),
  }),
+ // Cover-runner: a fast melee flanker that refuses a straight fight. On a
+ // deterministic cooldown it slips to a nav node that breaks line of sight to
+ // the player, then breaks cover with a short, telegraphed speed/damage burst.
+ lancer: Object.freeze({
+  id:'lancer', name:'Lancer', role:'FLANKER',
+  health:65, armor:10, speedMult:1.3, damageMult:.5,
+  kind:'swarmer', meleeOnly:true, meleeRange:2.6, meleeDamage:14,
+  range:[1.4,3], hold:.05, aggression:1, leash:20,
+  scan:30, scale:.86, color:'#66f2c0', accent:'#063a2a', points:2,
+  character:'mistral', harness:'openclaw',
+  flank:Object.freeze({chargeDistance:18, burst:.8, speedBonus:.55, damageBonus:.3, telegraph:.5, cooldown:6, hold:1.1}),
+ }),
+ // Shield-bearer: a slow, armoured line unit whose formation pulse hands a
+ // temporary front shield to every nearby ally. It anchors a push instead of
+ // dealing damage itself, so breaking the formation matters more than the body.
+ sentinel: Object.freeze({
+  id:'sentinel', name:'Sentinel', role:'SHIELD',
+  health:130, armor:60, speedMult:.6, damageMult:.5,
+  kind:'heavy', range:[4,12], hold:.72, aggression:.55, leash:14,
+  scan:24, scale:1.28, color:'#8aa0ff', accent:'#101a3a', points:4,
+  character:'kimi', harness:'openclaw',
+  phalanx:Object.freeze({radius:6.5, shield:45, cap:90, interval:3.4, telegraph:.55, cooldown:3.4}),
+ }),
+ // Second boss class. Where the Warden stomps, the Harbinger summons: every
+ // few seconds it births a pair of husks from the floor. Each named phase
+ // accelerates the boss and adds bodies to the summon, so ignoring the adds
+ // is a losing line. Phases are pure data for deterministic snapshots.
+ harbinger: Object.freeze({
+  id:'harbinger', name:'HARBINGER', role:'BOSS', boss:true,
+  health:420, armor:70, speedMult:.82, damageMult:.95,
+  kind:'ranged', range:[9,26], hold:.5, aggression:.62, leash:28,
+  scan:34, scale:1.55, color:'#9dff5c', accent:'#1a2a06', points:14,
+  character:'qwen', harness:'openclaw',
+  phases: Object.freeze([
+   Object.freeze({phase:1,name:'HARBINGER',speedMult:1,damageMult:1}),
+   Object.freeze({phase:2,name:'SWARMLORD',speedMult:1.14,damageMult:1.2}),
+   Object.freeze({phase:3,name:'OBLIVION',speedMult:1.3,damageMult:1.45}),
+  ]),
+  summon:Object.freeze({type:'husk',count:2,interval:11,radius:13,telegraph:.7,maxAlive:28}),
+ }),
 });
 // The zone vocabulary shared by the campaign authoring side and the bot brain.
 // `spawn` is soft (a group may break its leash to chase a nearby player), while
@@ -140,6 +180,9 @@ export function applyEnemyFields(actor, typeOrId){
  if(type.leader)actor.npcLeader={...type.leader};
  if(type.shield)actor.npcShield={...type.shield};
  if(type.artillery)actor.npcArtillery={...type.artillery};
+ if(type.flank)actor.npcFlank={...type.flank};
+ if(type.phalanx)actor.npcPhalanx={...type.phalanx};
+ if(type.summon)actor.npcSummon={...type.summon};
  return actor;
 }
 
@@ -147,7 +190,7 @@ export function applyEnemyFields(actor, typeOrId){
 // single-player runtime ticks each frame.
 export const hasEnemyRole = typeOrId => {
  const type=typeof typeOrId==='string'?enemyById(typeOrId):typeOrId;
- return Boolean(type?.support||type?.sapper||type?.leader||type?.shield||type?.artillery);
+ return Boolean(type?.support||type?.sapper||type?.leader||type?.shield||type?.artillery||type?.flank||type?.phalanx||type?.summon);
 };
 
 // Shape-compatible with botBehavior(): start from the normal brain and override
@@ -162,6 +205,7 @@ export function enemyBehavior(actor){
   leash:Number.isFinite(type.leash)?type.leash:base.leash,
   support:Boolean(type.support), sapper:Boolean(type.sapper), leader:Boolean(type.leader),
   shield:Boolean(type.shield), artillery:Boolean(type.artillery),
+  flanker:Boolean(type.flank), phalanx:Boolean(type.phalanx),
   weaponBand:close?'close':type.kind==='heavy'?'mid':'long',
   engageBand:close?[1.2,2.4]:type.artillery?[Math.max(18,type.range[0]-2),Math.min(type.range[1],40)]:type.kind==='heavy'?[6,14]:[14,26],
   spacing:type.artillery?Math.max(base.spacing??2.4,3.4):base.spacing,

@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {Match,floorAt} from './core.mjs';
-import {GAME_MODES,normalizeConfig,DEFAULT_CONFIG} from './config.mjs';
+import {GAME_MODES,DIFFICULTIES,normalizeConfig,DEFAULT_CONFIG} from './config.mjs';
 import {CAMPAIGN_MISSIONS,missionFor} from './campaign-data.mjs';
 import {ENEMY_TYPES,ENEMY_SPEED_VARIANCE,enemyById,applyEnemyFields,enemyBehavior} from './enemy-types.mjs';
 import {initializeSinglePlayer,hordeWaveSize,hordeWaveComposition,hordeWaveModifier,hordeWavePlan,HORDE_WAVE_MODIFIERS,HORDE_UPGRADES,HORDE_TYPES,hordeUpgradeChoices,resupplyHorde,offerHordeUpgrade,selectHordeUpgrade,resumeSinglePlayer,applyCampaignCheckpoint,isSinglePlayerMode,singlePlayerSnapshot,spawnGroup,SINGLEPLAYER_MODES} from './singleplayer.mjs';
@@ -9,7 +9,7 @@ import {initializeSinglePlayer,hordeWaveSize,hordeWaveComposition,hordeWaveModif
 const make=(mode,options={})=>new Match('chatgpt','openclaw',()=>.5,options.mapId||'convoy-line',{mode,botCount:3,humanCount:1,timeLimit:300,...options});
 const firstEnemies=(match)=>match.actors.filter(actor=>actor.isNpc&&actor.team===1);
 const clearGroup=(match,group)=>{for(const id of match.modeState.groups[group]||[]){const actor=match.actors.find(a=>a.id===id);if(actor){actor.health=0;actor.dead=1;}}};
-const autoplay=(missionId,mapId,tint=1e12)=>{const match=make('campaign',{mission:missionId,mapId});match.actors[0].protection=tint;let guard=0;while(!match.over&&guard++<60*60*5){const state=match.modeState,step=state.steps[state.stepIndex];if(step){if(step.marker){match.actors[0].x=step.marker.x;match.actors[0].z=step.marker.z;}if(step.complete?.kind==='group-dead')clearGroup(match,step.complete.group);}match.step(1/60,{inputs:{}});}return match;};
+const autoplay=(missionId,mapId,tint=1e12,difficulty='easy')=>{const match=make('campaign',{mission:missionId,mapId,difficulty});match.actors[0].protection=tint;let guard=0;while(!match.over&&guard++<60*60*5){const state=match.modeState,step=state.steps[state.stepIndex];if(step){if(step.marker){match.actors[0].x=step.marker.x;match.actors[0].z=step.marker.z;}if(step.complete?.kind==='group-dead')clearGroup(match,step.complete.group);}match.step(1/60,{inputs:{}});}return match;};
 
 test('single-player modes are registered and configuration keeps the mission',()=>{
  for(const id of SINGLEPLAYER_MODES)assert.ok(GAME_MODES.some(mode=>mode.id===id),id);
@@ -482,4 +482,87 @@ test('the throne finale resumes from a checkpoint and keeps its finale win',()=>
  assert.equal(applyCampaignCheckpoint(retry,{missionId:order[0],step:1}),false,'a different mission is rejected');
  assert.equal(applyCampaignCheckpoint(retry,{missionId:'throne-siege',step:3}),true);
  assert.equal(retry.modeState.stepIndex,3);
+});
+
+test('ghost-wire and crown-duel terminate with a win on every difficulty',()=>{
+ for(const difficulty of DIFFICULTIES){
+  const ghost=autoplay('ghost-wire','frost-gate',1e12,difficulty.id),ghostSnap=ghost.snapshot().singleplayer;
+  assert.equal(ghost.over,true,`ghost-wire/${difficulty.id} ends`);
+  assert.equal(ghostSnap.winner,0,`ghost-wire/${difficulty.id} wins`);
+  assert.equal(ghostSnap.phase,'won',`ghost-wire/${difficulty.id} phase`);
+  assert.equal(ghostSnap.mission.id,'ghost-wire');
+  assert.equal(ghostSnap.steps.filter(step=>step.done).length,ghostSnap.steps.length,`ghost-wire/${difficulty.id} full chain`);
+  const crown=autoplay('crown-duel','fortress',1e12,difficulty.id),crownSnap=crown.snapshot().singleplayer;
+  assert.equal(crown.over,true,`crown-duel/${difficulty.id} ends`);
+  assert.equal(crownSnap.winner,0,`crown-duel/${difficulty.id} wins`);
+  assert.equal(crownSnap.mission.id,'crown-duel');
+  assert.ok(crownSnap.bossPhaseTotal>=3,`crown-duel/${difficulty.id} authors a multi-phase Harbinger`);
+ }
+});
+
+test('the lancer flanks to cover and bursts after a telegraph',()=>{
+ const match=make('horde',{fragLimit:1,mapId:'colosseum'});
+ const state=match.modeState,player=match.actors[0];
+ player.protection=1e9;player.health=player.maxHealth;
+ const id=spawnGroup(match,state,{type:'lancer',count:1,zone:{x:player.x,z:player.z,r:8,leash:14,kind:'hold'}},{team:1})[0];
+ const lancer=match.actors.find(actor=>actor.id===id);
+ const captured=[],original=match.emit.bind(match);
+ match.emit=(type,data)=>{captured.push({type,...data});original(type,data);};
+ for(let i=0;i<600&&!match.over;i++){player.x=lancer.x+3;player.z=lancer.z;match.updateSinglePlayer(1/60);}
+ assert.ok(captured.some(entry=>entry.type==='enemy-telegraph'&&entry.kind==='flanker'),'the flank is telegraphed');
+ assert.ok(captured.some(entry=>entry.type==='enemy-flank'),'the flank resolves');
+ assert.ok(lancer.flankPoint&&Number.isFinite(lancer.flankPoint.x)&&Number.isFinite(lancer.flankPoint.z),'a real cover point was chosen');
+ assert.ok(lancer.speedMultiplier>1,'the burst speeds the lancer up');
+});
+
+test('the sentinel shields nearby allies in formation',()=>{
+ const match=make('horde',{fragLimit:1,mapId:'colosseum'});
+ const state=match.modeState,player=match.actors[0];player.protection=1e9;
+ const zone={x:player.x+30,z:player.z+30,r:6,leash:12,kind:'hold'};
+ const sentinelId=spawnGroup(match,state,{type:'sentinel',count:1,x:zone.x,z:zone.z,zone},{team:1})[0];
+ const huskId=spawnGroup(match,state,{type:'husk',count:1,x:zone.x,z:zone.z,zone},{team:1})[0];
+ const sentinel=match.actors.find(actor=>actor.id===sentinelId),husk=match.actors.find(actor=>actor.id===huskId);
+ const captured=[],original=match.emit.bind(match);
+ match.emit=(type,data)=>{captured.push({type,...data});original(type,data);};
+ for(let i=0;i<400&&!match.over;i++){husk.x=sentinel.x;husk.z=sentinel.z;husk.y=sentinel.y;match.updateSinglePlayer(1/60);}
+ assert.ok(captured.some(entry=>entry.type==='enemy-telegraph'&&entry.kind==='phalanx'),'the formation pulse is telegraphed');
+ assert.ok(captured.some(entry=>entry.type==='phalanx-shield'&&entry.shielded>=1),'allies inside the wall are shielded');
+ assert.ok(husk.temporaryShield>0,'the ally carries the front shield');
+});
+
+test('the Harbinger summons adds and its phases escalate',()=>{
+ const match=make('horde',{fragLimit:1,mapId:'colosseum'});
+ const state=match.modeState,player=match.actors[0];player.protection=1e9;
+ const id=spawnGroup(match,state,{type:'harbinger',count:1,x:player.x+12,z:player.z,zone:{x:player.x+12,z:player.z,r:8,leash:24,kind:'hold'}},{team:1})[0];
+ const boss=match.actors.find(actor=>actor.id===id);boss.summonTimer=0;
+ const captured=[],original=match.emit.bind(match);
+ match.emit=(type,data)=>{captured.push({type,...data});original(type,data);};
+ const before=match.actors.length;
+ state.bossPhase=2;
+ for(let i=0;i<3;i++)match.updateSinglePlayer(1/60);
+ assert.ok(captured.some(entry=>entry.type==='boss-summon'),'the boss summons');
+ assert.ok(match.actors.length>before,'the summon deploys actors');
+ assert.ok(match.actors.some(actor=>actor.npcType==='husk'),'the summon brings husks');
+ assert.equal(boss.bossPhase,2);
+ assert.ok(boss.speedMultiplier>1&&boss.damageMultiplier>1,'phase two escalates the boss');
+});
+
+test('horde modifiers inject flankers, shield-bearers and a champion boss',()=>{
+ assert.equal(hordeWaveModifier(7).id,'flanked');
+ assert.equal(hordeWaveModifier(8).id,'fortified');
+ assert.equal(hordeWaveModifier(9).id,'champion');
+ assert.ok((hordeWavePlan(7).counts.lancer||0)>=1,'a flanked wave fields a lancer');
+ assert.ok((hordeWavePlan(8).counts.sentinel||0)>=1,'a fortified wave fields a sentinel');
+ assert.equal(hordeWavePlan(9).counts.boss,true,'a champion wave marks a boss');
+ assert.ok((hordeWavePlan(9).counts.harbinger||0)>=1,'a champion wave fields the Harbinger');
+ const match=make('horde',{fragLimit:10,mapId:'colosseum'});match.actors[0].protection=1e9;
+ let guard=0;
+ while(!match.over&&match.modeState.wave<9&&guard++<60*60*3){
+  for(const actor of firstEnemies(match)){actor.health=0;actor.dead=1;}
+  if(match.modeState.phase==='intermission')match.modeState.timer=0;
+  match.step(1/60,{inputs:{}});
+ }
+ assert.ok(match.modeState.wave>=9,'reached the champion wave');
+ assert.ok(match.actors.some(actor=>actor.isBoss&&actor.npcType==='harbinger'),'the champion deploys a Harbinger');
+ assert.equal(match.modeState.waveModifier.id,'champion');
 });

@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {CAMPAIGN_MISSIONS} from './campaign-data.mjs';
-import {CAMPAIGN_STORAGE_KEY,CAMPAIGN_PROGRESS_VERSION,defaultCampaignProgress,normalizeCampaignProgress,isMissionUnlocked,firstIncompleteMission,nextMissionId,missionIndex,recordMission,setCheckpoint,checkpointFor,clearCheckpoint} from './campaign-progress.mjs';
+import {CAMPAIGN_MISSIONS,missionFor} from './campaign-data.mjs';
+import {CAMPAIGN_STORAGE_KEY,CAMPAIGN_PROGRESS_VERSION,defaultCampaignProgress,normalizeCampaignProgress,isMissionUnlocked,firstIncompleteMission,nextMissionId,missionIndex,recordMission,setCheckpoint,checkpointFor,clearCheckpoint,campaignMissionPar,missionEnemyBudget,missionScoreTarget,missionStars,missionMedal,missionReward,missionProgress,campaignStarTotal,campaignMedalCounts,campaignRewardTotal} from './campaign-progress.mjs';
 
 test('default and normalized campaign progress are stable',()=>{
  const base=defaultCampaignProgress();
@@ -66,4 +66,55 @@ test('checkpointFor resolves a mission resume step and clears cleanly',()=>{
  assert.equal(cleared.checkpoint,null);
  assert.equal(checkpointFor(cleared,order[0]),null);
  assert.equal(clearCheckpoint(cleared),cleared,'clearing with no checkpoint is a no-op');
+});
+
+test('mission thresholds are deterministic functions of the authored mission',()=>{
+ for(const mission of CAMPAIGN_MISSIONS){
+  const par=campaignMissionPar(mission),budget=missionEnemyBudget(mission),target=missionScoreTarget(mission);
+  assert.ok(Number.isFinite(par)&&par>0,`${mission.id} par`);
+  assert.ok(Number.isInteger(budget)&&budget>0,`${mission.id} has authored enemies`);
+  assert.ok(target>=1&&target<=budget,`${mission.id} score target sits inside its budget`);
+  assert.equal(missionScoreTarget(mission),missionScoreTarget(mission),'stable across calls');
+ }
+ assert.equal(campaignMissionPar(undefined),120,'an unknown mission has a floor par');
+});
+
+test('stars and medals resolve from time, score and completion thresholds',()=>{
+ assert.equal(missionStars(missionFor('convoy-run'),null),0,'no entry means no stars');
+ assert.equal(missionMedal(missionFor('convoy-run'),null),null);
+ assert.equal(missionReward(missionFor('convoy-run'),null),null);
+ assert.equal(missionProgress(defaultCampaignProgress(),'nope'),null);
+ const mission=missionFor('convoy-run'),par=campaignMissionPar(mission),target=missionScoreTarget(mission);
+ // Completion alone is a bronze.
+ assert.equal(missionStars(mission,{bestTime:par*3,bestScore:0}),1);
+ assert.equal(missionMedal(mission,{bestTime:par*3,bestScore:0}),'BRONZE');
+ // A strong result on either stat earns silver.
+ assert.equal(missionStars(mission,{bestTime:par*1.2,bestScore:0}),2,'fast time alone is silver');
+ assert.equal(missionStars(mission,{bestTime:par*3,bestScore:target*2}),2,'score alone is silver');
+ // Gold needs both.
+ assert.equal(missionStars(mission,{bestTime:par*.5,bestScore:target}),3);
+ assert.equal(missionMedal(mission,{bestTime:par*.5,bestScore:target}),'GOLD');
+ const reward=missionReward(mission,{bestTime:par*.5,bestScore:target});
+ assert.equal(reward.missionId,mission.id);
+ assert.equal(reward.stars,3);
+ assert.equal(reward.medal,'GOLD');
+ assert.ok(reward.xp>0&&reward.emblem.endsWith('-3'));
+});
+
+test('campaign totals aggregate stars, medals and rewards from stored results',()=>{
+ const order=CAMPAIGN_MISSIONS.map(mission=>mission.id);
+ assert.equal(campaignStarTotal(defaultCampaignProgress()),0);
+ assert.deepEqual(campaignMedalCounts(defaultCampaignProgress()),{GOLD:0,SILVER:0,BRONZE:0});
+ assert.equal(campaignRewardTotal(defaultCampaignProgress()),0);
+ let progress=defaultCampaignProgress();
+ for(const id of order)progress=recordMission(progress,{id,won:true,time:campaignMissionPar(missionFor(id))*.5,score:missionScoreTarget(missionFor(id))});
+ assert.equal(campaignStarTotal(progress),order.length*3);
+ assert.deepEqual(campaignMedalCounts(progress),{GOLD:order.length,SILVER:0,BRONZE:0});
+ assert.ok(campaignRewardTotal(progress)>0);
+ const view=missionProgress(progress,order[0]);
+ assert.equal(view.completed,true);
+ assert.equal(view.stars,3);
+ assert.equal(view.medal,'GOLD');
+ assert.equal(view.scoreTarget,missionScoreTarget(missionFor(order[0])));
+ assert.ok(view.reward.xp>0);
 });

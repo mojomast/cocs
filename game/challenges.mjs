@@ -3,8 +3,10 @@
 // identical on every device for a given day seed.
 export const CHALLENGE_VERSION = 1;
 export const CHALLENGE_COUNT = 3;
+export const WEEKLY_CHALLENGE_COUNT = 3;
 export const CHALLENGE_STORAGE_KEY = 'token-arena-challenges';
 export const MS_PER_DAY = 86400000;
+export const MS_PER_WEEK = MS_PER_DAY * 7;
 
 // The rotating pool. `metric` names a counter derived from a match result; the
 // optional `mode`/`team` gates decide which matches count toward the objective.
@@ -21,6 +23,20 @@ export const CHALLENGE_POOL = Object.freeze([
   {id: 'win-objective', metric: 'wins', team: true, target: 2, reward: 150, label: 'Win {target} objective rounds'},
   {id: 'capture-zones', metric: 'objectiveCaptures', target: 2, reward: 150, label: 'Capture {target} control points'},
   {id: 'score-kills', metric: 'kills', target: 40, reward: 170, label: 'Score {target} eliminations'},
+]);
+
+// The weekly rotation runs longer, pays more and leans on the rarer counters
+// (flawless rounds, big objective holds) so it does not read like a louder
+// daily. Selected from its own seed so the two rotations never move in step.
+export const WEEKLY_POOL = Object.freeze([
+  {id: 'week-eliminations', metric: 'kills', target: 60, reward: 320, label: 'Score {target} eliminations this week'},
+  {id: 'week-wins', metric: 'wins', target: 6, reward: 340, label: 'Win {target} matches this week'},
+  {id: 'week-captures', metric: 'captures', mode: 'ctf', target: 6, reward: 360, label: 'Capture {target} enemy flags this week'},
+  {id: 'week-objective', metric: 'objectiveTime', target: 180, reward: 300, label: 'Hold objectives for {target} seconds this week'},
+  {id: 'week-matches', metric: 'matches', target: 12, reward: 280, label: 'Play {target} matches this week'},
+  {id: 'week-flawless', metric: 'flawlessWins', target: 2, reward: 400, label: 'Win {target} matches without dying'},
+  {id: 'week-streak', metric: 'bestStreak', target: 8, reward: 360, label: 'Reach a {target} killstreak this week'},
+  {id: 'week-zones', metric: 'objectiveCaptures', target: 5, reward: 340, label: 'Capture {target} control points this week'},
 ]);
 
 function hashSeed(value) {
@@ -63,17 +79,38 @@ function materialize(def) {
   return {...def, label: String(def.label).replace('{target}', String(def.target))};
 }
 
-export function dailyChallenges(daySeed = currentDaySeed()) {
-  const seed = normalizeSeed(daySeed);
+function shufflePool(pool, seed, count) {
   const random = mulberry32(seed || 1);
-  const pool = CHALLENGE_POOL.slice();
-  for (let i = pool.length - 1; i > 0; i--) {
+  const list = pool.slice();
+  for (let i = list.length - 1; i > 0; i--) {
     const j = Math.floor(random() * (i + 1));
-    const swap = pool[i];
-    pool[i] = pool[j];
-    pool[j] = swap;
+    const swap = list[i];
+    list[i] = list[j];
+    list[j] = swap;
   }
-  return pool.slice(0, CHALLENGE_COUNT).map(materialize);
+  return list.slice(0, count).map(materialize);
+}
+
+export function dailyChallenges(daySeed = currentDaySeed()) {
+  return shufflePool(CHALLENGE_POOL, normalizeSeed(daySeed), CHALLENGE_COUNT);
+}
+
+// Weeks are anchored to Monday 2024-01-01 UTC so every device agrees on the
+// rotation boundary regardless of timezone.
+const WEEK_ANCHOR = Date.UTC(2024, 0, 1);
+export function weekSeedFor(date = Date.now()) {
+  const time = date instanceof Date ? date.getTime() : Number(date);
+  if (!Number.isFinite(time)) return 0;
+  return Math.floor((time - WEEK_ANCHOR) / MS_PER_WEEK);
+}
+
+export function currentWeekSeed(now = Date.now()) {
+  return weekSeedFor(now);
+}
+
+export function weeklyChallenges(weekSeed = currentWeekSeed()) {
+  const seed = (normalizeSeed(weekSeed) ^ 0x9e3779b9) >>> 0;
+  return shufflePool(WEEKLY_POOL, seed, WEEKLY_CHALLENGE_COUNT);
 }
 
 function nonNegative(value) {
@@ -81,27 +118,38 @@ function nonNegative(value) {
   return Number.isFinite(n) ? Math.max(0, Math.floor(n)) : 0;
 }
 
-export function normalizeChallengeState(value, daySeed) {
+export function normalizeChallengeState(value, daySeed, weekSeed) {
   const source = value && typeof value === 'object' ? value : {};
   const requested = daySeed === undefined ? (Number.isFinite(Number(source.daySeed)) ? source.daySeed : currentDaySeed()) : daySeed;
   const active = normalizeSeed(requested);
   const sameDay = Number.isFinite(Number(source.daySeed)) && normalizeSeed(source.daySeed) === active;
-  const progress = {}, done = {};
+  const requestedWeek = weekSeed === undefined ? (Number.isFinite(Number(source.weekSeed)) ? source.weekSeed : currentWeekSeed()) : weekSeed;
+  const activeWeek = normalizeSeed(requestedWeek);
+  const sameWeek = Number.isFinite(Number(source.weekSeed)) && normalizeSeed(source.weekSeed) === activeWeek;
+  const progress = {}, done = {}, weeklyProgress = {}, weeklyDone = {};
   const sourceProgress = sameDay && source.progress && typeof source.progress === 'object' ? source.progress : {};
   const sourceDone = sameDay && source.done && typeof source.done === 'object' ? source.done : {};
+  const sourceWeeklyProgress = sameWeek && source.weeklyProgress && typeof source.weeklyProgress === 'object' ? source.weeklyProgress : {};
+  const sourceWeeklyDone = sameWeek && source.weeklyDone && typeof source.weeklyDone === 'object' ? source.weeklyDone : {};
   for (const def of dailyChallenges(active)) {
     progress[def.id] = nonNegative(sourceProgress[def.id]);
     done[def.id] = sourceDone[def.id] === true;
   }
-  return {version: CHALLENGE_VERSION, daySeed: active, progress, done};
+  for (const def of weeklyChallenges(activeWeek)) {
+    weeklyProgress[def.id] = nonNegative(sourceWeeklyProgress[def.id]);
+    weeklyDone[def.id] = sourceWeeklyDone[def.id] === true;
+  }
+  return {version: CHALLENGE_VERSION, daySeed: active, weekSeed: activeWeek, progress, done, weeklyProgress, weeklyDone};
 }
 
 export function metricsFor(result = {}) {
   const actor = result?.actor || {};
   const stats = actor.scoreStats || {};
+  const win = result?.win === true;
   return {
     matches: 1,
-    wins: result?.win === true ? 1 : 0,
+    wins: win ? 1 : 0,
+    flawlessWins: win && nonNegative(actor.deaths) === 0 ? 1 : 0,
     kills: nonNegative(actor.frags),
     deaths: nonNegative(actor.deaths),
     captures: nonNegative(stats.captures),
@@ -118,17 +166,11 @@ export function challengeMatches(def, result = {}) {
   return true;
 }
 
-// Advance the day's counters by one match result and grant the bonus XP exactly
-// once per objective. Safe to call on every match end: completed objectives are
-// marked done and never pay out again.
-export function applyMatch(state, result = {}) {
-  const base = normalizeChallengeState(state);
+function advanceGroup(result, defs, progress, done) {
   const metrics = metricsFor(result);
-  const progress = {...base.progress};
-  const done = {...base.done};
   let gained = 0;
   const completed = [];
-  for (const def of dailyChallenges(base.daySeed)) {
+  for (const def of defs) {
     if (!challengeMatches(def, result)) continue;
     const current = nonNegative(progress[def.id]);
     const delta = nonNegative(metrics[def.metric]);
@@ -139,13 +181,48 @@ export function applyMatch(state, result = {}) {
       completed.push(def);
     }
   }
-  return {state: {version: CHALLENGE_VERSION, daySeed: base.daySeed, progress, done}, gained, completed, completedIds: completed.map(def => def.id)};
+  return {gained, completed};
 }
 
-export function challengeStatus(state) {
-  const normalized = normalizeChallengeState(state);
-  return dailyChallenges(normalized.daySeed).map(def => {
-    const progress = nonNegative(normalized.progress[def.id]);
+// Advance the day's counters by one match result and grant the bonus XP exactly
+// once per objective. Safe to call on every match end: completed objectives are
+// marked done and never pay out again.
+export function applyMatch(state, result = {}) {
+  const base = normalizeChallengeState(state);
+  const progress = {...base.progress};
+  const done = {...base.done};
+  const {gained, completed} = advanceGroup(result, dailyChallenges(base.daySeed), progress, done);
+  return {state: {...base, progress, done}, gained, completed, completedIds: completed.map(def => def.id)};
+}
+
+// The weekly counterpart. Kept separate from applyMatch so existing callers
+// (and tests) that only speak daily objectives keep their exact behaviour.
+export function applyWeeklyMatch(state, result = {}) {
+  const base = normalizeChallengeState(state);
+  const weeklyProgress = {...base.weeklyProgress};
+  const weeklyDone = {...base.weeklyDone};
+  const {gained, completed} = advanceGroup(result, weeklyChallenges(base.weekSeed), weeklyProgress, weeklyDone);
+  return {state: {...base, weeklyProgress, weeklyDone}, gained, completed, completedIds: completed.map(def => def.id)};
+}
+
+// One match end advances both rotations and reports the combined payout.
+export function applyMatchAll(state, result = {}) {
+  const daily = applyMatch(state, result);
+  const weekly = applyWeeklyMatch(daily.state, result);
+  const completed = [...daily.completed, ...weekly.completed];
+  return {
+    state: weekly.state,
+    gained: daily.gained + weekly.gained,
+    completed,
+    completedIds: completed.map(def => def.id),
+    daily,
+    weekly,
+  };
+}
+
+function statusRows(normalized, defs, progress, done) {
+  return defs.map(def => {
+    const value = nonNegative(progress[def.id]);
     return {
       id: def.id,
       label: def.label,
@@ -154,12 +231,26 @@ export function challengeStatus(state) {
       reward: def.reward,
       mode: def.mode ?? null,
       team: def.team === true,
-      progress: Math.min(progress, def.target),
-      done: normalized.done[def.id] === true,
+      progress: Math.min(value, def.target),
+      done: done[def.id] === true,
     };
   });
 }
 
+export function challengeStatus(state) {
+  const normalized = normalizeChallengeState(state);
+  return statusRows(normalized, dailyChallenges(normalized.daySeed), normalized.progress, normalized.done);
+}
+
+export function weeklyStatus(state) {
+  const normalized = normalizeChallengeState(state);
+  return statusRows(normalized, weeklyChallenges(normalized.weekSeed), normalized.weeklyProgress, normalized.weeklyDone);
+}
+
 export function completedChallenges(state) {
   return challengeStatus(state).filter(challenge => challenge.done);
+}
+
+export function completedWeeklyChallenges(state) {
+  return weeklyStatus(state).filter(challenge => challenge.done);
 }

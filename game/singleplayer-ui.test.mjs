@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import {createRequire} from 'node:module';
 import vm from 'node:vm';
 import {build} from 'esbuild';
-import {singlePlayerDisplay,singlePlayerResult,singlePlayerSummary,missionBrief} from './singleplayer-ui.mjs';
+import {singlePlayerDisplay,singlePlayerResult,singlePlayerSummary,missionBrief,campaignMissionPar,campaignMissionStars,campaignMissionView,campaignProgressSummary} from './singleplayer-ui.mjs';
 import {HELP_SECTIONS} from './onboarding.mjs';
 
 // Render a client component to static markup so its aria wiring is asserted the
@@ -176,6 +176,95 @@ test('campaign display surfaces waypoint distance, steps, story and boss',()=>{
   assert.match(html,/Team modes with a twist\./);
   assert.match(html,/<ul class="help-list">/);
   assert.match(html,/<li>JUGGERNAUT · hold the crown and bank points\.<\/li>/);
+ });
+
+ test('campaign mission select derives stars, locks and best results',()=>{
+  const missions=[
+   {id:'a',name:'One',chapter:'ACT I',tag:'ESCORT',brief:'first',steps:[{id:'s1'},{id:'s2'}]},
+   {id:'b',name:'Two',chapter:'ACT I',tag:'ASSAULT',brief:'second',steps:[{id:'s1'}]},
+   {id:'c',name:'Three',chapter:'ACT II',tag:'FINALE',brief:'third',steps:[]},
+  ];
+  const progress={completed:{a:{wins:1,attempts:1,bestTime:100,bestScore:5,at:1}}};
+  const parA=campaignMissionPar(missions[0]);
+  assert.equal(parA,120+2*45);
+  assert.equal(campaignMissionStars(progress.completed.a,parA),3,'beating par is three stars');
+  assert.equal(campaignMissionStars({bestTime:parA*1.4},parA),2);
+  assert.equal(campaignMissionStars({bestTime:parA*9},parA),1);
+  assert.equal(campaignMissionStars(null,parA),0);
+  const view=campaignMissionView(missions,progress,'b');
+  assert.deepEqual(view.map(v=>v.id),['a','b','c']);
+  assert.equal(view[0].unlocked,true);
+  assert.equal(view[1].unlocked,true,'completing the prior mission unlocks the next');
+  assert.equal(view[2].unlocked,false,'the finale stays locked until mission two is done');
+  assert.equal(view[1].selected,true);
+  assert.equal(view[0].stars,3);
+  assert.equal(view[1].completed,false);
+  assert.equal(view[1].stars,0);
+  assert.equal(view[2].completed,false);
+  assert.deepEqual(campaignMissionView([],{},null),[]);
+  const summary=campaignProgressSummary(missions,progress);
+  assert.equal(summary.total,3);
+  assert.equal(summary.done,1);
+  assert.equal(summary.stars,3);
+  assert.equal(summary.maxStars,9);
+  assert.equal(summary.ratio,1/3);
+  assert.deepEqual(campaignProgressSummary([],{}),{total:0,done:0,stars:0,maxStars:0,ratio:0});
+ });
+
+ test('campaign mission select renders locked and replay affordances',async()=>{
+  const ui={
+   singleOpen:true,setSingleOpen:()=>{},singleSub:'campaign',setSingleSub:()=>{},singleMission:'b',setSingleMission:()=>{},
+   config:{difficulty:'normal'},setConfig:()=>{},mapId:'convoy-line',setMapId:()=>{},selectedMap:{name:'Convoy Line',tag:'ESCORT'},
+   startSinglePlayer:()=>{},startCampaignMission:()=>{},mapsForMode:()=>[],missionFor:(id)=>id==='b'?{id:'b',name:'Two',mapId:'titan-valley',chapter:'ACT I',tag:'ASSAULT',brief:'second',intro:{speaker:'DISPATCH',lines:['go']},steps:[{id:'s1',text:'Do the thing'}]}:null,
+   isMissionUnlocked:()=>true,getMap:()=>({name:'Titan Valley'}),legacyMaps:false,campaign:{},DIFFICULTIES:[{id:'normal',name:'Normal'}],ready:true,error:'',singleRef:{current:null},
+   campaignMissions:[
+    {id:'a',name:'Mission One',chapter:'ACT I',tag:'ESCORT',brief:'first',unlocked:true,completed:true,stars:3,bestTime:100,bestScore:5,attempts:1,parTime:240,selected:false},
+    {id:'b',name:'Mission Two',chapter:'ACT I',tag:'ASSAULT',brief:'second',unlocked:true,completed:false,stars:0,bestTime:null,bestScore:null,attempts:0,parTime:165,selected:true},
+    {id:'c',name:'Mission Three',chapter:'ACT II',tag:'FINALE',brief:'third',unlocked:false,completed:false,stars:0,bestTime:null,bestScore:null,attempts:0,parTime:120,selected:false},
+   ],
+  };
+  const html=await renderSsr('app/ui/screens/SetupModals.tsx','SinglePlayerModal',`{ui:{...${JSON.stringify(ui)},missionFor:(id)=>({id,name:'Mission Two',mapId:'titan-valley',chapter:'ACT I',tag:'ASSAULT',brief:'second',parTime:165,intro:{speaker:'DISPATCH',lines:['go']},steps:[{id:'s1',text:'Do the thing'}]})}}`);
+  assert.match(html,/Campaign mission select/);
+  assert.match(html,/REPLAY/);
+  assert.match(html,/aria-label="Mission One: 3 of 3 stars"/);
+  assert.match(html,/aria-label="Mission Three: locked"/);
+  assert.match(html,/ACT II/);
+ });
+
+ test('results medals render as an accessible list with per-medal detail',async()=>{
+  const awards=[
+   {id:'mvp',label:'MATCH MVP',name:'ChatGPT',value:'12 FRAGS'},
+   {id:'captures',label:'MOST CAPTURES',name:'ChatGPT',value:'3 CAP'},
+   {id:'accuracy',label:'BEST ACCURACY',name:'Claude',value:'90%'},
+   {id:'flawless',label:'UNTOUCHABLE · NO DEATHS',name:'Claude',value:'0 DEATHS'},
+  ];
+  const html=await renderSsr('app/ui/screens/ResultModals.tsx','MedalStrip',`{awards:${JSON.stringify(awards)},player:{name:'ChatGPT'}}`);
+  assert.match(html,/role="list" aria-label="Match medals"/);
+  assert.match(html,/role="listitem" aria-label="MOST CAPTURES: ChatGPT, 3 CAP"/);
+  assert.match(html,/role="listitem" aria-label="BEST ACCURACY: Claude, 90%"/);
+  assert.match(html,/UNTOUCHABLE · NO DEATHS/);
+  assert.match(html,/medal--flawless/);
+  assert.match(html,/class="medal medal--mvp you"/);
+  const empty=await renderSsr('app/ui/screens/ResultModals.tsx','MedalStrip',`{awards:[],player:null}`);
+  assert.match(empty,/collect medals/);
+ });
+
+ test('arsenal inspector exposes weapons, operators, attachments and cosmetics',async()=>{
+  const ui={settings:true,setSettings:()=>{},prefs:null,profile:{level:5},weaponRangeLabel:(w)=>`MID · ${w.range}m`,
+   WEAPONS:[{name:'Pulse Rifle',short:'PULSE',damage:11,interval:.09,range:70,color:'#70ffe6',description:'Starter.'}],
+   CHARACTERS:[{id:'chatgpt',name:'ChatGPT',tag:'PLEASER',color:'#57e6cd',detail:'Helps.',stats:{health:100,armor:0,speed:8}}],
+   ATTACHMENTS:[{id:'holo-sight',slot:'optic',name:'Holo Sight',description:'Zoom.',level:2,weapons:[0,1]}],
+   ATTACHMENT_SLOTS:[{id:'optic',name:'Optic'}],GEAR:[{id:'scope',slot:'primary',name:'Scope',description:'x',level:2,modifiers:{}}],GEAR_SLOTS:[{id:'primary',name:'Weapon Kit'}],
+   WEAPON_FINISHES:[{id:'finish-ion',name:'Ion',kind:'finish',level:10,description:'Shiny.'}],
+   CROSSHAIR_STYLES:[{id:'cross',name:'Cross',level:1,description:'Plain.'}],
+   REPO_URL:'https://github.com/mojomast/tokenarena',helpSections:[],settingsTab:'arsenal',setSettingsTab:()=>{}};
+  const html=await renderSsr('app/ui/screens/SettingsDialog.tsx','SettingsDialog',`{ui:{...${JSON.stringify(ui)},weaponRangeLabel:(w)=>\`MID · \${w.range}m\`}}`);
+  assert.match(html,/OPERATOR LEVEL 5/);
+  assert.match(html,/Pulse Rifle/);
+  assert.match(html,/MID · 70m/);
+  assert.match(html,/role="tablist" aria-label="Settings sections"/);
+  assert.match(html,/role="tablist" aria-label="Arsenal category"/);
+  assert.match(html,/1 OPERATORS · 1 WEAPONS/);
  });
 
  test('spectator board groups teams, shows lives and marks the followed target',async()=>{

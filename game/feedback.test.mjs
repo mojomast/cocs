@@ -1,7 +1,8 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import * as T from 'three';
-import {WeaponFeedback,EffectPool,SynthAudio,AmbientFX} from './feedback.mjs';
+import {WeaponFeedback,EffectPool,SynthAudio,AmbientFX,WeatherFX} from './feedback.mjs';
+import {weatherPreset} from './environment.mjs';
 
 const player={id:7,weapon:0,x:0,z:0,yaw:0,grounded:true,vx:0,vy:0,vz:0};
 test('weapon kicks are distinct, bounded, pellet-deduplicated and recover exponentially',()=>{
@@ -164,6 +165,55 @@ test('kill confirmations layer into the death voice and follow the spectated act
  assert.equal(confirms.length,1,'the watched actor scoring a kill adds one confirmation');
  audio.event({type:'death',actor:7,source:7,pos:{x:0,z:0}},spectator);
  assert.equal(confirms.length,1,'a local death never confirms a kill');
+});
+
+test('dynamic combat intensity starts a music layer, ducks the bed and disposes cleanly',()=>{
+ const {audio,nodes}=audioFixture2();
+ audio._bed(true);
+ assert.ok(audio.bed,'the ambience bed starts');
+ const bedGain=audio.bed.g,bedSub=audio.bed.og;
+ assert.equal(audio.setIntensity(1.4),1,'intensity clamps to one');
+ assert.ok(audio.music,'a loud fight starts the music layer');
+ assert.ok(audio.bedScale>1,'the bed ducks up toward full level in a fight');
+ audio.setIntensity(0);
+ assert.ok(audio.bedScale<1,'the bed eases back down when the fight ends');
+ audio.tone(100);assert.ok(audio.voices.size>0,'ordinary voices still play');
+ for(let i=0;i<100;i++)audio.tone(100);
+ assert.equal(audio.voices.size,30,'the shared voice cap still holds');
+ audio.dispose();
+ assert.equal(audio.music,null,'dispose tears the music layer down');
+ assert.equal(audio.ctx,null);
+});
+
+test('the announcer cue is opt-in, returns the cue id and respects mute and the voice cap',()=>{
+ const {audio}=audioFixture2();
+ assert.equal(audio.announcer,false);
+ assert.equal(audio.announcerCue('goal').played,false,'a disabled announcer never spends a voice');
+ assert.equal(audio.announcerCue('not-a-cue'),null,'an unknown event has no cue');
+ assert.equal(audio.announcerCue('capture').played,false,'an unknown-but-known event is still gated when off');
+ assert.equal(audio.setAnnouncer(true),true);
+ const played=audio.announcerCue('goal');
+ assert.equal(played.cue,'goal');
+ assert.equal(played.played,true);
+ assert.equal(audio.lastCue,'goal');
+ assert.ok(audio.voices.size>=1,'an enabled announcer spends a voice');
+ audio.muted=true;
+ assert.equal(audio.announcerCue('victory').played,false,'muting silences the announcer');
+ audio.dispose();
+});
+
+test('weather precipitation reuses pooled slots, respects the cap and gates CPU/reduced motion',()=>{
+ const pool=new EffectPool(new T.Scene(),32),fx=new WeatherFX(pool,{seed:1,preset:weatherPreset('storm'),cap:6}),origin={x:0,y:0,z:0};
+ assert.equal(fx.update(.05,origin,{software:true}),0,'the CPU renderer emits no precipitation');
+ assert.equal(fx.update(.05,origin,{reduced:true}),0,'reduced motion emits no precipitation');
+ assert.equal(fx.update(.05,null,{}),0,'no origin emits nothing');
+ const spawned=fx.update(.05,origin,{quality:1});
+ assert.ok(spawned>0&&spawned<=6,'the per-frame cap bounds the emitter');
+ assert.ok(pool.slots.some(slot=>slot.active),'precipitation lands in the shared pool');
+ assert.equal(fx.update(.05,origin,{quality:0}),0,'a zero quality scale suppresses precipitation');
+ fx.setPreset(weatherPreset('clear'));
+ assert.equal(fx.update(.05,origin,{quality:1}),0,'clear weather spawns nothing');
+ pool.dispose();
 });
 
 test('ambient bed mood is remembered before start and eases the running nodes',()=>{

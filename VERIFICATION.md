@@ -1,5 +1,31 @@
 # COCS verification report
 
+## Release 4.2 - Campaign, weather, history and challenge expansion
+
+**Campaign / PvE**
+- Campaign now has five missions. `ghost-wire` is a stealth infiltration on
+  Frost Gate; `crown-duel` is a Harbinger boss duel on Fortress. Both add
+  checkpoints, barks, multi-phase encounters and distinct win conditions.
+- Horde adds lancer flankers, sentinel shield formations and the three-phase
+  Harbinger summoner, plus new flanked/fortified/champion wave modifiers.
+- Campaign progress now derives mission stars, medals, par scores and aggregate
+  rewards; checkpoint helpers correctly return the first uncompleted mission.
+
+**World / presentation**
+- Deterministic time-of-day and biome weather (clear, overcast, rain, snow, ash
+  and storms) drive sky/fog/light tint, pooled precipitation and ambience.
+- Combat intensity drives a bounded music layer, while biome ambience controls
+  the ambient bed and optional announcer cues.
+
+**Meta / interface**
+- Local match history and per-mode personal leaderboards, weekly challenges,
+  campaign mission selection with stars/bests, expanded medals, an Arsenal
+  inspector and persisted quality tiers (`auto`/`low`/`medium`/`high`).
+- The display preset buttons now select real persisted LOD tiers.
+
+Verification: game **1157/1157**, server **127/127**, `tests/` **5/5**, `tsc`
+clean, lint 0 errors, build clean.
+
 ## Release 4.1 - Feature expansion and three refinement passes
 
 Four feature agents plus three refinement passes (all with focused test gates).

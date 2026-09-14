@@ -229,6 +229,28 @@ test('matchAwards stays silent for solo practice and malformed input', () => {
   assert.deepEqual(matchAwards(null), []);
 });
 
+test('matchAwards derives medals for captures, accuracy, damage and flawless rounds', () => {
+  const hud = {actors:[
+    awardActor(0, 'ChatGPT', 8, 5, {captures:3, shots:40, hits:20, damage:1800}),
+    awardActor(1, 'Claude', 6, 0, {shots:50, hits:45, damage:1250}),
+    awardActor(2, 'Grok', 2, 9, {shots:10, hits:2, damage:300}),
+  ]};
+  const by = id => matchAwards(hud).find(a => a.id === id);
+  assert.equal(by('captures').name, 'ChatGPT');
+  assert.equal(by('captures').value, '3 CAP');
+  assert.equal(by('accuracy').name, 'Claude');
+  assert.equal(by('accuracy').value, '90%');
+  assert.equal(by('damage').name, 'ChatGPT');
+  assert.equal(by('damage').value, '1800');
+  assert.equal(by('flawless').name, 'Claude');
+  assert.equal(by('flawless').value, '0 DEATHS');
+  assert.equal(by('flawless').label, 'UNTOUCHABLE · NO DEATHS');
+  // A quieter lobby omits medals that have no valid owner.
+  const bare = matchAwards({actors:[awardActor(0, 'A', 4, 1), awardActor(1, 'B', 3, 2)]});
+  assert.equal(bare.some(a => a.id === 'accuracy'), false);
+  assert.equal(bare.some(a => a.id === 'flawless'), false);
+});
+
 test('weapon range labels expose band, effective range and falloff', () => {
   assert.equal(weaponRangeLabel({range: 24, falloff: {start: 6, end: 24, min: .4}}), 'SHORT · 6–24m · 40%');
   assert.equal(weaponRangeLabel({range: 90}), 'LONG · 90m');

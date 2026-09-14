@@ -348,3 +348,86 @@
   .help-sections{gap:var(--ui-gap-5)}
   .help-list{font-size:16px;gap:10px}
 }
+
+/* ==========================================================================
+   Pass 4 — match history, local leaderboard, weekly challenges, campaign
+   mission select, result medals, arsenal inspector and display presets.
+   Same tokens as the rest of the system, with mobile / 4K / a11y coverage.
+   ========================================================================== */
+.history-list,.leaderboard{display:grid;gap:var(--ui-gap-2)}
+.history-row,.leaderboard-row{display:flex;align-items:center;justify-content:space-between;gap:var(--ui-gap-3);
+  padding:10px 12px;border:1px solid var(--ui-line);border-radius:var(--radius-md);background:rgba(10,22,26,.45)}
+.history-row__stats,.leaderboard-row__stats{justify-content:flex-end;flex:none}
+.history-row .card-name small,.leaderboard-row .card-name small,.mission-row .card-name small{color:var(--text-mute)}
+.leaderboard-row .label{font-variant-numeric:tabular-nums}
+
+/* Campaign mission select. */
+.mission-chapters{display:grid;gap:var(--ui-gap-3);margin-top:10px}
+.mission-chapter-group{display:grid;gap:var(--ui-gap-2)}
+.mission-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(min(100%,220px),1fr));gap:var(--ui-gap-2)}
+.mission-card{display:flex;align-items:stretch;gap:6px;min-width:0}
+.mission-select{flex:1;min-width:0;display:grid;gap:5px;text-align:left;padding:12px 14px;border:1px solid var(--ui-line);
+  border-radius:var(--radius-md);background:rgba(12,26,30,.55);color:var(--text);cursor:pointer;transition:border-color .16s,background .16s}
+.mission-select:hover:not(:disabled){border-color:var(--accent-soft)}
+.mission-select:focus-visible{outline:2px solid var(--accent);outline-offset:1px}
+.mission-select:disabled{cursor:not-allowed;opacity:.55}
+.mission-card.selected .mission-select{border-color:var(--accent);background:rgba(30,60,52,.55);box-shadow:0 0 0 1px var(--accent) inset}
+.mission-card.locked .mission-select{border-style:dashed}
+.mission-chapter{font:10px var(--font-mono);letter-spacing:.14em;text-transform:uppercase;color:var(--text-mute)}
+.mission-select strong{font-size:15px}
+.mission-select small{font-size:12px;line-height:1.45;color:var(--text-dim)}
+.mission-stars{font-size:15px;letter-spacing:2px;color:var(--warn);white-space:nowrap}
+.mission-row .mission-stars{color:var(--warn)}
+
+/* Results medals. */
+.medal-strip{display:grid;grid-template-columns:repeat(auto-fill,minmax(min(100%,220px),1fr));gap:var(--ui-gap-2)}
+.medal{display:flex;align-items:center;gap:10px;padding:11px 13px;border:1px solid var(--ui-line);
+  border-left:3px solid var(--accent);border-radius:var(--radius-md);background:rgba(13,31,28,.72)}
+.medal.you{background:rgba(20,48,42,.8);border-left-color:#b6ff9d}
+.medal-icon{display:grid;place-items:center;width:30px;height:30px;flex:none;border-radius:50%;
+  background:rgba(131,244,213,.12);color:var(--accent)}
+.medal-main{display:grid;min-width:0;flex:1}
+.medal-main small{font:10px var(--font-mono);letter-spacing:.14em;text-transform:uppercase;color:var(--text-mute)}
+.medal-main strong{font-size:14px;color:#e8fff6}
+.medal em{font:12px var(--font-mono);font-style:normal;color:#ffd9a0;letter-spacing:.04em;white-space:nowrap}
+.medal--flawless{border-left-color:#9ad9b2}
+.medal--accuracy{border-left-color:#8fd0ff}
+.medal--captures{border-left-color:#ffd166}
+.medal--damage{border-left-color:#ff9f6b}
+.medal--deaths{border-left-color:var(--danger)}
+
+/* Arsenal inspector. */
+.arsenal-summary{padding:10px 12px;border:1px solid var(--ui-line);border-radius:var(--radius-md);background:rgba(10,22,26,.45)}
+.arsenal-inspector .card-main{min-width:0}
+.arsenal-locked{opacity:.62;border-style:dashed}
+.arsenal-locked h3{display:flex;align-items:center;gap:7px;color:var(--text-dim)}
+.arsenal-inspector h3{margin:0 0 8px;font-size:16px;color:#e8fff6}
+
+/* Display quality presets. */
+.display-presets{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,150px),1fr));gap:8px;margin-bottom:14px}
+.display-presets button{display:grid;gap:3px;text-align:left;padding:11px 13px;border:1px solid var(--ui-line);
+  border-radius:var(--radius-md);background:rgba(12,26,30,.55);color:var(--text);cursor:pointer;transition:border-color .16s,background .16s}
+.display-presets button:hover{border-color:var(--accent-soft);background:rgba(24,48,42,.6)}
+.display-presets button:focus-visible{outline:2px solid var(--accent);outline-offset:1px}
+.display-presets strong{font-size:13px}
+.display-presets small{font-size:11px;line-height:1.4;color:var(--text-mute)}
+
+@media (max-width:720px){
+  .history-row,.leaderboard-row{align-items:flex-start;flex-wrap:wrap}
+  .history-row__stats,.leaderboard-row__stats{width:100%;justify-content:flex-start}
+  .mission-grid{grid-template-columns:minmax(0,1fr)}
+  .medal-strip{grid-template-columns:minmax(0,1fr)}
+  .medal-main strong{font-size:13px}
+}
+@media (min-width:1800px){
+  .history-row,.leaderboard-row{padding:13px 15px}
+  .history-row .card-name,.leaderboard-row .card-name,.mission-select strong{font-size:17px}
+  .mission-select small,.medal-main strong{font-size:15px}
+  .medal{padding:13px 15px}
+  .medal-icon{width:36px;height:36px}
+  .display-presets strong{font-size:15px}
+  .display-presets small{font-size:12px}
+}
+@media (prefers-reduced-motion:reduce){
+  .mission-select,.display-presets button{transition:none}
+}

@@ -1,5 +1,6 @@
 import * as T from 'three';
 import {WEAPONS} from './data.mjs';
+import {precipParticleAdds} from './environment.mjs';
 
 // Presentation only: these offsets must never be applied to the aiming camera.
 const KICKS=WEAPONS.map(w=>w.feel?.kick||[.04,.04,16]);
@@ -68,9 +69,40 @@ export class AmbientFX{
  }
 }
 
+// Deterministic precipitation emitter. Reuses the same pooled EffectPool as the
+// ambient motes; the spawn list itself comes from the pure precipParticleAdds
+// helper so replays match and the CPU renderer can skip the pass entirely.
+export class WeatherFX{
+ constructor(pool,{seed=1,preset=null,cap=10}={}){this.pool=pool;this.preset=preset;this.seed=(seed>>>0)||1;this.cap=Math.max(1,Math.round(Number(cap)||10));this.serial=0;this.spawned=0;}
+ setPreset(preset){this.preset=preset||null;this.serial=0;return this.preset;}
+ reset(){this.serial=0;this.spawned=0;}
+ update(dt,origin,{reduced=false,software=false,radius=9,intensity=1,quality=1}={}){
+  if(reduced||software||!this.pool||!this.preset||!(this.preset.particles>0)||!origin)return 0;
+  this.serial=(this.serial+1)>>>0;
+  const scale=Math.max(0,Math.min(1,Number(intensity)||0))*Math.max(0,Math.min(1,Number(quality)||0));
+  if(scale<=0)return 0;
+  const adds=precipParticleAdds(this.serial,this.preset.kind,origin,radius,{...this.preset,particles:Math.round(this.preset.particles*scale)});
+  let spawned=0;
+  for(const add of adds){if(spawned>=this.cap)break;this.pool.add(add);spawned++;}
+  this.spawned+=spawned;return spawned;
+ }
+}
+
 const REPORTS=[[320,.075,'square',65],[110,.2,'sawtooth',28],[1500,.16,'sine',180],[180,.13,'triangle',35],[620,.09,'triangle',250],[210,.18,'sawtooth',45],[480,.1,'square',1100],[95,.22,'triangle',30]];
 // Per-weapon synthesis family: rifle snap, heavy thump, electric zap, wide burst.
 const GUN_STYLES=['rifle','heavy','zap','burst','plasma','heavy','zap','burst'];
+// Optional announcer motifs keyed by mode event. Two-note rising/falling pairs
+// keep the callouts distinct without a speech asset.
+const ANNOUNCE_CUES=Object.freeze({
+ capture:Object.freeze({id:'capture',freq:520,end:1040,length:.3}),
+ 'flag-pickup':Object.freeze({id:'flag-pickup',freq:640,end:880,length:.24}),
+ 'flag-return':Object.freeze({id:'flag-return',freq:720,end:560,length:.22}),
+ goal:Object.freeze({id:'goal',freq:440,end:1320,length:.42}),
+ killstreak:Object.freeze({id:'killstreak',freq:620,end:1240,length:.3}),
+ multikill:Object.freeze({id:'multikill',freq:780,end:1560,length:.3}),
+ victory:Object.freeze({id:'victory',freq:660,end:1320,length:.5}),
+ defeat:Object.freeze({id:'defeat',freq:520,end:300,length:.5}),
+});
 const cl=(n,a,b)=>Math.max(a,Math.min(b,n));
 
 // Layered Web Audio synth: filtered noise transients + tonal bodies, distance
@@ -85,7 +117,7 @@ const BED_MOODS=Object.freeze({
  storm:Object.freeze({filter:420,tone:48,gain:.024,sub:.005}),
 });
 export class SynthAudio{
- constructor(){this.ctx=null;this.muted=false;this.voices=new Set();this.noiseBuffer=null;this.master=null;this.lastDamage=null;this.lastReport=null;this.lastHit=-Infinity;this.footPhase=0;this.wasGrounded=undefined;this.lastVy=0;this.engine=null;this.bed=null;this.bedMood='default';this.ambientBed=true;this.stepVariant=0;this.landVariant=0;this.reloadVariant=0;}
+ constructor({announcer=false}={}){this.ctx=null;this.muted=false;this.voices=new Set();this.noiseBuffer=null;this.master=null;this.lastDamage=null;this.lastReport=null;this.lastHit=-Infinity;this.footPhase=0;this.wasGrounded=undefined;this.lastVy=0;this.engine=null;this.bed=null;this.bedMood='default';this.ambientBed=true;this.stepVariant=0;this.landVariant=0;this.reloadVariant=0;this.intensity=0;this.bedScale=.75;this.music=null;this.announcer=announcer===true;this.announced=new Set();this.lastCue=null;}
  start(){try{const Context=globalThis.AudioContext||globalThis.webkitAudioContext;if(!Context)return;this.ctx??=new Context();if(this.ctx.state==='suspended')this.ctx.resume();if(!this.master){this.master=this.ctx.createGain();this.master.gain.value=.9;this.master.connect(this.ctx.destination);}this.noiseBuffer??=this._makeNoise();if(this.ambientBed!==false)this._bed(true);}catch{}}
  // Low, continuous ambience bed: filtered noise hiss plus a sub tone, faded in
  // through the master gain. Owned by the audio instance and torn down in dispose.
@@ -118,7 +150,44 @@ export class SynthAudio{
   try{this.bed.f.frequency.setTargetAtTime(profile.filter,t,1.2);this.bed.osc.frequency.setTargetAtTime(profile.tone,t,1.2);this.bed.g.gain.setTargetAtTime(profile.gain,t,1.2);this.bed.og.gain.setTargetAtTime(profile.sub,t,1.2);}catch{}
   return this.bedMood;
  }
- // Spectator audio follows the watched actor as well as the local player.
+ // Dynamic combat layer. `intensity` rises with nearby action and eases back
+ // down; it drives a low music drone and lets the keyboard bed duck so gunfire
+ // cuts through. Both share the instance's disposal and mute handling.
+ setIntensity(value){
+  const next=cl(Number(value)||0,0,1);this.intensity=next;
+  if(!this.ctx||!this.master||this.muted)return this.intensity;
+  const t=this.ctx.currentTime;
+  if(next>.24&&!this.music&&this.voices.size<28)this._musicOn(1-next*.15);
+  if(this.music){try{this.music.g.gain.setTargetAtTime(next*.05,t,.4);this.music.osc.frequency.setTargetAtTime(58+next*46,t,.3);}catch{}}
+  this.bedScale=.55+next*.55;
+  if(this.bed){const profile=BED_MOODS[this.bedMood]||BED_MOODS.default;try{this.bed.g.gain.setTargetAtTime(profile.gain*this.bedScale,t,.5);this.bed.og.gain.setTargetAtTime(profile.sub*this.bedScale,t,.55);}catch{}}
+  return this.intensity;
+ }
+ _musicOn(gain=1){
+  if(!this.ctx||!this.master)return null;
+  if(!this.music){
+   const osc=this.ctx.createOscillator(),g=this.ctx.createGain();osc.type='triangle';osc.frequency.value=58;g.gain.value=.0001;osc.connect(g);g.connect(this.master);osc.start();this.music={osc,g};
+  }
+  if(this.music)this.music.g.gain.setTargetAtTime(Math.max(0,Math.min(1,Number(gain)||0))*.005,this.ctx.currentTime,.6);
+  return this.music;
+ }
+ _musicOff(){
+  if(!this.music)return;
+  const {osc,g}=this.music;this.music=null;
+  try{g.gain.setTargetAtTime(.0001,this.ctx.currentTime,.12);}catch{}
+  setTimeout(()=>{try{osc.stop();}catch{}},320);
+ }
+ setAnnouncer(on){this.announcer=on===true;return this.announcer;}
+ // Optional announcer cue: a short two-note motif keyed by mode event. Returns
+ // the cue id (or null) and reports whether a voice was spent, respecting the
+ // existing cap and mute/dispose path.
+ announcerCue(type){
+  const cue=ANNOUNCE_CUES[type];if(!cue)return null;
+  if(!this.announcer||!this.ctx||this.muted)return {cue:cue.id,played:false};
+  this._play(cue.length,0,(t,out,nodes)=>{this._tone(t,out,nodes,{freq:cue.freq,duration:cue.length*.55,type:'triangle',gain:.06,end:cue.end});this._tone(t+cue.length*.5,out,nodes,{freq:cue.end,duration:cue.length*.55,type:'triangle',gain:.05,end:cue.end*1.12});});
+  this.lastCue=cue.id;return {cue:cue.id,played:true};
+ }
+  // Spectator audio follows the watched actor as well as the local player.
  _isLocal(e,player){if(!e||!player)return false;if(e.actor===player.id)return true;return player.spectator===true&&player.spectatorTarget!=null&&e.actor===player.spectatorTarget;}
  _isScorer(source,player){if(source==null||!player)return false;return source===player.id||(player.spectator===true&&player.spectatorTarget!=null&&source===player.spectatorTarget);}
  // Confirmation chirp layered into the death voice: a short rising pair so a
@@ -185,5 +254,5 @@ export class SynthAudio{
   const vehicle=(vehicles||[]).find(v=>v.id===player.vehicleId||v.driver===player.id),vx=vehicle?(vehicle.vx??vehicle.velocity?.x??0):0,vz=vehicle?(vehicle.vz??vehicle.velocity?.z??0):0;
   this._engine(vehicle?Math.hypot(vx,vz):0,Boolean(vehicle));}
  _engine(speed,active){if(!this.ctx)return;if(active&&!this.muted){if(!this.engine){const osc=this.ctx.createOscillator(),sub=this.ctx.createOscillator(),f=this.ctx.createBiquadFilter(),g=this.ctx.createGain();osc.type='sawtooth';sub.type='triangle';f.type='lowpass';f.frequency.value=700;g.gain.value=.0001;osc.connect(f);sub.connect(f);f.connect(g);g.connect(this.master);osc.start();sub.start();this.engine={osc,sub,f,g};}const s=cl(speed/20,0,1),t=this.ctx.currentTime;this.engine.osc.frequency.setTargetAtTime(55+s*120,t,.1);this.engine.sub.frequency.setTargetAtTime(28+s*40,t,.1);this.engine.g.gain.setTargetAtTime(.022+s*.05,t,.12);this.engine.f.frequency.setTargetAtTime(500+s*1200,t,.15);}else if(this.engine){const {osc,sub,g}=this.engine,t=this.ctx.currentTime;g.gain.setTargetAtTime(.0001,t,.08);this.engine=null;setTimeout(()=>{try{osc.stop();sub.stop();}catch{}},300);}}
- dispose(){if(this.engine){try{this.engine.osc.stop();this.engine.sub.stop();}catch{}this.engine=null;}if(this.bed){try{this.bed.src.stop();this.bed.osc.stop();}catch{}this.bed=null;}for(const token of this.voices){clearTimeout(token.timer);for(const n of token.nodes){try{n.disconnect();}catch{}}}this.voices.clear();try{this.master?.disconnect();}catch{}this.master=null;this.ctx?.close();this.ctx=null;}
+ dispose(){if(this.engine){try{this.engine.osc.stop();this.engine.sub.stop();}catch{}this.engine=null;}if(this.bed){try{this.bed.src.stop();this.bed.osc.stop();}catch{}this.bed=null;}if(this.music){try{this.music.osc.stop();}catch{}try{this.music.osc.disconnect();this.music.g.disconnect();}catch{}this.music=null;}for(const token of this.voices){clearTimeout(token.timer);for(const n of token.nodes){try{n.disconnect();}catch{}}}this.voices.clear();try{this.master?.disconnect();}catch{}this.master=null;this.ctx?.close();this.ctx=null;}
 }

@@ -227,6 +227,101 @@ export function ambientProfile(arena={},phase='day'){
  return Object.freeze({kind,...table});
 }
 
+// Deterministic weather layer. Presets are pure data so selection, material
+// tinting, fog density and audio mood stay identical between the WebGL and CPU
+// renderers. `material` carries the wet/dark tint the view applies to the fog
+// and lights; `density` is the fog multiplier and `audio` the ambient bed mood.
+export const WEATHER_KINDS=Object.freeze(['clear','overcast','rain','snow','ash','storm']);
+export const PRECIP_KINDS=Object.freeze(new Set(['rain','snow','ash','storm']));
+const WEATHER_PRESETS=Object.freeze({
+ clear:Object.freeze({kind:'clear',particles:0,streakRatio:.4,color:'#cfe0ef',size:.03,life:3.4,speed:5,drift:.4,fall:1,density:1,exposure:1,audio:'default',material:Object.freeze({tint:'#000000',wet:0,dark:0})}),
+ overcast:Object.freeze({kind:'overcast',particles:0,streakRatio:.4,color:'#c9d3dc',size:.03,life:4,speed:4,drift:.5,fall:1,density:1.12,exposure:.86,audio:'storm',material:Object.freeze({tint:'#2c3540',wet:.04,dark:.06})}),
+ rain:Object.freeze({kind:'rain',particles:90,streakRatio:1.3,color:'#aebccb',size:.028,life:1.15,speed:17,drift:.25,fall:19,density:1.35,exposure:.8,audio:'storm',material:Object.freeze({tint:'#28323d',wet:.16,dark:.1})}),
+ snow:Object.freeze({kind:'snow',particles:72,streakRatio:.4,color:'#eef6ff',size:.045,life:3.4,speed:2.4,drift:1,fall:2.4,density:1.2,exposure:1.04,audio:'cold',material:Object.freeze({tint:'#c3d1de',wet:.05,dark:0})}),
+ ash:Object.freeze({kind:'ash',particles:64,streakRatio:.4,color:'#9aa0a6',size:.035,life:3.8,speed:1.8,drift:.8,fall:.9,density:1.25,exposure:.85,audio:'hot',material:Object.freeze({tint:'#3a3129',wet:0,dark:.12})}),
+ storm:Object.freeze({kind:'storm',particles:130,streakRatio:1.15,color:'#9fb0c2',size:.03,life:1.4,speed:13,drift:.7,fall:15,density:1.6,exposure:.7,audio:'storm',material:Object.freeze({tint:'#1e2833',wet:.22,dark:.16})}),
+});
+// Per-biome mood, tint and particle character. `biome` names match the level
+// generator families so a procedurally built map picks the same ambience.
+const BIOME_TABLE=Object.freeze({
+ canyon:{biome:'canyon',mood:'hot',tint:'#8a6a44',particles:'dust'},
+ forest:{biome:'forest',mood:'default',tint:'#4f7a44',particles:'leaf'},
+ snow:{biome:'snow',mood:'cold',tint:'#c7dbe8',particles:'snow'},
+ volcanic:{biome:'volcanic',mood:'hot',tint:'#7a3a24',particles:'ember'},
+ urban:{biome:'urban',mood:'default',tint:'#6d747b',particles:'dust'},
+ ruins:{biome:'ruins',mood:'default',tint:'#9a8258',particles:'ash'},
+ cavern:{biome:'cavern',mood:'night',tint:'#4a4550',particles:'dust'},
+});
+const hashUnit2=(seed,salt=0)=>{let h=(Math.imul(seed>>>0||1,2654435761)^Math.imul((salt|0)+2246822519,3266489917))|0;h=Math.imul(h^(h>>>15),1274126177);h^=h>>>13;h=(h^(h>>>16))>>>0;return h/4294967295;};
+
+// Biome ambience for the arena. Ids win over the raw terrain material so the
+// hand-authored maps stay distinct, then the ambient profile is the fallback.
+export function biomeAmbience(arena={}){
+ const id=String(arena?.id||'').toLowerCase();
+ const byId=(pattern,biome)=>(pattern.test(id)?BIOME_TABLE[biome]:null);
+ const direct=byId(/frost|snow|ice|glacier|tundra/,'snow')||byId(/lava|forge|slag|foundry|ember|sunscar|gauntlet|magma|ashen/,'volcanic')||byId(/warfront|trench|ash|derelict|exchange|substation|signal|ironfall/,'ruins')||byId(/gulch|river|titan|sunken|proving|plateau|colosseum|catacomb|atrium|throne|citadel|fortress|longreach/,'forest')||byId(/neon|aether|skybreak|skyfall/,'urban')||byId(/canyon|sunscar|dune/,'canyon');
+ const base=direct||BIOME_TABLE.canyon;
+ return Object.freeze({biome:base.biome,mood:base.mood,tint:base.tint,particles:base.particles});
+}
+
+// Direct preset lookup (used when a caller pins a kind explicitly).
+export function weatherPreset(kind){return WEATHER_PRESETS[kind]||WEATHER_PRESETS.clear;}
+
+// Weighted, deterministic weather selection. Clear is always the plurality;
+// snow maps snow, ashen maps ash, wet maps rain, and the storm biome can roll a
+// full storm. Same arena, mode and seed always resolve to the same preset.
+export function selectWeather(arena={},timeOfDay={},seed=1,{reduced=false}={}){
+ const id=String(arena?.id||'').toLowerCase();
+ if(reduced||arena?.reducedMotion===true)return WEATHER_PRESETS.clear;
+ const wet=biomeAmbience(arena).mood;
+ const roll=hashUnit2(seed,Math.round(Number(timeOfDay?.t)||0));
+ let kind='clear';
+ if(/snow|frost|ice|glacier|tundra/.test(id))kind=roll<.55?'snow':'clear';
+ else if(/lava|forge|slag|foundry|ember|sunscar|ashen|gauntlet|magma/.test(id))kind=roll<.36?'ash':'clear';
+ else if(/gulch|river|titan|sunken|proving|plateau|atrium/.test(id))kind=roll<.3?'overcast':'clear';
+ else if(/neon|aether|skybreak|skyfall|storm/.test(id))kind=roll<.22?'storm':roll<.5?'rain':roll<.72?'overcast':'clear';
+ else if(/warfront|derelict|exchange|substation|signal|ironfall|ruins|trench/.test(id))kind=roll<.42?'ash':'clear';
+ else if(wet==='cold'&&roll<.4)kind='snow';
+ else if(wet==='hot'&&roll<.28)kind='ash';
+ else if(roll<.16)kind='rain';
+ else if(roll<.32)kind='overcast';
+ return WEATHER_PRESETS[kind]||WEATHER_PRESETS.clear;
+}
+
+// Smooth time-of-day. A short cycle is used for menu/showcase modes so a title
+// screen visibly drifts through the phases; play modes use a long, slow cycle
+// seeded per arena so two maps are not in lockstep. Reduced motion pins the
+// arena's authored phase. Pure: elapsed time and arena always map identically.
+export const TOD_PERIODS=Object.freeze({menu:90,play:600});
+export function timeOfDayAt(arena={},elapsed=0,mode='playing'){
+ const authored=skyPhase(arena);
+ if(arena?.reducedMotion===true||arena?.timeOfDay===false||arena?.timeOfDayOverride===false)return Object.freeze({phase:authored,t:0,cycle:authored});
+ const menu=mode==='selection'||mode==='theater'||mode==='progression',period=menu?TOD_PERIODS.menu:TOD_PERIODS.play;
+ const seed=arenaSeedNumber(arena),speed=period*(1+((seed%7)-3)*.05);
+ const t=(Number.isFinite(elapsed)?Math.max(0,elapsed):0)/Math.max(30,speed);
+ const u=t-Math.floor(t),order=['day','dusk','night','dusk'];
+ const index=Math.min(order.length-1,Math.floor(u*order.length)),local=u*order.length-index;
+ const current=order[index],next=order[Math.min(order.length-1,index+1)];
+ return Object.freeze({phase:local>=.5?next:current,from:current,to:next,blend:local,cycle:current,t});
+}
+function arenaSeedNumber(arena){return String(arena?.id||'arena').split('').reduce((hash,char)=>(Math.imul(hash,31)+char.charCodeAt(0))>>>0,7);}
+
+// Deterministic precipitation spawns for one frame. Pure: the same serial, kind
+// and origin always emit identical particles, so a replay matches visually and
+// the CPU renderer (which never calls this) stays byte-identical to a no-op.
+export function precipParticleAdds(serial,kind,origin={},radius=9,preset=null){
+ const profile=preset&&typeof preset==='object'?preset:WEATHER_PRESETS[kind];if(!profile||!(profile.particles>0))return [];
+ const count=Math.max(1,Math.round(profile.particles/6)),r=Math.max(2,Number(radius)||9),ox=Number(origin.x)||0,oy=Number(origin.y)||0,oz=Number(origin.z)||0,streak=Math.max(.1,profile.streakRatio||.4),adds=[];
+ for(let i=0;i<count;i++){
+  const salt=(serial|0)*17+i*131;
+  const a=hashUnit2(salt,1)*Math.PI*2,dist=Math.sqrt(hashUnit2(salt,2))*r;
+  const x=ox+Math.cos(a)*dist,z=oz+Math.sin(a)*dist,y=oy+4+hashUnit2(salt,3)*6;
+  const life=profile.life*(.8+hashUnit2(salt,4)*.4),fall=profile.fall*(.85+hashUnit2(salt,5)*.3);
+  adds.push({pos:{x,y,z},color:profile.color,size:profile.size*(.8+hashUnit2(salt,6)*.5),life,velocity:{x:(hashUnit2(salt,7)-.5)*profile.drift,y:-fall,z:(hashUnit2(salt,8)-.5)*profile.drift},additive:profile.kind==='snow'||profile.kind==='ash',streak});
+ }
+ return adds;
+}
+
 // Deterministic distant-smoke anchor points inside the arena footprint. Pure:
 // the same bounds and seed always yield the same emitters.
 export function smokeAnchors(bounds,seed=1,count=4){

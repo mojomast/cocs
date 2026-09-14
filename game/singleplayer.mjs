@@ -1,6 +1,7 @@
 import {CHARACTERS,POWERUPS} from './data.mjs';
 import {CAMPAIGN_MISSIONS,missionFor} from './campaign-data.mjs';
-import {applyEnemyFields,enemyById,enemyLeash,bossPhaseProfile,ENEMY_SPEED_VARIANCE,DEFAULT_ENEMY_ID,NPC_ZONE_KINDS} from './enemy-types.mjs';
+import {applyEnemyFields,enemyById,enemyLeash,bossPhaseProfile,bossMaxPhase,ENEMY_SPEED_VARIANCE,DEFAULT_ENEMY_ID,NPC_ZONE_KINDS} from './enemy-types.mjs';
+import {coverPoint} from './bots.mjs';
 
 // Single-player simulation. Horde spawns escalating waves of fragile enemies;
 // campaign runs a linear, story-driven sequence of objectives with world
@@ -63,8 +64,11 @@ export const HORDE_WAVE_MODIFIERS = Object.freeze([
  Object.freeze({id:'artillery',name:'ARTILLERY',description:'Indirect fire — keep moving or eat the shells.'}),
  Object.freeze({id:'shielded',name:'SHIELDED',description:'An armoured front line leads the push.'}),
  Object.freeze({id:'elite',name:'ELITE GATE',description:'An elite unit anchors the wave.'}),
+ Object.freeze({id:'flanked',name:'FLANKED',description:'Lancers break cover and hit from the sides.'}),
+ Object.freeze({id:'fortified',name:'FORTIFIED',description:'A shield-bearer formation anchors the line.'}),
+ Object.freeze({id:'champion',name:'CHAMPION',description:'A boss takes the field and calls in reinforcements.'}),
 ]);
-const HORDE_MODIFIER_ORDER = Object.freeze(['swarm','mixed','artillery','shielded','mixed','elite']);
+const HORDE_MODIFIER_ORDER = Object.freeze(['swarm','mixed','artillery','shielded','mixed','elite','flanked','fortified','champion']);
 export function hordeWaveModifier(wave,difficultyId='easy'){
  const index=Math.max(1,Math.round(wave)),id=HORDE_MODIFIER_ORDER[(index-1)%HORDE_MODIFIER_ORDER.length];
  const base=HORDE_WAVE_MODIFIERS.find(modifier=>modifier.id===id)||HORDE_WAVE_MODIFIERS[0];
@@ -86,7 +90,18 @@ export function hordeWavePlan(wave,difficultyId='easy'){
   if(counts[source]>0)counts[source]-=1;
   counts.bulwark=(counts.bulwark||0)+1;
  }
+ if(modifier.id==='flanked'&&(counts.lancer||0)<1){
+  const source=counts.husk>0?'husk':counts.spitter>0?'spitter':counts.brute>0?'brute':'husk';
+  if((counts[source]||0)>0)counts[source]-=1;
+  counts.lancer=(counts.lancer||0)+1;
+ }
+ if(modifier.id==='fortified'&&(counts.sentinel||0)<1){
+  const source=counts.brute>0?'brute':counts.husk>0?'husk':'spitter';
+  if((counts[source]||0)>0)counts[source]-=1;
+  counts.sentinel=(counts.sentinel||0)+1;
+ }
  if(modifier.id==='elite')counts.elite=true;
+ if(modifier.id==='champion'){counts.boss=true;counts.harbinger=(counts.harbinger||0)+1;}
  return {counts,modifier};
 }
 
@@ -231,7 +246,7 @@ export function initializeSinglePlayer(match){
  match.humanCount=1;
  match.config.botCount=0;
  const mode=match.config.mode;
- const state={kind:mode,playerId:0,phase:'intermission',timer:0,elapsed:0,lives:2,deaths:0,nextId:1,enemies:[],allies:[],groups:{},entered:{},everHadEnemies:false,boss:null,winner:null,message:null,objective:'',script:[],fired:{},defendProgress:0,lastEvent:0,steps:[],stepIndex:0,stepElapsed:0,holdProgress:0,waypoint:null,storyLine:null,bark:null,bossPhase:0,bossPhaseName:null,bossPhaseMax:1,checkpoint:null,upgrades:[],upgradeOffers:0,pendingUpgrade:null,upgradeSelected:null,nextUpgradeWave:HORDE_UPGRADE_GAPS[0],upgradeGapIndex:0,waveModifier:null};
+ const state={kind:mode,playerId:0,phase:'intermission',timer:0,elapsed:0,lives:2,deaths:0,nextId:1,enemies:[],allies:[],groups:{},entered:{},everHadEnemies:false,boss:null,winner:null,message:null,objective:'',script:[],fired:{},defendProgress:0,lastEvent:0,steps:[],stepIndex:0,stepElapsed:0,holdProgress:0,waypoint:null,storyLine:null,bark:null,bossPhase:0,bossPhaseName:null,bossPhaseMax:1,summonCount:0,checkpoint:null,upgrades:[],upgradeOffers:0,pendingUpgrade:null,upgradeSelected:null,nextUpgradeWave:HORDE_UPGRADE_GAPS[0],upgradeGapIndex:0,waveModifier:null};
  let resumeStep=null;
  if(mode==='horde'){
   const pacing=hordePacing(match.config.difficulty);
@@ -267,19 +282,24 @@ function releaseDead(match,state){
 }
 
 function startWave(match,state){
- state.wave+=1;state.phase='wave';state.timer=0;state.enemies=[];
+ state.wave+=1;state.phase='wave';state.timer=0;state.enemies=[];state.boss=null;state.bossPhase=0;state.bossPhaseName=null;
  const plan=hordeWavePlan(state.wave,match.config.difficulty),composition=plan.counts,modifier=plan.modifier;
  state.waveModifier={id:modifier.id,name:modifier.name,description:modifier.description};
  const group=`wave-${state.wave}`;
  const eliteType=composition.bulwark>0?'bulwark':composition.brute>0?'brute':composition.mortar>0?'mortar':composition.overseer>0?'overseer':null;
  let count=0;
- for(const kind of HORDE_TYPES){
-  const amount=composition[kind]||0;
-  if(amount<=0)continue;
-  spawnGroup(match,state,{type:kind,count:amount,group,elite:composition.elite&&kind===eliteType},{team:1});
-  count+=amount;
+ // Iterate the planned keys, not the base HORDE_TYPES table, so modifier
+ // twists can inject archetypes (lancer/sentinel) or a champion boss that is
+ // not part of the standing composition.
+ for(const kind of Object.keys(composition)){
+  const amount=composition[kind];
+  if(kind==='elite'||kind==='boss'||!Number.isFinite(amount)||amount<=0)continue;
+  const size=Math.round(amount);
+  spawnGroup(match,state,{type:kind,count:size,group,elite:composition.elite&&kind===eliteType},{team:1});
+  count+=size;
  }
- match.emit('horde-wave',{wave:state.wave,target:state.waveTarget,count,elite:Boolean(composition.elite),modifier:modifier.id,modifierName:modifier.name});
+ if(state.boss!=null){const boss=actorById(match,state.boss);if(boss)state.bossPhaseMax=Math.max(state.bossPhaseMax||1,bossMaxPhase(boss.npcType));}
+ match.emit('horde-wave',{wave:state.wave,target:state.waveTarget,count,elite:Boolean(composition.elite),boss:Boolean(composition.boss),modifier:modifier.id,modifierName:modifier.name});
  match.emit('horde-modifier',{wave:state.wave,id:modifier.id,name:modifier.name,description:modifier.description});
 }
 
@@ -497,11 +517,64 @@ function updateEnemyRoles(match,state,dt){
  }
  for(const actor of allies){
   const base=Number.isFinite(actor.auraBaseDamage)?actor.auraBaseDamage:(actor.auraBaseDamage=Number.isFinite(actor.damageMultiplier)?actor.damageMultiplier:1);
-  actor.damageMultiplier=base*(actor.auraDamage||1);
-  actor.speedMultiplier=actor.auraSpeed||1;
+  const flank=actor.npcFlank,burning=Boolean(flank)&&Number.isFinite(actor.flankerBurstUntil)&&actor.flankerBurstUntil>state.elapsed;
+  actor.damageMultiplier=base*(actor.auraDamage||1)*(burning?1+(flank.damageBonus??0):1);
+  actor.speedMultiplier=(actor.auraSpeed||1)*(burning?1+(flank.speedBonus??0):1);
  }
  const player=match.actors[0];
  if(!player||match.over)return;
+ // Flankers seek a nav node that breaks the player's sightline, hold it for a
+ // beat, then burst out with a speed/damage spike. coverPoint() is pure and
+ // stable, so the chosen cover is identical for identical sim state.
+ for(const flanker of allies){
+  const flank=flanker.npcFlank;if(!flank)continue;
+  if(Number.isFinite(flanker.flankWindup)){
+   flanker.flankWindup-=dt;
+   if(flanker.flankWindup<=0){
+    flanker.flankWindup=undefined;
+    flanker.flankerBurstUntil=state.elapsed+(flank.burst??.8);
+    flanker.flankCooldown=flank.cooldown??6;
+    match.emit('enemy-flank',{actor:flanker.id,x:flanker.x,z:flanker.z,speedBonus:flank.speedBonus??.55,damageBonus:flank.damageBonus??.3,point:flanker.flankPoint??null});
+   }
+   continue;
+  }
+  if(!Number.isFinite(flanker.flankCooldown))flanker.flankCooldown=flank.cooldown??6;
+  flanker.flankCooldown-=dt;
+  if(flanker.flankCooldown>0||player.health<=0)continue;
+  const distance=Math.hypot(player.x-flanker.x,player.z-flanker.z);
+  if(distance>(flank.chargeDistance??18))continue;
+  const cover=coverPoint(match,flanker,player);
+  if(!cover)continue;
+  flanker.flankPoint={x:cover.x,y:cover.y??0,z:cover.z};
+  flanker.flankWindup=flank.telegraph??.5;
+  if(flanker.bot){flanker.bot.destination={x:cover.x,y:cover.y??0,z:cover.z};flanker.bot.route=[];flanker.bot.think=Math.max(flanker.bot.think||0,flank.hold??1.1);}
+  match.emit('enemy-telegraph',{kind:'flanker',actor:flanker.id,x:cover.x,z:cover.z,radius:2,duration:flanker.flankWindup});
+ }
+ // Shield-bearers pulse a temporary front shield onto allies inside the
+ // formation, telegraphed first so the clump can be broken by fire or movement.
+ for(const sentinel of allies){
+  const wall=sentinel.npcPhalanx;if(!wall)continue;
+  if(Number.isFinite(sentinel.phalanxWindup)){
+   sentinel.phalanxWindup-=dt;
+   if(sentinel.phalanxWindup<=0){
+    sentinel.phalanxWindup=undefined;sentinel.phalanxTimer=wall.interval??3.4;let shielded=0;
+    for(const ally of allies){
+     if(ally===sentinel)continue;
+     if(Math.hypot(ally.x-sentinel.x,ally.z-sentinel.z)>wall.radius)continue;
+     ally.temporaryShield=Math.min(wall.cap??90,(ally.temporaryShield||0)+(wall.shield??45));
+     shielded++;
+    }
+    match.emit('phalanx-shield',{actor:sentinel.id,x:sentinel.x,z:sentinel.z,radius:wall.radius,shield:wall.shield??45,shielded});
+   }
+   continue;
+  }
+  if(!Number.isFinite(sentinel.phalanxTimer))sentinel.phalanxTimer=wall.interval??3.4;
+  sentinel.phalanxTimer-=dt;
+  if(sentinel.phalanxTimer>0)continue;
+  sentinel.phalanxTimer=wall.interval??3.4;
+  sentinel.phalanxWindup=wall.telegraph??.55;
+  match.emit('enemy-telegraph',{kind:'phalanx',actor:sentinel.id,x:sentinel.x,z:sentinel.z,radius:wall.radius,duration:sentinel.phalanxWindup});
+ }
  for(const sapper of allies){
   const bomb=sapper.npcSapper;if(!bomb)continue;
   if(!Number.isFinite(sapper.sapperCooldown))sapper.sapperCooldown=bomb.cooldown??1.2;
@@ -559,6 +632,25 @@ function updateEnemyRoles(match,state,dt){
   if(profile){
    boss.damageMultiplier=damageBase*(boss.auraDamage||1)*(profile.damageMult??1);
    boss.speedMultiplier=speedBase*(boss.auraSpeed||1)*(profile.speedMult??1);
+  }
+  // Summoner bosses (the Harbinger) birth adds on a cooldown. Count scales with
+  // the boss phase and the live cap keeps the wave bounded, so the mechanic adds
+  // pressure without letting a fight run away from the player.
+  const summon=boss.npcSummon;
+  if(summon){
+   if(!Number.isFinite(boss.summonTimer))boss.summonTimer=summon.interval??11;
+   boss.summonTimer-=dt;
+   if(boss.summonTimer<=0){
+    boss.summonTimer=summon.interval??11;
+    if(aliveEnemies(match,state)<(summon.maxAlive??28)){
+     const count=Math.max(1,Math.round((summon.count??2)+((boss.bossPhase??1)-1)));
+     const angle=(boss.id%4)*(Math.PI/2),radius=summon.radius??12;
+     const x=boss.x+Math.cos(angle)*radius,z=boss.z+Math.sin(angle)*radius;
+     const group=`boss-summon-${boss.id}-${++state.summonCount}`;
+     spawnGroup(match,state,{type:summon.type||'husk',count,group,x,z,zone:{x:boss.x,z:boss.z,r:radius,leash:radius+8,kind:'hold'}},{team:1});
+     match.emit('boss-summon',{actor:boss.id,x,z,unit:summon.type||'husk',count});
+    }
+   }
   }
   const stomp=profile?.stomp;
   if(!stomp)continue;
