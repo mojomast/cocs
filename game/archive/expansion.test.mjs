@@ -1,8 +1,8 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {Match,eye,obstructed,floorAt,moveActor} from './core.mjs';
-import {MAPS,pickupWeapon} from './maps.mjs';
-import {CHARACTERS,HARNESSES,WEAPONS,validLoadout} from './data.mjs';
+import {Match,eye,obstructed,floorAt,moveActor} from '../core.mjs';
+import {MAPS,pickupWeapon} from '../maps.mjs';
+import {CHARACTERS,HARNESSES,WEAPONS,validLoadout} from '../data.mjs';
 const seeded=()=>{let n=17;return()=>((n=(Math.imul(n,1664525)+1013904223)>>>0)/4294967296);};
 function fixture(harness='codex',map='crosswire'){const m=new Match('gemini',harness,seeded(),map);m.actors.forEach(a=>{a.protection=0;a.shotWait=0;a.health=0;a.dead=999;});const a=m.actors[0];Object.assign(a,{x:0,z:8,y:0,health:100,armor:0,yaw:0,pitch:0,vx:0,vy:0,vz:0});return [m,a];}
 test('expanded roster has unique IDs, full compatibility and ten-slot inventories',()=>{assert.equal(CHARACTERS.length,9);assert.equal(HARNESSES.length,7);assert.equal(WEAPONS.length,10);assert.equal(new Set(CHARACTERS.map(c=>c.id)).size,9);for(const c of CHARACTERS)for(const h of HARNESSES){assert.equal(validLoadout(c.id,h.id),c.id!=='claude'||h.id==='claudecode');const m=new Match(c.id,h.id,seeded(),'exchange',{botCount:4});assert.equal(m.actors[0].ammo.length,10);assert.equal(new Set(m.actors.map(a=>a.character)).size,5);}});

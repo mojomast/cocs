@@ -1,12 +1,12 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {Match, obstructed, floorAt} from './core.mjs';
-import {MAPS} from './maps.mjs';
-import {arenaMeta} from './arenas.mjs';
-import {RULES} from './data.mjs';
-import {actorWon} from './outcome.mjs';
-import {payloadTemplate, stepPayload} from './payload.mjs';
-import {botBehavior} from './bot-personalities.mjs';
+import {Match, obstructed, floorAt} from '../core.mjs';
+import {MAPS} from '../maps.mjs';
+import {arenaMeta} from '../arenas.mjs';
+import {RULES} from '../data.mjs';
+import {actorWon} from '../outcome.mjs';
+import {payloadTemplate, stepPayload} from '../payload.mjs';
+import {botBehavior} from '../bot-personalities.mjs';
 
 const seeded = () => { let n = 17; return () => ((n = (Math.imul(n, 1664525) + 1013904223) >>> 0) / 4294967296); };
 

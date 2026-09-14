@@ -347,7 +347,7 @@ For read-only debugging, `window.tokenArenaSnapshot()` reports state and renderi
 
 ## Verify
 
-`npm run test:game` runs the game, expansion, configuration, multi-human, prediction, content, map, mode, powerup, replay and renderer tests; `npm run test:server` runs the room, registry, spectator, history, chat and network tests. `npx tsc --noEmit` checks TypeScript. `npm run build` verifies the production bundle. See VERIFICATION.md for browser evidence and gaps; do not equate a passing simulated match with GPU performance verification.
+`npm run test:game` runs the fast game suite (configuration, multi-human, prediction, content, map, mode, powerup, replay and renderer tests); `npm run test:server` runs the room, registry, spectator, history, chat and network tests. The slow, largely-redundant integration tests (the 12-minute all-map bot sweep and the hardening grab-bag) are archived in `game/archive/` and run on demand via `npm run test:archive` (or everything with `npm run test:all`); see `game/archive/README.md` for what replaced them. `npx tsc --noEmit` checks TypeScript. `npm run build` verifies the production bundle. See VERIFICATION.md for browser evidence and gaps; do not equate a passing simulated match with GPU performance verification.
 
 ## Scope boundary
 

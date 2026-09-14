@@ -2,11 +2,8 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {Match} from './core.mjs';
 import {CHARACTERS,HARNESSES} from './data.mjs';
-import {GAME_MODES,DIFFICULTIES} from './config.mjs';
-import {resolveMapForMode} from './arenas.mjs';
 import {botBehavior,botArchetype} from './bot-personalities.mjs';
 
-const rng=()=>{let n=123;return()=>((n=(Math.imul(n,1664525)+1013904223)>>>0)/4294967296);};
 const combos=(behaviors)=>{const set=new Set(behaviors.map(behavior=>[behavior.strafePattern,behavior.weaponBand,behavior.engageBand.map(n=>n.toFixed(2)).join(',')].join('|')));return set;};
 
 test('the roster resolves to several distinct archetypes across ids',()=>{
@@ -67,15 +64,5 @@ test('two archetypes actually strafe differently over time',()=>{
  assert.ok(a.some(Boolean)&&b.some(Boolean),'both bots must strafe while engaging');
  assert.notDeepEqual(a,b,'serpentine and sine strafing must diverge over time');
 });
-
-test('every combat mode still completes with archetype bots at every difficulty',()=>{
- for(const mode of GAME_MODES.filter(mode=>mode.rules?.score!=='laps'&&mode.id!=='puma-soccer'))for(const difficulty of DIFFICULTIES){
-  const m=new Match('kimi','roo',rng(),resolveMapForMode('crosswire',mode.id,{legacy:true}),{mode:mode.id,difficulty:difficulty.id,botCount:8,timeLimit:60,fragLimit:5});
-  for(let i=0;i<3601&&!m.over;i++)m.step(1/60);
-  assert.ok(m.over,`${mode.id}/${difficulty.id}`);
-  assert.ok(m.stats.shots>0,`${mode.id}/${difficulty.id} shots`);
-  const settled=m.stats.kills>0||m.events.some(event=>['capture','zone-capture','assault-breach','payload-checkpoint','payload-delivered','objective-win'].includes(event.type));
-  assert.ok(settled,`${mode.id}/${difficulty.id} resolves by combat or objective`);
-  assert.ok(m.actors.every(a=>[a.x,a.y,a.z,a.health,a.frags].every(Number.isFinite)));
- }
-});
+// The all-modes/all-difficulties completion loop lives in config.test.mjs; keeping
+// a second copy here doubled the slowest integration pass for no extra coverage.
