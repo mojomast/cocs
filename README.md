@@ -588,6 +588,12 @@ Version 2.23 shows your connection quality online:
 
 - **Latency chip.** Network matches display a colour-coded `GOOD` / `FAIR` / `POOR` chip with the current interpolation delay, graded from the same jitter and packet-loss estimators the netcode already uses (`connectionQuality` in `game/hud.mjs`). It turns amber or red before the connection becomes unplayable.
 
+Version 3.6 fixes menu paint order and the progression layout:
+
+- **Menus paint above the canvas again.** `.shell` is positioned (`z-index:1`); previously the absolutely-positioned canvas painted over the whole menu body, hiding the operator/harness selection and stealing its clicks and scroll.
+- **Progression** shows the operator preview beneath the rank/stats card and gives the unlock list a wider, readable column.
+- **4K tier** scales the shell width, type and controls on large displays.
+
 Version 3.5 adds granular video options and fixes menu scrolling:
 
 - **Glow controls.** Post-processing has its own toggle plus glow-strength and brightness sliders, independent of resolution scale (`postFx`/`bloom`/`exposure` in the display config).

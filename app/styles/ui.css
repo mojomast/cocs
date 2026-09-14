@@ -6,7 +6,7 @@
    ========================================================================== */
 
 /* ---------- Shell: header / scrolling body / sticky action rail ---------- */
-.shell{display:flex;flex-direction:column;height:100dvh;height:100svh;overflow:hidden;background:
+.shell{position:relative;z-index:1;display:flex;flex-direction:column;height:100dvh;height:100svh;overflow:hidden;background:
   radial-gradient(120% 90% at 12% 0%, rgba(131,244,213,.06), transparent 60%),
   linear-gradient(180deg, var(--surface-0), #050c10 70%);
   color:var(--text)}
@@ -267,4 +267,30 @@
 @media (prefers-reduced-motion:reduce){
   .btn,.meter > i{transition:none}
   .spin-slow{animation:none}
+}
+
+/* Progression columns: rank+preview rail, gear, and a wide unlock body. */
+.progression-grid{grid-template-columns:minmax(260px,340px) minmax(0,1fr) minmax(0,1.55fr)}
+@media (max-width:1100px){.progression-grid{grid-template-columns:minmax(0,1fr)}}
+
+/* Large / 4K displays: scale the console up instead of leaving a small island. */
+@media (min-width:1800px){
+  .shell-body{max-width:1840px;padding-top:var(--ui-gap-6)}
+  .brand-name{font-size:23px}
+  .h-page{font-size:clamp(40px,2.6vw,60px)}
+  .lede{font-size:16px}
+  .panel-title{font-size:18px}
+  .panel-head,.panel-body{padding:20px 22px}
+  .card{padding:15px 17px}
+  .card-name{font-size:17px}
+  .card-tag{font-size:13px}
+  .card-stats{font-size:12px}
+  .btn{min-height:48px;font-size:14px}
+  .btn-sm{min-height:40px}
+  .stat dd{font-size:30px}
+  .label,.eyebrow{font-size:12px}
+  .tabs button{font-size:13px;min-height:46px}
+  .segmented button{min-height:42px;font-size:13px}
+  .modal-panel--xl{--modal-w:1240px}
+  .modal-panel--lg{--modal-w:940px}
 }

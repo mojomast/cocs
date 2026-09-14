@@ -1,5 +1,27 @@
 # COCS verification report
 
+## Release 3.6 - Menu paint order, progression preview, 4K scaling
+
+- **Root cause of the "invisible harness/model selection": paint order.** The app
+  shell (`.shell`) was a non-positioned block, while the game canvas is
+  `position:absolute`. In the CSS painting order, positioned elements paint above
+  non-positioned block content, so the canvas (showing the last showcase frame)
+  was drawn **over the entire menu body** — hiding the operator/harness cards and
+  stealing their clicks and wheel events. `.shell` is now `position:relative;
+  z-index:1`, so menus paint above the canvas again. This also explains the
+  un-scrollable-by-hover unlock list and the "preview on top of the list".
+- **Progression layout.** The operator preview now sits **beneath the rank/stats
+  card**, and the unlock column is wider (`.progression-grid` =
+  rank/preview rail · gear · 1.55fr unlocks), so the list has room and a readable
+  panel background. The showcase renderer and `previewRef` now also run in
+  `progression` mode so the model appears there.
+- **4K scaling.** A `min-width:1800px` tier raises the shell width, type scale,
+  control heights and modal sizes so the console does not sit as a small island
+  on large displays.
+
+Verification: game **962/962**, server **126/126**, `tests/` **5/5**, `tsc` clean,
+lint 0 errors, build clean.
+
 ## Release 3.5 - Granular video options, scrollable menus
 
 - **Glow is now a real setting.** Post-processing used to be gated on resolution

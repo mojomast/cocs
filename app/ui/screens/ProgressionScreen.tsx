@@ -4,7 +4,7 @@ import type {ScreenProps} from '../contract';
 import {ActionRail,Banner,Btn,Chip,Meter,PageHead,Panel,SelectCard,Shell,Stats,Tabs,TopBar} from '../primitives';
 
 export function ProgressionScreen({ui}:ScreenProps){
- const {profile,UNLOCKS,UNLOCK_GROUPS,GEAR,GEAR_SLOTS,ATTACHMENTS,ATTACHMENT_SLOTS,WEAPON_FINISHES,CROSSHAIR_STYLES,levelFromXp,rankTitle,rankBlurb,unlockedItems,chooseGear,chooseAttachment,chooseFinish,chooseCrosshair,selected,changeMode,notice,headActions}=ui;
+ const {profile,UNLOCKS,UNLOCK_GROUPS,GEAR,GEAR_SLOTS,ATTACHMENTS,ATTACHMENT_SLOTS,WEAPON_FINISHES,CROSSHAIR_STYLES,levelFromXp,rankTitle,rankBlurb,unlockedItems,chooseGear,chooseAttachment,chooseFinish,chooseCrosshair,selected,changeMode,notice,headActions,previewRef}=ui;
  const [tab,setTab]=useState('gear');
  const level=levelFromXp(profile.xp);
  const renderItems=(items:any[],isSelected:(item:any)=>boolean,isLocked:(item:any)=>boolean,onPick:(item:any)=>void)=>(
@@ -14,12 +14,13 @@ export function ProgressionScreen({ui}:ScreenProps){
   })}</div>
  );
  const rail=<ActionRail summary={<span className="label">LEVEL {profile.level} · {profile.xp} XP</span>}><Btn variant="secondary" onClick={()=>changeMode('selection')}>BACK TO LOADOUT</Btn></ActionRail>;
- return <Shell head={<TopBar sub="PROGRESSION">{headActions}</TopBar>} rail={rail}>
+ return <Shell className="shell--showcase" head={<TopBar sub="PROGRESSION">{headActions}</TopBar>} rail={rail}>
   <div className="stack">
    <PageHead eyebrow="OPERATOR RECORD" title="Rank up."/>
    {notice&&<Banner>{notice}</Banner>}
-   <div className="layout layout--3 layout--sticky">
-    <Panel label="RANK" meta={`LEVEL ${profile.level} / 60`}>
+    <div className="layout progression-grid layout--sticky">
+     <div className="stack">
+     <Panel label="RANK" meta={`LEVEL ${profile.level} / 60`}>
      <div className="stack">
       <div className="row row--between"><h2 className="panel-title">{rankTitle(profile.level)}</h2>{selected&&<Chip tone="accent"><i/>{selected.name}</Chip>}</div>
       <div className="row row--between"><span className="label">{profile.xp} XP</span><span className="label">{level.toNext} XP TO LEVEL {profile.level+1}</span></div>
@@ -27,8 +28,13 @@ export function ProgressionScreen({ui}:ScreenProps){
       <p className="field-note">{rankBlurb(profile.level)}</p>
       <Stats items={[{label:'MATCHES',value:profile.matches},{label:'WINS',value:profile.wins},{label:'KILLS',value:profile.kills}]}/>
      </div>
-    </Panel>
-    <Panel label="GEAR LOADOUT" meta="COMBINED ARMS">
+     </Panel>
+     <div ref={previewRef} className="preview-stage" aria-label={`${selected?.name??'Operator'} animated 3D model`}>
+      <span className="preview-corner">OPERATOR PREVIEW</span>
+      <div className="preview-caption"><p className="eyebrow" style={{color:selected?.color}}>{selected?.tag}</p><h2 className="h-page">{selected?.name}</h2></div>
+     </div>
+     </div>
+     <Panel label="GEAR LOADOUT" meta="COMBINED ARMS">
      <div className="stack">
       <Tabs value={tab} onChange={setTab} ariaLabel="Loadout category" tabs={[{value:'gear',label:'Gear'},{value:'mods',label:'Weapon mods'},{value:'skins',label:'Skins'},{value:'reticles',label:'Reticles'}]}/>
       {tab==='gear'&&GEAR_SLOTS.map((slot:any)=><div key={slot.id} className="stack stack--tight">
