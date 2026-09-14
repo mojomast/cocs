@@ -588,6 +588,14 @@ Version 2.23 shows your connection quality online:
 
 - **Latency chip.** Network matches display a colour-coded `GOOD` / `FAIR` / `POOR` chip with the current interpolation delay, graded from the same jitter and packet-loss estimators the netcode already uses (`connectionQuality` in `game/hud.mjs`). It turns amber or red before the connection becomes unplayable.
 
+Version 4.1 expands and refines the game after v4.0:
+
+- **New modes/objectives:** Juggernaut, Team Elimination and VIP Escort; multi-phase Warden bosses; sudden-death timers so every mode terminates.
+- **Single-player:** horde between-wave upgrades and wave modifiers, new enemy roles (mender/sapper/overseer, shield tank, mortar artillery), campaign checkpoint resume, and a third mission.
+- **Presentation/perf:** death variety, ambient FX, audio variants, richer weapon/operator/vehicle detail, impact decals, and a quality/LOD controller with a CPU triangle budget.
+- **Interface:** daily challenges, per-mode career stats, full loadout presets, theater library + in-dock highlights, help legend, and a team-grouped spectator board.
+- **Maps:** two new next-gen arenas (The Throne, The Gauntlet).
+
 Version 4.0 is a major improvement pass across single-player, modes, graphics and rewards:
 
 - **Single-player:** enemies spawn in authored areas and stay within a per-type leash, groups fan out instead of stacking, horde waves use a per-difficulty composition table, and both campaign missions now run scripted timelines (timed reinforcements, ambushes, boss phases with adds, NPC barks) with real win conditions.

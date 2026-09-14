@@ -1,4 +1,5 @@
 import { compressDemo, decompressDemo, trimDemo } from './demo.mjs';
+import { teamMode as isTeamMode } from './config.mjs';
 
 const DB_NAME = 'token-arena-demos';
 const DB_VERSION = 1;
@@ -111,10 +112,33 @@ export function demoHighlights(demo) {
   return highlights.sort((a, b) => a.time - b.time);
 }
 
+const numeric = value => Number.isFinite(Number(value)) ? Number(value) : 0;
+
+export function demoOutcome(demo) {
+  const header = demo?.header || {};
+  const frames = Array.isArray(demo?.keyframes) ? demo.keyframes : [];
+  const state = frames.length ? frames[frames.length - 1]?.state || {} : {};
+  const config = state.config || header.config || {};
+  const teamScores = state.teamScores || header.teamScores || {};
+  const teamMode = config?.team === true || isTeamMode(config?.mode);
+  const actors = Array.isArray(state.actors) ? state.actors : [];
+  if (teamMode) {
+    const a = numeric(teamScores[0]), b = numeric(teamScores[1]);
+    const winner = a === b ? null : a > b ? 'Team 1' : 'Team 2';
+    return {teamMode: true, winner, scores: {0: a, 1: b}, score: `${a}–${b}`};
+  }
+  const ranked = actors.slice().sort((x, y) => numeric(y?.frags) - numeric(x?.frags));
+  const top = ranked[0];
+  const winner = top?.name || null;
+  const frags = top ? numeric(top.frags) : 0;
+  return {teamMode: false, winner, scores: null, score: top ? `${frags} frags` : ''};
+}
+
 export function demoSummary(demo) {
   const header = demo?.header || {};
   const frames = Array.isArray(demo?.keyframes) ? demo.keyframes : [];
   const duration = frames.length > 1 ? frames[frames.length - 1].time - frames[0].time : 0;
+  const outcome = demoOutcome(demo);
   return {
     id: demo?.id || null,
     createdAt: demo?.createdAt || null,
@@ -127,7 +151,35 @@ export function demoSummary(demo) {
     duration,
     frames: frames.length,
     highlights: demoHighlights(demo),
+    teamMode: outcome.teamMode,
+    winner: outcome.winner,
+    score: outcome.score,
   };
+}
+
+export function filterDemos(demos, {mode = 'all', mapId = 'all'} = {}) {
+  return (Array.isArray(demos) ? demos : []).filter(demo => {
+    if (mode !== 'all' && demo?.mode !== mode) return false;
+    if (mapId !== 'all' && demo?.mapId !== mapId) return false;
+    return true;
+  });
+}
+
+export function sortDemos(demos, order = 'newest') {
+  const list = (Array.isArray(demos) ? demos : []).slice();
+  const newest = (a, b) => String(b?.createdAt || '').localeCompare(String(a?.createdAt || ''));
+  if (order === 'oldest') return list.sort((a, b) => newest(b, a));
+  if (order === 'longest') return list.sort((a, b) => numeric(b?.duration) - numeric(a?.duration) || newest(a, b));
+  if (order === 'shortest') return list.sort((a, b) => numeric(a?.duration) - numeric(b?.duration) || newest(a, b));
+  return list.sort(newest);
+}
+
+export function demoModes(demos) {
+  return [...new Set((Array.isArray(demos) ? demos : []).map(demo => demo?.mode).filter(Boolean))];
+}
+
+export function demoMaps(demos) {
+  return [...new Set((Array.isArray(demos) ? demos : []).map(demo => demo?.mapId).filter(Boolean))];
 }
 
 function trimSeconds(demo) {

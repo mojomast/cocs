@@ -9,8 +9,34 @@ const map={id:'mode-test',name:'Mode Test',raised:false,blocks:[],spawns:[[-10,0
 test('modes and mode-specific defaults preserve explicit limits',()=>{
  assert.ok(GAME_MODES.some(m=>m.id==='ctf')&&GAME_MODES.some(m=>m.id==='teamdeathmatch'));
   assert.equal(normalizeConfig({mode:'ctf'}).fragLimit,3);
- assert.equal(normalizeConfig({mode:'ctf',fragLimit:12}).fragLimit,12);
- assert.equal(normalizeConfig({mode:'teamdeathmatch'}).fragLimit,30);
+  assert.equal(normalizeConfig({mode:'ctf',fragLimit:12}).fragLimit,12);
+  assert.equal(normalizeConfig({mode:'teamdeathmatch'}).fragLimit,30);
+});
+
+test('new modes register distinct mechanics without disturbing existing mode IDs',()=>{
+  const juggernaut=GAME_MODES.find(m=>m.id==='juggernaut');
+  const elimination=GAME_MODES.find(m=>m.id==='team-elimination');
+  assert.ok(juggernaut&&elimination,'both new modes are registered');
+  assert.equal(juggernaut.name,'Juggernaut');
+  assert.equal(juggernaut.rules.team,false);
+  assert.equal(juggernaut.rules.score,'juggernaut');
+  assert.equal(juggernaut.rules.juggernaut,true);
+  assert.equal(juggernaut.rules.objective.kind,'juggernaut');
+  assert.equal(elimination.name,'Team Elimination');
+  assert.equal(elimination.rules.team,true);
+  assert.equal(elimination.rules.score,'elimination');
+  assert.equal(elimination.rules.elimination,true);
+  assert.equal(elimination.rules.objective.kind,'elimination');
+  assert.equal(new Set(GAME_MODES.map(m=>m.id)).size,GAME_MODES.length,'mode ids stay unique');
+  assert.equal(new Set(GAME_MODES.map(m=>m.name)).size,GAME_MODES.length,'mode names stay unique');
+  assert.equal(normalizeConfig({mode:'juggernaut'}).fragLimit,30);
+  assert.equal(normalizeConfig({mode:'juggernaut',fragLimit:9999}).fragLimit,99);
+  assert.equal(normalizeConfig({mode:'team-elimination'}).fragLimit,10);
+  assert.equal(normalizeConfig({mode:'team-elimination',fragLimit:0}).fragLimit,1);
+  assert.equal(GAME_MODES.find(m=>m.id==='ctf').name,'Capture the Flag');
+  assert.equal(GAME_MODES.find(m=>m.id==='ctf').rules.score,'captures');
+  assert.equal(GAME_MODES.find(m=>m.id==='armsrace').name,'Arms Race');
+  assert.equal(GAME_MODES.find(m=>m.id==='deathmatch').rules.score,'frags');
 });
 
 test('CTF assigns teams, flag lifecycle and capture preconditions',()=>{

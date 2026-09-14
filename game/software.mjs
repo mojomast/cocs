@@ -4,9 +4,15 @@
 import * as T from 'three';
 import {skyPalette,makeStarField} from './environment.mjs';
 export class SoftwareRenderer{
- constructor(canvas){this.domElement=canvas;this.ctx=canvas.getContext('2d',{alpha:false});if(!this.ctx)throw new Error('No canvas rendering context is available');this.info={render:{calls:0,triangles:0}};this.cache=new WeakMap();this.isSoftware=true;this.ratio=.85;}
+ constructor(canvas){this.domElement=canvas;this.ctx=canvas.getContext('2d',{alpha:false});if(!this.ctx)throw new Error('No canvas rendering context is available');this.info={render:{calls:0,triangles:0}};this.cache=new WeakMap();this.isSoftware=true;this.ratio=.85;this.triangleBudget=Infinity;this.minScreenArea=.06;}
  setPixelRatio(ratio){this.ratio=ratio;}
  setSize(w,h){this.domElement.width=Math.max(1,Math.round(w*this.ratio));this.domElement.height=Math.max(1,Math.round(h*this.ratio));}
+ // Hard ceiling on triangles submitted in one frame. Reached mid-scene the
+ // renderer stops rasterizing rather than growing unbounded with scene detail.
+ setTriangleBudget(budget){this.triangleBudget=Number.isFinite(budget)&&budget>0?Math.floor(budget):Infinity;return this.triangleBudget;}
+ // Raised for low quality tiers so sub-pixel facets are dropped before costly
+ // clipping/colour work instead of being drawn and hidden under neighbours.
+ setScreenArea(area){this.minScreenArea=Number.isFinite(area)&&area>0?area:.06;return this.minScreenArea;}
  dispose(){}
  render(scene,camera){
   const ctx=this.ctx,w=this.domElement.width,h=this.domElement.height;scene.updateMatrixWorld();camera.updateMatrixWorld();this._paintSky(ctx,w,h,scene,camera);
@@ -18,6 +24,7 @@ export class SoftwareRenderer{
   const color=(mat,light,alpha,tr,tg,tb)=>{let c=colors.get(mat);if(!c){c={lr:mat.color.r,lg:mat.color.g,lb:mat.color.b};c.sr=toSRGB(c.lr);c.sg=toSRGB(c.lg);c.sb=toSRGB(c.lb);colors.set(mat,c);}const r=tr===undefined?c.sr:toSRGB(c.lr*tr),g=tr===undefined?c.sg:toSRGB(c.lg*tg),b=tr===undefined?c.sb:toSRGB(c.lb*tb);return `rgba(${Math.min(255,Math.round(r*255*light))},${Math.min(255,Math.round(g*255*light))},${Math.min(255,Math.round(b*255*light))},${alpha})`;};
   const clip=verts=>{const out=[];for(let i=0;i<verts.length;i++){const a=verts[i],b=verts[(i+1)%verts.length],ain=a[2]<-.1,bin=b[2]<-.1;if(ain)out.push(a);if(ain!==bin){const t=(-.1-a[2])/(b[2]-a[2]);out.push([a[0]+t*(b[0]-a[0]),a[1]+t*(b[1]-a[1]),-.1]);}}return out;};
   scene.traverseVisible(obj=>{
+   if(triangles>=this.triangleBudget)return;
    if(!obj.geometry||!obj.material)return;const mat=Array.isArray(obj.material)?obj.material[0]:obj.material;if(!mat.visible||mat.opacity<.015)return;const pos=obj.geometry.attributes.position;if(!pos)return;
    viewMatrix.multiplyMatrices(camera.matrixWorldInverse,obj.matrixWorld);
    let cached=this.cache.get(obj.geometry);if(!cached){const attr=obj.geometry.attributes.color;cached={positions:Array.from(pos.array),indices:obj.geometry.index?Array.from(obj.geometry.index.array):Array.from({length:pos.count},(_,i)=>i),colors:attr?Array.from(attr.array):null};this.cache.set(obj.geometry,cached);}
@@ -29,7 +36,7 @@ export class SoftwareRenderer{
     const ix=cached.indices;
     if(obj.isLine||obj.isLineSegments){for(let i=0;i<ix.length-1;i+=obj.isLineSegments?2:1){const a=vertices[ix[i]],b=vertices[ix[i+1]];if(a[2]>=-.1||b[2]>=-.1)continue;const p=project(a),q=project(b);if((p[0]<0&&q[0]<0)||(p[0]>w&&q[0]>w)||(p[1]<0&&q[1]<0)||(p[1]>h&&q[1]>h))continue;draw.push({depth:-(a[2]+b[2])*.5,points:[p,q],color:color(mat,1,mat.opacity),line:true});}continue;}
     if(!obj.isMesh)continue;
-    for(let i=0;i<ix.length;i+=3){const a=vertices[ix[i]],b=vertices[ix[i+1]],c=vertices[ix[i+2]];if(!a||!b||!c||(a[2]>=-.1&&b[2]>=-.1&&c[2]>=-.1))continue;const poly=clip([a,b,c]);if(poly.length<3)continue;const p=poly.map(project),area=(p[1][0]-p[0][0])*(p[2][1]-p[0][1])-(p[1][1]-p[0][1])*(p[2][0]-p[0][0]),back=mat.side===T.BackSide;if(((mat.side===T.FrontSide||back)&&(back?area<=0:area>=0))||Math.abs(area)<.06)continue;
+    for(let i=0;i<ix.length;i+=3){if(triangles>=this.triangleBudget)break;const a=vertices[ix[i]],b=vertices[ix[i+1]],c=vertices[ix[i+2]];if(!a||!b||!c||(a[2]>=-.1&&b[2]>=-.1&&c[2]>=-.1))continue;const poly=clip([a,b,c]);if(poly.length<3)continue;const p=poly.map(project),area=(p[1][0]-p[0][0])*(p[2][1]-p[0][1])-(p[1][1]-p[0][1])*(p[2][0]-p[0][0]),back=mat.side===T.BackSide;if(((mat.side===T.FrontSide||back)&&(back?area<=0:area>=0))||Math.abs(area)<this.minScreenArea)continue;
      if(p.every(v=>v[0]<0)||p.every(v=>v[0]>w)||p.every(v=>v[1]<0)||p.every(v=>v[1]>h))continue;
      const ux=b[0]-a[0],uy=b[1]-a[1],uz=b[2]-a[2],vx=c[0]-a[0],vy=c[1]-a[1],vz=c[2]-a[2],nx=uy*vz-uz*vy,ny=uz*vx-ux*vz,nz=ux*vy-uy*vx,nl=Math.hypot(nx,ny,nz)||1;
      const light=mat.isMeshBasicMaterial||mat.emissiveIntensity>0&&mat.emissive?.getHex()>0?1:Math.max(.4,.7+(nx*.25+ny*.7+nz*.55)/nl*.4);
@@ -45,7 +52,13 @@ export class SoftwareRenderer{
   const palette=skyPalette(sky.background,sky.phase),gradient=ctx.createLinearGradient(0,0,0,h);
   gradient.addColorStop(0,palette.zenith);gradient.addColorStop(.55,palette.horizon);gradient.addColorStop(1,palette.ground);
   ctx.fillStyle=gradient;ctx.fillRect(0,0,w,h);
-  const f=h*.5/Math.tan(camera.fov*Math.PI/360),cx=w/2,cy=h/2,q=camera.getWorldQuaternion(new T.Quaternion()).invert(),v=new T.Vector3(),project=p=>[cx+p.x*f/-p.z,cy-p.y*f/-p.z];
+  const f=h*.5/Math.tan(camera.fov*Math.PI/360),cx=w/2,cy=h/2,worldQ=camera.getWorldQuaternion(new T.Quaternion()),q=worldQ.clone().invert(),v=new T.Vector3(),project=p=>[cx+p.x*f/-p.z,cy-p.y*f/-p.z];
+  // Silhouette the horizon from the camera's own pitch so the CPU backdrop ends
+  // on layered ridges rather than a flat gradient band.
+  const forward=v.set(0,0,-1).applyQuaternion(worldQ),horizontal=new T.Vector3(forward.x,0,forward.z);
+  if(horizontal.lengthSq()<1e-6)horizontal.set(0,0,-1);else horizontal.normalize();
+  const horizonView=horizontal.applyQuaternion(q),horizonY=horizonView.z<-.0001?cy-horizonView.y*f/-horizonView.z:cy;
+  this._paintMountains(ctx,w,h,horizonY,sky,palette);
   if(sky.phase==='night'){
    const field=makeStarField(sky.seed||1,{count:160});
    for(let i=0;i<field.count;i++){
@@ -58,5 +71,19 @@ export class SoftwareRenderer{
   }
   const direction=sky.sunDir||[18,24,10],sun=new T.Vector3(direction[0],direction[1],direction[2]).normalize().applyQuaternion(q);
   if(sun.z<-.15&&typeof ctx.createRadialGradient==='function'&&typeof ctx.arc==='function'){const point=project(sun),radius=Math.max(10,Math.min(w,h)*.045),glow=ctx.createRadialGradient(point[0],point[1],0,point[0],point[1],radius);glow.addColorStop(0,palette.disk);glow.addColorStop(.42,palette.diskGlow);glow.addColorStop(1,'rgba(0,0,0,0)');ctx.fillStyle=glow;ctx.beginPath();ctx.arc(point[0],point[1],radius,0,Math.PI*2);ctx.fill();}
+ }
+ // Deterministic two-layer ridge silhouette drawn against the gradient horizon.
+ // Uses only path primitives so it works on any 2D canvas backend.
+ _paintMountains(ctx,w,h,horizonY,sky,palette){
+  if(!Number.isFinite(horizonY)||horizonY<-h*.5||horizonY>h*1.5)return;
+  let state=((Number(sky?.seed)||1)>>>0)^0x9e3779b9;
+  const random=()=>{state=(Math.imul(state,1664525)+1013904223)>>>0;return state/4294967296;};
+  const layers=[{amp:h*.17,base:h*.06,segments:12,depth:.45},{amp:h*.11,base:h*.02,segments:18,depth:.78}];
+  for(const layer of layers){
+   const color='#'+new T.Color(palette.horizon).lerp(new T.Color(palette.ground),layer.depth).getHexString();
+   ctx.fillStyle=color;ctx.beginPath();ctx.moveTo(0,horizonY+layer.base);
+   for(let i=0;i<=layer.segments;i++){const x=w*i/layer.segments;ctx.lineTo(x,horizonY+layer.base-random()*layer.amp);}
+   ctx.lineTo(w,horizonY+layer.base);ctx.closePath();ctx.fill();
+  }
  }
 }

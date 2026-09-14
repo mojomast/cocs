@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import * as T from 'three';
-import {addSky,addMountains,addScatter} from './environment.mjs';
+import {addSky,addMountains,addScatter,updateScatterSway,ambientProfile,smokeAnchors,AMBIENT_KINDS,skyPalette,skyGradientAt} from './environment.mjs';
 import {ArenaView} from './view.mjs';
 
 const bounds={minX:-40,maxX:40,minZ:-40,maxZ:40};
@@ -60,6 +60,35 @@ test('terrain scatter stays in bounds and produces finite instances',()=>{
  }
 });
 
+test('the software scatter guard keeps prop triangle cost bounded',()=>{
+ const triangles=meshes=>meshes.reduce((sum,mesh)=>sum+mesh.count*(mesh.geometry.index?mesh.geometry.index.count:mesh.geometry.attributes.position.count)/3,0);
+ const webgl=addScatter(new T.Group(),{terrain:flatTerrain(),bounds,seed:9});
+ const software=addScatter(new T.Group(),{terrain:flatTerrain(),bounds,seed:9,software:true});
+ const webglTris=triangles(webgl),softwareTris=triangles(software),budget=120000;
+ assert.ok(webglTris>0&&softwareTris>0,'both detail levels produce scatter');
+ assert.ok(softwareTris<=webglTris,`software scatter ${softwareTris} <= WebGL ${webglTris}`);
+ assert.ok(webglTris<=budget,`WebGL scatter ${webglTris} stays under ${budget} triangles`);
+ assert.ok(softwareTris<=budget,`software scatter ${softwareTris} stays under ${budget} triangles`);
+});
+
+test('the sky carries a tagged additive atmosphere band for WebGL',()=>{
+ const world=new T.Group();
+ const sky=addSky(world,{background:'#0a0f1e',radius:120,phase:'day'});
+ const atmosphere=sky.children.find(child=>child.userData.atmosphere);
+ assert.ok(atmosphere&&atmosphere.isMesh,'the dome parents an atmosphere band');
+ assert.equal(atmosphere.userData.environment,true);
+ assert.notEqual(atmosphere.material.side,T.FrontSide,'the haze is seen from inside the dome');
+ assert.ok(atmosphere.geometry.attributes.position.count>0);
+ assert.equal(sky.children.filter(child=>child.userData.atmosphere).length,1);
+});
+
+test('terrain scatter exposes named families including the fern tufts',()=>{
+ const meshes=addScatter(new T.Group(),{terrain:flatTerrain(),bounds,seed:5});
+ const kinds=new Set(meshes.map(mesh=>mesh.userData.scatterKind));
+ assert.ok(kinds.has('grass')&&kinds.has('rock')&&kinds.has('fern'),`scatter kinds ${[...kinds].join(',')}`);
+ for(const mesh of meshes){assert.ok(kinds.has(mesh.userData.scatterKind));assert.equal(mesh.userData.environment,true);}
+});
+
 test('scatter skips missing terrain and unsupported ground without throwing',()=>{
  const world=new T.Group();
  assert.deepEqual(addScatter(world,{}),[]);
@@ -87,4 +116,93 @@ test('the view reduced-motion gate still keeps the static backdrop',()=>{
  assert.equal(view.reduced(),true);
  view.display={reducedMotion:false};view.motionQuery={matches:false};
  assert.equal(view.reduced(),false);
+});
+
+test('the ambient profile is a pure, biome-aware shape with finite fields',()=>{
+ const dust=ambientProfile({id:'custom-map'},'night');
+ assert.equal(dust.kind,'dust');
+ assert.ok(AMBIENT_KINDS.includes(dust.kind));
+ assert.ok(Object.isFrozen(dust));
+ assert.deepEqual(dust,ambientProfile({id:'custom-map'},'night'),'same map and phase yield the same profile');
+ assert.equal(ambientProfile({id:'frostline'},'day').kind,'snow');
+ assert.equal(ambientProfile({id:'blood-gulch'},'day').kind,'leaf');
+ assert.equal(ambientProfile({id:'foundry'},'day').kind,'ember');
+ assert.equal(ambientProfile({id:'warfront'},'day').kind,'ash');
+ for(const arena of [{id:'aether'},{id:'x'},{},null]){
+  const profile=ambientProfile(arena,'day');
+  assert.ok(AMBIENT_KINDS.includes(profile.kind));
+  for(const key of ['color','size','life','rate','drift','rise'])assert.ok(profile[key]!==undefined,`${profile.kind}.${key}`);
+  assert.equal(typeof profile.additive,'boolean');
+ }
+ assert.notEqual(ambientProfile({id:'foundry'},'day').additive,ambientProfile({id:'frostline'},'day').additive,'embers glow while snow does not');
+});
+
+test('smoke anchors are deterministic, bounded and count-limited',()=>{
+ const bounds={minX:-30,maxX:30,minZ:-20,maxZ:20};
+ const a=smokeAnchors(bounds,7,4),b=smokeAnchors(bounds,7,4),c=smokeAnchors(bounds,8,4);
+ assert.deepEqual(a,b,'the same seed reproduces the emitters');
+ assert.notDeepEqual(a,c);
+ assert.equal(a.length,4);
+ assert.equal(smokeAnchors(bounds,7,99).length,12,'the emitter count is capped');
+ for(const anchor of a){assert.ok(anchor.x>=bounds.minX&&anchor.x<=bounds.maxX);assert.ok(anchor.z>=bounds.minZ&&anchor.z<=bounds.maxZ);assert.ok(Number.isFinite(anchor.y));}
+});
+
+test('wind sway mutates only wind-tagged vegetation and is bounded and deterministic',()=>{
+ const meshes=addScatter(new T.Group(),{terrain:flatTerrain(),bounds,seed:11,wind:true});
+ const swaying=meshes.filter(mesh=>mesh.userData.scatterWind);
+ assert.ok(swaying.length>0,'grass and fern families capture wind data');
+ assert.ok(swaying.every(mesh=>['grass','fern'].includes(mesh.userData.scatterKind)),'only vegetation sways');
+ for(const mesh of swaying){
+  assert.equal(mesh.userData.scatterWind.base.length,mesh.count*16,'each live instance has a base transform');
+  assert.equal(mesh.userData.scatterWind.phase.length,mesh.count);
+ }
+ const target=swaying[0],before=Array.from(target.instanceMatrix.array.slice(0,target.count*16));
+ const moved=updateScatterSway(swaying,1.25);
+ assert.equal(moved,swaying.reduce((n,mesh)=>n+mesh.count,0),'every vegetation instance sways');
+ const after=Array.from(target.instanceMatrix.array.slice(0,target.count*16));
+ assert.notDeepEqual(after,before,'the wind displaces the instance matrices');
+ assert.ok(after.every(Number.isFinite),'the swayed matrices stay finite');
+ const replay=Array.from(target.instanceMatrix.array.slice(0,target.count*16));
+ updateScatterSway(swaying,1.25);
+ assert.deepEqual(Array.from(target.instanceMatrix.array.slice(0,target.count*16)),replay,'sway is deterministic for the same time');
+ const rocks=meshes.filter(mesh=>mesh.userData.scatterKind==='rock');
+ assert.equal(updateScatterSway(rocks,2),0,'rocks never sway');
+ assert.equal(updateScatterSway(undefined,2),0);
+});
+
+test('scatter without the wind option never tags vegetation for sway',()=>{
+ const meshes=addScatter(new T.Group(),{terrain:flatTerrain(),bounds,seed:12});
+ assert.ok(meshes.length>0);
+ assert.ok(meshes.every(mesh=>mesh.userData.scatterWind===undefined),'wind data is opt-in');
+ assert.equal(updateScatterSway(meshes,1),0);
+});
+
+test('the sky gradient is deterministic, finite and eases from horizon to zenith',()=>{
+ const palette=skyPalette('#0a0f1e','day'),horizon=skyGradientAt(0,palette),zenith=skyGradientAt(1,palette),ground=skyGradientAt(-1,palette);
+ assert.deepEqual(skyGradientAt(.4,palette),skyGradientAt(.4,palette),'the gradient is a pure function');
+ for(const t of [-1,-.4,0,.25,.6,1,2,NaN]){const sample=skyGradientAt(t,palette);for(const key of ['r','g','b'])assert.ok(Number.isFinite(sample[key])&&sample[key]>=0&&sample[key]<=1,`${key} at ${t}`);}
+ const lift=sample=>sample.r+sample.g+sample.b;
+ assert.ok(lift(zenith)>lift(horizon),'the zenith is brighter than the horizon for the day palette');
+ assert.ok(lift(ground)<=lift(horizon),'the ground hemisphere is darker than the horizon');
+ assert.ok(Math.abs(skyGradientAt(3,palette).r-zenith.r)<1e-9,'out-of-range heights clamp to the zenith');
+ assert.notDeepEqual(horizon,skyGradientAt(0,skyPalette('#0a0f1e','night')),'the haze follows the palette phase');
+});
+
+test('scatter density and detail scale the triangle bill without changing the layout rule',()=>{
+ const triangles=meshes=>meshes.reduce((sum,mesh)=>sum+mesh.count*(mesh.geometry.index?mesh.geometry.index.count:mesh.geometry.attributes.position.count)/3,0);
+ const full=addScatter(new T.Group(),{terrain:flatTerrain(),bounds,seed:21});
+ const sparse=addScatter(new T.Group(),{terrain:flatTerrain(),bounds,seed:21,density:.4,detail:.3});
+ const fullInstances=full.reduce((n,mesh)=>n+mesh.count,0),sparseInstances=sparse.reduce((n,mesh)=>n+mesh.count,0);
+ assert.ok(sparseInstances>0&&sparseInstances<fullInstances,`sparse ${sparseInstances} < full ${fullInstances}`);
+ assert.ok(triangles(sparse)<triangles(full),'the sparse tier draws fewer triangles');
+ const zero=addScatter(new T.Group(),{terrain:flatTerrain(),bounds,seed:21,density:0});
+ assert.equal(zero.length,0,'a zero density builds nothing');
+});
+
+test('mountain detail scales the cone shell resolution',()=>{
+ const triangleCount=mesh=>mesh.count*mesh.geometry.attributes.position.count/3;
+ const coarse=addMountains(new T.Group(),{background:'#090f17',count:10,seed:2,detail:.2});
+ const fine=addMountains(new T.Group(),{background:'#090f17',count:10,seed:2,detail:1});
+ assert.ok(triangleCount(coarse)<triangleCount(fine),'coarse mountains use fewer segments');
+ assert.ok(coarse.geometry.attributes.position.count<fine.geometry.attributes.position.count);
 });

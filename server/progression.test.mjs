@@ -46,6 +46,22 @@ test('gear is level-gated and saved',async()=>{
  assert.equal(reloaded.get(ID).gear.primary,'heavy-barrel');
 });
 
+test('per-mode career stats round-trip through persistence',async()=>{
+ const file=tempFile(),store=new ProgressionStore(file);
+ store.award(ID,{win:true,mode:'deathmatch',actor:{frags:7,scoreStats:{}}});
+ store.award(ID,{win:false,mode:'ctf',actor:{frags:2,scoreStats:{captures:1}}});
+ const live=store.get(ID).byMode;
+ assert.deepEqual(live.deathmatch,{matches:1,wins:1,kills:7,best:7});
+ assert.deepEqual(live.ctf,{matches:1,wins:0,kills:2,best:2});
+ await store.whenPersisted();
+ const reloaded=new ProgressionStore(file);
+ assert.deepEqual(reloaded.get(ID).byMode,live);
+ assert.deepEqual(reloaded.get(ID).byMode.ctf,{matches:1,wins:0,kills:2,best:2});
+ const copies=store.all();
+ copies[0].byMode.deathmatch.kills=999;
+ assert.equal(store.get(ID).byMode.deathmatch.kills,7,'all() returns copied mode stats');
+});
+
 test('invalid ids never create profiles and all() returns copies',()=>{
  const store=new ProgressionStore();
  assert.equal(store.award('bad',{actor:{frags:1}}),null);

@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {CAMPAIGN_MISSIONS} from './campaign-data.mjs';
-import {CAMPAIGN_STORAGE_KEY,CAMPAIGN_PROGRESS_VERSION,defaultCampaignProgress,normalizeCampaignProgress,isMissionUnlocked,firstIncompleteMission,nextMissionId,missionIndex,recordMission,setCheckpoint} from './campaign-progress.mjs';
+import {CAMPAIGN_STORAGE_KEY,CAMPAIGN_PROGRESS_VERSION,defaultCampaignProgress,normalizeCampaignProgress,isMissionUnlocked,firstIncompleteMission,nextMissionId,missionIndex,recordMission,setCheckpoint,checkpointFor,clearCheckpoint} from './campaign-progress.mjs';
 
 test('default and normalized campaign progress are stable',()=>{
  const base=defaultCampaignProgress();
@@ -29,7 +29,10 @@ test('missions unlock sequentially in campaign order',()=>{
  if(order.length>1)assert.equal(isMissionUnlocked(after,order[1]),true);
  if(order.length>2)assert.equal(isMissionUnlocked(after,order[2]),false);
  assert.equal(firstIncompleteMission(after),order.length>1?order[1]:order[0]);
- assert.equal(nextMissionId(after),order.length>2?order[1]:null);
+ assert.equal(nextMissionId(after),order.length>1?order[1]:null);
+ let full=defaultCampaignProgress();
+ for(const id of order)full=recordMission(full,{id,won:true,time:60,score:1});
+ assert.equal(nextMissionId(full),null,'a finished campaign has no next mission');
 });
 
 test('recording a mission keeps the best time and score',()=>{
@@ -51,4 +54,16 @@ test('checkpoints round-trip for real missions only',()=>{
  assert.deepEqual(progress.checkpoint,{missionId:order[0],step:2});
  assert.equal(setCheckpoint(progress,'bogus',1).checkpoint.missionId,order[0]);
  assert.equal(missionIndex(order[0]),0);
+});
+
+test('checkpointFor resolves a mission resume step and clears cleanly',()=>{
+ const order=CAMPAIGN_MISSIONS.map(m=>m.id);
+ let progress=setCheckpoint(defaultCampaignProgress(),order[0],4);
+ assert.equal(checkpointFor(progress,order[0]),4);
+ assert.equal(checkpointFor(progress,'nope'),null);
+ assert.equal(checkpointFor(defaultCampaignProgress(),order[0]),null);
+ const cleared=clearCheckpoint(progress);
+ assert.equal(cleared.checkpoint,null);
+ assert.equal(checkpointFor(cleared,order[0]),null);
+ assert.equal(clearCheckpoint(cleared),cleared,'clearing with no checkpoint is a no-op');
 });

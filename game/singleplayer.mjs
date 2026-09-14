@@ -1,6 +1,6 @@
-import {CHARACTERS} from './data.mjs';
+import {CHARACTERS,POWERUPS} from './data.mjs';
 import {CAMPAIGN_MISSIONS,missionFor} from './campaign-data.mjs';
-import {applyEnemyFields,enemyById,enemyLeash,ENEMY_SPEED_VARIANCE,DEFAULT_ENEMY_ID,NPC_ZONE_KINDS} from './enemy-types.mjs';
+import {applyEnemyFields,enemyById,enemyLeash,bossPhaseProfile,ENEMY_SPEED_VARIANCE,DEFAULT_ENEMY_ID,NPC_ZONE_KINDS} from './enemy-types.mjs';
 
 // Single-player simulation. Horde spawns escalating waves of fragile enemies;
 // campaign runs a linear, story-driven sequence of objectives with world
@@ -27,30 +27,92 @@ export const hordePacing = id => HORDE_CONFIG[id] || HORDE_CONFIG.easy;
 export const HORDE_COMPOSITION = Object.freeze([
  Object.freeze({husk:3,spitter:1,brute:0}),
  Object.freeze({husk:4,spitter:1,brute:0}),
- Object.freeze({husk:4,spitter:2,brute:0}),
- Object.freeze({husk:5,spitter:2,brute:0}),
- Object.freeze({husk:6,spitter:2,brute:1}),
- Object.freeze({husk:7,spitter:3,brute:1}),
+ Object.freeze({husk:4,spitter:1,sapper:1,brute:0}),
+ Object.freeze({husk:5,spitter:2,mender:1,brute:0}),
+ Object.freeze({husk:6,spitter:2,sapper:1,mortar:1,brute:1}),
+ Object.freeze({husk:6,spitter:2,overseer:1,bulwark:1,brute:1}),
+ Object.freeze({husk:7,spitter:3,overseer:1,mortar:2,bulwark:1,brute:1}),
+ Object.freeze({husk:8,spitter:3,mender:1,overseer:1,mortar:2,bulwark:2,brute:2}),
 ]);
+// Stable spawn order for a wave. Derived from the composition table so adding a
+// row entry is the only change needed to field a new archetype.
+export const HORDE_TYPES = Object.freeze([...new Set(HORDE_COMPOSITION.flatMap(row=>Object.keys(row).filter(key=>key!=='elite')))]);
 // Marked on NPCs so the base respawn timer can never revive them.
 const NPC_DEAD = 1e9;
 const STORY_SECONDS = 7;
+// Between-wave economy: a full resupply on every clear, plus a choose-1-of-3
+// upgrade every 3-5 waves. The gap cycles deterministically through this table,
+// so a run never depends on Math.random. Choices reuse the shared POWERUPS
+// vocabulary and are re-applied on every resupply, making them run upgrades.
+export const HORDE_UPGRADE_GAPS = Object.freeze([3,4,5]);
+export const HORDE_UPGRADES = Object.freeze(POWERUPS.map(powerup=>Object.freeze({id:powerup.id,name:powerup.name,description:powerup.description,color:powerup.color,duration:powerup.duration})));
+const hordeUpgradeInfo = id => HORDE_UPGRADES.find(choice=>choice.id===id)||null;
+export function hordeUpgradeChoices(offerIndex=0){
+ const ids=POWERUPS.map(powerup=>powerup.id),count=Math.min(3,ids.length),start=((Math.round(offerIndex)||0)%ids.length+ids.length)%ids.length,choices=[];
+ for(let i=0;i<count;i++)choices.push(ids[(start+i)%ids.length]);
+ return choices;
+}
+
+// Wave modifiers give every tier a readable identity and a clear telegraph
+// (`horde-wave` carries the modifier, and `horde-modifier` announces the twist
+// for the HUD). The cycle is deterministic and difficulty-independent, so a
+// settled run always fields the same sequence of twists.
+export const HORDE_WAVE_MODIFIERS = Object.freeze([
+ Object.freeze({id:'swarm',name:'SWARM',description:'A fast, fragile rush with no heavy support.'}),
+ Object.freeze({id:'mixed',name:'MIXED',description:'Balanced ranks of husks, spitters and heavies.'}),
+ Object.freeze({id:'artillery',name:'ARTILLERY',description:'Indirect fire — keep moving or eat the shells.'}),
+ Object.freeze({id:'shielded',name:'SHIELDED',description:'An armoured front line leads the push.'}),
+ Object.freeze({id:'elite',name:'ELITE GATE',description:'An elite unit anchors the wave.'}),
+]);
+const HORDE_MODIFIER_ORDER = Object.freeze(['swarm','mixed','artillery','shielded','mixed','elite']);
+export function hordeWaveModifier(wave,difficultyId='easy'){
+ const index=Math.max(1,Math.round(wave)),id=HORDE_MODIFIER_ORDER[(index-1)%HORDE_MODIFIER_ORDER.length];
+ const base=HORDE_WAVE_MODIFIERS.find(modifier=>modifier.id===id)||HORDE_WAVE_MODIFIERS[0];
+ return {...base,wave:index,difficulty:difficultyId};
+}
+// Resolves the full wave plan: the base composition plus the modifier's twist.
+// Twists swap (never inflate) bodies so the live cap and difficulty pacing stay
+// authoritative, and wave one is left untouched as the tutorial wave.
+export function hordeWavePlan(wave,difficultyId='easy'){
+ const counts={...hordeWaveComposition(wave,difficultyId)};
+ const modifier=hordeWaveModifier(wave,difficultyId);
+ if(modifier.id==='artillery'&&(counts.mortar||0)<1){
+  const source=counts.spitter>0?'spitter':counts.brute>0?'brute':'husk';
+  if(counts[source]>0)counts[source]-=1;
+  counts.mortar=(counts.mortar||0)+1;
+ }
+ if(modifier.id==='shielded'&&(counts.bulwark||0)<1){
+  const source=counts.brute>0?'brute':counts.spitter>0?'spitter':'husk';
+  if(counts[source]>0)counts[source]-=1;
+  counts.bulwark=(counts.bulwark||0)+1;
+ }
+ if(modifier.id==='elite')counts.elite=true;
+ return {counts,modifier};
+}
 
 export function hordeWaveComposition(wave,difficultyId='easy'){
  const pacing=hordePacing(difficultyId),index=Math.max(1,Math.round(wave));
  const row=HORDE_COMPOSITION[Math.min(index-1,HORDE_COMPOSITION.length-1)];
  const overflow=Math.max(0,index-HORDE_COMPOSITION.length);
- const counts={husk:Math.round((row.husk||0)*pacing.countScale)+Math.floor(overflow*pacing.growth),spitter:Math.round((row.spitter||0)*pacing.countScale),brute:Math.round((row.brute||0)*pacing.countScale)};
- let total=counts.husk+counts.spitter+counts.brute;
- if(total>pacing.maxAlive){counts.husk=Math.max(0,counts.husk-(total-pacing.maxAlive));total=counts.husk+counts.spitter+counts.brute;}
- if(total>pacing.maxAlive)counts.spitter=Math.max(0,counts.spitter-(total-pacing.maxAlive));
+ const counts={};
+ for(const kind of HORDE_TYPES)counts[kind]=0;
+ for(const [kind,base] of Object.entries(row)){if(kind==='elite'||!(kind in counts))continue;counts[kind]+=Math.round((base||0)*pacing.countScale);}
+ counts.husk+=Math.floor(overflow*pacing.growth);
+ let total=HORDE_TYPES.reduce((sum,kind)=>sum+counts[kind],0);
+ if(total>pacing.maxAlive){
+  for(const kind of [...HORDE_TYPES].reverse()){
+   if(kind==='husk'||total<=pacing.maxAlive)continue;
+   const cut=Math.min(counts[kind],total-pacing.maxAlive);
+   counts[kind]-=cut;total-=cut;
+  }
+ }
  const elite=Boolean(pacing.eliteEvery)&&index%pacing.eliteEvery===0;
  return {...counts,elite};
 }
 
 export const hordeWaveSize = (wave,difficulty='easy') => {
  const composition=hordeWaveComposition(wave,difficulty);
- return composition.husk+composition.spitter+composition.brute;
+ return HORDE_TYPES.reduce((sum,kind)=>sum+(composition[kind]||0),0);
 };
 
 const actorById = (match,id) => (match.actors||[]).find(actor => actor.id === id) || null;
@@ -169,7 +231,8 @@ export function initializeSinglePlayer(match){
  match.humanCount=1;
  match.config.botCount=0;
  const mode=match.config.mode;
- const state={kind:mode,playerId:0,phase:'intermission',timer:0,elapsed:0,lives:2,deaths:0,nextId:1,enemies:[],allies:[],groups:{},entered:{},everHadEnemies:false,boss:null,winner:null,message:null,objective:'',script:[],fired:{},defendProgress:0,lastEvent:0,steps:[],stepIndex:0,stepElapsed:0,holdProgress:0,waypoint:null,storyLine:null,bark:null,bossPhase:0};
+ const state={kind:mode,playerId:0,phase:'intermission',timer:0,elapsed:0,lives:2,deaths:0,nextId:1,enemies:[],allies:[],groups:{},entered:{},everHadEnemies:false,boss:null,winner:null,message:null,objective:'',script:[],fired:{},defendProgress:0,lastEvent:0,steps:[],stepIndex:0,stepElapsed:0,holdProgress:0,waypoint:null,storyLine:null,bark:null,bossPhase:0,bossPhaseName:null,bossPhaseMax:1,checkpoint:null,upgrades:[],upgradeOffers:0,pendingUpgrade:null,upgradeSelected:null,nextUpgradeWave:HORDE_UPGRADE_GAPS[0],upgradeGapIndex:0,waveModifier:null};
+ let resumeStep=null;
  if(mode==='horde'){
   const pacing=hordePacing(match.config.difficulty);
   state.waveTarget=Math.max(1,Math.round(match.config.fragLimit||10));
@@ -182,10 +245,16 @@ export function initializeSinglePlayer(match){
   state.script=(mission.script||[]).map((event,index)=>({id:event.id??`${mission.id}-script-${index}`,...event}));
   for(const event of state.script)if(event.when==='player-in-zone')Object.assign(event,snapZone(match,event));
   state.steps=(mission.steps||[]).map(step=>snapStep(match,step));
+  // The boss phase pip strip needs to know how many phases the mission authors.
+  const scanPhases=actions=>{for(const action of actions||[])if(Number.isFinite(action?.bossPhase))state.bossPhaseMax=Math.max(state.bossPhaseMax,Math.max(1,Math.round(action.bossPhase)));};
+  for(const event of state.script)scanPhases([event]);
+  for(const step of state.steps){scanPhases(step.onStart);scanPhases(step.onComplete);}
   const player=match.actors[0];
+  if(Number.isFinite(match.config.checkpoint))resumeStep=Math.round(match.config.checkpoint);
   if(player&&mission.start){placeAt(match,player,mission.start.x,mission.start.z);if(Number.isFinite(mission.start.yaw)){player.yaw=mission.start.yaw;player.bodyYaw=mission.start.yaw;}}
  }
  match.modeState=state;
+ if(mode==='campaign'&&resumeStep!==null)resumeSinglePlayer(match,resumeStep);
  match.objectiveState={kind:mode,zones:[],winner:null,singleplayer:true};
  match.teamScores=match.teamScores||{0:0,1:0};
  return state;
@@ -199,13 +268,75 @@ function releaseDead(match,state){
 
 function startWave(match,state){
  state.wave+=1;state.phase='wave';state.timer=0;state.enemies=[];
- const composition=hordeWaveComposition(state.wave,match.config.difficulty);
+ const plan=hordeWavePlan(state.wave,match.config.difficulty),composition=plan.counts,modifier=plan.modifier;
+ state.waveModifier={id:modifier.id,name:modifier.name,description:modifier.description};
  const group=`wave-${state.wave}`;
- if(composition.husk>0)spawnGroup(match,state,{type:'husk',count:composition.husk,group},{team:1});
- if(composition.spitter>0)spawnGroup(match,state,{type:'spitter',count:composition.spitter,group},{team:1});
- if(composition.brute>0)spawnGroup(match,state,{type:'brute',count:composition.brute,group,elite:composition.elite},{team:1});
- const count=composition.husk+composition.spitter+composition.brute;
- match.emit('horde-wave',{wave:state.wave,target:state.waveTarget,count,elite:composition.elite});
+ const eliteType=composition.bulwark>0?'bulwark':composition.brute>0?'brute':composition.mortar>0?'mortar':composition.overseer>0?'overseer':null;
+ let count=0;
+ for(const kind of HORDE_TYPES){
+  const amount=composition[kind]||0;
+  if(amount<=0)continue;
+  spawnGroup(match,state,{type:kind,count:amount,group,elite:composition.elite&&kind===eliteType},{team:1});
+  count+=amount;
+ }
+ match.emit('horde-wave',{wave:state.wave,target:state.waveTarget,count,elite:Boolean(composition.elite),modifier:modifier.id,modifierName:modifier.name});
+ match.emit('horde-modifier',{wave:state.wave,id:modifier.id,name:modifier.name,description:modifier.description});
+}
+
+// Applies one POWERUPS entry as a run-long horde blessing. The timed powerup
+// pipeline drives the actual stat change; the timer is stretched so the buff
+// survives the next wave and is refreshed again on every resupply.
+function grantHordeUpgrade(match,player,id){
+ if(!player||player.health<=0)return false;
+ const powerup=POWERUPS.find(entry=>entry.id===id);
+ if(!powerup)return false;
+ match.applyPowerup(player,id);
+ if(player.powerups[id]!==undefined)player.powerups[id]=Math.max(player.powerups[id],(powerup.duration||0)*3);
+ if(typeof match.refreshPowerups==='function')match.refreshPowerups(player);
+ return true;
+}
+
+export function resupplyHorde(match,state){
+ const player=match.actors[0];
+ if(!player||player.health<=0)return false;
+ player.health=player.maxHealth;
+ player.armor=Math.max(player.armor||0,100);
+ for(let index=0;index<player.ammo.length;index++){
+  const amount=player.ammo[index];
+  if(index!==player.weapon&&amount!==Infinity&&!(amount>0))continue;
+  const weapon=typeof match.weaponForIndex==='function'?match.weaponForIndex(player,index):null;
+  const cap=weapon?.cap;
+  if(amount===Infinity||!Number.isFinite(cap))player.ammo[index]=Infinity;
+  else player.ammo[index]=Math.max(amount,cap);
+ }
+ for(const id of state.upgrades||[])grantHordeUpgrade(match,player,id);
+ match.emit('horde-resupply',{wave:state.wave,health:player.health,armor:player.armor,upgrades:(state.upgrades||[]).length});
+ return true;
+}
+
+export function offerHordeUpgrade(match,state){
+ if(!state||state.kind!=='horde')return null;
+ const choices=hordeUpgradeChoices(state.upgradeOffers||0);
+ state.upgradeOffers=(state.upgradeOffers||0)+1;
+ state.pendingUpgrade={wave:state.wave,choices};
+ state.upgradeGapIndex=((state.upgradeGapIndex||0)+1)%HORDE_UPGRADE_GAPS.length;
+ state.nextUpgradeWave=state.wave+HORDE_UPGRADE_GAPS[state.upgradeGapIndex];
+ match.emit('horde-upgrade',{wave:state.wave,choices:[...choices],count:choices.length});
+ return choices;
+}
+
+export function selectHordeUpgrade(match,id){
+ const state=match.modeState;
+ if(!state||state.kind!=='horde')return false;
+ const pending=state.pendingUpgrade;
+ if(!pending||!pending.choices.includes(id)||!hordeUpgradeInfo(id))return false;
+ state.upgrades=[...(state.upgrades||[]),id];
+ state.pendingUpgrade=null;
+ state.upgradeSelected={id,wave:state.wave,at:match.time};
+ const player=match.actors[0];
+ if(player)grantHordeUpgrade(match,player,id);
+ match.emit('horde-upgrade-selected',{id,wave:state.wave,count:state.upgrades.length});
+ return true;
 }
 
 function stepHorde(match,state,dt){
@@ -217,7 +348,9 @@ function stepHorde(match,state,dt){
  if(state.phase!=='wave')return;
  if(aliveEnemies(match,state)>0)return;
  match.emit('horde-wave-cleared',{wave:state.wave});
+ resupplyHorde(match,state);
  if(state.wave>=state.waveTarget){win(match,state,`You survived ${state.waveTarget} waves.`);return;}
+ if(state.wave>=state.nextUpgradeWave)offerHordeUpgrade(match,state);
  state.phase='intermission';state.timer=hordePacing(match.config.difficulty).intermission;releaseDead(match,state);
 }
 
@@ -229,7 +362,7 @@ function applyAction(match,state,action){
  if(!action)return;
  if(action.story){state.storyLine={speaker:action.story.speaker||'OPS',text:action.story.text||'',at:match.time};match.emit('story-line',{speaker:state.storyLine.speaker,text:state.storyLine.text});}
  if(action.bark){const bark=typeof action.bark==='string'?{text:action.bark}:action.bark;state.bark={speaker:bark.speaker||'ENEMY',text:bark.text||'',at:match.time};match.emit('npc-bark',{speaker:state.bark.speaker,text:state.bark.text});}
- if(Number.isFinite(action.bossPhase)){state.bossPhase=Math.max(0,Math.round(action.bossPhase));match.emit('boss-phase',{phase:state.bossPhase,name:action.name||null});}
+ if(Number.isFinite(action.bossPhase)){state.bossPhase=Math.max(0,Math.round(action.bossPhase));state.bossPhaseMax=Math.max(state.bossPhaseMax||1,state.bossPhase);if(action.name)state.bossPhaseName=action.name;match.emit('boss-phase',{phase:state.bossPhase,name:action.name||null});}
  if(action.announce){state.message={text:action.announce,at:match.time};match.emit('mission-message',{text:action.announce});}
  if(action.objective)state.objective=action.objective;
  if(Number.isFinite(action.lives))state.lives=Math.max(0,Math.round(action.lives));
@@ -312,6 +445,169 @@ function stepCampaign(match,state,dt){
  if(state.win)evaluateWin(match,state,dt,state.elapsed);
 }
 
+// Ticks the role abilities of the new enemy archetypes. Deterministic and
+// allocation-light: one pass for auras, one for support pulses, one for sapper
+// fuses. Every bonus is recomputed from a stored base each frame so buffs never
+// compound when auras overlap.
+function updateEnemyRoles(match,state,dt){
+ const ids=state.enemies;
+ if(!ids||!ids.length)return;
+ const allies=[];
+ for(const id of ids){const actor=actorById(match,id);if(actor&&actor.health>0)allies.push(actor);}
+ if(!allies.length)return;
+ for(const actor of allies){actor.auraDamage=1;actor.auraSpeed=1;}
+ for(const leader of allies){
+  const aura=leader.npcLeader;if(!aura)continue;
+  for(const ally of allies){
+   if(ally===leader)continue;
+   if(Math.hypot(ally.x-leader.x,ally.z-leader.z)>aura.radius)continue;
+   if(aura.damageBonus)ally.auraDamage=Math.max(ally.auraDamage,1+aura.damageBonus);
+   if(aura.speedBonus)ally.auraSpeed=Math.max(ally.auraSpeed,1+aura.speedBonus);
+  }
+  if(Number.isFinite(leader.auraWindup)){
+   leader.auraWindup-=dt;
+   if(leader.auraWindup<=0){leader.auraWindup=undefined;match.emit('overseer-aura',{actor:leader.id,x:leader.x,z:leader.z,radius:aura.radius,damageBonus:aura.damageBonus,speedBonus:aura.speedBonus});}
+   continue;
+  }
+  if(!Number.isFinite(leader.auraTimer))leader.auraTimer=aura.interval??4;
+  leader.auraTimer-=dt;
+  if(leader.auraTimer<=0){leader.auraTimer=aura.interval??4;leader.auraWindup=aura.telegraph??.6;match.emit('enemy-telegraph',{kind:'overseer',actor:leader.id,x:leader.x,z:leader.z,radius:aura.radius,duration:leader.auraWindup});}
+ }
+ for(const mender of allies){
+  const aura=mender.npcSupport;if(!aura)continue;
+  if(Number.isFinite(mender.abilityWindup)){
+   mender.abilityWindup-=dt;
+   if(mender.abilityWindup<=0){
+    mender.abilityWindup=undefined;let healed=0;
+    for(const ally of allies){
+     if(ally===mender)continue;
+     if(Math.hypot(ally.x-mender.x,ally.z-mender.z)>aura.radius)continue;
+     if(ally.health<ally.maxHealth){const amount=Math.min(ally.maxHealth-ally.health,aura.heal);ally.health+=amount;healed+=amount;}
+     if(aura.damageBonus)ally.auraDamage=Math.max(ally.auraDamage,1+aura.damageBonus);
+    }
+    match.emit('mender-heal',{actor:mender.id,x:mender.x,z:mender.z,radius:aura.radius,healed});
+   }
+   continue;
+  }
+  if(!Number.isFinite(mender.abilityTimer))mender.abilityTimer=aura.interval;
+  mender.abilityTimer-=dt;
+  if(mender.abilityTimer>0)continue;
+  mender.abilityTimer=aura.interval;mender.abilityWindup=aura.telegraph??.5;
+  match.emit('enemy-telegraph',{kind:'mender',actor:mender.id,x:mender.x,z:mender.z,radius:aura.radius,duration:mender.abilityWindup});
+ }
+ for(const actor of allies){
+  const base=Number.isFinite(actor.auraBaseDamage)?actor.auraBaseDamage:(actor.auraBaseDamage=Number.isFinite(actor.damageMultiplier)?actor.damageMultiplier:1);
+  actor.damageMultiplier=base*(actor.auraDamage||1);
+  actor.speedMultiplier=actor.auraSpeed||1;
+ }
+ const player=match.actors[0];
+ if(!player||match.over)return;
+ for(const sapper of allies){
+  const bomb=sapper.npcSapper;if(!bomb)continue;
+  if(!Number.isFinite(sapper.sapperCooldown))sapper.sapperCooldown=bomb.cooldown??1.2;
+  const distance=Math.hypot(player.x-sapper.x,player.z-sapper.z);
+  if(!Number.isFinite(sapper.sapperFuse)){
+   sapper.sapperCooldown=Math.max(0,sapper.sapperCooldown-dt);
+   if(player.health>0&&distance<=bomb.trigger&&sapper.sapperCooldown<=0){sapper.sapperFuse=bomb.fuse;match.emit('enemy-telegraph',{kind:'sapper',actor:sapper.id,x:sapper.x,z:sapper.z,radius:bomb.radius,duration:bomb.telegraph??bomb.fuse});}
+   continue;
+  }
+  sapper.sapperFuse-=dt;
+  if(sapper.sapperFuse>0)continue;
+  const hit=player.health>0&&distance<=bomb.radius;
+  if(hit)match.damage(player,bomb.damage*(1-distance/bomb.radius),sapper);
+  sapper.health=0;sapper.dead=NPC_DEAD;
+  match.emit('enemy-detonate',{actor:sapper.id,x:sapper.x,z:sapper.z,radius:bomb.radius,hit});
+ }
+ // Artillery batteries mark a spot, telegraph for a full second, then drop an
+ // AoE on that fixed point. Moving out of the circle avoids the shell, so the
+ // counterplay is footwork instead of cover.
+ for(const gunner of allies){
+  const gun=gunner.npcArtillery;if(!gun)continue;
+  if(Number.isFinite(gunner.artilleryWindup)){
+   gunner.artilleryWindup-=dt;
+   if(gunner.artilleryWindup<=0){
+    gunner.artilleryWindup=undefined;
+    const mark=gunner.artilleryMark;gunner.artilleryMark=null;
+    const distance=mark?Math.hypot(player.x-mark.x,player.z-mark.z):Infinity,hit=Boolean(mark)&&player.health>0&&distance<=gun.radius;
+    if(hit)match.damage(player,gun.damage*(1-distance/gun.radius),gunner);
+    match.emit('enemy-artillery',{actor:gunner.id,x:mark?.x??gunner.x,z:mark?.z??gunner.z,radius:gun.radius,damage:gun.damage,hit});
+   }
+   continue;
+  }
+  if(!Number.isFinite(gunner.artilleryCooldown))gunner.artilleryCooldown=gun.cooldown??5.5;
+  gunner.artilleryCooldown-=dt;
+  if(gunner.artilleryCooldown>0)continue;
+  if(!player||player.health<=0)continue;
+  const range=Math.hypot(player.x-gunner.x,player.z-gunner.z);
+  if(range>gun.maxRange||range<gun.minRange)continue;
+  gunner.artilleryCooldown=gun.cooldown??5.5;
+  gunner.artilleryWindup=gun.telegraph??1.2;
+  gunner.artilleryMark={x:player.x,z:player.z};
+  match.emit('enemy-telegraph',{kind:'artillery',actor:gunner.id,x:player.x,z:player.z,radius:gun.radius,duration:gunner.artilleryWindup});
+ }
+ // Bosses escalate through named phases: each overlay rewrites speed and damage
+ // and swaps in a harder telegraphed ground-slam. The phase counter is authored
+ // by the campaign script (`bossPhase`), so the mechanical profile and the HUD
+ // pip strip stay in lockstep without any per-frame allocation.
+ for(const boss of allies){
+  if(boss.isBoss!==true)continue;
+  const phase=Math.max(1,Math.round(state.bossPhase||boss.bossPhase||1));
+  const profile=bossPhaseProfile(boss.npcType,phase);
+  boss.bossPhase=phase;
+  const damageBase=Number.isFinite(boss.bossBaseDamage)?boss.bossBaseDamage:(boss.bossBaseDamage=Number.isFinite(boss.auraBaseDamage)?boss.auraBaseDamage:(boss.damageMultiplier||1));
+  const speedBase=Number.isFinite(boss.bossBaseSpeed)?boss.bossBaseSpeed:(boss.bossBaseSpeed=Number.isFinite(boss.speedMultiplier)?boss.speedMultiplier:1);
+  if(profile){
+   boss.damageMultiplier=damageBase*(boss.auraDamage||1)*(profile.damageMult??1);
+   boss.speedMultiplier=speedBase*(boss.auraSpeed||1)*(profile.speedMult??1);
+  }
+  const stomp=profile?.stomp;
+  if(!stomp)continue;
+  if(Number.isFinite(boss.bossStompWindup)){
+   boss.bossStompWindup-=dt;
+   if(boss.bossStompWindup<=0){
+    boss.bossStompWindup=undefined;
+    const mark=boss.bossStompMark;boss.bossStompMark=null;
+    const distance=mark?Math.hypot(player.x-mark.x,player.z-mark.z):Infinity,hit=Boolean(mark)&&player.health>0&&distance<=stomp.radius;
+    if(hit)match.damage(player,stomp.damage*(1-distance/stomp.radius),boss);
+    match.emit('boss-slam',{actor:boss.id,x:mark?.x??boss.x,z:mark?.z??boss.z,radius:stomp.radius,damage:stomp.damage,hit,phase});
+   }
+   continue;
+  }
+  if(!Number.isFinite(boss.bossStompCooldown))boss.bossStompCooldown=stomp.cooldown??6;
+  boss.bossStompCooldown-=dt;
+  if(boss.bossStompCooldown>0||player.health<=0)continue;
+  const range=Math.hypot(player.x-boss.x,player.z-boss.z),minRange=stomp.minRange??0,maxRange=Math.max(stomp.radius,stomp.maxRange??stomp.radius);
+  if(range>maxRange||range<minRange)continue;
+  boss.bossStompCooldown=stomp.cooldown??6;
+  boss.bossStompWindup=stomp.telegraph??1;
+  boss.bossStompMark={x:player.x,z:player.z};
+  match.emit('enemy-telegraph',{kind:'boss',actor:boss.id,x:player.x,z:player.z,radius:stomp.radius,duration:boss.bossStompWindup,phase});
+ }
+}
+
+export function resumeSinglePlayer(match,stepOrCheckpoint){
+ const state=match.modeState;
+ if(!state||state.kind!=='campaign'||!state.steps.length)return false;
+ const raw=typeof stepOrCheckpoint==='object'&&stepOrCheckpoint!==null?stepOrCheckpoint.step:stepOrCheckpoint;
+ const step=Math.max(0,Math.min(state.steps.length,Math.round(Number(raw)||0)));
+ state.stepIndex=step;state.stepElapsed=0;state.holdProgress=0;state.entered={};state.defendProgress=0;
+ state.checkpoint=step;
+ const player=match.actors[0];
+ if(player&&state.mission?.start){placeAt(match,player,state.mission.start.x,state.mission.start.z);if(Number.isFinite(state.mission.start.yaw)){player.yaw=state.mission.start.yaw;player.bodyYaw=state.mission.start.yaw;}}
+ state.waypoint=null;match.waypoint=null;
+ if(step<state.steps.length&&state.steps[step].text)state.objective=state.steps[step].text;
+ match.emit('singleplayer-checkpoint',{missionId:state.mission?.id??null,step});
+ return true;
+}
+
+export function applyCampaignCheckpoint(match,checkpoint){
+ if(!checkpoint||typeof checkpoint!=='object')return false;
+ const state=match.modeState;
+ if(!state||state.kind!=='campaign')return false;
+ if(checkpoint.missionId&&state.mission&&checkpoint.missionId!==state.mission.id)return false;
+ return resumeSinglePlayer(match,checkpoint);
+}
+
 function onPlayerDeath(match,state){
  state.lives=Math.max(0,(state.lives??0)-1);
  match.emit('singleplayer-life',{lives:state.lives});
@@ -326,6 +622,8 @@ export function updateSinglePlayer(match,dt){
  if(!player)return;
  if(player.deaths>(state.deaths||0)){state.deaths=player.deaths;onPlayerDeath(match,state);if(match.over)return;}
  for(const actor of match.actors)if(actor.isNpc&&actor.health<=0&&(actor.dead??0)<NPC_DEAD)actor.dead=NPC_DEAD;
+ updateEnemyRoles(match,state,dt);
+ if(match.over)return;
  if(match.time+dt>=match.config.timeLimit){lose(match,state,'The clock ran out.');return;}
  if(state.kind==='horde')stepHorde(match,state,dt);else stepCampaign(match,state,dt);
 }
@@ -340,5 +638,9 @@ export function singlePlayerSnapshot(state,match){
  const story=state.storyLine&&match.time-state.storyLine.at<STORY_SECONDS?{speaker:state.storyLine.speaker,text:state.storyLine.text}:null;
  const bark=state.bark&&match.time-state.bark.at<STORY_SECONDS?{speaker:state.bark.speaker,text:state.bark.text}:null;
  const hold=step?.complete?.kind==='hold'?{seconds:step.complete.seconds||0,progress:Math.min(step.complete.seconds||0,state.holdProgress||0)}:null;
- return {kind:state.kind,phase:state.phase,elapsed:state.elapsed,wave:state.wave||0,waveTarget:state.waveTarget||0,waveTimer:state.timer||0,enemiesAlive,enemiesTotal:state.enemies.length,kills:player?.frags||0,deaths:player?.deaths||0,lives:state.lives,objective:state.objective||'',message:state.message&&match.time-state.message.at<5?state.message.text:'',story,bark,bossPhase:state.bossPhase||0,waypoint:state.waypoint?{id:state.waypoint.id,x:state.waypoint.x,z:state.waypoint.z,label:state.waypoint.label}:null,winner:state.winner??null,mission:state.mission?{id:state.mission.id,name:state.mission.name,tag:state.mission.tag,chapter:state.mission.chapter||'',index:missionIndex,total:CAMPAIGN_MISSIONS.length,brief:state.mission.brief,intro:state.mission.intro||null,outro:state.mission.outro||null}:null,steps:state.steps.map((item,index)=>({id:item.id,label:item.label||'',text:item.text||'',detail:item.detail||'',active:index===state.stepIndex,done:index<state.stepIndex})),hold,boss:boss?{name:boss.name,hp:Math.max(0,Math.round(boss.health)),maxHp:boss.maxHealth,alive:boss.health>0,phase:state.bossPhase||0}:null,defend:state.win?.kind==='defend'?{seconds:state.win.seconds??30,progress:Math.min(state.win.seconds??30,Math.round(state.defendProgress||0))}:null};
+ const pending=state.pendingUpgrade;
+ const upgrades=pending?pending.choices.map(hordeUpgradeInfo).filter(Boolean):[];
+ const bossPhase=state.bossPhase||0,bossPhaseTotal=Math.max(1,state.bossPhaseMax||1);
+ const checkpoint=Number.isFinite(state.checkpoint)?{step:Math.max(0,Math.round(state.checkpoint)),missionId:state.mission?.id??null}:null;
+ return {kind:state.kind,phase:state.phase,elapsed:state.elapsed,wave:state.wave||0,waveTarget:state.waveTarget||0,waveTimer:state.timer||0,waveModifier:state.waveModifier?{...state.waveModifier}:null,enemiesAlive,enemiesTotal:state.enemies.length,kills:player?.frags||0,deaths:player?.deaths||0,lives:state.lives,objective:state.objective||'',message:state.message&&match.time-state.message.at<5?state.message.text:'',story,bark,bossPhase,bossPhaseName:state.bossPhaseName||null,bossPhaseTotal,waypoint:state.waypoint?{id:state.waypoint.id,x:state.waypoint.x,z:state.waypoint.z,label:state.waypoint.label}:null,winner:state.winner??null,mission:state.mission?{id:state.mission.id,name:state.mission.name,tag:state.mission.tag,chapter:state.mission.chapter||'',index:missionIndex,total:CAMPAIGN_MISSIONS.length,brief:state.mission.brief,intro:state.mission.intro||null,outro:state.mission.outro||null}:null,steps:state.steps.map((item,index)=>({id:item.id,label:item.label||'',text:item.text||'',detail:item.detail||'',active:index===state.stepIndex,done:index<state.stepIndex})),hold,boss:boss?{name:boss.name,hp:Math.max(0,Math.round(boss.health)),maxHp:boss.maxHealth,alive:boss.health>0,phase:bossPhase,phaseName:state.bossPhaseName||null,phases:bossPhaseTotal}:null,checkpoint,upgrades,upgradeWave:pending?pending.wave:null,upgradeSelected:state.upgradeSelected?.id??null,upgradeCount:(state.upgrades||[]).length,defend:state.win?.kind==='defend'?{seconds:state.win.seconds??30,progress:Math.min(state.win.seconds??30,Math.round(state.defendProgress||0))}:null};
 }

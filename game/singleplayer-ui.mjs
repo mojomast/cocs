@@ -9,6 +9,18 @@ export function singlePlayerDisplay(hud){
  const waypoint=state.waypoint?{...state.waypoint,distance:player&&Number.isFinite(Number(player.x))?Math.round(Math.hypot(Number(player.x)-state.waypoint.x,Number(player.z)-state.waypoint.z)):null}:null;
  const waveTarget=Math.max(1,state.waveTarget||1);
  const steps=Array.isArray(state.steps)?state.steps:[];
+ const upgrades=Array.isArray(state.upgrades)?state.upgrades:Array.isArray(state.upgrade?.pending)?state.upgrade.pending:[];
+ const selectedRaw=state.upgradeSelected??state.upgrade?.selected??null;
+ const upgradeSelected=selectedRaw&&typeof selectedRaw==='object'?(selectedRaw.id??selectedRaw.name??null):selectedRaw;
+ const bossPhase=Math.max(0,Number(state.bossPhase??state.boss?.phase)||0);
+ const bossPhaseTotal=Math.max(1,Number(state.bossPhaseTotal??state.boss?.phases)||1);
+ const bossPhaseName=state.bossPhaseName??state.boss?.phaseName??null;
+ const rawCheckpoint=state.checkpoint;
+ const checkpoint=rawCheckpoint&&typeof rawCheckpoint==='object'
+  ?{step:Math.max(0,Math.round(Number(rawCheckpoint.step)||0)),missionId:rawCheckpoint.missionId??mission?.id??null}
+  :Number.isFinite(Number(rawCheckpoint))?{step:Math.max(0,Math.round(Number(rawCheckpoint))),missionId:mission?.id??null}:null;
+ const rawNotice=state.notice??state.singleNotice??hud?.singleNotice??null;
+ const notice=rawNotice&&rawNotice.text?{type:rawNotice.type||'info',text:String(rawNotice.text),tone:rawNotice.tone||(rawNotice.type==='enemy-detonate'?'danger':rawNotice.type==='horde-resupply'?'accent':'default')}:null;
  return {
   horde,
   kind:state.kind,
@@ -37,7 +49,16 @@ export function singlePlayerDisplay(hud){
   missionTotal:mission?.total||0,
   missionLabel:mission?`${mission.chapter||'MISSION'} ${mission.index+1} / ${mission.total}`:'',
   hold:state.hold?{seconds:state.hold.seconds,progress:state.hold.progress,ratio:state.hold.seconds?Math.min(1,state.hold.progress/state.hold.seconds):0}:null,
-  boss:state.boss&&state.boss.alive?{name:state.boss.name,hp:state.boss.hp,maxHp:state.boss.maxHp,ratio:state.boss.maxHp?Math.max(0,state.boss.hp/state.boss.maxHp):0}:null,
+  boss:state.boss&&state.boss.alive?{name:state.boss.name,hp:state.boss.hp,maxHp:state.boss.maxHp,ratio:state.boss.maxHp?Math.max(0,state.boss.hp/state.boss.maxHp):0,phase:bossPhase,phaseName:bossPhaseName,phases:bossPhaseTotal}:null,
+  bossPhase,
+  bossPhaseName,
+  bossPhaseTotal,
+  checkpoint,
+  upgrades,
+  upgradeWave:Number.isFinite(Number(state.upgradeWave))?Number(state.upgradeWave):null,
+  upgradeSelected,
+  upgradeCount:Number.isFinite(Number(state.upgradeCount))?Number(state.upgradeCount):(Array.isArray(state.acquired)?state.acquired.length:0),
+  notice,
   defend:state.defend?{seconds:state.defend.seconds,progress:state.defend.progress,ratio:state.defend.seconds?Math.min(1,state.defend.progress/state.defend.seconds):0}:null,
   status:state.phase==='intermission'?`NEXT WAVE IN ${Math.max(0,Math.ceil(state.waveTimer||0))}S`:state.phase==='wave'?'WAVE ACTIVE':state.phase==='won'?'MISSION COMPLETE':state.phase==='lost'?'MISSION FAILED':state.phase==='active'?'IN PROGRESS':'STANDBY',
  };

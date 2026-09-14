@@ -71,3 +71,31 @@ test('campaign missions author scripts, barks, boss phases and win conditions',(
  assert.equal(reactor.win.kind,'assassinate');
  assert.ok(reactor.script.some(event=>typeof event.when==='string'&&event.when.startsWith('boss-hp:')),'warden phases');
 });
+
+test('the third mission is a checkpointed throne finale with named boss phases',()=>{
+ const mission=missionFor('throne-siege');
+ assert.equal(mission.mapId,'throne');
+ assert.equal(mission.win.kind,'defend');
+ assert.ok(Number.isFinite(mission.win.seconds)&&mission.win.seconds>0,'the finale has a hold window');
+ assert.ok(mission.steps.some(step=>step.complete.kind==='hold'),'the finale is a hold objective');
+ const spawns=mission.steps.flatMap(step=>[...(step.onStart||[]),...(step.onComplete||[])]).filter(action=>action.spawn).map(action=>action.spawn.type);
+ assert.ok(spawns.includes('warden'),'the finale has a Warden set-piece');
+ assert.ok(spawns.includes('bulwark')&&spawns.includes('mortar'),'the finale fields the new tank and artillery classes');
+ const actions=[...(mission.script||[]),...mission.steps.flatMap(step=>[...(step.onStart||[]),...(step.onComplete||[])])];
+ assert.ok(actions.some(action=>action.checkpoint),'the finale banks a checkpoint');
+ assert.ok(mission.script.some(event=>event.when==='boss-hp:0.6'&&Number.isFinite(event.bossPhase)&&event.name),'named phase two');
+ assert.ok(mission.script.some(event=>event.when==='boss-hp:0.25'&&Number.isFinite(event.bossPhase)&&event.name),'named phase three');
+ assert.ok(mission.script.some(event=>event.bark&&event.spawn),'the finale barks in reinforcements');
+});
+
+test('campaign missions author checkpoints and named boss phases',()=>{
+ for(const mission of CAMPAIGN_MISSIONS){
+  const actions=[...(mission.script||[]),...mission.steps.flatMap(step=>[...(step.onStart||[]),...(step.onComplete||[])])];
+  assert.ok(actions.some(action=>action.checkpoint),`${mission.id} has a resumable checkpoint`);
+  for(const event of mission.script)if(event.bossPhase!==undefined){
+   assert.ok(typeof event.name==='string'&&event.name.length>0,`${mission.id}/${event.id} names its boss phase`);
+  }
+ }
+ const named=CAMPAIGN_MISSIONS.flatMap(mission=>mission.script).filter(event=>event.bossPhase!==undefined&&event.name);
+ assert.ok(named.length>=2,'boss phases carry presentation names');
+});

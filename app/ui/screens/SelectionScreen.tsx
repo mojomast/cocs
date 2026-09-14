@@ -1,10 +1,10 @@
 'use client';
 import {ArrowUpRight,Check,ChevronRight,Crosshair,Flag,Hexagon,LockKeyhole,Play,Rocket,Shield,Skull,Sparkles,Swords,Target,Film,Users,Zap} from 'lucide-react';
 import type {ScreenProps} from '../contract';
-import {ActionRail,Banner,Btn,PageHead,Panel,SelectCard,Shell,Stats,TopBar} from '../primitives';
+import {ActionRail,Banner,Btn,Meter,PageHead,Panel,SelectCard,Shell,Stats,TopBar} from '../primitives';
 
 export function SelectionScreen({ui}:ScreenProps){
- const {entered,showcaseLive,character,chooseCharacter,CHARACTERS=[],selected,harness,setHarness,HARNESSES=[],power,powerIcon,config,start,startSpectate,quickStart,setSetupOpen,setSingleOpen,changeMode,connectNet,openBrowser,netConnected,profile,demos=[],previewRef,headActions,notice}=ui;
+ const {entered,showcaseLive,character,chooseCharacter,CHARACTERS=[],selected,harness,setHarness,HARNESSES=[],power,powerIcon,config,start,startSpectate,quickStart,setSetupOpen,setSingleOpen,changeMode,connectNet,openBrowser,netConnected,profile,demos=[],previewRef,headActions,notice,challenges=[],presets=[],loadPreset,deletePreset}=ui;
  const note=character==='claude'?'Enhanced health, armor and speed offset the Claude Code harness lock.':'Each operator trades durability for mobility. Pick the stats that fit your style.';
  const activities=[
   {id:'deathmatch',name:'Quick Match',tag:'Free-for-all · first to the frag limit',icon:<Zap size={20}/>},
@@ -51,19 +51,31 @@ export function SelectionScreen({ui}:ScreenProps){
        <p className="eyebrow"><i/>{power?.power} <span className="chip">Q</span></p>
        <p className="field-note">{power?.description}</p>
        <div className="row"><span className="chip">{power?.stat}</span><span className="chip">{power?.cooldown}s COOLDOWN</span></div>
-      </div>
-     </Panel>
-    </div>
-    <div className="stack">
-     <div ref={previewRef} className="preview-stage" aria-label={`${selected?.name} animated 3D model`}>
+       </div>
+      </Panel>
+      <Panel label="DAILY CHALLENGES" meta={challenges.length?`${challenges.filter((c:any)=>c.done).length} / ${challenges.length} COMPLETE`:'ROTATING'} actions={<Btn size="sm" variant="ghost" onClick={()=>changeMode('progression')}>TRACK</Btn>}>
+       {challenges.length?<div className="stack stack--tight">{challenges.map((c:any)=><div key={c.id} className="stack stack--tight challenge-row">
+        <div className="row row--between"><span className="label">{c.label}</span><span className="label">{c.done?'CLAIMED':`${c.progress} / ${c.target} · +${c.reward} XP`}</span></div>
+        <Meter ratio={c.target?Math.min(1,c.progress/c.target):0}/>
+       </div>)}</div>:<p className="field-note">Daily objectives load with the arena. Finish matches to earn bonus XP.</p>}
+      </Panel>
+     </div>
+     <div className="stack">
+      <div ref={previewRef} className="preview-stage" aria-label={`${selected?.name} animated 3D model`}>
       <span className="preview-corner">LIVE MODEL / {String((CHARACTERS.indexOf(selected)>=0?CHARACTERS.indexOf(selected):0)+1).padStart(2,'0')}</span>
       <div className="preview-caption"><p className="eyebrow" style={{color:selected?.color}}>{selected?.tag}</p><h2 className="h-page">{selected?.name}</h2><p className="lede" style={{fontSize:14}}>{selected?.detail}</p></div>
      </div>
      <Panel label="03 / QUICK START" meta="LAUNCHES INSTANTLY">
-      <div className="grid-cards">{activities.map((a)=><SelectCard key={a.id} onClick={()=>quickStart?.(a.id)} ariaLabel={`${a.name}: ${a.tag}`} icon={a.icon} name={a.name} tag={a.tag} meta={<Play size={15}/>}/>)}</div>
-      <p className="field-note">Starts now with <b>{selected?.name}</b>, the <b>{power?.name}</b> harness and your current rules on a {ui.selectedMode?.name} arena. Fine-tune everything under MATCH SETUP, or pick a specific arena there.</p>
-     </Panel>
-    </div>
+       <div className="grid-cards">{activities.map((a)=><SelectCard key={a.id} onClick={()=>quickStart?.(a.id)} ariaLabel={`${a.name}: ${a.tag}`} icon={a.icon} name={a.name} tag={a.tag} meta={<Play size={15}/>}/>)}</div>
+       <p className="field-note">Starts now with <b>{selected?.name}</b>, the <b>{power?.name}</b> harness and your current rules on a {ui.selectedMode?.name} arena. Fine-tune everything under MATCH SETUP, or pick a specific arena there. New objective modes — Juggernaut, Team Elimination, VIP Escort, Payload and Assault — live there too; the full legend is under Graphics &amp; settings → Help.</p>
+      </Panel>
+      <Panel label="LOADOUT PRESETS" meta={`${presets.length} SAVED`} actions={<Btn size="sm" variant="ghost" onClick={()=>setSetupOpen(true)}>MANAGE</Btn>}>
+       {presets.length?<div className="row" role="group" aria-label="Saved loadout presets">{presets.map((p:any)=><span key={p.id} className="chip preset-chip" title={`${p.character} / ${p.harness}${p.mapId?` · ${p.mapId}`:''}`}>
+        <button type="button" className="text-button" aria-label={`Load preset ${p.name}`} onClick={()=>loadPreset?.(p)}>{p.name}</button>
+        <button type="button" className="text-button" aria-label={`Delete preset ${p.name}`} onClick={()=>deletePreset?.(p.id)}>×</button>
+       </span>)}</div>:<p className="field-note">No presets yet. Save your full loadout — operator, harness, arena, rules, gear, mods, finish and reticle — from MATCH SETUP.</p>}
+      </Panel>
+     </div>
    </div>
   </div>
  </Shell>;

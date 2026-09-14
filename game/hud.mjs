@@ -134,7 +134,7 @@ export function suddenDeathBanner(hud) {
   return hud?.suddenDeath === true && hud?.over !== true ? { text: 'SUDDEN DEATH', detail: 'NEXT SCORE WINS' } : null;
 }
 
-const CAPTION_EVENTS = Object.freeze({shot:'Gunfire',explosion:'Explosion','vehicle-shot':'Vehicle gunfire',grenade:'Grenade out',melee:'Melee',reload:'Reloading',pickup:'Pickup',powerup:'Powerup','vehicle-destroyed':'Vehicle destroyed','zone-capture':'Zone captured','zone-score':'Objective scoring','zone-neutralized':'Zone neutralized','flag-pickup':'Flag taken','flag-return':'Flag returned','flag-drop':'Flag dropped',capture:'Flag captured','assault-breach':'Sector breached','payload-checkpoint':'Checkpoint reached','payload-delivered':'Payload delivered','soccer-goal':'Goal','killstreak':'Killstreak',death:'Elimination','mission-message':'Mission update','mission-won':'Mission complete','mission-lost':'Mission failed','horde-wave':'Wave incoming','horde-wave-cleared':'Wave cleared','npc-deploy':'Contacts','story-line':'Mission briefing','npc-bark':'Transmission','boss-phase':'Boss phase'});
+const CAPTION_EVENTS = Object.freeze({shot:'Gunfire',explosion:'Explosion','vehicle-shot':'Vehicle gunfire',grenade:'Grenade out',melee:'Melee',reload:'Reloading',pickup:'Pickup',powerup:'Powerup','vehicle-destroyed':'Vehicle destroyed','zone-capture':'Zone captured','zone-score':'Objective scoring','zone-neutralized':'Zone neutralized','flag-pickup':'Flag taken','flag-return':'Flag returned','flag-drop':'Flag dropped',capture:'Flag captured','assault-breach':'Sector breached','payload-checkpoint':'Checkpoint reached','payload-delivered':'Payload delivered','soccer-goal':'Goal','killstreak':'Killstreak',death:'Elimination','mission-message':'Mission update','mission-won':'Mission complete','mission-lost':'Mission failed','horde-wave':'Wave incoming','horde-wave-cleared':'Wave cleared','horde-resupply':'Resupplied','horde-upgrade':'Upgrade available','horde-upgrade-selected':'Upgrade acquired','enemy-detonate':'Sapper detonation','singleplayer-checkpoint':'Checkpoint saved','npc-deploy':'Contacts','story-line':'Mission briefing','npc-bark':'Transmission','boss-phase':'Boss phase'});
 export function ladderStatus(player, total = 10) {
   const rung = Math.max(0, Math.floor(Number(player?.ladder) || 0));
   const size = Math.max(1, Math.floor(Number(total) || 10));
@@ -273,6 +273,29 @@ export function spectatorBoard(actors, targetId) {
   return (Array.isArray(actors) ? actors : []).filter(a => a && a.health > 0).map(a => ({id: a.id, name: a.name || `A${a.id}`, team: a.team, health: a.health, current: a.id === targetId}));
 }
 
+// Spectator board, grouped by side. Free agents (no team) sort last so team
+// modes read top-to-bottom like the scoreboard. `points` is the juggernaut
+// point ledger keyed by actor id; it is not stored on the actor itself.
+export function spectatorTeams(actors, targetId, {points = {}} = {}) {
+  const live = (Array.isArray(actors) ? actors : []).filter(a => a && a.health > 0);
+  const byTeam = new Map();
+  for (const a of live) {
+    const team = a.team === undefined || a.team === null || Number.isNaN(Number(a.team)) ? null : Number(a.team);
+    const key = team === null ? 'free' : `t${team}`;
+    if (!byTeam.has(key)) byTeam.set(key, {key, team, players: []});
+    byTeam.get(key).players.push({
+      id: a.id,
+      name: a.name || `A${a.id}`,
+      team,
+      health: a.health,
+      current: a.id === targetId,
+      juggernaut: a.juggernaut === true,
+      points: Number(points?.[a.id]) || 0,
+    });
+  }
+  return [...byTeam.values()].sort((x, y) => x.team === null ? 1 : y.team === null ? -1 : x.team - y.team);
+}
+
 export function nextSpectateTarget(actors, currentId, step = 1) {
   const live = (Array.isArray(actors) ? actors : []).filter(a => a.health > 0);
   if (!live.length) return null;
@@ -298,6 +321,8 @@ export const modeGoal = mode => {
   if (score === 'teamFrags') return 'TEAM FRAGS';
   if (score === 'ladder') return 'LADDER';
   if (score === 'goals') return 'GOALS';
+  if (score === 'juggernaut') return 'CROWN POINTS';
+  if (score === 'elimination') return 'TEAM LIVES';
   return isTeamMode(mode) ? 'TEAM FRAGS' : 'FRAGS';
 };
 
@@ -305,6 +330,8 @@ export const modeGoal = mode => {
 export const modeTargetText = (mode, target) => {
   const limit = Number(target);
   if (mode?.id === 'armsrace') return 'CLIMB THE LADDER';
+  if (mode?.id === 'juggernaut') return 'HOLD THE CROWN · MOST POINTS';
+  if (mode?.id === 'team-elimination') return Number.isFinite(limit) ? `TEAM LIVES · ${limit} EACH` : 'TEAM LIVES REMAINING';
   const goal = modeGoal(mode);
   return Number.isFinite(limit) ? `FIRST TO ${limit} ${goal}` : goal;
 };
@@ -317,7 +344,7 @@ export const teamScoreText = scores => Array.isArray(scores)
     ? Object.entries(scores).map(([team, score]) => `${teamName(team)} ${scoreText(score)}`).join('  ·  ')
     : '';
 
-export const SCORE_STAT_FIELDS = ['captures', 'flagPickups', 'flagReturns', 'flagDrops', 'objectiveTime', 'objectiveCaptures', 'objectiveNeutralizations', 'objectiveContests'];
+export const SCORE_STAT_FIELDS = ['captures', 'flagPickups', 'flagReturns', 'flagDrops', 'objectiveTime', 'objectiveCaptures', 'objectiveNeutralizations', 'objectiveContests', 'points', 'eliminations'];
 export const scoreStats = actor => Object.fromEntries(SCORE_STAT_FIELDS.map(field => [field, Number.isFinite(Number(actor?.scoreStats?.[field])) ? Number(actor.scoreStats[field]) : 0]));
 
 const zoneName = (zone, index) => String(zone?.id ?? '').toLowerCase() === 'alpha' ? 'A' : String(zone?.id ?? '').toLowerCase() === 'bravo' ? 'B' : String(zone?.id ?? '').toLowerCase() === 'charlie' ? 'C' : String.fromCharCode(65 + index);
@@ -337,7 +364,9 @@ export const modeColumns = mode => mode === 'ctf' ? [['captures', 'CAP'], ['flag
         : mode === 'payload' ? [['objectiveCaptures', 'CHECKPOINTS'], ['objectiveTime', 'CART TIME']]
           : mode === 'armsrace' ? [['ladder', 'RUNG'], ['weapon', 'WEAPON']]
             : mode === 'puma-soccer' ? [['goals', 'GOALS']]
-              : [];
+              : mode === 'juggernaut' ? [['points', 'POINTS']]
+                : mode === 'team-elimination' ? [['eliminations', 'ELIMS']]
+                  : [];
 
 export const modePrimary = (mode, actor) => {
   const stats = scoreStats(actor);
@@ -346,6 +375,8 @@ export const modePrimary = (mode, actor) => {
   if (mode === 'assault' || mode === 'payload') return [stats.objectiveCaptures, stats.objectiveTime];
   if (mode === 'armsrace') return [Number(actor?.ladder) || 0, Number(actor?.frags) || 0];
   if (mode === 'puma-soccer') return [Number(actor?.goals) || Number(actor?.scoreStats?.goals) || 0];
+  if (mode === 'juggernaut') return [Number(actor?.points) || 0, actor?.juggernaut === true ? 1 : 0];
+  if (mode === 'team-elimination') return [Number(actor?.eliminations) || 0, Number(actor?.frags) || 0];
   return [0];
 };
 
@@ -361,6 +392,8 @@ export const objectiveCopy = score => ({
   payload: 'Escort the payload cart down the track to the final point. Standing with the cart pushes it forward; the defenders stall it and roll it back. Attackers win on delivery, defenders on the clock.',
   ladder: 'Every elimination promotes you one rung up the weapon rack. Reach the final rung to win; there is no frag target to chase.',
   goals: 'Both teams fight over one ball and smash it into the enemy goal. The first team to the goal target wins; each goal restarts play from the centre circle.',
+  juggernaut: 'One powered operator carries a shield and a damage aura while everyone hunts them. Hold the crown to bank the most points; killing the juggernaut seizes the role and pays a bounty.',
+  elimination: 'Shared team lives and no free respawns: every death burns a ticket for your side. The first team out of lives loses the round.',
 })[score] || null;
 
 export function commandBrief(hud, player, mode) {

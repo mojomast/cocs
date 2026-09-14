@@ -44,7 +44,7 @@ export class ProgressionStore{
   }catch{this.players=new Map();this.tokens=new Map();}
  }
  touch(id){const profile=this.players.get(id);if(profile){this.players.delete(id);this.players.set(id,profile);}return profile;}
- clone(profile){return profile?{...profile,gear:{...profile.gear},attachments:{...profile.attachments},unlocks:{...profile.unlocks}}:null;}
+ clone(profile){return profile?{...profile,byMode:Object.fromEntries(Object.entries(profile.byMode||{}).map(([mode,stats])=>[mode,{...(stats||{})}])),gear:{...profile.gear},attachments:{...profile.attachments},unlocks:{...profile.unlocks}}:null;}
  get(id){if(!validPlayerId(id)||!this.players.has(id))return null;return this.clone(this.touch(id));}
  getOwned(id,token){if(!validPlayerId(id)||!validProgressToken(token))return null;const profile=this.players.get(id);if(!profile||profile.ownerToken!==token)return null;return this.clone(this.touch(id));}
  setPinned(ids){this.pinned=ids instanceof Set?ids:new Set(ids??[]);}
@@ -134,5 +134,5 @@ export class ProgressionStore{
    await this.flush();
   }
  }
- all(){return [...this.players.values()].map(profile=>({...profile,gear:{...profile.gear},attachments:{...profile.attachments},unlocks:{...profile.unlocks}}));}
+ all(){return [...this.players.values()].map(profile=>({...profile,byMode:Object.fromEntries(Object.entries(profile.byMode||{}).map(([mode,stats])=>[mode,{...(stats||{})}])),gear:{...profile.gear},attachments:{...profile.attachments},unlocks:{...profile.unlocks}}));}
 }

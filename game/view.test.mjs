@@ -3,7 +3,8 @@ import assert from 'node:assert/strict';
 import {ArenaView,raceTrackModel,vehicleModel,weaponModel,robotModel,shadowTick} from './view.mjs';
 import {RACE_DEMO_MODE_SECONDS} from './race-camera.mjs';
 import {SoftwareRenderer} from './software.mjs';
-import {ModelAssets,CameraShake,MuzzleLightPool,LowHealthOverlay,DeathPool} from './effects-fx.mjs';
+import {ModelAssets,CameraShake,MuzzleLightPool,LowHealthOverlay,DeathPool,DecalPool,killcamPose,KILLCAM_DURATION} from './effects-fx.mjs';
+import {ambientProfile} from './environment.mjs';
 import {DEFAULT_DISPLAY} from './config.mjs';
 import * as T from 'three';
 import BLOOD_GULCH from './blood-gulch.mjs';
@@ -686,14 +687,63 @@ test('soccer presentation renders one keyed ball and skips race pickups',()=>{
 
 test('soccer pitch draws markings and goals while posts still occlude the camera',()=>{
  const race={kind:'soccer',pitch:{minX:-30,maxX:30,minZ:-18,maxZ:18},goals:[{team:0,x:-30,z:0,nx:-1,nz:0,halfWidth:6,height:4,depth:2},{team:1,x:30,z:0,nx:1,nz:0,halfWidth:6,height:4,depth:2}],boundary:{outer:[{x:-34,z:-22},{x:34,z:-22},{x:34,z:22},{x:-34,z:22}]}};
- const model=raceTrackModel(race,'#55ddcc'),posts=[],nets=[],paint=[];
- model.traverse(node=>{if(node.userData.soccerPost)posts.push(node);if(node.userData.soccerNet)nets.push(node);if(node.isMesh&&node.userData.arenaDetail)paint.push(node);});
+ const model=raceTrackModel(race,'#55ddcc'),posts=[],nets=[],paint=[],arcs=[];
+ model.traverse(node=>{if(node.userData.soccerPost)posts.push(node);if(node.userData.soccerNet)nets.push(node);if(node.isMesh&&node.userData.pitchArc)arcs.push(node);if(node.isMesh&&node.userData.arenaDetail)paint.push(node);});
  assert.equal(posts.length,6,'each goal contributes two posts and a crossbar');
- assert.equal(nets.length,8,'each goal contributes four net panels');
+ assert.equal(nets.length,2,'each goal gets one line-lattice net instead of four solid panels');
+ for(const net of nets){
+  assert.equal(net.isLineSegments,true,'nets are built from LineSegments');
+  assert.equal(net.userData.noCameraOcclusion,true);
+  const positions=net.geometry.attributes.position.array;
+  assert.ok(positions.length>0&&[...positions].every(Number.isFinite),'net lattice is finite');
+ }
+ assert.ok(arcs.length>=6,'corner, goal-area and penalty arcs are flat arena detail');
+ for(const arc of arcs){assert.equal(arc.userData.arenaDetail,true);assert.equal(arc.geometry.type,'RingGeometry');assert.ok([...arc.geometry.attributes.position.array].every(Number.isFinite));}
  assert.ok(paint.length>0,'pitch paint is flat arena detail');
  for(const post of posts)assert.notEqual(post.userData.noCameraOcclusion,true,'solid posts stay occluders');
  for(const net of nets)assert.equal(net.userData.noCameraOcclusion,true);
  ArenaView.prototype.disposeObject.call({},model);
+});
+
+test('software actors and vehicles carry flat contact shadows that dispose with the model',()=>{
+ const blobCount=model=>{let count=0;model.traverse(n=>{if(n.userData.blobShadow)count++;});return count;};
+ const softwareActor=robotModel('chatgpt',undefined,true),softwareVehicle=vehicleModel('puma',undefined,true),softwareHornet=vehicleModel('hornet',undefined,true);
+ const artActor=robotModel('chatgpt',undefined,false),artVehicle=vehicleModel('puma',undefined,false);
+ assert.equal(blobCount(softwareActor),1,'software actors get a contact shadow');
+ assert.equal(blobCount(softwareVehicle),1,'software pumas get a contact shadow');
+ assert.equal(blobCount(softwareHornet),1,'software hornets get a contact shadow');
+ assert.equal(blobCount(artActor),0,'WebGL actors rely on shadow maps');
+ assert.equal(blobCount(artVehicle),0,'WebGL vehicles rely on shadow maps');
+ for(const model of [softwareActor,softwareVehicle,softwareHornet]){
+  model.traverse(n=>{if(n.userData.blobShadow){assert.equal(n.userData.noCameraOcclusion,true);assert.equal(n.isMesh,true);assert.ok([...n.geometry.attributes.position.array].every(Number.isFinite));}});
+ }
+ let disposed=0;softwareActor.traverse(n=>{if(n.userData.blobShadow)n.geometry.addEventListener('dispose',()=>disposed++);});
+ ArenaView.prototype.disposeObject.call({},softwareActor);
+ assert.equal(disposed,1,'the blob shadow geometry is disposed with the model');
+ ArenaView.prototype.disposeObject.call({},softwareVehicle);ArenaView.prototype.disposeObject.call({},softwareHornet);
+ ArenaView.prototype.disposeObject.call({},artActor);ArenaView.prototype.disposeObject.call({},artVehicle);
+});
+
+test('next-gen props carry paintGeometry vertex colors that the CPU renderer reads',()=>{
+ const view=Object.assign(Object.create(ArenaView.prototype),{renderResources:new Set(),renderer:{isSoftware:true}});
+ const world=new T.Group();
+ view.buildNextGen(world,{color:'#55ddcc',terrain:{height:()=>0},structures:[],props:[{type:'rock',x:0,z:0,y:0,seed:1},{type:'tree',x:4,z:0,y:0,seed:2},{type:'barrel',x:-4,z:2,y:0,seed:3}]});
+ const instanced=[];world.traverse(n=>{if(n.isInstancedMesh)instanced.push(n);});
+ assert.ok(instanced.length>=2,'rock/tree families build as instanced props');
+ for(const inst of instanced)assert.ok(inst.geometry.attributes.color,'every prop family ships vertex colors');
+ const painted=instanced.find(inst=>inst.geometry.attributes.color);
+ const colors=Array.from(painted.geometry.attributes.color.array);
+ assert.ok(colors.every(Number.isFinite)&&colors.some(value=>value!==1),'the tint varies rather than staying flat white');
+ const fills=[];
+ const ctx={fillStyle:'',strokeStyle:'',lineWidth:0,font:'',textAlign:'',fillRect(){},fillText(){},beginPath(){},moveTo(){},lineTo(){},closePath(){},stroke(){},fill(){fills.push(String(ctx.fillStyle));}};
+ const renderer=new SoftwareRenderer({width:320,height:180,getContext:()=>ctx});
+ const scene=new T.Scene();scene.background=new T.Color('#000');
+ scene.add(new T.Mesh(painted.geometry,new T.MeshBasicMaterial({color:'#ffffff'})));
+ const camera=new T.PerspectiveCamera(90,320/180,.1,100);camera.position.set(0,3,6);camera.lookAt(0,0,0);
+ renderer.render(scene,camera);
+ assert.ok(fills.length>0,'the painted prop draws on the CPU renderer');
+ assert.ok(fills.some(fill=>!/rgba\(255,255,255/.test(fill)),'vertex tint reaches the software fill color');
+ view.disposeObject(world);for(const resource of view.renderResources)resource.dispose();
 });
 
 test('free camera seeds from the live camera, clamps its look and resets cleanly',()=>{
@@ -777,3 +827,261 @@ test('single-player waypoint marker is created, moved and cleared',t=>{
  assert.equal(view.waypointModel,null,'cleared with no waypoint');
 });
 
+test('operator model adds shoulder, visor and backpack detail without moving rig joints',()=>{
+ const assets=new ModelAssets(),first=robotModel('chatgpt',assets),before=assets.resources.size;
+ const data=first.userData;
+ assert.equal(data.shoulderPads.length,2,'both shoulders get a pad');
+ for(const pad of data.shoulderPads)assert.ok(pad.geometry.type.startsWith('SphereGeometry'));
+ assert.ok(data.backpack&&data.backpack.name==='backpack','a backpack group is tagged');
+ assert.ok(data.backpack.children.length>=4,'backpack carries canisters, a vent and an antenna');
+ assert.ok(data.visor?.brow&&data.visor?.nub,'visor brow and sensor nub exist');
+ assert.equal(data.head.getObjectByName('visor-brow'),data.visor.brow);
+ const jointKeys=['root','hips','torso','chest','head','armUpperL','armUpperR','forearmL','forearmR','legUpperL','legUpperR','legLowerL','legLowerR','footL','footR'];
+ for(const key of jointKeys)assert.ok(data.joints[key],`${key} joint survives the detail pass`);
+ assert.ok(Math.abs(data.gunAnchor.position.x-.16)<1e-9&&Math.abs(data.gunAnchor.position.z+.26)<1e-9,'the gun anchor keeps its mount point');
+ assert.ok(Math.abs(data.chest.position.x)<1e-12,'the chest was never reparented');
+ const second=robotModel('chatgpt',assets);
+ assert.equal(assets.resources.size,before,'detail geometry and materials are shared, not reallocated');
+ assets.dispose();ArenaView.prototype.disposeObject.call({},first);ArenaView.prototype.disposeObject.call({},second);
+});
+
+test('muzzle flash keeps its indexed flare and adds a layered burst per muzzle',()=>{
+ for(const model of [weaponModel(0),weaponModel(3)]){
+  const {muzzles,flash}=model.userData,feel=model.userData.feel;
+  assert.equal(flash.children.length>=muzzles.length*2,true,'each muzzle contributes a flare plus a burst');
+  for(const [i,anchor] of muzzles.entries()){
+   const flare=flash.children[i];
+   assert.equal(flare.geometry.type,'SphereGeometry');
+   assert.equal(flare.geometry.parameters.radius,feel.muzzle[0]);
+   assert.deepEqual(flare.position.toArray(),anchor.position.toArray());
+   const bursts=flash.children.filter(child=>child.userData.muzzleFlash);
+   assert.equal(bursts.length,muzzles.length,'one tagged burst per muzzle');
+   assert.ok(bursts[i].children.some(child=>child.name==='flash-cone'),'the burst has a cone core');
+   assert.equal(bursts[i].children.filter(child=>child.name==='flash-petal').length,2,'the burst has crossed petals');
+  }
+  const sights=model.userData.sights;
+  assert.ok(Array.isArray(sights)&&sights.length===2,'a top rail mounts front and rear sights');
+  assert.ok(sights.every(sight=>sight.userData.weaponDetail==='sight'));
+  ArenaView.prototype.disposeObject.call({},model);
+ }
+});
+
+test('impact decals are pooled on WebGL, skipped on software and bounded',()=>{
+ const scene=new T.Scene(),pool=new DecalPool(scene,3);
+ for(let i=0;i<6;i++)assert.equal(pool.spawn({x:i,y:0,z:0},{seed:i}),true);
+ assert.equal(pool.slots.length,3,'the decal pool never grows past its limit');
+ assert.ok(pool.slots.every(slot=>slot.obj.visible&&slot.obj.userData.decal===true));
+ pool.update(10);
+ assert.ok(pool.slots.every(slot=>!slot.obj.visible),'decals expire and hide');
+ const resources=new Set();scene.traverse(n=>{if(n.geometry)resources.add(n.geometry);if(n.material)resources.add(n.material);});
+ const counts=new Map();for(const r of resources){counts.set(r,0);r.addEventListener('dispose',()=>counts.set(r,counts.get(r)+1));}
+ pool.dispose();
+ assert.ok([...counts.values()].every(count=>count===1),'decal geometry and materials dispose exactly once');
+ const webgl=Object.assign(Object.create(ArenaView.prototype),{scene:new T.Scene(),renderer:{isSoftware:false},motionQuery:{matches:false},display:{...DEFAULT_DISPLAY}});
+ webgl._spawnImpactDecal({x:1,y:2,z:3},false,0);
+ assert.ok(webgl.decalPool&&webgl.decalPool.slots.some(slot=>slot.active),'WebGL impacts stamp a decal');
+ const software=Object.assign(Object.create(ArenaView.prototype),{scene:new T.Scene(),renderer:{isSoftware:true},motionQuery:{matches:false},display:{...DEFAULT_DISPLAY}});
+ software._spawnImpactDecal({x:1,y:2,z:3},false,0);
+ assert.ok(!software.decalPool,'the CPU renderer never allocates decals');
+ webgl.decalPool.dispose();
+});
+
+test('the Puma mounts spare-wheel and utility accessories without losing its guns',()=>{
+ const model=vehicleModel('puma');
+ assert.equal(model.userData.guns.length,2);
+ const {spareTire,jerryCan,winch,towHook}=model.userData.accessories;
+ assert.ok(spareTire&&jerryCan&&winch&&towHook,'accessories are exposed on userData');
+ assert.equal(spareTire.parent,model);
+ assert.equal(spareTire.geometry.type,'TorusGeometry');
+ assert.equal(jerryCan.name,'jerry-can');
+ assert.equal(winch.name,'winch-drum');
+ model.traverse(child=>{if(child.geometry)child.geometry.dispose();if(child.material){for(const m of Array.isArray(child.material)?child.material:[child.material])m.dispose();}});
+});
+
+test('throne and gauntlet render with distinct arena identities',t=>{
+ const previous=Object.getOwnPropertyDescriptor(globalThis,'document');
+ const ctx={fillRect(){},fillText(){},beginPath(){},moveTo(){},lineTo(){},closePath(){},stroke(){},fill(){}};
+ Object.defineProperty(globalThis,'document',{configurable:true,value:{createElement:()=>({getContext:()=>ctx})}});
+ t.after(()=>{if(previous)Object.defineProperty(globalThis,'document',previous);else delete globalThis.document;});
+ const view=Object.assign(Object.create(ArenaView.prototype),{scene:new T.Scene(),renderResources:new Set(),renderer:{isSoftware:true}});
+ const signatures=new Map();
+ for(const id of ['throne','gauntlet']){
+  const arena=MAPS.find(map=>map.id===id);assert.ok(arena,`${id} is a canonical map`);
+  view.buildArena(arena);
+  const block=view.worldGroup.children.find(n=>Number.isInteger(n.userData.block));
+  signatures.set(id,`${block.material.color.getHexString()}/${view.scene.fog.density}`);
+ }
+ assert.notEqual(signatures.get('throne'),signatures.get('gauntlet'),'each map has its own palette and fog');
+ view.buildArena(MAPS.find(map=>map.id==='exchange'));
+ const exchangeBlock=view.worldGroup.children.find(n=>Number.isInteger(n.userData.block));
+ const exchangeSig=`${exchangeBlock.material.color.getHexString()}/${view.scene.fog.density}`;
+ for(const id of ['throne','gauntlet'])assert.notEqual(signatures.get(id),exchangeSig,`${id} no longer falls back to exchange`);
+ view.disposeObject(view.worldGroup);for(const resource of view.renderResources)resource.dispose();
+});
+
+
+test('kill-cam framing is deterministic, bounded and collapses under reduced motion',()=>{
+ const args={elapsed:.9,duration:KILLCAM_DURATION,focus:{x:2,y:1,z:-3},killer:{x:8,y:2,z:5},seed:42};
+ const a=killcamPose(args),b=killcamPose(args),c=killcamPose({...args,seed:43});
+ assert.deepEqual(a,b,'the same kill context frames the same shot');
+ assert.notDeepEqual(a,c,'the seed varies the framing');
+ for(const value of [a.x,a.y,a.z,a.lookX,a.lookY,a.lookZ,a.fov,a.phase])assert.ok(Number.isFinite(value));
+ assert.ok(a.phase>=0&&a.phase<=1);
+ assert.ok(a.fov>=50&&a.fov<=100);
+ const first=killcamPose({...args,elapsed:0});
+ assert.ok(Math.abs(first.phase)<1e-9);
+ assert.ok(killcamPose({...args,elapsed:KILLCAM_DURATION*2}).phase===1,'the phase saturates at one');
+ const reduced=killcamPose({...args,reduced:true});
+ const reducedLater=killcamPose({...args,reduced:true,elapsed:1.7});
+ assert.deepEqual([reduced.x,reduced.y,reduced.z,reduced.lookX,reduced.lookY,reduced.lookZ,reduced.fov],[reducedLater.x,reducedLater.y,reducedLater.z,reducedLater.lookX,reducedLater.lookY,reducedLater.lookZ,reducedLater.fov],'reduced motion holds a stable stand-off');
+ assert.ok(reduced.fov===62);
+});
+
+test('a local death triggers a short kill-cam that only moves the presentation camera',t=>{
+ const {view}=playable(t,{fov:80});
+ view.deathContext=new Map();
+ const player={id:7,weapon:0,health:100,maxHealth:100,x:0,y:0,z:0,yaw:0,pitch:0,vx:0,vy:0,vz:0,grounded:true};
+ view.effect({type:'death',actor:7,pos:{x:3,y:0,z:2},time:10,seed:5,killer:8});
+ assert.ok(view.killcam,'killing the local player starts a kill-cam');
+ assert.equal(view.killcam.duration,KILLCAM_DURATION);
+ const match={actors:[player],pickups:[],rockets:[],time:10.5,events:[]};
+ const before=JSON.stringify(player);
+ view.render('playing',match,.016,10.5);
+ assert.ok(view.killcamActive(),'the kill-cam is still running mid-shot');
+ assert.ok(view.camera.position.distanceTo(new T.Vector3(3,0,2))>1,'the camera orbits the death anchor');
+ assert.equal(JSON.stringify(player),before,'the authoritative player is never mutated by the framing');
+ view.render('playing',{...match,time:10+2*KILLCAM_DURATION},.016,10+2*KILLCAM_DURATION);
+ assert.equal(view.killcam,null,'the kill-cam ends after its duration');
+ assert.ok(view.camera.position.distanceTo(new T.Vector3(0,1.45,0))<.2,'the normal camera path resumes');
+ view.setKillcam(false);
+ view.effect({type:'death',actor:7,pos:{x:1,y:0,z:1},time:20});
+ assert.equal(view.killcam,null,'the option disables the kill-cam');
+});
+
+test('ambient emitters are WebGL-only, bounded and skipped under reduced motion',t=>{
+ const {view}=playable(t);
+ view.ambientConfig=ambientProfile({id:'foundry'},'day');
+ view.ambientAnchors=[{x:0,y:.4,z:0}];
+ let spawned=0;for(let i=0;i<40;i++)spawned+=view._updateAmbient(null,.1,i*.1,false);
+ assert.ok(view.ambientFx&&view.ambientPool,'WebGL lazily allocates the ambient pool');
+ assert.ok(spawned>0,'ambient motes spawn');
+ assert.ok(view.ambientPool.slots.some(slot=>slot.active));
+ assert.equal(view._updateAmbient(null,.1,9,true),0,'reduced motion emits nothing');
+ const drawn=view.ambientPool.slots.filter(slot=>slot.active).length;
+ view.renderer.isSoftware=true;
+ assert.equal(view._updateAmbient(null,.1,9,false),0,'the CPU renderer emits nothing');
+ assert.equal(view.ambientPool.slots.filter(slot=>slot.active).length,drawn,'the CPU guard adds no draw calls');
+ const software=Object.assign(Object.create(ArenaView.prototype),{renderer:{isSoftware:true},scene:new T.Scene(),motionQuery:{matches:false},display:{...DEFAULT_DISPLAY},ambientConfig:view.ambientConfig});
+ assert.equal(software._updateAmbient(null,.1,0,false),0);
+ assert.ok(!software.ambientPool,'the CPU view never allocates the ambient pool');
+ view.ambientPool.dispose();
+});
+
+test('wind sway is gated to WebGL, disabled by reduced motion and tagged to vegetation',t=>{
+ const {view}=playable(t);
+ const mesh=new T.InstancedMesh(new T.BoxGeometry(1,1,1),new T.MeshBasicMaterial(),1);
+ mesh.count=1;mesh.setMatrixAt(0,new T.Matrix4());
+ mesh.userData.scatterWind={base:Float32Array.from(mesh.instanceMatrix.array),phase:new Float32Array([0]),amp:new Float32Array([.03])};
+ view.scatterWind=[mesh];
+ assert.ok(view._updateWind(1,false)>0,'WebGL sways the tagged vegetation');
+ assert.equal(view._updateWind(1,true),0,'reduced motion freezes the sway');
+ view.renderer.isSoftware=true;
+ assert.equal(view._updateWind(1,false),0,'the CPU renderer never sways');
+ view.renderer.isSoftware=false;view.scatterWind=[];
+ assert.equal(view._updateWind(1,false),0,'no tagged vegetation means no work');
+});
+
+test('soccer net density follows the quality detail hint',()=>{
+ const race={kind:'soccer',pitch:{minX:-30,maxX:30,minZ:-18,maxZ:18},goals:[{team:0,x:-30,z:0,nx:-1,nz:0,halfWidth:6,height:4,depth:2}]};
+ const lattice=model=>{let count=0;model.traverse(node=>{if(node.userData.soccerNet)count+=node.geometry.attributes.position.count;});return count;};
+ const high=raceTrackModel(race,'#55ddcc',undefined,undefined,{quality:{scatterDetail:1}});
+ const low=raceTrackModel(race,'#55ddcc',undefined,undefined,{quality:{scatterDetail:.3}});
+ assert.ok(lattice(high)>0&&lattice(low)>0,'both tiers build a net');
+ assert.ok(lattice(low)<lattice(high),`low detail ${lattice(low)} < high detail ${lattice(high)}`);
+ ArenaView.prototype.disposeObject.call({},high);ArenaView.prototype.disposeObject.call({},low);
+});
+
+test('the software next-gen prop detail stays within the CPU triangle budget',()=>{
+ const ctx={fillRect(){},fillText(){},beginPath(){},moveTo(){},lineTo(){},closePath(){},stroke(){},fill(){}};
+ const renderer=new SoftwareRenderer({width:320,height:180,getContext:()=>ctx});
+ const props=[];for(let i=0;i<48;i++)props.push({type:i%3===0?'rock':i%3===1?'tree':'barrel',x:(i%8)*3-12,z:Math.floor(i/8)*3-6,y:0,seed:i+1});
+ const build=software=>{
+  const view=Object.assign(Object.create(ArenaView.prototype),{renderResources:new Set(),renderer:{isSoftware:software}}),world=new T.Group();
+  view.buildNextGen(world,{color:'#55ddcc',terrain:{height:()=>0},structures:[],props});
+  const scene=new T.Scene();scene.background=new T.Color('#000');scene.add(world);
+  const camera=new T.PerspectiveCamera(90,320/180,.1,200);camera.position.set(0,7,18);camera.lookAt(0,0,0);
+  renderer.render(scene,camera);
+  const triangles=renderer.info.render.triangles;
+  view.disposeObject(world);for(const resource of view.renderResources)resource.dispose();
+  return triangles;
+ };
+ const low=build(true),high=build(false);
+ assert.ok(low>0,'the software prop pass draws geometry');
+ assert.ok(low<=high,`software props ${low} triangles <= WebGL props ${high}`);
+ assert.ok(low<=200000,`software prop triangles ${low} stay bounded`);
+});
+
+test('quality tiers resolve from the renderer and pin through the display path',t=>{
+ const {view}=fixture(t,{software:true});
+ view._quality();
+ assert.equal(view.quality,'low');
+ assert.equal(view.qualityTier(),0);
+ assert.equal(view._quality().decals,8);
+ view.setQuality('high');
+ assert.equal(view.quality,'high');
+ assert.equal(view._quality().shadows,2);
+ view.setDisplay({...DEFAULT_DISPLAY,quality:'medium'});
+ assert.equal(view.quality,'medium','the display path pins a requested tier');
+ assert.equal(view._quality().decals,14);
+ const webgl=fixture(t).view;
+ webgl._quality();
+ assert.equal(webgl.quality,'high','a hardware renderer defaults to high');
+ webgl.setDisplay({...DEFAULT_DISPLAY,reducedMotion:true});
+ assert.equal(webgl.quality,'medium','reduced motion caps the auto tier at medium');
+ webgl.setQuality(null);
+ assert.equal(webgl._qualityOverride,null,'clearing the override unpins quality');
+});
+
+test('quality budgets drive decal, death and ambient pool sizes',t=>{
+ const {view}=fixture(t);view.scene=new T.Scene();
+ view.setQuality('low');
+ view._spawnImpactDecal({x:0,y:0,z:0},false,0);
+ assert.ok(view.decalPool,'a low tier still stamps decals');
+ assert.equal(view.decalPool.limit,8,'the decal pool uses the low-tier slot count');
+ const deaths=view.deathFx();
+ assert.equal(deaths.limit,36);assert.equal(deaths.splatLimit,10);
+ assert.equal(view._quality().ambientMotes,3);
+ view.setQuality('high');
+ view._spawnImpactDecal({x:1,y:0,z:1},false,0);
+ assert.equal(view.decalPool.limit,8,'an existing pool keeps its allocation but is reused');
+ assert.equal(view.deathFx().limit,36);
+ view.decalPool.dispose();deaths.dispose();
+});
+
+test('the quality controller auto-downgrades on sustained low FPS without pinning',t=>{
+ const {view}=playable(t);
+ view._quality();
+ assert.equal(view.quality,'high');
+ for(let i=0;i<5;i++)view._sampleQuality(.2);
+ assert.equal(view.quality,'medium','sustained low FPS drops a tier');
+ for(let i=0;i<5;i++)view._sampleQuality(.2);
+ assert.equal(view.quality,'low');
+ for(let i=0;i<100;i++)view._sampleQuality(.01);
+ assert.equal(view.quality,'medium','fast frames recover one tier at a time');
+ assert.ok(view._qualityOverride==null,'the controller never pins quality');
+});
+
+test('death debris spin and splay options are deterministic, bounded and opt-in',()=>{
+ const mk=()=>({children:[],add(o){this.children.push(o);},remove(o){const i=this.children.indexOf(o);if(i>=0)this.children.splice(i,1);}});
+ const a=new DeathPool(mk(),6,2),b=new DeathPool(mk(),6,2);
+ a.spawn({x:0,y:0,z:0},{pieces:5,force:6,seed:3,spin:1.4,splay:1});
+ b.spawn({x:0,y:0,z:0},{pieces:5,force:6,seed:3,spin:1.4,splay:1});
+ assert.deepEqual(a.slots.map(s=>s.spin),b.slots.map(s=>s.spin),'debris spin is deterministic for a seed');
+ assert.ok(a.slots.every(s=>Math.abs(s.spin.x)<=14&&Math.abs(s.spin.y)<=14&&Math.abs(s.spin.z)<=14),'spin stays bounded');
+ const flat=new DeathPool(mk(),6,2);
+ flat.spawn({x:0,y:0,z:0},{pieces:5,force:6,seed:3,spin:0,splay:0});
+ assert.ok(flat.slots.every(s=>s.spin.x===0&&s.spin.y===0&&s.spin.z===0),'a zero tumble multiplier removes angular motion');
+ const defaults=new DeathPool(mk(),6,2);
+ assert.equal(defaults.spawn({x:0,y:0,z:0},{pieces:5,force:6,seed:3}),5,'the new options keep the old default call signature');
+ a.dispose();b.dispose();flat.dispose();defaults.dispose();
+});

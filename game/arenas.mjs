@@ -52,6 +52,8 @@ const AUTHOR={
  'proving-grounds':{group:'arena',scale:'skirmish',play:['armsrace','deathmatch','teamdeathmatch','instagib','rockets','arsenal','koth','domination']},
  'titan-valley':{group:'combined',scale:'warzone',play:['combined-arms','teamdeathmatch','deathmatch','koth','domination','arsenal','assault','payload']},
  'convoy-line':{group:'urban',scale:'warzone',play:['payload','combined-arms','teamdeathmatch','deathmatch','koth','domination','arsenal']},
+ throne:{group:'arena',scale:'battle',play:['juggernaut','deathmatch','teamdeathmatch','instagib','rockets','arsenal','koth','domination','vip-escort']},
+ gauntlet:{group:'indoor',scale:'warzone',play:['team-elimination','teamdeathmatch','deathmatch','koth','domination','arsenal','instagib','vip-escort']},
 };
 
 const span=arena=>{

@@ -47,9 +47,9 @@ export function missionIndex(id) {
  return index < 0 ? 0 : index;
 }
 export function nextMissionId(progress) {
- const order = orderIds(), id = firstIncompleteMission(progress);
- const index = order.indexOf(id);
- return index >= 0 && index < order.length - 1 ? order[index + 1] : null;
+ // The next mission to play is the first one not yet completed; null once the
+ // whole campaign is finished. (Returning the mission after it skipped one.)
+ return orderIds().find(id => !progress?.completed?.[id]) || null;
 }
 /** @param {any} progress @param {{id:string,won:boolean,time?:number|null,score?:number|null}} [options] */
 export function recordMission(progress, {id, won, time = null, score = null} = {}) {
@@ -67,4 +67,14 @@ export function recordMission(progress, {id, won, time = null, score = null} = {
 export function setCheckpoint(progress, missionId, step) {
  if (!CAMPAIGN_MISSIONS.some(m => m.id === missionId)) return progress;
  return {...progress, checkpoint:{missionId, step:Math.max(0, Math.round(step) || 0)}, updatedAt:Date.now()};
+}
+/** Reads the banked resume step for a mission, or null when there is none. */
+export function checkpointFor(progress, missionId) {
+ const checkpoint = progress?.checkpoint;
+ if (!checkpoint || checkpoint.missionId !== missionId) return null;
+ return Math.max(0, Math.round(Number(checkpoint.step) || 0));
+}
+/** Drops a banked checkpoint once its mission is completed or abandoned. */
+export function clearCheckpoint(progress) {
+ return progress?.checkpoint ? {...progress, checkpoint:null, updatedAt:Date.now()} : progress;
 }

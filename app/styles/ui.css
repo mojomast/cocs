@@ -294,3 +294,57 @@
   .modal-panel--xl{--modal-w:1240px}
   .modal-panel--lg{--modal-w:940px}
 }
+
+/* ==========================================================================
+   Pass 2 — theater filter toolbar and highlight jumps, plus small polish for
+   the challenge/per-mode readouts that reuse the panel + meter primitives.
+   Menus only, so these follow the same tokens as the rest of the system.
+   ========================================================================== */
+.config-field select{min-height:44px;width:100%;min-width:0;padding:0 12px;border:1px solid var(--ui-line);border-radius:var(--radius-md);background:rgba(6,14,18,.7);color:var(--text);font-size:16px}
+.config-field select:hover{border-color:var(--accent-soft)}
+.config-field select:focus-visible{outline:2px solid var(--accent);outline-offset:1px}
+.theater-filters .config-field{flex:1 1 170px;min-width:150px;margin-bottom:0;gap:6px}
+.theater-filters .config-field>span{font:10px var(--font-mono);letter-spacing:.16em;text-transform:uppercase;color:var(--text-mute)}
+.theater-filters select{min-height:44px;width:100%;padding:0 12px;border:1px solid var(--ui-line);border-radius:var(--radius-md);background:rgba(6,14,18,.7);color:var(--text);font-size:15px}
+.theater-filters select:hover{border-color:var(--accent-soft)}
+.theater-filters select:focus-visible{outline:2px solid var(--accent);outline-offset:1px}
+.theater-highlights{align-items:center;gap:6px}
+.theater-highlights .label{margin-right:2px}
+.theater-highlights .btn{font-variant-numeric:tabular-nums;min-height:34px}
+.theater-highlights .btn:focus-visible{outline:2px solid var(--accent);outline-offset:1px}
+.panel .field-note + .meter{margin-top:6px}
+
+/* Daily-challenge and per-mode readouts sit in panels but read as cards. */
+.challenge-row,.mode-row{padding:10px 12px;border:1px solid var(--ui-line);border-radius:var(--radius-md);background:rgba(10,22,26,.45)}
+.challenge-row .meter{min-height:8px}
+.challenge-row .field-note,.mode-row .field-note{margin-top:2px}
+.mode-row .card-main small{color:var(--text-mute)}
+
+@media (max-width:720px){
+  .theater-filters .config-field{flex:1 1 100%}
+}
+@media (min-width:1800px){
+  .theater-filters .config-field{flex-basis:210px}
+  .theater-filters select{min-height:48px;font-size:16px}
+  .theater-highlights .btn{min-height:40px}
+  .challenge-row,.mode-row{padding:13px 15px}
+}
+
+/* ==========================================================================
+   Pass 3 — Help legend tab for the new systems (modes, horde, dailies,
+   Theater) plus final menu polish. Skimmable lists, one panel per topic.
+   ========================================================================== */
+.help-sections{display:grid;gap:var(--ui-gap-4)}
+.help-sections .panel-body{padding:14px 16px}
+.help-list{margin:0;padding-left:18px;display:grid;gap:8px;color:var(--text-dim);font-size:14px;line-height:1.5}
+.help-list li::marker{color:var(--accent)}
+.help-list li b{color:var(--text)}
+
+@media (max-width:720px){
+  .help-sections .panel-body{padding:12px 14px}
+  .help-list{font-size:13px;gap:6px}
+}
+@media (min-width:1800px){
+  .help-sections{gap:var(--ui-gap-5)}
+  .help-list{font-size:16px;gap:10px}
+}

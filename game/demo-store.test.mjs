@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { DEMO_VERSION, demoHeader, compressDemo } from './demo.mjs';
-import { setDemoStorage, saveDemo, getDemo, listDemos, deleteDemo, demoSummary, demoHighlights } from './demo-store.mjs';
+import { setDemoStorage, saveDemo, getDemo, listDemos, deleteDemo, demoSummary, demoHighlights, demoOutcome, demoModes, demoMaps, filterDemos, sortDemos } from './demo-store.mjs';
 
 function createMemoryStorage() {
   const meta = new Map();
@@ -104,6 +104,36 @@ test('demoSummary derives theater highlights from death, capture and killstreak 
   assert.deepEqual(summary.highlights.map(h => h.actor), [0, 0, 0]);
   assert.deepEqual(demoHighlights({ events: [] }), []);
   assert.deepEqual(demoHighlights({ events: [{ type: 'death', id: 9, time: 1, actor: 3 }] }).map(h => h.label), ['Actor 3 was eliminated']);
+});
+
+test('demo filtering, sorting and outcomes are deterministic', () => {
+  const demos = [
+    {id: 'a', mode: 'ctf', mapId: 'exchange', createdAt: '2020-01-01T00:00:00Z', duration: 10},
+    {id: 'b', mode: 'deathmatch', mapId: 'forge', createdAt: '2020-02-01T00:00:00Z', duration: 30},
+    {id: 'c', mode: 'ctf', mapId: 'exchange', createdAt: '2020-03-01T00:00:00Z', duration: 5},
+  ];
+  assert.deepEqual(filterDemos(demos, {mode: 'ctf'}).map(d => d.id), ['a', 'c']);
+  assert.deepEqual(filterDemos(demos, {mapId: 'forge'}).map(d => d.id), ['b']);
+  assert.deepEqual(filterDemos(demos, {mode: 'ctf', mapId: 'exchange'}).map(d => d.id), ['a', 'c']);
+  assert.deepEqual(filterDemos(demos).map(d => d.id), ['a', 'b', 'c']);
+  assert.deepEqual(sortDemos(demos, 'newest').map(d => d.id), ['c', 'b', 'a']);
+  assert.deepEqual(sortDemos(demos, 'oldest').map(d => d.id), ['a', 'b', 'c']);
+  assert.deepEqual(sortDemos(demos, 'longest').map(d => d.id), ['b', 'a', 'c']);
+  assert.deepEqual(sortDemos(demos, 'shortest').map(d => d.id), ['c', 'a', 'b']);
+  assert.deepEqual(sortDemos([], 'longest'), []);
+  assert.deepEqual(demoModes(demos), ['ctf', 'deathmatch']);
+  assert.deepEqual(demoMaps(demos), ['exchange', 'forge']);
+  const team = {header: {config: {team: true}, teamScores: {0: 3, 1: 1}}, keyframes: [{time: 0, state: {config: {team: true}, teamScores: {0: 3, 1: 1}}}]};
+  assert.deepEqual(demoOutcome(team), {teamMode: true, winner: 'Team 1', scores: {0: 3, 1: 1}, score: '3–1'});
+  const ctf = {header: {config: {mode: 'ctf'}, mapId: 'exchange'}, keyframes: [{time: 0, state: {config: {mode: 'ctf'}, teamScores: {0: 5, 1: 2}}}]};
+  assert.deepEqual(demoOutcome(ctf), {teamMode: true, winner: 'Team 1', scores: {0: 5, 1: 2}, score: '5–2'});
+  const losing = {header: {config: {mode: 'teamdeathmatch'}}, keyframes: [{time: 0, state: {config: {mode: 'teamdeathmatch'}, teamScores: {0: 4, 1: 9}}}]};
+  assert.equal(demoOutcome(losing).winner, 'Team 2');
+  const ffa = {keyframes: [{time: 0, state: {config: {team: false}, actors: [{id: 0, name: 'Claude', frags: 4}, {id: 1, name: 'ChatGPT', frags: 9}]}}]};
+  assert.deepEqual(demoOutcome(ffa), {teamMode: false, winner: 'ChatGPT', scores: null, score: '9 frags'});
+  const tie = {header: {config: {team: true}, teamScores: {}}};
+  assert.equal(demoOutcome(tie).winner, null);
+  assert.equal(demoOutcome(tie).score, '0–0');
 });
 
 test('getDemo validates DEMO_VERSION on load', async () => {

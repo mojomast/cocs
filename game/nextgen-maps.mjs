@@ -229,4 +229,48 @@ const provingGrounds = createLevel({
   },
 });
 
-export const NEXTGEN_MAPS = [colosseum, frostGate, sunkenHill, riverbend, fortress, atrium, catacombs, slagworks, forge, provingGrounds, titanValley, convoyLine];
+// 13. Juggernaut — a raised throne arena where one fighter holds the centre.
+const throne = createLevel({
+  id: 'throne', name: 'The Throne', tag: 'JUGGERNAUT / RAISED ARENA', color: '#ffcf6b', background: '#140f08', seed: 1313,
+  group: 'arena', scale: 'battle', mode: 'juggernaut', size: { w: 104, d: 104 }, biome: 'ruins', amplitude: 1.4, relief: .4,
+  description: 'A tiered arena around a central throne. One fighter wears the crown and every eye is on them; take it by force.',
+  layout(ctx, rng) {
+    ring(ctx, 0, 0, 16, 20, (c, x, z, a, i) => { if (i % 5 === 0) return; c.addBlock({ x, z, w: 3, d: 3, h: c.ground(x, z) + 1.2, kind: 'terrace' }); });
+    for (const [x, z] of [[-6, 0], [6, 0], [0, -6], [0, 6]]) ctx.addColumn({ x, z, radius: .9, height: 6 });
+    ctx.addBuilding({ x: -26, z: 0, w: 10, d: 10, h: 6, rot: Math.PI / 2, roof: 'gable', door: 'south', floors: 1 });
+    ctx.addBuilding({ x: 26, z: 0, w: 10, d: 10, h: 6, rot: -Math.PI / 2, roof: 'gable', door: 'south', floors: 1 });
+    for (const [x, z] of [[-30, -24], [30, 24], [-30, 24], [30, -24]]) ctx.addRock({ x, z, scale: 1.2 });
+    ctx.addObjective(0, 0, 4); ctx.addObjective(-11, 0, 3.5); ctx.addObjective(11, 0, 3.5);
+    for (let i = 0; i < 8; i++) { const a = (i / 8) * Math.PI * 2; ctx.addSpawn(Math.cos(a) * 32, Math.sin(a) * 32); }
+    ctx.addPickup('health', -30, 0); ctx.addPickup('armor', 30, 0); ctx.addPickup('rocket', 0, -30); ctx.addPickup('plasma', 0, 30);
+    // Extra dressing turns the throne into a fighting pit: diagonal braziers,
+    // four pieces of low cover around the crown, and a ring of barrels.
+    for (const [x, z] of [[-9, -9], [9, 9], [-9, 9], [9, -9]]) ctx.addColumn({ x, z, radius: .75, height: 5.5 });
+    for (const [x, z] of [[-6, 10], [6, -10], [10, 6], [-10, -6]]) ctx.addBlock({ x, z, w: 3.4, d: 1.6, h: ctx.ground(x, z) + 2.1, kind: 'cover' });
+    ring(ctx, 0, 0, 26, 10, (c, x, z) => c.addBarrel({ x, z }));
+    scatter(ctx, 14, rng, 9, (c, x, z) => (rng() > .5 ? c.addRuin({ x, z, scale: .8 + rng() * .5 }) : c.addRock({ x, z, scale: .55 + rng() * .25 })));
+  },
+});
+
+// 14. Team Elimination — two staging bases with a contested central lane.
+const gauntlet = createLevel({
+  id: 'gauntlet', name: 'The Gauntlet', tag: 'ELIMINATION / TWIN BASES', color: '#ff8f6b', background: '#120c0a', seed: 1414,
+  group: 'indoor', scale: 'warzone', mode: 'team-elimination', size: { w: 96, d: 72 }, biome: 'ruins', amplitude: 2.2, relief: .8,
+  description: 'Two staging bases connected by a lethal central lane. Every death spends a team life — last squad standing wins.',
+  layout(ctx, rng) {
+    ctx.teamSpawns = { 0: [[-40, -18], [-40, 18], [-46, -24], [-46, 24]], 1: [[40, 18], [40, -18], [46, 24], [46, -24]] };
+    ctx.addBuilding({ x: -34, z: 0, w: 12, d: 22, h: 6, rot: Math.PI / 2, roof: 'flat', door: 'north', floors: 1 });
+    ctx.addBuilding({ x: 34, z: 0, w: 12, d: 22, h: 6, rot: -Math.PI / 2, roof: 'flat', door: 'north', floors: 1 });
+    for (const [x, z] of [[-16, -14], [-16, 14], [16, -14], [16, 14], [-8, -12], [-8, 12], [8, -12], [8, 12]]) ctx.addBlock({ x, z, w: 4, d: 4, h: ctx.ground(x, z) + 2.4, kind: 'cover' });
+    ctx.addObjective(-16, 0, 3.5); ctx.addObjective(0, 0, 4); ctx.addObjective(16, 0, 3.5);
+    ctx.addPickup('rail', 0, 0); ctx.addPickup('rocket', -18, -20); ctx.addPickup('rocket', 18, 20); ctx.addPickup('health', -40, 14); ctx.addPickup('health', 40, -14); ctx.addPickup('armor', 0, 22);
+    // Mirrored low cover extends the twin-base lane, so every push has a
+    // fallback and neither side gets a free run at the centre.
+    for (const [x, z] of [[20, 8], [-20, -8], [-20, 8], [20, -8], [10, 18], [-10, -18], [-10, 18], [10, -18]]) ctx.addBlock({ x, z, w: 3.6, d: 1.6, h: ctx.ground(x, z) + 2.1, kind: 'cover' });
+    for (const [x, z] of [[-26, 6], [26, -6], [-26, -6], [26, 6]]) ctx.addColumn({ x, z, radius: .7, height: 5 });
+    ring(ctx, 0, 0, 30, 12, (c, x, z) => c.addBarrel({ x, z }));
+    scatter(ctx, 16, rng, 8, (c, x, z) => (rng() > .5 ? c.addRuin({ x, z, scale: .8 + rng() * .4 }) : c.addCrate({ x, z, scale: .7 + rng() * .3 })));
+  },
+});
+
+export const NEXTGEN_MAPS = [colosseum, frostGate, sunkenHill, riverbend, fortress, atrium, catacombs, slagworks, forge, provingGrounds, titanValley, convoyLine, throne, gauntlet];

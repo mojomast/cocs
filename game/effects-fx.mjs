@@ -100,6 +100,49 @@ export class RailBeamPool{
  dispose(){for(const s of this.slots){this.scene.remove(s.beam,s.core,s.ring);s.beamMat.map?.dispose();s.beamMat.dispose();s.coreMat.dispose();s.ringMat.dispose();}this.slots=[];this.beamGeo.dispose();this.coreGeo.dispose();this.ringGeo.dispose();this.texture?.dispose();this.texture=null;}
 }
 
+// Flat impact/scorch decals: one shared quad, a fixed slot pool and per-slot
+// opacity so overlapping marks fade independently. The view creates this only
+// for WebGL and skips it on the CPU renderer to keep its draw-call budget flat.
+export class DecalPool{
+ constructor(scene,limit=18){
+  this.scene=scene;this.limit=limit;this.slots=[];this.serial=0;
+  this.geometry=new T.PlaneGeometry(1,1);
+ }
+ _slot(){
+  let slot=this.slots.find(s=>!s.active);
+  if(slot)return slot;
+  if(this.slots.length>=this.limit){this.slots.sort((a,b)=>a.serial-b.serial);return this.slots[0];}
+  const material=new T.MeshBasicMaterial({transparent:true,depthWrite:false,side:T.DoubleSide});
+  const obj=new T.Mesh(this.geometry,material);obj.visible=false;obj.frustumCulled=false;obj.renderOrder=3;
+  obj.userData.decal=true;this.scene.add(obj);slot={obj,material,active:false,serial:0,size:1};this.slots.push(slot);return slot;
+ }
+ spawn(pos,{color='#171310',size=.32,life=5.5,reduced=false,seed=0}={}){
+  if(!pos)return false;
+  const slot=this._slot();if(!slot)return false;
+  const yaw=hashUnit(seed||0)*Math.PI*2,scale=Math.max(.05,size);
+  slot.obj.material.color.set(color);
+  slot.obj.material.opacity=reduced?.46:.58;
+  slot.obj.visible=true;
+  slot.obj.position.set(pos.x||0,(pos.y||0)+.025,pos.z||0);
+  slot.obj.rotation.set(-Math.PI/2,yaw,0);
+  slot.obj.scale.setScalar(scale);
+  slot.active=true;slot.serial=++this.serial;slot.size=scale;slot.life=slot.total=Math.max(.2,life);
+  return true;
+ }
+ update(dt){
+  for(const slot of this.slots){
+   if(!slot.active)continue;
+   slot.life-=dt;
+   if(slot.life<=0){slot.active=false;slot.obj.visible=false;continue;}
+   const t=1-slot.life/slot.total;
+   slot.obj.material.opacity=Math.min(.58,slot.life/slot.total*.75);
+   slot.obj.scale.setScalar(slot.size*(1+t*.14));
+  }
+ }
+ clear(){for(const slot of this.slots){slot.active=false;slot.obj.visible=false;}}
+ dispose(){for(const slot of this.slots){this.scene.remove(slot.obj);slot.material?.dispose();slot.material=null;}this.slots=[];this.geometry?.dispose();this.geometry=null;}
+}
+
 // Pooled death debris: flung limb/body chunks and lingering ground splats.
 // Slots are reused oldest-first so a burst of deaths cannot grow GPU resources.
 const GIB_GRAVITY=26;
@@ -118,10 +161,11 @@ export class DeathPool{
   const obj=new T.Mesh(this.chunk,material);obj.visible=false;obj.frustumCulled=false;this.scene.add(obj);
   slot={obj,material,active:false};this.slots.push(slot);return slot;
  }
- spawn(pos,{pieces=6,force=6,color='#8f1a1a',reduced=false,seed=0}={}){
+ spawn(pos,{pieces=6,force=6,color='#8f1a1a',reduced=false,seed=0,spin=1,splay=.5}={}){
   if(!pos)return 0;
   const count=Math.max(0,reduced?Math.min(2,pieces):pieces),baseY=Number.isFinite(pos.y)?pos.y+.9:.9;
   const active=this.slots.reduce((n,slot)=>n+(slot.active?1:0),0),budget=Math.max(0,Math.min(count,this.limit-active));
+  const tumble=Math.max(-2,Math.min(2,Number.isFinite(spin)?spin:1)),spread=Math.max(0,Math.min(1,Number.isFinite(splay)?splay:.5));
   let spawned=0;
   for(let i=0;i<budget;i++){
    const slot=this._slot();if(!slot)break;
@@ -129,9 +173,10 @@ export class DeathPool{
    slot.obj.geometry=i%3===0?this.chunk:this.limb;
    slot.material.color.set(color);slot.material.opacity=1;
    slot.obj.visible=true;slot.obj.position.set(pos.x,baseY,pos.z);
-   slot.obj.rotation.set(angle,elevation*3,angle*.5);slot.obj.scale.setScalar(.7+hashUnit(seed,i)*.8);
-   slot.velocity={x:Math.cos(angle)*speed,y:speed*(.5+elevation),z:Math.sin(angle)*speed};
-   slot.spin={x:(hashUnit(seed,i+1)-.5)*14,y:(hashUnit(seed,i+2)-.5)*14,z:(hashUnit(seed,i+3)-.5)*14};
+   slot.obj.rotation.set(angle*(.6+spread*.8),elevation*3,angle*.5);
+   slot.obj.scale.setScalar((.7+hashUnit(seed,i)*.8)*(.85+spread*.3));
+   slot.velocity={x:Math.cos(angle)*speed*(.75+spread*.5),y:speed*(.5+elevation*spread),z:Math.sin(angle)*speed*(.75+spread*.5)};
+   slot.spin={x:(hashUnit(seed,i+1)-.5)*14*tumble,y:(hashUnit(seed,i+2)-.5)*14*tumble,z:(hashUnit(seed,i+3)-.5)*14*tumble};
    slot.active=true;slot.serial=++this.serial;slot.life=slot.total=1.2+hashUnit(seed,i+4)*.9;
    spawned++;
   }
@@ -172,4 +217,31 @@ export class DeathPool{
   for(const slot of this.splats){this.scene.remove(slot.obj);slot.material.dispose();}this.splats=[];
   this.limb.dispose();this.chunk.dispose();this.splatGeo.dispose();
  }
+}
+
+// Short, deterministic kill-cam framing. Camera math only: the authoritative
+// simulation never reads this. The pose orbits the death anchor and pulls in,
+// easing over the duration; reduced motion collapses to a fixed over-shoulder
+// stand-off so the shot stays stable.
+export const KILLCAM_DURATION=2.2;
+export function killcamPose({elapsed=0,duration=KILLCAM_DURATION,focus=null,killer=null,seed=0,reduced=false}={}){
+ const fx=focus&&Number.isFinite(focus.x)?focus:{x:0,y:0,z:0};
+ const span=Number.isFinite(duration)&&duration>0?duration:KILLCAM_DURATION;
+ const phase=Math.max(0,Math.min(1,(Number.isFinite(elapsed)?Math.max(0,elapsed):0)/span));
+ const seedValue=(seed>>>0)||1;
+ const angle=hashUnit(seedValue,3)*Math.PI*2;
+ if(reduced){
+  const x=fx.x+Math.sin(angle)*6.4,z=fx.z+Math.cos(angle)*6.4,y=fx.y+3;
+  return {x,y,z,lookX:fx.x,lookY:fx.y+.65,lookZ:fx.z,fov:62,phase};
+ }
+ // Orbit radius shrinks through the shot while the killer is slowly revealed:
+ // the first beat reads the death anchor, the tail frames the shooter.
+ const radius=5.6-1.5*Math.sin(phase*Math.PI);
+ const x=fx.x+Math.sin(angle+phase*1.7)*radius;
+ const z=fx.z+Math.cos(angle+phase*1.7)*radius;
+ const hasKiller=killer!=null&&Number.isFinite(killer.x)&&Number.isFinite(killer.z);
+ const reveal=hasKiller?Math.max(0,(phase-.45)/.55):0;
+ const y=fx.y+2.2+1.5*Math.sin(phase*Math.PI)+(hasKiller&&Number.isFinite(killer.y)?(killer.y-fx.y)*.22*reveal:0);
+ const lookX=fx.x+(hasKiller?(killer.x-fx.x)*.34*reveal:0),lookZ=fx.z+(hasKiller?(killer.z-fx.z)*.34*reveal:0);
+ return {x,y,z,lookX,lookY:fx.y+.7,lookZ,fov:58+9*(1-phase),phase};
 }

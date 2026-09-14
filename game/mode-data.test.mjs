@@ -62,6 +62,39 @@ test('KOTH places the hill at the authored center on next-gen maps',()=>{
   }
 });
 
+test('Juggernaut and Team Elimination objectives expose deterministic state',()=>{
+  const map=MAPS.find(value=>value.id==='crosswire');
+  const elimination=objectiveTemplate('team-elimination',map,{fragLimit:4});
+  assert.equal(elimination.kind,'elimination');
+  assert.equal(elimination.livesPerTeam,4);
+  assert.deepEqual(elimination.lives,{0:4,1:4});
+  assert.deepEqual(elimination.deaths,{0:0,1:0});
+  assert.deepEqual(elimination.eliminations,{0:0,1:0});
+  assert.equal(elimination.suddenDeath,false);
+  assert.deepEqual(elimination.zones.map(z=>z.id),['alpha','bravo','charlie'],'elimination exposes push anchors');
+  assert.ok(elimination.zones.length>=3&&elimination.zones.every(z=>Number.isFinite(z.x)&&Number.isFinite(z.z)),'elimination anchors are usable objective centers');
+  const juggernaut=objectiveTemplate('juggernaut',map,{});
+  assert.equal(juggernaut.kind,'juggernaut');
+  assert.equal(juggernaut.juggernautId,0);
+  assert.deepEqual(juggernaut.points,{});
+  assert.equal(juggernaut.suddenDeath,false);
+  assert.deepEqual(juggernaut.zones.map(z=>z.id),['alpha','bravo','charlie'],'juggernaut exposes hold anchors');
+  assert.equal(objectiveTemplate('koth',map).kind,'koth');
+  assert.equal(objectiveTemplate('domination',map).kind,'domination');
+});
+
+test('extraction objectives author a spawn, a beacon and a terminating win state',()=>{
+ const map=MAPS.find(value=>value.id==='gauntlet');
+ const state=objectiveTemplate('vip-escort',map,{fragLimit:1});
+ assert.equal(state.kind,'extraction');
+ assert.ok(Number.isFinite(state.spawn.x)&&Number.isFinite(state.spawn.z),'escort spawn');
+ assert.ok(Number.isFinite(state.extract.x)&&Number.isFinite(state.extract.z),'extraction beacon');
+ assert.notDeepEqual([state.spawn.x,state.spawn.z],[state.extract.x,state.extract.z],'spawn and beacon differ');
+ assert.ok(state.captureSeconds>0&&state.escortRadius>0,'the beacon has a hold window and radius');
+ assert.equal(state.winner,null);
+ assert.equal(state.vipId,null);
+});
+
 test('KOTH and Domination objectives use safe authored points on every canonical map',()=>{
   for(const id of canonicalObjectiveMaps){
     const map=MAPS.find(value=>value.id===id);

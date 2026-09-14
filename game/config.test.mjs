@@ -77,6 +77,25 @@ test('mode rules gate vehicles, carrier speed and zone buffs without touching ot
   assert.equal(modeRule('deathmatch').vehicles,undefined,'untouched modes keep current vehicle defaults');
 });
 
+test('new mode balance rules are explicit, bounded and cannot stalemate',()=>{
+ const jug=modeRule('juggernaut');
+ assert.equal(jug.juggernautRate,.75,'carrier banks less than a point a second');
+ assert.equal(jug.juggernautShield,125,'carrier buffer is tuned');
+ assert.equal(jug.juggernautDamage,1.4,'carrier damage aura is tuned');
+ assert.equal(jug.juggernautBounty,3);
+ assert.equal(jug.juggernautKillBonus,2);
+ assert.ok(jug.suddenDeathSeconds>0&&jug.suddenDeathSeconds<=60,'juggernaut has a bounded sudden-death window');
+ const elim=modeRule('team-elimination');
+ assert.equal(elim.eliminationRespawn,3,'elimination respawns are delayed');
+ assert.ok(elim.eliminationAttritionStart>0&&elim.eliminationAttritionEvery>0,'elimination bleeds tickets so a passive match still ends');
+ assert.ok(elim.eliminationAttritionStart+elim.fragLimit*elim.eliminationAttritionEvery<300,'the worst-case elimination match ends inside the default clock');
+ assert.ok(elim.suddenDeathSeconds>0&&elim.suddenDeathSeconds<=60,'elimination has a bounded sudden-death window');
+ assert.equal(normalizeConfig({mode:'team-elimination'}).respawn,2,'the shared respawn setting is untouched');
+ const duel=normalizeConfig({mode:'juggernaut',fragLimit:9999});
+ assert.equal(duel.fragLimit,99,'juggernaut target clamps');
+ assert.equal(normalizeConfig({mode:'team-elimination',fragLimit:0}).fragLimit,1,'elimination target clamps');
+});
+
 test('display configuration accepts a manual reduce-motion override', () => {
  const d = normalizeDisplay({ reducedMotion: true });
  assert.equal(d.reducedMotion, true);

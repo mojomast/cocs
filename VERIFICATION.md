@@ -1,5 +1,35 @@
 # COCS verification report
 
+## Release 4.1 - Feature expansion and three refinement passes
+
+Four feature agents plus three refinement passes (all with focused test gates).
+
+**New modes / objectives:** `juggernaut` (one powered crown-holder, points while
+holding, transfer on kill/fall), `team-elimination` (shared team ticket lives,
+attrition + sudden death), `vip-escort` (extraction objective), plus multi-phase
+Warden bosses and mode wide sudden-death timers so every mode terminates.
+
+**Single-player depth:** horde between-wave economy with choose-1-of-3 upgrades,
+wave modifiers (swarm/artillery/shielded/elite), new enemy archetypes (mender,
+sapper, overseer, bulwark tank with directional shields, mortar artillery), area
+confinement, campaign checkpoint resume, and a third mission (`throne-siege`).
+
+**Presentation:** death variety (poses/tumble), ambient biome FX and wind, audio
+variants + ambient bed, layered muzzle flashes, iron sights, operator/vehicle
+detail, impact decals, pooled effects, and a quality/LOD controller with FPS
+hysteresis and a CPU triangle budget.
+
+**Interface:** daily challenges, per-mode career stats, full loadout presets,
+theater library filter/sort with in-dock highlight jumps, results reward strip,
+unlock queue, help/settings legend, and team-grouped spectator board. New
+surfaces are styled, mobile/4K safe and accessible.
+
+**Maps:** two new next-gen arenas (`throne`, `gauntlet`) with metadata, plus
+detail/dressing passes.
+
+Verification: game **1107/1107**, server **127/127**, `tests/` **5/5**, `tsc`
+clean, lint 0 errors, build clean.
+
 ## Release 4.0 - Major improvement pass (single-player, modes, graphics, rewards)
 
 A five-agent research wave followed by four implementation agents.

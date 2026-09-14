@@ -87,6 +87,24 @@ test('matchRewardSummary surfaces XP, level progress and the next unlock',()=>{
  assert.ok(live.progress>=0&&live.progress<=1);
  assert.deepEqual(live.unlocked,award.unlocked);
 });
+test('matchXp folds in challenge bonus XP without changing the base reward',()=>{
+ const base=matchXp({actor:{frags:5,scoreStats:{}}});
+ assert.equal(matchXp({actor:{frags:5,scoreStats:{}},bonusXp:50}),base+50);
+ assert.equal(matchXp({actor:{frags:5,scoreStats:{}},bonusXp:-10}),base);
+ assert.equal(matchXp({actor:{frags:5,scoreStats:{}},bonusXp:'25'}),base+25);
+});
+test('awardMatch records explicit per-mode career stats and round-trips',()=>{
+ const first=awardMatch(defaultProgression(),{win:true,mode:'deathmatch',actor:{frags:9,scoreStats:{}}});
+ assert.deepEqual(first.profile.byMode.deathmatch,{matches:1,wins:1,kills:9,best:9});
+ const second=awardMatch(first.profile,{win:false,mode:'deathmatch',actor:{frags:4,scoreStats:{}}});
+ assert.deepEqual(second.profile.byMode.deathmatch,{matches:2,wins:1,kills:13,best:9});
+ const ctf=awardMatch(second.profile,{win:false,mode:'ctf',actor:{frags:3,scoreStats:{captures:1}}});
+ assert.deepEqual(ctf.profile.byMode.ctf,{matches:1,wins:0,kills:3,best:3});
+ assert.deepEqual(normalizeProgression({}).byMode,{});
+ const round=normalizeProgression(JSON.parse(JSON.stringify(ctf.profile)));
+ assert.deepEqual(round.byMode,ctf.profile.byMode);
+ assert.deepEqual(normalizeProgression({byMode:{deathmatch:{matches:-1,wins:'2',kills:1.9,best:NaN},'':'x'}}).byMode,{deathmatch:{matches:0,wins:2,kills:1,best:0}});
+});
 test('normalizeProgression clamps, recomputes level and re-validates gear',()=>{
  const profile=normalizeProgression({xp:xpForLevel(1)+xpForLevel(2),level:99,matches:-3,gear:{primary:'heavy-barrel',armor:'plating',utility:'stim'},unlocks:{'gear-scope':true}});
  assert.equal(profile.xp,1250);

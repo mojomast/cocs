@@ -14,8 +14,9 @@ const primaryMode = map => arenaMeta(map.id).play[0];
 test('there is exactly one next-gen map per combat game mode', () => {
   // Puma Race ships its own dedicated circuit (RACE_MAPS) rather than a
   // procedurally generated combat arena, and the single-player Horde/Campaign
-  // modes reuse the existing arenas, so they are excluded from this count.
-  const combatModes = GAME_MODES.filter(mode => !['puma-race','puma-soccer','horde','campaign'].includes(mode.id));
+  // modes reuse the existing arenas. VIP Escort is an objective mode layered on
+  // the Gauntlet next-gen arena, so it reuses an existing combat map too.
+  const combatModes = GAME_MODES.filter(mode => !['puma-race','puma-soccer','horde','campaign','vip-escort'].includes(mode.id));
   assert.equal(NEXTGEN_MAPS.length, combatModes.length);
   assert.equal(new Set(NEXTGEN_MAPS.map(map => map.id)).size, NEXTGEN_MAPS.length);
   const modes = new Set(NEXTGEN_MAPS.map(primaryMode));
@@ -221,4 +222,23 @@ test('final placement repair uses triangulated ground and includes decks and lat
   const points = [...map.spawns, ...map.pickups.map(p => p.slice(1)), ...Object.values(map.flagSpawns), ...map.objectiveZones.map(p => [p.x, p.z])];
   for (const [x, z] of points) assert.equal(obstructed(x, floorAt(x, z, map), z, .6, map), false, `repaired fixture placement ${x},${z}`);
   for (const zone of map.objectiveZones) assert.equal(zone.y, 0);
+});
+
+test('the campaign finale arena is large enough for a next-gen mission',()=>{
+ const throne=getMap('throne');
+ const span=Math.max(throne.bounds.maxX-throne.bounds.minX,throne.bounds.maxZ-throne.bounds.minZ);
+ assert.ok(span>=100,`throne is mission scale (${span}m)`);
+ assert.ok(arenaSupportsMode('throne','campaign'),'throne hosts campaign missions');
+ assert.ok(arenaSupportsMode('throne','juggernaut'),'throne keeps its primary mode');
+});
+
+test('the new objective maps carry layered cover and dressing', () => {
+  for (const id of ['throne', 'gauntlet']) {
+    const map = NEXTGEN_MAPS.find(value => value.id === id);
+    const cover = map.blocks.filter(block => block.kind === 'cover');
+    assert.ok(cover.length >= 4, `${id} has layered cover`);
+    assert.ok(map.props.length >= 6, `${id} has dressing props`);
+    assert.ok(map.props.some(prop => prop.type === 'barrel'), `${id} has barrels`);
+    if (map.teamSpawns) for (const block of cover) assert.ok(cover.some(other => other !== block && other.x === -block.x && other.z === -block.z && other.w === block.w && other.d === block.d), `${id} cover stays mirrored`);
+  }
 });

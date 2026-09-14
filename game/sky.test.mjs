@@ -37,6 +37,11 @@ test('the star field is deterministic, unit length and above the horizon', () =>
   }
 });
 
+test('the WebGL dome is tessellated finely enough to smooth the vertex gradient', () => {
+  const sky = addSky(new T.Group(),{background:'#0a0f1e',radius:100}), parameters = sky.geometry.parameters;
+  assert.ok(parameters.widthSegments >= 48 && parameters.heightSegments >= 32,`dome segments ${parameters.widthSegments}x${parameters.heightSegments}`);
+});
+
 test('a night sky parents stars and a disc without changing the dome contract', () => {
   const world = new T.Group(), sky = addSky(world,{background:'#090f17',radius:120,phase:'night',seed:3,starCount:48});
   assert.equal(world.children.length,1);
@@ -46,6 +51,19 @@ test('a night sky parents stars and a disc without changing the dome contract', 
   assert.ok(sky.children.some(child => child.userData.stars && child.isPoints),'night dome has a star cloud');
   assert.ok(sky.children.some(child => child.userData.sun),'dome has a sun/moon disc');
   assert.ok(sky.geometry.getAttribute('color').count > 0);
+});
+
+test('the dome parents a single tagged atmosphere haze band in every phase', () => {
+  for (const phase of SKY_PHASES) {
+    const world = new T.Group(), sky = addSky(world,{background:'#0a0f1e',radius:130,phase});
+    assert.equal(world.children.length,1,'the atmosphere never adds a second world node');
+    const bands = sky.children.filter(child => child.userData.atmosphere);
+    assert.equal(bands.length,1,`${phase} has exactly one atmosphere band`);
+    const band = bands[0];
+    assert.equal(band.isMesh,true);
+    assert.equal(band.userData.environment,true);
+    assert.ok([...band.geometry.attributes.position.array].every(Number.isFinite));
+  }
 });
 
 test('the halo ring only appears on halo maps', () => {

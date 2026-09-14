@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {vehicleHud, escapeHint, voiceHint, reloadProgress, dynamicCrosshairGap, lowAmmo, postureLabel, hitMarker, projectToScreen, damageNumberStyle, boundList, damageBearing, killBanner, weaponTag, ammoText, commandBrief, isTeamMode, matchStartBanner, modeColumns, modeGoal, modePrimary, objectiveCopy, suddenDeathBanner, grenadeStatus, killstreakCallout, ladderStatus, streakStatus, audioCaption, scoreAnnouncer, multikillLabel, spreeLabel, recentKills, killCallout, matchAwards, killFeedWeapon, connectionQuality, spectateActor, nextSpectateTarget, spectatorBoard, weaponRangeInfo, weaponRangeLabel} from './hud.mjs';
+import {vehicleHud, escapeHint, voiceHint, reloadProgress, dynamicCrosshairGap, lowAmmo, postureLabel, hitMarker, projectToScreen, damageNumberStyle, boundList, damageBearing, killBanner, weaponTag, ammoText, commandBrief, isTeamMode, matchStartBanner, modeColumns, modeGoal, modePrimary, modeTargetText, objectiveCopy, suddenDeathBanner, grenadeStatus, killstreakCallout, ladderStatus, streakStatus, audioCaption, scoreAnnouncer, multikillLabel, spreeLabel, recentKills, killCallout, matchAwards, killFeedWeapon, connectionQuality, spectateActor, nextSpectateTarget, spectatorBoard, spectatorTeams, weaponRangeInfo, weaponRangeLabel, scoreStats} from './hud.mjs';
 import {WEAPONS} from './data.mjs';
 import {GAME_MODES,teamMode} from './config.mjs';
 import {soccerDisplay,soccerResult} from './race-ui.mjs';
@@ -317,6 +317,25 @@ test('the spectator board lists live actors and marks the followed one',()=>{
  assert.deepEqual(spectatorBoard(null,0),[]);
 });
 
+test('spectatorTeams groups live players by side, free agents last, crown points attached',()=>{
+ const actors=[{id:0,name:'A',health:0,team:1},{id:1,name:'B',health:0,team:0},{id:2,name:'C',health:50,team:0,juggernaut:true},{id:3,health:60}];
+ const groups=spectatorTeams(actors,2,{points:{2:7,3:2}});
+ assert.deepEqual(groups.map(group=>group.team),[0,null],'dead actors drop out and free agents sort last');
+ assert.equal(groups[0].key,'t0');
+ assert.deepEqual(groups[0].players.map(player=>player.id),[2]);
+ assert.equal(groups[0].players[0].current,true);
+ assert.equal(groups[0].players[0].juggernaut,true);
+ assert.equal(groups[0].players[0].points,7);
+ assert.equal(groups[1].players[0].id,3);
+ assert.equal(groups[1].players[0].name,'A3');
+ assert.equal(groups[1].players[0].team,null);
+ assert.equal(groups[1].players[0].points,2);
+ const mixed=spectatorTeams([{id:0,health:5,team:1},{id:1,health:5,team:0},{id:2,health:5}],1);
+ assert.deepEqual(mixed.map(group=>group.team),[0,1,null],'sides read left to right with free agents last');
+ assert.deepEqual(spectatorTeams(null,0),[]);
+ assert.deepEqual(spectatorTeams([{id:0,health:1,team:'x'}],0)[0].team,null,'non-numeric teams read as free agents');
+});
+
 const modeById = id => GAME_MODES.find(m => m.id === id);
 
 test('modeGoal names the scoring objective for every mode', () => {
@@ -445,4 +464,50 @@ test('soccer command brief and goal announcer read the soccer snapshot', () => {
   assert.ok(brief.status.includes('BALL LIVE'), brief.status);
   assert.equal(audioCaption({type: 'soccer-goal'}).text, 'Goal');
   assert.deepEqual(scoreAnnouncer({teamScores: {0: 2, 1: 1}, config: {mode: 'puma-soccer'}}, {0: 1, 1: 1}), {team: 0, kind: 'goal', text: 'RED GOAL', score: 2, amount: 1});
+});
+
+test('modeGoal and modeTargetText name the juggernaut crown and team-elimination lives', () => {
+  const juggernaut = modeById('juggernaut'), elimination = modeById('team-elimination');
+  assert.equal(modeGoal(juggernaut), 'CROWN POINTS');
+  assert.equal(modeGoal(elimination), 'TEAM LIVES');
+  assert.equal(modeTargetText(juggernaut, 30), 'HOLD THE CROWN · MOST POINTS');
+  assert.equal(modeTargetText(elimination, 20), 'TEAM LIVES · 20 EACH');
+  assert.equal(modeTargetText(elimination), 'TEAM LIVES REMAINING');
+  assert.equal(matchStartBanner({time: .5, modeName: 'Juggernaut', mapName: 'Crosswire', config: {mode: 'juggernaut', fragLimit: 30}}, 2.6, juggernaut).detail, 'JUGGERNAUT · CROSSWIRE · HOLD THE CROWN · MOST POINTS');
+});
+
+test('mode columns and primary sort cover juggernaut points and elimination tickets', () => {
+  assert.deepEqual(modeColumns('juggernaut'), [['points', 'POINTS']]);
+  assert.deepEqual(modeColumns('team-elimination'), [['eliminations', 'ELIMS']]);
+  assert.deepEqual(modePrimary('juggernaut', {points: 12, juggernaut: true}), [12, 1]);
+  assert.deepEqual(modePrimary('juggernaut', {points: 4}), [4, 0]);
+  assert.deepEqual(modePrimary('team-elimination', {eliminations: 3, frags: 9}), [3, 9]);
+});
+
+test('objectiveCopy explains the juggernaut and elimination scoring models', () => {
+  assert.ok(objectiveCopy('juggernaut').length > 0);
+  assert.ok(objectiveCopy('elimination').length > 0);
+  assert.notEqual(objectiveCopy('juggernaut'), objectiveCopy('elimination'));
+});
+
+test('single-player economy, checkpoint and boss events have readable captions', () => {
+  assert.equal(audioCaption({type: 'horde-resupply'}).text, 'Resupplied');
+  assert.equal(audioCaption({type: 'horde-upgrade'}).text, 'Upgrade available');
+  assert.equal(audioCaption({type: 'horde-upgrade-selected'}).text, 'Upgrade acquired');
+  assert.equal(audioCaption({type: 'enemy-detonate'}).text, 'Sapper detonation');
+  assert.equal(audioCaption({type: 'singleplayer-checkpoint'}).text, 'Checkpoint saved');
+  assert.equal(audioCaption({type: 'boss-phase'}).text, 'Boss phase');
+  assert.equal(audioCaption({type: 'unknown-event'}), null);
+  assert.equal(audioCaption(null), null);
+});
+
+test('scoreStats forwards juggernaut points and elimination tickets', () => {
+  const stats = scoreStats({scoreStats: {points: 7, eliminations: 3, captures: 1}});
+  assert.equal(stats.points, 7);
+  assert.equal(stats.eliminations, 3);
+  assert.equal(stats.captures, 1);
+  assert.equal(scoreStats(undefined).points, 0);
+  assert.equal(scoreStats({scoreStats: {points: 'x'}}).points, 0);
+  assert.deepEqual(modeColumns('juggernaut'), [['points', 'POINTS']]);
+  assert.deepEqual(modeColumns('team-elimination'), [['eliminations', 'ELIMS']]);
 });

@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {postStage,applyComposerSize,disposeComposer,reducedMotion} from './post.mjs';
+import {postStage,applyComposerSize,disposeComposer,reducedMotion,QUALITY_LEVELS,normalizeQuality,qualitySettings,qualityIndex,nextQualityTier} from './post.mjs';
 
 const fakeComposer = () => {
   const calls = [];
@@ -49,4 +49,48 @@ test('reduced motion combines the app preference with the OS preference', () => 
   assert.equal(reducedMotion(true, false), true);
   assert.equal(reducedMotion(false, true), true);
   assert.equal(reducedMotion(true, true), true);
+});
+
+test('quality tiers normalize from explicit levels, numbers and the renderer', () => {
+  assert.deepEqual(QUALITY_LEVELS, ['low', 'medium', 'high']);
+  assert.equal(normalizeQuality('high'), 'high');
+  assert.equal(normalizeQuality('bogus'), 'high', 'an unknown string falls back to the hardware default');
+  assert.equal(normalizeQuality(0), 'low');
+  assert.equal(normalizeQuality(1.4), 'medium');
+  assert.equal(normalizeQuality(99), 'high', 'numeric tiers clamp to the ends');
+  assert.equal(normalizeQuality(undefined, { software: true }), 'low', 'software renders default low');
+  assert.equal(normalizeQuality(undefined, { reduced: true }), 'medium', 'reduced motion keeps medium');
+  assert.equal(normalizeQuality('low', { software: true }), 'low', 'an explicit tier always wins');
+  assert.equal(normalizeQuality('high', { software: true }), 'high');
+});
+
+test('quality budgets are frozen, ordered and scale expensive work monotonically', () => {
+  const low = qualitySettings('low'), medium = qualitySettings('medium'), high = qualitySettings('high');
+  for (const tier of [low, medium, high]) {
+    assert.ok(Object.isFrozen(tier));
+    assert.ok(tier.tier >= 0 && tier.tier <= 2);
+    for (const key of ['particles', 'decals', 'deaths', 'splats', 'shadows', 'shadowMap', 'stars', 'scatter', 'scatterDetail', 'ambientMotes', 'tracers', 'bloom']) {
+      assert.ok(Number.isFinite(tier[key]), `${key} is finite`);
+    }
+  }
+  assert.ok(low.particles < medium.particles && medium.particles < high.particles, 'particle budget grows with tier');
+  assert.ok(low.decals <= medium.decals && medium.decals <= high.decals, 'decal slots never shrink as tier rises');
+  assert.ok(low.deaths <= medium.deaths && medium.deaths <= high.deaths, 'death slots never shrink as tier rises');
+  assert.ok(low.shadowMap <= medium.shadowMap && medium.shadowMap <= high.shadowMap, 'shadow map resolution tracks tier');
+  assert.ok(low.scatter <= medium.scatter && medium.scatter <= high.scatter, 'backdrop density tracks tier');
+  assert.equal(qualitySettings('low'), low, 'the same tier returns the same frozen table');
+});
+
+test('the frame-rate controller demotes below minFps and promotes above maxFps with hysteresis', () => {
+  assert.equal(nextQualityTier('high', 30), 'medium', 'a slow high tier steps down');
+  assert.equal(nextQualityTier('medium', 30), 'low');
+  assert.equal(nextQualityTier('low', 30), 'low', 'the lowest tier cannot step further down');
+  assert.equal(nextQualityTier('low', 120), 'medium', 'a fast low tier can recover');
+  assert.equal(nextQualityTier('medium', 120), 'high');
+  assert.equal(nextQualityTier('high', 120), 'high', 'high is the top tier');
+  assert.equal(nextQualityTier('medium', 50), 'medium', 'fps inside the hysteresis band is unchanged');
+  assert.equal(nextQualityTier('medium', NaN), 'medium', 'non-finite fps is a no-op');
+  assert.equal(nextQualityTier(undefined, 30, { software: true }), 'low');
+  assert.equal(qualityIndex('high'), 2);
+  assert.equal(qualityIndex('low'), 0);
 });

@@ -46,21 +46,37 @@ export function normalizeGear(value,level=MAX_LEVEL){
  }
  return out;
 }
-export function matchXp({win=false,actor=null}={}){
+export function matchXp({win=false,actor=null,bonusXp=0}={}){
  const stats=actor?.scoreStats||{},frags=Number(actor?.frags)||0;
  const objective=(Number(stats.objectiveTime)||0)*1.5+(Number(stats.objectiveCaptures)||0)*30+(Number(stats.captures)||0)*120+(Number(stats.flagPickups)||0)*15+(Number(stats.flagReturns)||0)*10;
- return Math.max(10,Math.round(40+frags*12+objective+(win?80:0)));
+ const bonus=Math.max(0,Math.round(Number(bonusXp)||0));
+ return Math.max(10,Math.round(40+frags*12+objective+(win?80:0)))+bonus;
+}
+export function modeKey(mode){return typeof mode==='string'&&mode.trim()?mode.trim().slice(0,40):'unknown';}
+const count=value=>Math.max(0,Math.floor(Number(value)||0));
+export function normalizeByMode(value){
+ const source=value&&typeof value==='object'?value:{},out={};
+ for(const [mode,raw] of Object.entries(source)){
+  if(typeof mode!=='string'||!mode.trim())continue;
+  const entry=raw&&typeof raw==='object'?raw:{};
+  out[modeKey(mode)]={matches:count(entry.matches),wins:count(entry.wins),kills:count(entry.kills),best:count(entry.best)};
+ }
+ return out;
 }
 export function defaultProgression(){return normalizeProgression({});}
 export function normalizeProgression(value){
  const source=value&&typeof value==='object'?value:{},xp=Math.max(0,Math.floor(Number.isFinite(Number(source.xp))?Number(source.xp):0)),calculated=levelFromXp(xp),rawUnlocks=source.unlocks&&typeof source.unlocks==='object'?source.unlocks:{},unlocks={};
  for(const item of UNLOCKS)if(rawUnlocks[item.id]===true||item.level<=calculated.level)unlocks[item.id]=true;
- return {version:PROGRESSION_VERSION,xp,level:calculated.level,matches:Math.max(0,Math.floor(Number(source.matches)||0)),wins:Math.max(0,Math.floor(Number(source.wins)||0)),kills:Math.max(0,Math.floor(Number(source.kills)||0)),gear:normalizeGear(source.gear,calculated.level),attachments:normalizeAttachmentLoadout(source.attachments,calculated.level),finish:FINISH_IDS.includes(source.finish)?source.finish:null,crosshair:CROSSHAIR_IDS.includes(source.crosshair)?source.crosshair:null,unlocks};
+ return {version:PROGRESSION_VERSION,xp,level:calculated.level,matches:Math.max(0,Math.floor(Number(source.matches)||0)),wins:Math.max(0,Math.floor(Number(source.wins)||0)),kills:Math.max(0,Math.floor(Number(source.kills)||0)),byMode:normalizeByMode(source.byMode),gear:normalizeGear(source.gear,calculated.level),attachments:normalizeAttachmentLoadout(source.attachments,calculated.level),finish:FINISH_IDS.includes(source.finish)?source.finish:null,crosshair:CROSSHAIR_IDS.includes(source.crosshair)?source.crosshair:null,unlocks};
 }
 export function awardMatch(profile,result={}){
  const next=normalizeProgression(profile),before=next.level,gained=matchXp(result);
  next.xp+=gained;const level=levelFromXp(next.xp);
- next.level=level.level;next.matches+=1;if(result.win===true)next.wins+=1;next.kills+=Number(result.actor?.frags)||0;
+ next.level=level.level;next.matches+=1;if(result.win===true)next.wins+=1;
+ const kills=Math.max(0,Math.floor(Number(result.actor?.frags)||0));next.kills+=kills;
+ const mode=modeKey(result.mode),byMode={...next.byMode},modeStats={matches:0,wins:0,kills:0,best:0,...(byMode[mode]||{})};
+ modeStats.matches+=1;if(result.win===true)modeStats.wins+=1;modeStats.kills+=kills;modeStats.best=Math.max(modeStats.best,kills);
+ byMode[mode]=modeStats;next.byMode=byMode;
  const unlocked=[];
  for(const item of unlockedItems(level.level))if(!next.unlocks[item.id]){next.unlocks[item.id]=true;unlocked.push(item);}
  return {profile:next,gained,levelUp:level.level>before,unlocked,progress:level.progress,toNext:level.toNext};

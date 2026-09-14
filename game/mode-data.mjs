@@ -88,5 +88,13 @@ export function objectiveTemplate(mode,arena,config){
  if(kind==='domination')return {kind:'domination',zones:authored.map(zone=>clearZone(arena,zone)),winner:null};
  if(kind==='assault'){const count=config?.fragLimit??rules.fragLimit??3;const template=assaultTemplate(arena,assaultSectorIds(count));template.zones=template.sectors;return assignAssaultTeams(template);}
  if(kind==='payload')return payloadTemplate(arena,{segments:Math.max(1,Math.min(6,Math.round(config?.fragLimit??rules.fragLimit??3)))});
+ if(kind==='elimination'){const lives=Math.max(1,Math.round(config?.fragLimit??rules.fragLimit??20));return {kind:'elimination',zones:authored.map(zone=>clearZone(arena,zone)),winner:null,livesPerTeam:lives,lives:{0:lives,1:lives},deaths:{0:0,1:0},eliminations:{0:0,1:0},suddenDeath:false};}
+ if(kind==='juggernaut')return {kind:'juggernaut',zones:authored.map(zone=>clearZone(arena,zone)),winner:null,juggernautId:0,points:{},suddenDeath:false};
+ if(kind==='extraction'){
+  // The escort starts on the first authored point and runs to the last; the
+  // midpoint doubles as a contested waypoint the HUD and bots can read.
+  const points=authored.map(zone=>clearZone(arena,zone)),spawn=points[0],extract=points[points.length-1];
+  return {kind:'extraction',zones:points,spawn:{x:spawn.x,y:spawn.y,z:spawn.z},extract:{x:extract.x,y:extract.y,z:extract.z},escortTeam:0,defenderTeam:1,captureSeconds:rules.objective?.captureSeconds??4,escortRadius:rules.objective?.escortRadius??7,speed:rules.objective?.escortSpeed??4,progress:0,vipId:null,vipDead:false,winner:null};
+ }
  return null;
 }

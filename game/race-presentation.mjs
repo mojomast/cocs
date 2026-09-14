@@ -134,13 +134,37 @@ function boostPadModel(pad,centerline){
  for(let i=0;i<3;i++){const chevron=new T.Mesh(geometry,glow);chevron.rotation.x=Math.PI/2;chevron.position.z=(i-1)*.66;group.add(chevron);}
  return group;
 }
+// Thin lattice for the goal nets: a grid of line segments on the back, both
+// sides and the roof of the goal box. LineSegments keep the CPU renderer cheap
+// (it draws lines directly) while reading as a mesh net instead of solid slabs.
+function netLatticeGeometry({halfWidth=6,height=4,depth=2,cell=.6}={}){
+ const nx=Math.max(2,Math.round(halfWidth*2/Math.max(.25,cell))),ny=Math.max(2,Math.round(height/Math.max(.25,cell))),nz=Math.max(1,Math.round(depth/Math.max(.25,cell))),positions=[];
+ const segment=(x1,y1,z1,x2,y2,z2)=>positions.push(x1,y1,z1,x2,y2,z2);
+ for(let i=0;i<=nx;i++){const x=-halfWidth+2*halfWidth*i/nx;segment(x,0,depth,x,height,depth);}
+ for(let j=0;j<=ny;j++){const y=height*j/ny;segment(-halfWidth,y,depth,halfWidth,y,depth);}
+ for(const side of [-1,1]){
+  for(let j=0;j<=ny;j++){const y=height*j/ny;segment(side*halfWidth,y,0,side*halfWidth,y,depth);}
+  for(let k=0;k<=nz;k++){const z=depth*k/nz;segment(side*halfWidth,0,z,side*halfWidth,height,z);}
+ }
+ for(let i=0;i<=nx;i++){const x=-halfWidth+2*halfWidth*i/nx;segment(x,height,0,x,height,depth);}
+ for(let k=0;k<=nz;k++){const z=depth*k/nz;segment(-halfWidth,height,z,halfWidth,height,z);}
+ const geometry=new T.BufferGeometry();geometry.setAttribute('position',new T.Float32BufferAttribute(positions,3));
+ return geometry;
+}
 // Soccer reuses the same flat-shell treatment: mown stripes and paint sit under
 // the play area, while the goal frames stay real occluders for the chase camera.
-function soccerPitchBody(parent,race){
+function soccerPitchBody(parent,race,options={}){
+ const netDetail=Math.max(.3,Math.min(1,Number(options?.quality?.scatterDetail??1))),netCell=netDetail>=.8?.6:netDetail>=.5?.78:1;
  const pitch=race.pitch||{},minX=Number.isFinite(pitch.minX)?pitch.minX:-30,maxX=Number.isFinite(pitch.maxX)?pitch.maxX:30,minZ=Number.isFinite(pitch.minZ)?pitch.minZ:-18,maxZ=Number.isFinite(pitch.maxZ)?pitch.maxZ:18;
  const width=maxX-minX,depth=maxZ-minZ,cx=(minX+maxX)/2,cz=(minZ+maxZ)/2;
- const grass=material('#2c7038',.02,.96),mown=material('#337d40',.02,.96),line=material('#eaf7ee',.05,.85),postMat=material('#eef2f6',.35,.4),netMat=material('#bfe0c8',.05,.9);
+ const grass=material('#2c7038',.02,.96),mown=material('#337d40',.02,.96),line=material('#eaf7ee',.05,.85),postMat=material('#eef2f6',.35,.4),netMat=new T.LineBasicMaterial({color:'#bfe0c8',transparent:true,opacity:.5});
  const paint=(w,h,d,x,y,z,mat)=>{const mesh=box(parent,w,h,d,x,y,z,mat);mesh.userData.arenaDetail=true;return mesh;};
+ // Flat paint arcs: a RingGeometry slice laid on the turf. Local +X/+Y maps to
+ // world +X/-Z once rotated flat, so callers pass angles in that frame.
+ const arc=(radius,thickness,thetaStart,thetaLength,x,z)=>{
+  const mesh=new T.Mesh(new T.RingGeometry(Math.max(.01,radius-thickness),radius+thickness,Math.max(10,Math.round(radius*5)),1,thetaStart,thetaLength),line);
+  mesh.rotation.x=-Math.PI/2;mesh.position.set(x,.06,z);mesh.userData.arenaDetail=true;mesh.userData.pitchArc=true;parent.add(mesh);return mesh;
+ };
  const stripes=8,stripeWidth=width/stripes;
  for(let i=0;i<stripes;i++)paint(stripeWidth,.05,depth,minX+stripeWidth*(i+.5),.03,cz,i%2?mown:grass);
  paint(width+.3,.06,.18,cx,.05,minZ,line);paint(width+.3,.06,.18,cx,.05,maxZ,line);
@@ -148,23 +172,35 @@ function soccerPitchBody(parent,race){
  paint(.18,.06,depth,cx,.05,cz,line);
  const circle=ring(parent,Math.min(width,depth)*.16,.08,cx,.06,cz,line);circle.userData.arenaDetail=true;
  const spot=new T.Mesh(new T.CylinderGeometry(.35,.35,.05,16),line);spot.position.set(cx,.06,cz);spot.userData.arenaDetail=true;parent.add(spot);
+ const centre=ring(parent,1.5,.045,cx,.07,cz,line);centre.userData.arenaDetail=true;
+ // Corner arcs: quarter circles opening toward the pitch interior.
+ const cornerRadius=Math.min(2.4,Math.max(1.1,Math.min(width,depth)*.06));
+ for(const [x,z,thetaStart] of [[minX,minZ,-Math.PI/2],[maxX,minZ,Math.PI],[minX,maxZ,0],[maxX,maxZ,Math.PI/2]])arc(cornerRadius,.09,thetaStart,Math.PI/2,x,z);
  for(const goal of race.goals||[]){
   const halfWidth=Math.max(1,Number(goal.halfWidth)||6),height=Math.max(1,Number(goal.height)||4),goalDepth=Math.max(.4,Number(goal.depth)||2),goalZ=Number.isFinite(goal.z)?goal.z:cz;
-  const dir=Math.sign(goal.nx)||(goal.x<=cx?-1:1),boxDepth=Math.max(6,halfWidth*1.4),innerX=goal.x-dir*boxDepth;
+  const dir=Math.sign(goal.nx)||(goal.x<=cx?-1:1),boxDepth=Math.max(6,halfWidth*1.4),innerX=goal.x-dir*boxDepth,field=Math.sign(-dir)||1,midAngle=field>=0?0:Math.PI,halfArc=Math.PI/2;
   paint(boxDepth,.06,.16,(goal.x+innerX)/2,.05,goalZ+halfWidth,line);
   paint(boxDepth,.06,.16,(goal.x+innerX)/2,.05,goalZ-halfWidth,line);
   paint(.16,.06,halfWidth*2,innerX,.05,goalZ,line);
+  // Goal-area arc bulges into the field off the small box; the penalty arc sits
+  // further out around the penalty spot with a narrower sweep.
+  arc(halfWidth*.6,.1,midAngle-halfArc,Math.PI,innerX,goalZ);
+  const penaltyX=goal.x-dir*(boxDepth+halfWidth*.4);
+  arc(halfWidth*1.15,.1,midAngle-halfArc,Math.PI*.82,penaltyX,goalZ);
+  const penaltySpot=new T.Mesh(new T.CylinderGeometry(.22,.22,.05,14),line);penaltySpot.position.set(penaltyX,.06,goalZ);penaltySpot.userData.arenaDetail=true;parent.add(penaltySpot);
   const frame=new T.Group();frame.position.set(goal.x,0,goalZ);frame.rotation.y=Math.atan2(goal.nx,goal.nz);
   for(const x of [-halfWidth,halfWidth])box(frame,.2,height,.2,x,height/2,0,postMat).userData.soccerPost=true;
   box(frame,halfWidth*2,.2,.2,0,height,0,postMat).userData.soccerPost=true;
-  for(const net of [box(frame,halfWidth*2,height,.05,0,height/2,goalDepth,netMat),box(frame,.05,height,goalDepth,-halfWidth,height/2,goalDepth/2,netMat),box(frame,.05,height,goalDepth,halfWidth,height/2,goalDepth/2,netMat),box(frame,halfWidth*2,.05,goalDepth,0,height,goalDepth/2,netMat)])net.userData.soccerNet=true;
+  const net=new T.LineSegments(netLatticeGeometry({halfWidth,height,depth:goalDepth,cell:netCell}),netMat);
+  net.userData.soccerNet=true;net.userData.arenaDetail=true;net.userData.noCameraOcclusion=true;
+  frame.add(net);
   parent.add(frame);
  }
 }
-export function raceTrackModel(race,color='#83f4d5',parent,assets){const cache=assets??currentAssets()??new ModelAssets();return withAssets(cache,()=>raceTrackBody(race,color,parent));}
-function raceTrackBody(race,color='#83f4d5',parent){
+export function raceTrackModel(race,color='#83f4d5',parent,assets,options){const cache=assets??currentAssets()??new ModelAssets();return withAssets(cache,()=>raceTrackBody(race,color,parent,options));}
+function raceTrackBody(race,color='#83f4d5',parent,options){
  const group=new T.Group(),white=material('#ffffff'),black=material('#10151b'),accent=material(color,.4,.3,true);
- if(race.kind==='soccer')soccerPitchBody(group,race);else{
+ if(race.kind==='soccer')soccerPitchBody(group,race,options);else{
   const gates=race.gates??[],start=gates[0];
   if(start){const line=new T.Group();line.position.set(start.x,.08,start.z);line.rotation.y=Math.atan2(start.nx,start.nz);for(let row=0;row<2;row++)for(let col=0;col<12;col++)box(line,2,.025,1.2,(col-5.5)*2,0,(row-.5)*1.2,(row+col)%2?white:black);group.add(line);}
   for(const [index,p] of (race.grid??[]).entries()){const slot=new T.Group();slot.position.set(p.x,.08,p.z);slot.rotation.y=p.heading??p.yaw??0;slot.userData.raceGrid=index;for(const x of [-2,2])box(slot,.12,.03,5,x,0,0,white);for(const z of [-2.5,2.5])box(slot,4,.03,.12,0,0,z,white);group.add(slot);}
