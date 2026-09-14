@@ -6,107 +6,127 @@ import * as T from 'three';
 // stock, angled pistol grip. The shortest silhouette in the arsenal; the
 // muzzle ends near z = -0.83 to match the shared per-type muzzle point.
 export function buildSubmachineGun(g, ctx){
-  const {box,cylinder,ring,geo,material,palette}=ctx;
+  const {box,cylinder,ring,material,palette}=ctx;
   const {dark,light,glow}=palette;
   const accent=material('#8affc1',.55,.3);
 
-  // Boxy compact receiver.
+  // ------------------------------------------------------------------
+  // Boxy compact receiver. R1 is the core slab; R2 the upper deck, R3 the
+  // lower/magwell block, R4 a short rear cap. Each meets the next on a face.
+  // ------------------------------------------------------------------
   box(g,.22,.2,.4,0,.02,-.16,dark);
   box(g,.18,.07,.36,0,.155,-.14,dark);
-  box(g,.16,.11,.2,0,-.1,0,dark);
-  box(g,.2,.03,.1,0,-.02,.12,dark);
+  box(g,.14,.11,.16,0,-.135,-.12,dark);
+  box(g,.2,.04,.1,0,-.02,.09,dark);
 
-  // Top picatinny rail: base plus repeated teeth.
-  box(g,.08,.03,.36,0,.2,-.13,light);
-  for(let i=0;i<9;i++)box(g,.086,.024,.026,0,.226,-.3+i*.04,dark);
-  for(const z of [-.3,-.18])box(g,.032,.014,.03,0,.242,z,glow);
+  // ------------------------------------------------------------------
+  // Top picatinny rail: base plus repeated teeth, then two green index dots.
+  // Teeth sit on the base top (y = .22); dots sit on the tooth tops.
+  // ------------------------------------------------------------------
+  box(g,.08,.03,.36,0,.205,-.14,light);
+  for(let i=0;i<7;i++)box(g,.086,.024,.026,0,.232,-.3+i*.04,dark);
+  box(g,.03,.008,.03,0,.248,-.3,glow);
+  box(g,.03,.008,.03,0,.248,-.18,glow);
 
-  // Folding iron sights, front post and rear aperture.
-  box(g,.07,.05,.05,0,.235,-.47,dark);
-  box(g,.014,.055,.014,0,.28,-.47,glow);
-  for(const x of [-.02,.02])box(g,.01,.05,.014,x,.255,-.47,dark);
-  box(g,.08,.05,.05,0,.235,-.02,dark);
-  ring(g,.021,.007,0,.272,-.02,glow,0);
-  box(g,.05,.03,.03,0,.25,.02,dark);
+  // ------------------------------------------------------------------
+  // Folding iron sights. The front block rides the handguard top plate and
+  // the rear block rides the rail; the rear aperture is a ring on the block.
+  // ------------------------------------------------------------------
+  box(g,.06,.05,.05,0,.131,-.47,dark);
+  box(g,.014,.05,.014,0,.181,-.47,glow);
+  for(const x of [-.022,.022])box(g,.012,.05,.016,x,.181,-.47,dark);
+  box(g,.08,.05,.05,0,.245,.01,dark);
+  ring(g,.018,.006,0,.288,.01,glow,0);
 
-  // Short barrel with cooling shroud and stepped muzzle device.
-  const barrel=cylinder(g,.042,.042,.44,0,.05,-.6,light,16);barrel.rotation.x=Math.PI/2;
-  const shroud=cylinder(g,.06,.06,.18,0,.05,-.46,dark,16);shroud.rotation.x=Math.PI/2;
-  box(g,.07,.08,.06,0,.05,-.52,dark);
-  const brakeGeo=geo('smg|brake|.058|.038|.09|16',()=>new T.LatheGeometry([
-    new T.Vector2(.038,-.045),new T.Vector2(.058,-.02),
-    new T.Vector2(.058,.02),new T.Vector2(.046,.045),
-  ],16));
-  const brake=new T.Mesh(brakeGeo,glow);
-  brake.rotation.x=Math.PI/2;brake.position.set(0,.05,-.785);g.add(brake);
-  ring(g,.052,.009,0,.05,-.83,light,0);
+  // ------------------------------------------------------------------
+  // Short barrel with a stepped muzzle device. The exposed barrel butts the
+  // receiver front face; the brake butts the barrel and stops at z = -0.83.
+  // ------------------------------------------------------------------
+  const barrel=cylinder(g,.04,.04,.42,0,.05,-.57,light,16);barrel.rotation.x=Math.PI/2;
+  const brake=cylinder(g,.052,.052,.05,0,.05,-.805,glow,16);brake.rotation.x=Math.PI/2;
+  ring(g,.058,.009,0,.05,-.835,light,0);
 
-  // Handguard venting around the barrel.
-  for(let i=0;i<6;i++){
-    const z=-.4-i*.05;
-    box(g,.012,.02,.02,.062,.02,z,glow);
-    box(g,.012,.02,.02,-.062,.02,z,glow);
+  // ------------------------------------------------------------------
+  // Squared handguard: four plates whose inner faces only touch the barrel.
+  // They span back to the receiver front face so nothing floats.
+  // ------------------------------------------------------------------
+  box(g,.08,.016,.18,0,.098,-.45,dark);
+  box(g,.08,.016,.18,0,.002,-.45,dark);
+  box(g,.016,.1,.18,.048,.05,-.45,dark);
+  box(g,.016,.1,.18,-.048,.05,-.45,dark);
+
+  // ------------------------------------------------------------------
+  // Vertical foregrip with green finger ribs on its front face, plus a cap.
+  // ------------------------------------------------------------------
+  box(g,.05,.14,.06,0,-.076,-.46,dark);
+  for(let i=0;i<3;i++)box(g,.05,.012,.01,0,-.04-i*.038,-.495,glow);
+  box(g,.05,.02,.06,0,-.156,-.46,dark);
+
+  // ------------------------------------------------------------------
+  // Angled pistol grip (rotated 0.4 rad) with rear ribs and a base plate.
+  // The grip top tucks a little way into the receiver underside; the ribs
+  // live on the exposed lower half so they are not swallowed by the body.
+  // ------------------------------------------------------------------
+  const grip=box(g,.06,.16,.08,0,-.13,0,dark);grip.rotation.x=.4;
+  const gripBase=box(g,.07,.02,.05,0,-.213,-.035,dark);gripBase.rotation.x=.4;
+  for(const yi of [-.01,-.045]){
+    const y=-.13+.921*yi-.01945, z=.389*yi+.04605;
+    const rib=box(g,.064,.012,.02,0,y,z,glow);rib.rotation.x=.4;
   }
-  box(g,.05,.05,.2,0,-.02,-.46,dark);
 
-  // Ejection port and charging handle.
-  box(g,.012,.05,.11,.115,.06,-.18,accent);
-  box(g,.016,.062,.12,.12,.06,-.2,light);
-  box(g,.04,.024,.08,-.1,.12,-.06,light);
-  const charge=cylinder(g,.014,.014,.05,-.14,.12,-.06,glow,8);charge.rotation.z=Math.PI/2;
+  // ------------------------------------------------------------------
+  // Squared trigger guard: a post and bottom bar under the magwell, with a
+  // trigger blade meeting the same underside just ahead of the grip.
+  // ------------------------------------------------------------------
+  box(g,.012,.055,.012,0,-.2175,-.08,dark);
+  box(g,.012,.012,.072,0,-.245,-.06,dark);
+  box(g,.01,.045,.012,0,-.2125,-.07,glow);
 
-  // Vertical foregrip with green grip ribs.
-  box(g,.05,.15,.06,0,-.12,-.44,dark);
-  for(let i=0;i<3;i++)box(g,.056,.014,.066,0,-.06-i*.038,-.44,glow);
-  box(g,.05,.02,.06,0,-.2,-.44,dark);
-
-  // Angled pistol grip, trigger guard and trigger.
-  const grip=box(g,.06,.16,.08,0,-.12,.03,dark);grip.rotation.x=.4;
-  const gripBase=box(g,.07,.02,.09,0,-.2,.07,dark);gripBase.rotation.x=.4;
-  for(let i=0;i<2;i++)box(g,.064,.012,.084,0,-.08-i*.04,.02+i*.016,glow);
-  const guard=ring(g,.05,.012,0,-.06,-.02,light,0);guard.rotation.y=Math.PI/2;
-  box(g,.015,.05,.02,0,-.07,-.03,glow);
-  box(g,.03,.02,.03,0,-.1,-.06,accent);
-
-  // Curved magazine from stacked angled boxes.
-  box(g,.075,.06,.14,0,-.17,-.07,dark);
+  // ------------------------------------------------------------------
+  // Curved magazine from stacked segments. The top segment meets the magwell
+  // underside; each lower segment is spaced just under one box height so the
+  // stack reads as a smooth curve. Witness holes are raised side plates.
+  // ------------------------------------------------------------------
   for(let i=0;i<7;i++){
-    const y=-.22-i*.072,z=-.08-i*.018,tilt=-.07-i*.055;
-    const seg=box(g,.08,.075,.15,0,y,z,dark);seg.rotation.x=tilt;
-    if(i%2===0){const mark=box(g,.084,.013,.154,0,y,z,glow);mark.rotation.x=tilt;}
+    const y=-.2275-i*.072,z=-.15-i*.018,tilt=-.07-i*.055;
+    const seg=box(g,.08,.075,.12,0,y,z,dark);seg.rotation.x=tilt;
   }
-  box(g,.09,.025,.16,0,-.73,-.2,light);
-  box(g,.03,.02,.04,.05,-.18,-.05,accent);
-  // Magazine witness holes.
-  for(let i=0;i<4;i++)box(g,.086,.018,.028,0,-.27-i*.14,-.11-i*.028,glow);
-
-  // Side-folding wire stock: hinge, twin wires, brace and butt plate.
-  box(g,.05,.06,.04,0,.04,.03,dark);
-  const hingePin=cylinder(g,.022,.022,.07,0,-.04,.03,dark,8);hingePin.rotation.z=Math.PI/2;
-  box(g,.03,.03,.03,.08,.02,.05,glow);
-  box(g,.03,.03,.03,-.08,.02,.05,glow);
-  for(const x of [-.06,.06]){
-    const wireTop=cylinder(g,.011,.011,.22,x,.055,.15,light,8);wireTop.rotation.x=Math.PI/2;
-    const wireBottom=cylinder(g,.011,.011,.22,x,-.015,.15,light,8);wireBottom.rotation.x=Math.PI/2;
+  for(const [i,sx] of [[1,.043],[2,-.043],[4,.043],[5,-.043]]){
+    box(g,.006,.016,.024,sx,-.2275-i*.072,-.15-i*.018,glow);
   }
-  box(g,.14,.02,.02,0,.02,.26,dark);
-  box(g,.15,.13,.025,0,0,.275,dark);
-  box(g,.16,.14,.02,0,0,.29,light);
-  box(g,.1,.035,.08,0,.085,.2,dark);
-  box(g,.02,.08,.03,.075,.02,.2,accent);
-  // Stock lightening holes.
-  for(let i=0;i<3;i++)box(g,.03,.03,.03,-.04+i*.04,.02,.29,glow);
+  box(g,.09,.025,.13,0,-.715,-.258,light);
 
-  // Side accessory rails and green accents.
-  box(g,.02,.045,.2,.115,-.01,-.14,dark);
-  box(g,.02,.045,.2,-.115,-.01,-.14,dark);
-  box(g,.09,.012,.26,0,.24,-.12,glow);
-  ring(g,.025,.008,-.07,-.05,.06,glow,0);
-  box(g,.05,.02,.04,.1,-.03,.05,accent);
-  box(g,.04,.04,.05,-.11,.04,-.05,light);
+  // ------------------------------------------------------------------
+  // Ejection port and charging handle on the right face; a second charging
+  // handle on the left. All sit proud of the receiver side plane.
+  // ------------------------------------------------------------------
+  box(g,.01,.05,.11,.115,.06,-.18,accent);
+  box(g,.04,.04,.06,.13,.095,-.2,light);
+  box(g,.02,.03,.03,.16,.095,-.2,light);
+  box(g,.05,.018,.04,-.13,.09,-.06,light);
+  box(g,.02,.03,.03,-.16,.09,-.06,glow);
 
-  // Fire selector and bolt release.
-  const selector=cylinder(g,.018,.018,.03,.12,-.02,-.04,glow,8);selector.rotation.z=Math.PI/2;
-  box(g,.025,.03,.05,.125,-.02,-.0,light);
-  box(g,.04,.025,.06,-.09,-.02,-.24,dark);
+  // ------------------------------------------------------------------
+  // Side-folding wire stock: hinge on the rear cap, four parallel wire rods,
+  // a cross brace and a two-tone butt plate with three lightening holes.
+  // ------------------------------------------------------------------
+  box(g,.12,.1,.05,0,0,.165,dark);
+  for(const x of [-.05,.05])for(const y of [-.03,.03]){
+    const rod=cylinder(g,.011,.011,.12,x,y,.25,light,8);rod.rotation.x=Math.PI/2;
+  }
+  box(g,.12,.07,.02,0,0,.32,dark);
+  box(g,.15,.13,.02,0,0,.34,dark);
+  box(g,.16,.14,.02,0,0,.357,light);
+  for(const x of [-.045,0,.045])box(g,.03,.03,.008,x,0,.372,glow);
+
+  // ------------------------------------------------------------------
+  // Side accessory rails (proud of the receiver plane), left bolt housing,
+  // fire selector and bolt release.
+  // ------------------------------------------------------------------
+  box(g,.02,.045,.2,.12,-.01,-.14,dark);
+  box(g,.02,.045,.2,-.12,-.01,-.14,dark);
+  box(g,.04,.04,.05,-.13,.04,-.05,light);
+  const sel=cylinder(g,.018,.018,.03,.125,-.02,-.02,glow,8);sel.rotation.z=Math.PI/2;
+  box(g,.025,.03,.05,.122,-.02,.03,light);
+  box(g,.04,.025,.06,-.13,-.02,-.3,dark);
 }

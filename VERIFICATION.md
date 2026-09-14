@@ -1,5 +1,24 @@
 # COCS verification report
 
+## Release 3.8 - Weapon model de-clipping
+
+- Parts of the new weapon models interpenetrated (barrel shrouds swallowing
+  receivers, coils sunk into barrels, magazines buried in magwells, etc.). Each
+  of the ten builders in `game/weapon-models/` was revised so parts meet
+  flush/socket cleanly instead of overlapping in volume.
+- A per-model interpenetration audit (seeded point-in-mesh volume sampling,
+  classifying a pair as PARTIAL when a visible chunk of one part sits inside
+  another, FULL when a part is wholly enclosed) went from **492 flagged pairs /
+  ~430 PARTIAL** across the arsenal to **0 PARTIAL**. The remaining FULL pairs are
+  deliberate hidden internals: barrel bore liners, the shock emitter core, the
+  plasma core and the grenade drum's chamber shells.
+- Detail level, silhouettes, pinned names (`grenade-drum`, `shock-emitter`,
+  `flak-barrel`), muzzle anchor positions, the ctx-helper contract and the
+  cached-resource/disposal invariants are unchanged.
+
+Verification: game **963/963**, server **126/126**, `tests/` **5/5**, `tsc` clean,
+lint 0 errors, build clean.
+
 ## Release 3.7 - Voice crash fix, remodeled weapons
 
 - **Voice crash on ONLINE.** `createVoice` declared `const voice = new VoiceChat({

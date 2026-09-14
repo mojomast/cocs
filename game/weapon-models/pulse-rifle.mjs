@@ -8,96 +8,93 @@ export function buildPulseRifle(g, ctx){
   const energy = material('#70ffe6', .3, .2, true);
   const vent = material('#0b1014', .4, .72);
 
-  box(g, .17, .19, .5, 0, .02, -.12, dark);
-  box(g, .155, .11, .34, 0, .155, -.2, teal);
-  box(g, .19, .08, .2, 0, .05, .1, dark);
-  box(g, .125, .11, .3, 0, -.045, .02, dark);
-  box(g, .1, .075, .22, 0, .17, .14, steel);
-  box(g, .09, .06, .18, 0, .2, -.02, dark);
+  // receiver + top spine + handguard
+  box(g, .16, .18, .46, 0, .02, -.10, dark);
+  box(g, .13, .07, .65, 0, .135, -.225, teal);
+  box(g, .12, .16, .26, 0, .02, -.46, dark);
 
-  box(g, .06, .02, .12, 0, -.12, -.03, steel);
-  box(g, .014, .05, .12, .03, -.1, -.03, steel);
-  box(g, .014, .05, .12, -.03, -.1, -.03, steel);
-  const trigger = box(g, .014, .05, .02, 0, -.095, -.02, light);
-  trigger.rotation.x = .25;
+  // stock / butt
+  box(g, .15, .16, .22, 0, 0, .24, dark);
+  box(g, .16, .20, .03, 0, 0, .36, steel);
 
-  box(g, .05, .14, .06, 0, .055, .235, dark);
-  box(g, .05, .09, .06, 0, -.06, .235, dark);
-  box(g, .04, .05, .17, 0, 0, .26, teal);
-  box(g, .07, .22, .045, 0, 0, .315, steel);
+  // lower receiver, magwell, magazine
+  box(g, .12, .08, .24, 0, -.11, -.09, dark);
+  box(g, .10, .10, .12, 0, -.20, -.16, grip);
+  box(g, .08, .16, .10, 0, -.33, -.17, steel);
+  box(g, .085, .02, .11, 0, -.42, -.165, teal);
 
-  const pgrip = box(g, .06, .16, .09, 0, -.17, .02, grip);
-  pgrip.rotation.x = -.18;
-  box(g, .05, .05, .1, 0, -.125, 0, grip);
+  // pistol grip
+  const pg = box(g, .055, .15, .08, 0, -.13, .08, grip);
+  pg.rotation.x = -.2;
 
-  box(g, .1, .12, .13, 0, -.13, -.16, dark);
-  const mag = box(g, .07, .18, .1, 0, -.24, -.135, steel);
-  mag.rotation.x = .18;
-  box(g, .075, .02, .11, 0, -.325, -.115, teal);
+  // trigger guard + trigger
+  box(g, .05, .02, .14, 0, -.205, -.03, steel);
+  box(g, .014, .04, .02, .028, -.175, -.07, steel);
+  box(g, .014, .04, .02, -.028, -.175, -.07, steel);
+  box(g, .014, .04, .02, .028, -.175, 0, steel);
+  box(g, .014, .04, .02, -.028, -.175, 0, steel);
+  const trig = box(g, .014, .05, .02, 0, -.17, -.05, light);
+  trig.rotation.x = .25;
 
-  box(g, .045, .13, .05, 0, -.16, -.5, grip);
-  box(g, .06, .03, .09, 0, -.225, -.5, teal);
+  // handguard side plates + bottom rail + foregrip
+  box(g, .02, .04, .28, .068, -.01, -.46, steel);
+  box(g, .02, .04, .28, -.068, -.01, -.46, steel);
+  box(g, .06, .03, .26, 0, -.075, -.46, steel);
+  box(g, .045, .13, .05, 0, -.155, -.48, grip);
+  box(g, .055, .03, .09, 0, -.235, -.48, teal);
 
-  box(g, .12, .13, .3, 0, .03, -.44, dark);
-  box(g, .085, .06, .26, 0, .115, -.46, teal);
-  for(let i = 0; i < 3; i++) box(g, .16, .028, .026, 0, .02, -.35 - i * .06, vent);
-  box(g, .022, .045, .3, .1, .055, -.44, steel);
-  box(g, .022, .045, .3, -.1, .055, -.44, steel);
-  box(g, .07, .03, .26, 0, -.085, -.44, steel);
+  // handguard vents
+  for(let i = 0; i < 3; i++){
+    box(g, .018, .05, .03, .068, .045, -.40 - i * .06, vent);
+    box(g, .018, .05, .03, -.068, .045, -.40 - i * .06, vent);
+  }
 
-  const barrel = cylinder(g, .038, .045, .5, 0, .03, -.6, light, 16);
+  // barrel / muzzle / energy tip (muzzle front stays near z = -0.85)
+  const barrel = cylinder(g, .035, .035, .20, 0, .02, -.69, light, 16);
   barrel.rotation.x = Math.PI / 2;
-  const shroud = cylinder(g, .058, .058, .24, 0, .03, -.5, dark, 16);
-  shroud.rotation.x = Math.PI / 2;
-  const muzzle = cylinder(g, .062, .052, .06, 0, .03, -.82, steel, 16);
+  const muzzle = cylinder(g, .05, .045, .06, 0, .02, -.818, steel, 16);
   muzzle.rotation.x = Math.PI / 2;
-  const tip = cylinder(g, .024, .032, .1, 0, .03, -.8, energy, 12);
+  const tip = cylinder(g, .02, .02, .03, 0, .02, -.864, energy, 12);
   tip.rotation.x = Math.PI / 2;
 
-  const rod = cylinder(g, .022, .022, .52, 0, .15, -.44, energy, 12);
+  // energy conduit rod cradled by glowing rings above the spine
+  const rod = cylinder(g, .02, .02, .45, 0, .214, -.275, energy, 12);
   rod.rotation.x = Math.PI / 2;
-  for(let i = 0; i < 6; i++) ring(g, .055, .016, 0, .15, -.2 - i * .09, energy, 0);
-  box(g, .07, .04, .44, 0, .185, -.44, steel);
+  for(let i = 0; i < 5; i++) ring(g, .032, .012, 0, .214, -.45 + i * .10, energy, 0);
 
-  box(g, .085, .05, .12, 0, .2, -.02, dark);
-  box(g, .016, .13, .05, .045, .28, -.02, steel);
-  box(g, .016, .13, .05, -.045, .28, -.02, steel);
-  box(g, .13, .022, .05, 0, .345, -.02, steel);
-  box(g, .088, .085, .01, 0, .275, -.075, energy);
-  box(g, .07, .012, .01, 0, .275, -.075, light);
+  // rear sight
+  box(g, .09, .05, .06, 0, .20, .06, dark);
+  box(g, .016, .06, .03, 0, .25, .06, steel);
 
-  for(let i = 0; i < 5; i++) box(g, .052, .022, .03, 0, .255, -.2 - i * .07, steel);
-
-  for(let i = 0; i < 4; i++){
-    const bolt = cylinder(g, .014, .014, .022, .092, .07 - i * .06, -.12, steel, 8);
-    bolt.rotation.z = Math.PI / 2;
-    const bolt2 = cylinder(g, .014, .014, .022, -.092, .07 - i * .06, -.12, steel, 8);
-    bolt2.rotation.z = Math.PI / 2;
-  }
-
-  for(let i = 0; i < 3; i++){
-    box(g, .014, .07, .05, .075, -.02, .12 - i * .08, teal);
-    box(g, .014, .07, .05, -.075, -.02, .12 - i * .08, teal);
-  }
-
-  const cable = cylinder(g, .009, .009, .34, .088, -.02, -.05, glow, 6);
-  cable.rotation.set(Math.PI / 2, 0, .18);
-  const cable2 = cylinder(g, .009, .009, .3, -.088, -.02, -.05, glow, 6);
-  cable2.rotation.set(Math.PI / 2, 0, -.18);
-
-  const cellGeo = geo('pulse-cell|.055|1', () => new T.IcosahedronGeometry(.055, 1));
+  // side energy cells
+  const cellGeo = geo('pulse-cell|.04|1', () => new T.IcosahedronGeometry(.04, 1));
   const cell = new T.Mesh(cellGeo, energy);
-  cell.position.set(.1, .05, .12);
+  cell.position.set(.105, .05, 0);
   g.add(cell);
   const cell2 = new T.Mesh(cellGeo, energy);
-  cell2.position.set(-.1, .05, .12);
+  cell2.position.set(-.105, .05, 0);
   g.add(cell2);
 
-  const core = new T.Mesh(geo('pulse-core|.07|2', () => new T.IcosahedronGeometry(.07, 2)), glow);
-  core.position.set(0, .12, -.5);
-  g.add(core);
+  // receiver side bolts
+  for(let i = 0; i < 3; i++){
+    const by = .07 - i * .07;
+    const b1 = cylinder(g, .011, .011, .02, .088, by, -.24, steel, 8);
+    b1.rotation.z = Math.PI / 2;
+    const b2 = cylinder(g, .011, .011, .02, -.088, by, -.24, steel, 8);
+    b2.rotation.z = Math.PI / 2;
+  }
 
-  const cheek = new T.Mesh(geo('pulse-cheek|.09|.05|.16', () => new T.BoxGeometry(.09, .05, .16)), steel);
-  cheek.position.set(0, .215, .16);
-  g.add(cheek);
+  // stock side panels
+  box(g, .01, .06, .12, .078, 0, .24, teal);
+  box(g, .01, .06, .12, -.078, 0, .24, teal);
+
+  // front top accent
+  box(g, .07, .03, .06, 0, .18, -.53, teal);
+
+  // cheek rest + glow cables
+  box(g, .09, .05, .16, 0, .105, .22, steel);
+  const cable = cylinder(g, .009, .009, .25, .086, -.02, -.08, glow, 6);
+  cable.rotation.x = Math.PI / 2;
+  const cable2 = cylinder(g, .009, .009, .25, -.086, -.02, -.08, glow, 6);
+  cable2.rotation.x = Math.PI / 2;
 }

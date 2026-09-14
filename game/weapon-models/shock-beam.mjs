@@ -1,73 +1,67 @@
-// Shock Beam (type index 6) - compact Tesla/arc projector. Two long forward
-// prongs hold a glowing octahedral emitter; stacked ceramic insulator discs,
-// copper coil windings and a cage shroud wrap the barrel. Amber and pale-blue
-// energy read against the dark receiver. Static, deterministic, -Z muzzle.
+// Shock Beam (type index 6) - compact Tesla/arc projector. Two forward prongs
+// hold a glowing octahedral emitter; ceramic insulator rings, copper coil
+// windings and a cage shroud wrap the barrel. Amber and pale-blue energy read
+// against the dark receiver. Static, deterministic, -Z muzzle.
 import * as T from 'three';
 
 export function buildShockBeam(g, ctx){
   const {box,cylinder,ring,geo,material,palette}=ctx;const {dark,light,glow}=palette;
   const amber=material('#ffb347',.3,.35,true),ceramic=material('#cfd9de',.25,.7);
+  const B=.02;
 
   // receiver / grip / stock
-  box(g,.26,.26,.54,0,0,-.06,dark);
-  box(g,.18,.06,.44,0,.17,-.14,light);
-  box(g,.22,.12,.42,0,-.17,-.14,dark);
-  box(g,.18,.18,.3,0,0,.24,light);
-  box(g,.2,.24,.08,0,0,.43,dark);
-  box(g,.11,.28,.15,0,-.28,.06,dark);
-  box(g,.09,.2,.05,0,-.3,.15,amber);
-  box(g,.07,.05,.16,0,-.19,-.02,dark);
-  box(g,.035,.1,.04,0,-.21,-.05,glow);
-  box(g,.04,.16,.3,-.15,.02,-.06,light);
-  box(g,.04,.16,.3,.15,.02,-.06,light);
-  box(g,.02,.08,.12,-.16,.02,-.02,amber);
-  box(g,.02,.08,.12,.16,.02,-.02,amber);
-  box(g,.1,.05,.5,0,-.11,-.5,dark);
+  box(g,.26,.26,.5,0,0,-.05,dark);
+  box(g,.18,.06,.44,0,.16,-.1,light);
+  box(g,.22,.12,.42,0,-.19,-.1,dark);
+  box(g,.18,.18,.28,0,0,.34,light);
+  box(g,.2,.24,.08,0,0,.52,dark);
+  box(g,.11,.26,.14,0,-.26,.18,dark);
+  box(g,.09,.08,.12,0,-.42,.18,amber);
+
+  // side plates and amber accents
+  box(g,.03,.16,.3,-.145,.02,-.06,light);
+  box(g,.03,.16,.3,.145,.02,-.06,light);
+  box(g,.015,.08,.12,-.168,.02,-.02,amber);
+  box(g,.015,.08,.12,.168,.02,-.02,amber);
 
   // top coil housing
-  const housing=cylinder(g,.07,.07,.42,0,.21,-.28,dark,12);housing.rotation.x=Math.PI/2;
-  box(g,.1,.08,.08,0,.21,-.05,light);
+  const housing=cylinder(g,.05,.05,.34,0,.24,-.16,dark,12);housing.rotation.x=Math.PI/2;
 
-  // barrel, collar, muzzle
-  const barrel=cylinder(g,.075,.07,.52,0,.02,-.5,light,12);barrel.rotation.x=Math.PI/2;
-  const collar=cylinder(g,.1,.09,.12,0,.02,-.78,dark,12);collar.rotation.x=Math.PI/2;
-  ring(g,.095,.018,0,.02,-.86,glow,0);
+  // barrel and collar
+  const barrel=cylinder(g,.07,.07,.36,0,B,-.48,light,12);barrel.rotation.x=Math.PI/2;
+  const collar=cylinder(g,.1,.09,.12,0,B,-.72,dark,12);collar.rotation.x=Math.PI/2;
 
-  // stacked ceramic insulator discs along the barrel
-  for(const z of [-.3,-.4,-.5,-.6,-.7]){const disc=cylinder(g,.115,.115,.035,0,.02,z,ceramic,12);disc.rotation.x=Math.PI/2;}
+  // stacked ceramic insulator rings along the barrel
+  for(const z of [-.34,-.44,-.54])ring(g,.1,.028,0,B,z,ceramic,0);
   // copper coil windings
-  for(const z of [-.34,-.44,-.54,-.64])ring(g,.105,.016,0,.02,z,glow,0);
+  for(const z of [-.39,-.49])ring(g,.085,.014,0,B,z,glow,0);
 
-  // cage shroud rods around the barrel
-  for(let i=0;i<8;i++){const a=i*Math.PI/4;box(g,.028,.028,.54,Math.cos(a)*.14,.02+Math.sin(a)*.14,-.5,light);}
+  // cage shroud rods around the barrel (offset half-step from the prongs)
+  for(let i=0;i<8;i++){const a=(i+.5)*Math.PI/4;box(g,.028,.028,.46,Math.cos(a)*.16,B+Math.sin(a)*.16,-.54,light);}
 
-  // prong braces
-  box(g,.16,.03,.04,0,.02,-.58,dark);
-  box(g,.16,.03,.04,0,.02,-.72,dark);
+  // prong braces (split so they meet the barrel instead of spearing it)
+  for(const z of [-.6,-.64]){
+    box(g,.055,.03,.04,-.0975,B,z,dark);
+    box(g,.055,.03,.04,.0975,B,z,dark);
+  }
 
   // forward prongs and tips
   for(const x of [-.15,.15]){
-    const prong=cylinder(g,.028,.024,.5,x,.02,-.74,light,12);prong.rotation.x=Math.PI/2;
-    const tip=new T.Mesh(geo('shockbeam|tip|.035|0',()=>new T.OctahedronGeometry(.035,0)),glow);
-    tip.position.set(x,.02,-.99);g.add(tip);
+    const prong=cylinder(g,.028,.026,.47,x,B,-.72,light,12);prong.rotation.x=Math.PI/2;
+    const tip=new T.Mesh(geo('shockbeam|tip|.018|0',()=>new T.OctahedronGeometry(.018,0)),glow);
+    tip.position.set(x,B,-.973);g.add(tip);
   }
 
+  // emitter cage rods framing the central emitter
+  for(let i=0;i<4;i++){const a=Math.PI/4+i*Math.PI/2;box(g,.02,.02,.22,Math.cos(a)*.16,B+Math.sin(a)*.16,-.87,light);}
+
   // central octahedral emitter (looked up by name) and inner core
-  ring(g,.1,.016,0,.02,-.8,glow,0);
-  const emitter=new T.Mesh(geo('shockbeam|emitter|.14|2',()=>new T.OctahedronGeometry(.14,2)),glow);
-  emitter.position.set(0,.02,-.88);emitter.name='shock-emitter';g.add(emitter);
+  const emitter=new T.Mesh(geo('shockbeam|emitter|.12|2',()=>new T.OctahedronGeometry(.12,2)),glow);
+  emitter.position.set(0,B,-.87);emitter.name='shock-emitter';g.add(emitter);
   const core=new T.Mesh(geo('shockbeam|core|.07|1',()=>new T.OctahedronGeometry(.07,1)),amber);
-  core.position.set(0,.02,-.88);g.add(core);
+  core.position.set(0,B,-.87);g.add(core);
 
-  // emitter fins
-  box(g,.03,.16,.03,-.12,.02,-.88,light);
-  box(g,.03,.16,.03,.12,.02,-.88,light);
-  box(g,.16,.03,.03,0,.15,-.88,light);
-  box(g,.16,.03,.03,0,-.11,-.88,light);
-
-  // side energy channels and capacitor cells
-  box(g,.025,.04,.44,-.14,-.06,-.5,amber);
-  box(g,.025,.04,.44,.14,-.06,-.5,amber);
-  cylinder(g,.045,.045,.2,-.18,0,-.16,glow,12);
-  cylinder(g,.045,.045,.2,.18,0,-.16,glow,12);
+  // side capacitor cells
+  cylinder(g,.035,.035,.18,-.195,-.05,.075,glow,12);
+  cylinder(g,.035,.035,.18,.195,-.05,.075,glow,12);
 }

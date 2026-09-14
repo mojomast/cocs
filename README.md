@@ -588,6 +588,10 @@ Version 2.23 shows your connection quality online:
 
 - **Latency chip.** Network matches display a colour-coded `GOOD` / `FAIR` / `POOR` chip with the current interpolation delay, graded from the same jitter and packet-loss estimators the netcode already uses (`connectionQuality` in `game/hud.mjs`). It turns amber or red before the connection becomes unplayable.
 
+Version 3.8 de-clips the remodeled weapons:
+
+- Parts that interpenetrated (shrouds swallowing receivers, coils sunk into barrels, magazines buried in magwells) now meet flush so the models read as solid objects. An interpenetration audit went from ~430 visible overlaps to zero, leaving only intentional hidden internals (bore liners, cores, drum shells). Silhouettes, detail and pinned part names are unchanged.
+
 Version 3.7 fixes the voice crash and remodels the arsenal:
 
 - **ONLINE no longer throws.** A temporal-dead-zone `ReferenceError` in `createVoice` (the `VoiceChat` constructor publishes synchronously before its callback's `const voice` binding is initialized) is fixed by attaching `onState` after construction.
