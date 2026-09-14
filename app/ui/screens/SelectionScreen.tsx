@@ -1,0 +1,56 @@
+'use client';
+import {ArrowUpRight,Check,ChevronRight,Crosshair,Hexagon,LockKeyhole,Play,Shield,Sparkles,Film,Users,Zap} from 'lucide-react';
+import type {ScreenProps} from '../contract';
+import {ActionRail,Banner,Btn,PageHead,Panel,SelectCard,Shell,Stats,TopBar} from '../primitives';
+
+export function SelectionScreen({ui}:ScreenProps){
+ const {entered,showcaseLive,selectableMaps=[],mapId,setMapId,MapPlan,character,chooseCharacter,CHARACTERS=[],selected,harness,setHarness,HARNESSES=[],power,powerIcon,config,start,startSpectate,setSetupOpen,setSingleOpen,changeMode,connectNet,openBrowser,netConnected,profile,demos=[],previewRef,headActions,notice}=ui;
+ const note=character==='claude'?'Enhanced health, armor and speed offset the Claude Code harness lock.':'Each operator trades durability for mobility. Pick the stats that fit your style.';
+ const rail=<ActionRail summary={<>
+  <span className="chip chip--accent"><i/>{selected?.name}</span>
+  <span className="chip">{power?.name}</span>
+  <span className="chip">{ui.selectedMap?.name}</span>
+  <span className="chip">{ui.selectedMode?.name?.toUpperCase()} · {config?.botCount} BOTS</span>
+  {netConnected&&<span className="chip chip--accent"><i/>ONLINE</span>}
+ </>}>
+  <Btn size="sm" variant="ghost" onClick={()=>changeMode('progression')} disabled={!ui.ready||!!ui.error}><Sparkles size={14}/>RANK · LV {profile?.level}</Btn>
+  <Btn size="sm" variant="ghost" onClick={()=>{changeMode('theater');ui.refreshDemos?.();}} disabled={!ui.ready||!!ui.error}><Film size={14}/>THEATER{demos.length?` · ${demos.length}`:''}</Btn>
+  <Btn size="sm" variant="ghost" onClick={startSpectate} disabled={!ui.ready||!!ui.error}><Crosshair size={14}/>SPECTATE</Btn>
+  <Btn size="sm" variant="ghost" onClick={()=>setSingleOpen(true)} disabled={!ui.ready||!!ui.error}><Play size={14}/>SINGLE PLAYER</Btn>
+  <Btn size="sm" variant="ghost" onClick={netConnected?connectNet:openBrowser} disabled={!ui.ready||!!ui.error}><Users size={14}/>{netConnected?'DISCONNECT':'ONLINE'}</Btn>
+  <Btn variant="secondary" onClick={()=>setSetupOpen(true)}><span>MATCH SETUP</span><ChevronRight size={14}/></Btn>
+  <Btn variant="primary" onClick={()=>start()} disabled={!ui.ready||!!ui.error}>ENTER ARENA <small>{ui.selectedMode?.name?.toUpperCase()} · {ui.selectedMap?.name?.toUpperCase()}</small><ArrowUpRight size={20}/></Btn>
+ </ActionRail>;
+ return <Shell className={entered?'':'shell--awaiting'} head={<TopBar sub="CUSTOM MATCH">{headActions}</TopBar>} rail={rail}>
+  <div className="stack">
+   <PageHead eyebrow="COLOSSEUM SETUP" title={<>Choose your intelligence<span>.</span></>} lede="Pick an operator, strap on a harness, then tune the rules. Nine rival models are already talking trash — only one leaves with bragging rights."/>
+   {notice&&<Banner>{notice}</Banner>}
+   <div className="layout layout--lead">
+    <div className="stack">
+     <Panel label="01 / OPERATOR" meta={`${CHARACTERS.length} AVAILABLE`} actions={<Btn size="sm" variant="ghost" onClick={ui.shuffle} title="Random compatible operator, harness and arena">SHUFFLE LOADOUT / MAP</Btn>}>
+      <div className="grid-cards">{CHARACTERS.map((c:any,i:number)=><SelectCard key={c.id} selected={character===c.id} onClick={()=>chooseCharacter(c.id)} ariaLabel={`${c.name}: ${c.stats.health} health, ${c.stats.armor} armor, ${c.stats.speed} meters per second`} icon={<Hexagon size={22} strokeWidth={1.4}/>} name={c.name} tag={c.tag} meta={character===c.id?<Check size={17}/>:String(i+1).padStart(2,'0')} stats={<>{c.stats.health} HP · {c.stats.armor} ARM · {c.stats.speed} m/s</>}/>)}</div>
+      <Stats items={[{label:'MAX HEALTH',value:selected?.stats?.health},{label:'SPAWN ARMOR',value:selected?.stats?.armor},{label:'MOVE SPEED',value:Number(((selected?.stats?.speed||0)*(config?.speed||1)).toFixed(2)),hint:'m/s'}]}/>
+      <p className="field-note">{note}</p>
+     </Panel>
+     <Panel label="02 / HARNESS" meta="ACTIVE ABILITY">
+      <div className="grid-cards">{HARNESSES.map((h:any)=>{const locked=character==='claude'&&h.id!=='claudecode';return <SelectCard key={h.id} selected={harness===h.id} disabled={locked} onClick={()=>{setHarness(h.id);ui.setNotice?.('');}} ariaLabel={`${h.name}: ${h.power}`} icon={powerIcon?powerIcon(h.id,20):<Shield size={20}/>} name={h.name} tag={h.power} meta={locked?<LockKeyhole size={15}/>:harness===h.id?<Check size={17}/>:h.key}/>;})}</div>
+      <div className="panel-body--tight" style={{marginTop:14,borderTop:'1px solid var(--ui-line)',paddingTop:14}}>
+       <p className="eyebrow"><i/>{power?.power} <span className="chip">Q</span></p>
+       <p className="field-note">{power?.description}</p>
+       <div className="row"><span className="chip">{power?.stat}</span><span className="chip">{power?.cooldown}s COOLDOWN</span></div>
+      </div>
+     </Panel>
+    </div>
+    <div className="stack">
+     <div ref={previewRef} className="preview-stage" aria-label={`${selected?.name} animated 3D model`}>
+      <span className="preview-corner">LIVE MODEL / {String((CHARACTERS.indexOf(selected)>=0?CHARACTERS.indexOf(selected):0)+1).padStart(2,'0')}</span>
+      <div className="preview-caption"><p className="eyebrow" style={{color:selected?.color}}>{selected?.tag}</p><h2 className="h-page">{selected?.name}</h2><p className="lede" style={{fontSize:14}}>{selected?.detail}</p></div>
+     </div>
+     <Panel label="03 / ARENA" meta={ui.selectedMap?.tag}>
+      <div className="grid-cards">{selectableMaps.map((map:any)=><SelectCard key={map.id} selected={mapId===map.id} onClick={()=>setMapId(map.id)} ariaLabel={map.name} icon={MapPlan?<MapPlan map={map} viewBox={ui.mapViewBox?.(map)}/>:undefined} name={map.name} tag={map.description}/>)}</div>
+     </Panel>
+    </div>
+   </div>
+  </div>
+ </Shell>;
+}

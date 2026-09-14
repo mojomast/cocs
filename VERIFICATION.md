@@ -1,5 +1,46 @@
 # COCS verification report
 
+## Release 3.0 - Ground-up menu redesign (new app shell + design system)
+
+- **New design system.** `app/ui/primitives.tsx` (`Shell`, `TopBar`, `PageHead`,
+  `Panel`, `Btn`, `Segmented`, `Tabs`, `Stats`, `Field`, `Chip`, `Meter`,
+  `Empty`, `Banner`, `Modal`, `ActionRail`, `SelectCard`) plus the namespaced
+  `ui-*` / `shell-*` / `panel-*` / `btn-*` stylesheet in `app/styles/ui.css`,
+  imported from `app/globals.css`. It builds on the 8px spacing scale, tokenized
+  type scale, two-surface/two-elevation rule and the `--z-*` layer scale.
+- **Menus rebuilt from scratch** (the old inline markup is set aside as legacy,
+  see `app/legacy/README.md`):
+  - `TitleScreen` — single primary enter action, in-flow meta chips, worldmark
+    scaled by `min(vw, vh)` so it fits short landscape viewports.
+  - `SelectionScreen` — the elastic column is now the interactive loadout instead
+    of the decorative preview; operator/harness/map are real grids; a single
+    sticky `ActionRail` always shows the summary and `ENTER ARENA` (never below
+    the fold); secondary modes are grouped as small rail buttons.
+  - `ProgressionScreen` — the previously-empty reserved column is gone; rank
+    rail + tabbed gear (Gear/Mods/Skins/Reticles) + unlock track, no nested
+    scrollbar.
+  - `BrowseScreen` / `LobbyScreen` — one primary per screen, tabbed create/history,
+    3-column lobby (players / chat+voice / match control) reading a **reactive
+    net snapshot** instead of stale `runtime.current.net` ref reads.
+- **Runtime reactivity fix.** `page.tsx` now publishes `netInfo` (connected,
+  peerId, hostId, isHost, started, spectate, actorId, roundOver, roomId) from
+  every `wireNet` callback, so the lobby/results labels can no longer go stale.
+- **Compatibility held.** The legacy `app/game-ui/*.tsx` and
+  `game/scoreboard.mjs` contracts are untouched, so
+  `game/race-ui.test.mjs` / `game/touch-ui.test.mjs` / `game/scoreboard.test.mjs`
+  still pass, and `tests/rendered-html.test.mjs` still finds every required SSR
+  string on the new selection screen. The deploy version parser
+  (`scripts/read-version.mjs`) still finds the `title-footer` marker in
+  `app/page.tsx`.
+- **Still legacy / next phase:** match-setup, single-player, pause, results,
+  settings and onboarding modals, the theater screens, and the in-match HUD are
+  unchanged. `app/legacy/README.md` records the boundary.
+
+Verification: game **955/955**, server **126/126**, SSR 4/4, `tsc` clean, lint 0
+errors, build clean. No browser/WebGL playtest in this environment: the new
+layouts are type/SSR/markup-verified and worth a visual pass on desktop and
+phone.
+
 ## Release 2.81 - Design system, HUD unification and mobile/safe-area fixes
 
 - **Design tokens.** `app/globals.css` `:root` now carries the full semantic

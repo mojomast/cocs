@@ -588,6 +588,12 @@ Version 2.23 shows your connection quality online:
 
 - **Latency chip.** Network matches display a colour-coded `GOOD` / `FAIR` / `POOR` chip with the current interpolation delay, graded from the same jitter and packet-loss estimators the netcode already uses (`connectionQuality` in `game/hud.mjs`). It turns amber or red before the connection becomes unplayable.
 
+Version 3.0 rebuilds the menus on a new design system:
+
+- **New primitives and shell.** `app/ui/primitives.tsx` plus the namespaced `ui-*` design system in `app/styles/ui.css` give every screen one `Shell` (sticky header / scrolling body / sticky action rail), one `Panel`, one `Btn`, one `Modal` and shared `Stats`/`Tabs`/`Segmented`/`Chip`/`Meter` primitives.
+- **Balanced menu layouts.** The selection screen's elastic column is now the interactive loadout (not a decorative preview) and its primary action lives in a sticky rail that never falls below the fold; the progression screen no longer reserves an empty column and moves gear into tabs; browse/lobby get one primary action each and a 3-column lobby reading a reactive net snapshot instead of stale ref reads.
+- **Legacy set aside.** The previous inline menu markup is replaced, not duplicated; `app/legacy/README.md` records the boundary. Match-setup/single-player/pause/results/settings modals, the theater and the in-match HUD remain for the next redesign phase, and their test-pinned exports are unchanged.
+
 Version 2.81 is a full UI/HUD overhaul:
 
 - **Design tokens and a shared HUD language.** `app/globals.css` now defines a semantic token layer (surfaces, text tiers, accent/warn/danger/info, borders, radii, elevation, fonts and a `--z-*` scale) and completes the Tailwind `@theme` mapping so the Radix/shadcn select, radio and slider primitives resolve to the mint palette instead of undefined colours. Every in-match mode is built from the same `.hud-strip`/`.hud-cell`, `.hud-panel`, `.hud-bar`, `.hud-count` and `.hud-note` primitives, scoped by a per-mode `--accent` (race/soccer amber, single-player mint).
