@@ -1,5 +1,20 @@
 # COCS verification report
 
+## Release 3.2.2 - Fix runtime crash in all non-race modes
+
+- **Bug:** `PlayingHud` reads `voiceState` from the page's `ui` bag, but the bag
+  never provided it. Because the bag is loosely typed, `tsc` passed while
+  `voiceState.enabled` threw during render, so every mode using the default HUD
+  (deathmatch, CTF, KOTH, payload, assault, horde, campaign…) hit the error
+  boundary. Racing does not use that field, which is why only racing worked.
+- **Fix:** provide `voiceState` (and `showcaseLive`) in the `ui` bag.
+- **Guard:** new `tests/ui-contract.test.mjs` statically reads `app/page.tsx` and
+  every `app/ui/screens/*.tsx` and fails if any screen references a `ui` field
+  the page does not provide, so this class of bug cannot ship silently again.
+
+Verification: game **955/955**, server **126/126**, `tests/` **5/5** (including
+the new contract test), `tsc` clean, lint 0 errors, build clean.
+
 ## Release 3.2.1 - Startup shows the title screen (modal fix)
 
 - The keep-mounted match-setup modal was visible on launch and could not be

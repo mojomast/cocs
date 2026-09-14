@@ -290,15 +290,15 @@ export default function Home(){
    selected,selectedMap,selectedMode,selectableMaps,power,powerIcon,CHARACTERS,HARNESSES,GAME_MODES,DIFFICULTIES,mapsForMode,getMap,missionFor,isMissionUnlocked,CAMPAIGN_MISSIONS,MapPlan,mapViewBox,
    profile,campaign,nextMissionId,UNLOCKS,UNLOCK_GROUPS,GEAR,GEAR_SLOTS,ATTACHMENTS,ATTACHMENT_SLOTS,WEAPON_FINISHES,CROSSHAIR_STYLES,levelFromXp,rankTitle,rankBlurb,unlockedItems,
    rooms,matches,netUrl,setNetUrl,roomName,setRoomName,netError,quickJoin,createRoom,joinRoom,refreshNet,teamName,renderScoreboard,
-   net:netInfo,netPlayers,myPeerId,netRoomId,netConnected:netInfo.connected,chatLog,chatDraft,setChatDraft,sendChat,newMessages,setNewMessages,lobbyInputRef,lobbyChatRef,chatAtBottom,voicePanel,hostAndStart,reconnectNet,resumeNet,disconnectNet,
-   demos,demoPlaying,refreshDemos:()=>runtime.current?.refreshDemos?.(),start:()=>start(),ready,error,previewRef,headActions,BRAND,
+   net:netInfo,netPlayers,myPeerId,netRoomId,netConnected:netInfo.connected,chatLog,chatDraft,setChatDraft,sendChat,newMessages,setNewMessages,lobbyInputRef,lobbyChatRef,chatAtBottom,voicePanel,voiceState,hostAndStart,reconnectNet,resumeNet,disconnectNet,
+   demos,demoPlaying,refreshDemos:()=>runtime.current?.refreshDemos?.(),start:()=>start(),ready,error,previewRef,headActions,BRAND,showcaseLive,
    player,awards,scoreboard,resultTitle,resultDescription,resume,nextArena,campaignNext,isSingle,single,lastDemo,prefs,ONBOARDING_STEPS,onboarding,setOnboarding,finishOnboarding,modalRef,singleRef,runtime,
    demoNotice,demoPaused,demoTime,demoSpeed,demoRig,demoInfo,stopDemo:()=>runtime.current?.stopDemo?.(),removeDemo:(id:any)=>runtime.current?.removeDemo?.(id),playDemo:(id:any)=>runtime.current?.playDemo?.(id),setDemoPaused,setDemoTime,setDemoSpeed,setDemoRig,CAMERA_RIGS,clock,
    hud,brief,phase,hudRoute,hudMap,hudMode,isTeamMode,modeGoal,ladderStatus,flagText,armsrace,WEAPONS,activePower,radar,radarCols,radarBlip,crosshairGap,marker,reloadFill,reloading,posture,killNotice,suddenBanner,startBanner,scoreCue,damageIndicator,damageNumberStyle,reducedMotion,vehiclePrompt,vehicle,ammoEmpty,ammoLow,hideHud,pointerHint,requestLock,chatOpen,spectatorBoard,CAMERA_MODE_LABELS,grenadeStatus,streakStatus,killFeedWeapon,voiceHint,escapeHint,teamScoreText,ammoText,weaponTag,REPO_URL,weaponRangeLabel,
   };
   return <><main className={`arena-app mode-${mode}${(config.mode==='puma-race'||config.mode==='puma-soccer')?' race-setup':''}${(isRace||isSoccer)?' race-active':''}${display.teamPalette==='colorblind'?' palette-colorblind':''}`}>
   <canvas ref={canvas} tabIndex={-1} role="img" className="arena-canvas" aria-label="Colosseum Of Competitive Slop 3D game"/>
-  {!entered&&<><TitleScreen ui={ui}/><div className="title-footer"><span>v3.2.1 · STARTUP FIX</span>{githubLink}</div></>}
+  {!entered&&<><TitleScreen ui={ui}/><div className="title-footer"><span>v3.2.2 · MODE FIX</span>{githubLink}</div></>}
   {mode==='selection'&&<SelectionScreen ui={ui}/>}
   {mode==='selection'&&<SetupModal ui={ui}/>}
   {mode==='selection'&&<SinglePlayerModal ui={ui}/>}
