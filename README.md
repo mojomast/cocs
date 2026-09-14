@@ -588,6 +588,11 @@ Version 2.23 shows your connection quality online:
 
 - **Latency chip.** Network matches display a colour-coded `GOOD` / `FAIR` / `POOR` chip with the current interpolation delay, graded from the same jitter and packet-loss estimators the netcode already uses (`connectionQuality` in `game/hud.mjs`). It turns amber or red before the connection becomes unplayable.
 
+Version 3.7 fixes the voice crash and remodels the arsenal:
+
+- **ONLINE no longer throws.** A temporal-dead-zone `ReferenceError` in `createVoice` (the `VoiceChat` constructor publishes synchronously before its callback's `const voice` binding is initialized) is fixed by attaching `onState` after construction.
+- **Ten new weapons.** The low-poly arsenal is replaced by detailed higher-poly models under `game/weapon-models/` (roughly 3.0–4.8k triangles each, distinct silhouettes, cached resources). The original geometry is archived as `legacyWeaponModel` in `game/weapon-models/legacy.mjs`.
+
 Version 3.6 fixes menu paint order and the progression layout:
 
 - **Menus paint above the canvas again.** `.shell` is positioned (`z-index:1`); previously the absolutely-positioned canvas painted over the whole menu body, hiding the operator/harness selection and stealing its clicks and scroll.

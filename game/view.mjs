@@ -8,6 +8,8 @@ import {WeaponFeedback,EffectPool} from './feedback.mjs';
 import {ModelAssets,withAssets,currentAssets,CameraShake,MuzzleLightPool,LowHealthOverlay,RailBeamPool,DeathPool} from './effects-fx.mjs';
 import {deathPlan,hashUnit} from './deaths.mjs';
 import {resolveFinish} from './cosmetics.mjs';
+import {buildWeaponBody} from './weapon-models/index.mjs';
+import {legacyWeaponBody} from './weapon-models/legacy.mjs';
 import {CharacterRig} from './character-anim.mjs';
 import {terrainTriangles,terrainWallTriangles} from './terrain.mjs';
 import {TEAM_PALETTE,teamPresentation,teamMark,updateTeamMark,applyActorTeam} from './team-presentation.mjs';
@@ -58,24 +60,7 @@ const terrainTextureKind=key=>({grass:'grass',dirt:'sand',rock:'rock',cliff:'roc
 const NEXTGEN_PROXY=new Set(['cave','tunnel','rock','tree','crate','column']);
 const weaponInfo=type=>WEAPONS[type]||{color:['#ff6f91','#e8ff71','#ff9f43'][Math.abs(type)%3],name:`Weapon ${type}`,short:`W${type}`,feel:{}};
 const weaponVisualKey=visual=>{if(!visual)return '';try{return JSON.stringify(visual);}catch{return String(visual);}};
-export function weaponModel(type=0,assets,visual=null,finish=null){return withAssets(assets,()=>{type=Number.isInteger(type)&&type>=0?type:0;const info=weaponInfo(type),finishColors=resolveFinish(finish,null),g=new T.Group(),dark=material(finishColors?.secondary||'#222f37'),light=material(finishColors?.accent||'#73848a'),glow=material(finishColors?.primary||info.color,.3,.3,true);g.userData.type=type;
-  if(type===0){box(g,.2,.23,.62,0,0,-.15,dark);box(g,.24,.1,.34,0,.16,-.18,light);box(g,.07,.045,.48,.105,.06,-.2,glow);const barrel=cylinder(g,.07,.07,.5,0,.01,-.6,light);barrel.rotation.x=Math.PI/2;box(g,.09,.17,.12,0,.25,-.03,dark);box(g,.09,.2,.14,0,-.19,.03,dark);}
- if(type===1){const barrel=cylinder(g,.22,.24,.9,0,0,-.25,dark);barrel.rotation.x=Math.PI/2;ring(g,.205,.037,0,0,-.72,glow,0);box(g,.3,.09,.55,0,.23,-.15,light);box(g,.15,.25,.19,0,-.26,.02,light);for(const x of [-.24,.24])box(g,.04,.24,.38,x,0,-.25,glow);}
- if(type===2){box(g,.21,.22,.7,0,0,-.26,dark);for(const x of [-.14,.14]){box(g,.075,.1,.92,x,.025,-.58,light);box(g,.035,.045,.8,x,.085,-.58,glow);}box(g,.15,.08,.25,0,.2,-.17,glow);box(g,.08,.2,.13,0,-.2,0,dark);}
- if(type===3){box(g,.36,.22,.5,0,0,-.1,dark);for(const x of [-.12,.12]){const barrel=cylinder(g,.095,.095,.58,x,.03,-.51,light);barrel.rotation.x=Math.PI/2;ring(g,.075,.017,x,.03,-.81,glow,0);}box(g,.32,.1,.25,0,-.13,-.32,glow);box(g,.12,.24,.13,0,-.22,.09,dark);}
-  if(type===4){box(g,.23,.24,.62,0,0,-.2,dark);for(const z of [-.25,-.45,-.65])ring(g,.17,.025,0,0,z,glow,0);const core=new T.Mesh(new T.IcosahedronGeometry(.12,1),glow);core.position.z=-.67;g.add(core);for(const x of [-.18,.18])box(g,.08,.14,.7,x,0,-.3,light);box(g,.13,.22,.15,0,-.21,.05,dark);}
-  if(type===5){box(g,.28,.22,.55,0,.04,-.12,dark);const drum=cylinder(g,.29,.29,.38,0,-.17,-.23,light,12);drum.rotation.z=Math.PI/2;drum.name='grenade-drum';for(let i=0;i<6;i++){const a=i*Math.PI/3;const chamber=cylinder(g,.07,.07,.4,0,-.17+Math.cos(a)*.21,-.23+Math.sin(a)*.21,dark,8);chamber.rotation.z=Math.PI/2;box(g,.018,.06,.06,.21,-.17+Math.cos(a)*.21,-.23+Math.sin(a)*.21,glow);}const barrel=cylinder(g,.145,.17,.48,0,.04,-.65,dark);barrel.rotation.x=Math.PI/2;ring(g,.15,.035,0,.04,-.89,light,0);box(g,.06,.23,.06,0,.27,-.44,light);}
-  if(type===6){box(g,.24,.24,.5,0,0,-.08,dark);const emitter=new T.Mesh(new T.OctahedronGeometry(.15),glow);emitter.position.set(0,0,-.69);emitter.name='shock-emitter';g.add(emitter);for(const x of [-.19,.19]){box(g,.085,.16,.62,x,0,-.48,light);box(g,.055,.08,.22,x,0,-.87,glow);}for(const z of [-.2,-.34,-.48])ring(g,.19,.025,0,0,z,glow,0);box(g,.3,.12,.22,0,-.19,-.06,light);}
-  if(type===7){box(g,.4,.32,.48,0,0,-.06,dark);const barrel=cylinder(g,.28,.21,.62,0,0,-.61,light,8);barrel.rotation.x=Math.PI/2;barrel.name='flak-barrel';ring(g,.245,.05,0,0,-.93,dark,0);for(let i=0;i<8;i++){const a=i*Math.PI/4;box(g,.06,.06,.36,Math.cos(a)*.25,Math.sin(a)*.25,-.6,dark);}box(g,.32,.2,.3,0,-.26,-.1,light);for(const x of [-.16,0,.16])box(g,.075,.035,.22,x,.18,-.05,glow);}
-  if(type===8){box(g,.2,.2,.72,0,0,-.28,dark);const scope=cylinder(g,.06,.06,.4,0,.26,-.22,dark);scope.rotation.x=Math.PI/2;ring(g,.052,.012,0,.26,-.44,glow,0);box(g,.24,.5,.22,0,-.1,-.1,light);const barrel=cylinder(g,.055,.055,.8,0,0,-.78,light);barrel.rotation.x=Math.PI/2;box(g,.24,.14,.3,0,.16,-.02,dark);for(const x of [-.11,.11])box(g,.05,.24,.36,x,-.2,.08,light);box(g,.2,.08,.24,0,.22,-.5,glow);box(g,.09,.18,.12,.15,.05,.02,light);box(g,.09,.18,.12,-.15,.05,.02,light);box(g,.12,.3,.16,0,-.26,.16,light);box(g,.16,.06,.4,0,.3,-.34,glow);}
-  if(type===9){box(g,.28,.24,.46,0,0,-.08,dark);const barrel=cylinder(g,.085,.085,.5,0,.03,-.58,light);barrel.rotation.x=Math.PI/2;box(g,.1,.1,.28,0,.03,-.4,glow);box(g,.14,.34,.14,0,-.24,.06,dark);box(g,.2,.24,.2,0,.16,.12,glow);for(const x of [-.15,.15])box(g,.06,.2,.28,x,-.02,.02,light);box(g,.14,.3,.1,0,.02,.2,light);box(g,.08,.16,.1,0,.02,.3,dark);box(g,.06,.1,.16,.13,.1,.02,glow);box(g,.16,.14,.34,0,.26,-.16,dark);box(g,.1,.08,.2,0,-.02,-.5,glow);}
-  // Mechanical details distinguish the original five as well as the heavy weapons.
-  if(type===0){box(g,.13,.27,.2,0,-.25,-.19,light);for(const z of [-.22,-.32,-.42])box(g,.225,.025,.04,0,.02,z,dark);box(g,.18,.2,.22,0,0,.25,light);box(g,.1,.04,.07,.15,.09,.04,light);}
-  if(type===1){ring(g,.24,.035,0,0,.2,light,0);box(g,.07,.16,.28,.28,.22,-.05,dark);for(const z of [-.12,-.24,-.36])box(g,.12,.035,.045,0,.29,z,glow);box(g,.32,.08,.18,0,-.24,.17,dark);}
-  if(type===2){const scope=cylinder(g,.07,.07,.32,0,.25,-.24,dark);scope.rotation.x=Math.PI/2;ring(g,.06,.013,0,.25,-.405,glow,0);for(const z of [-.4,-.58,-.76])box(g,.34,.035,.05,0,-.04,z,dark);}
-  if(type===3){box(g,.34,.12,.22,0,-.1,-.59,light);for(const z of [-.53,-.6,-.67])box(g,.35,.035,.025,0,-.17,z,dark);for(const x of [-.22,.22])box(g,.06,.13,.12,x,0,-.1,glow);}
-  if(type===4){for(const x of [-.22,.22]){const cell=cylinder(g,.075,.075,.25,x,-.06,.07,glow,8);cell.rotation.x=Math.PI/2;box(g,.12,.045,.3,x,.04,.07,dark);}ring(g,.17,.03,0,0,-.73,light,0);}
-  if(type>=5){box(g,.12,.25,.16,0,-.26,.12,dark);box(g,.2,.2,.22,0,0,.26,light);}
+function assembleWeapon(type,assets,visual,finish,body){return withAssets(assets,()=>{type=Number.isInteger(type)&&type>=0?type:0;const info=weaponInfo(type),finishColors=resolveFinish(finish,null),g=new T.Group(),dark=material(finishColors?.secondary||'#222f37'),light=material(finishColors?.accent||'#73848a'),glow=material(finishColors?.primary||info.color,.3,.3,true);g.userData.type=type;const ctx={T,info,material,box,cylinder,ring,geo:(key,make)=>geometry(assets,key,make),palette:{dark,light,glow}};body(type,g,ctx);
   const points=[[[0,.01,-.85]],[[0,0,-.76]],[[0,.025,-1.04]],[[-.12,.03,-.82],[.12,.03,-.82]],[[0,0,-.77]],[[0,.04,-.93]],[[0,0,-.99]],[[0,0,-.99]]][type]||[[0,0,-.83]];
   const muzzle=info.feel?.muzzle||[.12,.06],flash=new T.Group(),anchors=[];for(const point of points){const anchor=new T.Group();anchor.position.set(...point);anchor.name='muzzle';g.add(anchor);anchors.push(anchor);const flare=new T.Mesh(new T.SphereGeometry(muzzle[0],6,4),new T.MeshBasicMaterial({color:info.color}));flare.position.copy(anchor.position);flare.scale.z=1.5;flash.add(flare);}  flash.visible=false;g.add(flash);g.userData.flash=flash;g.userData.muzzles=anchors;g.userData.muzzle=anchors[0];g.userData.feel=info.feel;
   if(visual){const acc=material(visual.color||'#8affc1',.4,.3,true),mod=material('#161d22',.6,.5);
@@ -100,6 +85,10 @@ export function weaponModel(type=0,assets,visual=null,finish=null){return withAs
    }
   }
   return g;});}
+// New detailed models are dispatched by the weapon-models registry; the old
+// low-poly geometry lives in game/weapon-models/legacy.mjs as `legacyWeaponModel`.
+export function weaponModel(type=0,assets,visual=null,finish=null){return assembleWeapon(type,assets,visual,finish,buildWeaponBody);}
+export function legacyWeaponModel(type=0,assets,visual=null,finish=null){return assembleWeapon(type,assets,visual,finish,legacyWeaponBody);}
 function hornetModel(){const g=new T.Group();g.name='hornet';const hull=material('#3c4652',.7,.4),dark=material('#20262e',.6,.5),accent=material('#ffb35c',.4,.3,true),glass=material('#20323d',.6,.12);
  box(g,1.1,.7,4.6,0,0,-.1,hull);box(g,.7,.5,1.2,0,.25,1.6,hull);
  const nose=new T.Mesh(new T.ConeGeometry(.5,1.4,10),hull);nose.rotation.x=-Math.PI/2;nose.position.set(0,0,-2.6);g.add(nose);

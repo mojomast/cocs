@@ -1,5 +1,34 @@
 # COCS verification report
 
+## Release 3.7 - Voice crash fix, remodeled weapons
+
+- **Voice crash on ONLINE.** `createVoice` declared `const voice = new VoiceChat({
+  onState: () => { ... uses `voice` ... } })`. `VoiceChat`'s constructor calls
+  `publish()` **synchronously**, so the callback read `voice` while it was still
+  in its temporal dead zone, throwing
+  `ReferenceError: Cannot access 'voice' before initialization` the moment the
+  button connected. The callback is now attached after construction
+  (`const voice = new VoiceChat({net:n}); voice.onState = ...`), so the
+  constructor's initial publish is absorbed by the default no-op handler and the
+  real handler is live before any network event.
+- **Weapons remodeled.** The ten low-poly weapons are replaced with detailed,
+  higher-poly models in `game/weapon-models/` (one builder per weapon:
+  pulse-rifle, rocket-launcher, rail-lance, scattergun, plasma-driver,
+  grenade-launcher, shock-beam, flak-cannon, marksman-rifle, submachine-gun).
+  `weaponModel` in `game/view.mjs` now assembles: dispatch to the registry, the
+  shared muzzle/flash/`userData` tail, then the attachment/finish overlay. Every
+  mesh goes through the cached `box`/`cylinder`/`ring`/`geo` helpers so
+  `ModelAssets` sharing and exactly-once disposal are preserved. The old geometry
+  is archived, still buildable, as `legacyWeaponModel` (`game/weapon-models/legacy.mjs`)
+  and covered by `game/legacy-weapons.test.mjs`.
+- New models carry 49-100 direct children and roughly 3.0-4.8k triangles each
+  (up from ~1.5-3.5k) with distinct silhouettes; pinned parts (`grenade-drum`,
+  `shock-emitter`, `flak-barrel`), muzzle anchors and finish/attachment behavior
+  are unchanged.
+
+Verification: game **963/963**, server **126/126**, `tests/` **5/5**, `tsc` clean,
+lint 0 errors, build clean.
+
 ## Release 3.6 - Menu paint order, progression preview, 4K scaling
 
 - **Root cause of the "invisible harness/model selection": paint order.** The app
