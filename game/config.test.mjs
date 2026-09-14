@@ -43,7 +43,7 @@ test('Puma Circuit clamps laps and roster and neutralizes combat modifiers witho
 test('Puma Soccer clamps the roster and neutralizes combat modifiers without mutating saved config',()=>{
  const saved={mode:'puma-soccer',botCount:99,fragLimit:99,speed:1.5,gravity:.4,damage:2,fastPowers:true,lifeSteal:true,unlimitedAmmo:true,suddenDeath:true,randomLoadout:true,oneShot:true,bounty:true,berserk:true,startingWeapon:9};
  const c=normalizeConfig(saved);
- assert.equal(c.botCount,8);assert.equal(c.fragLimit,15);
+ assert.equal(c.botCount,3);assert.equal(c.fragLimit,15);
  assert.equal(normalizeConfig({mode:'puma-soccer'}).fragLimit,5);
  assert.equal(normalizeConfig({mode:'puma-soccer',fragLimit:0,botCount:0}).fragLimit,1);
  for(const key of ['speed','gravity','damage'])assert.equal(c[key],1);

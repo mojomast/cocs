@@ -7,7 +7,7 @@ function fixture(count=8,{seed=7,bot=false,timeLimit=180,goalLimit=3}={}){
  let state=seed>>>0;
  const match={
   arena:PUMA_PITCH,
-  actors:Array.from({length:count},(_,id)=>({id,team:id<count/2?0:1,bot:bot?{}:null,yaw:0,ammo:[]})),
+  actors:Array.from({length:count},(_,id)=>({id,team:id%2,bot:bot?{}:null,yaw:0,ammo:[]})),
   vehicles:[],
   config:{timeLimit,fragLimit:goalLimit},
   random(){state=(Math.imul(state,1664525)+1013904223)>>>0;return state/2**32;},
@@ -23,17 +23,17 @@ function fixture(count=8,{seed=7,bot=false,timeLimit=180,goalLimit=3}={}){
 }
 
 function start(m,goalLimit){
- stepSoccer(m,3);
+ stepSoccer(m,3.2);
  if(goalLimit!==undefined) m.race.goalLimit=goalLimit;
 }
 
-test('initializeSoccer seats four per team as puma drivers and resets scores',()=>{
+test('initializeSoccer seats two per team as puma drivers and resets scores',()=>{
  const m=fixture(8);
  assert.equal(SOCCER_MODE_ID,'puma-soccer');
  assert.equal(m.race.kind,'soccer');assert.equal(m.race.phase,'kickoff');
- assert.equal(m.race.racers.length,8);
- assert.equal(m.race.racers.filter(r=>r.team===0).length,4);
- assert.equal(m.race.racers.filter(r=>r.team===1).length,4);
+ assert.equal(m.race.racers.length,4);
+ assert.equal(m.race.racers.filter(r=>r.team===0).length,2);
+ assert.equal(m.race.racers.filter(r=>r.team===1).length,2);
  assert.deepEqual(m.teamScores,{0:0,1:0});
  for(const racer of m.race.racers){
   const actor=m.actors.find(a=>a.id===racer.actorId),vehicle=m.vehicleById(racer.vehicleId);
@@ -108,6 +108,43 @@ test('soccerSnapshot JSON round-trips and every field stays finite',()=>{
   const v=m.vehicleById(racer.vehicleId);
   assert.ok(Number.isFinite(v.position.x)&&Number.isFinite(v.position.z)&&Number.isFinite(v.position.y));
  }
+});
+
+test('boards keep the ball on the pitch and the goal mouth still scores',()=>{
+ const m=fixture(4,{bot:false,goalLimit:99,timeLimit:999});
+ start(m);
+ const ball=m.race.ball,pitch=m.race.pitch;
+ ball.x=0;ball.z=14;ball.y=1.1;ball.vx=0;ball.vz=45;
+ for(let i=0;i<150;i++) stepSoccer(m,1/60);
+ assert.ok(ball.z<=pitch.maxZ,'the +z board keeps the ball on the pitch');
+ assert.ok(ball.z>=pitch.minZ,'the ball never leaves the far touchline');
+ ball.x=0;ball.z=14;ball.vx=45;ball.vz=0;
+ for(let i=0;i<150;i++) stepSoccer(m,1/60);
+ assert.ok(ball.x<=pitch.maxX,'the end board stops the ball outside the goal mouth');
+ assert.equal(m.race.scores[0],0);
+ assert.equal(m.race.scores[1],0);
+ ball.x=29.9;ball.z=0;ball.y=1.1;ball.vx=14;ball.vz=0;
+ m.race.lastTouch=m.race.racers.find(r=>r.team===0).actorId;
+ stepSoccer(m,1/60);
+ assert.equal(m.race.scores[0],1,'the goal mouth still lets the ball in');
+});
+
+test('soccerBotControls separates team-mates and never stalls indefinitely',()=>{
+ const m=fixture(4,{bot:true,goalLimit:99,timeLimit:999});
+ start(m);
+ for(let i=0;i<400;i++) stepSoccer(m,1/60,{inputs:{}});
+ for(const racer of m.race.racers){
+  const controls=soccerBotControls(m,racer);
+  assert.ok(Number.isFinite(controls.throttle)&&Number.isFinite(controls.steer));
+  assert.ok(controls.steer>=-1&&controls.steer<=1);
+ }
+ const vehicles=m.race.racers.map(r=>m.vehicleById(r.vehicleId));
+ for(let i=0;i<vehicles.length;i++)for(let j=i+1;j<vehicles.length;j++){
+  const d=Math.hypot(vehicles[i].position.x-vehicles[j].position.x,vehicles[i].position.z-vehicles[j].position.z);
+  assert.ok(d>1.2,`cars stay separated (${d.toFixed(2)})`);
+ }
+ const moving=vehicles.some(v=>Math.hypot(v.velocity?.x||0,v.velocity?.z||0)>.5);
+ assert.ok(moving,'at least one bot is still driving');
 });
 
 test('bot controls aim the car at the ball and opponent goal',()=>{

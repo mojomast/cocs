@@ -1,8 +1,8 @@
 import {PUMA_CIRCUIT} from './race-maps.mjs';
 import {freeze} from './map-schema.mjs';
 
-const team0=[[-24,-9],[-24,-3],[-24,3],[-24,9]];
-const team1=[[24,-9],[24,-3],[24,3],[24,9]];
+const team0=[[-24,-6],[-24,6]];
+const team1=[[24,-6],[24,6]];
 const grid=[
  ...team0.map(([x,z])=>({x,z,heading:Math.PI/2})),
  ...team1.map(([x,z])=>({x,z,heading:-Math.PI/2})),
@@ -22,9 +22,19 @@ for(const side of [-1,1]){
  goalBlocks.push({x,z:6,w:1,d:1,h:4,kind:'soccer-goal'});
  goalBlocks.push({x:x+side*2,z:0,w:1,d:12,h:4,kind:'soccer-goal'});
 }
+// Boards ring the pitch so the ball (and the cars) cannot wander onto the
+// circuit. The goals leave a mouth on each goal line; the back walls above
+// close the net behind it.
+const wallH=3,wallT=1,wallBlocks=[];
+for(const z of [-19,19]) wallBlocks.push({x:0,z,w:62,d:wallT,h:wallH,kind:'soccer-wall'});
+for(const x of [-31,31]) for(const [z0,z1] of [[-19,-6],[6,19]]) wallBlocks.push({x,z:(z0+z1)/2,w:wallT,d:z1-z0,h:wallH,kind:'soccer-wall'});
 
-const blocks=[...PUMA_CIRCUIT.blocks.filter(b=>b.kind==='race-rail'||b.kind==='race-apron').map(b=>({...b})),...goalBlocks];
+const blocks=[...PUMA_CIRCUIT.blocks.filter(b=>b.kind==='race-rail'||b.kind==='race-apron').map(b=>({...b})),...wallBlocks,...goalBlocks];
 const spawns=[...team0,...team1];
+// A drivable pitch needs no infantry pathing, but the registry validator builds
+// the navigation graph; a 4m lattice keeps it connected for tooling.
+const navNodes=[];
+for(let x=-24;x<=24;x+=4)for(let z=-12;z<=12;z+=4)navNodes.push({x,z});
 const race={
  kind:'soccer',pitch,goals,
  ball:{x:0,y:1.1,z:0,r:1.1},
@@ -39,7 +49,7 @@ export const PUMA_PITCH=freeze({
  color:PUMA_CIRCUIT.color,background:PUMA_CIRCUIT.background,floorColor:PUMA_CIRCUIT.floorColor,
  raised:false,bounds:PUMA_CIRCUIT.bounds,
  blocks,spawns,teamSpawns:{0:team0.map(s=>[...s]),1:team1.map(s=>[...s])},
- pickups:[],navNodes:[...spawns.map(([x,z])=>({x,z}))],
+ pickups:[],navNodes,
  vehicles:grid.map(({x,z,heading},id)=>({id,kind:'puma',x,y:0,z,yaw:heading})),
  race,
  boundary:PUMA_CIRCUIT.race.boundary,

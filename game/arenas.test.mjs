@@ -105,7 +105,7 @@ test('puma-soccer is confined to its pitch and does not bleed into other vehicle
  assert.equal(arenaSupportsMode('puma-pitch','puma-soccer'),true);
  assert.equal(arenaSupportsMode('puma-circuit','puma-soccer'),false);
  assert.equal(arenaSupportsMode('puma-pitch','puma-race'),false);
- assert.equal(maxBotsFor('puma-soccer'),8);
+ assert.equal(maxBotsFor('puma-soccer'),3);
 });
 test('payload is enabled on route-capable arenas and reconciles an incompatible one',()=>{
  const payload=mapsForMode('payload');

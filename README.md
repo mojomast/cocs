@@ -93,11 +93,14 @@ deployment and verification commands.
 
 Choose **Puma Soccer** in Match Setup for car soccer on the Puma Circuit infield.
 The circuit's middle is opened into a 60x36 pitch with a halfway line, centre
-circle and penalty boxes, and two goals on the long axis. Two teams of up to four
-Pumas per side (eight cars total) fight for the ball; drive into it to pass and
-shoot, boost to strike harder, and handbrake to turn. First team to the goal
-limit wins, otherwise the highest score at full time. Stored results record team
-scores and per-driver goals.
+circle and penalty boxes, and two goals on the long axis. It is always **2 v 2**:
+two Pumas per side, with bots filling any empty seats (so a solo player gets three
+bot drivers, and four humans get none). Boards ring the pitch with a goal mouth at
+each end, so the ball cannot wander onto the circuit. Drive into the ball to pass
+and shoot, boost to strike harder, and handbrake to turn; one attacker per team
+presses the ball while the other covers, and bots steer around each other instead
+of piling up. First team to the goal limit wins, otherwise the highest score at
+full time. Stored results record team scores and per-driver goals.
 
 ## Objective clarity and bot variety
 

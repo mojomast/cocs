@@ -142,9 +142,9 @@ test('rendered race setup offers 0-7 rivals without difficulty and defaults only
  changed=undefined;
  const soccerConfig={...DEFAULT_CONFIG,mode:'puma-soccer',botCount:0};
  const soccerHtml=renderToStaticMarkup(createElement(MatchConfiguration,{config:soccerConfig,onChange}));
- assert.match(soccerHtml,/Team size/);assert.match(soccerHtml,/Goal limit<output>15<\/output>/);assert.match(soccerHtml,/Time limit/);
- assert.ok(soccerHtml.includes('human drivers replace excess bots'));assert.ok(!soccerHtml.includes('Bot difficulty'));assert.ok(!soccerHtml.includes('Starting weapon'));
- modeControl(MatchConfiguration({config:{...DEFAULT_CONFIG,mode:'deathmatch',botCount:0},onChange})).props.onValueChange('puma-soccer');assert.equal(changed.botCount,7);
+ assert.match(soccerHtml,/2 v 2/);assert.match(soccerHtml,/Goal limit<output>15<\/output>/);assert.match(soccerHtml,/Time limit/);
+ assert.ok(soccerHtml.includes('Bots fill the empty seats'));assert.ok(!soccerHtml.includes('Bot difficulty'));assert.ok(!soccerHtml.includes('Starting weapon'));
+ modeControl(MatchConfiguration({config:{...DEFAULT_CONFIG,mode:'deathmatch',botCount:0},onChange})).props.onValueChange('puma-soccer');assert.equal(changed.botCount,3);
 });
 test('rendered soccer HUD shows team score, match clock, phase and local goals',async()=>{
  const file=new URL('../app/game-ui/soccer-hud.tsx',import.meta.url),source=await readFile(file,'utf8');

@@ -1,5 +1,30 @@
 # COCS verification report
 
+## Release 2.74 - Puma Soccer: 2v2, pitch boards and smarter bots
+
+- **2 v 2.** Soccer is now four Pumas total (two per side). `puma-soccer` caps at
+  `maxBots:3` and the core constructor sizes the roster to `4 - humanCount`, so a
+  solo player fields three bot drivers, two humans field two bots, and four humans
+  field none. The pitch authors two kickoff slots per team and `initializeSoccer`
+  slices to four cars.
+- **Boards.** `puma-pitch` now rings the pitch with `soccer-wall` collision boards
+  (both touchlines and both goal lines, leaving a goal mouth at each end) plus
+  hidden `soccer-goal` collision for the posts/back; the ball also hard-clamps to
+  the pitch bounds except inside the goal mouth, so it can no longer roll onto the
+  circuit. Boards render with a dedicated material; goal posts/nets stay the
+  hand-drawn frames.
+- **Bot behaviour.** Bots now pick one attacker and one support per team (nearest
+  to the ball attacks, the partner covers the line between the ball and its own
+  goal), steer around team-mates and the ball pile-up, hold a stable lane offset
+  to avoid head-on collisions, and reverse out after ~1s of being wedged. This
+  removes the old ball-jam where every bot rammed the ball from the same spot.
+
+Verification: game **951/951**, server **126/126**, SSR `tests/*.test.mjs` 4/4,
+`tsc --noEmit` clean, `npm run lint` 0 errors, production build succeeds, live
+deploy verified. New tests cover the 2v2 roster, board containment with the goal
+mouth still scoring, and bot separation/stall recovery. No browser/WebGL playtest
+was possible, so ball feel and board visuals remain unit-verified only.
+
 ## Release 2.73 - Menu demo shows a variety of modes
 
 The title-screen showcase is now a reel of eight distinct modes instead of a

@@ -69,7 +69,7 @@ export function initializeSoccer(match){
  match.teamScores[0]=0;match.teamScores[1]=0;
  const pools={0:slotPool(pitch,match.arena,0),1:slotPool(pitch,match.arena,1)};
  const used={0:0,1:0};
- const actors=(match.actors||[]).slice(0,8);
+ const actors=(match.actors||[]).slice(0,4);
  match.vehicles=[];
  actors.forEach((actor,index)=>{
   const team=Number.isFinite(actor.team)?(actor.team===0?0:1):index%2;
@@ -111,24 +111,53 @@ export function soccerSnapshot(state){
  };
 }
 
+// One bot per team attacks the ball; its partner holds a support line between
+// the ball and its own goal. Both steer around team-mates (and the pile-up at
+// the ball) and reverse out if they wedge against a wall or each other.
 export function soccerBotControls(match,racer){
  const vehicle=match.vehicleById?.(racer.vehicleId),state=match.race;
  if(!vehicle||!state) return {throttle:0,steer:0};
- const ball=state.ball,pos=vehicle.position;
- const goal=state.goals[racer.team===0?1:0]||state.goals[0];
+ const pos=vehicle.position;
+ if(!Number.isFinite(pos?.x)||!Number.isFinite(pos?.z)||!Number.isFinite(vehicle.heading)) return {throttle:0,steer:0};
+ const ai=racer.ai||(racer.ai={reverse:0,stuck:0,lane:((racer.actorId*2654435761>>>0)%1000/1000-.5)*3});
+ const ball=state.ball;
+ const ownGoal=state.goals.find(g=>g.team===racer.team)||state.goals[0];
+ const targetGoal=state.goals.find(g=>g.team!==racer.team)||state.goals[1];
+ const chaser=state.chaser?.[racer.team]===racer.actorId;
+ let targetX,targetZ;
+ if(chaser){
+  const ax=(targetGoal.x-ball.x),az=(targetGoal.z-ball.z),al=Math.hypot(ax,az)||1;
+  const px=-az/al,pz=ax/al,back=Math.min(2.8,2.0+CAR_RADIUS*.5);
+  targetX=ball.x-(ax/al)*back+px*ai.lane;
+  targetZ=ball.z-(az/al)*back+pz*ai.lane;
+ }else{
+  const gx=ball.x-(ownGoal?ownGoal.x:0),gz=ball.z-(ownGoal?ownGoal.z:0),gl=Math.hypot(gx,gz)||1;
+  targetX=ball.x-(gx/gl)*9+(gz/gl)*ai.lane;
+  targetZ=ball.z-(gz/gl)*9-(gx/gl)*ai.lane;
+ }
+ let tx=targetX-pos.x,tz=targetZ-pos.z;
+ const others=match.vehicles||[];
+ for(const other of others){
+  if(other===vehicle) continue;
+  const ox=pos.x-other.position.x,oz=pos.z-other.position.z,od=Math.hypot(ox,oz);
+  if(od>3.6||od<1e-4) continue;
+  const push=(3.6-od)/3.6*4.5;
+  tx+=(ox/od)*push;tz+=(oz/od)*push;
+ }
+ if(!Number.isFinite(tx)||!Number.isFinite(tz)||(tx===0&&tz===0)){tx=Math.sin(vehicle.heading);tz=Math.cos(vehicle.heading);}
+ const error=angle(Math.atan2(tx,tz)-vehicle.heading);
+ const speed=Math.hypot(vehicle.velocity?.x||0,vehicle.velocity?.z||0);
+ if(speed<1.1) ai.stuck+=SLICE; else ai.stuck=Math.max(0,ai.stuck-SLICE*1.5);
+ if(ai.stuck>1&&ai.reverse<=0){ai.reverse=.75;ai.stuck=0;}
+ if(ai.reverse>0){ai.reverse-=SLICE;return {throttle:-.7,steer:clamp(-error*1.4,-1,1)};}
  const ballDistance=Math.hypot(ball.x-pos.x,ball.z-pos.z);
- if(!Number.isFinite(ballDistance)||!Number.isFinite(vehicle.heading)) return {throttle:0,steer:0};
- const attackX=(goal?goal.x:30)-ball.x,attackZ=(goal?goal.z:0)-ball.z;
- const attackLength=Math.hypot(attackX,attackZ)||1;
- const aimX=ball.x-(attackX/attackLength)*2.4,aimZ=ball.z-(attackZ/attackLength)*2.4;
- const error=angle(Math.atan2(aimX-pos.x,aimZ-pos.z)-vehicle.heading);
  const close=ballDistance<5;
  return {
-  throttle:Math.abs(error)>1?0.35:0.9,
-  steer:clamp(error*1.8,-1,1),
-  sprint:close&&Math.abs(error)<0.6,
-  brake:ballDistance<2.2&&Math.abs(error)>1.4,
-  jump:ballDistance<2.2&&Math.abs(error)>1.4,
+  throttle:Math.abs(error)>1.05?.4:.95,
+  steer:clamp(error*1.9,-1,1),
+  sprint:chaser&&close&&Math.abs(error)<.5,
+  brake:!chaser&&Math.abs(error)>1.6,
+  jump:!chaser&&Math.abs(error)>1.6,
  };
 }
 
@@ -156,13 +185,14 @@ function resolveBallCars(match,state){
  return hits;
 }
 
-function resolveBallBounds(ball,bounds){
- if(!bounds) return;
- const r=ball.r;
- if(ball.x<bounds.minX+r){ball.x=bounds.minX+r;ball.vx=Math.abs(ball.vx)*BALL_BOUNCE;}
- else if(ball.x>bounds.maxX-r){ball.x=bounds.maxX-r;ball.vx=-Math.abs(ball.vx)*BALL_BOUNCE;}
- if(ball.z<bounds.minZ+r){ball.z=bounds.minZ+r;ball.vz=Math.abs(ball.vz)*BALL_BOUNCE;}
- else if(ball.z>bounds.maxZ-r){ball.z=bounds.maxZ-r;ball.vz=-Math.abs(ball.vz)*BALL_BOUNCE;}
+function resolveBallBounds(ball,pitch,goals){
+ if(!pitch) return;
+ const r=ball.r,list=Array.isArray(goals)?goals:[];
+ const inMouth=z=>list.some(g=>Math.abs(z-(Number.isFinite(g.z)?g.z:0))<=(Number.isFinite(g.halfWidth)?g.halfWidth:6));
+ if(ball.z<pitch.minZ+r){ball.z=pitch.minZ+r;ball.vz=Math.abs(ball.vz)*BALL_BOUNCE;}
+ else if(ball.z>pitch.maxZ-r){ball.z=pitch.maxZ-r;ball.vz=-Math.abs(ball.vz)*BALL_BOUNCE;}
+ if(ball.x<pitch.minX+r&&!inMouth(ball.z)){ball.x=pitch.minX+r;ball.vx=Math.abs(ball.vx)*BALL_BOUNCE;}
+ else if(ball.x>pitch.maxX-r&&!inMouth(ball.z)){ball.x=pitch.maxX-r;ball.vx=-Math.abs(ball.vx)*BALL_BOUNCE;}
 }
 
 function resolveBallBlocks(ball,blocks){
@@ -198,7 +228,7 @@ function stepBall(match,state,dt){
  if(!Number.isFinite(ball.vz)) ball.vz=0;
  ball.x+=ball.vx*dt;
  ball.z+=ball.vz*dt;
- resolveBallBounds(ball,match.arena?.bounds);
+ resolveBallBounds(ball,state.pitch,state.goals);
  resolveBallBlocks(ball,match.arena?.blocks||[]);
  ball.y=groundY(match,ball.x,ball.z)+ball.r;
  if(!Number.isFinite(ball.x)||!Number.isFinite(ball.z)||!Number.isFinite(ball.y)) resetBall(match,state);
@@ -257,6 +287,14 @@ export function stepSoccer(match,dt,inputs={}){
   step=Math.min(step,Math.max(0,state.timeLimit-state.elapsed));
   state.elapsed+=step;match.time+=step;remaining-=step;
   const ballPrev={x:state.ball.x,z:state.ball.z};
+  const chaser={0:null,1:null},closest={0:Infinity,1:Infinity};
+  for(const racer of state.racers){
+   const vehicle=match.vehicleById(racer.vehicleId);
+   if(!vehicle) continue;
+   const distance=Math.hypot(state.ball.x-vehicle.position.x,state.ball.z-vehicle.position.z);
+   if(distance<closest[racer.team]){closest[racer.team]=distance;chaser[racer.team]=racer.actorId;}
+  }
+  state.chaser=chaser;
   for(const racer of state.racers){
    const actor=match.actors.find(a=>a.id===racer.actorId);
    const vehicle=match.vehicleById(racer.vehicleId);

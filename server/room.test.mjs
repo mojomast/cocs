@@ -377,7 +377,9 @@ test('a soccer room starts, scores through the sim and records the team result',
  assert.equal(room.mapId,'puma-pitch');
  assert.equal(room.match.config.mode,'puma-soccer');
  assert.equal(room.match.race.kind,'soccer');
- assert.equal(room.match.race.racers.length,2);
+ assert.equal(room.match.race.racers.length,4);
+ assert.equal(room.match.race.racers.filter(racer=>racer.team===0).length,2);
+ assert.equal(room.match.race.racers.filter(racer=>racer.team===1).length,2,'bots fill the empty seats for 2v2');
  for(let i=0;i<Math.ceil(3/RULES.dt)+10&&room.match.race.phase!=='playing';i++)room.tick(RULES.dt);
  assert.equal(room.match.race.phase,'playing','kickoff countdown runs on room ticks');
  const scorer=room.match.race.racers.find(racer=>racer.team===0);

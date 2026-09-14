@@ -6,7 +6,7 @@ import {vehicleSeatFor,vehicleMounted} from './vehicles.mjs';
 // current match ends) the next scenario is built and the camera switches rigs.
 export const SHOWCASES=[
  {id:'puma-race',label:'Puma Circuit',mode:'puma-race',maps:['puma-circuit'],bots:7,difficulty:'normal',timeLimit:180,fragLimit:2,seatVehicles:0},
- {id:'puma-soccer',label:'Puma Soccer',mode:'puma-soccer',maps:['puma-pitch'],bots:7,difficulty:'normal',timeLimit:120,fragLimit:3,seatVehicles:0},
+ {id:'puma-soccer',label:'Puma Soccer',mode:'puma-soccer',maps:['puma-pitch'],bots:3,difficulty:'normal',timeLimit:120,fragLimit:3,seatVehicles:0},
  {id:'deathmatch',label:'Deathmatch',mode:'deathmatch',maps:['colosseum','forge','substation','atrium','crosswire'],bots:7,difficulty:'normal',timeLimit:75,fragLimit:15,seatVehicles:0},
  {id:'teamdeathmatch',label:'Team Deathmatch',mode:'teamdeathmatch',maps:['warfront','titan-valley','atrium','riverbend','crosswire'],bots:8,difficulty:'normal',timeLimit:75,fragLimit:30,seatVehicles:0},
  {id:'ctf',label:'Capture the Flag',mode:'ctf',maps:['skybreak','frost-gate','launchpad','citadel','blood-gulch'],bots:8,difficulty:'normal',timeLimit:90,fragLimit:3,seatVehicles:0},
@@ -22,7 +22,7 @@ export function pickShowcase(index,random=Math.random,{legacy=false}={}){
  const preferred=scenario.maps.filter(id=>available.has(id));
  const pool=preferred.length?preferred:[...available];
  const mapId=pool.length?pool[Math.min(pool.length-1,Math.floor(random()*pool.length))]:'exchange';
- const botCount=Math.max(4,Math.min(maxBotsFor(scenario.mode),Math.round(scenario.bots)));
+ const botCount=Math.max(0,Math.min(maxBotsFor(scenario.mode),Math.round(scenario.bots)));
  return {id:scenario.id,label:scenario.label,mode:scenario.mode,mapId,botCount,difficulty:scenario.difficulty,timeLimit:scenario.timeLimit,fragLimit:scenario.fragLimit,seatVehicles:scenario.seatVehicles};
 }
 

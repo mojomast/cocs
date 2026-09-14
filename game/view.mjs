@@ -341,13 +341,13 @@ export class ArenaView{
     }
   const rockMat=applyTextures(material('#827d67',.02,.98),'rock',2,2),teamMats=TEAM_PALETTE.map(team=>material(team.color,.15,.8));
   palette.push(rockMat,...teamMats);
-  const raceMats=arena.race?{'race-rail':material('#e78b30',.08,.78),'race-infield':material('#203b30',.02,.96),'race-apron':material('#171e28',.02,.94),stripe:material('#f4eddb',.05,.85)}:null;
+  const raceMats=arena.race?{'race-rail':material('#e78b30',.08,.78),'race-infield':material('#203b30',.02,.96),'race-apron':material('#171e28',.02,.94),'soccer-wall':material('#2b3550',.12,.82),'soccer-goal':material('#eef2f6',.35,.4),stripe:material('#f4eddb',.05,.85)}:null;
   if(raceMats)palette.push(...Object.values(raceMats));
   for(const [index,b] of arena.blocks.entries()){
    const rock=arena.id==='blood-gulch'&&(['cover','landmark','rock','boulder'].includes(b.kind)),bunker=b.kind?.startsWith('base-')||b.kind==='cliff-outpost',raceMat=raceMats?.[b.kind],blockMat=variant('block',raceMat??(rock?rockMat:wall),{map:textured&&!raceMat,kind:rock?'rock':'metal'}),body=box(world,b.w,b.h,b.d,b.x,b.h/2,b.z,blockMat);paintGeometry(body.geometry,arenaSeed+index*13+1,.16);body.userData.block=index;body.castShadow=true;body.receiveShadow=true;
     // Rails are continuous collision runs of overlapping boxes; render the
     // smooth barrier walls in raceTrackModel instead so they never z-fight.
-    if(raceMat){if(b.kind==='race-rail'){body.visible=false;body.castShadow=false;body.receiveShadow=false;}continue;}
+    if(raceMat){if(b.kind==='race-rail'||b.kind==='soccer-goal'){body.visible=false;body.castShadow=false;body.receiveShadow=false;}continue;}
    // Next-gen maps keep these as invisible collision proxies and draw smooth geometry in buildNextGen.
    if(arena.nextGen===true&&NEXTGEN_PROXY.has(b.kind)){body.visible=false;continue;}
    // Keep the complete collision box visible: rock fractures and armor are surface treatments.

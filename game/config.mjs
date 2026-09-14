@@ -13,7 +13,7 @@ export const GAME_MODES = [
   {id:'combined-arms',name:'Combined Arms',description:'Command infantry, armour and aircraft across the largest battlefields. Hold the zones together.',rules:{team:true,score:'zoneTime',fragLimit:200,minFragLimit:50,maxFragLimit:900,objective:{kind:'domination',captureSeconds:6},maxBots:16}},
   {id:'payload',name:'Payload',description:'Escort the payload cart down the track to the final point. Checkpoints bank progress; defenders stall it and roll it back. Attackers win on delivery, defenders on the clock.',rules:{team:true,score:'payload',fragLimit:3,minFragLimit:1,maxFragLimit:6,objective:{kind:'payload',captureSeconds:5}}},
  {id:'puma-race',name:'Puma Circuit',description:'Race Pumas around the circuit. Cross every gate in order and finish the lap target first.',rules:{team:false,score:'laps',fragLimit:3,minFragLimit:1,maxFragLimit:10,maxBots:7}},
- {id:'puma-soccer',name:'Puma Soccer',description:'Team car soccer on the circuit infield. Fling the ball into the enemy goal while defending your own.',rules:{team:true,score:'goals',fragLimit:5,minFragLimit:1,maxFragLimit:15,maxBots:8}},
+ {id:'puma-soccer',name:'Puma Soccer',description:'Team car soccer on the circuit infield. Fling the ball into the enemy goal while defending your own.',rules:{team:true,score:'goals',fragLimit:5,minFragLimit:1,maxFragLimit:15,maxBots:3}},
 ];
 export const DIFFICULTIES = [
  {id:'easy',name:'Easy',description:'Relaxed reactions, loose aim and plenty of breathing room.',reaction:1.2,think:.5,error:.3,fireDelay:.48},
