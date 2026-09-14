@@ -588,6 +588,11 @@ Version 2.23 shows your connection quality online:
 
 - **Latency chip.** Network matches display a colour-coded `GOOD` / `FAIR` / `POOR` chip with the current interpolation delay, graded from the same jitter and packet-loss estimators the netcode already uses (`connectionQuality` in `game/hud.mjs`). It turns amber or red before the connection becomes unplayable.
 
+Version 3.2 extracts the in-match HUD and finishes the settings dialog:
+
+- **HUD extracted.** The default HUD is now `app/ui/screens/PlayingHud.tsx`, with all legacy classes/anchors preserved and the centre announcements arbitrated into one slot (sudden-death > start > score > kill callout > kill banner).
+- **Settings on the new primitives.** A tabbed `Modal` (Game / Arsenal / About) replaces the legacy Radix panel and its duplicated keybind table.
+
 Version 3.1 redesigns the modals, theater and HUD layering:
 
 - **Modals on the new primitives.** Match setup (two-column arena + rules, sticky footer), single-player (segmented Horde/Campaign with a briefing pane), pause, results (tabbed scoreboard/stats/awards with a sticky action footer) and onboarding all use the `app/ui` `Modal`/`Panel`/`Btn`/`Tabs`/`Stats` primitives.

@@ -1,5 +1,27 @@
 # COCS verification report
 
+## Release 3.2 - In-match HUD extraction and the settings dialog
+
+- **In-match HUD extracted and unified.** The default (non-race/soccer) HUD now
+  lives in `app/ui/screens/PlayingHud.tsx` instead of inline in `app/page.tsx`.
+  Every legacy class and DOM anchor is preserved so the existing stylesheet still
+  applies, and the three centre announcement layers (kill banner, kill callout,
+  objective/sudden-death/score announcer) are now **arbitrated into a single
+  slot** by priority: sudden-death > match-start > score > kill callout > kill
+  banner. `GameChat`, `TouchControls` and the scoreboard overlay stay in the page
+  and continue to share the HUD frame.
+- **Settings dialog rebuilt** (`app/ui/screens/SettingsDialog.tsx`) on the `Modal`
+  primitive with tabs: Game (the existing `prefs` node), Arsenal (weapon cards
+  with range chips) and About. The duplicated keybind table was dropped and the
+  Radix `Dialog` wrapper removed (settings is now an `app/ui` modal).
+- **Layering retained** from 3.1: combat feedback sits above panels; touch mode
+  lifts the bottom readouts above the thumb lane.
+
+Verification: game **955/955**, server **126/126**, SSR 4/4, `tsc` clean, lint 0
+errors, build clean. The HUD is a structural extraction with class/anchor
+compatibility verified by `tsc`/build only; a browser playtest is still advised
+for feel (announcement timing, touch spacing).
+
 ## Release 3.1 - Modals, theater and HUD layering on the new design system
 
 - **Modals rebuilt** on the `app/ui` primitives: match setup (two-column arena
