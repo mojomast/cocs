@@ -1,5 +1,33 @@
 # COCS verification report
 
+## Release 3.3 - Animated boot logo, living skies and objective occlusion
+
+- **Boot logo.** The title wordmark is now four oversized glyphs that slide in one
+  letter at a time (rotating up from behind), each followed by a cyan period and
+  with its word set beneath (`C. / COLOSSEUM`, `O. / OF`, `C. / COMPETITIVE`,
+  `S. / SLOP`), plus a repeating sheen sweep. Letters scale with `min(vw, vh)` and
+  the whole animation is disabled under `prefers-reduced-motion`.
+- **Sky rendering fixed.** Root cause: the gradient dome was a fixed-origin sphere
+  of radius 185 while the camera far plane is 220, so on maps wider than ~70 units
+  the dome was far-plane clipped and the player saw a moving circular edge. The sky
+  and mountain rig now follow the camera each frame (`ArenaView.updateSky`), which
+  makes the sky read as infinite while keeping sun/stars fixed in world direction.
+- **Living skies.** New deterministic `game/environment.mjs` helpers (`skyPhase`,
+  `skyPalette`, `makeStarField`, `SKY_PHASES`, `NIGHT_MAPS`, `HALO_MAPS`): dark
+  arenas get a night dome with 520 additive stars and a pale moon, dusk maps get a
+  warm horizon, day maps stay bright, and `aether`/`skybreak` get a halo ring. The
+  CPU renderer now paints a matching gradient + starfield + sun/moon disc.
+- **Objective occlusion fixed.** Objective zone floor markers (`area`/`base`/
+  `progress`/`emblem`) had `depthTest=false` and `renderOrder=100`, so they drew
+  through bot models; they are now depth-tested and drawn in the normal order. A
+  single thin, raised beacon keeps its always-visible cue so distant objectives
+  remain findable.
+
+Verification: game **962/962** (new `sky.test.mjs` + `objective-occlusion.test.mjs`),
+server **126/126**, `tests/` **5/5**, `tsc` clean, lint 0 errors, build clean. No
+browser/WebGL playtest: the sky is geometry/unit-verified and the CPU path is
+guarded for stub canvases; a visual pass on a real GPU is still advised.
+
 ## Release 3.2.2 - Fix runtime crash in all non-race modes
 
 - **Bug:** `PlayingHud` reads `voiceState` from the page's `ui` bag, but the bag

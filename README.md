@@ -588,6 +588,12 @@ Version 2.23 shows your connection quality online:
 
 - **Latency chip.** Network matches display a colour-coded `GOOD` / `FAIR` / `POOR` chip with the current interpolation delay, graded from the same jitter and packet-loss estimators the netcode already uses (`connectionQuality` in `game/hud.mjs`). It turns amber or red before the connection becomes unplayable.
 
+Version 3.3 is the boot-logo and sky pass:
+
+- **Animated boot logo.** Oversized letters slide in one at a time, each with a cyan period and its word beneath, plus a sheen sweep.
+- **Living skies.** The gradient sky dome used to be far-plane clipped on large maps (the "moving circle"); it now follows the camera, and dark arenas get a deterministic starfield (520 stars) and moon, dusk maps a warm horizon, with a halo ring on `aether` and `skybreak`. The CPU renderer paints a matching gradient/starfield/disk.
+- **Objective occlusion.** Objective zone floor markers are depth-tested again so bot models occlude them; only a thin raised beacon stays always-visible.
+
 Version 3.2 extracts the in-match HUD and finishes the settings dialog:
 
 - **HUD extracted.** The default HUD is now `app/ui/screens/PlayingHud.tsx`, with all legacy classes/anchors preserved and the centre announcements arbitrated into one slot (sudden-death > start > score > kill callout > kill banner).

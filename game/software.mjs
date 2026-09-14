@@ -2,14 +2,15 @@
 // Three.js scene and camera; gameplay is renderer-independent. Painter sorting is
 // approximate at intersecting surfaces; WebGL remains the primary renderer.
 import * as T from 'three';
+import {skyPalette,makeStarField} from './environment.mjs';
 export class SoftwareRenderer{
  constructor(canvas){this.domElement=canvas;this.ctx=canvas.getContext('2d',{alpha:false});if(!this.ctx)throw new Error('No canvas rendering context is available');this.info={render:{calls:0,triangles:0}};this.cache=new WeakMap();this.isSoftware=true;this.ratio=.85;}
  setPixelRatio(ratio){this.ratio=ratio;}
  setSize(w,h){this.domElement.width=Math.max(1,Math.round(w*this.ratio));this.domElement.height=Math.max(1,Math.round(h*this.ratio));}
  dispose(){}
  render(scene,camera){
-  const ctx=this.ctx,w=this.domElement.width,h=this.domElement.height;ctx.fillStyle=scene.background?.getStyle()||'#080f13';ctx.fillRect(0,0,w,h);
-  scene.updateMatrixWorld();camera.updateMatrixWorld();camera.matrixWorldInverse.copy(camera.matrixWorld).invert();
+  const ctx=this.ctx,w=this.domElement.width,h=this.domElement.height;scene.updateMatrixWorld();camera.updateMatrixWorld();this._paintSky(ctx,w,h,scene,camera);
+  camera.matrixWorldInverse.copy(camera.matrixWorld).invert();
   const f=h*.5/Math.tan(camera.fov*Math.PI/360),cx=w/2,cy=h/2,draw=[],viewMatrix=new T.Matrix4(),instanceMatrix=new T.Matrix4(),combined=new T.Matrix4();
   let triangles=0;
   const project=p=>[cx+p[0]*f/-p[2],cy-p[1]*f/-p[2]];
@@ -36,5 +37,24 @@ export class SoftwareRenderer{
   });
   draw.sort((a,b)=>b.depth-a.depth);ctx.lineWidth=.65;for(const d of draw){if(d.label){ctx.fillStyle=d.color;ctx.font=`bold ${d.size}px monospace`;ctx.textAlign='center';ctx.fillText(d.label,d.points[0][0],d.points[0][1]);continue;}ctx.beginPath();ctx.moveTo(d.points[0][0],d.points[0][1]);for(let i=1;i<d.points.length;i++)ctx.lineTo(d.points[i][0],d.points[i][1]);if(d.closed)ctx.closePath();if(d.line){ctx.strokeStyle=d.color;ctx.stroke();}else{ctx.fillStyle=d.color;ctx.fill();}}
   this.info.render.calls=draw.length;this.info.render.triangles=triangles;
+ }
+ _paintSky(ctx,w,h,scene,camera){
+  const sky=scene.userData?.sky;if(!sky||typeof ctx.createLinearGradient!=='function'){ctx.fillStyle=scene.background?.getStyle()||'#080f13';ctx.fillRect(0,0,w,h);return;}
+  const palette=skyPalette(sky.background,sky.phase),gradient=ctx.createLinearGradient(0,0,0,h);
+  gradient.addColorStop(0,palette.zenith);gradient.addColorStop(.55,palette.horizon);gradient.addColorStop(1,palette.ground);
+  ctx.fillStyle=gradient;ctx.fillRect(0,0,w,h);
+  const f=h*.5/Math.tan(camera.fov*Math.PI/360),cx=w/2,cy=h/2,q=camera.getWorldQuaternion(new T.Quaternion()).invert(),v=new T.Vector3(),project=p=>[cx+p.x*f/-p.z,cy-p.y*f/-p.z];
+  if(sky.phase==='night'){
+   const field=makeStarField(sky.seed||1,{count:160});
+   for(let i=0;i<field.count;i++){
+    v.set(field.positions[i*3],field.positions[i*3+1],field.positions[i*3+2]).applyQuaternion(q);
+    if(v.z>=-.15)continue;
+    const point=project(v);if(point[0]<0||point[0]>w||point[1]<0||point[1]>h)continue;
+    ctx.fillStyle=field.colors[i*3+2]>field.colors[i*3]?'rgba(188,212,255,.9)':'rgba(255,255,255,.9)';
+    ctx.fillRect(point[0],point[1],field.sizes[i]>1.7?2:1,field.sizes[i]>1.7?2:1);
+   }
+  }
+  const direction=sky.sunDir||[18,24,10],sun=new T.Vector3(direction[0],direction[1],direction[2]).normalize().applyQuaternion(q);
+  if(sun.z<-.15&&typeof ctx.createRadialGradient==='function'&&typeof ctx.arc==='function'){const point=project(sun),radius=Math.max(10,Math.min(w,h)*.045),glow=ctx.createRadialGradient(point[0],point[1],0,point[0],point[1],radius);glow.addColorStop(0,palette.disk);glow.addColorStop(.42,palette.diskGlow);glow.addColorStop(1,'rgba(0,0,0,0)');ctx.fillStyle=glow;ctx.beginPath();ctx.arc(point[0],point[1],radius,0,Math.PI*2);ctx.fill();}
  }
 }
