@@ -63,16 +63,16 @@ export function Banner({tone='default',children}:{tone?:'default'|'error'|'warn'
  return <div className={`banner${tone!=='default'?' banner--'+tone:''}`} role={tone==='error'?'alert':'status'}>{children}</div>;
 }
 
-export function Modal({open,onClose,size='md',title,eyebrow,description,children,footer,closeLabel='Close'}:{open:boolean;onClose:()=>void;size?:'sm'|'md'|'lg'|'xl';title:ReactNode;eyebrow?:ReactNode;description?:ReactNode;children:ReactNode;footer?:ReactNode;closeLabel?:string}){
- if(!open)return null;
+export function Modal({open,onClose,size='md',title,eyebrow,description,children,footer,closeLabel='Close',panelRef,keepMounted=false,bodyClass=''}:{open:boolean;onClose:()=>void;size?:'sm'|'md'|'lg'|'xl';title:ReactNode;eyebrow?:ReactNode;description?:ReactNode;children:ReactNode;footer?:ReactNode;closeLabel?:string;panelRef?:React.Ref<HTMLElement>;keepMounted?:boolean;bodyClass?:string}){
+ if(!open&&!keepMounted)return null;
  const titleId=`modal-${String(title).replace(/\W+/g,'-').toLowerCase()}`;
- return <div className="modal" onMouseDown={e=>{if(e.target===e.currentTarget)onClose();}}>
-  <section className={`modal-panel modal-panel--${size}`} role="dialog" aria-modal="true" aria-labelledby={titleId}>
+ return <div className={`modal${open?'':' modal--hidden'}`} aria-hidden={!open} onMouseDown={e=>{if(open&&e.target===e.currentTarget)onClose();}}>
+  <section ref={panelRef} className={`modal-panel modal-panel--${size}`} role="dialog" aria-modal={open} aria-labelledby={titleId}>
    <header className="modal-head">
     <div>{eyebrow&&<p className="eyebrow"><i/>{eyebrow}</p>}<h2 className="modal-title" id={titleId}>{title}</h2>{description&&<p className="modal-desc">{description}</p>}</div>
     <button type="button" className="btn btn-ghost btn-icon modal-close" aria-label={closeLabel} onClick={onClose}><X size={18}/></button>
    </header>
-   <div className="modal-body">{children}</div>
+   <div className={`modal-body${bodyClass?' '+bodyClass:''}`}>{children}</div>
    {footer&&<footer className="modal-foot">{footer}</footer>}
   </section>
  </div>;

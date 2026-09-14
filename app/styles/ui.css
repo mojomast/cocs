@@ -178,6 +178,7 @@
   border:1px dashed var(--ui-line);border-radius:var(--radius-lg);color:var(--text-mute);font-size:13px}
 
 /* ---------- Modal ---------- */
+.modal--hidden{display:none}
 .modal{position:fixed;inset:0;z-index:var(--z-modal);display:grid;place-items:center;
   padding:var(--safe-top) var(--safe-right) var(--safe-bottom) var(--safe-left);
   background:#050e13c2;backdrop-filter:blur(8px);-webkit-backdrop-filter:blur(8px)}
