@@ -1,11 +1,23 @@
 'use client';
-import {ArrowUpRight,Check,ChevronRight,Crosshair,Hexagon,LockKeyhole,Play,Shield,Sparkles,Film,Users,Zap} from 'lucide-react';
+import {ArrowUpRight,Check,ChevronRight,Crosshair,Flag,Hexagon,LockKeyhole,Play,Rocket,Shield,Skull,Sparkles,Swords,Target,Film,Users,Zap} from 'lucide-react';
 import type {ScreenProps} from '../contract';
 import {ActionRail,Banner,Btn,PageHead,Panel,SelectCard,Shell,Stats,TopBar} from '../primitives';
 
 export function SelectionScreen({ui}:ScreenProps){
- const {entered,showcaseLive,selectableMaps=[],mapId,setMapId,MapPlan,character,chooseCharacter,CHARACTERS=[],selected,harness,setHarness,HARNESSES=[],power,powerIcon,config,start,startSpectate,setSetupOpen,setSingleOpen,changeMode,connectNet,openBrowser,netConnected,profile,demos=[],previewRef,headActions,notice}=ui;
+ const {entered,showcaseLive,character,chooseCharacter,CHARACTERS=[],selected,harness,setHarness,HARNESSES=[],power,powerIcon,config,start,startSpectate,quickStart,setSetupOpen,setSingleOpen,changeMode,connectNet,openBrowser,netConnected,profile,demos=[],previewRef,headActions,notice}=ui;
  const note=character==='claude'?'Enhanced health, armor and speed offset the Claude Code harness lock.':'Each operator trades durability for mobility. Pick the stats that fit your style.';
+ const activities=[
+  {id:'deathmatch',name:'Quick Match',tag:'Free-for-all · first to the frag limit',icon:<Zap size={20}/>},
+  {id:'teamdeathmatch',name:'Team Deathmatch',tag:'Shared score · friendly fire off',icon:<Users size={20}/>},
+  {id:'ctf',name:'Capture the Flag',tag:'Steal the enemy flag and run it home',icon:<Flag size={20}/>},
+  {id:'koth',name:'King of the Hill',tag:'Hold the hill and freeze their clock',icon:<Target size={20}/>},
+  {id:'rockets',name:'Rocket Arena',tag:'Unlimited rockets for everyone',icon:<Rocket size={20}/>},
+  {id:'instagib',name:'Instagib',tag:'Rail only · one unprotected hit kills',icon:<Crosshair size={20}/>},
+  {id:'armsrace',name:'Arms Race',tag:'Every kill promotes you up the rack',icon:<Swords size={20}/>},
+  {id:'horde',name:'Horde',tag:'Solo survival against escalating waves',icon:<Skull size={20}/>},
+  {id:'campaign',name:'Campaign',tag:'Scripted solo missions with objectives',icon:<Play size={20}/>},
+  {id:'spectate',name:'Spectate',tag:'Watch a cinematic AI match',icon:<Film size={20}/>},
+ ];
  const rail=<ActionRail summary={<>
   <span className="chip chip--accent"><i/>{selected?.name}</span>
   <span className="chip">{power?.name}</span>
@@ -46,8 +58,9 @@ export function SelectionScreen({ui}:ScreenProps){
       <span className="preview-corner">LIVE MODEL / {String((CHARACTERS.indexOf(selected)>=0?CHARACTERS.indexOf(selected):0)+1).padStart(2,'0')}</span>
       <div className="preview-caption"><p className="eyebrow" style={{color:selected?.color}}>{selected?.tag}</p><h2 className="h-page">{selected?.name}</h2><p className="lede" style={{fontSize:14}}>{selected?.detail}</p></div>
      </div>
-     <Panel label="03 / ARENA" meta={ui.selectedMap?.tag}>
-      <div className="grid-cards">{selectableMaps.map((map:any)=><SelectCard key={map.id} selected={mapId===map.id} onClick={()=>setMapId(map.id)} ariaLabel={map.name} icon={MapPlan?<MapPlan map={map} viewBox={ui.mapViewBox?.(map)}/>:undefined} name={map.name} tag={map.description}/>)}</div>
+     <Panel label="03 / QUICK START" meta="LAUNCHES INSTANTLY">
+      <div className="grid-cards">{activities.map((a)=><SelectCard key={a.id} onClick={()=>quickStart?.(a.id)} ariaLabel={`${a.name}: ${a.tag}`} icon={a.icon} name={a.name} tag={a.tag} meta={<Play size={15}/>}/>)}</div>
+      <p className="field-note">Starts now with <b>{selected?.name}</b>, the <b>{power?.name}</b> harness and your current rules on a {ui.selectedMode?.name} arena. Fine-tune everything under MATCH SETUP, or pick a specific arena there.</p>
      </Panel>
     </div>
    </div>

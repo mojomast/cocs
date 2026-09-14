@@ -1,5 +1,23 @@
 # COCS verification report
 
+## Release 3.9 - Safer display defaults and quick start activities
+
+- **Glow off by default.** `DEFAULT_DISPLAY` now has `postFx:false` and
+  `bloom:0`, and `normalizeDisplay` defaults match (`postFx` is only true when
+  explicitly set). Glow/post-processing stays available in Graphics & settings.
+- **Resolution scaling defaults to 50%.** `resolutionScale:.5` (range remains
+  0.5-1.5), so the game renders lighter by default; players can raise it.
+- **Quick start replaces the arena grid on the main menu.** The selection
+  screen's `03 / ARENA` map picker was redundant with MATCH SETUP, so it is now
+  `03 / QUICK START`: ten activity cards (Quick Match, Team Deathmatch, Capture
+  the Flag, King of the Hill, Rocket Arena, Instagib, Arms Race, Horde,
+  Campaign, Spectate) that launch immediately with the current operator, harness
+  and rules, resolving an arena the mode supports. Arena selection remains in
+  MATCH SETUP and SINGLE PLAYER.
+
+Verification: game **964/964**, server **126/126**, `tests/` **5/5**, `tsc` clean,
+lint 0 errors, build clean.
+
 ## Release 3.8 - Weapon model de-clipping
 
 - Parts of the new weapon models interpenetrated (barrel shrouds swallowing

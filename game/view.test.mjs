@@ -54,13 +54,13 @@ test('live scale, size and DPR changes resize, but unrelated display changes do 
  view.render('playing',null,0,0);
  assert.equal(renderer.ratio,1.5*.7);assert.equal(renderer.sizes.length,calls+2);
  view.render('playing',null,0,0);assert.equal(renderer.sizes.length,calls+2);
- view.setDisplay(null);assert.deepEqual(view.display,DEFAULT_DISPLAY);assert.equal(view.camera.fov,82);assert.equal(view.showWeapon,true);assert.equal(renderer.ratio,1.5);
+ view.setDisplay(null);assert.deepEqual(view.display,DEFAULT_DISPLAY);assert.equal(view.camera.fov,82);assert.equal(view.showWeapon,true);assert.equal(renderer.ratio,1.5*DEFAULT_DISPLAY.resolutionScale);
  view.setDisplay({resolutionScale:Infinity,fov:NaN});assert.deepEqual(view.display,DEFAULT_DISPLAY);
 });
 
 test('tiny and hidden canvases retain positive backing dimensions and finite aspects',t=>{
  const {view,renderer}=fixture(t,{width:0,height:0});
- view.setDisplay({resolutionScale:.5});
+ view.resize();
  assert.equal(renderer.domElement.width,1);assert.equal(renderer.domElement.height,1);
  assert.equal(view.camera.aspect,1);assert.equal(view.menu.camera.aspect,1);
  for(const dpr of [undefined,NaN,Infinity,0,-1]){window.devicePixelRatio=dpr;view.resize();assert.equal(renderer.ratio,.5);}

@@ -588,6 +588,11 @@ Version 2.23 shows your connection quality online:
 
 - **Latency chip.** Network matches display a colour-coded `GOOD` / `FAIR` / `POOR` chip with the current interpolation delay, graded from the same jitter and packet-loss estimators the netcode already uses (`connectionQuality` in `game/hud.mjs`). It turns amber or red before the connection becomes unplayable.
 
+Version 3.9 changes the out-of-the-box defaults and the main menu:
+
+- **Glow is off by default** and **resolution scaling defaults to 50%** for lighter rendering; both remain adjustable in Graphics & settings.
+- **Quick start activities** replace the redundant arena map grid on the selection screen: ten one-click activities (Quick Match, Team Deathmatch, Capture the Flag, King of the Hill, Rocket Arena, Instagib, Arms Race, Horde, Campaign, Spectate) launch instantly with your current operator, harness and rules. Arena selection now lives in MATCH SETUP and SINGLE PLAYER.
+
 Version 3.8 de-clips the remodeled weapons:
 
 - Parts that interpenetrated (shrouds swallowing receivers, coils sunk into barrels, magazines buried in magwells) now meet flush so the models read as solid objects. An interpenetration audit went from ~430 visible overlaps to zero, leaving only intentional hidden internals (bore liners, cores, drum shells). Silhouettes, detail and pinned part names are unchanged.

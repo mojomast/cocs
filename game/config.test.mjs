@@ -9,7 +9,7 @@ function fixture(options={}){const m=new Match('chatgpt','hermes',()=>.75,'cross
 test('configuration sanitizes saved data and isolates each match',()=>{const c=normalizeConfig({botCount:99,difficulty:'bogus',timeLimit:NaN,fragLimit:-1,gravity:0,damage:Infinity,mode:'x',playerName:'  Kyle\u0000 D  ',lifeSteal:'yes'});assert.equal(c.botCount,8);assert.equal(c.fragLimit,5);assert.equal(c.timeLimit,300);assert.equal(c.mode,'deathmatch');assert.equal(c.gravity,1);assert.equal(c.damage,1);assert.equal(c.playerName,'Kyle D');assert.equal(c.lifeSteal,false);assert.deepEqual(normalizeConfig(null),DEFAULT_CONFIG);const options={botCount:0,fragLimit:5};const [m]=fixture(options);options.fragLimit=50;assert.equal(m.config.fragLimit,5);assert.equal(new Match().config.fragLimit,15);assert.deepEqual(normalizeDisplay({fov:999,color:'bad',size:NaN,crosshair:'x'}),{...DEFAULT_DISPLAY,fov:110});});
 test('resolution scale defaults, clamps finite numbers and survives saved JSON',()=>{
  assert.deepEqual(normalizeDisplay(null),DEFAULT_DISPLAY);
- for(const resolutionScale of [undefined,null,'0.7',true,NaN,Infinity,-Infinity,{},[]])assert.equal(normalizeDisplay({resolutionScale}).resolutionScale,1);
+ for(const resolutionScale of [undefined,null,'0.7',true,NaN,Infinity,-Infinity,{},[]])assert.equal(normalizeDisplay({resolutionScale}).resolutionScale,.5);
  for(const [input,expected] of [[-1,.5],[0,.5],[.5,.5],[.73,.73],[1,1],[1.5,1.5],[2,1.5]]){
   const display=normalizeDisplay({resolutionScale:input,fov:95,showWeapon:false});
   assert.equal(display.resolutionScale,expected);
@@ -18,6 +18,16 @@ test('resolution scale defaults, clamps finite numbers and survives saved JSON',
  }
  const legacy=JSON.parse('{"display":{"fov":90,"crosshair":"dot","showWeapon":false}}');
  assert.deepEqual(normalizeDisplay(legacy.display),{...DEFAULT_DISPLAY,fov:90,crosshair:'dot',showWeapon:false});
+});
+test('glow defaults off and resolution scaling defaults to 50 percent',()=>{
+ const d=normalizeDisplay({});
+ assert.equal(d.postFx,false);
+ assert.equal(d.bloom,0);
+ assert.equal(d.resolutionScale,.5);
+ const on=normalizeDisplay({postFx:true,bloom:.5,resolutionScale:1});
+ assert.equal(on.postFx,true);
+ assert.equal(on.bloom,.5);
+ assert.equal(on.resolutionScale,1);
 });
 test('0 through 8 bots create exact rosters; solo ends on configured time',()=>{for(let count=0;count<=8;count++){const [m]=fixture({botCount:count});assert.equal(m.actors.length,count+1);assert.equal(new Set(m.actors.map(a=>a.character)).size,count+1);assert.ok(m.actors.every(a=>a.character!=='claude'||a.harness==='claudecode'));}const [m]=fixture({botCount:0,timeLimit:60,playerName:'Kyle'});for(let i=0;i<3601;i++)m.step(1/60);assert.equal(m.over,true);assert.equal(m.stats.kills,0);assert.equal(m.snapshot().actors[0].name,'Kyle');});
 test('Instagib locks rail, ignores supplies, disables powers and kills in one unprotected hit',()=>{const [m,a,b]=fixture({mode:'instagib'});assert.equal(m.pickups.length,0);assert.equal(m.power(a),false);assert.deepEqual(a.ammo,[0,0,Infinity,0,0,0,0,0,0,0]);b.protection=1;m.fire(a);assert.equal(b.health,100);a.shotWait=0;b.protection=0;b.armor=100;a.weapon=0;m.fire(a);assert.equal(a.weapon,2);assert.equal(b.health,0);assert.equal(a.frags,1);m.spawn(b);assert.equal(b.weapon,2);assert.equal(b.ammo[2],Infinity);});
