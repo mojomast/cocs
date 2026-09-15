@@ -1,8 +1,11 @@
 # COCS — Steam release plan (orchestration-ready)
 
-Status: proposed. This document is the execution contract for an orchestration
-agent that will dispatch parallel subagents to ship the existing Three.js /
-Next.js game (`COCS`) as a Steam title on **Windows + Linux/Steam Deck**.
+Status: executing. Wave 0 complete (toolchain pinned) and Wave 1 complete on
+branch `steam` (client/server transport seams, `dist-desktop/` build, Steamworks
+wrapper, Electron shell). This document is the execution contract for an
+orchestration agent that will dispatch parallel subagents to ship the existing
+Three.js / Next.js game (`COCS`) as a Steam title on **Windows + Linux/Steam
+Deck**.
 
 It is deliberately self-contained: decisions, frozen interfaces, parallel
 workstreams, file ownership, acceptance tests and a subagent prompt template.

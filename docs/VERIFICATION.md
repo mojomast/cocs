@@ -1,5 +1,39 @@
 # COCS verification report
 
+## Steam desktop (Wave 1) - transport seams, static bundle, Electron shell
+
+Branch `steam`. Wave 1 of `docs/STEAM_RELEASE_PLAN.md`; the web/LAN build is
+untouched and all pre-existing tests still pass.
+
+- **T1.1 Client transport seam:** `game/transport.mjs` exports `OPEN` and
+  `WebSocketTransport`; `NetClient` takes `options.transport` and no longer
+  references the global `WebSocket`. `game/transport.test.mjs` (10 tests) plus a
+  `game/net.test.mjs` injected-transport test.
+- **T1.2 Server seam:** `createGameServer({ createTransport })` with a default
+  `ws`-backed factory; exported `attachConnection(engine, ws)`; `Room` is
+  isomorphic (`globalThis.crypto.randomUUID`, `TextEncoder`, no `node:crypto`).
+  `server/transport.test.mjs` covers injected transport, `attachConnection`
+  parity and a runtime guard that `Room` runs without Node-only globals.
+- **T1.3 Desktop bundle:** `scripts/build-desktop.sh` emits `dist-desktop/`
+  (`index.html` + 13 content-hashed assets) that loads offline; all 16 local
+  document references resolve inside `dist-desktop/`. `npm run build` (web) and
+  `dist/server/index.js` are unchanged.
+- **T1.4 Steamworks wrapper:** `desktop/steam.mjs` (mockable, no Electron
+  imports) for init/lobbies/cloud/stats/achievements/rich presence/Deck, with
+  clean no-op degradation when Steam is absent; `desktop/steam.test.mjs`
+  (11 tests) with a mocked binding.
+- **T1.5 Electron shell:** `desktop/main.mjs`, `preload.mjs`, `protocol.mjs`,
+  `security.mjs` and `electron-builder.yml`; hardened `BrowserWindow`
+  (`contextIsolation`, `sandbox`, no `nodeIntegration`), `app://` protocol,
+  navigation/window-open locks, sender-validated IPC, fuses.
+
+Verification: game **1339/1339**, server **144/144**, `tests/` **7/7**, `tsc`
+clean, lint 0 errors, `npm run build:desktop` and `npm run build` both clean.
+An Electron smoke launch under `xvfb` loaded `app://bundle/index.html` with the
+real hashed stylesheet (200), SPA fallback and traversal rejection. **Not**
+verified here: a rendered/playable bot match (headless, no GPU), the Steam
+overlay, cloud sync, invites and frame pacing - all manual.
+
 ## Release 4.12 - Build sync, campaign checkpoints and feedback
 
 - **Build sync:** `app/api/version/route.ts` returns `RELEASE_VERSION` with

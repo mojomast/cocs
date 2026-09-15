@@ -437,6 +437,23 @@ test('interpolateSnapshots blends linearly, wraps angles and leaves the predicte
  assert.equal(interpolateSnapshots(prev, null, .5), prev, 'a missing next frame returns prev');
 });
 
+test('an injected transport replaces the global WebSocket for connect and send',async t=>{
+ const sockets=[];
+ const transport={open(url){const socket={url,readyState:0,sent:[],closed:false,onopen:null,onerror:null,onclose:null,onmessage:null,send(text){this.sent.push(text);},close(){this.closed=true;}};sockets.push(socket);return socket;}};
+ t.mock.method(globalThis,'WebSocket',function(){throw new Error('global WebSocket must not be used');});
+ const client=new NetClient('ws://injected:1',{transport});
+ assert.equal(client.transport,transport);
+ const pending=client.connect();
+ sockets[0].readyState=1;
+ sockets[0].onopen();
+ await pending;
+ assert.equal(sockets[0].url,'ws://injected:1');
+ assert.equal(client.send({type:'list'}),true);
+ assert.deepEqual(JSON.parse(sockets[0].sent[0]),{type:'list'});
+ client.close();
+ assert.equal(sockets[0].closed,true);
+});
+
 test('NetHarness reconciles prediction under latency with zero divergence and delta savings', () => {
  const harness = new NetHarness({mapId: 'crosswire', config: {humanCount: 1, botCount: 0, timeLimit: 60}, seed: 7, latency: 3, delta: true, keyframeEvery: 5});
  for (let i = 0; i < 60; i++) harness.step({forward: 1, right: i % 3 === 0 ? 1 : 0, jump: i === 20});

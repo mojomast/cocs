@@ -24,7 +24,12 @@ export const CONTROL_RATE_LIMIT = 60;
 export const CONTROL_RATE_WINDOW = 1000;
 export const MAX_CLIENTS = 256;
 
-export function createGameServer({ port = 0, random, tickDt = 1 / 60, tickMs = 1000 / 60, graceMs, snapshotHz, historyPath = null, progressionPath = null, maxClients = MAX_CLIENTS } = {}) {
+function wsTransport(httpServer) {
+ const wss = new WebSocketServer({ server: httpServer, maxPayload: 64 * 1024 });
+ return { wss, on: (event, cb) => wss.on(event, cb), clients: wss.clients, close: cb => wss.close(cb) };
+}
+
+export function createGameServer({ port = 0, random, tickDt = 1 / 60, tickMs = 1000 / 60, graceMs, snapshotHz, historyPath = null, progressionPath = null, maxClients = MAX_CLIENTS, createTransport = wsTransport } = {}) {
  const history = new MatchHistory(historyPath);
  const progression = new ProgressionStore(progressionPath);
   const registry = new RoomRegistry({ random, graceMs, history, progression, snapshotHz, onError: (error, room) => console.error(`room ${room?.id ?? '?'} tick failed`, error) });
@@ -39,8 +44,8 @@ export function createGameServer({ port = 0, random, tickDt = 1 / 60, tickMs = 1
   const players = [...registry.rooms.values()].reduce((n, r) => n + r.peers.size, 0);
   res.end(JSON.stringify({ service: 'token-arena-game-server', rooms: registry.rooms.size, players, port: server.address()?.port ?? port }));
  });
- const wss = new WebSocketServer({ server, maxPayload: 64 * 1024 });
- let nextPeer = 1;
+ const transport = createTransport(server);
+ const wss = transport.wss ?? transport;
  // Snapshots and voice traffic are replaceable; protocol transitions
  // (welcome/start/results/lobby/errors) are not. Essential messages that hit a
  // congested socket are coalesced by type and pumped once the buffer drains,
@@ -209,7 +214,7 @@ export function createGameServer({ port = 0, random, tickDt = 1 / 60, tickMs = 1
       sockets.get(msg.from)?.readyState !== 1)) continue;
       const text = JSON.stringify(msg);
      if (to === null) {
-      for (const ws of wss.clients) if (ws.readyState === ws.OPEN && peerRoom.get(socketPeer.get(ws)) === room) deliver(ws, msg, text);
+      for (const ws of transport.clients) if (ws.readyState === ws.OPEN && peerRoom.get(socketPeer.get(ws)) === room) deliver(ws, msg, text);
      } else {
        const ws = sockets.get(to);
        if (msg.type === MESSAGE.VOICE_CONFIG && peerRoom.get(to) !== room) continue;
@@ -218,33 +223,10 @@ export function createGameServer({ port = 0, random, tickDt = 1 / 60, tickMs = 1
      }
     }
   }
-  for (const ws of wss.clients) if (ws.pendingEssential?.length) pumpEssential(ws);
+  for (const ws of transport.clients) if (ws.pendingEssential?.length) pumpEssential(ws);
  }
- wss.on('connection', ws => {
-  if (wss.clients.size > maxClients) { try { ws.close(1013, 'server full'); } catch {} return; }
-  const peerId = nextPeer++;
-  ws.isAlive = true;
-  sockets.set(peerId, ws);
-  socketPeer.set(ws, peerId);
-  ws.on('pong', () => { ws.isAlive = true; });
-  ws.protocolErrors = 0;
-  ws.on('message', data => {
-   let msg;
-   try { msg = JSON.parse(data.toString()); }
-   catch { if (++ws.protocolErrors > 20) { ws.terminate(); return; } sendTo(peerId, { type: 'error', message: 'invalid JSON' }); return; }
-   try { dispatch(peerId, msg, ws); }
-   catch (e) { if (++ws.protocolErrors > 20) { ws.terminate(); return; } sendTo(peerId, { type: 'error', message: String(e?.message ?? e) }); }
-   flush();
-  });
-  ws.on('close', () => {
-   sockets.delete(peerId);
-   matchmaker.remove(peerId);
-   const room = peerRoom.get(peerId);
-   if (room) { room.disconnect(peerId); peerRoom.delete(peerId); }
-   flush();
-  });
-  ws.on('error', () => {});
- });
+ const engine = { server, wss, transport, registry, history, progression, matchmaker, sockets, socketPeer, peerRoom, maxClients, nextPeer: 1, dispatch, flush, sendTo, releaseSeat, deliver, queueEssential, pumpEssential, rewindEvents, controlAllowed, close };
+ transport.on('connection', ws => attachConnection(engine, ws));
   const timer = setInterval(() => {
    try { registry.tickAll(tickDt); registry.expireAll(); } catch (error) { console.error('server tick failed', error); }
    try { while (matchmaker.size() >= matchmaker.teamSize * 2) { if (!draftQueue()) break; } } catch (error) { console.error('matchmaking draft failed', error); }
@@ -257,16 +239,46 @@ export function createGameServer({ port = 0, random, tickDt = 1 / 60, tickMs = 1
   Promise.resolve(progression.flush?.()).catch(error => console.error('progression flush failed', error));
   try { flush(); } catch (error) { console.error('outbound flush failed', error); }
  }, tickMs);
- const heartbeat = setInterval(() => { for (const ws of wss.clients) { if (ws.isAlive === false) { ws.terminate(); continue; } ws.isAlive = false; try { ws.ping(); } catch {} } }, HEARTBEAT_MS);
+ const heartbeat = setInterval(() => { for (const ws of transport.clients) { if (ws.isAlive === false) { ws.terminate(); continue; } ws.isAlive = false; try { ws.ping(); } catch {} } }, HEARTBEAT_MS);
  async function close() {
   clearInterval(timer);
   clearInterval(heartbeat);
-  for (const ws of wss.clients) ws.close();
-  wss.close();
+  for (const ws of transport.clients) ws.close();
+  transport.close();
   server.close();
   await Promise.allSettled([Promise.resolve(history.flush?.()), Promise.resolve(progression.flush?.())]);
  }
- return { server, wss, close, registry, history, progression };
+ return engine;
+}
+
+function iterableCount(iterable) {
+ return typeof iterable?.size === 'number' ? iterable.size : [...iterable].length;
+}
+
+export function attachConnection(engine, ws) {
+ if (iterableCount(engine.transport.clients) > engine.maxClients) { try { ws.close(1013, 'server full'); } catch {} return; }
+ const peerId = engine.nextPeer++;
+ ws.isAlive = true;
+ engine.sockets.set(peerId, ws);
+ engine.socketPeer.set(ws, peerId);
+ ws.on('pong', () => { ws.isAlive = true; });
+ ws.protocolErrors = 0;
+ ws.on('message', data => {
+  let msg;
+  try { msg = JSON.parse(data.toString()); }
+  catch { if (++ws.protocolErrors > 20) { ws.terminate(); return; } engine.sendTo(peerId, { type: 'error', message: 'invalid JSON' }); return; }
+  try { engine.dispatch(peerId, msg, ws); }
+  catch (e) { if (++ws.protocolErrors > 20) { ws.terminate(); return; } engine.sendTo(peerId, { type: 'error', message: String(e?.message ?? e) }); }
+  engine.flush();
+ });
+ ws.on('close', () => {
+  engine.sockets.delete(peerId);
+  engine.matchmaker.remove(peerId);
+  const room = engine.peerRoom.get(peerId);
+  if (room) { room.disconnect(peerId); engine.peerRoom.delete(peerId); }
+  engine.flush();
+ });
+ ws.on('error', () => {});
 }
 
 const isEntry = process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href;

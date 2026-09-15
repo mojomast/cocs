@@ -3,6 +3,7 @@ import {Match} from './core.mjs';
 import {RULES} from './data.mjs';
 import {clamp, lerp} from './math.mjs';
 import {MESSAGE, PROTOCOL_VERSION, validPlayerId, validProgressToken, snapshotDelta, applySnapshotDelta, wireSize, BandwidthMeter} from './protocol.mjs';
+import {OPEN, WebSocketTransport} from './transport.mjs';
 
 export const DEFAULT_SERVER_URL = 'ws://localhost:4000';
 const createPlayerId=()=>{try{return globalThis.crypto?.randomUUID?.()??`p-${Math.random().toString(36).slice(2)}-${Date.now().toString(36)}`;}catch{return `p-${Math.random().toString(36).slice(2)}-${Date.now().toString(36)}`;}};
@@ -68,6 +69,7 @@ export function interpolateSnapshots(prev, next, alpha, {localId = null, predict
 export class NetClient {
  constructor(url = DEFAULT_SERVER_URL, options = {}) {
   this.url = url;
+  this.transport = options.transport ?? new WebSocketTransport();
   this.storage = options.storage ?? (typeof localStorage !== 'undefined' ? localStorage : null);
   this.storageKey = `token-arena-net:${url}`;
   this.roomKey = `token-arena-room:${url}`;
@@ -154,7 +156,7 @@ export class NetClient {
   this.closedByUser = false;
   return new Promise((resolve, reject) => {
    let ws;
-   try { ws = new WebSocket(this.url); } catch (e) { reject(e); return; }
+   try { ws = this.transport.open(this.url); } catch (e) { reject(e); return; }
    const current = () => this.ws === ws;
    this.ws = ws;
    this._pendingReject = reject;
@@ -166,7 +168,7 @@ export class NetClient {
  }
  close() { this.closedByUser = true; this._disposeSocket(); this.connected = false; }
  send(msg) {
-  if (!this.ws || this.ws.readyState !== WebSocket.OPEN) return false;
+  if (!this.ws || this.ws.readyState !== OPEN) return false;
   const text = JSON.stringify(msg);
   if (msg.type === MESSAGE.VOICE_SIGNAL &&
    new TextEncoder().encode(text).length + (this.ws.bufferedAmount ?? 0) > 64 * 1024) return false;

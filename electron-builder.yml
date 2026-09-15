@@ -1,0 +1,68 @@
+appId: de.ussyco.cocs
+productName: COCS
+copyright: Copyright (c) 2026 COCS
+
+directories:
+  output: release
+  buildResources: build
+
+asar: true
+asarUnpack:
+  - node_modules/steamworks.js/dist/**
+
+files:
+  - desktop/**/*.mjs
+  - "!desktop/**/*.test.mjs"
+  - dist-desktop/**/*
+  - package.json
+  - node_modules/steamworks.js/**/*
+  - "!node_modules/steamworks.js/dist/osx/**/*"
+
+extraMetadata:
+  main: desktop/main.mjs
+
+electronFuses:
+  runAsNode: false
+  enableCookieEncryption: true
+  enableNodeOptionsEnvironmentVariable: false
+  enableNodeCliInspectArguments: false
+  enableEmbeddedAsarIntegrityValidation: true
+  onlyLoadAppFromAsar: true
+  loadBrowserProcessSpecificV8Snapshot: false
+  grantFileProtocolExtraPrivileges: false
+
+extraResources:
+  - from: desktop/resources
+    to: resources
+    filter:
+      - "**/*"
+
+win:
+  target:
+    - target: nsis
+      arch:
+        - x64
+  executableName: COCS
+
+nsis:
+  oneClick: false
+  perMachine: false
+  allowToChangeInstallationDirectory: true
+  createDesktopShortcut: true
+  createStartMenuShortcut: true
+  shortcutName: COCS
+
+linux:
+  target:
+    - target: AppImage
+      arch:
+        - x64
+    - target: deb
+      arch:
+        - x64
+  category: Game
+  executableName: cocs
+  desktop:
+    Name: COCS
+    Comment: Token Arena
+    Categories: Game;

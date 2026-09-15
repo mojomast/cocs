@@ -5,8 +5,11 @@ import {actorWon} from '../game/outcome.mjs';
 import {getMap} from '../game/maps.mjs';
 import {resolveMapForMode} from '../game/arenas.mjs';
 import {CHARACTERS,resolveLoadout,RULES} from '../game/data.mjs';
-import {randomUUID} from 'node:crypto';
 import {validPlayerId,sanitizeText,parseInputEnvelope,PROTOCOL_VERSION} from '../game/protocol.mjs';
+
+const randomUUID = () => globalThis.crypto.randomUUID();
+const textEncoder = new TextEncoder();
+const byteLength = text => textEncoder.encode(text).length;
 
 export const PLAYER_LIMIT = 8;
 export const SPECTATOR_LIMIT = 24;
@@ -380,7 +383,7 @@ export class Room {
     ...(c.usernameFragment === undefined ? {} : { usernameFragment: c.usernameFragment }) } };
   }
   const relay = { type: 'voice-signal', roomId: this.id, from: peerId, session: msg.session, targetSession: msg.targetSession, ...payload };
-  if (this.voiceBudget(peer, Buffer.byteLength(JSON.stringify(relay)))) this.send(msg.to, relay);
+  if (this.voiceBudget(peer, byteLength(JSON.stringify(relay)))) this.send(msg.to, relay);
  }
  leave(peerId) {
   const peer = this.peers.get(peerId);

@@ -16,6 +16,8 @@ runner and no external test framework.
 | `test:all` | `test:game` && `test:archive` | Every game-layer test |
 | `typecheck` | `tsc --noEmit` | TypeScript check for `app/`, `components/`, `lib/` |
 | `build` | `bash scripts/build-verified.sh` | Bounded `vinext build`, required before the SSR test |
+| `build:desktop` | `bash scripts/build-desktop.sh` | Client-only static bundle -> `dist-desktop/` (no SSR/Wrangler) |
+| `package:desktop` | `bash scripts/package-desktop.sh` | Electron installers/depots (script lands in Wave 3) |
 | `lint` | `bash scripts/sites-env.sh -- eslint .` | ESLint over the repo (ignores `dist`, `.next`) |
 | `deploy` | `bash scripts/deploy.sh` | Build + restart + verify + rollback |
 | `test` | `test:game` && `test:server` && `typecheck` && `build` && `node --test tests/*.test.mjs` | Full CI-style gate |
@@ -131,10 +133,12 @@ duplicate "every combat mode completes" loop was removed outright from
 
 ## Current counts
 
-Last verified on release v4.12 (2026-09-15):
+Last verified on release v4.12 (2026-09-15), `main`; the `steam` branch adds the
+Wave 1 desktop tests (`game/transport.test.mjs`, `server/transport.test.mjs`,
+`desktop/steam.test.mjs`):
 
-- `npm run test:game` — **1328 pass, 0 fail**, across 118 `game/*.test.mjs` files.
-- `npm run test:server` — **141 pass, 0 fail**, across 15 `server/*.test.mjs` files.
+- `npm run test:game` — **1339 pass, 0 fail**, across `game/*.test.mjs` files (118 `game` files on `main`, 119 with `transport.test.mjs`).
+- `npm run test:server` — **144 pass, 0 fail**, across `server/*.test.mjs` files (15 `server` files on `main`, 16 with `transport.test.mjs`).
 - `node --test tests/*.test.mjs` — **7 pass, 0 fail** (SSR, UI contract, deployment).
 - `npx tsc --noEmit` — clean; `npm run lint` — 0 errors.
 - `game/archive/*.test.mjs` — 2 files, run on demand, not counted above.
