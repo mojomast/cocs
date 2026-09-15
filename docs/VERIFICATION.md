@@ -1,5 +1,36 @@
 # COCS verification report
 
+## Release 4.8 - Broadcast lower-third, in-game patch notes, demo background, docs
+
+**Demo broadcast**
+- The title showcase feeds a pure `game/broadcast.mjs` digest (mode, map, kind,
+  phase, clock, teams or leaderboard, metrics, ticker) into a broadcast-style
+  lower-third (`app/ui/DemoBroadcast.tsx`) that animates in per scenario.
+- `game/broadcast.test.mjs` covers free-for-all, team, race and soccer shapes and
+  an empty snapshot; the digest reuses the tested HUD helpers, so it never invents
+  a metric.
+
+**In-game patch notes**
+- `game/changelog.mjs` holds the release digest and the running version;
+  `app/ui/screens/ChangelogScreen.tsx` renders it newest-first from the menu header
+  and the loadout action rail, linking to `docs/CHANGELOG.md`.
+- `game/changelog.test.mjs` asserts descending order, complete entries, a valid
+  full-changelog link, and that the digest's newest version matches the
+  title-footer literal in `app/page.tsx`.
+
+**Demo background fix**
+- `ArenaView.setShowcaseExpected` plus the page always setting the showcase
+  snapshot on a scenario change stop the full-screen operator turntable flashing
+  between demo scenarios; a not-yet-ready showcase frame renders the arena scene.
+
+**Documentation**
+- README rewritten as a feature showcase with a five-release changelog; new
+  `docs/` index, `ARCHITECTURE.md`, `SYSTEMS.md`, `TESTING.md`, `DEPLOYMENT.md` and
+  a full `CHANGELOG.md`; historical spec/plan/audit docs moved under `docs/`.
+
+Verification: game **1319/1319**, server **141/141**, `tests/` **5/5**, `tsc`
+clean, lint 0 errors, build clean. Not browser/GPU verified.
+
 ## Release 4.7 - Title showcase, vehicle placement, single-player atmosphere
 
 **Title showcase**

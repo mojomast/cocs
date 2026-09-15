@@ -27,6 +27,7 @@ export function SelectionScreen({ui}:ScreenProps){
   {netConnected&&<span className="chip chip--accent"><i/>ONLINE</span>}
  </>}>
    <Btn size="sm" variant="ghost" onClick={()=>changeMode('progression')} disabled={!ui.ready||!!ui.error}><Sparkles size={14}/>RANK · LV {profile?.level}</Btn>
+   <Btn size="sm" variant="ghost" onClick={()=>changeMode('changelog')} disabled={!ui.ready||!!ui.error}><Sparkles size={14}/>PATCH NOTES</Btn>
    <Btn size="sm" variant="ghost" onClick={()=>openSettings?.('arsenal')} disabled={!ui.ready||!!ui.error}><Shield size={14}/>ARSENAL</Btn>
    <Btn size="sm" variant="ghost" onClick={()=>{changeMode('theater');ui.refreshDemos?.();}} disabled={!ui.ready||!!ui.error}><Film size={14}/>THEATER{demos.length?` ${demos.length}`:''}</Btn>
   <Btn size="sm" variant="ghost" onClick={startSpectate} disabled={!ui.ready||!!ui.error}><Crosshair size={14}/>SPECTATE</Btn>

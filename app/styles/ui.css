@@ -526,3 +526,51 @@
 @media (prefers-reduced-motion:reduce){
   .achievement-row,.prestige-row{transition:none}
 }
+
+/* ---------- Patch-notes list (Changelog screen) ---------- */
+.changelog-list{display:flex;flex-direction:column;gap:8px;margin:0;padding:0;list-style:none}
+.changelog-list li{display:flex;align-items:flex-start;gap:10px;color:var(--text-dim);font-size:14px;line-height:1.55}
+.changelog-list li svg{flex:none;margin-top:3px;color:var(--accent)}
+
+/* ---------- Title-screen demo broadcast lower-third ----------
+   Floats just above the sticky action rail / title footer so the rail stays
+   clickable; pointer-events:none lets clicks fall through to the menu. */
+.demo-broadcast{position:fixed;left:0;right:0;bottom:calc(var(--safe-bottom) + 84px);z-index:var(--z-panel);
+  pointer-events:none;padding:0 max(var(--edge), var(--safe-right)) 0 max(var(--edge), var(--safe-left));
+  animation:demo-broadcast-in .5s cubic-bezier(.16,.84,.34,1) both}
+.demo-broadcast__bar{display:flex;align-items:stretch;gap:0;max-width:1440px;margin-inline:auto;
+  background:linear-gradient(90deg, rgba(6,14,19,.96), rgba(6,14,19,.82) 60%, rgba(6,14,19,.55));
+  border:1px solid var(--ui-line);border-left:3px solid var(--accent);
+  box-shadow:0 18px 40px rgba(0,0,0,.5);backdrop-filter:blur(12px);-webkit-backdrop-filter:blur(12px)}
+.demo-broadcast__id{display:flex;flex-direction:column;gap:3px;justify-content:center;flex:0 0 auto;
+  padding:12px 18px;border-right:1px solid var(--ui-line);min-width:200px}
+.demo-broadcast__live{display:inline-flex;align-items:center;gap:7px;font:700 11px var(--font-mono);letter-spacing:.2em;color:#ff6b6b}
+.demo-broadcast__live i{width:8px;height:8px;border-radius:50%;background:#ff6b6b;box-shadow:0 0 10px #ff6b6b;animation:demo-broadcast-pulse 1.4s ease-in-out infinite}
+.demo-broadcast__mode{font:800 clamp(16px,2vw,22px)/1 var(--font-sans,inherit);letter-spacing:-.01em;color:var(--text)}
+.demo-broadcast__map{display:flex;align-items:center;gap:8px;font:11px var(--font-mono);letter-spacing:.14em;color:var(--text-mute);text-transform:uppercase}
+.demo-broadcast__map em{font-style:normal;padding:2px 6px;border:1px solid var(--ui-line);color:var(--accent-soft)}
+.demo-broadcast__call{display:flex;flex-direction:column;justify-content:center;gap:3px;flex:1 1 auto;min-width:0;padding:12px 18px}
+.demo-broadcast__call strong{font:800 clamp(13px,1.4vw,16px)/1.1 var(--font-mono);letter-spacing:.06em;color:var(--text);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.demo-broadcast__call span{font-size:12px;line-height:1.4;color:var(--text-dim);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.demo-broadcast__metrics{display:flex;align-items:stretch;flex:0 0 auto;border-left:1px solid var(--ui-line)}
+.demo-broadcast__metric{display:flex;flex-direction:column;justify-content:center;gap:2px;min-width:72px;padding:10px 14px;border-right:1px solid var(--ui-line)}
+.demo-broadcast__metric small{font:10px var(--font-mono);letter-spacing:.16em;color:var(--text-mute)}
+.demo-broadcast__metric b{font:800 clamp(16px,1.8vw,22px)/1 var(--font-mono);color:var(--accent-soft)}
+.demo-broadcast__ticker{max-width:1440px;margin:2px auto 0;overflow:hidden;border:1px solid var(--ui-line);border-top:none;
+  background:rgba(4,10,13,.9)}
+.demo-broadcast__track{display:flex;align-items:center;gap:34px;width:max-content;padding:6px 16px;animation:demo-ticker 26s linear infinite}
+.demo-broadcast__headline{font:11px var(--font-mono);letter-spacing:.12em;color:var(--text-dim);white-space:nowrap}
+.demo-broadcast__headline::before{content:'◆';margin-right:9px;color:var(--accent)}
+.demo-broadcast--reduced,.demo-broadcast--reduced .demo-broadcast__live i,.demo-broadcast--reduced .demo-broadcast__track{animation:none}
+@keyframes demo-broadcast-in{from{transform:translateY(130%);opacity:0}to{transform:translateY(0);opacity:1}}
+@keyframes demo-broadcast-pulse{0%,100%{opacity:1;transform:scale(1)}50%{opacity:.45;transform:scale(.82)}}
+@keyframes demo-ticker{from{transform:translateX(0)}to{transform:translateX(-50%)}}
+@media (max-width:760px){
+  .demo-broadcast{bottom:calc(var(--safe-bottom) + 96px)}
+  .demo-broadcast__bar{flex-wrap:wrap}
+  .demo-broadcast__call{order:3;flex-basis:100%;border-top:1px solid var(--ui-line)}
+  .demo-broadcast__metrics{flex:1 1 auto;justify-content:flex-end}
+}
+@media (prefers-reduced-motion:reduce){
+  .demo-broadcast,.demo-broadcast .demo-broadcast__live i,.demo-broadcast .demo-broadcast__track{animation:none}
+}
