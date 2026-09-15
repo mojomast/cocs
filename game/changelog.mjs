@@ -1,12 +1,19 @@
 // In-game patch notes. The title-screen footer is the running version; this
 // module is the human-readable release digest the Changelog screen renders. The
 // full historical record lives in docs/CHANGELOG.md and is linked from the UI.
-export const RELEASE_VERSION = 'v4.11';
-export const RELEASE_CODENAME = 'HARDENED';
+export const RELEASE_VERSION = 'v4.12';
+export const RELEASE_CODENAME = 'SYNC';
 export const REPO_URL = 'https://github.com/mojomast/tokenarena';
 export const FULL_CHANGELOG_URL = `${REPO_URL}/blob/main/docs/CHANGELOG.md`;
 
 export const CHANGELOG = [
+  {version:'v4.12',codename:'SYNC',date:'2026-09-15',tag:'Version sync, checkpoints and feedback',highlights:[
+    'A client open across a deploy now detects the newer build via /api/version and over a protocol-version change, and offers a one-click reload.',
+    'Campaign checkpoints persist across sessions and resume the mission at the banked step; the checkpoint clears when the mission is won.',
+    'Campaign stars shown on the mission-select screen now match the reward logic (time and score), instead of using a separate time-only rule.',
+    'Enemy telegraphs and single-player abilities are captioned and audible, and VIP Escort gets its extraction beacon marker.',
+    'Reconnecting a spectator or inviter once again targets their previous room and seat intent.',
+  ]},
   {version:'v4.11',codename:'HARDENED',date:'2026-09-15',tag:'Wiring, cache and correctness pass',highlights:[
     'The menu demo now keeps rendering on the room browser, lobby and patch-notes screens instead of freezing, and the rank screen composites its operator preview.',
     'The document is served no-cache so a browser can never keep running a deleted bundle after a deploy; the deployment verifier enforces it.',

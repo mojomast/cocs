@@ -131,9 +131,9 @@ duplicate "every combat mode completes" loop was removed outright from
 
 ## Current counts
 
-Last verified on release v4.11 (2026-09-15):
+Last verified on release v4.12 (2026-09-15):
 
-- `npm run test:game` — **1327 pass, 0 fail**, across 118 `game/*.test.mjs` files.
+- `npm run test:game` — **1328 pass, 0 fail**, across 118 `game/*.test.mjs` files.
 - `npm run test:server` — **141 pass, 0 fail**, across 15 `server/*.test.mjs` files.
 - `node --test tests/*.test.mjs` — **7 pass, 0 fail** (SSR, UI contract, deployment).
 - `npx tsc --noEmit` — clean; `npm run lint` — 0 errors.

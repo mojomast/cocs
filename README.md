@@ -425,6 +425,12 @@ assets. Full procedure and verification: [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md
 The last five releases. The full history lives in
 [docs/CHANGELOG.md](docs/CHANGELOG.md).
 
+### v4.12 · SYNC — 2026-09-15
+- An open tab detects a newer deploy via `/api/version` and a protocol-version
+  change, and offers a one-click reload.
+- Campaign checkpoints persist and resume; mission-select stars match the reward
+  logic; VIP Escort draws its beacon; enemy telegraphs are captioned and audible.
+
 ### v4.11 · HARDENED — 2026-09-15
 - The demo keeps rendering on the room browser, lobby and patch-notes screens; the
   rank screen composites its operator preview.
@@ -452,13 +458,6 @@ The last five releases. The full history lives in
   scenarios.
 - The documentation was rebuilt: this README plus a full `docs/` reference tree.
 
-### v4.7 · SPECTACLE — 2026-09-15
-- The title reel shuffles a curated set of mode/map showpieces and rebuilds
-  atomically, so it never drops to a static model preview.
-- Titan, Scout and Transport vehicles are placed on the warzone maps.
-- Campaign missions author weather with scripted mid-mission changes and timed
-  story transmissions.
-- A broadcast lower-third reports the live demo's mode, map, score and objective,
   and a full Changelog screen joins the menu.
 
 ## Parody and attribution

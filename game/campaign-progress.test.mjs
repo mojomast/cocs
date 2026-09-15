@@ -118,3 +118,12 @@ test('campaign totals aggregate stars, medals and rewards from stored results',(
  assert.equal(view.scoreTarget,missionScoreTarget(missionFor(order[0])));
  assert.ok(view.reward.xp>0);
 });
+
+test('match config preserves a validated campaign checkpoint step',async()=>{
+ const {normalizeConfig}=await import('./config.mjs');
+ assert.equal(normalizeConfig({mode:'campaign',checkpoint:3}).checkpoint,3);
+ assert.equal(normalizeConfig({mode:'campaign',checkpoint:null}).checkpoint,null);
+ assert.equal(normalizeConfig({mode:'campaign'}).checkpoint,null);
+ assert.equal(normalizeConfig({mode:'campaign',checkpoint:-5}).checkpoint,null);
+ assert.equal(normalizeConfig({mode:'campaign',checkpoint:'4.6'}).checkpoint,5);
+});

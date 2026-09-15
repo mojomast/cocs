@@ -1,5 +1,25 @@
 # COCS verification report
 
+## Release 4.12 - Build sync, campaign checkpoints and feedback
+
+- **Build sync:** `app/api/version/route.ts` returns `RELEASE_VERSION` with
+  `Cache-Control: no-store`; the client polls it and raises a reload notice on a
+  version mismatch. `NetClient.join`/`create` send `PROTOCOL_VERSION`, `Room`
+  echoes it in `welcome` (verified in `server/network.test.mjs`), and a mismatch
+  raises the same notice.
+- **Campaign checkpoints:** `normalizeConfig` preserves a validated `checkpoint`
+  step (`game/campaign-progress.test.mjs`); the page banks `singleplayer-checkpoint`
+  events, resumes with `checkpointFor`, and clears on win.
+- **Star consistency:** mission-select stars come from `missionStars`
+  (`game/singleplayer-ui.test.mjs` unchanged expectations still pass).
+- **Feedback and markers:** enemy telegraphs and SP abilities are captioned and
+  audible; VIP Escort's extraction beacon renders via the new snapshot extraction
+  fields and `ArenaView.updateObjectives`.
+- **Reconnect intent:** room/spectate intent is remembered across reconnect.
+
+Verification: game **1328/1328**, server **141/141**, `tests/` **7/7**, `tsc`
+clean, lint 0 errors, build clean. Not browser/GPU frame-pacing verified.
+
 ## Release 4.11 - Wiring, cache and correctness pass
 
 A three-area read-only audit (gameplay, UI, netcode/deploy) drove this batch.

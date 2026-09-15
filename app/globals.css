@@ -1168,3 +1168,10 @@ html, body { overscroll-behavior: none; }
  .spectator-objective{font-size:12px}
  .spectator-group-label b{font-size:15px}
 }
+
+/* New-build notice: a tab open across a deploy offers a one-click reload. */
+.update-banner{position:fixed;left:50%;transform:translateX(-50%);bottom:calc(var(--safe-bottom) + 92px);z-index:var(--z-toast);
+  display:flex;align-items:center;gap:14px;padding:10px 16px;max-width:min(92vw,560px);
+  border:1px solid #83f4d5aa;border-left:3px solid #83f4d5;background:rgba(8,22,26,.96);color:#e9fff6;
+  font:12px var(--font-mono);box-shadow:0 14px 40px rgba(0,0,0,.55)}
+.update-banner .update-reload{width:auto;margin:0;padding:8px 14px;display:inline-flex}

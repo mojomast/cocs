@@ -2,6 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {createGameServer} from './game-server.mjs';
 import {NetClient} from '../game/net.mjs';
+import {PROTOCOL_VERSION} from '../game/protocol.mjs';
 
 function connect(url) {
  return new Promise((resolve, reject) => {
@@ -86,6 +87,8 @@ test('two real WebSocket clients join, play and receive results end-to-end', asy
   const welcomeB = await until(b, 'welcome');
   assert.equal(welcomeA.host, true);
   assert.equal(welcomeB.host, false);
+  assert.equal(welcomeA.v, PROTOCOL_VERSION, 'welcome carries the protocol version');
+  assert.equal(welcomeB.v, PROTOCOL_VERSION);
   const lobbyA = await latest(a, 'lobby');
   assert.equal(lobbyA.players.length, 2);
   assert.equal(lobbyA.players[1].harness, 'claudecode');

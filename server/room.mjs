@@ -6,7 +6,7 @@ import {getMap} from '../game/maps.mjs';
 import {resolveMapForMode} from '../game/arenas.mjs';
 import {CHARACTERS,resolveLoadout,RULES} from '../game/data.mjs';
 import {randomUUID} from 'node:crypto';
-import {validPlayerId,sanitizeText,parseInputEnvelope} from '../game/protocol.mjs';
+import {validPlayerId,sanitizeText,parseInputEnvelope,PROTOCOL_VERSION} from '../game/protocol.mjs';
 
 export const PLAYER_LIMIT = 8;
 export const SPECTATOR_LIMIT = 24;
@@ -187,7 +187,7 @@ export class Room {
     this.peers.set(peerId, existing);
     if (this.hostId === oldId) this.hostId = peerId;
     else if (!this.hostId && existing.spectate !== true) this.hostId = peerId;
-    this.send(peerId, { type: 'welcome', peerId, roomId: this.id, host: peerId === this.hostId, reconnected: true, token: existing.token, spectate: existing.spectate === true, profile: this.progressProfile(existing), progressToken: existing.playerToken ?? null });
+    this.send(peerId, { type: 'welcome', v: PROTOCOL_VERSION, peerId, roomId: this.id, host: peerId === this.hostId, reconnected: true, token: existing.token, spectate: existing.spectate === true, profile: this.progressProfile(existing), progressToken: existing.playerToken ?? null });
     this.broadcast(this.lobby());
     if (this.started && !this.roundOver && this.match) {
      this.send(peerId, { type: 'start', config: { ...this.match.config }, mapId: this.match.arena.id });
@@ -214,7 +214,7 @@ export class Room {
    token: randomUUID(), disconnectedAt: null, spectate: isSpectator, voiceSession: null, playerId: identity?.profile.id ?? null, playerToken: identity?.token ?? null };
   this.peers.set(peerId, peer);
   if (!this.hostId && !isSpectator) this.hostId = peerId;
-  this.send(peerId, { type: 'welcome', peerId, roomId: this.id, host: peerId === this.hostId, token: peer.token, spectate: isSpectator, profile: identity?.profile ?? null, progressToken: peer.playerToken });
+  this.send(peerId, { type: 'welcome', v: PROTOCOL_VERSION, peerId, roomId: this.id, host: peerId === this.hostId, token: peer.token, spectate: isSpectator, profile: identity?.profile ?? null, progressToken: peer.playerToken });
   this.broadcast(this.lobby());
   if (requestedPlayer && active) this.send(peerId, { type: 'error', message: 'Match in progress — you joined as a spectator.' });
   if (isSpectator && this.started && !this.roundOver && this.match) {

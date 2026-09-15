@@ -16,6 +16,25 @@ record in [VERIFICATION.md](VERIFICATION.md).
 
 ---
 
+## v4.12 · SYNC — 2026-09-15
+
+- **Build sync:** `app/api/version/route.ts` reports `RELEASE_VERSION`; the client
+  polls it on load, on focus and every five minutes, and offers a one-click reload
+  when the deployed build is newer. `NetClient` also stamps `PROTOCOL_VERSION` on
+  join/create, the server echoes it in `welcome`, and a mismatch raises the same
+  reload notice.
+- **Campaign checkpoints:** `normalizeConfig` preserves a validated `checkpoint`
+  step; the page banks the step from `singleplayer-checkpoint` events, resumes via
+  `checkpointFor`, and clears it with the mission win. Tests cover normalization
+  and round-tripping.
+- **Star consistency:** the mission-select adapter now derives stars from the
+  authoritative `missionStars` (time and score) so the UI agrees with the reward.
+- **Feedback:** enemy telegraphs and single-player abilities are captioned and
+  audible (`feedback.mjs`); VIP Escort draws its extraction beacon
+  (`objectiveState` extraction fields + `ArenaView.updateObjectives`).
+- **Reconnect intent:** room and spectate intent are remembered so a reconnect
+  rejoins the same room as the same kind of peer.
+
 ## v4.11 · HARDENED — 2026-09-15
 
 A wiring, cache and correctness pass driven by a three-area audit.

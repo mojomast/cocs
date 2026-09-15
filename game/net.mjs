@@ -81,6 +81,7 @@ export class NetClient {
   this.onHistory = null;
   this.onChat = null;
   this.onError = null;
+  this.onProtocolMismatch = null;
   this.onClose = null;
   this.onProgression = null;
   this.onVoiceSignal = null;
@@ -172,8 +173,8 @@ export class NetClient {
   this.ws.send(text);
   return true;
  }
- join(name, character, harness, opts = {}) { this.send({ type: 'join', name, character, harness, token: this.token ?? '', roomId: opts.roomId || this.roomId || 'local', spectate: opts.spectate === true, playerId: this.playerId, progressToken: this.progressToken ?? '' }); }
- create(name, character, harness, playerName = '') { this.send({ type: 'create', name, playerName, character, harness, token: this.token ?? '', roomId: '', playerId: this.playerId, progressToken: this.progressToken ?? '' }); }
+ join(name, character, harness, opts = {}) { this.send({ type: 'join', name, character, harness, token: this.token ?? '', roomId: opts.roomId || this.roomId || 'local', spectate: opts.spectate === true, playerId: this.playerId, progressToken: this.progressToken ?? '', v: PROTOCOL_VERSION }); }
+ create(name, character, harness, playerName = '') { this.send({ type: 'create', name, playerName, character, harness, token: this.token ?? '', roomId: '', playerId: this.playerId, progressToken: this.progressToken ?? '', v: PROTOCOL_VERSION }); }
  list() { this.send({ type: 'list' }); }
  history() { this.send({ type: 'history' }); }
  host(config, mapId) { this.send({ type: 'host', config, mapId }); }
@@ -213,6 +214,7 @@ export class NetClient {
     if (msg.token) { this.token = msg.token; if (this.storage) this.storage.setItem(this.storageKey, msg.token); }
     if (typeof msg.progressToken === 'string' && msg.progressToken) { this.progressToken = msg.progressToken; if (this.storage) { try { this.storage.setItem(this.progressKey, msg.progressToken); } catch {} } }
     if (msg.profile) { this.progression = msg.profile; this.onProgression?.({ profile: msg.profile, reconnected: msg.reconnected === true }); }
+    if (Number.isInteger(msg.v) && msg.v !== PROTOCOL_VERSION) this.onProtocolMismatch?.({ client: PROTOCOL_VERSION, server: msg.v });
     break;
    case MESSAGE.LOBBY:
     this.players = Array.isArray(msg.players) ? msg.players.filter(p => p && typeof p === 'object') : [];

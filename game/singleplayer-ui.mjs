@@ -1,5 +1,6 @@
 // Presentation adapter for the single-player HUD and result screen. Keeps
 // React components free of snapshot-shape knowledge, mirroring race-ui.mjs.
+import {missionStars} from './campaign-progress.mjs';
 export function singlePlayerDisplay(hud){
  const state=hud?.singleplayer;
  if(!state)return null;
@@ -115,7 +116,7 @@ export function campaignMissionView(missions=[],progress={},selectedId=null){
    selected:selectedId===mission.id,
    unlocked:index===0||Boolean(completed[previous?.id]),
    completed:Boolean(entry),
-   stars:campaignMissionStars(entry,par),
+   stars:missionStars(mission,entry),
    parTime:par,
    bestTime:Number.isFinite(Number(entry?.bestTime))?Number(entry.bestTime):null,
    bestScore:Number.isFinite(Number(entry?.bestScore))?Number(entry.bestScore):null,
