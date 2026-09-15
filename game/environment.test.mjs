@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import * as T from 'three';
-import {addSky,addMountains,addScatter,updateScatterSway,ambientProfile,smokeAnchors,AMBIENT_KINDS,skyPalette,skyGradientAt,skyPhase,WEATHER_KINDS,PRECIP_KINDS,selectWeather,weatherPreset,timeOfDayAt,biomeAmbience,precipParticleAdds,BIOME_PROP_FAMILIES,SCATTER_TRIANGLE_BUDGET,biomePropFamilies,scatterTriangles} from './environment.mjs';
+import {addSky,addMountains,addScatter,updateScatterSway,ambientProfile,smokeAnchors,AMBIENT_KINDS,skyPalette,skyGradientAt,skyPhase,WEATHER_KINDS,PRECIP_KINDS,selectWeather,weatherPreset,timeOfDayAt,biomeAmbience,precipParticleAdds,BIOME_PROP_FAMILIES,SCATTER_TRIANGLE_BUDGET,biomePropFamilies,scatterTriangles,lightningSchedule,windGustAt,wetSheen} from './environment.mjs';
 import {ArenaView} from './view.mjs';
 
 const bounds={minX:-40,maxX:40,minZ:-40,maxZ:40};
@@ -308,6 +308,53 @@ test('an explicit arena biome drives ambience and weather deterministically',()=
  const volcanic=selectWeather({id:'ember-caldera',biome:'volcanic'},'day',2);
  assert.equal(volcanic.kind,'ash','a volcanic biome rolls ash');
  assert.equal(selectWeather({id:'ember-caldera',biome:'volcanic'},'day',2),volcanic,'selection is deterministic');
+});
+
+test('lightning schedules are deterministic, ordered and only exist for storm presets',()=>{
+ assert.deepEqual(lightningSchedule(weatherPreset('clear')),[],'clear skies have no lightning');
+ assert.deepEqual(lightningSchedule(weatherPreset('snow')),[],'snow has no lightning');
+ const storm=weatherPreset('storm');
+ const a=lightningSchedule(storm,{seed:4,window:90,count:8}),b=lightningSchedule(storm,{seed:4,window:90,count:8}),c=lightningSchedule(storm,{seed:5,window:90,count:8});
+ assert.ok(a.length>0);
+ assert.deepEqual(a,b,'the same seed reproduces the schedule');
+ assert.notDeepEqual(a,c,'a new seed advances the schedule');
+ for(let i=0;i<a.length;i++){
+  const strike=a[i];
+  assert.ok(strike.time>=0&&strike.time<90,'strikes stay inside the window');
+  if(i>0)assert.ok(strike.time>a[i-1].time,'strikes are ordered');
+  assert.ok(strike.intensity>0&&strike.intensity<=1);
+  assert.ok(strike.distance>=0&&strike.distance<=1);
+  assert.ok(strike.thunderDelay>0&&strike.pan>=-1&&strike.pan<=1);
+  assert.ok(strike.thunderGain>0,`${strike.thunderGain} thunder gain`);
+  assert.ok(Object.isFrozen(strike));
+ }
+ assert.ok(lightningSchedule(storm,{seed:4,window:90,count:99}).length<=24,'the schedule is count-capped');
+ assert.ok(lightningSchedule(storm,{seed:4,window:5,count:8}).every(strike=>strike.time<5),'a short window drops late strikes');
+});
+
+test('wind gusts are deterministic, bounded and scale with strength',()=>{
+ for(let i=0;i<20;i++){const g=windGustAt(i*.37,{seed:3});assert.ok(Number.isFinite(g)&&g>=.4&&g<=1.7,`gust ${g}`);}
+ assert.equal(windGustAt(12.5,{seed:3}),windGustAt(12.5,{seed:3}),'the gust is a pure function of time and seed');
+ assert.notEqual(windGustAt(12.5,{seed:3}),windGustAt(12.5,{seed:9}),'a different seed shifts the phase');
+ const calm=windGustAt(4,{seed:2,strength:0}),strong=windGustAt(4,{seed:2,strength:2});
+ assert.ok(Math.abs(calm-1)<1e-9,'zero strength pins the gust to 1');
+ const spread=strength=>{let total=0;for(let i=0;i<200;i++)total+=Math.abs(windGustAt(i*.25,{seed:2,strength})-1);return total/200;};
+ assert.ok(spread(2)>spread(1)&&spread(1)>spread(0),'a stronger gust swings further from calm on average');
+ assert.ok(Number.isFinite(windGustAt(NaN,{seed:1})));
+});
+
+test('wet sheen is a pure, bounded descriptor that dries back out',()=>{
+ const dry=wetSheen(0),soaked=wetSheen(1);
+ assert.equal(dry.wetness,0);assert.equal(soaked.wetness,1);
+ assert.ok(soaked.roughness<dry.roughness,'wet surfaces are smoother');
+ assert.ok(soaked.metalness>dry.metalness,'wet surfaces gain a damp gloss');
+ assert.ok(soaked.sheen>dry.sheen);
+ for(const look of [dry,soaked,wetSheen(.5),wetSheen(2),wetSheen(-1),wetSheen(NaN)]){
+  assert.ok(Object.isFrozen(look));
+  for(const key of ['wetness','roughness','metalness','sheen','reflection'])assert.ok(Number.isFinite(look[key])&&look[key]>=0,`${key} finite`);
+ }
+ assert.deepEqual(wetSheen(.5),wetSheen(.5),'the descriptor is pure');
+ assert.equal(wetSheen(5).wetness,1,'out-of-range wetness clamps');
 });
 
 test('mountain detail scales the cone shell resolution',()=>{

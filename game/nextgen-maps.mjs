@@ -37,6 +37,7 @@ const colosseum = createLevel({
     for (let i = 0; i < 8; i++) { const a = (i / 8) * Math.PI * 2; ctx.addSpawn(Math.cos(a) * 9, Math.sin(a) * 9); }
     ctx.addPickup('rocket', -8, 0); ctx.addPickup('rail', 8, 0); ctx.addPickup('scatter', 0, -8); ctx.addPickup('plasma', 0, 8);
     ctx.addPickup('health', -24, 0); ctx.addPickup('health', 24, 0); ctx.addPickup('armor', 0, -24); ctx.addPickup('armor', 0, 24);
+    ctx.addPickup('weaponUpgrade', -16, 0); ctx.addPickup('deployable', 16, 0);
   },
 });
 
@@ -160,6 +161,7 @@ const slagworks = createLevel({
     scatter(ctx, 14, rng, 10, (c, x, z) => c.addBarrel({ x, z, scale: .9 + rng() * .4 }));
     ctx.addObjective(-24, 0, 3.5); ctx.addObjective(0, 24, 4); ctx.addObjective(24, 0, 3.5);
     ctx.addPickup('rocket', -30, -20); ctx.addPickup('rocket', 30, 20); ctx.addPickup('rocket', 0, -30); ctx.addPickup('rocket', 0, 30); ctx.addPickup('health', -12, 0); ctx.addPickup('armor', 12, 0);
+    ctx.addPickup('weaponUpgrade', -14, -14); ctx.addPickup('deployable', 14, 14);
   },
 });
 
@@ -217,6 +219,7 @@ const convoyLine = createLevel({
     ctx.addVehicle({ kind: 'puma', x: -52, z: 26, yaw: 0 }); ctx.addVehicle({ kind: 'puma', x: 52, z: -26, yaw: Math.PI });
     ctx.addPickup('rocket', -18, 0); ctx.addPickup('rail', 18, 0); ctx.addPickup('scatter', 0, -15); ctx.addPickup('plasma', 0, 15);
     ctx.addPickup('health', -58, 0); ctx.addPickup('health', 58, 0); ctx.addPickup('armor', 0, -22); ctx.addPickup('armor', 0, 22);
+    ctx.addPickup('weaponUpgrade', -24, 0); ctx.addPickup('deployable', 24, 0);
   },
 });
 

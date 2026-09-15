@@ -16,9 +16,9 @@ export const DEFAULT_MAX_BOTS=8;
 const AUTHOR={
  'puma-circuit':{group:'vehicle',scale:'battle',play:['puma-race']},
  'puma-pitch':{group:'vehicle',scale:'battle',play:['puma-soccer']},
- exchange:{group:'arena',legacy:true,scale:'skirmish',play:['deathmatch','teamdeathmatch','instagib','rockets','arsenal','armsrace','koth','domination']},
- crosswire:{group:'arena',legacy:true,scale:'skirmish',play:['deathmatch','teamdeathmatch','instagib','rockets','arsenal','armsrace','koth','domination']},
- foundry:{group:'arena',legacy:true,scale:'skirmish',play:['deathmatch','teamdeathmatch','instagib','rockets','arsenal','armsrace','koth','domination']},
+ exchange:{group:'arena',legacy:true,scale:'skirmish',play:['deathmatch','teamdeathmatch','instagib','rockets','arsenal','armsrace','koth','domination','holdout','uplink']},
+ crosswire:{group:'arena',legacy:true,scale:'skirmish',play:['deathmatch','teamdeathmatch','instagib','rockets','arsenal','armsrace','koth','domination','holdout','uplink']},
+ foundry:{group:'arena',legacy:true,scale:'skirmish',play:['deathmatch','teamdeathmatch','instagib','rockets','arsenal','armsrace','koth','domination','holdout','uplink']},
  launchpad:{group:'arena',legacy:true,scale:'battle',play:['ctf','teamdeathmatch','deathmatch','koth','domination','arsenal','payload']},
  citadel:{group:'arena',legacy:true,scale:'battle',play:['ctf','teamdeathmatch','deathmatch','koth','domination','arsenal','payload']},
  'blood-gulch':{group:'outdoor',legacy:true,scale:'battle',play:['ctf','teamdeathmatch','deathmatch','koth','domination','combined-arms','payload']},
@@ -40,7 +40,7 @@ const AUTHOR={
  rampart:{group:'urban',scale:'battle',play:['assault','deathmatch','teamdeathmatch','instagib','rockets','arsenal','koth','domination']},
  'catwalk-breach':{group:'urban',scale:'battle',play:['assault','deathmatch','teamdeathmatch','instagib','rockets','arsenal','koth','domination']},
  // Next-generation procedural maps (levelgen.mjs). One per mode.
- colosseum:{group:'arena',scale:'battle',play:['deathmatch','teamdeathmatch','instagib','rockets','arsenal','armsrace','koth','domination']},
+ colosseum:{group:'arena',scale:'battle',play:['deathmatch','teamdeathmatch','instagib','rockets','arsenal','armsrace','koth','domination','holdout','uplink']},
  'frost-gate':{group:'outdoor',scale:'warzone',play:['ctf','teamdeathmatch','deathmatch','koth','domination','arsenal','payload']},
  'sunken-hill':{group:'outdoor',scale:'battle',play:['koth','domination','deathmatch','teamdeathmatch','ctf','payload']},
  riverbend:{group:'urban',scale:'warzone',play:['domination','koth','deathmatch','teamdeathmatch','arsenal','payload']},

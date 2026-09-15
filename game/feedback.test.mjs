@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import * as T from 'three';
-import {WeaponFeedback,EffectPool,SynthAudio,AmbientFX,WeatherFX} from './feedback.mjs';
+import {WeaponFeedback,EffectPool,SynthAudio,AmbientFX,WeatherFX,MODE_THEMES} from './feedback.mjs';
 import {weatherPreset} from './environment.mjs';
 
 const player={id:7,weapon:0,x:0,z:0,yaw:0,grounded:true,vx:0,vy:0,vz:0};
@@ -214,6 +214,66 @@ test('weather precipitation reuses pooled slots, respects the cap and gates CPU/
  fx.setPreset(weatherPreset('clear'));
  assert.equal(fx.update(.05,origin,{quality:1}),0,'clear weather spawns nothing');
  pool.dispose();
+});
+
+test('per-mode music themes retune the running drone without restarting it',()=>{
+ const {audio}=audioFixture2();
+ assert.equal(audio.mode,'default');
+ assert.equal(audio.setModeTheme('ctf'),'ctf');
+ assert.equal(audio.theme,MODE_THEMES.ctf);
+ assert.equal(audio.setModeTheme('not-a-mode'),'default','an unknown mode falls back to the default theme');
+ audio._bed(true);
+ const drone=audio.music;
+ assert.equal(drone,null,'no drone until the fight starts');
+ audio.setIntensity(1);
+ assert.ok(audio.music,'a loud fight starts the drone');
+ const osc=audio.music.osc;
+ audio.setModeTheme('pounce');
+ assert.equal(audio.setModeTheme('horde'),'horde');
+ assert.equal(audio.music.osc,osc,'switching modes reuses the same oscillator');
+ assert.ok(MODE_THEMES.horde.root!==MODE_THEMES.default.root,'modes have distinct roots');
+ for(const [key,theme] of Object.entries(MODE_THEMES)){
+  assert.ok(Number.isFinite(theme.root)&&theme.root>0,`${key} root`);
+  assert.ok(Array.isArray(theme.scale)&&theme.scale.length>0,`${key} scale`);
+  assert.ok(Object.isFrozen(theme)&&Object.isFrozen(theme.scale));
+ }
+ audio.dispose();
+});
+
+test('victory and defeat stings reuse the voice cap and honour mute',()=>{
+ const {audio}=audioFixture2();
+ assert.equal(audio.sting('not-an-outcome'),null,'an unknown outcome has no sting');
+ assert.equal(audio.sting('victory').played,true);
+ assert.equal(audio.lastSting,'victory');
+ assert.ok(audio.voices.size>=1,'an enabled sting spends a voice');
+ const before=audio.voices.size;
+ audio.muted=true;
+ assert.equal(audio.sting('defeat').played,false,'muting silences the sting');
+ assert.equal(audio.voices.size,before,'a muted sting spends no voice');
+ audio.muted=false;
+ audio.sting('defeat');
+ assert.equal(audio.lastSting,'defeat');
+ audio.dispose();
+});
+
+test('distant thunder is distance-scaled, panned and respects mute',async()=>{
+ const {audio}=audioFixture2();
+ assert.equal(audio.thunder({distance:.5,pan:.4,intensity:1}),true,'a strike schedules thunder');
+ assert.equal(audio.thunder({distance:1,pan:0,intensity:0}),false,'a silent strike is a no-op');
+ audio.muted=true;
+ assert.equal(audio.thunder({distance:.5}),false,'muted thunder is a no-op');
+ audio.dispose();
+});
+
+test('wind gusts scale ambient particle drift without changing the seed contract',()=>{
+ const profile={kind:'dust',color:'#c9d8e6',size:.03,life:3.6,rate:5,drift:.6,rise:.08,additive:false,smoke:null};
+ const run=wind=>{const pool={adds:[],add(o){this.adds.push(o);}};const fx=new AmbientFX(pool,{profile,seed:77,moteCap:6});for(let i=0;i<12;i++)fx.update(1/30,{x:0,y:0,z:0},{radius:6,wind});return pool.adds;};
+ const calm=run(1),gusty=run(2);
+ assert.ok(calm.length>0&&gusty.length>0);
+ const spread=adds=>adds.reduce((sum,add)=>sum+Math.abs(add.velocity.x),0);
+ assert.ok(spread(gusty)>spread(calm),'a stronger gust throws motes further');
+ const replay=run(1);
+ assert.deepEqual(replay,calm,'the same wind reproduces the same motes');
 });
 
 test('ambient bed mood is remembered before start and eases the running nodes',()=>{

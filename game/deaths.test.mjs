@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {OVERKILL_GIB,deathPlan,deathStyleFor,deathPose,hashSeed,hashUnit,FALL_POSES,DEATH_STYLES} from './deaths.mjs';
+import {OVERKILL_GIB,deathPlan,deathStyleFor,deathPose,hitReaction,hashSeed,hashUnit,FALL_POSES,DEATH_STYLES} from './deaths.mjs';
 
 test('death hashing is deterministic and well distributed',()=>{
  assert.equal(hashSeed(1,2,3),hashSeed(1,2,3));
@@ -81,6 +81,30 @@ test('death poses are deterministic, bounded and vary with the kill context',()=
  assert.ok(fallPoses.size>=3,`falling corpses take several stances, got ${[...fallPoses].join(',')}`);
  const spins=new Set();for(let seed=0;seed<96;seed++)spins.add(Math.round(deathPlan({weapon:1,seed}).spin*100));
  assert.ok(spins.size>=6,`spin tumble varies, got ${spins.size} buckets`);
+});
+
+test('hit reactions are deterministic, bounded and scale with damage',()=>{
+ const context={damage:20,dir:{x:1,z:0},seed:5,actor:2,serial:7};
+ assert.deepEqual(hitReaction(context),hitReaction(context),'the same hit context reproduces the reaction');
+ const light=hitReaction({damage:2,dir:{x:0,z:1},seed:1}),heavy=hitReaction({damage:35,dir:{x:0,z:1},seed:1});
+ assert.ok(heavy.strength>light.strength,'more damage flinches harder');
+ assert.equal(heavy.strength,1,'a 35-damage hit saturates the flinch');
+ assert.ok(light.strength>=0&&light.strength<=1);
+ for(const reaction of [light,heavy]){
+  assert.ok(reaction.lean>=0&&reaction.lean<=.9,`lean bounded: ${reaction.lean}`);
+  assert.ok(reaction.push>=0&&reaction.push<=.4,`push bounded: ${reaction.push}`);
+  assert.ok(reaction.count>=0&&Number.isInteger(reaction.count));
+  for(const key of ['pushX','pushZ','sprayX','sprayZ','seed'])assert.ok(Number.isFinite(reaction[key]),`${key} finite`);
+ }
+ const blood=hitReaction({damage:10,dir:{x:1,z:0}}),spark=hitReaction({damage:10,dir:{x:1,z:0},energy:true}),ember=hitReaction({damage:10,dir:{x:1,z:0},fire:true});
+ assert.equal(blood.kind,'blood');assert.equal(spark.kind,'spark');assert.equal(ember.kind,'ember');
+ assert.notEqual(blood.color,spark.color,'energy hits read differently from blood');
+ const reduced=hitReaction({damage:30,dir:{x:1,z:0},reduced:true});
+ assert.equal(reduced.lean,0,'reduced motion drops the flinch lean');
+ assert.equal(reduced.push,0,'reduced motion drops the knockback push');
+ assert.ok(reduced.count<=2,'reduced motion emits a minimal spray');
+ const noDir=hitReaction({damage:10});
+ assert.equal(noDir.pushX,0);assert.equal(noDir.pushZ,0);
 });
 
 test('spinning styles carry a larger tumble multiplier than ordinary ragdolls',()=>{

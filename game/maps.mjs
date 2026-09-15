@@ -43,4 +43,6 @@ export const getMap=id=>MAPS.find(m=>m.id===id)||MAPS[0];
 export const pickupWeapon=kind=>({rocket:1,rail:2,scatter:3,plasma:4,grenade:5,shock:6,flak:7,marksman:8,smg:9})[kind];
 // Non-weapon supply pickups. `ammo` refills the actor's current weapon (its
 // `weapon` field names which), `megahealth` overcharges health and armor.
-export const SUPPLY_KINDS=Object.freeze(['health','armor','ammo','megahealth']);
+// `weaponUpgrade` and `deployable` are the economy powerups defined in data.mjs;
+// they are listed here so map validation accepts them as supply kinds.
+export const SUPPLY_KINDS=Object.freeze(['health','armor','ammo','megahealth','weaponUpgrade','deployable']);

@@ -189,6 +189,44 @@ export function nextUnlockFor(profile){
  const unlocked=(profile&&typeof profile.unlocks==='object'&&profile.unlocks)||{};
  return UNLOCKS.filter(item=>unlocked[item.id]!==true).sort((a,b)=>a.level-b.level||String(a.name).localeCompare(String(b.name)))[0]||null;
 }
+// Compact post-match summary card. Pure composition of the snapshot, the
+// reward strip and the career tracks so the results screen can surface
+// achievements and prestige progress without re-deriving them in JSX.
+/** @param {{hud?:any,reward?:any,profile?:any,achievements?:any[],historyEntry?:any,result?:any}} [input] */
+export function matchSummaryCard({hud=null,reward=null,profile=null,achievements=[],historyEntry=null,result=null}={}){
+ const p=profile&&typeof profile==='object'?profile:defaultProgression();
+ const level=levelFromXp(p.xp),prestige=prestigeFromXp(p.xp);
+ const list=Array.isArray(achievements)?achievements:[];
+ const unlocked=list.filter(a=>a?.unlocked===true);
+ const actors=Array.isArray(hud?.actors)?hud.actors:[];
+ const local=actors.find(a=>a&&a.id===(hud?.actorId??0))||actors[0]||result?.actor||null;
+ const kills=Number(local?.frags)||Number(historyEntry?.kills)||0;
+ const deaths=Number(local?.deaths)||Number(historyEntry?.deaths)||0;
+ const duration=Math.round(Number(hud?.time)||Number(historyEntry?.duration)||0);
+ const outcome=historyEntry?.result||result||(reward?.levelUp?'win':null);
+ return {
+  modeName:hud?.modeName||historyEntry?.modeName||null,
+  mapName:hud?.mapName||historyEntry?.mapName||null,
+  result:outcome,
+  kills,deaths,
+  kd:deaths>0?Math.round((kills/deaths)*100)/100:kills,
+  duration,
+  xp:Math.max(0,Math.floor(Number(reward?.gained)||0)),
+  level:level.level,
+  progress:level.progress,
+  toNext:level.toNext,
+  levelUp:reward?.levelUp===true,
+  prestige:prestige.rank,
+  prestigeTier:prestige.tier?prestige.tier.name:null,
+  prestigeProgress:prestige.progress,
+  prestigeToNext:prestige.toNext,
+  prestigeMaxed:prestige.maxed,
+  achievements:unlocked.map(a=>({id:a.id,name:a.name,description:a.description,xp:Math.max(0,Math.floor(Number(a.xp)||0))})),
+  achievementCount:unlocked.length,
+  nextUnlock:reward?.nextUnlock||nextUnlockFor(p),
+ };
+}
+
 export function matchRewardSummary(award={}){
  const profile=award&&award.profile?award.profile:defaultProgression(),level=levelFromXp(profile.xp),next=nextUnlockFor(profile),prestige=prestigeFromXp(profile.xp);
  return {

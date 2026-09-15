@@ -41,6 +41,19 @@ export const POWERUPS=[
   {id:'recon',name:'Recon Pulse',duration:10,color:'#7fe7ff',description:'Reveals every enemy on your team radar, no matter the distance. The map, unmapped.',effect:{reveal:true}},
   {id:'cloak',name:'Cloak',duration:7,color:'#c8b6ff',description:'Bends light around you: bots cannot acquire you at range and you drop off enemy radar except up close.',effect:{cloak:true}},
 ];
+// ---------------------------------------------------------------------------
+// Economy pickups. These are a separate table from POWERUPS so the timed
+// actor-modifier contract (and its pinned count) stays untouched. Core handles
+// each id explicitly: `weaponUpgrade` promotes the holder one weapon tier for a
+// window (with a full magazine) and reverts afterwards; `deployable` drops a
+// friendly sentry turret at the pickup point. Both are deterministic.
+// ---------------------------------------------------------------------------
+export const ECONOMY_PICKUPS = Object.freeze([
+ Object.freeze({id:'weaponUpgrade',name:'Weapon Upgrade',duration:12,color:'#ffd166',description:'A field promotion: your current weapon is swapped for the next tier up the rack, with a full magazine.'}),
+ Object.freeze({id:'deployable',name:'Sentry Deployable',duration:18,color:'#8affc1',description:'Drops a friendly sentry turret that tracks and fires on the nearest enemy while it lasts.'}),
+]);
+export const ECONOMY_PICKUP_IDS = Object.freeze(ECONOMY_PICKUPS.map(pickup=>pickup.id));
+export const economyPickup = id => ECONOMY_PICKUPS.find(pickup=>pickup.id===id) || null;
 // Short tongue-in-cheek weapon blurbs, kept separate so the combat tuning above
 // stays one continuous, diff-friendly table. Shown in settings and the arsenal.
 const WEAPON_BLURBS=['The dependable starter. Infinite ammo, chirpy retort, zero excuses.','A dumb-fire party starter. Mind the splash or become the splash.','Charges a piercing beam into one very opinionated shot.','Eight pellets of “get out of my hallway.”','Superheated blue orbs that bounce downrange. Handle with vague respect.','Arcs a bouncy surprise around corners. The timer is a suggestion.','A crackling lightning hose for players who refuse to aim in a straight line.','Twelve shards of instant regret at point-blank range.','A hard-hitting semi-auto. One deep breath per customer.','Sprays a fast, forgiving curtain of small mistakes.'];

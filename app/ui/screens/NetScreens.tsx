@@ -4,15 +4,30 @@ import {MatchConfiguration} from '../../game-ui/configuration';
 import {Shell,TopBar,PageHead,Panel,Btn,Tabs,Field,Chip,Empty,Banner,ActionRail,SelectCard} from '../primitives';
 import type {ScreenProps} from '../contract';
 
+const FILTER_ALL='all';
+const filterLabel=(value:any)=>String(value||'').replace(/[-_]+/g,' ').replace(/\b\w/g,(c:string)=>c.toUpperCase());
+const sizeBucket=(players:any)=>{const n=Number(players)||0;return n===0?'empty':n<=2?'small':n<=5?'medium':'large';};
+
 export function BrowseScreen({ui}:ScreenProps){
- const {rooms=[],matches=[],netUrl='',setNetUrl,roomName='',setRoomName,netError,quickJoin,createRoom,joinRoom,refreshNet,changeMode,headActions,teamName,renderScoreboard,config}=ui;
+ const {rooms=[],matches=[],netUrl='',setNetUrl,roomName='',setRoomName,netError,quickJoin,createRoom,joinRoom,refreshNet,changeMode,headActions,teamName,renderScoreboard,config,quickStart,GAME_MODES=[],getMap,DIFFICULTIES=[]}=ui;
  const [tab,setTab]=useState('create');
+ const [modeFilter,setModeFilter]=useState(FILTER_ALL);
+ const [mapFilter,setMapFilter]=useState(FILTER_ALL);
+ const [sizeFilter,setSizeFilter]=useState(FILTER_ALL);
+ const [practiceMode,setPracticeMode]=useState('deathmatch');
+ const [practiceBots,setPracticeBots]=useState(3);
+ const [practiceDifficulty,setPracticeDifficulty]=useState('normal');
  const live=rooms.filter((r:any)=>r.started||r.players>0).length;
+ const roomModes=[...new Set(rooms.map((r:any)=>r.config?.mode).filter(Boolean))];
+ const roomMaps=[...new Set(rooms.map((r:any)=>r.mapId).filter(Boolean))];
+ const visible=rooms.filter((r:any)=>{if(modeFilter!==FILTER_ALL&&r.config?.mode!==modeFilter)return false;if(mapFilter!==FILTER_ALL&&r.mapId!==mapFilter)return false;if(sizeFilter!==FILTER_ALL&&sizeBucket(r.players)!==sizeFilter)return false;return true;});
+ const practiceConfig={...config,mode:practiceMode,botCount:practiceBots,difficulty:practiceDifficulty};
+ const startPractice=()=>quickStart?.(practiceMode);
  return <Shell head={<TopBar sub="ROOM BROWSER">{headActions}</TopBar>} rail={<ActionRail>
    <Btn onClick={()=>changeMode('selection')}>BACK</Btn>
    <Btn variant="primary" onClick={refreshNet}>REFRESH</Btn>
   </ActionRail>}>
-  <PageHead eyebrow="CONCURRENT ROOMS" title={<>Pick a fight<span>.</span></>} lede="Join any open room, watch one in progress, or create your own code."/>
+  <PageHead eyebrow="CONCURRENT ROOMS" title={<>Pick a fight<span>.</span></>} lede="Filter open rooms by mode, map or size, join one in progress, or drop straight into a practice match against bots."/>
   <div className="stack">
    <div className="toolbar">
     <span className="toolbar-title">SERVER</span>
@@ -21,10 +36,25 @@ export function BrowseScreen({ui}:ScreenProps){
    </div>
    {netError&&<Banner tone="error">{netError}</Banner>}
    {(config?.mode==='puma-race'||config?.mode==='puma-soccer')&&<p className="field-note">PUMA {config.mode==='puma-race'?'RACE':'SOCCER'} / Equal chassis for every driver. Operator is your identity only. Harnesses, weapons and combat gear are inactive.</p>}
+   <Panel label="PRACTICE VS BOTS" meta="OFFLINE · INSTANT" bodyClass="stack">
+    <p className="field-note">No server needed. Launch a local match against bots with your current operator and arena.</p>
+    <div className="row">
+     <label className="config-field"><span>Mode</span><select aria-label="Practice mode" value={practiceMode} onChange={e=>setPracticeMode(e.target.value)}>{GAME_MODES.filter((m:any)=>!['horde','campaign'].includes(m.id)).map((m:any)=><option key={m.id} value={m.id}>{m.name}</option>)}</select></label>
+     <label className="config-field"><span>Bots</span><select aria-label="Practice bot count" value={practiceBots} onChange={e=>setPracticeBots(Number(e.target.value))}>{[0,1,2,3,4,5,6,7].map(n=><option key={n} value={n}>{n}</option>)}</select></label>
+     <label className="config-field"><span>Difficulty</span><select aria-label="Practice bot difficulty" value={practiceDifficulty} onChange={e=>setPracticeDifficulty(e.target.value)}>{DIFFICULTIES.map((d:any)=><option key={d.id} value={d.id}>{d.name}</option>)}</select></label>
+     <Btn variant="primary" onClick={startPractice}>PRACTICE VS BOTS</Btn>
+    </div>
+    <p className="field-note">{practiceConfig.botCount} bots · {filterLabel(practiceMode)} · {filterLabel(practiceDifficulty)}. Practice starts with your saved rules; tune everything under MATCH SETUP.</p>
+   </Panel>
    <div className="layout layout--trail">
-    <Panel label="LIVE ROOMS" meta={`${live} LIVE`}>
+    <Panel label="LIVE ROOMS" meta={`${visible.length} / ${rooms.length} SHOWN · ${live} LIVE`}>
+     <div className="toolbar theater-filters" role="group" aria-label="Room filters">
+      <label className="config-field"><span>Mode</span><select aria-label="Filter by mode" value={modeFilter} onChange={e=>setModeFilter(e.target.value)}><option value={FILTER_ALL}>All modes</option>{roomModes.map((mode:any)=><option key={mode} value={mode}>{filterLabel(mode)}</option>)}</select></label>
+      <label className="config-field"><span>Map</span><select aria-label="Filter by map" value={mapFilter} onChange={e=>setMapFilter(e.target.value)}><option value={FILTER_ALL}>All maps</option>{roomMaps.map((map:any)=><option key={map} value={map}>{getMap?.(map)?.name||filterLabel(map)}</option>)}</select></label>
+      <label className="config-field"><span>Size</span><select aria-label="Filter by size" value={sizeFilter} onChange={e=>setSizeFilter(e.target.value)}><option value={FILTER_ALL}>Any size</option><option value="empty">Empty</option><option value="small">Small · 1-2</option><option value="medium">Medium · 3-5</option><option value="large">Large · 6+</option></select></label>
+     </div>
      <div className="stack stack--tight">
-      {rooms.map((room:any)=>{
+      {visible.map((room:any)=>{
        const carded=room.started&&room.players>0;
        return <div key={room.roomId} className="stack stack--tight">
         <SelectCard name={room.name||room.roomId} tag={room.started?`IN MATCH · ${room.mapId??'arena'}`:room.players>0?'LOBBY OPEN':'EMPTY'} meta={`${room.players}P`} onClick={carded?undefined:()=>joinRoom(room.roomId,false)}/>
@@ -35,6 +65,7 @@ export function BrowseScreen({ui}:ScreenProps){
        </div>;
       })}
       {rooms.length===0&&<Empty title="No rooms yet">Create one below — the first player to join becomes host.</Empty>}
+      {rooms.length>0&&visible.length===0&&<Empty title="No matching rooms">Try a different mode, map or size filter.</Empty>}
      </div>
     </Panel>
     <Panel>

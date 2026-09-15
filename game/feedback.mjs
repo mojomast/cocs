@@ -49,23 +49,23 @@ export class AmbientFX{
  setProfile(profile){this.profile=profile||null;this.acc=0;this.smokeAcc=0;}
  setAnchors(anchors){this.anchors=Array.isArray(anchors)?anchors:[];}
  reset(){this.acc=0;this.smokeAcc=0;}
- update(dt,origin,{reduced=false,software=false,radius=9}={}){
+ update(dt,origin,{reduced=false,software=false,radius=9,wind=1}={}){
   if(reduced||software||!this.pool||!this.profile||!origin)return 0;
   const step=Math.min(Math.max(Number(dt)||0,0),.1),rate=Math.max(0,Number(this.profile.rate)||0)*this.rateScale;
   this.acc+=step*rate;
   let spawned=0;
-  while(this.acc>=1&&spawned<this.moteCap){this.acc-=1;this._mote(origin,radius);spawned++;}
+  while(this.acc>=1&&spawned<this.moteCap){this.acc-=1;this._mote(origin,radius,wind);spawned++;}
   const smoke=this.profile.smoke;
-  if(smoke&&this.anchors.length){this.smokeAcc+=step*Math.max(1,Number(smoke.rate)||1);while(this.smokeAcc>=1&&spawned<this.moteCap*2){this.smokeAcc-=1;this._smoke(smoke);spawned++;}}
+  if(smoke&&this.anchors.length){this.smokeAcc+=step*Math.max(1,Number(smoke.rate)||1);while(this.smokeAcc>=1&&spawned<this.moteCap*2){this.smokeAcc-=1;this._smoke(smoke,wind);spawned++;}}
   this.spawned+=spawned;return spawned;
  }
- _mote(origin,radius){
-  const a=this.random()*Math.PI*2,dist=Math.sqrt(this.random())*Math.max(1,radius),height=this.random()*3.4,drift=this.profile.drift||.5,rise=this.profile.rise||0;
+ _mote(origin,radius,wind=1){
+  const a=this.random()*Math.PI*2,dist=Math.sqrt(this.random())*Math.max(1,radius),height=this.random()*3.4,g=Number.isFinite(wind)&&wind>0?wind:1,drift=(this.profile.drift||.5)*g,rise=(this.profile.rise||0)*g;
   this.pool.add({pos:{x:(origin.x||0)+Math.cos(a)*dist,y:(origin.y||0)+height,z:(origin.z||0)+Math.sin(a)*dist},color:this.profile.color||'#c9d8e6',size:this.profile.size||.035,life:this.profile.life||3.5,velocity:{x:(this.random()-.5)*drift,y:rise*(.5+this.random()),z:(this.random()-.5)*drift},additive:this.profile.additive===true});
  }
- _smoke(smoke){
-  const anchor=this.anchors[Math.floor(this.random()*this.anchors.length)%this.anchors.length];
-  this.pool.add({pos:{x:(anchor.x||0)+(this.random()-.5)*1.2,y:(anchor.y||0)+.4,z:(anchor.z||0)+(this.random()-.5)*1.2},color:smoke.color||'#8f9a86',size:smoke.size||.3,life:smoke.life||6,expand:.4,velocity:{x:(this.random()-.5)*.2,y:smoke.rise||.5,z:(this.random()-.5)*.2},additive:true});
+ _smoke(smoke,wind=1){
+  const anchor=this.anchors[Math.floor(this.random()*this.anchors.length)%this.anchors.length],g=Number.isFinite(wind)&&wind>0?wind:1;
+  this.pool.add({pos:{x:(anchor.x||0)+(this.random()-.5)*1.2,y:(anchor.y||0)+.4,z:(anchor.z||0)+(this.random()-.5)*1.2},color:smoke.color||'#8f9a86',size:smoke.size||.3,life:smoke.life||6,expand:.4,velocity:{x:(this.random()-.5)*.2*g,y:(smoke.rise||.5)*g,z:(this.random()-.5)*.2*g},additive:true});
  }
 }
 
@@ -105,6 +105,35 @@ const ANNOUNCE_CUES=Object.freeze({
 });
 const cl=(n,a,b)=>Math.max(a,Math.min(b,n));
 
+// Per-mode music themes. A theme is a root frequency plus a small scale (in
+// semitones) reused for the dynamic combat drone and the victory/defeat sting,
+// so a mode has a recognisable tonal centre without a music asset. Pure data.
+export const MODE_THEMES=Object.freeze({
+ default:Object.freeze({root:58,scale:Object.freeze([0,3,5,7])}),
+ deathmatch:Object.freeze({root:62,scale:Object.freeze([0,3,5,7])}),
+ teamdeathmatch:Object.freeze({root:58,scale:Object.freeze([0,3,5,7])}),
+ ctf:Object.freeze({root:55,scale:Object.freeze([0,4,7,9])}),
+ koth:Object.freeze({root:52,scale:Object.freeze([0,5,7,10])}),
+ domination:Object.freeze({root:57,scale:Object.freeze([0,4,7,11])}),
+ assault:Object.freeze({root:50,scale:Object.freeze([0,3,7,10])}),
+ payload:Object.freeze({root:53,scale:Object.freeze([0,5,7,10])}),
+ instagib:Object.freeze({root:66,scale:Object.freeze([0,6,8,12])}),
+ rockets:Object.freeze({root:48,scale:Object.freeze([0,3,6,9])}),
+ arsenal:Object.freeze({root:60,scale:Object.freeze([0,4,7,9])}),
+ armsrace:Object.freeze({root:64,scale:Object.freeze([0,2,5,9])}),
+ 'combined-arms':Object.freeze({root:51,scale:Object.freeze([0,4,7,10])}),
+ 'puma-race':Object.freeze({root:69,scale:Object.freeze([0,4,7,12])}),
+ 'puma-soccer':Object.freeze({root:67,scale:Object.freeze([0,4,7,11])}),
+ horde:Object.freeze({root:46,scale:Object.freeze([0,1,5,8])}),
+ campaign:Object.freeze({root:54,scale:Object.freeze([0,3,7,10])}),
+ juggernaut:Object.freeze({root:49,scale:Object.freeze([0,3,6,10])}),
+});
+// Victory/defeat stings: a short arpeggio built from the active mode scale.
+const STING_CUES=Object.freeze({
+ victory:Object.freeze({type:'triangle',octave:4,step:.12,length:.6,gain:.06,end:1.5,notes:Object.freeze([0,2,4,7])}),
+ defeat:Object.freeze({type:'sawtooth',octave:2,step:.15,length:.62,gain:.055,end:.5,notes:Object.freeze([4,2,1,0])}),
+});
+
 // Layered Web Audio synth: filtered noise transients + tonal bodies, distance
 // falloff and stereo panning, plus footsteps, landing thuds and a Warthog engine.
 // Continuous ambience bed profiles keyed by biome mood. Frequencies and gains
@@ -117,7 +146,7 @@ const BED_MOODS=Object.freeze({
  storm:Object.freeze({filter:420,tone:48,gain:.024,sub:.005}),
 });
 export class SynthAudio{
- constructor({announcer=false}={}){this.ctx=null;this.muted=false;this.voices=new Set();this.noiseBuffer=null;this.master=null;this.lastDamage=null;this.lastReport=null;this.lastHit=-Infinity;this.footPhase=0;this.wasGrounded=undefined;this.lastVy=0;this.engine=null;this.bed=null;this.bedMood='default';this.ambientBed=true;this.stepVariant=0;this.landVariant=0;this.reloadVariant=0;this.intensity=0;this.bedScale=.75;this.music=null;this.announcer=announcer===true;this.announced=new Set();this.lastCue=null;}
+ constructor({announcer=false}={}){this.ctx=null;this.muted=false;this.voices=new Set();this.noiseBuffer=null;this.master=null;this.lastDamage=null;this.lastReport=null;this.lastHit=-Infinity;this.footPhase=0;this.wasGrounded=undefined;this.lastVy=0;this.engine=null;this.bed=null;this.bedMood='default';this.ambientBed=true;this.stepVariant=0;this.landVariant=0;this.reloadVariant=0;this.intensity=0;this.bedScale=.75;this.music=null;this.announcer=announcer===true;this.announced=new Set();this.lastCue=null;this.mode='default';this.theme=MODE_THEMES.default;this.lastSting=null;}
  start(){try{const Context=globalThis.AudioContext||globalThis.webkitAudioContext;if(!Context)return;this.ctx??=new Context();if(this.ctx.state==='suspended')this.ctx.resume();if(!this.master){this.master=this.ctx.createGain();this.master.gain.value=.9;this.master.connect(this.ctx.destination);}this.noiseBuffer??=this._makeNoise();if(this.ambientBed!==false)this._bed(true);}catch{}}
  // Low, continuous ambience bed: filtered noise hiss plus a sub tone, faded in
  // through the master gain. Owned by the audio instance and torn down in dispose.
@@ -158,7 +187,7 @@ export class SynthAudio{
   if(!this.ctx||!this.master||this.muted)return this.intensity;
   const t=this.ctx.currentTime;
   if(next>.24&&!this.music&&this.voices.size<28)this._musicOn(1-next*.15);
-  if(this.music){try{this.music.g.gain.setTargetAtTime(next*.05,t,.4);this.music.osc.frequency.setTargetAtTime(58+next*46,t,.3);}catch{}}
+  if(this.music){try{this.music.g.gain.setTargetAtTime(next*.05,t,.4);this.music.osc.frequency.setTargetAtTime((this.theme?.root??58)+next*46,t,.3);}catch{}}
   this.bedScale=.55+next*.55;
   if(this.bed){const profile=BED_MOODS[this.bedMood]||BED_MOODS.default;try{this.bed.g.gain.setTargetAtTime(profile.gain*this.bedScale,t,.5);this.bed.og.gain.setTargetAtTime(profile.sub*this.bedScale,t,.55);}catch{}}
   return this.intensity;
@@ -166,10 +195,31 @@ export class SynthAudio{
  _musicOn(gain=1){
   if(!this.ctx||!this.master)return null;
   if(!this.music){
-   const osc=this.ctx.createOscillator(),g=this.ctx.createGain();osc.type='triangle';osc.frequency.value=58;g.gain.value=.0001;osc.connect(g);g.connect(this.master);osc.start();this.music={osc,g};
+   const osc=this.ctx.createOscillator(),g=this.ctx.createGain();osc.type='triangle';osc.frequency.value=this.theme?.root??58;g.gain.value=.0001;osc.connect(g);g.connect(this.master);osc.start();this.music={osc,g};
   }
   if(this.music)this.music.g.gain.setTargetAtTime(Math.max(0,Math.min(1,Number(gain)||0))*.005,this.ctx.currentTime,.6);
   return this.music;
+ }
+ // Select the tonal centre for a game mode. The running drone retunes in place
+ // so switching modes never restarts the oscillator or spends a voice slot.
+ setModeTheme(mode){
+  const key=typeof mode==='string'&&MODE_THEMES[mode]?mode:'default';
+  this.mode=key;this.theme=MODE_THEMES[key];
+  if(this.music&&this.ctx){try{this.music.osc.frequency.setTargetAtTime(this.theme.root,this.ctx.currentTime,.4);}catch{}}
+  return key;
+ }
+ // Victory/defeat sting: a short arpeggio built from the active mode scale. It
+ // reuses the shared voice cap and disposal path, and is a no-op when muted or
+ // when the context has not started.
+ sting(outcome){
+  const cue=STING_CUES[outcome];if(!cue)return null;
+  if(!this.ctx||this.muted)return {outcome,played:false};
+  const scale=this.theme?.scale||MODE_THEMES.default.scale,root=this.theme?.root??58;
+  const freq=step=>root*Math.pow(2,(scale[step%scale.length]+12*(cue.octave-1))/12);
+  this._play(cue.length+(cue.notes.length-1)*cue.step,0,(t,out,nodes)=>{
+   cue.notes.forEach((step,i)=>{const f=freq(step);this._tone(t+i*cue.step,out,nodes,{freq:f,duration:cue.length,type:cue.type,gain:cue.gain,end:f*cue.end});});
+  });
+  this.lastSting=outcome;return {outcome,played:true};
  }
  _musicOff(){
   if(!this.music)return;
@@ -220,9 +270,24 @@ export class SynthAudio{
  _melee(weapon,hit){
   this._play(.22,0,(t,out,nodes)=>{this._noise(t,out,nodes,{duration:.16,gain:.22,type:'bandpass',freq:900,sweep:260,q:.7});this._tone(t,out,nodes,{freq:220,duration:.12,type:'triangle',gain:.08,end:90});if(hit)this._noise(t+.05,out,nodes,{duration:.09,gain:.3,type:'lowpass',freq:700,sweep:200,q:.8});});
  }
- // Landing thump scaled by impact speed. The variant shifts the body tone so
- // repeated jumps do not phase into one sample.
- _landing(impact,weapon){
+  // Distant thunder: a low, filtered rumble with a delayed onset and stereo
+  // pan. Distance (0..1) controls the delay, brightness and gain so a close
+  // strike cracks and a far one rolls. Reuses the shared voice cap/disposal.
+  thunder({distance=.6,pan=0,intensity=1}={}){
+   if(!this.ctx||this.muted)return false;
+   const d=cl(Number(distance)||0,0,1),vol=cl(Number(intensity)||0,0,1)*(1-d*.55);
+   if(vol<=.02)return false;
+   const delay=.06+d*1.5;
+   setTimeout(()=>{if(!this.ctx||this.muted)return;this._play(.9+d*.7,pan,(t,out,nodes)=>{
+    this._noise(t,out,nodes,{duration:.55+d*.5,gain:.42*vol,type:'lowpass',freq:420-d*220,sweep:70+d*40,q:.7,attack:.02});
+    this._noise(t+.08,out,nodes,{duration:.3,gain:.2*vol,type:'lowpass',freq:180,sweep:60,q:.8,attack:.03});
+    this._tone(t,out,nodes,{freq:52-d*12,duration:.7+d*.5,type:'sine',gain:.3*vol,end:26});
+   });},Math.round(delay*1000));
+   return true;
+  }
+  // Landing thump scaled by impact speed. The variant shifts the body tone so
+  // repeated jumps do not phase into one sample.
+  _landing(impact,weapon){
   this.landVariant=(this.landVariant+1)%3;
   const heavy=(WEAPONS[weapon]?.feel?.kick?.[2]??16)<12;
   this._play(.14,0,(t,out,nodes)=>{this._noise(t,out,nodes,{duration:.1,gain:.05+.16*impact,type:'lowpass',freq:420,sweep:160,q:.8});this._tone(t,out,nodes,{freq:(heavy?76:90)+this.landVariant*8,duration:.12,type:'sine',gain:.05+.1*impact,end:45});});
@@ -254,5 +319,5 @@ export class SynthAudio{
   const vehicle=(vehicles||[]).find(v=>v.id===player.vehicleId||v.driver===player.id),vx=vehicle?(vehicle.vx??vehicle.velocity?.x??0):0,vz=vehicle?(vehicle.vz??vehicle.velocity?.z??0):0;
   this._engine(vehicle?Math.hypot(vx,vz):0,Boolean(vehicle));}
  _engine(speed,active){if(!this.ctx)return;if(active&&!this.muted){if(!this.engine){const osc=this.ctx.createOscillator(),sub=this.ctx.createOscillator(),f=this.ctx.createBiquadFilter(),g=this.ctx.createGain();osc.type='sawtooth';sub.type='triangle';f.type='lowpass';f.frequency.value=700;g.gain.value=.0001;osc.connect(f);sub.connect(f);f.connect(g);g.connect(this.master);osc.start();sub.start();this.engine={osc,sub,f,g};}const s=cl(speed/20,0,1),t=this.ctx.currentTime;this.engine.osc.frequency.setTargetAtTime(55+s*120,t,.1);this.engine.sub.frequency.setTargetAtTime(28+s*40,t,.1);this.engine.g.gain.setTargetAtTime(.022+s*.05,t,.12);this.engine.f.frequency.setTargetAtTime(500+s*1200,t,.15);}else if(this.engine){const {osc,sub,g}=this.engine,t=this.ctx.currentTime;g.gain.setTargetAtTime(.0001,t,.08);this.engine=null;setTimeout(()=>{try{osc.stop();sub.stop();}catch{}},300);}}
- dispose(){if(this.engine){try{this.engine.osc.stop();this.engine.sub.stop();}catch{}this.engine=null;}if(this.bed){try{this.bed.src.stop();this.bed.osc.stop();}catch{}this.bed=null;}if(this.music){try{this.music.osc.stop();}catch{}try{this.music.osc.disconnect();this.music.g.disconnect();}catch{}this.music=null;}for(const token of this.voices){clearTimeout(token.timer);for(const n of token.nodes){try{n.disconnect();}catch{}}}this.voices.clear();try{this.master?.disconnect();}catch{}this.master=null;this.ctx?.close();this.ctx=null;}
+ dispose(){if(this.engine){try{this.engine.osc.stop();this.engine.sub.stop();}catch{}this.engine=null;}if(this.bed){try{this.bed.src.stop();this.bed.osc.stop();}catch{}this.bed=null;}if(this.music){try{this.music.osc.stop();}catch{}try{this.music.osc.disconnect();this.music.g.disconnect();}catch{}this.music=null;}for(const token of this.voices){clearTimeout(token.timer);for(const n of token.nodes){try{n.disconnect();}catch{}}}this.voices.clear();this.lastSting=null;try{this.master?.disconnect();}catch{}this.master=null;this.ctx?.close();this.ctx=null;}
 }

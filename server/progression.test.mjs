@@ -78,6 +78,25 @@ test('achievements and prestige mirror through the server store and persistence'
  assert.equal(store.get(ID).achievements['first-blood'],true,'all() copies achievements');
 });
 
+test('summary mirrors the award as a results-screen card',async()=>{
+ const file=tempFile(),store=new ProgressionStore(file);
+ const award=store.award(ID,{win:true,mode:'deathmatch',actor:{frags:12,deaths:3,scoreStats:{}}});
+ const card=store.summary(ID,award);
+ assert.equal(card.result,'win');
+ assert.equal(card.kills,12);
+ assert.equal(card.deaths,3);
+ assert.equal(card.kd,4);
+ assert.equal(card.xp,award.gained);
+ assert.equal(card.level,award.profile.level);
+ assert.ok(card.achievementCount>=1,'first win unlocks an achievement on the card');
+ assert.equal(store.summary('player-0000-missing',award),null);
+ assert.equal(store.summary('bad',award),null);
+ await store.whenPersisted();
+ const reloaded=new ProgressionStore(file);
+ const round=reloaded.summary(ID,{gained:0,profile:reloaded.get(ID)});
+ assert.equal(round.level,reloaded.get(ID).level);
+});
+
 test('invalid ids never create profiles and all() returns copies',()=>{
  const store=new ProgressionStore();
  assert.equal(store.award('bad',{actor:{frags:1}}),null);

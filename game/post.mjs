@@ -23,11 +23,31 @@ export function normalizeQuality(value, { software = false, reduced = false } = 
   return reduced === true ? 'medium' : 'high';
 }
 
+// `triangleBudget` is the hard per-frame ceiling the CPU SoftwareRenderer
+// rasterizes. It is the last line of defence: even a pathological scene (a
+// dozen actors, debris, weather and a full scatter field) can never make the
+// software path spend unbounded raster work. WebGL ignores it because the GPU
+// clips and culls cheaply, but the value still scales monotonically so a
+// hardware tier can lower its own scatter budget from the same table.
 const QUALITY_TABLE = Object.freeze({
-  low: Object.freeze({ tier: 0, particles: .4, decals: 8, deaths: 36, splats: 10, shadows: 4, shadowMap: 1024, stars: .45, scatter: .5, scatterDetail: .35, ambientMotes: 3, tracers: .72, bloom: .6 }),
-  medium: Object.freeze({ tier: 1, particles: .7, decals: 14, deaths: 56, splats: 14, shadows: 3, shadowMap: 1536, stars: .8, scatter: .78, scatterDetail: .7, ambientMotes: 5, tracers: .86, bloom: .85 }),
-  high: Object.freeze({ tier: 2, particles: 1, decals: 18, deaths: 72, splats: 16, shadows: 2, shadowMap: 2048, stars: 1, scatter: 1, scatterDetail: 1, ambientMotes: 6, tracers: 1, bloom: 1 }),
+  low: Object.freeze({ tier: 0, particles: .4, decals: 8, deaths: 36, splats: 10, shadows: 4, shadowMap: 1024, stars: .45, scatter: .5, scatterDetail: .35, ambientMotes: 3, tracers: .72, bloom: .6, triangleBudget: 90000 }),
+  medium: Object.freeze({ tier: 1, particles: .7, decals: 14, deaths: 56, splats: 14, shadows: 3, shadowMap: 1536, stars: .8, scatter: .78, scatterDetail: .7, ambientMotes: 5, tracers: .86, bloom: .85, triangleBudget: 140000 }),
+  high: Object.freeze({ tier: 2, particles: 1, decals: 18, deaths: 72, splats: 16, shadows: 2, shadowMap: 2048, stars: 1, scatter: 1, scatterDetail: 1, ambientMotes: 6, tracers: 1, bloom: 1, triangleBudget: 200000 }),
 });
+
+// Normalize an arbitrary budget into a finite, positive triangle ceiling.
+// Non-finite or non-positive values disable the cap (Infinity) so a caller can
+// explicitly opt out, matching SoftwareRenderer.setTriangleBudget.
+export function clampTriangleBudget(value) {
+  return Number.isFinite(value) && value > 0 ? Math.floor(value) : Infinity;
+}
+
+// Pick the CPU triangle ceiling for a tier. A software renderer can only ever
+// run the low tier, but an explicit override may raise it, so the value is
+// always the tier's own budget rather than a hard-coded software constant.
+export function frameTriangleBudget(level, options) {
+  return clampTriangleBudget(qualitySettings(level, options).triangleBudget);
+}
 
 export function qualitySettings(level, options) {
   return QUALITY_TABLE[normalizeQuality(level, options)];

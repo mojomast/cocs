@@ -442,6 +442,12 @@
 .team-score-banner b { color: #ffc489; font-weight: 400; }
 .palette-colorblind .team-score-banner span:nth-of-type(1) { color: #ff9d2e; }
 .palette-colorblind .team-score-banner span:nth-of-type(2) { color: #2f9bff; }
+.palette-deuteranopia .team-score-banner span:nth-of-type(1) { color: #ff9d2e; }
+.palette-deuteranopia .team-score-banner span:nth-of-type(2) { color: #2f9bff; }
+.palette-protanopia .team-score-banner span:nth-of-type(1) { color: #0072b2; }
+.palette-protanopia .team-score-banner span:nth-of-type(2) { color: #f0e442; }
+.palette-tritanopia .team-score-banner span:nth-of-type(1) { color: #d55e00; }
+.palette-tritanopia .team-score-banner span:nth-of-type(2) { color: #009e73; }
 .history-heading { display: flex; justify-content: space-between; gap: 12px; flex-wrap: wrap; margin-bottom: 8px; color: #9db9ad; font: 11px monospace; letter-spacing: .7px; }
 .history-heading b { color: #ffc489; font-weight: 400; }
 .history-match .mode-scoreboard { margin-inline: -2px; }

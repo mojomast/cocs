@@ -73,3 +73,42 @@ export function deathPlan(context={}){
  const variation=deathPose(base,context);
  return {style,...base,pieces:Math.round(base.pieces*scale),gore:Math.round(base.gore*scale),force:base.force*scale,color,...variation};
 }
+
+// ---- Hit reactions --------------------------------------------------------
+//
+// Deterministic, presentation-only flinch/knockback for a non-lethal hit. The
+// authoritative simulation never reads this: it only decides how a model leans
+// and which way a blood/spark spray is thrown. Pure, so the same hit context
+// (actor, direction, damage, serial) always produces the same reaction on every
+// client and in a replay. `strength` is a bounded 0..1 envelope, `lean` and
+// `push` are small world-space offsets the renderer applies to the model, and
+// `spray` describes the directional feedback burst.
+const clampUnit=n=>{const v=Number(n);return Number.isFinite(v)?Math.max(0,Math.min(1,v)):0;};
+
+export function hitReaction({damage=0,dir=null,seed=0,actor=0,serial=0,reduced=false,headshot=false,energy=false,fire=false}={}){
+ const amount=Math.max(0,Number.isFinite(Number(damage))?Number(damage):0);
+ // A 35-damage hit saturates the flinch; tiny chip damage barely reads.
+ const strength=clampUnit(amount/35);
+ const dx=Number.isFinite(dir?.x)?dir.x:0,dz=Number.isFinite(dir?.z)?dir.z:0;
+ const len=Math.hypot(dx,dz)||1,nx=dx/len,nz=dz/len;
+ const jitter=hashUnit(seed,actor,serial);
+ const lean=reduced?0:(.12+.5*strength)*(.7+.6*jitter);
+ const push=reduced?0:(.05+.22*strength);
+ const color=energy?'#8ce8ff':fire?'#ffb27a':'#8f1a1a';
+ const kind=energy?'spark':fire?'ember':'blood';
+ const count=reduced?Math.min(2,Math.round(1+strength*3)):Math.round(2+strength*6);
+ return {
+  strength,
+  headshot:headshot===true,
+  kind,
+  color,
+  lean:Math.max(0,Math.min(.9,lean)),
+  push:Math.max(0,Math.min(.4,push)),
+  // World-space knockback direction; zero when the hit carried no direction.
+  pushX:Number.isFinite(dir?.x)?nx*push:0,
+  pushZ:Number.isFinite(dir?.z)?nz*push:0,
+  sprayX:nx,sprayZ:nz,
+  count,
+  seed:hashSeed(seed,actor,serial),
+ };
+}

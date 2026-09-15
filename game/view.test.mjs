@@ -1117,6 +1117,197 @@ test('the quality controller auto-downgrades on sustained low FPS without pinnin
  assert.ok(view._qualityOverride==null,'the controller never pins quality');
 });
 
+test('the weapon preview mounts a real weapon through ModelAssets and disposes exactly once',()=>{
+ const view=Object.create(ArenaView.prototype);
+ const rig=view.mountWeaponPreview({type:2});
+ assert.ok(rig,'the view exposes a preview rig');
+ assert.ok(rig.model&&rig.model.userData.type===2,'the preview builds the requested weapon');
+ const box=new T.Box3().setFromObject(rig.model),center=box.getCenter(new T.Vector3());
+ assert.ok(Math.abs(center.x)<.05&&Math.abs(center.y)<.05&&Math.abs(center.z)<.05,'the preview recenters the weapon on the turntable');
+ const shared=rig.assets.resources;
+ assert.ok(shared.size>0,'the preview reuses the shared ModelAssets registry');
+ const sharedCounts=[...shared].map(()=>0);[...shared].forEach((r,i)=>r.addEventListener('dispose',()=>sharedCounts[i]++));
+ view.unmountWeaponPreview();
+ assert.ok(sharedCounts.every(c=>c===0),'unmounting keeps shared assets alive');
+ assert.equal(rig.model,null,'unmounting releases the preview model');
+ rig.mount({type:3});
+ assert.equal(rig.model.userData.type,3,'switching weapons rebuilds the preview');
+ const owned=new Set();rig.model.traverse(n=>{if(n.geometry&&!shared.has(n.geometry))owned.add(n.geometry);if(n.material)for(const m of Array.isArray(n.material)?n.material:[n.material])if(!shared.has(m))owned.add(m);});
+ const ownedCounts=[...owned].map(()=>0);[...owned].forEach((r,i)=>r.addEventListener('dispose',()=>ownedCounts[i]++));
+ rig.dispose();
+ assert.ok(ownedCounts.every(c=>c===1),'dispose releases each preview-owned resource exactly once');
+ assert.ok(sharedCounts.every(c=>c===0),'a rig never disposes assets it does not own');
+ view.previewAssets.dispose();
+ assert.ok(sharedCounts.every(c=>c===1),'the view releases the shared preview assets exactly once');
+ view.preview=null;view.previewAssets=null;
+});
+
+test('the weapon preview pose is deterministic and freezes under reduced motion',()=>{
+ const view=Object.create(ArenaView.prototype);
+ const rig=view.mountWeaponPreview({type:0});
+ const a=view.updateWeaponPreview(2,{reduced:false}),b=view.updateWeaponPreview(2,{reduced:false});
+ assert.deepEqual(a,b,'the same time reproduces the preview pose');
+ const frozen=view.updateWeaponPreview(10,{reduced:true}),frozenLater=view.updateWeaponPreview(99,{reduced:true});
+ assert.deepEqual(frozen,frozenLater,'reduced motion pins the preview');
+ assert.equal(view.updateWeaponPreview(1,{visible:false}).pivot.visible,false,'visibility is applied without breaking the pose');
+ assert.equal(view.updateWeaponPreview(1,{visible:true}).pivot.visible,true);
+ rig.dispose();view.preview=null;
+});
+
+test('the preview rect resizes the inspect camera without touching the gameplay camera',t=>{
+ const {view}=fixture(t);
+ const rig=view.mountWeaponPreview({type:1,rect:{left:10,bottom:20,width:320,height:180}});
+ assert.equal(rig.camera.aspect,320/180,'the inspect camera matches the mount rect');
+ view.updateWeaponPreview(1,{reduced:false});
+ assert.equal(view.camera.aspect,1,'the gameplay camera is untouched');
+ rig.dispose();
+});
+
+test('the weapon preview renders into its mount rect through the shared renderer',t=>{
+ const {view,renderer}=fixture(t);
+ view.width=800;view.height=450;
+ const calls=[];renderer.autoClear=true;
+ renderer.setScissorTest=v=>calls.push(['scissorTest',v]);
+ renderer.setViewport=(...a)=>calls.push(['viewport',...a]);
+ renderer.setScissor=(...a)=>calls.push(['scissor',...a]);
+ renderer.render=(scene,camera)=>calls.push(['render',scene===view.preview.scene,camera===view.preview.camera]);
+ view.mountWeaponPreview({type:0,rect:{left:10,bottom:20,width:320,height:180}});
+ assert.equal(view.renderWeaponPreview(),true,'the preview renders into the mount rect');
+ assert.deepEqual(calls[0],['scissorTest',true]);
+ assert.deepEqual(calls[1],['viewport',10,430,320,180],'the viewport is derived from the CSS rect');
+ assert.deepEqual(calls[2],['scissor',10,430,320,180]);
+ assert.deepEqual(calls[3],['render',true,true]);
+ assert.ok(calls.some(call=>call[0]==='scissorTest'&&call[1]===false),'scissor testing is disabled again');
+ assert.deepEqual(calls.at(-2),['viewport',0,0,800,450],'the full viewport is restored');
+ assert.deepEqual(calls.at(-1),['scissor',0,0,800,450]);
+ view.previewRect=null;
+ assert.equal(view.renderWeaponPreview(),false,'no mount rect means no preview draw');
+ view.previewRect={left:0,bottom:0,width:4,height:4};
+ assert.equal(view.renderWeaponPreview(),false,'a tiny rect is ignored');
+ view.previewRect={left:0,bottom:0,width:320,height:180};
+ view.renderer={isSoftware:true};
+ assert.equal(view.renderWeaponPreview(),false,'a software renderer never previews');
+ view.preview.dispose();view.preview=null;
+});
+
+test('hit reactions are deterministic, directional and gated off the CPU renderer',t=>{
+ const {view,renderer}=playable(t);
+ view.scene=new T.Scene();view.actorModels=new Map([[7,new T.Group()]]);
+ const event={type:'damage',id:5,actor:7,amount:20,seed:3,direction:{x:1,z:0},pos:{x:0,y:1,z:0}};
+ const first=view.applyHitReaction(event,false);
+ assert.ok(first&&first.strength>0,'a hit produces a reaction');
+ const copy={...event};
+ view.applyHitReaction(copy,false);
+ assert.deepEqual(copy,event,'the authoritative event is never mutated');
+ assert.ok(view.hitPool&&view.hitPool.slots.some(s=>s.active),'WebGL spawns directional feedback');
+ renderer.isSoftware=true;
+ const before=view.hitPool.slots.filter(s=>s.active).length;
+ view.applyHitReaction({...event,id:6,pos:{x:3,y:1,z:0}},false);
+ assert.equal(view.hitPool.slots.filter(s=>s.active).length,before,'the CPU renderer spawns no hit feedback');
+ const reduced=view.applyHitReaction({...event,id:7},true);
+ assert.equal(reduced.lean,0,'reduced motion drops the flinch');
+ assert.ok(view._updateHitReactions(.016)>=0);
+ // Knockback is re-applied while the hit is live, then the flinch expires.
+ const pushed=view.actorModels.get(7).position.x;
+ view._updateHitReactions();
+ assert.ok(view.actorModels.get(7).position.x>=pushed,'the flinch keeps nudging the model');
+ view.hitFlinch.set(7,{strength:.5,until:0,lean:.2,pushX:.1,pushZ:0});
+ assert.equal(view._updateHitReactions(),0,'an expired flinch is dropped');
+ assert.equal(view.hitFlinch.has(7),false);
+ view.hitPool.dispose();
+});
+
+test('storm weather schedules lightning, plays thunder and applies a wet sheen on WebGL',t=>{
+ const {view}=playable(t);
+ view.scene.userData.sky={background:'#090f17',phase:'night',seed:1};
+ view._arenaLook={background:'#090f17',fog:'#090f17',fogDensity:.018,exposure:1.15};
+ view._arenaLight={hemi:1.8,sun:2.4,hemiColor:new T.Color('#8da5b1'),sunColor:new T.Color('#8da5b1'),groundColor:new T.Color('#20364f')};
+ view.worldGroup=new T.Group();
+ const floor=new T.Mesh(new T.BoxGeometry(4,.5,4),new T.MeshStandardMaterial({color:'#888888',roughness:.9,metalness:0}));
+ view.worldGroup.add(floor);
+ let thunder=0;view.viewAudio={thunder(){thunder++;}};
+ view.setWeather('storm');view.initWeather({id:'aether',background:'#090f17'});
+ view._updateWeather({id:'aether',background:'#090f17'},.016,'playing');
+ assert.ok(view._lightningSchedule().length>0,'the storm builds a deterministic strike schedule');
+ let fired=0;for(let i=0;i<200;i++)fired+=view._updateLightning(.05,false,false);
+ assert.ok(fired>0,'strikes fire across the window');
+ // A long storm loops its schedule instead of falling silent after the window.
+ let later=0;for(let i=0;i<4000;i++)later+=view._updateLightning(.05,false,false);
+ assert.ok(later>0,'a storm past its first window keeps striking');
+ assert.ok(thunder>0,'fired strikes schedule thunder');
+ assert.ok(view._flash>=0&&view._flash<=1,'the flash envelope stays bounded');
+ assert.equal(view.scene.userData.sky.wet>0,true,'the storm marks the sky wet');
+ const authoredExposure=view._arenaLook.exposure;
+ view.renderer.toneMappingExposure=authoredExposure;
+ view._applyLightningFlash(1);
+ assert.ok(view.renderer.toneMappingExposure>authoredExposure,'a flash brightens the exposure');
+ view._flashApplied=1;view._applyLightningFlash(0);
+ assert.equal(view.renderer.toneMappingExposure,authoredExposure,'the flash restores the authored exposure');
+ assert.equal(view._applyWetSheen(view._weatherState()),true,'the first wet pass applies');
+ const base=floor.material.userData.wetBase;
+ assert.ok(floor.material.roughness<base.roughness,'wet floors are smoother');
+ assert.equal(view._applyWetSheen(view._weatherState()),false,'an unchanged wetness band is a no-op');
+ view.setWeather('clear');view._updateWeather({id:'aether',background:'#090f17'},3,'playing');
+ view._weatherState().wetness=0;
+ assert.equal(view._applyWetSheen(view._weatherState()),true,'drying re-applies the dry look');
+ assert.ok(Math.abs(floor.material.roughness-base.roughness)<1e-9,'a fully dry surface matches its authored roughness');
+});
+
+test('the CPU renderer gets a cheap lightning pass with no thunder',t=>{
+ const {view,renderer}=playable(t);renderer.isSoftware=true;
+ view.scene.userData.sky={background:'#090f17',phase:'night',seed:1};
+ view.setWeather('storm');view.initWeather({id:'aether',background:'#090f17'});
+ let thunder=0;view.viewAudio={thunder(){thunder++;}};
+ let fired=0;for(let i=0;i<200;i++)fired+=view._updateLightning(.05,false,true);
+ assert.ok(fired>0,'the CPU renderer still flashes');
+ assert.equal(thunder,0,'the CPU renderer never schedules thunder');
+ assert.equal(view._applyWetSheen(view._weatherState()),false,'the CPU renderer skips the wet sheen');
+});
+
+test('wind gusts drive vegetation sway and ambient drift deterministically',t=>{
+ const {view}=playable(t);
+ view.ambientConfig=ambientProfile({id:'foundry'},'day');
+ view.ambientAnchors=[];
+ view.setWeather('storm');view.initWeather({id:'aether',background:'#090f17'});
+ assert.ok(view.windGust(3)>=.4&&view.windGust(3)<=1.7);
+ assert.equal(view.windGust(3),view.windGust(3),'the gust is a pure function of time');
+ const mesh=new T.InstancedMesh(new T.BoxGeometry(1,1,1),new T.MeshBasicMaterial(),1);
+ mesh.count=1;mesh.setMatrixAt(0,new T.Matrix4());
+ mesh.userData.scatterWind={base:Float32Array.from(mesh.instanceMatrix.array),phase:new Float32Array([0]),amp:new Float32Array([.03])};
+ view.scatterWind=[mesh];
+ assert.ok(view._updateWind(2,false)>0,'gusty wind still sways vegetation');
+ assert.ok(view._updateAmbient(null,.1,2,false)>=0,'ambient drift accepts the gust without throwing');
+ view.ambientPool?.dispose();
+});
+
+test('the view forwards the mode theme and the victory/defeat sting to audio',t=>{
+ const {view}=playable(t);
+ const calls=[];view.viewAudio={setModeTheme(mode){calls.push(['mode',mode]);return mode;},sting(outcome){calls.push(['sting',outcome]);return {outcome,played:true};}};
+ view.setAudio(view.viewAudio);
+ view.buildArena=()=>{};view.clearObjectiveMarkers=()=>{};view.syncVehicles=()=>{};view.updateFlags=()=>{};view.updateObjectives=()=>{};view._trackAssets=()=>{};
+ view.actorModels=new Map();view.pickupModels=[];view.flagModels=new Map();view.vehicleModels=new Map();view.modelAssets=new ModelAssets();view.mapId=MAPS[0].id;
+ view.setMatch({arena:MAPS[0],config:{mode:'ctf'},actors:[],pickups:[],vehicles:[]});
+ assert.deepEqual(calls[0],['mode','ctf'],'setMatch forwards the mode theme');
+ assert.equal(view.setOutcome('victory').played,true);
+ assert.deepEqual(calls.at(-1),['sting','victory']);
+ assert.equal(view.setOutcome('bogus'),null,'an unknown outcome is ignored');
+});
+
+test('the software renderer receives a finite triangle budget from the quality tier',t=>{
+ const {view,renderer}=fixture(t,{software:true});
+ const budgets=[];renderer.setTriangleBudget=budget=>{budgets.push(budget);return budget;};
+ view._applyQuality();
+ assert.ok(budgets.length>0,'the software renderer is given a budget');
+ assert.ok(Number.isFinite(budgets.at(-1))&&budgets.at(-1)>0,'the budget is finite and positive');
+ const low=budgets.at(-1);
+ view.setQuality('high');
+ assert.ok(budgets.at(-1)>=low,'a higher tier raises the CPU triangle ceiling');
+ const webgl=fixture(t).view;
+ const webglRenderer=webgl.renderer;let called=0;webglRenderer.setTriangleBudget=()=>{called++;};
+ webgl._applyQuality();
+ assert.equal(called,0,'the WebGL renderer is never given a CPU triangle cap');
+});
+
 test('death debris spin and splay options are deterministic, bounded and opt-in',()=>{
  const mk=()=>({children:[],add(o){this.children.push(o);},remove(o){const i=this.children.indexOf(o);if(i>=0)this.children.splice(i,1);}});
  const a=new DeathPool(mk(),6,2),b=new DeathPool(mk(),6,2);

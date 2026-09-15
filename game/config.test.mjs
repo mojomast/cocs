@@ -96,6 +96,33 @@ test('new mode balance rules are explicit, bounded and cannot stalemate',()=>{
  assert.equal(normalizeConfig({mode:'team-elimination',fragLimit:0}).fragLimit,1,'elimination target clamps');
 });
 
+test('endless defaults off and normalizes as a boolean',()=>{
+ assert.equal(DEFAULT_CONFIG.endless,false);
+ assert.equal(normalizeConfig({}).endless,false);
+ assert.equal(normalizeConfig({endless:true}).endless,true);
+ assert.equal(normalizeConfig({endless:'yes'}).endless,false);
+ assert.equal(normalizeConfig({endless:1}).endless,false);
+});
+
+test('holdout and uplink register distinct objective variants without disturbing existing modes',()=>{
+ const holdout=GAME_MODES.find(mode=>mode.id==='holdout');
+ const uplink=GAME_MODES.find(mode=>mode.id==='uplink');
+ assert.ok(holdout&&uplink,'both variants are registered');
+ assert.equal(holdout.name,'Holdout');
+ assert.equal(holdout.rules.team,true);
+ assert.equal(holdout.rules.objective.kind,'domination','holdout reuses the domination capture loop');
+ assert.equal(holdout.rules.objective.holdCount,2);
+ assert.ok(holdout.rules.objective.holdSeconds>0);
+ assert.equal(uplink.name,'Uplink');
+ assert.equal(uplink.rules.team,true);
+ assert.equal(uplink.rules.objective.kind,'koth','uplink reuses the single-hill capture loop');
+ assert.ok(uplink.rules.objective.sequence>=2);
+ assert.equal(new Set(GAME_MODES.map(mode=>mode.id)).size,GAME_MODES.length,'mode ids stay unique');
+ assert.equal(new Set(GAME_MODES.map(mode=>mode.name)).size,GAME_MODES.length,'mode names stay unique');
+ assert.equal(normalizeConfig({mode:'holdout'}).fragLimit,100);
+ assert.equal(normalizeConfig({mode:'uplink'}).fragLimit,100);
+});
+
 test('display configuration accepts a manual reduce-motion override', () => {
  const d = normalizeDisplay({ reducedMotion: true });
  assert.equal(d.reducedMotion, true);

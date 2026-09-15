@@ -71,6 +71,13 @@ export class SoftwareRenderer{
   }
   const direction=sky.sunDir||[18,24,10],sun=new T.Vector3(direction[0],direction[1],direction[2]).normalize().applyQuaternion(q);
   if(sun.z<-.15&&typeof ctx.createRadialGradient==='function'&&typeof ctx.arc==='function'){const point=project(sun),radius=Math.max(10,Math.min(w,h)*.045),glow=ctx.createRadialGradient(point[0],point[1],0,point[0],point[1],radius);glow.addColorStop(0,palette.disk);glow.addColorStop(.42,palette.diskGlow);glow.addColorStop(1,'rgba(0,0,0,0)');ctx.fillStyle=glow;ctx.beginPath();ctx.arc(point[0],point[1],radius,0,Math.PI*2);ctx.fill();}
+  // Cheap storm depth: a wet sky darkens slightly, and a lightning flash is a
+  // single translucent white fill over the whole backdrop. No particles, no
+  // extra draws, so the CPU renderer's cost stays flat.
+  const wet=Math.max(0,Math.min(1,Number(sky.wet)||0));
+  if(wet>0){ctx.fillStyle=`rgba(10,18,26,${(wet*.22).toFixed(3)})`;ctx.fillRect(0,0,w,h);}
+  const flash=Math.max(0,Math.min(1,Number(sky.flash)||0));
+  if(flash>0){ctx.fillStyle=`rgba(214,232,255,${(flash*.62).toFixed(3)})`;ctx.fillRect(0,0,w,h);}
  }
  // Deterministic two-layer ridge silhouette drawn against the gradient horizon.
  // Uses only path primitives so it works on any 2D canvas backend.

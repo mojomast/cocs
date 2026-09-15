@@ -1,5 +1,5 @@
 'use client';
-import {useState} from 'react';
+import {useEffect,useState} from 'react';
 import {Slider} from '@/components/ui/slider';
 import {Switch} from '@/components/ui/switch';
 import {RadioGroup,RadioGroupItem} from '@/components/ui/radio-group';
@@ -9,7 +9,7 @@ import {maxBotsFor} from '../../game/arenas.mjs';
 import {objectiveCopy} from '../../game/hud.mjs';
 import {WEAPONS} from '../../game/data.mjs';
 import {QUICK_MATCH_PRESETS,presetConfig} from '../../game/replay.mjs';
-import {DISPLAY_PRESETS,applyDisplayPreset} from '../../game/presets.mjs';
+import {DISPLAY_PRESETS,applyDisplayPreset,normalizeAccessibility,paletteOptions,teamColorsFor} from '../../game/presets.mjs';
 import {DEFAULT_BINDINGS,KEYBIND_ACTIONS,KEYBIND_OPTIONS,rebindAction} from '../../game/keybinds.mjs';
 
 const SCORE_RULES:any={
@@ -34,7 +34,60 @@ const LOCK_COPY:any={
 function Choice({label,value,options,onChange,disabled=false}:any){return <div className="config-field"><span>{label}</span><Select value={String(value)} onValueChange={onChange} disabled={disabled}><SelectTrigger aria-label={label}><SelectValue/></SelectTrigger><SelectContent className="arena-select">{options.map((o:any)=><SelectItem key={o[0]} value={String(o[0])}>{o[1]}</SelectItem>)}</SelectContent></Select></div>;}
 function Range({label,value,min,max,step=1,onChange,suffix=''}:any){return <div className="config-field"><label>{label}<output>{value}{suffix}</output></label><Slider aria-label={label} value={[value]} min={min} max={max} step={step} onValueChange={([v])=>onChange(v)}/></div>;}
 function Toggle({label,checked,onChange,disabled=false}:any){return <label className="config-toggle"><span>{label}</span><Switch aria-label={label} checked={checked} onCheckedChange={onChange} disabled={disabled}/></label>;}
-export function KeybindsConfiguration({bindings,onChange,conflicts=[]}:any){const patch=(action:string,code:string)=>onChange(rebindAction(bindings,action,code));return <div className="config-block keybinds-configuration"><h3>Controls</h3><div className="keybind-grid">{KEYBIND_ACTIONS.map(action=><label key={action} className="keybind-row" style={{flexWrap:'wrap'}}><span style={{minWidth:0}}>{action}</span><select aria-label={action} value={bindings?.[action]??(DEFAULT_BINDINGS as any)[action]} onChange={e=>patch(action,e.target.value)}>{KEYBIND_OPTIONS.map(code=><option key={code} value={code}>{code.replace(/^Key|^Digit/,'')}</option>)}</select></label>)}</div>{conflicts.length?<p className="config-note">Duplicate keys: {conflicts.join(', ')}</p>:<p className="config-note">Choosing an occupied key swaps the two actions.</p>}<button className="text-button" onClick={()=>onChange({...DEFAULT_BINDINGS})}>RESET KEYS</button></div>;}
+const KEY_LABEL=(code:string)=>String(code||'?').replace(/^Key/,'').replace(/^Digit/,'').replace(/^Arrow/,'').replace('ShiftLeft','Shift').replace('ShiftRight','ShiftR').replace('ControlLeft','Ctrl').replace('ControlRight','CtrlR').replace('AltLeft','Alt').replace('AltRight','AltR');
+
+// Full keyboard remapping. Each action is a button that arms a one-shot key
+// capture; the next valid key is bound (occupied keys swap automatically via
+// rebindAction). A select fallback stays available for keyboard-only users who
+// prefer not to press the target key. Every control is focusable and labelled.
+export function KeybindsConfiguration({bindings,onChange,conflicts=[]}:any){
+ const [capturing,setCapturing]=useState<string|null>(null);
+ useEffect(()=>{
+  if(!capturing)return;
+  const onKey=(e:KeyboardEvent)=>{
+   if(e.key==='Escape'){e.preventDefault();setCapturing(null);return;}
+   if(e.repeat)return;
+   e.preventDefault();
+   const code=e.code;
+   if(KEYBIND_OPTIONS.includes(code)){onChange(rebindAction(bindings,capturing,code));setCapturing(null);}
+  };
+  window.addEventListener('keydown',onKey,{capture:true});
+  return()=>window.removeEventListener('keydown',onKey,{capture:true});
+ },[capturing,bindings,onChange]);
+ const patch=(action:string,code:string)=>onChange(rebindAction(bindings,action,code));
+ return <div className="config-block keybinds-configuration"><h3>Controls</h3>
+  <p className="config-note">Select an action, then press any key to bind it. Escape cancels; occupied keys swap automatically.</p>
+  <div className="keybind-grid" role="group" aria-label="Keyboard bindings">
+   {KEYBIND_ACTIONS.map(action=>{const code=bindings?.[action]??(DEFAULT_BINDINGS as any)[action];const armed=capturing===action;return <div key={action} className={`keybind-row${armed?' capturing':''}`}>
+    <span style={{minWidth:0}}>{action}</span>
+    <button type="button" className="keybind-key" aria-label={`Rebind ${action}, currently ${KEY_LABEL(code)}`} aria-pressed={armed} onClick={()=>setCapturing(armed?null:action)}>{armed?'PRESS A KEY…':KEY_LABEL(code)}</button>
+    <select aria-label={`${action} key`} value={code} onChange={e=>patch(action,e.target.value)}>{KEYBIND_OPTIONS.map(option=><option key={option} value={option}>{KEY_LABEL(option)}</option>)}</select>
+   </div>;})}
+  </div>
+  {conflicts.length?<p className="config-note" role="alert">Duplicate keys: {conflicts.join(', ')}</p>:<p className="config-note">One key per action; choosing an occupied key swaps the two actions.</p>}
+  <button className="text-button" onClick={()=>{setCapturing(null);onChange({...DEFAULT_BINDINGS});}}>RESET KEYS</button>
+ </div>;
+}
+
+// Accessibility panel: the richer colour-vision palettes plus a high-contrast
+// UI switch. The page owns the accessibility state and passes it down; this
+// component is a pure view of it.
+export function AccessibilityConfiguration({accessibility,onChange}:any){
+ const value=normalizeAccessibility(accessibility);
+ const set=(patch:any)=>onChange(normalizeAccessibility({...value,...patch}));
+ return <div className="config-block accessibility-configuration"><h3>Accessibility</h3>
+  <div className="config-field"><span>Colour vision palette</span>
+   <div className="palette-options" role="radiogroup" aria-label="Colour vision palette">
+    {paletteOptions().map(option=>{const colors=teamColorsFor(option.id),active=value.palette===option.id;return <button key={option.id} type="button" role="radio" aria-checked={active} aria-label={`${option.name}: ${option.detail}`} className={`palette-option${active?' active':''}`} onClick={()=>set({palette:option.id})}>
+     <span className="palette-swatches" aria-hidden="true"><i style={{background:colors[0]}}/><i style={{background:colors[1]}}/></span>
+     <span className="palette-main"><strong>{option.name}</strong><small>{option.detail}</small></span>
+    </button>;})}
+   </div>
+  </div>
+  <Toggle label="High-contrast UI" checked={value.highContrast===true} onChange={(v:boolean)=>set({highContrast:v})}/>
+  <p className="config-note">Palettes recolor team markers, the radar and score banners; the 3D arena swaps to its safe team colours. High contrast strengthens borders, text and focus rings across every menu.</p>
+ </div>;
+}
 
 export function PresetsConfiguration({presets=[],onSave,onLoad,onDelete}:any){const [name,setName]=useState('');return <div className="config-block presets-configuration"><h3>Loadout presets</h3><div className="preset-save"><input aria-label="Preset name" placeholder="Preset name" maxLength={24} value={name} onChange={e=>setName(e.target.value)}/><button className="secondary-button" onClick={()=>{onSave?.(name);setName('');}}>SAVE CURRENT</button></div>{presets.length?<div className="preset-list">{presets.map((p:any)=><div key={p.id} className="preset-row" style={{flexWrap:'wrap'}}><span style={{minWidth:0}}>{p.name}<small>{p.character} / {p.harness}{p.mapId?` · ${p.mapId}`:''}</small></span><div className="preset-actions"><button className="text-button" aria-label={`Load preset ${p.name}`} onClick={()=>onLoad?.(p)}>LOAD</button><button className="text-button" aria-label={`Delete preset ${p.name}`} onClick={()=>onDelete?.(p.id)}>DELETE</button></div></div>)}</div>:<p className="config-note">Save your operator, harness, arena and rules for one-tap recall.</p>}</div>;}
 
@@ -56,4 +109,4 @@ export function DisplayConfiguration({display,onChange}:any){const patch=(key:st
   <Range label="Glow strength" value={Math.round((display.bloom??.34)*100)} min={0} max={100} step={5} suffix="%" onChange={(v:number)=>patch('bloom',v/100)}/>
   <Range label="Brightness" value={Math.round((display.exposure??1.15)*100)} min={60} max={180} step={5} suffix="%" onChange={(v:number)=>patch('exposure',v/100)}/>
   <p className="config-note">Glow is independent of resolution scale. Turn post-processing off entirely, or drop glow strength to 0%, if the bloom is too strong.</p>
- <Choice label="Detail level" value={display.quality??'auto'} options={[['auto','Auto'],['low','Low'],['medium','Medium'],['high','High']]} onChange={(v:string)=>patch('quality',v)}/><Range label="Field of view" value={display.fov} min={65} max={110} suffix="°" onChange={(v:number)=>patch('fov',v)}/><Choice label="Crosshair shape" value={display.crosshair} options={['cross','dot','ring','chevron','split'].map(v=>[v,v[0].toUpperCase()+v.slice(1)])} onChange={(v:string)=>patch('crosshair',v)}/><Choice label="Team colors" value={display.teamPalette??'default'} options={[['default','Red / blue'],['colorblind','Colorblind · orange / blue']]} onChange={(v:string)=>patch('teamPalette',v)}/><Range label="Crosshair size" value={display.size} min={.6} max={1.8} step={.1} suffix="×" onChange={(v:number)=>patch('size',v)}/><div className="crosshair-editor"><label>Crosshair color<input type="color" aria-label="Crosshair color" value={display.color} onChange={e=>patch('color',e.target.value)}/></label><div className="crosshair-preview"><div className={`crosshair shape-${display.crosshair}`} style={{'--crosshair-color':display.color,'--crosshair-size':display.size} as any}><span/><span/><span/><span/></div></div></div><Toggle label="Show weapon model" checked={display.showWeapon} onChange={(v:boolean)=>patch('showWeapon',v)}/><Toggle label="Show FPS counter" checked={display.showFps} onChange={(v:boolean)=>patch('showFps',v)}/><Toggle label="Invert vertical look" checked={display.invertY===true} onChange={(v:boolean)=>patch('invertY',v)}/><Toggle label="Subtitles / audio captions" checked={display.captions===true} onChange={(v:boolean)=>patch('captions',v)}/><Toggle label="Show kill feed" checked={display.showKillFeed!==false} onChange={(v:boolean)=>patch('showKillFeed',v)}/><Toggle label="Show damage numbers" checked={display.showDamageNumbers!==false} onChange={(v:boolean)=>patch('showDamageNumbers',v)}/><Toggle label="Show radar" checked={display.showRadar!==false} onChange={(v:boolean)=>patch('showRadar',v)}/><Range label="ADS sensitivity" value={display.adsSensitivity??.85} min={.2} max={1.5} step={.05} suffix="×" onChange={(v:number)=>patch('adsSensitivity',v)}/><Range label="Touch sensitivity" value={display.touchSensitivity??1} min={.3} max={3} step={.1} suffix="×" onChange={(v:number)=>patch('touchSensitivity',v)}/><Toggle label="Reduce motion" checked={display.reducedMotion===true} onChange={(v:boolean)=>patch('reducedMotion',v)}/><p className="config-note">Covers image quality (resolution scale, glow, brightness), readability (crosshair, team colours, kill feed, damage numbers, radar) and accessibility (subtitles, reduce motion, colourblind palette, touch sensitivity).</p><button className="text-button" onClick={()=>onChange({...DEFAULT_DISPLAY})}>RESET VIEW</button></div>;}
+ <Choice label="Detail level" value={display.quality??'auto'} options={[['auto','Auto'],['low','Low'],['medium','Medium'],['high','High']]} onChange={(v:string)=>patch('quality',v)}/><Range label="Field of view" value={display.fov} min={65} max={110} suffix="°" onChange={(v:number)=>patch('fov',v)}/><Choice label="Crosshair shape" value={display.crosshair} options={['cross','dot','ring','chevron','split'].map(v=>[v,v[0].toUpperCase()+v.slice(1)])} onChange={(v:string)=>patch('crosshair',v)}/><p className="config-note">Team colours and high contrast moved to the Accessibility panel below.</p><Range label="Crosshair size" value={display.size} min={.6} max={1.8} step={.1} suffix="×" onChange={(v:number)=>patch('size',v)}/><div className="crosshair-editor"><label>Crosshair color<input type="color" aria-label="Crosshair color" value={display.color} onChange={e=>patch('color',e.target.value)}/></label><div className="crosshair-preview"><div className={`crosshair shape-${display.crosshair}`} style={{'--crosshair-color':display.color,'--crosshair-size':display.size} as any}><span/><span/><span/><span/></div></div></div><Toggle label="Show weapon model" checked={display.showWeapon} onChange={(v:boolean)=>patch('showWeapon',v)}/><Toggle label="Show FPS counter" checked={display.showFps} onChange={(v:boolean)=>patch('showFps',v)}/><Toggle label="Invert vertical look" checked={display.invertY===true} onChange={(v:boolean)=>patch('invertY',v)}/><Toggle label="Subtitles / audio captions" checked={display.captions===true} onChange={(v:boolean)=>patch('captions',v)}/><Toggle label="Show kill feed" checked={display.showKillFeed!==false} onChange={(v:boolean)=>patch('showKillFeed',v)}/><Toggle label="Show damage numbers" checked={display.showDamageNumbers!==false} onChange={(v:boolean)=>patch('showDamageNumbers',v)}/><Toggle label="Show radar" checked={display.showRadar!==false} onChange={(v:boolean)=>patch('showRadar',v)}/><Range label="ADS sensitivity" value={display.adsSensitivity??.85} min={.2} max={1.5} step={.05} suffix="×" onChange={(v:number)=>patch('adsSensitivity',v)}/><Range label="Touch sensitivity" value={display.touchSensitivity??1} min={.3} max={3} step={.1} suffix="×" onChange={(v:number)=>patch('touchSensitivity',v)}/><Toggle label="Reduce motion" checked={display.reducedMotion===true} onChange={(v:boolean)=>patch('reducedMotion',v)}/><p className="config-note">Covers image quality (resolution scale, glow, brightness), readability (crosshair, team colours, kill feed, damage numbers, radar) and accessibility (subtitles, reduce motion, colourblind palette, touch sensitivity).</p><button className="text-button" onClick={()=>onChange({...DEFAULT_DISPLAY})}>RESET VIEW</button></div>;}

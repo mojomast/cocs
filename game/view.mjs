@@ -5,8 +5,8 @@ import {aim} from './core.mjs';
 import {MAPS,pickupWeapon} from './maps.mjs';
 import {normalizeDisplay} from './config.mjs';
 import {WeaponFeedback,EffectPool,AmbientFX,WeatherFX} from './feedback.mjs';
-import {ModelAssets,withAssets,currentAssets,CameraShake,MuzzleLightPool,LowHealthOverlay,RailBeamPool,DeathPool,DecalPool,killcamPose,KILLCAM_DURATION} from './effects-fx.mjs';
-import {deathPlan,hashUnit} from './deaths.mjs';
+import {ModelAssets,withAssets,currentAssets,CameraShake,MuzzleLightPool,LowHealthOverlay,RailBeamPool,DeathPool,DecalPool,HitReactionFX,WeaponPreviewRig,killcamPose,KILLCAM_DURATION} from './effects-fx.mjs';
+import {deathPlan,deathStyleFor,hitReaction,hashUnit} from './deaths.mjs';
 import {resolveFinish} from './cosmetics.mjs';
 import {buildWeaponBody} from './weapon-models/index.mjs';
 import {legacyWeaponBody} from './weapon-models/legacy.mjs';
@@ -18,9 +18,9 @@ import {NEUTRAL} from './radar.mjs';
 import {cavernShell,propId,applyPropDamage,propBreakPlan,isBreakable} from './structures.mjs';
 import {raceDemoMode,raceDemoPose,RACE_DEMO_MODE_SECONDS} from './race-camera.mjs';
 import {occlusionDistance} from './camera.mjs';
-import {postStage,applyComposerSize,disposeComposer,reducedMotion,normalizeQuality,qualitySettings,qualityIndex,nextQualityTier,QUALITY_LEVELS} from './post.mjs';
-import {surfaceTextures,clearSurfaceTextures} from './textures.mjs';
-import {addSky,addMountains,addScatter,updateScatterSway,ambientProfile,smokeAnchors,skyPhase,HALO_MAPS,skyPalette,biomeAmbience,selectWeather,timeOfDayAt,weatherPreset,WEATHER_KINDS} from './environment.mjs';
+import {postStage,applyComposerSize,disposeComposer,reducedMotion,normalizeQuality,qualitySettings,qualityIndex,nextQualityTier,QUALITY_LEVELS,frameTriangleBudget} from './post.mjs';
+import {surfaceTextures,clearSurfaceTextures,wetSheenTexture} from './textures.mjs';
+import {addSky,addMountains,addScatter,updateScatterSway,ambientProfile,smokeAnchors,skyPhase,HALO_MAPS,skyPalette,biomeAmbience,selectWeather,timeOfDayAt,weatherPreset,WEATHER_KINDS,lightningSchedule,windGustAt,wetSheen} from './environment.mjs';
 import {raceTrackModel,updateRace as syncRacePresentation} from './race-presentation.mjs';
 export {raceTrackModel};
 import {RoomEnvironment} from 'three/addons/environments/RoomEnvironment.js';
@@ -31,6 +31,14 @@ import {ShaderPass} from 'three/addons/postprocessing/ShaderPass.js';
 import {OutputPass} from 'three/addons/postprocessing/OutputPass.js';
 import {VignetteShader} from 'three/addons/shaders/VignetteShader.js';
 export {SynthAudio} from './feedback.mjs';
+export {WeaponPreviewRig} from './effects-fx.mjs';
+// Menu/showcase weapon preview. A host screen can mount a rotating, inspectable
+// weapon without touching app/**: build the rig, hand it a canvas mount rect,
+// and call update(time). It reuses weaponModel + ModelAssets exactly like the
+// in-match viewmodel, so preview and gameplay share geometry/materials.
+export function createWeaponPreview(options={}){
+ return new WeaponPreviewRig({weaponModel,assets:options.assets,background:options.background});
+}
 // Shadows are re-rendered on a fixed cadence instead of every frame; the arena
 // bake still refreshes immediately on build, and moving actors lag at most one step.
 export const SHADOW_REFRESH_INTERVAL=2;
@@ -358,7 +366,7 @@ export class ArenaView{
   this.scene=new T.Scene();this.scene.background=new T.Color('#090f17');this.scene.fog=new T.FogExp2('#090f17',.018);this.camera=new T.PerspectiveCamera(82,1,.08,220);this.camera.rotation.order='YXZ';this.scene.add(new T.HemisphereLight('#b2eeff','#1f252c',2));const sun=new T.DirectionalLight('#c9e5ef',2.8);sun.position.set(3,12,8);sun.castShadow=this.renderer.isSoftware!==true;if(sun.shadow){const shadowSize=this.qualitySettings?.shadowMap??2048;sun.shadow.mapSize.set(shadowSize,shadowSize);sun.shadow.bias=-.0006;sun.shadow.normalBias=.03;}this.sun=sun;this.sunTarget=new T.Object3D();this.scene.add(this.sunTarget);sun.target=this.sunTarget;this.scene.add(sun);
   if(this.renderer.isSoftware!==true&&this.renderer.shadowMap){this.renderer.shadowMap.enabled=true;this.renderer.shadowMap.type=T.PCFSoftShadowMap;this.renderer.shadowMap.autoUpdate=false;this.renderer.shadowMap.needsUpdate=true;}
   if(this.renderer.isSoftware!==true&&this.renderer.capabilities&&typeof document!=='undefined'){try{const pmrem=new T.PMREMGenerator(this.renderer);this.environmentRT=pmrem.fromScene(new RoomEnvironment(),.04);this.scene.environment=this.environmentRT.texture;this.scene.environmentIntensity=.5;pmrem.dispose();}catch{}}
-      this.renderResources=new Set();this.sharedResources=new Set();this.modelAssets=new ModelAssets();this.buildArena();this.actorModels=new Map();this.vehicleModels=new Map();this.pickupModels=[];this.flagModels=new Map();this.lastEvent=0;this.flashUntil=0;this.playerId=0;this.spectator=false;this.spectatorTarget=null;this.spectatorThird=false;this.hands=new T.Group();this.camera.add(this.hands);this.scene.add(this.camera);this.currentWeapon=-1;this.aim=false;this.lowHealth=false;this.cameraShake=new CameraShake();this.muzzleLights=null;this.lowHealthOverlay=null;this.railPool=null;this.deathPool=null;this.deathContext=new Map();this.payloadModel=null;this.decalPool=null;this.ambientFx=null;this.ambientPool=null;this.ambientConfig=null;this.ambientAnchors=[];this.scatterWind=[];this.killcamEnabled=true;this._killcam=null;if(this.renderer.isSoftware!==true){this.muzzleLights=new MuzzleLightPool(this.scene,2);this.lowHealthOverlay=new LowHealthOverlay(this.camera);if(typeof document!=='undefined')this.railPool=new RailBeamPool(this.scene,6);this.decalPool=new DecalPool(this.scene,18);const rim=new T.DirectionalLight('#7fd8ff',.55);rim.position.set(-7,6,-9);rim.userData.rimLight=true;this.scene.add(rim);}this.menu=this.makeMenu();this.cinema=false;this.director=null;this._freeCam=false;this._directorLock=false;this.freePose={x:0,y:6,z:0,yaw:0,pitch:0};this.showcaseState=null;this.previewRect=null;this.raycaster=new T.Raycaster();this._occClear=0;this.resize();}
+      this.renderResources=new Set();this.sharedResources=new Set();this.modelAssets=new ModelAssets();this.buildArena();this.actorModels=new Map();this.vehicleModels=new Map();this.pickupModels=[];this.flagModels=new Map();this.lastEvent=0;this.flashUntil=0;this.playerId=0;this.spectator=false;this.spectatorTarget=null;this.spectatorThird=false;this.hands=new T.Group();this.camera.add(this.hands);this.scene.add(this.camera);this.currentWeapon=-1;this.aim=false;this.lowHealth=false;this.cameraShake=new CameraShake();this.muzzleLights=null;this.lowHealthOverlay=null;this.railPool=null;this.deathPool=null;this.deathContext=new Map();this.payloadModel=null;this.decalPool=null;this.ambientFx=null;this.ambientPool=null;this.ambientConfig=null;this.ambientAnchors=[];this.scatterWind=[];this.killcamEnabled=true;this._killcam=null;this.hitPool=null;this.hitFlinch=new Map();this._lightning=[];this._lightningAt=0;this._flash=0;this._wetSheenApplied=0;this.preview=null;if(this.renderer.isSoftware!==true){this.muzzleLights=new MuzzleLightPool(this.scene,2);this.lowHealthOverlay=new LowHealthOverlay(this.camera);if(typeof document!=='undefined')this.railPool=new RailBeamPool(this.scene,6);this.decalPool=new DecalPool(this.scene,18);const rim=new T.DirectionalLight('#7fd8ff',.55);rim.position.set(-7,6,-9);rim.userData.rimLight=true;this.scene.add(rim);}this.menu=this.makeMenu();this.cinema=false;this.director=null;this._freeCam=false;this._directorLock=false;this.freePose={x:0,y:6,z:0,yaw:0,pitch:0};this.showcaseState=null;this.previewRect=null;this.raycaster=new T.Raycaster();this._occClear=0;this.resize();}
        reduced(){return reducedMotion(this.display?.reducedMotion, Boolean(this.motionQuery?.matches));}
        // Presentation-only quality tier. Lazily resolved so partially constructed
        // views in tests still get a sane budget, and cached so hot paths are free.
@@ -380,6 +388,10 @@ export class ArenaView{
         if(this.renderer?.setScreenArea)this.renderer.setScreenArea(this.qualitySettings.tier===0?.12:this.qualitySettings.tier===1?.09:.06);
         if(this.ambientFx)this.ambientFx.moteCap=Math.max(1,this.qualitySettings.ambientMotes??3);
         if(this.weatherFx)this.weatherFx.cap=Math.max(2,Math.round((this.qualitySettings.ambientMotes??3)*2));
+        // The CPU renderer gets a hard per-frame triangle ceiling taken from the
+        // active tier; WebGL leaves its renderer uncapped. This is the last guard
+        // against a pathological scene on the software path.
+        if(this.renderer?.isSoftware===true&&this.renderer.setTriangleBudget)this.renderer.setTriangleBudget(frameTriangleBudget(this.quality,{software:true}));
        }
        setQuality(level){this._qualityOverride=level==null?null:level;return this._applyQuality();}
        qualityTier(){return this._quality().tier;}
@@ -413,9 +425,52 @@ export class ArenaView{
    resetFreeCam(){this.freePose={x:0,y:6,z:0,yaw:0,pitch:0};}
    freeLook(dyaw,dpitch){const pose=this.freePose??(this.freePose={x:0,y:6,z:0,yaw:0,pitch:0});pose.yaw=(Number.isFinite(pose.yaw)?pose.yaw:0)+(Number.isFinite(dyaw)?dyaw:0);pose.pitch=Math.max(-1.5,Math.min(1.5,(Number.isFinite(pose.pitch)?pose.pitch:0)+(Number.isFinite(dpitch)?dpitch:0)));}
    updateFreeCam(dt,{forward=0,right=0,up=0,boost=false}={}){const pose=this.freePose??(this.freePose={x:0,y:6,z:0,yaw:0,pitch:0});const step=Math.min(Math.max(Number.isFinite(dt)?dt:0,0),.1),speed=16*(boost===true?2.4:1),fwd=Number.isFinite(forward)?forward:0,strafe=Number.isFinite(right)?right:0,rise=Number.isFinite(up)?up:0,cy=Math.cos(pose.yaw||0),sy=Math.sin(pose.yaw||0),cp=Math.cos(pose.pitch||0),sp=Math.sin(pose.pitch||0),distance=speed*step;pose.x+=distance*(fwd*(-cp*sy)+strafe*cy);pose.y+=distance*(fwd*sp+rise);pose.z+=distance*(fwd*(-cp*cy)+strafe*(-sy));if(!(pose.y>=.4))pose.y=.4;if(!Number.isFinite(pose.x))pose.x=0;if(!Number.isFinite(pose.z))pose.z=0;if(!Number.isFinite(pose.yaw))pose.yaw=0;if(!Number.isFinite(pose.pitch))pose.pitch=0;return pose;}
-   setShowcase(state){this.showcaseState=state||null;}
-   setPreviewRect(rect){this.previewRect=rect||null;}
-   cinemaLook(dy,dp){this.director?.look?.(dy,dp);}
+    setShowcase(state){this.showcaseState=state||null;}
+    setPreviewRect(rect){this.previewRect=rect||null;}
+    // ---- Weapon inspect API (menu/showcase) --------------------------------
+    // Mount a rotating, inspectable weapon preview. The host screen supplies a
+    // mount rect (CSS pixels) and, optionally, its own ModelAssets so preview
+    // and gameplay share resources. Returns the rig so the host can drive it.
+    mountWeaponPreview({type=0,visual=null,finish=null,rect=null,assets=null}={}){
+     if(!assets&&!this.previewAssets)this.previewAssets=new ModelAssets();
+     const rig=this.preview??(this.preview=createWeaponPreview({assets:assets??this.previewAssets}));
+     this.previewRect=rect??this.previewRect;
+     rig.mount({type,visual,finish});
+     if(this.previewRect)rig.resize(this.previewRect.width,this.previewRect.height);
+     return rig;
+    }
+    // Advance the preview turntable and render it into the mount rect. Safe to
+    // call every frame; a missing rig or rect is a no-op.
+    updateWeaponPreview(time,{reduced=this.reduced(),spin=.35,pitch=-.18,visible=true}={}){
+     const rig=this.preview;if(!rig)return null;
+     rig.setVisible(visible);
+     rig.update(time,{reduced,spin,pitch});
+     return rig;
+    }
+    unmountWeaponPreview(){this.preview?.clear();}
+    // Render the mounted weapon preview into its mount rect. A host menu screen
+    // calls this after updateWeaponPreview so the preview shares the single
+    // WebGL context instead of creating a second renderer. Returns false when
+    // there is nothing to draw (no rig, no rect, or a software renderer).
+    renderWeaponPreview(){
+     const rig=this.preview,rect=this.previewRect;
+     if(!rig||!rect||rect.width<12||rect.height<12)return false;
+     if(this.renderer?.isSoftware===true)return false;
+     rig.resize(rect.width,rect.height);
+     return this._renderSceneInto(this.renderer,rect,rig.scene,rig.camera);
+    }
+    // Scissor a scene into a CSS-pixel rect on the shared renderer, restoring the
+    // full viewport afterwards. Used by both the character and weapon previews.
+    _renderSceneInto(renderer,rect,scene,camera){
+     const w=this.width,h=this.height;if(!(w>0&&h>0))return false;
+     const x=Math.max(0,Math.round(rect.left)),y=Math.max(0,Math.round(h-rect.bottom)),vw=Math.max(1,Math.round(rect.width)),vh=Math.max(1,Math.round(rect.height));
+     const prevAuto=renderer.autoClear;
+     renderer.setScissorTest(true);renderer.setViewport(x,y,vw,vh);renderer.setScissor(x,y,vw,vh);renderer.autoClear=true;
+     renderer.render(scene,camera);
+     renderer.setScissorTest(false);renderer.setViewport(0,0,w,h);renderer.setScissor(0,0,w,h);renderer.autoClear=prevAuto;
+     return true;
+    }
+    cinemaLook(dy,dp){this.director?.look?.(dy,dp);}
     resize(){const w=Math.max(1,this.renderer.domElement.clientWidth),h=Math.max(1,this.renderer.domElement.clientHeight),dpr=window.devicePixelRatio,baseline=this.renderer.isSoftware?.85:Math.min(Number.isFinite(dpr)&&dpr>0?dpr:1,1.5),ratio=baseline*(this.display?.resolutionScale??1);
      if(this.width===w&&this.height===h&&this.pixelRatio===ratio){this._syncPost?.();return;}
      if(this.pixelRatio!==ratio)this.renderer.setPixelRatio(ratio);
@@ -648,7 +703,9 @@ export class ArenaView{
  for(let i=-4;i<=4;i++){box(scene,.25,9,.5,i*3,4,-6,dark);box(scene,.045,6,.04,i*3+.18,4,-5.72,glow);}
   const model=robotModel('chatgpt',undefined,this.renderer?.isSoftware===true);model.scale.setScalar(2.15);model.position.y=.17;model.rotation.y=.25;scene.add(model);return {scene,camera,model,id:'chatgpt'};}
   setCharacter(id){if(id===this.menu.id)return;this.disposeObject(this.menu.model);this.menu.scene.remove(this.menu.model);this.menu.model=robotModel(id,undefined,this.renderer?.isSoftware===true);this.menu.model.scale.setScalar(2.15);this.menu.model.position.y=.17;this.menu.scene.add(this.menu.model);this.menu.id=id;}
-      setMatch(match){const arena=match.arena||MAPS.find(a=>a.id===match.mapId)||MAPS[0];this.clearObjectiveMarkers();if(this.payloadModel){this.scene.remove(this.payloadModel);this.disposeObject(this.payloadModel);this.payloadModel=null;}for(const m of [...this.actorModels.values(),...this.pickupModels,...(this.flagModels||new Map()).values()]){this.scene.remove(m);this.disposeObject(m);}this.flagModels=new Map();if(this.mapId!==arena.id)this.buildArena(arena);const assets=this.modelAssets??=new ModelAssets();this.actorModels=new Map((match.actors||[]).map(a=>{const m=robotModel(a.character,assets,this.renderer?.isSoftware===true);this.scene.add(m);return [a.id,m];}));this.pickupModels=(match.pickups||[]).map(p=>{const g=new T.Group(),colors={health:'#77efba',armor:'#6dbfff',rocket:'#ffb164',rail:'#bf9cff',scatter:'#ffde87',plasma:'#72cfff',grenade:'#ff806b',shock:'#8ce8ff',flak:'#ffd166',marksman:'#ffd27a',smg:'#8affc1',haste:'#72f1b8',overcharge:'#ff8f70',overshield:'#75baff',recon:'#7fe7ff',cloak:'#c8b6ff'},mat=material(colors[p.kind]||'#8ad9d3',.4,.3,true);if(p.kind==='health'){box(g,.6,.19,.19,0,.65,0,mat);box(g,.19,.6,.19,0,.65,0,mat);}else if(p.kind==='armor'){const m=new T.Mesh(new T.OctahedronGeometry(.4),mat);m.position.y=.7;g.add(m);}else if(['haste','overcharge','overshield'].includes(p.kind)){const m=new T.Mesh(new T.IcosahedronGeometry(.36,1),mat);m.position.y=.7;g.add(m);ring(g,.55,.022,0,.07,0,mat);}else{const w=weaponModel(pickupWeapon(p.kind),assets);w.position.y=.75;w.scale.setScalar(.7);g.add(w);}if(!['haste','overcharge','overshield'].includes(p.kind))ring(g,.55,.022,0,.07,0,mat);g.position.set(p.x||0,p.y||0,p.z||0);this.scene.add(g);return g;});this._trackAssets(assets);this.syncVehicles(match);this.updateFlags(match,arena);this.updateObjectives(match,arena);this.effectPool?.clear();this.projectilePool?.clear();this.railPool?.clear();this.deathContext?.clear();this.deathPool?.clear();this.decalPool?.clear();this.ambientFx?.reset();this.debrisPool?.clear();this._killcam=null;this.feedback?.reset();this.cameraShake?.reset();this.lowHealth=false;this.flashUntil=0;this.lastEvent=match.serial||0;this.currentWeapon=-1;}
+      setMatch(match){const arena=match.arena||MAPS.find(a=>a.id===match.mapId)||MAPS[0];this.clearObjectiveMarkers();if(this.payloadModel){this.scene.remove(this.payloadModel);this.disposeObject(this.payloadModel);this.payloadModel=null;}for(const m of [...this.actorModels.values(),...this.pickupModels,...(this.flagModels||new Map()).values()]){this.scene.remove(m);this.disposeObject(m);}this.flagModels=new Map();if(this.mapId!==arena.id)this.buildArena(arena);const assets=this.modelAssets??=new ModelAssets();this.actorModels=new Map((match.actors||[]).map(a=>{const m=robotModel(a.character,assets,this.renderer?.isSoftware===true);this.scene.add(m);return [a.id,m];}));this.pickupModels=(match.pickups||[]).map(p=>{const g=new T.Group(),colors={health:'#77efba',armor:'#6dbfff',rocket:'#ffb164',rail:'#bf9cff',scatter:'#ffde87',plasma:'#72cfff',grenade:'#ff806b',shock:'#8ce8ff',flak:'#ffd166',marksman:'#ffd27a',smg:'#8affc1',haste:'#72f1b8',overcharge:'#ff8f70',overshield:'#75baff',recon:'#7fe7ff',cloak:'#c8b6ff'},mat=material(colors[p.kind]||'#8ad9d3',.4,.3,true);if(p.kind==='health'){box(g,.6,.19,.19,0,.65,0,mat);box(g,.19,.6,.19,0,.65,0,mat);}else if(p.kind==='armor'){const m=new T.Mesh(new T.OctahedronGeometry(.4),mat);m.position.y=.7;g.add(m);}else if(['haste','overcharge','overshield'].includes(p.kind)){const m=new T.Mesh(new T.IcosahedronGeometry(.36,1),mat);m.position.y=.7;g.add(m);ring(g,.55,.022,0,.07,0,mat);}else{const w=weaponModel(pickupWeapon(p.kind),assets);w.position.y=.75;w.scale.setScalar(.7);g.add(w);}if(!['haste','overcharge','overshield'].includes(p.kind))ring(g,.55,.022,0,.07,0,mat);g.position.set(p.x||0,p.y||0,p.z||0);this.scene.add(g);return g;});this._trackAssets(assets);this.syncVehicles(match);this.updateFlags(match,arena);this.updateObjectives(match,arena);this.effectPool?.clear();this.projectilePool?.clear();this.railPool?.clear();this.deathContext?.clear();this.deathPool?.clear();this.decalPool?.clear();this.ambientFx?.reset();this.debrisPool?.clear();this.hitFlinch?.clear();this.hitPool?.clear();this._killcam=null;this.feedback?.reset();this.cameraShake?.reset();this.lowHealth=false;this.flashUntil=0;this.lastEvent=match.serial||0;this.currentWeapon=-1;
+  // Per-mode music theme. The audio object retunes its running drone in place.
+  const mode=match.config?.mode??match.mode;if(mode)this.viewAudio?.setModeTheme?.(mode);this._modeTheme=mode??this._modeTheme;}
       syncActors(match){const actors=match?.actors||[];for(const actor of actors)if(!this.actorModels.has(actor.id)){const model=robotModel(actor.character,this.modelAssets??=new ModelAssets(),this.renderer?.isSoftware===true);applyActorTeam(model,actor.team,this.display?.teamPalette);this.scene.add(model);this.actorModels.set(actor.id,model);}const live=new Set(actors.map(actor=>actor.id));for(const [id,model] of this.actorModels)if(!live.has(id)){this.scene.remove(model);this.disposeObject(model);this.actorModels.delete(id);}}
       styleActor(model,actor,palette){applyActorTeam(model,actor.team,palette);const profile=actor?.npcProfile;if(!profile)return;const data=model.userData||{};if(data.base?.material?.color)data.base.material.color.set(profile.color);if(data.armor?.color)data.armor.color.set(profile.accent||profile.color);model.scale.setScalar(profile.scale??1);}
       updateWaypoint(match,arena){const waypoint=match?.waypoint;if(!waypoint){if(this.waypointModel){this.scene.remove(this.waypointModel);this.disposeObject(this.waypointModel);this.waypointModel=null;this.waypointId=null;}return;}if(!this.waypointModel||this.waypointId!==waypoint.id){if(this.waypointModel){this.scene.remove(this.waypointModel);this.disposeObject(this.waypointModel);}this.waypointId=waypoint.id;this.waypointModel=this.createObjectiveModel({id:'waypoint',x:waypoint.x,y:waypoint.y??0,z:waypoint.z,radius:waypoint.radius??4,label:waypoint.label},arena);this.scene.add(this.waypointModel);}this.waypointModel.position.set(waypoint.x,waypoint.y??0,waypoint.z);}
@@ -714,7 +771,7 @@ export class ArenaView{
         if(e.pos)this.breakPropsAt(e.pos,{radius:w===4?3.4:w===5?4.6:4,amount:w===4?60:45,serial:(e.id??0)+1,reduced});}
      if(e.type==='shot'||e.type==='launch'){const until=performance.now()+(info.feel?.muzzle?.[1]??.06)*1000,model=this.actorModels?.get(e.actor);if(model)model.userData.flashUntil=until;if(e.actor===this.playerId){this.feedback.shot(e.weapon,e.time);this.flashUntil=until;}}if(e.type==='vehicle-shot'){const model=this.vehicleModels?.get(e.vehicle);if(model)model.userData.flashUntil=performance.now()+45;if(e.actor===this.playerId&&e.barrel===0){this.feedback.shot(0,e.time);this.flashUntil=performance.now()+45;}}
       if((e.type==='shot'||e.type==='vehicle-shot')&&!reduced&&this.muzzleLights){const muzzleColor=e.type==='vehicle-shot'?'#ffd166':info.color,muzzleLife=info.feel?.muzzle?.[1]??.06;this.muzzleLights.flash(muzzleColor,e.from??e.pos,muzzleLife);}
-      if(e.type==='damage'){const victim=this.actorModels?.get(e.actor);if(victim)victim.userData.hitUntil=performance.now()+220;}
+      if(e.type==='damage'){this.applyHitReaction(e,reduced);}
       if(e.type==='damage'&&e.actor===this.playerId&&Number(e.amount)>=10&&!reduced){this.cameraShake??=new CameraShake();this.cameraShake.add(Math.min(1,Number(e.amount)/70));}
       if(e.type==='death'&&!reduced){this.cameraShake??=new CameraShake();if(e.actor===this.playerId)this.cameraShake.add(1);else{const local=this.actorModels?.get(this.playerId),p=e.pos;if(local&&p){const distance=Math.hypot(local.position.x-(p.x||0),local.position.z-(p.z||0));if(distance<8)this.cameraShake.add(.55*(1-distance/8));}}}
       // Optional announcer cue. The audio object owns the voice cap and mute
@@ -746,6 +803,35 @@ export class ArenaView{
    pool.spawn(e.pos,{pieces:plan.pieces,force:plan.force,color:plan.color,reduced,seed:e.seed??0,spin:plan.spin,splay:plan.splay});
    if(plan.gore>0){this.effectPool??=new EffectPool(this.scene);const count=reduced?Math.min(3,plan.gore):plan.gore;for(let i=0;i<count;i++)this.effectPool.add({pos:e.pos,color:plan.color,size:.045+Math.random()*.05,life:.55,velocity:V((Math.random()-.5)*7,Math.random()*5,(Math.random()-.5)*7)});}
    if(e.fall!==true&&!plan.hideBody&&Number.isFinite(e.pos.y))pool.splat({x:e.pos.x,y:e.pos.y-1,z:e.pos.z},{color:plan.energy?'#20343d':'#570c0c',reduced,seed:e.seed??0});
+  }
+  // ---- Hit reactions -----------------------------------------------------
+  // Deterministic, presentation-only flinch/knockback for a non-lethal hit. The
+  // plan comes from the pure hitReaction helper; the view only applies the lean
+  // to the actor model and spawns directional blood/spark feedback on WebGL.
+  // The simulation is never read or written here.
+  hitFx(){return this.hitPool??=new HitReactionFX(this.scene,this._quality().deaths);}
+  applyHitReaction(e,reduced){
+   if(!e||e.actor==null)return null;
+   const weapon=Number.isInteger(e.weapon)?e.weapon:null,plan=e.weapon!=null?deathStyleFor({weapon,seed:e.seed??0}):null;
+   const energy=plan==='vaporize'||plan==='electrocute',fire=plan==='combust'||plan==='burst';
+   const reaction=hitReaction({damage:e.amount,dir:e.direction,seed:e.seed??0,actor:e.actor,serial:e.id??0,reduced,headshot:e.headshot===true,energy,fire});
+   (this.hitFlinch??=new Map()).set(e.actor,{strength:reaction.strength,until:(typeof performance!=='undefined'?performance.now():0)+220,lean:reaction.lean,pushX:reduced?0:reaction.pushX,pushZ:reduced?0:reaction.pushZ});
+   if(e.pos&&reaction.count>0&&!reduced&&this.renderer?.isSoftware!==true)this.hitFx().spawn(e.pos,reaction,{reduced});
+   return reaction;
+  }
+  // Applied after the actor sync each frame: feeds the rig's existing flinch
+  // channel and re-applies the bounded knockback offset while the hit is live.
+  _updateHitReactions(){
+   if(!this.hitFlinch?.size)return 0;
+   const now=typeof performance!=='undefined'?performance.now():0;let live=0;
+   for(const [id,state] of this.hitFlinch){
+    if(state.until<=now){this.hitFlinch.delete(id);continue;}
+    live++;
+    const model=this.actorModels?.get(id);if(!model)continue;
+    model.userData.hitUntil=Math.max(model.userData.hitUntil??0,state.until);
+    if(state.pushX||state.pushZ){model.position.x+=state.pushX;model.position.z+=state.pushZ;}
+   }
+   return live;
   }
   poseCorpse(m,a,match){
    const reduced=this.reduced();
@@ -837,7 +923,11 @@ export class ArenaView{
     this._raceCam={mode,segment,x,y,z,lookX,lookY,lookZ};
     return true;
    }
-   setAudio(audio){this.viewAudio=audio||null;return this.viewAudio;}
+   setAudio(audio){this.viewAudio=audio||null;if(audio&&this._modeTheme)audio.setModeTheme?.(this._modeTheme);return this.viewAudio;}
+   // Victory/defeat sting for the end-of-match screen. The audio object owns the
+   // voice cap, mute handling and disposal; the view only forwards the outcome
+   // and the active mode theme. Returns the sting result (or null when absent).
+   setOutcome(outcome){if(outcome!=='victory'&&outcome!=='defeat')return null;return this.viewAudio?.sting?.(outcome)??null;}
    // Nearby-combat signal for the dynamic music/bed layer. Near action spikes
    // the value to one, then it decays over a fixed window. Pure arithmetic so a
    // caller without audio still gets the same deterministic value.
@@ -852,19 +942,22 @@ export class ArenaView{
    updateSky(){if(this.sky)this.sky.position.copy(this.camera.position);if(this.mountains)this.mountains.position.copy(this.camera.position);}
    // WebGL-only ambient pass: wind sway on tagged vegetation and pooled motes.
    // Both are skipped entirely for the CPU renderer and reduced motion.
-   _updateWind(time,reduced){if(this.renderer?.isSoftware===true||reduced||!this.scatterWind?.length)return 0;return updateScatterSway(this.scatterWind,time);}
-   _updateAmbient(match,delta,time,reduced){if(this.renderer?.isSoftware===true||reduced||!this.ambientConfig)return 0;const origin=this.camera?.position;if(!origin)return 0;if(!this.ambientFx){this.ambientPool??=new EffectPool(this.scene,64);this.ambientFx=new AmbientFX(this.ambientPool,{profile:this.ambientConfig,seed:this.ambientSeed??1,anchors:this.ambientAnchors,moteCap:this._quality().ambientMotes});}return this.ambientFx.update(delta,origin,{radius:9});}
+   _updateWind(time,reduced){if(this.renderer?.isSoftware===true||reduced||!this.scatterWind?.length)return 0;return updateScatterSway(this.scatterWind,time,{strength:this.windGust(time)});}
+   _updateAmbient(match,delta,time,reduced){if(this.renderer?.isSoftware===true||reduced||!this.ambientConfig)return 0;const origin=this.camera?.position;if(!origin)return 0;if(!this.ambientFx){this.ambientPool??=new EffectPool(this.scene,64);this.ambientFx=new AmbientFX(this.ambientPool,{profile:this.ambientConfig,seed:this.ambientSeed??1,anchors:this.ambientAnchors,moteCap:this._quality().ambientMotes});}return this.ambientFx.update(delta,origin,{radius:9,wind:this.windGust(time)});}
    // Deterministic weather + smooth time-of-day. The clock advances by frame
    // delta and is seeded per arena, so repeated runs produce identical phases.
    // Reduced motion and the CPU renderer still get the tint/sway-free sky blend;
    // only the pooled precipitation pass is gated off for them.
    setWeather(kind){this._weatherOverride=kind==null?null:(WEATHER_KINDS.includes(kind)?kind:null);return this._weatherOverride;}
-   initWeather(arena=MAPS[0]){const seed=this.ambientSeed??arenaSeedOf(arena),tod=timeOfDayAt(arena,0,'playing'),reduced=this.reduced?.()===true,preset=this._weatherOverride?weatherPreset(this._weatherOverride):selectWeather(arena,tod,seed,{reduced});this.weatherState={clock:0,kind:preset.kind,preset,wetness:preset.material?.wet??0,applied:-Infinity,phase:tod.phase,timeOfDay:tod};this.weatherFx=null;this.weatherPool=null;this._weatherSeed=seed;this._nearActionAt=undefined;this._nearAction=0;return this.weatherState;}
-   _weatherState(){return this.weatherState??(this.weatherState={clock:0,kind:'clear',preset:selectWeather(MAPS[0],'day',1),wetness:undefined,phase:'day',timeOfDay:null});}
+   initWeather(arena=MAPS[0]){const seed=this.ambientSeed??arenaSeedOf(arena),tod=timeOfDayAt(arena,0,'playing'),reduced=this.reduced?.()===true,preset=this._weatherOverride?weatherPreset(this._weatherOverride):selectWeather(arena,tod,seed,{reduced});this.weatherState={clock:0,kind:preset.kind,preset,wetness:preset.material?.wet??0,applied:-Infinity,phase:tod.phase,timeOfDay:tod,flash:0};this.weatherFx=null;this.weatherPool=null;this._weatherSeed=seed;this._nearActionAt=undefined;this._nearAction=0;this._lightningPreset=null;this._lightning=[];this._lightningAt=0;this._lightningFired=new Set();this._flash=0;this._wetSheenApplied=0;this._wetSheenKind=undefined;return this.weatherState;}
+   _weatherState(){return this.weatherState??(this.weatherState={clock:0,kind:'clear',preset:selectWeather(MAPS[0],'day',1),wetness:undefined,phase:'day',timeOfDay:null,flash:0});}
    _applyArenaLook(state){const base=this._arenaLook;if(!base)return;const palette=skyPalette(base.background,state.phase),material=state.preset?.material||{tint:'#000000',wet:0,dark:0},wet=Math.max(0,Math.min(1,Number(state.wetness)||0)),dark=Math.max(0,Math.min(1,Number(material.dark)||0)),fogScale=Number(state.preset?.density)||1;
     if(this.scene){if(this.scene.background)this.scene.background.copy(new T.Color(base.background)).lerp(new T.Color(material.tint),wet*.5+dark*.5);if(this.scene.fog){this.scene.fog.color.copy(new T.Color(base.fog)).lerp(new T.Color(material.tint),wet*.5+dark*.5);this.scene.fog.density=base.fogDensity*fogScale;}}
     this._applyLookLighting(wet,dark);
     if(this.sky)this._tintSky(this.sky,palette,state.timeOfDay,Math.max(wet,dark));
+    // The CPU renderer reads the scalar wetness off scene.userData.sky; the
+    // flash scalar is refreshed every frame by _updateLightning.
+    if(this.scene?.userData?.sky)this.scene.userData.sky.wet=wet;
     if('toneMappingExposure' in this.renderer)this.renderer.toneMappingExposure=base.exposure*(1+(Number(state.preset?.exposure??1)-1)*.85);
    }
    _applyLookLighting(wet,dark){const base=this._arenaLight;if(!base)return;const tint=new T.Color(base.dark||'#000000');for(const light of this.scene?.children||[]){if(light.isHemisphereLight){light.intensity=base.hemi*(1-dark*.22);if(light.color)light.color.copy(base.hemiColor).lerp(tint,wet*.2+dark*.3);if(light.groundColor)light.groundColor.copy(base.groundColor);}else if(light.isDirectionalLight&&!light.userData?.rimLight){light.intensity=base.sun*(1-dark*.5);if(light.color)light.color.copy(base.sunColor).lerp(tint,wet*.3+dark*.55);}}}
@@ -892,6 +985,82 @@ export class ArenaView{
     return state;
    }
    _updateWeatherFx(delta,reduced,quality){if(this.renderer?.isSoftware===true||reduced)return 0;const state=this._weatherState();if(!(state.preset?.particles>0))return 0;const origin=this.camera?.position;if(!origin)return 0;if(!this.weatherFx){this.weatherPool??=new EffectPool(this.scene,48);this.weatherFx=new WeatherFX(this.weatherPool,{seed:this._weatherSeed??1,cap:Math.max(2,Math.round((quality?.ambientMotes??3)*2))});}this.weatherFx.setPreset(state.preset);return this.weatherFx.update(delta,origin,{radius:10,quality:quality?.particles??1,software:false,reduced:false});}
+   // ---- Weather depth: lightning, thunder, wet sheen and wind gusts --------
+   // Deterministic storm schedule for the current preset. Rebuilt only when the
+   // preset changes so the strikes stay phase-locked across frames.
+   _lightningSchedule(preset=this._weatherState().preset){
+    const profile=preset?.lightning;if(!profile)return [];
+    if(this._lightningPreset!==preset){this._lightningPreset=preset;this._lightningWindow=90;this._lightning=lightningSchedule(preset,{seed:this._weatherSeed??1,window:this._lightningWindow,count:8});this._lightningAt=0;this._lightningFired=new Set();}
+    return this._lightning;
+   }
+   // Advance the storm clock, fire due strikes and expose the current flash
+   // envelope. WebGL gets the full schedule; the CPU renderer gets a cheap
+   // version (fewer strikes, no thunder) so the software path stays flat.
+   _updateLightning(delta,reduced,software){
+    const state=this._weatherState(),preset=state.preset;
+    if(reduced||!preset?.lightning){
+     if((this._flashApplied??0)>0){this._flashApplied=0;this._applyArenaLook(state);}
+     this._flash=0;state.flash=0;if(this.scene?.userData?.sky)this.scene.userData.sky.flash=0;return 0;
+    }
+    const schedule=this._lightningSchedule(preset);
+    if(!schedule.length){this._flash=0;state.flash=0;return 0;}
+    this._lightningAt=(this._lightningAt||0)+Math.max(0,Math.min(Number(delta)||0,.25));
+    // Loop the deterministic schedule so a long storm never runs silent.
+    if(this._lightningAt>(this._lightningWindow??90)){this._lightningAt=0;this._lightningFired=new Set();this._lightning=lightningSchedule(preset,{seed:(this._weatherSeed??1)+((this._lightningCycle=(this._lightningCycle??0)+1)>>>0),window:this._lightningWindow,count:8});}
+    const firedSet=this._lightningFired??=new Set();
+    let fired=0,flash=0;
+    for(const strike of schedule){
+     const age=this._lightningAt-strike.time;
+     if(age>=0&&age<.55){flash=Math.max(flash,strike.intensity*(1-age/.55));if(!firedSet.has(strike)){firedSet.add(strike);fired++;this._onLightningStrike(strike,software);}}
+    }
+    this._flash=flash;state.flash=flash;
+    if(this.scene?.userData?.sky)this.scene.userData.sky.flash=flash;
+    if(Math.abs((this._flashApplied??-1)-flash)>.01){
+     const was=this._flashApplied??0;this._flashApplied=flash;
+     if(flash<=0&&was>0)this._applyArenaLook(state);else this._applyLightningFlash(flash);
+    }
+    return fired;
+   }
+   _onLightningStrike(strike,software){
+    if(software)return;
+    if(this.viewAudio?.thunder)this.viewAudio.thunder({distance:strike.distance,pan:strike.pan,intensity:strike.intensity*(strike.thunderGain??1)});
+   }
+   // Brighten the exposure and key lights for the flash envelope. Restores the
+   // authored look when the flash decays, so no state leaks between strikes.
+   _applyLightningFlash(flash){
+    const base=this._arenaLook;if(!base)return flash;
+    if('toneMappingExposure' in this.renderer)this.renderer.toneMappingExposure=base.exposure*(1+flash*.7);
+    for(const light of this.scene?.children||[]){
+     if(light.isHemisphereLight)light.intensity=(this._arenaLight?.hemi??light.intensity)*(1+flash*.5);
+     else if(light.isDirectionalLight&&!light.userData?.rimLight)light.intensity=(this._arenaLight?.sun??light.intensity)*(1+flash*.8);
+    }
+    return flash;
+   }
+   // Apply the wet sheen to floor materials. Runs only on WebGL and only when
+   // the wetness band or preset changes, so the per-frame cost is a comparison.
+   _applyWetSheen(state){
+    if(this.renderer?.isSoftware===true)return false;
+    const wet=Math.max(0,Math.min(1,Number(state?.wetness)||0)),look=wetSheen(wet);
+    if(Math.abs((this._wetSheenApplied??0)-wet)<.02&&this._wetSheenKind===state?.kind)return false;
+    this._wetSheenApplied=wet;this._wetSheenKind=state?.kind;
+    const world=this.worldGroup;if(!world)return false;
+    const map=wet>0.01&&typeof document!=='undefined'?wetSheenTexture({seed:(this.ambientSeed??1)+13}):null;
+    world.traverse(n=>{
+     const mat=n.material;if(!mat||Array.isArray(mat)||!mat.isMeshStandardMaterial)return;
+     // Snapshot the authored roughness/metalness AND the original roughness map
+     // once, so a dry spell restores the exact pre-weather look.
+     if(mat.userData?.wetBase===undefined)mat.userData.wetBase={roughness:mat.roughness,metalness:mat.metalness,roughnessMap:mat.roughnessMap??null};
+     const base=mat.userData.wetBase;
+     mat.roughness=Math.max(0,Math.min(1,base.roughness*look.roughness));
+     mat.metalness=Math.max(0,Math.min(1,base.metalness+look.metalness));
+     const want=map??base.roughnessMap;
+     if(mat.roughnessMap!==want){mat.roughnessMap=want;mat.needsUpdate=true;}
+    });
+    return true;
+   }
+   // Deterministic wind gust multiplier for the current time. Feeds vegetation
+   // sway and particle drift. The CPU renderer ignores it (its sway is skipped).
+   windGust(time){const preset=this._weatherState().preset,strength=Math.max(0,Math.min(2,Number(preset?.wind)||1));return windGustAt(time,{seed:this._weatherSeed??1,strength});}
    _nearbyAction(match,time){const events=match?.events,from=Number.isFinite(this.lastEvent)?this.lastEvent:-1;if(Array.isArray(events)&&events.length){for(const event of events){if(!(event.id>from)||!event)continue;if(!['shot','vehicle-shot','launch','explosion','death','melee'].includes(event.type))continue;const pos=event.pos||event.from;const origin=this.actorModels?.get(this.playerId)?.position;if(origin&&pos&&Math.hypot((pos.x||0)-origin.x,(pos.z||0)-origin.z)>34)continue;this._nearActionAt=time;this._nearAction=event.type==='explosion'||event.type==='death'?1:Math.max(this._nearAction||0,.72);break;}}
     const origin=this.actorModels?.get(this.playerId)?.position||this.camera?.position;let proximity=0;if(origin)for(const rocket of (match?.rockets||[])){const position=rocket?.pos;if(position&&Math.hypot((position.x||0)-origin.x,(position.z||0)-origin.z)<18)proximity=Math.max(proximity,.85);}
     return Math.max(this.audioIntensity(time),proximity);
@@ -914,8 +1083,8 @@ if(this.freeCam){this.lowHealthOverlay?.update(false,time,delta,reduced,this.cam
   for(const e of (match.events||[]))if(e.id>this.lastEvent){this.effect(e);this.lastEvent=e.id;}
    this.effectPool?.update(Math.max(0,delta));this.railPool?.update(Math.max(0,delta));this.deathPool?.update(Math.max(0,delta));this.decalPool?.update(Math.max(0,delta));
        this.hands.visible=player.health>0&&this.showWeapon!==false&&!this.spectator&&!cinematic&&!this.freeCam&&player.vehicleId==null;const weaponSig=`${player.finish??''}|${weaponVisualKey(player.attachments?.visual)}`;if(this.currentWeapon!==player.weapon||this._viewWeaponSig!==weaponSig){for(const c of [...this.hands.children]){this.hands.remove(c);this.disposeObject(c);}this.firstPerson=weaponModel(player.weapon,undefined,player.attachments?.visual,player.finish);this.firstPerson.scale.setScalar(1.1);this.hands.add(this.firstPerson);this.currentWeapon=player.weapon;this._viewWeaponSig=weaponSig;this.firstPerson.traverse(m=>{if(m.isMesh){m.renderOrder=100;m.material.depthTest=false;}});}
-   this.feedback??=new WeaponFeedback();const pose=this.feedback.update(player,delta,reduced,this.hands.visible);this.hands.position.set(.37+pose.x,-.36+pose.y,-.58+pose.z);this.hands.rotation.set(pose.pitch,0,pose.roll);this.firstPerson.userData.flash.visible=!reduced&&this.hands.visible&&this.flashUntil>performance.now();this.muzzleLights?.update(Math.max(0,delta));if(this.renderer.shadowMap?.autoUpdate===false){const st=shadowTick(this._shadowTick,this._quality().shadows);this._shadowTick=st.tick;if(st.refresh)this.renderer.shadowMap.needsUpdate=true;}this.updateSky();this._updateWind(time,reduced);this._updateAmbient(match,delta,time,reduced);this._updateWeather(arena,delta,mode);this._updateWeatherFx(delta,reduced,this._quality());this._updateDebris(delta);this._updateAudio(match,time);if(this.composer)this.composer.render();else this.renderer.render(this.scene,this.camera);if(cinematic)this.playerId=savedPlayerId;if(mode==='selection'&&this.showcaseState)this._renderPreview(time,reduced);}
+   this.feedback??=new WeaponFeedback();const pose=this.feedback.update(player,delta,reduced,this.hands.visible);this.hands.position.set(.37+pose.x,-.36+pose.y,-.58+pose.z);this.hands.rotation.set(pose.pitch,0,pose.roll);this.firstPerson.userData.flash.visible=!reduced&&this.hands.visible&&this.flashUntil>performance.now();this.muzzleLights?.update(Math.max(0,delta));if(this.renderer.shadowMap?.autoUpdate===false){const st=shadowTick(this._shadowTick,this._quality().shadows);this._shadowTick=st.tick;if(st.refresh)this.renderer.shadowMap.needsUpdate=true;}this.updateSky();this._updateWind(time,reduced);this._updateAmbient(match,delta,time,reduced);this._updateWeather(arena,delta,mode);this._updateWeatherFx(delta,reduced,this._quality());const software=this.renderer?.isSoftware===true;this._updateLightning(delta,reduced,software);this._applyWetSheen(this._weatherState());this.hitPool?.update(Math.max(0,delta));this._updateHitReactions();this._updateDebris(delta);this._updateAudio(match,time);if(this.composer)this.composer.render();else this.renderer.render(this.scene,this.camera);if(cinematic)this.playerId=savedPlayerId;if(mode==='selection'&&this.showcaseState)this._renderPreview(time,reduced);}
       updateRace(match,time){syncRacePresentation(this,match,time);}
-    _renderPreview(time,reduced){const rect=this.previewRect;if(!rect||rect.width<12||rect.height<12||!(this.renderer instanceof T.WebGLRenderer))return;const renderer=this.renderer,w=this.width,h=this.height;if(w<=0||h<=0)return;const x=Math.max(0,Math.round(rect.left)),y=Math.max(0,Math.round(h-rect.bottom)),vw=Math.max(1,Math.round(rect.width)),vh=Math.max(1,Math.round(rect.height));const m=this.menu.model;m.rotation.y=Math.PI+.25+(reduced?0:Math.sin(time*.4)*.22);m.position.y=.17;const cam=this.menu.camera;cam.aspect=Math.max(.2,vw/vh);cam.updateProjectionMatrix();const prevAuto=renderer.autoClear;renderer.setScissorTest(true);renderer.setViewport(x,y,vw,vh);renderer.setScissor(x,y,vw,vh);renderer.autoClear=true;renderer.render(this.menu.scene,cam);renderer.setScissorTest(false);renderer.setViewport(0,0,w,h);renderer.setScissor(0,0,w,h);renderer.autoClear=prevAuto;}
-          dispose(){this.clearObjectiveMarkers();this.effectPool?.dispose();this.projectilePool?.dispose();this.railPool?.dispose();this.deathPool?.dispose();this.decalPool?.dispose();this.debrisPool?.dispose();this.debrisPool=null;this.ambientPool?.dispose();this.weatherPool?.dispose();this.ambientFx=null;this.weatherFx=null;this._killcam=null;disposeComposer(this.composer);this.composer=null;this.muzzleLights?.dispose();this.lowHealthOverlay?.dispose();this.disposeObject(this.scene);this.disposeObject(this.menu.scene);this.environmentRT?.dispose?.();for(const resource of this.renderResources||[])resource.dispose();this.renderResources?.clear();for(const resource of this.sharedResources||[])resource.dispose();this.sharedResources?.clear();this.modelAssets?.materials.clear();this.modelAssets?.geometries.clear();this.modelAssets?.resources.clear();this.arenaAssets?.materials.clear();this.arenaAssets?.geometries.clear();this.arenaAssets?.resources.clear();clearSurfaceTextures();this._freeCam=false;this._directorLock=false;this.resetFreeCam();this.renderer.dispose();}
+     _renderPreview(time,reduced){const rect=this.previewRect;if(!rect||rect.width<12||rect.height<12||!(this.renderer instanceof T.WebGLRenderer))return;const m=this.menu.model;m.rotation.y=Math.PI+.25+(reduced?0:Math.sin(time*.4)*.22);m.position.y=.17;const cam=this.menu.camera;cam.aspect=Math.max(.2,rect.width/rect.height);cam.updateProjectionMatrix();this._renderSceneInto(this.renderer,rect,this.menu.scene,cam);}
+          dispose(){this.clearObjectiveMarkers();this.effectPool?.dispose();this.projectilePool?.dispose();this.railPool?.dispose();this.deathPool?.dispose();this.decalPool?.dispose();this.debrisPool?.dispose();this.debrisPool=null;this.hitPool?.dispose();this.hitPool=null;this.hitFlinch?.clear();this.ambientPool?.dispose();this.weatherPool?.dispose();this.ambientFx=null;this.weatherFx=null;this._killcam=null;this.preview?.dispose();this.preview=null;this.previewAssets?.dispose?.();this.previewAssets=null;disposeComposer(this.composer);this.composer=null;this.muzzleLights?.dispose();this.lowHealthOverlay?.dispose();this.disposeObject(this.scene);this.disposeObject(this.menu.scene);this.environmentRT?.dispose?.();for(const resource of this.renderResources||[])resource.dispose();this.renderResources?.clear();for(const resource of this.sharedResources||[])resource.dispose();this.sharedResources?.clear();this.modelAssets?.materials.clear();this.modelAssets?.geometries.clear();this.modelAssets?.resources.clear();this.arenaAssets?.materials.clear();this.arenaAssets?.geometries.clear();this.arenaAssets?.resources.clear();clearSurfaceTextures();this._freeCam=false;this._directorLock=false;this.resetFreeCam();this.renderer.dispose();}
 }

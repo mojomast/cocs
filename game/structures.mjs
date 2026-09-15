@@ -125,3 +125,28 @@ export function propBreakPlan(prop, { origin = null, serial = 0, reduced = false
   }
   return { id: prop?.id ?? null, kind: prop.type, color: profile.color, material: profile.material, sound: profile.sound, pieces, count };
 }
+
+// ---- Weapon inspector -----------------------------------------------------
+//
+// Pure pose math for the menu/showcase 3D weapon viewer. Keeping the rotation
+// and framing here (three.js-free) means the viewer's contract can be verified
+// without a WebGL context, and the same pose is reproducible for a given
+// weapon and time. `spin` is the idle turntable rate, `pitch` the presentation
+// tilt and `distance`/`height` the framing of the inspect camera.
+
+// Normalize a mount option set. `spin` may be a per-second rate; `reduced`
+// freezes the turntable but keeps a fixed three-quarter pose so the weapon is
+// still readable without motion.
+export function weaponPose({time=0,spin=.35,pitch=-.18,reduced=false,index=0}={}){
+ const t=Number.isFinite(time)?time:0,rate=Number.isFinite(spin)?spin:0;
+ const yaw=reduced?(Math.PI*.75+index*.4):(Math.PI*.75+index*.4+t*rate);
+ return { yaw, pitch:Number.isFinite(pitch)?pitch:-.18, roll:reduced?0:Math.sin(t*.7+index)*.03 };
+}
+
+// Inspect camera framing for a weapon bounding radius. Pulls back and lifts
+// slightly so the whole silhouette (including a long barrel) stays in frame.
+export function weaponInspect(radius=1,{fov=34,reduced=false}={}){
+ const r=Math.max(.2,Number.isFinite(radius)?radius:1);
+ const distance=r*(reduced?3.1:2.85),height=r*.55;
+ return { distance, height, fov:Number.isFinite(fov)?fov:34, target:r*.1 };
+}

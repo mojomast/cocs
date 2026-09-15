@@ -77,9 +77,18 @@ export function hordeWaveModifier(wave,difficultyId='easy'){
 // Resolves the full wave plan: the base composition plus the modifier's twist.
 // Twists swap (never inflate) bodies so the live cap and difficulty pacing stay
 // authoritative, and wave one is left untouched as the tutorial wave.
-export function hordeWavePlan(wave,difficultyId='easy'){
+export function hordeWavePlan(wave,difficultyId='easy',{endless=false}={}){
  const counts={...hordeWaveComposition(wave,difficultyId)};
  const modifier=hordeWaveModifier(wave,difficultyId);
+ // Endless runs escalate a boss on a fixed five-wave cadence, alternating the
+ // two boss classes so a long run never settles into one fight. The bounded run
+ // keeps the authored champion modifier untouched.
+ if(endless&&hordeBossWave(wave,{endless:true})){
+  counts.boss=true;
+  const bossType=Math.floor(Math.max(1,Math.round(wave))/5)%2===1?'warden':'harbinger';
+  counts[bossType]=(counts[bossType]||0)+1;
+  return {counts,modifier:{...modifier,id:'champion',name:'CHAMPION',description:'A boss takes the field and calls in reinforcements.',boss:true}};
+ }
  if(modifier.id==='artillery'&&(counts.mortar||0)<1){
   const source=counts.spitter>0?'spitter':counts.brute>0?'brute':'husk';
   if(counts[source]>0)counts[source]-=1;
@@ -128,6 +137,29 @@ export function hordeWaveComposition(wave,difficultyId='easy'){
 export const hordeWaveSize = (wave,difficulty='easy') => {
  const composition=hordeWaveComposition(wave,difficulty);
  return HORDE_TYPES.reduce((sum,kind)=>sum+(composition[kind]||0),0);
+};
+
+// Endless scoring. A cleared wave pays a base value that grows with the wave
+// index and the difficulty multiplier; boss waves pay a flat bonus. The formula
+// is pure integer arithmetic so a run's score is reproducible from its wave
+// history alone. `hordeBossWave` is the single source of truth for when a
+// champion takes the field: bounded runs use the modifier cycle, endless runs
+// escalate a boss every fifth wave from wave five.
+export const HORDE_BOSS_BONUS = 500;
+export const hordeWaveScore = (wave,difficulty='easy') => {
+ const index=Math.max(1,Math.round(wave)),pacing=hordePacing(difficulty);
+ return Math.round((100+index*25)*pacing.countScale);
+};
+export const hordeBossWave = (wave,{endless=false}={}) => {
+ const index=Math.max(1,Math.round(wave));
+ if(endless)return index>=5&&index%5===0;
+ return hordeWaveModifier(index).id==='champion';
+};
+export const hordeWaveScoreTotal = (wave,difficulty='easy',{endless=false}={}) => {
+ const index=Math.max(1,Math.round(wave));
+ let total=0;
+ for(let w=1;w<=index;w++)total+=hordeWaveScore(w,difficulty)+(hordeBossWave(w,{endless})?HORDE_BOSS_BONUS:0);
+ return total;
 };
 
 const actorById = (match,id) => (match.actors||[]).find(actor => actor.id === id) || null;
@@ -209,8 +241,15 @@ const snapZone = (match,zone) => snapPoint(match,zone);
 const snapStep = (match,step) => step.marker ? {...step,marker:snapPoint(match,step.marker)} : {...step};
 const inZone = (match,zone) => { const player=match.actors[0]; if(!player||!zone)return false; return Math.hypot(player.x-(zone.x??0),player.z-(zone.z??0))<=(zone.radius??3.5); };
 
-function win(match,state,text){if(match.over)return;state.phase='won';state.winner=0;state.message={text,at:match.time};match.objectiveState.winner=0;match.teamScores[0]=Math.max(match.teamScores[0]||0,1);match.emit('mission-won',{text});match.endMatch('objective');}
-function lose(match,state,text){if(match.over)return;state.phase='lost';state.winner=1;state.message={text,at:match.time};match.objectiveState.winner=1;match.teamScores[1]=Math.max(match.teamScores[1]||0,1);match.emit('mission-lost',{text});match.endMatch('objective');}
+// A horde run banks its final record once, at the moment it ends, so the
+// end-of-run summary is a pure read of `state.summary` and never depends on
+// later frame state. Bounded and endless runs share the same shape.
+function hordeSummary(match,state,outcome){
+ const player=match.actors[0];
+ return {outcome,wave:state.wave||0,target:state.waveTarget||0,endless:state.endless===true,score:state.score||0,bestWave:state.bestWave||0,kills:player?.frags||0,deaths:player?.deaths||0,elapsed:state.elapsed||0,lives:state.lives||0,upgrades:(state.upgrades||[]).length};
+}
+function win(match,state,text){if(match.over)return;state.phase='won';state.winner=0;state.message={text,at:match.time};match.objectiveState.winner=0;match.teamScores[0]=Math.max(match.teamScores[0]||0,1);if(state.kind==='horde'){state.summary=hordeSummary(match,state,'won');match.emit('horde-summary',{...state.summary});}match.emit('mission-won',{text});match.endMatch('objective');}
+function lose(match,state,text){if(match.over)return;state.phase='lost';state.winner=1;state.message={text,at:match.time};match.objectiveState.winner=1;match.teamScores[1]=Math.max(match.teamScores[1]||0,1);if(state.kind==='horde'){state.summary=hordeSummary(match,state,'lost');match.emit('horde-summary',{...state.summary});}match.emit('mission-lost',{text});match.endMatch('objective');}
 
 export function spawnGroup(match,state,spec,{team}){
  const request=spec||{};
@@ -246,14 +285,18 @@ export function initializeSinglePlayer(match){
  match.humanCount=1;
  match.config.botCount=0;
  const mode=match.config.mode;
- const state={kind:mode,playerId:0,phase:'intermission',timer:0,elapsed:0,lives:2,deaths:0,nextId:1,enemies:[],allies:[],groups:{},entered:{},everHadEnemies:false,boss:null,winner:null,message:null,objective:'',script:[],fired:{},defendProgress:0,lastEvent:0,steps:[],stepIndex:0,stepElapsed:0,holdProgress:0,waypoint:null,storyLine:null,bark:null,bossPhase:0,bossPhaseName:null,bossPhaseMax:1,summonCount:0,checkpoint:null,upgrades:[],upgradeOffers:0,pendingUpgrade:null,upgradeSelected:null,nextUpgradeWave:HORDE_UPGRADE_GAPS[0],upgradeGapIndex:0,waveModifier:null};
- let resumeStep=null;
- if(mode==='horde'){
-  const pacing=hordePacing(match.config.difficulty);
-  state.waveTarget=Math.max(1,Math.round(match.config.fragLimit||10));
-  state.wave=0;state.timer=pacing.intermission;state.phase='intermission';state.lives=3;
-  state.objective=`Survive ${state.waveTarget} hostile waves.`;
- } else {
+  const state={kind:mode,playerId:0,phase:'intermission',timer:0,elapsed:0,lives:2,deaths:0,nextId:1,enemies:[],allies:[],groups:{},entered:{},everHadEnemies:false,boss:null,winner:null,message:null,objective:'',script:[],fired:{},defendProgress:0,lastEvent:0,steps:[],stepIndex:0,stepElapsed:0,holdProgress:0,waypoint:null,storyLine:null,bark:null,bossPhase:0,bossPhaseName:null,bossPhaseMax:1,summonCount:0,checkpoint:null,upgrades:[],upgradeOffers:0,pendingUpgrade:null,upgradeSelected:null,nextUpgradeWave:HORDE_UPGRADE_GAPS[0],upgradeGapIndex:0,waveModifier:null,endless:false,score:0,bestWave:0,waveSize:0,summary:null};
+  let resumeStep=null;
+  if(mode==='horde'){
+   const pacing=hordePacing(match.config.difficulty);
+   // Endless is opt-in so the bounded wave-target run stays the default. An
+   // endless run has no wave target; it ends only when the player's lives run
+   // out (or the clock expires), and banks a wave/score record for the summary.
+   state.endless=match.config.endless===true;
+   state.waveTarget=state.endless?0:Math.max(1,Math.round(match.config.fragLimit||10));
+   state.wave=0;state.timer=pacing.intermission;state.phase='intermission';state.lives=3;
+   state.objective=state.endless?'Survive as long as you can. Every wave pays score.':`Survive ${state.waveTarget} hostile waves.`;
+  } else {
   const mission=missionFor(match.config.mission);
   state.mission=mission;state.phase='active';state.lives=mission.lives??3;
   state.objective=mission.objective;state.win=snapZone(match,mission.win);state.timer=0;
@@ -283,8 +326,9 @@ function releaseDead(match,state){
 
 function startWave(match,state){
  state.wave+=1;state.phase='wave';state.timer=0;state.enemies=[];state.boss=null;state.bossPhase=0;state.bossPhaseName=null;
- const plan=hordeWavePlan(state.wave,match.config.difficulty),composition=plan.counts,modifier=plan.modifier;
+ const plan=hordeWavePlan(state.wave,match.config.difficulty,{endless:state.endless===true}),composition=plan.counts,modifier=plan.modifier;
  state.waveModifier={id:modifier.id,name:modifier.name,description:modifier.description};
+ state.bestWave=Math.max(state.bestWave||0,state.wave);
  const group=`wave-${state.wave}`;
  const eliteType=composition.bulwark>0?'bulwark':composition.brute>0?'brute':composition.mortar>0?'mortar':composition.overseer>0?'overseer':null;
  let count=0;
@@ -367,9 +411,12 @@ function stepHorde(match,state,dt){
  }
  if(state.phase!=='wave')return;
  if(aliveEnemies(match,state)>0)return;
- match.emit('horde-wave-cleared',{wave:state.wave});
+ const bossWave=hordeBossWave(state.wave,{endless:state.endless===true});
+ const gained=hordeWaveScore(state.wave,match.config.difficulty)+(bossWave?HORDE_BOSS_BONUS:0);
+ state.score=(state.score||0)+gained;
+ match.emit('horde-wave-cleared',{wave:state.wave,score:state.score,gained});
  resupplyHorde(match,state);
- if(state.wave>=state.waveTarget){win(match,state,`You survived ${state.waveTarget} waves.`);return;}
+ if(!state.endless&&state.wave>=state.waveTarget){win(match,state,`You survived ${state.waveTarget} waves.`);return;}
  if(state.wave>=state.nextUpgradeWave)offerHordeUpgrade(match,state);
  state.phase='intermission';state.timer=hordePacing(match.config.difficulty).intermission;releaseDead(match,state);
 }
@@ -734,5 +781,5 @@ export function singlePlayerSnapshot(state,match){
  const upgrades=pending?pending.choices.map(hordeUpgradeInfo).filter(Boolean):[];
  const bossPhase=state.bossPhase||0,bossPhaseTotal=Math.max(1,state.bossPhaseMax||1);
  const checkpoint=Number.isFinite(state.checkpoint)?{step:Math.max(0,Math.round(state.checkpoint)),missionId:state.mission?.id??null}:null;
- return {kind:state.kind,phase:state.phase,elapsed:state.elapsed,wave:state.wave||0,waveTarget:state.waveTarget||0,waveTimer:state.timer||0,waveModifier:state.waveModifier?{...state.waveModifier}:null,enemiesAlive,enemiesTotal:state.enemies.length,kills:player?.frags||0,deaths:player?.deaths||0,lives:state.lives,objective:state.objective||'',message:state.message&&match.time-state.message.at<5?state.message.text:'',story,bark,bossPhase,bossPhaseName:state.bossPhaseName||null,bossPhaseTotal,waypoint:state.waypoint?{id:state.waypoint.id,x:state.waypoint.x,z:state.waypoint.z,label:state.waypoint.label}:null,winner:state.winner??null,mission:state.mission?{id:state.mission.id,name:state.mission.name,tag:state.mission.tag,chapter:state.mission.chapter||'',index:missionIndex,total:CAMPAIGN_MISSIONS.length,brief:state.mission.brief,intro:state.mission.intro||null,outro:state.mission.outro||null}:null,steps:state.steps.map((item,index)=>({id:item.id,label:item.label||'',text:item.text||'',detail:item.detail||'',active:index===state.stepIndex,done:index<state.stepIndex})),hold,boss:boss?{name:boss.name,hp:Math.max(0,Math.round(boss.health)),maxHp:boss.maxHealth,alive:boss.health>0,phase:bossPhase,phaseName:state.bossPhaseName||null,phases:bossPhaseTotal}:null,checkpoint,upgrades,upgradeWave:pending?pending.wave:null,upgradeSelected:state.upgradeSelected?.id??null,upgradeCount:(state.upgrades||[]).length,defend:state.win?.kind==='defend'?{seconds:state.win.seconds??30,progress:Math.min(state.win.seconds??30,Math.round(state.defendProgress||0))}:null};
+ return {kind:state.kind,phase:state.phase,elapsed:state.elapsed,wave:state.wave||0,waveTarget:state.waveTarget||0,endless:state.endless===true,score:state.score||0,bestWave:state.bestWave||0,summary:state.summary?{...state.summary}:null,waveTimer:state.timer||0,waveModifier:state.waveModifier?{...state.waveModifier}:null,enemiesAlive,enemiesTotal:state.enemies.length,kills:player?.frags||0,deaths:player?.deaths||0,lives:state.lives,objective:state.objective||'',message:state.message&&match.time-state.message.at<5?state.message.text:'',story,bark,bossPhase,bossPhaseName:state.bossPhaseName||null,bossPhaseTotal,waypoint:state.waypoint?{id:state.waypoint.id,x:state.waypoint.x,z:state.waypoint.z,label:state.waypoint.label}:null,winner:state.winner??null,mission:state.mission?{id:state.mission.id,name:state.mission.name,tag:state.mission.tag,chapter:state.mission.chapter||'',index:missionIndex,total:CAMPAIGN_MISSIONS.length,brief:state.mission.brief,intro:state.mission.intro||null,outro:state.mission.outro||null}:null,steps:state.steps.map((item,index)=>({id:item.id,label:item.label||'',text:item.text||'',detail:item.detail||'',active:index===state.stepIndex,done:index<state.stepIndex})),hold,boss:boss?{name:boss.name,hp:Math.max(0,Math.round(boss.health)),maxHp:boss.maxHealth,alive:boss.health>0,phase:bossPhase,phaseName:state.bossPhaseName||null,phases:bossPhaseTotal}:null,checkpoint,upgrades,upgradeWave:pending?pending.wave:null,upgradeSelected:state.upgradeSelected?.id??null,upgradeCount:(state.upgrades||[]).length,defend:state.win?.kind==='defend'?{seconds:state.win.seconds??30,progress:Math.min(state.win.seconds??30,Math.round(state.defendProgress||0))}:null};
 }

@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { DEMO_VERSION, demoHeader, compressDemo } from './demo.mjs';
-import { setDemoStorage, saveDemo, getDemo, listDemos, deleteDemo, demoSummary, demoHighlights, demoOutcome, demoModes, demoMaps, filterDemos, sortDemos } from './demo-store.mjs';
+import { setDemoStorage, saveDemo, getDemo, listDemos, deleteDemo, demoSummary, demoHighlights, demoOutcome, demoModes, demoMaps, filterDemos, sortDemos, demoFileName, exportDemo, importDemo, importDemoToStore } from './demo-store.mjs';
 
 function createMemoryStorage() {
   const meta = new Map();
@@ -142,6 +142,48 @@ test('getDemo validates DEMO_VERSION on load', async () => {
   const bad = { ...makeDemo(), version: DEMO_VERSION + 1 };
   storage.data.set('bad', { id: 'bad', bytes: await compressDemo(bad) });
   await assert.rejects(() => getDemo('bad'), /version/);
+});
+
+test('exportDemo and importDemo round-trip a replay through JSON', () => {
+  const demo = makeDemo({ timeLimit: 5, count: 4 });
+  const exported = exportDemo(demo);
+  assert.match(exported.name, /^cocs-replay-deathmatch-/);
+  assert.match(exported.name, /\.json$/);
+  assert.equal(typeof exported.text, 'string');
+  const parsed = JSON.parse(exported.text);
+  assert.equal(parsed.version, DEMO_VERSION);
+  assert.equal(parsed.keyframes.length, 4);
+  const { demo: restored, summary } = importDemo(exported.text);
+  assert.deepEqual(restored, demo);
+  assert.equal(summary.frames, 4);
+  assert.equal(summary.mapId, 'exchange');
+  assert.equal(summary.mode, 'deathmatch');
+  // Bytes are accepted too, and a bad payload is rejected rather than stored.
+  const fromBytes = importDemo(new TextEncoder().encode(exported.text));
+  assert.deepEqual(fromBytes.demo, demo);
+  assert.throws(() => importDemo('{"version":999}'), /version/);
+  assert.throws(() => importDemo('not json'), /Invalid demo JSON/);
+  assert.throws(() => exportDemo(null), /No demo/);
+});
+
+test('importDemoToStore persists an exported replay and de-duplicates by id', async () => {
+  const storage = createMemoryStorage();
+  setDemoStorage(storage);
+  const demo = makeDemo({ timeLimit: 5, count: 4 });
+  demo.id = 'fixed-replay';
+  const first = await importDemoToStore(exportDemo(demo).text);
+  assert.equal(first.id, 'fixed-replay');
+  assert.equal((await listDemos()).length, 1);
+  await importDemoToStore(exportDemo(demo).text);
+  assert.equal((await listDemos()).length, 1, 're-importing replaces the same id');
+  const loaded = await getDemo('fixed-replay');
+  assert.equal(loaded.meta.tag, 'roundtrip');
+});
+
+test('demoFileName sanitizes the mode and stamp', () => {
+  const name = demoFileName({createdAt: '2020-01-02T03:04:05.000Z', header: {config: {mode: 'team death/match'}}});
+  assert.match(name, /^cocs-replay-teamdeathmatch-20200102T030405000Z\.json$/);
+  assert.match(demoFileName({}), /^cocs-replay-match-\d+\.json$/);
 });
 
 test('trimDemo caps an oversized recording when saving', async () => {

@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {DISPLAY_PRESETS,PRESET_LIMIT,addPreset,applyDisplayPreset,descriptivePresetName,findPreset,normalizeLoadout,normalizePreset,normalizePresets,removePreset} from './presets.mjs';
+import {ACCESSIBILITY_PALETTES,ACCESSIBILITY_STORAGE_KEY,DEFAULT_PALETTE_ID,DISPLAY_PRESETS,PRESET_LIMIT,addPreset,applyDisplayPreset,defaultAccessibility,descriptivePresetName,enginePaletteFor,findPreset,normalizeAccessibility,normalizeLoadout,normalizePaletteId,normalizePreset,normalizePresets,paletteById,paletteIds,paletteOptions,radarPaletteFor,removePreset,teamColorsFor} from './presets.mjs';
 
 const options = {characters: ['chatgpt', 'claude'], harnesses: ['openclaw', 'cline'], maps: ['exchange', 'forge']};
 
@@ -61,4 +61,40 @@ test('display presets apply quality tiers without dropping unrelated options', (
   assert.equal(performance.showFps, true);
   assert.deepEqual(applyDisplayPreset({fov: 70}, 'nope'), {fov: 70});
   assert.deepEqual(applyDisplayPreset(undefined, 'balanced'), {resolutionScale: .85, postFx: true, bloom: .34, quality: 'medium', showFps: false});
+});
+
+test('accessibility palettes cover the common colour-vision deficiencies', () => {
+  assert.deepEqual(paletteIds(), ['default', 'deuteranopia', 'protanopia', 'tritanopia']);
+  assert.equal(ACCESSIBILITY_STORAGE_KEY, 'token-arena-accessibility');
+  for (const id of paletteIds()) {
+    const colors = teamColorsFor(id);
+    assert.equal(colors.length, 2, id);
+    assert.notEqual(colors[0], colors[1], `${id} teams are distinguishable`);
+    const radar = radarPaletteFor(id);
+    assert.equal(radar.red, colors[0]);
+    assert.equal(radar.blue, colors[1]);
+    assert.ok(radar.hostile && radar.self && radar.neutral && radar.contested && radar.payload && radar.waypoint, id);
+  }
+  // The three deficiency palettes are all distinct from the default and each other.
+  const signatures = ACCESSIBILITY_PALETTES.map(p => p.team.join(','));
+  assert.equal(new Set(signatures).size, ACCESSIBILITY_PALETTES.length);
+});
+
+test('palette ids normalize and the engine collapses every deficiency to colorblind', () => {
+  assert.equal(normalizePaletteId('protanopia'), 'protanopia');
+  assert.equal(normalizePaletteId('nope'), DEFAULT_PALETTE_ID);
+  assert.equal(normalizePaletteId(undefined), DEFAULT_PALETTE_ID);
+  assert.equal(paletteById('ghost').id, DEFAULT_PALETTE_ID);
+  assert.equal(enginePaletteFor('default'), 'default');
+  for (const id of ['deuteranopia', 'protanopia', 'tritanopia']) assert.equal(enginePaletteFor(id), 'colorblind', id);
+  assert.equal(enginePaletteFor('nope'), 'default');
+  assert.deepEqual(paletteOptions().map(o => o.id), paletteIds());
+});
+
+test('accessibility preferences normalize and round-trip', () => {
+  assert.deepEqual(defaultAccessibility(), {version: 1, palette: 'default', highContrast: false});
+  assert.deepEqual(normalizeAccessibility({palette: 'tritanopia', highContrast: true}), {version: 1, palette: 'tritanopia', highContrast: true});
+  assert.deepEqual(normalizeAccessibility({palette: 'bogus', highContrast: 'yes'}), {version: 1, palette: 'default', highContrast: false});
+  assert.deepEqual(normalizeAccessibility(null), defaultAccessibility());
+  assert.deepEqual(normalizeAccessibility(JSON.parse(JSON.stringify(normalizeAccessibility({palette: 'deuteranopia', highContrast: true})))), {version: 1, palette: 'deuteranopia', highContrast: true});
 });

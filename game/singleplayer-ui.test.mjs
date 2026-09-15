@@ -157,6 +157,63 @@ test('campaign display surfaces waypoint distance, steps, story and boss',()=>{
   for(const label of ['Mode','Map','Sort'])assert.match(html,new RegExp(`<select aria-label="${label}"`),label);
  });
 
+ test('theater exposes replay export and import controls',async()=>{
+  const ui={demos:[],getMap:()=>undefined,clock:value=>String(value),changeMode:()=>{},headActions:null,CAMERA_RIGS:[],exportDemo:()=>{},importDemo:()=>{}};
+  const html=await renderSsr('app/ui/screens/TheaterScreen.tsx','TheaterScreen',`{ui:${JSON.stringify(ui)}}`);
+  assert.match(html,/REPLAY FILES/);
+  assert.match(html,/IMPORT REPLAY/);
+  assert.match(html,/aria-label="Import replay file"/);
+  assert.match(html,/type="file"/);
+ });
+
+ test('accessibility panel renders palette radios and the high-contrast switch',async()=>{
+  const accessibility={version:1,palette:'protanopia',highContrast:true};
+  const html=await renderSsr('app/game-ui/configuration.tsx','AccessibilityConfiguration',`{accessibility:${JSON.stringify(accessibility)},onChange:()=>{}}`);
+  assert.match(html,/role="radiogroup" aria-label="Colour vision palette"/);
+  assert.match(html,/role="radio" aria-checked="true"/);
+  assert.match(html,/role="radio" aria-checked="false"/);
+  assert.match(html,/Deuteranopia/);
+  assert.match(html,/Protanopia/);
+  assert.match(html,/Tritanopia/);
+  assert.match(html,/palette-swatches/);
+  assert.match(html,/High-contrast UI/);
+  assert.match(html,/aria-checked="true"/);
+ });
+
+ test('keybind remap UI is keyboard reachable and labelled per action',async()=>{
+  const html=await renderSsr('app/game-ui/configuration.tsx','KeybindsConfiguration',`{bindings:{forward:'KeyW',back:'KeyS',left:'KeyA',right:'KeyD',jump:'Space',sprint:'ShiftLeft',crouch:'ControlLeft',reload:'KeyR',melee:'KeyF',grenade:'KeyG',power:'KeyQ',interact:'KeyE',voice:'KeyV'},onChange:()=>{},conflicts:[]}`);
+  assert.match(html,/role="group" aria-label="Keyboard bindings"/);
+  assert.match(html,/aria-label="Rebind forward, currently W"/);
+  assert.match(html,/aria-label="forward key"/);
+  assert.match(html,/aria-pressed="false"/);
+  assert.match(html,/RESET KEYS/);
+ });
+
+ test('browse screen exposes mode, map and size filters plus practice vs bots',async()=>{
+  const ui={rooms:[],matches:[],netUrl:'',setNetUrl:()=>{},roomName:'',setRoomName:()=>{},quickJoin:()=>{},createRoom:()=>{},joinRoom:()=>{},refreshNet:()=>{},changeMode:()=>{},headActions:null,teamName:()=>'',renderScoreboard:()=>null,config:{mode:'deathmatch'},quickStart:()=>{},GAME_MODES:[{id:'deathmatch',name:'Deathmatch'},{id:'ctf',name:'Capture the Flag'}],getMap:()=>undefined,DIFFICULTIES:[{id:'normal',name:'Normal'}]};
+  const html=await renderSsr('app/ui/screens/NetScreens.tsx','BrowseScreen',`{ui:${JSON.stringify(ui)}}`);
+  assert.match(html,/PRACTICE VS BOTS/);
+  assert.match(html,/aria-label="Practice mode"/);
+  assert.match(html,/aria-label="Practice bot count"/);
+  assert.match(html,/aria-label="Practice bot difficulty"/);
+  assert.match(html,/aria-label="Filter by mode"/);
+  assert.match(html,/aria-label="Filter by map"/);
+  assert.match(html,/aria-label="Filter by size"/);
+ });
+
+ test('results summary card surfaces XP, prestige progress and achievements',async()=>{
+  const summary={result:'win',modeName:'Deathmatch',mapName:'Exchange',kills:12,deaths:3,kd:4,duration:154,xp:500,level:2,progress:.4,toNext:300,levelUp:true,prestige:1,prestigeTier:'Bronze',prestigeProgress:.25,prestigeToNext:4500,prestigeMaxed:false,achievements:[{id:'first-blood',name:'First Blood',description:'Win a match.',xp:100}],achievementCount:1};
+  const html=await renderSsr('app/ui/screens/ResultModals.tsx','MatchSummaryCard',`{summary:${JSON.stringify(summary)}}`);
+  assert.match(html,/role="group" aria-label="Match summary"/);
+  assert.match(html,/VICTORY/);
+  assert.match(html,/DEATHMATCH · EXCHANGE/);
+  assert.match(html,/XP EARNED/);
+  assert.match(html,/PRESTIGE 1 · BRONZE/);
+  assert.match(html,/ACHIEVEMENTS UNLOCKED · 1/);
+  assert.match(html,/First Blood/);
+  assert.match(html,/role="listitem"/);
+ });
+
  test('help legend covers the systems added on top of the core loop',()=>{
   const byId=id=>HELP_SECTIONS.find(section=>section.id===id);
   for(const id of ['modes','horde','challenges','theater','access'])assert.ok(byId(id),id);

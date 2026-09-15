@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {CHARACTERS,HARNESSES,WEAPONS,POWERUPS,RULES,validLoadout,resolveLoadout} from './data.mjs';
+import {CHARACTERS,HARNESSES,WEAPONS,POWERUPS,ECONOMY_PICKUPS,ECONOMY_PICKUP_IDS,RULES,validLoadout,resolveLoadout} from './data.mjs';
 import {MAPS,pickupWeapon,SUPPLY_KINDS} from './maps.mjs';
 import {Match} from './core.mjs';
 
@@ -25,7 +25,11 @@ test('every weapon can be picked up, fired and represented by a pickup kind',()=
  assert.equal(pickupWeapon('health'),undefined);
  assert.equal(pickupWeapon('megahealth'),undefined);
  assert.equal(pickupWeapon('ammo'),undefined);
- assert.deepEqual([...SUPPLY_KINDS],['health','armor','ammo','megahealth']);
+ assert.deepEqual([...SUPPLY_KINDS],['health','armor','ammo','megahealth','weaponUpgrade','deployable']);
+ assert.deepEqual([...ECONOMY_PICKUP_IDS],['weaponUpgrade','deployable'],'economy pickups keep stable ids');
+ assert.equal(ECONOMY_PICKUPS.length,2);
+ for(const pickup of ECONOMY_PICKUPS)assert.ok(pickup.duration>0&&pickup.description.length>0);
+ assert.ok(!POWERUPS.some(powerup=>ECONOMY_PICKUP_IDS.includes(powerup.id)),'economy pickups are not timed powerups');
 });
 
 test('the new supply pickups refill ammo and overcharge health deterministically',()=>{
@@ -42,6 +46,6 @@ test('the new supply pickups refill ammo and overcharge health deterministically
 });
 
 test('maps only reference known pickup kinds',()=>{
- const known=new Set([...SUPPLY_KINDS,...Object.keys({rocket:1,rail:2,scatter:3,plasma:4,grenade:5,shock:6,flak:7,marksman:8,smg:9}),...POWERUPS.map(p=>p.id)]);
+ const known=new Set([...SUPPLY_KINDS,...Object.keys({rocket:1,rail:2,scatter:3,plasma:4,grenade:5,shock:6,flak:7,marksman:8,smg:9}),...POWERUPS.map(p=>p.id),...ECONOMY_PICKUP_IDS]);
  for(const map of MAPS)for(const [kind] of map.pickups)assert.ok(known.has(kind),`${map.id} pickup kind ${kind}`);
 });

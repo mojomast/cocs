@@ -9,7 +9,9 @@ export const ONBOARDING_STEPS = Object.freeze([
   Object.freeze({id: 'systems', title: 'NEW SYSTEMS', detail: 'Juggernaut, Team Elimination and VIP Escort remix the objective; Horde waves grant lasting upgrades; dailies and Theater highlights track progress.'}),
   Object.freeze({id: 'mutators', title: 'MUTATORS & WEATHER', detail: 'Match Setup toggles mutators like One-shot, Bounty, Berserk, Random weapon and Sudden death. Arenas pick their own weather — rain, snow, ash or storms — and time of day; reduce motion clears it.'}),
   Object.freeze({id: 'career', title: 'PRESTIGE & ACHIEVEMENTS', detail: 'Milestones unlock achievements for bonus XP, and overflow XP past level 60 banks prestige ranks with permanent XP bonuses. Track both under Rank → Career track.'}),
-  Object.freeze({id: 'adapt', title: 'MAKE IT YOURS', detail: 'Set invert look, sensitivity, captions, HUD clarity and colourblind team colours in Settings at any time.'}),
+  Object.freeze({id: 'adapt', title: 'MAKE IT YOURS', detail: 'Set invert look, sensitivity, captions and HUD clarity in Settings. Pick a colour-vision palette (deuteranopia, protanopia or tritanopia) or high-contrast UI, and remap any key by pressing it.'}),
+  Object.freeze({id: 'replays', title: 'REPLAYS & SUMMARY', detail: 'Theater exports any recorded match to a .json file and imports one back. The results screen opens on a Summary card with XP, level, prestige progress and achievements unlocked.'}),
+  Object.freeze({id: 'browser', title: 'ROOM BROWSER & PRACTICE', detail: 'Filter open rooms by mode, map or size, or hit Practice vs Bots to launch a local match with no server at all.'}),
 ]);
 
 // Skimmable in-game legend for the systems added on top of the core loop. Kept
@@ -72,8 +74,41 @@ export const HELP_SECTIONS = Object.freeze([
     summary: 'Every finished solo or online match is recorded.',
     items: Object.freeze([
       'Filter the library by mode, map or length, then WATCH to replay it.',
+      'EXPORT downloads a replay as a .json file; IMPORT REPLAY loads one back onto this device.',
       'HIGHLIGHTS jumps straight to eliminations, captures and killstreaks; the scrub bar seeks anywhere.',
       'Cinematic cameras 1–7, [ / ] changes subject, Space pauses, R restarts, Escape exits.',
+    ]),
+  }),
+  Object.freeze({
+    id: 'browser',
+    title: 'ROOM BROWSER & PRACTICE',
+    summary: 'Find the right fight, or skip the server entirely.',
+    items: Object.freeze([
+      'Filter live rooms by mode, map or player count before you join, or WATCH one already in progress.',
+      'PRACTICE VS BOTS starts a local match with your operator and arena — pick the mode, bot count and difficulty.',
+      'QUICK JOIN drops you into the first open room; CREATE & HOST opens your own code.',
+    ]),
+  }),
+  Object.freeze({
+    id: 'access',
+    title: 'ACCESSIBILITY',
+    summary: 'Make the arena readable for you.',
+    items: Object.freeze([
+      'View & crosshair holds resolution scale, glow, brightness, FOV, crosshair shape and colour.',
+      'Colour vision palettes — deuteranopia, protanopia and tritanopia — recolour teams, the radar and score banners; the 3D arena follows.',
+      'High-contrast UI strengthens borders, text and focus rings across every menu.',
+      'Remap any action under Controls by selecting it and pressing a key; touch controls have their own sensitivity slider.',
+      'Every menu tab, panel and modal is keyboard reachable; Tab cycles focus and Escape closes the active dialog.',
+    ]),
+  }),
+  Object.freeze({
+    id: 'results',
+    title: 'RESULTS & CAREER',
+    summary: 'The summary card and long-term tracks.',
+    items: Object.freeze([
+      'The results screen opens on SUMMARY: kills, K/D, time, XP earned, level and prestige progress.',
+      'Achievements unlocked that round are listed on the summary card and under Rank → Career track.',
+      'Overflow XP past level 60 banks prestige ranks, each granting a permanent match-XP bonus.',
     ]),
   }),
   Object.freeze({
@@ -85,17 +120,6 @@ export const HELP_SECTIONS = Object.freeze([
       'BATTLEFIELDS · Neon Vertical, Substation 7, Warfront Delta and Skyfall Basin add rooftops, bulkheads, armour and air superiority.',
       'ISLES · Skybreak Isles and Aether Ring offer three-route island layouts with trampolines and boost launchers.',
       'OBJECTIVE · The Throne (Juggernaut), The Gauntlet (Elimination), Convoy Line (Payload), Proving Grounds (Arms Race) and Titan Valley (Combined Arms).',
-    ]),
-  }),
-  Object.freeze({
-    id: 'access',
-    title: 'ACCESSIBILITY',
-    summary: 'Make the arena readable for you.',
-    items: Object.freeze([
-      'View & crosshair holds resolution scale, glow, brightness, FOV, crosshair shape and colour.',
-      'Subtitles / audio captions, reduce motion and the colourblind team palette live there too.',
-      'Remap any action under Controls; touch controls have their own sensitivity slider.',
-      'Every menu tab, panel and modal is keyboard reachable; Tab cycles focus and Escape closes the active dialog.',
     ]),
   }),
 ]);

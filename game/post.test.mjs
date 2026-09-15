@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {postStage,applyComposerSize,disposeComposer,reducedMotion,QUALITY_LEVELS,normalizeQuality,qualitySettings,qualityIndex,nextQualityTier} from './post.mjs';
+import {postStage,applyComposerSize,disposeComposer,reducedMotion,QUALITY_LEVELS,normalizeQuality,qualitySettings,qualityIndex,nextQualityTier,clampTriangleBudget,frameTriangleBudget} from './post.mjs';
 
 const fakeComposer = () => {
   const calls = [];
@@ -69,16 +69,29 @@ test('quality budgets are frozen, ordered and scale expensive work monotonically
   for (const tier of [low, medium, high]) {
     assert.ok(Object.isFrozen(tier));
     assert.ok(tier.tier >= 0 && tier.tier <= 2);
-    for (const key of ['particles', 'decals', 'deaths', 'splats', 'shadows', 'shadowMap', 'stars', 'scatter', 'scatterDetail', 'ambientMotes', 'tracers', 'bloom']) {
+    for (const key of ['particles', 'decals', 'deaths', 'splats', 'shadows', 'shadowMap', 'stars', 'scatter', 'scatterDetail', 'ambientMotes', 'tracers', 'bloom', 'triangleBudget']) {
       assert.ok(Number.isFinite(tier[key]), `${key} is finite`);
     }
   }
+  assert.ok(low.triangleBudget < medium.triangleBudget && medium.triangleBudget < high.triangleBudget, 'the CPU triangle ceiling grows with tier');
   assert.ok(low.particles < medium.particles && medium.particles < high.particles, 'particle budget grows with tier');
   assert.ok(low.decals <= medium.decals && medium.decals <= high.decals, 'decal slots never shrink as tier rises');
   assert.ok(low.deaths <= medium.deaths && medium.deaths <= high.deaths, 'death slots never shrink as tier rises');
   assert.ok(low.shadowMap <= medium.shadowMap && medium.shadowMap <= high.shadowMap, 'shadow map resolution tracks tier');
   assert.ok(low.scatter <= medium.scatter && medium.scatter <= high.scatter, 'backdrop density tracks tier');
   assert.equal(qualitySettings('low'), low, 'the same tier returns the same frozen table');
+});
+
+test('the CPU triangle budget clamps invalid values and resolves per tier', () => {
+  assert.equal(clampTriangleBudget(0), Infinity, 'a non-positive budget disables the cap');
+  assert.equal(clampTriangleBudget(-10), Infinity);
+  assert.equal(clampTriangleBudget(NaN), Infinity);
+  assert.equal(clampTriangleBudget(Infinity), Infinity);
+  assert.equal(clampTriangleBudget(1234.9), 1234, 'a finite budget floors to whole triangles');
+  assert.equal(frameTriangleBudget('low', { software: true }), qualitySettings('low').triangleBudget);
+  assert.equal(frameTriangleBudget('high'), qualitySettings('high').triangleBudget);
+  assert.equal(frameTriangleBudget('bogus'), qualitySettings('high').triangleBudget, 'an unknown tier falls back to the hardware default');
+  assert.ok(frameTriangleBudget('low', { software: true }) <= frameTriangleBudget('medium') && frameTriangleBudget('medium') <= frameTriangleBudget('high'));
 });
 
 test('the frame-rate controller demotes below minFps and promotes above maxFps with hysteresis', () => {

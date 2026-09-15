@@ -318,12 +318,12 @@ export function ambientProfile(arena={},phase='day'){
 export const WEATHER_KINDS=Object.freeze(['clear','overcast','rain','snow','ash','storm']);
 export const PRECIP_KINDS=Object.freeze(new Set(['rain','snow','ash','storm']));
 const WEATHER_PRESETS=Object.freeze({
- clear:Object.freeze({kind:'clear',particles:0,streakRatio:.4,color:'#cfe0ef',size:.03,life:3.4,speed:5,drift:.4,fall:1,density:1,exposure:1,audio:'default',material:Object.freeze({tint:'#000000',wet:0,dark:0})}),
- overcast:Object.freeze({kind:'overcast',particles:0,streakRatio:.4,color:'#c9d3dc',size:.03,life:4,speed:4,drift:.5,fall:1,density:1.12,exposure:.86,audio:'storm',material:Object.freeze({tint:'#2c3540',wet:.04,dark:.06})}),
- rain:Object.freeze({kind:'rain',particles:90,streakRatio:1.3,color:'#aebccb',size:.028,life:1.15,speed:17,drift:.25,fall:19,density:1.35,exposure:.8,audio:'storm',material:Object.freeze({tint:'#28323d',wet:.16,dark:.1})}),
- snow:Object.freeze({kind:'snow',particles:72,streakRatio:.4,color:'#eef6ff',size:.045,life:3.4,speed:2.4,drift:1,fall:2.4,density:1.2,exposure:1.04,audio:'cold',material:Object.freeze({tint:'#c3d1de',wet:.05,dark:0})}),
- ash:Object.freeze({kind:'ash',particles:64,streakRatio:.4,color:'#9aa0a6',size:.035,life:3.8,speed:1.8,drift:.8,fall:.9,density:1.25,exposure:.85,audio:'hot',material:Object.freeze({tint:'#3a3129',wet:0,dark:.12})}),
- storm:Object.freeze({kind:'storm',particles:130,streakRatio:1.15,color:'#9fb0c2',size:.03,life:1.4,speed:13,drift:.7,fall:15,density:1.6,exposure:.7,audio:'storm',material:Object.freeze({tint:'#1e2833',wet:.22,dark:.16})}),
+ clear:Object.freeze({kind:'clear',particles:0,streakRatio:.4,color:'#cfe0ef',size:.03,life:3.4,speed:5,drift:.4,fall:1,density:1,exposure:1,audio:'default',material:Object.freeze({tint:'#000000',wet:0,dark:0}),lightning:null,wind:1}),
+ overcast:Object.freeze({kind:'overcast',particles:0,streakRatio:.4,color:'#c9d3dc',size:.03,life:4,speed:4,drift:.5,fall:1,density:1.12,exposure:.86,audio:'storm',material:Object.freeze({tint:'#2c3540',wet:.04,dark:.06}),lightning:Object.freeze({chance:.12,interval:Object.freeze([5,11]),thunder:Object.freeze([.9,2.4])}),wind:1.25}),
+ rain:Object.freeze({kind:'rain',particles:90,streakRatio:1.3,color:'#aebccb',size:.028,life:1.15,speed:17,drift:.25,fall:19,density:1.35,exposure:.8,audio:'storm',material:Object.freeze({tint:'#28323d',wet:.16,dark:.1}),lightning:Object.freeze({chance:.22,interval:Object.freeze([4,9]),thunder:Object.freeze([.7,2])}),wind:1.5}),
+ snow:Object.freeze({kind:'snow',particles:72,streakRatio:.4,color:'#eef6ff',size:.045,life:3.4,speed:2.4,drift:1,fall:2.4,density:1.2,exposure:1.04,audio:'cold',material:Object.freeze({tint:'#c3d1de',wet:.05,dark:0}),lightning:null,wind:1.1}),
+ ash:Object.freeze({kind:'ash',particles:64,streakRatio:.4,color:'#9aa0a6',size:.035,life:3.8,speed:1.8,drift:.8,fall:.9,density:1.25,exposure:.85,audio:'hot',material:Object.freeze({tint:'#3a3129',wet:0,dark:.12}),lightning:null,wind:1.2}),
+ storm:Object.freeze({kind:'storm',particles:130,streakRatio:1.15,color:'#9fb0c2',size:.03,life:1.4,speed:13,drift:.7,fall:15,density:1.6,exposure:.7,audio:'storm',material:Object.freeze({tint:'#1e2833',wet:.22,dark:.16}),lightning:Object.freeze({chance:1,interval:Object.freeze([2.2,5.5]),thunder:Object.freeze([.5,1.6])}),wind:2}),
 });
 // Per-biome mood, tint and particle character. `biome` names match the level
 // generator families so a procedurally built map picks the same ambience.
@@ -411,6 +411,48 @@ export function precipParticleAdds(serial,kind,origin={},radius=9,preset=null){
   adds.push({pos:{x,y,z},color:profile.color,size:profile.size*(.8+hashUnit2(salt,6)*.5),life,velocity:{x:(hashUnit2(salt,7)-.5)*profile.drift,y:-fall,z:(hashUnit2(salt,8)-.5)*profile.drift},additive:profile.kind==='snow'||profile.kind==='ash',streak});
  }
  return adds;
+}
+
+// Deterministic lightning schedule for a storm. Pure: the same seed and window
+// always yield the same strikes, so a replay flashes and thunders identically.
+// Each strike carries a time offset, a 0..1 brightness, a distance and the
+// resulting thunder delay/pan. Presets without a lightning profile return [].
+export function lightningSchedule(preset,{seed=1,window=60,count=4}={}){
+ const profile=preset?.lightning;if(!profile)return [];
+ const [minGap,maxGap]=Array.isArray(profile.interval)?profile.interval:[3,8];
+ const [minThunder,maxThunder]=Array.isArray(profile.thunder)?profile.thunder:[.7,2];
+ const total=Math.max(0,Math.min(24,Math.round(Number(count)||0))),span=Number.isFinite(window)&&window>0?window:60;
+ let state=(seed>>>0)||1;const random=()=>{state=(Math.imul(state,1664525)+1013904223)>>>0;return state/4294967296;};
+ // `chance` is the probability this storm produces any lightning at all, so an
+ // overcast sky is usually quiet and a full storm almost always rumbles.
+ if(random()>(Number.isFinite(profile.chance)?profile.chance:1))return [];
+ const strikes=[];let t=random()*Math.max(.2,minGap);
+ for(let i=0;i<total&&t<span;i++){
+  const distance=.35+random()*.65,intensity=.5+random()*.5,thunderGain=minThunder+random()*Math.max(0,maxThunder-minThunder);
+  strikes.push(Object.freeze({time:t,intensity,distance,thunderGain,thunderDelay:.12+distance*1.7,pan:random()*2-1}));
+  t+=Math.max(.2,minGap)+random()*Math.max(0,maxGap-minGap);
+ }
+ return strikes;
+}
+
+// Smooth deterministic wind gust multiplier. `time` in seconds, `seed` fixes
+// the phase so two clients agree. Returns a bounded ~0.4..1.7 scale the view
+// applies to vegetation sway and particle drift. `strength` scales the swing.
+export function windGustAt(time,{seed=1,strength=1}={}){
+ const t=Number.isFinite(time)?time:0,s=(seed>>>0)||1;
+ const p1=hashUnit2(s,1)*Math.PI*2,p2=hashUnit2(s,2)*Math.PI*2,p3=hashUnit2(s,3)*Math.PI*2;
+ const raw=.5+.5*Math.sin(t*.21+p1)+.28*Math.sin(t*.53+p2)+.14*Math.sin(t*1.07+p3);
+ const norm=Math.max(0,Math.min(1,raw/1.92)),amp=Math.max(0,Math.min(2,Number.isFinite(Number(strength))?Number(strength):1));
+ return Math.max(.4,Math.min(1.7,1+(norm-.5)*amp*1.3));
+}
+
+// Wet-surface look for a given wetness (0..1). Pure so the view can apply the
+// same sheen to floor materials on WebGL while the CPU renderer reads only the
+// scalar fields. `roughness` scales the base roughness, `metalness` adds a
+// damp gloss and `sheen` drives a subtle additive highlight.
+export function wetSheen(wetness=0){
+ const w=clamp(Number.isFinite(wetness)?wetness:0,0,1);
+ return Object.freeze({wetness:w,roughness:1-w*.55,metalness:Math.min(.35,w*.3),sheen:w*.5,reflection:w});
 }
 
 // Deterministic distant-smoke anchor points inside the arena footprint. Pure:

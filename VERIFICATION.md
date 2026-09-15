@@ -1,5 +1,29 @@
 # COCS verification report
 
+## Release 4.4 - Objective variants, endless horde, economy, inspect, accessibility
+
+**Gameplay**
+- New objective modes: **Holdout** (quorum hold window) and **Uplink**
+  (sequential moving relay), with snapshot state and deterministic tiebreaks.
+- **Endless Horde** with wave/score banking, escalating alternating bosses and a
+  clean end-on-death summary.
+- **Economy pickups**: temporary weapon upgrade and a deployable sentry, plus
+  deterministic bot objective coordination (attack/defend/regroup).
+
+**Presentation**
+- **Weapon inspect** viewer API (reuses `weaponModel` + `ModelAssets`),
+  deterministic hit reactions (flinch/knockback/spray, WebGL-gated), storm
+  lightning/thunder, wet sheen and wind gusts, per-mode music themes and
+  victory/defeat stings.
+
+**Meta / accessibility**
+- Three colorblind palettes + high-contrast UI; full press-to-capture keyboard
+  remapping; replay export/import; a match summary card; room-browser filters
+  and a practice-vs-bots option; onboarding/help refreshed.
+
+Verification: game **1262/1262**, server **129/129**, `tests/` **5/5**, `tsc`
+clean, lint 0 errors, build clean.
+
 ## Release 4.3 - Mutators, biomes, destructibles, prestige and achievements
 
 **Gameplay**

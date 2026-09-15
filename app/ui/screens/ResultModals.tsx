@@ -35,9 +35,43 @@ export function PauseModal({ui}:ScreenProps){
  </Modal>;
 }
 
+// Post-match summary card: result line, XP/level progress, prestige progress
+// and the achievements unlocked this round. Pure view over the page's
+// matchSummary composition so the results screen never re-derives career state.
+export function MatchSummaryCard({summary}:any){
+ if(!summary)return null;
+ const resultLabel=summary.result==='win'?'VICTORY':summary.result==='draw'?'DRAW':summary.result==='loss'?'DEFEAT':'MATCH';
+ const achievements=Array.isArray(summary.achievements)?summary.achievements:[];
+ return <section className="match-summary" role="group" aria-label="Match summary">
+  <div className="match-summary-head">
+   <span className={`match-summary-result result-${summary.result||'none'}`}>{resultLabel}</span>
+   <span className="match-summary-context">{[summary.modeName,summary.mapName].filter(Boolean).join(' · ').toUpperCase()}</span>
+  </div>
+  <Stats items={[
+   {label:'KILLS',value:summary.kills},
+   {label:'DEATHS',value:summary.deaths},
+   {label:'K/D',value:Number(summary.kd||0).toFixed(2)},
+   {label:'TIME',value:`${Math.round(Number(summary.duration)||0)}s`},
+   {label:'XP EARNED',value:`+${summary.xp}`},
+  ]}/>
+  <div className="match-summary-track">
+   <div className="row row--between"><span className="label">LEVEL {summary.level}</span><span className="label">{summary.levelUp?'RANK UP':summary.toNext>0?`${summary.toNext} XP TO NEXT`:'MAX LEVEL'}</span></div>
+   <Meter ratio={Number(summary.progress)||0}/>
+  </div>
+  <div className="match-summary-track">
+   <div className="row row--between"><span className="label">{summary.prestige>0?`PRESTIGE ${summary.prestige}${summary.prestigeTier?` · ${String(summary.prestigeTier).toUpperCase()}`:''}`:'PRESTIGE'}</span><span className="label">{summary.prestigeMaxed?'MAX PRESTIGE':summary.prestige>0?`${summary.prestigeToNext} XP TO NEXT`:'REACH LEVEL 60'}</span></div>
+   <Meter ratio={Number(summary.prestigeProgress)||0}/>
+  </div>
+  {achievements.length>0&&<div className="stack stack--tight">
+   <span className="label">ACHIEVEMENTS UNLOCKED · {achievements.length}</span>
+   <div className="achievement-strip" role="list">{achievements.map((a:any)=><div key={a.id} className="achievement-row unlocked" role="listitem"><span className="achievement-icon" aria-hidden="true">★</span><span className="card-main"><span className="card-name">{a.name}<small>{a.description}</small></span></span><span className="label">+{a.xp} XP</span></div>)}</div>
+  </div>}
+ </section>;
+}
+
 export function ResultsModal({ui}:ScreenProps){
- const {hud,awards,scoreboard,resultTitle,resultDescription,start,nextArena,surpriseMe,playDemo,disconnectNet,changeMode,lastDemo,net,modalRef,player,mode,reward}=ui;
- const [tab,setTab]=useState('scoreboard');
+ const {hud,awards,scoreboard,resultTitle,resultDescription,start,nextArena,surpriseMe,playDemo,disconnectNet,changeMode,lastDemo,net,modalRef,player,mode,reward,matchSummary}=ui;
+ const [tab,setTab]=useState('summary');
  const list=Array.isArray(hud?.actors)?hud.actors:[];
  const localActor=list.find((a:any)=>a&&a.id===(hud?.actorId??0))||player;
  const statItems=localActor?[
@@ -70,8 +104,9 @@ export function ResultsModal({ui}:ScreenProps){
  </>;
  return <Modal open={!!hud&&mode==='results'} onClose={()=>changeMode('selection')} size="lg" eyebrow="MATCH COMPLETE" title={hud?resultTitle(hud,player):undefined} description={hud?resultDescription(hud,player):undefined} panelRef={modalRef} footer={footer}>
   {rewardStrip}
-  <Tabs value={tab} onChange={setTab} ariaLabel="Match results" tabs={[{value:'scoreboard',label:'Scoreboard'},{value:'stats',label:'Your stats'},{value:'awards',label:`Awards${awardCount?` · ${awardCount}`:''}`}]}/>
+  <Tabs value={tab} onChange={setTab} ariaLabel="Match results" tabs={[{value:'summary',label:'Summary'},{value:'scoreboard',label:'Scoreboard'},{value:'stats',label:'Your stats'},{value:'awards',label:`Awards${awardCount?` · ${awardCount}`:''}`}]}/>
   <div className="stack">
+   {tab==='summary'&&<MatchSummaryCard summary={matchSummary}/>}
    {tab==='scoreboard'&&scoreboard}
    {tab==='stats'&&(statItems?<div className="stack"><Stats items={statItems}/>{Array.isArray(reward?.achievements)&&reward.achievements.length>0&&<div className="stack stack--tight"><span className="label">NEW ACHIEVEMENTS</span><div className="achievement-strip" role="list">{reward.achievements.map((a:any)=><div key={a.id} className="achievement-row unlocked" role="listitem"><span className="achievement-icon" aria-hidden="true">★</span><span className="card-main"><span className="card-name">{a.name}<small>{a.description}</small></span></span><span className="label">+{a.xp} XP</span></div>)}</div></div>}<div className="stack stack--tight"><span className="label">MEDALS EARNED</span><MedalStrip awards={awards} player={player}/></div></div>:<div className="match-awards">{awardsNode}</div>)}
    {tab==='awards'&&<MedalStrip awards={awards} player={player}/>}

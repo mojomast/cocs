@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {surfaceTextures,clearSurfaceTextures} from './textures.mjs';
+import {surfaceTextures,clearSurfaceTextures,wetSheenTexture} from './textures.mjs';
 
 const withDocument = t => {
   const previous = Object.getOwnPropertyDescriptor(globalThis, 'document');
@@ -24,4 +24,20 @@ test('surface textures cache by key and are disposed exactly once on clear', t =
 
 test('surface textures return null without a document', () => {
   assert.equal(surfaceTextures('concrete'), null);
+  assert.equal(wetSheenTexture(), null);
+});
+
+test('the wet sheen overlay caches by key and is disposed with the surface cache', t => {
+  withDocument(t);
+  const first = wetSheenTexture({ seed: 3 });
+  assert.ok(first, 'the wet overlay is generated with a document');
+  assert.equal(first.userData.surfaceKind, 'wet');
+  assert.equal(wetSheenTexture({ seed: 3 }), first, 'identical requests reuse the cache');
+  assert.notEqual(wetSheenTexture({ seed: 4 }), first, 'a new seed builds a distinct overlay');
+  let disposed = 0;
+  first.addEventListener('dispose', () => disposed++);
+  clearSurfaceTextures();
+  assert.equal(disposed, 1, 'clearing the surface cache releases the wet overlay exactly once');
+  assert.notEqual(wetSheenTexture({ seed: 3 }), first, 'cleared overlays are rebuilt');
+  clearSurfaceTextures();
 });

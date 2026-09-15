@@ -1,5 +1,6 @@
 import * as T from 'three';
 import {hashUnit} from './deaths.mjs';
+import {weaponPose,weaponInspect} from './structures.mjs';
 
 // Shared per-model resources. Registrations are skipped by disposeObject and
 // released exactly once when the owning ArenaView is disposed.
@@ -217,6 +218,127 @@ export class DeathPool{
   for(const slot of this.splats){this.scene.remove(slot.obj);slot.material.dispose();}this.splats=[];
   this.limb.dispose();this.chunk.dispose();this.splatGeo.dispose();
  }
+}
+
+// Pooled, directional hit feedback for non-lethal damage. WebGL-only and
+// presentation-only: it never touches the simulation. A hit spawns a short
+// spray of blood/spark motes thrown along the incoming direction, all drawn
+// from a fixed slot budget so a firefight cannot grow GPU resources. The
+// companion flinch envelope is applied by the view through the actor rig's
+// existing `hit` channel.
+export class HitReactionFX{
+ constructor(scene,limit=24){
+  this.scene=scene;this.limit=Math.max(0,limit|0);this.slots=[];this.serial=0;
+  this.mote=new T.IcosahedronGeometry(.05,0);
+ }
+ _slot(){
+  let slot=this.slots.find(s=>!s.active);
+  if(slot)return slot;
+  if(this.slots.length>=this.limit){this.slots.sort((a,b)=>a.serial-b.serial);return this.slots[0]||null;}
+  const material=new T.MeshBasicMaterial({transparent:true,depthWrite:false});
+  const obj=new T.Mesh(this.mote,material);obj.visible=false;obj.frustumCulled=false;this.scene.add(obj);
+  slot={obj,material,active:false};this.slots.push(slot);return slot;
+ }
+ // Spawn from a pure hitReaction plan. Returns the number of motes emitted.
+ spawn(pos,reaction,{reduced=false}={}){
+  if(!pos||!reaction||!this.limit)return 0;
+  const count=Math.max(0,reduced?Math.min(2,reaction.count):reaction.count);
+  const baseY=Number.isFinite(pos.y)?pos.y:0;
+  let spawned=0;
+  for(let i=0;i<count;i++){
+   const slot=this._slot();if(!slot)break;
+   const j=hashUnit(reaction.seed,i*.61+1),j2=hashUnit(reaction.seed,i*.61+2),j3=hashUnit(reaction.seed,i*.61+3);
+   const spread=.7+reaction.strength;
+   slot.obj.visible=true;slot.obj.material.color.set(reaction.color);slot.obj.material.opacity=1;
+   slot.obj.position.set(Number.isFinite(pos.x)?pos.x:0,baseY,Number.isFinite(pos.z)?pos.z:0);
+   slot.obj.scale.setScalar(.5+j*.9);
+   slot.velocity={x:(reaction.sprayX*.6+(j-.5)*spread)*3.2,y:(.4+j2*1.4)*3.2,z:(reaction.sprayZ*.6+(j3-.5)*spread)*3.2};
+   slot.active=true;slot.serial=++this.serial;slot.life=slot.total=.35+j3*.35;
+   spawned++;
+  }
+  return spawned;
+ }
+ update(dt){
+  const step=Math.max(0,Math.min(Number(dt)||0,.1));
+  for(const slot of this.slots){
+   if(!slot.active)continue;
+   slot.life-=step;
+   if(slot.life<=0){slot.active=false;slot.obj.visible=false;continue;}
+   const v=slot.velocity||{x:0,y:0,z:0};v.y-=16*step;
+   slot.obj.position.x+=v.x*step;slot.obj.position.y+=v.y*step;slot.obj.position.z+=v.z*step;
+   slot.obj.material.opacity=Math.min(1,slot.life/(slot.total*.4));
+  }
+ }
+ clear(){for(const slot of this.slots){slot.active=false;slot.obj.visible=false;}}
+ dispose(){for(const slot of this.slots){this.scene.remove(slot.obj);slot.material?.dispose();slot.material=null;}this.slots=[];this.mote?.dispose();this.mote=null;}
+}
+
+// Menu/showcase 3D weapon viewer. It owns a tiny scene with a turntable pivot
+// and an inspect camera; mount() builds the weapon through the shared
+// weaponModel + ModelAssets pipeline (so a preview reuses the exact same
+// geometry/materials as gameplay and disposes exactly once), and frame() /
+// update() apply the deterministic pose from structures.mjs. The host screen
+// only needs the canvas and a mount rect; no app/** changes are required.
+export class WeaponPreviewRig{
+ constructor({weaponModel:build=null,assets=null,background='#0a1014'}={}){
+  this.build=build;this.assets=assets;this._ownsAssets=!assets;this.scene=new T.Scene();
+  this.scene.background=new T.Color(background);
+  this.camera=new T.PerspectiveCamera(34,1,.05,60);
+  this.pivot=new T.Group();this.scene.add(this.pivot);
+  this.scene.add(new T.HemisphereLight('#cdeef2','#1b242b',2.6));
+  const key=new T.DirectionalLight('#eafff6',3.4);key.position.set(-3,5,4);this.scene.add(key);
+  const rim=new T.PointLight('#59e6d0',60,16);rim.position.set(3,2,-3);this.scene.add(rim);
+  this.model=null;this.type=-1;this.visual=null;this.finish=null;this.radius=1;this.mounted=false;
+ }
+ // Build (or rebuild) the previewed weapon. Reuses the supplied ModelAssets so
+ // materials/geometries survive weapon switches; only the previous model's
+ // non-shared children are released.
+ mount({type=0,visual=null,finish=null}={}){
+  if(!this.build)return null;
+  this.clear();
+  this.type=type;this.visual=visual;this.finish=finish;
+  if(!this.assets){this.assets=new ModelAssets();this._ownsAssets=true;}
+  const assets=this.assets;
+  this.model=withAssets(assets,()=>this.build(type,assets,visual,finish));
+  this.pivot.add(this.model);
+  const box=new T.Box3().setFromObject(this.model),size=box.getSize(new T.Vector3()),center=box.getCenter(new T.Vector3());
+  this.radius=Math.max(.25,Math.max(size.x,size.y,size.z)*.5);
+  // Recenter so the turntable spins about the weapon's own middle, not its
+  // muzzle origin, then frame the inspect camera from the bounding radius.
+  this.model.position.set(-center.x,-center.y,-center.z);
+  const frame=weaponInspect(this.radius);
+  this.camera.position.set(0,frame.height,frame.distance);
+  this.camera.lookAt(0,0,0);
+  this.mounted=true;
+  return this.model;
+ }
+ // Apply a deterministic pose. `time` drives the turntable; reduced motion
+ // freezes it at a fixed three-quarter angle.
+ frame(time,{reduced=false,spin=.35,pitch=-.18}={}){
+  if(!this.pivot)return null;
+  const pose=weaponPose({time,spin,pitch,reduced,index:this.type<0?0:this.type});
+  this.pivot.rotation.set(pose.pitch,pose.yaw,pose.roll);
+  return pose;
+ }
+ // Resize the inspect camera to a CSS mount rect. The host passes the same rect
+ // it uses for the scissor viewport, so the preview matches the menu layout.
+ resize(width,height){
+  const w=Math.max(1,Number(width)||1),h=Math.max(1,Number(height)||1);
+  this.camera.aspect=w/h;this.camera.updateProjectionMatrix();
+  return {width:w,height:h};
+ }
+ update(time,{reduced=false,spin=.35,pitch=-.18}={}){return this.frame(time,{reduced,spin,pitch});}
+ setVisible(visible){this.pivot.visible=visible!==false;return this.pivot.visible;}
+ clear(){
+  if(!this.model)return;
+  this.pivot.remove(this.model);
+  // disposeObject-equivalent: release only resources not owned by ModelAssets.
+  const owned=this.assets?.resources,geometries=new Set(),materials=new Set();
+  this.model.traverse(n=>{if(n.geometry&&!owned?.has(n.geometry))geometries.add(n.geometry);if(n.material)for(const m of Array.isArray(n.material)?n.material:[n.material])if(!owned?.has(m))materials.add(m);});
+  for(const r of [...geometries,...materials])r.dispose();
+  this.model=null;this.mounted=false;
+ }
+ dispose(){this.clear();if(this._ownsAssets)this.assets?.dispose?.();this.assets=null;this.pivot?.clear?.();this.scene?.clear?.();}
 }
 
 // Short, deterministic kill-cam framing. Camera math only: the authoritative

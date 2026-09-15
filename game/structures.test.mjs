@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import * as T from 'three';
-import {CAVERN_SEGMENTS,cavernArcs,cavernOpening,cavernShell,cavernRenderArcs,BREAK_KINDS,BREAKABLE_PROPS,breakProfile,isBreakable,propId,propHash,applyPropDamage,propBreakPlan} from './structures.mjs';
+import {CAVERN_SEGMENTS,cavernArcs,cavernOpening,cavernShell,cavernRenderArcs,BREAK_KINDS,BREAKABLE_PROPS,breakProfile,isBreakable,propId,propHash,applyPropDamage,propBreakPlan,weaponPose,weaponInspect} from './structures.mjs';
 
 test('a cavern leaves two opposite entrances open', () => {
   assert.equal(CAVERN_SEGMENTS, 16);
@@ -95,6 +95,31 @@ test('the break plan is deterministic, bounded and reduced-motion aware', () => 
   const reduced = propBreakPlan(prop, {origin: {x: 3, y: 1, z: -2}, serial: 5, reduced: true});
   assert.ok(reduced.count <= 2 && reduced.count < a.count, 'reduced motion emits a minimal burst');
   assert.equal(propBreakPlan({type: 'rock', x: 0, z: 0}, {}), null, 'unbreakable props have no plan');
+});
+
+test('weapon inspect poses are deterministic, finite and freeze under reduced motion', () => {
+  const a = weaponPose({ time: 3, spin: .35, index: 2 }), b = weaponPose({ time: 3, spin: .35, index: 2 });
+  assert.deepEqual(a, b, 'the same time and index reproduce the pose');
+  assert.notDeepEqual(a, weaponPose({ time: 4, spin: .35, index: 2 }), 'the turntable advances with time');
+  for (const pose of [a, weaponPose({ time: NaN }), weaponPose({ time: 1, spin: NaN })]) {
+    for (const key of ['yaw', 'pitch', 'roll']) assert.ok(Number.isFinite(pose[key]), `${key} finite`);
+  }
+  const frozen = weaponPose({ time: 10, reduced: true }), frozenLater = weaponPose({ time: 99, reduced: true });
+  assert.deepEqual(frozen, frozenLater, 'reduced motion pins the pose');
+  assert.equal(frozen.roll, 0, 'reduced motion drops the idle roll');
+  assert.notEqual(weaponPose({ time: 0, index: 0 }).yaw, weaponPose({ time: 0, index: 1 }).yaw, 'each weapon gets a distinct resting angle');
+});
+
+test('weapon inspect framing pulls back with the bounding radius', () => {
+  const small = weaponInspect(.3), large = weaponInspect(2);
+  assert.ok(large.distance > small.distance, 'a larger weapon is framed further out');
+  assert.ok(large.height > small.height);
+  assert.equal(small.fov, 34);
+  const reduced = weaponInspect(1, { reduced: true });
+  assert.ok(reduced.distance >= weaponInspect(1).distance, 'reduced motion keeps a stable, slightly wider stand-off');
+  for (const frame of [small, large, weaponInspect(NaN)]) {
+    for (const key of ['distance', 'height', 'fov', 'target']) assert.ok(Number.isFinite(frame[key]) && frame[key] > 0, `${key} finite`);
+  }
 });
 
 test('rendered cavern arcs put solid walls and openings where collision does', () => {

@@ -361,12 +361,104 @@ test('low-health objective bots break line of sight instead of trading',()=>{
 });
 
 test('coverPoint prefers a node that breaks line of sight to the threat',()=>{
-  const match={nav:[{x:0,y:0,z:0},{x:-6,y:0,z:0},{x:6,y:0,z:0}],arena:{blocks:[]},visible:(from,to)=>Math.abs(from.z-to.z)<2};
-  const bot={x:0,y:0,z:0},threat={x:0,y:0,z:6};
-  const cover=coverPoint(match,bot,threat);
-  assert.ok(cover,'a hidden node is found');
-  assert.equal(cover.x,-6,'the deterministic nearest hidden node wins the tie');
-  assert.equal(coverPoint({nav:[],arena:{},visible:()=>false},bot,threat),null,'no nav means no cover');
-  assert.equal(coverPoint(match,bot,{x:0,y:0,z:0}),null,'a threat already at the bot finds no separation');
+ const match={nav:[{x:0,y:0,z:0},{x:-6,y:0,z:0},{x:6,y:0,z:0}],arena:{blocks:[]},visible:(from,to)=>Math.abs(from.z-to.z)<2};
+ const bot={x:0,y:0,z:0},threat={x:0,y:0,z:6};
+ const cover=coverPoint(match,bot,threat);
+ assert.ok(cover,'a hidden node is found');
+ assert.equal(cover.x,-6,'the deterministic nearest hidden node wins the tie');
+ assert.equal(coverPoint({nav:[],arena:{},visible:()=>false},bot,threat),null,'no nav means no cover');
+ assert.equal(coverPoint(match,bot,{x:0,y:0,z:0}),null,'a threat already at the bot finds no separation');
+});
+
+test('Holdout wins when a team holds the quorum for the full window',()=>{
+ const m=new Match('chatgpt','openclaw',rng,'crosswire',{mode:'holdout',botCount:0,humanCount:3,timeLimit:600,fragLimit:100});
+ const state=m.objectiveState,[a,b,c]=m.actors;
+ assert.equal(state.holdCount,2);
+ // Two zones owned by team 0, the third neutral: team 0 is one short of quorum.
+ state.zones[0].owner=0;state.zones[1].owner=0;state.zones[2].owner=1;
+ state.holdProgress={0:state.holdSeconds-1/60,1:0};
+ for(const actor of [a,b,c])actor.health=0;
+ m.updateObjectives(1/60);
+ assert.equal(m.over,true,'a completed hold window ends the round');
+ assert.equal(m.snapshot().winner,0);
+ assert.equal(m.snapshot().objectives.holdTeam,0);
+ assert.ok(m.events.some(event=>event.type==='holdout-win'&&event.team===0));
+ assert.ok(m.events.some(event=>event.type==='objective-win'&&event.team===0));
+});
+
+test('Holdout resets progress the moment the quorum breaks',()=>{
+ const m=new Match('chatgpt','openclaw',rng,'crosswire',{mode:'holdout',botCount:0,humanCount:2,timeLimit:600,fragLimit:100});
+ const state=m.objectiveState;
+ state.zones.forEach(zone=>{zone.owner=0;});
+ m.updateObjectives(1);
+ assert.ok(state.holdProgress[0]>0,'a full quorum builds progress');
+ state.zones[1].owner=1;state.zones[2].owner=1;
+ m.updateObjectives(1/60);
+ assert.equal(state.holdProgress[0],0,'losing the quorum resets the window');
+ assert.equal(m.over,false);
+});
+
+test('Holdout resolves a winner on time expiry even without a completed window',()=>{
+ const m=new Match('chatgpt','openclaw',rng,'crosswire',{mode:'holdout',botCount:0,humanCount:2,timeLimit:60,fragLimit:100});
+ const state=m.objectiveState;
+ state.zones[0].owner=0;state.zones[1].owner=0;state.zones[2].owner=1;
+ state.holdProgress={0:8,1:2};
+ m.time=60;
+ m.updateObjectives(1/60);
+ assert.equal(m.over,true);
+ assert.equal(m.snapshot().winner,0,'the side with more hold progress takes the clock');
+ assert.ok(m.events.some(event=>event.type==='objective-tiebreak'&&event.team===0));
+});
+
+test('Uplink banks a stage per capture and advances the relay to the next node',()=>{
+ const m=new Match('chatgpt','openclaw',rng,'crosswire',{mode:'uplink',botCount:0,humanCount:2,timeLimit:600,fragLimit:100});
+ const state=m.objectiveState,hill=state.zones[0],a=m.actors[0];
+ assert.equal(state.stage,0);
+ // Force the first stage to be owned by team 0; the pass banks it and moves on.
+ hill.owner=0;hill.progress=100;
+ m.updateObjectives(1/60);
+ assert.equal(state.stage,1,'the capture banks a stage');
+ assert.equal(state.stageCaptures[0],1);
+ assert.equal(hill.id,'uplink-2','the relay advances to the next authored node');
+ assert.equal(hill.owner,null,'the new node starts neutral');
+ assert.ok(m.events.some(event=>event.type==='uplink-capture'&&event.team===0&&event.stage===1));
+ assert.ok(m.events.some(event=>event.type==='uplink-stage'&&event.stage===2));
+});
+
+test('Uplink ends when a team captures every stage',()=>{
+ const m=new Match('chatgpt','openclaw',rng,'crosswire',{mode:'uplink',botCount:0,humanCount:2,timeLimit:600,fragLimit:100});
+ const state=m.objectiveState,hill=state.zones[0];
+ for(let stage=0;stage<state.stageCount;stage++){
+  hill.owner=0;hill.progress=100;
+  m.updateObjectives(1/60);
+ }
+ assert.equal(m.over,true);
+ assert.equal(m.snapshot().winner,0);
+ assert.equal(state.stageCaptures[0],state.stageCount);
+ assert.ok(m.events.some(event=>event.type==='uplink-win'&&event.team===0));
+ assert.ok(m.events.some(event=>event.type==='objective-win'&&event.team===0));
+});
+
+test('Uplink resolves a winner on time expiry from banked stages',()=>{
+ const m=new Match('chatgpt','openclaw',rng,'crosswire',{mode:'uplink',botCount:0,humanCount:2,timeLimit:60,fragLimit:100});
+ const state=m.objectiveState;
+ state.stage=1;state.stageCaptures={0:1,1:0};
+ m.time=60;
+ m.updateObjectives(1/60);
+ assert.equal(m.over,true);
+ assert.equal(m.snapshot().winner,0,'the side with more banked stages takes the clock');
+ assert.ok(m.events.some(event=>event.type==='objective-tiebreak'&&event.mode==='uplink'));
+});
+
+test('holdout and uplink complete with a winner at every difficulty',()=>{
+ for(const mode of ['holdout','uplink'])for(const difficulty of DIFFICULTIES){
+  const m=new Match('kimi','roo',seeded(),'crosswire',{mode,difficulty:difficulty.id,botCount:6,timeLimit:60,fragLimit:5});
+  for(let i=0;i<60*60+120&&!m.over;i++)m.step(1/60);
+  const snapshot=m.snapshot();
+  assert.ok(m.over,`${mode}/${difficulty.id} completes`);
+  assert.ok(snapshot.winner!==null&&snapshot.winner!==undefined,`${mode}/${difficulty.id} declares a winner`);
+  assert.ok(m.stats.shots>0,`${mode}/${difficulty.id} fires`);
+  assert.ok(m.actors.every(actor=>[actor.x,actor.y,actor.z,actor.health,actor.frags].every(Number.isFinite)),`${mode}/${difficulty.id} stays finite`);
+ }
 });
 

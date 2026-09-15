@@ -95,6 +95,34 @@ test('extraction objectives author a spawn, a beacon and a terminating win state
  assert.equal(state.vipId,null);
 });
 
+test('Holdout authors a quorum hold window on top of Domination zones',()=>{
+ const map=MAPS.find(value=>value.id==='crosswire');
+ const state=objectiveTemplate('holdout',map,{fragLimit:5});
+ assert.equal(state.kind,'domination','holdout reuses the domination capture loop');
+ assert.equal(state.zones.length,3);
+ assert.equal(state.holdCount,2,'a quorum smaller than the zone count cannot deadlock');
+ assert.ok(state.holdCount<state.zones.length);
+ assert.equal(state.holdSeconds,30);
+ assert.deepEqual(state.holdProgress,{0:0,1:0});
+ assert.equal(state.holdTeam,null);
+ assert.equal(objectiveTemplate('domination',map,{fragLimit:5}).holdCount,undefined,'plain domination is untouched');
+});
+
+test('Uplink authors an ordered stage race on top of the KOTH hill',()=>{
+ const map=MAPS.find(value=>value.id==='crosswire');
+ const state=objectiveTemplate('uplink',map,{fragLimit:5});
+ assert.equal(state.kind,'koth','uplink reuses the single-hill capture loop');
+ assert.equal(state.zones.length,1);
+ assert.equal(state.stageCount,3);
+ assert.equal(state.stages.length,3);
+ assert.equal(state.stage,0);
+ assert.deepEqual(state.stageCaptures,{0:0,1:0});
+ assert.deepEqual(state.zones[0].id,'hill');
+ assert.deepEqual(state.stages.map(stage=>stage.id),['uplink-1','uplink-2','uplink-3']);
+ for(const stage of state.stages)assert.ok(Number.isFinite(stage.x)&&Number.isFinite(stage.z),'stages are usable capture centers');
+ assert.equal(objectiveTemplate('koth',map,{fragLimit:5}).stages,undefined,'plain KOTH is untouched');
+});
+
 test('KOTH and Domination objectives use safe authored points on every canonical map',()=>{
   for(const id of canonicalObjectiveMaps){
     const map=MAPS.find(value=>value.id===id);

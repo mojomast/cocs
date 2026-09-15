@@ -83,9 +83,29 @@ export function objectiveTemplate(mode,arena,config){
  if(kind==='koth'){
   const b=boundsOf(arena),centerX=(b.minX+b.maxX)/2,centerZ=(b.minZ+b.maxZ)/2;
   const source=arena.id==='crosswire'?authored[1]:authored.slice().sort((p,q)=>Math.hypot(p.x-centerX,p.z-centerZ)-Math.hypot(q.x-centerX,q.z-centerZ))[0];
-  return {kind:'koth',zones:[clearZone(arena,{...source,id:'hill',captureSeconds:rules.objective.captureSeconds})],winner:null};
+  const state={kind:'koth',zones:[clearZone(arena,{...source,id:'hill',captureSeconds:rules.objective.captureSeconds})],winner:null};
+  // Uplink: a sequential hill race. `sequence` is the number of stages and the
+  // ordered stage list reuses the authored points; `stage`/`stageCount` are the
+  // HUD-visible progress and `stageCaptures` is the per-team bank.
+  const sequence=Math.max(0,Math.round(rules.objective.sequence??0));
+  if(sequence>0){
+   const stages=authored.slice(0,Math.max(1,sequence)).map((zone,index)=>clearZone(arena,{...zone,id:`uplink-${index+1}`}));
+   state.sequence=sequence;state.stages=stages;state.stage=0;state.stageCount=stages.length;
+   state.stageCaptures={0:0,1:0};state.stageHold=0;state.stageOwner=null;
+   const first=stages[0];state.zones=[{...first,id:'hill',captureSeconds:rules.objective.captureSeconds,owner:null,captureTeam:null,progress:0,contested:false}];
+  }
+  return state;
  }
- if(kind==='domination')return {kind:'domination',zones:authored.map(zone=>clearZone(arena,zone)),winner:null};
+ if(kind==='domination'){
+  const state={kind:'domination',zones:authored.map(zone=>clearZone(arena,zone)),winner:null};
+  // Holdout: hold a quorum of zones simultaneously for a sustained window.
+  const holdCount=Math.max(0,Math.round(rules.objective.holdCount??0));
+  if(holdCount>0){
+   state.holdCount=Math.min(holdCount,state.zones.length);state.holdSeconds=Math.max(1,rules.objective.holdSeconds??30);
+   state.holdProgress={0:0,1:0};state.holdTeam=null;
+  }
+  return state;
+ }
  if(kind==='assault'){const count=config?.fragLimit??rules.fragLimit??3;const template=assaultTemplate(arena,assaultSectorIds(count));template.zones=template.sectors;return assignAssaultTeams(template);}
  if(kind==='payload')return payloadTemplate(arena,{segments:Math.max(1,Math.min(6,Math.round(config?.fragLimit??rules.fragLimit??3)))});
  if(kind==='elimination'){const lives=Math.max(1,Math.round(config?.fragLimit??rules.fragLimit??20));return {kind:'elimination',zones:authored.map(zone=>clearZone(arena,zone)),winner:null,livesPerTeam:lives,lives:{0:lives,1:lives},deaths:{0:0,1:0},eliminations:{0:0,1:0},suddenDeath:false};}

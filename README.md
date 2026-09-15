@@ -588,6 +588,12 @@ Version 2.23 shows your connection quality online:
 
 - **Latency chip.** Network matches display a colour-coded `GOOD` / `FAIR` / `POOR` chip with the current interpolation delay, graded from the same jitter and packet-loss estimators the netcode already uses (`connectionQuality` in `game/hud.mjs`). It turns amber or red before the connection becomes unplayable.
 
+Version 4.4 broadens objectives, presentation and accessibility:
+
+- **New objective modes** Holdout (quorum hold) and Uplink (sequential relay); **Endless Horde** with score banking and escalating bosses; economy pickups (weapon upgrade, deployable sentry).
+- **Presentation:** in-menu 3D weapon inspect, hit reactions, storm lightning/thunder, wet sheen, wind gusts, per-mode music and victory/defeat stings.
+- **Accessibility:** deuteranopia/protanopia/tritanopia palettes, high-contrast UI, full keyboard remapping; replay export/import, match summary card, room filters and practice-vs-bots.
+
 Version 4.3 deepens gameplay, world and career:
 
 - **Mutators** (low gravity, turbo, instagib, one-shot, mirror loadout, big head, no recoil) compose on any mode, plus per-mode loadouts and sniper/pistol presets with new ammo/megahealth supplies.

@@ -36,7 +36,38 @@ const LAYERS={
 
 const cache=new Map();
 
-export function clearSurfaceTextures(){for(const textures of cache.values())for(const texture of Object.values(textures))texture?.dispose?.();cache.clear();}
+export function clearSurfaceTextures(){for(const textures of cache.values())for(const texture of Object.values(textures))texture?.dispose?.();cache.clear();clearWetSheenTextures();}
+
+// A single shared puddle/wet-sheen overlay: a soft, low-contrast blotch map the
+// view blends over wet floor materials. It is cached once (keyed only by size
+// and seed) and released by clearSurfaceTextures alongside the surface maps, so
+// exactly-once disposal still holds. Returns null without a document.
+const wetCache=new Map();
+export function wetSheenTexture({size=128,seed=1}={}){
+ const key=`wet|${size}|${seed}`;
+ const cached=wetCache.get(key);
+ if(cached)return cached;
+ if(typeof document==='undefined'||!document.createElement)return null;
+ const canvas=document.createElement('canvas');canvas.width=size;canvas.height=size;
+ const ctx=canvas.getContext('2d');
+ if(!ctx?.createImageData||!ctx.putImageData)return null;
+ const image=ctx.createImageData(size,size),data=image.data;
+ for(let y=0;y<size;y++)for(let x=0;x<size;x++){
+  const i=(y*size+x)*4,u=x/size*3.1,v=y/size*3.1;
+  const blotch=fbm(u,v,seed+411,4),edge=fbm(u*2.7,v*2.7,seed+913,3),n=Math.max(0,Math.min(1,(blotch*.75+edge*.25-.4)*1.7));
+  const shade=clamp255(255*(1-n*.18));
+  data[i]=data[i+1]=data[i+2]=shade;data[i+3]=clamp255(n*210);
+ }
+ ctx.putImageData(image,0,0);
+ const map=new T.CanvasTexture(canvas);
+ map.wrapS=map.wrapT=T.RepeatWrapping;
+ map.colorSpace=T.NoColorSpace;
+ map.needsUpdate=true;
+ map.userData.surfaceKind='wet';
+ wetCache.set(key,map);
+ return map;
+}
+export function clearWetSheenTextures(){for(const texture of wetCache.values())texture?.dispose?.();wetCache.clear();}
 
 export function surfaceTextures(kind='concrete',{size=96,seed=1,repeat=[1,1],normal=true,roughness=true}={}){
  const key=`${kind}|${size}|${seed}|${repeat[0]},${repeat[1]}|${normal?1:0}|${roughness?1:0}`;

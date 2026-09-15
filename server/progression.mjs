@@ -2,7 +2,7 @@ import fs from 'node:fs';
 import fsp from 'node:fs/promises';
 import path from 'node:path';
 import {randomBytes,randomUUID} from 'node:crypto';
-import {awardMatch,defaultProgression,normalizeGear,normalizeProgression} from '../game/progression.mjs';
+import {awardMatch,defaultProgression,matchSummaryCard,normalizeGear,normalizeProgression} from '../game/progression.mjs';
 import {normalizeAttachments} from '../game/attachments.mjs';
 import {FINISH_IDS} from '../game/cosmetics.mjs';
 import {validPlayerId,validProgressToken} from '../game/protocol.mjs';
@@ -80,9 +80,18 @@ export class ProgressionStore{
   this.players.set(id,awarded.profile);
   this.trim();
   this._dirty=true;this._rev++;this.flush();
-  return {profile:this.get(id),gained:awarded.gained,baseGained:awarded.baseGained,prestigeBonus:awarded.prestigeBonus,achievementXp:awarded.achievementXp,levelUp:awarded.levelUp,prestigeUp:awarded.prestigeUp,unlocked:awarded.unlocked,achievements:awarded.achievements,progress:awarded.progress,toNext:awarded.toNext};
+  return {profile:this.get(id),gained:awarded.gained,baseGained:awarded.baseGained,prestigeBonus:awarded.prestigeBonus,achievementXp:awarded.achievementXp,levelUp:awarded.levelUp,prestigeUp:awarded.prestigeUp,unlocked:awarded.unlocked,achievements:awarded.achievements,progress:awarded.progress,toNext:awarded.toNext,result:result?.win===true?'win':result?.draw===true?'draw':'loss',actor:result?.actor??null,mode:result?.mode??null};
  }
  awardOwned(id,token,result){return this.getOwned(id,token)?this.award(id,result):null;}
+ // Post-match summary card for the client results screen. Composes the stored
+ // profile with the award payload so the network path shows the same XP,
+ // prestige and achievement progress as the local path.
+ summary(id,award={}){
+  const profile=this.get(id);
+  if(!profile)return null;
+  const achievements=(Array.isArray(award?.achievements)?award.achievements:[]).map(a=>({...a,unlocked:true}));
+  return matchSummaryCard({reward:award,profile,achievements,result:award?.result??null,historyEntry:{result:award?.result??null,kills:award?.actor?.frags,deaths:award?.actor?.deaths}});
+ }
  trim(){
   for(const id of [...this.players.keys()]){
    if(this.players.size<=this.max)break;

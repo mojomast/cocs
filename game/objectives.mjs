@@ -56,4 +56,78 @@ export function updateExtraction(match,dt=RULES.dt){
  if(match.time>=match.config.timeLimit){state.winner=state.defenderTeam;state.tiebreak='time';match.teamScores[state.defenderTeam]=Math.max(match.teamScores[state.defenderTeam]||0,state.progress);match.emit('objective-tiebreak',{mode:'extraction',team:state.defenderTeam,progress:state.progress});match.emit('objective-win',{team:state.defenderTeam,score:match.teamScores[state.defenderTeam]});match.endMatch('objective');}
 }
 
-export function updateObjectives(match,dt=RULES.dt){const state=match.objectiveState;if(!state||match.over)return;if(state.kind==='extraction'){updateExtraction(match,dt);return;}if(state.kind==='assault'){match.updateAssault(dt);return;}if(state.kind==='payload'){match.updatePayload(dt);return;}if(state.kind==='elimination'){updateElimination(match,dt);return;}if(state.kind==='juggernaut'){updateJuggernaut(match,dt);return;}if(state.kind==='koth'&&Array.isArray(state.rotation)&&state.rotation.length>1){state.rotationTimer=(state.rotationTimer??state.rotationEvery??30)-dt;if(state.rotationTimer<=0){state.rotationTimer=state.rotationEvery??30;state.rotationIndex=((state.rotationIndex??0)+1)%state.rotation.length;const point=state.rotation[state.rotationIndex],hill=state.zones[0];hill.id=point.id;hill.x=point.x;hill.z=point.z;hill.radius=point.radius??hill.radius;if(Number.isFinite(point.y))hill.y=point.y;hill.owner=null;hill.captureTeam=null;hill.progress=0;hill.contested=false;match.objectiveEventState.delete(hill.id);match.emit('hill-rotate',{zone:hill.id,x:hill.x,z:hill.z});}}const rules=modeRule(match.config.mode),scratch=state._zoneScratch||(state._zoneScratch={inside:[],teams:new Set()}),inside=scratch.inside,teams=scratch.teams;for(const zone of state.zones){inside.length=0;for(const a of match.actors)if(a.health>0&&Math.hypot(a.x-zone.x,a.z-zone.z)<=zone.radius&&Math.abs((a.y??0)-(Number.isFinite(zone.y)?zone.y:0))<=5)inside.push(a);teams.clear();let firstTeam;for(const a of inside){if(teams.size===0)firstTeam=a.team;teams.add(a.team);}const previous=zone.progress,previousOwner=zone.owner,previousCaptureTeam=zone.captureTeam,previousContested=zone.contested===true;zone.contested=teams.size>1;const eventState=match.objectiveEventState.get(zone.id)||{progressBucket:-1,scoreBucket:-1};if(zone.contested&&!previousContested)inside.forEach(a=>a.scoreStats.objectiveContests++);if(zone.contested){if(zone.owner!==null){const rate=100*dt/(zone.captureSeconds||rules.objective?.captureSeconds||5);zone.progress=Math.max(0,zone.progress-rate*.75);if(zone.progress===0){const challenger=inside.find(a=>a.team!==previousOwner)?.team??null;zone.owner=null;zone.captureTeam=challenger;if(challenger!==null)inside.filter(a=>a.team===challenger).forEach(a=>a.scoreStats.objectiveNeutralizations++);match.emit('zone-neutralized',{zone:zone.id,team:challenger});}}}else if(teams.size===1){const team=firstTeam,rate=100*dt/(zone.captureSeconds||rules.objective?.captureSeconds||5);if(zone.owner===team){zone.progress=100;match.teamScores[team]+=dt;const occupants=inside.filter(a=>a.team===team);occupants.forEach(a=>a.scoreStats.objectiveTime+=dt/occupants.length);const scoreBucket=Math.floor(match.teamScores[team]);if(scoreBucket!==eventState.scoreBucket){eventState.scoreBucket=scoreBucket;match.emit('zone-score',{zone:zone.id,team,score:match.teamScores[team]});}}else if(zone.owner!==null){zone.progress=Math.max(0,zone.progress-rate);if(zone.progress===0){zone.owner=null;zone.captureTeam=team;inside.filter(a=>a.team===team).forEach(a=>a.scoreStats.objectiveNeutralizations++);match.emit('zone-neutralized',{zone:zone.id,team});}}else{if(zone.captureTeam!==team){zone.captureTeam=team;zone.progress=0;}zone.progress=Math.min(100,zone.progress+rate);if(zone.progress>=100){zone.owner=team;zone.captureTeam=null;inside.filter(a=>a.team===team).forEach(a=>a.scoreStats.objectiveCaptures++);match.emit('zone-capture',{zone:zone.id,team,score:match.teamScores[team]});}}}const progressBucket=Math.floor(zone.progress);if(progressBucket!==eventState.progressBucket||zone.contested!==previousContested||zone.owner!==previousOwner||zone.captureTeam!==previousCaptureTeam){eventState.progressBucket=progressBucket;match.emit('zone-progress',{zone:zone.id,team:zone.captureTeam??zone.owner,progress:zone.progress,contested:zone.contested});}match.objectiveEventState.set(zone.id,eventState);const zoneBuff=rules.zoneBuffs?.[zone.id]??(state.kind==='koth'?rules.zoneBuff:null);if(zoneBuff&&zone.owner!==null)for(const a of inside)if(a.team===zone.owner)match.applyPowerup(a,zoneBuff);}const reached=[0,1].filter(team=>match.teamScores[team]>=match.config.fragLimit);if(reached.length){const [t0,t1]=reached,tied=reached.length>1&&match.teamScores[t0]===match.teamScores[t1];if(!tied){const winner=reached.length===1?t0:(match.teamScores[t0]>match.teamScores[t1]?t0:t1);state.winner=winner;match.endMatch('objective');match.emit('objective-win',{team:winner,score:match.teamScores[winner]});}}}
+// Holdout: a Domination variant. The shared capture loop keeps zone ownership
+// current; this pass tracks, per team, how long it has continuously held a
+// quorum of zones. Reaching the window wins the round. Quorum is always less
+// than the zone count, so both sides can never qualify at once and the window
+// can never deadlock.
+export function updateHoldout(match,dt=RULES.dt){
+ const state=match.objectiveState;if(!state||state.kind!=='domination'||!state.holdCount||match.over)return;
+ const zones=state.zones||[],quorum=Math.min(state.holdCount,zones.length),window=state.holdSeconds||30,counts={0:0,1:0};
+ for(const zone of zones)if(zone.owner===0||zone.owner===1)counts[zone.owner]++;
+ const qualifying=[0,1].filter(team=>counts[team]>=quorum),progress=state.holdProgress||(state.holdProgress={0:0,1:0});
+ for(const team of [0,1])progress[team]=qualifying.includes(team)?Math.min(window,progress[team]+dt):0;
+ const leader=qualifying.length===1?qualifying[0]:null;
+ if(leader!==null&&progress[leader]>=window){
+  state.holdTeam=leader;state.winner=leader;match.teamScores[leader]=Math.max(match.teamScores[leader]||0,match.config.fragLimit);
+  match.emit('holdout-win',{team:leader,held:counts[leader],window});
+  match.emit('objective-win',{team:leader,score:match.teamScores[leader]});
+  match.endMatch('objective');return;
+ }
+ const bucket=leader===null?-1:Math.floor(progress[leader]/5);
+ if(bucket!==state.holdBucket){state.holdBucket=bucket;match.emit('holdout-progress',{team:leader,progress:leader===null?0:progress[leader],window,counts:{...counts},quorum});}
+ // Time expiry resolves deterministically: most hold progress, then most zones
+ // held, then team score. Setting `winner` here lets the snapshot report a side
+ // even when the clock, not the window, ends the round.
+ if(match.time>=match.config.timeLimit&&state.winner===null){
+  const progressNow=state.holdProgress||{0:0,1:0};
+  let winner=progressNow[0]===progressNow[1]?(counts[0]===counts[1]?(match.teamScores[0]>=match.teamScores[1]?0:1):(counts[0]>counts[1]?0:1)):(progressNow[0]>progressNow[1]?0:1);
+  state.winner=winner;state.tiebreak='time';
+  match.emit('objective-tiebreak',{mode:'holdout',team:winner,progress:{...progressNow},counts:{...counts}});
+  match.emit('objective-win',{team:winner,score:match.teamScores[winner]});
+  match.endMatch('time');
+ }
+}
+
+// Uplink: a sequential KOTH race. The shared capture loop maintains the single
+// active hill; when a team completes a capture the stage banks, the relay jumps
+// to the next authored node, and the first team through every stage wins. If
+// the clock runs out first, the generic time path decides on banked stages and
+// hill time, so the match always terminates.
+export function updateUplink(match,dt=RULES.dt){
+ const state=match.objectiveState;if(!state||state.kind!=='koth'||!Array.isArray(state.stages)||match.over)return;
+ const hill=state.zones[0];if(!hill)return;
+ const owner=hill.owner===0||hill.owner===1?hill.owner:null;
+ if(owner!==null&&owner!==state.prevOwner){
+  state.stageCaptures[owner]=(state.stageCaptures[owner]||0)+1;
+  match.emit('uplink-capture',{team:owner,stage:(state.stage||0)+1,stages:state.stageCount,captures:{...state.stageCaptures}});
+  state.stage=(state.stage||0)+1;
+  if(state.stage>=state.stageCount){
+   const captures=state.stageCaptures,winner=captures[0]===captures[1]?(match.teamScores[0]>=match.teamScores[1]?0:1):(captures[0]>captures[1]?0:1);
+   state.winner=winner;match.teamScores[winner]=Math.max(match.teamScores[winner]||0,state.stageCount);
+   match.emit('uplink-win',{team:winner,stages:state.stageCount,captures:{...captures}});
+   match.emit('objective-win',{team:winner,score:state.stageCount});
+   match.endMatch('objective');return;
+  }
+  const next=state.stages[state.stage];
+  hill.id=next.id;hill.x=next.x;hill.z=next.z;hill.radius=next.radius??hill.radius;if(Number.isFinite(next.y))hill.y=next.y;
+  hill.owner=null;hill.captureTeam=null;hill.progress=0;hill.contested=false;
+  match.objectiveEventState.delete(hill.id);
+  match.emit('uplink-stage',{stage:state.stage+1,stages:state.stageCount,zone:hill.id,x:hill.x,z:hill.z});
+  state.prevOwner=null;
+  return;
+ }
+ state.prevOwner=owner;
+ // Time expiry resolves deterministically: most stages banked, then hill time,
+ // then team score. This guarantees a winner even if the relay never completes.
+ if(match.time>=match.config.timeLimit&&state.winner===null){
+  const captures=state.stageCaptures||{0:0,1:0};
+  const winner=captures[0]===captures[1]?(match.teamScores[0]>=match.teamScores[1]?0:1):(captures[0]>captures[1]?0:1);
+  state.winner=winner;state.tiebreak='time';
+  match.emit('objective-tiebreak',{mode:'uplink',team:winner,captures:{...captures}});
+  match.emit('objective-win',{team:winner,score:match.teamScores[winner]});
+  match.endMatch('time');
+ }
+}
+
+export function updateObjectives(match,dt=RULES.dt){const state=match.objectiveState;if(!state||match.over)return;if(state.kind==='extraction'){updateExtraction(match,dt);return;}if(state.kind==='assault'){match.updateAssault(dt);return;}if(state.kind==='payload'){match.updatePayload(dt);return;}if(state.kind==='elimination'){updateElimination(match,dt);return;}if(state.kind==='juggernaut'){updateJuggernaut(match,dt);return;}if(state.kind==='koth'&&Array.isArray(state.rotation)&&state.rotation.length>1){state.rotationTimer=(state.rotationTimer??state.rotationEvery??30)-dt;if(state.rotationTimer<=0){state.rotationTimer=state.rotationEvery??30;state.rotationIndex=((state.rotationIndex??0)+1)%state.rotation.length;const point=state.rotation[state.rotationIndex],hill=state.zones[0];hill.id=point.id;hill.x=point.x;hill.z=point.z;hill.radius=point.radius??hill.radius;if(Number.isFinite(point.y))hill.y=point.y;hill.owner=null;hill.captureTeam=null;hill.progress=0;hill.contested=false;match.objectiveEventState.delete(hill.id);match.emit('hill-rotate',{zone:hill.id,x:hill.x,z:hill.z});}}const rules=modeRule(match.config.mode),scratch=state._zoneScratch||(state._zoneScratch={inside:[],teams:new Set()}),inside=scratch.inside,teams=scratch.teams;for(const zone of state.zones){inside.length=0;for(const a of match.actors)if(a.health>0&&Math.hypot(a.x-zone.x,a.z-zone.z)<=zone.radius&&Math.abs((a.y??0)-(Number.isFinite(zone.y)?zone.y:0))<=5)inside.push(a);teams.clear();let firstTeam;for(const a of inside){if(teams.size===0)firstTeam=a.team;teams.add(a.team);}const previous=zone.progress,previousOwner=zone.owner,previousCaptureTeam=zone.captureTeam,previousContested=zone.contested===true;zone.contested=teams.size>1;const eventState=match.objectiveEventState.get(zone.id)||{progressBucket:-1,scoreBucket:-1};if(zone.contested&&!previousContested)inside.forEach(a=>a.scoreStats.objectiveContests++);if(zone.contested){if(zone.owner!==null){const rate=100*dt/(zone.captureSeconds||rules.objective?.captureSeconds||5);zone.progress=Math.max(0,zone.progress-rate*.75);if(zone.progress===0){const challenger=inside.find(a=>a.team!==previousOwner)?.team??null;zone.owner=null;zone.captureTeam=challenger;if(challenger!==null)inside.filter(a=>a.team===challenger).forEach(a=>a.scoreStats.objectiveNeutralizations++);match.emit('zone-neutralized',{zone:zone.id,team:challenger});}}}else if(teams.size===1){const team=firstTeam,rate=100*dt/(zone.captureSeconds||rules.objective?.captureSeconds||5);if(zone.owner===team){zone.progress=100;match.teamScores[team]+=dt;const occupants=inside.filter(a=>a.team===team);occupants.forEach(a=>a.scoreStats.objectiveTime+=dt/occupants.length);const scoreBucket=Math.floor(match.teamScores[team]);if(scoreBucket!==eventState.scoreBucket){eventState.scoreBucket=scoreBucket;match.emit('zone-score',{zone:zone.id,team,score:match.teamScores[team]});}}else if(zone.owner!==null){zone.progress=Math.max(0,zone.progress-rate);if(zone.progress===0){zone.owner=null;zone.captureTeam=team;inside.filter(a=>a.team===team).forEach(a=>a.scoreStats.objectiveNeutralizations++);match.emit('zone-neutralized',{zone:zone.id,team});}}else{if(zone.captureTeam!==team){zone.captureTeam=team;zone.progress=0;}zone.progress=Math.min(100,zone.progress+rate);if(zone.progress>=100){zone.owner=team;zone.captureTeam=null;inside.filter(a=>a.team===team).forEach(a=>a.scoreStats.objectiveCaptures++);match.emit('zone-capture',{zone:zone.id,team,score:match.teamScores[team]});}}}const progressBucket=Math.floor(zone.progress);if(progressBucket!==eventState.progressBucket||zone.contested!==previousContested||zone.owner!==previousOwner||zone.captureTeam!==previousCaptureTeam){eventState.progressBucket=progressBucket;match.emit('zone-progress',{zone:zone.id,team:zone.captureTeam??zone.owner,progress:zone.progress,contested:zone.contested});}match.objectiveEventState.set(zone.id,eventState);const zoneBuff=rules.zoneBuffs?.[zone.id]??(state.kind==='koth'?rules.zoneBuff:null);if(zoneBuff&&zone.owner!==null)for(const a of inside)if(a.team===zone.owner)match.applyPowerup(a,zoneBuff);}if(state.holdCount){updateHoldout(match,dt);return;}if(Array.isArray(state.stages)){updateUplink(match,dt);return;}const reached=[0,1].filter(team=>match.teamScores[team]>=match.config.fragLimit);if(reached.length){const [t0,t1]=reached,tied=reached.length>1&&match.teamScores[t0]===match.teamScores[t1];if(!tied){const winner=reached.length===1?t0:(match.teamScores[t0]>match.teamScores[t1]?t0:t1);state.winner=winner;match.endMatch('objective');match.emit('objective-win',{team:winner,score:match.teamScores[winner]});}}}

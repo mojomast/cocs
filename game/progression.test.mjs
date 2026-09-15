@@ -15,6 +15,7 @@ import {
  gearById,
  levelFromXp,
  matchRewardSummary,
+ matchSummaryCard,
  matchXp,
  nextUnlockFor,
  normalizeGear,
@@ -227,6 +228,35 @@ test('career panels expose prestige/achievement aria and the page provides every
   const missing=[...names].filter(name=>!has(name));
   assert.deepEqual(missing,[],`page ui bag is missing: ${missing.join(', ')}`);
  }
+});
+
+test('matchSummaryCard composes the result, reward and career tracks',()=>{
+ const hud={actorId:0,modeName:'Deathmatch',mapName:'Exchange',time:154,actors:[{id:0,frags:12,deaths:3}]};
+ const profile=normalizeProgression({xp:500,matches:4,wins:2,kills:30});
+ const reward=matchRewardSummary({profile,gained:500,levelUp:true,unlocked:[],achievements:[],nextUnlock:{id:'gear-scope',kind:'gear',name:'Precision Scope',level:2}});
+ const achievements=[{id:'first-blood',name:'First Blood',description:'Win a match.',xp:100,unlocked:true},{id:'veteran',name:'Veteran',description:'Finish 25 matches.',xp:200,unlocked:false}];
+ const card=matchSummaryCard({hud,reward,profile,achievements,historyEntry:{result:'win',modeName:'Deathmatch',mapName:'Exchange',kills:12,deaths:3,duration:154}});
+ assert.equal(card.modeName,'Deathmatch');
+ assert.equal(card.mapName,'Exchange');
+ assert.equal(card.result,'win');
+ assert.equal(card.kills,12);
+ assert.equal(card.deaths,3);
+ assert.equal(card.kd,4);
+ assert.equal(card.duration,154);
+ assert.equal(card.xp,500);
+ assert.equal(card.level,2);
+ assert.equal(card.levelUp,true);
+ assert.equal(card.prestige,0);
+ assert.equal(card.achievementCount,1);
+ assert.deepEqual(card.achievements.map(a=>a.id),['first-blood']);
+ assert.deepEqual(card.nextUnlock,reward.nextUnlock);
+ const empty=matchSummaryCard();
+ assert.equal(empty.result,null);
+ assert.equal(empty.kills,0);
+ assert.equal(empty.kd,0);
+ assert.equal(empty.level,1);
+ assert.equal(empty.achievementCount,0);
+ assert.ok(empty.nextUnlock&&typeof empty.nextUnlock.name==='string');
 });
 
 test('normalizeProgression clamps, recomputes level and re-validates gear',()=>{

@@ -1,4 +1,4 @@
-import { compressDemo, decompressDemo, trimDemo } from './demo.mjs';
+import { compressDemo, decompressDemo, trimDemo, serializeDemo, parseDemo } from './demo.mjs';
 import { teamMode as isTeamMode } from './config.mjs';
 
 const DB_NAME = 'token-arena-demos';
@@ -214,4 +214,34 @@ export async function getDemo(id) {
 
 export async function deleteDemo(id) {
   await storage.remove(id);
+}
+
+// ---------------------------------------------------------------------------
+// Replay export / import. A demo is a plain JSON document, so export is a
+// stable, human-readable serialization and import validates the version before
+// handing the demo back to the caller. Kept storage-agnostic so the round-trip
+// is testable without IndexedDB or a browser.
+export function demoFileName(demo) {
+  const stamp = String(demo?.createdAt || demo?.id || Date.now()).replace(/[^0-9a-z]/gi, '').slice(0, 24) || 'replay';
+  const mode = String(demo?.header?.config?.mode || demo?.meta?.mode || 'match').replace(/[^a-z0-9-]/gi, '').slice(0, 24) || 'match';
+  return `cocs-replay-${mode}-${stamp}.json`;
+}
+
+export function exportDemo(demo) {
+  if (!demo || typeof demo !== 'object') throw new Error('No demo to export');
+  return { name: demoFileName(demo), text: serializeDemo(demo), demo };
+}
+
+export function importDemo(textOrBytes) {
+  const demo = parseDemo(textOrBytes);
+  const summary = demoSummary(demo);
+  return { demo, summary };
+}
+
+// Import straight into the local library. The imported demo keeps its own id
+// when present so re-importing an export replaces rather than duplicates it.
+export async function importDemoToStore(textOrBytes) {
+  const { demo } = importDemo(textOrBytes);
+  const summary = await saveDemo(demo);
+  return summary;
 }

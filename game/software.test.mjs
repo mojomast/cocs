@@ -118,6 +118,27 @@ test('the CPU renderer drops sub-pixel facets when the screen-area guard is rais
  assert.equal(renderer.minScreenArea,.06,'an invalid threshold falls back to the default');
 });
 
+test('the CPU sky applies a cheap wet darkening and lightning flash backdrop',()=>{
+ const rects=[];
+ const ctx={fillStyle:'',strokeStyle:'',lineWidth:0,font:'',textAlign:'',
+  createLinearGradient(){return {addColorStop(){}};},
+  fillRect(x,y,w,h){rects.push(String(this.fillStyle));},fillText(){},beginPath(){},moveTo(){},lineTo(){},closePath(){},stroke(){},fill(){}};
+ const renderer=new SoftwareRenderer({width:320,height:180,getContext:()=>ctx});
+ const scene=new T.Scene();scene.background=new T.Color('#000');
+ scene.userData.sky={background:'#0a0f1e',phase:'night',seed:5,sunDir:[0,40,0],wet:.6,flash:0};
+ const camera=new T.PerspectiveCamera(70,320/180,.1,200);camera.position.set(0,2,0);camera.lookAt(0,2,-30);
+ renderer.render(scene,camera);
+ assert.ok(rects.some(style=>/^rgba\(10,18,26,/.test(style)),'wet skies add a darkening wash');
+ scene.userData.sky.flash=.8;
+ rects.length=0;
+ renderer.render(scene,camera);
+ assert.ok(rects.some(style=>/^rgba\(214,232,255,/.test(style)),'a lightning flash adds a bright wash');
+ scene.userData.sky.flash=0;scene.userData.sky.wet=0;
+ rects.length=0;
+ renderer.render(scene,camera);
+ assert.ok(!rects.some(style=>/^rgba\(214,232,255,/.test(style)),'a clear sky adds no flash');
+});
+
 test('the CPU sky paints layered ridge silhouettes instead of a flat gradient',()=>{
  const fills=[];
  const ctx={fillStyle:'',strokeStyle:'',lineWidth:0,font:'',textAlign:'',

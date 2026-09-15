@@ -12,9 +12,9 @@ import {NetClient,DEFAULT_SERVER_URL} from '../game/net.mjs';
 import {VoiceChat} from '../game/voice.mjs';
 import {DEFAULT_CONFIG,DEFAULT_DISPLAY,DIFFICULTIES,normalizeConfig,normalizeDisplay,GAME_MODES} from '../game/config.mjs';
 import {HELP_SECTIONS,ONBOARDING_STEPS,ONBOARDING_STORAGE_KEY,shouldShowOnboarding} from '../game/onboarding.mjs';
-import {PRESET_STORAGE_KEY,addPreset,normalizePreset,normalizePresets,removePreset} from '../game/presets.mjs';
+import {ACCESSIBILITY_STORAGE_KEY,PRESET_STORAGE_KEY,addPreset,defaultAccessibility,enginePaletteFor,normalizeAccessibility,normalizePreset,normalizePresets,radarPaletteFor,removePreset} from '../game/presets.mjs';
 import {DEFAULT_BINDINGS,KEYBIND_STORAGE_KEY,actionForCode,bindingConflicts,normalizeBindings} from '../game/keybinds.mjs';
-import {MatchConfiguration,DisplayConfiguration,PresetsConfiguration,KeybindsConfiguration} from './game-ui/configuration';
+import {MatchConfiguration,DisplayConfiguration,PresetsConfiguration,KeybindsConfiguration,AccessibilityConfiguration} from './game-ui/configuration';
 import {GameChat} from './game-ui/game-chat';
 import {RaceHud} from './game-ui/race-hud';
 import {SoccerHud} from './game-ui/soccer-hud';
@@ -33,11 +33,11 @@ import {shuffleSelection,nextArenaSelection,surpriseSelection} from '../game/rep
 import {CinematicDirector,CAMERA_RIGS} from '../game/director.mjs';
 import {CAMERA_MODES,CAMERA_MODE_LABELS,cycleCameraMode,cameraModeRig} from '../game/camera-modes.mjs';
 import {DemoRecorder,DemoPlayer} from '../game/demo.mjs';
-import {saveDemo,listDemos,getDemo,deleteDemo,demoSummary} from '../game/demo-store.mjs';
+import {saveDemo,listDemos,getDemo,deleteDemo,demoSummary,exportDemo,importDemoToStore} from '../game/demo-store.mjs';
 import {blocksGameplay,controlsFromState,cycleWeapon,hasAmmo,isEditable} from '../game/input.mjs';
 import {applyLook,isTouchDevice} from '../game/touch.mjs';
 import {TouchControls} from './game-ui/touch-controls';
-import {ACHIEVEMENTS,PRESTIGE_TIERS,PRESTIGE_XP,achievementStatus,awardMatch,defaultProgression,GEAR,GEAR_SLOTS,levelFromXp,matchRewardSummary,normalizeGear,normalizeProgression,prestigeFromXp,prestigeTier,prestigeXpBonus,rankBlurb,rankTitle,UNLOCKS,unlockedItems} from '../game/progression.mjs';
+import {ACHIEVEMENTS,PRESTIGE_TIERS,PRESTIGE_XP,achievementStatus,awardMatch,defaultProgression,GEAR,GEAR_SLOTS,levelFromXp,matchRewardSummary,matchSummaryCard,normalizeGear,normalizeProgression,prestigeFromXp,prestigeTier,prestigeXpBonus,rankBlurb,rankTitle,UNLOCKS,unlockedItems} from '../game/progression.mjs';
 import {CHALLENGE_STORAGE_KEY,applyMatchAll,challengeStatus,currentDaySeed,normalizeChallengeState,weeklyStatus} from '../game/challenges.mjs';
 import {emptyHistory,historyEntryFromResult,historyLeaderboard,historyTotals,loadHistory,recordMatch,saveHistory} from '../game/history.mjs';
 import {ATTACHMENTS,ATTACHMENT_SLOTS,normalizeAttachments} from '../game/attachments.mjs';
@@ -47,7 +47,7 @@ import {pickShowcase,seatShowcaseVehicles,SHOWCASE_MAX_SECONDS} from '../game/sh
 import {buildShowcase as buildShowcaseFactory} from '../game/showcase-build.mjs';
 import {buildSpectateMatch} from '../game/spectate-build.mjs';
 import {renderScoreboard} from '../game/scoreboard.mjs';
-import {radarContacts,radarPalette,radarBlip} from '../game/radar.mjs';
+import {radarContacts,radarBlip} from '../game/radar.mjs';
 import {resetNetworkPresentation,selectRenderState} from '../game/presentation.mjs';
 import {actorWon} from '../game/outcome.mjs';
 import {raceDisplay,raceResult,raceTime,soccerDisplay,soccerResult} from '../game/race-ui.mjs';
@@ -77,7 +77,7 @@ const resultDescription=(hud:any,player:any)=>{const mode=GAME_MODES.find((m:any
 export default function Home(){
   const canvas=useRef<HTMLCanvasElement>(null),runtime=useRef<any>(null),modeRef=useRef<Mode>('selection');
   const [mode,setMode]=useState<Mode>('selection'),[entered,setEntered]=useState(false),[character,setCharacter]=useState('chatgpt'),[harness,setHarness]=useState('openclaw'),[mapId,setMapId]=useState('colosseum'),[ready,setReady]=useState(false),[error,setError]=useState(''),[notice,setNotice]=useState(''),[hud,setHud]=useState<any>(null),[scores,setScores]=useState(false),[sensitivity,setSensitivity]=useState(1),[muted,setMuted]=useState(false),[settings,setSettings]=useState(false),[touchControls,setTouchControls]=useState(false),[fullscreen,setFullscreen]=useState(false),[pointerHint,setPointerHint]=useState(false),[netUrl,setNetUrl]=useState(defaultNetUrl),[netPlayers,setNetPlayers]=useState<any[]>([]),[netError,setNetError]=useState('');
- const [config,setConfig]=useState<any>({...DEFAULT_CONFIG}),[display,setDisplay]=useState<any>({...DEFAULT_DISPLAY}),[rooms,setRooms]=useState<any[]>([]),[matches,setMatches]=useState<any[]>([]),[roomName,setRoomName]=useState(''),[netRoomId,setNetRoomId]=useState('');
+  const [config,setConfig]=useState<any>({...DEFAULT_CONFIG}),[display,setDisplay]=useState<any>({...DEFAULT_DISPLAY}),[accessibility,setAccessibility]=useState<any>(()=>defaultAccessibility()),[rooms,setRooms]=useState<any[]>([]),[matches,setMatches]=useState<any[]>([]),[roomName,setRoomName]=useState(''),[netRoomId,setNetRoomId]=useState('');
   const [chatOpen,setChatOpen]=useState(false),[chatDraft,setChatDraft]=useState(''),[chatLog,setChatLog]=useState<any[]>([]),[setupOpen,setSetupOpen]=useState(false),[legacyMaps,setLegacyMaps]=useState(false);
   const [singleOpen,setSingleOpen]=useState(false),[singleSub,setSingleSub]=useState<'horde'|'campaign'>('horde'),[singleMission,setSingleMission]=useState<string>(CAMPAIGN_MISSIONS[0].id);
   const [campaign,setCampaign]=useState<any>(defaultCampaignProgress);
@@ -99,6 +99,11 @@ export default function Home(){
   useEffect(()=>{try{const normalized=normalizeChallengeState(JSON.parse(localStorage.getItem(CHALLENGE_STORAGE_KEY)||'null'),currentDaySeed());challengeRef.current=normalized;setChallengeState(normalized);}catch{}},[]);
   useEffect(()=>{try{localStorage.setItem(CHALLENGE_STORAGE_KEY,JSON.stringify(challengeState));}catch{}},[challengeState]);
   useEffect(()=>{try{setBindings(normalizeBindings(JSON.parse(localStorage.getItem(KEYBIND_STORAGE_KEY)||'null')));}catch{}},[]);
+  useEffect(()=>{try{setAccessibility(normalizeAccessibility(JSON.parse(localStorage.getItem(ACCESSIBILITY_STORAGE_KEY)||'null')));}catch{}},[]);
+  useEffect(()=>{try{localStorage.setItem(ACCESSIBILITY_STORAGE_KEY,JSON.stringify(accessibility));}catch{}}, [accessibility]);
+  // The richer accessibility palette drives the 2D UI; the 3D engine only
+  // understands the coarse default/colorblind hint, so keep display in sync.
+  useEffect(()=>{setDisplay((d:any)=>normalizeDisplay({...d,teamPalette:enginePaletteFor(accessibility.palette)}));},[accessibility.palette]);
   useEffect(()=>{try{setCampaign(normalizeCampaignProgress(JSON.parse(localStorage.getItem(CAMPAIGN_STORAGE_KEY)||'null')));}catch{}},[]);
   useEffect(()=>{try{localStorage.setItem(CAMPAIGN_STORAGE_KEY,JSON.stringify(campaign));}catch{}},[campaign]);
   useEffect(()=>{const loaded=loadHistory();historyRef.current=loaded;setHistory(loaded);},[]);
@@ -158,7 +163,12 @@ export default function Home(){
   const playDemo=async(target:any)=>{const id=target&&typeof target==='object'?target.id:target;try{const demo=await getDemo(id);if(!demo){setDemoNotice('That demo could not be loaded.');return;}const player=new DemoPlayer(demo);const director=new CinematicDirector({random:Math.random,center:{x:0,z:0},radius:16,cutEvery:4,reduced:reducedMotion()});r.demo={player,director,time:0,paused:false,speed:1,lastT:0,hudAt:0,state:player.sample(0)};view.setMatch(player.sample(0));view.lastEvent=0;view.setPlayerId(-1);view.setSpectator(true);view.setDirector(director);view.setCinema(true);view.setShowcase(null);view.setPreviewRect(null);setDemoInfo(demoSummary(demo));setDemoRig(director.rig);setDemoTime(0);setDemoPaused(false);setDemoSpeed(1);setDemoNotice('');setDemoPlaying(true);changeMode('theater');}catch(e:any){setDemoNotice(String(e?.message||e));}};
   const stopDemo=()=>{r.demo=null;r.showcaseMatchedId=null;setDemoPlaying(false);view.setSpectator(false);view.setCinema(false);view.setDirector(null);view.setShowcase(null);view.setPreviewRect(null);changeMode('selection');};
   const removeDemo=async(id:string)=>{await deleteDemo(id).catch(()=>{});refreshDemos();};
-  r.buildShowcase=buildShowcase;r.makeRng=makeRng;r.refreshDemos=refreshDemos;r.saveRecording=saveRecording;r.playDemo=playDemo;r.stopDemo=stopDemo;r.removeDemo=removeDemo;
+  // Replay export downloads the demo as a JSON file; import reads a picked file
+  // back into the local library. Both are browser-only and fail soft with a
+  // notice so the Theater never throws on a bad file.
+  const exportDemoFile=async(id:string)=>{try{const demo=await getDemo(id);if(!demo){setDemoNotice('That replay could not be loaded.');return;}const {name,text}=exportDemo(demo);const blob=new Blob([text],{type:'application/json'});const url=URL.createObjectURL(blob);const link=document.createElement('a');link.href=url;link.download=name;document.body.appendChild(link);link.click();link.remove();setTimeout(()=>URL.revokeObjectURL(url),0);setDemoNotice(`Exported ${name}.`);}catch(e:any){setDemoNotice(`Export failed: ${String(e?.message||e)}`);}};
+  const importDemoFile=async(file:any)=>{if(!file)return;try{const text=await file.text();const summary=await importDemoToStore(text);setLastDemo(summary);await refreshDemos();setDemoNotice(`Imported ${summary.mapName||summary.modeName||'replay'}.`);}catch(e:any){setDemoNotice(`Import failed: ${String(e?.message||e)}`);}};
+  r.buildShowcase=buildShowcase;r.makeRng=makeRng;r.refreshDemos=refreshDemos;r.saveRecording=saveRecording;r.playDemo=playDemo;r.stopDemo=stopDemo;r.removeDemo=removeDemo;r.exportDemoFile=exportDemoFile;r.importDemoFile=importDemoFile;
   if(r.showcaseEnabled)buildShowcase();
    const noteDamage=(e:any,snap:any,localId:number)=>{if(e.type!=='damage')return;const actors=snap?.actors??[],local=actors.find((a:any)=>a.id===localId)||actors[0];
     if(e.actor===localId){const source=e.pos??actors.find((a:any)=>a.id===e.source),bearing=local&&source?damageBearing(local,source):null;r.damageDir=bearing?{angle:bearing.angle,hasSource:true}:{angle:0,hasSource:false};r.damageDirAt=Number(snap?.time)||0;}
@@ -304,10 +314,10 @@ export default function Home(){
   const chooseAttachment=(slot:string,item:string)=>{const current=profileRef.current.attachments||{},next={...current,[slot]:current[slot]===item?undefined:item};const saved=saveProgression({...profileRef.current,attachments:next});runtime.current?.net?.gear(saved.gear,saved.attachments);setNotice('');};
   const chooseFinish=(id:string)=>{const saved=saveProgression({...profileRef.current,finish:profileRef.current.finish===id?null:id});runtime.current?.net?.gear(saved.gear,saved.attachments,saved.finish);};
   const chooseCrosshair=(id:string)=>{saveProgression({...profileRef.current,crosshair:profileRef.current.crosshair===id?null:id});setDisplay((d:any)=>normalizeDisplay({...d,crosshair:id}));};
-  const prefs=<><div className="preferences"><label htmlFor="sensitivity">Mouse sensitivity <span>{sensitivity.toFixed(1)}×</span></label><Slider id="sensitivity" aria-label="Mouse sensitivity" value={[sensitivity]} min={.3} max={2.5} step={.1} onValueChange={([v])=>saveSettings(v,muted)}/><div className="sound-setting"><label htmlFor="audio-switch">Game audio</label><Switch id="audio-switch" checked={!muted} onCheckedChange={v=>saveSettings(sensitivity,!v)}/></div><div className="sound-setting"><label htmlFor="showcase-switch">Menu showcase</label><Switch id="showcase-switch" checked={showcase} onCheckedChange={v=>saveSettings(sensitivity,muted,v)}/></div><div className="sound-setting"><label htmlFor="legacy-switch">Legacy arenas</label><Switch id="legacy-switch" checked={legacyMaps} onCheckedChange={v=>saveSettings(sensitivity,muted,showcase,v)}/></div><div className="sound-setting"><label htmlFor="touch-switch">Touch controls</label><Switch id="touch-switch" checked={touchControls} onCheckedChange={v=>setTouchPref(v)}/></div></div><DisplayConfiguration display={display} onChange={(v:any)=>setDisplay(normalizeDisplay(v))}/><KeybindsConfiguration bindings={bindings} onChange={(v:any)=>setBindings(normalizeBindings(v))} conflicts={bindingConflicts(bindings)}/></>;
+  const prefs=<><div className="preferences"><label htmlFor="sensitivity">Mouse sensitivity <span>{sensitivity.toFixed(1)}×</span></label><Slider id="sensitivity" aria-label="Mouse sensitivity" value={[sensitivity]} min={.3} max={2.5} step={.1} onValueChange={([v])=>saveSettings(v,muted)}/><div className="sound-setting"><label htmlFor="audio-switch">Game audio</label><Switch id="audio-switch" checked={!muted} onCheckedChange={v=>saveSettings(sensitivity,!v)}/></div><div className="sound-setting"><label htmlFor="showcase-switch">Menu showcase</label><Switch id="showcase-switch" checked={showcase} onCheckedChange={v=>saveSettings(sensitivity,muted,v)}/></div><div className="sound-setting"><label htmlFor="legacy-switch">Legacy arenas</label><Switch id="legacy-switch" checked={legacyMaps} onCheckedChange={v=>saveSettings(sensitivity,muted,showcase,v)}/></div><div className="sound-setting"><label htmlFor="touch-switch">Touch controls</label><Switch id="touch-switch" checked={touchControls} onCheckedChange={v=>setTouchPref(v)}/></div></div><DisplayConfiguration display={display} onChange={(v:any)=>setDisplay(normalizeDisplay(v))}/><AccessibilityConfiguration accessibility={accessibility} onChange={(v:any)=>setAccessibility(normalizeAccessibility(v))}/><KeybindsConfiguration bindings={bindings} onChange={(v:any)=>setBindings(normalizeBindings(v))} conflicts={bindingConflicts(bindings)}/></>;
   const player=hud?.actors?.find((a:any)=>a.id===(hud.actorId??0))||hud?.actors?.[0],activePower=HARNESSES.find((h:any)=>h.id===player?.harness),hudMode=GAME_MODES.find((m:any)=>m.id===hud?.config?.mode),brief=commandBrief(hud,player,hudMode),hudMap=getMap(hud?.mapId||mapId),hudRoute=routeContext(hudMap,player),phase=matchPhase(hud);
    const aimActor=player||hud?.actors?.[0],crosshairGap=dynamicCrosshairGap(aimActor?.spread,display.size),reloadFill=reloadProgress(aimActor),reloading=Boolean(aimActor?.reloading),posture=postureLabel(aimActor),marker=hitMarker(hud,player),ammoEmpty=Boolean(player&&typeof player.ammo?.[player.weapon]==='number'&&player.ammo[player.weapon]===0),ammoLow=lowAmmo(player,WEAPONS);
-    const killNotice=killBanner(hud,player),suddenBanner=suddenDeathBanner(hud),startBanner=matchStartBanner(hud,undefined,hudMode),scoreCue=hud?.scoreCue&&hud.scoreCue.age<1.6?hud.scoreCue:null,damageIndicator=hud?.damageDir&&hud.time-hud.damageDirAt<.8?hud.damageDir:null,awards=matchAwards(hud),radar=radarContacts(hud,player),radarCols=radarPalette(display.teamPalette);
+    const killNotice=killBanner(hud,player),suddenBanner=suddenDeathBanner(hud),startBanner=matchStartBanner(hud,undefined,hudMode),scoreCue=hud?.scoreCue&&hud.scoreCue.age<1.6?hud.scoreCue:null,damageIndicator=hud?.damageDir&&hud.time-hud.damageDirAt<.8?hud.damageDir:null,awards=matchAwards(hud),radar=radarContacts(hud,player),radarCols=radarPaletteFor(accessibility.palette);
    const {vehicle,prompt:vehiclePrompt}=vehicleHud(player,hud?.vehicles,hud?.flags,hud?.spectate);
    const scoreboard=renderScoreboard(hud);
    const isRace=hud?.config?.mode==='puma-race',isSoccer=hud?.config?.mode==='puma-soccer',armsrace=hud?.config?.mode==='armsrace',race=raceDisplay(hud,player?.id),soccerState=hud?.race,soccerRow=soccerState?.standings?.find((row:any)=>row.actorId===player?.id),soccer=isSoccer?soccerDisplay(hud,player?.id):null,isSingle=hud?.config?.mode==='horde'||hud?.config?.mode==='campaign',single=isSingle?singlePlayerDisplay(hud):null,campaignNext=isSingle?nextMissionId(campaign):null;
@@ -320,22 +330,24 @@ export default function Home(){
   const REPO_URL='https://github.com/mojomast/tokenarena',githubLink=<a className="icon-button github-link" href={REPO_URL} target="_blank" rel="noreferrer noopener" aria-label="View Colosseum Of Competitive Slop source on GitHub" title="View source on GitHub"><GitHubMark size={18}/><span>Source on GitHub</span></a>
   const headActions=<>{settingsButton}<button className="btn btn-ghost btn-icon" aria-label={muted?'Unmute audio':'Mute audio'} onClick={()=>saveSettings(sensitivity,!muted)}>{muted?<VolumeX size={18}/>:<Volume2 size={18}/>}</button>{githubLink}</>;
   const nextUnlock=matchRewardSummary({profile}).nextUnlock;
-  const ui:UiBag={mode,changeMode,enterMenu,exitToTitle,entered,settings,setSettings,setupOpen,setSetupOpen,closeSetup,singleOpen,setSingleOpen,singleSub,setSingleSub,singleMission,setSingleMission,startSinglePlayer,startSpectate,quickStart,reward,surpriseMe,nextUnlock,
+  const careerAchievements=achievementStatus(profile,{campaignDone:campaignProgressSummary(CAMPAIGN_MISSIONS as any,campaign).done,campaignTotal:campaignProgressSummary(CAMPAIGN_MISSIONS as any,campaign).total});
+  const matchSummary=matchSummaryCard({hud,reward,profile,achievements:careerAchievements,historyEntry:history.entries?.[0]||null});
+  const ui:UiBag={mode,changeMode,enterMenu,exitToTitle,entered,settings,setSettings,setupOpen,setSetupOpen,closeSetup,singleOpen,setSingleOpen,singleSub,setSingleSub,singleMission,setSingleMission,startSinglePlayer,startSpectate,quickStart,reward,surpriseMe,nextUnlock,matchSummary,accessibility,setAccessibility,
    character,setCharacter,harness,setHarness,mapId,setMapId,chooseCharacter,chooseGear,chooseAttachment,chooseFinish,chooseCrosshair,shuffle,notice,setNotice,config,setConfig:(v:any)=>setConfig({...normalizeConfig(v),playerName:v.playerName}),display,setDisplay,bindings,setBindings,presets,savePreset,loadPreset,deletePreset,sensitivity,muted,legacyMaps,showcase,touchControls,setTouchPref,saveSettings,connectNet,openBrowser,
    selected,selectedMap,selectedMode,selectableMaps,power,powerIcon,CHARACTERS,HARNESSES,GAME_MODES,DIFFICULTIES,mapsForMode,getMap,missionFor,isMissionUnlocked,CAMPAIGN_MISSIONS,MapPlan,mapViewBox,
    profile,campaign,nextMissionId,challenges:challengeStatus(challengeState),weeklyChallenges:weeklyStatus(challengeState),UNLOCKS,UNLOCK_GROUPS,GEAR,GEAR_SLOTS,ATTACHMENTS,ATTACHMENT_SLOTS,WEAPON_FINISHES,CROSSHAIR_STYLES,levelFromXp,rankTitle,rankBlurb,unlockedItems,
-   achievements:achievementStatus(profile,{campaignDone:campaignProgressSummary(CAMPAIGN_MISSIONS as any,campaign).done,campaignTotal:campaignProgressSummary(CAMPAIGN_MISSIONS as any,campaign).total}),ACHIEVEMENTS,prestige:prestigeFromXp(profile.xp),PRESTIGE_TIERS,PRESTIGE_XP,prestigeTier,prestigeXpBonus,
+   achievements:careerAchievements,ACHIEVEMENTS,prestige:prestigeFromXp(profile.xp),PRESTIGE_TIERS,PRESTIGE_XP,prestigeTier,prestigeXpBonus,
    history,historyTotals:historyTotals(history),historyLeaderboard:historyLeaderboard(history),clearHistory,campaignMissions:campaignMissionView(CAMPAIGN_MISSIONS as any,campaign,singleMission as any),campaignSummary:campaignProgressSummary(CAMPAIGN_MISSIONS as any,campaign),startCampaignMission,settingsTab,setSettingsTab,openSettings,
    rooms,matches,netUrl,setNetUrl,roomName,setRoomName,netError,quickJoin,createRoom,joinRoom,refreshNet,teamName,renderScoreboard,
    net:netInfo,netPlayers,myPeerId,netRoomId,netConnected:netInfo.connected,chatLog,chatDraft,setChatDraft,sendChat,newMessages,setNewMessages,lobbyInputRef,lobbyChatRef,chatAtBottom,voicePanel,voiceState,hostAndStart,reconnectNet,resumeNet,disconnectNet,
-   demos,demoPlaying,refreshDemos:()=>runtime.current?.refreshDemos?.(),start:()=>start(),ready,error,previewRef,headActions,BRAND,showcaseLive,
+   demos,demoPlaying,refreshDemos:()=>runtime.current?.refreshDemos?.(),start:()=>start(),ready,error,previewRef,headActions,BRAND,showcaseLive,exportDemo:(id:any)=>runtime.current?.exportDemoFile?.(id),importDemo:(file:any)=>runtime.current?.importDemoFile?.(file),
    player,awards,scoreboard,resultTitle,resultDescription,resume,nextArena,campaignNext,isSingle,single,selectHordeUpgrade:chooseHordeUpgrade,resumeSingleplayer,lastDemo,prefs,ONBOARDING_STEPS,helpSections:HELP_SECTIONS,onboarding,setOnboarding,finishOnboarding,modalRef,singleRef,runtime,
    demoNotice,demoPaused,demoTime,demoSpeed,demoRig,demoInfo,stopDemo:()=>runtime.current?.stopDemo?.(),removeDemo:(id:any)=>runtime.current?.removeDemo?.(id),playDemo:(id:any)=>runtime.current?.playDemo?.(id),setDemoPaused,setDemoTime,setDemoSpeed,setDemoRig,CAMERA_RIGS,clock,
    hud,brief,phase,hudRoute,hudMap,hudMode,isTeamMode,modeGoal,ladderStatus,flagText,armsrace,WEAPONS,activePower,radar,radarCols,radarBlip,crosshairGap,marker,reloadFill,reloading,posture,killNotice,suddenBanner,startBanner,scoreCue,damageIndicator,damageNumberStyle,reducedMotion,vehiclePrompt,vehicle,ammoEmpty,ammoLow,hideHud,pointerHint,requestLock,chatOpen,spectatorBoard,spectatorTeams,CAMERA_MODE_LABELS,grenadeStatus,streakStatus,killFeedWeapon,voiceHint,escapeHint,teamScoreText,ammoText,weaponTag,REPO_URL,weaponRangeLabel,
   };
-  return <><main className={`arena-app mode-${mode}${(config.mode==='puma-race'||config.mode==='puma-soccer')?' race-setup':''}${(isRace||isSoccer)?' race-active':''}${display.teamPalette==='colorblind'?' palette-colorblind':''}`}>
+  return <><main className={`arena-app mode-${mode}${(config.mode==='puma-race'||config.mode==='puma-soccer')?' race-setup':''}${(isRace||isSoccer)?' race-active':''} palette-${accessibility.palette}${accessibility.palette!=='default'?' palette-colorblind':''}${accessibility.highContrast?' ui-contrast':''}`}>
   <canvas ref={canvas} tabIndex={-1} role="img" className="arena-canvas" aria-label="Colosseum Of Competitive Slop 3D game"/>
-  {!entered&&<><TitleScreen ui={ui}/><div className="title-footer"><span>v4.3 · DEEPER</span>{githubLink}</div></>}
+  {!entered&&<><TitleScreen ui={ui}/><div className="title-footer"><span>v4.4 · BROADER</span>{githubLink}</div></>}
   {mode==='selection'&&<SelectionScreen ui={ui}/>}
   {mode==='selection'&&<SetupModal ui={ui}/>}
   {mode==='selection'&&<SinglePlayerModal ui={ui}/>}

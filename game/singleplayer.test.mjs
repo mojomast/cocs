@@ -4,7 +4,7 @@ import {Match,floorAt} from './core.mjs';
 import {GAME_MODES,DIFFICULTIES,normalizeConfig,DEFAULT_CONFIG} from './config.mjs';
 import {CAMPAIGN_MISSIONS,missionFor} from './campaign-data.mjs';
 import {ENEMY_TYPES,ENEMY_SPEED_VARIANCE,enemyById,applyEnemyFields,enemyBehavior} from './enemy-types.mjs';
-import {initializeSinglePlayer,hordeWaveSize,hordeWaveComposition,hordeWaveModifier,hordeWavePlan,HORDE_WAVE_MODIFIERS,HORDE_UPGRADES,HORDE_TYPES,hordeUpgradeChoices,resupplyHorde,offerHordeUpgrade,selectHordeUpgrade,resumeSinglePlayer,applyCampaignCheckpoint,isSinglePlayerMode,singlePlayerSnapshot,spawnGroup,SINGLEPLAYER_MODES} from './singleplayer.mjs';
+import {initializeSinglePlayer,hordeWaveSize,hordeWaveComposition,hordeWaveModifier,hordeWavePlan,HORDE_WAVE_MODIFIERS,HORDE_UPGRADES,HORDE_TYPES,hordeUpgradeChoices,resupplyHorde,offerHordeUpgrade,selectHordeUpgrade,resumeSinglePlayer,applyCampaignCheckpoint,isSinglePlayerMode,singlePlayerSnapshot,spawnGroup,SINGLEPLAYER_MODES,hordeWaveScore,hordeBossWave,hordeWaveScoreTotal,HORDE_BOSS_BONUS} from './singleplayer.mjs';
 
 const make=(mode,options={})=>new Match('chatgpt','openclaw',()=>.5,options.mapId||'convoy-line',{mode,botCount:3,humanCount:1,timeLimit:300,...options});
 const firstEnemies=(match)=>match.actors.filter(actor=>actor.isNpc&&actor.team===1);
@@ -545,6 +545,84 @@ test('the Harbinger summons adds and its phases escalate',()=>{
  assert.ok(match.actors.some(actor=>actor.npcType==='husk'),'the summon brings husks');
  assert.equal(boss.bossPhase,2);
  assert.ok(boss.speedMultiplier>1&&boss.damageMultiplier>1,'phase two escalates the boss');
+});
+
+test('horde endless scoring is deterministic and grows with the wave',()=>{
+ assert.ok(hordeWaveScore(1,'easy')>0);
+ assert.ok(hordeWaveScore(10,'easy')>hordeWaveScore(2,'easy'),'later waves pay more');
+ assert.equal(hordeWaveScore(5,'easy'),hordeWaveScore(5,'easy'),'scoring is pure');
+ assert.ok(hordeWaveScore(5,'nightmare')>hordeWaveScore(5,'easy'),'harder difficulties pay more');
+ assert.equal(hordeWaveScoreTotal(1,'easy'),hordeWaveScore(1,'easy'),'a one-wave run banks exactly one wave');
+ assert.ok(hordeWaveScoreTotal(6,'easy')>hordeWaveScoreTotal(5,'easy'));
+ const bossTotal=hordeWaveScoreTotal(5,'easy',{endless:true})-hordeWaveScoreTotal(4,'easy',{endless:true});
+ assert.ok(bossTotal>=HORDE_BOSS_BONUS,'a boss wave pays the flat bonus on top of the wave value');
+});
+
+test('horde endless escalates a boss every fifth wave and alternates classes',()=>{
+ assert.equal(hordeBossWave(4,{endless:true}),false);
+ assert.equal(hordeBossWave(5,{endless:true}),true);
+ assert.equal(hordeBossWave(10,{endless:true}),true);
+ assert.equal(hordeBossWave(9,{endless:true}),false);
+ const fifth=hordeWavePlan(5,'easy',{endless:true}),tenth=hordeWavePlan(10,'easy',{endless:true});
+ assert.equal(fifth.counts.boss,true);
+ assert.ok((fifth.counts.warden||0)>=1,'the first endless boss is the Warden');
+ assert.equal(tenth.counts.boss,true);
+ assert.ok((tenth.counts.harbinger||0)>=1,'the second endless boss is the Harbinger');
+ assert.equal(hordeWavePlan(4,'easy',{endless:true}).counts.boss,undefined,'non-boss waves are unchanged');
+});
+
+test('endless horde banks score per wave and ends with a clean summary on death',()=>{
+ const match=make('horde',{fragLimit:10,mapId:'colosseum',endless:true});
+ assert.equal(match.modeState.endless,true);
+ assert.equal(match.modeState.waveTarget,0,'endless has no wave target');
+ assert.equal(match.snapshot().singleplayer.endless,true);
+ assert.equal(match.snapshot().singleplayer.score,0);
+ match.actors[0].protection=1e9;
+ const captured=[],original=match.emit.bind(match);
+ match.emit=(type,data)=>{captured.push({type,...data});original(type,data);};
+ let guard=0;
+ while(!match.over&&match.modeState.wave<6&&guard++<60*60*4){
+  for(const actor of firstEnemies(match)){actor.health=0;actor.dead=1;}
+  if(match.modeState.phase==='intermission')match.modeState.timer=0;
+  match.step(1/60,{inputs:{}});
+ }
+ const snap=match.snapshot().singleplayer;
+ assert.ok(snap.wave>=6,'endless keeps producing waves');
+ assert.ok(snap.score>0,'cleared waves bank score');
+ assert.ok(snap.bestWave>=snap.wave,'the run records its best wave');
+ assert.ok(captured.some(entry=>entry.type==='horde-wave-cleared'&&entry.gained>0),'each clear announces its score gain');
+ assert.equal(match.over,false,'endless does not stop at the bounded wave target');
+ // Kill the player to force the end-on-death summary.
+ const enemy=firstEnemies(match)[0];
+ for(let death=0;death<3&&!match.over;death++){const player=match.actors[0];player.protection=0;match.damage(player,1e6,enemy);for(let i=0;i<240&&!match.over;i++)match.step(1/60,{inputs:{}});}
+ assert.equal(match.over,true);
+ assert.equal(match.snapshot().winner,1);
+ const summary=match.snapshot().singleplayer.summary;
+ assert.ok(summary,'the run banks a summary');
+ assert.equal(summary.outcome,'lost');
+ assert.equal(summary.endless,true);
+ assert.equal(summary.score,snap.score,'the summary keeps the banked score');
+ assert.ok(summary.bestWave>=6);
+ assert.equal(summary.deaths,3);
+ assert.ok(captured.some(entry=>entry.type==='horde-summary'&&entry.score===summary.score),'the summary is announced once');
+});
+
+test('a bounded horde run still ends at its wave target and banks a won summary',()=>{
+ const match=make('horde',{fragLimit:3,mapId:'colosseum'});
+ assert.equal(match.modeState.endless,false);
+ match.actors[0].protection=1e9;
+ let guard=0;
+ while(!match.over&&guard++<60*60*4){
+  for(const actor of firstEnemies(match)){actor.health=0;actor.dead=1;}
+  if(match.modeState.phase==='intermission')match.modeState.timer=0;
+  match.step(1/60,{inputs:{}});
+ }
+ assert.equal(match.over,true);
+ assert.equal(match.snapshot().winner,0);
+ const summary=match.snapshot().singleplayer.summary;
+ assert.ok(summary&&summary.outcome==='won'&&summary.endless===false,'a bounded win banks a won summary');
+ assert.equal(summary.target,3);
+ assert.ok(summary.score>0,'a bounded win still banks score');
 });
 
 test('horde modifiers inject flankers, shield-bearers and a champion boss',()=>{
