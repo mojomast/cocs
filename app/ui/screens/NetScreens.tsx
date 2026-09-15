@@ -3,6 +3,12 @@ import {useState} from 'react';
 import {MatchConfiguration} from '../../game-ui/configuration';
 import {Shell,TopBar,PageHead,Panel,Btn,Tabs,Field,Chip,Empty,Banner,ActionRail,SelectCard} from '../primitives';
 import type {ScreenProps} from '../contract';
+import {inviteLink} from '../../../game/invite.mjs';
+
+const copyText=async(text:string)=>{
+ try{await navigator.clipboard.writeText(text);return true;}catch{}
+ try{const el=document.createElement('textarea');el.value=text;el.setAttribute('readonly','');el.style.position='fixed';el.style.opacity='0';document.body.appendChild(el);el.select();const ok=document.execCommand('copy');el.remove();return ok;}catch{return false;}
+};
 
 const FILTER_ALL='all';
 const filterLabel=(value:any)=>String(value||'').replace(/[-_]+/g,' ').replace(/\b\w/g,(c:string)=>c.toUpperCase());
@@ -14,6 +20,8 @@ export function BrowseScreen({ui}:ScreenProps){
  const [modeFilter,setModeFilter]=useState(FILTER_ALL);
  const [mapFilter,setMapFilter]=useState(FILTER_ALL);
  const [sizeFilter,setSizeFilter]=useState(FILTER_ALL);
+ const [copiedRoom,setCopiedRoom]=useState<string|null>(null);
+ const copyRoom=async(roomId:string)=>{const link=typeof window!=='undefined'?inviteLink(window.location.href,roomId):null;if(!link)return;if(await copyText(link)){setCopiedRoom(roomId);setTimeout(()=>setCopiedRoom(prev=>prev===roomId?null:prev),2000);}};
  const [practiceMode,setPracticeMode]=useState('deathmatch');
  const [practiceBots,setPracticeBots]=useState(3);
  const [practiceDifficulty,setPracticeDifficulty]=useState('normal');
@@ -58,10 +66,11 @@ export function BrowseScreen({ui}:ScreenProps){
        const carded=room.started&&room.players>0;
        return <div key={room.roomId} className="stack stack--tight">
         <SelectCard name={room.name||room.roomId} tag={room.started?`IN MATCH · ${room.mapId??'arena'}`:room.players>0?'LOBBY OPEN':'EMPTY'} meta={`${room.players}P`} onClick={carded?undefined:()=>joinRoom(room.roomId,false)}/>
-        <div className="row">
-         <Btn size="sm" onClick={()=>joinRoom(room.roomId,false)} disabled={carded}>{room.started?'SPECTATE':'JOIN'}</Btn>
-         <Btn size="sm" onClick={()=>joinRoom(room.roomId,true)}>WATCH</Btn>
-        </div>
+         <div className="row">
+          <Btn size="sm" onClick={()=>joinRoom(room.roomId,false)} disabled={carded}>{room.started?'SPECTATE':'JOIN'}</Btn>
+          <Btn size="sm" onClick={()=>joinRoom(room.roomId,true)}>WATCH</Btn>
+          <Btn size="sm" variant="ghost" onClick={()=>copyRoom(room.roomId)}>{copiedRoom===room.roomId?'LINK COPIED':'COPY LINK'}</Btn>
+         </div>
        </div>;
       })}
       {rooms.length===0&&<Empty title="No rooms yet">Create one below — the first player to join becomes host.</Empty>}
@@ -93,11 +102,20 @@ export function LobbyScreen({ui}:ScreenProps){
  const {netPlayers=[],myPeerId,netRoomId,netError,chatLog=[],chatDraft='',setChatDraft,sendChat,newMessages,setNewMessages,lobbyInputRef,lobbyChatRef,chatAtBottom,voicePanel,config,setConfig,mapId,setMapId,selectableMaps=[],selectedMap,selectedMode,hostAndStart,reconnectNet,resumeNet,disconnectNet,net={}}=ui;
  const connected=!!net.connected;
  const chatAtBottomRef=chatAtBottom;
+ const [copied,setCopied]=useState(false);
+ const invite=typeof window!=='undefined'?inviteLink(window.location.href,netRoomId):null;
+ const copyInvite=async()=>{if(!invite)return;if(await copyText(invite)){setCopied(true);setTimeout(()=>setCopied(false),2200);}};
  return <Shell head={<TopBar sub={netRoomId?`ROOM ${netRoomId}`:'NETWORK LOBBY'}>{ui.headActions}</TopBar>} rail={<ActionRail>
+   {netRoomId&&<Btn onClick={copyInvite}>{copied?'LINK COPIED':'COPY INVITE LINK'}</Btn>}
    {net.isHost?<Btn variant="primary" onClick={hostAndStart} disabled={!connected}>START NETWORK MATCH</Btn>:<Chip tone={connected?'default':'danger'}>{connected?(net.spectate?'SPECTATING':'WAITING ON HOST'):'DISCONNECTED'}</Chip>}
    <Btn variant="danger" onClick={disconnectNet}>DISCONNECT</Btn>
   </ActionRail>}>
-  <PageHead eyebrow="PLAYERS ONLINE" title={<>Gather at the server<span>.</span></>} lede="First to join hosts the match. Escape during play returns here."/>
+   <PageHead eyebrow="PLAYERS ONLINE" title={<>Gather at the server<span>.</span></>} lede="First to join hosts the match. Escape during play returns here."/>
+   {netRoomId&&<div className="toolbar">
+    <span className="toolbar-title">INVITE</span>
+    <input className="ui-input" readOnly value={invite||''} aria-label="Room invite link" spellCheck={false} onFocus={e=>e.currentTarget.select()}/>
+    <Btn variant="primary" onClick={copyInvite}>{copied?'COPIED':'COPY LINK'}</Btn>
+   </div>}
   <div className="layout layout--3">
    <Panel label="01 / PLAYERS" meta={`${netPlayers.length} CONNECTED`} bodyClass="stack">
     <div className="stack stack--tight">

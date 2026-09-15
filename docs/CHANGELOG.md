@@ -16,6 +16,16 @@ record in [VERIFICATION.md](VERIFICATION.md).
 
 ---
 
+## v4.9 · INVITE — 2026-09-15
+
+- **Invite links:** the lobby and room browser can copy a `?room=CODE` link.
+  Opening it auto-connects and joins that room; a stale code falls back to the
+  room browser with a friendly message. Parsing lives in the pure
+  `game/invite.mjs` (`inviteLink`, `roomFromLocation`, `normaliseRoomCode`).
+- **Readable title demo:** the `.title-stage` vignette was lightened and the
+  broadcast lower-third was raised above it with a darker, higher-contrast card
+  so the live mode, map and score stay legible over the demo.
+
 ## v4.8 · BROADCAST — 2026-09-15
 
 - **Demo broadcast lower-third:** the title showcase now drives a broadcast-style

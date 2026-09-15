@@ -424,6 +424,12 @@ assets. Full procedure and verification: [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md
 The last five releases. The full history lives in
 [docs/CHANGELOG.md](docs/CHANGELOG.md).
 
+### v4.9 · INVITE — 2026-09-15
+- Copy an invite link from the lobby or room browser; opening it auto-joins that
+  room, with a fallback to the browser if the code has closed.
+- The title-screen vignette was lightened and the broadcast card made darker and
+  higher-contrast so it stays readable over the demo.
+
 ### v4.8 · BROADCAST — 2026-09-15
 - A broadcast-style lower-third overlays the title demo, reporting the live mode,
   map, score and objective with animated metrics and a scrolling ticker.
@@ -454,10 +460,6 @@ The last five releases. The full history lives in
 - Titan/Scout/Transport, levelgen compounds and structural map validation.
 - Server matchmaking, room lifecycle and leaderboards.
 
-### v4.4 · BROADER — 2026-09-14
-- New objective modes Holdout and Uplink, plus Endless Horde.
-- Economy pickups, weapon inspect, hit reactions, storm and wind effects.
-- Colorblind palettes, high-contrast UI and full keyboard remapping.
 - Replay export/import, match summary and room filters.
 
 ## Parody and attribution

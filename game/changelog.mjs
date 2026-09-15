@@ -1,12 +1,16 @@
 // In-game patch notes. The title-screen footer is the running version; this
 // module is the human-readable release digest the Changelog screen renders. The
 // full historical record lives in docs/CHANGELOG.md and is linked from the UI.
-export const RELEASE_VERSION = 'v4.8';
-export const RELEASE_CODENAME = 'BROADCAST';
+export const RELEASE_VERSION = 'v4.9';
+export const RELEASE_CODENAME = 'INVITE';
 export const REPO_URL = 'https://github.com/mojomast/tokenarena';
 export const FULL_CHANGELOG_URL = `${REPO_URL}/blob/main/docs/CHANGELOG.md`;
 
 export const CHANGELOG = [
+  {version:'v4.9',codename:'INVITE',date:'2026-09-15',tag:'Invite links and a clearer title demo',highlights:[
+    'Copy an invite link from the lobby or the room browser; opening it auto-connects and drops the player straight into that room, with a fallback to the room browser if the code has closed.',
+    'The title-screen vignette was lightened and the broadcast lower-third now sits above it with a darker, higher-contrast card, so the mode, map and score stay readable over the demo.',
+  ]},
   {version:'v4.8',codename:'BROADCAST',date:'2026-09-15',tag:'Docs, patch notes and a broadcast title demo',highlights:[
     'A broadcast-style lower-third now overlays the title-screen demo, reporting the live mode, map, score and objective with animated metric blocks and a scrolling ticker.',
     'A Changelog screen joins the menu, showing the running release and recent patch notes with a link to the full history.',

@@ -1,5 +1,23 @@
 # COCS verification report
 
+## Release 4.9 - Invite links and a readable title demo
+
+**Invite links**
+- `game/invite.mjs` (`normaliseRoomCode`, `inviteLink`, `roomFromLocation`) builds
+  and parses `?room=CODE` links; `game/invite.test.mjs` covers normalization,
+  query replacement, `room`/`join` parameters and a generate→parse round-trip.
+- The lobby and room browser copy the link to the clipboard with a fallback, and
+  `?room=CODE` auto-connects and joins on load; a `room not found` error redirects
+  to the browser with a friendly message.
+
+**Title demo readability**
+- The `.title-stage` radial vignette was lightened, and `.demo-broadcast` was
+  raised above the title overlay with a darker, higher-contrast card, so the mode,
+  map and score stay legible over a bright demo.
+
+Verification: game **1323/1323**, server **141/141**, `tests/` **5/5**, `tsc`
+clean, lint 0 errors, build clean. Not browser/GPU verified.
+
 ## Release 4.8 - Broadcast lower-third, in-game patch notes, demo background, docs
 
 **Demo broadcast**
