@@ -1,6 +1,6 @@
 import {createElement} from 'react';
 import {CHARACTERS,WEAPONS} from './data.mjs';
-import {modeColumns,modePrimary,scoreStats,scoreText,teamName} from './hud.mjs';
+import {modeColumns,modePrimary,scoreStats,scoreText,teamName,isTeamMode} from './hud.mjs';
 import {raceStandings,raceTime} from './race-ui.mjs';
 
 const metricText=(field,value,actor)=>field==='objectiveTime'?`${value.toFixed(1)}s`:field==='ladder'?`RUNG ${Math.max(1,(Number(actor?.ladder)||0)+1)}`:field==='weapon'?String(WEAPONS[Number(actor?.weapon)]?.short??actor?.weapon??'-'):scoreText(value);
@@ -32,7 +32,7 @@ export function scoreboardGroups(source,{history=false}={}){
  const teamScores=source?.teamScores;
  const actorId=history?null:source?.actorId;
  const actors=[...(source?.actors??source?.players??[])];
- const teamMode=modeId==='teamdeathmatch'||modeId==='assault'||modeId==='combined-arms'||modeId==='ctf'||modeId==='koth'||modeId==='domination'||modeId==='payload';
+ const teamMode=isTeamMode(modeId);
  if(!teamMode)return [{team:null,label:null,score:null,actors:actors.sort((a,b)=>compareActors(modeId,a,b,teamScores))}];
  const teams=new Map();
  for(const actor of actors){
@@ -60,7 +60,7 @@ export function renderScoreboard(source,history=false){
   rows.map((row,index)=>{const you=!history&&row.actorId===actorId;return createElement('div',{className:`soccer-score-row ${you?'you':''}`,key:row.actorId},createElement('span',null,createElement('b',null,String(index+1).padStart(2,'0')),' ',nameOf(row),you?' / YOU':''),createElement('span',null,teamName(row.team)),createElement('span',null,Number(row.goals)||0));}));}
  const modeId=source?.config?.mode??source?.mode??'deathmatch',columns=modeColumns(modeId),teamScores=source?.teamScores,actorId=history?null:source?.actorId;
  const groups=scoreboardGroups(source,{history});
- const teamBanner=modeId==='teamdeathmatch'||modeId==='assault'||modeId==='combined-arms';
+ const teamBanner=isTeamMode(modeId);
  const header=createElement('div',{className:'score-row labels',role:'row'},createElement('span',null,'OPERATOR'),createElement('strong',null,'KILLS'),createElement('span',null,'DEATHS'),createElement('span',null,'STREAK'),createElement('span',null,'PING'),columns.map(([,label])=>createElement('span',{key:label},label)));
  let rank=0;
  const rows=[];

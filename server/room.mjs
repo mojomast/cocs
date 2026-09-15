@@ -23,32 +23,9 @@ const object = value => value !== null && typeof value === 'object' && !Array.is
 const bounded = (value, max) => typeof value === 'string' && value.length <= max;
 // Match.snapshot() shares mutable or deeply frozen nested branches (powerups,
 // objectiveNodes, ...), so quantizing it in place would corrupt authoritative
-// state or throw on frozen map data. Copy and round in one pass instead of
-// structuredClone followed by a second walk over the whole tree.
-const quantizedCopy = (value, precision = 3) => {
- const factor = 10 ** precision;
- const round = n => Math.round(n * factor) / factor;
- const copy = node => {
-  if (Array.isArray(node)) {
-   const out = new Array(node.length);
-   for (let i = 0; i < node.length; i++) {
-    const v = node[i];
-    out[i] = typeof v === 'number' ? (Number.isFinite(v) ? round(v) : v) : v && typeof v === 'object' ? copy(v) : v;
-   }
-   return out;
-  }
-  if (node && typeof node === 'object') {
-   const out = {};
-   for (const key of Object.keys(node)) {
-    const v = node[key];
-    out[key] = typeof v === 'number' ? (Number.isFinite(v) ? round(v) : v) : v && typeof v === 'object' ? copy(v) : v;
-   }
-   return out;
-  }
-  return node;
- };
- return copy(value);
-};
+// state or throw on frozen map data. The shared non-mutating clone quantizer
+// keeps client-visible rounding identical to the client codec.
+import {quantizeClone as quantizedCopy} from '../game/quantize.mjs';
 
 export class Room {
  constructor(id = 'local', random = Math.random, options = {}) {

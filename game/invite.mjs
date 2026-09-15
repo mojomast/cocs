@@ -2,21 +2,30 @@
 // `?room=CODE` query parameter; opening it auto-connects and joins that room.
 // Pure string/URL helpers so the parsing is unit-tested apart from the DOM.
 export function normaliseRoomCode(value) {
-  const code = String(value ?? '').trim().toUpperCase();
-  return /^[A-Z0-9]{2,8}$/.test(code) ? code : null;
+  const raw = String(value ?? '').trim();
+  if (!/^[A-Za-z0-9]{2,8}$/.test(raw)) return null;
+  // The default room is lowercase `local` on the server; codes are uppercase.
+  return raw.toLowerCase() === 'local' ? 'local' : raw.toUpperCase();
 }
 
-export function inviteLink(href, roomId) {
+export function inviteLink(href, roomId, {spectate = false} = {}) {
   const room = normaliseRoomCode(roomId);
   if (!room) return null;
   try {
     const url = new URL(String(href));
     url.searchParams.set('room', room);
+    if (spectate) url.searchParams.set('spectate', '1');
+    else url.searchParams.delete('spectate');
     url.hash = '';
     return url.toString();
   } catch {
     return null;
   }
+}
+
+export function spectateFromLocation(search) {
+  const params = new URLSearchParams(String(search ?? ''));
+  return params.get('spectate') === '1' || params.get('watch') === '1';
 }
 
 export function roomFromLocation(search) {

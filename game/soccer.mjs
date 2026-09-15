@@ -294,7 +294,7 @@ function scoreGoal(match,state,goal){
   if(racer&&racer.team===team) racer.goals=(racer.goals||0)+1;
  }
  match.teamScores[0]=state.scores[0];match.teamScores[1]=state.scores[1];
- const goalX=(state.goalMinX+state.goalMaxX)/2,goalZ=team===0?state.pitchMaxZ:state.pitchMinZ;
+ const goalX=Number.isFinite(goal?.x)?goal.x:0,goalZ=Number.isFinite(goal?.z)?goal.z:0;
  match.emit('soccer-goal',{team,actor:scorerId,actorId:scorerId,scorerId,pos:{x:goalX,y:1.2,z:goalZ}});
  resetBall(match,state);
  state.lastTouch=null;

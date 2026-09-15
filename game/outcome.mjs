@@ -22,6 +22,7 @@ export const rankTuple = (actor, mode) => {
   }
   if (mode === 'puma-soccer') return [scoreStatsOf(actor)?.goals ?? 0, frags];
   if (mode === 'armsrace') return [Number(actor?.ladder) || 0, frags];
+  if (mode === 'juggernaut') return [Number(actor?.points) || 0, frags];
   return [frags];
 };
 
@@ -45,6 +46,13 @@ export function actorWon(result, mode, actor) {
     return winner !== null && winner !== undefined && winner === actor.id;
   }
   if (teamMode(mode)) return result.winner !== null && result.winner !== undefined && result.winner === actor.team;
+  if (mode === 'juggernaut') {
+    // The crown is decided by points, not frags. The authoritative winner is the
+    // crown holder at the end; fall back to the points ranking on time endings.
+    if (result.winner !== null && result.winner !== undefined) return result.winner === actor.id;
+    const best = topRank(result.actors, 'juggernaut');
+    return Boolean(best) && best[0] > 0 && compareRanks(rankTuple(actor, 'juggernaut'), best) === 0;
+  }
   if (mode === 'armsrace') {
     // An explicit finisher outranks any re-derived ladder/frag ranking.
     if (result.winner !== null && result.winner !== undefined) return result.winner === actor.id;

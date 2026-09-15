@@ -374,6 +374,11 @@ test('modeGoal names the scoring objective for every mode', () => {
   assert.equal(modeGoal(modeById('instagib')), 'FRAGS');
   assert.equal(modeGoal(modeById('rockets')), 'FRAGS');
   assert.equal(modeGoal(modeById('arsenal')), 'FRAGS');
+  assert.equal(modeGoal(modeById('holdout')), 'QUORUM HOLD');
+  assert.equal(modeGoal(modeById('uplink')), 'RELAY STAGES');
+  assert.equal(modeGoal(modeById('vip-escort')), 'EXTRACTION');
+  assert.equal(modeGoal(modeById('juggernaut')), 'CROWN POINTS');
+  assert.equal(modeGoal(modeById('team-elimination')), 'TEAM LIVES');
 });
 
 test('isTeamMode distinguishes shared-score modes from free-for-alls', () => {
@@ -547,4 +552,16 @@ test('scoreStats forwards juggernaut points and elimination tickets', () => {
   assert.equal(scoreStats({scoreStats: {points: 'x'}}).points, 0);
   assert.deepEqual(modeColumns('juggernaut'), [['points', 'POINTS']]);
   assert.deepEqual(modeColumns('team-elimination'), [['eliminations', 'ELIMS']]);
+});
+
+test('objective-variant modes get a real briefing instead of generic frag copy', () => {
+ const me={...player,team:0};
+ const holdout=commandBrief({config:{mode:'holdout'},objectives:{kind:'domination',holdCount:2,holdSeconds:30,holdProgress:{0:12,1:4},holdTeam:0}},me,modeById('holdout'));
+ assert.equal(holdout.title,'HOLD THE QUORUM');
+ assert.match(holdout.detail,/HELD/);
+ const uplink=commandBrief({config:{mode:'uplink'},objectives:{kind:'uplink',stage:1,stageCount:3,stageCaptures:{0:1,1:0}}},me,modeById('uplink'));
+ assert.equal(uplink.title,'RUN THE RELAY');
+ assert.match(uplink.detail,/RELAY 2 \/ 3/);
+ const vip=commandBrief({config:{mode:'vip-escort'},objectives:{kind:'extraction',vipDead:false}},me,modeById('vip-escort'));
+ assert.equal(vip.title,'ESCORT THE VIP');
 });

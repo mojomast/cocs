@@ -95,11 +95,17 @@ export function ResultsModal({ui}:ScreenProps){
   {reward.nextUnlock?<Chip>NEXT UNLOCK · {reward.nextUnlock.name} · LV {reward.nextUnlock.level}</Chip>:<Chip tone="accent">ALL UNLOCKS CLAIMED</Chip>}
  </div>:null;
  const footer=<>
-  {connected&&!isHost?<Chip>WAITING FOR HOST</Chip>:<Btn variant="primary" onClick={()=>start()}>PLAY AGAIN</Btn>}
-  <Btn onClick={nextArena}>NEXT ARENA</Btn>
+  {connected?<>
+   {isHost&&<Btn variant="primary" onClick={()=>changeMode('lobby')}>RETURN TO LOBBY</Btn>}
+   {!isHost&&<Chip>WAITING FOR HOST</Chip>}
+   {!isHost&&<Btn onClick={()=>changeMode('lobby')}>RETURN TO LOBBY</Btn>}
+  </>:<>
+   <Btn variant="primary" onClick={()=>start()}>PLAY AGAIN</Btn>
+   <Btn onClick={nextArena}>NEXT ARENA</Btn>
+  </>}
   {surpriseMe&&<Btn onClick={surpriseMe}>SURPRISE ME</Btn>}
   {lastDemo&&playDemo&&<Btn onClick={()=>playDemo(lastDemo.id)}>WATCH REPLAY</Btn>}
-  <Btn onClick={()=>changeMode('selection')}>CHANGE LOADOUT</Btn>
+  <Btn onClick={()=>connected?disconnectNet():changeMode('selection')}>CHANGE LOADOUT</Btn>
   {connected&&<Btn variant="danger" onClick={disconnectNet}>LEAVE SERVER</Btn>}
  </>;
  return <Modal open={!!hud&&mode==='results'} onClose={()=>changeMode('selection')} size="lg" eyebrow="MATCH COMPLETE" title={hud?resultTitle(hud,player):undefined} description={hud?resultDescription(hud,player):undefined} panelRef={modalRef} footer={footer}>

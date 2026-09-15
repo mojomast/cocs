@@ -68,3 +68,12 @@ test('scoreboardGroups groups team modes and keeps free-for-all in one group',()
  assert.equal(ffa.length,1);
  assert.equal(ffa[0].actors[0].id,2,'ffa sorts by frags');
 });
+
+test('objective team modes group players by team instead of free-for-all',()=>{
+ for(const mode of ['team-elimination','vip-escort','holdout','uplink']){
+  const snapshot={config:{mode},actorId:0,teamScores:{0:3,1:2},actors:[{id:0,name:'Claude',team:0,frags:2,scoreStats:{}},{id:1,name:'Grok',team:1,frags:4,scoreStats:{}}]};
+  const html=renderToStaticMarkup(renderScoreboard(snapshot));
+  assert.ok(html.includes('score-team-heading'),`${mode} renders team groups`);
+  assert.ok(html.includes('RED')&&html.includes('BLUE'),`${mode} labels both teams`);
+ }
+});

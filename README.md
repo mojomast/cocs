@@ -263,8 +263,9 @@ The game server runs on your machine, not a cloud platform.
   movement, aim and fire, then reconciles to every authoritative snapshot.
 - **Interpolation**: remote actors and projectiles render at an adaptive ~100 ms
   delay with a jitter-adaptive buffer.
-- **Efficient wire format**: quantized numbers, snapshot delta compression and
-  protocol v2 with a full-snapshot fallback.
+- **Efficient wire format**: snapshots are quantized to the millimetre at 30 Hz, the
+  protocol is v2 with a full-snapshot fallback, and a snapshot-delta codec is used
+  by the deterministic net harness and available to constrained transports.
 - **Rooms and matchmaking**: a default room plus on-demand 4-letter-code rooms, a
   room browser, balanced team matchmaking, warmup/ready/map-vote/rematch lifecycle
   and leaderboards.
@@ -424,6 +425,15 @@ assets. Full procedure and verification: [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md
 The last five releases. The full history lives in
 [docs/CHANGELOG.md](docs/CHANGELOG.md).
 
+### v4.11 · HARDENED — 2026-09-15
+- The demo keeps rendering on the room browser, lobby and patch-notes screens; the
+  rank screen composites its operator preview.
+- The document is served no-cache so a browser can never keep a deleted bundle
+  after a deploy; the deployment verifier enforces it.
+- Objective/reward correctness (team scoreboards, Juggernaut points, soccer goal
+  position) plus multiplayer robustness (case-insensitive room codes, spectate
+  invites, full/closed-room fallback, voice-config congestion).
+
 ### v4.10 · CLARITY — 2026-09-15
 - The title demo no longer reveals the operator model between scenarios: the view
   decides from the showcase setting itself, not from a not-yet-ready snapshot.
@@ -450,12 +460,6 @@ The last five releases. The full history lives in
   story transmissions.
 - A broadcast lower-third reports the live demo's mode, map, score and objective,
   and a full Changelog screen joins the menu.
-
-### v4.6 · TUNED — 2026-09-15
-- Distinct roles and retuned time-to-kill for all ten weapons.
-- Out-of-combat health regeneration in campaign and horde.
-- Speaker/mission-lore data, campaign briefings, procedural weapon rigs and richer
-  announcer audio.
 
 ## Parody and attribution
 

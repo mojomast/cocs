@@ -56,6 +56,8 @@ test('a ball crossing a goal line scores for the other team and resets to centre
  assert.equal(m.teamScores[1],1);
  assert.equal(ball.x,0);assert.equal(ball.z,0);assert.equal(ball.vx,0);assert.equal(ball.vz,0);
  assert.ok(m.events.some(e=>e.type==='soccer-goal'&&e.team===1));
+ const goalEvent=m.events.find(e=>e.type==='soccer-goal');
+ assert.ok(Number.isFinite(goalEvent.pos.x)&&Number.isFinite(goalEvent.pos.z)&&Number.isFinite(goalEvent.pos.y),'goal event carries a finite position');
  assert.equal(soccerStandings(m.race).find(r=>r.actorId===scorer.actorId).goals,1);
  assert.equal(m.race.serial,1);
 });

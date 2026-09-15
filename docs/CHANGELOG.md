@@ -16,6 +16,31 @@ record in [VERIFICATION.md](VERIFICATION.md).
 
 ---
 
+## v4.11 · HARDENED — 2026-09-15
+
+A wiring, cache and correctness pass driven by a three-area audit.
+
+- **Demo never freezes or shows the model:** `ArenaView.render` now honors the
+  showcase snapshot on `browse`, `lobby` and `changelog` (not just
+  selection/theater/progression) and composites the operator preview on
+  `progression`; the page passes real elapsed time to those screens.
+- **Stale bundles impossible:** `next.config.ts` sends `Cache-Control:
+  no-cache, must-revalidate` for the document (hashed assets keep `immutable`),
+  and `scripts/verify-deployment.mjs` fails a deployment whose HTML is cacheable.
+  The verifier also checks `preload`/`modulepreload` asset references.
+- **Objectives and rewards:** team scoreboards group the newer team modes
+  (`holdout`, `uplink`, `vip-escort`, `team-elimination`); Juggernaut is awarded on
+  crown points, not frags; soccer goal events carry a finite position; HUD goals
+  and briefings cover holdout/uplink/vip; replay timelines include the newer
+  objective events.
+- **Multiplayer robustness:** room lookup is case-insensitive (so `LOCAL` and
+  `local` both resolve); invite links can encode a spectate/watch intent; a full or
+  closed room falls back to the refreshed room browser; `VOICE_CONFIG` no longer
+  terminates a congested socket; the server uses the shared quantizer.
+- **UI wiring:** practice-vs-bots honors its bot-count and difficulty pickers;
+  mission select opens from the rank screen; local spectate hides the network-only
+  H/P controls; the radar draws off-screen bearing arrows.
+
 ## v4.10 · CLARITY — 2026-09-15
 
 - **The demo no longer shows the operator model between scenarios.** The view's

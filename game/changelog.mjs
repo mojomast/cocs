@@ -1,12 +1,19 @@
 // In-game patch notes. The title-screen footer is the running version; this
 // module is the human-readable release digest the Changelog screen renders. The
 // full historical record lives in docs/CHANGELOG.md and is linked from the UI.
-export const RELEASE_VERSION = 'v4.10';
-export const RELEASE_CODENAME = 'CLARITY';
+export const RELEASE_VERSION = 'v4.11';
+export const RELEASE_CODENAME = 'HARDENED';
 export const REPO_URL = 'https://github.com/mojomast/tokenarena';
 export const FULL_CHANGELOG_URL = `${REPO_URL}/blob/main/docs/CHANGELOG.md`;
 
 export const CHANGELOG = [
+  {version:'v4.11',codename:'HARDENED',date:'2026-09-15',tag:'Wiring, cache and correctness pass',highlights:[
+    'The menu demo now keeps rendering on the room browser, lobby and patch-notes screens instead of freezing, and the rank screen composites its operator preview.',
+    'The document is served no-cache so a browser can never keep running a deleted bundle after a deploy; the deployment verifier enforces it.',
+    'Objective and reward correctness: team scoreboards for the newer modes, Juggernaut awarded on crown points, and finite soccer goal positions.',
+    'Network and lobby robustness: case-insensitive room codes, invite links for spectators, a clear fallback when a room is full or closed, and voice config no longer drops congested sockets.',
+    'HUD/UX wiring: practice-vs-bots honors its bot/difficulty pickers, mission select opens from the rank screen, local spectate lists only its real controls, and the radar draws off-screen bearing arrows.',
+  ]},
   {version:'v4.10',codename:'CLARITY',date:'2026-09-15',tag:'The demo keeps showing the match',highlights:[
     'The title demo no longer reveals the operator model between scenarios. The view now decides from the showcase setting itself, not from whether a snapshot happens to be ready, so a cycling build can never fall back to the model preview.',
   ]},

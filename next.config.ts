@@ -31,6 +31,13 @@ const nextConfig: NextConfig = {
         source: "/(.*)",
         headers: securityHeaders,
       },
+      {
+        // The document must revalidate: it references content-hashed assets, so
+        // a browser that heuristic-caches the HTML can keep running a deleted
+        // bundle after a deploy. Hashed assets keep their own immutable policy.
+        source: "/",
+        headers: [{ key: "Cache-Control", value: "no-cache, must-revalidate" }],
+      },
     ];
   },
 };

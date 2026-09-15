@@ -51,9 +51,15 @@ npm run verify:deployment -- https://arena.ussyco.de
 ```
 
 The verifier requires HTTP 200 **and** the correct content type for every CSS and
-JS asset referenced by the HTML, including preload and streamed RSC references.
-This catches stale-manifest failures that an HTML-only smoke test would miss. The
-rendered-HTML test also checks that every referenced asset exists in the build
+JS asset referenced by the HTML, including `preload`/`modulepreload` and streamed
+RSC references — and it fails if the document itself is cacheable. This catches
+stale-manifest failures that an HTML-only smoke test would miss.
+
+**Document cache policy.** `next.config.ts` sends `Cache-Control: no-cache,
+must-revalidate` for `/` while content-hashed `/assets/*` keep `public,
+max-age=31536000, immutable`. The browser therefore always revalidates the HTML
+and can never keep running a bundle whose files were deleted by the next deploy.
+The rendered-HTML test also checks that every referenced asset exists in the build
 directory.
 
 ## Local development

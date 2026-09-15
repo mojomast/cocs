@@ -30,7 +30,7 @@ export function BrowseScreen({ui}:ScreenProps){
  const roomMaps=[...new Set(rooms.map((r:any)=>r.mapId).filter(Boolean))];
  const visible=rooms.filter((r:any)=>{if(modeFilter!==FILTER_ALL&&r.config?.mode!==modeFilter)return false;if(mapFilter!==FILTER_ALL&&r.mapId!==mapFilter)return false;if(sizeFilter!==FILTER_ALL&&sizeBucket(r.players)!==sizeFilter)return false;return true;});
  const practiceConfig={...config,mode:practiceMode,botCount:practiceBots,difficulty:practiceDifficulty};
- const startPractice=()=>quickStart?.(practiceMode);
+ const startPractice=()=>quickStart?.(practiceMode,{botCount:practiceBots,difficulty:practiceDifficulty});
  return <Shell head={<TopBar sub="ROOM BROWSER">{headActions}</TopBar>} rail={<ActionRail>
    <Btn onClick={()=>changeMode('selection')}>BACK</Btn>
    <Btn variant="primary" onClick={refreshNet}>REFRESH</Btn>
@@ -103,7 +103,7 @@ export function LobbyScreen({ui}:ScreenProps){
  const connected=!!net.connected;
  const chatAtBottomRef=chatAtBottom;
  const [copied,setCopied]=useState(false);
- const invite=typeof window!=='undefined'?inviteLink(window.location.href,netRoomId):null;
+ const invite=typeof window!=='undefined'?inviteLink(window.location.href,netRoomId,{spectate:net.spectate===true}):null;
  const copyInvite=async()=>{if(!invite)return;if(await copyText(invite)){setCopied(true);setTimeout(()=>setCopied(false),2200);}};
  return <Shell head={<TopBar sub={netRoomId?`ROOM ${netRoomId}`:'NETWORK LOBBY'}>{ui.headActions}</TopBar>} rail={<ActionRail>
    {netRoomId&&<Btn onClick={copyInvite}>{copied?'LINK COPIED':'COPY INVITE LINK'}</Btn>}

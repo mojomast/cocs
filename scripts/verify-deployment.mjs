@@ -2,13 +2,17 @@ import assert from 'node:assert/strict';
 import {pathToFileURL} from 'node:url';
 
 export function linkedAssets(html) {
-  return [...new Set(html.match(/\/assets\/[A-Za-z0-9_.-]+\.(?:css|js)\b/g) || [])];
+  const refs = [...html.matchAll(/(?:src|href)="([^"]+\.(?:css|js))(?:\?[^"]*)?"/g)].map(match => match[1]).filter(path => path.startsWith('/'));
+  return [...new Set(refs)];
 }
 
 export async function verifyDeployment(base, {fetchImpl = fetch, version = ''} = {}) {
   const response = await fetchImpl(new URL('/', base), {signal: AbortSignal.timeout(15000), cache: 'no-store'});
   assert.equal(response.status, 200, 'HTML must return 200');
   assert.match(response.headers.get('content-type') || '', /^text\/html\b/i);
+  // The document references content-hashed assets, so it must revalidate. A
+  // cached HTML can otherwise keep a browser on a bundle that no longer exists.
+  assert.match(response.headers.get('cache-control') || '', /no-cache|no-store/i, 'HTML must send Cache-Control: no-cache/no-store');
   const html = await response.text();
   if (version) assert.ok(html.includes(version), `Expected release ${version}`);
   const assets = linkedAssets(html);

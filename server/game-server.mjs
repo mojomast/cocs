@@ -45,7 +45,7 @@ export function createGameServer({ port = 0, random, tickDt = 1 / 60, tickMs = 1
  // (welcome/start/results/lobby/errors) are not. Essential messages that hit a
  // congested socket are coalesced by type and pumped once the buffer drains,
  // rather than being silently dropped.
- const REPLACEABLE = new Set([MESSAGE.SNAPSHOT, MESSAGE.EVENTS, MESSAGE.VOICE_SIGNAL, MESSAGE.VOICE_CONFIG]);
+ const REPLACEABLE = new Set([MESSAGE.SNAPSHOT, MESSAGE.EVENTS, MESSAGE.VOICE_SIGNAL]);
  function queueEssential(ws, text, type) {
   const queue = ws.pendingEssential || (ws.pendingEssential = []);
   // Tag with the peer's room so messages queued for one room are never
@@ -72,10 +72,12 @@ export function createGameServer({ port = 0, random, tickDt = 1 / 60, tickMs = 1
   }
   function deliver(ws, msg, text = JSON.stringify(msg)) {
    if (!ws || ws.readyState !== ws.OPEN) return false;
-   const voice = msg?.type === MESSAGE.VOICE_SIGNAL || msg?.type === MESSAGE.VOICE_CONFIG;
+   // Only high-rate voice signalling uses the small voice budget; VOICE_CONFIG is
+   // a one-shot control message, so a busy socket queues it instead of dying.
+   const voice = msg?.type === MESSAGE.VOICE_SIGNAL;
    const limit = voice ? VOICE_BUFFER_LIMIT : TRAFFIC_BUFFER_LIMIT;
    if (ws.bufferedAmount + Buffer.byteLength(text) <= limit) { ws.send(text); return true; }
-   if (REPLACEABLE.has(msg?.type)) { if (msg?.type === MESSAGE.VOICE_CONFIG) ws.terminate(); return false; }
+   if (REPLACEABLE.has(msg?.type)) return false;
    queueEssential(ws, text, msg?.type);
    return false;
   }

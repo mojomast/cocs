@@ -126,3 +126,18 @@ test('a timed team finish is reported as a time ending even with a winner', () =
   assert.equal(state.overReason, 'time');
   assert.equal(state.winner, 0);
 });
+
+test('juggernaut is awarded on crown points, not frags', () => {
+  const crown = {id:0, team:0, frags:1, points:30}, chaser = {id:1, team:1, frags:9, points:5};
+  const byPoints = { winner: 0, actors: [crown, chaser] };
+  assert.equal(actorWon(byPoints, 'juggernaut', crown), true, 'crown holder wins');
+  assert.equal(actorWon(byPoints, 'juggernaut', chaser), false, 'frag leader without the crown loses');
+  const noWinner = { winner: null, actors: [crown, chaser] };
+  assert.equal(actorWon(noWinner, 'juggernaut', crown), true, 'time ending ranks by points');
+  assert.equal(actorWon(noWinner, 'juggernaut', chaser), false);
+});
+
+test('rankTuple ranks juggernaut by points before frags', () => {
+  const a = { frags: 1, points: 20 }, b = { frags: 9, points: 2 };
+  assert.ok(compareRanks(rankTuple(a, 'juggernaut'), rankTuple(b, 'juggernaut')) < 0);
+});

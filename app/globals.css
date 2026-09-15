@@ -338,6 +338,8 @@
 .radar-dead { opacity: .28; }
 .radar-revealed { stroke: #7fe7ff; stroke-width: .022; }
 .radar-zone-label { font: 700 .11px/1 monospace; pointer-events: none; }
+.radar-indicator { pointer-events: none; }
+.radar-indicator polygon { filter: drop-shadow(0 0 2px #000); }
 .ladder-chip, .streak-chip { position: absolute; left: 50%; bottom: 150px; transform: translateX(-50%); display: flex; align-items: center; gap: 8px; padding: 6px 12px; border: 1px solid #9fe0a055; border-radius: 999px; background: #0a1b1acc; font: 600 12px/1 var(--font-ui, system-ui); letter-spacing: .08em; color: #d9ffe0; pointer-events: none; }
 .streak-chip { bottom: 186px; border-color: #ffd16655; color: #ffe9b0; }
 .ladder-chip b, .streak-chip b { color: #9fe0a0; }

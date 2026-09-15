@@ -1,5 +1,33 @@
 # COCS verification report
 
+## Release 4.11 - Wiring, cache and correctness pass
+
+A three-area read-only audit (gameplay, UI, netcode/deploy) drove this batch.
+
+- **Demo render path:** `ArenaView.render` honors the showcase snapshot on
+  `browse`/`lobby`/`changelog` and composites the operator preview on
+  `progression`; the page passes real frame time to those screens. A browser probe
+  (Playwright + SwiftShader) confirmed the demo keeps playing across scenario
+  cycles with no model fallback.
+- **Stale-bundle prevention:** `next.config.ts` sets document `no-cache`;
+  `scripts/verify-deployment.mjs` rejects cacheable HTML and now checks
+  `preload`/`modulepreload` references (`tests/deployment-assets.test.mjs`).
+- **Gameplay correctness:** team scoreboards use `isTeamMode` (covers
+  holdout/uplink/vip-escort/team-elimination); Juggernaut is awarded on crown
+  points; soccer goal events carry a finite position; HUD `modeGoal`/`commandBrief`
+  cover holdout/uplink/vip-escort; replay timelines include the newer objective
+  events. New assertions in `scoreboard`, `outcome`, `soccer` and `hud` tests.
+- **Multiplayer robustness:** case-insensitive room lookup; spectate invite links;
+  full/closed-room fallback to a refreshed browser; `VOICE_CONFIG` no longer
+  terminates a congested socket; the server uses the shared quantizer.
+- **UI wiring:** practice-vs-bots honors its pickers; mission select opens from the
+  rank screen; local spectate hides network-only controls; radar off-screen arrows
+  render.
+
+Verification: game **1327/1327**, server **141/141**, `tests/` **7/7**, `tsc`
+clean, lint 0 errors, build clean. Not browser/GPU frame-pacing verified (the
+Playwright probe uses the software WebGL path).
+
 ## Release 4.10 - Demo never falls back to the operator model while cycling
 
 - The view's `showcaseExpected` flag is now driven by the showcase setting and

@@ -116,7 +116,7 @@ export function ProgressionScreen({ui}:ScreenProps){
      <Panel label="WEEKLY CHALLENGES" meta={weeklyChallenges.length?`${weeklyChallenges.filter((c:any)=>c.done).length} / ${weeklyChallenges.length} CLAIMED`:'ROTATING'}>
       {renderChallenges(weeklyChallenges,'Weekly objectives rotate on Monday and pay out bigger bonus XP.')}
      </Panel>
-     <Panel label="CAMPAIGN" meta={campaignSummary?`${campaignSummary.done} / ${campaignSummary.total} · ★ ${campaignSummary.stars} / ${campaignSummary.maxStars}`:''} actions={<Btn size="sm" variant="ghost" onClick={()=>{setSingleSub?.('campaign');setSingleOpen?.(true);}}>MISSION SELECT</Btn>}>
+     <Panel label="CAMPAIGN" meta={campaignSummary?`${campaignSummary.done} / ${campaignSummary.total} · ★ ${campaignSummary.stars} / ${campaignSummary.maxStars}`:''} actions={<Btn size="sm" variant="ghost" onClick={()=>{changeMode('selection');setSingleSub?.('campaign');setSingleOpen?.(true);}}>MISSION SELECT</Btn>}>
       {campaignMissions.length?<div className="stack stack--tight">{campaignMissions.map((m:any)=><div key={m.id} className="row row--between mode-row mission-row">
        <span className="card-main"><span className="card-name">{m.name}<small>{m.chapter} · {m.completed?`BEST ${m.bestTime!=null?`${Math.round(m.bestTime)}s`:'—'}${m.bestScore!=null?` · ${m.bestScore} K`:''}`:m.unlocked?m.brief:'LOCKED — clear the previous mission'}</small></span></span>
        <span className="row" style={{gap:8}}><span className="mission-stars" aria-label={`${m.stars} of 3 stars`}>{'★★★'.slice(0,m.stars)}{'☆☆☆'.slice(0,3-m.stars)}</span>{m.completed&&<Btn size="sm" variant="ghost" onClick={()=>startCampaignMission?.(m.id)}>REPLAY</Btn>}</span>

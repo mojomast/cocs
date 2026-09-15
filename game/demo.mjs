@@ -287,6 +287,17 @@ export const OBJECTIVE_EVENT_KINDS = Object.freeze({
  'payload-delivered': 'PAYLOAD DELIVERED',
  'soccer-goal': 'GOAL',
  'killstreak': 'KILLSTREAK',
+ 'holdout-progress': 'HOLDOUT',
+ 'holdout-win': 'HOLDOUT WON',
+ 'uplink-capture': 'UPLINK CAPTURED',
+ 'uplink-stage': 'UPLINK ADVANCED',
+ 'uplink-win': 'UPLINK WON',
+ 'juggernaut-win': 'JUGGERNAUT WON',
+ 'elimination-win': 'TEAM ELIMINATED',
+ 'vip-deploy': 'VIP DEPLOYED',
+ 'vip-down': 'VIP DOWN',
+ 'vip-extracted': 'VIP EXTRACTED',
+ 'objective-win': 'OBJECTIVE SECURED',
 });
 
 const eventTime = event => (typeof event?.time === 'number' && Number.isFinite(event.time) ? event.time : null);

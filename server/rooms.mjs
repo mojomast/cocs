@@ -134,7 +134,14 @@ export class RoomRegistry {
   const safeName = String(name ?? '').replace(/[\u0000-\u001f\u007f-\u009f]/g, '').trim().slice(0, 32) || id;
   return this.add(new Room(id, this.random, { name: safeName, graceMs: this.graceMs, history: this.history, progression: this.progression, snapshotHz: this.snapshotHz }));
  }
- get(roomId) { return this.rooms.get(roomId) ?? null; }
+ get(roomId) {
+  if (this.rooms.has(roomId)) return this.rooms.get(roomId);
+  // Room codes are uppercase but the default room is lowercase `local`; accept a
+  // case-insensitive match so typed or linked codes always resolve.
+  const lower = String(roomId ?? '').toLowerCase();
+  for (const [id, room] of this.rooms) if (id.toLowerCase() === lower) return room;
+  return null;
+ }
  has(roomId) { return this.rooms.has(roomId); }
  list() {
   return [...this.rooms.values()].map(r => r.summary());
