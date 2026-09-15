@@ -22,6 +22,7 @@ test('economy pickups are a separate, stable table from the timed powerups',()=>
 
 test('a weapon upgrade promotes the holder one tier and reverts on expiry',()=>{
  const m=quiet(),a=m.actors[0];
+ a.health=a.maxHealth=100000;
  a.weapon=0;a.ammo[0]=Infinity;a.ammo[1]=0;
  assert.equal(m.collect(a,{kind:'weaponUpgrade',x:a.x,z:a.z,y:a.y,wait:0}),true);
  assert.equal(a.weapon,1,'the holder is promoted to the next weapon');

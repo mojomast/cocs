@@ -192,13 +192,17 @@ test('the announcer cue is opt-in, returns the cue id and respects mute and the 
  assert.equal(audio.announcerCue('not-a-cue'),null,'an unknown event has no cue');
  assert.equal(audio.announcerCue('capture').played,false,'an unknown-but-known event is still gated when off');
  assert.equal(audio.setAnnouncer(true),true);
- const played=audio.announcerCue('goal');
- assert.equal(played.cue,'goal');
- assert.equal(played.played,true);
- assert.equal(audio.lastCue,'goal');
- assert.ok(audio.voices.size>=1,'an enabled announcer spends a voice');
- audio.muted=true;
- assert.equal(audio.announcerCue('victory').played,false,'muting silences the announcer');
+  const played=audio.announcerCue('goal');
+  assert.equal(played.cue,'goal');
+  assert.equal(played.played,true);
+  assert.equal(audio.lastCue,'goal');
+  const scorePlayed=audio.announcerCue('score');
+  assert.equal(scorePlayed.cue,'score');
+  assert.equal(scorePlayed.played,true);
+  assert.equal(audio.lastCue,'score');
+  assert.ok(audio.voices.size>=1,'an enabled announcer spends a voice');
+  audio.muted=true;
+  assert.equal(audio.announcerCue('victory').played,false,'muting silences the announcer');
  audio.dispose();
 });
 
@@ -289,3 +293,81 @@ test('ambient bed mood is remembered before start and eases the running nodes',(
  audio._bed(false);
  assert.equal(audio.bed,null);
 });
+
+test('weapons 8 and 9 use sharp and rapid gunshot synthesis styles and reports',()=>{
+ const {audio}=audioFixture();
+ const shots=[];
+ audio._gunshot=(e,local,pan,vol)=>shots.push({weapon:e.weapon,local,vol});
+ for(let w=0;w<10;w++)audio.event({type:'shot',actor:7,weapon:w,time:w,from:{x:0,z:0}},player);
+ assert.equal(shots.length,10);
+ assert.equal(shots[8].weapon,8);
+ assert.equal(shots[9].weapon,9);
+});
+
+test('grenade toss, sliding friction and race audio events trigger feedback voices',()=>{
+ const {audio}=audioFixture();
+ const plays=[];
+ audio._play=(duration,pan)=>plays.push({duration,pan});
+ audio.event({type:'grenade',actor:7,pos:{x:0,z:0}},player);
+ assert.equal(plays.length,1);
+ audio.event({type:'race-coin',actor:7,coins:1,pos:{x:0,z:0}},player);
+ assert.equal(plays.length,2);
+ audio.event({type:'race-box',actor:7,item:'turbo',pos:{x:0,z:0}},player);
+ assert.equal(plays.length,3);
+ audio.event({type:'race-boost',actor:7,pos:{x:0,z:0}},player);
+ assert.equal(plays.length,4);
+ audio.event({type:'race-item',actor:7,item:'turbo',pos:{x:0,z:0}},player);
+ assert.equal(plays.length,5);
+ audio.event({type:'race-hazard-hit',actor:7,hazard:'oil',pos:{x:0,z:0}},player);
+ assert.equal(plays.length,6);
+ audio.event({type:'race-lap',actor:7,lap:2,total:3},player);
+ assert.equal(plays.length,7);
+ audio.event({type:'race-finish',actor:7,time:45},player);
+ assert.equal(plays.length,8);
+  // Sliding audio
+  const slidePlayer={...player,sliding:true,vx:6,vz:0,grounded:true,health:100};
+  audio.update(slidePlayer,[],1/60);
+  assert.equal(plays.length,9);
+  // Vehicle and soccer goal audio events
+  const clicks=[];
+  audio._click=(...args)=>clicks.push(args);
+  audio.event({type:'vehicle-destroyed',actor:7,pos:{x:0,z:0}},player);
+  assert.equal(plays.length,10);
+  audio.event({type:'soccer-goal',team:0,pos:{x:0,z:0}},player);
+  assert.equal(plays.length,11);
+  // Real soccer-goal emission without pos and with actorId
+  audio.event({type:'soccer-goal',team:0,actorId:7,scorerId:7},player);
+  assert.equal(plays.length,12);
+  audio.event({type:'vehicle-enter',actor:7},player);
+  assert.equal(clicks.length,1);
+  audio.event({type:'vehicle-exit',actor:7},player);
+  assert.equal(clicks.length,2);
+  // Vehicle destroyed recognizes driver or occupant as local
+  audio.event({type:'vehicle-destroyed',actor:99,driver:7,pos:{x:0,z:0}},player);
+  assert.equal(plays.length,13);
+  audio.event({type:'vehicle-destroyed',actor:99,driver:50,occupants:[7],pos:{x:0,z:0}},player);
+  assert.equal(plays.length,14);
+});
+
+test('reload variant 2 invokes tone method and does not throw',async()=>{
+  const {audio}=audioFixture2();
+  const tones=[];
+  audio.tone=(...args)=>tones.push(args);
+  audio.reloadVariant=1; // so next is 2
+  audio._reload(0,'start');
+  assert.equal(audio.reloadVariant,2);
+  await new Promise(r=>setTimeout(r,250));
+  assert.equal(tones.length,1);
+  assert.equal(tones[0][0],320); // heavy?180:320 -> kick is 18 >= 14 -> 320
+  assert.equal(tones[0][2],'square');
+});
+
+test('extended mode themes are defined and selectable without error',()=>{
+  const {audio}=audioFixture2();
+  for(const mode of ['team-elimination','vip-escort','holdout','uplink']){
+    assert.ok(MODE_THEMES[mode],`theme defined for ${mode}`);
+    assert.equal(audio.setModeTheme(mode),mode);
+    assert.equal(audio.mode,mode);
+  }
+});
+

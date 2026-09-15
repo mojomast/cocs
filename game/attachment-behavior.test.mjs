@@ -58,5 +58,5 @@ test('magazine attachments raise the reload ceiling and quickdraw shortens the r
   const g = rig({underbarrel: 'quickdraw-grip'}), b = g.actors[0];
   b.weapon = 3; b.ammo[3] = 10; b.shotWait = 0;
   g.startReload(b, 3);
-  assert.ok(Math.abs(b.reloadDuration - 2 * .82) < 1e-6, `quickdraw reload ${b.reloadDuration}`);
+  assert.ok(Math.abs(b.reloadDuration - 1.9 * .82) < 1e-6, `quickdraw reload ${b.reloadDuration}`);
 });

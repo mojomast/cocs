@@ -588,6 +588,12 @@ Version 2.23 shows your connection quality online:
 
 - **Latency chip.** Network matches display a colour-coded `GOOD` / `FAIR` / `POOR` chip with the current interpolation delay, graded from the same jitter and packet-loss estimators the netcode already uses (`connectionQuality` in `game/hud.mjs`). It turns amber or red before the connection becomes unplayable.
 
+Version 4.6 tunes combat and single-player:
+
+- **Weapon balance:** distinct roles and retuned TTK for all ten weapons, with DPS/TTK balance metrics.
+- **Single-player regen:** out-of-combat health recovery in campaign and horde (delay after damage/firing, reset on respawn/resupply/checkpoint).
+- **Narrative & animation scaffolding:** speaker/mission-lore data, campaign briefings, procedural weapon rig/springs/IK, material fidelity presets and richer announcer audio.
+
 Version 4.5 connects and deepens the game:
 
 - **Netcode:** snapshot delta compression + bandwidth accounting, deterministic prediction/reconciliation and interpolation; protocol v2 with a full-snapshot fallback.

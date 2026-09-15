@@ -17,8 +17,12 @@ export class WeaponFeedback{
   this.phase+=dt*10*speed;this.bob+=((player.grounded?speed:0)-this.bob)*blend;
   const lateral=(player.vx||0)*Math.cos(player.yaw||0)-(player.vz||0)*Math.sin(player.yaw||0);
   this.sway+=(Math.max(-.012,Math.min(.012,-lateral*.002))-this.sway)*blend;
+  this.idleTime=(this.idleTime||0)+dt;
+  const idle=(1-speed)*Math.sin(this.idleTime*2.2)*.0018;
+  const idleY=(1-speed)*Math.cos(this.idleTime*4.4)*.0012;
+  const lookSway=(player.punchYaw||0)*.02;
   if(reduced||!visible){this.kick=0;this.landing=0;this.bob=0;this.sway=0;return {x:0,y:0,z:0,pitch:0,roll:0};}
-  return {x:Math.sin(this.phase)*.007*this.bob+this.sway,y:Math.cos(this.phase*2)*.006*this.bob-this.landing,z:this.kick*profile[0],pitch:this.kick*profile[1],roll:this.sway*.7};
+  return {x:Math.sin(this.phase)*.007*this.bob+this.sway+idle+lookSway,y:Math.cos(this.phase*2)*.006*this.bob-this.landing+idleY,z:this.kick*profile[0],pitch:this.kick*profile[1]+(player.punchPitch||0)*.015,roll:(this.sway+lookSway)*.7};
  }
 }
 
@@ -88,9 +92,9 @@ export class WeatherFX{
  }
 }
 
-const REPORTS=[[320,.075,'square',65],[110,.2,'sawtooth',28],[1500,.16,'sine',180],[180,.13,'triangle',35],[620,.09,'triangle',250],[210,.18,'sawtooth',45],[480,.1,'square',1100],[95,.22,'triangle',30]];
-// Per-weapon synthesis family: rifle snap, heavy thump, electric zap, wide burst.
-const GUN_STYLES=['rifle','heavy','zap','burst','plasma','heavy','zap','burst'];
+const REPORTS=[[320,.075,'square',65],[110,.2,'sawtooth',28],[1500,.16,'sine',180],[180,.13,'triangle',35],[620,.09,'triangle',250],[210,.18,'sawtooth',45],[480,.1,'square',1100],[95,.22,'triangle',30],[700,.09,'square',420],[540,.06,'square',180]];
+// Per-weapon synthesis family: rifle snap, heavy thump, electric zap, wide burst, sharp crack, rapid chatter.
+const GUN_STYLES=['rifle','heavy','zap','burst','plasma','heavy','zap','burst','sharp','rapid'];
 // Optional announcer motifs keyed by mode event. Two-note rising/falling pairs
 // keep the callouts distinct without a speech asset.
 const ANNOUNCE_CUES=Object.freeze({
@@ -102,6 +106,7 @@ const ANNOUNCE_CUES=Object.freeze({
  multikill:Object.freeze({id:'multikill',freq:780,end:1560,length:.3}),
  victory:Object.freeze({id:'victory',freq:660,end:1320,length:.5}),
  defeat:Object.freeze({id:'defeat',freq:520,end:300,length:.5}),
+ score:Object.freeze({id:'score',freq:480,end:720,length:.25}),
 });
 const cl=(n,a,b)=>Math.max(a,Math.min(b,n));
 
@@ -127,6 +132,10 @@ export const MODE_THEMES=Object.freeze({
  horde:Object.freeze({root:46,scale:Object.freeze([0,1,5,8])}),
  campaign:Object.freeze({root:54,scale:Object.freeze([0,3,7,10])}),
  juggernaut:Object.freeze({root:49,scale:Object.freeze([0,3,6,10])}),
+ 'team-elimination':Object.freeze({root:45,scale:Object.freeze([0,1,6,8])}),
+ 'vip-escort':Object.freeze({root:56,scale:Object.freeze([0,4,7,9])}),
+ holdout:Object.freeze({root:55,scale:Object.freeze([0,3,5,7])}),
+ uplink:Object.freeze({root:63,scale:Object.freeze([0,4,7,11])}),
 });
 // Victory/defeat stings: a short arpeggio built from the active mode scale.
 const STING_CUES=Object.freeze({
@@ -238,7 +247,7 @@ export class SynthAudio{
   this.lastCue=cue.id;return {cue:cue.id,played:true};
  }
   // Spectator audio follows the watched actor as well as the local player.
- _isLocal(e,player){if(!e||!player)return false;if(e.actor===player.id)return true;return player.spectator===true&&player.spectatorTarget!=null&&e.actor===player.spectatorTarget;}
+  _isLocal(e,player){if(!e||!player)return false;if(e.actor===player.id||e.actorId===player.id||e.driver===player.id||Boolean(e.occupants?.includes(player.id)))return true;return Boolean(player.spectator===true&&player.spectatorTarget!=null&&(e.actor===player.spectatorTarget||e.actorId===player.spectatorTarget||e.driver===player.spectatorTarget||e.occupants?.includes(player.spectatorTarget)));}
  _isScorer(source,player){if(source==null||!player)return false;return source===player.id||(player.spectator===true&&player.spectatorTarget!=null&&source===player.spectatorTarget);}
  // Confirmation chirp layered into the death voice: a short rising pair so a
  // scoring player hears the kill without spending a second voice slot.
@@ -252,7 +261,7 @@ export class SynthAudio{
   _panFor(pos,player){if(!pos||!player||!Number.isFinite(pos.x)||!Number.isFinite(player.x))return 0;const dx=pos.x-(player.x||0),dz=pos.z-(player.z||0),dist=Math.hypot(dx,dz)||1,rx=Math.cos(player.yaw||0),rz=-Math.sin(player.yaw||0);return cl((dx*rx+dz*rz)/dist*.9,-1,1);}
   _falloff(pos,player,max=36){if(!pos||!Number.isFinite(pos.x))return 0;if(!player||!Number.isFinite(player.x))return 1;return Math.max(0,1-Math.hypot(pos.x-(player.x||0),pos.z-(player.z||0))/max);}
   _click(pan,vol=1,gain=.06,freq=1600){this._play(.09,pan,(t,out,nodes)=>{this._noise(t,out,nodes,{duration:.03,gain:gain*vol,type:'highpass',freq:900,sweep:freq});this._tone(t,out,nodes,{freq:freq*.8,duration:.03,type:'square',gain:.02*vol,end:200});});}
-  _gunshot(e,local,pan,vol){const feel=WEAPONS[e.weapon]?.feel||{},s=e.type==='launch'?feel.launch:feel.shot,style=GUN_STYLES[e.weapon]||'rifle',[freq,duration,type,gain]=s||REPORTS[e.weapon]||REPORTS[0],d=cl((duration||.08)*1.5,.06,.3);this._play(d+.05,pan,(t,out,nodes)=>{this._noise(t,out,nodes,{duration:.05,gain:.55*vol,type:style==='heavy'?'lowpass':'highpass',freq:style==='heavy'?Math.max(80,(freq||300)*.9):(freq||320)*1.5,sweep:style==='heavy'?160:(freq||320)*.6});this._tone(t,out,nodes,{freq:freq||320,duration:Math.min(.14,d*.8),type:type||'square',gain:Math.min(.3,(gain||.05)*vol*3.2),end:style==='zap'?(freq||320)*2.2:Math.max(40,(freq||320)*.55)});this._tone(t,out,nodes,{freq:Math.max(60,(freq||320)*.45),duration:Math.min(.2,d),type:'sine',gain:.16*vol,end:50});if(style==='burst')this._noise(t,out,nodes,{duration:.12,gain:.3*vol,type:'lowpass',freq:1200,sweep:500,q:.6});if(style==='plasma')this._tone(t,out,nodes,{freq:260,duration:.16,type:'triangle',gain:.14*vol,end:1200});});}
+   _gunshot(e,local,pan,vol){const feel=WEAPONS[e.weapon]?.feel||{},s=e.type==='launch'?feel.launch:feel.shot,style=GUN_STYLES[e.weapon]||'rifle',[freq,duration,type,gain]=s||REPORTS[e.weapon]||REPORTS[0],d=cl((duration||.08)*1.5,.06,.3);this._play(d+.05,pan,(t,out,nodes)=>{this._noise(t,out,nodes,{duration:.05,gain:.55*vol,type:style==='heavy'?'lowpass':'highpass',freq:style==='heavy'?Math.max(80,(freq||300)*.9):(freq||320)*1.5,sweep:style==='heavy'?160:(freq||320)*.6});this._tone(t,out,nodes,{freq:freq||320,duration:Math.min(.14,d*.8),type:type||'square',gain:Math.min(.3,(gain||.05)*vol*3.2),end:style==='zap'?(freq||320)*2.2:Math.max(40,(freq||320)*.55)});this._tone(t,out,nodes,{freq:Math.max(60,(freq||320)*.45),duration:Math.min(.2,d),type:'sine',gain:.16*vol,end:50});if(style==='burst')this._noise(t,out,nodes,{duration:.12,gain:.3*vol,type:'lowpass',freq:1200,sweep:500,q:.6});if(style==='plasma')this._tone(t,out,nodes,{freq:260,duration:.16,type:'triangle',gain:.14*vol,end:1200});if(style==='sharp')this._noise(t,out,nodes,{duration:.04,gain:.45*vol,type:'bandpass',freq:2200,sweep:800,q:1.8});if(style==='rapid')this._noise(t,out,nodes,{duration:.03,gain:.35*vol,type:'highpass',freq:1400,sweep:600});});}
   // Mounted chaingun: a heavier, layered thump so it reads differently from the
   // pulse rifle. Slight per-shot pitch wobble gives the spinning-barrel texture.
   _chaingun(pan,vol=1){if(!this.ctx)return;const now=this.ctx.currentTime;if(now-(this.lastChain||0)<.03)return;this.lastChain=now;const pitch=.92+Math.random()*.18;this._play(.11,pan,(t,out,nodes)=>{this._noise(t,out,nodes,{duration:.05,gain:.62*vol,type:'lowpass',freq:1500*pitch,sweep:320,q:.85,attack:.001});this._noise(t,out,nodes,{duration:.028,gain:.34*vol,type:'highpass',freq:2600*pitch,sweep:5600,q:.6,attack:.001});this._tone(t,out,nodes,{freq:150*pitch,duration:.06,type:'square',gain:.22*vol,end:58});this._tone(t,out,nodes,{freq:66*pitch,duration:.11,type:'sine',gain:.26*vol,end:34});});}
@@ -264,7 +273,7 @@ export class SynthAudio{
   this.reloadVariant=(this.reloadVariant+1)%3;
   const kick=WEAPONS[weapon]?.feel?.kick?.[2]??16,heavy=kick<14,delay=heavy?260:200;
   this._click(0,1,.06,heavy?950:1200);
-  setTimeout(()=>{if(this.ctx&&!this.muted){this._click(0,1,.05,heavy?1500:1750);if(this.reloadVariant===2)this._tone(heavy?180:320,.05,'square',.02,heavy?120:220);}},delay);
+  setTimeout(()=>{if(this.ctx&&!this.muted){this._click(0,1,.05,heavy?1500:1750);if(this.reloadVariant===2)this.tone(heavy?180:320,.05,'square',.02,heavy?120:220);}},delay);
  }
  // Melee whoosh plus an impact crack when it connects.
  _melee(weapon,hit){
@@ -302,6 +311,7 @@ export class SynthAudio{
  event(e,player){if(!this.ctx||!e||!player)return;const local=this._isLocal(e,player),pos=e.from??e.pos,pan=this._panFor(pos,player);
   if(e.type==='shot'||e.type==='vehicle-shot'||e.type==='launch'){const same=this.lastReport&&e.time!=null&&this.lastReport.time===e.time&&this.lastReport.actor===e.actor&&this.lastReport.weapon===e.weapon&&this.lastReport.type===e.type;this.lastReport=e;if(same)return;const vehicle=e.type==='vehicle-shot',vol=local?1:this._falloff(pos,player,vehicle?42:34)*(vehicle?.95:.9);if(vol>.01){if(vehicle)this._chaingun(pan,vol);else this._gunshot(e,local,pan,vol);}return;}
   if(e.type==='dryfire'){if(local)this._click(0,1,.08,1500);return;}
+  if(e.type==='grenade'){const vol=local?1:this._falloff(pos,player,24);if(vol>.02)this._play(.18,pan,(t,out,nodes)=>{this._click(pan,vol,.06,1400);this._noise(t+.02,out,nodes,{duration:.12,gain:.22*vol,type:'bandpass',freq:800,sweep:300,q:.8});this._tone(t+.03,out,nodes,{freq:280,duration:.1,type:'triangle',gain:.08*vol,end:140});});return;}
   if(e.type==='explosion'){const vol=this._falloff(pos,player,42);if(vol>.02)this._play(.7,pan,(t,out,nodes)=>{this._noise(t,out,nodes,{duration:.5,gain:.8*vol,type:'lowpass',freq:900,sweep:60,q:.8});this._tone(t,out,nodes,{freq:120,duration:.5,type:'sine',gain:.35*vol,end:34});this._tone(t,out,nodes,{freq:60,duration:.7,type:'sine',gain:.3*vol,end:28});});return;}
   if(e.type==='damage'){this.lastDamage=e;if(this._isLocal(e,player)){this._play(.18,0,(t,out,nodes)=>{this._noise(t,out,nodes,{duration:.14,gain:.4,type:'lowpass',freq:700,sweep:200,q:.7});this._tone(t,out,nodes,{freq:150,duration:.14,type:'triangle',gain:.18,end:60});});}else if(this._isScorer(e.source,player)&&e.amount>0){const stamp=this.ctx.currentTime;if(stamp-this.lastHit>=.045){this.lastHit=stamp;this._play(.12,0,(t,out,nodes)=>{this._noise(t,out,nodes,{duration:.05,gain:.26,type:'highpass',freq:1600,sweep:2600});this._tone(t,out,nodes,{freq:1250,duration:.07,type:'sine',gain:.11,end:1800});});}}return;}
   if(e.type==='death'){const vol=local?1:this._falloff(pos,player,32);if(vol>.02)this._play(.55,pan,(t,out,nodes)=>{this._noise(t,out,nodes,{duration:.4,gain:.35*vol,type:'lowpass',freq:1200,sweep:120,q:.7});this._tone(t,out,nodes,{freq:local?220:180,duration:.45,type:'sawtooth',gain:.12*vol,end:40});if(this._isScorer(e.source,player)&&e.source!==e.actor&&e.actor!==player.id)this._killConfirm(t,out,nodes,vol);});return;}
@@ -309,13 +319,38 @@ export class SynthAudio{
   if(e.type==='melee'){if(e.actor===player.id)this._melee(e.weapon??player.weapon,e.hit!=null);return;}
   if(e.type==='weapon-switch'){if(e.actor===player.id)this._click(0,1,.05,1900);return;}
   if(e.type==='vehicle-splatter'){const vol=local?1:this._falloff(pos,player,26);if(vol>.02)this._play(.2,pan,(t,out,nodes)=>{this._noise(t,out,nodes,{duration:.16,gain:.5*vol,type:'lowpass',freq:600,sweep:180,q:.8});this._tone(t,out,nodes,{freq:95,duration:.16,type:'sine',gain:.2*vol,end:40});});return;}
+  if(e.type==='vehicle-destroyed'){const vol=local?1:this._falloff(pos,player,42);if(vol>.02)this._play(.8,pan,(t,out,nodes)=>{this._noise(t,out,nodes,{duration:.6,gain:.8*vol,type:'lowpass',freq:750,sweep:50,q:.85});this._tone(t,out,nodes,{freq:85,duration:.55,type:'sawtooth',gain:.28*vol,end:25});this._tone(t,out,nodes,{freq:45,duration:.75,type:'sine',gain:.3*vol,end:20});this._noise(t+.06,out,nodes,{duration:.35,gain:.35*vol,type:'bandpass',freq:1400,sweep:300,q:.7});});return;}
+  if(e.type==='vehicle-enter'){if(local)this._click(0,1,.08,800);return;}
+  if(e.type==='vehicle-exit'){if(local)this._click(0,1,.07,700);return;}
+  if(e.type==='soccer-goal'){const vol=local?1:(pos?Math.max(.35,this._falloff(pos,player,60)):.85);if(vol>.05){this._play(.65,pan,(t,out,nodes)=>{this._tone(t,out,nodes,{freq:220,duration:.6,type:'sawtooth',gain:.16*vol,end:220});this._tone(t,out,nodes,{freq:330,duration:.6,type:'triangle',gain:.14*vol,end:330});this._noise(t,out,nodes,{duration:.45,gain:.25*vol,type:'bandpass',freq:850,sweep:420,q:.8});});}return;}
+  if(e.type==='race-coin'){if(local||this._falloff(pos,player,20)>.1){this._play(.12,pan,(t,out,nodes)=>{this._tone(t,out,nodes,{freq:988,duration:.08,type:'sine',gain:.08,end:1318});this._tone(t+.03,out,nodes,{freq:1318,duration:.09,type:'triangle',gain:.06,end:1760});});}return;}
+  if(e.type==='race-box'){const vol=local?1:this._falloff(pos,player,24);if(vol>.05){this._play(.25,pan,(t,out,nodes)=>{this._tone(t,out,nodes,{freq:520,duration:.12,type:'sine',gain:.08*vol,end:780});this._tone(t+.06,out,nodes,{freq:780,duration:.15,type:'triangle',gain:.07*vol,end:1175});});}return;}
+  if(e.type==='race-boost'){const vol=local?1:this._falloff(pos,player,28);if(vol>.05){this._play(.35,pan,(t,out,nodes)=>{this._noise(t,out,nodes,{duration:.3,gain:.45*vol,type:'lowpass',freq:800,sweep:1800,q:.7});this._tone(t,out,nodes,{freq:180,duration:.25,type:'sawtooth',gain:.15*vol,end:420});});}return;}
+  if(e.type==='race-item'){const vol=local?1:this._falloff(pos,player,28);if(vol>.05){this._play(.25,pan,(t,out,nodes)=>{if(e.item==='turbo'||e.item==='star'){this._noise(t,out,nodes,{duration:.22,gain:.4*vol,type:'bandpass',freq:1200,sweep:2400,q:.9});this._tone(t,out,nodes,{freq:240,duration:.2,type:'sawtooth',gain:.14*vol,end:580});}else if(e.item==='shield'){this._tone(t,out,nodes,{freq:440,duration:.24,type:'sine',gain:.12*vol,end:660});this._tone(t+.05,out,nodes,{freq:660,duration:.2,type:'triangle',gain:.08*vol,end:880});}else if(e.item==='pulse'||e.item==='triple'||e.item==='bolt'){this._noise(t,out,nodes,{duration:.15,gain:.3*vol,type:'highpass',freq:1800,sweep:3200});this._tone(t,out,nodes,{freq:720,duration:.18,type:'square',gain:.1*vol,end:1440});}else{this._noise(t,out,nodes,{duration:.18,gain:.35*vol,type:'lowpass',freq:600,sweep:120,q:.8});this._tone(t,out,nodes,{freq:140,duration:.15,type:'triangle',gain:.12*vol,end:50});}});}return;}
+  if(e.type==='race-hazard-hit'){const vol=local?1:this._falloff(pos,player,26);if(vol>.05){this._play(.32,pan,(t,out,nodes)=>{this._noise(t,out,nodes,{duration:.28,gain:.4*vol,type:'bandpass',freq:1400,sweep:400,q:.6});this._tone(t,out,nodes,{freq:340,duration:.25,type:'sawtooth',gain:.15*vol,end:80});});}return;}
+  if(e.type==='race-lap'){if(local){this._play(.4,0,(t,out,nodes)=>{this._tone(t,out,nodes,{freq:523,duration:.18,type:'triangle',gain:.09,end:659});this._tone(t+.1,out,nodes,{freq:659,duration:.22,type:'triangle',gain:.09,end:784});this._tone(t+.2,out,nodes,{freq:1046,duration:.25,type:'sine',gain:.08,end:1046});});}return;}
+  if(e.type==='race-finish'){if(local){this._play(.6,0,(t,out,nodes)=>{this._tone(t,out,nodes,{freq:440,duration:.2,type:'triangle',gain:.1,end:554});this._tone(t+.12,out,nodes,{freq:554,duration:.2,type:'triangle',gain:.1,end:659});this._tone(t+.24,out,nodes,{freq:880,duration:.35,type:'sine',gain:.12,end:880});});}return;}
   if(e.type==='pickup'||e.type==='powerup'||e.type==='power'||e.type==='spawn'||e.type.startsWith('flag')||e.type==='capture'||e.type.startsWith('zone')){if(!local&&e.type!=='capture'&&e.type!=='flag-pickup'&&e.type!=='flag-drop'&&e.type!=='flag-return')return;const pair=e.type==='pickup'?[520,780]:e.type==='powerup'?[440,880]:e.type==='spawn'?[300,300]:[300,660];this._play(.34,pan,(t,out,nodes)=>{this._tone(t,out,nodes,{freq:pair[0],duration:.2,type:'sine',gain:.08,end:pair[1]});this._tone(t+.06,out,nodes,{freq:pair[1]*1.5,duration:.18,type:'triangle',gain:.05,end:pair[1]});});return;}
  }
   update(player,vehicles=[],dt=0){if(!this.ctx||!player)return;if(this.muted){this._engine(0,false);this._bed(false);return;}if(!this.bed&&this.ambientBed!==false)this._bed(true);
   if(player.grounded&&this.wasGrounded===false&&player.vehicleId==null){const impact=cl(Math.abs(this.lastVy||0)/13,0,1);if(impact>.12)this._landing(impact,player.weapon);}
   this.wasGrounded=player.grounded;this.lastVy=player.vy||0;
-  const speed=Math.hypot(player.vx||0,player.vz||0),walking=player.health>0&&player.vehicleId==null&&player.grounded===true&&speed>1.4;
-  if(walking){this.footPhase=(this.footPhase||0)+dt*speed*.62;if(this.footPhase>=1){this.footPhase-=1;this._footstep(speed,player.weapon);}}else this.footPhase=0;
+  const speed=Math.hypot(player.vx||0,player.vz||0);
+  if(player.health>0&&player.vehicleId==null&&player.grounded===true){
+    if(player.sliding&&speed>2){
+      if(!this.wasSliding){
+        this.footPhase=0;
+        this._play(.14,0,(t,out,nodes)=>{this._noise(t,out,nodes,{duration:.12,gain:.16*Math.min(1,speed/7),type:'bandpass',freq:950,sweep:450,q:.7});});
+      }else{
+        this.footPhase=(this.footPhase||0)+dt*8;
+        if(this.footPhase>=1){this.footPhase-=1;this._play(.14,0,(t,out,nodes)=>{this._noise(t,out,nodes,{duration:.12,gain:.16*Math.min(1,speed/7),type:'bandpass',freq:950,sweep:450,q:.7});});}
+      }
+    }else if(speed>1.4){
+      this.footPhase=(this.footPhase||0)+dt*speed*.62;
+      if(this.footPhase>=1){this.footPhase-=1;this._footstep(speed,player.weapon);}
+    }else this.footPhase=0;
+  }else this.footPhase=0;
+  this.wasSliding=Boolean(player.sliding&&player.grounded&&speed>2&&player.health>0&&player.vehicleId==null);
   const vehicle=(vehicles||[]).find(v=>v.id===player.vehicleId||v.driver===player.id),vx=vehicle?(vehicle.vx??vehicle.velocity?.x??0):0,vz=vehicle?(vehicle.vz??vehicle.velocity?.z??0):0;
   this._engine(vehicle?Math.hypot(vx,vz):0,Boolean(vehicle));}
  _engine(speed,active){if(!this.ctx)return;if(active&&!this.muted){if(!this.engine){const osc=this.ctx.createOscillator(),sub=this.ctx.createOscillator(),f=this.ctx.createBiquadFilter(),g=this.ctx.createGain();osc.type='sawtooth';sub.type='triangle';f.type='lowpass';f.frequency.value=700;g.gain.value=.0001;osc.connect(f);sub.connect(f);f.connect(g);g.connect(this.master);osc.start();sub.start();this.engine={osc,sub,f,g};}const s=cl(speed/20,0,1),t=this.ctx.currentTime;this.engine.osc.frequency.setTargetAtTime(55+s*120,t,.1);this.engine.sub.frequency.setTargetAtTime(28+s*40,t,.1);this.engine.g.gain.setTargetAtTime(.022+s*.05,t,.12);this.engine.f.frequency.setTargetAtTime(500+s*1200,t,.15);}else if(this.engine){const {osc,sub,g}=this.engine,t=this.ctx.currentTime;g.gain.setTargetAtTime(.0001,t,.08);this.engine=null;setTimeout(()=>{try{osc.stop();sub.stop();}catch{}},300);}}

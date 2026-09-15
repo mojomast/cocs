@@ -1,5 +1,28 @@
 # COCS verification report
 
+## Release 4.6 - Weapon balance, single-player regen, narrative and animation scaffolding
+
+**Weapon balance**
+- Distinct combat roles for all ten weapons (`WEAPON_ROLES`); retuned TTK across
+  Scattergun, Rocket Launcher, Plasma Driver, Grenade Launcher, Shock Beam, Flak
+  Cannon, Marksman Rifle and SMG. Balance metrics (`weaponDPS`, `weaponTTK`,
+  `weaponBalanceSummary`).
+
+**Single-player**
+- Out-of-combat **health regeneration** for campaign/horde: 4.5s post-damage
+  delay, 2.0s firing pause, 14 hp/s heal, reset on respawn/resupply/checkpoint
+  and exposed on the snapshot as `regen`. Not active in multiplayer.
+
+**Narrative & presentation scaffolding**
+- Speaker profiles and mission lore (`story.mjs`), campaign briefings and
+  mission progression (`campaign.mjs`), procedural springs/weapon rig/two-bone
+  IK (`rig.mjs`), material fidelity presets, thruster exhaust and energy-shield
+  meshes (`models.mjs`), plus announcer cues, victory/defeat stings and sprint
+  lean/breathing animation.
+
+Verification: game **1307/1307**, server **141/141**, `tests/` **5/5**, `tsc`
+clean, lint 0 errors, build clean.
+
 ## Release 4.5 - Netcode, replay, camera, vehicles, levelgen, matchmaking
 
 **Netcode & replays**

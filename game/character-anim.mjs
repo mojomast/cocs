@@ -120,10 +120,14 @@ export function characterPose(state = {}) {
     pose.armL.elbowX = -0.3 - Math.max(0, swing) * 0.35 * speed;
     pose.armR.elbowX = -0.3 - Math.max(0, -swing) * 0.35 * speed;
     pose.rootY = -bob * 0.045 * speed + (1 - speed) * Math.sin(time * 1.6) * 0.008;
-    pose.torso.x = 0.05 + 0.16 * speed + forward * 0.05;
+    const sprintLean = speed > 0.6 ? (speed - 0.6) * 0.1 : 0;
+    pose.torso.x = 0.05 + 0.16 * speed + forward * 0.05 + sprintLean;
     pose.torso.z = -strafe * 0.12 * (0.4 + speed);
     pose.hips.z = strafe * 0.05;
     pose.hips.y = swing * 0.08 * speed;
+    const idleBreath = (1 - speed) * Math.sin(time * 2.0) * 0.012;
+    pose.chest.x += idleBreath;
+    pose.head.x += idleBreath * 0.4;
   }
 
   // Crouch lowers the whole body and folds the knees.

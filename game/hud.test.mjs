@@ -519,8 +519,23 @@ test('single-player economy, checkpoint and boss events have readable captions',
   assert.equal(audioCaption({type: 'enemy-detonate'}).text, 'Sapper detonation');
   assert.equal(audioCaption({type: 'singleplayer-checkpoint'}).text, 'Checkpoint saved');
   assert.equal(audioCaption({type: 'boss-phase'}).text, 'Boss phase');
+  assert.equal(audioCaption({type: 'vehicle-enter'}).text, 'Mounted vehicle');
+  assert.equal(audioCaption({type: 'vehicle-exit'}).text, 'Dismounted vehicle');
+  assert.equal(audioCaption({type: 'vehicle-splatter'}).text, 'Vehicle splatter');
+  assert.equal(audioCaption({type: 'assault-sector-captured'}).text, 'Sector captured');
+  assert.equal(audioCaption({type: 'assault-sector-lost'}).text, 'Sector lost');
   assert.equal(audioCaption({type: 'unknown-event'}), null);
   assert.equal(audioCaption(null), null);
+});
+
+test('race events have readable captions', () => {
+  assert.equal(audioCaption({type: 'race-coin'}).text, 'Coin collected');
+  assert.equal(audioCaption({type: 'race-box'}).text, 'Item box');
+  assert.equal(audioCaption({type: 'race-boost'}).text, 'Speed boost');
+  assert.equal(audioCaption({type: 'race-item'}).text, 'Item deployed');
+  assert.equal(audioCaption({type: 'race-hazard-hit'}).text, 'Hazard hit');
+  assert.equal(audioCaption({type: 'race-lap'}).text, 'Lap complete');
+  assert.equal(audioCaption({type: 'race-finish'}).text, 'Race finish');
 });
 
 test('scoreStats forwards juggernaut points and elimination tickets', () => {

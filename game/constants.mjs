@@ -1,0 +1,18 @@
+import { RULES, WEAPONS, POWERUPS, CHARACTERS, HARNESSES } from './data.mjs';
+
+export { RULES, WEAPONS, POWERUPS, CHARACTERS, HARNESSES };
+
+export const SINGLEPLAYER_REGEN = Object.freeze({
+  DELAY_SECONDS: 4.5,
+  COMBAT_COOLDOWN: 2.0,
+  HEAL_RATE: 14, // HP per second
+});
+
+export const COMBAT_CONSTANTS = Object.freeze({
+  DEFAULT_HEALTH: 100,
+  DEFAULT_ARMOR: 0,
+  MAX_ARMOR: 100,
+  ARMOR_ABSORPTION: 0.6,
+  HEADSHOT_MULTIPLIER: 1.5,
+  FALLOFF_MIN: 0.4,
+});

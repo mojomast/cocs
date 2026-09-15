@@ -365,6 +365,9 @@ export function resupplyHorde(match,state){
  if(!player||player.health<=0)return false;
  player.health=player.maxHealth;
  player.armor=Math.max(player.armor||0,100);
+ state.lastPlayerHealth=player.maxHealth;
+ state.regenDelay=0;
+ state.regenActive=false;
  for(let index=0;index<player.ammo.length;index++){
   const amount=player.ammo[index];
   if(index!==player.weapon&&amount!==Infinity&&!(amount>0))continue;
@@ -731,6 +734,9 @@ export function resumeSinglePlayer(match,stepOrCheckpoint){
  const step=Math.max(0,Math.min(state.steps.length,Math.round(Number(raw)||0)));
  state.stepIndex=step;state.stepElapsed=0;state.holdProgress=0;state.entered={};state.defendProgress=0;
  state.checkpoint=step;
+ state.lastPlayerHealth=match.actors[0]?.health??100;
+ state.regenDelay=0;
+ state.regenActive=false;
  const player=match.actors[0];
  if(player&&state.mission?.start){placeAt(match,player,state.mission.start.x,state.mission.start.z);if(Number.isFinite(state.mission.start.yaw)){player.yaw=state.mission.start.yaw;player.bodyYaw=state.mission.start.yaw;}}
  state.waypoint=null;match.waypoint=null;
@@ -747,8 +753,49 @@ export function applyCampaignCheckpoint(match,checkpoint){
  return resumeSinglePlayer(match,checkpoint);
 }
 
+export const REGEN_DELAY = 4.5;
+export const REGEN_RATE = 14;
+
+export function updateHealthRegen(match, state, dt) {
+ const player = match.actors[0];
+ if (!player || player.health <= 0) {
+  state.regenDelay = REGEN_DELAY;
+  state.regenActive = false;
+  return;
+ }
+ const maxHealth = player.maxHealth ?? 100;
+ if (!Number.isFinite(state.lastPlayerHealth)) {
+  state.lastPlayerHealth = player.health;
+  state.regenDelay = 0;
+  state.regenActive = false;
+  return;
+ }
+ if (player.health < state.lastPlayerHealth - 1e-4) {
+  state.regenDelay = REGEN_DELAY;
+  state.regenActive = false;
+ } else if ((player.shotWait || 0) > 0) {
+  state.regenDelay = Math.max(state.regenDelay || 0, 2.0);
+  state.regenActive = false;
+ }
+
+ if (state.regenDelay > 0) {
+  state.regenDelay = Math.max(0, state.regenDelay - dt);
+  state.regenActive = false;
+ } else if (player.health < maxHealth) {
+  const heal = Math.min(maxHealth - player.health, REGEN_RATE * dt);
+  player.health = Math.min(maxHealth, player.health + heal);
+  state.regenActive = true;
+ } else {
+  state.regenActive = false;
+ }
+ state.lastPlayerHealth = player.health;
+}
+
 function onPlayerDeath(match,state){
  state.lives=Math.max(0,(state.lives??0)-1);
+ state.lastPlayerHealth=match.actors[0]?.maxHealth??100;
+ state.regenDelay=0;
+ state.regenActive=false;
  match.emit('singleplayer-life',{lives:state.lives});
  if(state.lives<=0)lose(match,state,state.kind==='campaign'&&state.mission?`${state.mission.name} failed.`:'Out of lives.');
 }
@@ -762,6 +809,7 @@ export function updateSinglePlayer(match,dt){
  if(player.deaths>(state.deaths||0)){state.deaths=player.deaths;onPlayerDeath(match,state);if(match.over)return;}
  for(const actor of match.actors)if(actor.isNpc&&actor.health<=0&&(actor.dead??0)<NPC_DEAD)actor.dead=NPC_DEAD;
  updateEnemyRoles(match,state,dt);
+ updateHealthRegen(match,state,dt);
  if(match.over)return;
  if(match.time+dt>=match.config.timeLimit){lose(match,state,'The clock ran out.');return;}
  if(state.kind==='horde')stepHorde(match,state,dt);else stepCampaign(match,state,dt);
@@ -781,5 +829,6 @@ export function singlePlayerSnapshot(state,match){
  const upgrades=pending?pending.choices.map(hordeUpgradeInfo).filter(Boolean):[];
  const bossPhase=state.bossPhase||0,bossPhaseTotal=Math.max(1,state.bossPhaseMax||1);
  const checkpoint=Number.isFinite(state.checkpoint)?{step:Math.max(0,Math.round(state.checkpoint)),missionId:state.mission?.id??null}:null;
- return {kind:state.kind,phase:state.phase,elapsed:state.elapsed,wave:state.wave||0,waveTarget:state.waveTarget||0,endless:state.endless===true,score:state.score||0,bestWave:state.bestWave||0,summary:state.summary?{...state.summary}:null,waveTimer:state.timer||0,waveModifier:state.waveModifier?{...state.waveModifier}:null,enemiesAlive,enemiesTotal:state.enemies.length,kills:player?.frags||0,deaths:player?.deaths||0,lives:state.lives,objective:state.objective||'',message:state.message&&match.time-state.message.at<5?state.message.text:'',story,bark,bossPhase,bossPhaseName:state.bossPhaseName||null,bossPhaseTotal,waypoint:state.waypoint?{id:state.waypoint.id,x:state.waypoint.x,z:state.waypoint.z,label:state.waypoint.label}:null,winner:state.winner??null,mission:state.mission?{id:state.mission.id,name:state.mission.name,tag:state.mission.tag,chapter:state.mission.chapter||'',index:missionIndex,total:CAMPAIGN_MISSIONS.length,brief:state.mission.brief,intro:state.mission.intro||null,outro:state.mission.outro||null}:null,steps:state.steps.map((item,index)=>({id:item.id,label:item.label||'',text:item.text||'',detail:item.detail||'',active:index===state.stepIndex,done:index<state.stepIndex})),hold,boss:boss?{name:boss.name,hp:Math.max(0,Math.round(boss.health)),maxHp:boss.maxHealth,alive:boss.health>0,phase:bossPhase,phaseName:state.bossPhaseName||null,phases:bossPhaseTotal}:null,checkpoint,upgrades,upgradeWave:pending?pending.wave:null,upgradeSelected:state.upgradeSelected?.id??null,upgradeCount:(state.upgrades||[]).length,defend:state.win?.kind==='defend'?{seconds:state.win.seconds??30,progress:Math.min(state.win.seconds??30,Math.round(state.defendProgress||0))}:null};
+ const regen={active:state.regenActive===true,delay:Number(state.regenDelay||0),rate:REGEN_RATE};
+ return {kind:state.kind,phase:state.phase,elapsed:state.elapsed,wave:state.wave||0,waveTarget:state.waveTarget||0,endless:state.endless===true,score:state.score||0,bestWave:state.bestWave||0,summary:state.summary?{...state.summary}:null,waveTimer:state.timer||0,waveModifier:state.waveModifier?{...state.waveModifier}:null,enemiesAlive,enemiesTotal:state.enemies.length,kills:player?.frags||0,deaths:player?.deaths||0,lives:state.lives,objective:state.objective||'',message:state.message&&match.time-state.message.at<5?state.message.text:'',story,bark,bossPhase,bossPhaseName:state.bossPhaseName||null,bossPhaseTotal,waypoint:state.waypoint?{id:state.waypoint.id,x:state.waypoint.x,z:state.waypoint.z,label:state.waypoint.label}:null,winner:state.winner??null,mission:state.mission?{id:state.mission.id,name:state.mission.name,tag:state.mission.tag,chapter:state.mission.chapter||'',index:missionIndex,total:CAMPAIGN_MISSIONS.length,brief:state.mission.brief,intro:state.mission.intro||null,outro:state.mission.outro||null}:null,steps:state.steps.map((item,index)=>({id:item.id,label:item.label||'',text:item.text||'',detail:item.detail||'',active:index===state.stepIndex,done:index<state.stepIndex})),hold,boss:boss?{name:boss.name,hp:Math.max(0,Math.round(boss.health)),maxHp:boss.maxHealth,alive:boss.health>0,phase:bossPhase,phaseName:state.bossPhaseName||null,phases:bossPhaseTotal}:null,checkpoint,upgrades,upgradeWave:pending?pending.wave:null,upgradeSelected:state.upgradeSelected?.id??null,upgradeCount:(state.upgrades||[]).length,defend:state.win?.kind==='defend'?{seconds:state.win.seconds??30,progress:Math.min(state.win.seconds??30,Math.round(state.defendProgress||0))}:null,regen};
 }

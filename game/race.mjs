@@ -242,6 +242,7 @@ function botControls(state, racer, vehicle) {
 function useItem(match, racer) {
   const state=match.race, vehicle=match.vehicleById(racer.vehicleId), item=racer.item;
   if (!item) return;
+  match.emit?.('race-item', {actor: racer.actorId, item, pos: vehicle?.position ? {...vehicle.position} : null});
   racer.item=null;
   if (item==='turbo') racer.effects.turbo=2;
   if (item==='shield') {racer.effects.shield=5; racer.effects.slow=0;}
@@ -303,17 +304,28 @@ export function stepRace(match, dt, inputs={}) {
         next=>match.vehicleCollision(next,vehicle),()=>0);
       if (automatic) actor.yaw=vehicle.heading-Math.PI;
       match.syncVehicleActor(actor,vehicle);
+      const prevLaps=r.completedLaps;
       crossRaceGates(state,r,from,vehicle.position,start,step);
+      if (r.completedLaps>prevLaps) {
+        if (r.completedLaps>=state.laps) match.emit?.('race-finish', {actor: r.actorId, lap: r.completedLaps, time: r.finishTime, pos: {...vehicle.position}});
+        else match.emit?.('race-lap', {actor: r.actorId, lap: r.completedLaps, pos: {...vehicle.position}});
+      }
       for (const box of state.boxes) if (!r.item&&box.wait<=0&&distance(vehicle.position,box)<3) {
         r.item=rollItem(match.random,rank); box.wait=8;
+        match.emit?.('race-box', {actor: r.actorId, item: r.item, pos: {x: box.x, y: 2.2, z: box.z}});
       }
       for (const coin of state.coins) if (coin.wait<=0&&distance(vehicle.position,coin)<2.2) {
         r.coins=Math.min(10,r.coins+1); coin.wait=10;
+        match.emit?.('race-coin', {actor: r.actorId, coins: r.coins, pos: {x: coin.x, y: 1.2, z: coin.z}});
       }
       if (r.boostPadWait<=0&&r.effects.star<=0) for (const pad of state.boostPads) if (distance(vehicle.position,pad)<2.6) {
-        r.effects.turbo=Math.max(r.effects.turbo,1.2); r.boostPadWait=1.2; break;
+        r.effects.turbo=Math.max(r.effects.turbo,1.2); r.boostPadWait=1.2;
+        match.emit?.('race-boost', {actor: r.actorId, pos: {x: pad.x, y: 0, z: pad.z}});
+        break;
       }
-      for (const h of state.hazards) if (h.owner!==r.actorId&&distance(vehicle.position,h)<(h.radius??3)) applySlow(r,h.slow??2);
+      for (const h of state.hazards) if (h.owner!==r.actorId&&distance(vehicle.position,h)<(h.radius??3)) {
+        if (applySlow(r,h.slow??2)) match.emit?.('race-hazard-hit', {actor: r.actorId, hazard: h.type, pos: {x: h.x, y: 0, z: h.z}});
+      }
       r.stuck=Math.abs(throttle)>.1&&distance(from,vehicle.position)<.015?r.stuck+step:0;
       r.checkpointAge+=step;
       if (r.finishTime===null&&(r.stuck>3||r.checkpointAge>20||!Number.isFinite(vehicle.position.x)||!Number.isFinite(vehicle.position.z))) resetRaceRacer(match,r);
