@@ -588,6 +588,14 @@ Version 2.23 shows your connection quality online:
 
 - **Latency chip.** Network matches display a colour-coded `GOOD` / `FAIR` / `POOR` chip with the current interpolation delay, graded from the same jitter and packet-loss estimators the netcode already uses (`connectionQuality` in `game/hud.mjs`). It turns amber or red before the connection becomes unplayable.
 
+Version 4.5 connects and deepens the game:
+
+- **Netcode:** snapshot delta compression + bandwidth accounting, deterministic prediction/reconciliation and interpolation; protocol v2 with a full-snapshot fallback.
+- **Replay:** kill feed, objective timeline, summary and seekable/speed playback.
+- **Presentation:** cinematic/over-shoulder/free-look/tactical cameras, richer radar and grouped scoreboard, team outlines and announcer callouts.
+- **World:** Titan/Scout/Transport vehicles, levelgen compounds/terraces/towers, biome props and structural map-schema validation.
+- **Server:** matchmaking queue with balanced teams, room lifecycle (warmup/ready/map-vote/rematch), leaderboards and anti-cheat bounds.
+
 Version 4.4 broadens objectives, presentation and accessibility:
 
 - **New objective modes** Holdout (quorum hold) and Uplink (sequential relay); **Endless Horde** with score banking and escalating bosses; economy pickups (weapon upgrade, deployable sentry).

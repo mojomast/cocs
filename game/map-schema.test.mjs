@@ -56,3 +56,44 @@ test('team and flag spawn builders emit numeric and colour aliases',()=>{
   assert.deepEqual(teamSpawns(['w'],['e']),{0:['w'],1:['e'],red:['w'],blue:['e']});
   assert.deepEqual(flagSpawns(-5,5),{0:{x:-5,z:0},1:{x:5,z:0},red:{x:-5,z:0},blue:{x:5,z:0}});
 });
+
+import {validateMapSchema,isMapSchemaValid,LEVELGEN_SCHEMA_VERSION,REQUIRED_MAP_ARRAYS} from './map-schema.mjs';
+
+const validMap=()=>({
+ id:'fixture',name:'Fixture',bounds:{minX:-10,maxX:10,minZ:-10,maxZ:10},
+ blocks:[{x:0,z:0,w:2,d:2,h:3}],spawns:[[1,1]],pickups:[['health',2,2]],navNodes:[{x:0,z:0}],
+});
+
+test('validateMapSchema accepts a well-formed map and reports structural errors',()=>{
+ assert.equal(LEVELGEN_SCHEMA_VERSION,2);
+ assert.deepEqual(validateMapSchema(validMap()),[]);
+ assert.equal(isMapSchemaValid(validMap()),true);
+ const missing=validateMapSchema({});
+ assert.ok(missing.some(e=>e.includes('map.id')));
+ assert.ok(missing.some(e=>e.includes('map.bounds')));
+ for(const key of REQUIRED_MAP_ARRAYS)assert.ok(missing.some(e=>e.includes(`map.${key}`)));
+});
+
+test('validateMapSchema rejects out-of-bounds placements and degenerate blocks',()=>{
+ const map=validMap();
+ map.spawns=[[99,0]];
+ map.pickups=[['health',0,99]];
+ map.navNodes=[{x:0,z:50}];
+ map.blocks=[{x:0,z:0,w:0,d:2,h:3}];
+ const errors=validateMapSchema(map);
+ assert.ok(errors.some(e=>e.includes('spawns[0]')));
+ assert.ok(errors.some(e=>e.includes('pickups[0]')));
+ assert.ok(errors.some(e=>e.includes('navNodes[0]')));
+ assert.ok(errors.some(e=>e.includes('blocks[0]')));
+ assert.equal(isMapSchemaValid(map),false);
+ assert.deepEqual(validateMapSchema(null),['map must be an object']);
+});
+
+test('validateMapSchema checks team and flag spawn bounds',()=>{
+ const map=validMap();
+ map.teamSpawns={0:[[0,0]],1:[[99,0]]};
+ map.flagSpawns={0:{x:0,z:0},1:[0,99]};
+ const errors=validateMapSchema(map);
+ assert.ok(errors.some(e=>e.includes('teamSpawns.1[0]')));
+ assert.ok(errors.some(e=>e.includes('flagSpawns.1')));
+});

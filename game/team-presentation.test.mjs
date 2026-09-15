@@ -41,3 +41,28 @@ test('zone ownership, capture progress and contested status retain separate colo
  update([{id:'a',owner:1,contested:true,progress:50}]);assert.equal(zone.userData.areaMat.color.getHexString(),'ffd166');assert.equal(zone.userData.progressMat.color.getHexString(),'ffd166');
  update([{id:'a',owner:null,progress:0}]);assert.equal(zone.userData.areaMat.color.getHexString(),'55ddcc');assert.equal(zone.userData.progress.visible,false);view.clearObjectiveMarkers();assert.equal(view.worldGroup.children.length,0);
 });
+
+import {ensureTeamOutline,outlineOpacity,TEAM_CALLOUTS,teamCallout,selectCallout} from './team-presentation.mjs';
+
+test('ensureTeamOutline is idempotent and outlineOpacity fades with distance',()=>{
+ const model=robotModel('chatgpt');
+ const first=ensureTeamOutline(model);
+ assert.ok(first,'a model with a base gets an outline shell');
+ assert.equal(ensureTeamOutline(model),first,'the outline is created once');
+ assert.equal(first.scale.x,1.06);
+ assert.ok(outlineOpacity(0,{team:true})>outlineOpacity(30,{team:true}));
+ assert.equal(outlineOpacity(999,{team:true}),0,'beyond range the outline fades out');
+ assert.ok(outlineOpacity(0,{team:true})>outlineOpacity(0,{team:false}),'teammates are rimmed brighter');
+});
+
+test('teamCallout maps events to text and selectCallout picks the highest priority',()=>{
+ assert.equal(teamCallout({type:'capture'}).text,'FLAG CAPTURED');
+ assert.equal(teamCallout({type:'killstreak',streak:1}),null,'a streak of one is not announced');
+ const streak=teamCallout({type:'killstreak',streak:5,reward:'overcharge'});
+ assert.equal(streak.text,'5 KILLSTREAK');
+ assert.equal(streak.detail,'OVERCHARGE');
+ assert.equal(teamCallout({type:'nope'}),null);
+ const best=selectCallout([{type:'flag-drop'},{type:'payload-delivered'},{type:'capture'}]);
+ assert.equal(best.id,'payload-delivered');
+ assert.equal(selectCallout([]),null);
+});

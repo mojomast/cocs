@@ -347,7 +347,7 @@ export default function Home(){
   };
   return <><main className={`arena-app mode-${mode}${(config.mode==='puma-race'||config.mode==='puma-soccer')?' race-setup':''}${(isRace||isSoccer)?' race-active':''} palette-${accessibility.palette}${accessibility.palette!=='default'?' palette-colorblind':''}${accessibility.highContrast?' ui-contrast':''}`}>
   <canvas ref={canvas} tabIndex={-1} role="img" className="arena-canvas" aria-label="Colosseum Of Competitive Slop 3D game"/>
-  {!entered&&<><TitleScreen ui={ui}/><div className="title-footer"><span>v4.4 · BROADER</span>{githubLink}</div></>}
+  {!entered&&<><TitleScreen ui={ui}/><div className="title-footer"><span>v4.5 · CONNECTED</span>{githubLink}</div></>}
   {mode==='selection'&&<SelectionScreen ui={ui}/>}
   {mode==='selection'&&<SetupModal ui={ui}/>}
   {mode==='selection'&&<SinglePlayerModal ui={ui}/>}

@@ -268,8 +268,159 @@ export class DemoPlayer {
   }
 }
 
+// ---------------------------------------------------------------------------
+// Replay analysis: kill feed, objective timeline and a one-glance summary.
+// All derived from the recorded event stream so the demo format stays
+// backward-compatible (no new required fields, version unchanged).
+// ---------------------------------------------------------------------------
+
+// Events that mark objective progress, grouped so the timeline can label them.
+export const OBJECTIVE_EVENT_KINDS = Object.freeze({
+ 'flag-pickup': 'FLAG TAKEN',
+ 'flag-return': 'FLAG RETURNED',
+ 'flag-drop': 'FLAG DROPPED',
+ capture: 'FLAG CAPTURED',
+ 'zone-capture': 'ZONE CAPTURED',
+ 'zone-neutralized': 'ZONE NEUTRALIZED',
+ 'assault-breach': 'SECTOR BREACHED',
+ 'payload-checkpoint': 'CHECKPOINT',
+ 'payload-delivered': 'PAYLOAD DELIVERED',
+ 'soccer-goal': 'GOAL',
+ 'killstreak': 'KILLSTREAK',
+});
+
+const eventTime = event => (typeof event?.time === 'number' && Number.isFinite(event.time) ? event.time : null);
+
+// Kill feed entries (killer/victim/weapon/time), sorted by time. Falls back to
+// the snapshot feed when the event stream predates death events.
+export function replayKillFeed(demo) {
+ const events = Array.isArray(demo?.events) ? demo.events : [];
+ const feed = [];
+ for (const event of events) {
+  const time = eventTime(event);
+  if (time === null || event?.type !== 'death') continue;
+  feed.push({
+   time,
+   actor: event.actor ?? null,
+   killer: event.killer ?? null,
+   killerName: event.killerName ?? null,
+   victim: event.actor ?? null,
+   weapon: Number.isInteger(event.weapon) ? event.weapon : null,
+   self: event.self === true,
+   fall: event.fall === true,
+  });
+ }
+ return feed.sort((a, b) => a.time - b.time);
+}
+
+// Objective events in chronological order with a human label for the timeline.
+export function objectiveTimeline(demo) {
+ const events = Array.isArray(demo?.events) ? demo.events : [];
+ const timeline = [];
+ for (const event of events) {
+  const time = eventTime(event);
+  if (time === null) continue;
+  const label = OBJECTIVE_EVENT_KINDS[event?.type];
+  if (!label) continue;
+  timeline.push({
+   time,
+   type: event.type,
+   label,
+   actor: event.actor ?? null,
+   team: event.team ?? null,
+   zone: event.zone ?? event.id ?? null,
+   streak: Number.isFinite(event.streak) ? event.streak : null,
+   reward: event.reward ?? null,
+  });
+ }
+ return timeline.sort((a, b) => a.time - b.time);
+}
+
+// Deterministic replay summary: duration, frame/event counts, per-type event
+// tallies, the kill feed, the objective timeline and the first/last keyframe
+// times. Safe on empty or malformed demos.
+export function replaySummary(demo) {
+ const keyframes = Array.isArray(demo?.keyframes) ? demo.keyframes : [];
+ const events = Array.isArray(demo?.events) ? demo.events : [];
+ const first = keyframes[0]?.time ?? 0;
+ const last = keyframes[keyframes.length - 1]?.time ?? first;
+ const counts = {};
+ for (const event of events) {
+  if (!event || typeof event.type !== 'string') continue;
+  counts[event.type] = (counts[event.type] || 0) + 1;
+ }
+ const feed = replayKillFeed(demo);
+ const timeline = objectiveTimeline(demo);
+ return {
+  version: demo?.version ?? DEMO_VERSION,
+  header: demo?.header ?? null,
+  createdAt: demo?.createdAt ?? null,
+  duration: Math.max(0, last - first),
+  startTime: first,
+  endTime: last,
+  frameCount: keyframes.length,
+  eventCount: events.length,
+  eventCounts: counts,
+  kills: feed.length,
+  objectives: timeline.length,
+  killFeed: feed,
+  objectiveTimeline: timeline,
+  highlights: timeline.filter(item => item.type !== 'killstreak').map(item => ({ time: item.time, label: item.label, actor: item.actor })),
+ };
+}
+
+// Deterministic playback controller: owns a cursor in demo time, supports
+// seeking, variable speed and stepping, and samples the DemoPlayer. It never
+// reads the wall clock, so tests can advance it by exact deltas.
+export class DemoPlayback {
+ constructor(player, {time = 0, speed = 1, paused = false} = {}) {
+  this.player = player instanceof DemoPlayer ? player : new DemoPlayer(player);
+  this.duration = this.player.duration;
+  this.time = clampTime(time, this.duration);
+  this.speed = normalizeSpeed(speed);
+  this.paused = paused === true;
+ }
+ get durationSeconds() { return this.duration; }
+ get progress() { return this.duration > 0 ? this.time / this.duration : 0; }
+ get ended() { return this.time >= this.duration; }
+ seek(time) { this.time = clampTime(time, this.duration); return this.time; }
+ seekProgress(fraction) { return this.seek((Number.isFinite(fraction) ? fraction : 0) * this.duration); }
+ setSpeed(speed) { this.speed = normalizeSpeed(speed); return this.speed; }
+ play() { this.paused = false; return this; }
+ pause() { this.paused = true; return this; }
+ toggle() { this.paused = !this.paused; return this.paused; }
+ // Advance by `dt` real seconds scaled by speed. Returns the new demo time.
+ advance(dt) {
+  if (this.paused) return this.time;
+  const delta = (Number.isFinite(dt) ? dt : 0) * this.speed;
+  this.time = clampTime(this.time + delta, this.duration);
+  return this.time;
+ }
+ sample() { return this.player.sample(this.time); }
+ // Events crossed by the last advance, in (from, to] order, so a caller can
+ // play callouts without double-firing on seek.
+ eventsBetween(t0, t1) { return this.player.eventsBetween(t0, t1); }
+ summary() { return replaySummary(this.player.demo); }
+}
+
+const clampTime = (time, duration) => {
+ const value = Number.isFinite(time) ? time : 0;
+ if (value < 0) return 0;
+ if (value > duration) return duration;
+ return value;
+};
+
+const PLAYBACK_SPEEDS = Object.freeze([.25, .5, 1, 2, 4]);
+export const REPLAY_SPEEDS = PLAYBACK_SPEEDS;
+
+const normalizeSpeed = speed => {
+ const value = Number(speed);
+ if (!Number.isFinite(value) || value <= 0) return 1;
+ return Math.max(.05, Math.min(16, value));
+};
+
 export function serializeDemo(demo) {
-  return JSON.stringify(demo);
+ return JSON.stringify(demo);
 }
 
 export function parseDemo(textOrBytes) {

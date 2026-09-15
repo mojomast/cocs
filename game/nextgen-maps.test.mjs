@@ -276,3 +276,33 @@ test('the new objective maps carry layered cover and dressing', () => {
     if (map.teamSpawns) for (const block of cover) assert.ok(cover.some(other => other !== block && other.x === -block.x && other.z === -block.z && other.w === block.w && other.d === block.d), `${id} cover stays mirrored`);
   }
 });
+
+import {degenerateLayout} from './levelgen.mjs';
+
+test('degenerateLayout rejects invalid schemas and accepts a complete fixture',()=>{
+ const bounds={minX:-30,maxX:30,minZ:-30,maxZ:30};
+ const terrain=terrainField(bounds,{height:()=>0,amplitude:0});
+ const good=createLevel({id:'degenerate-fixture',name:'Degenerate',bounds,terrain,layout(ctx){
+  ctx.addSpawn(0,0);ctx.addObjective(0,0);ctx.addNav(0,0);
+ }});
+ assert.equal(degenerateLayout(good),null);
+ assert.match(degenerateLayout({id:'x',name:'x',bounds,blocks:[],spawns:[],pickups:[],navNodes:[],objectiveZones:[]}),/schema|objective/i);
+});
+
+test('compound, terrace and tower primitives produce walkable, validated geometry',()=>{
+ const bounds={minX:-40,maxX:40,minZ:-40,maxZ:40};
+ const terrain=terrainField(bounds,{height:()=>0,amplitude:0});
+ const map=createLevel({id:'primitive-fixture',name:'Primitives',bounds,terrain,layout(ctx){
+  ctx.addCompound({x:-20,z:0,w:12,d:8,h:6,rooms:[2,2]});
+  ctx.addTerrace({x:20,z:0,tiers:3,size:16});
+  ctx.addTower({x:0,z:20,radius:3,height:12,decks:3});
+  ctx.addSpawn(0,-20);ctx.addObjective(-20,0);ctx.addNav(0,0);
+ }});
+ assert.ok(map.structures.some(s=>s.type==='compound'&&s.rooms[0]===2&&s.rooms[1]===2));
+ assert.ok(map.structures.some(s=>s.type==='terrace'&&s.tiers===3));
+ assert.ok(map.structures.some(s=>s.type==='tower'&&s.decks===3));
+ assert.ok(map.blocks.some(b=>b.kind==='partition'));
+ assert.ok(map.blocks.some(b=>b.kind==='terrace'));
+ assert.ok(map.blocks.some(b=>b.kind==='tower'));
+ assert.equal(degenerateLayout(map),null);
+});

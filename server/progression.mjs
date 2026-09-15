@@ -11,6 +11,57 @@ export const PLAYER_CAP=500;
 export {validPlayerId,validProgressToken};
 const newToken=()=>randomBytes(24).toString('hex');
 
+// ---------------------------------------------------------------------------
+// Anti-cheat sanity bounds. A client can report any actor result it likes, so
+// the authoritative store clamps implausible counters before they inflate a
+// career. Bounds are generous (a 15-minute match cannot honestly produce more
+// than a few hundred kills) but tight enough to reject forged payloads.
+export const SANITY = Object.freeze({
+ maxKills: 1000,
+ maxDeaths: 1000,
+ maxObjectiveTime: 3600,
+ maxCaptures: 80,
+ maxStreak: 1000,
+ maxMatchSeconds: 3600,
+ maxXpPerMatch: 20000,
+});
+
+// Clamp a match result to sane bounds. Returns a new object; never mutates the
+// caller's payload. Non-finite and negative counters collapse to zero.
+export function sanityCheckResult(result = {}) {
+ const source = result && typeof result === 'object' ? result : {};
+ const actor = source.actor && typeof source.actor === 'object' ? source.actor : {};
+ const stats = actor.scoreStats && typeof actor.scoreStats === 'object' ? actor.scoreStats : {};
+ const count = (value, max) => {
+  const n = Number(value);
+  return Number.isFinite(n) ? Math.max(0, Math.min(max, Math.floor(n))) : 0;
+ };
+ const objectiveTime = (() => {
+  const n = Number(stats.objectiveTime);
+  return Number.isFinite(n) ? Math.max(0, Math.min(SANITY.maxObjectiveTime, n)) : 0;
+ })();
+ const cleanStats = { ...stats, objectiveTime };
+ for (const field of ['captures', 'flagReturns', 'flagPickups', 'flagDrops', 'objectiveCaptures', 'objectiveNeutralizations', 'objectiveContests']) {
+  if (field in cleanStats) cleanStats[field] = count(cleanStats[field], SANITY.maxCaptures);
+ }
+ return {
+  ...source,
+  actor: { ...actor, frags: count(actor.frags, SANITY.maxKills), deaths: count(actor.deaths, SANITY.maxDeaths), scoreStats: cleanStats },
+  bestStreak: count(source.bestStreak, SANITY.maxStreak),
+  time: Number.isFinite(Number(source.time)) ? Math.max(0, Math.min(SANITY.maxMatchSeconds, Number(source.time))) : 0,
+ };
+}
+
+// True when a result was already within bounds (used to flag suspicious
+// payloads without rejecting the whole match).
+export function withinSanity(result = {}) {
+ const source = result && typeof result === 'object' ? result : {};
+ const actor = source.actor && typeof source.actor === 'object' ? source.actor : {};
+ const stats = actor.scoreStats && typeof actor.scoreStats === 'object' ? actor.scoreStats : {};
+ const over = (value, max) => Number.isFinite(Number(value)) && Number(value) > max;
+ return !(over(actor.frags, SANITY.maxKills) || over(actor.deaths, SANITY.maxDeaths) || over(stats.objectiveTime, SANITY.maxObjectiveTime) || over(source.bestStreak, SANITY.maxStreak));
+}
+
 export class ProgressionStore{
  constructor(file=null,options={}){
   this.file=file?path.resolve(file):null;
@@ -74,15 +125,35 @@ export class ProgressionStore{
   const profile=this.ensure(id);
   if(!profile)return null;
   const token=existing?.ownerToken??profile.ownerToken;
-  const awarded=awardMatch(profile,result);
+  const clean=withinSanity(result)?result:sanityCheckResult(result);
+  const awarded=awardMatch(profile,clean);
   awarded.profile.id=id;
   if(token)awarded.profile.ownerToken=token;
   this.players.set(id,awarded.profile);
   this.trim();
   this._dirty=true;this._rev++;this.flush();
-  return {profile:this.get(id),gained:awarded.gained,baseGained:awarded.baseGained,prestigeBonus:awarded.prestigeBonus,achievementXp:awarded.achievementXp,levelUp:awarded.levelUp,prestigeUp:awarded.prestigeUp,unlocked:awarded.unlocked,achievements:awarded.achievements,progress:awarded.progress,toNext:awarded.toNext,result:result?.win===true?'win':result?.draw===true?'draw':'loss',actor:result?.actor??null,mode:result?.mode??null};
+  return {profile:this.get(id),gained:awarded.gained,baseGained:awarded.baseGained,prestigeBonus:awarded.prestigeBonus,achievementXp:awarded.achievementXp,levelUp:awarded.levelUp,prestigeUp:awarded.prestigeUp,unlocked:awarded.unlocked,achievements:awarded.achievements,progress:awarded.progress,toNext:awarded.toNext,result:result?.win===true?'win':result?.draw===true?'draw':'loss',actor:result?.actor??null,mode:result?.mode??null,flagged:withinSanity(result)?false:true};
  }
  awardOwned(id,token,result){return this.getOwned(id,token)?this.award(id,result):null;}
+ // Cross-session leaderboard. One row per profile, ranked deterministically by
+ // wins, then XP, then kills, then best single-match kills. `mode` optionally
+ // filters to a single mode's stored stats. Pure read; never mutates profiles.
+ leaderboard({mode=null,limit=50}={}) {
+  const rows=[];
+  for(const profile of this.players.values()){
+   const byMode=profile.byMode||{};
+   const stats=mode?(byMode[mode]||{matches:0,wins:0,kills:0,best:0}):null;
+   const wins=mode?Number(stats.wins)||0:Number(profile.wins)||0;
+   const kills=mode?Number(stats.kills)||0:Number(profile.kills)||0;
+   const best=mode?Number(stats.best)||0:Object.values(byMode).reduce((max,entry)=>Math.max(max,Number(entry?.best)||0),0);
+   const matches=mode?Number(stats.matches)||0:Number(profile.matches)||0;
+   if(mode&&!matches)continue;
+   rows.push({id:profile.id,level:profile.level,xp:Number(profile.xp)||0,wins,kills,matches,best,prestige:Number(profile.prestige)||0,mode:mode??null});
+  }
+  rows.sort((a,b)=>(b.wins-a.wins)||(b.xp-a.xp)||(b.kills-a.kills)||(b.best-a.best)||String(a.id).localeCompare(String(b.id)));
+  const max=Math.max(1,Math.min(500,Number(limit)||50));
+  return rows.slice(0,max).map((row,index)=>({...row,rank:index+1}));
+ }
  // Post-match summary card for the client results screen. Composes the stored
  // profile with the award payload so the network path shows the same XP,
  // prestige and achievement progress as the local path.

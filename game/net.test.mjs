@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {Match} from './core.mjs';
-import {NetClient} from './net.mjs';
+import {NetClient, NetHarness, interpolateSnapshots} from './net.mjs';
 function rng(){let n=3;return()=>((n=(Math.imul(n,1664525)+1013904223)>>>0)/4294967296);}
 const config={humanCount:1,botCount:0,timeLimit:60};
 test('connection and reconnection preserve registered UI callbacks',async t=>{
@@ -421,4 +421,38 @@ test('progression token is generated, transported and persisted',t=>{
  client.onMessage(JSON.stringify({type:'welcome',peerId:1,host:true,progressToken:'server-issued-token-abcdefghijklmnopqrstuvwxyz'}));
  assert.equal(client.progressToken,'server-issued-token-abcdefghijklmnopqrstuvwxyz');
  assert.equal(store.get('token-arena-progress-token'),'server-issued-token-abcdefghijklmnopqrstuvwxyz');
+});
+
+test('interpolateSnapshots blends linearly, wraps angles and leaves the predicted local actor untouched', () => {
+ const prev = {actors: [{id: 0, x: 0, y: 0, z: 0, yaw: -Math.PI + .1}, {id: 1, x: 0, y: 0, z: 0, yaw: 0}], rockets: [], vehicles: []};
+ const next = {actors: [{id: 0, x: 10, y: 4, z: -6, yaw: Math.PI - .1}, {id: 1, x: 20, y: 0, z: 0, yaw: 0}], rockets: [], vehicles: []};
+ const mid = interpolateSnapshots(prev, next, .5);
+ assert.equal(mid.actors[0].x, 5);
+ assert.equal(mid.actors[0].y, 2);
+ assert.equal(mid.actors[0].z, -3);
+ assert.ok(Math.abs(Math.abs(mid.actors[0].yaw) - Math.PI) < 1e-9, 'shortest arc crosses the seam');
+ assert.equal(mid.actors[1].x, 10);
+ const predicted = interpolateSnapshots(prev, next, .5, {localId: 0, predicted: true});
+ assert.equal(predicted.actors[0].x, 10, 'predicted local actor is not smoothed');
+ assert.equal(interpolateSnapshots(prev, null, .5), prev, 'a missing next frame returns prev');
+});
+
+test('NetHarness reconciles prediction under latency with zero divergence and delta savings', () => {
+ const harness = new NetHarness({mapId: 'crosswire', config: {humanCount: 1, botCount: 0, timeLimit: 60}, seed: 7, latency: 3, delta: true, keyframeEvery: 5});
+ for (let i = 0; i < 60; i++) harness.step({forward: 1, right: i % 3 === 0 ? 1 : 0, jump: i === 20});
+ harness.flush();
+ assert.ok(harness.divergence() < 1e-6, `shadow converged (${harness.divergence()})`);
+ assert.ok(harness.stats.deltaFrames > 0, 'deltas are emitted');
+ assert.ok(harness.stats.deltaBytes / harness.stats.deltaFrames < harness.stats.fullBytes / harness.stats.fullFrames, 'deltas are smaller on average than full frames');
+ assert.ok(harness.stats.dropped === 0);
+});
+
+test('NetHarness recovers from packet loss and re-syncs on a keyframe', () => {
+ const harness = new NetHarness({mapId: 'crosswire', config: {humanCount: 1, botCount: 0, timeLimit: 60}, seed: 9, latency: 2, loss: .5, delta: true, keyframeEvery: 4});
+ for (let i = 0; i < 120; i++) harness.step({forward: 1});
+ harness.flush();
+ assert.ok(harness.stats.dropped > 0, 'some frames were dropped');
+ assert.ok(harness.client.deltaMisses > 0, 'a missing delta base is counted');
+ assert.ok(harness.client.snapshotSeq > 0, 'the client kept applying snapshots');
+ assert.ok(harness.divergence() < 1e-6, `lossy link still converges (${harness.divergence()})`);
 });

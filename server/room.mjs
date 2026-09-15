@@ -13,6 +13,12 @@ export const SPECTATOR_LIMIT = 24;
 // Clients send inputs at 60 Hz; allow generous headroom and drop the excess so a
 // flooding client cannot burn simulation time or unbounded server work.
 export const INPUT_RATE_LIMIT = 120;
+// Warmup countdown and the minimum fraction of connected players that must
+// ready-up before a warmup-gated start is allowed. Defaults keep the direct
+// host-start path (used everywhere else) unaffected.
+export const WARMUP_SECONDS = 5;
+export const REMATCH_RATIO = 0.5;
+export const LIFECYCLE_PHASES = Object.freeze(['lobby', 'warmup', 'live', 'results']);
 const object = value => value !== null && typeof value === 'object' && !Array.isArray(value);
 const bounded = (value, max) => typeof value === 'string' && value.length <= max;
 // Match.snapshot() shares mutable or deeply frozen nested branches (powerups,
@@ -66,6 +72,17 @@ export class Room {
   this.snapshotInterval = 1 / this.snapshotHz;
   this.seq = 0;
   this.out = [];
+  // Deterministic lifecycle. `phase` is one of LIFECYCLE_PHASES; warmup runs a
+  // fixed countdown before the host start is honored, and map votes are tallied
+  // from connected players. `rematchVotes` gates the post-round rematch.
+  this.phase = 'lobby';
+  this.warmupSeconds = Math.max(0, Number(options.warmupSeconds ?? WARMUP_SECONDS));
+  this.warmupTimer = 0;
+  this.ready = new Set();
+  this.mapVotes = new Map();
+  this.rematchVotes = new Set();
+  this.lifecycleRevision = 0;
+  this.lastResult = null;
  }
  send(peerId, msg) { this.out.push({ to: peerId, msg }); }
  broadcast(msg) { this.out.push({ to: null, msg }); }
@@ -79,10 +96,92 @@ export class Room {
   if (!this.match) return null;
   return quantizedCopy(this.match.snapshot());
  }
+ // Deterministic lifecycle view shared by the lobby message and the tests.
+ lifecycle() {
+  const players = [...this.peers.values()].filter(p => p.spectate !== true);
+  const connected = players.filter(p => p.disconnectedAt === null);
+  const readyCount = connected.filter(p => this.ready.has(p.id)).length;
+  const needed = Math.max(1, Math.ceil(connected.length * REMATCH_RATIO));
+  // A rematch needs a strict majority (> half), not a ratio-rounded quorum, so
+  // one of two players cannot restart the match on their own.
+  const rematchNeeded = Math.max(1, Math.floor(connected.length / 2) + 1);
+  const votes = {};
+  for (const [mapId, voters] of this.mapVotes) if (voters.size) votes[mapId] = voters.size;
+  const winner = Object.entries(votes).sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))[0]?.[0] ?? null;
+  return {
+   phase: this.phase,
+   revision: this.lifecycleRevision,
+   warmup: this.phase === 'warmup' ? Math.max(0, Math.ceil(this.warmupTimer)) : 0,
+   ready: readyCount,
+   readyNeeded: needed,
+   readyRatio: connected.length ? readyCount / connected.length : 0,
+   mapVotes: votes,
+   mapVoteWinner: winner,
+   rematch: this.rematchVotes.size,
+   rematchNeeded,
+   rematchReady: this.roundOver && this.started && this.rematchVotes.size >= rematchNeeded,
+  };
+ }
  lobby() {
   return { type: 'lobby', roomId: this.id, name: this.name, hostId: this.hostId, started: this.started,
-   config: this.config ? { ...this.config } : null, mapId: this.mapId,
-   players: [...this.peers.values()].map(p => ({ peerId: p.id, name: p.name, character: p.character, harness: p.harness, actorId: p.actorId, ready: p.ready, connected: p.disconnectedAt === null, spectate: p.spectate === true, voiceSession: p.voiceSession })) };
+   config: this.config ? { ...this.config } : null, mapId: this.mapId, lifecycle: this.lifecycle(),
+   players: [...this.peers.values()].map(p => ({ peerId: p.id, name: p.name, character: p.character, harness: p.harness, actorId: p.actorId, ready: this.ready.has(p.id) || p.ready, connected: p.disconnectedAt === null, spectate: p.spectate === true, voiceSession: p.voiceSession })) };
+ }
+ // Mark a player ready for the warmup gate. Ready state is keyed by the stable
+ // peer id and cleared on join/leave so a reconnecting peer must re-ready.
+ setReady(peerId, ready = true) {
+  const peer = this.peers.get(peerId);
+  if (!peer || peer.spectate) return false;
+  const next = ready !== false;
+  if (next) this.ready.add(peerId); else this.ready.delete(peerId);
+  if (peer.ready !== next) { peer.ready = next; this.lifecycleRevision++; this.broadcast(this.lobby()); }
+  return next;
+ }
+ // One vote per player. Voting replaces the player's previous choice so the
+ // tally always reflects current intent rather than a running total.
+ mapVote(peerId, mapId) {
+  const peer = this.peers.get(peerId);
+  if (!peer || peer.spectate || typeof mapId !== 'string' || !mapId) return null;
+  for (const voters of this.mapVotes.values()) voters.delete(peerId);
+  const voters = this.mapVotes.get(mapId) || new Set();
+  voters.add(peerId);
+  this.mapVotes.set(mapId, voters);
+  this.lifecycleRevision++;
+  this.broadcast(this.lobby());
+  return mapId;
+ }
+ // A rematch needs a majority of connected players; once met the host may
+ // restart without re-running warmup.
+ requestRematch(peerId) {
+  const peer = this.peers.get(peerId);
+  if (!peer || peer.spectate || !this.roundOver) return false;
+  this.rematchVotes.add(peerId);
+  this.lifecycleRevision++;
+  this.broadcast(this.lobby());
+  return this.lifecycle().rematchReady;
+ }
+ // Enter warmup: the host start arms a countdown; the match itself is created
+ // when the countdown reaches zero (see tick). A zero warmup starts immediately.
+ beginWarmup(peerId) {
+  const peer = this.peers.get(peerId);
+  if (!peer || peer.spectate || peerId !== this.hostId) return false;
+  const players = [...this.peers.values()].filter(p => p.spectate !== true && p.disconnectedAt === null);
+  if (!players.length) return false;
+  const needed = Math.max(1, Math.ceil(players.length * REMATCH_RATIO));
+  if (this.warmupSeconds <= 0 || this.ready.size >= needed) return this.start(peerId);
+  this.phase = 'warmup';
+  this.warmupTimer = this.warmupSeconds;
+  this.lifecycleRevision++;
+  this.broadcast(this.lobby());
+  return true;
+ }
+ cancelWarmup() {
+  if (this.phase !== 'warmup') return false;
+  this.phase = 'lobby';
+  this.warmupTimer = 0;
+  this.lifecycleRevision++;
+  this.broadcast(this.lobby());
+  return true;
  }
  nextConnectedHost() { for (const p of this.peers.values()) if (p.spectate !== true && p.disconnectedAt === null) return p.id; return null; }
  progressProfile(peer) { if (!this.progression || !peer?.playerId || !peer.playerToken) return null; return this.progression.getOwned(peer.playerId, peer.playerToken); }
@@ -131,6 +230,7 @@ export class Room {
   if (isSpectator && [...this.peers.values()].filter(p => p.spectate === true).length >= SPECTATOR_LIMIT) { this.send(peerId, { type: 'error', message: 'spectator limit reached' }); return; }
   const l = resolveLoadout(character, harness) || { character: 'chatgpt', harness: 'openclaw' };
   const identity = this.progression ? this.progression.identify(validPlayerId(playerId) ? playerId : '', progressToken) : null;
+  if (this.phase === 'warmup') this.cancelWarmup();
   const peer = { id: peerId, name: sanitizeText(name, 20) || CHARACTERS.find(c => c.id === l.character).name,
     character: l.character, harness: l.harness, actorId: null, ready: false, latest: null, receivedSeq: 0, latestSeq: 0, appliedSeq: 0, lastSerial: active ? this.match.serial : 0,
      lastJump: false, lastPower: false, lastInteract: false, lastReload: false, edgeFire: false, edgeJump: false, edgePower: false, edgeInteract: false, edgeMelee: false, lastMelee: false, edgeReload: false, edgeGrenade: false, lastGrenade: false,
@@ -191,10 +291,14 @@ export class Room {
    for (const p of this.peers.values()) { p.edgeFire = false; p.edgeReload = p.lastReload = false; p.edgeGrenade = false; p.lastGrenade = false; if (p.spectate) p.lastSerial = 0; }
   this.started = true;
   this.roundOver = false;
+  this.phase = 'live';
+  this.warmupTimer = 0;
+  this.rematchVotes.clear();
   this.tickAcc = 0;
   this.broadcastAt = 0;
   this.broadcast(this.lobby());
   this.broadcast({ type: 'start', config: { ...this.config }, mapId: this.mapId });
+  return true;
  }
  input(peerId, input) {
   const peer = this.peers.get(peerId);
@@ -317,6 +421,10 @@ export class Room {
   peer.voiceSession = null;
   peer.playerToken = null;
   this.peers.delete(peerId);
+  this.ready.delete(peerId);
+  this.rematchVotes.delete(peerId);
+  for (const voters of this.mapVotes.values()) voters.delete(peerId);
+  if (this.phase === 'warmup') { this.phase = 'lobby'; this.warmupTimer = 0; }
   if (this.hostId === peerId) this.hostId = this.nextConnectedHost();
   this.broadcast(this.lobby());
  }
@@ -341,6 +449,16 @@ export class Room {
   }
  }
  tick(dt) {
+  if (this.phase === 'warmup') {
+   this.warmupTimer -= Math.min(dt, .25);
+   if (this.warmupTimer <= 0) {
+    this.warmupTimer = 0;
+    const host = this.hostId ?? this.nextConnectedHost();
+    if (host !== null) this.start(host);
+    else { this.phase = 'lobby'; this.lifecycleRevision++; this.broadcast(this.lobby()); }
+   }
+   return;
+  }
   if (!this.match || this.roundOver) return;
   this.tickAcc += Math.min(dt, .25);
   let steps = 0;
@@ -370,7 +488,10 @@ export class Room {
   this.deliverEvents();
   if (ended) {
    this.roundOver = true;
+   this.phase = 'results';
+   this.lifecycleRevision++;
    const result = this.match.snapshot();
+   this.lastResult = result;
    const mode = this.match.config.mode;
     try { this.history?.record({ roomId: this.id, mapId: this.match.arena.id, config: this.match.config, time: this.match.time, actors: result.actors, teamScores: result.teamScores, winner: result.winner, endingReason: result.overReason ?? null, result }); }
    catch {}

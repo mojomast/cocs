@@ -11,6 +11,10 @@ import {
   compressDemo,
   decompressDemo,
   trimDemo,
+  replayKillFeed,
+  objectiveTimeline,
+  replaySummary,
+  DemoPlayback,
 } from './demo.mjs';
 
 function actor(over = {}) {
@@ -271,4 +275,48 @@ test('recorder stops appending events once past maxSeconds and keeps pre-cutoff 
   assert.equal(demo.events.length, 11);
   assert.ok(demo.events.every(event => event.time <= cutoff));
   assert.ok(demo.events.every(event => event.time <= demo.keyframes.at(-1).time));
+});
+
+test('replayKillFeed and objectiveTimeline sort events and label objective kinds', () => {
+  const demo = twoFrameDemo();
+  demo.events = [
+    { type: 'death', time: 2, actor: 1, killer: 0, killerName: 'A', weapon: 3 },
+    { type: 'capture', time: 1, actor: 0, team: 0 },
+    { type: 'zone-capture', time: 3, actor: 1, team: 1, zone: 'B' },
+    { type: 'shot', time: 1.5, actor: 0 },
+  ];
+  const feed = replayKillFeed(demo);
+  assert.equal(feed.length, 1);
+  assert.equal(feed[0].killer, 0);
+  assert.equal(feed[0].weapon, 3);
+  const timeline = objectiveTimeline(demo);
+  assert.deepEqual(timeline.map(e => e.time), [1, 3]);
+  assert.equal(timeline[0].label, 'FLAG CAPTURED');
+  assert.equal(timeline[1].label, 'ZONE CAPTURED');
+});
+
+test('replaySummary tallies events and DemoPlayback seeks, speeds and samples deterministically', () => {
+  const demo = twoFrameDemo();
+  demo.events = [
+    { type: 'death', time: .5, actor: 1, killer: 0 },
+    { type: 'capture', time: .75, actor: 0, team: 0 },
+  ];
+  const summary = replaySummary(demo);
+  assert.equal(summary.duration, 1);
+  assert.equal(summary.frameCount, 2);
+  assert.equal(summary.eventCount, 2);
+  assert.equal(summary.eventCounts.death, 1);
+  assert.equal(summary.kills, 1);
+  const playback = new DemoPlayback(demo);
+  assert.equal(playback.seek(.5), .5);
+  assert.equal(playback.sample().actors[0].x, 5);
+  playback.setSpeed(2);
+ playback.play();
+  assert.equal(playback.advance(.25), 1, 'speed scales the advance and clamps to duration');
+  assert.equal(playback.ended, true);
+  assert.equal(playback.seekProgress(.5), .5);
+  playback.pause();
+  assert.equal(playback.advance(1), .5, 'paused playback does not advance');
+  assert.deepEqual(playback.eventsBetween(0, .6).map(e => e.type), ['death']);
+  assert.equal(playback.summary().kills, 1);
 });

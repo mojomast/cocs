@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { GUNTRUCK, PUMA, createVehicle, respawnVehicle, stepVehicle, vehicleCanEnter, vehicleMuzzles } from './vehicles.mjs';
+import { GUNTRUCK, PUMA, HORNET, TITAN, SCOUT, TRANSPORT, VEHICLE_TYPES, VEHICLE_KIND_IDS, createVehicle, respawnVehicle, stepVehicle, vehicleCanEnter, vehicleMuzzles, vehicleMuzzleCount, vehicleStats, vehicleCapacity, vehicleSeatFor } from './vehicles.mjs';
 
 const flat = () => ({ y: 0, normal: { x: 0, y: 1, z: 0 } });
 const lateralOf = vehicle => vehicle.velocity.x * Math.cos(vehicle.heading) - vehicle.velocity.z * Math.sin(vehicle.heading);
@@ -196,4 +196,84 @@ test('driver harness skills scale top speed, boost and turret traverse', () => {
   stepVehicle(slow, { turretYaw: 2 }, 1 / 60); stepVehicle(quick, { turretYaw: 2, traverseScale: 1.5 }, 1 / 60);
   stepVehicle(slow, { turretYaw: 2 }, 1 / 60); stepVehicle(quick, { turretYaw: 2, traverseScale: 1.5 }, 1 / 60);
   assert.ok(quick.turretYaw > slow.turretYaw, 'traverseScale should speed turret rotation');
+});
+
+test('the roster exposes five distinct frozen chassis with stable ids', () => {
+  assert.deepEqual(VEHICLE_KIND_IDS, ['puma', 'hornet', 'titan', 'scout', 'transport']);
+  assert.equal(VEHICLE_TYPES.length, 5);
+  assert.ok(VEHICLE_TYPES.every(Object.isFrozen));
+  for (const vehicle of [TITAN, SCOUT, TRANSPORT]) {
+    assert.ok(vehicle.mountedChaingun && Number.isFinite(vehicle.mountedChaingun.damage));
+    assert.ok(vehicle.dimensions.length > 0 && vehicle.dimensions.width > 0);
+    assert.ok(vehicle.health > 0 && vehicle.speed > 0);
+  }
+  assert.equal(TITAN.class, 'heavy');
+  assert.equal(SCOUT.class, 'light');
+  assert.equal(TRANSPORT.class, 'transport');
+});
+
+test('heavy, light and transport chassis handle distinctly on flat ground', () => {
+  const run = template => {
+    const vehicle = createVehicle(template);
+    for (let i = 0; i < 600; i++) stepVehicle(vehicle, { throttle: 1 }, 1 / 60, next => next, flat);
+    return vehicle.speed;
+  };
+  const titan = run(TITAN), scout = run(SCOUT), transport = run(TRANSPORT), puma = run(PUMA);
+  assert.ok(scout > puma, `scout ${scout} should outrun puma ${puma}`);
+  assert.ok(puma > transport, `puma ${puma} should outrun transport ${transport}`);
+  assert.ok(transport > titan, `transport ${transport} should outrun titan ${titan}`);
+  const heavy = createVehicle(TITAN), light = createVehicle(SCOUT);
+  for (let i = 0; i < 60; i++) { stepVehicle(heavy, { steer: 1 }, 1 / 60, next => next, flat); stepVehicle(light, { steer: 1 }, 1 / 60, next => next, flat); }
+  assert.ok(Math.abs(light.heading) > Math.abs(heavy.heading), 'the scout turns faster than the titan');
+});
+
+test('mounted weapons are type-aware: barrels, damage and overheat differ', () => {
+  assert.equal(vehicleMuzzleCount(createVehicle(PUMA)), 2);
+  assert.equal(vehicleMuzzleCount(createVehicle(TITAN)), 1);
+  assert.equal(vehicleMuzzleCount(createVehicle(SCOUT)), 1);
+  assert.equal(vehicleMuzzleCount(createVehicle(TRANSPORT)), 2);
+  const titan = createVehicle(TITAN);
+  stepVehicle(titan, { fire: true }, 0.01);
+  assert.deepEqual(titan.lastStep.muzzles, [0]);
+  assert.equal(titan.lastStep.muzzle, 0);
+  assert.ok(titan.heat > 0, 'the cannon builds heat');
+  for (let i = 0; i < 2; i++) stepVehicle(titan, { fire: true }, 0.9);
+  assert.equal(titan.overheated, true, 'sustained cannon fire overheats');
+  const scout = createVehicle(SCOUT);
+  for (let i = 0; i < 30; i++) stepVehicle(scout, { fire: true }, 0.06);
+  assert.equal(scout.overheated, false, 'the light gun never overheats');
+  assert.equal(scout.heat, 0);
+});
+
+test('transport carries six seats and the scout carries two', () => {
+  const transport = createVehicle(TRANSPORT), scout = createVehicle(SCOUT);
+  assert.equal(vehicleCapacity(transport), 6);
+  assert.equal(vehicleCapacity(scout), 2);
+  assert.equal(vehicleSeatFor(transport).role, 'driver');
+  transport.driver = 1;
+  assert.equal(vehicleSeatFor(transport).role, 'gunner');
+  transport.gunner = 2;
+  assert.equal(vehicleSeatFor(transport).role, 'passenger');
+  scout.driver = 1;
+  assert.equal(vehicleSeatFor(scout).role, 'passenger');
+});
+
+test('vehicleStats summarizes each chassis without throwing', () => {
+  const stats = vehicleStats(createVehicle(TITAN));
+  assert.equal(stats.id, 'titan');
+  assert.equal(stats.class, 'heavy');
+  assert.equal(stats.capacity, 3);
+  assert.equal(stats.weapon, 'mounted-cannon');
+  assert.equal(stats.barrels, 1);
+  assert.ok(Object.isFrozen(stats));
+  assert.equal(vehicleStats(createVehicle(HORNET)).flight, true);
+});
+
+test('respawn resets the barrel count for every chassis', () => {
+  const vehicle = createVehicle(TRANSPORT);
+  vehicle.muzzleIndex = 1;
+  respawnVehicle(vehicle);
+  assert.equal(vehicle.muzzleIndex, 0);
+  assert.equal(vehicle.barrelCount, 2);
+  assert.equal(createVehicle(TITAN).barrelCount, 1);
 });

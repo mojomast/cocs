@@ -110,9 +110,203 @@ export const HORNET = freeze({
   ]
 });
 
-const VEHICLE_KINDS = { puma: PUMA, hornet: HORNET };
+const CANNON = freeze({
+  id: 'mounted-cannon',
+  name: 'Mounted Cannon',
+  damage: 34,
+  interval: 0.9,
+  sustainedDps: 37.7777777778,
+  barrels: 1,
+  range: 70,
+  heatPerShot: 0.6,
+  maxHeat: 1,
+  coolRate: 0.25,
+  overheatCooldown: 2.5
+});
+
+const LIGHT_GUN = freeze({
+  id: 'mounted-light-gun',
+  name: 'Mounted Light Gun',
+  damage: 3,
+  interval: 0.06,
+  sustainedDps: 50,
+  barrels: 1,
+  range: 45,
+  heatPerShot: 0,
+  maxHeat: 1,
+  coolRate: 1,
+  overheatCooldown: 0
+});
+
+// Heavy siege chassis: slow, heavily armoured, single high-calibre barrel.
+export const TITAN = freeze({
+  id: 'titan',
+  name: 'Titan',
+  kind: 'titan',
+  class: 'heavy',
+  dimensions: { length: 5.4, width: 3.0, height: 2.2 },
+  speed: 13,
+  acceleration: 7,
+  reverseSpeed: 4,
+  brake: 18,
+  drag: 0.05,
+  wheelBase: 4.2,
+  trackWidth: 2.6,
+  maxSteer: 0.38,
+  steerAssist: 0.8,
+  steerAssistSpeed: 2,
+  maxYawRate: 1.6,
+  handbrakeYaw: 1.2,
+  maxHandbrakeYawRate: 2.2,
+  grip: 9,
+  handbrakeGrip: 2.2,
+  driftLateral: 3.5,
+  boostSpeed: 17,
+  boostAcceleration: 12,
+  boostDuration: 1.6,
+  boostCooldown: 8,
+  traverseRate: 1.1,
+  rollMax: 0.22,
+  pitchMax: 0.3,
+  suspensionRate: 9,
+  bodyRate: 5,
+  health: 650,
+  respawn: 10,
+  capacity: 3,
+  seatLayout: {
+    driver: { x: -0.6, y: 0.3, z: 0.2 },
+    gunner: { x: 0, y: 0.75, z: -1.4 },
+    passengers: [{ x: 0.6, y: 0.3, z: 0.2 }]
+  },
+  mountedChaingun: CANNON,
+  muzzles: [{ x: 0, y: 1.5, z: 1.6 }]
+});
+
+// Light recon chassis: fastest ground vehicle, fragile, single fast barrel.
+export const SCOUT = freeze({
+  id: 'scout',
+  name: 'Scout',
+  kind: 'scout',
+  class: 'light',
+  dimensions: { length: 2.2, width: 1.1, height: 1.3 },
+  speed: 30,
+  acceleration: 24,
+  reverseSpeed: 8,
+  brake: 26,
+  drag: 0.03,
+  wheelBase: 1.5,
+  trackWidth: 0.9,
+  maxSteer: 0.7,
+  steerAssist: 2,
+  steerAssistSpeed: 4,
+  maxYawRate: 4.6,
+  handbrakeYaw: 1.9,
+  maxHandbrakeYawRate: 6.5,
+  grip: 6,
+  handbrakeGrip: 1.4,
+  driftLateral: 5,
+  boostSpeed: 40,
+  boostAcceleration: 36,
+  boostDuration: 2.4,
+  boostCooldown: 5,
+  traverseRate: 2.6,
+  rollMax: 0.5,
+  pitchMax: 0.4,
+  suspensionRate: 14,
+  bodyRate: 10,
+  health: 140,
+  respawn: 4,
+  capacity: 2,
+  seatLayout: {
+    driver: { x: -0.2, y: 0.2, z: 0.1 },
+    passengers: [{ x: 0.2, y: 0.2, z: -0.5 }]
+  },
+  mountedChaingun: LIGHT_GUN,
+  muzzles: [{ x: 0, y: 0.9, z: 0.6 }]
+});
+
+// Armoured personnel carrier: six seats, defensive twin-barrel turret.
+export const TRANSPORT = freeze({
+  id: 'transport',
+  name: 'Transport',
+  kind: 'transport',
+  class: 'transport',
+  dimensions: { length: 6.2, width: 2.6, height: 2.4 },
+  speed: 17,
+  acceleration: 10,
+  reverseSpeed: 6,
+  brake: 20,
+  drag: 0.04,
+  wheelBase: 4.6,
+  trackWidth: 2.2,
+  maxSteer: 0.45,
+  steerAssist: 1,
+  steerAssistSpeed: 3,
+  maxYawRate: 2,
+  handbrakeYaw: 1.4,
+  maxHandbrakeYawRate: 3,
+  grip: 7.5,
+  handbrakeGrip: 2,
+  driftLateral: 3.5,
+  boostSpeed: 22,
+  boostAcceleration: 16,
+  boostDuration: 2,
+  boostCooldown: 7,
+  traverseRate: 1.4,
+  rollMax: 0.28,
+  pitchMax: 0.32,
+  suspensionRate: 10,
+  bodyRate: 6,
+  health: 480,
+  respawn: 9,
+  capacity: 6,
+  seatLayout: {
+    driver: { x: -0.7, y: 0.35, z: 0.2 },
+    gunner: { x: 0, y: 0.8, z: -1.8 },
+    passengers: [
+      { x: 0.7, y: 0.35, z: 0.2 },
+      { x: -0.7, y: 0.35, z: -1.2 },
+      { x: 0.7, y: 0.35, z: -1.2 },
+      { x: 0, y: 0.35, z: -2.4 }
+    ]
+  },
+  mountedChaingun: CHAINGUN,
+  muzzles: [
+    { x: -0.7, y: 1.35, z: -0.4 },
+    { x: 0.7, y: 1.35, z: -0.4 }
+  ]
+});
+
+const VEHICLE_KINDS = { puma: PUMA, hornet: HORNET, titan: TITAN, scout: SCOUT, transport: TRANSPORT };
 const vehicleConfig = vehicle => VEHICLE_KINDS[vehicle?.config?.kind] || VEHICLE_KINDS[vehicle?.kind] || vehicle?.config || GUNTRUCK;
 export { vehicleConfig };
+
+export const VEHICLE_TYPES = freeze([PUMA, HORNET, TITAN, SCOUT, TRANSPORT]);
+export const VEHICLE_KIND_IDS = freeze(VEHICLE_TYPES.map(vehicle => vehicle.id));
+// Resolves the mounted gun's barrel count without assuming the legacy pair.
+export const vehicleMuzzleCount = vehicle => {
+  const template = vehicleConfig(vehicle);
+  const barrels = Math.round(number(template?.mountedChaingun?.barrels, 0));
+  if (barrels > 0) return barrels;
+  return Math.max(1, Math.round(template?.muzzles?.length || 2));
+};
+// Pure handling descriptor for UI/tests. `class` distinguishes the chassis roles.
+export const vehicleStats = vehicle => {
+  const template = vehicleConfig(vehicle);
+  return freeze({
+    id: template.id,
+    name: template.name,
+    class: template.class || 'standard',
+    flight: template.flight === true,
+    health: number(template.health, GUNTRUCK.health),
+    speed: number(template.speed, GUNTRUCK.speed),
+    acceleration: number(template.acceleration, GUNTRUCK.acceleration),
+    turnRate: number(template.maxYawRate, GUNTRUCK.maxYawRate),
+    capacity: 1 + (template.seatLayout?.gunner ? 1 : 0) + (template.seatLayout?.passengers?.length || 0),
+    weapon: template.mountedChaingun?.id || null,
+    barrels: vehicleMuzzleCount(vehicle)
+  });
+};
 
 import {clamp} from './math.mjs';
 
@@ -139,7 +333,9 @@ const readNormal = value => {
 export function createVehicle(template = PUMA) {
   const source = template || GUNTRUCK;
   const config = VEHICLE_KINDS[source.kind] || source || GUNTRUCK;
+  const barrelCount = Math.max(1, Math.round(config?.mountedChaingun?.barrels || config?.muzzles?.length || 2));
   return {
+    barrelCount,
     template: source.id || 'vehicle',
     config,
     position: { x: 0, y: 0, z: 0 },
@@ -352,10 +548,11 @@ function stepFlight(vehicle, input, dt, collision, ground, config, gun) {
       vehicle.turretYaw = number(vehicle.turretYaw, 0);
     }
     if (input.fire === true && !vehicle.overheated && vehicle.fireCooldown <= 0) {
+      const barrels = vehicle.barrelCount || 2;
       vehicle.heat = Math.min(gun.maxHeat, vehicle.heat + gun.heatPerShot);
       vehicle.fireCooldown = gun.interval;
-      vehicle.lastStep = { fired: true, muzzle: vehicle.muzzleIndex, muzzles: [0, 1] };
-      vehicle.muzzleIndex = (vehicle.muzzleIndex + 1) % 2;
+      vehicle.lastStep = { fired: true, muzzle: vehicle.muzzleIndex, muzzles: Array.from({ length: barrels }, (_, i) => i) };
+      vehicle.muzzleIndex = (vehicle.muzzleIndex + 1) % barrels;
       if (vehicle.heat >= gun.maxHeat) {
         vehicle.overheated = true;
         vehicle.overheatTimer = gun.overheatCooldown;
@@ -560,10 +757,11 @@ export function stepVehicle(vehicle, input = {}, dt = 0, collision, ground) {
   vehicle.grounded = groundY === null ? true : grounded;
 
   if (vehicle.gunner == null && input.fire === true && !vehicle.overheated && vehicle.fireCooldown <= 0) {
+    const barrels = vehicle.barrelCount || 2;
     vehicle.heat = Math.min(gun.maxHeat, vehicle.heat + gun.heatPerShot);
     vehicle.fireCooldown = gun.interval;
-    vehicle.lastStep = { fired: true, muzzle: vehicle.muzzleIndex, muzzles: [0, 1] };
-    vehicle.muzzleIndex = (vehicle.muzzleIndex + 1) % 2;
+    vehicle.lastStep = { fired: true, muzzle: vehicle.muzzleIndex, muzzles: Array.from({ length: barrels }, (_, i) => i) };
+    vehicle.muzzleIndex = (vehicle.muzzleIndex + 1) % barrels;
     if (vehicle.heat >= gun.maxHeat) {
       vehicle.overheated = true;
       vehicle.overheatTimer = gun.overheatCooldown;
@@ -589,10 +787,11 @@ export function stepVehicleWeapon(vehicle, input = {}, dt = 0) {
     vehicle.turretYaw = wrapAngle(approachAngle(number(vehicle.turretYaw, 0), input.turretYaw, traverse));
   }
   if (input.fire === true && !vehicle.overheated && vehicle.fireCooldown <= 0) {
+    const barrels = vehicle.barrelCount || 2;
     vehicle.heat = Math.min(gun.maxHeat, vehicle.heat + gun.heatPerShot);
     vehicle.fireCooldown = gun.interval;
-    vehicle.lastStep = { fired: true, muzzle: vehicle.muzzleIndex, muzzles: [0, 1] };
-    vehicle.muzzleIndex = (vehicle.muzzleIndex + 1) % 2;
+    vehicle.lastStep = { fired: true, muzzle: vehicle.muzzleIndex, muzzles: Array.from({ length: barrels }, (_, i) => i) };
+    vehicle.muzzleIndex = (vehicle.muzzleIndex + 1) % barrels;
     if (vehicle.heat >= gun.maxHeat) {
       vehicle.overheated = true;
       vehicle.overheatTimer = gun.overheatCooldown;

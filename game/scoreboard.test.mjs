@@ -41,3 +41,30 @@ test('the soccer pitch map exposes the arena.race contract buildArena reads',()=
  assert.ok(Array.isArray(PUMA_PITCH.race.goals)&&PUMA_PITCH.race.goals.length===2);
  assert.ok(PUMA_PITCH.race.pitch&&Number.isFinite(PUMA_PITCH.race.pitch.minX));
 });
+
+import {scoreboardGroups,streakLabel,pingLabel} from './scoreboard.mjs';
+
+test('streak and ping labels bucket values and hide absent data',()=>{
+ assert.equal(streakLabel({streak:0}),null);
+ assert.equal(streakLabel({streak:-2}),null);
+ assert.deepEqual(streakLabel({streak:5}),{streak:5,label:'5'});
+ assert.equal(pingLabel({}),null);
+ assert.equal(pingLabel({ping:-1}),null);
+ assert.deepEqual(pingLabel({ping:42}),{ping:42,quality:'good',label:'42'});
+ assert.equal(pingLabel({ping:90}).quality,'fair');
+ assert.equal(pingLabel({ping:200}).quality,'poor');
+});
+
+test('scoreboardGroups groups team modes and keeps free-for-all in one group',()=>{
+ const source={config:{mode:'teamdeathmatch'},teamScores:{0:5,1:9},actorId:1,actors:[
+  {id:1,name:'A',team:0,frags:3,deaths:1,streak:2},
+  {id:2,name:'B',team:1,frags:7,deaths:0,streak:4,ping:30},
+ ]};
+ const groups=scoreboardGroups(source);
+ assert.equal(groups.length,2);
+ assert.equal(groups[0].team,1,'the winning team is first');
+ assert.equal(groups[0].actors[0].id,2);
+ const ffa=scoreboardGroups({config:{mode:'deathmatch'},actors:[{id:1,frags:1,team:0},{id:2,frags:5,team:1}]});
+ assert.equal(ffa.length,1);
+ assert.equal(ffa[0].actors[0].id,2,'ffa sorts by frags');
+});

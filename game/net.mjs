@@ -2,7 +2,7 @@ import {getMap} from './maps.mjs';
 import {Match} from './core.mjs';
 import {RULES} from './data.mjs';
 import {clamp, lerp} from './math.mjs';
-import {MESSAGE, validPlayerId, validProgressToken} from './protocol.mjs';
+import {MESSAGE, PROTOCOL_VERSION, validPlayerId, validProgressToken, snapshotDelta, applySnapshotDelta, wireSize, BandwidthMeter} from './protocol.mjs';
 
 export const DEFAULT_SERVER_URL = 'ws://localhost:4000';
 const createPlayerId=()=>{try{return globalThis.crypto?.randomUUID?.()??`p-${Math.random().toString(36).slice(2)}-${Date.now().toString(36)}`;}catch{return `p-${Math.random().toString(36).slice(2)}-${Date.now().toString(36)}`;}};
@@ -16,6 +16,54 @@ const JITTER_REF = 50;
 const turn = (a, b) => ((((b - a) % (Math.PI * 2)) + Math.PI * 3) % (Math.PI * 2)) - Math.PI;
 const VEHICLE_MODES = new Set(['puma-race', 'puma-soccer']);
 const isVehicleMode = mode => VEHICLE_MODES.has(mode);
+// How long a client keeps a sent snapshot as a delta base before falling back
+// to full snapshots. Bounded so the base map cannot grow without limit.
+const DELTA_HISTORY = 64;
+const SNAPSHOT_DELTA_MIN_BYTES = 48;
+
+// Pure entity interpolation shared by the live render path and the test
+// harness. Given two authoritative snapshots and an alpha in [0,1], returns a
+// new state with actors, rockets and vehicles blended. The local actor is never
+// interpolated when `localId` is supplied and the shadow owns it, so prediction
+// stays authoritative for the player's own body. Angles take the shortest arc.
+export function interpolateSnapshots(prev, next, alpha, {localId = null, predicted = false} = {}) {
+ if (!next) return prev ?? null;
+ const t = clamp(Number.isFinite(alpha) ? alpha : 0, 0, 1);
+ const before = prev ?? next;
+ const blendList = (source, linear, angles, {local = false} = {}) => {
+  const list = Array.isArray(next[source]) ? next[source] : [];
+  const priorList = Array.isArray(before?.[source]) ? before[source] : [];
+  return list.map(item => {
+   if (!item || typeof item !== 'object') return item;
+   const prior = priorList.find(x => x && x.id === item.id);
+   if (!prior || (local && item.id === localId && predicted)) return item;
+   const out = { ...item };
+   for (const key of linear) {
+    const a = prior[key], b = item[key];
+    if (Number.isFinite(a) && Number.isFinite(b)) out[key] = lerp(a, b, t);
+   }
+   for (const key of angles) {
+    const a = prior[key], b = item[key];
+    if (Number.isFinite(a) && Number.isFinite(b)) out[key] = a + turn(a, b) * t;
+   }
+   if (item.pos && prior.pos) {
+    const pos = { ...item.pos };
+    for (const axis of ['x', 'y', 'z']) {
+     const a = prior.pos[axis], b = item.pos[axis];
+     if (Number.isFinite(a) && Number.isFinite(b)) pos[axis] = lerp(a, b, t);
+    }
+    out.pos = pos;
+   }
+   return out;
+  });
+ };
+ return {
+  ...next,
+  actors: blendList('actors', ['x', 'y', 'z'], ['yaw', 'pitch'], {local: true}),
+  rockets: blendList('rockets', [], []),
+  vehicles: blendList('vehicles', ['x', 'y', 'z'], ['yaw'], {local: true}),
+ };
+}
 
 export class NetClient {
  constructor(url = DEFAULT_SERVER_URL, options = {}) {
@@ -37,6 +85,8 @@ export class NetClient {
   this.onProgression = null;
   this.onVoiceSignal = null;
   this.baseRenderDelay = clamp(Number(options.renderDelay) || RENDER_DELAY_DEFAULT, RENDER_DELAY_MIN, RENDER_DELAY_MAX);
+  this.protocolVersion = PROTOCOL_VERSION;
+  this.bandwidth = new BandwidthMeter({windowMs: 5000, capacity: 300});
   this._pendingReject = null;
   this.reset();
  }
@@ -81,6 +131,13 @@ export class NetClient {
    this.clockOffset = null;
    this.renderDelay = this.baseRenderDelay;
    this.bufferTarget = BUFFER_MIN;
+   // Delta decoding: sequence -> authoritative state, plus the last applied
+   // sequence so a delta with a missing base can be rejected and re-requested.
+   this.deltaBase = new Map();
+   this.deltaSent = new Map();
+   this.deltaApplied = 0;
+   this.deltaMisses = 0;
+   this.deltaHits = 0;
    this._resetTiming();
   this.lastError = '';
   this.chatLog = [];
@@ -180,6 +237,11 @@ export class NetClient {
      this.inputSeq = 0;
      this.pendingInputs = [];
      this.clockOffset = null;
+     this.deltaBase.clear();
+     this.deltaSent.clear();
+     this.deltaApplied = 0;
+     this.deltaMisses = 0;
+     this.deltaHits = 0;
     this.createShadow(msg.mapId, msg.config);
     this.onStart?.(msg);
     break;
@@ -188,6 +250,7 @@ export class NetClient {
     if (this.events.length > 300) this.events.splice(0, this.events.length - 300);
     break;
     case MESSAGE.SNAPSHOT: this.push(msg); break;
+    case MESSAGE.SNAPSHOT_DELTA: this.pushDelta(msg); break;
      case MESSAGE.PROGRESSION: this.progression = msg.profile ?? this.progression; this.onProgression?.(msg); break;
      case MESSAGE.RESULTS: this.roundOver = true; this.state = msg.state; this.onResults?.(msg); break;
     case MESSAGE.CHAT:
@@ -202,6 +265,7 @@ export class NetClient {
    push(msg) {
    if (Number.isInteger(msg.seq) && msg.seq > 0 && msg.seq <= this.snapshotSeq) return;
    if (Number.isInteger(msg.seq) && msg.seq > 0) this.snapshotSeq = msg.seq;
+   this.bandwidth.record(wireSize(msg), this._now());
    msg.recvAt = performance.now();
    msg.serverTime = Number.isFinite(msg.state?.time) ? msg.state.time : null;
    if (msg.serverTime !== null) { const sample=msg.recvAt-msg.serverTime*1000;this.clockOffset=this.clockOffset===null?sample:lerp(this.clockOffset,sample,.08); }
@@ -210,6 +274,7 @@ export class NetClient {
    this._adapt();
    while (this.buffer.length > this.bufferTarget) this.buffer.shift();
   this.state = msg.state;
+   this._rememberBase(msg);
    const actors = Array.isArray(msg.state?.actors) ? msg.state.actors.filter(a => a && typeof a === 'object') : [];
    if (msg.state?.race) {
     // Race IDs, inventory and standings belong exclusively to the server.
@@ -234,9 +299,69 @@ export class NetClient {
      if(ack!==null){this.pendingInputs=this.pendingInputs.filter(item=>item.seq>ack);for(const item of this.pendingInputs)this.shadow.step(RULES.dt,{inputs:{[this.shadow.actors[0].id]:item.input}});}
      this.resynced = true;
     }
+   }
   }
- }
- _resetTiming() {
+  _now() {
+   try { return performance.now(); } catch { return 0; }
+  }
+  // Keep a bounded map of sequence -> authoritative state so a later delta can
+  // be reconstructed. Only full snapshots become bases.
+  _rememberBase(msg) {
+   if (!Number.isInteger(msg.seq) || msg.seq <= 0 || !msg.state) return;
+   this.deltaBase.set(msg.seq, msg.state);
+   this.deltaApplied = msg.seq;
+   while (this.deltaBase.size > DELTA_HISTORY) {
+    const oldest = this.deltaBase.keys().next().value;
+    this.deltaBase.delete(oldest);
+   }
+  }
+  // Decode a version-2 delta frame. `base` names the sequence the patch was
+  // computed against; when that base is missing (dropped or evicted) the frame
+  // is counted as a miss and ignored, and the next full snapshot re-syncs.
+  pushDelta(msg) {
+   if (!msg || !Number.isInteger(msg.seq) || msg.seq <= 0) return false;
+   const base = this.deltaBase.get(msg.base);
+   if (!base) { this.deltaMisses++; return false; }
+   if (msg.seq <= this.snapshotSeq) return false;
+   let state;
+   try { state = applySnapshotDelta(base, msg.patch); } catch { this.deltaMisses++; return false; }
+   this.deltaHits++;
+   this.push({ seq: msg.seq, acks: msg.acks, state });
+   return true;
+  }
+  // Build the next outbound frame for a sequence: a delta against the last
+  // sent base when it saves bytes, otherwise a full snapshot. The server owns
+  // the authoritative state and calls this once per broadcast. Every emitted
+  // frame is remembered so the next one can patch against it; a full snapshot
+  // becomes the new base.
+  encodeSnapshot(seq, state, {acks = {}, base = null, force = false} = {}) {
+   const priorSeq = Number.isInteger(base) ? base : this.deltaApplied;
+   if (!force && Number.isInteger(priorSeq) && priorSeq > 0) {
+    const prior = this.deltaSent.get(priorSeq);
+    if (prior) {
+     const patch = snapshotDelta(prior, state);
+     if (patch) {
+      const delta = { type: MESSAGE.SNAPSHOT_DELTA, v: PROTOCOL_VERSION, seq, base: priorSeq, acks, patch };
+      if (wireSize(delta) + SNAPSHOT_DELTA_MIN_BYTES < wireSize({ type: MESSAGE.SNAPSHOT, seq, acks, state })) {
+       this._rememberSent(seq, state);
+       return delta;
+      }
+     }
+    }
+   }
+   this._rememberSent(seq, state);
+   return { type: MESSAGE.SNAPSHOT, v: PROTOCOL_VERSION, seq, acks, state };
+  }
+  _rememberSent(seq, state) {
+   if (!Number.isInteger(seq) || seq <= 0 || !state) return;
+   this.deltaSent.set(seq, state);
+   this.deltaApplied = seq;
+   while (this.deltaSent.size > DELTA_HISTORY) {
+    const oldest = this.deltaSent.keys().next().value;
+    this.deltaSent.delete(oldest);
+   }
+  }
+  _resetTiming() {
   this._lastRecvAt = null;
   this._lastSeq = null;
   this._lastServerTime = null;
@@ -367,5 +492,102 @@ export class NetClient {
     }
    }
    return { ...base, actors, vehicles, rockets, events: this.events };
+  }
+ }
+
+// ---------------------------------------------------------------------------
+// Deterministic netcode harness.
+//
+// A seeded, in-process simulation of a server and one predicting client. It
+// models one-way latency, jitter and packet loss deterministically so the
+// prediction/reconciliation path can be asserted frame-for-frame in tests
+// without a socket, a clock or a browser. The harness steps the authoritative
+// `Match`, delivers snapshots (optionally as deltas), and exposes the client's
+// shadow actor for divergence checks.
+// ---------------------------------------------------------------------------
+export class NetHarness {
+ constructor({mapId = 'crosswire', config = {}, seed = 1, latency = 2, jitter = 0, loss = 0, delta = true, keyframeEvery = 0, humanCount = 1, botCount = 0} = {}) {
+  let state = seed >>> 0 || 1;
+  this.random = () => ((state = (Math.imul(state, 1664525) + 1013904223) >>> 0) / 4294967296);
+  this.server = new Match('chatgpt', 'openclaw', this.random, mapId, { ...config, humanCount, botCount });
+  this.client = new NetClient();
+  this.client.createShadow(mapId, { ...config, humanCount, botCount });
+  this.client.actorId = this.server.actors[0]?.id ?? 0;
+  this.latency = Math.max(0, Math.floor(latency));
+  this.jitter = Math.max(0, Math.floor(jitter));
+  this.loss = clamp(Number(loss) || 0, 0, 1);
+  this.delta = delta;
+  // Emit a full snapshot every N frames so a client that missed a delta base
+  // can re-sync without waiting for the next match. 0 disables keyframes.
+  this.keyframeEvery = Math.max(0, Math.floor(keyframeEvery) || 0);
+  this.dt = RULES.dt;
+  this.seq = 0;
+  this.tick = 0;
+  this.inFlight = [];
+  this.pendingInputs = [];
+  this.stats = { sent: 0, delivered: 0, dropped: 0, deltaFrames: 0, fullFrames: 0, bytes: 0, deltaBytes: 0, fullBytes: 0 };
+ }
+ // Queue an input for the next tick, exactly like NetClient.input + predict.
+ send(input) {
+  const seq = this.client.input(input);
+  this.client.predict(input);
+  this.pendingInputs.push({ seq, input: { ...input } });
+  return seq;
+ }
+ // Advance one authoritative tick: apply every queued input, step the server,
+ // then deliver any snapshot whose latency has elapsed.
+ step(input = null) {
+  if (input) this.send(input);
+  const inputs = {};
+  for (const item of this.pendingInputs) inputs[this.server.actors[0].id] = item.input;
+  this.pendingInputs = [];
+  this.server.step(this.dt, { inputs });
+  this.tick++;
+  const ack = this.client.inputSeq;
+  const state = this.server.snapshot();
+  const keyframe = this.keyframeEvery > 0 && this.seq > 0 && this.seq % this.keyframeEvery === 0;
+  const frame = this.delta && this.seq > 0
+   ? this.client.encodeSnapshot(this.seq + 1, state, { acks: { [this.client.actorId]: ack }, base: this.seq, force: keyframe })
+   : { type: MESSAGE.SNAPSHOT, seq: this.seq + 1, acks: { [this.client.actorId]: ack }, state };
+  this.seq++;
+  const size = wireSize(frame);
+  this.stats.sent++;
+  this.stats.bytes += size;
+  if (frame.type === MESSAGE.SNAPSHOT_DELTA) { this.stats.deltaFrames++; this.stats.deltaBytes += size; }
+  else { this.stats.fullFrames++; this.stats.fullBytes += size; }
+  const jitter = this.jitter ? Math.floor(this.random() * (this.jitter + 1)) : 0;
+  this.inFlight.push({ at: this.tick + this.latency + jitter, frame });
+  const ready = [];
+  for (const packet of this.inFlight) {
+   if (packet.at > this.tick) { ready.push(packet); continue; }
+   if (this.loss > 0 && this.random() < this.loss) { this.stats.dropped++; continue; }
+   if (packet.frame.type === MESSAGE.SNAPSHOT_DELTA) this.client.pushDelta(packet.frame);
+   else this.client.push(packet.frame);
+   this.stats.delivered++;
+  }
+  this.inFlight = ready;
+  return this.server.snapshot();
+ }
+ // Absolute divergence between the predicted shadow actor and the server.
+ divergence() {
+  const a = this.client.shadow?.actors?.[0];
+  const b = this.server.actors[0];
+  if (!a || !b) return Infinity;
+  return Math.hypot(a.x - b.x, a.y - b.y, a.z - b.z);
+ }
+ flush() {
+  while (this.inFlight.length) {
+   this.tick++;
+   const ready = [];
+   for (const packet of this.inFlight) {
+    if (packet.at > this.tick) { ready.push(packet); continue; }
+    if (this.loss > 0 && this.random() < this.loss) { this.stats.dropped++; continue; }
+    if (packet.frame.type === MESSAGE.SNAPSHOT_DELTA) this.client.pushDelta(packet.frame);
+    else this.client.push(packet.frame);
+    this.stats.delivered++;
+   }
+   this.inFlight = ready;
+  }
+  return this.client;
  }
 }

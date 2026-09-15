@@ -1,5 +1,33 @@
 # COCS verification report
 
+## Release 4.5 - Netcode, replay, camera, vehicles, levelgen, matchmaking
+
+**Netcode & replays**
+- Snapshot **delta compression** with bandwidth accounting and a deterministic
+  prediction/reconciliation harness (latency, jitter, loss, keyframes); protocol
+  bumped to v2 with a backward-compatible full-snapshot fallback.
+- Replay **kill feed**, objective timeline, summary and a seekable/speed-aware
+  playback controller.
+
+**Presentation**
+- Four new camera modes (cinematic, over-shoulder, free-look, tactical) with
+  frame-rate-independent smoothing; race cinematic rig.
+- Richer radar (off-screen indicators, objective markers/progress) and a grouped
+  scoreboard with streaks and ping; team outlines and capped announcer callouts.
+
+**World & sim**
+- New vehicles (**Titan**, **Scout**, **Transport**) with distinct handling and
+  mounted weapons; levelgen compounds/terraces/towers and biome prop scatter;
+  structural **map-schema validation** with degenerate-layout rejection.
+
+**Server & meta**
+- Matchmaking queue with deterministic team balancing, room lifecycle (warmup,
+  ready-up, map vote, rematch), cross-session leaderboards and anti-cheat stat
+  bounds.
+
+Verification: game **1294/1294**, server **141/141**, `tests/` **5/5**, `tsc`
+clean, lint 0 errors, build clean.
+
 ## Release 4.4 - Objective variants, endless horde, economy, inspect, accessibility
 
 **Gameplay**

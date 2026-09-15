@@ -1,5 +1,70 @@
 import {clamp01} from './math.mjs';
+import {teamCallout} from './team-presentation.mjs';
 const eligible = player => player?.connected === true && !player.spectate;
+
+// ---------------------------------------------------------------------------
+// Announcer callout queue.
+//
+// A small, bounded, disposable bus for objective/streak callouts. It mirrors the
+// synth's voice cap discipline: at most `cap` callouts are live at once, a
+// higher-priority callout may pre-empt a lower one, duplicates inside the
+// dedupe window are dropped, and dispose() silences everything immediately.
+// It is deliberately renderer/audio agnostic so the page can pump events into
+// it and read the active list, and so it is unit-testable without WebAudio.
+// ---------------------------------------------------------------------------
+export class CalloutQueue {
+ constructor({cap = 3, dedupeMs = 1500, onCallout = () => {}} = {}) {
+  this.cap = Math.max(1, Math.floor(Number(cap) || 3));
+  this.dedupeMs = Math.max(0, Number(dedupeMs) || 0);
+  this.onCallout = onCallout;
+  this.active = [];
+  this.seen = new Map();
+  this.disposed = false;
+ }
+ // Offer a match event; returns the accepted callout or null. `at` is a
+ // monotonic time in ms (defaults to 0 so tests are deterministic).
+ offer(event, at = 0) {
+  if (this.disposed) return null;
+  const callout = teamCallout(event);
+  if (!callout) return null;
+  const key = callout.id;
+  const last = this.seen.get(key);
+  if (last !== undefined && at - last < this.dedupeMs) return null;
+  this.seen.set(key, at);
+  // Pre-empt the lowest-priority live callout when full and this one outranks it.
+  if (this.active.length >= this.cap) {
+   let weakest = 0;
+   for (let i = 1; i < this.active.length; i++) if (this.active[i].priority < this.active[weakest].priority) weakest = i;
+   if (this.active[weakest].priority >= callout.priority) return null;
+   this.active.splice(weakest, 1);
+  }
+  const entry = { ...callout, at };
+  this.active.push(entry);
+  try { this.onCallout(entry); } catch {}
+  return entry;
+ }
+ // Offer a batch and return the accepted callouts, highest priority first.
+ offerAll(events, at = 0) {
+  const accepted = [];
+  const ordered = [...(Array.isArray(events) ? events : [])].sort((a, b) => (teamCallout(b)?.priority ?? 0) - (teamCallout(a)?.priority ?? 0));
+  for (const event of ordered) { const entry = this.offer(event, at); if (entry) accepted.push(entry); }
+  return accepted;
+ }
+ // Drop callouts older than `ttlMs` relative to `at`.
+ expire(at = 0, ttlMs = 2500) {
+  if (!(ttlMs > 0)) return this.active.length;
+  this.active = this.active.filter(entry => at - entry.at < ttlMs);
+  return this.active.length;
+ }
+ clear() { this.active.length = 0; }
+ dispose() {
+  if (this.disposed) return;
+  this.disposed = true;
+  this.clear();
+  this.seen.clear();
+  this.onCallout = () => {};
+ }
+}
 const stop = stream => { for (const track of stream?.getTracks() ?? []) { track.onended = null; track.stop(); } };
 const disconnect = node => { try { node?.disconnect(); } catch {} };
 const removeSink = sink => {

@@ -553,3 +553,31 @@ for (const lifecycle of ['session replacement', 'departure', 'disable', 'dispose
     assert.equal(h.voice.state.error, '');
   });
 }
+
+import {CalloutQueue} from './voice.mjs';
+
+test('CalloutQueue caps live callouts, dedupes by id and pre-empts weaker cues',()=>{
+ const seen=[];
+ const queue=new CalloutQueue({cap:2,dedupeMs:1000,onCallout:entry=>seen.push(entry.id)});
+ assert.ok(queue.offer({type:'flag-drop'},0));
+ assert.equal(queue.offer({type:'flag-drop'},500),null,'a duplicate inside the window is dropped');
+ assert.ok(queue.offer({type:'capture'},600));
+ assert.equal(queue.active.length,2);
+ const preempt=queue.offer({type:'payload-delivered'},700);
+ assert.ok(preempt,'a higher-priority cue pre-empts the weakest live one');
+ assert.equal(queue.active.length,2);
+ assert.deepEqual(seen,['flag-drop','capture','payload-delivered']);
+ assert.equal(queue.offer({type:'victory'},800).priority,5);
+ queue.expire(5000,2500);
+ assert.equal(queue.active.length,0,'stale callouts expire');
+});
+
+test('CalloutQueue disposes cleanly and ignores later offers',()=>{
+ const queue=new CalloutQueue({cap:2});
+ queue.offer({type:'capture'},0);
+ queue.dispose();
+ assert.equal(queue.disposed,true);
+ assert.equal(queue.active.length,0);
+ assert.equal(queue.offer({type:'victory'},10),null,'a disposed queue accepts nothing');
+ queue.dispose();
+});

@@ -16,6 +16,7 @@ import {cavernOpening} from './structures.mjs';
 import {terrainSupportAt, terrainWallSegments} from './terrain.mjs';
 import {RULES} from './data.mjs';
 import {clamp, lerp} from './math.mjs';
+import {validateMapSchema} from './map-schema.mjs';
 
 export function mulberry32(seed) {
   let a = (seed >>> 0) || 0x6d2b79f5;
@@ -58,6 +59,21 @@ const BIOME_MATERIAL = {
   ruins: { low: 'sand', mid: 'stone', high: 'stone', peak: 'rock' },
   cavern: { low: 'stone', mid: 'rock', high: 'rock', peak: 'rock' },
 };
+
+// Biome-aware dressing. Each biome names the prop vocabulary that reads
+// correctly on its surface, so a snow map never sprouts desert scrub. Builders
+// resolve to the ctx.add* helpers, which already carry collision and clearance
+// rules; `weight` biases the deterministic pick.
+const BIOME_PROPS = {
+  canyon: [{ type: 'rock', weight: 5 }, { type: 'crate', weight: 2 }, { type: 'ruin', weight: 1 }],
+  forest: [{ type: 'tree', weight: 5 }, { type: 'rock', weight: 2 }, { type: 'crate', weight: 1 }],
+  snow: [{ type: 'tree', weight: 3 }, { type: 'rock', weight: 4 }, { type: 'crate', weight: 1 }],
+  volcanic: [{ type: 'rock', weight: 4 }, { type: 'barrel', weight: 3 }, { type: 'crate', weight: 1 }],
+  urban: [{ type: 'crate', weight: 4 }, { type: 'barrel', weight: 2 }, { type: 'ruin', weight: 2 }],
+  ruins: [{ type: 'ruin', weight: 4 }, { type: 'rock', weight: 3 }, { type: 'crate', weight: 1 }],
+  cavern: [{ type: 'rock', weight: 4 }, { type: 'barrel', weight: 2 }, { type: 'ruin', weight: 1 }],
+};
+export const biomePropTable = biome => BIOME_PROPS[biome] || BIOME_PROPS.canyon;
 
 // Build a triangulated heightfield over the level bounds. Materials are grouped
 // per-surface so the renderer can texture each biome separately.
@@ -181,6 +197,102 @@ export function createLevel(spec) {
     return x;
   };
 
+  // A multi-room building: an outer shell plus interior partition walls that
+  // leave doorways between rooms, so the interior is genuinely walkable and
+  // reads as more than a hollow box. `rooms` is a grid [cols, rows]; each
+  // partition gets a door gap centred on the wall. The shell reuses the
+  // single-room builder so collision/doors/nav stay consistent.
+  ctx.addCompound = (o) => {
+    const { x, z, w, d, h = 6, rot = 0, rooms = [2, 1], wall = 0.5, door = 'south', doorWidth = 2.2, roof = 'gable', color, windows = true, y } = o;
+    const q = quarter(rot), baseY = y ?? terrain.height(x, z);
+    ctx.addBuilding({ x, z, w, d, h, rot, wall, door, doorWidth, roof, color, windows, y: baseY });
+    const [cols, rows] = [Math.max(1, Math.round(rooms[0] || 1)), Math.max(1, Math.round(rooms[1] || 1))];
+    const innerW = w - wall * 2, innerD = d - wall * 2;
+    const place = (lx, lz, sw, sd, hh) => {
+      const [rx, rz] = rotateLocal(lx, lz, q);
+      const [sw2, sd2] = q % 2 === 0 ? [sw, sd] : [sd, sw];
+      ctx.addBlock({ x: x + rx, z: z + rz, w: sw2, d: sd2, h: baseY + hh, kind: 'partition' });
+    };
+    const gap = Math.min(doorWidth, 2.4);
+    for (let i = 1; i < cols; i++) {
+      const lx = -innerW / 2 + (innerW * i) / cols;
+      const seg = (innerD - gap) / 2;
+      if (seg > 0.4) { place(lx, -innerD / 2 + seg / 2, wall, seg, h); place(lx, innerD / 2 - seg / 2, wall, seg, h); }
+      else place(lx, 0, wall, innerD, h);
+    }
+    for (let j = 1; j < rows; j++) {
+      const lz = -innerD / 2 + (innerD * j) / rows;
+      const seg = (innerW - gap) / 2;
+      if (seg > 0.4) { place(-innerW / 2 + seg / 2, lz, seg, wall, h); place(innerW / 2 - seg / 2, lz, seg, wall, h); }
+      else place(0, lz, innerW, wall, h);
+    }
+    ctx.addStructure({ type: 'compound', x, z, y: baseY, w, d, h, rot, rooms: [cols, rows], roof, color, door });
+    return { x, z, y: baseY, w, d, h, rooms: [cols, rows] };
+  };
+
+  // A stepped terrace: `tiers` concentric (or stacked) decks of rising height,
+  // each with a ramp on alternating sides so every tier stays walkable. This is
+  // the verticality primitive: a hilltop, a rooftop cluster or a ziggurat.
+  ctx.addTerrace = (o) => {
+    const { x, z, tiers = 3, size = 18, step = 4, rise = 1.6, rot = 0 } = o;
+    const baseY = o.y ?? terrain.height(x, z);
+    const q = quarter(rot);
+    for (let tier = 0; tier < tiers; tier++) {
+      const span = Math.max(3, size - tier * step * 2), height = baseY + rise * (tier + 1);
+      ctx.addBlock({ x, z, w: span, d: span, h: height, kind: 'terrace' });
+      const rampSpan = Math.max(2.5, span * 0.35), offset = span / 2 + step / 2;
+      const [rx, rz] = rotateLocal(offset, 0, q);
+      ctx.addBlock({ x: x + rx, z: z + rz, w: step, d: rampSpan, h: baseY + rise * tier + rise * 0.5, kind: 'ramp' });
+      const [bx, bz] = rotateLocal(-offset, 0, q);
+      ctx.addBlock({ x: x + bx, z: z + bz, w: step, d: rampSpan, h: baseY + rise * tier + rise * 0.5, kind: 'ramp' });
+      for (let a = 0; a < 4; a++) { const angle = (a / 4) * Math.PI * 2 + Math.PI / 4; ctx.addNav(x + Math.cos(angle) * span * 0.4, z + Math.sin(angle) * span * 0.4); }
+    }
+    ctx.addStructure({ type: 'terrace', x, z, y: baseY, tiers, size, step, rise, rot });
+    return { x, z, y: baseY, tiers };
+  };
+
+  // A vertical tower: a solid core with a ring of decks and a top platform,
+  // connected by alternating ramps. Collision stays box-based; the renderer
+  // smooths the silhouette. `height` is the top deck height above ground.
+  ctx.addTower = (o) => {
+    const { x, z, radius = 3, height = 12, decks = 3, deckSize = 7 } = o;
+    const baseY = o.y ?? terrain.height(x, z);
+    ctx.addBlock({ x, z, w: radius * 2, d: radius * 2, h: baseY + height, kind: 'tower' });
+    for (let deck = 1; deck <= decks; deck++) {
+      const y = baseY + (height * deck) / (decks + 1), angle = (deck % 2 ? 0 : Math.PI);
+      ctx.addBlock({ x: x + Math.cos(angle) * deckSize, z: z + Math.sin(angle) * deckSize, w: deckSize, d: deckSize * 0.5, h: y, kind: 'deck' });
+      ctx.addBlock({ x: x + Math.cos(angle + Math.PI / 2) * deckSize, z: z + Math.sin(angle + Math.PI / 2) * deckSize, w: deckSize * 0.5, d: deckSize, h: y, kind: 'deck' });
+      ctx.addNav(x + Math.cos(angle) * deckSize, z + Math.sin(angle) * deckSize);
+    }
+    ctx.addStructure({ type: 'tower', x, z, y: baseY, radius, height, decks });
+    return { x, z, y: baseY, height, decks };
+  };
+
+  // Biome-aware prop scatter. Deterministic (uses ctx.rng), respects the
+  // collision/clearance rules of the underlying add* helpers, and never
+  // overwrites authored props when `respectAuthored` is set.
+  ctx.addBiomeProps = (o = {}) => {
+    const biome = o.biome ?? spec.biome ?? 'canyon';
+    const table = biomePropTable(biome);
+    const count = Math.max(0, Math.round(o.count ?? 12));
+    const margin = o.margin ?? 8;
+    const rng = o.rng ?? rng;
+    const total = table.reduce((sum, entry) => sum + entry.weight, 0);
+    const pick = () => { let roll = rng() * total; for (const entry of table) { roll -= entry.weight; if (roll <= 0) return entry.type; } return table[table.length - 1].type; };
+    const builders = { rock: ctx.addRock, tree: ctx.addTree, crate: ctx.addCrate, barrel: ctx.addBarrel, ruin: ctx.addRuin };
+    const placed = [];
+    for (let i = 0; i < count; i++) {
+      const x = bounds.minX + margin + rng() * (bounds.maxX - bounds.minX - margin * 2);
+      const z = bounds.minZ + margin + rng() * (bounds.maxZ - bounds.minZ - margin * 2);
+      const type = pick(), builder = builders[type];
+      if (!builder) continue;
+      const before = ctx.props.length;
+      builder({ x, z, scale: 0.7 + rng() * 0.6 });
+      if (ctx.props.length > before) placed.push({ type, x, z });
+    }
+    return placed;
+  };
+
   // A hollow tunnel: side-wall collision boxes along the path and a smooth tube
   // mesh for the roof/arch. Points are [x,y,z]; y defaults to the terrain.
   ctx.addTunnel = (rawPoints, radius = 3) => {
@@ -245,6 +357,22 @@ export function createLevel(spec) {
   }
   // Supplement authored approach chains; even diagonal grid edges fit walkEdge.
   for (let x = bounds.minX + 2; x < bounds.maxX; x += 4) for (let z = bounds.minZ + 2; z < bounds.maxZ; z += 4) ctx.addNav(x, z);
+  // Connected objective placement: lay a short nav chain between every pair of
+  // consecutive objectives and from each team spawn to the nearest objective.
+  // The grid above guarantees coverage; these chains guarantee the *authored*
+  // objective order is walkable even when an objective sits on a deck or across
+  // a narrow gap the coarse grid might straddle.
+  const navChain = (ax, az, bx, bz) => {
+    const steps = Math.max(1, Math.ceil(Math.hypot(bx - ax, bz - az) / 3));
+    for (let i = 0; i <= steps; i++) ctx.addNav(ax + (bx - ax) * i / steps, az + (bz - az) * i / steps);
+  };
+  const orderedObjectives = [...ctx.objectiveZones].sort((a, b) => Math.hypot(a.x, a.z) - Math.hypot(b.x, b.z));
+  for (let i = 1; i < orderedObjectives.length; i++) navChain(orderedObjectives[i - 1].x, orderedObjectives[i - 1].z, orderedObjectives[i].x, orderedObjectives[i].z);
+  for (const team of [0, 1]) for (const [sx, sz] of ctx.teamSpawns[team]) {
+    let nearest = null, bestDistance = Infinity;
+    for (const zone of orderedObjectives) { const d = Math.hypot(zone.x - sx, zone.z - sz); if (d < bestDistance) { bestDistance = d; nearest = zone; } }
+    if (nearest) navChain(sx, sz, nearest.x, nearest.z);
+  }
   // Guarantee the supplies a match expects (weapon tiers, health/armor and
   // powerups) and place any missing spawn points on supported ground.
   const anchors = [...ctx.objectiveZones.map(z => [z.x, z.z]).sort((a, b) => Math.hypot(a[0], a[1]) - Math.hypot(b[0], b[1])), ...ctx.spawns, ...Object.values(ctx.teamSpawns).flat()];
@@ -308,7 +436,7 @@ export function createLevel(spec) {
   for (const zone of ctx.objectiveZones) { [zone.x, zone.z] = clearSpot(zone.x, zone.z, .65); zone.y = floor(zone.x, zone.z); }
 
   const map = {
-    id: spec.id, name: spec.name, tag: spec.tag, description: spec.description, color: spec.color, background: spec.background,
+    id: spec.id, name: spec.name ?? spec.id, tag: spec.tag, description: spec.description, color: spec.color, background: spec.background,
     bounds, terrain, blocks: ctx.blocks, spawns: ctx.spawns, pickups: ctx.pickups, navNodes: ctx.navNodes,
     objectiveZones: ctx.objectiveZones, vehicles: ctx.vehicles, traversal: ctx.traversal,
     structures: ctx.structures, props: ctx.props, nextGen: true,
@@ -326,5 +454,23 @@ export function createLevel(spec) {
     map.flagSpawns = Object.fromEntries(Object.entries(map.flagSpawns).map(([team, point]) => [team, clearSpot(...pair(point), .65)]));
     map.flags = map.flagSpawns;
   }
+  // Schema validation pass: reject degenerate layouts before they reach the
+  // simulation. `spec.validate === false` opts a fixture out (tests only).
+  const schemaErrors = validateMapSchema(map);
+  if (schemaErrors.length && spec.validate !== false) throw new Error(`${spec.id}: invalid map schema — ${schemaErrors.join('; ')}`);
+  map.schemaErrors = schemaErrors;
   return map;
 }
+
+// Rejection helper used by tests and tooling: a layout is degenerate when the
+// schema is invalid, when it has no walkable objective, or when a required
+// placement still sits inside a solid. Returns a reason string, or null.
+export function degenerateLayout(map) {
+  const errors = validateMapSchema(map);
+  if (errors.length) return errors.join('; ');
+  if (!map.objectiveZones?.length) return 'no objective zones';
+  if (!map.navNodes?.length) return 'no nav nodes';
+  if (!map.spawns?.length && !Object.values(map.teamSpawns || {}).some(list => list?.length)) return 'no spawns';
+  return null;
+}
+

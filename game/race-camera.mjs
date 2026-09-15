@@ -9,6 +9,45 @@ export const RACE_DEMO_MODE_SECONDS = 7;
 const num = (value, fallback = 0) => (Number.isFinite(value) ? value : fallback);
 const clamp = (value, min, max) => (value < min ? min : value > max ? max : value);
 
+// ---------------------------------------------------------------------------
+// Race camera smoothing. The view applies these to the raw raceDemoPose output
+// so the menu reel glides between rigs instead of snapping. Frame-rate
+// independent exponential easing plus shortest-arc angles; pure and testable.
+// ---------------------------------------------------------------------------
+export const RACE_CAMERA_HALF_LIFE = .14;
+
+const shortestArc = (a, b) => ((((b - a) % (Math.PI * 2)) + Math.PI * 3) % (Math.PI * 2)) - Math.PI;
+
+export function raceSmoothFactor(halfLife, dt) {
+ const life = Number(halfLife), step = Number(dt);
+ if (!(life > 0) || !(step > 0)) return 1;
+ return 1 - Math.pow(2, -step / life);
+}
+
+// Blend two race poses. Position and look-at ease linearly; the implied yaw of
+// the look direction is not stored, so only the scalar fields need easing.
+export function blendRacePose(current, target, { halfLife = RACE_CAMERA_HALF_LIFE, dt = 1 / 60 } = {}) {
+ if (!target) return current ?? null;
+ const a = current ?? {};
+ const k = raceSmoothFactor(halfLife, dt);
+ const out = { ...target };
+ for (const key of ['x', 'y', 'z', 'lookX', 'lookY', 'lookZ', 'fov']) {
+  const from = num(a[key], num(target[key]));
+  const to = num(target[key], from);
+  out[key] = from + (to - from) * k;
+ }
+ return out;
+}
+
+// Bearing (radians) from a race pose to its look-at point, so a caller can aim
+// a mount or billboard consistently.
+export function racePoseBearing(pose) {
+ if (!pose) return 0;
+ return Math.atan2(num(pose.lookX) - num(pose.x), num(pose.lookZ) - num(pose.z));
+}
+
+export { shortestArc as raceShortestArc };
+
 export function raceDemoMode(elapsed) {
   const t = Number.isFinite(elapsed) ? Math.max(0, elapsed) : 0;
   return RACE_DEMO_MODES[Math.floor(t / RACE_DEMO_MODE_SECONDS) % RACE_DEMO_MODES.length];
@@ -110,7 +149,7 @@ export function raceDemoPose({ mode, centerline, vehicle, vehicles, elapsed } = 
   const segment = Math.floor(t / RACE_DEMO_MODE_SECONDS);
   const selected = list.length ? list[((segment % list.length) + list.length) % list.length] : null;
   const focus = selected || { x: 0, y: 0, z: 0, yaw: 0 };
-  const rig = RACE_DEMO_MODES.includes(mode) ? mode : 'chase';
+  const rig = RACE_DEMO_MODES.includes(mode) || mode === 'cinematic' ? mode : 'chase';
   const pack = packCenter(list) || focus;
   const bounds = poseBounds(points, list);
   let x = focus.x, y = focus.y + 5, z = focus.z;
@@ -128,6 +167,14 @@ export function raceDemoPose({ mode, centerline, vehicle, vehicles, elapsed } = 
     const sample = sampleCenterline(points, ahead + 18) || { x: focus.x, z: focus.z, dx: 0, dz: 1 };
     x = sample.x; y = 12 + 1.4 * Math.sin(t * 0.31); z = sample.z;
     lookX = pack.x; lookY = pack.y + 1.2; lookZ = pack.z;
+  } else if (rig === 'cinematic') {
+    // Low, wide tracking shot that leads the pack along the racing line. Not in
+    // the auto-cycling list; opt in explicitly for a hero shot.
+    const ahead = pack && points.length ? nearestArcLength(points, pack) : t * 16;
+    const sample = sampleCenterline(points, ahead + 9) || { x: focus.x, z: focus.z, dx: 0, dz: 1 };
+    const bank = Math.sin(t * 0.4) * 2.4;
+    x = sample.x - sample.dz * 7 + bank; y = 2.6; z = sample.z + sample.dx * 7;
+    lookX = pack.x; lookY = pack.y + 1.4; lookZ = pack.z;
   } else {
     const anchor = sampleCenterline(points, segment * RACE_DEMO_MODE_SECONDS * 13) || { x: focus.x, z: focus.z, dx: 0, dz: 1 };
     const side = segment % 2 ? 1 : -1;

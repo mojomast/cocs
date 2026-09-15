@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {MESSAGE,validPlayerId,validProgressToken,sanitizeText,parseInputEnvelope} from './protocol.mjs';
+import {MESSAGE,validPlayerId,validProgressToken,sanitizeText,parseInputEnvelope,snapshotDelta,applySnapshotDelta,wireSize,BandwidthMeter} from './protocol.mjs';
 
 test('message types expose the canonical wire vocabulary',()=>{
  for(const type of [MESSAGE.JOIN,MESSAGE.CREATE,MESSAGE.LIST,MESSAGE.HISTORY,MESSAGE.HOST,MESSAGE.GEAR,MESSAGE.START,MESSAGE.INPUT,MESSAGE.CHAT,MESSAGE.LEAVE,MESSAGE.PING,MESSAGE.PONG,MESSAGE.WELCOME,MESSAGE.LOBBY,MESSAGE.ROOMS,MESSAGE.SNAPSHOT,MESSAGE.EVENTS,MESSAGE.RESULTS,MESSAGE.PROGRESSION,MESSAGE.ERROR,MESSAGE.VOICE_STATE,MESSAGE.VOICE_SIGNAL,MESSAGE.VOICE_CONFIG])assert.equal(typeof type,'string');
@@ -79,4 +79,26 @@ test('parseInputEnvelope tolerates malformed frames with safe defaults',()=>{
   assert.equal(input.power,false);
   assert.equal(input.reload,false);
  }
+});
+
+test('snapshotDelta round-trips through applySnapshotDelta and marks deletions', () => {
+ const base = {time: 1, actors: [{id: 0, x: 0, y: 0}], flags: {0: {x: 1, z: 2}}, gone: 5};
+ const next = {time: 2, actors: [{id: 0, x: 3, y: 0}], flags: {0: {x: 1, z: 4}}};
+ const patch = snapshotDelta(base, next);
+ assert.ok(patch, 'a changed tree produces a patch');
+ assert.equal(patch.gone.$d, 1, 'a removed key is marked for deletion');
+ const rebuilt = applySnapshotDelta(base, patch);
+ assert.deepEqual(rebuilt, next);
+ assert.equal(snapshotDelta(base, { ...base }), null, 'an unchanged tree yields no patch');
+});
+
+test('wireSize and BandwidthMeter report bytes and a sliding rate', () => {
+ assert.ok(wireSize({a: 1}) > 0);
+ const meter = new BandwidthMeter({windowMs: 1000, capacity: 8});
+ for (let i = 0; i < 5; i++) meter.record(100, i * 100);
+ assert.equal(meter.totalBytes, 500);
+ assert.equal(meter.totalFrames, 5);
+ assert.equal(meter.rate(400), 500);
+ assert.equal(meter.rate(1100), 400, 'older samples fall out of the window');
+ assert.ok(meter.average(400) > 0);
 });

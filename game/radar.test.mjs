@@ -123,3 +123,47 @@ test('radarBlip surfaces zone labels and the payload icon/progress/clamp state f
  const delivered=radarBlip({kind:'payload',x:0,y:0,progress:null,delivered:true},player);
  assert.equal(delivered.progress,null);assert.equal(delivered.progressRatio,null);assert.equal(delivered.delivered,true);
 });
+
+import {radarContactVisual} from './radar.mjs';
+
+test('radarContacts clamps far contacts and flags them offscreen with a bearing',()=>{
+ const scout={...player,powerups:{recon:1}};
+ const {contacts}=radarContacts(hud,scout,{range:5});
+ const enemy=contacts.find(c=>c.kind==='actor'&&c.id===1);
+ assert.equal(enemy.offscreen,true,'a revealed contact beyond range is offscreen');
+ assert.ok(Number.isFinite(enemy.bearing));
+ assert.ok(Math.abs(enemy.x)<=1&&Math.abs(enemy.y)<=1,'clamped onto the radar ring');
+ const near=radarContacts(hud,scout,{range:100}).contacts.find(c=>c.kind==='actor'&&c.id===1);
+ assert.equal(near.offscreen,false);
+});
+
+test('radarContacts surfaces objective zones and markers with progress',()=>{
+ const withObjectives={...hud,objectives:{kind:'domination',zones:[{id:'A',x:0,z:-20,owner:1,contested:true,progress:60}]},markers:[{id:'m1',label:'GOAL',x:30,z:0,team:0}]};
+ const {contacts}=radarContacts(withObjectives,player,{range:25});
+ const zone=contacts.find(c=>c.kind==='zone');
+ assert.ok(zone);assert.equal(zone.contested,true);assert.equal(zone.progress,60);assert.equal(zone.owner,1);
+ const marker=contacts.find(c=>c.kind==='marker');
+ assert.ok(marker);assert.equal(marker.label,'GOAL');assert.equal(marker.offscreen,true,'markers pin to the rim');
+});
+
+test('radarBlipColor honours the palette and objective accents',()=>{
+ const colors=RADAR_COLORS.default;
+ assert.equal(radarBlipColor({kind:'marker',team:0},player,colors),colors.red);
+ assert.equal(radarBlipColor({kind:'marker',team:null},player,colors),colors.objective);
+ assert.equal(radarBlipColor({kind:'zone',owner:null,contested:false},player,colors),colors.neutral);
+ assert.equal(radarBlipColor({kind:'zone',owner:1,contested:true},player,colors),colors.contested);
+ const visual=radarContactVisual({kind:'actor',id:1,x:0,y:0,team:1,offscreen:true,bearing:.5},player);
+ assert.ok(visual.indicator,'an offscreen actor gets an indicator');
+ assert.equal(visual.indicator.bearing,.5);
+});
+
+test('radarBlipColor honours the palette and objective accents',()=>{
+ const colors=RADAR_COLORS.default;
+ assert.equal(radarBlipColor({kind:'marker',team:0},player,colors),colors.red);
+ assert.equal(radarBlipColor({kind:'marker',team:null},player,colors),colors.objective);
+ assert.equal(radarBlipColor({kind:'zone',owner:null,contested:false},player,colors),colors.neutral);
+ assert.equal(radarBlipColor({kind:'zone',owner:1,contested:true},player,colors),colors.contested);
+ const visual=radarContactVisual({kind:'actor',id:1,x:0,y:0,team:1,offscreen:true,bearing:.5},player);
+ assert.ok(visual.indicator,'an offscreen actor gets an indicator');
+ assert.equal(visual.indicator.bearing,.5);
+});

@@ -25,3 +25,37 @@ export function quantizeNumbers(value, precision = 3) {
  };
  return walk(value);
 }
+
+// Non-mutating variant for callers that must keep the source tree intact (the
+// client's authoritative snapshot buffer, demo keyframes). Same rounding rules
+// as quantizeNumbers, including leaving Infinity/NaN sentinels untouched.
+export function quantizeClone(value, precision = 3) {
+ const factor = 10 ** precision;
+ const round = n => Math.round(n * factor) / factor;
+ const walk = node => {
+  if (Array.isArray(node)) return node.map(item => typeof item === 'number' ? (Number.isFinite(item) ? round(item) : item) : item && typeof item === 'object' ? walk(item) : item);
+  if (node && typeof node === 'object') {
+   const out = {};
+   for (const key of Object.keys(node)) {
+    const v = node[key];
+    out[key] = typeof v === 'number' ? (Number.isFinite(v) ? round(v) : v) : v && typeof v === 'object' ? walk(v) : v;
+   }
+   return out;
+  }
+  return node;
+ };
+ return walk(value);
+}
+
+// JSON byte length of a value as it would cross the wire.
+export function wireBytes(value) {
+ try { return new TextEncoder().encode(JSON.stringify(value)).length; } catch { return 0; }
+}
+
+// Quantization saving report: how many bytes rounding removed, and the ratio.
+// Useful for the bandwidth HUD and for asserting the codec actually helps.
+export function quantizeSaving(value, precision = 3) {
+ const raw = wireBytes(value);
+ const quantized = wireBytes(quantizeClone(value, precision));
+ return { raw, quantized, saved: Math.max(0, raw - quantized), ratio: raw > 0 ? (raw - quantized) / raw : 0 };
+}

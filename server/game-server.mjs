@@ -1,7 +1,7 @@
 import http from 'node:http';
 import { pathToFileURL, fileURLToPath } from 'node:url';
 import { WebSocketServer } from 'ws';
-import { RoomRegistry } from './rooms.mjs';
+import { RoomRegistry, Matchmaker, ratingFor } from './rooms.mjs';
 import { MatchHistory } from './history.mjs';
 import { ProgressionStore } from './progression.mjs';
 import { MESSAGE } from '../game/protocol.mjs';
@@ -27,8 +27,9 @@ export const MAX_CLIENTS = 256;
 export function createGameServer({ port = 0, random, tickDt = 1 / 60, tickMs = 1000 / 60, graceMs, snapshotHz, historyPath = null, progressionPath = null, maxClients = MAX_CLIENTS } = {}) {
  const history = new MatchHistory(historyPath);
  const progression = new ProgressionStore(progressionPath);
- const registry = new RoomRegistry({ random, graceMs, history, progression, snapshotHz, onError: (error, room) => console.error(`room ${room?.id ?? '?'} tick failed`, error) });
- const sockets = new Map();
+  const registry = new RoomRegistry({ random, graceMs, history, progression, snapshotHz, onError: (error, room) => console.error(`room ${room?.id ?? '?'} tick failed`, error) });
+  const matchmaker = new Matchmaker({ random });
+  const sockets = new Map();
  const socketPeer = new WeakMap();
  const peerRoom = new Map();
  let historyCache = null;
@@ -104,6 +105,27 @@ export function createGameServer({ port = 0, random, tickDt = 1 / 60, tickMs = 1
   releaseSeat(peerId);
   peerRoom.set(peerId, room);
  }
+ // Pop a balanced draft from the matchmaking queue and seat every player in a
+ // fresh room. Team assignments are sent to each peer so the client can show
+ // the balanced sides before the host starts. Returns the new room or null.
+ function draftQueue() {
+  const draft = matchmaker.draft();
+  if (!draft) return null;
+  const room = registry.create('Matchmade');
+  if (!room) { for (const player of draft.players) matchmaker.enqueue(player); return null; }
+  draft.teams.forEach((team, teamIndex) => {
+   for (const player of team) {
+    const ws = sockets.get(player.peerId);
+    if (!ws || ws.readyState !== ws.OPEN) { matchmaker.remove(player.peerId); continue; }
+    room.join(player.peerId, player.name, undefined, undefined, '', false, '', '');
+    if (!room.peers.has(player.peerId)) continue;
+    releaseSeat(player.peerId);
+    peerRoom.set(player.peerId, room);
+    sendTo(player.peerId, { type: 'matchmade', roomId: room.id, team: teamIndex, rating: player.rating, teams: draft.teams.map(t => t.map(p => ({ peerId: p.peerId, name: p.name, rating: p.rating }))) });
+   }
+  });
+  return room;
+ }
  function controlAllowed(ws, now = Date.now()) {
   if (ws.controlRate && now - ws.controlRate.at < CONTROL_RATE_WINDOW) {
    if (ws.controlRate.count >= CONTROL_RATE_LIMIT) return false;
@@ -124,9 +146,32 @@ export function createGameServer({ port = 0, random, tickDt = 1 / 60, tickMs = 1
   case MESSAGE.JOIN: joinPeer(peerId, msg); break;
   case MESSAGE.CREATE: createRoom(peerId, msg); break;
   case MESSAGE.LIST: sendTo(peerId, { type: 'rooms', rooms: registry.list() }); break;
+  case 'ready': peerRoom.get(peerId)?.setReady(peerId, msg.ready !== false); break;
+  case 'map-vote': peerRoom.get(peerId)?.mapVote(peerId, msg.mapId); break;
+  case 'rematch': peerRoom.get(peerId)?.requestRematch(peerId); break;
+  case 'warmup': {
+   const room = peerRoom.get(peerId);
+   if (room) { if (msg.cancel === true) room.cancelWarmup(); else room.beginWarmup(peerId); }
+   break;
+  }
+  case 'queue': {
+   const profile = progression.getOwned(msg.playerId, msg.progressToken);
+   const entry = matchmaker.enqueue({ peerId, name: msg.name, rating: ratingFor(profile) });
+   if (!entry) { sendTo(peerId, { type: 'error', message: 'matchmaking queue is full' }); break; }
+   sendTo(peerId, { type: 'queue', status: 'queued', position: matchmaker.position(peerId), size: matchmaker.size(), rating: entry.rating });
+   break;
+  }
+  case 'queue-leave': matchmaker.remove(peerId); sendTo(peerId, { type: 'queue', status: 'left', size: matchmaker.size() }); break;
+  case 'queue-list': sendTo(peerId, { type: 'queue', status: 'list', players: matchmaker.list() }); break;
   case MESSAGE.HISTORY: {
    if (!historyCache || historyCacheVersion !== history.version) { historyCache = history.all(); historyCacheVersion = history.version; }
    sendTo(peerId, { type: 'history', matches: historyCache });
+   break;
+  }
+  case 'leaderboard': sendTo(peerId, { type: 'leaderboard', mode: typeof msg.mode === 'string' ? msg.mode : null, rows: progression.leaderboard({ mode: typeof msg.mode === 'string' ? msg.mode : null }) }); break;
+  case 'profile': {
+   const profile = progression.getOwned(msg.playerId, msg.progressToken);
+   sendTo(peerId, { type: 'profile', profile });
    break;
   }
     case MESSAGE.HOST: peerRoom.get(peerId)?.host(peerId, msg.config, msg.mapId); break;
@@ -191,15 +236,16 @@ export function createGameServer({ port = 0, random, tickDt = 1 / 60, tickMs = 1
   });
   ws.on('close', () => {
    sockets.delete(peerId);
+   matchmaker.remove(peerId);
    const room = peerRoom.get(peerId);
    if (room) { room.disconnect(peerId); peerRoom.delete(peerId); }
    flush();
   });
   ws.on('error', () => {});
  });
- const timer = setInterval(() => {
-  try { registry.tickAll(tickDt); registry.expireAll(); }
-  catch (error) { console.error('server tick failed', error); }
+  const timer = setInterval(() => {
+   try { registry.tickAll(tickDt); registry.expireAll(); } catch (error) { console.error('server tick failed', error); }
+   try { while (matchmaker.size() >= matchmaker.teamSize * 2) { if (!draftQueue()) break; } } catch (error) { console.error('matchmaking draft failed', error); }
   try {
    const pinned = new Set();
    for (const room of registry.rooms.values()) for (const p of room.peers.values()) if (p.playerId) pinned.add(p.playerId);
