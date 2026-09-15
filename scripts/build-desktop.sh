@@ -11,6 +11,12 @@ set -euo pipefail
 # bundle and inline it as index.html with root-absolute asset references
 # rewritten to relative ones. The result is plain files: no server, no
 # bindings, no network.
+#
+# `vinext build` always writes to <root>/dist. Any pre-existing dist/ (for
+# example a live web build) is moved aside and restored on exit, so running the
+# desktop build never mutates an existing dist/ tree. Run it from a dedicated
+# worktree as well: the trade-off is that the restore still swaps dist/ aside
+# for the duration of the build.
 
 script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
@@ -34,6 +40,27 @@ if [[ ! -x "${vinext}" ]]; then
   exit 69
 fi
 
+# Preserve any existing dist/ so this script is non-destructive to a web build.
+dist_backup=""
+dist_built=0
+restore_dist() {
+  local status=$?
+  trap - EXIT
+  if [[ -n "${dist_backup}" ]]; then
+    rm -rf "${dist_dir}"
+    mv "${dist_backup}" "${dist_dir}"
+  elif [[ "${dist_built}" == "1" ]]; then
+    rm -rf "${dist_dir}"
+  fi
+  exit "${status}"
+}
+trap restore_dist EXIT
+if [[ -e "${dist_dir}" ]]; then
+  dist_backup="${project_root}/.dist-desktop-backup.$$"
+  rm -rf "${dist_backup}"
+  mv "${dist_dir}" "${dist_backup}"
+fi
+
 echo "Assembling desktop client bundle (${out_dir})..."
 
 # Start from a clean output tree so stale content hashes can never survive.
@@ -41,6 +68,7 @@ rm -rf "${out_dir}"
 mkdir -p "${out_dir}"
 
 echo "Running vinext build for the desktop source tree..."
+dist_built=1
 timeout \
   --signal=TERM \
   --kill-after="${SITES_BUILD_KILL_AFTER:-10s}" \
