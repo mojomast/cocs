@@ -277,3 +277,15 @@ test('respawn resets the barrel count for every chassis', () => {
   assert.equal(vehicle.barrelCount, 2);
   assert.equal(createVehicle(TITAN).barrelCount, 1);
 });
+
+test('every new chassis is placed on maps that can actually use it', async () => {
+ const {MAPS} = await import('./maps.mjs');
+ const known = new Set(VEHICLE_KIND_IDS);
+ for (const arena of MAPS) for (const vehicle of arena.vehicles || []) {
+  assert.ok(known.has(vehicle.kind || 'puma'), `${arena.id} uses a known chassis (${vehicle.kind})`);
+ }
+ for (const kind of ['titan', 'scout', 'transport']) {
+  const hosts = MAPS.filter(arena => (arena.vehicles || []).some(vehicle => (vehicle.kind || 'puma') === kind));
+  assert.ok(hosts.length >= 3, `${kind} should be reachable on several maps (${hosts.length})`);
+ }
+});

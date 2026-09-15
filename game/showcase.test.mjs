@@ -79,8 +79,14 @@ test('menu builder produces a valid match for every scenario and rotates modes',
 test('menu race scenario runs a full race and the next build restarts the reel',()=>{
  const {r,deps}=showcaseDeps();
  const buildShowcase=buildShowcaseFactory(deps);
- buildShowcase();
- const m=r.showcase.match;
+ // The reel order is shuffled each cycle, so advance until the car scenario
+ // comes up rather than assuming it is first.
+ let m=null;
+ for(let i=0;i<SHOWCASES.length;i++){
+  buildShowcase();
+  if(r.showcase.match.config.mode==='puma-race'){m=r.showcase.match;break;}
+ }
+ assert.ok(m,'the reel includes a race scenario');
  assert.equal(m.config.mode,'puma-race');
  assert.equal(m.arena.id,'puma-circuit');
  assert.equal(m.actors.length,8);

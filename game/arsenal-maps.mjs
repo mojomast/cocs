@@ -24,7 +24,7 @@ const trenchline={
   ['scatter',-34,0],['scatter',34,0],['plasma',-14,-14],['plasma',14,14],
   ['grenade',-60,-40],['shock',60,40],['flak',-16,20],['marksman',16,-20],
  ],
- vehicles:[vehicle('tr-puma-w','puma',-40,30,Math.PI/2),vehicle('tr-puma-e','puma',40,-30,-Math.PI/2),vehicle('tr-hornet','hornet',0,46,0)],
+ vehicles:[vehicle('tr-puma-w','puma',-40,30,Math.PI/2),vehicle('tr-puma-e','puma',40,-30,-Math.PI/2),vehicle('tr-hornet','hornet',0,46,0),vehicle('tr-titan-w','titan',-50,0,Math.PI/2),vehicle('tr-titan-e','titan',50,0,-Math.PI/2),vehicle('tr-transport-w','transport',-50,14,Math.PI/2),vehicle('tr-transport-e','transport',50,-14,-Math.PI/2),vehicle('tr-scout-w','scout',-50,-14,Math.PI/2),vehicle('tr-scout-e','scout',50,14,-Math.PI/2)],
  traversal:{
   jumpPads:[pad('tr-hop-w',-72,-16,16),pad('tr-hop-e',72,16,16),pad('tr-hop-n',0,-47,16),pad('tr-hop-s',0,47,16)],
   teleporters:[tp('tr-tp-w',-72,0,72,0)],
@@ -51,7 +51,7 @@ const signalRidge={
   ['scatter',-30,0],['scatter',30,0],['plasma',-14,-14],['plasma',14,14],
   ['grenade',-54,42],['shock',54,-42],['flak',-16,26],['marksman',16,-26],
  ],
- vehicles:[vehicle('sr-puma','puma',-48,34,Math.PI/2),vehicle('sr-hornet-w','hornet',-20,-44,0),vehicle('sr-hornet-e','hornet',20,44,Math.PI)],
+ vehicles:[vehicle('sr-puma','puma',-48,34,Math.PI/2),vehicle('sr-hornet-w','hornet',-20,-44,0),vehicle('sr-hornet-e','hornet',20,44,Math.PI),vehicle('sr-titan-w','titan',-30,-20,Math.PI/2),vehicle('sr-titan-e','titan',30,20,-Math.PI/2),vehicle('sr-scout-w','scout',-40,-20,Math.PI/2),vehicle('sr-scout-e','scout',40,20,-Math.PI/2)],
  traversal:{
   jumpPads:[pad('sr-hop-w',-68,0,16),pad('sr-hop-e',68,0,16),pad('sr-hop-n',0,-38,16),pad('sr-hop-s',0,38,16)],
   ziplines:[zip('sr-zip-long',{x:-46,y:0,z:30},{x:46,y:0,z:-30},18)],

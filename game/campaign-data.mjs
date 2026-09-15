@@ -33,6 +33,7 @@
 export const CAMPAIGN_MISSIONS = Object.freeze([
  {
   id:'convoy-run',order:1,chapter:'ACT I',name:'The Long Haul',mapId:'convoy-line',tag:'ESCORT',
+  weather:'overcast',
   brief:'Relay seven has gone dark. Run the only road east and light it before the cluster closes in.',
   objective:'Rally at the west depot.',
   lives:3,
@@ -46,7 +47,7 @@ export const CAMPAIGN_MISSIONS = Object.freeze([
   script:[
    {id:'convoy-reinforce-1',at:6,spawn:{type:'husk',count:2,x:-58,z:8,group:'script-convoy-reinforce',zone:{x:-58,z:8,r:9,leash:13,kind:'spawn'}},bark:{speaker:'DISPATCH',text:'Drones on the ridge — more husks on the road.'}},
    {id:'convoy-ambush-cleared',when:'cleared',spawn:{type:'spitter',count:2,x:-32,z:-6,group:'script-convoy-ambush',zone:{x:-32,z:-6,r:10,leash:16,kind:'patrol'}},bark:{speaker:'RELAY',text:'They were waiting in the tenements. Watch the windows.'}},
-   {id:'convoy-bridge-ambush',when:'player-in-zone',x:0,z:6,radius:22,spawn:{type:'husk',count:3,x:0,z:12,group:'script-convoy-bridge',zone:{x:0,z:12,r:10,leash:14,kind:'hold'}},bark:{speaker:'DISPATCH',text:'Bridge is hot — they came up from the riverbed!'}},
+   {id:'convoy-bridge-ambush',when:'player-in-zone',x:0,z:6,radius:22,weather:'rain',spawn:{type:'husk',count:3,x:0,z:12,group:'script-convoy-bridge',zone:{x:0,z:12,r:10,leash:14,kind:'hold'}},bark:{speaker:'DISPATCH',text:'Bridge is hot — they came up from the riverbed!'}},
    {id:'convoy-yard-phase2',when:'boss-hp:0.6',bossPhase:2,name:'UNSHACKLED',spawn:{type:'husk',count:2,x:58,z:0,group:'script-convoy-phase2',zone:{x:58,z:0,r:12,leash:16,kind:'spawn'}},bark:{speaker:'WARDEN',text:'You should have stayed on the road!'}},
    {id:'convoy-yard-phase3',when:'boss-hp:0.3',bossPhase:3,name:'LEGION',spawn:{type:'brute',count:1,elite:true,x:58,z:0,group:'script-convoy-phase3',zone:{x:58,z:0,r:12,leash:16,kind:'spawn'}},bark:{speaker:'WARDEN',text:'The cluster knows your name now.'}},
    {id:'convoy-relay-online',when:'boss-dead',objective:'Relay seven is online — hold for extraction.',announce:'Relay seven online.'},
@@ -76,6 +77,7 @@ export const CAMPAIGN_MISSIONS = Object.freeze([
  },
  {
   id:'reactor-run',order:2,chapter:'ACT I',name:'Reactor Run',mapId:'titan-valley',tag:'ASSAULT',
+  weather:'ash',
   brief:'The cluster is massing around the Titan Valley reactor. Cross the ridge, take the core, and end the Warden.',
   objective:'Secure the west outpost.',
   lives:3,
@@ -91,7 +93,7 @@ export const CAMPAIGN_MISSIONS = Object.freeze([
    {id:'reactor-cavern-ambush',when:'player-in-zone',x:0,z:-30,radius:22,spawn:{type:'spitter',count:3,x:0,z:-38,group:'script-reactor-cavern',zone:{x:0,z:-38,r:12,leash:18,kind:'patrol'}},bark:{speaker:'RELAY',text:'Contact in the cavern — they use the dark.'}},
    {id:'reactor-low-count',when:'enemiesAtMost:2',spawn:{type:'brute',count:1,elite:true,x:0,z:-30,group:'script-reactor-low',zone:{x:0,z:-30,r:10,leash:15,kind:'hold'}},bark:{speaker:'WARDEN',text:'I see you, operator.'}},
    {id:'reactor-warden-phase2',when:'boss-hp:0.5',bossPhase:2,name:'OVERCLOCKED',spawn:{type:'husk',count:3,x:60,z:0,group:'script-reactor-phase2',zone:{x:60,z:0,r:12,leash:18,kind:'spawn'}},bark:{speaker:'WARDEN',text:'Then let the cluster burn with me!'}},
-   {id:'reactor-warden-phase3',when:'boss-hp:0.2',bossPhase:3,name:'LEGION',spawn:{type:'brute',count:1,elite:true,x:60,z:0,group:'script-reactor-phase3',zone:{x:60,z:0,r:12,leash:18,kind:'spawn'}},bark:{speaker:'WARDEN',text:'We are one node. We are legion.'}},
+   {id:'reactor-warden-phase3',when:'boss-hp:0.2',bossPhase:3,name:'LEGION',weather:'storm',spawn:{type:'brute',count:1,elite:true,x:60,z:0,group:'script-reactor-phase3',zone:{x:60,z:0,r:12,leash:18,kind:'spawn'}},bark:{speaker:'WARDEN',text:'We are one node. We are legion.'}},
   ],
   steps:[
    {id:'outpost',label:'WEST OUTPOST',text:'Secure the west outpost',detail:'Clear the ridge.',marker:{x:-28,z:-30,radius:6,label:'OUTPOST'},
@@ -118,6 +120,7 @@ export const CAMPAIGN_MISSIONS = Object.freeze([
  },
  {
   id:'throne-siege',order:3,chapter:'ACT II',name:'The Broken Throne',mapId:'throne',tag:'FINALE',
+  weather:'storm',
   brief:'The cluster\'s last node is enthroned at the centre of the arena. Break the ring, survive the pit, and end the Warden on the throne.',
   objective:'Reach the outer ring.',
   lives:3,
@@ -162,6 +165,7 @@ export const CAMPAIGN_MISSIONS = Object.freeze([
  },
  {
   id:'ghost-wire',order:4,chapter:'ACT II',name:'Ghost Wire',mapId:'frost-gate',tag:'STEALTH',
+  weather:'snow',
   brief:'A listening post on the frozen ridge is selling our convoy routes to the cluster. Slip the patrols, slice the relay, and leave without the fight you cannot win.',
   objective:'Infiltrate the ridge depot.',
   lives:3,
@@ -199,6 +203,7 @@ export const CAMPAIGN_MISSIONS = Object.freeze([
  },
  {
   id:'crown-duel',order:5,chapter:'ACT III',name:'The Crown Duel',mapId:'fortress',tag:'DUEL',
+  weather:'storm',
   brief:'The Harbinger holds the fortress keep and will drown the valley in husks. Break the shield line, survive the ring, and duel the voice of the cluster.',
   objective:'Break into the fortress.',
   lives:3,

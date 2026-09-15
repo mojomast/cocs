@@ -2,6 +2,7 @@ import {CHARACTERS,POWERUPS} from './data.mjs';
 import {CAMPAIGN_MISSIONS,missionFor} from './campaign-data.mjs';
 import {applyEnemyFields,enemyById,enemyLeash,bossPhaseProfile,bossMaxPhase,ENEMY_SPEED_VARIANCE,DEFAULT_ENEMY_ID,NPC_ZONE_KINDS} from './enemy-types.mjs';
 import {coverPoint} from './bots.mjs';
+import {getMissionLore} from './story.mjs';
 
 // Single-player simulation. Horde spawns escalating waves of fragile enemies;
 // campaign runs a linear, story-driven sequence of objectives with world
@@ -165,7 +166,7 @@ export const hordeWaveScoreTotal = (wave,difficulty='easy',{endless=false}={}) =
 const actorById = (match,id) => (match.actors||[]).find(actor => actor.id === id) || null;
 const aliveById = (match,id) => { const actor = actorById(match,id); return Boolean(actor) && actor.health > 0; };
 const aliveEnemies = (match,state) => (state.enemies||[]).reduce((count,id) => count + (aliveById(match,id)?1:0),0);
-const allScriptDone = state => !state.script.length || state.script.every(event => state.fired[event.id]);
+const allScriptDone = state => !state.script.length || state.script.every(event => event.lore === true || state.fired[event.id]);
 
 function placeAt(match,actor,x,z){
  let best=null,bestDistance=Infinity;
@@ -285,7 +286,7 @@ export function initializeSinglePlayer(match){
  match.humanCount=1;
  match.config.botCount=0;
  const mode=match.config.mode;
-  const state={kind:mode,playerId:0,phase:'intermission',timer:0,elapsed:0,lives:2,deaths:0,nextId:1,enemies:[],allies:[],groups:{},entered:{},everHadEnemies:false,boss:null,winner:null,message:null,objective:'',script:[],fired:{},defendProgress:0,lastEvent:0,steps:[],stepIndex:0,stepElapsed:0,holdProgress:0,waypoint:null,storyLine:null,bark:null,bossPhase:0,bossPhaseName:null,bossPhaseMax:1,summonCount:0,checkpoint:null,upgrades:[],upgradeOffers:0,pendingUpgrade:null,upgradeSelected:null,nextUpgradeWave:HORDE_UPGRADE_GAPS[0],upgradeGapIndex:0,waveModifier:null,endless:false,score:0,bestWave:0,waveSize:0,summary:null};
+  const state={kind:mode,playerId:0,phase:'intermission',timer:0,elapsed:0,lives:2,deaths:0,nextId:1,enemies:[],allies:[],groups:{},entered:{},everHadEnemies:false,boss:null,winner:null,message:null,objective:'',script:[],fired:{},defendProgress:0,lastEvent:0,steps:[],stepIndex:0,stepElapsed:0,holdProgress:0,waypoint:null,storyLine:null,bark:null,weather:null,timeOfDay:null,bossPhase:0,bossPhaseName:null,bossPhaseMax:1,summonCount:0,checkpoint:null,upgrades:[],upgradeOffers:0,pendingUpgrade:null,upgradeSelected:null,nextUpgradeWave:HORDE_UPGRADE_GAPS[0],upgradeGapIndex:0,waveModifier:null,endless:false,score:0,bestWave:0,waveSize:0,summary:null};
   let resumeStep=null;
   if(mode==='horde'){
    const pacing=hordePacing(match.config.difficulty);
@@ -299,8 +300,17 @@ export function initializeSinglePlayer(match){
   } else {
   const mission=missionFor(match.config.mission);
   state.mission=mission;state.phase='active';state.lives=mission.lives??3;
+  state.weather=mission.weather??null;state.timeOfDay=mission.timeOfDay??null;match.weather=state.weather;
   state.objective=mission.objective;state.win=snapZone(match,mission.win);state.timer=0;
   state.script=(mission.script||[]).map((event,index)=>({id:event.id??`${mission.id}-script-${index}`,...event}));
+  // Timed narrative transmissions from the story bible play alongside the
+  // authored spawn/objective beats so each mission has a scripted voice-over.
+  state.lore=getMissionLore(mission.id);
+  if(state.lore)for(const [index,line] of (state.lore.transmissions||[]).entries()){
+   const id=`lore-${mission.id}-${index}`;
+   if(state.script.some(event=>event.id===id))continue;
+   state.script.push({id,at:Number.isFinite(line.at)?line.at:index,lore:true,story:{speaker:line.speaker,text:line.text}});
+  }
   for(const event of state.script)if(event.when==='player-in-zone')Object.assign(event,snapZone(match,event));
   state.steps=(mission.steps||[]).map(step=>snapStep(match,step));
   // The boss phase pip strip needs to know how many phases the mission authors.
@@ -432,7 +442,9 @@ function applyAction(match,state,action){
  if(!action)return;
  if(action.story){state.storyLine={speaker:action.story.speaker||'OPS',text:action.story.text||'',at:match.time};match.emit('story-line',{speaker:state.storyLine.speaker,text:state.storyLine.text});}
  if(action.bark){const bark=typeof action.bark==='string'?{text:action.bark}:action.bark;state.bark={speaker:bark.speaker||'ENEMY',text:bark.text||'',at:match.time};match.emit('npc-bark',{speaker:state.bark.speaker,text:state.bark.text});}
- if(Number.isFinite(action.bossPhase)){state.bossPhase=Math.max(0,Math.round(action.bossPhase));state.bossPhaseMax=Math.max(state.bossPhaseMax||1,state.bossPhase);if(action.name)state.bossPhaseName=action.name;match.emit('boss-phase',{phase:state.bossPhase,name:action.name||null});}
+  if(Number.isFinite(action.bossPhase)){state.bossPhase=Math.max(0,Math.round(action.bossPhase));state.bossPhaseMax=Math.max(state.bossPhaseMax||1,state.bossPhase);if(action.name)state.bossPhaseName=action.name;match.emit('boss-phase',{phase:state.bossPhase,name:action.name||null});}
+  if(action.weather){state.weather=String(action.weather);match.weather=state.weather;match.emit('weather-change',{kind:state.weather});}
+  if(action.timeOfDay){state.timeOfDay=String(action.timeOfDay);match.emit('time-change',{phase:state.timeOfDay});}
  if(action.announce){state.message={text:action.announce,at:match.time};match.emit('mission-message',{text:action.announce});}
  if(action.objective)state.objective=action.objective;
  if(Number.isFinite(action.lives))state.lives=Math.max(0,Math.round(action.lives));
@@ -830,5 +842,5 @@ export function singlePlayerSnapshot(state,match){
  const bossPhase=state.bossPhase||0,bossPhaseTotal=Math.max(1,state.bossPhaseMax||1);
  const checkpoint=Number.isFinite(state.checkpoint)?{step:Math.max(0,Math.round(state.checkpoint)),missionId:state.mission?.id??null}:null;
  const regen={active:state.regenActive===true,delay:Number(state.regenDelay||0),rate:REGEN_RATE};
- return {kind:state.kind,phase:state.phase,elapsed:state.elapsed,wave:state.wave||0,waveTarget:state.waveTarget||0,endless:state.endless===true,score:state.score||0,bestWave:state.bestWave||0,summary:state.summary?{...state.summary}:null,waveTimer:state.timer||0,waveModifier:state.waveModifier?{...state.waveModifier}:null,enemiesAlive,enemiesTotal:state.enemies.length,kills:player?.frags||0,deaths:player?.deaths||0,lives:state.lives,objective:state.objective||'',message:state.message&&match.time-state.message.at<5?state.message.text:'',story,bark,bossPhase,bossPhaseName:state.bossPhaseName||null,bossPhaseTotal,waypoint:state.waypoint?{id:state.waypoint.id,x:state.waypoint.x,z:state.waypoint.z,label:state.waypoint.label}:null,winner:state.winner??null,mission:state.mission?{id:state.mission.id,name:state.mission.name,tag:state.mission.tag,chapter:state.mission.chapter||'',index:missionIndex,total:CAMPAIGN_MISSIONS.length,brief:state.mission.brief,intro:state.mission.intro||null,outro:state.mission.outro||null}:null,steps:state.steps.map((item,index)=>({id:item.id,label:item.label||'',text:item.text||'',detail:item.detail||'',active:index===state.stepIndex,done:index<state.stepIndex})),hold,boss:boss?{name:boss.name,hp:Math.max(0,Math.round(boss.health)),maxHp:boss.maxHealth,alive:boss.health>0,phase:bossPhase,phaseName:state.bossPhaseName||null,phases:bossPhaseTotal}:null,checkpoint,upgrades,upgradeWave:pending?pending.wave:null,upgradeSelected:state.upgradeSelected?.id??null,upgradeCount:(state.upgrades||[]).length,defend:state.win?.kind==='defend'?{seconds:state.win.seconds??30,progress:Math.min(state.win.seconds??30,Math.round(state.defendProgress||0))}:null,regen};
+ return {kind:state.kind,phase:state.phase,elapsed:state.elapsed,wave:state.wave||0,waveTarget:state.waveTarget||0,endless:state.endless===true,score:state.score||0,bestWave:state.bestWave||0,summary:state.summary?{...state.summary}:null,waveTimer:state.timer||0,waveModifier:state.waveModifier?{...state.waveModifier}:null,enemiesAlive,enemiesTotal:state.enemies.length,kills:player?.frags||0,deaths:player?.deaths||0,lives:state.lives,objective:state.objective||'',message:state.message&&match.time-state.message.at<5?state.message.text:'',story,bark,weather:state.weather??null,timeOfDay:state.timeOfDay??null,bossPhase,bossPhaseName:state.bossPhaseName||null,bossPhaseTotal,waypoint:state.waypoint?{id:state.waypoint.id,x:state.waypoint.x,z:state.waypoint.z,label:state.waypoint.label}:null,winner:state.winner??null,mission:state.mission?{id:state.mission.id,name:state.mission.name,tag:state.mission.tag,chapter:state.mission.chapter||'',index:missionIndex,total:CAMPAIGN_MISSIONS.length,brief:state.mission.brief,intro:state.mission.intro||null,outro:state.mission.outro||null,lore:state.lore?{title:state.lore.title,location:state.lore.location,intel:state.lore.intel,threatLevel:state.lore.threatLevel}:null}:null,steps:state.steps.map((item,index)=>({id:item.id,label:item.label||'',text:item.text||'',detail:item.detail||'',active:index===state.stepIndex,done:index<state.stepIndex})),hold,boss:boss?{name:boss.name,hp:Math.max(0,Math.round(boss.health)),maxHp:boss.maxHealth,alive:boss.health>0,phase:bossPhase,phaseName:state.bossPhaseName||null,phases:bossPhaseTotal}:null,checkpoint,upgrades,upgradeWave:pending?pending.wave:null,upgradeSelected:state.upgradeSelected?.id??null,upgradeCount:(state.upgrades||[]).length,defend:state.win?.kind==='defend'?{seconds:state.win.seconds??30,progress:Math.min(state.win.seconds??30,Math.round(state.defendProgress||0))}:null,regen};
 }

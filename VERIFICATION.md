@@ -1,5 +1,31 @@
 # COCS verification report
 
+## Release 4.7 - Title showcase, vehicle placement, single-player atmosphere
+
+**Title showcase**
+- The menu reel is now a shuffled cycle of hand-picked, good-looking mode/map
+  combos (deathmatch, teamdeathmatch, CTF, KOTH, domination, combined-arms,
+  payload, juggernaut, team-elimination, race, soccer) instead of a fixed order.
+- Rebuilds are atomic: a failed scenario keeps the running reel rather than
+  dropping to the static operator preview, and the cinema camera resets between
+  scenarios.
+
+**Vehicles**
+- Titan, Scout and Transport are now placed on the warzone maps (warfront,
+  skyfall-basin, titan-valley, trenchline, signal-ridge, longreach-plateau,
+  ironfall-megastructure), mirrored per side with clear, supported ground.
+
+**Single-player atmosphere**
+- Campaign missions author their own weather (snow blizzard, reactor ash, storms)
+  and scripted beats change it mid-mission; the view honours `match.weather` for
+  campaign/horde.
+- Timed narrative transmissions from the story bible play as scripted voice-over
+  beats and surface in the mission snapshot; boss phases and transmissions trigger
+  new announcer cues.
+
+Verification: game **1310/1310**, server **141/141**, `tests/` **5/5**, `tsc`
+clean, lint 0 errors, build clean.
+
 ## Release 4.6 - Weapon balance, single-player regen, narrative and animation scaffolding
 
 **Weapon balance**

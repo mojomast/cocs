@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import {MAPS,pickupWeapon} from './maps.mjs';
 import {ARSENAL_MAPS} from './arsenal-maps.mjs';
+import {VEHICLE_KIND_IDS} from './vehicles.mjs';
 
 const WEAPON_KINDS=['rocket','rail','scatter','plasma','grenade','shock','flak','marksman','smg'];
 const EXPECTED_IDS=['trenchline','signal-ridge','rampart','catwalk-breach'];
@@ -74,14 +75,14 @@ test('arsenal map navNodes are inside bounds and unobstructed by blocks',()=>{
 
 test('arsenal map vehicles use valid kinds and clear slots',()=>{
  for(const map of ARSENAL_MAPS)for(const unit of map.vehicles||[]){
-  assert.ok(unit.kind==='puma'||unit.kind==='hornet',`${map.id} vehicle kind`);
+  assert.ok(VEHICLE_KIND_IDS.includes(unit.kind),`${map.id} vehicle kind`);
   assert.ok(finite(unit.x,unit.z)&&within(map,unit.x,unit.z),`${map.id} vehicle bounds`);
   assert.equal(inBlock(map,unit.x,unit.z,1.5),false,`${map.id} vehicle in block`);
  }
  const trenchline=ARSENAL_MAPS.find(map=>map.id==='trenchline');
  const signal=ARSENAL_MAPS.find(map=>map.id==='signal-ridge');
- assert.deepEqual(trenchline.vehicles.map(v=>v.kind).sort(),['hornet','puma','puma']);
- assert.deepEqual(signal.vehicles.map(v=>v.kind).sort(),['hornet','hornet','puma']);
+ assert.deepEqual(trenchline.vehicles.map(v=>v.kind).sort(),['hornet','puma','puma','scout','scout','titan','titan','transport','transport']);
+ assert.deepEqual(signal.vehicles.map(v=>v.kind).sort(),['hornet','hornet','puma','scout','scout','titan','titan']);
 });
 
 test('arsenal traversal points and teleporter targets are finite and in bounds',()=>{

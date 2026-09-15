@@ -4,6 +4,7 @@ import {BATTLE_MAPS} from './battle-maps.mjs';
 import {MAPS,getMap} from './maps.mjs';
 import {arenaMeta,arenaSupportsMode} from './arenas.mjs';
 import {floorAt,obstructed} from './core.mjs';
+import {VEHICLE_KIND_IDS} from './vehicles.mjs';
 
 const EXPECTED=['neon-vertical','substation','warfront','skyfall-basin'];
 const finite=value=>typeof value==='number'&&Number.isFinite(value);
@@ -71,7 +72,7 @@ test('battle-map objective zones sit on supported, unobstructed ground',()=>{
 });
 
 test('declared battle-map vehicles have clearance and valid kinds',()=>{
- const kinds=new Set(['puma','hornet']);
+ const kinds=new Set(VEHICLE_KIND_IDS);
  for(const map of BATTLE_MAPS){
   const ids=(map.vehicles||[]).map(vehicle=>vehicle.id);
   assert.equal(new Set(ids).size,ids.length,`${map.id} vehicle ids unique`);

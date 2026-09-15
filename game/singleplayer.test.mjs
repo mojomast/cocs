@@ -644,3 +644,30 @@ test('horde modifiers inject flankers, shield-bearers and a champion boss',()=>{
  assert.ok(match.actors.some(actor=>actor.isBoss&&actor.npcType==='harbinger'),'the champion deploys a Harbinger');
  assert.equal(match.modeState.waveModifier.id,'champion');
 });
+
+test('campaign missions author weather and scripted beats can change it',()=>{
+ const match=new Match('chatgpt','openclaw',()=>.5,'convoy-line',{mode:'campaign',botCount:0,humanCount:1,mission:'convoy-run'});
+ assert.equal(singlePlayerSnapshot(match.modeState,match).weather,'overcast','the mission authors its weather');
+ assert.equal(match.weather,'overcast','the live match carries the authored weather');
+ const player=match.actors[0];
+ player.x=0;player.z=6;player.y=floorAt(0,6,match.arena)??0;player.protection=1e9;
+ let changed=false;
+ for(let i=0;i<60&&!changed;i++){
+  match.step(1/60,{inputs:{}});
+  changed=match.events.some(event=>event.type==='weather-change'&&event.kind==='rain');
+ }
+ assert.ok(changed,'a scripted beat changes the weather');
+ assert.equal(match.weather,'rain');
+ assert.equal(singlePlayerSnapshot(match.modeState,match).weather,'rain');
+});
+
+test('campaign missions play their timed story transmissions without gating wins',()=>{
+ const match=new Match('chatgpt','openclaw',()=>.5,'convoy-line',{mode:'campaign',botCount:0,humanCount:1,mission:'convoy-run'});
+ const state=match.modeState;
+ const lore=state.script.filter(event=>event.lore===true);
+ assert.ok(lore.length>=4,'the story bible injects timed transmissions');
+ const first=lore.reduce((min,event)=>Math.min(min,Number(event.at)||0),Infinity);
+ for(let i=0;i<Math.ceil((first+.5)*60);i++)match.step(1/60,{inputs:{}});
+ assert.ok(match.events.some(event=>event.type==='story-line'),'a lore transmission surfaces as a story line');
+ assert.ok(singlePlayerSnapshot(state,match).mission.lore?.title,'the mission exposes its lore for the briefing');
+});

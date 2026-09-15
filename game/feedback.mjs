@@ -107,6 +107,8 @@ const ANNOUNCE_CUES=Object.freeze({
  victory:Object.freeze({id:'victory',freq:660,end:1320,length:.5}),
  defeat:Object.freeze({id:'defeat',freq:520,end:300,length:.5}),
  score:Object.freeze({id:'score',freq:480,end:720,length:.25}),
+ boss:Object.freeze({id:'boss',freq:190,end:96,length:.62}),
+ objective:Object.freeze({id:'objective',freq:600,end:900,length:.3}),
 });
 const cl=(n,a,b)=>Math.max(a,Math.min(b,n));
 

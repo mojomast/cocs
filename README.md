@@ -588,6 +588,12 @@ Version 2.23 shows your connection quality online:
 
 - **Latency chip.** Network matches display a colour-coded `GOOD` / `FAIR` / `POOR` chip with the current interpolation delay, graded from the same jitter and packet-loss estimators the netcode already uses (`connectionQuality` in `game/hud.mjs`). It turns amber or red before the connection becomes unplayable.
 
+Version 4.7 puts on a show:
+
+- **Title showcase:** the menu reel is a random cycle of cherry-picked mode/map combos, with atomic rebuilds so it never drops to a static preview.
+- **Vehicles:** Titan, Scout and Transport are placed on the warzone maps alongside Pumas and Hornets.
+- **Single-player atmosphere:** missions author weather (blizzard, ash, storms) with scripted mid-mission changes and timed story transmissions that surface as voice-over beats.
+
 Version 4.6 tunes combat and single-player:
 
 - **Weapon balance:** distinct roles and retuned TTK for all ten weapons, with DPS/TTK balance metrics.

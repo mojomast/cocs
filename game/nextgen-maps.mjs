@@ -198,6 +198,9 @@ const titanValley = createLevel({
     ctx.addObjective(0, 0, 6); ctx.addObjective(-34, -26, 4); ctx.addObjective(34, 26, 4);
     ctx.addVehicle({ kind: 'puma', x: -37, z: 35, yaw: 0 }); ctx.addVehicle({ kind: 'puma', x: 37, z: -37, yaw: Math.PI }); ctx.addVehicle({ kind: 'puma', x: 0, z: 48, yaw: Math.PI }); ctx.addVehicle({ kind: 'puma', x: 0, z: -48, yaw: 0 });
     ctx.addVehicle({ kind: 'hornet', x: -49, z: -37, yaw: 0 }); ctx.addVehicle({ kind: 'hornet', x: 49, z: 39, yaw: Math.PI });
+    ctx.addVehicle({ kind: 'titan', x: -44, z: 0, yaw: Math.PI / 2 }); ctx.addVehicle({ kind: 'titan', x: 44, z: 0, yaw: -Math.PI / 2 });
+    ctx.addVehicle({ kind: 'transport', x: -44, z: 14, yaw: Math.PI / 2 }); ctx.addVehicle({ kind: 'transport', x: 44, z: -14, yaw: -Math.PI / 2 });
+    ctx.addVehicle({ kind: 'scout', x: -30, z: 0, yaw: Math.PI / 2 }); ctx.addVehicle({ kind: 'scout', x: 30, z: 0, yaw: -Math.PI / 2 });
     ctx.addPickup('rocket', 0, -24); ctx.addPickup('rocket', 0, 24); ctx.addPickup('rail', -34, 0); ctx.addPickup('rail', 34, 0); ctx.addPickup('health', -60, 30); ctx.addPickup('health', 60, -30); ctx.addPickup('armor', 0, 0);
   },
 });
