@@ -424,6 +424,10 @@ assets. Full procedure and verification: [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md
 The last five releases. The full history lives in
 [docs/CHANGELOG.md](docs/CHANGELOG.md).
 
+### v4.10 · CLARITY — 2026-09-15
+- The title demo no longer reveals the operator model between scenarios: the view
+  decides from the showcase setting itself, not from a not-yet-ready snapshot.
+
 ### v4.9 · INVITE — 2026-09-15
 - Copy an invite link from the lobby or room browser; opening it auto-joins that
   room, with a fallback to the browser if the code has closed.
@@ -452,15 +456,6 @@ The last five releases. The full history lives in
 - Out-of-combat health regeneration in campaign and horde.
 - Speaker/mission-lore data, campaign briefings, procedural weapon rigs and richer
   announcer audio.
-
-### v4.5 · CONNECTED — 2026-09-15
-- Snapshot delta compression, protocol v2 and deterministic prediction and
-  interpolation.
-- Replay kill feed, objective timeline and new cinematic camera modes.
-- Titan/Scout/Transport, levelgen compounds and structural map validation.
-- Server matchmaking, room lifecycle and leaderboards.
-
-- Replay export/import, match summary and room filters.
 
 ## Parody and attribution
 

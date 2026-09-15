@@ -16,6 +16,14 @@ record in [VERIFICATION.md](VERIFICATION.md).
 
 ---
 
+## v4.10 · CLARITY — 2026-09-15
+
+- **The demo no longer shows the operator model between scenarios.** The view's
+  `showcaseExpected` flag is now set from the showcase *setting* every frame (and
+  mode), independent of whether a snapshot is ready, and the retry keeps
+  attempting a fresh scenario. A cycling or failed rebuild can no longer reveal
+  the full-screen operator turntable behind the menu.
+
 ## v4.9 · INVITE — 2026-09-15
 
 - **Invite links:** the lobby and room browser can copy a `?room=CODE` link.

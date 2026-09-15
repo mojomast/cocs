@@ -1,5 +1,18 @@
 # COCS verification report
 
+## Release 4.10 - Demo never falls back to the operator model while cycling
+
+- The view's `showcaseExpected` flag is now driven by the showcase setting and
+  current menu mode every frame, independent of whether `r.showcase`/`showcaseState`
+  is momentarily empty. A cycling rebuild (or a failed first build during the
+  retry window) now renders the arena scene, not the full-screen operator
+  turntable.
+- No new unit tests: this is a render-path flag; `tests/` and the showcase build
+  tests still cover the surrounding logic.
+
+Verification: game **1323/1323**, server **141/141**, `tests/` **5/5**, `tsc`
+clean, lint 0 errors, build clean. Not browser/GPU verified.
+
 ## Release 4.9 - Invite links and a readable title demo
 
 **Invite links**

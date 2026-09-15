@@ -1,12 +1,15 @@
 // In-game patch notes. The title-screen footer is the running version; this
 // module is the human-readable release digest the Changelog screen renders. The
 // full historical record lives in docs/CHANGELOG.md and is linked from the UI.
-export const RELEASE_VERSION = 'v4.9';
-export const RELEASE_CODENAME = 'INVITE';
+export const RELEASE_VERSION = 'v4.10';
+export const RELEASE_CODENAME = 'CLARITY';
 export const REPO_URL = 'https://github.com/mojomast/tokenarena';
 export const FULL_CHANGELOG_URL = `${REPO_URL}/blob/main/docs/CHANGELOG.md`;
 
 export const CHANGELOG = [
+  {version:'v4.10',codename:'CLARITY',date:'2026-09-15',tag:'The demo keeps showing the match',highlights:[
+    'The title demo no longer reveals the operator model between scenarios. The view now decides from the showcase setting itself, not from whether a snapshot happens to be ready, so a cycling build can never fall back to the model preview.',
+  ]},
   {version:'v4.9',codename:'INVITE',date:'2026-09-15',tag:'Invite links and a clearer title demo',highlights:[
     'Copy an invite link from the lobby or the room browser; opening it auto-connects and drops the player straight into that room, with a fallback to the room browser if the code has closed.',
     'The title-screen vignette was lightened and the broadcast lower-third now sits above it with a darker, higher-contrast card, so the mode, map and score stay readable over the demo.',
