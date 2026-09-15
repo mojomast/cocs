@@ -11,6 +11,7 @@ reference.
 | [TESTING.md](TESTING.md) | How the project is verified and how to run the suites. |
 | [DEPLOYMENT.md](DEPLOYMENT.md) | Hosting, the build/restart rule and deployment verification. |
 | [VERIFICATION.md](VERIFICATION.md) | Dated release evidence and the remaining validation gaps. |
+| [STEAM_RELEASE_PLAN.md](STEAM_RELEASE_PLAN.md) | Orchestration-ready plan for shipping the desktop/Steam build. |
 | [spec/SPEC.md](spec/SPEC.md) | Historical design specification (kept as a record). |
 | [spec/DEVPLAN.md](spec/DEVPLAN.md) | Historical development plan (kept as a record). |
 | [history/](history/) | Superseded audit and code-review plans. |
