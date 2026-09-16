@@ -20,7 +20,7 @@ test('post-processing is enabled on a hardware renderer unless disabled or reduc
   assert.equal(postStage({ eligible: true, reduced: true }), false);
   assert.equal(postStage({ eligible: false, reduced: false }), false);
   assert.equal(postStage({ eligible: true, reduced: false, postFx: false }), false);
-  assert.equal(postStage({ eligible: true, reduced: false, bloom: 0 }), false);
+  assert.equal(postStage({ eligible: true, reduced: false, bloom: 0 }), true, 'zero bloom no longer disables the composer');
   assert.equal(postStage({ eligible: true, reduced: false, bloom: .5 }), true);
   assert.equal(postStage({ eligible: true, reduced: false, scale: .5, bloom: .5 }), true, 'resolution scale no longer disables glow');
 });

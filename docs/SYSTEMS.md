@@ -208,8 +208,11 @@ visual metadata). `game/weapons.mjs` exposes derived `WEAPON_ROLES`, `weaponDPS`
    plus `difficulty.fireDelay` for bots. OpenCode's active ability divides interval.
 6. Adds recoil punch (`punchYaw`/`punchPitch` + velocities), increments the spray
    burst index, and grows `spread` by `bloom.perShot` up to `bloom.max`.
-7. For each pellet, computes spread from base + bloom + movement factor, then
-   ray-tests world, actors (`hitActor`, `hitBox` scale `.85 × hitScale`) and vehicles.
+7. For each pellet, computes spread from base + bloom + movement factor via the
+   shared `effectiveSpread` helper, perturbs the aim in the plane perpendicular to
+   it (`aimBasis`/`spreadDirection`), then ray-tests world, actors (`hitActor`,
+   `hitBox` scale `.85 × hitScale`) and vehicles. The HUD crosshair reads the same
+   `effectiveSpread`, so the reticle matches the real cone.
 8. Muzzle clearance is verified so shots cannot originate inside walls.
 9. Hitscan applies `damageFalloff` then `damage`. Projectiles (`w.speed`) push a
    rocket record with owner, direction, `vy`, damage multiplier, life, bounces, and
@@ -217,7 +220,10 @@ visual metadata). `game/weapons.mjs` exposes derived `WEAPON_ROLES`, `weaponDPS`
 
 Recoil recovery is a damped spring in `Match.step`: `punchVel += (-punch * recover² - punchVel * 2 * recover) * dt`.
 Spread recovers by `bloom.recovery` per second. ADS multiplies spread by `.35`;
-sprinting by `1.3`.
+sprinting by `1.3`. Precision weapons keep small `bloom.moveFactor` values so
+walking does not dominate the base cone. Weapon changes go through
+`Match.switchWeapon` (mode/loadout/ammo validation, `.45 s` delay, reload cancel,
+`weapon-switch` event), used by both human requests and bot decisions.
 
 ### 4.3 Projectiles
 
@@ -426,6 +432,12 @@ event; each vehicle/target pair is throttled by `vehicleHits` to `.5 s`.
 `Match.vehicleCollision` returns the resolved position or `false`; it also clamps
 flight altitude. Team ownership is inferred from occupants for friendly-fire checks.
 
+Spawn selection (`Match.spawn`) rejects blocked/unsupported points first, then
+scores survivors by enemy clearance minus exposure (enemy line of sight), nearby
+hostile projectiles, a decaying death heatmap (`_spawnHeatAdd`/`_spawnHeatAt`) and
+a bonus for useful (non-overlapping) teammate proximity. A validated fallback
+keeps the result finite and clear.
+
 ---
 
 ## 7. Game modes and objectives
@@ -563,6 +575,10 @@ profile: `strafePattern`/`strafePeriod`/`strafePhase`, `weaponBand`, `engageBand
 (`rusher`, `flanker`, `defender`, `support`, `sharpshooter`) is voted by role and
 personality with a stable per-id hash tiebreak (`botArchetype`, `botNoise`).
 `botWeaponBandPick` maps the band to weapon preferences; the core requires ammo.
+Weapon selection goes through `Match.switchWeapon` (the same operation humans
+use) with an explicit `chooseWeaponIndex` scan and a `weaponCommitUntil` window,
+so a bot cannot assign `a.weapon` directly and does not oscillate around a
+distance band.
 
 ### 8.3 Navigation and pathing
 
@@ -571,8 +587,11 @@ personality with a stable per-id hash tiebreak (`botArchetype`, `botNoise`).
   teleporters. `navigationEdges` uses a spatial bucket for large maps; a
   `pruneToLargestComponent` pass removes isolated islands except where a traversal
   link reconnects them.
-- `path(a, b, nodes, edges)` is BFS over the adjacency list, returning a node index
-  route. Bots advance along `b.route`, shifting nodes within `.8`.
+- `astar(a, b, nodes, edges)` is weighted A* (distance edge costs, straight-line
+  admissible heuristic) returning `{route, cost, reachable}`; `path` returns the
+  node-index route or an empty route for an unreachable destination. Bots advance
+  along `b.route`, shifting nodes within `.8`. Routes are cached per destination
+  and replanned on a staggered per-bot cadence (`b.routeDest`/`b.routeAt`).
 - `walkEdge` validates a direct step; `match.separation` pushes bots apart.
 
 ### 8.4 Objective play
@@ -585,8 +604,12 @@ personality with a stable per-id hash tiebreak (`botArchetype`, `botNoise`).
   undefended owned zone; scattered squads regroup to `teamCentroid`.
 - Assault/Payload: attack the active sector or push the cart, defend as assigned.
 - Juggernaut: hunters bias toward the carrier.
-- `coverPoint` finds a nav node that breaks line of sight, used to disengage at low
-  health or when suppressed.
+- `coverPoint` finds reachable cover that breaks line of sight: one Dijkstra flood
+  from the bot gives route cost to every node, and candidates are scored by cost,
+  a capped safety-distance benefit (farther from the threat is safer) and whether
+  the threat stays inside the bot's weapon range. `flankDestination` picks a node
+  with real lateral separation from the direct route, keyed to the current target
+  and expired/invalidated when the target changes.
 
 ### 8.5 Vehicles, threats, recovery
 
@@ -805,6 +828,17 @@ detail batches, traversal devices, next-gen structures, props, sky/mountains/sca
 and objective/pickup/vehicle/actor models. `buildArena` disposes the previous world
 and rebuilds it from immutable map templates; `setMatch` keys actor models by id.
 
+First-person weapons render through a dedicated `weaponScene` + `weaponCamera`
+(`weaponFov`) rather than the main camera. The active weapon is parented to a
+`weaponRoot` mirrored on the camera, the world depth is cleared before the
+weapon draw, and weapon meshes keep `depthTest`, so the gun's parts occlude each
+other correctly without clipping into world geometry. The CPU renderer keeps the
+legacy in-camera path (`depthTest` off). `assembleWeapon` exposes named anchors
+(`muzzle`, `rearSight`, `frontSight`, `leftGrip`, `rightGrip`, `magazine`,
+`bolt`, `hinge`) and a sight-derived `userData.aim`; `_animateWeaponParts` drives
+reload/bolt motion from authoritative state, and weapon changes run a two-phase
+lower/swap/raise (`_swap`).
+
 ### 12.2 Procedural assets
 
 - `game/textures.mjs` `surfaceTextures` generates cached value-noise/FBM albedo,
@@ -818,16 +852,19 @@ and rebuilds it from immutable map templates; `setMatch` keys actor models by id
   `canonicalTextureKind`. `surfaceTextures({bump:true})` also emits a dedicated
   `bumpMap`; the cache key encodes the normal/roughness/bump flags. Every generated
   map is tagged `userData.surfaceKind` so `disposeObject` never frees a shared
-  cached map.
+  cached map. Albedo, roughness and normal share one height/wear field so relief
+  and roughness line up; `MATERIAL_PRESETS` (painted armour, exposed steel,
+  rubber, stone, energy) describe the common surfaces.
 - `paintGeometry` adds deterministic per-vertex/per-triangle color variation.
 - `ArenaView.buildArena` picks a surface kind per map for the floor and non-race
   blocks (e.g. `holographic_grid` on `neon-vertical`/`crosswire`, `diamond_plate`
   on `foundry`, `riveted_armor` on `citadel`/bunkers, `metal_grating` on the
   megastructure maps, `carbon_fiber` on the pads), and `terrainTextureKind` maps
-  terrain (`industrial_mesh` for metal, `rough_stucco` for stone, `corrugated_metal`
-  for lava). `assembleWeapon`/`hornetModel`/`vehicleModel`/`robotModel` add a
-  muzzle ejection deflector, Hornet fins/skids/pod/beacons, a Puma front splitter,
-  hood vents, tail-lights and exhaust pipes, and forearm/lower-leg armour plates.
+  terrain (  `industrial_mesh` for metal, `rough_stucco` for stone, `corrugated_metal`
+  for lava). `assembleWeapon` owns per-weapon anchors and the sight-derived ADS
+  transform; `hornetModel`/`vehicleModel`/`robotModel` add Hornet
+  fins/skids/pod/beacons, a Puma front splitter, hood vents, tail-lights and
+  exhaust pipes, and forearm/lower-leg armour plates.
 - `EffectPool` (`game/feedback.mjs`) is an allocation-free pooled particle system:
   recycling scans linearly for the oldest slot (no `filter().sort()`) and each slot
   keeps persistent scratch `Vector3`/`Color` instances. `add` supports `fade`
@@ -847,8 +884,9 @@ and rebuilds it from immutable map templates; `setMatch` keys actor models by id
   phase.
 - `WeaponRig.recoilImpulse` drives `recoilSpring.z.vel` (a `VectorSpring3D` has no
   top-level `vel`), and the rig adds stride bob, a strafe roll, and procedural
-  reload/swap dips (`triggerReload`/`triggerSwap`). `WeaponFeedback` mirrors the
-  reload/swap dip on the first-person hands.
+  reload/swap dips (`triggerReload`/`triggerSwap`). The active first-person path
+  drives the weapon from `WeaponFeedback` plus the model's own anchors
+  (`_animateWeaponParts`); `WeaponRig` is not used by that rendering path.
 - `buildNextGen` replaces collision box proxies (`cave`, `tunnel`, `rock`, `tree`,
   `crate`, `column`) with smooth or instanced geometry, gable roofs, windows, arches,
   bridges, tunnel tubes, and cavern domes. Destructible crates/barrels are instanced
@@ -862,9 +900,12 @@ motes/tracers/bloom/`triangleBudget` 90000/140000/200000). `normalizeQuality` ch
 a tier (software defaults low, reduced motion medium, hardware high). `ArenaView`
 runs an FPS-hysteresis controller (`nextQualityTier`, demote below 45, promote above
 58) that never exceeds the configured ceiling; an explicit override pins the tier.
-`postStage` gates bloom/vignette/SMAA on hardware, `postFx`, bloom > 0, and
-non-reduced motion. `applyComposerSize` and `disposeComposer` handle composer sizing
-and explicit pass disposal. The CPU path sets a hard triangle budget and screen-area
+`postStage` gates the composer on hardware, `postFx` and non-reduced motion only —
+it is deliberately independent of bloom strength, so a zero-strength bloom pass
+still leaves the vignette and antialiasing running. The chain is RenderPass →
+UnrealBloom → Vignette → OutputPass → FXAA. `applyComposerSize` and
+`disposeComposer` handle composer sizing and explicit pass disposal (including the
+FXAA resolution uniform). The CPU path sets a hard triangle budget and screen-area
 cull; shadows and post are disabled.
 
 Camera: first-person eye height plus punch recoil, dynamic FOV (sprint +5°, ADS

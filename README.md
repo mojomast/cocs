@@ -425,6 +425,22 @@ assets. Full procedure and verification: [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md
 The last five releases. The full history lives in
 [docs/CHANGELOG.md](docs/CHANGELOG.md).
 
+### v5.6 · ARSENAL — 2026-09-16
+- Weapons are rebuilt around per-weapon anchors and sight lines: ADS resolves to
+  each gun's own sights and optic, and no shared rail is bolted onto every model.
+- Moving parts animate from real reload progress (SMG magazine, Scattergun break
+  action, Rocket loading, Rail Lance cell) with the bolt cycling on shots, and
+  weapon swaps hold the outgoing gun until the new one rises.
+- The viewmodel renders in its own scene/camera so its parts keep correct depth
+  without clipping into the world.
+- Movement no longer dominates accuracy, spread is applied perpendicular to aim,
+  and the crosshair uses the same effective-spread calculation.
+- Bots share one weapon-switch operation with players and navigate with A*
+  routing, reachable cover, lateral flanks and cached routes; spawns weigh
+  threats, exposure, projectiles and a death heatmap.
+- Composer gets explicit FXAA and survives zero bloom; texture channels share one
+  height field.
+
 ### v5.5 · FIDELITY — 2026-09-16
 - Eight new relief surfaces (diamond plate, riveted armour, circuit board, brushed
   and corrugated metal, alien chitin, rough stucco, industrial mesh) with aliases,
@@ -458,14 +474,6 @@ The last five releases. The full history lives in
   stop reading zero.
 - Race no longer crashes on a short grid or NaNs on a one-gate track; deep horde
   waves honour the live enemy cap; gunners/passengers get the PUMA card.
-
-### v5.1 · TIGHTEN — 2026-09-16
-- Killstreak challenges are a high-water mark, so several small streaks can no
-  longer complete a "reach an 8 killstreak" objective.
-- The scoreboard hides an absent ping instead of showing a healthy 0 ms, and an
-  unassigned team is no longer grouped under RED.
-- The solo objective counter stops at the total, and the settings dialog traps
-  keyboard focus like the other modals.
 
 ## Parody and attribution
 

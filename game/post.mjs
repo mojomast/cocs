@@ -68,11 +68,12 @@ export function nextQualityTier(current, fps, { minFps = 45, maxFps = 58, softwa
   return tier;
 }
 
-// Post-processing runs on a hardware renderer whenever the player keeps it on
-// and asks for some glow. Resolution scale no longer switches it off, so glow is
-// independent of the render scale.
-export function postStage({ eligible = false, reduced = false, postFx = true, bloom = .34 } = {}) {
-  return eligible === true && reduced !== true && postFx !== false && (Number(bloom) || 0) > 0;
+// Post-processing runs on a hardware renderer whenever the player keeps it on.
+// Composer eligibility is independent of bloom strength (a zero-strength bloom
+// pass still leaves antialiasing and the vignette running) and of resolution
+// scale, so those controls never silently disable unrelated processing.
+export function postStage({ eligible = false, reduced = false, postFx = true } = {}) {
+  return eligible === true && reduced !== true && postFx !== false;
 }
 
 // EffectComposer already multiplies the size it is given by its own pixel

@@ -24,18 +24,23 @@ export function buildRocketLauncher(g, ctx){
     ring(g, r, .026, 0, .06, z, light, 0);
 
   // --- loaded warhead poking out the front ---------------------------------
-  const body = cylinder(g, .155, .15, .44, 0, .06, -.86, warhead, 18);
+  // Grouped so the reload can pull the round back into the tube.
+  const warheadGroup = new T.Group();
+  warheadGroup.name = 'rocket-warhead';
+  g.add(warheadGroup);
+  const body = cylinder(warheadGroup, .155, .15, .44, 0, .06, -.86, warhead, 18);
   body.rotation.x = Math.PI / 2;
   for (const z of [-.9, -.96, -1.02])
-    ring(g, .16, .016, 0, .06, z, hazard, 0);
+    ring(warheadGroup, .16, .016, 0, .06, z, hazard, 0);
   const nose = new T.Mesh(geo('rocket-nose|.15|.24|16', () => new T.ConeGeometry(.15, .24, 16)), warhead);
   nose.rotation.x = -Math.PI / 2;
   nose.position.set(0, .06, -1.2);
-  g.add(nose);
+  warheadGroup.add(nose);
   const noseTip = new T.Mesh(geo('rocket-nose-tip|.05|.1|10', () => new T.ConeGeometry(.05, .1, 10)), glow);
   noseTip.rotation.x = -Math.PI / 2;
   noseTip.position.set(0, .06, -1.35);
-  g.add(noseTip);
+  warheadGroup.add(noseTip);
+  g.userData.parts = {...(g.userData.parts || {}), magazine: warheadGroup};
 
   // --- rear venturi, exhaust glow and rim ----------------------------------
   const venturi = cylinder(g, .27, .2, .2, 0, .06, .3, dark, 20);

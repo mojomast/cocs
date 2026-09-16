@@ -724,9 +724,12 @@ test('procedural textures are wired across arena floors, blocks, and weapon deta
   assert.ok(floorMesh, 'neon-vertical builds floor mesh');
   assert.equal(floorMesh.material.map?.userData.surfaceKind, 'holographic_grid', 'neon floor uses holographic_grid');
 
-  // Verify weapon model has deflector detail
+  // Verify the viewmodel exposes named per-weapon anchors; the old unconditional
+  // shared rail/sights/deflector is replaced by builder-owned sight lines.
   const weapon = weaponModel(0);
-  assert.ok(weapon.userData.deflector, 'weaponModel exposes ejection deflector detail');
+  assert.ok(weapon.userData.anchors?.rearSight && weapon.userData.anchors?.frontSight, 'weaponModel exposes named sight anchors');
+  assert.ok(weapon.userData.anchors?.muzzle, 'weaponModel exposes a muzzle anchor');
+  assert.ok(weapon.userData.aim?.position && Number.isFinite(weapon.userData.aim.pitch), 'ADS is derived from the sight anchors');
 
   view.dispose();
   clearSurfaceTextures();
@@ -762,12 +765,18 @@ test('reduced motion keeps the static arena backdrop while freezing animation',t
 test('first-person viewmodel rebuilds when attachments or finish change',t=>{
  const {view}=playable(t);
  const base={id:7,weapon:0,health:100,x:0,y:0,z:0,yaw:0,pitch:0,vx:0,vy:0,vz:0,grounded:true};
- const frame=player=>view.render('playing',{actors:[player],pickups:[],rockets:[],time:1,events:[]},.016,1);
+ const frame=(player,dt=.016)=>view.render('playing',{actors:[player],pickups:[],rockets:[],time:1,events:[]},dt,1);
  frame(base);const initial=view.firstPerson;
  frame(base);assert.equal(view.firstPerson,initial,'unchanged gear keeps the same viewmodel');
- const scoped={...base,attachments:{visual:{optic:'scope',barrel:'stock',magazine:'stock',underbarrel:'none'}}};
- frame(scoped);const afterScope=view.firstPerson;assert.notEqual(afterScope,initial,'an attachment change rebuilds the viewmodel');
- frame({...scoped,finish:'finish-ion'});assert.notEqual(view.firstPerson,afterScope,'a finish change rebuilds the viewmodel');
+ const scoped={...base,weaponSwitch:.4,attachments:{visual:{optic:'scope',barrel:'stock',magazine:'stock',underbarrel:'none'}}};
+ frame(scoped);
+ assert.ok(view._swap,'a presentation change starts a swap');
+ assert.equal(view.firstPerson,initial,'the outgoing weapon is retained while lowering');
+ for(let i=0;i<30;i++)frame(scoped);
+ const afterScope=view.firstPerson;assert.notEqual(afterScope,initial,'the incoming viewmodel is raised after the swap');
+ const finished={...scoped,finish:'finish-ion'};
+ frame(finished);for(let i=0;i<30;i++)frame(finished);
+ assert.notEqual(view.firstPerson,afterScope,'a finish change rebuilds the viewmodel');
  view.disposeObject(view.scene);
 });
 
@@ -1012,9 +1021,10 @@ test('muzzle flash keeps its indexed flare and adds a layered burst per muzzle',
    assert.ok(bursts[i].children.some(child=>child.name==='flash-cone'),'the burst has a cone core');
    assert.equal(bursts[i].children.filter(child=>child.name==='flash-petal').length,2,'the burst has crossed petals');
   }
-  const sights=model.userData.sights;
-  assert.ok(Array.isArray(sights)&&sights.length===2,'a top rail mounts front and rear sights');
-  assert.ok(sights.every(sight=>sight.userData.weaponDetail==='sight'));
+  const anchors=model.userData.anchors;
+  assert.ok(anchors?.rearSight&&anchors?.frontSight,'every weapon exposes rear and front sight anchors');
+  assert.equal(anchors.rearSight.userData.weaponDetail,'sight');
+  assert.equal(anchors.frontSight.userData.weaponDetail,'sight');
   ArenaView.prototype.disposeObject.call({},model);
  }
 });

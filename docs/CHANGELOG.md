@@ -16,6 +16,64 @@ record in [VERIFICATION.md](VERIFICATION.md).
 
 ---
 
+## v5.6 · ARSENAL — 2026-09-16
+
+### Weapon presentation
+- `assembleWeapon` no longer bolts a shared top rail, iron sights and ejection
+  deflector onto every gun. Each model now exposes named anchors —
+  `muzzle`, `rearSight`, `frontSight`, `leftGrip`, `rightGrip`, `magazine`,
+  `bolt`, `hinge` — under `userData.anchors`, and `WEAPON_SIGHT_LINES` defines a
+  front/rear sight line per weapon.
+- ADS is derived from those anchors (`userData.aim`): the rear sight resolves to
+  the sightline origin and the front sight is levelled, so each weapon shoulders
+  to its own glass. The selected optic attaches along the same line.
+- Reload/part animation reads authoritative state via `_animateWeaponParts`: the
+  SMG magazine drops out of the magwell, the Scattergun breaks open and tips its
+  barrels, the Rocket Launcher pulls its round back into the tube and the Rail
+  Lance spins its capacitor stack; the bolt cycles on the shot kick. Builders
+  opt in through `userData.parts`. The Pulse Rifle keeps infinite ammo and
+  invents no reload motion.
+- Weapon changes are two-phase: the outgoing model is retained while the weapon
+  lowers, the models swap at the bottom, and the incoming weapon rises. Reduced
+  motion swaps immediately and holds the hip layout.
+
+### First-person depth
+- The viewmodel renders through a dedicated `weaponScene` + `weaponCamera` with
+  its own `weaponFov`. The world depth is cleared before the weapon draw, and
+  weapon meshes keep `depthTest`, so the gun's own parts occlude each other
+  correctly instead of every part drawing over everything. A mirrored root keeps
+  muzzle world transforms correct for effects. The CPU renderer keeps the legacy
+  in-camera, depth-test-off fallback.
+
+### Accuracy and AI
+- Movement penalties were retuned so precision weapons are not dominated by
+  walking (Pulse `moveFactor` .35→.035, SMG .45→.06, Rail .18→.015, Marksman
+  .22→.025); Rocket/Plasma/Grenade have no movement spread. Spread perturbs the
+  plane perpendicular to aim (`aimBasis`/`spreadDirection`), and the crosshair
+  reads the same `effectiveSpread` calculation used by `fire()`.
+- `Match.switchWeapon` is the single weapon-switch operation for humans and
+  bots (validation, 0.45 s delay, reload cancellation, presentation event).
+  Bots use it with a commit window and explicit `chooseWeaponIndex` selection so
+  index 0 stays a deliberate choice.
+- Bots route with weighted A*; `coverPoint` scores reachable cover by Dijkstra
+  route cost, exposure, usable weapon range and a capped safety-distance benefit
+  (fixing the old toward-threat bias); `flankDestination` demands lateral
+  separation and is keyed to the target with expiry; routes are cached with
+  staggered replanning; unreachable paths return an explicit empty route.
+- `Match.spawn` rejects blocked points first, scores threats from enemies only,
+  penalises enemy line of sight and nearby projectiles, applies a decaying death
+  heatmap and rewards non-overlapping teammate proximity, with a validated
+  fallback.
+
+### Rendering
+- `postStage` no longer disables the composer for zero bloom, and the composer
+  chain gains an explicit FXAA pass after `OutputPass`.
+- Reduced motion no longer removes static texture eligibility.
+- Albedo, roughness and normal maps derive from one shared height/wear field, so
+  a visible scratch or pit has matching relief and roughness. `MATERIAL_PRESETS`
+  (painted armour, exposed steel, rubber, stone, energy) are exported for
+  material tuning.
+
 ## v5.5 · FIDELITY — 2026-09-16
 
 - **Surfaces:** `textures.mjs` adds `diamond_plate`, `riveted_armor`,

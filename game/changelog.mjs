@@ -1,12 +1,20 @@
 // In-game patch notes. The title-screen footer is the running version; this
 // module is the human-readable release digest the Changelog screen renders. The
 // full historical record lives in docs/CHANGELOG.md and is linked from the UI.
-export const RELEASE_VERSION = 'v5.5';
-export const RELEASE_CODENAME = 'FIDELITY';
+export const RELEASE_VERSION = 'v5.6';
+export const RELEASE_CODENAME = 'ARSENAL';
 export const REPO_URL = 'https://github.com/mojomast/tokenarena';
 export const FULL_CHANGELOG_URL = `${REPO_URL}/blob/main/docs/CHANGELOG.md`;
 
 export const CHANGELOG = [
+  {version:'v5.6',codename:'ARSENAL',date:'2026-09-16',tag:'Weapon presentation, combat AI and rendering',highlights:[
+    'First-person weapons are rebuilt around per-weapon anchors: each gun exposes its own muzzle, front/rear sights, grips, magazine, bolt and hinge, sights come from the weapon itself rather than one shared rail, and aiming down sights resolves to that weapon\'s own sight line and optic.',
+    'Weapons have moving parts again: the SMG magazine, Scattergun break-action, Rocket Launcher loading and Rail Lance energy cell animate from real reload progress, the bolt cycles on each shot, and weapon swaps now hold the outgoing gun through the lowering phase and raise the new one — all from authoritative simulation state.',
+    'The viewmodel renders through its own scene and camera, so the gun keeps correct depth between its own parts without being clipped by world geometry, with an independent field of view and the existing CPU fallback.',
+    'Movement no longer dominates accuracy: precision-weapon movement penalties are far smaller, spread is applied in the plane perpendicular to aim, and the crosshair reads the same effective-spread calculation used by shooting.',
+    'Bots handle weapons like players — one shared switch operation with the delay, reload cancel and event, plus selection hysteresis — and navigate with weighted A* routing, reachable cover scoring, laterally separated flanks and cached routes. Spawns now weigh threats, exposure, incoming projectiles and a decaying death heatmap instead of raw distance.',
+    'Rendering detail: the composer gets explicit antialiasing and is no longer disabled by zero bloom, reduced motion keeps static material detail, and albedo, roughness and normal maps share one height field so relief and roughness match.',
+  ]},
   {version:'v5.5',codename:'FIDELITY',date:'2026-09-16',tag:'Surface, particle and model fidelity',highlights:[
     'Eight new relief surfaces (diamond plate, riveted armour, circuit board, brushed metal, corrugated metal, alien chitin, rough stucco, industrial mesh) with a canonical-kind resolver, intuitive aliases and seam-free tiling, mapped across arena floors and blocks.',
     'Texture generation can now emit a dedicated bump map alongside the normal map, and materials wire it when present.',

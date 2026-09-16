@@ -58,13 +58,18 @@ export function buildRailLance(g, ctx) {
 
   // --- stacked capacitor coils along the rails ---------------------------
   const coilGeo = (r, t) => geo(`rail-coil|${r}|${t}|5|12`, () => new T.TorusGeometry(r, t, 5, 12));
+  // Grouped so the energy-cell reload can spin the capacitor stack.
+  const coils = new T.Group();
+  coils.name = 'rail-coils';
+  g.add(coils);
   for (const x of [-.075, .075]) {
     for (let i = 0; i < 5; i++) {
       const coil = new T.Mesh(coilGeo(.062, .016), i % 2 ? glow : light);
       coil.position.set(x, .05, -.5 - i * .08);
-      g.add(coil);
+      coils.add(coil);
     }
   }
+  g.userData.parts = {...(g.userData.parts || {}), cell: coils};
 
   // --- long scope ---------------------------------------------------------
   const scopeTube = cylinder(g, .055, .055, .5, 0, .27, -.28, dark, 16);

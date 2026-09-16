@@ -8,7 +8,7 @@ import {mapsForMode,resolveMapForMode} from '../game/arenas.mjs';
 import {WEATHER_KINDS} from '../game/environment.mjs';
 import {Switch} from '@/components/ui/switch';
 import {CHARACTERS,HARNESSES,WEAPONS,RULES,resolveLoadout} from '../game/data.mjs';
-import {Match} from '../game/core.mjs';
+import {Match,effectiveSpread} from '../game/core.mjs';
 import {NetClient,DEFAULT_SERVER_URL} from '../game/net.mjs';
 import {VoiceChat} from '../game/voice.mjs';
 import {DEFAULT_CONFIG,DEFAULT_DISPLAY,DIFFICULTIES,normalizeConfig,normalizeDisplay,GAME_MODES} from '../game/config.mjs';
@@ -43,7 +43,7 @@ import {CHALLENGE_STORAGE_KEY,applyMatchAll,challengeStatus,currentDaySeed,norma
 import {emptyHistory,historyEntryFromResult,historyLeaderboard,historyTotals,loadHistory,recordMatch,saveHistory} from '../game/history.mjs';
 import {ATTACHMENTS,ATTACHMENT_SLOTS,normalizeAttachments} from '../game/attachments.mjs';
 import {WEAPON_FINISHES,CROSSHAIR_STYLES,FINISH_IDS,CROSSHAIR_IDS} from '../game/cosmetics.mjs';
-import {harnessVehicle} from '../game/harness-profiles.mjs';
+import {harnessVehicle,harnessWeaponHandling} from '../game/harness-profiles.mjs';
 import {pickShowcase,seatShowcaseVehicles,SHOWCASES,SHOWCASE_MAX_SECONDS} from '../game/showcase.mjs';
 import {buildShowcase as buildShowcaseFactory} from '../game/showcase-build.mjs';
 import {demoBroadcast} from '../game/broadcast.mjs';
@@ -348,7 +348,7 @@ export default function Home(){
   const chooseCrosshair=(id:string)=>{saveProgression({...profileRef.current,crosshair:profileRef.current.crosshair===id?null:id});setDisplay((d:any)=>normalizeDisplay({...d,crosshair:id}));};
   const prefs=<><div className="preferences"><label htmlFor="sensitivity">Mouse sensitivity <span>{sensitivity.toFixed(1)}×</span></label><Slider id="sensitivity" aria-label="Mouse sensitivity" value={[sensitivity]} min={.3} max={2.5} step={.1} onValueChange={([v])=>saveSettings(v,muted)}/><div className="sound-setting"><label htmlFor="audio-switch">Game audio</label><Switch id="audio-switch" checked={!muted} onCheckedChange={v=>saveSettings(sensitivity,!v)}/></div><div className="sound-setting"><label htmlFor="showcase-switch">Menu showcase</label><Switch id="showcase-switch" checked={showcase} onCheckedChange={v=>saveSettings(sensitivity,muted,v)}/></div><div className="sound-setting"><label htmlFor="legacy-switch">Legacy arenas</label><Switch id="legacy-switch" checked={legacyMaps} onCheckedChange={v=>saveSettings(sensitivity,muted,showcase,v)}/></div><div className="sound-setting"><label htmlFor="touch-switch">Touch controls</label><Switch id="touch-switch" checked={touchControls} onCheckedChange={v=>setTouchPref(v)}/></div></div><DisplayConfiguration display={display} onChange={(v:any)=>setDisplay(normalizeDisplay(v))}/><AccessibilityConfiguration accessibility={accessibility} onChange={(v:any)=>setAccessibility(normalizeAccessibility(v))}/><KeybindsConfiguration bindings={bindings} onChange={(v:any)=>setBindings(normalizeBindings(v))} conflicts={bindingConflicts(bindings)}/></>;
   const player=hud?.actors?.find((a:any)=>a.id===(hud.actorId??0))||hud?.actors?.[0],activePower=HARNESSES.find((h:any)=>h.id===player?.harness),hudMode=GAME_MODES.find((m:any)=>m.id===hud?.config?.mode),brief=commandBrief(hud,player,hudMode),hudMap=getMap(hud?.mapId||mapId),hudRoute=routeContext(hudMap,player),phase=matchPhase(hud);
-   const aimActor=player||hud?.actors?.[0],crosshairGap=dynamicCrosshairGap(aimActor?.spread,display.size),reloadFill=reloadProgress(aimActor),reloading=Boolean(aimActor?.reloading),posture=postureLabel(aimActor),marker=hitMarker(hud,player),ammoEmpty=Boolean(player&&typeof player.ammo?.[player.weapon]==='number'&&player.ammo[player.weapon]===0),ammoLow=lowAmmo(player,WEAPONS);
+   const aimActor=player||hud?.actors?.[0],aimWeapon=aimActor?WEAPONS[aimActor.weapon??0]||WEAPONS[0]:null,aimSpread=aimActor?effectiveSpread(aimActor,aimWeapon,{handling:harnessWeaponHandling(aimActor.harness,aimActor.weapon)}):0,crosshairGap=dynamicCrosshairGap(aimSpread,display.size),reloadFill=reloadProgress(aimActor),reloading=Boolean(aimActor?.reloading),posture=postureLabel(aimActor),marker=hitMarker(hud,player),ammoEmpty=Boolean(player&&typeof player.ammo?.[player.weapon]==='number'&&player.ammo[player.weapon]===0),ammoLow=lowAmmo(player,WEAPONS);
     const killNotice=killBanner(hud,player),suddenBanner=suddenDeathBanner(hud),startBanner=matchStartBanner(hud,undefined,hudMode),scoreCue=hud?.scoreCue&&hud.scoreCue.age<1.6?hud.scoreCue:null,damageIndicator=hud?.damageDir&&hud.time-hud.damageDirAt<.8?hud.damageDir:null,awards=matchAwards(hud),radar=radarContacts(hud,player),radarCols=radarPaletteFor(accessibility.palette);
    const {vehicle,prompt:vehiclePrompt}=vehicleHud(player,hud?.vehicles,hud?.flags,hud?.spectate);
    const scoreboard=renderScoreboard(hud);
@@ -379,7 +379,7 @@ export default function Home(){
   };
   return <><main className={`arena-app mode-${mode}${(config.mode==='puma-race'||config.mode==='puma-soccer')?' race-setup':''}${(isRace||isSoccer)?' race-active':''} palette-${accessibility.palette}${accessibility.palette!=='default'?' palette-colorblind':''}${accessibility.highContrast?' ui-contrast':''}`}>
   <canvas ref={canvas} tabIndex={-1} role="img" className="arena-canvas" aria-label="Colosseum Of Competitive Slop 3D game"/>
-  {!entered&&!demoOnly&&<><TitleScreen ui={ui}/><div className="title-footer"><span>v5.5 · FIDELITY</span>{githubLink}</div></>}
+  {!entered&&!demoOnly&&<><TitleScreen ui={ui}/><div className="title-footer"><span>v5.6 · ARSENAL</span>{githubLink}</div></>}
   {!entered&&demoOnly&&<div className="demo-controls" role="group" aria-label="Demo controls">
     <div className="demo-controls__row">
       <button type="button" className="icon-button" onClick={()=>cycleShowcase(-1)} aria-label="Previous demo mode" title="Previous mode"><ChevronLeft size={18}/></button>

@@ -1,5 +1,34 @@
 # COCS verification report
 
+## Release 5.6 - Weapon presentation, combat AI and rendering
+
+- **Weapon presentation:** `game/weapon-rig.test.mjs` asserts every weapon
+  exposes the named anchors, that the ADS position is derived from the rear
+  sight (and differs per weapon), that reload progress moves the real SMG
+  magazine / Rail Lance cell / Scattergun barrels while the infinite-ammo Pulse
+  Rifle invents no motion, and that the bolt cycles on the shot kick and holds
+  under reduced motion. `game/weapon-presentation.test.mjs` still pins muzzle
+  counts, flash lifetimes and exactly-once disposal; `game/view.test.mjs` covers
+  the two-phase swap (outgoing retained while lowering).
+- **First-person depth:** the render path builds a dedicated weapon scene and
+  camera; the scene-graph/behaviour tests construct partial views without one
+  and fall back to the in-camera path, which is the same software-renderer
+  fallback.
+- **Accuracy:** `game/weapon-spread.test.mjs` asserts the perpendicular-plane
+  perturbation, the retuned `moveFactor` values, and seeded moving-shot hit
+  distributions at fixed distances.
+- **Weapon handling and navigation:** `game/weapon-switch.test.mjs` covers the
+  shared switch operation, its delay/reload-cancel/event and bot commit
+  hysteresis; `game/bot-navigation.test.mjs` covers weighted A*, explicit
+  unreachability, reachable-cover scoring, lateral flanks and keyed expiry;
+  `game/spawn-scoring.test.mjs` proves covered spawns beat exposed ones and that
+  a nearby ally does not make safe cover undesirable.
+- **Rendering:** `game/material-presets.test.mjs` measures the shared height
+  field (albedo/roughness correlation) and the preset table; `game/post.test.mjs`
+  covers the composer no longer being disabled by zero bloom.
+- No GPU/browser verification here — scene-graph, material state and pure
+  simulation only.
+
 ## Release 5.5 - Surface, particle and model fidelity
 
 - **Textures:** `game/textures.test.mjs` generates each new pattern, checks the

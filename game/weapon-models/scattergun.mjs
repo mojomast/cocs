@@ -8,12 +8,15 @@ export function buildScattergun(g, ctx){
   const red=material('#cf3b2f',.3,.5);
 
   // --- twin barrels (down -Z, tips near z=-0.82 at x=+/-0.12) ---
+  // Grouped so the break action can tip them down during a reload.
+  const barrels=new T.Group();barrels.name='scatter-barrels';g.add(barrels);
   for(const x of [-.12,.12]){
-    const barrel=cylinder(g,.05,.05,.80,x,.04,-.42,steel,24); barrel.rotation.x=Math.PI/2;
-    const bore=cylinder(g,.037,.037,.06,x,.04,-.79,boreMat,16); bore.rotation.x=Math.PI/2;
-    ring(g,.062,.011,x,.04,-.815,brass,0);
-    box(g,.02,.02,.03,x,.10,-.79,glow);
+    const barrel=cylinder(barrels,.05,.05,.80,x,.04,-.42,steel,24); barrel.rotation.x=Math.PI/2;
+    const bore=cylinder(barrels,.037,.037,.06,x,.04,-.79,boreMat,16); bore.rotation.x=Math.PI/2;
+    ring(barrels,.062,.011,x,.04,-.815,brass,0);
+    box(barrels,.02,.02,.03,x,.10,-.79,glow);
   }
+  g.userData.parts={...(g.userData.parts||{}),barrel:barrels};
   // --- sight rib nestled between the twin barrels ---
   box(g,.14,.05,.70,0,.07,-.45,light);
   box(g,.03,.02,.45,0,.105,-.42,dark);

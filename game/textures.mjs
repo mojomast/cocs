@@ -558,6 +558,18 @@ function generatePatternPixel(kind, u, v, seed, channel, edge) {
 }
 
 export function clearSurfaceTextures(){for(const textures of cache.values())for(const texture of Object.values(textures))texture?.dispose?.();cache.clear();clearWetSheenTextures();}
+// Explicit PBR material presets for the surfaces that recur across the scene.
+// Callers spread these onto a MeshStandardMaterial so painted armour, exposed
+// steel, rubber, stone/concrete and energy read as physically distinct instead
+// of sharing one generic metallic value.
+export const MATERIAL_PRESETS=Object.freeze({
+ paintedArmor:Object.freeze({metalness:.14,roughness:.55}),
+ exposedSteel:Object.freeze({metalness:.9,roughness:.34}),
+ rubber:Object.freeze({metalness:.05,roughness:.92}),
+ stone:Object.freeze({metalness:.02,roughness:.95}),
+ energy:Object.freeze({metalness:.2,roughness:.3,emissiveIntensity:1.6}),
+});
+export function materialPreset(name){return MATERIAL_PRESETS[name]||MATERIAL_PRESETS.paintedArmor;}
 
 // A single shared puddle/wet-sheen overlay: a soft, low-contrast blotch map the
 // view blends over wet floor materials. It is cached once (keyed only by size
@@ -613,7 +625,9 @@ export function surfaceTextures(kind='concrete',{size=96,seed=1,repeat=[1,1],nor
      continue;
     }
    }
-   const base=fbm(u,v,seed+channel*997,4),fine=fbm(u*3.1,v*3.1,seed+channel*997+17,3),n=base*.72+fine*.28;
+   // One shared height/wear field drives every channel, so a scratch or pit in
+   // the albedo has matching relief in the normal map and roughness.
+   const base=fbm(u,v,seed,4),fine=fbm(u*3.1,v*3.1,seed+17,3),n=base*.72+fine*.28;
    if(channel===0){
     const lum=(1-layer.contrast*.5)+layer.contrast*n;
     data[i]=clamp255(lum*255*layer.hue[0]);
@@ -623,7 +637,7 @@ export function surfaceTextures(kind='concrete',{size=96,seed=1,repeat=[1,1],nor
     const r=(layer.rough[0]+(layer.rough[1]-layer.rough[0])*n)*255;
     data[i]=data[i+1]=data[i+2]=clamp255(r);
    }else{
-    const dx=fbm(u+edge,v,seed+channel*997,4)-base,dy=fbm(u,v+edge,seed+channel*997,4)-base,strength=layer.grain*6;
+    const dx=fbm(u+edge,v,seed,4)-base,dy=fbm(u,v+edge,seed,4)-base,strength=layer.grain*6;
     data[i]=clamp255(128-dx*strength*128);
     data[i+1]=clamp255(128-dy*strength*128);
     data[i+2]=255;

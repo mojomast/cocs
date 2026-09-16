@@ -87,14 +87,17 @@ export function buildSubmachineGun(g, ctx){
   // underside; each lower segment is spaced just under one box height so the
   // stack reads as a smooth curve. Witness holes are raised side plates.
   // ------------------------------------------------------------------
+  // The magazine is grouped so reload animation can drop it out of the magwell.
+  const mag=new T.Group();mag.name='smg-magazine';g.add(mag);
   for(let i=0;i<7;i++){
     const y=-.2275-i*.072,z=-.15-i*.018,tilt=-.07-i*.055;
-    const seg=box(g,.08,.075,.12,0,y,z,dark);seg.rotation.x=tilt;
+    const seg=box(mag,.08,.075,.12,0,y,z,dark);seg.rotation.x=tilt;
   }
   for(const [i,sx] of [[1,.043],[2,-.043],[4,.043],[5,-.043]]){
-    box(g,.006,.016,.024,sx,-.2275-i*.072,-.15-i*.018,glow);
+    box(mag,.006,.016,.024,sx,-.2275-i*.072,-.15-i*.018,glow);
   }
-  box(g,.09,.025,.13,0,-.715,-.258,light);
+  box(mag,.09,.025,.13,0,-.715,-.258,light);
+  g.userData.parts={...(g.userData.parts||{}),magazine:mag};
 
   // ------------------------------------------------------------------
   // Ejection port and charging handle on the right face; a second charging

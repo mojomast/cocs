@@ -10,6 +10,8 @@ test('a flanker seeks deterministic cover from a synthetic nav graph',()=>{
  const match={nav:[{x:0,y:0,z:0},{x:-6,y:0,z:0},{x:6,y:0,z:0}],arena:{blocks:[]},visible:(from,to)=>Math.abs(from.z-to.z)<2};
  const bot={x:0,y:0,z:0},threat={x:0,y:0,z:6};
  const first=coverPoint(match,bot,threat);
+ // Both nodes are out of sight and equidistant from the threat, so the first
+ // (lowest-id) node wins on the deterministic tie-break.
  assert.deepEqual(first,{x:-6,y:0,z:0});
  assert.deepEqual(coverPoint(match,bot,threat),first,'the same inputs resolve to the same cover');
  assert.equal(coverPoint({nav:[],arena:{},visible:()=>false},bot,threat),null,'no nav means no cover');

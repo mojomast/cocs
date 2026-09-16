@@ -30,6 +30,7 @@ import {UnrealBloomPass} from 'three/addons/postprocessing/UnrealBloomPass.js';
 import {ShaderPass} from 'three/addons/postprocessing/ShaderPass.js';
 import {OutputPass} from 'three/addons/postprocessing/OutputPass.js';
 import {VignetteShader} from 'three/addons/shaders/VignetteShader.js';
+import {FXAAShader} from 'three/addons/shaders/FXAAShader.js';
 export {SynthAudio} from './feedback.mjs';
 export {WeaponPreviewRig} from './effects-fx.mjs';
 // Menu/showcase weapon preview. A host screen can mount a rotating, inspectable
@@ -76,26 +77,49 @@ const terrainTextureKind=key=>({grass:'grass',dirt:'sand',rock:'rock',cliff:'roc
 const NEXTGEN_PROXY=new Set(['cave','tunnel','rock','tree','crate','column']);
 const weaponInfo=type=>WEAPONS[type]||{color:['#ff6f91','#e8ff71','#ff9f43'][Math.abs(type)%3],name:`Weapon ${type}`,short:`W${type}`,feel:{}};
 const weaponVisualKey=visual=>{if(!visual)return '';try{return JSON.stringify(visual);}catch{return String(visual);}};
+// Per-weapon iron-sight line: [rearX,rearY,rearZ, frontX,frontY,frontZ]. The ADS
+// transform is derived from these anchors, and the selected optic attaches along
+// the same line, so every weapon shoulders to its own sights.
+const WEAPON_SIGHT_LINES=[
+ [0,.20,.06,0,.205,-.60],   // 0 Pulse Rifle
+ [0,.50,-.56,0,.50,-.72],   // 1 Rocket Launcher (flip-up)
+ [0,.27,.02,0,.27,-.645],   // 2 Rail Lance (scope)
+ [0,.11,-.18,0,.11,-.78],   // 3 Scattergun (rib)
+ [0,.15,-.18,0,.15,-.55],   // 4 Plasma Driver
+ [0,.15,-.18,0,.15,-.60],   // 5 Grenade Launcher
+ [0,.12,-.20,0,.12,-.62],   // 6 Shock Beam
+ [0,.12,-.20,0,.12,-.62],   // 7 Flak Cannon
+ [0,.20,-.10,0,.20,-.66],   // 8 Marksman Rifle
+ [0,.248,.01,0,.181,-.47],  // 9 SMG (folding irons)
+];
+const WEAPON_SIGHT_DEFAULT=[0,.16,-.1,0,.16,-.5];
+const WEAPON_PART_DEFAULTS={leftGrip:[0,-.14,-.05],rightGrip:[0,-.14,-.05],magazine:[0,-.26,-.16],bolt:[.09,.05,-.16],hinge:[0,0,0]};
 function assembleWeapon(type,assets,visual,finish,body){return withAssets(assets,()=>{type=Number.isInteger(type)&&type>=0?type:0;const info=weaponInfo(type),finishColors=resolveFinish(finish,null),g=new T.Group(),dark=material(finishColors?.secondary||'#222f37'),light=material(finishColors?.accent||'#73848a'),glow=material(finishColors?.primary||info.color,.3,.3,true);g.userData.type=type;const ctx={T,info,material,box,cylinder,ring,geo:(key,make)=>geometry(assets,key,make),palette:{dark,light,glow}};body(type,g,ctx);
-  // Subtle top rail with iron sights so the first-person viewmodel reads as a
-  // service weapon instead of a bare receiver. Presentation only.
-  const detailMat=material('#101619',.7,.45),rail=box(g,.075,.04,.52,0,.145,-.42,detailMat);rail.name='top-rail';rail.userData.weaponDetail='rail';
-  for(const z of [-.22,-.64]){const tooth=box(g,.09,.018,.028,0,.166,z,detailMat);tooth.userData.weaponDetail='rail-tooth';}
-  const rearSight=box(g,.11,.06,.05,0,.18,-.14,detailMat);rearSight.name='rear-sight';rearSight.userData.weaponDetail='sight';
-  const frontSight=box(g,.045,.1,.035,0,.19,-.68,detailMat);frontSight.name='front-sight';frontSight.userData.weaponDetail='sight';
-  const deflector=box(g,.024,.036,.08,.042,.07,-.24,detailMat);deflector.name='ejection-deflector';
-  g.userData.sights=[rearSight,frontSight];g.userData.railDetail=rail;g.userData.deflector=deflector;
+  // Named anchors replace the old unconditional rail + iron sights. Every
+  // builder already ships its own sights; the shared tail only records the
+  // anchors used to derive ADS, attach the selected optic, and drive reload
+  // part animation. Builders may supply movable groups via g.userData.parts.
+  const line=WEAPON_SIGHT_LINES[type]||WEAPON_SIGHT_DEFAULT,parts=g.userData.parts||{};
+  const makeAnchor=(name,xyz,detail)=>{const existing=parts[name];if(existing){existing.name=name;return existing;}const node=new T.Group();node.name=name;if(xyz)node.position.set(xyz[0]||0,xyz[1]||0,xyz[2]||0);if(detail)node.userData.weaponDetail=detail;g.add(node);return node;};
+  const rearSight=makeAnchor('rearSight',line.slice(0,3),'sight'),frontSight=makeAnchor('frontSight',line.slice(3,6),'sight');
+  const partAnchors={rearSight,frontSight,leftGrip:makeAnchor('leftGrip',WEAPON_PART_DEFAULTS.leftGrip),rightGrip:makeAnchor('rightGrip',WEAPON_PART_DEFAULTS.rightGrip),magazine:makeAnchor('magazine',WEAPON_PART_DEFAULTS.magazine),bolt:makeAnchor('bolt',WEAPON_PART_DEFAULTS.bolt),hinge:makeAnchor('hinge',WEAPON_PART_DEFAULTS.hinge)};
+  const sightDZ=frontSight.position.z-rearSight.position.z,sightDY=frontSight.position.y-rearSight.position.y;
+  g.userData.anchors=partAnchors;g.userData.parts=parts;
+  // ADS resolves the rear sight to the sightline origin and levels the front
+  // sight onto the same horizontal line.
+  g.userData.aim={position:{x:-rearSight.position.x,y:-rearSight.position.y,z:-rearSight.position.z-.12},pitch:-Math.atan2(sightDY,Math.abs(sightDZ)||.001)};
   const points=[[[0,.01,-.85]],[[0,0,-.76]],[[0,.025,-1.04]],[[-.12,.03,-.82],[.12,.03,-.82]],[[0,0,-.77]],[[0,.04,-.93]],[[0,0,-.99]],[[0,0,-.99]],[[0,.02,-.84]],[[0,.05,-.835]]][type]||[[0,0,-.83]];
   const muzzle=info.feel?.muzzle||[.12,.06],flash=new T.Group(),anchors=[];
   for(const point of points){const anchor=new T.Group();anchor.position.set(...point);anchor.name='muzzle';g.add(anchor);anchors.push(anchor);const flare=new T.Mesh(new T.SphereGeometry(muzzle[0],6,4),new T.MeshBasicMaterial({color:info.color}));flare.position.copy(anchor.position);flare.scale.z=1.5;flare.name='muzzle-flare';flash.add(flare);}
   // Layered flash petals around each flare: keep the flare itself as the indexed
   // child (weapon-presentation contract) and append detail bursts afterwards.
   for(const point of points){const origin=V(point[0],point[1],point[2]),burst=new T.Group();burst.name='muzzle-flash';burst.userData.muzzleFlash=true;burst.position.copy(origin);const cone=new T.Mesh(new T.ConeGeometry(muzzle[0]*.8,muzzle[0]*2.2,5),new T.MeshBasicMaterial({color:info.color,transparent:true,opacity:.9,depthWrite:false,blending:T.AdditiveBlending}));cone.name='flash-cone';cone.rotation.x=-Math.PI/2;cone.position.z=-muzzle[0]*1.2;burst.add(cone);for(const angle of [0,Math.PI/2]){const petal=new T.Mesh(new T.PlaneGeometry(muzzle[0]*3.2,muzzle[0]*.55),new T.MeshBasicMaterial({color:info.color,transparent:true,opacity:.7,depthWrite:false,side:T.DoubleSide,blending:T.AdditiveBlending}));petal.name='flash-petal';petal.rotation.z=angle;burst.add(petal);}flash.add(burst);}
-  flash.visible=false;g.add(flash);g.userData.flash=flash;g.userData.muzzles=anchors;g.userData.muzzle=anchors[0];g.userData.feel=info.feel;
+  flash.visible=false;g.add(flash);g.userData.flash=flash;g.userData.muzzles=anchors;g.userData.muzzle=anchors[0];g.userData.feel=info.feel;g.userData.anchors.muzzle=anchors[0];g.userData.anchors.muzzles=anchors;
   if(visual){const acc=material(visual.color||'#8affc1',.4,.3,true),mod=material('#161d22',.6,.5);
-   if(visual.optic==='scope'){const s=cylinder(g,.06,.06,.5,0,.28,-.18,mod,10);s.rotation.x=Math.PI/2;ring(g,.055,.014,0,.28,-.44,acc,0);}
-   else if(visual.optic==='holo'){box(g,.12,.1,.16,0,.3,-.2,acc);}
-   else if(visual.optic==='iron'){box(g,.1,.07,.1,0,.3,-.16,mod);}
+   const opticZ=Math.max(-1.05,Math.min(-.05,rearSight.position.z-.12)),opticY=Math.max(rearSight.position.y,frontSight.position.y)+.03;
+   if(visual.optic==='scope'){const s=cylinder(g,.06,.06,Math.max(.3,Math.abs(sightDZ)),0,opticY,(rearSight.position.z+frontSight.position.z)/2,mod,10);s.rotation.x=Math.PI/2;ring(g,.055,.014,0,opticY,frontSight.position.z+.05,acc,0);}
+   else if(visual.optic==='holo'){box(g,.12,.1,.16,rearSight.position.x,opticY,opticZ,acc);}
+   else if(visual.optic==='iron'){box(g,.1,.07,.1,rearSight.position.x,opticY,opticZ,mod);}
    if(visual.barrel==='long'){const b=cylinder(g,.052,.046,.55,0,.02,-.88,mod,10);b.rotation.x=Math.PI/2;ring(g,.062,.014,0,.02,-1.12,acc,0);}
    else if(visual.barrel==='heavy'){const b=cylinder(g,.09,.08,.55,0,.02,-.88,mod,10);b.rotation.x=Math.PI/2;ring(g,.105,.02,0,.02,-1.12,acc,0);}
    else if(visual.barrel==='short'){const b=cylinder(g,.072,.072,.18,0,.02,-.56,mod,10);b.rotation.x=Math.PI/2;}
@@ -379,7 +403,15 @@ export class ArenaView{
   this.scene=new T.Scene();this.scene.background=new T.Color('#090f17');this.scene.fog=new T.FogExp2('#090f17',.018);this.camera=new T.PerspectiveCamera(82,1,.08,220);this.camera.rotation.order='YXZ';this.scene.add(new T.HemisphereLight('#b2eeff','#1f252c',2));const sun=new T.DirectionalLight('#c9e5ef',2.8);sun.position.set(3,12,8);sun.castShadow=this.renderer.isSoftware!==true;if(sun.shadow){const shadowSize=this.qualitySettings?.shadowMap??2048;sun.shadow.mapSize.set(shadowSize,shadowSize);sun.shadow.bias=-.0006;sun.shadow.normalBias=.03;}this.sun=sun;this.sunTarget=new T.Object3D();this.scene.add(this.sunTarget);sun.target=this.sunTarget;this.scene.add(sun);
   if(this.renderer.isSoftware!==true&&this.renderer.shadowMap){this.renderer.shadowMap.enabled=true;this.renderer.shadowMap.type=T.PCFSoftShadowMap;this.renderer.shadowMap.autoUpdate=false;this.renderer.shadowMap.needsUpdate=true;}
   if(this.renderer.isSoftware!==true&&this.renderer.capabilities&&typeof document!=='undefined'){try{const pmrem=new T.PMREMGenerator(this.renderer);this.environmentRT=pmrem.fromScene(new RoomEnvironment(),.04);this.scene.environment=this.environmentRT.texture;this.scene.environmentIntensity=.5;pmrem.dispose();}catch{}}
-      this.renderResources=new Set();this.sharedResources=new Set();this.modelAssets=new ModelAssets();this.buildArena();this.actorModels=new Map();this.vehicleModels=new Map();this.pickupModels=[];this.flagModels=new Map();this.lastEvent=0;this.flashUntil=0;this.playerId=0;this.spectator=false;this.spectatorTarget=null;this.spectatorThird=false;this.hands=new T.Group();this.camera.add(this.hands);this.scene.add(this.camera);this.currentWeapon=-1;this.aim=false;this.lowHealth=false;this.cameraShake=new CameraShake();this.muzzleLights=null;this.lowHealthOverlay=null;this.railPool=null;this.deathPool=null;this.deathContext=new Map();this.payloadModel=null;this.decalPool=null;this.ambientFx=null;this.ambientPool=null;this.ambientConfig=null;this.ambientAnchors=[];this.scatterWind=[];this.killcamEnabled=true;this._killcam=null;this.hitPool=null;this.hitFlinch=new Map();this._lightning=[];this._lightningAt=0;this._flash=0;this._wetSheenApplied=0;this.preview=null;this.showcaseExpected=false;if(this.renderer.isSoftware!==true){this.muzzleLights=new MuzzleLightPool(this.scene,2);this.lowHealthOverlay=new LowHealthOverlay(this.camera);if(typeof document!=='undefined')this.railPool=new RailBeamPool(this.scene,6);this.decalPool=new DecalPool(this.scene,18);const rim=new T.DirectionalLight('#7fd8ff',.55);rim.position.set(-7,6,-9);rim.userData.rimLight=true;this.scene.add(rim);}this.menu=this.makeMenu();this.cinema=false;this.director=null;this._freeCam=false;this._directorLock=false;this.freePose={x:0,y:6,z:0,yaw:0,pitch:0};this.showcaseState=null;this.previewRect=null;this.raycaster=new T.Raycaster();this._occClear=0;this.resize();}
+      this.renderResources=new Set();this.sharedResources=new Set();this.modelAssets=new ModelAssets();this.buildArena();this.actorModels=new Map();this.vehicleModels=new Map();this.pickupModels=[];this.flagModels=new Map();this.lastEvent=0;this.flashUntil=0;this.playerId=0;this.spectator=false;this.spectatorTarget=null;this.spectatorThird=false;this.hands=new T.Group();
+   // First-person weapons render through a dedicated scene + camera so the gun
+   // keeps normal depth testing between its own parts while never being clipped
+   // by world depth. A mirrored root keeps muzzle world transforms correct for
+   // effects. The CPU renderer keeps the legacy in-camera path.
+   this.weaponScene=null;this.weaponRoot=null;this.weaponCamera=null;this.weaponFov=Math.max(45,Number(this.display?.fov)||70);
+   if(this.renderer.isSoftware===true){this.camera.add(this.hands);}
+   else{this.weaponScene=new T.Scene();this.weaponRoot=new T.Group();this.weaponScene.add(this.weaponRoot);this.weaponRoot.add(this.hands);this.weaponCamera=new T.PerspectiveCamera(this.weaponFov,1,.02,4);this.weaponScene.add(new T.HemisphereLight('#cfe9ff','#20262c',2.2));const weaponKey=new T.DirectionalLight('#ffffff',2.6);weaponKey.position.set(-2,4,3);this.weaponScene.add(weaponKey);}
+   this.scene.add(this.camera);this.currentWeapon=-1;this.aim=false;this.lowHealth=false;this.cameraShake=new CameraShake();this.muzzleLights=null;this.lowHealthOverlay=null;this.railPool=null;this.deathPool=null;this.deathContext=new Map();this.payloadModel=null;this.decalPool=null;this.ambientFx=null;this.ambientPool=null;this.ambientConfig=null;this.ambientAnchors=[];this.scatterWind=[];this.killcamEnabled=true;this._killcam=null;this.hitPool=null;this.hitFlinch=new Map();this._lightning=[];this._lightningAt=0;this._flash=0;this._wetSheenApplied=0;this.preview=null;this.showcaseExpected=false;if(this.renderer.isSoftware!==true){this.muzzleLights=new MuzzleLightPool(this.scene,2);this.lowHealthOverlay=new LowHealthOverlay(this.camera);if(typeof document!=='undefined')this.railPool=new RailBeamPool(this.scene,6);this.decalPool=new DecalPool(this.scene,18);const rim=new T.DirectionalLight('#7fd8ff',.55);rim.position.set(-7,6,-9);rim.userData.rimLight=true;this.scene.add(rim);}this.menu=this.makeMenu();this.cinema=false;this.director=null;this._freeCam=false;this._directorLock=false;this.freePose={x:0,y:6,z:0,yaw:0,pitch:0};this.showcaseState=null;this.previewRect=null;this.raycaster=new T.Raycaster();this._occClear=0;this.resize();}
        reduced(){return reducedMotion(this.display?.reducedMotion, Boolean(this.motionQuery?.matches));}
        // Presentation-only quality tier. Lazily resolved so partially constructed
        // views in tests still get a sane budget, and cached so hot paths are free.
@@ -423,7 +455,7 @@ export class ArenaView{
         if(target!==this.quality){this.quality=target;this.qualitySettings=qualitySettings(target,{software,reduced});this._onQualityChange();}
         return this.quality;
        }
-        setDisplay(prefs){if(prefs&&typeof prefs==='object'&&'quality' in prefs)this._qualityOverride=prefs.quality==null?null:prefs.quality;const display=normalizeDisplay(prefs),scaleChanged=display.resolutionScale!==this.display?.resolutionScale;this.display=display;this.camera.fov=display.fov;this.camera.updateProjectionMatrix();this.showWeapon=display.showWeapon;if('toneMappingExposure' in this.renderer)this.renderer.toneMappingExposure=Number(display.exposure)||1.15;this._applyQuality();if(scaleChanged)this.resize();else this._syncPost?.();}
+        setDisplay(prefs){if(prefs&&typeof prefs==='object'&&'quality' in prefs)this._qualityOverride=prefs.quality==null?null:prefs.quality;const display=normalizeDisplay(prefs),scaleChanged=display.resolutionScale!==this.display?.resolutionScale;this.display=display;this.camera.fov=display.fov;this.camera.updateProjectionMatrix();this.weaponFov=Math.max(45,Number(display.fov)||this.weaponFov||70);if(this.weaponCamera)this.weaponCamera.fov=this.weaponFov;this.showWeapon=display.showWeapon;if('toneMappingExposure' in this.renderer)this.renderer.toneMappingExposure=Number(display.exposure)||1.15;this._applyQuality();if(scaleChanged)this.resize();else this._syncPost?.();}
    setPlayerId(id){if(this.playerId!==id){this.feedback?.reset();this.flashUntil=0;this.cameraShake?.reset();this.lowHealth=false;}this.playerId=id;}
    setAim(on){this.aim=on===true;}
    setSpectator(on){this.spectator=on===true;}
@@ -494,8 +526,12 @@ export class ArenaView{
      if(this.pixelRatio!==ratio)this.renderer.setPixelRatio(ratio);
      // Keep even tiny/hidden canvases at least one backing pixel without changing CSS size.
      this.renderer.setSize(Math.max(w,1/ratio),Math.max(h,1/ratio),false);this.width=w;this.height=h;this.pixelRatio=ratio;
-     this.camera.aspect=w/h;this.camera.updateProjectionMatrix();this.menu.camera.aspect=w/h;this.menu.camera.updateProjectionMatrix();this._syncPost?.();}
-         _syncPost(){const eligible=this.renderer instanceof T.WebGLRenderer,bloomStrength=Number(this.display?.bloom)*this._quality().bloom,want=postStage({eligible,reduced:this.reduced(),postFx:this.display?.postFx,bloom:bloomStrength});if(!want){if(this.composer){disposeComposer(this.composer);this.composer=null;this.bloomPass=null;}this._postW=0;this._postH=0;this._postRatio=0;return;}if(!this.composer){try{const composer=new EffectComposer(this.renderer);composer.addPass(new RenderPass(this.scene,this.camera));this.bloomPass=new UnrealBloomPass(new T.Vector2(1,1),bloomStrength,.72,.9);composer.addPass(this.bloomPass);const vignette=new ShaderPass(VignetteShader);vignette.uniforms.offset.value=1.05;vignette.uniforms.darkness.value=.92;composer.addPass(vignette);composer.addPass(new OutputPass());this.composer=composer;this._postW=0;this._postH=0;this._postRatio=0;}catch{this.composer=null;return;}}if(this.bloomPass)this.bloomPass.strength=bloomStrength;const w=Math.max(1,this.renderer.domElement.clientWidth),h=Math.max(1,this.renderer.domElement.clientHeight),ratio=this.pixelRatio??1;if(this._postW!==w||this._postH!==h||this._postRatio!==ratio){applyComposerSize(this.composer,w,h,ratio);this._postW=w;this._postH=h;this._postRatio=ratio;}}
+     this.camera.aspect=w/h;this.camera.updateProjectionMatrix();this.menu.camera.aspect=w/h;this.menu.camera.updateProjectionMatrix();if(this.weaponCamera){this.weaponCamera.aspect=w/h;this.weaponCamera.updateProjectionMatrix();}this._syncPost?.();}
+         _syncPost(){const eligible=this.renderer instanceof T.WebGLRenderer,bloomStrength=Number(this.display?.bloom)*this._quality().bloom,want=postStage({eligible,reduced:this.reduced(),postFx:this.display?.postFx,bloom:bloomStrength});if(!want){if(this.composer){disposeComposer(this.composer);this.composer=null;this.bloomPass=null;this.aaPass=null;}this._postW=0;this._postH=0;this._postRatio=0;return;}if(!this.composer){try{const composer=new EffectComposer(this.renderer);composer.addPass(new RenderPass(this.scene,this.camera));this.bloomPass=new UnrealBloomPass(new T.Vector2(1,1),bloomStrength,.72,.9);composer.addPass(this.bloomPass);const vignette=new ShaderPass(VignetteShader);vignette.uniforms.offset.value=1.05;vignette.uniforms.darkness.value=.92;composer.addPass(vignette);composer.addPass(new OutputPass());
+    // Explicit antialiasing for the composer path: the render pass has no MSAA,
+    // so a final FXAA pass cleans up geometry edges after tone mapping.
+    const aa=new ShaderPass(FXAAShader);aa.name='fxaa';composer.addPass(aa);this.aaPass=aa;
+    this.composer=composer;this._postW=0;this._postH=0;this._postRatio=0;}catch{this.composer=null;return;}}if(this.bloomPass)this.bloomPass.strength=bloomStrength;const w=Math.max(1,this.renderer.domElement.clientWidth),h=Math.max(1,this.renderer.domElement.clientHeight),ratio=this.pixelRatio??1;if(this._postW!==w||this._postH!==h||this._postRatio!==ratio){applyComposerSize(this.composer,w,h,ratio);if(this.aaPass){this.aaPass.uniforms.resolution.value.set(1/(w*ratio),1/(h*ratio));}this._postW=w;this._postH=h;this._postRatio=ratio;}}
     buildArena(arena=MAPS[0]){return withAssets(this.arenaAssets??=new ModelAssets(),()=>this._buildArena(arena));}
     _buildArena(arena=MAPS[0]){if(this.worldGroup){this.scene.remove(this.worldGroup);this.disposeObject(this.worldGroup);for(const resource of this.renderResources||[])resource.dispose();this.renderResources?.clear();this.flagAssets=null;}this.sky=null;this.mountains=null;this.objectiveModels=new Map();this.mapId=arena.id;const world=new T.Group();this.worldGroup=world;this.scene.add(world);this.scene.background=new T.Color(arena.background);this.scene.fog=new T.FogExp2(arena.background,.018);const bounds=arenaBounds(arena),legacy=!arena.bounds,minX=bounds.minX,maxX=bounds.maxX,minZ=bounds.minZ,maxZ=bounds.maxZ,width=maxX-minX,depth=maxZ-minZ;
     const look=arenaLooks[arena.id]||arenaLooks.exchange,[floorColor,wallColor,trimColor,skyColor,groundColor,fogDensity,metal]=look;
@@ -508,7 +544,7 @@ export class ArenaView{
     this._arenaLight={hemi:hemi?.intensity??1.8,sun:sunLight?.intensity??2.4,hemiColor:new T.Color(hemi?.color||skyColor),sunColor:new T.Color(sunLight?.color||skyColor),groundColor:new T.Color(hemi?.groundColor||groundColor)};
     const floor=material(arena.floorColor??floorColor,metal,.78),wall=material(wallColor,metal,.72),trim=material(trimColor,metal,.58),glow=material(arena.color,.4,.3,true),islands=arena.platforms?.length>0;
     const palette=[floor,wall,trim,glow],detailBatches=new Map(),indexedUnit=new T.BoxGeometry(1,1,1),unit=indexedUnit.toNonIndexed();indexedUnit.dispose();
-    const arenaSeed=arenaSeedOf(arena),textured=this.renderer?.isSoftware!==true&&typeof document!=='undefined'&&!this.reduced();
+    const arenaSeed=arenaSeedOf(arena),textured=this.renderer?.isSoftware!==true&&typeof document!=='undefined';
     clearSurfaceTextures();
     const applyTextures=(mat,kind,rx,ry)=>{if(!textured)return mat;const maps=surfaceTextures(kind,{seed:arenaSeed,repeat:[rx,ry]});if(maps){mat.map=maps.map;mat.roughnessMap=maps.roughnessMap;mat.normalMap=maps.normalMap;mat.normalScale=new T.Vector2(.4,.4);}return mat;};
     const variantBuckets={block:new Map(),detail:new Map(),terrain:new Map(),terrainWall:new Map()};
@@ -1105,9 +1141,60 @@ if(this.freeCam){this.lowHealthOverlay?.update(false,time,delta,reduced,this.cam
    this.projectilePool??=new EffectPool(this.scene,64);this.projectilePool.clear();for(const r of (match.rockets||[]).slice(0,64))if(r.pos){const wp=r.weapon??0;if(wp===4){this.projectilePool.add({pos:r.pos,color:'#72cfff',size:.2,life:1});this.projectilePool.add({pos:r.pos,color:'#dff6ff',size:.09,life:1});}else if(wp===5)this.projectilePool.add({pos:r.pos,color:'#ffb27a',size:.13,life:1});else this.projectilePool.add({pos:r.pos,color:'#ffad61',size:.15,life:1});if(!reduced&&this.effectPool&&this.renderer?.isSoftware!==true&&(wp===1||wp===4||wp===5)){this.effectPool.add({pos:V(r.pos.x,r.pos.y,r.pos.z),color:wp===4?'#72cfff':wp===5?'#ffb27a':'#ffad61',endColor:wp===4?'#003366':wp===5?'#551100':'#441100',fade:'smooth',damping:2,size:wp===4?.06:.08,life:.22,expand:1.2,velocity:V((Math.random()-.5)*.6,(Math.random()-.5)*.6,(Math.random()-.5)*.6)});} }
   for(const e of (match.events||[]))if(e.id>this.lastEvent){this.effect(e);this.lastEvent=e.id;}
    this.effectPool?.update(Math.max(0,delta));this.railPool?.update(Math.max(0,delta));this.deathPool?.update(Math.max(0,delta));this.decalPool?.update(Math.max(0,delta));
-       this.hands.visible=player.health>0&&this.showWeapon!==false&&!this.spectator&&!cinematic&&!this.freeCam&&player.vehicleId==null;const weaponSig=`${player.finish??''}|${weaponVisualKey(player.attachments?.visual)}`;if(this.currentWeapon!==player.weapon||this._viewWeaponSig!==weaponSig){for(const c of [...this.hands.children]){this.hands.remove(c);this.disposeObject(c);}this.firstPerson=weaponModel(player.weapon,undefined,player.attachments?.visual,player.finish);this.firstPerson.scale.setScalar(1.1);this.hands.add(this.firstPerson);this.currentWeapon=player.weapon;this._viewWeaponSig=weaponSig;this.firstPerson.traverse(m=>{if(m.isMesh){m.renderOrder=100;m.material.depthTest=false;}});}
-    this.feedback??=new WeaponFeedback();const pose=this.feedback.update(player,delta,reduced,this.hands.visible);const adsTarget=(player.ads===true||this.aim===true)&&!reduced&&this.hands.visible?1:0;this._adsTransition=reduced?0:(this._adsTransition??0)+((adsTarget-(this._adsTransition??0))*Math.min(1,Math.max(0,(delta||0)*14)));if(reduced)this._adsTransition=0;const adsT=this._adsTransition,hipX=.37+pose.x,hipY=-.36+pose.y,hipZ=-.58+pose.z,aimX=pose.x*.2,aimY=-.24+pose.y*.2,aimZ=-.44+pose.z*.25;this.hands.position.set(hipX*(1-adsT)+aimX*adsT,hipY*(1-adsT)+aimY*adsT,hipZ*(1-adsT)+aimZ*adsT);this.hands.rotation.set(pose.pitch*(1-adsT*.7),0,pose.roll*(1-adsT*.7));this.firstPerson.userData.flash.visible=!reduced&&this.hands.visible&&this.flashUntil>performance.now();this.muzzleLights?.update(Math.max(0,delta));if(this.renderer.shadowMap?.autoUpdate===false){const st=shadowTick(this._shadowTick,this._quality().shadows);this._shadowTick=st.tick;if(st.refresh)this.renderer.shadowMap.needsUpdate=true;}this.updateSky();this._updateWind(time,reduced);this._updateAmbient(match,delta,time,reduced);const spMode=match.config?.mode==='campaign'||match.config?.mode==='horde';if(spMode)this.setWeather(match.weather??null);else if(!cinematic&&this._weatherOverride!==null)this.setWeather(null);this._updateWeather(arena,delta,mode);this._updateWeatherFx(delta,reduced,this._quality());const software=this.renderer?.isSoftware===true;this._updateLightning(delta,reduced,software);this._applyWetSheen(this._weatherState());this.hitPool?.update(Math.max(0,delta));this._updateHitReactions();this._updateDebris(delta);this._updateAudio(match,time);if(this.composer)this.composer.render();else this.renderer.render(this.scene,this.camera);if(cinematic)this.playerId=savedPlayerId;if((mode==='selection'||mode==='progression')&&this.showcaseState)this._renderPreview(time,reduced);}
+       this.hands.visible=player.health>0&&this.showWeapon!==false&&!this.spectator&&!cinematic&&!this.freeCam&&player.vehicleId==null;
+    const weaponSig=`${player.finish??''}|${weaponVisualKey(player.attachments?.visual)}`;
+    if(this.currentWeapon!==player.weapon||this._viewWeaponSig!==weaponSig){
+     // Finish any in-flight swap first so models never leak across changes.
+     if(this._swap){this.hands.remove(this._swap.from);this.disposeObject(this._swap.from);this._swap.to.visible=true;this.firstPerson=this._swap.to;this._swap=null;}
+     const next=weaponModel(player.weapon,undefined,player.attachments?.visual,player.finish);next.scale.setScalar(1.1);
+     next.traverse(m=>{if(m.isMesh){m.renderOrder=100;if(this.renderer.isSoftware===true)m.material.depthTest=false;}});
+     if(reduced||!this.firstPerson){if(this.firstPerson){this.hands.remove(this.firstPerson);this.disposeObject(this.firstPerson);}this.firstPerson=next;this.hands.add(next);this.firstPerson.visible=true;}
+     // Retain the outgoing weapon through the lowering half, swap models at the
+     // bottom, then raise the incoming weapon.
+     else{this._swap={from:this.firstPerson,to:next,t:0,duration:Math.max(.2,Number(player.weaponSwitch)||.45)};this.hands.add(next);next.visible=false;}
+     this.currentWeapon=player.weapon;this._viewWeaponSig=weaponSig;
+    }
+    this.feedback??=new WeaponFeedback();const pose=this.feedback.update(player,delta,reduced,this.hands.visible);
+    if(this._swap){this._swap.t+=Math.max(0,delta||0);const k=Math.min(1,this._swap.t/this._swap.duration),showIncoming=k>=.5;this._swap.from.visible=!showIncoming;this._swap.to.visible=showIncoming;this.firstPerson=showIncoming?this._swap.to:this._swap.from;if(k>=1){this.hands.remove(this._swap.from);this.disposeObject(this._swap.from);this._swap=null;}}
+    const adsTarget=(player.ads===true||this.aim===true)&&!reduced&&this.hands.visible?1:0;this._adsTransition=reduced?0:(this._adsTransition??0)+((adsTarget-(this._adsTransition??0))*Math.min(1,Math.max(0,(delta||0)*14)));if(reduced)this._adsTransition=0;
+    const adsT=this._adsTransition,hipX=.37+pose.x,hipY=-.36+pose.y,hipZ=-.58+pose.z,aimData=this.firstPerson?.userData?.aim,aimBase=aimData?.position||{x:0,y:-.24,z:-.44},aimX=aimBase.x+pose.x*.2,aimY=aimBase.y+pose.y*.2,aimZ=aimBase.z+pose.z*.25;
+    this.hands.position.set(hipX*(1-adsT)+aimX*adsT,hipY*(1-adsT)+aimY*adsT,hipZ*(1-adsT)+aimZ*adsT);
+    this.hands.rotation.set(pose.pitch*(1-adsT*.7)+(aimData?.pitch||0)*adsT,0,pose.roll*(1-adsT*.7));
+    this._animateWeaponParts(this.firstPerson,player,reduced);
+    this.firstPerson.userData.flash.visible=!reduced&&this.hands.visible&&this.flashUntil>performance.now();this.muzzleLights?.update(Math.max(0,delta));if(this.renderer.shadowMap?.autoUpdate===false){const st=shadowTick(this._shadowTick,this._quality().shadows);this._shadowTick=st.tick;if(st.refresh)this.renderer.shadowMap.needsUpdate=true;}this.updateSky();this._updateWind(time,reduced);this._updateAmbient(match,delta,time,reduced);const spMode=match.config?.mode==='campaign'||match.config?.mode==='horde';if(spMode)this.setWeather(match.weather??null);else if(!cinematic&&this._weatherOverride!==null)this.setWeather(null);this._updateWeather(arena,delta,mode);this._updateWeatherFx(delta,reduced,this._quality());const software=this.renderer?.isSoftware===true;this._updateLightning(delta,reduced,software);this._applyWetSheen(this._weatherState());this.hitPool?.update(Math.max(0,delta));this._updateHitReactions();this._updateDebris(delta);this._updateAudio(match,time);if(this.composer)this.composer.render();else this.renderer.render(this.scene,this.camera);
+  // Isolated first-person pass: mirror the active camera onto a dedicated
+  // weapon camera, clear the world depth, then draw the gun with normal depth
+  // testing between its parts. The CPU fallback renders in the main camera.
+  if(this.weaponScene&&this.weaponCamera&&this.hands.visible){
+   const wc=this.weaponCamera;wc.position.copy(this.camera.position);wc.quaternion.copy(this.camera.quaternion);wc.fov=this.weaponFov??this.camera.fov;wc.aspect=this.camera.aspect;wc.updateProjectionMatrix();wc.updateMatrixWorld(true);
+   this.weaponRoot.position.copy(wc.position);this.weaponRoot.quaternion.copy(wc.quaternion);this.weaponRoot.updateMatrixWorld(true);
+   const prevAuto=this.renderer.autoClear;this.renderer.autoClear=false;this.renderer.clearDepth?.();this.renderer.render(this.weaponScene,wc);this.renderer.autoClear=prevAuto;
+  }
+  if(cinematic)this.playerId=savedPlayerId;if((mode==='selection'||mode==='progression')&&this.showcaseState)this._renderPreview(time,reduced);}
+      // Drive a viewmodel's movable parts from authoritative state: reload
+      // progress (magazine/barrel/energy cell) and the WeaponFeedback shot kick
+      // (bolt/charging handle). A builder opts in by exposing g.userData.parts;
+      // weapons without separate part geometry simply animate their anchors.
+      _animateWeaponParts(weapon,player,reduced){
+       if(!weapon)return;
+       const parts=weapon.userData.parts||{},anchors=weapon.userData.anchors||{};
+       const base=node=>{if(node&&node.userData.baseZ===undefined){node.userData.baseX=node.position.x;node.userData.baseY=node.position.y;node.userData.baseZ=node.position.z;node.userData.baseRX=node.rotation.x;node.userData.baseRZ=node.rotation.z;}return node;};
+       const mag=base(parts.magazine||anchors.magazine),bolt=base(parts.bolt||anchors.bolt),cell=base(parts.cell||anchors.cell),barrel=base(parts.barrel||anchors.barrel);
+       const type=Number.isInteger(player.weapon)?player.weapon:(Number.isInteger(weapon.userData.type)?weapon.userData.type:0);
+       if(reduced){
+        if(mag)mag.position.set(mag.userData.baseX,mag.userData.baseY,mag.userData.baseZ);
+        if(barrel){barrel.position.set(barrel.userData.baseX,barrel.userData.baseY,barrel.userData.baseZ);barrel.rotation.x=barrel.userData.baseRX;}
+        if(cell)cell.rotation.z=cell.userData.baseRZ;
+        if(bolt)bolt.position.set(bolt.userData.baseX,bolt.userData.baseY,bolt.userData.baseZ);
+        return;
+       }
+       const reloading=player.reloading===true,progress=reloading?Math.max(0,Math.min(1,1-(Number(player.reloadTimer)||0)/(Number(player.reloadDuration)||1))):0,cycle=reloading?Math.sin(progress*Math.PI):0;
+       if(mag&&[9,1,5].includes(type))mag.position.y=mag.userData.baseY-cycle*.5;
+       if(barrel&&type===3){barrel.position.y=barrel.userData.baseY-cycle*.1;barrel.rotation.x=barrel.userData.baseRX+cycle*.45;}
+       if(cell&&type===2)cell.rotation.z=cell.userData.baseRZ+progress*Math.PI*4;
+       if(bolt){const kick=Math.max(0,Math.min(1,Number(this.feedback?.kick)||0));bolt.position.z=bolt.userData.baseZ-kick*.05;}
+      }
       updateRace(match,time){syncRacePresentation(this,match,time);}
      _renderPreview(time,reduced){const rect=this.previewRect;if(!rect||rect.width<12||rect.height<12||!(this.renderer instanceof T.WebGLRenderer))return;const m=this.menu.model;m.rotation.y=Math.PI+.25+(reduced?0:Math.sin(time*.4)*.22);m.position.y=.17;const cam=this.menu.camera;cam.aspect=Math.max(.2,rect.width/rect.height);cam.updateProjectionMatrix();this._renderSceneInto(this.renderer,rect,this.menu.scene,cam);}
-          dispose(){this.clearObjectiveMarkers();this.effectPool?.dispose();this.projectilePool?.dispose();this.railPool?.dispose();this.deathPool?.dispose();this.decalPool?.dispose();this.debrisPool?.dispose();this.debrisPool=null;this.hitPool?.dispose();this.hitPool=null;this.hitFlinch?.clear();this.ambientPool?.dispose();this.weatherPool?.dispose();this.ambientFx=null;this.weatherFx=null;this._killcam=null;this.preview?.dispose();this.preview=null;this.previewAssets?.dispose?.();this.previewAssets=null;disposeComposer(this.composer);this.composer=null;this.muzzleLights?.dispose();this.lowHealthOverlay?.dispose();this.disposeObject(this.scene);this.disposeObject(this.menu.scene);this.environmentRT?.dispose?.();for(const resource of this.renderResources||[])resource.dispose();this.renderResources?.clear();for(const resource of this.sharedResources||[])resource.dispose();this.sharedResources?.clear();this.modelAssets?.materials.clear();this.modelAssets?.geometries.clear();this.modelAssets?.resources.clear();this.arenaAssets?.materials.clear();this.arenaAssets?.geometries.clear();this.arenaAssets?.resources.clear();clearSurfaceTextures();this._freeCam=false;this._directorLock=false;this.resetFreeCam();this.renderer.dispose();}
+          dispose(){this.clearObjectiveMarkers();this.effectPool?.dispose();this.projectilePool?.dispose();this.railPool?.dispose();this.deathPool?.dispose();this.decalPool?.dispose();this.debrisPool?.dispose();this.debrisPool=null;this.hitPool?.dispose();this.hitPool=null;this.hitFlinch?.clear();this.ambientPool?.dispose();this.weatherPool?.dispose();this.ambientFx=null;this.weatherFx=null;this._killcam=null;this.preview?.dispose();this.preview=null;this.previewAssets?.dispose?.();this.previewAssets=null;disposeComposer(this.composer);this.composer=null;this.muzzleLights?.dispose();this.lowHealthOverlay?.dispose();this.disposeObject(this.scene);if(this.weaponScene)this.disposeObject(this.weaponScene);this.disposeObject(this.menu.scene);this.environmentRT?.dispose?.();for(const resource of this.renderResources||[])resource.dispose();this.renderResources?.clear();for(const resource of this.sharedResources||[])resource.dispose();this.sharedResources?.clear();this.modelAssets?.materials.clear();this.modelAssets?.geometries.clear();this.modelAssets?.resources.clear();this.arenaAssets?.materials.clear();this.arenaAssets?.geometries.clear();this.arenaAssets?.resources.clear();clearSurfaceTextures();this._freeCam=false;this._directorLock=false;this.resetFreeCam();this.renderer.dispose();}
 }

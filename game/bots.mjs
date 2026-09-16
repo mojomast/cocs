@@ -12,25 +12,84 @@ const v=(x=0,y=0,z=0)=>({x,y,z});
 const norm=a=>{const l=Math.hypot(a.x,a.y,a.z)||1;return v(a.x/l,a.y/l,a.z/l)};
 export function defensivePost(match,a){const base=match.flagSpawns[a.team]||[match.center.x,match.center.z],dx=match.center.x-base[0],dz=match.center.z-base[1],length=Math.hypot(dx,dz)||1,distance=Math.min(12,length*.35),x=base[0]+dx/length*distance,z=base[1]+dz/length*distance;return {x,y:floorAt(x,z,match.arena)??0,z};}
 
-export function flankDestination(match,a,enemy){const b=a.bot,nodes=match.nav?.length?match.nav:null;if(b.flank&&!b.flankDone){if(dist(a,b.flank)<7)b.flankDone=true;else return b.flank;}if(b.flankDone||!nodes)return {x:enemy.x,y:enemy.y??0,z:enemy.z};const candidates=nodes.map(n=>({n,s:dist(a,n)+Math.hypot(n.x-enemy.x,n.z-enemy.z)})).sort((p,q)=>p.s-q.s).slice(0,3),pick=candidates[a.id%candidates.length]?.n;if(!pick||dist(a,pick)<8)return {x:enemy.x,y:enemy.y??0,z:enemy.z};b.flank={x:pick.x,y:Number.isFinite(pick.y)?pick.y:(floorAt(pick.x,pick.z,match.arena)??0),z:pick.z};return b.flank;}
+const FLANK_MIN_LATERAL=.35,FLANK_TTL=6,FLANK_MAX_ROUTE=34;
+// Flank routing. The chosen node must be lateral to the straight a→enemy line
+// (a real side approach, not a slower walk down the middle), closer to the enemy
+// than the bot is, and within a bounded route. The flank is keyed to the current
+// target and expires, so a later encounter cannot inherit a stale decision.
+export function flankDestination(match,a,enemy){
+ const b=a.bot||(a.bot={}),target=enemy||{x:a.x,y:a.y??0,z:a.z};
+ const nodes=match.nav?.length?match.nav:null;
+ const key=String(b.target??-1),now=Number.isFinite(match.time)?match.time:0;
+ if(b.flank&&(b.flank.key!==key||now>=(b.flank.until??0))){b.flank=null;b.flankDone=false;}
+ if(b.flank){if(dist(a,b.flank)<7){b.flankDone=true;b.flank=null;}else return b.flank;}
+ if(!nodes)return {x:target.x,y:target.y??0,z:target.z};
+ const directX=target.x-a.x,directZ=target.z-a.z,directLength=Math.hypot(directX,directZ)||1,unitX=directX/directLength,unitZ=directZ/directLength;
+ let best=null,bestScore=Infinity;
+ for(const node of nodes){
+  if(!Number.isFinite(node.x)||!Number.isFinite(node.z))continue;
+  const travel=Math.hypot(node.x-a.x,node.z-a.z),toEnemy=Math.hypot(node.x-target.x,node.z-target.z);
+  if(travel<8||travel>FLANK_MAX_ROUTE||toEnemy>=directLength)continue;
+  const lateral=Math.abs((node.x-a.x)*-unitZ+(node.z-a.z)*unitX);
+  if(lateral<directLength*FLANK_MIN_LATERAL)continue;
+  const score=travel+toEnemy-lateral*.8;
+  if(score<bestScore){bestScore=score;best=node;}
+ }
+ if(!best)return {x:target.x,y:target.y??0,z:target.z};
+ b.flank={x:best.x,y:Number.isFinite(best.y)?best.y:(floorAt(best.x,best.z,match.arena)??0),z:best.z,key,until:now+FLANK_TTL};
+ b.flankDone=false;
+ return b.flank;
+}
 
-// Seeks the nearest reachable nav node that breaks line of sight to a visible
-// threat. Bots defending a fixed objective use this to disengage and re-peek
-// instead of trading at low health. Pure and deterministic: candidates are
-// scored by travel distance plus a small bias away from the threat, so equal
-// inputs always resolve to the same node.
+const COVER_SAFETY_CAP=12,COVER_SAFETY_WEIGHT=.55,COVER_MAX_ROUTE=34;
+// Single-source shortest path over the nav graph. One flood gives route cost to
+// every node, so cover scoring is O(E log V) per call instead of one A* per
+// candidate.
+function dijkstraFrom(from,nodes,edges){
+ const dist=new Array(nodes.length).fill(Infinity);
+ if(!Number.isInteger(from)||from<0||from>=nodes.length)return dist;
+ dist[from]=0;const heap=[];heapPush(heap,from,0);
+ while(heap.length){
+  const current=heapPop(heap).item;
+  for(const next of edges[current]||[]){
+   if(!Number.isInteger(next)||next<0||next>=nodes.length)continue;
+   const tentative=dist[current]+Math.hypot(nodes[current].x-nodes[next].x,nodes[current].z-nodes[next].z);
+   if(tentative<dist[next]){dist[next]=tentative;heapPush(heap,next,tentative);}
+  }
+ }
+ return dist;
+}
+// Route cost between two points on the nav graph. Uses A* when the caller
+// supplies the edge list, otherwise falls back to straight-line distance (which
+// is exact on an obstacle-free synthetic graph).
+export function routeTo(match,a,point){
+ const nodes=match?.nav,edges=match?.edges;
+ if(Array.isArray(nodes)&&nodes.length&&Array.isArray(edges)){const result=astar(a,point,nodes,edges);return {cost:result.cost,reachable:result.reachable};}
+ return {cost:Math.hypot(a.x-point.x,a.z-point.z),reachable:true};
+}
+// Seeks reachable cover that breaks line of sight to a visible threat. Bots
+// defending a fixed objective use this to disengage and re-peek instead of
+// trading at low health. Candidates are scored by route cost, a capped
+// safety-distance benefit (farther from the threat is safer, up to a cap), and
+// whether the threat remains inside the bot's weapon range. Pure and
+// deterministic: equal inputs always resolve to the same node.
 export function coverPoint(match,a,threat){
  if(!a||!threat||!match?.nav?.length)return null;
- const threatEye=eye(threat),threatX=threat.x??0,threatZ=threat.z??0;
+ const nodes=match.nav,edges=Array.isArray(match.edges)?match.edges:null,threatEye=eye(threat),threatX=threat.x??0,threatZ=threat.z??0;
+ const weaponRange=WEAPONS[a.weapon??0]?.range??70,costs=edges?dijkstraFrom(nearest(a,nodes),nodes,edges):null;
  let best=null,bestScore=Infinity;
- for(const node of match.nav){
+ for(let index=0;index<nodes.length;index++){
+  const node=nodes[index];
   if(!Number.isFinite(node.x)||!Number.isFinite(node.z))continue;
-  const travel=Math.hypot(a.x-node.x,a.z-node.z);
-  if(travel>20||travel<1.5)continue;
   const y=Number.isFinite(node.y)?node.y:(floorAt(node.x,node.z,match.arena)??0);
   if(obstructed(node.x,y,node.z,RULES.radius*.9,match.arena))continue;
   if(match.visible({x:node.x,y:y+1.2,z:node.z},threatEye))continue;
-  const score=travel+Math.hypot(node.x-threatX,node.z-threatZ)*.15;
+  const cost=costs?costs[index]:Math.hypot(a.x-node.x,a.z-node.z);
+  if(!Number.isFinite(cost)||cost>COVER_MAX_ROUTE||cost<1.5)continue;
+  const threatDistance=Math.hypot(node.x-threatX,node.z-threatZ);
+  const safety=Math.min(threatDistance,COVER_SAFETY_CAP)*COVER_SAFETY_WEIGHT;
+  const usable=threatDistance<=weaponRange?0:-6;
+  const score=cost-safety+usable;
   if(score<bestScore){bestScore=score;best={x:node.x,y,z:node.z};}
  }
  return best;
@@ -41,6 +100,14 @@ export function patrolPoint(match,a){const nodes=match.nav?.length?match.nav:nul
 export function separation(match,a,radius=2.6){let x=0,z=0;for(const other of match.actors){if(other===a||other.health<=0)continue;const dx=a.x-other.x,dz=a.z-other.z,d=Math.hypot(dx,dz);if(d>1e-4&&d<radius){const weight=(radius-d)/radius;x+=dx/d*weight;z+=dz/d*weight;}}return {x,z};}
 
 export function spreadBias(match,a,point){const h=(Math.imul((a.id|0)+1,73856093)^Math.imul(Math.round((point.x||0)*10),19349663)^Math.imul(Math.round((point.z||0)*10),83492791))>>>0;return (h%997)/997;}
+
+// Explicit weapon-index selection: index 0 is a real, deliberate choice, so the
+// `||` fallback chains that treated it as absent are replaced by a scan for the
+// first valid (integer, non-negative) candidate.
+export function chooseWeaponIndex(candidates,fallback=0){for(const candidate of candidates)if(Number.isInteger(candidate)&&candidate>=0)return candidate;return fallback;}
+// Bots commit to a chosen weapon for a window so they do not oscillate around a
+// distance band boundary. A dry magazine always permits an immediate swap.
+export function weaponSwitchAllowed(a,desired,now,commitUntil){if(!Number.isInteger(desired)||desired<0||desired===a.weapon)return false;const empty=!(a.ammo?.[a.weapon]>0);return empty||now>=(commitUntil||0);}
 
 // ---------------------------------------------------------------------------
 // NPC area confinement. A spawned NPC may carry an `npcZone` {x,z,r,leash,kind}
@@ -130,14 +197,20 @@ export function botInput(match,a,dt){const b=a.bot,hints=harnessBotHints(a.harne
  return {t,score};}).sort((c,d)=>c.score-d.score),target=ranked.length?ranked[0].t:null;if(target){if(b.target!==target.id)b.reaction=match.difficulty.reaction+match.random()*.25;b.target=target.id;b.memory=1.5;b.seen={x:target.x,y:target.y,z:target.z};}else if(!b.memory)b.target=-1;
     const criticalHealth=a.health<a.maxHealth*retreatAt,objectiveMode=['ctf','koth','domination','teamdeathmatch','assault','combined-arms','payload','juggernaut','team-elimination','holdout','uplink','vip-escort'].includes(match.config.mode),supply=objectiveMode?undefined:match.pickups.filter(p=>!p.wait&&match.useful(a,p)&&(walkEdge(a,p,match.arena)||path(a,p,match.nav,match.edges).length>1)).sort((c,d)=>(dist(a,c)+match.spreadBias(a,c)*4*behavior.supply-(c.kind==='health'&&a.health<a.maxHealth*.55?20:0))-(dist(a,d)+match.spreadBias(a,d)*4*behavior.supply-(d.kind==='health'&&a.health<a.maxHealth*.55?20:0)))[0],healthSupply=objectiveMode?match.pickups.filter(p=>!p.wait&&(p.kind==='health'||p.kind==='megahealth')&&match.useful(a,p)&&dist(a,p)<=8&&(walkEdge(a,p,match.arena)||path(a,p,match.nav,match.edges).length>1)).sort((c,d)=>dist(a,c)-dist(a,d))[0]:undefined,strategicSupply=objectiveMode?match.pickups.filter(p=>!p.wait&&match.useful(a,p)&&(p.kind==='armor'||p.kind==='megahealth'||POWERUPS.some(power=>power.id===p.kind))&&dist(a,p)<=3&&walkEdge(a,p,match.arena)).sort((c,d)=>dist(a,c)-dist(a,d))[0]:undefined,needs=objectiveMode?(criticalHealth&&healthSupply||strategicSupply):(supply&&(criticalHealth||(a.ammo.slice(1).every(n=>n===0)&&supply.kind!=='health')||(a.health<a.maxHealth*.7&&supply.kind==='health')));
      const duel=behavior.objective<.4&&target&&b.target>=0&&b.memory>0&&!needs;
-     if(match.config.mode==='ctf'){const carrying=Object.values(match.flags).some(f=>f.carrier===a.id),enemy=match.flags[1-a.team],own=match.flags[a.team],enemyDistance=dist(a,enemy),ownDistance=dist(a,own);if(carrying){b.state='flag-return';b.destination={x:own.x,y:0,z:own.z};}else if(needs){b.state='seek';b.destination=objectiveMode?needs:supply;}else if(behavior.hold>.62&&own.state!=='at-base'){b.state='flag-defend';b.destination={x:own.x,y:0,z:own.z};}else if((own.state==='dropped'||own.carrier!==null)&&(ownDistance<=enemyDistance||behavior.hold>.62)){b.state='flag-defend';b.destination={x:own.x,y:0,z:own.z};}else if(enemy.state==='carried'){b.state='flag-defend';b.destination=match.defensivePost(a);}else{b.state='flag-attack';b.destination=enemyDistance>38||behavior.flank>.7?match.flankDestination(a,enemy):{x:enemy.x,y:0,z:enemy.z};}}else if(needs){b.state='seek';b.destination=objectiveMode?needs:supply;}else if((match.config.mode==='koth'||match.config.mode==='domination'||match.config.mode==='combined-arms'||match.config.mode==='holdout'||match.config.mode==='uplink')&&match.objectiveState&&!duel){const zones=match.objectiveState.zones,assignment=objectiveAssignment(match,a,zones);if(assignment){const zone=assignment.zone,centroid=teamCentroid(match,a),scattered=dist(a,centroid)>26&&assignment.role!=='defend';b.state=scattered?'regroup':'objective';b.objectiveRole=assignment.role;b.destination=scattered?centroid:match.zoneSlot(a,zone,a.team);}else{const owned=zones.filter(z=>z.owner===a.team),enemyZones=zones.filter(z=>z.owner!==a.team),holdZone=behavior.hold>.62&&owned.length?owned.slice().sort((x,y)=>dist(a,x)-dist(a,y))[0]:null,defendZone=match.zoneDefense(a,owned),pushPool=enemyZones.length?enemyZones:zones,pushZone=pushPool.slice().sort((x,y)=>dist(a,x)-dist(a,y))[0],zone=defendZone||holdZone||pushZone;b.state='objective';b.objectiveRole='attack';b.destination=match.zoneSlot(a,zone,a.team);}}else if(match.config.mode==='assault'&&match.objectiveState&&!duel){const sectors=match.objectiveState.sectors||[],active=sectors[Math.min(match.objectiveState.active??0,Math.max(0,sectors.length-1))];if(active){const defending=a.team===(match.objectiveState.defender??1);b.state=defending?'hold':'objective';b.destination=defending?match.zoneSlot(a,{...active,owner:a.team},a.team):match.zoneSlot(a,active,a.team);}else b.state='roam';}else if(match.config.mode==='payload'&&match.objectiveState&&!duel){const st=match.objectiveState,pos=st.position??payloadPosition(st),attacking=a.team===(st.attacker??0);b.state=attacking?'objective':'hold';b.destination=attacking?match.zoneSlot(a,{id:'payload',x:pos.x,z:pos.z,y:pos.y,radius:st.radius,owner:a.team},a.team):{x:pos.x,y:pos.y,z:pos.z};}else if(match.config.mode==='vip-escort'&&match.objectiveState&&!duel){const st=match.objectiveState,vip=match.actors.find(x=>x.id===st.vipId&&x.health>0),anchor=vip?{x:vip.x,y:vip.y??0,z:vip.z}:{x:st.extract.x,y:st.extract.y??0,z:st.extract.z},escort=a.team===(st.escortTeam??0),vipAtExtract=Boolean(vip)&&Math.hypot(vip.x-st.extract.x,vip.z-st.extract.z)<=st.escortRadius;b.state='objective';b.destination=escort&&vipAtExtract?{x:st.extract.x,y:st.extract.y??0,z:st.extract.z}:anchor;}else if(match.config.mode==='juggernaut'&&match.objectiveState){const st=match.objectiveState,jug=match.actors.find(x=>x.id===st.juggernautId&&x.health>0),zones=st.zones||[];if(a.juggernaut){const zone=zones.slice().sort((x,y)=>dist(a,x)-dist(a,y))[0];b.state='objective';b.destination=zone?match.zoneSlot(a,zone,a.team):{x:match.center.x,y:0,z:match.center.z};}else if(jug){b.state='objective';b.destination=dist(a,jug)>40?match.flankDestination(a,jug):{x:jug.x,y:jug.y??0,z:jug.z};}else{const zone=zones.slice().sort((x,y)=>dist(a,x)-dist(a,y))[0];b.state='roam';b.destination=zone?match.zoneSlot(a,zone,a.team):match.patrolPoint(a);}}else if(match.config.mode==='team-elimination'&&match.objectiveState){const zone=(match.objectiveState.zones||[]).slice().sort((x,y)=>dist(a,x)-dist(a,y))[0];b.state='objective';b.destination=zone?match.zoneSlot(a,zone,a.team):match.patrolPoint(a);}else if(target){if(behavior.flank>.65&&dist(a,target)>12){b.state='flank';b.destination=match.flankDestination(a,target);}else if(behavior.hold>.72&&dist(a,target)>16){b.state='hold';b.destination=match.defensivePost(a);}else{b.state='engage';b.destination={x:target.x,y:target.y,z:target.z};}}else if(b.memory){b.state='pursue';b.destination=b.seen;}else{b.state='roam';if(!b.destination||dist(a,b.destination)<2.5)b.destination=match.patrolPoint(a);}
+     if(match.config.mode==='ctf'){const carrying=Object.values(match.flags).some(f=>f.carrier===a.id),enemy=match.flags[1-a.team],own=match.flags[a.team],enemyDistance=dist(a,enemy),ownDistance=dist(a,own);if(carrying){b.state='flag-return';b.destination={x:own.x,y:0,z:own.z};}else if(needs){b.state='seek';b.destination=objectiveMode?needs:supply;}else if(behavior.hold>.62&&own.state!=='at-base'){b.state='flag-defend';b.destination={x:own.x,y:0,z:own.z};}else if((own.state==='dropped'||own.carrier!==null)&&(ownDistance<=enemyDistance||behavior.hold>.62)){b.state='flag-defend';b.destination={x:own.x,y:0,z:own.z};}else if(enemy.state==='carried'){b.state='flag-defend';b.destination=match.defensivePost(a);}else{b.state='flag-attack';b.destination=enemyDistance>38||behavior.flank>.7?match.flankDestination(a,enemy):{x:enemy.x,y:0,z:enemy.z};}}else if(needs){b.state='seek';b.destination=objectiveMode?needs:supply;}else if((match.config.mode==='koth'||match.config.mode==='domination'||match.config.mode==='combined-arms'||match.config.mode==='holdout'||match.config.mode==='uplink')&&match.objectiveState){const zones=match.objectiveState.zones,assignment=objectiveAssignment(match,a,zones);if(assignment){const zone=assignment.zone,centroid=teamCentroid(match,a),scattered=dist(a,centroid)>26&&assignment.role!=='defend';b.state=scattered?'regroup':'objective';b.objectiveRole=assignment.role;b.destination=scattered?centroid:match.zoneSlot(a,zone,a.team);}else{const owned=zones.filter(z=>z.owner===a.team),enemyZones=zones.filter(z=>z.owner!==a.team),holdZone=behavior.hold>.62&&owned.length?owned.slice().sort((x,y)=>dist(a,x)-dist(a,y))[0]:null,defendZone=match.zoneDefense(a,owned),pushPool=enemyZones.length?enemyZones:zones,pushZone=pushPool.slice().sort((x,y)=>dist(a,x)-dist(a,y))[0],zone=defendZone||holdZone||pushZone;b.state='objective';b.objectiveRole='attack';b.destination=match.zoneSlot(a,zone,a.team);}}else if(match.config.mode==='assault'&&match.objectiveState&&!duel){const sectors=match.objectiveState.sectors||[],active=sectors[Math.min(match.objectiveState.active??0,Math.max(0,sectors.length-1))];if(active){const defending=a.team===(match.objectiveState.defender??1);b.state=defending?'hold':'objective';b.destination=defending?match.zoneSlot(a,{...active,owner:a.team},a.team):match.zoneSlot(a,active,a.team);}else b.state='roam';}else if(match.config.mode==='payload'&&match.objectiveState&&!duel){const st=match.objectiveState,pos=st.position??payloadPosition(st),attacking=a.team===(st.attacker??0);b.state=attacking?'objective':'hold';b.destination=attacking?match.zoneSlot(a,{id:'payload',x:pos.x,z:pos.z,y:pos.y,radius:st.radius,owner:a.team},a.team):{x:pos.x,y:pos.y,z:pos.z};}else if(match.config.mode==='vip-escort'&&match.objectiveState&&!duel){const st=match.objectiveState,vip=match.actors.find(x=>x.id===st.vipId&&x.health>0),anchor=vip?{x:vip.x,y:vip.y??0,z:vip.z}:{x:st.extract.x,y:st.extract.y??0,z:st.extract.z},escort=a.team===(st.escortTeam??0),vipAtExtract=Boolean(vip)&&Math.hypot(vip.x-st.extract.x,vip.z-st.extract.z)<=st.escortRadius;b.state='objective';b.destination=escort&&vipAtExtract?{x:st.extract.x,y:st.extract.y??0,z:st.extract.z}:anchor;}else if(match.config.mode==='juggernaut'&&match.objectiveState){const st=match.objectiveState,jug=match.actors.find(x=>x.id===st.juggernautId&&x.health>0),zones=st.zones||[];if(a.juggernaut){const zone=zones.slice().sort((x,y)=>dist(a,x)-dist(a,y))[0];b.state='objective';b.destination=zone?match.zoneSlot(a,zone,a.team):{x:match.center.x,y:0,z:match.center.z};}else if(jug){b.state='objective';b.destination=dist(a,jug)>40?match.flankDestination(a,jug):{x:jug.x,y:jug.y??0,z:jug.z};}else{const zone=zones.slice().sort((x,y)=>dist(a,x)-dist(a,y))[0];b.state='roam';b.destination=zone?match.zoneSlot(a,zone,a.team):match.patrolPoint(a);}}else if(match.config.mode==='team-elimination'&&match.objectiveState){const zone=(match.objectiveState.zones||[]).slice().sort((x,y)=>dist(a,x)-dist(a,y))[0];b.state='objective';b.destination=zone?match.zoneSlot(a,zone,a.team):match.patrolPoint(a);}else if(target){if(behavior.flank>.65&&dist(a,target)>12){b.state='flank';b.destination=match.flankDestination(a,target);}else if(behavior.hold>.72&&dist(a,target)>16){b.state='hold';b.destination=match.defensivePost(a);}else{b.state='engage';b.destination={x:target.x,y:target.y,z:target.z};}}else if(b.memory){b.state='pursue';b.destination=b.seen;}else{b.state='roam';if(!b.destination||dist(a,b.destination)<2.5)b.destination=match.patrolPoint(a);}
    if(target&&target.health>0&&b.memory>0&&(b.state==='objective'||b.state==='hold'||b.state==='flag-defend'||b.state==='flag-return'||a.juggernaut)&&(a.health<a.maxHealth*retreatAt||b.suppressed>0)){
     const cover=coverPoint(match,a,target);
     if(cover){b.state='cover';b.destination=cover;b.route=[];}
    }
   if(a.vehicleId===null&&(b.vehicleCooldown||0)<=0&&b.destination&&!match.flagCarrier(a)&&dist(a,b.destination)>30){const rig=match.vehicles.find(vehicle=>{const seat=vehicleSeatFor(vehicle);return seat&&seat.role!=='passenger'&&!vehicleMounted(vehicle,a.id)&&Math.hypot(a.x-vehicle.position.x,a.z-vehicle.position.z)<16&&Math.abs(a.y-vehicle.position.y)<(vehicle.config?.flight===true?20:4);});if(rig)b.destination={x:rig.position.x,y:rig.position.y,z:rig.position.z};}
   if(a.npcZone)confineDestination(match,a,b,behavior);
-   if(b.destination){b.route=path(a,b.destination,match.nav,match.edges);if(b.route.length>1&&dist(a,match.nav[b.route[0]])<2)b.route.shift();}
+   if(b.destination){
+    // Route caching with staggered replanning: keep a valid route until the
+    // destination drifts or the per-bot cache window closes, then recompute.
+    const dest=b.destination,replan=!b.routeDest||Math.hypot((dest.x??0)-b.routeDest.x,(dest.z??0)-b.routeDest.z)>1.5||match.time>=(b.routeAt??0);
+    if(replan){b.route=path(a,dest,match.nav,match.edges);b.routeAt=match.time+.8+(a.id%4)*.2;b.routeDest={x:dest.x??0,z:dest.z??0};}
+    if(b.route.length>1&&dist(a,match.nav[b.route[0]])<2)b.route.shift();
+   }
   b.seeking=Boolean(needs);
   }
  const t=match.actors[b.target],canSee=t&&t.health>0&&b.memory>0&&dist(a,t)<(a.botScan||25)&&match.visible(eye(a),eye(t));const routeNode=b.route.length?match.nav[b.route[0]]:null;let dest=b.route.length>1?routeNode:(b.destination||routeNode||a);
@@ -150,7 +223,13 @@ let delta=dest?v(dest.x-a.x,0,dest.z-a.z):v(0,0,0),l=Math.hypot(delta.x,delta.z)
   if(canSee){const d=dist(a,t),desperate=(a.health<a.maxHealth*retreatAt||b.suppressed>0)&&!b.seeking,unsafeBlast=blastUnsafe(WEAPONS[a.weapon],d),band=behavior.range,hold=behavior.hold>.62,inner=clamp(behavior.engageBand[0],band[0],band[1]),outer=clamp(behavior.engageBand[1],inner,band[1]),fresh=(hold?outer:inner+(1-behavior.aggression)*1.8)+(desperate?5:0);if(desperate||!Number.isFinite(b.standoff)||Math.abs(d-b.standoff)>1.25)b.standoff=fresh;const desired=b.standoff,closing=unsafeBlast||desperate?-1:d>desired+1?1:d<desired-1?-.7:0,toward=norm(v(t.x-a.x,0,t.z-a.z)),period=Math.max(.5,behavior.strafePeriod||2),phase=behavior.strafePhase||0;let side;if(behavior.strafePattern===1)side=Math.floor((match.time+phase)/period)%2===0?1:-1;else if(behavior.strafePattern===2)side=Math.sin((match.time+phase)*(1.6+behavior.strafe*1.4))>=0?1:-1;else side=Math.sin(match.time*(1.3+behavior.strafe)+a.id*1.7)>0?1:-1;if(b.strafeReverse>-99&&match.time-b.strafeReverse<.4)side=-side;const strafe=behavior.strafe*(behavior.aggression>.65?.85:.55),combat={x:toward.x*closing+toward.z*side*strafe,z:toward.z*closing-toward.x*side*strafe};input=l>.4&&b.state!=='engage'&&b.state!=='hold'?{x:delta.x/l+combat.x*.35,z:delta.z/l+combat.z*.35}:combat;
     // Mode loadouts restrict the candidate pool before archetype/harness
     // preferences vote, so a sniper-only mode never has a bot reach for an SMG.
-    const allowed=index=>loadoutAllows(match.loadout,index),available=WEAPONS.map((w,index)=>a.ammo[index]>0&&allowed(index)?index:-1).filter(index=>index>=0),preferred=preferredHarnessWeapon(a.harness,available),operatorWeapon=preferredOperatorWeapon(a.character,available),far=behavior.range[1],bandInReach=(behavior.weaponBand==='close'&&d<12)||(behavior.weaponBand==='mid'&&d>=8&&d<=26)||(behavior.weaponBand==='long'&&d>16),bandWeapon=bandInReach?botWeaponBandPick(a.ammo,behavior.weaponBand):-1,ladderWeapon=d<8?(a.ammo[9]>0?9:a.ammo[3]>0?3:0):d>20&&a.ammo[8]>0?8:d>14&&a.ammo[2]>0?2:d>5&&d<16&&a.ammo[1]>0?1:a.ammo[7]>0?7:a.ammo[5]>0?5:a.ammo[4]>0?4:a.ammo[6]>0?6:0,rangeWeapon=bandWeapon>=0?bandWeapon:ladderWeapon; a.weapon=modeWeapon(match.config,match.loadout)??(match.mutators.mirrorLoadout&&loadoutAllows(match.loadout,match.config.startingWeapon)?match.config.startingWeapon:((match.config.mode==='armsrace'||match.mutators.randomLoadout)&&Number.isInteger(a.weapon)?a.weapon:(rangeWeapon||preferred||operatorWeapon||loadoutStart(match.config,match.loadout)||0)));
+    const allowed=index=>loadoutAllows(match.loadout,index),available=WEAPONS.map((w,index)=>a.ammo[index]>0&&allowed(index)?index:-1).filter(index=>index>=0),preferred=preferredHarnessWeapon(a.harness,available),operatorWeapon=preferredOperatorWeapon(a.character,available),far=behavior.range[1],bandInReach=(behavior.weaponBand==='close'&&d<12)||(behavior.weaponBand==='mid'&&d>=8&&d<=26)||(behavior.weaponBand==='long'&&d>16),bandWeapon=bandInReach?botWeaponBandPick(a.ammo,behavior.weaponBand):-1,ladderWeapon=d<8?(a.ammo[9]>0?9:a.ammo[3]>0?3:-1):d>20&&a.ammo[8]>0?8:d>14&&a.ammo[2]>0?2:d>5&&d<16&&a.ammo[1]>0?1:a.ammo[7]>0?7:a.ammo[5]>0?5:a.ammo[4]>0?4:a.ammo[6]>0?6:-1,rangeWeapon=bandWeapon>=0?bandWeapon:ladderWeapon;
+     const pinned=modeWeapon(match.config,match.loadout);let weaponDesired=-1;
+     if(pinned!==null)weaponDesired=pinned;
+     else if(match.mutators.mirrorLoadout&&loadoutAllows(match.loadout,match.config.startingWeapon))weaponDesired=match.config.startingWeapon;
+     else if(match.config.mode==='armsrace'||match.mutators.randomLoadout)weaponDesired=Number.isInteger(a.weapon)?a.weapon:-1;
+     else weaponDesired=chooseWeaponIndex([rangeWeapon,preferred,operatorWeapon,loadoutStart(match.config,match.loadout)],0);
+     if(weaponSwitchAllowed(a,weaponDesired,match.time,b.weaponCommitUntil)&&match.switchWeapon(a,weaponDesired,{source:'bot'}))b.weaponCommitUntil=match.time+2.5;
  b.aimWait=(b.aimWait||0)-dt;
  if(b.aimWait<=0){const err=match.difficulty.error*(1+match.random()*.89)*(b.suppressed>0?1.9:1);b.aimError=v((match.random()-.5)*err,(match.random()-.5)*err,(match.random()-.5)*err);b.aimWait=match.difficulty.think;}
  const lead=WEAPONS[a.weapon].speed?d/WEAPONS[a.weapon].speed:0,dir=norm(v(t.x+t.vx*lead-a.x+d*b.aimError.x,t.y+1.1-(a.y+1.45)+d*b.aimError.y,t.z+t.vz*lead-a.z+d*b.aimError.z));
@@ -171,4 +250,30 @@ const postured=Math.hypot(input.x||0,input.z||0)>.1;if(postured){input.sprint=!a
  if(match.arena.voidY!==undefined&&!a.grounded&&a.vy<0&&a.vehicleId===null&&floorAt(a.x,a.z,match.arena)===null){const node=match.nav[nearest(a,match.nav)];if(node){const dx=node.x-a.x,dz=node.z-a.z,l=Math.hypot(dx,dz)||1;input={x:dx/l,z:dz/l};}}
  return input;}
 
-export function path(a,b,nodes,edges){const from=nearest(a,nodes),to=nearest(b,nodes),queue=[from],prev=new Map([[from,-1]]);for(let head=0;head<queue.length;head++){const n=queue[head];if(n===to)break;for(const j of edges[n])if(!prev.has(j)){prev.set(j,n);queue.push(j);}}if(!prev.has(to))return [from];const route=[];for(let n=to;n!==-1;n=prev.get(n))route.unshift(n);return route;}
+function heapPush(heap,item,priority){heap.push({item,priority});let i=heap.length-1;while(i>0){const p=(i-1)>>1;if(heap[p].priority<=heap[i].priority)break;const swap=heap[p];heap[p]=heap[i];heap[i]=swap;i=p;}}
+function heapPop(heap){const top=heap[0],last=heap.pop();if(heap.length){heap[0]=last;let i=0;for(;;){const l=i*2+1,r=l+1;let m=i;if(l<heap.length&&heap[l].priority<heap[m].priority)m=l;if(r<heap.length&&heap[r].priority<heap[m].priority)m=r;if(m===i)break;const swap=heap[m];heap[m]=heap[i];heap[i]=swap;i=m;}}return top;}
+// Weighted A* over the nav graph: distance-based edge costs with a straight-line
+// (admissible) heuristic. Returns an explicit reachability result so a one-node
+// route is never mistaken for success.
+export function astar(a,b,nodes,edges){
+ if(!Array.isArray(nodes)||!nodes.length||!Array.isArray(edges))return {route:[],cost:Infinity,reachable:false};
+ const from=nearest(a,nodes),to=nearest(b,nodes),heuristic=i=>Math.hypot(nodes[i].x-nodes[to].x,nodes[i].z-nodes[to].z);
+ const g=new Array(nodes.length).fill(Infinity),prev=new Array(nodes.length).fill(-1),closed=new Uint8Array(nodes.length);
+ g[from]=0;const heap=[];heapPush(heap,from,heuristic(from));
+ while(heap.length){
+  const current=heapPop(heap).item;
+  if(closed[current])continue;closed[current]=1;
+  if(current===to)break;
+  for(const next of edges[current]||[]){
+   if(closed[next]||!Number.isInteger(next)||next<0||next>=nodes.length)continue;
+   const step=Math.hypot(nodes[current].x-nodes[next].x,nodes[current].z-nodes[next].z),tentative=g[current]+step;
+   if(tentative<g[next]){g[next]=tentative;prev[next]=current;heapPush(heap,next,tentative+heuristic(next));}
+  }
+ }
+ if(!Number.isFinite(g[to]))return {route:[],cost:Infinity,reachable:false};
+ const route=[];for(let node=to;node!==-1;node=prev[node])route.unshift(node);
+ return {route,cost:g[to],reachable:true};
+}
+// Route as a node-index list. An unreachable destination returns an empty route
+// rather than a misleading single-node success.
+export function path(a,b,nodes,edges){const result=astar(a,b,nodes,edges);return result.reachable?result.route:[];}
