@@ -425,6 +425,12 @@ assets. Full procedure and verification: [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md
 The last five releases. The full history lives in
 [docs/CHANGELOG.md](docs/CHANGELOG.md).
 
+### v4.15 · AMBIENT — 2026-09-16
+- The fullscreen demo controls gain music, ambience and announcer toggles plus an
+  environment (weather) picker: AUTO, clear, overcast, rain, snow, ash, storm.
+- Pinned weather now holds through the whole demo; the choices persist across
+  sessions.
+
 ### v4.14 · TUNED — 2026-09-16
 - Holdout/Uplink/VIP Escort show the correct brief, scoreboard columns, ranking and
   match-start target; Juggernaut/Team Elimination banner sudden death again.
@@ -454,10 +460,6 @@ The last five releases. The full history lives in
 - Objective/reward correctness (team scoreboards, Juggernaut points, soccer goal
   position) plus multiplayer robustness (case-insensitive room codes, spectate
   invites, full/closed-room fallback, voice-config congestion).
-
-### v4.10 · CLARITY — 2026-09-15
-- The title demo no longer reveals the operator model between scenarios: the view
-  decides from the showcase setting itself, not from a not-yet-ready snapshot.
 
 ## Parody and attribution
 

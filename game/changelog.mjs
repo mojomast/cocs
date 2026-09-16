@@ -1,12 +1,17 @@
 // In-game patch notes. The title-screen footer is the running version; this
 // module is the human-readable release digest the Changelog screen renders. The
 // full historical record lives in docs/CHANGELOG.md and is linked from the UI.
-export const RELEASE_VERSION = 'v4.14';
-export const RELEASE_CODENAME = 'TUNED';
+export const RELEASE_VERSION = 'v4.15';
+export const RELEASE_CODENAME = 'AMBIENT';
 export const REPO_URL = 'https://github.com/mojomast/tokenarena';
 export const FULL_CHANGELOG_URL = `${REPO_URL}/blob/main/docs/CHANGELOG.md`;
 
 export const CHANGELOG = [
+  {version:'v4.15',codename:'AMBIENT',date:'2026-09-16',tag:'Demo audio and environment options',highlights:[
+    'The fullscreen demo controls gain a music toggle (independent of the global mute), ambience and announcer toggles, and an environment (weather) picker: AUTO plus clear, overcast, rain, snow, ash and storm.',
+    'The pinned weather now stays put for the whole cinematic demo instead of being reset every frame; starting a real match still restores automatic weather.',
+    'Music, ambience, announcer and environment choices persist across sessions and survive unrelated settings changes.',
+  ]},
   {version:'v4.14',codename:'TUNED',date:'2026-09-16',tag:'Objective-mode and lobby correctness',highlights:[
     'Holdout, Uplink and VIP Escort now show the correct command brief, scoreboard columns, ranking and match-start target instead of generic frag or hill copy.',
     'Juggernaut and Team Elimination raise the SUDDEN DEATH banner that their self-managed objective state sets.',

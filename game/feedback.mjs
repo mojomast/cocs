@@ -157,7 +157,7 @@ const BED_MOODS=Object.freeze({
  storm:Object.freeze({filter:420,tone:48,gain:.024,sub:.005}),
 });
 export class SynthAudio{
- constructor({announcer=false}={}){this.ctx=null;this.muted=false;this.voices=new Set();this.noiseBuffer=null;this.master=null;this.lastDamage=null;this.lastReport=null;this.lastHit=-Infinity;this.footPhase=0;this.wasGrounded=undefined;this.lastVy=0;this.engine=null;this.bed=null;this.bedMood='default';this.ambientBed=true;this.stepVariant=0;this.landVariant=0;this.reloadVariant=0;this.intensity=0;this.bedScale=.75;this.music=null;this.announcer=announcer===true;this.announced=new Set();this.lastCue=null;this.mode='default';this.theme=MODE_THEMES.default;this.lastSting=null;}
+ constructor({announcer=false}={}){this.ctx=null;this.muted=false;this.voices=new Set();this.noiseBuffer=null;this.master=null;this.lastDamage=null;this.lastReport=null;this.lastHit=-Infinity;this.footPhase=0;this.wasGrounded=undefined;this.lastVy=0;this.engine=null;this.bed=null;this.bedMood='default';this.ambientBed=true;this.stepVariant=0;this.landVariant=0;this.reloadVariant=0;this.intensity=0;this.bedScale=.75;this.music=null;this.musicEnabled=true;this.announcer=announcer===true;this.announced=new Set();this.lastCue=null;this.mode='default';this.theme=MODE_THEMES.default;this.lastSting=null;}
  start(){try{const Context=globalThis.AudioContext||globalThis.webkitAudioContext;if(!Context)return;this.ctx??=new Context();if(this.ctx.state==='suspended')this.ctx.resume();if(!this.master){this.master=this.ctx.createGain();this.master.gain.value=.9;this.master.connect(this.ctx.destination);}this.noiseBuffer??=this._makeNoise();if(this.ambientBed!==false)this._bed(true);}catch{}}
  // Low, continuous ambience bed: filtered noise hiss plus a sub tone, faded in
  // through the master gain. Owned by the audio instance and torn down in dispose.
@@ -197,7 +197,7 @@ export class SynthAudio{
   const next=cl(Number(value)||0,0,1);this.intensity=next;
   if(!this.ctx||!this.master||this.muted)return this.intensity;
   const t=this.ctx.currentTime;
-  if(next>.24&&!this.music&&this.voices.size<28)this._musicOn(1-next*.15);
+  if(this.musicEnabled!==false&&next>.24&&!this.music&&this.voices.size<28)this._musicOn(1-next*.15);
   if(this.music){try{this.music.g.gain.setTargetAtTime(next*.05,t,.4);this.music.osc.frequency.setTargetAtTime((this.theme?.root??58)+next*46,t,.3);}catch{}}
   this.bedScale=.55+next*.55;
   if(this.bed){const profile=BED_MOODS[this.bedMood]||BED_MOODS.default;try{this.bed.g.gain.setTargetAtTime(profile.gain*this.bedScale,t,.5);this.bed.og.gain.setTargetAtTime(profile.sub*this.bedScale,t,.55);}catch{}}
@@ -239,6 +239,15 @@ export class SynthAudio{
   setTimeout(()=>{try{osc.stop();}catch{}},320);
  }
  setAnnouncer(on){this.announcer=on===true;return this.announcer;}
+ // Music on/off is independent of the global mute: disabling it fades the drone
+ // out and stops future starts, while effects, ambience and the announcer keep
+ // playing. Re-enabling restarts the drone on the next intensity update.
+ setMusicEnabled(on){
+  this.musicEnabled=on!==false;
+  if(!this.musicEnabled)this._musicOff();
+  else if(this.ctx&&!this.muted&&this.intensity>.24&&!this.music&&this.voices.size<28)this._musicOn(1-this.intensity*.15);
+  return this.musicEnabled;
+ }
  // Optional announcer cue: a short two-note motif keyed by mode event. Returns
  // the cue id (or null) and reports whether a voice was spent, respecting the
  // existing cap and mute/dispose path.

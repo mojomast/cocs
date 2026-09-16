@@ -244,6 +244,23 @@ test('per-mode music themes retune the running drone without restarting it',()=>
  audio.dispose();
 });
 
+test('music can be disabled without muting the rest of the mix',()=>{
+ const {audio}=audioFixture2();
+ audio._bed(true);
+ audio.setIntensity(1);
+ const drone=audio.music;
+ assert.ok(drone,'a loud fight starts the drone');
+ assert.equal(audio.setMusicEnabled(false),false);
+ assert.equal(audio.music,null,'disabling music stops the drone');
+ assert.ok(drone.g.gain,'the drone gain node is kept for its fade-out');
+ assert.equal(audio.muted,false,'the music toggle does not mute the whole mix');
+ audio.setIntensity(1);
+ assert.equal(audio.music,null,'no drone restarts while music is disabled');
+ assert.equal(audio.setMusicEnabled(true),true);
+ assert.ok(audio.music,'re-enabling music restarts the drone on the next intensity update');
+ audio.dispose();
+});
+
 test('victory and defeat stings reuse the voice cap and honour mute',()=>{
  const {audio}=audioFixture2();
  assert.equal(audio.sting('not-an-outcome'),null,'an unknown outcome has no sting');

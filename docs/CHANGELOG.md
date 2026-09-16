@@ -16,6 +16,19 @@ record in [VERIFICATION.md](VERIFICATION.md).
 
 ---
 
+## v4.15 · AMBIENT — 2026-09-16
+
+- **Demo options:** the back-to-demo controls gain MUSIC (new
+  `SynthAudio.setMusicEnabled`, independent of the global mute), AMBIENCE and
+  ANNOUNCER toggles, and an ENVIRONMENT picker (`view.setWeather`: AUTO + the six
+  `WEATHER_KINDS`).
+- **Sticky weather:** a pinned weather override now persists through the
+  cinematic demo (`view.render` no longer clears it while `cinematic`); a real
+  match still clears it.
+- **Persistence:** music/ambience/announcer/weather are stored in
+  `token-arena-settings` and applied on load; the settings dialog now merges
+  instead of overwriting the prefs object so unrelated changes keep them.
+
 ## v4.14 · TUNED — 2026-09-16
 
 - **Objective variants:** Holdout, Uplink and VIP Escort get the right

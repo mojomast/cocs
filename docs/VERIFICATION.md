@@ -1,5 +1,23 @@
 # COCS verification report
 
+## Release 4.15 - Demo audio and environment options
+
+- **Controls:** the fullscreen demo controls render a `.demo-options` row
+  (`app/page.tsx`) with MUSIC/AMBIENCE/ANNOUNCER toggles and an ENVIRONMENT
+  picker over `[null, ...WEATHER_KINDS]`.
+- **Audio:** new `SynthAudio.setMusicEnabled` (independent of `muted`); ambience
+  and announcer reuse `setAmbient`/`setAnnouncer`. Covered by
+  `game/feedback.test.mjs` (music off stops the drone, effects/mute unaffected).
+- **Environment:** `view.render` keeps a pinned `_weatherOverride` while
+  `cinematic`, so the demo picker sticks; a real match clears it.
+- **Persistence:** choices are stored in `token-arena-settings`, read on init and
+  applied to the live audio/view; `saveSettings` now merges the prefs object.
+
+Verification: game **1330/1330**, server **143/143**, `tests/` **7/7**, `tsc`
+clean, lint 0 errors. Live probe (0 errors): ENV `AUTO -> CLEAR -> RAIN` updates
+`weather`/`weatherOverride` and survives a mode change; MUSIC toggles off without
+leaving the demo. Weather persistence verified by reloading after a pick.
+
 ## Release 4.14 - Objective-mode and lobby correctness
 
 Read-only audits of gameplay/sim, UI wiring and netcode/server drove this pass.
