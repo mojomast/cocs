@@ -1,12 +1,18 @@
 // In-game patch notes. The title-screen footer is the running version; this
 // module is the human-readable release digest the Changelog screen renders. The
 // full historical record lives in docs/CHANGELOG.md and is linked from the UI.
-export const RELEASE_VERSION = 'v5.0';
-export const RELEASE_CODENAME = 'COMPACT';
+export const RELEASE_VERSION = 'v5.1';
+export const RELEASE_CODENAME = 'TIGHTEN';
 export const REPO_URL = 'https://github.com/mojomast/tokenarena';
 export const FULL_CHANGELOG_URL = `${REPO_URL}/blob/main/docs/CHANGELOG.md`;
 
 export const CHANGELOG = [
+  {version:'v5.1',codename:'TIGHTEN',date:'2026-09-16',tag:'Progression and UI correctness',highlights:[
+    'Killstreak challenges are now a high-water mark: a weekly "reach an 8 killstreak" objective can no longer be completed by several smaller streaks across matches.',
+    'The scoreboard no longer shows a healthy 0 ms ping when no latency was reported, and an unassigned team is no longer grouped under RED.',
+    'The solo objective counter stops at the total instead of overrunning it when a mission keeps running after the last step.',
+    'The Graphics & settings dialog now traps keyboard focus like the other modals, and a stale duplicate star-rating rule was removed.',
+  ]},
   {version:'v5.0',codename:'COMPACT',date:'2026-09-16',tag:'Id-keyed snapshot deltas',highlights:[
     'Snapshots are now sent as compact patches: the actor, rocket and pickup arrays are diffed element by element against the previous frame instead of crossing the wire whole. Measured frames drop about 90% in size (roughly 30 KB down to 3 KB per frame in a full 8v8 match).',
     'The protocol only sends a delta to a client that advertised support, so an older tab keeps receiving full snapshots; a periodic full keyframe lets a client that missed a frame re-sync within a second.',

@@ -77,3 +77,12 @@ test('objective team modes group players by team instead of free-for-all',()=>{
   assert.ok(html.includes('RED')&&html.includes('BLUE'),`${mode} labels both teams`);
  }
 });
+
+test('absent ping and null team are never coerced to healthy values', () => {
+  assert.equal(pingLabel({ping: null}), null, 'a null ping hides the column');
+  assert.equal(pingLabel({ping: ''}), null, 'an empty ping hides the column');
+  const groups = scoreboardGroups({config: {mode: 'teamdeathmatch'}, teamScores: {}, actors: [{id: 1, name: 'A', team: null, frags: 1}]});
+  assert.equal(groups.length, 1);
+  assert.equal(groups[0].team, null, 'an unassigned actor is not grouped under RED');
+  assert.equal(groups[0].label, 'UNASSIGNED');
+});

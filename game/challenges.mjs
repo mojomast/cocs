@@ -166,15 +166,20 @@ export function challengeMatches(def, result = {}) {
   return true;
 }
 
+// Metrics that are a per-match peak, not a running total. A weekly "reach N
+// killstreak" objective must be a high-water mark, otherwise several smaller
+// streaks across matches would complete a target no single match ever hit.
+const MAX_METRICS = new Set(['bestStreak']);
+
 function advanceGroup(result, defs, progress, done) {
-  const metrics = metricsFor(result);
-  let gained = 0;
-  const completed = [];
-  for (const def of defs) {
-    if (!challengeMatches(def, result)) continue;
-    const current = nonNegative(progress[def.id]);
-    const delta = nonNegative(metrics[def.metric]);
-    progress[def.id] = current + delta;
+ const metrics = metricsFor(result);
+ let gained = 0;
+ const completed = [];
+ for (const def of defs) {
+  if (!challengeMatches(def, result)) continue;
+  const current = nonNegative(progress[def.id]);
+  const delta = nonNegative(metrics[def.metric]);
+  progress[def.id] = MAX_METRICS.has(def.metric) ? Math.max(current, delta) : current + delta;
     if (!done[def.id] && progress[def.id] >= def.target) {
       done[def.id] = true;
       gained += def.reward;

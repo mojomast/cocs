@@ -91,16 +91,9 @@ export function campaignMissionPar(mission){
  const steps=Array.isArray(mission?.steps)?mission.steps.length:0;
  return 120+steps*45;
 }
-// A completed mission earns one star; beating par adds the rest. The stored
-// entry only carries best time/score, so the derivation is version-stable.
-export function campaignMissionStars(entry,par){
- if(!entry)return 0;
- const time=Number(entry.bestTime);
- if(!Number.isFinite(par)||par<=0)return 1;
- if(Number.isFinite(time)&&time<=par)return 3;
- if(Number.isFinite(time)&&time<=par*1.5)return 2;
- return 1;
-}
+// Mission-select view. Star rating delegates to the authoritative
+// `missionStars` rule in campaign-progress so the display and the rewards
+// cannot disagree.
 export function campaignMissionView(missions=[],progress={},selectedId=null){
  const list=Array.isArray(missions)?missions:[],completed=progress?.completed||{};
  return list.map((mission,index)=>{

@@ -184,3 +184,20 @@ test('applyMatchAll advances daily and weekly without cross-contaminating them',
   const weeklyOnly = applyWeeklyMatch(state, matchOnly);
   assert.deepEqual(weeklyOnly.state.progress, state.progress);
 });
+
+test('a bestStreak objective is a high-water mark, not a per-match sum', () => {
+  let seed = null, def = null;
+  for (let i = 0; i < 10000 && !def; i++) {
+    const hit = dailyChallenges(i).find(d => d.metric === 'bestStreak');
+    if (hit) { seed = i; def = hit; }
+  }
+  assert.ok(def, 'the daily rotation includes a streak objective');
+  let state = normalizeChallengeState({}, seed);
+  const twoStreak = () => applyMatch(state, {win: false, mode: 'deathmatch', bestStreak: 2, actor: {frags: 1, deaths: 1, streak: 2}});
+  state = twoStreak().state;
+  state = twoStreak().state;
+  assert.equal(state.progress[def.id], 2, 'two separate 2-streaks must not total 4');
+  state = applyMatch(state, {win: false, mode: 'deathmatch', bestStreak: def.target, actor: {frags: 1, deaths: 1, streak: def.target}}).state;
+  assert.equal(state.progress[def.id], def.target);
+  assert.equal(state.done[def.id], true, 'reaching the target completes the objective');
+});

@@ -425,6 +425,14 @@ assets. Full procedure and verification: [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md
 The last five releases. The full history lives in
 [docs/CHANGELOG.md](docs/CHANGELOG.md).
 
+### v5.1 · TIGHTEN — 2026-09-16
+- Killstreak challenges are a high-water mark, so several small streaks can no
+  longer complete a "reach an 8 killstreak" objective.
+- The scoreboard hides an absent ping instead of showing a healthy 0 ms, and an
+  unassigned team is no longer grouped under RED.
+- The solo objective counter stops at the total, and the settings dialog traps
+  keyboard focus like the other modals.
+
 ### v5.0 · COMPACT — 2026-09-16
 - Snapshots travel as compact patches: id-keyed actor/rocket/pickup arrays are
   diffed element by element against the previous frame, cutting a full 8v8 frame
@@ -454,14 +462,6 @@ The last five releases. The full history lives in
   environment (weather) picker: AUTO, clear, overcast, rain, snow, ash, storm.
 - Pinned weather now holds through the whole demo; the choices persist across
   sessions.
-
-### v4.14 · TUNED — 2026-09-16
-- Holdout/Uplink/VIP Escort show the correct brief, scoreboard columns, ranking and
-  match-start target; Juggernaut/Team Elimination banner sudden death again.
-- Bots treat the objective variants as objective modes; campaign announce beats
-  surface as HUD notices.
-- Server vote quorums ignore disconnected peers and a reconnect must re-ready;
-  menu focus, Theater camera hotkeys and the title overlay got fixes.
 
 ## Parody and attribution
 

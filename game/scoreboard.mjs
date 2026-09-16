@@ -16,9 +16,11 @@ export function streakLabel(actor){
 
 // Ping bucket for the scoreboard chip. Returns null when the actor has no
 // reported latency (local/offline matches), so the column hides cleanly.
-export function pingLabel(actor){
- const ping=Number(actor?.ping);
- if(!Number.isFinite(ping)||ping<0)return null;
+ export function pingLabel(actor){
+  const raw=actor?.ping;
+  if(raw===null||raw===undefined||raw==='')return null;
+  const ping=Number(raw);
+  if(!Number.isFinite(ping)||ping<0)return null;
  const ms=Math.round(ping);
  const quality=ms<60?'good':ms<120?'fair':'poor';
  return {ping:ms,quality,label:`${ms}`};
@@ -36,7 +38,8 @@ export function scoreboardGroups(source,{history=false}={}){
  if(!teamMode)return [{team:null,label:null,score:null,actors:actors.sort((a,b)=>compareActors(modeId,a,b,teamScores))}];
  const teams=new Map();
  for(const actor of actors){
-  const team=Number.isInteger(Number(actor?.team))?Number(actor.team):null;
+  const raw=actor?.team;
+  const team=raw===null||raw===undefined||raw===''||!Number.isInteger(Number(raw))?null:Number(raw);
   if(!teams.has(team))teams.set(team,[]);
   teams.get(team).push(actor);
  }

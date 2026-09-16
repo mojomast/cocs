@@ -1,5 +1,23 @@
 # COCS verification report
 
+## Release 5.1 - Progression and UI correctness
+
+- **Challenge streak:** `MAX_METRICS` in `game/challenges.mjs` advances
+  `bestStreak` by `Math.max` instead of sum. New test asserts two 2-streaks do
+  not complete an 8 target and that a real target still completes.
+- **Scoreboard coercion:** `pingLabel({ping:null|''})` returns null and
+  `scoreboardGroups` keeps a `null` team in the `UNASSIGNED` group; both asserted
+  in `game/scoreboard.test.mjs`.
+- **Solo HUD:** the objective counter clamps to `total / total`; the display
+  adapter already reports `stepIndex` as the completed count.
+- **Focus trap:** `settingsRef` joins the modal auto-focus and Tab-trap effects in
+  `app/page.tsx`, and `SettingsDialog` passes `panelRef` to its `Modal`.
+- **Cleanup:** removed `campaignMissionStars` (unused duplicate of
+  `missionStars`) and its stale assertions.
+
+Verification: game **1337/1337**, server **153/153**, `tests/` **7/7**, `tsc`
+clean, lint 0 errors.
+
 ## Release 5.0 - Id-keyed snapshot deltas
 
 - **Compression, measured:** on real quantized frames from an 8-human/8-bot

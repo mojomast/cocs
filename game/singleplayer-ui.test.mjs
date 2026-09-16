@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import {createRequire} from 'node:module';
 import vm from 'node:vm';
 import {build} from 'esbuild';
-import {singlePlayerDisplay,singlePlayerResult,singlePlayerSummary,missionBrief,campaignMissionPar,campaignMissionStars,campaignMissionView,campaignProgressSummary} from './singleplayer-ui.mjs';
+import {singlePlayerDisplay,singlePlayerResult,singlePlayerSummary,missionBrief,campaignMissionView,campaignProgressSummary} from './singleplayer-ui.mjs';
 import {HELP_SECTIONS} from './onboarding.mjs';
 
 // Render a client component to static markup so its aria wiring is asserted the
@@ -242,12 +242,6 @@ test('campaign display surfaces waypoint distance, steps, story and boss',()=>{
    {id:'c',name:'Three',chapter:'ACT II',tag:'FINALE',brief:'third',steps:[]},
   ];
   const progress={completed:{a:{wins:1,attempts:1,bestTime:100,bestScore:5,at:1}}};
-  const parA=campaignMissionPar(missions[0]);
-  assert.equal(parA,120+2*45);
-  assert.equal(campaignMissionStars(progress.completed.a,parA),3,'beating par is three stars');
-  assert.equal(campaignMissionStars({bestTime:parA*1.4},parA),2);
-  assert.equal(campaignMissionStars({bestTime:parA*9},parA),1);
-  assert.equal(campaignMissionStars(null,parA),0);
   const view=campaignMissionView(missions,progress,'b');
   assert.deepEqual(view.map(v=>v.id),['a','b','c']);
   assert.equal(view[0].unlocked,true);

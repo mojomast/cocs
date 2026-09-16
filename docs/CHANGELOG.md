@@ -16,6 +16,23 @@ record in [VERIFICATION.md](VERIFICATION.md).
 
 ---
 
+## v5.1 · TIGHTEN — 2026-09-16
+
+- **Challenge aggregation:** `advanceGroup` now treats `bestStreak` as a
+  high-water mark (`MAX_METRICS`) instead of a running total, so a weekly "reach
+  an 8 killstreak" objective cannot be completed by accumulating several smaller
+  streaks. Covered by a new `game/challenges.test.mjs` case.
+- **Scoreboard inputs:** `pingLabel` returns null for a `null`/empty ping instead
+  of coercing it to a healthy `0`, and `scoreboardGroups` no longer coerces a
+  `null` team to `0` (RED) — an unassigned actor stays in the `UNASSIGNED` group.
+- **Solo HUD:** the objective counter is clamped so a mission that keeps running
+  after its last step shows `total / total` instead of `total + 1 / total`.
+- **Accessibility:** the Graphics & settings dialog is now included in the modal
+  keyboard-focus trap and focus-on-open, matching the setup/results/single-player
+  modals.
+- **Cleanup:** removed the unused `campaignMissionStars` duplicate of the
+  authoritative `missionStars` rule (and its stale test assertions).
+
 ## v5.0 · COMPACT — 2026-09-16
 
 **Protocol:** `SNAPSHOT_DELTA_VERSION` 1 → 2. The envelope stays additive and

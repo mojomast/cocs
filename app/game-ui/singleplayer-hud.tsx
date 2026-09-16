@@ -27,7 +27,7 @@ export function SinglePlayerHud({single,onSelectUpgrade,onResumeCheckpoint}:{sin
     {checkpoint&&typeof onResumeCheckpoint==='function'&&single.phase!=='won'&&<button type="button" className="btn btn-ghost btn-sm sp-checkpoint" style={{pointerEvents:'auto'}} aria-label={`Resume from checkpoint ${Math.min(checkpoint.step+1,single.stepTotal||checkpoint.step+1)}${single.stepTotal?` of ${single.stepTotal}`:''}`} onClick={onResumeCheckpoint}>RESUME CHECKPOINT{single.stepTotal?` ${Math.min(checkpoint.step+1,single.stepTotal)} / ${single.stepTotal}`:''}</button>}
    </section>
    <div className="sp-status" role="group" aria-label="Mission vitals">
-   <span><small>{single.horde?'WAVE':'OBJECTIVE'}</small><b>{single.horde?`${single.wave}/${single.waveTarget}`:`${single.stepIndex+1}/${single.stepTotal}`}</b></span>
+   <span><small>{single.horde?'WAVE':'OBJECTIVE'}</small><b>{single.horde?`${single.wave}/${single.waveTarget}`:`${single.stepTotal?Math.min(single.stepIndex+1,single.stepTotal):0}/${single.stepTotal}`}</b></span>
    <span><small>HOSTILES</small><b>{single.enemiesLabel}</b></span>
    <span><small>LIVES</small><b>{single.lives}</b></span>
    <span><small>KILLS</small><b>{single.kills}</b></span>

@@ -68,9 +68,9 @@ export function ArsenalInspector({WEAPONS=[],CHARACTERS=[],ATTACHMENTS=[],ATTACH
 }
 
 export function SettingsDialog({ui}:ScreenProps){
- const {settings,setSettings,prefs,WEAPONS=[],weaponRangeLabel,REPO_URL,helpSections,settingsTab='game',setSettingsTab,CHARACTERS=[],ATTACHMENTS=[],ATTACHMENT_SLOTS=[],GEAR=[],GEAR_SLOTS=[],WEAPON_FINISHES=[],CROSSHAIR_STYLES=[],profile}=ui;
+ const {settings,setSettings,prefs,WEAPONS=[],weaponRangeLabel,REPO_URL,helpSections,settingsTab='game',setSettingsTab,CHARACTERS=[],ATTACHMENTS=[],ATTACHMENT_SLOTS=[],GEAR=[],GEAR_SLOTS=[],WEAPON_FINISHES=[],CROSSHAIR_STYLES=[],profile,settingsRef}=ui;
  const tab=settingsTab||'game';
- return <Modal open={settings} onClose={()=>setSettings(false)} size="xl" eyebrow="GRAPHICS & SETTINGS" title="Tune your arena" description="Changes apply immediately and are saved on this device." footer={<Btn onClick={()=>setSettings(false)}>CLOSE</Btn>}>
+ return <Modal open={settings} onClose={()=>setSettings(false)} size="xl" eyebrow="GRAPHICS & SETTINGS" title="Tune your arena" description="Changes apply immediately and are saved on this device." panelRef={settingsRef} footer={<Btn onClick={()=>setSettings(false)}>CLOSE</Btn>}>
   <div className="stack">
    <Tabs value={tab} onChange={(v:string)=>setSettingsTab?.(v)} ariaLabel="Settings sections" tabs={[{value:'game',label:'Game'},{value:'help',label:'Help'},{value:'arsenal',label:'Arsenal'},{value:'about',label:'About'}]}/>
    {tab==='game'&&<Panel>{prefs}</Panel>}
