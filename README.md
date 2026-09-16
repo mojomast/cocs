@@ -425,6 +425,29 @@ assets. Full procedure and verification: [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md
 The last five releases. The full history lives in
 [docs/CHANGELOG.md](docs/CHANGELOG.md).
 
+### v6.2 · CADENCE — 2026-09-16
+- Scopes and ironsights are physically mounted (base plate, support posts, clamp
+  rings), not floating, and integrated Rail Lance/Marksman scopes now zoom with a
+  lens-warped SVG reticle driven by one active-sight resolver; mounted optics are
+  a middle magnification, irons keep the floored ADS pull-in.
+- ADS recoil no longer doubles through the transition: a neutral hip pose blends
+  with the solved ADS pose first, then distinct sway/recoil/reload/switch channels
+  are applied exactly once.
+- Near-wall shots clamp the visual tracer origin before the impact (degenerate
+  traces are suppressed) while the impact flash and real barrel muzzle remain.
+- Third-person operators/pickups use a simplified weapon silhouette that still
+  exposes its type and barrel-tip anchor; transparent effects and tagged greebles
+  no longer cast shadows.
+- Opt-in presentation interpolation blends the previous/current actor transforms
+  by the fixed-step fraction (short-way yaw, snaps on teleport); 60/120/144 Hz
+  presentation of one 60 Hz sim stays consistent and never touches sim state.
+- Honest baseline tooling: renderer/GPU identification, scene-vs-submit CPU split
+  and GPU time only from a real async WebGL2 timer query; `compileAsync` shader
+  warmup; bounded viewmodel cache.
+- Compatibility: `renderer.info.reset` is optional-chained and the CPU
+  SoftwareRenderer exposes a compatible `info.reset()`, so software-only
+  environments no longer throw every frame.
+
 ### v6.1 · SIGHTLINE — 2026-09-16
 - Every weapon's sights/scopes are rigged on a clear line above the model's top
   profile, so rails, rods, tanks and sight bases no longer block the bore (proved
@@ -480,14 +503,6 @@ The last five releases. The full history lives in
   impacts.
 - Muzzle anchors for weapons 8/9, cached pickup geometry, and more Hornet/Puma
   detail.
-
-### v5.4 · DETAIL — 2026-09-16
-- Weapon recoil works again (the rig was writing to a field the springs never
-  read), plus stride bob and a tuck-down weapon swap.
-- Characters compress on landing, lower the offhand through reloads, flex through
-  strafes, and the viewmodel dips/rolls through reloads and swaps.
-- New procedural arena surfaces (holographic grid, grating, carbon fibre, hex
-  panelling, hazard stripes, weathered concrete) and extra model detailing.
 
 ## Parody and attribution
 

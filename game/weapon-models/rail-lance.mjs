@@ -75,7 +75,7 @@ export function buildRailLance(g, ctx) {
   // --- long open scope on its mounting brackets ---------------------------
   box(g, .04, .06, .05, 0, .355, -.3, light);
   for (const z of [-.09, -.28]) box(g, .04, .088, .05, 0, .171, z, dark);
-  const sights = attachScope(g, ctx, {x: 0, y: .44, z: .12, length: .5, radius: .05});
+  const sights = attachScope(g, ctx, {x: 0, y: .44, z: .12, length: .5, radius: .05, mount: true, mountY: .15});
 
   // --- forward rest / bipod-ish brace ------------------------------------
   box(g, .06, .12, .08, 0, -.03, -.78, dark);

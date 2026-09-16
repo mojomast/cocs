@@ -16,6 +16,49 @@ record in [VERIFICATION.md](VERIFICATION.md).
 
 ---
 
+## v6.2 · CADENCE — 2026-09-16
+
+Native-resolution performance, smooth presentation and sighted optics.
+
+- Scopes and ironsights are physically mounted (receiver base plate, paired
+  support posts, clamp rings) instead of floating; everything sits below or
+  outside the bore so the sight line stays open.
+- One active-sight resolver combines the weapon's built-in sight, any mounted
+  optic and the aiming state, and drives both the ADS field of view and the
+  reticle. Integrated Rail Lance and Marksman scopes now zoom hard, an attached
+  scope is a middle magnification, and irons/holos use a small dot.
+- Scope reticles get a lens treatment: a full-bleed SVG reticle with a barrel
+  bow, mil ticks, a centre dot and an ocular shadow, crisp at native resolution
+  via non-scaling strokes. The reticle layer owns the hip/ADS switch in its own
+  animation frame, so aiming does not re-render the whole HUD.
+- ADS recoil composition is fixed: a neutral hip pose blends with the solved ADS
+  pose first, then distinct sway/recoil/reload/switch channels are applied once
+  (`composeAdsQuaternion`), removing the doubled kick through the transition.
+- Near-wall tracers clamp the visual origin before a close authoritative impact
+  and suppress degenerate traces, while keeping the impact flash and the real
+  barrel muzzle. Authoritative endpoints and remote muzzle origins are untouched.
+- Third-person operators and pickups use a simplified weapon silhouette (a few
+  meshes rather than ~40) that still exposes `type` and a barrel-tip anchor.
+- Shadow casting excludes tiny tagged greebles, transparent effects and the team
+  base ring.
+- Opt-in presentation interpolation blends the previous/current actor transforms
+  by the fixed-step accumulator fraction, interpolates yaw the short way and snaps
+  on respawn/teleport; 60/120/144 Hz presentation of one 60 Hz simulation stays in
+  the same tick bracket and never mutates simulation state.
+- Honest baseline tooling: renderer/GPU identification, scene-preparation vs
+  render-submission CPU split, and GPU milliseconds only from a real asynchronous
+  WebGL2 disjoint timer query. Shader variants warm with `compileAsync` when
+  available (synchronously otherwise; never on the software renderer).
+- Compatibility: the per-frame `renderer.info.reset()` is optional-chained and the
+  CPU `SoftwareRenderer` exposes a compatible `info.reset()`, so software-only
+  environments no longer throw on every frame.
+- Sight verification is stronger: clearance is re-tested with a real camera and
+  `Raycaster.setFromCamera()` over an angle-defined clear cone across FOVs and
+  aspect ratios, checking every opaque mesh (including scope walls) and confirming
+  the ADS camera stays outside solid receiver/stock geometry.
+
+---
+
 ## v6.1 · SIGHTLINE — 2026-09-16
 
 **Tag:** Clear sight pictures and correctly rigged weapons.

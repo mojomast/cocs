@@ -1,12 +1,27 @@
 // In-game patch notes. The title-screen footer is the running version; this
 // module is the human-readable release digest the Changelog screen renders. The
 // full historical record lives in docs/CHANGELOG.md and is linked from the UI.
-export const RELEASE_VERSION = 'v6.1';
-export const RELEASE_CODENAME = 'SIGHTLINE';
+export const RELEASE_VERSION = 'v6.2';
+export const RELEASE_CODENAME = 'CADENCE';
 export const REPO_URL = 'https://github.com/mojomast/tokenarena';
 export const FULL_CHANGELOG_URL = `${REPO_URL}/blob/main/docs/CHANGELOG.md`;
 
 export const CHANGELOG = [
+  {version:'v6.2',codename:'CADENCE',date:'2026-09-16',tag:'Native-resolution performance, smooth presentation and sighted optics',highlights:[
+    'Scopes and ironsights are physically mounted instead of floating: integrated and attached optics get a receiver base plate, paired support posts and clamp rings that sit below or outside the bore, so a raised optic reads as bolted on while the sight line stays open.',
+    'Integrated Rail Lance and Marksman scopes now actually zoom: one active-sight resolver combines the weapon\'s built-in sight with any mounted optic and the aiming state, and drives both the ADS field of view and the reticle. The rail lance zooms harder than the marksman rifle, and an attached scope is a middle ground; iron sights keep their mild, floored ADS pull-in.',
+    'Scope reticles get a lens treatment: a full-bleed reticle with a barrel-warp bow, mil ticks, a centre dot and a soft ocular shadow, drawn as native-resolution SVG with non-scaling strokes so it stays hairline-crisp at any viewport. Irons and holos keep a small configurable dot.',
+    'Aiming is immediate without re-rendering the HUD: the reticle layer owns the hip crosshair and ADS reticle and toggles between them in its own animation frame, so the switch does not wait for the 80 ms HUD snapshot.',
+    'ADS recoil no longer doubles through the transition. The weapon pose now blends a neutral hip orientation with the solved ADS orientation first and then composes distinct movement-sway, recoil, reload and weapon-switch channels exactly once, instead of baking recoil into the hip pose and re-adding it after the blend.',
+    'Near-wall shots read correctly: the visual tracer origin is clamped to just before a close authoritative impact (and degenerate traces are suppressed), while the impact flash remains and the muzzle flash stays on the real barrel. Authoritative endpoints, hit registration and remote muzzle origins are untouched.',
+    'Draw calls drop where they cost most: third-person operators and pickups use a simplified, light weapon silhouette (a handful of meshes instead of roughly forty) that still exposes its type and barrel-tip anchor for remote tracers, while the fully detailed weapon is reserved for the first-person viewmodel.',
+    'Shadows skip what is not worth casting: tiny tagged greebles, transparent effects (energy shields, muzzle flashes, visor glow) and the team base ring no longer cast, keeping the shadow silhouette while trimming the shadow draw.',
+    'Presentation interpolation (opt-in for the local fixed-step path) retains the previous and current actor transforms and blends by the fixed-step accumulator fraction, interpolating yaw the short way around and snapping on respawn or teleport. 60, 120 and 144 Hz presentation of one 60 Hz simulation stays inside the same tick bracket and never touches simulation state.',
+    'Honest baseline tooling: the renderer reports its backend, GPU vendor/renderer and texture limit, the frame cost is split into scene preparation and render submission, and GPU time is only ever filled from a real asynchronous WebGL2 disjoint timer query — never relabelled from CPU submission time.',
+    'Loading is less stuttery: shader variants are warmed with compileAsync when available (synchronously otherwise, never on the CPU renderer), cached viewmodels are reused across swaps with a bounded cache, and repeated swaps keep resource counts stable.',
+    'Compatibility: the per-frame renderer counter reset is optional-chained and the CPU SoftwareRenderer now exposes a WebGL-compatible info.reset(), so a software-only environment no longer throws every frame and tears down the render loop.',
+    'Sight verification is stronger: bore clearance is re-tested with a real camera and Raycaster.setFromCamera() across FOVs and aspect ratios, using an angle-defined clear cone instead of a fixed pixel region, checking every opaque mesh (including scope walls) and confirming the ADS camera stays outside solid receiver and stock geometry.',
+  ]},
   {version:'v6.1',codename:'SIGHTLINE',date:'2026-09-16',tag:'Clear sight pictures and correctly rigged weapons',highlights:[
     'Every weapon\'s iron sights and scopes are now rigged onto a clear sight line that sits above the model\'s own top profile. Opening the apertures exposed receiver rails, conduit rods, dorsal coolant tanks and rear-sight bases that used to hide behind solid sight blocks — they no longer block the bore, and a per-weapon raycast test proves the centre of the aiming picture is unobstructed.',
     'ADS framing is fixed: the solver holds the weapon body at a consistent distance in front of the eye instead of pinning eye relief, so weapons whose rear sight sits forward of the model origin (the Scattergun and others) no longer shove the camera inside the receiver and fill the screen with the stock.',

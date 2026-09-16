@@ -1,8 +1,22 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import * as T from 'three';
-import {ArenaView,weaponModel} from './view.mjs';
+import {ArenaView,weaponModel,simpleWeaponModel} from './view.mjs';
 import {WEAPONS} from './data.mjs';
+
+test('third-person weapons are simplified silhouettes with a muzzle anchor',()=>{
+ const view=Object.create(ArenaView.prototype),meshCount=m=>{let n=0;m.traverse(o=>{if(o.isMesh)n++;});return n;};
+ for(let type=0;type<WEAPONS.length;type++){
+  const detailed=weaponModel(type),simple=simpleWeaponModel(type);
+  assert.equal(simple.userData.type,type);
+  assert.equal(simple.userData.weapon,true);
+  assert.equal(simple.userData.muzzle?.name,'muzzle','a barrel-tip anchor is exposed for remote tracers');
+  assert.equal(simple.userData.muzzles[0],simple.userData.muzzle);
+  assert.ok(meshCount(simple)<=6,`${type}: the third-person weapon stays light (${meshCount(simple)} meshes)`);
+  assert.ok(meshCount(simple)<meshCount(detailed),`${type}: lighter than the detailed model (${meshCount(simple)} < ${meshCount(detailed)})`);
+  view.disposeObject(simple);view.disposeObject(detailed);
+ }
+});
 
 test('ten detailed weapon silhouettes have explicit barrel-aligned muzzle anchors',()=>{
  const view=Object.create(ArenaView.prototype),sizes=[];

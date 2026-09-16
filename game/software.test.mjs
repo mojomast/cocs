@@ -18,6 +18,26 @@ function drawnTriangles(vertices,side){
 const frontWinding=[0,0,0,1,0,0,0,1,0];
 const backWinding=[0,0,0,0,1,0,1,0,0];
 
+test('the CPU renderer exposes a WebGL-compatible info.reset() so shared hosts never crash',()=>{
+ const ctx={fillRect(){},fillText(){},beginPath(){},moveTo(){},lineTo(){},closePath(){},stroke(){},fill(){}};
+ const renderer=new SoftwareRenderer({width:320,height:180,getContext:()=>ctx});
+ assert.equal(typeof renderer.info.reset,'function','the software info object advertises reset()');
+ assert.ok(renderer.info.render&&renderer.info.memory,'info carries render and memory sections like WebGLRenderer');
+ const scene=new T.Scene();scene.background=new T.Color('#000');
+ scene.add(new T.Mesh(new T.BoxGeometry(1,1,1),new T.MeshBasicMaterial({color:'#fff'})));
+ const camera=new T.PerspectiveCamera(90,320/180,.1,100);camera.position.set(0,0,5);camera.lookAt(0,0,0);
+ renderer.render(scene,camera);
+ assert.ok(renderer.info.render.triangles>0,'a rendered frame accounts triangles');
+ // The exact call ArenaView.render makes: optional chaining must not throw and
+ // the counters must zero out so per-frame totals stay trustworthy.
+ assert.doesNotThrow(()=>renderer?.info?.reset?.());
+ assert.equal(renderer.info.render.triangles,0,'reset clears the triangle count');
+ assert.equal(renderer.info.render.calls,0,'reset clears the draw-call count');
+ // A renderer with no info at all must also survive the guarded call.
+ const bare={isSoftware:true};
+ assert.doesNotThrow(()=>bare?.info?.reset?.());
+});
+
 test('the software renderer culls by material side instead of treating BackSide as front-facing',()=>{
  assert.equal(drawnTriangles(frontWinding,T.FrontSide),1,'FrontSide draws the front winding');
  assert.equal(drawnTriangles(frontWinding,T.BackSide),0,'BackSide culls the front winding');

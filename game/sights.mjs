@@ -40,7 +40,8 @@ export function attachRearAperture(parent, ctx, { x = 0, y = 0, z = 0, radius = 
   const { ring } = ctx;
   const mat = material || ctx.palette?.light;
   // ring() builds a torus in its local XY plane; rx = 0 leaves the bore along Z.
-  ring(parent, radius, tube, x, y, z, mat, 0);
+  const node = ring(parent, radius, tube, x, y, z, mat, 0);
+  if (node) { node.userData.sightRear = true; node.userData.sightAperture = true; }
   return { x, y, z, radius, inner: Math.max(0, radius - tube) };
 }
 
@@ -95,8 +96,8 @@ export function attachHoloSight(parent, ctx, { x = 0, y = 0, z = 0, width = 0.09
 
 // Scope: an open-ended tube. No end caps and no lens disk sit in the bore; the
 // rear and front anchors are the bore openings on the optical axis.
-export function attachScope(parent, ctx, { x = 0, y = 0, z = 0, length = 0.5, radius = 0.055, bell = 0.02, material, ringMaterial } = {}) {
-  const { geo, cylinder, ring } = ctx;
+export function attachScope(parent, ctx, { x = 0, y = 0, z = 0, length = 0.5, radius = 0.055, bell = 0.02, material, ringMaterial, mount = false, mountY, mountMaterial } = {}) {
+  const { geo, cylinder, ring, box } = ctx;
   const mat = material || ctx.palette?.dark;
   const openTube = (r, len, cx, cy, cz) => {
     const g = geo ? geo(`sight-scope-tube|${r}|${len}|16`, () => new T.CylinderGeometry(r, r, len, 16, 1, true)) : new T.CylinderGeometry(r, r, len, 16, 1, true);
@@ -116,6 +117,24 @@ export function attachScope(parent, ctx, { x = 0, y = 0, z = 0, length = 0.5, ra
     ring(parent, radius + 0.012, 0.012, x, y, z - length * 0.5 + 0.1, ringMaterial || ctx.palette?.glow, 0);
     ring(parent, radius + 0.012, 0.012, x, y, z + 0.02, ringMaterial || ctx.palette?.glow, 0);
   }
+  // Physical mount: a receiver base plate with paired support posts and clamp
+  // rings so a raised optic reads as bolted on rather than floating. Everything
+  // sits below or outside the bore, so the sight line stays open.
+  if (mount) {
+    const post = mountMaterial || mat;
+    const baseY = Number.isFinite(mountY) ? mountY : y - radius - 0.05;
+    const postX = radius + 0.022;
+    const top = y - radius + 0.004;
+    const postLength = Math.max(0.02, top - baseY);
+    for (const rz of [z - length * 0.74, z - length * 0.16]) {
+      if (ring) ring(parent, radius + 0.01, 0.01, x, y, rz, ringMaterial || post, 0);
+      if (box) {
+        box(parent, 0.02, postLength, 0.024, x + postX, baseY + postLength / 2, rz, post);
+        box(parent, 0.02, postLength, 0.024, x - postX, baseY + postLength / 2, rz, post);
+      }
+    }
+    if (box) box(parent, postX * 2 + 0.02, 0.018, length * 0.8, x, baseY + 0.009, z - length * 0.45, post);
+  }
   return { kind: 'scope', rear: { x, y, z: z + 0.05 }, front: { x, y, z: z - length - 0.02 } };
 }
 
@@ -124,7 +143,7 @@ export function attachScope(parent, ctx, { x = 0, y = 0, z = 0, length = 0.5, ra
 // optic sits on the same axis instead of floating on a separate hard-coded line.
 export function attachOptic(parent, ctx, kind, anchors, { x = 0, y = 0, z = 0 } = {}) {
   if (kind === 'holo') return attachHoloSight(parent, ctx, { x, y, z, material: ctx.palette?.dark, reticleMaterial: ctx.palette?.glow });
-  if (kind === 'scope') return attachScope(parent, ctx, { x, y, z, material: ctx.palette?.dark, ringMaterial: ctx.palette?.glow });
+  if (kind === 'scope') return attachScope(parent, ctx, { x, y, z, material: ctx.palette?.dark, ringMaterial: ctx.palette?.glow, mount: true });
   if (kind === 'iron') {
     // An "iron" attachment is a raised rail-mounted aperture + post over the
     // built-in sights; keep it open.
@@ -207,4 +226,34 @@ export function sightAlignmentError(rear, front, pose, scale = 1) {
   return { rearError, angleError, lateral, length };
 }
 
-export const SIGHT_EXPORTS = Object.freeze(['attachRearNotch', 'attachRearAperture', 'attachFrontPost', 'attachIronSights', 'attachHoloSight', 'attachScope', 'attachOptic', 'solveSightPose', 'projectSightPoint', 'sightAlignmentError']);
+// ---------------------------------------------------------------------------
+// ADS presentation composition.
+//
+// The weapon-camera pose is a blend between a *neutral* hip orientation and the
+// solved ADS orientation, with the presentation channels (movement sway, recoil,
+// reload, weapon switch) composed exactly once on top. The neutral hip pose must
+// not already contain the recoil channels: doing so and then re-adding them made
+// recoil roughly double through the ADS transition. Recoil is applied once here;
+// its roll strength eases from full at hip to half at full ADS.
+const AXIS_X = v3(1, 0, 0);
+const AXIS_Z = v3(0, 0, 1);
+const scratchAxis = new T.Quaternion();
+const scratchAim = new T.Quaternion();
+export const ZERO_CHANNELS = Object.freeze({ recoil: null, punch: null, reload: null, swap: null, movement: null });
+
+export function composeAdsQuaternion(out, aimQuaternion, adsT, channels) {
+  const t = Math.max(0, Math.min(1, Number(adsT) || 0));
+  out.identity();
+  if (aimQuaternion) {
+    scratchAim.set(Number(aimQuaternion.x) || 0, Number(aimQuaternion.y) || 0, Number(aimQuaternion.z) || 0, Number.isFinite(aimQuaternion.w) ? aimQuaternion.w : 1);
+    out.slerp(scratchAim, t);
+  }
+  const c = channels || ZERO_CHANNELS;
+  const pitch = (c.recoil?.pitch || 0) + (c.punch?.pitch || 0) + (c.reload?.pitch || 0) + (c.swap?.pitch || 0);
+  const roll = (c.movement?.roll || 0) * (1 - t * 0.5) + (c.reload?.roll || 0) + (c.swap?.roll || 0) + (c.recoil?.roll || 0);
+  if (pitch) out.multiply(scratchAxis.setFromAxisAngle(AXIS_X, pitch));
+  if (roll) out.multiply(scratchAxis.setFromAxisAngle(AXIS_Z, roll));
+  return out;
+}
+
+export const SIGHT_EXPORTS = Object.freeze(['attachRearNotch', 'attachRearAperture', 'attachFrontPost', 'attachIronSights', 'attachHoloSight', 'attachScope', 'attachOptic', 'solveSightPose', 'projectSightPoint', 'sightAlignmentError', 'composeAdsQuaternion']);

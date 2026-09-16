@@ -4,7 +4,14 @@
 import * as T from 'three';
 import {skyPalette,makeStarField} from './environment.mjs';
 export class SoftwareRenderer{
- constructor(canvas){this.domElement=canvas;this.ctx=canvas.getContext('2d',{alpha:false});if(!this.ctx)throw new Error('No canvas rendering context is available');this.info={render:{calls:0,triangles:0}};this.cache=new WeakMap();this.isSoftware=true;this.ratio=.85;this.triangleBudget=Infinity;this.minScreenArea=.06;}
+ constructor(canvas){this.domElement=canvas;this.ctx=canvas.getContext('2d',{alpha:false});if(!this.ctx)throw new Error('No canvas rendering context is available');this.info={render:{calls:0,triangles:0,lines:0,points:0},memory:{geometries:0,textures:0},programs:[]};
+  // Match the WebGLRenderer.info contract closely enough that shared hosts can
+  // reset and read the same counters. ArenaView disables autoReset on WebGL and
+  // resets once per presented frame; the CPU fallback previously exposed no
+  // reset() at all, so that call threw and tore down the whole render loop in
+  // software-only review environments.
+  this.info.reset=()=>{const render=this.info.render;render.calls=0;render.triangles=0;render.lines=0;render.points=0;};
+  this.cache=new WeakMap();this.isSoftware=true;this.ratio=.85;this.triangleBudget=Infinity;this.minScreenArea=.06;}
  setPixelRatio(ratio){this.ratio=ratio;}
  setSize(w,h){this.domElement.width=Math.max(1,Math.round(w*this.ratio));this.domElement.height=Math.max(1,Math.round(h*this.ratio));}
  // Hard ceiling on triangles submitted in one frame. Reached mid-scene the

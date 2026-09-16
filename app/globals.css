@@ -530,11 +530,27 @@
 
 /* ADS reticle: one small, high-contrast centre reference while aiming. The hip
    crosshair is hidden in ADS so it never competes with the sight or optic, and
-   the reticle stays at native UI resolution (it is DOM, not the 3D canvas). */
+   the reticle stays at native UI resolution (it is DOM, not the 3D canvas).
+   The aim layer owns both references and toggles `.is-ads` from its own rAF loop
+   so the switch is immediate without re-rendering the whole HUD. */
+.aim-layer{position:absolute;inset:0;pointer-events:none}
+.aim-layer .ads-reticle{display:none}
+.aim-layer.is-ads .ads-reticle{display:block}
+.aim-layer.is-ads .crosshair{display:none}
 .ads-reticle{position:absolute;left:50%;top:50%;width:7px;height:7px;transform:translate(-50%,-50%) scale(var(--crosshair-size,1));border-radius:50%;background:var(--crosshair-color,#c2ffea);box-shadow:0 0 0 1px #000b,0 0 4px #000,0 0 2px #000;pointer-events:none}
 .ads-reticle::after{content:'';position:absolute;left:50%;top:50%;width:2px;height:2px;transform:translate(-50%,-50%);border-radius:50%;background:#04070a}
-.ads-reticle.scope{width:2px;height:2px}
-.ads-reticle.scope::after{width:22px;height:2px;border-radius:1px;background:var(--crosshair-color,#c2ffea);box-shadow:0 0 0 1px #000b,0 0 3px #000}
+/* Magnified scope: a full-bleed reticle SVG with a barrel-warp bow, mil ticks
+   and a soft ocular shadow that reads as a lens. Lines use non-scaling strokes
+   so they stay hairline-crisp at any viewport size or zoom level. */
+.ads-reticle.scope{left:0;top:0;width:100%;height:100%;transform:none;border-radius:0;background:none;box-shadow:none}
+.ads-reticle.scope::after{display:none}
+.scope-reticle{position:absolute;inset:0;width:100%;height:100%;display:block}
+.scope-line{fill:none;stroke:var(--crosshair-color,#c2ffea);stroke-width:1.5px;stroke-linecap:round;opacity:.92}
+.scope-tick{stroke:var(--crosshair-color,#c2ffea);stroke-width:1.5px;opacity:.75}
+.scope-dot{fill:var(--crosshair-color,#c2ffea);stroke:#000;stroke-width:1px}
+.scope-lens{position:absolute;inset:0;pointer-events:none;background:
+  radial-gradient(circle at 50% 50%, transparent 0 52%, #0002 66%, #000c 100%);
+  box-shadow:inset 0 0 180px #000a, inset 0 0 42px #0006}
 .hitmarker { position: absolute; left: 50%; top: 50%; width: 26px; height: 26px; transform: translate(-50%, -50%); pointer-events: none; filter: drop-shadow(0 0 2px #000); }
 .hitmarker span { position: absolute; left: 50%; top: 50%; width: 16px; height: 2px; background: #f4fffb; box-shadow: 0 0 6px #ffffff99; }
 .hitmarker span:first-child { transform: translate(-50%, -50%) rotate(45deg); }

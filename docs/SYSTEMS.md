@@ -950,7 +950,55 @@ non-reduced motion only).
 
 `game/software.mjs` honors `setPixelRatio`, `setSize`, `setTriangleBudget`, and
 `setScreenArea`; the README and `docs/VERIFICATION.md` record that it is approximate
-and slower and not frame-pacing verified.
+and slower and not frame-pacing verified. It also exposes an `info` object shaped
+like `WebGLRenderer.info` (`render`/`memory`/`programs`) with a compatible
+`reset()`, so the shared host frame accounting does not throw in a software-only
+environment.
+
+### 12.4 Sights, reticles and magnification (`game/sights.mjs`, `game/reticle.mjs`)
+
+`game/sights.mjs` builds the open sight geometry (`attachRearNotch`,
+`attachRearAperture`, `attachFrontPost`, `attachIronSights`, `attachHoloSight`,
+`attachScope`, `attachOptic`). `attachScope` optionally emits a physical mount
+(base plate, paired support posts, clamp rings) below/outside the bore, so a raised
+optic is attached rather than floating; the aperture and bore stay open.
+`solveSightPose` derives the ADS translation/quaternion from the real rear aperture
+and front tip at the runtime `VIEWMODEL_SCALE` and a fixed `VIEWMODEL_GUN_DISTANCE`,
+and `composeAdsQuaternion` blends a neutral hip orientation with the solved ADS
+orientation first, then composes movement-sway/recoil/reload/switch channels exactly
+once (so recoil is never doubled through the transition).
+
+`game/reticle.mjs` has no three.js import, so the React HUD can resolve the active
+sight too. `resolveActiveSight({weapon, optic, aiming})` combines a weapon's
+built-in sight (`BUILTIN_SIGHT`), an equipped optic override and the aiming state;
+`adsFieldOfView`/`sightFovFloor` drive the ADS camera FOV (scopes divide the base
+FOV by their magnification, irons keep a floored mild pull-in), and `reticleWarp`
+gives scopes their lens bow. `app/ui/screens/SightReticle.tsx` owns both the hip
+crosshair and the ADS reticle and toggles between them in its own
+`requestAnimationFrame` loop, so the aim switch is immediate without re-rendering
+the HUD; scope reticles are native-resolution SVG using non-scaling strokes.
+
+### 12.5 Batching, shadows and performance tooling
+
+Third-person operators and pickups build a simplified weapon silhouette
+(`simpleWeaponModel`, at most a handful of meshes) that still exposes `userData.type`
+and a barrel-tip `userData.muzzle` for remote tracers; the detailed first-person
+weapon is reserved for `_acquireWeapon`'s bounded cache. Shadow casting excludes
+transparent effects and meshes tagged `userData.lodDetail`.
+
+`game/perf.mjs` `PerfTracker` accumulates named CPU phases and keeps asynchronous
+GPU time distinct; `GpuTimer` fills the GPU number only from a real
+`EXT_disjoint_timer_query_webgl2` result. `ArenaView.warmup()` compiles world and
+viewmodel variants with `compileAsync` where available (synchronous `compile`
+otherwise, no-op on the software renderer), `rendererInfo()` reports the backend,
+GPU vendor/renderer and max texture size, and `getPerformance()` reports viewport,
+drawing buffer, tier, passes, draw calls, triangles and frame-time median/p95.
+
+`game/interpolation.mjs` is the pure presentation-interpolation core (shortest-path
+yaw, snap-on-discontinuity, `interpolatePose`). `ArenaView.setInterpolation` (opt-in,
+host-driven, local fixed-step path only) retains the previous/current actor
+transforms and blends by the fixed-step accumulator fraction; it never mutates
+simulation state and is not applied to the multiplayer interpolation path.
 
 ---
 

@@ -1,5 +1,49 @@
 # COCS verification report
 
+## Release 6.2 - Native-resolution performance, smooth presentation and sighted optics
+
+- **Active sight resolver:** `game/reticle.test.mjs` proves the resolver's built-in
+  sight table matches the real `weaponModel(...).userData.sights.kind` for all ten
+  weapons, that the Rail Lance and Marksman Rifle resolve as magnified scopes with
+  no optic attached, that a mounted scope never downgrades an integrated one, and
+  that the ADS FOV zooms scopes far below the iron floor while irons keep their
+  floored pull-in.
+- **Sight mounting:** `attachScope` now builds a receiver base plate, support posts
+  and clamp rings below/outside the bore; `game/sights.test.mjs` re-tests clearance
+  after the change with a real camera and `Raycaster.setFromCamera()` across an
+  angle-defined clear cone at 60/82/110 degree FOVs and 16:9/21:9/4:3 aspects,
+  checks every opaque mesh including scope walls, and asserts the ADS camera origin
+  is outside solid receiver/stock geometry.
+- **ADS recoil composition:** `game/sights.test.mjs` proves `composeAdsQuaternion`
+  blends a neutral hip with the solved aim first and applies the presentation
+  channels exactly once at every transition fraction; `game/feedback.test.mjs`
+  asserts the new sway/recoil/reload/switch channels sum to the returned
+  pitch/roll and zero out under reduced motion.
+- **Scope zoom in engine:** `game/view.test.mjs` drives a Rail Lance into ADS and
+  asserts the camera FOV drops below 30 while an iron weapon keeps the 55-degree
+  floor.
+- **Near-wall tracers:** `game/view.test.mjs` fires a shot into a wall 0.2 m away
+  and asserts no tracer origin sits behind the impact while an impact still spawns,
+  then turns the camera 90 degrees and asserts the far-shot tracer runs along the
+  current forward axis.
+- **Interpolation:** `game/interpolation.test.mjs` covers shortest-path yaw,
+  snapping on respawn/teleport, and presents one 60 Hz simulation at 60/120/144 Hz
+  asserting every sample stays inside its tick bracket and is schedule-independent.
+  `game/view.test.mjs` enables it on a view and checks the blend and the teleport
+  snap.
+- **Batching and shadows:** `game/weapon-presentation.test.mjs` asserts the
+  third-person weapon is a <= 6-mesh silhouette (vs the detailed model) that still
+  exposes `type` and a `muzzle` anchor; `game/view.test.mjs` asserts transparent
+  effects and tagged greebles never cast.
+- **Baseline tooling:** `game/perf.test.mjs` exercises `GpuTimer` (resolved async
+  query -> ms; no extension/no WebGL -> null, never a fabricated number).
+  `game/view.test.mjs` covers `warmup()` preferring `compileAsync`, falling back to
+  synchronous `compile`, and doing nothing on the CPU renderer, plus the bounded
+  viewmodel cache across 200 swaps.
+- **Software fallback:** `game/software.test.mjs` asserts the CPU renderer exposes a
+  WebGL-compatible `info.reset()` and that the exact `renderer?.info?.reset?.()`
+  call used by `ArenaView.render` neither throws nor leaves stale counters.
+
 ## Release 6.1 - Clear sight pictures and correctly rigged weapons
 
 - **Per-weapon bore clearance:** `game/sights.test.mjs` mounts every weapon at its

@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {PerfTracker,BENCHMARK_PRESET,benchmarkDisplay,benchmarkReport} from './perf.mjs';
+import {PerfTracker,BENCHMARK_PRESET,benchmarkDisplay,benchmarkReport,GpuTimer} from './perf.mjs';
 
 test('the perf tracker accumulates named CPU phases and keeps GPU time distinct',()=>{
  const perf=new PerfTracker({window:30});
@@ -28,6 +28,35 @@ test('the perf report is compact and labels GPU time separately from CPU',()=>{
  assert.match(report,/cpu ms total: sim/);
  assert.match(report,/gpu ms: n\/a/);
  assert.match(report,/drawCalls: 123/);
+});
+
+test('the GPU timer reports elapsed ms only when async query results are actually available',()=>{
+ const queries=[];
+ const gl={
+  createQuery(){const q={id:queries.length};queries.push(q);return q;},
+  beginQuery(){},endQuery(){},deleteQuery(q){q.deleted=true;},
+  getParameter(){return false;},
+  // Each query resolves after one poll; QUERY_RESULT_AVAILABLE then QUERY_RESULT.
+  getQueryParameter(q,param){if(param===gl.QUERY_RESULT_AVAILABLE)return q.resolved!==false;return 3_500_000;},
+  QUERY_RESULT_AVAILABLE:'available',
+ };
+ const renderer={getContext:()=>gl};
+ gl.getExtension=name=>name==='EXT_disjoint_timer_query_webgl2'?{TIME_ELAPSED_EXT:'time',GPU_DISJOINT_EXT:'disjoint'}:null;
+ const timer=new GpuTimer(renderer);
+ assert.equal(timer.available,true);
+ assert.equal(timer.begin(),true);
+ assert.equal(timer.end(),true);
+ assert.equal(timer.poll(),3.5,'a resolved query yields milliseconds');
+ timer.dispose();
+ // A renderer without the extension never fabricates GPU time.
+ const bare=new GpuTimer({getContext:()=>({getExtension:()=>null})});
+ assert.equal(bare.available,false);
+ assert.equal(bare.begin(),false);
+ assert.equal(bare.poll(),null);
+ // A renderer with no WebGL at all is a no-op, not a crash.
+ const none=new GpuTimer(null);
+ assert.equal(none.available,false);
+ assert.equal(none.poll(),null);
 });
 
 test('the benchmark preset fixes the scenario and covers direct and post-processed runs',()=>{

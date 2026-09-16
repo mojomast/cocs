@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import * as T from 'three';
 import {WEAPONS} from './data.mjs';
 import {weaponModel,VIEWMODEL_SCALE,VIEWMODEL_GUN_DISTANCE} from './view.mjs';
-import {attachHoloSight,attachScope,solveSightPose,sightAlignmentError,projectSightPoint} from './sights.mjs';
+import {attachHoloSight,attachScope,solveSightPose,sightAlignmentError,projectSightPoint,composeAdsQuaternion} from './sights.mjs';
 
 // Mount a solved viewmodel in weapon-camera space so rays can be cast exactly
 // like the renderer does: the weapon group is translated/rotated by the ADS pose
@@ -19,11 +19,29 @@ function mounted(type,visual){
   const scene=new T.Scene();scene.add(root);root.updateMatrixWorld(true);
   return {model,root,pose,scene};
 }
-const camera=()=>new T.PerspectiveCamera(82,16/9,.02,4);
-function centerHits(root,fov=82,aspect=16/9){
-  const cam=camera();cam.fov=fov;cam.aspect=aspect;cam.position.set(0,0,0);cam.lookAt(0,0,-1);cam.updateMatrixWorld(true);
-  const ray=new T.Raycaster(new T.Vector3(0,0,0),new T.Vector3(0,0,-1));
-  return ray.intersectObject(root,true);
+const camera=(fov=82,aspect=16/9)=>{const cam=new T.PerspectiveCamera(fov,aspect,.02,6);cam.updateProjectionMatrix();cam.position.set(0,0,0);cam.lookAt(0,0,-1);cam.updateMatrixWorld(true);return cam;};
+// Screen-space bore test: the exact runtime scale, solved ADS pose and attachment
+// assembly are mounted in weapon-camera space, then a real Raycaster is driven
+// with setFromCamera at NDC offsets. This is what the player actually sees, so a
+// changed FOV or aspect genuinely re-tests clearance.
+function screenHits(root,{fov=82,aspect=16/9,ndc=[0,0]}={}){
+ const cam=camera(fov,aspect);
+ const ray=new T.Raycaster();
+ ray.setFromCamera(new T.Vector2(ndc[0],ndc[1]),cam);
+ return ray.intersectObject(root,true);
+}
+function centerHits(root,fov=82,aspect=16/9){return screenHits(root,{fov,aspect,ndc:[0,0]});}
+// Intentional intersections: the front post tip the player lines up with, the
+// holo reticle dot, and muzzle flash. Everything else on the bore is a bug.
+function intentionalBore(object){
+ const u=object?.userData||{};
+ if(String(object?.name).includes('flash')||object?.name==='muzzle-flare')return true;
+ if(object?.name==='reticle')return true;
+ if(u.sightFrontTip||u.sightFront)return true;
+ // A ghost-ring rear aperture is an open torus the player looks through; its
+ // lower rim can be grazed at an off-centre ray without blocking the target.
+ if(u.sightAperture)return true;
+ return false;
 }
 function tagged(hits,name){return hits.some(hit=>hit.object?.userData?.[name]===true);}
 function dispose(root){root.traverse(n=>{if(n.geometry)n.geometry.dispose?.();if(n.material)for(const m of Array.isArray(n.material)?n.material:[n.material])m.dispose?.();});}
@@ -106,6 +124,67 @@ test('the ADS solver aligns every weapon at representative FOVs, with attachment
   assert.ok(err.rearError<1e-6&&err.angleError<1e-6&&err.lateral<1e-6,`${type}/${visual?.optic||'iron'} aligns (${JSON.stringify(err)})`);
   const projected=projectSightPoint(rear,pose,VIEWMODEL_SCALE);
   assert.ok(Math.abs(projected.x)<1e-9&&Math.abs(projected.y)<1e-9,`${type} aperture projects to screen center`);
+  dispose(model);
+ }
+});
+
+test('ADS composition blends a neutral hip with the solved aim first and applies recoil exactly once',()=>{
+ const aimQuat=new T.Quaternion().setFromEuler(new T.Euler(.2,.3,.1,'YXZ')),aim={x:aimQuat.x,y:aimQuat.y,z:aimQuat.z,w:aimQuat.w};
+ const channels={recoil:{pitch:.05,roll:.02},punch:{pitch:.01},reload:{pitch:.02,roll:.03},swap:{pitch:.01},movement:{roll:.04}};
+ const empty={recoil:null,punch:null,reload:null,swap:null,movement:null};
+ const axisX=new T.Vector3(1,0,0),axisZ=new T.Vector3(0,0,1);
+ for(const t of [0,.25,.5,.75,1]){
+  const zero=composeAdsQuaternion(new T.Quaternion(),aim,t,empty);
+  const base=new T.Quaternion().identity().slerp(aimQuat,t);
+  assert.ok(zero.angleTo(base)<1e-9,`adsT ${t}: neutral base is exactly the hip-to-ADS blend`);
+  const full=composeAdsQuaternion(new T.Quaternion(),aim,t,channels);
+  // Everything the channels add is a single pitch then roll application; if the
+  // hip pose carried recoil too the relative angle would exceed this.
+  const expectedPitch=.05+.01+.02+.01;
+  const expectedRoll=.04*(1-t*.5)+.03+.02;
+  const mono=new T.Quaternion().setFromAxisAngle(axisX,expectedPitch).multiply(new T.Quaternion().setFromAxisAngle(axisZ,expectedRoll));
+  const relative=zero.clone().invert().multiply(full);
+  assert.ok(relative.angleTo(mono)<1e-6,`adsT ${t}: presentation channels are applied once`);
+ }
+ const hip=composeAdsQuaternion(new T.Quaternion(),{x:0,y:0,z:0,w:1},0,channels);
+ const hipMono=new T.Quaternion().setFromAxisAngle(axisX,.09).multiply(new T.Quaternion().setFromAxisAngle(axisZ,.09));
+ assert.ok(hip.angleTo(hipMono)<1e-9,'hip fire keeps the full recoil pitch and roll');
+});
+
+test('the ADS reticle region stays clear across FOVs and aspect ratios with screen-space rays',()=>{
+ for(let type=0;type<WEAPONS.length;type++)for(const visual of [null,{optic:'holo'},{optic:'scope'},{optic:'iron'}]){
+  const {model,root}=mounted(type,visual),optic=visual?.optic||null;
+  // The usable sight picture is a narrow cone on and above the reticle: the
+  // material below a rear notch is intentionally solid, and a rear post is only
+  // so far off-axis. Define the cone in *degrees* and convert to NDC per FOV and
+  // aspect so a wide screen does not silently widen the test.
+  const cone=[];
+  for(const hx of [-.22,-.11,0,.11,.22])for(const vy of [-.12,0,.2,.45,.7])cone.push([hx,vy]);
+  for(const fov of [60,82,110])for(const aspect of [16/9,21/9,4/3]){
+   const t=Math.tan(fov*Math.PI/360),rad=Math.PI/180;
+   for(const [hx,vy] of cone){
+    const nx=Math.tan(hx*rad)/(t*aspect),ny=Math.tan(vy*rad)/t;
+    const hits=screenHits(root,{fov,aspect,ndc:[nx,ny]});
+    const bad=hits.filter(hit=>!intentionalBore(hit.object));
+    assert.equal(bad.length,0,`${WEAPONS[type]?.name||type}/${optic||'iron'} blocked at fov ${fov}, aspect ${aspect.toFixed(2)}, angle (${hx},${vy})deg by ${bad[0]?.object?.geometry?.type||bad[0]?.object?.name}`);
+   }
+  }
+  dispose(model);
+ }
+});
+
+test('the ADS camera origin sits outside solid receiver and stock geometry',()=>{
+ const sightOnly=object=>{const u=object?.userData||{};return u.sightRear||u.sightFront||u.sightFrontTip||u.sightFrame||u.scopeTube||object?.name==='reticle'||object?.name==='muzzle-flare'||String(object?.name).includes('flash');};
+ for(let type=0;type<WEAPONS.length;type++){
+  const {model,root}=mounted(type);
+  root.updateMatrixWorld(true);
+  const origin=new T.Vector3(0,0,0),inside=[];
+  model.traverse(n=>{
+   if(!n.isMesh||sightOnly(n))return;
+   const box=new T.Box3().setFromObject(n);
+   if(box.containsPoint(origin))inside.push(n.geometry?.type||n.name||'mesh');
+  });
+  assert.equal(inside.length,0,`${WEAPONS[type]?.name||type}: the ADS camera is inside ${inside[0]}`);
   dispose(model);
  }
 });

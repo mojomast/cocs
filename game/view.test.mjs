@@ -87,7 +87,7 @@ test('view keeps camera aim authoritative while weapon feedback respects visibil
   assert.ok(view.feedback.kick>0&&view.feedback.kick<kick,'fresh network snapshots preserve recoil recovery');
   assert.ok(view.effectPool.slots.some(s=>s.active),'fresh snapshots preserve live effects');
  view.showWeapon=false;view.render('playing',match,.016,1);assert.equal(view.hands.visible,false);assert.equal(view.hands.position.z,-.58);
-  view.showWeapon=true;view.motionQuery.matches=true;view.render('playing',match,.016,1);assert.deepEqual(view.hands.position.toArray(),[.37,-.36,-.58]);assert.equal(view.firstPerson.userData.flash.visible,false);assert.equal(view.hands.rotation.x,0);
+  view.showWeapon=true;view.motionQuery.matches=true;view.render('playing',match,.016,1);assert.deepEqual(view.hands.position.toArray(),[.37,-.36,-.58]);assert.equal(view.firstPerson.userData.flash.visible,false);assert.ok(Math.abs(view.hands.rotation.x)<1e-12,'reduced hip fire keeps no pitch (three yields -0 for identity)');
   view.mapId='crosswire';view.setMatch({arena:{id:'crosswire'},actors:[],pickups:[],serial:0});
   assert.equal(view.feedback.kick,0);assert.ok(view.effectPool.slots.every(s=>!s.active),'new rounds clear effects');
  view.effectPool.dispose();view.projectilePool.dispose();view.disposeObject(view.scene);
@@ -126,6 +126,23 @@ test('vehicle nitro exhaust emits particles behind boosting and turbo vehicles u
  view.updateVehicleModels(matchBoosting);
  assert.ok(view.effectPool.slots.every(s=>!s.active),'reduced motion suppresses vehicle exhaust particles');
  view.effectPool?.dispose();view.disposeObject(view.scene);
+});
+
+test('shadow casting excludes transparent effects and low-value greebles',t=>{
+ const model=robotModel('chatgpt');
+ let solid=0,detailed=0,transparent=0;
+ model.traverse(n=>{
+  if(!n.isMesh)return;
+  if(n.material?.transparent)transparent++;
+  if(n.userData?.lodDetail)detailed++;
+  if(n.castShadow)solid++;
+ });
+ assert.ok(transparent>0,'the operator has transparent effects (shield/base/flash)');
+ assert.ok(detailed>0,'low-value greebles are tagged');
+ assert.ok(solid>0,'solid body parts still cast shadows');
+ model.traverse(n=>{if(n.isMesh&&(n.material?.transparent===true||n.userData?.lodDetail))assert.equal(n.castShadow,false,`${n.name||n.geometry?.type} must not cast`);});
+ const view=Object.create(ArenaView.prototype);
+ view.disposeObject(model);
 });
 
 test('energy shields render visible 3D mesh for overshield and Juggernaut, and shieldBreak emits shatter VFX',t=>{
@@ -301,6 +318,103 @@ test('dynamic FOV lerps toward sprint and ADS targets and never drops below 55',
  view.setAim(true);for(let i=0;i<160;i++)frame(base);assert.ok(view.camera.fov<66.5,'setAim drives ADS without a snapshot flag');
  view.setAim(false);for(let i=0;i<200;i++)frame({...base,sprinting:true});assert.ok(view.camera.fov>84.5);
  view.setDisplay({...DEFAULT_DISPLAY,fov:50});for(let i=0;i<240;i++)frame({...base,ads:true});assert.ok(view.camera.fov>=55,'FOV never drops below 55');
+});
+
+function aimFixture(t){
+ const {view,renderer}=fixture(t);view.camera=new T.PerspectiveCamera();view.scene=new T.Scene();view.hands=new T.Group();view.camera.add(view.hands);view.scene.add(view.camera);view.actorModels=new Map();view.pickupModels=[];view.playerId=7;view.currentWeapon=-1;view.lastEvent=0;view.motionQuery={matches:false};view.display={...DEFAULT_DISPLAY};renderer.render=()=>{};
+ return {view,renderer};
+}
+
+test('a near-wall shot clamps the visual tracer before the impact and keeps the impact flash',t=>{
+ const {view}=aimFixture(t);
+ const player={id:7,weapon:0,health:100,x:0,y:0,z:0,yaw:0,pitch:0,vx:0,vz:0,vy:0,grounded:true};
+ const match={actors:[player],pickups:[],rockets:[],time:1,events:[]};
+ view.render('playing',match,.016,1);
+ const camPos=view.camera.position.clone(),forward=new T.Vector3(0,0,-1).applyQuaternion(view.camera.quaternion);
+ const close={x:camPos.x+forward.x*.2,y:camPos.y+forward.y*.2,z:camPos.z+forward.z*.2};
+ const impactDepth=forward.dot(new T.Vector3(close.x,close.y,close.z).sub(camPos));
+ view.lastEvent=0;
+ view.render('playing',{...match,time:1.1,events:[{id:1,type:'shot',actor:7,weapon:0,time:1.1,from:{x:camPos.x,y:camPos.y,z:camPos.z},to:close,hit:null}]},.016,1.1);
+ for(const slot of view.effectPool.slots.filter(s=>s.active&&s.line)){
+  const originDepth=forward.dot(slot.obj.position.clone().sub(camPos));
+  assert.ok(originDepth<=impactDepth+.001,`a tracer origin (${originDepth.toFixed(3)}) never sits behind the impact (${impactDepth.toFixed(3)})`);
+ }
+ assert.ok(view.effectPool.slots.some(s=>s.active&&!s.line),'the near-wall shot still spawns an impact');
+ view.effectPool?.dispose();view.disposeObject(view.scene);
+});
+
+test('tracer origins resolve from the current-frame transform after a rapid turn',t=>{
+ const {view}=aimFixture(t);
+ const base={id:7,weapon:0,health:100,x:0,y:0,z:0,yaw:0,pitch:0,vx:0,vz:0,vy:0,grounded:true};
+ view.render('playing',{actors:[base],pickups:[],rockets:[],time:1,events:[]},.016,1);
+ const turned={...base,yaw:Math.PI/2};
+ view.lastEvent=0;
+ view.render('playing',{actors:[turned],pickups:[],rockets:[],time:2,events:[]},.016,2);
+ const camPos=view.camera.position.clone(),forward=new T.Vector3(0,0,-1).applyQuaternion(view.camera.quaternion);
+ const to={x:camPos.x+forward.x*30,y:camPos.y+forward.y*30,z:camPos.z+forward.z*30};
+ view.lastEvent=0;
+ view.render('playing',{actors:[turned],pickups:[],rockets:[],time:2.1,events:[{id:2,type:'shot',actor:7,weapon:0,time:2.1,from:{x:camPos.x,y:camPos.y,z:camPos.z},to,hit:null}]},.016,2.1);
+ const trace=view.effectPool.slots.find(s=>s.active&&s.line);
+ assert.ok(trace,'a far shot still draws a tracer');
+ const direction=new T.Vector3().subVectors(new T.Vector3(to.x,to.y,to.z),trace.obj.position).normalize();
+ assert.ok(direction.dot(forward)>.999,'the tracer runs along the current forward axis, not the previous frame');
+ view.effectPool?.dispose();view.disposeObject(view.scene);
+});
+
+test('opt-in presentation interpolation blends actors and snaps on a teleport',t=>{
+ const {view}=aimFixture(t);
+ view.setInterpolation({enabled:true,alpha:.5});
+ const actor=x=>({id:2,character:'chatgpt',weapon:0,health:100,x,y:0,z:0,yaw:0,pitch:0,vx:0,vz:0,vy:0,grounded:true});
+ const match=(time,x)=>({actors:[actor(x)],pickups:[],rockets:[],time,events:[]});
+ view.syncActors(match(0,0));
+ view.render('playing',match(0,0),.016,0);
+ const model=view.actorModels.get(2);
+ view.render('playing',match(.016,1),.016,.016);
+ assert.ok(model.position.x>0&&model.position.x<1,`an actor interpolates between ticks (${model.position.x})`);
+ view.render('playing',match(.032,20),.016,.032);
+ assert.equal(model.position.x,20,'a 19-unit jump snaps to the authoritative position');
+ view.setInterpolation({enabled:false});
+ view.render('playing',match(.048,25),.016,.048);
+ assert.equal(model.position.x,25,'disabling interpolation restores direct authoritative rendering');
+ assert.equal(view.setInterpolation({enabled:false}),1,'disabled interpolation reports alpha 1');
+ view.effectPool?.dispose();view.disposeObject(view.scene);
+});
+
+test('shader warmup prefers compileAsync and never runs on the CPU renderer',async t=>{
+ const compiled=[];
+ const {view,renderer}=fixture(t);renderer.compileAsync=async scene=>{compiled.push(scene);};
+ view.scene=new T.Scene();view.camera=new T.PerspectiveCamera();
+ view.weaponScene=new T.Scene();view.weaponCamera=new T.PerspectiveCamera();
+ assert.equal(await view.warmup(),true);
+ assert.equal(compiled.length,2,'world and viewmodel scenes are both warmed');
+ renderer.isSoftware=true;
+ assert.equal(await view.warmup(),false);
+ assert.equal(compiled.length,2,'the CPU renderer is never asked to compile shaders');
+ const sync=[];
+ const {view:view2,renderer:r2}=fixture(t);r2.compile=()=>sync.push(1);
+ view2.scene=new T.Scene();view2.camera=new T.PerspectiveCamera();
+ assert.equal(await view2.warmup(),true);
+ assert.equal(sync.length,1,'a synchronous-only renderer still warms its world scene');
+});
+
+test('repeated weapon swaps keep the viewmodel cache bounded and reuse instances',t=>{
+ const {view}=fixture(t);
+ view.hands=new T.Group();view.modelAssets=new ModelAssets();
+ const first=view._acquireWeapon(0,null,null);
+ for(let i=0;i<200;i++){const model=view._acquireWeapon(i%10,null,null);view._releaseWeapon(model);}
+ assert.equal(view._acquireWeapon(0,null,null),first,'the same loadout reuses the cached viewmodel');
+ assert.ok(view._weaponCache.size<=16,`the cache stays bounded (${view._weaponCache.size})`);
+});
+
+test('built-in scopes zoom the ADS field of view far below the iron floor',t=>{
+ const {view}=playable(t,{fov:80});
+ const base={id:7,weapon:2,health:100,x:0,y:0,z:0,yaw:0,pitch:0,vx:0,vy:0,vz:0,grounded:true};
+ const frame=player=>view.render('playing',{actors:[player],pickups:[],rockets:[],time:1,events:[]},.05,1);
+ for(let i=0;i<240;i++)frame({...base,ads:true});
+ assert.equal(view.getActiveSight().kind,'scope','the rail lance resolves as a built-in scope');
+ assert.ok(view.camera.fov<30,`the integrated scope zooms the world (fov ${view.camera.fov.toFixed(1)})`);
+ for(let i=0;i<300;i++)frame({...base,weapon:0,ads:true});
+ assert.ok(view.camera.fov>=55,'iron sights keep the mild ADS pull-in floor');
 });
 
 test('low health toggles the public flag and the camera vignette',t=>{

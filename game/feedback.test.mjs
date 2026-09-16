@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import * as T from 'three';
-import {WeaponFeedback,EffectPool,SynthAudio,AmbientFX,WeatherFX,MODE_THEMES} from './feedback.mjs';
+import {WeaponFeedback,EffectPool,SynthAudio,AmbientFX,WeatherFX,EMPTY_CHANNELS,MODE_THEMES} from './feedback.mjs';
 import {weatherPreset} from './environment.mjs';
 
 const player={id:7,weapon:0,x:0,z:0,yaw:0,grounded:true,vx:0,vy:0,vz:0};
@@ -11,6 +11,23 @@ test('weapon kicks are distinct, bounded, pellet-deduplicated and recover expone
   assert.equal(new Set(poses).size,8);
  const a=new WeaponFeedback(),b=new WeaponFeedback();a.shot(0,1);b.shot(0,1);a.update(player,.1);for(let i=0;i<6;i++)b.update(player,1/60);assert.ok(Math.abs(a.kick-b.kick)<1e-12);
 });
+test('weapon feedback exposes distinct sway/recoil/reload/switch channels that sum to pitch and roll',()=>{
+ const f=new WeaponFeedback();
+ f.shot(0,1);
+ const reloading={...player,vx:5,vz:0,punchYaw:.1,punchPitch:.5,reloading:true,reloadTimer:.2,reloadDuration:.5};
+ const pose=f.update(reloading,1/60);
+ const ch=f.channels;
+ assert.ok(ch&&ch.recoil&&ch.movement&&ch.reload&&ch.swap&&ch.punch,'all presentation channels are named');
+ assert.ok(ch.recoil.pitch>0,'the shot kick lands in the recoil channel');
+ const pitchSum=ch.recoil.pitch+ch.punch.pitch+ch.reload.pitch+ch.swap.pitch;
+ const rollSum=ch.movement.roll+ch.reload.roll+ch.swap.roll+ch.recoil.roll;
+ assert.ok(Math.abs(pitchSum-pose.pitch)<1e-12,'channels sum to the returned pitch');
+ assert.ok(Math.abs(rollSum-pose.roll)<1e-12,'channels sum to the returned roll');
+ assert.notEqual(ch.movement.roll,0,'movement sway is kept distinct from recoil');
+ f.update({...player},1/60,true);
+ assert.deepEqual(f.channels,EMPTY_CHANNELS,'reduced motion zeroes every channel without allocating');
+});
+
 test('motion is presentation-only, disabled for hidden/reduced weapons, with bounded landing',()=>{
  const f=new WeaponFeedback(),p={...player,vx:7,vy:-12,grounded:false},copy={...p};f.update(p,.016);assert.deepEqual(p,copy);
  const landed=f.update({...p,grounded:true,vy:0},.016);assert.ok(landed.y<0&&landed.y>-.05);

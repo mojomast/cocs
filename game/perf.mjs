@@ -112,4 +112,44 @@ export function benchmarkReport(results = []) {
   return lines.join('\n');
 }
 
-export const BENCHMARK_EXPORTS = Object.freeze(['PerfTracker', 'BENCHMARK_PRESET', 'benchmarkDisplay', 'benchmarkReport']);
+export const BENCHMARK_EXPORTS = Object.freeze(['PerfTracker', 'BENCHMARK_PRESET', 'benchmarkDisplay', 'benchmarkReport', 'GpuTimer']);
+
+// Asynchronous GPU timing through the WebGL2 disjoint timer query extension.
+// GPU time is only ever populated when the extension is genuinely available and
+// a query result has come back; otherwise `latest()` stays null so a caller can
+// never mistake a CPU estimate for a GPU measurement.
+export class GpuTimer {
+  constructor(renderer) {
+    this.gl = null; this.ext = null; this.pending = null; this.queue = []; this.last = null;
+    try { this.gl = renderer?.getContext?.() || null; this.ext = this.gl?.getExtension?.('EXT_disjoint_timer_query_webgl2') || null; } catch { this.ext = null; }
+  }
+  get available() { return !!this.ext; }
+  begin() {
+    if (!this.ext || this.pending) return false;
+    try { const q = this.gl.createQuery(); this.gl.beginQuery(this.ext.TIME_ELAPSED_EXT, q); this.pending = q; return true; } catch { this.pending = null; return false; }
+  }
+  end() {
+    if (!this.pending) return false;
+    try { this.gl.endQuery(this.ext.TIME_ELAPSED_EXT); this.queue.push(this.pending); } catch {}
+    this.pending = null; return true;
+  }
+  // Poll the oldest outstanding query. Returns the latest available elapsed
+  // milliseconds, or null when nothing has resolved yet (or timing is absent).
+  poll() {
+    if (!this.ext) return null;
+    try {
+      const disjoint = this.gl.getParameter(this.ext.GPU_DISJOINT_EXT);
+      if (disjoint) { for (const q of this.queue) this.gl.deleteQuery(q); this.queue.length = 0; this.last = null; return null; }
+      const q = this.queue[0];
+      if (q && this.gl.getQueryParameter(q, this.gl.QUERY_RESULT_AVAILABLE)) {
+        this.last = this.gl.getQueryParameter(q, this.gl.QUERY_RESULT) / 1e6;
+        this.gl.deleteQuery(q); this.queue.shift();
+      }
+    } catch { this.queue.length = 0; this.last = null; }
+    return this.last;
+  }
+  dispose() {
+    try { for (const q of this.queue) this.gl.deleteQuery(q); if (this.pending) this.gl.deleteQuery(this.pending); } catch {}
+    this.queue.length = 0; this.pending = null; this.ext = null; this.gl = null;
+  }
+}
