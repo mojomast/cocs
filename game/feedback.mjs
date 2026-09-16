@@ -33,19 +33,86 @@ export class WeaponFeedback{
 
 // Fixed-size reusable slots: bursts and pellets cannot grow GPU resources.
 export class EffectPool{
-  constructor(scene,limit=96){this.scene=scene;this.limit=limit;this.slots=[];this.serial=0;this.line=new T.CylinderGeometry(.5,.5,1,6).rotateX(Math.PI/2).translate(0,0,.5);this.sphere=new T.IcosahedronGeometry(1,0);this.axis=new T.Vector3(0,0,1);this.direction=new T.Vector3();}
- add({from,to,pos,color,life=.15,size=.08,expand=0,velocity=null,wireframe=false,additive=false}){
-  const line=!!from;let slot=this.slots.find(s=>!s.active&&s.line===line);
+  constructor(scene,limit=96){
+    this.scene=scene;this.limit=limit;this.slots=[];this.serial=0;
+    this.line=new T.CylinderGeometry(.5,.5,1,6).rotateX(Math.PI/2).translate(0,0,.5);
+    this.sphere=new T.IcosahedronGeometry(1,0);
+    this.axis=new T.Vector3(0,0,1);
+    this.direction=new T.Vector3();
+    this.scratchColor=new T.Color();
+  }
+  add({from,to,pos,color,life=.15,size=.08,expand=0,velocity=null,wireframe=false,additive=false,damping=0,gravity=null,spin=null,fade='linear',startOpacity=.8,endColor=null}){
+   const line=!!from;let slot=this.slots.find(s=>!s.active&&s.line===line);
    if(!slot&&this.slots.length<this.limit){const mat=new T.MeshBasicMaterial({transparent:true,depthWrite:false});const obj=new T.Mesh(line?this.line:this.sphere,mat);slot={obj,line};this.slots.push(slot);this.scene.add(obj);}
-  if(!slot){slot=this.slots.filter(s=>s.line===line).sort((a,b)=>a.serial-b.serial)[0];if(!slot)return;}
-  const obj=slot.obj;obj.visible=true;obj.material.color.set(color);obj.material.opacity=.8;obj.material.wireframe=wireframe;obj.material.blending=additive?T.AdditiveBlending:T.NormalBlending;obj.rotation.set(0,0,0);
+   if(!slot){
+     let oldest=null;
+     for(let i=0;i<this.slots.length;i++){
+       const s=this.slots[i];
+       if(s.line===line&&(!oldest||s.serial<oldest.serial))oldest=s;
+     }
+     slot=oldest;
+     if(!slot)return;
+   }
+   const obj=slot.obj;obj.visible=true;obj.material.color.set(color);obj.material.opacity=startOpacity??.8;obj.material.wireframe=wireframe;obj.material.blending=additive?T.AdditiveBlending:T.NormalBlending;obj.rotation.set(0,0,0);
    if(line){obj.position.copy(from);this.direction.subVectors(to,from);obj.scale.set(size,size,this.direction.length());obj.quaternion.setFromUnitVectors(this.axis,this.direction.normalize());}
-  else{obj.position.copy(pos);obj.scale.setScalar(size);}
-  Object.assign(slot,{active:true,serial:++this.serial,life,total:life,expand,velocity});return obj;
- }
- update(dt){for(const s of this.slots){if(!s.active)continue;s.life-=dt;if(s.life<=0){s.active=false;s.obj.visible=false;continue;}s.obj.material.opacity=.8*s.life/s.total;if(s.expand)s.obj.scale.addScalar(dt*s.expand);if(s.velocity){s.obj.position.addScaledVector(s.velocity,dt);s.velocity.y-=15*dt;}}}
- clear(){for(const s of this.slots){s.active=false;s.obj.visible=false;}}
- dispose(){for(const s of this.slots){this.scene.remove(s.obj);s.obj.material.dispose();}this.slots=[];this.line.dispose();this.sphere.dispose();}
+   else{obj.position.copy(pos);obj.scale.setScalar(size);}
+   let vel=null;
+   if(velocity){
+     slot.velVec??=new T.Vector3();
+     slot.velVec.set(velocity.x||0,velocity.y||0,velocity.z||0);
+     vel=slot.velVec;
+   }
+   let spinVec=null;
+   if(spin){
+     slot.spinVec??=new T.Vector3();
+     if(typeof spin==='number')slot.spinVec.set(spin,spin*.7,spin*1.3);
+     else slot.spinVec.set(spin.x||0,spin.y||0,spin.z||0);
+     spinVec=slot.spinVec;
+   }
+   if(endColor){
+     slot.startCol??=new T.Color();
+     slot.endCol??=new T.Color();
+     slot.startCol.set(color);
+     slot.endCol.set(endColor);
+     slot.startColor=slot.startCol;
+     slot.endColor=slot.endCol;
+   }else{
+     slot.startColor=null;
+     slot.endColor=null;
+   }
+   Object.assign(slot,{active:true,serial:++this.serial,life,total:life,expand,velocity:vel,spin:spinVec,damping:Math.max(0,Number(damping)||0),gravity,fade,startOpacity:startOpacity??.8});
+   return obj;
+  }
+  update(dt){
+   for(const s of this.slots){
+    if(!s.active)continue;
+    s.life-=dt;
+    if(s.life<=0){s.active=false;s.obj.visible=false;continue;}
+    const fraction=Math.max(0,Math.min(1,s.life/s.total));
+    let alpha=fraction;
+    if(s.fade==='smooth')alpha=fraction*fraction*(3-2*fraction);
+    else if(s.fade==='exp')alpha=Math.pow(fraction,1.8);
+    else if(s.fade==='pop')alpha=Math.sin(fraction*Math.PI*0.5);
+    s.obj.material.opacity=s.startOpacity*alpha;
+    if(s.endColor&&s.startColor){
+     this.scratchColor.copy(s.endColor).lerp(s.startColor,fraction);
+     s.obj.material.color.copy(this.scratchColor);
+    }
+    if(s.expand)s.obj.scale.addScalar(dt*s.expand);
+    if(s.spin){
+     s.obj.rotation.x+=s.spin.x*dt;
+     s.obj.rotation.y+=s.spin.y*dt;
+     s.obj.rotation.z+=s.spin.z*dt;
+    }
+    if(s.velocity){
+     s.obj.position.addScaledVector(s.velocity,dt);
+     if(s.damping>0)s.velocity.multiplyScalar(Math.exp(-s.damping*dt));
+     s.velocity.y-=(s.gravity!=null?s.gravity:15)*dt;
+    }
+   }
+  }
+  clear(){for(const s of this.slots){s.active=false;s.obj.visible=false;s.velocity=null;s.spin=null;s.startColor=null;s.endColor=null;}}
+  dispose(){for(const s of this.slots){this.scene.remove(s.obj);s.obj.material.dispose();}this.slots=[];this.line.dispose();this.sphere.dispose();}
 }
 
 // Deterministic ambient emitter that reuses the existing pooled effect system.

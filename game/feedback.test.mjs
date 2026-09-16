@@ -99,6 +99,45 @@ test('pooled effects switch to additive blending per spawn and reset it on reuse
  pool.dispose();
 });
 
+test('EffectPool supports velocity damping, custom gravity, spin, fade curves and color interpolation',()=>{
+ const pool=new EffectPool(new T.Scene(),2),pos=new T.Vector3(0,5,0),vel=new T.Vector3(10,20,0);
+ const spark=pool.add({pos,color:'#ffffff',endColor:'#ff4400',life:1,velocity:vel,damping:2,gravity:5,spin:3,fade:'smooth',startOpacity:1});
+ assert.equal(spark.position.y,5);
+ pool.update(0.1);
+ assert.ok(spark.position.x>0);
+ assert.ok(spark.position.y>5);
+ assert.ok(spark.rotation.x>0);
+ assert.ok(spark.material.opacity<1);
+ // After 1 full second, particle should be deactivated
+ pool.update(1.0);
+ assert.equal(pool.slots[0].active,false);
+ assert.equal(spark.visible,false);
+ pool.dispose();
+});
+
+test('EffectPool reuses scratch vectors and colors across cycles without GC churn',()=>{
+ const pool=new EffectPool(new T.Scene(),1);
+ const pos=new T.Vector3(0,0,0),vel=new T.Vector3(1,2,3);
+ pool.add({pos,color:'#ffffff',endColor:'#000000',velocity:vel,spin:2});
+ const slot=pool.slots[0];
+ const allocatedVel=slot.velVec;
+ const allocatedSpin=slot.spinVec;
+ const allocatedColor=slot.startCol;
+ assert.ok(allocatedVel&&allocatedSpin&&allocatedColor);
+ pool.clear();
+ assert.equal(slot.velocity,null);
+ assert.equal(slot.spin,null);
+ assert.equal(slot.endColor,null);
+ pool.add({pos,color:'#ff0000'});
+ assert.equal(slot.velocity,null);
+ pool.clear();
+ pool.add({pos,color:'#00ff00',endColor:'#0000ff',velocity:vel,spin:4});
+ assert.equal(slot.velVec,allocatedVel,'velocity vector instance is reused');
+ assert.equal(slot.spinVec,allocatedSpin,'spin vector instance is reused');
+ assert.equal(slot.startCol,allocatedColor,'color instance is reused');
+ pool.dispose();
+});
+
 function audioFixture2(){const audio=new SynthAudio(),nodes=[];const param=()=>({value:0,setValueAtTime(){},linearRampToValueAtTime(){},exponentialRampToValueAtTime(){},setTargetAtTime(){}});const node=extra=>{const n={frequency:param(),gain:param(),Q:param(),pan:param(),type:'',buffer:null,loop:false,connect(){},disconnect(){this.disconnected=true;},start(){this.started=true;},stop(){this.stopped=true;},...extra};nodes.push(n);return n;};audio.ctx={currentTime:1,destination:{},createOscillator:()=>node({type:'sine'}),createGain:()=>node(),createBiquadFilter:()=>node({type:'lowpass'}),createBufferSource:()=>node({}),createStereoPanner:()=>node(),close(){this.closed=true;}};audio.noiseBuffer={};audio.master=node();return {audio,nodes};}
 
 test('footstep and landing variants rotate deterministically per weapon family',()=>{

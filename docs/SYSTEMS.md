@@ -812,15 +812,28 @@ and rebuilds it from immutable map templates; `setMatch` keys actor models by id
   on rebuild. `wetSheenTexture` supplies a shared wet blotch overlay. Besides the
   noise kinds it has hand-written pattern generators — `carbon_fiber`,
   `metal_grating`, `hex_paneling`, `hazard_stripes`, `weathered_concrete`,
-  `holographic_grid` (`TEXTURE_KINDS`) — plus alias names. Every generated map is
-  tagged `userData.surfaceKind` so `disposeObject` never frees a shared cached map.
+  `holographic_grid`, `diamond_plate`, `riveted_armor`, `circuit_board`,
+  `brushed_metal`, `corrugated_metal`, `alien_chitin`, `rough_stucco`,
+  `industrial_mesh` (`TEXTURE_KINDS`) — with alias names resolved by
+  `canonicalTextureKind`. `surfaceTextures({bump:true})` also emits a dedicated
+  `bumpMap`; the cache key encodes the normal/roughness/bump flags. Every generated
+  map is tagged `userData.surfaceKind` so `disposeObject` never frees a shared
+  cached map.
 - `paintGeometry` adds deterministic per-vertex/per-triangle color variation.
 - `ArenaView.buildArena` picks a surface kind per map for the floor and non-race
-  blocks (e.g. `holographic_grid` on `neon-vertical`/`crosswire`, `metal_grating`
-  on the megastructure maps, `carbon_fiber` on the pads, `hazard_stripes` on
-  `foundry`); `assembleWeapon`/`hornetModel`/`vehicleModel`/`robotModel` add a
-  muzzle ejection deflector, Hornet fins and skids, a Puma front splitter and hood
-  vents, and forearm/lower-leg armour plates.
+  blocks (e.g. `holographic_grid` on `neon-vertical`/`crosswire`, `diamond_plate`
+  on `foundry`, `riveted_armor` on `citadel`/bunkers, `metal_grating` on the
+  megastructure maps, `carbon_fiber` on the pads), and `terrainTextureKind` maps
+  terrain (`industrial_mesh` for metal, `rough_stucco` for stone, `corrugated_metal`
+  for lava). `assembleWeapon`/`hornetModel`/`vehicleModel`/`robotModel` add a
+  muzzle ejection deflector, Hornet fins/skids/pod/beacons, a Puma front splitter,
+  hood vents, tail-lights and exhaust pipes, and forearm/lower-leg armour plates.
+- `EffectPool` (`game/feedback.mjs`) is an allocation-free pooled particle system:
+  recycling scans linearly for the oldest slot (no `filter().sort()`) and each slot
+  keeps persistent scratch `Vector3`/`Color` instances. `add` supports `fade`
+  (`linear`/`smooth`/`exp`/`pop`), `damping`, `gravity`, `spin`, `startOpacity`
+  and `endColor`; rockets trail exhaust, shield breaks shed spinning debris, and
+  rail impacts fade superheated white into the beam colour.
 - `robotModel`, `weaponModel`, and `vehicleModel` build models from primitives with
   cached `ModelAssets`; `buildWeaponBody` and `legacyWeaponBody` are separate weapon
   body registries. `game/models.mjs` adds material enhancement, thruster exhaust,

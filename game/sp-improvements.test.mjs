@@ -9,7 +9,7 @@ import { updateSinglePlayer, updateHealthRegen, singlePlayerSnapshot, REGEN_DELA
 import { SPEAKERS, MISSION_LORE, getMissionLore, formatTransmission } from './story.mjs';
 import { getMissionBriefing, getMissionTransmissions, validateMissionProgression, CAMPAIGN_MISSIONS } from './campaign.mjs';
 import { ProceduralSpring, VectorSpring3D, WeaponRig, solveTwoBoneIK } from './rig.mjs';
-import { enhanceModelMaterials, createThrusterExhaust, createEnergyShieldMesh, FIDELITY_PRESETS, createGlowingConduit, createArmorPlatingDetail, createWeaponMuzzleBrake, createRadiatorGrill, enhanceVehicleModel, applyProceduralTexturesToModel } from './models.mjs';
+import { enhanceModelMaterials, createThrusterExhaust, createEnergyShieldMesh, FIDELITY_PRESETS, createGlowingConduit, createArmorPlatingDetail, createWeaponMuzzleBrake, createRadiatorGrill, enhanceVehicleModel, applyProceduralTexturesToModel, createIndustrialVentilationShaft, createHolographicEmitter, createReinforcedBulkhead, createBioArmorPlating, enhanceOperatorModel } from './models.mjs';
 import { characterPose, CharacterRig } from './character-anim.mjs';
 import { singlePlayerDisplay } from './singleplayer-ui.mjs';
 import { SynthAudio, WeaponFeedback } from './feedback.mjs';
@@ -277,6 +277,26 @@ test('model visual fidelity utilities construct valid meshes and materials', () 
   assert.equal(grill.name, 'radiator-grill');
   assert.ok(grill.children.length >= 2);
 
+  const ventShaft = createIndustrialVentilationShaft(null, { width: 0.5, height: 0.5 });
+  assert.equal(ventShaft.name, 'ventilation-shaft');
+  assert.ok(ventShaft.children.length >= 3);
+
+  const holo = createHolographicEmitter(null, { radius: 0.25 });
+  assert.equal(holo.name, 'holographic-emitter');
+  assert.ok(holo.children.length >= 3);
+
+  const bulkhead = createReinforcedBulkhead(null, { width: 1.0, height: 1.5 });
+  assert.equal(bulkhead.name, 'reinforced-bulkhead');
+  assert.ok(bulkhead.children.length >= 3);
+
+  const bioArmor = createBioArmorPlating(null, { width: 0.25, height: 0.2 });
+  assert.equal(bioArmor.name, 'bio-armor-plating');
+  assert.ok(bioArmor.children.length >= 2);
+
+  const robot = new T.Group();
+  enhanceOperatorModel(robot);
+  assert.ok(robot.children.some(c => c.name === 'operator-enhancements'));
+
   const vehicle = new T.Group();
   enhanceVehicleModel(vehicle);
   assert.ok(vehicle.children.some(c => c.name === 'vehicle-enhancements'), 'enhanceVehicleModel attaches enhancements');
@@ -301,6 +321,12 @@ test('model visual fidelity utilities construct valid meshes and materials', () 
     assert.ok(testMesh.material.map, 'map applied');
     assert.ok(testMesh.material.roughnessMap, 'roughnessMap applied');
     assert.ok(testMesh.material.normalMap, 'normalMap applied');
+
+    // Test bumpMap assignment
+    testMesh.material.bumpMap = null;
+    const countBump = applyProceduralTexturesToModel(group, { kind: 'diamond_plate' });
+    assert.equal(countBump, 1, 'applied diamond_plate procedural maps to mesh');
+    assert.equal(testMesh.material.map.userData.surfaceKind, 'diamond_plate');
   } finally {
     if (prevDoc) Object.defineProperty(globalThis, 'document', prevDoc);
     else delete globalThis.document;

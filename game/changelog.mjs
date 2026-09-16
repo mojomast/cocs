@@ -1,12 +1,18 @@
 // In-game patch notes. The title-screen footer is the running version; this
 // module is the human-readable release digest the Changelog screen renders. The
 // full historical record lives in docs/CHANGELOG.md and is linked from the UI.
-export const RELEASE_VERSION = 'v5.4';
-export const RELEASE_CODENAME = 'DETAIL';
+export const RELEASE_VERSION = 'v5.5';
+export const RELEASE_CODENAME = 'FIDELITY';
 export const REPO_URL = 'https://github.com/mojomast/tokenarena';
 export const FULL_CHANGELOG_URL = `${REPO_URL}/blob/main/docs/CHANGELOG.md`;
 
 export const CHANGELOG = [
+  {version:'v5.5',codename:'FIDELITY',date:'2026-09-16',tag:'Surface, particle and model fidelity',highlights:[
+    'Eight new relief surfaces (diamond plate, riveted armour, circuit board, brushed metal, corrugated metal, alien chitin, rough stucco, industrial mesh) with a canonical-kind resolver, intuitive aliases and seam-free tiling, mapped across arena floors and blocks.',
+    'Texture generation can now emit a dedicated bump map alongside the normal map, and materials wire it when present.',
+    'Particles are richer and cheaper: the effect pool recycles with a single linear scan and reuses scratch vectors/colours, and gains fade curves, damping, custom gravity, spin and colour interpolation — used by rocket exhaust trails, shield-break debris and rail impacts.',
+    'Model detail continues: muzzle anchors for the marksman rifle and SMG, cached pickup geometry, and extra Hornet pods/beacons, Puma tail-lights and exhaust pipes.',
+  ]},
   {version:'v5.4',codename:'DETAIL',date:'2026-09-16',tag:'Character motion and surface detail',highlights:[
     'Recoil actually kicks now: the weapon rig was writing its impulse to a field the springs never read. It also gains a stride bob tied to the run cadence and a tuck-down, direction-aware weapon swap.',
     'Characters absorb landings with knee flexion and a torso dip, lower the offhand through a reload, flex through strafes and stabilise the head; the first-person viewmodel dips and rolls through reloads and weapon swaps.',

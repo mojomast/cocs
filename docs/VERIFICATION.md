@@ -1,5 +1,27 @@
 # COCS verification report
 
+## Release 5.5 - Surface, particle and model fidelity
+
+- **Textures:** `game/textures.test.mjs` generates each new pattern, checks the
+  alias table and `canonicalTextureKind` (`TEXTURE_KINDS`), asserts the
+  `surfaceKind` tag, and covers the `bump` option. The cache key includes the
+  normal/roughness/bump flags, so a bump request cannot be served a cached
+  non-bump result.
+- **Particles:** `game/feedback.test.mjs` asserts the fade curves, damping,
+  custom gravity, spin and colour interpolation, and that recycle cycles reuse
+  the persistent scratch vectors/colours.
+- **View:** `game/view.test.mjs` pins the arena/material wiring, the rocket
+  exhaust trail and the cached pickup geometry. `geometry(assets,key,make)` is
+  the existing `ModelAssets` cache path, and surface textures stay
+  `surfaceKind`-tagged so `disposeObject` never frees a shared map.
+- **Models:** the new `models.mjs` builders are asserted in
+  `sp-improvements.test.mjs` and remain test-only.
+- No GPU/browser verification here — scene-graph and material state only.
+
+Verification: game **1360/1360**, server **153/153**, `tests/` **7/7**, `tsc`
+clean, lint 0 errors; the production client/server/SSR/RSC bundles build cleanly
+as part of `npm run deploy`.
+
 ## Release 5.4 - Character motion and surface detail
 
 - **Rig bug fix:** `VectorSpring3D` exposes `x`/`y`/`z` `ProceduralSpring`s, not a

@@ -425,6 +425,16 @@ assets. Full procedure and verification: [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md
 The last five releases. The full history lives in
 [docs/CHANGELOG.md](docs/CHANGELOG.md).
 
+### v5.5 · FIDELITY — 2026-09-16
+- Eight new relief surfaces (diamond plate, riveted armour, circuit board, brushed
+  and corrugated metal, alien chitin, rough stucco, industrial mesh) with aliases,
+  seam-free tiling and an optional dedicated bump map, mapped across arenas.
+- The effect pool is allocation-free and gains fade curves, damping, gravity, spin
+  and colour interpolation — rocket exhaust trails, shield-break debris, rail
+  impacts.
+- Muzzle anchors for weapons 8/9, cached pickup geometry, and more Hornet/Puma
+  detail.
+
 ### v5.4 · DETAIL — 2026-09-16
 - Weapon recoil works again (the rig was writing to a field the springs never
   read), plus stride bob and a tuck-down weapon swap.
@@ -456,14 +466,6 @@ The last five releases. The full history lives in
   unassigned team is no longer grouped under RED.
 - The solo objective counter stops at the total, and the settings dialog traps
   keyboard focus like the other modals.
-
-### v5.0 · COMPACT — 2026-09-16
-- Snapshots travel as compact patches: id-keyed actor/rocket/pickup arrays are
-  diffed element by element against the previous frame, cutting a full 8v8 frame
-  from ~30 KB to ~3 KB (~90%).
-- Only clients that advertised support receive deltas; a once-a-second keyframe
-  lets a client that missed a frame re-sync.
-- Delta/full counts surface in the game server's status JSON and the debug hook.
 
 ## Parody and attribution
 

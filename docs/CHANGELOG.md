@@ -16,6 +16,33 @@ record in [VERIFICATION.md](VERIFICATION.md).
 
 ---
 
+## v5.5 · FIDELITY — 2026-09-16
+
+- **Surfaces:** `textures.mjs` adds `diamond_plate`, `riveted_armor`,
+  `circuit_board`, `brushed_metal`, `corrugated_metal`, `alien_chitin`,
+  `rough_stucco` and `industrial_mesh`, each with a pattern generator, alias names
+  and a canonicalizing `canonicalTextureKind` (`TEXTURE_KINDS`). `surfaceTextures`
+  takes a `bump` option and emits `result.bumpMap`; the cache key includes every
+  flag so a bump/no-bump request cannot collide, and generated maps keep the
+  `userData.surfaceKind` tag. `view.mjs` maps arena floors/blocks and terrain to
+  the new kinds (`foundry` floors are diamond plate, `citadel` blocks are riveted
+  armour, `metal` terrain is industrial mesh, lava is corrugated metal, stone is
+  rough stucco).
+- **Particles:** `EffectPool` recycles via one linear oldest-slot scan instead of
+  `filter().sort()`, and reuses per-slot scratch `Vector3`/`Color` across cycles.
+  `add` accepts `fade` (`linear`/`smooth`/`exp`/`pop`), `damping`, `gravity`,
+  `spin`, `startOpacity` and `endColor`. Rocket projectiles trail smooth-fading
+  exhaust, shield breaks shed spinning wireframe debris with gravity, and rail
+  impacts fade white → beam colour. `view.mjs` also caches pickup geometry
+  (`pickup-armor-octa`, `pickup-power-ico`) through `ModelAssets` and adds barrel
+  anchors for weapons 8/9.
+- **Models:** `models.mjs` gains conduit/plating/muzzle-brake/radiator/vent/
+  holographic-emitter/bulkhead/bio-armour builders, `enhanceVehicleModel`/
+  `enhanceOperatorModel`, and `applyProceduralTexturesToModel` (wires `map`,
+  `roughnessMap`, `normalMap`, `bumpMap`). These remain test-only helpers.
+- **Model detail:** a Hornet sensor pod/lens and formation beacons, and Puma rear
+  tail-lights and exhaust pipes.
+
 ## v5.4 · DETAIL — 2026-09-16
 
 - **Recoil fix:** `WeaponRig.recoilImpulse` wrote the kick to `recoilSpring.vel`
