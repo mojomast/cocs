@@ -51,6 +51,14 @@ export function shadowTick(previous,interval=SHADOW_REFRESH_INTERVAL){const step
 export function shadowDue(now,last,hz){const period=1/Math.max(1,Number(hz)||30);return !Number.isFinite(last)||now-last>=period;}
 // Planar distance from a presentation node to the active camera, for model LOD.
 export function distanceOf(node,camera){if(!node||!camera)return 0;const dx=(node.position?.x||0)-camera.position.x,dz=(node.position?.z||0)-camera.position.z;return Math.hypot(dx,dz);}
+// Time-accumulator for trail/particle emission. Emitting once per rendered frame
+// doubles the particle count at 144 Hz; accumulating elapsed time and emitting at
+// a fixed interval keeps the count roughly constant across refresh rates.
+export function trailEmissions(accumulated, delta, interval=1/30){
+ const step=Math.max(0,Number(delta)||0),period=Math.max(1e-4,Number(interval)||1/30);
+ const next=(Number(accumulated)||0)+step,count=Math.floor(next/period);
+ return {count,remainder:next-count*period};
+}
 export const V=(x=0,y=0,z=0)=>new T.Vector3(x,y,z);
 const buildMaterial=(color,metal=.5,rough=.42,emissive=false)=>new T.MeshStandardMaterial({color,metalness:metal,roughness:rough,...(emissive?{emissive:color,emissiveIntensity:1.6}:{})});
 // Arena/palette materials stay uncached; shared model assets opt into the cache via withAssets.
@@ -1251,7 +1259,12 @@ if(this.freeCam){this.lowHealthOverlay?.update(false,time,delta,reduced,this.cam
    for(const zone of (match.objectives??match.objectiveState)?.zones||[]){const model=this.objectiveModels?.get(String(zone.id));if(!model)continue;const mark=model.userData.teamMark??=teamMark();if(!mark.parent){mark.position.y=1.45;mark.scale.setScalar(2);model.add(mark);mark.traverse(n=>{n.userData.objective=true;n.userData.noCameraOcclusion=true;});}updateTeamMark(mark,zone.contested?null:zone.owner);}
        if((this.qualitySettings?.modelDetail??1)<1)this._applyModelDetail();
     (match.pickups||[]).forEach((p,i)=>{const m=this.pickupModels[i];if(!m)return;m.visible=(p.wait||0)<=0;m.rotation.y=reduced?0:time*.8;m.position.y=(p.y||0)+(reduced?0:Math.sin(time*2+i)*.07);});
-   this.projectilePool??=new EffectPool(this.scene,64);this.projectilePool.clear();for(const r of (match.rockets||[]).slice(0,64))if(r.pos){const wp=r.weapon??0;if(wp===4){this.projectilePool.add({pos:r.pos,color:'#72cfff',size:.2,life:1});this.projectilePool.add({pos:r.pos,color:'#dff6ff',size:.09,life:1});}else if(wp===5)this.projectilePool.add({pos:r.pos,color:'#ffb27a',size:.13,life:1});else this.projectilePool.add({pos:r.pos,color:'#ffad61',size:.15,life:1});if(!reduced&&this.effectPool&&this.renderer?.isSoftware!==true&&(wp===1||wp===4||wp===5)){this.effectPool.add({pos:V(r.pos.x,r.pos.y,r.pos.z),color:wp===4?'#72cfff':wp===5?'#ffb27a':'#ffad61',endColor:wp===4?'#003366':wp===5?'#551100':'#441100',fade:'smooth',damping:2,size:wp===4?.06:.08,life:.22,expand:1.2,velocity:V((Math.random()-.5)*.6,(Math.random()-.5)*.6,(Math.random()-.5)*.6)});} }
+   // Persistent projectile markers keep their identity frame to frame, and trail
+   // puffs are emitted on a time accumulator (~30 Hz) instead of once per render,
+   // so 60 and 144 fps produce roughly the same number of trail particles.
+   this.projectilePool??=new EffectPool(this.scene,64);this.projectilePool.clear();
+   const trailEm=trailEmissions(this._trailAt,Math.min(Number(delta)||0,.1));this._trailAt=trailEm.remainder;const emitTrail=trailEm.count>0;
+   for(const r of (match.rockets||[]).slice(0,64))if(r.pos){const wp=r.weapon??0;if(wp===4){this.projectilePool.add({pos:r.pos,color:'#72cfff',size:.2,life:1});this.projectilePool.add({pos:r.pos,color:'#dff6ff',size:.09,life:1});}else if(wp===5)this.projectilePool.add({pos:r.pos,color:'#ffb27a',size:.13,life:1});else this.projectilePool.add({pos:r.pos,color:'#ffad61',size:.15,life:1});if(emitTrail&&!reduced&&this.effectPool&&this.renderer?.isSoftware!==true&&(wp===1||wp===4||wp===5)){this.effectPool.add({pos:V(r.pos.x,r.pos.y,r.pos.z),color:wp===4?'#72cfff':wp===5?'#ffb27a':'#ffad61',endColor:wp===4?'#003366':wp===5?'#551100':'#441100',fade:'smooth',damping:2,size:wp===4?.06:.08,life:.22,expand:1.2,velocity:V((Math.random()-.5)*.6,(Math.random()-.5)*.6,(Math.random()-.5)*.6)});} }
   for(const e of (match.events||[]))if(e.id>this.lastEvent){this.effect(e);this.lastEvent=e.id;}
    this.effectPool?.update(Math.max(0,delta));this.railPool?.update(Math.max(0,delta));this.deathPool?.update(Math.max(0,delta));this.decalPool?.update(Math.max(0,delta));
        this.hands.visible=player.health>0&&this.showWeapon!==false&&!this.spectator&&!cinematic&&!this.freeCam&&player.vehicleId==null;

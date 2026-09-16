@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {ArenaView,raceTrackModel,vehicleModel,weaponModel,robotModel,shadowTick} from './view.mjs';
+import {ArenaView,raceTrackModel,vehicleModel,weaponModel,robotModel,shadowTick,trailEmissions,shadowDue} from './view.mjs';
 import {RACE_DEMO_MODE_SECONDS} from './race-camera.mjs';
 import {SoftwareRenderer} from './software.mjs';
 import {ModelAssets,CameraShake,MuzzleLightPool,LowHealthOverlay,DeathPool,DecalPool,killcamPose,KILLCAM_DURATION} from './effects-fx.mjs';
@@ -1447,4 +1447,15 @@ test('death debris spin and splay options are deterministic, bounded and opt-in'
  const defaults=new DeathPool(mk(),6,2);
  assert.equal(defaults.spawn({x:0,y:0,z:0},{pieces:5,force:6,seed:3}),5,'the new options keep the old default call signature');
  a.dispose();b.dispose();flat.dispose();defaults.dispose();
+});
+
+test('trail emission is frame-rate independent and shadows refresh on an elapsed-time budget',()=>{
+  const count=(fps,seconds)=>{let accum=0,emitted=0,frames=Math.round(fps*seconds);for(let i=0;i<frames;i++){const em=trailEmissions(accum,1/fps);accum=em.remainder;emitted+=em.count;}return emitted;};
+  const at60=count(60,2),at144=count(144,2);
+  assert.ok(Math.abs(at60-at144)<=1,`60fps emits ${at60}, 144fps emits ${at144} — close enough`);
+  assert.ok(at60>=58&&at60<=62,'two seconds at a 30Hz interval emits about sixty puffs');
+  // Elapsed-time shadow scheduling does not scale with frame count.
+  assert.equal(shadowDue(0, undefined, 30), true, 'the first frame always schedules a refresh');
+  assert.equal(shadowDue(1.01, 1, 30), false, 'a frame sooner than the period does not refresh');
+  assert.equal(shadowDue(1.04, 1, 30), true, 'a frame past the period refreshes');
 });
