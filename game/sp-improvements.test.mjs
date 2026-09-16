@@ -10,6 +10,8 @@ import { getMissionBriefing, getMissionTransmissions, validateMissionProgression
 import { ProceduralSpring, VectorSpring3D, WeaponRig, solveTwoBoneIK } from './rig.mjs';
 import { enhanceModelMaterials, createThrusterExhaust, createEnergyShieldMesh, FIDELITY_PRESETS } from './models.mjs';
 import { characterPose, CharacterRig } from './character-anim.mjs';
+import { singlePlayerDisplay } from './singleplayer-ui.mjs';
+import { SynthAudio } from './feedback.mjs';
 
 test('weapon balancing across arsenal defines distinct roles with no dominating outliers', () => {
   assert.equal(WEAPONS.length, 10);
@@ -233,3 +235,153 @@ test('model visual fidelity utilities construct valid meshes and materials', () 
     child.material.dispose();
   }
 });
+
+test('singlePlayerSnapshot enriches narrative transmissions with speaker profile metadata', () => {
+  const match = new Match('chatgpt', 'openclaw', () => 0.5, 'convoy-line', {
+    mode: 'campaign',
+    mission: 'convoy-run',
+    botCount: 0,
+    humanCount: 1,
+  });
+  match.modeState.storyLine = {
+    speaker: 'DISPATCH',
+    text: 'Priority neural shipment detected on northern highway.',
+    at: match.time,
+  };
+  match.modeState.bark = {
+    speaker: 'ECHO',
+    text: 'Hostile spitters spotted on high ground.',
+    at: match.time,
+  };
+
+  const snap = singlePlayerSnapshot(match.modeState, match);
+  assert.ok(snap.story);
+  assert.equal(snap.story.speaker, 'Tactical Control');
+  assert.equal(snap.story.callsign, 'COMMAND-01');
+  assert.equal(snap.story.color, '#57e6cd');
+  assert.equal(snap.story.tag, 'TACTICAL');
+
+  assert.ok(snap.bark);
+  assert.equal(snap.bark.speaker, 'Recon Drone Echo-4');
+  assert.equal(snap.bark.callsign, 'ECHO-4');
+  assert.equal(snap.bark.color, '#ffd166');
+
+  // Verify singlePlayerDisplay adapter forwards them
+  const display = singlePlayerDisplay({ singleplayer: snap, actors: match.actors });
+  assert.ok(display.story);
+  assert.equal(display.story.callsign, 'COMMAND-01');
+  assert.ok(display.bark);
+  assert.equal(display.bark.callsign, 'ECHO-4');
+  assert.ok(display.regen);
+  assert.equal(display.regen.rate, REGEN_RATE);
+});
+
+test('shieldBreak is emitted on damage when shield or armor is completely shattered', () => {
+  const match = new Match('chatgpt', 'openclaw', () => 0.5, 'colosseum', {
+    mode: 'deathmatch',
+    botCount: 1,
+    humanCount: 1,
+  });
+  const player = match.actors[0];
+  const enemy = match.actors[1];
+  player.protection = 0;
+  enemy.protection = 0;
+  enemy.armor = 20;
+  enemy.health = 100;
+
+  // Small damage that reduces armor from 20 to 8: shieldBreak is false
+  match.damage(enemy, 20, player);
+  const ev1 = match.events.filter(e => e.type === 'damage').at(-1);
+  assert.ok(ev1);
+  assert.equal(ev1.shieldBreak, false, 'Armor still remains, no shieldBreak');
+  assert.ok(enemy.armor > 0);
+
+  // Large damage that completely depletes remaining armor: shieldBreak is true
+  match.damage(enemy, 50, player);
+  const ev2 = match.events.filter(e => e.type === 'damage').at(-1);
+  assert.equal(ev2.shieldBreak, true, 'Armor depleted to 0 emits shieldBreak: true');
+  assert.equal(enemy.armor, 0);
+
+  // Subsequent damage when armor is already 0: shieldBreak is false
+  match.damage(enemy, 10, player);
+  const ev3 = match.events.filter(e => e.type === 'damage').at(-1);
+  assert.equal(ev3.shieldBreak, false, 'No shield was present, so shieldBreak is false');
+});
+
+test('SynthAudio supports spree announcer cue, critical ping, and shieldBreak audio layers', () => {
+  const audio = new SynthAudio({ announcer: true });
+  const nodes = [];
+  const param = () => ({ setValueAtTime(){}, linearRampToValueAtTime(){}, exponentialRampToValueAtTime(){}, setTargetAtTime(){} });
+  const node = () => { const n = { frequency: param(), gain: param(), connect(){}, disconnect(){}, start(){}, stop(){} }; nodes.push(n); return n; };
+  audio.ctx = { currentTime: 1, destination: {}, createOscillator: node, createGain: node, createBiquadFilter: node, close(){} };
+
+  // 1. Spree announcer cue
+  const spree = audio.announcerCue('spree');
+  assert.ok(spree);
+  assert.equal(spree.cue, 'spree');
+  assert.equal(spree.played, true);
+
+  // 2. Critical hit audio plays single _play token with high frequency ping
+  const plays = [];
+  audio._play = (duration, pan, build) => {
+    plays.push({ duration, pan });
+    build(1, node(), []);
+  };
+  const scorer = { id: 1, weapon: 0, x: 0, z: 0 };
+  
+  // Normal damage
+  audio.lastHit = -10;
+  audio.event({ type: 'damage', id: 101, time: 2, actor: 2, source: 1, amount: 20 }, scorer);
+  assert.equal(plays.length, 1);
+  assert.equal(plays[0].duration, 0.12);
+
+  // Critical damage
+  audio.lastHit = -10;
+  audio.event({ type: 'damage', id: 102, time: 3, actor: 2, source: 1, amount: 20, critical: true }, scorer);
+  assert.equal(plays.length, 2);
+  assert.equal(plays[1].duration, 0.16, 'Critical hit plays extended resonant chime');
+
+  // Shield break damage
+  audio.lastHit = -10;
+  audio.event({ type: 'damage', id: 103, time: 4, actor: 2, source: 1, amount: 35, shieldBreak: true }, scorer);
+  assert.equal(plays.length, 3);
+
+  // Local shield break damage received
+  audio.event({ type: 'damage', id: 104, time: 5, actor: 1, source: 2, amount: 40, shieldBreak: true }, scorer);
+  assert.equal(plays.length, 4);
+  assert.equal(plays[3].duration, 0.24, 'Local shield break duration accommodates shatter transient');
+
+  audio.dispose();
+});
+
+test('SynthAudio triggers low-health heartbeat and vehicle nitro engine pitch boost', () => {
+  const audio = new SynthAudio();
+  const nodes = [];
+  const param = () => ({ setValueAtTime(){}, linearRampToValueAtTime(){}, exponentialRampToValueAtTime(){}, setTargetAtTime(){} });
+  const node = () => { const n = { frequency: param(), gain: param(), connect(){}, disconnect(){}, start(){}, stop(){} }; nodes.push(n); return n; };
+  audio.ctx = { currentTime: 1, destination: {}, createOscillator: node, createGain: node, createBiquadFilter: node, close(){} };
+
+  const plays = [];
+  audio._play = (duration, pan) => plays.push({ duration, pan });
+
+  const healthyPlayer = { id: 1, health: 100, maxHealth: 100, grounded: true, vx: 0, vy: 0, vz: 0, weapon: 0 };
+  // Healthy player does not trigger heartbeat
+  for (let i = 0; i < 60; i++) audio.update(healthyPlayer, [], 1 / 60);
+  assert.equal(plays.length, 0, 'No heartbeat when healthy');
+
+  // Low health player (< 28 HP) triggers rhythmic heartbeat
+  const lowHealthPlayer = { id: 1, health: 22, maxHealth: 100, grounded: true, vx: 0, vy: 0, vz: 0, weapon: 0 };
+  for (let i = 0; i < 75; i++) audio.update(lowHealthPlayer, [], 1 / 60); // 1.25s
+  assert.ok(plays.length >= 1, 'Low health triggers heartbeat thump');
+  assert.equal(plays[0].duration, 0.22);
+
+  // Boosting vehicle revs engine higher
+  const drivingPlayer = { id: 1, vehicleId: 'puma-1', health: 100, maxHealth: 100, grounded: true, vx: 0, vy: 0, vz: 0, weapon: 0 };
+  const boostingVehicle = { id: 'puma-1', vx: 18, vz: 0, boosting: true };
+  audio.update(drivingPlayer, [boostingVehicle], 0.05);
+  assert.ok(audio.engine, 'Vehicle engine initialized');
+
+  audio.dispose();
+});
+
+

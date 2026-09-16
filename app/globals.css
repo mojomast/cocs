@@ -532,7 +532,8 @@
 .hitmarker span:first-child { transform: translate(-50%, -50%) rotate(45deg); }
 .hitmarker span:last-child { transform: translate(-50%, -50%) rotate(-45deg); }
 .hitmarker.kill span { width: 21px; background: #ff6b6b; box-shadow: 0 0 9px #ff6b6bcc; }
-.hitmarker.hit { animation: hitmarker-in .12s ease-out; }
+.hitmarker.critical span { width: 20px; background: #ffd166; box-shadow: 0 0 10px #ffd166dd; }
+.hitmarker.hit, .hitmarker.critical, .hitmarker.kill { animation: hitmarker-in .12s ease-out; }
 .reload-indicator { position: absolute; left: 50%; top: calc(50% + 26px); transform: translateX(-50%); display: grid; gap: 5px; justify-items: center; pointer-events: none; text-shadow: 0 1px 3px #000; }
 .reload-label { color: #ffd9a0; font: 11px monospace; letter-spacing: 2px; }
 .reload-track { display: block; width: 74px; height: 4px; background: #0a1717d9; border: 1px solid #ffd9a066; overflow: hidden; }
@@ -542,7 +543,7 @@
 @keyframes hitmarker-in { from { opacity: .35; transform: translate(-50%, -50%) scale(1.35); } to { opacity: 1; transform: translate(-50%, -50%) scale(1); } }
 @keyframes ammo-pulse { 0%, 100% { opacity: 1; } 50% { opacity: .45; } }
 @media (prefers-reduced-motion: reduce) {
-  .hitmarker.hit { animation: none; }
+  .hitmarker.hit, .hitmarker.critical, .hitmarker.kill { animation: none; }
   .ammo-warning.pulse { animation: none; }
   .reload-track > i { transition: none; }
 }
@@ -551,6 +552,7 @@
 .damage-numbers { position: absolute; inset: 0; overflow: hidden; pointer-events: none; }
 .damage-number { position: absolute; font: 700 20px monospace; color: #ffe9b0; text-shadow: 0 2px 6px #000; transition: opacity .08s linear, transform .08s linear; will-change: opacity, transform; }
 .damage-number.kill { color: #ff6b6b; font-size: 24px; text-shadow: 0 0 10px #ff6b6baa, 0 2px 6px #000; }
+.damage-number.critical { color: #ffd166; font-size: 23px; text-shadow: 0 0 12px #ffd166cc, 0 2px 6px #000; font-weight: 800; }
 .damage-direction { position: absolute; left: 50%; top: 50%; width: 0; height: 0; transform: rotate(var(--damage-angle, 0deg)); pointer-events: none; animation: damage-direction 0.8s ease-out forwards; }
 .damage-direction i { position: absolute; left: -14px; top: calc(-1 * min(34vh, 230px)); width: 0; height: 0; border-left: 14px solid transparent; border-right: 14px solid transparent; border-bottom: 18px solid #ff6b6b; filter: drop-shadow(0 0 6px #ff6b6baa); opacity: .92; }
 .damage-flash { position: absolute; inset: 0; pointer-events: none; background: radial-gradient(circle at 50% 50%, #ff6b6b44, transparent 62%); animation: damage-flash 0.8s ease-out forwards; }
@@ -760,6 +762,7 @@ a.icon-button.github-link>span{position:absolute;width:1px;height:1px;overflow:h
 .hitmarker span{box-shadow:0 0 10px #ffffffbb}
 .damage-number{font-size:clamp(22px,1.9vw,34px)}
 .damage-number.kill{font-size:clamp(26px,2.3vw,42px)}
+.damage-number.critical{font-size:clamp(25px,2.1vw,38px);color:#ffd166;text-shadow:0 0 12px #ffd166cc,0 2px 6px #000;font-weight:800}
 .posture-chip{font-size:clamp(10px,.85vw,13px);padding:5px 13px}
 @keyframes feedSlide{from{opacity:0;transform:translateX(26px)}to{opacity:1;transform:none}}
 @keyframes announceGlow{0%{opacity:0;transform:scale(.6)}40%{opacity:1}100%{opacity:0;transform:scale(1.25)}}
@@ -859,6 +862,9 @@ html, body { overscroll-behavior: none; }
 .sp-hold i b{display:block;height:100%;background:#ffce73}
 .sp-story{position:absolute;bottom:158px;left:50%;transform:translateX(-50%);width:min(720px,78vw);margin:0;padding:9px 14px;background:#04100fe6;border-left:3px solid #ffe066;font-size:13px;line-height:1.45;color:#f6f2e2}
 .sp-story b{color:#ffe066;letter-spacing:1.4px;margin-right:10px}
+.sp-story-tag{display:inline-block;font-size:10px;padding:1px 5px;margin-right:6px;border:1px solid currentColor;border-radius:2px;letter-spacing:1px;vertical-align:middle}
+.sp-story.sp-story--bark{border-left-color:#ffaa44;background:#140e04e6}
+.sp-regen b{color:#70ffe6;text-shadow:0 0 8px #70ffe666}
 @media(max-width:820px){.sp-objectives{left:12px;width:min(250px,46vw)}.sp-steps{display:none}}
 @media(max-width:700px){.sp-objectives{left:10px;top:auto;bottom:196px;transform:none;width:min(230px,58vw)}.sp-status{top:104px;gap:10px;padding:6px 10px}.sp-status b{font-size:13px}.sp-bars{top:146px;width:88vw}.sp-story{bottom:186px;width:94vw;font-size:12px}}
 /* Briefing + story copy in the mission select modal. */
@@ -1007,8 +1013,14 @@ html, body { overscroll-behavior: none; }
 .stat-card .stat-bar>i{display:block;height:100%;background:var(--accent);transition:width .12s linear}
 .stat-card--health .stat-value{color:#b6ffd9}
 .stat-card--health .stat-bar>i{background:#6ff0b0}
+.stat-card--health.is-low{border-color:rgba(255,71,87,.7);animation:health-pulse 1s infinite alternate ease-in-out}
+.stat-card--health.is-low .stat-value{color:#ff6b81}
+.stat-card--health.is-low .stat-bar>i{background:#ff4757;box-shadow:0 0 8px #ff4757cc}
+@keyframes health-pulse{from{box-shadow:0 0 4px #ff475744,0 8px 22px #0008}to{box-shadow:0 0 16px #ff4757aa,0 8px 22px #0008}}
 .stat-card--armor .stat-value{color:#9fd0ff}
 .stat-card--armor .stat-bar>i{background:#6dbfff}
+.stat-card--armor.is-empty{opacity:.55;border-color:rgba(109,191,255,.2)}
+.stat-card--armor.is-empty .stat-value{color:#62828f}
 .stat-card--ammo{min-width:150px}
 .stat-card--ammo .stat-value{color:#ffe6b0}
 .stat-card--ammo .stat-bar>i{background:#ffd166}

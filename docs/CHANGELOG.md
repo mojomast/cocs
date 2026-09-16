@@ -16,6 +16,29 @@ record in [VERIFICATION.md](VERIFICATION.md).
 
 ---
 
+## v5.3 · IMPACT — 2026-09-16
+
+- **ADS viewmodel:** the first-person hands lerp from the hip layout onto the
+  iron-sight centre line while aiming (`_adsTransition`, frame-rate independent)
+  and ease back on hipfire; reduced motion pins the fixed hip layout. Weapon
+  kick/roll is damped by the same blend.
+- **Energy shields:** `temporaryShield`/`juggernautShield` now drive the actor's
+  shield mesh — cyan for Overshield, amber for the Juggernaut — with a higher
+  opacity while charged. `Match.damage` emits `shieldBreak` when shields plus
+  armor fall from positive to zero on a surviving target, and the view answers
+  with a wireframe shard burst and the synth with a layered crack.
+- **Hit feedback:** `hitMarker` recognises a `critical` tier (gold), driven by
+  `e.critical`/`e.headshot`/`amount >= 48`; damage numbers gain a `.critical`
+  style; the health card pulses under 30% and the audio raises a heartbeat, and
+  killstreak `spree` gets its own announcer cue and engine pitch lift for
+  boosting vehicles.
+- **Nitro exhaust:** boosting/turbo vehicles emit pooled exhaust particles behind
+  the chassis (suppressed under reduced motion).
+- **Narrative:** campaign `story-line`/`bark` transmissions resolve `SPEAKERS`
+  profiles to a display name, callsign, tag and colour; the solo HUD renders the
+  tag/callsign and a distinct bark style, and surfaces the (already-snapshotted)
+  out-of-combat `regen` state.
+
 ## v5.2 · RESTORE — 2026-09-16
 
 - **Campaign persistence (critical):** `recordMission` wrote entries without a

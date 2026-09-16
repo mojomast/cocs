@@ -1,12 +1,18 @@
 // In-game patch notes. The title-screen footer is the running version; this
 // module is the human-readable release digest the Changelog screen renders. The
 // full historical record lives in docs/CHANGELOG.md and is linked from the UI.
-export const RELEASE_VERSION = 'v5.2';
-export const RELEASE_CODENAME = 'RESTORE';
+export const RELEASE_VERSION = 'v5.3';
+export const RELEASE_CODENAME = 'IMPACT';
 export const REPO_URL = 'https://github.com/mojomast/tokenarena';
 export const FULL_CHANGELOG_URL = `${REPO_URL}/blob/main/docs/CHANGELOG.md`;
 
 export const CHANGELOG = [
+  {version:'v5.3',codename:'IMPACT',date:'2026-09-16',tag:'Weapon, shield and impact feedback',highlights:[
+    'Shouldering a weapon now reads: the first-person viewmodel glides onto the iron-sight line while aiming down sights and eases back on hipfire, and holds its fixed hip layout under reduced motion.',
+    'Energy shields are visible again: Overshield glows cyan and the Juggernaut carries an amber bubble; shattering one fires a burst of shards, a distinct crack and a shield-break damage event.',
+    'Hits read harder: critical and headshot hits get a gold hitmarker and damage number, low health pulses the health card and adds a heartbeat, and killstreak sprees announce themselves with their own cue.',
+    'Boosting vehicles spit nitro exhaust and their engine pitch climbs, and campaign transmissions now carry each speaker\'s callsign, tag and colour.',
+  ]},
   {version:'v5.2',codename:'RESTORE',date:'2026-09-16',tag:'Campaign persistence and mode fixes',highlights:[
     'Campaign progress survives a reload again: the save normalizer was dropping every completed mission because it required a flag the recorder never wrote, so the campaign silently reset to mission one.',
     'Losses now count as attempts without unlocking the next mission, so mission-select shows real attempt and win counts.',

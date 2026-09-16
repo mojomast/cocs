@@ -31,6 +31,7 @@ export function SinglePlayerHud({single,onSelectUpgrade,onResumeCheckpoint}:{sin
    <span><small>HOSTILES</small><b>{single.enemiesLabel}</b></span>
    <span><small>LIVES</small><b>{single.lives}</b></span>
    <span><small>KILLS</small><b>{single.kills}</b></span>
+   {single.regen?.active&&<span className="sp-regen" title="Out of combat regeneration active"><small>REGEN</small><b>+{single.regen.rate||14}/s</b></span>}
    {single.waypoint&&<span className="sp-waypoint"><small>NEXT</small><b>{single.waypoint.label}{single.waypoint.distance!==null?` · ${single.waypoint.distance}m`:''}</b></span>}
   </div>
   {(single.boss||single.hold)&&<div className="sp-bars">
@@ -49,6 +50,6 @@ export function SinglePlayerHud({single,onSelectUpgrade,onResumeCheckpoint}:{sin
     {selected&&<p className="sp-upgrade-selected" role="status">ACQUIRED · {String(selected).toUpperCase()}</p>}
   </section>}
   {notice&&<p className={`sp-notice sp-notice--${notice.tone||'default'}`} role="status" aria-live="polite">{notice.text}</p>}
-  {single.story&&<p className="sp-story" role="status" aria-live="polite"><b>{single.story.speaker}</b>{single.story.text}</p>}
+  {single.story?<p className="sp-story" role="status" aria-live="polite"><b style={single.story.color?{color:single.story.color}:undefined}>{single.story.tag?<span className="sp-story-tag">{single.story.tag}</span>:null}{single.story.callsign?`[${single.story.callsign}] `:''}{single.story.speaker}</b>{single.story.text}</p>:single.bark?<p className="sp-story sp-story--bark" role="status" aria-live="polite"><b style={single.bark.color?{color:single.bark.color}:undefined}>{single.bark.callsign?`[${single.bark.callsign}] `:''}{single.bark.speaker}</b>{single.bark.text}</p>:null}
  </div>;
 }

@@ -32,6 +32,8 @@ export function singlePlayerDisplay(hud){
   objective:state.objective||'',
   message:state.message||'',
   story:state.story||null,
+  bark:state.bark||null,
+  regen:state.regen||null,
   waypoint,
   steps,
   stepIndex:steps.filter(step=>step.done).length,

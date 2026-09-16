@@ -264,6 +264,9 @@ visual overrides. `applyAttachmentsToWeapon` returns a fresh weapon object;
 - Facing shields (NPC `npcShield`) reduce frontal damage and amplify flanking.
 - Absorbs from `temporaryShield`, then `juggernautShield`, then armor (armor absorbs
   `damage * .6`, capped by available armor), then health.
+- The `damage` event carries `shield` (temporary shield absorbed this hit) and
+  `shieldBreak` (true when the summed temporary/Juggernaut shield plus armor fell
+  from positive to zero on a still-living target).
 - Life steal heals the source for 25% of actual health damage.
 - Shots at bots set threat memory, target, suppression, and a fast replan.
 
@@ -639,6 +642,9 @@ Five missions in three acts: `convoy-run`, `reactor-run`, `throne-siege`,
 - Win conditions: `eliminate`, `survive`, `assassinate`, `reach`, `defend`.
 - `story.mjs` `MISSION_LORE` appends timed transmissions (`lore:true`) that play as
   `story-line` events; `SPEAKERS` names DISPATCH, RELAY, WARDEN, HARBINGER, ECHO.
+  `singlePlayerSnapshot` resolves a speaker to `{speaker, callsign, color, tag}` so
+  the HUD renders the callsign, tag chip and speaker colour; barks use their own
+  class and a redacted `[CALLSIGN]` prefix.
 
 Health regen (`updateHealthRegen`): after `REGEN_DELAY 4.5 s` without taking damage,
 heal `REGEN_RATE 14` HP/s; firing delays regen (`>= 2.0 s`).
@@ -838,6 +844,14 @@ a pooled muzzle light, and a short killcam (`KILLCAM_DURATION 2.2`). Spectator a
 free-cam poses are separate. Shadow maps refresh on a fixed cadence
 (`SHADOW_REFRESH_INTERVAL 2`).
 
+First-person viewmodel: the hands lerp from the fixed hip layout toward the
+iron-sight centre line while ADS (`_adsTransition`, frame-rate independent, kick and
+roll damped by the same blend); reduced motion pins the hip layout. Actor shield
+meshes read the energy state — cyan for `temporaryShield`, amber for
+`juggernautShield` — and a `shieldBreak` damage event spawns a wireframe shard burst.
+Boosting/turbo vehicles emit pooled nitro exhaust behind the chassis (hardware,
+non-reduced motion only).
+
 `game/software.mjs` honors `setPixelRatio`, `setSize`, `setTriangleBudget`, and
 `setScreenArea`; the README and `docs/VERIFICATION.md` record that it is approximate
 and slower and not frame-pacing verified.
@@ -859,8 +873,12 @@ cap (30), a filtered-noise ambience bed with mood profiles (`default`, `night`,
 - `MODE_THEMES` gives each mode a root and scale; `setModeTheme` retunes the running
   drone in place. `STING_CUES` and `sting(outcome)` play victory/defeat arpeggios.
 - `announcerCue(type)` plays optional two-note motifs for capture, goals, streaks,
-  boss phases, and objective events.
+  sprees, boss phases, and objective events.
 - `thunder` plays distance-panned rumbles from the deterministic lightning schedule.
+- Combat feedback layers: a critical hit (or `amount >= 48`) gets a brighter two-tone
+  ping, `shieldBreak` adds a bandpass crack with a saw decay, a low-health actor
+  raises a periodic heartbeat (`heartbeatTimer`), and a boosting vehicle multiplies
+  the engine oscillator/sub/lowpass pitch and gain.
 
 `CalloutQueue` (`game/voice.mjs`) is a bounded, deduped, priority-aware bus for
 announcer callouts.
@@ -873,6 +891,9 @@ announcer callouts.
   death, ladder/streak/spree status, `audioCaption` (captions), `connectionQuality`,
   spectator boards/target cyclers, mode goal/target/columns/primary text, and
   `objectiveCopy`.
+- `hitMarker` has three tiers — `hit`, `critical` (gold, from `hud.critical`), and
+  `kill`. Damage numbers carry a `.critical` class; the health card pulses below 30%
+  and the armor card dims at zero; `singlePlayerDisplay` surfaces `regen` and `bark`.
 - `game/radar.mjs` `radarContacts(hud, player, {range})` projects actors, zones,
   waypoints, markers, the payload, and flags onto a yaw-relative unit circle
   (`+y` ahead, `+x` right); `place(..., always)` clamps off-screen contacts to the

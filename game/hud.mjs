@@ -51,9 +51,11 @@ export function postureLabel(actor) {
 }
 
 export function hitMarker(hud, player) {
+  if (!hud?.hit && !hud?.kill) return null;
   const latest = hud?.feed?.[0], when = Number(hud?.time), at = Number(latest?.time);
-  const killed = Boolean(latest && player && latest.killer === player.name && !latest.self && (!Number.isFinite(when) || !Number.isFinite(at) || when - at < 2));
+  const killed = Boolean(hud?.kill || (latest && player && latest.killer === player.name && !latest.self && (!Number.isFinite(when) || !Number.isFinite(at) || when - at < 0.6)));
   if (killed) return 'kill';
+  if (hud?.critical) return 'critical';
   return hud?.hit ? 'hit' : null;
 }
 

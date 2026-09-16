@@ -93,6 +93,59 @@ test('view keeps camera aim authoritative while weapon feedback respects visibil
  view.effectPool.dispose();view.projectilePool.dispose();view.disposeObject(view.scene);
 });
 
+test('ADS transitions viewmodel smoothly toward iron-sights center line and returns on hipfire',t=>{
+ const {view,renderer}=fixture(t);view.camera=new T.PerspectiveCamera();view.scene=new T.Scene();view.hands=new T.Group();view.camera.add(view.hands);view.scene.add(view.camera);view.actorModels=new Map();view.pickupModels=[];view.playerId=7;view.currentWeapon=-1;view.lastEvent=0;view.motionQuery={matches:false};renderer.render=()=>{};
+ const player={id:7,weapon:0,health:100,x:1,y:2,z:3,yaw:0,pitch:0,vx:0,vz:0,vy:0,grounded:true,ads:false};
+ const match={actors:[player],pickups:[],rockets:[],time:1,events:[]};
+ view.render('playing',match,.016,1);
+ const hipX=view.hands.position.x;
+ assert.ok(hipX>.35,'hipfire viewmodel sits off-center to the right');
+ player.ads=true;
+ for(let i=0;i<20;i++)view.render('playing',match,.016,1+(i+1)*.016);
+ assert.ok(view.hands.position.x<hipX*.4,'ADS smoothly centers viewmodel towards iron-sight line');
+ assert.ok(view.hands.position.y>-0.34,'ADS elevates viewmodel towards sightline');
+ view.motionQuery.matches=true;
+ view.render('playing',match,.016,2);
+ assert.deepEqual(view.hands.position.toArray(),[.37,-.36,-.58],'reduced motion keeps fixed hip layout');
+ view.effectPool?.dispose();view.disposeObject(view.scene);
+});
+
+test('vehicle nitro exhaust emits particles behind boosting and turbo vehicles under standard motion',t=>{
+ const {view}=fixture(t);view.scene=new T.Scene();view.motionQuery={matches:false};view.vehicleModels=new Map();
+ const model=new T.Group();model.userData={wheels:[],guns:[]};view.vehicleModels.set('veh-1',model);view.scene.add(model);
+ const matchBoosting={vehicles:[{id:'veh-1',position:{x:5,y:1,z:5},yaw:0,health:100,boosting:true,vx:12,vz:0}],time:1};
+ view.updateVehicleModels(matchBoosting);
+ assert.ok(view.effectPool,'effectPool initialized for exhaust particles');
+ const activeSlot=view.effectPool.slots.find(s=>s.active);
+ assert.ok(activeSlot,'nitro exhaust particles emitted during boost');
+ assert.ok(activeSlot.obj.position.z>5.5,'exhaust particle spawns behind vehicle along z axis');
+ assert.ok(activeSlot.velocity.z>1,'exhaust particle shoots backwards trailing behind car');
+ view.motionQuery.matches=true;view.effectPool.clear();matchBoosting.time=1.1;
+ view.updateVehicleModels(matchBoosting);
+ assert.ok(view.effectPool.slots.every(s=>!s.active),'reduced motion suppresses vehicle exhaust particles');
+ view.effectPool?.dispose();view.disposeObject(view.scene);
+});
+
+test('energy shields render visible 3D mesh for overshield and Juggernaut, and shieldBreak emits shatter VFX',t=>{
+ const {view,renderer}=fixture(t);view.scene=new T.Scene();view.camera=new T.PerspectiveCamera();view.hands=new T.Group();view.camera.add(view.hands);view.scene.add(view.camera);view.actorModels=new Map();view.pickupModels=[];view.playerId=7;view.currentWeapon=-1;view.lastEvent=0;view.motionQuery={matches:false};renderer.render=()=>{};
+ const juggernaut={id:2,character:'claude',weapon:0,health:100,x:0,y:0,z:0,yaw:0,pitch:0,vx:0,vz:0,vy:0,grounded:true,juggernautShield:120};
+ const overshieldActor={id:3,character:'gemini',weapon:0,health:100,x:5,y:0,z:5,yaw:0,pitch:0,vx:0,vz:0,vy:0,grounded:true,temporaryShield:75};
+ const match={actors:[{id:7,character:'chatgpt',weapon:0,health:100,x:0,y:0,z:-10,yaw:0,pitch:0,vx:0,vz:0,vy:0,grounded:true},juggernaut,overshieldActor],pickups:[],rockets:[],time:1,events:[]};
+ view.syncActors(match);
+ view.render('playing',match,.016,1);
+ const jugModel=view.actorModels.get(2);
+ assert.ok(jugModel?.userData?.shield?.visible,'juggernaut 3D shield mesh visible');
+ assert.equal(jugModel.userData.shield.material.color.getHexString(),'ffd166','juggernaut shield is golden amber');
+ const overModel=view.actorModels.get(3);
+ assert.ok(overModel?.userData?.shield?.visible,'temporaryShield 3D shield mesh visible');
+ assert.equal(overModel.userData.shield.material.color.getHexString(),'70ffe6','overshield is glowing cyan');
+
+ view.effectPool?.clear();
+ view.effect({type:'damage',actor:3,shieldBreak:true,amount:75,pos:{x:5,y:0,z:5}});
+ assert.ok(view.effectPool.slots.some(s=>s.active&&s.obj.material.wireframe),'shieldBreak emits wireframe shatter particles');
+ view.effectPool?.dispose();view.disposeObject(view.scene);
+});
+
 test('object disposal deduplicates shared geometry, material and texture',()=>{
   const view=Object.create(ArenaView.prototype),group=new T.Group(),geometry=new T.BoxGeometry(),texture=new T.Texture(),material=new T.MeshBasicMaterial({map:texture}),counts=[0,0,0];
   [geometry,material,texture].forEach((r,i)=>r.addEventListener('dispose',()=>counts[i]++));group.add(new T.Mesh(geometry,material),new T.Mesh(geometry,material));view.disposeObject(group);assert.deepEqual(counts,[1,1,1]);

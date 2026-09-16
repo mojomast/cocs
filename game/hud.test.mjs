@@ -75,8 +75,13 @@ test('postureLabel prioritizes slide, then crouch, then sprint', () => {
 test('hitMarker promotes a recent local kill over a normal hit', () => {
   const player = {name:'ChatGPT'};
   assert.equal(hitMarker({hit:true,time:10}, player), 'hit');
+  assert.equal(hitMarker({hit:true,critical:true,time:10}, player), 'critical');
+  assert.equal(hitMarker({hit:true,critical:true,time:10,feed:[{killer:'ChatGPT',victim:'Grok',self:false,time:9.5}]}, player), 'kill');
   assert.equal(hitMarker({hit:true,time:10,feed:[{killer:'ChatGPT',victim:'Grok',self:false,time:9.5}]}, player), 'kill');
+  assert.equal(hitMarker({kill:true,time:10}, player), 'kill');
   assert.equal(hitMarker({hit:true,time:10,feed:[{killer:'Grok',victim:'ChatGPT',self:false,time:9.5}]}, player), 'hit');
+  assert.equal(hitMarker({hit:true,time:10,feed:[{killer:'ChatGPT',victim:'Grok',self:false,time:9.2}]}, player), 'hit');
+  assert.equal(hitMarker({hit:false,time:10,feed:[{killer:'ChatGPT',victim:'Grok',self:false,time:9.8}]}, player), null);
   assert.equal(hitMarker({hit:false,time:10,feed:[{killer:'ChatGPT',victim:'Grok',time:1}]}, player), null);
   assert.equal(hitMarker({}, player), null);
 });

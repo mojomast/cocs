@@ -1,5 +1,26 @@
 # COCS verification report
 
+## Release 5.3 - Weapon, shield and impact feedback
+
+- **Sim:** `Match.damage` emits `shieldBreak` when the summed temporary/Juggernaut
+  shield plus armor falls from positive to zero on a surviving target; asserted in
+  `game/sp-improvements.test.mjs`.
+- **Narrative:** `singlePlayerSnapshot` resolves `SPEAKERS` into
+  `{speaker,callsign,color,tag}` for `story`/`bark`; asserted by the new
+  `sp-improvements` test.
+- **Audio:** `spree` cue, critical hit ping, `shieldBreak` layers, low-health
+  heartbeat and vehicle nitro pitch are asserted in `game/sp-improvements.test.mjs`
+  (offline synth construction, no AudioContext needed).
+- **View/model:** `game/view.test.mjs` adds three tests — ADS viewmodel
+  transition (and reduced-motion pin), nitro exhaust particles (and reduced-motion
+  suppression), and the Overshield/Juggernaut shield mesh plus the `shieldBreak`
+  wireframe shatter. `game/hud.test.mjs` pins the critical/kill/hit marker tiers.
+- No GPU/browser verification is possible here, so the view tests assert scene
+  graph and material state rather than pixels.
+
+Verification: game **1350/1350**, server **153/153**, `tests/` **7/7**, `tsc`
+clean, lint 0 errors.
+
 ## Release 5.2 - Campaign persistence and mode fixes
 
 - **Campaign save round-trip (critical):** probed `recordMission` →

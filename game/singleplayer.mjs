@@ -2,7 +2,7 @@ import {CHARACTERS,POWERUPS} from './data.mjs';
 import {CAMPAIGN_MISSIONS,missionFor} from './campaign-data.mjs';
 import {applyEnemyFields,enemyById,enemyLeash,bossPhaseProfile,bossMaxPhase,ENEMY_SPEED_VARIANCE,DEFAULT_ENEMY_ID,NPC_ZONE_KINDS} from './enemy-types.mjs';
 import {coverPoint} from './bots.mjs';
-import {getMissionLore} from './story.mjs';
+import {getMissionLore,SPEAKERS} from './story.mjs';
 
 // Single-player simulation. Horde spawns escalating waves of fragile enemies;
 // campaign runs a linear, story-driven sequence of objectives with world
@@ -840,8 +840,10 @@ export function singlePlayerSnapshot(state,match){
  const boss=state.boss!=null?actorById(match,state.boss):null;
  const step=state.steps[state.stepIndex];
  const missionIndex=state.mission?CAMPAIGN_MISSIONS.findIndex(mission=>mission.id===state.mission.id):-1;
- const story=state.storyLine&&match.time-state.storyLine.at<STORY_SECONDS?{speaker:state.storyLine.speaker,text:state.storyLine.text}:null;
- const bark=state.bark&&match.time-state.bark.at<STORY_SECONDS?{speaker:state.bark.speaker,text:state.bark.text}:null;
+ const speakerProfile=state.storyLine?(SPEAKERS[state.storyLine.speaker]||null):null;
+ const story=state.storyLine&&match.time-state.storyLine.at<STORY_SECONDS?{speaker:speakerProfile?.name||state.storyLine.speaker,callsign:speakerProfile?.callsign||state.storyLine.speaker,color:speakerProfile?.color||'#57e6cd',tag:speakerProfile?.tag||'COMMS',text:state.storyLine.text}:null;
+ const barkSpeaker=state.bark?(SPEAKERS[state.bark.speaker]||null):null;
+ const bark=state.bark&&match.time-state.bark.at<STORY_SECONDS?{speaker:barkSpeaker?.name||state.bark.speaker,callsign:barkSpeaker?.callsign||state.bark.speaker,color:barkSpeaker?.color||'#ffd166',text:state.bark.text}:null;
  const hold=step?.complete?.kind==='hold'?{seconds:step.complete.seconds||0,progress:Math.min(step.complete.seconds||0,state.holdProgress||0)}:null;
  const pending=state.pendingUpgrade;
  const upgrades=pending?pending.choices.map(hordeUpgradeInfo).filter(Boolean):[];

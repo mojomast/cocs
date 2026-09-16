@@ -425,6 +425,14 @@ assets. Full procedure and verification: [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md
 The last five releases. The full history lives in
 [docs/CHANGELOG.md](docs/CHANGELOG.md).
 
+### v5.3 · IMPACT — 2026-09-16
+- Aiming down sights now glides the viewmodel onto the iron-sight line and back.
+- Overshield and Juggernaut render a visible shield bubble; breaking it fires a
+  shard burst, a distinct crack and a `shieldBreak` event.
+- Critical hits get a gold hitmarker and damage number, low health adds a
+  heartbeat, sprees announce themselves, boosts spit nitro, and campaign
+  transmissions carry speaker callsigns, tags and colours.
+
 ### v5.2 · RESTORE — 2026-09-16
 - Campaign progress survives a reload again (the save normalizer was dropping
   every completed mission); losses count as attempts without unlocking the next.
@@ -456,14 +464,6 @@ The last five releases. The full history lives in
   reply: congested sockets drain essential replies through a pure, tested scheduler.
 - Dead exports removed across the race camera, vehicles, showcase, models, arenas,
   presets, progression and bot code.
-
-### v4.16 · SIGNAL — 2026-09-16
-- The title demo keeps cycling under Reduce motion / saved display settings instead
-  of dropping to the operator preview after the first scenario.
-- BEST ACCURACY and MOST DAMAGE awards fire: the sim tracks per-actor shots, hits
-  and damage.
-- Matchmaking keeps a queued player's career identity; lobby/matchmaking wire verbs
-  are declared in the shared MESSAGE list with a drift test.
 
 ## Parody and attribution
 
