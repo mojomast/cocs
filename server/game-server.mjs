@@ -119,7 +119,7 @@ export function createGameServer({ port = 0, random, tickDt = 1 / 60, tickMs = 1
    for (const player of team) {
     const ws = sockets.get(player.peerId);
     if (!ws || ws.readyState !== ws.OPEN) { matchmaker.remove(player.peerId); continue; }
-    room.join(player.peerId, player.name, undefined, undefined, '', false, '', '');
+    room.join(player.peerId, player.name, undefined, undefined, '', false, player.playerId, player.progressToken);
     if (!room.peers.has(player.peerId)) continue;
     releaseSeat(player.peerId);
     peerRoom.set(player.peerId, room);
@@ -158,7 +158,7 @@ export function createGameServer({ port = 0, random, tickDt = 1 / 60, tickMs = 1
   }
   case 'queue': {
    const profile = progression.getOwned(msg.playerId, msg.progressToken);
-   const entry = matchmaker.enqueue({ peerId, name: msg.name, rating: ratingFor(profile) });
+   const entry = matchmaker.enqueue({ peerId, name: msg.name, rating: ratingFor(profile), playerId: msg.playerId, progressToken: msg.progressToken });
    if (!entry) { sendTo(peerId, { type: 'error', message: 'matchmaking queue is full' }); break; }
    sendTo(peerId, { type: 'queue', status: 'queued', position: matchmaker.position(peerId), size: matchmaker.size(), rating: entry.rating });
    break;

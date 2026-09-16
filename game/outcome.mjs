@@ -2,9 +2,12 @@ import {teamMode} from './config.mjs';
 
 // Shared end-of-match ranking so the in-match leaderboard (Match.leaders), the
 // award path (actorWon) and match history all read the same ordering.
-const SCORE_STAT_FIELDS = ['captures', 'flagPickups', 'flagReturns', 'flagDrops', 'objectiveTime', 'objectiveCaptures', 'objectiveNeutralizations', 'objectiveContests', 'goals'];
+const SCORE_STAT_FIELDS = ['captures', 'flagPickups', 'flagReturns', 'flagDrops', 'objectiveTime', 'objectiveCaptures', 'objectiveNeutralizations', 'objectiveContests', 'goals', 'shots', 'hits', 'damage'];
+// Objective ranking counts only objective actions, never the raw shot/hit/damage
+// output added for the end-of-match awards.
+const OBJECTIVE_STAT_FIELDS = ['flagPickups', 'flagReturns', 'flagDrops', 'objectiveTime', 'objectiveCaptures', 'objectiveNeutralizations', 'objectiveContests', 'goals'];
 const ZERO_STATS = Object.freeze(Object.fromEntries(SCORE_STAT_FIELDS.map(field => [field, 0])));
-const objectiveActions = stats => SCORE_STAT_FIELDS.filter(field => field !== 'captures').reduce((total, field) => total + stats[field], 0);
+const objectiveActions = stats => OBJECTIVE_STAT_FIELDS.reduce((total, field) => total + stats[field], 0);
 
 export const scoreStatsOf = actor => {
   const source = actor?.scoreStats;

@@ -1,5 +1,30 @@
 # COCS verification report
 
+## Release 4.16 - Demo continuity and award data
+
+- **Demo fix:** reproduced the "first demo then walking bot" report by saving
+  `display.reducedMotion:true`: the initial `buildShowcase` ran before the setting
+  applied, then the cycle-time `showcaseOk()` (which required `!reducedMotion()`)
+  cleared it and never rebuilt. Fixed by applying the saved display (and
+  `reducedOverride`) before the first build and removing the reduced-motion gate
+  from `showcaseOk`/retry/`setShowcaseExpected`/the settings effect, so the attract
+  reel keeps cycling (the director still receives `reduced` for a calmer camera).
+  Verified live: forced a cycle under reduced motion and the reel advanced instead
+  of clearing (`tokenArenaDebug.state()` still non-null, `showcaseReady:true`).
+- **Award data:** `game/core.mjs` now counts per-actor
+  `scoreStats.shots`/`hits`/`damage`; `game/outcome.mjs`'s `scoreStatsOf` carries
+  them into history while `objectiveActions` uses an explicit objective field list
+  so ranking is unchanged. `game/core.test.mjs` asserts the counters.
+- **Matchmaking:** `Matchmaker.enqueue` retains `playerId`/`progressToken`;
+  `draftQueue` seats with them; `list()` omits the token. Covered in
+  `server/matchmaking.test.mjs`.
+- **Wire contract:** lobby/matchmaking verbs added to `MESSAGE`;
+  `server/protocol.test.mjs` asserts every server dispatch literal is declared.
+
+Verification: game **1331/1331**, server **146/146**, `tests/` **7/7**, `tsc`
+clean, lint 0 errors. `tokenArenaDebug` (`state()`, `skip()`) ships alongside the
+existing `tokenArenaSnapshot` debug hook.
+
 ## Release 4.15 - Demo audio and environment options
 
 - **Controls:** the fullscreen demo controls render a `.demo-options` row

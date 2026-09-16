@@ -8,7 +8,7 @@ import {Room} from './room.mjs';
 function rng(){let n=11;return()=>((n=(Math.imul(n,1664525)+1013904223)>>>0)/4294967296);}
 const tmpDir=()=>fs.mkdtempSync(path.join(os.tmpdir(),'token-arena-history-'));
 const actors=[{name:'Alice',character:'chatgpt',harness:'openclaw',frags:7,deaths:3},{name:'Bob',character:'claude',harness:'claudecode',frags:4,deaths:6},{name:'Bot-1',character:'gemini',harness:'cline',frags:2,deaths:5}];
-const stats={captures:2,flagPickups:3,flagReturns:4,flagDrops:1,objectiveTime:12.5,objectiveCaptures:2,objectiveNeutralizations:1,objectiveContests:3,goals:0};
+const stats={captures:2,flagPickups:3,flagReturns:4,flagDrops:1,objectiveTime:12.5,objectiveCaptures:2,objectiveNeutralizations:1,objectiveContests:3,goals:0,shots:0,hits:0,damage:0};
 test('record builds a complete history entry and leader',()=>{
  const h=new MatchHistory();
  const entry=h.record({roomId:'ABCD',mapId:'crosswire',config:{mode:'deathmatch',fragLimit:5,timeLimit:60},time:42.3,actors});

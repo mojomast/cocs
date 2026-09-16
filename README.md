@@ -425,6 +425,14 @@ assets. Full procedure and verification: [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md
 The last five releases. The full history lives in
 [docs/CHANGELOG.md](docs/CHANGELOG.md).
 
+### v4.16 · SIGNAL — 2026-09-16
+- The title demo keeps cycling under Reduce motion / saved display settings instead
+  of dropping to the operator preview after the first scenario.
+- BEST ACCURACY and MOST DAMAGE awards fire: the sim tracks per-actor shots, hits
+  and damage.
+- Matchmaking keeps a queued player's career identity; lobby/matchmaking wire verbs
+  are declared in the shared MESSAGE list with a drift test.
+
 ### v4.15 · AMBIENT — 2026-09-16
 - The fullscreen demo controls gain music, ambience and announcer toggles plus an
   environment (weather) picker: AUTO, clear, overcast, rain, snow, ash, storm.
@@ -451,15 +459,6 @@ The last five releases. The full history lives in
   change, and offers a one-click reload.
 - Campaign checkpoints persist and resume; mission-select stars match the reward
   logic; VIP Escort draws its beacon; enemy telegraphs are captioned and audible.
-
-### v4.11 · HARDENED — 2026-09-15
-- The demo keeps rendering on the room browser, lobby and patch-notes screens; the
-  rank screen composites its operator preview.
-- The document is served no-cache so a browser can never keep a deleted bundle
-  after a deploy; the deployment verifier enforces it.
-- Objective/reward correctness (team scoreboards, Juggernaut points, soccer goal
-  position) plus multiplayer robustness (case-insensitive room codes, spectate
-  invites, full/closed-room fallback, voice-config congestion).
 
 ## Parody and attribution
 

@@ -74,6 +74,8 @@ export class Matchmaker {
    peerId,
    name: String(entry.name ?? '').slice(0, 24),
    rating: Number.isFinite(Number(entry.rating)) ? Number(entry.rating) : 0,
+   playerId: typeof entry.playerId === 'string' ? entry.playerId : '',
+   progressToken: typeof entry.progressToken === 'string' ? entry.progressToken : '',
    order: this.sequence++,
    at: Number.isFinite(Number(entry.at)) ? Number(entry.at) : 0,
   };

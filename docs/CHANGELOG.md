@@ -16,6 +16,23 @@ record in [VERIFICATION.md](VERIFICATION.md).
 
 ---
 
+## v4.16 · SIGNAL — 2026-09-16
+
+- **Demo continuity:** the saved display settings (including `reducedMotion`) are
+  applied before the first `buildShowcase`, and the attract reel no longer gates
+  on reduced motion, so it keeps cycling instead of dropping to the operator
+  preview after the first scenario. `tokenArenaDebug` exposes `state()`/`skip()`
+  for forcing a cycle in tests.
+- **Award data:** `Match` now tracks per-actor `scoreStats.shots`/`hits`/`damage`
+  (counted in `fire` and `damage`), so `matchAwards` emits BEST ACCURACY and MOST
+  DAMAGE. `outcome.scoreStatsOf` carries them into history without touching the
+  objective ranking (`objectiveActions` uses an explicit objective field list).
+- **Matchmaking identity:** `Matchmaker.enqueue` retains `playerId`/
+  `progressToken` and `draftQueue` seats players with them, so a queued career is
+  no longer replaced; `list()` still omits the owner token.
+- **Wire contract:** the lobby/matchmaking verbs are declared in `MESSAGE`, with
+  `server/protocol.test.mjs` asserting every dispatch literal is declared.
+
 ## v4.15 · AMBIENT — 2026-09-16
 
 - **Demo options:** the back-to-demo controls gain MUSIC (new

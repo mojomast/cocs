@@ -163,3 +163,14 @@ test('a live match reports the results phase and a deterministic rematch gate', 
  assert.equal(room.lifecycle().rematchReady, false);
  assert.ok(WARMUP_SECONDS >= 0);
 });
+
+test('matchmaking entries keep the career identity through the draft', () => {
+ const queue = new Matchmaker({teamSize: 1, minPlayers: 2});
+ queue.enqueue({peerId: 1, name: 'A', rating: 10, playerId: 'player-one', progressToken: 'token-one-0123456789'});
+ queue.enqueue({peerId: 2, name: 'B', rating: 20, playerId: 'player-two', progressToken: 'token-two-0123456789'});
+ assert.ok(queue.list().every(entry => !('progressToken' in entry)), 'the public queue list never exposes the owner token');
+ const draft = queue.draft();
+ const seated = draft.players.find(p => p.peerId === 1);
+ assert.equal(seated.playerId, 'player-one', 'the draft carries the career id');
+ assert.equal(seated.progressToken, 'token-one-0123456789', 'the draft carries the owner token for seating');
+});

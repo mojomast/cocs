@@ -39,3 +39,16 @@ test('void falls emit a ragdoll death without a killer',()=>{
  assert.equal(death.weapon,null);
  assert.equal(death.direction,null);
 });
+
+test('shots, hits and damage accumulate per actor for the end-of-match awards',()=>{
+ const m=fresh(),[a,b]=isolate(m);
+ b.harnessResistance=0;
+ m.damage(b,25,a);
+ assert.equal(a.scoreStats.hits,1,'a landed hit counts one hit');
+ assert.equal(a.scoreStats.damage,25,'damage dealt is summed');
+ assert.equal(b.scoreStats.damage,0,'the victim does not bank the damage it received');
+ a.shotWait=0;a.reloading=false;a.ammo[a.weapon]=10;
+ assert.equal(m.fire(a),true);
+ assert.equal(a.scoreStats.shots,1,'a fired shot is counted in the actor stats');
+ assert.equal(a.shots,1);
+});

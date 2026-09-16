@@ -14,6 +14,11 @@ export const MESSAGE = Object.freeze({
  WELCOME:'welcome', LOBBY:'lobby', ROOMS:'rooms', SNAPSHOT:'snapshot', EVENTS:'events',
  RESULTS:'results', PROGRESSION:'progression', ERROR:'error',
  VOICE_STATE:'voice-state', VOICE_SIGNAL:'voice-signal', VOICE_CONFIG:'voice-config',
+ // Lobby/matchmaking verbs the authoritative server dispatches (the web client
+ // does not yet send them, but declaring them keeps the two switches in sync).
+ READY:'ready', MAP_VOTE:'map-vote', REMATCH:'rematch', WARMUP:'warmup',
+ QUEUE:'queue', QUEUE_LEAVE:'queue-leave', QUEUE_LIST:'queue-list',
+ LEADERBOARD:'leaderboard', PROFILE:'profile', MATCHMADE:'matchmade',
  // Additive v2 frame: a snapshot expressed as a patch against a prior sequence.
  SNAPSHOT_DELTA:'snapshot-delta',
 });

@@ -1,12 +1,18 @@
 // In-game patch notes. The title-screen footer is the running version; this
 // module is the human-readable release digest the Changelog screen renders. The
 // full historical record lives in docs/CHANGELOG.md and is linked from the UI.
-export const RELEASE_VERSION = 'v4.15';
-export const RELEASE_CODENAME = 'AMBIENT';
+export const RELEASE_VERSION = 'v4.16';
+export const RELEASE_CODENAME = 'SIGNAL';
 export const REPO_URL = 'https://github.com/mojomast/tokenarena';
 export const FULL_CHANGELOG_URL = `${REPO_URL}/blob/main/docs/CHANGELOG.md`;
 
 export const CHANGELOG = [
+  {version:'v4.16',codename:'SIGNAL',date:'2026-09-16',tag:'Demo continuity and award data',highlights:[
+    'The title demo no longer drops to the operator preview after the first scenario when Reduce motion (or a saved display setting) is on; saved display settings are applied before the first demo builds and the attract reel keeps cycling.',
+    'The end-of-match BEST ACCURACY and MOST DAMAGE awards now fire: the simulation tracks per-actor shots, hits and damage alongside the objective stats.',
+    'Matchmaking keeps a queued player\'s career identity when the draft seats them, and the public queue list never exposes the profile owner token.',
+    'Every lobby/matchmaking wire verb is declared in the shared MESSAGE list, guarded by a drift test so the client and server switches cannot diverge.',
+  ]},
   {version:'v4.15',codename:'AMBIENT',date:'2026-09-16',tag:'Demo audio and environment options',highlights:[
     'The fullscreen demo controls gain a music toggle (independent of the global mute), ambience and announcer toggles, and an environment (weather) picker: AUTO plus clear, overcast, rain, snow, ash and storm.',
     'The pinned weather now stays put for the whole cinematic demo instead of being reset every frame; starting a real match still restores automatic weather.',
