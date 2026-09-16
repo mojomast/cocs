@@ -157,6 +157,35 @@ export function characterPose(state = {}) {
   const bank = clamp(state.bank ?? 0, -1, 1);
   if (bank) { pose.torso.z += bank * 0.16; pose.hips.z += bank * 0.08; pose.chest.y -= bank * 0.08; }
 
+  // Dynamic strafe banking leg flexion and head stabilization
+  if (strafe !== 0) {
+    pose.legL.kneeX = clamp(pose.legL.kneeX + strafe * 0.06 * speed, -1.25, 1.25);
+    pose.legR.kneeX = clamp(pose.legR.kneeX - strafe * 0.06 * speed, -1.25, 1.25);
+  }
+  pose.head.z = clamp(strafe * 0.04 - bank * 0.05, -0.5, 0.5);
+
+  // Jump landing compression absorbs touchdown impact with knee flexion and torso lean
+  const land = clamp(state.land ?? 0, 0, 1);
+  if (land > 0) {
+    pose.rootY -= land * 0.12;
+    pose.legL.kneeX = clamp(pose.legL.kneeX + land * 0.22, -1.25, 1.25);
+    pose.legR.kneeX = clamp(pose.legR.kneeX + land * 0.22, -1.25, 1.25);
+    pose.torso.x = clamp(pose.torso.x + land * 0.08, -1.25, 1.25);
+    pose.armL.shoulderZ = clamp(pose.armL.shoulderZ + land * 0.12, -1.25, 1.25);
+    pose.armR.shoulderZ = clamp(pose.armR.shoulderZ - land * 0.12, -1.25, 1.25);
+  }
+
+  // Reload / weapon transition animation lowers offhand and angles main weapon arm
+  const reload = clamp(state.reload ?? 0, 0, 1);
+  if (reload > 0) {
+    pose.armL.shoulderX = lerp(pose.armL.shoulderX, -0.65, reload);
+    pose.armL.elbowX = lerp(pose.armL.elbowX, -1.05, reload);
+    pose.armL.shoulderZ = lerp(pose.armL.shoulderZ, 0.18, reload);
+    pose.armR.shoulderX = lerp(pose.armR.shoulderX, -0.75, reload);
+    pose.armR.elbowX = lerp(pose.armR.elbowX, -0.85, reload);
+    pose.chest.x = clamp(pose.chest.x + reload * 0.05, -1.25, 1.25);
+  }
+
   // Head and chest track the aim point relative to the body.
   const focusYaw = clamp(state.focusYaw ?? 0, -0.9, 0.9);
   const focusPitch = clamp(state.focusPitch ?? 0, -0.6, 0.6);
@@ -173,6 +202,24 @@ export function characterPose(state = {}) {
     pose.armL.shoulderX -= hit * 0.4;
     pose.armR.shoulderX -= hit * 0.25;
   }
+
+  // Final safety clamping ensures all rig angles remain strictly bounded
+  for (const part of [pose.hips, pose.torso, pose.chest, pose.head]) {
+    part.x = clamp(part.x, -1.25, 1.25);
+    part.y = clamp(part.y, -1.25, 1.25);
+    part.z = clamp(part.z, -1.25, 1.25);
+  }
+  for (const arm of [pose.armL, pose.armR]) {
+    arm.shoulderX = clamp(arm.shoulderX, -1.25, 1.25);
+    arm.shoulderZ = clamp(arm.shoulderZ, -1.25, 1.25);
+    arm.elbowX = clamp(arm.elbowX, -1.25, 1.25);
+  }
+  for (const leg of [pose.legL, pose.legR]) {
+    leg.hipX = clamp(leg.hipX, -1.25, 1.25);
+    leg.kneeX = clamp(leg.kneeX, -1.25, 1.25);
+    leg.ankleX = clamp(leg.ankleX, -1.25, 1.25);
+  }
+
   return pose;
 }
 
@@ -193,6 +240,9 @@ export class CharacterRig {
     this.forward = 0;
     this.hit = 0;
     this.bodyYaw = 0;
+    this.land = 0;
+    this.reload = 0;
+    this.lastGrounded = true;
   }
 
   update(state = {}) {
@@ -206,11 +256,20 @@ export class CharacterRig {
     this.forward = damp(this.forward, clamp(state.forward ?? 0, -1, 1), 8, dt);
     this.hit = Math.max(0, this.hit - dt * 4);
     if (state.hit) this.hit = Math.max(this.hit, clamp(state.hit, 0, 1));
-    this.phase = advancePhase(this.phase, this.speedNorm, dt, state.grounded !== false);
+    const grounded = state.grounded !== false;
+    if (this.lastGrounded === false && grounded) {
+      this.land = 1.0;
+    }
+    this.lastGrounded = grounded;
+    this.land = Math.max(0, this.land - dt * 5.5);
+    if (state.land !== undefined) this.land = Math.max(this.land, clamp(state.land, 0, 1));
+    if (state.reload !== undefined) this.reload = damp(this.reload, clamp(state.reload, 0, 1), 8, dt);
+    else this.reload = damp(this.reload, 0, 8, dt);
+    this.phase = advancePhase(this.phase, this.speedNorm, dt, grounded);
     const pose = characterPose({
       phase: this.phase,
       speedNorm: this.speedNorm,
-      grounded: state.grounded,
+      grounded,
       crouch: this.crouch,
       ads: this.ads,
       strafe: this.strafe,
@@ -219,6 +278,8 @@ export class CharacterRig {
       focusPitch: state.focusPitch,
       bank: state.bank,
       hit: this.hit,
+      land: this.land,
+      reload: this.reload,
       time: state.time,
     });
     this.apply(pose);

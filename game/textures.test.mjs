@@ -41,3 +41,38 @@ test('the wet sheen overlay caches by key and is disposed with the surface cache
   assert.notEqual(wetSheenTexture({ seed: 3 }), first, 'cleared overlays are rebuilt');
   clearSurfaceTextures();
 });
+
+test('rich procedural textures generate complete map sets and respect aliases', t => {
+  withDocument(t);
+  const kinds = [
+    'carbon_fiber',
+    'metal_grating',
+    'hex_paneling',
+    'hazard_stripes',
+    'weathered_concrete',
+    'holographic_grid',
+  ];
+  for (const kind of kinds) {
+    const tex = surfaceTextures(kind, { seed: 5, size: 64, repeat: [2, 2] });
+    assert.ok(tex, `textures generated for ${kind}`);
+    assert.ok(tex.map, `map generated for ${kind}`);
+    assert.ok(tex.roughnessMap, `roughnessMap generated for ${kind}`);
+    assert.ok(tex.normalMap, `normalMap generated for ${kind}`);
+    assert.equal(tex.map.userData.surfaceKind, kind);
+  }
+
+  // Check aliases resolve to valid textures
+  const carbon = surfaceTextures('carbon', { seed: 7, size: 48 });
+  assert.ok(carbon?.map, 'carbon alias generated');
+  const grating = surfaceTextures('grating', { seed: 7, size: 48 });
+  assert.ok(grating?.map, 'grating alias generated');
+  const hex = surfaceTextures('hex', { seed: 7, size: 48 });
+  assert.ok(hex?.map, 'hex alias generated');
+  const hazard = surfaceTextures('hazard', { seed: 7, size: 48 });
+  assert.ok(hazard?.map, 'hazard alias generated');
+  const hologrid = surfaceTextures('hologrid', { seed: 7, size: 48 });
+  assert.ok(hologrid?.map, 'hologrid alias generated');
+
+  clearSurfaceTextures();
+});
+

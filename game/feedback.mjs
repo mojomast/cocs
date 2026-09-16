@@ -18,11 +18,16 @@ export class WeaponFeedback{
   const lateral=(player.vx||0)*Math.cos(player.yaw||0)-(player.vz||0)*Math.sin(player.yaw||0);
   this.sway+=(Math.max(-.012,Math.min(.012,-lateral*.002))-this.sway)*blend;
   this.idleTime=(this.idleTime||0)+dt;
-  const idle=(1-speed)*Math.sin(this.idleTime*2.2)*.0018;
-  const idleY=(1-speed)*Math.cos(this.idleTime*4.4)*.0012;
+  const idle=(1-speed)*Math.sin(this.idleTime*1.8)*.0022;
+  const idleY=(1-speed)*(Math.cos(this.idleTime*3.6)+Math.sin(this.idleTime*1.8)*.25)*.0016;
+  const strafeRoll=Math.max(-.05,Math.min(.05,-lateral*.006));
   const lookSway=(player.punchYaw||0)*.02;
   if(reduced||!visible){this.kick=0;this.landing=0;this.bob=0;this.sway=0;return {x:0,y:0,z:0,pitch:0,roll:0};}
-  return {x:Math.sin(this.phase)*.007*this.bob+this.sway+idle+lookSway,y:Math.cos(this.phase*2)*.006*this.bob-this.landing+idleY,z:this.kick*profile[0],pitch:this.kick*profile[1]+(player.punchPitch||0)*.015,roll:(this.sway+lookSway)*.7};
+  const reloadT=player.reloading?Math.sin(Math.max(0,Math.min(1,1-(player.reloadTimer||0)/(player.reloadDuration||1)))*Math.PI):0;
+  const reloadDipY=-0.045*reloadT,reloadPitch=-0.04*reloadT,reloadRoll=0.05*reloadT;
+  const swapT=(player.weaponSwitch||0)>0?Math.sin(Math.min(1,Math.max(0,(player.weaponSwitch||0)/.45))*Math.PI):0;
+  const swapDipY=-0.07*swapT,swapPitch=-0.04*swapT;
+  return {x:Math.sin(this.phase)*.007*this.bob+this.sway+idle+lookSway,y:Math.cos(this.phase*2)*.006*this.bob-this.landing+idleY+reloadDipY+swapDipY,z:this.kick*profile[0],pitch:this.kick*profile[1]+(player.punchPitch||0)*.015+reloadPitch+swapPitch,roll:(this.sway+lookSway)*.7+strafeRoll+reloadRoll};
  }
 }
 

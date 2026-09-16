@@ -16,6 +16,26 @@ record in [VERIFICATION.md](VERIFICATION.md).
 
 ---
 
+## v5.4 · DETAIL — 2026-09-16
+
+- **Recoil fix:** `WeaponRig.recoilImpulse` wrote the kick to `recoilSpring.vel`
+  (a field `VectorSpring3D` does not have), so recoil never reached the springs;
+  it now drives `recoilSpring.z.vel`. The rig also adds a stride bob tied to the
+  movement cadence (`stridePhase`), a strafe roll, and procedural reload/swap
+  tuck-downs via `triggerReload`/`triggerSwap`.
+- **Character motion:** `CharacterRig` tracks `land`/`reload`; `characterPose`
+  adds landing knee compression and torso lean, a reload arm animation, strafe
+  knee flexion, head stabilisation, and a final bounded clamp on every rig angle.
+  `view.mjs` passes the actor's `reloading` state through.
+- **Viewmodel feedback:** `WeaponFeedback` adds reload dip/pitch/roll and a
+  weapon-swap tuck, retunes idle sway, and leans the viewmodel into strafes.
+- **Surfaces and models:** `textures.mjs` adds `carbon_fiber`, `metal_grating`,
+  `hex_paneling`, `hazard_stripes`, `weathered_concrete` and `holographic_grid`
+  pattern generators (with `TEXTURE_KINDS`); `view.mjs` maps arena floors and
+  blocks to them by map, adds a weapon ejection deflector, Hornet fins/skids,
+  Puma splitter/hood vents, and arm/leg armour plates. `models.mjs` adds reusable
+  conduit/plating/muzzle-brake/radiator builders and `applyProceduralTexturesToModel`.
+
 ## v5.3 · IMPACT — 2026-09-16
 
 - **ADS viewmodel:** the first-person hands lerp from the hip layout onto the

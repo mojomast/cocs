@@ -678,6 +678,60 @@ test('dispose clears the global surface-texture cache',t=>{
  clearSurfaceTextures();
 });
 
+test('procedural textures are wired across arena floors, blocks, and weapon detailing', t => {
+  const previous = Object.getOwnPropertyDescriptor(globalThis, 'document');
+  const ctx = {
+    createImageData: (w, h) => ({ data: new Uint8ClampedArray(w * h * 4) }),
+    putImageData() {},
+    fillText() {},
+    strokeText() {},
+    fillRect() {},
+  };
+  Object.defineProperty(globalThis, 'document', {
+    configurable: true,
+    value: { createElement: () => ({ width: 0, height: 0, getContext: () => ctx }) },
+  });
+  t.after(() => {
+    if (previous) Object.defineProperty(globalThis, 'document', previous);
+    else delete globalThis.document;
+  });
+
+  const view = Object.assign(Object.create(ArenaView.prototype), {
+    scene: new T.Scene(),
+    menu: { scene: new T.Scene() },
+    renderResources: new Set(),
+    sharedResources: new Set(),
+    modelAssets: new ModelAssets(),
+    renderer: { isSoftware: false, dispose() {} },
+    display: { ...DEFAULT_DISPLAY },
+    reduced: () => false,
+  });
+
+  // Verify hazard_stripes on foundry reactor blocks
+  const foundry = MAPS.find(m => m.id === 'foundry');
+  view.buildArena(foundry);
+  const reactorMesh = view.worldGroup.children.find(m => {
+    const b = foundry.blocks[m.userData.block];
+    return b && b.kind === 'reactor';
+  });
+  assert.ok(reactorMesh, 'foundry builds reactor mesh');
+  assert.equal(reactorMesh.material.map?.userData.surfaceKind, 'hazard_stripes', 'reactor uses hazard_stripes texture');
+
+  // Verify holographic_grid on neon-vertical floor
+  const neon = MAPS.find(m => m.id === 'neon-vertical');
+  view.buildArena(neon);
+  const floorMesh = view.worldGroup.children.find(m => m.position.y === -0.25);
+  assert.ok(floorMesh, 'neon-vertical builds floor mesh');
+  assert.equal(floorMesh.material.map?.userData.surfaceKind, 'holographic_grid', 'neon floor uses holographic_grid');
+
+  // Verify weapon model has deflector detail
+  const weapon = weaponModel(0);
+  assert.ok(weapon.userData.deflector, 'weaponModel exposes ejection deflector detail');
+
+  view.dispose();
+  clearSurfaceTextures();
+});
+
  test('race builds reuse cached geometry for identical tiles',()=>{
   const race={gates:[{x:0,z:0,nx:0,nz:1,halfWidth:12},{x:20,z:0,nx:1,nz:0,halfWidth:12}],grid:[{x:0,z:0,heading:0},{x:4,z:0,heading:0}],centerline:[]};
   const assets=new ModelAssets();

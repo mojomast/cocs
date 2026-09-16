@@ -1,5 +1,27 @@
 # COCS verification report
 
+## Release 5.4 - Character motion and surface detail
+
+- **Rig bug fix:** `VectorSpring3D` exposes `x`/`y`/`z` `ProceduralSpring`s, not a
+  `vel` field, so the old `recoilSpring.vel +=` never moved the springs; the impulse
+  now targets `recoilSpring.z.vel`. Covered by a new `sp-improvements` assertion
+  that a reload/swap dips the viewmodel and that stride phase advances.
+- **Character motion:** `character-anim.test.mjs` adds landing compression, reload
+  arm pose and rig ground-contact cases; every emitted rig angle is clamped.
+- **Surfaces:** `textures.test.mjs` generates each new pattern (`carbon_fiber`,
+  `metal_grating`, `hex_paneling`, `hazard_stripes`, `weathered_concrete`,
+  `holographic_grid`), checks the alias table and `TEXTURE_KINDS`, and asserts a
+  complete map set. `view.test.mjs` pins the arena/model wiring. Surface textures
+  keep the `userData.surfaceKind` tag, so `disposeObject` never frees a shared
+  cached map.
+- **Models:** the new `models.mjs` builders (conduit, plating, muzzle brake,
+  radiator, `enhanceVehicleModel`, `applyProceduralTexturesToModel`) are asserted
+  in `sp-improvements.test.mjs`; they remain test-only helpers.
+- No GPU/browser verification here — scene-graph and material state only.
+
+Verification: game **1356/1356**, server **153/153**, `tests/` **7/7**, `tsc`
+clean, lint 0 errors.
+
 ## Release 5.3 - Weapon, shield and impact feedback
 
 - **Sim:** `Match.damage` emits `shieldBreak` when the summed temporary/Juggernaut

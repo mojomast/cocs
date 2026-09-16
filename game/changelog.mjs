@@ -1,12 +1,17 @@
 // In-game patch notes. The title-screen footer is the running version; this
 // module is the human-readable release digest the Changelog screen renders. The
 // full historical record lives in docs/CHANGELOG.md and is linked from the UI.
-export const RELEASE_VERSION = 'v5.3';
-export const RELEASE_CODENAME = 'IMPACT';
+export const RELEASE_VERSION = 'v5.4';
+export const RELEASE_CODENAME = 'DETAIL';
 export const REPO_URL = 'https://github.com/mojomast/tokenarena';
 export const FULL_CHANGELOG_URL = `${REPO_URL}/blob/main/docs/CHANGELOG.md`;
 
 export const CHANGELOG = [
+  {version:'v5.4',codename:'DETAIL',date:'2026-09-16',tag:'Character motion and surface detail',highlights:[
+    'Recoil actually kicks now: the weapon rig was writing its impulse to a field the springs never read. It also gains a stride bob tied to the run cadence and a tuck-down, direction-aware weapon swap.',
+    'Characters absorb landings with knee flexion and a torso dip, lower the offhand through a reload, flex through strafes and stabilise the head; the first-person viewmodel dips and rolls through reloads and weapon swaps.',
+    'Arenas and kits gained detail: new procedural floor and block surfaces (holographic grid, metal grating, carbon fibre, weathered concrete, hex panelling, hazard stripes), a weapon ejection deflector, Hornet fins and skids, a Puma front splitter with hood vents, and extra arm and leg armour plates.',
+  ]},
   {version:'v5.3',codename:'IMPACT',date:'2026-09-16',tag:'Weapon, shield and impact feedback',highlights:[
     'Shouldering a weapon now reads: the first-person viewmodel glides onto the iron-sight line while aiming down sights and eases back on hipfire, and holds its fixed hip layout under reduced motion.',
     'Energy shields are visible again: Overshield glows cyan and the Juggernaut carries an amber bubble; shattering one fires a burst of shards, a distinct crack and a shield-break damage event.',

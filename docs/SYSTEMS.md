@@ -809,17 +809,33 @@ and rebuilds it from immutable map templates; `setMatch` keys actor models by id
 
 - `game/textures.mjs` `surfaceTextures` generates cached value-noise/FBM albedo,
   roughness, and normal maps per surface kind; `clearSurfaceTextures` disposes them
-  on rebuild. `wetSheenTexture` supplies a shared wet blotch overlay.
+  on rebuild. `wetSheenTexture` supplies a shared wet blotch overlay. Besides the
+  noise kinds it has hand-written pattern generators — `carbon_fiber`,
+  `metal_grating`, `hex_paneling`, `hazard_stripes`, `weathered_concrete`,
+  `holographic_grid` (`TEXTURE_KINDS`) — plus alias names. Every generated map is
+  tagged `userData.surfaceKind` so `disposeObject` never frees a shared cached map.
 - `paintGeometry` adds deterministic per-vertex/per-triangle color variation.
+- `ArenaView.buildArena` picks a surface kind per map for the floor and non-race
+  blocks (e.g. `holographic_grid` on `neon-vertical`/`crosswire`, `metal_grating`
+  on the megastructure maps, `carbon_fiber` on the pads, `hazard_stripes` on
+  `foundry`); `assembleWeapon`/`hornetModel`/`vehicleModel`/`robotModel` add a
+  muzzle ejection deflector, Hornet fins and skids, a Puma front splitter and hood
+  vents, and forearm/lower-leg armour plates.
 - `robotModel`, `weaponModel`, and `vehicleModel` build models from primitives with
   cached `ModelAssets`; `buildWeaponBody` and `legacyWeaponBody` are separate weapon
-  body registries. `game/models.mjs` adds material enhancement, thruster exhaust, and
-  shield meshes; `game/rig.mjs` adds `ProceduralSpring`, `WeaponRig`, and
-  `solveTwoBoneIK`.
+  body registries. `game/models.mjs` adds material enhancement, thruster exhaust,
+  shield meshes, and reusable conduit/armor-plating/muzzle-brake/radiator builders;
+  `game/rig.mjs` adds `ProceduralSpring`, `WeaponRig`, and `solveTwoBoneIK`.
 - `game/character-anim.mjs` is Three.js-free: `characterPose` produces a bounded
-  pose from gait phase, speed, grounded, crouch, ADS, strafe, bank, and hit flinch;
-  `CharacterRig` damps and applies it. `advancePhase`/`strideFrequency` drive stride
-  from accumulated phase.
+  pose from gait phase, speed, grounded, crouch, ADS, strafe, bank, hit flinch,
+  `land` (landing compression) and `reload`; every emitted rig angle is clamped.
+  `CharacterRig` damps and applies it, auto-detecting touchdown via
+  `lastGrounded`. `advancePhase`/`strideFrequency` drive stride from accumulated
+  phase.
+- `WeaponRig.recoilImpulse` drives `recoilSpring.z.vel` (a `VectorSpring3D` has no
+  top-level `vel`), and the rig adds stride bob, a strafe roll, and procedural
+  reload/swap dips (`triggerReload`/`triggerSwap`). `WeaponFeedback` mirrors the
+  reload/swap dip on the first-person hands.
 - `buildNextGen` replaces collision box proxies (`cave`, `tunnel`, `rock`, `tree`,
   `crate`, `column`) with smooth or instanced geometry, gable roofs, windows, arches,
   bridges, tunnel tubes, and cavern domes. Destructible crates/barrels are instanced

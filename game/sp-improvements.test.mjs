@@ -1,5 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import * as T from 'three';
 import { Match } from './core.mjs';
 import { WEAPONS, RULES } from './data.mjs';
 import { weaponById, weaponByName, weaponDPS, weaponTTK, weaponBalanceSummary, WEAPON_ROLES } from './weapons.mjs';
@@ -8,10 +9,10 @@ import { updateSinglePlayer, updateHealthRegen, singlePlayerSnapshot, REGEN_DELA
 import { SPEAKERS, MISSION_LORE, getMissionLore, formatTransmission } from './story.mjs';
 import { getMissionBriefing, getMissionTransmissions, validateMissionProgression, CAMPAIGN_MISSIONS } from './campaign.mjs';
 import { ProceduralSpring, VectorSpring3D, WeaponRig, solveTwoBoneIK } from './rig.mjs';
-import { enhanceModelMaterials, createThrusterExhaust, createEnergyShieldMesh, FIDELITY_PRESETS } from './models.mjs';
+import { enhanceModelMaterials, createThrusterExhaust, createEnergyShieldMesh, FIDELITY_PRESETS, createGlowingConduit, createArmorPlatingDetail, createWeaponMuzzleBrake, createRadiatorGrill, enhanceVehicleModel, applyProceduralTexturesToModel } from './models.mjs';
 import { characterPose, CharacterRig } from './character-anim.mjs';
 import { singlePlayerDisplay } from './singleplayer-ui.mjs';
-import { SynthAudio } from './feedback.mjs';
+import { SynthAudio, WeaponFeedback } from './feedback.mjs';
 
 test('weapon balancing across arsenal defines distinct roles with no dominating outliers', () => {
   assert.equal(WEAPONS.length, 10);
@@ -213,6 +214,27 @@ test('procedural rigging springs and weapon rig behave physically', () => {
   assert.ok(Number.isFinite(output.rotation.pitch));
   assert.ok(Number.isFinite(output.rotation.roll));
 
+  // Reload animation test
+  rig.triggerReload(1.0);
+  assert.equal(rig.reloadTimer, 1.0);
+  const reloadOutput = rig.update({ dt: 0.5, grounded: true });
+  assert.ok(reloadOutput.offset.y < output.offset.y, 'weapon dips during reload animation');
+  assert.ok(Number.isFinite(reloadOutput.rotation.roll));
+
+  // Swap animation test with directional roll
+  rig.triggerSwap(1, 0.4);
+  assert.equal(rig.swapTimer, 0.4);
+  const swapOutput = rig.update({ dt: 0.2, grounded: true });
+  assert.ok(swapOutput.offset.y < output.offset.y, 'weapon tucks downward during weapon swap');
+  rig.triggerSwap(-1, 0.4);
+  const leftSwapOutput = rig.update({ dt: 0.2, grounded: true });
+  assert.ok(swapOutput.rotation.roll > leftSwapOutput.rotation.roll, 'swap direction influences roll tilt');
+
+  // Stride bobbing test
+  const movingRig = new WeaponRig();
+  movingRig.update({ dt: 1 / 60, speed: 6, grounded: true });
+  assert.ok(movingRig.stridePhase > 0, 'stride phase advances while moving');
+
   // Two-bone IK test
   const ik = solveTwoBoneIK({ x: 0, y: 0, z: 0 }, { x: 0, y: 0, z: 1.0 }, 0.6, 0.6);
   assert.ok(ik.reachRatio > 0 && ik.reachRatio <= 1.0);
@@ -234,6 +256,68 @@ test('model visual fidelity utilities construct valid meshes and materials', () 
     child.geometry.dispose();
     child.material.dispose();
   }
+
+  const conduit = createGlowingConduit(null, [[0, 0, 0], [0, 0.2, 0.5]], { color: '#2ff5d5' });
+  assert.equal(conduit.name, 'glowing-conduit');
+  assert.ok(conduit.children.length >= 1);
+  for (const child of conduit.children) {
+    child.geometry?.dispose();
+    child.material?.dispose();
+  }
+
+  const armorPlate = createArmorPlatingDetail(null, { width: 0.3, height: 0.15 });
+  assert.equal(armorPlate.name, 'armor-plating');
+  assert.ok(armorPlate.children.length >= 1);
+
+  const brake = createWeaponMuzzleBrake(null, { length: 0.15, ports: 3 });
+  assert.equal(brake.name, 'muzzle-brake');
+  assert.ok(brake.children.length >= 1);
+
+  const grill = createRadiatorGrill(null, { width: 0.6, height: 0.3 });
+  assert.equal(grill.name, 'radiator-grill');
+  assert.ok(grill.children.length >= 2);
+
+  const vehicle = new T.Group();
+  enhanceVehicleModel(vehicle);
+  assert.ok(vehicle.children.some(c => c.name === 'vehicle-enhancements'), 'enhanceVehicleModel attaches enhancements');
+
+  const group = new T.Group();
+  const testMesh = new T.Mesh(new T.BoxGeometry(1, 1, 1), new T.MeshStandardMaterial());
+  group.add(testMesh);
+  assert.equal(applyProceduralTexturesToModel(group), 0, 'returns 0 without document');
+
+  const prevDoc = Object.getOwnPropertyDescriptor(globalThis, 'document');
+  const ctx = {
+    createImageData: (w, h) => ({ data: new Uint8ClampedArray(w * h * 4) }),
+    putImageData() {},
+  };
+  Object.defineProperty(globalThis, 'document', {
+    configurable: true,
+    value: { createElement: () => ({ width: 0, height: 0, getContext: () => ctx }) },
+  });
+  try {
+    const count = applyProceduralTexturesToModel(group, { kind: 'carbon_fiber' });
+    assert.equal(count, 1, 'applied procedural maps to mesh');
+    assert.ok(testMesh.material.map, 'map applied');
+    assert.ok(testMesh.material.roughnessMap, 'roughnessMap applied');
+    assert.ok(testMesh.material.normalMap, 'normalMap applied');
+  } finally {
+    if (prevDoc) Object.defineProperty(globalThis, 'document', prevDoc);
+    else delete globalThis.document;
+  }
+});
+
+test('WeaponFeedback produces reload dip and weapon swap transition offsets', () => {
+  const f = new WeaponFeedback();
+  const p = { id: 1, weapon: 0, x: 0, z: 0, yaw: 0, grounded: true, vx: 0, vy: 0, vz: 0, reloading: false, weaponSwitch: 0 };
+  const rest = f.update(p, 0.016);
+  // Reload transition
+  const reloading = f.update({ ...p, reloading: true, reloadTimer: 0.5, reloadDuration: 1.0 }, 0.016);
+  assert.ok(reloading.y < rest.y, 'viewmodel dips downward during reload');
+  assert.ok(reloading.pitch < rest.pitch, 'viewmodel pitches during reload');
+  // Swap transition
+  const swapping = f.update({ ...p, weaponSwitch: 0.22 }, 0.016);
+  assert.ok(swapping.y < rest.y, 'viewmodel tucks downward during weapon swap');
 });
 
 test('singlePlayerSnapshot enriches narrative transmissions with speaker profile metadata', () => {

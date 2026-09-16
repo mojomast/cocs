@@ -425,6 +425,14 @@ assets. Full procedure and verification: [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md
 The last five releases. The full history lives in
 [docs/CHANGELOG.md](docs/CHANGELOG.md).
 
+### v5.4 · DETAIL — 2026-09-16
+- Weapon recoil works again (the rig was writing to a field the springs never
+  read), plus stride bob and a tuck-down weapon swap.
+- Characters compress on landing, lower the offhand through reloads, flex through
+  strafes, and the viewmodel dips/rolls through reloads and swaps.
+- New procedural arena surfaces (holographic grid, grating, carbon fibre, hex
+  panelling, hazard stripes, weathered concrete) and extra model detailing.
+
 ### v5.3 · IMPACT — 2026-09-16
 - Aiming down sights now glides the viewmodel onto the iron-sight line and back.
 - Overshield and Juggernaut render a visible shield bubble; breaking it fires a
@@ -456,14 +464,6 @@ The last five releases. The full history lives in
 - Only clients that advertised support receive deltas; a once-a-second keyframe
   lets a client that missed a frame re-sync.
 - Delta/full counts surface in the game server's status JSON and the debug hook.
-
-### v4.17 · STREAMLINE — 2026-09-16
-- The live render path shares the exported snapshot interpolator with the deterministic
-  net harness, so the two cannot drift apart.
-- A control message larger than the transport budget no longer blocks every later
-  reply: congested sockets drain essential replies through a pure, tested scheduler.
-- Dead exports removed across the race camera, vehicles, showcase, models, arenas,
-  presets, progression and bot code.
 
 ## Parody and attribution
 

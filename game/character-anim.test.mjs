@@ -85,3 +85,41 @@ test('turn banking twists the chest alongside aim focus',()=>{
   assert.ok(Math.abs(characterPose({bank:1,focusYaw:0}).chest.y+0.08)<1e-9,'bank alone twists the chest');
   assert.ok(Math.abs(characterPose({bank:1,focusYaw:.5}).chest.y-(0.1-0.08))<1e-9,'bank and focus combine');
 });
+
+test('landing compression absorbs touchdown impact with knee flexion and root drop', () => {
+  const stand = characterPose({ speedNorm: 0, grounded: true, land: 0 });
+  const landing = characterPose({ speedNorm: 0, grounded: true, land: 1 });
+  assert.ok(landing.rootY < stand.rootY, 'root drops during landing compression');
+  assert.ok(landing.legL.kneeX > stand.legL.kneeX, 'knees flex to absorb impact');
+  assert.ok(landing.legR.kneeX > stand.legR.kneeX, 'both knees flex symmetrically');
+  assert.ok(landing.torso.x > stand.torso.x, 'torso leans forward to cushion momentum');
+});
+
+test('reload transition lowers offhand and repositions weapon arm', () => {
+  const ready = characterPose({ speedNorm: 0, grounded: true, reload: 0 });
+  const reloading = characterPose({ speedNorm: 0, grounded: true, reload: 1 });
+  assert.ok(reloading.armL.shoulderX < ready.armL.shoulderX, 'offhand moves to reload position');
+  assert.ok(reloading.armL.elbowX < ready.armL.elbowX, 'offhand elbow bends toward mag well');
+  assert.ok(reloading.armR.shoulderX < ready.armR.shoulderX, 'weapon arm tilts for reload control');
+});
+
+test('CharacterRig arms landing compression on ground contact transition', () => {
+  const node = () => ({ position: { x: 0, y: 0, z: 0 }, rotation: { x: 0, y: 0, z: 0, set(x, y, z) { this.x = x; this.y = y; this.z = z; } } });
+  const joints = { root: node(), hips: node(), torso: node(), chest: node(), head: node(), armUpperL: node(), armUpperR: node(), forearmL: node(), forearmR: node(), legUpperL: node(), legUpperR: node(), legLowerL: node(), legLowerR: node(), footL: node(), footR: node() };
+  const rig = new CharacterRig(joints);
+
+  // In air
+  rig.update({ dt: 1 / 60, grounded: false });
+  assert.equal(rig.lastGrounded, false);
+  assert.equal(rig.land, 0);
+
+  // Touchdown triggers compression
+  rig.update({ dt: 1 / 60, grounded: true });
+  assert.equal(rig.lastGrounded, true);
+  assert.ok(rig.land > 0.8, 'landing compression triggered on touchdown');
+
+  // Recovers over time
+  for (let i = 0; i < 30; i++) rig.update({ dt: 1 / 60, grounded: true });
+  assert.ok(rig.land < 0.1, 'landing compression settles back to rest');
+});
+
