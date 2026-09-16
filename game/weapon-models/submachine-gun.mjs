@@ -1,4 +1,5 @@
 import * as T from 'three';
+import {attachIronSights} from '../sights.mjs';
 
 // Type index 9 - "Submachine Gun" (#8affc1). Compact high-rate SMG: short
 // barrel with a small muzzle device, boxy receiver, curved magazine, top
@@ -29,14 +30,14 @@ export function buildSubmachineGun(g, ctx){
   box(g,.03,.008,.03,0,.248,-.18,glow);
 
   // ------------------------------------------------------------------
-  // Folding iron sights. The front block rides the handguard top plate and
-  // the rear block rides the rail; the rear aperture is a ring on the block.
+  // Open folding iron sights: a rear notch on the rail and a front post on the
+  // handguard. Uses the real rear aperture height (y = .288) rather than the
+  // old shared anchor, so ADS lines up with the actual sights.
   // ------------------------------------------------------------------
-  box(g,.06,.05,.05,0,.131,-.47,dark);
-  box(g,.014,.05,.014,0,.181,-.47,glow);
-  for(const x of [-.022,.022])box(g,.012,.05,.016,x,.181,-.47,dark);
-  box(g,.08,.05,.05,0,.245,.01,dark);
-  ring(g,.018,.006,0,.288,.01,glow,0);
+  const sights=attachIronSights(g,ctx,{
+    rear:{x:0,y:.288,z:.01,width:.06,height:.07,gap:.02},
+    front:{x:0,y:.206,z:-.47,width:.014,height:.10,depth:.014},
+  });
 
   // ------------------------------------------------------------------
   // Short barrel with a stepped muzzle device. The exposed barrel butts the
@@ -132,4 +133,6 @@ export function buildSubmachineGun(g, ctx){
   const sel=cylinder(g,.018,.018,.03,.125,-.02,-.02,glow,8);sel.rotation.z=Math.PI/2;
   box(g,.025,.03,.05,.122,-.02,.03,light);
   box(g,.04,.025,.06,-.13,-.02,-.3,dark);
+
+  g.userData.sights=sights;
 }

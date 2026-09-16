@@ -1,4 +1,5 @@
 import * as T from 'three';
+import {attachScope} from '../sights.mjs';
 export function buildMarksmanRifle(g, ctx){
   const {box,cylinder,ring,geo,material,palette}=ctx;
   const {dark,light,glow}=palette;
@@ -35,15 +36,7 @@ export function buildMarksmanRifle(g, ctx){
 
   box(g,.03,.035,.05,0,.1075,-.19,dark);
   box(g,.03,.035,.05,0,.1075,.05,dark);
-  const tube=cylinder(g,.05,.05,.44,0,.175,-.06,dark,16);tube.rotation.x=Math.PI/2;
-  ring(g,.056,.012,0,.175,-.18,dark,0);
-  ring(g,.056,.012,0,.175,.06,dark,0);
-  const bell=cylinder(g,.06,.06,.075,0,.175,-.30,dark,16);bell.rotation.x=Math.PI/2;
-  const eye=cylinder(g,.055,.055,.07,0,.175,.18,dark,12);eye.rotation.x=Math.PI/2;
-  const frontLens=cylinder(g,.052,.052,.010,0,.175,-.341,glow,12);frontLens.rotation.x=Math.PI/2;
-  const rearLens=cylinder(g,.047,.047,.010,0,.175,.22,glow,12);rearLens.rotation.x=Math.PI/2;
-  ring(g,.057,.008,0,.175,-.343,glow,0);
-  ring(g,.052,.008,0,.175,.223,dark,0);
+  const sights=attachScope(g,ctx,{x:0,y:.175,z:.22,length:.56,radius:.05});
   cylinder(g,.022,.022,.05,0,.25,-.06,dark,8);
   cylinder(g,.024,.024,.014,0,.282,-.06,light,8);
   const wind=cylinder(g,.02,.02,.045,.074,.175,-.06,dark,8);wind.rotation.z=Math.PI/2;
@@ -78,4 +71,6 @@ export function buildMarksmanRifle(g, ctx){
 
   cylinder(g,.007,.007,.028,0,-.10,-.30,dark,6);
   cylinder(g,.007,.007,.028,0,-.085,.52,dark,6);
+
+  g.userData.sights=sights;
 }

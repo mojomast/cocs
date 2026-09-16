@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import {initializeRace, stepRace, raceSnapshot, raceStandings, crossRaceGates, resetRaceRacer,
   ITEMS, CAR_RADIUS, MIN_CAR_SEPARATION, paceMultiplier, itemWeights, rollItem, resolveCarCollisions,
   PACE_LEADER, PACE_TRAILER} from './race.mjs';
+import {slowSkip} from './test-support.mjs';
 
 function fixture(count=2, bots=false, seed=7, extras={}) {
   const centerline=Array.from({length:12},(_,i)=>({x:60*Math.sin(i*Math.PI/6),z:-48*Math.cos(i*Math.PI/6)}));
@@ -167,7 +168,7 @@ test('automatic recovery retains mount and checkpoint progress',()=>{
   resetRaceRacer(m,r);assert.equal(r.completedLaps,0);
 });
 
-test('eight bots complete actual driving laps deterministically without recovery',()=>{
+test('eight bots complete actual driving laps deterministically without recovery',{skip:slowSkip('10k-step 8-bot race: run with COCS_SLOW_TESTS=1')},()=>{
   const run=()=>{
     const m=fixture(8,true);let resets=0;
     for(let i=0;i<10000&&!m.over;i++){stepRace(m,1/30,{inputs:{}});if(m.race.racers.some(r=>r.resetWait>0))resets++;}

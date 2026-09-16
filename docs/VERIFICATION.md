@@ -1,5 +1,34 @@
 # COCS verification report
 
+## Release 6.0 - Open sights, honest performance and real quality tiers
+
+- **Open sights (geometry, browser-free):** `game/sights.test.mjs` mounts every
+  weapon at its runtime scale with the solved ADS pose, then raycasts through the
+  bore. It asserts the rear notch never blocks the centre ray or a small bundle in
+  its gap, the front-post tip meets the aiming point, the holo frame misses the
+  centre, scopes have no caps/lens disks and their bores stay clear across
+  FOVs/aspect ratios, and the solver's rear/aperture projection lands on the
+  centre ray for every weapon and attachment.
+- **Sight regressions:** the SMG's rear anchor is checked against its real
+  aperture (y=0.288), the opaque holo/iron block and capped-scope cases are
+  explicit assertions, and `game/weapon-rig.test.mjs` now asserts the solved ADS
+  transform (rear on the centre ray, bore on the forward axis, centred front tip).
+- **Auto quality fix:** `game/post.test.mjs` covers `normalizeQualityOverride`
+  (`auto`/null/junk → automatic; only fixed tiers pin), and
+  `game/view.test.mjs` proves auto demotes on sustained pressure, holds a cooldown,
+  recovers one tier at a time, and never pins, while fixed tiers stay fixed.
+- **Real quality work:** `game/post.test.mjs` checks the tier table carries
+  ordered `bloomScale`/`shadowHz`/`modelDetail`, that `bloomResolution` caps a 4K
+  extraction at 1024 and leaves smaller canvases unscaled, and that the sustained
+  governor demotes slowly, cools down and stays bounded under a software ceiling.
+- **Trustworthy counters:** `game/perf.test.mjs` accumulates named CPU phases,
+  keeps frame median/p95 bounded and ordered, keeps GPU time `null` until set and
+  distinct from CPU, and asserts the benchmark preset fixes the scenario with a
+  direct and a post-processed variant at 100% render scale.
+- **Suite runtime:** long hardware-bound simulations are opt-in
+  (`COCS_SLOW_TESTS=1` / `npm run test:game:slow`); the default `test:game` run
+  completes in minutes with `--test-timeout` set so it cannot hang.
+
 ## Release 5.6 - Weapon presentation, combat AI and rendering
 
 - **Weapon presentation:** `game/weapon-rig.test.mjs` asserts every weapon

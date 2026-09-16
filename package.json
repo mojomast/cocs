@@ -16,10 +16,11 @@
     "start": "WRANGLER_LOG_PATH=.wrangler/wrangler.log vinext start",
     "test": "npm run test:game && npm run test:server && npm run typecheck && npm run build && node --test tests/*.test.mjs",
     "lint": "bash scripts/sites-env.sh -- eslint . --ignore-pattern dist --ignore-pattern .next",
-    "test:game": "node --test game/*.test.mjs",
-    "test:archive": "node --test game/archive/*.test.mjs",
+    "test:game": "node --test --test-timeout=600000 game/*.test.mjs",
+    "test:game:slow": "COCS_SLOW_TESTS=1 node --test --test-timeout=1800000 game/*.test.mjs",
+    "test:archive": "node --test --test-timeout=120000 game/archive/*.test.mjs",
     "test:all": "npm run test:game && npm run test:archive",
-    "test:server": "node --test server/*.test.mjs",
+    "test:server": "node --test --test-timeout=120000 server/*.test.mjs",
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {

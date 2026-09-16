@@ -1,4 +1,5 @@
 import * as T from 'three';
+import {attachIronSights} from '../sights.mjs';
 
 export function buildGrenadeLauncher(g, ctx) {
   const { box, cylinder, ring, geo, palette } = ctx;
@@ -18,6 +19,12 @@ export function buildGrenadeLauncher(g, ctx) {
   box(g, .20, .05, .30, 0, .46, -.06, light);
   const handle = cylinder(g, .028, .028, .30, 0, .513, -.06, dark, 8);
   handle.rotation.x = Math.PI / 2;
+
+  // --- open iron sights on the top rail ------------------------------------
+  const sights = attachIronSights(g, ctx, {
+    rear: {x: 0, y: .33, z: .10, width: .08, height: .05, gap: .03},
+    front: {x: 0, y: .33, z: -.47, width: .014, height: .17, depth: .014},
+  });
 
   const shroud = cylinder(g, .115, .13, .32, 0, .045, -.47, dark, 16);
   shroud.rotation.x = Math.PI / 2;
@@ -70,4 +77,6 @@ export function buildGrenadeLauncher(g, ctx) {
   box(g, .03, .06, .14, -.135, -.12, -.02, light);
   box(g, .03, .06, .04, 0, .335, -.30, light);
   box(g, .05, .06, .04, 0, .335, .06, light);
+
+  g.userData.sights = sights;
 }

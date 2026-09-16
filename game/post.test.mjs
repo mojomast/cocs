@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {postStage,applyComposerSize,disposeComposer,reducedMotion,QUALITY_LEVELS,normalizeQuality,qualitySettings,qualityIndex,nextQualityTier,clampTriangleBudget,frameTriangleBudget} from './post.mjs';
+import {postStage,applyComposerSize,disposeComposer,reducedMotion,QUALITY_LEVELS,normalizeQuality,normalizeQualityOverride,qualitySettings,qualityIndex,nextQualityTier,nextQualityState,clampTriangleBudget,frameTriangleBudget,bloomResolution,createFrameWindow,pushFrameTime,framePercentiles} from './post.mjs';
 
 const fakeComposer = () => {
   const calls = [];
@@ -106,4 +106,64 @@ test('the frame-rate controller demotes below minFps and promotes above maxFps w
   assert.equal(nextQualityTier(undefined, 30, { software: true }), 'low');
   assert.equal(qualityIndex('high'), 2);
   assert.equal(qualityIndex('low'), 0);
+});
+
+test('the saved "auto" quality is never stored as a fixed override', () => {
+  assert.equal(normalizeQualityOverride('auto'), null, 'auto means automatic, not a pinned tier');
+  assert.equal(normalizeQualityOverride(null), null);
+  assert.equal(normalizeQualityOverride(undefined), null);
+  assert.equal(normalizeQualityOverride('bogus'), null);
+  assert.equal(normalizeQualityOverride('high'), 'high');
+  assert.equal(normalizeQualityOverride('low'), 'low');
+  assert.equal(normalizeQualityOverride(0), 'low');
+  assert.equal(normalizeQualityOverride(2), 'high');
+});
+
+test('quality tiers expose real effect-resolution and pass controls, ordered by tier', () => {
+  const low = qualitySettings('low'), medium = qualitySettings('medium'), high = qualitySettings('high');
+  for (const tier of [low, medium, high]) {
+    for (const key of ['bloomScale', 'bloomMax', 'shadowHz', 'modelDetail', 'lodDistance']) assert.ok(Number.isFinite(tier[key]), `${key} is finite`);
+    assert.equal(typeof tier.fxaa, 'boolean');
+    assert.equal(typeof tier.vignette, 'boolean');
+  }
+  assert.ok(low.bloomScale < medium.bloomScale && medium.bloomScale < high.bloomScale, 'bloom extraction shrinks on lower tiers');
+  assert.ok(low.shadowHz <= medium.shadowHz && medium.shadowHz <= high.shadowHz, 'shadow budget falls with tier');
+  assert.ok(low.modelDetail < high.modelDetail, 'geometry detail falls with tier');
+});
+
+test('the bloom budget caps extraction independently of the full-resolution image', () => {
+  const full = bloomResolution(3840, 2160, { scale: 0.5, maxDim: 1024 });
+  assert.ok(full.width <= 1024 && full.height <= 1024, 'a 4K canvas cannot spawn a 2K-wide bloom chain');
+  const small = bloomResolution(1280, 720, { scale: 0.5, maxDim: 1024 });
+  assert.equal(small.width, 640);
+  assert.equal(small.height, 360);
+  assert.ok(bloomResolution(0, 0).width >= 1, 'degenerate sizes stay at least one texel');
+});
+
+test('the sustained governor demotes slowly, holds a cooldown and promotes gradually', () => {
+  let state = { level: 'high', bad: 0, good: 0, cool: 0 };
+  for (let i = 0; i < 5; i++) state = nextQualityState(state, 200, { ceiling: 'high' });
+  assert.equal(state.level, 'high', '1s of slow frames is not enough');
+  for (let i = 0; i < 4 && state.level === 'high'; i++) state = nextQualityState(state, 200, { ceiling: 'high' });
+  assert.equal(state.level, 'medium', 'sustained slow frames demote one tier');
+  assert.ok(state.cool > 0, 'a cooldown follows a change');
+  const during = nextQualityState(state, 200, { ceiling: 'high' });
+  assert.equal(during.level, 'medium', 'no change during the cooldown');
+  let fast = { level: 'low', bad: 0, good: 0, cool: 0 };
+  for (let i = 0; i < 300 && fast.level === 'low'; i++) fast = nextQualityState(fast, 8, { ceiling: 'high' });
+  assert.equal(fast.level, 'medium', 'fast frames promote one tier');
+  // A software ceiling cannot be raised by fast frames.
+  let soft = { level: 'low', bad: 0, good: 0, cool: 0 };
+  for (let i = 0; i < 400; i++) soft = nextQualityState(soft, 8, { ceiling: 'low', software: true });
+  assert.equal(soft.level, 'low');
+});
+
+test('the rolling frame window reports bounded median and p95 percentiles', () => {
+  const window = createFrameWindow(10);
+  for (let i = 1; i <= 100; i++) pushFrameTime(window, i);
+  assert.equal(window.values.length, 10, 'the window is bounded');
+  const [median, p95] = framePercentiles(window, [0.5, 0.95]);
+  assert.equal(median, 96);
+  assert.ok(p95 >= median && p95 <= 100);
+  assert.deepEqual(framePercentiles(createFrameWindow(4), [0.5, 0.95]), [0, 0]);
 });

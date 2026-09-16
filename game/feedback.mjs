@@ -8,7 +8,7 @@ export class WeaponFeedback{
  constructor(){this.reset();}
  reset(){this.kick=0;this.landing=0;this.phase=0;this.bob=0;this.sway=0;this.grounded=undefined;this.vy=0;this.weapon=-1;this.lastShot=null;}
  shot(weapon,stamp){if(stamp!=null&&stamp===this.lastShot&&weapon===this.weapon)return;this.lastShot=stamp;this.weapon=weapon;this.kick=Math.min(1.4,this.kick+1);}
- update(player,dt,reduced=false,visible=true){dt=Math.max(0,Math.min(dt||0,.1));const profile=KICKS[player.weapon]||KICKS[0];
+ update(player,dt,reduced=false,visible=true,bobScale=1){dt=Math.max(0,Math.min(dt||0,.1));const bobAmp=Math.max(0,Math.min(1.5,Number(bobScale)||0));const profile=KICKS[player.weapon]||KICKS[0];
   if(this.weapon!==player.weapon){this.kick=0;this.weapon=player.weapon;}
   if(this.grounded===false&&player.grounded)this.landing=Math.min(.035,Math.max(0,-this.vy)*.003);
   this.grounded=player.grounded;this.vy=player.vy||0;
@@ -27,7 +27,7 @@ export class WeaponFeedback{
   const reloadDipY=-0.045*reloadT,reloadPitch=-0.04*reloadT,reloadRoll=0.05*reloadT;
   const swapT=(player.weaponSwitch||0)>0?Math.sin(Math.min(1,Math.max(0,(player.weaponSwitch||0)/.45))*Math.PI):0;
   const swapDipY=-0.07*swapT,swapPitch=-0.04*swapT;
-  return {x:Math.sin(this.phase)*.007*this.bob+this.sway+idle+lookSway,y:Math.cos(this.phase*2)*.006*this.bob-this.landing+idleY+reloadDipY+swapDipY,z:this.kick*profile[0],pitch:this.kick*profile[1]+(player.punchPitch||0)*.015+reloadPitch+swapPitch,roll:(this.sway+lookSway)*.7+strafeRoll+reloadRoll};
+  return {x:(Math.sin(this.phase)*.007*this.bob+this.sway+idle+lookSway)*bobAmp,y:(Math.cos(this.phase*2)*.006*this.bob+idleY)*bobAmp-this.landing+reloadDipY+swapDipY,z:this.kick*profile[0],pitch:this.kick*profile[1]+(player.punchPitch||0)*.015+reloadPitch+swapPitch,roll:((this.sway+lookSway)*.7+strafeRoll)*bobAmp+reloadRoll};
  }
 }
 

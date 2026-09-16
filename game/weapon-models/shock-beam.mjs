@@ -3,6 +3,7 @@
 // windings and a cage shroud wrap the barrel. Amber and pale-blue energy read
 // against the dark receiver. Static, deterministic, -Z muzzle.
 import * as T from 'three';
+import {attachIronSights} from '../sights.mjs';
 
 export function buildShockBeam(g, ctx){
   const {box,cylinder,ring,geo,material,palette}=ctx;const {dark,light,glow}=palette;
@@ -26,6 +27,12 @@ export function buildShockBeam(g, ctx){
 
   // top coil housing
   const housing=cylinder(g,.05,.05,.34,0,.24,-.16,dark,12);housing.rotation.x=Math.PI/2;
+
+  // open iron sights (rear notch on the receiver, front post over the barrel)
+  const sights=attachIronSights(g,ctx,{
+    rear:{x:0,y:.20,z:.05,width:.07,height:.045,gap:.025},
+    front:{x:0,y:.20,z:-.62,width:.014,height:.14,depth:.014},
+  });
 
   // barrel and collar
   const barrel=cylinder(g,.07,.07,.36,0,B,-.48,light,12);barrel.rotation.x=Math.PI/2;
@@ -64,4 +71,6 @@ export function buildShockBeam(g, ctx){
   // side capacitor cells
   cylinder(g,.035,.035,.18,-.195,-.05,.075,glow,12);
   cylinder(g,.035,.035,.18,.195,-.05,.075,glow,12);
+
+  g.userData.sights=sights;
 }

@@ -1,4 +1,5 @@
 import * as T from 'three';
+import {attachIronSights} from '../sights.mjs';
 export function buildPulseRifle(g, ctx){
   const {box, cylinder, ring, geo, material, palette} = ctx;
   const {dark, light, glow} = palette;
@@ -62,9 +63,11 @@ export function buildPulseRifle(g, ctx){
   rod.rotation.x = Math.PI / 2;
   for(let i = 0; i < 5; i++) ring(g, .032, .012, 0, .214, -.45 + i * .10, energy, 0);
 
-  // rear sight
-  box(g, .09, .05, .06, 0, .20, .06, dark);
-  box(g, .016, .06, .03, 0, .25, .06, steel);
+  // open iron sights (rear notch + front post)
+  const sights = attachIronSights(g, ctx, {
+    rear: {x: 0, y: .215, z: .06, width: .09, height: .05, gap: .03},
+    front: {x: 0, y: .21, z: -.53, width: .012, height: .05, depth: .014},
+  });
 
   // side energy cells
   const cellGeo = geo('pulse-cell|.04|1', () => new T.IcosahedronGeometry(.04, 1));
@@ -97,4 +100,6 @@ export function buildPulseRifle(g, ctx){
   cable.rotation.x = Math.PI / 2;
   const cable2 = cylinder(g, .009, .009, .25, -.086, -.02, -.08, glow, 6);
   cable2.rotation.x = Math.PI / 2;
+
+  g.userData.sights = sights;
 }

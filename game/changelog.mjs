@@ -1,12 +1,22 @@
 // In-game patch notes. The title-screen footer is the running version; this
 // module is the human-readable release digest the Changelog screen renders. The
 // full historical record lives in docs/CHANGELOG.md and is linked from the UI.
-export const RELEASE_VERSION = 'v5.6';
-export const RELEASE_CODENAME = 'ARSENAL';
+export const RELEASE_VERSION = 'v6.0';
+export const RELEASE_CODENAME = 'CLARITY';
 export const REPO_URL = 'https://github.com/mojomast/tokenarena';
 export const FULL_CHANGELOG_URL = `${REPO_URL}/blob/main/docs/CHANGELOG.md`;
 
 export const CHANGELOG = [
+  {version:'v6.0',codename:'CLARITY',date:'2026-09-16',tag:'Open sights, honest performance and real quality tiers',highlights:[
+    'Sights are actually usable. Solid blocks and capped cylinders are gone: iron sights are an open rear notch with a front post, holographic sights are a thin frame around an empty window with a small reticle, and scopes are open-ended tubes with no caps or lens disks across the bore. The target is visible through the sight, not behind it.',
+    'Aiming down sights is solved from the weapon\'s real aperture and front-tip anchors after its final scale and attachment transforms, so the sight line lands on the weapon camera\'s centre ray; the SMG\'s rear anchor now matches its actual aperture. Reduced motion snaps to the correct ADS pose instead of falling back to the hip.',
+    'Auto quality is automatic again: the saved "auto" setting is no longer stored as a pinned tier, the frame-rate governor needs sustained pressure with a cooldown so it cannot oscillate, and fixed low/medium/high tiers stay fixed.',
+    'Quality changes now reduce real work: a zero-strength bloom pass is omitted entirely, bloom extraction has its own capped resolution budget independent of the world, FXAA and vignette are tier-gated passes, the shadow target is resized correctly on tier change, dynamic shadows refresh on an elapsed-time 20–30 Hz budget, and WebGL gets real geometry LOD.',
+    'Performance accounting is trustworthy: three\'s per-render counter reset is disabled and the counters are reset once per presented frame, so the totals cover the world, post-processing and the first-person weapon pass. The debug snapshot reports viewport, drawing buffer, active tier, enabled passes, draw calls, triangles, geometry/texture counts, CPU phase timings and frame-time median/p95, with an optional asynchronous GPU number never confused for CPU submission time.',
+    'A fixed benchmark preset (same map, seed, roster, weather and camera path) captures a direct and a post-processed run and prints a copyable report. The world render resolution is unchanged throughout.',
+    'Presentation pacing and polish: assembled viewmodels are cached and reused across switches, a recorder keyframe is checked before building an expensive snapshot, and separate controls for effects quality, camera shake and weapon bob sit alongside the global reduced-motion option.',
+    'Long simulated matches that take minutes without 3D hardware are now opt-in (COCS_SLOW_TESTS=1 / npm run test:game:slow) so the default suite always finishes.',
+  ]},
   {version:'v5.6',codename:'ARSENAL',date:'2026-09-16',tag:'Weapon presentation, combat AI and rendering',highlights:[
     'First-person weapons are rebuilt around per-weapon anchors: each gun exposes its own muzzle, front/rear sights, grips, magazine, bolt and hinge, sights come from the weapon itself rather than one shared rail, and aiming down sights resolves to that weapon\'s own sight line and optic.',
     'Weapons have moving parts again: the SMG magazine, Scattergun break-action, Rocket Launcher loading and Rail Lance energy cell animate from real reload progress, the bolt cycles on each shot, and weapon swaps now hold the outgoing gun through the lowering phase and raise the new one — all from authoritative simulation state.',

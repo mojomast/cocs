@@ -425,6 +425,25 @@ assets. Full procedure and verification: [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md
 The last five releases. The full history lives in
 [docs/CHANGELOG.md](docs/CHANGELOG.md).
 
+### v6.0 · CLARITY — 2026-09-16
+- Iron sights, holographic sights and scopes are rebuilt with real open apertures
+  (notch, ring, thin frame, open-ended tube) so the target is visible through the
+  sight; ADS is solved from each weapon's real anchors after its final scale.
+- Auto quality is automatic again (the saved `auto` value no longer pins a tier)
+  and the governor uses sustained thresholds plus a cooldown, so fixed tiers stay
+  fixed and quality cannot oscillate.
+- Quality changes reduce real work: zero-strength bloom is omitted, bloom
+  extraction has its own capped budget, FXAA/vignette are tier-gated, the shadow
+  target is resized correctly, dynamic shadows refresh on an elapsed-time 20–30 Hz
+  budget, and WebGL gets geometry LOD.
+- Performance counters are trustworthy (reset once per presented frame, totals
+  across all passes) and report viewport, buffer size, tier, passes, draw calls,
+  triangles, CPU phases and frame-time median/p95, plus a fixed benchmark preset
+  with a copyable report.
+- New controls for effects quality, camera shake and weapon bob; cached
+  viewmodels; recorder snapshots only built when a keyframe is due. Long
+  hardware-bound matches are opt-in via `COCS_SLOW_TESTS=1`.
+
 ### v5.6 · ARSENAL — 2026-09-16
 - Weapons are rebuilt around per-weapon anchors and sight lines: ADS resolves to
   each gun's own sights and optic, and no shared rail is bolted onto every model.
@@ -466,14 +485,6 @@ The last five releases. The full history lives in
 - Critical hits get a gold hitmarker and damage number, low health adds a
   heartbeat, sprees announce themselves, boosts spit nitro, and campaign
   transmissions carry speaker callsigns, tags and colours.
-
-### v5.2 · RESTORE — 2026-09-16
-- Campaign progress survives a reload again (the save normalizer was dropping
-  every completed mission); losses count as attempts without unlocking the next.
-- VIP Escort credits escort time and extraction, so its scoreboard and ranking
-  stop reading zero.
-- Race no longer crashes on a short grid or NaNs on a one-gate track; deep horde
-  waves honour the live enemy cap; gunners/passengers get the PUMA card.
 
 ## Parody and attribution
 

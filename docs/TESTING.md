@@ -131,11 +131,16 @@ duplicate "every combat mode completes" loop was removed outright from
 
 ## Current counts
 
-Last verified on release v5.6 (2026-09-16):
+Last verified on release v6.0 (2026-09-16):
 
-- `npm run test:game` — **1381 pass, 0 fail**, across 124 `game/*.test.mjs` files
-  (verified per-file; the heaviest sweeps — `config`, `singleplayer`, `payload`,
-  `showcase` — were each run individually in this environment).
+- `npm run test:game` — **1393 pass, 0 fail, 4 skipped**, across 126
+  `game/*.test.mjs` files, and it completes in minutes.
+- The 4 skipped tests are long simulations (an exhaustive 8-bot all-modes sweep,
+  an 18k-step 4-bot match, a 10k-step 8-bot race, a 4×1800-step platform-bot
+  sweep) that take many minutes on a machine without 3D hardware. They are opt-in:
+  run `npm run test:game:slow` (or `COCS_SLOW_TESTS=1 npm run test:game`) on a
+  machine with the budget. `--test-timeout` is set on every script so a stuck
+  test fails instead of hanging forever.
 - `npm run test:server` — **153 pass, 0 fail**, across 16 `server/*.test.mjs` files.
 - `node --test tests/*.test.mjs` — **7 pass, 0 fail** (SSR, UI contract, deployment).
 - `npx tsc --noEmit` — clean; `npm run lint` — 0 errors.

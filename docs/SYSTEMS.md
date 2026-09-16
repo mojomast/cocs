@@ -242,7 +242,12 @@ normal protection/armor/suicide path. `blastUnsafe(weapon, distance)` is
 - `spawnInventory` (`game/config.mjs`) builds the ammo belt; slot 0 starts at
   `Infinity`, other weapons carry `ammo` and cap at `cap`.
 - ADS is a level input (`controls.ads`) that tightens spread and lowers sensitivity;
-  loadouts with `noAds` strip it.
+  loadouts with `noAds` strip it. Presentation-side, the first-person ADS transform
+  is solved from the weapon's real rear-aperture and front-tip anchors
+  (`game/sights.mjs` `solveSightPose` / `sightAlignmentError`), so the active sight
+  line is aligned to the weapon camera's centre ray; sights themselves are open
+  (notch/aperture/front post, thin holo frame, open-ended scope) and the optic
+  attachment mounts on the same interpolated sight line.
 - `Match.melee(a)` uses `MELEE = { range: 2.4, damage: 45, cooldown: .6, arc: .2 }`,
   selecting the nearest enemy inside the arc with line of sight.
 - `Match.throwGrenade(a)` launches the slot-5 launcher's grenade physics with a flat
@@ -895,28 +900,49 @@ lower/swap/raise (`_swap`).
 ### 12.3 Post-processing and quality
 
 `game/post.mjs` defines `QUALITY_LEVELS = low/medium/high` and the `QUALITY_TABLE`
-(particle/decals/deaths/splats/shadow cadence/shadow map size/stars/scatter/ambient
-motes/tracers/bloom/`triangleBudget` 90000/140000/200000). `normalizeQuality` chooses
-a tier (software defaults low, reduced motion medium, hardware high). `ArenaView`
-runs an FPS-hysteresis controller (`nextQualityTier`, demote below 45, promote above
-58) that never exceeds the configured ceiling; an explicit override pins the tier.
+(particle/decals/deaths/splats/legacy shadow cadence/shadow map size/stars/scatter/
+ambient motes/tracers/bloom strength/`triangleBudget` 90000/140000/200000) plus the
+controls that change real GPU work at a fixed resolution: `bloomScale`/`bloomMax`
+(independent bloom extraction budget), `fxaa`/`vignette` (whole-pass enable),
+`shadowHz` (elapsed-time dynamic-shadow budget), and `modelDetail`/`lodDistance`
+(geometry LOD). `normalizeQuality` chooses a tier (software defaults low, reduced
+motion medium, hardware high). `normalizeQualityOverride` returns a fixed tier or
+`null`, so the saved `auto` value is never stored as an override.
+
+`ArenaView` runs a sustained-threshold governor (`nextQualityState`) that requires
+the frame time to stay past 45/58 FPS for ~1.5 s before switching and holds a 4 s
+cooldown, so quality cannot oscillate; fixed low/medium/high tiers never move. The
+`auto` ceiling is low on software, medium under reduced motion, high otherwise.
+
 `postStage` gates the composer on hardware, `postFx` and non-reduced motion only —
-it is deliberately independent of bloom strength, so a zero-strength bloom pass
-still leaves the vignette and antialiasing running. The chain is RenderPass →
-UnrealBloom → Vignette → OutputPass → FXAA. `applyComposerSize` and
-`disposeComposer` handle composer sizing and explicit pass disposal (including the
-FXAA resolution uniform). The CPU path sets a hard triangle budget and screen-area
-cull; shadows and post are disabled.
+independent of both bloom strength and resolution scale. A zero-strength bloom pass
+is omitted entirely (not left running). The chain is RenderPass → UnrealBloom (only
+when strength > 0) → Vignette (tier-gated) → OutputPass → FXAA (tier-gated).
+`applyComposerSize` and `disposeComposer` handle composer sizing and explicit pass
+disposal. `bloomResolution` caps the bloom base size and is re-applied after any
+composer resize. The CPU path sets a hard triangle budget and screen-area cull;
+shadows and post are disabled.
+
+Performance accounting: `renderer.info.autoReset` is disabled and the counters are
+reset once at the start of `render()` and read after all passes, so the totals
+include the world, post-processing and the first-person weapon pass.
+`PerfTracker` (`game/perf.mjs`) accumulates CPU phases (simulation/snapshot/render
+submission), keeps a bounded frame-time window with median and p95, and keeps GPU
+time as an optional separate number. `BENCHMARK_PRESET` fixes the map, seed, bot
+count, weather and camera path, with direct and post-processed variants.
 
 Camera: first-person eye height plus punch recoil, dynamic FOV (sprint +5°, ADS
-`max(55, fov*0.82)`), camera-occlusion clearing, `CameraShake`, low-health overlay,
-a pooled muzzle light, and a short killcam (`KILLCAM_DURATION 2.2`). Spectator and
-free-cam poses are separate. Shadow maps refresh on a fixed cadence
-(`SHADOW_REFRESH_INTERVAL 2`).
+`max(55, fov*0.82)`), camera-occlusion clearing, `CameraShake` (scaled by the
+`cameraShake` display control), low-health overlay, a pooled muzzle light, and a
+short killcam (`KILLCAM_DURATION 2.2`). Spectator and free-cam poses are separate.
+Dynamic shadow maps refresh on the tier's `shadowHz` budget (20–30 Hz by elapsed
+time) rather than a frame cadence.
 
-First-person viewmodel: the hands lerp from the fixed hip layout toward the
-iron-sight centre line while ADS (`_adsTransition`, frame-rate independent, kick and
-roll damped by the same blend); reduced motion pins the hip layout. Actor shield
+First-person viewmodel: the ADS pose is solved from each weapon's real rear
+aperture and front-tip anchors after scale and attachments (`solveSightPose`),
+blending from the hip layout by a frame-rate-independent factor; reduced motion
+snaps straight to the solved pose. Assembled viewmodels are cached and reused
+across switches. Actor shield
 meshes read the energy state — cyan for `temporaryShield`, amber for
 `juggernautShield` — and a `shieldBreak` damage event spawns a wireframe shard burst.
 Boosting/turbo vehicles emit pooled nitro exhaust behind the chassis (hardware,

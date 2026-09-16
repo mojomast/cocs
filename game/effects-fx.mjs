@@ -22,7 +22,7 @@ export class CameraShake{
  reset(){this.magnitude=0;}
  add(amount){if(!(amount>0))return;this.magnitude=Math.min(1.4,this.magnitude+amount);this.seed=(this.seed+1)%97;}
  update(dt){this.magnitude*=Math.exp(-Math.max(0,dt||0)/.25);if(this.magnitude<.001)this.magnitude=0;}
- apply(camera,time,reduced){if(reduced||this.magnitude<=0||!camera)return;const m=this.magnitude,t=(time||0)*38+this.seed*13.7;camera.position.x+=Math.sin(t)*m*.05;camera.position.y+=Math.cos(t*1.31)*m*.045;camera.rotation.z+=Math.sin(t*1.7)*m*.028;camera.rotation.x+=Math.cos(t*1.13)*m*.014;}
+ apply(camera,time,reduced,intensity=1){if(reduced||this.magnitude<=0||!camera)return;const scale=Math.max(0,Math.min(1.5,Number(intensity)||0));if(scale<=0)return;const m=this.magnitude*scale,t=(time||0)*38+this.seed*13.7;camera.position.x+=Math.sin(t)*m*.05;camera.position.y+=Math.cos(t*1.31)*m*.045;camera.rotation.z+=Math.sin(t*1.7)*m*.028;camera.rotation.x+=Math.cos(t*1.13)*m*.014;}
 }
 
 // Fixed pool of point lights so automatic fire never allocates per shot.

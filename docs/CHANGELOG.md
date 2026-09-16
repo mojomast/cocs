@@ -16,6 +16,60 @@ record in [VERIFICATION.md](VERIFICATION.md).
 
 ---
 
+## v6.0 · CLARITY — 2026-09-16
+
+**Tag:** Open sights, honest performance and real quality tiers.
+
+- **Open sights.** The old geometry caused the blocked sight picture: the holo and
+  iron attachments were solid boxes, scope bodies used capped cylinders and
+  opaque lenses, and the SMG rear anchor sat inside its support block. The
+  sights are now built from reusable open components in `game/sights.mjs`: a rear
+  notch (two posts over a bridge with an empty centre), a rear aperture (a bare
+  ring with no backing), a front post whose tip meets the aiming point, a
+  holographic frame around an empty window, and open-ended scope tubes with no
+  caps or lens disks in the bore. Depth testing is never disabled to fake it.
+- **ADS correctness.** The ADS pose is solved from each weapon's real aperture
+  and front-tip anchors after its final scale and attachment transforms
+  (`solveSightPose`), aligning the sight line with the weapon camera's centre ray
+  at a fixed eye relief. The SMG's rear anchor now matches its real aperture
+  (y=0.288). Reduced motion snaps to the correct ADS pose instead of forcing the
+  blend to zero.
+- **Auto quality fix.** `game/view.mjs` stored the saved `quality: 'auto'` string
+  as a fixed override, so the governor bailed out while `normalizeQuality('auto')`
+  fell back to High. Only `low`/`medium`/`high` are overrides now
+  (`normalizeQualityOverride`), and `setQuality(null)`/`setDisplay` normalize to
+  automatic.
+- **Real quality work.** Zero-strength bloom no longer leaves its expensive
+  processing running — the pass is omitted. Bloom extraction has an independent
+  capped resolution budget (`bloomResolution`) that survives composer resizing.
+  FXAA and vignette are tier-gated passes. The shadow target is resized by
+  disposing the stale map so the pinned three revision reallocates it. Dynamic
+  shadows refresh on an elapsed-time 20–30 Hz budget instead of a frame cadence.
+  WebGL gets geometry LOD through tagged detail meshes.
+- **Trustworthy counters.** `renderer.info.autoReset` is disabled and the counters
+  are reset once at the start of the presented frame, then read after every pass
+  (world, post and the first-person weapon pass). The snapshot exposes CSS
+  viewport, device pixel ratio, drawing-buffer dimensions, render scale, tier,
+  enabled passes, draw calls, triangles, geometry/texture counts, CPU phase
+  timings, and a bounded frame-time median/p95. GPU time is optional and never
+  labelled as CPU submission time.
+- **Benchmark preset.** `game/perf.mjs` ships a fixed map/seed/roster/weather/
+  camera-path preset with a direct and a post-processed variant, and a compact
+  copyable report. The world render resolution is preserved at 100%.
+- **Presentation and controls.** Assembled viewmodels are cached and reused;
+  recorder snapshots are only built when a keyframe is due; separate effects
+  quality, camera shake and weapon bob controls join the global reduced-motion
+  option.
+- **Test suite.** Long matches that take minutes without 3D hardware are opt-in
+  via `COCS_SLOW_TESTS=1` / `npm run test:game:slow`; the default suite always
+  finishes.
+
+Tests: `game/sights.test.mjs` (per-weapon aperture raycasts, SMG anchor, holo and
+scope regressions), `game/perf.test.mjs`, and new `game/post.test.mjs` coverage
+for the governor, override normalization, bloom budget and frame window.
+
+---
+
 ## v5.6 · ARSENAL — 2026-09-16
 
 ### Weapon presentation

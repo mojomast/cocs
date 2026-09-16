@@ -3,15 +3,21 @@ import assert from 'node:assert/strict';
 import {ArenaView,weaponModel} from './view.mjs';
 import {WEAPONS} from './data.mjs';
 
-test('every weapon exposes named anchors and a sight-derived ADS transform',()=>{
+test('every weapon exposes named anchors and a solved, sight-aligned ADS transform',()=>{
  for(let type=0;type<WEAPONS.length;type++){
   const model=weaponModel(type),anchors=model.userData.anchors;
   for(const name of ['muzzle','rearSight','frontSight','leftGrip','rightGrip','magazine','bolt','hinge'])assert.ok(anchors?.[name],`${type} exposes the ${name} anchor`);
   const aim=model.userData.aim;
   assert.ok(aim&&Number.isFinite(aim.pitch),`${type} derives an ADS pitch`);
-  assert.ok(Math.abs(aim.position.x-(-anchors.rearSight.position.x))<1e-9,'ADS x is derived from the rear sight');
-  assert.ok(Math.abs(aim.position.y-(-anchors.rearSight.position.y))<1e-9,'ADS y is derived from the rear sight');
+  assert.ok(aim.quaternion&&Number.isFinite(aim.quaternion.w),`${type} solves an ADS rotation`);
   assert.notEqual(anchors.rearSight.position.z,anchors.frontSight.position.z,`${type} has a front/rear sight separation`);
+  // The solver must place the real rear aperture on the weapon-camera center
+  // ray at the fixed eye relief and point the bore down -Z.
+  const err=model.userData.sightError;
+  assert.ok(err,`${type} records a sight alignment error`);
+  assert.ok(err.rearError<1e-6,`${type} rear aperture lands on the center ray (error ${err.rearError})`);
+  assert.ok(err.angleError<1e-6,`${type} bore aligns with the camera forward axis (error ${err.angleError})`);
+  assert.ok(err.lateral<1e-6,`${type} front tip stays centered (lateral ${err.lateral})`);
   ArenaView.prototype.disposeObject.call({},model);
  }
 });

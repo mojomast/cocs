@@ -1,4 +1,5 @@
 import * as T from 'three';
+import {attachIronSights} from '../sights.mjs';
 export function buildScattergun(g, ctx){
   const {box,cylinder,ring,material,palette}=ctx; const {dark,light,glow}=palette;
   const wood=material('#6b4a2f',.1,.85), woodDark=material('#573a24',.08,.88);
@@ -20,7 +21,11 @@ export function buildScattergun(g, ctx){
   // --- sight rib nestled between the twin barrels ---
   box(g,.14,.05,.70,0,.07,-.45,light);
   box(g,.03,.02,.45,0,.105,-.42,dark);
-  box(g,.03,.03,.06,0,.11,-.78,glow);
+  // --- open iron sights riding the rib ---
+  const sights=attachIronSights(g,ctx,{
+    rear:{x:0,y:.135,z:-.18,width:.07,height:.04,gap:.025},
+    front:{x:0,y:.135,z:-.78,width:.012,height:.05,depth:.014},
+  });
   // --- barrel bands clamp the twin tubes together ---
   for(const z of [-.65,-.30]){
     for(const x of [-.12,.12]) ring(g,.062,.011,x,.04,z,brass,0);
@@ -83,4 +88,6 @@ export function buildScattergun(g, ctx){
 
   // --- breech pins flanking the receiver ---
   for(const x of [-.172,.172]){const p=cylinder(g,.010,.010,.02,x,.05,.02,brass,8);p.rotation.z=Math.PI/2;}
+
+  g.userData.sights=sights;
 }

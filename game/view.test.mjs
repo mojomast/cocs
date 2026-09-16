@@ -104,10 +104,12 @@ test('ADS transitions viewmodel smoothly toward iron-sights center line and retu
  for(let i=0;i<20;i++)view.render('playing',match,.016,1+(i+1)*.016);
  assert.ok(view.hands.position.x<hipX*.4,'ADS smoothly centers viewmodel towards iron-sight line');
  assert.ok(view.hands.position.y>-0.34,'ADS elevates viewmodel towards sightline');
- view.motionQuery.matches=true;
- view.render('playing',match,.016,2);
- assert.deepEqual(view.hands.position.toArray(),[.37,-.36,-.58],'reduced motion keeps fixed hip layout');
- view.effectPool?.dispose();view.disposeObject(view.scene);
+  view.motionQuery.matches=true;
+  view.render('playing',match,.016,2);
+  // Reduced motion must snap to the solved ADS pose (not fall back to hip): the
+  // sight line has to be usable, just without the animated transition.
+  assert.ok(Math.abs(view.hands.position.x)<.05,'reduced motion snaps to the centered ADS pose');
+  view.effectPool?.dispose();view.disposeObject(view.scene);
 });
 
 test('vehicle nitro exhaust emits particles behind boosting and turbo vehicles under standard motion',t=>{
@@ -1221,17 +1223,24 @@ test('quality budgets drive decal, death and ambient pool sizes',t=>{
  view.decalPool.dispose();deaths.dispose();
 });
 
-test('the quality controller auto-downgrades on sustained low FPS without pinning',t=>{
+test('the quality controller demotes on sustained low FPS, holds a cooldown, and recovers without pinning',t=>{
  const {view}=playable(t);
  view._quality();
  assert.equal(view.quality,'high');
+ // A short slow spell must not demote; the governor requires sustained pressure.
  for(let i=0;i<5;i++)view._sampleQuality(.2);
- assert.equal(view.quality,'medium','sustained low FPS drops a tier');
- for(let i=0;i<5;i++)view._sampleQuality(.2);
- assert.equal(view.quality,'low');
- for(let i=0;i<100;i++)view._sampleQuality(.01);
- assert.equal(view.quality,'medium','fast frames recover one tier at a time');
+ assert.equal(view.quality,'high','a short slow spell (1s) does not demote');
+ for(let i=0;i<4;i++)view._sampleQuality(.2);
+ assert.equal(view.quality,'medium','sustained slow frames (~1.8s) demote a tier');
+ // Immediately after a change the cooldown blocks the next one.
+ for(let i=0;i<15;i++)view._sampleQuality(.2);
+ assert.equal(view.quality,'medium','the cooldown prevents one-second oscillation');
  assert.ok(view._qualityOverride==null,'the controller never pins quality');
+ // A fresh view recovers one tier at a time from sustained fast frames.
+ const fast=playable(t).view;fast._quality();fast._qualityState={level:'low',bad:0,good:0,cool:0};fast.quality='low';
+ for(let i=0;i<400;i++)fast._sampleQuality(.008);
+ assert.notEqual(fast.quality,'low','sustained fast frames recover quality');
+ assert.ok(fast._qualityOverride==null,'recovery never pins quality');
 });
 
 test('the weapon preview mounts a real weapon through ModelAssets and disposes exactly once',()=>{

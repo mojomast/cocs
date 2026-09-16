@@ -4,6 +4,7 @@ import {Match,moveActor,obstructed,floorAt} from './core.mjs';
 import {MAPS} from './maps.mjs';
 import {RULES} from './data.mjs';
 import {DEFAULT_CONFIG,normalizeConfig} from './config.mjs';
+import {slowSkip} from './test-support.mjs';
 const rng=()=>{let n=42;return()=>((n=(Math.imul(n,1664525)+1013904223)>>>0)/4294967296);};
 const actor=(arena,values={})=>Object.assign(new Match('chatgpt','openclaw',rng(),arena.id,{botCount:0}).actors[0],{vx:0,vy:0,vz:0,active:0,grounded:false},values);
 const clear=(a,arena)=>assert.equal(obstructed(a.x,a.y,a.z,RULES.radius,arena),false,`${arena.id}: ${JSON.stringify({x:a.x,y:a.y,z:a.z})}`);
@@ -109,7 +110,7 @@ test('matches share frozen map navigation but not mutable match state',()=>{
  }
 });
 
-test('seeded platform-map team bots traverse launchers instead of falling through routes',()=>{
+test('seeded platform-map team bots traverse launchers instead of falling through routes',{skip:slowSkip('4x1800-step platform bot sweep: run with COCS_SLOW_TESTS=1')},()=>{
  const cases=[['skybreak','ctf'],['aether','koth'],['ironfall-megastructure','teamdeathmatch'],['longreach-plateau','domination']];
  for(const [map,mode] of cases){
   const m=new Match('chatgpt','openclaw',()=>.37,map,{mode,botCount:7,timeLimit:30,fragLimit:20});

@@ -9,6 +9,7 @@
 // Parts are laid out to meet cleanly (touch or just clear) with no volume
 // interpenetration apart from the plasma core hidden inside the orb.
 import * as T from 'three';
+import {attachIronSights} from '../sights.mjs';
 export function buildPlasmaDriver(g, ctx) {
   const {box, cylinder, ring, geo, palette} = ctx;
   const {dark, light, glow} = palette;
@@ -23,6 +24,12 @@ export function buildPlasmaDriver(g, ctx) {
   // ---- Glow spine and cooling fins along the top ---------------------------
   box(g, .04, .03, .46, 0, .265, -.14, glow);
   for (const z of [-.02, -.1, -.18, -.26, -.34]) box(g, .24, .05, .03, 0, .235, z, light);
+
+  // ---- Open iron sights along the top -------------------------------------
+  const sights = attachIronSights(g, ctx, {
+    rear: {x: 0, y: .30, z: -.02, width: .07, height: .05, gap: .025},
+    front: {x: 0, y: .30, z: -.40, width: .014, height: .09, depth: .014},
+  });
 
   // ---- Angled grip, trigger and magazine -----------------------------------
   const grip = box(g, .08, .2, .1, 0, -.3203, .10, dark);
@@ -71,4 +78,6 @@ export function buildPlasmaDriver(g, ctx) {
   const muzzle = cylinder(g, .03, .04, .07, 0, .02, -.755, light, 18);
   muzzle.rotation.x = Math.PI / 2;
   ring(g, .05, .012, 0, .02, -.775, glow, 0);
+
+  g.userData.sights = sights;
 }

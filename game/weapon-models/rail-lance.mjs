@@ -1,4 +1,5 @@
 import * as T from 'three';
+import {attachScope} from '../sights.mjs';
 
 // Rail Lance (type 2) - long-range electromagnetic precision lance.
 // Silhouette: the longest, narrowest weapon in the set. Twin accelerator rails
@@ -71,21 +72,10 @@ export function buildRailLance(g, ctx) {
   }
   g.userData.parts = {...(g.userData.parts || {}), cell: coils};
 
-  // --- long scope ---------------------------------------------------------
-  const scopeTube = cylinder(g, .055, .055, .5, 0, .27, -.28, dark, 16);
-  scopeTube.rotation.x = Math.PI / 2;
-  const scopeBell = cylinder(g, .055, .075, .11, 0, .27, -.585, dark, 16);
-  scopeBell.rotation.x = Math.PI / 2;
-  const eye = cylinder(g, .06, .06, .1, 0, .27, .02, dark, 12);
-  eye.rotation.x = Math.PI / 2;
+  // --- long open scope on its mounting brackets ---------------------------
   box(g, .04, .06, .05, 0, .355, -.3, light);
   for (const z of [-.09, -.28]) box(g, .04, .088, .05, 0, .171, z, dark);
-  ring(g, .067, .012, 0, .27, -.53, glow, 0);
-  ring(g, .072, .012, 0, .27, .07, glow, 0);
-  const lens = new T.Mesh(geo('rail-lens|.075|16', () => new T.CircleGeometry(.075, 16)), glow);
-  lens.position.set(0, .27, -.645);
-  lens.rotation.y = Math.PI;
-  g.add(lens);
+  const sights = attachScope(g, ctx, {x: 0, y: .27, z: .02, length: .62, radius: .055});
 
   // --- forward rest / bipod-ish brace ------------------------------------
   box(g, .06, .12, .08, 0, -.03, -.78, dark);
@@ -104,4 +94,6 @@ export function buildRailLance(g, ctx) {
     box(g, .035, .035, .05, x, .12, .2, light);
   }
   box(g, .05, .05, .44, 0, -.08, -.58, dark);
+
+  g.userData.sights = sights;
 }

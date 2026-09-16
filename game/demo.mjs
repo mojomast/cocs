@@ -167,6 +167,15 @@ export class DemoRecorder {
     }
   }
 
+  // Whether a keyframe is due at `time`. Callers can test this *before* building
+  // an expensive Match.snapshot(), and pass only `{ time }` on frames that will
+  // not be recorded while still ingesting events.
+  due(time) {
+    if (!Number.isFinite(time)) return false;
+    const interval = 1 / this.recordHz;
+    return this.lastKeyframeTime === null || time - this.lastKeyframeTime >= interval - 1e-9;
+  }
+
   frame(state, events = []) {
     this.lastTime = state?.time ?? this.lastTime;
     const hasTime = !!state && typeof state.time === 'number';
@@ -177,8 +186,7 @@ export class DemoRecorder {
     }
     this.pushEvents(events, null);
     if (!hasTime) return false;
-    const interval = 1 / this.recordHz;
-    if (this.lastKeyframeTime === null || state.time - this.lastKeyframeTime >= interval - 1e-9) {
+    if (this.due(state.time)) {
       this.keyframes.push({ time: state.time, state: cloneRounded(state) });
       this.lastKeyframeTime = state.time;
       return true;

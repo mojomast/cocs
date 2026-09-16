@@ -1,4 +1,5 @@
 import * as T from 'three';
+import {attachIronSights} from '../sights.mjs';
 
 export function buildFlakCannon(g, ctx){
   const {box, cylinder, ring, geo, material, palette} = ctx;
@@ -43,6 +44,12 @@ export function buildFlakCannon(g, ctx){
   box(g, .42, .34, .06, 0, .02, .31, plate);
   box(g, .06, .34, .44, -.26, .02, 0, plate);
 
+  // --- open iron sights on the top plate -----------------------------------
+  const sights = attachIronSights(g, ctx, {
+    rear: {x: 0, y: .37, z: .10, width: .08, height: .05, gap: .03},
+    front: {x: 0, y: .37, z: -.26, width: .014, height: .05, depth: .014},
+  });
+
   box(g, .22, .32, .38, .34, -.06, -.06, plate);
   box(g, .22, .06, .4, .34, .13, -.06, dark);
   box(g, .07, .05, .1, .34, .185, .13, glow);
@@ -75,4 +82,6 @@ export function buildFlakCannon(g, ctx){
     const t = i / 3;
     box(g, .04, .03, .03, -.31, .05 + .12 * t, -.09 + .12 * t, dark);
   }
+
+  g.userData.sights = sights;
 }

@@ -1,4 +1,5 @@
 import * as T from 'three';
+import {attachIronSights} from '../sights.mjs';
 
 // Rocket Launcher (type 1) - the shouldered anti-armour tube and the bulk of
 // the set. A fat launch tube with an open front and a loaded warhead poking
@@ -56,12 +57,14 @@ export function buildRocketLauncher(g, ctx){
     box(g, .05, .1, .18, s * .3, .3, -.14, dark);
   }
 
-  // --- raised flip-up sight ------------------------------------------------
-  box(g, .06, .08, .06, 0, .3, -.56, steel);
-  box(g, .1, .05, .14, 0, .365, -.56, dark);
-  box(g, .03, .14, .03, 0, .45, -.56, steel);
-  ring(g, .05, .012, 0, .53, -.56, glow, 0);
-  box(g, .12, .03, .05, 0, .6, -.56, dark);
+  // --- open flip-up iron sights -------------------------------------------
+  // Keeps the tall flip-up profile: a rear notch on the top rail and a raised
+  // front post rising off the launch tube. Both are open, so the target stays
+  // visible along the sight line.
+  const sights = attachIronSights(g, ctx, {
+    rear: {x: 0, y: .36, z: -.14, width: .07, height: .045, gap: .025},
+    front: {x: 0, y: .45, z: -.56, width: .014, height: .36, depth: .014},
+  });
 
   // --- top rail and teeth --------------------------------------------------
   box(g, .07, .05, .5, 0, .29, -.26, dark);
@@ -84,4 +87,6 @@ export function buildRocketLauncher(g, ctx){
   box(g, .1, .18, .26, 0, -.239, -.34, dark);
   for (const z of [-.44, -.36, -.28, -.2]) for (const s of [-1, 1])
     cylinder(g, .018, .018, .03, s * .03, -.34, z, steel, 8);
+
+  g.userData.sights = sights;
 }
