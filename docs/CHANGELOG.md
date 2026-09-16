@@ -16,6 +16,31 @@ record in [VERIFICATION.md](VERIFICATION.md).
 
 ---
 
+## v5.0 · COMPACT — 2026-09-16
+
+**Protocol:** `SNAPSHOT_DELTA_VERSION` 1 → 2. The envelope stays additive and
+version-gated, so older clients keep receiving full snapshots.
+
+- **Id-keyed array patches (`$A`):** `snapshotDelta` now diffs arrays whose
+  elements are plain objects with a unique `id` element-wise — an `order` list
+  only when the identity sequence changes, a `set` map of nested patches for
+  surviving elements, and an `add` map for inserts. Removals are implied by the
+  new order, and `applySnapshotDelta` rebuilds the array exactly. Arrays without
+  ids (e.g. `leaders`, `ammo`) stay opaque leaves. Measured on real frames this
+  cuts a full 8v8 snapshot from ~30 KB to ~3 KB (≈90%); the pure unit tests and
+  the net harness assert the round-trip and the compression floor.
+- **Server-side deltas:** `Room` broadcasts per-peer frames. The shared patch is
+  computed once per tick against the previous broadcast and reused for every peer
+  whose base matches; peers with a stale/missing base, or with no advertised
+  capability, get a full snapshot. A configurable keyframe cadence (default once
+  per second) bounds recovery after a dropped frame. `SNAPSHOT_DELTA` is treated
+  as replaceable under backpressure, like a full snapshot.
+- **Capability handshake:** `join`/`create` advertise `delta: 2`; the room clamps
+  it to its own revision and only deltas peers at or above it.
+- **Telemetry:** the game server's status JSON reports aggregate
+  `snapshot.deltaFrames`/`fullFrames`; `tokenArenaDebug.delta()` reports the
+  client's delta hits, misses, base and bandwidth rate.
+
 ## v4.17 · STREAMLINE — 2026-09-16
 
 - **One interpolator:** `NetClient.renderState` now delegates actor/rocket/vehicle

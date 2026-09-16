@@ -215,7 +215,9 @@ test('NetClient wrapper joins, interpolates snapshots and reaches results', asyn
   clearInterval(input);
   assert.equal(c.roundOver, true);
   assert.ok(c.state.over);
-  assert.equal(c.state.actors.length, 3);
+  assert.equal(c.state.actors.length, 3, 'deltas reconstruct every actor');
+  assert.ok(c.deltaHits > 0, 'the client applied server snapshot deltas end-to-end');
+  assert.equal(c.deltaMisses, 0, 'the delta chain never missed');
   const final = c.renderState(performance.now());
   assert.equal(final.actors.length, 3);
   assert.equal(final.actors.find(a => a.id === c.actorId), c.shadow.actors[0], 'own actor slot is the predicted shadow');

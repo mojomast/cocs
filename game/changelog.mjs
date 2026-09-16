@@ -1,12 +1,17 @@
 // In-game patch notes. The title-screen footer is the running version; this
 // module is the human-readable release digest the Changelog screen renders. The
 // full historical record lives in docs/CHANGELOG.md and is linked from the UI.
-export const RELEASE_VERSION = 'v4.17';
-export const RELEASE_CODENAME = 'STREAMLINE';
+export const RELEASE_VERSION = 'v5.0';
+export const RELEASE_CODENAME = 'COMPACT';
 export const REPO_URL = 'https://github.com/mojomast/tokenarena';
 export const FULL_CHANGELOG_URL = `${REPO_URL}/blob/main/docs/CHANGELOG.md`;
 
 export const CHANGELOG = [
+  {version:'v5.0',codename:'COMPACT',date:'2026-09-16',tag:'Id-keyed snapshot deltas',highlights:[
+    'Snapshots are now sent as compact patches: the actor, rocket and pickup arrays are diffed element by element against the previous frame instead of crossing the wire whole. Measured frames drop about 90% in size (roughly 30 KB down to 3 KB per frame in a full 8v8 match).',
+    'The protocol only sends a delta to a client that advertised support, so an older tab keeps receiving full snapshots; a periodic full keyframe lets a client that missed a frame re-sync within a second.',
+    'The server exposes delta/full frame counts in its status JSON and the debug hook reports delta hits, misses and bandwidth, so the savings are measurable in a live match.',
+  ]},
   {version:'v4.17',codename:'STREAMLINE',date:'2026-09-16',tag:'Netcode consistency and cleanup',highlights:[
     'The live render path now shares the exported snapshot interpolator, so the renderer and the deterministic net harness can no longer drift apart on actor, rocket or vehicle blending.',
     'A single control message larger than the transport budget no longer blocks every later reply: congested sockets drain essential replies through a pure scheduler that keeps later messages moving.',

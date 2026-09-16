@@ -425,6 +425,14 @@ assets. Full procedure and verification: [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md
 The last five releases. The full history lives in
 [docs/CHANGELOG.md](docs/CHANGELOG.md).
 
+### v5.0 · COMPACT — 2026-09-16
+- Snapshots travel as compact patches: id-keyed actor/rocket/pickup arrays are
+  diffed element by element against the previous frame, cutting a full 8v8 frame
+  from ~30 KB to ~3 KB (~90%).
+- Only clients that advertised support receive deltas; a once-a-second keyframe
+  lets a client that missed a frame re-sync.
+- Delta/full counts surface in the game server's status JSON and the debug hook.
+
 ### v4.17 · STREAMLINE — 2026-09-16
 - The live render path shares the exported snapshot interpolator with the deterministic
   net harness, so the two cannot drift apart.
@@ -454,13 +462,6 @@ The last five releases. The full history lives in
   surface as HUD notices.
 - Server vote quorums ignore disconnected peers and a reconnect must re-ready;
   menu focus, Theater camera hotkeys and the title overlay got fixes.
-
-### v4.13 · ATTRACT — 2026-09-16
-- The demo announcement bar is part of the title-screen foreground and the new
-  back-to-demo view, so it no longer covers main-menu controls.
-- A fullscreen toggle joins the menu top bar.
-- "Back to demo" hides the title overlay and returns to the live demo with
-  on-screen and arrow-key controls to cycle modes.
 
 ## Parody and attribution
 

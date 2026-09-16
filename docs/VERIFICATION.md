@@ -1,5 +1,32 @@
 # COCS verification report
 
+## Release 5.0 - Id-keyed snapshot deltas
+
+- **Compression, measured:** on real quantized frames from an 8-human/8-bot
+  deathmatch, a full frame is 30,254 B and the id-keyed delta averages 2,985 B
+  (90% smaller); ctf 31,267/3,620 (88%), 4v4 16,179/1,808 (89%), 2h+8b
+  20,086/2,756 (86%). Diff cost was 0.30-0.79 ms per frame. The same numbers are
+  asserted as a floor in `game/protocol.test.mjs` ("cuts a real combat frame by
+  at least 80%") and in the `NetHarness` delta test.
+- **Correctness:** `game/protocol.test.mjs` adds round-trip coverage for reorder,
+  insert, remove, nested arrays, emptied arrays and non-id arrays. The net
+  harness (which drives the real `encodeSnapshot`/`pushDelta`) still converges to
+  zero divergence and now asserts delta frames are under half a full frame.
+- **Server wiring:** `server/room.test.mjs` streams a started room and replays
+  each peer's frames through `applySnapshotDelta`, asserting the rebuilt state
+  deep-equals the authoritative `room.wireState()`; it also asserts a keyframe
+  cadence, that an incapable peer only gets full snapshots, and that a late
+  joiner gets a full keyframe first.
+- **End-to-end:** `server/network.test.mjs` plays a full match over a real
+  WebSocket against `createGameServer` and asserts the client applied deltas
+  (`deltaHits > 0`) with zero misses while reconstructing every actor.
+- **Telemetry:** the game-server status JSON reports aggregate
+  `snapshot.deltaFrames`/`fullFrames`; `tokenArenaDebug.delta()` reports the
+  client's hits, misses, applied base and bandwidth rate.
+
+Verification: game **1335/1335**, server **153/153**, `tests/` **7/7**, `tsc`
+clean, lint 0 errors.
+
 ## Release 4.17 - Netcode consistency and cleanup
 
 - **Render path:** `NetClient.renderState` now computes its `base`/`prev`/`alpha`

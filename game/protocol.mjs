@@ -4,7 +4,13 @@ import {clamp} from './math.mjs';
 // version 1 simply never emits or consumes the version-2 snapshot-delta frame,
 // so bumping this constant cannot strand an older client.
 export const PROTOCOL_VERSION = 2;
-export const SNAPSHOT_DELTA_VERSION = 1;
+// Snapshot-delta revisions. v2 diffs id-keyed arrays element-wise; a peer only
+// receives deltas for a revision it advertised, so a v1 client keeps getting
+// full snapshots instead of a patch it cannot apply.
+export const SNAPSHOT_DELTA_VERSION = 2;
+// Only send a delta when it beats a full frame by at least this many bytes; a
+// frame that barely changed is not worth the apply complexity on the client.
+export const SNAPSHOT_DELTA_MIN_BYTES = 48;
 
 // Canonical wire message types. Client and server share this list so the two
 // dispatch switches cannot drift apart.
@@ -61,6 +67,11 @@ export function parseInputEnvelope(msg) {
 // the full tree from the same base. Both are pure and deterministic; they never
 // mutate their arguments. The patch is self-describing so a client can fall
 // back to a full snapshot whenever it lacks the base sequence.
+//
+// Version 2 adds id-keyed array patches (`$A`): an array whose elements are
+// plain objects with unique `id`s is diffed element-wise instead of being sent
+// whole. That is what makes the frame small, because the actor/rocket arrays
+// dominate every snapshot. Arrays without ids stay opaque leaves.
 // ---------------------------------------------------------------------------
 
 const isPlainObject = value => value !== null && typeof value === 'object' && !Array.isArray(value);
@@ -76,14 +87,50 @@ const sameLeaf = (a, b) => a === b || (Number.isNaN(a) && Number.isNaN(b));
 // array survives JSON round-tripping (an empty object would otherwise vanish).
 const encode = value => Array.isArray(value) ? { $a: value } : isPlainObject(value) ? { $o: value } : value;
 
+// An array is "id-keyed" when every element is a plain object carrying a unique
+// `id`. Only then can a patch address elements by identity across reorders,
+// inserts and removals. An empty list is vacuously id-keyed.
+const isIdArray = list => {
+ if (!Array.isArray(list)) return false;
+ const seen = new Set();
+ for (const item of list) {
+  if (!isPlainObject(item) || !Object.hasOwn(item, 'id')) return false;
+  const id = String(item.id);
+  if (seen.has(id)) return false;
+  seen.add(id);
+ }
+ return true;
+};
+
+// Diff two id-keyed arrays. `order` is emitted only when the id sequence
+// changes; `set` holds nested patches for elements present in both; `add` holds
+// the full value of inserted elements. Removals are implied by the new order.
+function arrayDelta(before, after) {
+ const prior = new Map();
+ for (const item of before) prior.set(String(item.id), item);
+ const patch = { $A: 1 };
+ let orderChanged = before.length !== after.length;
+ const order = new Array(after.length);
+ const set = {};
+ const add = {};
+ for (let i = 0; i < after.length; i++) {
+  const item = after[i];
+  const id = String(item.id);
+  order[i] = item.id;
+  if (!orderChanged && String(before[i]?.id) !== id) orderChanged = true;
+  const from = prior.get(id);
+  if (!from) { add[id] = item; continue; }
+  const nested = snapshotDelta(from, item);
+  if (nested) set[id] = nested;
+ }
+ if (orderChanged) patch.order = order;
+ if (Object.keys(set).length) patch.set = set;
+ if (Object.keys(add).length) patch.add = add;
+ return patch.order || patch.set || patch.add ? patch : null;
+}
+
 // Build a patch object describing `next` relative to `base`. Returns null when
 // the two trees are structurally identical (nothing to send).
-//
-// Arrays are treated as opaque leaves: any change replaces the whole array. The
-// live snapshot's cost is dominated by the `actors`/`rockets`/`pickups` arrays,
-// so a production server-side delta would save little until this grows
-// id-keyed element diffing. The format is symmetric and self-describing, so
-// that can be added later without a wire change.
 export function snapshotDelta(base, next) {
  if (!isPlainObject(base) || !isPlainObject(next)) return null;
  const patch = {};
@@ -92,6 +139,13 @@ export function snapshotDelta(base, next) {
   const before = base[key];
   const after = next[key];
   if (sameLeaf(before, after)) continue;
+  if (Array.isArray(before) && Array.isArray(after)) {
+   const pair = isIdArray(before) && isIdArray(after);
+   const nested = pair ? arrayDelta(before, after) : null;
+   if (nested) { patch[key] = nested; changed = true; }
+   else if (!pair) { patch[key] = encode(after); changed = true; }
+   continue;
+  }
   if (isPlainObject(before) && isPlainObject(after)) {
    const nested = snapshotDelta(before, after);
    if (nested) { patch[key] = nested; changed = true; }
@@ -109,8 +163,32 @@ export function snapshotDelta(base, next) {
  return changed ? patch : null;
 }
 
+// Rebuild an id-keyed array from an `$A` patch. `order` carries the next frame's
+// identity sequence; `set` patches elements that survived; `add` inserts new
+// ones. Without `order` the identity set is unchanged, so the base order stands.
+function applyArrayDelta(before, patch) {
+ const prior = new Map();
+ if (Array.isArray(before)) for (const item of before) if (isPlainObject(item) && Object.hasOwn(item, 'id')) prior.set(String(item.id), item);
+ const set = isPlainObject(patch.set) ? patch.set : null;
+ const add = isPlainObject(patch.add) ? patch.add : null;
+ const rebuild = id => {
+  const key = String(id);
+  if (add && Object.hasOwn(add, key)) return add[key];
+  const from = prior.get(key);
+  if (set && Object.hasOwn(set, key)) return applySnapshotDelta(from, set[key]);
+  return from;
+ };
+ if (Array.isArray(patch.order)) return patch.order.map(rebuild);
+ if (!Array.isArray(before)) return [];
+ return before.map(item => {
+  const key = isPlainObject(item) && Object.hasOwn(item, 'id') ? String(item.id) : null;
+  return key !== null && set && Object.hasOwn(set, key) ? applySnapshotDelta(item, set[key]) : item;
+ });
+}
+
 // Apply a patch produced by `snapshotDelta` to `base`, returning a fresh tree.
-// `$d` markers delete a key, `$a`/`$o` markers restore empty containers.
+// `$d` markers delete a key, `$a`/`$o` markers restore empty containers, and
+// `$A` markers rebuild an id-keyed array.
 export function applySnapshotDelta(base, patch) {
  if (!isPlainObject(patch)) return base;
  const out = { ...(isPlainObject(base) ? base : {}) };
@@ -119,6 +197,7 @@ export function applySnapshotDelta(base, patch) {
   if (isPlainObject(value) && value.$d === 1) { delete out[key]; continue; }
   if (isPlainObject(value) && Object.hasOwn(value, '$a')) { out[key] = value.$a; continue; }
   if (isPlainObject(value) && Object.hasOwn(value, '$o')) { out[key] = value.$o; continue; }
+  if (isPlainObject(value) && value.$A === 1) { out[key] = applyArrayDelta(out[key], value); continue; }
   const before = out[key];
   if (isPlainObject(value) && isPlainObject(before)) out[key] = applySnapshotDelta(before, value);
   else out[key] = value;

@@ -92,6 +92,63 @@ test('snapshotDelta round-trips through applySnapshotDelta and marks deletions',
  assert.equal(snapshotDelta(base, { ...base }), null, 'an unchanged tree yields no patch');
 });
 
+test('snapshotDelta v2 diffs id-keyed arrays element-wise and round-trips', () => {
+ const base = {
+  time: 1,
+  actors: [
+   {id: 0, x: 0, y: 0, ammo: [30, 0], gear: {speed: 1, spread: 2}},
+   {id: 1, x: 5, y: 0, ammo: [10, 0], gear: {speed: 1, spread: 2}},
+  ],
+  tags: ['a', 'b'],
+ };
+ const next = {
+  time: 2,
+  actors: [
+   {id: 1, x: 5.5, y: 0, ammo: [10, 1], gear: {speed: 1, spread: 2}},
+   {id: 0, x: 0, y: 0.25, ammo: [30, 0], gear: {speed: 1, spread: 2}},
+   {id: 2, x: 9, y: 0, ammo: [40, 0], gear: {speed: 1, spread: 2}},
+  ],
+  tags: ['a', 'b'],
+ };
+ const patch = snapshotDelta(base, next);
+ assert.ok(patch, 'changed trees produce a patch');
+ assert.equal(patch.actors.$A, 1, 'id-keyed arrays get a structured patch');
+ assert.deepEqual(patch.actors.order, [1, 0, 2], 'the new identity order is recorded');
+ assert.ok(patch.actors.set[1].ammo.$a, 'a nested array can still be replaced whole');
+ assert.deepEqual(applySnapshotDelta(base, patch), next, 'the patch round-trips through a reorder and an insert');
+ const removed = snapshotDelta(next, {time: 3, actors: [next.actors[0], next.actors[2]], tags: ['a']});
+ assert.deepEqual(applySnapshotDelta(next, removed), {time: 3, actors: [next.actors[0], next.actors[2]], tags: ['a']}, 'removals and a shrunk opaque array round-trip');
+});
+
+test('snapshotDelta keeps non-id arrays opaque and preserves empty arrays', () => {
+ const base = {leaders: ['A', 'B'], nums: [1, 2, 3], empty: []};
+ const next = {leaders: ['A', 'C'], nums: [1, 2, 4], empty: []};
+ const patch = snapshotDelta(base, next);
+ assert.deepEqual(patch.leaders.$a, ['A', 'C'], 'string arrays are sent whole');
+ assert.deepEqual(applySnapshotDelta(base, patch), next);
+ assert.equal(snapshotDelta(base, {...base}), null, 'a reference-identical tree yields no patch');
+ const shrunk = snapshotDelta({tags: ['a']}, {tags: []});
+ assert.deepEqual(shrunk.tags.$a, [], 'an emptied array survives the round-trip');
+});
+
+test('snapshotDelta v2 cuts a real combat frame by at least 80%', async () => {
+ const {Match} = await import('./core.mjs');
+ const {quantizeClone} = await import('./quantize.mjs');
+ let n = 1;
+ const rng = () => ((n = (Math.imul(n, 1664525) + 1013904223) >>> 0) / 4294967296);
+ const match = new Match('chatgpt', 'openclaw', rng, 'crosswire', {mode: 'deathmatch', difficulty: 'normal', humanCount: 8, botCount: 8, timeLimit: 300, fragLimit: 15});
+ let frames = [];
+ for (let i = 0; i < 240; i++) { match.step(1 / 60); if (i % 4 === 0) frames.push(quantizeClone(match.snapshot())); }
+ let fullBytes = 0, deltaBytes = 0;
+ for (let i = 1; i < frames.length; i++) {
+  fullBytes += wireSize({type: 'snapshot', seq: i, acks: {}, state: frames[i]});
+  deltaBytes += wireSize({type: 'snapshot-delta', seq: i, base: i - 1, patch: snapshotDelta(frames[i - 1], frames[i]) ?? {}});
+ }
+ assert.ok(fullBytes > 0 && deltaBytes > 0);
+ assert.ok(deltaBytes < fullBytes * 0.2, `delta (${deltaBytes}) should be under 20% of full (${fullBytes})`);
+ assert.deepEqual(applySnapshotDelta(frames[frames.length - 2], snapshotDelta(frames[frames.length - 2], frames[frames.length - 1])), frames[frames.length - 1], 'the real frame round-trips exactly');
+});
+
 test('wireSize and BandwidthMeter report bytes and a sliding rate', () => {
  assert.ok(wireSize({a: 1}) > 0);
  const meter = new BandwidthMeter({windowMs: 1000, capacity: 8});

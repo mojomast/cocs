@@ -2,7 +2,7 @@ import {getMap} from './maps.mjs';
 import {Match} from './core.mjs';
 import {RULES} from './data.mjs';
 import {clamp, lerp} from './math.mjs';
-import {MESSAGE, PROTOCOL_VERSION, validPlayerId, validProgressToken, snapshotDelta, applySnapshotDelta, wireSize, BandwidthMeter} from './protocol.mjs';
+import {MESSAGE, PROTOCOL_VERSION, SNAPSHOT_DELTA_VERSION, SNAPSHOT_DELTA_MIN_BYTES, validPlayerId, validProgressToken, snapshotDelta, applySnapshotDelta, wireSize, BandwidthMeter} from './protocol.mjs';
 
 export const DEFAULT_SERVER_URL = 'ws://localhost:4000';
 const createPlayerId=()=>{try{return globalThis.crypto?.randomUUID?.()??`p-${Math.random().toString(36).slice(2)}-${Date.now().toString(36)}`;}catch{return `p-${Math.random().toString(36).slice(2)}-${Date.now().toString(36)}`;}};
@@ -19,7 +19,6 @@ const isVehicleMode = mode => VEHICLE_MODES.has(mode);
 // How long a client keeps a sent snapshot as a delta base before falling back
 // to full snapshots. Bounded so the base map cannot grow without limit.
 const DELTA_HISTORY = 64;
-const SNAPSHOT_DELTA_MIN_BYTES = 48;
 
 // Pure entity interpolation shared by the live render path and the test
 // harness. Given two authoritative snapshots and an alpha in [0,1], returns a
@@ -173,8 +172,8 @@ export class NetClient {
   this.ws.send(text);
   return true;
  }
- join(name, character, harness, opts = {}) { this.send({ type: 'join', name, character, harness, token: this.token ?? '', roomId: opts.roomId || this.roomId || 'local', spectate: opts.spectate === true, playerId: this.playerId, progressToken: this.progressToken ?? '', v: PROTOCOL_VERSION }); }
- create(name, character, harness, playerName = '') { this.send({ type: 'create', name, playerName, character, harness, token: this.token ?? '', roomId: '', playerId: this.playerId, progressToken: this.progressToken ?? '', v: PROTOCOL_VERSION }); }
+ join(name, character, harness, opts = {}) { this.send({ type: 'join', name, character, harness, token: this.token ?? '', roomId: opts.roomId || this.roomId || 'local', spectate: opts.spectate === true, playerId: this.playerId, progressToken: this.progressToken ?? '', v: PROTOCOL_VERSION, delta: SNAPSHOT_DELTA_VERSION }); }
+ create(name, character, harness, playerName = '') { this.send({ type: 'create', name, playerName, character, harness, token: this.token ?? '', roomId: '', playerId: this.playerId, progressToken: this.progressToken ?? '', v: PROTOCOL_VERSION, delta: SNAPSHOT_DELTA_VERSION }); }
  list() { this.send({ type: 'list' }); }
  history() { this.send({ type: 'history' }); }
  host(config, mapId) { this.send({ type: 'host', config, mapId }); }

@@ -57,7 +57,9 @@ export function createGameServer({ port = 0, random, tickDt = 1 / 60, tickMs = 1
  const server = http.createServer((req, res) => {
   res.setHeader('content-type', 'application/json');
   const players = [...registry.rooms.values()].reduce((n, r) => n + r.peers.size, 0);
-  res.end(JSON.stringify({ service: 'token-arena-game-server', rooms: registry.rooms.size, players, port: server.address()?.port ?? port }));
+  let deltaFrames = 0, fullFrames = 0;
+  for (const room of registry.rooms.values()) { deltaFrames += room.deltaFrames ?? 0; fullFrames += room.fullFrames ?? 0; }
+  res.end(JSON.stringify({ service: 'token-arena-game-server', rooms: registry.rooms.size, players, port: server.address()?.port ?? port, snapshot: { deltaFrames, fullFrames } }));
  });
  const wss = new WebSocketServer({ server, maxPayload: 64 * 1024 });
  let nextPeer = 1;
@@ -65,7 +67,7 @@ export function createGameServer({ port = 0, random, tickDt = 1 / 60, tickMs = 1
  // (welcome/start/results/lobby/errors) are not. Essential messages that hit a
  // congested socket are coalesced by type and pumped once the buffer drains,
  // rather than being silently dropped.
- const REPLACEABLE = new Set([MESSAGE.SNAPSHOT, MESSAGE.EVENTS, MESSAGE.VOICE_SIGNAL]);
+ const REPLACEABLE = new Set([MESSAGE.SNAPSHOT, MESSAGE.SNAPSHOT_DELTA, MESSAGE.EVENTS, MESSAGE.VOICE_SIGNAL]);
   function queueEssential(ws, text, type) {
    const queue = ws.pendingEssential || (ws.pendingEssential = []);
    // Tag with the peer's room so messages queued for one room are never
@@ -108,7 +110,7 @@ export function createGameServer({ port = 0, random, tickDt = 1 / 60, tickMs = 1
   const roomId = typeof msg.roomId === 'string' && msg.roomId ? msg.roomId : 'local';
   const room = registry.get(roomId);
   if (!room) { sendTo(peerId, { type: 'error', message: `room not found: ${roomId}` }); return; }
-  room.join(peerId, msg.name, msg.character, msg.harness, msg.token, msg.spectate === true, msg.playerId, msg.progressToken);
+  room.join(peerId, msg.name, msg.character, msg.harness, msg.token, msg.spectate === true, msg.playerId, msg.progressToken, msg.delta);
   if (!room.peers.has(peerId)) return;
   if (peerRoom.get(peerId) !== room) releaseSeat(peerId);
   peerRoom.set(peerId, room);
@@ -116,7 +118,7 @@ export function createGameServer({ port = 0, random, tickDt = 1 / 60, tickMs = 1
  function createRoom(peerId, msg) {
   const room = registry.create(msg.name);
   if (!room) { sendTo(peerId, { type: 'error', message: 'server is at the room limit' }); return; }
-  room.join(peerId, msg.playerName ?? msg.name, msg.character, msg.harness, msg.token, false, msg.playerId, msg.progressToken);
+  room.join(peerId, msg.playerName ?? msg.name, msg.character, msg.harness, msg.token, false, msg.playerId, msg.progressToken, msg.delta);
   if (!room.peers.has(peerId)) return;
   releaseSeat(peerId);
   peerRoom.set(peerId, room);

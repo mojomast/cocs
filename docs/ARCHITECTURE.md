@@ -245,15 +245,17 @@ Pipeline components:
 
 ### Wire protocol — `game/protocol.mjs`
 
-- `PROTOCOL_VERSION = 2`, `SNAPSHOT_DELTA_VERSION = 1`. The envelope is
-  additive: an older peer never emits/consumes the v2 delta frame, so a bump
-  cannot strand it.
+- `PROTOCOL_VERSION = 2`, `SNAPSHOT_DELTA_VERSION = 2`. The envelope is
+  additive: an older peer never emits/consumes a delta frame, so a bump cannot
+  strand it. Revision 2 adds id-keyed array patches (`$A`), so the actor/rocket
+  arrays are diffed element-wise instead of sent whole.
 - `MESSAGE` is the single shared list of message `type` strings consumed by both
   client and server dispatch switches so they cannot drift.
 - `parseInputEnvelope(msg)` validates/clamps input; `snapshotDelta(base, next)`
-  and `applySnapshotDelta(base, patch)` encode deltas; `wireSize` and
-  `BandwidthMeter` account for them; `validPlayerId`, `validProgressToken` and
-  `sanitizeText` validate identification and text.
+  and `applySnapshotDelta(base, patch)` encode deltas (`$d` deletes, `$a`/`$o`
+  whole containers, `$A` id-keyed arrays with `order`/`set`/`add`); `wireSize`
+  and `BandwidthMeter` account for them; `validPlayerId`, `validProgressToken`
+  and `sanitizeText` validate identification and text.
 
 ### `game/net.mjs` — `NetClient`
 

@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import {Room,PLAYER_LIMIT} from './room.mjs';
 import {MatchHistory} from './history.mjs';
 import {RULES} from '../game/data.mjs';
+import {applySnapshotDelta,wireSize,SNAPSHOT_DELTA_VERSION} from '../game/protocol.mjs';
 function rng(){let n=11;return()=>((n=(Math.imul(n,1664525)+1013904223)>>>0)/4294967296);}
 const find=(msgs,type,to)=>msgs.find(m=>m.msg.type===type&&(to===undefined||m.to===to))?.msg;
 const last=(msgs,type)=>[...msgs].reverse().find(m=>m.msg.type===type)?.msg;
@@ -561,4 +562,73 @@ test('a reconnecting peer must ready up again',()=>{
  const lobby=room.drain().find(m=>m.msg.type==='lobby')?.msg;
  assert.equal(lobby.players.find(p=>p.peerId===9).ready,false,'reconnect clears ready');
  assert.equal(room.lifecycle().ready,0);
+});
+
+test('capable peers receive id-keyed deltas that rebuild the authoritative state',()=>{
+ const room=new Room('r',rng(),{snapshotHz:30,keyframeEvery:0});
+ room.join(1,'Alice','chatgpt','openclaw','',false,'','',SNAPSHOT_DELTA_VERSION);
+ room.join(2,'Bob','claude','claudecode','',false,'','',SNAPSHOT_DELTA_VERSION);
+ room.host(1,{botCount:2,fragLimit:5,timeLimit:60},'crosswire');
+ room.start(1);
+ room.drain();
+ const bases=new Map();
+ let fulls=0,deltas=0,fullBytes=0,deltaBytes=0;
+ for(let i=0;i<70;i++){
+  room.tick(1/60);
+  for(const {to,msg} of room.drain()){
+   if(to===null) continue;
+   if(msg.type==='snapshot'){ bases.set(to,msg.state); fulls++; fullBytes+=wireSize(msg); }
+   else if(msg.type==='snapshot-delta'){ bases.set(to,applySnapshotDelta(bases.get(to),msg.patch)); deltas++; deltaBytes+=wireSize(msg); }
+  }
+ }
+ assert.ok(fulls>=1,'the first frame for each capable peer is a full keyframe');
+ assert.ok(deltas>10,`deltas dominate the stream, got ${deltas}`);
+ assert.ok(deltaBytes/deltas<fullBytes/fulls*0.25,`deltas (${(deltaBytes/deltas).toFixed(0)}B) should be far smaller than a full frame (${(fullBytes/fulls).toFixed(0)}B)`);
+ assert.deepEqual(bases.get(1),room.wireState(),'replaying peer 1 frames rebuilds the authoritative state');
+ assert.deepEqual(bases.get(2),room.wireState(),'replaying peer 2 frames rebuilds the authoritative state');
+});
+
+test('a capable peer is sent a periodic full keyframe',()=>{
+ const room=new Room('r',rng(),{snapshotHz:30,keyframeEvery:5});
+ room.join(1,'Alice','chatgpt','openclaw','',false,'','',SNAPSHOT_DELTA_VERSION);
+ room.host(1,{botCount:2,fragLimit:5,timeLimit:60},'crosswire');
+ room.start(1);
+ room.drain();
+ let fulls=0,deltas=0;
+ for(let i=0;i<60;i++){
+  room.tick(1/60);
+  for(const {to,msg} of room.drain()){ if(to===null) continue; if(msg.type==='snapshot')fulls++; else if(msg.type==='snapshot-delta')deltas++; }
+ }
+ assert.ok(deltas>0,'frames between keyframes are deltas');
+ assert.ok(fulls>=5,`a keyframe arrives at the configured cadence, got ${fulls}`);
+});
+
+test('a peer without delta capability only ever receives full snapshots',()=>{
+ const room=new Room('r',rng(),{snapshotHz:30});
+ room.join(1,'Alice','chatgpt','openclaw');
+ room.host(1,{botCount:2,fragLimit:5,timeLimit:60},'crosswire');
+ room.start(1);
+ room.drain();
+ for(let i=0;i<40;i++) room.tick(1/60);
+ const frames=room.drain().filter(m=>m.to===1&&(m.msg.type==='snapshot'||m.msg.type==='snapshot-delta'));
+ assert.ok(frames.length>0,'the peer is streamed frames');
+ assert.ok(frames.every(m=>m.msg.type==='snapshot'),'an old client never gets a delta it cannot apply');
+ assert.equal(room.deltaFrames,0);
+ assert.ok(room.fullFrames>0);
+});
+
+test('a peer that joins after the chain started is sent a full keyframe first',()=>{
+ const room=new Room('r',rng(),{snapshotHz:30,keyframeEvery:0});
+ room.join(1,'Alice','chatgpt','openclaw','',false,'','',SNAPSHOT_DELTA_VERSION);
+ room.host(1,{botCount:2,fragLimit:5,timeLimit:60},'crosswire');
+ room.start(1);
+ room.drain();
+ for(let i=0;i<10;i++) room.tick(1/60);
+ room.drain();
+ room.join(9,'Carl','gemini','cline','',true,'','',SNAPSHOT_DELTA_VERSION);
+ const joinMsgs=room.drain();
+ assert.equal(joinMsgs.find(m=>m.to===9&&m.msg.type==='snapshot')?.msg.type,'snapshot','a late joiner gets a full snapshot immediately');
+ room.tick(1/60);room.tick(1/60);
+ const first=room.drain().find(m=>m.to===9&&(m.msg.type==='snapshot'||m.msg.type==='snapshot-delta'));
+ assert.equal(first?.msg.type,'snapshot','the late joiner has no matching base, so the next frame is full again');
 });

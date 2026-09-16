@@ -6,7 +6,7 @@ import {getMap} from '../game/maps.mjs';
 import {resolveMapForMode} from '../game/arenas.mjs';
 import {CHARACTERS,resolveLoadout,RULES} from '../game/data.mjs';
 import {randomUUID} from 'node:crypto';
-import {validPlayerId,sanitizeText,parseInputEnvelope,PROTOCOL_VERSION} from '../game/protocol.mjs';
+import {validPlayerId,sanitizeText,parseInputEnvelope,PROTOCOL_VERSION,SNAPSHOT_DELTA_VERSION,SNAPSHOT_DELTA_MIN_BYTES,snapshotDelta,wireSize,MESSAGE} from '../game/protocol.mjs';
 
 export const PLAYER_LIMIT = 8;
 export const SPECTATOR_LIMIT = 24;
@@ -48,6 +48,13 @@ export class Room {
   this.snapshotHz = Math.max(1, Math.min(120, Number(options.snapshotHz) || 30));
   this.snapshotInterval = 1 / this.snapshotHz;
   this.seq = 0;
+  // A delta chain needs a periodic full keyframe so a client that missed a
+  // frame (the transport drops replaceable snapshots under backpressure) can
+  // re-sync without waiting for the next match. Default: one keyframe a second.
+  this.keyframeEvery = Math.max(0, Math.floor(Number(options.keyframeEvery) || this.snapshotHz));
+  this.lastSnapshot = null;
+  this.deltaFrames = 0;
+  this.fullFrames = 0;
   this.out = [];
   // Deterministic lifecycle. `phase` is one of LIFECYCLE_PHASES; warmup runs a
   // fixed countdown before the host start is honored, and map votes are tallied
@@ -166,8 +173,9 @@ export class Room {
  }
  nextConnectedHost() { for (const p of this.peers.values()) if (p.spectate !== true && p.disconnectedAt === null) return p.id; return null; }
  progressProfile(peer) { if (!this.progression || !peer?.playerId || !peer.playerToken) return null; return this.progression.getOwned(peer.playerId, peer.playerToken); }
- join(peerId, name = '', character = 'chatgpt', harness = 'openclaw', token = '', spectate = false, playerId = '', progressToken = '') {
+ join(peerId, name = '', character = 'chatgpt', harness = 'openclaw', token = '', spectate = false, playerId = '', progressToken = '', deltaVersion = 0) {
   if (this.peers.has(peerId)) return;
+  const delta = Math.min(SNAPSHOT_DELTA_VERSION, Math.max(0, Math.floor(Number(deltaVersion) || 0)));
   if (token) {
    const existing = [...this.peers.values()].find(p => p.token === token);
    if (existing) {
@@ -180,6 +188,7 @@ export class Room {
     const oldId = existing.id;
     this.peers.delete(oldId);
       existing.id = peerId;
+      existing.deltaVersion = delta;
        this.ready.delete(oldId); this.rematchVotes.delete(oldId); for (const voters of this.mapVotes.values()) voters.delete(oldId); existing.ready = false;
        existing.disconnectedAt = null;
       existing.voiceSession = null;
@@ -196,7 +205,9 @@ export class Room {
     this.broadcast(this.lobby());
     if (this.started && !this.roundOver && this.match) {
      this.send(peerId, { type: 'start', config: { ...this.match.config }, mapId: this.match.arena.id });
-     this.send(peerId, { type: 'snapshot', seq: ++this.seq, acks: { [existing.actorId]: existing.appliedSeq }, state: this.wireState() });
+     const state = this.wireState(), seq = ++this.seq;
+     existing.snapshotBase = { seq, state };
+     this.send(peerId, { type: 'snapshot', seq, acks: { [existing.actorId]: existing.appliedSeq }, state });
      } else if (this.match?.over) {
       this.send(peerId, { type: 'results', state: this.match.snapshot() });
      }
@@ -216,7 +227,7 @@ export class Room {
   const peer = { id: peerId, name: sanitizeText(name, 20) || CHARACTERS.find(c => c.id === l.character).name,
     character: l.character, harness: l.harness, actorId: null, ready: false, latest: null, receivedSeq: 0, latestSeq: 0, appliedSeq: 0, lastSerial: active ? this.match.serial : 0,
      lastJump: false, lastPower: false, lastInteract: false, lastReload: false, edgeFire: false, edgeJump: false, edgePower: false, edgeInteract: false, edgeMelee: false, lastMelee: false, edgeReload: false, edgeGrenade: false, lastGrenade: false,
-   token: randomUUID(), disconnectedAt: null, spectate: isSpectator, voiceSession: null, playerId: identity?.profile.id ?? null, playerToken: identity?.token ?? null };
+   token: randomUUID(), disconnectedAt: null, spectate: isSpectator, voiceSession: null, playerId: identity?.profile.id ?? null, playerToken: identity?.token ?? null, deltaVersion: delta, snapshotBase: null };
   this.peers.set(peerId, peer);
   if (!this.hostId && !isSpectator) this.hostId = peerId;
   this.send(peerId, { type: 'welcome', v: PROTOCOL_VERSION, peerId, roomId: this.id, host: peerId === this.hostId, token: peer.token, spectate: isSpectator, profile: identity?.profile ?? null, progressToken: peer.playerToken });
@@ -224,7 +235,9 @@ export class Room {
   if (requestedPlayer && active) this.send(peerId, { type: 'error', message: 'Match in progress — you joined as a spectator.' });
   if (isSpectator && this.started && !this.roundOver && this.match) {
    this.send(peerId, { type: 'start', config: { ...this.match.config }, mapId: this.match.arena.id });
-     this.send(peerId, { type: 'snapshot', seq: ++this.seq, acks: { [this.peers.get(peerId)?.actorId ?? -1]: 0 }, state: this.wireState() });
+    const state = this.wireState(), seq = ++this.seq;
+    peer.snapshotBase = { seq, state };
+    this.send(peerId, { type: 'snapshot', seq, acks: { [this.peers.get(peerId)?.actorId ?? -1]: 0 }, state });
    } else if (isSpectator && this.match?.over) {
     this.send(peerId, { type: 'results', state: this.match.snapshot() });
    }
@@ -278,6 +291,10 @@ export class Room {
   this.rematchVotes.clear();
   this.tickAcc = 0;
   this.broadcastAt = 0;
+  // A new match invalidates every delta chain: the first post-start frame is a
+  // full snapshot and each peer's base is reset.
+  this.lastSnapshot = null;
+  for (const p of this.peers.values()) p.snapshotBase = null;
   this.broadcast(this.lobby());
   this.broadcast({ type: 'start', config: { ...this.config }, mapId: this.mapId });
   return true;
@@ -464,7 +481,29 @@ export class Room {
    this.tickAcc -= RULES.dt;
    steps++;
     this.broadcastAt += RULES.dt;
-     if (!broadcasted && this.broadcastAt >= this.snapshotInterval) { broadcasted = true; this.broadcastAt = 0; const acks = {}; for (const p of this.peers.values()) if (p.actorId !== null) acks[p.actorId] = p.appliedSeq; this.broadcast({ type: 'snapshot', seq: ++this.seq, acks, state: this.wireState() }); }
+     if (!broadcasted && this.broadcastAt >= this.snapshotInterval) {
+      broadcasted = true; this.broadcastAt = 0;
+      const state = this.wireState();
+      const seq = ++this.seq;
+      const acks = {};
+      for (const p of this.peers.values()) if (p.actorId !== null) acks[p.actorId] = p.appliedSeq;
+      const prev = this.lastSnapshot;
+      const keyframe = this.keyframeEvery > 0 && seq % this.keyframeEvery === 0;
+      // The patch is identical for every peer whose base is the previous
+      // broadcast, so it is computed once per tick rather than once per peer.
+      let patch = null;
+      if (!keyframe && prev) {
+       patch = snapshotDelta(prev.state, state);
+       if (patch && wireSize({ type: MESSAGE.SNAPSHOT_DELTA, seq, base: prev.seq, acks, patch }) + SNAPSHOT_DELTA_MIN_BYTES >= wireSize({ type: MESSAGE.SNAPSHOT, seq, acks, state })) patch = null;
+      }
+      for (const p of this.peers.values()) {
+       const canDelta = !!patch && p.deltaVersion >= SNAPSHOT_DELTA_VERSION && prev && p.snapshotBase?.seq === prev.seq;
+       if (canDelta) { this.send(p.id, { type: MESSAGE.SNAPSHOT_DELTA, v: PROTOCOL_VERSION, seq, base: prev.seq, acks, patch }); this.deltaFrames++; }
+       else { this.send(p.id, { type: MESSAGE.SNAPSHOT, v: PROTOCOL_VERSION, seq, acks, state }); this.fullFrames++; }
+       p.snapshotBase = { seq, state };
+      }
+      this.lastSnapshot = { seq, state };
+     }
      if (this.match.over) { ended = true; break; }
   }
   this.deliverEvents();

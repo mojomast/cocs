@@ -447,6 +447,17 @@ test('NetHarness reconciles prediction under latency with zero divergence and de
  assert.ok(harness.stats.dropped === 0);
 });
 
+test('NetHarness delta frames shrink sharply with id-keyed array diffing', () => {
+ const harness = new NetHarness({mapId: 'crosswire', config: {humanCount: 1, botCount: 7, timeLimit: 60}, seed: 3, latency: 3, delta: true, keyframeEvery: 30});
+ for (let i = 0; i < 180; i++) harness.step({forward: 1, right: i % 5 === 0 ? 1 : 0});
+ harness.flush();
+ const avgDelta = harness.stats.deltaBytes / harness.stats.deltaFrames;
+ const avgFull = harness.stats.fullBytes / harness.stats.fullFrames;
+ assert.ok(harness.stats.deltaFrames > 5, 'deltas are emitted');
+ assert.ok(avgDelta < avgFull * 0.5, `average delta ${avgDelta.toFixed(0)}B should be far below a full frame ${avgFull.toFixed(0)}B`);
+ assert.ok(harness.divergence() < 1e-6, `shadow still converges (${harness.divergence()})`);
+});
+
 test('NetHarness recovers from packet loss and re-syncs on a keyframe', () => {
  const harness = new NetHarness({mapId: 'crosswire', config: {humanCount: 1, botCount: 0, timeLimit: 60}, seed: 9, latency: 2, loss: .5, delta: true, keyframeEvery: 4});
  for (let i = 0; i < 120; i++) harness.step({forward: 1});
