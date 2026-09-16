@@ -131,7 +131,7 @@ export function killFeedWeapon(entry, weapons = []) {
 export const teamName = team => Number(team) === 0 ? 'RED' : Number(team) === 1 ? 'BLUE' : `TEAM ${team}`;
 
 export function suddenDeathBanner(hud) {
-  return hud?.suddenDeath === true && hud?.over !== true ? { text: 'SUDDEN DEATH', detail: 'NEXT SCORE WINS' } : null;
+  return (hud?.suddenDeath === true || hud?.objectives?.suddenDeath === true) && hud?.over !== true ? { text: 'SUDDEN DEATH', detail: 'NEXT SCORE WINS' } : null;
 }
 
 const CAPTION_EVENTS = Object.freeze({shot:'Gunfire',explosion:'Explosion','vehicle-shot':'Vehicle gunfire',grenade:'Grenade out',melee:'Melee',reload:'Reloading',pickup:'Pickup',powerup:'Powerup','vehicle-enter':'Mounted vehicle','vehicle-exit':'Dismounted vehicle','vehicle-destroyed':'Vehicle destroyed','vehicle-splatter':'Vehicle splatter','zone-capture':'Zone captured','zone-score':'Objective scoring','zone-neutralized':'Zone neutralized','flag-pickup':'Flag taken','flag-return':'Flag returned','flag-drop':'Flag dropped',capture:'Flag captured','assault-sector-captured':'Sector captured','assault-sector-lost':'Sector lost','assault-breach':'Sector breached','payload-checkpoint':'Checkpoint reached','payload-delivered':'Payload delivered','soccer-goal':'Goal','killstreak':'Killstreak',death:'Elimination','mission-message':'Mission update','mission-won':'Mission complete','mission-lost':'Mission failed','horde-wave':'Wave incoming','horde-wave-cleared':'Wave cleared','horde-resupply':'Resupplied','horde-upgrade':'Upgrade available','horde-upgrade-selected':'Upgrade acquired','enemy-detonate':'Sapper detonation','singleplayer-checkpoint':'Checkpoint saved','npc-deploy':'Contacts','story-line':'Mission briefing','npc-bark':'Transmission','boss-phase':'Boss phase','armsrace-promote':'Ladder up','armsrace-demote':'Ladder down','juggernaut-transfer':'Crown taken','elimination-life':'Team life lost','vip-deploy':'VIP deployed','vip-down':'VIP down','vip-extracted':'VIP extracted','holdout-progress':'Holdout progress','holdout-win':'Holdout won','uplink-capture':'Uplink captured','uplink-stage':'Uplink advanced','uplink-win':'Uplink won','objective-win':'Objective secured','enemy-telegraph':'Incoming attack','boss-slam':'Boss slam','boss-summon':'Boss summon','mender-heal':'Ally healed','overseer-aura':'Overseer aura','phalanx-shield':'Phalanx shield','enemy-flank':'Flanking','enemy-artillery':'Artillery incoming','race-coin':'Coin collected','race-box':'Item box','race-boost':'Speed boost','race-item':'Item deployed','race-hazard-hit':'Hazard hit','race-lap':'Lap complete','race-finish':'Race finish'});
@@ -335,8 +335,6 @@ export const modeGoal = mode => {
   if (score === 'juggernaut') return 'CROWN POINTS';
   if (score === 'elimination') return 'TEAM LIVES';
   if (score === 'goals') return 'GOALS';
-  if (score === 'juggernaut') return 'CROWN POINTS';
-  if (score === 'elimination') return 'TEAM LIVES';
   return isTeamMode(mode) ? 'TEAM FRAGS' : 'FRAGS';
 };
 
@@ -346,6 +344,9 @@ export const modeTargetText = (mode, target) => {
   if (mode?.id === 'armsrace') return 'CLIMB THE LADDER';
   if (mode?.id === 'juggernaut') return 'HOLD THE CROWN · MOST POINTS';
   if (mode?.id === 'team-elimination') return Number.isFinite(limit) ? `TEAM LIVES · ${limit} EACH` : 'TEAM LIVES REMAINING';
+  if (mode?.id === 'holdout') return 'HOLD A QUORUM';
+  if (mode?.id === 'uplink') return 'RUN THE RELAY';
+  if (mode?.id === 'vip-escort') return 'ESCORT THE VIP';
   const goal = modeGoal(mode);
   return Number.isFinite(limit) ? `FIRST TO ${limit} ${goal}` : goal;
 };
@@ -373,7 +374,10 @@ export const flagText = hud => {
 
 export const modeColumns = mode => mode === 'ctf' ? [['captures', 'CAP'], ['flagPickups', 'PICK'], ['flagReturns', 'RET'], ['flagDrops', 'DROP']]
   : mode === 'koth' ? [['objectiveTime', 'HILL TIME'], ['objectiveCaptures', 'CAP'], ['objectiveContests', 'CONTEST']]
-    : mode === 'domination' || mode === 'combined-arms' ? [['objectiveTime', 'ZONE TIME'], ['objectiveCaptures', 'CAP'], ['objectiveNeutralizations', 'NEUT'], ['objectiveContests', 'CONTEST']]
+    : mode === 'holdout' ? [['objectiveTime', 'ZONE TIME'], ['objectiveCaptures', 'CAP'], ['objectiveContests', 'CONTEST']]
+      : mode === 'uplink' ? [['objectiveCaptures', 'RELAY'], ['objectiveContests', 'CONTEST']]
+        : mode === 'vip-escort' ? [['objectiveTime', 'ESCORT TIME'], ['objectiveCaptures', 'EXTRACT']]
+          : mode === 'domination' || mode === 'combined-arms' ? [['objectiveTime', 'ZONE TIME'], ['objectiveCaptures', 'CAP'], ['objectiveNeutralizations', 'NEUT'], ['objectiveContests', 'CONTEST']]
       : mode === 'assault' ? [['objectiveCaptures', 'SECTORS'], ['objectiveTime', 'SECTOR TIME']]
         : mode === 'payload' ? [['objectiveCaptures', 'CHECKPOINTS'], ['objectiveTime', 'CART TIME']]
           : mode === 'armsrace' ? [['ladder', 'RUNG'], ['weapon', 'WEAPON']]
@@ -386,6 +390,9 @@ export const modePrimary = (mode, actor) => {
   const stats = scoreStats(actor);
   if (mode === 'ctf') return [stats.captures, stats.flagPickups + stats.flagReturns + stats.flagDrops];
   if (mode === 'koth' || mode === 'domination' || mode === 'combined-arms') return [stats.objectiveTime, stats.objectiveCaptures];
+  if (mode === 'holdout') return [stats.objectiveTime, stats.objectiveCaptures];
+  if (mode === 'uplink') return [stats.objectiveCaptures, stats.objectiveContests];
+  if (mode === 'vip-escort') return [stats.objectiveTime, stats.objectiveCaptures];
   if (mode === 'assault' || mode === 'payload') return [stats.objectiveCaptures, stats.objectiveTime];
   if (mode === 'armsrace') return [Number(actor?.ladder) || 0, Number(actor?.frags) || 0];
   if (mode === 'puma-soccer') return [Number(actor?.goals) || Number(actor?.scoreStats?.goals) || 0];
@@ -429,7 +436,7 @@ export function commandBrief(hud, player, mode) {
     const next = WEAPONS[Number(player?.weapon) + 1]?.name;
     return {title: 'CLIMB THE LADDER', action: 'Score an elimination to advance one weapon up the rack. Reach the final rung to win.', detail: `${ladder.label} · ${current ?? 'STARTING WEAPON'}`, status: next ? `NEXT WEAPON · ${next}` : 'FINAL RUNG · LAST WEAPON'};
   }
-  if (kind === 'koth' || id === 'koth') { const zone = objective?.zones?.[0], owner = zone?.owner === null || zone?.owner === undefined ? 'NEUTRAL' : teamName(zone.owner), held = zone?.owner === player?.team; return {title: zone?.contested ? 'CONTEST THE HILL' : held ? 'HOLD THE HILL' : zone?.owner === null ? 'CAPTURE THE HILL' : 'BREAK THEIR CONTROL', action: zone?.contested ? 'Clear the enemy from the hill to restart scoring.' : held ? 'Stay inside the hill and protect the zone.' : 'Push the hill and deny their control.', detail: `${team} ${scoreText(teamScore(hud, player?.team))} / ${target} · HILL ${owner}`, status: `${Math.round(zone?.progress ?? 0)}% CAPTURED · ${zone?.contested ? 'CONTESTED' : owner + ' CONTROL'}`}; }
+  if ((kind === 'koth' || id === 'koth') && id !== 'holdout' && id !== 'uplink' && id !== 'vip-escort') { const zone = objective?.zones?.[0], owner = zone?.owner === null || zone?.owner === undefined ? 'NEUTRAL' : teamName(zone.owner), held = zone?.owner === player?.team; return {title: zone?.contested ? 'CONTEST THE HILL' : held ? 'HOLD THE HILL' : zone?.owner === null ? 'CAPTURE THE HILL' : 'BREAK THEIR CONTROL', action: zone?.contested ? 'Clear the enemy from the hill to restart scoring.' : held ? 'Stay inside the hill and protect the zone.' : 'Push the hill and deny their control.', detail: `${team} ${scoreText(teamScore(hud, player?.team))} / ${target} · HILL ${owner}`, status: `${Math.round(zone?.progress ?? 0)}% CAPTURED · ${zone?.contested ? 'CONTESTED' : owner + ' CONTROL'}`}; }
   if (id === 'holdout') { const st = hud?.objectives, hp = st?.holdProgress ?? {}, held = Number(hp[player?.team]) || 0, need = Number(st?.holdSeconds) || 30, owner = st?.holdTeam === null || st?.holdTeam === undefined ? 'NOBODY' : teamName(st.holdTeam); return {title: 'HOLD THE QUORUM', action: 'Own a majority of the zones together and keep them for the full window to take the round.', detail: `${team} · ${Math.round(held)}s / ${need}s HELD`, status: `HOLDING · ${owner}`}; }
  if (id === 'uplink') { const st = hud?.objectives, stage = Number(st?.stage) || 0, total = Math.max(1, Number(st?.stageCount) || 1), caps = st?.stageCaptures ?? {}; return {title: 'RUN THE RELAY', action: 'Capture each relay point in sequence before the enemy takes the last one back.', detail: `${team} · RELAY ${stage + 1} / ${total}`, status: `CAPTURED · ${Number(caps[player?.team]) || 0} / ${total}`}; }
  if (id === 'vip-escort') { const st = hud?.objectives, down = st?.vipDead === true; return {title: down ? 'VIP DOWN' : 'ESCORT THE VIP', action: down ? 'The VIP is down; the defenders take the round.' : 'Move the VIP to the extraction beacon and hold the pad against the other squad.', detail: `${team} · VIP ${down ? 'DOWN' : 'ACTIVE'}`, status: down ? 'ROUND LOST' : 'HOLD THE PAD'}; }

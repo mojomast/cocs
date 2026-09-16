@@ -14,10 +14,12 @@ export const scoreStatsOf = actor => {
 
 export const rankTuple = (actor, mode) => {
   const frags = Number(actor?.frags) || 0;
-  if (mode === 'ctf' || mode === 'koth' || mode === 'domination' || mode === 'combined-arms' || mode === 'assault' || mode === 'payload') {
+  if (mode === 'ctf' || mode === 'koth' || mode === 'domination' || mode === 'combined-arms' || mode === 'assault' || mode === 'payload' || mode === 'holdout' || mode === 'uplink' || mode === 'vip-escort') {
     const stats = scoreStatsOf(actor) ?? ZERO_STATS;
     if (mode === 'ctf') return [stats.captures, objectiveActions(stats), frags];
     if (mode === 'assault' || mode === 'payload') return [stats.objectiveCaptures, stats.objectiveTime, frags];
+    if (mode === 'uplink') return [stats.objectiveCaptures, stats.objectiveContests, frags];
+    if (mode === 'vip-escort') return [stats.objectiveCaptures, stats.objectiveTime, frags];
     return [stats.objectiveTime, stats.objectiveCaptures, frags];
   }
   if (mode === 'puma-soccer') return [scoreStatsOf(actor)?.goals ?? 0, frags];

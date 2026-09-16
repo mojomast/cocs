@@ -535,3 +535,30 @@ test('grenade is a one-shot edge and cannot auto-repeat while held',()=>{
  room.input(1,{grenade:true});
  assert.equal(peer.edgeGrenade,true,'a fresh press re-arms');
 });
+
+test('votes from a disconnected peer stop counting toward quorum',()=>{
+ const room=new Room('r',rng(),{graceMs:600000});
+ room.join(1,'A');room.join(2,'B');room.join(3,'C');room.join(4,'D');
+ room.drain();
+ room.mapVote(1,'forge');room.mapVote(2,'forge');
+ room.requestRematch(1);room.requestRematch(2);
+ assert.equal(room.lifecycle().mapVotes.forge,2);
+ assert.equal(room.lifecycle().rematch,2);
+ room.disconnect(2);
+ assert.equal(room.lifecycle().mapVotes.forge,1,'a disconnected voter no longer counts');
+ assert.equal(room.lifecycle().rematch,1);
+});
+
+test('a reconnecting peer must ready up again',()=>{
+ const room=new Room('r',rng());
+ room.join(1,'A','chatgpt','openclaw');
+ const token=room.drain().find(m=>m.msg.type==='welcome')?.msg.token;
+ assert.ok(token,'the server issued a reconnect token');
+ assert.equal(room.setReady(1,true),true);
+ assert.equal(room.lifecycle().ready,1);
+ room.drain();
+ room.join(9,'A','chatgpt','openclaw',token);
+ const lobby=room.drain().find(m=>m.msg.type==='lobby')?.msg;
+ assert.equal(lobby.players.find(p=>p.peerId===9).ready,false,'reconnect clears ready');
+ assert.equal(room.lifecycle().ready,0);
+});

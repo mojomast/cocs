@@ -16,6 +16,23 @@ record in [VERIFICATION.md](VERIFICATION.md).
 
 ---
 
+## v4.14 · TUNED — 2026-09-16
+
+- **Objective variants:** Holdout, Uplink and VIP Escort get the right
+  `commandBrief`, `modeColumns`/`modePrimary`, `rankTuple` ordering and
+  `modeTargetText`; the Uplink brief no longer falls through to the KOTH copy
+  (the engine reports `kind:'koth'`). `game/hud.test.mjs` now uses the real kind.
+- **Sudden death:** `suddenDeathBanner` also reads `objectives.suddenDeath`, so
+  Juggernaut and Team Elimination banner again.
+- **Bots:** `objectiveMode` includes the three objective variants so supply runs
+  route to the objective.
+- **Campaign:** `mission-message` events surface as HUD notices.
+- **Server:** `lifecycle()` counts only connected peers' map/rematch votes, and a
+  reconnect clears the old peer's ready flag and votes.
+- **Menu:** Match Setup restores focus to its trigger
+  (`[data-setup-trigger]`), Theater camera hotkeys cover rigs 1-8, and the title
+  overlay no longer intercepts clicks meant for the footer GitHub link.
+
 ## v4.13 · ATTRACT — 2026-09-16
 
 - **Broadcast scope:** the demo announcement lower-third is part of the title

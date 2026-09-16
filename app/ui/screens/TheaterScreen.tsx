@@ -31,7 +31,7 @@ function PlaybackDock({info,paused,time,speed,rig,rigs,clock,onPlayPause,onResta
    {rigs.map((name:string,i:number)=><Btn key={name} size="sm" variant={rig===name?'primary':'secondary'} onClick={()=>onRig(name)}><b>{i+1}</b>{name.toUpperCase()}</Btn>)}
    <Btn size="sm" onClick={onNextSubject}>NEXT SUBJECT</Btn>
   </div>
-  <p className="field-note">SPACE play/pause · ←/→ seek · R restart · 1–7 camera · [ ] next subject · ESC exit · drag the timeline to scrub</p>
+  <p className="field-note">SPACE play/pause · ←/→ seek · R restart · 1–8 camera · [ ] next subject · ESC exit · drag the timeline to scrub</p>
  </Panel></ActionRail>;
 }
 

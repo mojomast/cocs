@@ -425,6 +425,14 @@ assets. Full procedure and verification: [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md
 The last five releases. The full history lives in
 [docs/CHANGELOG.md](docs/CHANGELOG.md).
 
+### v4.14 · TUNED — 2026-09-16
+- Holdout/Uplink/VIP Escort show the correct brief, scoreboard columns, ranking and
+  match-start target; Juggernaut/Team Elimination banner sudden death again.
+- Bots treat the objective variants as objective modes; campaign announce beats
+  surface as HUD notices.
+- Server vote quorums ignore disconnected peers and a reconnect must re-ready;
+  menu focus, Theater camera hotkeys and the title overlay got fixes.
+
 ### v4.13 · ATTRACT — 2026-09-16
 - The demo announcement bar is part of the title-screen foreground and the new
   back-to-demo view, so it no longer covers main-menu controls.
@@ -450,12 +458,6 @@ The last five releases. The full history lives in
 ### v4.10 · CLARITY — 2026-09-15
 - The title demo no longer reveals the operator model between scenarios: the view
   decides from the showcase setting itself, not from a not-yet-ready snapshot.
-
-### v4.9 · INVITE — 2026-09-15
-- Copy an invite link from the lobby or room browser; opening it auto-joins that
-  room, with a fallback to the browser if the code has closed.
-- The title-screen vignette was lightened and the broadcast card made darker and
-  higher-contrast so it stays readable over the demo.
 
 ## Parody and attribution
 

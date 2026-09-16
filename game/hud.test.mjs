@@ -296,6 +296,7 @@ test('spectator cycling starts at the first live actor when the current target i
 
 test('the sudden death banner shows until the match ends',()=>{
  assert.equal(suddenDeathBanner({suddenDeath:true,over:false})?.text,'SUDDEN DEATH');
+ assert.equal(suddenDeathBanner({objectives:{suddenDeath:true},over:false})?.text,'SUDDEN DEATH','self-managed objective sudden death still banners');
  assert.equal(suddenDeathBanner({suddenDeath:true,over:true}),null);
  assert.equal(suddenDeathBanner({}),null);
 });
@@ -559,9 +560,21 @@ test('objective-variant modes get a real briefing instead of generic frag copy',
  const holdout=commandBrief({config:{mode:'holdout'},objectives:{kind:'domination',holdCount:2,holdSeconds:30,holdProgress:{0:12,1:4},holdTeam:0}},me,modeById('holdout'));
  assert.equal(holdout.title,'HOLD THE QUORUM');
  assert.match(holdout.detail,/HELD/);
- const uplink=commandBrief({config:{mode:'uplink'},objectives:{kind:'uplink',stage:1,stageCount:3,stageCaptures:{0:1,1:0}}},me,modeById('uplink'));
+ const uplink=commandBrief({config:{mode:'uplink'},objectives:{kind:'koth',stage:1,stageCount:3,stageCaptures:{0:1,1:0}}},me,modeById('uplink'));
  assert.equal(uplink.title,'RUN THE RELAY');
  assert.match(uplink.detail,/RELAY 2 \/ 3/);
  const vip=commandBrief({config:{mode:'vip-escort'},objectives:{kind:'extraction',vipDead:false}},me,modeById('vip-escort'));
  assert.equal(vip.title,'ESCORT THE VIP');
+});
+
+test('objective-variant modes keep their scoreboard columns, ranking and start target', () => {
+  assert.deepEqual(modeColumns('holdout'), [['objectiveTime', 'ZONE TIME'], ['objectiveCaptures', 'CAP'], ['objectiveContests', 'CONTEST']]);
+  assert.deepEqual(modeColumns('uplink'), [['objectiveCaptures', 'RELAY'], ['objectiveContests', 'CONTEST']]);
+  assert.deepEqual(modeColumns('vip-escort'), [['objectiveTime', 'ESCORT TIME'], ['objectiveCaptures', 'EXTRACT']]);
+  assert.deepEqual(modePrimary('uplink', {scoreStats: {objectiveCaptures: 2, objectiveContests: 5}}), [2, 5]);
+  assert.deepEqual(modePrimary('holdout', {scoreStats: {objectiveTime: 12, objectiveCaptures: 1}}), [12, 1]);
+  assert.deepEqual(modePrimary('vip-escort', {scoreStats: {objectiveTime: 9, objectiveCaptures: 3}}), [9, 3]);
+  assert.equal(modeTargetText(modeById('holdout')), 'HOLD A QUORUM');
+  assert.equal(modeTargetText(modeById('uplink')), 'RUN THE RELAY');
+  assert.equal(modeTargetText(modeById('vip-escort')), 'ESCORT THE VIP');
 });

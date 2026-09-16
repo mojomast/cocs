@@ -206,9 +206,10 @@
 .rail-actions{display:flex;align-items:center;gap:10px;flex-wrap:wrap}
 
 /* ---------- Title / attract ---------- */
-.title-stage{position:absolute;inset:0;z-index:5;display:flex;flex-direction:column;align-items:center;justify-content:center;
+.title-stage{position:absolute;inset:0;z-index:5;pointer-events:none;display:flex;flex-direction:column;align-items:center;justify-content:center;
   gap:16px;padding:var(--safe-top) 6vw var(--safe-bottom);text-align:center;
   background:radial-gradient(ellipse at 50% 38%,rgba(4,9,12,0),rgba(4,9,12,.16) 55%,rgba(2,6,8,.6) 100%)}
+.title-stage .btn{pointer-events:auto}
 .title-wordmark{font-size:clamp(46px,min(13vw,20dvh),150px);line-height:.92;letter-spacing:-.05em;
   font-weight:900;margin:0;color:#f0fbf6;text-shadow:0 4px 34px rgba(0,0,0,.75)}
 .title-wordmark span{color:var(--accent);font-weight:400}

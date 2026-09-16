@@ -1,12 +1,19 @@
 // In-game patch notes. The title-screen footer is the running version; this
 // module is the human-readable release digest the Changelog screen renders. The
 // full historical record lives in docs/CHANGELOG.md and is linked from the UI.
-export const RELEASE_VERSION = 'v4.13';
-export const RELEASE_CODENAME = 'ATTRACT';
+export const RELEASE_VERSION = 'v4.14';
+export const RELEASE_CODENAME = 'TUNED';
 export const REPO_URL = 'https://github.com/mojomast/tokenarena';
 export const FULL_CHANGELOG_URL = `${REPO_URL}/blob/main/docs/CHANGELOG.md`;
 
 export const CHANGELOG = [
+  {version:'v4.14',codename:'TUNED',date:'2026-09-16',tag:'Objective-mode and lobby correctness',highlights:[
+    'Holdout, Uplink and VIP Escort now show the correct command brief, scoreboard columns, ranking and match-start target instead of generic frag or hill copy.',
+    'Juggernaut and Team Elimination raise the SUDDEN DEATH banner that their self-managed objective state sets.',
+    'Bots treat Holdout, Uplink and VIP Escort as objective modes and resupply toward the objective rather than wandering the map.',
+    'Campaign announce beats are surfaced as HUD notices, and the server no longer lets a disconnected or reconnected peer keep a map or rematch vote; a reconnect must ready up again.',
+    'Menu polish: Match Setup returns focus to its trigger, the Theater camera hotkeys cover all eight rigs, and the title overlay no longer blocks the footer GitHub link.',
+  ]},
   {version:'v4.13',codename:'ATTRACT',date:'2026-09-16',tag:'Title-screen demo controls',highlights:[
     'The demo announcement bar now belongs to the title screen foreground, so it no longer floats over the main-menu controls.',
     'The menu top bar gains a fullscreen toggle that mirrors the browser fullscreen state.',

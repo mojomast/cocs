@@ -82,9 +82,13 @@ export class Room {
   // A rematch needs a strict majority (> half), not a ratio-rounded quorum, so
   // one of two players cannot restart the match on their own.
   const rematchNeeded = Math.max(1, Math.floor(connected.length / 2) + 1);
+  // Only connected, non-spectator peers count toward a vote quorum: a seat held
+  // open after a disconnect (or superseded by a reconnect) must not keep voting.
+  const live = new Set(connected.map(p => p.id));
   const votes = {};
-  for (const [mapId, voters] of this.mapVotes) if (voters.size) votes[mapId] = voters.size;
+  for (const [mapId, voters] of this.mapVotes) { const count = [...voters].filter(id => live.has(id)).length; if (count) votes[mapId] = count; }
   const winner = Object.entries(votes).sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))[0]?.[0] ?? null;
+  const rematch = [...this.rematchVotes].filter(id => live.has(id)).length;
   return {
    phase: this.phase,
    revision: this.lifecycleRevision,
@@ -94,9 +98,9 @@ export class Room {
    readyRatio: connected.length ? readyCount / connected.length : 0,
    mapVotes: votes,
    mapVoteWinner: winner,
-   rematch: this.rematchVotes.size,
-   rematchNeeded,
-   rematchReady: this.roundOver && this.started && this.rematchVotes.size >= rematchNeeded,
+    rematch,
+    rematchNeeded,
+    rematchReady: this.roundOver && this.started && rematch >= rematchNeeded,
   };
  }
  lobby() {
@@ -175,8 +179,9 @@ export class Room {
     }
     const oldId = existing.id;
     this.peers.delete(oldId);
-     existing.id = peerId;
-      existing.disconnectedAt = null;
+      existing.id = peerId;
+       this.ready.delete(oldId); this.rematchVotes.delete(oldId); for (const voters of this.mapVotes.values()) voters.delete(oldId); existing.ready = false;
+       existing.disconnectedAt = null;
       existing.voiceSession = null;
      existing.inputRate = null;
      existing.latest = null;

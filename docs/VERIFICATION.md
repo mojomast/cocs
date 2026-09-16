@@ -1,5 +1,29 @@
 # COCS verification report
 
+## Release 4.14 - Objective-mode and lobby correctness
+
+Read-only audits of gameplay/sim, UI wiring and netcode/server drove this pass.
+
+- **Objective variants:** `commandBrief` checks the variant ids before the
+  `kind`-based KOTH branch (Uplink reports `kind:'koth'`), and
+  `modeColumns`/`modePrimary`/`modeTargetText` plus `outcome.rankTuple` now cover
+  Holdout/Uplink/VIP Escort. `game/hud.test.mjs` uses the real `kind:'koth'`
+  fixture; new assertions cover columns/primary/target.
+- **Sudden death:** `suddenDeathBanner` also reads `objectives.suddenDeath`
+  (Juggernaut/Team Elimination self-manage it); asserted in `game/hud.test.mjs`.
+- **Bots:** `objectiveMode` includes the three variants.
+- **Campaign:** `app/page.tsx` maps `mission-message` events into the HUD notice.
+- **Server:** `Room.lifecycle()` counts only connected peers' map/rematch votes,
+  and the reconnect branch clears the old peer's ready flag and votes; two new
+  `server/room.test.mjs` tests. (A proposed duplicate-START guard was reverted:
+  it conflicts with the pinned "start clears pending and held fire" contract.)
+- **Menu:** Match Setup focuses `[data-setup-trigger]`, Theater hotkeys cover
+  rigs 1-8, and `.title-stage` is `pointer-events:none` with `.title-stage .btn`
+  interactive so the footer GitHub link is clickable.
+
+Verification: game **1329/1329**, server **143/143**, `tests/` **7/7**, `tsc`
+clean, lint 0 errors. Not browser/GPU verified.
+
 ## Release 4.13 - Title-screen demo controls
 
 - **Broadcast scope:** `app/page.tsx` renders `DemoBroadcast` only while
