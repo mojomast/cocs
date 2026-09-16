@@ -1,12 +1,17 @@
 // In-game patch notes. The title-screen footer is the running version; this
 // module is the human-readable release digest the Changelog screen renders. The
 // full historical record lives in docs/CHANGELOG.md and is linked from the UI.
-export const RELEASE_VERSION = 'v4.12';
-export const RELEASE_CODENAME = 'SYNC';
+export const RELEASE_VERSION = 'v4.13';
+export const RELEASE_CODENAME = 'ATTRACT';
 export const REPO_URL = 'https://github.com/mojomast/tokenarena';
 export const FULL_CHANGELOG_URL = `${REPO_URL}/blob/main/docs/CHANGELOG.md`;
 
 export const CHANGELOG = [
+  {version:'v4.13',codename:'ATTRACT',date:'2026-09-16',tag:'Title-screen demo controls',highlights:[
+    'The demo announcement bar now belongs to the title screen foreground, so it no longer floats over the main-menu controls.',
+    'The menu top bar gains a fullscreen toggle that mirrors the browser fullscreen state.',
+    'A "Back to demo" button returns to the live demo, hides the title overlay, and offers on-screen and arrow-key controls to cycle through the demo modes.',
+  ]},
   {version:'v4.12',codename:'SYNC',date:'2026-09-15',tag:'Version sync, checkpoints and feedback',highlights:[
     'A client open across a deploy now detects the newer build via /api/version and over a protocol-version change, and offers a one-click reload.',
     'Campaign checkpoints persist across sessions and resume the mission at the banked step; the checkpoint clears when the mission is won.',

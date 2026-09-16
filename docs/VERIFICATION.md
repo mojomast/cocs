@@ -1,5 +1,25 @@
 # COCS verification report
 
+## Release 4.13 - Title-screen demo controls
+
+- **Broadcast scope:** `app/page.tsx` renders `DemoBroadcast` only while
+  `!entered`, so the lower-third is part of the title screen and the back-to-demo
+  view and never covers main-menu controls; `.demo-broadcast` sits in the title
+  foreground (`z-index:6`).
+- **Fullscreen:** the menu top bar (`headActions`) gains a toggle bound to
+  `toggleFullscreen`/`fullscreen`, with `aria-pressed` and a Maximize/Minimize
+  icon swap.
+- **Back to demo:** a `demoOnly` view hides the title overlay, keeps the live
+  showcase running, and renders `.demo-controls` (previous/next mode, enter);
+  `cycleShowcase` rebuilds the reel at a chosen `SHOWCASES` index and arrow keys
+  cycle modes.
+
+Verification: game **1328/1328**, `tests/` **7/7** (incl. `ui-contract`), `tsc`
+clean, lint 0 errors. A Playwright probe on the live build reported no console
+errors and confirmed: broadcast present on the title screen, absent in the menu,
+restored by Back to Demo, and next-mode changed the demo `koth -> domination`.
+Fullscreen is DOM/`aria` verified; actual fullscreen entry is browser-manual.
+
 ## Release 4.12 - Build sync, campaign checkpoints and feedback
 
 - **Build sync:** `app/api/version/route.ts` returns `RELEASE_VERSION` with

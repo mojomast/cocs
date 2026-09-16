@@ -4,7 +4,7 @@ import type {ScreenProps} from '../contract';
 import {ActionRail,Banner,Btn,Meter,PageHead,Panel,SelectCard,Shell,Stats,TopBar} from '../primitives';
 
 export function SelectionScreen({ui}:ScreenProps){
-  const {entered,showcaseLive,character,chooseCharacter,CHARACTERS=[],selected,harness,setHarness,HARNESSES=[],power,powerIcon,config,start,startSpectate,quickStart,setSetupOpen,setSingleOpen,changeMode,connectNet,openBrowser,netConnected,profile,demos=[],previewRef,headActions,notice,challenges=[],presets=[],loadPreset,deletePreset,openSettings}=ui;
+  const {entered,showcaseLive,character,chooseCharacter,CHARACTERS=[],selected,harness,setHarness,HARNESSES=[],power,powerIcon,config,start,startSpectate,quickStart,setSetupOpen,setSingleOpen,changeMode,connectNet,openBrowser,netConnected,profile,demos=[],previewRef,headActions,backToDemo,notice,challenges=[],presets=[],loadPreset,deletePreset,openSettings}=ui;
  const note=character==='claude'?'Enhanced health, armor and speed offset the Claude Code harness lock.':'Each operator trades durability for mobility. Pick the stats that fit your style.';
  const activities=[
   {id:'deathmatch',name:'Quick Match',tag:'Free-for-all · first to the frag limit',icon:<Zap size={20}/>},
@@ -28,6 +28,7 @@ export function SelectionScreen({ui}:ScreenProps){
  </>}>
    <Btn size="sm" variant="ghost" onClick={()=>changeMode('progression')} disabled={!ui.ready||!!ui.error}><Sparkles size={14}/>RANK · LV {profile?.level}</Btn>
    <Btn size="sm" variant="ghost" onClick={()=>changeMode('changelog')} disabled={!ui.ready||!!ui.error}><Sparkles size={14}/>PATCH NOTES</Btn>
+   <Btn size="sm" variant="ghost" onClick={backToDemo} disabled={!ui.ready||!!ui.error}><Film size={14}/>BACK TO DEMO</Btn>
    <Btn size="sm" variant="ghost" onClick={()=>openSettings?.('arsenal')} disabled={!ui.ready||!!ui.error}><Shield size={14}/>ARSENAL</Btn>
    <Btn size="sm" variant="ghost" onClick={()=>{changeMode('theater');ui.refreshDemos?.();}} disabled={!ui.ready||!!ui.error}><Film size={14}/>THEATER{demos.length?` ${demos.length}`:''}</Btn>
   <Btn size="sm" variant="ghost" onClick={startSpectate} disabled={!ui.ready||!!ui.error}><Crosshair size={14}/>SPECTATE</Btn>

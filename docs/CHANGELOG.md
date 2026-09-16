@@ -16,6 +16,17 @@ record in [VERIFICATION.md](VERIFICATION.md).
 
 ---
 
+## v4.13 · ATTRACT — 2026-09-16
+
+- **Broadcast scope:** the demo announcement lower-third is part of the title
+  screen foreground and the new back-to-demo view only, so it no longer covers
+  main-menu controls.
+- **Fullscreen:** the menu top bar gains a fullscreen toggle that reflects the
+  browser fullscreen state (`aria-pressed`, Maximize/Minimize).
+- **Back to demo:** a menu button hides the title overlay, returns to the live
+  demo, and shows playback controls (previous/next mode plus enter); arrow keys
+  cycle modes and Enter/Space/Escape return to the menu.
+
 ## v4.12 · SYNC — 2026-09-15
 
 - **Build sync:** `app/api/version/route.ts` reports `RELEASE_VERSION`; the client

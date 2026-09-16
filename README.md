@@ -425,6 +425,13 @@ assets. Full procedure and verification: [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md
 The last five releases. The full history lives in
 [docs/CHANGELOG.md](docs/CHANGELOG.md).
 
+### v4.13 · ATTRACT — 2026-09-16
+- The demo announcement bar is part of the title-screen foreground and the new
+  back-to-demo view, so it no longer covers main-menu controls.
+- A fullscreen toggle joins the menu top bar.
+- "Back to demo" hides the title overlay and returns to the live demo with
+  on-screen and arrow-key controls to cycle modes.
+
 ### v4.12 · SYNC — 2026-09-15
 - An open tab detects a newer deploy via `/api/version` and a protocol-version
   change, and offers a one-click reload.
@@ -449,16 +456,6 @@ The last five releases. The full history lives in
   room, with a fallback to the browser if the code has closed.
 - The title-screen vignette was lightened and the broadcast card made darker and
   higher-contrast so it stays readable over the demo.
-
-### v4.8 · BROADCAST — 2026-09-15
-- A broadcast-style lower-third overlays the title demo, reporting the live mode,
-  map, score and objective with animated metrics and a scrolling ticker.
-- A Changelog screen joins the menu, backed by the release digest.
-- The demo background no longer flashes the full-screen operator model between
-  scenarios.
-- The documentation was rebuilt: this README plus a full `docs/` reference tree.
-
-  and a full Changelog screen joins the menu.
 
 ## Parody and attribution
 
