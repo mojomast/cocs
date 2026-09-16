@@ -33,8 +33,8 @@
   and per-vertex tint is deterministic and shared across coincident vertices.
 - **Diagnostics:** `game/perf.test.mjs` exercises `GpuTimer` (resolved async
   query, no extension/no WebGL returns null) and `game/view.test.mjs` covers
-  `prepareScene` warming the weapon + viewmodel through `compileAsync`, bounding a
-  stuck compile to a reported timeout, and reporting a rejected compile.
+  `prepareScene` warming the weapon + viewmodel with a bounded synchronous
+  compile and reporting a throwing compile instead of pretending success.
 
 ## Release 6.2 - Native-resolution performance, smooth presentation and sighted optics
 

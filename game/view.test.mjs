@@ -452,40 +452,33 @@ test('resetPresentation clears history so a new match or replay seek snaps, and 
  view.effectPool?.dispose();view.disposeObject(view.scene);
 });
 
-test('prepareScene warms the weapon and bounds a stuck compile, reporting failures',async t=>{
+test('prepareScene warms the weapon and reports compile failures',async t=>{
  // CPU renderer needs no shader warmup.
  const {view:soft,renderer:softRenderer}=fixture(t,{software:true});
  assert.equal((await soft.prepareScene({weapon:0})).reason,'software');
  assert.equal(softRenderer.isSoftware,true);
- // A working compileAsync warms the world and the viewmodel.
+ // A working compile warms the world and the viewmodel.
  const compiled=[];
  const {view,renderer}=fixture(t);
- renderer.compileAsync=async scene=>{compiled.push(scene);return true;};
+ renderer.compile=scene=>{compiled.push(scene);return true;};
  view.scene=new T.Scene();view.camera=new T.PerspectiveCamera();view.weaponScene=new T.Scene();view.weaponCamera=new T.PerspectiveCamera();
  view.modelAssets=new ModelAssets();
  const ok=await view.prepareScene({weapon:0});
  assert.equal(ok.ok,true);
  assert.equal(ok.compiled,true);
  assert.equal(compiled.length,2,'world and viewmodel compile');
- // A compile that never resolves is bounded and reported as a timeout.
- const {view:stuck,renderer:stuckRenderer}=fixture(t);
- stuckRenderer.compileAsync=()=>new Promise(()=>{});
- stuck.scene=new T.Scene();stuck.camera=new T.PerspectiveCamera();stuck.modelAssets=new ModelAssets();
- const timed=await stuck.prepareScene({weapon:0,timeout:400});
- assert.equal(timed.ok,false);
- assert.equal(timed.reason,'timeout');
- // A rejecting compile reports the error rather than pretending success.
+ // A throwing compile reports the error rather than pretending success.
  const {view:broken,renderer:brokenRenderer}=fixture(t);
- brokenRenderer.compileAsync=async()=>{throw new Error('shader exploded');};
+ brokenRenderer.compile=()=>{throw new Error('shader exploded');};
  broken.scene=new T.Scene();broken.camera=new T.PerspectiveCamera();broken.modelAssets=new ModelAssets();
  const failed=await broken.prepareScene({weapon:0});
  assert.equal(failed.ok,false);
  assert.match(failed.reason,/shader exploded/);
 });
 
-test('shader warmup prefers compileAsync and never runs on the CPU renderer',async t=>{
+test('shader warmup compiles the world and viewmodel off the CPU renderer',async t=>{
  const compiled=[];
- const {view,renderer}=fixture(t);renderer.compileAsync=async scene=>{compiled.push(scene);};
+ const {view,renderer}=fixture(t);renderer.compile=scene=>{compiled.push(scene);};
  view.scene=new T.Scene();view.camera=new T.PerspectiveCamera();
  view.weaponScene=new T.Scene();view.weaponCamera=new T.PerspectiveCamera();
  assert.equal(await view.warmup(),true);
@@ -497,7 +490,7 @@ test('shader warmup prefers compileAsync and never runs on the CPU renderer',asy
  const {view:view2,renderer:r2}=fixture(t);r2.compile=()=>sync.push(1);
  view2.scene=new T.Scene();view2.camera=new T.PerspectiveCamera();
  assert.equal(await view2.warmup(),true);
- assert.equal(sync.length,1,'a synchronous-only renderer still warms its world scene');
+ assert.equal(sync.length,1,'a renderer that exposes compile still warms its world scene');
 });
 
 test('repeated weapon swaps keep the viewmodel cache bounded and reuse instances',t=>{

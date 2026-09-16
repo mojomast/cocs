@@ -477,7 +477,7 @@ export class ArenaView{
   this._frameWindow=createFrameWindow(120);this._qualityState={level:null,bad:0,good:0,cool:0};
   // Presentation interpolation state. Off by default so authoritative tests and
   // the multiplayer path are untouched; the host opts in for local play.
-  this._interpAlpha=1;this._interpEnabled=false;this._present={cur:new Map(),prev:new Map(),vehicles:{cur:new Map(),prev:new Map()},rockets:{cur:[],prev:[]},time:null};
+  this._interpAlpha=1;this._interpEnabled=false;this._present={cur:new Map(),prev:new Map(),vehicles:{cur:new Map(),prev:new Map()},rockets:{cur:[],prev:[]},time:null};this._warmupChain=Promise.resolve();
   this.perf={frames:0,lastFrameMs:0,medianFrameMs:0,p95FrameMs:0,renderMs:0,sceneMs:0,submitMs:0,weaponSubmitMs:0,gpuMs:null,calls:0,triangles:0,lines:0,points:0,geometries:0,textures:0,programs:0,passes:[],viewport:{cssWidth:0,cssHeight:0,devicePixelRatio:1,bufferWidth:0,bufferHeight:0,scale:1},tier:'high',reduced:false,qualityAuto:true};
   this._renderMs=0;this._sceneMs=0;
   this.renderer.outputColorSpace=T.SRGBColorSpace;this.renderer.toneMapping=T.ACESFilmicToneMapping;this.renderer.toneMappingExposure=1.2;this.composer=null;this.bloomPass=null;this.vignettePass=null;this.aaPass=null;this._postKey=null;this._postW=0;this._postH=0;this._postRatio=0;this.motionQuery=typeof window!=='undefined'?window.matchMedia?.('(prefers-reduced-motion: reduce)'):undefined;this._applyQuality();
@@ -631,7 +631,17 @@ export class ArenaView{
    // for the active display/quality exist, then compile world + viewmodel shaders.
    // The compile is bounded so a misbehaving renderer can never hang the match;
    // failures are reported in the result rather than treated as success.
-   async prepareScene({weapon=0,visual=null,finish=null,timeout=2500}={}){
+   // Serialize shader warmup/preparation so two three.js compileAsync passes can
+   // never poll the same program list concurrently (which logs a spurious
+   // `isReady` TypeError). Failures never break the chain.
+   _queueWarmup(task){
+    const chain=this._warmupChain??(this._warmupChain=Promise.resolve());
+    const run=chain.then(()=>task());
+    this._warmupChain=run.then(()=>undefined,()=>undefined);
+    return run;
+   }
+   async prepareScene(options={}){return this._queueWarmup(()=>this._prepareScene(options));}
+   async _prepareScene({weapon=0,visual=null,finish=null,timeout=2500}={}){
     const startedAt=(typeof performance!=='undefined'&&performance.now)?performance.now():Date.now();
     const result={ok:false,compiled:false,reason:null,ms:0};
     const elapsed=()=>((typeof performance!=='undefined'&&performance.now)?performance.now():Date.now())-startedAt;
@@ -639,39 +649,36 @@ export class ArenaView{
     try{
      if(Number.isInteger(weapon))try{this._acquireWeapon(weapon,visual,finish);}catch{}
      try{this._applyPostQuality?.();}catch{}
-     const compile=async()=>{
-      if(typeof this.renderer?.compileAsync==='function'){
-       await this.renderer.compileAsync(this.scene,this.camera);
-       if(this.weaponScene&&this.weaponCamera)await this.renderer.compileAsync(this.weaponScene,this.weaponCamera);
-       return true;
-      }
-      if(typeof this.renderer?.compile==='function'){
-       this.renderer.compile(this.scene,this.camera);
-       if(this.weaponScene&&this.weaponCamera)this.renderer.compile(this.weaponScene,this.weaponCamera);
-       return true;
-      }
-      return false;
-     };
-     const bounded=new Promise(resolve=>setTimeout(()=>resolve('timeout'),Math.max(400,Number(timeout)||2500)));
-     const outcome=await Promise.race([compile(),bounded]);
-     if(outcome==='timeout'){result.reason='timeout';}
-     else{result.compiled=outcome===true;result.ok=outcome===true;if(!outcome)result.reason='no-compile-method';}
+     // Synchronous compile is deliberate: three's `compileAsync` polls
+     // `materialProperties.currentProgram`, which is undefined for some materials
+     // (e.g. transparent effect materials), logging an `isReady` TypeError and
+     // never resolving. A synchronous compile is bounded by the surrounding
+     // preparing state and cannot flood or hang. The timeout still applies to a
+     // renderer whose compile is slow or throws.
+     const ok=await this._compileScenes(Number(timeout)||2500);
+     if(ok==='timeout'){result.reason='timeout';}
+     else{result.compiled=ok===true;result.ok=ok===true;if(!ok)result.reason='no-compile-method';}
     }catch(error){result.reason=String(error?.message||error||'warmup failed');}
     result.ms=elapsed();
     return result;
    }
+   // Compile the world and viewmodel scenes, preferring the synchronous compile
+   // (bounded by a timeout so a slow renderer cannot wedge scene preparation).
+   async _compileScenes(timeout=2500){
+    const run=()=>{
+     if(typeof this.renderer?.compile!=='function')return false;
+     this.renderer.compile(this.scene,this.camera);
+     if(this.weaponScene&&this.weaponCamera)this.renderer.compile(this.weaponScene,this.weaponCamera);
+     return true;
+    };
+    return Promise.race([Promise.resolve().then(run),new Promise(resolve=>setTimeout(()=>resolve('timeout'),Math.max(400,timeout)))]);
+   }
    // Warm shader variants for the world and viewmodel scenes during loading.
-   // Uses compileAsync where the renderer supports it (so the compile never
-   // stalls a frame), falls back to the synchronous compile(), and is a no-op on
-   // the CPU renderer. Safe to call repeatedly; never rejects.
-   async warmup(){
+   // A no-op on the CPU renderer; safe to call repeatedly and never rejects.
+   async warmup(){return this._queueWarmup(()=>this._warmupWorld());}
+   async _warmupWorld(){
     if(this.renderer?.isSoftware===true)return false;
     try{
-     if(typeof this.renderer?.compileAsync==='function'){
-      await this.renderer.compileAsync(this.scene,this.camera);
-      if(this.weaponScene&&this.weaponCamera)await this.renderer.compileAsync(this.weaponScene,this.weaponCamera);
-      return true;
-     }
      if(typeof this.renderer?.compile==='function'){
       this.renderer.compile(this.scene,this.camera);
       if(this.weaponScene&&this.weaponCamera)this.renderer.compile(this.weaponScene,this.weaponCamera);
