@@ -1,6 +1,7 @@
 import * as T from 'three';
 import {WEAPONS} from './data.mjs';
 import {precipParticleAdds} from './environment.mjs';
+import {MusicEngine} from './music.mjs';
 
 // Presentation only: these offsets must never be applied to the aiming camera.
 const KICKS=WEAPONS.map(w=>w.feel?.kick||[.04,.04,16]);
@@ -240,8 +241,82 @@ const BED_MOODS=Object.freeze({
  storm:Object.freeze({filter:420,tone:48,gain:.024,sub:.005}),
 });
 export class SynthAudio{
- constructor({announcer=false}={}){this.ctx=null;this.muted=false;this.voices=new Set();this.noiseBuffer=null;this.master=null;this.lastDamage=null;this.lastReport=null;this.lastHit=-Infinity;this.footPhase=0;this.wasGrounded=undefined;this.lastVy=0;this.engine=null;this.bed=null;this.bedMood='default';this.ambientBed=true;this.stepVariant=0;this.landVariant=0;this.reloadVariant=0;this.intensity=0;this.bedScale=.75;this.music=null;this.musicEnabled=true;this.announcer=announcer===true;this.announced=new Set();this.lastCue=null;this.mode='default';this.theme=MODE_THEMES.default;this.lastSting=null;this.heartbeatTimer=0;}
- start(){try{const Context=globalThis.AudioContext||globalThis.webkitAudioContext;if(!Context)return;this.ctx??=new Context();if(this.ctx.state==='suspended')this.ctx.resume();if(!this.master){this.master=this.ctx.createGain();this.master.gain.value=.9;this.master.connect(this.ctx.destination);}this.noiseBuffer??=this._makeNoise();if(this.ambientBed!==false)this._bed(true);}catch{}}
+ constructor({announcer=false}={}){this.ctx=null;this.muted=false;this.voices=new Set();this.noiseBuffer=null;this.master=null;this.lastDamage=null;this.lastReport=null;this.lastHit=-Infinity;this.footPhase=0;this.wasGrounded=undefined;this.lastVy=0;this.engine=null;this.bed=null;this.bedMood='default';this.ambientBed=true;this.stepVariant=0;this.landVariant=0;this.reloadVariant=0;this.intensity=0;this.bedScale=.75;this.musicEnabled=true;this.announcer=announcer===true;this.announced=new Set();this.lastCue=null;this.mode='default';this.theme=MODE_THEMES.default;this.lastSting=null;this.heartbeatTimer=0;
+  // Gain buses. `muteGain` sits between the master and the destination so a
+  // master mute silences every branch immediately; music/effects/ambience each
+  // have their own bus for independent volume control. Voice chat lives in
+  // game/voice.mjs and is deliberately outside this graph.
+  this.musicEngine=null;this.effectsBus=null;this.ambienceBus=null;this.muteGain=null;
+  this.volumes={master:.9,music:.7,effects:1,ambience:.8};
+  this.status='off';this.scene='menu';this._announceAt=new Map();this._stingDuckTimer=null;
+ }
+ // Start (or resume) the audio engine. Returns a promise that resolves once the
+ // context is running; a rejected/blocked resume is surfaced through `status`
+ // rather than swallowed so the UI can offer a retry. Safe to call repeatedly.
+ start(){
+  try{
+   const Context=globalThis.AudioContext||globalThis.webkitAudioContext;if(!Context)return Promise.resolve(false);
+   this.ctx??=new Context();
+   this._ensureBuses();
+   this.noiseBuffer??=this._makeNoise();
+   if(this.ambientBed!==false)this._bed(true);
+   return this.unlock();
+  }catch{this.status='error';return Promise.resolve(false);}
+ }
+ // Resume a suspended AudioContext and record the outcome. Autoplay policies
+ // require this to happen inside a user gesture; callers trigger it from clicks.
+ unlock(){
+  if(!this.ctx)return Promise.resolve(false);
+  if(this.ctx.state==='running'){this.status='running';return Promise.resolve(true);}
+  const res=this.ctx.resume?.();
+  if(res&&typeof res.then==='function'){
+   return res.then(()=>{this.status=this.ctx.state==='running'?'running':'suspended';return this.status==='running';}).catch(()=>{this.status='blocked';return false;});
+  }
+  this.status=this.ctx.state||'suspended';return Promise.resolve(this.status==='running');
+ }
+ _ensureBuses(){
+  if(!this.ctx||this.master)return;
+  const ctx=this.ctx;
+  this.master=ctx.createGain();this.master.gain.value=this.volumes.master;
+  this.muteGain=ctx.createGain();this.muteGain.gain.value=this.muted?0:1;
+  this.master.connect(this.muteGain);this.muteGain.connect(ctx.destination);
+  this.effectsBus=ctx.createGain();this.effectsBus.gain.value=this.volumes.effects;this.effectsBus.connect(this.master);
+  this.ambienceBus=ctx.createGain();this.ambienceBus.gain.value=this.volumes.ambience;this.ambienceBus.connect(this.master);
+  try{this.musicEngine=new MusicEngine({ctx,destination:this.master,theme:this.theme,noiseBuffer:this.noiseBuffer,seed:(Date.now()&0xffff)||1});}
+  catch{this.musicEngine=null;}
+  if(this.musicEngine){this.musicEngine.setEnabled(this.musicEnabled);this.musicEngine.setMuted(this.muted);this.musicEngine.setScene(this.scene);}
+  this.status=ctx.state||'suspended';
+ }
+ // Immediate master mute. The mute gain is set synchronously (not ramped) so a
+ // mute silences a running music pad instantly; music scheduling pauses so no
+ // new notes are queued while silent.
+ setMuted(on){
+  this.muted=on===true;
+  if(!this.ctx)return this.muted;
+  this._ensureBuses();
+  try{this.muteGain.gain.cancelScheduledValues?.(this.ctx.currentTime);}catch{}
+  try{this.muteGain.gain.value=this.muted?0:1;}catch{}
+  this.musicEngine?.setMuted(this.muted);
+  if(this.muted){this._engine(0,false);this._bed(false);}
+  else if(this.ambientBed!==false)this._bed(true);
+  if(!this.muted)this.unlock();
+  return this.muted;
+ }
+ setVolume(kind,value){
+  const key=kind in this.volumes?kind:null;if(!key)return null;
+  const v=Math.max(0,Math.min(1.5,Number(value)));
+  this.volumes[key]=Number.isFinite(v)?v:this.volumes[key];
+  if(key==='master'&&this.master)try{this.master.gain.value=this.volumes.master;}catch{}
+  if(key==='effects'&&this.effectsBus)try{this.effectsBus.gain.value=this.volumes.effects;}catch{}
+  if(key==='ambience'&&this.ambienceBus)try{this.ambienceBus.gain.value=this.volumes.ambience;}catch{}
+  return this.volumes[key];
+ }
+ getVolume(kind){return this.volumes[kind]??null;}
+ // Scene drives the soundtrack arrangement: menus get the menu theme, matches
+ // get exploration/combat layered by intensity.
+ setScene(scene){this.scene=scene==='menu'?'menu':'game';this.musicEngine?.setScene(this.scene==='menu'?'menu':(this.intensity>=.34?'combat':'explore'));return this.scene;}
+ previewMusic(scene='menu',seconds=8){this._ensureBuses();const r=this.musicEngine?.preview(scene,seconds);this.unlock();return r??null;}
+ audioStatus(){return {state:this.ctx?(this.ctx.state||'suspended'):'unavailable',status:this.status,enabled:this.musicEnabled,muted:this.muted,scene:this.scene,intensity:this.intensity,voices:this.voices.size,notes:this.musicEngine?.notesScheduled??0,music:this.musicEngine?.status?.()??'off'};}
  // Low, continuous ambience bed: filtered noise hiss plus a sub tone, faded in
  // through the master gain. Owned by the audio instance and torn down in dispose.
  _bed(on){
@@ -253,7 +328,7 @@ export class SynthAudio{
    const g=this.ctx.createGain();g.gain.value=.0001;
    const osc=this.ctx.createOscillator();osc.type='sine';osc.frequency.value=profile.tone;
    const og=this.ctx.createGain();og.gain.value=.0001;
-   src.connect(f);f.connect(g);g.connect(this.master);osc.connect(og);og.connect(this.master);
+   src.connect(f);f.connect(g);g.connect(this.ambienceBus||this.master);osc.connect(og);og.connect(this.ambienceBus||this.master);
    src.start();osc.start();g.gain.setTargetAtTime(profile.gain,t,.8);og.gain.setTargetAtTime(profile.sub,t,.9);
    this.bed={src,f,g,osc,og};
   }else if(!on&&this.bed){
@@ -273,35 +348,28 @@ export class SynthAudio{
   try{this.bed.f.frequency.setTargetAtTime(profile.filter,t,1.2);this.bed.osc.frequency.setTargetAtTime(profile.tone,t,1.2);this.bed.g.gain.setTargetAtTime(profile.gain,t,1.2);this.bed.og.gain.setTargetAtTime(profile.sub,t,1.2);}catch{}
   return this.bedMood;
  }
- // Dynamic combat layer. `intensity` rises with nearby action and eases back
- // down; it drives a low music drone and lets the keyboard bed duck so gunfire
- // cuts through. Both share the instance's disposal and mute handling.
+ // Combat intensity drives the soundtrack arrangement (exploration vs combat
+ // layering) and lets the ambience bed duck so gunfire cuts through. It never
+ // starts or stops the soundtrack: music plays continuously once enabled.
  setIntensity(value){
   const next=cl(Number(value)||0,0,1);this.intensity=next;
-  if(!this.ctx||!this.master||this.muted)return this.intensity;
-  const t=this.ctx.currentTime;
-  if(this.musicEnabled!==false&&next>.24&&!this.music&&this.voices.size<28)this._musicOn(1-next*.15);
-  if(this.music){try{this.music.g.gain.setTargetAtTime(next*.05,t,.4);this.music.osc.frequency.setTargetAtTime((this.theme?.root??58)+next*46,t,.3);}catch{}}
+  this.musicEngine?.setIntensity(next);
+  this.musicEngine?.setScene(this.scene==='menu'?'menu':(next>=.34?'combat':'explore'));
   this.bedScale=.55+next*.55;
-  if(this.bed){const profile=BED_MOODS[this.bedMood]||BED_MOODS.default;try{this.bed.g.gain.setTargetAtTime(profile.gain*this.bedScale,t,.5);this.bed.og.gain.setTargetAtTime(profile.sub*this.bedScale,t,.55);}catch{}}
+  if(this.ctx&&this.bed){const profile=BED_MOODS[this.bedMood]||BED_MOODS.default,t=this.ctx.currentTime;try{this.bed.g.gain.setTargetAtTime(profile.gain*this.bedScale,t,.5);this.bed.og.gain.setTargetAtTime(profile.sub*this.bedScale,t,.55);}catch{}}
   return this.intensity;
  }
- _musicOn(gain=1){
-  if(!this.ctx||!this.master)return null;
-  if(!this.music){
-   const osc=this.ctx.createOscillator(),g=this.ctx.createGain();osc.type='triangle';osc.frequency.value=this.theme?.root??58;g.gain.value=.0001;osc.connect(g);g.connect(this.master);osc.start();this.music={osc,g};
-  }
-  if(this.music)this.music.g.gain.setTargetAtTime(Math.max(0,Math.min(1,Number(gain)||0))*.005,this.ctx.currentTime,.6);
-  return this.music;
- }
- // Select the tonal centre for a game mode. The running drone retunes in place
- // so switching modes never restarts the oscillator or spends a voice slot.
+ // Select the tonal centre for a game mode. Every soundtrack layer reads the
+ // shared theme, so switching modes retunes the music without restarting nodes.
  setModeTheme(mode){
   const key=typeof mode==='string'&&MODE_THEMES[mode]?mode:'default';
   this.mode=key;this.theme=MODE_THEMES[key];
-  if(this.music&&this.ctx){try{this.music.osc.frequency.setTargetAtTime(this.theme.root,this.ctx.currentTime,.4);}catch{}}
+  this.musicEngine?.setTheme(this.theme);
   return key;
  }
+ // Advance the soundtrack scheduler. Called once per rendered frame from the
+ // host so note timing is driven by the AudioContext clock, not the frame rate.
+ tick(){return this.musicEngine?.tick?.()??0;}
  // Victory/defeat sting: a short arpeggio built from the active mode scale. It
  // reuses the shared voice cap and disposal path, and is a no-op when muted or
  // when the context has not started.
@@ -313,30 +381,34 @@ export class SynthAudio{
   this._play(cue.length+(cue.notes.length-1)*cue.step,0,(t,out,nodes)=>{
    cue.notes.forEach((step,i)=>{const f=freq(step);this._tone(t+i*cue.step,out,nodes,{freq:f,duration:cue.length,type:cue.type,gain:cue.gain,end:f*cue.end});});
   });
-  this.lastSting=outcome;return {outcome,played:true};
- }
- _musicOff(){
-  if(!this.music)return;
-  const {osc,g}=this.music;this.music=null;
-  try{g.gain.setTargetAtTime(.0001,this.ctx.currentTime,.12);}catch{}
-  setTimeout(()=>{try{osc.stop();}catch{}},320);
+  this.lastSting=outcome;
+  // Duck the soundtrack under the sting so the result reads clearly, then ease
+  // it back. The timer is cleared on disposal so it cannot outlive the engine.
+  this.musicEngine?.setDuck(1);
+  if(this._stingDuckTimer)clearTimeout(this._stingDuckTimer);
+  this._stingDuckTimer=setTimeout(()=>{this._stingDuckTimer=null;this.musicEngine?.setDuck(0);},1400);
+  return {outcome,played:true};
  }
  setAnnouncer(on){this.announcer=on===true;return this.announcer;}
- // Music on/off is independent of the global mute: disabling it fades the drone
- // out and stops future starts, while effects, ambience and the announcer keep
- // playing. Re-enabling restarts the drone on the next intensity update.
+ // Music on/off is independent of the global mute: disabling it silences and
+ // pauses only the soundtrack, while effects, ambience and the announcer keep
+ // playing. Re-enabling attempts an autoplay unlock and resumes scheduling.
  setMusicEnabled(on){
   this.musicEnabled=on!==false;
-  if(!this.musicEnabled)this._musicOff();
-  else if(this.ctx&&!this.muted&&this.intensity>.24&&!this.music&&this.voices.size<28)this._musicOn(1-this.intensity*.15);
+  this.musicEngine?.setEnabled(this.musicEnabled);
+  if(this.musicEnabled)this.unlock();
   return this.musicEnabled;
  }
- // Optional announcer cue: a short two-note motif keyed by mode event. Returns
- // the cue id (or null) and reports whether a voice was spent, respecting the
- // existing cap and mute/dispose path.
+ // Optional announcer cue: a short two-note motif keyed by mode event. A short
+ // per-cue cooldown dedupes the two event paths that can report the same moment
+ // (view effect dispatch and the HUD snapshot), so one event makes one sound.
  announcerCue(type){
   const cue=ANNOUNCE_CUES[type];if(!cue)return null;
   if(!this.announcer||!this.ctx||this.muted)return {cue:cue.id,played:false};
+  const now=this.ctx.currentTime||0;
+  const last=this._announceAt.get(cue.id);
+  if(Number.isFinite(last)&&now-last<.25)return {cue:cue.id,played:false,deduped:true};
+  this._announceAt.set(cue.id,now);
   this._play(cue.length,0,(t,out,nodes)=>{this._tone(t,out,nodes,{freq:cue.freq,duration:cue.length*.55,type:'triangle',gain:.06,end:cue.end});this._tone(t+cue.length*.5,out,nodes,{freq:cue.end,duration:cue.length*.55,type:'triangle',gain:.05,end:cue.end*1.12});});
   this.lastCue=cue.id;return {cue:cue.id,played:true};
  }
@@ -347,7 +419,7 @@ export class SynthAudio{
  // scoring player hears the kill without spending a second voice slot.
  _killConfirm(t,out,nodes,vol=1){const gain=Math.min(.1,.075*vol);this._tone(t+.02,out,nodes,{freq:1180,duration:.08,type:'triangle',gain,end:1860});this._tone(t+.09,out,nodes,{freq:1660,duration:.07,type:'sine',gain:gain*.7,end:840});}
   _makeNoise(){const ctx=this.ctx,length=Math.max(1,Math.floor(ctx.sampleRate)),buffer=ctx.createBuffer(1,length,ctx.sampleRate),data=buffer.getChannelData(0);let last=0;for(let i=0;i<length;i++){const white=Math.random()*2-1;last=(last+.02*white)/1.02;data[i]=white*.75+last*.5;}return buffer;}
-  _dest(pan){const out=this.ctx.createStereoPanner?this.ctx.createStereoPanner():this.ctx.createGain();if(out.pan)out.pan.value=cl(pan||0,-1,1);out.connect(this.master);return out;}
+  _dest(pan){const out=this.ctx.createStereoPanner?this.ctx.createStereoPanner():this.ctx.createGain();if(out.pan)out.pan.value=cl(pan||0,-1,1);out.connect(this.effectsBus||this.master);return out;}
   _play(duration,pan,build){if(!this.ctx||this.muted||this.voices.size>=30)return;const t=this.ctx.currentTime,out=this._dest(pan),nodes=[out],token={nodes};build(t,out,nodes);this.voices.add(token);token.timer=setTimeout(()=>{for(const n of nodes){try{n.disconnect();}catch{}}this.voices.delete(token);},Math.max(30,(duration+.15)*1000));}
   _noise(t,out,nodes,{duration=.08,gain=.1,type='bandpass',freq=800,q=1,sweep=null,attack=.002}){if(!this.ctx||!this.ctx.createBufferSource)return;const src=this.ctx.createBufferSource();src.buffer=this.noiseBuffer;src.loop=true;const f=this.ctx.createBiquadFilter();f.type=type;f.frequency.setValueAtTime(Math.max(30,freq),t);f.Q.value=q;if(sweep)f.frequency.exponentialRampToValueAtTime(Math.max(30,sweep),t+duration);const g=this.ctx.createGain();g.gain.setValueAtTime(.0001,t);g.gain.linearRampToValueAtTime(Math.max(.0002,gain),t+attack);g.gain.exponentialRampToValueAtTime(.0001,t+duration);src.connect(f);f.connect(g);g.connect(out);src.start(t);src.stop(t+duration+.03);nodes.push(src,f,g);}
   _tone(t,out,nodes,{freq,duration=.08,type='sine',gain=.05,end=0,attack=.003}){const o=this.ctx.createOscillator();o.type=type;o.frequency.setValueAtTime(Math.max(20,freq),t);if(end)o.frequency.exponentialRampToValueAtTime(Math.max(20,end),t+duration);const g=this.ctx.createGain();g.gain.setValueAtTime(.0001,t);g.gain.linearRampToValueAtTime(Math.max(.0002,gain),t+attack);g.gain.exponentialRampToValueAtTime(.0001,t+duration);o.connect(g);g.connect(out);o.start(t);o.stop(t+duration+.03);nodes.push(o,g);}
@@ -462,6 +534,6 @@ export class SynthAudio{
   this.wasLowHealth=isLowHealth;
   const vehicle=(vehicles||[]).find(v=>v.id===player.vehicleId||v.driver===player.id),vx=vehicle?(vehicle.vx??vehicle.velocity?.x??0):0,vz=vehicle?(vehicle.vz??vehicle.velocity?.z??0):0,boosting=Boolean(vehicle&&(vehicle.boosting===true||(vehicle.boostCooldown??0)>0||(vehicle.effects?.turbo>0)));
   this._engine(vehicle?Math.hypot(vx,vz):0,Boolean(vehicle),boosting);}
- _engine(speed,active,boosting=false){if(!this.ctx)return;if(active&&!this.muted){if(!this.engine){const osc=this.ctx.createOscillator(),sub=this.ctx.createOscillator(),f=this.ctx.createBiquadFilter(),g=this.ctx.createGain();osc.type='sawtooth';sub.type='triangle';f.type='lowpass';f.frequency.value=700;g.gain.value=.0001;osc.connect(f);sub.connect(f);f.connect(g);g.connect(this.master);osc.start();sub.start();this.engine={osc,sub,f,g};}const s=cl(speed/20,0,1),boostMult=boosting?1.35:1,t=this.ctx.currentTime;this.engine.osc.frequency.setTargetAtTime((55+s*120)*boostMult,t,.1);this.engine.sub.frequency.setTargetAtTime((28+s*40)*boostMult,t,.1);this.engine.g.gain.setTargetAtTime((.022+s*.05)*(boosting?1.2:1),t,.12);this.engine.f.frequency.setTargetAtTime((500+s*1200)*(boosting?1.4:1),t,.15);}else if(this.engine){const {osc,sub,g}=this.engine,t=this.ctx.currentTime;g.gain.setTargetAtTime(.0001,t,.08);this.engine=null;setTimeout(()=>{try{osc.stop();sub.stop();}catch{}},300);}}
- dispose(){if(this.engine){try{this.engine.osc.stop();this.engine.sub.stop();}catch{}this.engine=null;}if(this.bed){try{this.bed.src.stop();this.bed.osc.stop();}catch{}this.bed=null;}if(this.music){try{this.music.osc.stop();}catch{}try{this.music.osc.disconnect();this.music.g.disconnect();}catch{}this.music=null;}for(const token of this.voices){clearTimeout(token.timer);for(const n of token.nodes){try{n.disconnect();}catch{}}}this.voices.clear();this.lastSting=null;try{this.master?.disconnect();}catch{}this.master=null;this.ctx?.close();this.ctx=null;}
+ _engine(speed,active,boosting=false){if(!this.ctx)return;if(active&&!this.muted){if(!this.engine){const osc=this.ctx.createOscillator(),sub=this.ctx.createOscillator(),f=this.ctx.createBiquadFilter(),g=this.ctx.createGain();osc.type='sawtooth';sub.type='triangle';f.type='lowpass';f.frequency.value=700;g.gain.value=.0001;osc.connect(f);sub.connect(f);f.connect(g);g.connect(this.effectsBus||this.master);osc.start();sub.start();this.engine={osc,sub,f,g};}const s=cl(speed/20,0,1),boostMult=boosting?1.35:1,t=this.ctx.currentTime;this.engine.osc.frequency.setTargetAtTime((55+s*120)*boostMult,t,.1);this.engine.sub.frequency.setTargetAtTime((28+s*40)*boostMult,t,.1);this.engine.g.gain.setTargetAtTime((.022+s*.05)*(boosting?1.2:1),t,.12);this.engine.f.frequency.setTargetAtTime((500+s*1200)*(boosting?1.4:1),t,.15);}else if(this.engine){const {osc,sub,g}=this.engine,t=this.ctx.currentTime;g.gain.setTargetAtTime(.0001,t,.08);this.engine=null;setTimeout(()=>{try{osc.stop();sub.stop();}catch{}},300);}}
+ dispose(){if(this._stingDuckTimer){clearTimeout(this._stingDuckTimer);this._stingDuckTimer=null;}try{this.musicEngine?.dispose();}catch{}this.musicEngine=null;if(this.engine){try{this.engine.osc.stop();this.engine.sub.stop();}catch{}this.engine=null;}if(this.bed){try{this.bed.src.stop();this.bed.osc.stop();}catch{}this.bed=null;}for(const token of this.voices){clearTimeout(token.timer);for(const n of token.nodes){try{n.disconnect();}catch{}}}this.voices.clear();this._announceAt?.clear?.();this.lastSting=null;for(const bus of [this.effectsBus,this.ambienceBus,this.master,this.muteGain]){try{bus?.disconnect();}catch{}}this.effectsBus=null;this.ambienceBus=null;this.master=null;this.muteGain=null;this.ctx?.close();this.ctx=null;this.status='off';}
 }

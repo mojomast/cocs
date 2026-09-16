@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {WEAPONS} from './data.mjs';
 import {weaponModel} from './view.mjs';
-import {BUILTIN_SIGHT,resolveActiveSight,adsFieldOfView,sightFovFloor,reticleWarp} from './reticle.mjs';
+import {BUILTIN_SIGHT,resolveActiveSight,adsFieldOfView,sightFovFloor,reticleWarp,scopeCrossPaths,quadraticMidpoint} from './reticle.mjs';
 
 test('the built-in sight table matches the real weapon models',()=>{
  for(let type=0;type<WEAPONS.length;type++){
@@ -70,4 +70,30 @@ test('reticle warp is scope-only, grows with magnification and stays bounded',()
  assert.ok(marksman>0&&marksman<=5);
  assert.ok(rail>=marksman,'more magnification means more warp');
  assert.ok(reticleWarp({kind:'scope',magnification:999})<=5,'warp is capped');
+});
+
+test('scope magnification uses the perspective projection formula',()=>{
+ const base=80,scope=resolveActiveSight({weapon:2});
+ const fov=adsFieldOfView(base,scope);
+ // tan(base/2)/tan(fov/2) recovers the exact magnification ratio.
+ const ratio=Math.tan(base*Math.PI/360)/Math.tan(fov*Math.PI/360);
+ assert.ok(Math.abs(ratio-scope.magnification)<1e-9,`a ×${scope.magnification} optic frames ${ratio.toFixed(3)}× tighter`);
+ assert.ok(fov>=sightFovFloor(scope),'the floor bounds the zoom');
+ assert.equal(adsFieldOfView(60,scope,{scopeFloor:20}),20,'the scope floor wins when the zoom exceeds it');
+ assert.ok(adsFieldOfView(base,resolveActiveSight({weapon:8}))>fov,'the marksman zooms less than the rail lance');
+});
+
+test('the scope cross passes through the aiming centre at every warp',()=>{
+ for(const warp of [0,1.4,3,5,99]){
+  const {h,v}=scopeCrossPaths(warp);
+  const hm=h.match(/^M0 ([\d.]+) Q50 ([\d.]+) 100 ([\d.]+)$/);
+  const vm=v.match(/^M([\d.]+) 0 Q([\d.]+) 50 ([\d.]+) 100$/);
+  assert.ok(hm&&vm,`paths parse at warp ${warp}`);
+  const midH=quadraticMidpoint([0,+hm[1]],[50,+hm[2]],[100,+hm[3]]);
+  const midV=quadraticMidpoint([+vm[1],0],[+vm[2],50],[+vm[3],100]);
+  assert.ok(Math.abs(midH.x-50)<1e-6&&Math.abs(midH.y-50)<1e-6,`horizontal cross is centred at warp ${warp}`);
+  assert.ok(Math.abs(midV.x-50)<1e-6&&Math.abs(midV.y-50)<1e-6,`vertical cross is centred at warp ${warp}`);
+ }
+ assert.match(scopeCrossPaths(0).h,/Q50 50\.00/,'zero warp is a straight line through the centre');
+ assert.match(scopeCrossPaths(0).v,/Q50\.00 50/);
 });

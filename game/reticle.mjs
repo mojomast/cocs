@@ -54,13 +54,16 @@ export function resolveActiveSight({ weapon = 0, optic = null, aiming = false } 
 }
 
 // ADS field of view for a resolved sight. Iron/holo keep the historical mild
-// ADS pull-in; a scope divides the base FOV by its magnification so high-zoom
-// optics actually zoom in. Floors keep the projection stable.
-export function adsFieldOfView(baseFov, sight, { ironFloor = 55, scopeFloor = 15 } = {}) {
+// ADS pull-in; a scope applies the perspective projection formula for an exact
+// magnification ratio, `fov = 2*atan(tan(baseFov/2)/magnification)`, so a ×3.6
+// optic really frames 3.6× tighter. Floors keep the projection stable.
+export function adsFieldOfView(baseFov, sight, { ironFloor = 55, scopeFloor = 12 } = {}) {
   const base = Math.max(30, finite(baseFov, 82));
   const mag = Math.max(1, finite(sight?.magnification, 1));
   if (mag <= 1.0001) return Math.max(ironFloor, base * 0.82);
-  return Math.max(scopeFloor, base / mag);
+  const half = (base * Math.PI) / 360;
+  const zoomed = (2 * Math.atan(Math.tan(half) / mag) * 180) / Math.PI;
+  return Math.max(scopeFloor, Math.min(base, zoomed));
 }
 
 // Smallest FOV the camera may reach for a sight. Scopes are allowed well below
@@ -77,4 +80,24 @@ export function reticleWarp(sight) {
   return Math.max(1.4, Math.min(5, (mag - 1) * 1.6));
 }
 
-export const RETICLE_EXPORTS = Object.freeze(['BUILTIN_SIGHT', 'BUILTIN_MAGNIFICATION', 'OPTIC_MAGNIFICATION', 'resolveActiveSight', 'adsFieldOfView', 'sightFovFloor', 'reticleWarp']);
+// Curved cross paths for the scope reticle that genuinely pass through the
+// aiming centre at (50,50). A quadratic's midpoint is 0.25*P0 + 0.5*C + 0.25*P2,
+// so a control point at 50 - warp puts the midpoint exactly on 50 while the ends
+// bow out by warp. Warp 0 is a perfectly straight cross.
+export function scopeCrossPaths(warp) {
+  const w = Math.max(0, Math.min(12, finite(warp, 0)));
+  const end = (50 + w).toFixed(2);
+  const control = (50 - w).toFixed(2);
+  return { h: `M0 ${end} Q50 ${control} 100 ${end}`, v: `M${end} 0 Q${control} 50 ${end} 100` };
+}
+
+// Midpoint of a quadratic path's first segment, used by tests to assert the
+// cross passes through the aiming centre.
+export function quadraticMidpoint(p0, control, p1) {
+  return {
+    x: 0.25 * p0[0] + 0.5 * control[0] + 0.25 * p1[0],
+    y: 0.25 * p0[1] + 0.5 * control[1] + 0.25 * p1[1],
+  };
+}
+
+export const RETICLE_EXPORTS = Object.freeze(['BUILTIN_SIGHT', 'BUILTIN_MAGNIFICATION', 'OPTIC_MAGNIFICATION', 'resolveActiveSight', 'adsFieldOfView', 'sightFovFloor', 'reticleWarp', 'scopeCrossPaths']);

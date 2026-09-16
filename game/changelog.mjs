@@ -1,12 +1,24 @@
 // In-game patch notes. The title-screen footer is the running version; this
 // module is the human-readable release digest the Changelog screen renders. The
 // full historical record lives in docs/CHANGELOG.md and is linked from the UI.
-export const RELEASE_VERSION = 'v6.2';
-export const RELEASE_CODENAME = 'CADENCE';
+export const RELEASE_VERSION = 'v6.3';
+export const RELEASE_CODENAME = 'RESONANCE';
 export const REPO_URL = 'https://github.com/mojomast/tokenarena';
 export const FULL_CHANGELOG_URL = `${REPO_URL}/blob/main/docs/CHANGELOG.md`;
 
 export const CHANGELOG = [
+  {version:'v6.3',codename:'RESONANCE',date:'2026-09-16',tag:'A real soundtrack, smooth first-person motion and cheaper static worlds',highlights:[
+    'The audio engine is actually connected. `ArenaView` now receives `SynthAudio` at startup, so mode themes, the ambience bed, thunder, announcer cues and the victory/defeat sting flow through one object instead of being built and never wired.',
+    'A composed procedural soundtrack replaces the single low drone: menu, exploration and combat arrangements share one mode theme and chord progression, with bass, percussion, arpeggio and lead layers, four-bar phrase fills, layered intensity crossfades and gently ducked music under stings. Notes are scheduled with a bounded look-ahead on the AudioContext clock, so timing does not depend on frame rate and a suspended tab resumes without firing a backlog.',
+    'Music plays in a quiet menu and quiet gameplay (no rockets or gunfire required). Master mute silences every game-audio branch immediately, Music OFF silences only music, and per-bus Music/Effects/Ambience sliders plus a Preview action live in the normal settings panel. Saved mute/music preferences survive and are migrated without unexpectedly enabling sound.',
+    'Combat intensity is fed from the single event-dispatch stage before the effect cursor advances, so nearby shots, explosions and deaths drive the soundtrack again. Announcer cues have one owner with a short cooldown, so one event makes one announcement. `AudioContext.resume()` is handled asynchronously and a blocked context surfaces a recoverable status.',
+    'First-person presentation interpolation is completed at the simulation boundary: the host captures a presentation snapshot around every fixed step (including catch-up), and the previous/current ticks blend by the accumulator fraction for the local camera, actors, vehicles and projectiles. Mouse-look stays immediate, history resets on match/map/respawn/teleport/seek, pause freezes without a backward jump, and multiplayer keeps its own interpolation.',
+    'Static worlds cost less at unchanged 100% scale: floor tiles merge into one material batch on WebGL and visible blocks batch by material within small spatial chunks, while the CPU renderer keeps its separate tiles for depth ordering. Collision geometry, semantic block ids, UVs, normals and shadow behavior are preserved.',
+    'Scopes are corrected and polished: the reticle cross now genuinely passes through the aiming centre (the quadratic control point was offset), the centre dot is a bounded CSS-pixel circle instead of a stretched SVG ellipse, the reticle reads the live weapon/optic during an ADS swap, and magnification uses the perspective formula `2*atan(tan(baseFov/2)/magnification)`. Ocular shading and lens warp are removed under reduced motion.',
+    'Terrain gets crease-aware smoothed normals and coherent per-vertex tint: continuous slopes read smooth while cliffs and material seams keep hard edges, and authored height/collision are untouched.',
+    'Performance tooling is trustworthy: the GPU query now covers the first-person weapon pass, CPU submission is split into world/post and weapon, `tokenArenaPerf` propagates GPU timing into the tracker, outstanding timer queries are bounded and cleared on disjoint events, and `tokenArenaBenchmark.run()` applies the fixed preset scenario for direct and post-processed variants, warms up, measures a window and restores state.',
+    'Shader warmup is connected to scene preparation: the selected arena and starting weapon are prepared before gameplay settles, post variants are created, the compile is bounded and token-guarded across rapid map changes, and a lightweight "preparing" state is shown while it completes. Failures are reported rather than treated as success.',
+  ]},
   {version:'v6.2',codename:'CADENCE',date:'2026-09-16',tag:'Native-resolution performance, smooth presentation and sighted optics',highlights:[
     'Scopes and ironsights are physically mounted instead of floating: integrated and attached optics get a receiver base plate, paired support posts and clamp rings that sit below or outside the bore, so a raised optic reads as bolted on while the sight line stays open.',
     'Integrated Rail Lance and Marksman scopes now actually zoom: one active-sight resolver combines the weapon\'s built-in sight with any mounted optic and the aiming state, and drives both the ADS field of view and the reticle. The rail lance zooms harder than the marksman rifle, and an attached scope is a middle ground; iron sights keep their mild, floored ADS pull-in.',

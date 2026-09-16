@@ -425,6 +425,29 @@ assets. Full procedure and verification: [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md
 The last five releases. The full history lives in
 [docs/CHANGELOG.md](docs/CHANGELOG.md).
 
+### v6.3 · RESONANCE — 2026-09-16
+- A composed procedural soundtrack (menu/exploration/combat sharing one theme
+  and progression, with bass, percussion, arpeggio and lead, phrase fills and
+  layered intensity) replaces the single low drone, scheduled on the
+  AudioContext clock with bounded look-ahead. The audio engine is now actually
+  connected to `ArenaView`, so music plays in a quiet menu and quiet gameplay.
+- Master mute, Music/Effects/Ambience sliders, a Preview action and a blocked
+  audio status live in settings; mute/music preferences survive. Announcer cues
+  have one owner, and combat intensity is fed from the event-dispatch stage.
+- First-person interpolation is completed at the simulation boundary: per-tick
+  snapshots blend the camera, actors, vehicles and projectiles; mouse-look stays
+  immediate; history resets on match/teleport/seek and pause freezes cleanly.
+- Static worlds batch floors (one material mesh) and visible blocks by material
+  within spatial chunks on WebGL at unchanged 100% scale; terrain gets
+  crease-aware smoothed normals.
+- Scopes: the cross passes through the true centre, the dot is bounded and
+  circular, the reticle follows live ADS weapon swaps, and magnification uses
+  `2*atan(tan(fov/2)/mag)`.
+- Trustworthy perf tooling: full-frame GPU timing including the weapon pass, a
+  world/weapon CPU split, `tokenArenaPerf` GPU propagation and a callable
+  `tokenArenaBenchmark.run()`; shader warmup is connected to scene preparation
+  with a bounded, token-guarded compile and a "preparing" state.
+
 ### v6.2 · CADENCE — 2026-09-16
 - Scopes and ironsights are physically mounted (base plate, support posts, clamp
   rings), not floating, and integrated Rail Lance/Marksman scopes now zoom with a
@@ -493,16 +516,6 @@ The last five releases. The full history lives in
   threats, exposure, projectiles and a death heatmap.
 - Composer gets explicit FXAA and survives zero bloom; texture channels share one
   height field.
-
-### v5.5 · FIDELITY — 2026-09-16
-- Eight new relief surfaces (diamond plate, riveted armour, circuit board, brushed
-  and corrugated metal, alien chitin, rough stucco, industrial mesh) with aliases,
-  seam-free tiling and an optional dedicated bump map, mapped across arenas.
-- The effect pool is allocation-free and gains fade curves, damping, gravity, spin
-  and colour interpolation — rocket exhaust trails, shield-break debris, rail
-  impacts.
-- Muzzle anchors for weapons 8/9, cached pickup geometry, and more Hornet/Puma
-  detail.
 
 ## Parody and attribution
 

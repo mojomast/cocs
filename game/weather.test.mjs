@@ -82,21 +82,26 @@ test('precipitation spawns are deterministic, bounded and fall toward the ground
 
 function audioFixture(){const audio=new SynthAudio(),nodes=[];const param=()=>({value:0,setValueAtTime(){},linearRampToValueAtTime(){},exponentialRampToValueAtTime(){},setTargetAtTime(){}});const node=extra=>{const n={frequency:param(),gain:param(),Q:param(),pan:param(),type:'',buffer:null,loop:false,connect(){},disconnect(){this.disconnected=true;},start(){this.started=true;},stop(){this.stopped=true;},...extra};nodes.push(n);return n;};audio.ctx={currentTime:1,destination:{},createOscillator:()=>node({type:'sine'}),createGain:()=>node(),createBiquadFilter:()=>node({type:'lowpass'}),createBufferSource:()=>node({}),createStereoPanner:()=>node(),close(){this.closed=true;}};audio.noiseBuffer={};audio.master=node();return {audio,nodes};}
 
-test('combat intensity starts and releases the music layer while ducking the bed',()=>{
- const {audio,nodes}=audioFixture();
+test('combat intensity drives the soundtrack layer while ducking the bed',()=>{
+ const {audio}=audioFixture();
+ const ctx=audio.ctx;
+ audio.master=null; // build the real bus graph rather than the fixture stub
+ audio._ensureBuses();
+ assert.ok(audio.musicEngine,'the soundtrack engine is created with the buses');
  assert.equal(audio.intensity,0);
  assert.equal(audio.setIntensity(2),1,'intensity clamps to one');
- assert.ok(audio.music,'a loud fight starts the music oscillator');
- const gainNode=audio.music.g;
+ audio.setScene('game');
+ for(let i=0;i<24;i++){ctx.currentTime+=.05;audio.tick();}
+ assert.ok(audio.musicEngine.notesScheduled>0,'a loud fight schedules the combat soundtrack');
+ assert.ok(audio.bedScale>1,'the bed lifts toward full level in a fight');
  audio.setIntensity(.05);
  assert.equal(audio.intensity,.05);
- assert.ok(gainNode.gain.value<=.001,'the music layer releases when the fight ends');
+ assert.ok(audio.bedScale<1,'the bed eases back down when the fight ends');
  audio.setIntensity(NaN);
  assert.equal(audio.intensity,0,'non-finite intensity is a no-op');
  audio.dispose();
  assert.equal(audio.ctx,null);
- assert.ok(audio.music===null,'dispose tears the music layer down');
- assert.ok(nodes.every(n=>n.disconnected===true||n===audio.master));
+ assert.equal(audio.musicEngine,null,'dispose tears the soundtrack down');
 });
 
 test('the announcer is opt-in, capped through the voice budget and tolerates unknown cues',()=>{

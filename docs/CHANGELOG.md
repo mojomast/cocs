@@ -16,6 +16,48 @@ record in [VERIFICATION.md](VERIFICATION.md).
 
 ---
 
+## v6.3 · RESONANCE — 2026-09-16
+
+A real soundtrack, smooth first-person motion and cheaper static worlds.
+
+- The audio engine is connected: `ArenaView.setAudio(audio)` is called at
+  startup, so mode themes, ambience, thunder, announcer cues and stings flow
+  through one object.
+- A composed procedural soundtrack (`game/music.mjs`) replaces the single low
+  drone: menu, exploration and combat arrangements share one mode theme and
+  chord progression, with bass, percussion, arpeggio and lead layers, four-bar
+  phrase fills, layered intensity crossfades and ducked stings. Notes use a
+  bounded look-ahead on the `AudioContext` clock; a suspended tab resumes
+  without a backlog.
+- Music plays in a quiet menu and quiet gameplay. Master mute silences every
+  branch immediately; Music OFF silences only music. Settings gained per-bus
+  Music/Effects/Ambience sliders, a Preview action and a blocked-audio status,
+  and saved preferences are preserved.
+- Combat intensity is fed from the event-dispatch stage before the effect cursor
+  advances; announcer cues are deduped and owned by one path. `AudioContext.resume()`
+  is awaited and a blocked context is recoverable.
+- Presentation interpolation is completed at the simulation boundary: the host
+  captures a snapshot around every fixed step and blends the previous/current
+  ticks for the camera, actors, vehicles and projectiles. Mouse-look is
+  immediate, history resets on match/map/respawn/teleport/seek, pause freezes,
+  and multiplayer keeps its own interpolation.
+- Static worlds cost less at 100% scale: floor tiles merge into one material
+  batch and visible blocks batch by material within small chunks on WebGL; the
+  CPU renderer keeps separate tiles. Collision, ids, UVs, normals and shadows are
+  preserved.
+- Scopes: the cross passes through the true centre, the dot is a bounded
+  CSS-pixel circle, the reticle follows live ADS weapon swaps, and magnification
+  uses the perspective formula. Ocular shading and warp are removed under
+  reduced motion.
+- Terrain gets crease-aware smoothed normals and coherent per-vertex tint.
+- Performance tooling: full-frame GPU timing including the weapon pass, a
+  world/weapon CPU submission split, GPU propagation through `tokenArenaPerf`,
+  bounded timer queries, and a callable `tokenArenaBenchmark.run()`.
+- Shader warmup is connected to scene preparation with a bounded, token-guarded
+  compile and a lightweight preparing state.
+
+---
+
 ## v6.2 · CADENCE — 2026-09-16
 
 Native-resolution performance, smooth presentation and sighted optics.

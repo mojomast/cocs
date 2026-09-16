@@ -120,7 +120,7 @@ export const BENCHMARK_EXPORTS = Object.freeze(['PerfTracker', 'BENCHMARK_PRESET
 // never mistake a CPU estimate for a GPU measurement.
 export class GpuTimer {
   constructor(renderer) {
-    this.gl = null; this.ext = null; this.pending = null; this.queue = []; this.last = null;
+    this.gl = null; this.ext = null; this.pending = null; this.queue = []; this.last = null; this.maxPending = 4;
     try { this.gl = renderer?.getContext?.() || null; this.ext = this.gl?.getExtension?.('EXT_disjoint_timer_query_webgl2') || null; } catch { this.ext = null; }
   }
   get available() { return !!this.ext; }
@@ -131,7 +131,11 @@ export class GpuTimer {
   end() {
     if (!this.pending) return false;
     try { this.gl.endQuery(this.ext.TIME_ELAPSED_EXT); this.queue.push(this.pending); } catch {}
-    this.pending = null; return true;
+    this.pending = null;
+    // Bound outstanding query resources so a renderer that never reports a result
+    // cannot accumulate GPU queries without limit.
+    while (this.queue.length > this.maxPending) { const stale = this.queue.shift(); try { this.gl.deleteQuery(stale); } catch {} }
+    return true;
   }
   // Poll the oldest outstanding query. Returns the latest available elapsed
   // milliseconds, or null when nothing has resolved yet (or timing is absent).

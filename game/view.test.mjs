@@ -273,6 +273,28 @@ test('rebuilding a terrain arena releases traversal resources instead of accumul
   view.disposeObject(view.worldGroup);for(const resource of view.renderResources)resource.dispose();
   });
 
+test('floor tiles merge into one batch and static blocks group by material and chunk',t=>{
+ const view=Object.create(ArenaView.prototype),mat=new T.MeshBasicMaterial({color:'#888888'});
+ const tiles=[{w:5,d:5,x:0,z:0},{w:5,d:5,x:5,z:0},{w:2,d:5,x:10,z:0}];
+ const mesh=view._mergeFloorTiles(tiles,mat);
+ assert.ok(mesh&&mesh.userData.arenaFloor,'the floor becomes one batch mesh');
+ assert.equal(mesh.userData.floorTiles,3);
+ assert.equal(mesh.geometry.attributes.position.count,3*24,'every tile geometry is present');
+ assert.ok(mesh.receiveShadow);
+ const box=new T.Box3().setFromObject(mesh);
+ assert.ok(box.min.x<=-2.5&&box.max.x>=11,'the batch preserves tile bounds');
+ const a=new T.Mesh(new T.BoxGeometry(1,1,1),mat);a.position.set(0,0,0);
+ const b=new T.Mesh(new T.BoxGeometry(1,1,1),mat);b.position.set(2,0,0);
+ const c=new T.Mesh(new T.BoxGeometry(1,1,1),new T.MeshBasicMaterial());c.position.set(40,0,0);
+ const groups=view._groupByMaterialChunk([a,b,c],24);
+ assert.equal(groups.length,2,'same material+chunk groups together; far or different material splits');
+ assert.ok(groups.some(g=>g.meshes.length===2));
+ const world=new T.Group();world.add(a,b,c);
+ assert.equal(view._batchArenaBlocks(world),0,'a non-WebGL renderer never batches');
+ assert.equal(world.children.length,3,'individual meshes are untouched off WebGL');
+ mesh.geometry.dispose();mat.dispose();a.geometry.dispose();c.material.dispose();
+});
+
 test('every canonical arena has batched polish, faithful collision boxes and software-readable materials',t=>{
  const previous=Object.getOwnPropertyDescriptor(globalThis,'document');
  const ctx={fillRect(){},fillText(){},beginPath(){},moveTo(x,y){assert.ok(Number.isFinite(x)&&Number.isFinite(y));},lineTo(x,y){assert.ok(Number.isFinite(x)&&Number.isFinite(y));},closePath(){},stroke(){},fill(){}};
@@ -361,23 +383,104 @@ test('tracer origins resolve from the current-frame transform after a rapid turn
  view.effectPool?.dispose();view.disposeObject(view.scene);
 });
 
-test('opt-in presentation interpolation blends actors and snaps on a teleport',t=>{
+test('host-captured presentation interpolation smooths the camera and snaps on teleports',t=>{
  const {view}=aimFixture(t);
- view.setInterpolation({enabled:true,alpha:.5});
- const actor=x=>({id:2,character:'chatgpt',weapon:0,health:100,x,y:0,z:0,yaw:0,pitch:0,vx:0,vz:0,vy:0,grounded:true});
+ const actor=x=>({id:7,character:'chatgpt',weapon:0,health:100,x,y:0,z:0,yaw:0,bodyYaw:0,pitch:0,vx:0,vz:0,vy:0,grounded:true});
  const match=(time,x)=>({actors:[actor(x)],pickups:[],rockets:[],time,events:[]});
  view.syncActors(match(0,0));
+ view.capturePresentation(match(0,0));
+ view.setInterpolation({enabled:true,alpha:0});
  view.render('playing',match(0,0),.016,0);
- const model=view.actorModels.get(2);
+ const model=view.actorModels.get(7);
+ view.capturePresentation(match(.016,1));
+ view.setInterpolation({enabled:true,alpha:.5});
  view.render('playing',match(.016,1),.016,.016);
- assert.ok(model.position.x>0&&model.position.x<1,`an actor interpolates between ticks (${model.position.x})`);
+ assert.ok(Math.abs(view.camera.position.x-.5)<1e-9,`the local camera interpolates between ticks (${view.camera.position.x})`);
+ assert.ok(Math.abs(model.position.x-.5)<1e-9,'the actor mesh interpolates by the same fraction');
+ // A second capture without a teleport keeps blending (zero-tick frame).
+ view.setInterpolation({enabled:true,alpha:.9});
+ view.render('playing',match(.016,1),.016,.0165);
+ assert.ok(Math.abs(view.camera.position.x-.9)<1e-9,'advancing alpha continues the blend without a new tick');
+ // A large jump snaps to the authoritative pose.
+ view.capturePresentation(match(.032,20));
+ view.setInterpolation({enabled:true,alpha:.5});
  view.render('playing',match(.032,20),.016,.032);
- assert.equal(model.position.x,20,'a 19-unit jump snaps to the authoritative position');
- view.setInterpolation({enabled:false});
- view.render('playing',match(.048,25),.016,.048);
- assert.equal(model.position.x,25,'disabling interpolation restores direct authoritative rendering');
- assert.equal(view.setInterpolation({enabled:false}),1,'disabled interpolation reports alpha 1');
+ assert.equal(view.camera.position.x,20,'a teleport snaps the camera to the authoritative position');
+ assert.equal(model.position.x,20,'a teleport snaps the actor mesh');
  view.effectPool?.dispose();view.disposeObject(view.scene);
+});
+
+test('a frame consuming several ticks keeps only the two surrounding ticks',t=>{
+ const {view}=aimFixture(t);
+ const actor=x=>({id:7,character:'chatgpt',weapon:0,health:100,x,y:0,z:0,yaw:0,bodyYaw:0,pitch:0,vx:0,vz:0,vy:0,grounded:true});
+ const match=(time,x)=>({actors:[actor(x)],pickups:[],rockets:[],time,events:[]});
+ view.syncActors(match(0,0));
+ // Three catch-up steps in one frame.
+ view.capturePresentation(match(0,0));
+ view.capturePresentation(match(.016,1));
+ view.capturePresentation(match(.032,2));
+ view.setInterpolation({enabled:true,alpha:.5});
+ view.render('playing',match(.032,2),.05,.032);
+ assert.equal(view.camera.position.x,1.5,'the render brackets the last two ticks, not the first');
+ view.effectPool?.dispose();view.disposeObject(view.scene);
+});
+
+test('resetPresentation clears history so a new match or replay seek snaps, and pause freezes',t=>{
+ const {view}=aimFixture(t);
+ const actor=x=>({id:7,character:'chatgpt',weapon:0,health:100,x,y:0,z:0,yaw:0,bodyYaw:0,pitch:0,vx:0,vz:0,vy:0,grounded:true});
+ const match=(time,x)=>({actors:[actor(x)],pickups:[],rockets:[],time,events:[]});
+ view.syncActors(match(0,0));
+ view.capturePresentation(match(10,10));
+ view.capturePresentation(match(10.016,11));
+ // Pause: the host renders alpha 1 (authoritative latest) to freeze.
+ view.setInterpolation({enabled:true,alpha:1});
+ view.render('playing',match(10.016,11),.016,10.016);
+ assert.equal(view.camera.position.x,11,'pause freezes at the authoritative latest pose');
+ // A second match whose simulation time returns to zero must not inherit history.
+ view.resetPresentation();
+ view.setInterpolation({enabled:true,alpha:.5});
+ view.render('playing',match(0,0),.016,0);
+ assert.equal(view.camera.position.x,0,'a reset snaps instead of sweeping from the previous match');
+ view.capturePresentation(match(.016,1));
+ view.setInterpolation({enabled:true,alpha:0});
+ view.render('playing',match(.016,1),.016,.016);
+ assert.equal(view.camera.position.x,1,'the first post-reset capture snaps forward, never backward');
+ view.capturePresentation(match(.032,2));
+ view.setInterpolation({enabled:true,alpha:.5});
+ view.render('playing',match(.032,2),.016,.032);
+ assert.equal(view.camera.position.x,1.5,'interpolation resumes forward from the new match');
+ view.effectPool?.dispose();view.disposeObject(view.scene);
+});
+
+test('prepareScene warms the weapon and bounds a stuck compile, reporting failures',async t=>{
+ // CPU renderer needs no shader warmup.
+ const {view:soft,renderer:softRenderer}=fixture(t,{software:true});
+ assert.equal((await soft.prepareScene({weapon:0})).reason,'software');
+ assert.equal(softRenderer.isSoftware,true);
+ // A working compileAsync warms the world and the viewmodel.
+ const compiled=[];
+ const {view,renderer}=fixture(t);
+ renderer.compileAsync=async scene=>{compiled.push(scene);return true;};
+ view.scene=new T.Scene();view.camera=new T.PerspectiveCamera();view.weaponScene=new T.Scene();view.weaponCamera=new T.PerspectiveCamera();
+ view.modelAssets=new ModelAssets();
+ const ok=await view.prepareScene({weapon:0});
+ assert.equal(ok.ok,true);
+ assert.equal(ok.compiled,true);
+ assert.equal(compiled.length,2,'world and viewmodel compile');
+ // A compile that never resolves is bounded and reported as a timeout.
+ const {view:stuck,renderer:stuckRenderer}=fixture(t);
+ stuckRenderer.compileAsync=()=>new Promise(()=>{});
+ stuck.scene=new T.Scene();stuck.camera=new T.PerspectiveCamera();stuck.modelAssets=new ModelAssets();
+ const timed=await stuck.prepareScene({weapon:0,timeout:400});
+ assert.equal(timed.ok,false);
+ assert.equal(timed.reason,'timeout');
+ // A rejecting compile reports the error rather than pretending success.
+ const {view:broken,renderer:brokenRenderer}=fixture(t);
+ brokenRenderer.compileAsync=async()=>{throw new Error('shader exploded');};
+ broken.scene=new T.Scene();broken.camera=new T.PerspectiveCamera();broken.modelAssets=new ModelAssets();
+ const failed=await broken.prepareScene({weapon:0});
+ assert.equal(failed.ok,false);
+ assert.match(failed.reason,/shader exploded/);
 });
 
 test('shader warmup prefers compileAsync and never runs on the CPU renderer',async t=>{
@@ -404,6 +507,31 @@ test('repeated weapon swaps keep the viewmodel cache bounded and reuse instances
  for(let i=0;i<200;i++){const model=view._acquireWeapon(i%10,null,null);view._releaseWeapon(model);}
  assert.equal(view._acquireWeapon(0,null,null),first,'the same loadout reuses the cached viewmodel');
  assert.ok(view._weaponCache.size<=16,`the cache stays bounded (${view._weaponCache.size})`);
+});
+
+test('combat events feed the soundtrack from the dispatch stage and reset per match',t=>{
+ const {view}=playable(t,{fov:80});
+ const player={id:7,weapon:0,health:100,x:0,y:0,z:0,yaw:0,pitch:0,vx:0,vy:0,vz:0,grounded:true};
+ view.render('playing',{actors:[player],pickups:[],rockets:[],time:9,events:[]},.016,9);
+ assert.equal(view.audioIntensity(9),0,'no action means no combat music');
+ view.render('playing',{actors:[player],pickups:[],rockets:[],time:10,events:[{id:1,type:'shot',actor:7,weapon:0,time:10,from:{x:0,y:0,z:0},to:{x:0,y:0,z:-5}}]},.016,10);
+ assert.ok(view.audioIntensity(10)>.5,'a nearby shot raises the soundtrack intensity even though the effect loop advanced its own cursor');
+ view.mapId=MAPS[0].id;
+ view.setMatch({arena:MAPS[0],actors:[],pickups:[],serial:5});
+ assert.equal(view._nearActionAt,undefined,'a new match clears the combat-music signal'); assert.equal(view.audioIntensity(11),0);
+ view.disposeObject(view.scene);
+});
+
+test('the view forwards the active mode theme and outcome to a connected audio engine',t=>{
+ const calls=[];
+ const audio={setModeTheme:m=>{calls.push(m);return m;},sting:o=>({outcome:o,played:true}),setIntensity:v=>v,announcerCue:()=>null,thunder:()=>true,setBedMood:m=>m};
+ const {view}=playable(t,{fov:80});
+ view._modeTheme='ctf';
+ assert.equal(view.setAudio(audio),audio);
+ assert.ok(calls.includes('ctf'),'connecting audio adopts the active mode theme');
+ assert.deepEqual(view.setOutcome('victory'),{outcome:'victory',played:true});
+ assert.equal(view.setOutcome('nonsense'),null,'unknown outcomes are ignored');
+ assert.equal(view.setAudio(null),null);
 });
 
 test('built-in scopes zoom the ADS field of view far below the iron floor',t=>{

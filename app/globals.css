@@ -535,22 +535,27 @@
    so the switch is immediate without re-rendering the whole HUD. */
 .aim-layer{position:absolute;inset:0;pointer-events:none}
 .aim-layer .ads-reticle{display:none}
-.aim-layer.is-ads .ads-reticle{display:block}
+.aim-layer.is-ads .ads-reticle.dot{display:block}
 .aim-layer.is-ads .crosshair{display:none}
+.aim-layer.is-ads.is-scope .ads-reticle.dot{display:none}
+.aim-layer.is-ads.is-scope .ads-reticle.scope{display:block}
 .ads-reticle{position:absolute;left:50%;top:50%;width:7px;height:7px;transform:translate(-50%,-50%) scale(var(--crosshair-size,1));border-radius:50%;background:var(--crosshair-color,#c2ffea);box-shadow:0 0 0 1px #000b,0 0 4px #000,0 0 2px #000;pointer-events:none}
 .ads-reticle::after{content:'';position:absolute;left:50%;top:50%;width:2px;height:2px;transform:translate(-50%,-50%);border-radius:50%;background:#04070a}
-/* Magnified scope: a full-bleed reticle SVG with a barrel-warp bow, mil ticks
-   and a soft ocular shadow that reads as a lens. Lines use non-scaling strokes
-   so they stay hairline-crisp at any viewport size or zoom level. */
+/* Magnified scope: a full-bleed reticle SVG with a barrel-warp bow and fine
+   tick lines, plus a small bounded CSS-pixel centre dot that is always
+   circular (the SVG stretches the viewBox, so the dot is not drawn in it). */
 .ads-reticle.scope{left:0;top:0;width:100%;height:100%;transform:none;border-radius:0;background:none;box-shadow:none}
 .ads-reticle.scope::after{display:none}
 .scope-reticle{position:absolute;inset:0;width:100%;height:100%;display:block}
-.scope-line{fill:none;stroke:var(--crosshair-color,#c2ffea);stroke-width:1.5px;stroke-linecap:round;opacity:.92}
-.scope-tick{stroke:var(--crosshair-color,#c2ffea);stroke-width:1.5px;opacity:.75}
-.scope-dot{fill:var(--crosshair-color,#c2ffea);stroke:#000;stroke-width:1px}
+.scope-line{fill:none;stroke:var(--crosshair-color,#c2ffea);stroke-width:1.2px;stroke-linecap:round;opacity:.9}
+.scope-tick{stroke:var(--crosshair-color,#c2ffea);stroke-width:1.2px;opacity:.7}
+.scope-dot{position:absolute;left:50%;top:50%;width:3px;height:3px;transform:translate(-50%,-50%);border-radius:50%;background:var(--crosshair-color,#c2ffea);box-shadow:0 0 0 1px #000b,0 0 3px #000;pointer-events:none}
 .scope-lens{position:absolute;inset:0;pointer-events:none;background:
-  radial-gradient(circle at 50% 50%, transparent 0 52%, #0002 66%, #000c 100%);
-  box-shadow:inset 0 0 180px #000a, inset 0 0 42px #0006}
+  radial-gradient(circle at 50% 50%, transparent 0 54%, #0002 68%, #000b 100%);
+  box-shadow:inset 0 0 150px #0009, inset 0 0 36px #0005}
+/* Reduced motion removes the cosmetic distortion entirely, leaving a clean
+   centred cross so the target stays readable. */
+.aim-layer.no-warp .scope-lens{display:none}
 .hitmarker { position: absolute; left: 50%; top: 50%; width: 26px; height: 26px; transform: translate(-50%, -50%); pointer-events: none; filter: drop-shadow(0 0 2px #000); }
 .hitmarker span { position: absolute; left: 50%; top: 50%; width: 16px; height: 2px; background: #f4fffb; box-shadow: 0 0 6px #ffffff99; }
 .hitmarker span:first-child { transform: translate(-50%, -50%) rotate(45deg); }
@@ -1212,3 +1217,17 @@ html, body { overscroll-behavior: none; }
   border:1px solid #83f4d5aa;border-left:3px solid #83f4d5;background:rgba(8,22,26,.96);color:#e9fff6;
   font:12px var(--font-mono);box-shadow:0 14px 40px rgba(0,0,0,.55)}
 .update-banner .update-reload{width:auto;margin:0;padding:8px 14px;display:inline-flex}
+
+/* Music mix controls (v6.3): per-bus volume sliders, a preview action and a
+   blocked-audio status. Kept in the normal settings panel so music is audible
+   during menus and gameplay without opening the demo drawer. */
+.audio-mix{display:grid;gap:12px;margin:16px 0 0;border-top:1px solid #66867455;padding-top:16px}
+.audio-mix>label{display:flex;justify-content:space-between;gap:12px;font-size:13px;color:#c0d6ca}
+.audio-mix>label span{font-family:var(--font-mono);color:#94bca4}
+.audio-status{display:flex;align-items:center;gap:14px;flex-wrap:wrap;margin-top:4px}
+.audio-status .text-button{width:auto}
+.audio-status small{font:12px var(--font-mono);color:#e6c07a;letter-spacing:.4px}
+
+/* Lightweight preparing state shown while arena/weapon shaders warm (v6.3). */
+.preparing-overlay{position:absolute;left:50%;bottom:12%;transform:translateX(-50%);display:grid;gap:6px;justify-items:center;text-align:center;background:rgba(8,22,26,.82);border:1px solid rgba(131,244,213,.35);padding:12px 20px;pointer-events:none;z-index:var(--z-board);text-shadow:0 1px 3px #000}
+.preparing-overlay small{font:12px var(--font-mono);color:#9fc4b5;letter-spacing:.6px}

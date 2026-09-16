@@ -156,6 +156,24 @@ test('EffectPool reuses scratch vectors and colors across cycles without GC chur
 });
 
 function audioFixture2(){const audio=new SynthAudio(),nodes=[];const param=()=>({value:0,setValueAtTime(){},linearRampToValueAtTime(){},exponentialRampToValueAtTime(){},setTargetAtTime(){}});const node=extra=>{const n={frequency:param(),gain:param(),Q:param(),pan:param(),type:'',buffer:null,loop:false,connect(){},disconnect(){this.disconnected=true;},start(){this.started=true;},stop(){this.stopped=true;},...extra};nodes.push(n);return n;};audio.ctx={currentTime:1,destination:{},createOscillator:()=>node({type:'sine'}),createGain:()=>node(),createBiquadFilter:()=>node({type:'lowpass'}),createBufferSource:()=>node({}),createStereoPanner:()=>node(),close(){this.closed=true;}};audio.noiseBuffer={};audio.master=node();return {audio,nodes};}
+// A fuller context for soundtrack tests: mutable clock, resume(), buffers, and
+// the same node factories the real graph uses. Buses are built through the real
+// _ensureBuses path so the tests exercise production wiring.
+function musicFixture(){
+ const nodes=[];
+ const param=(v=0)=>({value:v,setValueAtTime(){},linearRampToValueAtTime(){},exponentialRampToValueAtTime(){},setTargetAtTime(){},cancelScheduledValues(){}});
+ const node=extra=>{const n={frequency:param(),gain:param(),Q:param(),pan:param(),type:'',buffer:null,loop:false,connect(){},disconnect(){this.disconnected=true;},start(){this.started=true;},stop(){this.stopped=true;},...extra};nodes.push(n);return n;};
+ const ctx={currentTime:0,state:'running',sampleRate:44100,destination:{},
+  createOscillator:()=>node({type:'sine'}),createGain:()=>node(),createBiquadFilter:()=>node({type:'lowpass'}),
+  createBufferSource:()=>node({}),createStereoPanner:()=>node(),
+  createBuffer:(ch,len)=>({getChannelData:()=>new Float32Array(len)}),
+  resume(){this.state='running';return Promise.resolve();},close(){this.closed=true;}};
+ const audio=new SynthAudio({announcer:true});
+ audio.ctx=ctx;audio.noiseBuffer={};
+ audio._ensureBuses();
+ audio._bed(true);
+ return {audio,ctx,nodes};
+}
 
 test('footstep and landing variants rotate deterministically per weapon family',()=>{
  const {audio}=audioFixture2(),tones=[],noises=[];
@@ -223,22 +241,72 @@ test('kill confirmations layer into the death voice and follow the spectated act
  assert.equal(confirms.length,1,'a local death never confirms a kill');
 });
 
-test('dynamic combat intensity starts a music layer, ducks the bed and disposes cleanly',()=>{
- const {audio,nodes}=audioFixture2();
- audio._bed(true);
- assert.ok(audio.bed,'the ambience bed starts');
- const bedGain=audio.bed.g,bedSub=audio.bed.og;
- assert.equal(audio.setIntensity(1.4),1,'intensity clamps to one');
- assert.ok(audio.music,'a loud fight starts the music layer');
- assert.ok(audio.bedScale>1,'the bed ducks up toward full level in a fight');
- audio.setIntensity(0);
- assert.ok(audio.bedScale<1,'the bed eases back down when the fight ends');
- audio.tone(100);assert.ok(audio.voices.size>0,'ordinary voices still play');
- for(let i=0;i<100;i++)audio.tone(100);
- assert.equal(audio.voices.size,30,'the shared voice cap still holds');
+test('the soundtrack plays from a quiet menu and layers combat with intensity',()=>{
+ const {audio,ctx}=musicFixture();
+ assert.equal(audio.setScene('menu'),'menu');
+ // Quiet menu: no gunfire, no rockets. Music must still schedule notes.
+ for(let i=0;i<20;i++){ctx.currentTime+=.05;audio.tick();}
+ assert.ok(audio.musicEngine.notesScheduled>0,'a quiet menu still produces music');
+ assert.equal(audio.musicEngine._activeScene(),'menu');
+ const menuNotes=audio.musicEngine.notesScheduled;
+ // Quiet gameplay starts on exploration material, then combat layers in.
+ audio.setScene('game');audio.setIntensity(0);
+ for(let i=0;i<20;i++){ctx.currentTime+=.05;audio.tick();}
+ assert.equal(audio.musicEngine._activeScene(),'explore','quiet play uses the exploration arrangement');
+ audio.setIntensity(1);
+ assert.equal(audio.musicEngine._activeScene(),'combat','a loud fight layers the combat arrangement');
+ for(let i=0;i<20;i++){ctx.currentTime+=.05;audio.tick();}
+ assert.ok(audio.musicEngine.notesScheduled>menuNotes,'combat keeps scheduling after the menu theme');
+ assert.ok(audio.musicEngine.voices.length<=audio.musicEngine.maxVoices,'simultaneous voices are bounded');
  audio.dispose();
- assert.equal(audio.music,null,'dispose tears the music layer down');
  assert.equal(audio.ctx,null);
+});
+
+test('music toggles and master mute silence only the intended branch',()=>{
+ const {audio,ctx}=musicFixture();
+ for(let i=0;i<10;i++){ctx.currentTime+=.05;audio.tick();}
+ const before=audio.musicEngine.notesScheduled;
+ assert.equal(audio.setMusicEnabled(false),false);
+ assert.equal(audio.musicEngine.enabled,false);
+ for(let i=0;i<10;i++){ctx.currentTime+=.05;audio.tick();}
+ assert.equal(audio.musicEngine.notesScheduled,before,'music off pauses the soundtrack scheduler');
+ audio.tone(100);
+ assert.ok(audio.voices.size>0,'effects still play while music is disabled');
+ assert.equal(audio.muted,false,'the music toggle does not mute the whole mix');
+ assert.equal(audio.setMusicEnabled(true),true);
+ assert.equal(audio.musicEngine.enabled,true);
+ for(let i=0;i<10;i++){ctx.currentTime+=.05;audio.tick();}
+ assert.ok(audio.musicEngine.notesScheduled>before,'re-enabling resumes the soundtrack');
+ // Master mute silences every branch immediately.
+ assert.equal(audio.setMuted(true),true);
+ assert.equal(audio.muteGain.gain.value,0,'master mute drives the mute gain to zero');
+ assert.equal(audio.musicEngine.muted,true);
+ assert.equal(audio.bed,null,'muting stops the ambience bed');
+ const muted=audio.musicEngine.notesScheduled;
+ for(let i=0;i<10;i++){ctx.currentTime+=.05;audio.tick();}
+ assert.equal(audio.musicEngine.notesScheduled,muted,'muting pauses the soundtrack scheduler');
+ assert.equal(audio.setMuted(false),false);
+ assert.equal(audio.muteGain.gain.value,1,'unmuting restores the master gain');
+ assert.ok(audio.bed,'unmuting restarts the ambience bed');
+ audio.dispose();
+});
+
+test('per-mode themes retune the soundtrack in place',()=>{
+ const {audio,ctx}=musicFixture();
+ assert.equal(audio.mode,'default');
+ assert.equal(audio.setModeTheme('ctf'),'ctf');
+ assert.equal(audio.theme,MODE_THEMES.ctf);
+ assert.equal(audio.musicEngine.theme.root,MODE_THEMES.ctf.root,'the engine reads the shared mode theme');
+ assert.equal(audio.setModeTheme('not-a-mode'),'default','an unknown mode falls back to the default theme');
+ for(let i=0;i<20;i++){ctx.currentTime+=.05;audio.tick();}
+ assert.ok(audio.musicEngine.notesScheduled>0);
+ assert.ok(MODE_THEMES.horde.root!==MODE_THEMES.default.root,'modes have distinct roots');
+ for(const [key,theme] of Object.entries(MODE_THEMES)){
+  assert.ok(Number.isFinite(theme.root)&&theme.root>0,`${key} root`);
+  assert.ok(Array.isArray(theme.scale)&&theme.scale.length>0,`${key} scale`);
+  assert.ok(Object.isFrozen(theme)&&Object.isFrozen(theme.scale));
+ }
+ audio.dispose();
 });
 
 test('the announcer cue is opt-in, returns the cue id and respects mute and the voice cap',()=>{
@@ -262,6 +330,18 @@ test('the announcer cue is opt-in, returns the cue id and respects mute and the 
  audio.dispose();
 });
 
+test('duplicate announcer reports of one moment are deduped',()=>{
+ const {audio}=audioFixture2();
+ audio.announcer=true;
+ audio.ctx.currentTime=5;
+ assert.equal(audio.announcerCue('capture').played,true);
+ assert.equal(audio.announcerCue('capture').deduped,true,'the same cue within the cooldown is dropped');
+ assert.equal(audio.announcerCue('capture').played,false);
+ audio.ctx.currentTime=5.4;
+ assert.equal(audio.announcerCue('capture').played,true,'the cue plays again after the cooldown');
+ audio.dispose();
+});
+
 test('weather precipitation reuses pooled slots, respects the cap and gates CPU/reduced motion',()=>{
  const pool=new EffectPool(new T.Scene(),32),fx=new WeatherFX(pool,{seed:1,preset:weatherPreset('storm'),cap:6}),origin={x:0,y:0,z:0};
  assert.equal(fx.update(.05,origin,{software:true}),0,'the CPU renderer emits no precipitation');
@@ -274,47 +354,6 @@ test('weather precipitation reuses pooled slots, respects the cap and gates CPU/
  fx.setPreset(weatherPreset('clear'));
  assert.equal(fx.update(.05,origin,{quality:1}),0,'clear weather spawns nothing');
  pool.dispose();
-});
-
-test('per-mode music themes retune the running drone without restarting it',()=>{
- const {audio}=audioFixture2();
- assert.equal(audio.mode,'default');
- assert.equal(audio.setModeTheme('ctf'),'ctf');
- assert.equal(audio.theme,MODE_THEMES.ctf);
- assert.equal(audio.setModeTheme('not-a-mode'),'default','an unknown mode falls back to the default theme');
- audio._bed(true);
- const drone=audio.music;
- assert.equal(drone,null,'no drone until the fight starts');
- audio.setIntensity(1);
- assert.ok(audio.music,'a loud fight starts the drone');
- const osc=audio.music.osc;
- audio.setModeTheme('pounce');
- assert.equal(audio.setModeTheme('horde'),'horde');
- assert.equal(audio.music.osc,osc,'switching modes reuses the same oscillator');
- assert.ok(MODE_THEMES.horde.root!==MODE_THEMES.default.root,'modes have distinct roots');
- for(const [key,theme] of Object.entries(MODE_THEMES)){
-  assert.ok(Number.isFinite(theme.root)&&theme.root>0,`${key} root`);
-  assert.ok(Array.isArray(theme.scale)&&theme.scale.length>0,`${key} scale`);
-  assert.ok(Object.isFrozen(theme)&&Object.isFrozen(theme.scale));
- }
- audio.dispose();
-});
-
-test('music can be disabled without muting the rest of the mix',()=>{
- const {audio}=audioFixture2();
- audio._bed(true);
- audio.setIntensity(1);
- const drone=audio.music;
- assert.ok(drone,'a loud fight starts the drone');
- assert.equal(audio.setMusicEnabled(false),false);
- assert.equal(audio.music,null,'disabling music stops the drone');
- assert.ok(drone.g.gain,'the drone gain node is kept for its fade-out');
- assert.equal(audio.muted,false,'the music toggle does not mute the whole mix');
- audio.setIntensity(1);
- assert.equal(audio.music,null,'no drone restarts while music is disabled');
- assert.equal(audio.setMusicEnabled(true),true);
- assert.ok(audio.music,'re-enabling music restarts the drone on the next intensity update');
- audio.dispose();
 });
 
 test('victory and defeat stings reuse the voice cap and honour mute',()=>{

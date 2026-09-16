@@ -1,5 +1,41 @@
 # COCS verification report
 
+## Release 6.3 - Soundtrack, smooth presentation, batching and diagnostics
+
+- **Audio wiring:** `game/feedback.test.mjs` builds the real bus graph through
+  `_ensureBuses`, then proves the soundtrack schedules from a quiet menu, layers
+  combat by intensity, pauses on Music OFF and master mute (mute gain set to zero
+  and the ambience bed stopped), resumes on unmute, retunes per mode theme, and
+  dedupes duplicate announcer reports. `game/weather.test.mjs` covers intensity
+  and the bed duck; `game/view.test.mjs` proves `setAudio` adopts the active mode
+  theme and forwards stings, and that combat events feed intensity from the
+  dispatch stage and reset per match.
+- **Soundtrack engine:** `game/music.test.mjs` asserts the arrangements share a
+  tonal centre and carry bass/percussion/arpeggio, that a quiet menu schedules
+  music, that look-ahead is bounded per tick and recovers from a 20s suspension
+  without a backlog, that scene/intensity crossfade the buses, that ducking
+  works, and that disposal stops and disconnects every held note and bus. An
+  `OfflineAudioContext` non-silence check runs where Web Audio is available.
+- **Interpolation:** `game/interpolation.test.mjs` covers shortest-path yaw,
+  snapping and schedule-independent sampling. `game/view.test.mjs` drives the
+  host-captured path and verifies the **camera** position blends, snaps on a
+  teleport, keeps only the two surrounding ticks across a multi-tick frame,
+  resets on a new match/replay seek, and freezes at the authoritative pose.
+- **Batching:** `game/view.test.mjs` merges floor tiles into one batch mesh
+  (asserting tile count and bounds) and verifies block grouping by material and
+  chunk; `_batchArenaBlocks` is a no-op off WebGL so the CPU renderer and tests
+  keep individual meshes.
+- **Scopes:** `game/reticle.test.mjs` asserts perspective-correct magnification
+  (`tan(base/2)/tan(fov/2)` recovers the ratio), floors, and that the scope cross
+  midpoint is exactly the aiming centre at every warp including zero.
+- **Terrain:** `game/terrain-normals.test.mjs` proves coplanar triangles smooth
+  to one normal, a 90-degree crease keeps hard edges, normals stay unit length,
+  and per-vertex tint is deterministic and shared across coincident vertices.
+- **Diagnostics:** `game/perf.test.mjs` exercises `GpuTimer` (resolved async
+  query, no extension/no WebGL returns null) and `game/view.test.mjs` covers
+  `prepareScene` warming the weapon + viewmodel through `compileAsync`, bounding a
+  stuck compile to a reported timeout, and reporting a rejected compile.
+
 ## Release 6.2 - Native-resolution performance, smooth presentation and sighted optics
 
 - **Active sight resolver:** `game/reticle.test.mjs` proves the resolver's built-in

@@ -986,19 +986,39 @@ and a barrel-tip `userData.muzzle` for remote tracers; the detailed first-person
 weapon is reserved for `_acquireWeapon`'s bounded cache. Shadow casting excludes
 transparent effects and meshes tagged `userData.lodDetail`.
 
+Static architecture is batched on real WebGL only: `_mergeFloorTiles` merges the
+5-unit floor tiles into one material mesh, and `_batchArenaBlocks` groups visible
+block meshes by material and coarse spatial cell (24 units) and merges each group,
+recording `world.userData.blockBatches`. The CPU renderer and the test mock keep
+individual tiles/blocks (`isWebGLRenderer !== true`) so painter depth ordering and
+representation tests are unaffected; `arena.blocks` collision data is untouched.
+`game/terrain-normals.mjs` supplies crease-aware `smoothNormals` (faces are
+averaged only within `angleCos`) and `positionColors` for coherent terrain tint.
+
 `game/perf.mjs` `PerfTracker` accumulates named CPU phases and keeps asynchronous
 GPU time distinct; `GpuTimer` fills the GPU number only from a real
-`EXT_disjoint_timer_query_webgl2` result. `ArenaView.warmup()` compiles world and
-viewmodel variants with `compileAsync` where available (synchronous `compile`
-otherwise, no-op on the software renderer), `rendererInfo()` reports the backend,
-GPU vendor/renderer and max texture size, and `getPerformance()` reports viewport,
-drawing buffer, tier, passes, draw calls, triangles and frame-time median/p95.
+`EXT_disjoint_timer_query_webgl2` result and bounds outstanding queries
+(`maxPending`), clearing them on a disjoint event. `ArenaView.warmup()` compiles
+world and viewmodel variants; `prepareScene()` additionally builds the requested
+viewmodel, ensures the post variants, and compiles under a bounded, token-guarded
+timeout that reports `ok`/`reason` instead of pretending success. `rendererInfo()`
+reports backend/GPU/texture limits, the per-frame `_beginGpu`/`_endGpu` query spans
+the world, post and first-person weapon pass, CPU submission is split into
+`submitMs` and `weaponSubmitMs`, and `getPerformance()` reports viewport, drawing
+buffer, tier, passes, draw calls, triangles and frame-time median/p95.
+`app/page.tsx` `tokenArenaBenchmark.run()` applies `BENCHMARK_PRESET` (map, seed,
+bots, camera path), runs direct and post-processed variants at `resolutionScale:1`,
+warms up, measures a bounded window and restores the previous display and match.
 
 `game/interpolation.mjs` is the pure presentation-interpolation core (shortest-path
-yaw, snap-on-discontinuity, `interpolatePose`). `ArenaView.setInterpolation` (opt-in,
-host-driven, local fixed-step path only) retains the previous/current actor
-transforms and blends by the fixed-step accumulator fraction; it never mutates
-simulation state and is not applied to the multiplayer interpolation path.
+yaw, snap-on-discontinuity, `interpolatePose`). The host calls
+`ArenaView.capturePresentation(match)` after **every** fixed step (including
+catch-up) and `setInterpolation({enabled, alpha})` before rendering; the view then
+blends the previous/current tick for the local camera, actor meshes, vehicles and
+projectile visuals. `resetPresentation()` clears history on match/map changes,
+respawns, teleports, actor replacement, vehicle transitions and replay seeking.
+It never mutates simulation state and is not applied to the multiplayer
+interpolation path.
 
 ---
 
@@ -1027,7 +1047,32 @@ cap (30), a filtered-noise ambience bed with mood profiles (`default`, `night`,
 `CalloutQueue` (`game/voice.mjs`) is a bounded, deduped, priority-aware bus for
 announcer callouts.
 
-### 13.2 HUD, radar, scoreboard
+### 13.2 Soundtrack (`game/music.mjs`)
+
+`MusicEngine` is a small step sequencer layered over the Web Audio graph. It owns
+three sub-buses (`menu`, `explore`, `combat`) plus a shared percussion bus, all
+under a music bus fed to `SynthAudio`'s master. `ARRANGEMENTS` and
+`CHORD_PROGRESSIONS` are pure data sharing the active `MODE_THEMES` root/scale, so
+menu, exploration and combat are recognisably the same piece; each arrangement
+carries bass, kick/snare/hat, an arpeggio and (combat) a lead, with four-bar phrase
+fills. `tick()` — called once per rendered frame by `ArenaView`/`app/page.tsx`,
+including in menus — schedules notes with a bounded look-ahead using
+`AudioContext.currentTime`, so timing is frame-rate independent and a suspended tab
+resumes without a backlog. `setScene`/`setIntensity` crossfade the buses,
+`setDuck` eases the music under stings, `preview` forces a scene for an audition,
+and `dispose` stops and disconnects every held note and bus.
+
+`SynthAudio` builds the bus graph in `_ensureBuses` (master → mute gain →
+destination, with effects/ambience/music children), exposes `setMuted` (which sets
+the mute gain synchronously and pauses scheduling), `setVolume`/`getVolume`,
+`setScene`, `setMusicEnabled`, `previewMusic`, `audioStatus`, and `tick`.
+`ArenaView.setAudio` connects the engine at startup; combat intensity is fed from
+the single event-dispatch stage (`_noteCombatEvent`) before `lastEvent` advances,
+and announcer cues are deduped with a short per-cue cooldown. Announcer ownership:
+`ArenaView` owns capture/flag/goal cues, `app/page.tsx` owns kill/score/objective
+cues.
+
+### 13.3 HUD, radar, scoreboard
 
 - `game/hud.mjs` is a set of pure derivations covering vehicle prompts, reload
   progress, dynamic crosshair gap, low-ammo/posture/hit markers, damage numbers and
@@ -1047,7 +1092,7 @@ announcer callouts.
   React elements: team grouping/winning-first ordering, `compareActors`, mode
   columns, streak and ping chips, race standings, and soccer standings.
 
-### 13.3 Director and cameras
+### 13.4 Director and cameras
 
 `game/director.mjs` `CinematicDirector` drives eight rigs (`CAMERA_RIGS`: orbit,
 chase, dolly, crane, tripod, follow, firstperson, flyover). It picks targets and rigs
@@ -1057,7 +1102,7 @@ adds presentation modes (`cinematic`, `overshoulder`, `freelook`, `tactical`) pl
 `auto`/`free`, with frame-rate-independent `smoothPose`/`smoothAngle` helpers and
 `extraModePose` geometry.
 
-### 13.4 Weather presentation
+### 13.5 Weather presentation
 
 `ArenaView` owns a deterministic weather state: `_updateWeather` resolves a preset per
 time-of-day phase, eases wetness, and applies palette/tint/lighting; `_updateWeatherFx`
