@@ -27,8 +27,8 @@ export function buildPlasmaDriver(g, ctx) {
 
   // ---- Open iron sights along the top -------------------------------------
   const sights = attachIronSights(g, ctx, {
-    rear: {x: 0, y: .30, z: -.02, width: .07, height: .05, gap: .025},
-    front: {x: 0, y: .30, z: -.40, width: .014, height: .09, depth: .014},
+    rear: {x: 0, y: .33, z: .14, width: .07, height: .05, gap: .025},
+    front: {x: 0, y: .33, z: -.40, width: .014, height: .09, depth: .014},
   });
 
   // ---- Angled grip, trigger and magazine -----------------------------------

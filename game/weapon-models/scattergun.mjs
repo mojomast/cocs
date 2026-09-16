@@ -23,8 +23,8 @@ export function buildScattergun(g, ctx){
   box(g,.03,.02,.45,0,.105,-.42,dark);
   // --- open iron sights riding the rib ---
   const sights=attachIronSights(g,ctx,{
-    rear:{x:0,y:.135,z:-.18,width:.07,height:.04,gap:.025},
-    front:{x:0,y:.135,z:-.78,width:.012,height:.05,depth:.014},
+    rear:{x:0,y:.32,z:.2,width:.07,height:.04,gap:.025},
+    front:{x:0,y:.32,z:-.78,width:.012,height:.05,depth:.014},
   });
   // --- barrel bands clamp the twin tubes together ---
   for(const z of [-.65,-.30]){

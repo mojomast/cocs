@@ -62,8 +62,8 @@ export function buildRocketLauncher(g, ctx){
   // front post rising off the launch tube. Both are open, so the target stays
   // visible along the sight line.
   const sights = attachIronSights(g, ctx, {
-    rear: {x: 0, y: .36, z: -.14, width: .07, height: .045, gap: .025},
-    front: {x: 0, y: .45, z: -.56, width: .014, height: .36, depth: .014},
+    rear: {x: 0, y: .47, z: .16, width: .07, height: .045, gap: .025},
+    front: {x: 0, y: .47, z: -.56, width: .014, height: .12, depth: .014},
   });
 
   // --- top rail and teeth --------------------------------------------------

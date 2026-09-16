@@ -110,10 +110,12 @@ const WEAPON_SIGHT_LINES=[
 const WEAPON_SIGHT_DEFAULT=[0,.16,-.1,0,.16,-.5];
 const WEAPON_PART_DEFAULTS={leftGrip:[0,-.14,-.05],rightGrip:[0,-.14,-.05],magazine:[0,-.26,-.16],bolt:[.09,.05,-.16],hinge:[0,0,0]};
 // The first-person viewmodel is uniformly scaled and viewed through a dedicated
-// weapon camera. The ADS solver needs the same scale and a fixed eye relief, so
-// both live here and are mirrored by the weapon-camera pass.
+// weapon camera. The ADS solver needs the same scale and a fixed body distance
+// (how far the weapon origin sits in front of the eye), so both live here and are
+// mirrored by the weapon-camera pass. Distance — not eye relief — keeps every
+// weapon framed consistently and in front of the near plane.
 export const VIEWMODEL_SCALE=1.1;
-export const VIEWMODEL_EYE_RELIEF=.5;
+export const VIEWMODEL_GUN_DISTANCE=.82;
 const buildSightError=(rear,front,aim)=>sightAlignmentError(rear,front,aim,VIEWMODEL_SCALE);
 function assembleWeapon(type,assets,visual,finish,body){return withAssets(assets,()=>{type=Number.isInteger(type)&&type>=0?type:0;const info=weaponInfo(type),finishColors=resolveFinish(finish,null),g=new T.Group(),dark=material(finishColors?.secondary||'#222f37'),light=material(finishColors?.accent||'#73848a'),glow=material(finishColors?.primary||info.color,.3,.3,true);g.userData.type=type;const ctx={T,info,material,box,cylinder,ring,geo:(key,make)=>geometry(assets,key,make),palette:{dark,light,glow}};body(type,g,ctx);
   // Named anchors replace the old unconditional rail + iron sights. Every
@@ -135,7 +137,7 @@ function assembleWeapon(type,assets,visual,finish,body){return withAssets(assets
   // eye relief and rotates the bore onto the camera forward axis (accounting for
   // a rear anchor that is off the origin), rather than negating an unrotated
   // offset. `sightError` records the residual for the geometric tests.
-  g.userData.aim=solveSightPose(rearSight.position,frontSight.position,{scale:VIEWMODEL_SCALE,eyeRelief:VIEWMODEL_EYE_RELIEF});
+  g.userData.aim=solveSightPose(rearSight.position,frontSight.position,{scale:VIEWMODEL_SCALE,distance:VIEWMODEL_GUN_DISTANCE});
   g.userData.sightError=buildSightError(rearSight.position,frontSight.position,g.userData.aim);
   const points=[[[0,.01,-.85]],[[0,0,-.76]],[[0,.025,-1.04]],[[-.12,.03,-.82],[.12,.03,-.82]],[[0,0,-.77]],[[0,.04,-.93]],[[0,0,-.99]],[[0,0,-.99]],[[0,.02,-.84]],[[0,.05,-.835]]][type]||[[0,0,-.83]];
   const muzzle=info.feel?.muzzle||[.12,.06],flash=new T.Group(),anchors=[];
@@ -933,7 +935,20 @@ export class ArenaView{
      const actorModel=this.actorModels?.get(e.actor);
      if(!e.pos&&(e.type.startsWith('flag-')||e.type==='capture')&&actorModel)e={...e,pos:actorModel.position.clone().add(V(0,1,0))};
      // Change only the visual origin; authoritative hit endpoints and camera aim stay untouched.
-     if(e.from&&(e.type==='shot'||e.type==='launch')){const weapon=e.actor===this.playerId?(this.hands?.visible?this.firstPerson:null):actorModel?.userData.weapon;if(weapon?.userData.type===e.weapon&&weapon.userData.muzzle)e={...e,from:weapon.userData.muzzle.getWorldPosition(V())};}
+      if(e.from&&(e.type==='shot'||e.type==='launch')){
+       const local=e.actor===this.playerId,weapon=local?(this.hands?.visible?this.firstPerson:null):actorModel?.userData.weapon;
+       if(weapon?.userData.type===e.weapon&&weapon.userData.muzzle){
+        const muzzle=weapon.userData.muzzle.getWorldPosition(V());
+        if(local&&this.camera){
+         // The viewmodel muzzle sits below/off the sight line, so the raw muzzle
+         // point made shots read from the side of the gun. Project it onto the
+         // camera's forward axis at the same depth so the tracer leaves the
+         // reticle; authoritative hit endpoints and camera aim stay untouched.
+         const forward=V(0,0,-1).applyQuaternion(this.camera.quaternion),depth=Math.max(.05,forward.dot(muzzle.clone().sub(this.camera.position)));
+         e={...e,from:this.camera.position.clone().addScaledVector(forward,depth)};
+        }else e={...e,from:muzzle};
+       }
+      }
      if(e.type==='shot'||e.type==='vehicle-shot'||e.type==='launch'||e.type==='dash')this.shotEffect(e,info,reduced);
       if(['explosion','death','power','powerup','spawn','jam','flag-pickup','flag-drop','flag-return','capture','vehicle-destroyed'].includes(e.type)){const color=e.type==='explosion'?info.color:e.type==='vehicle-destroyed'?'#ff9944':e.type==='jam'?'#c99aff':e.type==='powerup'?'#ffcf70':e.type.startsWith('flag')||e.type==='capture'?(teamPresentation(e.team,this.display?.teamPalette)?.color??NEUTRAL):e.type==='death'?(CHARACTERS.find(c=>c.id===e.character)?.color??'#fff2ce'):'#74f4de';const impact=info.feel?.impactVisual,particleScale=this._quality().particles,count=(e.type==='death'||e.type==='vehicle-destroyed')&&!reduced?Math.max(1,Math.round(8*particleScale)):1,size=e.type==='death'?.12:e.type==='vehicle-destroyed'?.22:impact==='wide'?.42:impact==='burst'?.34:impact==='ring'?.22:.3;if(e.pos)for(let i=0;i<count;i++)this.effectPool.add({pos:e.pos,color,endColor:e.type==='vehicle-destroyed'?'#441800':e.type==='death'?'#553311':null,fade:'smooth',size,life:e.type==='death'?.5:e.type==='vehicle-destroyed'?.65:impact==='ring'?.4:.3,expand:reduced||e.type==='death'?0:impact==='ring'?1.5:3,wireframe:e.type==='power'||e.type==='powerup'||e.type==='spawn',velocity:(e.type==='death'||e.type==='vehicle-destroyed')&&!reduced?V((Math.random()-.5)*5,Math.random()*4+1,(Math.random()-.5)*5):null});if(e.type==='spawn'&&e.pos)this.effectPool.add({from:{x:e.pos.x,y:e.pos.y,z:e.pos.z},to:{x:e.pos.x,y:(e.pos.y||0)+2.2,z:e.pos.z},color,life:.4,size:.05,additive:true});}
         if(e.type==='explosion'||e.type==='vehicle-destroyed'){const w=e.weapon??1,fragments=this._quality().particles;if(e.type==='vehicle-destroyed'){if(!reduced)for(let i=0;i<Math.max(1,Math.round(8*fragments));i++)this.effectPool.add({pos:e.pos,color:'#ff9944',endColor:'#331100',fade:'smooth',damping:1.5,gravity:9.8,spin:V((Math.random()-.5)*8,(Math.random()-.5)*8,(Math.random()-.5)*8),size:.14,life:.6,velocity:V((Math.random()-.5)*10,Math.random()*6+2,(Math.random()-.5)*10)});if(e.pos)this.breakPropsAt(e.pos,{radius:5.5,amount:60,serial:(e.id??0)+1,reduced});}else if(w===4){this.effectPool.add({pos:e.pos,color:'#bff4ff',endColor:'#1155aa',fade:'smooth',size:.3,life:.35,expand:reduced?0:1.8});this.effectPool.add({pos:e.pos,color:'#72cfff',endColor:'#002266',fade:'smooth',size:.5,life:.42,expand:reduced?0:2.4});}else if(w===5){if(!reduced)for(let i=0;i<Math.max(1,Math.round(7*fragments));i++)this.effectPool.add({pos:e.pos,color:'#ffb27a',endColor:'#661100',fade:'exp',damping:1.8,gravity:8,spin:V((Math.random()-.5)*6,(Math.random()-.5)*6,(Math.random()-.5)*6),size:.06,life:.5,velocity:V((Math.random()-.5)*9,Math.random()*6,(Math.random()-.5)*9),wireframe:true});}else if(w===1&&!reduced){for(let i=0;i<Math.max(1,Math.round(6*fragments));i++)this.effectPool.add({pos:e.pos,color:'#ffcf9a',endColor:'#ff3300',fade:'smooth',damping:1.6,gravity:9.8,spin:V((Math.random()-.5)*5,(Math.random()-.5)*5,(Math.random()-.5)*5),size:.07,life:.45,velocity:V((Math.random()-.5)*8,Math.random()*5,(Math.random()-.5)*8)});}
@@ -1289,7 +1304,7 @@ if(this.freeCam){this.lowHealthOverlay?.update(false,time,delta,reduced,this.cam
      // unchanged.
      const wantAds=(player.ads===true||this.aim===true)&&this.hands.visible,adsTarget=wantAds?1:0;
      if(reduced)this._adsTransition=adsTarget;else this._adsTransition=(this._adsTransition??0)+((adsTarget-(this._adsTransition??0))*Math.min(1,Math.max(0,(delta||0)*14)));
-     const adsT=this._adsTransition,hipX=.37+pose.x,hipY=-.36+pose.y,hipZ=-.58+pose.z,aimData=this.firstPerson?.userData?.aim,aimBase=aimData?.position||{x:0,y:-.24,z:-.44},aimX=aimBase.x+pose.x*.2,aimY=aimBase.y+pose.y*.2,aimZ=aimBase.z+pose.z*.25;
+     const adsT=this._adsTransition,hipX=.37+pose.x,hipY=-.36+pose.y,hipZ=-.58+pose.z,aimData=this.firstPerson?.userData?.aim,aimBase=aimData?.position||{x:0,y:-.24,z:-.44},aimX=aimBase.x+pose.x*.2,aimY=aimBase.y+pose.y*.2,aimZ=aimBase.z+pose.z*.5;
      this.hands.position.set(hipX*(1-adsT)+aimX*adsT,hipY*(1-adsT)+aimY*adsT,hipZ*(1-adsT)+aimZ*adsT);
      // Blend rotation as a quaternion so the solved ADS orientation (which levels
      // the real sight line) is reached exactly, while hip-fire keeps the feedback
@@ -1300,6 +1315,10 @@ if(this.freeCam){this.lowHealthOverlay?.update(false,time,delta,reduced,this.cam
       hipEuler.set(pose.pitch,0,pose.roll,'YXZ');hipQuat.setFromEuler(hipEuler);
       if(aimData?.quaternion)aimQuat.set(aimData.quaternion.x,aimData.quaternion.y,aimData.quaternion.z,aimData.quaternion.w);else aimQuat.copy(hipQuat);
       this.hands.quaternion.copy(hipQuat).slerp(aimQuat,adsT);
+      // The solved ADS orientation is level; reintroduce the recoil pitch and
+      // roll on top of it so firing still kicks the sight picture.
+      this.hands.rotateX(pose.pitch);
+      this.hands.rotateZ(pose.roll*.5);
      }
     this._animateWeaponParts(this.firstPerson,player,reduced);
     this.firstPerson.userData.flash.visible=!reduced&&this.hands.visible&&this.flashUntil>performance.now();this.muzzleLights?.update(Math.max(0,delta));if(this.renderer.shadowMap?.autoUpdate===false){const hz=Number(this._quality().shadowHz)||30;if(shadowDue(time,this._shadowAt,hz)){this._shadowAt=time;this.renderer.shadowMap.needsUpdate=true;}}this.updateSky();this._updateWind(time,reduced);this._updateAmbient(match,delta,time,reduced);const spMode=match.config?.mode==='campaign'||match.config?.mode==='horde';if(spMode)this.setWeather(match.weather??null);else if(!cinematic&&this._weatherOverride!==null)this.setWeather(null);this._updateWeather(arena,delta,mode);this._updateWeatherFx(delta,reduced,this._quality());const software=this.renderer?.isSoftware===true;this._updateLightning(delta,reduced,software);this._applyWetSheen(this._weatherState());this.hitPool?.update(Math.max(0,delta));this._updateHitReactions();this._updateDebris(delta);this._updateAudio(match,time);if(this.composer)this.composer.render();else this.renderer.render(this.scene,this.camera);

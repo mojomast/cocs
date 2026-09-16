@@ -141,15 +141,22 @@ export function attachOptic(parent, ctx, kind, anchors, { x = 0, y = 0, z = 0 } 
 // builders (in the weapon group's local space), solve the translation and
 // rotation that align the sight line with the weapon camera's center ray. The
 // caller applies its own uniform model scale: a local point p maps to
-// `P + Q * (scale * p)`, so with the rear aperture required at
-// (0, 0, -eyeRelief) and the rear→front direction required along -Z:
+// `P + Q * (scale * p)`.
+//
+// The rear aperture (and therefore the whole sight line, front tip included, once
+// Q aligns the bore) is centred on the camera axis in x/y, but the weapon *body*
+// is held at a fixed `distance` in front of the eye rather than pinning the rear
+// sight at a fixed eye relief. Pinning eye relief pushed weapons whose rear sight
+// sits forward of the model origin (e.g. the Scattergun) back through the camera,
+// filling the screen with the receiver. A fixed body distance keeps every weapon
+// framed consistently and in front of the near plane.
 //
 //   Q = rotation taking (front - rear) onto (0, 0, -1)
-//   P = (0, 0, -eyeRelief) - scale * (Q * rear)
+//   P = (-(Q * rear * scale).x, -(Q * rear * scale).y, -distance)
 //
-// This accounts for the rotated rear anchor rather than negating its unrotated
-// position, and stays valid for any eye relief across the supported FOV range.
-export function solveSightPose(rear, front, { scale = 1, eyeRelief = 0.5 } = {}) {
+// `rearZ` records where the real aperture ended up so the geometric tests can
+// check it against the center ray.
+export function solveSightPose(rear, front, { scale = 1, distance = 0.62, eyeRelief } = {}) {
   const r = v3(Number(rear?.x) || 0, Number(rear?.y) || 0, Number(rear?.z) || 0);
   const f = v3(Number(front?.x) || 0, Number(front?.y) || 0, Number(front?.z) || 0);
   const dir = f.clone().sub(r);
@@ -157,14 +164,20 @@ export function solveSightPose(rear, front, { scale = 1, eyeRelief = 0.5 } = {})
   dir.normalize();
   const quat = new T.Quaternion().setFromUnitVectors(dir, v3(0, 0, -1));
   const rotatedRear = r.clone().applyQuaternion(quat).multiplyScalar(scale);
+  const body = Number.isFinite(eyeRelief)
+    ? Math.max(0.2, eyeRelief + rotatedRear.z)
+    : (Number.isFinite(distance) ? Math.max(0.2, distance) : 0.62);
+  const rearZ = -body + rotatedRear.z;
   const euler = new T.Euler().setFromQuaternion(quat, 'YXZ');
   return {
-    position: { x: -rotatedRear.x, y: -rotatedRear.y, z: -eyeRelief - rotatedRear.z },
+    position: { x: -rotatedRear.x, y: -rotatedRear.y, z: -body },
     quaternion: { x: quat.x, y: quat.y, z: quat.z, w: quat.w },
     pitch: euler.x,
     yaw: euler.y,
     roll: euler.z,
-    eyeRelief,
+    distance: body,
+    rearZ,
+    eyeRelief: -rearZ,
   };
 }
 

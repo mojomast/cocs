@@ -65,8 +65,8 @@ export function buildPulseRifle(g, ctx){
 
   // open iron sights (rear notch + front post)
   const sights = attachIronSights(g, ctx, {
-    rear: {x: 0, y: .215, z: .06, width: .09, height: .05, gap: .03},
-    front: {x: 0, y: .21, z: -.53, width: .012, height: .05, depth: .014},
+    rear: {x: 0, y: .31, z: .06, width: .09, height: .05, gap: .03},
+    front: {x: 0, y: .31, z: -.53, width: .012, height: .05, depth: .014},
   });
 
   // side energy cells
@@ -77,6 +77,15 @@ export function buildPulseRifle(g, ctx){
   const cell2 = new T.Mesh(cellGeo, energy);
   cell2.position.set(-.105, .05, 0);
   g.add(cell2);
+
+  // Charging handle / bolt carrier on the right face. Grouped so the shot kick
+  // and reload can cycle it (the shared tail animates userData.parts.bolt).
+  const bolt = new T.Group();
+  bolt.name = 'pulse-bolt';
+  g.add(bolt);
+  box(bolt, .03, .05, .14, .085, .06, -.16, steel);
+  box(bolt, .04, .03, .04, .108, .06, -.16, light);
+  g.userData.parts = {...(g.userData.parts || {}), bolt};
 
   // receiver side bolts
   for(let i = 0; i < 3; i++){

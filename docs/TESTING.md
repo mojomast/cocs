@@ -131,9 +131,9 @@ duplicate "every combat mode completes" loop was removed outright from
 
 ## Current counts
 
-Last verified on release v6.0 (2026-09-16):
+Last verified on release v6.1 (2026-09-16):
 
-- `npm run test:game` — **1393 pass, 0 fail, 4 skipped**, across 126
+- `npm run test:game` — **1399 tests: 1395 pass, 0 fail, 4 skipped**, across 126
   `game/*.test.mjs` files, and it completes in minutes.
 - The 4 skipped tests are long simulations (an exhaustive 8-bot all-modes sweep,
   an 18k-step 4-bot match, a 10k-step 8-bot race, a 4×1800-step platform-bot

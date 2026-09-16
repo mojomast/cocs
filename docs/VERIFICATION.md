@@ -1,5 +1,21 @@
 # COCS verification report
 
+## Release 6.1 - Clear sight pictures and correctly rigged weapons
+
+- **Per-weapon bore clearance:** `game/sights.test.mjs` mounts every weapon at its
+  runtime scale with the solved ADS pose, raycasts the centre of the aim picture,
+  and fails if any non-sight mesh (rail, rod, tank, sight base) blocks it. All ten
+  weapons pass.
+- **ADS framing:** `solveSightPose` uses a fixed body distance; the `weapon-rig`
+  and `view` tests assert the viewmodel centres on the sight line and does not
+  drop below the hip height.
+- **Reticle and tracers:** the ADS reticle is DOM (native UI resolution) and the
+  local tracer origin is projected onto the camera aim ray in `effect()`; the
+  authoritative event endpoints are still asserted unchanged by
+  `weapon-presentation.test.mjs`.
+- **Firing feedback:** the Pulse Rifle exposes a `parts.bolt` charging handle and
+  the ADS pose carries recoil pitch/roll.
+
 ## Release 6.0 - Open sights, honest performance and real quality tiers
 
 - **Open sights (geometry, browser-free):** `game/sights.test.mjs` mounts every

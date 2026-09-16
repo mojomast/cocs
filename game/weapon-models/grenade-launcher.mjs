@@ -22,8 +22,8 @@ export function buildGrenadeLauncher(g, ctx) {
 
   // --- open iron sights on the top rail ------------------------------------
   const sights = attachIronSights(g, ctx, {
-    rear: {x: 0, y: .33, z: .10, width: .08, height: .05, gap: .03},
-    front: {x: 0, y: .33, z: -.47, width: .014, height: .17, depth: .014},
+    rear: {x: 0, y: .60, z: .10, width: .08, height: .05, gap: .03},
+    front: {x: 0, y: .60, z: -.47, width: .014, height: .17, depth: .014},
   });
 
   const shroud = cylinder(g, .115, .13, .32, 0, .045, -.47, dark, 16);

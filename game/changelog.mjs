@@ -1,12 +1,20 @@
 // In-game patch notes. The title-screen footer is the running version; this
 // module is the human-readable release digest the Changelog screen renders. The
 // full historical record lives in docs/CHANGELOG.md and is linked from the UI.
-export const RELEASE_VERSION = 'v6.0';
-export const RELEASE_CODENAME = 'CLARITY';
+export const RELEASE_VERSION = 'v6.1';
+export const RELEASE_CODENAME = 'SIGHTLINE';
 export const REPO_URL = 'https://github.com/mojomast/tokenarena';
 export const FULL_CHANGELOG_URL = `${REPO_URL}/blob/main/docs/CHANGELOG.md`;
 
 export const CHANGELOG = [
+  {version:'v6.1',codename:'SIGHTLINE',date:'2026-09-16',tag:'Clear sight pictures and correctly rigged weapons',highlights:[
+    'Every weapon\'s iron sights and scopes are now rigged onto a clear sight line that sits above the model\'s own top profile. Opening the apertures exposed receiver rails, conduit rods, dorsal coolant tanks and rear-sight bases that used to hide behind solid sight blocks — they no longer block the bore, and a per-weapon raycast test proves the centre of the aiming picture is unobstructed.',
+    'ADS framing is fixed: the solver holds the weapon body at a consistent distance in front of the eye instead of pinning eye relief, so weapons whose rear sight sits forward of the model origin (the Scattergun and others) no longer shove the camera inside the receiver and fill the screen with the stock.',
+    'A dedicated ADS reticle replaces the hip crosshair while aiming — one small, sharp, high-contrast centre reference (a dot for irons and holos, a thin cross for scopes) that sits at native UI resolution and never competes with the sight picture.',
+    'Shots no longer appear to come from the side of the gun: local tracers now originate on the camera\'s aim ray at the muzzle depth, while authoritative hit endpoints and camera aim are untouched. Other players\' shots still leave their own muzzles.',
+    'The Pulse Rifle gets a visible charging handle, and the solved ADS pose now carries the recoil pitch and roll on top of it, so firing still kicks the sight picture instead of freezing it level.',
+    'The long Rail Lance and Marksman scopes are open, see-through tubes with their own reticle framing.',
+  ]},
   {version:'v6.0',codename:'CLARITY',date:'2026-09-16',tag:'Open sights, honest performance and real quality tiers',highlights:[
     'Sights are actually usable. Solid blocks and capped cylinders are gone: iron sights are an open rear notch with a front post, holographic sights are a thin frame around an empty window with a small reticle, and scopes are open-ended tubes with no caps or lens disks across the bore. The target is visible through the sight, not behind it.',
     'Aiming down sights is solved from the weapon\'s real aperture and front-tip anchors after its final scale and attachment transforms, so the sight line lands on the weapon camera\'s centre ray; the SMG\'s rear anchor now matches its actual aperture. Reduced motion snaps to the correct ADS pose instead of falling back to the hip.',

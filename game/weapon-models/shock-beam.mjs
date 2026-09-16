@@ -30,8 +30,8 @@ export function buildShockBeam(g, ctx){
 
   // open iron sights (rear notch on the receiver, front post over the barrel)
   const sights=attachIronSights(g,ctx,{
-    rear:{x:0,y:.20,z:.05,width:.07,height:.045,gap:.025},
-    front:{x:0,y:.20,z:-.62,width:.014,height:.14,depth:.014},
+    rear:{x:0,y:.34,z:.05,width:.07,height:.045,gap:.025},
+    front:{x:0,y:.34,z:-.62,width:.014,height:.14,depth:.014},
   });
 
   // barrel and collar

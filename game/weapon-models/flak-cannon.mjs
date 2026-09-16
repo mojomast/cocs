@@ -46,8 +46,8 @@ export function buildFlakCannon(g, ctx){
 
   // --- open iron sights on the top plate -----------------------------------
   const sights = attachIronSights(g, ctx, {
-    rear: {x: 0, y: .37, z: .10, width: .08, height: .05, gap: .03},
-    front: {x: 0, y: .37, z: -.26, width: .014, height: .05, depth: .014},
+    rear: {x: 0, y: .59, z: .10, width: .08, height: .05, gap: .03},
+    front: {x: 0, y: .59, z: -.72, width: .014, height: .05, depth: .014},
   });
 
   box(g, .22, .32, .38, .34, -.06, -.06, plate);

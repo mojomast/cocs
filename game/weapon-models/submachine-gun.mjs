@@ -35,8 +35,8 @@ export function buildSubmachineGun(g, ctx){
   // old shared anchor, so ADS lines up with the actual sights.
   // ------------------------------------------------------------------
   const sights=attachIronSights(g,ctx,{
-    rear:{x:0,y:.288,z:.01,width:.06,height:.07,gap:.02},
-    front:{x:0,y:.206,z:-.47,width:.014,height:.10,depth:.014},
+    rear:{x:0,y:.31,z:.01,width:.06,height:.07,gap:.02},
+    front:{x:0,y:.31,z:-.47,width:.014,height:.10,depth:.014},
   });
 
   // ------------------------------------------------------------------

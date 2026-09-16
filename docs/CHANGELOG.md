@@ -16,6 +16,39 @@ record in [VERIFICATION.md](VERIFICATION.md).
 
 ---
 
+## v6.1 · SIGHTLINE — 2026-09-16
+
+**Tag:** Clear sight pictures and correctly rigged weapons.
+
+- **Rigged sights.** Opening the apertures in v6.0 exposed model geometry that had
+  always been hidden behind solid sight blocks: top rails, conduit rods, the Rail
+  Lance's dorsal coolant tank and several rear-sight bases sat directly on the
+  sight line and blocked the target. Every weapon's iron sights and scopes are now
+  placed on a flat sight line above the model's own top profile, and
+  `game/sights.test.mjs` raycasts each weapon's ADSed bore and fails if any
+  non-sight mesh blocks it.
+- **ADS framing.** `solveSightPose` holds the weapon body at a fixed distance in
+  front of the eye (`VIEWMODEL_GUN_DISTANCE`) instead of pinning the rear sight to
+  a fixed eye relief. Weapons whose rear sight sits forward of the model origin
+  (Scattergun, Plasma Driver, Grenade Launcher, Flak Cannon) used to translate the
+  camera into the receiver; they now frame consistently.
+- **ADS reticle.** While aiming, the hip crosshair is replaced by a small,
+  high-contrast centre reticle (dot for irons/holos, thin cross for scopes) at
+  native UI resolution, so the hip reticle never competes with the sight.
+- **Tracers.** Local shot tracers now start on the camera's forward axis at the
+  muzzle's depth (`effect()`), so firing reads from the reticle rather than the
+  side/underside of the viewmodel. Authoritative endpoints and camera aim are
+  unchanged, and other actors still fire from their own muzzles.
+- **Firing feedback.** The Pulse Rifle gains a visible charging handle that cycles
+  on the shot kick, and the solved ADS pose now carries recoil pitch/roll so the
+  sight picture still kicks when firing.
+
+Tests: the per-weapon bore raycast and the SMG/anchor and ADS framing assertions
+were updated; `weapon-rig.test.mjs`, `view.test.mjs`, `weapon-presentation.test.mjs`
+and `sights.test.mjs` all pass.
+
+---
+
 ## v6.0 · CLARITY — 2026-09-16
 
 **Tag:** Open sights, honest performance and real quality tiers.

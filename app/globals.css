@@ -527,6 +527,14 @@
 .crosshair:not(.shape-dot):not(.shape-chevron):not(.shape-split) span:nth-child(2) { transform: translateY(var(--crosshair-gap, 0px)); }
 .crosshair:not(.shape-dot):not(.shape-chevron):not(.shape-split) span:nth-child(3) { transform: translateX(calc(-1 * var(--crosshair-gap, 0px))); }
 .crosshair:not(.shape-dot):not(.shape-chevron):not(.shape-split) span:nth-child(4) { transform: translateX(var(--crosshair-gap, 0px)); }
+
+/* ADS reticle: one small, high-contrast centre reference while aiming. The hip
+   crosshair is hidden in ADS so it never competes with the sight or optic, and
+   the reticle stays at native UI resolution (it is DOM, not the 3D canvas). */
+.ads-reticle{position:absolute;left:50%;top:50%;width:7px;height:7px;transform:translate(-50%,-50%) scale(var(--crosshair-size,1));border-radius:50%;background:var(--crosshair-color,#c2ffea);box-shadow:0 0 0 1px #000b,0 0 4px #000,0 0 2px #000;pointer-events:none}
+.ads-reticle::after{content:'';position:absolute;left:50%;top:50%;width:2px;height:2px;transform:translate(-50%,-50%);border-radius:50%;background:#04070a}
+.ads-reticle.scope{width:2px;height:2px}
+.ads-reticle.scope::after{width:22px;height:2px;border-radius:1px;background:var(--crosshair-color,#c2ffea);box-shadow:0 0 0 1px #000b,0 0 3px #000}
 .hitmarker { position: absolute; left: 50%; top: 50%; width: 26px; height: 26px; transform: translate(-50%, -50%); pointer-events: none; filter: drop-shadow(0 0 2px #000); }
 .hitmarker span { position: absolute; left: 50%; top: 50%; width: 16px; height: 2px; background: #f4fffb; box-shadow: 0 0 6px #ffffff99; }
 .hitmarker span:first-child { transform: translate(-50%, -50%) rotate(45deg); }
@@ -971,6 +979,7 @@ html, body { overscroll-behavior: none; }
 /* HUD layering + touch clearance (v3.1): combat feedback must never be
    occluded by HUD panels, and the bottom readouts clear the thumb lane. */
 .game-hud .crosshair,
+.game-hud .ads-reticle,
 .game-hud .hitmarker,
 .game-hud .damage-numbers,
 .game-hud .damage-direction,

@@ -425,6 +425,17 @@ assets. Full procedure and verification: [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md
 The last five releases. The full history lives in
 [docs/CHANGELOG.md](docs/CHANGELOG.md).
 
+### v6.1 · SIGHTLINE — 2026-09-16
+- Every weapon's sights/scopes are rigged on a clear line above the model's top
+  profile, so rails, rods, tanks and sight bases no longer block the bore (proved
+  by a per-weapon raycast test).
+- ADS holds the gun body at a fixed distance instead of pinning eye relief, so
+  weapons with forward rear sights no longer fill the screen with the receiver.
+- A dedicated ADS reticle replaces the hip crosshair while aiming; local tracers
+  start on the camera aim ray at the muzzle depth, so shots read from the reticle.
+- The Pulse Rifle gets a visible charging handle, and ADS now carries recoil
+  pitch/roll.
+
 ### v6.0 · CLARITY — 2026-09-16
 - Iron sights, holographic sights and scopes are rebuilt with real open apertures
   (notch, ring, thin frame, open-ended tube) so the target is visible through the
@@ -477,14 +488,6 @@ The last five releases. The full history lives in
   strafes, and the viewmodel dips/rolls through reloads and swaps.
 - New procedural arena surfaces (holographic grid, grating, carbon fibre, hex
   panelling, hazard stripes, weathered concrete) and extra model detailing.
-
-### v5.3 · IMPACT — 2026-09-16
-- Aiming down sights now glides the viewmodel onto the iron-sight line and back.
-- Overshield and Juggernaut render a visible shield bubble; breaking it fires a
-  shard burst, a distinct crack and a `shieldBreak` event.
-- Critical hits get a gold hitmarker and damage number, low health adds a
-  heartbeat, sprees announce themselves, boosts spit nitro, and campaign
-  transmissions carry speaker callsigns, tags and colours.
 
 ## Parody and attribution
 

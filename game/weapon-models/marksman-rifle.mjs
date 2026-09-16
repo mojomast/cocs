@@ -36,7 +36,7 @@ export function buildMarksmanRifle(g, ctx){
 
   box(g,.03,.035,.05,0,.1075,-.19,dark);
   box(g,.03,.035,.05,0,.1075,.05,dark);
-  const sights=attachScope(g,ctx,{x:0,y:.175,z:.22,length:.56,radius:.05});
+  const sights=attachScope(g,ctx,{x:0,y:.34,z:.22,length:.5,radius:.05});
   cylinder(g,.022,.022,.05,0,.25,-.06,dark,8);
   cylinder(g,.024,.024,.014,0,.282,-.06,light,8);
   const wind=cylinder(g,.02,.02,.045,.074,.175,-.06,dark,8);wind.rotation.z=Math.PI/2;

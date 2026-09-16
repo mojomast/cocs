@@ -102,8 +102,8 @@ test('ADS transitions viewmodel smoothly toward iron-sights center line and retu
  assert.ok(hipX>.35,'hipfire viewmodel sits off-center to the right');
  player.ads=true;
  for(let i=0;i<20;i++)view.render('playing',match,.016,1+(i+1)*.016);
- assert.ok(view.hands.position.x<hipX*.4,'ADS smoothly centers viewmodel towards iron-sight line');
- assert.ok(view.hands.position.y>-0.34,'ADS elevates viewmodel towards sightline');
+  assert.ok(view.hands.position.x<hipX*.4,'ADS smoothly centers viewmodel towards iron-sight line');
+  assert.ok(view.hands.position.y>=-.36,'ADS elevates the viewmodel toward the sight line instead of dropping it');
   view.motionQuery.matches=true;
   view.render('playing',match,.016,2);
   // Reduced motion must snap to the solved ADS pose (not fall back to hip): the

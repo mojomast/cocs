@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import * as T from 'three';
 import {WEAPONS} from './data.mjs';
-import {weaponModel,VIEWMODEL_SCALE,VIEWMODEL_EYE_RELIEF} from './view.mjs';
+import {weaponModel,VIEWMODEL_SCALE,VIEWMODEL_GUN_DISTANCE} from './view.mjs';
 import {attachHoloSight,attachScope,solveSightPose,sightAlignmentError,projectSightPoint} from './sights.mjs';
 
 // Mount a solved viewmodel in weapon-camera space so rays can be cast exactly
@@ -55,10 +55,10 @@ test('the front post tip sits at the aiming point while the post body extends be
  dispose(model);
 });
 
-test('the SMG rear anchor uses the real aperture height, not the old in-block offset',()=>{
+test('the SMG rear anchor sits on the clear sight line, not the old in-block offset',()=>{
  const model=weaponModel(9);
- assert.ok(Math.abs(model.userData.sights.rear.y-.288)<1e-6,'the SMG rear anchor matches the aperture ring (y=.288)');
- assert.ok(model.userData.sights.rear.y>.27,'the anchor sits above the rear block instead of inside it');
+ assert.ok(model.userData.sights.rear.y>=.29,'the SMG rear anchor clears the rear block instead of sitting inside it (was y=.248)');
+ assert.ok(model.userData.sights.rear.y<=.42,'the rear anchor stays a sensible height above the receiver');
  // The rear sight must not expose a solid block: a rear notch is open.
  const {root}=mounted(9),hits=centerHits(root);
  assert.ok(!tagged(hits,'sightRear'),'the SMG rear sight is an open notch');
@@ -100,7 +100,7 @@ test('the ADS solver aligns every weapon at representative FOVs, with attachment
  for(let type=0;type<WEAPONS.length;type++)for(const visual of [null,{optic:'holo'},{optic:'scope'},{optic:'iron'}]){
   const model=weaponModel(type,undefined,visual);
   const rear=model.userData.anchors.rearSight.position,front=model.userData.anchors.frontSight.position;
-  const pose=solveSightPose(rear,front,{scale:VIEWMODEL_SCALE,eyeRelief:VIEWMODEL_EYE_RELIEF});
+  const pose=solveSightPose(rear,front,{scale:VIEWMODEL_SCALE,distance:VIEWMODEL_GUN_DISTANCE});
   const err=sightAlignmentError(rear,front,pose,VIEWMODEL_SCALE);
   // Reduced motion only changes *when* the pose is reached, never the pose.
   assert.ok(err.rearError<1e-6&&err.angleError<1e-6&&err.lateral<1e-6,`${type}/${visual?.optic||'iron'} aligns (${JSON.stringify(err)})`);
@@ -111,6 +111,21 @@ test('the ADS solver aligns every weapon at representative FOVs, with attachment
 });
 
 function findNamed(root,name){let found=null;root.traverse(n=>{if(!found&&(n.name===name))found=n;});return found;}
+
+test('no weapon blocks its own ADS bore with receiver, rail, rod or tank geometry',()=>{
+ // Regression: open sights exposed geometry that used to be hidden behind solid
+ // sight blocks — a top rail, a conduit rod, a dorsal tank or a rear sight base
+ // sat exactly on the sight line and blocked the target. The intended sight
+ // meshes (front post, notch/aperture, frame, tube, reticle, flash) are allowed.
+ const allowed=obj=>{const u=obj.userData||{};return u.sightFront||u.sightFrontTip||u.sightRear||u.sightFrame||u.scopeTube||obj.name==='reticle'||obj.name==='muzzle-flare'||String(obj.name).includes('flash');};
+ for(let type=0;type<WEAPONS.length;type++){
+  const {model,root}=mounted(type);
+  const ray=new T.Raycaster(new T.Vector3(0,0,0),new T.Vector3(0,0,-1));
+  const blockers=ray.intersectObject(root,true).filter(hit=>!allowed(hit.object));
+  assert.equal(blockers.length,0,`${WEAPONS[type]?.name||type}: ${blockers[0]?.object?.geometry?.type||'geometry'} blocks the ADS bore at z=${blockers[0]?.object?.position?.z}`);
+  dispose(model);
+ }
+});
 
 test('scope and holo builders never emit opaque sight blockers for their own bodies',()=>{
  const holoParent=new T.Group(),scopeParent=new T.Group();
