@@ -102,7 +102,8 @@ function acceptSlot(match, probe, x, z) {
 
 export function initializeRace(match) {
   const track = match.arena.race;
-  if (!track?.gates?.length || track.grid.length < match.actors.length) throw new Error('Race requires a circuit and enough grid slots');
+  const racerCount = Math.min(8, match.actors.length);
+  if (!track?.gates?.length || racerCount < 1 || track.grid.length < racerCount) throw new Error('Race requires a circuit and enough grid slots');
   match.pickups = [];
   match.rockets = [];
   match.race = {
@@ -115,14 +116,14 @@ export function initializeRace(match) {
   // Authored grid slots are used as-is. If a future map ever packs them closer
   // than one car diameter we nudge them apart in-game (never editing the map)
   // and only keep a moved slot when the world accepts it. Never NaN.
-  const slots = track.grid.slice(0, 8).map(g => ({x: g.x, z: g.z, heading: g.heading}));
+  const slots = track.grid.slice(0, racerCount).map(g => ({x: g.x, z: g.z, heading: g.heading}));
   match.race.gridMinSeparation = gridSeparation(slots);
   if (match.race.gridMinSeparation <= MIN_CAR_SEPARATION) {
     match.race.gridNudged = separateGrid(match, slots);
     match.race.gridMinSeparation = gridSeparation(slots);
   }
   // Each racer owns a chassis; overlaps are resolved in stepRace, not ghosted.
-  match.vehicles = Array.from({length: 8}, (_,id) => {
+  match.vehicles = Array.from({length: racerCount}, (_,id) => {
     const grid = slots[id], vehicle = createVehicle(PUMA);
     vehicle.id = id; vehicle.kind = 'puma';
     vehicle.spawn = {x: grid.x, y: 0, z: grid.z};
@@ -130,6 +131,7 @@ export function initializeRace(match) {
     return vehicle;
   });
   match.actors.forEach((actor, index) => {
+    if (index >= racerCount) return;
     const vehicle = match.vehicles[index], grid = slots[index];
     takeVehicleSeat(vehicle, actor.id, 'driver');
     actor.yaw = grid.heading - Math.PI;
@@ -197,8 +199,8 @@ export function crossRaceGates(state, racer, from, to, startTime, dt) {
     }
   }
   const prev = state.gates[(racer.nextGate+state.gates.length-1)%state.gates.length], next = state.gates[racer.nextGate];
-  const dx = next.x-prev.x, dz = next.z-prev.z;
-  const fraction = clamp(((to.x-prev.x)*dx+(to.z-prev.z)*dz)/(dx*dx+dz*dz),0,.999999);
+  const dx = next.x-prev.x, dz = next.z-prev.z, span = dx*dx+dz*dz;
+  const fraction = span > 1e-9 ? clamp(((to.x-prev.x)*dx+(to.z-prev.z)*dz)/span,0,.999999) : 0;
   racer.progress = racer.started ? racer.passed-1+fraction : -distance(to,state.gates[0])/1000;
 }
 

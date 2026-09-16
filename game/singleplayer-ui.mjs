@@ -1,6 +1,6 @@
 // Presentation adapter for the single-player HUD and result screen. Keeps
 // React components free of snapshot-shape knowledge, mirroring race-ui.mjs.
-import {missionStars} from './campaign-progress.mjs';
+import {missionStars,isMissionComplete} from './campaign-progress.mjs';
 export function singlePlayerDisplay(hud){
  const state=hud?.singleplayer;
  if(!state)return null;
@@ -97,7 +97,7 @@ export function campaignMissionPar(mission){
 export function campaignMissionView(missions=[],progress={},selectedId=null){
  const list=Array.isArray(missions)?missions:[],completed=progress?.completed||{};
  return list.map((mission,index)=>{
-  const entry=completed[mission.id]||null,previous=index>0?list[index-1]:null,par=campaignMissionPar(mission);
+  const entry=completed[mission.id]||null,previous=index>0?list[index-1]:null,par=campaignMissionPar(mission),done=isMissionComplete(entry);
   return {
    id:mission.id,
    order:index+1,
@@ -107,9 +107,9 @@ export function campaignMissionView(missions=[],progress={},selectedId=null){
    brief:mission.brief||'',
    index,
    selected:selectedId===mission.id,
-   unlocked:index===0||Boolean(completed[previous?.id]),
-   completed:Boolean(entry),
-   stars:missionStars(mission,entry),
+   unlocked:index===0||isMissionComplete(completed[previous?.id]),
+   completed:done,
+   stars:done?missionStars(mission,entry):0,
    parTime:par,
    bestTime:Number.isFinite(Number(entry?.bestTime))?Number(entry.bestTime):null,
    bestScore:Number.isFinite(Number(entry?.bestScore))?Number(entry.bestScore):null,

@@ -671,3 +671,9 @@ test('campaign missions play their timed story transmissions without gating wins
  assert.ok(match.events.some(event=>event.type==='story-line'),'a lore transmission surfaces as a story line');
  assert.ok(singlePlayerSnapshot(state,match).mission.lore?.title,'the mission exposes its lore for the briefing');
 });
+
+test('the declared live enemy cap holds even on deep overflow waves',()=>{
+ for(const [id,cap] of [['easy',12],['normal',16],['hard',20],['nightmare',24]]){
+  for(const wave of [15,20,40,100])assert.ok(hordeWaveSize(wave,id)<=cap,`${id} wave ${wave} stays under ${cap} (got ${hordeWaveSize(wave,id)})`);
+ }
+});

@@ -39,7 +39,7 @@ function MissionCard({mission,onSelect,onReplay}:{mission:any;onSelect:(id:strin
 }
 
 export function SinglePlayerModal({ui}:ScreenProps){
- const {singleOpen,setSingleOpen,singleSub,setSingleSub,singleMission,setSingleMission,config,setConfig,mapId,setMapId,selectedMap,startSinglePlayer,startCampaignMission,mapsForMode,missionFor,isMissionUnlocked,CAMPAIGN_MISSIONS=[],campaignMissions=[],getMap,legacyMaps,campaign={},DIFFICULTIES=[],ready,error,singleRef}=ui;
+ const {singleOpen,setSingleOpen,singleSub,setSingleSub,singleMission,setSingleMission,config,setConfig,mapId,setMapId,selectedMap,startSinglePlayer,startCampaignMission,mapsForMode,missionFor,isMissionUnlocked,isMissionComplete,CAMPAIGN_MISSIONS=[],campaignMissions=[],getMap,legacyMaps,campaign={},DIFFICULTIES=[],ready,error,singleRef}=ui;
  const campaignName=(sub:string)=>sub==='campaign'&&typeof missionFor==='function'?`${missionFor(singleMission)?.name?.toUpperCase()} · ${getMap?.(missionFor(singleMission)?.mapId)?.name?.toUpperCase()}`:`HORDE · ${(selectedMap?.name||'').toUpperCase()}`;
  const chapters:string[]=campaignMissions.length?[...new Set<string>(campaignMissions.map((m:any)=>String(m.chapter)))]:[];
  const selectedMission=campaignMissions.find((m:any)=>m.id===singleMission)||null;
@@ -59,7 +59,7 @@ export function SinglePlayerModal({ui}:ScreenProps){
     <span className="label">{chapter}</span>
     <div className="mission-grid">{campaignMissions.filter((m:any)=>m.chapter===chapter).map((mission:any)=><MissionCard key={mission.id} mission={mission} onSelect={setSingleMission} onReplay={startCampaignMission}/>)}</div>
    </div>)}</div>
-   :<div className="grid-cards">{CAMPAIGN_MISSIONS.map((mission:any,i:number)=>{const unlocked=i===0||isMissionUnlocked(campaign,mission.id),done=Boolean(campaign.completed?.[mission.id]);return <SelectCard key={mission.id} selected={singleMission===mission.id} disabled={!unlocked} onClick={unlocked?()=>setSingleMission(mission.id):undefined} name={`${mission.name}${done?' ✓':''}`} meta={mission.chapter} tag={unlocked?mission.brief:'Complete the previous mission to unlock.'} ariaLabel={mission.name}/>;})}</div>}
+   :<div className="grid-cards">{CAMPAIGN_MISSIONS.map((mission:any,i:number)=>{const unlocked=i===0||isMissionUnlocked(campaign,mission.id),done=isMissionComplete(campaign.completed?.[mission.id]);return <SelectCard key={mission.id} selected={singleMission===mission.id} disabled={!unlocked} onClick={unlocked?()=>setSingleMission(mission.id):undefined} name={`${mission.name}${done?' ✓':''}`} meta={mission.chapter} tag={unlocked?mission.brief:'Complete the previous mission to unlock.'} ariaLabel={mission.name}/>;})}</div>}
    {(()=>{const mission=typeof missionFor==='function'?missionFor(singleMission):null;if(!mission)return null;return <Panel label={`${mission.chapter} / ${mission.tag}`}>
     <div className="row row--between" style={{marginBottom:10}}>
      <span className="row" style={{gap:8}}>{selectedMission&&<Chip tone={selectedMission.unlocked?'accent':'warn'}>{selectedMission.unlocked?'UNLOCKED':'LOCKED'}</Chip>}{selectedMission&&<span className="mission-stars" aria-label={`${selectedMission.stars} of 3 stars`}>{stars(selectedMission.stars)}</span>}</span>
@@ -74,10 +74,10 @@ export function SinglePlayerModal({ui}:ScreenProps){
 }
 
 export function OnboardingModal({ui}:ScreenProps){
- const {onboarding,setOnboarding,finishOnboarding,ONBOARDING_STEPS=[]}=ui;
+ const {onboarding,setOnboarding,finishOnboarding,onboardingRef,ONBOARDING_STEPS=[]}=ui;
  if(onboarding===null||onboarding===undefined)return null;
  const step=ONBOARDING_STEPS[onboarding];
- return <Modal open size="sm" onClose={finishOnboarding} eyebrow={`WELCOME · ${onboarding+1}/${ONBOARDING_STEPS.length}`} title={step?.title} footer={<>
+ return <Modal open size="sm" onClose={finishOnboarding} panelRef={onboardingRef} eyebrow={`WELCOME · ${onboarding+1}/${ONBOARDING_STEPS.length}`} title={step?.title} footer={<>
   {onboarding>0&&<Btn variant="secondary" onClick={()=>setOnboarding(onboarding-1)}>BACK</Btn>}
   <Btn variant="primary" className="modal-foot-primary" onClick={()=>onboarding+1>=ONBOARDING_STEPS.length?finishOnboarding():setOnboarding(onboarding+1)}>{onboarding+1>=ONBOARDING_STEPS.length?'GOT IT':'NEXT'}</Btn>
   <Btn variant="ghost" onClick={finishOnboarding}>SKIP</Btn>

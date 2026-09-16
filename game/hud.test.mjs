@@ -578,3 +578,9 @@ test('objective-variant modes keep their scoreboard columns, ranking and start t
   assert.equal(modeTargetText(modeById('uplink')), 'RUN THE RELAY');
   assert.equal(modeTargetText(modeById('vip-escort')), 'ESCORT THE VIP');
 });
+
+test('a gunner or passenger also receives their PUMA card and exit prompt', () => {
+  assert.equal(vehicleHud({...player, vehicleId:0}, [{...ride, driver:1, gunner:0}]).prompt, 'E / EXIT PUMA');
+  assert.equal(vehicleHud({...player, vehicleId:0}, [{...ride, driver:1, passengers:[0]}]).prompt, 'E / EXIT PUMA');
+  assert.equal(vehicleHud({...player, vehicleId:0}, [{...ride, driver:1, passengers:[2]}]).vehicle, null);
+});

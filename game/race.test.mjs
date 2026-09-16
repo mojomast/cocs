@@ -375,3 +375,19 @@ test('collisions never duplicate or skip a racer gate/progress state',()=>{
     assert.ok(r.completedLaps<=s.laps);
   }
 });
+
+test('a race with fewer than eight grid slots seats exactly the racers it can',()=>{
+  const grid=Array.from({length:4},(_,i)=>({x:-4-i*5,z:-48+(i%2?3:-3),heading:Math.PI/2}));
+  const m=fixture(4,false,7,{grid});
+  assert.equal(m.vehicles.length,4);
+  assert.equal(m.race.racers.length,4);
+  assert.ok(m.vehicles.every(v=>Number.isFinite(v.position.x)&&Number.isFinite(v.position.z)));
+});
+
+test('a single-gate circuit never produces a NaN race progress',()=>{
+  const gate={x:0,z:0,nx:1,nz:0,halfWidth:12};
+  const state={gates:[gate],laps:2,elapsed:0};
+  const racer={nextGate:0,passed:0,started:true,completedLaps:0,anchor:{x:0,z:0,heading:0},effects:{},checkpointAge:0,finishTime:null};
+  crossRaceGates(state,racer,{x:0,z:0},{x:1,z:0},0,1);
+  assert.ok(Number.isFinite(racer.progress),'progress stays finite when prev and next gates coincide');
+});

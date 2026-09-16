@@ -298,6 +298,8 @@ test('escorting the VIP to the beacon wins the round',()=>{
  }
  assert.equal(m.over,true);
  assert.equal(m.snapshot().winner,0);
+ assert.ok(a.scoreStats.objectiveTime>0,'escort time is credited to the escort');
+ assert.ok(a.scoreStats.objectiveCaptures>=1,'the extraction credits an objective capture');
  assert.ok(m.events.some(e=>e.type==='vip-extracted'));
  assert.ok(m.events.some(e=>e.type==='objective-win'&&e.team===0));
 });

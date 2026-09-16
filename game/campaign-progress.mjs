@@ -17,10 +17,15 @@ export function normalizeCampaignProgress(value) {
  const completed = {};
  for (const mission of CAMPAIGN_MISSIONS) {
   const entry = source.completed?.[mission.id];
-  if (!entry || typeof entry !== 'object' || entry.won !== true) continue;
+  if (!entry || typeof entry !== 'object') continue;
+  const recorded = Math.max(0, Math.round(Number(entry.wins) || 0));
+  // Back-compat: an older save may carry a bare win flag and no `wins` count.
+  const wins = recorded > 0 ? recorded : (entry.won === true ? 1 : 0);
+  const attempts = Math.max(wins, Math.max(0, Math.round(Number(entry.attempts) || 0)));
+  if (wins === 0 && attempts === 0) continue;
   completed[mission.id] = {
-   wins:Math.max(0, Math.round(Number(entry.wins) || 1)),
-   attempts:Math.max(0, Math.round(Number(entry.attempts) || 0)),
+   wins,
+   attempts,
    bestTime:Number.isFinite(Number(entry.bestTime)) ? Number(entry.bestTime) : null,
    bestScore:Number.isFinite(Number(entry.bestScore)) ? Number(entry.bestScore) : null,
    at:Number.isFinite(Number(entry.at)) ? Number(entry.at) : 0,
@@ -32,15 +37,26 @@ export function normalizeCampaignProgress(value) {
  return {version:CAMPAIGN_PROGRESS_VERSION,completed,checkpoint,updatedAt:Number.isFinite(Number(source.updatedAt)) ? Number(source.updatedAt) : 0};
 }
 
+// A stored entry counts as completed only once it has at least one win. An
+// attempted-but-lost mission keeps an entry (for its attempt count) without
+// unlocking the next mission or earning stars.
+export function isMissionComplete(entry) {
+ return Math.max(0, Math.round(Number(entry?.wins) || 0)) > 0;
+}
+const completedEntry = (progress, id) => {
+ const entry = progress?.completed?.[id] || null;
+ return isMissionComplete(entry) ? entry : null;
+};
+
 const orderIds = () => campaignOrder();
 export function isMissionUnlocked(progress, id) {
  const order = orderIds(), index = order.indexOf(id);
  if (index <= 0) return true;
- return Boolean(progress?.completed?.[order[index - 1]]);
+ return isMissionComplete(progress?.completed?.[order[index - 1]]);
 }
 export function firstIncompleteMission(progress) {
  const order = orderIds();
- return order.find(id => !progress?.completed?.[id]) || order[order.length - 1] || null;
+ return order.find(id => !isMissionComplete(progress?.completed?.[id])) || order[order.length - 1] || null;
 }
 export function missionIndex(id) {
  const index = orderIds().indexOf(id);
@@ -49,17 +65,22 @@ export function missionIndex(id) {
 export function nextMissionId(progress) {
  // The next mission to play is the first one not yet completed; null once the
  // whole campaign is finished. (Returning the mission after it skipped one.)
- return orderIds().find(id => !progress?.completed?.[id]) || null;
+ return orderIds().find(id => !isMissionComplete(progress?.completed?.[id])) || null;
 }
-/** @param {any} progress @param {{id:string,won:boolean,time?:number|null,score?:number|null}} [options] */
-export function recordMission(progress, {id, won, time = null, score = null} = {}) {
- if (!won || !CAMPAIGN_MISSIONS.some(m => m.id === id)) return progress;
+/**
+ * Records a run. Every attempt bumps `attempts`; only a win bumps `wins` and
+ * updates the best time/score, so a loss is remembered without completing the
+ * mission. @param {any} progress @param {{id:string,won:boolean,time?:number|null,score?:number|null}} [options]
+ */
+export function recordMission(progress, {id, won = false, time = null, score = null} = {}) {
+ if (!CAMPAIGN_MISSIONS.some(m => m.id === id)) return progress;
  const current = progress?.completed?.[id];
+ const wonRun = won === true;
  const next = {
-  wins:(current?.wins || 0) + 1,
-  attempts:(current?.attempts || 0) + 1,
-  bestTime:Number.isFinite(time) ? (Number.isFinite(current?.bestTime) ? Math.min(current.bestTime, time) : time) : (current?.bestTime ?? null),
-  bestScore:Number.isFinite(score) ? (current?.bestScore === null || current?.bestScore === undefined ? score : Math.max(current.bestScore, score)) : (current?.bestScore ?? null),
+  wins: Math.max(0, Math.round(Number(current?.wins) || 0)) + (wonRun ? 1 : 0),
+  attempts: Math.max(0, Math.round(Number(current?.attempts) || 0)) + 1,
+  bestTime: wonRun && Number.isFinite(time) ? (Number.isFinite(current?.bestTime) ? Math.min(current.bestTime, time) : time) : (current?.bestTime ?? null),
+  bestScore: wonRun && Number.isFinite(score) ? (current?.bestScore === null || current?.bestScore === undefined ? score : Math.max(current.bestScore, score)) : (current?.bestScore ?? null),
   at:Date.now(),
  };
  return {...progress, completed:{...progress.completed, [id]:next}, updatedAt:Date.now()};
@@ -151,7 +172,7 @@ export function missionReward(mission, entry) {
 export function missionProgress(progress, idOrMission) {
  const mission = missionById(idOrMission);
  if (!mission) return null;
- const entry = progress?.completed?.[mission.id] || null;
+ const entry = completedEntry(progress, mission.id);
  return {
   missionId:mission.id,
   completed:Boolean(entry),
@@ -166,18 +187,18 @@ export function missionProgress(progress, idOrMission) {
 }
 /** Total stars banked across the whole campaign (0..missions*3). */
 export function campaignStarTotal(progress) {
- return CAMPAIGN_MISSIONS.reduce((sum, mission) => sum + missionStars(mission, progress?.completed?.[mission.id] || null), 0);
+ return CAMPAIGN_MISSIONS.reduce((sum, mission) => sum + missionStars(mission, completedEntry(progress, mission.id)), 0);
 }
 /** Medal tally across completed missions. */
 export function campaignMedalCounts(progress) {
  const counts = {GOLD:0, SILVER:0, BRONZE:0};
  for (const mission of CAMPAIGN_MISSIONS) {
-  const medal = missionMedal(mission, progress?.completed?.[mission.id] || null);
+  const medal = missionMedal(mission, completedEntry(progress, mission.id));
   if (medal) counts[medal] += 1;
  }
  return counts;
 }
 /** Combined XP value of every medal currently banked. */
 export function campaignRewardTotal(progress) {
- return CAMPAIGN_MISSIONS.reduce((sum, mission) => sum + (missionReward(mission, progress?.completed?.[mission.id] || null)?.xp || 0), 0);
+ return CAMPAIGN_MISSIONS.reduce((sum, mission) => sum + (missionReward(mission, completedEntry(progress, mission.id))?.xp || 0), 0);
 }

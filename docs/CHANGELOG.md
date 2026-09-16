@@ -16,6 +16,32 @@ record in [VERIFICATION.md](VERIFICATION.md).
 
 ---
 
+## v5.2 · RESTORE — 2026-09-16
+
+- **Campaign persistence (critical):** `recordMission` wrote entries without a
+  `won` flag, but `normalizeCampaignProgress` dropped any entry lacking
+  `entry.won === true` — so every completed mission vanished on the next page
+  load and the campaign reset to mission one. Normalization now validates by
+  `wins`/`attempts` (with `won:true` accepted as legacy back-compat) and a new
+  round-trip test fails if a recorded win is dropped again.
+- **Attempts:** a loss now bumps `attempts` without `wins`, and "completed" is
+  `wins > 0` everywhere (`isMissionComplete`) instead of entry presence, so a
+  lost mission neither unlocks the next one nor earns stars. The game-over path
+  records losses; mission-select shows real attempts.
+- **VIP Escort scoring:** `updateExtraction` credits `objectiveTime` to escort
+  actors near the VIP and `objectiveCaptures` on extraction, so the
+  `ESCORT TIME`/`EXTRACT` columns and `rankTuple('vip-escort')` stop reading zero.
+- **Race robustness:** `initializeRace` seats `min(8, actors)` racers and requires
+  that many grid slots (previously it always built eight vehicles and crashed on
+  a shorter grid); a coincident prev/next gate can no longer divide by zero into a
+  NaN `progress`.
+- **Horde:** the live enemy cap now trims husks last (it previously skipped them,
+  so deep overflow waves exceeded `maxAlive`), and an elite wave is only announced
+  when an elite heavy actually survives the composition trim.
+- **Vehicle HUD:** `vehicleHud` recognises a gunner/passenger as mounted, so they
+  get the PUMA card and exit prompt, not just the driver.
+- **Accessibility:** the onboarding modal now joins the focus trap.
+
 ## v5.1 · TIGHTEN — 2026-09-16
 
 - **Challenge aggregation:** `advanceGroup` now treats `bestStreak` as a

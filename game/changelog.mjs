@@ -1,12 +1,19 @@
 // In-game patch notes. The title-screen footer is the running version; this
 // module is the human-readable release digest the Changelog screen renders. The
 // full historical record lives in docs/CHANGELOG.md and is linked from the UI.
-export const RELEASE_VERSION = 'v5.1';
-export const RELEASE_CODENAME = 'TIGHTEN';
+export const RELEASE_VERSION = 'v5.2';
+export const RELEASE_CODENAME = 'RESTORE';
 export const REPO_URL = 'https://github.com/mojomast/tokenarena';
 export const FULL_CHANGELOG_URL = `${REPO_URL}/blob/main/docs/CHANGELOG.md`;
 
 export const CHANGELOG = [
+  {version:'v5.2',codename:'RESTORE',date:'2026-09-16',tag:'Campaign persistence and mode fixes',highlights:[
+    'Campaign progress survives a reload again: the save normalizer was dropping every completed mission because it required a flag the recorder never wrote, so the campaign silently reset to mission one.',
+    'Losses now count as attempts without unlocking the next mission, so mission-select shows real attempt and win counts.',
+    'VIP Escort credits objective time and the extraction to the escorting players, so its scoreboard columns and ranking no longer read zero.',
+    'Race mode no longer crashes on a circuit with fewer than eight grid slots and can no longer produce a NaN progress on a one-gate track.',
+    'Deep horde waves honour the declared live enemy cap, an elite wave is only announced when an elite actually spawns, a mounted gunner or passenger sees their PUMA card, and onboarding now traps keyboard focus.',
+  ]},
   {version:'v5.1',codename:'TIGHTEN',date:'2026-09-16',tag:'Progression and UI correctness',highlights:[
     'Killstreak challenges are now a high-water mark: a weekly "reach an 8 killstreak" objective can no longer be completed by several smaller streaks across matches.',
     'The scoreboard no longer shows a healthy 0 ms ping when no latency was reported, and an unassigned team is no longer grouped under RED.',

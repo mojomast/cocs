@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {CAMPAIGN_MISSIONS,missionFor} from './campaign-data.mjs';
-import {CAMPAIGN_STORAGE_KEY,CAMPAIGN_PROGRESS_VERSION,defaultCampaignProgress,normalizeCampaignProgress,isMissionUnlocked,firstIncompleteMission,nextMissionId,missionIndex,recordMission,setCheckpoint,checkpointFor,clearCheckpoint,campaignMissionPar,missionEnemyBudget,missionScoreTarget,missionStars,missionMedal,missionReward,missionProgress,campaignStarTotal,campaignMedalCounts,campaignRewardTotal} from './campaign-progress.mjs';
+import {CAMPAIGN_STORAGE_KEY,CAMPAIGN_PROGRESS_VERSION,defaultCampaignProgress,normalizeCampaignProgress,isMissionUnlocked,firstIncompleteMission,nextMissionId,missionIndex,recordMission,isMissionComplete,setCheckpoint,checkpointFor,clearCheckpoint,campaignMissionPar,missionEnemyBudget,missionScoreTarget,missionStars,missionMedal,missionReward,missionProgress,campaignStarTotal,campaignMedalCounts,campaignRewardTotal} from './campaign-progress.mjs';
 
 test('default and normalized campaign progress are stable',()=>{
  const base=defaultCampaignProgress();
@@ -126,4 +126,34 @@ test('match config preserves a validated campaign checkpoint step',async()=>{
  assert.equal(normalizeConfig({mode:'campaign'}).checkpoint,null);
  assert.equal(normalizeConfig({mode:'campaign',checkpoint:-5}).checkpoint,null);
  assert.equal(normalizeConfig({mode:'campaign',checkpoint:'4.6'}).checkpoint,5);
+});
+
+test('a recorded win survives a save/load round-trip',()=>{
+ const order=CAMPAIGN_MISSIONS.map(m=>m.id);
+ let progress=recordMission(defaultCampaignProgress(),{id:order[0],won:true,time:90,score:4});
+ const reloaded=normalizeCampaignProgress(JSON.parse(JSON.stringify(progress)));
+ assert.ok(reloaded.completed[order[0]],'a recorded win is not dropped on reload');
+ assert.equal(reloaded.completed[order[0]].wins,1);
+ assert.equal(reloaded.completed[order[0]].bestTime,90);
+ assert.equal(nextMissionId(reloaded),order.length>1?order[1]:null);
+ if(order.length>1)assert.equal(isMissionUnlocked(reloaded,order[1]),true,'reload keeps unlocking the next mission');
+});
+
+test('losses count as attempts without completing or unlocking',()=>{
+ const order=CAMPAIGN_MISSIONS.map(m=>m.id);
+ let progress=recordMission(defaultCampaignProgress(),{id:order[0],won:false});
+ assert.equal(progress.completed[order[0]].attempts,1);
+ assert.equal(progress.completed[order[0]].wins,0);
+ assert.equal(isMissionComplete(progress.completed[order[0]]),false);
+ assert.equal(campaignStarTotal(progress),0,'a loss earns no stars');
+ assert.equal(missionProgress(progress,order[0]).completed,false);
+ assert.equal(nextMissionId(progress),order[0],'the lost mission is still the next one');
+ if(order.length>1)assert.equal(isMissionUnlocked(progress,order[1]),false,'a loss does not unlock the next mission');
+ progress=recordMission(progress,{id:order[0],won:false,time:5,score:99});
+ assert.equal(progress.completed[order[0]].attempts,2);
+ assert.equal(progress.completed[order[0]].bestTime,null,'a loss never sets a best time');
+ progress=recordMission(progress,{id:order[0],won:true,time:50,score:2});
+ assert.equal(progress.completed[order[0]].wins,1);
+ assert.equal(progress.completed[order[0]].attempts,3);
+ if(order.length>1)assert.equal(isMissionUnlocked(progress,order[1]),true);
 });

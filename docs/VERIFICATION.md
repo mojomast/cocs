@@ -1,5 +1,25 @@
 # COCS verification report
 
+## Release 5.2 - Campaign persistence and mode fixes
+
+- **Campaign save round-trip (critical):** probed `recordMission` →
+  `JSON.stringify` → `normalizeCampaignProgress` and confirmed every completed
+  mission was dropped (the recorder wrote no `won` flag; the normalizer required
+  one). Normalization now keys on `wins`/`attempts` with `won:true` legacy
+  fallback; new tests assert a win survives reload and keeps unlocking, and that
+  a loss bumps attempts without completing or unlocking.
+- **VIP Escort:** `updateExtraction` credits `objectiveTime`/`objectiveCaptures`
+  to escorts; the existing extraction test now asserts non-zero escort stats.
+- **Race:** new tests initialise a four-slot grid (four racers, finite positions)
+  and drive `crossRaceGates` over a single-gate circuit (finite `progress`).
+- **Horde:** new test asserts `hordeWaveSize` stays under the difficulty's
+  `maxAlive` at waves 15/20/40/100 for all four difficulties.
+- **Vehicle HUD / focus:** gunner and passenger prompts asserted in
+  `game/hud.test.mjs`; onboarding ref wired into the `app/page.tsx` trap.
+
+Verification: game **1343/1343**, server **153/153**, `tests/` **7/7**, `tsc`
+clean, lint 0 errors.
+
 ## Release 5.1 - Progression and UI correctness
 
 - **Challenge streak:** `MAX_METRICS` in `game/challenges.mjs` advances

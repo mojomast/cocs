@@ -425,6 +425,14 @@ assets. Full procedure and verification: [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md
 The last five releases. The full history lives in
 [docs/CHANGELOG.md](docs/CHANGELOG.md).
 
+### v5.2 · RESTORE — 2026-09-16
+- Campaign progress survives a reload again (the save normalizer was dropping
+  every completed mission); losses count as attempts without unlocking the next.
+- VIP Escort credits escort time and extraction, so its scoreboard and ranking
+  stop reading zero.
+- Race no longer crashes on a short grid or NaNs on a one-gate track; deep horde
+  waves honour the live enemy cap; gunners/passengers get the PUMA card.
+
 ### v5.1 · TIGHTEN — 2026-09-16
 - Killstreak challenges are a high-water mark, so several small streaks can no
   longer complete a "reach an 8 killstreak" objective.
@@ -456,12 +464,6 @@ The last five releases. The full history lives in
   and damage.
 - Matchmaking keeps a queued player's career identity; lobby/matchmaking wire verbs
   are declared in the shared MESSAGE list with a drift test.
-
-### v4.15 · AMBIENT — 2026-09-16
-- The fullscreen demo controls gain music, ambience and announcer toggles plus an
-  environment (weather) picker: AUTO, clear, overcast, rain, snow, ash, storm.
-- Pinned weather now holds through the whole demo; the choices persist across
-  sessions.
 
 ## Parody and attribution
 

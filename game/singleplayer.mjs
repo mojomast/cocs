@@ -130,6 +130,12 @@ export function hordeWaveComposition(wave,difficultyId='easy'){
    const cut=Math.min(counts[kind],total-pacing.maxAlive);
    counts[kind]-=cut;total-=cut;
   }
+  // The loop never trims husks, so on overflow waves husk growth alone could
+  // exceed the declared live cap. Trim them last so the cap is honoured.
+  if(total>pacing.maxAlive&&counts.husk>0){
+   const cut=Math.min(counts.husk,total-pacing.maxAlive);
+   counts.husk-=cut;total-=cut;
+  }
  }
  const elite=Boolean(pacing.eliteEvery)&&index%pacing.eliteEvery===0;
  return {...counts,elite};
@@ -353,7 +359,7 @@ function startWave(match,state){
   count+=size;
  }
  if(state.boss!=null){const boss=actorById(match,state.boss);if(boss)state.bossPhaseMax=Math.max(state.bossPhaseMax||1,bossMaxPhase(boss.npcType));}
- match.emit('horde-wave',{wave:state.wave,target:state.waveTarget,count,elite:Boolean(composition.elite),boss:Boolean(composition.boss),modifier:modifier.id,modifierName:modifier.name});
+ match.emit('horde-wave',{wave:state.wave,target:state.waveTarget,count,elite:Boolean(composition.elite)&&eliteType!==null,boss:Boolean(composition.boss),modifier:modifier.id,modifierName:modifier.name});
  match.emit('horde-modifier',{wave:state.wave,id:modifier.id,name:modifier.name,description:modifier.description});
 }
 

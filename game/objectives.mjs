@@ -50,9 +50,11 @@ export function updateExtraction(match,dt=RULES.dt){
  if(!vip)vip=spawnExtractionVip(match,state);
  if(vip&&vip.health<=0){state.vipDead=true;state.winner=state.defenderTeam;match.teamScores[state.defenderTeam]=Math.max(match.teamScores[state.defenderTeam]||0,1);match.emit('vip-down',{actor:state.vipId,team:state.defenderTeam});match.emit('objective-win',{team:state.defenderTeam,score:match.teamScores[state.defenderTeam]});match.endMatch('objective');return;}
  stepExtractionVip(match,state,dt);
+ const escorts=vip&&vip.health>0?match.actors.filter(a=>a!==vip&&a.health>0&&a.team===state.escortTeam&&Math.hypot(a.x-vip.x,a.z-vip.z)<=state.escortRadius):[];
+ if(escorts.length)for(const a of escorts)a.scoreStats.objectiveTime+=dt;
  const inside=Boolean(vip)&&Math.hypot(vip.x-state.extract.x,vip.z-state.extract.z)<=state.escortRadius;
  state.progress=inside?Math.min(state.captureSeconds,(state.progress||0)+dt):Math.max(0,(state.progress||0)-dt);
- if(state.progress>=state.captureSeconds){state.winner=state.escortTeam;match.teamScores[state.escortTeam]=Math.max(match.teamScores[state.escortTeam]||0,1);match.emit('vip-extracted',{actor:state.vipId,team:state.escortTeam});match.emit('objective-win',{team:state.escortTeam,score:match.teamScores[state.escortTeam]});match.endMatch('objective');return;}
+ if(state.progress>=state.captureSeconds){state.winner=state.escortTeam;match.teamScores[state.escortTeam]=Math.max(match.teamScores[state.escortTeam]||0,1);for(const a of escorts)a.scoreStats.objectiveCaptures++;match.emit('vip-extracted',{actor:state.vipId,team:state.escortTeam});match.emit('objective-win',{team:state.escortTeam,score:match.teamScores[state.escortTeam]});match.endMatch('objective');return;}
  if(match.time>=match.config.timeLimit){state.winner=state.defenderTeam;state.tiebreak='time';match.teamScores[state.defenderTeam]=Math.max(match.teamScores[state.defenderTeam]||0,state.progress);match.emit('objective-tiebreak',{mode:'extraction',team:state.defenderTeam,progress:state.progress});match.emit('objective-win',{team:state.defenderTeam,score:match.teamScores[state.defenderTeam]});match.endMatch('objective');}
 }
 
