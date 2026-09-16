@@ -3,7 +3,6 @@
 // arena, match rules and the full cosmetic/gear loadout.
 export const PRESET_LIMIT = 8;
 export const PRESET_STORAGE_KEY = 'token-arena-presets';
-export const LOADOUT_KEYS = Object.freeze(['gear', 'attachments', 'finish', 'crosshair']);
 
 const clean = (value, max) => typeof value === 'string' ? value.replace(/[\u0000-\u001f\u007f]/g, '').trim().slice(0, max) : '';
 const titleCase = value => {const text = clean(value, 24); return text ? text[0].toUpperCase() + text.slice(1) : '';};

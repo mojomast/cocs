@@ -51,7 +51,6 @@ export function spreadBias(match,a,point){const h=(Math.imul((a.id|0)+1,73856093
 export function npcZone(a){const z=a?.npcZone;return z&&Number.isFinite(z.x)&&Number.isFinite(z.z)?z:null;}
 export function zoneLeash(z){if(Number.isFinite(z?.leash))return z.leash;return Math.max(Number.isFinite(z?.r)?z.r:8,12);}
 export function zoneDistance(a,z){return Math.hypot(a.x-z.x,a.z-z.z);}
-export function zoneHard(z){return z?.kind==='patrol'||z?.kind==='hold';}
 export function zoneReturnPoint(match,a){
  const z=npcZone(a);if(!z)return null;
  let best=null,bestDistance=Infinity;

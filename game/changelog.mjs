@@ -1,12 +1,17 @@
 // In-game patch notes. The title-screen footer is the running version; this
 // module is the human-readable release digest the Changelog screen renders. The
 // full historical record lives in docs/CHANGELOG.md and is linked from the UI.
-export const RELEASE_VERSION = 'v4.16';
-export const RELEASE_CODENAME = 'SIGNAL';
+export const RELEASE_VERSION = 'v4.17';
+export const RELEASE_CODENAME = 'STREAMLINE';
 export const REPO_URL = 'https://github.com/mojomast/tokenarena';
 export const FULL_CHANGELOG_URL = `${REPO_URL}/blob/main/docs/CHANGELOG.md`;
 
 export const CHANGELOG = [
+  {version:'v4.17',codename:'STREAMLINE',date:'2026-09-16',tag:'Netcode consistency and cleanup',highlights:[
+    'The live render path now shares the exported snapshot interpolator, so the renderer and the deterministic net harness can no longer drift apart on actor, rocket or vehicle blending.',
+    'A single control message larger than the transport budget no longer blocks every later reply: congested sockets drain essential replies through a pure scheduler that keeps later messages moving.',
+    'Removed a set of dead exports across the race camera, vehicles, showcase, models, arenas, presets, progression and bot code, and documented why snapshot deltas are still server-side future work.',
+  ]},
   {version:'v4.16',codename:'SIGNAL',date:'2026-09-16',tag:'Demo continuity and award data',highlights:[
     'The title demo no longer drops to the operator preview after the first scenario when Reduce motion (or a saved display setting) is on; saved display settings are applied before the first demo builds and the attract reel keeps cycling.',
     'The end-of-match BEST ACCURACY and MOST DAMAGE awards now fire: the simulation tracks per-actor shots, hits and damage alongside the objective stats.',

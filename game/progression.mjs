@@ -25,7 +25,6 @@ export const RANK_TITLES=[{level:1,name:'Recruit',blurb:'Fresh weights and no id
 // Every PRESTIGE_XP of overflow XP banks one prestige rank, and each rank maps
 // to a named tier with a deterministic reward. Pure, so the panel, the server
 // mirror and the tests all derive the same rank from the same total XP.
-export const PRESTIGE_VERSION=1;
 export const PRESTIGE_XP=6000;
 export const PRESTIGE_TIERS=Object.freeze([
  {level:1,name:'Bronze',color:'#d08a4e',reward:'Bronze prestige emblem',perk:'+5% match XP'},

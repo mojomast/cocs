@@ -9,45 +9,6 @@ export const RACE_DEMO_MODE_SECONDS = 7;
 const num = (value, fallback = 0) => (Number.isFinite(value) ? value : fallback);
 const clamp = (value, min, max) => (value < min ? min : value > max ? max : value);
 
-// ---------------------------------------------------------------------------
-// Race camera smoothing. The view applies these to the raw raceDemoPose output
-// so the menu reel glides between rigs instead of snapping. Frame-rate
-// independent exponential easing plus shortest-arc angles; pure and testable.
-// ---------------------------------------------------------------------------
-export const RACE_CAMERA_HALF_LIFE = .14;
-
-const shortestArc = (a, b) => ((((b - a) % (Math.PI * 2)) + Math.PI * 3) % (Math.PI * 2)) - Math.PI;
-
-export function raceSmoothFactor(halfLife, dt) {
- const life = Number(halfLife), step = Number(dt);
- if (!(life > 0) || !(step > 0)) return 1;
- return 1 - Math.pow(2, -step / life);
-}
-
-// Blend two race poses. Position and look-at ease linearly; the implied yaw of
-// the look direction is not stored, so only the scalar fields need easing.
-export function blendRacePose(current, target, { halfLife = RACE_CAMERA_HALF_LIFE, dt = 1 / 60 } = {}) {
- if (!target) return current ?? null;
- const a = current ?? {};
- const k = raceSmoothFactor(halfLife, dt);
- const out = { ...target };
- for (const key of ['x', 'y', 'z', 'lookX', 'lookY', 'lookZ', 'fov']) {
-  const from = num(a[key], num(target[key]));
-  const to = num(target[key], from);
-  out[key] = from + (to - from) * k;
- }
- return out;
-}
-
-// Bearing (radians) from a race pose to its look-at point, so a caller can aim
-// a mount or billboard consistently.
-export function racePoseBearing(pose) {
- if (!pose) return 0;
- return Math.atan2(num(pose.lookX) - num(pose.x), num(pose.lookZ) - num(pose.z));
-}
-
-export { shortestArc as raceShortestArc };
-
 export function raceDemoMode(elapsed) {
   const t = Number.isFinite(elapsed) ? Math.max(0, elapsed) : 0;
   return RACE_DEMO_MODES[Math.floor(t / RACE_DEMO_MODE_SECONDS) % RACE_DEMO_MODES.length];

@@ -67,13 +67,3 @@ export function createEnergyShieldMesh({ radius = 1.15, color = '#70ffe6', opaci
   });
   return new T.Mesh(geo, mat);
 }
-
-export function createArmorEdgeHighlight(geometry, color = '#ffffff', opacity = 0.4) {
-  const edges = new T.EdgesGeometry(geometry, 25);
-  const lineMat = new T.LineBasicMaterial({
-    color,
-    transparent: true,
-    opacity,
-  });
-  return new T.LineSegments(edges, lineMat);
-}

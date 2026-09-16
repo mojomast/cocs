@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {createGameServer, TRAFFIC_BUFFER_LIMIT} from './game-server.mjs';
+import {createGameServer, TRAFFIC_BUFFER_LIMIT, drainEssential} from './game-server.mjs';
 
 function connect(url) {
  return new Promise((resolve, reject) => {
@@ -65,4 +65,36 @@ test('essential replies survive backpressure and arrive after recovery', async (
   const pong = await until(ws, 'pong');
   assert.equal(pong.type, 'pong');
  } finally { try { ws.close(); } catch {} close(); }
+});
+
+test('drainEssential sends what fits in order and leaves the rest queued', () => {
+ const entry = (type, size, room = null) => ({ type, text: JSON.stringify({ type }), room, size });
+ const queue = [entry('a', 10), entry('b', 10), entry('c', 10)];
+ const sent = [];
+ const n = drainEssential(queue, { bufferedAmount: TRAFFIC_BUFFER_LIMIT - 15, limit: TRAFFIC_BUFFER_LIMIT, current: null, send: text => sent.push(text) });
+ assert.equal(n, 1, 'only the entry that fits the remaining budget is sent');
+ assert.deepEqual(sent.map(text => JSON.parse(text).type), ['a'], 'messages keep their order');
+ assert.deepEqual(queue.map(item => item.type), ['b', 'c'], 'the remainder stays queued');
+});
+
+test('drainEssential cannot be starved by an oversized essential message', () => {
+ const entry = (type, size, room = null) => ({ type, text: JSON.stringify({ type }), room, size });
+ const queue = [entry('oversized', TRAFFIC_BUFFER_LIMIT + 1), entry('pong', 8)];
+ const sent = [];
+ const first = drainEssential(queue, { bufferedAmount: 0, limit: TRAFFIC_BUFFER_LIMIT, current: null, send: text => sent.push(text) });
+ assert.equal(first, 1, 'the oversized message is sent once the socket has drained');
+ assert.deepEqual(queue.map(item => item.type), ['pong'], 'the oversized message no longer blocks later replies forever');
+ drainEssential(queue, { bufferedAmount: 0, limit: TRAFFIC_BUFFER_LIMIT, current: null, send: text => sent.push(text) });
+ assert.deepEqual(sent.map(text => JSON.parse(text).type), ['oversized', 'pong'], 'later replies still arrive');
+ assert.equal(queue.length, 0);
+});
+
+test('drainEssential discards entries addressed to a room the peer has left', () => {
+ const entry = (type, size, room = null) => ({ type, text: JSON.stringify({ type }), room, size });
+ const queue = [entry('stale', 8, 'ROOM1'), entry('fresh', 8, 'ROOM2')];
+ const sent = [];
+ const n = drainEssential(queue, { bufferedAmount: 0, limit: TRAFFIC_BUFFER_LIMIT, current: 'ROOM2', send: text => sent.push(text) });
+ assert.equal(n, 1, 'stale entries are skipped, not sent');
+ assert.deepEqual(sent.map(text => JSON.parse(text).type), ['fresh']);
+ assert.equal(queue.length, 0);
 });

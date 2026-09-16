@@ -16,6 +16,25 @@ record in [VERIFICATION.md](VERIFICATION.md).
 
 ---
 
+## v4.17 · STREAMLINE — 2026-09-16
+
+- **One interpolator:** `NetClient.renderState` now delegates actor/rocket/vehicle
+  blending to the exported `interpolateSnapshots` helper instead of carrying a
+  second copy, so the live render path and the deterministic net harness cannot
+  drift apart.
+- **Essential-queue starvation:** `queueEssential`/`pumpEssential` now hand off to
+  the pure, tested `drainEssential`. A single control message larger than
+  `TRAFFIC_BUFFER_LIMIT` can no longer block every later reply forever; the
+  scheduler sends it once the socket has drained, preserves order for everything
+  that fits, and discards entries for a room the peer has left.
+- **Dead code:** removed unused exports (`blendRacePose`, `racePoseBearing`,
+  `raceShortestArc`, `raceSmoothFactor`, `RACE_CAMERA_HALF_LIFE`,
+  `vehicleOccupantCount`, `showcaseById`, `createArmorEdgeHighlight`, `MODE_IDS`,
+  `LOADOUT_KEYS`, `PRESTIGE_VERSION`, `zoneHard`).
+- **Note:** server-side snapshot deltas remain future work — `snapshotDelta`
+  treats arrays as opaque leaves, so the actor/rocket arrays would still cross the
+  wire whole (documented in `game/protocol.mjs`).
+
 ## v4.16 · SIGNAL — 2026-09-16
 
 - **Demo continuity:** the saved display settings (including `reducedMotion`) are

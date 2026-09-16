@@ -418,11 +418,6 @@ export function vehicleSeatFor(vehicle) {
   return null;
 }
 
-export function vehicleOccupantCount(vehicle) {
-  const layout = vehicleConfig(vehicle)?.seatLayout || GUNTRUCK.seatLayout;
-  return (vehicle.driver != null ? 1 : 0) + (vehicle.gunner != null ? 1 : 0) + (vehicle.passengers?.filter(id => id != null).length || 0);
-}
-
 export function vehicleMounted(vehicle, actorId) {
   if (vehicle.driver === actorId) return { role: 'driver', index: 0 };
   if (vehicle.gunner === actorId) return { role: 'gunner', index: 0 };

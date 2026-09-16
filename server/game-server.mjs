@@ -24,6 +24,26 @@ export const CONTROL_RATE_LIMIT = 60;
 export const CONTROL_RATE_WINDOW = 1000;
 export const MAX_CLIENTS = 256;
 
+// Pure drain for a peer's coalesced essential queue. Sends every entry that fits
+// in the remaining budget, in order, skipping entries addressed to a room the
+// peer has already left. A single control message larger than the entire budget
+// would otherwise block every later reply forever, so once the socket has
+// drained it is sent rather than starving the queue. Returns the count sent.
+export function drainEssential(queue, { bufferedAmount = 0, limit = TRAFFIC_BUFFER_LIMIT, current = null, send } = {}) {
+ let sent = 0;
+ while (queue.length && bufferedAmount < limit) {
+  const entry = queue[0];
+  if ((entry.room ?? null) !== current) { queue.shift(); continue; }
+  const size = Number.isFinite(entry.size) ? entry.size : Buffer.byteLength(entry.text);
+  if (size <= limit && bufferedAmount + size > limit) break;
+  queue.shift();
+  send(entry.text);
+  bufferedAmount += size;
+  sent++;
+ }
+ return sent;
+}
+
 export function createGameServer({ port = 0, random, tickDt = 1 / 60, tickMs = 1000 / 60, graceMs, snapshotHz, historyPath = null, progressionPath = null, maxClients = MAX_CLIENTS } = {}) {
  const history = new MatchHistory(historyPath);
  const progression = new ProgressionStore(progressionPath);
@@ -46,28 +66,22 @@ export function createGameServer({ port = 0, random, tickDt = 1 / 60, tickMs = 1
  // congested socket are coalesced by type and pumped once the buffer drains,
  // rather than being silently dropped.
  const REPLACEABLE = new Set([MESSAGE.SNAPSHOT, MESSAGE.EVENTS, MESSAGE.VOICE_SIGNAL]);
- function queueEssential(ws, text, type) {
-  const queue = ws.pendingEssential || (ws.pendingEssential = []);
-  // Tag with the peer's room so messages queued for one room are never
-  // delivered after the peer has switched to another.
-  const entry = { text, room: peerRoom.get(socketPeer.get(ws)) ?? null, type };
-  const index = queue.findIndex(item => item.type === type);
-  if (index >= 0) queue[index] = entry;
-  else if (queue.length >= 64) queue.shift();
-  else queue.push(entry);
- }
+  function queueEssential(ws, text, type) {
+   const queue = ws.pendingEssential || (ws.pendingEssential = []);
+   // Tag with the peer's room so messages queued for one room are never
+   // delivered after the peer has switched to another. The byte size is cached
+   // so the drain loop does not re-measure every entry every pass.
+   const entry = { text, room: peerRoom.get(socketPeer.get(ws)) ?? null, type, size: Buffer.byteLength(text) };
+   const index = queue.findIndex(item => item.type === type);
+   if (index >= 0) queue[index] = entry;
+   else if (queue.length >= 64) queue.shift();
+   else queue.push(entry);
+  }
   function pumpEssential(ws) {
    const queue = ws.pendingEssential;
    if (!queue?.length || ws.readyState !== ws.OPEN) return;
    const current = peerRoom.get(socketPeer.get(ws)) ?? null;
-   while (queue.length && ws.bufferedAmount < TRAFFIC_BUFFER_LIMIT) {
-    const entry = queue[0];
-    if ((entry.room ?? null) !== current) { queue.shift(); continue; }
-    const text = entry.text;
-    if (ws.bufferedAmount + Buffer.byteLength(text) > TRAFFIC_BUFFER_LIMIT) break;
-    queue.shift();
-    ws.send(text);
-   }
+   drainEssential(queue, { bufferedAmount: ws.bufferedAmount, limit: TRAFFIC_BUFFER_LIMIT, current, send: text => ws.send(text) });
    if (!queue.length) ws.pendingEssential = null;
   }
   function deliver(ws, msg, text = JSON.stringify(msg)) {

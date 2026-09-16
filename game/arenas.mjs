@@ -1,5 +1,5 @@
 import {MAPS} from './maps.mjs';
-import {GAME_MODES,modeRule} from './config.mjs';
+import {modeRule} from './config.mjs';
 
 export const ARENA_GROUPS=[
  {id:'arena',name:'Arena',description:'Compact classic combat arenas. Legacy rotation.'},
@@ -84,4 +84,3 @@ export function resolveMapForMode(mapId,mode,options={}){
 export function activeMaps({legacy=false}={}){return legacy?[...MAPS]:MAPS.filter(map=>!arenaMeta(map.id).legacy);}
 export function groupedMaps(maps=MAPS){const groups=[];for(const group of ARENA_GROUPS){const entries=maps.filter(map=>(arenaMeta(map.id).group)===group.id);if(entries.length)groups.push({...group,maps:entries});}return groups;}
 export function modeMapSummary(mode,mapId){const meta=arenaMeta(mapId);const group=ARENA_GROUPS.find(entry=>entry.id===meta.group);return {mapId,group:meta.group,groupName:group?.name??'Arena',scale:meta.scale,recommendedBots:recommendedBots(mode,mapId),maxBots:maxBotsFor(mode),legacy:meta.legacy};}
-export const MODE_IDS=GAME_MODES.map(mode=>mode.id);

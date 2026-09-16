@@ -1,5 +1,34 @@
 # COCS verification report
 
+## Release 4.17 - Netcode consistency and cleanup
+
+- **Render path:** `NetClient.renderState` now computes its `base`/`prev`/`alpha`
+  and then delegates all actor/rocket/vehicle blending to the exported
+  `interpolateSnapshots`, replacing the second inline copy. The shadow
+  substitution (predicted own actor/vehicle when resynced) is unchanged. Covered
+  by the existing `game/net.test.mjs` suite (31 tests).
+- **Essential-queue starvation:** extracted the drain loop into the exported pure
+  `drainEssential` and rewired `pumpEssential` to it. An entry whose own byte size
+  exceeds `TRAFFIC_BUFFER_LIMIT` used to make `pumpEssential` `break` on every pass
+  forever, stalling every later reply. It is now sent once the socket has drained,
+  order is preserved for everything that fits, and stale-room entries are dropped.
+  `queueEssential` caches each entry's byte size. Three unit tests cover ordering,
+  the oversized case and stale-room skipping; the live backpressure tests in
+  `server/transport.test.mjs` and `server/security.test.mjs` still pass.
+- **Dead code:** removed unused exported symbols confirmed to have zero
+  references: `blendRacePose`, `racePoseBearing`, `raceShortestArc`,
+  `raceSmoothFactor`, `RACE_CAMERA_HALF_LIFE`, `vehicleOccupantCount`,
+  `showcaseById`, `createArmorEdgeHighlight`, `MODE_IDS`, `LOADOUT_KEYS`,
+  `PRESTIGE_VERSION`, `zoneHard` (plus the now-unused `GAME_MODES` import in
+  `game/arenas.mjs`).
+- **Deferred, documented:** server-side snapshot deltas are not wired because
+  `snapshotDelta` treats arrays as opaque leaves; `actors`/`rockets` would still
+  cross the wire whole. A note in `game/protocol.mjs` records that id-keyed
+  array element diffing is the prerequisite.
+
+Verification: game **1331/1331**, server **149/149**, `tests/` **7/7**, `tsc`
+clean, lint 0 errors.
+
 ## Release 4.16 - Demo continuity and award data
 
 - **Demo fix:** reproduced the "first demo then walking bot" report by saving

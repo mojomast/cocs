@@ -78,6 +78,12 @@ const encode = value => Array.isArray(value) ? { $a: value } : isPlainObject(val
 
 // Build a patch object describing `next` relative to `base`. Returns null when
 // the two trees are structurally identical (nothing to send).
+//
+// Arrays are treated as opaque leaves: any change replaces the whole array. The
+// live snapshot's cost is dominated by the `actors`/`rockets`/`pickups` arrays,
+// so a production server-side delta would save little until this grows
+// id-keyed element diffing. The format is symmetric and self-describing, so
+// that can be added later without a wire change.
 export function snapshotDelta(base, next) {
  if (!isPlainObject(base) || !isPlainObject(next)) return null;
  const patch = {};

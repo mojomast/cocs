@@ -425,6 +425,14 @@ assets. Full procedure and verification: [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md
 The last five releases. The full history lives in
 [docs/CHANGELOG.md](docs/CHANGELOG.md).
 
+### v4.17 · STREAMLINE — 2026-09-16
+- The live render path shares the exported snapshot interpolator with the deterministic
+  net harness, so the two cannot drift apart.
+- A control message larger than the transport budget no longer blocks every later
+  reply: congested sockets drain essential replies through a pure, tested scheduler.
+- Dead exports removed across the race camera, vehicles, showcase, models, arenas,
+  presets, progression and bot code.
+
 ### v4.16 · SIGNAL — 2026-09-16
 - The title demo keeps cycling under Reduce motion / saved display settings instead
   of dropping to the operator preview after the first scenario.
@@ -453,12 +461,6 @@ The last five releases. The full history lives in
 - A fullscreen toggle joins the menu top bar.
 - "Back to demo" hides the title overlay and returns to the live demo with
   on-screen and arrow-key controls to cycle modes.
-
-### v4.12 · SYNC — 2026-09-15
-- An open tab detects a newer deploy via `/api/version` and a protocol-version
-  change, and offers a one-click reload.
-- Campaign checkpoints persist and resume; mission-select stars match the reward
-  logic; VIP Escort draws its beacon; enemy telegraphs are captioned and audible.
 
 ## Parody and attribution
 

@@ -61,8 +61,6 @@ export function pickRandomShowcase(random=Math.random,{legacy=false,exclude=null
  return specFor(scenario,random,{legacy});
 }
 
-export function showcaseById(id){return SHOWCASES.find(scenario=>scenario.id===id)||null;}
-
 // A shuffled walk over every scenario so a full cycle shows all the modes before
 // repeating, but in a different order each time. Deterministic for a given rng.
 export function shuffleShowcaseReel(random=Math.random){

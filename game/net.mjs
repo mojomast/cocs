@@ -449,13 +449,11 @@ export class NetClient {
   }
  renderState(now = performance.now()) {
   const b = this.buffer;
-   let base, actors, rockets, vehicles;
+   let base, prev, alpha;
   if (!b.length) {
    if (!this.state) return null;
-   base = this.state;
-    actors = base.actors;
-    vehicles = base.vehicles ?? [];
-    rockets = base.rockets ?? [];
+    base = prev = this.state;
+    alpha = 0;
   } else {
     const useServerClock=this.clockOffset!==null&&b.length>1&&b.every(m=>m.serverTime!==null),target=useServerClock?(now-this.clockOffset)/1000-this.renderDelay/1000:now-this.renderDelay;
     let hi = b.findIndex(m => useServerClock?m.serverTime>=target:m.recvAt>=target);
@@ -463,26 +461,15 @@ export class NetClient {
    const lo = Math.max(0, hi - 1);
    const s2 = b[hi], s1 = b[lo];
     const t1=useServerClock?s1.serverTime:s1.recvAt,t2=useServerClock?s2.serverTime:s2.recvAt;
-    const alpha = hi === lo ? 1 : Math.max(0, Math.min(1, (target-t1)/(t2-t1||1)));
+    alpha = hi === lo ? 1 : Math.max(0, Math.min(1, (target-t1)/(t2-t1||1)));
    base = s2.state;
-   const prev = s1.state;
-   actors = base.actors.map(actor => {
-    const before = (prev.actors ?? []).find(x => x.id === actor.id);
-      if (!before||(actor.id===this.actorId&&this.shadow&&this.resynced)) return actor;
-    return { ...actor, x: lerp(before.x, actor.x, alpha), y: lerp(before.y, actor.y, alpha), z: lerp(before.z, actor.z, alpha),
-     yaw: before.yaw + turn(before.yaw, actor.yaw) * alpha, pitch: lerp(before.pitch, actor.pitch, alpha) };
-   });
-    rockets = (base.rockets ?? []).map(r => {
-    const before = (prev.rockets ?? []).find(x => x.id === r.id);
-    if (!before) return r;
-     return { ...r, pos: { x: lerp(before.pos.x, r.pos.x, alpha), y: lerp(before.pos.y, r.pos.y, alpha), z: lerp(before.pos.z, r.pos.z, alpha) } };
-    });
-    vehicles = (base.vehicles ?? []).map(vehicle => {
-     const before = (prev.vehicles ?? []).find(item => item.id === vehicle.id);
-     if (!before) return vehicle;
-     return { ...vehicle, x: lerp(before.x, vehicle.x, alpha), y: lerp(before.y, vehicle.y, alpha), z: lerp(before.z, vehicle.z, alpha), yaw: before.yaw + turn(before.yaw, vehicle.yaw) * alpha };
-    });
-   }
+   prev = s1.state;
+  }
+  // The exported pure helper owns actor/rocket/vehicle blending so the live
+  // render path and the test harness cannot drift apart.
+  const resynced = Boolean(this.shadow && this.resynced);
+  const view = interpolateSnapshots(prev, base, alpha, { localId: this.actorId, predicted: resynced });
+  let { actors, vehicles } = view;
    if (this.shadow && this.resynced) {
    const own = this.shadow.actors[0];
    const idx = actors.findIndex(a => a.id === this.actorId);
@@ -493,7 +480,7 @@ export class NetClient {
      if (local && idx >= 0) { const state = { id: local.id, kind: local.kind, x: local.position.x, y: local.position.y, z: local.position.z, vx: local.velocity.x, vz: local.velocity.z, yaw: local.heading, health: local.health, maxHealth: local.maxHealth, driver: local.driver, heat: local.heat, overheated: local.overheated, respawnTimer: local.respawnTimer, turretYaw: local.turretYaw, roll: local.roll, pitchBody: local.pitchBody, speed: local.speed }; vehicles = vehicles.slice(0, idx).concat(state, vehicles.slice(idx + 1)); }
     }
    }
-   return { ...base, actors, vehicles, rockets, events: this.events };
+   return { ...view, actors, vehicles, events: this.events };
   }
  }
 
