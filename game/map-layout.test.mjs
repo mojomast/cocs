@@ -5,16 +5,22 @@ import {arenaSupportsMode} from './arenas.mjs';
 import {GAME_MODES,modeRule} from './config.mjs';
 import {Match,floorAt,obstructed,walkEdge,navigation} from './core.mjs';
 import {RULES} from './data.mjs';
+import {CAMPAIGN_MISSIONS} from './campaign-data.mjs';
 
 for(const arena of MAPS)test(`registry runtime placements: ${arena.id}`,t=>{
   const modes=GAME_MODES.filter(mode=>arenaSupportsMode(arena.id,mode.id));
   assert.ok(modes.length,'map advertises at least one registered mode');
+  // Campaign runs a mission whose floor anchors are authored for one specific
+  // map. Resolving those anchors elsewhere is a hard error by design, so run
+  // campaign only on its mission's map and skip it where no mission lives.
+  const missionForMap=CAMPAIGN_MISSIONS.find(mission=>mission.mapId===arena.id)??null;
   const checked=new Set();
   const counts={modes:0,placements:0,authored:0,spawns:0,teamSpawns:0,actors:0,pickups:0,flags:0,objectives:0,payload:0};
   let nav,edges,roundTrip;
   for(const {id:mode} of modes){
+    if(mode==='campaign'&&!missionForMap)continue;
     // Match owns the navigation cache; do not rebuild navigation per mode.
-    const match=new Match('chatgpt','openclaw',()=>.5,arena.id,{mode,botCount:0,humanCount:2,fragLimit:3});
+    const match=new Match('chatgpt','openclaw',()=>.5,arena.id,{mode,botCount:0,humanCount:2,fragLimit:3,...(mode==='campaign'?{mission:missionForMap.id}:{})});
     assert.equal(match.arena,arena);
     assert.equal(match.config.mode,mode);
     if(!nav){
