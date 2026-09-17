@@ -11,7 +11,9 @@ test('switchWeapon validates, delays, cancels reload and emits one shared event'
  const m=fresh(),a=m.actors[0];
  a.ammo=a.ammo.map((v,i)=>i===0?Infinity:i===4?4:0);
  assert.equal(m.switchWeapon(a,4),true,'switches to an available weapon');
- assert.equal(a.weapon,4);assert.equal(a.weaponSwitch,.45,'applies the switching delay');
+ // ChatGPT's Adaptive class verb halves the .45 s base holster to .225 s, and
+ // switchWeapon applies that class delay (operator-verbs.mjs ADAPTIVE.swapDelay).
+ assert.equal(a.weapon,4);assert.equal(a.weaponSwitch,.225,'applies the Adaptive-halved switching delay');
  assert.equal(m.events.at(-1).type,'weapon-switch');assert.equal(m.events.at(-1).actor,a.id);assert.equal(m.events.at(-1).source,'request');
  assert.equal(m.switchWeapon(a,4),false,'a no-op switch is not re-emitted');
  assert.equal(m.switchWeapon(a,2),false,'an empty weapon cannot be selected');

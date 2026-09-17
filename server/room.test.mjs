@@ -72,14 +72,16 @@ test('remote inputs drive look, fire and events stream back as deltas',()=>{
   room.input(2,{seq:20,yaw:Math.PI,fire:true});
  for(let i=0;i<4;i++)room.tick(1/60);
  const msgs=room.drain();
- assert.equal(a.health,88.78);
- assert.equal(b.health,88.78);
+ // Phase 2's spawn-stat re-cut gives ChatGPT 5 spawn armor; armor soaks the
+ // first 5 of the 11.22 shot, so the hit takes 6.22 health (100 - 6.22 = 93.78).
+ assert.equal(a.health,93.78);
+ assert.equal(b.health,93.78);
  assert.ok(Math.abs(b.yaw-Math.PI)<1e-9);
  const ev1=find(msgs,'events',1).items,ev2=find(msgs,'events',2).items;
  assert.ok(ev1.some(e=>e.type==='damage'&&e.actor===1&&e.source===0));
  assert.ok(ev2.some(e=>e.type==='damage'&&e.actor===0&&e.source===1));
-  assert.ok(find(msgs,'snapshot').state.actors[1].health===88.78);
-  assert.ok(find(msgs,'snapshot').state.actors[0].health===88.78);
+  assert.ok(find(msgs,'snapshot').state.actors[1].health===93.78);
+  assert.ok(find(msgs,'snapshot').state.actors[0].health===93.78);
   assert.deepEqual(find(msgs,'snapshot').acks,{0:10,1:20});
 });
 test('start and rematch preserve every human validated loadout',()=>{

@@ -155,6 +155,46 @@ triangle scan with no spatial index and dominates step cost on terrain maps
 
 ---
 
+## F11 — Three stale Phase 2 pins in the class-overhaul gate (fixed)
+
+The class-overhaul integration gate surfaced three test pins that predate the
+Phase 2 stat/verb work. None was a game bug; each pin was updated to the shipped
+contract at full strictness:
+
+- `game/weapon-switch.test.mjs` pinned `a.weaponSwitch === .45` for the ChatGPT
+  fixture. ChatGPT's Adaptive signature verb halves the .45 s base holster to
+  .225 s (`game/operator-verbs.mjs` `ADAPTIVE_SWAP_MULTIPLIER = .5`, applied in
+  `core.mjs` `switchWeapon()`), so the pin is now the exact `.225` with a
+  comment naming the Adaptive contract. This keeps the only Match-level check
+  that the class holster multiplier is wired into `switchWeapon()`; the base and
+  inactive paths stay pinned in `game/operator-verbs.test.mjs`.
+- `server/room.test.mjs` expected 88.78 health after one shot (100 − 11.22).
+  The Phase 2 spawn-stat re-cut gives ChatGPT 5 spawn armor, and armor soaks the
+  first 5 of the hit, so a shot now takes 6.22 health: the four health pins
+  (authoritative and snapshot, both actors) are 93.78 with a comment. The
+  damage pipeline itself (`core.mjs damage()`: armor absorbs up to 60% of the
+  hit) is unchanged.
+- `COCS_SLOW_TESTS=1 game/config.test.mjs` ran campaign with the default mission
+  on the crosswire fallback, which authors no campaign anchors — a hard error by
+  design (`game/campaign-anchors.mjs`). The sweep now pairs campaign with its
+  own mission's map (`CAMPAIGN_MISSIONS[0]` → `convoy-run`/`convoy-line`, the
+  same approach as `game/map-layout.test.mjs`), and the objective-resolution
+  check accepts campaign `mission-won`/`mission-lost` alongside the multiplayer
+  objective events. The strict anchor contract is untouched and campaign now
+  runs in the sweep instead of being skipped.
+
+**Evidence (worktree `tokenarena-class`, during the class-overhaul gate):**
+`npm run test:game` → 1745 tests, 1740 pass, 0 fail, 5 skipped (the 4
+`COCS_SLOW_TESTS` skips plus the `OfflineAudioContext` environment skip in
+`game/music.test.mjs`); `npm run test:server` → 153/153 pass;
+`npx tsc --noEmit` → clean; `npm run lint` → 0 errors (428 pre-existing
+warnings); `node --test game/ability-parity.test.mjs` → 1/1 with no fixture
+regeneration;
+`COCS_SLOW_TESTS=1 node --test --test-timeout=1800000 game/config.test.mjs game/core.test.mjs game/gameplay.test.mjs game/race.test.mjs`
+→ 132/132 pass, 0 skipped (all four files carrying a `slowSkip`).
+
+---
+
 ## F6 — Full-suite gate before deploy (closed)
 
 `npm test` is green on this branch — all stages exit 0 (`test:game`,

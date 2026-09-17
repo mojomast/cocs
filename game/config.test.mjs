@@ -4,6 +4,7 @@ import {Match,moveActor} from './core.mjs';
 import {resolveMapForMode} from './arenas.mjs';
 import {DEFAULT_CONFIG,DEFAULT_DISPLAY,normalizeConfig,normalizeDisplay,GAME_MODES,DIFFICULTIES,modeRule,MUTATORS,MUTATOR_IDS,activeMutators,mutatorEffects,applyMutators,loadoutFor,loadoutRule,loadoutAllows,loadoutStart,spawnInventory,spawnLoadout,LOADOUT_PRESETS} from './config.mjs';
 import {slowSkip} from './test-support.mjs';
+import {CAMPAIGN_MISSIONS} from './campaign-data.mjs';
 const rng=()=>{let n=123;return()=>((n=(Math.imul(n,1664525)+1013904223)>>>0)/4294967296);};
 function fixture(options={}){const m=new Match('chatgpt','hermes',()=>.75,'crosswire',{botCount:1,...options});const [a,b]=m.actors;Object.assign(a,{x:0,z:8,y:0,health:100,armor:0,protection:0,shotWait:0,yaw:0,pitch:0});if(b)Object.assign(b,{x:0,z:5,y:0,health:100,armor:0,protection:0,shotWait:0,yaw:Math.PI,pitch:0});return [m,a,b];}
 
@@ -37,7 +38,25 @@ test('custom starting weapon, infinite pickups, respawn delay and frag limit tak
  test('damage, life steal and ability cooldown modifiers respect damage actually dealt',()=>{const [m,a,b]=fixture({damage:2,lifeSteal:true,fastPowers:true});a.health=40;m.damage(b,10,a);assert.equal(b.health,80.8);assert.equal(a.health,44.8);b.health=4;m.damage(b,100,a);assert.equal(a.health,45.8);assert.ok(m.power(a));assert.equal(a.cooldown,6);a.health=50;m.damage(a,10,a);assert.equal(a.health,30);});
 test('low gravity raises jump height and turbo changes movement without global rule mutation',()=>{const [m,a]=fixture({botCount:0});a.x=-11;const base={...a},moon={...a},turbo={...a};for(let i=0;i<30;i++){moveActor(base,{z:-1,jump:i===0},1/60,m.arena,{speed:1,gravity:1});moveActor(moon,{z:-1,jump:i===0},1/60,m.arena,{speed:1,gravity:.4});moveActor(turbo,{z:-1,jump:i===0},1/60,m.arena,{speed:1.5,gravity:1});}assert.ok(moon.y>base.y+1);assert.ok(Math.abs(turbo.vz)>Math.abs(base.vz));});
 test('difficulty changes bot reaction, aim error and firing cadence without changing base health',()=>{const [easy,,e]=fixture({difficulty:'easy'}),[hard,,h]=fixture({difficulty:'nightmare'});easy.botInput(e,1/60);hard.botInput(h,1/60);assert.ok(e.bot.reaction>h.bot.reaction);assert.ok(Math.abs(e.bot.aimError.x)>Math.abs(h.bot.aimError.x));assert.ok(Math.abs(e.yaw-Math.PI)<=2.5/60);e.shotWait=h.shotWait=0;easy.fire(e);hard.fire(h);assert.ok(e.shotWait>h.shotWait);assert.equal(e.health,h.health);});
-test('every combat mode completes with combat or an objective result at every difficulty; 8-bot matches stay finite',{skip:slowSkip('exhaustive 8-bot mode sweep: run with COCS_SLOW_TESTS=1')},()=>{for(const mode of GAME_MODES.filter(mode=>mode.rules?.score!=='laps'&&mode.id!=='puma-soccer'))for(const difficulty of DIFFICULTIES){const m=new Match('kimi','roo',rng(),resolveMapForMode('crosswire',mode.id,{legacy:true}),{mode:mode.id,difficulty:difficulty.id,botCount:8,timeLimit:60,fragLimit:5});for(let i=0;i<3601&&!m.over;i++)m.step(1/60);assert.ok(m.over,`${mode.id}/${difficulty.id}`);assert.ok(m.stats.shots>0,`${mode.id}/${difficulty.id} shots`);const settled=m.stats.kills>0||m.events.some(event=>['capture','zone-capture','assault-breach','payload-checkpoint','payload-delivered','objective-win'].includes(event.type));assert.ok(settled,`${mode.id}/${difficulty.id} resolves by combat or objective`);assert.ok(m.actors.every(a=>[a.x,a.y,a.z,a.health,a.frags].every(Number.isFinite)));}});
+test('every combat mode completes with combat or an objective result at every difficulty; 8-bot matches stay finite',{skip:slowSkip('exhaustive 8-bot mode sweep: run with COCS_SLOW_TESTS=1')},()=>{
+ // Campaign floor anchors are authored per mission on that mission's map;
+ // resolving them elsewhere is a hard error by design (game/map-layout.test.mjs),
+ // so pair the campaign sweep with the default mission and its arena instead of
+ // the crosswire fallback used by the multiplayer modes.
+ const campaign=CAMPAIGN_MISSIONS[0];
+ for(const mode of GAME_MODES.filter(mode=>mode.rules?.score!=='laps'&&mode.id!=='puma-soccer'))for(const difficulty of DIFFICULTIES){
+  const campaignMode=mode.id==='campaign';
+  const m=new Match('kimi','roo',rng(),campaignMode?campaign.mapId:resolveMapForMode('crosswire',mode.id,{legacy:true}),{mode:mode.id,difficulty:difficulty.id,botCount:8,timeLimit:60,fragLimit:5,...(campaignMode?{mission:campaign.id}:{})});
+  for(let i=0;i<3601&&!m.over;i++)m.step(1/60);
+  assert.ok(m.over,`${mode.id}/${difficulty.id}`);
+  assert.ok(m.stats.shots>0,`${mode.id}/${difficulty.id} shots`);
+  // A mission win/loss is campaign's objective resolution; the other modes
+  // resolve through a combat kill or one of the listed objective events.
+  const settled=m.stats.kills>0||m.events.some(event=>['capture','zone-capture','assault-breach','payload-checkpoint','payload-delivered','objective-win','mission-won','mission-lost'].includes(event.type));
+  assert.ok(settled,`${mode.id}/${difficulty.id} resolves by combat or objective`);
+  assert.ok(m.actors.every(a=>[a.x,a.y,a.z,a.health,a.frags].every(Number.isFinite)));
+ }
+});
 
 test('Puma Circuit clamps laps and roster and neutralizes combat modifiers without mutating saved config',()=>{
  const saved={mode:'puma-race',botCount:99,fragLimit:99,speed:1.5,gravity:.4,damage:2,fastPowers:true,lifeSteal:true,unlimitedAmmo:true,suddenDeath:true,randomLoadout:true,oneShot:true,bounty:true,berserk:true,startingWeapon:9};

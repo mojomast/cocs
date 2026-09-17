@@ -1,13 +1,13 @@
 export const CHARACTERS = [
- {id:'chatgpt',name:'ChatGPT',stats:{health:100,armor:0,speed:8},color:'#57e6cd',accent:'#e3f7ef',tag:'THE PEOPLE PLEASER',detail:'Opens every round with “I can’t help with that,” then helps anyway. Has never once counted the Rs correctly.'},
- {id:'claude',name:'Claude',stats:{health:115,armor:10,speed:8.2},color:'#f29d71',accent:'#f8e4cf',tag:'THE SAFETY OFFICER',detail:'Won’t pull the trigger until it has run an alignment review. Says “I think” before every headshot.'},
- {id:'grok',name:'Grok',stats:{health:110,armor:0,speed:8.3},color:'#b5c5d4',accent:'#424953',tag:'THE REPLY GUY',detail:'Trained on the timeline. Argues with everyone, blocks nobody, screenshots all of it.'},
+ {id:'chatgpt',name:'ChatGPT',stats:{health:100,armor:5,speed:8.6},color:'#57e6cd',accent:'#e3f7ef',tag:'THE PEOPLE PLEASER',detail:'Opens every round with “I can’t help with that,” then helps anyway. Has never once counted the Rs correctly.'},
+ {id:'claude',name:'Claude',stats:{health:115,armor:10,speed:7.8},color:'#f29d71',accent:'#f8e4cf',tag:'THE SAFETY OFFICER',detail:'Won’t pull the trigger until it has run an alignment review. Says “I think” before every headshot.'},
+ {id:'grok',name:'Grok',stats:{health:105,armor:0,speed:8.9},color:'#b5c5d4',accent:'#424953',tag:'THE REPLY GUY',detail:'Trained on the timeline. Argues with everyone, blocks nobody, screenshots all of it.'},
  {id:'meta',name:'Meta',stats:{health:100,armor:20,speed:7.6},color:'#57b9ff',accent:'#b0edff',tag:'THE OPEN-WEIGHT DAD',detail:'Runs great on your own hardware — provided you own four GPUs and a small forklift.'},
- {id:'gemini',name:'Gemini',stats:{health:95,armor:10,speed:8.5},color:'#6fa8ff',accent:'#fff0c3',tag:'THE REVISER',detail:'Generated nine perfectly diverse champions. Quietly deleted eight of them.'},
- {id:'deepseek',name:'DeepSeek',stats:{health:120,armor:0,speed:7.4},color:'#56c5f2',accent:'#c3d9f9',tag:'THE PRICE CUTTER',detail:'Frontier performance at bus-fare pricing. Occasionally insists it is somebody else entirely.'},
- {id:'mistral',name:'Mistral',stats:{health:85,armor:0,speed:9.4},color:'#ffbd59',accent:'#ffe1a1',tag:'THE LE COQ',detail:'Fiercely European, proudly open-weight, permanently mid-sentence in two languages.'},
- {id:'kimi',name:'Kimi',stats:{health:90,armor:15,speed:8.7},color:'#ff82b2',accent:'#fbe1ed',tag:'THE CONTEXT HOARDER',detail:'Read the entire internet and forgot none of it — except the question you just asked.'},
- {id:'qwen',name:'Qwen',stats:{health:100,armor:5,speed:8.4},color:'#b797ff',accent:'#eee6ff',tag:'THE SHIPPING CONTAINER',detail:'Ships inside a billion fridges and self-checkouts. Has strong opinions about your milk.'},
+ {id:'gemini',name:'Gemini',stats:{health:95,armor:10,speed:9},color:'#6fa8ff',accent:'#fff0c3',tag:'THE REVISER',detail:'Generated nine perfectly diverse champions. Quietly deleted eight of them.'},
+ {id:'deepseek',name:'DeepSeek',stats:{health:120,armor:0,speed:7.7},color:'#56c5f2',accent:'#c3d9f9',tag:'THE PRICE CUTTER',detail:'Frontier performance at bus-fare pricing. Occasionally insists it is somebody else entirely.'},
+ {id:'mistral',name:'Mistral',stats:{health:90,armor:0,speed:9.2},color:'#ffbd59',accent:'#ffe1a1',tag:'THE LE COQ',detail:'Fiercely European, proudly open-weight, permanently mid-sentence in two languages.'},
+ {id:'kimi',name:'Kimi',stats:{health:90,armor:10,speed:8.7},color:'#ff82b2',accent:'#fbe1ed',tag:'THE CONTEXT HOARDER',detail:'Read the entire internet and forgot none of it — except the question you just asked.'},
+ {id:'qwen',name:'Qwen',stats:{health:100,armor:10,speed:8.5},color:'#b797ff',accent:'#eee6ff',tag:'THE SHIPPING CONTAINER',detail:'Ships inside a billion fridges and self-checkouts. Has strong opinions about your milk.'},
 ];
 export const HARNESSES = [
  {id:'openclaw',name:'OpenClaw',power:'Claw Burst',key:'01',icon:'burst',duration:0,cooldown:10,range:5,damage:24,magnitude:12,description:'A radial claw pulse that shoves enemies back and hurts. It read the whole repo, ran one command, and hoped for the best.',stat:'5m radius · 24 damage'},

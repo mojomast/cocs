@@ -1,9 +1,10 @@
-import {clamp,dist,eye,blastUnsafe,walkEdge,floorAt,obstructed,nearest} from './core.mjs';
+import {clamp,dist,eye,aim,blastUnsafe,walkEdge,floorAt,obstructed,nearest} from './core.mjs';
 import {POWERUPS,WEAPONS,RULES} from './data.mjs';
 import {modeWeapon,teamMode,loadoutAllows,loadoutStart} from './config.mjs';
 import {harnessBotHints,preferredHarnessWeapon} from './harness-profiles.mjs';
 import {operatorProfile,preferredOperatorWeapon} from './operator-profiles.mjs';
 import {botBehavior,botWeaponBandPick} from './bot-personalities.mjs';
+import {OPERATOR_KITS} from './kits.mjs';
 import {enemyBehavior} from './enemy-types.mjs';
 import {turnToward} from './character-anim.mjs';
 import {payloadPosition} from './payload.mjs';
@@ -188,7 +189,70 @@ export function teamCentroid(match,a){
  return {x:x/mates.length,y:0,z:z/mates.length};
 }
 
-export function botInput(match,a,dt){const b=a.bot,hints=harnessBotHints(a.harness)||{range:[6,16],retreatHealth:.4,power:'hurt'},operator=operatorProfile(a.character),behavior=a.npcType?enemyBehavior(a):botBehavior(a);b.behavior=behavior;const lethal=match.mutators?.oneShot===true||match.mutators?.instagib===true,retreatAt=clamp(behavior.retreat*.6+(hints.retreatHealth??.4)*.4+(lethal?.18:0),.12,.85);b.think-=dt;b.memory=Math.max(0,b.memory-dt);b.suppressed=Math.max(0,(b.suppressed||0)-dt);b.vehicleCooldown=Math.max(0,(b.vehicleCooldown||0)-dt);b.reaction=Math.max(0,b.reaction-dt);if(a.traversalFlight||a.zipRide)return {};if(a.vehicleId!==null&&a.vehicleSeat==='passenger')return {interact:true};if(a.vehicleId!==null&&a.vehicleSeat==='gunner'){const mounted=match.vehicleById(a.vehicleId);if(!mounted||mounted.driver===null)return {interact:true};}const ride=a.vehicleId===null&&(b.vehicleCooldown||0)<=0&&behavior.vehicle>.32?match.vehicles.find(vehicle=>{const seat=vehicleSeatFor(vehicle);return seat&&seat.role!=='passenger'&&Math.hypot(a.x-vehicle.position.x,a.z-vehicle.position.z)<2.4&&Math.abs(a.y-vehicle.position.y)<(vehicle.config?.flight===true?3.2:2.4);}):null;if(ride&&!match.flagCarrier(a))return {interact:true};
+// ---------------------------------------------------------------------------
+// Phase 2 class-movement policy. The actor's movement state (game/movement.mjs)
+// is plain, documented data, so the policy only reads it and presses the verb's
+// own input. Deterministic: cadence comes from `match.time` and the hold window
+// from `dt`; no Math.random, no wall clock. The kit's `bot.mobility` style
+// decides when the verb is worth spending (engage/escape/route/reposition/hold).
+// ---------------------------------------------------------------------------
+const KIT_BY_CHARACTER=Object.fromEntries(OPERATOR_KITS.map(kit=>[kit.id,kit]));
+const MOBILITY_ATTEMPT_SECONDS=2.5;
+export function botMovementIntent(match,a,b,input,dt,targetDistance=Infinity){
+ const movement=a.movement;
+ if(!movement||movement.enabled!==true)return input;
+ if(a.vehicleId!==null||a.zipRide||a.traversalFlight||a.health<=0||(a.active||0)>0)return input;
+ const now=Number.isFinite(match.time)?match.time:0;
+ if((b.mvHold||0)>0){
+  b.mvHold=Math.max(0,b.mvHold-dt);
+  if(b.mvHoldKind==='crouch')input.crouch=true;
+  else if(b.mvHoldKind==='jump')input.jump=true;
+  else if(b.mvHoldKind==='slam')input.slam=true;
+  return input;
+ }
+ if(movement.phase!=='ready'||now<(b.mvAt||0))return input;
+ const style=KIT_BY_CHARACTER[a.character]?.bot?.mobility??'hold';
+ const verb=movement.verb;
+ const press=key=>{input[key]=true;b.mvAt=now+MOBILITY_ATTEMPT_SECONDS;};
+ const hold=(kind,seconds)=>{b.mvHoldKind=kind;b.mvHold=seconds;b.mvAt=now+MOBILITY_ATTEMPT_SECONDS;};
+ if(verb==='grapple'||verb==='deployable-rope'){
+  // Aimed route tools: only when a wall or floor sits inside the verb's reach
+  // along the current facing, so a bot does not eat the miss cooldown.
+  if(style==='route'&&a.grounded&&(targetDistance>13||b.state==='roam'||b.state==='pursue')){
+   const reach=movement.params?.distance??14,hit=match.rayWorld(eye(a),aim(a.yaw,a.pitch),reach);
+   if(hit>2&&hit<reach-.5)press('mobility');
+  }
+  return input;
+ }
+ if(verb==='blink-step'){
+  if(a.grounded&&(targetDistance>10||b.state==='pursue'||b.state==='flank'||b.state==='cover'))press('mobility');
+  return input;
+ }
+ if(verb==='air-dash'||verb==='double-jump'){
+  if(!a.grounded&&style==='engage'&&(targetDistance>6||b.state==='pursue'))press('jump');
+  return input;
+ }
+ if(verb==='super-jump'){
+  if(a.grounded&&style==='engage'&&targetDistance>10&&(b.state==='engage'||b.state==='flank'||b.state==='pursue'))hold('crouch',(movement.params?.windup??.55)+.05);
+  return input;
+ }
+ if(verb==='hover-jets'){
+  if(!a.grounded&&(a.vy<-3.5||(a.vy<0&&Number.isFinite(targetDistance)&&targetDistance<10)))hold('jump',.45);
+  return input;
+ }
+ if(verb==='safety-glide'){
+  const overVoid=match.arena.voidY!==undefined&&floorAt(a.x,a.z,match.arena)===null;
+  if(!a.grounded&&a.vy<-2&&(overVoid||b.suppressed>0||a.health<a.maxHealth*(b.behavior?.retreat??.4)))hold('jump',.6);
+  return input;
+ }
+ if(verb==='brace-slam'){
+  if(!a.grounded&&a.vy<0&&targetDistance<6)press('slam');
+  return input;
+ }
+ return input;
+}
+
+export function botInput(match,a,dt){const b=a.bot,hints=harnessBotHints(a.harness)||{range:[6,16],retreatHealth:.4,power:'hurt'},operator=operatorProfile(a.character),behavior=a.npcType?enemyBehavior(a):botBehavior(a);b.behavior=behavior;b.fired=false;const lethal=match.mutators?.oneShot===true||match.mutators?.instagib===true,retreatAt=clamp(behavior.retreat*.6+(hints.retreatHealth??.4)*.4+(lethal?.18:0),.12,.85);b.think-=dt;b.memory=Math.max(0,b.memory-dt);b.suppressed=Math.max(0,(b.suppressed||0)-dt);b.vehicleCooldown=Math.max(0,(b.vehicleCooldown||0)-dt);b.reaction=Math.max(0,b.reaction-dt);if(a.traversalFlight||a.zipRide)return {};if(a.vehicleId!==null&&a.vehicleSeat==='passenger')return {interact:true};if(a.vehicleId!==null&&a.vehicleSeat==='gunner'){const mounted=match.vehicleById(a.vehicleId);if(!mounted||mounted.driver===null)return {interact:true};}const ride=a.vehicleId===null&&(b.vehicleCooldown||0)<=0&&behavior.vehicle>.32?match.vehicles.find(vehicle=>{const seat=vehicleSeatFor(vehicle);return seat&&seat.role!=='passenger'&&Math.hypot(a.x-vehicle.position.x,a.z-vehicle.position.z)<2.4&&Math.abs(a.y-vehicle.position.y)<(vehicle.config?.flight===true?3.2:2.4);}):null;if(ride&&!match.flagCarrier(a))return {interact:true};
     if(b.think<=0){b.think=clamp((match.difficulty.think+match.random()*.15)*(behavior.thinkScale||1),match.difficulty.think*.6,(match.difficulty.think+.15)*1.4);const candidates=match.actors.filter(t=>t!==a&&t.health>0&&dist(a,t)<(a.botScan||25)&&match.visible(eye(a),eye(t))&&(!(t.powerups?.cloak>0)||dist(a,t)<4)&&(!teamMode(match.config)||t.team!==a.team)),locks=new Map();for(const ally of match.actors)if(ally!==a&&ally.bot&&Number.isInteger(ally.bot.target)&&ally.bot.target>=0)locks.set(ally.bot.target,(locks.get(ally.bot.target)||0)+1);const ranked=candidates.map(t=>{let score=dist(a,t)+match.random()*1.5+(locks.get(t.id)||0)*(2+behavior.hold*7);if(behavior.personality==='opportunist')score+=(t.health||100)*.14;if(behavior.role==='ambusher')score+=Math.max(0,dist(a,t)-9)*1.5;if(match.objectiveState?.kind==='juggernaut'&&t.id===match.objectiveState.juggernautId)score-=18;if(behavior.hold>.7)score+=Math.max(0,behavior.range[1]-dist(a,t))*.4;if(behavior.archetype==='flanker')score+=Math.max(0,dist(a,t)-9)*.25;else if(behavior.archetype==='sharpshooter')score-=Math.min(dist(a,t),26)*.06;else if(behavior.archetype==='rusher')score-=Math.max(0,9-dist(a,t))*.18;else if(behavior.archetype==='defender')score+=Math.max(0,dist(a,t)-13)*.22;else if(behavior.archetype==='support')score+=(t.health||100)*.06;
  // Finish the wounded and punish anyone already shooting a teammate. Both are
  // deterministic (health + distance only) and make target choice less random.
@@ -235,7 +299,7 @@ let delta=dest?v(dest.x-a.x,0,dest.z-a.z):v(0,0,0),l=Math.hypot(delta.x,delta.z)
  const lead=WEAPONS[a.weapon].speed?d/WEAPONS[a.weapon].speed:0,dir=norm(v(t.x+t.vx*lead-a.x+d*b.aimError.x,t.y+1.1-(a.y+1.45)+d*b.aimError.y,t.z+t.vz*lead-a.z+d*b.aimError.z));
  const turn=match.difficulty.id==='easy'?2.5:match.difficulty.id==='normal'?4:8,yaw=Math.atan2(-dir.x,-dir.z),pitch=Math.asin(dir.y),deltaYaw=Math.atan2(Math.sin(yaw-a.yaw),Math.cos(yaw-a.yaw));
  a.yaw+=clamp(deltaYaw,-turn*dt,turn*dt);a.pitch+=clamp(pitch-a.pitch,-turn*dt,turn*dt);
-   if(!behavior.meleeOnly&&!b.reaction&&!unsafeBlast&&a.vehicleId===null&&Math.abs(deltaYaw)<.2&&Math.abs(pitch-a.pitch)<.2)match.fire(a);if(!behavior.meleeOnly&&a.vehicleId===null&&(a.grenadeCooldown||0)<=0&&a.grounded&&d>7&&d<20)match.throwGrenade(a);if(d<=(behavior.meleeRange||2.2)&&!a.melee)input.melee=true;
+   if(!behavior.meleeOnly&&!b.reaction&&!unsafeBlast&&a.vehicleId===null&&Math.abs(deltaYaw)<.2&&Math.abs(pitch-a.pitch)<.2){if(match.fire(a))b.fired=true;}if(!behavior.meleeOnly&&a.vehicleId===null&&(a.grenadeCooldown||0)<=0&&a.grounded&&d>7&&d<20)match.throwGrenade(a);if(d<=(behavior.meleeRange||2.2)&&!a.melee)input.melee=true;
    const nearby=match.actors.filter(enemy=>enemy!==a&&enemy.health>0&&(!teamMode(match.config)||enemy.team!==a.team)&&dist(a,enemy)<(hints.range[1]||16)).length,shouldPower=hints.power==='close'?d<4.5:hints.power==='escape'?d>8:hints.power==='visible'?d<far&&a.ammo[a.weapon]>2:hints.power==='hurt'?a.health<a.maxHealth*retreatAt:hints.power==='approach'?d>9:hints.power==='cluster'?(d<7||nearby>1):d<far;
     if(!a.cooldown&&shouldPower)match.power(a);
     if(a.juggernaut&&!a.cooldown&&t&&dist(a,t)<(behavior.range[1]||20))match.power(a);
@@ -248,6 +312,7 @@ const postured=Math.hypot(input.x||0,input.z||0)>.1;if(postured){input.sprint=!a
  if(b.recover>0){b.recover-=dt;input={x:Math.sin(a.id*2+match.time),z:Math.cos(a.id*2+match.time),jump:true};}
  if(match.arena.voidY!==undefined&&b.recover<=0&&a.grounded&&a.vehicleId===null&&(input.x||input.z)){const len=Math.hypot(input.x,input.z)||1;if(floorAt(a.x+input.x/len*.9,a.z+input.z/len*.9,match.arena)===null)input={};}
  if(match.arena.voidY!==undefined&&!a.grounded&&a.vy<0&&a.vehicleId===null&&floorAt(a.x,a.z,match.arena)===null){const node=match.nav[nearest(a,match.nav)];if(node){const dx=node.x-a.x,dz=node.z-a.z,l=Math.hypot(dx,dz)||1;input={x:dx/l,z:dz/l};}}
+ botMovementIntent(match,a,b,input,dt,canSee&&t?dist(a,t):Infinity);
  return input;}
 
 function heapPush(heap,item,priority){heap.push({item,priority});let i=heap.length-1;while(i>0){const p=(i-1)>>1;if(heap[p].priority<=heap[i].priority)break;const swap=heap[p];heap[p]=heap[i];heap[i]=swap;i=p;}}

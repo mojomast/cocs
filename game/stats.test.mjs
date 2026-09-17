@@ -5,7 +5,11 @@ import {Match,moveActor} from './core.mjs';
 import {NetClient} from './net.mjs';
 import {Room} from '../server/room.mjs';
 
-const expected=[[100,0,8],[115,10,8.2],[110,0,8.3],[100,20,7.6],[95,10,8.5],[120,0,7.4],[85,0,9.4],[90,15,8.7],[100,5,8.4]];
+// §13.3 Phase-2 spawn-stat re-cut (EHP ≤1.5×, speed within ±10% of the mean):
+// Strikers 90/95/105 HP at 9.2/9.0/8.9 m/s; Vanguards 120 / 100+20 / 115+10 at
+// 7.7/7.6/7.8 m/s; Tacticians 100+5 / 90+10 / 100+10 at 8.6/8.7/8.5 m/s.
+// Gemini's 10 armor and every other unchanged field survive the re-cut.
+const expected=[[100,5,8.6],[115,10,7.8],[105,0,8.9],[100,20,7.6],[95,10,9],[120,0,7.7],[90,0,9.2],[90,10,8.7],[100,10,8.5]];
 for(const [i,c] of CHARACTERS.entries()){
  test(`${c.name}: spawn, respawn, snapshot and healing caps`,()=>{
   assert.deepEqual(c.stats,Object.fromEntries(['health','armor','speed'].map((key,j)=>[key,expected[i][j]])));
@@ -37,6 +41,24 @@ for(const [i,c] of CHARACTERS.entries()){
  });
 }
 
+// §4.1 stat envelope, re-pinned with the §13.3 re-cut. Effective HP is
+// `health + armor`: no table expresses a mitigation multiplier, and core treats
+// armor as a one-for-one damage pool (per-hit absorb capped at 60%,
+// `core.mjs` damage()). §13.3 pins the tighter ±10% speed band on top of the
+// §4.1 ±15% envelope, so that is what is asserted here. The tolerance only
+// absorbs binary rounding at the exact bound (Meta's 7.6 is exactly −10%);
+// it never admits a stat outside the band.
+test('spawn stats stay inside the §4.1 envelope: EHP span ≤1.5×, speed mean ±10%',()=>{
+ const effective=CHARACTERS.map(c=>c.stats.health+c.stats.armor);
+ const span=Math.max(...effective)/Math.min(...effective);
+ assert.ok(span<=1.5,`effective HP span ${span.toFixed(4)} exceeds 1.5× (${Math.min(...effective)}..${Math.max(...effective)})`);
+ const mean=CHARACTERS.reduce((sum,c)=>sum+c.stats.speed,0)/CHARACTERS.length;
+ for(const c of CHARACTERS){
+  const deviation=Math.abs(c.stats.speed-mean)/mean;
+  assert.ok(deviation<=.1+1e-9,`${c.name} speed ${c.stats.speed} is ${(deviation*100).toFixed(3)}% from the ${mean.toFixed(4)} mean`);
+ }
+});
+
 test('construction validates supplied human loadouts before the only initial spawn',()=>{
  const m=new Match('chatgpt','openclaw',()=>.5,'crosswire',{humanCount:2,botCount:0,loadouts:[{character:'invalid',harness:'invalid'},{character:'claude',harness:'hermes'}]});
  assert.equal(m.actors[0].character,'chatgpt');assert.equal(m.actors[0].health,100);
@@ -48,7 +70,7 @@ test('room start and rematch retain selected stats and predict a nonzero actor',
  const room=new Room('stats',()=>.5);room.join(1,'Host','deepseek','codex');room.join(2,'Guest','kimi','hermes');room.host(1,{botCount:0,speed:1.25},'crosswire');
  for(let round=0;round<2;round++){
   room.start(1);const m=room.match,[host,a]=m.actors;
-  assert.equal(host.health,120);assert.equal(host.moveSpeed,7.4);assert.equal(a.health,90);assert.equal(a.armor,15);assert.equal(a.moveSpeed,8.7);assert.equal(a.name,'Guest');
+  assert.equal(host.health,120);assert.equal(host.moveSpeed,7.7);assert.equal(a.health,90);assert.equal(a.armor,10);assert.equal(a.moveSpeed,8.7);assert.equal(a.name,'Guest');
   assert.equal(m.stats.respawns,2);assert.equal(m.events.filter(e=>e.type==='spawn').length,2);
   Object.assign(a,{x:0,y:0,z:5,vx:0,vy:0,vz:0,active:3,slow:3});m.pickups=[];
   const client=new NetClient();client.createShadow('crosswire',m.config);client.actorId=1;client.push({state:JSON.parse(JSON.stringify(m.snapshot()))});
