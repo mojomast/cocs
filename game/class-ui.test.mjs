@@ -9,7 +9,7 @@ import {
 } from './class-ui.mjs';
 
 const EXPECTED_BUDGET_LINES = {
-  'air-dash': '1 charge · 5.5 m · 3.5 s cooldown · 0.15 s landing',
+  'air-dash': '1 charge · 5.5 m · 2.5 s cooldown · 0.15 s landing',
   'double-jump': '1 charge · 7.4 impulse',
   'super-jump': '1 charge · 12.5 impulse · 0.55 s wind-up · 6 s cooldown · 0.25 s landing',
   'hover-jets': '2.5 s fuel · 1.8 s recharge · 0.35 climb · 2.2 m/s descent · 0.2 s landing',
