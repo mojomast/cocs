@@ -346,3 +346,19 @@ test('bots use their movement verbs deterministically and never touch Math.rando
   assert.ok(first.used > 0, 'at least one bot spent a movement verb');
   assert.deepEqual(first.snapshot, second.snapshot, 'two identical runs are byte-identical');
 });
+
+// Regression: bots signal Brace Slam through `input.slam` (botMovementIntent
+// mvHoldKind==='slam'); Match.step must forward it or the verb never fires.
+test('brace slam fires from a direct slam input edge', () => {
+  const match = rig('meta', 'openclaw');
+  const actor = match.actors[0];
+  actor.cooldown = 1e9; // keep the Claw Burst out of the frame
+  tick(match, 0, {slam: true});
+  assert.equal(actor.movement.phase, 'windup', 'the slam winds up from the slam edge');
+  assert.equal(eventsOf(match, 'windup-start').length, 1);
+  for (let i = 0; i < 240; i++) match.step(DT, {inputs: {0: {slam: true}}});
+  assert.ok(eventsOf(match, 'slam-launch').length >= 1, 'the leap launched');
+  assert.ok(eventsOf(match, 'slam-impact').length >= 1, 'the impact resolved on landing');
+  assert.equal(actor.movement.charges, 0, 'the slam spent its charge');
+  assert.ok(actor.movement.cooldown > 0, 'the 8 s cooldown started');
+});

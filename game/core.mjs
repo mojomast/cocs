@@ -763,6 +763,10 @@ export class Match{
       crouchReleased:!crouchHeld&&a.inputCrouch===true,
       mobility:mobilityHeld&&a.inputMobility!==true,
       mobilityReleased:!mobilityHeld&&a.inputMobility===true,
+      // Brace Slam (`meta`) also accepts a direct `slam` edge; bots set it via
+      // botMovementIntent's mvHoldKind==='slam'. Without this forward the
+      // intent was dropped and the verb never fired in matches.
+      slam:controls.slam===true,
       interrupted:false,
      },{
       dt,x:a.x,y:a.y,z:a.z,vy:a.vy,yaw:a.yaw,pitch:a.pitch,grounded:a.grounded===true,
