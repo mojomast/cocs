@@ -97,16 +97,21 @@ export function botNoise(id,salt=0){
 
 export function botBehavior(actor){
  const character=actor?.character,harness=actor?.harness,id=Number.isFinite(actor?.id)?actor.id:0;
- const role=operatorProfile(character)?.role;
+ // Harness-only AI policy override (docs/design/CLASS_OVERHAUL.md §14): the
+ // balance sweep runs a policy-neutral pass where every seat shares one
+ // role/personality/archetype. `Match` stores `options.botPolicy` on the bot
+ // brain; nothing on the live path sets it, so default behaviour is unchanged.
+ const policy=actor?.bot?.policy??null;
+ const role=policy?.role??operatorProfile(character)?.role;
  const hints=harnessBotHints(harness);
- const personality=hints?.personality;
+ const personality=policy?.personality??hints?.personality;
  const r=ROLE_ARCHETYPES[role]||DEFAULT;
  const p=PERSONALITY_ARCHETYPES[personality]||DEFAULT;
  const jitter=(salt,amount)=>1+(botNoise(id,salt)-.5)*amount;
  const lo=blend(r.range[0],p.range[0])*jitter(1,.24);
  const hi=blend(r.range[1],p.range[1])*jitter(2,.18);
  const rangeLo=Math.max(2,Math.min(lo,hi-.5)),rangeHi=Math.max(lo+.5,hi);
- const archetype=botArchetype(role||'adaptive',personality||'adaptive',id);
+ const archetype=policy?.archetype??botArchetype(role||'adaptive',personality||'adaptive',id);
  const profile=ARCHETYPE_PROFILES[archetype]||ARCHETYPE_PROFILES.support;
  const span=Math.max(.5,rangeHi-rangeLo);
  const innerFrac=clamp(profile.innerFrac+(botNoise(id,14)-.5)*.12,0,1);

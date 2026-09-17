@@ -149,6 +149,13 @@ progress and match end are computed in `game/core.mjs` and, in multiplayer, in
 `Match` is the authoritative simulation. Its constructor is approximately
 `new Match(character, harness, random, mapId, options)`; `options` carries the
 normalized config plus `humanCount`, `botCount` and per-actor `loadouts`.
+Harness-only options used by the balance sweep (`game/balance-sweep.mjs`, §14 of
+`docs/design/CLASS_OVERHAUL.md`) are `botLoadouts` (an array/object indexed by
+bot ordinal pinning `{character, harness, gear, attachments, finish}` at
+construction, without changing the historical RNG draw order when absent),
+`aiSeats` (give the leading human seats the bot AI) and `botPolicy` (override
+the AI role/personality/archetype for a policy-neutral sweep). Net/server never
+set them.
 Important methods/symbols:
 
 - `step(dt, { inputs })` — advance one fixed step (movement, weapons,
