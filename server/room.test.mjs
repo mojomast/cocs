@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {Room,PLAYER_LIMIT} from './room.mjs';
+import {Room,PLAYER_LIMIT,LOADOUT_LOCKOUT_MS,LOADOUT_FLOOD_MS} from './room.mjs';
 import {MatchHistory} from './history.mjs';
 import {RULES} from '../game/data.mjs';
 import {applySnapshotDelta,wireSize,SNAPSHOT_DELTA_VERSION} from '../game/protocol.mjs';
@@ -650,4 +650,72 @@ test('a peer that joins after the chain started is sent a full keyframe first',(
  room.tick(1/60);room.tick(1/60);
  const first=room.drain().find(m=>m.to===9&&(m.msg.type==='snapshot'||m.msg.type==='snapshot-delta'));
  assert.equal(first?.msg.type,'snapshot','the late joiner has no matching base, so the next frame is full again');
+});
+
+// ---------------------------------------------------------------------------
+// Phase 4 team-mode respawn switching (§3.7, §12.2). `teamMode` alone would
+// admit puma-soccer, horde and campaign, so the gate also uses the movement and
+// single-player mode rules.
+// ---------------------------------------------------------------------------
+test('respawn switching rejects locked modes, spectators, unknown and disconnected peers',()=>{
+  const ffa=new Room('ffa',rng());
+  ffa.join(1,'A');ffa.host(1,{mode:'deathmatch',botCount:0,timeLimit:60},'crosswire');ffa.start(1);ffa.drain();
+  assert.equal(ffa.setLoadout(1,'grok','hermes'),false,'FFA locks the pick');
+  const soccer=new Room('soccer',rng());
+  soccer.join(1,'A');soccer.host(1,{mode:'puma-soccer',botCount:0,timeLimit:60},'puma-pitch');soccer.start(1);soccer.drain();
+  assert.equal(soccer.setLoadout(1,'grok','hermes'),false,'soccer strips combat kits');
+  const pre=new Room('pre',rng());
+  pre.join(1,'A','chatgpt','openclaw');
+  pre.host(1,{mode:'ctf',botCount:0,timeLimit:60},'crosswire');
+  assert.equal(pre.setLoadout(1,'grok','hermes'),false,'there is no live match to switch into');
+  const room=new Room('r',rng());
+  room.join(1,'A');room.join(2,'B');room.join(3,'Watch','chatgpt','openclaw','',true);
+  room.host(1,{mode:'teamdeathmatch',botCount:0,timeLimit:60},'crosswire');
+  room.start(1);room.drain();
+  assert.equal(room.setLoadout(3,'grok','hermes'),false,'spectators cannot switch');
+  assert.equal(room.setLoadout(99,'grok','hermes'),false,'unknown peer');
+  room.disconnect(2);
+  assert.equal(room.setLoadout(2,'grok','hermes'),false,'a disconnected peer cannot switch');
+  assert.equal(room.setLoadout(1,'grok','hermes'),true,'a connected team-mode player may switch');
+});
+test('a team-mode switch queues on the peer, the room and the match and lands on respawn',()=>{
+  const room=new Room('r',rng());
+  room.join(1,'A');room.join(2,'B');
+  room.host(1,{mode:'teamdeathmatch',botCount:0,timeLimit:60},'crosswire');
+  room.start(1);room.drain();
+  const actor=room.match.actors[0];
+  assert.equal(room.setLoadout(1,'claude','openclaw'),true);
+  assert.deepEqual(room.pendingLoadouts.get(1),{character:'claude',harness:'claudecode'});
+  assert.deepEqual(room.peers.get(1).pendingLoadout,{character:'claude',harness:'claudecode'});
+  assert.equal(actor.character,'chatgpt','the switch is queued, not applied while alive');
+  const lobby=last(room.drain(),'lobby');
+  assert.equal(lobby.players.find(p=>p.peerId===1).character,'claude','teammates see the queued choice');
+  actor.protection=0;
+  room.match.damage(actor,1e6,actor);
+  for(let i=0;i<600&&actor.health<=0;i++)room.tick(1/60);
+  assert.equal(actor.character,'claude');
+  assert.equal(actor.harness,'claudecode');
+  assert.equal(actor.health,actor.maxHealth);
+});
+test('respawn switching honours the 60 s lockout and the 500 ms anti-flood floor',()=>{
+  const room=new Room('r',rng());
+  room.join(1,'A');room.host(1,{mode:'teamdeathmatch',botCount:0,timeLimit:60},'crosswire');room.start(1);room.drain();
+  const t0=1_000_000;
+  assert.equal(room.setLoadout(1,'grok','hermes',t0),true);
+  assert.equal(room.peers.get(1).loadoutLockUntil,t0+LOADOUT_LOCKOUT_MS);
+  assert.equal(room.setLoadout(1,'mistral','openclaw',t0+LOADOUT_FLOOD_MS-1),false,'anti-flood floor');
+  assert.equal(room.setLoadout(1,'mistral','openclaw',t0+2000),false,'within the 60 s lockout');
+  assert.equal(room.setLoadout(1,'mistral','openclaw',t0+LOADOUT_LOCKOUT_MS-1),false);
+  assert.equal(room.setLoadout(1,'mistral','openclaw',t0+LOADOUT_LOCKOUT_MS),true,'the lockout expires');
+});
+test('sudden death and the VIP lock respawn switching',()=>{
+  const room=new Room('r',rng());
+  room.join(1,'A');room.host(1,{mode:'ctf',botCount:0,timeLimit:60},'crosswire');room.start(1);room.drain();
+  room.match.suddenDeath=true;
+  assert.equal(room.setLoadout(1,'grok','hermes'),false,'sudden death locks the pick');
+  room.match.suddenDeath=false;
+  room.match.actors[0].isVip=true;
+  assert.equal(room.setLoadout(1,'grok','hermes'),false,'the VIP is locked');
+  room.match.actors[0].isVip=false;
+  assert.equal(room.setLoadout(1,'grok','hermes'),true);
 });

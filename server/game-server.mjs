@@ -194,6 +194,7 @@ export function createGameServer({ port = 0, random, tickDt = 1 / 60, tickMs = 1
   }
     case MESSAGE.HOST: peerRoom.get(peerId)?.host(peerId, msg.config, msg.mapId); break;
     case MESSAGE.GEAR: peerRoom.get(peerId)?.setGear(peerId, msg.gear, msg.attachments, undefined, msg.finish); break;
+    case MESSAGE.LOADOUT: peerRoom.get(peerId)?.setLoadout(peerId, msg.character, msg.harness); break;
    case MESSAGE.START: peerRoom.get(peerId)?.start(peerId); break;
     case MESSAGE.INPUT: peerRoom.get(peerId)?.input(peerId, msg); break;
     case MESSAGE.CHAT: {

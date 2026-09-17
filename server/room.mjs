@@ -1,5 +1,6 @@
 import {Match} from '../game/core.mjs';
-import {normalizeConfig} from '../game/config.mjs';
+import {normalizeConfig,teamMode} from '../game/config.mjs';
+import {movementModeRule} from '../game/movement.mjs';
 import {isSinglePlayerMode} from '../game/singleplayer.mjs';
 import {actorWon} from '../game/outcome.mjs';
 import {getMap} from '../game/maps.mjs';
@@ -18,6 +19,10 @@ export const INPUT_RATE_LIMIT = 120;
 // host-start path (used everywhere else) unaffected.
 export const WARMUP_SECONDS = 5;
 export const REMATCH_RATIO = 0.5;
+// Team-mode respawn switching (§3.7): one switch per player per 60 s, with a
+// 500 ms anti-flood floor that rejects duplicate bursts even before the lockout.
+export const LOADOUT_LOCKOUT_MS = 60000;
+export const LOADOUT_FLOOD_MS = 500;
 export const LIFECYCLE_PHASES = Object.freeze(['lobby', 'warmup', 'live', 'results']);
 const object = value => value !== null && typeof value === 'object' && !Array.isArray(value);
 const bounded = (value, max) => typeof value === 'string' && value.length <= max;
@@ -65,6 +70,11 @@ export class Room {
   this.ready = new Set();
   this.mapVotes = new Map();
   this.rematchVotes = new Set();
+  // Team-mode respawn switches queued by peers, keyed by peer id (§3.7). The
+  // match owns the authoritative pending record; this map mirrors it so the
+  // room can clear the queue on every lifecycle boundary and the tests can
+  // observe it directly.
+  this.pendingLoadouts = new Map();
   this.lifecycleRevision = 0;
   this.lastResult = null;
  }
@@ -289,6 +299,7 @@ export class Room {
   this.phase = 'live';
   this.warmupTimer = 0;
   this.rematchVotes.clear();
+  this.pendingLoadouts.clear();
   this.tickAcc = 0;
   this.broadcastAt = 0;
   // A new match invalidates every delta chain: the first post-start frame is a
@@ -349,6 +360,37 @@ export class Room {
   peer.lastGearAt = now;
   const profile = this.progression.setGearOwned(peer.playerId, peer.playerToken, gear, attachments, finish);
   if (profile) this.send(peerId, { type: 'progression', profile, gear: profile.gear, attachments: profile.attachments });
+ }
+ // Team-mode respawn switching modelled on setGear: validate the peer, the mode
+ // and the cooldowns, normalise through resolveLoadout (Claude lock), then queue
+ // the pair on the peer and the room and hand the authoritative pending record
+ // to the match. It applies at the actor's next spawn, never mid-life. FFA/solo
+ // locked modes, puma race/soccer (movement disabled) and single-player modes
+ // are rejected; so are sudden death and the VIP. `teamMode` alone would admit
+ // puma-soccer, horde and campaign, which is why the movement/mode rule helpers
+ // are part of the gate.
+ setLoadout(peerId, character, harness, now = Date.now()) {
+  const peer = this.peers.get(peerId);
+  if (!peer || peer.spectate || peer.disconnectedAt !== null) return false;
+  if (!this.match || !this.started || this.roundOver) return false;
+  const mode = this.match.config.mode;
+  if (!teamMode(mode) || isSinglePlayerMode(mode) || movementModeRule(mode).disabled) return false;
+  if (this.match.suddenDeath === true) return false;
+  const actor = peer.actorId !== null ? this.match.actors[peer.actorId] : null;
+  if (actor && actor.isVip === true) return false;
+  if (peer.lastLoadoutAt && now - peer.lastLoadoutAt < LOADOUT_FLOOD_MS) return false;
+  const resolved = resolveLoadout(character, harness);
+  if (resolved.character === peer.character && resolved.harness === peer.harness) return false;
+  if (peer.loadoutLockUntil && now < peer.loadoutLockUntil) return false;
+  peer.lastLoadoutAt = now;
+  peer.loadoutLockUntil = now + LOADOUT_LOCKOUT_MS;
+  peer.character = resolved.character;
+  peer.harness = resolved.harness;
+  peer.pendingLoadout = { ...resolved };
+  this.pendingLoadouts.set(peerId, { ...resolved });
+  if (actor) this.match.setLoadout(actor.id, resolved);
+  this.broadcast(this.lobby());
+  return true;
  }
  chat(peerId, text, now = Date.now()) {
   const peer = this.peers.get(peerId);
@@ -423,6 +465,7 @@ export class Room {
   peer.actorId = null;
   peer.voiceSession = null;
   peer.playerToken = null;
+  this.pendingLoadouts.delete(peerId);
   this.peers.delete(peerId);
   this.ready.delete(peerId);
   this.rematchVotes.delete(peerId);

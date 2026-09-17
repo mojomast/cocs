@@ -117,6 +117,33 @@ test('two real WebSocket clients join, play and receive results end-to-end', asy
  }
 });
 
+test('the loadout control message reaches the room and broadcasts the queued switch', async () => {
+ const { server, close } = createGameServer({ tickDt: 1 / 6 });
+ await new Promise(resolve => server.listen(0, resolve));
+ const url = `ws://127.0.0.1:${server.address().port}`;
+ const a = await connect(url);
+ const b = await connect(url);
+ try {
+  send(a, { type: 'join', name: 'Alice', character: 'chatgpt', harness: 'openclaw' });
+  send(b, { type: 'join', name: 'Bob', character: 'chatgpt', harness: 'openclaw' });
+  await until(a, 'welcome');
+  const welcomeB = await until(b, 'welcome');
+  await latest(a, 'lobby');
+  send(a, { type: 'host', config: { mode: 'teamdeathmatch', botCount: 0, timeLimit: 60 }, mapId: 'crosswire' });
+  send(a, { type: 'start' });
+  await until(b, 'start');
+  await until(a, 'snapshot');
+  send(b, { type: 'loadout', character: 'grok', harness: 'hermes' });
+  let lobby = await latest(b, 'lobby');
+  for (let i = 0; i < 6 && lobby.players.find(p => p.peerId === welcomeB.peerId)?.character !== 'grok'; i++) lobby = await latest(b, 'lobby', 5000);
+  const bob = lobby.players.find(p => p.peerId === welcomeB.peerId);
+  assert.equal(bob.character, 'grok', 'the queued switch is visible to the room');
+  assert.equal(bob.harness, 'hermes');
+ } finally {
+  a.close(); b.close(); close();
+ }
+});
+
 test('a dropped NetClient reconnects to its seat and keeps playing to results', async () => {
  const { server, close } = createGameServer({ tickDt: 1 / 6, graceMs: 60000 });
  await new Promise(resolve => server.listen(0, resolve));

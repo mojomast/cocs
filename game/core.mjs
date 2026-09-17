@@ -274,7 +274,7 @@ export class Match{
     this.config=normalizeConfig(options);this.mutators=mutatorEffects(this.config);this.loadout=resolveMatchLoadout(this.config);this.humanCount=Math.max(1,Math.min(Math.round(options.humanCount??1),8));this.aiSeats=options.aiSeats===true;this.botPolicy=options.botPolicy??null;
     const vehicleMode=this.config.mode==='puma-race'||this.config.mode==='puma-soccer';
     if(vehicleMode){this.config.botCount=this.config.mode==='puma-soccer'?Math.max(0,Math.min(3,4-this.humanCount)):Math.min(this.config.botCount,8-this.humanCount);if(!getMap(mapId).race)mapId=this.config.mode==='puma-soccer'?'puma-pitch':'puma-circuit';}
-    this.difficulty=DIFFICULTIES.find(d=>d.id===this.config.difficulty);this.arena=getMap(mapId);const nav=vehicleMode?{nodes:[],edges:[]}:matchNavigation(this.arena);this.nav=nav.nodes;this.edges=nav.edges;{const arenaBounds=boundsOf(this.arena);this.center={x:(arenaBounds.minX+arenaBounds.maxX)/2,z:(arenaBounds.minZ+arenaBounds.maxZ)/2};}this.spawns=this.arena.spawns.map(([x,z])=>v(x,floorAt(x,z,this.arena),z));this.random=random;this.time=0;this.over=false;this.suddenDeath=false;this.armsraceWinner=null;this.events=[];this.feed=[];this.rockets=[];this.deployables=[];this.ropeLines=[];this.ropeSerial=0;this.stats={shots:0,kills:0,pickups:0,powers:0,respawns:0,falls:0};this.serial=0;this.teamScores={0:0,1:0};this.vehicleHits=new Map();this.spawnHeat=new Map();
+    this.difficulty=DIFFICULTIES.find(d=>d.id===this.config.difficulty);this.arena=getMap(mapId);const nav=vehicleMode?{nodes:[],edges:[]}:matchNavigation(this.arena);this.nav=nav.nodes;this.edges=nav.edges;{const arenaBounds=boundsOf(this.arena);this.center={x:(arenaBounds.minX+arenaBounds.maxX)/2,z:(arenaBounds.minZ+arenaBounds.maxZ)/2};}this.spawns=this.arena.spawns.map(([x,z])=>v(x,floorAt(x,z,this.arena),z));this.random=random;this.time=0;this.over=false;this.suddenDeath=false;this.armsraceWinner=null;this.events=[];this.feed=[];this.rockets=[];this.deployables=[];this.ropeLines=[];this.ropeSerial=0;this.pendingLoadouts=new Map();this.stats={shots:0,kills:0,pickups:0,powers:0,respawns:0,falls:0};this.serial=0;this.teamScores={0:0,1:0};this.vehicleHits=new Map();this.spawnHeat=new Map();
    const defaults={0:this.arena.spawns.filter((_,i)=>i%2===0),1:this.arena.spawns.filter((_,i)=>i%2===1)};
     this.teamSpawns=teamPoints(this.arena.teamSpawns,defaults);
     // Team-only maps author no FFA spawn list. Derive one from the navigation
@@ -367,6 +367,35 @@ export class Match{
   // needs.
   _kitOptions(a,over={}){
    return {mode:this.config.mode,npc:a.isNpc===true,vip:a.isVip===true,juggernaut:a.juggernaut===true,carrying:a.carryingFlag===true,...over};
+  }
+  // Team-mode respawn switching (§3.7, §12.2 Phase 4). The server validates the
+  // mode/lockout; the match only records the requested operator/harness pair and
+  // consumes it on the next spawn, so a live actor keeps its current kit until it
+  // dies. Gear/attachments/finish are deliberately untouched: the switch changes
+  // the class and spec, not the build. Returns true only when the pair differs
+  // from the actor's current one (a no-op also cancels a queued switch).
+  setLoadout(actorId,{character,harness}={}){
+   const a=this.actors[actorId];
+   if(!a)return false;
+   const l=resolveLoadout(character,harness);
+   if(l.character===a.character&&l.harness===a.harness){this.pendingLoadouts.delete(a.id);return false;}
+   this.pendingLoadouts.set(a.id,{character:l.character,harness:l.harness});
+   return true;
+  }
+  // Consumed at the top of spawn(), before stats/movement/verb state are rebuilt
+  // from the new class. Emits `loadout-switch` only when the applied pair really
+  // changed; the accessor repair paths (_movementState/_verbState) then see the
+  // mismatched loadout and rebuild fresh state for the new kit.
+  _applyPendingLoadout(a){
+   const pending=this.pendingLoadouts.get(a.id);
+   if(!pending)return false;
+   this.pendingLoadouts.delete(a.id);
+   const from={character:a.character,harness:a.harness};
+   const l=resolveLoadout(pending.character,pending.harness);
+   if(l.character===a.character&&l.harness===a.harness)return false;
+   a.character=l.character;a.harness=l.harness;
+   this.emit('loadout-switch',{actor:a.id,from,to:{character:a.character,harness:a.harness}});
+   return true;
   }
   // Movement state accessor that also heals a net snapshot that replaced the
   // live state object (game/net.mjs `resync` copies the actor snapshot onto the
@@ -534,7 +563,7 @@ export class Match{
      // projectiles, the death heatmap and useful (non-overlapping) teammate
      // proximity. Teammates are no longer scored as threats, so a covered spawn
      // beside an ally can beat a distant exposed one.
-     spawn(a){if(a.vehicleId!==null)this.releaseVehicle(a,undefined,'respawn');const team=teamMode(this.config),enemies=this.actors?.filter(b=>b!==a&&b.health>0&&(!team||b.team!==a.team))||[],mates=team?this.actors.filter(b=>b!==a&&b.health>0&&b.team===a.team):[],pool=team?this.teamSpawns[a.team]:this.spawns;let best=-Infinity,chosen=null,fallback=null;
+     spawn(a){if(a.vehicleId!==null)this.releaseVehicle(a,undefined,'respawn');this._applyPendingLoadout(a);const team=teamMode(this.config),enemies=this.actors?.filter(b=>b!==a&&b.health>0&&(!team||b.team!==a.team))||[],mates=team?this.actors.filter(b=>b!==a&&b.health>0&&b.team===a.team):[],pool=team?this.teamSpawns[a.team]:this.spawns;let best=-Infinity,chosen=null,fallback=null;
       for(const s of pool){
        const sx=Array.isArray(s)?s[0]:s?.x,sz=Array.isArray(s)?s[1]:s?.z;if(!Number.isFinite(sx)||!Number.isFinite(sz))continue;
        const y=floorAt(sx,sz,this.arena);if(y===null||obstructed(sx,y,sz,RULES.radius,this.arena))continue;

@@ -29,7 +29,9 @@ import {SetupModal,SinglePlayerModal,OnboardingModal} from './ui/screens/SetupMo
 import {PauseModal,ResultsModal} from './ui/screens/ResultModals';
 import {TheaterScreen} from './ui/screens/TheaterScreen';
 import {PlayingHud} from './ui/screens/PlayingHud';
+import {RespawnOverlay} from './ui/screens/RespawnOverlay';
 import {SettingsDialog} from './ui/screens/SettingsDialog';
+import {respawnOverlayView} from '../game/respawn-ui.mjs';
 import {shuffleSelection,nextArenaSelection,surpriseSelection} from '../game/replay.mjs';
 import {CinematicDirector,CAMERA_RIGS} from '../game/director.mjs';
 import {CAMERA_MODES,CAMERA_MODE_LABELS,cycleCameraMode,cameraModeRig} from '../game/camera-modes.mjs';
@@ -597,6 +599,16 @@ export default function Home(){
   const surpriseMe=()=>{const selection=surpriseSelection(Math.random,{legacy:legacyMaps});const rules=normalizeConfig({...config,mode:selection.mode});setCharacter(selection.character);setHarness(selection.harness);setMapId(selection.mapId);setConfig(rules);setNotice('');start({...selection,config:rules});};
  const resume=()=>{runtime.current?.audio.start();changeMode('playing');requestLock();};
   const chooseCharacter=(id:string)=>{setCharacter(id);const valid=resolveLoadout(id,harness);if(valid.harness!==harness){setHarness(valid.harness);setNotice('Claude equipped Claude Code automatically.');}else setNotice('');};
+  // Team-mode respawn switch (§3.7). Online goes through the validated server
+  // message; a local match records the pending pair on the authoritative match.
+  // Both land on the actor's next spawn — the overlay only appears while dead.
+  const switchRespawnLoadout=(nextCharacter:string,nextHarness:string)=>{const loadout=resolveLoadout(nextCharacter,nextHarness);const r=runtime.current;if(!r)return;
+   // Hold the pick in the page state too so a reconnect re-seats the latest pair
+   // (NetClient.join writes seatLoadout) instead of the selection-screen pair.
+   if(character!==loadout.character)setCharacter(loadout.character);
+   if(harness!==loadout.harness)setHarness(loadout.harness);
+   if(r.net?.connected){r.net.loadout(loadout.character,loadout.harness);return;}
+   if(r.match?.setLoadout)r.match.setLoadout(r.view?.playerId??0,{character:loadout.character,harness:loadout.harness});};
   const chooseGear=(slot:string,item:string)=>{const current=profileRef.current.gear||{},next={...current,[slot]:current[slot]===item?undefined:item};const saved=saveProgression({...profileRef.current,gear:next});runtime.current?.net?.gear(saved.gear,saved.attachments);setNotice('');};
   const chooseAttachment=(slot:string,item:string)=>{const current=profileRef.current.attachments||{},next={...current,[slot]:current[slot]===item?undefined:item};const saved=saveProgression({...profileRef.current,attachments:next});runtime.current?.net?.gear(saved.gear,saved.attachments);setNotice('');};
   const chooseFinish=(id:string)=>{const saved=saveProgression({...profileRef.current,finish:profileRef.current.finish===id?null:id});runtime.current?.net?.gear(saved.gear,saved.attachments,saved.finish);};
@@ -615,6 +627,7 @@ export default function Home(){
   const player=hud?.actors?.find((a:any)=>a.id===(hud.actorId??0))||hud?.actors?.[0],activePower=HARNESSES.find((h:any)=>h.id===player?.harness),hudMode=GAME_MODES.find((m:any)=>m.id===hud?.config?.mode),brief=commandBrief(hud,player,hudMode),hudMap=getMap(hud?.mapId||mapId),hudRoute=routeContext(hudMap,player),phase=matchPhase(hud);
    const aimActor=player||hud?.actors?.[0],aimWeapon=aimActor?WEAPONS[aimActor.weapon??0]||WEAPONS[0]:null,aimSpread=aimActor?effectiveSpread(aimActor,aimWeapon,{handling:harnessWeaponHandling(aimActor.harness,aimActor.weapon)}):0,crosshairGap=dynamicCrosshairGap(aimSpread,display.size),reloadFill=reloadProgress(aimActor),reloading=Boolean(aimActor?.reloading),posture=postureLabel(aimActor),marker=hitMarker(hud,player),ammoEmpty=Boolean(player&&typeof player.ammo?.[player.weapon]==='number'&&player.ammo[player.weapon]===0),ammoLow=lowAmmo(player,WEAPONS);
     const killNotice=killBanner(hud,player),suddenBanner=suddenDeathBanner(hud),startBanner=matchStartBanner(hud,undefined,hudMode),scoreCue=hud?.scoreCue&&hud.scoreCue.age<1.6?hud.scoreCue:null,damageIndicator=hud?.damageDir&&hud.time-hud.damageDirAt<.8?hud.damageDir:null,awards=matchAwards(hud),radar=radarContacts(hud,player),radarCols=radarPaletteFor(accessibility.palette);
+    const respawn=respawnOverlayView(hud,player);
    const {vehicle,prompt:vehiclePrompt}=vehicleHud(player,hud?.vehicles,hud?.flags,hud?.spectate);
    const scoreboard=renderScoreboard(hud);
    // Demo dock/options view data. The session is plain state mirrored from
@@ -644,7 +657,7 @@ export default function Home(){
    rooms,matches,netUrl,setNetUrl,roomName,setRoomName,netError,quickJoin,createRoom,joinRoom,refreshNet,teamName,renderScoreboard,
    net:netInfo,netPlayers,myPeerId,netRoomId,netConnected:netInfo.connected,chatLog,chatDraft,setChatDraft,sendChat,newMessages,setNewMessages,lobbyInputRef,lobbyChatRef,chatAtBottom,voicePanel,voiceState,hostAndStart,reconnectNet,resumeNet,disconnectNet,
    demos,demoPlaying,refreshDemos:()=>runtime.current?.refreshDemos?.(),start:()=>start(),ready,error,previewRef,headActions,backToDemo,BRAND,showcaseLive,CHANGELOG,RELEASE_VERSION,RELEASE_CODENAME,FULL_CHANGELOG_URL,exportDemo:(id:any)=>runtime.current?.exportDemoFile?.(id),importDemo:(file:any)=>runtime.current?.importDemoFile?.(file),
-   player,awards,scoreboard,resultTitle,resultDescription,resume,nextArena,campaignNext,isSingle,single,selectHordeUpgrade:chooseHordeUpgrade,resumeSingleplayer,lastDemo,prefs,pauseQuick,toggleCaptions,toggleReducedMotion,ONBOARDING_STEPS,helpSections:HELP_SECTIONS,onboarding,setOnboarding,finishOnboarding,modalRef,singleRef,settingsRef,onboardingRef,runtime,
+   player,awards,scoreboard,respawn,switchRespawnLoadout,resultTitle,resultDescription,resume,nextArena,campaignNext,isSingle,single,selectHordeUpgrade:chooseHordeUpgrade,resumeSingleplayer,lastDemo,prefs,pauseQuick,toggleCaptions,toggleReducedMotion,ONBOARDING_STEPS,helpSections:HELP_SECTIONS,onboarding,setOnboarding,finishOnboarding,modalRef,singleRef,settingsRef,onboardingRef,runtime,
    demoNotice,demoPaused,demoTime,demoSpeed,demoRig,demoInfo,stopDemo:()=>runtime.current?.stopDemo?.(),removeDemo:(id:any)=>runtime.current?.removeDemo?.(id),playDemo:(id:any)=>runtime.current?.playDemo?.(id),setDemoPaused,setDemoTime,setDemoSpeed,setDemoRig,CAMERA_RIGS,clock,
    hud,brief,phase,hudRoute,hudMap,hudMode,isTeamMode,modeGoal,ladderStatus,flagText,armsrace,WEAPONS,activePower,radar,radarCols,radarBlip,crosshairGap,marker,reloadFill,reloading,posture,killNotice,suddenBanner,startBanner,scoreCue,damageIndicator,damageNumberStyle,reducedMotion,vehiclePrompt,vehicle,ammoEmpty,ammoLow,hideHud,pointerHint,requestLock,chatOpen,spectatorBoard,spectatorTeams,CAMERA_MODE_LABELS,grenadeStatus,streakStatus,killFeedWeapon,voiceHint,escapeHint,teamScoreText,ammoText,weaponTag,REPO_URL,weaponRangeLabel,
   };
@@ -678,6 +691,7 @@ export default function Home(){
    {mode==='playing'&&<TouchControls runtime={runtime} mode={hud?.config?.mode} visible={touchControls&&!hud?.spectate} onLook={touchLook} onSwap={touchSwap} onPause={touchPause} onFullscreen={toggleFullscreen} fullscreen={fullscreen}/>}
    {!entered&&demoOnly&&demoSession.state==='free'&&touchControls&&<TouchControls runtime={runtime} visible onLook={touchLook} onSwap={()=>{}} onPause={demoTogglePause} onFullscreen={toggleFullscreen} fullscreen={fullscreen}/>}
    {scores&&mode==='playing'&&<div className="scores-overlay"><p className="eyebrow">LIVE STANDINGS</p>{scoreboard}</div>}
+   {mode==='playing'&&respawn.open&&<RespawnOverlay ui={ui}/>}
   </>}
   {mode==='paused'&&<PauseModal ui={ui}/>}
   {mode==='results'&&hud&&<ResultsModal ui={ui}/>}

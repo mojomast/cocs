@@ -747,3 +747,39 @@
 .pause-quick.preferences>label{margin-bottom:14px}
 .pause-toggle{min-height:44px;cursor:pointer;background:rgba(10,27,26,.8)}
 .pause-toggle[aria-pressed="true"]{border-color:var(--accent);color:var(--accent);background:rgba(131,244,213,.1)}
+
+/* ==========================================================================
+   P4-4 — team-mode respawn switching overlay (CLASS_OVERHAUL §3.7, §6.2).
+   A bottom-anchored HUD panel shown while a team-mode actor is dead: what killed
+   you, plus the one legal operator/harness change for the next spawn.
+   ========================================================================== */
+.respawn-overlay{position:fixed;left:50%;bottom:calc(var(--safe-bottom) + 96px);transform:translateX(-50%);z-index:40;
+  width:min(720px,calc(100vw - 32px));display:grid;gap:12px;padding:16px;
+  border:1px solid var(--ui-line);border-radius:var(--radius-lg);
+  background:linear-gradient(180deg,rgba(7,18,20,.94),rgba(5,12,15,.97));
+  box-shadow:0 24px 60px rgba(0,0,0,.55);backdrop-filter:blur(6px);pointer-events:auto}
+.respawn-overlay__head{display:flex;align-items:flex-start;justify-content:space-between;gap:12px;flex-wrap:wrap}
+.respawn-overlay__headline{display:grid;gap:2px;min-width:0}
+.respawn-overlay__eyebrow{margin:0;font-size:11px;letter-spacing:.14em;text-transform:uppercase;color:var(--accent)}
+.respawn-overlay__killed{font-size:15px;color:var(--text);overflow-wrap:anywhere}
+.respawn-overlay__body{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:16px}
+.respawn-overlay__picks{display:grid;gap:6px;align-content:start}
+.respawn-overlay__row{display:flex;flex-wrap:wrap;gap:6px}
+.respawn-pick{min-height:34px;padding:6px 10px;border:1px solid var(--ui-line);border-radius:var(--radius-pill);
+  background:rgba(10,27,26,.8);color:var(--text-dim);font:inherit;font-size:12px;letter-spacing:.04em;cursor:pointer}
+.respawn-pick:hover:not(:disabled){border-color:var(--accent-soft);color:var(--text)}
+.respawn-pick.is-active{border-color:var(--accent);color:var(--accent);background:rgba(131,244,213,.12)}
+.respawn-pick:disabled,.respawn-pick.is-locked{opacity:.45;cursor:not-allowed}
+.respawn-overlay__kit{display:grid;gap:6px;align-content:start;padding-left:16px;border-left:1px solid var(--ui-line)}
+.respawn-overlay__kit .label{margin:0}
+.respawn-overlay__kit p{margin:0}
+.respawn-overlay__verb{font-size:13px;line-height:1.5;color:var(--text-dim)}
+.respawn-overlay__verb b{color:var(--text)}
+.respawn-overlay__foot{display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;
+  border-top:1px solid var(--ui-line);padding-top:12px}
+@media (max-width:720px){
+  .respawn-overlay{bottom:calc(var(--safe-bottom) + 12px);padding:12px}
+  .respawn-overlay__body{grid-template-columns:minmax(0,1fr)}
+  .respawn-overlay__kit{padding-left:0;border-left:0;border-top:1px solid var(--ui-line);padding-top:10px}
+  .respawn-pick{min-height:44px}
+}

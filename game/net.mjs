@@ -88,6 +88,10 @@ export class NetClient {
   this.protocolVersion = PROTOCOL_VERSION;
   this.bandwidth = new BandwidthMeter({windowMs: 5000, capacity: 300});
   this._pendingReject = null;
+  // The seat's latest operator/harness pair. It lives apart from the `loadout`
+  // send method (which would otherwise shadow a same-named data field) so a
+  // reconnect or a fresh prediction shadow is built from the most recent pick.
+  this.seatLoadout = null;
   this.reset();
  }
  _disposeSocket() {
@@ -172,13 +176,20 @@ export class NetClient {
   this.ws.send(text);
   return true;
  }
- join(name, character, harness, opts = {}) { this.loadout = { character, harness }; this.send({ type: 'join', name, character, harness, token: this.token ?? '', roomId: opts.roomId || this.roomId || 'local', spectate: opts.spectate === true, playerId: this.playerId, progressToken: this.progressToken ?? '', v: PROTOCOL_VERSION, delta: SNAPSHOT_DELTA_VERSION }); }
+ join(name, character, harness, opts = {}) { this.seatLoadout = { character, harness }; this.send({ type: 'join', name, character, harness, token: this.token ?? '', roomId: opts.roomId || this.roomId || 'local', spectate: opts.spectate === true, playerId: this.playerId, progressToken: this.progressToken ?? '', v: PROTOCOL_VERSION, delta: SNAPSHOT_DELTA_VERSION }); }
  create(name, character, harness, playerName = '') { this.send({ type: 'create', name, playerName, character, harness, token: this.token ?? '', roomId: '', playerId: this.playerId, progressToken: this.progressToken ?? '', v: PROTOCOL_VERSION, delta: SNAPSHOT_DELTA_VERSION }); }
  list() { this.send({ type: 'list' }); }
  history() { this.send({ type: 'history' }); }
  host(config, mapId) { this.send({ type: 'host', config, mapId }); }
   start() { this.send({ type: 'start' }); }
   gear(gear, attachments, finish) { this.send({ type: 'gear', gear, ...(attachments !== undefined ? { attachments } : {}), ...(finish !== undefined ? { finish } : {}) }); }
+  // Team-mode respawn switch (§3.7, §12.2 Phase 4): remember the latest pair so a
+  // reconnect or a fresh prediction shadow is built from it (createShadow reads
+  // `seatLoadout`), then ask the authoritative server to validate and apply it.
+  loadout(character, harness) {
+   if (typeof character === 'string' && character) this.seatLoadout = { ...(this.seatLoadout ?? {}), character, ...(harness !== undefined ? { harness } : {}) };
+   this.send({ type: MESSAGE.LOADOUT, character, harness });
+  }
   voiceState(enabled) { return typeof enabled === 'boolean' && this.send({ type: 'voice-state', enabled }); }
   voiceSignal(to, payload) {
    if (!payload || typeof payload !== 'object' || Array.isArray(payload)) return false;
@@ -243,7 +254,7 @@ export class NetClient {
      this.deltaApplied = 0;
      this.deltaMisses = 0;
      this.deltaHits = 0;
-    this.createShadow(msg.mapId, msg.config, this.loadout);
+    this.createShadow(msg.mapId, msg.config, this.seatLoadout);
     this.onStart?.(msg);
     break;
    case MESSAGE.EVENTS:

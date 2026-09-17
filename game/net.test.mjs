@@ -2,6 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {Match} from './core.mjs';
 import {NetClient, NetHarness, interpolateSnapshots} from './net.mjs';
+import {MESSAGE} from './protocol.mjs';
 function rng(){let n=3;return()=>((n=(Math.imul(n,1664525)+1013904223)>>>0)/4294967296);}
 const config={humanCount:1,botCount:0,timeLimit:60};
 test('connection and reconnection preserve registered UI callbacks',async t=>{
@@ -478,4 +479,21 @@ test('the prediction shadow uses the real loadout instead of the default pair', 
  plain.createShadow('crosswire', config);
  assert.equal(plain.shadow.actors[0].character, 'chatgpt', 'callers without a loadout keep the default pair');
  assert.notEqual(actor.moveSpeed, plain.shadow.actors[0].moveSpeed, 'the real loadout changes predicted movement');
+});
+
+test('net.loadout remembers the latest pair and sends the v3 loadout message', () => {
+ const client = new NetClient();
+ const sent = [];
+ client.send = msg => { sent.push(msg); return true; };
+ client.loadout('claude', 'openclaw');
+ assert.deepEqual(client.seatLoadout, {character: 'claude', harness: 'openclaw'});
+ assert.deepEqual(sent.at(-1), {type: MESSAGE.LOADOUT, character: 'claude', harness: 'openclaw'});
+ // A later reconnect / shadow build reads the remembered pair and the Claude
+ // lock still normalises it.
+ client.createShadow('crosswire', config, client.seatLoadout);
+ assert.equal(client.shadow.actors[0].character, 'claude');
+ assert.equal(client.shadow.actors[0].harness, 'claudecode');
+ client.loadout('grok', 'hermes');
+ assert.deepEqual(client.seatLoadout, {character: 'grok', harness: 'hermes'}, 'the latest pair replaces the previous one');
+ assert.deepEqual(sent.at(-1), {type: MESSAGE.LOADOUT, character: 'grok', harness: 'hermes'});
 });
