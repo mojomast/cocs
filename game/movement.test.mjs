@@ -63,7 +63,7 @@ test('MOVEMENT_SPECS flattens the nine §13.3 verbs in wing order with exact bud
   const byId = Object.fromEntries(MOVEMENT_SPECS.map(spec => [spec.id, spec]));
   assert.deepEqual(
     {charges: byId['air-dash'].maxCharges, distance: byId['air-dash'].distance, cooldown: byId['air-dash'].cooldown, windup: byId['air-dash'].windup, landing: byId['air-dash'].landing, duration: byId['air-dash'].duration},
-    {charges: 1, distance: 5.5, cooldown: 3.5, windup: 0, landing: 0.15, duration: 0.25},
+    {charges: 1, distance: 5.5, cooldown: 2.5, windup: 0, landing: 0.15, duration: 0.25},
   );
   assert.deepEqual(
     {charges: byId['double-jump'].maxCharges, impulse: byId['double-jump'].impulse, cooldown: byId['double-jump'].cooldown, landing: byId['double-jump'].landing, refreshOnGround: byId['double-jump'].refreshOnGround},
@@ -219,14 +219,14 @@ test('mode coverage: off in Puma, NPCs never in horde/campaign, weakened in inst
 test('resolveMovementParams starts from §13.3 and applies the economy hook', () => {
   const base = resolveMovementParams('air-dash', {});
   assert.equal(base.maxCharges, 1);
-  assert.equal(base.cooldown, 3.5);
+  assert.equal(base.cooldown, 2.5);
   assert.equal(base.liftScale, 1);
   assert.equal(base.disabled, false);
   assert.equal(base.hook, null);
   const economy = resolveMovementParams('air-dash', {spec: 'hermes'});
   assert.equal(economy.hook, 'economy');
   assert.equal(economy.maxCharges, 2, '+1 charge');
-  closeTo(economy.cooldown, 2.8, EPS, '−20% cooldown');
+  closeTo(economy.cooldown, 2, EPS, '−20% cooldown');
   const hover = resolveMovementParams('hover-jets', {spec: 'hermes'});
   closeTo(hover.fuel, 3.125, EPS, '+25% fuel');
   assert.equal(hover.cooldown, 0);
@@ -271,7 +271,7 @@ test('carrier weakening numbers: one charge, half fuel, +50% cooldown, no lift',
   const dash = resolveMovementParams('air-dash', {spec: 'hermes', carrying: true, character: 'qwen'});
   assert.equal(dash.hook, 'economy');
   assert.equal(dash.maxCharges, WEAKENED_CARRIER.charges, 'economy 2 → weakened 1');
-  closeTo(dash.cooldown, 3.5 * 0.8 * 1.5, EPS, '−20% then +50%');
+  closeTo(dash.cooldown, 2.5 * 0.8 * 1.5, EPS, '−20% then +50%');
   assert.equal(dash.liftScale, 0);
   const hover = resolveMovementParams('hover-jets', {spec: 'hermes', carrying: true, character: 'deepseek'});
   closeTo(hover.fuel, 2.5 * 1.25 * 0.5, EPS, 'half of the economy pool');
@@ -318,19 +318,19 @@ test('air dash: airborne jump edge translates 5.5 m, spends the charge and prese
   assert.ok(frame.events.some(event => event.type === 'move-start' && event.reason === 'dash'));
 });
 
-test('air dash: 0.25 s active window then cooldown 3.5 s, recharge on the timer, landing recovery 0.15 s', () => {
+test('air dash: 0.25 s active window then cooldown 2.5 s, recharge on the timer, landing recovery 0.15 s', () => {
   const state = createMovementState({character: 'mistral', harness: 'openclaw'});
   step(state, {jump: true}, {grounded: false, y: 4, vy: 0});
   const frames = [];
   for (let i = 0; i < 40 && state.phase !== 'ready'; i++) frames.push(step(state, {}, {grounded: false, y: 4, vy: 0}));
   assert.equal(state.phase, 'ready');
   assert.ok(hasEvent(frames, 'move-end'));
-  closeTo(state.cooldown, 3.5, EPS, 'cooldown starts at end');
+  closeTo(state.cooldown, 2.5, EPS, 'cooldown starts at end');
   // Resource gate while empty.
   const blocked = step(state, {jump: true}, {grounded: false, y: 4, vy: 0});
   assert.equal(blocked.blocked, 'resources');
   // Recharge on the cooldown timer while grounded.
-  run(state, Math.ceil(3.5 / DT) + 4, () => ({}), () => ({grounded: true, y: 0, vy: 0}));
+  run(state, Math.ceil(2.5 / DT) + 4, () => ({}), () => ({grounded: true, y: 0, vy: 0}));
   assert.equal(state.charges, 1);
   assert.equal(state.cooldown, 0);
   // Landing recovery.
@@ -831,7 +831,7 @@ test('interruptMovement is a no-op when idle and starts the cooldown after a com
   assert.equal(info.interrupted, true);
   assert.equal(info.phase, 'active');
   assert.equal(info.refunded, null);
-  closeTo(idle.cooldown, 2.8, EPS, 'committed dash keeps its (economy) cooldown');
+  closeTo(idle.cooldown, 2, EPS, 'committed dash keeps its (economy) cooldown');
 });
 
 test('one movement source: vehicles, ziplines and traversal flight block activation', () => {

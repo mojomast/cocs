@@ -118,7 +118,7 @@ test('air dash end to end: jump, airborne jump edge, 5.5 m translation and landi
   assert.ok(eventsOf(match, 'move-start').some(event => event.reason === 'dash'));
   for (let i = 0; i < 150; i++) match.step(DT, {});
   assert.equal(actor.movement.phase, 'ready');
-  assert.ok(actor.movement.cooldown > 0, 'the 3.5 s cooldown starts at the end');
+  assert.ok(actor.movement.cooldown > 0, 'the 2.5 s cooldown starts at the end');
   assert.ok(eventsOf(match, 'landing-recovery').length >= 1, 'a clean landing pays the recovery beat');
 });
 

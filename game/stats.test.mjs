@@ -9,7 +9,10 @@ import {Room} from '../server/room.mjs';
 // Strikers 90/95/105 HP at 9.2/9.0/8.9 m/s; Vanguards 120 / 100+20 / 115+10 at
 // 7.7/7.6/7.8 m/s; Tacticians 100+5 / 90+10 / 100+10 at 8.6/8.7/8.5 m/s.
 // Gemini's 10 armor and every other unchanged field survive the re-cut.
-const expected=[[100,5,8.6],[115,10,7.8],[105,0,8.9],[100,20,7.6],[95,10,9],[120,0,7.7],[90,0,9.2],[90,10,8.7],[100,10,8.5]];
+// P3-tune raised Mistral 90 -> 100 HP (she still holds the roster's lowest
+// effective EHP: 100 vs 90+10 armor Kimi) so the bottom tier can win trades;
+// the committed sweep report reports the movement.
+const expected=[[100,5,8.6],[115,10,7.8],[105,0,8.9],[100,20,7.6],[95,10,9],[120,0,7.7],[100,0,9.2],[90,10,8.7],[100,10,8.5]];
 for(const [i,c] of CHARACTERS.entries()){
  test(`${c.name}: spawn, respawn, snapshot and healing caps`,()=>{
   assert.deepEqual(c.stats,Object.fromEntries(['health','armor','speed'].map((key,j)=>[key,expected[i][j]])));

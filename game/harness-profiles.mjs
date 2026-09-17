@@ -41,7 +41,7 @@ const rawProfiles = {
   },
   claudecode: {
     kind: 'buff', buff: 'resistance',
-    ability: {duration: 3, resistance: .5, cooldown: 14, vehicle: {armor: .6}},
+    ability: {duration: 3, resistance: .5, cooldown: 11, vehicle: {armor: .6}},
     weapons: {preferred: [1, 5], damage: 1.03, interval: 1.03, spread: .94},
     bot: {personality: 'sentinel', range: [6, 16], retreatHealth: .62, power: 'hurt'},
   },

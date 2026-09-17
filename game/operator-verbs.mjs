@@ -156,7 +156,7 @@ const BRACED_KNOCKBACK_MULTIPLIER = .5; // §3.2: crouching halves knockback
 // with Guardrail's 50% clamp. Charge time and the damage pause are chosen;
 // pool size and duration are pinned by §3.2.
 // ---------------------------------------------------------------------------
-const REVIEW_CHARGE_SECONDS = 3; // chosen: 3 s of holding ground fills the meter
+const REVIEW_CHARGE_SECONDS = 2; // chosen (P3-tune): 2 s of holding ground fills the meter; §10 decision 1 compensates the Claude Code lock with the strongest defensive class verb
 const REVIEW_SUPPRESS_SECONDS = 1.5; // chosen: damage pauses the build (does not reset it)
 const REVIEW_ABSORB = 35; // §3.2: ~35 HP
 const REVIEW_DURATION = 2.5; // §3.2: 2.5 s
