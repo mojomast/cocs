@@ -805,7 +805,7 @@ export class ArenaView{
     const palette=[floor,wall,trim,glow],detailBatches=new Map(),indexedUnit=new T.BoxGeometry(1,1,1),unit=indexedUnit.toNonIndexed();indexedUnit.dispose();
     const arenaSeed=arenaSeedOf(arena),textured=this.renderer?.isSoftware!==true&&typeof document!=='undefined';
     clearSurfaceTextures();
-    const applyTextures=(mat,kind,rx,ry)=>{if(!textured)return mat;const maps=surfaceTextures(kind,{seed:arenaSeed,repeat:[rx,ry]});if(maps){mat.map=maps.map;mat.roughnessMap=maps.roughnessMap;mat.normalMap=maps.normalMap;mat.normalScale=new T.Vector2(.4,.4);}if(maps?.map?.userData.source==='moth'&&this.renderer?.isWebGLRenderer===true)enhanceMothMaterial(mat,{kind,macro:mothMacroTexture()});return mat;};
+    const applyTextures=(mat,kind,rx,ry)=>{if(!textured)return mat;const maps=surfaceTextures(kind,{seed:arenaSeed,repeat:[rx,ry]});if(maps){mat.map=maps.map;mat.roughnessMap=maps.roughnessMap;mat.normalMap=maps.normalMap;mat.normalScale=new T.Vector2(.6,.6);}if(maps&&this.renderer?.isWebGLRenderer===true)enhanceMothMaterial(mat,{kind,macro:mothMacroTexture()});return mat;};
     const variantBuckets={block:new Map(),detail:new Map(),terrain:new Map(),terrainWall:new Map()};
     const variant=(scope,base,{map=false,kind='rock'}={})=>{const bucket=variantBuckets[scope];let clone=bucket.get(base);if(!clone){clone=base.clone();clone.vertexColors=true;clone.map=null;clone.normalMap=null;clone.roughnessMap=null;if(map)applyTextures(clone,kind,1,1);bucket.set(base,clone);palette.push(clone);}return clone;};
     const floorKind=arena.id==='neon-vertical'||arena.id==='crosswire'?'holographic_grid':(arena.id==='foundry'?'diamond_plate':(['ironfall-megastructure','substation','citadel','derelict-station'].includes(arena.id)?'metal_grating':(['launchpad','catwalk-breach'].includes(arena.id)?'carbon_fiber':'weathered_concrete')));
@@ -1388,7 +1388,7 @@ export class ArenaView{
     if(this.sky)this._tintSky(this.sky,palette,state.timeOfDay,Math.max(wet,dark));
     // The CPU renderer reads the scalar wetness off scene.userData.sky; the
     // flash scalar is refreshed every frame by _updateLightning.
-    if(this.scene?.userData?.sky)this.scene.userData.sky.wet=wet;
+    if(this.scene?.userData?.sky){this.scene.userData.sky.wet=wet;this.scene.userData.sky.phase=state.phase;}
     if('toneMappingExposure' in this.renderer)this.renderer.toneMappingExposure=base.exposure*(1+(Number(state.preset?.exposure??1)-1)*.85);
    }
    _applyLookLighting(wet,dark){const base=this._arenaLight;if(!base)return;const tint=new T.Color(base.dark||'#000000');for(const light of this.scene?.children||[]){if(light.isHemisphereLight){light.intensity=base.hemi*(1-dark*.22);if(light.color)light.color.copy(base.hemiColor).lerp(tint,wet*.2+dark*.3);if(light.groundColor)light.groundColor.copy(base.groundColor);}else if(light.isDirectionalLight&&!light.userData?.rimLight){light.intensity=base.sun*(1-dark*.5);if(light.color)light.color.copy(base.sunColor).lerp(tint,wet*.3+dark*.55);}}}
@@ -1413,6 +1413,7 @@ export class ArenaView{
     const target=state.preset?.material?.wet??0;state.wetness=state.wetness===undefined?target:state.wetness+(target-state.wetness)*(1-Math.exp(-.7*dt));
     if(state.phase!==state.applied||state.kind!==state.appliedKind||Math.abs((state._wetApplied??-1)-state.wetness)>.02||state.clock-state._lookAt>2){state.applied=state.phase;state.appliedKind=state.kind;state._wetApplied=state.wetness;state._lookAt=state.clock;this._applyArenaLook(state);}
     const mood=state.preset?.audio||'default';if(this.viewAudio?.setBedMood&&this._audioMood!==mood){this.viewAudio.setBedMood(mood);this._audioMood=mood;}
+    const wind=Number.isFinite(state.preset?.wind)?state.preset.wind:null;if(this.viewAudio?.setWind&&this._audioWind!==wind){this.viewAudio.setWind(wind);this._audioWind=wind;}
     return state;
    }
    _updateWeatherFx(delta,reduced,quality){if(this.renderer?.isSoftware===true||reduced)return 0;const state=this._weatherState();if(!(state.preset?.particles>0))return 0;const origin=this.camera?.position;if(!origin)return 0;if(!this.weatherFx){this.weatherPool??=new EffectPool(this.scene,48);this.weatherFx=new WeatherFX(this.weatherPool,{seed:this._weatherSeed??1,cap:Math.max(2,Math.round((quality?.ambientMotes??3)*2))});}this.weatherFx.setPreset(state.preset);return this.weatherFx.update(delta,origin,{radius:10,quality:(quality?.particles??1)*(this._effectsScale??1),software:false,reduced:false});}
