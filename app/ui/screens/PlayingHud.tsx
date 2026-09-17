@@ -1,9 +1,12 @@
 'use client';
 /* eslint-disable react-hooks/purity -- floating damage numbers fade against the wall clock. */
 import type {ScreenProps} from '../contract';
-import {Shield,Crosshair} from 'lucide-react';
+import {Shield,Crosshair,Move} from 'lucide-react';
 import {SinglePlayerHud} from '../../game-ui/singleplayer-hud';
 import {SightReticle} from './SightReticle';
+import {abilityRing,movementHud} from '../../../game/hud-class.mjs';
+import {MOVEMENT_VERBS} from '../../../game/kits.mjs';
+import {harnessAbility} from '../../../game/harness-profiles.mjs';
 
 const FRAG_COOLDOWN=7;
 
@@ -38,11 +41,13 @@ export function PlayingHud({ui}:ScreenProps){
  const ammoRatio=ammoCount===Infinity?1:Math.max(0,Math.min(1,(Number(ammoCount)||0)/weaponCap));
  const healthRatio=Math.max(0,Math.min(1,(Number(player.health)||0)/(player.maxHealth??100)));
  const armorRatio=Math.max(0,Math.min(1,(Number(player.armor)||0)/100));
- const abilityMax=(Number(activePower?.cooldown)||1)*(hud.config?.fastPowers?.5:1);
- const abilityDisabled=!!vehicle||hud.config?.mode==='instagib';
- const abilityActive=Number(player.active)>0;
- const abilityRatio=abilityActive?1:Math.max(0,Math.min(1,1-(Number(player.cooldown)||0)/abilityMax));
- const abilityReady=!abilityDisabled&&!abilityActive&&Number(player.cooldown)<=0;
+ const ring=abilityRing(player,harnessAbility(player.harness)||activePower,hud.config||{},{over:hud.over===true});
+ const abilityDisabled=ring.disabled;
+ const abilityActive=ring.active;
+ const abilityRatio=ring.ratio;
+ const abilityReady=ring.ready;
+ const kitMovement=player.movement?.verb?MOVEMENT_VERBS.find((v:any)=>v.id===player.movement.verb)||null:null;
+ const movement=player.movement?movementHud(player.movement,kitMovement):null;
  const frag=!hud.spectate?grenadeStatus(player):null;
  const fragRatio=frag?frag.ready?1:Math.max(0,Math.min(1,1-frag.cooldown/FRAG_COOLDOWN)):0;
  const streak=!hud.spectate?streakStatus(player):null;
@@ -96,7 +101,12 @@ export function PlayingHud({ui}:ScreenProps){
     {!hud.spectate&&<div className={`ability-card${abilityActive?' is-active':''}${abilityReady?' is-ready':''}${abilityDisabled?' is-disabled':''}`} role="status" aria-label={`Ability ${abilityReady?'ready':abilityDisabled?'unavailable':`recharging ${Number(player.cooldown).toFixed(1)} seconds`}`}>
      <span className="ability-ring" style={{'--fill':`${abilityRatio}turn`} as any}>{powerIcon(player.harness,22)}</span>
      <span className="stat-label">{activePower?.power||'ABILITY'}</span>
-     <span className="stat-note">{abilityDisabled?(vehicle?'DRIVING':'OFF'):abilityActive?`ACTIVE ${Number(player.active).toFixed(1)}s`:abilityReady?'READY':`${Number(player.cooldown).toFixed(1)}s`}</span>
+     <span className="stat-note">{ring.label}</span>
+    </div>}
+    {!hud.spectate&&!vehicle&&movement&&<div className={`ability-card movement-card${movement.ready?' is-ready':''}${movement.phase!=='ready'?' is-active':''}${movement.enabled?'':' is-disabled'}`} role="status" aria-label={`Movement ${movement.name} · ${movement.note}`}>
+     <span className="ability-ring" style={{'--fill':`${movement.progress}turn`} as any}>{movement.maxCharges>0?<b>{Math.round(movement.charges)}</b>:movement.maxFuel>0?<b>{Math.round(movement.fuel/Math.max(1e-9,movement.maxFuel)*100)}%</b>:<Move size={18}/>}</span>
+     <span className="stat-label">{movement.name.toUpperCase()}</span>
+     <span className="stat-note">{movement.note}</span>
     </div>}
     {frag&&<div className={`ability-card frag-card${frag.ready?' is-ready':''}`} role="status" aria-label={frag.label}>
      <span className="ability-ring" style={{'--fill':`${fragRatio}turn`} as any}><b>G</b></span>
