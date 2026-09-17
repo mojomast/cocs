@@ -388,4 +388,23 @@ const mothGraph = mothLevelFrom(MOTH_BAKED, 'moth-backrooms');
 const mothBackrooms = mothGraph ? buildMothArena(mothGraph, { id: 'moth-backrooms', name: 'Quantum Labyrinth', tag: 'MOTH / QUANTUM LABYRINTH' }) : null;
 if (mothBackrooms) mothBackrooms.variant = true;
 
-export const NEXTGEN_MAPS = [colosseum, frostGate, sunkenHill, riverbend, fortress, atrium, catacombs, slagworks, forge, provingGrounds, titanValley, convoyLine, throne, gauntlet, duneRavine, emberCaldera, ...(mothBackrooms ? [mothBackrooms] : [])];
+// Phase 1's tunnel builder samples every authored segment independently, so the
+// waypoint shared by two consecutive segments emits the same conservative wall
+// box once per segment (the duplicate-collision defect tracked as DEAD-6 in
+// docs/history/IMPROVEMENT_PLAN.md). The authored floor points carry real
+// terrain-following elevations and cannot be collapsed without changing the
+// tunnel floors, so drop the exact repeated solids here: every exported
+// collision box must be one distinct wall location.
+const withoutRepeatedTunnelSolids = map => {
+  const solids = new Set();
+  map.blocks = map.blocks.filter(block => {
+    if (block.kind !== 'tunnel') return true;
+    const at = [block.x, block.z, block.w, block.d, block.h].join(':');
+    if (solids.has(at)) return false;
+    solids.add(at);
+    return true;
+  });
+  return map;
+};
+
+export const NEXTGEN_MAPS = [colosseum, frostGate, sunkenHill, riverbend, fortress, atrium, catacombs, slagworks, forge, provingGrounds, titanValley, convoyLine, throne, gauntlet, duneRavine, emberCaldera, ...(mothBackrooms ? [mothBackrooms] : [])].map(withoutRepeatedTunnelSolids);

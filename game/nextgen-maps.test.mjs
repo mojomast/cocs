@@ -138,12 +138,16 @@ test('quarter-turned buildings size window props to the rotated wall', () => {
   }});
   const windows = map.structures.filter(s => s.type === 'windows');
   const span = (x, z) => windows.find(s => Math.abs(s.x - x) < .01 && Math.abs(s.z - z) < .01)?.w;
-  assert.equal(span(0, -2.75), 10);
-  assert.equal(span(0, 2.75), 10);
-  assert.equal(span(-4.75, 0), 6);
-  assert.equal(span(22.75, 0), 6);
-  assert.equal(span(17.25, 0), 6);
-  assert.equal(span(20, -4.75), 10);
+  // Phase 1 facade frames sit on the OUTER wall plane, not the wall-box centre
+  // (docs/phase1-spatial-handoff.md). North/south spans keep the authored width
+  // and east/west keep depth without a second swap after the quarter turn, so
+  // the rotated building's long faces carry 10 and its short face 6.
+  assert.equal(span(0, -3), 10);
+  assert.equal(span(0, 3), 10);
+  assert.equal(span(-5, 0), 6);
+  assert.equal(span(23, 0), 10);
+  assert.equal(span(17, 0), 10);
+  assert.equal(span(20, -5), 6);
 });
 
 test('level generation is deterministic for a fixed seed', () => {
