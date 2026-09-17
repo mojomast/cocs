@@ -123,3 +123,16 @@ test('CharacterRig arms landing compression on ground contact transition', () =>
   assert.ok(rig.land < 0.1, 'landing compression settles back to rest');
 });
 
+test('reduced motion plants the refined contact gait while full motion lifts the stride', () => {
+  // The app intentionally keeps reduce-motion semantics: legs stay planted and
+  // the arms/torso keep their readable pose. This pins that contract so a
+  // future change cannot silently animate (or silently freeze) the stride.
+  const shared = {contactGait:true, grounded:true, phase:1.3, time:2.4, speedNorm:1};
+  const running = characterPose({...shared, reduced:false});
+  const reduced = characterPose({...shared, reduced:true});
+  assert.ok(running.legL.contactLift > 0, 'full motion lifts the planted foot');
+  assert.equal(reduced.legL.contactLift, 0, 'reduced motion keeps the foot planted');
+  assert.notEqual(reduced.legL.hipX, running.legL.hipX, 'the reduced stride angle differs from the running angle');
+  assert.notEqual(reduced.legL.kneeX, running.legL.kneeX, 'the reduced knee angle differs from the running angle');
+});
+

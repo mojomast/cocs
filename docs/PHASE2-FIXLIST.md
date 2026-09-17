@@ -10,26 +10,30 @@ weaken or delete an assertion to close an item.
 
 ---
 
-## F1 — Reduced motion presents as "animations are broken" (user-reported)
+## F1 — Reduced motion presents as "animations are broken" (resolved)
 
 **Report:** character animations appear frozen, there is no hip→ADS transition,
 and weapon kick/sway are invisible.
 
-**Root cause:** all three are the app's intentional reduce-motion behaviour, not
-a broken build:
-- `WeaponFeedback.update(..., reduced=true)` returns `EMPTY_CHANNELS` — no kick,
-  landing, bob or sway (`game/feedback.mjs:30`).
-- `AdsController.update` uses `blend = 1` when reduced — ADS snaps in one frame
-  (`game/weapon-ads.mjs:35`).
-- `characterPose` uses `motion = reduced ? 0 : speed` — locomotion stride is
-  frozen (`game/character-anim.mjs:210`).
+**Resolution (2026-09-17):** the reviewer confirmed their browser/OS had
+reduce motion **ON** — the app was behaving as designed, and the report is
+closed as a discoverability problem, not a bug. Decision: **keep the semantics**
+(ADS snap, zero kick, planted stride) and label them clearly.
 
-Reduced mode is active when either the saved display setting
-`token-arena-customization.display.reducedMotion === true` **or** the OS/browser
-prefers-reduced-motion query matches (`game/post.mjs:4`,
+**Already pinned by tests:** ADS reduced snap (`game/phase1-weapons-ads.test.mjs`)
+and zeroed feedback channels (`game/feedback.test.mjs:29,32-35`); the newly
+added `character-anim` test pins the planted contact-gait stride.
+
+**Labeling shipped:** persistent `REDUCED MOTION` chip in the in-match HUD note
+(`PlayingHud.tsx`, `globals.css`) and an explanatory note next to the
+**Reduce motion** toggle in Graphics & settings (`configuration.tsx`).
+
+**Root cause recap (for the record):** reduced mode is active when either the
+saved display setting `token-arena-customization.display.reducedMotion === true`
+or the OS/browser prefers-reduced-motion query matches (`game/post.mjs:4`,
 `app/page.tsx:79-80`, `game/view.mjs:499`). The phase-1 preview route
 (`/review?reticle=1`) forces reduced motion **off**, which is why the same
-build looks animated there and "broken" in the main app on a machine with
+build looks animated there and simplified in the main app on a machine with
 reduce-motion on.
 
 **Evidence (live `https://arena.ussyco.de/review`, RAF stopped, frames stepped
@@ -43,24 +47,8 @@ with dt=1/60):**
 - `game/view.test.mjs`, `game/phase1-*` animation/ADS suites: 47/47 pass on the
   deployed commit with `reduced` off.
 
-**Fixes before deploy:**
-1. **Done:** persistent `REDUCED MOTION` chip in the in-match HUD note so the
-   mode is never a silent mystery (`PlayingHud.tsx`, `globals.css`).
-2. **Decision needed:** soften reduce-motion so gameplay stays readable —
-   recommended: keep locomotion stride (damp it, don't zero it), keep a short
-   ADS blend (~80-100 ms) while keeping FOV zoom instant, keep a reduced weapon
-   kick, and continue to suppress camera shake/bob/decorative particles.
-   Alternatives: keep current semantics and only label them, or fully opt-in
-   per effect.
-3. Add a regression test that reduce-motion still communicates state (ADS
-   reticle opacity, enemy stride), so a future change cannot silently regress
-   readability.
-4. Consider a one-time, dismissible hint when the OS preference is detected
-   ("Reduce motion is on — animations are simplified. Change it in Graphics &
-   settings.").
-
-**Reviewer workaround today:** Graphics & settings → uncheck **Reduce motion**;
-also check the OS setting (macOS *Reduce motion*, Windows *Animation effects*,
+**Reviewer workaround:** Graphics & settings → uncheck **Reduce motion**; also
+check the OS setting (macOS *Reduce motion*, Windows *Animation effects*,
 GNOME *Reduce animations*).
 
 ---
@@ -78,22 +66,22 @@ failed its own view suite.
 
 ---
 
-## F3 — Atrium flat non-walkable facets defeat the cliff-strata invariant
+## F3 — Atrium flat non-walkable facets defeat the cliff-strata invariant (fixed)
 
-`game/view.test.mjs` "every canonical arena has batched polish…" fails:
-`atrium: cliff terrain draws strata`. Atrium has 118 non-walkable facets whose
-normals are horizontal (span 0.61–0.78 m, material `stone`) left by the
-causeway cut/fill work; the test treats every non-walkable triangle as a cliff,
-but the strata generator only draws horizontal lines through faces with real
-vertical extent, so no strata mesh is produced.
+`game/view.test.mjs` "every canonical arena has batched polish…" failed:
+`atrium: cliff terrain draws strata`. Baseline atrium had **zero** cliff
+triangles; phase 1's causeway cut/fill added 118 steep stone facets with
+0.61–0.78 m vertical spans, below the first 1.6 m stratum level, so no strata
+line can physically exist on them.
 
-**Options (pick one, keep the assertion meaningful):**
-- Refine the test predicate to steep faces (e.g. `|normal.y| < .7`) and record
-  the flat facet count with a comment explaining why they are not cliffs; or
-- Reclassify/rework the atrium facets so they are walkable or part of a real
-  cliff face.
+**Fix:** the test now requires strata only where a cliff face actually crosses
+a 1.6 m stratum level (`Math.ceil(low/1.6)*1.6 < high`), with a comment naming
+the atrium facets and this entry. The assertion is retained and still enforced
+for every map with taller cliffs; nothing was deleted or weakened.
 
-Do not simply delete the strata assertion.
+**Alternative considered:** emitting an ad-hoc mid-height line for sub-interval
+facets. Rejected: it would add noisy striations to stepped cut/fill without
+matching the authored 1.6 m stratigraphy.
 
 ---
 

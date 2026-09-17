@@ -312,7 +312,13 @@ test('every canonical arena has batched polish, faithful collision boxes and sof
   signatures.add(`${blocks[0].material.color.getHexString()}/${view.scene.fog.density}`);
   for(const mesh of details){assert.equal(mesh.material.isMeshStandardMaterial,true);assert.ok(mesh.material.roughness>=.3);assert.ok([...mesh.geometry.attributes.position.array].every(Number.isFinite));}
   if(arena.platforms){const platforms=children.filter(n=>n.userData.platform);assert.equal(platforms.length,arena.platforms.length);assert.ok(platforms.every(n=>n.material.emissive.getHex()===0),'landing surfaces are not washed out by full-deck emission');}
-   if(arena.terrain){const cliffs=[...terrainWallTriangles(arena.terrain),...terrainTriangles(arena.terrain).filter(tri=>tri.walkable===false)];if(cliffs.length)assert.ok(children.some(n=>n.userData.strata),`${arena.id}: cliff terrain draws strata`);const actual=children.filter(n=>n.userData.terrain).flatMap(n=>Array.from(n.geometry.attributes.position.array));const expected=[...terrainTriangles(arena.terrain),...terrainWallTriangles(arena.terrain)].flatMap(t=>t.vertices.flat());assert.equal(actual.length,expected.length);assert.deepEqual(actual.sort((a,b)=>a-b),Array.from(new Float32Array(expected)).sort((a,b)=>a-b));}
+   if(arena.terrain){const cliffs=[...terrainWallTriangles(arena.terrain),...terrainTriangles(arena.terrain).filter(tri=>tri.walkable===false)];
+    // Strata are authored on a 1.6 m horizontal interval, so only a face that
+    // crosses a stratum level can carry one. Atrium's causeway cut/fill adds
+    // 0.61-0.78 m stone facets that are real cliffs but sit between levels
+    // (docs/PHASE2-FIXLIST.md F3); require strata only where one must exist.
+    const stratified=cliffs.some(tri=>{const ys=tri.vertices.map(p=>p[1]);return Math.ceil(Math.min(...ys)/1.6)*1.6<Math.max(...ys);});
+    if(stratified)assert.ok(children.some(n=>n.userData.strata),`${arena.id}: cliff terrain draws strata`);const actual=children.filter(n=>n.userData.terrain).flatMap(n=>Array.from(n.geometry.attributes.position.array));const expected=[...terrainTriangles(arena.terrain),...terrainWallTriangles(arena.terrain)].flatMap(t=>t.vertices.flat());assert.equal(actual.length,expected.length);assert.deepEqual(actual.sort((a,b)=>a-b),Array.from(new Float32Array(expected)).sort((a,b)=>a-b));}
   const camera=new T.PerspectiveCamera(82,320/180,.08,220);camera.position.set(0,12,24);camera.lookAt(0,0,0);renderer.render(view.scene,camera);assert.ok(renderer.info.render.triangles>0,`${arena.id}: CPU scene renders`);
   assert.equal(JSON.stringify(arena),before,'rendering never mutates canonical maps');
   // Every attached resource must be disposed exactly once when the arena is replaced.
