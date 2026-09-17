@@ -156,7 +156,7 @@ const BRACED_KNOCKBACK_MULTIPLIER = .5; // §3.2: crouching halves knockback
 // with Guardrail's 50% clamp. Charge time and the damage pause are chosen;
 // pool size and duration are pinned by §3.2.
 // ---------------------------------------------------------------------------
-const REVIEW_CHARGE_SECONDS = 2; // chosen (P3-tune): 2 s of holding ground fills the meter; §10 decision 1 compensates the Claude Code lock with the strongest defensive class verb
+const REVIEW_CHARGE_SECONDS = 1.5; // chosen (P5-2): 1.5 s of holding ground fills the meter; §10 decision 1 compensates the Claude Code lock with the strongest defensive class verb, and the Claude operator was the weakest vanguard at full sample
 const REVIEW_SUPPRESS_SECONDS = 1.5; // chosen: damage pauses the build (does not reset it)
 const REVIEW_ABSORB = 35; // §3.2: ~35 HP
 const REVIEW_DURATION = 2.5; // §3.2: 2.5 s
@@ -188,10 +188,10 @@ const LONG_CONTEXT_RANGE_MULTIPLIER = 1.08; // chosen: "slightly longer" band
 // product; the repair tick is the only additive vehicle effect (§4.7).
 // ---------------------------------------------------------------------------
 const TOOL_USE_INTERACTION_CAP = 1.35; // §3.2/§4.7: interaction cap
-const TOOL_USE_HANDLING_SECONDS = 2; // §3.2: 2 s of faster handling after a pickup
-const TOOL_USE_INTERVAL_MULTIPLIER = .92; // chosen: -8% interval
-const TOOL_USE_SPREAD_MULTIPLIER = .94; // chosen
-const TOOL_USE_RELOAD_FRACTION = .5; // chosen: partial reload = half a magazine
+const TOOL_USE_HANDLING_SECONDS = 3; // chosen (P5-2): 3 s of faster handling after a pickup (Qwen was the bottom operator at full sample)
+const TOOL_USE_INTERVAL_MULTIPLIER = .9; // chosen (P5-2): -10% interval
+const TOOL_USE_SPREAD_MULTIPLIER = .92; // chosen (P5-2)
+const TOOL_USE_RELOAD_FRACTION = .6; // chosen (P5-2): partial reload = 60% of a magazine
 const TOOL_USE_MELEE_REACH_MULTIPLIER = 1.15; // §3.2: +15% melee/tool reach
 const TOOL_USE_VEHICLE = deepFreeze({traverse: 1.15, speed: 1.05, boost: 1.1, repairPerSecond: 4});
 
@@ -354,14 +354,6 @@ export const DEEP_COMPUTE = Object.freeze({
       capped: damage < raw,
       ceiling,
     };
-  },
-  // Pure clamp for call sites that already built the charged damage (rockets,
-  // splash, chain): never above the §4.7 90 cap and never above 90% of the
-  // target's full health.
-  clampShot(state, damage, {targetHealth} = {}) {
-    const value = Math.max(0, finiteOr(damage, 0));
-    if (verbInactive(state, 'deep-compute')) return value;
-    return Math.min(value, singleHitCeiling(targetHealth));
   },
   snapshot(state) {
     return {charge: verbInactive(state, 'deep-compute') ? 0 : clamp01(state.charge || 0), decayIn: state?.decayIn || 0};
@@ -729,7 +721,7 @@ const rawVerbs = {
     integration: [
       {site: 'Match.step() actor tick (core.mjs:518)', call: 'DEEP_COMPUTE.step(a.verbState, dt, {firing})', effect: 'builds while the trigger is held, decays 1.5 s after release'},
       {site: 'Match.fire() charge scale (core.mjs:469-471)', call: 'DEEP_COMPUTE.multiplier(a.verbState, {attachmentCharge: w.chargeTime > 0 ? (w.chargeDamage || 1) : 1})', effect: 'max(compute, attachment), never the product'},
-      {site: 'Match.fire() direct hit (core.mjs:486) and projectile explode (core.mjs:495)', call: 'DEEP_COMPUTE.onShot / clampShot(a.verbState, damage, {targetHealth: target.maxHealth})', effect: 'consume charge; clamp to min(90, 90% of full health)'},
+      {site: 'Match.fire() direct hit and projectile/splash/chain sites (core.mjs)', call: 'DEEP_COMPUTE.onShot then clampSingleHit(damage, {targetHealth: target.maxHealth})', effect: 'consume charge; the §4.7 clamp is applied roster-wide, not just on DeepSeek'},
       {site: 'HUD charge meter', call: 'DEEP_COMPUTE.charge(a.verbState)', effect: '0..1 visible charge'},
     ],
   },
@@ -959,9 +951,20 @@ export function operatorVerbSnapshot(state) {
 
 // The one-shot ceiling: never above §4.7's 90 damage, and never above 90% of
 // the target's full health. Armor never raises the ceiling — a full-health
-// target can never be removed by a single Deep Compute shot.
+// target can never be removed by a single shot.
 function singleHitCeiling(targetHealth) {
   const health = finiteOr(targetHealth, 0);
   if (!(health > 0)) return SINGLE_HIT_CAP;
   return Math.min(SINGLE_HIT_CAP, ONE_SHOT_HEALTH_FRACTION * health);
+}
+
+// §4.7 single-hit cap, as a roster-wide invariant rather than a Deep Compute
+// feature. Every direct-hit site in `Match.fire()`/`explode()` funnels through
+// this helper, so a charge-coil (or any future attachment/class charge) cannot
+// one-shot a full-HP/0-armour target on any operator — the P5-2 bug where only
+// the DeepSeek path clamped. `targetHealth` is the target's full health (armor
+// never raises the ceiling); a missing/zero value still gets the flat 90 cap.
+export function clampSingleHit(damage, {targetHealth} = {}) {
+  const value = Math.max(0, finiteOr(damage, 0));
+  return Math.min(value, singleHitCeiling(targetHealth));
 }

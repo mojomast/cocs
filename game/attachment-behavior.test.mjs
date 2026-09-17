@@ -32,6 +32,32 @@ test('a charge coil holds a shot until charged then fires it boosted', () => {
   assert.ok(m.rockets[0] && m.rockets[0].damageMultiplier > 1.5, 'charged shot should carry bonus damage');
 });
 
+test('a charge-coil charged hit is clamped for every class, not just DeepSeek', () => {
+  // P5-2 bug: only DEEP_COMPUTE.onShot applied the §4.7 clamp, so a non-DeepSeek
+  // charge-coil hit (Shock 44 × coil 1.15 × attachment charge 2.2 ≈ 111) removed
+  // a full-HP Kimi (90) in one shot. The clamp now lives at the shared fire()/
+  // explode() sites via clampSingleHit.
+  const m = new Match('mistral', 'openclaw', () => .5, 'exchange', {
+    mode: 'deathmatch', botCount: 0, humanCount: 2,
+    loadouts: {
+      0: {character: 'mistral', harness: 'openclaw', attachments: {barrel: 'charge-coil'}},
+      1: {character: 'kimi', harness: 'openclaw'},
+    },
+  });
+  const [a, b] = m.actors;
+  Object.assign(a, {x: 0, y: 0, z: 5, yaw: 0, pitch: 0, shotWait: 0, protection: 0, weapon: 6});
+  a.ammo[6] = 5;
+  Object.assign(b, {x: 0, y: 0, z: 2.5, yaw: 0, pitch: 0, protection: 0, armor: 0, health: b.maxHealth});
+  assert.equal(b.maxHealth, 90, 'Kimi is the lightest full-HP target');
+  assert.ok(m.weaponFor(a).chargeTime > 0, 'charge coil arms a charged shot');
+  // Force the coil into its firing state without spending the charge window.
+  a.charge = m.weaponFor(a).chargeTime;
+  a.chargeAt = m.time;
+  assert.equal(m.fire(a), true);
+  assert.equal(b.health, 9, `full-HP Kimi clamps to 81 damage (${b.health} HP left)`);
+  assert.ok(b.health > 0, 'a charge-coil hit cannot one-shot a full-health target');
+});
+
 test('a homing beacon steers its rocket toward a nearby enemy', () => {
   const m = new Match('chatgpt', 'openclaw', () => .5, 'blood-gulch', {mode: 'deathmatch', botCount: 0, humanCount: 2, loadouts: {0: {character: 'chatgpt', harness: 'openclaw', attachments: {underbarrel: 'homing-beacon'}}}});
   const [a, enemy] = m.actors;

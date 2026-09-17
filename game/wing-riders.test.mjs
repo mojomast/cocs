@@ -320,7 +320,7 @@ test('Hermes riders: longer rush, 25% mitigation while active, cooldown −1 s',
   const [runner] = fast.actors;
   quiet(runner);
   assert.equal(fast.power(runner), true);
-  near(runner.cooldown, 11, 1e-9, 'tactician cooldown −1 s');
+  near(runner.cooldown, 9, 1e-9, 'tactician cooldown −1 s');
 });
 
 test('OpenCode riders: faster while active, longer burst, one skipped holster', () => {

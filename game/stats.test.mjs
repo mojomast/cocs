@@ -9,10 +9,14 @@ import {Room} from '../server/room.mjs';
 // Strikers 90/95/105 HP at 9.2/9.0/8.9 m/s; Vanguards 120 / 100+20 / 115+10 at
 // 7.7/7.6/7.8 m/s; Tacticians 100+5 / 90+10 / 100+10 at 8.6/8.7/8.5 m/s.
 // Gemini's 10 armor and every other unchanged field survive the re-cut.
-// P3-tune raised Mistral 90 -> 100 HP (she still holds the roster's lowest
-// effective EHP: 100 vs 90+10 armor Kimi) so the bottom tier can win trades;
-// the committed sweep report reports the movement.
-const expected=[[100,5,8.6],[115,10,7.8],[105,0,8.9],[100,20,7.6],[95,10,9],[120,0,7.7],[100,0,9.2],[90,10,8.7],[100,10,8.5]];
+// P3-tune raised Mistral 90 -> 100 HP (she still held the roster's lowest
+// effective EHP: 100 vs 90+10 armor Kimi) so the bottom tier can win trades.
+// P5-2 bottom-raised the full-sample garbage rows with a small, ordered re-cut
+// (Mistral 100->112, Gemini 95->100, Grok 105->110, Qwen 100->108) and nudged
+// the vanguards just enough that the §4.5 suffered-TTK wing ordering still
+// holds (DeepSeek 120->126, Meta 100->104, Claude 115->120). Speeds are
+// untouched so the ±10% band is unchanged.
+const expected=[[100,5,8.6],[120,10,7.8],[110,0,8.9],[104,20,7.6],[100,10,9],[126,0,7.7],[112,0,9.2],[90,10,8.7],[108,10,8.5]];
 for(const [i,c] of CHARACTERS.entries()){
  test(`${c.name}: spawn, respawn, snapshot and healing caps`,()=>{
   assert.deepEqual(c.stats,Object.fromEntries(['health','armor','speed'].map((key,j)=>[key,expected[i][j]])));
@@ -65,7 +69,7 @@ test('spawn stats stay inside the §4.1 envelope: EHP span ≤1.5×, speed mean 
 test('construction validates supplied human loadouts before the only initial spawn',()=>{
  const m=new Match('chatgpt','openclaw',()=>.5,'crosswire',{humanCount:2,botCount:0,loadouts:[{character:'invalid',harness:'invalid'},{character:'claude',harness:'hermes'}]});
  assert.equal(m.actors[0].character,'chatgpt');assert.equal(m.actors[0].health,100);
- assert.equal(m.actors[1].harness,'claudecode');assert.equal(m.actors[1].health,115);
+ assert.equal(m.actors[1].harness,'claudecode');assert.equal(m.actors[1].health,120);
  assert.equal(m.stats.respawns,2);assert.equal(m.events.length,2);
 });
 
@@ -73,7 +77,7 @@ test('room start and rematch retain selected stats and predict a nonzero actor',
  const room=new Room('stats',()=>.5);room.join(1,'Host','deepseek','codex');room.join(2,'Guest','kimi','hermes');room.host(1,{botCount:0,speed:1.25},'crosswire');
  for(let round=0;round<2;round++){
   room.start(1);const m=room.match,[host,a]=m.actors;
-  assert.equal(host.health,120);assert.equal(host.moveSpeed,7.7);assert.equal(a.health,90);assert.equal(a.armor,10);assert.equal(a.moveSpeed,8.7);assert.equal(a.name,'Guest');
+  assert.equal(host.health,126);assert.equal(host.moveSpeed,7.7);assert.equal(a.health,90);assert.equal(a.armor,10);assert.equal(a.moveSpeed,8.7);assert.equal(a.name,'Guest');
   assert.equal(m.stats.respawns,2);assert.equal(m.events.filter(e=>e.type==='spawn').length,2);
   Object.assign(a,{x:0,y:0,z:5,vx:0,vy:0,vz:0,active:3,slow:3});m.pickups=[];
   const client=new NetClient();client.createShadow('crosswire',m.config);client.actorId=1;client.push({state:JSON.parse(JSON.stringify(m.snapshot()))});

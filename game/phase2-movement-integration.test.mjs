@@ -238,7 +238,7 @@ test('death resets the movement verb and the signature verb, and clears placed r
 // 5. Deep Compute through the real fire/damage path
 // ---------------------------------------------------------------------------
 
-for (const [targetCharacter, maxHealth] of [['chatgpt', 100], ['deepseek', 120]]) {
+for (const [targetCharacter, maxHealth] of [['chatgpt', 100], ['deepseek', 126]]) {
   test(`Deep Compute never one-shots a full-health ${maxHealth} HP target through Match.fire`, () => {
     const match = new Match('deepseek', 'openclaw', seeded(11), 'exchange', {
       mode: 'deathmatch', botCount: 0, humanCount: 2,

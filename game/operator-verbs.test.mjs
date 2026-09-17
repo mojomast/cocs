@@ -28,6 +28,7 @@ import {
   DEEP_COMPUTE,
   SINGLE_HIT_CAP,
   ONE_SHOT_HEALTH_FRACTION,
+  clampSingleHit,
   BRACED,
   ALIGNMENT_REVIEW,
   ADAPTIVE,
@@ -165,7 +166,7 @@ test('nothing applies unless the verb is active', () => {
   assert.equal(REVISION.skipsHolster({verb: 'revision', active: false}, {from: 3, to: 2}), false);
   assert.equal(HEAT.fireRateMultiplier({verb: 'adaptive', active: true}), 1);
   close(DEEP_COMPUTE.multiplier(null, {attachmentCharge: 2.2}), 2.2, 1e-12);
-  assert.equal(DEEP_COMPUTE.clampShot(null, 1000, {targetHealth: 50}), 1000, 'the clamp is DeepSeek-only');
+  assert.equal(clampSingleHit(1000, {targetHealth: 50}), 45, 'the §4.7 clamp is roster-wide, not DeepSeek-only');
   assert.equal(BRACED.armorRegen(null, 1, {spawnArmor: 20, currentArmor: 0}), 0);
   assert.equal(BRACED.knockbackMultiplier(null, {crouching: true}), 1);
   assert.deepEqual(ALIGNMENT_REVIEW.status(null), {meter: 0, pool: 0, poolIn: 0, suppressed: false, active: false});
@@ -292,11 +293,12 @@ test('Deep Compute clamp: the max multiplier can never one-shot a full-health ta
   assert.equal(OPERATOR_VERBS['deep-compute'].numbers.maxBonusMultiplier, .35);
   assert.equal(SINGLE_HIT_CAP, 90);
   assert.equal(ONE_SHOT_HEALTH_FRACTION, .9);
-  // Direct-hit ceiling helper.
-  assert.equal(DEEP_COMPUTE.clampShot(state, 500, {targetHealth: 120}), 90);
-  close(DEEP_COMPUTE.clampShot(state, 500, {targetHealth: 60}), 54, 1e-9);
-  assert.equal(DEEP_COMPUTE.clampShot(state, 20, {targetHealth: 100}), 20);
-  assert.equal(DEEP_COMPUTE.clampShot(state, 1000), 90, 'no target info still gets the flat §4.7 cap');
+  // Direct-hit ceiling helper (roster-wide, independent of the verb state).
+  assert.equal(clampSingleHit(500, {targetHealth: 120}), 90);
+  close(clampSingleHit(500, {targetHealth: 60}), 54, 1e-9);
+  assert.equal(clampSingleHit(20, {targetHealth: 100}), 20);
+  assert.equal(clampSingleHit(1000), 90, 'no target info still gets the flat §4.7 cap');
+  assert.equal(clampSingleHit(1000, {targetHealth: 50}), 45, 'a class or attachment charge cannot one-shot any full-health target');
   // Sweep every weapon direct damage, the roster healths plus a 1..200 range,
   // and every plausible attachment charge at full compute charge.
   const healths = [...new Set([...CHARACTERS.map(character => character.stats.health), ...Array.from({length: 200}, (_, index) => index + 1)])];
@@ -346,7 +348,7 @@ test('Meta Braced: spawn-armor regen out of combat and crouch halving knockback'
   close(BRACED.knockbackMultiplier(state, {crouching: false, firing: true}), 1);
 });
 
-test('Claude Alignment Review: 2 s hold builds a 35 HP / 2.5 s absorb pool, no stacking', () => {
+test('Claude Alignment Review: 1.5 s hold builds a 35 HP / 2.5 s absorb pool, no stacking', () => {
   const state = createOperatorVerbState('claude');
   ALIGNMENT_REVIEW.step(state, 1, {grounded: false});
   close(ALIGNMENT_REVIEW.meter(state), 0, 1e-12, 'airborne does not build');
@@ -354,7 +356,7 @@ test('Claude Alignment Review: 2 s hold builds a 35 HP / 2.5 s absorb pool, no s
   close(ALIGNMENT_REVIEW.meter(state), 0, 1e-12, 'sprinting does not build');
   ALIGNMENT_REVIEW.step(state, 1, {firing: true});
   close(ALIGNMENT_REVIEW.meter(state), 0, 1e-12, 'firing does not build');
-  ALIGNMENT_REVIEW.step(state, 1.99, {});
+  ALIGNMENT_REVIEW.step(state, 1.49, {});
   assert.ok(ALIGNMENT_REVIEW.meter(state) < 1 && ALIGNMENT_REVIEW.absorbPool(state) === 0);
   ALIGNMENT_REVIEW.step(state, .01, {});
   close(ALIGNMENT_REVIEW.absorbPool(state), 35, 1e-12, 'the pool is ~35 HP');
@@ -381,10 +383,12 @@ test('Claude Alignment Review: 2 s hold builds a 35 HP / 2.5 s absorb pool, no s
   close(second.pool, 0);
   assert.equal(second.broke, true);
   assert.equal(ALIGNMENT_REVIEW.absorbActive(state), false);
-  // Damage pauses the build for 1.5 s but does not reset it.
-  ALIGNMENT_REVIEW.step(state, 1, {});
+  // Damage pauses the build for 1.5 s but does not reset it. (Meter is reset so
+  // the resume step lands below 100% on the faster 1.5 s charge.)
+  state.meter = 0;
+  ALIGNMENT_REVIEW.step(state, .5, {});
   const held = ALIGNMENT_REVIEW.meter(state);
-  assert.ok(held > 0);
+  assert.ok(held > 0 && held < 1);
   ALIGNMENT_REVIEW.onDamage(state);
   ALIGNMENT_REVIEW.step(state, 1, {});
   close(ALIGNMENT_REVIEW.meter(state), held, 1e-12);
@@ -453,12 +457,12 @@ test('Qwen Tool Use: 1.35x capped interactions, pickup reload + handling, reach 
   assert.equal(TOOL_USE.interactionMultiplier(state, {kind: 'flag-capture'}), 1, 'never on flag capture');
   assert.equal(TOOL_USE.interactionMultiplier(state, {kind: 'unknown'}), 1);
   const pickup = TOOL_USE.onPickup(state, {magazine: 10, ammo: 2, cap: 30});
-  assert.deepEqual(pickup, {reload: 5, active: true});
-  assert.deepEqual(TOOL_USE.handling(state), {interval: .92, spread: .94});
-  TOOL_USE.step(state, 1.99);
+  assert.deepEqual(pickup, {reload: 6, active: true});
+  assert.deepEqual(TOOL_USE.handling(state), {interval: .9, spread: .92});
+  TOOL_USE.step(state, 2.99);
   assert.equal(TOOL_USE.windowActive(state), true);
   TOOL_USE.step(state, .02);
-  assert.equal(TOOL_USE.windowActive(state), false, '2 s handling window');
+  assert.equal(TOOL_USE.windowActive(state), false, '3 s handling window');
   assert.deepEqual(TOOL_USE.handling(state), {interval: 1, spread: 1});
   assert.equal(TOOL_USE.onPickup(state, {magazine: 10, ammo: 28, cap: 30}).reload, 2, 'bounded by the missing ammo');
   assert.equal(TOOL_USE.onPickup(state, {magazine: Infinity, ammo: Infinity, cap: Infinity}).reload, 0, 'no partial reload into an infinite magazine');

@@ -29,7 +29,7 @@ const rawProfiles = {
   },
   hermes: {
     kind: 'buff', buff: 'speed',
-    ability: {duration: 3, speed: 1.6, cooldown: 12, vehicle: {speed: 1.15}},
+    ability: {duration: 3, speed: 1.6, cooldown: 10, vehicle: {speed: 1.15}},
     weapons: {preferred: [0, 4], damage: 1, interval: .97, spread: 1.08},
     bot: {personality: 'skirmisher', range: [8, 18], retreatHealth: .35, power: 'escape'},
   },
@@ -41,7 +41,7 @@ const rawProfiles = {
   },
   claudecode: {
     kind: 'buff', buff: 'resistance',
-    ability: {duration: 3, resistance: .5, cooldown: 11, vehicle: {armor: .6}},
+    ability: {duration: 3, resistance: .5, cooldown: 10, vehicle: {armor: .6}},
     weapons: {preferred: [1, 5], damage: 1.03, interval: 1.03, spread: .94},
     bot: {personality: 'sentinel', range: [6, 16], retreatHealth: .62, power: 'hurt'},
   },
@@ -59,7 +59,7 @@ const rawProfiles = {
   },
   roo: {
     kind: 'slow', buff: null,
-    ability: {duration: 3, radius: 7, slow: .55, cooldown: 15, vehicle: {autogunner: true, gunnerDamage: 1.25}},
+    ability: {duration: 3, radius: 7, slow: .55, cooldown: 12, vehicle: {autogunner: true, gunnerDamage: 1.25}},
     weapons: {preferred: [1, 5], damage: 1.02, interval: 1.02, spread: .97},
     bot: {personality: 'controller', range: [5, 13], retreatHealth: .48, power: 'cluster'},
   },
