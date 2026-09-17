@@ -381,6 +381,8 @@ function traversalItems(arena,name){const t=arena.traversal||arena.traversalMeta
 const arenaLooks={
  'puma-circuit':['#292d34','#343c49','#b08042','#ffe1af','#17222d',.006,.35],
  exchange:['#253d40','#182b30','#72918b','#c3ffe9','#163d39',.016,.62],
+ // Moth Quantum labyrinth: a cold teal graph-lit interior.
+ 'moth-backrooms':['#123034','#0d2226','#5fe3d6','#a8fff4','#07181b',.03,.8],
  crosswire:['#302d45','#242139','#777091','#d8ceff','#29203f',.022,.55],
  foundry:['#48332a','#302723','#a38061','#ffd3a0','#4b2116',.024,.7],
  launchpad:['#324657','#243340','#8da5b1','#d7efff','#20364f',.012,.65],

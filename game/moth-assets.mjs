@@ -170,7 +170,13 @@ export function mothMaterialNames() {
 // registry, and so successive map builds stay isolated.
 export function mothLevel(name) {
   if (!registry || typeof name !== 'string') return null;
-  const record = registry.source.levels?.[name];
+  return mothLevelFrom(registry.source, name);
+}
+
+// Pure variant that reads a baked data object directly, so modules that run at
+// import time (before configureMothAssets) can still resolve a level.
+export function mothLevelFrom(data, name) {
+  const record = data?.levels?.[name];
   return record ? clone(record) : null;
 }
 
