@@ -38,9 +38,19 @@ test('duplicate bindings fall back to the default for the later action', () => {
 test('codes resolve to actions and conflicts are reported', () => {
   const bindings = normalizeBindings({});
   assert.equal(actionForCode(bindings, 'KeyG'), 'grenade');
+  assert.equal(actionForCode(bindings, 'KeyX'), 'mobility');
   assert.equal(actionForCode(bindings, 'KeyZ'), null);
   assert.deepEqual(bindingConflicts({forward: 'KeyW', back: 'KeyW', jump: 'Space', sprint: 'Space'}), ['KeyW', 'Space']);
   assert.equal(KEYBIND_ACTIONS.length, Object.keys(DEFAULT_BINDINGS).length);
+});
+
+test('mobility binds to KeyX and stays remappable like every other action', () => {
+  assert.equal(DEFAULT_BINDINGS.mobility, 'KeyX');
+  assert.equal(KEYBIND_ACTIONS.length, 14, '13 historical actions plus mobility');
+  assert.ok(KEYBIND_OPTIONS.includes('KeyX'), 'KeyX is offered in the settings dropdown');
+  assert.deepEqual(rebindAction(DEFAULT_BINDINGS, 'mobility', 'KeyZ'), {...DEFAULT_BINDINGS, mobility: 'KeyZ'});
+  assert.deepEqual(normalizeBindings({mobility: 'nonsense'}).mobility, 'KeyX');
+  assert.equal(actionForCode(normalizeBindings({}), 'KeyZ'), null, 'KeyZ stays free');
 });
 
 test('normalization never produces duplicate bindings', () => {

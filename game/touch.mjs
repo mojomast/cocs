@@ -15,7 +15,7 @@ export function stickAxis(dx,dy,radius,knobRadius=24){
  const vector=joystickVector(dx,dy,r),axis=moveAxis(dx,dy,r),travel=Math.max(4,r-(Number(knobRadius)||0));
  return {x:axis.x,y:axis.y,sprint:axis.sprint,magnitude:vector.magnitude,knobX:vector.x*travel,knobY:vector.y*travel};
 }
-export const TOUCH_BUTTONS=Object.freeze(['fire','ads','jump','crouch','reload','power','melee','grenade','interact','swap','voice']);
+export const TOUCH_BUTTONS=Object.freeze(['fire','ads','jump','crouch','reload','power','melee','grenade','interact','swap','voice','mobility']);
 // Screen-space joystick vector: x right, y down, magnitude clamped to 1.
 export function joystickVector(dx,dy,radius=1){
  const r=Math.max(1e-6,Number(radius)||1),nx=(Number(dx)||0)/r,ny=(Number(dy)||0)/r,magnitude=Math.hypot(nx,ny);
@@ -43,14 +43,16 @@ export function applyLook(look,dx,dy,sensitivity=1,invert=false){
 }
 export const isTouchDevice=()=>typeof window!=='undefined'&&(window.matchMedia?.('(pointer: coarse)')?.matches===true||(typeof navigator!=='undefined'&&navigator.maxTouchPoints>0));
 // Apply an on-screen button press/release to the imperative runtime. Held actions
-// (fire, ADS, crouch, voice) track the pointer; one-shot actions (jump, reload,
-// power, interact) only latch on press and are consumed by the simulation loop.
+// (fire, ADS, crouch, mobility, voice) track the pointer; one-shot actions (jump,
+// reload, power, interact) only latch on press and are consumed by the
+// simulation loop.
 export function applyTouchAction(runtime,action,pressed){
  if(!runtime)return null;
  runtime.touch??={};
   if(action==='fire'){runtime.touch.fire=pressed;if(pressed)runtime.fireTap=true;}
   else if(action==='ads')runtime.touch.ads=pressed;
  else if(action==='crouch')runtime.touch.crouch=pressed;
+ else if(action==='mobility')runtime.touch.mobility=pressed;
  else if(action==='voice')runtime.voice?.setPushToTalk?.(pressed);
  else if(pressed){
   if(action==='jump')runtime.jump=true;

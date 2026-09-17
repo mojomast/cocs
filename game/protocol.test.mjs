@@ -1,11 +1,14 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {MESSAGE,validPlayerId,validProgressToken,sanitizeText,parseInputEnvelope,snapshotDelta,applySnapshotDelta,wireSize,BandwidthMeter} from './protocol.mjs';
+import {MESSAGE,PROTOCOL_VERSION,SNAPSHOT_DELTA_VERSION,validPlayerId,validProgressToken,sanitizeText,parseInputEnvelope,snapshotDelta,applySnapshotDelta,wireSize,BandwidthMeter} from './protocol.mjs';
 
 test('message types expose the canonical wire vocabulary',()=>{
  for(const type of [MESSAGE.JOIN,MESSAGE.CREATE,MESSAGE.LIST,MESSAGE.HISTORY,MESSAGE.HOST,MESSAGE.GEAR,MESSAGE.START,MESSAGE.INPUT,MESSAGE.CHAT,MESSAGE.LEAVE,MESSAGE.PING,MESSAGE.PONG,MESSAGE.WELCOME,MESSAGE.LOBBY,MESSAGE.ROOMS,MESSAGE.SNAPSHOT,MESSAGE.EVENTS,MESSAGE.RESULTS,MESSAGE.PROGRESSION,MESSAGE.ERROR,MESSAGE.VOICE_STATE,MESSAGE.VOICE_SIGNAL,MESSAGE.VOICE_CONFIG])assert.equal(typeof type,'string');
  assert.equal(MESSAGE.WELCOME,'welcome');
  assert.equal(MESSAGE.VOICE_CONFIG,'voice-config');
+ assert.equal(MESSAGE.LOADOUT,'loadout','Phase 4 adds the respawn loadout-switch frame');
+ assert.equal(PROTOCOL_VERSION,3,'the mobility input surface and loadout message bump the envelope');
+ assert.equal(SNAPSHOT_DELTA_VERSION,2,'the snapshot-delta revision is unchanged');
 });
 
 test('player ids accept only the canonical uuid-like shape',()=>{
@@ -38,7 +41,7 @@ test('sanitizeText strips control characters, trims and truncates names and chat
 });
 
 test('parseInputEnvelope validates and clamps the nested wire envelope',()=>{
- const input=parseInputEnvelope({input:{x:5,z:-9,fire:true,yaw:1,pitch:5,weapon:2,sprint:true,crouch:false},seq:7});
+ const input=parseInputEnvelope({input:{x:5,z:-9,fire:true,yaw:1,pitch:5,weapon:2,sprint:true,crouch:false,mobility:true},seq:7});
  assert.equal(input.seq,7);
  assert.equal(input.x,1);
  assert.equal(input.z,-1);
@@ -48,10 +51,11 @@ test('parseInputEnvelope validates and clamps the nested wire envelope',()=>{
  assert.equal(input.weapon,2);
  assert.equal(input.sprint,true);
  assert.equal(input.crouch,false);
+ assert.equal(input.mobility,true,'the held mobility bind is validated as a boolean');
 });
 
 test('parseInputEnvelope accepts the flattened ext payload used by the room',()=>{
- const input=parseInputEnvelope({x:Infinity,z:2,yaw:Infinity,pitch:NaN,weapon:2.5,jump:true});
+ const input=parseInputEnvelope({x:Infinity,z:2,yaw:Infinity,pitch:NaN,weapon:2.5,jump:true,mobility:true});
  assert.equal(input.seq,null);
  assert.equal(input.x,0);
  assert.equal(input.z,1);
@@ -59,6 +63,7 @@ test('parseInputEnvelope accepts the flattened ext payload used by the room',()=
  assert.equal(input.pitch,undefined);
  assert.equal(input.weapon,undefined);
  assert.equal(input.jump,true);
+ assert.equal(input.mobility,true);
 });
 
 test('parseInputEnvelope prefers the envelope sequence over the inner one',()=>{
@@ -78,6 +83,7 @@ test('parseInputEnvelope tolerates malformed frames with safe defaults',()=>{
   assert.equal(input.jump,false);
   assert.equal(input.power,false);
   assert.equal(input.reload,false);
+  assert.equal(input.mobility,false);
  }
 });
 

@@ -43,10 +43,11 @@ test('look steps accumulate yaw and clamp pitch',()=>{
  assert.equal(look.pitch,1.45);
  assert.deepEqual(lookStep(0,0,1),{yaw:0,pitch:0});
  assert.equal(applyLook(null,10,10),null);
- assert.equal(TOUCH_BUTTONS.length,11);
+ assert.equal(TOUCH_BUTTONS.length,12);
  assert.ok(TOUCH_BUTTONS.includes('voice'));
  assert.ok(TOUCH_BUTTONS.includes('melee'));
  assert.ok(TOUCH_BUTTONS.includes('grenade'));
+ assert.ok(TOUCH_BUTTONS.includes('mobility'));
 });
 
 test('applyTouchAction tracks held buttons and latches one-shot actions',()=>{
@@ -54,11 +55,13 @@ test('applyTouchAction tracks held buttons and latches one-shot actions',()=>{
  applyTouchAction(runtime,'fire',true);
  applyTouchAction(runtime,'ads',true);
  applyTouchAction(runtime,'crouch',true);
+ applyTouchAction(runtime,'mobility',true);
  applyTouchAction(runtime,'voice',true);
   assert.equal(runtime.touch.fire,true);
   assert.equal(runtime.touch.ads,true);
   assert.equal(runtime.fireTap,true);
  assert.equal(runtime.touch.crouch,true);
+ assert.equal(runtime.touch.mobility,true,'mobility is a held touch button');
  assert.deepEqual(runtime.voice.talking,[true]);
  applyTouchAction(runtime,'jump',true);
  applyTouchAction(runtime,'reload',true);
@@ -77,11 +80,13 @@ test('applyTouchAction tracks held buttons and latches one-shot actions',()=>{
  applyTouchAction(runtime,'fire',false);
  applyTouchAction(runtime,'ads',false);
  applyTouchAction(runtime,'crouch',false);
+ applyTouchAction(runtime,'mobility',false);
  applyTouchAction(runtime,'voice',false);
   assert.equal(runtime.touch.fire,false);
   assert.equal(runtime.touch.ads,false);
   assert.equal(runtime.fireTap,true, 'release preserves the unconsumed tap');
  assert.equal(runtime.touch.crouch,false);
+ assert.equal(runtime.touch.mobility,false);
  assert.deepEqual(runtime.voice.talking,[true,false]);
  assert.equal(applyTouchAction(null,'fire',true),null);
 });

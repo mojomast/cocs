@@ -539,6 +539,23 @@ test('grenade is a one-shot edge and cannot auto-repeat while held',()=>{
  assert.equal(peer.edgeGrenade,true,'a fresh press re-arms');
 });
 
+test('mobility is forwarded as a held input, never as an edge',()=>{
+ const room=new Room('r',rng());
+ room.join(1,'A','chatgpt','openclaw');room.host(1,{botCount:0,timeLimit:30},'crosswire');room.start(1);room.drain();
+ const peer=room.peers.get(1),a=room.match.actors[0];
+ room.input(1,{seq:1,mobility:true});
+ assert.equal(peer.latest.mobility,true,'the held bind reaches the simulation');
+ room.input(1,{seq:2,mobility:true,x:.5});
+ assert.equal(peer.latest.mobility,true,'holding keeps forwarding it like sprint/crouch/ads');
+ room.tick(1/60);
+ assert.equal(peer.latest.mobility,true,'a tick does not consume the held field');
+ assert.equal(a.inputMobility,true,'core latched the held state for edge derivation');
+ room.input(1,{seq:3,mobility:false});
+ assert.equal(peer.latest.mobility,undefined,'release clears the held field');
+ room.tick(1/60);
+ assert.equal(a.inputMobility,false);
+});
+
 test('votes from a disconnected peer stop counting toward quorum',()=>{
  const room=new Room('r',rng(),{graceMs:600000});
  room.join(1,'A');room.join(2,'B');room.join(3,'C');room.join(4,'D');

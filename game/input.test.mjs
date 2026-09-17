@@ -109,6 +109,16 @@ test('melee registers as a provided one-shot control', () => {
   assert.equal(controlsFromState({ melee: true }).melee, true);
   assert.equal(controlsFromState({}).melee, undefined);
 });
+test('mobility is a held control from the keyboard, touch or an explicit flag', () => {
+  assert.equal(controlsFromState({keys: ['KeyX']}).mobility, true, 'the default KeyX bind is held');
+  assert.equal(controlsFromState({keys: ['KeyZ']}).mobility, undefined, 'an unbound key does not move');
+  assert.equal(controlsFromState({touch: {mobility: true}}).mobility, true, 'the touch button is held through the touch bag');
+  assert.equal(controlsFromState({mobility: true}).mobility, true);
+  assert.equal(controlsFromState({keys: [], touch: {mobility: false}}).mobility, undefined, 'release clears the held control');
+  const remapped = controlsFromState({keys: ['ArrowDown'], bindings: {mobility: 'ArrowDown'}});
+  assert.equal(remapped.mobility, true, 'a custom bind drives the same held control');
+  assert.equal(controlsFromState({keys: ['KeyX'], bindings: {mobility: 'ArrowDown'}}).mobility, undefined, 'the old key stops working after a remap');
+});
 test('an idle joystick does not suppress keyboard movement', () => {
   // The runtime always supplies a touch vector shaped like this, so a centered
   // joystick must fall back to WASD instead of zeroing local and online input.

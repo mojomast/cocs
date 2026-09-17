@@ -322,6 +322,10 @@ export class Room {
   if (i.sprint) ext.sprint = true;
   if (i.crouch) ext.crouch = true;
   if (i.ads) ext.ads = true;
+  // The class movement verb is a held state, never an edge: the client keeps
+  // sending true while the bind is down, and the core derives the press/release
+  // edges. A forwarded pulse would fake a release and cancel an active grapple.
+  if (i.mobility) ext.mobility = true;
     peer.latest = ext;
     peer.latestSeq = seq;
     if (i.fire && !this.match.race) peer.edgeFire = true;

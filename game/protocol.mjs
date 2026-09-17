@@ -2,8 +2,10 @@ import {clamp} from './math.mjs';
 
 // Wire-format revisions. The envelope is additive: a peer that only knows
 // version 1 simply never emits or consumes the version-2 snapshot-delta frame,
-// so bumping this constant cannot strand an older client.
-export const PROTOCOL_VERSION = 2;
+// so bumping this constant cannot strand an older client. Version 3 adds the
+// held `mobility` input field and the `loadout` respawn-switch message
+// (docs/design/CLASS_OVERHAUL.md §5, §12.2 Phase 4).
+export const PROTOCOL_VERSION = 3;
 // Snapshot-delta revisions. v2 diffs id-keyed arrays element-wise; a peer only
 // receives deltas for a revision it advertised, so a v1 client keeps getting
 // full snapshots instead of a patch it cannot apply.
@@ -27,6 +29,9 @@ export const MESSAGE = Object.freeze({
  LEADERBOARD:'leaderboard', PROFILE:'profile', MATCHMADE:'matchmade',
  // Additive v2 frame: a snapshot expressed as a patch against a prior sequence.
  SNAPSHOT_DELTA:'snapshot-delta',
+ // Additive v3 frame: a validated team-mode respawn loadout switch. FFA and
+ // solo modes lock their pick, so the server refuses it there (Phase 4).
+ LOADOUT:'loadout',
 });
 
 export const validPlayerId = id => typeof id === 'string' && /^[A-Za-z0-9-]{8,64}$/.test(id);
@@ -53,7 +58,7 @@ export function parseInputEnvelope(msg) {
   fire: source.fire === true, jump: source.jump === true, power: source.power === true,
   interact: source.interact === true, sprint: source.sprint === true, crouch: source.crouch === true,
   ads: source.ads === true, reload: source.reload === true, melee: source.melee === true,
-  grenade: source.grenade === true,
+  grenade: source.grenade === true, mobility: source.mobility === true,
  };
 }
 

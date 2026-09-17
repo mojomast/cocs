@@ -22,6 +22,7 @@ test('the rendered touch cluster includes every action, including grenade', asyn
   const html = renderToStaticMarkup(createElement(TouchControls, props));
   for (const action of TOUCH_BUTTONS) assert.ok(html.includes(`touch-button touch-${action}"`), `${action} is rendered`);
   assert.match(html, /aria-label="GRENADE"/);
+  assert.match(html, /aria-label="MOBILITY"/);
   assert.equal(renderToStaticMarkup(createElement(TouchControls, {...props, visible:false})), '');
 });
 
@@ -30,5 +31,5 @@ test('the rendered soccer cluster exposes boost, brake and reset without combat 
   const props = {runtime:{current:{}}, visible:true, mode:'puma-soccer', onLook(){}, onSwap(){}, onPause(){}};
   const html = renderToStaticMarkup(createElement(TouchControls, props));
   for (const label of ['BOOST','BRAKE','RESET']) assert.ok(html.includes(label), `${label} is rendered`);
-  for (const action of ['fire','ads','reload','swap','grenade','melee','jump']) assert.ok(!html.includes(`touch-${action}`), `${action} is hidden`);
+  for (const action of ['fire','ads','reload','swap','grenade','melee','jump','mobility']) assert.ok(!html.includes(`touch-${action}`), `${action} is hidden`);
 });

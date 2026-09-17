@@ -5,7 +5,7 @@ export const KEYBIND_STORAGE_KEY = 'token-arena-keybinds';
 export const DEFAULT_BINDINGS = Object.freeze({
   forward: 'KeyW', back: 'KeyS', left: 'KeyA', right: 'KeyD',
   jump: 'Space', sprint: 'ShiftLeft', crouch: 'ControlLeft',
-  reload: 'KeyR', melee: 'KeyF', grenade: 'KeyG', power: 'KeyQ', interact: 'KeyE', voice: 'KeyV',
+  reload: 'KeyR', melee: 'KeyF', grenade: 'KeyG', power: 'KeyQ', mobility: 'KeyX', interact: 'KeyE', voice: 'KeyV',
 });
 
 export const KEYBIND_ACTIONS = Object.freeze(Object.keys(DEFAULT_BINDINGS));

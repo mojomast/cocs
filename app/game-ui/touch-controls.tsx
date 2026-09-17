@@ -10,8 +10,8 @@ import {applyTouchAction,stickAxis} from '../../game/touch.mjs';
 // inside their zone and use a fixed base radius, so the axis can never saturate
 // from a collapsed element. Every control captures its own pointer id, so both
 // sticks and any number of buttons work together under multi-touch.
-const LABELS:Record<string,string>={fire:'FIRE',ads:'ADS',jump:'JUMP',crouch:'SLIDE',reload:'RELOAD',power:'POWER',melee:'MELEE',grenade:'GRENADE',interact:'USE',swap:'SWAP',voice:'TALK'};
-const COMBAT_SMALL=['ads','crouch','reload','power','melee','grenade','interact','swap','voice'];
+const LABELS:Record<string,string>={fire:'FIRE',ads:'ADS',jump:'JUMP',crouch:'SLIDE',reload:'RELOAD',power:'POWER',melee:'MELEE',grenade:'GRENADE',interact:'USE',swap:'SWAP',voice:'TALK',mobility:'MOBILITY'};
+const COMBAT_SMALL=['ads','crouch','reload','power','melee','mobility','grenade','interact','swap','voice'];
 const CAR_LABELS:Record<string,string>={crouch:'BRAKE',interact:'RESET',power:'BOOST',fire:'USE ITEM'};
 const STICK_RADIUS=66,STICK_KNOB=29,LOOK_TRAVEL=33;
 
