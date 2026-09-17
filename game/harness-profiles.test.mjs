@@ -5,6 +5,7 @@ import {Match,moveActor} from './core.mjs';
 import {
   HARNESS_PROFILES,
   HARNESS_PROFILE_IDS,
+  abilityOf,
   getHarnessProfile,
   harnessAbility,
   harnessBotHints,
@@ -75,4 +76,23 @@ test('profiles affect the authoritative actor simulation',()=>{
  assert.ok(hermes.vx>baseline.vx);
  const guarded=new Match('chatgpt','claudecode',()=>.5,'crosswire',{botCount:0}).actors[0];
  assert.equal(guarded.harnessResistance,.04);
+});
+
+test('ability kinds, buffs and magnitudes are data-driven and memoized',()=>{
+ const kinds={openclaw:'burst',hermes:'buff',opencode:'buff',claudecode:'buff',codex:'heal',cline:'dash',roo:'slow'};
+ const buffs={openclaw:null,hermes:'speed',opencode:'fireRate',claudecode:'resistance',codex:null,cline:null,roo:null};
+ for(const harness of HARNESSES){
+  const ability=abilityOf(harness.id);
+  assert.equal(ability,harnessAbility(harness.id),'abilityOf shares the resolved profile descriptor');
+  assert.equal(abilityOf(harness.id),abilityOf(harness.id),'memoized by id');
+  assert.equal(abilityOf(HARNESS_PROFILES[harness.id]),abilityOf(harness.id),'accepts a profile object');
+  assert.equal(abilityOf(harness.id).kind,kinds[harness.id]);
+  assert.equal(abilityOf(harness.id).buff,buffs[harness.id]);
+  assert.equal(abilityOf(harness.id).magnitude,harness.magnitude,'magnitude mirrors the harness table');
+  assert.ok(Object.isFrozen(ability));
+ }
+ assert.equal(abilityOf('not-a-harness'),null);
+ assert.equal(abilityOf(null),null);
+ assert.equal(abilityOf(undefined),null);
+ assert.equal(abilityOf({}),null);
 });

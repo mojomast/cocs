@@ -1,15 +1,18 @@
-const rawProfiles={
- chatgpt:{role:'adaptive',preferred:[0,4],strafe:.78},
- claude:{role:'anchor',preferred:[2,6],strafe:.58},
- grok:{role:'disruptor',preferred:[1,5],strafe:.9},
- meta:{role:'connector',preferred:[4,6],strafe:.68},
- gemini:{role:'duelist',preferred:[3,2],strafe:1},
- deepseek:{role:'ambusher',preferred:[5,4],strafe:.52},
- mistral:{role:'flanker',preferred:[3,7],strafe:1.08},
- kimi:{role:'orbiter',preferred:[6,0],strafe:1.16},
- qwen:{role:'optimizer',preferred:[0,2],strafe:.72},
-};
+// Compatibility shim: the class data now lives in `kits.mjs`. This module keeps
+// the historical operator-profile shape (a two-weapon `preferred` pair, the
+// role string and the strafe scalar) so every existing consumer stays
+// byte-compatible; `OPERATOR_KITS` and `resolveKit` expose the full
+// three-weapon affinity band and the rest of the class kit.
+import {CHARACTERS} from './data.mjs';
+import {OPERATOR_KITS} from './kits.mjs';
+
 const freeze=value=>{if(value&&typeof value==='object'&&!Object.isFrozen(value)){Object.freeze(value);Object.values(value).forEach(freeze);}return value;};
-export const OPERATOR_PROFILES=freeze(Object.fromEntries(Object.entries(rawProfiles).map(([id,profile])=>[id,{id,...profile,preferred:[...profile.preferred]}])));
+const KITS_BY_ID=Object.fromEntries(OPERATOR_KITS.map(kit=>[kit.id,kit]));
+export const OPERATOR_PROFILES=freeze(Object.fromEntries(CHARACTERS.map(character=>{
+ const kit=KITS_BY_ID[character.id];
+ // The legacy pair is the first two entries of the kit's affinity band, in the
+ // kit's order, so `preferredOperatorWeapon` answers exactly as it always did.
+ return [kit.id,{id:kit.id,role:kit.role,preferred:kit.preferred.slice(0,2),strafe:kit.strafe}];
+})));
 export function operatorProfile(id){return OPERATOR_PROFILES[id]??OPERATOR_PROFILES.chatgpt;}
 export function preferredOperatorWeapon(id,available=[]){const profile=OPERATOR_PROFILES[id];return profile?.preferred.find(index=>available.includes(index))??null;}

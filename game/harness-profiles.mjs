@@ -6,45 +6,63 @@ import {clamp} from './math.mjs';
 // multipliers becoming the new source of balance problems.
 const WEAPON_IDS = Object.freeze(WEAPONS.map((_, index) => index));
 const freeze = value => Object.freeze(value);
+const deepFreeze = value => {
+  if (value && typeof value === 'object' && !Object.isFrozen(value)) {
+    Object.freeze(value);
+    Object.values(value).forEach(deepFreeze);
+  }
+  return value;
+};
 
+// `kind` / `buff` are the data-driven dispatch vocabulary (§13.2); `magnitude`
+// is filled from the harness table in `makeProfile` so the active's stored
+// number has exactly one source. Kinds unused by today's roster are reserved
+// vocabulary, not dead data.
 const rawProfiles = {
   openclaw: {
+    kind: 'burst', buff: null,
     passive: {speed: 1, damage: 1.02, resistance: 0},
     ability: {radius: 5, damage: 24, knockback: 12, lift: 4, cooldown: 10, vehicle: {autogunner: true, gunnerDamage: 1.12, label: 'Auto-Gunner'}},
     weapons: {preferred: [3, 7], damage: 1.04, interval: 1, spread: .96},
     bot: {personality: 'brawler', range: [3, 8], retreatHealth: .28, power: 'close'},
   },
   hermes: {
+    kind: 'buff', buff: 'speed',
     passive: {speed: 1.05, damage: .98, resistance: 0},
     ability: {duration: 3, speed: 1.6, cooldown: 12, vehicle: {speed: 1.15, label: 'Overdrive'}},
     weapons: {preferred: [0, 4], damage: 1, interval: .97, spread: 1.08},
     bot: {personality: 'skirmisher', range: [8, 18], retreatHealth: .35, power: 'escape'},
   },
   opencode: {
+    kind: 'buff', buff: 'fireRate',
     passive: {speed: 1, damage: 1, resistance: 0},
     ability: {duration: 3, fireRate: 1 / .6, cooldown: 14, vehicle: {autogunner: true, traverse: 1.5, label: 'Targeting Uplink'}},
     weapons: {preferred: [0, 4], damage: .98, interval: .9, spread: 1.04},
     bot: {personality: 'suppressor', range: [7, 20], retreatHealth: .3, power: 'visible'},
   },
   claudecode: {
+    kind: 'buff', buff: 'resistance',
     passive: {speed: .98, damage: 1, resistance: .04},
     ability: {duration: 3, resistance: .5, cooldown: 14, vehicle: {armor: .6, label: 'Reactive Plating'}},
     weapons: {preferred: [1, 5], damage: 1.03, interval: 1.03, spread: .94},
     bot: {personality: 'sentinel', range: [6, 16], retreatHealth: .62, power: 'hurt'},
   },
   codex: {
+    kind: 'heal', buff: null,
     passive: {speed: 1, damage: 1.01, resistance: 0},
     ability: {duration: 2, heal: 35, cooldown: 16, vehicle: {repair: 12, label: 'Field Repair'}},
     weapons: {preferred: [2, 6], damage: 1.05, interval: 1.05, spread: .9},
     bot: {personality: 'opportunist', range: [10, 24], retreatHealth: .65, power: 'hurt'},
   },
   cline: {
+    kind: 'dash', buff: null,
     passive: {speed: 1.03, damage: .99, resistance: 0},
     ability: {duration: .35, distance: 6, cooldown: 11, vehicle: {boost: 1.6, label: 'Nitro Boost'}},
     weapons: {preferred: [3, 6], damage: 1.02, interval: .98, spread: 1.12},
     bot: {personality: 'flanker', range: [5, 14], retreatHealth: .4, power: 'approach'},
   },
   roo: {
+    kind: 'slow', buff: null,
     passive: {speed: .99, damage: 1.03, resistance: .02},
     ability: {duration: 3, radius: 7, slow: .55, cooldown: 15, vehicle: {autogunner: true, gunnerDamage: 1.25, label: 'Gunner Drone'}},
     weapons: {preferred: [1, 5], damage: 1.02, interval: 1.02, spread: .97},
@@ -55,12 +73,23 @@ const rawProfiles = {
 export const HARNESS_PROFILE_IDS = Object.freeze(HARNESSES.map(harness => harness.id));
 
 function makeProfile(id, profile) {
-  const ability = {...profile.ability, id, name: HARNESSES.find(h => h.id === id).power};
+  const harness = HARNESSES.find(h => h.id === id);
+  // The dispatch fields ride on the resolved active descriptor so `abilityOf`
+  // and `harnessAbility` are the same frozen object. `magnitude` mirrors the
+  // harness table exactly, which is what `power()` stores today.
+  const ability = deepFreeze({
+    ...profile.ability,
+    id,
+    name: harness.power,
+    kind: profile.kind,
+    buff: profile.buff ?? null,
+    magnitude: harness.magnitude,
+  });
   const weaponAffinity = Object.fromEntries(WEAPON_IDS.map(index => [index, profile.weapons.preferred.includes(index) ? 1.08 : 1]));
   return freeze({
     id,
     passive: freeze({...profile.passive}),
-    ability: freeze(ability),
+    ability,
     weapons: freeze({...profile.weapons, preferred: freeze([...profile.weapons.preferred]), affinity: freeze(weaponAffinity)}),
     bot: freeze({...profile.bot, range: freeze([...profile.bot.range])}),
   });
@@ -80,6 +109,22 @@ export function harnessPassive(harnessId) {
 
 export function harnessAbility(harnessId) {
   return getHarnessProfile(harnessId)?.ability ?? null;
+}
+
+// Memoized resolved ability descriptor for the kind router and the buff use
+// sites: the same frozen object as `harnessAbility(id)`, carrying `id`, `name`,
+// `kind`, `buff` and `magnitude`. Accepts a harness id or a profile object for
+// convenience; unknown inputs return null. Because the descriptor is memoized
+// by harness id, callers may compare descriptors by identity.
+const abilityCache = new Map();
+export function abilityOf(harnessIdOrProfile) {
+  const id = typeof harnessIdOrProfile === 'string' ? harnessIdOrProfile
+    : harnessIdOrProfile && typeof harnessIdOrProfile === 'object' ? harnessIdOrProfile.id
+      : null;
+  const profile = getHarnessProfile(id);
+  if (!profile) return null;
+  if (!abilityCache.has(profile.id)) abilityCache.set(profile.id, profile.ability);
+  return abilityCache.get(profile.id);
 }
 
 // Vehicle skills ride on the active ability: auto-gunner, plating, repair, boost or speed.
