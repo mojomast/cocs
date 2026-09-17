@@ -151,6 +151,11 @@ worktree (class Phase 2 + rebuilt attract demo merged):
 - `npx tsc --noEmit` — clean; `npm run lint` — 0 errors (481 warnings only);
   bounded `vinext build` — green.
 - `game/archive/*.test.mjs` — 2 files, run on demand, not counted above.
+  `game/archive/balance-sweep.test.mjs` is the opt-in balance sweep hook
+  (`COCS_SLOW_TESTS=1` smoke, `COCS_SWEEP=full` full profile; tier alarms are
+  signal, not failures). The CLI path is
+  `node scripts/balance-sweep.mjs --profile smoke|full --print-tierlist`, which
+  writes `reports/balance-<release>.json`.
 
 These counts come from a real run on that release; re-run the suites to confirm
 them after changes rather than trusting this table.
