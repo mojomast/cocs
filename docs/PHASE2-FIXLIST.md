@@ -119,11 +119,46 @@ additional stale pins can still surface. The F6 gate below is what catches them;
 fix each by confirming the phase-1 handoff intent and updating the pin without
 deleting coverage.
 
+## F8 — Registry placement sweep ran campaign off-map (fixed)
+
+`game/map-layout.test.mjs` constructed a campaign match with the default
+mission on all 41 maps; phase 1's strict off-map anchor resolution (intentional)
+threw `entrance has no supported floor` on 30 of them. The sweep now runs
+campaign only on the map its mission authors and passes that mission id; the
+game contract is untouched. Test-only change; 41/41 pass (~133 s).
+
+## F9 — Duplicated tunnel solids and stale facade spans (fixed)
+
+- Phase 1's tunnel rewrite dropped the interior-waypoint guard, so 4 maps
+  (frost-gate, riverbend, fortress, convoy-line) each emitted four byte-identical
+  conservative wall boxes where collinear segments share a waypoint. The exported
+  next-gen maps now filter exact repeated tunnel solids without touching authored
+  floor points; `nextgen-maps.test.mjs` stays strict (24/24).
+- The quarter-turned window-prop test now asserts the documented outer-wall-plane
+  positions and the correct per-side spans (the old pins encoded the pre-phase-1
+  swapped-span defect). 24/24.
+- Follow-up: restoring the generator guard (`k = i === 0 ? 0 : 1` in
+  `ctx.addTunnel`, `game/levelgen.mjs`) is the deeper fix; the map-level filter
+  becomes a no-op if it lands.
+
+## F10 — Singleplayer suite hang (fixed)
+
+The autoplay driver cleared only `step.complete.group`, not `complete.groups`,
+so predeploy steps never advanced and every mission burned its full 18k-step
+guard — the file exceeded 600 s. The driver now clears every required group,
+tracks the staged Warden, and advances to authored steps before expecting
+step-gated scripts/checkpoints. No production file changed; 44/44 in ~3m21s.
+
+Follow-up perf ticket: `terrainSupportAt` (`game/terrain.mjs:90`) is a linear
+triangle scan with no spatial index and dominates step cost on terrain maps
+(~13 ms/step with ~20 actors), which is why the campaign sims are slow.
+
 ---
 
-## F6 — Full-suite gate before deploy
+## F6 — Full-suite gate before deploy (closed)
 
-After both phases are integrated: `npm test` on this branch must be green
-(`test:game` + `test:server` + `typecheck` + build + `tests/*.test.mjs`), with
-exact counts recorded in the final report. Two known failures at the deployed
-phase-1 checkpoint (F2, F3) are being worked here; F2 is fixed.
+`npm test` is green on this branch — all stages exit 0 (`test:game`,
+`test:server`, `typecheck`, build, `tests/*.test.mjs`). The first gate run
+exposed 36 failures, every one pre-existing at the deployed phase-1 checkpoint
+and all fixed above (F7–F10 plus F2/F3): campaign pins 3, placement sweep 30,
+next-gen maps 2, singleplayer hang 1. The rerun passed with no failures.

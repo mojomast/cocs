@@ -1,5 +1,41 @@
 # COCS verification report
 
+## Phase 2 - Materials, cinematic music, gameplay sound, restrained HUD
+
+- **Materials:** natural surfaces derive albedo/roughness/normal from one
+  seamless multi-scale height/wear field. Pinned concrete albedo/roughness
+  correlation 0.874 (> 0.75), tile edge-step ratio 0.74-0.95x (was 3.8-11.3x),
+  normal relief std 0.08-0.23 (was ~0.007). The moth enhancer now runs on every
+  natural kind with a two-scale masked region field and a ridged fracture layer.
+- **Sky/weather:** cinematic day/dusk/night palettes, thicker horizon haze,
+  de-neoned ambience tints; the CPU sky follows the phase.
+- **Music:** eight-bar progressions with fills, absolute-quarter lead phrasing,
+  staged combat layers, an outro/enter/idle transition machine, seeded noise
+  risers, panning and reverb sends. Public API and `MUSIC_EXPORTS` unchanged.
+  Offline `OfflineAudioContext` renders for menu/explore/combat are non-silent
+  in every second (rms 0.016/0.031/0.032, peaks <= 0.51); excerpts in
+  `docs/evidence/phase2/audio/`.
+- **Gameplay sound:** single-token layered weapon reports with deterministic
+  per-shot variation and distance darkening, surface-aware impacts/ricochets,
+  bounded explosion debris, surface footstep/landing/jump/slide foley,
+  wind/tension beds, retuned objective cues, retry-safe cavern IR load.
+- **HUD:** merged vitals card, grouped action gauges, one contextual objective
+  chip, kill feed capped at four, settled hints, and a `REDUCED MOTION`
+  indicator with explanatory settings copy (semantics unchanged).
+- **Integration:** solo movement foley resolves terrain material per frame;
+  authored weather wind feeds the ambience bed; the material enhancer applies to
+  all natural surfaces; normal scale 0.6.
+- **Evidence:** six before/after map sheets in `docs/evidence/phase2/maps/`
+  (same seed/resolution/quality as the phase-1 atlas; geometry unchanged,
+  tiling repetition visibly reduced). Built-preview smoke 10/10 with no page
+  errors; SwiftShader compatibility only, not hardware FPS.
+- **Gate:** `npm test` green. The first full-suite run found 36 failures, all
+  pre-existing at the deployed phase-1 checkpoint (campaign pins 3, placement
+  sweep 30, next-gen maps 2, singleplayer driver hang 1) and all fixed; see
+  `docs/PHASE2-FIXLIST.md`.
+- **Open:** F4 preview favicon CSP; material bake ~0.4 s/arena; loudness/mix and
+  GPU shader compile remain manual-review items.
+
 ## Release 6.3 - Soundtrack, smooth presentation, batching and diagnostics
 
 - **Audio wiring:** `game/feedback.test.mjs` builds the real bus graph through
