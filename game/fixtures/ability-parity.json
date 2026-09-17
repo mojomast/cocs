@@ -1073,7 +1073,7 @@
             "19": {
               "actor": {
                 "health": 100,
-                "armor": 0,
+                "armor": 5,
                 "slow": 0,
                 "slowMultiplier": 0.55,
                 "cooldown": 0,
@@ -1094,7 +1094,7 @@
               },
               "target": {
                 "health": 100,
-                "armor": 0,
+                "armor": 5,
                 "slow": 0,
                 "slowMultiplier": 0.55,
                 "cooldown": 0,
@@ -1115,7 +1115,7 @@
               },
               "third": {
                 "health": 100,
-                "armor": 0,
+                "armor": 5,
                 "slow": 0,
                 "slowMultiplier": 0.55,
                 "cooldown": 0,
@@ -1138,7 +1138,7 @@
             "20": {
               "actor": {
                 "health": 100,
-                "armor": 0,
+                "armor": 5,
                 "slow": 0,
                 "slowMultiplier": 0.55,
                 "cooldown": 10,
@@ -1158,7 +1158,7 @@
                 ]
               },
               "target": {
-                "health": 76,
+                "health": 81,
                 "armor": 0,
                 "slow": 0,
                 "slowMultiplier": 0.55,
@@ -1179,7 +1179,7 @@
                 ]
               },
               "third": {
-                "health": 76,
+                "health": 81,
                 "armor": 0,
                 "slow": 0,
                 "slowMultiplier": 0.55,
@@ -1203,7 +1203,7 @@
             "21": {
               "actor": {
                 "health": 100,
-                "armor": 0,
+                "armor": 5,
                 "slow": 0,
                 "slowMultiplier": 0.55,
                 "cooldown": 9.983333,
@@ -1223,7 +1223,7 @@
                 ]
               },
               "target": {
-                "health": 76,
+                "health": 81,
                 "armor": 0,
                 "slow": 0,
                 "slowMultiplier": 0.55,
@@ -1244,7 +1244,7 @@
                 ]
               },
               "third": {
-                "health": 76,
+                "health": 81,
                 "armor": 0,
                 "slow": 0,
                 "slowMultiplier": 0.55,
@@ -1268,7 +1268,7 @@
             "40": {
               "actor": {
                 "health": 100,
-                "armor": 0,
+                "armor": 5,
                 "slow": 0,
                 "slowMultiplier": 0.55,
                 "cooldown": 9.666667,
@@ -1288,7 +1288,7 @@
                 ]
               },
               "target": {
-                "health": 76,
+                "health": 81,
                 "armor": 0,
                 "slow": 0,
                 "slowMultiplier": 0.55,
@@ -1309,7 +1309,7 @@
                 ]
               },
               "third": {
-                "health": 76,
+                "health": 81,
                 "armor": 0,
                 "slow": 0,
                 "slowMultiplier": 0.55,
@@ -1333,7 +1333,7 @@
             "60": {
               "actor": {
                 "health": 100,
-                "armor": 0,
+                "armor": 5,
                 "slow": 0,
                 "slowMultiplier": 0.55,
                 "cooldown": 9.333333,
@@ -1353,7 +1353,7 @@
                 ]
               },
               "target": {
-                "health": 76,
+                "health": 81,
                 "armor": 0,
                 "slow": 0,
                 "slowMultiplier": 0.55,
@@ -1374,7 +1374,7 @@
                 ]
               },
               "third": {
-                "health": 76,
+                "health": 81,
                 "armor": 0,
                 "slow": 0,
                 "slowMultiplier": 0.55,
@@ -1398,7 +1398,7 @@
             "120": {
               "actor": {
                 "health": 100,
-                "armor": 0,
+                "armor": 5,
                 "slow": 0,
                 "slowMultiplier": 0.55,
                 "cooldown": 8.333333,
@@ -1418,7 +1418,7 @@
                 ]
               },
               "target": {
-                "health": 76,
+                "health": 81,
                 "armor": 0,
                 "slow": 0,
                 "slowMultiplier": 0.55,
@@ -1439,7 +1439,7 @@
                 ]
               },
               "third": {
-                "health": 76,
+                "health": 81,
                 "armor": 0,
                 "slow": 0,
                 "slowMultiplier": 0.55,
@@ -1463,7 +1463,7 @@
             "200": {
               "actor": {
                 "health": 100,
-                "armor": 0,
+                "armor": 5,
                 "slow": 0,
                 "slowMultiplier": 0.55,
                 "cooldown": 7,
@@ -1483,7 +1483,7 @@
                 ]
               },
               "target": {
-                "health": 76,
+                "health": 81,
                 "armor": 0,
                 "slow": 0,
                 "slowMultiplier": 0.55,
@@ -1504,7 +1504,7 @@
                 ]
               },
               "third": {
-                "health": 76,
+                "health": 81,
                 "armor": 0,
                 "slow": 0,
                 "slowMultiplier": 0.55,
@@ -1528,7 +1528,7 @@
             "210": {
               "actor": {
                 "health": 100,
-                "armor": 0,
+                "armor": 5,
                 "slow": 0,
                 "slowMultiplier": 0.55,
                 "cooldown": 6.833333,
@@ -1548,7 +1548,7 @@
                 ]
               },
               "target": {
-                "health": 76,
+                "health": 81,
                 "armor": 0,
                 "slow": 0,
                 "slowMultiplier": 0.55,
@@ -1569,7 +1569,7 @@
                 ]
               },
               "third": {
-                "health": 76,
+                "health": 81,
                 "armor": 0,
                 "slow": 0,
                 "slowMultiplier": 0.55,
@@ -1593,7 +1593,7 @@
             "259": {
               "actor": {
                 "health": 100,
-                "armor": 0,
+                "armor": 5,
                 "slow": 0,
                 "slowMultiplier": 0.55,
                 "cooldown": 6.016667,
@@ -1613,7 +1613,7 @@
                 ]
               },
               "target": {
-                "health": 76,
+                "health": 81,
                 "armor": 0,
                 "slow": 0,
                 "slowMultiplier": 0.55,
@@ -1634,7 +1634,7 @@
                 ]
               },
               "third": {
-                "health": 76,
+                "health": 81,
                 "armor": 0,
                 "slow": 0,
                 "slowMultiplier": 0.55,
@@ -1688,7 +1688,7 @@
               "source": 0,
               "amount": 24,
               "shield": 0,
-              "shieldBreak": false
+              "shieldBreak": true
             },
             {
               "step": 20,
@@ -1697,7 +1697,7 @@
               "source": 0,
               "amount": 24,
               "shield": 0,
-              "shieldBreak": false
+              "shieldBreak": true
             }
           ]
         },
@@ -2756,7 +2756,7 @@
             "19": {
               "actor": {
                 "health": 100,
-                "armor": 0,
+                "armor": 5,
                 "slow": 0,
                 "slowMultiplier": 0.55,
                 "cooldown": 0,
@@ -2777,7 +2777,7 @@
               },
               "target": {
                 "health": 100,
-                "armor": 0,
+                "armor": 5,
                 "slow": 0,
                 "slowMultiplier": 0.55,
                 "cooldown": 0,
@@ -2798,7 +2798,7 @@
               },
               "third": {
                 "health": 100,
-                "armor": 0,
+                "armor": 5,
                 "slow": 0,
                 "slowMultiplier": 0.55,
                 "cooldown": 0,
@@ -2821,7 +2821,7 @@
             "20": {
               "actor": {
                 "health": 100,
-                "armor": 0,
+                "armor": 5,
                 "slow": 0,
                 "slowMultiplier": 0.55,
                 "cooldown": 12,
@@ -2842,7 +2842,7 @@
               },
               "target": {
                 "health": 100,
-                "armor": 0,
+                "armor": 5,
                 "slow": 0,
                 "slowMultiplier": 0.55,
                 "cooldown": 0,
@@ -2863,7 +2863,7 @@
               },
               "third": {
                 "health": 100,
-                "armor": 0,
+                "armor": 5,
                 "slow": 0,
                 "slowMultiplier": 0.55,
                 "cooldown": 0,
@@ -2886,7 +2886,7 @@
             "21": {
               "actor": {
                 "health": 100,
-                "armor": 0,
+                "armor": 5,
                 "slow": 0,
                 "slowMultiplier": 0.55,
                 "cooldown": 11.983333,
@@ -2897,17 +2897,17 @@
                 "position": [
                   9,
                   0,
-                  -0.037333
+                  -0.040133
                 ],
                 "velocity": [
                   0,
                   0,
-                  -2.24
+                  -2.408
                 ]
               },
               "target": {
                 "health": 100,
-                "armor": 0,
+                "armor": 5,
                 "slow": 0,
                 "slowMultiplier": 0.55,
                 "cooldown": 0,
@@ -2928,7 +2928,7 @@
               },
               "third": {
                 "health": 100,
-                "armor": 0,
+                "armor": 5,
                 "slow": 0,
                 "slowMultiplier": 0.55,
                 "cooldown": 0,
@@ -2951,7 +2951,7 @@
             "40": {
               "actor": {
                 "health": 100,
-                "armor": 0,
+                "armor": 5,
                 "slow": 0,
                 "slowMultiplier": 0.55,
                 "cooldown": 11.666667,
@@ -2962,17 +2962,17 @@
                 "position": [
                   9,
                   0,
-                  -3.761036
+                  -4.043114
                 ],
                 "velocity": [
                   0,
                   0,
-                  -13.44
+                  -14.448
                 ]
               },
               "target": {
                 "health": 100,
-                "armor": 0,
+                "armor": 5,
                 "slow": 0,
                 "slowMultiplier": 0.55,
                 "cooldown": 0,
@@ -2993,7 +2993,7 @@
               },
               "third": {
                 "health": 100,
-                "armor": 0,
+                "armor": 5,
                 "slow": 0,
                 "slowMultiplier": 0.55,
                 "cooldown": 0,
@@ -3016,7 +3016,7 @@
             "60": {
               "actor": {
                 "health": 100,
-                "armor": 0,
+                "armor": 5,
                 "slow": 0,
                 "slowMultiplier": 0.55,
                 "cooldown": 11.333333,
@@ -3027,17 +3027,17 @@
                 "position": [
                   9,
                   0,
-                  -7.314101
+                  -7.862658
                 ],
                 "velocity": [
                   0,
                   0,
-                  -4.686238
+                  -5.037706
                 ]
               },
               "target": {
                 "health": 100,
-                "armor": 0,
+                "armor": 5,
                 "slow": 0,
                 "slowMultiplier": 0.55,
                 "cooldown": 0,
@@ -3058,7 +3058,7 @@
               },
               "third": {
                 "health": 100,
-                "armor": 0,
+                "armor": 5,
                 "slow": 0,
                 "slowMultiplier": 0.55,
                 "cooldown": 0,
@@ -3081,7 +3081,7 @@
             "120": {
               "actor": {
                 "health": 100,
-                "armor": 0,
+                "armor": 5,
                 "slow": 0,
                 "slowMultiplier": 0.55,
                 "cooldown": 10.333333,
@@ -3092,7 +3092,7 @@
                 "position": [
                   9,
                   0,
-                  -7.867036
+                  -8.468314
                 ],
                 "velocity": [
                   0,
@@ -3102,7 +3102,7 @@
               },
               "target": {
                 "health": 100,
-                "armor": 0,
+                "armor": 5,
                 "slow": 0,
                 "slowMultiplier": 0.55,
                 "cooldown": 0,
@@ -3123,7 +3123,7 @@
               },
               "third": {
                 "health": 100,
-                "armor": 0,
+                "armor": 5,
                 "slow": 0,
                 "slowMultiplier": 0.55,
                 "cooldown": 0,
@@ -3146,7 +3146,7 @@
             "200": {
               "actor": {
                 "health": 100,
-                "armor": 0,
+                "armor": 5,
                 "slow": 0,
                 "slowMultiplier": 0.55,
                 "cooldown": 9,
@@ -3157,7 +3157,7 @@
                 "position": [
                   9,
                   0,
-                  -7.867036
+                  -8.468314
                 ],
                 "velocity": [
                   0,
@@ -3167,7 +3167,7 @@
               },
               "target": {
                 "health": 100,
-                "armor": 0,
+                "armor": 5,
                 "slow": 0,
                 "slowMultiplier": 0.55,
                 "cooldown": 0,
@@ -3188,7 +3188,7 @@
               },
               "third": {
                 "health": 100,
-                "armor": 0,
+                "armor": 5,
                 "slow": 0,
                 "slowMultiplier": 0.55,
                 "cooldown": 0,
@@ -3211,7 +3211,7 @@
             "210": {
               "actor": {
                 "health": 100,
-                "armor": 0,
+                "armor": 5,
                 "slow": 0,
                 "slowMultiplier": 0.55,
                 "cooldown": 8.833333,
@@ -3222,7 +3222,7 @@
                 "position": [
                   9,
                   0,
-                  -7.867036
+                  -8.468314
                 ],
                 "velocity": [
                   0,
@@ -3232,7 +3232,7 @@
               },
               "target": {
                 "health": 100,
-                "armor": 0,
+                "armor": 5,
                 "slow": 0,
                 "slowMultiplier": 0.55,
                 "cooldown": 0,
@@ -3253,7 +3253,7 @@
               },
               "third": {
                 "health": 100,
-                "armor": 0,
+                "armor": 5,
                 "slow": 0,
                 "slowMultiplier": 0.55,
                 "cooldown": 0,
@@ -3276,7 +3276,7 @@
             "259": {
               "actor": {
                 "health": 100,
-                "armor": 0,
+                "armor": 5,
                 "slow": 0,
                 "slowMultiplier": 0.55,
                 "cooldown": 8.016667,
@@ -3287,7 +3287,7 @@
                 "position": [
                   9,
                   0,
-                  -7.867036
+                  -8.468314
                 ],
                 "velocity": [
                   0,
@@ -3297,7 +3297,7 @@
               },
               "target": {
                 "health": 100,
-                "armor": 0,
+                "armor": 5,
                 "slow": 0,
                 "slowMultiplier": 0.55,
                 "cooldown": 0,
@@ -3318,7 +3318,7 @@
               },
               "third": {
                 "health": 100,
-                "armor": 0,
+                "armor": 5,
                 "slow": 0,
                 "slowMultiplier": 0.55,
                 "cooldown": 0,
@@ -4421,7 +4421,7 @@
             "19": {
               "actor": {
                 "health": 100,
-                "armor": 0,
+                "armor": 5,
                 "slow": 0,
                 "slowMultiplier": 0.55,
                 "cooldown": 0,
@@ -4442,7 +4442,7 @@
               },
               "target": {
                 "health": 100,
-                "armor": 0,
+                "armor": 5,
                 "slow": 0,
                 "slowMultiplier": 0.55,
                 "cooldown": 0,
@@ -4463,7 +4463,7 @@
               },
               "third": {
                 "health": 100,
-                "armor": 0,
+                "armor": 5,
                 "slow": 0,
                 "slowMultiplier": 0.55,
                 "cooldown": 0,
@@ -4486,7 +4486,7 @@
             "20": {
               "actor": {
                 "health": 100,
-                "armor": 0,
+                "armor": 5,
                 "slow": 0,
                 "slowMultiplier": 0.55,
                 "cooldown": 14,
@@ -4507,7 +4507,7 @@
               },
               "target": {
                 "health": 100,
-                "armor": 0,
+                "armor": 5,
                 "slow": 0,
                 "slowMultiplier": 0.55,
                 "cooldown": 0,
@@ -4528,7 +4528,7 @@
               },
               "third": {
                 "health": 100,
-                "armor": 0,
+                "armor": 5,
                 "slow": 0,
                 "slowMultiplier": 0.55,
                 "cooldown": 0,
@@ -4551,7 +4551,7 @@
             "21": {
               "actor": {
                 "health": 100,
-                "armor": 0,
+                "armor": 5,
                 "slow": 0,
                 "slowMultiplier": 0.55,
                 "cooldown": 13.983333,
@@ -4572,7 +4572,7 @@
               },
               "target": {
                 "health": 100,
-                "armor": 0,
+                "armor": 5,
                 "slow": 0,
                 "slowMultiplier": 0.55,
                 "cooldown": 0,
@@ -4593,7 +4593,7 @@
               },
               "third": {
                 "health": 100,
-                "armor": 0,
+                "armor": 5,
                 "slow": 0,
                 "slowMultiplier": 0.55,
                 "cooldown": 0,
@@ -4616,7 +4616,7 @@
             "40": {
               "actor": {
                 "health": 100,
-                "armor": 0,
+                "armor": 5,
                 "slow": 0,
                 "slowMultiplier": 0.55,
                 "cooldown": 13.666667,
@@ -4637,7 +4637,7 @@
               },
               "target": {
                 "health": 100,
-                "armor": 0,
+                "armor": 5,
                 "slow": 0,
                 "slowMultiplier": 0.55,
                 "cooldown": 0,
@@ -4658,7 +4658,7 @@
               },
               "third": {
                 "health": 100,
-                "armor": 0,
+                "armor": 5,
                 "slow": 0,
                 "slowMultiplier": 0.55,
                 "cooldown": 0,
@@ -4681,7 +4681,7 @@
             "60": {
               "actor": {
                 "health": 100,
-                "armor": 0,
+                "armor": 5,
                 "slow": 0,
                 "slowMultiplier": 0.55,
                 "cooldown": 13.333333,
@@ -4702,7 +4702,7 @@
               },
               "target": {
                 "health": 100,
-                "armor": 0,
+                "armor": 5,
                 "slow": 0,
                 "slowMultiplier": 0.55,
                 "cooldown": 0,
@@ -4723,7 +4723,7 @@
               },
               "third": {
                 "health": 100,
-                "armor": 0,
+                "armor": 5,
                 "slow": 0,
                 "slowMultiplier": 0.55,
                 "cooldown": 0,
@@ -4746,7 +4746,7 @@
             "120": {
               "actor": {
                 "health": 100,
-                "armor": 0,
+                "armor": 5,
                 "slow": 0,
                 "slowMultiplier": 0.55,
                 "cooldown": 12.333333,
@@ -4767,7 +4767,7 @@
               },
               "target": {
                 "health": 100,
-                "armor": 0,
+                "armor": 5,
                 "slow": 0,
                 "slowMultiplier": 0.55,
                 "cooldown": 0,
@@ -4788,7 +4788,7 @@
               },
               "third": {
                 "health": 100,
-                "armor": 0,
+                "armor": 5,
                 "slow": 0,
                 "slowMultiplier": 0.55,
                 "cooldown": 0,
@@ -4811,7 +4811,7 @@
             "200": {
               "actor": {
                 "health": 100,
-                "armor": 0,
+                "armor": 5,
                 "slow": 0,
                 "slowMultiplier": 0.55,
                 "cooldown": 11,
@@ -4832,7 +4832,7 @@
               },
               "target": {
                 "health": 100,
-                "armor": 0,
+                "armor": 5,
                 "slow": 0,
                 "slowMultiplier": 0.55,
                 "cooldown": 0,
@@ -4853,7 +4853,7 @@
               },
               "third": {
                 "health": 100,
-                "armor": 0,
+                "armor": 5,
                 "slow": 0,
                 "slowMultiplier": 0.55,
                 "cooldown": 0,
@@ -4876,7 +4876,7 @@
             "210": {
               "actor": {
                 "health": 100,
-                "armor": 0,
+                "armor": 5,
                 "slow": 0,
                 "slowMultiplier": 0.55,
                 "cooldown": 10.833333,
@@ -4897,7 +4897,7 @@
               },
               "target": {
                 "health": 100,
-                "armor": 0,
+                "armor": 5,
                 "slow": 0,
                 "slowMultiplier": 0.55,
                 "cooldown": 0,
@@ -4918,7 +4918,7 @@
               },
               "third": {
                 "health": 100,
-                "armor": 0,
+                "armor": 5,
                 "slow": 0,
                 "slowMultiplier": 0.55,
                 "cooldown": 0,
@@ -4941,7 +4941,7 @@
             "259": {
               "actor": {
                 "health": 100,
-                "armor": 0,
+                "armor": 5,
                 "slow": 0,
                 "slowMultiplier": 0.55,
                 "cooldown": 10.016667,
@@ -4962,7 +4962,7 @@
               },
               "target": {
                 "health": 100,
-                "armor": 0,
+                "armor": 5,
                 "slow": 0,
                 "slowMultiplier": 0.55,
                 "cooldown": 0,
@@ -4983,7 +4983,7 @@
               },
               "third": {
                 "health": 100,
-                "armor": 0,
+                "armor": 5,
                 "slow": 0,
                 "slowMultiplier": 0.55,
                 "cooldown": 0,
@@ -6122,7 +6122,7 @@
             "19": {
               "actor": {
                 "health": 100,
-                "armor": 0,
+                "armor": 5,
                 "slow": 0,
                 "slowMultiplier": 0.55,
                 "cooldown": 0,
@@ -6143,7 +6143,7 @@
               },
               "target": {
                 "health": 100,
-                "armor": 0,
+                "armor": 5,
                 "slow": 0,
                 "slowMultiplier": 0.55,
                 "cooldown": 0,
@@ -6164,7 +6164,7 @@
               },
               "third": {
                 "health": 100,
-                "armor": 0,
+                "armor": 5,
                 "slow": 0,
                 "slowMultiplier": 0.55,
                 "cooldown": 0,
@@ -6187,7 +6187,7 @@
             "20": {
               "actor": {
                 "health": 100,
-                "armor": 0,
+                "armor": 5,
                 "slow": 0,
                 "slowMultiplier": 0.55,
                 "cooldown": 14,
@@ -6208,7 +6208,7 @@
               },
               "target": {
                 "health": 100,
-                "armor": 0,
+                "armor": 5,
                 "slow": 0,
                 "slowMultiplier": 0.55,
                 "cooldown": 0,
@@ -6229,7 +6229,7 @@
               },
               "third": {
                 "health": 100,
-                "armor": 0,
+                "armor": 5,
                 "slow": 0,
                 "slowMultiplier": 0.55,
                 "cooldown": 0,
@@ -6252,7 +6252,7 @@
             "21": {
               "actor": {
                 "health": 100,
-                "armor": 0,
+                "armor": 5,
                 "slow": 0,
                 "slowMultiplier": 0.55,
                 "cooldown": 13.983333,
@@ -6273,7 +6273,7 @@
               },
               "target": {
                 "health": 100,
-                "armor": 0,
+                "armor": 5,
                 "slow": 0,
                 "slowMultiplier": 0.55,
                 "cooldown": 0,
@@ -6294,7 +6294,7 @@
               },
               "third": {
                 "health": 100,
-                "armor": 0,
+                "armor": 5,
                 "slow": 0,
                 "slowMultiplier": 0.55,
                 "cooldown": 0,
@@ -6316,7 +6316,7 @@
             },
             "40": {
               "actor": {
-                "health": 70,
+                "health": 75,
                 "armor": 0,
                 "slow": 0,
                 "slowMultiplier": 0.55,
@@ -6338,7 +6338,7 @@
               },
               "target": {
                 "health": 100,
-                "armor": 0,
+                "armor": 5,
                 "slow": 0,
                 "slowMultiplier": 0.55,
                 "cooldown": 0,
@@ -6359,7 +6359,7 @@
               },
               "third": {
                 "health": 100,
-                "armor": 0,
+                "armor": 5,
                 "slow": 0,
                 "slowMultiplier": 0.55,
                 "cooldown": 0,
@@ -6381,7 +6381,7 @@
             },
             "60": {
               "actor": {
-                "health": 70,
+                "health": 75,
                 "armor": 0,
                 "slow": 0,
                 "slowMultiplier": 0.55,
@@ -6403,7 +6403,7 @@
               },
               "target": {
                 "health": 100,
-                "armor": 0,
+                "armor": 5,
                 "slow": 0,
                 "slowMultiplier": 0.55,
                 "cooldown": 0,
@@ -6424,7 +6424,7 @@
               },
               "third": {
                 "health": 100,
-                "armor": 0,
+                "armor": 5,
                 "slow": 0,
                 "slowMultiplier": 0.55,
                 "cooldown": 0,
@@ -6446,7 +6446,7 @@
             },
             "120": {
               "actor": {
-                "health": 70,
+                "health": 75,
                 "armor": 0,
                 "slow": 0,
                 "slowMultiplier": 0.55,
@@ -6468,7 +6468,7 @@
               },
               "target": {
                 "health": 100,
-                "armor": 0,
+                "armor": 5,
                 "slow": 0,
                 "slowMultiplier": 0.55,
                 "cooldown": 0,
@@ -6489,7 +6489,7 @@
               },
               "third": {
                 "health": 100,
-                "armor": 0,
+                "armor": 5,
                 "slow": 0,
                 "slowMultiplier": 0.55,
                 "cooldown": 0,
@@ -6511,7 +6511,7 @@
             },
             "200": {
               "actor": {
-                "health": 70,
+                "health": 75,
                 "armor": 0,
                 "slow": 0,
                 "slowMultiplier": 0.55,
@@ -6533,7 +6533,7 @@
               },
               "target": {
                 "health": 100,
-                "armor": 0,
+                "armor": 5,
                 "slow": 0,
                 "slowMultiplier": 0.55,
                 "cooldown": 0,
@@ -6554,7 +6554,7 @@
               },
               "third": {
                 "health": 100,
-                "armor": 0,
+                "armor": 5,
                 "slow": 0,
                 "slowMultiplier": 0.55,
                 "cooldown": 0,
@@ -6576,7 +6576,7 @@
             },
             "210": {
               "actor": {
-                "health": 12.4,
+                "health": 17.4,
                 "armor": 0,
                 "slow": 0,
                 "slowMultiplier": 0.55,
@@ -6598,7 +6598,7 @@
               },
               "target": {
                 "health": 100,
-                "armor": 0,
+                "armor": 5,
                 "slow": 0,
                 "slowMultiplier": 0.55,
                 "cooldown": 0,
@@ -6619,7 +6619,7 @@
               },
               "third": {
                 "health": 100,
-                "armor": 0,
+                "armor": 5,
                 "slow": 0,
                 "slowMultiplier": 0.55,
                 "cooldown": 0,
@@ -6641,7 +6641,7 @@
             },
             "259": {
               "actor": {
-                "health": 12.4,
+                "health": 17.4,
                 "armor": 0,
                 "slow": 0,
                 "slowMultiplier": 0.55,
@@ -6663,7 +6663,7 @@
               },
               "target": {
                 "health": 100,
-                "armor": 0,
+                "armor": 5,
                 "slow": 0,
                 "slowMultiplier": 0.55,
                 "cooldown": 0,
@@ -6684,7 +6684,7 @@
               },
               "third": {
                 "health": 100,
-                "armor": 0,
+                "armor": 5,
                 "slow": 0,
                 "slowMultiplier": 0.55,
                 "cooldown": 0,
@@ -6737,7 +6737,7 @@
               "source": 1,
               "amount": 30,
               "shield": 0,
-              "shieldBreak": false
+              "shieldBreak": true
             },
             {
               "step": 210,
@@ -7805,7 +7805,7 @@
             "19": {
               "actor": {
                 "health": 40,
-                "armor": 0,
+                "armor": 5,
                 "slow": 0,
                 "slowMultiplier": 0.55,
                 "cooldown": 0,
@@ -7826,7 +7826,7 @@
               },
               "target": {
                 "health": 100,
-                "armor": 0,
+                "armor": 5,
                 "slow": 0,
                 "slowMultiplier": 0.55,
                 "cooldown": 0,
@@ -7847,7 +7847,7 @@
               },
               "third": {
                 "health": 100,
-                "armor": 0,
+                "armor": 5,
                 "slow": 0,
                 "slowMultiplier": 0.55,
                 "cooldown": 0,
@@ -7870,7 +7870,7 @@
             "20": {
               "actor": {
                 "health": 75,
-                "armor": 0,
+                "armor": 5,
                 "slow": 0,
                 "slowMultiplier": 0.55,
                 "cooldown": 16,
@@ -7891,7 +7891,7 @@
               },
               "target": {
                 "health": 100,
-                "armor": 0,
+                "armor": 5,
                 "slow": 0,
                 "slowMultiplier": 0.55,
                 "cooldown": 0,
@@ -7912,7 +7912,7 @@
               },
               "third": {
                 "health": 100,
-                "armor": 0,
+                "armor": 5,
                 "slow": 0,
                 "slowMultiplier": 0.55,
                 "cooldown": 0,
@@ -7935,7 +7935,7 @@
             "21": {
               "actor": {
                 "health": 75,
-                "armor": 0,
+                "armor": 5,
                 "slow": 0,
                 "slowMultiplier": 0.55,
                 "cooldown": 15.983333,
@@ -7956,7 +7956,7 @@
               },
               "target": {
                 "health": 100,
-                "armor": 0,
+                "armor": 5,
                 "slow": 0,
                 "slowMultiplier": 0.55,
                 "cooldown": 0,
@@ -7977,7 +7977,7 @@
               },
               "third": {
                 "health": 100,
-                "armor": 0,
+                "armor": 5,
                 "slow": 0,
                 "slowMultiplier": 0.55,
                 "cooldown": 0,
@@ -8000,7 +8000,7 @@
             "40": {
               "actor": {
                 "health": 75,
-                "armor": 0,
+                "armor": 5,
                 "slow": 0,
                 "slowMultiplier": 0.55,
                 "cooldown": 15.666667,
@@ -8021,7 +8021,7 @@
               },
               "target": {
                 "health": 100,
-                "armor": 0,
+                "armor": 5,
                 "slow": 0,
                 "slowMultiplier": 0.55,
                 "cooldown": 0,
@@ -8042,7 +8042,7 @@
               },
               "third": {
                 "health": 100,
-                "armor": 0,
+                "armor": 5,
                 "slow": 0,
                 "slowMultiplier": 0.55,
                 "cooldown": 0,
@@ -8065,7 +8065,7 @@
             "60": {
               "actor": {
                 "health": 75,
-                "armor": 0,
+                "armor": 5,
                 "slow": 0,
                 "slowMultiplier": 0.55,
                 "cooldown": 15.333333,
@@ -8086,7 +8086,7 @@
               },
               "target": {
                 "health": 100,
-                "armor": 0,
+                "armor": 5,
                 "slow": 0,
                 "slowMultiplier": 0.55,
                 "cooldown": 0,
@@ -8107,7 +8107,7 @@
               },
               "third": {
                 "health": 100,
-                "armor": 0,
+                "armor": 5,
                 "slow": 0,
                 "slowMultiplier": 0.55,
                 "cooldown": 0,
@@ -8130,7 +8130,7 @@
             "120": {
               "actor": {
                 "health": 75,
-                "armor": 0,
+                "armor": 5,
                 "slow": 0,
                 "slowMultiplier": 0.55,
                 "cooldown": 14.333333,
@@ -8151,7 +8151,7 @@
               },
               "target": {
                 "health": 100,
-                "armor": 0,
+                "armor": 5,
                 "slow": 0,
                 "slowMultiplier": 0.55,
                 "cooldown": 0,
@@ -8172,7 +8172,7 @@
               },
               "third": {
                 "health": 100,
-                "armor": 0,
+                "armor": 5,
                 "slow": 0,
                 "slowMultiplier": 0.55,
                 "cooldown": 0,
@@ -8195,7 +8195,7 @@
             "200": {
               "actor": {
                 "health": 75,
-                "armor": 0,
+                "armor": 5,
                 "slow": 0,
                 "slowMultiplier": 0.55,
                 "cooldown": 13,
@@ -8216,7 +8216,7 @@
               },
               "target": {
                 "health": 100,
-                "armor": 0,
+                "armor": 5,
                 "slow": 0,
                 "slowMultiplier": 0.55,
                 "cooldown": 0,
@@ -8237,7 +8237,7 @@
               },
               "third": {
                 "health": 100,
-                "armor": 0,
+                "armor": 5,
                 "slow": 0,
                 "slowMultiplier": 0.55,
                 "cooldown": 0,
@@ -8260,7 +8260,7 @@
             "210": {
               "actor": {
                 "health": 75,
-                "armor": 0,
+                "armor": 5,
                 "slow": 0,
                 "slowMultiplier": 0.55,
                 "cooldown": 12.833333,
@@ -8281,7 +8281,7 @@
               },
               "target": {
                 "health": 100,
-                "armor": 0,
+                "armor": 5,
                 "slow": 0,
                 "slowMultiplier": 0.55,
                 "cooldown": 0,
@@ -8302,7 +8302,7 @@
               },
               "third": {
                 "health": 100,
-                "armor": 0,
+                "armor": 5,
                 "slow": 0,
                 "slowMultiplier": 0.55,
                 "cooldown": 0,
@@ -8325,7 +8325,7 @@
             "259": {
               "actor": {
                 "health": 75,
-                "armor": 0,
+                "armor": 5,
                 "slow": 0,
                 "slowMultiplier": 0.55,
                 "cooldown": 12.016667,
@@ -8346,7 +8346,7 @@
               },
               "target": {
                 "health": 100,
-                "armor": 0,
+                "armor": 5,
                 "slow": 0,
                 "slowMultiplier": 0.55,
                 "cooldown": 0,
@@ -8367,7 +8367,7 @@
               },
               "third": {
                 "health": 100,
-                "armor": 0,
+                "armor": 5,
                 "slow": 0,
                 "slowMultiplier": 0.55,
                 "cooldown": 0,
@@ -9470,7 +9470,7 @@
             "19": {
               "actor": {
                 "health": 100,
-                "armor": 0,
+                "armor": 5,
                 "slow": 0,
                 "slowMultiplier": 0.55,
                 "cooldown": 0,
@@ -9491,7 +9491,7 @@
               },
               "target": {
                 "health": 100,
-                "armor": 0,
+                "armor": 5,
                 "slow": 0,
                 "slowMultiplier": 0.55,
                 "cooldown": 0,
@@ -9512,7 +9512,7 @@
               },
               "third": {
                 "health": 100,
-                "armor": 0,
+                "armor": 5,
                 "slow": 0,
                 "slowMultiplier": 0.55,
                 "cooldown": 0,
@@ -9535,7 +9535,7 @@
             "20": {
               "actor": {
                 "health": 100,
-                "armor": 0,
+                "armor": 5,
                 "slow": 0,
                 "slowMultiplier": 0.55,
                 "cooldown": 11,
@@ -9556,7 +9556,7 @@
               },
               "target": {
                 "health": 100,
-                "armor": 0,
+                "armor": 5,
                 "slow": 0,
                 "slowMultiplier": 0.55,
                 "cooldown": 0,
@@ -9577,7 +9577,7 @@
               },
               "third": {
                 "health": 100,
-                "armor": 0,
+                "armor": 5,
                 "slow": 0,
                 "slowMultiplier": 0.55,
                 "cooldown": 0,
@@ -9600,7 +9600,7 @@
             "21": {
               "actor": {
                 "health": 100,
-                "armor": 0,
+                "armor": 5,
                 "slow": 0,
                 "slowMultiplier": 0.55,
                 "cooldown": 10.983333,
@@ -9621,7 +9621,7 @@
               },
               "target": {
                 "health": 100,
-                "armor": 0,
+                "armor": 5,
                 "slow": 0,
                 "slowMultiplier": 0.55,
                 "cooldown": 0,
@@ -9642,7 +9642,7 @@
               },
               "third": {
                 "health": 100,
-                "armor": 0,
+                "armor": 5,
                 "slow": 0,
                 "slowMultiplier": 0.55,
                 "cooldown": 0,
@@ -9665,7 +9665,7 @@
             "40": {
               "actor": {
                 "health": 100,
-                "armor": 0,
+                "armor": 5,
                 "slow": 0,
                 "slowMultiplier": 0.55,
                 "cooldown": 10.666667,
@@ -9686,7 +9686,7 @@
               },
               "target": {
                 "health": 100,
-                "armor": 0,
+                "armor": 5,
                 "slow": 0,
                 "slowMultiplier": 0.55,
                 "cooldown": 0,
@@ -9707,7 +9707,7 @@
               },
               "third": {
                 "health": 100,
-                "armor": 0,
+                "armor": 5,
                 "slow": 0,
                 "slowMultiplier": 0.55,
                 "cooldown": 0,
@@ -9730,7 +9730,7 @@
             "60": {
               "actor": {
                 "health": 100,
-                "armor": 0,
+                "armor": 5,
                 "slow": 0,
                 "slowMultiplier": 0.55,
                 "cooldown": 10.333333,
@@ -9751,7 +9751,7 @@
               },
               "target": {
                 "health": 100,
-                "armor": 0,
+                "armor": 5,
                 "slow": 0,
                 "slowMultiplier": 0.55,
                 "cooldown": 0,
@@ -9772,7 +9772,7 @@
               },
               "third": {
                 "health": 100,
-                "armor": 0,
+                "armor": 5,
                 "slow": 0,
                 "slowMultiplier": 0.55,
                 "cooldown": 0,
@@ -9795,7 +9795,7 @@
             "120": {
               "actor": {
                 "health": 100,
-                "armor": 0,
+                "armor": 5,
                 "slow": 0,
                 "slowMultiplier": 0.55,
                 "cooldown": 9.333333,
@@ -9816,7 +9816,7 @@
               },
               "target": {
                 "health": 100,
-                "armor": 0,
+                "armor": 5,
                 "slow": 0,
                 "slowMultiplier": 0.55,
                 "cooldown": 0,
@@ -9837,7 +9837,7 @@
               },
               "third": {
                 "health": 100,
-                "armor": 0,
+                "armor": 5,
                 "slow": 0,
                 "slowMultiplier": 0.55,
                 "cooldown": 0,
@@ -9860,7 +9860,7 @@
             "200": {
               "actor": {
                 "health": 100,
-                "armor": 0,
+                "armor": 5,
                 "slow": 0,
                 "slowMultiplier": 0.55,
                 "cooldown": 8,
@@ -9881,7 +9881,7 @@
               },
               "target": {
                 "health": 100,
-                "armor": 0,
+                "armor": 5,
                 "slow": 0,
                 "slowMultiplier": 0.55,
                 "cooldown": 0,
@@ -9902,7 +9902,7 @@
               },
               "third": {
                 "health": 100,
-                "armor": 0,
+                "armor": 5,
                 "slow": 0,
                 "slowMultiplier": 0.55,
                 "cooldown": 0,
@@ -9925,7 +9925,7 @@
             "210": {
               "actor": {
                 "health": 100,
-                "armor": 0,
+                "armor": 5,
                 "slow": 0,
                 "slowMultiplier": 0.55,
                 "cooldown": 7.833333,
@@ -9946,7 +9946,7 @@
               },
               "target": {
                 "health": 100,
-                "armor": 0,
+                "armor": 5,
                 "slow": 0,
                 "slowMultiplier": 0.55,
                 "cooldown": 0,
@@ -9967,7 +9967,7 @@
               },
               "third": {
                 "health": 100,
-                "armor": 0,
+                "armor": 5,
                 "slow": 0,
                 "slowMultiplier": 0.55,
                 "cooldown": 0,
@@ -9990,7 +9990,7 @@
             "259": {
               "actor": {
                 "health": 100,
-                "armor": 0,
+                "armor": 5,
                 "slow": 0,
                 "slowMultiplier": 0.55,
                 "cooldown": 7.016667,
@@ -10011,7 +10011,7 @@
               },
               "target": {
                 "health": 100,
-                "armor": 0,
+                "armor": 5,
                 "slow": 0,
                 "slowMultiplier": 0.55,
                 "cooldown": 0,
@@ -10032,7 +10032,7 @@
               },
               "third": {
                 "health": 100,
-                "armor": 0,
+                "armor": 5,
                 "slow": 0,
                 "slowMultiplier": 0.55,
                 "cooldown": 0,
@@ -11150,7 +11150,7 @@
             "19": {
               "actor": {
                 "health": 100,
-                "armor": 0,
+                "armor": 5,
                 "slow": 0,
                 "slowMultiplier": 0.55,
                 "cooldown": 0,
@@ -11171,7 +11171,7 @@
               },
               "target": {
                 "health": 100,
-                "armor": 0,
+                "armor": 5,
                 "slow": 0,
                 "slowMultiplier": 0.55,
                 "cooldown": 0,
@@ -11192,7 +11192,7 @@
               },
               "third": {
                 "health": 100,
-                "armor": 0,
+                "armor": 5,
                 "slow": 0,
                 "slowMultiplier": 0.55,
                 "cooldown": 0,
@@ -11215,7 +11215,7 @@
             "20": {
               "actor": {
                 "health": 100,
-                "armor": 0,
+                "armor": 5,
                 "slow": 0,
                 "slowMultiplier": 0.55,
                 "cooldown": 15,
@@ -11236,7 +11236,7 @@
               },
               "target": {
                 "health": 100,
-                "armor": 0,
+                "armor": 5,
                 "slow": 2.983333,
                 "slowMultiplier": 0.55,
                 "cooldown": 0,
@@ -11257,7 +11257,7 @@
               },
               "third": {
                 "health": 100,
-                "armor": 0,
+                "armor": 5,
                 "slow": 2.983333,
                 "slowMultiplier": 0.55,
                 "cooldown": 0,
@@ -11280,7 +11280,7 @@
             "21": {
               "actor": {
                 "health": 100,
-                "armor": 0,
+                "armor": 5,
                 "slow": 0,
                 "slowMultiplier": 0.55,
                 "cooldown": 14.983333,
@@ -11301,7 +11301,7 @@
               },
               "target": {
                 "health": 100,
-                "armor": 0,
+                "armor": 5,
                 "slow": 2.966667,
                 "slowMultiplier": 0.55,
                 "cooldown": 0,
@@ -11322,7 +11322,7 @@
               },
               "third": {
                 "health": 100,
-                "armor": 0,
+                "armor": 5,
                 "slow": 2.966667,
                 "slowMultiplier": 0.55,
                 "cooldown": 0,
@@ -11345,7 +11345,7 @@
             "40": {
               "actor": {
                 "health": 100,
-                "armor": 0,
+                "armor": 5,
                 "slow": 0,
                 "slowMultiplier": 0.55,
                 "cooldown": 14.666667,
@@ -11366,7 +11366,7 @@
               },
               "target": {
                 "health": 100,
-                "armor": 0,
+                "armor": 5,
                 "slow": 2.65,
                 "slowMultiplier": 0.55,
                 "cooldown": 0,
@@ -11387,7 +11387,7 @@
               },
               "third": {
                 "health": 100,
-                "armor": 0,
+                "armor": 5,
                 "slow": 2.65,
                 "slowMultiplier": 0.55,
                 "cooldown": 0,
@@ -11410,7 +11410,7 @@
             "60": {
               "actor": {
                 "health": 100,
-                "armor": 0,
+                "armor": 5,
                 "slow": 0,
                 "slowMultiplier": 0.55,
                 "cooldown": 14.333333,
@@ -11431,7 +11431,7 @@
               },
               "target": {
                 "health": 100,
-                "armor": 0,
+                "armor": 5,
                 "slow": 2.316667,
                 "slowMultiplier": 0.55,
                 "cooldown": 0,
@@ -11452,7 +11452,7 @@
               },
               "third": {
                 "health": 100,
-                "armor": 0,
+                "armor": 5,
                 "slow": 2.316667,
                 "slowMultiplier": 0.55,
                 "cooldown": 0,
@@ -11475,7 +11475,7 @@
             "120": {
               "actor": {
                 "health": 100,
-                "armor": 0,
+                "armor": 5,
                 "slow": 0,
                 "slowMultiplier": 0.55,
                 "cooldown": 13.333333,
@@ -11496,7 +11496,7 @@
               },
               "target": {
                 "health": 100,
-                "armor": 0,
+                "armor": 5,
                 "slow": 1.316667,
                 "slowMultiplier": 0.55,
                 "cooldown": 0,
@@ -11517,7 +11517,7 @@
               },
               "third": {
                 "health": 100,
-                "armor": 0,
+                "armor": 5,
                 "slow": 1.316667,
                 "slowMultiplier": 0.55,
                 "cooldown": 0,
@@ -11540,7 +11540,7 @@
             "200": {
               "actor": {
                 "health": 100,
-                "armor": 0,
+                "armor": 5,
                 "slow": 0,
                 "slowMultiplier": 0.55,
                 "cooldown": 12,
@@ -11561,7 +11561,7 @@
               },
               "target": {
                 "health": 100,
-                "armor": 0,
+                "armor": 5,
                 "slow": 0,
                 "slowMultiplier": 0.55,
                 "cooldown": 0,
@@ -11582,7 +11582,7 @@
               },
               "third": {
                 "health": 100,
-                "armor": 0,
+                "armor": 5,
                 "slow": 0,
                 "slowMultiplier": 0.55,
                 "cooldown": 0,
@@ -11605,7 +11605,7 @@
             "210": {
               "actor": {
                 "health": 100,
-                "armor": 0,
+                "armor": 5,
                 "slow": 0,
                 "slowMultiplier": 0.55,
                 "cooldown": 11.833333,
@@ -11626,7 +11626,7 @@
               },
               "target": {
                 "health": 100,
-                "armor": 0,
+                "armor": 5,
                 "slow": 0,
                 "slowMultiplier": 0.55,
                 "cooldown": 0,
@@ -11647,7 +11647,7 @@
               },
               "third": {
                 "health": 100,
-                "armor": 0,
+                "armor": 5,
                 "slow": 0,
                 "slowMultiplier": 0.55,
                 "cooldown": 0,
@@ -11670,7 +11670,7 @@
             "259": {
               "actor": {
                 "health": 100,
-                "armor": 0,
+                "armor": 5,
                 "slow": 0,
                 "slowMultiplier": 0.55,
                 "cooldown": 11.016667,
@@ -11691,7 +11691,7 @@
               },
               "target": {
                 "health": 100,
-                "armor": 0,
+                "armor": 5,
                 "slow": 0,
                 "slowMultiplier": 0.55,
                 "cooldown": 0,
@@ -11712,7 +11712,7 @@
               },
               "third": {
                 "health": 100,
-                "armor": 0,
+                "armor": 5,
                 "slow": 0,
                 "slowMultiplier": 0.55,
                 "cooldown": 0,
@@ -12852,7 +12852,7 @@
             "19": {
               "actor": {
                 "health": 100,
-                "armor": 0,
+                "armor": 5,
                 "slow": 0,
                 "slowMultiplier": 0.55,
                 "cooldown": 0,
@@ -12873,7 +12873,7 @@
               },
               "target": {
                 "health": 100,
-                "armor": 0,
+                "armor": 5,
                 "slow": 0,
                 "slowMultiplier": 0.55,
                 "cooldown": 0,
@@ -12894,7 +12894,7 @@
               },
               "third": {
                 "health": 100,
-                "armor": 0,
+                "armor": 5,
                 "slow": 0,
                 "slowMultiplier": 0.55,
                 "cooldown": 0,
@@ -12917,7 +12917,7 @@
             "20": {
               "actor": {
                 "health": 100,
-                "armor": 0,
+                "armor": 5,
                 "slow": 0,
                 "slowMultiplier": 0.55,
                 "cooldown": 10,
@@ -12937,7 +12937,7 @@
                 ]
               },
               "target": {
-                "health": 76,
+                "health": 81,
                 "armor": 0,
                 "slow": 0,
                 "slowMultiplier": 0.55,
@@ -12959,7 +12959,7 @@
               },
               "third": {
                 "health": 100,
-                "armor": 0,
+                "armor": 5,
                 "slow": 0,
                 "slowMultiplier": 0.55,
                 "cooldown": 0,
@@ -12982,7 +12982,7 @@
             "21": {
               "actor": {
                 "health": 100,
-                "armor": 0,
+                "armor": 5,
                 "slow": 0,
                 "slowMultiplier": 0.55,
                 "cooldown": 9.983333,
@@ -13002,7 +13002,7 @@
                 ]
               },
               "target": {
-                "health": 76,
+                "health": 81,
                 "armor": 0,
                 "slow": 0,
                 "slowMultiplier": 0.55,
@@ -13024,7 +13024,7 @@
               },
               "third": {
                 "health": 100,
-                "armor": 0,
+                "armor": 5,
                 "slow": 0,
                 "slowMultiplier": 0.55,
                 "cooldown": 0,
@@ -13047,7 +13047,7 @@
             "40": {
               "actor": {
                 "health": 100,
-                "armor": 0,
+                "armor": 5,
                 "slow": 0,
                 "slowMultiplier": 0.55,
                 "cooldown": 0,
@@ -13067,7 +13067,7 @@
                 ]
               },
               "target": {
-                "health": 76,
+                "health": 81,
                 "armor": 0,
                 "slow": 0,
                 "slowMultiplier": 0.55,
@@ -13089,7 +13089,7 @@
               },
               "third": {
                 "health": 100,
-                "armor": 0,
+                "armor": 5,
                 "slow": 0,
                 "slowMultiplier": 0.55,
                 "cooldown": 0,
@@ -13112,7 +13112,7 @@
             "60": {
               "actor": {
                 "health": 100,
-                "armor": 0,
+                "armor": 5,
                 "slow": 0,
                 "slowMultiplier": 0.55,
                 "cooldown": 9.833333,
@@ -13132,7 +13132,7 @@
                 ]
               },
               "target": {
-                "health": 76,
+                "health": 81,
                 "armor": 0,
                 "slow": 0,
                 "slowMultiplier": 0.55,
@@ -13154,7 +13154,7 @@
               },
               "third": {
                 "health": 100,
-                "armor": 0,
+                "armor": 5,
                 "slow": 0,
                 "slowMultiplier": 0.55,
                 "cooldown": 0,
@@ -13177,7 +13177,7 @@
             "120": {
               "actor": {
                 "health": 100,
-                "armor": 0,
+                "armor": 5,
                 "slow": 0,
                 "slowMultiplier": 0.55,
                 "cooldown": 8.833333,
@@ -13197,7 +13197,7 @@
                 ]
               },
               "target": {
-                "health": 76,
+                "health": 81,
                 "armor": 0,
                 "slow": 0,
                 "slowMultiplier": 0.55,
@@ -13219,7 +13219,7 @@
               },
               "third": {
                 "health": 100,
-                "armor": 0,
+                "armor": 5,
                 "slow": 0,
                 "slowMultiplier": 0.55,
                 "cooldown": 0,
@@ -13242,7 +13242,7 @@
             "200": {
               "actor": {
                 "health": 100,
-                "armor": 0,
+                "armor": 5,
                 "slow": 0,
                 "slowMultiplier": 0.55,
                 "cooldown": 7.5,
@@ -13262,7 +13262,7 @@
                 ]
               },
               "target": {
-                "health": 76,
+                "health": 81,
                 "armor": 0,
                 "slow": 0,
                 "slowMultiplier": 0.55,
@@ -13284,7 +13284,7 @@
               },
               "third": {
                 "health": 100,
-                "armor": 0,
+                "armor": 5,
                 "slow": 0,
                 "slowMultiplier": 0.55,
                 "cooldown": 0,
@@ -13307,7 +13307,7 @@
             "250": {
               "actor": {
                 "health": 100,
-                "armor": 0,
+                "armor": 5,
                 "slow": 0,
                 "slowMultiplier": 0.55,
                 "cooldown": 6.666667,
@@ -13327,7 +13327,7 @@
                 ]
               },
               "target": {
-                "health": 76,
+                "health": 81,
                 "armor": 0,
                 "slow": 0,
                 "slowMultiplier": 0.55,
@@ -13349,7 +13349,7 @@
               },
               "third": {
                 "health": 100,
-                "armor": 0,
+                "armor": 5,
                 "slow": 0,
                 "slowMultiplier": 0.55,
                 "cooldown": 0,
@@ -13372,7 +13372,7 @@
             "259": {
               "actor": {
                 "health": 100,
-                "armor": 0,
+                "armor": 5,
                 "slow": 0,
                 "slowMultiplier": 0.55,
                 "cooldown": 6.516667,
@@ -13392,7 +13392,7 @@
                 ]
               },
               "target": {
-                "health": 76,
+                "health": 81,
                 "armor": 0,
                 "slow": 0,
                 "slowMultiplier": 0.55,
@@ -13414,7 +13414,7 @@
               },
               "third": {
                 "health": 100,
-                "armor": 0,
+                "armor": 5,
                 "slow": 0,
                 "slowMultiplier": 0.55,
                 "cooldown": 0,
@@ -13467,7 +13467,7 @@
               "source": 0,
               "amount": 24,
               "shield": 0,
-              "shieldBreak": false
+              "shieldBreak": true
             },
             {
               "step": 50,
@@ -14538,7 +14538,7 @@
             "19": {
               "actor": {
                 "health": 100,
-                "armor": 0,
+                "armor": 5,
                 "slow": 0,
                 "slowMultiplier": 0.55,
                 "cooldown": 0,
@@ -14559,7 +14559,7 @@
               },
               "target": {
                 "health": 100,
-                "armor": 0,
+                "armor": 5,
                 "slow": 0,
                 "slowMultiplier": 0.55,
                 "cooldown": 0,
@@ -14580,7 +14580,7 @@
               },
               "third": {
                 "health": 100,
-                "armor": 0,
+                "armor": 5,
                 "slow": 0,
                 "slowMultiplier": 0.55,
                 "cooldown": 0,
@@ -14603,7 +14603,7 @@
             "20": {
               "actor": {
                 "health": 100,
-                "armor": 0,
+                "armor": 5,
                 "slow": 0,
                 "slowMultiplier": 0.55,
                 "cooldown": 12,
@@ -14624,7 +14624,7 @@
               },
               "target": {
                 "health": 100,
-                "armor": 0,
+                "armor": 5,
                 "slow": 0,
                 "slowMultiplier": 0.55,
                 "cooldown": 0,
@@ -14645,7 +14645,7 @@
               },
               "third": {
                 "health": 100,
-                "armor": 0,
+                "armor": 5,
                 "slow": 0,
                 "slowMultiplier": 0.55,
                 "cooldown": 0,
@@ -14668,7 +14668,7 @@
             "21": {
               "actor": {
                 "health": 100,
-                "armor": 0,
+                "armor": 5,
                 "slow": 0,
                 "slowMultiplier": 0.55,
                 "cooldown": 11.983333,
@@ -14679,17 +14679,17 @@
                 "position": [
                   -10,
                   0,
-                  -0.037333
+                  -0.040133
                 ],
                 "velocity": [
                   0,
                   0,
-                  -2.24
+                  -2.408
                 ]
               },
               "target": {
                 "health": 100,
-                "armor": 0,
+                "armor": 5,
                 "slow": 0,
                 "slowMultiplier": 0.55,
                 "cooldown": 0,
@@ -14710,7 +14710,7 @@
               },
               "third": {
                 "health": 100,
-                "armor": 0,
+                "armor": 5,
                 "slow": 0,
                 "slowMultiplier": 0.55,
                 "cooldown": 0,
@@ -14733,7 +14733,7 @@
             "40": {
               "actor": {
                 "health": 100,
-                "armor": 0,
+                "armor": 5,
                 "slow": 0,
                 "slowMultiplier": 0.55,
                 "cooldown": 0,
@@ -14744,17 +14744,17 @@
                 "position": [
                   -10,
                   0,
-                  -3.761036
+                  -4.043114
                 ],
                 "velocity": [
                   0,
                   0,
-                  -13.44
+                  -14.448
                 ]
               },
               "target": {
                 "health": 100,
-                "armor": 0,
+                "armor": 5,
                 "slow": 0,
                 "slowMultiplier": 0.55,
                 "cooldown": 0,
@@ -14775,7 +14775,7 @@
               },
               "third": {
                 "health": 100,
-                "armor": 0,
+                "armor": 5,
                 "slow": 0,
                 "slowMultiplier": 0.55,
                 "cooldown": 0,
@@ -14798,7 +14798,7 @@
             "60": {
               "actor": {
                 "health": 100,
-                "armor": 0,
+                "armor": 5,
                 "slow": 0,
                 "slowMultiplier": 0.55,
                 "cooldown": 11.833333,
@@ -14809,17 +14809,17 @@
                 "position": [
                   -10,
                   0,
-                  -7.314101
+                  -7.862658
                 ],
                 "velocity": [
                   0,
                   0,
-                  -4.686238
+                  -5.037706
                 ]
               },
               "target": {
                 "health": 100,
-                "armor": 0,
+                "armor": 5,
                 "slow": 0,
                 "slowMultiplier": 0.55,
                 "cooldown": 0,
@@ -14840,7 +14840,7 @@
               },
               "third": {
                 "health": 100,
-                "armor": 0,
+                "armor": 5,
                 "slow": 0,
                 "slowMultiplier": 0.55,
                 "cooldown": 0,
@@ -14863,7 +14863,7 @@
             "120": {
               "actor": {
                 "health": 100,
-                "armor": 0,
+                "armor": 5,
                 "slow": 0,
                 "slowMultiplier": 0.55,
                 "cooldown": 10.833333,
@@ -14874,7 +14874,7 @@
                 "position": [
                   -10,
                   0,
-                  -7.867036
+                  -8.468314
                 ],
                 "velocity": [
                   0,
@@ -14884,7 +14884,7 @@
               },
               "target": {
                 "health": 100,
-                "armor": 0,
+                "armor": 5,
                 "slow": 0,
                 "slowMultiplier": 0.55,
                 "cooldown": 0,
@@ -14905,7 +14905,7 @@
               },
               "third": {
                 "health": 100,
-                "armor": 0,
+                "armor": 5,
                 "slow": 0,
                 "slowMultiplier": 0.55,
                 "cooldown": 0,
@@ -14928,7 +14928,7 @@
             "200": {
               "actor": {
                 "health": 100,
-                "armor": 0,
+                "armor": 5,
                 "slow": 0,
                 "slowMultiplier": 0.55,
                 "cooldown": 9.5,
@@ -14939,7 +14939,7 @@
                 "position": [
                   -10,
                   0,
-                  -7.867036
+                  -8.468314
                 ],
                 "velocity": [
                   0,
@@ -14949,7 +14949,7 @@
               },
               "target": {
                 "health": 100,
-                "armor": 0,
+                "armor": 5,
                 "slow": 0,
                 "slowMultiplier": 0.55,
                 "cooldown": 0,
@@ -14970,7 +14970,7 @@
               },
               "third": {
                 "health": 100,
-                "armor": 0,
+                "armor": 5,
                 "slow": 0,
                 "slowMultiplier": 0.55,
                 "cooldown": 0,
@@ -14993,7 +14993,7 @@
             "250": {
               "actor": {
                 "health": 100,
-                "armor": 0,
+                "armor": 5,
                 "slow": 0,
                 "slowMultiplier": 0.55,
                 "cooldown": 8.666667,
@@ -15004,7 +15004,7 @@
                 "position": [
                   -10,
                   0,
-                  -7.867036
+                  -8.468314
                 ],
                 "velocity": [
                   0,
@@ -15014,7 +15014,7 @@
               },
               "target": {
                 "health": 100,
-                "armor": 0,
+                "armor": 5,
                 "slow": 0,
                 "slowMultiplier": 0.55,
                 "cooldown": 0,
@@ -15035,7 +15035,7 @@
               },
               "third": {
                 "health": 100,
-                "armor": 0,
+                "armor": 5,
                 "slow": 0,
                 "slowMultiplier": 0.55,
                 "cooldown": 0,
@@ -15058,7 +15058,7 @@
             "259": {
               "actor": {
                 "health": 100,
-                "armor": 0,
+                "armor": 5,
                 "slow": 0,
                 "slowMultiplier": 0.55,
                 "cooldown": 8.516667,
@@ -15069,7 +15069,7 @@
                 "position": [
                   -10,
                   0,
-                  -7.867036
+                  -8.468314
                 ],
                 "velocity": [
                   0,
@@ -15079,7 +15079,7 @@
               },
               "target": {
                 "health": 100,
-                "armor": 0,
+                "armor": 5,
                 "slow": 0,
                 "slowMultiplier": 0.55,
                 "cooldown": 0,
@@ -15100,7 +15100,7 @@
               },
               "third": {
                 "health": 100,
-                "armor": 0,
+                "armor": 5,
                 "slow": 0,
                 "slowMultiplier": 0.55,
                 "cooldown": 0,
@@ -15155,7 +15155,7 @@
               "pos": {
                 "x": -10,
                 "y": 1.45,
-                "z": -6.001036
+                "z": -6.451114
               }
             }
           ]
@@ -16215,7 +16215,7 @@
             "19": {
               "actor": {
                 "health": 100,
-                "armor": 0,
+                "armor": 5,
                 "slow": 0,
                 "slowMultiplier": 0.55,
                 "cooldown": 0,
@@ -16236,7 +16236,7 @@
               },
               "target": {
                 "health": 100,
-                "armor": 0,
+                "armor": 5,
                 "slow": 0,
                 "slowMultiplier": 0.55,
                 "cooldown": 0,
@@ -16257,7 +16257,7 @@
               },
               "third": {
                 "health": 100,
-                "armor": 0,
+                "armor": 5,
                 "slow": 0,
                 "slowMultiplier": 0.55,
                 "cooldown": 0,
@@ -16280,7 +16280,7 @@
             "20": {
               "actor": {
                 "health": 100,
-                "armor": 0,
+                "armor": 5,
                 "slow": 0,
                 "slowMultiplier": 0.55,
                 "cooldown": 14,
@@ -16301,7 +16301,7 @@
               },
               "target": {
                 "health": 100,
-                "armor": 0,
+                "armor": 5,
                 "slow": 0,
                 "slowMultiplier": 0.55,
                 "cooldown": 0,
@@ -16322,7 +16322,7 @@
               },
               "third": {
                 "health": 100,
-                "armor": 0,
+                "armor": 5,
                 "slow": 0,
                 "slowMultiplier": 0.55,
                 "cooldown": 0,
@@ -16345,7 +16345,7 @@
             "21": {
               "actor": {
                 "health": 100,
-                "armor": 0,
+                "armor": 5,
                 "slow": 0,
                 "slowMultiplier": 0.55,
                 "cooldown": 13.983333,
@@ -16366,7 +16366,7 @@
               },
               "target": {
                 "health": 100,
-                "armor": 0,
+                "armor": 5,
                 "slow": 0,
                 "slowMultiplier": 0.55,
                 "cooldown": 0,
@@ -16387,7 +16387,7 @@
               },
               "third": {
                 "health": 100,
-                "armor": 0,
+                "armor": 5,
                 "slow": 0,
                 "slowMultiplier": 0.55,
                 "cooldown": 0,
@@ -16410,7 +16410,7 @@
             "40": {
               "actor": {
                 "health": 100,
-                "armor": 0,
+                "armor": 5,
                 "slow": 0,
                 "slowMultiplier": 0.55,
                 "cooldown": 0,
@@ -16431,7 +16431,7 @@
               },
               "target": {
                 "health": 100,
-                "armor": 0,
+                "armor": 5,
                 "slow": 0,
                 "slowMultiplier": 0.55,
                 "cooldown": 0,
@@ -16452,7 +16452,7 @@
               },
               "third": {
                 "health": 100,
-                "armor": 0,
+                "armor": 5,
                 "slow": 0,
                 "slowMultiplier": 0.55,
                 "cooldown": 0,
@@ -16475,7 +16475,7 @@
             "60": {
               "actor": {
                 "health": 100,
-                "armor": 0,
+                "armor": 5,
                 "slow": 0,
                 "slowMultiplier": 0.55,
                 "cooldown": 13.833333,
@@ -16496,7 +16496,7 @@
               },
               "target": {
                 "health": 100,
-                "armor": 0,
+                "armor": 5,
                 "slow": 0,
                 "slowMultiplier": 0.55,
                 "cooldown": 0,
@@ -16517,7 +16517,7 @@
               },
               "third": {
                 "health": 100,
-                "armor": 0,
+                "armor": 5,
                 "slow": 0,
                 "slowMultiplier": 0.55,
                 "cooldown": 0,
@@ -16540,7 +16540,7 @@
             "120": {
               "actor": {
                 "health": 100,
-                "armor": 0,
+                "armor": 5,
                 "slow": 0,
                 "slowMultiplier": 0.55,
                 "cooldown": 12.833333,
@@ -16561,7 +16561,7 @@
               },
               "target": {
                 "health": 100,
-                "armor": 0,
+                "armor": 5,
                 "slow": 0,
                 "slowMultiplier": 0.55,
                 "cooldown": 0,
@@ -16582,7 +16582,7 @@
               },
               "third": {
                 "health": 100,
-                "armor": 0,
+                "armor": 5,
                 "slow": 0,
                 "slowMultiplier": 0.55,
                 "cooldown": 0,
@@ -16605,7 +16605,7 @@
             "200": {
               "actor": {
                 "health": 100,
-                "armor": 0,
+                "armor": 5,
                 "slow": 0,
                 "slowMultiplier": 0.55,
                 "cooldown": 11.5,
@@ -16626,7 +16626,7 @@
               },
               "target": {
                 "health": 100,
-                "armor": 0,
+                "armor": 5,
                 "slow": 0,
                 "slowMultiplier": 0.55,
                 "cooldown": 0,
@@ -16647,7 +16647,7 @@
               },
               "third": {
                 "health": 100,
-                "armor": 0,
+                "armor": 5,
                 "slow": 0,
                 "slowMultiplier": 0.55,
                 "cooldown": 0,
@@ -16670,7 +16670,7 @@
             "250": {
               "actor": {
                 "health": 100,
-                "armor": 0,
+                "armor": 5,
                 "slow": 0,
                 "slowMultiplier": 0.55,
                 "cooldown": 10.666667,
@@ -16691,7 +16691,7 @@
               },
               "target": {
                 "health": 100,
-                "armor": 0,
+                "armor": 5,
                 "slow": 0,
                 "slowMultiplier": 0.55,
                 "cooldown": 0,
@@ -16712,7 +16712,7 @@
               },
               "third": {
                 "health": 100,
-                "armor": 0,
+                "armor": 5,
                 "slow": 0,
                 "slowMultiplier": 0.55,
                 "cooldown": 0,
@@ -16735,7 +16735,7 @@
             "259": {
               "actor": {
                 "health": 100,
-                "armor": 0,
+                "armor": 5,
                 "slow": 0,
                 "slowMultiplier": 0.55,
                 "cooldown": 10.516667,
@@ -16756,7 +16756,7 @@
               },
               "target": {
                 "health": 100,
-                "armor": 0,
+                "armor": 5,
                 "slow": 0,
                 "slowMultiplier": 0.55,
                 "cooldown": 0,
@@ -16777,7 +16777,7 @@
               },
               "third": {
                 "health": 100,
-                "armor": 0,
+                "armor": 5,
                 "slow": 0,
                 "slowMultiplier": 0.55,
                 "cooldown": 0,
@@ -17928,7 +17928,7 @@
             "19": {
               "actor": {
                 "health": 100,
-                "armor": 0,
+                "armor": 5,
                 "slow": 0,
                 "slowMultiplier": 0.55,
                 "cooldown": 0,
@@ -17949,7 +17949,7 @@
               },
               "target": {
                 "health": 100,
-                "armor": 0,
+                "armor": 5,
                 "slow": 0,
                 "slowMultiplier": 0.55,
                 "cooldown": 0,
@@ -17970,7 +17970,7 @@
               },
               "third": {
                 "health": 100,
-                "armor": 0,
+                "armor": 5,
                 "slow": 0,
                 "slowMultiplier": 0.55,
                 "cooldown": 0,
@@ -17993,7 +17993,7 @@
             "20": {
               "actor": {
                 "health": 100,
-                "armor": 0,
+                "armor": 5,
                 "slow": 0,
                 "slowMultiplier": 0.55,
                 "cooldown": 14,
@@ -18014,7 +18014,7 @@
               },
               "target": {
                 "health": 100,
-                "armor": 0,
+                "armor": 5,
                 "slow": 0,
                 "slowMultiplier": 0.55,
                 "cooldown": 0,
@@ -18035,7 +18035,7 @@
               },
               "third": {
                 "health": 100,
-                "armor": 0,
+                "armor": 5,
                 "slow": 0,
                 "slowMultiplier": 0.55,
                 "cooldown": 0,
@@ -18058,7 +18058,7 @@
             "21": {
               "actor": {
                 "health": 100,
-                "armor": 0,
+                "armor": 5,
                 "slow": 0,
                 "slowMultiplier": 0.55,
                 "cooldown": 13.983333,
@@ -18079,7 +18079,7 @@
               },
               "target": {
                 "health": 100,
-                "armor": 0,
+                "armor": 5,
                 "slow": 0,
                 "slowMultiplier": 0.55,
                 "cooldown": 0,
@@ -18100,7 +18100,7 @@
               },
               "third": {
                 "health": 100,
-                "armor": 0,
+                "armor": 5,
                 "slow": 0,
                 "slowMultiplier": 0.55,
                 "cooldown": 0,
@@ -18122,7 +18122,7 @@
             },
             "40": {
               "actor": {
-                "health": 70,
+                "health": 75,
                 "armor": 0,
                 "slow": 0,
                 "slowMultiplier": 0.55,
@@ -18144,7 +18144,7 @@
               },
               "target": {
                 "health": 100,
-                "armor": 0,
+                "armor": 5,
                 "slow": 0,
                 "slowMultiplier": 0.55,
                 "cooldown": 0,
@@ -18165,7 +18165,7 @@
               },
               "third": {
                 "health": 100,
-                "armor": 0,
+                "armor": 5,
                 "slow": 0,
                 "slowMultiplier": 0.55,
                 "cooldown": 0,
@@ -18187,7 +18187,7 @@
             },
             "60": {
               "actor": {
-                "health": 70,
+                "health": 75,
                 "armor": 0,
                 "slow": 0,
                 "slowMultiplier": 0.55,
@@ -18209,7 +18209,7 @@
               },
               "target": {
                 "health": 100,
-                "armor": 0,
+                "armor": 5,
                 "slow": 0,
                 "slowMultiplier": 0.55,
                 "cooldown": 0,
@@ -18230,7 +18230,7 @@
               },
               "third": {
                 "health": 100,
-                "armor": 0,
+                "armor": 5,
                 "slow": 0,
                 "slowMultiplier": 0.55,
                 "cooldown": 0,
@@ -18252,7 +18252,7 @@
             },
             "120": {
               "actor": {
-                "health": 70,
+                "health": 75,
                 "armor": 0,
                 "slow": 0,
                 "slowMultiplier": 0.55,
@@ -18274,7 +18274,7 @@
               },
               "target": {
                 "health": 100,
-                "armor": 0,
+                "armor": 5,
                 "slow": 0,
                 "slowMultiplier": 0.55,
                 "cooldown": 0,
@@ -18295,7 +18295,7 @@
               },
               "third": {
                 "health": 100,
-                "armor": 0,
+                "armor": 5,
                 "slow": 0,
                 "slowMultiplier": 0.55,
                 "cooldown": 0,
@@ -18317,7 +18317,7 @@
             },
             "200": {
               "actor": {
-                "health": 70,
+                "health": 75,
                 "armor": 0,
                 "slow": 0,
                 "slowMultiplier": 0.55,
@@ -18339,7 +18339,7 @@
               },
               "target": {
                 "health": 100,
-                "armor": 0,
+                "armor": 5,
                 "slow": 0,
                 "slowMultiplier": 0.55,
                 "cooldown": 0,
@@ -18360,7 +18360,7 @@
               },
               "third": {
                 "health": 100,
-                "armor": 0,
+                "armor": 5,
                 "slow": 0,
                 "slowMultiplier": 0.55,
                 "cooldown": 0,
@@ -18382,7 +18382,7 @@
             },
             "250": {
               "actor": {
-                "health": 12.4,
+                "health": 17.4,
                 "armor": 0,
                 "slow": 0,
                 "slowMultiplier": 0.55,
@@ -18404,7 +18404,7 @@
               },
               "target": {
                 "health": 100,
-                "armor": 0,
+                "armor": 5,
                 "slow": 0,
                 "slowMultiplier": 0.55,
                 "cooldown": 0,
@@ -18425,7 +18425,7 @@
               },
               "third": {
                 "health": 100,
-                "armor": 0,
+                "armor": 5,
                 "slow": 0,
                 "slowMultiplier": 0.55,
                 "cooldown": 0,
@@ -18447,7 +18447,7 @@
             },
             "259": {
               "actor": {
-                "health": 12.4,
+                "health": 17.4,
                 "armor": 0,
                 "slow": 0,
                 "slowMultiplier": 0.55,
@@ -18469,7 +18469,7 @@
               },
               "target": {
                 "health": 100,
-                "armor": 0,
+                "armor": 5,
                 "slow": 0,
                 "slowMultiplier": 0.55,
                 "cooldown": 0,
@@ -18490,7 +18490,7 @@
               },
               "third": {
                 "health": 100,
-                "armor": 0,
+                "armor": 5,
                 "slow": 0,
                 "slowMultiplier": 0.55,
                 "cooldown": 0,
@@ -18543,7 +18543,7 @@
               "source": 1,
               "amount": 30,
               "shield": 0,
-              "shieldBreak": false
+              "shieldBreak": true
             },
             {
               "step": 50,
@@ -19623,7 +19623,7 @@
             "19": {
               "actor": {
                 "health": 40,
-                "armor": 0,
+                "armor": 5,
                 "slow": 0,
                 "slowMultiplier": 0.55,
                 "cooldown": 0,
@@ -19644,7 +19644,7 @@
               },
               "target": {
                 "health": 100,
-                "armor": 0,
+                "armor": 5,
                 "slow": 0,
                 "slowMultiplier": 0.55,
                 "cooldown": 0,
@@ -19665,7 +19665,7 @@
               },
               "third": {
                 "health": 100,
-                "armor": 0,
+                "armor": 5,
                 "slow": 0,
                 "slowMultiplier": 0.55,
                 "cooldown": 0,
@@ -19688,7 +19688,7 @@
             "20": {
               "actor": {
                 "health": 75,
-                "armor": 0,
+                "armor": 5,
                 "slow": 0,
                 "slowMultiplier": 0.55,
                 "cooldown": 16,
@@ -19709,7 +19709,7 @@
               },
               "target": {
                 "health": 100,
-                "armor": 0,
+                "armor": 5,
                 "slow": 0,
                 "slowMultiplier": 0.55,
                 "cooldown": 0,
@@ -19730,7 +19730,7 @@
               },
               "third": {
                 "health": 100,
-                "armor": 0,
+                "armor": 5,
                 "slow": 0,
                 "slowMultiplier": 0.55,
                 "cooldown": 0,
@@ -19753,7 +19753,7 @@
             "21": {
               "actor": {
                 "health": 75,
-                "armor": 0,
+                "armor": 5,
                 "slow": 0,
                 "slowMultiplier": 0.55,
                 "cooldown": 15.983333,
@@ -19774,7 +19774,7 @@
               },
               "target": {
                 "health": 100,
-                "armor": 0,
+                "armor": 5,
                 "slow": 0,
                 "slowMultiplier": 0.55,
                 "cooldown": 0,
@@ -19795,7 +19795,7 @@
               },
               "third": {
                 "health": 100,
-                "armor": 0,
+                "armor": 5,
                 "slow": 0,
                 "slowMultiplier": 0.55,
                 "cooldown": 0,
@@ -19818,7 +19818,7 @@
             "40": {
               "actor": {
                 "health": 75,
-                "armor": 0,
+                "armor": 5,
                 "slow": 0,
                 "slowMultiplier": 0.55,
                 "cooldown": 0,
@@ -19839,7 +19839,7 @@
               },
               "target": {
                 "health": 100,
-                "armor": 0,
+                "armor": 5,
                 "slow": 0,
                 "slowMultiplier": 0.55,
                 "cooldown": 0,
@@ -19860,7 +19860,7 @@
               },
               "third": {
                 "health": 100,
-                "armor": 0,
+                "armor": 5,
                 "slow": 0,
                 "slowMultiplier": 0.55,
                 "cooldown": 0,
@@ -19883,7 +19883,7 @@
             "60": {
               "actor": {
                 "health": 100,
-                "armor": 0,
+                "armor": 5,
                 "slow": 0,
                 "slowMultiplier": 0.55,
                 "cooldown": 15.833333,
@@ -19904,7 +19904,7 @@
               },
               "target": {
                 "health": 100,
-                "armor": 0,
+                "armor": 5,
                 "slow": 0,
                 "slowMultiplier": 0.55,
                 "cooldown": 0,
@@ -19925,7 +19925,7 @@
               },
               "third": {
                 "health": 100,
-                "armor": 0,
+                "armor": 5,
                 "slow": 0,
                 "slowMultiplier": 0.55,
                 "cooldown": 0,
@@ -19948,7 +19948,7 @@
             "120": {
               "actor": {
                 "health": 100,
-                "armor": 0,
+                "armor": 5,
                 "slow": 0,
                 "slowMultiplier": 0.55,
                 "cooldown": 14.833333,
@@ -19969,7 +19969,7 @@
               },
               "target": {
                 "health": 100,
-                "armor": 0,
+                "armor": 5,
                 "slow": 0,
                 "slowMultiplier": 0.55,
                 "cooldown": 0,
@@ -19990,7 +19990,7 @@
               },
               "third": {
                 "health": 100,
-                "armor": 0,
+                "armor": 5,
                 "slow": 0,
                 "slowMultiplier": 0.55,
                 "cooldown": 0,
@@ -20013,7 +20013,7 @@
             "200": {
               "actor": {
                 "health": 100,
-                "armor": 0,
+                "armor": 5,
                 "slow": 0,
                 "slowMultiplier": 0.55,
                 "cooldown": 13.5,
@@ -20034,7 +20034,7 @@
               },
               "target": {
                 "health": 100,
-                "armor": 0,
+                "armor": 5,
                 "slow": 0,
                 "slowMultiplier": 0.55,
                 "cooldown": 0,
@@ -20055,7 +20055,7 @@
               },
               "third": {
                 "health": 100,
-                "armor": 0,
+                "armor": 5,
                 "slow": 0,
                 "slowMultiplier": 0.55,
                 "cooldown": 0,
@@ -20078,7 +20078,7 @@
             "250": {
               "actor": {
                 "health": 100,
-                "armor": 0,
+                "armor": 5,
                 "slow": 0,
                 "slowMultiplier": 0.55,
                 "cooldown": 12.666667,
@@ -20099,7 +20099,7 @@
               },
               "target": {
                 "health": 100,
-                "armor": 0,
+                "armor": 5,
                 "slow": 0,
                 "slowMultiplier": 0.55,
                 "cooldown": 0,
@@ -20120,7 +20120,7 @@
               },
               "third": {
                 "health": 100,
-                "armor": 0,
+                "armor": 5,
                 "slow": 0,
                 "slowMultiplier": 0.55,
                 "cooldown": 0,
@@ -20143,7 +20143,7 @@
             "259": {
               "actor": {
                 "health": 100,
-                "armor": 0,
+                "armor": 5,
                 "slow": 0,
                 "slowMultiplier": 0.55,
                 "cooldown": 12.516667,
@@ -20164,7 +20164,7 @@
               },
               "target": {
                 "health": 100,
-                "armor": 0,
+                "armor": 5,
                 "slow": 0,
                 "slowMultiplier": 0.55,
                 "cooldown": 0,
@@ -20185,7 +20185,7 @@
               },
               "third": {
                 "health": 100,
-                "armor": 0,
+                "armor": 5,
                 "slow": 0,
                 "slowMultiplier": 0.55,
                 "cooldown": 0,
@@ -21300,7 +21300,7 @@
             "19": {
               "actor": {
                 "health": 100,
-                "armor": 0,
+                "armor": 5,
                 "slow": 0,
                 "slowMultiplier": 0.55,
                 "cooldown": 0,
@@ -21321,7 +21321,7 @@
               },
               "target": {
                 "health": 100,
-                "armor": 0,
+                "armor": 5,
                 "slow": 0,
                 "slowMultiplier": 0.55,
                 "cooldown": 0,
@@ -21342,7 +21342,7 @@
               },
               "third": {
                 "health": 100,
-                "armor": 0,
+                "armor": 5,
                 "slow": 0,
                 "slowMultiplier": 0.55,
                 "cooldown": 0,
@@ -21365,7 +21365,7 @@
             "20": {
               "actor": {
                 "health": 100,
-                "armor": 0,
+                "armor": 5,
                 "slow": 0,
                 "slowMultiplier": 0.55,
                 "cooldown": 11,
@@ -21386,7 +21386,7 @@
               },
               "target": {
                 "health": 100,
-                "armor": 0,
+                "armor": 5,
                 "slow": 0,
                 "slowMultiplier": 0.55,
                 "cooldown": 0,
@@ -21407,7 +21407,7 @@
               },
               "third": {
                 "health": 100,
-                "armor": 0,
+                "armor": 5,
                 "slow": 0,
                 "slowMultiplier": 0.55,
                 "cooldown": 0,
@@ -21430,7 +21430,7 @@
             "21": {
               "actor": {
                 "health": 100,
-                "armor": 0,
+                "armor": 5,
                 "slow": 0,
                 "slowMultiplier": 0.55,
                 "cooldown": 10.983333,
@@ -21451,7 +21451,7 @@
               },
               "target": {
                 "health": 100,
-                "armor": 0,
+                "armor": 5,
                 "slow": 0,
                 "slowMultiplier": 0.55,
                 "cooldown": 0,
@@ -21472,7 +21472,7 @@
               },
               "third": {
                 "health": 100,
-                "armor": 0,
+                "armor": 5,
                 "slow": 0,
                 "slowMultiplier": 0.55,
                 "cooldown": 0,
@@ -21495,7 +21495,7 @@
             "40": {
               "actor": {
                 "health": 100,
-                "armor": 0,
+                "armor": 5,
                 "slow": 0,
                 "slowMultiplier": 0.55,
                 "cooldown": 0,
@@ -21516,7 +21516,7 @@
               },
               "target": {
                 "health": 100,
-                "armor": 0,
+                "armor": 5,
                 "slow": 0,
                 "slowMultiplier": 0.55,
                 "cooldown": 0,
@@ -21537,7 +21537,7 @@
               },
               "third": {
                 "health": 100,
-                "armor": 0,
+                "armor": 5,
                 "slow": 0,
                 "slowMultiplier": 0.55,
                 "cooldown": 0,
@@ -21560,7 +21560,7 @@
             "60": {
               "actor": {
                 "health": 100,
-                "armor": 0,
+                "armor": 5,
                 "slow": 0,
                 "slowMultiplier": 0.55,
                 "cooldown": 10.833333,
@@ -21581,7 +21581,7 @@
               },
               "target": {
                 "health": 100,
-                "armor": 0,
+                "armor": 5,
                 "slow": 0,
                 "slowMultiplier": 0.55,
                 "cooldown": 0,
@@ -21602,7 +21602,7 @@
               },
               "third": {
                 "health": 100,
-                "armor": 0,
+                "armor": 5,
                 "slow": 0,
                 "slowMultiplier": 0.55,
                 "cooldown": 0,
@@ -21625,7 +21625,7 @@
             "120": {
               "actor": {
                 "health": 100,
-                "armor": 0,
+                "armor": 5,
                 "slow": 0,
                 "slowMultiplier": 0.55,
                 "cooldown": 9.833333,
@@ -21646,7 +21646,7 @@
               },
               "target": {
                 "health": 100,
-                "armor": 0,
+                "armor": 5,
                 "slow": 0,
                 "slowMultiplier": 0.55,
                 "cooldown": 0,
@@ -21667,7 +21667,7 @@
               },
               "third": {
                 "health": 100,
-                "armor": 0,
+                "armor": 5,
                 "slow": 0,
                 "slowMultiplier": 0.55,
                 "cooldown": 0,
@@ -21690,7 +21690,7 @@
             "200": {
               "actor": {
                 "health": 100,
-                "armor": 0,
+                "armor": 5,
                 "slow": 0,
                 "slowMultiplier": 0.55,
                 "cooldown": 8.5,
@@ -21711,7 +21711,7 @@
               },
               "target": {
                 "health": 100,
-                "armor": 0,
+                "armor": 5,
                 "slow": 0,
                 "slowMultiplier": 0.55,
                 "cooldown": 0,
@@ -21732,7 +21732,7 @@
               },
               "third": {
                 "health": 100,
-                "armor": 0,
+                "armor": 5,
                 "slow": 0,
                 "slowMultiplier": 0.55,
                 "cooldown": 0,
@@ -21755,7 +21755,7 @@
             "250": {
               "actor": {
                 "health": 100,
-                "armor": 0,
+                "armor": 5,
                 "slow": 0,
                 "slowMultiplier": 0.55,
                 "cooldown": 7.666667,
@@ -21776,7 +21776,7 @@
               },
               "target": {
                 "health": 100,
-                "armor": 0,
+                "armor": 5,
                 "slow": 0,
                 "slowMultiplier": 0.55,
                 "cooldown": 0,
@@ -21797,7 +21797,7 @@
               },
               "third": {
                 "health": 100,
-                "armor": 0,
+                "armor": 5,
                 "slow": 0,
                 "slowMultiplier": 0.55,
                 "cooldown": 0,
@@ -21820,7 +21820,7 @@
             "259": {
               "actor": {
                 "health": 100,
-                "armor": 0,
+                "armor": 5,
                 "slow": 0,
                 "slowMultiplier": 0.55,
                 "cooldown": 7.516667,
@@ -21841,7 +21841,7 @@
               },
               "target": {
                 "health": 100,
-                "armor": 0,
+                "armor": 5,
                 "slow": 0,
                 "slowMultiplier": 0.55,
                 "cooldown": 0,
@@ -21862,7 +21862,7 @@
               },
               "third": {
                 "health": 100,
-                "armor": 0,
+                "armor": 5,
                 "slow": 0,
                 "slowMultiplier": 0.55,
                 "cooldown": 0,
@@ -23007,7 +23007,7 @@
             "19": {
               "actor": {
                 "health": 100,
-                "armor": 0,
+                "armor": 5,
                 "slow": 0,
                 "slowMultiplier": 0.55,
                 "cooldown": 0,
@@ -23028,7 +23028,7 @@
               },
               "target": {
                 "health": 100,
-                "armor": 0,
+                "armor": 5,
                 "slow": 0,
                 "slowMultiplier": 0.55,
                 "cooldown": 0,
@@ -23049,7 +23049,7 @@
               },
               "third": {
                 "health": 100,
-                "armor": 0,
+                "armor": 5,
                 "slow": 0,
                 "slowMultiplier": 0.55,
                 "cooldown": 0,
@@ -23072,7 +23072,7 @@
             "20": {
               "actor": {
                 "health": 100,
-                "armor": 0,
+                "armor": 5,
                 "slow": 0,
                 "slowMultiplier": 0.55,
                 "cooldown": 15,
@@ -23093,7 +23093,7 @@
               },
               "target": {
                 "health": 100,
-                "armor": 0,
+                "armor": 5,
                 "slow": 2.983333,
                 "slowMultiplier": 0.55,
                 "cooldown": 0,
@@ -23114,7 +23114,7 @@
               },
               "third": {
                 "health": 100,
-                "armor": 0,
+                "armor": 5,
                 "slow": 0,
                 "slowMultiplier": 0.55,
                 "cooldown": 0,
@@ -23137,7 +23137,7 @@
             "21": {
               "actor": {
                 "health": 100,
-                "armor": 0,
+                "armor": 5,
                 "slow": 0,
                 "slowMultiplier": 0.55,
                 "cooldown": 14.983333,
@@ -23158,7 +23158,7 @@
               },
               "target": {
                 "health": 100,
-                "armor": 0,
+                "armor": 5,
                 "slow": 2.966667,
                 "slowMultiplier": 0.55,
                 "cooldown": 0,
@@ -23179,7 +23179,7 @@
               },
               "third": {
                 "health": 100,
-                "armor": 0,
+                "armor": 5,
                 "slow": 0,
                 "slowMultiplier": 0.55,
                 "cooldown": 0,
@@ -23202,7 +23202,7 @@
             "40": {
               "actor": {
                 "health": 100,
-                "armor": 0,
+                "armor": 5,
                 "slow": 0,
                 "slowMultiplier": 0.55,
                 "cooldown": 0,
@@ -23223,7 +23223,7 @@
               },
               "target": {
                 "health": 100,
-                "armor": 0,
+                "armor": 5,
                 "slow": 2.65,
                 "slowMultiplier": 0.55,
                 "cooldown": 0,
@@ -23244,7 +23244,7 @@
               },
               "third": {
                 "health": 100,
-                "armor": 0,
+                "armor": 5,
                 "slow": 0,
                 "slowMultiplier": 0.55,
                 "cooldown": 0,
@@ -23267,7 +23267,7 @@
             "60": {
               "actor": {
                 "health": 100,
-                "armor": 0,
+                "armor": 5,
                 "slow": 0,
                 "slowMultiplier": 0.55,
                 "cooldown": 14.833333,
@@ -23288,7 +23288,7 @@
               },
               "target": {
                 "health": 100,
-                "armor": 0,
+                "armor": 5,
                 "slow": 2.816667,
                 "slowMultiplier": 0.55,
                 "cooldown": 0,
@@ -23309,7 +23309,7 @@
               },
               "third": {
                 "health": 100,
-                "armor": 0,
+                "armor": 5,
                 "slow": 0,
                 "slowMultiplier": 0.55,
                 "cooldown": 0,
@@ -23332,7 +23332,7 @@
             "120": {
               "actor": {
                 "health": 100,
-                "armor": 0,
+                "armor": 5,
                 "slow": 0,
                 "slowMultiplier": 0.55,
                 "cooldown": 13.833333,
@@ -23353,7 +23353,7 @@
               },
               "target": {
                 "health": 100,
-                "armor": 0,
+                "armor": 5,
                 "slow": 1.816667,
                 "slowMultiplier": 0.55,
                 "cooldown": 0,
@@ -23374,7 +23374,7 @@
               },
               "third": {
                 "health": 100,
-                "armor": 0,
+                "armor": 5,
                 "slow": 0,
                 "slowMultiplier": 0.55,
                 "cooldown": 0,
@@ -23397,7 +23397,7 @@
             "200": {
               "actor": {
                 "health": 100,
-                "armor": 0,
+                "armor": 5,
                 "slow": 0,
                 "slowMultiplier": 0.55,
                 "cooldown": 12.5,
@@ -23418,7 +23418,7 @@
               },
               "target": {
                 "health": 100,
-                "armor": 0,
+                "armor": 5,
                 "slow": 0.483333,
                 "slowMultiplier": 0.55,
                 "cooldown": 0,
@@ -23439,7 +23439,7 @@
               },
               "third": {
                 "health": 100,
-                "armor": 0,
+                "armor": 5,
                 "slow": 0,
                 "slowMultiplier": 0.55,
                 "cooldown": 0,
@@ -23462,7 +23462,7 @@
             "250": {
               "actor": {
                 "health": 100,
-                "armor": 0,
+                "armor": 5,
                 "slow": 0,
                 "slowMultiplier": 0.55,
                 "cooldown": 11.666667,
@@ -23483,7 +23483,7 @@
               },
               "target": {
                 "health": 100,
-                "armor": 0,
+                "armor": 5,
                 "slow": 0,
                 "slowMultiplier": 0.55,
                 "cooldown": 0,
@@ -23504,7 +23504,7 @@
               },
               "third": {
                 "health": 100,
-                "armor": 0,
+                "armor": 5,
                 "slow": 0,
                 "slowMultiplier": 0.55,
                 "cooldown": 0,
@@ -23527,7 +23527,7 @@
             "259": {
               "actor": {
                 "health": 100,
-                "armor": 0,
+                "armor": 5,
                 "slow": 0,
                 "slowMultiplier": 0.55,
                 "cooldown": 11.516667,
@@ -23548,7 +23548,7 @@
               },
               "target": {
                 "health": 100,
-                "armor": 0,
+                "armor": 5,
                 "slow": 0,
                 "slowMultiplier": 0.55,
                 "cooldown": 0,
@@ -23569,7 +23569,7 @@
               },
               "third": {
                 "health": 100,
-                "armor": 0,
+                "armor": 5,
                 "slow": 0,
                 "slowMultiplier": 0.55,
                 "cooldown": 0,
