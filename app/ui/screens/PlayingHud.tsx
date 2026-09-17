@@ -105,5 +105,5 @@ export function PlayingHud({ui}:ScreenProps){
     </div>}
    </div>
   </div>
-  <div className={`hud-bottom-note${hud.time>60?' is-settled':''}`}><span className="hint-static">TAB / SCOREBOARD</span>{hud.spectate&&<span className="hint-static">[ / ] FOLLOW</span>}{hud.net&&hud.quality&&<span className={`net-quality ${hud.quality.tone}`}>{hud.quality.label} · {hud.quality.ms}MS</span>}{voiceHint(voiceState.enabled,voiceState.mode)&&<span>{voiceHint(voiceState.enabled,voiceState.mode)}</span>}{display.showFps&&<span>{hud.fps||0} FPS · {hud.renderer==='software'?'CPU':'WEBGL'}</span>}<span className="hint-static">{escapeHint(hud.net)}</span></div></div>;
+  <div className={`hud-bottom-note${hud.time>60?' is-settled':''}`}><span className="hint-static">TAB / SCOREBOARD</span>{hud.spectate&&<span className="hint-static">[ / ] FOLLOW</span>}{hud.net&&hud.quality&&<span className={`net-quality ${hud.quality.tone}`}>{hud.quality.label} · {hud.quality.ms}MS</span>}{voiceHint(voiceState.enabled,voiceState.mode)&&<span>{voiceHint(voiceState.enabled,voiceState.mode)}</span>}{display.showFps&&<span>{hud.fps||0} FPS · {hud.renderer==='software'?'CPU':'WEBGL'}</span>}<span className="hint-static">{escapeHint(hud.net)}</span>{reducedMotion()&&<span className="motion-note">REDUCED MOTION</span>}</div></div>;
 }

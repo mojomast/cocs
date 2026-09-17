@@ -1237,7 +1237,7 @@ test('operator model adds shoulder, visor and backpack detail without moving rig
  assert.equal(data.head.getObjectByName('visor-brow'),data.visor.brow);
  const jointKeys=['root','hips','torso','chest','head','armUpperL','armUpperR','forearmL','forearmR','legUpperL','legUpperR','legLowerL','legLowerR','footL','footR'];
  for(const key of jointKeys)assert.ok(data.joints[key],`${key} joint survives the detail pass`);
- assert.ok(Math.abs(data.gunAnchor.position.x-.16)<1e-9&&Math.abs(data.gunAnchor.position.z+.26)<1e-9,'the gun anchor keeps its mount point');
+ assert.ok(Math.abs(data.gunAnchor.position.x-.04)<1e-9&&Math.abs(data.gunAnchor.position.y-.06)<1e-9&&Math.abs(data.gunAnchor.position.z+.08)<1e-9,'the gun anchor keeps its refined carry mount');
  assert.ok(Math.abs(data.chest.position.x)<1e-12,'the chest was never reparented');
  const second=robotModel('chatgpt',assets);
  assert.equal(assets.resources.size,before,'detail geometry and materials are shared, not reallocated');
