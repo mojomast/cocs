@@ -435,6 +435,29 @@ assets. Full procedure and verification: [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md
 Recent releases. The full history lives in
 [docs/CHANGELOG.md](docs/CHANGELOG.md).
 
+### v6.6 · BIOME — 2026-09-17
+- Moth skies are wired per biome: volcanic maps get the baked ashen sky, frost
+  maps get frost and the neon/void maps (the Quantum Labyrinth included) get
+  void, replacing the addSky gradient on the existing camera-following dome
+  while stars, sun, haze, halo and the storm/time-of-day tint keep working.
+  Unlisted maps keep their procedural sky; the old nebula bake stays unused
+  because it decodes to an all-zero equirect (a black dome).
+- New surface bakes cover the kinds the game actually paints: eight albedos
+  (metal, rough_stucco, corrugated_metal, metal_grating, diamond_plate,
+  carbon_fiber, riveted_armor, industrial_mesh) and nine normal maps (grass,
+  hazard_stripes, hex_paneling, holographic_grid, metal, metal_grating,
+  diamond_plate, rough_stucco, corrugated_metal).
+- Two baked effect sequences (arc-burst, spark-impact) drive remote muzzle
+  flashes, impacts, explosions, vehicle kills, respawns, captures, teleporter
+  transitions and lightning through a new pooled billboarded player;
+  entanglement LUTs light pads, beacons, capture rings, the payload halo, flags,
+  pickups and menu rings; rock, chitin, brushed metal, stucco and ice surfaces
+  reach next-gen props, and race/soccer get a grass pitch, mown stripes and
+  brushed-metal goals.
+- Shared Moth textures are cached once and disposed safely. The fidelity pass
+  cost 28 emulator credits; the wiring cost 0.
+- Presentation only: no simulation, protocol or server code changed.
+
 ### v6.5 · MOMENTUM — 2026-09-17
 - Every operator owns a movement verb: nine verbs (Air Dash, Double Jump, Super
   Jump, Hover Jets, Brace Slam, Safety Glide, Grapple, Blink Step, Deployable
