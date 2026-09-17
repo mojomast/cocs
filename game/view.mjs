@@ -1,11 +1,12 @@
 import * as T from 'three';
 import {SoftwareRenderer} from './software.mjs';
 import {CHARACTERS,WEAPONS} from './data.mjs';
+import {WINGS,OPERATOR_KITS} from './kits.mjs';
 import {aim,presentationSupportAt} from './core.mjs';
 import {MAPS,pickupWeapon} from './maps.mjs';
 import {normalizeDisplay} from './config.mjs';
 import {WeaponFeedback,EffectPool,AmbientFX,WeatherFX} from './feedback.mjs';
-import {ModelAssets,withAssets,currentAssets,CameraShake,MuzzleLightPool,LowHealthOverlay,RailBeamPool,DeathPool,DecalPool,HitReactionFX,WeaponPreviewRig,killcamPose,KILLCAM_DURATION} from './effects-fx.mjs';
+import {ModelAssets,withAssets,currentAssets,CameraShake,MuzzleLightPool,LowHealthOverlay,RailBeamPool,DeathPool,DecalPool,HitReactionFX,TelegraphPool,WeaponPreviewRig,killcamPose,KILLCAM_DURATION} from './effects-fx.mjs';
 import {deathPlan,deathStyleFor,hitReaction,hashUnit} from './deaths.mjs';
 import {resolveFinish} from './cosmetics.mjs';
 import {buildWeaponBody} from './weapon-models/index.mjs';
@@ -77,6 +78,12 @@ const buildMaterial=(color,metal=.5,rough=.42,emissive=false)=>new T.MeshStandar
 // Arena/palette materials stay uncached; shared model assets opt into the cache via withAssets.
 export const material=(color,metal=.5,rough=.42,emissive=false)=>{const assets=currentAssets();return assets?assets.material(`${color}|${metal}|${rough}|${emissive?1:0}`,()=>buildMaterial(color,metal,rough,emissive)):buildMaterial(color,metal,rough,emissive);};
 function geometry(scope,key,make){const assets=scope===undefined?currentAssets():scope;return assets?assets.geometry(key,make):make();}
+// Wing lookup for presentation: the same OPERATOR_KITS table the resolver reads
+// keeps the silhouette language and telegraph palette from drifting from the
+// class data (§3.1).
+const WING_BY_CHARACTER=Object.fromEntries(OPERATOR_KITS.map(kit=>[kit.id,WINGS.find(wing=>wing.id===kit.wing)]));
+// Movement/spec events that carry a telegraph cue in ArenaView.effect().
+const TELEGRAPH_EVENTS=new Set(['windup-start','windup-interrupt','charge-start','move-start','landing-recovery','fuel-empty','slam-launch','slam-impact','grapple-hook','grapple-release','rope-place','rope-expire','threat-ping']);
 export function box(parent,w,h,d,x,y,z,mat,assets){const m=new T.Mesh(geometry(assets,`b|${w}|${h}|${d}`,()=>new T.BoxGeometry(w,h,d)),mat);m.position.set(x,y,z);parent.add(m);return m;}
 function cylinder(parent,r1,r2,h,x,y,z,mat,segments=12,assets){const m=new T.Mesh(geometry(assets,`c|${r1}|${r2}|${h}|${segments}`,()=>new T.CylinderGeometry(r1,r2,h,segments)),mat);m.position.set(x,y,z);parent.add(m);return m;}
 export function ring(parent,r,t,x,y,z,mat,rx=Math.PI/2,assets){const m=new T.Mesh(geometry(assets,`t|${r}|${t}`,()=>new T.TorusGeometry(r,t,6,32)),mat);m.position.set(x,y,z);m.rotation.x=rx;parent.add(m);return m;}
@@ -291,7 +298,55 @@ export function vehicleModel(kind='puma',assets,software=false){return withAsset
     g.userData={kind,vehicle:true,wheels,turret,barrels,guns,accessories:{spareTire,jerryCan,winch,towHook,splitter},flashUntil:0,color:'#5f6338'};
    return g;
 });}
-export function robotModel(id,assets,software=false){return withAssets(assets,()=>{const c=CHARACTERS.find(ch=>ch.id===id)||CHARACTERS[0],g=new T.Group(),armor=new T.MeshStandardMaterial({color:c.accent,metalness:.72,roughness:.32}),color=material(c.color,.6,.3),dark=material('#18262c',.5,.5),glow=material(c.color,.4,.2,true);
+// Wing silhouette language (§6.6): additive, cached geometry/materials layered
+// over the per-operator accents. Each wing gets one body language — Strikers
+// lean forward behind swept fins and a leaner torso, Vanguards square up behind
+// broader shoulder plates and a boxy chest, Tacticians carry sensor/toolkit
+// greebles. Shape pieces stay in the default LOD so the wing reads at range;
+// small trim pieces are tagged `lodDetail` and drop out with distance. Geometry
+// flows through `geometry(undefined,key,…)` and materials through `material(…)`,
+// so rebuilding a model never grows `assets.resources`.
+function buildWingSilhouette(parts,wing,{accent,dark}){
+ const tag=node=>{if(node)node.userData.lodDetail=true;return node;};
+ const {chest,head,hips,backpack,torsoMesh,shoulderPads,arms}=parts;
+ if(wing.id==='striker'){
+  // Swept fins lean the read forward over the shoulders; the torso is pulled
+  // slightly leaner than the base operator body.
+  for(const side of [-1,1]){
+   const key=side<0?'L':'R',fin=box(backpack,.055,.34,.18,side*.17,.12,.05,accent);
+   fin.name=`wing-fin-${key}`;fin.rotation.x=-.6;fin.rotation.z=side*.22;
+   const spar=tag(cylinder(backpack,.014,.014,.24,side*.17,.27,.01,dark,6));
+   spar.name=`wing-fin-spar-${key}`;spar.rotation.x=-.6;spar.rotation.z=side*.22;
+  }
+  const collar=tag(box(chest,.34,.05,.26,0,.16,.03,accent));collar.name='wing-collar';collar.rotation.x=.12;
+  torsoMesh.scale.set(.97,1.36,.66);
+ }
+ else if(wing.id==='vanguard'){
+  // Broader shoulder plates and a squared chest plate read as a wall.
+  for(const pad of shoulderPads)pad.scale.set(1.38,.66,1.28);
+  for(const side of [-1,1]){
+   const key=side<0?'L':'R',shoulder=arms[key].shoulder,plate=box(shoulder,.3,.075,.3,side*.02,.16,0,accent);
+   plate.name=`wing-pauldron-${key}`;plate.rotation.z=side*-.2;
+   const rim=tag(box(shoulder,.24,.05,.24,side*.04,.23,0,dark));rim.name=`wing-pauldron-rim-${key}`;rim.rotation.z=side*-.2;
+  }
+  box(chest,.46,.26,.05,0,-.03,-.2,accent).name='wing-chest-plate';
+  const collar=tag(box(chest,.52,.075,.22,0,.15,.02,dark));collar.name='wing-collar';collar.rotation.x=.1;
+ }
+ else{
+  // Tactician sensor mast plus toolkit greebles; the boom stays in the default
+  // LOD so the slighter silhouette still reads at distance.
+  const mast=cylinder(head,.01,.01,.26,-.14,.2,.01,dark,6);mast.name='wing-sensor-mast';mast.rotation.z=.24;
+  const bulb=tag(new T.Mesh(geometry(undefined,'wing-sensor-bulb',()=>new T.SphereGeometry(.052,8,6)),accent));
+  bulb.name='wing-sensor-bulb';bulb.position.set(-.17,.32,.01);head.add(bulb);
+  const dish=tag(new T.Mesh(geometry(undefined,'wing-dish',()=>new T.ConeGeometry(.07,.05,10)),accent));
+  dish.name='wing-sensor-dish';dish.position.set(.12,.17,-.05);dish.rotation.x=Math.PI*.46;head.add(dish);
+  tag(box(chest,.17,.14,.07,-.24,-.09,.16,dark)).name='wing-toolkit';
+  tag(box(chest,.075,.16,.1,-.3,-.01,.1,accent)).name='wing-tool-module';
+  tag(box(hips,.16,.12,.12,.19,-.02,-.05,dark)).name='wing-tool-pouch';
+ }
+ return wing;
+}
+export function robotModel(id,assets,software=false){return withAssets(assets,()=>{const c=CHARACTERS.find(ch=>ch.id===id)||CHARACTERS[0],g=new T.Group(),armor=new T.MeshStandardMaterial({color:c.accent,metalness:.72,roughness:.32}),color=material(c.color,.6,.3),dark=material('#18262c',.5,.5),glow=material(c.color,.4,.2,true),wing=WING_BY_CHARACTER[c.id]||WINGS[0],wingAccent=material(wing.color,.42,.3,true);
  // Smooth capsule limbs and ball joints read as a rounded operator rather than a stack of boxes.
  const capsule=(parent,r,len,mat,seg=10)=>{const m=new T.Mesh(geometry(undefined,`cap|${r}|${len}|${seg}`,()=>new T.CapsuleGeometry(r,len,4,seg)),mat);parent.add(m);return m;};
  const ball=(parent,r,mat,seg=12)=>{const m=new T.Mesh(geometry(undefined,`sph|${r}|${seg}`,()=>new T.SphereGeometry(r,seg,Math.max(6,Math.round(seg*.65)))),mat);parent.add(m);return m;};
@@ -344,6 +399,9 @@ export function robotModel(id,assets,software=false){return withAssets(assets,()
   const foot=new T.Group();foot.position.y=-.35;lower.add(foot);const footMesh=ball(foot,.105,armor,10);footMesh.position.set(0,-.02,-.07);footMesh.scale.set(1.05,.7,1.6);
   legs[key]={hip,upper:upperLeg,knee,lower,foot};
  }
+ // Wing silhouette layer: added after the operator accents so it can sit on the
+ // finished shoulders/backpack, before the shadow policy traverse below.
+ buildWingSilhouette({chest,head,hips,backpack,torsoMesh,shoulderPads,arms},wing,{accent:wingAccent,dark});
  const gunAnchor=new T.Group();gunAnchor.position.set(.16,0,-.26);chest.add(gunAnchor);const weapon=simpleWeaponModel(0,assets);gunAnchor.add(weapon);
  const shield=new T.Mesh(new T.SphereGeometry(1.15,16,12),new T.MeshBasicMaterial({color:c.color,transparent:true,opacity:.13,wireframe:true}));shield.scale.set(.7,1,.7);shield.position.y=.9;g.add(shield);shield.visible=false;
  const base=new T.Mesh(new T.RingGeometry(.47,.54,28),new T.MeshBasicMaterial({color:c.color,side:T.DoubleSide,transparent:true,opacity:.7}));base.rotation.x=-Math.PI/2;base.position.y=.02;g.add(base);
@@ -358,7 +416,7 @@ export function robotModel(id,assets,software=false){return withAssets(assets,()
  g.traverse(n=>{if(!n.isMesh)return;const u=n.userData||{};const skip=(n.material&&n.material.transparent===true)||u.lodDetail===true||u.noShadow===true||String(n.name).includes('flash');n.castShadow=!skip;n.receiveShadow=u.lodDetail!==true;});
  for(const mark of teamMarks)mark.traverse(n=>{if(n.isMesh){n.castShadow=false;n.receiveShadow=false;}});
  const joints={root,rootBaseY:0,hips,torso,chest,head,armUpperL:arms.L.upper,armUpperR:arms.R.upper,forearmL:arms.L.fore,forearmR:arms.R.fore,legUpperL:legs.L.upper,legUpperR:legs.R.upper,legLowerL:legs.L.lower,legLowerR:legs.R.lower,footL:legs.L.foot,footR:legs.R.foot};
- g.userData={limbs:[],head,torso:torsoMesh,chest,torsoGroup:torso,gunAnchor,weapon,shield,color:c.color,armor,armorColor:c.accent,base,teamMarks,shoulderPads,backpack,visor:{brow,nub},rig:new CharacterRig(joints),joints};refineOperatorCharacter(g);return g;});}
+ g.userData={limbs:[],head,torso:torsoMesh,chest,torsoGroup:torso,gunAnchor,weapon,shield,color:c.color,armor,armorColor:c.accent,base,teamMarks,shoulderPads,backpack,visor:{brow,nub},wing:wing.id,wingColor:wing.color,rig:new CharacterRig(joints),joints};refineOperatorCharacter(g);return g;});}
 export function textLabel(parent,text,x,y,z,size=1,color='#8ad9d3',ry=0){const canvas=document.createElement('canvas');canvas.width=512;canvas.height=128;const ctx=canvas.getContext('2d');ctx.font='bold 78px monospace';ctx.textAlign='center';ctx.fillStyle=color;ctx.fillText(text,256,90);const tex=new T.CanvasTexture(canvas);const m=new T.Mesh(new T.PlaneGeometry(size*4,size),new T.MeshBasicMaterial({map:tex,transparent:true,depthWrite:false}));m.position.set(x,y,z);m.rotation.y=ry;m.userData.label=text;m.userData.labelSize=size*.6;parent.add(m);return m;}
 function pointOf(value){if(Array.isArray(value))return {x:+value[0]||0,y:value.length>2?(+value[1]||0):0,z:+value[value.length>2?2:1]||0};return value?.position||value||{};}
 // Payload yaw follows the route tangent. Local play exposes the full route on
@@ -1284,7 +1342,7 @@ export class ArenaView{
  for(let i=-4;i<=4;i++){box(scene,.25,9,.5,i*3,4,-6,dark);box(scene,.045,6,.04,i*3+.18,4,-5.72,glow);}
   const model=robotModel('chatgpt',undefined,this.renderer?.isSoftware===true);model.scale.setScalar(2.15);model.position.y=.17;model.rotation.y=.25;scene.add(model);return {scene,camera,model,id:'chatgpt'};}
   setCharacter(id){if(id===this.menu.id)return;this.disposeObject(this.menu.model);this.menu.scene.remove(this.menu.model);this.menu.model=robotModel(id,undefined,this.renderer?.isSoftware===true);this.menu.model.scale.setScalar(2.15);this.menu.model.position.y=.17;this.menu.scene.add(this.menu.model);this.menu.id=id;}
-      setMatch(match){this.clearFreeMotion();this.characterLifecycle?.clear();const arena=match.arena||MAPS.find(a=>a.id===match.mapId)||MAPS[0];this.clearObjectiveMarkers();if(this.payloadModel){this.scene.remove(this.payloadModel);this.disposeObject(this.payloadModel);this.payloadModel=null;}for(const m of [...this.actorModels.values(),...this.pickupModels,...(this.flagModels||new Map()).values()]){this.scene.remove(m);this.disposeObject(m);}this.flagModels=new Map();if(this.mapId!==arena.id)this.buildArena(arena);const assets=this.modelAssets??=new ModelAssets();this.actorModels=new Map((match.actors||[]).map(a=>{const m=robotModel(a.character,assets,this.renderer?.isSoftware===true);this.scene.add(m);return [a.id,m];}));this.pickupModels=(match.pickups||[]).map(p=>{const g=new T.Group(),colors={health:'#77efba',armor:'#6dbfff',rocket:'#ffb164',rail:'#bf9cff',scatter:'#ffde87',plasma:'#72cfff',grenade:'#ff806b',shock:'#8ce8ff',flak:'#ffd166',marksman:'#ffd27a',smg:'#8affc1',haste:'#72f1b8',overcharge:'#ff8f70',overshield:'#75baff',recon:'#7fe7ff',cloak:'#c8b6ff'},mat=material(colors[p.kind]||'#8ad9d3',.4,.3,true);if(p.kind==='health'){box(g,.6,.19,.19,0,.65,0,mat);box(g,.19,.6,.19,0,.65,0,mat);}else if(p.kind==='armor'){const m=new T.Mesh(geometry(assets,'pickup-armor-octa',()=>new T.OctahedronGeometry(.4)),mat);m.position.y=.7;g.add(m);}else if(['haste','overcharge','overshield'].includes(p.kind)){const m=new T.Mesh(geometry(assets,'pickup-power-ico',()=>new T.IcosahedronGeometry(.36,1)),mat);m.position.y=.7;g.add(m);ring(g,.55,.022,0,.07,0,mat);}else{const w=simpleWeaponModel(pickupWeapon(p.kind),assets);w.position.y=.75;w.scale.setScalar(.7);g.add(w);}if(!['haste','overcharge','overshield'].includes(p.kind))ring(g,.55,.022,0,.07,0,mat);g.position.set(p.x||0,p.y||0,p.z||0);this.scene.add(g);return g;});this._trackAssets(assets);this.syncVehicles(match);this.updateFlags(match,arena);this.updateObjectives(match,arena);this.effectPool?.clear();this.projectilePool?.clear();this.railPool?.clear();this.deathContext?.clear();this.deathPool?.clear();this.decalPool?.clear();this.ambientFx?.reset();this.debrisPool?.clear();this.hitFlinch?.clear();this.hitPool?.clear();this._killcam=null;this.feedback?.reset();this.cameraShake?.reset();this.lowHealth=false;this.flashUntil=0;this.lastEvent=match.serial||0;this.currentWeapon=-1;this._adsTransition=0;this._adsController?.reset(this.display?.fov??82);this._nearActionAt=undefined;this._nearAction=0;this.resetPresentation();
+      setMatch(match){this.clearFreeMotion();this.characterLifecycle?.clear();const arena=match.arena||MAPS.find(a=>a.id===match.mapId)||MAPS[0];this.clearObjectiveMarkers();if(this.payloadModel){this.scene.remove(this.payloadModel);this.disposeObject(this.payloadModel);this.payloadModel=null;}for(const m of [...this.actorModels.values(),...this.pickupModels,...(this.flagModels||new Map()).values()]){this.scene.remove(m);this.disposeObject(m);}this.flagModels=new Map();if(this.mapId!==arena.id)this.buildArena(arena);const assets=this.modelAssets??=new ModelAssets();this.actorModels=new Map((match.actors||[]).map(a=>{const m=robotModel(a.character,assets,this.renderer?.isSoftware===true);this.scene.add(m);return [a.id,m];}));this.pickupModels=(match.pickups||[]).map(p=>{const g=new T.Group(),colors={health:'#77efba',armor:'#6dbfff',rocket:'#ffb164',rail:'#bf9cff',scatter:'#ffde87',plasma:'#72cfff',grenade:'#ff806b',shock:'#8ce8ff',flak:'#ffd166',marksman:'#ffd27a',smg:'#8affc1',haste:'#72f1b8',overcharge:'#ff8f70',overshield:'#75baff',recon:'#7fe7ff',cloak:'#c8b6ff'},mat=material(colors[p.kind]||'#8ad9d3',.4,.3,true);if(p.kind==='health'){box(g,.6,.19,.19,0,.65,0,mat);box(g,.19,.6,.19,0,.65,0,mat);}else if(p.kind==='armor'){const m=new T.Mesh(geometry(assets,'pickup-armor-octa',()=>new T.OctahedronGeometry(.4)),mat);m.position.y=.7;g.add(m);}else if(['haste','overcharge','overshield'].includes(p.kind)){const m=new T.Mesh(geometry(assets,'pickup-power-ico',()=>new T.IcosahedronGeometry(.36,1)),mat);m.position.y=.7;g.add(m);ring(g,.55,.022,0,.07,0,mat);}else{const w=simpleWeaponModel(pickupWeapon(p.kind),assets);w.position.y=.75;w.scale.setScalar(.7);g.add(w);}if(!['haste','overcharge','overshield'].includes(p.kind))ring(g,.55,.022,0,.07,0,mat);g.position.set(p.x||0,p.y||0,p.z||0);this.scene.add(g);return g;});this._trackAssets(assets);this.syncVehicles(match);this.updateFlags(match,arena);this.updateObjectives(match,arena);this.effectPool?.clear();this.telegraphPool?.clear();this.projectilePool?.clear();this.railPool?.clear();this.deathContext?.clear();this.deathPool?.clear();this.decalPool?.clear();this.ambientFx?.reset();this.debrisPool?.clear();this.hitFlinch?.clear();this.hitPool?.clear();this._killcam=null;this.feedback?.reset();this.cameraShake?.reset();this.lowHealth=false;this.flashUntil=0;this.lastEvent=match.serial||0;this.currentWeapon=-1;this._adsTransition=0;this._adsController?.reset(this.display?.fov??82);this._nearActionAt=undefined;this._nearAction=0;this.resetPresentation();
   // Per-mode music theme. The audio object retunes its running drone in place.
   const mode=match.config?.mode??match.mode;if(mode)this.viewAudio?.setModeTheme?.(mode);this._modeTheme=mode??this._modeTheme;}
       syncActors(match){const actors=match?.actors||[];for(const actor of actors)if(!this.actorModels.has(actor.id)){const model=robotModel(actor.character,this.modelAssets??=new ModelAssets(),this.renderer?.isSoftware===true);applyActorTeam(model,actor.team,this.display?.teamPalette);this.scene.add(model);this.actorModels.set(actor.id,model);}const live=new Set(actors.map(actor=>actor.id));for(const [id,model] of this.actorModels)if(!live.has(id)){this.characterLifecycle?.release(model);this.scene.remove(model);this.disposeObject(model);this.actorModels.delete(id);}}
@@ -1390,7 +1448,111 @@ export class ArenaView{
        // handling; the view only decides which mode events are announceable.
        const announceType=e.type==='soccer-goal'?'goal':e.type==='zone-capture'?'capture':e.type;
        if(!reduced&&this.viewAudio?.announcerCue&&['capture','flag-pickup','flag-return','goal'].includes(announceType))this.viewAudio.announcerCue(announceType);
+       // Movement/spec telegraphs (§6.3): wind-ups, movement starts, landings,
+       // slam shocks, hooks/ropes and the threat ping. Every branch below is
+       // reduced-motion aware.
+       if(TELEGRAPH_EVENTS.has(e.type))this.telegraphEffect(e,reduced);
  }
+    // Telegraph cues for events that used to be invisible. Presentation only:
+    // reads actor models and the event payload, never the simulation. Colours
+    // come from the actor's wing palette; reduced motion keeps a static,
+    // low-opacity cue and drops every streak/particle.
+    telegraphEffect(e,reduced){
+     const model=this.actorModels?.get(e.actor),raw=e.pos??model?.position;if(!raw)return false;
+     const at=pointOf(raw),feet={x:at.x||0,y:at.y||0,z:at.z||0},chest={x:feet.x,y:feet.y+1.05,z:feet.z};
+     const color=model?.userData?.wingColor??'#cfe9ff',fx=this.effectPool??=new EffectPool(this.scene),pool=this.telegraphPool??=new TelegraphPool(this.scene,20);
+     const yaw=Number(model?.rotation?.y)||0,fwd={x:-Math.sin(yaw),z:-Math.cos(yaw)},sideAxis={x:-fwd.z,z:fwd.x};
+     const ground=(radius,life,opts={})=>pool.spawn({kind:opts.kind??'ring',pos:opts.pos??{x:feet.x,y:feet.y+.06,z:feet.z},color,yaw:opts.yaw??0,radius,life,grow:opts.grow??0,opacity:opts.opacity??.5});
+     switch(e.type){
+      case 'windup-start':case 'charge-start':{
+       // Ring radius/life scale with the wind-up length so a short blink and a
+       // long slam charge read differently.
+       const charge=e.type==='charge-start',duration=Math.max(.08,Number(e.duration)||.3);
+       ground(.5+Math.min(.95,duration*(charge?1.3:.9)),Math.max(.3,duration+(charge?.35:.2)),{grow:reduced?0:(charge?1.1:.7),opacity:reduced?.26:.5});
+       if(charge&&!reduced)fx.add({from:{...chest},to:{x:chest.x,y:chest.y+.95,z:chest.z},color,life:duration,size:.05,additive:true});
+       if(!reduced)fx.add({pos:{...chest},color,size:.07,life:.2,additive:true});
+       break;
+      }
+      case 'windup-interrupt':{
+       ground(.7,.24,{kind:'disc',grow:reduced?0:-.9,opacity:reduced?.18:.4});
+       if(!reduced)for(let i=0;i<3;i++)fx.add({pos:{...chest},color,size:.045,life:.22,velocity:V((Math.random()-.5)*3,Math.random()*2-.4,(Math.random()-.5)*3)});
+       break;
+      }
+      case 'move-start':{
+       const reason=String(e.reason||''),vertical=reason==='hover'||reason==='super-jump'||reason==='double-jump'||reason==='jump'||reason==='slam';
+       if(reduced){ground(.4,.16,{kind:'disc',opacity:.2});break;}
+       if(reason==='glide'||reason==='rope'){ground(.55,.3,{kind:'disc',grow:1,opacity:.42});break;}
+       for(let i=0;i<3;i++){
+        const offset=(i-1)*.2,ox=feet.x+sideAxis.x*offset,oz=feet.z+sideAxis.z*offset;
+        if(vertical)fx.add({from:{x:ox,y:feet.y+.6,z:oz},to:{x:ox,y:feet.y+.03,z:oz},color,life:.2,size:.045,additive:true});
+        else fx.add({from:{x:ox,y:feet.y+.3+i*.12,z:oz},to:{x:ox-fwd.x*(1+i*.18),y:feet.y+.24+i*.12,z:oz-fwd.z*(1+i*.18)},color,life:.16,size:.05,additive:true});
+       }
+       fx.add({pos:{x:feet.x,y:feet.y+.3,z:feet.z},color,size:.06,life:.14,additive:true});
+       break;
+      }
+      case 'landing-recovery':{
+       // Dust ring scaled by the recovery beat the landing paid for.
+       const duration=Math.max(0,Number(e.duration)||0);
+       ground(.4+Math.min(.55,duration),.32,{kind:'disc',grow:reduced?0:1.5,opacity:reduced?.28:.46});
+       if(!reduced)for(let i=0;i<4;i++)fx.add({pos:{x:feet.x,y:feet.y+.05,z:feet.z},color:'#9fb0b4',size:.05,life:.3,gravity:6,velocity:V((Math.random()-.5)*4.5,Math.random()*1.6,(Math.random()-.5)*4.5)});
+       break;
+      }
+      case 'fuel-empty':{
+       if(reduced){fx.add({pos:{...chest},color,size:.035,life:.12,additive:true});break;}
+       for(let i=0;i<3;i++)fx.add({pos:{...chest},color,size:.035,life:.24,additive:true,velocity:V((Math.random()-.5)*2.4,Math.random()*1.4,(Math.random()-.5)*2.4)});
+       break;
+      }
+      case 'slam-launch':{
+       ground(.55,.3,{grow:reduced?0:1.3,opacity:reduced?.26:.5});
+       if(!reduced){fx.add({from:{x:feet.x,y:feet.y,z:feet.z},to:{x:feet.x,y:feet.y+1,z:feet.z},color,life:.2,size:.05,additive:true});for(let i=0;i<4;i++)fx.add({pos:{x:feet.x,y:feet.y+.06,z:feet.z},color,size:.05,life:.3,velocity:V((Math.random()-.5)*5,Math.random()*2.2,(Math.random()-.5)*5)});}
+       break;
+      }
+      case 'slam-impact':{
+       const radius=Math.max(.8,Math.min(3.2,(Number(e.radius)||4)*.45));
+       ground(radius,.4,{kind:'disc',grow:reduced?0:2.2,opacity:reduced?.28:.5});
+       ground(radius*.62,.32,{grow:reduced?0:1.2,opacity:reduced?.28:.55});
+       if(!reduced)for(let i=0;i<6;i++)fx.add({pos:{x:feet.x,y:feet.y+.05,z:feet.z},color,size:.06,life:.36,velocity:V((Math.random()-.5)*7,Math.random()*1.6,(Math.random()-.5)*7)});
+       break;
+      }
+      case 'grapple-hook':{
+       if(model)model.userData.grappleAnchor={x:feet.x,y:feet.y,z:feet.z};
+       ground(.45,.3,{grow:reduced?0:1.2,opacity:reduced?.24:.55});
+       if(!reduced)fx.add({from:{...chest},to:{x:feet.x,y:feet.y,z:feet.z},color,life:.16,size:.05,additive:true});
+       break;
+      }
+      case 'grapple-release':{
+       const anchor=model?.userData?.grappleAnchor;
+       if(anchor&&!reduced)fx.add({from:{...chest},to:{x:anchor.x,y:anchor.y,z:anchor.z},color,life:.12,size:.04,additive:true});
+       if(model?.userData?.grappleAnchor)delete model.userData.grappleAnchor;
+       ground(.42,.22,{kind:'disc',grow:reduced?0:.8,opacity:reduced?.2:.4});
+       if(!reduced)fx.add({pos:{...chest},color,size:.05,life:.14,additive:true});
+       break;
+      }
+      case 'rope-place':{
+       const hold=Math.min(12,Math.max(.5,Number(e.life)||20));
+       ground(.55,hold,{grow:reduced?0:.05,opacity:reduced?.2:.4});
+       if(!reduced){fx.add({from:{x:feet.x,y:feet.y,z:feet.z},to:{x:feet.x,y:feet.y+1.1,z:feet.z},color,life:.35,size:.045,additive:true});for(let i=0;i<3;i++)fx.add({pos:{x:feet.x,y:feet.y+.15,z:feet.z},color,size:.04,life:.3,additive:true,velocity:V((Math.random()-.5)*3,Math.random()*2,(Math.random()-.5)*3)});}
+       break;
+      }
+      case 'rope-expire':{
+       ground(.6,.32,{kind:'disc',grow:reduced?0:-1.2,opacity:reduced?.18:.45});
+       if(!reduced)fx.add({pos:{x:feet.x,y:feet.y+.1,z:feet.z},color,size:.05,life:.2,additive:true});
+       break;
+      }
+      case 'threat-ping':{
+       // Directional warning arc aimed at the source of the bead, plus a small
+       // pulse outside it; the arc is the static reduced-motion cue. The event's
+       // pos is the target's eye, so anchor the cue at the actor's feet instead.
+       const source=this.actorModels?.get(e.source),duration=Math.max(.2,Number(e.duration)||.75),ping=model?pointOf(model.position):feet;
+       const dx=source?source.position.x-ping.x:0,dz=source?source.position.z-ping.z:0,aim=Math.atan2(-dx,-dz),pingPos={x:ping.x,y:(ping.y||0)+.06,z:ping.z};
+       ground(.95,duration,{kind:'arc',pos:pingPos,grow:0,opacity:reduced?.3:.55,yaw:aim});
+       if(!reduced)ground(.5,Math.min(.4,duration),{pos:{...pingPos,y:pingPos.y+.01},grow:1.2,opacity:.4});
+       break;
+      }
+      default:return false;
+     }
+     return true;
+    }
    shotEffect(e,info,reduced){this.effectPool??=new EffectPool(this.scene);const from=e.from,to=e.to??e.pos,weapon=e.weapon??0,feel=info.feel||{},color=e.type==='vehicle-shot'?'#ffd166':(info.color||'#c2ffea'),tracerScale=this._quality().tracers,tracer=feel.tracer||[.085,.055];
     if(e.type==='dash'){if(from&&to)this.effectPool.add({from,to,color:'#c99aff',life:.12,size:.08});return;}
     if(e.type==='launch'){if(to){this.effectPool.add({pos:to,color,size:(feel.muzzle?.[0]||.12)*1.5,life:feel.muzzle?.[1]||.09});this.effectPool.add({pos:to,color:'#ffffff',size:.06,life:.08});}return;}
@@ -1749,7 +1911,7 @@ if(freeCam){this.lowHealthOverlay?.update(false,time,delta,reduced,this.camera);
    const trailEm=trailEmissions(this._trailAt,Math.min(Number(delta)||0,.1));this._trailAt=trailEm.remainder;const emitTrail=trailEm.count>0;
    for(const [rocketIndex,r] of (match.rockets||[]).slice(0,64).entries())if(r.pos){const wp=r.weapon??0,pres=this._interpEnabled?this._presentRocket(rocketIndex):null,rp=pres&&!pres.snapped?pres:r.pos;if(wp===4){this.projectilePool.add({pos:rp,color:'#72cfff',size:.2,life:1});this.projectilePool.add({pos:rp,color:'#dff6ff',size:.09,life:1});}else if(wp===5)this.projectilePool.add({pos:rp,color:'#ffb27a',size:.13,life:1});else this.projectilePool.add({pos:rp,color:'#ffad61',size:.15,life:1});if(emitTrail&&!reduced&&this.effectPool&&this.renderer?.isSoftware!==true&&(wp===1||wp===4||wp===5)){this.effectPool.add({pos:V(rp.x,rp.y,rp.z),color:wp===4?'#72cfff':wp===5?'#ffb27a':'#ffad61',endColor:wp===4?'#003366':wp===5?'#551100':'#441100',fade:'smooth',damping:2,size:wp===4?.06:.08,life:.22,expand:1.2,velocity:V((Math.random()-.5)*.6,(Math.random()-.5)*.6,(Math.random()-.5)*.6)});} }
   for(const e of (match.events||[]))if(e.id>this.lastEvent){this._noteCombatEvent(e,time);this.effect(e);this.lastEvent=e.id;}
-   this.effectPool?.update(Math.max(0,delta));this.railPool?.update(Math.max(0,delta));this.deathPool?.update(Math.max(0,delta));this.decalPool?.update(Math.max(0,delta));
+   this.effectPool?.update(Math.max(0,delta));this.telegraphPool?.update(Math.max(0,delta));this.railPool?.update(Math.max(0,delta));this.deathPool?.update(Math.max(0,delta));this.decalPool?.update(Math.max(0,delta));
        this.hands.visible=player.health>0&&this.showWeapon!==false&&!this.spectator&&!cinematic&&!freeCam&&follow==null&&player.vehicleId==null;
     const weaponSig=`${player.finish??''}|${weaponVisualKey(player.attachments?.visual)}`;
      if(this.currentWeapon!==player.weapon||this._viewWeaponSig!==weaponSig){
@@ -1892,5 +2054,5 @@ if(freeCam){this.lowHealthOverlay?.update(false,time,delta,reduced,this.camera);
       }
       updateRace(match,time){syncRacePresentation(this,match,time);}
      _renderPreview(time,reduced){const rect=this.previewRect;if(!rect||rect.width<12||rect.height<12||!(this.renderer instanceof T.WebGLRenderer))return;const m=this.menu.model;m.rotation.y=Math.PI+.25+(reduced?0:Math.sin(time*.4)*.22);m.position.y=.17;const cam=this.menu.camera;cam.aspect=Math.max(.2,rect.width/rect.height);cam.updateProjectionMatrix();this._renderSceneInto(this.renderer,rect,this.menu.scene,cam);}
-          dispose(){this.characterLifecycle?.clear();this.clearObjectiveMarkers();this.effectPool?.dispose();this.projectilePool?.dispose();this.railPool?.dispose();this.deathPool?.dispose();this.decalPool?.dispose();this.debrisPool?.dispose();this.debrisPool=null;this.hitPool?.dispose();this.hitPool=null;this.hitFlinch?.clear();this.ambientPool?.dispose();this.weatherPool?.dispose();this.ambientFx=null;this.weatherFx=null;this._killcam=null;this.preview?.dispose();this.preview=null;this.previewAssets?.dispose?.();this.previewAssets=null;disposeComposer(this.composer);this.composer=null;this.muzzleLights?.dispose();this.lowHealthOverlay?.dispose();this.disposeObject(this.scene);if(this.weaponScene)this.disposeObject(this.weaponScene);this.disposeObject(this.menu.scene);this.environmentRT?.dispose?.();for(const resource of this.renderResources||[])resource.dispose();this.renderResources?.clear();for(const resource of this.sharedResources||[])resource.dispose();this.sharedResources?.clear();this.modelAssets?.materials.clear();this.modelAssets?.geometries.clear();this.modelAssets?.resources.clear();this.arenaAssets?.materials.clear();this.arenaAssets?.geometries.clear();this.arenaAssets?.resources.clear();clearSurfaceTextures();for(const model of this._weaponCache?.values?.()||[])this.disposeObject(model);this._weaponCache?.clear();this._freeCam=false;this._directorLock=false;this.manualFollowId=null;this._cameraOwner='auto';this._freeExit=null;this.clearFreeMotion();this.resetFreeCam();this.renderer.dispose();}
+          dispose(){this.characterLifecycle?.clear();this.clearObjectiveMarkers();this.effectPool?.dispose();this.telegraphPool?.dispose();this.projectilePool?.dispose();this.railPool?.dispose();this.deathPool?.dispose();this.decalPool?.dispose();this.debrisPool?.dispose();this.debrisPool=null;this.hitPool?.dispose();this.hitPool=null;this.hitFlinch?.clear();this.ambientPool?.dispose();this.weatherPool?.dispose();this.ambientFx=null;this.weatherFx=null;this._killcam=null;this.preview?.dispose();this.preview=null;this.previewAssets?.dispose?.();this.previewAssets=null;disposeComposer(this.composer);this.composer=null;this.muzzleLights?.dispose();this.lowHealthOverlay?.dispose();this.disposeObject(this.scene);if(this.weaponScene)this.disposeObject(this.weaponScene);this.disposeObject(this.menu.scene);this.environmentRT?.dispose?.();for(const resource of this.renderResources||[])resource.dispose();this.renderResources?.clear();for(const resource of this.sharedResources||[])resource.dispose();this.sharedResources?.clear();this.modelAssets?.materials.clear();this.modelAssets?.geometries.clear();this.modelAssets?.resources.clear();this.arenaAssets?.materials.clear();this.arenaAssets?.geometries.clear();this.arenaAssets?.resources.clear();clearSurfaceTextures();for(const model of this._weaponCache?.values?.()||[])this.disposeObject(model);this._weaponCache?.clear();this._freeCam=false;this._directorLock=false;this.manualFollowId=null;this._cameraOwner='auto';this._freeExit=null;this.clearFreeMotion();this.resetFreeCam();this.renderer.dispose();}
 }
