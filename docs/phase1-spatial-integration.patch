@@ -1,6 +1,6 @@
 --- a/game/view.mjs
 +++ b/game/view.mjs
-@@ -20,7 +20,7 @@
+@@ -20,8 +20,8 @@
  import {TEAM_PALETTE,teamPresentation,teamMark,updateTeamMark,applyActorTeam} from './team-presentation.mjs';
  import {spectateActor} from './hud.mjs';
  import {NEUTRAL} from './radar.mjs';
@@ -8,6 +8,7 @@
 +import {cavernShell,facadeDetails,tunnelRenderPaths,propId,applyPropDamage,propBreakPlan,isBreakable} from './structures.mjs';
  import {raceDemoMode,raceDemoPose,RACE_DEMO_MODE_SECONDS} from './race-camera.mjs';
  import {occlusionDistance} from './camera.mjs';
++import {smoothAngle,smoothTowards,smoothFactor,normalizeCameraOwner,cameraOwnerAllowsRace,integrateFreeMove,FREE_CAM_DEFAULT_SPEED,FREE_CAM_BOOST,FREE_CAM_MIN_SPEED,FREE_CAM_MAX_BASE_SPEED} from './camera-modes.mjs';
  import {postStage,applyComposerSize,disposeComposer,reducedMotion,normalizeQuality,qualitySettings,qualityIndex,nextQualityTier,QUALITY_LEVELS,frameTriangleBudget,normalizeQualityOverride,bloomResolution,nextQualityState,createFrameWindow,pushFrameTime,framePercentiles} from './post.mjs';
 @@ -876,6 +876,13 @@
      // Rails are continuous collision runs of overlapping boxes; render the

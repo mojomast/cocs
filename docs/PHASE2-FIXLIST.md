@@ -195,6 +195,35 @@ regeneration;
 
 ---
 
+## F12 — Phase-1 spatial patch context split by a demo import (fixed)
+
+The first full integration gate (`demo/showcase` + `feat/class-overhaul`) failed
+one test, `game/spatial-foundations-integration.test.mjs` at its hunk-replay
+guard ("integration hunk still matches current renderer"). It was a stale
+fixture pin, not a game bug, and it predates the merge on `demo/showcase`.
+
+The test replays `docs/phase1-spatial-integration.patch` against the **current**
+`game/view.mjs` in memory, accepting a hunk whose changed side is already
+integrated and otherwise requiring the old context to match. Hunk 1 changes the
+`structures.mjs` import (adding `facadeDetails` and `tunnelRenderPaths`) and its
+context block ran `occlusionDistance` (camera.mjs) straight into the `post.mjs`
+import. `6a9fc6a` (demo) inserted the new `camera-modes.mjs` import between
+those two lines, so the integrated block was no longer contiguous and the
+`includes(next)` shortcut could not fire.
+
+**Fix:** the patch's hunk 1 now carries the `camera-modes.mjs` import as context
+and is renumbered `@@ -20,8 +20,8 @@`. The semantic change is untouched (the
+same structures import), no assertion changed, and the test still imports and
+exercises the renderer path it always did: facade details consume the
+frame-aware placement contract, the tunnel shell follows the authored floor, and
+the software renderer draws the world.
+
+**Evidence:** `node --test game/spatial-foundations-integration.test.mjs` → 1/1
+(`spatial software smoke` line prints triangles/fills). Full gate counts in the
+release 6.5 verification section.
+
+---
+
 ## F6 — Full-suite gate before deploy (closed)
 
 `npm test` is green on this branch — all stages exit 0 (`test:game`,
