@@ -508,7 +508,8 @@ async function downloadOutputs(result, dir, log) {
     const res = await fetch(output.url);
     const buffer = Buffer.from(await res.arrayBuffer());
     files.set(output.slot, buffer);
-    const target = path.join(dir, rgba(`${output.slot}.${(output.content_type || 'bin').split('/').pop().replace(/[^a-z0-9]/gi, '')}`));
+    const ext = (output.content_type || 'bin').split('/').pop().replace(/[^a-z0-9]/gi, '');
+    const target = path.join(dir, `${rgba(output.slot)}.${ext}`);
     fs.writeFileSync(target, buffer);
     log(`  saved ${path.relative(ROOT, target)} (${buffer.length} bytes)`);
   }
