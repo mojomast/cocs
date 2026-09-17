@@ -2,6 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import * as T from 'three';
 import {WeaponFeedback,EffectPool,SynthAudio,AmbientFX,WeatherFX,EMPTY_CHANNELS,MODE_THEMES} from './feedback.mjs';
+import {SURFACE_KINDS,surfaceKind,footstepProfile,impactProfile,reportVariation,mixUnit,eventSeed} from './sfx-design.mjs';
 import {weatherPreset} from './environment.mjs';
 
 const player={id:7,weapon:0,x:0,z:0,yaw:0,grounded:true,vx:0,vy:0,vz:0};
@@ -481,5 +482,212 @@ test('extended mode themes are defined and selectable without error',()=>{
     assert.equal(audio.setModeTheme(mode),mode);
     assert.equal(audio.mode,mode);
   }
+});
+
+test('sound-design tables are frozen, alias-normalised and deterministically varied',()=>{
+ assert.equal(surfaceKind('Rock'),'stone');
+ assert.equal(surfaceKind('ICE'),'snow');
+ assert.equal(surfaceKind('diamond-plate'),'metal','decorated metal aliases resolve');
+ assert.equal(surfaceKind('corrugated_metal'),'metal');
+ assert.equal(surfaceKind('turf'),'grass');
+ assert.equal(surfaceKind(undefined),'default');
+ assert.equal(surfaceKind('not-a-material'),'default','unknown materials fall back to the phase-1 default');
+ for(const kind of SURFACE_KINDS){
+  const step=footstepProfile(kind),surfaceHit=impactProfile(kind);
+  assert.ok(step&&surfaceHit,`${kind} has step and impact profiles`);
+  for(const value of [step.bright,step.body,step.gain,step.q,surfaceHit.freq,surfaceHit.q,surfaceHit.gain,surfaceHit.tone,surfaceHit.end])assert.ok(Number.isFinite(value),`${kind} profile is finite`);
+  assert.ok(Object.isFrozen(step)&&Object.isFrozen(surfaceHit),`${kind} profiles are immutable`);
+ }
+ const v1=reportVariation('rifle',7),v2=reportVariation('rifle',7);
+ assert.deepEqual(v1,v2,'the same seed reproduces the same variation');
+ assert.ok(v1.pitch>=.955&&v1.pitch<=1.045&&v1.bright>=.9&&v1.bright<=1.12&&v1.tail>=.75&&v1.tail<=1.25,'variation stays inside its bounded ranges');
+ assert.notDeepEqual(v1,reportVariation('rifle',8),'a new seed shifts the variation');
+ assert.notDeepEqual(reportVariation('rifle',7),reportVariation('heavy',7),'families vary over their own styles');
+ for(let i=0;i<64;i++){const unit=mixUnit(i);assert.ok(unit>=0&&unit<1,'mixUnit is normalized');}
+ assert.equal(eventSeed({id:3,time:1.5,weapon:2}),eventSeed({id:3,time:1.5,weapon:2}));
+ assert.notEqual(eventSeed({id:3,time:1.5,weapon:2}),eventSeed({id:4,time:1.5,weapon:2}),'an event id reseeds the variation');
+});
+
+test('surface profiles shape footsteps and landings while default numbers stay phase-1 exact',()=>{
+ const {audio}=audioFixture2(),tones=[],noises=[];
+ audio._play=(duration,pan,build)=>build(0,{},[]);
+ audio._tone=(t,out,nodes,options)=>tones.push(options);
+ audio._noise=(t,out,nodes,options)=>noises.push(options);
+ audio.stepVariant=0;
+ audio._footstep(6,0);
+ assert.equal(noises.length,1,'the default surface keeps the single-noise footstep layer');
+ assert.equal(tones.length,1,'the default surface keeps the single-body footstep layer');
+ const defaultFreq=noises[0].freq,defaultTone=tones[0].freq;
+ tones.length=noises.length=0;
+ audio._footstep(6,0,'metal');
+ assert.ok(noises[0].freq>defaultFreq,'metal steps are brighter than default');
+ assert.ok(tones[0].freq>defaultTone,'metal bodies land higher');
+ assert.ok(tones.some(t=>t.freq===2400),'metal adds its ring');
+ tones.length=noises.length=0;
+ audio.stepVariant=0;
+ for(let i=0;i<3;i++)audio._footstep(6,0,'gravel');
+ assert.equal(new Set(noises.map(n=>n.freq)).size>=3,true,'variant rotation survives surface profiles');
+ assert.ok(noises.length>3,'gravel scatters debris ticks');
+ tones.length=noises.length=0;
+ audio.landVariant=0;
+ audio._landing(.6,5,'wall');
+ assert.equal(noises.length,1,'an unknown surface keeps the default landing layer count');
+ assert.equal(tones.length,1);
+ audio.dispose();
+});
+
+test('update resolves the movement surface from player, opts or resolver and cues take-off',()=>{
+ const {audio}=audioFixture2(),surfaces=[];
+ audio._footstep=(speed,weapon,surface)=>surfaces.push(surface);
+ audio._slide=(speed,surface)=>surfaces.push(surface);
+ const walking={id:7,weapon:0,x:0,z:0,yaw:0,grounded:true,health:100,maxHealth:100,vx:6,vy:0,vz:0,vehicleId:null};
+ for(let i=0;i<40;i++)audio.update(walking,[],1/60,{surface:'sand'});
+ for(let i=0;i<40;i++)audio.update({...walking,surface:'metal'},[],1/60);
+ audio.setSurfaceResolver((x,z)=>(x===0&&z===0?'wood':null));
+ for(let i=0;i<40;i++)audio.update({...walking,surface:undefined},[],1/60);
+ assert.deepEqual([...new Set(surfaces)],['sand','metal','wood'],'opts, the player field and the resolver each choose the profile');
+ assert.equal(audio.setSurfaceResolver(null),null,'a non-function resolver clears the hook');
+ const jumps=[];
+ audio._jump=(surface,weapon)=>jumps.push(surface);
+ audio.update({...walking,grounded:true,vx:0},[],1/60,{surface:'grass'});
+ audio.update({...walking,grounded:false,vy:4,vx:0},[],1/60,{surface:'grass'});
+ assert.deepEqual(jumps,['grass'],'take-off cues once per airborne transition with the resolved surface');
+ audio.dispose();
+});
+
+test('layered gunshots are deterministic per event, varied across shots and family-specific',()=>{
+ const run=e=>{
+  const {audio}=audioFixture2(),noises=[],tones=[];
+  audio._play=(duration,pan,build)=>build(0,{},[]);
+  audio._noise=(t,out,nodes,options)=>noises.push(options);
+  audio._tone=(t,out,nodes,options)=>tones.push(options);
+  audio._gunshot(e,true,0,1,player);
+  audio.dispose();
+  return {noises,tones};
+ };
+ const first=run({type:'shot',weapon:0,id:5,time:1}),replay=run({type:'shot',weapon:0,id:5,time:1});
+ assert.deepEqual(first.tones,replay.tones,'the same event synthesizes identically');
+ assert.deepEqual(first.noises,replay.noises);
+ const later=run({type:'shot',weapon:0,id:6,time:1.02});
+ assert.notEqual(first.tones[0].freq,later.tones[0].freq,'consecutive shots vary their body pitch');
+ assert.ok(first.noises.length>=4,'reports carry transient, body and tail layers');
+ const sharp=run({type:'shot',weapon:8,id:9,time:2});
+ assert.ok(sharp.noises.some(n=>n.q===1.8),'the sharp family adds its crack layer');
+ const heavy=run({type:'shot',weapon:1,id:11,time:3});
+ assert.ok(heavy.tones.some(t=>typeof t.type==='string'&&t.type.length>0),'heavy keeps a tonal body');
+ assert.ok(heavy.noises.some(n=>n.sweep===200),'heavy adds its double-thump layer');
+});
+
+test('missed shots synthesize a surface impact but actor hits do not double up',()=>{
+ const {audio}=audioFixture2(),noises=[],tones=[];
+ audio._play=(duration,pan,build)=>build(0,{},[]);
+ audio._noise=(t,out,nodes,options)=>noises.push(options);
+ audio._tone=(t,out,nodes,options)=>tones.push(options);
+ audio._gunshot({type:'shot',weapon:0,id:1,time:1,hit:false,to:{x:3,z:0},surface:'metal'},false,0,1,player);
+ const missed=noises.length,missedTones=tones.length;
+ assert.ok(noises.some(n=>n.type==='bandpass'&&n.freq>=2000),'metal impacts add a bright band');
+ assert.ok(missedTones>0);
+ audio._gunshot({type:'shot',weapon:0,id:2,time:2,hit:{id:9},to:{x:3,z:0}},false,0,1,player);
+ assert.ok(noises.length-missed<missed,'an actor hit gets no surface impact layers');
+ audio.dispose();
+});
+
+test('objective and match-beat cues retune to the mode root and stay one voice each',()=>{
+ const {audio}=audioFixture2(),tones=[],plays=[];
+ audio._play=(duration,pan,build)=>{plays.push(duration);build(0,{},[]);};
+ audio._tone=(t,out,nodes,options)=>tones.push(options);
+ audio._noise=()=>{};
+ audio.setModeTheme('ctf');
+ const root=MODE_THEMES.ctf.root;
+ audio.event({type:'flag-pickup',id:1,time:1,actor:7,from:{x:0,z:0}},player);
+ assert.equal(plays.length,1,'a flag pickup spends one voice');
+ assert.ok(Math.abs(tones[0].freq-root)<1e-9,'motifs start on the active mode root');
+ const flagNotes=tones.length;
+ tones.length=0;
+ audio.event({type:'zone-capture',id:2,time:2,actor:99,from:{x:4,z:0}},player);
+ assert.ok(tones.length>=3,'zone captures play a three-note motif');
+ assert.equal(audio.theme.root,root,'the cue does not retune the theme');
+ audio.event({type:'objective-win',id:3,time:3},player);
+ assert.ok(tones.length>=6,'objective win matches the larger beat motif');
+ assert.ok(flagNotes>=2);
+ audio.dispose();
+});
+
+test('explosions add a bounded deterministic debris tail',()=>{
+ const {audio}=audioFixture2(),noises=[],tones=[];
+ audio._play=(duration,pan,build)=>build(0,{},[]);
+ audio._noise=(t,out,nodes,options)=>noises.push(options);
+ audio._tone=(t,out,nodes,options)=>tones.push(options);
+ audio.event({type:'explosion',id:1,time:1,pos:{x:2,z:0},weapon:1},player);
+ assert.equal(tones.length,2,'the sub layers survive');
+ assert.ok(noises.length>=3&&noises.length<=10,'explosions stay bounded with the debris tail');
+ const count=noises.length;
+ audio.event({type:'explosion',id:1,time:1,pos:{x:2,z:0},weapon:1},player);
+ assert.equal(noises.length,count*2,'the same explosion synthesizes the same amount of layers');
+ audio.dispose();
+});
+
+test('setWind clamps and the bed owns wind and tension layers',()=>{
+ const {audio}=audioFixture2();
+ audio._bed(true);
+ assert.ok(audio.bed&&audio.bed.windG&&audio.bed.windLfo&&audio.bed.tenseG,'the running bed owns the new continuous layers');
+ assert.equal(audio.setWind(9),3);
+ assert.equal(audio.setWind(-2),0);
+ assert.equal(audio.setWind('nope'),null);
+ assert.equal(audio.windScale,null,'a non-finite override falls back to the mood wind');
+ assert.equal(audio.setBedMood('storm'),'storm');
+ audio.dispose();
+});
+
+test('the shared space send costs one node per sounding voice and keeps the voice cap',()=>{
+ const {audio,nodes}=audioFixture2();
+ const param=()=>({value:0,setValueAtTime(){},linearRampToValueAtTime(){},exponentialRampToValueAtTime(){},setTargetAtTime(){}});
+ let delays=0;
+ audio.ctx.createDelay=()=>{delays++;const node={delayTime:param(),connect(){},disconnect(){this.disconnected=true;}};nodes.push(node);return node;};
+ audio.master=null;
+ audio._ensureBuses();
+ assert.ok(audio.space,'the space send is built when DelayNode is available');
+ assert.equal(delays,1,'the send builds exactly one delay line');
+ audio.voices.clear();
+ const before=nodes.length;
+ audio._play(.1,0,(t,out,list)=>audio._tone(t,out,list,{freq:100}));
+ const without=nodes.length-before;
+ audio.voices.clear();
+ const beforeSend=nodes.length;
+ audio._play(.1,0,(t,out,list)=>audio._tone(t,out,list,{freq:100}),{send:.5});
+ assert.equal(nodes.length-beforeSend,without+1,'a sent voice adds exactly one send gain');
+ audio.voices.clear();
+ for(let i=0;i<40;i++)audio.tone(90+i);
+ assert.equal(audio.voices.size,30,'the voice cap still bounds sent and unsent voices');
+ audio.dispose();
+});
+
+test('a failed impulse response load stays retryable instead of latching loaded',async()=>{
+ const {audio,ctx}=musicFixture();
+ const attached=[];
+ ctx.decodeAudioData=(bytes,resolve)=>resolve({id:'ir'});
+ audio.musicEngine.setReverb=(buffer,options)=>{attached.push(buffer);return true;};
+ const originalFetch=globalThis.fetch;
+ let calls=0;
+ globalThis.fetch=async()=>{calls++;return {ok:false,arrayBuffer:async()=>new ArrayBuffer(0)};};
+ try{
+  assert.equal(audio.setReverbUrl('/moth/files/ir-cavern/result.wav',.42),true);
+  assert.equal(audio.audioStatus().reverb,'loading','the status reports an in-flight IR load');
+  await audio.unlock();
+  await new Promise(resolve=>setTimeout(resolve,0));
+  assert.equal(calls,1,'the URL is fetched once when the context unlocks');
+  assert.equal(audio.reverbLoaded,false,'a 404 does not latch the reverb as loaded');
+  assert.equal(audio.audioStatus().reverb,'pending','a failed load returns to pending');
+  assert.equal(attached.length,0,'nothing is attached on a failed load');
+  globalThis.fetch=async()=>{calls++;return {ok:true,arrayBuffer:async()=>new ArrayBuffer(8)};};
+  audio.unlock();
+  await new Promise(resolve=>setTimeout(resolve,0));
+  assert.equal(calls,2,'a later unlock retries the same URL');
+  assert.equal(audio.reverbLoaded,true,'a successful retry latches');
+  assert.equal(attached.length,1,'the decoded buffer is attached once');
+ }finally{
+  globalThis.fetch=originalFetch;
+  audio.dispose();
+ }
 });
 
