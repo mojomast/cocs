@@ -246,7 +246,11 @@ export function botMovementIntent(match,a,b,input,dt,targetDistance=Infinity){
   return input;
  }
  if(verb==='brace-slam'){
-  if(!a.grounded&&a.vy<0&&targetDistance<6)press('slam');
+  // Brace Slam starts from the ground (movement.mjs VERBS['brace-slam'] rejects
+  // `ctx.grounded !== true` and then leaps before driving down), so the intent
+  // must fire while planted and in range. The old airborne/descending check
+  // could never satisfy the verb and Meta's slam fired zero times per match.
+  if(a.grounded&&targetDistance<6)press('slam');
   return input;
  }
  return input;

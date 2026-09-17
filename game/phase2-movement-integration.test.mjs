@@ -16,6 +16,7 @@ import {RULES} from './data.mjs';
 import {MOVEMENT_EVENTS, MOVEMENT_SNAPSHOT_FIELDS} from './movement.mjs';
 import {DEEP_COMPUTE, TOOL_USE} from './operator-verbs.mjs';
 import {snapshotDelta, applySnapshotDelta} from './protocol.mjs';
+import {botMovementIntent} from './bots.mjs';
 
 const DT = RULES.dt;
 const seeded = (seed = 7) => {
@@ -361,4 +362,47 @@ test('brace slam fires from a direct slam input edge', () => {
   assert.ok(eventsOf(match, 'slam-impact').length >= 1, 'the impact resolved on landing');
   assert.equal(actor.movement.charges, 0, 'the slam spent its charge');
   assert.ok(actor.movement.cooldown > 0, 'the 8 s cooldown started');
+});
+
+// Regression: the Meta bot intent pressed `slam` only while airborne/descending
+// (`!grounded && vy < 0`), but the verb refuses to start unless `grounded`, so
+// Brace Slam fired zero times per match. The intent now presses while planted
+// and in range. These two tests pin the intent condition and a real match.
+test('the Meta bot intent presses Brace Slam from the ground and only in range', () => {
+  const match = new Match('meta', 'openclaw', seeded(5), 'crosswire', {
+    mode: 'deathmatch', humanCount: 1, botCount: 1, difficulty: 'normal', timeLimit: 30, fragLimit: 40,
+  });
+  const actor = match.actors[0];
+  const bot = actor.bot ?? (actor.bot = {});
+  Object.assign(actor, {grounded: true, vy: 0, health: actor.maxHealth, active: 0, cooldown: 1e9});
+  assert.equal(actor.movement.phase, 'ready');
+  assert.equal(botMovementIntent(match, actor, bot, {}, DT, 4).slam, true, 'grounded and in range presses the slam');
+  // Out of range: the band opens the leap once the target is close enough.
+  const held = {};
+  assert.equal(botMovementIntent(match, actor, held, {}, DT, 12).slam, undefined, 'a far target does not spend the slam');
+  // Airborne: the verb requires the ground, so the intent must not press there.
+  Object.assign(actor, {grounded: false, vy: -3});
+  assert.equal(botMovementIntent(match, actor, {}, {}, DT, 4).slam, undefined, 'the intent never presses while airborne');
+});
+
+test('a Meta bot spends Brace Slam in a deterministic match', () => {
+  const run = () => {
+    const match = new Match('chatgpt', 'openclaw', seeded(31), 'crosswire', {
+      mode: 'koth', humanCount: 1, botCount: 5, difficulty: 'hard', timeLimit: 30, fragLimit: 40,
+      botLoadouts: Array.from({length: 5}, () => ({character: 'meta', harness: 'openclaw'})),
+    });
+    let spent = 0;
+    for (let i = 0; i < 30 * 60; i++) {
+      match.step(DT, {});
+      for (const actor of match.actors) {
+        if (!actor.bot || actor.movement?.verb !== 'brace-slam') continue;
+        if (actor.movement.phase !== 'ready' || actor.movement.chains > 0) spent++;
+      }
+    }
+    return {match, spent, snapshot: match.snapshot()};
+  };
+  const first = run(), second = run();
+  assert.ok(first.match.actors.filter(a => a.bot).every(a => a.character === 'meta'), 'the bots are Meta');
+  assert.ok(first.spent > 0, 'a Meta bot spent Brace Slam');
+  assert.deepEqual(first.snapshot, second.snapshot, 'two identical runs are byte-identical');
 });
