@@ -200,7 +200,7 @@ do, feel, and test.
 |---|---|---|---|
 | OpenClaw | Claw Burst (`burst`) | **Grip** — melee arc +25% | Strikers: pull-in; Vanguards: bigger knockback; Tacticians: wider radius |
 | Hermes | Courier Rush (`buff:speed`) | **Express** — can sprint while reloading | Strikers: longer; Vanguards: 25% mitigation during the rush; Tacticians: cooldown −1 s |
-| OpenCode | Parallel Burst (`buff:fireRate`) | **Multiplex** — reload continues while swapped | Strikers: faster while active; Vanguards: Guardrail lasts 1 s longer; Tacticians: skip the next holster |
+| OpenCode | Parallel Burst (`buff:fireRate`) | **Multiplex** — reload continues while swapped | Strikers: faster while active; Vanguards: the burst lasts 1 s longer; Tacticians: skip the next holster |
 | Claude Code | Guardrail (`buff:resistance`) | **Linted** — brief threat ping when an enemy holds a bead on you | Strikers: cleanse slow on activation; Vanguards: +10% mitigation while active; Tacticians: ping lasts longer |
 | Codex | Recompile (`heal`) | **Green Build** — reload 15% faster | Strikers: +1 s speed; Vanguards: overheal up to +15%; Tacticians: refill the equipped magazine |
 | Cline | Phase Step (`dash`) | **Off-road** — extra air control, longer slide | Strikers: travels further; Vanguards: unstoppable during the verb, shorter; Tacticians: radar feint at the origin |
