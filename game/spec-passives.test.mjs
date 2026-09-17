@@ -17,8 +17,8 @@ const rng = (seed = 7) => { let n = seed >>> 0; return () => ((n = (Math.imul(n,
 const closedArena = {blocks: [], bounds: {minX: -1000, maxX: 1000, minZ: -1000, maxZ: 1000}};
 const close = (actual, expected, eps = 1e-9) => assert.ok(Math.abs(actual - expected) <= eps, `${actual} != ${expected}`);
 
-const match = (harness, options = {}) => {
-  const m = new Match('chatgpt', harness, rng(), 'exchange', {mode: 'deathmatch', botCount: 0, ...options});
+const match = (harness, options = {}, character = 'chatgpt') => {
+  const m = new Match(character, harness, rng(), 'exchange', {mode: 'deathmatch', botCount: 0, ...options});
   m.arena = closedArena;
   m.pickups = [];
   m.vehicles = [];
@@ -165,7 +165,8 @@ test('OpenCode Multiplex keeps a reload running across a weapon swap and finishe
 // ---------------------------------------------------------------------------
 
 test('Claude Code Linted pings a threat on cooldown and ignores beads that are not held', () => {
-  const m = match('claudecode', {humanCount: 2});
+  // Mistral (striker) has no threat-ping rider, so the base descriptor shows.
+  const m = match('claudecode', {humanCount: 2}, 'mistral');
   const [a, b] = m.actors;
   quiet(a); quiet(b);
   a.health = b.health = 100;

@@ -16,7 +16,7 @@ test('per-actor inputs drive look, fire, movement and weapon switching independe
  Object.assign(a,{x:-9,y:0,z:8,protection:0,shotWait:0,health:100,armor:0,yaw:0,pitch:0});
  Object.assign(b,{x:-9,y:0,z:-2,protection:0,shotWait:0,health:100,armor:0,yaw:0,pitch:0});
  m.step(1/60,{inputs:{0:{yaw:0,fire:true},1:{yaw:Math.PI,fire:true}}});
-  assert.equal(a.health,89);assert.equal(b.health,89.2288);
+  assert.equal(a.health,89);assert.equal(b.health,89);
  assert.ok(Math.abs(a.yaw)<1e-9);assert.ok(Math.abs(b.yaw-Math.PI)<1e-9);
  const ax=a.x,bx=b.x;
  m.step(1/60,{inputs:{0:{x:1,z:0},1:{}}});
@@ -50,5 +50,5 @@ test('legacy single-input step shape still drives actor zero',()=>{
  Object.assign(a,{x:-9,y:0,z:8,protection:0,shotWait:0,health:100,yaw:0,pitch:0});
   Object.assign(b,{x:-9,y:0,z:4,protection:0,health:100,armor:0});
  m.step(1/60,{fire:true});
-  assert.equal(b.health,89.2288);
+  assert.equal(b.health,89);
 });

@@ -64,11 +64,13 @@ const riderCache = new Map();
 /**
  * The wing rider for a character x harness pick, or null when either id is
  * missing/unknown. Normalises through `resolveLoadout`, so the Claude Code lock
- * resolves the same way every other loadout path does. Hand-built actors
- * without a character/harness (movement tests) get a neutral null rider.
+ * resolves the same way every other loadout path does; unknown ids resolve to a
+ * neutral null (hand-built test actors) instead of the chatgpt/openclaw
+ * fallback, because a rider must never leak onto an actor that did not pick it.
  */
 export function riderOf(character, harness) {
   if (typeof character !== 'string' || typeof harness !== 'string') return null;
+  if (!KIT_BY_ID[character] || !SPEC_BY_ID[harness]) return null;
   const loadout = resolveLoadout(character, harness);
   const key = `${loadout.character}|${loadout.harness}`;
   let rider = riderCache.get(key);
@@ -139,17 +141,22 @@ export function riderEffect(character, harness, type, query = {}) {
   return effectOf(rider.effects, type, effectQuery);
 }
 
+/** Bounded numeric field of a rider effect (`field` names the effect's own key). */
+export function riderNumber(character, harness, type, field, fallback = 0, query = {}) {
+  return bounded(riderEffect(character, harness, type, query), field, fallback);
+}
+
 /** Bounded `scale` field of a rider effect (1 = neutral fallback). */
 export function riderScale(character, harness, type, fallback = 1, query = {}) {
-  return bounded(riderEffect(character, harness, type, query), 'scale', fallback);
+  return riderNumber(character, harness, type, 'scale', fallback, query);
 }
 
 /** Bounded `bonus` field of a rider effect (0 = neutral fallback). */
 export function riderBonus(character, harness, type, fallback = 0, query = {}) {
-  return bounded(riderEffect(character, harness, type, query), 'bonus', fallback);
+  return riderNumber(character, harness, type, 'bonus', fallback, query);
 }
 
 /** Bounded `amount` field of a rider effect (0 = neutral fallback). */
 export function riderAmount(character, harness, type, fallback = 0, query = {}) {
-  return bounded(riderEffect(character, harness, type, query), 'amount', fallback);
+  return riderNumber(character, harness, type, 'amount', fallback, query);
 }

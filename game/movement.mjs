@@ -297,16 +297,18 @@ export const HOOK_VALUES = deepFreeze({
   economy: {chargeBonus: 1, fuelScale: 1.25, cooldownScale: 0.8},
   chaining: {linkScale: CHAIN_LINK_SCALE, distanceCap: CHAIN_DISTANCE_CAP, allowCancel: true},
   usage: {allowWhileFiring: true},
+  // Landing hooks are a pure spec-id table now: each entry carries the complete
+  // action payload, so the engine never branches on a spec id.
   'landing-self': {
     // §3.4 Codex: "landing repairs a little; no fall damage".
-    codex: {heal: 8, noFallDamage: true},
+    codex: {action: 'heal', amount: 8, noFallDamage: true},
     // §3.4 Claude Code: "landing grants a brief brace". ≤60% mitigation cap (§4.7).
-    claudecode: {brace: {duration: 1.2, mitigation: 0.1, knockbackScale: 0.5}},
+    claudecode: {action: 'brace', duration: 1.2, mitigation: 0.1, knockbackScale: 0.5},
   },
   'landing-control': {
     // §3.4 OpenClaw + §4.7 field caps: ≤3.5 m, ≤35% slow, 2.5 s per actor.
-    openclaw: {radius: 3.5, knockback: 6, lift: 0},
-    roo: {radius: 3.5, slowMultiplier: 0.65, duration: 2.5},
+    openclaw: {action: 'knockback', radius: 3.5, knockback: 6, lift: 0},
+    roo: {action: 'slow-field', radius: 3.5, slowMultiplier: 0.65, duration: 2.5},
   },
 });
 
@@ -813,26 +815,18 @@ function directTranslation(from, direction, distance, ctx, radius = MOVE_PROBE_R
 // ---------------------------------------------------------------------------
 
 /**
- * The landing-self / landing-control actions for a clean landing, keyed by the
- * state's hook and spec (§3.6). Pure: same state in, same action list out.
+ * The landing-self / landing-control actions for a clean landing, resolved as a
+ * `HOOK_VALUES[hook][spec]` table lookup (§3.6). Pure: same state in, same
+ * action list out, and no spec or operator id in the code path.
  * Bounds are the frozen §4.7 values in HOOK_VALUES.
  */
 export function movementLandingActions(state) {
   const actions = [];
   if (!state || state.enabled !== true) return actions;
-  if (state.hook === 'landing-self') {
-    if (state.spec === 'codex') {
-      actions.push({type: 'heal', amount: HOOK_VALUES['landing-self'].codex.heal, noFallDamage: true, source: 'movement'});
-    } else if (state.spec === 'claudecode') {
-      actions.push({type: 'brace', ...HOOK_VALUES['landing-self'].claudecode.brace, source: 'movement'});
-    }
-  } else if (state.hook === 'landing-control') {
-    if (state.spec === 'openclaw') {
-      actions.push({type: 'knockback', ...HOOK_VALUES['landing-control'].openclaw, source: 'movement'});
-    } else if (state.spec === 'roo') {
-      actions.push({type: 'slow-field', ...HOOK_VALUES['landing-control'].roo, source: 'movement'});
-    }
-  }
+  const entry = HOOK_VALUES[state.hook]?.[state.spec];
+  if (!entry?.action) return actions;
+  const {action, ...payload} = entry;
+  actions.push({type: action, ...payload, source: 'movement'});
   return actions;
 }
 

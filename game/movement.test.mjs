@@ -130,9 +130,10 @@ test('hook values are exactly the §3.6/§4.7 bounded numbers', () => {
   assert.equal(HOOK_VALUES.chaining.distanceCap, 1.4);
   assert.equal(HOOK_VALUES.chaining.allowCancel, true);
   assert.equal(HOOK_VALUES.usage.allowWhileFiring, true);
-  assert.equal(HOOK_VALUES['landing-self'].codex.heal, 8);
+  assert.equal(HOOK_VALUES['landing-self'].codex.action, 'heal');
+  assert.equal(HOOK_VALUES['landing-self'].codex.amount, 8);
   assert.equal(HOOK_VALUES['landing-self'].codex.noFallDamage, true);
-  const brace = HOOK_VALUES['landing-self'].claudecode.brace;
+  const brace = HOOK_VALUES['landing-self'].claudecode;
   assert.ok(brace.duration > 0 && brace.mitigation > 0 && brace.mitigation <= 0.6, 'brace mitigation ≤60% (§4.7)');
   assert.ok(brace.knockbackScale > 0 && brace.knockbackScale <= 0.5);
   const claw = HOOK_VALUES['landing-control'].openclaw;
@@ -745,6 +746,14 @@ test('landing hooks: Codex heals, Claude Code braces, OpenClaw knocks back, Roo 
   closeTo(slow.radius, 3.5, EPS);
   closeTo(slow.slowMultiplier, 0.65, EPS);
   closeTo(slow.duration, 2.5, EPS);
+
+  // The landing tables are resolved by hook + spec id only: hooks that have no
+  // landing action (economy/usage/chaining) stay empty for every spec.
+  for (const harness of ['hermes', 'opencode', 'cline']) {
+    assert.deepEqual(movementLandingActions(createMovementState({character: 'mistral', harness})), [], harness);
+  }
+  assert.equal(HOOK_VALUES['landing-control'].roo.action, 'slow-field');
+  assert.equal(HOOK_VALUES['landing-control'].openclaw.action, 'knockback');
 });
 
 test('landing hooks fire only on a clean ctx.landed and not while an active verb handles its own landing', () => {
