@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import * as T from 'three';
-import {ArenaView} from './view.mjs';
+import {ArenaView, mothAtmosphereFor} from './view.mjs';
 import {mothEffectTextures, mothMaterialLutTexture, clearSurfaceTextures} from './textures.mjs';
 import {configureMothAssets, resetMothAssets} from './moth-assets.mjs';
 
@@ -20,6 +20,23 @@ const fixture = () => ({
     ] },
   },
   levels: {}, seeds: {}, motifs: {},
+});
+
+test('map atmospheres pick the baked sky by theatre and leave the rest procedural', () => {
+  assert.equal(mothAtmosphereFor('ember-caldera'), 'ashen');
+  assert.equal(mothAtmosphereFor('slagworks'), 'ashen');
+  assert.equal(mothAtmosphereFor('forge'), 'ashen');
+  assert.equal(mothAtmosphereFor('ashen-rift'), 'ashen');
+  assert.equal(mothAtmosphereFor('frostline'), 'frost');
+  assert.equal(mothAtmosphereFor('frost-gate'), 'frost');
+  assert.equal(mothAtmosphereFor('neon-vertical'), 'void');
+  assert.equal(mothAtmosphereFor('aether'), 'void');
+  assert.equal(mothAtmosphereFor('substation'), 'void');
+  assert.equal(mothAtmosphereFor('derelict-station'), 'void');
+  assert.equal(mothAtmosphereFor('ironfall-megastructure'), 'void');
+  assert.equal(mothAtmosphereFor('moth-backrooms'), 'void');
+  assert.equal(mothAtmosphereFor('exchange'), null, 'unlisted maps keep addSky');
+  assert.equal(mothAtmosphereFor(undefined), null);
 });
 
 test('effect frames and LUTs are shared caches marked for the disposal traversal', () => {
@@ -55,4 +72,20 @@ test('disposeObject never releases a shared Moth texture', () => {
   ArenaView.prototype.disposeObject.call({}, group);
   assert.equal(sharedDisposed, 0, 'the shared cache texture survives object disposal');
   assert.equal(ownedDisposed, 1, 'an object-owned texture is still released');
+});
+
+test('the view swaps the sky material for the baked map atmosphere', () => {
+  configureMothAssets(fixture());
+  try {
+    const view = Object.assign(Object.create(ArenaView.prototype), { renderer: { isSoftware: false }, reduced: () => false });
+    const skyMesh = { material: new T.MeshBasicMaterial(), userData: {} };
+    view.sky = skyMesh;
+    assert.equal(view._applyMothAtmosphere('void'), skyMesh);
+    assert.equal(skyMesh.material.map?.userData.mothSky, 'void');
+    assert.equal(skyMesh.userData.mothAtmosphere, 'void');
+    assert.equal(view._applyMothAtmosphere('missing'), null, 'unknown atmospheres leave the dome alone');
+  } finally {
+    resetMothAssets();
+    clearSurfaceTextures();
+  }
 });

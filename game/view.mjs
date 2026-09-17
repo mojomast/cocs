@@ -100,6 +100,17 @@ function addBlobShadow(parent,radius,opacity=.34){
  parent.add(shadow);return shadow;
 }
 const arenaSeedOf=arena=>String(arena?.id||'arena').split('').reduce((hash,char)=>(Math.imul(hash,31)+char.charCodeAt(0))>>>0,7);
+// Baked Moth atmosphere per map, applied to the standard sky dome. Maps that are
+// not listed keep the procedural addSky gradient. `nebula` is deliberately
+// unused: the bake decodes to a fully black equirect (mean/max 0), so wiring it
+// would render a black dome instead of an atmosphere.
+const MOTH_ATMOSPHERE_MAPS=Object.freeze({
+ 'ember-caldera':'ashen','slagworks':'ashen','forge':'ashen','ashen-rift':'ashen',
+ frostline:'frost','frost-gate':'frost',
+ 'neon-vertical':'void','aether':'void','substation':'void','derelict-station':'void','ironfall-megastructure':'void',
+ 'moth-backrooms':'void',
+});
+export function mothAtmosphereFor(arenaId){return MOTH_ATMOSPHERE_MAPS[String(arenaId)]||null;}
 const terrainTextureKind=key=>({grass:'grass',dirt:'sand',rock:'rock',cliff:'rock',concrete:'weathered_concrete',metal:'industrial_mesh',ice:'ice',sand:'sand',snow:'ice',ash:'weathered_concrete',stone:'rough_stucco',lava:'corrugated_metal'}[key]||'rock');
 // Collision proxies that next-gen maps render as smooth geometry instead of a box.
 const NEXTGEN_PROXY=new Set(['cave','tunnel','rock','tree','crate','column']);
@@ -992,12 +1003,12 @@ export class ArenaView{
     const floorKind=arena.id==='neon-vertical'||arena.id==='crosswire'?'holographic_grid':(arena.id==='foundry'?'diamond_plate':(['ironfall-megastructure','substation','citadel','derelict-station'].includes(arena.id)?'metal_grating':(['launchpad','catwalk-breach'].includes(arena.id)?'carbon_fiber':'weathered_concrete')));
     applyTextures(floor,floorKind,Math.max(2,Math.round(width/4)),Math.max(2,Math.round(depth/4)));
     // Moth Quantum signature: on the quantum labyrinth, build an iridescent
-    // landmark from the entanglement LUTs, an animated rift from the baked
-    // effect frames, and a nebula sky dome.
+    // landmark from the entanglement LUTs and an animated rift from the baked
+    // effect frames. The baked sky atmosphere is wired onto the standard sky
+    // dome below (`MOTH_ATMOSPHERE_MAPS`), so it follows the camera and keeps
+    // addSky's stars, sun disc and haze children.
     if(arena.id==='moth-backrooms'&&textured){
       const cx=(minX+maxX)/2,cz=(minZ+maxZ)/2;
-      const sky=mothSkyTexture('nebula');
-      if(sky?.texture){const dome=new T.Mesh(new T.SphereGeometry(Math.max(width,depth)*1.15,24,16),new T.MeshBasicMaterial({map:sky.texture,side:T.BackSide,fog:false,depthWrite:false}));dome.position.set(cx,0,cz);dome.renderOrder=-1;world.add(dome);}
       const riftFrames=mothEffectTextures('quantum-rift');
       if(this.renderer?.isWebGLRenderer===true){
         const lut=mothMaterialLutTexture('entanglement-arcane');
@@ -1103,7 +1114,7 @@ export class ArenaView{
    // the test mock keep individual meshes for predictable depth ordering).
    this._batchArenaBlocks(world);
    // Unused family colors never reach the scene's normal disposal traversal.
-   const usedMaterials=new Set();world.traverse(n=>{if(n.material)usedMaterials.add(n.material);});for(const mat of new Set(palette))if(!usedMaterials.has(mat))mat.dispose();   const skyPhaseName=skyPhase(arena),halo=HALO_MAPS.has(arena.id),sunDir=arena.id==='aether'?[-18,24,-12]:arena.id==='foundry'?[18,24,-12]:[18,24,10],quality=this._quality();this.scene.userData.sky={background:arena.background,phase:skyPhaseName,seed:arenaSeed,halo,sunDir,mood:biomeAmbience(arena).mood,weather:this.weatherState?this.weatherState.kind:'clear'};if(this.renderer?.isSoftware!==true){this.sky=addSky(world,{background:arena.background,radius:185,phase:skyPhaseName,seed:arenaSeed,starCount:Math.round((skyPhaseName==='night'?520:0)*quality.stars),halo,sunDir});this.mountains=addMountains(world,{background:arena.background,seed:arenaSeed,radius:150,count:Math.max(8,Math.round(26*quality.scatter)),base:-12,detail:quality.scatterDetail});if(arena.terrain)this.scatterWind=addScatter(world,{terrain:arena.terrain,bounds,seed:arenaSeed,wind:true,density:quality.scatter,detail:quality.scatterDetail,biome:arena.biome})||[];}
+   const usedMaterials=new Set();world.traverse(n=>{if(n.material)usedMaterials.add(n.material);});for(const mat of new Set(palette))if(!usedMaterials.has(mat))mat.dispose();   const skyPhaseName=skyPhase(arena),halo=HALO_MAPS.has(arena.id),sunDir=arena.id==='aether'?[-18,24,-12]:arena.id==='foundry'?[18,24,-12]:[18,24,10],quality=this._quality();this.scene.userData.sky={background:arena.background,phase:skyPhaseName,seed:arenaSeed,halo,sunDir,mood:biomeAmbience(arena).mood,weather:this.weatherState?this.weatherState.kind:'clear'};if(this.renderer?.isSoftware!==true){this.sky=addSky(world,{background:arena.background,radius:185,phase:skyPhaseName,seed:arenaSeed,starCount:Math.round((skyPhaseName==='night'?520:0)*quality.stars),halo,sunDir});this.mountains=addMountains(world,{background:arena.background,seed:arenaSeed,radius:150,count:Math.max(8,Math.round(26*quality.scatter)),base:-12,detail:quality.scatterDetail});if(arena.terrain)this.scatterWind=addScatter(world,{terrain:arena.terrain,bounds,seed:arenaSeed,wind:true,density:quality.scatter,detail:quality.scatterDetail,biome:arena.biome})||[];const atmosphere=mothAtmosphereFor(arena.id);if(atmosphere)this._applyMothAtmosphere(atmosphere);}
     else this.scatterWind=[];
     this.ambientFx=null;this.ambientPool?.dispose?.();this.ambientPool=null;this.ambientConfig=ambientProfile(arena,skyPhaseName);this.ambientSeed=arenaSeed;this.ambientAnchors=smokeAnchors(bounds,arenaSeed,4);
     this.weatherFx=null;this.weatherPool?.dispose?.();this.weatherPool=null;this.initWeather(arena);
@@ -1558,6 +1569,20 @@ export class ArenaView{
     return Math.max(0,Math.min(1,peak*decay*decay));
    }
    _noteNearAction(audio,time){if(!audio)return;const value=this.audioIntensity(time);if(Math.abs((audio.intensity||0)-value)>.02)audio.setIntensity?.(value);}
+   // Swap the procedural gradient material for the map's baked Moth atmosphere.
+   // The sky mesh is kept (so updateSky still tracks the camera and _tintSky can
+   // still drive stars, sun disc, haze and storm darkening); only the dome's own
+   // material is replaced. The gradient material is generated per arena, so it is
+   // safe to release here.
+   _applyMothAtmosphere(name){
+    const mesh=this.sky,sky=mothSkyTexture(name);
+    if(!mesh||!sky?.texture)return null;
+    const previous=mesh.material;
+    mesh.material=new T.MeshBasicMaterial({map:sky.texture,side:T.BackSide,fog:false,depthWrite:false});
+    if(previous&&previous!==mesh.material)previous.dispose?.();
+    mesh.userData.mothAtmosphere=name;
+    return mesh;
+   }
    updateSky(){if(this.sky)this.sky.position.copy(this.camera.position);if(this.mountains)this.mountains.position.copy(this.camera.position);}
    // WebGL-only ambient pass: wind sway on tagged vegetation and pooled motes.
    // Both are skipped entirely for the CPU renderer and reduced motion.
