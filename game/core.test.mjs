@@ -5,12 +5,12 @@ import {CHARACTERS,HARNESSES,validLoadout,resolveLoadout,RULES} from './data.mjs
 import {slowSkip} from './test-support.mjs';
 function rng(){let n=42;return()=>((n=(Math.imul(n,1664525)+1013904223)>>>0)/4294967296);}
 const fresh=()=>new Match('chatgpt','openclaw',rng(),'exchange',{botCount:4,difficulty:'normal'});
-function isolate(m){m.actors.forEach((a,i)=>Object.assign(a,{x:10+i*.1,y:0,z:10,protection:0,health:100,armor:0,harnessDamageMultiplier:1}));return m.actors;}
+function isolate(m){m.actors.forEach((a,i)=>Object.assign(a,{x:10+i*.1,y:0,z:10,protection:0,health:100,armor:0}));return m.actors;}
 test('all roster / harness combinations enforce compatibility and correction',()=>{for(const c of CHARACTERS)for(const h of HARNESSES){assert.equal(validLoadout(c.id,h.id),c.id!=='claude'||h.id==='claudecode');const l=resolveLoadout(c.id,h.id);assert.ok(validLoadout(l.character,l.harness));}assert.equal(new Match('claude','hermes').actors[0].harness,'claudecode');assert.equal(validLoadout('unknown','hermes'),false);});
 test('armor, Guardrail, protection and one-time kill scoring',()=>{const m=fresh(),[a,b]=isolate(m);b.protection=1;assert.equal(m.damage(b,100,a),0);b.protection=0;b.armor=50;b.harness='claudecode';b.active=3;m.damage(b,100,a);assert.equal(b.health,80);assert.equal(b.armor,20);m.damage(b,1000,a);m.damage(b,1000,a);assert.equal(a.frags,1);assert.equal(b.deaths,1);assert.equal(b.active,0);assert.equal(b.cooldown,0);});
 test('suicide deducts one frag and match end locks scoring',()=>{const m=fresh(),[a,b]=isolate(m);m.damage(a,500,a);assert.equal(a.frags,-1);a.health=100;a.frags=14;m.damage(b,500,a);assert.equal(m.over,true);assert.equal(a.frags,15);m.damage(a,500,b);assert.equal(a.health,100);});
 test('time limit returns all tied leaders',()=>{const m=fresh();m.time=299.995;m.actors.forEach(a=>{a.health=0;a.dead=100;});m.step(1/60);assert.equal(m.over,true);assert.equal(m.leaders().length,5);});
-test('wall and reactor rays occlude; open line damages; muzzle checks',()=>{const m=fresh(),[a,b]=isolate(m);Object.assign(a,{x:0,y:0,z:5,shotWait:0,yaw:0,pitch:0});Object.assign(b,{x:0,y:0,z:-5});m.fire(a);assert.equal(b.health,100);assert.ok(rayWorld(eye(a),aim(0),30)<4);Object.assign(b,{x:0,y:0,z:3.5});a.shotWait=0;m.fire(a);assert.equal(b.health,89.44);});
+test('wall and reactor rays occlude; open line damages; muzzle checks',()=>{const m=fresh(),[a,b]=isolate(m);Object.assign(a,{x:0,y:0,z:5,shotWait:0,yaw:0,pitch:0});Object.assign(b,{x:0,y:0,z:-5});m.fire(a);assert.equal(b.health,100);assert.ok(rayWorld(eye(a),aim(0),30)<4);Object.assign(b,{x:0,y:0,z:3.5});a.shotWait=0;m.fire(a);assert.equal(b.health,89,'full Pulse damage: no target harness passive is subtracted');});
 test('pulse respects cover and applies damage and knockback in range',()=>{const m=fresh(),[a,b,c]=isolate(m);Object.assign(a,{x:0,y:0,z:2.8});Object.assign(b,{x:0,y:0,z:-2.8});Object.assign(c,{x:1,y:0,z:3});assert.equal(m.power(a),true);assert.equal(c.health,76);assert.ok(c.vx>0);assert.equal(b.health,100);assert.equal(m.power(a),false);});
 test('powers expire on fixed time; Parallel Burst respects ammo',()=>{for(const h of HARNESSES){const m=new Match('qwen',h.id,rng()),a=m.actors[0];m.actors.slice(1).forEach(b=>{b.health=0;b.dead=100;});a.protection=0;assert.ok(m.power(a));for(let i=0;i<241;i++)m.step(1/60);assert.equal(a.active,0);assert.ok(a.cooldown>0);m.spawn(a);assert.equal(a.cooldown,0);}const m=fresh(),a=m.actors[0];a.harness='opencode';a.protection=0;a.shotWait=0;a.ammo[2]=1;a.weapon=2;m.power(a);m.fire(a);assert.equal(a.ammo[2],0);assert.ok(a.shotWait<1);a.shotWait=0;m.fire(a);assert.equal(a.weapon,2);assert.equal(a.reloading,true);});
 test('rockets use swept hits, explode on solids, cause self splash',()=>{const m=fresh(),[a,b]=isolate(m);Object.assign(a,{x:0,y:0,z:3.3,weapon:1,ammo:[Infinity,2,0],shotWait:0,yaw:0,pitch:0});Object.assign(b,{x:0,y:0,z:-3.3});m.fire(a);for(let i=0;i<8;i++)m.step(1/60);assert.equal(m.rockets.length,0);assert.ok(a.health<100);assert.equal(b.health,100);assert.ok(m.events.some(e=>e.type==='explosion'));});
@@ -43,7 +43,6 @@ test('void falls emit a ragdoll death without a killer',()=>{
 
 test('shots, hits and damage accumulate per actor for the end-of-match awards',()=>{
  const m=fresh(),[a,b]=isolate(m);
- b.harnessResistance=0;
  m.damage(b,25,a);
  assert.equal(a.scoreStats.hits,1,'a landed hit counts one hit');
  assert.equal(a.scoreStats.damage,25,'damage dealt is summed');

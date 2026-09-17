@@ -29,11 +29,11 @@ for(const [i,c] of CHARACTERS.entries()){
   for(const speed of [.75,1,1.5])for(const active of [0,3])for(const slow of [0,3]){
    Object.assign(a,{x:0,y:0,z:0,vx:0,vy:0,vz:0,active,slow});
    for(let j=0;j<30;j++)moveActor(a,{x:1},1/60,{blocks:[]},{speed,gravity:1});
-    assert.ok(Math.abs(a.vx-c.stats.speed*speed*a.harnessSpeedMultiplier*(active&&a.harness==='hermes'?1.6:1)*(slow?.55:1))<1e-10);
+    assert.ok(Math.abs(a.vx-c.stats.speed*speed*(active&&a.harness==='hermes'?1.6:1)*(slow?.55:1))<1e-10);
   }
   delete a.moveSpeed;Object.assign(a,{x:0,vx:0,active:0,slow:0});
   for(let j=0;j<30;j++)moveActor(a,{x:1},1/60,{blocks:[]});
-   assert.equal(a.vx,c.stats.speed*a.harnessSpeedMultiplier);
+   assert.equal(a.vx,c.stats.speed,'no hidden harness speed multiplier: walk speed is the class stat');
  });
  test(`${c.name}: Instagib stays lethal with full armor and Guardrail`,()=>{
   const m=new Match(c.id,'claudecode',()=>.5,'crosswire',{mode:'instagib',botCount:1});

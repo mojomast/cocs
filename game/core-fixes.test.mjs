@@ -14,7 +14,7 @@ const openDeathmatch = (botCount = 0) => {
 test('BUG-2 bots execute melee through the step controls path', () => {
   const m = openDeathmatch(1);
   const [human, bot] = m.actors;
-  Object.assign(human, {x: 0, y: 0, z: -1.2, health: 100, armor: 0, protection: 0, harnessResistance: 0, dead: 0});
+  Object.assign(human, {x: 0, y: 0, z: -1.2, health: 100, armor: 0, protection: 0, dead: 0});
   Object.assign(bot, {x: 0, y: 0, z: 0, yaw: 0, pitch: 0, melee: 0, protection: 0, weapon: 0});
   bot.ammo[0] = Infinity;
   m.step(1 / 60);
@@ -53,7 +53,7 @@ test('SIM-F4 interact without a vehicle does not eat a movement tick', () => {
 test('SIM-F7 self-inflicted lethal damage does not count as a kill', () => {
   const m = openDeathmatch(0);
   const a = m.actors[0];
-  Object.assign(a, {health: 50, armor: 0, protection: 0, harnessResistance: 0});
+  Object.assign(a, {health: 50, armor: 0, protection: 0});
   const before = m.stats.kills;
   m.damage(a, 1000, a);
   assert.equal(a.health, 0);

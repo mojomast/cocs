@@ -19,8 +19,8 @@ const open=(weaponIndex,distance)=>{
  const m=new Match('chatgpt','openclaw',()=>.5,'exchange',{mode:'deathmatch',botCount:0,humanCount:2});
  m.arena={blocks:[],bounds:{minX:-1000,maxX:1000,minZ:-1000,maxZ:1000}};m.pickups=[];m.vehicles=[];
  const [a,b]=m.actors;
- Object.assign(a,{x:0,y:0,z:0,health:100,armor:0,protection:0,shotWait:0,reloading:false,weaponSwitch:0,punchYaw:0,punchPitch:0,spread:0,yaw:0,pitch:0,harnessResistance:0,weapon:weaponIndex});
- Object.assign(b,{x:0,y:0,z:-distance,health:1000,maxHealth:1000,armor:0,protection:0,harnessResistance:0});
+ Object.assign(a,{x:0,y:0,z:0,health:100,armor:0,protection:0,shotWait:0,reloading:false,weaponSwitch:0,punchYaw:0,punchPitch:0,spread:0,yaw:0,pitch:0,weapon:weaponIndex});
+ Object.assign(b,{x:0,y:0,z:-distance,health:1000,maxHealth:1000,armor:0,protection:0});
  a.ammo[weaponIndex]=5;
  m.fire(a);
  return 1000-b.health;

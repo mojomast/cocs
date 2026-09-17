@@ -48,7 +48,7 @@ function distribution(weaponIndex,distance,moving,shots=400){
  m.arena=openArena;m.pickups=[];m.vehicles=[];
  const [a,b]=m.actors;
  Object.assign(a,{x:0,y:0,z:0,health:100,armor:0,protection:0,shotWait:0,reloading:false,weaponSwitch:0,punchYaw:0,punchPitch:0,spread:0,yaw:0,pitch:0,vx:moving?8:0,vz:0,moveSpeed:8,vehicleId:null,traversalCooldown:0});
- Object.assign(b,{x:0,y:0,z:-distance,health:100000,maxHealth:100000,armor:0,protection:0,harnessResistance:0});
+ Object.assign(b,{x:0,y:0,z:-distance,health:100000,maxHealth:100000,armor:0,protection:0});
  a.ammo[weaponIndex]=Infinity;a.weapon=weaponIndex;
  let hits=0;
  for(let i=0;i<shots;i++){

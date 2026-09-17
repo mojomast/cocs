@@ -54,9 +54,9 @@ test('air reversal changes only the requested projection and external momentum i
 });
 
 test('ground speed respects analog input and all existing speed modifiers',()=>{
- const a=actor({harness:'hermes',active:2,activeSpeedMultiplier:1.6,harnessSpeedMultiplier:1.1,speedMultiplier:1.35,slow:2,slowMultiplier:.55});
+ const a=actor({harness:'hermes',active:2,speedMultiplier:1.35,slow:2,slowMultiplier:.55});
  for(let i=0;i<120;i++)moveActor(a,{x:.5},RULES.dt,arena,{speed:1.5,gravity:1});
- close(speed(a),8*.5*1.5*1.6*1.1*1.35*.55);
+ close(speed(a),8*.5*1.5*1.6*1.35*.55);
 });
 
 test('sprint, crouch and slide compose with the base speed',()=>{

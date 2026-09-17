@@ -6,8 +6,8 @@ const open=()=>{
  const m=new Match('chatgpt','openclaw',()=>.5,'exchange',{mode:'deathmatch',botCount:0,humanCount:2});
  m.arena={blocks:[],bounds:{minX:-1000,maxX:1000,minZ:-1000,maxZ:1000}};m.pickups=[];m.vehicles=[];
  const [a,b]=m.actors;
- Object.assign(a,{x:0,y:0,z:0,health:100,armor:0,protection:0,shotWait:0,weaponSwitch:0,melee:0,yaw:0,pitch:0,punchYaw:0,punchPitch:0,harnessResistance:0});
- Object.assign(b,{x:0,y:0,z:-2,health:100,armor:0,protection:0,harnessResistance:0});
+ Object.assign(a,{x:0,y:0,z:0,health:100,armor:0,protection:0,shotWait:0,weaponSwitch:0,melee:0,yaw:0,pitch:0,punchYaw:0,punchPitch:0});
+ Object.assign(b,{x:0,y:0,z:-2,health:100,armor:0,protection:0});
  a.ammo[0]=Infinity;
  return {m,a,b};
 };
@@ -45,8 +45,8 @@ test('melee never hits a teammate',()=>{
  m.arena={blocks:[],bounds:{minX:-1000,maxX:1000,minZ:-1000,maxZ:1000}};m.pickups=[];m.vehicles=[];
  const [a,b]=m.actors;
  a.team=0;b.team=0;
- Object.assign(a,{x:0,y:0,z:0,health:100,protection:0,melee:0,yaw:0,pitch:0,harnessResistance:0});
- Object.assign(b,{x:0,y:0,z:-1.5,health:100,armor:0,protection:0,harnessResistance:0});
+ Object.assign(a,{x:0,y:0,z:0,health:100,protection:0,melee:0,yaw:0,pitch:0});
+ Object.assign(b,{x:0,y:0,z:-1.5,health:100,armor:0,protection:0});
  assert.equal(m.melee(a),true);
  assert.equal(b.health,100);
 });

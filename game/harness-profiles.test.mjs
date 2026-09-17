@@ -2,6 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {HARNESSES, WEAPONS} from './data.mjs';
 import {Match,moveActor} from './core.mjs';
+import {SPECS, SPEC_TRIGGERS, SPEC_EFFECT_TYPES, SPEC_EFFECT_TARGETS} from './kits.mjs';
 import {
   HARNESS_PROFILES,
   HARNESS_PROFILE_IDS,
@@ -9,7 +10,6 @@ import {
   getHarnessProfile,
   harnessAbility,
   harnessBotHints,
-  harnessPassive,
   harnessWeaponHandling,
   preferredHarnessWeapon,
 } from './harness-profiles.mjs';
@@ -18,24 +18,37 @@ test('profiles preserve the seven shipped harness IDs and are immutable', () => 
   assert.deepEqual(HARNESS_PROFILE_IDS, HARNESSES.map(harness => harness.id));
   assert.equal(Object.keys(HARNESS_PROFILES).length, 7);
   assert.equal(getHarnessProfile('not-a-harness'), null);
-  assert.throws(() => { HARNESS_PROFILES.openclaw.passive.speed = 2; }, TypeError);
+  assert.throws(() => { HARNESS_PROFILES.openclaw.weapons.damage = 2; }, TypeError);
 });
 
-test('every harness has a distinct, bounded passive and active contract', () => {
-  const passiveFingerprints = new Set();
+test('every harness has a distinct active contract and no hidden stat passive', () => {
   const abilityFingerprints = new Set();
   for (const harness of HARNESSES) {
-    const passive = harnessPassive(harness.id);
+    const profile = getHarnessProfile(harness.id);
     const ability = harnessAbility(harness.id);
-    passiveFingerprints.add(JSON.stringify(passive));
     abilityFingerprints.add(JSON.stringify(ability));
-    assert.ok(passive.speed >= .95 && passive.speed <= 1.05);
-    assert.ok(passive.damage >= .97 && passive.damage <= 1.05);
-    assert.ok(passive.resistance >= 0 && passive.resistance <= .05);
+    assert.equal(profile.passive, undefined, `${harness.id} carries no hidden stat passive`);
+    assert.ok(!('speed' in profile) && !('damage' in profile) && !('resistance' in profile), `${harness.id} profile`);
     assert.ok(ability.cooldown >= 10 && ability.cooldown <= 16);
   }
-  assert.equal(passiveFingerprints.size, 7);
   assert.equal(abilityFingerprints.size, 7);
+});
+
+test('the seven behavioural passives live in kits.mjs with triggers and labelled effects', () => {
+  const ids = new Set();
+  for (const spec of SPECS) {
+    const passive = spec.passive;
+    ids.add(passive.id);
+    assert.ok(SPEC_TRIGGERS.includes(passive.trigger), `${spec.id} trigger`);
+    assert.ok(Array.isArray(passive.effects) && passive.effects.length > 0, `${spec.id} effects`);
+    for (const effect of passive.effects) {
+      assert.ok(SPEC_EFFECT_TYPES.includes(effect.type), `${spec.id} effect ${effect.type}`);
+      assert.ok(SPEC_EFFECT_TARGETS.includes(effect.target), `${spec.id} target ${effect.target}`);
+      assert.ok(effect.type !== 'speed', `${spec.id} must not hide a speed multiplier`);
+      assert.ok(effect.type !== 'resistance', `${spec.id} must not hide a resistance multiplier`);
+    }
+  }
+  assert.equal(ids.size, 7);
 });
 
 test('weapon handling covers all slots without runaway stacking', () => {
@@ -69,13 +82,20 @@ test('bot hints create seven distinct personalities with usable combat ranges', 
  assert.equal(personalities.size, 7);
 });
 
-test('profiles affect the authoritative actor simulation',()=>{
+test('profiles affect the authoritative actor simulation through named behaviour only',()=>{
  const hermes=new Match('chatgpt','hermes',()=>.5,'crosswire',{botCount:0}).actors[0];
  const baseline=new Match('chatgpt','openclaw',()=>.5,'crosswire',{botCount:0}).actors[0];
  for(const actor of [hermes,baseline]){Object.assign(actor,{x:0,y:0,z:0,vx:0,vy:0,vz:0,grounded:true});for(let i=0;i<30;i++)moveActor(actor,{x:1},1/60,{blocks:[]});}
+ assert.equal(hermes.vx,baseline.vx,'walk speed carries no hidden harness multiplier');
+ // Express: only Hermes keeps the sprint posture while a reload is running.
+ for(const actor of [hermes,baseline])Object.assign(actor,{x:0,vx:0,reloading:true});
+ for(let i=0;i<30;i++)moveActor(hermes,{x:1,sprint:true},1/60,{blocks:[]});
+ for(let i=0;i<30;i++)moveActor(baseline,{x:1,sprint:true},1/60,{blocks:[]});
+ assert.equal(hermes.sprinting,true,'Hermes can sprint while reloading');
+ assert.equal(baseline.sprinting,false,'every other spec must wait out the reload');
  assert.ok(hermes.vx>baseline.vx);
  const guarded=new Match('chatgpt','claudecode',()=>.5,'crosswire',{botCount:0}).actors[0];
- assert.equal(guarded.harnessResistance,.04);
+ assert.equal(guarded.harnessResistance,undefined,'Guardrail is the only resistance source');
 });
 
 test('ability kinds, buffs and magnitudes are data-driven and memoized',()=>{

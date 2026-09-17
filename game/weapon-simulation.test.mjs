@@ -7,7 +7,7 @@ import {createVehicle} from './vehicles.mjs';
 const fresh=(mode='deathmatch')=>{
  const m=new Match('chatgpt','openclaw',()=>.5,'exchange',{mode,botCount:0,humanCount:3});
  m.arena={blocks:[],bounds:{minX:-1000,maxX:1000,minZ:-1000,maxZ:1000}};m.pickups=[];m.vehicles=[];
- m.actors.forEach((a,i)=>Object.assign(a,{x:100+i*10,y:0,z:100,health:100,armor:0,protection:0,harnessResistance:0}));
+ m.actors.forEach((a,i)=>Object.assign(a,{x:100+i*10,y:0,z:100,health:100,armor:0,protection:0}));
  return m;
 };
 const close=(actual,expected)=>assert.ok(Math.abs(actual-expected)<1e-8,`${actual} != ${expected}`);

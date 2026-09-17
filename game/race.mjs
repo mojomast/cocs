@@ -137,8 +137,7 @@ export function initializeRace(match) {
     actor.yaw = grid.heading - Math.PI;
     actor.active = actor.cooldown = actor.temporaryShield = actor.armor = 0;
     actor.powerups = {}; actor.ammo = actor.ammo.map(() => 0);
-    actor.harnessSpeedMultiplier = actor.harnessDamageMultiplier = actor.speedMultiplier = 1;
-    actor.harnessResistance = 0;
+    actor.speedMultiplier = 1;
     match.syncVehicleActor(actor, vehicle);
     // Seeded in actor order from match.random so a fixed seed is reproducible.
     match.race.racers.push({actorId: actor.id, vehicleId: vehicle.id, lap: 1, completedLaps: 0,

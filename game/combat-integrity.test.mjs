@@ -9,7 +9,7 @@ function combat(firstZ = -20, secondZ = -30, attachments = {magazine: 'piercing-
   });
   m.arena = {...m.arena, blocks: [], raised: false, terrain: null, platforms: [], surfaces: []};
   m.vehicles = [];
-  m.actors.forEach(a => Object.assign(a, {x: 0, y: 0, z: 0, health: 500, armor: 0, protection: 0, harnessResistance: 0}));
+  m.actors.forEach(a => Object.assign(a, {x: 0, y: 0, z: 0, health: 500, armor: 0, protection: 0}));
   const [a, first, second] = m.actors;
   Object.assign(a, {weapon: 2, yaw: 0, pitch: 0, shotWait: 0});
   a.ammo[2] = 5;

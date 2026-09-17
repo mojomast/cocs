@@ -210,9 +210,11 @@ test('reduced-armour gear stays a tradeoff instead of amplifying damage',()=>{
  const before=a.health;m.damage(a,10,a);
  assert.equal(before-a.health,10,`light frame should not add damage (${before-a.health})`);
 });
-test('harness passive damage is applied to outgoing fire',()=>{
- const open=new Match('chatgpt','openclaw',rng(),'exchange',{mode:'deathmatch',botCount:0}).actors[0];
- const hermes=new Match('chatgpt','hermes',rng(),'exchange',{mode:'deathmatch',botCount:0}).actors[0];
- assert.ok(open.harnessDamageMultiplier>1,'OpenClaw passive should raise damage');
- assert.ok(hermes.harnessDamageMultiplier<1,'Hermes passive should lower damage');
+test('harness passives are behavioural: no hidden damage, speed or resistance multiplier is injected',()=>{
+ for(const harness of ['openclaw','hermes','opencode','claudecode','codex','cline','roo']){
+  const a=new Match('chatgpt',harness,rng(),'exchange',{mode:'deathmatch',botCount:0}).actors[0];
+  assert.equal(a.harnessDamageMultiplier,undefined,`${harness} carries no hidden damage multiplier`);
+  assert.equal(a.harnessSpeedMultiplier,undefined,`${harness} carries no hidden speed multiplier`);
+  assert.equal(a.harnessResistance,undefined,`${harness} carries no hidden resistance multiplier`);
+ }
 });
