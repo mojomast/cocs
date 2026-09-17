@@ -408,25 +408,26 @@ function startPass(state,catalog,key,rng){
  return state;
 }
 
-const scoreOrder=(a,b)=>a[0]-b[0]||a[1]-b[1]||a[2]-b[2];
+const scoreOrder=(a,b)=>{const length=Math.max(a.length,b.length);for(let i=0;i<length;i++){const delta=(a[i]??0)-(b[i]??0);if(delta)return delta;}return 0;};
 
-function candidateScore(scenario,passCounts,index){
+function candidateScore(scenario,passCounts,index,{lastId=null,lastMap=null}={}){
  const maps=scenarioMaps(scenario);
  let mapUse=0;
  if(maps.length){mapUse=Math.min(...maps.map(mapId=>passCounts.maps[mapId]||0));}
- return [passCounts.modes[scenario.mode]||0,mapUse,index];
+ const repeatId=scenario.id===lastId?1:0;
+ const repeatMap=maps.length&&lastMap&&maps.every(mapId=>mapId===lastMap)?1:0;
+ return [passCounts.modes[scenario.mode]||0,repeatId,repeatMap,mapUse,index];
 }
 
-// Coverage-aware choice: least-used mode first, then least-used map, with the
-// shuffled pass order as the deterministic tie-break. The last scenario and the
-// last map are excluded while any alternative exists.
+// Coverage-aware choice: least-used mode first, because a pass must show every
+// mode before any repeat (full-pass mode coverage). Within that tier the last
+// scenario and last map are avoided as tie-breaks, then least-used map, then the
+// shuffled pass order. Filtering the avoid-last rules *before* scoring could
+// hide the last unseen mode behind a repeated one, so they stay in the key.
 function chooseEntry(entries,state){
- let list=entries;
- if(list.length>1){const filtered=list.filter(entry=>entry.scenario.id!==state.lastId);if(filtered.length)list=filtered;}
- if(list.length>1&&state.lastMap){const filtered=list.filter(entry=>scenarioMaps(entry.scenario).some(mapId=>mapId!==state.lastMap));if(filtered.length)list=filtered;}
- let best=list[0],bestScore=null;
- list.forEach((entry,index)=>{
-  const score=candidateScore(entry.scenario,state.passCounts,index);
+ let best=null,bestScore=null;
+ entries.forEach((entry,index)=>{
+  const score=candidateScore(entry.scenario,state.passCounts,index,{lastId:state.lastId,lastMap:state.lastMap});
   if(!bestScore||scoreOrder(score,bestScore)<0){best=entry;bestScore=score;}
  });
  return best;
