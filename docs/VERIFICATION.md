@@ -1,5 +1,141 @@
 # COCS verification report
 
+## Release 7.0 - DOCTRINE (the class/harness overhaul and the Phase-5 balance gate)
+
+**Scope.** The class/harness overhaul (Phases 1-4) and the Phase-5 balance
+sweep on `feat/class-overhaul` (24 commits, tip `0facf42`), merged **fast-forward**
+into the production line (`improvement/phase2-audio-visual`, previously
+`f95ee2e` = v6.6). Unlike v6.6, this release changes the simulation, the wire
+protocol and the server (`game/core.mjs`, `game/protocol.mjs`, `server/room.mjs`,
+`server/game-server.mjs`), so the deploy restarts the authoritative game server
+and multiplayer clients briefly disconnect.
+
+- **Phase 3A - structured riders + passives (`11ecd2f`):** the 21 rider strings
+  become inert `{wing, id, trigger, description, effects[]}` descriptors keyed
+  striker/vanguard/tactician per spec, using the shared `SPEC_TRIGGERS` /
+  `SPEC_EFFECT_TYPES` / `SPEC_EFFECT_TARGETS` vocabularies; the seven behavioural
+  spec passives are declared beside their tradeoff copy; `resolveKit` resolves
+  gear through `progression.mjs` `resolveGear`, snapshots and deep-freezes it,
+  accepts an already-resolved record and extends the fingerprint with sorted gear
+  item ids. `wing-riders.test.mjs` pins 21 riders, 63 combos, deep freeze, the
+  unlabelled-percentage scan and the 7 passive shapes.
+- **Phase 3B - passives and riders go live (`fcaded7`, `e700328`):** the hidden
+  `passive:{speed,damage,resistance}` table is removed from
+  `harness-profiles.mjs` and every engine read. The seven passives resolve
+  through the new id-free `game/spec-effects.mjs` (Grip melee arc, Express
+  running reload, Multiplex swap reload, Linted threat ping, Green Build reload
+  x0.85, Off-road air control and slide, Flood Fill radius/damage); all 21
+  riders dispatch only on `description.trigger` then effect `type`/`target`
+  (a source-scan test enforces no harness/operator id in effect logic) and every
+  numeric shaper clamps through `EFFECT_BOUNDS`.
+- **Phase 3C - asymmetric gear (`89f2b06`):** the eight GEAR items declare
+  `powerAxis`/`costAxis`/`budget`; scope, heavy-barrel and servo become distinct
+  builds; `resolveGear` keeps its export name and output keys, then enforces the
+  §4.8 envelope once for every caller (damage <=1.15x, speed <=1.10x,
+  spread/handling within [0.85x, 1.11x], pooled health+armour <= +15 points) and
+  returns a frozen result. `gear-dominance.test.mjs` pins axes, slot budget
+  parity, pairwise non-dominance and the >=60% cost floor.
+- **Phase 3D - sweep CLI (`3325519`, `9ae6208`):** `scripts/balance-sweep.mjs`
+  runs the policy-neutral sweep (balance gate) then the policy-on sweep (class
+  expression), writes `reports/balance-<release>.json`, supports one-match
+  replay, `--print-tierlist` and `--budget-ms`, and `Match` gains the
+  `botLoadouts`/`aiSeats`/`botPolicy` harness options (net/server never set
+  them). `game/archive/balance-sweep.test.mjs` is the opt-in hook.
+- **Phase 4-1 - mobility input + HUD (`386c15b`, `59ce158`):** `mobility` binds
+  to KeyX, a MOBILITY touch button and the runtime flag, forwarded to the
+  server as a **held** state (a one-tick edge would fake a release and cancel an
+  active grapple); `PROTOCOL_VERSION` becomes 3 (`SNAPSHOT_DELTA_VERSION` stays
+  2) and `MESSAGE.LOADOUT` is declared. `game/hud-class.mjs` mirrors
+  `Match.power()`'s guards/cooldown formula (fast powers, Haste
+  cooldownMultiplier and the wing-rider bonus) and renders the movement card.
+- **Phase 4-2/3/4 - identity, silhouettes, switching (`eff279f`, `0cbafe1`,
+  `0823a9a`, `65de90c`):** selection-screen wing/role/signature chips, harness
+  tradeoff/movement-hook/wing-rider copy and MODEL/KIT tabs via
+  `game/class-ui.mjs`; kill/death attribution in the feed, banner, scoreboard,
+  captions and audio; per-wing view silhouettes and the pooled `TelegraphPool`;
+  `Match.setLoadout` queues an operator/harness pair consumed on the next spawn
+  with `Room.setLoadout` validation/normalisation and the v3 LOADOUT dispatch;
+  and the Meta bot now presses Brace Slam from the ground.
+- **Phase 4 UI/UX (`64b7ef3`):** the v6.6 audit landed in the global chrome
+  (header action labels, demo dock, results box model and dead legacy CSS,
+  44 px hit targets, pause quick block with CC/MOTION pills).
+- **Phase 5.1 (`7be5f76`):** truncation is refused (one `truncated` warning,
+  all sample alarms suppressed, CLI exit 2); FFA placement ties break by damage
+  then actor id; `ttk-envelope.test.mjs` pins the §4.5 bands, §4.7 one-shot cap,
+  wing ordering and EHP envelope; `route-sweep.test.mjs` is the opt-in all-arena
+  sweep; the CLI `--baseline` gear run computes the §4.8.6 invariant; and
+  `metrics.modeViability` ships at full sample.
+- **Phase 5.2 (`0facf42`):** the §4.7 single-hit cap becomes a roster-wide
+  invariant, `clampSingleHit(damage, {targetHealth}) = min(90, 0.9 x full
+  health)`, applied at every direct-hit site (`fire`/`detonate`/`pierceAlong`/
+  `chainFrom`/`explode`), with `fire()` wrapping Deep Compute's `onShot`. Spawn
+  health is re-cut (Mistral 112, Gemini 100, Grok 110, Qwen 108, DeepSeek 126,
+  Meta 104, Claude 120) with every speed untouched, and spec uptimes are cut
+  (Qwen Tool Use window 3 s, Claude Review hold 1.5 s, Hermes 10 s, Roo 12 s,
+  Claude Code Guardrail 10 s). A regression drives a real Match: a Mistral
+  charge-coil Shock hit on a full-HP Kimi lands 81 instead of one-shotting.
+- **Balance evidence:** `reports/balance-v7-stock.json` and
+  `reports/balance-v7-tuned.json` are full 900/900 neutral + policy-on runs with
+  0 errors; `reports/balance-v7-max.json` is the max-gear neutral run used for
+  the §4.8.6 invariant. Policy-neutral operator win-rate spread falls 18.6 ->
+  11.4 points (deepseek 51.1, meta 49.8, kimi 49.5, claude 47.3, chatgpt 45.7,
+  grok 43.8, mistral 41.1, gemini 40.9, qwen 39.6); the neutral alarm set falls
+  6 -> 1 (Hermes is the remaining garbage row at 33.9, a speed burst that does
+  not convert in the weapon-first neutral policy; a measured buff was reverted
+  because it reshuffled other rows into fresh alarms); all nine operators clear
+  the 45% Wilson floor, roo 40.8 and claudecode 41.3 clear the spec floor, Kimi's
+  team-answers needle clears, no god tier (top lower bound 45.6 < 55), EHP span
+  1.33, and the gear invariant passes (operators rho 0.9667, shift <=1, gain
+  <=2.32 points; specs/wings rho 1.0).
+- **Tests (class tree, `0facf42`):** see the gate line below. New coverage
+  includes `wing-riders` (21), `spec-passives` (7 positives + negatives + bounds),
+  `gear-dominance`, `ttk-envelope`, `route-sweep` (opt-in), `balance-sweep`,
+  `movement-input`, `respawn-loadout`, `respawn-ui`, `hud-class`,
+  `class-ui`, `class-presentation`, `bot-loadouts` and `attachment-behavior`
+  (single-hit clamp).
+- **Gate:** `test:game` **1953 tests: 1946 pass, 0 fail, 7 skipped** across 176
+  `game/*.test.mjs` files on the `feat/class-overhaul` worktree (726 s); the 7
+  skips are the opt-in long simulations and the browser-only
+  `OfflineAudioContext` render; `npm run test:server` **159/159**;
+  `npx tsc --noEmit` clean; `npm run lint` 0 errors (487 warnings, up from the
+  481 baseline). In the production checkout the release re-ran
+  `game/changelog.test.mjs` **3/3**, `test:server` **159/159**, `tsc` clean and
+  `lint` 0 errors.
+- **Deploy:** `npm run deploy -- --with-game-server` rebuilt the working tree (with
+  the v7.0 bump uncommitted) and restarted **both** services at the same
+  timestamp (2026-09-17 23:50:18 UTC) because `core.mjs`, `game/protocol.mjs` and
+  `server/` changed. `token-arena-web.service` and `token-arena-server.service`
+  are both active; the game-server health endpoint reports
+  `token-arena-game-server` on :4000. `npm run verify:deployment` verified the
+  served HTML (footer `v7.0 · DOCTRINE`) and its 12 linked CSS/JS assets, and
+  `GET /api/version` returns `{"version":"v7.0"}`. Note the deliberate transient:
+  the first HTML fetch during the restart returns 502 until the web service is
+  listening again, which is why `scripts/deploy.sh` retries verification.
+- **Live deploy smoke (production `arena.ussyco.de`, after the deploy):** a
+  bounded headless Chromium/SwiftShader run (`/tmp/opencode/live-smoke.cjs`,
+  adapted from the v6.6 script, exit 0, JSON in
+  `/tmp/opencode/release-v70-smoke.json`) — footer `v7.0 · DOCTRINE`;
+  `GET /api/version` 200 `{"version":"v7.0"}`; the selection screen rendered the
+  new wing chip (`TACTICIAN`); ENTER ARENA started a 3-actor bot match
+  (`mode: playing`, match clock advancing 0.30 -> 0.95 s) with the movement HUD
+  card live (`GRAPPLEREADY`); zero console errors and zero page errors across
+  the whole run. Screenshots: `/tmp/opencode/release-v70-smoke.png` (title +
+  footer), `/tmp/opencode/release-v70-smoke-selection.png` (class identity) and
+  `/tmp/opencode/release-v70-smoke-match.png` (bot match + movement card). The
+  3 fps figure is SwiftShader, not hardware-GPU evidence.
+- **Rollback point:** `f95ee2e` (v6.6 · BIOME), the last production commit
+  before the fast-forward merge; `scripts/deploy.sh` additionally restores the
+  previous `dist/` and restarts the services automatically if a deploy step
+  fails.
+- **Limitations (honest scope):** the live smoke is a SwiftShader/CPU render,
+  not hardware-GPU or frame-rate evidence. Bot balance is policy-swept over
+  seeded matches, not human-playtested; the neutral policy is weapon-first, so a
+  movement-burst spec (Hermes) can underperform there without being weak in
+  human play. The §4.5 1.3-1.6 s vanguard suffered-TTK window still needs
+  roughly +15% vanguard EHP and was deliberately left alone to avoid a god tier
+  and the 1.5x envelope. Rider/passive visuals rest on unit tests and review
+  screenshots, not a pixel diff.
+
 ## Release 6.6 - BIOME (Moth skies per biome, new surface and effect albedos)
 
 **Scope.** The Moth fidelity pass on `feat/moth-fidelity` (five commits, tip

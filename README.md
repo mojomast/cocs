@@ -435,6 +435,34 @@ assets. Full procedure and verification: [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md
 Recent releases. The full history lives in
 [docs/CHANGELOG.md](docs/CHANGELOG.md).
 
+### v7.0 · DOCTRINE — 2026-09-17
+- The class and harness overhaul is complete. The hidden harness stat
+  multipliers are gone: seven behavioural spec passives (Grip, Express,
+  Multiplex, Linted, Green Build, Off-road, Flood Fill) and all 21 wing riders
+  resolve through one shared trigger vocabulary with no harness or operator id
+  in effect logic, clamped by `EFFECT_BOUNDS`. Kits are data-driven and
+  gear-aware, and asymmetric gear gives the scope, heavy-barrel and servo real
+  power/cost axes under the §4.8 envelope.
+- Class identity is visible. `mobility` binds to KeyX and a MOBILITY touch
+  button (forwarded as a held control, protocol v3), the HUD gets a
+  rider-aware ability ring and a movement card, and the selection screen shows
+  wing/role/signature chips, harness passives/riders and MODEL/KIT tabs. Wings
+  gain distinct silhouettes and a pooled telegraph player cues wind-up, charge,
+  movement, landings, slams, grapples, ropes and threat pings.
+- Team modes gain respawn loadout switching: a queued operator/harness pair is
+  consumed on the next spawn, validated and normalised by the room, and offered
+  through a respawn overlay. Kills are attributed in the feed, banner,
+  scoreboard, captions and audio.
+- Phase 5 ships a balance gate: a seeded policy-neutral + policy-on sweep with
+  a truncation guard, FFA tie-break, TTK/route/gear gates and
+  `reports/balance-v7-*.json`. P5-2 makes the single-hit cap roster-wide
+  (`min(90, 0.9 x health)`), re-cuts spawn health and spec uptimes, and brings
+  policy-neutral operator spread from 18.6 to 11.4 points with no god tier.
+- The v6.6 UI/UX audit landed: header actions, demo dock, results box model,
+  pause quick block and 44 px hit targets.
+- Scope: `core.mjs`, `game/protocol.mjs` and `server/` changed, so this deploy
+  restarts the game server and briefly disconnects multiplayer clients.
+
 ### v6.6 · BIOME — 2026-09-17
 - Moth skies are wired per biome: volcanic maps get the baked ashen sky, frost
   maps get frost and the neon/void maps (the Quantum Labyrinth included) get

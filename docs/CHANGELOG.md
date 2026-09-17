@@ -16,6 +16,158 @@ record in [VERIFICATION.md](VERIFICATION.md).
 
 ---
 
+## v7.0 · DOCTRINE — 2026-09-17
+
+The class and harness overhaul is complete: data-driven kits, live spec
+passives and wing riders, asymmetric gear, a visible class identity and a
+balance sweep that gates the roster. v6.5 shipped the movement and signature
+verbs; this release ships the rest of the doctrine, plus the P5-2 tuning pass.
+
+### Class and harness
+
+- **One data-driven kit.** `game/kits.mjs` resolves an operator, harness and
+  gear set into one immutable kit. `resolveKit` is gear-aware (it resolves gear
+  through `progression.mjs`, snapshots and deep-freezes it, and extends the
+  fingerprint with the sorted gear item ids), and the golden ability-parity
+  fixtures pin the simulation behaviour. Every existing field is unchanged;
+  gear rides as inert data unless a caller supplies it.
+- **Spec passives are behavioural.** The hidden `passive:{speed,damage,
+  resistance}` table is removed from `harness-profiles.mjs` and every engine
+  read (walk speed, outgoing fire, damage mitigation, race stripping). The
+  seven descriptors in `kits.mjs` resolve through the new id-free
+  `game/spec-effects.mjs`: OpenClaw Grip (+25% melee arc), Hermes Express
+  (sprint posture survives a running reload), OpenCode Multiplex (reload
+  progress continues across a weapon swap), Claude Code Linted (deterministic
+  threat ping, 35 m / 0.75 s / 3 s cooldown), Codex Green Build (reload timer
+  x0.85), Cline Off-road (air accel/cap x1.25, +0.2 s slide) and Roo Flood Fill
+  (ability radius x1.25, outgoing damage x0.95). `spec-passives.test.mjs` proves
+  each positive and negative and sweeps the §4.7 bounds.
+- **All 21 wing riders are live.** Every `{wing, id, trigger, description,
+  effects[]}` descriptor from v6.5's inert table now resolves through
+  `spec-effects.mjs`, dispatching only on `description.trigger` then effect
+  `type`/`target` — no harness or operator id appears in effect logic, enforced
+  by a source-scan test. Riders cover pull-in, knockback, radius, rush and
+  cooldown, burst and holster, cleanse and max-not-sum mitigation, overheal and
+  magazine refill, distance scaling, weapon-ready landings, unstoppable frames,
+  radar feints, behind-placement and stronger slows. Numeric shapers clamp
+  through `EFFECT_BOUNDS`; `movementLandingActions()` is now a pure
+  `HOOK_VALUES[hook][spec]` lookup.
+- **Gear is asymmetric.** The eight GEAR items declare a `powerAxis`,
+  `costAxis` and `budget` plus a real build-level cost. The three specialists
+  become distinct builds: scope (spread x0.85, damage x1.1, speed x0.9),
+  heavy-barrel (damage x1.15, spread x1.1, speed x0.97) and servo (speed x1.1,
+  spread x1.07). `resolveGear` keeps its export name, one-per-slot merge and
+  output keys, then enforces the §4.8 envelope once for every caller (damage
+  <=1.15x, speed <=1.10x, spread >=0.85x and handling >=0.90x, pooled health +
+  armour <= +15 points by proportional trim) and returns a frozen result.
+  `gear-dominance.test.mjs` pins the axes, slot budget parity, pairwise
+  non-dominance and a >=60% cost floor.
+
+### Controls, HUD and identity
+
+- **Mobility input.** `mobility` binds to KeyX, a MOBILITY touch button and the
+  explicit runtime flag. Core derives the press/release edges from the held
+  state, and the server forwards mobility held (like sprint/crouch/ads), never
+  as a one-tick edge — a forwarded pulse would fake a release and cancel an
+  active grapple. `PROTOCOL_VERSION` is 3 (`SNAPSHOT_DELTA_VERSION` stays 2),
+  and `MESSAGE.LOADOUT` is declared for respawn switching.
+- **Movement HUD.** New pure `game/hud-class.mjs`: `abilityRing` mirrors
+  `Match.power()`'s guards and cooldown formula (fast powers, Haste
+  cooldownMultiplier and the wing-rider cooldown bonus), and `movementHud`
+  turns a movement snapshot plus the resolved verb into the card's phase and
+  economy view. `PlayingHud` renders the movement card (verb, charges or fuel,
+  wind-up, cooldown) beside the ability ring, with reduced-motion styles.
+- **Selection-screen identity.** `game/class-ui.mjs` turns `resolveKit` plus
+  `WINGS`/`OPERATOR_KITS`/`MOVEMENT_VERBS` into display copy: operator cards
+  gain wing/role/signature chips, the harness panel gains the tradeoff passive,
+  movement hook and wing rider, and the preview stage gains MODEL/KIT tabs at
+  no extra scroll height. Daily Challenges move under the presets, the rail
+  collapses to MORE on phones, the match-setup modal gets clamped arena blurbs,
+  a chip mode row with one detail panel, two-column rules and left-column
+  presets.
+- **Attribution.** Death events and kill-feed entries carry the killer
+  character/harness plus the landing ability, `killFeedWeapon`/`killBanner`
+  name it, the feed renders wing and ability chips, the scoreboard gets a
+  null-safe wing/spec chip per row, captions cover abilities and movement
+  verbs, and feedback adds per-harness activation motifs, movement-event foley
+  and per-verb announcer lines.
+- **Wing silhouettes and telegraphs.** The view builds additive, cached
+  per-wing geometry and materials from `OPERATOR_KITS` — strikers sweep back
+  fins over a leaner torso, vanguards widen pads with a chest plate and squared
+  collar, tacticians gain a sensor mast, bulb, dish and toolkit — with
+  `userData.wing`/`wingColor` and small pieces tagged `lodDetail`. A pooled
+  `TelegraphPool` (ring, disc, directional arc) cues wind-up start/interrupt,
+  charge, movement start, landing recovery, empty fuel, slam launch/impact,
+  grapple hook/release, rope place/expire and the threat ping, coloured from
+  the wing palette; reduced motion keeps a static low-opacity cue.
+- **Respawn loadout switching.** In team modes `Match.setLoadout` queues an
+  operator/harness pair and consumes it on the next spawn, rebuilding
+  stats/movement/verb state while leaving gear intact and emitting
+  `loadout-switch`. `Room.setLoadout` validates mode/peer/lockout and
+  normalises through `resolveLoadout`; the v3 LOADOUT control message is
+  dispatched by the game server; and a respawn overlay reports what killed you
+  and offers the one legal operator/spec swap.
+- **UI/UX clean-up.** The v6.6 audit landed in the global chrome: header
+  action labels become visually hidden without wrapping, the demo dock spans
+  the top edge with 44 px hit targets, the results summary box model is pinned
+  and its dead legacy CSS removed, remaining sub-44 px menu targets are raised,
+  disabled opacity rises from .45 to .6, and the pause modal gets a compact
+  quick block with CC and MOTION pills plus a link into the full settings.
+
+### Balance (Phase 5)
+
+- **A real gate.** `game/balance-sweep.mjs` is a pure, deterministic seeded
+  round-robin with a checked seed manifest; `scripts/balance-sweep.mjs` runs
+  the policy-neutral sweep (the balance gate) and the policy-on sweep (class
+  expression) and writes `reports/balance-<release>.json`, with
+  `--only=<mode,matchup,seed>` to replay any alarm one match at a time. The
+  report carries `{release, dataHash, seedManifest}` and the executed item log.
+  New preconditions for the sweep: `botLoadouts`, `aiSeats` and `botPolicy`
+  options on `Match` (net/server never set them).
+- **Truncation is refused, not misread.** A `--budget-ms` clipped run carries
+  `truncated: true` at both levels, `computeAlarms` returns one `truncated`
+  warning and suppresses every sample-derived alarm, the CLI prints a loud
+  banner and exits non-zero. `--budget-ms 0` is the explicit complete run.
+  This closes the P3-D false alarms, which were budget artifacts.
+- **Sweep fixes and gates.** FFA `placementWinners` breaks rank ties by damage
+  dealt then actor id, so unattributed-death maps no longer hand low-id seats a
+  free pod win. `game/ttk-envelope.test.mjs` pins the §4.5 dealt bands, the
+  §4.7 single-hit cap, the wing ordering and the roster EHP envelope;
+  `game/route-sweep.test.mjs` is the opt-in all-arena verb/bot sweep; and the
+  CLI's `--baseline` gear run computes the §4.8.6 rank-correlation invariant.
+- **P5-2 tuning.** The single-hit cap was only on DeepSeek's Deep Compute path,
+  so a charge-coil charged Shock Beam (44 x 1.15 x 2.2 = ~111 direct) could
+  delete a full-HP Kimi (90) in one hitscan hit for any operator. It is now a
+  roster-wide invariant, `clampSingleHit(damage, {targetHealth}) =
+  min(90, 0.9 x full health)`, applied at every direct-hit site in
+  `fire()`/`detonate()`/`pierceAlong()`/`chainFrom()`/`explode()`, with
+  `fire()` wrapping Deep Compute's `onShot`. A Mistral charge-coil Shock hit on
+  a full-HP Kimi now lands 81 instead of one-shotting. The bottom-raise re-cut
+  lifts spawn health (Mistral 100->112, Gemini 95->100, Grok 105->110, Qwen
+  100->108, DeepSeek 120->126, Meta 100->104, Claude 115->120) while leaving
+  every speed untouched, and cuts ability uptime (Qwen Tool Use pickup window
+  2->3 s, Claude Alignment Review hold 2->1.5 s, Hermes 12->10 s, Roo 15->12 s,
+  Claude Code Guardrail 11->10 s).
+- **Result at the full 900/900 sample.** Policy-neutral operator win-rate spread
+  falls from 18.6 to 11.4 points, the neutral alarm set from six to one, and all
+  nine operators clear the 45% Wilson floor (Mistral 36.8->41.1, Qwen
+  34.6->39.6, Claude 41.1->47.3); roo 38.5->40.8 and claudecode 38.1->41.3 clear
+  the spec floor and Kimi's team-answers needle clears. Hermes is the one
+  remaining garbage row (35.5->33.9): its value is a speed burst that does not
+  convert in the weapon-first neutral policy, and a measured buff was reverted
+  because it moved the row +0.6 points while reshuffling others into fresh
+  alarms. There is no god tier (top lower bound 45.6 < 55), EHP span is 1.33,
+  and the §4.8.6 gear invariant passes (operators rho 0.9667, shift <=1, gain
+  <=2.32 points; specs/wings rho 1.0). Evidence in
+  `reports/balance-v7-tuned.json` against `reports/balance-v7-stock.json`, with
+  `reports/balance-v7-max.json` regenerated from the tuned baseline.
+- **Scope:** this release changes `core.mjs`, `game/protocol.mjs` and `server/`,
+  so the deploy restarts the authoritative game server and connected
+  multiplayer clients briefly disconnect. Race and soccer still strip combat
+  power, and class gear/passives remain inert there.
+
+---
+
 ## v6.6 · BIOME — 2026-09-17
 
 Moth skies are chosen per biome, and the surface and effect bakes now cover the
