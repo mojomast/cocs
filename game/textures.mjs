@@ -641,7 +641,7 @@ function generatePatternPixel(kind, u, v, seed, channel, edge, layerScale = 1) {
   return null;
 }
 
-export function clearSurfaceTextures(){for(const textures of cache.values())for(const texture of Object.values(textures))texture?.dispose?.();cache.clear();try{macroCache?.dispose?.();}catch{}macroCache=null;for(const sky of skyCache.values())try{sky.texture?.dispose?.();}catch{}skyCache.clear();clearWetSheenTextures();}
+export function clearSurfaceTextures(){for(const textures of cache.values())for(const texture of Object.values(textures))texture?.dispose?.();cache.clear();try{macroCache?.dispose?.();}catch{}macroCache=null;for(const sky of skyCache.values())try{sky.texture?.dispose?.();}catch{}skyCache.clear();for(const effect of effectCache.values())for(const texture of effect.textures)try{texture?.dispose?.();}catch{}effectCache.clear();for(const texture of lutCache.values())try{texture?.dispose?.();}catch{}lutCache.clear();clearWetSheenTextures();}
 // Explicit PBR material presets for the surfaces that recur across the scene.
 // Callers spread these onto a MeshStandardMaterial so painted armour, exposed
 // steel, rubber, stone/concrete and energy read as physically distinct instead
@@ -779,6 +779,7 @@ function bakedAlbedoTexture(canonical,repeat){
  texture.needsUpdate=true;
  texture.userData.surfaceKind=canonical;
  texture.userData.source='moth';
+ texture.userData.mothShared=true;
  return texture;
 }
 
@@ -794,6 +795,7 @@ function bakedNormalTexture(canonical,repeat){
  texture.needsUpdate=true;
  texture.userData.surfaceKind=canonical;
  texture.userData.source='moth';
+ texture.userData.mothShared=true;
  return texture;
 }
 
@@ -809,6 +811,7 @@ export function mothMacroTexture(){
  texture.colorSpace=T.NoColorSpace;
  texture.needsUpdate=true;
  texture.userData.mothMacro=true;
+ texture.userData.mothShared=true;
  macroCache=texture;
  return texture;
 }
@@ -829,6 +832,7 @@ export function mothSkyTexture(name,{repeat=[1,1]}={}){
  texture.colorSpace=T.SRGBColorSpace;
  texture.needsUpdate=true;
  texture.userData.mothSky=name;
+ texture.userData.mothShared=true;
  if(sky.equirect)texture.mapping=T.EquirectangularReflectionMapping;
  const result={texture,equirect:Boolean(sky.equirect),width:sky.width,height:sky.height};
  skyCache.set(key,result);
@@ -836,7 +840,14 @@ export function mothSkyTexture(name,{repeat=[1,1]}={}){
 }
 
 // An animated effect sequence baked from a series of quantum-blurred grids.
+// Cached per name: the frames are shared by every player of the same effect and
+// released exactly once by clearSurfaceTextures, so callers must never dispose
+// a frame they did not create (see `userData.mothShared`).
+const effectCache=new Map();
 export function mothEffectTextures(name){
+ const key=String(name);
+ const cached=effectCache.get(key);
+ if(cached)return cached;
  const effect=mothEffect(name);
  if(!effect)return null;
  const textures=effect.frames.map((frame,index)=>{
@@ -845,14 +856,23 @@ export function mothEffectTextures(name){
   texture.colorSpace=T.SRGBColorSpace;
   texture.needsUpdate=true;
   texture.userData.mothEffect=`${name}:${index}`;
+  texture.userData.mothShared=true;
   return texture;
  });
- return {name,fps:effect.fps,textures};
+ const result={name,fps:effect.fps,textures};
+ effectCache.set(key,result);
+ return result;
 }
 
 // The reflectance LUT from the entanglement shader engine, as a DataTexture for
 // a custom iridescent material. Returns null unless the material was baked.
+// Cached per name+repeat and shared by every material that samples it, so the
+// view's disposal traversal skips it (`userData.mothShared`).
+const lutCache=new Map();
 export function mothMaterialLutTexture(name,{repeat=[1,1]}={}){
+ const key=`${name}|${repeat[0]},${repeat[1]}`;
+ const cached=lutCache.get(key);
+ if(cached)return cached;
  const lut=mothMaterialLut(name);
  if(!lut)return null;
  const texture=new T.DataTexture(lut.r,lut.size,lut.size,T.RGBFormat,T.UnsignedByteType);
@@ -861,6 +881,8 @@ export function mothMaterialLutTexture(name,{repeat=[1,1]}={}){
  texture.colorSpace=T.NoColorSpace;
  texture.needsUpdate=true;
  texture.userData.mothLut=name;
+ texture.userData.mothShared=true;
+ lutCache.set(key,texture);
  return texture;
 }
 
