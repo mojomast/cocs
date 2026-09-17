@@ -1,5 +1,5 @@
 import {MAPS} from './maps.mjs';
-import {modeRule} from './config.mjs';
+import {GAME_MODES,modeRule} from './config.mjs';
 
 export const ARENA_GROUPS=[
  {id:'arena',name:'Arena',description:'Compact classic combat arenas. Legacy rotation.'},
@@ -12,6 +12,12 @@ export const ARENA_GROUPS=[
 ];
 export const ARENA_SCALES={skirmish:{bots:3,label:'Skirmish'},battle:{bots:7,label:'Battle'},warzone:{bots:11,label:'Warzone'}};
 export const DEFAULT_MAX_BOTS=8;
+
+// LATTICE STRIKE (mode id `cocs`) is owned by the mode wave. Register the map
+// against it only when the mode exists, so `arenas.mjs` stays valid on a tree
+// where `config.mjs` has not landed it yet (arenas.test asserts every `play`
+// entry is a real GAME_MODES id).
+const COCS_PLAY=GAME_MODES.some(mode=>mode.id==='cocs')?['cocs']:[];
 
 const AUTHOR={
  'puma-circuit':{group:'vehicle',scale:'battle',play:['puma-race']},
@@ -59,6 +65,9 @@ const AUTHOR={
  'ember-caldera':{group:'outdoor',scale:'battle',play:['rockets','deathmatch','teamdeathmatch','instagib','arsenal','koth','domination']},
  // Moth Quantum labyrinth variant (nextgen-maps.mjs, generated from a quantum graph).
  'moth-backrooms':{group:'indoor',scale:'skirmish',play:['deathmatch','teamdeathmatch','instagib','rockets','arsenal','armsrace','koth','domination']},
+ // Purpose-built LATTICE STRIKE slice (game/lattice-maps.mjs). Non-terrain,
+ // nextGen nav, rotationally symmetric 240 m play band.
+ 'lattice-slice':{group:'outdoor',scale:'warzone',play:['deathmatch','teamdeathmatch','instagib','rockets','arsenal','armsrace','koth','domination','holdout','uplink',...COCS_PLAY]},
 };
 
 const span=arena=>{

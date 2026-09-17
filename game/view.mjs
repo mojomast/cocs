@@ -491,6 +491,9 @@ const arenaLooks={
    gauntlet:['#3a2a24','#221812','#c07a5a','#ffb089','#150d09',.0135,.6],
    'dune-ravine':['#8a6a3c','#5f4a2c','#d8b878','#ffe6b0','#3a2a16',.006,.2],
    'ember-caldera':['#5a2e22','#3a1d16','#c07a4a','#ffcfa0','#1d0c07',.012,.5],
+   // LATTICE STRIKE slice: a cold relay-teal theatre with its own fog band, so
+   // the canonical-map identity test sees a distinct material/atmosphere pair.
+   'lattice-slice':['#24443c','#183029','#79c7a8','#b9fff0','#0d241f',.0145,.5],
    };
 // Pooled, presentation-only debris for destructible props. It mirrors the
 // DeathPool contract (fixed slots, deterministic transforms, exactly-once

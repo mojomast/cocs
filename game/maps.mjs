@@ -7,6 +7,7 @@ import {ARSENAL_MAPS} from './arsenal-maps.mjs';
 import {NEXTGEN_MAPS} from './nextgen-maps.mjs';
 import {RACE_MAPS} from './race-maps.mjs';
 import {PUMA_PITCH} from './soccer-maps.mjs';
+import {LATTICE_MAPS} from './lattice-maps.mjs';
 import {freeze,wall,cover} from './map-schema.mjs';
 
 // Map definitions are immutable templates. Each Match owns its own collision and navigation context.
@@ -38,8 +39,9 @@ export const MAPS=[
   ...BATTLE_MAPS,
   ...ARSENAL_MAPS,
    ...NEXTGEN_MAPS,
-   ...RACE_MAPS,
-   PUMA_PITCH,
+    ...RACE_MAPS,
+    ...LATTICE_MAPS,
+    PUMA_PITCH,
 ];
 freeze(MAPS);
 export const getMap=id=>MAPS.find(m=>m.id===id)||MAPS[0];

@@ -12,6 +12,33 @@ export const teamData=teamSpawns;
 export const flagSpawns=(west,east)=>({0:{x:west,z:0},1:{x:east,z:0},red:{x:west,z:0},blue:{x:east,z:0}});
 export const flagData=flagSpawns;
 
+// ---- LATTICE builders (schema v3, opt-in) ---------------------------------
+//
+// The COCS theatre layer is additive and *gated on presence*: a legacy map that
+// never authors `playBounds`/`nodes`/`lattice`/`terminals`/`lanes` picks up no
+// new required fields and no version bump. `LEVELGEN_SCHEMA_VERSION` therefore
+// stays 2 and the v3 semantics ride on the authored fields themselves.
+//
+// Frozen interface the runtime/mode layer consumes:
+//   arena.playBounds = {minX,maxX,minZ,maxZ,frontage,laneSep,maxNodeSpacing}
+//   arena.nodes      = [{id,x,z,r,archetype}]
+//   arena.lattice    = [[a,b], ...]        // capture-adjacency, node ids
+//   arena.terminals  = [{id,nodeId,kind,x,z,y}]
+//   arena.lanes      = [{id,kind,waypoints,...}]  // kind = traversal identity
+export const NODE_ARCHETYPES=Object.freeze(['front','economy','relay','hq','array']);
+export const CAPTURABLE_ARCHETYPES=Object.freeze(['front','economy','relay']);
+export const LANE_TRAVERSAL_KINDS=Object.freeze(['vehicle-road','cqc','zipline-flank']);
+export const TERMINAL_KINDS=Object.freeze(['relay','vault','array-relay']);
+
+/** A lattice/objective node. `r` is the capture radius in metres. */
+export const node=(id,x,z,r=8,archetype='front')=>({id,x,z,r,archetype});
+/** An undirected lattice edge as an `[a,b]` node-id pair. */
+export const edge=(a,b)=>[a,b];
+/** A physical lane. `kind` is the traversal identity, mirrored into `traversal.kind`. */
+export const lane=(id,kind,waypoints=[],{traversal={},...rest}={})=>({id,kind,waypoints,traversal:{kind,...traversal},...rest});
+/** A terminal hosted on a relay/array node. */
+export const terminal=(id,nodeId,kind,x,z,y=0)=>({id,nodeId,kind,x,z,y});
+
 // ---- Schema validation ----------------------------------------------------
 //
 // A structural pass over the map contract the simulation consumes. It is pure
@@ -24,6 +51,86 @@ const finite=value=>typeof value==='number'&&Number.isFinite(value);
 const pointPair=value=>Array.isArray(value)&&finite(value[0])&&finite(value[1]);
 const pointObject=value=>Boolean(value)&&finite(value.x)&&finite(value.z);
 const inBounds=(bounds,x,z)=>x>=bounds.minX&&x<=bounds.maxX&&z>=bounds.minZ&&z<=bounds.maxZ;
+const PLAY_BOUNDS_FRONTAGE_MAX=240;
+const rectangle=b=>Boolean(b)&&finite(b.minX)&&finite(b.maxX)&&finite(b.minZ)&&finite(b.maxZ)&&b.minX<b.maxX&&b.minZ<b.maxZ;
+const latticeFrame=map=>rectangle(map.playBounds)?{...map.playBounds,label:'playBounds'}:rectangle(map.bounds)?{...map.bounds,label:'map.bounds'}:null;
+
+// All structural v3 checks live here so `validateMapSchema` (presence-gated)
+// and `validateLattice` (doctrine) can never drift apart.
+function latticeIssues(map){
+ const errors=[],p=map.playBounds;
+ if(p!==undefined){
+  if(!p||typeof p!=='object')errors.push('map.playBounds must be an object');
+  else if(!rectangle(p))errors.push('map.playBounds must be a finite, non-empty rectangle');
+  else{
+   const derived=Math.max(p.maxX-p.minX,p.maxZ-p.minZ);
+   if(p.frontage!==undefined&&(!finite(p.frontage)||p.frontage<=0))errors.push('map.playBounds.frontage must be a positive number');
+   if((p.frontage??derived)>PLAY_BOUNDS_FRONTAGE_MAX+1e-9)errors.push('map.playBounds.frontage must be ≤240 m');
+   if(p.laneSep!==undefined&&(!finite(p.laneSep)||p.laneSep<0))errors.push('map.playBounds.laneSep must be a non-negative number');
+   if(p.maxNodeSpacing!==undefined&&(!finite(p.maxNodeSpacing)||p.maxNodeSpacing<0))errors.push('map.playBounds.maxNodeSpacing must be a non-negative number');
+  }
+ }
+ for(const [key,label] of [['nodes','array of nodes'],['lattice','array of [a,b] edges'],['terminals','array of terminals'],['lanes','array of lanes']])
+  if(map[key]!==undefined&&!Array.isArray(map[key]))errors.push(`map.${key} must be an ${label}`);
+ const frame=latticeFrame(map),ids=new Set();
+ if(Array.isArray(map.nodes))for(const [index,n] of map.nodes.entries()){
+  const label=`nodes[${index}]`;
+  if(!n||typeof n!=='object'){errors.push(`${label} must be an object`);continue;}
+  if(typeof n.id!=='string'||!n.id)errors.push(`${label}.id must be a non-empty string`);
+  else if(ids.has(n.id))errors.push(`${label}.id ${n.id} is duplicated`);
+  else ids.add(n.id);
+  if(!finite(n.x)||!finite(n.z))errors.push(`${label} must have finite x/z`);
+  if(!finite(n.r)||n.r<=0)errors.push(`${label}.r must be a positive capture radius`);
+  if(!NODE_ARCHETYPES.includes(n.archetype))errors.push(`${label}.archetype must be one of ${NODE_ARCHETYPES.join('/')}`);
+  if(frame&&finite(n.x)&&finite(n.z)&&!inBounds(frame,n.x,n.z))errors.push(`${label} must sit inside ${frame.label}`);
+ }
+ if(Array.isArray(map.lattice))for(const [index,link] of map.lattice.entries()){
+  if(!Array.isArray(link)||link.length!==2||typeof link[0]!=='string'||typeof link[1]!=='string'){errors.push(`lattice[${index}] must be a [a,b] node-id pair`);continue;}
+  if(link[0]===link[1])errors.push(`lattice[${index}] cannot self-reference ${link[0]}`);
+  for(const id of link)if(Array.isArray(map.nodes)&&!ids.has(id))errors.push(`lattice[${index}] references unknown node ${id}`);
+ }
+ if(Array.isArray(map.terminals)){
+  const byId=new Map((Array.isArray(map.nodes)?map.nodes:[]).filter(n=>n&&typeof n.id==='string').map(n=>[n.id,n])),terminalIds=new Set();
+  for(const [index,t] of map.terminals.entries()){
+   const label=`terminals[${index}]`;
+   if(!t||typeof t!=='object'){errors.push(`${label} must be an object`);continue;}
+   if(typeof t.id!=='string'||!t.id)errors.push(`${label}.id must be a non-empty string`);
+   else if(terminalIds.has(t.id))errors.push(`${label}.id ${t.id} is duplicated`);
+   else terminalIds.add(t.id);
+   if(!finite(t.x)||!finite(t.z))errors.push(`${label} must have finite x/z`);
+   if(!TERMINAL_KINDS.includes(t.kind))errors.push(`${label}.kind must be one of ${TERMINAL_KINDS.join('/')}`);
+   const host=typeof t.nodeId==='string'?byId.get(t.nodeId):null;
+   if(typeof t.nodeId!=='string'||!t.nodeId)errors.push(`${label}.nodeId must reference a lattice node`);
+   else if(Array.isArray(map.nodes)&&!host)errors.push(`${label}.nodeId references unknown node ${t.nodeId}`);
+   else if(host){
+    if(!['relay','array','hq'].includes(host.archetype))errors.push(`${label}.nodeId must host on a relay/array/HQ node, not ${host.archetype}`);
+    else if(finite(t.x)&&finite(t.z)&&finite(host.x)&&finite(host.z)&&Math.hypot(t.x-host.x,t.z-host.z)>host.r+1e-9)errors.push(`${label} must sit inside ${host.id}'s capture radius`);
+   }
+  }
+ }
+ if(Array.isArray(map.lanes)){
+  const laneIds=new Set();
+  for(const [index,l] of map.lanes.entries()){
+   const label=`lanes[${index}]`;
+   if(!l||typeof l!=='object'){errors.push(`${label} must be an object`);continue;}
+   if(typeof l.id!=='string'||!l.id)errors.push(`${label}.id must be a non-empty string`);
+   else if(laneIds.has(l.id))errors.push(`${label}.id ${l.id} is duplicated`);
+   else laneIds.add(l.id);
+   const kind=l.kind??l.traversal?.kind;
+   if(!LANE_TRAVERSAL_KINDS.includes(kind))errors.push(`${label}.kind must be one of ${LANE_TRAVERSAL_KINDS.join('/')}`);
+   if(l.traversal!==undefined&&(!l.traversal||typeof l.traversal!=='object'))errors.push(`${label}.traversal must be an object`);
+   else if(l.traversal?.kind!==undefined&&!LANE_TRAVERSAL_KINDS.includes(l.traversal.kind))errors.push(`${label}.traversal.kind must be one of ${LANE_TRAVERSAL_KINDS.join('/')}`);
+   if(!Array.isArray(l.waypoints)||l.waypoints.length<2)errors.push(`${label}.waypoints must hold at least two [x,z] points`);
+   else for(const [windex,w] of l.waypoints.entries()){
+    if(!pointPair(w))errors.push(`${label}.waypoints[${windex}] must be an [x,z] pair`);
+    else if(frame&&!inBounds(frame,w[0],w[1]))errors.push(`${label}.waypoints[${windex}] must sit inside ${frame.label}`);
+   }
+   if(l.width!==undefined&&(!finite(l.width)||l.width<6))errors.push(`${label}.width must be at least 6 m`);
+   if(l.slopeCap!==undefined&&(!finite(l.slopeCap)||l.slopeCap<=0))errors.push(`${label}.slopeCap must be a positive number`);
+  }
+ }
+ return errors;
+}
 
 /** Structural schema errors for a map template. Returns [] when valid. */
 export function validateMapSchema(map){
@@ -67,9 +174,41 @@ export function validateMapSchema(map){
   }
   if(s.openSegments!==undefined&&(!Array.isArray(s.openSegments)||!s.openSegments.every(i=>Number.isInteger(i)&&i>=0&&i<16)||new Set(s.openSegments).size!==s.openSegments.length))errors.push(`${label}.openSegments must contain unique cavern segment indices 0..15`);
  }
+ // Schema v3 lattice layer: only validated when the map opts in by authoring
+ // any of the fields. Legacy maps keep the v2 contract and stay valid.
+ if(map.playBounds!==undefined||map.nodes!==undefined||map.lattice!==undefined||map.terminals!==undefined||map.lanes!==undefined)errors.push(...latticeIssues(map));
  return errors;
 }
 
 /** True when a map has no structural schema errors. */
 export const isMapSchemaValid=map=>validateMapSchema(map).length===0;
+
+/** Deeper lattice doctrine checks for maps that author the v3 layer. Returns [] when valid or opted out. */
+export function validateLattice(map){
+ const errors=latticeIssues(map);
+ if(!map||typeof map!=='object')return errors;
+ const nodes=Array.isArray(map.nodes)?map.nodes:[],edges=Array.isArray(map.lattice)?map.lattice:[];
+ if(!nodes.length&&!edges.length)return errors;
+ const byId=new Map(nodes.filter(n=>n&&typeof n.id==='string').map(n=>[n.id,n])),ids=new Set(byId.keys()),adjacency=new Map([...ids].map(id=>[id,new Set()]));
+ for(const link of edges)if(Array.isArray(link)&&ids.has(link[0])&&ids.has(link[1])&&link[0]!==link[1]){adjacency.get(link[0]).add(link[1]);adjacency.get(link[1]).add(link[0]);}
+ if(ids.size){
+  const start=ids.values().next().value,seen=new Set([start]),queue=[start];
+  while(queue.length)for(const next of adjacency.get(queue.shift()))if(!seen.has(next)){seen.add(next);queue.push(next);}
+  if(seen.size<ids.size)errors.push(`lattice must be connected: ${ids.size-seen.size} node(s) unreachable from ${start}`);
+ }
+ const hqs=[...byId.values()].filter(n=>n.archetype==='hq'),arrays=[...byId.values()].filter(n=>n.archetype==='array'),capturable=[...byId.values()].filter(n=>CAPTURABLE_ARCHETYPES.includes(n.archetype));
+ if(hqs.length&&hqs.length!==2)errors.push(`lattice HQ anchors must come in pairs, found ${hqs.length}`);
+ if(capturable.length<3)errors.push(`lattice must field at least 3 capturable nodes (front/economy/relay), found ${capturable.length}`);
+ for(const hq of hqs)if(![...(adjacency.get(hq.id)||[])].some(id=>CAPTURABLE_ARCHETYPES.includes(byId.get(id)?.archetype)))errors.push(`lattice HQ ${hq.id} must be adjacent to a capturable node`);
+ for(const array of arrays){
+  const approaches=new Set(adjacency.get(array.id)||[]);
+  for(const laneObj of (Array.isArray(map.lanes)?map.lanes:[]))for(const w of laneObj?.waypoints||[])if(Array.isArray(w)&&finite(w[0])&&finite(w[1])&&finite(array.x)&&finite(array.z)&&Math.hypot(w[0]-array.x,w[1]-array.z)<=array.r+8)approaches.add(laneObj.id);
+  if(approaches.size<2)errors.push(`lattice ARRAY ${array.id} needs at least 2 approach vectors`);
+  if(![...(adjacency.get(array.id)||[])].some(id=>['hq','front'].includes(byId.get(id)?.archetype)))errors.push(`lattice ARRAY ${array.id} must anchor behind an HQ or front node`);
+ }
+ return errors;
+}
+
+/** True when a map authors no v3 lattice or passes every lattice doctrine check. */
+export const isLatticeValid=map=>validateLattice(map).length===0;
 

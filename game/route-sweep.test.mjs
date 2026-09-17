@@ -3,7 +3,7 @@
 //
 // Opt-in slow test: `COCS_SLOW_TESTS=1 node --test game/route-sweep.test.mjs`.
 //
-// Two sweeps cover all 41 registered arenas:
+// Two sweeps cover all registered arenas (minus the two race/soccer maps):
 //   1. Geometry: every one of the nine movement verbs is driven, with real
 //      terrain callbacks, on every arena and must stay inside the arena bounds
 //      and the `min(58, arena.ceiling ?? 24)` ceiling, and must not translate
@@ -30,8 +30,8 @@ const defaultBounds = {minX: -13.55, maxX: 13.55, minZ: -13.55, maxZ: 13.55};
 const boundsOf = arena => arena.bounds ?? defaultBounds;
 const OWNER_BY_VERB = Object.fromEntries(OPERATOR_KITS.map(kit => [kit.movement, kit.id]));
 
-// The race maps have no infantry route; the other 39 arenas are the design's
-// "39 non-race" set.
+// The race maps have no infantry route; every other arena is the design's
+// non-race combat set.
 const COMBAT_ARENAS = MAPS.filter(arena => arena.id !== 'puma-circuit' && arena.id !== 'puma-pitch');
 
 // A deterministic activation script per verb input family.
@@ -74,8 +74,8 @@ const START_EVENTS = ['move-start', 'windup-start', 'charge-start', 'slam-launch
 const ATTEMPT_EVENTS = ['move-miss', 'rope-miss', 'move-blocked'];
 
 test('every movement verb is contained and budgeted on every registered arena', {skip: SKIP, timeout: 600000}, () => {
-  assert.equal(MAPS.length, 41, 'the registry holds 41 arenas');
-  assert.equal(COMBAT_ARENAS.length, 39, '39 non-race arenas');
+  assert.ok(MAPS.length >= 41, `the registry holds at least 41 arenas (${MAPS.length})`);
+  assert.equal(COMBAT_ARENAS.length, MAPS.length - 2, 'the non-race combat set excludes both puma maps');
   const attempted = Object.fromEntries(MOVEMENT_SPECS.map(spec => [spec.id, 0]));
   const started = Object.fromEntries(MOVEMENT_SPECS.map(spec => [spec.id, 0]));
   let maxTranslation = 0;
@@ -152,13 +152,13 @@ test('every movement verb is contained and budgeted on every registered arena', 
     }
   }
   for (const spec of MOVEMENT_SPECS) {
-    assert.equal(attempted[spec.id], MAPS.length, `${spec.id} was attempted on all 41 arenas`);
+    assert.equal(attempted[spec.id], MAPS.length, `${spec.id} was attempted on all ${MAPS.length} arenas`);
   }
-  // Aimed verbs only hook where there is a surface downrange (19 of 41 here);
-  // every other verb must genuinely start on every arena.
+  // Aimed verbs only hook where there is a surface downrange (19 of 41 at the
+  // time of writing); every other verb must genuinely start on every arena.
   for (const spec of MOVEMENT_SPECS) {
     if (spec.input === 'mobility') continue;
-    assert.equal(started[spec.id], MAPS.length, `${spec.id} started on all 41 arenas`);
+    assert.equal(started[spec.id], MAPS.length, `${spec.id} started on all ${MAPS.length} arenas`);
   }
   console.log(`route geometry: ${MAPS.length} arenas × ${MOVEMENT_SPECS.length} verbs, max single-activation translation ${maxTranslation.toFixed(2)} m, no bounds/ceiling escape`);
 });

@@ -178,12 +178,21 @@ test('complete rotation avoids map repeats while an alternative map remains pend
  let state=null,previous=null;
  const rng=seededRng(21);
  for(let i=0;i<catalog.length;i++){
+  const beforeState=state;
   const pendingBefore=state?state.pending.slice():[];
   const result=pickNext(state,{rng,rotation:'complete',legacy:true,afterEnd:true});
   state=result.state;
   if(previous){
    assert.notEqual(result.scenario.id,previous.id,'no back-to-back scenario repeats');
-   const alternative=pendingBefore.some(id=>byId.get(id).maps.some(mapId=>mapId!==previous.mapId));
+   // The least-used-mode tier is the coverage priority: a pass must show every
+   // mode before any repeat (the sibling test). Map variety is a tie-break
+   // *within* that tier, so the assertion is scoped to tier candidates that
+   // actually offer a different map. When the only unseen mode sits on the
+   // previous map, replaying it is required coverage, not a scheduling miss.
+   const counts=beforeState?beforeState.passCounts.modes:{};
+   const minCount=Math.min(...pendingBefore.map(id=>counts[byId.get(id).mode]||0));
+   const tier=pendingBefore.filter(id=>(counts[byId.get(id).mode]||0)===minCount);
+   const alternative=tier.some(id=>byId.get(id).maps.some(mapId=>mapId!==previous.mapId));
    if(alternative)assert.notEqual(result.scenario.mapId,previous.mapId,`map variety on ${previous.mapId}`);
   }
   previous=result.scenario;
