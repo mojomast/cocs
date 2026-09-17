@@ -2,6 +2,9 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import * as T from 'three';
 import {ArenaView, mothAtmosphereFor} from './view.mjs';
+import {MAPS} from './maps.mjs';
+import {DEFAULT_DISPLAY} from './config.mjs';
+import {ModelAssets} from './effects-fx.mjs';
 import {mothEffectTextures, mothMaterialLutTexture, clearSurfaceTextures} from './textures.mjs';
 import {configureMothAssets, resetMothAssets} from './moth-assets.mjs';
 
@@ -74,16 +77,91 @@ test('disposeObject never releases a shared Moth texture', () => {
   assert.equal(ownedDisposed, 1, 'an object-owned texture is still released');
 });
 
-test('the view swaps the sky material for the baked map atmosphere', () => {
+test('the view swaps the sky material and plays/disposes baked sprites', () => {
   configureMothAssets(fixture());
   try {
-    const view = Object.assign(Object.create(ArenaView.prototype), { renderer: { isSoftware: false }, reduced: () => false });
+    const scene = new T.Scene();
+    const view = Object.assign(Object.create(ArenaView.prototype), {
+      scene,
+      renderer: { isSoftware: false },
+      reduced: () => false,
+    });
+    // Atmosphere: the generated gradient is replaced, the mesh itself kept.
     const skyMesh = { material: new T.MeshBasicMaterial(), userData: {} };
     view.sky = skyMesh;
     assert.equal(view._applyMothAtmosphere('void'), skyMesh);
     assert.equal(skyMesh.material.map?.userData.mothSky, 'void');
     assert.equal(skyMesh.userData.mothAtmosphere, 'void');
     assert.equal(view._applyMothAtmosphere('missing'), null, 'unknown atmospheres leave the dome alone');
+    // Sprite pool: created lazily, parented to the scene, shared frames intact.
+    assert.equal(view._mothSprite('spark-impact', { slots: 2 }), view._mothSprite('spark-impact', { slots: 2 }));
+    const slot = view._spawnMothSprite('spark-impact', { x: 1, y: 1, z: 1 }, { size: 0.5, life: 0.3 });
+    assert.ok(slot && slot.mesh.parent === scene, 'sprites parent into the scene');
+    assert.equal(view._updateMothSprites(0.05, { quaternion: new T.Quaternion() }), 1);
+    view._clearMothSprites();
+    assert.equal(view._updateMothSprites(0.05, null), 0);
+    assert.equal(view._disposeMothSprites(), 1, 'one player was cached and released');
+    assert.equal(view._mothSprite('spark-impact', { slots: 2 }) !== null, true, 'a fresh pool can be built');
+    view._disposeMothSprites();
+  } finally {
+    resetMothAssets();
+    clearSurfaceTextures();
+  }
+});
+
+test('LUT materials are a WebGL-only opt-in', () => {
+  configureMothAssets(fixture());
+  try {
+    const software = Object.assign(Object.create(ArenaView.prototype), { renderer: { isSoftware: true } });
+    assert.equal(software._mothLutMaterial('entanglement'), null);
+    const plain = Object.assign(Object.create(ArenaView.prototype), { renderer: { isSoftware: false } });
+    assert.equal(plain._mothLutMaterial('entanglement'), null, 'a non-WebGL renderer keeps the flat material');
+    const webgl = Object.assign(Object.create(ArenaView.prototype), { renderer: { isSoftware: false, isWebGLRenderer: true }, renderResources: new Set() });
+    const material = webgl._mothLutMaterial('entanglement', { base: { color: '#102030' } });
+    assert.ok(material && material.userData.moth === true, 'WebGL gets the iridescent material');
+    assert.equal(webgl._mothLutMaterial('entanglement', { track: true }).userData.moth, true);
+    assert.equal(webgl.renderResources.size, 1, 'tracked LUT materials join the arena resource set');
+  } finally {
+    resetMothAssets();
+    clearSurfaceTextures();
+  }
+});
+
+test('next-gen props, tunnels and race surfaces pick up the baked maps', t => {
+  const previous = Object.getOwnPropertyDescriptor(globalThis, 'document');
+  const ctx = { createImageData: (w, h) => ({ data: new Uint8ClampedArray(w * h * 4) }), putImageData() {}, fillText() {}, fillRect() {}, strokeText() {}, measureText: () => ({ width: 4 }) };
+  Object.defineProperty(globalThis, 'document', { configurable: true, value: { createElement: () => ({ width: 0, height: 0, getContext: () => ctx }) } });
+  t.after(() => { if (previous) Object.defineProperty(globalThis, 'document', previous); else delete globalThis.document; });
+  configureMothAssets(fixture());
+  try {
+    const view = Object.assign(Object.create(ArenaView.prototype), {
+      scene: new T.Scene(), renderResources: new Set(), sharedResources: new Set(), modelAssets: new ModelAssets(),
+      renderer: { isSoftware: false }, display: { ...DEFAULT_DISPLAY }, reduced: () => false,
+    });
+    view.buildArena(MAPS.find(map => map.id === 'frost-gate'));
+    const kinds = new Set();
+    let tunnelUv = false;
+    view.worldGroup.traverse(node => {
+      if (!node.isMesh) return;
+      const kind = node.material?.map?.userData?.surfaceKind;
+      if (kind) kinds.add(kind);
+      if (node.userData.tunnelShell && node.geometry?.attributes?.uv) tunnelUv = true;
+    });
+    assert.ok(kinds.has('rock'), 'rocks/props carry the rock bake');
+    assert.ok(kinds.has('alien_chitin'), 'tree canopies carry the organic chitin bake');
+    assert.ok(kinds.has('rough_stucco'), 'next-gen structure walls carry the stucco bake');
+    assert.ok(tunnelUv, 'tunnel shells generate world-unit UVs for their rock map');
+    // Race and soccer presentation share the same helper through options.surface.
+    view.buildArena(MAPS.find(map => map.id === 'puma-pitch'));
+    const raceKinds = new Set();
+    view.worldGroup.traverse(node => { if (node.isMesh && node.material?.map) raceKinds.add(node.material.map.userData.surfaceKind); });
+    assert.ok(raceKinds.has('grass'), 'the soccer pitch carries the grass bake');
+    assert.ok(raceKinds.has('brushed_metal'), 'goal frames carry the brushed-metal bake');
+    assert.ok(raceKinds.has('hazard_stripes'), 'race barriers carry the caution-stripe bake');
+    view.disposeObject(view.worldGroup);
+    for (const resource of view.renderResources) resource.dispose();
+    view._disposeMothSprites();
+    clearSurfaceTextures();
   } finally {
     resetMothAssets();
     clearSurfaceTextures();
