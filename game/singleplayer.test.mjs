@@ -9,7 +9,7 @@ import {initializeSinglePlayer,hordeWaveSize,hordeWaveComposition,hordeWaveModif
 const make=(mode,options={})=>new Match('chatgpt','openclaw',()=>.5,options.mapId||'convoy-line',{mode,botCount:3,humanCount:1,timeLimit:300,...options});
 const firstEnemies=(match)=>match.actors.filter(actor=>actor.isNpc&&actor.team===1);
 const clearGroup=(match,group)=>{for(const id of match.modeState.groups[group]||[]){const actor=match.actors.find(a=>a.id===id);if(actor){actor.health=0;actor.dead=1;}}};
-const autoplay=(missionId,mapId,tint=1e12,difficulty='easy')=>{const match=make('campaign',{mission:missionId,mapId,difficulty});match.actors[0].protection=tint;let guard=0;while(!match.over&&guard++<60*60*5){const state=match.modeState,step=state.steps[state.stepIndex];if(step){if(step.marker){match.actors[0].x=step.marker.x;match.actors[0].z=step.marker.z;}if(step.complete?.kind==='group-dead')clearGroup(match,step.complete.group);}match.step(1/60,{inputs:{}});}return match;};
+const autoplay=(missionId,mapId,tint=1e12,difficulty='easy')=>{const match=make('campaign',{mission:missionId,mapId,difficulty});match.actors[0].protection=tint;let guard=0;while(!match.over&&guard++<60*60*5){const state=match.modeState,step=state.steps[state.stepIndex];if(step){if(step.marker){match.actors[0].x=step.marker.x;match.actors[0].z=step.marker.z;}const required=step.complete?.group?[step.complete.group]:[];if(step.complete?.groups)required.push(...step.complete.groups);for(const group of required)clearGroup(match,group);}match.step(1/60,{inputs:{}});}return match;};
 
 test('single-player modes are registered and configuration keeps the mission',()=>{
  for(const id of SINGLEPLAYER_MODES)assert.ok(GAME_MODES.some(mode=>mode.id===id),id);
@@ -81,7 +81,10 @@ test('the first campaign objective sets a waypoint and the next spawns themed en
  assert.ok(match.modeState.storyLine,'opening story line played');
  const rally=match.modeState.steps[0].marker;match.actors[0].x=rally.x;match.actors[0].z=rally.z;
  for(let i=0;i<10;i++)match.step(1/60,{inputs:{}});
- const enemies=firstEnemies(match);
+ // Predeploy stages every authored encounter before play, so scope the
+ // thematic check to the opening/tenement deployment this objective fronts.
+ const staged=new Set([...(match.modeState.groups.opening||[]),...(match.modeState.groups.tenements||[])]);
+ const enemies=firstEnemies(match).filter(actor=>staged.has(actor.id));
  assert.ok(enemies.length>0,'encounter deployed');
  assert.ok(enemies.some(actor=>actor.npcType==='husk'),'husks present');
  assert.ok(enemies.some(actor=>actor.npcType==='spitter'),'spitters present');
@@ -153,8 +156,8 @@ test('enemy deploys vary speed within a class and carry reduced firepower',()=>{
  let n=987654321;const random=()=>((n=(Math.imul(n,1664525)+1013904223)>>>0)/4294967296);
  const match=new Match('chatgpt','openclaw',random,'convoy-line',{mode:'campaign',botCount:0,humanCount:1,mission:'convoy-run'});
  const state=match.modeState;
- spawnGroup(match,state,{type:'spitter',count:8},{team:1});
- const enemies=match.actors.filter(actor=>actor.isNpc);
+ const ids=spawnGroup(match,state,{type:'spitter',count:8},{team:1});
+ const enemies=ids.map(id=>match.actors.find(actor=>actor.id===id));
  const speeds=enemies.map(actor=>actor.npcProfile.speedMult);
  assert.ok(speeds.length===8);
  assert.ok(new Set(speeds.map(speed=>speed.toFixed(4))).size>1,'speeds are not uniform');
@@ -215,24 +218,24 @@ test('group spawns de-clump onto distinct in-radius floor points',()=>{
  for(let i=0;i<actors.length;i++)for(let j=i+1;j<actors.length;j++)assert.ok(Math.hypot(actors[i].x-actors[j].x,actors[i].z-actors[j].z)>1,'members are pairwise separated');
 });
 
-test('campaign scripts fire a timed reinforcement and bark exactly once',()=>{
+test('campaign predeploys reinforcements and fires its timed bark exactly once',()=>{
  const match=make('campaign',{mission:'convoy-run',mapId:'convoy-line'});
  const state=match.modeState;
  match.actors[0].protection=1e9;
- const event=state.script.find(candidate=>Number.isFinite(candidate.at)&&candidate.bark&&candidate.spawn);
- assert.ok(event,'convoy-run authors a timed, barked reinforcement');
+ const event=state.script.find(candidate=>Number.isFinite(candidate.at)&&candidate.bark);
+ assert.ok(event,'convoy-run authors a timed bark');
+ assert.ok((state.groups.opening||[]).length>=2,'the opening reinforcement is staged before play');
+ const staged=match.actors.length;
  const captured=[],original=match.emit.bind(match);
  match.emit=(type,data)=>{captured.push({type,...data});original(type,data);};
- const before=match.actors.length;
  const barkCount=()=>captured.filter(entry=>entry.type==='npc-bark'&&entry.text===event.bark.text).length;
  for(let i=0;i<Math.ceil((event.at+2)*60);i++)match.step(1/60,{inputs:{}});
  assert.equal(barkCount(),1,'the timed bark fires once');
- assert.ok(match.actors.length>before,'the timed reinforcement deployed actors');
  assert.equal(state.fired[event.id],true,'the script event is marked fired');
- const actorsAfter=match.actors.length;
+ assert.equal(match.actors.length,staged,'predeploy stages the reinforcement once');
  for(let i=0;i<180;i++)match.step(1/60,{inputs:{}});
  assert.equal(barkCount(),1,'the one-shot script event never fires twice');
- assert.equal(match.actors.length,actorsAfter,'no duplicate reinforcements');
+ assert.equal(match.actors.length,staged,'no duplicate reinforcements');
 });
 
 test('horde clears resupply the player and offer deterministic upgrades',()=>{
@@ -290,7 +293,8 @@ test('campaign checkpoints persist and resume a retry from the saved step',()=>{
  const snap=match.snapshot().singleplayer;
  assert.ok(snap.checkpoint,'the run banks a checkpoint');
  assert.equal(snap.checkpoint.missionId,'convoy-run');
- assert.equal(snap.checkpoint.step,3,'the central-bridge checkpoint saves the next step');
+ const finalCheckpoint=Math.max(...Object.keys(missionFor('convoy-run').checkpoints).map(Number));
+ assert.equal(snap.checkpoint.step,finalCheckpoint,'a finished run banks the authored exit checkpoint');
  const retry=make('campaign',{mission:'convoy-run',mapId:'convoy-line'});
  retry.config.checkpoint=3;
  retry.initializeSinglePlayer();
@@ -300,15 +304,19 @@ test('campaign checkpoints persist and resume a retry from the saved step',()=>{
  assert.equal(retrySnap.steps[2].done,true,'earlier steps are treated as complete');
  assert.equal(retrySnap.steps[3].active,true,'resume lands on the saved step');
  assert.equal(applyCampaignCheckpoint(retry,{missionId:'reactor-run',step:1}),false,'wrong mission is rejected');
- assert.equal(applyCampaignCheckpoint(retry,{missionId:'convoy-run',step:1}),true);
- assert.equal(retry.modeState.stepIndex,1);
+ assert.equal(applyCampaignCheckpoint(retry,{missionId:'convoy-run',step:4}),true);
+ assert.equal(retry.modeState.stepIndex,3,'an unauthored step snaps to the previous authored checkpoint');
+ assert.equal(applyCampaignCheckpoint(retry,{missionId:'convoy-run',step:finalCheckpoint}),true);
+ assert.equal(retry.modeState.stepIndex,finalCheckpoint);
 });
 
 test('boss phases surface as a named, pip-counted snapshot entry',()=>{
  const match=make('campaign',{mission:'reactor-run',mapId:'titan-valley'});
  const state=match.modeState;
- const ids=spawnGroup(match,state,{type:'warden',count:1,x:0,z:0},{team:1});
- const boss=match.actors.find(actor=>actor.id===ids[0]);
+ // Predeploy stages the mission's Warden, which is the boss the phase script tracks.
+ const boss=match.actors.find(actor=>actor.isBoss);
+ assert.ok(boss&&boss.npcType==='warden'&&boss.id===state.boss,'reactor-run predeploys its tracked Warden');
+ state.stepIndex=state.steps.findIndex(step=>step.id==='warden');
  boss.health=boss.maxHealth*.45;
  match.step(1/60,{inputs:{}});
  assert.equal(state.bossPhase,2,'the boss-hp script advances the phase');
@@ -451,8 +459,9 @@ test('boss phases mechanically escalate the Warden and telegraph a ground slam',
  const match=make('campaign',{mission:'reactor-run',mapId:'titan-valley'});
  const state=match.modeState,player=match.actors[0];
  player.protection=1e9;player.health=player.maxHealth;
- const id=spawnGroup(match,state,{type:'warden',count:1,x:player.x+7,z:player.z},{team:1})[0];
- const boss=match.actors.find(actor=>actor.id===id);
+ const boss=match.actors.find(actor=>actor.isBoss);
+ assert.ok(boss&&boss.npcType==='warden','reactor-run predeploys its Warden');
+ state.stepIndex=state.steps.findIndex(step=>step.id==='warden');
  const captured=[],original=match.emit.bind(match);
  match.emit=(type,data)=>{captured.push({type,...data});original(type,data);};
  for(let i=0;i<600;i++){
@@ -650,7 +659,14 @@ test('campaign missions author weather and scripted beats can change it',()=>{
  assert.equal(singlePlayerSnapshot(match.modeState,match).weather,'overcast','the mission authors its weather');
  assert.equal(match.weather,'overcast','the live match carries the authored weather');
  const player=match.actors[0];
- player.x=0;player.z=6;player.y=floorAt(0,6,match.arena)??0;player.protection=1e9;
+ const state=match.modeState;
+ // Zone scripts are gated to their authored linear step, so advance to the
+ // bridge beat and stand on its resolved marker before expecting the change.
+ const bridgeIndex=state.steps.findIndex(step=>step.id==='bridge');
+ assert.ok(bridgeIndex>0,'convoy-run authors the bridge beat');
+ const marker=state.steps[bridgeIndex].marker;
+ state.stepIndex=bridgeIndex;
+ player.x=marker.x;player.z=marker.z;player.y=marker.y;player.protection=1e9;
  let changed=false;
  for(let i=0;i<60&&!changed;i++){
   match.step(1/60,{inputs:{}});
