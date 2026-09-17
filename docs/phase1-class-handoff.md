@@ -19,7 +19,12 @@ Plan: `docs/design/CLASS_OVERHAUL.md` §12.2 Phase 1, §13 (schema), §15 (kicko
 
 - Golden parity: `node --test game/ability-parity.test.mjs` — unchanged across the router refactor.
 - Focused: kits/harness-profiles/operator-profiles/data/stats/core/net/parity — 98 tests, 97 pass, 1 skipped (browser-only audio render).
-- Phase 1 gate (plan §12.3): `test:game` + `test:server` + `npx tsc --noEmit` + `npm run lint` in this worktree.
+- Phase 1 gate (plan §12.3): **green** — `test:game` (0 failures, 5 skipped),
+  `test:server` 153/153, `npx tsc --noEmit` clean, `npm run lint` 0 errors
+  (428 pre-existing warnings). The first gate run surfaced one pre-existing lint
+  error in `app/review/page.tsx` (synchronous `setState` in an effect); the
+  reticle query now resolves in a cancellable `requestAnimationFrame`, so the
+  behaviour is unchanged and the rule is satisfied.
 
 ## Decisions made where the plan was silent
 
