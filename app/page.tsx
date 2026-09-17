@@ -1,6 +1,6 @@
 'use client';
 import {useEffect,useRef,useState} from 'react';
-import {ArrowUpRight,AudioLines,Check,ChevronDown,ChevronLeft,ChevronRight,Crosshair,Film,Hexagon,LockKeyhole,Maximize,Minimize,Mic,Pause,Play,RotateCcw,Settings,Shield,SkipForward,Sparkles,Terminal,Trash2,Trophy,Users,Volume2,VolumeX,X,Zap} from 'lucide-react';
+import {ArrowUpRight,AudioLines,Check,ChevronDown,Crosshair,Film,Hexagon,LockKeyhole,Maximize,Minimize,Mic,Pause,Play,RotateCcw,Settings,Shield,SkipForward,Sparkles,Terminal,Trash2,Trophy,Users,Volume2,VolumeX,X,Zap} from 'lucide-react';
 import {Slider} from '@/components/ui/slider';
 import {RadioGroup,RadioGroupItem} from '@/components/ui/radio-group';
 import {MAPS,getMap} from '../game/maps.mjs';
@@ -44,12 +44,15 @@ import {emptyHistory,historyEntryFromResult,historyLeaderboard,historyTotals,loa
 import {ATTACHMENTS,ATTACHMENT_SLOTS,normalizeAttachments} from '../game/attachments.mjs';
 import {WEAPON_FINISHES,CROSSHAIR_STYLES,FINISH_IDS,CROSSHAIR_IDS} from '../game/cosmetics.mjs';
 import {harnessVehicle,harnessWeaponHandling} from '../game/harness-profiles.mjs';
-import {pickShowcase,seatShowcaseVehicles,SHOWCASES,SHOWCASE_MAX_SECONDS} from '../game/showcase.mjs';
+import {pickShowcase,seatShowcaseVehicles,SHOWCASE_MAX_SECONDS} from '../game/showcase.mjs';
 import {buildShowcase as buildShowcaseFactory} from '../game/showcase-build.mjs';
 import {demoBroadcast} from '../game/broadcast.mjs';
 import {roomFromLocation,spectateFromLocation} from '../game/invite.mjs';
 import {CHANGELOG,RELEASE_VERSION,RELEASE_CODENAME,FULL_CHANGELOG_URL} from '../game/changelog.mjs';
 import {DemoBroadcast} from './ui/DemoBroadcast';
+import {DemoControls} from './ui/DemoControls';
+import {DemoOptions} from './ui/DemoOptions';
+import {applyDemoEvent,applyDemoOptions,createDemoSession,demoOptionsDirty,demoPinned,demoRunningLabels,demoScenarioState,freeCamStep,loadDemoSettings,nextDemoSubject,DEMO_SETTINGS_KEY,pickDemoScenario,storeDemoSettings} from '../game/demo-session.mjs';
 import {ChangelogScreen} from './ui/screens/ChangelogScreen';
 import {buildSpectateMatch} from '../game/spectate-build.mjs';
 import {renderScoreboard} from '../game/scoreboard.mjs';
@@ -101,6 +104,7 @@ export default function Home(){
   const [broadcast,setBroadcast]=useState<any>(null);
   const [updateReady,setUpdateReady]=useState(false);
   const [demoOnly,setDemoOnly]=useState(false);
+  const [demoSession,setDemoSession]=useState<any>(()=>createDemoSession());
   const [demoMusic,setDemoMusic]=useState(true);
   const [demoAmbience,setDemoAmbience]=useState(true);
   const [demoAnnouncer,setDemoAnnouncer]=useState(true);
@@ -133,7 +137,11 @@ export default function Home(){
   const savePreset=(name:string)=>{const loadout={gear:profileRef.current.gear,attachments:profileRef.current.attachments,finish:profileRef.current.finish,crosshair:profileRef.current.crosshair};const preset=normalizePreset({name,character,harness,mapId,config,loadout},presetOptions as any,()=>`p${Date.now().toString(36)}`);if(preset)setPresets(list=>addPreset(list,preset));};
   const loadPreset=(p:any)=>{const level=profileRef.current.level||1,raw=p.loadout||{};if(CHARACTERS.some(c=>c.id===p.character))setCharacter(p.character);if(HARNESSES.some(h=>h.id===p.harness))setHarness(p.harness);if(MAPS.some(m=>m.id===p.mapId))setMapId(p.mapId);setConfig((c:any)=>normalizeConfig({...c,...p.config,playerName:c.playerName}));const gear=normalizeGear(raw.gear,level),attachments=normalizeAttachments(raw.attachments,level),finish=FINISH_IDS.includes(raw.finish)?raw.finish:null,crosshair=CROSSHAIR_IDS.includes(raw.crosshair)?raw.crosshair:null;const saved=saveProgression({...profileRef.current,gear,attachments,finish,crosshair});if(crosshair)setDisplay((d:any)=>normalizeDisplay({...d,crosshair}));runtime.current?.net?.gear(saved.gear,saved.attachments,saved.finish);setSetupOpen(false);};
   const deletePreset=(id:string)=>setPresets(list=>removePreset(list,id));
-  const modalRef=useRef<HTMLElement>(null),singleRef=useRef<HTMLElement>(null),settingsRef=useRef<HTMLElement>(null),onboardingRef=useRef<HTMLElement>(null),previewRef=useRef<HTMLElement>(null),enteredRef=useRef(false),profileRef=useRef<any>(defaultProgression()),challengeRef=useRef<any>(normalizeChallengeState({})),historyRef=useRef<any>(emptyHistory()),inviteHandled=useRef(false);
+  const modalRef=useRef<HTMLElement>(null),singleRef=useRef<HTMLElement>(null),settingsRef=useRef<HTMLElement>(null),onboardingRef=useRef<HTMLElement>(null),previewRef=useRef<HTMLElement>(null),enteredRef=useRef(false),profileRef=useRef<any>(defaultProgression()),challengeRef=useRef<any>(normalizeChallengeState({})),historyRef=useRef<any>(emptyHistory()),inviteHandled=useRef(false),demoSessionRef=useRef<any>(demoSession),demoOnlyRef=useRef(false),demoLiftRef=useRef(0),demoTrailRef=useRef<any[]>([]),demoForwardRef=useRef<any[]>([]);
+  // Demo preferences load once and persist whenever the applied settings change.
+  useEffect(()=>{let raw:string|null=null;try{raw=localStorage.getItem(DEMO_SETTINGS_KEY);}catch{}const next=applyDemoEvent(demoSessionRef.current,{type:'load-settings',settings:loadDemoSettings(raw)});demoSessionRef.current=next;setDemoSession(next);},[]);
+  useEffect(()=>{try{localStorage.setItem(DEMO_SETTINGS_KEY,storeDemoSettings(demoSession.applied));}catch{}},[demoSession.applied]);
+  useEffect(()=>{demoOnlyRef.current=demoOnly;},[demoOnly]);
   const [voiceState,setVoiceState]=useState<any>({enabled:false,mode:'ptt',status:'off',error:'',talking:false,peers:0}),[voiceVolume,setVoiceVolume]=useState(1),[voiceThreshold,setVoiceThreshold]=useState(.03),[voiceOpen,setVoiceOpen]=useState(false),[newMessages,setNewMessages]=useState(false);
   const voiceGate=useRef({menu:false,blurred:false}),voicePrefs=useRef({volume:1,threshold:.03}),lobbyInputRef=useRef<HTMLInputElement>(null),lobbyChatRef=useRef<HTMLDivElement>(null),chatAtBottom=useRef(true),chatRoom=useRef('');
   const syncVoice=()=>{const r=runtime.current,suppressed=voiceGate.current.menu||voiceGate.current.blurred||document.hidden||isEditable(document.activeElement)||chatOpenRef.current||!!r?.net?.spectate||!['lobby','playing'].includes(modeRef.current)||!!(modeRef.current==='lobby'&&r?.net?.started&&!r?.net?.roundOver);if(suppressed)r?.voice?.setPushToTalk(false);if(r?.voice&&r.voiceSuppressed!==suppressed){r.voiceSuppressed=suppressed;r.voice.setSuppressed(suppressed);}return !suppressed;};
@@ -165,12 +173,111 @@ export default function Home(){
    const changeMode=(m:Mode)=>{runtime.current?.voice?.setPushToTalk(false);runtime.current?.voice?.setSuppressed(true);if(runtime.current)runtime.current.voiceSuppressed=true;modeRef.current=m;setMode(m);setChatOpen(false);setSetupOpen(false);setSettings(false);clearInput();if(m!=='playing'){document.exitPointerLock?.();setPointerHint(false);}setScores(false);};
     const enterMenu=()=>{enteredRef.current=true;setEntered(true);setDemoOnly(false);runtime.current?.audio?.start?.();};
     const exitToTitle=()=>{runtime.current?.voice?.setPushToTalk(false);if(modeRef.current!=='selection')changeMode('selection');enteredRef.current=false;setEntered(false);setDemoOnly(false);setHud(null);setSetupOpen(false);setSettings(false);document.exitPointerLock?.();};
-  const touchLook=(dx:number,dy:number)=>{const r=runtime.current;if(!r||modeRef.current!=='playing'||chatOpenRef.current||r.net?.spectate||r.spectateLocal)return;const look=r.net?.started?r.look:r.match?.actors?.[0],d=r.display||{};if(look)applyLook(look,dx,dy,r.lookSensitivity*(d.touchSensitivity??1)*((r.ads||r.touch?.ads)?(d.adsSensitivity??1):1),d.invertY===true);};
+  const touchLook=(dx:number,dy:number)=>{const r=runtime.current;if(!r)return;if(demoOnlyRef.current&&demoSessionRef.current.state==='free'){const d=r.display||{},scale=.004*(r.lookSensitivity||1);demoFreeAdapter(r.view).look(-dx*scale,(d.invertY?1:-1)*dy*scale);return;}if(modeRef.current!=='playing'||chatOpenRef.current||r.net?.spectate||r.spectateLocal)return;const look=r.net?.started?r.look:r.match?.actors?.[0],d=r.display||{};if(look)applyLook(look,dx,dy,r.lookSensitivity*(d.touchSensitivity??1)*((r.ads||r.touch?.ads)?(d.adsSensitivity??1):1),d.invertY===true);};
   const touchSwap=()=>{const r=runtime.current;if(!r||modeRef.current!=='playing')return;const p=r.net?.started?r.renderState?.actors?.find((a:any)=>a.id===r.net.actorId):r.match?.actors?.[0];if(!p)return;const n=cycleWeapon(p.ammo,p.weapon,r.inputWeapon,1);if(n>=0)r.inputWeapon=n;};
   const touchPause=()=>{const r=runtime.current;if(!r)return;changeMode(r.net?.started?'lobby':'paused');};
   const toggleFullscreen=()=>{const doc:any=document;try{if(doc.fullscreenElement||doc.webkitFullscreenElement){(doc.exitFullscreen||doc.webkitExitFullscreen)?.call(doc);return;}const el:any=doc.documentElement,req=el.requestFullscreen||el.webkitRequestFullscreen;const result=req?.call(el,{navigationUI:'hide'});result?.catch?.(()=>{});}catch{}};
-  const backToDemo=()=>{const r=runtime.current;exitToTitle();setDemoOnly(true);r?.audio?.start?.();r?.view?.setWeather?.(demoWeather);if(r&&r.showcaseEnabled!==false&&!r.showcase)r.buildShowcase?.();};
-  const cycleShowcase=(delta:number)=>{const r=runtime.current;if(!r)return;const found=SHOWCASES.findIndex((s:any)=>s.id===r.showcase?.modeId);const next=((found<0?0:found+delta)%SHOWCASES.length+SHOWCASES.length)%SHOWCASES.length;r.showcaseReel=[next];r.buildShowcase?.();};
+  // --- Back to Demo session ---------------------------------------------------
+  // The pure state machine lives in game/demo-session.mjs; the page only mirrors
+  // its plain objects into React state (once per scenario/transition, never per
+  // frame) and performs the side effects that need a live runtime: view/director
+  // ownership and match builds through the existing showcase factory.
+  const commitDemoSession=(next:any)=>{if(!next||next===demoSessionRef.current)return demoSessionRef.current;demoSessionRef.current=next;setDemoSession(next);return next;};
+  const demoFreeAdapter=(view:any)=>{
+   const api=view??{};
+   return {
+    set:(on:boolean)=>{api.setFreeCam?.(on);},
+    look:(yaw:number,pitch:number)=>{api.freeLook?.(yaw,pitch);},
+    move:(dt:number,input:any)=>{
+     // Prefer the newer view.freeMove when it lands; freeCamStep mirrors the
+     // historical updateFreeCam math (plus adjustable speed) until then.
+     if(typeof api.setFreeCamSpeed==='function'&&typeof input?.speed==='number')api.setFreeCamSpeed(input.speed);if(typeof api.freeMove==='function'){api.freeMove({forward:input?.forward??0,right:input?.right??0,up:input?.up??0,boost:input?.boost===true},dt);return;}
+     const pose=api.freePose;if(!pose)return;
+     const next=freeCamStep(pose,dt,input);
+     pose.x=next.x;pose.y=next.y;pose.z=next.z;pose.pitch=next.pitch;
+    },
+    reset:()=>{api.resetFreeCam?.();},
+   };
+  };
+  const clearDemoInputs=()=>{const r=runtime.current;if(!r)return;demoLiftRef.current=0;r.keys?.clear?.();r.fire=r.fireTap=r.jump=r.power=r.interact=r.ads=r.reload=r.melee=r.grenade=r.drag=false;if(r.touch){r.touch.moveX=0;r.touch.moveY=0;r.touch.sprint=false;r.touch.crouch=false;r.touch.ads=false;r.touch.fire=false;}};
+  const demoFreeInput=()=>{
+   const r=runtime.current,session=demoSessionRef.current;
+   if(!r)return {forward:0,right:0,up:0,boost:false,speed:session.freeSpeed};
+   const b=r.bindings||bindings,keys=r.keys||new Set<string>(),t=r.touch||{};
+   const axis=(value:number)=>Math.max(-1,Math.min(1,Number.isFinite(value)?value:0));
+   return {
+    forward:axis((keys.has(b.forward)?1:0)-(keys.has(b.back)?1:0)+(Number.isFinite(t.moveY)?t.moveY:0)),
+    right:axis((keys.has(b.right)?1:0)-(keys.has(b.left)?1:0)+(Number.isFinite(t.moveX)?t.moveX:0)),
+    up:axis((keys.has(b.jump)?1:0)-(keys.has(b.crouch)?1:0)+demoLiftRef.current+(t.crouch?-1:0)),
+    boost:keys.has(b.sprint)||t.sprint===true,
+    speed:session.freeSpeed,
+   };
+  };
+  const applyDemoCameraOwnership=(session:any)=>{
+   const r=runtime.current,view=r?.view;if(!view)return;
+   if(session?.state==='free'){demoFreeAdapter(view).set(true);return;}
+   demoFreeAdapter(view).set(false);
+   const sc=r.showcase,director=sc?.director;
+   if(!director)return;
+   if(session?.cameraStyle&&session.cameraStyle!=='auto'){if(view.cameraOwner!=='manual')view.setCameraOwner?.('manual');director.setRig?.(session.cameraStyle);}
+   else{
+    // Style "auto" hands the rig back to the planner; a pinned follow subject is
+    // re-asserted so the camera keeps tracking without a manual rig.
+    director.reframe?.(sc.match?.snapshot?.());
+    if(session?.state==='follow'&&session.subjectId!==null&&session.subjectId!==undefined)director.setTarget?.(session.subjectId);
+   }
+  };
+  const demoTransition=(event:any)=>{const committed=commitDemoSession(applyDemoEvent(demoSessionRef.current,event));applyDemoCameraOwnership(committed);return committed;};
+  const pushTrail=(list:any[],spec:any)=>{if(!spec)return list;list.push(spec);while(list.length>16)list.shift();return list;};
+  const buildDemoShowcase=(spec:any=null)=>{
+   const r=runtime.current;if(!r?.buildShowcase)return false;
+   const ok=r.buildShowcase(spec??undefined)===true;
+   if(!ok)commitDemoSession(applyDemoEvent(demoSessionRef.current,{type:'error',message:'That scenario could not start. Keeping the running demo.'}));
+   return ok;
+  };
+  const selectDemoScenario=(rng:any)=>{
+   const r=runtime.current;
+   const picked=pickDemoScenario(demoSessionRef.current,{rng,legacy:r?.legacyArenas===true,afterEnd:true});
+   commitDemoSession(picked.session);
+   return picked.spec;
+  };
+  const skipDemoScenario=(dir:number)=>{
+   const r=runtime.current;if(!r?.buildShowcase)return;
+   if(dir<0){const previous=demoTrailRef.current.pop();if(previous){pushTrail(demoForwardRef.current,r.showcaseSpec);buildDemoShowcase(previous);return;}}
+   else{const next=demoForwardRef.current.pop();if(next){pushTrail(demoTrailRef.current,r.showcaseSpec);buildDemoShowcase(next);return;}}
+   commitDemoSession(applyDemoEvent(demoSessionRef.current,{type:'release-pins',rotation:true}));
+   buildDemoShowcase();
+  };
+  const demoFollow=(dir:number)=>{
+   const snapshot=runtime.current?.showcase?.match?.snapshot?.();
+   const subject=nextDemoSubject(demoSessionRef.current,snapshot,dir);
+   if(subject)demoTransition({type:'follow',actorId:subject.id,actorName:subject.name});
+  };
+  const demoToggleFree=()=>{demoTransition({type:demoSessionRef.current.state==='free'?'auto':'free'});};
+  const demoCycleStyle=(dir:number)=>demoTransition({type:'cycle-camera',dir});
+  const demoCycleSpeedPref=(dir:number)=>demoTransition({type:'cycle-speed',dir});
+  const demoResetView=()=>{const session=demoSessionRef.current;if(session.state==='free'){demoFreeAdapter(runtime.current?.view).reset();return;}demoTransition({type:'auto'});};
+  const demoToggleHud=()=>demoTransition({type:'toggle-hud'});
+  const demoTogglePause=()=>demoTransition({type:demoSessionRef.current.state==='paused'?'resume':'pause'});
+  const demoReleasePins=()=>demoTransition({type:'release-pins',rotation:true});
+  const openDemoOptions=()=>{clearDemoInputs();document.exitPointerLock?.();demoFreeAdapter(runtime.current?.view).set(false);demoTransition({type:'open-options'});};
+  const closeDemoOptions=()=>demoTransition({type:'close-options'});
+  const demoSetDraft=(patch:any)=>commitDemoSession(applyDemoEvent(demoSessionRef.current,{type:'set-draft',patch}));
+  const demoSetSelection=(selection:any)=>commitDemoSession(applyDemoEvent(demoSessionRef.current,{type:'set-selection',selection}));
+  const demoResetDraft=()=>commitDemoSession(applyDemoEvent(demoSessionRef.current,{type:'reset-draft'}));
+  const demoApplyOptions=(start:boolean)=>{
+   const r=runtime.current;
+   const result=applyDemoOptions(demoSessionRef.current,{legacy:r?.legacyArenas===true});
+   if(!result.ok){commitDemoSession(result.session);return false;}
+   commitDemoSession(result.session);
+   demoForwardRef.current=[];
+   demoTrailRef.current=[];
+   if(start||result.selectionChanged)buildDemoShowcase();
+   else applyDemoCameraOwnership(result.session);
+   return true;
+  };
+  const enterArenaFromDemo=()=>{clearDemoInputs();document.exitPointerLock?.();demoFreeAdapter(runtime.current?.view).set(false);commitDemoSession(applyDemoEvent(demoSessionRef.current,{type:'exit'}));enterMenu();};
+  const backToDemo=()=>{const r=runtime.current;exitToTitle();const current=demoSessionRef.current;const fresh=createDemoSession({settings:current.applied,hudVisible:current.hudVisible,state:'auto'});commitDemoSession({...fresh,rotation:current.rotation,coverage:current.coverage,selection:{...current.selection}});setDemoOnly(true);demoOnlyRef.current=true;r?.audio?.start?.();r?.view?.setWeather?.(demoWeather);if(r&&r.showcaseEnabled!==false&&!r.showcase)buildDemoShowcase();else applyDemoCameraOwnership(demoSessionRef.current);};
   const saveDemoPrefs=(patch:any)=>{try{const prefs=JSON.parse(localStorage.getItem('token-arena-settings')||'{}');localStorage.setItem('token-arena-settings',JSON.stringify({...prefs,...patch}));}catch{}};
   const setMusicPref=(on:boolean)=>{setDemoMusic(on);const r=runtime.current;r?.audio?.setMusicEnabled?.(on);if(on)r?.audio?.unlock?.();setAudioNotice(on&&r?.audio?.audioStatus?.().state!=='running'?'Audio is blocked by the browser. Click or press a key to enable it.':'');saveDemoPrefs({music:on});};
   const setAudioVolume=(kind:'master'|'music'|'effects'|'ambience',v:number)=>{const r=runtime.current;if(kind==='music')setMusicVolume(v);else if(kind==='effects')setEffectsVolume(v);else if(kind==='ambience')setAmbienceVolume(v);r?.audio?.setVolume?.(kind,v);try{const prefs=JSON.parse(localStorage.getItem('token-arena-settings')||'{}');localStorage.setItem('token-arena-settings',JSON.stringify({...prefs,[`${kind}Volume`]:v}));}catch{}};
@@ -188,7 +295,7 @@ export default function Home(){
   resize=()=>view.resize();window.addEventListener('resize',resize);let last=performance.now(),hudAt=0;
   const makeRng=(seed:number=Date.now()>>>0)=>{let n=seed||1;return()=>((n=(Math.imul(n,1664525)+1013904223)>>>0)/4294967296);};
   const showcaseOk=()=>r.showcaseEnabled!==false&&view.renderer.isSoftware!==true;
-    const buildShowcase=buildShowcaseFactory({r,view,showcaseOk,makeRng,pickShowcase,normalizeConfig,DEFAULT_CONFIG,Match,seatShowcaseVehicles,RULES,CinematicDirector,reducedMotion,setShowcaseLive});
+    const buildShowcase=buildShowcaseFactory({r,view,showcaseOk,makeRng,pickShowcase,normalizeConfig,DEFAULT_CONFIG,Match,seatShowcaseVehicles,RULES,CinematicDirector,reducedMotion,setShowcaseLive,selectScenario:selectDemoScenario,onError:(error:any)=>{commitDemoSession(applyDemoEvent(demoSessionRef.current,{type:'error',message:`Scenario build failed: ${String(error?.message||error)}. Keeping the running demo.`}));}});
   // Prepare the selected arena + starting weapon before gameplay is comfortable:
   // build the viewmodel, create the post variants and compile shaders. Bounded
   // and token-guarded so rapid map changes cannot clobber a newer preparation and
@@ -246,7 +353,13 @@ export default function Home(){
   if(r.recorder){const recordTime=r.match.time;if(r.recorder.due(recordTime))r.perf?.time('snapshot',()=>r.recorder.frame(r.match.snapshot(),r.match.events));else r.perf?.time('snapshot',()=>r.recorder.frame({time:recordTime},r.match.events));}
   for(const e of r.match.events)if(e.id>r.lastAudio){audio.event(e,r.match.actors[0]);noteDamage(e,r.match,0);noteKill(e,0,r.match.time);if(r.display?.captions===true){const cap=audioCaption(e);if(cap){r.caption=cap.text;r.captionAt=r.match.time;}}if(e.type==='damage'&&e.actor===0)r.lastDamage=r.match.time;if(e.type==='damage'&&e.source===0&&e.actor!==0){r.lastHit=r.match.time;if(e.critical||e.headshot||Number(e.amount)>=48)r.lastCritical=r.match.time;}if((e.type==='pickup'||e.type==='powerup')&&e.actor===0){r.pickupText=e.type==='powerup'?`${e.kind.toUpperCase()} ACTIVE`:`${e.kind.toUpperCase()} ACQUIRED`;r.pickupAt=r.match.time;}if(e.type==='horde-resupply')r.singleNotice={type:e.type,text:`RESUPPLIED · WAVE ${e.wave??''}`.trim(),at:r.match.time};else if(e.type==='enemy-detonate')r.singleNotice={type:e.type,text:'SAPPER DETONATION',at:r.match.time};else if(e.type==='boss-phase'){r.singleNotice={type:e.type,text:`PHASE ${e.phase}${e.name?` · ${e.name}`:''}`,at:r.match.time};audio.announcerCue?.('boss');}else if(e.type==='mission-message')r.singleNotice={type:e.type,text:String(e.text??''),at:r.match.time};else if(e.type==='story-line'||e.type==='npc-bark')audio.announcerCue?.('objective');else if(e.type==='singleplayer-checkpoint'&&r.match.config.mode==='campaign'){setCampaign((p:any)=>setCheckpoint(p,e.missionId??r.match.config.mission,e.step));}r.lastAudio=e.id;}}
     const cinematicMode=r.showcase&&(['selection','browse','lobby','progression','changelog'].includes(modeRef.current)||(modeRef.current==='theater'&&!r.demo));
-    if(cinematicMode){const sc=r.showcase;if(r.showcaseMatchedId!==sc.mapId){view.setMatch(sc.match.snapshot());view.lastEvent=sc.match.serial;view.setPlayerId(-1);view.setDirector(sc.director);view.setCinema(true);r.showcaseMatchedId=sc.mapId;view.setShowcase(sc.match.snapshot());}sc.acc=Math.min(sc.acc+elapsed,RULES.dt*4);let showcaseGuard=0;while(sc.acc>=RULES.dt&&showcaseGuard<4){sc.acc-=RULES.dt;showcaseGuard++;sc.match.step(RULES.dt,{inputs:{}});}sc.time+=elapsed;if(sc.match.over||sc.time>=SHOWCASE_MAX_SECONDS){if(!buildShowcase()){sc.time=0;sc.acc=0;}}else{const snap=sc.match.snapshot();snap.events=sc.match.events;snap.serial=sc.match.serial;view.setShowcase(snap);if(now-(r.broadcastAt||0)>250){r.broadcastAt=now;const modeInfo=GAME_MODES.find((m:any)=>m.id===sc.mode);setBroadcast({...demoBroadcast(snap,{modeName:modeInfo?.name,mapName:getMap(sc.mapId)?.name}),revision:r.showcaseIndex||0});}}if(enteredRef.current&&(modeRef.current==='selection'||modeRef.current==='progression')&&previewRef.current)view.setPreviewRect(previewRef.current.getBoundingClientRect());else view.setPreviewRect(null);}
+    if(cinematicMode){const sc=r.showcase;const demoActive=demoOnlyRef.current;const plan=demoScenarioState(demoSessionRef.current,{elapsed:sc.time,limit:sc.seconds??SHOWCASE_MAX_SECONDS,over:sc.match.over===true,active:demoActive});if(r.showcaseMatchedId!==sc.mapId){view.setMatch(sc.match.snapshot());view.lastEvent=sc.match.serial;view.setPlayerId(-1);view.setDirector(sc.director);view.setCinema(true);r.showcaseMatchedId=sc.mapId;view.setShowcase(sc.match.snapshot());}if(!plan.paused){sc.acc=Math.min(sc.acc+elapsed,RULES.dt*4);let showcaseGuard=0;while(sc.acc>=RULES.dt&&showcaseGuard<4){sc.acc-=RULES.dt;showcaseGuard++;sc.match.step(RULES.dt,{inputs:{}});}sc.time+=elapsed;}if(plan.advance){if(!buildShowcase()){sc.time=0;sc.acc=0;}}else if(plan.restart){if(!buildShowcase(r.showcaseSpec??undefined)){sc.time=0;sc.acc=0;}}else if(!plan.paused){const snap=sc.match.snapshot();snap.events=sc.match.events;snap.serial=sc.match.serial;view.setShowcase(snap);if(now-(r.broadcastAt||0)>250){r.broadcastAt=now;const modeInfo=GAME_MODES.find((m:any)=>m.id===sc.mode);setBroadcast({...demoBroadcast(snap,{modeName:modeInfo?.name,mapName:getMap(sc.mapId)?.name}),revision:r.showcaseIndex||0,subjects:(sc.match.actors||[]).filter((a:any)=>a&&a.id!==undefined&&a.id!==null).slice(0,4).map((a:any)=>({id:a.id,name:String(a.name||`BOT ${a.id}`)}))});}}if(enteredRef.current&&(modeRef.current==='selection'||modeRef.current==='progression')&&previewRef.current)view.setPreviewRect(previewRef.current.getBoundingClientRect());else view.setPreviewRect(null);
+     // Free-roam flight: the dock owns the camera while the session says so, and
+     // the inputs are cleared by Escape/blur/mode changes elsewhere. Re-assert the
+     // free camera every frame so a scenario rebuild cannot silently drop it.
+     const liveSession=demoSessionRef.current;
+     if(demoOnlyRef.current&&liveSession.state==='free'){const freeCam=demoFreeAdapter(view);freeCam.set(true);freeCam.move(elapsed,demoFreeInput());}
+    }
     else {view.setPreviewRect(null);if(['selection','browse','lobby','progression','changelog'].includes(modeRef.current)&&r.showcaseEnabled!==false&&!r.demo&&view.renderer?.isSoftware!==true&&now-(r.showcaseRetryAt||0)>3000){r.showcaseRetryAt=now;r.buildShowcase?.();}}
    if(r.demo&&modeRef.current==='theater'){const d=r.demo;if(!d.paused){d.time=Math.min(d.player.duration,d.time+elapsed*d.speed);if(d.time>=d.player.duration)d.paused=true;}const offset=d.player.keyframes?.[0]?.time||0,state=d.player.sample(d.time);state.events=d.player.eventsBetween(offset+(d.lastT||0),offset+d.time);d.lastT=d.time;d.state=state;view.setCinema(true);view.setDirector(d.director);view.setPlayerId(-1);if(now-d.hudAt>100){d.hudAt=now;setDemoTime(d.time);setDemoPaused(d.paused);}}
   if(!r.match&&r.net?.started&&r.net.state)r.voice?.updateSpatial(r.net.state);
@@ -322,18 +435,18 @@ export default function Home(){
     if(!e.repeat&&(/^Digit[1-9]$/.test(e.code)||e.code==='Digit0')){const n=e.code==='Digit0'?9:Number(e.code.slice(-1))-1;if(n>=WEAPONS.length)return;if(r.net?.started||(r.match&&hasAmmo(r.match.actors[0].ammo[n])))r.inputWeapon=n;}
    };
   const keyup=(e:KeyboardEvent)=>{if(actionForCode(runtime.current?.bindings||bindings,e.code)==='voice')runtime.current?.voice?.setPushToTalk(false);keys.delete(e.code);if(e.code==='Tab')setScores(false);};
-  const move=(e:MouseEvent)=>{const r=runtime.current;if(modeRef.current!=='playing'||chatOpenRef.current||r?.net?.spectate||!r?.match&&!r?.net?.started||(document.pointerLockElement!==canvas.current&&!r.drag))return;if(r.spectateLocal){const d=r.display||{},gain=r.lookSensitivity*((r.ads||r.touch?.ads)?(d.adsSensitivity??1):1),inv=d.invertY?-1:1;if(r.view?.freeCam)r.view.freeLook(-e.movementX*.002*gain,-inv*e.movementY*.002*gain);else r.spectateDirector?.look?.(-e.movementX*.002*gain,-inv*e.movementY*.002*gain);return;}const look=r.net?.started?r.look:r.match.actors[0],d=r.display||{},gain=r.lookSensitivity*((r.ads||r.touch?.ads)?(d.adsSensitivity??1):1);look.yaw-=e.movementX*.002*gain;look.pitch=Math.max(-1.45,Math.min(1.45,look.pitch-(d.invertY?-1:1)*e.movementY*.002*gain));};
-  const down=(e:MouseEvent)=>{if(e.target!==canvas.current||modeRef.current!=='playing'||chatOpenRef.current)return;const r=runtime.current;if(r.net?.spectate)return;if(r.spectateLocal){canvas.current?.focus({preventScroll:true});if(document.pointerLockElement!==canvas.current)requestLock();return;}canvas.current?.focus({preventScroll:true});if(document.pointerLockElement!==canvas.current)requestLock();if(e.button===0){r.fire=true;r.fireTap=true;r.drag=true;}else if(e.button===2){e.preventDefault();r.ads=true;}};
+  const move=(e:MouseEvent)=>{const r=runtime.current;if(demoOnlyRef.current&&demoSessionRef.current.state==='free'&&(document.pointerLockElement===canvas.current||r?.drag)){const d=r?.display||{},gain=(r?.lookSensitivity||1)*(d.adsSensitivity??1);demoFreeAdapter(r?.view).look(-e.movementX*.002*gain,-(d.invertY?-1:1)*e.movementY*.002*gain);return;}if(modeRef.current!=='playing'||chatOpenRef.current||r?.net?.spectate||!r?.match&&!r?.net?.started||(document.pointerLockElement!==canvas.current&&!r.drag))return;if(r.spectateLocal){const d=r.display||{},gain=r.lookSensitivity*((r.ads||r.touch?.ads)?(d.adsSensitivity??1):1),inv=d.invertY?-1:1;if(r.view?.freeCam)r.view.freeLook(-e.movementX*.002*gain,-inv*e.movementY*.002*gain);else r.spectateDirector?.look?.(-e.movementX*.002*gain,-inv*e.movementY*.002*gain);return;}const look=r.net?.started?r.look:r.match.actors[0],d=r.display||{},gain=r.lookSensitivity*((r.ads||r.touch?.ads)?(d.adsSensitivity??1):1);look.yaw-=e.movementX*.002*gain;look.pitch=Math.max(-1.45,Math.min(1.45,look.pitch-(d.invertY?-1:1)*e.movementY*.002*gain));};
+  const down=(e:MouseEvent)=>{if(e.target!==canvas.current)return;const r=runtime.current;if(!r)return;if(demoOnlyRef.current&&demoSessionRef.current.state==='free'){canvas.current?.focus({preventScroll:true});if(document.pointerLockElement!==canvas.current)requestLock();return;}if(modeRef.current!=='playing'||chatOpenRef.current)return;if(r.net?.spectate)return;if(r.spectateLocal){canvas.current?.focus({preventScroll:true});if(document.pointerLockElement!==canvas.current)requestLock();return;}canvas.current?.focus({preventScroll:true});if(document.pointerLockElement!==canvas.current)requestLock();if(e.button===0){r.fire=true;r.fireTap=true;r.drag=true;}else if(e.button===2){e.preventDefault();r.ads=true;}};
  const up=(e:MouseEvent)=>{const r=runtime.current;if(!r)return;if(e.button===0||e.button===undefined){r.fire=false;r.drag=false;}else if(e.button===2)r.ads=false;};
  const contextmenu=(e:MouseEvent)=>{if(e.target===canvas.current&&modeRef.current==='playing')e.preventDefault();};
-   const pause=()=>{voiceGate.current.blurred=true;syncVoice();clearInput();if(modeRef.current==='playing'){if(runtime.current?.net?.started){setPointerHint(!runtime.current.net.spectate);document.exitPointerLock?.();}else changeMode('paused');}};
-  const lock=()=>{const r=runtime.current;if(!r)return;r.lockPending=false;if(document.pointerLockElement===canvas.current){r.hadLock=true;canvas.current?.focus({preventScroll:true});setPointerHint(false);}else{const hadLock=r.hadLock;r.hadLock=false;clearInput();if(modeRef.current==='playing'){if(r.net?.started)setPointerHint(!r.net.spectate&&!chatOpenRef.current);else if(hadLock)changeMode('paused');}}};
+   const pause=()=>{voiceGate.current.blurred=true;syncVoice();clearInput();if(demoOnlyRef.current)clearDemoInputs();if(modeRef.current==='playing'){if(runtime.current?.net?.started){setPointerHint(!runtime.current.net.spectate);document.exitPointerLock?.();}else changeMode('paused');}};
+  const lock=()=>{const r=runtime.current;if(!r)return;r.lockPending=false;if(demoOnlyRef.current){if(document.pointerLockElement===canvas.current){r.hadLock=true;canvas.current?.focus({preventScroll:true});setPointerHint(false);}else{r.hadLock=false;clearDemoInputs();}return;}if(document.pointerLockElement===canvas.current){r.hadLock=true;canvas.current?.focus({preventScroll:true});setPointerHint(false);}else{const hadLock=r.hadLock;r.hadLock=false;clearInput();if(modeRef.current==='playing'){if(r.net?.started)setPointerHint(!r.net.spectate&&!chatOpenRef.current);else if(hadLock)changeMode('paused');}}};
   const lockError=()=>{if(runtime.current)runtime.current.lockPending=false;if(modeRef.current==='playing')setPointerHint(true);};
   const wheel=(e:WheelEvent)=>{const r=runtime.current;if(modeRef.current!=='playing'||e.target!==canvas.current||blocksGameplay(chatOpenRef.current,r?.net?.spectate,e.target,document.activeElement)||(!r?.match&&!r?.net?.started)||e.deltaY===0)return;const p=r.net?.started?r.renderState?.actors?.find((a:any)=>a.id===r.net.actorId):r.match.actors[0];if(!p)return;e.preventDefault();const n=cycleWeapon(p.ammo,p.weapon,r.inputWeapon,e.deltaY);if(n>=0)r.inputWeapon=n;};
    const focus=(e:FocusEvent)=>{if(modeRef.current==='playing'&&isEditable(e.target))clearInput();syncVoice();};
    const focusOut=()=>{queueMicrotask(()=>{if(!cancelled)syncVoice();});};
    const windowFocus=()=>{voiceGate.current.blurred=false;syncVoice();};
-   const visibility=()=>{if(document.hidden){clearInput();runtime.current?.voice?.setPushToTalk(false);}syncVoice();};
+   const visibility=()=>{if(document.hidden){clearInput();if(demoOnlyRef.current)clearDemoInputs();runtime.current?.voice?.setPushToTalk(false);}syncVoice();};
    window.addEventListener('focus',windowFocus);window.addEventListener('focusout',focusOut);document.addEventListener('visibilitychange',visibility);
   const pointerLost=()=>{if(runtime.current?.drag&&document.pointerLockElement!==canvas.current)clearInput();};
    window.addEventListener('focusin',focus);window.addEventListener('pointercancel',pointerLost);canvas.current?.addEventListener('pointerleave',pointerLost);
@@ -352,7 +465,31 @@ export default function Home(){
    useEffect(()=>{if(!achievement)return;const timer=setTimeout(()=>setAchievementQueue(q=>q.slice(1)),5200);return()=>clearTimeout(timer);},[achievement]);
    useEffect(()=>{if(mode!=='theater'||!demoPlaying)return;const onKey=(e:KeyboardEvent)=>{const r=runtime.current,d=r?.demo;if(!d)return;if(e.code==='Escape'){e.preventDefault();r.stopDemo?.();return;}if(e.code==='Space'){e.preventDefault();d.paused=!d.paused;d.hudAt=-1;setDemoPaused(d.paused);return;}if(e.code==='KeyR'){d.time=0;d.lastT=0;d.hudAt=-1;r.view.lastEvent=0;return;}if(e.code==='ArrowRight'){d.time=Math.min(d.player.duration,d.time+(e.shiftKey?10:5));d.lastT=d.time;d.hudAt=-1;r.view.lastEvent=0;return;}if(e.code==='ArrowLeft'){d.time=Math.max(0,d.time-(e.shiftKey?10:5));d.lastT=d.time;d.hudAt=-1;r.view.lastEvent=0;return;}if(e.code==='BracketRight'||e.code==='BracketLeft'){d.director.cycleTarget(d.state,e.code==='BracketRight'?1:-1);d.director.cut();return;}if(/^Digit[1-8]$/.test(e.code)){const rig=CAMERA_RIGS[Number(e.code.slice(-1))-1];if(rig){d.director.setRig(rig);d.director.cut();setDemoRig(rig);}}};window.addEventListener('keydown',onKey);return()=>window.removeEventListener('keydown',onKey);},[mode,demoPlaying]);
     useEffect(()=>{if(entered||demoOnly)return;const onKey=(e:KeyboardEvent)=>{if(e.metaKey||e.ctrlKey||e.altKey||isEditable(e.target)||/^F\d{1,2}$/.test(e.key))return;e.preventDefault();e.stopPropagation();enterMenu();};window.addEventListener('keydown',onKey,{capture:true});return()=>window.removeEventListener('keydown',onKey,{capture:true});},[entered,demoOnly]);
-    useEffect(()=>{if(!demoOnly)return;const onKey=(e:KeyboardEvent)=>{if(e.code==='ArrowRight'){e.preventDefault();cycleShowcase(1);}else if(e.code==='ArrowLeft'){e.preventDefault();cycleShowcase(-1);}else if(e.code==='Escape'){e.preventDefault();enterMenu();}else if((e.code==='Enter'||e.code==='Space')&&!(e.target instanceof HTMLElement&&e.target.closest('button,a,input,select'))){e.preventDefault();enterMenu();}};window.addEventListener('keydown',onKey);return()=>window.removeEventListener('keydown',onKey);},[demoOnly]);
+    // Back to Demo keyboard map. Every shortcut here has a visible dock button;
+    // the important change from the old shell is that Space no longer exits
+    // (free-roam flight uses it as vertical thrust) — Escape/Enter/Backspace and
+    // the ENTER ARENA button leave the demo, and the first Escape while pointer
+    // locked only releases the cursor.
+    useEffect(()=>{if(!demoOnly)return;
+     const onKey=(e:KeyboardEvent)=>{
+      if(isEditable(e.target)||isEditable(document.activeElement))return;
+      const session=demoSessionRef.current;
+      if(session.state==='options'){if(e.code==='Escape'){e.preventDefault();closeDemoOptions();}return;}
+      if(e.code==='Escape'){e.preventDefault();if(document.pointerLockElement){clearDemoInputs();document.exitPointerLock?.();return;}enterArenaFromDemo();return;}
+      if(e.code==='Enter'||e.code==='Backspace'){const target=e.target instanceof HTMLElement?e.target:null;if(!target?.closest('button,a,input,select,textarea')){e.preventDefault();enterArenaFromDemo();}return;}
+      if(e.code==='ArrowRight'){e.preventDefault();skipDemoScenario(1);}
+      else if(e.code==='ArrowLeft'){e.preventDefault();skipDemoScenario(-1);}
+      else if(e.code==='KeyH'){e.preventDefault();demoToggleHud();}
+      else if(e.code==='KeyB'){e.preventDefault();demoCycleStyle(1);}
+      else if(e.code==='KeyF'){e.preventDefault();demoToggleFree();}
+      else if(e.code==='KeyR'){e.preventDefault();demoResetView();}
+      else if(e.code==='KeyP'){e.preventDefault();demoTogglePause();}
+      else if(e.code==='BracketRight'){e.preventDefault();demoFollow(1);}
+      else if(e.code==='BracketLeft'){e.preventDefault();demoFollow(-1);}
+      else if(['KeyW','KeyA','KeyS','KeyD'].includes(e.code)||Object.values(runtime.current?.bindings||bindings).includes(e.code)){e.preventDefault();runtime.current?.keys?.add(e.code);}
+     };
+     window.addEventListener('keydown',onKey);return()=>window.removeEventListener('keydown',onKey);
+    },[demoOnly]);
    const closeSetup=()=>{setSetupOpen(false);requestAnimationFrame(()=>document.querySelector<HTMLButtonElement>('[data-setup-trigger]')?.focus());};
   useEffect(()=>{const host=onboarding!==null?onboardingRef:settings?settingsRef:setupOpen||mode==='paused'||mode==='results'?modalRef:singleOpen?singleRef:null;if(!host)return;const frame=requestAnimationFrame(()=>host.current?.querySelector<HTMLElement>('button:not(:disabled), input, [tabindex]:not([tabindex="-1"])')?.focus());return()=>cancelAnimationFrame(frame);},[setupOpen,singleOpen,settings,onboarding,mode]);
   useEffect(()=>{const onKey=(e:KeyboardEvent)=>{const host=onboarding!==null?onboardingRef.current:settings?settingsRef.current:setupOpen||mode==='paused'||mode==='results'?modalRef.current:singleOpen?singleRef.current:null;if((onboarding!==null||settings||setupOpen||singleOpen||mode==='paused'||mode==='results')&&e.key==='Tab'&&host){const focusable=[...host.querySelectorAll<HTMLElement>('button:not(:disabled),input,select,[tabindex]:not([tabindex="-1"])')];if(focusable.length){const next=e.shiftKey?focusable[focusable.length-1]:focusable[0];if(e.shiftKey?document.activeElement===focusable[0]:document.activeElement===focusable[focusable.length-1]){e.preventDefault();next.focus();}}return;}if(e.key!=='Escape')return;if(singleOpen){e.preventDefault();setSingleOpen(false);return;}if(onboarding!==null){e.preventDefault();finishOnboarding();return;}if(setupOpen){e.preventDefault();closeSetup();return;}if(settings){e.preventDefault();setSettings(false);return;}if(mode==='selection'&&enteredRef.current){e.preventDefault();exitToTitle();return;}if(mode==='browse'||mode==='progression'||mode==='changelog'){e.preventDefault();changeMode('selection');return;}if(mode==='theater'&&!demoPlaying){e.preventDefault();changeMode('selection');return;}if(mode==='lobby'){e.preventDefault();changeMode('selection');}};window.addEventListener('keydown',onKey);return()=>window.removeEventListener('keydown',onKey);},[setupOpen,singleOpen,onboarding,settings,mode,demoPlaying]);
@@ -418,6 +555,12 @@ export default function Home(){
     const killNotice=killBanner(hud,player),suddenBanner=suddenDeathBanner(hud),startBanner=matchStartBanner(hud,undefined,hudMode),scoreCue=hud?.scoreCue&&hud.scoreCue.age<1.6?hud.scoreCue:null,damageIndicator=hud?.damageDir&&hud.time-hud.damageDirAt<.8?hud.damageDir:null,awards=matchAwards(hud),radar=radarContacts(hud,player),radarCols=radarPaletteFor(accessibility.palette);
    const {vehicle,prompt:vehiclePrompt}=vehicleHud(player,hud?.vehicles,hud?.flags,hud?.spectate);
    const scoreboard=renderScoreboard(hud);
+   // Demo dock/options view data. The session is plain state mirrored from
+   // game/demo-session.mjs; the broadcast digest carries the actual running
+   // scenario and the subject labels shown on the demo HUD.
+   const demoRunning=broadcast?{modeName:broadcast.modeName,mapName:broadcast.mapName,phase:broadcast.phase,clock:broadcast.clock}:null;
+   const demoActual={mode:runtime.current?.showcase?.mode??null,modeName:broadcast?.modeName??null,mapId:runtime.current?.showcase?.mapId??null,mapName:broadcast?.mapName??null};
+   const demoLabels=demoRunningLabels(demoSession,{actual:demoRunning,subjects:broadcast?.subjects??null});
    const isRace=hud?.config?.mode==='puma-race',isSoccer=hud?.config?.mode==='puma-soccer',armsrace=hud?.config?.mode==='armsrace',race=raceDisplay(hud,player?.id),soccerState=hud?.race,soccerRow=soccerState?.standings?.find((row:any)=>row.actorId===player?.id),soccer=isSoccer?soccerDisplay(hud,player?.id):null,isSingle=hud?.config?.mode==='horde'||hud?.config?.mode==='campaign',single=isSingle?singlePlayerDisplay(hud):null,campaignNext=isSingle?nextMissionId(campaign):null;
    const raceControls=`${moveKeys} throttle / steer / ${keyLabel(bindings.jump)} or ${keyLabel(bindings.crouch)} brake / ${keyLabel(bindings.sprint)} boost / Click or ${keyLabel(bindings.power)} item / ${keyLabel(bindings.interact)} reset`;
    const soccerControls=`${moveKeys} throttle / steer / ${keyLabel(bindings.jump)} or ${keyLabel(bindings.crouch)} brake / ${keyLabel(bindings.sprint)} boost / ${keyLabel(bindings.interact)} reset`;
@@ -446,20 +589,12 @@ export default function Home(){
   return <><main className={`arena-app mode-${mode}${(config.mode==='puma-race'||config.mode==='puma-soccer')?' race-setup':''}${(isRace||isSoccer)?' race-active':''} palette-${accessibility.palette}${accessibility.palette!=='default'?' palette-colorblind':''}${accessibility.highContrast?' ui-contrast':''}`}>
   <canvas ref={canvas} tabIndex={-1} role="img" className="arena-canvas" aria-label="Colosseum Of Competitive Slop 3D game"/>
   {!entered&&!demoOnly&&<><TitleScreen ui={ui}/><div className="title-footer"><span>v6.3 · RESONANCE</span>{githubLink}</div></>}
-  {!entered&&demoOnly&&<div className="demo-controls" role="group" aria-label="Demo controls">
-    <div className="demo-controls__row">
-      <button type="button" className="icon-button" onClick={()=>cycleShowcase(-1)} aria-label="Previous demo mode" title="Previous mode"><ChevronLeft size={18}/></button>
-      <span className="demo-controls__label">{broadcast?.modeName||'DEMO'}<em>{broadcast?.mapName||''}</em></span>
-      <button type="button" className="icon-button" onClick={()=>cycleShowcase(1)} aria-label="Next demo mode" title="Next mode"><ChevronRight size={18}/></button>
-      <button type="button" className="secondary-button demo-controls__enter" onClick={enterMenu}>ENTER ARENA</button>
-    </div>
-    <div className="demo-options" role="group" aria-label="Demo music and environment options">
-      <button type="button" className="demo-option" aria-pressed={demoMusic} onClick={()=>setMusicPref(!demoMusic)}>MUSIC · {demoMusic?'ON':'OFF'}</button>
-      <button type="button" className="demo-option" aria-pressed={demoAmbience} onClick={()=>setAmbiencePref(!demoAmbience)}>AMBIENCE · {demoAmbience?'ON':'OFF'}</button>
-      <button type="button" className="demo-option" aria-pressed={demoAnnouncer} onClick={()=>setAnnouncerPref(!demoAnnouncer)}>ANNOUNCER · {demoAnnouncer?'ON':'OFF'}</button>
-      <button type="button" className="demo-option" aria-pressed={demoWeather!==null} onClick={cycleWeather}>ENVIRONMENT · {demoWeather?demoWeather.toUpperCase():'AUTO'}</button>
-    </div>
-  </div>}
+  {!entered&&demoOnly&&<DemoControls state={demoSession.state} labels={demoLabels} subjects={broadcast?.subjects??[]} cameraStyle={demoSession.cameraStyle} hudVisible={demoSession.hudVisible} pinned={demoPinned(demoSession)} freeSpeed={demoSession.freeSpeed} running={demoRunning} notice={demoSession.notice} error={demoSession.error}
+    onEnterArena={enterArenaFromDemo} onPrevScenario={()=>skipDemoScenario(-1)} onNextScenario={()=>skipDemoScenario(1)}
+    onAuto={()=>demoTransition({type:'auto'})} onFollow={demoFollow} onFree={demoToggleFree} onStyle={demoCycleStyle} onResetView={demoResetView}
+    onToggleHud={demoToggleHud} onOptions={openDemoOptions} onPause={demoTogglePause} onResume={demoTogglePause} onReleasePins={demoReleasePins}
+    onSpeed={demoCycleSpeedPref} onLift={(value:number)=>{demoLiftRef.current=value;}}
+    music={demoMusic} onMusic={setMusicPref} ambience={demoAmbience} onAmbience={setAmbiencePref} announcer={demoAnnouncer} onAnnouncer={setAnnouncerPref} weather={demoWeather} onWeather={cycleWeather}/>}
   {mode==='selection'&&<SelectionScreen ui={ui}/>}
   {mode==='selection'&&<SetupModal ui={ui}/>}
   {mode==='selection'&&<SinglePlayerModal ui={ui}/>}
@@ -472,17 +607,21 @@ export default function Home(){
     {unlock&&<div className="unlock-toast" role="status"><Sparkles size={16}/><div><strong>{unlock.kind==='gear'?'GEAR UNLOCKED':unlock.kind==='attachment'?'WEAPON MOD UNLOCKED':unlock.kind==='finish'?'FINISH UNLOCKED':unlock.kind==='crosshair'?'RETICLE UNLOCKED':'UNLOCKED'}</strong><span>{unlock.name}</span></div>{unlock.gained?<em>+{unlock.gained} XP</em>:null}{unlockQueue.length>1?<em>+{unlockQueue.length-1} MORE</em>:null}<button className="text-button" onClick={()=>setUnlockQueue(q=>q.slice(1))} aria-label="Dismiss unlock">×</button></div>}
     {achievement&&<div className="achievement-toast" role="status" aria-label={`Achievement unlocked: ${achievement.name}`}><Trophy size={16}/><div><strong>ACHIEVEMENT UNLOCKED</strong><span>{achievement.name}</span><small>{achievement.description}</small></div>{achievement.xp?<em>+{achievement.xp} XP</em>:null}{achievementQueue.length>1?<em>+{achievementQueue.length-1} MORE</em>:null}<button className="text-button" onClick={dismissAchievement} aria-label="Dismiss achievement">×</button></div>}
   {mode==='selection'&&<OnboardingModal ui={ui}/>}
-  {showcaseLive&&broadcast&&!demoPlaying&&!error&&!entered&&<DemoBroadcast key={broadcast.revision} data={broadcast} reduced={reducedMotion()||display.reducedMotion===true}/>}
+  {showcaseLive&&broadcast&&!demoPlaying&&!error&&!entered&&<DemoBroadcast key={broadcast.revision} data={broadcast} reduced={reducedMotion()||display.reducedMotion===true} visible={demoSession.hudVisible} subjects={broadcast.subjects} activeSubjectId={demoSession.subjectId}/>}
    {error&&<div className="error-banner" role="alert">{error}<button className="secondary-button" onClick={()=>{setError('');if(runtime.current)start();else window.location.reload();}}>RETRY ARENA</button></div>}
    {updateReady&&<div className="update-banner" role="status"><span>A new version of the arena is available.</span><button type="button" className="secondary-button update-reload" onClick={()=>window.location.reload()}>RELOAD</button></div>}
   {(mode==='playing'||mode==='paused')&&player&&<>
    {isSoccer?<SoccerHud soccer={soccer} state={soccerState} actorId={player?.id} touchControls={touchControls} controls={soccerControls}/>:isRace?<RaceHud race={race} touchControls={touchControls} raceControls={raceControls}/>:<PlayingHud ui={ui}/>}
    {hud.net&&<GameChat hud={hud} chatOpen={chatOpen} chatLog={chatLog} chatInputRef={chatInputRef} chatDraft={chatDraft} sendChat={sendChat} setChatOpen={setChatOpen} setChatDraft={setChatDraft}/>}
    {mode==='playing'&&<TouchControls runtime={runtime} mode={hud?.config?.mode} visible={touchControls&&!hud?.spectate} onLook={touchLook} onSwap={touchSwap} onPause={touchPause} onFullscreen={toggleFullscreen} fullscreen={fullscreen}/>}
+   {!entered&&demoOnly&&demoSession.state==='free'&&touchControls&&<TouchControls runtime={runtime} visible onLook={touchLook} onSwap={()=>{}} onPause={demoTogglePause} onFullscreen={toggleFullscreen} fullscreen={fullscreen}/>}
    {scores&&mode==='playing'&&<div className="scores-overlay"><p className="eyebrow">LIVE STANDINGS</p>{scoreboard}</div>}
   </>}
   {mode==='paused'&&<PauseModal ui={ui}/>}
   {mode==='results'&&hud&&<ResultsModal ui={ui}/>}
   <SettingsDialog ui={ui}/>
+  <DemoOptions open={demoOnly&&demoSession.state==='options'} draft={demoSession.draft} draftSelection={demoSession.draftSelection} actual={demoActual} legacy={legacyMaps} dirty={demoOptionsDirty(demoSession)} error={demoSession.error}
+    onClose={closeDemoOptions} onDraft={demoSetDraft} onSelection={demoSetSelection} onResetDefaults={demoResetDraft} onApply={()=>demoApplyOptions(false)} onStart={()=>demoApplyOptions(true)}
+    music={demoMusic} onMusic={setMusicPref} ambience={demoAmbience} onAmbience={setAmbiencePref} announcer={demoAnnouncer} onAnnouncer={setAnnouncerPref} weather={demoWeather} onWeather={cycleWeather}/>
   </main></>;
 }

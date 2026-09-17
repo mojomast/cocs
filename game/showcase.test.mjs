@@ -149,3 +149,43 @@ test('random showcase picks avoid the excluded scenario and stay playable', () =
  }
  assert.ok(seen.size >= 3, 'the picker keeps producing different scenarios');
 });
+
+// The rotation owner (app/page.tsx) can hand the factory an explicit spec from
+// game/demo-playlist.mjs `pickNext`, or install a `selectScenario` picker. Both
+// are additive: the index-based reel remains the default for the pinned tests
+// above, and a failed build must never drop the running showcase.
+test('explicit scenario specs and selectScenario drive the factory additively', () => {
+ const {r,deps}=showcaseDeps();
+ let selected=0;
+ const buildShowcase=buildShowcaseFactory({...deps,selectScenario:rng=>{
+  selected+=1;
+  const spec=specFor(SHOWCASES[3],rng,{});
+  return {...spec,scenarioSeconds:123};
+ }});
+ assert.equal(buildShowcase(),true);
+ assert.equal(selected,1);
+ assert.equal(r.showcase.modeId,SHOWCASES[3].id);
+ assert.equal(r.showcase.seconds,123);
+ assert.equal(r.showcase.mapId,r.showcaseSpec.mapId);
+ const explicit={...specFor(SHOWCASES[5],()=>.5,{}),mapId:'warfront',scenarioSeconds:45};
+ assert.equal(buildShowcase(explicit),true);
+ assert.equal(r.showcase.modeId,SHOWCASES[5].id);
+ assert.equal(r.showcase.seconds,45);
+ assert.equal(r.showcase.match.arena.id,'warfront');
+});
+
+test('a failed build keeps the running showcase and reports the error', () => {
+ const {r,deps}=showcaseDeps();
+ let reported=null,fail=false;
+ class FlakyMatch extends Match{constructor(...args){if(fail)throw new Error('no arena');super(...args);}}
+ const buildShowcase=buildShowcaseFactory({...deps,Match:FlakyMatch,onError:error=>{reported=error;}});
+ assert.equal(buildShowcase(),true);
+ const running=r.showcase;
+ fail=true;
+ assert.equal(buildShowcase(),false);
+ assert.equal(r.showcase,running,'the running demo survives a failed build');
+ assert.ok(reported instanceof Error);
+ assert.match(String(reported.message),/no arena/);
+ fail=false;
+ assert.equal(buildShowcase(),true,'the factory recovers on the next build');
+});

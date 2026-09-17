@@ -3,17 +3,28 @@
 // vehicle modes (match.race). The build is atomic: a scenario that fails to
 // construct leaves the current reel intact instead of dropping the title screen
 // back to the static operator preview.
-import {shuffleShowcaseReel as defaultShuffleReel} from './showcase.mjs';
+//
+// The historical index-based pick (`r.showcaseReel` + `pickShowcase`) is still
+// the default so the pinned showcase tests keep working. Callers that own a
+// rotation (app/page.tsx via game/demo-session.mjs) can pass `selectScenario`
+// or hand an explicit spec to the returned builder; both paths produce the same
+// match-ready spec shape.
+import {shuffleShowcaseReel as defaultShuffleReel,SHOWCASE_MAX_SECONDS} from './showcase.mjs';
 
-export function buildShowcase({r,view,showcaseOk,makeRng,pickShowcase,normalizeConfig,DEFAULT_CONFIG,Match,seatShowcaseVehicles,RULES,CinematicDirector,reducedMotion,setShowcaseLive,shuffleShowcaseReel=defaultShuffleReel}){
+export function buildShowcase({r,view,showcaseOk,makeRng,pickShowcase,normalizeConfig,DEFAULT_CONFIG,Match,seatShowcaseVehicles,RULES,CinematicDirector,reducedMotion,setShowcaseLive,shuffleShowcaseReel=defaultShuffleReel,selectScenario=/** @type {any} */(null),onError=/** @type {any} */(null)}){
  const clear=()=>{r.showcase=null;r.showcaseMatchedId=null;r.showcaseReel=null;view.setShowcase(null);view.setCinema(false);view.setDirector(null);setShowcaseLive(false);};
- return ()=>{
+ const fail=error=>{try{onError?.(error);}catch{}return false;};
+ return (overrideSpec=null)=>{
   if(!showcaseOk()){clear();return false;}
   try{
    const rng=makeRng();
-   if(!Array.isArray(r.showcaseReel)||!r.showcaseReel.length)r.showcaseReel=shuffleShowcaseReel(rng);
-   const index=r.showcaseReel.shift();
-   const spec=pickShowcase(index,rng,{legacy:r.legacyArenas===true});
+   let spec=overrideSpec&&typeof overrideSpec==='object'?overrideSpec:null;
+   if(!spec&&typeof selectScenario==='function')spec=selectScenario(rng);
+   if(!spec){
+    if(!Array.isArray(r.showcaseReel)||!r.showcaseReel.length)r.showcaseReel=shuffleShowcaseReel(rng);
+    const index=r.showcaseReel.shift();
+    spec=pickShowcase(index,rng,{legacy:r.legacyArenas===true});
+   }
    const cfg=normalizeConfig({...DEFAULT_CONFIG,mode:spec.mode,botCount:spec.botCount,difficulty:spec.difficulty,timeLimit:spec.timeLimit,fragLimit:spec.fragLimit});
    const m=new Match('chatgpt','openclaw',rng,spec.mapId,cfg);
    for(const a of m.actors)if(!a.bot)a.bot={route:[],think:0,target:-1,memory:0,reaction:0,stuck:0,last:{x:0,y:0,z:0},state:'roam',patrol:0,flank:null,flankDone:false,recover:0,suppressed:0,threat:-1,standoff:null,strafeReverse:-99};
@@ -30,7 +41,9 @@ export function buildShowcase({r,view,showcaseOk,makeRng,pickShowcase,normalizeC
    view.setDirector(director);
    view.setCinema(true);
    view.setShowcase(m.snapshot());
-   r.showcase={match:m,director,acc:0,time:0,mapId:spec.mapId,mode:spec.mode,modeId:spec.id};
+   const seconds=Number.isFinite(spec.scenarioSeconds)&&spec.scenarioSeconds>0?spec.scenarioSeconds:SHOWCASE_MAX_SECONDS;
+   r.showcase={match:m,director,acc:0,time:0,mapId:spec.mapId,mode:spec.mode,modeId:spec.id,seconds,source:spec.source??null,category:spec.category??null};
+   r.showcaseSpec={...spec};
    r.showcaseMatchedId=null;
    r.showcaseIndex=(r.showcaseIndex||0)+1;
    setShowcaseLive(true);
@@ -38,7 +51,7 @@ export function buildShowcase({r,view,showcaseOk,makeRng,pickShowcase,normalizeC
   }catch(error){
    console.error('showcase build failed',error);
    if(!r.showcase)clear();
-   return false;
+   return fail(error);
   }
  };
 }
