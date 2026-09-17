@@ -1,4 +1,5 @@
 import * as T from 'three';
+import {mothSurfaceOverride,mothNormalOverride,mothMaterialLut,mothSky,mothEffect} from './moth-assets.mjs';
 
 // Deterministic value-noise / FBM surface maps. Everything is procedural and
 // cached per build; callers clearSurfaceTextures() before rebuilding a world so
@@ -568,6 +569,9 @@ export const MATERIAL_PRESETS=Object.freeze({
  rubber:Object.freeze({metalness:.05,roughness:.92}),
  stone:Object.freeze({metalness:.02,roughness:.95}),
  energy:Object.freeze({metalness:.2,roughness:.3,emissiveIntensity:1.6}),
+ // Backed by the Moth entanglement-shader LUTs (mothMaterialLutTexture): a
+ // sharp, high-metalness surface for the quantum arena's iridescent panels.
+ entanglement:Object.freeze({metalness:.62,roughness:.12,emissiveIntensity:.7}),
 });
 export function materialPreset(name){return MATERIAL_PRESETS[name]||MATERIAL_PRESETS.paintedArmor;}
 
@@ -653,12 +657,86 @@ export function surfaceTextures(kind='concrete',{size=96,seed=1,repeat=[1,1],nor
   map.userData.surfaceKind=canonical;
   return map;
  };
- const result={map:make(0)};
+ const result={map:bakedAlbedoTexture(canonical,repeat)||make(0)};
  if(roughness)result.roughnessMap=make(1);
- if(normal)result.normalMap=make(2);
+ if(normal)result.normalMap=bakedNormalTexture(canonical,repeat)||make(2);
  if(bump)result.bumpMap=make(2);
  cache.set(key,result);
  return result;
+}
+
+// A baked Moth tile, uploaded as a DataTexture. Returns null when no override
+// is configured, so the procedural generator stays the default.
+function bakedAlbedoTexture(canonical,repeat){
+ const baked=mothSurfaceOverride(canonical);
+ if(!baked)return null;
+ const texture=new T.DataTexture(baked.data,baked.width,baked.height,T.RGBAFormat,T.UnsignedByteType);
+ texture.wrapS=texture.wrapT=T.RepeatWrapping;
+ texture.repeat.set(repeat[0],repeat[1]);
+ texture.colorSpace=T.SRGBColorSpace;
+ texture.needsUpdate=true;
+ texture.userData.surfaceKind=canonical;
+ texture.userData.source='moth';
+ return texture;
+}
+
+// A baked tangent-space normal map (derived offline from a quantum-blurred
+// height grid), or null for the procedural normal.
+function bakedNormalTexture(canonical,repeat){
+ const baked=mothNormalOverride(canonical);
+ if(!baked)return null;
+ const texture=new T.DataTexture(baked.data,baked.width,baked.height,T.RGBAFormat,T.UnsignedByteType);
+ texture.wrapS=texture.wrapT=T.RepeatWrapping;
+ texture.repeat.set(repeat[0],repeat[1]);
+ texture.colorSpace=T.NoColorSpace;
+ texture.needsUpdate=true;
+ texture.userData.surfaceKind=canonical;
+ texture.userData.source='moth';
+ return texture;
+}
+
+// An equirectangular sky/nebula baked through a Moth image engine.
+export function mothSkyTexture(name,{repeat=[1,1]}={}){
+ const sky=mothSky(name);
+ if(!sky)return null;
+ const texture=new T.DataTexture(sky.data,sky.width,sky.height,T.RGBAFormat,T.UnsignedByteType);
+ texture.wrapS=repeat[0]>1?T.RepeatWrapping:T.ClampToEdgeWrapping;
+ texture.wrapT=T.ClampToEdgeWrapping;
+ texture.repeat.set(repeat[0],repeat[1]);
+ texture.colorSpace=T.SRGBColorSpace;
+ texture.needsUpdate=true;
+ texture.userData.mothSky=name;
+ if(sky.equirect)texture.mapping=T.EquirectangularReflectionMapping;
+ return {texture,equirect:Boolean(sky.equirect),width:sky.width,height:sky.height};
+}
+
+// An animated effect sequence baked from a series of quantum-blurred grids.
+export function mothEffectTextures(name){
+ const effect=mothEffect(name);
+ if(!effect)return null;
+ const textures=effect.frames.map((frame,index)=>{
+  const texture=new T.DataTexture(frame.data,frame.width,frame.height,T.RGBAFormat,T.UnsignedByteType);
+  texture.wrapS=texture.wrapT=T.ClampToEdgeWrapping;
+  texture.colorSpace=T.SRGBColorSpace;
+  texture.needsUpdate=true;
+  texture.userData.mothEffect=`${name}:${index}`;
+  return texture;
+ });
+ return {name,fps:effect.fps,textures};
+}
+
+// The reflectance LUT from the entanglement shader engine, as a DataTexture for
+// a custom iridescent material. Returns null unless the material was baked.
+export function mothMaterialLutTexture(name,{repeat=[1,1]}={}){
+ const lut=mothMaterialLut(name);
+ if(!lut)return null;
+ const texture=new T.DataTexture(lut.r,lut.size,lut.size,T.RGBFormat,T.UnsignedByteType);
+ texture.wrapS=texture.wrapT=T.RepeatWrapping;
+ texture.repeat.set(repeat[0],repeat[1]);
+ texture.colorSpace=T.NoColorSpace;
+ texture.needsUpdate=true;
+ texture.userData.mothLut=name;
+ return texture;
 }
 
 if (typeof globalThis !== 'undefined') {

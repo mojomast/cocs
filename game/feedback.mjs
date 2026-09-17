@@ -1,7 +1,7 @@
 import * as T from 'three';
 import {WEAPONS} from './data.mjs';
 import {precipParticleAdds} from './environment.mjs';
-import {MusicEngine} from './music.mjs';
+import {MusicEngine,HALO_THEME} from './music.mjs';
 
 // Presentation only: these offsets must never be applied to the aiming camera.
 const KICKS=WEAPONS.map(w=>w.feel?.kick||[.04,.04,16]);
@@ -241,7 +241,7 @@ const BED_MOODS=Object.freeze({
  storm:Object.freeze({filter:420,tone:48,gain:.024,sub:.005}),
 });
 export class SynthAudio{
- constructor({announcer=false}={}){this.ctx=null;this.muted=false;this.voices=new Set();this.noiseBuffer=null;this.master=null;this.lastDamage=null;this.lastReport=null;this.lastHit=-Infinity;this.footPhase=0;this.wasGrounded=undefined;this.lastVy=0;this.engine=null;this.bed=null;this.bedMood='default';this.ambientBed=true;this.stepVariant=0;this.landVariant=0;this.reloadVariant=0;this.intensity=0;this.bedScale=.75;this.musicEnabled=true;this.announcer=announcer===true;this.announced=new Set();this.lastCue=null;this.mode='default';this.theme=MODE_THEMES.default;this.lastSting=null;this.heartbeatTimer=0;
+ constructor({announcer=false}={}){this.ctx=null;this.muted=false;this.voices=new Set();this.noiseBuffer=null;this.master=null;this.lastDamage=null;this.lastReport=null;this.lastHit=-Infinity;this.footPhase=0;this.wasGrounded=undefined;this.lastVy=0;this.engine=null;this.bed=null;this.bedMood='default';this.ambientBed=true;this.stepVariant=0;this.landVariant=0;this.reloadVariant=0;this.intensity=0;this.bedScale=.75;this.musicEnabled=true;this.announcer=announcer===true;this.announced=new Set();this.lastCue=null;this.mode='default';this.theme=MODE_THEMES.default;this.soundtrack='default';this.reverbUrl=null;this.reverbWet=0.42;this.reverbLoaded=false;this.lastSting=null;this.heartbeatTimer=0;
   // Gain buses. `muteGain` sits between the master and the destination so a
   // master mute silences every branch immediately; music/effects/ambience each
   // have their own bus for independent volume control. Voice chat lives in
@@ -267,13 +267,18 @@ export class SynthAudio{
  // require this to happen inside a user gesture; callers trigger it from clicks.
  unlock(){
   if(!this.ctx)return Promise.resolve(false);
-  if(this.ctx.state==='running'){this.status='running';return Promise.resolve(true);}
+  // Once the context is actually running, load the convolution reverb exactly
+  // once (fetch + decodeAudioData are async and must not block playback).
+  const settle=(ok)=>{if(ok&&this.reverbUrl&&!this.reverbLoaded&&this.musicEngine&&!this.musicEngine.reverb){this.reverbLoaded=true;this.loadMusicReverb(this.reverbUrl,{wet:this.reverbWet});}return ok;};
+  if(this.ctx.state==='running'){this.status='running';return Promise.resolve(settle(true));}
   const res=this.ctx.resume?.();
   if(res&&typeof res.then==='function'){
-   return res.then(()=>{this.status=this.ctx.state==='running'?'running':'suspended';return this.status==='running';}).catch(()=>{this.status='blocked';return false;});
+   return res.then(()=>{this.status=this.ctx.state==='running'?'running':'suspended';return settle(this.status==='running');}).catch(()=>{this.status='blocked';return false;});
   }
-  this.status=this.ctx.state||'suspended';return Promise.resolve(this.status==='running');
+  this.status=this.ctx.state||'suspended';return Promise.resolve(settle(this.status==='running'));
  }
+ // Register a same-origin impulse response to attach on the next unlock.
+ setReverbUrl(url,wet=0.42){this.reverbUrl=url||null;this.reverbWet=wet;this.reverbLoaded=false;if(this.ctx&&this.ctx.state==='running')this.unlock();return Boolean(url);}
  _ensureBuses(){
   if(!this.ctx||this.master)return;
   const ctx=this.ctx;
@@ -284,7 +289,7 @@ export class SynthAudio{
   this.ambienceBus=ctx.createGain();this.ambienceBus.gain.value=this.volumes.ambience;this.ambienceBus.connect(this.master);
   try{this.musicEngine=new MusicEngine({ctx,destination:this.master,theme:this.theme,noiseBuffer:this.noiseBuffer,seed:(Date.now()&0xffff)||1});}
   catch{this.musicEngine=null;}
-  if(this.musicEngine){this.musicEngine.setEnabled(this.musicEnabled);this.musicEngine.setMuted(this.muted);this.musicEngine.setScene(this.scene);}
+  if(this.musicEngine){this.musicEngine.setEnabled(this.musicEnabled);this.musicEngine.setMuted(this.muted);this.musicEngine.setScene(this.scene);this.musicEngine.setSoundtrack(this.soundtrack||'default');}
   this.status=ctx.state||'suspended';
  }
  // Immediate master mute. The mute gain is set synchronously (not ramped) so a
@@ -316,6 +321,25 @@ export class SynthAudio{
  // get exploration/combat layered by intensity.
  setScene(scene){this.scene=scene==='menu'?'menu':'game';this.musicEngine?.setScene(this.scene==='menu'?'menu':(this.intensity>=.34?'combat':'explore'));return this.scene;}
  previewMusic(scene='menu',seconds=8){this._ensureBuses();const r=this.musicEngine?.preview(scene,seconds);this.unlock();return r??null;}
+ // Select an arrangement pack (e.g. 'halo'); delegates to the music engine.
+ setSoundtrack(name='default'){this.soundtrack=(name==='halo')?'halo':'default';this._ensureBuses();this.theme=this.soundtrack==='halo'?HALO_THEME:(MODE_THEMES[this.mode]||MODE_THEMES.default);return this.musicEngine?.setSoundtrack(this.soundtrack)??this.soundtrack;}
+ // Attach a convolution impulse response (an AudioBuffer) to the music reverb.
+ setMusicReverb(buffer,opts){return this.musicEngine?.setReverb(buffer,opts)??false;}
+ // Fetch and decode a same-origin impulse response WAV, then attach it. Safe to
+ // call repeatedly and safe when the context is not yet running.
+ async loadMusicReverb(url,opts){
+  if(!url)return false;
+  try{
+   this._ensureBuses();
+   if(!this.ctx||typeof this.ctx.decodeAudioData!=='function')return false;
+   const response=await fetch(url,{cache:'force-cache'});
+   if(!response.ok)return false;
+   const bytes=await response.arrayBuffer();
+   const buffer=await new Promise((resolve,reject)=>{const p=this.ctx.decodeAudioData(bytes,resolve,reject);if(p&&typeof p.then==='function')p.then(resolve,reject);});
+   if(!this.musicEngine)return false;
+   return this.musicEngine.setReverb(buffer,opts);
+  }catch{return false;}
+ }
  audioStatus(){return {state:this.ctx?(this.ctx.state||'suspended'):'unavailable',status:this.status,enabled:this.musicEnabled,muted:this.muted,scene:this.scene,intensity:this.intensity,voices:this.voices.size,notes:this.musicEngine?.notesScheduled??0,music:this.musicEngine?.status?.()??'off'};}
  // Low, continuous ambience bed: filtered noise hiss plus a sub tone, faded in
  // through the master gain. Owned by the audio instance and torn down in dispose.
@@ -363,8 +387,11 @@ export class SynthAudio{
  // shared theme, so switching modes retunes the music without restarting nodes.
  setModeTheme(mode){
   const key=typeof mode==='string'&&MODE_THEMES[mode]?mode:'default';
-  this.mode=key;this.theme=MODE_THEMES[key];
-  this.musicEngine?.setTheme(this.theme);
+  this.mode=key;
+  // The Halo soundtrack owns a single modal tonal centre; mode themes still
+  // apply to the baseline soundtrack and to outcome stings.
+  this.theme=(this.soundtrack==='halo')?HALO_THEME:MODE_THEMES[key];
+  if(this.soundtrack==='halo')this.musicEngine?.setSoundtrack('halo');else this.musicEngine?.setTheme(this.theme);
   return key;
  }
  // Advance the soundtrack scheduler. Called once per rendered frame from the

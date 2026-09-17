@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {surfaceTextures,clearSurfaceTextures,wetSheenTexture,canonicalTextureKind,TEXTURE_KINDS} from './textures.mjs';
+import {surfaceTextures,clearSurfaceTextures,wetSheenTexture,canonicalTextureKind,TEXTURE_KINDS,MATERIAL_PRESETS,materialPreset,mothMaterialLutTexture,mothSkyTexture,mothEffectTextures} from './textures.mjs';
+import {configureMothAssets,resetMothAssets} from './moth-assets.mjs';
 
 const withDocument = t => {
   const previous = Object.getOwnPropertyDescriptor(globalThis, 'document');
@@ -130,6 +131,76 @@ test('surfaceTextures tags canonical surfaceKind on aliases and supports bumpMap
   result.bumpMap.addEventListener('dispose', () => disposed++);
   clearSurfaceTextures();
   assert.equal(disposed, 1, 'bumpMap is disposed on clearSurfaceTextures');
+});
+
+test('the entanglement preset is a distinct, frozen surface and looks up by name', () => {
+  assert.ok(Object.isFrozen(MATERIAL_PRESETS));
+  const { entanglement } = MATERIAL_PRESETS;
+  assert.ok(entanglement.metalness > 0.4 && entanglement.roughness < 0.3, 'entanglement is a sharp metallic surface');
+  assert.equal(materialPreset('entanglement'), entanglement);
+});
+
+test('configured Moth assets replace the albedo map while procedural maps remain', t => {
+  const b64 = (bytes) => Buffer.from(bytes).toString('base64');
+  configureMothAssets({
+    version: 1,
+    textures: { concrete: { width: 2, height: 2, data: b64(Uint8Array.from([10, 20, 30, 255, 40, 50, 60, 255, 70, 80, 90, 255, 100, 110, 120, 255])) } },
+    normals: { concrete: { width: 2, height: 2, data: b64(Uint8Array.from([128, 128, 255, 255, 128, 128, 255, 255, 128, 128, 255, 255, 128, 128, 255, 255])) } },
+    materials: { entanglement: { size: 2, r: b64(Uint8Array.from([1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12])), t: b64(Uint8Array.from([9, 8, 7, 6, 5, 4, 3, 2, 1, 2, 3, 4])) } },
+    sky: { nebula: { width: 2, height: 2, equirect: true, data: b64(Uint8Array.from([5, 10, 20, 255, 6, 11, 21, 255, 7, 12, 22, 255, 8, 13, 23, 255])) } },
+    effects: { rift: { fps: 8, frames: [{ width: 2, height: 2, data: b64(Uint8Array.from([1, 2, 3, 255, 4, 5, 6, 255, 7, 8, 9, 255, 10, 11, 12, 255])) }] } },
+    levels: {}, seeds: {}, motifs: {},
+  });
+  try {
+    withDocument(t);
+    const maps = surfaceTextures('concrete', { seed: 1, size: 32, repeat: [2, 3] });
+    assert.ok(maps.map, 'albedo is produced');
+    assert.equal(maps.map.isDataTexture, true, 'albedo comes from the baked Moth tile');
+    assert.equal(maps.map.userData.source, 'moth');
+    assert.equal(maps.map.image.width, 2);
+    assert.equal(maps.map.image.height, 2);
+    assert.deepEqual([...maps.map.image.data.slice(0, 4)], [10, 20, 30, 255]);
+    assert.equal(maps.map.repeat.x, 2);
+    assert.equal(maps.map.repeat.y, 3);
+    assert.ok(maps.roughnessMap && maps.roughnessMap.isDataTexture !== true, 'roughness stays procedural');
+    assert.equal(maps.normalMap.isDataTexture, true, 'normal comes from the baked Moth map');
+    assert.equal(maps.normalMap.userData.source, 'moth');
+    assert.deepEqual([...maps.normalMap.image.data.slice(0, 4)], [128, 128, 255, 255]);
+    clearSurfaceTextures();
+
+    const lut = mothMaterialLutTexture('entanglement', { repeat: [1, 1] });
+    assert.ok(lut, 'the baked LUT is exposed as a texture');
+    assert.equal(lut.isDataTexture, true);
+    assert.equal(lut.image.width, 2);
+    assert.equal(lut.userData.mothLut, 'entanglement');
+    assert.deepEqual([...lut.image.data.slice(0, 3)], [1, 2, 3]);
+    lut.dispose();
+    assert.equal(mothMaterialLutTexture('missing'), null);
+
+    const sky = mothSkyTexture('nebula');
+    assert.ok(sky && sky.texture.isDataTexture, 'the baked sky is a DataTexture');
+    assert.equal(sky.equirect, true);
+    assert.equal(typeof sky.texture.mapping, 'number');
+    assert.deepEqual([...sky.texture.image.data.slice(0, 3)], [5, 10, 20]);
+    assert.equal(mothSkyTexture('missing'), null);
+
+    const effect = mothEffectTextures('rift');
+    assert.equal(effect.textures.length, 1);
+    assert.equal(effect.fps, 8);
+    assert.equal(effect.textures[0].isDataTexture, true);
+    assert.equal(mothEffectTextures('missing'), null);
+  } finally {
+    clearSurfaceTextures();
+    resetMothAssets();
+  }
+});
+
+test('without a configured registry surfaceTextures keeps the procedural albedo', t => {
+  resetMothAssets();
+  withDocument(t);
+  const maps = surfaceTextures('concrete', { seed: 1, size: 32 });
+  assert.equal(maps.map.isDataTexture, undefined, 'no baked override leaks into the default path');
+  clearSurfaceTextures();
 });
 
 

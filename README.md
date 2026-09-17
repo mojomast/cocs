@@ -97,9 +97,17 @@ on your machine, and every asset is procedural.
 - **Cinematic director**: seven camera rigs that auto-cut to kills, explosions and
   captures, used in Theater playback and the title showcase.
 - **Per-mode music and stingers**: synthesized themes, ambient beds and
-  victory/defeat cues that follow the mode and mood.
+  victory/defeat cues that follow the mode and mood, plus a slow modal
+  **Halo-flavoured soundtrack** with a choir pad, taiko drums and a convolution
+  reverb baked from Moth's retrocausal-echo engine.
 - **A living menu**: a shuffled reel of real bot matches behind the UI, with a
   broadcast lower-third reporting the live mode, map, score and objective.
+- **Optional quantum-baked assets**: offline [Moth Quantum](docs/MOTH.md) engines
+  bake albedo textures, **normal maps** (from quantum-blurred height fields),
+  iridescent material LUTs, an equirect sky, animated effect frames, a
+  convolution **reverb impulse** and MIDI motifs into `game/moth-baked.mjs`; the
+  game stays procedural and offline until a bake has been run. Browse the results
+  at the **[/moth showcase](docs/MOTH.md#showcase-moth)**.
 
 ### Progression and meta
 - **XP, ranks and prestige** across a deterministic curve, with two prestiges
@@ -346,7 +354,8 @@ Racing uses **W/S** throttle/reverse, **A/D** steer, **Space/Ctrl** handbrake,
 app/        React UI: the runtime owner (app/page.tsx), screens, design system
 game/       The pure 60 Hz engine plus rendering, audio, netcode and content
 server/     Authoritative multiplayer: rooms, matchmaking, persistence
-scripts/    Build, version, deployment verification
+scripts/    Build, version, deployment verification, Moth Quantum bake
+assets/moth/ Moth bake manifest and deterministic source art
 tests/      SSR, UI-contract and deployment guards
 deploy/     nginx vhost and systemd units
 docs/       Architecture, systems, testing, changelog, verification
@@ -417,6 +426,7 @@ assets. Full procedure and verification: [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md
 | [docs/TESTING.md](docs/TESTING.md) | Test layers, contracts and limitations. |
 | [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md) | Hosting and deploy verification. |
 | [docs/CHANGELOG.md](docs/CHANGELOG.md) | The complete release history. |
+| [docs/MOTH.md](docs/MOTH.md) | Baking and loading Moth Quantum assets. |
 | [docs/VERIFICATION.md](docs/VERIFICATION.md) | Dated evidence and known gaps. |
 | [docs/spec/](docs/spec/) | Historical specification and development plan. |
 

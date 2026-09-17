@@ -1020,6 +1020,31 @@ respawns, teleports, actor replacement, vehicle transitions and replay seeking.
 It never mutates simulation state and is not applied to the multiplayer
 interpolation path.
 
+### 12.6 Moth Quantum assets (`scripts/moth-bake.mjs`, `game/moth-assets.mjs`, `game/moth-maps.mjs`)
+
+Optional presentation assets can be baked offline from Moth Quantum engines and
+committed as data. `scripts/moth-bake.mjs` runs the jobs in
+`assets/moth/manifest.json` against the Atlas API (submit → poll → download),
+decodes the results with dependency-free PNG/ZIP/Radiance-HDR readers, and emits
+`game/moth-baked.mjs`. Job ids are recorded back so re-bakes reuse the paid
+result, and the `MOTH_API_KEY` secret is read from the environment only.
+
+`game/moth-assets.mjs` is the pure runtime reader. It is inert until
+`configureMothAssets()` runs (wired once in `app/page.tsx`), so Node tests and a
+fresh checkout always fall back to the procedural generators. `game/textures.mjs`
+uses baked tiles as albedo and baked normal maps (derived offline from
+quantum-blurred height fields) while keeping procedural roughness, and exposes
+the entanglement reflectance LUT through the `entanglement` material preset and
+`mothMaterialLutTexture`. `game/moth-material.mjs` builds a Fresnel-sampled
+iridescent `MeshStandardMaterial` from a LUT. `game/music.mjs` can play a
+Halo-flavoured soundtrack pack (choir pad, drone, taiko, bells) with a
+convolution reverb decoded from the baked `retrocausal-echo` impulse response.
+`game/moth-maps.mjs` maps a `labyrinth-v1` graph onto a room grid — nodes to
+rooms, quantum couplings to doorways, radiating qubits to objectives —
+guaranteeing a walk-connected labyrinth on the 6 m navigation grid. The baked
+assets are browsable at the `/moth` showcase route. See [docs/MOTH.md](MOTH.md)
+for the full pipeline.
+
 ---
 
 ## 13. Audio and presentation

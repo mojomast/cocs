@@ -113,3 +113,35 @@ test('offline render produces non-silent, non-clipping output when Web Audio is 
  assert.ok(peak<=1.5,'the soundtrack does not grossly clip');
  e.dispose();
 });
+
+test('the halo soundtrack pack is original modal material and swaps cleanly',()=>{
+ const {e,ctx}=engine();
+ assert.equal(e.arrangements,ARRANGEMENTS,'the baseline pack is the default');
+ assert.equal(e.setSoundtrack('halo'),'halo');
+ assert.deepEqual([...e.theme.scale],[0,2,3,5,7,8,10],'D natural minor');
+ assert.ok(e.arrangements.menu.choir&&e.arrangements.menu.drone,'halo carries a choir pad and drone');
+ assert.ok(e.arrangements.menu.taiko.length>0,'halo has tribal percussion');
+ assert.ok(e.arrangements.menu.bpm<=72&&e.arrangements.combat.bpm<100,'halo is slow and ritualistic');
+ e.setScene('menu');
+ let scheduled=0;
+ for(let i=0;i<80;i++){ctx.currentTime+=.05;scheduled+=e.tick();}
+ assert.ok(scheduled>0&&e.notesScheduled>0,'the halo pack schedules continuously');
+ assert.equal(e.setSoundtrack('bogus'),'default','an unknown pack falls back');
+ assert.equal(e.arrangements,ARRANGEMENTS);
+});
+
+test('setReverb is a safe no-op without a convolver and attaches when available',()=>{
+ const plain=engine();
+ assert.equal(plain.e.setReverb({}),false,'no convolver means no reverb');
+ const ctx=mockContext();
+ ctx.createConvolver=()=>({connect(){this.connected=true;},disconnect(){this.disconnected=true;},buffer:null});
+ const e=new MusicEngine({ctx,destination:ctx.destination,theme});
+ e.setSoundtrack('halo');e.setScene('menu');
+ assert.equal(e.setReverb({}),true);
+ assert.ok(e.reverb,'the convolver is retained');
+ for(let i=0;i<40;i++){ctx.currentTime+=.05;e.tick();}
+ assert.ok(e.notesScheduled>0,'the halo pack schedules with reverb attached');
+ const convolver=e.reverb;
+ e.dispose();
+ assert.equal(convolver.disconnected,true,'the convolver is released on dispose');
+});
