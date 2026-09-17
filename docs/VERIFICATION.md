@@ -57,14 +57,30 @@ digest stays continuous.
   the demo's new `camera-modes.mjs` import. The patch context now includes that
   import; the assertion and the exercised renderer path are unchanged. Full
   reasoning in `docs/PHASE2-FIXLIST.md` F12.
+- **Live deploy smoke (production `arena.ussyco.de`, after
+  `npm run deploy -- --with-game-server` on `75b2103`):** bounded headless
+  Chromium/SwiftShader run — footer `v6.5 · MOMENTUM`; the attract reel held one
+  planned shot (shot start constant across six samples over ~7 s while match
+  time advanced; subject `Claude`, planner reason `kill ChatGPT`, camera owner
+  `auto`); the Back to Demo
+  dock rendered Auto Director / Follow Subject / Free Roam / HUD / pause /
+  Demo Options; FREE ROAM reported owner `free` and moved the camera 2.63 units
+  on `W`; the HUD toggle flipped `hudVisible` true → false; ENTER ARENA started
+  a 3-actor bot match (`mode: playing`, match clock advancing). No console
+  errors, no page errors. The 7 fps figure is SwiftShader, not hardware-GPU
+  evidence.
+- **Deploy:** build + web restart + game-server restart by `scripts/deploy.sh`;
+  `token-arena-web.service` and `token-arena-server.service` both active; the
+  game server health endpoint reports `token-arena-game-server` on :4000;
+  `npm run verify:deployment -- https://arena.ussyco.de` verified the HTML and
+  12 linked CSS/JS assets.
 - **Limitations (honest scope):** this is Phase 2. Spec tradeoffs, the 21 riders
   and asymmetric gear (Phase 3), the `mobility` input binding, movement HUD and
   touch presentation, `PROTOCOL_VERSION` 3 and respawn loadout switching
   (Phase 4), and the TTK/tier balance sweeps (Phase 5) are not in this release;
   specs and gear ride along as inert data. No hardware-GPU frame-rate claim is
   made for the movement verbs; bot-vs-bot balance is policy-verified, not
-  human-playtested. The live deploy smoke for the merged release is recorded in
-  a follow-up evidence commit after the production deploy.
+  human-playtested.
 
 ## Release 6.4 - SPECTRUM (materials, cinematic music, gameplay sound, restrained HUD, adaptive resolution)
 
