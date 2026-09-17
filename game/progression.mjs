@@ -3,15 +3,22 @@ import {WEAPON_FINISHES,CROSSHAIR_STYLES,FINISH_IDS,CROSSHAIR_IDS} from './cosme
 export const PROGRESSION_VERSION=1;
 export const MAX_LEVEL=60;
 export const GEAR_SLOTS=[{id:'primary',name:'Weapon Kit'},{id:'armor',name:'Armour'},{id:'utility',name:'Utility'}];
+// §4.8 asymmetric-but-testable gear. Every item names one power axis and one
+// different cost axis, spends within its slot's net budget, and resolves
+// through the §4.8 envelope caps below. Points are unitless: one point is +1%
+// on a multiplier (damage, speed, spread) or +1 flat point of health/armour.
+export const GEAR_AXES=Object.freeze(['offense','mobility','ehp','handling']);
+export const GEAR_BUDGET=Object.freeze({primary:15,armor:25,utility:24});
+export const GEAR_CAPS=Object.freeze({offense:1.15,mobility:1.1,ehp:15,spread:.85,handling:.9});
 export const GEAR=[
- {id:'scope',slot:'primary',name:'Precision Scope',level:2,description:'Tighter spread and a small damage lift for ranged duels. Reads the room before it reads the target.',modifiers:{spread:.85,damage:1.06}},
- {id:'heavy-barrel',slot:'primary',name:'Heavy Barrel',level:5,description:'More damage and punch at the cost of mobility. Subtlety is for other operators.',modifiers:{damage:1.12,spread:1.1,speed:.97}},
- {id:'light-frame',slot:'primary',name:'Light Frame',level:8,description:'A fast-handling build with reduced armour. Travel light, hit hard.',modifiers:{damage:1.08,spread:.9,armor:-5}},
- {id:'plating',slot:'armor',name:'Composite Plating',level:3,description:'A pre-fight slab of extra spawn armour. Because the best offense is not dying.',modifiers:{armor:25,speed:.98}},
- {id:'reactive',slot:'armor',name:'Reactive Weave',level:6,description:'Balanced armour and health for long slogs. Designed for “just one more round.”',modifiers:{armor:15,health:10}},
- {id:'stim',slot:'utility',name:'Combat Stim',level:4,description:'Extra health and a sliver of speed on every spawn. Performance-enhancing, but legal here.',modifiers:{health:20,speed:1.04}},
- {id:'servo',slot:'utility',name:'Servo Assist',level:7,description:'A movement-focused rig for objective sprints. Your W key says thank you.',modifiers:{speed:1.08}},
- {id:'mag',slot:'utility',name:'Stabiliser Mag',level:9,description:'Steadies the muzzle with a tiny speed trade. Poetry, in full auto.',modifiers:{spread:.92,speed:.99}},
+ {id:'scope',slot:'primary',name:'Precision Scope',level:2,powerAxis:'handling',costAxis:'mobility',budget:GEAR_BUDGET.primary,description:'Tighter spread and a harder first shot for ranged duels. The glass is heavy, and the footwork pays for it.',modifiers:{spread:.85,damage:1.1,speed:.9}},
+ {id:'heavy-barrel',slot:'primary',name:'Heavy Barrel',level:5,powerAxis:'offense',costAxis:'handling',budget:GEAR_BUDGET.primary,description:'The hardest-hitting barrel in the pool, at the cost of muzzle control and a little footwork. Subtlety is for other operators.',modifiers:{damage:1.15,spread:1.1,speed:.97}},
+ {id:'light-frame',slot:'primary',name:'Light Frame',level:8,powerAxis:'offense',costAxis:'ehp',budget:GEAR_BUDGET.primary,description:'A fast-handling build with reduced armour. Travel light, hit hard.',modifiers:{damage:1.08,spread:.9,armor:-5}},
+ {id:'plating',slot:'armor',name:'Composite Plating',level:3,powerAxis:'ehp',costAxis:'mobility',budget:GEAR_BUDGET.armor,description:'A pre-fight slab of extra spawn armour. Because the best offense is not dying.',modifiers:{armor:25,speed:.98}},
+ {id:'reactive',slot:'armor',name:'Reactive Weave',level:6,powerAxis:'ehp',costAxis:'mobility',budget:GEAR_BUDGET.armor,description:'Balanced armour and health for long slogs. Designed for “just one more round.”',modifiers:{armor:15,health:10}},
+ {id:'stim',slot:'utility',name:'Combat Stim',level:4,powerAxis:'ehp',costAxis:'mobility',budget:GEAR_BUDGET.utility,description:'Extra health and a sliver of speed on every spawn. Performance-enhancing, but legal here.',modifiers:{health:20,speed:1.04}},
+ {id:'servo',slot:'utility',name:'Servo Assist',level:7,powerAxis:'mobility',costAxis:'handling',budget:GEAR_BUDGET.utility,description:'The fastest rig in the pool for objective sprints. The servos jitter your aim; your W key says thank you.',modifiers:{speed:1.1,spread:1.07}},
+ {id:'mag',slot:'utility',name:'Stabiliser Mag',level:9,powerAxis:'handling',costAxis:'mobility',budget:GEAR_BUDGET.utility,description:'Steadies the muzzle with a tiny speed trade. Poetry, in full auto.',modifiers:{spread:.92,speed:.99}},
 ];
 export const COSMETICS=[
  ...WEAPON_FINISHES.map(item=>({id:item.id,kind:'finish',name:item.name,level:item.level,description:item.description})),
@@ -93,11 +100,55 @@ export function rankTitle(level){let title='Recruit';for(const rank of RANK_TITL
 export function rankBlurb(level){let blurb=RANK_TITLES[0].blurb;for(const rank of RANK_TITLES)if(level>=rank.level)blurb=rank.blurb;return blurb;}
 export function gearById(id){return GEAR.find(item=>item.id===id)||null;}
 export function unlockedItems(level){const l=Math.max(1,Math.round(level));return UNLOCKS.filter(item=>item.level<=l);}
+const round3=value=>Math.round(value*1000)/1000;
+const clampNumber=(value,min,max)=>Math.max(min,Math.min(max,Number.isFinite(value)?value:min));
+// Budget points for a modifier set, oriented so a positive value is a benefit:
+// offense = +damage %, mobility = +speed %, handling = tighter spread %,
+// ehp = flat health + armour points.
+export function gearPoints(modifiers){
+ const m=modifiers&&typeof modifiers==='object'?modifiers:{},num=value=>Number.isFinite(value)?value:1;
+ return Object.freeze({
+  offense:round3((num(m.damage)-1)*100),
+  mobility:round3((num(m.speed)-1)*100),
+  handling:round3((1-num(m.spread))*100),
+  ehp:round3((Number(m.health)||0)+(Number(m.armor)||0)),
+ });
+}
+// Splits an item's declared power and cost axes out of its modifier points and
+// reports the §4.8 cost ratio (must be ≥0.6 for upgraded items). `net` is the
+// item's total signed points, which the slot budget caps.
+export function gearBudget(item){
+ const points=gearPoints(item?.modifiers),power=round3(Math.max(0,Number(points[item?.powerAxis])||0)),cost=round3(Math.max(0,-(Number(points[item?.costAxis])||0)));
+ const net=round3(Object.values(points).reduce((sum,value)=>sum+value,0));
+ return Object.freeze({budget:Number(item?.budget)||0,points,power,cost,net,ratio:power>0?round3(cost/power):0});
+}
+// §4.8 envelope caps, applied once at the end of resolution so no caller can
+// bypass them: offense/damage ≤1.15×, mobility/speed ≤1.10×, pooled EHP
+// (health + armour) ≤ +15 points, spread ≥0.85× and spread ≤ 1/0.90 (the
+// handling ≥0.90× floor). EHP over the cap scales both pools down
+// proportionally so a full loadout cannot stack past the envelope.
+function poolEhp(health,armor){
+ const total=health+armor;
+ if(!(total>GEAR_CAPS.ehp))return {health,armor};
+ const scale=GEAR_CAPS.ehp/total;let h=round3(health*scale),a=round3(armor*scale);
+ const drift=round3(h+a-GEAR_CAPS.ehp);
+ if(drift>0){
+  if(a>=h)a=round3(Math.max(0,a-drift));
+  else h=round3(Math.max(0,h-drift));
+ }
+ return {health:h,armor:a};
+}
 export function resolveGear(ids){
  const list=(Array.isArray(ids)?ids:Object.values(ids||{})).map(gearById).filter(Boolean),modifiers={health:0,armor:0,speed:1,damage:1,spread:1};
  for(const item of list)for(const [key,value] of Object.entries(item.modifiers)){if(key==='health'||key==='armor')modifiers[key]+=value;else modifiers[key]*=value;}
- modifiers.speed=Math.max(.5,Math.min(1.6,modifiers.speed));modifiers.damage=Math.max(.5,Math.min(2,modifiers.damage));modifiers.spread=Math.max(.5,Math.min(1.6,modifiers.spread));modifiers.armor=Math.max(0,modifiers.armor);
- return {items:list,modifiers};
+ modifiers.speed=clampNumber(modifiers.speed,.5,GEAR_CAPS.mobility);
+ modifiers.damage=clampNumber(modifiers.damage,.5,GEAR_CAPS.offense);
+ modifiers.spread=clampNumber(modifiers.spread,GEAR_CAPS.spread,1/GEAR_CAPS.handling);
+ modifiers.armor=Math.max(0,Number(modifiers.armor)||0);
+ modifiers.health=Math.max(0,Number(modifiers.health)||0);
+ const pooled=poolEhp(modifiers.health,modifiers.armor);
+ modifiers.health=pooled.health;modifiers.armor=pooled.armor;
+ return Object.freeze({items:Object.freeze(list),modifiers:Object.freeze(modifiers)});
 }
 export function normalizeGear(value,level=MAX_LEVEL){
  const source=value&&typeof value==='object'?value:{},out={};
