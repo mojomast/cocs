@@ -558,7 +558,7 @@ function generatePatternPixel(kind, u, v, seed, channel, edge) {
   return null;
 }
 
-export function clearSurfaceTextures(){for(const textures of cache.values())for(const texture of Object.values(textures))texture?.dispose?.();cache.clear();clearWetSheenTextures();}
+export function clearSurfaceTextures(){for(const textures of cache.values())for(const texture of Object.values(textures))texture?.dispose?.();cache.clear();try{macroCache?.dispose?.();}catch{}macroCache=null;for(const sky of skyCache.values())try{sky.texture?.dispose?.();}catch{}skyCache.clear();clearWetSheenTextures();}
 // Explicit PBR material presets for the surfaces that recur across the scene.
 // Callers spread these onto a MeshStandardMaterial so painted armour, exposed
 // steel, rubber, stone/concrete and energy read as physically distinct instead
@@ -695,8 +695,29 @@ function bakedNormalTexture(canonical,repeat){
  return texture;
 }
 
-// An equirectangular sky/nebula baked through a Moth image engine.
+// A single low-frequency macro-variation tile the anti-tiling shader multiplies
+// over natural surfaces so the world never repeats. Returns null without a bake.
+let macroCache=null;
+export function mothMacroTexture(){
+ if(macroCache)return macroCache;
+ const baked=mothSurfaceOverride('macro-organic');
+ if(!baked)return null;
+ const texture=new T.DataTexture(baked.data,baked.width,baked.height,T.RGBAFormat,T.UnsignedByteType);
+ texture.wrapS=texture.wrapT=T.RepeatWrapping;
+ texture.colorSpace=T.NoColorSpace;
+ texture.needsUpdate=true;
+ texture.userData.mothMacro=true;
+ macroCache=texture;
+ return texture;
+}
+
+// An equirectangular sky/nebula baked through a Moth image engine. Cached per
+// name+repeat and disposed with the surface cache.
+const skyCache=new Map();
 export function mothSkyTexture(name,{repeat=[1,1]}={}){
+ const key=`${name}|${repeat[0]},${repeat[1]}`;
+ const cached=skyCache.get(key);
+ if(cached)return cached;
  const sky=mothSky(name);
  if(!sky)return null;
  const texture=new T.DataTexture(sky.data,sky.width,sky.height,T.RGBAFormat,T.UnsignedByteType);
@@ -707,7 +728,9 @@ export function mothSkyTexture(name,{repeat=[1,1]}={}){
  texture.needsUpdate=true;
  texture.userData.mothSky=name;
  if(sky.equirect)texture.mapping=T.EquirectangularReflectionMapping;
- return {texture,equirect:Boolean(sky.equirect),width:sky.width,height:sky.height};
+ const result={texture,equirect:Boolean(sky.equirect),width:sky.width,height:sky.height};
+ skyCache.set(key,result);
+ return result;
 }
 
 // An animated effect sequence baked from a series of quantum-blurred grids.

@@ -109,6 +109,41 @@ Two emulator behaviours worth knowing before you spend credits:
   commitment, CHSH witness and entropy report (with `seed: null`). Raise `shots`,
   lower `epsilon_log2`, or run on a QPU to obtain actual bytes.
 
+## Combating visible tiling
+
+A small tile repeated across a large floor reads as a grid. Three things fix it:
+
+1. **Seamless sources.** `makeSourceArt` builds natural surfaces from a wrapping
+   value-noise field with no edge seam; only the industrial patterns keep hard
+   edges on purpose.
+2. **A macro tile.** `textures['macro-organic']` is a single low-frequency
+   variation tile that never repeats across the world (`mothMacroTexture()`).
+3. **A shader break.** `game/moth-surface.mjs` `enhanceMothMaterial(material, {kind, macro})`
+   patches the material's UVs via `onBeforeCompile`: it multiplies albedo by a
+   large-scale world-space noise, blends a second rotated/scaled sample of the
+   same map, and optionally modulates with the macro tile. Grid kinds
+   (`MOTH_GRID_KINDS`: hazard stripes, hex paneling, circuit board, grating,
+   diamond plate, industrial mesh, corrugated metal, carbon fibre, riveted
+   armour, brushed metal) are a no-op, so industrial surfaces keep their grid.
+
+`game/view.mjs` applies the enhancer automatically to baked Moth surfaces on
+WebGL, and only to natural kinds.
+
+## In-world wiring
+
+The baked assets are used, not just showcased:
+
+- **Textures + normal maps** — arena floors, terrain and block surfaces.
+- **Sky** — the quantum labyrinth gets a nebula dome (`mothSkyTexture`).
+- **Materials + effects** — the labyrinth gets an iridescent landmark built with
+  `createMothLutMaterial` (entanglement LUT) ringed by an animated rift that
+  cycles the baked effect frames each frame (`updateMothRift`).
+- **Arena** — `moth-backrooms` is registered as a `variant` next-gen map
+  (Quantum Labyrinth) so it appears in the normal rotation.
+- **Motifs** — the baked `moth-oracle` motif drives the Halo soundtrack's combat
+  lead via `MusicEngine.setMotif`.
+- **Reverb IR** — `SynthAudio.setReverbUrl` decodes the cavern impulse response.
+
 ## Runtime API (`game/moth-assets.mjs`)
 
 Nothing is active until `configureMothAssets()` is called; without it every

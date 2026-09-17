@@ -26,7 +26,7 @@ test('a quantum graph builds a complete, non-degenerate arena', () => {
   assert.ok(map.blocks.length > 0, 'rooms have walls');
   assert.ok(map.spawns.length >= 4, 'spawns exist');
   assert.ok(map.navNodes.length >= 4, 'nav nodes exist');
-  assert.equal(map.objectiveZones.length, 2, 'one objective per radiating qubit');
+  assert.ok(map.objectiveZones.length >= 3, 'a match gets at least three contested spaces');
   for (const block of map.blocks) {
     assert.ok([block.x, block.z, block.w, block.d, block.h].every(finite), 'block geometry is finite');
     assert.ok(block.w > 0 && block.d > 0 && block.h > 0, 'block geometry is positive');

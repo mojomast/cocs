@@ -95,7 +95,7 @@ export const HALO_ARRANGEMENTS = Object.freeze({
     kick: Object.freeze([0, 6, 8, 14]), snare: Object.freeze([4, 12]), hat: Object.freeze([2, 6, 10, 14]),
     taiko: Object.freeze([0, 3, 8, 11]), bell: null, choir: true, drone: true,
     bass: Object.freeze([[0, 0, 2], [2, 0, 2], [4, 3, 2], [6, 3, 2], [8, 0, 2], [10, 0, 2], [12, 5, 2], [14, 4, 2]]),
-    arp: Object.freeze([0, 2, 4, 6, 4, 2, 0, 2]), lead: Object.freeze([7, 9, 11, 9, 7, 4, 2, 0]), pad: false,
+    arp: Object.freeze([0, 2, 4, 6, 4, 2, 0, 2]), lead: 'motif', pad: false,
   }),
 });
 export const SOUNDTRACKS = Object.freeze({
@@ -136,6 +136,8 @@ export class MusicEngine {
     // the baseline arrangements. Reverb is opt-in via setReverb().
     this.arrangements = ARRANGEMENTS;
     this.progressions = CHORD_PROGRESSIONS;
+    this.motif = null;
+    this.motifLead = null;
     this.reverbSend = null;
     this.reverbReturn = null;
     this.reverb = null;
@@ -185,8 +187,37 @@ export class MusicEngine {
     this.arrangements = pack.arrangements;
     this.progressions = pack.progressions;
     if (pack.theme) this.setTheme(pack.theme);
+    if (this.motif) this.setMotif(this.motif);
     this._resetTransport();
     return SOUNDTRACKS[name] ? name : 'default';
+  }
+  // A recorded motif (e.g. baked from qrc-midi) whose notes drive any
+  // arrangement with `lead: 'motif'`, quantised to the active scale degrees.
+  setMotif(motif) {
+    this.motif = motif && Array.isArray(motif.notes) ? motif : null;
+    const scale = this.theme.scale || [0, 3, 5, 7];
+    const len = scale.length;
+    const degrees = [];
+    for (const note of this.motif?.notes || []) {
+      const midi = Number(note?.midi);
+      if (!Number.isFinite(midi)) continue;
+      const freq = 440 * Math.pow(2, (midi - 69) / 12);
+      const semi = 12 * Math.log2(freq / this.theme.root);
+      let best = 0, bestError = Infinity;
+      for (let d = -len; d <= len * 3; d++) {
+        const value = scale[((d % len) + len) % len] + 12 * Math.floor(d / len);
+        const error = Math.abs(value - semi);
+        if (error < bestError) { bestError = error; best = d; }
+      }
+      degrees.push(best);
+    }
+    this.motifLead = degrees.length ? degrees : null;
+    return this.motifLead?.length ?? 0;
+  }
+  _leadFor(arr) {
+    if (Array.isArray(arr.lead)) return arr.lead;
+    if (arr.lead === 'motif' && this.motifLead?.length) return this.motifLead;
+    return null;
   }
   // Route a convolution impulse response onto the reverb return. Safe to call
   // without a convolver (returns false) and safe to call before audio unlock.
@@ -362,9 +393,10 @@ export class MusicEngine {
       if (scene !== 'menu') this._scheduleNote(time, bus, f * 2, stepDur * 1.1, 'sine', 0.018, 0, 0.012);
     }
     // Lead: a melodic counter-line, only once the combat layer is established.
-    if (arr.lead && scene === 'combat' && step % 4 === 0) {
+    const lead = this._leadFor(arr);
+    if (lead && scene === 'combat' && step % 4 === 0) {
       const i = step / 4;
-      const f = noteFreq(root, scale, arr.lead[i % arr.lead.length] + chord);
+      const f = noteFreq(root, scale, lead[i % lead.length] + chord);
       this._scheduleNote(time, bus, f, stepDur * 3.4, 'square', 0.032, 0, 0.02);
     }
     // Pad: a sustained root+fifth at the top of each bar for menu/explore.

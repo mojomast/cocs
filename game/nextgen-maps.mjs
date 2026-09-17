@@ -3,6 +3,7 @@
 // engine but not a silhouette. The legacy maps remain untouched in MAPS.
 import {createLevel, mulberry32} from './levelgen.mjs';
 import {terrainSupportAt} from './terrain.mjs';
+import {mothArena} from './moth-maps.mjs';
 
 // Runtime triangulated support, so authored cover sits on the surface the
 // simulation actually walks on (raw noise height can differ by metres on the
@@ -352,4 +353,10 @@ const emberCaldera = createLevel({
 duneRavine.biome = 'canyon';duneRavine.variant = true;
 emberCaldera.biome = 'volcanic';emberCaldera.variant = true;
 
-export const NEXTGEN_MAPS = [colosseum, frostGate, sunkenHill, riverbend, fortress, atrium, catacombs, slagworks, forge, provingGrounds, titanValley, convoyLine, throne, gauntlet, duneRavine, emberCaldera];
+// Moth Quantum labyrinth: a room grid generated from a quantum graph measured
+// on Aer (see scripts/moth-bake.mjs). It extends the rotation as a variant
+// without claiming a mode slot, and is skipped if the bake is absent.
+const mothBackrooms = mothArena('moth-backrooms', { name: 'Quantum Labyrinth', tag: 'MOTH / QUANTUM LABYRINTH', variant: true });
+if (mothBackrooms) mothBackrooms.variant = true;
+
+export const NEXTGEN_MAPS = [colosseum, frostGate, sunkenHill, riverbend, fortress, atrium, catacombs, slagworks, forge, provingGrounds, titanValley, convoyLine, throne, gauntlet, duneRavine, emberCaldera, ...(mothBackrooms ? [mothBackrooms] : [])];

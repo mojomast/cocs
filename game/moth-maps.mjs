@@ -113,6 +113,7 @@ export function buildMothArena(graph, {
         }
       }
       let objectiveCount = 0;
+      const objectiveCells = new Set();
       for (let row = 0; row < rows; row++) for (let col = 0; col < cols; col++) {
         const [x, z] = [centerX(col, cols, size), centerZ(row, rows, size)];
         ctx.addNav(x, z);
@@ -124,12 +125,23 @@ export function buildMothArena(graph, {
           ctx.addObjective(x, z, 3.2);
           ctx.addBarrel({ x, z, scale: 1.1 });
           ctx.addBarrel({ x: x + 1.4, z: z - 1.4, scale: 0.85 });
+          objectiveCells.add(`${row}:${col}`);
           objectiveCount++;
         } else if (cell && cell.z > 0.06) {
           ctx.addRock({ x, z, scale: 0.7, collide: false });
         } else if (cell && cell.z < -0.06) {
           ctx.addRuin({ x, z, scale: 0.8 });
         }
+      }
+      // A match needs at least three contested spaces; radiating qubits author
+      // the rest, and the corners fill in when the graph is sparse.
+      for (const [row, col] of [[0, 0], [0, cols - 1], [rows - 1, 0], [rows - 1, cols - 1], [Math.floor(rows / 2), Math.floor(cols / 2)]]) {
+        if (objectiveCount >= 3) break;
+        const key = `${row}:${col}`;
+        if (objectiveCells.has(key)) continue;
+        objectiveCells.add(key);
+        ctx.addObjective(centerX(col, cols, size), centerZ(row, rows, size), 3.2);
+        objectiveCount++;
       }
       if (!objectiveCount) ctx.addObjective(0, 0, 4);
       // Spawn ring: corners, edge midpoints and the centre, de-duplicated so

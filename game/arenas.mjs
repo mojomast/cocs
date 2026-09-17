@@ -57,6 +57,8 @@ const AUTHOR={
  // Second biome wave: a desert canyon and a frozen volcanic caldera.
  'dune-ravine':{group:'outdoor',scale:'battle',play:['deathmatch','teamdeathmatch','instagib','rockets','arsenal','koth','domination']},
  'ember-caldera':{group:'outdoor',scale:'battle',play:['rockets','deathmatch','teamdeathmatch','instagib','arsenal','koth','domination']},
+ // Moth Quantum labyrinth variant (nextgen-maps.mjs, generated from a quantum graph).
+ 'moth-backrooms':{group:'indoor',scale:'skirmish',play:['deathmatch','teamdeathmatch','instagib','rockets','arsenal','armsrace','koth','domination']},
 };
 
 const span=arena=>{

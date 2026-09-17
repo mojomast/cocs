@@ -154,7 +154,6 @@
       "engine": "blur-v1",
       "enabled": true,
       "credits": 1,
-      "jobId": "35fb9eb1-0de0-468f-88dd-135704974fc7",
       "input": {
         "image": "sources/panel.png"
       },
@@ -169,8 +168,9 @@
       "bake": {
         "type": "texture-tile",
         "name": "weathered_concrete",
-        "size": 48
-      }
+        "size": 64
+      },
+      "jobId": "3087cf6c-23f3-4e30-9fbd-c67e932fd3a4"
     },
     {
       "id": "tex-rock",
@@ -191,9 +191,9 @@
       "bake": {
         "type": "texture-tile",
         "name": "rock",
-        "size": 48
+        "size": 64
       },
-      "jobId": "50db2020-0f9f-4ce3-978a-391c0db10257"
+      "jobId": "d0eee6b7-40df-4647-9990-b77206c07055"
     },
     {
       "id": "tex-sand",
@@ -214,9 +214,9 @@
       "bake": {
         "type": "texture-tile",
         "name": "sand",
-        "size": 48
+        "size": 64
       },
-      "jobId": "95cc27a7-dd4c-4df1-9b9a-1491a801e25a"
+      "jobId": "fbd76580-90e9-4581-bf45-55a7b9659b45"
     },
     {
       "id": "tex-ice",
@@ -237,9 +237,9 @@
       "bake": {
         "type": "texture-tile",
         "name": "ice",
-        "size": 48
+        "size": 64
       },
-      "jobId": "4961798c-5a46-46fe-9fb1-e298344ccc93"
+      "jobId": "752a8324-6c26-4564-809d-bc3149b2130c"
     },
     {
       "id": "tex-grass",
@@ -260,9 +260,9 @@
       "bake": {
         "type": "texture-tile",
         "name": "grass",
-        "size": 48
+        "size": 64
       },
-      "jobId": "54319a14-8189-41e2-bf57-2c2e7c12248a"
+      "jobId": "ccdcb6f7-4514-4503-a99c-ab2f31fe3e7e"
     },
     {
       "id": "tex-metal",
@@ -283,9 +283,9 @@
       "bake": {
         "type": "texture-tile",
         "name": "brushed_metal",
-        "size": 48
+        "size": 64
       },
-      "jobId": "0f7230f2-56a9-4948-b3eb-4f230970d2fc"
+      "jobId": "8fcb92a9-620b-408a-90b2-925ef272844f"
     },
     {
       "id": "tex-hazard",
@@ -308,7 +308,7 @@
         "name": "hazard_stripes",
         "size": 48
       },
-      "jobId": "63a3e1cb-406d-4026-8bd2-e0cd01fbbd0e"
+      "jobId": "26be43d4-5a5c-44f3-bf73-ab27fff0e295"
     },
     {
       "id": "tex-hull",
@@ -339,7 +339,7 @@
         "name": "hex_paneling",
         "size": 48
       },
-      "jobId": "38673232-449f-4ed3-b30f-551659d8affb"
+      "jobId": "dbef2caf-1c0b-45a1-9ce4-8030fdd641bf"
     },
     {
       "id": "tex-circuit",
@@ -370,7 +370,7 @@
         "name": "circuit_board",
         "size": 48
       },
-      "jobId": "e02d9d8d-fbd8-42f5-a277-e916ec8fe39f"
+      "jobId": "2e94b002-a0a0-496b-929c-816d2053dbf5"
     },
     {
       "id": "tex-chitin",
@@ -399,16 +399,15 @@
       "bake": {
         "type": "texture-tile",
         "name": "alien_chitin",
-        "size": 48
+        "size": 64
       },
-      "jobId": "50bfc63c-402f-4529-9e6e-76fbd6c17cec"
+      "jobId": "f3099ab8-9943-409b-a7b1-fd8445306afb"
     },
     {
       "id": "tessa-tile",
       "engine": "tessa-image-v1",
       "enabled": true,
       "credits": 1,
-      "jobId": "c47d5fc1-b2df-41ac-a584-11120fc0552a",
       "input": {
         "image": "sources/tile.png"
       },
@@ -424,7 +423,8 @@
         "type": "texture-tile",
         "name": "holographic_grid",
         "size": 48
-      }
+      },
+      "jobId": "e4ce3600-80d5-43f5-b3c5-f8bc29d04de6"
     },
     {
       "id": "sky-nebula",
@@ -448,7 +448,7 @@
         "width": 128,
         "height": 64
       },
-      "jobId": "6e30c820-30de-4524-aed9-9d0176888375"
+      "jobId": "33d0f7bb-d535-4eb0-bfe8-34419123a954"
     },
     {
       "id": "normal-rock",
@@ -482,7 +482,7 @@
         "size": 32,
         "strength": 1.7
       },
-      "jobId": "31bac39a-621c-492d-825a-c5cf30ab4642"
+      "jobId": "04baa6d7-0a70-483d-b82d-6e0fa83cdd2c"
     },
     {
       "id": "normal-ice",
@@ -516,7 +516,7 @@
         "size": 32,
         "strength": 2.1
       },
-      "jobId": "7505557a-9118-491d-ac2b-61486ca303af"
+      "jobId": "a26f5ffa-6e3e-4c41-ac9d-b399a7d8701f"
     },
     {
       "id": "normal-sand",
@@ -546,7 +546,7 @@
         "size": 32,
         "strength": 1.3
       },
-      "jobId": "4781423e-5d39-49ef-aa01-c46bd293431d"
+      "jobId": "68ef7d47-d0c7-4eb7-890d-a59219370831"
     },
     {
       "id": "normal-concrete",
@@ -580,7 +580,7 @@
         "size": 32,
         "strength": 1.6
       },
-      "jobId": "757639fb-edb0-436a-8d39-61b2f27000b0"
+      "jobId": "4fa28a5a-3a58-4ce5-bfc6-ee1d0daa39a1"
     },
     {
       "id": "effect-rift-0",
@@ -793,6 +793,29 @@
         "type": "seed",
         "name": "moth-daily"
       }
+    },
+    {
+      "id": "tex-macro",
+      "engine": "blur-v1",
+      "enabled": true,
+      "credits": 1,
+      "input": {
+        "image": "sources/macro.png"
+      },
+      "params": {
+        "strength": 0.2,
+        "style": "rx",
+        "reach": 0.7,
+        "size": 256,
+        "downscale": true
+      },
+      "raw": "tex-macro",
+      "bake": {
+        "type": "texture-tile",
+        "name": "macro-organic",
+        "size": 64
+      },
+      "jobId": "fd67e2ab-4767-4c08-99f6-e8a0f3811cda"
     }
   ]
 }

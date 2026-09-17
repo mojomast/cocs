@@ -593,6 +593,23 @@ const SOURCE_ART = {
   chitin: { size: 256, palette: [0.4, 0.72, 0.66], pattern: 'noise', contrast: 0.5 },
   hazard: { size: 256, palette: [0.86, 0.7, 0.16], pattern: 'stripes', contrast: 0.55 },
   nebula: { size: 256, wide: 2, palette: [0.26, 0.3, 0.5], pattern: 'stars', contrast: 0.6 },
+  macro: { size: 256, palette: [0.62, 0.58, 0.5], pattern: 'noise', contrast: 0.95, freq: 2 },
+};
+
+// Wrapping value noise, so the source art tiles seamlessly and does not draw a
+// hard seam grid when repeated across a surface.
+const wrapIndex = (n, m) => ((n % m) + m) % m;
+const valueNoiseT = (x, y, seed, period) => {
+  const xi = Math.floor(x), yi = Math.floor(y), xf = x - xi, yf = y - yi;
+  const x0 = wrapIndex(xi, period), x1 = wrapIndex(xi + 1, period), y0 = wrapIndex(yi, period), y1 = wrapIndex(yi + 1, period);
+  const a = hash2(x0, y0, seed), b = hash2(x1, y0, seed), c = hash2(x0, y1, seed), d = hash2(x1, y1, seed);
+  const u = smoothStep(xf), v = smoothStep(yf);
+  return (a * (1 - u) + b * u) * (1 - v) + (c * (1 - u) + d * u) * v;
+};
+const tileFbm = (u, v, seed, freq, octaves = 4) => {
+  let total = 0, amp = 0.5, f = freq, norm = 0;
+  for (let i = 0; i < octaves; i++) { total += valueNoiseT(u * f, v * f, seed + i * 131, f) * amp; norm += amp; amp *= 0.5; f *= 2; }
+  return total / norm;
 };
 
 function makeSourceArt(name, spec = SOURCE_ART.panel) {
@@ -604,12 +621,13 @@ function makeSourceArt(name, spec = SOURCE_ART.panel) {
   const height = size;
   const [pr, pg, pb] = merged.palette || [0.6, 0.6, 0.6];
   const contrast = merged.contrast ?? 0.4;
+  const freq = merged.freq ?? 6;
+  const industrial = merged.pattern !== 'noise' && merged.pattern !== 'stars';
   const rgb = new Uint8Array(width * height * 3);
   for (let y = 0; y < height; y++) for (let x = 0; x < width; x++) {
-    const u = (x / width) * 6, v = (y / height) * 6;
-    let lum = 0.5 + (fbm2(u, v, seed, 4) - 0.5) * contrast;
-    const fine = fbm2(u * 4.1, v * 4.1, seed + 31, 3);
-    lum += (fine - 0.5) * contrast * 0.35;
+    const u = x / width, v = y / height;
+    let lum = 0.5 + (tileFbm(u, v, seed, freq, 4) - 0.5) * contrast;
+    lum += (tileFbm(u, v, seed + 31, freq * 3, 3) - 0.5) * contrast * 0.35;
     if (merged.pattern === 'panels') {
       const gx = Math.abs(((x / width) * 8) % 1 - 0.5) * 2, gy = Math.abs(((y / height) * 8) % 1 - 0.5) * 2;
       lum *= gx > 0.94 || gy > 0.94 ? 0.45 : 1;
@@ -620,11 +638,12 @@ function makeSourceArt(name, spec = SOURCE_ART.panel) {
       lum = (((x + y) / height) * 4) % 1 < 0.5 ? lum + 0.25 : lum * 0.35;
     } else if (merged.pattern === 'stars') {
       const band = Math.max(0, 1 - Math.abs((y / height) - 0.5) * 2.2);
-      lum = 0.06 + band * (0.25 + fbm2(u * 0.6, v * 0.6, seed, 4) * 0.7);
+      lum = 0.06 + band * (0.25 + tileFbm(u, v, seed, 3, 4) * 0.7);
       if (hash2(x * 3 + 1, y * 7 + 5, seed + 991) > 0.9965) lum = 1;
     }
-    const seam = Math.min(1, Math.abs(Math.sin((x / width) * Math.PI)) * Math.abs(Math.sin((y / height) * Math.PI)) * 1.4);
-    const scale = (merged.pattern === 'stars' ? 255 : 360) * (merged.pattern === 'stars' ? 1 : seam);
+    // Natural surfaces must read as one continuous material: no seam darkening.
+    // Industrial patterns keep their hard edges so the grid reads on purpose.
+    const scale = industrial ? 360 : 300;
     const i = (y * width + x) * 3;
     rgb[i] = Math.max(0, Math.min(255, Math.round(lum * pr * scale)));
     rgb[i + 1] = Math.max(0, Math.min(255, Math.round(lum * pg * scale)));
@@ -633,13 +652,13 @@ function makeSourceArt(name, spec = SOURCE_ART.panel) {
   return encodePng(width, height, rgb);
 }
 
-// A non-negative 2D height field for blur-core-v1 (values, not a file).
+// A non-negative, seamlessly tiling 2D height field for blur-core-v1.
 function heightGrid(size, seed, kind = 'noise') {
   return Array.from({ length: size }, (_, y) => Array.from({ length: size }, (_, x) => {
-    const u = (x / size) * 5, v = (y / size) * 5;
-    let h = fbm2(u, v, seed, 4);
+    const u = x / size, v = y / size;
+    let h = tileFbm(u, v, seed, 8, 5);
     if (kind === 'ridge') h = 1 - Math.abs(h * 2 - 1);
-    if (kind === 'cells') h = Math.abs(Math.sin(u * 3) * Math.cos(v * 3));
+    if (kind === 'cells') h = Math.abs(Math.sin(u * Math.PI * 4) * Math.cos(v * Math.PI * 4));
     return Math.round(h * 1000) / 1000;
   }));
 }

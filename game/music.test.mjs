@@ -145,3 +145,17 @@ test('setReverb is a safe no-op without a convolver and attaches when available'
  e.dispose();
  assert.equal(convolver.disconnected,true,'the convolver is released on dispose');
 });
+
+test('a baked motif drives the lead voice, quantised to the active scale',()=>{
+ const {e,ctx}=engine();
+ e.setSoundtrack('halo');
+ const notes=[{step:0,midi:62,dur:4},{step:4,midi:65,dur:4},{step:8,midi:69,dur:4},{step:12,midi:72,dur:4}];
+ assert.equal(e.setMotif({bpm:60,notes}),4,'every note maps to a scale degree');
+ assert.ok(e.motifLead.every(d=>Number.isInteger(d)),'degrees are integers');
+ assert.equal(e.arrangements.combat.lead,'motif','the halo combat layer reads the motif');
+ e.setScene('combat');e.setIntensity(1);
+ let scheduled=0;for(let i=0;i<40;i++){ctx.currentTime+=.05;scheduled+=e.tick();}
+ assert.ok(scheduled>0&&e.notesScheduled>0,'the motif lead schedules');
+ assert.equal(e.setMotif(null),0,'clearing the motif disables the lead');
+ assert.equal(e.motifLead,null);
+});

@@ -323,6 +323,8 @@ export class SynthAudio{
  previewMusic(scene='menu',seconds=8){this._ensureBuses();const r=this.musicEngine?.preview(scene,seconds);this.unlock();return r??null;}
  // Select an arrangement pack (e.g. 'halo'); delegates to the music engine.
  setSoundtrack(name='default'){this.soundtrack=(name==='halo')?'halo':'default';this._ensureBuses();this.theme=this.soundtrack==='halo'?HALO_THEME:(MODE_THEMES[this.mode]||MODE_THEMES.default);return this.musicEngine?.setSoundtrack(this.soundtrack)??this.soundtrack;}
+ // Hand a baked motif (e.g. from qrc-midi) to the soundtrack's lead voice.
+ setMotif(motif){return this.musicEngine?.setMotif(motif)??0;}
  // Attach a convolution impulse response (an AudioBuffer) to the music reverb.
  setMusicReverb(buffer,opts){return this.musicEngine?.setReverb(buffer,opts)??false;}
  // Fetch and decode a same-origin impulse response WAV, then attach it. Safe to
