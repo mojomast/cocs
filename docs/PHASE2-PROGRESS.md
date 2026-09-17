@@ -1,8 +1,8 @@
 # Phase 2 progress — materials, music, gameplay sound, HUD
 
-Branch: `improvement/phase2-audio-visual` (worktree `/home/mojo/projects/tokenarena-phase2`),
-based on the deployed phase-1 checkpoint `ee6a929` / branch tip `36cfba1`.
-Production still runs phase 1; phase 2 has not been deployed.
+Branch: `improvement/phase2-audio-visual`. **Deployed to production on
+2026-09-17 06:18 UTC at revision `3b22b7a`** (web-only restart; the game server
+was not restarted because no changed file is in its import graph).
 
 Scope per `docs/PHASE2-HANDOFF.md`: natural/credible materials, cinematic music,
 substantial gameplay sound, restrained HUD — preserving phase-1 geometry, ADS,
@@ -85,6 +85,19 @@ Focused per workstream (all green after integration):
   second excerpts in `docs/evidence/phase2/audio/`.
 - Full suite: `npm test` green on this branch (all stages exit 0). The first run
   exposed 36 pre-existing phase-1 failures, all fixed (F7–F10 plus F2/F3).
+
+## Deployment
+
+- `npm run deploy` (web-only) succeeded: build + restart + `verify:deployment`
+  against `https://arena.ussyco.de` (12 linked assets, 200s).
+- Live asset hashes match this checkout's `dist/` byte-for-byte for the entry
+  JS, page chunk and CSS.
+- Live browser smoke: **13/13 checks, 0 console errors, 0 page errors** — title,
+  match setup, playable bot match with HUD, campaign entry (convoy-run), and a
+  network match hosted through `wss://arena.ussyco.de/ws`; the cavern IR now
+  serves 200 so the long-standing 404 is gone.
+- Web service restarted at 06:18:06 UTC; game server untouched (`04:12:11`),
+  so multiplayer sessions were preserved.
 
 ## Not verified / limitations
 
