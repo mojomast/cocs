@@ -1,8 +1,9 @@
 # Phase 2 progress — materials, music, gameplay sound, HUD
 
-Branch: `improvement/phase2-audio-visual`. **Deployed to production on
-2026-09-17 06:18 UTC at revision `3b22b7a`** (web-only restart; the game server
-was not restarted because no changed file is in its import graph).
+Branch: `improvement/phase2-audio-visual`. **Deployed to production as
+`v6.4 · SPECTRUM` on 2026-09-17** (web-only restarts; the game server was not
+restarted because no changed file is in its import graph). The resolution
+budget/dynamic-resolution work shipped in the same release.
 
 Scope per `docs/PHASE2-HANDOFF.md`: natural/credible materials, cinematic music,
 substantial gameplay sound, restrained HUD — preserving phase-1 geometry, ADS,

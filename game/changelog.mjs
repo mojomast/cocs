@@ -1,12 +1,22 @@
 // In-game patch notes. The title-screen footer is the running version; this
 // module is the human-readable release digest the Changelog screen renders. The
 // full historical record lives in docs/CHANGELOG.md and is linked from the UI.
-export const RELEASE_VERSION = 'v6.3';
-export const RELEASE_CODENAME = 'RESONANCE';
+export const RELEASE_VERSION = 'v6.4';
+export const RELEASE_CODENAME = 'SPECTRUM';
 export const REPO_URL = 'https://github.com/mojomast/tokenarena';
 export const FULL_CHANGELOG_URL = `${REPO_URL}/blob/main/docs/CHANGELOG.md`;
 
 export const CHANGELOG = [
+  {version:'v6.4',codename:'SPECTRUM',date:'2026-09-17',tag:'Natural materials, a cinematic soundtrack and soundscape, a restrained HUD, and resolution that adapts to the display',highlights:[
+    'Surfaces are rebuilt around one seamless multi-scale height/wear field: albedo, roughness and normal derive from the same data, so cracks, wear and relief agree. Measured albedo/roughness correlation 0.874 (pin > 0.75), tile edge steps 0.74-0.95x (was 3.8-11.3x) and normal relief 0.08-0.23 std (was ~0.007). Weathering is per material (stains, run-off streaks, dust, temperature drift), and the moth macro/fracture enhancer now applies to every natural surface instead of only Moth-baked albedo.',
+    'Sky and light read as natural rather than neon: day/dusk/night palettes with a warm dust horizon, a thicker dusk haze band, a faint night airglow and mountain silhouettes that keep their depth; ambience and weather tints are de-neoned, and the CPU renderer follows the day/dusk/night phase.',
+    'The soundtrack is composed instead of looped: eight-bar progressions with phrase fills, staged combat layers (kick, snare, hats, accents, counter-line, lead), an outro/enter/idle transition machine for scene and intensity changes, seeded noise risers, stereo panning and reverb sends - all original synthesis.',
+    'Gameplay sound is layered: single-token weapon reports (transient, body, thump, sub, tail) with deterministic per-shot variation and distance darkening, surface-aware impacts and ricochets, bounded explosion debris, surface footsteps/landings/jumps/slides, wind and tension beds, and objective cues retuned to the mode root. The cavern reverb impulse now loads (the long-standing 404 is fixed) and retries instead of latching failure.',
+    'The in-match HUD is restrained: health and armor share one vitals card, the ability and frag gauges are grouped, the objective bar shows one contextual chip, the kill feed is capped at four, control hints settle after the opening minute, and a REDUCED MOTION chip plus explanatory settings copy make that accessibility mode visible. Reduced-motion semantics are unchanged.',
+    'Resolution adapts to the display: a pixel-budget cap (Auto/1080p/1440p/Native) stops 2K/4K screens from asking for 4-9x the tuned pixel count - a 4K viewport at 100% now renders a 1080p-class buffer - and a frame-time governor trades resolution before quality tiers (0.5-1x, hysteretic, long frames counted honestly). Benchmarks keep true native 100%.',
+    'Glow defaults are calmer: arena glow trims, the energy emissive preset, objective markers and beacons are toned down, while bloom stays user-controlled through the Glow slider.',
+    'The first full-suite gate on this branch fixed 36 pre-existing failures from the phase-1 checkpoint (three stale campaign pins, 30 registry placement sweeps, two next-gen tunnel/facade expectations and a singleplayer driver hang over 600s) plus the review-harness lint error; the suite is green.',
+  ]},
   {version:'v6.3',codename:'RESONANCE',date:'2026-09-16',tag:'A real soundtrack, smooth first-person motion and cheaper static worlds',highlights:[
     'The audio engine is actually connected. `ArenaView` now receives `SynthAudio` at startup, so mode themes, the ambience bed, thunder, announcer cues and the victory/defeat sting flow through one object instead of being built and never wired.',
     'A composed procedural soundtrack replaces the single low drone: menu, exploration and combat arrangements share one mode theme and chord progression, with bass, percussion, arpeggio and lead layers, four-bar phrase fills, layered intensity crossfades and gently ducked music under stings. Notes are scheduled with a bounded look-ahead on the AudioContext clock, so timing does not depend on frame rate and a suspended tab resumes without firing a backlog.',

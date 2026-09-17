@@ -16,6 +16,48 @@ record in [VERIFICATION.md](VERIFICATION.md).
 
 ---
 
+## v6.4 · SPECTRUM — 2026-09-17
+
+Natural materials, a cinematic soundtrack and soundscape, a restrained HUD, and
+resolution that adapts to the display.
+
+- Surfaces are rebuilt around one seamless multi-scale height/wear field:
+  albedo, roughness and normal derive from the same data, so cracks, wear and
+  relief agree (albedo/roughness correlation 0.874; tile edge steps 0.74–0.95×,
+  was 3.8–11.3×; normal relief 0.08–0.23 std, was ~0.007). Weathering is per
+  material, and the moth macro/fracture enhancer now applies to every natural
+  surface instead of only Moth-baked albedo.
+- Sky and light read as natural rather than neon: day/dusk/night palettes with a
+  warm dust horizon, a thicker dusk haze band, a faint night airglow and mountain
+  silhouettes that keep their depth; ambience and weather tints are de-neoned,
+  and the CPU renderer follows the day/dusk/night phase.
+- The soundtrack is composed instead of looped: eight-bar progressions with
+  phrase fills, staged combat layers, an outro/enter/idle transition machine,
+  seeded noise risers, stereo panning and reverb sends — all original synthesis.
+- Gameplay sound is layered: single-token weapon reports with deterministic
+  per-shot variation and distance darkening, surface-aware impacts and ricochets,
+  bounded explosion debris, surface movement foley, wind/tension beds, and
+  objective cues retuned to the mode root. The cavern reverb impulse now loads
+  (the long-standing 404 is fixed) and retries instead of latching failure.
+- The in-match HUD is restrained: one vitals card, grouped action gauges, one
+  contextual objective chip, a capped kill feed, hints that settle after the
+  opening minute, and a REDUCED MOTION chip with explanatory settings copy.
+  Reduced-motion semantics are unchanged.
+- Resolution adapts to the display: a pixel-budget cap
+  (Auto/1080p/1440p/Native) stops 2K/4K screens from asking for 4–9× the tuned
+  pixel count — a 4K viewport at 100% now renders a 1080p-class buffer — and a
+  frame-time governor trades resolution before quality tiers (0.5–1×,
+  hysteretic, long frames counted honestly). Benchmarks keep true native 100%.
+- Glow defaults are calmer: arena glow trims, the energy emissive preset,
+  objective markers and beacons are toned down; bloom stays user-controlled
+  through the Glow slider.
+- The first full-suite gate on this branch fixed 36 pre-existing failures from
+  the phase-1 checkpoint (campaign pins, 30 registry placement sweeps, next-gen
+  tunnel/facade expectations, a singleplayer driver hang over 600 s) plus the
+  review-harness lint error.
+
+---
+
 ## v6.3 · RESONANCE — 2026-09-16
 
 A real soundtrack, smooth first-person motion and cheaper static worlds.
