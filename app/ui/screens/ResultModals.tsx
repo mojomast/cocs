@@ -20,8 +20,17 @@ export function MedalStrip({awards,player}:any){
 }
 
 export function PauseModal({ui}:ScreenProps){
- const {mode,resume,changeMode,prefs,modalRef}=ui;
- return <Modal open={mode==='paused'} onClose={resume} size="lg" eyebrow="PAUSED" title="Take a breath." panelRef={modalRef} footer={<Btn variant="primary" onClick={resume}>RESUME MATCH</Btn>}>
+ const {mode,resume,changeMode,pauseQuick,openSettings,display,toggleCaptions,toggleReducedMotion,modalRef}=ui;
+ const captionsOn=display?.captions===true;
+ const motionReduced=display?.reducedMotion===true;
+ // I6 / I13 — quick settings + one-tap captions / reduced-motion pills instead
+ // of embedding the whole settings form; the full form opens in SettingsDialog.
+ const footer=<>
+  <button type="button" className="chip pause-toggle" aria-pressed={captionsOn} onClick={toggleCaptions} title="Toggle subtitles / audio captions">CC · {captionsOn?'ON':'OFF'}</button>
+  <button type="button" className="chip pause-toggle" aria-pressed={motionReduced} onClick={toggleReducedMotion} title="Toggle reduced motion">MOTION · {motionReduced?'REDUCED':'FULL'}</button>
+  <Btn variant="primary" className="modal-foot-primary" onClick={resume}>RESUME MATCH</Btn>
+ </>;
+ return <Modal open={mode==='paused'} onClose={resume} size="lg" eyebrow="PAUSED" title="Take a breath." panelRef={modalRef} footer={footer}>
   <div className="layout layout--2">
    <Panel label="MATCH">
     <div className="stack">
@@ -30,7 +39,12 @@ export function PauseModal({ui}:ScreenProps){
      <p className="field-note">The arena will wait for you. Jump pads and boost launchers can extend your launch.</p>
     </div>
    </Panel>
-   <Panel label="SETTINGS">{prefs}</Panel>
+   <Panel label="QUICK SETTINGS">
+    <div className="stack">
+     {pauseQuick}
+     <Btn onClick={()=>openSettings?.('game')}>OPEN GRAPHICS &amp; SETTINGS</Btn>
+    </div>
+   </Panel>
   </div>
  </Modal>;
 }

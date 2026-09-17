@@ -89,7 +89,7 @@
   letter-spacing:.02em;cursor:pointer;transition:background .16s,border-color .16s,transform .1s;white-space:nowrap}
 .btn:hover:not(:disabled){border-color:var(--accent);background:rgba(24,48,42,.6)}
 .btn:active:not(:disabled){transform:translateY(1px)}
-.btn:disabled{opacity:.45;cursor:not-allowed}
+.btn:disabled{opacity:.6;cursor:not-allowed}
 .btn-primary{background:linear-gradient(180deg,var(--accent),#5fdec0);color:var(--accent-contrast);
   border-color:transparent;font-weight:800}
 .btn-primary:hover:not(:disabled){filter:brightness(1.06);background:linear-gradient(180deg,var(--accent),#5fdec0)}
@@ -109,7 +109,7 @@
   background:rgba(12,26,30,.55);color:var(--text);cursor:pointer;transition:border-color .16s,background .16s}
 .card:hover:not(:disabled){border-color:var(--accent-soft)}
 .card.selected{border-color:var(--accent);background:rgba(30,60,52,.55);box-shadow:0 0 0 1px var(--accent) inset}
-.card:disabled{opacity:.45;cursor:not-allowed}
+.card:disabled{opacity:.6;cursor:not-allowed}
 .card-icon{display:grid;place-items:center;width:38px;height:38px;flex:none;border-radius:var(--radius-md);
   background:rgba(131,244,213,.1);color:var(--accent)}
 .card-main{flex:1;min-width:0}
@@ -279,8 +279,13 @@
 .keybind-key:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
 
 /* ---------- Match summary card ---------- */
+/* R1 — the legacy `globals.css` `.match-summary` rule (now deleted) used to merge
+   `align-items:center` + `flex-wrap:wrap` into this column, which collapsed
+   `.stats` to a single 100px column. Pin the box model here so the five stats
+   stay columns and the legacy font/cursor can never leak back in. */
 .match-summary{display:flex;flex-direction:column;gap:var(--ui-gap-3);padding:16px;border:1px solid var(--ui-line);
-  border-radius:var(--radius-lg);background:rgba(12,26,30,.5)}
+  border-radius:var(--radius-lg);background:rgba(12,26,30,.5);
+  align-items:stretch;flex-wrap:nowrap;font:inherit;letter-spacing:normal;color:var(--text);cursor:default;text-align:left}
 .match-summary-head{display:flex;align-items:baseline;justify-content:space-between;gap:12px;flex-wrap:wrap}
 .match-summary-result{font:800 20px var(--font-ui);letter-spacing:.02em;color:var(--accent)}
 .match-summary-result.result-loss{color:var(--danger-soft)}
@@ -689,3 +694,56 @@
   .config-toggle-grid{columns:2;column-gap:24px}
   .config-toggle-grid .config-toggle{break-inside:avoid}
 }
+
+/* ==========================================================================
+   P4-UI — global chrome clean-up (UI-AUDIT-v6.6 A, B, I3, I5, I8, I13, I16).
+   Header actions, the demo dock, results summary and touch/contrast polish.
+   Selection / setup / rooms stay in the P4-2 block above.
+   ========================================================================== */
+
+/* A — top-right icon buttons. The labels stay in the accessibility tree but
+   the icon buttons collapse to a single 44x44 icon; only the settings trigger
+   keeps a visible label. The header never wraps its actions. */
+.head-actions .icon-button>span{position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap;border:0}
+.head-actions .settings-trigger>span{position:static;width:auto;height:auto;margin:0;overflow:visible;clip:auto}
+.head-actions{flex-wrap:nowrap}
+.brand-name em{white-space:nowrap}
+.icon-button{transition:border-color .16s,background .16s,color .16s}
+.icon-button:hover{background:rgba(131,244,213,.08);border-color:var(--accent-soft);color:var(--text)}
+.icon-button[aria-pressed="true"]{border-color:var(--accent);color:var(--accent);background:rgba(131,244,213,.1)}
+@media (max-width:900px){.brand-name em{display:none}}
+@media (max-width:480px){
+  .head-actions .settings-trigger{width:44px;padding:0}
+  .head-actions .settings-trigger>span{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap}
+  .head-actions{gap:6px}
+}
+
+/* B — the demo dock spans the top edge instead of floating as a centred
+   island. Rows start at the leading edge, controls wrap instead of stacking in
+   a diamond, and ENTER ARENA hugs the trailing edge. */
+.demo-controls{top:calc(var(--safe-top) + 10px);left:max(var(--edge),var(--safe-left));right:max(var(--edge),var(--safe-right));
+  transform:none;max-width:none;align-items:stretch}
+.demo-controls__row{justify-content:flex-start;flex-wrap:wrap;row-gap:6px}
+.demo-controls .demo-controls__enter{margin-left:auto}
+.demo-options{justify-content:flex-start}
+.demo-option{min-height:44px;padding:8px 12px}
+@media (max-width:900px){.demo-controls{left:12px;right:12px}}
+
+/* I3 — remaining sub-44px touch targets on phones / tablets. The rail is
+   already covered by the P4-2 block; these are the menu tabs, chips and
+   secondary controls that sat just under the 44px guideline. */
+@media (max-width:900px){
+  .tabs button,.segmented button,.theater-highlights .btn,.keybind-key{min-height:44px}
+}
+
+/* I8 — on short viewports the title-screen broadcast bar clipped the meta
+   chip row; reserve room beneath the CTA for the lower-third. */
+@media (max-height:820px){.title-stage{padding-bottom:calc(var(--safe-bottom) + 180px)}}
+
+/* I6 / I13 — the pause modal drops the full 3000px settings form for a compact
+   quick block plus an "Open settings" action, and surfaces the captions /
+   reduced-motion toggles as pills in the modal footer. */
+.pause-quick.preferences{margin:0}
+.pause-quick.preferences>label{margin-bottom:14px}
+.pause-toggle{min-height:44px;cursor:pointer;background:rgba(10,27,26,.8)}
+.pause-toggle[aria-pressed="true"]{border-color:var(--accent);color:var(--accent);background:rgba(131,244,213,.1)}
