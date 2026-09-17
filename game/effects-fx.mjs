@@ -273,6 +273,64 @@ export class HitReactionFX{
  dispose(){for(const slot of this.slots){this.scene.remove(slot.obj);slot.material?.dispose();slot.material=null;}this.slots=[];this.mote?.dispose();this.mote=null;}
 }
 
+// Pooled telegraph cues for movement and spec events (wind-ups, dashes,
+// landings, fuel-out sparks, slam shockwaves, grapple hooks, rope anchors and
+// the Linted threat ping). A fixed slot budget with three shared unit
+// geometries keeps a busy match from growing GPU resources: every emission
+// reuses a slot and one material, and the slot is re-pointed at whichever of
+// the cached geoms the cue needs. Presentation only — the simulation never
+// reads this.
+//   ring — a flat hoop            disc — a soft dust annulus
+//   arc  — a directional wedge (used for warning cues aimed at a threat)
+export class TelegraphPool{
+ constructor(scene,limit=20){
+  this.scene=scene;this.limit=Math.max(4,limit|0);this.slots=[];this.serial=0;
+  this.ringGeo=new T.TorusGeometry(1,.055,6,26);
+  this.discGeo=new T.RingGeometry(.52,1,26);
+  this.arcGeo=new T.RingGeometry(.74,1,18,1,Math.PI/2-1,2);
+ }
+ _slot(){
+  let slot=this.slots.find(entry=>!entry.active);
+  if(slot)return slot;
+  if(this.slots.length>=this.limit){this.slots.sort((a,b)=>a.serial-b.serial);return this.slots[0];}
+  const material=new T.MeshBasicMaterial({transparent:true,depthWrite:false,side:T.DoubleSide});
+  const holder=new T.Group(),mesh=new T.Mesh(this.ringGeo,material);
+  mesh.rotation.x=-Math.PI/2;mesh.frustumCulled=false;mesh.renderOrder=2;
+  holder.add(mesh);holder.visible=false;this.scene.add(holder);
+  slot={holder,mesh,material,active:false,serial:0,life:0,total:1,grow:0,opacity:0};
+  this.slots.push(slot);return slot;
+ }
+ // `kind` is 'ring' | 'disc' | 'arc'; `yaw` aims an arc at a world direction
+ // (the arc is authored centred on the local forward, -z). `grow` is metres per
+ // second of radius expansion.
+ spawn({kind='ring',pos,color='#cfe9ff',radius=1,life=.4,grow=0,opacity=.6,yaw=0}={}){
+  if(!pos)return null;
+  const slot=this._slot();if(!slot)return null;
+  slot.mesh.geometry=kind==='disc'?this.discGeo:kind==='arc'?this.arcGeo:this.ringGeo;
+  slot.mesh.material.color.set(color);slot.mesh.material.opacity=opacity;
+  slot.mesh.scale.setScalar(Math.max(.05,Number(radius)||1));
+  slot.holder.position.set(Number(pos.x)||0,Number(pos.y)||0,Number(pos.z)||0);
+  slot.holder.rotation.y=kind==='arc'?(Number(yaw)||0):0;
+  slot.holder.visible=true;
+  slot.active=true;slot.serial=++this.serial;slot.grow=Number(grow)||0;slot.opacity=opacity;
+  slot.life=slot.total=Math.max(.05,Number(life)||.4);
+  return slot;
+ }
+ update(dt){
+  const step=Math.max(0,Math.min(Number(dt)||0,.25));
+  for(const slot of this.slots){
+   if(!slot.active)continue;
+   slot.life-=step;
+   if(slot.life<=0){slot.active=false;slot.holder.visible=false;continue;}
+   const t=1-slot.life/slot.total;
+   slot.material.opacity=slot.opacity*(1-t);
+   if(slot.grow)slot.mesh.scale.setScalar(slot.mesh.scale.x+slot.grow*step);
+  }
+ }
+ clear(){for(const slot of this.slots){slot.active=false;slot.holder.visible=false;}}
+ dispose(){for(const slot of this.slots){this.scene.remove(slot.holder);slot.material?.dispose();slot.material=null;}this.slots=[];this.ringGeo?.dispose();this.discGeo?.dispose();this.arcGeo?.dispose();this.ringGeo=this.discGeo=this.arcGeo=null;}
+}
+
 // Menu/showcase 3D weapon viewer. It owns a tiny scene with a turntable pivot
 // and an inspect camera; mount() builds the weapon through the shared
 // weaponModel + ModelAssets pipeline (so a preview reuses the exact same
