@@ -41,7 +41,7 @@ const skybreak={
  blocks:[cover(-39,-7,4,2.5,2.8,'landmark'),cover(39,7,4,2.5,2.8,'landmark'),cover(-34,4,3,2),cover(34,-4,3,2),cover(-18,-18,2.5,2),cover(18,-18,2.5,2),cover(-18,18,2.5,2),cover(18,18,2.5,2),cover(0,0,3,2.5,2.6,'landmark')],
  teamSpawns:teamSpawns([[-42,-4],[-42,4]],[[42,-4],[42,4]]),flagSpawns:flagSpawns(-43,43),
  spawns:[[-42,-4],[-42,4],[42,-4],[42,4],[-18,-20],[18,-20],[-18,20],[18,20]],
- pickups:[['health',-43,-8],['health',43,8],['armor',-34,8],['armor',34,-8],['rocket',-18,-16],['rocket',18,16],['rail',18,-16],['rail',-18,16],['scatter',-4,0],['scatter',4,0],['plasma',-2,2],['plasma',2,-2],['grenade',-21,-18],['grenade',21,18],['shock',-21,18],['shock',21,-18],['flak',0,-2],['flak',0,2],['haste',-34,-2],['overcharge',34,2],['overshield',0,3]],
+ pickups:[['health',-43,-8],['health',43,8],['armor',-34,8],['armor',34,-8],['rocket',-18,-16],['rocket',18,16],['rail',18,-16],['rail',-18,16],['scatter',-4,0],['scatter',4,0],['plasma',-2,2],['plasma',2,-2],['grenade',-21,-18],['grenade',21,18],['shock',-21,18],['shock',21,-18],['flak',-8,-3],['flak',8,3],['haste',-34,-2],['overcharge',34,2],['overshield',0,3]],
  traversal:{trampolines:skybreakTrampolines,boostLaunchers:skybreakBoosts},
  jumpLinks:[
   link('skybreak-mid-west-link',[-34,0],[-5.5,0],'skybreak-mid-west','middle'),link('skybreak-mid-east-link',[34,0],[5.5,0],'skybreak-mid-east','middle'),link('skybreak-mid-return-west-link',[-5.5,0],[-34,0],'skybreak-mid-return-west','middle'),link('skybreak-mid-return-east-link',[5.5,0],[34,0],'skybreak-mid-return-east','middle'),
@@ -83,7 +83,7 @@ const aether={
   blocks:[cover(-35,-2,2.5,2.5,2.8,'landmark'),cover(35,2,2.5,2.5,2.8,'landmark'),cover(-34,4,2.5,2),cover(34,-4,2.5,2),cover(-19,-18,2.5,2),cover(19,-18,2.5,2),cover(-19,18,2.5,2),cover(19,18,2.5,2),cover(0,0,3,3,2.5,'landmark')],
  teamSpawns:teamSpawns([[-37,-4],[-37,4]],[[37,-4],[37,4]]),flagSpawns:flagSpawns(-36,36),
  spawns:[[-37,-4],[-37,4],[37,-4],[37,4],[-19,-20],[19,-20],[-19,20],[19,20]],
- pickups:[['health',-34,-8],['health',34,8],['armor',-34,8],['armor',34,-8],['rocket',-19,-16],['rocket',19,16],['rail',19,-16],['rail',-19,16],['scatter',-4,0],['scatter',4,0],['plasma',-2,2.25],['plasma',2,-2.25],['grenade',-2,-22],['grenade',2,22],['shock',-2,22],['shock',2,-22],['flak',0,-22],['flak',0,22],['haste',-29,0],['overcharge',29,0],['overshield',0,3]],
+ pickups:[['health',-34,-8],['health',34,8],['armor',-34,8],['armor',34,-8],['rocket',-19,-16],['rocket',19,16],['rail',19,-16],['rail',-19,16],['scatter',-4,0],['scatter',4,0],['plasma',-2,2.25],['plasma',2,-2.25],['grenade',-2,-22],['grenade',2,22],['shock',-2,22],['shock',2,-22],['flak',0,-24],['flak',0,24],['haste',-29,0],['overcharge',29,0],['overshield',0,3]],
  traversal:{trampolines:aetherTrampolines,boostLaunchers:aetherBoosts},
  jumpLinks:[
   link('aether-mid-west-link',[-33,0],[-5.5,0],'aether-mid-west','middle'),link('aether-mid-east-link',[33,0],[5.5,0],'aether-mid-east','middle'),

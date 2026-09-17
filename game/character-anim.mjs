@@ -105,16 +105,16 @@ export function characterPose(state = {}) {
     pose.torso.x = 0.12;
     pose.rootY = 0.02;
   } else {
-    const stride = 0.34 + 0.52 * speed;
+    const stride = speed * (0.34 + 0.52 * speed);
     pose.legL.hipX = swing * stride;
     pose.legR.hipX = -swing * stride;
     // Knees bend most as the leg travels behind the body.
-    pose.legL.kneeX = 0.1 + Math.max(0, -swing) * (0.35 + 0.7 * speed);
-    pose.legR.kneeX = 0.1 + Math.max(0, swing) * (0.35 + 0.7 * speed);
+    pose.legL.kneeX = 0.1 + Math.max(0, -swing) * (0.35 + 0.7 * speed) * speed;
+    pose.legR.kneeX = 0.1 + Math.max(0, swing) * (0.35 + 0.7 * speed) * speed;
     pose.legL.ankleX = -pose.legL.hipX * 0.35;
     pose.legR.ankleX = -pose.legR.hipX * 0.35;
     // Arms counter-swing the legs; held arms shrink the swing during ADS.
-    const armSwing = (0.28 + 0.5 * speed) * (1 - ads * 0.75);
+    const armSwing = speed * (0.28 + 0.5 * speed) * (1 - ads * 0.75);
     pose.armL.shoulderX = -swing * armSwing;
     pose.armR.shoulderX = swing * armSwing;
     pose.armL.elbowX = -0.3 - Math.max(0, swing) * 0.35 * speed;
@@ -203,6 +203,28 @@ export function characterPose(state = {}) {
     pose.armR.shoulderX -= hit * 0.25;
   }
 
+  // Opt-in measured limb lengths used by the refined operator model. Solve a
+  // planted ankle, not independent hip/knee sine waves; no raycasts or iteration.
+  // Keep generic/legacy rigs on their existing dimensions until opted in.
+  if (grounded && state.contactGait) {
+    const motion = state.reduced ? 0 : speed;
+    pose.rootY = -.012 - motion*.025 - crouch*.06 - land*.02;
+    pose.hips.x = pose.hips.y = pose.hips.z = 0;
+    const direction = forward < -.05 ? -1 : 1;
+    for (const [leg,offset] of [[pose.legL,0],[pose.legR,Math.PI]]) {
+      const p=phase+offset;
+      const lift=Math.max(0,Math.sin(p))*.05*motion*(1-crouch*.6)*(1-land*.5);
+      const z=Math.cos(p)*.15*motion*direction*(1-crouch*.5);
+      leg.contactLift=lift;
+      const height=.69+pose.rootY-lift;
+      const distance=clamp(Math.hypot(height,z),.011,.6899);
+      const bend=Math.acos(clamp((.34*.34+distance*distance-.35*.35)/(2*.34*distance),-1,1));
+      leg.hipX=Math.atan2(z,height)-bend;
+      leg.kneeX=Math.PI-Math.acos(clamp((.34*.34+.35*.35-distance*distance)/(2*.34*.35),-1,1));
+      leg.ankleX=-leg.hipX-leg.kneeX;
+    }
+  }
+
   // Final safety clamping ensures all rig angles remain strictly bounded
   for (const part of [pose.hips, pose.torso, pose.chest, pose.head]) {
     part.x = clamp(part.x, -1.25, 1.25);
@@ -232,6 +254,7 @@ export function characterPose(state = {}) {
 export class CharacterRig {
   constructor(joints = {}) {
     this.joints = joints;
+    this.captureBind();
     this.phase = 0;
     this.speedNorm = 0;
     this.crouch = 0;
@@ -245,7 +268,29 @@ export class CharacterRig {
     this.lastGrounded = true;
   }
 
+  captureBind() {
+    this.bind = Object.values(this.joints).filter(n=>n?.position && n?.rotation).map(node=>({
+      node, position:{x:node.position.x,y:node.position.y,z:node.position.z},
+      rotation:{x:node.rotation.x,y:node.rotation.y,z:node.rotation.z,order:node.rotation.order},
+      scale:node.scale?{x:node.scale.x,y:node.scale.y,z:node.scale.z}:null,
+    }));
+  }
+
+  reset() {
+    for (const b of this.bind) {
+      Object.assign(b.node.position,b.position);
+      b.node.rotation.set(b.rotation.x,b.rotation.y,b.rotation.z,b.rotation.order);
+      if(b.scale) Object.assign(b.node.scale,b.scale);
+    }
+    for (const key of ['phase','speedNorm','crouch','ads','strafe','forward','hit','bodyYaw','land','reload']) this[key] = 0;
+    this.lastGrounded = true;
+    this.lifecycle = 'alive';
+    this.pose = null;
+  }
+
   update(state = {}) {
+    // The lifecycle owns all joint writes while dead, including dt=0 callers.
+    if (this.lifecycle && this.lifecycle !== 'alive') return null;
     const dt = clamp(state.dt ?? 0, 0, 0.1);
     const maxSpeed = Math.max(0.001, state.maxSpeed ?? 8);
     const speedNorm = clamp((state.speed ?? 0) / maxSpeed, 0, 1);
@@ -268,6 +313,8 @@ export class CharacterRig {
     this.phase = advancePhase(this.phase, this.speedNorm, dt, grounded);
     const pose = characterPose({
       phase: this.phase,
+      contactGait: this.joints.contactGait === true,
+      reduced: state.reduced === true,
       speedNorm: this.speedNorm,
       grounded,
       crouch: this.crouch,
@@ -287,6 +334,8 @@ export class CharacterRig {
   }
 
   apply(pose) {
+    if (this.lifecycle && this.lifecycle !== 'alive') return;
+    this.pose = pose;
     const j = this.joints;
     // The robot mesh faces -Z, but the rig poses are authored for a +Z front, so
     // negate the pitch axis on application (yaw/roll are unaffected).
@@ -300,6 +349,10 @@ export class CharacterRig {
     ro(j.armUpperR, pose.armR.shoulderX, 0, pose.armR.shoulderZ);
     ro(j.forearmL, pose.armL.elbowX, 0, 0);
     ro(j.forearmR, pose.armR.elbowX, 0, 0);
+    // Wrist orientation belongs to the optional post-pose grip pass. Clear it
+    // with the base pose so missing weapons/disabled passes never retain IK.
+    ro(j.handL, 0, 0, 0);
+    ro(j.handR, 0, 0, 0);
     ro(j.legUpperL, pose.legL.hipX, 0, 0);
     ro(j.legUpperR, pose.legR.hipX, 0, 0);
     ro(j.legLowerL, pose.legL.kneeX, 0, 0);

@@ -4,7 +4,7 @@
 //
 // Builder contract (see any sibling module for the pattern):
 //   export function build<Name>(g, ctx)
-//     g   - THREE.Group to populate. Attach every mesh directly to `g`.
+//     g   - THREE.Group to populate. Nested sight/mechanism groups are supported.
 //     ctx - {
 //             T,                 three namespace for custom geometry constructors
 //             info,              WEAPONS[type]

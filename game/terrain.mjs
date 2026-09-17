@@ -104,6 +104,138 @@ export function terrainSupportAt(x,z,terrain,maxSlope=Infinity){
   return best;
 }
 
+// Convex footprint clipping in XZ, retaining interpolated Y. Footprints are
+// counter-clockwise in XZ; input triangles retain their original winding.
+function clipHalf(poly,a,b,inside=true) {
+  if(!poly.length)return [];
+  const distance=p=>((b[0]-a[0])*(p[2]-a[1])-(b[1]-a[1])*(p[0]-a[0]))*(inside?1:-1);
+  const out=[];
+  for(let i=0;i<poly.length;i++){
+    const p=poly[i],q=poly[(i+1)%poly.length],dp=distance(p),dq=distance(q);
+    if(dp>=-EPSILON)out.push(p);
+    if((dp>EPSILON&&dq<-EPSILON)||(dp<-EPSILON&&dq>EPSILON)){
+      const t=dp/(dp-dq);out.push(p.map((v,k)=>v+(q[k]-v)*t));
+    }
+  }
+  return out;
+}
+function footprintPolygon(poly) {
+  if(!Array.isArray(poly)||poly.length<3||!poly.every(p=>Array.isArray(p)&&p.length===2&&p.every(finite)))throw new TypeError('Invalid footprint');
+  let area=0;
+  for(let i=0;i<poly.length;i++){const a=poly[i],b=poly[(i+1)%poly.length];area+=a[0]*b[1]-b[0]*a[1];}
+  const result=area<0?poly.slice().reverse():poly;
+  if(Math.abs(area)<=EPSILON)throw new RangeError('Degenerate footprint');
+  for(let i=0;i<result.length;i++){
+    const a=result[i],b=result[(i+1)%result.length],c=result[(i+2)%result.length];
+    if((b[0]-a[0])*(c[1]-b[1])-(b[1]-a[1])*(c[0]-b[0])<-EPSILON)throw new RangeError('Footprint must be convex');
+  }
+  return result;
+}
+const projectedArea=poly=>Math.abs(poly.reduce((sum,p,i)=>{const q=poly[(i+1)%poly.length];return sum+p[0]*q[2]-q[0]*p[2];},0))/2;
+const clipFootprint=(vertices,poly)=>poly.reduce((v,a,i)=>clipHalf(v,a,poly[(i+1)%poly.length]),vertices);
+
+// Exact extrema of the intersected piecewise-linear terrain, not centre/corner
+// sampling: an interior terrain vertex can be the highest point of a foundation.
+export function terrainFootprintRange(terrain,footprint) {
+  const poly=footprintPolygon(footprint);let min=Infinity,max=-Infinity,area=0;
+  for(const t of terrainTriangles(terrain)){
+    if(!t.walkable||t.normal[1]<=EPSILON)continue;
+    const clipped=clipFootprint(t.vertices,poly),a=projectedArea(clipped);
+    if(a<=EPSILON)continue;
+    area+=a;for(const p of clipped){min=Math.min(min,p[1]);max=Math.max(max,p[1]);}
+  }
+  return area>EPSILON?{min,max,area}:null;
+}
+
+// Author a ground replacement, NOT an elevated platform. Remove old terrain
+// under the footprint (including cliff proxies), then emit the same triangle
+// schema consumed by render, collision/rays and nav. Call only during generation.
+// The callback must describe a plane; piecewise paths stamp one segment at a time.
+export function stampTerrainFloor(terrain,footprint,height,id='authored-floor',{skirts=false}={}) {
+  const poly=footprintPolygon(footprint),surfaces=[];
+  const authored={id,material:'stone',walkable:true,vertices:[],triangles:[]};
+  const skirt={id:`${id}-sides`,material:'stone',walkable:false,vertices:[],triangles:[]};
+  const emit=(target,vertices)=>{
+    for(let i=1;i<vertices.length-1;i++){
+      const tri=[vertices[0],vertices[i],vertices[i+1]];
+      if(Math.hypot(...cross(subtract(tri[1],tri[0]),subtract(tri[2],tri[0])))<=EPSILON)continue;
+      const base=target.vertices.length;target.vertices.push(...tri);target.triangles.push([base,base+1,base+2]);
+    }
+  };
+  for(const surface of surfacesOf(terrain)){
+    const out={...surface,vertices:[],triangles:[]};
+    for(const t of surfaceTriangles(surface,surface.id)){
+      const clipped=clipFootprint(t.vertices,poly);
+      if(!clipped.length || (t.walkable&&projectedArea(clipped)<=EPSILON)){emit(out,t.vertices);continue;}
+      let remainder=t.vertices;
+      for(let i=0;i<poly.length;i++){
+        emit(out,clipHalf(remainder,poly[i],poly[(i+1)%poly.length],false));
+        remainder=clipHalf(remainder,poly[i],poly[(i+1)%poly.length]);
+      }
+      if(t.walkable&&t.normal[1]>EPSILON){
+        const raised=clipped.map(p=>{
+          const y=height(p[0],p[2]);if(!finite(y))throw new TypeError('Invalid authored floor height');return [p[0],y,p[2]];
+        });
+        emit(authored,raised);
+        // Only the edit perimeter needs a retaining face. Preserve every old
+        // triangle intersection there, so skirts meet the actual ground, not
+        // a centre/corner approximation. Ordinary foundation/tunnel stamps
+        // keep their existing behavior unless explicitly opted in.
+        if(skirts)for(let j=0;j<clipped.length;j++){
+          const k=(j+1)%clipped.length,p=clipped[j],q=clipped[k];
+          if(poly.some((a,i)=>{
+            const b=poly[(i+1)%poly.length],edge=v=>(b[0]-a[0])*(v[2]-a[1])-(b[1]-a[1])*(v[0]-a[0]);
+            return Math.abs(edge(p))<1e-7&&Math.abs(edge(q))<1e-7;
+          }))emit(skirt,[p,q,raised[k],raised[j]]);
+        }
+      }
+    }
+    if(out.triangles.length)surfaces.push(out);
+  }
+  // Split existing cliff wall segments at the same boundary, never leave an
+  // invisible old wall across a newly authored doorway or tunnel floor.
+  const walls=[];
+  for(const [wallId,wall] of (terrain.walls??[]).entries()){
+    const vertices=wallVertices(wall,wallId);
+    if(vertices.length>2){
+      // Retain actual polygons: converting them to two-point movement proxies
+      // would silently remove ray collision from untouched portions of the wall.
+      const out={vertices:[],triangles:[]};
+      for(let j=1;j<vertices.length-1;j++){
+        let remainder=[vertices[0],vertices[j],vertices[j+1]];
+        if(!clipFootprint(remainder,poly).length){emit(out,remainder);continue;}
+        for(let i=0;i<poly.length;i++){
+          emit(out,clipHalf(remainder,poly[i],poly[(i+1)%poly.length],false));
+          remainder=clipHalf(remainder,poly[i],poly[(i+1)%poly.length]);
+        }
+      }
+      for(const tri of out.triangles)walls.push({material:wall.material,vertices:tri.map(i=>out.vertices[i])});
+      continue;
+    }
+    const [pa,pb]=vertices,a={x:pa[0],y:pa[1],z:pa[2]},b={x:pb[0],y:pb[1],z:pb[2]};
+    let lo=0,hi=1;
+    for(let i=0;i<poly.length;i++){
+      const p=poly[i],q=poly[(i+1)%poly.length],dist=v=>(q[0]-p[0])*(v.z-p[1])-(q[1]-p[1])*(v.x-p[0]);
+      const da=dist(a),db=dist(b),delta=db-da;
+      if(Math.abs(delta)<=EPSILON){if(da<-EPSILON){lo=1;hi=0;break;}}
+      else if(delta>0)lo=Math.max(lo,-da/delta);else hi=Math.min(hi,-da/delta);
+    }
+    const at=t=>[a.x+(b.x-a.x)*t,a.y+(b.y-a.y)*t,a.z+(b.z-a.z)*t];
+    if(lo>=hi){walls.push({a:at(0),b:at(1)});continue;}
+    if(lo>EPSILON)walls.push({a:at(0),b:at(lo)});
+    if(hi<1-EPSILON)walls.push({a:at(hi),b:at(1)});
+  }
+  for(const addition of [authored,skirt])if(addition.triangles.length){
+    const batch=surfaces.find(s=>s.id===addition.id&&s.material===addition.material&&(s.walkable!==false)===addition.walkable);
+    if(batch){const base=batch.vertices.length;batch.vertices.push(...addition.vertices);batch.triangles.push(...addition.triangles.map(t=>t.map(i=>i+base)));}
+    else surfaces.push(addition);
+  }
+  terrain.surfaces=surfaces;terrain.walls=walls;
+  triangleCache.delete(terrain);wallTriangleCache.delete(terrain);wallSegmentCache.delete(terrain);
+  terrain.height=(x,z)=>terrainSupportAt(x,z,terrain)?.y??null;
+  return authored;
+}
+
 function rayTriangle(origin,direction,triangle){
   const [a,b,c]=triangle.vertices, edge1=subtract(b,a),edge2=subtract(c,a),h=cross(direction,edge2),det=dot(edge1,h);
   if(Math.abs(det)<=EPSILON)return null;

@@ -57,7 +57,8 @@ test('the bolt cycles from the authoritative shot kick and resets under reduced 
  const view=Object.create(ArenaView.prototype);view.feedback={kick:.8};
  const model=weaponModel(0),bolt=model.userData.anchors.bolt,baseZ=bolt.position.z;
  view._animateWeaponParts(model,{weapon:0,reloading:false},false);
- assert.ok(bolt.position.z<baseZ,'the bolt retracts on the shot kick');
+ // Model -Z is muzzle; rearward carrier travel is therefore positive Z.
+ assert.ok(bolt.position.z>baseZ&&bolt.position.z<=baseZ+.05,'the bolt retracts toward the stock within its carrier stroke');
  view._animateWeaponParts(model,{weapon:0,reloading:false},true);
  assert.equal(bolt.position.z,baseZ,'reduced motion holds the bolt still');
  ArenaView.prototype.disposeObject.call({},model);

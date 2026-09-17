@@ -112,3 +112,16 @@ export function hitReaction({damage=0,dir=null,seed=0,actor=0,serial=0,reduced=f
   seed:hashSeed(seed,actor,serial),
  };
 }
+
+// Every surviving-body profile reaches a horizontal rest. Spin changes yaw,
+// never the final supporting axis (the old crumple/sprawl remained upright).
+export function corpseRotation(plan = {}, progress = 1, yaw = 0, reduced = false) {
+ const t=clamp01(Number.isFinite(progress)?progress:0),e=t*t*(3-2*t);
+ const tilt=e*Math.PI/2,pose=plan.pose;
+ const spin=Number.isFinite(plan.spin)?Math.max(-1.6,Math.min(1.6,plan.spin)):0;
+ return {
+  x:pose==='left'||pose==='right'?0:pose==='back'?-tilt:tilt,
+  y:(Number.isFinite(yaw)?yaw:0)+(reduced?0:spin*e*.35),
+  z:pose==='left'?tilt:pose==='right'?-tilt:0,
+ };
+}

@@ -75,8 +75,11 @@ test('the front post tip sits at the aiming point while the post body extends be
 
 test('the SMG rear anchor sits on the clear sight line, not the old in-block offset',()=>{
  const model=weaponModel(9);
- assert.ok(model.userData.sights.rear.y>=.29,'the SMG rear anchor clears the rear block instead of sitting inside it (was y=.248)');
- assert.ok(model.userData.sights.rear.y<=.42,'the rear anchor stays a sensible height above the receiver');
+ const receiver=model.getObjectByName('receiver');
+ assert.ok(receiver,'SMG has a receiver whose clearance can be measured');
+ const receiverTop=receiver.position.y+receiver.geometry.parameters.height/2;
+ const clearance=model.userData.sights.rear.y-receiverTop;
+ assert.ok(clearance>=.035&&clearance<=.10,`low-mounted SMG sight clears its redesigned receiver without a tall riser: ${clearance}`);
  // The rear sight must not expose a solid block: a rear notch is open.
  const {root}=mounted(9),hits=centerHits(root);
  assert.ok(!tagged(hits,'sightRear'),'the SMG rear sight is an open notch');

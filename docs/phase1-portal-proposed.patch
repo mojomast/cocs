@@ -1,0 +1,24 @@
+--- a/game/nextgen-maps.mjs
++++ b/game/nextgen-maps.mjs
+@@ -60,6 +60,10 @@
+     // Keep deferred tunnel approaches clear of the base foundation landings.
+     ctx.addTunnel([[-32, undefined, 0], [-14, undefined, 0], [14, undefined, 0], [32, undefined, 0]], 3.2);
+     ctx.addCavern({ x: 0, z: -20, radius: 13, height: 9 });
++    // Caverns realize after scatter; reserve both default portal approaches.
++    for (const a of [Math.PI / 16, Math.PI + Math.PI / 16]) {
++      for (let r = 10; r <= 17; r++) ctx.addNav(Math.cos(a) * r, -20 + Math.sin(a) * r);
++    }
+     // Reserve the tunnel and both mouths, including each prop's collision extent.
+     const outsideTunnel = (x, z, radius) => Math.abs(x) > 40 + radius || Math.abs(z) > 3.2 + radius;
+     ring(ctx, 0, 0, 26, 10, (c, x, z) => { const scale = 1.4 + rng() * 1.2; if (outsideTunnel(x, z, scale)) c.addRock({ x, z, scale }); });
+@@ -152,8 +156,8 @@
+   layout(ctx, rng) {
+     const hubs = [[-26, -26], [26, -26], [26, 26], [-26, 26], [0, 0]];
+     for (const [x, z] of hubs) ctx.addCavern({ x, z, radius: 10, height: 7 });
+-    // East/west crypt openings must meet the lanes, not diagonal solid walls.
+-    for (const z of [-26, 0, 26]) ctx.addTunnel([[-40, undefined, z], [40, undefined, z]], 2.4);
++    // Existing lanes must clear diagonal chamber exits, including body/headroom.
++    for (const z of [-26, 0, 26]) ctx.addTunnel([[-40, undefined, z], [40, undefined, z]], 4);
+     scatter(ctx, 16, rng, 8, (c, x, z) => c.addRuin({ x, z, scale: .7 + rng() * .6 }));
+     ctx.addObjective(0, 0, 4); ctx.addObjective(-26, -26, 3.5); ctx.addObjective(26, 26, 3.5);
+     for (const [x, z] of [[-40, 0], [40, 0], [0, -40], [0, 40], [-40, -40], [40, -40], [-40, 40], [40, 40]]) ctx.addSpawn(x, z);

@@ -19,7 +19,7 @@ const v3 = (x = 0, y = 0, z = 0) => new T.Vector3(x, y, z);
 // Rear "notch" battle sight: a pair of side posts sitting on a lower bridge,
 // with an open gap between them. The aiming point is the empty center at
 // (x, y, z); the posts frame it without filling it.
-export function attachRearNotch(parent, ctx, { x = 0, y = 0, z = 0, width = 0.09, height = 0.05, depth = 0.03, gap = 0.03, material, bridge } = {}) {
+export function attachRearNotch(parent, ctx, { x = 0, y = 0, z = 0, width = 0.09, height = 0.05, depth = 0.03, gap = 0.03, mountY, material, bridge } = {}) {
   const { box } = ctx;
   const mat = material || ctx.palette?.dark;
   const bar = bridge || material || ctx.palette?.light;
@@ -31,6 +31,11 @@ export function attachRearNotch(parent, ctx, { x = 0, y = 0, z = 0, width = 0.09
   // A thin bridge under the opening ties the posts together without rising into
   // the sight line; the gap above it stays open.
   tagRear(box(parent, width, Math.max(0.01, height * 0.22), depth * 0.9, x, y - height * 0.39, z, bar));
+  if (Number.isFinite(mountY)) {
+    const top = y - height * .39;
+    const foot = box(parent, width, Math.max(.004, top - mountY), depth, x, (top + mountY) / 2, z, bar);
+    foot.userData.sightMount = true;
+  }
   return { x, y, z, width: gap, height };
 }
 
@@ -47,13 +52,18 @@ export function attachRearAperture(parent, ctx, { x = 0, y = 0, z = 0, radius = 
 
 // Front sight post. The post rises to a tip at (x, y, z) — the front aiming
 // point — and extends downward, keeping the target above the tip unobstructed.
-export function attachFrontPost(parent, ctx, { x = 0, y = 0, z = 0, width = 0.012, height = 0.05, depth = 0.014, material, tipMaterial } = {}) {
+export function attachFrontPost(parent, ctx, { x = 0, y = 0, z = 0, width = 0.012, height = 0.05, depth = 0.014, mountY, material, tipMaterial } = {}) {
   const { box } = ctx;
   const mat = material || ctx.palette?.dark;
   const post = box(parent, width, height, depth, x, y - height / 2, z, mat);
   if (post) post.userData.sightFront = true;
-  const tip = ctx.T && box(parent, width * 0.9, Math.min(0.012, height * 0.25), depth * 0.9, x, y, z, tipMaterial || ctx.palette?.glow);
+  const tip = ctx.T && box(parent, width * 0.9, Math.min(0.012, height * 0.25), depth * 0.9, x, y - Math.min(0.012, height * 0.25) / 2, z, tipMaterial || ctx.palette?.glow);
   if (tip) tip.userData.sightFrontTip = true;
+  if (Number.isFinite(mountY)) {
+    const top = y - height + .004;
+    const foot = box(parent, width * 3, Math.max(.004, top - mountY), depth * 2, x, (top + mountY) / 2, z, mat);
+    foot.userData.sightMount = true;
+  }
   return { x, y, z, tip: true };
 }
 
@@ -129,8 +139,10 @@ export function attachScope(parent, ctx, { x = 0, y = 0, z = 0, length = 0.5, ra
     for (const rz of [z - length * 0.74, z - length * 0.16]) {
       if (ring) ring(parent, radius + 0.01, 0.01, x, y, rz, ringMaterial || post, 0);
       if (box) {
-        box(parent, 0.02, postLength, 0.024, x + postX, baseY + postLength / 2, rz, post);
-        box(parent, 0.02, postLength, 0.024, x - postX, baseY + postLength / 2, rz, post);
+        for (const side of [-1, 1]) {
+          const foot = box(parent, 0.02, postLength, 0.024, x + side * postX, baseY + postLength / 2, rz, post);
+          foot.userData.sightMount = true;
+        }
       }
     }
     if (box) box(parent, postX * 2 + 0.02, 0.018, length * 0.8, x, baseY + 0.009, z - length * 0.45, post);
@@ -142,8 +154,17 @@ export function attachScope(parent, ctx, { x = 0, y = 0, z = 0, length = 0.5, ra
 // holo/scope. The anchors come from the weapon's own built-in sights, so the
 // optic sits on the same axis instead of floating on a separate hard-coded line.
 export function attachOptic(parent, ctx, kind, anchors, { x = 0, y = 0, z = 0 } = {}) {
-  if (kind === 'holo') return attachHoloSight(parent, ctx, { x, y, z, material: ctx.palette?.dark, reticleMaterial: ctx.palette?.glow });
-  if (kind === 'scope') return attachScope(parent, ctx, { x, y, z, material: ctx.palette?.dark, ringMaterial: ctx.palette?.glow, mount: true });
+  const built = parent.userData.sights;
+  // Integrated precision optics already own the bore and stronger zoom policy.
+  if (built?.kind === 'scope' && parent.userData.sightAssembly) return built;
+  if ((kind === 'holo' || kind === 'scope') && parent.userData.sightAssembly) parent.userData.sightAssembly.visible = false;
+  const mountY = parent.userData.chassis ? parent.userData.chassis.top + .024 : y - .065;
+  if (kind === 'holo') {
+    const foot = ctx.box(parent, .09, Math.max(.004, y - .035 - mountY), .10, x, (mountY + y - .035) / 2, z, ctx.palette?.dark);
+    foot.userData.sightMount = true;
+    return attachHoloSight(parent, ctx, { x, y, z, material: ctx.palette?.dark, reticleMaterial: ctx.palette?.glow });
+  }
+  if (kind === 'scope') return attachScope(parent, ctx, { x, y, z, radius: .039, bell: .006, length: .30, mountY, material: ctx.palette?.dark, ringMaterial: ctx.palette?.light, mount: true });
   if (kind === 'iron') {
     // An "iron" attachment is a raised rail-mounted aperture + post over the
     // built-in sights; keep it open.

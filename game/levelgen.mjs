@@ -12,8 +12,8 @@
 // bots, projectiles and prediction keep working unchanged; only the look and the
 // authored layout change.
 
-import {cavernOpening} from './structures.mjs';
-import {terrainSupportAt, terrainWallSegments} from './terrain.mjs';
+import {cavernOpening,facadeFrame,pathFloorAt,CAVERN_SEGMENTS,cavernShell} from './structures.mjs';
+import {terrainSupportAt, terrainWallSegments,terrainFootprintRange,stampTerrainFloor} from './terrain.mjs';
 import {RULES} from './data.mjs';
 import {clamp, lerp} from './math.mjs';
 import {validateMapSchema} from './map-schema.mjs';
@@ -159,15 +159,49 @@ export function createLevel(spec) {
     addProp: (p) => { ctx.props.push(p); return p; },
   };
 
-  const terrain = spec.terrain ?? terrainField(bounds, { ...spec, seed: spec.seed });
+  const sourceTerrain = spec.terrain ?? terrainField(bounds, { ...spec, seed: spec.seed });
+  // Generation owns its terrain container; authored/frozen input is never edited.
+  const terrain={...sourceTerrain,surfaces:[...(sourceTerrain.surfaces||[])],walls:[...(sourceTerrain.walls||[])]};
   ctx.terrain = terrain;
   ctx.ground = (x, z) => terrain.height(x, z);
+
+  // Existing terrain triangles remain the single authoritative ground surface.
+  const floorStrip=(a,b,width,id,options)=>{
+    const dx=b[0]-a[0],dz=b[2]-a[2],length=Math.hypot(dx,dz);
+    if(length<1e-6)return;
+    const nx=-dz/length*width/2,nz=dx/length*width/2;
+    stampTerrainFloor(terrain,[[a[0]+nx,a[2]+nz],[a[0]-nx,a[2]-nz],[b[0]-nx,b[2]-nz],[b[0]+nx,b[2]+nz]],(x,z)=>pathFloorAt(x,z,a,b).y,id,options);
+    const n=Math.ceil(length/1.5);
+    for(let i=0;i<=n;i++)ctx.addNav(a[0]+dx*i/n,a[2]+dz*i/n);
+  };
+  const approach=(x,z,y,nx,nz,width)=>{
+    // Flat landing extends beyond the solid by more than the actor radius.
+    const landing=[x+nx,z+nz];let length=4,endY=y;
+    for(let i=0;i<8;i++){
+      const ex=landing[0]+nx*length,ez=landing[1]+nz*length;
+      const sample=terrainSupportAt(ex,ez,terrain)?.y;
+      if(sample===undefined)break;
+      endY=sample;
+      const next=Math.max(4,Math.abs(y-endY)/.3);
+      if(next<=length+.01)break;
+      length=next;
+    }
+    floorStrip([x,y,z],[landing[0],y,landing[1]],width,'approach-floor');
+    floorStrip([landing[0],y,landing[1]],[landing[0]+nx*length,endY,landing[1]+nz*length],width,'approach-floor');
+  };
 
   // A building composed of four walls with an optional doorway and a roof.
   // Collision wall boxes leave a real, walkable door gap.
   ctx.addBuilding = (o) => {
     const { x, z, w, d, h = 6, wall = 0.5, rot = 0, roof = 'gable', door = 'south', doorWidth = 2.2, color, windows = true } = o;
-    const q = quarter(rot), groundY = terrain.height(x, z), baseY = o.y ?? groundY;
+    const q = quarter(rot),fw=q%2?d:w,fd=q%2?w:d;
+    const footprint=[[x-fw/2,z-fd/2],[x+fw/2,z-fd/2],[x+fw/2,z+fd/2],[x-fw/2,z+fd/2]];
+    const support=terrainFootprintRange(terrain,footprint);
+    if(!support||support.area<fw*fd-1e-6)throw new RangeError('Building footprint must be fully supported by terrain');
+    const baseY=o.y??support.max;
+    stampTerrainFloor(terrain,footprint,()=>baseY,'foundation-floor');
+    // Explicit ground-to-top solid fill. No minY/y semantics added to blocks.
+    if(baseY>0)ctx.addBlock({x,z,w:fw,d:fd,h:baseY,kind:'foundation'});
     const place = (lx, lz, sw, sd, kind, hh = h, yy = baseY) => {
       const [rx, rz] = rotateLocal(lx, lz, q);
       const [sw2, sd2] = q % 2 === 0 ? [sw, sd] : [sd, sw];
@@ -185,15 +219,17 @@ export function createLevel(spec) {
         else { place(cx, cz - (doorWidth / 2 + seg / 2), sw, seg, 'building'); place(cx, cz + (doorWidth / 2 + seg / 2), sw, seg, 'building'); }
       } else place(cx, cz, sw, sd, 'building');
     }
-    ctx.addStructure({ type: 'building', x, z, y: baseY, w, d, h, rot, roof, color, windows, door });
+    const building=ctx.addStructure({ type: 'building', x, z, y: baseY, w, d, h, rot:q*Math.PI/2, roof, color, windows, door, wall, doorWidth });
     // Follow the actual local doorway through its quarter-turn, not the wall
     // nearest the map centre. Short steps preserve narrow entrances in nav.
     if (sides[door]) {
       const [dx, dz] = sides[door], length = Math.hypot(dx, dz);
       const [nx, nz] = rotateLocal(dx / length, dz / length, q);
+      const frame=facadeFrame(building,door);
+      approach(frame.origin.x,frame.origin.z,baseY,nx,nz,Math.min(doorWidth,sideSpan[door]-2*wall));
       for (let t = 0; t <= length + 4; t += 1.5) ctx.addNav(x + nx * t, z + nz * t);
     }
-    if (windows) for (const name of Object.keys(sides)) { if (name === door) continue; const [cx, cz] = sides[name]; const [rx, rz] = rotateLocal(cx, cz, q); const alongX = name === 'north' || name === 'south'; ctx.addStructure({ type: 'windows', x: x + rx, z: z + rz, y: baseY + h * 0.45, w: q % 2 === 0 ? (alongX ? w : d) : (alongX ? d : w), rot, rows: Math.max(1, Math.floor(h / 3)) }); }
+    if (windows) for (const side of Object.keys(sides)) { if(side===door)continue; const frame=facadeFrame(building,side); ctx.addStructure({type:'windows',side,frame,x:frame.origin.x,y:baseY+h*.45,z:frame.origin.z,w:frame.span,rot:Math.atan2(frame.tangent.z,frame.tangent.x),rows:Math.max(1,Math.floor(h/3))}); }
     return x;
   };
 
@@ -204,8 +240,9 @@ export function createLevel(spec) {
   // single-room builder so collision/doors/nav stay consistent.
   ctx.addCompound = (o) => {
     const { x, z, w, d, h = 6, rot = 0, rooms = [2, 1], wall = 0.5, door = 'south', doorWidth = 2.2, roof = 'gable', color, windows = true, y } = o;
-    const q = quarter(rot), baseY = y ?? terrain.height(x, z);
-    ctx.addBuilding({ x, z, w, d, h, rot, wall, door, doorWidth, roof, color, windows, y: baseY });
+    const q = quarter(rot);
+    ctx.addBuilding({ x, z, w, d, h, rot, wall, door, doorWidth, roof, color, windows, y });
+    const baseY=ctx.structures.findLast(s=>s.type==='building').y;
     const [cols, rows] = [Math.max(1, Math.round(rooms[0] || 1)), Math.max(1, Math.round(rooms[1] || 1))];
     const innerW = w - wall * 2, innerD = d - wall * 2;
     const place = (lx, lz, sw, sd, hh) => {
@@ -293,40 +330,69 @@ export function createLevel(spec) {
     return placed;
   };
 
-  // A hollow tunnel: side-wall collision boxes along the path and a smooth tube
-  // mesh for the roof/arch. Points are [x,y,z]; y defaults to the terrain.
+  // Points are authored FLOOR coordinates [x,y,z]; omitted Y samples the
+  // triangulated ground once. No consumer independently re-samples or offsets Y.
   ctx.addTunnel = (rawPoints, radius = 3) => {
-    const points = rawPoints.map(p => [p[0], Number.isFinite(p[1]) ? p[1] : terrain.height(p[0], p[2]) + 1.2, p[2]]);
-    ctx.addStructure({ type: 'tunnel', points, radius });
-    for (let i = 0; i < points.length - 1; i++) {
-      const a = points[i], b = points[i + 1];
-      const dx = b[0] - a[0], dy = b[1] - a[1], dz = b[2] - a[2], len = Math.hypot(dx, dz) || 1, along = Math.atan2(dx, dz);
-      const nx = Math.cos(along), nz = -Math.sin(along), count = Math.max(1, Math.ceil(len / 1.2));
-      for (let k = i === 0 ? 0 : 1; k <= count; k++) {
-        const t = k / count, px = a[0] + dx * t, pz = a[2] + dz * t, py = a[1] + dy * t;
-        ctx.addNav(px, pz);
-        for (const side of [-1, 1]) ctx.addBlock({ x: px + nx * side * radius, z: pz + nz * side * radius, w: 1.6, d: 1.6, h: py + radius + 1.4, kind: 'tunnel' });
-      }
+    if(!Array.isArray(rawPoints)||rawPoints.length<2||!Number.isFinite(radius)||radius<2)throw new RangeError('Tunnel needs two points and radius >= 2');
+    const points=rawPoints.map(p=>{
+      if(!Array.isArray(p)||!Number.isFinite(p[0])||!Number.isFinite(p[2])||(p[1]!==undefined&&!Number.isFinite(p[1])))throw new TypeError('Invalid tunnel floor point');
+      const y=p[1]??terrainSupportAt(p[0],p[2],terrain)?.y;
+      if(!Number.isFinite(y))throw new RangeError('Unsupported tunnel point');
+      return [p[0],y,p[2]];
+    });
+    for(let i=0;i<points.length-1;i++){
+      const a=points[i],b=points[i+1],length=Math.hypot(b[0]-a[0],b[2]-a[2]);
+      if(length<1e-6)throw new RangeError('Tunnel segments need horizontal extent');
+      if(Math.atan2(Math.abs(b[1]-a[1]),length)>(terrain.maxSlope??.85))throw new RangeError('Tunnel floor exceeds terrain maxSlope');
+      const n=Math.ceil(length/1.5);for(let k=0;k<=n;k++)ctx.addNav(a[0]+(b[0]-a[0])*k/n,a[2]+(b[2]-a[2])*k/n);
     }
+    ctx.addStructure({type:'tunnel',points,floorPoints:points,radius});
     return points;
   };
 
-  // A carved cavern: a bowl in the terrain with a ring of rock walls and a domed
-  // roof. The floor is the terrain itself.
+  // Realization follows layout so connected portals do not depend on whether
+  // the cavern or its crossing tunnel was authored first.
   ctx.addCavern = (o) => {
-    const { x, z, radius = 12, height = 8 } = o;
-    ctx.addStructure({ type: 'cavern', x, z, y: terrain.height(x, z), radius, height });
-    const segments = 16;
-    for (let i = 0; i < segments; i++) {
-      if (cavernOpening(i)) continue; // two opposite entrances keep the cavern enterable
-      const a = (i / segments) * Math.PI * 2, wx = x + Math.cos(a) * radius, wz = z + Math.sin(a) * radius, wy = terrain.height(wx, wz);
-      ctx.addBlock({ x: wx, z: wz, w: radius * 0.45, d: radius * 0.45, h: wy + height, kind: 'cave' });
-    }
+    const {x,z,radius=12,height=8}=o;
+    if(![x,z,radius,height].every(Number.isFinite)||radius<3||height<4)throw new RangeError('Invalid cavern dimensions');
+    return ctx.addStructure({type:'cavern',x,z,y:o.y??terrainSupportAt(x,z,terrain)?.y,radius,height});
   };
 
   ctx.addArch = (o) => ctx.addStructure({ type: 'arch', ...o });
   ctx.addColumn = (o) => { ctx.addStructure({ type: 'column', ...o }); if (o.collide !== false) ctx.addBlock({ x: o.x, z: o.z, w: (o.radius ?? 0.6) * 2, d: (o.radius ?? 0.6) * 2, h: (o.y ?? terrain.height(o.x, o.z)) + (o.height ?? 5), kind: 'column' }); };
   ctx.addBridge = (o) => { ctx.addStructure({ type: 'bridge', ...o }); const q = quarter(o.rot ?? 0), [w, d] = q % 2 === 0 ? [o.w, o.d] : [o.d, o.w]; ctx.addBlock({ x: o.x, z: o.z, w, d, h: (o.y ?? terrain.height(o.x, o.z)) + (o.thickness ?? 0.4), kind: 'deck' }); };
+  // Explicit opt-in map reauthoring, not a reinterpretation of legacy bridges.
+  // A filled platform and two end ramps replace ONLY their ground footprints.
+  // All visible tops/sides use existing terrain triangles and foundation fill;
+  // the descriptor is audit metadata, never a second collision/render surface.
+  ctx.addCauseway = ({x,z,w,d,rot=0,y,ramp=4,rise=.5}) => {
+    if(![x,z,w,d,rot,ramp,rise].every(Number.isFinite)||w<=0||d<2||ramp<2||Math.abs(rot/(Math.PI/2)-Math.round(rot/(Math.PI/2)))>1e-8)throw new RangeError('Causeway requires finite dimensions and an explicit quarter turn');
+    const q=quarter(rot),[fw,fd]=q%2?[d,w]:[w,d], [nx,nz]=rotateLocal(1,0,q);
+    const footprint=[[x-fw/2,z-fd/2],[x+fw/2,z-fd/2],[x+fw/2,z+fd/2],[x-fw/2,z+fd/2]];
+    const support=terrainFootprintRange(terrain,footprint);
+    if(!support||support.area<fw*fd-1e-6)throw new RangeError('Unsupported causeway');
+    const top=y??support.max+rise;
+    if(!Number.isFinite(top)||top<=0)throw new RangeError('Invalid causeway top');
+    // Resolve both toes before editing. The one-unit landing keeps the actor
+    // radius clear of the ground-to-top foundation before starting descent.
+    const ends=[-1,1].map(sign=>{
+      const edge=[x+nx*sign*w/2,top,z+nz*sign*w/2];
+      const landing=[edge[0]+nx*sign,top,edge[2]+nz*sign];
+      const toe=[landing[0]+nx*sign*ramp,0,landing[2]+nz*sign*ramp];
+      toe[1]=terrainSupportAt(toe[0],toe[2],terrain)?.y;
+      if(!Number.isFinite(toe[1])||Math.abs(top-toe[1])/ramp>.5)throw new RangeError('Causeway needs a longer supported ramp');
+      return {edge,landing,toe};
+    });
+    stampTerrainFloor(terrain,footprint,()=>top,'causeway-floor');
+    ctx.addBlock({x,z,w:fw,d:fd,h:top,kind:'foundation'});
+    for(const {edge,landing,toe} of ends){
+      floorStrip(edge,landing,d,'causeway-floor',{skirts:true});
+      floorStrip(landing,toe,d,'causeway-ramp',{skirts:true});
+    }
+    floorStrip(ends[0].edge,ends[1].edge,d,'causeway-floor');
+    return ctx.addStructure({type:'causeway',x,z,y:top,w,d,rot:q*Math.PI/2,
+      accessPath:[ends[0].toe,ends[0].landing,ends[0].edge,[x,top,z],ends[1].edge,ends[1].landing,ends[1].toe]});
+  };
   const blocksApproach = (x, z, radius) => ctx.navNodes.some(p => Math.abs(x - p.x) < radius + 1 && Math.abs(z - p.z) < radius + 1);
   ctx.addRock = (o = {}) => { const x = o.x, z = o.z, s = o.scale ?? 1, seed = Math.floor(rng() * 1e6); if (o.collide !== false && s > .8 && blocksApproach(x, z, s)) return; ctx.addProp({ type: 'rock', x, z, y: o.y ?? terrain.height(x, z), scale: s, seed }); if (o.collide !== false && s > 0.8) ctx.addBlock({ x, z, w: s * 2, d: s * 2, h: (o.y ?? terrain.height(x, z)) + s * 1.4, kind: 'rock' }); };
   ctx.addTree = (o = {}) => { const x = o.x, z = o.z, s = o.scale ?? 1, seed = Math.floor(rng() * 1e6); if (o.collide !== false && blocksApproach(x, z, .25)) return; ctx.addProp({ type: 'tree', x, z, y: o.y ?? terrain.height(x, z), scale: s, seed }); if (o.collide !== false) ctx.addBlock({ x, z, w: .5, d: .5, h: (o.y ?? terrain.height(x, z)) + 2.4, kind: 'tree' }); };
@@ -335,6 +401,46 @@ export function createLevel(spec) {
   ctx.addRuin = (o = {}) => ctx.addProp({ type: 'ruin', x: o.x, z: o.z, y: o.y ?? terrain.height(o.x, o.z), scale: o.scale ?? 1, rot: o.rot ?? 0, seed: Math.floor(rng() * 1e6) });
 
   spec.layout?.(ctx, rng);
+
+  const tunnels=ctx.structures.filter(s=>s.type==='tunnel'),caverns=ctx.structures.filter(s=>s.type==='cavern');
+  const tunnelSegments=tunnels.flatMap(s=>s.floorPoints.slice(1).map((b,i)=>({a:s.floorPoints[i],b,radius:s.radius})));
+  for(const c of caverns){
+    const polygon=Array.from({length:32},(_,i)=>{const a=i*Math.PI/16;return [c.x+Math.cos(a)*c.radius,c.z+Math.sin(a)*c.radius];});
+    stampTerrainFloor(terrain,polygon,()=>c.y,'cavern-floor');
+    c.openSegments=[];
+    for(let i=0;i<CAVERN_SEGMENTS;i++){
+      const a=i*Math.PI*2/CAVERN_SEGMENTS,x=c.x+Math.cos(a)*c.radius,z=c.z+Math.sin(a)*c.radius,size=c.radius*.45;
+      const connected=tunnelSegments.some(s=>{const p=pathFloorAt(x,z,s.a,s.b);return Math.hypot(p.x-x,p.z-z)<s.radius+size/Math.SQRT2+.52;});
+      if(cavernOpening(i)||connected){c.openSegments.push(i);continue;}
+      ctx.addBlock({x,z,w:size,d:size,h:c.y+cavernShell(c.radius,c.height).wallHeight,kind:'cave'});
+    }
+    // Default opposite portals receive real floor approaches, not just a hole
+    // in the visible drum. Connected tunnel strips below take precedence.
+    for(const a of [Math.PI/16,Math.PI+Math.PI/16]){
+      const nx=Math.cos(a),nz=Math.sin(a);
+      approach(c.x+nx*(c.radius-1),c.z+nz*(c.radius-1),c.y,nx,nz,Math.max(1.4,c.radius*.3));
+    }
+  }
+  for(const s of tunnels){
+    const points=s.floorPoints;
+    for(const [p,n] of [[points[0],points[1]],[points.at(-1),points.at(-2)]]){
+      if(caverns.some(c=>Math.hypot(c.x-p[0],c.z-p[2])<c.radius))continue;
+      const length=Math.hypot(p[0]-n[0],p[2]-n[2]);
+      approach(p[0],p[2],p[1],(p[0]-n[0])/length,(p[2]-n[2])/length,s.radius*2);
+    }
+    for(let i=0;i<points.length-1;i++)floorStrip(points[i],points[i+1],s.radius*2,'tunnel-floor');
+    for(let i=0;i<points.length-1;i++){
+      const a=points[i],b=points[i+1],dx=b[0]-a[0],dz=b[2]-a[2],length=Math.hypot(dx,dz),nx=-dz/length,nz=dx/length,count=Math.ceil(length/1.2);
+      for(let k=0;k<=count;k++)for(const side of [-1,1]){
+        const t=k/count,offset=s.radius*.95+Math.SQRT2*.8,x=a[0]+dx*t+nx*side*offset,z=a[2]+dz*t+nz*side*offset,y=a[1]+(b[1]-a[1])*t;
+        if(caverns.some(c=>Math.hypot(c.x-x,c.z-z)<c.radius+Math.SQRT2*.8))continue;
+        // An inner bend or another crossing route must not be sealed by a
+        // neighbouring segment's conservative axis-aligned wall proxy.
+        if(tunnelSegments.some(seg=>{const p=pathFloorAt(x,z,seg.a,seg.b);return Math.hypot(p.x-x,p.z-z)<Math.SQRT2*.8+.6;}))continue;
+        ctx.addBlock({x,z,w:1.6,d:1.6,h:y+s.radius+1.4,kind:'tunnel'});
+      }
+    }
+  }
 
   // Default spawns/objectives when the layout does not author them.
   if (!ctx.spawns.length && !ctx.teamSpawns[0].length) {

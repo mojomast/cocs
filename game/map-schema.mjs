@@ -48,6 +48,25 @@ export function validateMapSchema(map){
  if(Array.isArray(map.objectiveZones)&&boundsValid)for(const [index,zone] of map.objectiveZones.entries())if(!pointObject(zone)||!inBounds(bounds,zone.x,zone.z))errors.push(`objectiveZones[${index}] must be an in-bounds {x,z}`);
  if(map.teamSpawns&&boundsValid)for(const [team,points] of Object.entries(map.teamSpawns)){if(!Array.isArray(points)){errors.push(`teamSpawns.${team} must be an array`);continue;}for(const [index,spawn] of points.entries())if(!pointPair(spawn)||!inBounds(bounds,spawn[0],spawn[1]))errors.push(`teamSpawns.${team}[${index}] must be an in-bounds [x,z] pair`);}
  if(map.flagSpawns&&boundsValid)for(const [team,flag] of Object.entries(map.flagSpawns)){const p=pointObject(flag)?[flag.x,flag.z]:pointPair(flag)?[flag[0],flag[1]]:null;if(!p||!inBounds(bounds,p[0],p[1]))errors.push(`flagSpawns.${team} must be an in-bounds {x,z} or [x,z]`);}
+ // Spatial additions are opt-in. Legacy blocks still mean the solid [0,h],
+ // even if unrelated author metadata contains y/minY; no elevated solid schema
+ // is introduced by the facade or authored-ground contracts.
+ if(map.structures!==undefined&&!Array.isArray(map.structures))errors.push('map.structures must be an array');
+ if(Array.isArray(map.structures))for(const [index,s] of map.structures.entries()){
+  if(!s||typeof s!=='object'){errors.push(`structures[${index}] must be an object`);continue;}
+  const label=`structures[${index}]`;
+  if(s.floorPoints!==undefined){
+   const points=s.floorPoints,valid=Array.isArray(points)&&points.length>=2&&points.every(p=>Array.isArray(p)&&p.length===3&&p.every(finite));
+   if(!valid)errors.push(`${label}.floorPoints must contain finite [x,y,z] floor coordinates`);
+   else for(let i=1;i<points.length;i++)if(Math.hypot(points[i][0]-points[i-1][0],points[i][2]-points[i-1][2])<1e-6)errors.push(`${label}.floorPoints need horizontal segment extent`);
+   if(!finite(s.radius)||s.radius<2)errors.push(`${label}.radius must be at least 2 for a traversable tunnel`);
+  }
+  if(s.frame!==undefined){
+   const f=s.frame,vec=v=>pointObject(v),unit=v=>vec(v)&&Math.abs(Math.hypot(v.x,v.z)-1)<1e-6;
+   if(!f||!vec(f.origin)||!finite(f.origin?.y)||!finite(f.span)||f.span<=0||!finite(f.height)||f.height<=0||!unit(f.tangent)||!unit(f.normal)||Math.abs(f.tangent.x*f.normal.x+f.tangent.z*f.normal.z)>1e-6||!vec(f.parent)||!finite(f.parent?.y)||!finite(f.parent?.rot)||!vec(f.localOrigin)||!unit(f.localTangent)||!unit(f.localNormal))errors.push(`${label}.frame must contain a finite local/world facade frame`);
+  }
+  if(s.openSegments!==undefined&&(!Array.isArray(s.openSegments)||!s.openSegments.every(i=>Number.isInteger(i)&&i>=0&&i<16)||new Set(s.openSegments).size!==s.openSegments.length))errors.push(`${label}.openSegments must contain unique cavern segment indices 0..15`);
+ }
  return errors;
 }
 

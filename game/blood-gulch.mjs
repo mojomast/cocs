@@ -115,7 +115,7 @@ const bloodGulch={
     ['plasma',-44,-14],['plasma',44,14],
     ['grenade',-12,0],['grenade',12,0],
     ['shock',-44,14],['shock',44,-14],
-    ['flak',0,20],['flak',0,-20],
+    ['flak',0,23],['flak',0,-23],
     ['haste',-30,-20],['overcharge',30,20],
     ['overshield',0,3]
   ],

@@ -1,0 +1,34 @@
+--- a/game/view.mjs
++++ b/game/view.mjs
+@@ -14,5 +14,6 @@
+ import {legacyWeaponBody} from './weapon-models/legacy.mjs';
+ import {CharacterRig} from './character-anim.mjs';
+ import {CharacterLifecycle} from './rig.mjs';
++import {alignLivingCharacter} from './rig.mjs';
+ import {refineOperatorCharacter} from './models.mjs';
+ import {terrainTriangles,terrainWallTriangles} from './terrain.mjs';
+@@ -1270,4 +1271,17 @@
+    return live;
+   }
++  // Final living-only contact pass: after interpolation, styling, swaps and hit pushes.
++  _alignLivingCharacters(match){
++   const arena=match?.arena??MAPS.find(map=>map.id===match?.mapId)??MAPS[0];
++   const sampleGround=(x,z,referenceY)=>typeof this.characterGroundAt==='function'
++     ?this.characterGroundAt(x,z,referenceY,match)
++     :presentationSupportAt(x,z,arena,referenceY);
++   for(const actor of match?.actors??[]){
++    const model=this.actorModels?.get(actor.id);
++    if(!model||!model.visible||actor.health<=0||actor.vehicleId!=null)continue;
++    if(this.characterLifecycle&&this.characterLifecycle.state(model)!=='alive')continue;
++    alignLivingCharacter(model,{grounded:actor.grounded!==false,sampleGround});
++   }
++  }
+   poseCorpse(m,a,match){
+    const lifecycle=this.characterLifecycle??=new CharacterLifecycle({maxCorpses:24,maxLifetime:4});
+@@ -1580,5 +1594,5 @@
+ 
+     this._animateWeaponParts(this.firstPerson,player,reduced);
+-    this.firstPerson.userData.flash.visible=!reduced&&this.hands.visible&&this.flashUntil>performance.now();this.muzzleLights?.update(Math.max(0,delta));if(this.renderer.shadowMap?.autoUpdate===false){const hz=Number(this._quality().shadowHz)||30;if(shadowDue(time,this._shadowAt,hz)){this._shadowAt=time;this.renderer.shadowMap.needsUpdate=true;}}this.updateSky();this._updateWind(time,reduced);this._updateAmbient(match,delta,time,reduced);const spMode=match.config?.mode==='campaign'||match.config?.mode==='horde';if(spMode)this.setWeather(match.weather??null);else if(!cinematic&&this._weatherOverride!==null)this.setWeather(null);this._updateWeather(arena,delta,mode);this._updateWeatherFx(delta,reduced,this._quality());const software=this.renderer?.isSoftware===true;this._updateLightning(delta,reduced,software);this._applyWetSheen(this._weatherState());this.hitPool?.update(Math.max(0,delta));this._updateHitReactions();this._updateDebris(delta);this._updateAudio(match,time);this._beginGpu();if(this.composer)this.composer.render();else this.renderer.render(this.scene,this.camera);
++    this.firstPerson.userData.flash.visible=!reduced&&this.hands.visible&&this.flashUntil>performance.now();this.muzzleLights?.update(Math.max(0,delta));if(this.renderer.shadowMap?.autoUpdate===false){const hz=Number(this._quality().shadowHz)||30;if(shadowDue(time,this._shadowAt,hz)){this._shadowAt=time;this.renderer.shadowMap.needsUpdate=true;}}this.updateSky();this._updateWind(time,reduced);this._updateAmbient(match,delta,time,reduced);const spMode=match.config?.mode==='campaign'||match.config?.mode==='horde';if(spMode)this.setWeather(match.weather??null);else if(!cinematic&&this._weatherOverride!==null)this.setWeather(null);this._updateWeather(arena,delta,mode);this._updateWeatherFx(delta,reduced,this._quality());const software=this.renderer?.isSoftware===true;this._updateLightning(delta,reduced,software);this._applyWetSheen(this._weatherState());this.hitPool?.update(Math.max(0,delta));this._updateHitReactions();this._alignLivingCharacters(match);this._updateDebris(delta);this._updateAudio(match,time);this._beginGpu();if(this.composer)this.composer.render();else this.renderer.render(this.scene,this.camera);
+   // Isolated first-person pass: mirror the active camera onto a dedicated
+   // weapon camera, clear the world depth, then draw the gun with normal depth

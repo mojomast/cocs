@@ -3,6 +3,7 @@
 // cavern or tunnel instead of orbiting the roof. Pure and three.js-free.
 
 import {clamp} from './math.mjs';
+import {tunnelFloorPath,pathFloorAt} from './structures.mjs';
 const num = (v, d = 0) => Number.isFinite(v) ? v : d;
 
 export function buildInteriors(structures = []) {
@@ -15,11 +16,11 @@ export function buildInteriors(structures = []) {
     } else if (s.type === 'cavern') {
       out.push({ kind: 'cyl', x: num(s.x), z: num(s.z), base: num(s.y), height: Math.max(1, num(s.height, 8)), r: Math.max(1, num(s.radius, 12) * .82) });
     } else if (s.type === 'tunnel') {
-      const r = Math.max(.8, num(s.radius, 3) * .8), pts = Array.isArray(s.points) ? s.points : [];
+      const r = Math.max(.8, num(s.radius, 3) * .8), pts = tunnelFloorPath(s);
       for (let i = 0; i < pts.length - 1; i++) {
         const a = pts[i], b = pts[i + 1];
         if (!a || !b) continue;
-        out.push({ kind: 'seg', ax: num(a[0]), ay: num(a[1]), az: num(a[2]), bx: num(b[0]), by: num(b[1]), bz: num(b[2]), r });
+        out.push({ kind: 'seg', ax: num(a[0]), ay: num(a[1]), az: num(a[2]), bx: num(b[0]), by: num(b[1]), bz: num(b[2]), r, floorPath:!!s.floorPoints });
       }
     }
   }
@@ -45,8 +46,8 @@ export function interiorAt(interiors, point) {
       if (py < v.base - .2 || py > v.base + v.height) continue;
       margin = v.r - Math.hypot(px - v.x, pz - v.z);
     } else {
-      const n = nearestOnSegment(px, py, pz, v);
-      if (py < n.y - 1 || py > n.y + v.r + 1.6) continue;
+      const n = v.floorPath ? pathFloorAt(px,pz,[v.ax,v.ay,v.az],[v.bx,v.by,v.bz]) : nearestOnSegment(px, py, pz, v);
+      if (py < n.y - (v.floorPath?.05:1) || py > n.y + v.r + 1.6) continue;
       margin = v.r - Math.hypot(px - n.x, py - n.y, pz - n.z);
     }
     if (margin >= 0 && margin < bestMargin) { bestMargin = margin; best = v; }
@@ -56,6 +57,9 @@ export function interiorAt(interiors, point) {
 
 export function interiorCenter(volume, point) {
   if (!volume) return null;
-  if (volume.kind === 'seg') return nearestOnSegment(num(point?.x), num(point?.y), num(point?.z), volume);
+  if (volume.kind === 'seg') {
+    if(volume.floorPath){const p=pathFloorAt(num(point?.x),num(point?.z),[volume.ax,volume.ay,volume.az],[volume.bx,volume.by,volume.bz]);return {x:p.x,y:p.y,z:p.z};}
+    return nearestOnSegment(num(point?.x), num(point?.y), num(point?.z), volume);
+  }
   return { x: volume.x, y: volume.base, z: volume.z };
 }

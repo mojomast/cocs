@@ -1,7 +1,7 @@
 import * as T from 'three';
 import {SoftwareRenderer} from './software.mjs';
 import {CHARACTERS,WEAPONS} from './data.mjs';
-import {aim} from './core.mjs';
+import {aim,presentationSupportAt} from './core.mjs';
 import {MAPS,pickupWeapon} from './maps.mjs';
 import {normalizeDisplay} from './config.mjs';
 import {WeaponFeedback,EffectPool,AmbientFX,WeatherFX} from './feedback.mjs';
@@ -9,21 +9,25 @@ import {ModelAssets,withAssets,currentAssets,CameraShake,MuzzleLightPool,LowHeal
 import {deathPlan,deathStyleFor,hitReaction,hashUnit} from './deaths.mjs';
 import {resolveFinish} from './cosmetics.mjs';
 import {buildWeaponBody} from './weapon-models/index.mjs';
+import {buildSimpleWeaponBody} from './weapon-models/chassis.mjs';
+import {AdsController} from './weapon-ads.mjs';
 import {legacyWeaponBody} from './weapon-models/legacy.mjs';
 import {CharacterRig} from './character-anim.mjs';
+import {CharacterLifecycle,alignLivingCharacter} from './rig.mjs';
+import {refineOperatorCharacter} from './models.mjs';
 import {terrainTriangles,terrainWallTriangles} from './terrain.mjs';
 import {smoothNormals,positionColors} from './terrain-normals.mjs';
 import {TEAM_PALETTE,teamPresentation,teamMark,updateTeamMark,applyActorTeam} from './team-presentation.mjs';
 import {spectateActor} from './hud.mjs';
 import {NEUTRAL} from './radar.mjs';
-import {cavernShell,propId,applyPropDamage,propBreakPlan,isBreakable} from './structures.mjs';
+import {cavernShell,facadeDetails,tunnelRenderPaths,propId,applyPropDamage,propBreakPlan,isBreakable} from './structures.mjs';
 import {raceDemoMode,raceDemoPose,RACE_DEMO_MODE_SECONDS} from './race-camera.mjs';
 import {occlusionDistance} from './camera.mjs';
 import {postStage,applyComposerSize,disposeComposer,reducedMotion,normalizeQuality,qualitySettings,qualityIndex,nextQualityTier,QUALITY_LEVELS,frameTriangleBudget,normalizeQualityOverride,bloomResolution,nextQualityState,createFrameWindow,pushFrameTime,framePercentiles} from './post.mjs';
 import {GpuTimer} from './perf.mjs';
 import {interpolatePose} from './interpolation.mjs';
-import {solveSightPose,attachOptic,sightAlignmentError,composeAdsQuaternion} from './sights.mjs';
-import {resolveActiveSight,adsFieldOfView,sightFovFloor} from './reticle.mjs';
+import {solveSightPose,attachOptic,sightAlignmentError} from './sights.mjs';
+import {resolveActiveSight} from './reticle.mjs';
 import {surfaceTextures,clearSurfaceTextures,wetSheenTexture,mothMacroTexture,mothSkyTexture,mothEffectTextures,mothMaterialLutTexture} from './textures.mjs';
 import {enhanceMothMaterial} from './moth-surface.mjs';
 import {createMothLutMaterial} from './moth-material.mjs';
@@ -188,19 +192,14 @@ export function legacyWeaponModel(type=0,assets,visual=null,finish=null){return 
 // and a barrel-tip anchor for remote tracers, so the full first-person detail
 // (sights, moving parts, attachments) is reserved for the viewmodel the player
 // can actually inspect. A handful of meshes replaces ~40 per actor.
-const SIMPLE_WEAPON_LONG=new Set([0,1,2,8]);
 export function simpleWeaponModel(type=0,assets,visual=null,finish=null){
  type=Number.isInteger(type)&&type>=0?type:0;
- const info=weaponInfo(type),long=SIMPLE_WEAPON_LONG.has(type);
+ const info=weaponInfo(type);
  return withAssets(assets,()=>{
   const g=new T.Group();g.name='weapon-simple';g.userData.type=type;g.userData.weapon=true;g.userData.simple=true;
   const dark=material(finish?.secondary||'#222f37',.5,.52),accent=material(finish?.accent||info.color,.4,.32,true);
-  const bodyLen=long?.6:.42,tip=-bodyLen*.8;
-  box(g,.09,.14,bodyLen,0,0,-bodyLen*.1,dark);
-  box(g,.05,.05,long?.5:.3,0,.05,tip-.12,accent);
-  box(g,.075,.11,.22,0,-.07,bodyLen*.42,dark);
-  box(g,.05,.09,.16,0,-.12,bodyLen*.06,dark);
-  const muzzle=new T.Group();muzzle.name='muzzle';muzzle.position.set(0,.05,tip-.36);g.add(muzzle);
+  buildSimpleWeaponBody(type,g,{T,box,cylinder,palette:{dark,light:accent}});
+  const muzzle=new T.Group();muzzle.name='muzzle';muzzle.position.set(...g.userData.muzzlePoint);g.add(muzzle);
   const flash=new T.Group();flash.visible=false;flash.position.copy(muzzle.position);const flare=new T.Mesh(geometry(assets,'simple-weapon-flash',()=>new T.SphereGeometry(.06,6,4)),new T.MeshBasicMaterial({color:info.color}));flare.userData.noShadow=true;flash.add(flare);g.add(flash);
   g.userData.muzzle=muzzle;g.userData.muzzles=[muzzle];g.userData.flash=flash;
   return g;
@@ -357,7 +356,7 @@ export function robotModel(id,assets,software=false){return withAssets(assets,()
  g.traverse(n=>{if(!n.isMesh)return;const u=n.userData||{};const skip=(n.material&&n.material.transparent===true)||u.lodDetail===true||u.noShadow===true||String(n.name).includes('flash');n.castShadow=!skip;n.receiveShadow=u.lodDetail!==true;});
  for(const mark of teamMarks)mark.traverse(n=>{if(n.isMesh){n.castShadow=false;n.receiveShadow=false;}});
  const joints={root,rootBaseY:0,hips,torso,chest,head,armUpperL:arms.L.upper,armUpperR:arms.R.upper,forearmL:arms.L.fore,forearmR:arms.R.fore,legUpperL:legs.L.upper,legUpperR:legs.R.upper,legLowerL:legs.L.lower,legLowerR:legs.R.lower,footL:legs.L.foot,footR:legs.R.foot};
- g.userData={limbs:[],head,torso:torsoMesh,chest,torsoGroup:torso,gunAnchor,weapon,shield,color:c.color,armor,armorColor:c.accent,base,teamMarks,shoulderPads,backpack,visor:{brow,nub},rig:new CharacterRig(joints),joints};return g;});}
+ g.userData={limbs:[],head,torso:torsoMesh,chest,torsoGroup:torso,gunAnchor,weapon,shield,color:c.color,armor,armorColor:c.accent,base,teamMarks,shoulderPads,backpack,visor:{brow,nub},rig:new CharacterRig(joints),joints};refineOperatorCharacter(g);return g;});}
 export function textLabel(parent,text,x,y,z,size=1,color='#8ad9d3',ry=0){const canvas=document.createElement('canvas');canvas.width=512;canvas.height=128;const ctx=canvas.getContext('2d');ctx.font='bold 78px monospace';ctx.textAlign='center';ctx.fillStyle=color;ctx.fillText(text,256,90);const tex=new T.CanvasTexture(canvas);const m=new T.Mesh(new T.PlaneGeometry(size*4,size),new T.MeshBasicMaterial({map:tex,transparent:true,depthWrite:false}));m.position.set(x,y,z);m.rotation.y=ry;m.userData.label=text;m.userData.labelSize=size*.6;parent.add(m);return m;}
 function pointOf(value){if(Array.isArray(value))return {x:+value[0]||0,y:value.length>2?(+value[1]||0):0,z:+value[value.length>2?2:1]||0};return value?.position||value||{};}
 // Payload yaw follows the route tangent. Local play exposes the full route on
@@ -877,6 +876,13 @@ export class ArenaView{
     // Rails are continuous collision runs of overlapping boxes; render the
     // smooth barrier walls in raceTrackModel instead so they never z-fight.
     if(raceMat){if(b.kind==='race-rail'||b.kind==='soccer-goal'){body.visible=false;body.castShadow=false;body.receiveShadow=false;}continue;}
+   // Foundation tops already live in the authoritative terrain mesh. Keep the
+   // solid's side skirt, but no coplanar top or unrelated legacy facade trim.
+   if(arena.nextGen===true&&b.kind==='foundation'){
+    const g=body.geometry.clone();body.geometry=g;this.renderResources.add(g);const index=g.index,indices=[];
+    for(let i=0;i<index.count;i+=3)if(g.attributes.normal.getY(index.getX(i))<.5)indices.push(index.getX(i),index.getX(i+1),index.getX(i+2));
+    g.setIndex(indices);continue;
+   }
    // Next-gen maps keep these as invisible collision proxies and draw smooth geometry in buildNextGen.
    if(arena.nextGen===true&&NEXTGEN_PROXY.has(b.kind)){body.visible=false;continue;}
    // Keep the complete collision box visible: rock fractures and armor are surface treatments.
@@ -984,10 +990,15 @@ export class ArenaView{
   const mesh=(g,m,x,y,z,rx=0,ry=0,rz=0)=>{const o=new T.Mesh(g,m);o.position.set(x,y,z);o.rotation.set(rx,ry,rz);o.castShadow=true;o.receiveShadow=true;world.add(o);return o;};
   for(const s of structures){
    if(s.type==='building'){
-    const q=((Math.round(s.rot/(Math.PI/2))%4)+4)%4,sw=q%2?s.d:s.w,sd=q%2?s.w:s.d;
-    if(s.roof==='gable'){const rh=Math.min(3.2,Math.max(1.6,Math.min(sw,sd)*.36)),g=geo(`gable|${sw.toFixed(1)}|${sd.toFixed(1)}|${rh.toFixed(1)}`,()=>{const shape=new T.Shape();shape.moveTo(-sw/2,0);shape.lineTo(sw/2,0);shape.lineTo(0,rh);shape.closePath();const e=new T.ExtrudeGeometry(shape,{depth:sd,bevelEnabled:false});e.translate(0,0,-sd/2);return e;});mesh(g,wallMat,s.x,s.y+s.h,s.z);}
-    else{const g=geo(`flat|${sw.toFixed(1)}|${sd.toFixed(1)}`,()=>new T.BoxGeometry(sw+.5,.42,sd+.5));mesh(g,dark,s.x,s.y+s.h+.2,s.z);}
-   }else if(s.type==='windows'){
+    const sw=s.w,sd=s.d; // Roof follows the same normalized local parent frame.
+    if(s.roof==='gable'){const rh=Math.min(3.2,Math.max(1.6,Math.min(sw,sd)*.36)),g=geo(`gable|${sw.toFixed(1)}|${sd.toFixed(1)}|${rh.toFixed(1)}`,()=>{const shape=new T.Shape();shape.moveTo(-sw/2,0);shape.lineTo(sw/2,0);shape.lineTo(0,rh);shape.closePath();const e=new T.ExtrudeGeometry(shape,{depth:sd,bevelEnabled:false});e.translate(0,0,-sd/2);return e;});mesh(g,wallMat,s.x,s.y+s.h,s.z,0,-s.rot,0);}
+    else{const g=geo(`flat|${sw.toFixed(1)}|${sd.toFixed(1)}`,()=>new T.BoxGeometry(sw+.5,.42,sd+.5));mesh(g,dark,s.x,s.y+s.h+.2,s.z,0,-s.rot,0);}
+   }else if(s.type==='windows'||s.type==='facade-detail'){
+    if(s.frame){
+     const g=geo('facade-unit',()=>new T.BoxGeometry(1,1,1));
+     for(const p of facadeDetails(s,s.detail)){const m=mesh(g,s.type==='windows'?glass:metal,p.x,p.y,p.z,0,p.rot,0);m.scale.set(p.w,p.h,p.d);m.userData.facadeDetail=true;}
+     continue;
+    }
     const alongX=Math.abs(Math.sin(s.rot))<.5,rows=Math.max(1,s.rows),count=Math.max(2,Math.floor(s.w/3.2)),gx=geo('win-x',()=>new T.BoxGeometry(1.5,1,.14)),gz=geo('win-z',()=>new T.BoxGeometry(.14,1,1.5));
     for(let r=0;r<rows;r++)for(let i=0;i<count;i++){const off=(i/(count-1||1)-.5)*s.w,px=alongX?s.x+off:s.x,pz=alongX?s.z:s.z+off;mesh(alongX?gx:gz,glass,px,s.y+r*1.7,pz);}
    }else if(s.type==='arch'){
@@ -998,22 +1009,19 @@ export class ArenaView{
     const r=s.radius??.6,h=s.height??5,g=geo(`col|${r.toFixed(2)}|${h.toFixed(1)}`,()=>new T.CylinderGeometry(r,r,h,12)),cap=geo(`cap|${r.toFixed(2)}`,()=>new T.CylinderGeometry(r*1.35,r*1.35,.28,12));
     mesh(g,stone,s.x,(s.y??0)+h/2,s.z);mesh(cap,stone,s.x,(s.y??0)+h-.14,s.z);mesh(cap,stone,s.x,(s.y??0)+.14,s.z);
    }else if(s.type==='tunnel'){
-    const r=s.radius??3,caverns=structures.filter(c=>c.type==='cavern'),raw=s.points;
-    const groundAt=(x,z)=>{const h=arena.terrain?.height?arena.terrain.height(x,z):null;return Number.isFinite(h)?h:null;};
-    const trimmed=raw.map((p,i)=>{const neighbor=i===0?raw[1]:i===raw.length-1?raw[raw.length-2]:null;if(!neighbor)return p;const c=caverns.find(c=>Math.hypot(c.x-p[0],c.z-p[2])<1.5);if(!c)return p;const dx=neighbor[0]-p[0],dz=neighbor[2]-p[2],len=Math.hypot(dx,dz)||1,trim=Math.min(c.radius??12,len*.9);return [p[0]+dx/len*trim,p[1],p[2]+dz/len*trim];});
-    // An open arch that follows the terrain, rather than a tube half-buried in it:
-    // buried double-sided tubes z-fight along their length and poke through the domes.
-    const path=[];
-    for(let i=0;i<trimmed.length-1;i++){const a=trimmed[i],b=trimmed[i+1],len=Math.hypot(b[0]-a[0],b[2]-a[2]),n=Math.max(1,Math.ceil(len/5));for(let k=0;k<=n;k++){if(i>0&&k===0)continue;const t=k/n,x=a[0]+(b[0]-a[0])*t,z=a[2]+(b[2]-a[2])*t,g=groundAt(x,z);path.push({x,z,y:Number.isFinite(g)?g:(a[1]+(b[1]-a[1])*t)-1.2});}}
+    const r=s.radius??3;
+    for(const raw of tunnelRenderPaths(s,structures)){
+    const path=raw.map(([x,y,z])=>({x,y,z}));
     const R=Math.max(.5,r*.95),ring=8,verts=[],idx=[];
     const tangent=i=>{const a=path[Math.max(0,i-1)],b=path[Math.min(path.length-1,i+1)];const tx=b.x-a.x,tz=b.z-a.z,l=Math.hypot(tx,tz)||1;return {x:tx/l,z:tz/l};};
     for(let i=0;i<path.length;i++){const p=path[i],t=tangent(i),sx=-t.z,sz=t.x;for(let j=0;j<=ring;j++){const a=Math.PI*j/ring;verts.push(p.x+sx*R*Math.cos(a),p.y+R*Math.sin(a),p.z+sz*R*Math.cos(a));}}
     for(let i=0;i<path.length-1;i++)for(let j=0;j<ring;j++){const a=i*(ring+1)+j,b=a+1,c=a+ring+1,d=c+1;idx.push(a,c,d,a,d,b);}
-    const key=`tun|${r}|${trimmed.map(p=>p.map(n=>Math.round(n)).join('.')).join('_')}`;
+    const key=`tun|${r}|${JSON.stringify(raw)}`;
     const g=path.length>1?geo(key,()=>{const bg=new T.BufferGeometry();bg.setAttribute('position',new T.Float32BufferAttribute(verts,3));bg.setIndex(idx);bg.computeVertexNormals();return bg;}):null;
-    if(g){const m=mesh(g,tunnelMat,0,0,0);m.castShadow=false;}
+    if(g){const m=mesh(g,tunnelMat,0,0,0);m.castShadow=false;m.userData.tunnelShell=true;}
+    }
    }else if(s.type==='cavern'){
-    const shell=cavernShell(s.radius??12,s.height??8),base=s.y??0,dome=geo(`cavdome|${shell.radius}`,()=>new T.SphereGeometry(shell.radius,28,12,0,Math.PI*2,0,Math.PI/2));
+    const shell=cavernShell(s.radius??12,s.height??8,undefined,s.openSegments),base=s.y??0,dome=geo(`cavdome|${shell.radius}`,()=>new T.SphereGeometry(shell.radius,28,12,0,Math.PI*2,0,Math.PI/2));
     for(const arc of shell.renderArcs){const key=`cavarc|${shell.radius}|${arc.thetaStart.toFixed(3)}|${arc.thetaLength.toFixed(3)}`,wg=geo(key,()=>new T.CylinderGeometry(shell.radius,shell.radius,1,28,1,true,arc.thetaStart,arc.thetaLength));const m=mesh(wg,caveMat,s.x,base+shell.wallHeight/2,s.z);m.scale.set(1,shell.wallHeight,1);}
     const roof=mesh(dome,caveMat,s.x,base+shell.wallHeight,s.z);roof.scale.set(1,shell.domeHeight/shell.radius,1);
    }else if(s.type==='bridge'){
@@ -1095,11 +1103,11 @@ export class ArenaView{
  for(let i=-4;i<=4;i++){box(scene,.25,9,.5,i*3,4,-6,dark);box(scene,.045,6,.04,i*3+.18,4,-5.72,glow);}
   const model=robotModel('chatgpt',undefined,this.renderer?.isSoftware===true);model.scale.setScalar(2.15);model.position.y=.17;model.rotation.y=.25;scene.add(model);return {scene,camera,model,id:'chatgpt'};}
   setCharacter(id){if(id===this.menu.id)return;this.disposeObject(this.menu.model);this.menu.scene.remove(this.menu.model);this.menu.model=robotModel(id,undefined,this.renderer?.isSoftware===true);this.menu.model.scale.setScalar(2.15);this.menu.model.position.y=.17;this.menu.scene.add(this.menu.model);this.menu.id=id;}
-      setMatch(match){const arena=match.arena||MAPS.find(a=>a.id===match.mapId)||MAPS[0];this.clearObjectiveMarkers();if(this.payloadModel){this.scene.remove(this.payloadModel);this.disposeObject(this.payloadModel);this.payloadModel=null;}for(const m of [...this.actorModels.values(),...this.pickupModels,...(this.flagModels||new Map()).values()]){this.scene.remove(m);this.disposeObject(m);}this.flagModels=new Map();if(this.mapId!==arena.id)this.buildArena(arena);const assets=this.modelAssets??=new ModelAssets();this.actorModels=new Map((match.actors||[]).map(a=>{const m=robotModel(a.character,assets,this.renderer?.isSoftware===true);this.scene.add(m);return [a.id,m];}));this.pickupModels=(match.pickups||[]).map(p=>{const g=new T.Group(),colors={health:'#77efba',armor:'#6dbfff',rocket:'#ffb164',rail:'#bf9cff',scatter:'#ffde87',plasma:'#72cfff',grenade:'#ff806b',shock:'#8ce8ff',flak:'#ffd166',marksman:'#ffd27a',smg:'#8affc1',haste:'#72f1b8',overcharge:'#ff8f70',overshield:'#75baff',recon:'#7fe7ff',cloak:'#c8b6ff'},mat=material(colors[p.kind]||'#8ad9d3',.4,.3,true);if(p.kind==='health'){box(g,.6,.19,.19,0,.65,0,mat);box(g,.19,.6,.19,0,.65,0,mat);}else if(p.kind==='armor'){const m=new T.Mesh(geometry(assets,'pickup-armor-octa',()=>new T.OctahedronGeometry(.4)),mat);m.position.y=.7;g.add(m);}else if(['haste','overcharge','overshield'].includes(p.kind)){const m=new T.Mesh(geometry(assets,'pickup-power-ico',()=>new T.IcosahedronGeometry(.36,1)),mat);m.position.y=.7;g.add(m);ring(g,.55,.022,0,.07,0,mat);}else{const w=weaponModel(pickupWeapon(p.kind),assets);w.position.y=.75;w.scale.setScalar(.7);g.add(w);}if(!['haste','overcharge','overshield'].includes(p.kind))ring(g,.55,.022,0,.07,0,mat);g.position.set(p.x||0,p.y||0,p.z||0);this.scene.add(g);return g;});this._trackAssets(assets);this.syncVehicles(match);this.updateFlags(match,arena);this.updateObjectives(match,arena);this.effectPool?.clear();this.projectilePool?.clear();this.railPool?.clear();this.deathContext?.clear();this.deathPool?.clear();this.decalPool?.clear();this.ambientFx?.reset();this.debrisPool?.clear();this.hitFlinch?.clear();this.hitPool?.clear();this._killcam=null;this.feedback?.reset();this.cameraShake?.reset();this.lowHealth=false;this.flashUntil=0;this.lastEvent=match.serial||0;this.currentWeapon=-1;this._adsTransition=0;this._nearActionAt=undefined;this._nearAction=0;this.resetPresentation();
+      setMatch(match){this.characterLifecycle?.clear();const arena=match.arena||MAPS.find(a=>a.id===match.mapId)||MAPS[0];this.clearObjectiveMarkers();if(this.payloadModel){this.scene.remove(this.payloadModel);this.disposeObject(this.payloadModel);this.payloadModel=null;}for(const m of [...this.actorModels.values(),...this.pickupModels,...(this.flagModels||new Map()).values()]){this.scene.remove(m);this.disposeObject(m);}this.flagModels=new Map();if(this.mapId!==arena.id)this.buildArena(arena);const assets=this.modelAssets??=new ModelAssets();this.actorModels=new Map((match.actors||[]).map(a=>{const m=robotModel(a.character,assets,this.renderer?.isSoftware===true);this.scene.add(m);return [a.id,m];}));this.pickupModels=(match.pickups||[]).map(p=>{const g=new T.Group(),colors={health:'#77efba',armor:'#6dbfff',rocket:'#ffb164',rail:'#bf9cff',scatter:'#ffde87',plasma:'#72cfff',grenade:'#ff806b',shock:'#8ce8ff',flak:'#ffd166',marksman:'#ffd27a',smg:'#8affc1',haste:'#72f1b8',overcharge:'#ff8f70',overshield:'#75baff',recon:'#7fe7ff',cloak:'#c8b6ff'},mat=material(colors[p.kind]||'#8ad9d3',.4,.3,true);if(p.kind==='health'){box(g,.6,.19,.19,0,.65,0,mat);box(g,.19,.6,.19,0,.65,0,mat);}else if(p.kind==='armor'){const m=new T.Mesh(geometry(assets,'pickup-armor-octa',()=>new T.OctahedronGeometry(.4)),mat);m.position.y=.7;g.add(m);}else if(['haste','overcharge','overshield'].includes(p.kind)){const m=new T.Mesh(geometry(assets,'pickup-power-ico',()=>new T.IcosahedronGeometry(.36,1)),mat);m.position.y=.7;g.add(m);ring(g,.55,.022,0,.07,0,mat);}else{const w=simpleWeaponModel(pickupWeapon(p.kind),assets);w.position.y=.75;w.scale.setScalar(.7);g.add(w);}if(!['haste','overcharge','overshield'].includes(p.kind))ring(g,.55,.022,0,.07,0,mat);g.position.set(p.x||0,p.y||0,p.z||0);this.scene.add(g);return g;});this._trackAssets(assets);this.syncVehicles(match);this.updateFlags(match,arena);this.updateObjectives(match,arena);this.effectPool?.clear();this.projectilePool?.clear();this.railPool?.clear();this.deathContext?.clear();this.deathPool?.clear();this.decalPool?.clear();this.ambientFx?.reset();this.debrisPool?.clear();this.hitFlinch?.clear();this.hitPool?.clear();this._killcam=null;this.feedback?.reset();this.cameraShake?.reset();this.lowHealth=false;this.flashUntil=0;this.lastEvent=match.serial||0;this.currentWeapon=-1;this._adsTransition=0;this._adsController?.reset(this.display?.fov??82);this._nearActionAt=undefined;this._nearAction=0;this.resetPresentation();
   // Per-mode music theme. The audio object retunes its running drone in place.
   const mode=match.config?.mode??match.mode;if(mode)this.viewAudio?.setModeTheme?.(mode);this._modeTheme=mode??this._modeTheme;}
-      syncActors(match){const actors=match?.actors||[];for(const actor of actors)if(!this.actorModels.has(actor.id)){const model=robotModel(actor.character,this.modelAssets??=new ModelAssets(),this.renderer?.isSoftware===true);applyActorTeam(model,actor.team,this.display?.teamPalette);this.scene.add(model);this.actorModels.set(actor.id,model);}const live=new Set(actors.map(actor=>actor.id));for(const [id,model] of this.actorModels)if(!live.has(id)){this.scene.remove(model);this.disposeObject(model);this.actorModels.delete(id);}}
-      styleActor(model,actor,palette){applyActorTeam(model,actor.team,palette);const profile=actor?.npcProfile;if(!profile)return;const data=model.userData||{};if(data.base?.material?.color)data.base.material.color.set(profile.color);if(data.armor?.color)data.armor.color.set(profile.accent||profile.color);model.scale.setScalar(profile.scale??1);}
+      syncActors(match){const actors=match?.actors||[];for(const actor of actors)if(!this.actorModels.has(actor.id)){const model=robotModel(actor.character,this.modelAssets??=new ModelAssets(),this.renderer?.isSoftware===true);applyActorTeam(model,actor.team,this.display?.teamPalette);this.scene.add(model);this.actorModels.set(actor.id,model);}const live=new Set(actors.map(actor=>actor.id));for(const [id,model] of this.actorModels)if(!live.has(id)){this.characterLifecycle?.release(model);this.scene.remove(model);this.disposeObject(model);this.actorModels.delete(id);}}
+      styleActor(model,actor,palette){if(this.characterLifecycle?.ownsTransform(model))return;applyActorTeam(model,actor.team,palette);const profile=actor?.npcProfile;if(!profile)return;const data=model.userData||{};if(data.base?.material?.color)data.base.material.color.set(profile.color);if(data.armor?.color)data.armor.color.set(profile.accent||profile.color);model.scale.setScalar(profile.scale??1);}
       updateWaypoint(match,arena){const waypoint=match?.waypoint;if(!waypoint){if(this.waypointModel){this.scene.remove(this.waypointModel);this.disposeObject(this.waypointModel);this.waypointModel=null;this.waypointId=null;}return;}if(!this.waypointModel||this.waypointId!==waypoint.id){if(this.waypointModel){this.scene.remove(this.waypointModel);this.disposeObject(this.waypointModel);}this.waypointId=waypoint.id;this.waypointModel=this.createObjectiveModel({id:'waypoint',x:waypoint.x,y:waypoint.y??0,z:waypoint.z,radius:waypoint.radius??4,label:waypoint.label},arena);this.scene.add(this.waypointModel);}this.waypointModel.position.set(waypoint.x,waypoint.y??0,waypoint.z);}
    createFlagModel(team,arena){const resources=this.renderResources??=new Set(),color=this.objectiveColor(team,arena);const assets=this.flagAssets??={},poleGeo=assets.pole??=new T.CylinderGeometry(.035,.05,1.8,8),bannerGeo=assets.banner??=new T.BoxGeometry(.52,.32,.035),baseGeo=assets.base??=new T.CylinderGeometry(.34,.42,.08,16),mat=material(color,.35,.3,true);resources.add(poleGeo);resources.add(bannerGeo);resources.add(baseGeo);const g=new T.Group();const pole=new T.Mesh(poleGeo,mat);pole.position.y=.9;g.add(pole);const banner=new T.Mesh(bannerGeo,mat);banner.position.set(.24,1.55,0);g.add(banner);for(const z of [-.025,.025]){const mark=teamMark();mark.position.set(.24,1.55,z);updateTeamMark(mark,team);g.add(mark);}const base=new T.Mesh(baseGeo,mat);base.position.y=.04;g.add(base);g.userData={team,teamLabel:teamPresentation(team,this.display?.teamPalette)?.label??null,flag:true,banner,material:mat};return g;}
      updateFlags(match,arena=MAPS[0]){this.updateVehicleModels(match);const input=match?.flags;if(!input){for(const g of this.flagModels?.values()||[])g.visible=false;return;}const flags=Array.isArray(input)?input:Object.entries(input).map(([team,flag])=>({...flag,team:flag?.team??team}));const active=new Set();for(const flag of flags.slice(0,8)){if(!flag)continue;const team=flag.team??flag.teamId??flag.id??0,key=String(team);let g=this.flagModels.get(key);if(!g){g=this.createFlagModel(team,arena);this.flagModels.set(key,g);this.scene.add(g);}active.add(key);const carrier=flag.carrier??flag.carrierId??flag.carriedBy;g.visible=carrier==null&&flag.state!=='carried'&&flag.status!=='carried';const p=pointOf(flag);g.position.set(p.x||0,p.y||0,p.z||0);g.rotation.y=flag.yaw??0;const dropped=flag.dropped===true||flag.state==='dropped'||flag.status==='dropped';const pulse=dropped&&!this.reduced();g.scale.setScalar(pulse?1+Math.sin((match.time||0)*7)*.08:1);g.userData.banner.material.opacity=dropped?.75:1;g.userData.banner.material.transparent=true;const flagColor=this.objectiveColor(team,arena),flagMaterial=g.userData.material;if(flagMaterial){flagMaterial.color.set(flagColor);flagMaterial.emissive?.set(flagColor);g.userData.banner.material.color.set(flagColor);}}for(const [key,g] of this.flagModels)if(!active.has(key))g.visible=false;}
@@ -1255,44 +1263,39 @@ export class ArenaView{
    for(const [id,state] of this.hitFlinch){
     if(state.until<=now){this.hitFlinch.delete(id);continue;}
     live++;
-    const model=this.actorModels?.get(id);if(!model)continue;
+    const model=this.actorModels?.get(id);if(!model||this.characterLifecycle?.ownsTransform(model))continue;
     model.userData.hitUntil=Math.max(model.userData.hitUntil??0,state.until);
     if(state.pushX||state.pushZ){model.position.x+=state.pushX;model.position.z+=state.pushZ;}
    }
    return live;
   }
-  poseCorpse(m,a,match){
-   const reduced=this.reduced();
-   let ctx=this.deathContext.get(a.id);
-   if(!ctx){const plan=deathPlan({seed:(a.id*7+(a.deaths??0)*13)>>>0});ctx={plan,pos:{x:a.x,y:a.y,z:a.z},direction:null,start:null};this.deathContext.set(a.id,ctx);}
-   if(ctx.start===null)ctx.start=Number.isFinite(match?.time)?match.time:0;
-   const plan=ctx.plan,t=Math.max(0,(Number.isFinite(match?.time)?match.time:ctx.start)-ctx.start),x=Number.isFinite(a.x)?a.x:ctx.pos.x,y=Number.isFinite(a.y)?a.y:ctx.pos.y,z=Number.isFinite(a.z)?a.z:ctx.pos.z;
-   m.userData.corpse=true;
-   if(m.userData.head)m.userData.head.visible=plan.hideHead!==true;
-   if(plan.hideBody||a.id===this.playerId){m.visible=false;return;}
-   m.visible=true;
-   const yaw=ctx.direction?Math.atan2(-ctx.direction.x,-ctx.direction.z):(Number.isFinite(a.bodyYaw)?a.bodyYaw:(a.yaw||0));
-   const pose=plan.pose||'forward',duration=plan.crumple?1.05:.55;
-   const fall=reduced?1:Math.min(1,t/duration),ease=fall*fall*(3-2*fall),tilt=ease*(Math.PI/2)*.9;
-   const spin=reduced?0:plan.spin*ease*Math.min(1,t*.6),roll=reduced?0:(plan.roll||0)*ease;
-   m.rotation.order='YXZ';
-   if(pose==='sprawl')m.rotation.set(-tilt*.5,yaw+spin,roll+tilt*.4);
-   else if(pose==='crumple')m.rotation.set(tilt*.55,yaw,roll);
-   else if(pose==='back')m.rotation.set(-tilt,yaw,roll);
-   else if(pose==='left')m.rotation.set(tilt*.25,yaw,tilt*.75+roll);
-   else if(pose==='right')m.rotation.set(tilt*.25,yaw,-tilt*.75+roll);
-   else m.rotation.set(tilt,yaw,roll);
-   m.position.set(x,y+.04-ease*.12,z);
-   m.userData.rig?.update({dt:0,time:match?.time??0,speed:0,maxSpeed:8,grounded:true,crouch:false,ads:false,strafe:0,forward:0,hit:0});
-   // Bounded limb splay over the deterministic pose so corpses do not all share
-   // one silhouette. Applied after the rig write so it survives the frame.
-   const joints=m.userData.joints;
-   if(joints&&plan.topple&&!reduced){const jitter=hashUnit(a.id,plan.pieces,a.deaths??0),splay=plan.splay*ease;if(joints.armUpperL)joints.armUpperL.rotation.z=.35+.8*splay;if(joints.armUpperR)joints.armUpperR.rotation.z=-(.35+.8*(1-splay));if(joints.forearmL)joints.forearmL.rotation.x=-(.3+.5*jitter);if(joints.forearmR)joints.forearmR.rotation.x=-(.3+.5*(1-jitter));if(joints.legUpperL)joints.legUpperL.rotation.x=.1+.4*splay;if(joints.legUpperR)joints.legUpperR.rotation.x=.1+.4*(1-splay);}
+  // Final living-only contact pass: after interpolation, styling, swaps and hit pushes.
+  _alignLivingCharacters(match){
+   const arena=match?.arena??MAPS.find(map=>map.id===match?.mapId)??MAPS[0];
+   const sampleGround=(x,z,referenceY)=>typeof this.characterGroundAt==='function'
+     ?this.characterGroundAt(x,z,referenceY,match)
+     :presentationSupportAt(x,z,arena,referenceY);
+   for(const actor of match?.actors??[]){
+    const model=this.actorModels?.get(actor.id);
+    if(!model||!model.visible||actor.health<=0||actor.vehicleId!=null)continue;
+    if(this.characterLifecycle&&this.characterLifecycle.state(model)!=='alive')continue;
+    alignLivingCharacter(model,{grounded:actor.grounded!==false,sampleGround});
+   }
   }
-  reviveCorpse(m){
-   if(m.userData.corpse!==true)return;
-   m.userData.corpse=false;m.visible=true;m.rotation.order='XYZ';m.rotation.x=0;m.rotation.z=0;
-   if(m.userData.head)m.userData.head.visible=true;
+  poseCorpse(m,a,match){
+   const lifecycle=this.characterLifecycle??=new CharacterLifecycle({maxCorpses:24,maxLifetime:4});
+   const ctx=this.deathContext?.get(a.id);
+   const plan=ctx?.plan??deathPlan({seed:(a.id*7+(a.deaths??0)*13)>>>0});
+   lifecycle.update(m,a,{time:match?.time??0,plan,reduced:this.reduced(),hidden:a.id===this.playerId,
+    // Override with the shared spatial support selector for stacked platforms.
+    // A callback returning null is void and MUST NOT fall back to an invented floor.
+    sampleGround:(x,z,referenceY)=>typeof this.characterGroundAt==='function'
+      ?this.characterGroundAt(x,z,referenceY,match)
+      :presentationSupportAt(x,z,match?.arena??MAPS.find(map=>map.id===match?.mapId)??MAPS[0],referenceY)});
+   this.hitFlinch?.delete(a.id);
+  }
+  reviveCorpse(m,a,match){
+   this.characterLifecycle?.update(m,a,{time:match?.time??0});
   }
    // Camera collision for the cinematic/demo director: cast from the followed
    // actor back toward the camera, then ease the stand-off distance in front of
@@ -1525,10 +1528,11 @@ export class ArenaView{
    _renderFrame(mode,match,delta,time){this.motionQuery??=window.matchMedia?.('(prefers-reduced-motion: reduce)');this.resize();this._sampleQuality(delta);const reduced=this.reduced();if((mode==='selection'||mode==='progression')&&!this.showcaseState){if(this.showcaseExpected){this.renderer.render(this.scene,this.camera);return;}const m=this.menu.model;m.rotation.y=Math.PI+.25+(reduced?0:Math.sin(time*.25)*.2);m.position.y=.17+(reduced?0:Math.sin(time)*.025);m.userData.rig?.update({dt:Math.max(0,Math.min(.1,delta||0)),time,speed:0,maxSpeed:8,grounded:true});this.renderer.render(this.menu.scene,this.menu.camera);return;}if((mode==='selection'||mode==='theater'||mode==='progression'||mode==='changelog'||mode==='browse'||mode==='lobby')&&!match)match=this.showcaseState;
       if(!match)return;const cinematic=this.cinema===true&&!!this.director;const actors=match.actors||[];let player=cinematic?actors[0]:(actors.find(a=>a.id===this.playerId)||actors[0]);if(this.spectator&&!cinematic)player=spectateActor(actors,this.spectatorTarget)||player;if(!player)return;const arena=match.arena||MAPS.find(a=>a.id===match.mapId)||MAPS[0];const savedPlayerId=this.playerId;this.updateFlags(match,arena);this.updateObjectives(match,arena);this.updateWaypoint(match,arena);this.updatePayloadModel(match,arena,time);this.updateMothRift(time);if(cinematic)this.playerId=-1;const cinemaPose=cinematic?this.director.update(match,Math.max(0,delta),match.events||[]):null;if(this.freeCam){this.camera.position.set(this.freePose.x,this.freePose.y,this.freePose.z);this.camera.rotation.set(this.freePose.pitch,this.freePose.yaw,0,'YXZ');}else if(cinematic){this.camera.position.set(cinemaPose.x,cinemaPose.y,cinemaPose.z);this.camera.rotation.set(cinemaPose.pitch,cinemaPose.yaw,cinemaPose.roll||0,'YXZ');this._clearCamera(player,delta,cinemaPose.cut);}else{const pres=this._interpEnabled?this._presentActor(player.id):null,px=pres&&!pres.snapped?pres.x:(player.x||0),py=pres&&!pres.snapped?pres.y:(player.y||0),pz=pres&&!pres.snapped?pres.z:(player.z||0);const eyeY=py+(player.health>0?(player.eyeHeight??1.45):.65),yaw=(player.yaw||0)+(player.punchYaw||0),pitch=(player.pitch||0)+(player.punchPitch||0);if(this.spectator&&this.spectatorThird===true){const dist=4.6,cos=Math.cos(pitch);this.camera.position.set(px+Math.sin(yaw)*dist*cos,eyeY+1.1-Math.sin(pitch)*dist,pz+Math.cos(yaw)*dist*cos);}else this.camera.position.set(px,eyeY,pz);this.camera.rotation.set(pitch,yaw,0,'YXZ');}this.cameraShake??=new CameraShake();const aiming=this.aim===true||player.ads===true,baseFov=this.display?.fov??82;
 const activeSight=this._activeSight=resolveActiveSight({weapon:player.weapon,optic:player.attachments?.visual?.optic,aiming});
-const targetFov=aiming?adsFieldOfView(baseFov,activeSight):player.sprinting===true?baseFov+5:baseFov,fovBlend=1-Math.exp(-8*Math.min(Math.max(delta||0,0),.1));this.camera.fov=Math.max(sightFovFloor(activeSight),this.camera.fov+(targetFov-this.camera.fov)*fovBlend);if(cinematic)this.camera.fov=Math.max(50,Math.min(100,cinemaPose.fov||this.camera.fov));if(this.freeCam)this.camera.fov=Math.max(50,Math.min(100,this.display?.fov??82));this.camera.updateProjectionMatrix();
+// Player FOV is updated with the weapon pose below; director/free camera keep ownership here.
+if(cinematic)this.camera.fov=Math.max(50,Math.min(100,cinemaPose.fov||this.camera.fov));if(this.freeCam)this.camera.fov=Math.max(50,Math.min(100,this.display?.fov??82));this.camera.updateProjectionMatrix();
 if(this._killcam&&!this.freeCam&&!cinematic){const elapsed=(Number.isFinite(time)?time:0)-this._killcam.start,kc=killcamPose({elapsed,duration:this._killcam.duration,focus:this._killcam.focus,killer:this._killcam.killer,seed:this._killcam.seed,reduced});if(kc.phase>=1){this._killcam=null;}else{this.camera.position.set(kc.x,kc.y,kc.z);this.camera.lookAt(kc.lookX,kc.lookY,kc.lookZ);this.camera.fov=Math.max(50,Math.min(100,kc.fov));this.camera.updateProjectionMatrix();}}
 if(this.freeCam){this.lowHealthOverlay?.update(false,time,delta,reduced,this.camera);}else if(!cinematic){this.cameraShake.apply(this.camera,time,reduced,this.display?.cameraShake??1);this.cameraShake.update(Math.max(0,delta));this.lowHealth=player.health>0&&player.health<=(player.maxHealth??100)*.35;this.lowHealthOverlay?.update(this.lowHealth,time,delta,reduced,this.camera);}else this.lowHealthOverlay?.update(false,time,delta,reduced,this.camera);
-      actors.forEach((a,i)=>{const m=this.actorModels.get(a.id);if(!m)return;const mounted=a.vehicleId!=null;if(a.health<=0){this.poseCorpse(m,a,match);return;}this.deathContext?.delete(a.id);this.reviveCorpse(m);m.visible=a.id!==this.playerId;m.position.set(a.x||0,(a.y||0)+.04,a.z||0);if(mounted){const rider=match.vehicles?.find(v=>v.id===a.vehicleId),chassis=Number.isFinite(rider?.yaw)?rider.yaw:Number.isFinite(rider?.heading)?rider.heading:a.yaw;m.rotation.y=(Number.isFinite(chassis)?chassis:0)-Math.PI;}else m.rotation.y=Number.isFinite(a.bodyYaw)?a.bodyYaw:(a.yaw||0);const bodyYaw=Number.isFinite(a.bodyYaw)?a.bodyYaw:(a.yaw||0),speed=Math.hypot(a.vx||0,a.vz||0),localX=(a.vx||0)*Math.cos(bodyYaw)-(a.vz||0)*Math.sin(bodyYaw),localZ=-((a.vx||0)*Math.sin(bodyYaw)+(a.vz||0)*Math.cos(bodyYaw));m.userData.rig?.update({dt:Math.max(0,Math.min(.1,delta||0)),time,speed:mounted?0:speed,maxSpeed:a.moveSpeed||8,grounded:mounted?true:a.grounded!==false,crouch:!mounted&&a.crouching===true,ads:!mounted&&a.ads===true,reload:!mounted&&a.reloading?1:0,strafe:mounted?0:Math.max(-1,Math.min(1,localX/3)),forward:mounted?0:Math.max(-1,Math.min(1,localZ/3)),focusYaw:Math.atan2(Math.sin((a.yaw||0)-bodyYaw),Math.cos((a.yaw||0)-bodyYaw)),focusPitch:-(a.pitch||0),bank:reduced?0:Math.max(-1,Math.min(1,((a.yaw||0)-bodyYaw)*1.1)),hit:!reduced&&(m.userData.hitUntil??0)>performance.now()?1:0});if(m.userData.gunAnchor){const aimYaw=Math.atan2(Math.sin((a.yaw||0)-bodyYaw),Math.cos((a.yaw||0)-bodyYaw));m.userData.gunAnchor.rotation.x=reduced?0:Math.max(-.7,Math.min(.7,a.pitch||0));m.userData.gunAnchor.rotation.y=reduced?0:Math.max(-.9,Math.min(.9,aimYaw));}if(!reduced&&a.health>0&&a.active>0&&a.harness==='hermes'&&(match.time||0)-(m.userData.trailAt||0)>.1){m.userData.trailAt=match.time;this.effectPool??=new EffectPool(this.scene);this.effectPool.add({pos:V(a.x,a.y+.4,a.z),color:m.userData.color,size:.11,life:.3});}m.userData.torso.material.emissive.set(a.active>0&&['opencode','codex','cline','roo'].includes(a.harness)?m.userData.color:'#000000');m.userData.torso.material.emissiveIntensity=a.active>0?.7:0;const hasEnergyShield=(a.temporaryShield||0)>0||(a.juggernautShield||0)>0;m.userData.shield.material.color.set(a.slow>0?'#d89aff':(a.juggernautShield||0)>0?'#ffd166':hasEnergyShield?'#70ffe6':m.userData.color);m.userData.shield.material.opacity=hasEnergyShield?.24:.13;m.userData.shield.visible=a.slow>0||a.protection>0||(a.harness==='claudecode'&&a.active>0)||hasEnergyShield;if(m.userData.weapon.userData.type!==a.weapon){m.userData.gunAnchor.remove(m.userData.weapon);this.disposeObject(m.userData.weapon);m.userData.weapon=simpleWeaponModel(a.weapon,this.modelAssets,a.attachments?.visual,a.finish);this._trackAssets();m.userData.gunAnchor.add(m.userData.weapon);}m.userData.weapon.userData.flash.visible=!reduced&&(m.userData.flashUntil??0)>performance.now();});
+      actors.forEach((a,i)=>{const m=this.actorModels.get(a.id);if(!m)return;const mounted=a.vehicleId!=null;if(a.health<=0){this.poseCorpse(m,a,match);return;}this.deathContext?.delete(a.id);this.reviveCorpse(m,a,match);m.visible=a.id!==this.playerId;m.position.set(a.x||0,a.y||0,a.z||0);if(mounted){const rider=match.vehicles?.find(v=>v.id===a.vehicleId),chassis=Number.isFinite(rider?.yaw)?rider.yaw:Number.isFinite(rider?.heading)?rider.heading:a.yaw;m.rotation.y=(Number.isFinite(chassis)?chassis:0)-Math.PI;}else m.rotation.y=Number.isFinite(a.bodyYaw)?a.bodyYaw:(a.yaw||0);const bodyYaw=Number.isFinite(a.bodyYaw)?a.bodyYaw:(a.yaw||0),speed=Math.hypot(a.vx||0,a.vz||0),localX=(a.vx||0)*Math.cos(bodyYaw)-(a.vz||0)*Math.sin(bodyYaw),localZ=-((a.vx||0)*Math.sin(bodyYaw)+(a.vz||0)*Math.cos(bodyYaw));m.userData.rig?.update({dt:Math.max(0,Math.min(.1,delta||0)),time,reduced,speed:mounted?0:speed,maxSpeed:a.moveSpeed||8,grounded:mounted?true:a.grounded!==false,crouch:!mounted&&a.crouching===true,ads:!mounted&&a.ads===true,reload:!mounted&&a.reloading?1:0,strafe:mounted?0:Math.max(-1,Math.min(1,localX/3)),forward:mounted?0:Math.max(-1,Math.min(1,localZ/3)),focusYaw:Math.atan2(Math.sin((a.yaw||0)-bodyYaw),Math.cos((a.yaw||0)-bodyYaw)),focusPitch:-(a.pitch||0),bank:reduced?0:Math.max(-1,Math.min(1,((a.yaw||0)-bodyYaw)*1.1)),hit:!reduced&&(m.userData.hitUntil??0)>performance.now()?1:0});if(m.userData.gunAnchor){const aimYaw=Math.atan2(Math.sin((a.yaw||0)-bodyYaw),Math.cos((a.yaw||0)-bodyYaw));m.userData.gunAnchor.rotation.x=reduced?0:Math.max(-.7,Math.min(.7,a.pitch||0));m.userData.gunAnchor.rotation.y=reduced?0:Math.max(-.9,Math.min(.9,aimYaw));}if(!reduced&&a.health>0&&a.active>0&&a.harness==='hermes'&&(match.time||0)-(m.userData.trailAt||0)>.1){m.userData.trailAt=match.time;this.effectPool??=new EffectPool(this.scene);this.effectPool.add({pos:V(a.x,a.y+.4,a.z),color:m.userData.color,size:.11,life:.3});}m.userData.torso.material.emissive.set(a.active>0&&['opencode','codex','cline','roo'].includes(a.harness)?m.userData.color:'#000000');m.userData.torso.material.emissiveIntensity=a.active>0?.7:0;const hasEnergyShield=(a.temporaryShield||0)>0||(a.juggernautShield||0)>0;m.userData.shield.material.color.set(a.slow>0?'#d89aff':(a.juggernautShield||0)>0?'#ffd166':hasEnergyShield?'#70ffe6':m.userData.color);m.userData.shield.material.opacity=hasEnergyShield?.24:.13;m.userData.shield.visible=a.slow>0||a.protection>0||(a.harness==='claudecode'&&a.active>0)||hasEnergyShield;if(m.userData.weapon.userData.type!==a.weapon){m.userData.gunAnchor.remove(m.userData.weapon);this.disposeObject(m.userData.weapon);m.userData.weapon=simpleWeaponModel(a.weapon,this.modelAssets,a.attachments?.visual,a.finish);this._trackAssets();m.userData.gunAnchor.add(m.userData.weapon);}m.userData.weapon.userData.flash.visible=!reduced&&(m.userData.flashUntil??0)>performance.now();});
    // Presentation interpolation (opt-in). The host captures a presentation
    // snapshot around every fixed simulation step (including catch-up steps), so
    // the previous/current transforms are the two surrounding ticks rather than
@@ -1536,9 +1540,10 @@ if(this.freeCam){this.lowHealthOverlay?.update(false,time,delta,reduced,this.cam
    // fraction; discontinuities snap. Storage is reused, never reallocated here.
    if(this._interpEnabled&&this.actorModels?.size&&this._interpAlpha<1){
     for(const [id,model] of this.actorModels){
+     if(this.characterLifecycle&&this.characterLifecycle.state(model)!=='alive')continue;
      const pose=this._presentActor(id);
      if(!pose||pose.snapped)continue;
-     model.position.set(pose.x,pose.y+.04,pose.z);
+     model.position.set(pose.x,pose.y,pose.z);
      model.rotation.y=pose.yaw;
     }
    }
@@ -1573,22 +1578,21 @@ if(this.freeCam){this.lowHealthOverlay?.update(false,time,delta,reduced,this.cam
     }
     this.feedback??=new WeaponFeedback();const pose=this.feedback.update(player,delta,reduced,this.hands.visible,this.display?.weaponBob??1);
     if(this._swap){this._swap.t+=Math.max(0,delta||0);const k=Math.min(1,this._swap.t/this._swap.duration),showIncoming=k>=.5;this._swap.from.visible=!showIncoming;this._swap.to.visible=showIncoming;this.firstPerson=showIncoming?this._swap.to:this._swap.from;if(k>=1){this._releaseWeapon(this._swap.from);this._swap=null;}}
-     // Reduced motion snaps straight to the solved ADS pose instead of forcing
-     // the blend to zero (which left the sight picture unusable). Hip-fire is
-     // unchanged.
-     const wantAds=(player.ads===true||this.aim===true)&&this.hands.visible,adsTarget=wantAds?1:0;
-     if(reduced)this._adsTransition=adsTarget;else this._adsTransition=(this._adsTransition??0)+((adsTarget-(this._adsTransition??0))*Math.min(1,Math.max(0,(delta||0)*14)));
-     const adsT=this._adsTransition,hipX=.37+pose.x,hipY=-.36+pose.y,hipZ=-.58+pose.z,aimData=this.firstPerson?.userData?.aim,aimBase=aimData?.position||{x:0,y:-.24,z:-.44},aimX=aimBase.x+pose.x*.2,aimY=aimBase.y+pose.y*.2,aimZ=aimBase.z+pose.z*.5;
-     this.hands.position.set(hipX*(1-adsT)+aimX*adsT,hipY*(1-adsT)+aimY*adsT,hipZ*(1-adsT)+aimZ*adsT);
-      // Blend the neutral hip orientation with the solved ADS orientation first,
-      // then compose the presentation channels exactly once on top (see
-      // composeAdsQuaternion). The earlier sequence baked pose.pitch/pose.roll
-      // into the hip quaternion and re-added them after the slerp, so recoil
-      // through the ADS transition was applied roughly twice.
-      composeAdsQuaternion(this.hands.quaternion,aimData?.quaternion,adsT,this.feedback.channels);
+    this._adsController??=new AdsController();
+    const ads=this._adsController.update(delta,{
+     weapon:player.weapon,aiming,baseFov,sight:activeSight,
+     aim:this.firstPerson?.userData?.aim,reduced,reloading:player.reloading===true,
+     swapping:!!this._swap,sprinting:player.sprinting===true,
+     visible:this.hands.visible&&player.health>0&&!cinematic&&!this.freeCam&&!this._killcam,
+    });
+    this._adsTransition=ads.progress;
+    this._activeSight={...activeSight,aiming:ads.reticle.ready,adsOpacity:ads.reticle.adsOpacity,hipOpacity:ads.reticle.hipOpacity};
+    this._adsController.compose(this.hands.position,this.hands.quaternion,pose,this.feedback.channels);
+    // Camera yaw/pitch above remain immediate; no extra camera recoil is added.
+    if(!cinematic&&!this.freeCam&&!this._killcam){this.camera.fov=ads.fov;this.camera.updateProjectionMatrix();}
 
     this._animateWeaponParts(this.firstPerson,player,reduced);
-    this.firstPerson.userData.flash.visible=!reduced&&this.hands.visible&&this.flashUntil>performance.now();this.muzzleLights?.update(Math.max(0,delta));if(this.renderer.shadowMap?.autoUpdate===false){const hz=Number(this._quality().shadowHz)||30;if(shadowDue(time,this._shadowAt,hz)){this._shadowAt=time;this.renderer.shadowMap.needsUpdate=true;}}this.updateSky();this._updateWind(time,reduced);this._updateAmbient(match,delta,time,reduced);const spMode=match.config?.mode==='campaign'||match.config?.mode==='horde';if(spMode)this.setWeather(match.weather??null);else if(!cinematic&&this._weatherOverride!==null)this.setWeather(null);this._updateWeather(arena,delta,mode);this._updateWeatherFx(delta,reduced,this._quality());const software=this.renderer?.isSoftware===true;this._updateLightning(delta,reduced,software);this._applyWetSheen(this._weatherState());this.hitPool?.update(Math.max(0,delta));this._updateHitReactions();this._updateDebris(delta);this._updateAudio(match,time);this._beginGpu();if(this.composer)this.composer.render();else this.renderer.render(this.scene,this.camera);
+    this.firstPerson.userData.flash.visible=!reduced&&this.hands.visible&&this.flashUntil>performance.now();this.muzzleLights?.update(Math.max(0,delta));if(this.renderer.shadowMap?.autoUpdate===false){const hz=Number(this._quality().shadowHz)||30;if(shadowDue(time,this._shadowAt,hz)){this._shadowAt=time;this.renderer.shadowMap.needsUpdate=true;}}this.updateSky();this._updateWind(time,reduced);this._updateAmbient(match,delta,time,reduced);const spMode=match.config?.mode==='campaign'||match.config?.mode==='horde';if(spMode)this.setWeather(match.weather??null);else if(!cinematic&&this._weatherOverride!==null)this.setWeather(null);this._updateWeather(arena,delta,mode);this._updateWeatherFx(delta,reduced,this._quality());const software=this.renderer?.isSoftware===true;this._updateLightning(delta,reduced,software);this._applyWetSheen(this._weatherState());this.hitPool?.update(Math.max(0,delta));this._updateHitReactions();this._alignLivingCharacters(match);this._updateDebris(delta);this._updateAudio(match,time);this._beginGpu();if(this.composer)this.composer.render();else this.renderer.render(this.scene,this.camera);
   // Isolated first-person pass: mirror the active camera onto a dedicated
   // weapon camera, clear the world depth, then draw the gun with normal depth
   // testing between its parts. The CPU fallback renders in the main camera.
@@ -1613,7 +1617,7 @@ if(this.freeCam){this.lowHealthOverlay?.update(false,time,delta,reduced,this.cam
        if(cached&&!cached.parent)return cached;
        const model=weaponModel(type,this.modelAssets??=new ModelAssets(),visual,finish);
        model.scale.setScalar(VIEWMODEL_SCALE);
-       model.traverse(n=>{if(n.isMesh){n.renderOrder=100;if(this.renderer?.isSoftware===true)n.material.depthTest=false;}});
+       model.traverse(n=>{if(n.isMesh){n.renderOrder=100;}});
        model.userData.weaponKey=key;
        if(!cached)this._weaponCache.set(key,model);
        if(this._weaponCache.size>16){for(const [k,m] of this._weaponCache){if(k!==key&&!m.parent){this._weaponCache.delete(k);this.disposeObject(m);break;}}}
@@ -1692,12 +1696,12 @@ if(this.freeCam){this.lowHealthOverlay?.update(false,time,delta,reduced,this.cam
         return;
        }
        const reloading=player.reloading===true,progress=reloading?Math.max(0,Math.min(1,1-(Number(player.reloadTimer)||0)/(Number(player.reloadDuration)||1))):0,cycle=reloading?Math.sin(progress*Math.PI):0;
-       if(mag&&[9,1,5].includes(type))mag.position.y=mag.userData.baseY-cycle*.5;
+       if(mag&&type!==0&&type!==3)mag.position.y=mag.userData.baseY-cycle*(type===1?.12:.24);
        if(barrel&&type===3){barrel.position.y=barrel.userData.baseY-cycle*.1;barrel.rotation.x=barrel.userData.baseRX+cycle*.45;}
        if(cell&&type===2)cell.rotation.z=cell.userData.baseRZ+progress*Math.PI*4;
-       if(bolt){const kick=Math.max(0,Math.min(1,Number(this.feedback?.kick)||0));bolt.position.z=bolt.userData.baseZ-kick*.05;}
+       if(bolt){const kick=Math.max(0,Math.min(1,Number(this.feedback?.kick)||0));bolt.position.z=bolt.userData.baseZ+kick*.05;}
       }
       updateRace(match,time){syncRacePresentation(this,match,time);}
      _renderPreview(time,reduced){const rect=this.previewRect;if(!rect||rect.width<12||rect.height<12||!(this.renderer instanceof T.WebGLRenderer))return;const m=this.menu.model;m.rotation.y=Math.PI+.25+(reduced?0:Math.sin(time*.4)*.22);m.position.y=.17;const cam=this.menu.camera;cam.aspect=Math.max(.2,rect.width/rect.height);cam.updateProjectionMatrix();this._renderSceneInto(this.renderer,rect,this.menu.scene,cam);}
-          dispose(){this.clearObjectiveMarkers();this.effectPool?.dispose();this.projectilePool?.dispose();this.railPool?.dispose();this.deathPool?.dispose();this.decalPool?.dispose();this.debrisPool?.dispose();this.debrisPool=null;this.hitPool?.dispose();this.hitPool=null;this.hitFlinch?.clear();this.ambientPool?.dispose();this.weatherPool?.dispose();this.ambientFx=null;this.weatherFx=null;this._killcam=null;this.preview?.dispose();this.preview=null;this.previewAssets?.dispose?.();this.previewAssets=null;disposeComposer(this.composer);this.composer=null;this.muzzleLights?.dispose();this.lowHealthOverlay?.dispose();this.disposeObject(this.scene);if(this.weaponScene)this.disposeObject(this.weaponScene);this.disposeObject(this.menu.scene);this.environmentRT?.dispose?.();for(const resource of this.renderResources||[])resource.dispose();this.renderResources?.clear();for(const resource of this.sharedResources||[])resource.dispose();this.sharedResources?.clear();this.modelAssets?.materials.clear();this.modelAssets?.geometries.clear();this.modelAssets?.resources.clear();this.arenaAssets?.materials.clear();this.arenaAssets?.geometries.clear();this.arenaAssets?.resources.clear();clearSurfaceTextures();for(const model of this._weaponCache?.values?.()||[])this.disposeObject(model);this._weaponCache?.clear();this._freeCam=false;this._directorLock=false;this.resetFreeCam();this.renderer.dispose();}
+          dispose(){this.characterLifecycle?.clear();this.clearObjectiveMarkers();this.effectPool?.dispose();this.projectilePool?.dispose();this.railPool?.dispose();this.deathPool?.dispose();this.decalPool?.dispose();this.debrisPool?.dispose();this.debrisPool=null;this.hitPool?.dispose();this.hitPool=null;this.hitFlinch?.clear();this.ambientPool?.dispose();this.weatherPool?.dispose();this.ambientFx=null;this.weatherFx=null;this._killcam=null;this.preview?.dispose();this.preview=null;this.previewAssets?.dispose?.();this.previewAssets=null;disposeComposer(this.composer);this.composer=null;this.muzzleLights?.dispose();this.lowHealthOverlay?.dispose();this.disposeObject(this.scene);if(this.weaponScene)this.disposeObject(this.weaponScene);this.disposeObject(this.menu.scene);this.environmentRT?.dispose?.();for(const resource of this.renderResources||[])resource.dispose();this.renderResources?.clear();for(const resource of this.sharedResources||[])resource.dispose();this.sharedResources?.clear();this.modelAssets?.materials.clear();this.modelAssets?.geometries.clear();this.modelAssets?.resources.clear();this.arenaAssets?.materials.clear();this.arenaAssets?.geometries.clear();this.arenaAssets?.resources.clear();clearSurfaceTextures();for(const model of this._weaponCache?.values?.()||[])this.disposeObject(model);this._weaponCache?.clear();this._freeCam=false;this._directorLock=false;this.resetFreeCam();this.renderer.dispose();}
 }

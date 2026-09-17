@@ -101,7 +101,7 @@ const warfront={
   ['health',-60,-20],['health',60,20],['armor',-60,20],['armor',60,-20],
   ['rocket',-40,14],['rocket',40,-14],['rail',0,-26],['rail',0,26],
   ['scatter',-24,0],['scatter',24,0],['plasma',-12,-12],['plasma',12,12],
-  ['grenade',-52,36],['shock',52,-36],['flak',-20,36],['haste',-60,8],['overcharge',60,-8],['overshield',0,16],['marksman',0,-14],['smg',0,14],
+  ['grenade',-52,36],['shock',52,-36],['flak',-20,36],['haste',-60,8],['overcharge',60,-8],['overshield',0,16],['marksman',0,-14],['smg',4,14],
  ],
  objectiveZones:[zone(-40,0),zone(0,-22),zone(40,0)],
  traversal:{jumpPads:[pad('wf-hop-w',-58,0,16),pad('wf-hop-e',58,0,16),pad('wf-hop-n',0,-38,16),pad('wf-hop-s',0,38,16)],teleporters:[tp('wf-tp-w',-42,0,42,0),tp('wf-tp-e',42,0,-42,0)]},
@@ -141,7 +141,7 @@ const skyfallBasin={
   ['grenade',-58,40],['shock',58,-40],['flak',-22,40],['haste',-70,10],['overcharge',70,-10],['overshield',0,18],['marksman',-30,-20],['smg',30,20],
  ],
  objectiveZones:[zone(-44,0),zone(0,-22),zone(44,0)],
- traversal:{jumpPads:[pad('sf-hop-w',-64,0,16),pad('sf-hop-e',64,0,16),pad('sf-hop-n',0,-46,16),pad('sf-hop-s',0,46,16)],teleporters:[tp('sf-tp-w',-56,0,56,0),tp('sf-tp-e',56,0,-56,0)]},
+ traversal:{jumpPads:[pad('sf-hop-w',-70,-14,16),pad('sf-hop-e',70,14,16),pad('sf-hop-n',0,-46,16),pad('sf-hop-s',0,46,16)],teleporters:[tp('sf-tp-w',-50,0,50,0),tp('sf-tp-e',50,0,-50,0)]},
  navNodes:[[-70,0],[-50,0],[-30,0],[0,0],[30,0],[50,0],[70,0],[0,-42],[0,42],[-34,-30],[34,30],[-34,30],[34,-30],[0,24],[0,-24],[-50,28],[50,-28],[-50,-28],[50,28]],
  landmarks:[{label:'WEST BASE',x:-60,z:0,y:7},{label:'THE MESA',x:0,z:0,y:9},{label:'EAST BASE',x:60,z:0,y:7}],
 };

@@ -29,6 +29,9 @@ const colosseum = createLevel({
       const r = 20 + tier * 6.5, h = 1.6 + tier * 1.4;
       ring(ctx, 0, 0, r, 24, (c, x, z, a, i) => {
         if (i % 6 < 2) return; // gaps keep the tiers walkable to bots
+        // Reserve both room footprints and inward-facing doorway approaches.
+        // Terrace solids otherwise occupy the door gaps at (+/-11, -16).
+        if (Math.abs(Math.abs(x) - 15) < 7 && Math.abs(z + 16) < 7) return;
         if (i % 3 === 0 && tier < 3) c.addColumn({ x, z, y: c.ground(x, z), radius: .8, height: h + 4 });
         else c.addBlock({ x, z, w: 3.4, d: 3.4, h: c.ground(x, z) + h, kind: 'terrace' });
       });
@@ -54,8 +57,13 @@ const frostGate = createLevel({
     ctx.flagSpawns = { 0: { x: -48, z: 0 }, 1: { x: 48, z: 0 } };
     ctx.addBuilding({ x: -48, z: 0, w: 16, d: 18, h: 7, rot: Math.PI / 2, roof: 'gable', door: 'north', floors: 1, color: '#cfe8ff' });
     ctx.addBuilding({ x: 48, z: 0, w: 16, d: 18, h: 7, rot: -Math.PI / 2, roof: 'gable', door: 'north', floors: 1, color: '#cfe8ff' });
-    ctx.addTunnel([[-34, undefined, 0], [-14, undefined, 0], [14, undefined, 0], [34, undefined, 0]], 3.2);
+    // Keep deferred tunnel approaches clear of the base foundation landings.
+    ctx.addTunnel([[-32, undefined, 0], [-14, undefined, 0], [14, undefined, 0], [32, undefined, 0]], 3.2);
     ctx.addCavern({ x: 0, z: -20, radius: 13, height: 9 });
+    // Caverns realize after scatter; reserve both default portal approaches.
+    for (const a of [Math.PI / 16, Math.PI + Math.PI / 16]) {
+      for (let r = 10; r <= 17; r++) ctx.addNav(Math.cos(a) * r, -20 + Math.sin(a) * r);
+    }
     // Reserve the tunnel and both mouths, including each prop's collision extent.
     const outsideTunnel = (x, z, radius) => Math.abs(x) > 40 + radius || Math.abs(z) > 3.2 + radius;
     ring(ctx, 0, 0, 26, 10, (c, x, z) => { const scale = 1.4 + rng() * 1.2; if (outsideTunnel(x, z, scale)) c.addRock({ x, z, scale }); });
@@ -65,16 +73,17 @@ const frostGate = createLevel({
   },
 });
 
-// 3. King of the Hill — a grassy mesa with a cavern beneath and ramps to the top.
+// 3. King of the Hill — a central cavern and ramped forest ring platforms.
 const sunkenHill = createLevel({
   id: 'sunken-hill', name: 'Sunken Hill', tag: 'KOTH / TERRAIN HILL', color: '#8fd08a', background: '#0a1410', seed: 3303,
   group: 'outdoor', scale: 'battle', mode: 'koth', size: { w: 100, d: 100 }, biome: 'forest', amplitude: 6, relief: 1.5,
-  description: 'A rounded hill dominates the field. Hold the crown, or fight through the cavern that runs beneath it.',
+  description: 'A central cavern anchors the field, surrounded by low ground-supported ring platforms and open forest flanks.',
   layout(ctx, rng) {
     ctx.teamSpawns = { 0: [[-38, -6], [-38, 6], [-30, -22], [-30, 22]], 1: [[38, 6], [38, -6], [30, 22], [30, -22]] };
     ctx.flagSpawns = { 0: { x: -38, z: 0 }, 1: { x: 38, z: 0 } };
     ctx.addCavern({ x: 0, z: 0, radius: 15, height: 10 });
-    ring(ctx, 0, 0, 30, 8, (c, x, z, a) => c.addBridge({ x, z, y: c.ground(x, z) + (a < Math.PI ? 0 : 2), w: 10, d: 4, rot: -a, thickness: .5 }));
+    // Low filled ring platforms stay outside the central cavern and its portals.
+    ring(ctx, 0, 0, 30, 8, (c, x, z, a) => c.addCauseway({ x, z, w: 10, d: 4, rot: Math.round((a + Math.PI / 2) / (Math.PI / 2)) * Math.PI / 2 }));
     scatter(ctx, 26, rng, 8, (c, x, z) => c.addTree({ x, z, scale: .8 + rng() * .8 }));
     for (let i = 0; i < 6; i++) { const a = (i / 6) * Math.PI * 2 + .4; ctx.addRock({ x: Math.cos(a) * 14, z: Math.sin(a) * 14, scale: 1.3 }); }
     ctx.addObjective(0, 0, 6); ctx.addObjective(-28, 0, 4); ctx.addObjective(28, 0, 4);
@@ -90,7 +99,9 @@ const riverbend = createLevel({
   description: 'A low river valley town. Three plazas sit between walkable buildings and a flooded centre channel.',
   layout(ctx, rng) {
     ctx.teamSpawns = { 0: [[-44, -22], [-44, 22], [-36, -18]], 1: [[44, 22], [44, -22], [36, 18]] };
-    const towns = [[-34, 0, 12, 10], [-14, -26, 10, 9], [14, 26, 10, 9], [34, 0, 12, 10], [-4, 0, 9, 8], [12, -6, 8, 8], [-16, 10, 8, 8]];
+    // Keep the three authored plazas outside buildings; the outer doorways
+    // must not discharge directly into the north-side tunnel's solid wall.
+    const towns = [[-34, 16, 12, 10], [-14, -26, 10, 9], [14, 26, 10, 9], [34, 16, 12, 10], [-4, 26, 9, 8], [12, -6, 8, 8], [-16, 10, 8, 8]];
     for (const [x, z, w, d] of towns) ctx.addBuilding({ x, z, w, d, h: 5.5, rot: rng() > .5 ? 0 : Math.PI / 2, roof: 'gable', door: rng() > .5 ? 'south' : 'west', floors: 1 });
     ctx.addTunnel([[-46, undefined, -12], [-20, undefined, -12], [20, undefined, -12], [46, undefined, -12]], 3);
     scatter(ctx, 14, rng, 10, (c, x, z) => c.addCrate({ x, z, scale: .8 + rng() * .5 }));
@@ -108,8 +119,10 @@ const fortress = createLevel({
     ctx.teamSpawns = { 0: [[-46, -20], [-46, 0], [-46, 20], [-40, 10]], 1: [[34, -16], [34, 16], [40, 0], [26, 0]] };
     ctx.addBuilding({ x: -34, z: 0, w: 14, d: 12, h: 5, roof: 'flat', door: 'east', floors: 1 });
     ctx.addBuilding({ x: 30, z: 0, w: 26, d: 40, h: 10, roof: 'flat', door: 'west', doorWidth: 4, floors: 1 });
-    ctx.addTunnel([[-16, undefined, -14], [6, undefined, -14], [18, undefined, -6]], 2.8);
-    ctx.addTunnel([[-16, undefined, 14], [6, undefined, 14], [18, undefined, 6]], 2.8);
+    // Both flanks discharge into the forecourt, then use the real west door.
+    // Ending at (18, +/-6) pierced solid keep walls, not doorway openings.
+    ctx.addTunnel([[-16, undefined, -14], [6, undefined, -14], [10, undefined, -14]], 2.8);
+    ctx.addTunnel([[-16, undefined, 14], [6, undefined, 14], [10, undefined, 14]], 2.8);
     for (let i = -2; i <= 2; i++) { ctx.addColumn({ x: i * 12, z: -28, radius: .7, height: 6 }); ctx.addColumn({ x: i * 12, z: 28, radius: .7, height: 6 }); }
     scatter(ctx, 10, rng, 12, (c, x, z) => c.addRock({ x, z, scale: .8 + rng() * .6 }));
     ctx.addObjective(-10, 0, 4); ctx.addObjective(12, 0, 4); ctx.addObjective(30, 0, 5);
@@ -121,13 +134,14 @@ const fortress = createLevel({
 const atrium = createLevel({
   id: 'atrium', name: 'The Atrium', tag: 'TEAM / INDOOR PLAZA', color: '#7fd8e6', background: '#0a1216', seed: 6606,
   group: 'indoor', scale: 'battle', mode: 'teamdeathmatch', size: { w: 90, d: 90 }, biome: 'urban', amplitude: 2, relief: .6,
-  description: 'A two-level corporate atrium. Side rooms, a mezzanine ring, and a glass centre make every lane contested.',
+  description: 'A corporate plaza with side rooms and two low, ramped causeways. Columns divide the contested ground lanes.',
   layout(ctx, rng) {
     ctx.teamSpawns = { 0: [[-38, -34], [-38, -20], [-30, -34]], 1: [[38, 34], [38, 20], [30, 34]] };
     for (const [x, z, rot] of [[-30, -20, 0], [30, 20, 0], [-20, 30, Math.PI / 2], [20, -30, Math.PI / 2], [0, -34, 0], [0, 34, Math.PI]]) ctx.addBuilding({ x, z, w: 14, d: 12, h: 5, rot, roof: 'flat', door: 'south', floors: 1 });
     ring(ctx, 0, 0, 16, 8, (c, x, z) => c.addColumn({ x, z, radius: .8, height: 7 }));
-    ctx.addBridge({ x: 0, z: -10, y: 4, w: 22, d: 3, rot: 0, thickness: .5 });
-    ctx.addBridge({ x: 0, z: 10, y: 4, w: 22, d: 3, rot: 0, thickness: .5 });
+    // Ground-supported plaza lanes, inset from the diagonal column bases.
+    ctx.addCauseway({ x: 0, z: -8, w: 22, d: 3 });
+    ctx.addCauseway({ x: 0, z: 8, w: 22, d: 3 });
     scatter(ctx, 12, rng, 10, (c, x, z) => c.addCrate({ x, z, scale: .8 + rng() * .4 }));
     ctx.addObjective(-20, 0, 4); ctx.addObjective(0, 0, 4); ctx.addObjective(20, 0, 4);
     ctx.addPickup('rocket', 0, -22); ctx.addPickup('rocket', 0, 22); ctx.addPickup('rail', -22, 0); ctx.addPickup('rail', 22, 0); ctx.addPickup('health', -30, 0); ctx.addPickup('armor', 30, 0);
@@ -142,8 +156,8 @@ const catacombs = createLevel({
   layout(ctx, rng) {
     const hubs = [[-26, -26], [26, -26], [26, 26], [-26, 26], [0, 0]];
     for (const [x, z] of hubs) ctx.addCavern({ x, z, radius: 10, height: 7 });
-    // East/west crypt openings must meet the lanes, not diagonal solid walls.
-    for (const z of [-26, 0, 26]) ctx.addTunnel([[-40, undefined, z], [40, undefined, z]], 2.4);
+    // Existing lanes must clear diagonal chamber exits, including body/headroom.
+    for (const z of [-26, 0, 26]) ctx.addTunnel([[-40, undefined, z], [40, undefined, z]], 4);
     scatter(ctx, 16, rng, 8, (c, x, z) => c.addRuin({ x, z, scale: .7 + rng() * .6 }));
     ctx.addObjective(0, 0, 4); ctx.addObjective(-26, -26, 3.5); ctx.addObjective(26, 26, 3.5);
     for (const [x, z] of [[-40, 0], [40, 0], [0, -40], [0, 40], [-40, -40], [40, -40], [-40, 40], [40, 40]]) ctx.addSpawn(x, z);
@@ -155,11 +169,13 @@ const catacombs = createLevel({
 const slagworks = createLevel({
   id: 'slagworks', name: 'Slagworks', tag: 'ROCKETS / VOLCANIC', color: '#ff7a4d', background: '#160b07', seed: 8808,
   group: 'urban', scale: 'battle', mode: 'rockets', size: { w: 90, d: 80 }, biome: 'volcanic', amplitude: 5, relief: 1.6,
-  description: 'A molten foundry. Elevated catwalks cross the slag pits and rocket duels decide every crossing.',
+  description: 'A molten foundry with intersecting ground-supported causeways. Rocket duels decide the crossings between furnaces.',
   layout(ctx, rng) {
     for (const [x, z] of [[-22, -14], [22, 14], [-22, 14], [22, -14]]) ctx.addBuilding({ x, z, w: 12, d: 10, h: 6, roof: 'flat', door: 'south', floors: 1 });
-    ctx.addBridge({ x: 0, z: 0, y: 5, w: 44, d: 4, rot: 0, thickness: .5 });
-    ctx.addBridge({ x: 0, z: 0, y: 5, w: 40, d: 4, rot: Math.PI / 2, thickness: .5 });
+    // One shared ground elevation at the crossing, never stacked catwalks.
+    const crossingY = runtimeFloor(ctx, 0, 0) + 1;
+    ctx.addCauseway({ x: 0, z: 0, y: crossingY, w: 44, d: 4, ramp: 6 });
+    ctx.addCauseway({ x: 0, z: 0, y: crossingY, w: 40, d: 4, rot: Math.PI / 2, ramp: 6 });
     ring(ctx, 0, 0, 9, 6, (c, x, z) => c.addRock({ x, z, scale: 1.2 }));
     scatter(ctx, 14, rng, 10, (c, x, z) => c.addBarrel({ x, z, scale: .9 + rng() * .4 }));
     ctx.addObjective(-24, 0, 3.5); ctx.addObjective(0, 24, 4); ctx.addObjective(24, 0, 3.5);
@@ -175,7 +191,7 @@ const forge = createLevel({
   description: 'A close forge floor with a raised centre and side workshops. Every weapon, one killbox.',
   layout(ctx, rng) {
     ring(ctx, 0, 0, 16, 6, (c, x, z) => c.addColumn({ x, z, radius: .8, height: 5 }));
-    ctx.addBridge({ x: 0, z: 0, y: 2.2, w: 11, d: 11, rot: 0, thickness: .5 });
+    ctx.addCauseway({ x: 0, z: 0, w: 11, d: 11, rise: .8 });
     for (const [x, z, rot] of [[-26, -26, -Math.PI / 2], [26, 26, Math.PI / 2], [-26, 26, Math.PI], [26, -26, 0]]) ctx.addBuilding({ x, z, w: 12, d: 10, h: 5, rot, roof: 'gable', door: 'south', floors: 1 });
     scatter(ctx, 10, rng, 8, (c, x, z) => c.addCrate({ x, z, scale: .8 }));
     ctx.addObjective(0, 0, 4); ctx.addObjective(-24, 0, 3.5); ctx.addObjective(24, 0, 3.5);
@@ -197,6 +213,11 @@ const titanValley = createLevel({
     ctx.addTunnel([[-24, undefined, 0], [-12, undefined, 5], [12, undefined, -5], [24, undefined, 0]], 3.4);
     ctx.addCavern({ x: 0, z: -30, radius: 12, height: 11 });
     ctx.addCavern({ x: 0, z: 30, radius: 12, height: 11 });
+    // Caverns realize after scatter. Reserve their default portal approaches
+    // now so the generator's prop-clearance check cannot place rocks in them.
+    for (const z of [-30, 30]) for (const a of [Math.PI / 16, Math.PI + Math.PI / 16]) {
+      for (let r = 9; r <= 18; r++) ctx.addNav(Math.cos(a) * r, z + Math.sin(a) * r);
+    }
     scatter(ctx, 34, rng, 7, (c, x, z) => (Math.abs(x) > 18 ? c.addTree({ x, z, scale: .8 + rng() * .7 }) : c.addRock({ x, z, scale: .8 + rng() * .9 })));
     ctx.addObjective(0, 0, 6); ctx.addObjective(-34, -26, 4); ctx.addObjective(34, 26, 4);
     ctx.addVehicle({ kind: 'puma', x: -37, z: 35, yaw: 0 }); ctx.addVehicle({ kind: 'puma', x: 37, z: -37, yaw: Math.PI }); ctx.addVehicle({ kind: 'puma', x: 0, z: 48, yaw: Math.PI }); ctx.addVehicle({ kind: 'puma', x: 0, z: -48, yaw: 0 });
@@ -212,14 +233,15 @@ const titanValley = createLevel({
 const convoyLine = createLevel({
   id: 'convoy-line', name: 'Convoy Line', tag: 'PAYLOAD / CONVOY ROUTE', color: '#e0b06a', background: '#100c07', seed: 1111,
   group: 'urban', scale: 'warzone', mode: 'payload', size: { w: 152, d: 72 }, biome: 'urban', amplitude: 3, relief: 1.1,
-  description: 'A long industrial convoy route. Attackers push the cart from a western depot, across a central bridge and tunnel, to the eastern fuel yard.',
+  description: 'A long industrial convoy route. Attackers push the cart from a western depot, through a central tunnel with exterior flanks, to the eastern fuel yard.',
   layout(ctx, rng) {
     ctx.teamSpawns = { 0: [[-66, -12], [-66, 12], [-72, -24], [-72, 24]], 1: [[66, 12], [66, -12], [72, 24], [72, -24]] };
     ctx.addBuilding({ x: -64, z: 0, w: 18, d: 18, h: 6, rot: Math.PI / 2, roof: 'flat', door: 'north', doorWidth: 3.4, floors: 1 });
     ctx.addBuilding({ x: 64, z: 0, w: 18, d: 18, h: 7, rot: -Math.PI / 2, roof: 'gable', door: 'north', doorWidth: 3.4, floors: 1 });
     for (const [x, z] of [[-36, -20], [-36, 20], [-8, -24], [-8, 24], [22, -20], [22, 20], [46, -22], [46, 22]]) ctx.addBuilding({ x, z, w: 11, d: 9, h: 5, rot: rng() > .5 ? 0 : Math.PI / 2, roof: 'flat', door: rng() > .5 ? 'south' : 'north', floors: 1 });
     ctx.addTunnel([[-48, undefined, 0], [-18, undefined, 0], [18, undefined, 0], [48, undefined, 0]], 3.2);
-    ctx.addBridge({ x: 0, z: 0, y: ctx.ground(0, 0) + 1.4, w: 16, d: 10, rot: 0, thickness: .5 });
+    // The legacy bridge was a ground-to-top solid across the payload tunnel.
+    // Keep this a ground route; a true overpass needs a shared spatial contract.
     scatter(ctx, 18, rng, 8, (c, x, z) => (rng() > .5 ? c.addCrate({ x, z, scale: .8 + rng() * .5 }) : c.addRock({ x, z, scale: .7 + rng() * .6 })));
     ctx.addObjective(-32, 0, 4); ctx.addObjective(0, 0, 5); ctx.addObjective(34, 0, 4);
     ctx.addVehicle({ kind: 'puma', x: -52, z: 26, yaw: 0 }); ctx.addVehicle({ kind: 'puma', x: 52, z: -26, yaw: Math.PI });
@@ -292,14 +314,16 @@ const gauntlet = createLevel({
 const duneRavine = createLevel({
   id: 'dune-ravine', name: 'Dune Ravine', tag: 'DEATHMATCH / DESERT CANYON', color: '#e0b06a', background: '#1a120a', seed: 1515,
   group: 'outdoor', scale: 'battle', mode: 'deathmatch', size: { w: 104, d: 104 }, biome: 'canyon', amplitude: 6.5, relief: 1.8, step: 7,
-  description: 'A wind-cut desert canyon. Flat-topped mesas overlook a dry ravine, and every ridge is a firing step.',
+  description: 'A wind-cut desert canyon. Solid mesas and ridges frame the ground routes; four ramped flank platforms overlook the dry ravine.',
   layout(ctx, rng) {
-    // Central mesa: a flat-topped plateau with four ramps down to the sand.
+    // Solid mesa cover with ground-level gaps; its tops are not walkable routes.
     ring(ctx, 0, 0, 17, 12, (c, x, z, a, i) => {
       if (i % 4 === 0) return; // gaps keep the plateau walkable
       c.addBlock({ x, z, w: 6.5, d: 6.5, h: c.ground(x, z) + 3.4, kind: 'terrace' });
     });
-    for (let i = 0; i < 4; i++) { const a = (i / 4) * Math.PI * 2 + .4; ctx.addBridge({ x: Math.cos(a) * 22, z: Math.sin(a) * 22, y: ctx.ground(Math.cos(a) * 22, Math.sin(a) * 22) + 1.6, w: 12, d: 4, rot: -a + Math.PI / 2, thickness: .5 }); }
+    // Four honest flank platforms outside the mesa solids, not diagonal
+    // proxy bridges claiming to connect inaccessible mesa tops.
+    for (const [x,z] of [[25,24],[-25,24],[-25,-24],[25,-24]]) ctx.addCauseway({ x, z, w: 8, d: 4 });
     // Wind-cut ridges frame the ravine running north to south.
     for (const [x, z, w, d] of [[-34, 0, 7, 34], [34, 0, 7, 34], [0, -38, 30, 7], [0, 38, 30, 7]]) ctx.addBlock({ x, z, w, d, h: ctx.ground(x, z) + 4.6, kind: 'ridge' });
     // Lava-lit cracks and ice pockets read the two extremes of the canyon.
@@ -322,7 +346,7 @@ const duneRavine = createLevel({
 const emberCaldera = createLevel({
   id: 'ember-caldera', name: 'Ember Caldera', tag: 'ROCKETS / FROZEN VOLCANIC', color: '#ff7a4d', background: '#160b07', seed: 1616,
   group: 'outdoor', scale: 'battle', mode: 'rockets', size: { w: 96, d: 96 }, biome: 'volcanic', amplitude: 5, relief: 1.6, step: 7,
-  description: 'A collapsed caldera half-frozen and half-molten. Catwalks cross the crater while ice shelves and lava cracks split the rim.',
+  description: 'A collapsed caldera half-frozen and half-molten. Filled causeways cross the crater floor; broken rim gaps lead to the outer lanes.',
   layout(ctx, rng) {
     // The caldera rim: a broken ring of cooled rock with four wide crossings so
     // the centre is always walk-connected to the outer lanes.
@@ -330,9 +354,11 @@ const emberCaldera = createLevel({
       if (i % 4 < 2) return;
       c.addBlock({ x, z, w: 6, d: 6, h: runtimeFloor(ctx, x, z) + (i % 3 === 0 ? 3.2 : 5.4), kind: 'ridge' });
     });
-    // Catwalks span the crater so rockets have open duelling lanes.
-    ctx.addBridge({ x: 0, z: 0, y: 5.5, w: 40, d: 4, rot: 0, thickness: .5 });
-    ctx.addBridge({ x: 0, z: 0, y: 5.5, w: 40, d: 4, rot: Math.PI / 2, thickness: .5 });
+    // Filled crossing lanes. North/south toes stop inside the solid rim;
+    // players use the existing rim gaps rather than an invented overpass.
+    const crossingY = runtimeFloor(ctx, 0, 0) + .7;
+    ctx.addCauseway({ x: 0, z: 0, y: crossingY, w: 40, d: 4 });
+    ctx.addCauseway({ x: 0, z: 0, y: crossingY, w: 28, d: 4, rot: Math.PI / 2 });
     // Molten cracks and frozen shelves alternate around the floor.
     for (const [x, z, rot, scale] of [[-12, -12, .3, 1.4], [12, 12, -.5, 1.5], [-13, 12, .9, 1.1], [13, -12, 1.4, 1.2], [0, -18, .1, 1.3]]) ctx.addProp({ type: 'lavaCrack', x, z, y: ctx.ground(x, z), rot, scale });
     for (const [x, z, scale] of [[-18, 0, 1.2], [18, 0, 1], [0, 18, 1.3], [0, -18, .9]]) ctx.addProp({ type: 'iceSpike', x, z, y: ctx.ground(x, z), scale });

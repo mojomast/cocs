@@ -14,6 +14,7 @@ import {initializeRace,stepRace,raceStandings,raceSnapshot} from './race.mjs';
 import {initializeSoccer,stepSoccer,soccerStandings,soccerSnapshot} from './soccer.mjs';
 import {initializeSinglePlayer,updateSinglePlayer,singlePlayerSnapshot} from './singleplayer.mjs';
 import {rankLeaders} from './outcome.mjs';
+import {spawnRouteContext,contestedPickupPenalty} from './spawn-placement.mjs';
 import * as bots from './bots.mjs';
 import * as objectives from './objectives.mjs';
 export const clamp=(n,a,b)=>Math.max(a,Math.min(b,n));
@@ -73,6 +74,13 @@ export function traversalTables(arena){
  const surfaceY=surface=>surface.y??surface.topY??0;
   export function floorAt(x,z,arena=MAPS[0]){if(arena.terrain){return terrainSupportAt(x,z,arena.terrain,arena.terrain.maxSlope??.9)?.y??null;}const surfaces=surfacesOf(arena);if(surfaces.length){let floor=null;for(const surface of surfaces)if(Math.abs(x-surface.x)<=surface.w/2&&Math.abs(z-surface.z)<=surface.d/2)floor=floor===null?surfaceY(surface):Math.max(floor,surfaceY(surface));return floor;}if(!arena.raised)return 0;let floor=0,solid=arena.blocks.some(b=>b.kind!=='deck'&&Math.abs(x-b.x)<=b.w/2&&Math.abs(z-b.z)<=b.d/2);for(const b of arena.blocks)if(b.kind==='deck'&&Math.abs(x-b.x)<=b.w/2&&Math.abs(z-b.z)<=b.d/2)floor=Math.max(floor,b.h);if(!arena.bounds&&!solid&&z<=-9)floor=Math.max(floor,3.8);else if(!arena.bounds&&!solid&&Math.abs(x)>8.2&&Math.abs(x)<14&&z<3)floor=Math.max(floor,(3-z)/12*3.8);return floor;}
   const supportAt=(x,z,arena)=>{let y=floorAt(x,z,arena);if(y===null)return null;for(const b of arena.blocks)if(b.kind!=='deck'&&Math.abs(x-b.x)<=b.w/2+RULES.radius&&Math.abs(z-b.z)<=b.d/2+RULES.radius)y=Math.max(y,b.h);return y;};
+  // Presentation contacts choose an existing surface below the body's origin,
+  // never the top of an overhead wall. Legacy h is still absolute solid top.
+  export function presentationSupportAt(x,z,arena=MAPS[0],referenceY=Infinity){
+   let y=floorAt(x,z,arena);if(!arena.terrain&&y!==null&&y>referenceY+.45)y=null;
+   for(const b of arena.blocks||[])if(b.h<=referenceY+.45&&Math.abs(x-b.x)<=b.w/2&&Math.abs(z-b.z)<=b.d/2)y=y===null?b.h:Math.max(y,b.h);
+   return y;
+  }
   const segmentDistance=(x,z,a,b)=>{const dx=b.x-a.x,dz=b.z-a.z,length=dx*dx+dz*dz;if(length<=1e-9)return Math.hypot(x-a.x,z-a.z);const t=clamp(((x-a.x)*dx+(z-a.z)*dz)/length,0,1);return Math.hypot(x-(a.x+dx*t),z-(a.z+dz*t));};
   const terrainObstructed=(x,y,z,r,arena)=>arena.terrain?.walls?.length>0&&terrainWallSegments(arena.terrain).some(({a,b})=>y<Math.max(a.y,b.y)-1e-6&&y+RULES.height>Math.min(a.y,b.y)+1e-6&&segmentDistance(x,z,a,b)<r);
  export function obstructed(x,y,z,r=RULES.radius,arena=MAPS[0]){return arena.blocks.some(b=>Math.abs(x-b.x)<b.w/2+r&&Math.abs(z-b.z)<b.d/2+r&&y<b.h-1e-6&&y+RULES.height>0)||terrainObstructed(x,y,z,r,arena);}
@@ -360,11 +368,20 @@ export class Match{
        let mateBonus=0,overlap=false;for(const b of mates){const d=dist(b,pos);if(d<2.2)overlap=true;else if(d<9)mateBonus+=1.5;}
        if(overlap)continue;
        const clearance=enemies.length?Math.min(nearestEnemy,30)*1.1:30;
-       const score=clearance+(exposed?-22:0)-threat-projectiles-heat*3+mateBonus+this.random()*2;
+       const route=spawnRouteContext(this,pos);
+       let routeThreat=0;for(const b of enemies){const travel=route?.travel(b);if(travel!==null&&travel!==undefined&&travel<12)routeThreat=Math.max(routeThreat,(12-travel)*1.1);}
+       const powerRisk=contestedPickupPenalty(pos,this.pickups,enemies,route);
+       const score=clearance+(exposed?-22:0)-threat-projectiles-heat*3-routeThreat-powerRisk+mateBonus+this.random()*2;
        if(!fallback)fallback=pos;
        if(score>best){best=score;chosen=pos;}
       }
-      if(!chosen)chosen=fallback||v();
+      if(!chosen){
+       // Bad authored markers must not silently respawn inside the origin wall.
+       // Bounded scan of the actual graph retains a supported recovery route.
+       const nodes=this.nav||[],stride=Math.max(1,Math.ceil(nodes.length/64));let recovery=-Infinity;
+       for(let i=0;i<nodes.length;i+=stride){const n=nodes[i],y=floorAt(n.x,n.z,this.arena);if(y===null||obstructed(n.x,y,n.z,RULES.radius,this.arena))continue;const p=v(n.x,y,n.z);if(mates.some(b=>dist(b,p)<2.2))continue;let score=30;for(const b of enemies)score=Math.min(score,dist(b,p)-(this.visible(eye(b),v(p.x,p.y+1.2,p.z))?15:0));if(score>recovery){recovery=score;chosen=p;}}
+       chosen??=fallback||v();
+      }
   // Safety net: never spawn inside geometry even if an authored point is blocked.
   const chosenFloor=floorAt(chosen.x,chosen.z,this.arena);
   if(chosenFloor===null||obstructed(chosen.x,chosenFloor,chosen.z,RULES.radius,this.arena)){const node=this.nav.length?this.nav[nearest(chosen,this.nav)]:null,nodeFloor=node?floorAt(node.x,node.z,this.arena):null;if(node&&nodeFloor!==null)chosen=v(node.x,nodeFloor,node.z);else{const pool=[...(this.spawns||[]),...(this.teamSpawns?.[0]||[]),...(this.teamSpawns?.[1]||[])];for(const s of pool){const sx=Array.isArray(s)?s[0]:s?.x,sz=Array.isArray(s)?s[1]:s?.z;if(!Number.isFinite(sx)||!Number.isFinite(sz))continue;const sy=floorAt(sx,sz,this.arena);if(sy!==null&&!obstructed(sx,sy,sz,RULES.radius,this.arena)){chosen=v(sx,sy,sz);break;}}}}

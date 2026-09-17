@@ -468,3 +468,40 @@ export function enhanceOperatorModel(robot, { color = '#57e6cd', accent = '#2c35
   return group;
 }
 
+
+// Character-only geometry pass: no weapon geometry or material retuning.
+// Invoke once after robotModel installs userData.joints, before first animation.
+export function refineOperatorCharacter(robot) {
+  const data=robot?.userData,j=data?.joints;
+  if(!j) return null;
+  if(data.characterRefinement) return data.characterRefinement;
+  if(j.hips) j.hips.position.y=.7835; // .34 thigh + .35 shin + .0935 sole
+  if(j.torso) j.torso.position.y=.22;
+  if(j.chest) j.chest.position.y=.30;
+  if(j.head) j.head.position.y=.28;
+  j.contactGait=true;
+  // Character-owned carry mount: keep both receiver contacts within arm reach.
+  // Aim rotation remains view-owned; weapon geometry/anchors are never rewritten.
+  if(data.gunAnchor) { data.gunAnchor.position.set(.04,.06,-.08); j.gunAnchor=data.gunAnchor; }
+  const plateMaterial=data.armor ?? new T.MeshStandardMaterial({color:'#2c3540'});
+  const armor=new T.Mesh(new T.BoxGeometry(.34,.19,.04),plateMaterial);
+  armor.name='articulated-sternum';armor.position.set(0,-.055,-.19);j.chest?.add(armor);
+  const handMaterial=new T.MeshStandardMaterial({color:'#18262c',roughness:.65});
+  const palmGeometry=new T.BoxGeometry(.09,.10,.075),fingerGeometry=new T.BoxGeometry(.085,.045,.045);
+  const result={armor};
+  for(const side of ['L','R']) {
+    const fore=j[`forearm${side}`];if(!fore) continue;
+    const hand=new T.Group();hand.name=`hand-${side}`;hand.position.set(0,-.275,0);fore.add(hand);
+    const palm=new T.Mesh(palmGeometry,handMaterial);hand.add(palm);
+    const fingers=new T.Mesh(fingerGeometry,handMaterial);fingers.position.set(0,-.026,-.048);hand.add(fingers);
+    const grip=new T.Group();grip.name=`grip-${side}`;grip.position.set(0,-.015,-.055);hand.add(grip);
+    result[`hand${side}`]=hand;result[`grip${side}`]=grip;
+    j[`hand${side}`]=hand;
+  }
+  armor.castShadow=armor.receiveShadow=true;
+  for(const hand of [result.handL,result.handR])hand?.traverse(n=>{if(n.isMesh)n.castShadow=n.receiveShadow=true;});
+  data.characterRefinement=result;
+  // Capture the revised proportions as bind transforms, not the old floating rig.
+  data.rig?.captureBind();
+  return result;
+}

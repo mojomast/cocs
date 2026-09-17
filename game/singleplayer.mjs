@@ -1,3 +1,4 @@
+import {resolveCampaignAnchors,campaignPoint,campaignGroupPoints} from './campaign-anchors.mjs';
 import {CHARACTERS,POWERUPS} from './data.mjs';
 import {CAMPAIGN_MISSIONS,missionFor} from './campaign-data.mjs';
 import {applyEnemyFields,enemyById,enemyLeash,bossPhaseProfile,bossMaxPhase,ENEMY_SPEED_VARIANCE,DEFAULT_ENEMY_ID,NPC_ZONE_KINDS} from './enemy-types.mjs';
@@ -242,11 +243,11 @@ function snapPoint(match,point){
  if(!point)return point;
  let best=null,bestDistance=Infinity;
  for(const node of match.nav||[]){const distance=Math.hypot((node.x??0)-(point.x??0),(node.z??0)-(point.z??0));if(distance<bestDistance){bestDistance=distance;best=node;}}
- return best?{...point,x:best.x,z:best.z}:point;
+ return best?{...point,x:best.x,y:Number.isFinite(point.y)?point.y:best.y,z:best.z}:point;
 }
 const snapZone = (match,zone) => snapPoint(match,zone);
 const snapStep = (match,step) => step.marker ? {...step,marker:snapPoint(match,step.marker)} : {...step};
-const inZone = (match,zone) => { const player=match.actors[0]; if(!player||!zone)return false; return Math.hypot(player.x-(zone.x??0),player.z-(zone.z??0))<=(zone.radius??3.5); };
+const inZone = (match,zone) => { const player=match.actors[0]; if(!player||player.health<=0||!zone||!Number.isFinite(zone.y))return false; return Math.abs(player.y-zone.y)<=(zone.halfHeight??2)&&Math.hypot(player.x-(zone.x??0),player.z-(zone.z??0))<=(zone.radius??3.5); };
 
 // A horde run banks its final record once, at the moment it ends, so the
 // end-of-run summary is a pure read of `state.summary` and never depends on
@@ -259,8 +260,9 @@ function win(match,state,text){if(match.over)return;state.phase='won';state.winn
 function lose(match,state,text){if(match.over)return;state.phase='lost';state.winner=1;state.message={text,at:match.time};match.objectiveState.winner=1;match.teamScores[1]=Math.max(match.teamScores[1]||0,1);if(state.kind==='horde'){state.summary=hordeSummary(match,state,'lost');match.emit('horde-summary',{...state.summary});}match.emit('mission-lost',{text});match.endMatch('objective');}
 
 export function spawnGroup(match,state,spec,{team}){
- const request=spec||{};
+ const request=spec?.anchor?campaignPoint(state.anchors,spec):(spec||{});
  const count=Math.max(0,Math.min(24,Math.round(request.count??1)));
+ const placements=request.anchor?campaignGroupPoints(match,state,request,count):null;
  const ids=[],created=[];
  for(let i=0;i<count;i++){
   const id=state.nextId++;
@@ -270,6 +272,8 @@ export function spawnGroup(match,state,spec,{team}){
   const actor=match.actor(id,character,harness);
   actor.team=team;actor.isNpc=true;
   applyEnemyFields(actor,type);
+  // Reviewed encounters stage all bodies before play, including summoner guards.
+  if(request.summons===false)actor.npcSummon=null;
   actor.npcProfile={...actor.npcProfile,speedMult:(actor.npcProfile.speedMult||1)*(1+(match.random()*2-1)*ENEMY_SPEED_VARIANCE)};
   if(request.elite){actor.npcProfile={...actor.npcProfile,health:Math.round(actor.npcProfile.health*1.8),armor:(actor.npcProfile.armor||0)+40};actor.name=`${actor.name} · ELITE`;}
   actor.npcZone=npcZoneSpec(request,type);
@@ -279,11 +283,34 @@ export function spawnGroup(match,state,spec,{team}){
   if(team===1)state.enemies.push(id);else state.allies.push(id);
   if(actor.isBoss&&state.boss==null)state.boss=id;
  }
- if(created.length){const zone=created[0].npcZone;if(zone)placeGroup(match,created,zone.x,zone.z,zone.r);}
+ if(created.length){const zone=created[0].npcZone;if(placements)created.forEach((actor,i)=>placeActor(actor,placements[i]));else if(zone)placeGroup(match,created,zone.x,zone.z,zone.r);}
  if(request.group&&ids.length)state.groups[request.group]=(state.groups[request.group]||[]).concat(ids);
  if(team===1&&count>0)state.everHadEnemies=true;
  match.emit('npc-deploy',{team,count,boss:Boolean(request.boss),elite:Boolean(request.elite),type:request.type||null});
  return ids;
+}
+
+// Recovery restores minimum reserves, never grants new weapons or infinite ammo.
+function resupplyCampaign(match,state){
+ const player=match.actors[0];if(!player||player.health<=0)return;
+ const fraction=({easy:1,normal:.8,hard:.6,nightmare:.4})[match.config.difficulty]??.8;
+ player.health=Math.max(player.health,Math.ceil(player.maxHealth*fraction));
+ player.armor=Math.max(player.armor||0,Math.round(60*fraction));
+ player.ammo.forEach((amount,index)=>{
+  if(amount===Infinity||(index!==player.weapon&&!(amount>0)))return;
+  const cap=match.weaponForIndex?.(player,index)?.cap;
+  if(Number.isFinite(cap))player.ammo[index]=Math.max(amount,Math.ceil(cap*fraction));
+ });
+ state.lastPlayerHealth=player.health;state.regenDelay=0;state.regenActive=false;
+ match.emit('campaign-resupply',{checkpoint:state.stepIndex,fraction});
+}
+
+function predeployCampaign(match,state,fromStep){
+ state.deployed=new Set();
+ for(const step of state.steps.slice(fromStep))for(const action of step.onStart||[]){
+  if(!action.spawn)continue;
+  spawnGroup(match,state,action.spawn,{team:1});state.deployed.add(action.spawn);
+ }
 }
 
 export function initializeSinglePlayer(match){
@@ -305,9 +332,11 @@ export function initializeSinglePlayer(match){
    state.objective=state.endless?'Survive as long as you can. Every wave pays score.':`Survive ${state.waveTarget} hostile waves.`;
   } else {
   const mission=missionFor(match.config.mission);
-  state.mission=mission;state.phase='active';state.lives=mission.lives??3;
+  state.mission=mission;
+  if(mission.anchors){const resolved=resolveCampaignAnchors(match,mission);state.anchors=resolved.anchors;state.campaignReachable=resolved.reachable;}
+  state.phase='active';state.lives=mission.lives??3;
   state.weather=mission.weather??null;state.timeOfDay=mission.timeOfDay??null;match.weather=state.weather;
-  state.objective=mission.objective;state.win=snapZone(match,mission.win);state.timer=0;
+  state.objective=mission.objective;state.win=snapZone(match,campaignPoint(state.anchors,mission.win));state.timer=0;
   state.script=(mission.script||[]).map((event,index)=>({id:event.id??`${mission.id}-script-${index}`,...event}));
   // Timed narrative transmissions from the story bible play alongside the
   // authored spawn/objective beats so each mission has a scripted voice-over.
@@ -315,19 +344,20 @@ export function initializeSinglePlayer(match){
   if(state.lore)for(const [index,line] of (state.lore.transmissions||[]).entries()){
    const id=`lore-${mission.id}-${index}`;
    if(state.script.some(event=>event.id===id))continue;
-   state.script.push({id,at:Number.isFinite(line.at)?line.at:index,lore:true,story:{speaker:line.speaker,text:line.text}});
+   state.script.push({id,step:line.step,at:Number.isFinite(line.at)?line.at:index,lore:true,story:{speaker:line.speaker,text:line.text}});
   }
-  for(const event of state.script)if(event.when==='player-in-zone')Object.assign(event,snapZone(match,event));
-  state.steps=(mission.steps||[]).map(step=>snapStep(match,step));
+  for(const event of state.script)if(event.when==='player-in-zone')Object.assign(event,snapZone(match,campaignPoint(state.anchors,event)));
+  state.steps=(mission.steps||[]).map(step=>snapStep(match,{...step,marker:campaignPoint(state.anchors,step.marker)}));
   // The boss phase pip strip needs to know how many phases the mission authors.
   const scanPhases=actions=>{for(const action of actions||[])if(Number.isFinite(action?.bossPhase))state.bossPhaseMax=Math.max(state.bossPhaseMax,Math.max(1,Math.round(action.bossPhase)));};
   for(const event of state.script)scanPhases([event]);
   for(const step of state.steps){scanPhases(step.onStart);scanPhases(step.onComplete);}
   const player=match.actors[0];
   if(Number.isFinite(match.config.checkpoint))resumeStep=Math.round(match.config.checkpoint);
-  if(player&&mission.start){placeAt(match,player,mission.start.x,mission.start.z);if(Number.isFinite(mission.start.yaw)){player.yaw=mission.start.yaw;player.bodyYaw=mission.start.yaw;}}
+  if(player&&mission.start){if(state.anchors)placeActor(player,campaignPoint(state.anchors,mission.start));else placeAt(match,player,mission.start.x,mission.start.z);if(Number.isFinite(mission.start.yaw)){player.yaw=mission.start.yaw;player.bodyYaw=mission.start.yaw;}}
  }
  match.modeState=state;
+ if(state.mission?.predeploy&&resumeStep===null)predeployCampaign(match,state,0);
  if(mode==='campaign'&&resumeStep!==null)resumeSinglePlayer(match,resumeStep);
  match.objectiveState={kind:mode,zones:[],winner:null,singleplayer:true};
  match.teamScores=match.teamScores||{0:0,1:0};
@@ -453,8 +483,9 @@ function applyAction(match,state,action){
   if(action.timeOfDay){state.timeOfDay=String(action.timeOfDay);match.emit('time-change',{phase:state.timeOfDay});}
  if(action.announce){state.message={text:action.announce,at:match.time};match.emit('mission-message',{text:action.announce});}
  if(action.objective)state.objective=action.objective;
+ if(action.supply)resupplyCampaign(match,state);
  if(Number.isFinite(action.lives))state.lives=Math.max(0,Math.round(action.lives));
- if(action.spawn)spawnGroup(match,state,action.spawn,{team:1});
+ if(action.spawn&&!state.deployed?.has(action.spawn))spawnGroup(match,state,action.spawn,{team:1});
  if(action.ally)spawnGroup(match,state,action.ally,{team:0});
  if(action.lose)lose(match,state,action.lose===true?'Mission failed.':String(action.lose));
  if(action.win)win(match,state,action.win===true?'Mission complete.':String(action.win));
@@ -472,6 +503,8 @@ function runStepActions(match,state,actions){
 
 function stepComplete(match,state,step,dt){
  const complete=step.complete;if(!complete)return false;
+ if(complete.requireZone&&!inZone(match,step.marker)){state.holdProgress=0;return false;}
+ if(complete.groups?.some(group=>!state.groups[group]?.length||state.groups[group].some(id=>aliveById(match,id)))){state.holdProgress=0;return false;}
  if(complete.kind==='enter-zone')return inZone(match,step.marker);
  if(complete.kind==='group-dead'){const ids=state.groups[complete.group];return Boolean(ids&&ids.length)&&ids.every(id=>!aliveById(match,id));}
  if(complete.kind==='boss-dead')return state.boss!=null&&!aliveById(match,state.boss);
@@ -487,10 +520,18 @@ function stepLinear(match,state,dt){
  state.stepElapsed+=dt;
  state.waypoint=step.marker?{id:step.id,x:step.marker.x,y:step.marker.y??0,z:step.marker.z,radius:step.marker.radius??4,label:step.marker.label||step.label||'OBJECTIVE'}:null;
  match.waypoint=state.waypoint;
+ // A zone script belonging to this step must see its volume before an
+ // enter-zone completion (or final win) changes the active step underneath it.
+ if(state.mission?.predeploy)for(const event of state.script){
+  if(event.when!=='player-in-zone'||state.fired[event.id]||!triggered(match,state,event,state.elapsed))continue;
+  state.fired[event.id]=true;state.lastEvent=state.elapsed;
+  applyEvent(match,state,event);if(match.over)return;
+ }
  if(stepComplete(match,state,step,dt)){state.stepIndex+=1;state.stepElapsed=0;state.holdProgress=0;runStepActions(match,state,step.onComplete);}
 }
 
 function triggered(match,state,event,time){
+ if(event.step&&state.steps[state.stepIndex]?.id!==event.step)return false;
  if(Number.isFinite(event.at))return time>=event.at;
  if(Number.isFinite(event.after))return time>=(state.lastEvent||0)+event.after;
  if(typeof event.when==='string'){
@@ -530,7 +571,7 @@ function stepCampaign(match,state,dt){
   if(match.over)return;
  }
  if(state.mission?.timeLimit&&state.elapsed>=state.mission.timeLimit){lose(match,state,'Time expired.');return;}
- if(state.win)evaluateWin(match,state,dt,state.elapsed);
+ if(state.win&&(!state.steps.length||state.stepIndex>=state.steps.length))evaluateWin(match,state,dt,state.elapsed);
 }
 
 // Ticks the role abilities of the new enemy archetypes. Deterministic and
@@ -749,14 +790,35 @@ export function resumeSinglePlayer(match,stepOrCheckpoint){
  const state=match.modeState;
  if(!state||state.kind!=='campaign'||!state.steps.length)return false;
  const raw=typeof stepOrCheckpoint==='object'&&stepOrCheckpoint!==null?stepOrCheckpoint.step:stepOrCheckpoint;
- const step=Math.max(0,Math.min(state.steps.length,Math.round(Number(raw)||0)));
+ let step=Math.max(0,Math.min(state.steps.length,Math.round(Number(raw)||0)));
+ if(state.mission?.predeploy)step=Math.max(0,...Object.keys(state.mission.checkpoints||{}).map(Number).filter(index=>index<=step));
  state.stepIndex=step;state.stepElapsed=0;state.holdProgress=0;state.entered={};state.defendProgress=0;
  state.checkpoint=step;
  state.lastPlayerHealth=match.actors[0]?.health??100;
  state.regenDelay=0;
  state.regenActive=false;
  const player=match.actors[0];
- if(player&&state.mission?.start){placeAt(match,player,state.mission.start.x,state.mission.start.z);if(Number.isFinite(state.mission.start.yaw)){player.yaw=state.mission.start.yaw;player.bodyYaw=state.mission.start.yaw;}}
+ if(player&&state.mission?.start){
+  if(state.anchors){
+   const name=step===0?'entrance':state.mission.checkpoints?.[step];
+   placeActor(player,name?state.anchors[name]:(state.steps[step]?.marker||state.anchors.entrance));
+  }else placeAt(match,player,state.mission.start.x,state.mission.start.z);
+  if(Number.isFinite(state.mission.start.yaw)){player.yaw=state.mission.start.yaw;player.bodyYaw=state.mission.start.yaw;}
+ }
+ if(state.mission?.predeploy){
+  // Reconstruct this checkpoint, not a second copy of the live battlefield.
+  match.actors=match.actors.filter(actor=>!actor.isNpc);
+  match.rockets=[];match.deployables=[];
+  state.storyLine=null;state.bark=null;state.message=null;
+  state.enemies=[];state.allies=[];state.groups={};state.boss=null;state.nextId=1;
+  state.bossPhase=0;state.bossPhaseName=null;state.summonCount=0;state.everHadEnemies=false;
+  state.elapsed=0;state.lastEvent=0;state.fired={};
+  for(const event of state.script){const index=state.steps.findIndex(item=>item.id===event.step);if(index>=0&&index<step)state.fired[event.id]=true;}
+  state.weather=state.mission.weather;
+  for(const event of state.script)if(state.fired[event.id]&&event.weather)state.weather=event.weather;
+  match.weather=state.weather;
+  predeployCampaign(match,state,step);resupplyCampaign(match,state);
+ }
  state.waypoint=null;match.waypoint=null;
  if(step<state.steps.length&&state.steps[step].text)state.objective=state.steps[step].text;
  match.emit('singleplayer-checkpoint',{missionId:state.mission?.id??null,step});

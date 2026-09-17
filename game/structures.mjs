@@ -2,18 +2,85 @@
 // generator (collision) and the renderer (smooth geometry) agree on where a
 // cavern's entrances are and how tall its shell is.
 
+// The generator's positive planar turn maps +X to +Z (opposite three.js yaw).
+// Keep origin/tangent/outward normal explicit; renderers must not infer a face
+// from the parent's rotation or swap a facade span after it has been measured.
+export function facadeFrame(parent, side) {
+  const {x=0,y=0,z=0,w,d,h=6,rot=0}=parent;
+  const faces={south:[0,d/2,1,0,0,1,w],north:[0,-d/2,-1,0,0,-1,w],east:[w/2,0,0,-1,1,0,d],west:[-w/2,0,0,1,-1,0,d]};
+  if(!faces[side])throw new RangeError(`Unknown facade side: ${side}`);
+  const [ox,oz,tx,tz,nx,nz,span]=faces[side],c=Math.cos(rot),s=Math.sin(rot);
+  const turn=(x,z)=>({x:c*x-s*z,z:s*x+c*z});
+  const o=turn(ox,oz);
+  return {localOrigin:{x:ox,y:0,z:oz},localTangent:{x:tx,z:tz},localNormal:{x:nx,z:nz},parent:{x,y,z,rot},origin:{x:x+o.x,y,z:z+o.z},tangent:turn(tx,tz),normal:turn(nx,nz),span,height:h};
+}
+
+// Also usable for signs, trim and other facade-mounted rectangles. Centered
+// packing leaves edge/roof/sill margins even on narrow or single-window faces.
+export function facadeDetails({frame,rows=1}, {width=1.5,height=1,edge=.35,sill=.5,roof=.5,gap=1.2,depth=.14,offset=.09}={}) {
+  if(!frame || width<=0 || height<=0)return [];
+  const usable=frame.span-2*edge,vertical=frame.height-sill-roof;
+  const cols=Math.floor((usable+gap)/(width+gap));
+  const count=Math.min(Math.max(1,Math.floor(rows)),Math.floor((vertical+.7)/(height+.7)));
+  if(cols<1||count<1)return [];
+  const out=[],packed=cols*width+(cols-1)*gap;
+  for(let r=0;r<count;r++)for(let i=0;i<cols;i++){
+    const u=-packed/2+width/2+i*(width+gap),v=sill+height/2+(count===1?(vertical-height)/2:r*(vertical-height)/(count-1));
+    out.push({x:frame.origin.x+frame.tangent.x*u+frame.normal.x*offset,y:frame.origin.y+v,z:frame.origin.z+frame.tangent.z*u+frame.normal.z*offset,w:width,h:height,d:depth,rot:Math.atan2(-frame.tangent.z,frame.tangent.x)});
+  }
+  return out;
+}
+
 export const CAVERN_SEGMENTS = 16;
+
+// Horizontal projection is shared by floor authoring, wall clearance and the
+// interior director. Eye height must never shift a sloping floor's XZ sample.
+export function pathFloorAt(x,z,a,b) {
+  const dx=b[0]-a[0],dz=b[2]-a[2],length=dx*dx+dz*dz;
+  const t=length>1e-12?Math.max(0,Math.min(1,((x-a[0])*dx+(z-a[2])*dz)/length)):0;
+  return {x:a[0]+dx*t,y:a[1]+(b[1]-a[1])*t,z:a[2]+dz*t,t};
+}
+
+export const tunnelFloorPath=s=>s.floorPoints??s.points??[];
+
+// Exact line/circle cuts retain authored Y by linear interpolation. Return
+// multiple paths for a tunnel crossing a cavern, not a mesh bridged over a gap.
+export function tunnelRenderPaths(tunnel,structures=[]) {
+  const points=tunnelFloorPath(tunnel),caves=structures.filter(s=>s.type==='cavern'),paths=[];
+  let current=null;
+  for(let i=0;i<points.length-1;i++){
+    const a=points[i],b=points[i+1],dx=b[0]-a[0],dz=b[2]-a[2],aa=dx*dx+dz*dz;
+    if(aa<1e-12)continue;
+    const cuts=[0,1];
+    for(const c of caves){
+      const ox=a[0]-c.x,oz=a[2]-c.z,bb=2*(ox*dx+oz*dz),cc=ox*ox+oz*oz-c.radius*c.radius,disc=bb*bb-4*aa*cc;
+      if(disc<0)continue;
+      for(const t of [(-bb-Math.sqrt(disc))/(2*aa),(-bb+Math.sqrt(disc))/(2*aa)])if(t>0&&t<1)cuts.push(t);
+    }
+    cuts.sort((a,b)=>a-b);
+    const at=t=>[a[0]+dx*t,a[1]+(b[1]-a[1])*t,a[2]+dz*t];
+    for(let j=0;j<cuts.length-1;j++){
+      if(cuts[j+1]-cuts[j]<1e-9)continue;
+      const mid=at((cuts[j]+cuts[j+1])/2);
+      if(caves.some(c=>Math.hypot(mid[0]-c.x,mid[2]-c.z)<c.radius-1e-9)){current=null;continue;}
+      const start=at(cuts[j]),end=at(cuts[j+1]);
+      if(current&&current.at(-1).every((v,k)=>Math.abs(v-start[k])<1e-8))current.push(end);
+      else{current=[start,end];paths.push(current);}
+    }
+  }
+  return paths;
+}
 
 // Two opposite entrances: the first two of every eight wall segments are open.
 export const cavernOpening = i => i % 8 < 2;
 
 // Angular arcs for the solid wall ring between the entrances, in radians.
-export function cavernArcs(segments = CAVERN_SEGMENTS) {
+export function cavernArcs(segments = CAVERN_SEGMENTS, openSegments = null) {
   const span = (Math.PI * 2) / segments;
   const arcs = [];
   let start = null;
   for (let i = 0; i <= segments; i++) {
-    const include = i < segments && !cavernOpening(i);
+    const include = i < segments && !(openSegments ? openSegments.includes(i) : cavernOpening(i));
     if (include && start === null) start = i;
     if (!include && start !== null) { arcs.push({ thetaStart: (start - .5) * span, thetaLength: (i - start) * span }); start = null; }
   }
@@ -24,17 +91,17 @@ export function cavernArcs(segments = CAVERN_SEGMENTS) {
 // ranges. Collision places a wall segment at (cos a, sin a), while a cylinder
 // vertex at theta sits at (sin theta, cos theta), so theta = PI/2 - a. Without
 // this conversion the visible openings land on solid collision segments.
-export function cavernRenderArcs(segments = CAVERN_SEGMENTS) {
-  return cavernArcs(segments).map(({ thetaStart, thetaLength }) => ({
+export function cavernRenderArcs(segments = CAVERN_SEGMENTS, openSegments = null) {
+  return cavernArcs(segments,openSegments).map(({ thetaStart, thetaLength }) => ({
     thetaStart: Math.PI / 2 - (thetaStart + thetaLength),
     thetaLength,
   }));
 }
 
 // A cavern is a low stone drum with a domed roof, open at two opposite points.
-export function cavernShell(radius = 12, height = 8, segments = CAVERN_SEGMENTS) {
+export function cavernShell(radius = 12, height = 8, segments = CAVERN_SEGMENTS, openSegments = null) {
   const r = Math.max(1, Number(radius) || 12), h = Math.max(1, Number(height) || 8);
-  return { radius: r, wallHeight: h * .52, domeHeight: h * .66, arcs: cavernArcs(segments), renderArcs: cavernRenderArcs(segments) };
+  return { radius: r, wallHeight: h * .52, domeHeight: h * .66, arcs: cavernArcs(segments,openSegments), renderArcs: cavernRenderArcs(segments,openSegments) };
 }
 
 // ---- Destructible props ---------------------------------------------------

@@ -20,6 +20,10 @@ function readLive(runtime:any, fallback:any){
   const netActor=id!=null?r.renderState?.actors?.find((a:any)=>a.id===id):null;
   const actor=netActor||r.match?.actors?.[0]||null;
   if(actor){out.ads=out.ads||actor.ads===true;out.weapon=actor.weapon??out.weapon;out.optic=actor.attachments?.visual?.optic??out.optic;}
+  // Phase-1 ADS presentation follows the renderer's interruptible pose/FOV
+  // controller. Authoritative aiming and immediate input are unchanged.
+  const transition=r.view?._adsController?.state;
+  if(transition)out.ads=transition.reticle.ready===true;
   return out;
 }
 
