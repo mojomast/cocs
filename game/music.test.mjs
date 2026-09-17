@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {MusicEngine,ARRANGEMENTS,CHORD_PROGRESSIONS,MUSIC_SCENES} from './music.mjs';
+import {MusicEngine,ARRANGEMENTS,CHORD_PROGRESSIONS,MUSIC_SCENES,SOUNDTRACKS,HALO_ARRANGEMENTS,HALO_PROGRESSIONS} from './music.mjs';
 
 // Minimal Web Audio mock with a controllable clock. Every created node records
 // whether it was connected, started, stopped and disconnected.
@@ -158,4 +158,169 @@ test('a baked motif drives the lead voice, quantised to the active scale',()=>{
  assert.ok(scheduled>0&&e.notesScheduled>0,'the motif lead schedules');
  assert.equal(e.setMotif(null),0,'clearing the motif disables the lead');
  assert.equal(e.motifLead,null);
+});
+
+// --- Phase 2 musical behaviour -------------------------------------------------
+
+// A fuller mock context with buffer sources, filters and panners so the cheap
+// cinematic texture (noise risers, stereo width) is exercised for real.
+function richContext(){
+ const nodes=[];
+ const param=(v=0)=>({value:v,setValueAtTime(){},linearRampToValueAtTime(){},exponentialRampToValueAtTime(){},setTargetAtTime(v2){this.value=v2;},cancelScheduledValues(){}});
+ const node=extra=>{const n={frequency:param(),gain:param(),Q:param(),pan:param(),type:'',buffer:null,loop:false,connect(){this.connected=true;},disconnect(){this.disconnected=true;},start(){this.started=true;},stop(){this.stopped=true;},...extra};nodes.push(n);return n;};
+ return {currentTime:0,state:'running',sampleRate:44100,destination:{},nodes,
+  createGain:()=>node(),createOscillator:()=>node({type:'sine'}),
+  createBufferSource:()=>node(),createBiquadFilter:()=>node({type:'lowpass'}),
+  createStereoPanner:()=>node(),
+  createBuffer:(ch,len)=>({getChannelData:()=>new Float32Array(len)})};
+}
+const runTicks=(e,ctx,n)=>{for(let i=0;i<n;i++){ctx.currentTime+=.05;e.tick();}};
+
+test('both packs carry eight-bar phrasing, multi-bar themes and counter-lines',()=>{
+ for(const [name,pack] of Object.entries(SOUNDTRACKS)){
+  for(const scene of MUSIC_SCENES){
+   assert.equal(pack.progressions[scene].length,8,`${name}/${scene} is an eight-bar phrase`);
+   assert.ok(pack.arrangements[scene]?.bass.length>0,`${name}/${scene} has bass`);
+  }
+ }
+ const leadOf=arr=>Array.isArray(arr.lead)?arr.lead:arr.leadFallback;
+ assert.ok(ARRANGEMENTS.menu.lead.length>=16&&ARRANGEMENTS.combat.lead.length>=16,'default leads are multi-bar themes');
+ assert.ok(leadOf(HALO_ARRANGEMENTS.combat).length>=16,'the halo fallback lead is a developed line');
+ assert.ok(leadOf(HALO_ARRANGEMENTS.menu)===undefined,'the halo menu stays chant-like without a lead');
+ for(const scene of MUSIC_SCENES){
+  assert.ok(ARRANGEMENTS[scene].counter.length>=8,`default ${scene} has an offbeat counter-line`);
+  assert.ok(HALO_ARRANGEMENTS[scene].counter.length>=8,`halo ${scene} has an offbeat counter-line`);
+ }
+ assert.ok(HALO_PROGRESSIONS.combat.length===8);
+ assert.ok(Object.isFrozen(SOUNDTRACKS)&&Object.isFrozen(SOUNDTRACKS.halo.fills),'packs and fills are frozen');
+ assert.ok(Object.isFrozen(ARRANGEMENTS.combat.bass[0])&&Object.isFrozen(CHORD_PROGRESSIONS.combat),'nested data is frozen');
+});
+
+test('a sixteen-note lead develops across four bars instead of looping every bar',()=>{
+ const {e}=engine();
+ const arr=ARRANGEMENTS.combat;
+ assert.equal(e._leadIndex(arr,0),0);
+ assert.equal(e._leadIndex(arr,4),1,'the second beat reads the second note');
+ e.bar=1;
+ assert.equal(e._leadIndex(arr,0),4,'the line continues into the next bar');
+ e.bar=3;
+ assert.equal(e._leadIndex(arr,12),15,'the phrase reaches its final note');
+ e.bar=4;
+ assert.equal(e._leadIndex(arr,0),0,'a sixteen-note theme wraps after four bars');
+});
+
+test('a long motif is played across bars rather than restarted each bar',()=>{
+ const {e}=engine();
+ e.setSoundtrack('halo');
+ const notes=Array.from({length:16},(_,i)=>({step:i*4,midi:62+((i*2)%12),dur:4}));
+ assert.equal(e.setMotif({bpm:60,notes}),16);
+ assert.equal(e._leadIndex(HALO_ARRANGEMENTS.combat,0),0);
+ e.bar=1;
+ assert.equal(e._leadIndex(HALO_ARRANGEMENTS.combat,0),4,'bar two reads the motif second quarter');
+});
+
+test('combat layers enter in bands with intensity and release slowly when the scene leaves',()=>{
+ const {e,ctx}=engine();
+ e.setScene('combat');e.setIntensity(0.1);
+ runTicks(e,ctx,40);
+ assert.ok(e.layers.explore>0.8,'quiet combat uses exploration material');
+ assert.ok(e.layers.combat<0.05,'the combat layer stays out of a quiet fight');
+ assert.equal(e.notesBy.snare,0,'combat percussion waits for its layer');
+ assert.ok(e.notesBy.counter>0,'the exploration counter-line is present');
+ const low=e.buses.combat.gain.value;
+ e.setIntensity(1);
+ runTicks(e,ctx,120);
+ assert.ok(e.layers.combat>0.95,`the combat layer settles in (${e.layers.combat})`);
+ assert.ok(e.notesBy.snare>0&&e.notesBy.hat>0,'percussion enters with the layer');
+ assert.ok(e.notesBy.lead>0,'the lead enters with the layer');
+ assert.ok(e.buses.combat.gain.value>low*1.5,'the combat bus opens with intensity');
+ const beforeMenu=e.layers.combat;
+ e.setScene('menu');e.setIntensity(0);
+ runTicks(e,ctx,4);
+ assert.ok(e.layers.combat<beforeMenu&&e.layers.combat>0.5,'the combat layer releases rather than cuts');
+ runTicks(e,ctx,240);
+ assert.ok(e.layers.combat<0.02,'the combat layer eventually leaves');
+ assert.ok(e.layers.menu>0.95,'the menu layer takes over');
+});
+
+test('scene changes run a bounded exit-swell/entrance-accent transition',()=>{
+ const {e,ctx}=engine();
+ runTicks(e,ctx,10);
+ assert.equal(e.transition,null,'a steady scene has no transition');
+ assert.equal(e.transitions,0);
+ // In-game the arrangement follows intensity, not setScene: the transport keeps
+ // running, so the rest of the current bar carries the exit swell.
+ e.setScene('combat');e.setIntensity(0.1);
+ runTicks(e,ctx,6);
+ assert.equal(e._activeScene(),'explore');
+ assert.equal(e.transitions,1,'leaving the menu is one transition');
+ assert.equal(e.transition.to,'explore','the first transition lands on exploration material');
+ assert.ok(e.notesBy.impact>0,'the exploration entrance plays');
+ e.setIntensity(1);
+ ctx.currentTime+=.05;e.tick();
+ assert.equal(e._activeScene(),'combat');
+ assert.ok(e.transition,'an intensity change opens a transition');
+ assert.equal(e.transition.from,'explore');
+ assert.equal(e.transition.to,'combat');
+ assert.equal(e.transition.phase,'outro','the exit swell starts first');
+ assert.equal(e.transitions,2);
+ runTicks(e,ctx,60);
+ assert.notEqual(e.transition.phase,'outro','the swell resolves into the entrance');
+ assert.ok(e.notesBy.impact>0,'the new scene gets an entrance accent');
+ runTicks(e,ctx,220);
+ assert.equal(e.transition.phase,'idle');
+ assert.equal(e.transitions,2,'each resolved scene change makes one transition');
+});
+
+test('preview drives the transition into the auditioned scene and back',()=>{
+ const {e,ctx}=engine();
+ runTicks(e,ctx,6);
+ e.preview('combat',1);
+ assert.equal(e.previewScene,'combat');
+ ctx.currentTime+=.05;e.tick();
+ assert.equal(e.transition?.to,'combat','an audition changes the resolved scene');
+ runTicks(e,ctx,40);
+ assert.equal(e._activeScene(),'menu','the audition expires back to the menu');
+ assert.equal(e.transition?.to,'menu','the return is a transition too');
+});
+
+test('the voice cap bounds layered combat under a long run',()=>{
+ const {e,ctx}=engine({maxVoices:12});
+ e.setScene('combat');e.setIntensity(1);
+ for(let i=0;i<500;i++){ctx.currentTime+=.05;e.tick();assert.ok(e.voices.length<=12,`voice cap at tick ${i}`);}
+ assert.ok(e.peakVoices>0&&e.peakVoices<=12,'the peak is capped');
+ assert.ok(e.notesScheduled>0,'the soundtrack keeps scheduling');
+});
+
+test('scheduling is seed-deterministic and humanised per seed',()=>{
+ const run=seed=>{const ctx=mockContext();const e=new MusicEngine({ctx,destination:ctx.destination,theme,seed});e.setScene('combat');e.setIntensity(1);runTicks(e,ctx,300);return e;};
+ const a=run(7),b=run(7),c=run(9);
+ assert.equal(a.scheduleChecksum,b.scheduleChecksum,'the same seed replays the same notes');
+ assert.equal(a.notesScheduled,b.notesScheduled);
+ assert.deepEqual(a.notesBy,b.notesBy);
+ assert.notEqual(a.scheduleChecksum,c.scheduleChecksum,'a different seed humanises the take');
+});
+
+test('filtered-noise swells and stereo width appear when the context supports them',()=>{
+ const ctx=richContext();
+ const e=new MusicEngine({ctx,destination:ctx.destination,theme});
+ e.setScene('combat');e.setIntensity(1);
+ runTicks(e,ctx,420);
+ assert.ok(e.noiseBuffer,'the engine provisions its own seeded noise buffer');
+ assert.ok(e.notesBy.riser>0,'risers use the noise buffer');
+ const pans=ctx.nodes.filter(n=>n.pan).map(n=>n.pan.value);
+ assert.ok(pans.length>0,'voices use the stereo panner');
+ assert.ok(pans.every(p=>p>=-1&&p<=1),'pan values stay in range');
+ assert.ok(pans.some(p=>p!==0),'layers are spread off-centre');
+ assert.ok(e.voices.length<=e.maxVoices);
+});
+
+test('without noise sources the engine falls back to tonal swells without crashing',()=>{
+ const {e,ctx}=engine();
+ e.setScene('combat');e.setIntensity(1);
+ runTicks(e,ctx,420);
+ assert.equal(e.notesBy.riser,0,'no buffer source means no noise riser');
+ assert.ok(e.notesBy.swell>0,'a tonal swell still marks the phrase');
+ assert.ok(e.notesBy.impact>0,'entrance accents are tonal too');
+ assert.ok(e.voices.length<=e.maxVoices);
 });
