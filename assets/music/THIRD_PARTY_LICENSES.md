@@ -1,8 +1,10 @@
-# Third-party licences — assets/music
+# Third-party licences — music samples
 
-All baked audio in this directory is derived from two **CC0 1.0** (public domain dedication)
-sample libraries. No attribution is legally required under CC0; it is provided here as good
-practice and to document provenance. No non-CC0 material is included.
+All baked audio shipped under `public/music/samples` (and indexed by
+`public/music/manifest.json`) is derived from two **CC0 1.0** (public domain
+dedication) sample libraries. No attribution is legally required under CC0; it is
+provided here as good practice and to document provenance. No non-CC0 material is
+included.
 
 Baked set: 70 samples, 4.51 MiB (Ogg + AAC fallback).
 

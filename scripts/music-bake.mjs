@@ -34,8 +34,9 @@
 //   5. encode Ogg Vorbis (primary) and AAC/.m4a (Safari fallback)
 //   6. collect a manifest entry pointing at the baked file + loop points + gain
 //
-// The manifest at assets/music/manifest.json is a frozen interface for the
-// runtime audio engine. See assets/music/README.md for field semantics.
+// The manifest at public/music/manifest.json is a frozen interface for the
+// runtime audio engine (served at /music/manifest.json). See
+// assets/music/README.md for field semantics.
 
 import fs from 'node:fs';
 import path from 'node:path';
@@ -44,11 +45,15 @@ import { spawnSync } from 'node:child_process';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const SRC_ROOT = process.env.MUSIC_SRC || '/home/mojo/music-src';
-const OUT_DIR = path.join(ROOT, 'assets/music');
+// Baked audio and the manifest live in the served static tree (public/music,
+// reachable at /music/*). The human-facing docs stay under assets/music. There
+// is exactly one copy of every asset: the bake writes public/music only.
+const OUT_DIR = path.join(ROOT, 'public/music');
 const SAMPLES_DIR = path.join(OUT_DIR, 'samples');
 const MANIFEST_PATH = path.join(OUT_DIR, 'manifest.json');
-const LICENSES_PATH = path.join(OUT_DIR, 'THIRD_PARTY_LICENSES.md');
-const README_PATH = path.join(OUT_DIR, 'README.md');
+const DOCS_DIR = path.join(ROOT, 'assets/music');
+const LICENSES_PATH = path.join(DOCS_DIR, 'THIRD_PARTY_LICENSES.md');
+const README_PATH = path.join(DOCS_DIR, 'README.md');
 const TMP_DIR = process.env.MUSIC_TMP || '/tmp/opencode/music-bake';
 
 const FFMPEG = process.env.FFMPEG || 'ffmpeg';
@@ -488,11 +493,13 @@ function writeDocs(manifest) {
   const bytes = used.reduce((n, s) => n + fileSize(s.file) + fileSize(s.fallback), 0);
 
   const lic = [];
-  lic.push('# Third-party licences — assets/music');
+  lic.push('# Third-party licences — music samples');
   lic.push('');
-  lic.push('All baked audio in this directory is derived from two **CC0 1.0** (public domain dedication)');
-  lic.push('sample libraries. No attribution is legally required under CC0; it is provided here as good');
-  lic.push('practice and to document provenance. No non-CC0 material is included.');
+  lic.push('All baked audio shipped under `public/music/samples` (and indexed by');
+  lic.push('`public/music/manifest.json`) is derived from two **CC0 1.0** (public domain');
+  lic.push('dedication) sample libraries. No attribution is legally required under CC0; it is');
+  lic.push('provided here as good practice and to document provenance. No non-CC0 material is');
+  lic.push('included.');
   lic.push('');
   lic.push(`Baked set: ${count} samples, ${(bytes / 1024 / 1024).toFixed(2)} MiB (Ogg + AAC fallback).`);
   lic.push('');
@@ -536,6 +543,12 @@ derived from **CC0-1.0** sources; see [THIRD_PARTY_LICENSES.md](./THIRD_PARTY_LI
 
 ${total} samples, ${(bytes / 1024 / 1024).toFixed(2)} MiB committed (Ogg + AAC fallback).
 
+Baked outputs live in the served static tree: audio under \`public/music/samples/\`
+and the index at \`public/music/manifest.json\`. The browser loads them same-origin
+from \`/music/manifest.json\` and \`/music/samples/<name>.<ext>\` (see
+\`game/sampler.mjs\`). This file and \`THIRD_PARTY_LICENSES.md\` stay under
+\`assets/music/\` as documentation; there is only one copy of every asset.
+
 | Instrument | Type | Samples | MIDI map | Role |
 | --- | --- | ---: | --- | --- |
 ${rows.join('\n')}
@@ -574,10 +587,17 @@ node scripts/music-bake.mjs --audition     # mix under /tmp/opencode, never comm
 Override the source root with \`MUSIC_SRC=/path/to/samples\`. The script needs only
 the system \`ffmpeg\`/\`ffprobe\`; there are no npm dependencies.
 
+The bake writes audio to \`public/music/samples/\` and the manifest to
+\`public/music/manifest.json\` so the browser can stream it from \`/music/*\`; the
+README and licence file are written back to \`assets/music/\`. Never copy the
+samples into \`assets/music/\` as well — \`scripts/music-bake.mjs\` is the single
+source of truth.
+
 ## Manifest field semantics
 
-\`assets/music/manifest.json\` is a frozen interface (\`version: 1\`). Every \`file\`
-and \`fallback\` path is relative to \`assets/music/\`.
+\`public/music/manifest.json\` is a frozen interface (\`version: 1\`). Every \`file\`
+and \`fallback\` path is relative to \`public/music/\` (i.e. the served \`/music/\`
+base).
 
 - \`instrument\`, \`midi\`, \`velocity\` — which note/layer the sample is; \`velocity\`
   1 is the soft layer, 2 the strong layer.
@@ -601,6 +621,17 @@ and \`fallback\` path is relative to \`assets/music/\`.
   fallback (\`fallback\`, \`fallbackMime: audio/mp4\`) for Safari/iOS. Prefer Ogg;
   fall back only if \`AudioContext.decodeAudioData\` rejects it.
 - All audio is **mono 44.1 kHz** — pan positionally at runtime.
+
+## Runtime selection (deterministic)
+
+\`game/sampler.mjs\` is the runtime reader. It picks the nearest \`midi\` sample,
+prefers the requested velocity layer (falling back to the nearest available
+one) and pitch-shifts with \`playbackRate = targetFreq / recordedFreq\`. The
+round-robin pick among same-pitch samples and the default velocity layer come
+from the \`MusicEngine\` seeded RNG, and the chosen \`(midi, velocity, rate)\` is
+folded into \`scheduleChecksum\`, so one seed still reproduces one performance.
+Decoding is lazy per instrument and never blocks the scheduler; any voice whose
+buffer is not ready (or fails to decode) falls back to the oscillator engine.
 `;
   fs.writeFileSync(README_PATH, md);
 }
@@ -770,7 +801,7 @@ function main() {
   writeDocs(manifest);
   writeReadme(manifest);
   console.log(`\nbaked ${manifest.samples.length} samples in ${((Date.now() - t0) / 1000).toFixed(1)}s`);
-  console.log(`manifest: assets/music/manifest.json`);
+  console.log(`manifest: public/music/manifest.json`);
   verify();
   if (has('--audition')) audition(manifest);
 }

@@ -5,6 +5,12 @@ derived from **CC0-1.0** sources; see [THIRD_PARTY_LICENSES.md](./THIRD_PARTY_LI
 
 70 samples, 4.51 MiB committed (Ogg + AAC fallback).
 
+Baked outputs live in the served static tree: audio under `public/music/samples/`
+and the index at `public/music/manifest.json`. The browser loads them same-origin
+from `/music/manifest.json` and `/music/samples/<name>.<ext>` (see
+`game/sampler.mjs`). This file and `THIRD_PARTY_LICENSES.md` stay under
+`assets/music/` as documentation; there is only one copy of every asset.
+
 | Instrument | Type | Samples | MIDI map | Role |
 | --- | --- | ---: | --- | --- |
 | `strings-pad` | sustained | 24 | 36–84 | Violin / viola / cello section sustains with vibrato; the harmonic bed. |
@@ -22,13 +28,17 @@ Raw sources live **outside** the repository (default `/home/mojo/music-src`):
 git clone --filter=blob:none --no-checkout https://github.com/sgossner/VSCO-2-CE /home/mojo/music-src/vsco
 cd /home/mojo/music-src/vsco
 git sparse-checkout init --cone
-git sparse-checkout set "Strings/Violin Section/susVib" "Strings/Viola Section/susvib"   "Strings/Cello Section/susvib" "Brass/F Horn/sus" "Brass/Tenor Trombone/sus" "Brass/Tuba/sus" "LICENSE"
+git sparse-checkout set "Strings/Violin Section/susVib" "Strings/Viola Section/susvib" \
+  "Strings/Cello Section/susvib" "Brass/F Horn/sus" "Brass/Tenor Trombone/sus" "Brass/Tuba/sus" "LICENSE"
 git checkout
 
 git clone --filter=blob:none --no-checkout https://github.com/sgossner/VCSL /home/mojo/music-src/vcsl
 cd /home/mojo/music-src/vcsl
 git sparse-checkout init --cone
-git sparse-checkout set "Idiophones/Struck Idiophones/Glockenspiel"   "Membranophones/Struck Membranophones/Timpani 1"   "Membranophones/Struck Membranophones/Frame Drum"   "Membranophones/Struck Membranophones/Bass Drum 1" "LICENSE"
+git sparse-checkout set "Idiophones/Struck Idiophones/Glockenspiel" \
+  "Membranophones/Struck Membranophones/Timpani 1" \
+  "Membranophones/Struck Membranophones/Frame Drum" \
+  "Membranophones/Struck Membranophones/Bass Drum 1" "LICENSE"
 git checkout
 
 # re-bake everything, verify, rewrite the manifest and docs
@@ -43,10 +53,17 @@ node scripts/music-bake.mjs --audition     # mix under /tmp/opencode, never comm
 Override the source root with `MUSIC_SRC=/path/to/samples`. The script needs only
 the system `ffmpeg`/`ffprobe`; there are no npm dependencies.
 
+The bake writes audio to `public/music/samples/` and the manifest to
+`public/music/manifest.json` so the browser can stream it from `/music/*`; the
+README and licence file are written back to `assets/music/`. Never copy the
+samples into `assets/music/` as well — `scripts/music-bake.mjs` is the single
+source of truth.
+
 ## Manifest field semantics
 
-`assets/music/manifest.json` is a frozen interface (`version: 1`). Every `file`
-and `fallback` path is relative to `assets/music/`.
+`public/music/manifest.json` is a frozen interface (`version: 1`). Every `file`
+and `fallback` path is relative to `public/music/` (i.e. the served `/music/`
+base).
 
 - `instrument`, `midi`, `velocity` — which note/layer the sample is; `velocity`
   1 is the soft layer, 2 the strong layer.
@@ -70,3 +87,14 @@ and `fallback` path is relative to `assets/music/`.
   fallback (`fallback`, `fallbackMime: audio/mp4`) for Safari/iOS. Prefer Ogg;
   fall back only if `AudioContext.decodeAudioData` rejects it.
 - All audio is **mono 44.1 kHz** — pan positionally at runtime.
+
+## Runtime selection (deterministic)
+
+`game/sampler.mjs` is the runtime reader. It picks the nearest `midi` sample,
+prefers the requested velocity layer (falling back to the nearest available
+one) and pitch-shifts with `playbackRate = targetFreq / recordedFreq`. The
+round-robin pick among same-pitch samples and the default velocity layer come
+from the `MusicEngine` seeded RNG, and the chosen `(midi, velocity, rate)` is
+folded into `scheduleChecksum`, so one seed still reproduces one performance.
+Decoding is lazy per instrument and never blocks the scheduler; any voice whose
+buffer is not ready (or fails to decode) falls back to the oscillator engine.

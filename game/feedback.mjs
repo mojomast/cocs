@@ -458,7 +458,7 @@ export class SynthAudio{
    return this.musicEngine.setReverb(buffer,opts);
   }catch{return false;}
  }
- audioStatus(){return {state:this.ctx?(this.ctx.state||'suspended'):'unavailable',status:this.status,enabled:this.musicEnabled,muted:this.muted,scene:this.scene,intensity:this.intensity,voices:this.voices.size,notes:this.musicEngine?.notesScheduled??0,music:this.musicEngine?.status?.()??'off',reverb:this.reverbLoaded?'ready':(this._reverbPending?'loading':(this.reverbUrl?'pending':'off'))};}
+ audioStatus(){return {state:this.ctx?(this.ctx.state||'suspended'):'unavailable',status:this.status,enabled:this.musicEnabled,muted:this.muted,scene:this.scene,intensity:this.intensity,voices:this.voices.size,notes:this.musicEngine?.notesScheduled??0,music:this.musicEngine?.status?.()??'off',reverb:this.reverbLoaded?'ready':(this._reverbPending?'loading':(this.reverbUrl?'pending':'off')),samples:this.musicEngine?.sampleStatus?.()??null};}
  // Low, continuous ambience bed: filtered noise hiss plus a sub tone, faded in
  // through the master gain. Owned by the audio instance and torn down in dispose.
  _bed(on){

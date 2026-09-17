@@ -27,12 +27,21 @@
 //   leadType / leadGain     optional timbre overrides
 //   pad / choir / drone     sustained ensemble toggles
 //   taiko / bell            optional percussion and accent grids
+//   brass / timpani         optional low-brass and timpani lines
 //   swell                   0..1 phrase-swell depth on the final bar
+//
+// Orchestral voices (pad/brass/taiko/bells/timpani) are served by the baked CC0
+// sample set (game/sampler.mjs, streamed from /music/*) when it has decoded, and
+// fall back to the oscillator voices otherwise. The choice is seeded from this
+// engine's RNG and folded into `scheduleChecksum`, so one seed reproduces one
+// take with or without samples.
 //
 // No three.js import and no DOM: the class is exercised in unit tests through a
 // minimal mock context, and a real OfflineAudioContext can render it for a
 // non-silence check. Noise uses a seeded PRNG, voice allocation is bounded and
 // every voice is pruned by schedule time, so one seed reproduces one take.
+
+import { MUSIC_BASE, SampleBank, loopWindow, sampleRateFor, selectSample } from './sampler.mjs';
 
 const clamp = (n, a, b) => Math.max(a, Math.min(b, n));
 
@@ -125,8 +134,9 @@ export const HALO_ARRANGEMENTS = frozen({
   menu: {
     bpm: 62, steps: 16, gain: 0.5,
     kick: [0, 8], snare: [], hat: [],
-    taiko: [0, 10], bell: [8], choir: true, drone: true,
+    taiko: [0, 10], bell: [8], timpani: [0], choir: true, drone: true,
     bass: [[0, 0, 6], [6, 2, 2], [8, 4, 6], [14, 5, 2]],
+    brass: [[4, 4, 4], [12, 2, 4]],
     arp: [0, 2, 4, 2, 3, 5, 4, 2],
     counter: [4, 2, 0, 2, 4, 5, 4, 2], counterShift: 12,
     lead: null, leadType: 'triangle', leadGain: 0.024,
@@ -135,8 +145,9 @@ export const HALO_ARRANGEMENTS = frozen({
   explore: {
     bpm: 70, steps: 16, gain: 0.44,
     kick: [0, 8], snare: [], hat: [],
-    taiko: [0, 6, 10], bell: [12], choir: true, drone: true,
+    taiko: [0, 6, 10], bell: [12], timpani: [0, 8], choir: true, drone: true,
     bass: [[0, 0, 4], [4, 2, 4], [8, 5, 6], [14, 4, 2]],
+    brass: [[0, 0, 4], [8, 5, 6]],
     arp: [0, 2, 4, 2, 3, 4, 5, 4],
     counter: [4, 5, 4, 2, 0, 2, 3, 2], counterShift: 12,
     lead: [7, 5, 4, 5, 7, 9, 7, 5, 4, 2, 4, 5, 4, 2, 0, 2],
@@ -146,8 +157,9 @@ export const HALO_ARRANGEMENTS = frozen({
   combat: {
     bpm: 84, steps: 16, gain: 0.55,
     kick: [0, 6, 8, 14], snare: [4, 12], hat: [2, 6, 10, 14],
-    taiko: [0, 3, 8, 11], bell: null, choir: true, drone: true,
+    taiko: [0, 3, 8, 11], bell: null, timpani: [0, 8], choir: true, drone: true,
     bass: [[0, 0, 2], [2, 0, 2], [4, 3, 2], [6, 2, 2], [8, 0, 2], [10, 0, 2], [12, 5, 2], [14, 4, 2]],
+    brass: [[0, 0, 2], [4, 3, 2], [8, 0, 2], [12, 5, 2]],
     arp: [0, 2, 4, 6, 4, 2, 0, 2],
     counter: [4, 5, 4, 2, 0, 2, 4, 5], counterShift: 12,
     lead: 'motif',
@@ -183,7 +195,7 @@ export const MUSIC_SCENES = Object.freeze(['menu', 'explore', 'combat']);
 const LAYER_THRESHOLDS = Object.freeze({ snare: 0.22, hat: 0.4, taiko: 0.32, bell: 0.45, counter: 0.28, lead: 0.42, choir: 0.12 });
 
 export class MusicEngine {
-  constructor({ ctx, destination, theme = null, noiseBuffer = null, seed = 1, maxVoices = 26, lookahead = 0.24 } = {}) {
+  constructor({ ctx, destination, theme = null, noiseBuffer = null, seed = 1, maxVoices = 26, lookahead = 0.24, samples = true, sampleBaseUrl = MUSIC_BASE, sampleManifestUrl = null, sampleFetch = null, sampleBank = null } = {}) {
     this.ctx = ctx || null;
     this.theme = theme || { root: 58, scale: [0, 3, 5, 7] };
     this.noiseBuffer = noiseBuffer || null;
@@ -203,9 +215,18 @@ export class MusicEngine {
     this.notesScheduled = 0;
     this.peakVoices = 0;
     // A cheap rolling fingerprint of every scheduled (freq, gain) pair; used by
-    // tests to prove seeded determinism without rendering audio.
+    // tests to prove seeded determinism without rendering audio. Sampled voices
+    // fold their selected (midi, velocity, playbackRate) into the same stream.
     this.scheduleChecksum = 0;
-    this.notesBy = { kick: 0, snare: 0, hat: 0, taiko: 0, bell: 0, bass: 0, arp: 0, counter: 0, lead: 0, pad: 0, choir: 0, drone: 0, swell: 0, riser: 0, roll: 0, impact: 0 };
+    this.notesBy = { kick: 0, snare: 0, hat: 0, taiko: 0, bell: 0, bass: 0, arp: 0, counter: 0, lead: 0, pad: 0, choir: 0, drone: 0, swell: 0, riser: 0, roll: 0, impact: 0, brass: 0, timpani: 0 };
+    // Sampled-instrument bank: lazy, optional and inert without a decodable
+    // context, so Node tests keep the deterministic oscillator path.
+    this.samplesEnabled = samples !== false;
+    this.sampleBaseUrl = sampleBaseUrl || MUSIC_BASE;
+    this.sampleManifestUrl = sampleManifestUrl || `${this.sampleBaseUrl.replace(/\/+$/, '')}/manifest.json`;
+    this.sampleFetch = sampleFetch;
+    this._sampleBank = sampleBank || null;
+    this._samplePreloadStarted = false;
     this.previewUntil = 0;
     this.previewScene = 'menu';
     // Soundtrack tables are swapped wholesale by setSoundtrack(); default keeps
@@ -218,6 +239,10 @@ export class MusicEngine {
     this.reverbSend = null;
     this.reverbReturn = null;
     this.reverb = null;
+    // A chorus send (short modulated delay) sits alongside the convolution
+    // reverb so sampled strings and the choir can widen without smearing.
+    this.chorusSend = null;
+    this.chorusReturn = null;
     // Dynamic layer state: `layers` eases between 0 and 1 per scene so the menu
     // hands over to exploration and combat instead of hard switching. The
     // transition record tracks the outro swell / entrance accent machine.
@@ -231,6 +256,9 @@ export class MusicEngine {
     this.musicBus = null;
     this.buses = null;
     this._buildBuses(destination);
+    // Start the lazy sample load once the graph exists. Inert in Node tests and
+    // when the AudioContext cannot decode; never blocks construction.
+    this.preloadSamples();
   }
 
   _buildBuses(destination) {
@@ -261,6 +289,198 @@ export class MusicEngine {
     } catch { this.ctx = null; this.buses = null; }
   }
 
+  // Chorus send, built on first use: an 18 ms delay swept by a 0.35 Hz LFO.
+  // Lazy so graphs that never ask for chorus (every Node mock, and the effect
+  // bus tests) allocate no delay line. Returns null when unsupported.
+  _ensureChorus() {
+    if (this.chorusSend) return this.chorusSend;
+    if (this._chorusUnavailable) return null;
+    const ctx = this.ctx;
+    if (!ctx || typeof ctx.createDelay !== 'function' || typeof ctx.createOscillator !== 'function') { this._chorusUnavailable = true; return null; }
+    try {
+      const send = ctx.createGain();
+      send.gain.value = 1;
+      const delay = ctx.createDelay(0.05);
+      delay.delayTime.value = 0.018;
+      const lfo = ctx.createOscillator();
+      lfo.frequency.value = 0.35;
+      const depth = ctx.createGain();
+      depth.gain.value = 0.004;
+      const wet = ctx.createGain();
+      wet.gain.value = 0.6;
+      lfo.connect(depth); depth.connect(delay.delayTime);
+      send.connect(delay); delay.connect(wet); wet.connect(this.musicBus);
+      this.chorusSend = send; this.chorusReturn = wet; this.chorusLfo = lfo;
+      lfo.start();
+      return send;
+    } catch { this._chorusUnavailable = true; return null; }
+  }
+
+  // Lazily create the sample bank on first use. Inert unless the context can
+  // decode and a fetch implementation is available, which keeps tests and
+  // blocked-autoplay paths on the deterministic oscillator path.
+  _ensureSampleBank() {
+    if (this._sampleBank) return this._sampleBank;
+    if (this.samplesEnabled === false) return null;
+    const ctx = this.ctx;
+    if (!ctx || typeof ctx.decodeAudioData !== 'function') return null;
+    const fetchImpl = this.sampleFetch || (typeof fetch === 'function' ? fetch.bind(globalThis) : null);
+    if (!fetchImpl) return null;
+    this._sampleBank = new SampleBank({ ctx, baseUrl: this.sampleBaseUrl, fetchImpl });
+    return this._sampleBank;
+  }
+
+  // Start fetching the manifest and decode the instruments the active pack can
+  // actually voice. Called automatically after a soundtrack swap; safe when the
+  // bank is inert. Decoding never blocks the scheduler.
+  preloadSamples() {
+    const bank = this._ensureSampleBank();
+    if (!bank || !bank.manifest) {
+      if (!bank) return null;
+      return bank.loadManifest(this.sampleManifestUrl).then((ok) => { if (ok) this._preloadPackSamples(bank); return ok; });
+    }
+    this._preloadPackSamples(bank);
+    return Promise.resolve(true);
+  }
+
+  _preloadPackSamples(bank) {
+    if (this._samplePreloadStarted) return;
+    this._samplePreloadStarted = true;
+    for (const name of this._packSampleNeeds()) bank.preload(name);
+  }
+
+  // Which sampled instruments the current arrangements reference. `drone` and
+  // `choir` both read the strings bed; `brass`/`taiko`/`bell` are explicit.
+  _packSampleNeeds() {
+    const needs = new Set();
+    for (const arr of Object.values(this.arrangements || {})) {
+      if (!arr) continue;
+      if (arr.pad || arr.choir || arr.drone || arr.strings) needs.add('strings-pad');
+      if (arr.brass) needs.add('low-brass');
+      if (arr.taiko) needs.add('taiko');
+      if (arr.bell) needs.add('bells');
+      if (arr.timpani) needs.add('timpani');
+    }
+    return [...needs];
+  }
+
+  // True when the bank has decoded the requested instrument. Triggers a lazy
+  // per-instrument preload (and the manifest fetch) the first time it is asked,
+  // without consuming RNG or scheduling a voice.
+  _sampleReady(instrument) {
+    const bank = this._ensureSampleBank();
+    if (!bank) return false;
+    if (!bank.manifest) { bank.loadManifest(this.sampleManifestUrl); return false; }
+    if (bank.isReady(instrument)) return true;
+    if (!bank.isPending(instrument)) bank.preload(instrument);
+    return false;
+  }
+
+  sampleStatus() {
+    const bank = this._sampleBank;
+    return {
+      enabled: this.samplesEnabled !== false,
+      baseUrl: this.sampleBaseUrl,
+      ...(bank ? bank.status() : { manifest: false, ready: 0, loading: 0, failed: 0, loaded: 0, total: 0, instruments: {} }),
+    };
+  }
+
+  // Shared routing tail for every voice: dry -> panner -> bus, plus optional
+  // reverb and chorus sends. Keeps pan/reverb/chorus wiring in one place so the
+  // sampled and oscillator voices stay interchangeable.
+  _route(g, bus, pan, reverb, chorus, extra) {
+    const ctx = this.ctx;
+    if (pan && typeof ctx.createStereoPanner === 'function') {
+      const p = ctx.createStereoPanner();
+      p.pan.value = clamp(pan, -1, 1);
+      g.connect(p); p.connect(bus);
+      extra.push(p);
+    } else {
+      g.connect(bus);
+    }
+    if (reverb > 0 && this.reverbSend) {
+      const send = ctx.createGain();
+      send.gain.value = clamp(reverb, 0, 1);
+      g.connect(send); send.connect(this.reverbSend);
+      extra.push(send);
+    }
+    if (chorus > 0) {
+      const bus = this._ensureChorus();
+      if (bus) {
+        const send = ctx.createGain();
+        send.gain.value = clamp(chorus, 0, 1);
+        g.connect(send); send.connect(bus);
+        extra.push(send);
+      }
+    }
+  }
+
+  _commitVoice(rec) {
+    this.voices.push(rec);
+    this.notesScheduled++;
+    if (this.voices.length > this.peakVoices) this.peakVoices = this.voices.length;
+  }
+
+  // Velocity layer for a sampled voice: an explicit 1/2 hint wins, otherwise a
+  // seeded coin flip chooses the soft or strong layer (both are baked and
+  // normalised, so either is a valid performance).
+  _sampledLayer(opts, pick) {
+    const explicit = Number(opts?.velocity ?? opts?.layer);
+    if (explicit === 1 || explicit === 2) return explicit;
+    return pick < 0.5 ? 2 : 1;
+  }
+
+  // Sampled voice with the SAME contract as _scheduleNote: (time, bus, freq, dur,
+  // gain, reverb, pan), plus an optional instrument/selection bag. Returns false
+  // when the bank is not decoded yet so the caller can fall back to the synth
+  // voice. Selection is seeded from the engine RNG and folded into the checksum.
+  _scheduleSampled(time, bus, instrument, freq, dur, gain, reverb = 0, pan = 0, opts = null) {
+    if (!this.ctx || !bus || this.voices.length >= this.maxVoices) return false;
+    if (!this._sampleReady(instrument)) return false;
+    const bank = this._sampleBank;
+    const pick = this.rng();
+    const layer = this._sampledLayer(opts, pick);
+    const note = Math.max(20, Number(freq) || 440);
+    const midi = 69 + 12 * Math.log2(note / 440);
+    const entry = selectSample(bank.manifest, instrument, midi, layer, pick);
+    const buffer = entry && bank.bufferFor(entry);
+    if (!entry || !buffer) return false;
+    try {
+      const ctx = this.ctx;
+      const rate = sampleRateFor(note, entry.midi);
+      const src = ctx.createBufferSource();
+      src.buffer = buffer;
+      try { src.playbackRate.setValueAtTime(rate, time); } catch { try { src.playbackRate.value = rate; } catch {} }
+      const loop = loopWindow(entry);
+      const srcDur = Math.max(0.02, Number(buffer.duration) || 0);
+      const endTime = loop ? time + Math.max(0.06, dur) : time + Math.max(srcDur / Math.max(0.25, rate), 0.05);
+      if (loop) {
+        src.loop = true;
+        src.loopStart = loop.loopStart;
+        src.loopEnd = loop.loopEnd;
+      }
+      const g = ctx.createGain();
+      const peak = Math.max(0.0002, gain * (Number(entry.gain) || 1) * (opts?.trim ? opts.trim : 1));
+      const span = Math.max(0.01, endTime - time);
+      const attack = Math.min(Math.max(0.001, Number(opts?.attack) || (loop ? 0.03 : 0.0015)), span * 0.5);
+      const release = Math.min(loop ? 0.06 : 0.04, span * 0.5);
+      g.gain.setValueAtTime(0.0001, time);
+      g.gain.linearRampToValueAtTime(peak, time + attack);
+      g.gain.setValueAtTime(peak, Math.max(time + attack, endTime - release));
+      g.gain.exponentialRampToValueAtTime(0.0001, endTime);
+      const extra = [];
+      src.connect(g);
+      this._route(g, bus, pan, reverb, opts?.chorus || 0, extra);
+      src.start(time, 0);
+      src.stop(endTime + 0.03);
+      const rec = { o: src, g, extra, end: endTime + 0.05 };
+      try { src.onended = () => { try { src.disconnect(); } catch {} try { g.disconnect(); } catch {} for (const n of extra) { try { n.disconnect(); } catch {} } }; } catch {}
+      this._commitVoice(rec);
+      this.scheduleChecksum = (Math.imul(this.scheduleChecksum, 31) + ((((entry.midi & 0xff) << 12) ^ ((entry.velocity & 0x3) << 10) ^ (Math.round(Math.max(20, freq)) & 0x3ff) ^ (Math.round(rate * 512) & 0x1ff)) | 0)) | 0;
+      return true;
+    } catch { return false; }
+  }
+
   setTheme(theme) {
     if (theme && Array.isArray(theme.scale) && Number.isFinite(theme.root)) this.theme = { root: theme.root, scale: theme.scale };
     return this.theme;
@@ -274,6 +494,8 @@ export class MusicEngine {
     this.fills = pack.fills || FILLS;
     if (pack.theme) this.setTheme(pack.theme);
     if (this.motif) this.setMotif(this.motif);
+    this._samplePreloadStarted = false;
+    this.preloadSamples();
     this._resetTransport();
     return SOUNDTRACKS[name] ? name : 'default';
   }
@@ -459,38 +681,50 @@ export class MusicEngine {
     } catch { return null; }
   }
 
-  _scheduleNote(time, bus, freq, dur, type, gain, end = 0, attack = 0.008, reverb = 0, pan = 0) {
+  // Oscillator voice. `opts` optionally turns it into a detuned unison stack
+  // (count/detune), inserts a velocity-scaled lowpass (filter/filterEnd/q) and
+  // adds a chorus send — all guarded so minimal test contexts ignore them. The
+  // positional contract and the single-oscillator checksum are unchanged.
+  _scheduleNote(time, bus, freq, dur, type, gain, end = 0, attack = 0.008, reverb = 0, pan = 0, opts = null) {
     if (!this.ctx || !bus || this.voices.length >= this.maxVoices) return false;
     try {
-      const o = this.ctx.createOscillator(), g = this.ctx.createGain();
-      o.type = type;
-      o.frequency.setValueAtTime(Math.max(20, freq), time);
-      if (end) o.frequency.exponentialRampToValueAtTime(Math.max(20, end), time + dur);
+      const ctx = this.ctx;
+      const g = ctx.createGain();
+      const extra = [];
+      let dest = g;
+      if (opts && opts.filter && typeof ctx.createBiquadFilter === 'function') {
+        const f = ctx.createBiquadFilter();
+        f.type = opts.filterType || 'lowpass';
+        f.frequency.setValueAtTime(Math.max(30, Number(opts.filter) || 800), time);
+        if (opts.filterEnd) f.frequency.exponentialRampToValueAtTime(Math.max(30, Number(opts.filterEnd)), time + dur);
+        if (opts.q != null) { try { f.Q.setValueAtTime(Number(opts.q) || 0.7, time); } catch {} }
+        f.connect(g);
+        dest = f;
+        extra.push(f);
+      }
+      const count = opts && Number(opts.count) > 1 ? Math.min(4, Math.round(Number(opts.count))) : 1;
+      const detune = opts ? Number(opts.detune) || 0 : 0;
+      const oscs = [];
+      for (let i = 0; i < count; i++) {
+        const o = ctx.createOscillator();
+        o.type = type;
+        o.frequency.setValueAtTime(Math.max(20, freq), time);
+        if (end) o.frequency.exponentialRampToValueAtTime(Math.max(20, end), time + dur);
+        if (detune) { try { o.detune.setValueAtTime((i - (count - 1) / 2) * detune, time); } catch {} }
+        o.connect(dest);
+        o.start(time); o.stop(time + dur + 0.04);
+        oscs.push(o);
+      }
       g.gain.setValueAtTime(0.0001, time);
       g.gain.linearRampToValueAtTime(Math.max(0.0002, gain), time + attack);
       g.gain.exponentialRampToValueAtTime(0.0001, time + dur);
-      const extra = [];
-      o.connect(g);
-      if (pan && typeof this.ctx.createStereoPanner === 'function') {
-        const p = this.ctx.createStereoPanner();
-        p.pan.value = clamp(pan, -1, 1);
-        g.connect(p); p.connect(bus);
-        extra.push(p);
-      } else {
-        g.connect(bus);
-      }
-      if (reverb > 0 && this.reverbSend) {
-        const send = this.ctx.createGain();
-        send.gain.value = reverb;
-        g.connect(send); send.connect(this.reverbSend);
-        extra.push(send);
-      }
-      o.start(time); o.stop(time + dur + 0.04);
-      const rec = { o, g, extra, end: time + dur + 0.05 };
-      try { o.onended = () => { try { o.disconnect(); } catch {} try { g.disconnect(); } catch {} for (const n of extra) { try { n.disconnect(); } catch {} } }; } catch {}
-      this.voices.push(rec);
-      this.notesScheduled++;
-      if (this.voices.length > this.peakVoices) this.peakVoices = this.voices.length;
+      this._route(g, bus, pan, reverb, opts ? Number(opts.chorus) || 0 : 0, extra);
+      const rec = { o: oscs[0], oscs, g, extra, end: time + dur + 0.05 };
+      const cleanup = () => { for (const o of oscs) { try { o.disconnect(); } catch {} } try { g.disconnect(); } catch {} for (const n of extra) { try { n.disconnect(); } catch {} } };
+      try { oscs[oscs.length - 1].onended = cleanup; } catch {}
+      this._commitVoice(rec);
+      // Unison stacks keep the single-oscillator checksum so existing seeded
+      // takes are unchanged when the stack collapses to one voice.
       this.scheduleChecksum = (Math.imul(this.scheduleChecksum, 31) + ((Math.round(Math.max(20, freq)) ^ Math.round(gain * 4096)) | 0)) | 0;
       return true;
     } catch { return false; }
@@ -545,7 +779,9 @@ export class MusicEngine {
     } catch { return false; }
   }
 
-  _kick(time, bus, gain = 0.42) {
+  _kick(time, bus, gain = 0.42, opts = null) {
+    // Tribal arrangements layer a sampled bass drum under the synth kick.
+    if (opts?.sampled && this._scheduleSampled(time, bus, 'taiko', 70, 0.24, gain, 0.14, opts.pan || 0, { velocity: opts.strong ? 2 : 1 })) { this.notesBy.kick++; return; }
     if (this._scheduleNote(time, bus, 132, 0.17, 'sine', gain, 44, 0.002)) this.notesBy.kick++;
   }
   _snare(time, bus, gain = 0.16) {
@@ -556,42 +792,116 @@ export class MusicEngine {
   _hat(time, bus, gain = 0.05) {
     if (this._scheduleNote(time, bus, 7800, 0.03, 'square', gain * (0.88 + this.rng() * 0.24), 5200, 0.001)) this.notesBy.hat++;
   }
-  // Tribal/taiko drum: a low pitched body plus a short noisy frame crack.
-  _taiko(time, bus, gain = 0.5) {
+  // Tribal/taiko drum. Sampled frame/bass drums when decoded; otherwise the
+  // original pitched body plus a short noisy frame crack. `freq` lets callers
+  // keep the drum in the arrangement's register.
+  _taiko(time, bus, gain = 0.5, opts = null) {
+    const strong = opts?.strong ?? gain >= 0.4;
+    if (this._scheduleSampled(time, bus, 'taiko', opts?.freq ?? 150, 0.32, gain, 0.22, opts?.pan ?? -0.08, { velocity: strong ? 2 : 1 })) { this.notesBy.taiko++; return; }
     let ok = this._scheduleNote(time, bus, 150, 0.3, 'sine', gain * this._vel(), 48, 0.002, 0.2, -0.08);
     ok = this._scheduleNote(time, bus, 82, 0.34, 'sine', gain * 0.6, 40, 0.002, 0.2, 0.08) || ok;
     ok = this._scheduleNote(time, bus, 1700, 0.045, 'triangle', gain * 0.16, 950, 0.001, 0.2, 0) || ok;
     if (ok) this.notesBy.taiko++;
   }
-  // Glassy FM-ish bell: a fundamental plus an inharmonic partial.
-  _bell(time, bus, gain = 0.06) {
-    let ok = this._scheduleNote(time, bus, 1320, 1.4, 'sine', gain * this._vel(), 1318, 0.005, 0.6, -0.3);
-    ok = this._scheduleNote(time, bus, 1979, 0.9, 'sine', gain * 0.45, 1977, 0.005, 0.62, 0.3) || ok;
-    if (ok) this.notesBy.bell++;
+  // Tuned timpani hit for downbeats, entrance accents and cadences. Sampled
+  // where available; falls back to a low sine body.
+  _timpani(time, bus, freq, gain = 0.4, opts = null) {
+    if (this._scheduleSampled(time, bus, 'timpani', freq, 0.8, gain, 0.3, opts?.pan || 0, { velocity: (opts?.strong ?? gain >= 0.4) ? 2 : 1 })) { this.notesBy.timpani++; return true; }
+    if (this._scheduleNote(time, bus, freq, 0.7, 'sine', gain, freq * 0.98, 0.004, 0.3, opts?.pan || 0)) { this.notesBy.timpani++; return true; }
+    return false;
   }
-  // Bass: a saw body plus a sine sub, so the low end stays defined under the
-  // pads. Callers move the line with root/third/fourth/octave degrees.
+  // Glassy bell. Sampled glockenspiel where available; otherwise a fundamental
+  // plus three inharmonic partials with progressively shorter decays, which
+  // reads far closer to struck metal than the old two-sine stack.
+  _bell(time, bus, gain = 0.06, freq = 1320) {
+    if (this._scheduleSampled(time, bus, 'bells', freq, 1.6, gain, 0.55, -0.25, { velocity: gain >= 0.05 ? 2 : 1, chorus: 0.18 })) { this.notesBy.bell++; return true; }
+    let ok = this._scheduleNote(time, bus, freq, 1.5, 'sine', gain * this._vel(), freq * 0.999, 0.005, 0.6, -0.3);
+    for (const [ratio, level, life] of [[2.76, 0.42, 0.9], [5.4, 0.22, 0.5], [8.93, 0.1, 0.3]]) {
+      ok = this._scheduleNote(time, bus, freq * ratio, life, 'sine', gain * level * this._vel(), freq * ratio, 0.004, 0.6, 0.3) || ok;
+    }
+    if (ok) this.notesBy.bell++;
+    return ok;
+  }
+  // Bass: a detuned saw body through a velocity-brightened lowpass plus a sine
+  // sub, so the low end stays defined under the pads. Callers move the line with
+  // root/third/fourth/octave degrees.
   _bass(time, bus, freq, dur, gain) {
-    let ok = this._scheduleNote(time, bus, freq, dur, 'sawtooth', gain, freq * 0.985, 0.006);
+    const cut = 300 + 620 * Math.min(1, gain * 14);
+    let ok = this._scheduleNote(time, bus, freq, dur, 'sawtooth', gain, freq * 0.985, 0.006, 0, 0, { count: 2, detune: 6, filter: cut, filterEnd: cut * 0.5, q: 0.8, chorus: 0.06 });
     ok = this._scheduleNote(time, bus, freq / 2, dur * 0.95, 'sine', gain * 0.5, freq / 2 * 0.99, 0.006) || ok;
     if (ok) this.notesBy.bass++;
   }
-  // Choir-like pad: detuned voices per chord tone that beat gently, panned in
-  // pairs for width and drenched in the reverb send. Shrinks to four voices
-  // when the engine is close to its cap so it can never starve the beat.
+  // Strings bed: the sampled section sustains when the bank is warm, otherwise
+  // a detuned, velocity-brightened saw stack stands in so the orchestral beds
+  // still work before (or without) any decode.
+  _strings(time, bus, freq, dur, gain, pan = 0, opts = null) {
+    if (this._scheduleSampled(time, bus, 'strings-pad', freq, dur, gain, 0.4, pan, { velocity: opts?.velocity, chorus: 0.35, attack: 0.07, trim: 0.6 })) return true;
+    const cut = 480 + 1500 * Math.min(1, gain * 16);
+    return this._scheduleNote(time, bus, freq, dur, 'sawtooth', gain * 0.8, 0, 0.35, 0.4, pan, { count: 2, detune: 9, filter: cut, filterEnd: cut * 0.7, q: 0.6, chorus: 0.3 });
+  }
+  // Low brass: sampled F Horn / Trombone / Tuba sustains for the low melodic
+  // and tension lines, with a dark saw fallback.
+  _brass(time, bus, freq, dur, gain, pan = 0, opts = null) {
+    if (this._scheduleSampled(time, bus, 'low-brass', freq, dur, gain, 0.25, pan, { velocity: opts?.velocity, chorus: 0.15, attack: 0.06 })) { this.notesBy.brass++; return true; }
+    const cut = 320 + 820 * Math.min(1, gain * 18);
+    const ok = this._scheduleNote(time, bus, freq, dur, 'sawtooth', gain, 0, 0.07, 0.25, pan, { count: 2, detune: 7, filter: cut, filterEnd: cut * 0.8, q: 0.9 });
+    if (ok) this.notesBy.brass++;
+    return ok;
+  }
+  // Choir: the one colour the CC0 set cannot supply. Two-to-four chord tones
+  // are doubled with detuned saws and shaped by a three-peak formant bank
+  // (620/1180/2600 Hz) so it reads as a wordless ensemble rather than a pad.
+  // Falls back to the plain detuned stack on contexts without filters. Still a
+  // single voice slot so it can never starve the beat.
   _choir(time, bus, root, scale, chord, dur) {
     const available = this.maxVoices - this.voices.length;
     if (available < 4) return false;
-    const pairs = available >= 10 ? 4 : 2;
-    const offsets = [0, 2, 4, 7];
-    let scheduled = false;
-    for (let i = 0; i < pairs; i++) {
-      const f = noteFreq(root / 2, scale, chord + offsets[i]);
-      const pan = i % 2 ? 0.3 : -0.3;
-      if (this._scheduleNote(time, bus, f, dur, 'sawtooth', 0.016 * this._vel(), f * 0.999, 0.9, 0.5, pan)) scheduled = true;
-      if (this._scheduleNote(time, bus, f * 1.003, dur, 'triangle', 0.01 * this._vel(), f * 1.001, 1.1, 0.5, -pan)) scheduled = true;
-    }
-    return scheduled;
+    try {
+      const ctx = this.ctx;
+      const pairs = available >= 10 ? 4 : 2;
+      const offsets = [0, 2, 4, 7];
+      const hasFilter = typeof ctx.createBiquadFilter === 'function';
+      const g = ctx.createGain();
+      const extra = [];
+      const oscs = [];
+      let dest = g;
+      if (hasFilter) {
+        const sum = ctx.createGain();
+        for (const [freq, q] of [[620, 6], [1180, 9], [2600, 12]]) {
+          const f = ctx.createBiquadFilter();
+          f.type = 'bandpass';
+          f.frequency.setValueAtTime(freq, time);
+          try { f.Q.setValueAtTime(q, time); } catch {}
+          sum.connect(f); f.connect(g);
+          extra.push(f);
+        }
+        const body = ctx.createGain();
+        body.gain.value = 0.5;
+        sum.connect(body); body.connect(g);
+        extra.push(sum, body);
+        dest = sum;
+      }
+      for (let i = 0; i < pairs; i++) {
+        const f = noteFreq(root / 2, scale, chord + offsets[i]);
+        for (const det of [-2.8, 3.2]) {
+          const o = ctx.createOscillator();
+          o.type = 'sawtooth';
+          o.frequency.setValueAtTime(Math.max(20, f * (1 + det / 1000)), time);
+          o.connect(dest);
+          o.start(time); o.stop(time + dur + 0.05);
+          oscs.push(o);
+        }
+      }
+      g.gain.setValueAtTime(0.0001, time);
+      g.gain.linearRampToValueAtTime(0.02 * this._vel(), time + 0.9);
+      g.gain.exponentialRampToValueAtTime(0.0001, time + dur);
+      this._route(g, bus, 0, 0.5, 0.3, extra);
+      const rec = { o: oscs[0], oscs, g, extra, end: time + dur + 0.05 };
+      const cleanup = () => { for (const o of oscs) { try { o.disconnect(); } catch {} } try { g.disconnect(); } catch {} for (const n of extra) { try { n.disconnect(); } catch {} } };
+      try { oscs[oscs.length - 1].onended = cleanup; } catch {}
+      this._commitVoice(rec);
+      return true;
+    } catch { return false; }
   }
   // Rising filtered-noise swell with a tonal fallback for contexts without a
   // noise buffer (unit-test mocks, renderers without buffer sources).
@@ -605,13 +915,17 @@ export class MusicEngine {
   // impact, topped with a bell/open-fifth hit for the combat downbeat.
   _entrance(time, transition, bus, drumBus, chord) {
     const root = this.theme.root, scale = this.theme.scale;
+    // A tuned timpani hit marks the moment, with the old sub boom kept as a
+    // fallback/body so the downbeat reads even before samples decode.
+    const timpFreq = noteFreq(root / 2, scale, chord);
+    this._timpani(time, drumBus, timpFreq, transition.to === 'combat' ? 0.5 : 0.34, { strong: true });
     if (transition.to === 'combat') {
-      this._kick(time, drumBus, 0.62);
+      this._kick(time, drumBus, 0.62, { sampled: true, strong: true });
       if (this._scheduleNote(time, drumBus, 58, 0.9, 'sine', 0.22, 26, 0.004, 0.1, 0)) this.notesBy.impact++;
       if (this._scheduleNoise(time, drumBus, { dur: 0.5, gain: 0.1, type: 'lowpass', freq: 900, q: 0.7, sweep: 70, attack: 0.004 })) this.notesBy.riser++;
       if (this._scheduleNote(time, bus, noteFreq(root, scale, chord + 7), 1.2, 'sine', 0.05, 0, 0.01, 0.5, 0.2)) this.notesBy.impact++;
     } else {
-      this._taiko(time, drumBus, transition.to === 'explore' ? 0.4 : 0.24);
+      this._taiko(time, drumBus, transition.to === 'explore' ? 0.4 : 0.24, { strong: true });
       if (this._scheduleNote(time, bus, noteFreq(root / 2, scale, chord), 1.4, 'sine', 0.045, 0, 0.4, 0.5, -0.12)) this.notesBy.impact++;
     }
     transition.accents++;
@@ -671,13 +985,15 @@ export class MusicEngine {
     }
     const boosted = entering || Boolean(transition && transition.phase === 'enter');
 
-    // 2. Percussion.
+    // 2. Percussion. Tribal arrangements layer a sampled bass drum under the
+    //    synth kick; the sample bank's `kick` is what makes the entrance read.
+    const sampledDrums = Boolean(arr.taiko);
     if (scene === 'combat') {
-      drumGrid(arr.kick, () => this._kick(time, drumBus, 0.5));
+      drumGrid(arr.kick, () => this._kick(time, drumBus, 0.5, { sampled: sampledDrums, strong: true }));
       if (entering || hold >= LAYER_THRESHOLDS.snare) drumGrid(arr.snare, () => this._snare(time, drumBus, 0.2));
       if (entering || hold >= LAYER_THRESHOLDS.hat) drumGrid(arr.hat, () => this._hat(time, drumBus, 0.055));
     } else {
-      drumGrid(arr.kick, () => this._kick(time, drumBus, 0.34));
+      drumGrid(arr.kick, () => this._kick(time, drumBus, 0.34, { sampled: sampledDrums, strong: false }));
       drumGrid(arr.snare, () => this._snare(time, drumBus, 0.13));
       drumGrid(arr.hat, () => this._hat(time, drumBus, 0.035));
     }
@@ -686,18 +1002,25 @@ export class MusicEngine {
       if (fill.snare) drumGrid(fill.snare, () => this._snare(time, drumBus, fillLevel === 2 ? 0.2 : 0.16));
     }
 
-    // 3. Tribal and bell accents.
+    // 3. Tribal and bell accents. Bells sit an octave-plus above the strings so
+    //    the high register stays clear of the brass and bass.
     const taikoOn = scene !== 'combat' || boosted || hold >= LAYER_THRESHOLDS.taiko;
     const bellOn = scene !== 'combat' || boosted || hold >= LAYER_THRESHOLDS.bell;
-    if (arr.taiko && taikoOn) drumGrid(arr.taiko, () => this._taiko(time, drumBus, scene === 'combat' ? 0.5 : 0.34));
-    if (fill && fill.taiko && taikoOn) drumGrid(fill.taiko, () => this._taiko(time, drumBus, 0.4));
-    if (arr.bell && bellOn) drumGrid(arr.bell, () => this._bell(time, bus, scene === 'combat' ? 0.06 : 0.05));
-    if (fill && fill.bell && bellOn) drumGrid(fill.bell, () => this._bell(time, bus, 0.04));
+    if (arr.taiko && taikoOn) drumGrid(arr.taiko, () => this._taiko(time, drumBus, scene === 'combat' ? 0.5 : 0.34, { strong: scene === 'combat' }));
+    if (fill && fill.taiko && taikoOn) drumGrid(fill.taiko, () => this._taiko(time, drumBus, 0.4, { strong: true }));
+    if (arr.bell && bellOn) drumGrid(arr.bell, () => this._bell(time, bus, scene === 'combat' ? 0.06 : 0.05, noteFreq(root, scale, chord + 7) * 4));
+    if (fill && fill.bell && bellOn) drumGrid(fill.bell, () => this._bell(time, bus, 0.04, noteFreq(root, scale, chord + 7) * 4));
+    if (arr.timpani && taikoOn) drumGrid(arr.timpani, () => this._timpani(time, drumBus, noteFreq(root / 2, scale, chord), scene === 'combat' ? 0.45 : 0.3));
 
-    // 4. Bass movement (root/fourth/octave passing tones inside the bar).
+    // 4. Bass movement (root/fourth/octave passing tones inside the bar) with an
+    //    optional low-brass line above it for tension and cadences.
     for (const [s, deg, len] of arr.bass) if ((s + arr.steps) % arr.steps === step) {
       const f = noteFreq(root / 2, scale, deg + chord);
       this._bass(time, bus, f, len * stepDur * 0.94, scene === 'combat' ? 0.12 : 0.09);
+    }
+    if (arr.brass) for (const [s, deg, len] of arr.brass) if ((s + arr.steps) % arr.steps === step) {
+      const f = noteFreq(root / 2, scale, deg + chord);
+      this._brass(time, bus, f, len * stepDur * 0.92, scene === 'combat' ? 0.055 : 0.04, 0.12, { velocity: scene === 'combat' ? 2 : 1 });
     }
 
     // 5. Lead: a quarter-note line that develops across bars. Gated by the layer
@@ -707,26 +1030,28 @@ export class MusicEngine {
       const f = noteFreq(root, scale, lead[this._leadIndex(arr, step)] + chord) * Math.pow(2, (Number(arr.leadShift) || 0) / 12);
       const type = arr.leadType || 'square';
       const gain = (Number(arr.leadGain) || 0.032) * (scene === 'combat' ? 1 : 0.9) * this._vel();
-      if (this._scheduleNote(time, bus, f, stepDur * 3.4, type, gain, 0, 0.02, 0.28, 0.06)) this.notesBy.lead++;
+      const cut = 900 + 2600 * Math.min(1, gain * 22);
+      if (this._scheduleNote(time, bus, f, stepDur * 3.4, type, gain, 0, 0.02, 0.28, 0.06, { count: 3, detune: 9, filter: cut, filterEnd: cut * 0.75, q: 1.1, chorus: 0.12 })) this.notesBy.lead++;
     }
 
     // 6. Counter-line on the offbeats, answering the lead an octave away and
-    //    panned opposite the arpeggio.
+    //    panned opposite the arpeggio. A soft unison keeps it from sounding thin
+    //    against the sampled strings.
     if (arr.counter && step % 2 === 1 && hold >= LAYER_THRESHOLDS.counter) {
       const i = (step - 1) / 2;
       const f = noteFreq(root, scale, arr.counter[i % arr.counter.length] + chord) * Math.pow(2, (Number(arr.counterShift) || 0) / 12);
       const pan = step % 4 === 1 ? 0.22 : -0.22;
-      if (this._scheduleNote(time, bus, f, stepDur * 1.6, 'triangle', 0.018 * this._vel(), 0, 0.012, 0.22, pan)) this.notesBy.counter++;
+      if (this._scheduleNote(time, bus, f, stepDur * 1.6, 'triangle', 0.018 * this._vel(), 0, 0.012, 0.22, pan, { count: 2, detune: 5, chorus: 0.1 })) this.notesBy.counter++;
     }
 
     // 7. Arpeggio: one degree per eighth note with a soft octave shimmer off the
-    //    menu, spread gently across the stereo field.
+    //    menu, spread gently across the stereo field and chorused for width.
     const arp = fill?.arp || arr.arp;
     if (arp && step % 2 === 0) {
       const i = step / 2;
       const f = noteFreq(root, scale, arp[i % arp.length] + chord);
       const pan = i % 2 ? -0.2 : 0.2;
-      if (this._scheduleNote(time, bus, f, stepDur * 1.7, 'triangle', (scene === 'combat' ? 0.055 : 0.045) * this._vel(), 0, 0.01, 0.12, pan)) this.notesBy.arp++;
+      if (this._scheduleNote(time, bus, f, stepDur * 1.7, 'triangle', (scene === 'combat' ? 0.055 : 0.045) * this._vel(), 0, 0.01, 0.12, pan, { count: 2, detune: 4, chorus: 0.08 })) this.notesBy.arp++;
       if (scene !== 'menu' && this._scheduleNote(time, bus, f * 2, stepDur * 1.1, 'sine', 0.016 * this._vel(), 0, 0.012, 0.2, -pan)) this.notesBy.arp++;
     }
 
@@ -742,23 +1067,31 @@ export class MusicEngine {
       }
     }
 
-    // 9. Pads: a sustained root+fifth at the top of each bar with a slow swell.
+    // 9. Pads: the strings section holds a root+fifth+octave at the top of each
+    //    bar with a slow swell. Registers are kept separate: the drone owns the
+    //    bottom, the strings the middle, and bells/lead the top.
     if (arr.pad && step === 0) {
       const padDur = stepDur * arr.steps * 0.96;
       const r = noteFreq(root / 2, scale, chord), fifth = noteFreq(root / 2, scale, chord + 4);
-      if (this._scheduleNote(time, bus, r, padDur, 'sine', 0.03 * this._vel(), 0, 0.5, 0.35, -0.15)) this.notesBy.pad++;
-      if (this._scheduleNote(time, bus, fifth, padDur, 'sine', 0.022 * this._vel(), 0, 0.6, 0.4, 0.15)) this.notesBy.pad++;
+      const octave = noteFreq(root, scale, chord);
+      if (this._strings(time, bus, r, padDur, 0.05 * this._vel(), -0.15, { velocity: 1 })) this.notesBy.pad++;
+      if (this._strings(time, bus, fifth, padDur, 0.038 * this._vel(), 0.15, { velocity: 1 })) this.notesBy.pad++;
+      // The octave only joins on the stronger half of the phrase so the bed
+      // breathes instead of sitting at one dynamic.
+      if (this.bar % 4 >= 2 && this._strings(time, bus, octave, padDur, 0.03 * this._vel(), -0.03, { velocity: 2 })) this.notesBy.pad++;
     }
     if (arr.choir && step === 0 && hold >= LAYER_THRESHOLDS.choir) {
       if (this._choir(time, bus, root, scale, chord, stepDur * arr.steps * 0.98)) this.notesBy.choir++;
     }
     // Low drone: a slow root+fifth every other bar, mostly dry so the bass
-    // stays defined under the wash.
+    // stays defined under the wash. The root doubles with low brass on the
+    // swells so the floor of the arrangement has some weight.
     if (arr.drone && step === 0 && this.bar % 2 === 0) {
       const droneDur = stepDur * arr.steps * 2 * 0.98;
       const f = noteFreq(root / 4, scale, 0);
       if (this._scheduleNote(time, bus, f, droneDur, 'sine', 0.05 * this._vel(), 0, 0.4, 0.08, -0.1)) this.notesBy.drone++;
       if (this._scheduleNote(time, bus, noteFreq(root / 4, scale, 4), droneDur, 'sine', 0.034 * this._vel(), 0, 0.5, 0.08, 0.1)) this.notesBy.drone++;
+      if (this.bar % 4 === 0) this._brass(time, bus, noteFreq(root / 4, scale, 0), droneDur * 0.9, 0.03, -0.05, { velocity: 1 });
     }
   }
 
@@ -792,9 +1125,12 @@ export class MusicEngine {
   }
 
   _stopVoice(rec) {
-    try { rec.o.onended = null; } catch {}
-    try { rec.o.stop(); } catch {}
-    try { rec.o.disconnect(); } catch {}
+    const sources = rec.oscs?.length ? rec.oscs : [rec.o];
+    for (const o of sources) {
+      try { o.onended = null; } catch {}
+      try { o.stop(); } catch {}
+      try { o.disconnect(); } catch {}
+    }
     try { rec.g.disconnect(); } catch {}
     for (const n of rec.extra || []) { try { n.disconnect(); } catch {} }
   }
@@ -807,6 +1143,13 @@ export class MusicEngine {
     try { this.reverbReturn?.disconnect(); } catch {}
     try { this.reverb?.disconnect(); } catch {}
     this.reverbSend = null; this.reverbReturn = null; this.reverb = null;
+    try { this.chorusLfo?.stop(); } catch {}
+    try { this.chorusLfo?.disconnect(); } catch {}
+    try { this.chorusSend?.disconnect(); } catch {}
+    try { this.chorusReturn?.disconnect(); } catch {}
+    this.chorusSend = null; this.chorusReturn = null; this.chorusLfo = null;
+    try { this._sampleBank?.dispose(); } catch {}
+    this._sampleBank = null;
     try { this.musicBus?.disconnect(); } catch {}
     this.musicBus = null;
     this.transition = null;
