@@ -5,6 +5,7 @@ import {WeaponFeedback,EffectPool,SynthAudio,AmbientFX,WeatherFX,EMPTY_CHANNELS,
 import {SURFACE_KINDS,surfaceKind,footstepProfile,impactProfile,reportVariation,mixUnit,eventSeed} from './sfx-design.mjs';
 import {weatherPreset} from './environment.mjs';
 import {HARNESSES} from './data.mjs';
+import {configureMothAssets,resetMothAssets} from './moth-assets.mjs';
 
 const player={id:7,weapon:0,x:0,z:0,yaw:0,grounded:true,vx:0,vy:0,vz:0};
 test('weapon kicks are distinct, bounded, pellet-deduplicated and recover exponentially',()=>{
@@ -745,5 +746,34 @@ test('a failed impulse response load stays retryable instead of latching loaded'
   globalThis.fetch=originalFetch;
   audio.dispose();
  }
+});
+
+test('setSpace selects baked space IRs, defaults wetness per space and falls back safely',()=>{
+ const b64=(bytes)=>Buffer.from(bytes).toString('base64');
+ const ir=(url,seconds)=>({url,seconds,sampleRate:22050,channels:2,taps:[]});
+ configureMothAssets({version:1,irs:{'open-air':ir('/moth/files/ir-open-air/result.wav',1.5),cavern:ir('/moth/files/ir-cavern/result.wav',4)}});
+ const audio=new SynthAudio();
+ try{
+  assert.equal(audio.setSpace('open-air'),'/moth/files/ir-open-air/result.wav');
+  assert.equal(audio.reverbWet,.22,'open-air is drier than the old cavern default');
+  assert.equal(audio.reverbSpace,'open-air');
+  assert.equal(audio.setSpace('open-air'),'/moth/files/ir-open-air/result.wav','re-selecting the active space is a no-op');
+  assert.equal(audio.setSpace('void'),'/moth/files/ir-cavern/result.wav','an unknown space falls back to cavern');
+  assert.equal(audio.reverbWet,.42,'the fallback keeps the cavern wetness');
+  assert.equal(audio.audioStatus().space,'void');
+  assert.equal(audio.setSpace('open-air',{wet:.5}),'/moth/files/ir-open-air/result.wav','explicit wetness overrides the per-space default');
+  assert.equal(audio.reverbWet,.5);
+ }finally{
+  resetMothAssets();
+  audio.dispose();
+ }
+ // With no registry the wired URL is preserved rather than cleared, so a partial
+ // bake can never silence the reverb that is already playing.
+ const offline=new SynthAudio();
+ try{
+  offline.setReverbUrl('/moth/files/ir-cavern/result.wav',.42);
+  assert.equal(offline.setSpace('hall'),'/moth/files/ir-cavern/result.wav');
+  assert.equal(offline.reverbUrl,'/moth/files/ir-cavern/result.wav');
+ }finally{offline.dispose();}
 });
 

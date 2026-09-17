@@ -3,6 +3,11 @@ import {WEAPONS} from './data.mjs';
 import {precipParticleAdds} from './environment.mjs';
 import {MusicEngine,HALO_THEME} from './music.mjs';
 import {footstepProfile,impactProfile,reportStyle,reportVariation,eventSeed,mixUnit} from './sfx-design.mjs';
+import {mothIr} from './moth-assets.mjs';
+
+// Per-space reverb wetness for the baked convolution IRs. `cavern` keeps the
+// historical .42; drier outdoor/tunnel responses sit lower, big interiors higher.
+const SPACE_WET=Object.freeze({'open-air':.22,tunnel:.34,hall:.42,cathedral:.6,cavern:.42});
 
 // Presentation only: these offsets must never be applied to the aiming camera.
 const KICKS=WEAPONS.map(w=>w.feel?.kick||[.04,.04,16]);
@@ -329,7 +334,7 @@ const BED_MOODS=Object.freeze({
  storm:Object.freeze({filter:420,tone:48,gain:.024,sub:.005,air:.012,windFreq:900,wind:2,tense:.003,tenseFreq:60}),
 });
 export class SynthAudio{
- constructor({announcer=false}={}){this.ctx=null;this.muted=false;this.voices=new Set();this.noiseBuffer=null;this.master=null;this.lastDamage=null;this.lastReport=null;this.lastHit=-Infinity;this.footPhase=0;this.wasGrounded=undefined;this.lastVy=0;this.engine=null;this.bed=null;this.bedMood='default';this.ambientBed=true;this.stepVariant=0;this.landVariant=0;this.reloadVariant=0;this.intensity=0;this.bedScale=.75;this.musicEnabled=true;this.announcer=announcer===true;this.announced=new Set();this.lastCue=null;this.mode='default';this.theme=MODE_THEMES.default;this.soundtrack='default';this.reverbUrl=null;this.reverbWet=0.42;this.reverbLoaded=false;this.lastSting=null;this.heartbeatTimer=0;this.reportSerial=0;this.space=null;this.surfaceResolver=null;this.windScale=null;this._reverbPending=false;this.jumpVariant=0;
+ constructor({announcer=false}={}){this.ctx=null;this.muted=false;this.voices=new Set();this.noiseBuffer=null;this.master=null;this.lastDamage=null;this.lastReport=null;this.lastHit=-Infinity;this.footPhase=0;this.wasGrounded=undefined;this.lastVy=0;this.engine=null;this.bed=null;this.bedMood='default';this.ambientBed=true;this.stepVariant=0;this.landVariant=0;this.reloadVariant=0;this.intensity=0;this.bedScale=.75;this.musicEnabled=true;this.announcer=announcer===true;this.announced=new Set();this.lastCue=null;this.mode='default';this.theme=MODE_THEMES.default;this.soundtrack='default';this.reverbUrl=null;this.reverbWet=0.42;this.reverbLoaded=false;this.reverbSpace=null;this.lastSting=null;this.heartbeatTimer=0;this.reportSerial=0;this.space=null;this.surfaceResolver=null;this.windScale=null;this._reverbPending=false;this.jumpVariant=0;
   // Gain buses. `muteGain` sits between the master and the destination so a
   // master mute silences every branch immediately; music/effects/ambience each
   // have their own bus for independent volume control. Voice chat lives in
@@ -382,6 +387,22 @@ export class SynthAudio{
  // URL cancels any in-flight attach for the old URL; the settle callback checks
  // the URL again before latching so a stale load cannot win.
  setReverbUrl(url,wet=0.42){this.reverbUrl=url||null;const w=Number(wet);this.reverbWet=Number.isFinite(w)?w:.42;this.reverbLoaded=false;this._reverbPending=false;if(this.ctx&&this.ctx.state==='running')this.unlock();return Boolean(url);}
+ // Select a baked space IR by name (open-air/tunnel/hall/cathedral/cavern).
+ // Resolved through the Moth registry; an unknown name falls back to `cavern`,
+ // and a missing registry keeps whatever URL is already wired so a partial bake
+ // never silences the reverb. Re-selecting the active space is a no-op, which
+ // keeps per-arena swaps cheap and safe.
+ setSpace(name,{wet=null}={}){
+  const space=typeof name==='string'&&name?name:'cavern';
+  if(this.reverbSpace===space)return this.reverbUrl;
+  const ir=mothIr(space)||mothIr('cavern');
+  if(!ir?.url)return this.reverbUrl;
+  this.reverbSpace=space;
+  const explicit=wet==null?NaN:Number(wet);
+  const w=Number.isFinite(explicit)?explicit:(SPACE_WET[space]??0.42);
+  this.setReverbUrl(ir.url,w);
+  return this.reverbUrl;
+ }
  _ensureBuses(){
   if(!this.ctx||this.master)return;
   const ctx=this.ctx;
@@ -458,7 +479,7 @@ export class SynthAudio{
    return this.musicEngine.setReverb(buffer,opts);
   }catch{return false;}
  }
- audioStatus(){return {state:this.ctx?(this.ctx.state||'suspended'):'unavailable',status:this.status,enabled:this.musicEnabled,muted:this.muted,scene:this.scene,intensity:this.intensity,voices:this.voices.size,notes:this.musicEngine?.notesScheduled??0,music:this.musicEngine?.status?.()??'off',reverb:this.reverbLoaded?'ready':(this._reverbPending?'loading':(this.reverbUrl?'pending':'off'))};}
+ audioStatus(){return {state:this.ctx?(this.ctx.state||'suspended'):'unavailable',status:this.status,enabled:this.musicEnabled,muted:this.muted,scene:this.scene,intensity:this.intensity,voices:this.voices.size,notes:this.musicEngine?.notesScheduled??0,music:this.musicEngine?.status?.()??'off',reverb:this.reverbLoaded?'ready':(this._reverbPending?'loading':(this.reverbUrl?'pending':'off')),space:this.reverbSpace};}
  // Low, continuous ambience bed: filtered noise hiss plus a sub tone, faded in
  // through the master gain. Owned by the audio instance and torn down in dispose.
  _bed(on){
