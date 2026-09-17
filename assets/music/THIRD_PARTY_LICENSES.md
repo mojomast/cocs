@@ -6,7 +6,7 @@ dedication) sample libraries. No attribution is legally required under CC0; it i
 provided here as good practice and to document provenance. No non-CC0 material is
 included.
 
-Baked set: 70 samples, 4.51 MiB (Ogg + AAC fallback).
+Baked set: 172 samples, 9.55 MiB (Ogg + AAC fallback).
 
 ## Sources
 
@@ -16,13 +16,22 @@ Baked set: 70 samples, 4.51 MiB (Ogg + AAC fallback).
 - **Licence:** CC0-1.0 — https://creativecommons.org/publicdomain/zero/1.0/
 - **Source repository:** https://github.com/sgossner/VSCO-2-CE
 - **Assets used:**
+  - VSCO 2 CE — Cello Section spiccato
   - VSCO 2 CE — Cello Section susvib
+  - VSCO 2 CE — F Horn staccato
   - VSCO 2 CE — F Horn sus
+  - VSCO 2 CE — Harp
+  - VSCO 2 CE — Tenor Trombone staccato
   - VSCO 2 CE — Tenor Trombone sus
+  - VSCO 2 CE — Trumpet staccato
+  - VSCO 2 CE — Trumpet sus
+  - VSCO 2 CE — Tuba staccato
   - VSCO 2 CE — Tuba sus
+  - VSCO 2 CE — Viola Section spiccato
   - VSCO 2 CE — Viola Section susvib
+  - VSCO 2 CE — Violin Section spiccato
   - VSCO 2 CE — Violin Section susVib
-- **Changes made:** decoded to mono 44.1 kHz float; leading/trailing silence trimmed; sustained notes loop-point detected; click-free fades applied; normalised per velocity layer (sustains to −22/−18 LUFS by EBU R128 for soft/strong, one-shots peak-normalised to −14/−3.5 dBFS true peak); encoded to Ogg Vorbis (primary) and AAC/.m4a (Safari fallback). No pitch shifting, time stretching or re-tuning of one-shots.
+- **Changes made:** decoded to mono 44.1 kHz float; leading/trailing silence trimmed; sustained notes loop-point detected; long percussive one-shots truncated to a per-instrument cap and faded out; click-free fades applied; normalised per velocity layer (sustains to −20/−16 LUFS by EBU R128 for soft/strong, one-shots peak-normalised to −14/−3.5 dBFS true peak); encoded to Ogg Vorbis (primary) and AAC/.m4a (Safari fallback). No pitch shifting, time stretching or re-tuning of one-shots.
 
 #### Upstream LICENSE snapshot
 
@@ -152,15 +161,23 @@ For more information, please see
 - **Source repository:** https://github.com/sgossner/VCSL
 - **Assets used:**
   - VCSL — Bass Drum
+  - VCSL — Clash Cymbals 1
+  - VCSL — Clash Cymbals 2
   - VCSL — Frame Drum (high)
   - VCSL — Frame Drum (low)
   - VCSL — Frame Drum (low, muted)
   - VCSL — Glockenspiel
+  - VCSL — Gong
+  - VCSL — Suspended Cymbal 1 crescendo
+  - VCSL — Suspended Cymbal 2 crescendo
   - VCSL — Timpani 1 Hit
+  - VCSL — Timpani 1 Roll
   - VCSL — Timpani 2 Hit
   - VCSL — Timpani 3 Hit
   - VCSL — Timpani 4 Hit
-- **Changes made:** decoded to mono 44.1 kHz float; leading/trailing silence trimmed; sustained notes loop-point detected; click-free fades applied; normalised per velocity layer (sustains to −22/−18 LUFS by EBU R128 for soft/strong, one-shots peak-normalised to −14/−3.5 dBFS true peak); encoded to Ogg Vorbis (primary) and AAC/.m4a (Safari fallback). No pitch shifting, time stretching or re-tuning of one-shots.
+  - VCSL — Timpani 4 Roll
+  - VCSL — Tubular Bells
+- **Changes made:** decoded to mono 44.1 kHz float; leading/trailing silence trimmed; sustained notes loop-point detected; long percussive one-shots truncated to a per-instrument cap and faded out; click-free fades applied; normalised per velocity layer (sustains to −20/−16 LUFS by EBU R128 for soft/strong, one-shots peak-normalised to −14/−3.5 dBFS true peak); encoded to Ogg Vorbis (primary) and AAC/.m4a (Safari fallback). No pitch shifting, time stretching or re-tuning of one-shots.
 
 #### Upstream LICENSE snapshot
 

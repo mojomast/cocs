@@ -6,9 +6,19 @@
 //
 //   * VSCO 2 Community Edition  (github.com/sgossner/VSCO-2-CE, CC0-1.0)
 //       - Violin / Viola / Cello *Section* sustained-vibrato string pads
+//       - Violin / Viola / Cello *Section* spiccato/staccato (low-string ostinato)
 //       - F Horn / Tenor Trombone / Tuba sustained brass
+//       - Trumpet sustained + staccato, F Horn / Trombone / Tuba staccato
+//       - Harp plucks
 //   * VCSL                       (github.com/sgossner/VCSL, CC0-1.0)
-//       - Glockenspiel, Timpani, Frame Drum, Bass Drum
+//       - Glockenspiel, Timpani hits + rolls, Frame Drum, Bass Drum
+//       - Tubular Bells, Gong, Suspended-cymbal swells, crash cymbals
+//
+// There is no verifiable CC0 choir in either library (VSCO/VCSL ship none, the
+// FreePats GM set is GPL, Sonatina is Sampling Plus 1.0, Karoryfer's CC0
+// freebies have no choir and the Discord GM choir patches are sine
+// placeholders), so no `choir` instrument is baked. The runtime keeps its
+// formant-synth choir fallback.
 //
 // Raw source libraries are expected OUTSIDE the repository (default
 // /home/mojo/music-src, override with MUSIC_SRC). Only the baked outputs, this
@@ -26,10 +36,12 @@
 //   1. decode the source WAV to a mono float32 buffer at 44.1 kHz
 //   2. trim leading/trailing silence
 //   3. for sustained notes: find a seamless loop window (correlation match on
-//      zero-crossings over a full vibrato cycle); for one-shots: keep the hit
+//      zero-crossings over a full vibrato cycle); for one-shots: keep the hit,
+//      capped at the instrument's maxSeconds and faded out (long cymbal/gong/
+//      bell decays are truncated so the committed bank stays small)
 //   4. apply click-free fades, measure EBU R128 loudness + true peak, then
-//      normalise to a per-velocity target: sustains soft/strong -> -22/-18 LUFS,
-//      one-shots soft/strong -> -12/-1.5 dBFS true peak. This keeps soft layers
+//      normalise to a per-velocity target: sustains soft/strong -> -20/-16 LUFS,
+//      one-shots soft/strong -> -14/-3.5 dBFS true peak. This keeps soft layers
 //      audible and guarantees soft < strong.
 //   5. encode Ogg Vorbis (primary) and AAC/.m4a (Safari fallback)
 //   6. collect a manifest entry pointing at the baked file + loop points + gain
@@ -92,14 +104,23 @@ const VSCO_SRC = 'VSCO 2 CE';
 const VCSL_SRC = 'VCSL';
 
 // Per-instrument runtime balance (linear multiplier baked into the manifest).
-// Sustained layers are loudness-normalised (-22/-18 LUFS), one-shots are
-// peak-normalised (-12/-1.5 dBFS); the one-shot gains pull those transients
+// Sustained layers are loudness-normalised (-20/-16 LUFS), one-shots are
+// peak-normalised (-14/-3.5 dBFS); the one-shot gains pull those transients
 // into the same mix neighbourhood as the pads. Tune at runtime if desired.
 const GAIN = {
   'strings-pad': 0.9,
   'low-brass': 0.85,
+  'low-strings-stacc': 0.9,
+  'brass-stacc': 0.85,
+  'trumpet-pad': 0.85,
   timpani: 0.9,
+  'timpani-roll': 0.9,
   bells: 0.65,
+  'tubular-bells': 0.7,
+  gong: 0.7,
+  'cymbal-swell': 0.7,
+  'cymbal-crash': 0.7,
+  harp: 0.8,
   taiko: 0.9,
 };
 
@@ -179,11 +200,122 @@ add('taiko', 'framel-muted', 45, 2, `${VCSL_FRAME}/HDrumL_HitMuted_v3_rr1_Sum.wa
 add('taiko', 'frames', 50, 1, `${VCSL_FRAME}/HDrumS_Hit_v2_rr1_Sum.wav`, `${VCSL_SRC} — Frame Drum (high)`, VCSL_URL);
 add('taiko', 'frames', 50, 2, `${VCSL_FRAME}/HDrumS_Hit_v3_rr1_Sum.wav`, `${VCSL_SRC} — Frame Drum (high)`, VCSL_URL);
 
+// --- low-strings-stacc: section spiccato, 2 layers x 2 round-robins ----------
+// Cello/viola are the low ostinato core; violin adds a high-string reply.
+const VSCO_VLN_SPIC = 'Strings/Violin Section/Spic';
+const VSCO_VLA_SPIC = 'Strings/Viola Section/spic';
+const VSCO_VLC_SPIC = 'Strings/Cello Section/spic';
+for (const [midi, note] of [[38, 'D2'], [41, 'F2'], [48, 'C3']]) {
+  for (let rr = 1; rr <= 2; rr++) {
+    add('low-strings-stacc', `cello-rr${rr}`, midi, 1, `vsco/${VSCO_VLC_SPIC}/spic_${note}_v1_RR${rr}.wav`, `${VSCO_SRC} — Cello Section spiccato`, VSCO_URL);
+    add('low-strings-stacc', `cello-rr${rr}`, midi, 2, `vsco/${VSCO_VLC_SPIC}/spic_${note}_v2_RR${rr}.wav`, `${VSCO_SRC} — Cello Section spiccato`, VSCO_URL);
+  }
+}
+for (const [midi, note] of [[50, 'D3'], [53, 'F3'], [60, 'C4']]) {
+  for (let rr = 1; rr <= 2; rr++) {
+    add('low-strings-stacc', `viola-rr${rr}`, midi, 1, `vsco/${VSCO_VLA_SPIC}/Violas_spic_${note}_v1_rr${rr}.wav`, `${VSCO_SRC} — Viola Section spiccato`, VSCO_URL);
+    add('low-strings-stacc', `viola-rr${rr}`, midi, 2, `vsco/${VSCO_VLA_SPIC}/Violas_spic_${note}_v2_rr${rr}.wav`, `${VSCO_SRC} — Viola Section spiccato`, VSCO_URL);
+  }
+}
+for (const [midi, note] of [[60, 'C4'], [64, 'E4'], [67, 'G4']]) {
+  for (let rr = 1; rr <= 2; rr++) {
+    add('low-strings-stacc', `violin-rr${rr}`, midi, 1, `vsco/${VSCO_VLN_SPIC}/VlnEns_Spic_${note}_v1_rr${rr}.wav`, `${VSCO_SRC} — Violin Section spiccato`, VSCO_URL);
+    add('low-strings-stacc', `violin-rr${rr}`, midi, 2, `vsco/${VSCO_VLN_SPIC}/VlnEns_Spic_${note}_v2_rr${rr}.wav`, `${VSCO_SRC} — Violin Section spiccato`, VSCO_URL);
+  }
+}
+
+// --- brass-stacc: marcato/staccato brass, 2 layers x 2 round-robins ----------
+const VSCO_TPT_STAC = 'Brass/Trumpet/stac';
+const VSCO_TBN_STAC = 'Brass/Tenor Trombone/stac';
+const VSCO_HORN_STAC = 'Brass/F Horn/stac';
+const VSCO_TUBA_STAC = 'Brass/Tuba/stac';
+for (const [midi, note] of [[62, 'D4'], [69, 'A4']]) {
+  for (let rr = 1; rr <= 2; rr++) {
+    add('brass-stacc', `trumpet-rr${rr}`, midi, 1, `vsco/${VSCO_TPT_STAC}/Sum_SHTrumpet_stac_${note}_v1_rr${rr}.wav`, `${VSCO_SRC} — Trumpet staccato`, VSCO_URL);
+    add('brass-stacc', `trumpet-rr${rr}`, midi, 2, `vsco/${VSCO_TPT_STAC}/Sum_SHTrumpet_stac_${note}_v3_rr${rr}.wav`, `${VSCO_SRC} — Trumpet staccato`, VSCO_URL);
+  }
+}
+for (const [midi, note] of [[41, 'F2'], [50, 'D3']]) {
+  for (let rr = 1; rr <= 2; rr++) {
+    add('brass-stacc', `trombone-rr${rr}`, midi, 1, `vsco/${VSCO_TBN_STAC}/tenortbn_stac_${note}_v1_rr${rr}.wav`, `${VSCO_SRC} — Tenor Trombone staccato`, VSCO_URL);
+    add('brass-stacc', `trombone-rr${rr}`, midi, 2, `vsco/${VSCO_TBN_STAC}/tenortbn_stac_${note}_v3_rr${rr}.wav`, `${VSCO_SRC} — Tenor Trombone staccato`, VSCO_URL);
+  }
+}
+for (const [midi, note] of [[41, 'F2'], [48, 'C3']]) {
+  for (let rr = 1; rr <= 2; rr++) {
+    add('brass-stacc', `horn-rr${rr}`, midi, 1, `vsco/${VSCO_HORN_STAC}/MOHorn_stac_${note}_v1_rr${rr}.wav`, `${VSCO_SRC} — F Horn staccato`, VSCO_URL);
+    add('brass-stacc', `horn-rr${rr}`, midi, 2, `vsco/${VSCO_HORN_STAC}/MOHorn_stac_${note}_v3_rr${rr}.wav`, `${VSCO_SRC} — F Horn staccato`, VSCO_URL);
+  }
+}
+for (const [midi, note] of [[38, 'D2'], [50, 'D3']]) {
+  for (let rr = 1; rr <= 2; rr++) {
+    add('brass-stacc', `tuba-rr${rr}`, midi, 1, `vsco/${VSCO_TUBA_STAC}/Tuba3_stac_${note}_v1_rr${rr}_Sum.wav`, `${VSCO_SRC} — Tuba staccato`, VSCO_URL);
+    add('brass-stacc', `tuba-rr${rr}`, midi, 2, `vsco/${VSCO_TUBA_STAC}/Tuba3_stac_${note}_v2_rr${rr}_Sum.wav`, `${VSCO_SRC} — Tuba staccato`, VSCO_URL);
+  }
+}
+
+// --- trumpet-pad: high-brass sustains (new high register), 2 layers ----------
+const VSCO_TPT_SUS = 'Brass/Trumpet/sus';
+for (const [midi, note] of [[62, 'D4'], [65, 'F4'], [69, 'A4'], [72, 'C5']]) {
+  add('trumpet-pad', 'trumpet', midi, 1, `vsco/${VSCO_TPT_SUS}/Sum_SHTrumpet_sus_${note}_v1_rr1.wav`, `${VSCO_SRC} — Trumpet sus`, VSCO_URL);
+  add('trumpet-pad', 'trumpet', midi, 2, `vsco/${VSCO_TPT_SUS}/Sum_SHTrumpet_sus_${note}_v3_rr1.wav`, `${VSCO_SRC} — Trumpet sus`, VSCO_URL);
+}
+
+// --- timpani-roll: looped rolls, 2 drums x 2 dynamics ------------------------
+const VCSL_TIMP_ROLL = 'vcsl/Membranophones/Struck Membranophones/Timpani 1/Roll';
+for (const [n, midi] of [[1, 42], [4, 52]]) {
+  add('timpani-roll', `timp${n}`, midi, 1, `${VCSL_TIMP_ROLL}/Timpani${n}_Roll_v3_rr1_Sum.wav`, `${VCSL_SRC} — Timpani ${n} Roll`, VCSL_URL);
+  add('timpani-roll', `timp${n}`, midi, 2, `${VCSL_TIMP_ROLL}/Timpani${n}_Roll_v5_rr1_Sum.wav`, `${VCSL_SRC} — Timpani ${n} Roll`, VCSL_URL);
+}
+
+// --- cymbal-swell: suspended-cymbal crescendos, short/long pairs -------------
+const VCSL_CYMB1 = 'vcsl/Idiophones/Struck Idiophones/Suspended Cymbal 1';
+const VCSL_CYMB2 = 'vcsl/Idiophones/Struck Idiophones/Suspended Cymbal 2';
+add('cymbal-swell', 'swell1', 60, 1, `${VCSL_CYMB1}/susCymb1_cresc_1.5s.wav`, `${VCSL_SRC} — Suspended Cymbal 1 crescendo`, VCSL_URL);
+add('cymbal-swell', 'swell1', 60, 2, `${VCSL_CYMB1}/susCymb1_cresc_4s.wav`, `${VCSL_SRC} — Suspended Cymbal 1 crescendo`, VCSL_URL);
+add('cymbal-swell', 'swell2', 60, 1, `${VCSL_CYMB2}/susCymb2_cresc_2.5s2.wav`, `${VCSL_SRC} — Suspended Cymbal 2 crescendo`, VCSL_URL);
+add('cymbal-swell', 'swell2', 60, 2, `${VCSL_CYMB2}/susCymb2_cresc_4s.wav`, `${VCSL_SRC} — Suspended Cymbal 2 crescendo`, VCSL_URL);
+
+// --- cymbal-crash: crash one-shots, 2 layers ---------------------------------
+const VCSL_CRASH1 = 'vcsl/Idiophones/Struck Idiophones/Clash Cymbals 1';
+const VCSL_CRASH2 = 'vcsl/Idiophones/Struck Idiophones/Clash Cymbals 2';
+add('cymbal-crash', 'crash1', 60, 1, `${VCSL_CRASH1}/cymbal_crash1_pp2.wav`, `${VCSL_SRC} — Clash Cymbals 1`, VCSL_URL);
+add('cymbal-crash', 'crash2', 60, 1, `${VCSL_CRASH1}/cymbal_crash1_mf1.wav`, `${VCSL_SRC} — Clash Cymbals 1`, VCSL_URL);
+add('cymbal-crash', 'crash3', 60, 2, `${VCSL_CRASH1}/cymbal_crash1_ff2.wav`, `${VCSL_SRC} — Clash Cymbals 1`, VCSL_URL);
+add('cymbal-crash', 'crash4', 60, 2, `${VCSL_CRASH2}/cymbal_crash2_fff1.wav`, `${VCSL_SRC} — Clash Cymbals 2`, VCSL_URL);
+
+// --- tubular-bells: single tolls, 3 notes x 2 dynamics -----------------------
+const VCSL_CHIMES = 'vcsl/Idiophones/Struck Idiophones/Tubular Bells 1';
+for (const [midi, soft, loud] of [[48, 'C3_pp_rr2', 'C3_f_rr1'], [52, 'E3_pp_rr1', 'E3_ff_rr2'], [58, 'A#3_pp_rr1', 'A#3_ff_rr1']]) {
+  add('tubular-bells', 'chimes', midi, 1, `${VCSL_CHIMES}/chimes_${soft}.wav`, `${VCSL_SRC} — Tubular Bells`, VCSL_URL);
+  add('tubular-bells', 'chimes', midi, 2, `${VCSL_CHIMES}/chimes_${loud}.wav`, `${VCSL_SRC} — Tubular Bells`, VCSL_URL);
+}
+
+// --- gong: soft + loud tam-tam strikes ---------------------------------------
+const VCSL_GONG = 'vcsl/Idiophones/Struck Idiophones/Gong 1';
+add('gong', 'gong', 60, 1, `${VCSL_GONG}/gong_p.wav`, `${VCSL_SRC} — Gong`, VCSL_URL);
+add('gong', 'gong', 60, 2, `${VCSL_GONG}/gong_fff.wav`, `${VCSL_SRC} — Gong`, VCSL_URL);
+
+// --- harp: plucked one-shots across two octaves (optional colour) ------------
+const VSCO_HARP = 'Strings/Harp';
+for (const [midi, note] of [[38, 'D2'], [45, 'A2'], [62, 'D4'], [65, 'F4'], [69, 'A4'], [72, 'C5']]) {
+  add('harp', 'harp', midi, 1, `vsco/${VSCO_HARP}/KSHarp_${note}_mf.wav`, `${VSCO_SRC} — Harp`, VSCO_URL);
+}
+
 const INSTRUMENT_META = {
   'strings-pad': { type: 'sustained', midiRange: [36, 84], blurb: 'Violin / viola / cello section sustains with vibrato; the harmonic bed.' },
+  'low-strings-stacc': { type: 'oneshot', maxSeconds: 2.5, fadeOutMs: 300, blurb: 'Violin / viola / cello section spiccato; low-string ostinato and high-string replies.' },
   'low-brass': { type: 'sustained', midiRange: [33, 72], blurb: 'F Horn / Tenor Trombone / Tuba sustains; low melodic and tension lines.' },
+  'brass-stacc': { type: 'oneshot', maxSeconds: 2.5, fadeOutMs: 300, blurb: 'Trumpet / horn / trombone / tuba staccato; marcato accents and fanfare stabs.' },
+  'trumpet-pad': { type: 'sustained', midiRange: [62, 72], blurb: 'Trumpet sustains; high-brass fanfare and brilliance above the low brass.' },
   timpani: { type: 'oneshot', blurb: 'Four tuned timpani hits; downbeats, accents and transitions.' },
+  'timpani-roll': { type: 'sustained', midiRange: [42, 52], blurb: 'Looped timpani rolls; climax build and transition fill.' },
   bells: { type: 'oneshot', blurb: 'Glockenspiel strikes; high melodic sparkle and cues.' },
+  'tubular-bells': { type: 'oneshot', maxSeconds: 6, fadeOutMs: 1500, blurb: 'Tubular-bell tolls; sacred cues and the drop.' },
+  gong: { type: 'oneshot', maxSeconds: 8, fadeOutMs: 1800, blurb: 'Tam-tam gong strikes; tension and impact.' },
+  'cymbal-swell': { type: 'oneshot', maxSeconds: 5, fadeOutMs: 1200, blurb: 'Suspended-cymbal crescendos; section transitions and climax fills.' },
+  'cymbal-crash': { type: 'oneshot', maxSeconds: 4, fadeOutMs: 1000, blurb: 'Crash-cymbal accents.' },
+  harp: { type: 'oneshot', maxSeconds: 4.5, fadeOutMs: 800, blurb: 'Harp plucks; arpeggio colour and menu sparkle.' },
   taiko: { type: 'oneshot', blurb: 'Frame-drum and bass-drum hits; percussive pulse and impacts.' },
 };
 
@@ -356,15 +488,15 @@ function applyFades(x, inMs, outMs) {
 // One sample
 //
 // Each sample is rendered then normalised to a PER-VELOCITY target:
-//   sustained: soft (v1) -> -22 LUFS, strong (v2) -> -18 LUFS (4 dB apart)
-//   one-shot : soft (v1) -> -12 dBFS peak, strong (v2) -> -1.5 dBFS peak
+//   sustained: soft (v1) -> -20 LUFS, strong (v2) -> -16 LUFS (4 dB apart)
+//   one-shot : soft (v1) -> -14 dBFS peak, strong (v2) -> -3.5 dBFS peak
 // One-shots are peak-normalised because their crest factor makes a LUFS target
 // unreachable without hard limiting; the two layers sit ~10.5 dB apart. Giving
 // every layer its own target keeps soft layers audible (the sources record some
 // soft layers 20+ dB down) while guaranteeing soft < strong.
 // ---------------------------------------------------------------------------
 
-const SUSTAINED_LUFS = { 1: -22, 2: -18, 3: -15 };
+const SUSTAINED_LUFS = { 1: -20, 2: -16, 3: -13 };
 // Peak targets leave room for AAC inter-sample overshoot (up to ~+2.5 dBFS).
 const ONESHOT_PEAK_DB = { 1: -14, 2: -3.5, 3: -2.5 };
 
@@ -379,6 +511,7 @@ function renderSample(plan) {
   const trimmed = trimSilence(x);
   let region;
   let loopStart = null, loopEnd = null;
+  let truncated = false;
 
   if (sustained) {
     region = findSustainLoop(x, trimmed.start, trimmed.end);
@@ -388,10 +521,20 @@ function renderSample(plan) {
     const preRoll = Math.round(0.003 * SAMPLE_RATE);
     const post = Math.round(0.02 * SAMPLE_RATE);
     region = { start: Math.max(0, trimmed.start - preRoll), end: Math.min(x.length, trimmed.end + post) };
+    // Long percussive decays (cymbals, gong, tubular bells, harp) are truncated
+    // to a per-instrument cap so the committed bank stays small; the matching
+    // fade-out below keeps the cut click-free.
+    if (meta.maxSeconds) {
+      const capped = region.start + Math.round(meta.maxSeconds * SAMPLE_RATE);
+      if (capped < region.end) { region.end = capped; truncated = true; }
+    }
   }
 
   const out = x.slice(region.start, region.end);
-  applyFades(out, sustained ? FADE_IN_MS : 1, sustained ? FADE_OUT_MS : Math.max(FADE_OUT_MS, 60));
+  const fadeOutMs = sustained
+    ? FADE_OUT_MS
+    : Math.max(FADE_OUT_MS, truncated && meta.fadeOutMs ? meta.fadeOutMs : 60);
+  applyFades(out, sustained ? FADE_IN_MS : 1, fadeOutMs);
   const measured = measureLoudness(out);
 
   return {
@@ -515,7 +658,7 @@ function writeDocs(manifest) {
     lic.push(`- **Source repository:** ${url}`);
     lic.push('- **Assets used:**');
     for (const item of items) lic.push(`  - ${item}`);
-    lic.push('- **Changes made:** decoded to mono 44.1 kHz float; leading/trailing silence trimmed; sustained notes loop-point detected; click-free fades applied; normalised per velocity layer (sustains to −22/−18 LUFS by EBU R128 for soft/strong, one-shots peak-normalised to −14/−3.5 dBFS true peak); encoded to Ogg Vorbis (primary) and AAC/.m4a (Safari fallback). No pitch shifting, time stretching or re-tuning of one-shots.');
+    lic.push('- **Changes made:** decoded to mono 44.1 kHz float; leading/trailing silence trimmed; sustained notes loop-point detected; long percussive one-shots truncated to a per-instrument cap and faded out; click-free fades applied; normalised per velocity layer (sustains to −20/−16 LUFS by EBU R128 for soft/strong, one-shots peak-normalised to −14/−3.5 dBFS true peak); encoded to Ogg Vorbis (primary) and AAC/.m4a (Safari fallback). No pitch shifting, time stretching or re-tuning of one-shots.');
     lic.push('');
     lic.push('#### Upstream LICENSE snapshot');
     lic.push('');
@@ -553,6 +696,14 @@ from \`/music/manifest.json\` and \`/music/samples/<name>.<ext>\` (see
 | --- | --- | ---: | --- | --- |
 ${rows.join('\n')}
 
+**No choir is baked.** Neither CC0 source library ships a choir (VSCO 2 CE and
+VCSL have none), the FreePats General MIDI set is GPL-3.0, Sonatina Symphonic
+Orchestra is CC Sampling Plus 1.0, Karoryfer's CC0 freebies contain no choir, the
+Discord GM "Choir Aahs"/"Voice Oohs" patches are sine placeholders, and a
+Freesound CC0 search returns only crowd walla or synth-derived loops. Rather than
+mislabel a non-CC0 or unverifiable recording, \`choir\` is left to the runtime's
+formant-synth fallback.
+
 ## Re-baking
 
 Raw sources live **outside** the repository (default \`/home/mojo/music-src\`):
@@ -562,21 +713,27 @@ Raw sources live **outside** the repository (default \`/home/mojo/music-src\`):
 git clone --filter=blob:none --no-checkout https://github.com/sgossner/VSCO-2-CE /home/mojo/music-src/vsco
 cd /home/mojo/music-src/vsco
 git sparse-checkout init --cone
-git sparse-checkout set "Strings/Violin Section/susVib" "Strings/Viola Section/susvib" \
-  "Strings/Cello Section/susvib" "Brass/F Horn/sus" "Brass/Tenor Trombone/sus" "Brass/Tuba/sus" "LICENSE"
+git sparse-checkout set "Strings/Violin Section/susVib" "Strings/Viola Section/susvib" \\
+  "Strings/Cello Section/susvib" "Strings/Violin Section/Spic" "Strings/Viola Section/spic" \\
+  "Strings/Cello Section/spic" "Strings/Harp" "Brass/F Horn/sus" "Brass/F Horn/stac" \\
+  "Brass/Tenor Trombone/sus" "Brass/Tenor Trombone/stac" "Brass/Tuba/sus" "Brass/Tuba/stac" \\
+  "Brass/Trumpet/sus" "Brass/Trumpet/stac" "LICENSE"
 git checkout
 
 git clone --filter=blob:none --no-checkout https://github.com/sgossner/VCSL /home/mojo/music-src/vcsl
 cd /home/mojo/music-src/vcsl
 git sparse-checkout init --cone
-git sparse-checkout set "Idiophones/Struck Idiophones/Glockenspiel" \
-  "Membranophones/Struck Membranophones/Timpani 1" \
-  "Membranophones/Struck Membranophones/Frame Drum" \
+git sparse-checkout set "Idiophones/Struck Idiophones/Glockenspiel" \\
+  "Idiophones/Struck Idiophones/Tubular Bells 1" "Idiophones/Struck Idiophones/Gong 1" \\
+  "Idiophones/Struck Idiophones/Suspended Cymbal 1" "Idiophones/Struck Idiophones/Suspended Cymbal 2" \\
+  "Idiophones/Struck Idiophones/Clash Cymbals 1" "Idiophones/Struck Idiophones/Clash Cymbals 2" \\
+  "Membranophones/Struck Membranophones/Timpani 1" \\
+  "Membranophones/Struck Membranophones/Frame Drum" \\
   "Membranophones/Struck Membranophones/Bass Drum 1" "LICENSE"
 git checkout
 
 # re-bake everything, verify, rewrite the manifest and docs
-node scripts/music-bake.mjs
+node scripts/music-bake.mjs --force
 
 # other modes
 node scripts/music-bake.mjs --only strings-pad,bells
@@ -608,11 +765,15 @@ base).
   boundary is click-free: do **not** crossfade at runtime, and do not play the
   tail after \`loopEnd\` while the loop is active (it is the release tail).
 - \`gain\` — linear playback multiplier for mixing balance; multiply the sample by
-  it after the (already normalised) decode step. Strings 0.9, brass 0.85,
-  timpani/taiko 0.9, bells 0.65.
-- Normalisation is per velocity layer: sustained soft/strong are −22/−18 LUFS
+  it after the (already normalised) decode step. Strings 0.9, low brass 0.85,
+  staccato strings 0.9, staccato brass 0.85, trumpet pad 0.85, timpani/roll 0.9,
+  taiko 0.9, bells 0.65, tubular bells/gong/cymbals 0.7, harp 0.8.
+- Normalisation is per velocity layer: sustained soft/strong are −20/−16 LUFS
   (EBU R128), one-shot soft/strong are peak-normalised to −14/−3.5 dBFS true
   peak. Every layer therefore keeps soft < strong and soft layers stay audible.
+- Long percussive one-shots (cymbals, gong, tubular bells, harp) are truncated to
+  a per-instrument cap and faded out; the tail beyond the fade is intentionally
+  discarded rather than looped.
 - One-shots are peak-normalised rather than loudness-normalised because a drum
   or bell transient has a high crest factor; hitting a LUFS target would need
   hard limiting that dulls the attack. The −3.5 dBFS target leaves headroom for
@@ -632,6 +793,33 @@ from the \`MusicEngine\` seeded RNG, and the chosen \`(midi, velocity, rate)\` i
 folded into \`scheduleChecksum\`, so one seed still reproduces one performance.
 Decoding is lazy per instrument and never blocks the scheduler; any voice whose
 buffer is not ready (or fails to decode) falls back to the oscillator engine.
+
+Extra staccato/marcato samples at the same pitch and layer are round-robin
+alternates by construction (the tag only changes the id), so the seeded pick
+avoids machine-gun repetition without a new manifest field.
+
+## Runtime mapping for new instruments (M2)
+
+The runtime is owned by the M2 change; until it merges these instruments simply
+sit unused in the manifest and the existing oscillator fallbacks still play.
+
+| id | recorded MIDI | notes / layers | intended use |
+| --- | --- | --- | --- |
+| \`low-strings-stacc\` | cello 38/41/48, viola 50/53/60, violin 60/64/67 | 3 notes x 2 vel x 2 RR | low-string ostinato + high-string staccato reply |
+| \`brass-stacc\` | trumpet 62/69, trombone 41/50, horn 41/48, tuba 38/50 | 2 notes x 2 vel x 2 RR | marcato/staccato brass accents |
+| \`trumpet-pad\` | 62/65/69/72 | 4 notes x 2 vel (looped) | high-brass sustains and fanfare |
+| \`timpani-roll\` | 42/52 | 2 rolls x 2 vel (looped) | climax build / transition fill |
+| \`cymbal-swell\` | 60 | 2 swells x soft+strong | cymbal crescendos |
+| \`cymbal-crash\` | 60 | 2 soft + 2 strong RR | crash accents |
+| \`tubular-bells\` | 48/52/58 | 3 notes x 2 vel | bell tolls |
+| \`gong\` | 60 | soft + loud | tam-tam impact |
+| \`harp\` | 38/45/62/65/69/72 | 6 one-shots, soft layer only | arpeggio colour |
+
+**Remove the runtime ×0.6 double-attenuation.** The old \`_strings\` path passed
+\`trim: 0.6\` because the sustains were baked at −22/−18 LUFS; they are now
+−20/−16 LUFS, so the extra 0.6 must be dropped (M2) or the pads will still sit
+~4 dB under the intended level. The manifest \`gain\` is the only per-instrument
+balance multiplier.
 `;
   fs.writeFileSync(README_PATH, md);
 }
