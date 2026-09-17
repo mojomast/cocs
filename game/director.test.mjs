@@ -1,6 +1,8 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {CinematicDirector,CAMERA_RIGS} from './director.mjs';
+import {CinematicDirector,CAMERA_RIGS,DIRECTOR_MOTION} from './director.mjs';
+import {SHOT_RIG_TO_RIG} from './shot-planner.mjs';
+import {obstructed} from './core.mjs';
 
 function seeded(seed=1){
  let state=seed>>>0;
@@ -10,6 +12,10 @@ function seeded(seed=1){
 const actor=(id,x,z,extra={})=>({id,name:`A${id}`,character:'chatgpt',team:id%2,x,y:0,z,yaw:0,pitch:0,vx:0,vz:0,health:100,dead:0,vehicleId:null,frags:0,...extra});
 
 const state=(time,actors,extra={})=>({time,mapId:'blood-gulch',actors,vehicles:[],objectives:null,events:[],rockets:[],...extra});
+
+// Tests that assert framing/selection use an explicit open arena so the real
+// map geometry (occluders, raised floors) cannot mask the planner behaviour.
+const openArena={id:'test-flat',raised:false,terrain:null,structures:[],bounds:{minX:-60,maxX:60,minZ:-60,maxZ:60},blocks:[]};
 
 const finite=pose=>{
  for(const key of ['x','y','z','yaw','pitch','roll','fov'])assert.ok(Number.isFinite(pose[key]),`${key} not finite: ${pose[key]}`);
@@ -164,53 +170,72 @@ test('explosions and confirmed melee hits prompt a cut; whiffs do not',()=>{
  assert.equal(d2.update(state(.2,actors),1/60,[{type:'melee',id:71,time:.2,actor:1,hit:2}]).cut,true);
 });
 
-test('tour mode flies the arena without cutting and eases toward the action',()=>{
- const d=new CinematicDirector({random:seeded(31),center:{x:0,z:0},radius:11,tour:true,tourRadius:30});
- const near=[actor(1,-10,0),actor(2,-8,2)];
- const far=[actor(1,20,20),actor(2,22,18)];
- d.reframe(state(0,near));
- assert.equal(d.rig,'flyover');
- assert.equal(finite(d.update(state(0,near),1/60,[])).cut,true,'first frame places the camera');
- assert.equal(finite(d.update(state(.1,near),1/60,[])).cut,false);
- assert.equal(d.rig,'flyover');
- const highlight={type:'death',id:9,time:.2,actor:1,pos:{x:-10,z:0}};
- assert.equal(finite(d.update(state(.2,near),1/60,[highlight])).cut,false,'highlights do not cut a tour');
- const before=d.aim.x;
- d.reframe(state(.3,far));
- d.update(state(.3,far),1/60,[]);
- assert.ok(d.aim.x>before,`aim should move toward the action (${before} -> ${d.aim.x})`);
- assert.ok(d.aim.x<20,'aim eases toward the centroid rather than snapping');
+// The old tour tests pinned a perpetual flyover orbit. That contract changed:
+// `tour` is now an opt-in attract flag only and the shot planner drives every
+// automatic frame, so these tests assert the new behaviour intentionally.
+test('opt-in attract mode plans safe shots instead of a perpetual flyover',()=>{
+ const d=new CinematicDirector({random:seeded(31),center:{x:0,z:0},radius:11,tour:true,tourRadius:30,arena:openArena});
+ const actors=[actor(1,-10,0),actor(2,-8,2)];
+ d.reframe(state(0,actors));
+ assert.equal(d.tour,true,'the legacy opt-in flag is preserved');
+ const first=finite(d.update(state(0,actors),1/60,[]));
+ assert.equal(first.cut,true,'first frame places the camera');
+ assert.ok(CAMERA_RIGS.includes(first.rig));
+ assert.notEqual(first.rig,'flyover','attract mode is no longer a perpetual flyover');
+ assert.ok(d.plan,'the planner owns automatic framing');
+ for(let i=0;i<120;i++)finite(d.update(state(i/60,actors),1/60,[]));
+ assert.ok(Number.isFinite(d.aim.x)&&Number.isFinite(d.aim.z),'aim stays a finite point');
+ assert.ok(d.plan.score>=0,'the planner keeps a scored shot');
 });
 
-test('the flyover rig is reserved for tours',()=>{
- const d=new CinematicDirector({random:seeded(42),cutEvery:.1});
+test('flyover stays context-only and never appears in action-directed cuts',()=>{
+ const d=new CinematicDirector({random:seeded(42),cutEvery:.1,arena:openArena});
  const actors=[actor(1,0,0),actor(2,5,3),actor(3,-4,2)];
  d.reframe(state(0,actors));
  const seen=new Set();
- for(let i=0;i<300;i++)seen.add(d.update(state(i*.2,actors),1/60,[]).rig);
- assert.ok(!seen.has('flyover'),'random cuts never choose flyover');
+ for(let i=0;i<300;i++){
+  const t=i*.2;
+  const events=[{type:'damage',time:t,actor:2,source:1,amount:8},{type:'damage',time:t,actor:1,source:2,amount:8}];
+  seen.add(d.update(state(t,actors,{events}),1/60,events).rig);
+ }
+ assert.ok(!seen.has('flyover'),'a running firefight never drops to a flyover');
 });
 
-test('the tour action point follows the densest cluster and the camera orbits it',()=>{
- const d=new CinematicDirector({random:seeded(51),center:{x:0,z:0},radius:11,tour:true,tourRadius:24});
- const actors=[actor(1,20,20),actor(2,21,19),actor(3,19,21),actor(4,-30,-30)];
+test('action cuts frame the firefight, not the idle teammate cluster',()=>{
+ const d=new CinematicDirector({random:seeded(51),center:{x:0,z:0},radius:11,arena:openArena});
+ const cluster=[actor(1,-20,-20),actor(2,-19,-19),actor(3,-21,-21),actor(4,-20,-18)];
+ const duel=[actor(5,20,20),actor(6,22,21)];
+ const actors=[...cluster,...duel];
  d.reframe(state(0,actors));
- for(let i=0;i<40;i++)d.update(state(i/60,actors),1/60,[]);
- assert.ok(d.aim.x>15&&d.aim.z>15,`expected the three-actor cluster (~20,20), got ${d.aim.x.toFixed(1)},${d.aim.z.toFixed(1)}`);
- const pose=finite(d.update(state(1,actors),1/60,[]));
- const orbit=Math.hypot(pose.x-d.aim.x,pose.z-d.aim.z);
- assert.ok(orbit<=24*1.1+1,`camera should orbit the action, distance ${orbit.toFixed(1)}`);
+ for(let i=0;i<60;i++){
+  const t=i/60;
+  const events=[{type:'damage',time:t,actor:6,source:5,amount:12},{type:'damage',time:t,actor:5,source:6,amount:12}];
+  d.update(state(t,actors,{events}),1/60,events);
+ }
+ assert.equal(d.plan.subjectKind,'firefight');
+ assert.deepEqual(d.plan.targets,[5,6]);
+ assert.ok(!d.plan.targets.some(id=>id<5),'idle teammates are not the subject');
+ assert.ok(Math.hypot(d.plan.anchor.x-21,d.plan.anchor.z-20.5)<6,`anchor ${d.plan.anchor.x},${d.plan.anchor.z}`);
 });
 
-test('the tour flies inside a structure when the fight is indoors',()=>{
+test('an indoor fight keeps the camera clear of walls and under the roof',()=>{
  const structures=[{type:'building',x:0,z:0,y:0,w:16,d:16,h:6,rot:0}];
- const d=new CinematicDirector({random:seeded(61),center:{x:0,z:0},radius:11,tour:true,tourRadius:26,structures});
+ const arena={raised:false,bounds:{minX:-13,maxX:13,minZ:-13,maxZ:13},blocks:[
+  {x:-8,z:0,w:1,d:17,h:6},{x:8,z:0,w:1,d:17,h:6},{x:0,z:-8,w:17,d:1,h:6},{x:0,z:8,w:17,d:1,h:6},
+ ]};
+ const d=new CinematicDirector({random:seeded(61),center:{x:0,z:0},radius:11,structures,arena});
  const actors=[actor(1,2,1),actor(2,-2,-1),actor(3,1,-2)];
  d.reframe(state(0,actors));
- for(let i=0;i<60;i++)d.update(state(i/60,actors),1/60,[]);
- const pose=finite(d.update(state(1,actors),1/60,[]));
- assert.ok(pose.y<6,`indoor camera should stay under the roof, y=${pose.y.toFixed(2)}`);
- assert.ok(Math.abs(pose.x)<=8&&Math.abs(pose.z)<=8,`indoor camera should stay in the room, ${pose.x.toFixed(1)},${pose.z.toFixed(1)}`);
+ let sawFirefight=false;
+ for(let i=0;i<120;i++){
+  const t=i/60;
+  const events=[{type:'damage',time:t,actor:2,source:1,amount:6},{type:'damage',time:t,actor:1,source:2,amount:6}];
+  const pose=finite(d.update(state(t,actors,{events}),1/60,events));
+  assert.ok(!obstructed(pose.x,pose.y,pose.z,.55,arena),`camera inside geometry at ${pose.x.toFixed(1)},${pose.y.toFixed(1)},${pose.z.toFixed(1)}`);
+  assert.ok(pose.y<=6.4,`camera under the roof, y=${pose.y.toFixed(2)}`);
+  if(d.plan.subjectKind==='firefight')sawFirefight=true;
+ }
+ assert.ok(sawFirefight,'the indoor fight is what the camera watches');
 });
 
 test('autoCut:false keeps the rig and target across automatic cuts',()=>{
@@ -239,4 +264,85 @@ test('autoCut:true lets automatic cuts change the rig',()=>{
  const seen=new Set();
  for(let i=0;i<200;i++)seen.add(d.update(state(i*.02,actors),1/60,[]).rig);
  assert.ok(seen.size>1,`expected multiple rigs, saw ${[...seen].join(',')}`);
+});
+
+test('the planner drives automatic rigs and exposes the chosen shot',()=>{
+ const d=new CinematicDirector({random:seeded(7),arena:openArena});
+ const actors=[actor(1,0,0),actor(2,7,1),actor(3,-3,4)];
+ d.reframe(state(0,actors));
+ let planned=0;
+ for(let i=0;i<90;i++){
+  const t=i/60;
+  const events=[{type:'damage',time:t,actor:2,source:1,amount:8},{type:'damage',time:t,actor:1,source:2,amount:8}];
+  const pose=finite(d.update(state(t,actors,{events}),1/60,events));
+  if(i>10){
+   assert.ok(d.plan,'a plan exists once the camera is running');
+   assert.equal(d.plan.incumbent,true,'the firefight shot is held, not re-cut every frame');
+   assert.equal(pose.rig,SHOT_RIG_TO_RIG[d.plan.rig]);
+   assert.equal(pose.target,d.plan.primary);
+   planned++;
+  }
+ }
+ assert.ok(planned>0);
+});
+
+test('manual rig and target ownership is respected until reframe clears it',()=>{
+ const d=new CinematicDirector({random:seeded(9),arena:openArena});
+ const actors=[actor(1,0,0),actor(2,6,1),actor(3,-4,2)];
+ d.reframe(state(0,actors));
+ d.update(state(0,actors),1/60,[]);
+ d.setRig('tripod');
+ d.setTarget(1);
+ for(let i=0;i<120;i++){
+  const t=i/60;
+  const events=[{type:'damage',time:t,actor:2,source:3,amount:20},{type:'damage',time:t,actor:3,source:2,amount:20}];
+  const pose=finite(d.update(state(t,actors,{events}),1/60,events));
+  assert.equal(pose.rig,'tripod','a manual rig never changes under the planner');
+  assert.equal(pose.target,1,'a manual target stays pinned');
+  assert.equal(d.plan,null,'manual ownership suspends the planner');
+ }
+ d.reframe(state(2,actors));
+ d.update(state(2.1,actors),1/60,[]);
+ assert.ok(d.plan!==null,'reframe hands control back to the planner');
+ assert.ok(CAMERA_RIGS.includes(d.rig));
+});
+
+test('identical seeded runs are deterministic and honour motion bounds',()=>{
+ const build=()=>new CinematicDirector({random:seeded(5),cutEvery:4,arena:openArena});
+ const actors=[actor(1,0,0),actor(2,8,1),actor(3,-5,3),actor(4,-9,4)];
+ const run=d=>{
+  d.reframe(state(0,actors));
+  const out=[];
+  let prev=null;
+  for(let i=0;i<180;i++){
+   const t=i/60;
+   const events=[{type:'damage',time:t,actor:2,source:1,amount:9},{type:'damage',time:t,actor:1,source:2,amount:9}];
+   const pose=finite(d.update(state(t,actors,{events}),1/60,events));
+   if(prev&&!pose.cut){
+    const step=Math.hypot(pose.x-prev.x,pose.y-prev.y,pose.z-prev.z);
+    assert.ok(step<=DIRECTOR_MOTION.maxSpeed/60+1e-6,`camera step ${step} exceeds the cap`);
+    const turn=Math.abs(Math.atan2(Math.sin(pose.yaw-prev.yaw),Math.cos(pose.yaw-prev.yaw)));
+    assert.ok(turn<=DIRECTOR_MOTION.maxTurn/60+1e-6,`camera turn ${turn} exceeds the cap`);
+   }
+   out.push(pose);
+   prev=pose;
+  }
+  return out;
+ };
+ const first=run(build()),second=run(build());
+ assert.equal(first.length,second.length);
+ for(let i=0;i<first.length;i++)assert.deepEqual(first[i],second[i],`frame ${i} diverged`);
+});
+
+test('reduced motion keeps stable, longer-held shots with zero roll',()=>{
+ const d=new CinematicDirector({random:seeded(11),reduced:true,arena:openArena});
+ const actors=[actor(1,0,0),actor(2,9,0)];
+ d.reframe(state(0,actors));
+ d.update(state(0,actors),1/60,[]);
+ const t=1;
+ const events=[{type:'damage',time:t,actor:2,source:1,amount:10},{type:'damage',time:t,actor:1,source:2,amount:10}];
+ const pose=finite(d.update(state(t,actors,{events}),1/60,events));
+ assert.equal(pose.roll,0);
+ assert.ok(d.plan.minUntil-t>=3.3,`reduced hold ${d.plan.minUntil-t} should be the longer one`);
+ assert.notEqual(d.plan.rig,'flyover');
 });
