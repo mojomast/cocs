@@ -339,15 +339,21 @@ export function pickDemoScenario(session,options={}){
 // ---------------------------------------------------------------------------
 // Reel pacing. In the "Back to Demo" view the user can hold a scenario
 // (autoRotate off): the reel then restarts the same scenario instead of
-// rotating while still staying alive.
+// rotating while still staying alive. The title and the other menu screens
+// (`active:false`) keep the same showcase simulating behind them, so they pace
+// the reel identically instead of rebuilding it every frame; a non-running
+// session only freezes the reel in the demo view, where the user paused it.
 // ---------------------------------------------------------------------------
 export function demoScenarioState(session,{elapsed=0,limit=0,over=false,active=true}={}){
- if(!active)return {paused:false,advance:true,restart:false,expired:false};
- if(!isDemoRunning(session?.state))return {paused:true,advance:false,restart:false,expired:false};
- const cap=Number.isFinite(limit)&&limit>0?limit:session.applied.scenarioSeconds;
+ if(active&&!isDemoRunning(session?.state))return {paused:true,advance:false,restart:false,expired:false};
+ const cap=Number.isFinite(limit)&&limit>0?limit:session?.applied?.scenarioSeconds;
+ // No scenario to pace yet (no session, initial build, missing match): ask for
+ // one. This is the only unconditional advance; everything else waits for the
+ // scenario to end or its time limit to expire, so a shot is actually held.
+ if(!Number.isFinite(cap)||cap<=0)return {paused:false,advance:true,restart:false,expired:false};
  const expired=over===true||(Number.isFinite(elapsed)&&elapsed>=cap);
  if(!expired)return {paused:false,advance:false,restart:false,expired:false};
- if(session.applied.autoRotate)return {paused:false,advance:true,restart:false,expired:true};
+ if(session?.applied?.autoRotate)return {paused:false,advance:true,restart:false,expired:true};
  return {paused:false,advance:false,restart:true,expired:true};
 }
 

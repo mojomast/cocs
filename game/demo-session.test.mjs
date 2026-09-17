@@ -191,7 +191,17 @@ test('scenario pacing advances only with auto-rotate and restarts otherwise', ()
  const heldPlan=demoScenarioState(held,{elapsed:31,limit:30});
  assert.equal(heldPlan.advance,false);
  assert.equal(heldPlan.restart,true,'a held scenario restarts instead of rotating');
- assert.equal(demoScenarioState(held,{elapsed:31,limit:30,active:false}).advance,true,'the title menu always rotates');
+ // The title (inactive) path now paces the reel exactly like the demo view: a
+ // shot is held until it ends or its limit expires, instead of rebuilding the
+ // scenario on every rendered frame.
+ assert.deepEqual(demoScenarioState(session,{elapsed:10,limit:30,active:false}),{paused:false,advance:false,restart:false,expired:false},'the title holds a running shot');
+ assert.deepEqual(demoScenarioState(session,{elapsed:30,limit:30,active:false}),{paused:false,advance:true,restart:false,expired:true},'the title rotates once the scenario expires');
+ assert.equal(demoScenarioState(session,{elapsed:10,limit:30,over:true,active:false}).advance,true,'an ended match rotates the title too');
+ assert.deepEqual(demoScenarioState(held,{elapsed:31,limit:30,active:false}),{paused:false,advance:false,restart:true,expired:true},'rotation off restarts the same title scenario');
+ assert.equal(demoScenarioState(createDemoSession({state:'menu'}),{elapsed:10,limit:30,active:false}).paused,false,'the title never pauses for a menu session');
+ // Only the absence of a scenario forces an immediate advance (first build).
+ assert.equal(demoScenarioState(null,{active:false}).advance,true,'without a session the title asks for the initial build');
+ assert.equal(demoScenarioState({state:'menu'},{active:false}).advance,true,'without applied settings there is no scenario clock to pace');
  assert.equal(demoScenarioState(createDemoSession({state:'paused'}),{elapsed:99}).paused,true);
 });
 

@@ -137,7 +137,7 @@ export default function Home(){
   const savePreset=(name:string)=>{const loadout={gear:profileRef.current.gear,attachments:profileRef.current.attachments,finish:profileRef.current.finish,crosshair:profileRef.current.crosshair};const preset=normalizePreset({name,character,harness,mapId,config,loadout},presetOptions as any,()=>`p${Date.now().toString(36)}`);if(preset)setPresets(list=>addPreset(list,preset));};
   const loadPreset=(p:any)=>{const level=profileRef.current.level||1,raw=p.loadout||{};if(CHARACTERS.some(c=>c.id===p.character))setCharacter(p.character);if(HARNESSES.some(h=>h.id===p.harness))setHarness(p.harness);if(MAPS.some(m=>m.id===p.mapId))setMapId(p.mapId);setConfig((c:any)=>normalizeConfig({...c,...p.config,playerName:c.playerName}));const gear=normalizeGear(raw.gear,level),attachments=normalizeAttachments(raw.attachments,level),finish=FINISH_IDS.includes(raw.finish)?raw.finish:null,crosshair=CROSSHAIR_IDS.includes(raw.crosshair)?raw.crosshair:null;const saved=saveProgression({...profileRef.current,gear,attachments,finish,crosshair});if(crosshair)setDisplay((d:any)=>normalizeDisplay({...d,crosshair}));runtime.current?.net?.gear(saved.gear,saved.attachments,saved.finish);setSetupOpen(false);};
   const deletePreset=(id:string)=>setPresets(list=>removePreset(list,id));
-  const modalRef=useRef<HTMLElement>(null),singleRef=useRef<HTMLElement>(null),settingsRef=useRef<HTMLElement>(null),onboardingRef=useRef<HTMLElement>(null),previewRef=useRef<HTMLElement>(null),enteredRef=useRef(false),profileRef=useRef<any>(defaultProgression()),challengeRef=useRef<any>(normalizeChallengeState({})),historyRef=useRef<any>(emptyHistory()),inviteHandled=useRef(false),demoSessionRef=useRef<any>(demoSession),demoOnlyRef=useRef(false),demoLiftRef=useRef(0),demoTrailRef=useRef<any[]>([]),demoForwardRef=useRef<any[]>([]);
+  const modalRef=useRef<HTMLElement>(null),singleRef=useRef<HTMLElement>(null),settingsRef=useRef<HTMLElement>(null),onboardingRef=useRef<HTMLElement>(null),previewRef=useRef<HTMLElement>(null),enteredRef=useRef(false),profileRef=useRef<any>(defaultProgression()),challengeRef=useRef<any>(normalizeChallengeState({})),historyRef=useRef<any>(emptyHistory()),inviteHandled=useRef(false),demoSessionRef=useRef<any>(demoSession),demoOnlyRef=useRef(false),demoLiftRef=useRef(0),demoTrailRef=useRef<any[]>([]),demoForwardRef=useRef<any[]>([]),demoPlanRef=useRef({advance:false,restart:false});
   // Demo preferences load once and persist whenever the applied settings change.
   useEffect(()=>{let raw:string|null=null;try{raw=localStorage.getItem(DEMO_SETTINGS_KEY);}catch{}const next=applyDemoEvent(demoSessionRef.current,{type:'load-settings',settings:loadDemoSettings(raw)});demoSessionRef.current=next;setDemoSession(next);},[]);
   useEffect(()=>{try{localStorage.setItem(DEMO_SETTINGS_KEY,storeDemoSettings(demoSession.applied));}catch{}},[demoSession.applied]);
@@ -217,14 +217,28 @@ export default function Home(){
    const r=runtime.current,view=r?.view;if(!view)return;
    if(session?.state==='free'){demoFreeAdapter(view).set(true);return;}
    demoFreeAdapter(view).set(false);
+   const following=session?.state==='follow'&&session.subjectId!==null&&session.subjectId!==undefined;
+   // Follow is a manual ownership claim on the view: the helper keeps the
+   // spectator and director targets in sync, so releasing it as soon as the
+   // session leaves the state stops a stale follow outliving the demo.
+   if(!following&&view.manualFollow!=null)view.clearManualFollow?.();
    const sc=r.showcase,director=sc?.director;
    if(!director)return;
-   if(session?.cameraStyle&&session.cameraStyle!=='auto'){if(view.cameraOwner!=='manual')view.setCameraOwner?.('manual');director.setRig?.(session.cameraStyle);}
+   if(session?.cameraStyle&&session.cameraStyle!=='auto'){
+    if(view.cameraOwner!=='manual')view.setCameraOwner?.('manual');
+    director.setRig?.(session.cameraStyle);
+    if(following)director.setTarget?.(session.subjectId);
+   }
    else{
-    // Style "auto" hands the rig back to the planner; a pinned follow subject is
-    // re-asserted so the camera keeps tracking without a manual rig.
+    // Style "auto" hands the rig back to the planner. The owner is only touched
+    // when it actually differs: an ownership switch drops cached camera state,
+    // so re-asserting it on an unchanged state would churn the hand-off.
     director.reframe?.(sc.match?.snapshot?.());
-    if(session?.state==='follow'&&session.subjectId!==null&&session.subjectId!==undefined)director.setTarget?.(session.subjectId);
+    if(following){
+     if(typeof view.setManualFollow==='function')view.setManualFollow(session.subjectId);
+     else{if(view.cameraOwner!=='manual')view.setCameraOwner?.('manual');director.setTarget?.(session.subjectId);}
+    }
+    else if(view.cameraOwner!=='auto')view.setCameraOwner?.('auto');
    }
   };
   const demoTransition=(event:any)=>{const committed=commitDemoSession(applyDemoEvent(demoSessionRef.current,event));applyDemoCameraOwnership(committed);return committed;};
@@ -233,6 +247,9 @@ export default function Home(){
    const r=runtime.current;if(!r?.buildShowcase)return false;
    const ok=r.buildShowcase(spec??undefined)===true;
    if(!ok)commitDemoSession(applyDemoEvent(demoSessionRef.current,{type:'error',message:'That scenario could not start. Keeping the running demo.'}));
+   // A build drops the view back to automatic ownership; re-assert the session's
+   // camera style/follow so a scenario change cannot silently steal the frame.
+   else applyDemoCameraOwnership(demoSessionRef.current);
    return ok;
   };
   const selectDemoScenario=(rng:any)=>{
@@ -276,7 +293,7 @@ export default function Home(){
    else applyDemoCameraOwnership(result.session);
    return true;
   };
-  const enterArenaFromDemo=()=>{clearDemoInputs();document.exitPointerLock?.();demoFreeAdapter(runtime.current?.view).set(false);commitDemoSession(applyDemoEvent(demoSessionRef.current,{type:'exit'}));enterMenu();};
+  const enterArenaFromDemo=()=>{clearDemoInputs();document.exitPointerLock?.();demoFreeAdapter(runtime.current?.view).set(false);const exited=commitDemoSession(applyDemoEvent(demoSessionRef.current,{type:'exit'}));applyDemoCameraOwnership(exited);enterMenu();};
   const backToDemo=()=>{const r=runtime.current;exitToTitle();const current=demoSessionRef.current;const fresh=createDemoSession({settings:current.applied,hudVisible:current.hudVisible,state:'auto'});commitDemoSession({...fresh,rotation:current.rotation,coverage:current.coverage,selection:{...current.selection}});setDemoOnly(true);demoOnlyRef.current=true;r?.audio?.start?.();r?.view?.setWeather?.(demoWeather);if(r&&r.showcaseEnabled!==false&&!r.showcase)buildDemoShowcase();else applyDemoCameraOwnership(demoSessionRef.current);};
   const saveDemoPrefs=(patch:any)=>{try{const prefs=JSON.parse(localStorage.getItem('token-arena-settings')||'{}');localStorage.setItem('token-arena-settings',JSON.stringify({...prefs,...patch}));}catch{}};
   const setMusicPref=(on:boolean)=>{setDemoMusic(on);const r=runtime.current;r?.audio?.setMusicEnabled?.(on);if(on)r?.audio?.unlock?.();setAudioNotice(on&&r?.audio?.audioStatus?.().state!=='running'?'Audio is blocked by the browser. Click or press a key to enable it.':'');saveDemoPrefs({music:on});};
@@ -353,7 +370,15 @@ export default function Home(){
   if(r.recorder){const recordTime=r.match.time;if(r.recorder.due(recordTime))r.perf?.time('snapshot',()=>r.recorder.frame(r.match.snapshot(),r.match.events));else r.perf?.time('snapshot',()=>r.recorder.frame({time:recordTime},r.match.events));}
   for(const e of r.match.events)if(e.id>r.lastAudio){audio.event(e,r.match.actors[0]);noteDamage(e,r.match,0);noteKill(e,0,r.match.time);if(r.display?.captions===true){const cap=audioCaption(e);if(cap){r.caption=cap.text;r.captionAt=r.match.time;}}if(e.type==='damage'&&e.actor===0)r.lastDamage=r.match.time;if(e.type==='damage'&&e.source===0&&e.actor!==0){r.lastHit=r.match.time;if(e.critical||e.headshot||Number(e.amount)>=48)r.lastCritical=r.match.time;}if((e.type==='pickup'||e.type==='powerup')&&e.actor===0){r.pickupText=e.type==='powerup'?`${e.kind.toUpperCase()} ACTIVE`:`${e.kind.toUpperCase()} ACQUIRED`;r.pickupAt=r.match.time;}if(e.type==='horde-resupply')r.singleNotice={type:e.type,text:`RESUPPLIED · WAVE ${e.wave??''}`.trim(),at:r.match.time};else if(e.type==='enemy-detonate')r.singleNotice={type:e.type,text:'SAPPER DETONATION',at:r.match.time};else if(e.type==='boss-phase'){r.singleNotice={type:e.type,text:`PHASE ${e.phase}${e.name?` · ${e.name}`:''}`,at:r.match.time};audio.announcerCue?.('boss');}else if(e.type==='mission-message')r.singleNotice={type:e.type,text:String(e.text??''),at:r.match.time};else if(e.type==='story-line'||e.type==='npc-bark')audio.announcerCue?.('objective');else if(e.type==='singleplayer-checkpoint'&&r.match.config.mode==='campaign'){setCampaign((p:any)=>setCheckpoint(p,e.missionId??r.match.config.mission,e.step));}r.lastAudio=e.id;}}
     const cinematicMode=r.showcase&&(['selection','browse','lobby','progression','changelog'].includes(modeRef.current)||(modeRef.current==='theater'&&!r.demo));
-    if(cinematicMode){const sc=r.showcase;const demoActive=demoOnlyRef.current;const plan=demoScenarioState(demoSessionRef.current,{elapsed:sc.time,limit:sc.seconds??SHOWCASE_MAX_SECONDS,over:sc.match.over===true,active:demoActive});if(r.showcaseMatchedId!==sc.mapId){view.setMatch(sc.match.snapshot());view.lastEvent=sc.match.serial;view.setPlayerId(-1);view.setDirector(sc.director);view.setCinema(true);r.showcaseMatchedId=sc.mapId;view.setShowcase(sc.match.snapshot());}if(!plan.paused){sc.acc=Math.min(sc.acc+elapsed,RULES.dt*4);let showcaseGuard=0;while(sc.acc>=RULES.dt&&showcaseGuard<4){sc.acc-=RULES.dt;showcaseGuard++;sc.match.step(RULES.dt,{inputs:{}});}sc.time+=elapsed;}if(plan.advance){if(!buildShowcase()){sc.time=0;sc.acc=0;}}else if(plan.restart){if(!buildShowcase(r.showcaseSpec??undefined)){sc.time=0;sc.acc=0;}}else if(!plan.paused){const snap=sc.match.snapshot();snap.events=sc.match.events;snap.serial=sc.match.serial;view.setShowcase(snap);if(now-(r.broadcastAt||0)>250){r.broadcastAt=now;const modeInfo=GAME_MODES.find((m:any)=>m.id===sc.mode);setBroadcast({...demoBroadcast(snap,{modeName:modeInfo?.name,mapName:getMap(sc.mapId)?.name}),revision:r.showcaseIndex||0,subjects:(sc.match.actors||[]).filter((a:any)=>a&&a.id!==undefined&&a.id!==null).slice(0,4).map((a:any)=>({id:a.id,name:String(a.name||`BOT ${a.id}`)}))});}}if(enteredRef.current&&(modeRef.current==='selection'||modeRef.current==='progression')&&previewRef.current)view.setPreviewRect(previewRef.current.getBoundingClientRect());else view.setPreviewRect(null);
+    if(cinematicMode){const sc=r.showcase;const demoActive=demoOnlyRef.current;const plan=demoScenarioState(demoSessionRef.current,{elapsed:sc.time,limit:sc.seconds??SHOWCASE_MAX_SECONDS,over:sc.match.over===true,active:demoActive});if(r.showcaseMatchedId!==sc.mapId){view.setMatch(sc.match.snapshot());view.lastEvent=sc.match.serial;view.setPlayerId(-1);view.setDirector(sc.director);view.setCinema(true);r.showcaseMatchedId=sc.mapId;view.setShowcase(sc.match.snapshot());}if(!plan.paused){sc.acc=Math.min(sc.acc+elapsed,RULES.dt*4);let showcaseGuard=0;while(sc.acc>=RULES.dt&&showcaseGuard<4){sc.acc-=RULES.dt;showcaseGuard++;sc.match.step(RULES.dt,{inputs:{}});}sc.time+=elapsed;}
+     // Rebuild only on a false->true pacing decision, so even a stale plan can
+     // never rebuild the showcase twice for the same scenario end. A fresh build
+     // drops camera ownership, so re-assert the session's style/follow after it.
+     const planPrev=demoPlanRef.current,advanceNow=plan.advance&&!planPrev.advance,restartNow=plan.restart&&!planPrev.restart;
+     demoPlanRef.current={advance:plan.advance,restart:plan.restart};
+     if(advanceNow){if(buildShowcase())applyDemoCameraOwnership(demoSessionRef.current);else{sc.time=0;sc.acc=0;}}
+     else if(restartNow){if(buildShowcase(r.showcaseSpec??undefined))applyDemoCameraOwnership(demoSessionRef.current);else{sc.time=0;sc.acc=0;}}
+     else if(!plan.paused){const snap=sc.match.snapshot();snap.events=sc.match.events;snap.serial=sc.match.serial;view.setShowcase(snap);if(now-(r.broadcastAt||0)>250){r.broadcastAt=now;const modeInfo=GAME_MODES.find((m:any)=>m.id===sc.mode);setBroadcast({...demoBroadcast(snap,{modeName:modeInfo?.name,mapName:getMap(sc.mapId)?.name}),revision:r.showcaseIndex||0,subjects:(sc.match.actors||[]).filter((a:any)=>a&&a.id!==undefined&&a.id!==null).slice(0,4).map((a:any)=>({id:a.id,name:String(a.name||`BOT ${a.id}`)}))});}}if(enteredRef.current&&(modeRef.current==='selection'||modeRef.current==='progression')&&previewRef.current)view.setPreviewRect(previewRef.current.getBoundingClientRect());else view.setPreviewRect(null);
      // Free-roam flight: the dock owns the camera while the session says so, and
      // the inputs are cleared by Escape/blur/mode changes elsewhere. Re-assert the
      // free camera every frame so a scenario rebuild cannot silently drop it.
@@ -370,6 +395,33 @@ export default function Home(){
   if(r.match&&!r.spectateLocal&&now-hudAt>80){setHud(decorate(r.match.snapshot(),{damage:r.match.time-r.lastDamage<.25,hit:r.match.time-r.lastHit<.12,critical:r.match.time-(r.lastCritical??-10)<.14,kill:r.match.time-(r.lastKill??-10)<.24,pickup:r.match.time-r.pickupAt<1.5?r.pickupText:'',singleNotice:r.singleNotice&&r.match.time-r.singleNotice.at<4?r.singleNotice:null,fps:r.fps,renderer:view.renderer.isSoftware?'software':'webgl',pointerLocked:!!document.pointerLockElement},now));hudAt=now;}}catch(e:any){console.error('COCS frame failed',e);r.match=null;r.renderState=null;r.netViewReady=false;r.fire=r.fireTap=r.jump=r.power=r.interact=false;setHud(null);setError(`The arena renderer recovered from an error: ${String(e?.message||e)}. Try entering again.`);changeMode('selection');}raf=requestAnimationFrame(loop);};raf=requestAnimationFrame(loop);setReady(true);
    (window as any).tokenArenaSnapshot=()=>({mode:modeRef.current,fps:r.fps,renderer:view.renderer.isSoftware?'software':'webgl',drawCalls:view.renderer.info.render.calls,triangles:view.renderer.info.render.triangles,pointerLocked:document.pointerLockElement===canvas.current,net:r.net?.started===true,actorId:r.net?.actorId??0,camera:{x:view.camera.position.x,y:view.camera.position.y,z:view.camera.position.z,yaw:view.camera.rotation.y},...(r.match?.snapshot()??r.renderState??{}),showcase:r.showcase&&(['selection','browse','lobby'].includes(modeRef.current)||(modeRef.current==='theater'&&!r.demo))?r.showcase.match.snapshot():null,showcaseReady:!!view.showcaseState,showcaseExpected:view.showcaseExpected===true,showcaseModelFallback:view.showcaseExpected!==true&&!view.showcaseState,weather:view._weatherState?.().kind??null,weatherOverride:view._weatherOverride??null});
    (window as any).tokenArenaDebug={state:()=>{const sc=r.showcase;return sc?{time:sc.time,index:r.showcaseIndex,reel:Array.isArray(r.showcaseReel)?r.showcaseReel.length:r.showcaseReel,modeId:sc.modeId,mapId:sc.mapId,over:sc.match.over===true}:null;},skip:()=>{if(r.showcase)r.showcase.time=SHOWCASE_MAX_SECONDS+1;return !!r.showcase;},next:()=>r.buildShowcase?.(),delta:()=>({hits:r.net?.deltaHits??0,misses:r.net?.deltaMisses??0,base:r.net?.deltaApplied??0,rate:r.net?.bandwidth?.rate(performance.now())??0}),aim:(on:boolean)=>{if(!r?.view)return false;r.ads=on===true;r.view.setAim(on===true);return true;},weapon:(n:number)=>{const a=r?.match?.actors?.[0];if(!a)return null;a.weapon=n;a.ammo[n]=Infinity;return a.weapon;},fire:(on:boolean)=>{if(!r)return false;r.fire=on===true;r.fireTap=on===true;return true;}};
+    // Read-only attract-demo debug hook. It reconstructs the session/planner view
+    // on demand (no new state, no per-frame React work) so automated checks can
+    // sample the running shot without reaching into internal refs themselves.
+    (window as any).tokenArenaDemo=()=>{
+     const session=demoSessionRef.current,showcase=r.showcase,plan=showcase?.director?.plan??null;
+     const subject=plan&&plan.primary!==null&&plan.primary!==undefined
+      ?(showcase?.match?.actors??[]).find((a:any)=>a.id===plan.primary)??null
+      :null;
+     return {
+      state:session?.state??null,
+      cameraOwner:view.cameraOwner??null,
+      rig:showcase?.director?.rig??null,
+      subject:plan?{id:plan.primary??null,kind:plan.subjectKind??null,name:subject?String(subject.name??`BOT ${subject.id}`):null,alive:subject?subject.health>0:null}:null,
+      reason:plan?.reason??null,
+      transition:plan?.transition??null,
+      visibility:plan?.visibility??null,
+      score:plan?.score??null,
+      incumbent:plan?.incumbent??null,
+      startedAt:plan?.startedAt??null,
+      minUntil:plan?.minUntil??null,
+      matchTime:showcase?.match?.time??null,
+      hudVisible:session?.hudVisible!==false,
+      pinned:demoPinned(session),
+      actualMap:showcase?.mapId??null,
+      actualMode:showcase?.mode??null,
+     };
+    };
     (window as any).tokenArenaAudio=()=>runtime.current?.audio?.audioStatus?.()||null;
     (window as any).tokenArenaPerf=()=>{const render=view.getPerformance?.()||null;if(render&&Number.isFinite(render.gpuMs))r.perf?.setGpu?.(render.gpuMs);const cpu=r.perf?.snapshot?.()||null;return {cpu,render,report:r.perf?.report?.({drawCalls:render?.calls,triangles:render?.triangles,geometries:render?.geometries,textures:render?.textures,tier:render?.tier,gpu:render?.gpuMs??null,backend:render?.renderer?.backend})||''};};
     // Executable benchmark: applies the fixed preset scenario (map, seed, bots,
@@ -451,7 +503,7 @@ export default function Home(){
   const pointerLost=()=>{if(runtime.current?.drag&&document.pointerLockElement!==canvas.current)clearInput();};
    window.addEventListener('focusin',focus);window.addEventListener('pointercancel',pointerLost);canvas.current?.addEventListener('pointerleave',pointerLost);
   window.addEventListener('keydown',keydown);window.addEventListener('keyup',keyup);window.addEventListener('mousemove',move);window.addEventListener('mousedown',down);window.addEventListener('mouseup',up);window.addEventListener('contextmenu',contextmenu);window.addEventListener('blur',pause);document.addEventListener('pointerlockchange',lock);document.addEventListener('pointerlockerror',lockError);window.addEventListener('wheel',wheel,{passive:false});
-    return()=>{cancelled=true;cancelAnimationFrame(raf);window.removeEventListener('focus',windowFocus);window.removeEventListener('focusout',focusOut);document.removeEventListener('visibilitychange',visibility);window.removeEventListener('focusin',focus);window.removeEventListener('pointercancel',pointerLost);canvas.current?.removeEventListener('pointerleave',pointerLost);window.removeEventListener('resize',resize);window.removeEventListener('keydown',keydown);window.removeEventListener('keyup',keyup);window.removeEventListener('mousemove',move);window.removeEventListener('mousedown',down);window.removeEventListener('mouseup',up);window.removeEventListener('contextmenu',contextmenu);window.removeEventListener('blur',pause);document.removeEventListener('pointerlockchange',lock);document.removeEventListener('pointerlockerror',lockError);window.removeEventListener('wheel',wheel);view?.dispose();audio?.dispose();const r=runtime.current;runtime.current=null;r?.voice?.dispose();r?.net?.close();delete (window as any).tokenArenaSnapshot;};
+    return()=>{cancelled=true;cancelAnimationFrame(raf);window.removeEventListener('focus',windowFocus);window.removeEventListener('focusout',focusOut);document.removeEventListener('visibilitychange',visibility);window.removeEventListener('focusin',focus);window.removeEventListener('pointercancel',pointerLost);canvas.current?.removeEventListener('pointerleave',pointerLost);window.removeEventListener('resize',resize);window.removeEventListener('keydown',keydown);window.removeEventListener('keyup',keyup);window.removeEventListener('mousemove',move);window.removeEventListener('mousedown',down);window.removeEventListener('mouseup',up);window.removeEventListener('contextmenu',contextmenu);window.removeEventListener('blur',pause);document.removeEventListener('pointerlockchange',lock);document.removeEventListener('pointerlockerror',lockError);window.removeEventListener('wheel',wheel);view?.dispose();audio?.dispose();const r=runtime.current;runtime.current=null;r?.voice?.dispose();r?.net?.close();delete (window as any).tokenArenaSnapshot;delete (window as any).tokenArenaDemo;};
   },[]);
   useEffect(()=>{let saved;try{saved=JSON.parse(localStorage.getItem('token-arena-settings')||'{}').touch;}catch{}setTouchControls(typeof saved==='boolean'?saved:isTouchDevice());},[]);
  useEffect(()=>{const sync=()=>setFullscreen(Boolean((document as any).fullscreenElement||(document as any).webkitFullscreenElement));document.addEventListener('fullscreenchange',sync);document.addEventListener('webkitfullscreenchange',sync);return()=>{document.removeEventListener('fullscreenchange',sync);document.removeEventListener('webkitfullscreenchange',sync);};},[]);
