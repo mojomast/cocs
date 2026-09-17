@@ -2,7 +2,8 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {CHARACTERS, HARNESSES, WEAPONS, resolveLoadout} from './data.mjs';
 import {abilityOf, harnessAbility, harnessBotHints, harnessVehicle} from './harness-profiles.mjs';
-import {KINDS, WINGS, OPERATOR_KITS, SPECS, MOVEMENT_VERBS, MOVEMENT_HOOK_BY_SPEC, resolveKit} from './kits.mjs';
+import {resolveGear} from './progression.mjs';
+import {KINDS, WINGS, OPERATOR_KITS, SPECS, MOVEMENT_VERBS, MOVEMENT_HOOK_BY_SPEC, SPEC_TRIGGERS, SPEC_EFFECT_TYPES, SPEC_EFFECT_TARGETS, resolveKit} from './kits.mjs';
 
 const deepFrozen = value => !value || typeof value !== 'object' || (Object.isFrozen(value) && Object.values(value).every(deepFrozen));
 const indexById = list => Object.fromEntries(list.map(entry => [entry.id, entry]));
@@ -114,8 +115,27 @@ test('specs map harness ids to kinds, tradeoffs, riders and movement hooks', () 
     assert.equal(spec.vehicle, harnessVehicle(spec.id));
     assert.equal(spec.bot, harnessBotHints(spec.id));
     assert.ok(spec.tradeoff.id.length > 0 && spec.tradeoff.name.length > 0 && spec.tradeoff.description.length > 0);
+    assert.equal(spec.passive.id, spec.tradeoff.id);
+    assert.equal(spec.passive.name, spec.tradeoff.name);
+    assert.equal(spec.passive.description, spec.tradeoff.description, 'passive reuses the tradeoff copy');
+    assert.ok(SPEC_TRIGGERS.includes(spec.passive.trigger), `${spec.id} passive trigger`);
+    assert.ok(Array.isArray(spec.passive.effects) && spec.passive.effects.length > 0);
+    for (const effect of spec.passive.effects) {
+      assert.ok(SPEC_EFFECT_TYPES.includes(effect.type), `${spec.id} passive effect ${effect.type}`);
+      assert.ok(SPEC_EFFECT_TARGETS.includes(effect.target), `${spec.id} passive target ${effect.target}`);
+    }
     assert.deepEqual(Object.keys(spec.riders).sort(), ['striker', 'tactician', 'vanguard']);
-    for (const text of Object.values(spec.riders)) assert.ok(typeof text === 'string' && text.length > 0);
+    for (const [wing, rider] of Object.entries(spec.riders)) {
+      assert.equal(rider.wing, wing);
+      assert.ok(typeof rider.id === 'string' && rider.id.length > 0);
+      assert.ok(typeof rider.description === 'string' && rider.description.length > 0);
+      assert.ok(SPEC_TRIGGERS.includes(rider.trigger), `${spec.id}/${wing} trigger`);
+      assert.ok(Array.isArray(rider.effects) && rider.effects.length > 0);
+      for (const effect of rider.effects) {
+        assert.ok(SPEC_EFFECT_TYPES.includes(effect.type), `${spec.id}/${wing} effect ${effect.type}`);
+        assert.ok(SPEC_EFFECT_TARGETS.includes(effect.target), `${spec.id}/${wing} target ${effect.target}`);
+      }
+    }
   }
   assert.equal(new Set(SPECS.map(spec => spec.tradeoff.id)).size, 7);
   assert.equal(new Set(SPECS.map(spec => spec.tradeoff.name)).size, 7);
@@ -123,7 +143,7 @@ test('specs map harness ids to kinds, tradeoffs, riders and movement hooks', () 
 });
 
 test('every exported table is deeply frozen', () => {
-  for (const table of [KINDS, WINGS, OPERATOR_KITS, SPECS, MOVEMENT_VERBS, MOVEMENT_HOOK_BY_SPEC]) {
+  for (const table of [KINDS, WINGS, OPERATOR_KITS, SPECS, MOVEMENT_VERBS, MOVEMENT_HOOK_BY_SPEC, SPEC_TRIGGERS, SPEC_EFFECT_TYPES, SPEC_EFFECT_TARGETS]) {
     assert.ok(deepFrozen(table));
   }
   assert.throws(() => { OPERATOR_KITS[0].preferred[0] = 9; }, TypeError);
@@ -131,10 +151,16 @@ test('every exported table is deeply frozen', () => {
   assert.throws(() => { OPERATOR_KITS[0].bot.archetype = 'rusher'; }, TypeError);
   assert.throws(() => { WINGS[0].family = 'tool'; }, TypeError);
   assert.throws(() => { SPECS[0].riders.striker = ''; }, TypeError);
+  assert.throws(() => { SPECS[0].riders.striker.description = ''; }, TypeError);
+  assert.throws(() => { SPECS[0].riders.striker.effects[0].type = 'pull'; }, TypeError);
+  assert.throws(() => { SPECS[0].riders.striker.effects.push({}); }, TypeError);
+  assert.throws(() => { SPECS[0].passive.effects[0] = {}; }, TypeError);
   assert.throws(() => { SPECS[0].tradeoff.id = 'other'; }, TypeError);
   assert.throws(() => { MOVEMENT_VERBS[0].budget.distance = 99; }, TypeError);
   assert.throws(() => { MOVEMENT_VERBS[0].carrier.drop = false; }, TypeError);
   assert.throws(() => { MOVEMENT_HOOK_BY_SPEC.hermes = 'usage'; }, TypeError);
+  assert.ok(deepFrozen(SPECS[0].riders.striker));
+  assert.ok(deepFrozen(SPECS[0].passive));
 });
 
 test('resolveKit normalises loadouts exactly like resolveLoadout', () => {
@@ -158,15 +184,15 @@ test('resolveKit normalises loadouts exactly like resolveLoadout', () => {
 test('resolveKit joins class, spec, stats and gear deterministically', () => {
   const specs = indexById(SPECS);
   const kits = indexById(OPERATOR_KITS);
-  const gear = {scope: 'mk2'};
-  const resolved = resolveKit('mistral', 'cline', gear);
-  assert.equal(resolved.gear, gear, 'gear passes through by identity');
-  assert.equal(resolveKit('mistral', 'cline').gear, null);
+  const resolved = resolveKit('mistral', 'cline');
+  assert.equal(resolved.gear, null);
   assert.equal(resolveKit('mistral', 'cline', null).gear, null);
+  assert.equal(resolveKit('mistral', 'cline', undefined).gear, null);
   assert.equal(resolved.wing, 'striker');
   assert.equal(resolved.kind, 'dash');
   assert.equal(resolved.active, abilityOf('cline'));
   assert.equal(resolved.tradeoff, specs.cline.tradeoff);
+  assert.equal(resolved.passive, specs.cline.passive);
   assert.equal(resolved.rider, specs.cline.riders.striker);
   assert.equal(resolved.movement, indexById(MOVEMENT_VERBS)['air-dash']);
   assert.equal(resolved.movementHook, 'chaining');
@@ -175,12 +201,51 @@ test('resolveKit joins class, spec, stats and gear deterministically', () => {
   assert.ok(Object.isFrozen(resolved));
   assert.ok(Object.isFrozen(resolved.stats));
   assert.ok(deepFrozen(resolveKit('mistral', 'cline')), 'resolved kit is deeply frozen');
-  assert.ok(!Object.isFrozen(gear), 'caller gear is passed through untouched');
   assert.equal(resolved.fingerprint, resolveKit('mistral', 'cline').fingerprint);
   assert.notEqual(resolved.fingerprint, resolveKit('gemini', 'cline').fingerprint);
   assert.notEqual(resolved.fingerprint, resolveKit('mistral', 'codex').fingerprint);
   assert.notEqual(resolved.fingerprint, resolveKit('claude', 'claudecode').fingerprint);
   assert.ok(/^[a-z0-9-]+:[a-z]+:[a-z-]+:[a-z-]+:[a-z]+$/.test(resolved.fingerprint), resolved.fingerprint);
+});
+
+test('resolveKit resolves, snapshots and fingerprints gear without touching the live table', () => {
+  const gearMap = {primary: 'scope', utility: 'servo'};
+  const resolved = resolveKit('mistral', 'cline', gearMap);
+  assert.deepEqual(resolved.gear.items.map(item => item.id), ['scope', 'servo']);
+  assert.equal(resolved.gear.modifiers.spread, .85);
+  assert.equal(resolved.gear.modifiers.speed, 1.08);
+  assert.ok(deepFrozen(resolved), 'geared kit is deeply frozen');
+  assert.ok(deepFrozen(resolved.gear), 'resolved gear is deeply frozen');
+  assert.ok(!Object.isFrozen(gearMap), 'caller gear map is untouched');
+  assert.equal(resolveKit('mistral', 'cline').gear, null);
+
+  // A snapshot copy, never a reference into the shared GEAR table.
+  const live = resolveGear(gearMap);
+  assert.notEqual(resolved.gear, live);
+  assert.notEqual(resolved.gear.items[0], live.items[0]);
+  assert.equal(Object.isFrozen(live.items[0]), false, 'the live GEAR entry stays mutable for progression.mjs');
+
+  // Fingerprint identity: same gear regardless of key order, different gear
+  // changes the tail, no gear keeps the five-segment form.
+  const reordered = resolveKit('mistral', 'cline', {utility: 'servo', primary: 'scope'});
+  assert.equal(resolved.fingerprint, reordered.fingerprint);
+  assert.notEqual(resolved.fingerprint, resolveKit('mistral', 'cline').fingerprint);
+  assert.notEqual(resolved.fingerprint, resolveKit('mistral', 'cline', {primary: 'scope'}).fingerprint);
+  assert.ok(resolved.fingerprint.endsWith(':gear-scope+servo'), resolved.fingerprint);
+
+  // An already-resolved record (core stores `actor.gear` in that shape) is
+  // accepted and resolves to the same identity.
+  const already = resolveGear(gearMap);
+  const reResolved = resolveKit('mistral', 'cline', already);
+  assert.equal(reResolved.fingerprint, resolved.fingerprint);
+  assert.equal(reResolved.gear.modifiers.spread, resolved.gear.modifiers.spread);
+  assert.ok(deepFrozen(reResolved));
+
+  // Supplied gear that names no known item still gets a stable segment.
+  const none = resolveKit('mistral', 'cline', {primary: 'not-an-item'});
+  assert.deepEqual(none.gear.items, []);
+  assert.ok(none.fingerprint.endsWith(':gear-none'), none.fingerprint);
+  assert.notEqual(none.fingerprint, resolveKit('mistral', 'cline').fingerprint);
 });
 
 test('abilityOf memoizes one frozen descriptor per harness', () => {
@@ -207,6 +272,8 @@ test('all 63 operator x spec combinations resolve through the lock and fallbacks
       assert.equal(resolved.wing, kit.wing);
       assert.equal(resolved.kind, EXPECTED_KIND[expected.harness]);
       assert.equal(resolved.rider, indexById(SPECS)[expected.harness].riders[kit.wing]);
+      assert.equal(resolved.rider.wing, kit.wing);
+      assert.equal(resolved.passive, indexById(SPECS)[expected.harness].passive);
       assert.equal(resolved.movement.id, kit.movement);
       assert.equal(resolved.movementHook, EXPECTED_HOOK[expected.harness]);
       assert.ok(Object.isFrozen(resolved));

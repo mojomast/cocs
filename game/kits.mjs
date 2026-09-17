@@ -1,5 +1,9 @@
 import {CHARACTERS, HARNESSES, WEAPONS, resolveLoadout} from './data.mjs';
 import {abilityOf, harnessBotHints, harnessVehicle} from './harness-profiles.mjs';
+// Gear ids resolve through progression.mjs. Verified at Phase 3A: progression.mjs
+// imports only attachments.mjs and cosmetics.mjs, and neither imports kits.mjs
+// (or anything that imports it), so this static edge cannot form a cycle.
+import {resolveGear} from './progression.mjs';
 
 // ---------------------------------------------------------------------------
 // COCS class & harness data model (docs/design/CLASS_OVERHAUL.md §13).
@@ -10,9 +14,10 @@ import {abilityOf, harnessBotHints, harnessVehicle} from './harness-profiles.mjs
 // behavioural tradeoff passive and one wing rider.
 //
 // This module is data plus one resolver. It imports no view/app code, never
-// mutates data.mjs, and deep-freezes everything it exports. Phase 1 ships it as
-// data only: operator-profiles.mjs reads it through the compatibility shim and
-// no engine hot path touches it yet, so behaviour is unchanged.
+// mutates data.mjs, and deep-freezes everything it exports. Phase 3A promotes
+// the 21 rider strings to structured, inert effect descriptors and adds the 7
+// behavioural spec passives (§3.3/§3.6). No engine hot path consumes them yet,
+// so behaviour is unchanged.
 // ---------------------------------------------------------------------------
 
 const deepFreeze = value => {
@@ -183,68 +188,193 @@ export const MOVEMENT_HOOK_BY_SPEC = deepFreeze({
   roo: 'landing-control',
 });
 
+// ---------------------------------------------------------------------------
+// Shared rider/passive vocabulary (§3.3 rider table, §3.6 events)
+// ---------------------------------------------------------------------------
+// Every rider and every passive picks exactly one trigger from this list. The
+// engine may branch on these values, but never on a spec or operator id, so the
+// same 21 rows keep working when Phase 4/5 rewires dispatch.
+export const SPEC_TRIGGERS = deepFreeze([
+  'activate', // §3.6 activate: the active/verb was accepted; resources paid.
+  'active',   // the active window is running.
+  'impact',   // the active connected with a target.
+  'air',      // §3.6 air: off the ground with verb resources remaining.
+  'land',     // §3.6 land: a clean landing this tick.
+  'end',      // §3.6 end: fuel empty / charge spent / cooldown starts.
+  'reload',   // a weapon reload is in progress.
+  'swap',     // a weapon swap / holster is in progress.
+  'melee',    // a melee arc swing.
+  'threat',   // an enemy holds a bead on the actor.
+  'always',   // continuous state; no discrete event.
+]);
+
+// Labelled effect axes for riders and passives. `type` names the thing being
+// changed so a percentage can never be an unlabelled key; the parameters are
+// bounded numbers in the axis' own unit:
+//   scale  multiplicative factor (1 = unchanged)
+//   bonus  additive delta (seconds / metres / m·s⁻¹ / charges)
+//   amount fraction of a pool (mitigation/overheal) or a slow multiplier
+//   duration/reel/range/cooldown  seconds or metres in the named unit
+//   status/mode/during            string switches from the row's own text
+export const SPEC_EFFECT_TYPES = deepFreeze([
+  'pull', 'knockback', 'radius', 'duration', 'cooldown', 'distance',
+  'speed', 'mitigation', 'cleanse', 'unstoppable', 'feint', 'placement',
+  'slow', 'holster', 'overheal', 'ammo', 'threat-ping', 'melee-arc',
+  'sprint', 'reload', 'air-control', 'slide', 'damage',
+]);
+
+export const SPEC_EFFECT_TARGETS = deepFreeze(['self', 'enemies', 'ability']);
+
 // Spec descriptors keyed to the harness table order. `kind`, `buff` and the
 // `active` descriptor itself come from harness-profiles.mjs (one source);
 // `vehicle` and `bot` are the existing per-harness skill/hint tables.
+//
+// `passive` is the structured face of `tradeoff` (§3.3): the same id/name/
+// description the UI shows, plus one shared trigger and labelled effects. No
+// passive carries an unlabelled speed/damage/resistance multiplier.
+//
+// `riders` holds the 21 wing riders: one per spec × wing, each a shared trigger,
+// labelled effect descriptors and the human sentence kept for UI legibility.
+// Phase 3A keeps them inert data — no engine hot path reads them yet.
+const makeRider = (wing, id, trigger, description, effects) => ({wing, id, trigger, description, effects});
+
 const rawSpecs = {
   openclaw: {
     tradeoff: {id: 'grip', name: 'Grip', description: 'Melee arc +25%.'},
+    passive: {
+      trigger: 'melee',
+      effects: [{type: 'melee-arc', target: 'self', scale: 1.25}],
+    },
     riders: {
-      striker: 'Pull-in on the claw pulse.',
-      vanguard: 'Bigger knockback on the claw pulse.',
-      tactician: 'Wider claw pulse radius.',
+      striker: makeRider('striker', 'claw-pull', 'impact', 'Pull-in on the claw pulse.', [
+        {type: 'pull', target: 'enemies', reel: 10},
+      ]),
+      vanguard: makeRider('vanguard', 'claw-knockback', 'impact', 'Bigger knockback on the claw pulse.', [
+        {type: 'knockback', target: 'enemies', bonus: 4},
+      ]),
+      tactician: makeRider('tactician', 'claw-radius', 'activate', 'Wider claw pulse radius.', [
+        {type: 'radius', target: 'ability', bonus: 1.5},
+      ]),
     },
   },
   hermes: {
     tradeoff: {id: 'express', name: 'Express', description: 'Can sprint while reloading.'},
+    passive: {
+      trigger: 'reload',
+      effects: [{type: 'sprint', target: 'self', during: 'reload'}],
+    },
     riders: {
-      striker: 'Longer courier rush.',
-      vanguard: '25% mitigation during the rush.',
-      tactician: 'Courier rush cooldown −1 s.',
+      striker: makeRider('striker', 'rush-duration', 'activate', 'Longer courier rush.', [
+        {type: 'duration', target: 'ability', bonus: 1},
+      ]),
+      vanguard: makeRider('vanguard', 'rush-mitigation', 'active', '25% mitigation during the rush.', [
+        {type: 'mitigation', target: 'self', amount: .25},
+      ]),
+      tactician: makeRider('tactician', 'rush-cooldown', 'end', 'Courier rush cooldown −1 s.', [
+        {type: 'cooldown', target: 'ability', bonus: -1},
+      ]),
     },
   },
   opencode: {
     tradeoff: {id: 'multiplex', name: 'Multiplex', description: 'Reload continues while swapped.'},
+    passive: {
+      trigger: 'swap',
+      effects: [{type: 'reload', target: 'self', during: 'swap', mode: 'continue'}],
+    },
     riders: {
-      striker: 'Faster while the burst is active.',
+      striker: makeRider('striker', 'burst-speed', 'active', 'Faster while the burst is active.', [
+        {type: 'speed', target: 'self', bonus: .75},
+      ]),
       // §3.3's table cell read "Guardrail lasts 1 s longer" in OpenCode's row;
       // Guardrail is Claude Code's active, so this is the same rider's intent
       // expressed on OpenCode's own active (Phase-3 tuning text).
-      vanguard: 'The burst lasts 1 s longer.',
-      tactician: 'Skip the next holster.',
+      vanguard: makeRider('vanguard', 'burst-duration', 'activate', 'The burst lasts 1 s longer.', [
+        {type: 'duration', target: 'ability', bonus: 1},
+      ]),
+      tactician: makeRider('tactician', 'burst-holster', 'activate', 'Skip the next holster.', [
+        {type: 'holster', target: 'self', mode: 'skip', charges: 1},
+      ]),
     },
   },
   claudecode: {
     tradeoff: {id: 'linted', name: 'Linted', description: 'Brief threat ping when an enemy holds a bead on you.'},
+    passive: {
+      trigger: 'threat',
+      effects: [{type: 'threat-ping', target: 'self', range: 35, duration: .75, cooldown: 3}],
+    },
     riders: {
-      striker: 'Cleanse slow on activation.',
-      vanguard: '+10% mitigation while active.',
-      tactician: 'Threat ping lasts longer.',
+      striker: makeRider('striker', 'guard-cleanse', 'activate', 'Cleanse slow on activation.', [
+        {type: 'cleanse', target: 'self', status: 'slow'},
+      ]),
+      vanguard: makeRider('vanguard', 'guard-mitigation', 'active', '+10% mitigation while active.', [
+        {type: 'mitigation', target: 'self', amount: .10},
+      ]),
+      tactician: makeRider('tactician', 'guard-ping', 'always', 'Threat ping lasts longer.', [
+        {type: 'threat-ping', target: 'self', bonus: 1},
+      ]),
     },
   },
   codex: {
     tradeoff: {id: 'green-build', name: 'Green Build', description: 'Reload 15% faster.'},
+    passive: {
+      trigger: 'reload',
+      effects: [{type: 'reload', target: 'self', scale: .85}],
+    },
     riders: {
-      striker: 'Recompile also grants +1 s of speed.',
-      vanguard: 'Overheal up to +15%.',
-      tactician: 'Refill the equipped magazine.',
+      striker: makeRider('striker', 'recompile-speed', 'activate', 'Recompile also grants +1 s of speed.', [
+        {type: 'speed', target: 'self', bonus: .6, duration: 1},
+      ]),
+      vanguard: makeRider('vanguard', 'recompile-overheal', 'activate', 'Overheal up to +15%.', [
+        {type: 'overheal', target: 'self', amount: .15},
+      ]),
+      tactician: makeRider('tactician', 'recompile-ammo', 'activate', 'Refill the equipped magazine.', [
+        {type: 'ammo', target: 'self', mode: 'refill'},
+      ]),
     },
   },
   cline: {
     tradeoff: {id: 'off-road', name: 'Off-road', description: 'Extra air control and a longer slide.'},
+    passive: {
+      trigger: 'air',
+      effects: [
+        {type: 'air-control', target: 'self', scale: 1.25},
+        {type: 'slide', target: 'self', bonus: .2},
+      ],
+    },
     // Worked rider row, §3.3.
     riders: {
-      striker: 'Longest distance, weapon ready on arrival.',
-      vanguard: 'Unstoppable during the dash, shorter distance.',
-      tactician: 'The dash leaves a brief radar feint at the origin.',
+      striker: makeRider('striker', 'step-distance', 'activate', 'Longest distance, weapon ready on arrival.', [
+        {type: 'distance', target: 'ability', scale: 1.25},
+        {type: 'holster', target: 'self', mode: 'ready'},
+      ]),
+      vanguard: makeRider('vanguard', 'step-unstoppable', 'active', 'Unstoppable during the dash, shorter distance.', [
+        {type: 'unstoppable', target: 'self'},
+        {type: 'distance', target: 'ability', scale: .8},
+      ]),
+      tactician: makeRider('tactician', 'step-feint', 'activate', 'The dash leaves a brief radar feint at the origin.', [
+        {type: 'feint', target: 'enemies', duration: 1.5, mode: 'radar'},
+      ]),
     },
   },
   roo: {
     tradeoff: {id: 'flood-fill', name: 'Flood Fill', description: 'Ability radius +25%, damage −5%.'},
+    passive: {
+      trigger: 'always',
+      effects: [
+        {type: 'radius', target: 'ability', scale: 1.25},
+        {type: 'damage', target: 'self', scale: .95},
+      ],
+    },
     riders: {
-      striker: 'Drop the jam behind you.',
-      vanguard: 'Stronger slow.',
-      tactician: 'Wider jam radius.',
+      striker: makeRider('striker', 'jam-placement', 'activate', 'Drop the jam behind you.', [
+        {type: 'placement', target: 'ability', mode: 'behind'},
+      ]),
+      vanguard: makeRider('vanguard', 'jam-slow', 'impact', 'Stronger slow.', [
+        {type: 'slow', target: 'enemies', scale: 1.2},
+      ]),
+      tactician: makeRider('tactician', 'jam-radius', 'activate', 'Wider jam radius.', [
+        {type: 'radius', target: 'ability', bonus: 1.5},
+      ]),
     },
   },
 };
@@ -259,6 +389,15 @@ export const SPECS = deepFreeze(HARNESSES.map(harness => {
     buff: active.buff,
     active,
     tradeoff: raw.tradeoff,
+    // Same id/name/description as `tradeoff` (one source), plus the shared
+    // trigger and labelled effects the Phase-3 engine will dispatch on.
+    passive: {
+      id: raw.tradeoff.id,
+      name: raw.tradeoff.name,
+      description: raw.tradeoff.description,
+      trigger: raw.passive.trigger,
+      effects: raw.passive.effects,
+    },
     riders: raw.riders,
     movementHook: MOVEMENT_HOOK_BY_SPEC[harness.id],
     vehicle: harnessVehicle(harness.id),
@@ -268,18 +407,57 @@ export const SPECS = deepFreeze(HARNESSES.map(harness => {
 
 const SPEC_BY_ID = Object.fromEntries(SPECS.map(spec => [spec.id, spec]));
 
+// ---------------------------------------------------------------------------
+// Gear resolution
+// ---------------------------------------------------------------------------
+// `resolveKit` accepts the same gear shapes `resolveGear` accepts (a
+// `{slot: id}` map or an id array) or an already-resolved `{items, modifiers}`
+// record, as core.mjs keeps `actor.gear` in the resolved shape. The result is
+// a frozen *snapshot*: `clonePlain` copies the resolveGear output first so
+// freezing it can never freeze the shared GEAR table or a caller's object.
+const isResolvedGear = value => value !== null && typeof value === 'object'
+  && Array.isArray(value.items)
+  && value.modifiers !== null && typeof value.modifiers === 'object';
+
+const clonePlain = value => {
+  if (Array.isArray(value)) return value.map(clonePlain);
+  if (value && typeof value === 'object') {
+    const copy = {};
+    for (const [key, entry] of Object.entries(value)) copy[key] = clonePlain(entry);
+    return copy;
+  }
+  return value;
+};
+
+function resolveKitGear(gear) {
+  if (gear === null || gear === undefined) return null;
+  const resolved = isResolvedGear(gear) ? gear : resolveGear(gear);
+  return deepFreeze(clonePlain(resolved));
+}
+
+// Fingerprint segment for resolved gear: item ids sorted so `{primary, utility}`
+// and `{utility, primary}` hash the same. Supplied gear that resolves to no
+// known item still gets a stable `gear-none` segment.
+function gearFingerprintKey(gear) {
+  if (gear === null) return null;
+  const ids = gear.items.map(item => item.id).filter(Boolean).sort();
+  return ids.length > 0 ? `gear-${ids.join('+')}` : 'gear-none';
+}
+
 // The one resolver. Normalises through `resolveLoadout` first, so the Claude
 // Code lock and the unknown-character/unknown-harness fallbacks behave exactly
 // like every other loadout path. Stats always come from CHARACTERS. `gear` is
-// passed through untouched (Phase 1 gear is inert, so it is not frozen and not
-// part of the fingerprint); `fingerprint` is the deterministic identity of the
-// resolved class/spec pair.
+// resolved through `resolveGear` (or accepted already-resolved) and frozen;
+// `fingerprint` is the deterministic identity of the resolved class/spec pair,
+// extended with the sorted gear item ids when gear is supplied.
 export function resolveKit(character, harness, gear) {
   const loadout = resolveLoadout(character, harness);
   const kit = KIT_BY_ID[loadout.character];
   const spec = SPEC_BY_ID[loadout.harness];
   const movement = VERB_BY_ID[kit.movement];
   const stats = CHARACTERS.find(entry => entry.id === loadout.character).stats;
+  const resolvedGear = resolveKitGear(gear);
+  const gearKey = gearFingerprintKey(resolvedGear);
   return Object.freeze({
     character: loadout.character,
     harness: loadout.harness,
@@ -287,12 +465,16 @@ export function resolveKit(character, harness, gear) {
     kind: spec.kind,
     active: spec.active,
     tradeoff: spec.tradeoff,
+    passive: spec.passive,
     rider: spec.riders[kit.wing],
     movement,
     movementHook: spec.movementHook,
     stats: Object.freeze({...stats}),
     affinity: kit.affinity,
-    gear: gear ?? null,
-    fingerprint: `${loadout.character}:${loadout.harness}:${kit.verb.id}:${movement.id}:${spec.kind}`,
+    gear: resolvedGear,
+    fingerprint: [
+      loadout.character, loadout.harness, kit.verb.id, movement.id, spec.kind,
+      ...(gearKey === null ? [] : [gearKey]),
+    ].join(':'),
   });
 }
