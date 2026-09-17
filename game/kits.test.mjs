@@ -212,8 +212,11 @@ test('resolveKit resolves, snapshots and fingerprints gear without touching the 
   const gearMap = {primary: 'scope', utility: 'servo'};
   const resolved = resolveKit('mistral', 'cline', gearMap);
   assert.deepEqual(resolved.gear.items.map(item => item.id), ['scope', 'servo']);
-  assert.equal(resolved.gear.modifiers.spread, .85);
-  assert.equal(resolved.gear.modifiers.speed, 1.08);
+  // Derived from the resolver so gear re-tuning (P3-C caps, axis budgets) does
+  // not silently stale this pin: resolveKit's snapshot must equal the live result.
+  const expected = resolveGear(gearMap).modifiers;
+  assert.equal(resolved.gear.modifiers.spread, expected.spread);
+  assert.equal(resolved.gear.modifiers.speed, expected.speed);
   assert.ok(deepFrozen(resolved), 'geared kit is deeply frozen');
   assert.ok(deepFrozen(resolved.gear), 'resolved gear is deeply frozen');
   assert.ok(!Object.isFrozen(gearMap), 'caller gear map is untouched');
