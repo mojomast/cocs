@@ -32,11 +32,14 @@ export function skyPhase(map={}){
 
 // Pure, deterministic palette. Returns hex strings so both renderers can use it.
 // `haze` is the warm/cool band that softens the horizon-to-sky transition.
+// Day keeps a saturated blue zenith over a warm dust haze, dusk burns orange at
+// the horizon under a violet zenith, and night keeps a faint airglow band above
+// a near-black ground so the horizon never reads as a hard black edge.
 export function skyPalette(background='#090f17',phase='day'){
  const base=new T.Color(background),mix=(target,amount)=>'#'+base.clone().lerp(new T.Color(target),amount).getHexString();
- if(phase==='night')return Object.freeze({zenith:mix('#050912',.62),horizon:mix('#16233d',.4),ground:mix('#000000',.72),haze:mix('#2a4a6e',.28),star:'#ffffff',starDim:'#9fb6ff',disk:'#e6ecff',diskGlow:'#7fa6ff',halo:'#8fe6ff'});
- if(phase==='dusk')return Object.freeze({zenith:mix('#1b1436',.5),horizon:mix('#ff8a4c',.5),ground:mix('#000000',.6),haze:mix('#ffb066',.34),star:'#fff2cf',starDim:'#ffb27a',disk:'#ffb066',diskGlow:'#ff7a3c',halo:'#ffd9a0'});
- return Object.freeze({zenith:mix('#ffffff',.4),horizon:mix('#ffffff',.08),ground:mix('#000000',.5),haze:mix('#dff1ff',.26),star:'#ffffff',starDim:'#cfe4ff',disk:'#fff3c4',diskGlow:'#ffd98a',halo:'#bff0ff'});
+ if(phase==='night')return Object.freeze({zenith:mix('#040812',.7),horizon:mix('#1b2b47',.45),ground:mix('#000000',.8),haze:mix('#2c4a6e',.3),star:'#ffffff',starDim:'#9fb6ff',disk:'#e6ecff',diskGlow:'#7fa6ff',halo:'#8fe6ff'});
+ if(phase==='dusk')return Object.freeze({zenith:mix('#2a2350',.62),horizon:mix('#ff8a4c',.55),ground:mix('#0d0a0e',.72),haze:mix('#ff9e5e',.38),star:'#fff2cf',starDim:'#ffb27a',disk:'#ffb066',diskGlow:'#ff7a3c',halo:'#ffd9a0'});
+ return Object.freeze({zenith:mix('#a9cdf5',.46),horizon:mix('#ffd9a8',.22),ground:mix('#2e2c28',.5),haze:mix('#f0dcc0',.3),star:'#ffffff',starDim:'#cfe4ff',disk:'#fff3c4',diskGlow:'#ffcf86',halo:'#bfe0ff'});
 }
 
 // Smooth horizon-weighted dome gradient. `t` is the normalized dome height
@@ -45,8 +48,10 @@ export function skyPalette(background='#090f17',phase='day'){
 // Returns a plain {r,g,b} in the working color space; deterministic and finite.
 export function skyGradientAt(t,palette){
  const u=clamp(Number.isFinite(t)?t:0,-1,1),zenith=new T.Color(palette?.zenith||'#ffffff'),horizon=new T.Color(palette?.horizon||'#000000'),ground=new T.Color(palette?.ground||'#000000'),haze=new T.Color(palette?.haze||palette?.horizon||'#000000'),color=new T.Color();
- if(u>=0){const k=Math.pow(u,.72)*.92;color.copy(horizon).lerp(zenith,k);const band=Math.max(0,1-u/.22)*.3;if(band>0)color.lerp(haze,band);}
- else color.copy(horizon).lerp(ground,Math.min(1,-u*1.35));
+ // The upper dome eases from the hazy horizon into the zenith; the thicker
+ // near-horizon haze band keeps distant terrain from meeting a hard sky edge.
+ if(u>=0){const k=Math.pow(u,.68)*.94;color.copy(horizon).lerp(zenith,k);const band=Math.max(0,1-u/.26)*.32;if(band>0)color.lerp(haze,band);}
+ else color.copy(horizon).lerp(ground,Math.min(1,Math.pow(-u,1.2)*1.5));
  return {r:color.r,g:color.g,b:color.b};
 }
 
@@ -89,11 +94,11 @@ export function addSky(world,{background='#090f17',radius=185,phase='day',seed=1
  const disc=new T.Mesh(new T.CircleGeometry(radius*.05,32),new T.MeshBasicMaterial({color:palette.disk,fog:false,depthWrite:false,transparent:true,opacity:.95}));
  disc.position.copy(direction).multiplyScalar(radius*.92);disc.lookAt(0,0,0);disc.frustumCulled=false;disc.renderOrder=-1;disc.userData.environment=true;disc.userData.sun=true;
  mesh.add(disc);
- const glow=new T.Mesh(new T.CircleGeometry(radius*.13,32),new T.MeshBasicMaterial({color:palette.diskGlow,fog:false,depthWrite:false,transparent:true,opacity:.22,blending:T.AdditiveBlending}));
+ const glow=new T.Mesh(new T.CircleGeometry(radius*(phase==='dusk'?.17:.13),32),new T.MeshBasicMaterial({color:palette.diskGlow,fog:false,depthWrite:false,transparent:true,opacity:phase==='dusk'?.28:.22,blending:T.AdditiveBlending}));
  glow.position.copy(direction).multiplyScalar(radius*.9);glow.lookAt(0,0,0);glow.frustumCulled=false;glow.renderOrder=-1;glow.userData.environment=true;
  mesh.add(glow);
  // Additive horizon haze band so distant terrain meets the gradient softly.
- const haze=new T.Mesh(new T.SphereGeometry(radius*.985,32,8,0,Math.PI*2,Math.PI*.34,Math.PI*.24),new T.MeshBasicMaterial({color:palette.horizon,transparent:true,opacity:phase==='night'?.12:.2,side:T.BackSide,depthWrite:false,fog:false,blending:T.AdditiveBlending}));
+ const haze=new T.Mesh(new T.SphereGeometry(radius*.985,32,8,0,Math.PI*2,Math.PI*.34,Math.PI*.24),new T.MeshBasicMaterial({color:palette.horizon,transparent:true,opacity:phase==='dusk'?.26:phase==='night'?.09:.16,side:T.BackSide,depthWrite:false,fog:false,blending:T.AdditiveBlending}));
  haze.frustumCulled=false;haze.renderOrder=-1;haze.userData.environment=true;haze.userData.atmosphere=true;
  mesh.add(haze);
  if(halo){
@@ -116,7 +121,7 @@ export function addMountains(world,{background='#090f17',radius=150,count=26,see
   dummy.scale.set(width,height,width*(.7+random()*.5));
   dummy.updateMatrix();
   mesh.setMatrixAt(i,dummy.matrix);
-  color.copy(rock).lerp(haze,clamp(.35+random()*.4,0,1));
+  color.copy(rock).lerp(haze,clamp(.16+random()*.32,0,1));
   mesh.setColorAt(i,color);
  }
  mesh.instanceMatrix.needsUpdate=true;
@@ -285,12 +290,12 @@ export function updateScatterSway(meshes,time,{strength=1}={}){
 // gate the pooled emitters on WebGL without changing the look per frame.
 export const AMBIENT_KINDS=Object.freeze(['dust','leaf','ember','ash','snow','spore']);
 const AMBIENT_TABLE=Object.freeze({
- dust:{color:'#c9d8e6',size:.03,life:3.6,rate:5,drift:.6,rise:.08,additive:false,smoke:null},
- leaf:{color:'#c9a24a',size:.05,life:4.2,rate:4,drift:1.1,rise:.05,additive:false,smoke:{color:'#8f9a86',size:.3,life:6,rise:.5,rate:2}},
+ dust:{color:'#c6b9a3',size:.03,life:3.6,rate:5,drift:.6,rise:.08,additive:false,smoke:null},
+ leaf:{color:'#c29a4c',size:.05,life:4.2,rate:4,drift:1.1,rise:.05,additive:false,smoke:{color:'#8b8f79',size:.3,life:6,rise:.5,rate:2}},
  ember:{color:'#ff9a4c',size:.04,life:3.2,rate:6,drift:.8,rise:.5,additive:true,smoke:{color:'#5b5348',size:.34,life:6.5,rise:.6,rate:2}},
- ash:{color:'#9aa0a6',size:.035,life:4.6,rate:5,drift:.7,rise:.12,additive:false,smoke:{color:'#6f6a63',size:.32,life:6,rise:.55,rate:2}},
+ ash:{color:'#918a82',size:.035,life:4.6,rate:5,drift:.7,rise:.12,additive:false,smoke:{color:'#6f6a63',size:.32,life:6,rise:.55,rate:2}},
  snow:{color:'#eef6ff',size:.045,life:5.4,rate:6,drift:.9,rise:-.06,additive:false,smoke:null},
- spore:{color:'#a8f0c0',size:.035,life:4.4,rate:4,drift:.5,rise:.1,additive:true,smoke:null},
+ spore:{color:'#b4e0b0',size:.035,life:4.4,rate:4,drift:.5,rise:.1,additive:true,smoke:null},
 });
 // Explicit biome -> ambient particle mapping. An authored `arena.biome` wins so
 // procedural maps (dune-ravine, ember-caldera) pick the right motes even when
@@ -319,10 +324,10 @@ export const WEATHER_KINDS=Object.freeze(['clear','overcast','rain','snow','ash'
 export const PRECIP_KINDS=Object.freeze(new Set(['rain','snow','ash','storm']));
 const WEATHER_PRESETS=Object.freeze({
  clear:Object.freeze({kind:'clear',particles:0,streakRatio:.4,color:'#cfe0ef',size:.03,life:3.4,speed:5,drift:.4,fall:1,density:1,exposure:1,audio:'default',material:Object.freeze({tint:'#000000',wet:0,dark:0}),lightning:null,wind:1}),
- overcast:Object.freeze({kind:'overcast',particles:0,streakRatio:.4,color:'#c9d3dc',size:.03,life:4,speed:4,drift:.5,fall:1,density:1.12,exposure:.86,audio:'storm',material:Object.freeze({tint:'#2c3540',wet:.04,dark:.06}),lightning:Object.freeze({chance:.12,interval:Object.freeze([5,11]),thunder:Object.freeze([.9,2.4])}),wind:1.25}),
+ overcast:Object.freeze({kind:'overcast',particles:0,streakRatio:.4,color:'#c1cbd4',size:.03,life:4,speed:4,drift:.5,fall:1,density:1.08,exposure:.88,audio:'storm',material:Object.freeze({tint:'#39404a',wet:.04,dark:.06}),lightning:Object.freeze({chance:.12,interval:Object.freeze([5,11]),thunder:Object.freeze([.9,2.4])}),wind:1.25}),
  rain:Object.freeze({kind:'rain',particles:90,streakRatio:1.3,color:'#aebccb',size:.028,life:1.15,speed:17,drift:.25,fall:19,density:1.35,exposure:.8,audio:'storm',material:Object.freeze({tint:'#28323d',wet:.16,dark:.1}),lightning:Object.freeze({chance:.22,interval:Object.freeze([4,9]),thunder:Object.freeze([.7,2])}),wind:1.5}),
  snow:Object.freeze({kind:'snow',particles:72,streakRatio:.4,color:'#eef6ff',size:.045,life:3.4,speed:2.4,drift:1,fall:2.4,density:1.2,exposure:1.04,audio:'cold',material:Object.freeze({tint:'#c3d1de',wet:.05,dark:0}),lightning:null,wind:1.1}),
- ash:Object.freeze({kind:'ash',particles:64,streakRatio:.4,color:'#9aa0a6',size:.035,life:3.8,speed:1.8,drift:.8,fall:.9,density:1.25,exposure:.85,audio:'hot',material:Object.freeze({tint:'#3a3129',wet:0,dark:.12}),lightning:null,wind:1.2}),
+ ash:Object.freeze({kind:'ash',particles:64,streakRatio:.4,color:'#8f8880',size:.035,life:3.8,speed:1.8,drift:.8,fall:.9,density:1.25,exposure:.85,audio:'hot',material:Object.freeze({tint:'#3a3129',wet:0,dark:.12}),lightning:null,wind:1.2}),
  storm:Object.freeze({kind:'storm',particles:130,streakRatio:1.15,color:'#9fb0c2',size:.03,life:1.4,speed:13,drift:.7,fall:15,density:1.6,exposure:.7,audio:'storm',material:Object.freeze({tint:'#1e2833',wet:.22,dark:.16}),lightning:Object.freeze({chance:1,interval:Object.freeze([2.2,5.5]),thunder:Object.freeze([.5,1.6])}),wind:2}),
 });
 // Per-biome mood, tint and particle character. `biome` names match the level

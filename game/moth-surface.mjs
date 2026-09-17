@@ -26,25 +26,28 @@ export const MOTH_GRID_KINDS = Object.freeze([
 ]);
 
 // Sensible per-kind defaults for natural, non-repeating surfaces. Kept small
-// and plain so callers can spread/override them.
+// and plain so callers can spread/override them. `fractureStrength` drives the
+// ridged crack layer; the rest shape the broad patch field and the rotated
+// second sample that hides the baked tile's repetition.
 const MOTH_NATURAL_PRESETS = Object.freeze({
-  rock: { macroScale: 0.012, macroStrength: 0.5, breakScale: 0.37, breakStrength: 0.4, rotation: 0.7 },
-  sand: { macroScale: 0.008, macroStrength: 0.35, breakScale: 0.21, breakStrength: 0.3, rotation: 1.1 },
-  ice: { macroScale: 0.02, macroStrength: 0.4, breakScale: 0.55, breakStrength: 0.3, rotation: 0.4 },
-  grass: { macroScale: 0.02, macroStrength: 0.5, breakScale: 0.29, breakStrength: 0.45, rotation: 0.9 },
-  weathered_concrete: { macroScale: 0.01, macroStrength: 0.45, breakScale: 0.41, breakStrength: 0.35, rotation: 0.6 },
-  rough_stucco: { macroScale: 0.014, macroStrength: 0.42, breakScale: 0.33, breakStrength: 0.4, rotation: 0.8 },
-  alien_chitin: { macroScale: 0.025, macroStrength: 0.55, breakScale: 0.47, breakStrength: 0.5, rotation: 1.3 },
-  metal: { macroScale: 0.009, macroStrength: 0.3, breakScale: 0.61, breakStrength: 0.25, rotation: 0.5 },
-  concrete: { macroScale: 0.012, macroStrength: 0.45, breakScale: 0.37, breakStrength: 0.35, rotation: 0.7 },
+  rock: { macroScale: 0.014, macroStrength: 0.6, breakScale: 0.41, breakStrength: 0.42, rotation: 0.7, fractureStrength: 0.55 },
+  sand: { macroScale: 0.009, macroStrength: 0.34, breakScale: 0.24, breakStrength: 0.28, rotation: 1.1, fractureStrength: 0.2 },
+  ice: { macroScale: 0.024, macroStrength: 0.42, breakScale: 0.6, breakStrength: 0.3, rotation: 0.4, fractureStrength: 0.3 },
+  grass: { macroScale: 0.02, macroStrength: 0.5, breakScale: 0.31, breakStrength: 0.45, rotation: 0.9, fractureStrength: 0.3 },
+  weathered_concrete: { macroScale: 0.011, macroStrength: 0.5, breakScale: 0.44, breakStrength: 0.38, rotation: 0.6, fractureStrength: 0.55 },
+  rough_stucco: { macroScale: 0.015, macroStrength: 0.45, breakScale: 0.35, breakStrength: 0.4, rotation: 0.8, fractureStrength: 0.35 },
+  alien_chitin: { macroScale: 0.026, macroStrength: 0.55, breakScale: 0.5, breakStrength: 0.5, rotation: 1.3, fractureStrength: 0.42 },
+  metal: { macroScale: 0.01, macroStrength: 0.32, breakScale: 0.62, breakStrength: 0.25, rotation: 0.5, fractureStrength: 0.25 },
+  concrete: { macroScale: 0.013, macroStrength: 0.5, breakScale: 0.4, breakStrength: 0.36, rotation: 0.7, fractureStrength: 0.5 },
 });
 
 const MOTH_FALLBACK_CONFIG = Object.freeze({
-  macroScale: 0.012,
-  macroStrength: 0.45,
-  breakScale: 0.37,
-  breakStrength: 0.35,
+  macroScale: 0.013,
+  macroStrength: 0.5,
+  breakScale: 0.4,
+  breakStrength: 0.36,
   rotation: 0.7,
+  fractureStrength: 0.5,
 });
 
 function mothNumber(value, fallback) {
@@ -63,6 +66,7 @@ export function mothSurfaceBreakConfig(kind) {
     breakScale: preset.breakScale,
     breakStrength: preset.breakStrength,
     rotation: preset.rotation,
+    fractureStrength: preset.fractureStrength,
   };
 }
 
@@ -70,7 +74,9 @@ const MOTH_FRAGMENT_ANCHOR = '#include <map_fragment>';
 const MOTH_VERTEX_ANCHOR = '#include <fog_vertex>';
 
 // Cheap, closed-form hash + fbm-ish value noise. No textures, no derivatives,
-// three octaves at most.
+// three octaves at most. `mothRidge` is the ridged companion used for fracture
+// veins: it folds the same value noise around its midpoint so the high values
+// form connected lines instead of blobs.
 const MOTH_NOISE_GLSL = [
   'float mothHash( vec2 p ) {',
   '  return fract( sin( dot( p, vec2( 127.1, 311.7 ) ) ) * 43758.5453123 );',
@@ -88,6 +94,23 @@ const MOTH_NOISE_GLSL = [
   '      mothSmooth.y );',
   '    mothSum += mothAmp * mothN;',
   '    p *= 2.0;',
+  '    mothAmp *= 0.5;',
+  '  }',
+  '  return mothSum;',
+  '}',
+  'float mothRidge( vec2 p ) {',
+  '  float mothAmp = 0.62;',
+  '  float mothSum = 0.0;',
+  '  for ( int i = 0; i < 2; i++ ) {',
+  '    vec2 mothCell = floor( p );',
+  '    vec2 mothFrac = fract( p );',
+  '    vec2 mothSmooth = mothFrac * mothFrac * ( 3.0 - 2.0 * mothFrac );',
+  '    float mothN = mix(',
+  '      mix( mothHash( mothCell ), mothHash( mothCell + vec2( 1.0, 0.0 ) ), mothSmooth.x ),',
+  '      mix( mothHash( mothCell + vec2( 0.0, 1.0 ) ), mothHash( mothCell + vec2( 1.0, 1.0 ) ), mothSmooth.x ),',
+  '      mothSmooth.y );',
+  '    mothSum += mothAmp * ( 1.0 - abs( 2.0 * mothN - 1.0 ) );',
+  '    p *= 2.07;',
   '    mothAmp *= 0.5;',
   '  }',
   '  return mothSum;',
@@ -116,6 +139,7 @@ export function enhanceMothMaterial(material, options = {}) {
   const uMothBreakScale = { value: mothNumber(opts.breakScale, config.breakScale) };
   const uMothBreakStrength = { value: mothNumber(opts.breakStrength, config.breakStrength) };
   const uMothRotation = { value: mothNumber(opts.rotation, config.rotation) };
+  const uMothFractureStrength = { value: mothNumber(opts.fractureStrength, config.fractureStrength) };
 
   material.userData.mothSurface = true;
   material.userData.mothSurfaceUniforms = {
@@ -125,6 +149,7 @@ export function enhanceMothMaterial(material, options = {}) {
     uMothBreakScale,
     uMothBreakStrength,
     uMothRotation,
+    uMothFractureStrength,
   };
   material.userData.setMothMacroStrength = (value) => {
     const next = Number(value);
@@ -136,6 +161,11 @@ export function enhanceMothMaterial(material, options = {}) {
     if (Number.isFinite(next)) uMothBreakStrength.value = next;
     return uMothBreakStrength.value;
   };
+  material.userData.setMothFractureStrength = (value) => {
+    const next = Number(value);
+    if (Number.isFinite(next)) uMothFractureStrength.value = next;
+    return uMothFractureStrength.value;
+  };
 
   material.onBeforeCompile = (shader) => {
     // Share the stored uniform objects so the setters mutate the live program.
@@ -145,6 +175,7 @@ export function enhanceMothMaterial(material, options = {}) {
     shader.uniforms.uMothBreakScale = uMothBreakScale;
     shader.uniforms.uMothBreakStrength = uMothBreakStrength;
     shader.uniforms.uMothRotation = uMothRotation;
+    shader.uniforms.uMothFractureStrength = uMothFractureStrength;
 
     // Vertex: capture the world position while `transformed` is in scope.
     shader.vertexShader = `varying vec3 vMothWorld;\n${shader.vertexShader}`;
@@ -161,6 +192,7 @@ export function enhanceMothMaterial(material, options = {}) {
       'uniform float uMothBreakScale;',
       'uniform float uMothBreakStrength;',
       'uniform float uMothRotation;',
+      'uniform float uMothFractureStrength;',
     ];
     if (macroTexture) declarations.push('uniform sampler2D uMothMacro;');
     declarations.push(...MOTH_NOISE_GLSL);
@@ -168,8 +200,15 @@ export function enhanceMothMaterial(material, options = {}) {
     const body = [
       `// ${MOTH_SURFACE_MARKER}`,
       '#ifdef USE_MAP',
-      '  float mothMacro = mothNoise( vMothWorld.xz * uMothMacroScale );',
-      '  diffuseColor.rgb *= mix( 1.0, 0.6 + mothMacro * 0.8, uMothMacroStrength );',
+      '  vec2 mothP = vMothWorld.xz * uMothMacroScale;',
+      '  float mothRegion = mothNoise( mothP ) * 0.72 + mothNoise( mothP * 0.37 + vec2( 13.1, 7.7 ) ) * 0.28;',
+      '  float mothCracks = mothRidge( mothP * 2.6 );',
+      // Cracks only bite where the broad region field is raised, so wear reads
+      // as patchy fracture systems instead of uniform noise across the surface.
+      '  float mothVeil = smoothstep( 0.3, 0.74, mothRegion );',
+      '  float mothShade = mix( 1.0, 0.58 + mothRegion * 0.84, uMothMacroStrength );',
+      '  mothShade *= 1.0 - mothCracks * mothVeil * uMothFractureStrength;',
+      '  diffuseColor.rgb *= mothShade;',
     ];
     if (macroTexture) {
       body.push(

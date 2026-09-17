@@ -24,15 +24,35 @@ const fbm=(x,y,seed,octaves=4)=>{
  for(let i=0;i<octaves;i++){total+=noise(x*freq,y*freq,seed+i*131)*amp;norm+=amp;amp*=.5;freq*=2;}
  return total/norm;
 };
+// Periodic variants. Surface maps are sampled with RepeatWrapping, so a field
+// whose integer lattice wraps at the tile edge tiles without a visible seam.
+// `px`/`py` are the lattice periods (cells per tile) along each axis; fbm
+// octaves double both, so the period stays integral.
+const pnoise=(x,y,px,py,seed)=>{
+ const xi=Math.floor(x),yi=Math.floor(y),xf=x-xi,yf=y-yi;
+ const x0=((xi%px)+px)%px,x1=((xi+1)%px+px)%px,y0=((yi%py)+py)%py,y1=((yi+1)%py+py)%py;
+ const a=hash(x0,y0,seed),b=hash(x1,y0,seed),c=hash(x0,y1,seed),d=hash(x1,y1,seed);
+ const u=smooth(xf),v=smooth(yf);
+ return (a*(1-u)+b*u)*(1-v)+(c*(1-u)+d*u)*v;
+};
+const pfbm=(x,y,px,py,seed,octaves=4)=>{
+ let total=0,amp=.5,freq=1,periodX=px,periodY=py,norm=0;
+ for(let i=0;i<octaves;i++){total+=pnoise(x*freq,y*freq,periodX,periodY,seed+i*131)*amp;norm+=amp;amp*=.5;freq*=2;periodX*=2;periodY*=2;}
+ return total/norm;
+};
 
 const LAYERS={
- concrete:{scale:5,contrast:.22,rough:[.6,.95],hue:[1,1,1],grain:.5},
- tile:{scale:7,contrast:.3,rough:[.45,.8],hue:[1,1,1],grain:.4},
- metal:{scale:11,contrast:.16,rough:[.25,.55],hue:[.98,1,1],grain:.7},
- sand:{scale:9,contrast:.18,rough:[.82,1],hue:[1.05,1,.92],grain:.3},
- grass:{scale:13,contrast:.26,rough:[.72,1],hue:[.95,1.05,.86],grain:.5},
- rock:{scale:6,contrast:.34,rough:[.78,1],hue:[1.03,.99,.94],grain:.6},
- ice:{scale:8,contrast:.2,rough:[.15,.4],hue:[.96,1,1.06],grain:.4},
+ // `stain` darkens water/dirt patches, `streak` adds vertical wash marks,
+ // `dust` lifts dry deposits and `temperature` drifts the channels warm/cool
+ // across the tile. All are driven by the same field family as the height, so
+ // weathering reads as part of the surface instead of a decal layer.
+ concrete:{scale:5,contrast:.24,rough:[.6,.95],hue:[1,1,1],grain:.5,stain:.2,streak:.28,temperature:.04},
+ tile:{scale:7,contrast:.3,rough:[.45,.8],hue:[1,1,1],grain:.4,stain:.14,streak:.14,temperature:.035},
+ metal:{scale:11,contrast:.16,rough:[.25,.55],hue:[.98,1,1],grain:.7,stain:.08,streak:.1,temperature:.025},
+ sand:{scale:9,contrast:.2,rough:[.82,1],hue:[1.05,1,.92],grain:.3,stain:.06,dust:.12,temperature:.07},
+ grass:{scale:13,contrast:.28,rough:[.72,1],hue:[.95,1.05,.86],grain:.5,stain:.16,temperature:.1},
+ rock:{scale:6,contrast:.34,rough:[.78,1],hue:[1.03,.99,.94],grain:.6,stain:.24,streak:.12,temperature:.05},
+ ice:{scale:8,contrast:.2,rough:[.15,.4],hue:[.96,1,1.06],grain:.4,streak:.26,stain:.05,temperature:.05},
  carbon_fiber:{scale:8,contrast:.3,rough:[.18,.4],hue:[.2,.22,.25],grain:.8,type:'carbon_fiber'},
  metal_grating:{scale:6,contrast:.45,rough:[.28,.88],hue:[.55,.58,.62],grain:.9,type:'metal_grating'},
  hex_paneling:{scale:5,contrast:.35,rough:[.26,.75],hue:[.6,.65,.72],grain:.75,type:'hex_paneling'},
@@ -146,7 +166,49 @@ export function canonicalTextureKind(kind) {
 
 const cache=new Map();
 
-function generatePatternPixel(kind, u, v, seed, channel, edge) {
+// One coherent multi-scale height/wear field per surface tile. Albedo,
+// roughness and the tangent-space normal are all derived from it, so a pit in
+// the albedo has matching relief and roughness rather than three unrelated
+// noise stacks. The field is periodic at the tile edge (see pnoise) and costs
+// one bounded pass per surface kind, reused by every requested channel.
+const SURFACE_RELIEF_GAIN=2.1;   // macro/meso contrast on the albedo
+const SURFACE_MICRO_GAIN=.12;    // per-pixel tooth on top of the smooth field
+const SURFACE_NORMAL_GAIN=15;    // one-texel slope -> tangent deflection
+
+function buildSurfaceField(layer,seed,size){
+ const count=size*size,height=new Float32Array(count),macro=new Float32Array(count),wear=new Float32Array(count),streak=new Float32Array(count);
+ const period=Math.max(2,Math.round(layer.scale));
+ const macroPeriod=Math.max(2,Math.round(period*.24));
+ const warpPeriod=Math.max(2,Math.round(period*.4));
+ // Cap the fine grain at two texels per cell so it stays a material tooth
+ // instead of aliasing into white noise at 96 px tiles.
+ const toothPeriod=Math.max(2,Math.min(period*6,Math.floor(size/2)));
+ const wearPeriod=Math.max(2,Math.round(period*.5));
+ const streakPeriodX=Math.max(3,period*2),streakPeriodY=Math.max(2,Math.round(period*.34));
+ for(let y=0;y<size;y++){
+  const ty=(y+.5)/size;
+  for(let x=0;x<size;x++){
+   const tx=(x+.5)/size,index=y*size+x;
+   const macroValue=pfbm(tx*macroPeriod,ty*macroPeriod,macroPeriod,macroPeriod,seed+211,3);
+   // Domain warp: midsize features bend around the broad weathering instead of
+   // marching across the tile in straight noise rows.
+   const warpX=(pfbm(tx*warpPeriod+5.2,ty*warpPeriod+1.7,warpPeriod,warpPeriod,seed+53,2)-.5)*.7;
+   const warpY=(pfbm(tx*warpPeriod+9.1,ty*warpPeriod-3.4,warpPeriod,warpPeriod,seed+419,2)-.5)*.7;
+   const base=pfbm(tx*period+warpX,ty*period+warpY,period,period,seed,4);
+   const tooth=pfbm(tx*toothPeriod+warpX*.4,ty*toothPeriod+warpY*.4,toothPeriod,toothPeriod,seed+17,3);
+   height[index]=base*.5+tooth*.24+macroValue*.18;
+   macro[index]=macroValue;
+   // Exposure follows the relief: raised faces take traffic and weather while
+   // hollows shelter dirt, so wear nudges roughness in the same direction as
+   // the albedo relief instead of reading as an unrelated stain layer.
+   wear[index]=height[index]*.6+pfbm(tx*wearPeriod+2.3,ty*wearPeriod-1.9,wearPeriod,wearPeriod,seed+601,3)*.4;
+   streak[index]=pfbm(tx*streakPeriodX+1.1,ty*streakPeriodY+4.7,streakPeriodX,streakPeriodY,seed+907,3);
+  }
+ }
+ return {height,macro,wear,streak};
+}
+
+function generatePatternPixel(kind, u, v, seed, channel, edge, layerScale = 1) {
   if (kind === 'carbon_fiber') {
     const cu = u * 4, cv = v * 4;
     const bx = Math.floor(cu), by = Math.floor(cv);
@@ -262,23 +324,33 @@ function generatePatternPixel(kind, u, v, seed, channel, edge) {
   }
 
   if (kind === 'weathered_concrete') {
-    const base = fbm(u, v, seed, 4);
-    const fine = fbm(u * 4.2, v * 4.2, seed + 17, 3);
-    const grit = noise(u * 24, v * 24, seed + 101);
-    const fissure = Math.abs(noise(u * 3.5, v * 3.5, seed + 307) - 0.5);
-    const isCrack = fissure < 0.024;
+    // One height field for the tile: broad pour variation, fine aggregate and a
+    // thin fissure network carved out of it. Albedo stains and vertical wash
+    // marks ride the same weathering so the surface reads as one aged material.
+    const wcHeight = (pu, pv) => {
+      const base = fbm(pu, pv, seed, 4);
+      const fine = fbm(pu * 4.2, pv * 4.2, seed + 17, 3);
+      const grit = noise(pu * 24, pv * 24, seed + 101);
+      const fissure = Math.abs(noise(pu * 3.5, pv * 3.5, seed + 307) - 0.5);
+      const crack = fissure < 0.024 ? 1 - fissure / 0.024 : 0;
+      return { base, fine, grit, crack, h: base * 0.52 + fine * 0.28 + grit * 0.14 - crack * 0.42 };
+    };
+    const sample = wcHeight(u, v);
     if (channel === 0) {
-      if (isCrack) return [44, 42, 40];
-      const lum = 0.55 + base * 0.3 + fine * 0.15 + (grit - 0.5) * 0.1;
-      return [clamp255(lum * 255 * 0.96), clamp255(lum * 255 * 0.94), clamp255(lum * 255 * 0.90)];
+      const damp = fbm(u * 0.4 + 2.1, v * 0.4 - 1.3, seed + 601, 3);
+      const stain = Math.max(0, damp - 0.52) * 1.7;
+      const streak = Math.max(0, fbm(u * 7.4 + 1.1, v * 0.5 + 4.7, seed + 907, 3) - 0.58) * 2.2;
+      if (sample.crack > 0.55) return [52, 49, 46];
+      const lum = 0.52 + sample.h * 0.46 - stain * 0.18 - streak * 0.2;
+      return [clamp255(lum * 255 * 0.97), clamp255(lum * 255 * 0.95), clamp255(lum * 255 * 0.91)];
     } else if (channel === 1) {
-      const r = isCrack ? 245 : clamp255((0.68 + base * 0.28 + (grit - 0.5) * 0.12) * 255);
+      const damp = Math.max(0, fbm(u * 0.4 + 2.1, v * 0.4 - 1.3, seed + 601, 3) - 0.52) * 1.2;
+      const r = clamp255((0.6 + sample.h * 0.3 + sample.crack * 0.2 + damp * 0.12) * 255);
       return [r, r, r];
     } else {
-      const dx = (fbm(u + edge, v, seed, 4) - base) * 5;
-      const dy = (fbm(u, v + edge, seed, 4) - base) * 5;
-      const cnx = isCrack ? (fissure - 0.012) * 20 : 0;
-      return [clamp255(128 - (dx + cnx) * 128), clamp255(128 - (dy + cnx) * 128), 255];
+      const dx = (wcHeight(u + edge, v).h - sample.h) * layerScale * 5;
+      const dy = (wcHeight(u, v + edge).h - sample.h) * layerScale * 5;
+      return [clamp255(128 - dx * 128), clamp255(128 - dy * 128), 255];
     }
   }
 
@@ -461,16 +533,19 @@ function generatePatternPixel(kind, u, v, seed, channel, edge) {
     const sinWave = Math.sin(waveU * Math.PI * 2);
     const cosWave = Math.cos(waveU * Math.PI * 2);
     const isTrough = sinWave < -0.65;
+    // Rain runs into the troughs and sits there, so rust blooms there while the
+    // exposed crests polish smooth: the two extremes describe different weather.
+    const crest = Math.max(0, sinWave);
     const rust = isTrough ? fbm(u * 4, v * 4, seed + 109, 3) : 0;
     const isRust = rust > 0.45;
     if (channel === 0) {
       if (isRust) {
         return [clamp255(145 * (0.8 + rust * 0.4)), clamp255(68 * (0.8 + rust * 0.4)), 32];
       }
-      const ridgeLum = 0.55 + sinWave * 0.25;
+      const ridgeLum = 0.55 + sinWave * 0.25 + crest * 0.07;
       return [clamp255(ridgeLum * 255 * 0.92), clamp255(ridgeLum * 255 * 0.96), clamp255(ridgeLum * 255)];
     } else if (channel === 1) {
-      const r = isRust ? 220 : clamp255((0.32 - sinWave * 0.12) * 255);
+      const r = isRust ? 220 : clamp255((0.34 - sinWave * 0.13 - crest * 0.08) * 255);
       return [r, r, r];
     } else {
       const nx = cosWave * 0.72;
@@ -508,21 +583,29 @@ function generatePatternPixel(kind, u, v, seed, channel, edge) {
   }
 
   if (kind === 'rough_stucco') {
-    const pebble1 = fbm(u * 2.5, v * 2.5, seed, 4);
-    const pebble2 = noise(u * 14, v * 14, seed + 67);
-    const pebble3 = noise(u * 32, v * 32, seed + 149);
-    const composite = pebble1 * 0.6 + pebble2 * 0.28 + pebble3 * 0.12;
-    const isPit = composite < 0.32;
+    // Pebble relief plus broad trowel patches. The patch term breaks up the
+    // uniform pebble field so large walls get regional tone/roughness drift.
+    const stuccoHeight = (pu, pv) => {
+      const pebble1 = fbm(pu * 2.5, pv * 2.5, seed, 4);
+      const pebble2 = noise(pu * 14, pv * 14, seed + 67);
+      const pebble3 = noise(pu * 32, pv * 32, seed + 149);
+      const patch = fbm(pu * 0.3 + 3.7, pv * 0.3 - 2.9, seed + 311, 3);
+      return { pebble1, pebble2, pebble3, patch, h: (pebble1 * 0.6 + pebble2 * 0.28 + pebble3 * 0.12) * 0.82 + patch * 0.18 };
+    };
+    const sample = stuccoHeight(u, v);
+    const isPit = sample.h < 0.34;
     if (channel === 0) {
-      if (isPit) return [72, 68, 62];
-      const lum = 0.58 + (composite - 0.5) * 0.38;
-      return [clamp255(lum * 240), clamp255(lum * 230), clamp255(lum * 215)];
+      if (isPit) return [74, 69, 62];
+      const temp = (sample.patch - 0.5) * 0.12;
+      const lum = 0.54 + (sample.h - 0.5) * 0.46;
+      return [clamp255(lum * 240 * (1 + temp)), clamp255(lum * 228 * (1 + temp * 0.2)), clamp255(lum * 210 * (1 - temp * 1.4))];
     } else if (channel === 1) {
-      const r = isPit ? 250 : clamp255((0.78 + (1 - composite) * 0.18) * 255);
+      const r = isPit ? 250 : clamp255((0.72 + (1 - sample.h) * 0.24) * 255);
       return [r, r, r];
     } else {
-      const dx = (fbm(u + edge, v, seed, 4) - pebble1) * 7.5 + (noise((u + edge) * 14, v * 14, seed + 67) - pebble2) * 3.5;
-      const dy = (fbm(u, v + edge, seed, 4) - pebble1) * 7.5 + (noise(u * 14, (v + edge) * 14, seed + 67) - pebble2) * 3.5;
+      const gain = layerScale * 3;
+      const dx = (stuccoHeight(u + edge, v).h - sample.h) * gain;
+      const dy = (stuccoHeight(u, v + edge).h - sample.h) * gain;
       return [clamp255(128 - dx * 128), clamp255(128 - dy * 128), 255];
     }
   }
@@ -564,14 +647,19 @@ export function clearSurfaceTextures(){for(const textures of cache.values())for(
 // steel, rubber, stone/concrete and energy read as physically distinct instead
 // of sharing one generic metallic value.
 export const MATERIAL_PRESETS=Object.freeze({
- paintedArmor:Object.freeze({metalness:.14,roughness:.55}),
- exposedSteel:Object.freeze({metalness:.9,roughness:.34}),
- rubber:Object.freeze({metalness:.05,roughness:.92}),
- stone:Object.freeze({metalness:.02,roughness:.95}),
- energy:Object.freeze({metalness:.2,roughness:.3,emissiveIntensity:1.6}),
+ // Paint is a dielectric layer over metal: very low metalness, moderate
+ // roughness. Exposed steel is the opposite: near-bare metal with a tight
+ // roughness to catch a sharp highlight. Rubber and stone are both dielectric
+ // but rubber stays glossier than unpolished stone. Energy is a dielectric
+ // emissive core; entanglement is the quantum LUT's sharp metallic film.
+ paintedArmor:Object.freeze({metalness:.08,roughness:.58}),
+ exposedSteel:Object.freeze({metalness:.95,roughness:.3}),
+ rubber:Object.freeze({metalness:.03,roughness:.94}),
+ stone:Object.freeze({metalness:.01,roughness:.96}),
+ energy:Object.freeze({metalness:.08,roughness:.32,emissiveIntensity:1.9}),
  // Backed by the Moth entanglement-shader LUTs (mothMaterialLutTexture): a
  // sharp, high-metalness surface for the quantum arena's iridescent panels.
- entanglement:Object.freeze({metalness:.62,roughness:.12,emissiveIntensity:.7}),
+ entanglement:Object.freeze({metalness:.68,roughness:.1,emissiveIntensity:.8}),
 });
 export function materialPreset(name){return MATERIAL_PRESETS[name]||MATERIAL_PRESETS.paintedArmor;}
 
@@ -620,33 +708,46 @@ export function surfaceTextures(kind='concrete',{size=96,seed=1,repeat=[1,1],nor
   const ctx=canvas.getContext('2d');
   if(!ctx?.createImageData||!ctx.putImageData)return null;
   const image=ctx.createImageData(size,size),data=image.data,edge=1/size;
-  for(let y=0;y<size;y++)for(let x=0;x<size;x++){
-   const i=(y*size+x)*4,u=(x/size)*layer.scale,v=(y/size)*layer.scale;
-   if(patternType){
-    const pix=generatePatternPixel(patternType,u,v,seed,channel,edge);
-    if(pix){
-     data[i]=pix[0];data[i+1]=pix[1];data[i+2]=pix[2];data[i+3]=255;
-     continue;
+  if(patternType){
+   for(let y=0;y<size;y++)for(let x=0;x<size;x++){
+    const i=(y*size+x)*4,u=(x/size)*layer.scale,v=(y/size)*layer.scale,pix=generatePatternPixel(patternType,u,v,seed,channel,edge,layer.scale);
+    if(pix){data[i]=pix[0];data[i+1]=pix[1];data[i+2]=pix[2];}
+    else data[i]=data[i+1]=data[i+2]=128;
+    data[i+3]=255;
+   }
+  }else{
+   const field=sharedField??=buildSurfaceField(layer,seed,size);
+   const {height,macro,wear,streak}=field;
+   const stain=layer.stain||0,wash=layer.streak||0,dust=layer.dust||0,temperature=layer.temperature||0;
+   for(let y=0;y<size;y++)for(let x=0;x<size;x++){
+    const i=(y*size+x)*4,index=y*size+x,h=height[index];
+    if(channel===0){
+     // Albedo relief rides the same field as roughness and the normal. The only
+     // extra term is a per-pixel grain, which reads as material tooth rather
+     // than another noise scale.
+     const micro=hash(x,y,seed+1009)-.5;
+     let lum=1+layer.contrast*((h-.5)*SURFACE_RELIEF_GAIN+micro*SURFACE_MICRO_GAIN);
+     if(stain)lum-=stain*Math.max(0,wear[index]-.5)*1.5;
+     if(dust)lum+=dust*Math.max(0,.5-wear[index])*.5;
+     if(wash)lum-=wash*Math.max(0,streak[index]-.58)*.55;
+     const temp=(macro[index]-.5)*temperature*2;
+     data[i]=clamp255(lum*255*layer.hue[0]*(1+temp));
+     data[i+1]=clamp255(lum*255*layer.hue[1]*(1+temp*.25));
+     data[i+2]=clamp255(lum*255*layer.hue[2]*(1-temp*1.25));
+    }else if(channel===1){
+     const rough=layer.rough[0]+(layer.rough[1]-layer.rough[0])*(h*.85+wear[index]*.15);
+     const r=clamp255(rough*255);
+     data[i]=data[i+1]=data[i+2]=r;
+    }else{
+     // One-texel forward difference of the same field, wrapped for seamlessness.
+     const hx=height[y*size+((x+1)%size)],hy=height[((y+1)%size)*size+x];
+     const dx=(hx-h)*layer.grain*SURFACE_NORMAL_GAIN,dy=(hy-h)*layer.grain*SURFACE_NORMAL_GAIN;
+     data[i]=clamp255(128-dx*128);
+     data[i+1]=clamp255(128-dy*128);
+     data[i+2]=255;
     }
+    data[i+3]=255;
    }
-   // One shared height/wear field drives every channel, so a scratch or pit in
-   // the albedo has matching relief in the normal map and roughness.
-   const base=fbm(u,v,seed,4),fine=fbm(u*3.1,v*3.1,seed+17,3),n=base*.72+fine*.28;
-   if(channel===0){
-    const lum=(1-layer.contrast*.5)+layer.contrast*n;
-    data[i]=clamp255(lum*255*layer.hue[0]);
-    data[i+1]=clamp255(lum*255*layer.hue[1]);
-    data[i+2]=clamp255(lum*255*layer.hue[2]);
-   }else if(channel===1){
-    const r=(layer.rough[0]+(layer.rough[1]-layer.rough[0])*n)*255;
-    data[i]=data[i+1]=data[i+2]=clamp255(r);
-   }else{
-    const dx=fbm(u+edge,v,seed,4)-base,dy=fbm(u,v+edge,seed,4)-base,strength=layer.grain*6;
-    data[i]=clamp255(128-dx*strength*128);
-    data[i+1]=clamp255(128-dy*strength*128);
-    data[i+2]=255;
-   }
-   data[i+3]=255;
   }
   ctx.putImageData(image,0,0);
   const map=new T.CanvasTexture(canvas);
@@ -657,6 +758,7 @@ export function surfaceTextures(kind='concrete',{size=96,seed=1,repeat=[1,1],nor
   map.userData.surfaceKind=canonical;
   return map;
  };
+ let sharedField=null;
  const result={map:bakedAlbedoTexture(canonical,repeat)||make(0)};
  if(roughness)result.roughnessMap=make(1);
  if(normal)result.normalMap=bakedNormalTexture(canonical,repeat)||make(2);

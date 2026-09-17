@@ -127,6 +127,36 @@ test('a supplied macro map is wired into the uniforms and shader', () => {
   );
 });
 
+test('fracture strength is a per-kind default and reaches the injected shader', () => {
+  const rock = mothSurfaceBreakConfig('rock');
+  assert.equal(typeof rock.fractureStrength, 'number');
+  assert.ok(rock.fractureStrength > 0 && rock.fractureStrength <= 1, `rock fracture ${rock.fractureStrength}`);
+  assert.equal(mothSurfaceBreakConfig('rough_stucco').fractureStrength > 0, true);
+  assert.equal(mothSurfaceBreakConfig('hazard_stripes'), null, 'grid kinds still opt out');
+
+  const material = enhanceMothMaterial(makeMaterial(), { kind: 'rock' });
+  const uniforms = material.userData.mothSurfaceUniforms;
+  assert.equal(uniforms.uMothFractureStrength.value, rock.fractureStrength, 'the kind default is installed');
+  assert.equal(material.userData.setMothFractureStrength(0.2), 0.2);
+  assert.equal(uniforms.uMothFractureStrength.value, 0.2, 'the setter mutates the live uniform');
+  const custom = enhanceMothMaterial(makeMaterial(), { kind: 'rock', fractureStrength: .31 });
+  assert.equal(custom.userData.mothSurfaceUniforms.uMothFractureStrength.value, .31, 'callers can override the default');
+
+  const shader = compile(material);
+  assert.ok(shader.uniforms.uMothFractureStrength, 'the fracture uniform is installed on the shader');
+  assert.ok(shader.fragmentShader.includes('uMothFractureStrength'));
+  assert.ok(shader.fragmentShader.includes('mothRidge'), 'a ridged fracture function is injected');
+});
+
+test('the macro field is sampled at two scales and cracks are masked by region', () => {
+  const material = enhanceMothMaterial(makeMaterial(), { kind: 'rock' });
+  const shader = compile(material);
+  assert.ok(shader.fragmentShader.includes('mothRegion'), 'a broad region field is injected');
+  assert.ok(shader.fragmentShader.includes('mothVeil'), 'the fracture layer is masked, not uniform');
+  assert.ok(shader.fragmentShader.includes('mothP * 2.6'), 'the ridge layer runs at its own scale');
+  assert.ok(shader.fragmentShader.includes('mothP * 0.37'), 'the region field mixes two scales');
+});
+
 test('macroMap spelling is accepted and shared textures are not modified', () => {
   const macro = makeMap();
   const map = makeMap();

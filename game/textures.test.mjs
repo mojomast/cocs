@@ -203,4 +203,78 @@ test('without a configured registry surfaceTextures keeps the procedural albedo'
   clearSurfaceTextures();
 });
 
+// Records the pixel buffers surfaceTextures writes so natural-material
+// properties can be measured without a real 2D canvas.
+const recordingDocument=t=>{
+  const previous=Object.getOwnPropertyDescriptor(globalThis,'document'),images=[];
+  const ctx={createImageData:(w,h)=>{const image={width:w,height:h,data:new Uint8ClampedArray(w*h*4)};images.push(image);return image;},putImageData(){}};
+  Object.defineProperty(globalThis,'document',{configurable:true,value:{createElement:()=>({width:0,height:0,getContext:()=>ctx})}});
+  t.after(()=>{if(previous)Object.defineProperty(globalThis,'document',previous);else delete globalThis.document;});
+  return images;
+};
+const channelStats=data=>{
+  let mean=0,variance=0;
+  const count=data.length/4;
+  for(let i=0;i<data.length;i+=4)mean+=.2126*data[i]+.7152*data[i+1]+.0722*data[i+2];
+  mean/=count;
+  for(let i=0;i<data.length;i+=4){const value=.2126*data[i]+.7152*data[i+1]+.0722*data[i+2];variance+=(value-mean)**2;}
+  return {mean,std:Math.sqrt(variance/count)};
+};
+// Splits a luminance field into a 4x4-downsampled macro band and its residual
+// micro band, so multi-scale detail is measurable rather than eyeballed.
+const bandStats=(data,size,block=4)=>{
+  const values=[];for(let i=0;i<data.length;i+=4)values.push(.2126*data[i]+.7152*data[i+1]+.0722*data[i+2]);
+  const low=[],high=[],blocks=size/block;
+  for(let by=0;by<blocks;by++)for(let bx=0;bx<blocks;bx++){
+    let sum=0;
+    for(let y=0;y<block;y++)for(let x=0;x<block;x++)sum+=values[(by*block+y)*size+bx*block+x];
+    const mean=sum/(block*block);low.push(mean);
+    for(let y=0;y<block;y++)for(let x=0;x<block;x++)high.push(values[(by*block+y)*size+bx*block+x]-mean);
+  }
+  const std=list=>{const m=list.reduce((s,v)=>s+v,0)/list.length;return Math.sqrt(list.reduce((s,v)=>s+(v-m)**2,0)/list.length);};
+  return {low:std(low),high:std(high)};
+};
+
+test('natural surfaces carry macro and micro detail with a seamless tile edge', t => {
+  const images=recordingDocument(t),size=64;
+  const maps=surfaceTextures('rock',{seed:9,size,repeat:[1,1]});
+  assert.ok(maps.map&&maps.normalMap,'rock generates maps');
+  const albedo=images[0].data,luminance=[];
+  for(let i=0;i<albedo.length;i+=4)luminance.push(.2126*albedo[i]+.7152*albedo[i+1]+.0722*albedo[i+2]);
+  const bands=bandStats(albedo,size);
+  assert.ok(bands.low>1.5&&bands.high>0.8,`rock shows macro ${bands.low.toFixed(2)} and micro ${bands.high.toFixed(2)} variation`);
+  // The generated field wraps at the tile edge, so the wrap discontinuity is no
+  // larger than a typical neighbouring-texel step.
+  let interior=0,boundary=0;
+  for(let y=0;y<size;y++){
+    for(let x=0;x<size-1;x++)interior+=Math.abs(luminance[y*size+x+1]-luminance[y*size+x]);
+    boundary+=Math.abs(luminance[y*size]-luminance[y*size+size-1]);
+  }
+  const ratio=(boundary/size)/(interior/(size*(size-1)));
+  assert.ok(ratio<1.5,`tile edge seam ratio ${ratio.toFixed(2)} stays near a normal texel step`);
+  // The normal map has to carry actual relief, not a flat 128/128/255 field.
+  const normal=images[2].data,relief=[];
+  for(let i=0;i<normal.length;i+=4)relief.push(normal[i]/255);
+  assert.ok(channelStats(normal).std>.02,'the normal map carries visible relief');
+  assert.ok(relief.some(value=>value<.4)&&relief.some(value=>value>.6),'relief points both ways from the neutral normal');
+  clearSurfaceTextures();
+});
+
+test('natural palettes stay restrained while weathering drifts the channels', t => {
+  const images=recordingDocument(t);
+  for(const kind of ['concrete','rock','sand','grass','ice','metal']){
+    images.length=0;
+    surfaceTextures(kind,{seed:13,size:48});
+    const data=images[0].data;
+    let saturation=0,spread=0,count=0;
+    for(let i=0;i<data.length;i+=4){
+      const max=Math.max(data[i],data[i+1],data[i+2]),min=Math.min(data[i],data[i+1],data[i+2]);
+      saturation+=max===0?0:(max-min)/max;spread+=max-min;count++;
+    }
+    assert.ok(saturation/count<.3,`${kind} stays away from a flat neon wash (sat ${(saturation/count).toFixed(3)})`);
+    assert.ok(spread/count>0.5,`${kind} has per-pixel channel variation instead of one flat tone`);
+    clearSurfaceTextures();
+  }
+});
+
 

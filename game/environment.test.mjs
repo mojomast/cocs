@@ -230,6 +230,37 @@ test('time-of-day transitions are deterministic and pin under reduced motion',()
  assert.ok(sample.blend>=0&&sample.blend<=1,'the phase blend stays normalized');
 });
 
+test('sky palettes keep a natural warm/cool balance across phases',()=>{
+ const day=skyPalette('#0a0f1e','day'),dusk=skyPalette('#0a0f1e','dusk'),night=skyPalette('#0a0f1e','night');
+ const warmth=hex=>{const c=new T.Color(hex);return c.r-c.b;};
+ const luminance=hex=>{const c=new T.Color(hex);return .2126*c.r+.7152*c.g+.0722*c.b;};
+ assert.ok(warmth(day.zenith)<0,'the day zenith is the cool end of the gradient');
+ assert.ok(warmth(day.horizon)>0&&warmth(day.zenith)<warmth(day.horizon),'the day horizon carries warm haze');
+ assert.ok(warmth(dusk.horizon)>0&&warmth(dusk.zenith)<0,'dusk puts a warm horizon under a cool violet zenith');
+ assert.ok(warmth(night.horizon)<0&&warmth(night.zenith)<0,'night stays cool throughout');
+ assert.ok(luminance(night.horizon)>luminance(night.zenith),'a faint airglow lifts the night horizon');
+ assert.ok(luminance(night.ground)<.01,'the night ground stays near black');
+ assert.ok(luminance(night.horizon)>luminance(night.ground),'the horizon never drops below the ground tone');
+});
+
+test('the horizon haze band warms the low sky and fades before the zenith',()=>{
+ const dusk=skyPalette('#0a0f1e','dusk');
+ const low=skyGradientAt(.05,dusk),mid=skyGradientAt(.45,dusk),high=skyGradientAt(.95,dusk);
+ const warmth=sample=>sample.r-sample.b;
+ assert.ok(warmth(low)>warmth(mid)&&warmth(mid)>=warmth(high),'the warm band lives at the horizon and fades upward');
+ for(const sample of [low,mid,high])for(const key of ['r','g','b'])assert.ok(Number.isFinite(sample[key])&&sample[key]>=0&&sample[key]<=1);
+});
+
+test('weather tints and motes stay on the warm/cool side of their biome',()=>{
+ const warmth=hex=>{const c=new T.Color(hex);return c.r-c.b;};
+ assert.ok(warmth(weatherPreset('ash').material.tint)>0,'ash weather keeps a warm soot tint');
+ assert.ok(warmth(weatherPreset('snow').material.tint)<0,'snow weather keeps a cold tint');
+ assert.ok(warmth(ambientProfile({id:'dune-ravine',biome:'canyon'},'day').color)>0,'canyon dust reads warm');
+ assert.ok(warmth(ambientProfile({id:'frostline'},'day').color)<0,'snow motes read cold');
+ const spore=new T.Color(ambientProfile({id:'aether'},'day').color);
+ assert.ok(spore.g>spore.r&&spore.g>spore.b,'spores stay in the green range instead of a neon mint');
+});
+
 test('biome ambience gives each map family a distinct mood, tint and particle',()=>{
  const snow=biomeAmbience({id:'frostline'}),volcanic=biomeAmbience({id:'foundry'}),forest=biomeAmbience({id:'riverbend'}),urban=biomeAmbience({id:'neon-vertical'});
  assert.equal(snow.biome,'snow');assert.equal(snow.mood,'cold');assert.equal(snow.particles,'snow');
