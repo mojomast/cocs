@@ -65,7 +65,7 @@ export const WINGS = deepFreeze([
 export const MOVEMENT_VERBS = deepFreeze([
   {
     id: 'air-dash', name: 'Air Dash', owner: 'mistral', family: 'burst', input: 'jump',
-    budget: {charges: 1, distance: 5.5, cooldown: 3.5, windup: 0, landing: .15},
+    budget: {charges: 1, distance: 5.5, cooldown: 2.5, windup: 0, landing: .15},
     carrier: {drop: true, weakened: false, lift: false},
   },
   {

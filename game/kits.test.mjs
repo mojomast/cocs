@@ -20,7 +20,7 @@ const EXPECTED_BUFF = {openclaw: null, hermes: 'speed', opencode: 'fireRate', cl
 const EXPECTED_HOOK = {openclaw: 'landing-control', hermes: 'economy', opencode: 'usage', claudecode: 'landing-self', codex: 'landing-self', cline: 'chaining', roo: 'landing-control'};
 const EXPECTED_LIFT = {'air-dash': false, 'double-jump': true, 'super-jump': true, 'hover-jets': true, 'brace-slam': true, 'safety-glide': false, grapple: true, 'blink-step': true, 'deployable-rope': true};
 const EXPECTED_BUDGETS = {
-  'air-dash': {charges: 1, distance: 5.5, cooldown: 3.5, windup: 0, landing: .15},
+  'air-dash': {charges: 1, distance: 5.5, cooldown: 2.5, windup: 0, landing: .15},
   'double-jump': {charges: 1, impulse: 7.4, cooldown: 0, windup: 0, landing: 0},
   'super-jump': {charges: 1, impulse: 12.5, windup: .55, cooldown: 6, landing: .25},
   'hover-jets': {fuel: 2.5, fuelRecharge: 1.8, climb: .35, descent: 2.2, windup: 0, landing: .2},

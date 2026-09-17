@@ -346,7 +346,7 @@ test('Meta Braced: spawn-armor regen out of combat and crouch halving knockback'
   close(BRACED.knockbackMultiplier(state, {crouching: false, firing: true}), 1);
 });
 
-test('Claude Alignment Review: 3 s hold builds a 35 HP / 2.5 s absorb pool, no stacking', () => {
+test('Claude Alignment Review: 2 s hold builds a 35 HP / 2.5 s absorb pool, no stacking', () => {
   const state = createOperatorVerbState('claude');
   ALIGNMENT_REVIEW.step(state, 1, {grounded: false});
   close(ALIGNMENT_REVIEW.meter(state), 0, 1e-12, 'airborne does not build');
@@ -354,7 +354,7 @@ test('Claude Alignment Review: 3 s hold builds a 35 HP / 2.5 s absorb pool, no s
   close(ALIGNMENT_REVIEW.meter(state), 0, 1e-12, 'sprinting does not build');
   ALIGNMENT_REVIEW.step(state, 1, {firing: true});
   close(ALIGNMENT_REVIEW.meter(state), 0, 1e-12, 'firing does not build');
-  ALIGNMENT_REVIEW.step(state, 2.99, {});
+  ALIGNMENT_REVIEW.step(state, 1.99, {});
   assert.ok(ALIGNMENT_REVIEW.meter(state) < 1 && ALIGNMENT_REVIEW.absorbPool(state) === 0);
   ALIGNMENT_REVIEW.step(state, .01, {});
   close(ALIGNMENT_REVIEW.absorbPool(state), 35, 1e-12, 'the pool is ~35 HP');
