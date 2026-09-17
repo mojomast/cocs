@@ -467,3 +467,15 @@ test('NetHarness recovers from packet loss and re-syncs on a keyframe', () => {
  assert.ok(harness.client.snapshotSeq > 0, 'the client kept applying snapshots');
  assert.ok(harness.divergence() < 1e-6, `lossy link still converges (${harness.divergence()})`);
 });
+
+test('the prediction shadow uses the real loadout instead of the default pair', () => {
+ const client = new NetClient();
+ client.createShadow('crosswire', config, {character: 'grok', harness: 'cline'});
+ const actor = client.shadow.actors[0];
+ assert.equal(actor.character, 'grok');
+ assert.equal(actor.harness, 'cline');
+ const plain = new NetClient();
+ plain.createShadow('crosswire', config);
+ assert.equal(plain.shadow.actors[0].character, 'chatgpt', 'callers without a loadout keep the default pair');
+ assert.notEqual(actor.moveSpeed, plain.shadow.actors[0].moveSpeed, 'the real loadout changes predicted movement');
+});

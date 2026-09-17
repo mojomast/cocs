@@ -49,7 +49,7 @@ test('weapon handling covers all slots without runaway stacking', () => {
       assert.ok(handling.damage >= .9 && handling.damage <= 1.12);
       assert.ok(handling.interval >= .88 && handling.interval <= 1.08);
       assert.ok(handling.spread >= .88 && handling.spread <= 1.14);
-      assert.ok(handling.affinity === 1 || handling.affinity === 1.08);
+      assert.equal(handling.favored, profile.weapons.preferred.includes(WEAPONS.indexOf(weapon)), 'favored matches the preferred band');
     }
   }
   assert.equal(harnessWeaponHandling('openclaw', 99), null);

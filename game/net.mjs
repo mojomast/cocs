@@ -172,7 +172,7 @@ export class NetClient {
   this.ws.send(text);
   return true;
  }
- join(name, character, harness, opts = {}) { this.send({ type: 'join', name, character, harness, token: this.token ?? '', roomId: opts.roomId || this.roomId || 'local', spectate: opts.spectate === true, playerId: this.playerId, progressToken: this.progressToken ?? '', v: PROTOCOL_VERSION, delta: SNAPSHOT_DELTA_VERSION }); }
+ join(name, character, harness, opts = {}) { this.loadout = { character, harness }; this.send({ type: 'join', name, character, harness, token: this.token ?? '', roomId: opts.roomId || this.roomId || 'local', spectate: opts.spectate === true, playerId: this.playerId, progressToken: this.progressToken ?? '', v: PROTOCOL_VERSION, delta: SNAPSHOT_DELTA_VERSION }); }
  create(name, character, harness, playerName = '') { this.send({ type: 'create', name, playerName, character, harness, token: this.token ?? '', roomId: '', playerId: this.playerId, progressToken: this.progressToken ?? '', v: PROTOCOL_VERSION, delta: SNAPSHOT_DELTA_VERSION }); }
  list() { this.send({ type: 'list' }); }
  history() { this.send({ type: 'history' }); }
@@ -243,7 +243,7 @@ export class NetClient {
      this.deltaApplied = 0;
      this.deltaMisses = 0;
      this.deltaHits = 0;
-    this.createShadow(msg.mapId, msg.config);
+    this.createShadow(msg.mapId, msg.config, this.loadout);
     this.onStart?.(msg);
     break;
    case MESSAGE.EVENTS:
@@ -398,8 +398,9 @@ export class NetClient {
   if (desiredBuffer > this.bufferTarget) this.bufferTarget = Math.min(desiredBuffer, this.bufferTarget + 1);
   else if (desiredBuffer < this.bufferTarget) this.bufferTarget = Math.max(desiredBuffer, this.bufferTarget - 1);
  }
-  createShadow(mapId, config) {
-    this.shadow = isVehicleMode(config?.mode) ? null : new Match('chatgpt', 'openclaw', Math.random, getMap(mapId).id, { ...(config || {}), humanCount: 1, botCount: 0 });
+  createShadow(mapId, config, loadout) {
+    const character = loadout?.character ?? 'chatgpt', harness = loadout?.harness ?? 'openclaw';
+    this.shadow = isVehicleMode(config?.mode) ? null : new Match(character, harness, Math.random, getMap(mapId).id, { ...(config || {}), humanCount: 1, botCount: 0, ...(loadout ? { loadouts: { 0: loadout } } : {}) });
    this.resynced = false;
    this.inputSeq = 0;
    this.pendingInputs = [];
@@ -494,12 +495,12 @@ export class NetClient {
 // shadow actor for divergence checks.
 // ---------------------------------------------------------------------------
 export class NetHarness {
- constructor({mapId = 'crosswire', config = {}, seed = 1, latency = 2, jitter = 0, loss = 0, delta = true, keyframeEvery = 0, humanCount = 1, botCount = 0} = {}) {
+ constructor({mapId = 'crosswire', config = {}, seed = 1, latency = 2, jitter = 0, loss = 0, delta = true, keyframeEvery = 0, humanCount = 1, botCount = 0, loadout = null} = {}) {
   let state = seed >>> 0 || 1;
   this.random = () => ((state = (Math.imul(state, 1664525) + 1013904223) >>> 0) / 4294967296);
-  this.server = new Match('chatgpt', 'openclaw', this.random, mapId, { ...config, humanCount, botCount });
+  this.server = new Match(loadout?.character ?? 'chatgpt', loadout?.harness ?? 'openclaw', this.random, mapId, { ...config, humanCount, botCount, ...(loadout ? { loadouts: { 0: loadout } } : {}) });
   this.client = new NetClient();
-  this.client.createShadow(mapId, { ...config, humanCount, botCount });
+  this.client.createShadow(mapId, { ...config, humanCount, botCount }, loadout);
   this.client.actorId = this.server.actors[0]?.id ?? 0;
   this.latency = Math.max(0, Math.floor(latency));
   this.jitter = Math.max(0, Math.floor(jitter));
