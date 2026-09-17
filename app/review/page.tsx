@@ -8,9 +8,9 @@ export default function ReviewPage(){
  const [error,setError]=useState(''),[display,setDisplay]=useState<any>(null),[showReticle,setShowReticle]=useState(false);
  const runtime=useRef<any>(null);
  useEffect(()=>{let dispose:(()=>void)|undefined,cancelled=false;
-  setShowReticle(new URLSearchParams(location.search).get('reticle')==='1');
+  const frame=requestAnimationFrame(()=>{if(!cancelled)setShowReticle(new URLSearchParams(location.search).get('reticle')==='1');});
   import('../../game/review.mjs').then(({mountReview})=>{if(!cancelled&&canvas.current&&panel.current)dispose=mountReview(canvas.current,panel.current,{runtime,onDisplay:setDisplay});}).catch(e=>setError(String(e)));
-  return()=>{cancelled=true;dispose?.();};
+  return()=>{cancelled=true;cancelAnimationFrame(frame);dispose?.();};
  },[]);
  return <main style={{position:'fixed',inset:0,background:'#101820',color:'#eee'}}>
   <canvas ref={canvas} style={{width:'100%',height:'100%',display:'block'}} aria-label="Phase one game inspection viewport"/>

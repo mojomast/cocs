@@ -100,7 +100,9 @@ export const BENCHMARK_PRESET = Object.freeze({
 });
 
 export function benchmarkDisplay(variant) {
-  return { postFx: variant?.postFx === true, bloom: Number(variant?.bloom) || 0, quality: 'high', resolutionScale: 1 };
+  // The benchmark pins quality (which disables the frame-time governor) and
+  // opts out of the resolution budget so the fixed workload runs at true 100%.
+  return { postFx: variant?.postFx === true, bloom: Number(variant?.bloom) || 0, quality: 'high', resolutionScale: 1, resolutionCap: 'native' };
 }
 
 export function benchmarkReport(results = []) {

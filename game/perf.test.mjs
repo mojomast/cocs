@@ -69,6 +69,7 @@ test('the benchmark preset fixes the scenario and covers direct and post-process
  assert.equal(benchmarkDisplay(BENCHMARK_PRESET.variants[0]).postFx,false);
  assert.equal(benchmarkDisplay(BENCHMARK_PRESET.variants[1]).postFx,true);
  assert.equal(benchmarkDisplay(BENCHMARK_PRESET.variants[1]).resolutionScale,1,'the benchmark keeps the world render at 100%');
+ assert.equal(benchmarkDisplay(BENCHMARK_PRESET.variants[1]).resolutionCap,'native','the benchmark opts out of the resolution budget');
  const text=benchmarkReport([{id:'direct',stats:{median:16.7,p95:18},calls:100,triangles:5000},{id:'postfx',stats:{median:20,p95:24},calls:120,triangles:5000}]);
  assert.match(text,/direct: median 16\.70/);
  assert.match(text,/postfx: median 20\.00/);

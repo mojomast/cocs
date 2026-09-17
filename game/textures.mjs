@@ -656,7 +656,7 @@ export const MATERIAL_PRESETS=Object.freeze({
  exposedSteel:Object.freeze({metalness:.95,roughness:.3}),
  rubber:Object.freeze({metalness:.03,roughness:.94}),
  stone:Object.freeze({metalness:.01,roughness:.96}),
- energy:Object.freeze({metalness:.08,roughness:.32,emissiveIntensity:1.9}),
+ energy:Object.freeze({metalness:.08,roughness:.32,emissiveIntensity:1.3}),
  // Backed by the Moth entanglement-shader LUTs (mothMaterialLutTexture): a
  // sharp, high-metalness surface for the quantum arena's iridescent panels.
  entanglement:Object.freeze({metalness:.68,roughness:.1,emissiveIntensity:.8}),
