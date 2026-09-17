@@ -68,7 +68,11 @@ test('manifest parsing normalises loop points and builds the instrument index', 
   assert.deepEqual(MANIFEST.samples.find((s) => s.id === 'bells-a').loopStart, null);
   assert.deepEqual(MANIFEST.instruments['strings-pad'].samples.sort(), ['strings-a', 'strings-b', 'strings-c']);
   assert.equal(MANIFEST.instruments.bells.type, 'oneshot');
-  assert.deepEqual([...SAMPLED_INSTRUMENTS], ['strings-pad', 'low-brass', 'timpani', 'bells', 'taiko']);
+  assert.deepEqual([...SAMPLED_INSTRUMENTS], [
+    'strings-pad', 'low-brass', 'timpani', 'bells', 'taiko',
+    'low-strings-stacc', 'brass-stacc', 'trumpet-pad', 'timpani-roll',
+    'cymbal-swell', 'cymbal-crash', 'tubular-bells', 'gong', 'harp',
+  ]);
   assert.equal(parseManifest({ version: 2, samples: [] }), null, 'unknown versions are rejected');
   assert.equal(parseManifest('{not json'), null);
   assert.equal(parseManifest({ version: 1, samples: [{ id: 'x', instrument: 'y' }] }), null, 'samples without a midi note are dropped');

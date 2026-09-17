@@ -273,4 +273,8 @@ export class SampleBank {
 
 // The instruments the engine can voice from samples, in one place so the
 // scheduler and docs cannot drift apart.
-export const SAMPLED_INSTRUMENTS = Object.freeze(['strings-pad', 'low-brass', 'timpani', 'bells', 'taiko']);
+export const SAMPLED_INSTRUMENTS = Object.freeze([
+  'strings-pad', 'low-brass', 'timpani', 'bells', 'taiko',
+  'low-strings-stacc', 'brass-stacc', 'trumpet-pad', 'timpani-roll',
+  'cymbal-swell', 'cymbal-crash', 'tubular-bells', 'gong', 'harp',
+]);
