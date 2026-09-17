@@ -1,5 +1,71 @@
 # COCS verification report
 
+## Release 6.5 - MOMENTUM (class movement and signature verbs, rebuilt attract demo)
+
+**Scope.** Class/harness overhaul Phase 2 on `feat/class-overhaul` (merged at
+`81de0ef`) plus the rebuilt attract demo on `demo/showcase`. The integration
+gate ran the merged tree after `Merge feat/class-overhaul`; task C of the
+release then brought the v6.4 release commit into the integration line so the
+digest stays continuous.
+
+- **Class Phase 2 — movement:** `game/movement.mjs` is a pure, engine-free
+  state machine over the nine `MOVEMENT_VERBS` in `game/kits.mjs`: charge/fuel/
+  impulse/wind-up/cooldown/landing budgets, the five spec hooks (economy,
+  chaining, usage, landing-self, landing-control), the mode rules (race/soccer
+  disabled; Instagib/Rocket Arena/Full Arsenal weakened) and one shared carrier
+  rule (flag carriers drop the verb, Qwen/Hermes weaken it, the VIP loses it and
+  its harness active, the Juggernaut keeps it with lift ×0.7 and a frozen
+  shield while airborne). Deterministic translation probes (0.12 m steps, 0.25 s
+  step cap) and a documented snapshot field list
+  (`movementSnapshot`/`applyMovementSnapshot`) keep it replay- and net-safe.
+- **Class Phase 2 — signature verbs:** `game/operator-verbs.mjs` implements all
+  nine kits (Effortless, Revision, Heat, Deep Compute, Braced, Alignment Review,
+  Adaptive, Long Context, Tool Use) with their numbers as exported constants and
+  the core call sites documented per verb. `core.mjs` ticks verb state after
+  controls resolve, routes `power()` on `ability.kind`, refreshes the carrier
+  rule at spawn/flag/vehicle/Juggernaut boundaries, and never grants class kits
+  to NPCs.
+- **Class Phase 2 — bots and net:** each kit's `bot.mobility` policy (engage,
+  escape, hold, route, reposition) drives bot spending. The actor snapshot
+  carries `movement`/`verbState`; a resync heals the live state object; the
+  prediction shadow builds the real loadout (`NetClient.createShadow` /
+  `NetHarness loadout`).
+- **Class evidence:** focused modules
+  (`movement`, `operator-verbs`, `kits`, `phase2-movement-integration`,
+  `ability-parity`) — **87/87 pass**. The class-overhaul gate at `b67d455`:
+  `test:game` **1745 tests, 1740 pass, 0 fail, 5 skipped**; `test:server`
+  **153/153**; `npx tsc --noEmit` clean; `npm run lint` 0 errors (428
+  pre-existing warnings); the golden ability-parity fixture unchanged
+  (`game/ability-parity.test.mjs` 1/1, no regeneration); the slow sweep
+  `COCS_SLOW_TESTS=1` over config/core/gameplay/race **132/132 pass, 0 skipped**.
+- **Demo evidence:** the rebuilt attract demo is covered by focused suites for
+  the shot planner, camera ownership, demo session, demo playlist, director,
+  showcase and camera modes — **92/92 pass**. The planner scores encounter and
+  objective subjects with hold windows, hysteresis and blend-vs-cut
+  transitions; `cameraOwner` allows exactly one controller per frame; free roam
+  is a real camera mode with hand-back; the dock and Demo Options modal are
+  driven by the pure `demo-session` state machine.
+- **Integration gate (this merge):** `npm test` in the integration worktree —
+  `test:game` **1822 tests, 1817 pass, 0 fail, 5 skipped** across 161
+  `game/*.test.mjs` files (486 s); `test:server` **153/153** across 16 files
+  (62 s); `npx tsc --noEmit` clean; bounded `vinext build` green; `tests/*.test.mjs`
+  **7/7** (SSR HTML, `UiBag` contract, deployment assets). The five skips are
+  the four opt-in slow simulations plus the browser-only `OfflineAudioContext`
+  render, unchanged from 6.4.
+- **Integration fix (F12):** the first gate run failed one stale fixture pin,
+  not a game bug: the phase-1 spatial patch's hunk-1 import context was split by
+  the demo's new `camera-modes.mjs` import. The patch context now includes that
+  import; the assertion and the exercised renderer path are unchanged. Full
+  reasoning in `docs/PHASE2-FIXLIST.md` F12.
+- **Limitations (honest scope):** this is Phase 2. Spec tradeoffs, the 21 riders
+  and asymmetric gear (Phase 3), the `mobility` input binding, movement HUD and
+  touch presentation, `PROTOCOL_VERSION` 3 and respawn loadout switching
+  (Phase 4), and the TTK/tier balance sweeps (Phase 5) are not in this release;
+  specs and gear ride along as inert data. No hardware-GPU frame-rate claim is
+  made for the movement verbs; bot-vs-bot balance is policy-verified, not
+  human-playtested. The live deploy smoke for the merged release is recorded in
+  a follow-up evidence commit after the production deploy.
+
 ## Release 6.4 - SPECTRUM (materials, cinematic music, gameplay sound, restrained HUD, adaptive resolution)
 
 - **Materials:** natural surfaces derive albedo/roughness/normal from one

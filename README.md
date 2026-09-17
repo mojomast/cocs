@@ -435,6 +435,27 @@ assets. Full procedure and verification: [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md
 Recent releases. The full history lives in
 [docs/CHANGELOG.md](docs/CHANGELOG.md).
 
+### v6.5 · MOMENTUM — 2026-09-17
+- Every operator owns a movement verb: nine verbs (Air Dash, Double Jump, Super
+  Jump, Hover Jets, Brace Slam, Safety Glide, Grapple, Blink Step, Deployable
+  Rope) with explicit charge/fuel/wind-up/cooldown/landing budgets, five spec
+  hooks and one shared carrier rule for flag carriers, the VIP and the
+  Juggernaut. Nine class signature verbs (Effortless, Revision, Heat, Deep
+  Compute, Braced, Alignment Review, Adaptive, Long Context, Tool Use) are live
+  in the simulation, and bots spend movement verbs under their class policy.
+- Movement and signature-verb state ride actor snapshots; the prediction shadow
+  now builds the real loadout, so a class cannot desync its own client.
+- The attract demo is rebuilt: an action-directed shot planner picks and holds
+  shots from real match action, one camera owner arbitrates director/race/manual/
+  free cameras, free roam flies, and a control dock adds Auto Director, Follow
+  Subject, HUD toggle, pause and a Demo Options modal with curated/complete
+  rotation and persistent settings.
+- Demo fixes: the title reel no longer rebuilds its scenario every rendered
+  frame (no shot held, 0.17 fps) and returning to auto resets the camera owner.
+- Honest scope: Phase 3 (specs/gear/riders), the `mobility` bind, protocol v3
+  and the TTK/tier balance sweeps are future phases; specs and gear are inert
+  data for now.
+
 ### v6.4 · SPECTRUM — 2026-09-17
 - Surfaces derive albedo, roughness and normal from one seamless multi-scale
   height/wear field (tiling repetition reduced, real relief, per-material

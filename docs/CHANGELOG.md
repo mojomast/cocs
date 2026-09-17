@@ -16,6 +16,57 @@ record in [VERIFICATION.md](VERIFICATION.md).
 
 ---
 
+## v6.5 · MOMENTUM — 2026-09-17
+
+Every operator gets a movement verb and a signature verb, and the attract demo is
+rebuilt around what is actually happening in the match.
+
+- Nine movement verbs ship as one data table — Air Dash, Double Jump, Super
+  Jump, Hover Jets, Brace Slam, Safety Glide, Grapple, Blink Step and Deployable
+  Rope — each paid for with explicit charge, fuel, impulse, wind-up, cooldown and
+  landing budgets. Five spec hooks (economy, chaining, usage, landing-self,
+  landing-control) change how a harness spends the verb, and one shared carrier
+  rule disables, weakens or lifts it for flag carriers, the VIP and the
+  Juggernaut. Race and soccer disable verbs; Instagib, Rocket Arena and Full
+  Arsenal run them weakened.
+- Nine class signature verbs are live in the simulation: Effortless (air
+  control, slides, hop window), Revision (holster-free primary swaps), Heat
+  (+12% fire rate on consecutive hits), Deep Compute (charged bonus shot),
+  Braced (spawn-armor regeneration, crouch knockback), Alignment Review (absorb
+  pool), Adaptive (faster swap, first-magazine handling), Long Context (radar
+  trails, extended range band) and Tool Use (pickups, interactions, vehicles).
+  `power()` now routes on ability kind, and NPCs never inherit class kits.
+- Bots express their class: each kit carries an AI movement policy (engage,
+  escape, hold, route, reposition) layered on the existing archetypes, spending
+  the same budgets humans do.
+- Movement and signature-verb state are serialized in the actor snapshot;
+  resync heals the live movement state, and the prediction shadow builds the
+  real loadout instead of the default pair.
+- The attract demo gets an action-directed shot planner (firefights, kills,
+  contested zones, flag carriers, payload, vehicles, race overtakes, soccer
+  attacks — scored for relevance, visibility, framing, clearance, continuity and
+  repetition, with hold windows, hysteresis and safe blend/cut transitions),
+  single-owner cameras (`cameraOwner`: auto/race/manual/free), real free roam,
+  and a control dock with Auto Director, Follow Subject, HUD toggle, pause and a
+  Demo Options modal (validated draft vs applied, curated/complete rotation,
+  mode/map/duration/bot picks, persistent settings).
+- Demo bugs fixed: the title reel rebuilt its scenario on every rendered frame
+  (~140 rebuilds over five minutes, no shot ever held, 0.17 fps) and now follows
+  the demo view's expiry pacing, rebuilding only on an advance/restart edge;
+  returning the session to auto resets the camera owner so a manual style cannot
+  stick.
+- Honest scope: this is class-overhaul Phase 2. Spec tradeoffs, the 21 riders
+  and asymmetric gear (Phase 3), the `mobility` bind, movement HUD/touch,
+  `PROTOCOL_VERSION` 3 and respawn loadout switching (Phase 4), and the TTK and
+  tier balance sweeps (Phase 5) are future work; specs and gear are inert data
+  for now.
+- The integration gate (class + demo) fixed one stale fixture pin: the
+  phase-1 spatial patch's import context was split by the demo's new
+  `camera-modes.mjs` import (`docs/PHASE2-FIXLIST.md` F12). No assertion was
+  weakened.
+
+---
+
 ## v6.4 · SPECTRUM — 2026-09-17
 
 Natural materials, a cinematic soundtrack and soundscape, a restrained HUD, and
