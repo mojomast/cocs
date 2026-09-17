@@ -34,7 +34,7 @@ const MAP_ID_SET=new Set(MAP_IDS);
 // the labels stay here so the UI can explain what was dropped.
 export const DEMO_CATEGORY_BY_MODE=Object.freeze({
  deathmatch:'infantry',teamdeathmatch:'infantry',instagib:'infantry',rockets:'infantry',arsenal:'infantry',armsrace:'infantry',juggernaut:'infantry','team-elimination':'infantry',
- ctf:'objectives',koth:'objectives',domination:'objectives',assault:'objectives',payload:'objectives',holdout:'objectives',uplink:'objectives','vip-escort':'objectives',
+ ctf:'objectives',koth:'objectives',domination:'objectives',assault:'objectives',payload:'objectives',holdout:'objectives',uplink:'objectives','vip-escort':'objectives',cocs:'objectives',
  'combined-arms':'vehicles','puma-race':'racing','puma-soccer':'soccer',
  horde:'survival',campaign:'campaign',
 });
@@ -142,7 +142,7 @@ export const DEMO_MODE_EXCLUSIONS=Object.freeze({
  }),
 });
 
-export const demoModeEligible=mode=>typeof mode==='string'&&!DEMO_MODE_EXCLUSIONS[mode]&&MODE_IDS.includes(mode);
+export const demoModeEligible=mode=>typeof mode==='string'&&!DEMO_MODE_EXCLUSIONS[mode]&&MODE_IDS.includes(mode)&&mapsForMode(mode).length>0;
 
 // `legacy` defaults to true for the catalog/eligibility helpers (the full
 // registry view); `pickNext` and `scenarioSpec` default to false to match the

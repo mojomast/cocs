@@ -332,6 +332,7 @@ export const isTeamMode = mode => teamMode(typeof mode === 'string' ? mode : (mo
 
 export const modeGoal = mode => {
   const score = mode?.rules?.score;
+  if (mode?.id === 'cocs') return 'LATTICE CONTROL';
   if (mode?.id === 'holdout') return 'QUORUM HOLD';
   if (mode?.id === 'uplink') return 'RELAY STAGES';
   if (score === 'laps') return 'LAPS';
@@ -358,6 +359,7 @@ export const modeTargetText = (mode, target) => {
   if (mode?.id === 'holdout') return 'HOLD A QUORUM';
   if (mode?.id === 'uplink') return 'RUN THE RELAY';
   if (mode?.id === 'vip-escort') return 'ESCORT THE VIP';
+  if (mode?.id === 'cocs') return 'HOLD THE LATTICE';
   const goal = modeGoal(mode);
   return Number.isFinite(limit) ? `FIRST TO ${limit} ${goal}` : goal;
 };
@@ -384,6 +386,7 @@ export const flagText = hud => {
 };
 
 export const modeColumns = mode => mode === 'ctf' ? [['captures', 'CAP'], ['flagPickups', 'PICK'], ['flagReturns', 'RET'], ['flagDrops', 'DROP']]
+  : mode === 'cocs' ? [['objectiveCaptures', 'CAPTURES'], ['objectiveTime', 'NODE TIME'], ['frags', 'FRAGS']]
   : mode === 'koth' ? [['objectiveTime', 'HILL TIME'], ['objectiveCaptures', 'CAP'], ['objectiveContests', 'CONTEST']]
     : mode === 'holdout' ? [['objectiveTime', 'ZONE TIME'], ['objectiveCaptures', 'CAP'], ['objectiveContests', 'CONTEST']]
       : mode === 'uplink' ? [['objectiveCaptures', 'RELAY'], ['objectiveContests', 'CONTEST']]
@@ -399,6 +402,7 @@ export const modeColumns = mode => mode === 'ctf' ? [['captures', 'CAP'], ['flag
 
 export const modePrimary = (mode, actor) => {
   const stats = scoreStats(actor);
+  if (mode === 'cocs') return [stats.objectiveCaptures, stats.objectiveTime];
   if (mode === 'ctf') return [stats.captures, stats.flagPickups + stats.flagReturns + stats.flagDrops];
   if (mode === 'koth' || mode === 'domination' || mode === 'combined-arms') return [stats.objectiveTime, stats.objectiveCaptures];
   if (mode === 'holdout') return [stats.objectiveTime, stats.objectiveCaptures];
@@ -441,6 +445,18 @@ export function commandBrief(hud, player, mode) {
     return {title, action, detail: `${teamName(mine)} ${myGoals} \u2013 ${theirGoals} ${teamName(theirs)} \u00b7 GOALS ${myGoals} / ${soccer.goalLimit}`, status: `${soccer.ballInPlay ? 'BALL LIVE' : String(soccer.phase).toUpperCase()} \u00b7 ${soccer.time}`};
   }
   if (id === 'ctf') return {title: carrying ? 'RETURN THE FLAG' : 'BREAK THEIR LINE', action: carrying ? 'Reach your base to capture.' : enemyFlag?.state === 'carried' ? 'Escort the carrier home.' : ownFlag?.state === 'dropped' ? 'Recover your flag.' : 'Take the enemy flag.', detail: `${team} ${carrying ? 'CARRIER' : 'DEFENSE'} · ${flagText(hud)}`, status: `${teamScore(hud, player?.team)} / ${target} CAPTURES`};
+  if (id === 'cocs') {
+    const nodes = hud?.cocs?.nodes ?? [];
+    const owned = nodes.filter(node => node.owner === player?.team).length;
+    const live = nodes.filter(node => node.live === true).length;
+    const contested = nodes.filter(node => node.contested === true).length;
+    return {
+      title: contested ? 'BREAK THE LATTICE' : 'HOLD THE LATTICE',
+      action: 'Capture a node next to one you already own. A node only pays while a supply line links it back to your HQ.',
+      detail: `${team} · ${owned} NODES · ${live} LIVE`,
+      status: contested ? `${contested} CONTESTED` : `${scoreText(teamScore(hud, player?.team))} CONTROL`,
+    };
+  }
   if (id === 'armsrace') {
     const ladder = ladderStatus(player, WEAPONS.length);
     const current = WEAPONS[Number(player?.weapon)]?.name;

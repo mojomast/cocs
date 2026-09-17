@@ -2,6 +2,7 @@ import {modeRule} from './config.mjs';
 import {terrainSupportAt} from './terrain.mjs';
 import {assaultTemplate,assignAssaultTeams,assaultSectorIds} from './assault.mjs';
 import {payloadTemplate} from './payload.mjs';
+import {cocsTemplate} from './cocs.mjs';
 const point=(x,z,id,rules,radius=3.5,y=0)=>({id,x,z,radius,owner:null,captureTeam:null,progress:0,captureSeconds:rules.objective?.captureSeconds??5,y});
 const boundsOf=arena=>arena.bounds||{minX:-13.55,maxX:13.55,minZ:-13.55,maxZ:13.55};
 
@@ -79,7 +80,11 @@ const authoredPoints=(arena,ids,rules)=>{
   return candidatePoints(arena,ids,rules);
 };
 export function objectiveTemplate(mode,arena,config){
- const rules=modeRule(mode),kind=rules.objective?.kind,authored=authoredPoints(arena,['alpha','bravo','charlie'],rules);
+ const rules=modeRule(mode),kind=rules.objective?.kind;
+ // LATTICE STRIKE owns its whole template (nodes/edges/live set/phase) in
+ // game/cocs.mjs; it does not reuse the authored alpha/bravo/charlie points.
+ if(kind==='cocs')return cocsTemplate(mode,arena,config);
+ const authored=authoredPoints(arena,['alpha','bravo','charlie'],rules);
  if(kind==='koth'){
   const b=boundsOf(arena),centerX=(b.minX+b.maxX)/2,centerZ=(b.minZ+b.maxZ)/2;
   const source=arena.id==='crosswire'?authored[1]:authored.slice().sort((p,q)=>Math.hypot(p.x-centerX,p.z-centerZ)-Math.hypot(q.x-centerX,q.z-centerZ))[0];
