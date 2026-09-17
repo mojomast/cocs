@@ -106,9 +106,13 @@ export function killBanner(hud, player) {
   const latest = hud?.feed?.[0], when = Number(hud?.time), at = Number(latest?.time);
   if (!latest || !player || !Number.isFinite(at) || !Number.isFinite(when)) return null;
   const age = Math.max(0, when - at);
-  if (latest.self && latest.victim === player.name) return {kind: 'self', text: 'ELIMINATED', age};
-  if (latest.killer === player.name && latest.victim !== player.name) return {kind: 'kill', text: `YOU ELIMINATED ${latest.victim ?? ''}`.trim(), age};
-  if (latest.victim === player.name && latest.killer !== player.name) return {kind: 'death', text: `${latest.killer ?? 'ARENA'} ELIMINATED YOU`, age};
+  const ability = latest.ability === true && typeof latest.abilityName === 'string' && latest.abilityName.length > 0
+    ? latest.abilityName.toUpperCase() : null;
+  // Ability attribution rides in `detail` so the pinned text lines stay exactly
+  // as they are; the HUD only renders the detail when it is present.
+  if (latest.self && latest.victim === player.name) return {kind: 'self', text: 'ELIMINATED', age, ...(ability ? {detail: ability} : {})};
+  if (latest.killer === player.name && latest.victim !== player.name) return {kind: 'kill', text: `YOU ELIMINATED ${latest.victim ?? ''}`.trim(), age, ...(ability ? {detail: `WITH ${ability}`} : {})};
+  if (latest.victim === player.name && latest.killer !== player.name) return {kind: 'death', text: `${latest.killer ?? 'ARENA'} ELIMINATED YOU`, age, ...(ability ? {detail: ability} : {})};
   return null;
 }
 
@@ -124,9 +128,14 @@ export function ammoText(value) {
   return Number.isFinite(n) ? String(n) : '∞';
 }
 
-// Short weapon name for a kill-feed entry, or null for environment kills.
+// Short weapon name for a kill-feed entry, or the harness ability when the
+// killing blow was ability-tagged (§6.2/§6.4). Null for environment kills.
 export function killFeedWeapon(entry, weapons = []) {
-  if (!entry || !Number.isInteger(entry.weapon)) return null;
+  if (!entry) return null;
+  if (entry.ability === true && typeof entry.abilityName === 'string' && entry.abilityName.length > 0) {
+    return entry.abilityName.toUpperCase();
+  }
+  if (!Number.isInteger(entry.weapon)) return null;
   return weapons[entry.weapon]?.short ?? null;
 }
 
@@ -136,7 +145,7 @@ export function suddenDeathBanner(hud) {
   return (hud?.suddenDeath === true || hud?.objectives?.suddenDeath === true) && hud?.over !== true ? { text: 'SUDDEN DEATH', detail: 'NEXT SCORE WINS' } : null;
 }
 
-const CAPTION_EVENTS = Object.freeze({shot:'Gunfire',explosion:'Explosion','vehicle-shot':'Vehicle gunfire',grenade:'Grenade out',melee:'Melee',reload:'Reloading',pickup:'Pickup',powerup:'Powerup','vehicle-enter':'Mounted vehicle','vehicle-exit':'Dismounted vehicle','vehicle-destroyed':'Vehicle destroyed','vehicle-splatter':'Vehicle splatter','zone-capture':'Zone captured','zone-score':'Objective scoring','zone-neutralized':'Zone neutralized','flag-pickup':'Flag taken','flag-return':'Flag returned','flag-drop':'Flag dropped',capture:'Flag captured','assault-sector-captured':'Sector captured','assault-sector-lost':'Sector lost','assault-breach':'Sector breached','payload-checkpoint':'Checkpoint reached','payload-delivered':'Payload delivered','soccer-goal':'Goal','killstreak':'Killstreak',death:'Elimination','mission-message':'Mission update','mission-won':'Mission complete','mission-lost':'Mission failed','horde-wave':'Wave incoming','horde-wave-cleared':'Wave cleared','horde-resupply':'Resupplied','horde-upgrade':'Upgrade available','horde-upgrade-selected':'Upgrade acquired','enemy-detonate':'Sapper detonation','singleplayer-checkpoint':'Checkpoint saved','npc-deploy':'Contacts','story-line':'Mission briefing','npc-bark':'Transmission','boss-phase':'Boss phase','armsrace-promote':'Ladder up','armsrace-demote':'Ladder down','juggernaut-transfer':'Crown taken','elimination-life':'Team life lost','vip-deploy':'VIP deployed','vip-down':'VIP down','vip-extracted':'VIP extracted','holdout-progress':'Holdout progress','holdout-win':'Holdout won','uplink-capture':'Uplink captured','uplink-stage':'Uplink advanced','uplink-win':'Uplink won','objective-win':'Objective secured','enemy-telegraph':'Incoming attack','boss-slam':'Boss slam','boss-summon':'Boss summon','mender-heal':'Ally healed','overseer-aura':'Overseer aura','phalanx-shield':'Phalanx shield','enemy-flank':'Flanking','enemy-artillery':'Artillery incoming','race-coin':'Coin collected','race-box':'Item box','race-boost':'Speed boost','race-item':'Item deployed','race-hazard-hit':'Hazard hit','race-lap':'Lap complete','race-finish':'Race finish'});
+const CAPTION_EVENTS = Object.freeze({shot:'Gunfire',explosion:'Explosion','vehicle-shot':'Vehicle gunfire',grenade:'Grenade out',melee:'Melee',reload:'Reloading',pickup:'Pickup',powerup:'Powerup','vehicle-enter':'Mounted vehicle','vehicle-exit':'Dismounted vehicle','vehicle-destroyed':'Vehicle destroyed','vehicle-splatter':'Vehicle splatter','zone-capture':'Zone captured','zone-score':'Objective scoring','zone-neutralized':'Zone neutralized','flag-pickup':'Flag taken','flag-return':'Flag returned','flag-drop':'Flag dropped',capture:'Flag captured','assault-sector-captured':'Sector captured','assault-sector-lost':'Sector lost','assault-breach':'Sector breached','payload-checkpoint':'Checkpoint reached','payload-delivered':'Payload delivered','soccer-goal':'Goal','killstreak':'Killstreak',death:'Elimination','mission-message':'Mission update','mission-won':'Mission complete','mission-lost':'Mission failed','horde-wave':'Wave incoming','horde-wave-cleared':'Wave cleared','horde-resupply':'Resupplied','horde-upgrade':'Upgrade available','horde-upgrade-selected':'Upgrade acquired','enemy-detonate':'Sapper detonation','singleplayer-checkpoint':'Checkpoint saved','npc-deploy':'Contacts','story-line':'Mission briefing','npc-bark':'Transmission','boss-phase':'Boss phase','armsrace-promote':'Ladder up','armsrace-demote':'Ladder down','juggernaut-transfer':'Crown taken','elimination-life':'Team life lost','vip-deploy':'VIP deployed','vip-down':'VIP down','vip-extracted':'VIP extracted','holdout-progress':'Holdout progress','holdout-win':'Holdout won','uplink-capture':'Uplink captured','uplink-stage':'Uplink advanced','uplink-win':'Uplink won','objective-win':'Objective secured','enemy-telegraph':'Incoming attack','boss-slam':'Boss slam','boss-summon':'Boss summon','mender-heal':'Ally healed','overseer-aura':'Overseer aura','phalanx-shield':'Phalanx shield','enemy-flank':'Flanking','enemy-artillery':'Artillery incoming','race-coin':'Coin collected','race-box':'Item box','race-boost':'Speed boost','race-item':'Item deployed','race-hazard-hit':'Hazard hit','race-lap':'Lap complete','race-finish':'Race finish',power:'Ability activated','threat-ping':'Threat ping',feint:'Radar feint','move-start':'Movement ability','move-end':'Movement ended','windup-start':'Movement wind-up','windup-end':'Movement wind-up ended','charge-start':'Movement charge','charge-release':'Movement released','charge-cancel':'Movement charge cancelled','slam-launch':'Slam launch','slam-impact':'Slam impact','grapple-hook':'Grapple hooked','grapple-release':'Grapple released','rope-place':'Rope deployed','rope-expire':'Rope expired','move-miss':'Movement missed','rope-miss':'Rope missed','move-blocked':'Movement blocked','fuel-empty':'Fuel empty','no-lift':'Movement blocked','chain-cancel':'Movement chained','landing-recovery':'Landing recovery'});
 export function ladderStatus(player, total = 10) {
   const rung = Math.max(0, Math.floor(Number(player?.ladder) || 0));
   const size = Math.max(1, Math.floor(Number(total) || 10));

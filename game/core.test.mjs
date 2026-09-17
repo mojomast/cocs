@@ -39,6 +39,35 @@ test('void falls emit a ragdoll death without a killer',()=>{
  assert.equal(death.style,'ragdoll');
  assert.equal(death.weapon,null);
  assert.equal(death.direction,null);
+ assert.equal(death.ability,false,'a fall is never an ability kill');
+ assert.equal(death.abilityName,null);
+ assert.equal(m.feed[0].fall,true,'the feed entry marks the environment kill');
+});
+
+test('ability kills carry the killer class, harness and ability name into the feed',()=>{
+ const m=fresh(),[a,b]=isolate(m);
+ a.harness='openclaw';
+ b.health=10;
+ m.damage(b,400,a,true);
+ const death=m.events.find(e=>e.type==='death'&&e.actor===b.id);
+ assert.ok(death,'death event emitted');
+ assert.equal(death.ability,true,'ability attribution rides the death event');
+ assert.equal(death.abilityName,'Claw Burst');
+ assert.equal(death.killerCharacter,'chatgpt');
+ assert.equal(death.killerHarness,'openclaw');
+ const feed=m.feed[0];
+ assert.equal(feed.ability,true);
+ assert.equal(feed.abilityName,'Claw Burst');
+ assert.equal(feed.killerCharacter,'chatgpt');
+ assert.equal(feed.killerHarness,'openclaw');
+ // A plain weapon kill keeps the same shape but without attribution.
+ const m2=fresh(),[c,d]=isolate(m2);
+ d.health=10;
+ m2.damage(d,400,c,false);
+ const plain=m2.events.find(e=>e.type==='death'&&e.actor===d.id);
+ assert.equal(plain.ability,false);
+ assert.equal(plain.abilityName,null);
+ assert.equal(m2.feed[0].ability,false);
 });
 
 test('shots, hits and damage accumulate per actor for the end-of-match awards',()=>{

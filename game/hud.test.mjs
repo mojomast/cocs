@@ -149,6 +149,42 @@ test('killBanner derives kill, death and self text with age', () => {
   assert.equal(killBanner({}, player), null);
 });
 
+test('ability kills name the active in the kill feed and banner detail', () => {
+  assert.equal(killFeedWeapon({ability:true, abilityName:'Claw Burst', weapon:0}, WEAPONS), 'CLAW BURST');
+  assert.equal(killFeedWeapon({ability:true, abilityName:'Recompile'}, WEAPONS), 'RECOMPILE');
+  assert.equal(killFeedWeapon({ability:true}, WEAPONS), null, 'an ability without a name falls back to no label');
+  assert.equal(killFeedWeapon({ability:false, abilityName:'Claw Burst', weapon:2}, WEAPONS), 'RAIL', 'a non-ability kill keeps the weapon label');
+  const feed = {killer:'Mistral', victim:'ChatGPT', self:false, time:9.4, weapon:0, ability:true, abilityName:'Claw Burst'};
+  const death = killBanner({time:10, feed:[feed]}, {name:'ChatGPT'});
+  assert.equal(death.kind, 'death');
+  assert.equal(death.text, 'Mistral ELIMINATED YOU');
+  assert.equal(death.detail, 'CLAW BURST');
+  const own = killBanner({time:10, feed:[{...feed, abilityName:'Phase Step'}]}, {name:'Mistral'});
+  assert.equal(own.text, 'YOU ELIMINATED ChatGPT');
+  assert.equal(own.detail, 'WITH PHASE STEP');
+  const plain = killBanner({time:10, feed:[{killer:'Mistral', victim:'ChatGPT', self:false, time:9.4}]}, {name:'ChatGPT'});
+  assert.equal('detail' in plain, false, 'a weapon kill adds no detail key');
+});
+
+test('movement verbs, ability activations and threat pings have readable captions', () => {
+  const expected = {
+    power: 'Ability activated',
+    'threat-ping': 'Threat ping',
+    'move-start': 'Movement ability',
+    'move-end': 'Movement ended',
+    'windup-start': 'Movement wind-up',
+    'slam-impact': 'Slam impact',
+    'grapple-hook': 'Grapple hooked',
+    'rope-place': 'Rope deployed',
+    'rope-expire': 'Rope expired',
+    'fuel-empty': 'Fuel empty',
+    'no-lift': 'Movement blocked',
+    'chain-cancel': 'Movement chained',
+    'landing-recovery': 'Landing recovery',
+  };
+  for (const [type, text] of Object.entries(expected)) assert.equal(audioCaption({type}).text, text, type);
+});
+
 test('weaponTag and ammoText describe fire mode and unlimited ammo', () => {
   assert.equal(weaponTag(WEAPONS[0]), 'AUTO');
   assert.equal(weaponTag(WEAPONS[2]), 'SEMI');

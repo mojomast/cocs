@@ -4,6 +4,7 @@ import * as T from 'three';
 import {WeaponFeedback,EffectPool,SynthAudio,AmbientFX,WeatherFX,EMPTY_CHANNELS,MODE_THEMES} from './feedback.mjs';
 import {SURFACE_KINDS,surfaceKind,footstepProfile,impactProfile,reportVariation,mixUnit,eventSeed} from './sfx-design.mjs';
 import {weatherPreset} from './environment.mjs';
+import {HARNESSES} from './data.mjs';
 
 const player={id:7,weapon:0,x:0,z:0,yaw:0,grounded:true,vx:0,vy:0,vz:0};
 test('weapon kicks are distinct, bounded, pellet-deduplicated and recover exponentially',()=>{
@@ -340,6 +341,61 @@ test('duplicate announcer reports of one moment are deduped',()=>{
  assert.equal(audio.announcerCue('capture').played,false);
  audio.ctx.currentTime=5.4;
  assert.equal(audio.announcerCue('capture').played,true,'the cue plays again after the cooldown');
+ audio.dispose();
+});
+
+test('harness activations cue per harness, stay local and fall back to the generic power motif',()=>{
+ const {audio}=audioFixture(),beats=[];
+ audio._beat=(cue,pan,vol)=>beats.push({cue,pan,vol});
+ audio.event({type:'power',actor:7,harness:'openclaw',pos:{x:0,z:0}},player);
+ audio.event({type:'power',actor:7,harness:'cline',pos:{x:0,z:0}},player);
+ audio.event({type:'power',actor:0,harness:'codex',pos:{x:0,z:0}},player);
+ assert.equal(beats.length,2,'a remote activation stays silent');
+ assert.notDeepEqual(beats[0].cue,beats[1].cue,'each harness has its own motif');
+ const motifs=new Set();
+ for(const harness of HARNESSES){
+  audio.event({type:'power',actor:7,harness:harness.id,pos:{x:0,z:0}},player);
+  const cue=beats.at(-1).cue;
+  assert.ok(cue&&Array.isArray(cue.notes)&&cue.notes.length>=2,harness.id);
+  motifs.add(JSON.stringify(cue.notes));
+ }
+ assert.equal(motifs.size,HARNESSES.length,'all seven harness motifs are distinct');
+ audio.event({type:'power',actor:7,harness:'not-a-harness',pos:{x:0,z:0}},player);
+ assert.ok(beats.at(-1).cue,'an unknown harness still gets the generic power cue');
+});
+
+test('movement events play local foley and announce each verb, remote verbs stay silent',()=>{
+ const {audio}=audioFixture2(),plays=[];
+ audio.announcer=true;
+ audio._play=(duration,pan)=>{plays.push({duration,pan});return 1;};
+ audio._tone=()=>{};audio._noise=()=>{};
+ audio.event({type:'move-start',actor:7,verb:'air-dash'},player);
+ assert.equal(plays.length,2,'one foley voice plus one verb announcement');
+ assert.equal(audio.lastCue,'air-dash','the verb motif is announced on activation');
+ audio.event({type:'move-start',actor:7,verb:'blink-step'},player);
+ assert.equal(audio.lastCue,'blink-step');
+ assert.equal(plays.length,4);
+ audio.event({type:'move-start',actor:3,verb:'air-dash'},player);
+ assert.equal(plays.length,4,'remote movement stays silent');
+ audio.event({type:'slam-impact',actor:7,verb:'brace-slam'},player);
+ assert.equal(audio.lastCue,'brace-slam');
+ audio.event({type:'rope-place',actor:7,verb:'deployable-rope'},player);
+ assert.equal(audio.lastCue,'deployable-rope');
+ // Every shared movement event maps to exactly one local voice (plus the
+ // activation announcement for the three announce-worthy types) and never throws.
+ const announced=new Set(['move-start','slam-impact','rope-place']);
+ const types=['move-start','move-end','move-miss','move-blocked','windup-start','windup-end','windup-interrupt','charge-start','charge-release','charge-cancel','slam-launch','slam-impact','grapple-hook','grapple-release','rope-place','rope-miss','rope-expire','fuel-empty','no-lift','chain-cancel','landing-recovery'];
+ for(const type of types){
+  audio.ctx.currentTime+=1; // clear the announcer's per-cue dedupe window
+  const before=plays.length,expected=announced.has(type)?2:1;
+  audio.event({type,actor:7,verb:'air-dash'},player);
+  assert.equal(plays.length,before+expected,type);
+ }
+ audio.ctx.currentTime+=1;
+ const beforeFeint=plays.length;
+ audio.event({type:'feint',actor:7,pos:{x:0,z:0}},player);
+ assert.equal(plays.length,beforeFeint+2,'the radar feint rider plays foley plus an announcement');
+ assert.equal(audio.lastCue,'feint');
  audio.dispose();
 });
 

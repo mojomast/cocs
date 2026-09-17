@@ -11,11 +11,11 @@ export function SetupModal({ui}:ScreenProps){
   <div className="layout layout--lead">
    <div className="stack">
     <div className="section-label"><span>ARENA</span><span>{selectedMap?.tag}</span></div>
-    <div className="grid-cards">{selectableMaps.map((map:any)=><SelectCard key={map.id} selected={mapId===map.id} onClick={()=>setMapId(map.id)} icon={MapPlan?<MapPlan map={map} viewBox={mapViewBox?.(map)}/>:undefined} name={map.name} tag={map.description} ariaLabel={map.name}/>)}</div>
+    <div className="grid-cards">{selectableMaps.map((map:any)=><SelectCard key={map.id} selected={mapId===map.id} onClick={()=>setMapId(map.id)} className="card--arena" icon={MapPlan?<MapPlan map={map} viewBox={mapViewBox?.(map)}/>:undefined} name={map.name} tag={map.description} ariaLabel={map.name}/>)}</div>
+    <PresetsConfiguration presets={presets} onSave={savePreset} onLoad={loadPreset} onDelete={deletePreset}/>
    </div>
    <div className="stack">
     <MatchConfiguration config={config} excludeModes={['horde','campaign']} onChange={setConfig}/>
-    <PresetsConfiguration presets={presets} onSave={savePreset} onLoad={loadPreset} onDelete={deletePreset}/>
    </div>
   </div>
  </Modal>;

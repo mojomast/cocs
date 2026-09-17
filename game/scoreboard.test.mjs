@@ -42,7 +42,28 @@ test('the soccer pitch map exposes the arena.race contract buildArena reads',()=
  assert.ok(PUMA_PITCH.race.pitch&&Number.isFinite(PUMA_PITCH.race.pitch.minX));
 });
 
-import {scoreboardGroups,streakLabel,pingLabel} from './scoreboard.mjs';
+import {scoreboardGroups,streakLabel,pingLabel,actorKitChip} from './scoreboard.mjs';
+
+test('scoreboard rows carry a null-safe wing/spec chip',()=>{
+ assert.equal(actorKitChip({}),null);
+ assert.equal(actorKitChip({character:'mistral'}),null,'a harness is required');
+ assert.equal(actorKitChip({harness:'cline'}),null,'a character is required');
+ assert.equal(actorKitChip(null),null);
+ const chip=actorKitChip({character:'mistral',harness:'cline'});
+ assert.equal(chip.wing.id,'striker');
+ assert.equal(chip.wing.label,'STRIKER');
+ assert.equal(chip.spec.name,'Cline');
+ assert.equal(chip.spec.power,'Phase Step');
+ assert.equal(actorKitChip({character:'claude',harness:'hermes'}).spec.id,'claudecode','the Claude lock normalises like every loadout path');
+ const html=renderToStaticMarkup(renderScoreboard({config:{mode:'deathmatch'},actorId:0,actors:[
+  {id:0,name:'Mistral',character:'mistral',harness:'cline',frags:2,deaths:0},
+  {id:1,name:'Rookie',frags:1,deaths:1},
+ ]}));
+ assert.ok(html.includes('STRIKER'),'the wing chip renders');
+ assert.ok(html.includes('CLINE'),'the spec chip renders');
+ assert.ok(html.includes('Rookie'),'an actor without class data still renders a plain row');
+ assert.ok(html.indexOf('wing-striker')>0);
+});
 
 test('streak and ping labels bucket values and hide absent data',()=>{
  assert.equal(streakLabel({streak:0}),null);

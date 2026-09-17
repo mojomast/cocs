@@ -1,5 +1,6 @@
 import {createElement} from 'react';
-import {CHARACTERS,WEAPONS} from './data.mjs';
+import {CHARACTERS,HARNESSES,WEAPONS} from './data.mjs';
+import {WINGS,resolveKit} from './kits.mjs';
 import {modeColumns,modePrimary,scoreStats,scoreText,teamName,isTeamMode} from './hud.mjs';
 import {raceStandings,raceTime} from './race-ui.mjs';
 
@@ -24,6 +25,23 @@ export function streakLabel(actor){
  const ms=Math.round(ping);
  const quality=ms<60?'good':ms<120?'fair':'poor';
  return {ping:ms,quality,label:`${ms}`};
+}
+
+// Null-safe wing/spec chip for one scoreboard row. Actors without a
+// character/harness (race and soccer snapshots, match history, tests) return
+// null, so the row renders exactly as it did before the class overhaul.
+export function actorKitChip(actor){
+ const character=typeof actor?.character==='string'?actor.character:null;
+ const harness=typeof actor?.harness==='string'?actor.harness:null;
+ if(!character||!harness)return null;
+ const kit=resolveKit(character,harness);
+ const wing=WINGS.find(entry=>entry.id===kit.wing)??null;
+ const spec=HARNESSES.find(entry=>entry.id===kit.harness)??null;
+ if(!wing&&!spec)return null;
+ return {
+  wing:wing?{id:wing.id,label:wing.label,name:wing.name,color:wing.color}:null,
+  spec:spec?{id:spec.id,name:spec.name,power:kit.active?.name??spec.power}:null,
+ };
 }
 
 // Build the deterministic row order for a scoreboard. Team modes group by team
@@ -71,9 +89,12 @@ export function renderScoreboard(source,history=false){
   if(group.team!==null)rows.push(createElement('div',{className:`score-team-heading team-${group.team}`,'aria-label':`${group.label} score`,key:`head-${group.team}`},createElement('strong',null,group.label),createElement('span',null,scoreText(group.score))));
   for(const a of group.actors){
    rank++;
-   const stats=scoreStats(a),streak=streakLabel(a),ping=pingLabel(a);
+   const stats=scoreStats(a),streak=streakLabel(a),ping=pingLabel(a),kitChip=actorKitChip(a);
    rows.push(createElement('div',{className:`score-row ${a.id===actorId?'you':''} ${a.team!==null&&a.team!==undefined?`team-${a.team}`:''}`,key:a.id??`${a.name}-${rank}`,role:'row'},
-    createElement('span',null,createElement('b',null,String(rank).padStart(2,'0')),createElement('i',{style:{background:CHARACTERS.find(c=>c.id===a.character)?.color}}),a.name,a.id===actorId&&createElement('small',null,'YOU')),
+    createElement('span',null,createElement('b',null,String(rank).padStart(2,'0')),createElement('i',{style:{background:CHARACTERS.find(c=>c.id===a.character)?.color}}),a.name,
+     kitChip?.wing&&createElement('small',{key:'wing',className:`score-chip score-chip--wing wing-${kitChip.wing.id}`,style:{color:kitChip.wing.color},title:`${kitChip.wing.name}${kitChip.spec?` · ${kitChip.spec.name}`:''}`},kitChip.wing.label),
+     kitChip?.spec&&createElement('small',{key:'spec',className:'score-chip score-chip--spec',title:`${kitChip.spec.name} · ${kitChip.spec.power}`},kitChip.spec.name.toUpperCase()),
+     a.id===actorId&&createElement('small',null,'YOU')),
     createElement('strong',null,Number(a.frags)||0),
     createElement('span',null,Number(a.deaths)||0),
     createElement('span',{className:streak?`streak streak-${streak.streak>=3?'hot':'warm'}`:'streak'},streak?streak.label:'-'),

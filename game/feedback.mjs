@@ -194,6 +194,20 @@ const ANNOUNCE_CUES=Object.freeze({
  score:Object.freeze({id:'score',freq:480,mid:600,end:720,length:.25}),
  boss:Object.freeze({id:'boss',freq:190,mid:140,end:96,length:.62}),
  objective:Object.freeze({id:'objective',freq:600,mid:750,end:900,length:.3}),
+ power:Object.freeze({id:'power',freq:540,mid:720,end:960,length:.24}),
+ feint:Object.freeze({id:'feint',freq:900,mid:600,end:320,length:.18}),
+ // Movement verbs (§3.4/§6.3): one opt-in motif per verb, fired on activate.
+ // `move-start` is the generic fallback when a verb id is unknown.
+ 'move-start':Object.freeze({id:'move-start',freq:560,mid:720,end:900,length:.2}),
+ 'air-dash':Object.freeze({id:'air-dash',freq:680,mid:1020,end:1360,length:.22}),
+ 'double-jump':Object.freeze({id:'double-jump',freq:620,mid:880,end:1240,length:.2}),
+ 'super-jump':Object.freeze({id:'super-jump',freq:240,mid:520,end:880,length:.3}),
+ 'hover-jets':Object.freeze({id:'hover-jets',freq:420,mid:640,end:840,length:.3}),
+ 'brace-slam':Object.freeze({id:'brace-slam',freq:180,mid:96,end:64,length:.4}),
+ 'safety-glide':Object.freeze({id:'safety-glide',freq:520,mid:460,end:400,length:.34}),
+ grapple:Object.freeze({id:'grapple',freq:700,mid:1050,end:1400,length:.2}),
+ 'blink-step':Object.freeze({id:'blink-step',freq:880,mid:1320,end:1760,length:.16}),
+ 'deployable-rope':Object.freeze({id:'deployable-rope',freq:500,mid:750,end:1120,length:.26}),
 });
 const cl=(n,a,b)=>Math.max(a,Math.min(b,n));
 
@@ -248,6 +262,23 @@ const OBJECTIVE_CUES=Object.freeze({
  default:objective([0,7],.06,.2,.075),
 });
 const objectiveCue=type=>OBJECTIVE_CUES[type]||(typeof type==='string'&&type.startsWith('zone')?OBJECTIVE_CUES.zone:OBJECTIVE_CUES.default);
+
+// Per-harness activation motifs (§6.3). The `power` event already carries the
+// harness id, so an activation reads as the spec that fired instead of one
+// generic power blip. One motif is still one `_play` voice.
+const POWER_CUES=Object.freeze({
+ openclaw:objective([0,-3,0],.06,.22,.09),
+ hermes:objective([0,5,12],.05,.18,.08),
+ opencode:objective([0,4,7,12],.04,.16,.075),
+ claudecode:objective([0,-5],.08,.26,.08),
+ codex:objective([0,7,12],.06,.24,.085),
+ cline:objective([12,5,0],.04,.14,.075),
+ roo:objective([0,-1,-5],.07,.24,.08,true),
+});
+
+// The movement module's shared event vocabulary (§3.6). Movement foley is
+// local-only: these are the verbs the local player is driving, not world beats.
+const MOVEMENT_EVENTS=new Set(['move-start','move-end','move-miss','move-blocked','windup-start','windup-end','windup-interrupt','charge-start','charge-release','charge-cancel','slam-launch','slam-impact','grapple-hook','grapple-release','rope-place','rope-miss','rope-expire','fuel-empty','no-lift','chain-cancel','landing-recovery']);
 
 // Match-beat motifs keyed by mode event type, in semitones from the mode root.
 // These cover objective ticks, wave/boss beats and lifetime events that used to
@@ -770,19 +801,38 @@ export class SynthAudio{
   if(e.type==='race-finish'){if(local){this._play(.6,0,(t,out,nodes)=>{this._tone(t,out,nodes,{freq:440,duration:.2,type:'triangle',gain:.1,end:554});this._tone(t+.12,out,nodes,{freq:554,duration:.2,type:'triangle',gain:.1,end:659});this._tone(t+.24,out,nodes,{freq:880,duration:.35,type:'sine',gain:.12,end:880});});}return;}
   // Objective / pickup motifs. Flag and capture cues are deliberately audible
   // for every player (they are match beats); ordinary pickups stay local.
-  if(e.type==='pickup'||e.type==='powerup'||e.type==='power'||e.type==='spawn'||e.type.startsWith('flag')){if(!local&&e.type!=='flag-pickup'&&e.type!=='flag-drop'&&e.type!=='flag-return')return;this._beat(objectiveCue(e.type),pan,1,.25);return;}
+  if(e.type==='power'){if(!local)return;this._beat(POWER_CUES[e.harness]||objectiveCue('power'),pan,1,.25);if(this.announcer)this.announcerCue('power');return;}
+  if(e.type==='pickup'||e.type==='powerup'||e.type==='spawn'||e.type.startsWith('flag')){if(!local&&e.type!=='flag-pickup'&&e.type!=='flag-drop'&&e.type!=='flag-return')return;this._beat(objectiveCue(e.type),pan,1,.25);return;}
   if(e.type==='capture'||EVENT_CUES[e.type]){const vol=local?1:(pos?Math.max(.2,this._falloff(pos,player,48)):.9);this._beat(EVENT_CUES[e.type]||objectiveCue('capture'),pan,vol,.3);return;}
   if(e.type.startsWith('zone')){const vol=local?1:(pos?Math.max(.2,this._falloff(pos,player,44)):.9);this._beat(objectiveCue('zone'),pan,vol,.24);return;}
   // Local ability/deployable foley and enemy ordnance, volume-shaped by distance.
-  if(e.type==='dash'||e.type==='jam'||e.type==='deployable'||e.type==='deployable-fire'||e.type==='deployable-expire'||e.type==='phalanx-shield'||e.type==='enemy-artillery'||e.type==='enemy-detonate'||e.type==='enemy-flank'){
+  if(e.type==='dash'||e.type==='jam'||e.type==='feint'||e.type==='deployable'||e.type==='deployable-fire'||e.type==='deployable-expire'||e.type==='phalanx-shield'||e.type==='enemy-artillery'||e.type==='enemy-detonate'||e.type==='enemy-flank'){
    const vol=local?1:this._falloff(pos,player,28);if(vol>.03){
     if(e.type==='dash')this._play(.16,pan,(t,out,nodes)=>{this._noise(t,out,nodes,{duration:.12,gain:.22*vol,type:'bandpass',freq:1200,sweep:2600,q:.8});this._tone(t,out,nodes,{freq:180,duration:.1,type:'triangle',gain:.06*vol,end:80});});
+    else if(e.type==='feint'){this._play(.2,pan,(t,out,nodes)=>{this._noise(t,out,nodes,{duration:.1,gain:.18*vol,type:'highpass',freq:2400,sweep:3600,q:.8});this._tone(t,out,nodes,{freq:660,duration:.16,type:'triangle',gain:.05*vol,end:220});});if(local&&this.announcer)this.announcerCue('feint');}
     else if(e.type==='jam')this._play(.3,pan,(t,out,nodes)=>{this._noise(t,out,nodes,{duration:.24,gain:.3*vol,type:'bandpass',freq:2400,sweep:400,q:1.4});this._tone(t,out,nodes,{freq:420,duration:.22,type:'square',gain:.08*vol,end:120});});
     else if(e.type==='phalanx-shield')this._play(.3,pan,(t,out,nodes)=>{this._noise(t,out,nodes,{duration:.2,gain:.28*vol,type:'bandpass',freq:1500,sweep:600,q:1.1});this._tone(t+.01,out,nodes,{freq:300,duration:.24,type:'triangle',gain:.1*vol,end:900});});
     else if(e.type==='enemy-artillery'||e.type==='enemy-detonate')this._play(.55,pan,(t,out,nodes)=>{this._noise(t,out,nodes,{duration:.38,gain:.5*vol,type:'lowpass',freq:700,sweep:70,q:.8});this._tone(t,out,nodes,{freq:95,duration:.3,type:'sawtooth',gain:.18*vol,end:30});this._debris(t,out,nodes,{vol,seed:eventSeed(e),cap:3});},{send:.35*vol});
     else if(e.type==='enemy-flank')this._beat(EVENT_CUES['enemy-flank'],pan,vol,.25);
     else this._play(.2,pan,(t,out,nodes)=>{this._noise(t,out,nodes,{duration:.14,gain:.24*vol,type:'bandpass',freq:1000,sweep:2200,q:.8});this._tone(t,out,nodes,{freq:220,duration:.12,type:'triangle',gain:.07*vol,end:440});});
    }return;
+  }
+  // Movement verbs (§3.4/§6.3): local-only foley keyed to the movement module's
+  // shared event vocabulary, plus an opt-in announcer motif per verb.
+  if(MOVEMENT_EVENTS.has(e.type)){
+   if(!local)return;
+   const verb=typeof e.verb==='string'&&e.verb.length?e.verb:null;
+   if(e.type==='move-start')this._play(.22,pan,(t,out,nodes)=>{this._noise(t,out,nodes,{duration:.16,gain:.24,type:'bandpass',freq:900,sweep:2600,q:.7});this._tone(t,out,nodes,{freq:150,duration:.14,type:'triangle',gain:.05,end:320});});
+   else if(e.type==='windup-start'||e.type==='charge-start'){const duration=Math.min(1,Math.max(.1,Number(e.duration)||.3));this._play(duration+.1,pan,(t,out,nodes)=>{this._tone(t,out,nodes,{freq:180,duration,type:'sawtooth',gain:.05,end:520});this._noise(t,out,nodes,{duration:.2,gain:.12,type:'bandpass',freq:600,sweep:1800,q:.8});});}
+   else if(e.type==='slam-launch')this._play(.24,pan,(t,out,nodes)=>{this._noise(t,out,nodes,{duration:.18,gain:.28,type:'lowpass',freq:700,sweep:220,q:.7});this._tone(t,out,nodes,{freq:120,duration:.2,type:'triangle',gain:.1,end:420});});
+   else if(e.type==='slam-impact')this._play(.42,pan,(t,out,nodes)=>{this._noise(t,out,nodes,{duration:.3,gain:.5,type:'lowpass',freq:520,sweep:90,q:.8});this._tone(t,out,nodes,{freq:70,duration:.32,type:'sine',gain:.22,end:28});this._debris(t,out,nodes,{vol:1,seed:eventSeed(e),cap:3});});
+   else if(e.type==='grapple-hook')this._play(.18,pan,(t,out,nodes)=>{this._noise(t,out,nodes,{duration:.08,gain:.3,type:'bandpass',freq:1800,sweep:900,q:1.4});this._tone(t,out,nodes,{freq:260,duration:.14,type:'triangle',gain:.09,end:520});});
+   else if(e.type==='rope-place')this._play(.3,pan,(t,out,nodes)=>{this._noise(t,out,nodes,{duration:.16,gain:.24,type:'bandpass',freq:1200,sweep:2600,q:.9});this._tone(t,out,nodes,{freq:520,duration:.22,type:'sine',gain:.1,end:780});});
+   else if(e.type==='fuel-empty'||e.type==='no-lift'||e.type==='move-blocked')this._play(.16,pan,(t,out,nodes)=>{this._tone(t,out,nodes,{freq:220,duration:.1,type:'square',gain:.05,end:150});this._noise(t,out,nodes,{duration:.08,gain:.1,type:'lowpass',freq:700,sweep:300,q:.7});});
+   else if(e.type==='landing-recovery')this._play(.18,pan,(t,out,nodes)=>{this._noise(t,out,nodes,{duration:.14,gain:.24,type:'lowpass',freq:500,sweep:150,q:.7,attack:.01});this._tone(t,out,nodes,{freq:90,duration:.16,type:'sine',gain:.12,end:36});});
+   else this._play(.14,pan,(t,out,nodes)=>{this._noise(t,out,nodes,{duration:.1,gain:.14,type:'bandpass',freq:1100,sweep:420,q:.9});this._tone(t,out,nodes,{freq:200,duration:.1,type:'triangle',gain:.04,end:110});});
+   if(this.announcer&&(e.type==='move-start'||e.type==='slam-impact'||e.type==='rope-place'))this.announcerCue(verb&&ANNOUNCE_CUES[verb]?verb:(e.type==='move-start'?'move-start':e.type));
+   return;
   }
  }
   update(player,vehicles=[],dt=0,opts=null){if(!this.ctx||!player)return;if(this.muted){this._engine(0,false);this._bed(false);return;}if(!this.bed&&this.ambientBed!==false)this._bed(true);

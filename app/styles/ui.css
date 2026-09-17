@@ -598,3 +598,94 @@
   .demo-controls__label{min-width:0;flex:1 1 auto}
   .demo-option{font-size:10px;padding:5px 8px}
 }
+
+/* ==========================================================================
+   P4-2 — selection / match setup / rooms clean-up (UI-AUDIT-v6.6 C1–C6,
+   I1–I4, I9). Scoped to those screens; global chrome (header, demo dock,
+   results, match summary) stays with the Phase-4 UI pass.
+   ========================================================================== */
+
+/* C1 — denser kit cards; the flavour line yields on narrow layouts. */
+.panel--dense .grid-cards{grid-template-columns:repeat(auto-fill,minmax(min(100%,190px),1fr))}
+.card-chip{display:inline-flex;align-items:center}
+.card-chip--wing{font-weight:700;letter-spacing:.08em}
+.card-chip--verb{color:var(--accent-soft)}
+.card-chip--stat{color:var(--text-mute)}
+@media (max-width:1024px){
+  .panel--dense .card{padding:8px 10px}
+  .panel--dense .card-name small{display:none}
+}
+
+/* C2 / I1 — sticky preview + presets column on wide layouts. */
+@media (min-width:1101px){
+  .layout--lead>.stack--sticky{position:sticky;top:calc(var(--safe-top) + 92px);align-self:start}
+}
+
+/* I4 — panel heads wrap instead of pushing buttons off-screen. */
+.panel-head{flex-wrap:wrap}
+.panel-head .btn{min-width:0;white-space:normal}
+.shuffle-short{display:none}
+@media (max-width:480px){
+  .shuffle-long{display:none}
+  .shuffle-short{display:inline}
+}
+
+/* I9 — MODEL / KIT tabs inside the existing preview height. */
+.preview-tabs{position:absolute;top:10px;right:10px;z-index:3}
+.preview-tabs .segmented{background:rgba(6,14,18,.82)}
+.preview-caption--kit{display:grid;gap:8px}
+.preview-caption--kit .field-note b{color:var(--text)}
+.preview-kit-verb{color:var(--accent)}
+.preview-kit-combo{flex:1 1 auto;margin:0}
+
+/* Harness panel tradeoff / rider block. */
+.harness-detail{margin-top:14px;border-top:1px solid var(--ui-line);padding-top:14px}
+.harness-detail .row{margin-top:8px}
+.harness-detail .field-note b{color:var(--text)}
+
+/* C5 — the rail collapses to chips + MATCH SETUP + ENTER ARENA + MORE on
+   phones; the secondary actions expand behind the disclosure. */
+@media (min-width:901px){
+  .rail-more{display:contents}
+  .rail-more__toggle{display:none}
+  .rail-more__body{display:flex;align-items:center;gap:10px;flex-wrap:wrap}
+}
+@media (max-width:900px){
+  .rail-actions .btn{min-height:44px}
+  .rail-more{display:block;min-width:0}
+  .rail-more__toggle{display:inline-flex}
+  .rail-more__body{display:none}
+  .rail-more.is-open .rail-more__body{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px;margin-top:8px}
+  .rail-more.is-open .rail-more__toggle svg{transform:rotate(180deg)}
+}
+@media (max-width:720px){
+  .rail-more{grid-column:1 / -1}
+}
+
+/* C6 — rooms toolbar input keeps the QUICK JOIN button on the same row. */
+.toolbar .ui-input{flex:1 1 320px;max-width:480px}
+
+/* C3 — match setup modal: clamped arena blurbs, chip mode row and a
+   two-column rules body at >=1100px. */
+.card--arena .card-name small{display:-webkit-box;-webkit-box-orient:vertical;-webkit-line-clamp:2;line-clamp:2;overflow:hidden}
+.card--arena .card-icon{width:30px;height:30px}
+.card--arena .card-icon svg{max-width:100%;max-height:100%}
+.match-configuration .mode-options--chips{display:flex;flex-wrap:wrap;gap:8px}
+.match-configuration .mode-options--chips .mode-option{flex:0 1 auto;align-items:center;gap:8px;padding:8px 12px;
+  border-radius:var(--radius-pill);background:rgba(10,27,26,.8)}
+.match-configuration .mode-options--chips .mode-option strong{font-size:13px}
+.match-configuration .mode-options--chips .mode-option small,
+.match-configuration .mode-options--chips .mode-option em{display:none}
+.match-configuration .mode-options--chips .mode-option.selected{border-color:var(--accent);background:rgba(30,60,52,.55);box-shadow:0 0 0 1px var(--accent) inset}
+.mode-detail{display:grid;gap:4px;margin-top:10px;padding:10px 12px;border:1px solid var(--ui-line);
+  border-radius:var(--radius-md);background:rgba(10,22,26,.45)}
+.mode-detail p{margin:0;font-size:13px;line-height:1.5;color:var(--text-dim);
+  display:-webkit-box;-webkit-box-orient:vertical;-webkit-line-clamp:2;line-clamp:2;overflow:hidden}
+.config-toggle-grid{display:grid;gap:2px}
+/* Container-based so the two-column body only applies when the setup panel is
+   wide; the lobby's narrower MatchConfiguration keeps one column. */
+@container (min-width:720px){
+  .match-configuration .config-grid{grid-template-columns:repeat(2,minmax(0,1fr))}
+  .config-toggle-grid{columns:2;column-gap:24px}
+  .config-toggle-grid .config-toggle{break-inside:avoid}
+}

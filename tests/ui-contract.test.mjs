@@ -21,14 +21,17 @@ test('every app/ui screen field exists in the page ui bag', async () => {
   for (const file of await readdir(dir)) {
     if (!file.endsWith('.tsx')) continue;
     const src = await readFile(new URL(file, dir), 'utf8');
+    // Module specifiers are not bag fields. Without this, importing
+    // `game/class-ui.mjs` scans as a `ui.mjs` field read and fails the contract.
+    const source = src.replace(/['"][^'"]*\.(?:mjs|js|ts|tsx)['"]/g, '""');
     const names = new Set();
-    for (const m of src.matchAll(/const \{([^}]*)\}\s*=\s*ui;/g)) {
+    for (const m of source.matchAll(/const \{([^}]*)\}\s*=\s*ui;/g)) {
       for (const part of m[1].split(',')) {
         const name = part.trim().split(':').pop().trim();
         if (name && !name.includes('=')) names.add(name);
       }
     }
-    for (const m of src.matchAll(/\bui\.([A-Za-z0-9_]+)/g)) names.add(m[1]);
+    for (const m of source.matchAll(/\bui\.([A-Za-z0-9_]+)/g)) names.add(m[1]);
     const missing = [...names].filter(name => !has(name));
     if (missing.length) failures.push(`${file}: ${missing.join(', ')}`);
   }
