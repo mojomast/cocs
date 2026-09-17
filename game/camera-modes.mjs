@@ -42,6 +42,100 @@ export function isExtraCameraMode(mode){
 }
 
 // ---------------------------------------------------------------------------
+// Camera ownership.
+//
+// Exactly one controller writes the presentation camera per frame. The owner
+// names that controller:
+//  - `auto`   the view arbitrates: director / spectator / first-person and,
+//             on a race match, the race-soccer demo rigs
+//  - `race`   the runtime explicitly wants the race/soccer demo camera
+//  - `manual` the runtime chose the framing (a pinned director rig or a manual
+//             subject follow); race demo poses must never clobber it
+//  - `free`   free roam; the page drives the pose with freeMove/freeLook
+// ---------------------------------------------------------------------------
+export const CAMERA_OWNERS=['auto','race','manual','free'];
+
+export function normalizeCameraOwner(value){
+ return CAMERA_OWNERS.includes(value)?value:'auto';
+}
+
+// Race/soccer presentation poses are only allowed to write the camera while the
+// owner is automatic (back-compat: an unclaimed race match keeps its demo rigs)
+// or explicitly `race`. Manual framing and free roam always win.
+export function cameraOwnerAllowsRace(owner){
+ const normalized=normalizeCameraOwner(owner);
+ return normalized==='auto'||normalized==='race';
+}
+
+// Map a HUD camera mode onto the owner the page should request. `auto` lets the
+// view arbitrate (race rigs included), `free` is free roam, and every explicit
+// rig or presentation mode is a manual framing choice that must beat race.
+export function cameraModeOwner(mode){
+ if(mode==='free')return 'free';
+ if(mode==='auto')return 'auto';
+ return 'manual';
+}
+
+// ---------------------------------------------------------------------------
+// Free-roam flight.
+//
+// Frame-rate independent and allocation-free: the velocity chases the input's
+// target velocity with an exponential approach, then the pose advances by the
+// average velocity across the step (trapezoid), so a 30 Hz and a 144 Hz client
+// converge to the same path. `pose` and `velocity` are caller-owned scratch
+// objects and are mutated in place. The input magnitude is normalized, so a
+// diagonal WASD press or Space+forward is bounded by the same top speed.
+// ---------------------------------------------------------------------------
+export const FREE_CAM_DEFAULT_SPEED=16;
+export const FREE_CAM_BOOST=2.4;
+export const FREE_CAM_MAX_SPEED=64;
+export const FREE_CAM_MIN_SPEED=2;
+export const FREE_CAM_MAX_BASE_SPEED=40;
+export const FREE_CAM_ACCEL_HALF_LIFE=.12;
+export const FREE_CAM_BRAKE_HALF_LIFE=.08;
+export const FREE_CAM_FLOOR=.4;
+
+const finiteOr=(value,fallback)=>Number.isFinite(value)?value:fallback;
+
+export function integrateFreeMove(pose,velocity,input,dt,speed=FREE_CAM_DEFAULT_SPEED,boost=FREE_CAM_BOOST){
+ const step=Math.min(Math.max(finiteOr(dt,0),0),.1);
+ const base=Math.max(0,finiteOr(speed,FREE_CAM_DEFAULT_SPEED));
+ const boostScale=input&&input.boost===true?Math.max(0,finiteOr(boost,FREE_CAM_BOOST)):1;
+ const top=Math.min(FREE_CAM_MAX_SPEED,base*boostScale);
+ let forward=finiteOr(input&&input.forward,0),right=finiteOr(input&&input.right,0),up=finiteOr(input&&input.up,0);
+ const magnitude=Math.hypot(forward,right,up);
+ if(magnitude>1e-9){forward/=magnitude;right/=magnitude;up/=magnitude;}
+ else{forward=0;right=0;up=0;}
+ const moving=magnitude>1e-9;
+ const poseObj=pose&&typeof pose==='object'?pose:{x:0,y:6,z:0,yaw:0,pitch:0};
+ const vel=velocity&&typeof velocity==='object'?velocity:{x:0,y:0,z:0};
+ const yaw=finiteOr(poseObj.yaw,0),pitch=Math.max(-1.5,Math.min(1.5,finiteOr(poseObj.pitch,0)));
+ const cy=Math.cos(yaw),sy=Math.sin(yaw),cp=Math.cos(pitch),sp=Math.sin(pitch);
+ // World-space target along the look basis: forward flies where the camera
+ // looks, right strafes horizontally, up is world up (Space/Ctrl).
+ const tx=moving?top*(forward*(-cp*sy)+right*cy):0;
+ const ty=moving?top*(forward*sp+up):0;
+ const tz=moving?top*(forward*(-cp*cy)+right*(-sy)):0;
+ const k=smoothFactor(moving?FREE_CAM_ACCEL_HALF_LIFE:FREE_CAM_BRAKE_HALF_LIFE,step);
+ const vx0=finiteOr(vel.x,0),vy0=finiteOr(vel.y,0),vz0=finiteOr(vel.z,0);
+ let vx=vx0+(tx-vx0)*k,vy=vy0+(ty-vy0)*k,vz=vz0+(tz-vz0)*k;
+ const speedNow=Math.hypot(vx,vy,vz);
+ if(speedNow>top&&speedNow>1e-9){const scale=top/speedNow;vx*=scale;vy*=scale;vz*=scale;}
+ vel.x=vx;vel.y=vy;vel.z=vz;
+ const px=finiteOr(poseObj.x,0),py=finiteOr(poseObj.y,6),pz=finiteOr(poseObj.z,0);
+ poseObj.x=px+(vx0+vx)*.5*step;
+ poseObj.y=py+(vy0+vy)*.5*step;
+ poseObj.z=pz+(vz0+vz)*.5*step;
+ if(!(poseObj.y>=FREE_CAM_FLOOR))poseObj.y=FREE_CAM_FLOOR;
+ if(!Number.isFinite(poseObj.x))poseObj.x=0;
+ if(!Number.isFinite(poseObj.y))poseObj.y=6;
+ if(!Number.isFinite(poseObj.z))poseObj.z=0;
+ if(!Number.isFinite(poseObj.yaw))poseObj.yaw=0;
+ if(!Number.isFinite(poseObj.pitch))poseObj.pitch=0;
+ return poseObj;
+}
+
+// ---------------------------------------------------------------------------
 // Deterministic camera smoothing.
 //
 // A frame-rate independent exponential ease: the same elapsed time produces the
