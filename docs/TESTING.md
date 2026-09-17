@@ -131,11 +131,13 @@ duplicate "every combat mode completes" loop was removed outright from
 
 ## Current counts
 
-Last verified on release v6.5 (2026-09-17), on the `demo/showcase` integration
-worktree (class Phase 2 + rebuilt attract demo merged):
+Last verified on release v6.6 (2026-09-17), on the `feat/moth-fidelity`
+worktree (Moth fidelity pass merged into production via `a75119b`):
 
-- `npm run test:game` — **1822 tests: 1817 pass, 0 fail, 5 skipped**, across 161
-  `game/*.test.mjs` files, and it completes in about eight minutes.
+- `npm run test:game` — **1833 tests: 1828 pass, 0 fail, 5 skipped**, across
+  163 `game/*.test.mjs` files, and it completes in about eight minutes. The Moth
+  pass adds 11 of those tests (`moth-sprite` 5, `moth-wiring` 6); the production
+  checkout re-ran the affected files plus `changelog` at **49/49**.
 - The 5 skipped tests are long simulations (an exhaustive 8-bot all-modes sweep,
   an 18k-step 4-bot match, a 10k-step 8-bot race, a 4×1800-step platform-bot
   sweep, and an `OfflineAudioContext` soundtrack render that only runs in a
@@ -147,7 +149,8 @@ worktree (class Phase 2 + rebuilt attract demo merged):
   at **132/132 pass, 0 skipped**.
 - `npm run test:server` — **153 pass, 0 fail**, across 16 `server/*.test.mjs`
   files.
-- `node --test tests/*.test.mjs` — **7 pass, 0 fail** (SSR, UI contract, deployment).
+- `node --test tests/*.test.mjs` — **7 pass, 0 fail** (SSR, UI contract,
+  deployment), re-ran against the v6.6 production build.
 - `npx tsc --noEmit` — clean; `npm run lint` — 0 errors (481 warnings only);
   bounded `vinext build` — green.
 - `game/archive/*.test.mjs` — 2 files, run on demand, not counted above.

@@ -437,6 +437,7 @@ function gridToRamp(field, width, height, tint = 'quantum') {
   const ramps = {
     quantum: [[10, 30, 40], [40, 210, 200], [180, 120, 255], [240, 250, 255]],
     ember: [[26, 8, 6], [180, 40, 20], [255, 150, 40], [255, 240, 200]],
+    plasma: [[10, 4, 30], [110, 30, 190], [255, 90, 160], [255, 240, 255]],
   };
   const ramp = ramps[tint] || ramps.quantum;
   const rgb = new Uint8Array(width * height * 4);
@@ -595,6 +596,20 @@ const SOURCE_ART = {
   hazard: { size: 256, palette: [0.86, 0.7, 0.16], pattern: 'stripes', contrast: 0.55 },
   nebula: { size: 256, wide: 2, palette: [0.26, 0.3, 0.5], pattern: 'stars', contrast: 0.6 },
   macro: { size: 256, palette: [0.62, 0.58, 0.5], pattern: 'noise', contrast: 0.95, freq: 2 },
+  // Fidelity pass: offline source art for canonical kinds that had no baked
+  // albedo, plus three atmosphere variants. `sources` renders these locally —
+  // no API key and no credits — so they are free to iterate.
+  steel: { size: 256, palette: [0.6, 0.63, 0.68], pattern: 'panels', panels: 6, contrast: 0.4, seed: 17 },
+  stucco: { size: 256, palette: [0.82, 0.78, 0.7], pattern: 'noise', contrast: 0.24, freq: 7, seed: 137 },
+  corrugated: { size: 256, palette: [0.62, 0.66, 0.71], pattern: 'corrugated', ribs: 12, contrast: 0.5, seed: 37 },
+  grating: { size: 256, palette: [0.58, 0.61, 0.65], pattern: 'grating', cells: 8, contrast: 0.6, seed: 41 },
+  diamond: { size: 256, palette: [0.6, 0.63, 0.67], pattern: 'diamond', cells: 5, contrast: 0.6, seed: 43 },
+  carbon: { size: 256, palette: [0.22, 0.24, 0.28], pattern: 'weave', cells: 18, contrast: 0.6, seed: 47 },
+  riveted: { size: 256, palette: [0.56, 0.6, 0.65], pattern: 'rivets', panels: 4, contrast: 0.45, seed: 53 },
+  mesh: { size: 256, palette: [0.54, 0.58, 0.62], pattern: 'mesh', cells: 6, contrast: 0.7, seed: 59 },
+  'sky-ashen': { size: 256, wide: 2, palette: [0.58, 0.5, 0.42], pattern: 'stars', contrast: 0.5, cloudFreq: 3.2, starDensity: 0.997, seed: 139 },
+  'sky-frost': { size: 256, wide: 2, palette: [0.5, 0.62, 0.82], pattern: 'stars', contrast: 0.5, cloudFreq: 3.4, starDensity: 0.997, seed: 67 },
+  'sky-void': { size: 256, wide: 2, palette: [0.26, 0.26, 0.42], pattern: 'stars', contrast: 0.5, cloudFreq: 3.6, starDensity: 0.997, seed: 149 },
 };
 
 // Wrapping value noise, so the source art tiles seamlessly and does not draw a
@@ -612,6 +627,7 @@ const tileFbm = (u, v, seed, freq, octaves = 4) => {
   for (let i = 0; i < octaves; i++) { total += valueNoiseT(u * f, v * f, seed + i * 131, f) * amp; norm += amp; amp *= 0.5; f *= 2; }
   return total / norm;
 };
+const wrap01 = (t) => ((t % 1) + 1) % 1;
 
 function makeSourceArt(name, spec = SOURCE_ART.panel) {
   const base = SOURCE_ART[name] || {};
@@ -630,17 +646,57 @@ function makeSourceArt(name, spec = SOURCE_ART.panel) {
     let lum = 0.5 + (tileFbm(u, v, seed, freq, 4) - 0.5) * contrast;
     lum += (tileFbm(u, v, seed + 31, freq * 3, 3) - 0.5) * contrast * 0.35;
     if (merged.pattern === 'panels') {
-      const gx = Math.abs(((x / width) * 8) % 1 - 0.5) * 2, gy = Math.abs(((y / height) * 8) % 1 - 0.5) * 2;
+      const panels = merged.panels ?? 8;
+      const gx = Math.abs(((x / width) * panels) % 1 - 0.5) * 2, gy = Math.abs(((y / height) * panels) % 1 - 0.5) * 2;
       lum *= gx > 0.94 || gy > 0.94 ? 0.45 : 1;
+    } else if (merged.pattern === 'rivets') {
+      // Riveted armour: a coarse plate grid with a bolt head row riding each seam.
+      const panels = merged.panels ?? 4;
+      const lx = ((x / width) * panels) % 1, ly = ((y / height) * panels) % 1;
+      const seam = Math.min(lx, 1 - lx, ly, 1 - ly);
+      if (seam < 0.05) lum *= 0.45;
+      const boltX = Math.abs((ly * 4) % 1 - 0.5) < 0.12 && Math.min(lx, 1 - lx) < 0.16;
+      const boltY = Math.abs((lx * 4) % 1 - 0.5) < 0.12 && Math.min(ly, 1 - ly) < 0.16;
+      if (boltX || boltY) lum = Math.min(1, lum + 0.5);
     } else if (merged.pattern === 'circuit') {
       const gx = Math.abs(((x / width) * 10) % 1 - 0.5) * 2, gy = Math.abs(((y / height) * 10) % 1 - 0.5) * 2;
       if (gx > 0.96 || gy > 0.96) lum = Math.min(1, lum + 0.5);
     } else if (merged.pattern === 'stripes') {
       lum = (((x + y) / height) * 4) % 1 < 0.5 ? lum + 0.25 : lum * 0.35;
+    } else if (merged.pattern === 'corrugated') {
+      // Rolled sheet: sinusoidal ribs running along the tile's height.
+      const ribs = merged.ribs ?? 10;
+      const wave = 0.5 + 0.5 * Math.sin(u * Math.PI * 2 * ribs);
+      lum = lum * (0.45 + wave * 0.75) + wave * 0.16;
+    } else if (merged.pattern === 'grating') {
+      // Bar-and-hole grating: bright rails around dark square voids.
+      const cells = merged.cells ?? 8;
+      const fx = (u * cells) % 1, fy = (v * cells) % 1;
+      const bar = Math.min(fx, 1 - fx, fy, 1 - fy) < 0.18;
+      lum = bar ? 0.6 + lum * 0.5 : lum * 0.28;
+    } else if (merged.pattern === 'diamond') {
+      // Diamond tread plate: the raised lattice is a pair of diagonal bands.
+      const cells = merged.cells ?? 5;
+      const t1 = wrap01(((x + y) / size) * cells), t2 = wrap01(((x - y) / size) * cells);
+      const tread = Math.min(t1, 1 - t1, t2, 1 - t2);
+      lum = tread < 0.24 ? 0.7 + lum * 0.45 : lum * 0.5;
+    } else if (merged.pattern === 'weave') {
+      // 2x2 carbon twill: alternate the diagonal shading direction every cell.
+      const cells = merged.cells ?? 16;
+      const cx = Math.floor(u * cells), cy = Math.floor(v * cells);
+      const fx = (u * cells) % 1;
+      const twill = (cx + cy) % 2 === 0 ? fx : 1 - fx;
+      lum = 0.3 + twill * 0.5 + ((y / height) * cells % 1) * 0.12 + (lum - 0.5) * 0.3;
+    } else if (merged.pattern === 'mesh') {
+      // Expanded metal: a diagonal slit lattice leaves bright strands.
+      const cells = merged.cells ?? 6;
+      const a = wrap01(((x + y) / size) * cells), b = wrap01(((x - y) / size) * cells);
+      const strand = a < 0.3 || b < 0.3;
+      lum = strand ? 0.6 + lum * 0.4 : lum * 0.22;
     } else if (merged.pattern === 'stars') {
       const band = Math.max(0, 1 - Math.abs((y / height) - 0.5) * 2.2);
-      lum = 0.06 + band * (0.25 + tileFbm(u, v, seed, 3, 4) * 0.7);
-      if (hash2(x * 3 + 1, y * 7 + 5, seed + 991) > 0.9965) lum = 1;
+      lum = 0.06 + band * (0.25 + tileFbm(u, v, seed, merged.cloudFreq ?? 3, 4) * 0.7);
+      if (hash2(x * 3 + 1, y * 7 + 5, seed + 991) > (merged.starDensity ?? 0.9965)) lum = 1;
     }
     // Natural surfaces must read as one continuous material: no seam darkening.
     // Industrial patterns keep their hard edges so the grid reads on purpose.
@@ -672,11 +728,38 @@ function radialGrid(size, frame = 0, seed = 3) {
     return Math.round((ring * 0.8 + fbm2(x * 0.3, y * 0.3, seed + frame * 17, 3) * 0.2) * 1000) / 1000;
   }));
 }
-function generateValues(job) {
+// A portal/arc burst: an expanding ring plus angular spokes and a hot core, so
+// the sequence reads as an opening gate rather than the rift's plain shockwave.
+function portalGrid(size, frame = 0, seed = 41) {
+  const c = (size - 1) / 2, radius = size * (0.12 + frame * 0.13);
+  return Array.from({ length: size }, (_, y) => Array.from({ length: size }, (_, x) => {
+    const dx = x - c, dy = y - c, d = Math.hypot(dx, dy), angle = Math.atan2(dy, dx);
+    const ring = Math.max(0, 1 - Math.abs(d - radius) / (size * 0.11));
+    const core = Math.max(0, 1 - d / (size * 0.14));
+    const spokes = Math.pow(Math.abs(Math.cos(angle * 3 + frame * 0.9)), 6) * Math.max(0, 1 - d / (size * 0.5));
+    const noise = fbm2(x * 0.35, y * 0.35, seed + frame * 23, 3) * 0.18;
+    return Math.round(Math.min(1, ring * 0.75 + spokes * 0.35 + core * 0.9 + noise) * 1000) / 1000;
+  }));
+}
+// A spark impact: a bright core with radiating needle rays that broaden with the
+// frame index, for muzzle/impact flashes.
+function sparkGrid(size, frame = 0, seed = 61) {
+  const c = (size - 1) / 2, radius = size * (0.06 + frame * 0.16);
+  return Array.from({ length: size }, (_, y) => Array.from({ length: size }, (_, x) => {
+    const dx = x - c, dy = y - c, d = Math.hypot(dx, dy) || 1e-6, angle = Math.atan2(dy, dx);
+    const core = Math.max(0, 1 - d / (size * (0.1 + frame * 0.03)));
+    const ray = Math.pow(Math.abs(Math.sin(angle * 5 + seed)), 4) * Math.max(0, 1 - Math.abs(d - radius) / (size * 0.22));
+    const noise = fbm2(x * 0.4, y * 0.4, seed + frame * 13, 2) * 0.15;
+    return Math.round(Math.min(1, core + ray * 0.7 + noise) * 1000) / 1000;
+  }));
+}
+export function generateValues(job) {
   const spec = job.generateValues;
   if (!spec || !spec.type) return null;
   if (spec.type === 'height') return heightGrid(spec.size || 32, spec.seed || 1, spec.kind || 'noise');
   if (spec.type === 'radial') return radialGrid(spec.size || 32, spec.frame || 0, spec.seed || 3);
+  if (spec.type === 'portal') return portalGrid(spec.size || 32, spec.frame || 0, spec.seed || 41);
+  if (spec.type === 'spark') return sparkGrid(spec.size || 32, spec.frame || 0, spec.seed || 61);
   return null;
 }
 

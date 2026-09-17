@@ -240,3 +240,27 @@ Append an entry to `assets/moth/manifest.json`:
 Then `MOTH_API_KEY=... node scripts/moth-bake.mjs run --only blur-metal`. The
 `bake.name` for a texture must be a canonical kind from `TEXTURE_KINDS` in
 `game/textures.mjs` if you want it to override that surface.
+
+### Source patterns and value generators
+
+The image engines consume PNGs from `assets/moth/sources`. `makeSourceArt`
+renders them locally and deterministically (no API key, no credits) from
+wrapping value noise, so art iteration is free: edit `SOURCE_ART`, run
+`sources`, and only pay when a job is submitted. `pattern` selects the family:
+`noise` (wrapping natural material, the default), `panels` (`panels`: plate grid
+with dark seams), `rivets` (`panels`: plate grid plus bolt rows along the seams),
+`circuit`, `stripes`, `corrugated` (`ribs`: rolled sinusoidal sheet), `grating`
+(`cells`: bright bars around dark square voids), `diamond` (`cells`: diamond
+tread crosshatch), `weave` (`cells`: 2x2 carbon twill), `mesh` (`cells`:
+expanded-metal slit lattice) and `stars` (`cloudFreq`, `starDensity`: equirect
+star band for skies). Shared knobs: `seed`, `size`, `wide`, `palette`,
+`contrast`, `freq`.
+
+blur-core-v1 never receives a grid through the manifest; `generateValues`
+synthesizes one so the job stays deterministic and offline: `height`
+(`kind`: `noise` | `ridge` | `cells`) for normal-map relief, `radial`
+(`frame`, `seed`) for the expanding shock ring behind `quantum-rift`, `portal`
+(`frame`, `seed`) for expanding rings with angular spokes and a hot core behind
+`arc-burst`, and `spark` (`frame`, `seed`) for a bright core with radiating
+needle rays behind `spark-impact`. Baked effect frames accept a `tint`
+(`quantum`, `ember`, `plasma`).

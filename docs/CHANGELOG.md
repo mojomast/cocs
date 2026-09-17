@@ -16,6 +16,60 @@ record in [VERIFICATION.md](VERIFICATION.md).
 
 ---
 
+## v6.6 · BIOME — 2026-09-17
+
+Moth skies are chosen per biome, and the surface and effect bakes now cover the
+kinds the game actually paints.
+
+- Eight new albedos fill canonical surface kinds that had no Moth tile: metal
+  (the default wall/ceiling look), rough_stucco and corrugated_metal through
+  blur-v1, and metal_grating, diamond_plate, carbon_fiber, riveted_armor and
+  industrial_mesh through deep-fryer-v1. Nine new normal maps add real relief to
+  grass, hazard_stripes, hex_paneling, holographic_grid, metal, metal_grating,
+  diamond_plate, rough_stucco and corrugated_metal.
+- Three baked skies replace the single nebula dome, chosen by theatre: volcanic
+  maps get ashen, frost maps get frost, and the neon/void maps (including the
+  Quantum Labyrinth) get void. The swap replaces the addSky gradient material on
+  the existing camera-following dome, so stars, the sun disc, haze, halo and the
+  storm/time-of-day tint keep working; unlisted maps keep their procedural sky.
+  The old nebula bake stays unused on purpose — it decodes to an all-zero
+  equirect and could only reproduce the black dome it caused.
+- Two effect sequences are wired: arc-burst (plasma, 3 frames) and spark-impact
+  (ember, 2 frames) drive remote muzzle flashes, bullet and rail impacts,
+  explosions, vehicle kills, respawns, flag/zone captures, teleporter
+  departures/arrivals, contested payloads and lightning strikes. A new pooled,
+  billboarded `MothSpritePlayer` spawns them deterministically; the effects are
+  WebGL-only and skipped or frozen under reduced motion, and the rift keeps its
+  bespoke looping player.
+- Landmarks and objective furniture wear the entanglement LUTs: traversal and
+  teleport pads, objective beacons, capture rings, the payload halo, flags,
+  pickups and the menu rings. Volcanic maps use ember, the rest arcane; the
+  plain entanglement bake covers flags and pickups.
+- Surface coverage reaches the props and architecture the game places: rock
+  (rocks, ruins, caverns, tunnels — the tunnel shell now generates world-unit
+  UVs), alien_chitin canopies, brushed_metal barrels and goal frames,
+  rough_stucco and metal walls, and ice spikes. Race and soccer presentation
+  shares the view's surface helper: a grass pitch with mown stripes, a
+  caution-striped barrier and brushed-metal goals; the race collision blocks
+  stay deliberately untextured.
+- The runtime cost is bounded: shared Moth textures are cached per name and
+  released exactly once (instead of a fresh DataTexture upload per call), and
+  every cached Moth texture is tagged `userData.mothShared` so disposal never
+  frees a texture another material still samples.
+- Budget: 28 emulator credits for the fidelity pass (25 submissions — 22 green
+  first pass plus 3 re-runs replacing near-black blur outputs), lifting the
+  baked buckets from 12/4/1/1 to 20 textures / 13 normal maps / 4 skies / 3
+  effects. The four wiring commits cost 0 credits because they reuse the
+  committed bakes. Nothing new is fetched at runtime and no API key ships.
+- Scope: presentation only. `game/textures.mjs`, `game/view.mjs` and
+  `game/race-presentation.mjs` carry the wiring; the simulation, protocol and
+  server code are untouched, so the release is web-only. The phase-1 spatial
+  integration patch needed a context refresh for the tunnel's world-unit UVs
+  (`docs/phase1-spatial-integration.patch`); its guard test re-applies every
+  hunk in memory and the renderer path is unchanged.
+
+---
+
 ## v6.5 · MOMENTUM — 2026-09-17
 
 Every operator gets a movement verb and a signature verb, and the attract demo is

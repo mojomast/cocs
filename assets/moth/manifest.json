@@ -451,6 +451,78 @@
       "jobId": "33d0f7bb-d535-4eb0-bfe8-34419123a954"
     },
     {
+      "id": "sky-ashen",
+      "engine": "blur-v1",
+      "enabled": true,
+      "credits": 1,
+      "input": {
+        "image": "sources/sky-ashen.png"
+      },
+      "params": {
+        "strength": 0.5,
+        "style": "rx",
+        "reach": 0.75,
+        "size": 512,
+        "downscale": true
+      },
+      "raw": "sky-ashen",
+      "bake": {
+        "type": "sky",
+        "name": "ashen",
+        "width": 128,
+        "height": 64
+      },
+      "jobId": "b4652488-f69d-47d3-a8f8-790627c42e53"
+    },
+    {
+      "id": "sky-frost",
+      "engine": "blur-v1",
+      "enabled": true,
+      "credits": 1,
+      "input": {
+        "image": "sources/sky-frost.png"
+      },
+      "params": {
+        "strength": 0.5,
+        "style": "rx",
+        "reach": 0.75,
+        "size": 512,
+        "downscale": true
+      },
+      "raw": "sky-frost",
+      "bake": {
+        "type": "sky",
+        "name": "frost",
+        "width": 128,
+        "height": 64
+      },
+      "jobId": "7e5fc4ac-82fe-4bfc-b6df-08e73c13eb73"
+    },
+    {
+      "id": "sky-void",
+      "engine": "blur-v1",
+      "enabled": true,
+      "credits": 1,
+      "input": {
+        "image": "sources/sky-void.png"
+      },
+      "params": {
+        "strength": 0.5,
+        "style": "rx",
+        "reach": 0.75,
+        "size": 512,
+        "downscale": true
+      },
+      "raw": "sky-void",
+      "bake": {
+        "type": "sky",
+        "name": "void",
+        "width": 128,
+        "height": 64
+      },
+      "jobId": "b17e6bc1-1d97-4d88-9dff-61ad2c75074b"
+    },
+    {
       "id": "normal-rock",
       "engine": "blur-core-v1",
       "enabled": true,
@@ -583,6 +655,312 @@
       "jobId": "4fa28a5a-3a58-4ce5-bfc6-ee1d0daa39a1"
     },
     {
+      "id": "normal-grass",
+      "engine": "blur-core-v1",
+      "enabled": true,
+      "credits": 1,
+      "generateValues": {
+        "type": "height",
+        "size": 64,
+        "seed": 71,
+        "kind": "noise"
+      },
+      "params": {
+        "style": "xy",
+        "strength": [
+          0.3,
+          0.3
+        ],
+        "reach": 0.18,
+        "axes": [
+          0,
+          1
+        ],
+        "shots": null,
+        "max_qubits": 20
+      },
+      "raw": "normal-grass",
+      "bake": {
+        "type": "normal-map",
+        "name": "grass",
+        "size": 32,
+        "strength": 1.5
+      },
+      "jobId": "b81fb534-168b-46b4-ac44-2fd38874eef6"
+    },
+    {
+      "id": "normal-hazard",
+      "engine": "blur-core-v1",
+      "enabled": true,
+      "credits": 1,
+      "generateValues": {
+        "type": "height",
+        "size": 64,
+        "seed": 83,
+        "kind": "ridge"
+      },
+      "params": {
+        "style": "xy",
+        "strength": [
+          0.4,
+          0.4
+        ],
+        "reach": 0.25,
+        "axes": [
+          0,
+          1
+        ],
+        "shots": null,
+        "max_qubits": 20
+      },
+      "raw": "normal-hazard",
+      "bake": {
+        "type": "normal-map",
+        "name": "hazard_stripes",
+        "size": 32,
+        "strength": 2.2
+      },
+      "jobId": "1e32e549-bbdb-4790-853c-e7de4bbf6219"
+    },
+    {
+      "id": "normal-hex",
+      "engine": "blur-core-v1",
+      "enabled": true,
+      "credits": 1,
+      "generateValues": {
+        "type": "height",
+        "size": 64,
+        "seed": 89,
+        "kind": "cells"
+      },
+      "params": {
+        "style": "xy",
+        "strength": [
+          0.5,
+          0.5
+        ],
+        "reach": 0.3,
+        "axes": [
+          0,
+          1
+        ],
+        "shots": null,
+        "max_qubits": 20
+      },
+      "raw": "normal-hex",
+      "bake": {
+        "type": "normal-map",
+        "name": "hex_paneling",
+        "size": 32,
+        "strength": 2.8
+      },
+      "jobId": "cca2dba8-dd44-4e84-bd03-752fe663db9a"
+    },
+    {
+      "id": "normal-hologrid",
+      "engine": "blur-core-v1",
+      "enabled": true,
+      "credits": 1,
+      "generateValues": {
+        "type": "height",
+        "size": 64,
+        "seed": 97,
+        "kind": "cells"
+      },
+      "params": {
+        "style": "xy",
+        "strength": [
+          0.45,
+          0.45
+        ],
+        "reach": 0.28,
+        "axes": [
+          0,
+          1
+        ],
+        "shots": null,
+        "max_qubits": 20
+      },
+      "raw": "normal-hologrid",
+      "bake": {
+        "type": "normal-map",
+        "name": "holographic_grid",
+        "size": 32,
+        "strength": 2.6
+      },
+      "jobId": "247999cb-4bae-40d1-b825-df5d664d0ef2"
+    },
+    {
+      "id": "normal-metal",
+      "engine": "blur-core-v1",
+      "enabled": true,
+      "credits": 1,
+      "generateValues": {
+        "type": "height",
+        "size": 64,
+        "seed": 101,
+        "kind": "noise"
+      },
+      "params": {
+        "style": "xy",
+        "strength": [
+          0.28,
+          0.28
+        ],
+        "reach": 0.14,
+        "axes": [
+          0,
+          1
+        ],
+        "shots": null,
+        "max_qubits": 20
+      },
+      "raw": "normal-metal",
+      "bake": {
+        "type": "normal-map",
+        "name": "metal",
+        "size": 32,
+        "strength": 1.4
+      },
+      "jobId": "c568ef8f-0682-49e0-916a-cf17861f6732"
+    },
+    {
+      "id": "normal-grating",
+      "engine": "blur-core-v1",
+      "enabled": true,
+      "credits": 1,
+      "generateValues": {
+        "type": "height",
+        "size": 64,
+        "seed": 103,
+        "kind": "ridge"
+      },
+      "params": {
+        "style": "xy",
+        "strength": [
+          0.55,
+          0.55
+        ],
+        "reach": 0.3,
+        "axes": [
+          0,
+          1
+        ],
+        "shots": null,
+        "max_qubits": 20
+      },
+      "raw": "normal-grating",
+      "bake": {
+        "type": "normal-map",
+        "name": "metal_grating",
+        "size": 32,
+        "strength": 3.6
+      },
+      "jobId": "306c39ad-8055-4789-928e-f453054d68d0"
+    },
+    {
+      "id": "normal-diamond",
+      "engine": "blur-core-v1",
+      "enabled": true,
+      "credits": 1,
+      "generateValues": {
+        "type": "height",
+        "size": 64,
+        "seed": 107,
+        "kind": "cells"
+      },
+      "params": {
+        "style": "xy",
+        "strength": [
+          0.5,
+          0.5
+        ],
+        "reach": 0.3,
+        "axes": [
+          0,
+          1
+        ],
+        "shots": null,
+        "max_qubits": 20
+      },
+      "raw": "normal-diamond",
+      "bake": {
+        "type": "normal-map",
+        "name": "diamond_plate",
+        "size": 32,
+        "strength": 2.8
+      },
+      "jobId": "74d58f80-48c5-47c2-a926-02de857f9ab5"
+    },
+    {
+      "id": "normal-stucco",
+      "engine": "blur-core-v1",
+      "enabled": true,
+      "credits": 1,
+      "generateValues": {
+        "type": "height",
+        "size": 64,
+        "seed": 109,
+        "kind": "noise"
+      },
+      "params": {
+        "style": "xy",
+        "strength": [
+          0.45,
+          0.45
+        ],
+        "reach": 0.2,
+        "axes": [
+          0,
+          1
+        ],
+        "shots": null,
+        "max_qubits": 20
+      },
+      "raw": "normal-stucco",
+      "bake": {
+        "type": "normal-map",
+        "name": "rough_stucco",
+        "size": 32,
+        "strength": 2.1
+      },
+      "jobId": "019b42dc-ab58-4f2d-b357-3c80c9fcb679"
+    },
+    {
+      "id": "normal-corrugated",
+      "engine": "blur-core-v1",
+      "enabled": true,
+      "credits": 1,
+      "generateValues": {
+        "type": "height",
+        "size": 64,
+        "seed": 113,
+        "kind": "ridge"
+      },
+      "params": {
+        "style": "xy",
+        "strength": [
+          0.5,
+          0.5
+        ],
+        "reach": 0.35,
+        "axes": [
+          0,
+          1
+        ],
+        "shots": null,
+        "max_qubits": 20
+      },
+      "raw": "normal-corrugated",
+      "bake": {
+        "type": "normal-map",
+        "name": "corrugated_metal",
+        "size": 32,
+        "strength": 3.4
+      },
+      "jobId": "c78096f8-88eb-4d8d-a220-4b180b35723f"
+    },
+    {
       "id": "effect-rift-0",
       "engine": "blur-core-v1",
       "enabled": true,
@@ -689,6 +1067,186 @@
         "tint": "quantum"
       },
       "jobId": "4bfb0e43-ac57-4cd3-a30e-7b160abc3431"
+    },
+    {
+      "id": "effect-portal-0",
+      "engine": "blur-core-v1",
+      "enabled": true,
+      "credits": 1,
+      "generateValues": {
+        "type": "portal",
+        "size": 32,
+        "frame": 0,
+        "seed": 41
+      },
+      "params": {
+        "style": "xy",
+        "strength": [
+          0.5,
+          0.5
+        ],
+        "reach": 0.3,
+        "axes": [
+          0,
+          1
+        ],
+        "shots": null,
+        "max_qubits": 20
+      },
+      "raw": "effect-portal-0",
+      "bake": {
+        "type": "effect-frame",
+        "name": "arc-burst",
+        "index": 0,
+        "fps": 10,
+        "size": 48,
+        "tint": "plasma"
+      },
+      "jobId": "dc29b683-4971-49ec-9f6b-408df5fe9809"
+    },
+    {
+      "id": "effect-portal-1",
+      "engine": "blur-core-v1",
+      "enabled": true,
+      "credits": 1,
+      "generateValues": {
+        "type": "portal",
+        "size": 32,
+        "frame": 1,
+        "seed": 41
+      },
+      "params": {
+        "style": "xy",
+        "strength": [
+          0.5,
+          0.5
+        ],
+        "reach": 0.3,
+        "axes": [
+          0,
+          1
+        ],
+        "shots": null,
+        "max_qubits": 20
+      },
+      "raw": "effect-portal-1",
+      "bake": {
+        "type": "effect-frame",
+        "name": "arc-burst",
+        "index": 1,
+        "fps": 10,
+        "size": 48,
+        "tint": "plasma"
+      },
+      "jobId": "d11eeecb-000f-43a9-b5bd-6330888c4af7"
+    },
+    {
+      "id": "effect-portal-2",
+      "engine": "blur-core-v1",
+      "enabled": true,
+      "credits": 1,
+      "generateValues": {
+        "type": "portal",
+        "size": 32,
+        "frame": 2,
+        "seed": 41
+      },
+      "params": {
+        "style": "xy",
+        "strength": [
+          0.5,
+          0.5
+        ],
+        "reach": 0.3,
+        "axes": [
+          0,
+          1
+        ],
+        "shots": null,
+        "max_qubits": 20
+      },
+      "raw": "effect-portal-2",
+      "bake": {
+        "type": "effect-frame",
+        "name": "arc-burst",
+        "index": 2,
+        "fps": 10,
+        "size": 48,
+        "tint": "plasma"
+      },
+      "jobId": "759af387-f59e-476c-af2e-cb5f60dd8793"
+    },
+    {
+      "id": "effect-spark-0",
+      "engine": "blur-core-v1",
+      "enabled": true,
+      "credits": 1,
+      "generateValues": {
+        "type": "spark",
+        "size": 32,
+        "frame": 0,
+        "seed": 61
+      },
+      "params": {
+        "style": "xy",
+        "strength": [
+          0.5,
+          0.5
+        ],
+        "reach": 0.3,
+        "axes": [
+          0,
+          1
+        ],
+        "shots": null,
+        "max_qubits": 20
+      },
+      "raw": "effect-spark-0",
+      "bake": {
+        "type": "effect-frame",
+        "name": "spark-impact",
+        "index": 0,
+        "fps": 14,
+        "size": 48,
+        "tint": "ember"
+      },
+      "jobId": "d6d6970a-c4a9-44d2-ad4b-e918760b8ff4"
+    },
+    {
+      "id": "effect-spark-1",
+      "engine": "blur-core-v1",
+      "enabled": true,
+      "credits": 1,
+      "generateValues": {
+        "type": "spark",
+        "size": 32,
+        "frame": 1,
+        "seed": 61
+      },
+      "params": {
+        "style": "xy",
+        "strength": [
+          0.5,
+          0.5
+        ],
+        "reach": 0.3,
+        "axes": [
+          0,
+          1
+        ],
+        "shots": null,
+        "max_qubits": 20
+      },
+      "raw": "effect-spark-1",
+      "bake": {
+        "type": "effect-frame",
+        "name": "spark-impact",
+        "index": 1,
+        "fps": 14,
+        "size": 48,
+        "tint": "ember"
+      },
+      "jobId": "1c51ff13-2bc0-463b-9fe9-14c6f494275a"
     },
     {
       "id": "ir-cavern",
@@ -816,6 +1374,230 @@
         "size": 64
       },
       "jobId": "fd67e2ab-4767-4c08-99f6-e8a0f3811cda"
+    },
+    {
+      "id": "tex-steel-wall",
+      "engine": "blur-v1",
+      "enabled": true,
+      "credits": 1,
+      "input": {
+        "image": "sources/steel.png"
+      },
+      "params": {
+        "strength": 0.35,
+        "style": "rx",
+        "reach": 0.2,
+        "size": 256,
+        "downscale": true
+      },
+      "raw": "tex-steel-wall",
+      "bake": {
+        "type": "texture-tile",
+        "name": "metal",
+        "size": 64
+      },
+      "jobId": "a1529c3c-85ac-4983-8ff7-c99315a4d95b"
+    },
+    {
+      "id": "tex-stucco",
+      "engine": "blur-v1",
+      "enabled": true,
+      "credits": 1,
+      "input": {
+        "image": "sources/stucco.png"
+      },
+      "params": {
+        "strength": 0.28,
+        "style": "rx",
+        "reach": 0.5,
+        "size": 256,
+        "downscale": true
+      },
+      "raw": "tex-stucco",
+      "bake": {
+        "type": "texture-tile",
+        "name": "rough_stucco",
+        "size": 64
+      },
+      "jobId": "7fa80208-7997-46b2-9d4b-d31dbf5c380f"
+    },
+    {
+      "id": "tex-corrugated",
+      "engine": "blur-v1",
+      "enabled": true,
+      "credits": 1,
+      "input": {
+        "image": "sources/corrugated.png"
+      },
+      "params": {
+        "strength": 0.3,
+        "style": "rx",
+        "reach": 0.2,
+        "size": 256,
+        "downscale": true
+      },
+      "raw": "tex-corrugated",
+      "bake": {
+        "type": "texture-tile",
+        "name": "corrugated_metal",
+        "size": 64
+      },
+      "jobId": "cc4bc462-1a1e-493c-8e84-14466efe3478"
+    },
+    {
+      "id": "tex-grating",
+      "engine": "deep-fryer-v1",
+      "enabled": true,
+      "credits": 1,
+      "input": {
+        "image": "sources/grating.png"
+      },
+      "params": {
+        "gates": [
+          [
+            "ry",
+            0.25
+          ],
+          [
+            "rx",
+            0.12
+          ]
+        ],
+        "tile_size": 4,
+        "mask_bin_size": 4,
+        "mask_min_region": 16
+      },
+      "raw": "tex-grating",
+      "bake": {
+        "type": "texture-tile",
+        "name": "metal_grating",
+        "size": 48
+      },
+      "jobId": "4ad71659-d9b7-492c-b113-71ad7004c65f"
+    },
+    {
+      "id": "tex-diamond",
+      "engine": "deep-fryer-v1",
+      "enabled": true,
+      "credits": 1,
+      "input": {
+        "image": "sources/diamond.png"
+      },
+      "params": {
+        "gates": [
+          [
+            "rx",
+            0.3
+          ],
+          [
+            "rz",
+            0.15
+          ]
+        ],
+        "tile_size": 4,
+        "mask_bin_size": 4,
+        "mask_min_region": 16
+      },
+      "raw": "tex-diamond",
+      "bake": {
+        "type": "texture-tile",
+        "name": "diamond_plate",
+        "size": 48
+      },
+      "jobId": "b1ca5f01-8f1e-4462-82aa-c361b356364c"
+    },
+    {
+      "id": "tex-carbon",
+      "engine": "deep-fryer-v1",
+      "enabled": true,
+      "credits": 1,
+      "input": {
+        "image": "sources/carbon.png"
+      },
+      "params": {
+        "gates": [
+          [
+            "ry",
+            0.2
+          ],
+          [
+            "rz",
+            0.1
+          ]
+        ],
+        "tile_size": 4,
+        "mask_bin_size": 4,
+        "mask_min_region": 16
+      },
+      "raw": "tex-carbon",
+      "bake": {
+        "type": "texture-tile",
+        "name": "carbon_fiber",
+        "size": 48
+      },
+      "jobId": "1e406cba-ced7-4e5d-89ee-0c1154e4f59a"
+    },
+    {
+      "id": "tex-riveted",
+      "engine": "deep-fryer-v1",
+      "enabled": true,
+      "credits": 1,
+      "input": {
+        "image": "sources/riveted.png"
+      },
+      "params": {
+        "gates": [
+          [
+            "rx",
+            0.22
+          ],
+          [
+            "ry",
+            0.1
+          ]
+        ],
+        "tile_size": 4,
+        "mask_bin_size": 4,
+        "mask_min_region": 16
+      },
+      "raw": "tex-riveted",
+      "bake": {
+        "type": "texture-tile",
+        "name": "riveted_armor",
+        "size": 48
+      },
+      "jobId": "d058be80-1a8f-4112-914b-c52d1b23a64a"
+    },
+    {
+      "id": "tex-mesh",
+      "engine": "deep-fryer-v1",
+      "enabled": true,
+      "credits": 1,
+      "input": {
+        "image": "sources/mesh.png"
+      },
+      "params": {
+        "gates": [
+          [
+            "ry",
+            0.35
+          ],
+          [
+            "rx",
+            0.15
+          ]
+        ],
+        "tile_size": 4,
+        "mask_bin_size": 4,
+        "mask_min_region": 16
+      },
+      "raw": "tex-mesh",
+      "bake": {
+        "type": "texture-tile",
+        "name": "industrial_mesh",
+        "size": 48
+      },
+      "jobId": "fd723f45-7f1a-4b6d-8da5-a29427fdb8eb"
     }
   ]
 }

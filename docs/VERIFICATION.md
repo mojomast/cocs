@@ -1,5 +1,105 @@
 # COCS verification report
 
+## Release 6.6 - BIOME (Moth skies per biome, new surface and effect albedos)
+
+**Scope.** The Moth fidelity pass on `feat/moth-fidelity` (five commits, tip
+`a75119b`), merged `--ff-only` into the production line
+(`improvement/phase2-audio-visual`, previously `34b2db7` = v6.5). Presentation
+only: `server/`, `core.mjs` and `game/protocol.mjs` are untouched, so this is a
+web-only deploy (`npm run deploy`, no `--with-game-server`).
+
+- **Skies per theatre (`ee10989`):** `mothSkyTexture('ashen'|'frost'|'void')`
+  replaces the addSky gradient material on the existing camera-following dome —
+  volcanic maps get ashen, frost maps get frost, the neon/void maps (including
+  the Quantum Labyrinth) get void, and every unlisted map keeps its procedural
+  sky. Stars, the sun disc, haze, halo and the storm/time-of-day tint survive
+  because only the dome's texture changes. The old nebula bake stays unused on
+  purpose: as committed it decodes to an all-zero equirect (mean/max 0), so a
+  re-run of that job could only reproduce the black dome.
+- **Surface coverage (`15dbbae`):** eight new albedos fill canonical kinds that
+  had no Moth tile — metal (the default wall/ceiling look), rough_stucco and
+  corrugated_metal through blur-v1; metal_grating, diamond_plate, carbon_fiber,
+  riveted_armor and industrial_mesh through deep-fryer-v1 — plus nine new normal
+  maps (grass, hazard_stripes, hex_paneling, holographic_grid, metal,
+  metal_grating, diamond_plate, rough_stucco, corrugated_metal). Baked buckets
+  move from 12/4/1/1 to 20 textures / 13 normal maps / 4 skies / 3 effects.
+- **Effects (`309a417`, `ad1aa87`):** arc-burst (plasma, 3 frames) and
+  spark-impact (ember, 2 frames) drive remote muzzle flashes, bullet and rail
+  impacts, explosions, vehicle kills, respawns, flag/zone captures, teleporter
+  departures/arrivals, contested payloads and lightning strikes, spawned by a
+  new pooled, billboarded, reduce-motion-aware `MothSpritePlayer`. Spawns are
+  deterministic and WebGL-only; the rift keeps its bespoke looping player.
+- **Landmarks (`ad1aa87`):** entanglement LUTs ride traversal and teleport pads,
+  objective beacons, capture rings, the payload halo, flags, pickups and the
+  menu rings; volcanic maps use ember, the rest arcane, and the plain
+  entanglement bake covers flags and pickups.
+- **Surfaces and shapes (`ad1aa87`):** next-gen props and architecture pick up
+  rock (rocks, ruins, caverns, tunnels — the tunnel shell now generates
+  world-unit UVs), alien_chitin canopies, brushed_metal barrels and goal frames,
+  rough_stucco and metal walls, and ice spikes. Race and soccer presentation
+  shares the view's surface helper: a grass pitch with mown stripes, a
+  caution-striped barrier (world-unit UVs) and brushed-metal goals. Race
+  collision blocks stay deliberately untextured.
+- **Caching (`309a417`):** effect frames and LUTs are cached per name and
+  released exactly once, and every cached Moth texture is tagged
+  `userData.mothShared` so `disposeObject` never frees a texture another
+  material still samples.
+- **Fixture refresh (`a75119b`):** the tunnel shell's new world-unit UVs changed
+  the context of an already-integrated hunk in
+  `docs/phase1-spatial-integration.patch`; the guard test that re-applies every
+  hunk in memory stays green and no renderer behaviour changed.
+- **Budget:** 28 emulator credits for the fidelity pass (25 submissions: 22
+  green first pass plus 3 re-runs that replaced near-black blur outputs). The
+  four wiring commits cost **0 credits** — they reuse the committed bakes.
+  Nothing is fetched at runtime and no API key ships.
+- **Evidence:** the local review route (`/tmp/opencode/moth-review.cjs`) produced
+  overview/spawn screenshots for six maps under `/tmp/opencode/moth-review/`
+  (moth-backrooms, ember-caldera, frostline, neon-vertical, puma-pitch,
+  exchange). `docs/MOTH.md` documents the pipeline and the in-world wiring; raw
+  Moth results are committed under `public/moth/files/<job>/` and the baked
+  digest is `game/moth-baked.mjs`; the v6.4 before/after material sheets in
+  `docs/evidence/phase2/maps/` remain the material baseline. New coverage:
+  `game/moth-sprite.test.mjs` (5 tests) and `game/moth-wiring.test.mjs` (6).
+- **Gate (full re-run on the `feat/moth-fidelity` tip):** `test:game` **1833
+  tests, 1828 pass, 0 fail, 5 skipped** across 163 `game/*.test.mjs` files.
+  In the production checkout: targeted re-run (`changelog`, `moth-sprite`,
+  `moth-wiring`, `moth-assets`, `moth-surface`, `moth-material`, `textures`)
+  **49/49**; `npm run test:server` **153/153**; `npx tsc --noEmit` clean;
+  `npm run lint` 0 errors (481 warnings, the unchanged baseline). The five
+  skips are the same opt-in long simulations plus the browser-only
+  `OfflineAudioContext` render as v6.5.
+- **Deploy:** `npm run deploy` (web-only) rebuilt the working tree (with the
+  v6.6 bump uncommitted) and restarted `token-arena-web.service` only — the
+  game server was deliberately not restarted because no `server/`, `core.mjs`
+  or `protocol.mjs` file changed. `token-arena-web.service` is active with a
+  fresh `ActiveEnterTimestamp`; `token-arena-server.service` stayed active on
+  its v6.5 start. `npm run verify:deployment -- https://arena.ussyco.de`
+  verified the served HTML (footer `v6.6 · BIOME`) and its 12 linked CSS/JS
+  assets, and `GET /api/version` returns `{"version":"v6.6"}`.
+- **Live deploy smoke (production `arena.ussyco.de`, after the deploy):** a
+  bounded headless Chromium/SwiftShader run (`/tmp/opencode/live-smoke.cjs`,
+  exit 0, JSON in `/tmp/opencode/release-v66-smoke.json`) — footer
+  `v6.6 · BIOME`; `GET /api/version` 200 `{"version":"v6.6"}`; the attract reel
+  held one planned shot (`startedAt` fixed across four samples, camera owner
+  `auto`, vehicle duel subject); ENTER ARENA started a 3-actor bot match
+  (`mode: playing`, match clock advancing); live `/review` captures of one map
+  per biome (`frostline`, `ember-caldera`, `neon-vertical`) rendered with a
+  SwiftShader `WEBGL_debug_renderer_info` string and no page errors. Zero
+  console errors and zero page errors across the whole run. Screenshots:
+  `/tmp/opencode/release-v66-smoke.png` (title + footer),
+  `/tmp/opencode/release-v66-smoke-match.png` (bot match) and
+  `/tmp/opencode/moth-live-{frostline,ember-caldera,neon-vertical}.png`
+  (biome skies). The fps figure is SwiftShader, not hardware-GPU evidence.
+- **Rollback point:** `34b2db7` (v6.5 · MOMENTUM), the last production commit
+  before the merge; `scripts/deploy.sh` additionally restores the previous
+  `dist/` and restarts the web service automatically if a deploy step fails.
+- **Limitations (honest scope):** the live smoke and review screenshots are
+  SwiftShader/CPU renders, not hardware-GPU or frame-rate evidence. The pass is
+  visual coverage plus unit tests, so "looks right" still rests on the review
+  screenshots rather than a pixel-diff. The nebula bake is deliberately unused,
+  and the race collision blocks stay untextured on purpose. Moth assets remain
+  offline: no runtime dependency, no API key, no network fetch.
+
 ## Release 6.5 - MOMENTUM (class movement and signature verbs, rebuilt attract demo)
 
 **Scope.** Class/harness overhaul Phase 2 on `feat/class-overhaul` (merged at

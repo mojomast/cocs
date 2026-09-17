@@ -81,24 +81,32 @@ function raceBarrierPolygons(race){
  return [{points:offset(-1),side:'outer'},{points:offset(1),side:'inner'}];
 }
 // One merged wall per polygon: vertical quads along every edge plus a top cap,
-// with a separate thin stripe band floated 0.03 off the wall plane.
+// with a separate thin stripe band floated 0.03 off the wall plane. Vertices
+// carry world-unit UVs (0.1 per metre) so the caution-stripe bake can wrap the
+// barrier without an authored UV layer.
 function raceBarrierGeometry(points,side,height=2.7){
- const positions=[],stripes=[];
+ const positions=[],wallUvs=[],stripes=[],stripeUvs=[];
  const area=points.reduce((sum,p,i)=>{const q=points[(i+1)%points.length];return sum+(p.x*q.z-q.x*p.z);},0);
- const ccw=area>=0,capWidth=.34,stripeOffset=.03,stripeTop=height-.1,stripeBottom=height-.42;
+ const ccw=area>=0,capWidth=.34,stripeOffset=.03,stripeTop=height-.1,stripeBottom=height-.42,scale=.1;
+ let run=0;
  for(let i=0;i<points.length;i++){
   const a=points[i],b=points[(i+1)%points.length],dx=b.x-a.x,dz=b.z-a.z,length=Math.hypot(dx,dz);
   if(!(length>1e-6))continue;
   let nx=-dz/length,nz=dx/length;
   if(!ccw){nx=-nx;nz=-nz;}
   const facing=side==='inner'?-1:1,tx=nx*facing,tz=nz*facing;
+  const u0=run*scale,u1=(run+length)*scale,vTop=height*scale,vStripeTop=stripeTop*scale,vStripeBottom=stripeBottom*scale;
   positions.push(a.x,0,a.z,b.x,0,b.z,b.x,height,b.z,a.x,0,a.z,b.x,height,b.z,a.x,height,a.z);
+  wallUvs.push(u0,0,u1,0,u1,vTop,u0,0,u1,vTop,u0,vTop);
   const cx0=a.x+tx*capWidth,cz0=a.z+tz*capWidth,cx1=b.x+tx*capWidth,cz1=b.z+tz*capWidth;
   positions.push(a.x,height,a.z,b.x,height,b.z,cx1,height,cz1,a.x,height,a.z,cx1,height,cz1,cx0,height,cz0);
+  wallUvs.push(u0,vTop,u1,vTop,u1,vTop,u0,vTop,u1,vTop,u0,vTop);
   stripes.push(a.x+tx*stripeOffset,stripeBottom,a.z+tz*stripeOffset,b.x+tx*stripeOffset,stripeBottom,b.z+tz*stripeOffset,b.x+tx*stripeOffset,stripeTop,b.z+tz*stripeOffset,a.x+tx*stripeOffset,stripeBottom,a.z+tz*stripeOffset,b.x+tx*stripeOffset,stripeTop,b.z+tz*stripeOffset,a.x+tx*stripeOffset,stripeTop,a.z+tz*stripeOffset);
+  stripeUvs.push(u0,vStripeBottom,u1,vStripeBottom,u1,vStripeTop,u0,vStripeBottom,u1,vStripeTop,u0,vStripeTop);
+  run+=length;
  }
- const wall=new T.BufferGeometry();wall.setAttribute('position',new T.Float32BufferAttribute(positions,3));wall.computeVertexNormals();
- const stripe=new T.BufferGeometry();stripe.setAttribute('position',new T.Float32BufferAttribute(stripes,3));stripe.computeVertexNormals();
+ const wall=new T.BufferGeometry();wall.setAttribute('position',new T.Float32BufferAttribute(positions,3));wall.setAttribute('uv',new T.Float32BufferAttribute(wallUvs,2));wall.computeVertexNormals();
+ const stripe=new T.BufferGeometry();stripe.setAttribute('position',new T.Float32BufferAttribute(stripes,3));stripe.setAttribute('uv',new T.Float32BufferAttribute(stripeUvs,2));stripe.computeVertexNormals();
  return {wall,stripe};
 }
 // Nearest-centerline tangent for a boost pad, so the chevrons point along the
@@ -157,7 +165,10 @@ function soccerPitchBody(parent,race,options={}){
  const netDetail=Math.max(.3,Math.min(1,Number(options?.quality?.scatterDetail??1))),netCell=netDetail>=.8?.6:netDetail>=.5?.78:1;
  const pitch=race.pitch||{},minX=Number.isFinite(pitch.minX)?pitch.minX:-30,maxX=Number.isFinite(pitch.maxX)?pitch.maxX:30,minZ=Number.isFinite(pitch.minZ)?pitch.minZ:-18,maxZ=Number.isFinite(pitch.maxZ)?pitch.maxZ:18;
  const width=maxX-minX,depth=maxZ-minZ,cx=(minX+maxX)/2,cz=(minZ+maxZ)/2;
- const grass=material('#2c7038',.02,.96),mown=material('#337d40',.02,.96),line=material('#eaf7ee',.05,.85),postMat=material('#eef2f6',.35,.4),netMat=new T.LineBasicMaterial({color:'#bfe0c8',transparent:true,opacity:.5});
+ // The view hands us its textured-surface helper; without it (tests, the CPU
+ // renderer) the flat authored materials are used unchanged.
+ const surface=typeof options?.surface==='function'?options.surface:null;
+ const grass=surface?surface(material('#2c7038',.02,.96),'grass',3,3):material('#2c7038',.02,.96),mown=surface?surface(material('#337d40',.02,.96),'grass',3,3):material('#337d40',.02,.96),line=material('#eaf7ee',.05,.85),postMat=surface?surface(material('#eef2f6',.35,.4),'brushed_metal',2,1):material('#eef2f6',.35,.4),netMat=new T.LineBasicMaterial({color:'#bfe0c8',transparent:true,opacity:.5});
  const paint=(w,h,d,x,y,z,mat)=>{const mesh=box(parent,w,h,d,x,y,z,mat);mesh.userData.arenaDetail=true;return mesh;};
  // Flat paint arcs: a RingGeometry slice laid on the turf. Local +X/+Y maps to
  // world +X/-Z once rotated flat, so callers pass angles in that frame.
@@ -210,7 +221,7 @@ function raceTrackBody(race,color='#83f4d5',parent,options){
  }
  const host=parent||group,polygons=raceBarrierPolygons(race);
  if(polygons.length){
-  const barrierMat=material('#e78b30',.08,.78),stripeMat=material('#f4eddb',.05,.85);
+  const surface=typeof options?.surface==='function'?options.surface:null,barrierMat=surface?surface(material('#e78b30',.08,.78),'hazard_stripes',1,1):material('#e78b30',.08,.78),stripeMat=material('#f4eddb',.05,.85);
   if(barrierMat.side!==T.DoubleSide)barrierMat.side=T.DoubleSide;
   if(stripeMat.side!==T.DoubleSide)stripeMat.side=T.DoubleSide;
   for(const {points,side} of polygons){
