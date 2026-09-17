@@ -101,6 +101,24 @@ Fixed by committing `public/moth/files/ir-cavern/result.wav` and keeping the
 extension intact in `scripts/moth-bake.mjs` (`5d6234b`). The sound workstream
 also made `unlock()` retry a failed IR load instead of latching failure.
 
+## F7 — Three stale campaign pins at the phase-1 checkpoint (fixed)
+
+`game/campaign-data.test.mjs` failed at the deployed commit and passes at
+baseline:
+- `reactor-run` and `crown-duel` win conditions are now `reach` with
+  `requireCleared:true` (cleared exit volume), not `assassinate` — intentional
+  per `docs/phase1-remaining-campaign-handoff.md`.
+- `throne-siege` and `crown-duel` no longer script live reinforcement spawns;
+  defenders are predeployed. The stale `bark && spawn` assertions were replaced
+  with the new contract (no script spawns; phase-beat barks) instead of deleted.
+
+`node --test game/campaign-data.test.mjs` → 9/9.
+
+Note: the phase-1 checkpoint was never full-suite-run before deployment, so
+additional stale pins can still surface. The F6 gate below is what catches them;
+fix each by confirming the phase-1 handoff intent and updating the pin without
+deleting coverage.
+
 ---
 
 ## F6 — Full-suite gate before deploy

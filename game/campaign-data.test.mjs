@@ -68,7 +68,8 @@ test('campaign missions author scripts, barks, boss phases and win conditions',(
  assert.ok(convoy.script.some(event=>typeof event.when==='string'&&event.when.startsWith('boss-hp:')&&Number.isFinite(event.bossPhase)),'boss phase beats');
  assert.equal(convoy.win.kind,'reach');
  const reactor=missionFor('reactor-run');
- assert.equal(reactor.win.kind,'assassinate');
+ assert.equal(reactor.win.kind,'reach','the reactor falls back to a cleared exit volume');
+ assert.equal(reactor.win.requireCleared,true,'the reactor exit only counts once the route is cleared');
  assert.ok(reactor.script.some(event=>typeof event.when==='string'&&event.when.startsWith('boss-hp:')),'warden phases');
 });
 
@@ -85,7 +86,8 @@ test('the third mission is a checkpointed throne finale with named boss phases',
  assert.ok(actions.some(action=>action.checkpoint),'the finale banks a checkpoint');
  assert.ok(mission.script.some(event=>event.when==='boss-hp:0.6'&&Number.isFinite(event.bossPhase)&&event.name),'named phase two');
  assert.ok(mission.script.some(event=>event.when==='boss-hp:0.25'&&Number.isFinite(event.bossPhase)&&event.name),'named phase three');
- assert.ok(mission.script.some(event=>event.bark&&event.spawn),'the finale barks in reinforcements');
+ assert.ok(!mission.script.some(event=>event.spawn),'the finale predeploys reinforcements instead of live script spawns');
+ assert.ok(mission.script.some(event=>event.when==='boss-hp:0.6'&&event.bark),'the finale script barks on its phase beat');
 });
 
 test('campaign missions author checkpoints and named boss phases',()=>{
@@ -129,7 +131,8 @@ test('crown-duel is a checkpointed Harbinger boss duel with named phases',()=>{
  const mission=missionFor('crown-duel');
  assert.equal(mission.mapId,'fortress');
  assert.equal(mission.tag,'DUEL');
- assert.equal(mission.win.kind,'assassinate');
+ assert.equal(mission.win.kind,'reach','the duel ends at the cleared exit once the Harbinger falls');
+ assert.equal(mission.win.requireCleared,true,'the exit only counts once the Harbinger is down');
  assert.ok(mission.script.some(event=>event.when==='boss-hp:0.65'&&event.bossPhase===2&&event.name),'named phase two');
  assert.ok(mission.script.some(event=>event.when==='boss-hp:0.3'&&event.bossPhase===3&&event.name),'named phase three');
  const spawns=mission.steps.flatMap(step=>[...(step.onStart||[]),...(step.onComplete||[])]).filter(action=>action.spawn).map(action=>action.spawn.type);
@@ -137,5 +140,6 @@ test('crown-duel is a checkpointed Harbinger boss duel with named phases',()=>{
  assert.ok(spawns.includes('sentinel')&&spawns.includes('lancer'),'the duel fields the new roles');
  const actions=[...(mission.script||[]),...mission.steps.flatMap(step=>[...(step.onStart||[]),...(step.onComplete||[])])];
  assert.ok(actions.some(action=>action.checkpoint),'the duel banks a checkpoint');
- assert.ok(mission.script.some(event=>event.bark&&event.spawn),'the duel barks in reinforcements');
+ assert.ok(!mission.script.some(event=>event.spawn),'the duel predeploys its adds instead of live script spawns');
+ assert.ok(mission.script.some(event=>event.when==='boss-hp:0.65'&&event.bark),'the duel script barks on its phase beats');
 });
