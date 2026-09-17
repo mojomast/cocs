@@ -432,8 +432,29 @@ assets. Full procedure and verification: [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md
 
 ## Changelog
 
-The last five releases. The full history lives in
+Recent releases. The full history lives in
 [docs/CHANGELOG.md](docs/CHANGELOG.md).
+
+### v6.4 · SPECTRUM — 2026-09-17
+- Surfaces derive albedo, roughness and normal from one seamless multi-scale
+  height/wear field (tiling repetition reduced, real relief, per-material
+  weathering); the moth macro/fracture enhancer now applies to every natural
+  surface; day/dusk/night sky palettes, haze and de-neoned ambience.
+- A composed soundtrack (eight-bar phrases, staged combat layers, a
+  scene/intensity transition machine, seeded risers, panning and reverb sends)
+  and layered gameplay sound (weapon reports, surface impacts and ricochets,
+  bounded debris, movement foley, wind/tension beds). The cavern reverb IR
+  loads again and retries on failure.
+- A restrained HUD: one vitals card, grouped action gauges, one contextual
+  objective chip, capped kill feed, settled hints, and a visible REDUCED MOTION
+  indicator with settings copy.
+- Resolution adapts to the display: a pixel-budget cap (Auto/1080p/1440p/Native)
+  plus dynamic resolution scaling, so 4K at 100% renders a 1080p-class buffer
+  and the frame-time governor trades pixels before quality tiers. Calmer glow
+  defaults; benchmarks stay true native.
+- The first full-suite gate fixed 36 pre-existing phase-1 failures (campaign
+  pins, placement sweeps, next-gen expectations, a singleplayer driver hang) and
+  the review-harness lint error.
 
 ### v6.3 · RESONANCE — 2026-09-16
 - A composed procedural soundtrack (menu/exploration/combat sharing one theme

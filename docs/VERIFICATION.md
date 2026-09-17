@@ -1,6 +1,6 @@
 # COCS verification report
 
-## Phase 2 - Materials, cinematic music, gameplay sound, restrained HUD
+## Release 6.4 - SPECTRUM (materials, cinematic music, gameplay sound, restrained HUD, adaptive resolution)
 
 - **Materials:** natural surfaces derive albedo/roughness/normal from one
   seamless multi-scale height/wear field. Pinned concrete albedo/roughness
@@ -33,6 +33,21 @@
   pre-existing at the deployed phase-1 checkpoint (campaign pins 3, placement
   sweep 30, next-gen maps 2, singleplayer driver hang 1) and all fixed; see
   `docs/PHASE2-FIXLIST.md`.
+- **Adaptive resolution:** `game/resolution.mjs` (pure) caps the drawing buffer
+  at a pixel budget and provides a hysteretic frame-time governor; `view.mjs`
+  applies it and reports the buffer through `perf.viewport`. Built-preview
+  probe: a 1080p canvas at a requested 1.5x renders 1920x1080 with cap `auto`
+  and 2880x1620 with cap `native`; DRS stepped 1920 -> 1824 -> 1728 under
+  sustained slow frames. Live probe at a 4K viewport: a 1920x1080 buffer at
+  100% scale. Tests: `game/resolution.test.mjs` (11), plus `view`/`config`/
+  `perf`/`post` coverage; the benchmark preset pins `resolutionCap:'native'`.
+- **Glow defaults:** arena glow trims 1.6 -> 1.0 emissive, the energy preset
+  1.9 -> 1.3, objective markers and beacons lowered; bloom stays user-controlled
+  through the Glow slider.
+- **Release discipline:** the title-footer version (parsed by
+  `scripts/read-version.mjs`), `game/changelog.mjs`, `docs/CHANGELOG.md`, the
+  README release list and this file move together on every deploy;
+  `game/changelog.test.mjs` pins the footer/digest agreement.
 - **Open:** F4 preview favicon CSP; material bake ~0.4 s/arena; loudness/mix and
   GPU shader compile remain manual-review items.
 

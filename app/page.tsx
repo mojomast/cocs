@@ -445,7 +445,7 @@ export default function Home(){
   };
   return <><main className={`arena-app mode-${mode}${(config.mode==='puma-race'||config.mode==='puma-soccer')?' race-setup':''}${(isRace||isSoccer)?' race-active':''} palette-${accessibility.palette}${accessibility.palette!=='default'?' palette-colorblind':''}${accessibility.highContrast?' ui-contrast':''}`}>
   <canvas ref={canvas} tabIndex={-1} role="img" className="arena-canvas" aria-label="Colosseum Of Competitive Slop 3D game"/>
-  {!entered&&!demoOnly&&<><TitleScreen ui={ui}/><div className="title-footer"><span>v6.3 · RESONANCE</span>{githubLink}</div></>}
+  {!entered&&!demoOnly&&<><TitleScreen ui={ui}/><div className="title-footer"><span>v6.4 · SPECTRUM</span>{githubLink}</div></>}
   {!entered&&demoOnly&&<div className="demo-controls" role="group" aria-label="Demo controls">
     <div className="demo-controls__row">
       <button type="button" className="icon-button" onClick={()=>cycleShowcase(-1)} aria-label="Previous demo mode" title="Previous mode"><ChevronLeft size={18}/></button>

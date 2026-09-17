@@ -37,6 +37,19 @@ nothing to restore, so a first deploy reports the failure only.
 Restarting the game server disconnects active multiplayer clients. Only pass
 `--with-game-server` when server code changed.
 
+## Release discipline
+
+Every deployment bumps the running version, and these move together in the same
+commit:
+
+- `app/page.tsx` `title-footer` — the source of truth, parsed by `scripts/read-version.mjs`
+- `game/changelog.mjs` — `RELEASE_VERSION`/`RELEASE_CODENAME` plus the digest entry
+- `docs/CHANGELOG.md`, the README release list and `docs/VERIFICATION.md`
+
+`game/changelog.test.mjs` fails if the newest digest entry and the footer literal
+disagree, and `scripts/deploy.sh` verifies the served HTML against the footer, so
+a stale or unbumped release cannot pass verification.
+
 ## Verifying a deployment
 
 `DEPLOY_VERSION` is optional: the script reads it from the `app/page.tsx`
