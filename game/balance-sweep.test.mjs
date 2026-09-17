@@ -8,7 +8,8 @@ import assert from 'node:assert/strict';
 import {
   MAX_GEAR, MODE_GROUPS, NEUTRAL_POLICY, SEED_FORMULA, SWEEP_MAPS, SWEEP_PROFILES, WILSON_Z99,
   balanceDataHash, buildManifest, computeAlarms, envelopeReport, filterManifest, fnv1a32,
-  formatTierList, modeGroup, mulberry32, objectiveCompletions, parseOnly, placementWinners, quantile,
+  formatTierList, gearTierInvariant, modeGroup, modeViability, mulberry32, objectiveCompletions,
+  parseOnly, placementWinners, quantile, rankCorrelation,
   runManifestItem, runSweep, sweepMapsForMode, sweepSeed, wilsonInterval,
 } from './balance-sweep.mjs';
 import {arenaSupportsMode} from './arenas.mjs';
@@ -112,11 +113,30 @@ test('FFA placement wins give every pod a 50% win baseline', () => {
     {id: 0, frags: 9}, {id: 1, frags: 4}, {id: 2, frags: 4}, {id: 3, frags: 1},
   ];
   const winners = placementWinners({actors}, 'deathmatch');
-  assert.deepEqual([...winners].sort((a, b) => a - b), [0, 1], 'top half wins; ties break by actor id');
+  assert.deepEqual([...winners].sort((a, b) => a - b), [0, 1], 'top half wins; ties break by damage then actor id');
   assert.equal(placementWinners({actors}, 'teamdeathmatch'), null, 'team modes keep the team result');
   assert.equal(placementWinners({actors}, 'juggernaut'), null, 'the crown keeps actorWon');
   const tied = placementWinners({actors: [{id: 3, frags: 2}, {id: 2, frags: 2}, {id: 1, frags: 2}, {id: 0, frags: 2}]}, 'deathmatch');
   assert.deepEqual([...tied].sort((a, b) => a - b), [0, 1], 'all-tie pods still resolve deterministically');
+});
+
+test('FFA placement ties break by damage dealt, never by actor id', () => {
+  // The aether bug: unattributed deaths leave the rank tuples tied, so the old
+  // `a.id - b.id` tie-break handed low-id seats a free pod win. Damage dealt is
+  // the fair, deterministic second key.
+  const actors = [
+    {id: 0, frags: 5, scoreStats: {damage: 10}},
+    {id: 1, frags: 5, scoreStats: {damage: 900}},
+    {id: 2, frags: 5, scoreStats: {damage: 800}},
+    {id: 3, frags: 5, scoreStats: {damage: 700}},
+  ];
+  assert.deepEqual([...placementWinners({actors}, 'deathmatch')].sort((a, b) => a - b), [1, 2], 'the two highest-damage seats advance, not ids 0 and 1');
+  // Input order must not matter: the sort is total on damage when frags tie.
+  const shuffled = [actors[2], actors[0], actors[3], actors[1]];
+  assert.deepEqual([...placementWinners({actors: shuffled}, 'deathmatch')].sort((a, b) => a - b), [1, 2], 'input order does not change the pod');
+  // Damage ties fall through to the id fallback, so the pod is still deterministic.
+  const damageTie = placementWinners({actors: [{id: 3, frags: 2, scoreStats: {damage: 50}}, {id: 2, frags: 2, scoreStats: {damage: 50}}, {id: 1, frags: 2, scoreStats: {damage: 50}}, {id: 0, frags: 2, scoreStats: {damage: 50}}]}, 'deathmatch');
+  assert.deepEqual([...damageTie].sort((a, b) => a - b), [0, 1]);
 });
 
 test('objective completions map to per-mode score stats', () => {
@@ -188,6 +208,82 @@ test('runSweep carries release, dataHash and the seed manifest, and truncates wh
   assert.equal(capped.completed, 1);
   assert.equal(capped.planned, 1);
   assert.equal(capped.truncated, false);
+});
+
+test('a budget-truncated run refuses tier alarms, marks itself, and prints a loud banner', () => {
+  let ticks = 0;
+  const truncated = runSweep({
+    profile: 'smoke', policy: 'neutral', release: 'v-test',
+    modes: ['deathmatch'], mapsPerMode: 1, seedIndexes: 1, cycles: 4,
+    now: () => (ticks += 1000), budgetMs: 1,
+  });
+  assert.equal(truncated.truncated, true);
+  assert.ok(truncated.completed < truncated.planned, `expected a clipped run (${truncated.completed}/${truncated.planned})`);
+  assert.deepEqual(truncated.metrics.truncation, {truncated: true, completed: truncated.completed, planned: truncated.planned, budgetMs: 1});
+  assert.deepEqual(truncated.alarms.map(alarm => alarm.kind), ['truncated'], 'no sample-derived alarm may survive truncation');
+  assert.equal(truncated.alarms[0].severity, 'warning');
+  const rendered = formatTierList(truncated);
+  assert.match(rendered, /TRUNCATED/);
+  assert.match(rendered, /NOT a gate/);
+  // Running the same manifest to completion is a gate again.
+  const full = runSweep({profile: 'smoke', policy: 'neutral', modes: ['deathmatch'], mapsPerMode: 1, seedIndexes: 1, cycles: 4});
+  assert.equal(full.truncated, false);
+  assert.ok(full.alarms.every(alarm => alarm.kind !== 'truncated'), 'a completed run never carries the truncation warning');
+});
+
+test('rankCorrelation and gearTierInvariant pin the §4.8.6 stock-vs-max-gear gate', () => {
+  const rows = list => list.map(([key, winRate]) => ({key, winRate}));
+  const stock = rows([['a', .60], ['b', .55], ['c', .50], ['d', .45], ['e', .40]]);
+  assert.deepEqual(rankCorrelation(stock, stock), {n: 5, rho: 1, maxShift: 0, maxGain: 0, crossings: []});
+  const swapped = rows([['a', .40], ['b', .55], ['c', .50], ['d', .45], ['e', .60]]);
+  const moved = gearTierInvariant({tierlist: {operators: stock, specs: stock, wings: stock}}, {tierlist: {operators: swapped, specs: stock, wings: stock}});
+  assert.equal(moved.kinds.operators.pass, false);
+  assert.equal(moved.kinds.specs.pass, true);
+  assert.equal(moved.pass, false);
+  // A class crossing 45/55 under max gear fails even if the rank order holds.
+  const flip = gearTierInvariant(
+    {tierlist: {operators: rows([['a', .44], ['b', .60]])}},
+    {tierlist: {operators: rows([['a', .60], ['b', .44]])}},
+  );
+  assert.equal(flip.kinds.operators.crossings.length, 2);
+  assert.equal(flip.kinds.operators.pass, false);
+  // A single below-cap gain passes.
+  const small = gearTierInvariant(
+    {tierlist: {operators: rows([['a', .50], ['b', .48]])}},
+    {tierlist: {operators: rows([['a', .52], ['b', .50]])}},
+  );
+  assert.equal(small.kinds.operators.pass, true);
+  assert.equal(small.pass, true);
+});
+
+test('modeViability computes the team-answer and locked-floor gates at the reported sample', () => {
+  const row = (key, n, byModeGroup = {}) => ({key, n, winRate: .5, lower: .4, upper: .6, damage: 0, abilityDamage: 0, abilityShare: 0, verbUsesPerMatch: 1, byMode: {}, byModeGroup});
+  const summary = {
+    operatorRows: [row('a', 30, {team: {n: 30}}), row('b', 30, {team: {n: 30}}), row('c', 6, {team: {n: 6}})],
+    teamPairs: [
+      {character: 'a', opponent: 'x', n: 10, winRate: .5},
+      {character: 'a', opponent: 'y', n: 10, winRate: .7},
+      {character: 'b', opponent: 'x', n: 10, winRate: .9},
+    ],
+    lockedPairs: [{a: 'a', b: 'b', n: 30, worst: .2}, {a: 'b', b: 'c', n: 10, worst: .1}],
+  };
+  const viability = modeViability(summary, {minSample: 24, answerSample: 8, answerCap: .6});
+  const a = viability.teamAnswers.find(entry => entry.operator === 'a');
+  assert.equal(a.answerCount, 1, 'only the ≤60% opponent counts as an answer');
+  assert.equal(a.viable, false);
+  const b = viability.teamAnswers.find(entry => entry.operator === 'b');
+  assert.equal(b.answerCount, 0);
+  assert.equal(b.viable, false);
+  const c = viability.teamAnswers.find(entry => entry.operator === 'c');
+  assert.equal(c.tested, false, 'a row below minSample is not tested');
+  assert.equal(c.viable, true);
+  assert.deepEqual(viability.lockedFloors.map(entry => entry.pass), [false], 'the n=10 pair is below minSample and excluded');
+  assert.equal(viability.teamViable, false);
+  assert.equal(viability.lockedViable, false);
+  // The alarm path reads the same numbers.
+  const alarms = computeAlarms({...summary, policy: 'neutral', geared: 'stock', profile: 'smoke', matches: 66, specRows: [], wingRows: [], modeGroupRows: []}, {envelope: {breaches: []}});
+  assert.ok(alarms.some(alarm => alarm.kind === 'team-answers' && alarm.subject === 'a'));
+  assert.ok(alarms.some(alarm => alarm.kind === 'locked-floor'));
 });
 
 test('envelope report stays inside the §4.1 stat envelope for stock and max gear', () => {

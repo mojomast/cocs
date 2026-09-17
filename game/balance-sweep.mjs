@@ -218,13 +218,23 @@ export function parseOnly(only) {
 // Win rule. Team modes use the authoritative team result and the Juggernaut
 // crown uses `actorWon`; every other locked mode (4-player FFA pods) counts a
 // top-half placement as a win so the sample has the same 50% baseline as a
-// team match (§14 compares win rates against 55/45). Ties are broken by actor
-// id, so a pod always has exactly floor(size/2) winners, deterministically.
-export const WIN_RULE = 'team=team-win; ffa=top-half-placement; juggernaut=actorWon';
+// team match (§14 compares win rates against 55/45).
+//
+// Ties are broken by damage dealt (descending), then actor id. Rank tuples are
+// frags/objective-only, so on maps where deaths are frequently unattributed
+// (falls/void, e.g. aether) two seats routinely tie; a bare `id` tie-break let
+// the low-id seat win the pod for free and biased every FFA row. Damage dealt
+// is already tracked per actor and is deterministic, so it is the fair second
+// key. The id fallback only fires when damage also ties (e.g. 0-damage pods in
+// synthetic fixtures), so a pod always has exactly floor(size/2) winners.
+export const WIN_RULE = 'team=team-win; ffa=top-half-placement; tie=damage,id; juggernaut=actorWon';
+const placementDamage = actor => Number(actor?.scoreStats?.damage) || 0;
 export function placementWinners(match, mode) {
   if (teamMode(mode) || mode === 'juggernaut' || mode === 'puma-race' || mode === 'puma-soccer') return null;
   const actors = [...match.actors];
-  actors.sort((a, b) => compareRanks(rankTuple(a, mode), rankTuple(b, mode)) || a.id - b.id);
+  actors.sort((a, b) => compareRanks(rankTuple(a, mode), rankTuple(b, mode))
+    || placementDamage(b) - placementDamage(a)
+    || a.id - b.id);
   return new Set(actors.slice(0, Math.floor(actors.length / 2)).map(actor => actor.id));
 }
 
@@ -490,7 +500,8 @@ export function summarizeRun({items, appearances, matches, policy, geared, profi
   const specRows = withPresence([...specs.values()]);
   const wingRows = withPresence([...wings.values()]);
   const kitRows = withPresence([...kits.values()]);
-  return {
+  const modeGroupRows = [...byModeGroup.values()].map(finalizeRow).sort((a, b) => a.key.localeCompare(b.key));
+  const summary = {
     policy, geared, profile,
     matches: matches.length,
     planned: items.length,
@@ -500,7 +511,7 @@ export function summarizeRun({items, appearances, matches, policy, geared, profi
     wingRows,
     kitRows,
     modeRows: [...byMode.values()].map(finalizeRow).sort((a, b) => a.key.localeCompare(b.key)),
-    modeGroupRows: [...byModeGroup.values()].map(finalizeRow).sort((a, b) => a.key.localeCompare(b.key)),
+    modeGroupRows,
     lockedPairs: locked,
     teamPairs: team,
     teamSwapRate: round(matches.length ? swaps / matches.length : 0),
@@ -513,6 +524,11 @@ export function summarizeRun({items, appearances, matches, policy, geared, profi
       return sorted.length ? {n: sorted.length, p25: round(quantile(sorted, .25), 3), median: round(quantile(sorted, .5), 3), p75: round(quantile(sorted, .75), 3)} : null;
     })(),
   };
+  // Mode viability is computed at the full sample the summary actually holds,
+  // so the report carries the team-answer / locked-floor numbers directly
+  // instead of forcing a caller to re-derive them from alarms.
+  summary.modeViability = modeViability(summary);
+  return summary;
 }
 
 // ---------------------------------------------------------------------------
@@ -540,8 +556,51 @@ export function envelopeReport(geared = 'stock') {
   return {geared, ehpRatio: round(ehpRatio), speedMean: round(speedMean, 3), speedBand: speedBand.map(value => round(value, 3)), rows, breaches};
 }
 
-export function computeAlarms(summary, {envelope = envelopeReport(summary.geared), profile = summary.profile} = {}) {
+// Mode viability at full sample (§4.2 / §7.6): the team-mode "≥2 reachable
+// answers at ≤60% aggregate" count and the locked-mode worst-pairing floor,
+// computed only once a row has the minimum sample. Exported so the report can
+// carry the numbers and a caller can read them without parsing alarms.
+export function modeViability(summary, {minSample = 24, answerSample = 8, answerCap = .6, floor = .35} = {}) {
+  const teamAnswers = summary.operatorRows.map(row => {
+    const team = row.byModeGroup?.team ?? null;
+    const answers = summary.teamPairs
+      .filter(pair => pair.character === row.key && pair.n >= answerSample && pair.winRate <= answerCap)
+      .map(pair => ({opponent: pair.opponent, n: pair.n, winRate: pair.winRate}));
+    const tested = Boolean(team && team.n >= minSample);
+    return {
+      operator: row.key, teamN: team?.n ?? 0, tested,
+      answerSample, answerCap, answerCount: answers.length, answers,
+      viable: !tested || answers.length >= 2,
+    };
+  });
+  const lockedFloors = summary.lockedPairs
+    .filter(pair => pair.n >= minSample)
+    .map(pair => ({a: pair.a, b: pair.b, n: pair.n, worst: pair.worst, pass: pair.worst >= floor}));
+  return {minSample, answerSample, answerCap, floor, teamAnswers, lockedFloors, teamViable: teamAnswers.every(entry => entry.viable), lockedViable: lockedFloors.every(entry => entry.pass)};
+}
+
+// A truncated run is not a gate (§14 / P3-tune finding): the budget clips whole
+// manifest items from the tail, so the surviving sample is not the planned
+// rotation and low-n rows are artifacts. `computeAlarms` refuses to emit any
+// sample-derived tier alarm from a truncated run and returns exactly one loud
+// `truncated` warning instead. Envelope checks are data-only and still run.
+export function computeAlarms(summary, {envelope = envelopeReport(summary.geared), profile = summary.profile, truncated = false} = {}) {
   const alarms = [];
+  const truncationAlarm = {
+    kind: 'truncated', severity: 'warning',
+    subject: `${summary.policy}/${summary.geared}`, n: summary.matches,
+    value: summary.matches, bound: summary.planned ?? null,
+    detail: `run was ${summary.matches}/${summary.planned ?? '?'} matches (budget-clipped); every tier/mode alarm is suppressed because the sample is truncated`,
+    replay: `--profile ${summary.profile} --policy ${summary.policy} --gear ${summary.geared}`,
+  };
+  if (truncated === true) {
+    for (const breach of envelope.breaches) {
+      if (breach.kind === 'ehp') alarms.push({kind: 'envelope', severity: 'alarm', axis: 'ehp', subject: `${breach.max} vs ${breach.min}`, n: 0, value: breach.ratio, bound: breach.limit, detail: `spawn EHP ratio ${breach.ratio} > ${breach.limit}`, replay: `--profile ${profile} --policy ${summary.policy} --gear ${summary.geared}`});
+      else alarms.push({kind: 'envelope', severity: 'alarm', axis: 'speed', subject: breach.character, n: 0, value: breach.speed, bound: breach.band, detail: `base speed ${breach.speed} outside [${breach.band.join(', ')}]`, replay: `--profile ${profile} --policy ${summary.policy} --gear ${summary.geared}`});
+    }
+    alarms.unshift(truncationAlarm);
+    return alarms;
+  }
   const aggregateReplay = `--profile ${profile} --policy ${summary.policy}`;
   const replayFor = (key, mode = null, group = null) => {
     const match = summary.matchesRef?.find(entry =>
@@ -564,20 +623,19 @@ export function computeAlarms(summary, {envelope = envelopeReport(summary.geared
       if (entry.objectives === 0) alarms.push({kind: 'garbage-objectives', severity: 'alarm', subject: row.key, subjectKind: row.kind, mode, n: entry.n, value: 0, bound: '>0', detail: `zero objective completions across ${entry.n} ${mode} appearances`, replay: replayFor(row.key, mode)});
     }
   }
-  for (const pair of summary.lockedPairs) {
-    if (pair.n < 24) continue;
-    if (pair.worst < .35) alarms.push({
-      kind: 'locked-floor', severity: 'alarm', subject: `${pair.a} vs ${pair.b}`, n: pair.n, value: pair.worst, bound: .35,
-      detail: `worst locked-mode pairing win share ${pair.worst} < 0.35`, replay: replayFor(pair.a < pair.b ? pair.a : pair.b, null, 'locked'),
+  const viability = summary.modeViability ?? modeViability(summary);
+  for (const pair of viability.lockedFloors) {
+    if (pair.pass) continue;
+    alarms.push({
+      kind: 'locked-floor', severity: 'alarm', subject: `${pair.a} vs ${pair.b}`, n: pair.n, value: pair.worst, bound: viability.floor,
+      detail: `worst locked-mode pairing win share ${pair.worst} < ${viability.floor}`, replay: replayFor(pair.a < pair.b ? pair.a : pair.b, null, 'locked'),
     });
   }
-  for (const row of summary.operatorRows) {
-    const team = row.byModeGroup.team;
-    if (!team || team.n < 24) continue;
-    const answers = summary.teamPairs.filter(pair => pair.character === row.key && pair.n >= 8 && pair.winRate <= .6);
-    if (answers.length < 2) alarms.push({
-      kind: 'team-answers', severity: 'alarm', subject: row.key, subjectKind: 'operator', n: team.n,
-      value: answers.length, bound: '>=2', detail: `only ${answers.length} reachable answer(s) at <=60% aggregate win rate`, replay: replayFor(row.key, null, 'team'),
+  for (const entry of viability.teamAnswers) {
+    if (!entry.tested || entry.viable) continue;
+    alarms.push({
+      kind: 'team-answers', severity: 'alarm', subject: entry.operator, subjectKind: 'operator', n: entry.teamN,
+      value: entry.answerCount, bound: '>=2', detail: `only ${entry.answerCount} reachable answer(s) at <=${viability.answerCap * 100}% aggregate win rate`, replay: replayFor(entry.operator, null, 'team'),
     });
   }
   const totalDamage = summary.operatorRows.reduce((sum, row) => sum + row.damage, 0);
@@ -609,6 +667,52 @@ export function balanceDataHash() {
 }
 
 // ---------------------------------------------------------------------------
+// §4.8.6 gear tier invariant
+// ---------------------------------------------------------------------------
+// Spearman rank correlation over the keys present in both tier lists, plus the
+// max rank shift, the max-gear win-rate gain in points and the classes that
+// crossed the 45/55 band. Both lists are already sorted by win rate descending,
+// so ranks are re-derived from the win rate so a caller can pass either order.
+export function rankCorrelation(rowsA = [], rowsB = []) {
+  const rankOf = rows => {
+    const order = [...rows].sort((a, b) => (Number(b.winRate) || 0) - (Number(a.winRate) || 0) || String(a.key).localeCompare(String(b.key)));
+    return new Map(order.map((row, index) => [row.key, index]));
+  };
+  const keysB = new Set(rowsB.map(row => row.key));
+  const shared = rowsA.filter(row => keysB.has(row.key));
+  const n = shared.length;
+  if (n < 2) return {n, rho: n === 1 ? 1 : 0, maxShift: 0, maxGain: 0, crossings: []};
+  const rankA = rankOf(shared);
+  const rankBFull = rankOf(rowsB);
+  const rankB = new Map(shared.map(row => [row.key, rankBFull.get(row.key)]));
+  const byKey = new Map(rowsB.map(row => [row.key, row]));
+  let sumSq = 0, maxShift = 0, maxGain = 0;
+  const crossings = [];
+  for (const row of shared) {
+    const d = rankA.get(row.key) - rankB.get(row.key);
+    sumSq += d * d;
+    maxShift = Math.max(maxShift, Math.abs(d));
+    const other = byKey.get(row.key) ?? {};
+    const a = Number(row.winRate) || 0, b = Number(other.winRate) || 0;
+    maxGain = Math.max(maxGain, (b - a) * 100);
+    if ((a - .5) * (b - .5) < 0 && Math.abs(a - .5) > .05 && Math.abs(b - .5) > .05) crossings.push({key: row.key, stock: round(a), geared: round(b)});
+  }
+  const rho = 1 - (6 * sumSq) / (n * (n * n - 1));
+  return {n, rho: round(rho), maxShift, maxGain: round(maxGain), crossings};
+}
+
+// §4.8.6: run the sweep stock and at max gear; rank correlation >= 0.85, max
+// rank shift <= 2, no class crossing 45/55 and max-gear gain <= 4 points.
+export function gearTierInvariant(stockRun, gearedRun, {minRho = .85, maxShift = 2, maxGain = 4} = {}) {
+  const kinds = {};
+  for (const kind of ['operators', 'specs', 'wings']) {
+    const stats = rankCorrelation(stockRun?.tierlist?.[kind] ?? [], gearedRun?.tierlist?.[kind] ?? []);
+    kinds[kind] = {...stats, pass: stats.n >= 2 ? stats.rho >= minRho && stats.maxShift <= maxShift && stats.maxGain <= maxGain && stats.crossings.length === 0 : true};
+  }
+  return {minRho, maxShift, maxGain, kinds, pass: Object.values(kinds).every(entry => entry.pass)};
+}
+
+// ---------------------------------------------------------------------------
 // Reporting
 // ---------------------------------------------------------------------------
 export function createReport({release, profile, policy, geared, manifest, summary, alarms, items, planned, completed, truncated, elapsedMs, budgetMs, errors}) {
@@ -635,6 +739,7 @@ export function createReport({release, profile, policy, geared, manifest, summar
       tierNotes: summary.tierNotes,
       lockedPairs: summary.lockedPairs,
       teamPairs: summary.teamPairs,
+      modeViability: summary.modeViability,
       envelope: envelopeReportOf(geared),
     },
     alarms,
@@ -693,7 +798,7 @@ export function runSweep({
   }
   const summary = summarizeRun({items: filtered, appearances, matches, policy, geared, profile});
   summary.matchesRef = matches;
-  const alarms = computeAlarms(summary);
+  const alarms = computeAlarms(summary, {truncated});
   const report = createReport({
     release, profile, policy, geared,
     manifest: {profile, policy, geared, seedFormula: SEED_FORMULA, items: filtered},
@@ -701,6 +806,7 @@ export function runSweep({
     planned: filtered.length, completed: items.length, truncated, elapsedMs: now() - start, budgetMs: budgetMs ?? null, errors,
   });
   report.metrics.matches = matches.length;
+  report.metrics.truncation = {truncated, completed: items.length, planned: filtered.length, budgetMs: budgetMs ?? null};
   return report;
 }
 
@@ -718,6 +824,7 @@ export function formatTierList(report) {
   for (const entry of report.runs ?? [run]) {
     lines.push('');
     lines.push(`== policy:${entry.policy} geared:${entry.geared} · ${entry.completed}/${entry.planned} matches${entry.truncated ? ' (budget-truncated)' : ''} ==`);
+    if (entry.truncated) lines.push(`!! TRUNCATED: only ${entry.completed}/${entry.planned} planned matches ran. Tier rows and alarms are NOT a gate; re-run to completion (no --budget-ms) before reading them.`);
     const rows = entry.tierlist.operators.slice(0, 3);
     lines.push(`podium: ${rows.map(row => `${row.key} ${percent(row.winRate)} [${percent(row.lower)}, ${percent(row.upper)}] n=${row.n}`).join(' · ') || 'n/a'}`);
     lines.push('');
