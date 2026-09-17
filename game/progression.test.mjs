@@ -46,12 +46,16 @@ test('xp curve is monotonic and levelFromXp tracks exact boundaries',()=>{
 test('gear resolves additive armour/health and multiplicative combat stats',()=>{
  const scope=resolveGear(['scope']);
  assert.equal(scope.modifiers.spread,.85);
- assert.ok(Math.abs(scope.modifiers.damage-1.06)<1e-9);
+ assert.ok(Math.abs(scope.modifiers.damage-1.1)<1e-9);
+ assert.ok(Math.abs(scope.modifiers.speed-.9)<1e-9);
  const both=resolveGear(['scope','plating','stim']);
- assert.equal(both.modifiers.armor,25);
- assert.equal(both.modifiers.health,20);
- assert.ok(Math.abs(both.modifiers.speed-1.04*.98)<1e-9);
+ // §4.8 EHP cap: pooled health + armour never exceeds +15 points.
+ assert.ok(Math.abs(both.modifiers.armor-8.333)<1e-9);
+ assert.ok(Math.abs(both.modifiers.health-6.667)<1e-9);
+ assert.ok(both.modifiers.health+both.modifiers.armor<=15+1e-9);
+ assert.ok(Math.abs(both.modifiers.speed-1.04*.98*.9)<1e-9);
  assert.equal(both.items.length,3);
+ assert.ok(Object.isFrozen(both)&&Object.isFrozen(both.items)&&Object.isFrozen(both.modifiers));
  assert.equal(resolveGear(['nope']).items.length,0);
 });
 test('normalizeGear enforces one per slot and level gating',()=>{
