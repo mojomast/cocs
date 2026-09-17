@@ -1,52 +1,30 @@
-import {activeMaps,maxBotsFor,arenaSupportsMode} from './arenas.mjs';
+// The title screen loops a reel of hand-picked scenarios chosen to show the
+// game off: tight infantry duels, objective pushes on the biggest maps, rolling
+// armour and the two car modes. The definitions now live in demo-playlist.mjs
+// (the curated rotation catalog); this module keeps the historical export
+// surface that showcase-build.mjs, app/page.tsx and the tests rely on. The order
+// is reshuffled every cycle (see `shuffleShowcaseReel`) so the menu never opens
+// on the same scenario twice in a row, and every scenario's map list is curated
+// for looks and playability.
 import {vehicleSeatFor,vehicleMounted} from './vehicles.mjs';
+import {CURATED_SCENARIOS,DEFAULT_SCENARIO_SECONDS,scenarioSpec,shuffleIndices} from './demo-playlist.mjs';
 
-// The title screen loops a reel of hand-picked scenarios chosen to show the game
-// off: tight infantry duels, objective pushes on the biggest maps, rolling armour
-// and the two car modes. The order is reshuffled every cycle (see
-// `shuffleShowcaseReel`) so the menu never opens on the same scenario twice in a
-// row, and every scenario's map list is curated for looks and playability.
-export const SHOWCASES=[
- {id:'deathmatch',label:'Deathmatch',mode:'deathmatch',maps:['colosseum','forge','substation','dune-ravine','atrium','crosswire'],bots:7,difficulty:'normal',timeLimit:60,fragLimit:10,seatVehicles:0},
- {id:'teamdeathmatch',label:'Team Deathmatch',mode:'teamdeathmatch',maps:['titan-valley','warfront','atrium','riverbend','crosswire'],bots:8,difficulty:'normal',timeLimit:60,fragLimit:20,seatVehicles:0},
- {id:'ctf',label:'Capture the Flag',mode:'ctf',maps:['frost-gate','skybreak','launchpad','citadel','blood-gulch'],bots:8,difficulty:'normal',timeLimit:60,fragLimit:2,seatVehicles:0},
- {id:'koth',label:'King of the Hill',mode:'koth',maps:['colosseum','skyfall-basin','sunken-hill','forge'],bots:7,difficulty:'normal',timeLimit:60,fragLimit:60,seatVehicles:0},
- {id:'domination',label:'Domination',mode:'domination',maps:['warfront','titan-valley','convoy-line','frost-gate'],bots:8,difficulty:'normal',timeLimit:60,fragLimit:100,seatVehicles:0},
- {id:'combined-arms',label:'Combined Arms',mode:'combined-arms',maps:['warfront','skyfall-basin','titan-valley','trenchline'],bots:12,difficulty:'normal',timeLimit:75,fragLimit:100,seatVehicles:.7},
- {id:'payload',label:'Payload',mode:'payload',maps:['convoy-line','derelict-station','frost-gate','launchpad'],bots:6,difficulty:'normal',timeLimit:60,fragLimit:2,seatVehicles:0},
- {id:'juggernaut',label:'Juggernaut',mode:'juggernaut',maps:['throne'],bots:7,difficulty:'normal',timeLimit:60,fragLimit:30,seatVehicles:0},
- {id:'team-elimination',label:'Team Elimination',mode:'team-elimination',maps:['gauntlet'],bots:8,difficulty:'normal',timeLimit:60,fragLimit:8,seatVehicles:0},
- {id:'puma-race',label:'Puma Circuit',mode:'puma-race',maps:['puma-circuit'],bots:7,difficulty:'normal',timeLimit:120,fragLimit:1,seatVehicles:0},
- {id:'puma-soccer',label:'Puma Soccer',mode:'puma-soccer',maps:['puma-pitch'],bots:3,difficulty:'normal',timeLimit:90,fragLimit:2,seatVehicles:0},
-];
+export const SHOWCASES=CURATED_SCENARIOS;
 // Never let one scenario hog the menu: advance after this many real seconds even
-// if the bot match has not finished.
-export const SHOWCASE_MAX_SECONDS=75;
+// if the bot match has not finished. Kept in step with the demo settings default.
+export const SHOWCASE_MAX_SECONDS=DEFAULT_SCENARIO_SECONDS;
 
-const wrap=(index,n)=>((Math.round(index)%n)+n)%n;
+export const wrap=(index,n)=>((Math.round(index)%n)+n)%n;
 
-// Active maps that can actually host the scenario's mode, preferring the
-// curated list. Falls back to any playable map, and finally the curated list, so
-// a scenario always resolves to a real match rather than an empty preview.
-function mapPool(scenario,{legacy=false}={}){
- const available=activeMaps({legacy});
- const playable=available.filter(map=>arenaSupportsMode(map.id,scenario.mode));
- const preferred=playable.filter(map=>scenario.maps.includes(map.id));
- if(preferred.length)return preferred;
- if(playable.length)return playable;
- return scenario.maps.slice();
-}
-
-function specFor(scenario,random,{legacy=false}={}){
- const pool=mapPool(scenario,{legacy});
- const chosen=pool.length?pool[Math.min(pool.length-1,Math.floor(random()*pool.length))]:null;
- const mapId=chosen&&typeof chosen==='object'?chosen.id:(typeof chosen==='string'?chosen:'exchange');
- const botCount=Math.max(0,Math.min(maxBotsFor(scenario.mode),Math.round(scenario.bots)));
- return {id:scenario.id,label:scenario.label,mode:scenario.mode,mapId,botCount,difficulty:scenario.difficulty,timeLimit:scenario.timeLimit,fragLimit:scenario.fragLimit,seatVehicles:scenario.seatVehicles};
+// Build a match-ready spec for a scenario definition: map pool resolution
+// (preferred -> any playable -> authored fallback) and bot clamping now live in
+// demo-playlist.mjs so the rotation and this index API share one implementation.
+export function specFor(scenario,random=Math.random,{legacy=false}={}){
+ return scenarioSpec(scenario,random,{legacy});
 }
 
 // Deterministic index-based pick, used by tests and callers that want a fixed
-// scenario. `pickRandomShowcase` is what the live title screen uses.
+// scenario. `pickNext` from demo-playlist.mjs is what the rotation uses.
 export function pickShowcase(index,random=Math.random,{legacy=false}={}){
  const n=SHOWCASES.length;
  return specFor(SHOWCASES[wrap(index,n)],random,{legacy});
@@ -64,12 +42,7 @@ export function pickRandomShowcase(random=Math.random,{legacy=false,exclude=null
 // A shuffled walk over every scenario so a full cycle shows all the modes before
 // repeating, but in a different order each time. Deterministic for a given rng.
 export function shuffleShowcaseReel(random=Math.random){
- const reel=SHOWCASES.map((_,index)=>index);
- for(let i=reel.length-1;i>0;i--){
-  const j=Math.min(i,Math.floor(random()*(i+1)));
-  [reel[i],reel[j]]=[reel[j],reel[i]];
- }
- return reel;
+ return shuffleIndices(SHOWCASES.length,random);
 }
 
 // Move a share of bots straight into seats so the demo opens with rolling

@@ -1,9 +1,10 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import {Match} from './core.mjs';
-import {pickShowcase,seatShowcaseVehicles,SHOWCASES,SHOWCASE_MAX_SECONDS} from './showcase.mjs';
+import {pickRandomShowcase,pickShowcase,seatShowcaseVehicles,SHOWCASES,SHOWCASE_MAX_SECONDS,shuffleShowcaseReel,specFor,wrap} from './showcase.mjs';
+import {DEFAULT_SCENARIO_SECONDS,demoCatalog,demoModeEligible,seededRng} from './demo-playlist.mjs';
 import {raceDemoMode,raceDemoPose} from './race-camera.mjs';
-import {maxBotsFor,arenaSupportsMode} from './arenas.mjs';
+import {maxBotsFor,arenaSupportsMode,arenaMeta} from './arenas.mjs';
 import {DEFAULT_CONFIG,normalizeConfig} from './config.mjs';
 import {RULES} from './data.mjs';
 import {CinematicDirector} from './director.mjs';
@@ -101,4 +102,50 @@ test('menu race scenario runs a full race and the next build restarts the reel',
  assert.notEqual(r.showcase.match,m);
  assert.equal(r.showcase.match.over,false);
  assert.equal(r.showcase.time,0);
+});
+
+test('showcase helpers keep their wrap, spec and shuffle contracts', () => {
+ assert.equal(wrap(-1, 3), 2);
+ assert.equal(wrap(4, 3), 1);
+ assert.equal(wrap(-SHOWCASES.length, SHOWCASES.length), 0);
+ for (const index of [-2, 0, 3, SHOWCASES.length + 2]) {
+  const expected = specFor(SHOWCASES[wrap(index, SHOWCASES.length)], () => .5);
+  assert.deepEqual(pickShowcase(index, () => .5), expected);
+ }
+ const reel = shuffleShowcaseReel(seededRng(11));
+ assert.deepEqual(reel, shuffleShowcaseReel(seededRng(11)));
+ assert.deepEqual(reel.slice().sort((a, b) => a - b), SHOWCASES.map((_, index) => index));
+ assert.equal(SHOWCASE_MAX_SECONDS, DEFAULT_SCENARIO_SECONDS);
+ assert.ok(SHOWCASE_MAX_SECONDS > 0 && SHOWCASE_MAX_SECONDS <= 90);
+});
+
+test('the reel is the curated rotation catalog with its required coverage', () => {
+ assert.equal(demoCatalog('curated'), SHOWCASES);
+ const ids = SHOWCASES.map(scenario => scenario.id);
+ assert.equal(new Set(ids).size, ids.length);
+ const categories = new Set(SHOWCASES.map(scenario => scenario.category));
+ for (const required of ['infantry', 'objectives', 'vehicles', 'racing', 'soccer']) {
+  assert.ok(categories.has(required), `${required} showcase missing`);
+ }
+ const maps = new Set(SHOWCASES.flatMap(scenario => scenario.maps));
+ assert.ok(maps.size >= 15, 'the curated maps are visually distinct');
+ const groups = new Set([...maps].map(mapId => arenaMeta(mapId).group));
+ assert.ok(groups.size >= 5, 'the curated maps span several arena groups');
+ for (const scenario of SHOWCASES) {
+  assert.ok(demoModeEligible(scenario.mode));
+  for (const mapId of scenario.maps) assert.ok(arenaSupportsMode(mapId, scenario.mode), `${scenario.mode} on ${mapId}`);
+ }
+});
+
+test('random showcase picks avoid the excluded scenario and stay playable', () => {
+ const seen = new Set();
+ for (let i = 0; i < 30; i++) {
+  const spec = pickRandomShowcase(seededRng(i), {exclude: 'ctf'});
+  assert.notEqual(spec.id, 'ctf');
+  assert.ok(SHOWCASES.some(scenario => scenario.id === spec.id));
+  assert.ok(arenaSupportsMode(spec.mapId, spec.mode));
+  assert.ok(spec.botCount >= 0 && spec.botCount <= maxBotsFor(spec.mode));
+  seen.add(spec.id);
+ }
+ assert.ok(seen.size >= 3, 'the picker keeps producing different scenarios');
 });
