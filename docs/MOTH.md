@@ -89,7 +89,7 @@ Decoders are dependency-free: PNG (filters 0–4, truecolour/palette, 8-bit), ZI
 | `deep-fryer-v1` | 1 | blown-out PNG | hull/panel, circuit and chitin albedos |
 | `tessa-image-v1` | 1 | sphere-encoded PNG (≤64×64) | palette-quantized albedo overrides |
 | `blur-core-v1` | 1 | blurred N-D grid JSON | **bump/normal maps and animated effects** (`normals.*`, `effects.*`) |
-| `retrocausal-echo-v1` | 2 | WAV impulse response | **convolution reverb** for the soundtrack (`irs.cavern`) |
+| `retrocausal-echo-v1` | 2 | WAV impulse response | **convolution reverb** for the soundtrack (`irs.*`) |
 | `qrc-midi-v1` / `blur-midi-v1` | 5 / 1 | MIDI | **motif data** for the soundtrack (`motifs.*`) |
 | `comet-qrng-v1` | 5 | random bytes + entropy certificate | provably-fair seeds |
 | `qrc-image-v1` | 5 | animated GIF | animated textures, loading art |
@@ -138,11 +138,22 @@ The baked assets are used, not just showcased:
 - **Materials + effects** — the labyrinth gets an iridescent landmark built with
   `createMothLutMaterial` (entanglement LUT) ringed by an animated rift that
   cycles the baked effect frames each frame (`updateMothRift`).
+- **Effect sequences** — `effect-explosion`, `effect-teleport`,
+  `effect-capture-ring`, `effect-heal`, `effect-shield` and
+  `effect-weather-snow` drive blasts/vehicle kills, traversal teleports, flag
+  and zone captures, heals and support pickups, shield breaks/walls/overshields
+  and snow weather through the pooled `MothSpritePlayer`. `view._mothFx` prefers
+  the dedicated sheet and falls back to the previous `arc-burst`/`spark-impact`
+  cue when a sheet is missing.
 - **Arena** — `moth-backrooms` is registered as a `variant` next-gen map
   (Quantum Labyrinth) so it appears in the normal rotation.
 - **Motifs** — the baked `moth-oracle` motif drives the Halo soundtrack's combat
   lead via `MusicEngine.setMotif`.
-- **Reverb IR** — `SynthAudio.setReverbUrl` decodes the cavern impulse response.
+- **Reverb IR** — `SynthAudio.setSpace(name)` swaps between the baked
+  `open-air`, `tunnel`, `hall`, `cathedral` and `cavern` responses.
+  `mothSpaceFor(arenaId)` picks one per map (interiors/tunnels/caverns override
+  the open-air default); `view` applies it on `setAudio` and on every arena
+  build, and re-selecting the active space is a no-op.
 
 ## Runtime API (`game/moth-assets.mjs`)
 
@@ -160,6 +171,7 @@ mothMaterialLut('entanglement');           // { size, r, t } | null
 mothSky('nebula');                         // equirect { width, height, data } | null
 mothEffect('quantum-rift');                // { fps, frames:[{width,height,data}] } | null
 mothIr('cavern');                          // { url, seconds, sampleRate, channels, taps } | null
+                                           // also: open-air, tunnel, hall, cathedral
 mothMotif('moth-oracle');                  // { bpm, notes:[{step,midi,dur,vel}] } | null
 mothLevel('moth-backrooms');               // graph copy | null
 mothSeed('moth-daily');                    // { seed, hex, bytes(), bell, certificate } | null
@@ -183,10 +195,12 @@ The procedural soundtrack can play a **Halo-flavoured pack** selected with
 `SynthAudio.setSoundtrack`). It is deliberately original material — slow modal
 ritual music in D natural minor with a choir-like detuned pad, a low open-fifth
 drone, tribal taiko drums and glassy bell accents — and it does not reproduce any
-existing theme. `SynthAudio.setReverbUrl(url)` fetches and decodes the baked
+existing theme. `SynthAudio.setReverbUrl(url)` fetches and decodes a baked
 `retrocausal-echo` WAV into a `ConvolverNode` on the music bus, opening the mix
-into a cavern. `app/page.tsx` opts the game into the halo pack and the `cavern`
-IR; the engine's baseline tables are unchanged so unit tests stay pinned.
+into the room; `SynthAudio.setSpace(name)` selects the baked response by name
+and the view re-applies it whenever the arena changes. `app/page.tsx` opts the
+game into the halo pack and a `cavern` fallback; the engine's baseline tables
+are unchanged so unit tests stay pinned.
 
 ## Showcase (`/moth`)
 
@@ -262,5 +276,30 @@ synthesizes one so the job stays deterministic and offline: `height`
 (`frame`, `seed`) for the expanding shock ring behind `quantum-rift`, `portal`
 (`frame`, `seed`) for expanding rings with angular spokes and a hot core behind
 `arc-burst`, and `spark` (`frame`, `seed`) for a bright core with radiating
-needle rays behind `spark-impact`. Baked effect frames accept a `tint`
-(`quantum`, `ember`, `plasma`).
+needle rays behind `spark-impact`.
+
+The pass-3 effect sheets add six generators, each with a distinct silhouette;
+all take `size`, `frame` and `seed` and return a bounded, deterministic grid:
+
+| `type` | Silhouette | Effect sheet |
+| --- | --- | --- |
+| `bloom` | turbulent core inside an expanding shock ring | `effect-explosion` |
+| `vortex` | swirling arms around a hot core | `effect-teleport` |
+| `contract` | contracting ticked ring that fills inward | `effect-capture-ring` |
+| `rise` | deterministic motes climbing a soft column | `effect-heal` |
+| `shield` | expanding hexagonal facet shell | `effect-shield` |
+| `snow` | flakes drifting down and sideways (wrapping) | `effect-weather-snow` |
+
+Baked effect frames accept a `tint` (`quantum`, `ember`, `plasma`). The
+pass-3 sequences are three frames each at 10–14 fps.
+
+### Reverb spaces
+
+`retrocausal-echo-v1` bakes one IR per `bake.name`. Besides `cavern` (the
+original), the manifest carries `open-air` (short, early reflections),
+`tunnel` (chain-lattice slapback, metallic), `hall` (medium square-lattice
+diffusion) and `cathedral` (long, tall, slow build). Each is a small
+same-origin WAV plus its tap map. `mothSpaceFor(arenaId)` maps arenas to a
+space and `SynthAudio.setSpace(name)` swaps the convolution response on the
+music bus, so the tail follows the room; an unknown or unbaked space falls
+back to `cavern` and a missing registry leaves the wired URL untouched.

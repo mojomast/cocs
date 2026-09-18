@@ -1598,6 +1598,808 @@
         "size": 48
       },
       "jobId": "fd723f45-7f1a-4b6d-8da5-a29427fdb8eb"
+    },
+    {
+      "id": "effect-explosion-0",
+      "engine": "blur-core-v1",
+      "enabled": true,
+      "credits": 1,
+      "generateValues": {
+        "type": "bloom",
+        "size": 32,
+        "frame": 0,
+        "seed": 23
+      },
+      "params": {
+        "style": "xy",
+        "strength": [
+          0.5,
+          0.5
+        ],
+        "reach": 0.3,
+        "axes": [
+          0,
+          1
+        ],
+        "shots": null,
+        "max_qubits": 20
+      },
+      "raw": "effect-explosion-0",
+      "bake": {
+        "type": "effect-frame",
+        "name": "effect-explosion",
+        "index": 0,
+        "fps": 14,
+        "size": 48,
+        "tint": "ember"
+      },
+      "jobId": "dc9fad3e-6847-4db8-a770-a73b54047ebc"
+    },
+    {
+      "id": "effect-explosion-1",
+      "engine": "blur-core-v1",
+      "enabled": true,
+      "credits": 1,
+      "generateValues": {
+        "type": "bloom",
+        "size": 32,
+        "frame": 1,
+        "seed": 23
+      },
+      "params": {
+        "style": "xy",
+        "strength": [
+          0.5,
+          0.5
+        ],
+        "reach": 0.3,
+        "axes": [
+          0,
+          1
+        ],
+        "shots": null,
+        "max_qubits": 20
+      },
+      "raw": "effect-explosion-1",
+      "bake": {
+        "type": "effect-frame",
+        "name": "effect-explosion",
+        "index": 1,
+        "fps": 14,
+        "size": 48,
+        "tint": "ember"
+      },
+      "jobId": "aa6603f2-b405-462b-954d-31eb372478e3"
+    },
+    {
+      "id": "effect-explosion-2",
+      "engine": "blur-core-v1",
+      "enabled": true,
+      "credits": 1,
+      "generateValues": {
+        "type": "bloom",
+        "size": 32,
+        "frame": 2,
+        "seed": 23
+      },
+      "params": {
+        "style": "xy",
+        "strength": [
+          0.5,
+          0.5
+        ],
+        "reach": 0.3,
+        "axes": [
+          0,
+          1
+        ],
+        "shots": null,
+        "max_qubits": 20
+      },
+      "raw": "effect-explosion-2",
+      "bake": {
+        "type": "effect-frame",
+        "name": "effect-explosion",
+        "index": 2,
+        "fps": 14,
+        "size": 48,
+        "tint": "ember"
+      },
+      "jobId": "2fd00b0c-81d7-4732-bd48-07814cd64c52"
+    },
+    {
+      "id": "effect-teleport-0",
+      "engine": "blur-core-v1",
+      "enabled": true,
+      "credits": 1,
+      "generateValues": {
+        "type": "vortex",
+        "size": 32,
+        "frame": 0,
+        "seed": 37
+      },
+      "params": {
+        "style": "xy",
+        "strength": [
+          0.5,
+          0.5
+        ],
+        "reach": 0.3,
+        "axes": [
+          0,
+          1
+        ],
+        "shots": null,
+        "max_qubits": 20
+      },
+      "raw": "effect-teleport-0",
+      "bake": {
+        "type": "effect-frame",
+        "name": "effect-teleport",
+        "index": 0,
+        "fps": 12,
+        "size": 48,
+        "tint": "plasma"
+      },
+      "jobId": "4de81227-b380-4fb6-bec4-60df478b4403"
+    },
+    {
+      "id": "effect-teleport-1",
+      "engine": "blur-core-v1",
+      "enabled": true,
+      "credits": 1,
+      "generateValues": {
+        "type": "vortex",
+        "size": 32,
+        "frame": 1,
+        "seed": 37
+      },
+      "params": {
+        "style": "xy",
+        "strength": [
+          0.5,
+          0.5
+        ],
+        "reach": 0.3,
+        "axes": [
+          0,
+          1
+        ],
+        "shots": null,
+        "max_qubits": 20
+      },
+      "raw": "effect-teleport-1",
+      "bake": {
+        "type": "effect-frame",
+        "name": "effect-teleport",
+        "index": 1,
+        "fps": 12,
+        "size": 48,
+        "tint": "plasma"
+      },
+      "jobId": "321ae8ef-3cf7-4576-adcb-fabc5815560a"
+    },
+    {
+      "id": "effect-teleport-2",
+      "engine": "blur-core-v1",
+      "enabled": true,
+      "credits": 1,
+      "generateValues": {
+        "type": "vortex",
+        "size": 32,
+        "frame": 2,
+        "seed": 37
+      },
+      "params": {
+        "style": "xy",
+        "strength": [
+          0.5,
+          0.5
+        ],
+        "reach": 0.3,
+        "axes": [
+          0,
+          1
+        ],
+        "shots": null,
+        "max_qubits": 20
+      },
+      "raw": "effect-teleport-2",
+      "bake": {
+        "type": "effect-frame",
+        "name": "effect-teleport",
+        "index": 2,
+        "fps": 12,
+        "size": 48,
+        "tint": "plasma"
+      },
+      "jobId": "237c88b4-e5ca-4272-8009-0c84973cd459"
+    },
+    {
+      "id": "effect-capture-ring-0",
+      "engine": "blur-core-v1",
+      "enabled": true,
+      "credits": 1,
+      "generateValues": {
+        "type": "contract",
+        "size": 32,
+        "frame": 0,
+        "seed": 53
+      },
+      "params": {
+        "style": "xy",
+        "strength": [
+          0.5,
+          0.5
+        ],
+        "reach": 0.3,
+        "axes": [
+          0,
+          1
+        ],
+        "shots": null,
+        "max_qubits": 20
+      },
+      "raw": "effect-capture-ring-0",
+      "bake": {
+        "type": "effect-frame",
+        "name": "effect-capture-ring",
+        "index": 0,
+        "fps": 12,
+        "size": 48,
+        "tint": "quantum"
+      },
+      "jobId": "2df0ac41-1663-49f5-97a8-650890d9151b"
+    },
+    {
+      "id": "effect-capture-ring-1",
+      "engine": "blur-core-v1",
+      "enabled": true,
+      "credits": 1,
+      "generateValues": {
+        "type": "contract",
+        "size": 32,
+        "frame": 1,
+        "seed": 53
+      },
+      "params": {
+        "style": "xy",
+        "strength": [
+          0.5,
+          0.5
+        ],
+        "reach": 0.3,
+        "axes": [
+          0,
+          1
+        ],
+        "shots": null,
+        "max_qubits": 20
+      },
+      "raw": "effect-capture-ring-1",
+      "bake": {
+        "type": "effect-frame",
+        "name": "effect-capture-ring",
+        "index": 1,
+        "fps": 12,
+        "size": 48,
+        "tint": "quantum"
+      },
+      "jobId": "2dd6e8eb-6199-4933-959b-2c9117360e36"
+    },
+    {
+      "id": "effect-capture-ring-2",
+      "engine": "blur-core-v1",
+      "enabled": true,
+      "credits": 1,
+      "generateValues": {
+        "type": "contract",
+        "size": 32,
+        "frame": 2,
+        "seed": 53
+      },
+      "params": {
+        "style": "xy",
+        "strength": [
+          0.5,
+          0.5
+        ],
+        "reach": 0.3,
+        "axes": [
+          0,
+          1
+        ],
+        "shots": null,
+        "max_qubits": 20
+      },
+      "raw": "effect-capture-ring-2",
+      "bake": {
+        "type": "effect-frame",
+        "name": "effect-capture-ring",
+        "index": 2,
+        "fps": 12,
+        "size": 48,
+        "tint": "quantum"
+      },
+      "jobId": "99f751d4-8636-4a1e-be8d-96c419ab2764"
+    },
+    {
+      "id": "effect-heal-0",
+      "engine": "blur-core-v1",
+      "enabled": true,
+      "credits": 1,
+      "generateValues": {
+        "type": "rise",
+        "size": 32,
+        "frame": 0,
+        "seed": 71
+      },
+      "params": {
+        "style": "xy",
+        "strength": [
+          0.5,
+          0.5
+        ],
+        "reach": 0.3,
+        "axes": [
+          0,
+          1
+        ],
+        "shots": null,
+        "max_qubits": 20
+      },
+      "raw": "effect-heal-0",
+      "bake": {
+        "type": "effect-frame",
+        "name": "effect-heal",
+        "index": 0,
+        "fps": 10,
+        "size": 48,
+        "tint": "quantum"
+      },
+      "jobId": "eba6c702-f666-42ef-92b0-7c9858350a4f"
+    },
+    {
+      "id": "effect-heal-1",
+      "engine": "blur-core-v1",
+      "enabled": true,
+      "credits": 1,
+      "generateValues": {
+        "type": "rise",
+        "size": 32,
+        "frame": 1,
+        "seed": 71
+      },
+      "params": {
+        "style": "xy",
+        "strength": [
+          0.5,
+          0.5
+        ],
+        "reach": 0.3,
+        "axes": [
+          0,
+          1
+        ],
+        "shots": null,
+        "max_qubits": 20
+      },
+      "raw": "effect-heal-1",
+      "bake": {
+        "type": "effect-frame",
+        "name": "effect-heal",
+        "index": 1,
+        "fps": 10,
+        "size": 48,
+        "tint": "quantum"
+      },
+      "jobId": "cbafc221-e6a3-4d27-a763-b5e7ce1fc0ee"
+    },
+    {
+      "id": "effect-heal-2",
+      "engine": "blur-core-v1",
+      "enabled": true,
+      "credits": 1,
+      "generateValues": {
+        "type": "rise",
+        "size": 32,
+        "frame": 2,
+        "seed": 71
+      },
+      "params": {
+        "style": "xy",
+        "strength": [
+          0.5,
+          0.5
+        ],
+        "reach": 0.3,
+        "axes": [
+          0,
+          1
+        ],
+        "shots": null,
+        "max_qubits": 20
+      },
+      "raw": "effect-heal-2",
+      "bake": {
+        "type": "effect-frame",
+        "name": "effect-heal",
+        "index": 2,
+        "fps": 10,
+        "size": 48,
+        "tint": "quantum"
+      },
+      "jobId": "140519c0-b6fb-4d34-a950-7f6e1e42068e"
+    },
+    {
+      "id": "effect-shield-0",
+      "engine": "blur-core-v1",
+      "enabled": true,
+      "credits": 1,
+      "generateValues": {
+        "type": "shield",
+        "size": 32,
+        "frame": 0,
+        "seed": 89
+      },
+      "params": {
+        "style": "xy",
+        "strength": [
+          0.5,
+          0.5
+        ],
+        "reach": 0.3,
+        "axes": [
+          0,
+          1
+        ],
+        "shots": null,
+        "max_qubits": 20
+      },
+      "raw": "effect-shield-0",
+      "bake": {
+        "type": "effect-frame",
+        "name": "effect-shield",
+        "index": 0,
+        "fps": 12,
+        "size": 48,
+        "tint": "quantum"
+      },
+      "jobId": "5e139b9a-2409-4091-a862-7d0e60b9d506"
+    },
+    {
+      "id": "effect-shield-1",
+      "engine": "blur-core-v1",
+      "enabled": true,
+      "credits": 1,
+      "generateValues": {
+        "type": "shield",
+        "size": 32,
+        "frame": 1,
+        "seed": 89
+      },
+      "params": {
+        "style": "xy",
+        "strength": [
+          0.5,
+          0.5
+        ],
+        "reach": 0.3,
+        "axes": [
+          0,
+          1
+        ],
+        "shots": null,
+        "max_qubits": 20
+      },
+      "raw": "effect-shield-1",
+      "bake": {
+        "type": "effect-frame",
+        "name": "effect-shield",
+        "index": 1,
+        "fps": 12,
+        "size": 48,
+        "tint": "quantum"
+      },
+      "jobId": "e7f5356d-64f8-4881-86f8-e8008b7af13f"
+    },
+    {
+      "id": "effect-shield-2",
+      "engine": "blur-core-v1",
+      "enabled": true,
+      "credits": 1,
+      "generateValues": {
+        "type": "shield",
+        "size": 32,
+        "frame": 2,
+        "seed": 89
+      },
+      "params": {
+        "style": "xy",
+        "strength": [
+          0.5,
+          0.5
+        ],
+        "reach": 0.3,
+        "axes": [
+          0,
+          1
+        ],
+        "shots": null,
+        "max_qubits": 20
+      },
+      "raw": "effect-shield-2",
+      "bake": {
+        "type": "effect-frame",
+        "name": "effect-shield",
+        "index": 2,
+        "fps": 12,
+        "size": 48,
+        "tint": "quantum"
+      },
+      "jobId": "ae723b8b-6de7-4e3a-97f5-a542bd69ebc3"
+    },
+    {
+      "id": "effect-weather-snow-0",
+      "engine": "blur-core-v1",
+      "enabled": true,
+      "credits": 1,
+      "generateValues": {
+        "type": "snow",
+        "size": 32,
+        "frame": 0,
+        "seed": 107
+      },
+      "params": {
+        "style": "xy",
+        "strength": [
+          0.5,
+          0.5
+        ],
+        "reach": 0.3,
+        "axes": [
+          0,
+          1
+        ],
+        "shots": null,
+        "max_qubits": 20
+      },
+      "raw": "effect-weather-snow-0",
+      "bake": {
+        "type": "effect-frame",
+        "name": "effect-weather-snow",
+        "index": 0,
+        "fps": 10,
+        "size": 48,
+        "tint": "quantum"
+      },
+      "jobId": "edd21a9f-b8fb-4462-9fe3-059349b83716"
+    },
+    {
+      "id": "effect-weather-snow-1",
+      "engine": "blur-core-v1",
+      "enabled": true,
+      "credits": 1,
+      "generateValues": {
+        "type": "snow",
+        "size": 32,
+        "frame": 1,
+        "seed": 107
+      },
+      "params": {
+        "style": "xy",
+        "strength": [
+          0.5,
+          0.5
+        ],
+        "reach": 0.3,
+        "axes": [
+          0,
+          1
+        ],
+        "shots": null,
+        "max_qubits": 20
+      },
+      "raw": "effect-weather-snow-1",
+      "bake": {
+        "type": "effect-frame",
+        "name": "effect-weather-snow",
+        "index": 1,
+        "fps": 10,
+        "size": 48,
+        "tint": "quantum"
+      },
+      "jobId": "33bff879-14cb-448b-905b-eec01d3a679a"
+    },
+    {
+      "id": "effect-weather-snow-2",
+      "engine": "blur-core-v1",
+      "enabled": true,
+      "credits": 1,
+      "generateValues": {
+        "type": "snow",
+        "size": 32,
+        "frame": 2,
+        "seed": 107
+      },
+      "params": {
+        "style": "xy",
+        "strength": [
+          0.5,
+          0.5
+        ],
+        "reach": 0.3,
+        "axes": [
+          0,
+          1
+        ],
+        "shots": null,
+        "max_qubits": 20
+      },
+      "raw": "effect-weather-snow-2",
+      "bake": {
+        "type": "effect-frame",
+        "name": "effect-weather-snow",
+        "index": 2,
+        "fps": 10,
+        "size": 48,
+        "tint": "quantum"
+      },
+      "jobId": "219a06a9-9158-40bf-9bfe-e985e2b2fb75"
+    },
+    {
+      "id": "ir-open-air",
+      "engine": "retrocausal-echo-v1",
+      "enabled": true,
+      "credits": 2,
+      "params": {
+        "emit": "audio",
+        "sr": 22050,
+        "output_format": "pcm_16",
+        "stereo_width": 1,
+        "mix": 1,
+        "include_tap_map": true,
+        "ref_floor": 0.02,
+        "ir_seconds": 1.5,
+        "lattice": "square",
+        "width": 6,
+        "height": 3,
+        "depth": 4,
+        "theta_zz": 0.7853981634,
+        "theta_x": 0.85,
+        "theta_z": 0.2,
+        "kick": "Z",
+        "disorder": 0,
+        "seed": 101,
+        "decay": 0.6,
+        "feedback": 0.25,
+        "feedback_source": "kick",
+        "diffusion_ms": 60,
+        "min_level": 0.05,
+        "max_regen": 12,
+        "negative_mode": "phase"
+      },
+      "raw": "ir-open-air",
+      "bake": {
+        "type": "ir",
+        "name": "open-air"
+      },
+      "jobId": "a16edab3-0402-4524-90ff-2db4b8104940"
+    },
+    {
+      "id": "ir-tunnel",
+      "engine": "retrocausal-echo-v1",
+      "enabled": true,
+      "credits": 2,
+      "params": {
+        "emit": "audio",
+        "sr": 22050,
+        "output_format": "pcm_16",
+        "stereo_width": 1,
+        "mix": 1,
+        "include_tap_map": true,
+        "ref_floor": 0.02,
+        "ir_seconds": 2.2,
+        "lattice": "chain",
+        "n_sites": 12,
+        "depth": 16,
+        "theta_zz": 0.7853981634,
+        "theta_x": 0.35,
+        "theta_z": 0.3,
+        "kick": "X",
+        "disorder": 0.05,
+        "seed": 202,
+        "decay": 0.92,
+        "feedback": 0.62,
+        "feedback_source": "all",
+        "diffusion_ms": 0,
+        "min_level": 0.04,
+        "max_regen": 40,
+        "negative_mode": "phase"
+      },
+      "raw": "ir-tunnel",
+      "bake": {
+        "type": "ir",
+        "name": "tunnel"
+      },
+      "jobId": "86657484-a758-487e-99d8-61786e2e3248"
+    },
+    {
+      "id": "ir-hall",
+      "engine": "retrocausal-echo-v1",
+      "enabled": true,
+      "credits": 2,
+      "params": {
+        "emit": "audio",
+        "sr": 22050,
+        "output_format": "pcm_16",
+        "stereo_width": 1,
+        "mix": 1,
+        "include_tap_map": true,
+        "ref_floor": 0.02,
+        "ir_seconds": 3,
+        "lattice": "square",
+        "width": 5,
+        "height": 4,
+        "theta_zz": 0.7853981634,
+        "theta_x": 0.62,
+        "theta_z": 0.35,
+        "kick": "Z",
+        "disorder": 0.1,
+        "seed": 303,
+        "decay": 0.82,
+        "feedback": 0.42,
+        "feedback_source": "all",
+        "diffusion_ms": 320,
+        "min_level": 0.03,
+        "max_regen": 36,
+        "negative_mode": "phase"
+      },
+      "raw": "ir-hall",
+      "bake": {
+        "type": "ir",
+        "name": "hall"
+      },
+      "jobId": "6bfc7ab1-1c80-4aad-8e8b-4f4c5657b525"
+    },
+    {
+      "id": "ir-cathedral",
+      "engine": "retrocausal-echo-v1",
+      "enabled": true,
+      "credits": 2,
+      "params": {
+        "emit": "audio",
+        "sr": 22050,
+        "output_format": "pcm_16",
+        "stereo_width": 1,
+        "mix": 1,
+        "include_tap_map": true,
+        "ref_floor": 0.02,
+        "ir_seconds": 7,
+        "lattice": "square",
+        "width": 4,
+        "height": 6,
+        "depth": 10,
+        "theta_zz": 0.6,
+        "theta_x": 0.5,
+        "theta_z": 0.5,
+        "kick": "Z",
+        "disorder": 0.25,
+        "seed": 404,
+        "decay": 0.94,
+        "feedback": 0.72,
+        "feedback_source": "all",
+        "diffusion_ms": 420,
+        "min_level": 0.02,
+        "max_regen": 64,
+        "negative_mode": "phase"
+      },
+      "raw": "ir-cathedral",
+      "bake": {
+        "type": "ir",
+        "name": "cathedral"
+      },
+      "jobId": "ca93ed39-9b1a-4ef6-87b5-1a7ba51c92de"
     }
   ]
 }

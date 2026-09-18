@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import * as T from 'three';
-import {ArenaView, mothAtmosphereFor} from './view.mjs';
+import {ArenaView, mothAtmosphereFor, mothSpaceFor} from './view.mjs';
 import {MAPS} from './maps.mjs';
 import {DEFAULT_DISPLAY} from './config.mjs';
 import {ModelAssets} from './effects-fx.mjs';
@@ -40,6 +40,37 @@ test('map atmospheres pick the baked sky by theatre and leave the rest procedura
   assert.equal(mothAtmosphereFor('moth-backrooms'), 'void');
   assert.equal(mothAtmosphereFor('exchange'), null, 'unlisted maps keep addSky');
   assert.equal(mothAtmosphereFor(undefined), null);
+});
+
+test('map spaces pick the baked reverb by room and default to open-air', () => {
+  assert.equal(mothSpaceFor('moth-backrooms'), 'cavern');
+  assert.equal(mothSpaceFor('catacombs'), 'tunnel');
+  assert.equal(mothSpaceFor('substation'), 'tunnel');
+  assert.equal(mothSpaceFor('atrium'), 'cathedral');
+  assert.equal(mothSpaceFor('colosseum'), 'hall');
+  assert.equal(mothSpaceFor('derelict-station'), 'hall');
+  assert.equal(mothSpaceFor('blood-gulch'), 'open-air', 'outdoor maps default to open-air');
+  assert.equal(mothSpaceFor(undefined), 'open-air');
+});
+
+test('_mothFx prefers a dedicated sequence and falls back to the old cue', () => {
+  const base = fixture();
+  const frame = { width: 2, height: 2, data: b64(Uint8Array.from([1, 2, 3, 255, 4, 5, 6, 255, 7, 8, 9, 255, 10, 11, 12, 255])) };
+  configureMothAssets({ ...base, effects: { ...base.effects, 'effect-explosion': { fps: 14, frames: [frame] } } });
+  try {
+    const scene = new T.Scene();
+    const view = Object.assign(Object.create(ArenaView.prototype), { scene, renderer: { isSoftware: false }, reduced: () => false });
+    const dedicated = view._mothFx('effect-explosion', 'arc-burst', { x: 0, y: 0, z: 0 }, { slots: 2, life: 0.3 });
+    assert.ok(dedicated && dedicated.mesh.parent === scene, 'the dedicated sequence spawns');
+    // A missing sequence falls back to the caller's existing cue, not nothing.
+    const fallback = view._mothFx('missing-effect', 'spark-impact', { x: 0, y: 0, z: 0 }, { slots: 2, life: 0.3 });
+    assert.ok(fallback && fallback.mesh.parent === scene, 'the fallback cue still spawns');
+    assert.equal(view._mothSpriteCache.get('missing-effect'), null, 'a missing sheet is cached as null');
+    view._disposeMothSprites();
+  } finally {
+    resetMothAssets();
+    clearSurfaceTextures();
+  }
 });
 
 test('effect frames and LUTs are shared caches marked for the disposal traversal', () => {

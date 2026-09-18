@@ -753,6 +753,95 @@ function sparkGrid(size, frame = 0, seed = 61) {
     return Math.round(Math.min(1, core + ray * 0.7 + noise) * 1000) / 1000;
   }));
 }
+// An explosion bloom: a bright turbulent core inside an expanding shock ring.
+// Distinct from `spark` (needle rays) and `portal` (angular spokes).
+function bloomGrid(size, frame = 0, seed = 23) {
+  const c = (size - 1) / 2, t = Math.min(1, frame / 2);
+  const coreR = size * (0.3 + 0.08 * t), ringR = size * (0.12 + 0.36 * t);
+  return Array.from({ length: size }, (_, y) => Array.from({ length: size }, (_, x) => {
+    const d = Math.hypot(x - c, y - c);
+    const core = Math.pow(Math.max(0, 1 - d / coreR), 1.3);
+    const ring = Math.max(0, 1 - Math.abs(d - ringR) / (size * 0.09)) * (1 - t * 0.45);
+    const turbulence = fbm2(x * 0.24, y * 0.24, seed + frame * 19, 3) * core * 0.55;
+    return Math.round(Math.min(1, core + ring * 0.65 + turbulence) * 1000) / 1000;
+  }));
+}
+// A teleport vortex: a swirling ring of arms around a bright core.
+function vortexGrid(size, frame = 0, seed = 37) {
+  const c = (size - 1) / 2, t = Math.min(1, frame / 2), radius = size * (0.36 - 0.05 * t);
+  return Array.from({ length: size }, (_, y) => Array.from({ length: size }, (_, x) => {
+    const dx = x - c, dy = y - c, d = Math.hypot(dx, dy), angle = Math.atan2(dy, dx);
+    const swirl = angle * 2 + d / (size * 0.16) - t * 2.4;
+    const ring = Math.max(0, 1 - Math.abs(d - radius) / (size * 0.1));
+    const arms = Math.pow(Math.abs(Math.cos(swirl * 1.5)), 4) * ring;
+    const core = Math.pow(Math.max(0, 1 - d / (size * 0.14)), 1.4);
+    const noise = fbm2(x * 0.3, y * 0.3, seed + frame * 29, 3) * 0.15;
+    return Math.round(Math.min(1, ring * 0.5 + arms * 0.7 + core + noise) * 1000) / 1000;
+  }));
+}
+// A capture ring: a thin contracting ring with radial ticks that fills inward.
+function contractGrid(size, frame = 0, seed = 53) {
+  const c = (size - 1) / 2, t = Math.min(1, frame / 2), radius = size * (0.42 - 0.2 * t);
+  return Array.from({ length: size }, (_, y) => Array.from({ length: size }, (_, x) => {
+    const dx = x - c, dy = y - c, d = Math.hypot(dx, dy), angle = Math.atan2(dy, dx);
+    const band = Math.max(0, 1 - Math.abs(d - radius) / (size * 0.055));
+    const ticks = Math.pow(Math.abs(Math.cos(angle * 8)), 8) * Math.max(0, 1 - Math.abs(d - radius) / (size * 0.16));
+    const fill = Math.pow(Math.max(0, 1 - d / radius), 2) * 0.3 * t;
+    const noise = fbm2(x * 0.35, y * 0.35, seed + frame * 31, 2) * 0.1;
+    return Math.round(Math.min(1, band * 0.85 + ticks * 0.6 + fill + noise) * 1000) / 1000;
+  }));
+}
+// A heal pulse: deterministic motes rising through a soft column.
+function riseGrid(size, frame = 0, seed = 71) {
+  const c = (size - 1) / 2, t = frame / 3;
+  const motes = [];
+  for (let i = 0; i < 9; i++) {
+    const mx = size * (0.14 + hash2(i, 1, seed) * 0.72);
+    const phase = (hash2(i, 2, seed) + t) % 1;
+    const my = size * (0.92 - phase * 0.84);
+    const mr = size * (0.045 + hash2(i, 3, seed) * 0.035);
+    motes.push([mx, my, mr]);
+  }
+  return Array.from({ length: size }, (_, y) => Array.from({ length: size }, (_, x) => {
+    let value = 0;
+    for (const [mx, my, mr] of motes) { const d = Math.hypot(x - mx, y - my); value = Math.max(value, Math.max(0, 1 - d / mr) * 0.9); }
+    const column = Math.max(0, 1 - Math.abs(x - c) / (size * 0.12)) * Math.max(0, 1 - y / size) * 0.18;
+    return Math.round(Math.min(1, value + column) * 1000) / 1000;
+  }));
+}
+// A shield bubble: an expanding hexagonal facet shell with bright seams.
+function shieldGrid(size, frame = 0, seed = 89) {
+  const c = (size - 1) / 2, t = Math.min(1, frame / 2), radius = size * (0.32 + 0.05 * t);
+  const hexDist = (dx, dy) => { let value = 0; for (let k = 0; k < 3; k++) value = Math.max(value, Math.abs(dx * Math.cos((k * Math.PI) / 3) + dy * Math.sin((k * Math.PI) / 3))); return value; };
+  return Array.from({ length: size }, (_, y) => Array.from({ length: size }, (_, x) => {
+    const dx = x - c, dy = y - c, hd = hexDist(dx, dy), angle = Math.atan2(dy, dx);
+    const shell = Math.max(0, 1 - Math.abs(hd - radius) / (size * 0.07));
+    const seam = Math.pow(Math.max(0, Math.cos(angle * 6)), 12) * shell;
+    const fill = Math.pow(Math.max(0, 1 - hd / radius), 3) * 0.22;
+    const noise = fbm2(x * 0.32, y * 0.32, seed + frame * 37, 2) * 0.08;
+    return Math.round(Math.min(1, shell * 0.8 + seam * 0.5 + fill + noise) * 1000) / 1000;
+  }));
+}
+// Weather snow: deterministic flakes drifting down and to one side. The wrap
+// keeps the field seamless, so consecutive frames read as continuous drift.
+function snowGrid(size, frame = 0, seed = 107) {
+  const drift = size * 0.06 * frame;
+  const flakes = [];
+  for (let i = 0; i < 26; i++) {
+    const fx = (hash2(i, 5, seed) * size + drift * (0.4 + hash2(i, 7, seed) * 0.6)) % size;
+    const fy = (hash2(i, 6, seed) * size + size * 0.28 * frame) % size;
+    flakes.push([fx, fy, size * (0.02 + hash2(i, 8, seed) * 0.022)]);
+  }
+  return Array.from({ length: size }, (_, y) => Array.from({ length: size }, (_, x) => {
+    let value = 0;
+    for (const [fx, fy, fr] of flakes) {
+      const dx = Math.abs(x - fx), dy = Math.abs(y - fy);
+      const wrapped = Math.hypot(Math.min(dx, size - dx), Math.min(dy, size - dy));
+      value = Math.max(value, Math.max(0, 1 - wrapped / fr));
+    }
+    return Math.round(Math.min(1, value) * 1000) / 1000;
+  }));
+}
 export function generateValues(job) {
   const spec = job.generateValues;
   if (!spec || !spec.type) return null;
@@ -760,6 +849,12 @@ export function generateValues(job) {
   if (spec.type === 'radial') return radialGrid(spec.size || 32, spec.frame || 0, spec.seed || 3);
   if (spec.type === 'portal') return portalGrid(spec.size || 32, spec.frame || 0, spec.seed || 41);
   if (spec.type === 'spark') return sparkGrid(spec.size || 32, spec.frame || 0, spec.seed || 61);
+  if (spec.type === 'bloom') return bloomGrid(spec.size || 32, spec.frame || 0, spec.seed || 23);
+  if (spec.type === 'vortex') return vortexGrid(spec.size || 32, spec.frame || 0, spec.seed || 37);
+  if (spec.type === 'contract') return contractGrid(spec.size || 32, spec.frame || 0, spec.seed || 53);
+  if (spec.type === 'rise') return riseGrid(spec.size || 32, spec.frame || 0, spec.seed || 71);
+  if (spec.type === 'shield') return shieldGrid(spec.size || 32, spec.frame || 0, spec.seed || 89);
+  if (spec.type === 'snow') return snowGrid(spec.size || 32, spec.frame || 0, spec.seed || 107);
   return null;
 }
 
