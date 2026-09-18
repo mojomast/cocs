@@ -35,6 +35,13 @@
 //     HOLD the most-threatened owned node. It skips a node the enemy is
 //     currently attacking so two standing attack orders cannot cancel into an
 //     order-only deadlock; the bots themselves decide such a node.
+//   * **Comeback / rotation pressure (W8)** — a team that trails on the node
+//     tally (enemy outright majority) or the objective score stops camping the
+//     held nodes: the garrison reaction is capped (never raised) and the surplus
+//     re-concentrates on the enemy's most weakly held frontier, balanced across
+//     the two weakest nodes so the enemy's single-node garrison cannot cover
+//     both. Behavioural only, deterministic and mode-guarded; see
+//     `cocsDeficit` / `cocsComebackTargets`.
 //
 // Determinism contract (mirrors game/cocs.mjs §11.6): no `Math.random`, no
 // wall clock, every list sorted by id; a fixed seed yields a byte-identical
@@ -55,6 +62,30 @@ const THREAT_PAD = 10;
 // is 2 s, so a task never lapses between reissues). Deliberately not 0 or 1 so
 // tick 1 stays order-silent for the arrival-order tests.
 const POLICY_INTERVAL = 45;
+// --- W8 comeback / rotation pressure ---------------------------------------
+// A team is "behind" when the enemy holds an outright majority of the
+// capturable lattice (the same threshold that arms dominance) or is running a
+// material score lead. This is a behavioural response only: it changes where
+// the losing squad is sent, never a stat, speed or damage value.
+//
+// When behind, the squad stops camping the held nodes: the garrison reaction is
+// capped to `COCS_COMEBACK_GARRISON` (only ever lowered, never raised) and the
+// surplus re-concentrates on the enemy's most weakly held frontier. Down to the
+// last node the recall tightens to `COCS_COMEBACK_DEEP` so the whole surviving
+// squad can mount the re-clear. Attack allocation is split evenly across the
+// two weakest frontier nodes (`COCS_COMEBACK_SPLIT`) so the enemy's single-node
+// garrison cannot cover both — that keeps a second front alive and stops the
+// re-concentrate from collapsing into one all-in stack.
+export const COCS_COMEBACK_GARRISON = 1;
+// The recapture is mounted once a team is down to its last node (or none).
+export const COCS_COMEBACK_DEEP = 1;
+// Half the roster per comeback node (ceil), i.e. a 2+2 split for a 4-bot squad.
+export const COCS_COMEBACK_SPLIT = 0.5;
+// Score deficit is measured relative to the combined objective score so the
+// trigger scales with match length instead of firing on every early tick. It
+// re-concentrates the attack but (unlike a node majority) does not recall the
+// garrison: holding your remaining nodes is how a comeback stays alive.
+export const COCS_SCORE_DEFICIT = 0.15;
 
 const idSort = (a, b) => String(a?.id ?? '').localeCompare(String(b?.id ?? ''));
 
@@ -119,6 +150,63 @@ export function cocsAttackTargets(state, team) {
     .sort((a, b) => b.value - a.value || idSort(a.node, b.node));
 }
 
+// `true` when the enemy holds an outright majority of the capturable lattice —
+// the same count that arms dominance. This is the condition that warrants
+// pulling the garrison off held nodes.
+export function cocsNodeDeficit(state, team) {
+  if (!state || state.kind !== COCS_KIND) return false;
+  const capturable = capturableNodes(state);
+  if (!capturable.length) return false;
+  let owned = 0, enemy = 0;
+  for (const node of capturable) {
+    if (node.owner === team) owned++;
+    else if (node.owner === 1 - team) enemy++;
+  }
+  const majority = Math.max(1, Math.round(state.dominanceCount ?? (Math.floor(capturable.length / 2) + 1)));
+  return enemy > owned && enemy >= majority;
+}
+
+// `true` when the enemy is running a material objective-score lead, measured
+// relative to the combined score so the trigger scales with match length.
+export function cocsScoreDeficit(state, team) {
+  if (!state || state.kind !== COCS_KIND) return false;
+  const mine = Math.max(0, Number(state.scores?.[team]) || 0);
+  const theirs = Math.max(0, Number(state.scores?.[1 - team]) || 0);
+  return theirs > mine + COCS_SCORE_DEFICIT * (mine + theirs);
+}
+
+// Combined trail: either signal puts the squad into the re-concentrate stance.
+export function cocsDeficit(state, team) {
+  return cocsNodeDeficit(state, team) || cocsScoreDeficit(state, team);
+}
+
+// Weakness of a frontier node from the attacking team's point of view: fewest
+// living defenders is the dominant term, with the enemy's banked capture
+// progress as a secondary at-risk signal and our own progress as a reason to
+// finish what we started. Lower is weaker. Deterministic, actor-order
+// independent (localPresence only counts).
+export function cocsWeakness(actors, node, team) {
+  const {hostile} = localPresence(actors, node, team, THREAT_PAD);
+  const enemyProgress = node.progress?.[1 - team] ?? 0;
+  const ownProgress = node.progress?.[team] ?? 0;
+  return hostile * 4 + enemyProgress * 3 - ownProgress * 3;
+}
+
+// The enemy-held frontier nodes, weakest first. The squad's focus therefore
+// rotates to whichever enemy node is currently thinnest as ownership and
+// presence shift, while the least-defended node is always the primary. Falls
+// back to neutral frontier nodes when the enemy owns none that we can legally
+// reach (e.g. only our own captured gate is open).
+export function cocsComebackTargets(state, actors, team, targets = null) {
+  if (!state || state.kind !== COCS_KIND) return [];
+  const pool = (targets ?? cocsAttackTargets(state, team)).filter(entry => entry?.node);
+  const held = pool.filter(entry => entry.node.owner === 1 - team);
+  const source = held.length ? held : pool;
+  return [...source].sort((a, b) =>
+    cocsWeakness(actors, a.node, team) - cocsWeakness(actors, b.node, team) ||
+    b.value - a.value || idSort(a.node, b.node));
+}
+
 // Deterministic squad plan: a duty slot per living roster index. Exposed (not
 // just consumed inside `cocsAssignment`) so the spread/defence rules are
 // directly testable without a running bot loop.
@@ -131,27 +219,48 @@ export function cocsTeamPlan(match, state, team) {
   const task = (state.tasks?.[team] && state.tick <= state.tasks[team].until) ? state.tasks[team] : null;
   const defence = cocsDefenceNode(actors, state, team);
   const cap = Math.max(1, Math.ceil(roster.length * COCS_SPREAD_FRACTION));
+  const deficit = cocsDeficit(state, team);
+  const nodeDeficit = cocsNodeDeficit(state, team);
+  const comeback = deficit ? cocsComebackTargets(state, actors, team, targets) : [];
   // A defence may reinforce up to the same per-node spread cap, so a front that
   // is genuinely being pushed can be met with numbers instead of fed in piecemeal.
   const maxDefenders = cap;
-  // Garrison slots: reinforce the most-threatened owned node to roughly the
-  // enemy numbers on it when it is genuinely being pushed, so an under-strength
-  // front cannot be picked apart one bot at a time. A safe rear node never
-  // strips the front.
+  // Comeback stance balances the attack across the two weakest frontier nodes
+  // (half the roster each) instead of leaning on one, so the enemy's single-node
+  // garrison cannot cover both and multi-front pressure survives.
+  const attackCap = deficit ? Math.max(1, Math.ceil(roster.length * COCS_COMEBACK_SPLIT)) : cap;
+  // Garrison: reinforce the most-threatened owned node to roughly the enemy
+  // numbers on it, capped by the spread rule. When the enemy holds a majority
+  // (W8) the reaction is only ever *capped* — down to `COCS_COMEBACK_GARRISON`,
+  // and to the token once we are down to our last node — so the surplus
+  // re-concentrates without ever stripping a genuinely pushed front.
   const holds = [];
   if (task && task.verb === 'HOLD') holds.push({nodeId: task.nodeId, count: 1});
   if (defence && defence.threat > 0) {
-    // Match the enemy numbers on the node (capped by the spread rule) so the
-    // fight on the point is an even scrum instead of a piecemeal feed.
     const {hostile} = localPresence(actors, defence.node, team, THREAT_PAD);
-    const count = Math.max(1, Math.min(maxDefenders, Math.round(hostile)));
+    let count = Math.max(1, Math.min(maxDefenders, Math.round(hostile)));
+    if (nodeDeficit) {
+      const owned = capturableNodes(state).filter(node => node.owner === team).length;
+      const recallCap = owned <= COCS_COMEBACK_DEEP ? Math.max(1, COCS_COMEBACK_GARRISON) : maxDefenders;
+      count = Math.min(count, recallCap);
+    }
     const existing = holds.find(hold => hold.nodeId === defence.node.id);
     if (existing) existing.count = Math.max(existing.count, count);
     else holds.push({nodeId: defence.node.id, count});
   }
   const duties = [];
   for (const hold of holds) for (let index = 0; index < hold.count; index++) duties.push({nodeId: hold.nodeId, kind: 'hold'});
-  if (task && task.verb === 'ATTACK') duties.push({nodeId: task.nodeId, kind: 'attack'});
+  if (deficit && comeback.length) {
+    // Weakest frontier first, then the next-weakest, so the squad keeps a second
+    // threat alive and the re-concentrate never collapses into one all-in stack.
+    for (const entry of comeback) {
+      if (!duties.some(duty => duty.nodeId === entry.node.id && duty.kind === 'attack')) {
+        duties.push({nodeId: entry.node.id, kind: 'attack'});
+      }
+    }
+  } else if (task && task.verb === 'ATTACK') {
+    duties.push({nodeId: task.nodeId, kind: 'attack'});
+  }
   for (const target of targets) {
     if (!duties.some(duty => duty.nodeId === target.node.id && duty.kind === 'attack')) {
       duties.push({nodeId: target.node.id, kind: 'attack'});
@@ -165,10 +274,11 @@ export function cocsTeamPlan(match, state, team) {
     while ((used.get(hold.nodeId) ?? 0) < hold.count && slots.length < roster.length) place(hold.nodeId, 'hold');
     if (slots.length >= roster.length) break;
   }
-  // 2. Attack: fill each duty to the spread cap, primary (task) first.
+  // 2. Attack: fill each duty to the attack cap (spread cap normally, the
+  //    balanced comeback split when trailing), primary (weakest task) first.
   for (const duty of duties) {
     if (duty.kind !== 'attack') continue;
-    while ((used.get(duty.nodeId) ?? 0) < cap && slots.length < roster.length) place(duty.nodeId, 'attack');
+    while ((used.get(duty.nodeId) ?? 0) < attackCap && slots.length < roster.length) place(duty.nodeId, 'attack');
     if (slots.length >= roster.length) break;
   }
   // 3. Overflow so every bot has a destination, never an infinite loop.
@@ -179,7 +289,7 @@ export function cocsTeamPlan(match, state, team) {
       place(duty.nodeId, duty.kind);
     }
   }
-  return {roster, duties, slots, cap, maxDefenders, defence, targets, task, holds};
+  return {roster, duties, slots, cap, maxDefenders, defence, targets, task, holds, deficit, nodeDeficit, comeback, attackCap};
 }
 
 // Per-actor assignment. Stable: the actor's position in the id-sorted living
