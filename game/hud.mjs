@@ -158,7 +158,16 @@ export function streakStatus(player) {
 }
 
 export function audioCaption(event) {
-  const text = CAPTION_EVENTS[event?.type];
+  const type = event?.type;
+  // LATTICE STRIKE command events route into the same captions pipeline (§13.4).
+  if (type === 'cocs-order') return {text: `Order ${String(event.verb ?? '').toUpperCase()}${event.node ? ` ${event.node}` : ''}`};
+  if (type === 'coop-spend') return {text: `Spend ${String(event.verb ?? '').toUpperCase()} · ${Math.round(Number(event.cost) || 0)} FLUX`};
+  if (type === 'director-intermission') return {text: `Intermission · wave ${Number(event.nextWave) || ''}`.trim()};
+  if (type === 'coop-intermission-open') return {text: 'Spend window open'};
+  if (type === 'coop-reinforce') return {text: 'Reinforcements called'};
+  if (type === 'coop-reserve') return {text: 'Reserve ticket burned'};
+  if (type === 'operation-summary') return {text: `Operation summary · ${String(event.reason ?? '').replace(/-/g, ' ')}`};
+  const text = CAPTION_EVENTS[type];
   return text ? { text } : null;
 }
 
