@@ -390,6 +390,135 @@ export function cocsDirectorView(snapshot) {
 }
 
 /**
+ * §6A traversal + depot read model for the HUD. Pure view of `snapshot.traversal`
+ * (the frozen `cocsTraversalSnapshot` subtree) and `snapshot.tick`/player team;
+ * null when the subtree is absent, which keeps every other mode dark. Shapes
+ * (per-kind mark, per-state mark, per-channel label) accompany the words so the
+ * readout never leans on colour, and nothing here animates.
+ */
+const COCS_DEVICE_KINDS = Object.freeze({
+  zipline: {label: 'ZIPLINE', mark: '⇢'},
+  'jump-pad': {label: 'JUMP PAD', mark: '⤒'},
+  launcher: {label: 'LAUNCHER', mark: '⟰'},
+  teleporter: {label: 'TELEPORTER', mark: '◎'},
+});
+const COCS_DEVICE_STATES = Object.freeze({
+  live: {label: 'LIVE', mark: '▶'},
+  cut: {label: 'CUT', mark: '✂'},
+  locked: {label: 'LOCKED', mark: '▣'},
+});
+const COCS_CHANNEL_ACTIONS = Object.freeze({cut: 'CUTTING', lock: 'LOCKING', repair: 'REPAIRING'});
+const cocsDeviceKind = kind => COCS_DEVICE_KINDS[String(kind)] ?? {label: String(kind ?? 'DEVICE').toUpperCase(), mark: '◆'};
+const cocsDeviceState = state => COCS_DEVICE_STATES[String(state)] ?? {label: String(state ?? 'LIVE').toUpperCase(), mark: '▶'};
+const cocsDepotOwnerLabel = (owner, team, contested) => contested ? 'CONTESTED'
+  : owner === null || owner === undefined ? 'NEUTRAL'
+    : team !== null && owner === team ? 'YOURS'
+      : team !== null ? 'ENEMY'
+        : `TEAM ${owner}`;
+
+export function cocsTraversalView(snapshot, player) {
+  if (!snapshot || typeof snapshot !== 'object') return null;
+  const raw = snapshot.traversal;
+  if (!raw || typeof raw !== 'object') return null;
+  const team = player?.team === 0 || player?.team === 1 ? Number(player.team) : null;
+  const devices = (Array.isArray(raw.devices) ? raw.devices : []).filter(Boolean).map(device => {
+    const kind = cocsDeviceKind(device.kind);
+    const state = cocsDeviceState(device.state);
+    const channel = device.channel ? {
+      actor: device.channel.actor,
+      action: device.channel.action,
+      label: COCS_CHANNEL_ACTIONS[String(device.channel.action)] ?? 'CHANNELLING',
+      remaining: num(device.channel.remaining, 0),
+      remainingSeconds: round(num(device.channel.remaining, 0), 1),
+      total: num(device.channel.total, 0),
+      percent: num(device.channel.total, 0) > 0 ? Math.max(0, Math.min(1, 1 - num(device.channel.remaining, 0) / num(device.channel.total, 0))) : 0,
+    } : null;
+    return {
+      id: String(device.id),
+      kind: String(device.kind ?? ''),
+      lane: device.lane ?? null,
+      label: kind.label,
+      mark: kind.mark,
+      state: String(device.state ?? 'live'),
+      stateLabel: state.label,
+      stateMark: state.mark,
+      timer: num(device.timer, 0),
+      timerSeconds: round(num(device.timer, 0), 1),
+      x: num(device.x, 0),
+      z: num(device.z, 0),
+      to: device.to && typeof device.to === 'object' ? {x: num(device.to.x, 0), z: num(device.to.z, 0)} : null,
+      channel,
+      text: `${kind.label} · ${state.label}`,
+    };
+  });
+  const depots = (Array.isArray(raw.depots) ? raw.depots : []).filter(Boolean).map(depot => {
+    const owner = depot.owner === 0 || depot.owner === 1 ? Number(depot.owner) : null;
+    const progress = Array.isArray(depot.progress) ? depot.progress : [0, 0];
+    const contested = depot.contested === true;
+    const myProgress = team === null ? Math.max(num(progress[0], 0), num(progress[1], 0)) : num(progress[team], 0);
+    const ownerLabel = cocsDepotOwnerLabel(owner, team, contested);
+    const vehicle = depot.vehicle && typeof depot.vehicle === 'object' ? depot.vehicle : {};
+    const live = num(vehicle.health, 0) > 0;
+    const respawn = Math.max(0, num(vehicle.respawn, 0));
+    const available = owner === team && live;
+    const vehicleState = available ? 'READY' : live ? 'ENEMY' : respawn > 0 ? `RETURN ${round(respawn, 1)}s` : owner !== null ? 'SPAWNING' : 'NONE';
+    return {
+      id: String(depot.id),
+      lane: depot.lane ?? null,
+      hq: depot.hq === true,
+      label: depot.hq === true ? 'HQ DEPOT' : 'FWD DEPOT',
+      mark: depot.hq === true ? '⌂' : '⬡',
+      x: num(depot.x, 0),
+      z: num(depot.z, 0),
+      owner,
+      ownerLabel,
+      contested,
+      mine: owner !== null && team !== null && owner === team,
+      enemy: owner !== null && team !== null && owner !== team,
+      myProgress,
+      capturePercent: Math.round(Math.max(0, Math.min(1, myProgress)) * 100),
+      vehicle: {id: vehicle.id ?? null, health: num(vehicle.health, 0), live, respawn, respawnSeconds: round(respawn, 1), available, state: vehicleState},
+      text: `${depot.hq === true ? 'HQ' : 'FWD'} DEPOT · ${ownerLabel}${!contested && myProgress > 0 ? ` ${Math.round(Math.max(0, Math.min(1, myProgress)) * 100)}%` : ''}`,
+    };
+  });
+  const arrivals = (Array.isArray(raw.arrivals) ? raw.arrivals : []).filter(Boolean).map(entry => ({
+    actor: entry.actor,
+    remaining: num(entry.remaining, 0),
+    remainingSeconds: round(num(entry.remaining, 0), 1),
+    x: num(entry.x, 0),
+    z: num(entry.z, 0),
+    telegraph: entry.telegraph === true,
+  }));
+  const channelDevice = devices.find(device => device.channel) ?? null;
+  const channel = channelDevice?.channel ?? null;
+  const ownDepot = depots.find(depot => depot.mine) ?? null;
+  const targetDepot = depots.find(depot => !depot.mine && !depot.contested && depot.capturePercent > 0)
+    ?? depots.find(depot => depot.ownerLabel === 'NEUTRAL')
+    ?? null;
+  let context = 'TRAVERSAL NOMINAL';
+  if (channelDevice) context = `${channel.label} ${channelDevice.label} · ${channel.remainingSeconds}s`;
+  else if (arrivals.length) context = `ARRIVAL PROTECTION · ${arrivals[0].remainingSeconds}s`;
+  else if (targetDepot) context = `${targetDepot.label} · ${targetDepot.ownerLabel}${targetDepot.capturePercent > 0 ? ` ${targetDepot.capturePercent}%` : ''}`;
+  else if (ownDepot) context = `${ownDepot.label} · LOANER ${ownDepot.vehicle.state}`;
+  else if (devices.length) context = `${devices[0].label} · ${devices[0].stateLabel}`;
+  return {
+    team,
+    devices,
+    depots,
+    arrivals,
+    deviceCount: devices.length,
+    depotCount: depots.length,
+    arrivalActive: arrivals.length > 0,
+    arrivalSeconds: arrivals.length ? Math.max(...arrivals.map(entry => entry.remainingSeconds)) : 0,
+    channel,
+    channelDevice,
+    ownDepot,
+    targetDepot,
+    context,
+  };
+}
+
+/**
  * Fold the board, snapshot, player and strip state into the single object
  * `CocsReadout` renders. Returns null outside cocs (mode isolation). `board` is
  * `cocsBoard(hud, player)` so the HUD derivation stays in one place.
@@ -416,6 +545,7 @@ export function cocsCommandView(board, snapshot, player, strip) {
     spots: economy?.spots ?? [],
     scanTarget: {nodeId: scanNode ?? null, label: scanLabel, active: economy?.scan?.active === true},
     strip: view,
+    traversal: cocsTraversalView(snapshot, player),
     director: cocsDirectorView(snapshot),
   };
 }

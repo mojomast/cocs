@@ -91,6 +91,25 @@ export const COCS_COMEBACK_SPLIT = 0.5;
 // garrison: holding your remaining nodes is how a comeback stays alive.
 export const COCS_SCORE_DEFICIT = 0.15;
 
+// --- W20 tactical traversal + depot weighting ------------------------------
+// A bot only routes through a device when the hop clearly shortens the remaining
+// push (or buys a disengage) and the landing is not a defended trap. Thresholds
+// are metres; no RNG, no clock read.
+export const COCS_DEVICE_MIN_GAIN = 18;
+export const COCS_DEVICE_MIN_FRACTION = 0.25;
+export const COCS_DEVICE_MAX_DETOUR = 55;
+export const COCS_DEVICE_LANDING_PAD = 6;
+export const COCS_DEVICE_RETREAT_HEALTH = 0.45;
+export const COCS_DEVICE_RETREAT_GAIN = 5;
+// Depot weighting. A squad only spends a body on a depots once it can spare
+// one: never while trailing (the W8 re-concentrate keeps every body on the
+// lattice), never in the first contact window, and only on a depot near its own
+// half so it never crosses the map for a loaner.
+export const COCS_DEPOT_MIN_ROSTER = 4;
+export const COCS_DEPOT_MIN_ATTACKS = 1;
+export const COCS_DEPOT_OPENING_TICKS = 600;
+export const COCS_DEPOT_MAX_DISTANCE = 90;
+
 const idSort = (a, b) => String(a?.id ?? '').localeCompare(String(b?.id ?? ''));
 
 function hqFor(state, team) {
@@ -293,7 +312,34 @@ export function cocsTeamPlan(match, state, team) {
       place(duty.nodeId, duty.kind);
     }
   }
-  return {roster, duties, slots, cap, maxDefenders, defence, targets, task, holds, deficit, nodeDeficit, comeback, attackCap};
+  // 4. W20 depot weighting: when the squad can spare a body (not trailing, a
+  //    legal attack still mounted, a depot near its own half) the weakest attack
+  //    slot takes the forward depot instead. It keeps its node as the fallback
+  //    push, so once the depot is secured the same bot walks back to the front
+  //    and can pick up the loaner on the way.
+  const depotDuty = cocsDepotDuty(state, actors, team, {roster, duties});
+  let vehicleDuty = null;
+  if (depotDuty) {
+    let replaceIndex = -1;
+    for (let index = slots.length - 1; index >= 0; index--) if (slots[index].kind === 'attack') { replaceIndex = index; break; }
+    if (replaceIndex >= 0) {
+      const fallbackNode = slots[replaceIndex].nodeId;
+      slots[replaceIndex] = {nodeId: fallbackNode, kind: 'depot', depotId: depotDuty.depotId, depotFallback: fallbackNode};
+    }
+  } else {
+    // 4b. W20 vehicle weighting: with the forward depot already ours, one spare
+    //     attacker crews the forward loaner and drives it to the front.
+    vehicleDuty = cocsVehicleDuty(match, state, team, {roster, duties});
+    if (vehicleDuty) {
+      let replaceIndex = -1;
+      for (let index = slots.length - 1; index >= 0; index--) if (slots[index].kind === 'attack') { replaceIndex = index; break; }
+      if (replaceIndex >= 0) {
+        const fallbackNode = slots[replaceIndex].nodeId;
+        slots[replaceIndex] = {nodeId: fallbackNode, kind: 'vehicle', vehicleId: vehicleDuty.vehicleId, vehicleDepotId: vehicleDuty.depotId, depotFallback: fallbackNode};
+      }
+    }
+  }
+  return {roster, duties, slots, cap, maxDefenders, defence, targets, task, holds, deficit, nodeDeficit, comeback, attackCap, depotDuty, vehicleDuty};
 }
 
 // Per-actor assignment. Stable: the actor's position in the id-sorted living
@@ -306,15 +352,34 @@ export function cocsAssignment(match, a, state = match?.objectiveState) {
   if (!plan.slots.length) return {nodeId: null, kind: 'hold', role: 'hold', index: 0, team, plan};
   const index = Math.max(0, plan.roster.findIndex(actor => actor.id === a.id));
   const slot = plan.slots[Math.min(index, plan.slots.length - 1)];
-  return {nodeId: slot.nodeId, kind: slot.kind, role: slot.kind, index, team, plan};
+  return {nodeId: slot.nodeId, kind: slot.kind, role: slot.kind, depotId: slot.depotId ?? null, vehicleId: slot.vehicleId ?? null, depotFallback: slot.depotFallback ?? null, index, team, plan};
 }
 
 // A destination inside the target node's radius. `Match.zoneSlot` places
 // attackers on a ring facing their own spawn (so the two teams meet across the
 // point) and defenders on a defensive ring; reusing it keeps the existing
-// cover/step-up reachability checks.
+// cover/step-up reachability checks. A `depot` slot targets the forward depot
+// until it is ours, then falls back to its node so the same bot returns to the
+// lattice push (and can grab the freshly spawned loaner on the way out).
 export function cocsBotDestination(match, a, assignment, state = match?.objectiveState) {
-  if (!assignment || assignment.nodeId === null || assignment.nodeId === undefined) return null;
+  if (!assignment) return null;
+  if (assignment.kind === 'depot' && assignment.depotId) {
+    const depot = state?.traversal?.depots?.[assignment.depotId];
+    if (depot && depot.owner !== a?.team) {
+      return {x: num(depot.x, 0), y: num(depot.y, 0), z: num(depot.z, 0)};
+    }
+    if (depot) assignment = {...assignment, nodeId: assignment.depotFallback ?? assignment.nodeId};
+  }
+  if (assignment.kind === 'vehicle' && assignment.vehicleId) {
+    const vehicle = match?.vehicles?.find(entry => entry && entry.id === assignment.vehicleId);
+    // While walking to the loaner the destination is the vehicle; once mounted
+    // the same slot routes to the fallback node so the driver takes it forward.
+    if (vehicle && vehicle.health > 0 && a?.vehicleId !== assignment.vehicleId) {
+      return {x: num(vehicle.position?.x, 0), y: num(vehicle.position?.y, 0), z: num(vehicle.position?.z, 0)};
+    }
+    if (vehicle) assignment = {...assignment, nodeId: assignment.depotFallback ?? assignment.nodeId};
+  }
+  if (assignment.nodeId === null || assignment.nodeId === undefined) return null;
   const node = nodeById(state, assignment.nodeId);
   if (!node) return null;
   const zone = {
@@ -344,6 +409,142 @@ function localPresence(actors, node, team, pad) {
     else if (actor.team === 1 - team) hostile++;
   }
   return {friendly, hostile};
+}
+
+// ---------------------------------------------------------------------------
+// W20 tactical traversal choice. Pure and deterministic: given the bot's
+// current destination it returns the one device worth routing through, or null.
+// A device is used only when it saves real travel (or opens a disengage) and
+// its landing is not a defended trap; a dead/cut/locked device is never chosen.
+// `state.traversal.botUse` gates the whole pass, so bot-use-off is byte-identical.
+// ---------------------------------------------------------------------------
+const toDevicePoint = value => {
+  if (!value) return null;
+  const x = Array.isArray(value) ? value[0] : value.x;
+  const z = Array.isArray(value) ? value[1] : value.z;
+  if (!Number.isFinite(Number(x)) || !Number.isFinite(Number(z))) return null;
+  const y = Array.isArray(value) ? value[2] : value.y;
+  return {x: Number(x), z: Number(z), y: Number.isFinite(Number(y)) ? Number(y) : 0, r: Number.isFinite(Number(value.r)) ? Number(value.r) : 5};
+};
+
+function nearestHostile(actors, at, team) {
+  let best = Infinity;
+  for (const actor of actors ?? []) {
+    if (!actor || actor.health <= 0 || actor.team !== 1 - team) continue;
+    best = Math.min(best, Math.hypot((actor.x ?? 0) - at.x, (actor.z ?? 0) - at.z));
+  }
+  return best;
+}
+
+export function cocsTraversalChoice(match, a, destination, state = match?.objectiveState) {
+  const traversal = state?.traversal;
+  if (!traversal || traversal.botUse !== true || !a || !destination) return null;
+  if (a.vehicleId !== null && a.vehicleId !== undefined) return null;
+  if (a.health <= 0) return null;
+  if (num(traversal.cooldowns?.[a.id], 0) > 0) return null;
+  const dest = {x: num(destination.x, 0), z: num(destination.z, 0)};
+  const direct = Math.hypot(dest.x - num(a.x, 0), dest.z - num(a.z, 0));
+  if (!(direct > 1)) return null;
+  const actors = match?.actors ?? [];
+  const team = a.team;
+  const health = num(a.health, 0) / Math.max(1, num(a.maxHealth, 100));
+  const retreating = health <= COCS_DEVICE_RETREAT_HEALTH || num(a.bot?.suppressed, 0) > 0;
+  const hostilesBefore = nearestHostile(actors, {x: num(a.x, 0), z: num(a.z, 0)}, team);
+  let best = null;
+  for (const id of Object.keys(traversal.devices ?? {}).sort()) {
+    const device = traversal.devices[id];
+    if (!device || device.state !== 'live' || !device.from) continue;
+    if (device.kind === 'jump-pad' && a.grounded !== true) continue;
+    const anchor = toDevicePoint(device.from);
+    const landing = toDevicePoint(device.arrival ?? device.target ?? device.to);
+    if (!anchor || !landing) continue;
+    const reach = Math.hypot(anchor.x - num(a.x, 0), anchor.z - num(a.z, 0));
+    const after = Math.hypot(landing.x - dest.x, landing.z - dest.z);
+    const gain = direct - (reach + after);
+    const threshold = Math.max(COCS_DEVICE_MIN_GAIN, direct * COCS_DEVICE_MIN_FRACTION);
+    const presence = localPresence(actors, {x: landing.x, z: landing.z, r: landing.r}, team, COCS_DEVICE_LANDING_PAD);
+    let score = null;
+    // Push: the hop must beat walking and the landing must not be an enemy
+    // ambush — a push hop is only taken when nobody hostile waits on the pad.
+    if (gain >= threshold && reach <= direct + COCS_DEVICE_MAX_DETOUR && presence.hostile === 0) score = gain;
+    if (score === null && retreating && reach <= direct + COCS_DEVICE_MAX_DETOUR) {
+      const hostilesAfter = nearestHostile(actors, {x: landing.x, z: landing.z}, team);
+      if (hostilesAfter > hostilesBefore + COCS_DEVICE_RETREAT_GAIN && hostilesAfter > landing.r + COCS_DEVICE_LANDING_PAD) score = hostilesAfter - hostilesBefore;
+    }
+    if (score === null) continue;
+    if (!best || score > best.score + 1e-9 || (Math.abs(score - best.score) < 1e-9 && id < best.deviceId)) {
+      best = {deviceId: id, kind: device.kind, lane: device.lane ?? null, x: anchor.x, y: anchor.y, z: anchor.z, score, gain, reason: gain >= threshold && score === gain ? 'route' : 'retreat'};
+    }
+  }
+  return best;
+}
+
+// The neutral/enemy forward depots a team could take, best first: value then
+// distance from the team HQ. Only depots near the team's own half qualify, so a
+// squad never crosses the map for a loaner.
+export function cocsDepotTargets(state, actors = [], team) {
+  const traversal = state?.traversal;
+  if (!state || state.kind !== COCS_KIND || !traversal?.depots) return [];
+  const hq = hqFor(state, team) ?? {x: 0, z: 0};
+  const list = [];
+  for (const id of Object.keys(traversal.depots).sort()) {
+    const depot = traversal.depots[id];
+    if (!depot || depot.hq === true) continue;
+    const owner = depot.owner === 0 || depot.owner === 1 ? depot.owner : null;
+    if (owner === team) continue;
+    const distance = Math.hypot(depot.x - hq.x, depot.z - hq.z);
+    if (distance > COCS_DEPOT_MAX_DISTANCE) continue;
+    const value = (owner === null ? 3 : 2) - (depot.contested === true ? 1 : 0);
+    list.push({depot, depotId: id, distance, value, owner, contested: depot.contested === true});
+  }
+  return list.sort((a, b) => (b.value - a.value) || (a.distance - b.distance) || (a.depotId < b.depotId ? -1 : 1));
+}
+
+// One depot duty per team when the squad can spare a body. Never while trailing
+// (the W8 comeback keeps every body on the lattice), never before first contact,
+// and only if the plan still mounts a legal attack.
+export function cocsDepotDuty(state, actors = [], team, plan = null) {
+  const traversal = state?.traversal;
+  if (!state || state.kind !== COCS_KIND || !traversal?.depots) return null;
+  // The whole W20 autopilot is opt-in: with `traversalBotUse` off the squad
+  // keeps the pre-W20 pure-lattice behaviour, so the W7/W8/W10 gates are
+  // untouched by default.
+  if (traversal.botUse !== true) return null;
+  if (cocsDeficit(state, team)) return null;
+  const roster = plan?.roster ?? [];
+  if (roster.length < COCS_DEPOT_MIN_ROSTER) return null;
+  if ((plan?.duties ?? []).filter(duty => duty.kind === 'attack').length < COCS_DEPOT_MIN_ATTACKS) return null;
+  if (num(state.tick, 0) < COCS_DEPOT_OPENING_TICKS) return null;
+  const targets = cocsDepotTargets(state, actors, team);
+  return targets[0] ?? null;
+}
+
+// One vehicle duty per team when a ready loaner exists: a bot walks to the
+// nearest forward-available depot Puma, drives it to its fallback node and
+// dismounts there (the driver-dismount rule in `bots.mjs`). Deterministic and
+// only one body at a time, so it never strips the front.
+export function cocsVehicleDuty(match, state, team, plan = null) {
+  const traversal = state?.traversal;
+  if (!state || state.kind !== COCS_KIND || !traversal?.depots || traversal.botUse !== true) return null;
+  if (cocsDeficit(state, team)) return null;
+  const roster = plan?.roster ?? [];
+  if (roster.length < COCS_DEPOT_MIN_ROSTER) return null;
+  if (num(state.tick, 0) < COCS_DEPOT_OPENING_TICKS) return null;
+  const enemy = hqFor(state, 1 - team) ?? {x: 0, z: 0};
+  const vehicles = match?.vehicles ?? [];
+  let best = null;
+  for (const id of Object.keys(traversal.depots).sort()) {
+    const depot = traversal.depots[id];
+    if (!depot || depot.owner !== team || depot.vehicleId === null || depot.vehicleId === undefined) continue;
+    const vehicle = vehicles.find(entry => entry && entry.id === depot.vehicleId);
+    if (!vehicle || !(vehicle.health > 0) || vehicle.driver !== null) continue;
+    if (num(vehicle.spawnImmunity, 0) > 0) continue;
+    const distance = Math.hypot(depot.x - enemy.x, depot.z - enemy.z);
+    if (!best || distance < best.distance - 1e-9 || (Math.abs(distance - best.distance) < 1e-9 && id < best.depotId)) {
+      best = {vehicleId: vehicle.id, depotId: id, distance, x: num(vehicle.position?.x, depot.x), y: num(vehicle.position?.y, 0), z: num(vehicle.position?.z, depot.z)};
+    }
+  }
+  return best;
 }
 
 // ---------------------------------------------------------------------------

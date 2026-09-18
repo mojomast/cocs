@@ -162,7 +162,12 @@ export function normalizeConfig(value={}){
     const rules=modeRule(mode),minGoal=rules.minFragLimit??(mode==='ctf'?1:5),maxGoal=rules.maxFragLimit??50;
     const checkpointValue=c.checkpoint===null||c.checkpoint===undefined?null:(Number.isFinite(Number(c.checkpoint))&&Number(c.checkpoint)>=0?Math.round(Number(c.checkpoint)):null);
     const normalized={mode,botCount:Math.round(number(c.botCount,DEFAULT_CONFIG.botCount,0,rules.maxBots??8)),difficulty:choice(c.difficulty,DIFFICULTIES.map(d=>d.id),DEFAULT_CONFIG.difficulty),fragLimit:Math.round(number(c.fragLimit,rules.fragLimit??15,minGoal,maxGoal)),timeLimit:Math.round(number(c.timeLimit,rules.timeLimit??300,60,900)),respawn:number(c.respawn,2,1,5),speed:choice(c.speed,[.75,1,1.25,1.5],1),gravity:choice(c.gravity,[.4,.7,1],1),damage:choice(c.damage,[.5,1,1.5,2],1),fastPowers:c.fastPowers===true,lifeSteal:c.lifeSteal===true,unlimitedAmmo:c.unlimitedAmmo===true,suddenDeath:c.suddenDeath===true,randomLoadout:c.randomLoadout===true,oneShot:c.oneShot===true,instagib:c.instagib===true,mirrorLoadout:c.mirrorLoadout===true,bounty:c.bounty===true,berserk:c.berserk===true,bigHead:c.bigHead===true,noRecoil:c.noRecoil===true,endless:c.endless===true,startingWeapon:Math.round(number(c.startingWeapon,0,0,Math.max(0,WEAPONS.length-1))),playerName:typeof c.playerName==='string'?c.playerName.replace(/[\u0000-\u001f\u007f]/g,'').trim().slice(0,20):'',mission:choice(c.mission,CAMPAIGN_MISSION_IDS,DEFAULT_MISSION_ID),loadout:normalizeLoadout(c.loadout),checkpoint:checkpointValue};
-    return {...normalized,mutators:Object.freeze(activeMutators(normalized))};
+    // The LATTICE `objective` override is an authored seam (node/income tuning +
+    // the opt-in `traversalBotUse` flag). It is preserved only when supplied, so
+    // `normalizeConfig(null)` still deep-equals `DEFAULT_CONFIG`. Pure data; a
+    // non-object override is dropped like every other malformed field.
+    const objective=c.objective&&typeof c.objective==='object'&&!Array.isArray(c.objective)?{...c.objective}:null;
+    return {...normalized,...(objective?{objective}:{}),mutators:Object.freeze(activeMutators(normalized))};
 }
 export function normalizeDisplay(value={}){
  const c=value&&typeof value==='object'?value:{};

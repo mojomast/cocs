@@ -1143,6 +1143,24 @@ html, body { overscroll-behavior: none; }
 .cocs-issue:disabled{opacity:.4;cursor:not-allowed}
 .cocs-strip__pending,.cocs-strip__issued{margin:0;font:600 10px var(--font-mono);letter-spacing:.05em;color:var(--text-mute)}
 .cocs-strip__pending{color:#ffe066}
+/* §6A traversal + depot context. Shape + word pairs carry the state; the strip
+   gets one integrated context line and the readout one compact chip block. */
+.cocs-strip__context{margin:0;font:600 10px var(--font-mono);letter-spacing:.05em;color:var(--text-mute);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.cocs-traversal{display:grid;gap:5px;border-top:1px solid var(--border);padding-top:6px}
+.cocs-traversal__channel{margin:0;font:700 10px var(--font-mono);letter-spacing:.05em;color:#ffe066}
+.cocs-traversal__channel b{color:#eafff5}
+.cocs-traversal__list{list-style:none;display:flex;flex-wrap:wrap;gap:4px;margin:0;padding:0}
+.cocs-device,.cocs-depot{display:inline-flex;align-items:baseline;gap:3px;padding:2px 6px;border:1px solid var(--border);border-radius:999px;font:600 10px var(--font-mono);color:var(--text-mute)}
+.cocs-device__mark,.cocs-depot__mark{font-size:11px;line-height:1;color:var(--text-dim)}
+.cocs-device__state{font-size:10px;color:var(--text-dim)}
+.cocs-device--live .cocs-device__mark{color:#7fe3c8}
+.cocs-device--cut .cocs-device__mark{color:#ff9e9e}
+.cocs-device--locked .cocs-device__mark{color:var(--warn-soft,#ffd166)}
+.cocs-depot.is-mine{border-color:var(--accent);color:#eafff5}
+.cocs-depot.is-enemy{border-color:#ff9e9e}
+.cocs-depot.is-contested{border-color:var(--warn-soft,#ffd166)}
+.cocs-device small,.cocs-depot small{color:var(--text-mute);font-size:9px}
+.cocs-traversal__arrival{margin:0;font:600 10px var(--font-mono);letter-spacing:.05em;color:#9fd8ff}
 .radar-spotted__ring{opacity:.9}
 .radar-spotted__mark{opacity:.95}
 @media (prefers-reduced-motion: reduce){.cocs-verb,.cocs-issue,.cocs-picker button{transition:none}}

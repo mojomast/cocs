@@ -1471,10 +1471,11 @@ export class ArenaView{
       // always-visible beacon. Follows the createObjectiveModel/disposeObject
       // lifecycle so nothing leaks on mode change or dispose.
       cocsNodes(match){const input=match?.objectives??match?.objectiveState;return match?.cocs?.nodes??input?.cocs?.nodes??input?.nodes??[];}
-      // V0b traversal markers: id-keyed devices (live/cut/locked) and depots
-      // (owner/contest tinted). Presentation only, reusing the objective-marker
-      // lifecycle; a fuller order-strip/UI is a follow-up.
-      cocsTraversal(match){const input=match?.objectives??match?.objectiveState;const source=match?.cocs?.traversal??input?.traversal??input?.cocs?.traversal;if(!source)return {devices:[],depots:[]};const list=value=>Array.isArray(value)?value:Object.keys(value||{}).map(id=>({id,...value[id]}));return {devices:list(source.devices),depots:list(source.depots)};}
+      // V0b traversal markers: id-keyed devices (live/cut/locked), depots
+      // (owner/contest tinted) and arrival telegraphs. Presentation only,
+      // reusing the objective-marker lifecycle; the order-strip readout is
+      // derived in `cocs-orders.mjs`.
+      cocsTraversal(match){const input=match?.objectives??match?.objectiveState;const source=match?.cocs?.traversal??input?.traversal??input?.cocs?.traversal;if(!source)return {devices:[],depots:[],arrivals:[]};const list=value=>Array.isArray(value)?value:Object.keys(value||{}).map(id=>({id,...value[id]}));const arrivals=(Array.isArray(source.arrivals)?source.arrivals:[]).map(entry=>({...entry,id:entry?.id??`arrival-${entry?.actor}`}));return {devices:list(source.devices),depots:list(source.depots),arrivals};}
       objectiveMarkZones(match){const input=match?.objectives??match?.objectiveState;return input?.kind==='cocs'?(match?.cocs?.nodes??input?.nodes??[]):(input?.zones||[]);}
       styleCocsModel(g,node){
        const archetype=String(node?.archetype??'front');
@@ -1599,6 +1600,21 @@ export class ArenaView{
         g.userData.progress.visible=false;g.userData.beacon.visible=true;
         g.position.set(Number(depot.x)||0,Number(depot.y)||0,Number(depot.z)||0);
         g.userData.identifier=key;g.userData.cocsDepotOwner=owner;
+       }
+       // §6A.3 arrival telegraph: a short blue landing ring where a device just
+       // dropped an actor. Reduced-motion holds a static ring; nobody relies on
+       // the pulse to read the state.
+       for(const arrival of traversal.arrivals){
+        if(!arrival||arrival.telegraph!==true)continue;
+        const key=`traversal:arrival:${arrival.id}`;
+        let g=this.objectiveModels.get(key);
+        if(!g){g=this.createObjectiveModel({id:key,radius:3.4,owner:null,contested:false,progress:0},arena);g.userData.cocsArrival=true;this.objectiveModels.set(key,g);this.worldGroup?.add(g);}
+        active.add(key);
+        for(const mat of [g.userData.baseMat,g.userData.areaMat,g.userData.beaconMat]){mat.color.set('#9fd8ff');mat.emissive?.set('#9fd8ff');}
+        g.userData.progress.visible=false;g.userData.beacon.visible=true;
+        g.position.set(Number(arrival.x)||0,0,Number(arrival.z)||0);
+        g.userData.identifier=key;g.userData.cocsArrivalSeconds=Number(arrival.remaining)||0;
+        g.scale.setScalar(reduced?1:1+Math.sin(time*9+(key.length||0))*.06);
        }
        for(const [key,g] of this.objectiveModels)if(!active.has(key)){this.worldGroup?.remove(g);this.disposeObject(g);this.objectiveModels.delete(key);}
       }

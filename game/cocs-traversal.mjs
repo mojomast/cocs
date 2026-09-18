@@ -26,6 +26,10 @@ const round = (value, places = 3) => {
 // Actor anchor reach for a cut/repair hold, and the §6A.1 stable-hold radius
 // ("no enemy within 6 m of the anchor").
 export const DEVICE_INTERACT_METERS = 6;
+// Auto-use reach for a bot that deliberately routed to a device (the tactical
+// planner posts `bot.cocsDevice`). Looser than the 0.9 m anchor point because a
+// nav route lands *near* the anchor; the intent itself is the safety check.
+export const DEVICE_USE_REACH_METERS = 3;
 
 const point = value => {
  if (!value) return null;
@@ -169,7 +173,7 @@ export function createTraversalState(arena, options = {}) {
 export function applyArrivalProtection(traversal, actor, tick = 0) {
  if (!actor || !traversal) return null;
  const protection = arrivalProtection();
- traversal.arrivals[actor.id] = {actor: actor.id, ...protection, atTick: tick};
+ traversal.arrivals[actor.id] = {actor: actor.id, ...protection, atTick: tick, x: num(actor.x, 0), y: num(actor.y, 0), z: num(actor.z, 0)};
  actor.cocsArrival = {...protection};
  traversal.stats.arrivals = num(traversal.stats.arrivals, 0) + 1;
  return protection;
@@ -322,6 +326,24 @@ function tryDeviceUse(match, traversal) {
   for (const actor of [...(match?.actors ?? [])].filter(Boolean).sort((a, b) => a.id - b.id)) {
    if (actor.health <= 0 || (actor.team !== 0 && actor.team !== 1)) continue;
    if (!actor.bot) continue;
+   const intent = actor.bot.cocsDevice;
+   // The tactical planner (`cocsTraversalChoice`) is authoritative: it posts an
+   // id only for a device it deliberately routed the bot through, and `null`
+   // means "stay off devices" (a live-but-tactically-poor option). Only an
+   // unplanned bot — no field at all — keeps the legacy arm-then-fire path the
+   // direct engine tests drive.
+   if (intent === null) continue;
+   if (intent !== undefined) {
+    if (intent !== device.id) continue;
+    if (!(distance(actor, device.from) <= DEVICE_USE_REACH_METERS)) continue;
+    if (useDeviceInternal(match, traversal, device, actor)) {
+     actor.bot.cocsDevice = null;
+     actor.bot.deviceUses = num(actor.bot.deviceUses, 0) + 1;
+     nextNear[`${actor.id}`] = device.id;
+     break;
+    }
+    continue;
+   }
    if (!(distance(actor, device.from) <= TRAVERSAL.anchorReachMeters)) continue;
    const key = `${actor.id}`;
    if (traversal.near[key] !== device.id) { nextNear[key] = device.id; continue; }
@@ -544,7 +566,7 @@ export function cocsTraversalSnapshot(state) {
    x: num(device.from?.x, 0),
    z: num(device.from?.z, 0),
    to: {x: num((device.target ?? device.to)?.x, 0), z: num((device.target ?? device.to)?.z, 0)},
-   channel: device.channel ? {actor: device.channel.actor, action: device.channel.action, remaining: round(device.channel.remaining)} : null,
+   channel: device.channel ? {actor: device.channel.actor, action: device.channel.action, remaining: round(device.channel.remaining), total: round(device.channel.total)} : null,
   };
  });
  const depots = sortedStrings(traversal.depots).map(id => {
@@ -552,6 +574,7 @@ export function cocsTraversalSnapshot(state) {
   return {
    id,
    lane: depot.lane,
+   hq: depot.hq === true,
    x: depot.x,
    z: depot.z,
    owner: depot.owner,
@@ -560,6 +583,6 @@ export function cocsTraversalSnapshot(state) {
    vehicle: {id: depot.vehicleId, health: num(depot.vehicleHealth, 0), respawn: round(depot.respawn)},
   };
  });
- const arrivals = sortedIds(traversal.arrivals).map(id => ({actor: id, remaining: round(traversal.arrivals[id].remaining), telegraph: traversal.arrivals[id].telegraph === true}));
+ const arrivals = sortedIds(traversal.arrivals).map(id => ({actor: id, remaining: round(traversal.arrivals[id].remaining), telegraph: traversal.arrivals[id].telegraph === true, x: num(traversal.arrivals[id].x, 0), z: num(traversal.arrivals[id].z, 0)}));
  return {tick: num(traversal.tick, 0), devices, depots, arrivals, stats: {...traversal.stats}};
 }

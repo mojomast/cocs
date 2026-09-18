@@ -38,7 +38,7 @@ export function SpectatorBoard({groups=[],objective,onFollow}:{groups?:any[];obj
 // colour; the animation-free markup is reduced-motion safe.
 function CocsReadout({command,teamName}:{command:any;teamName:(team:any)=>string}){
  if(!command)return null;
- const {board,economy,strip,scanTarget}=command;
+ const {board,economy,strip,scanTarget,traversal}=command;
  if(!board||!strip)return null;
  const amount=(value:any)=>Number.isFinite(Number(value))?String(Math.round(Number(value)*10)/10):'0';
  const whole=(value:any)=>Number.isFinite(Number(value))?String(Math.round(Number(value))):'0';
@@ -82,10 +82,21 @@ function CocsReadout({command,teamName}:{command:any;teamName:(team:any)=>string
    </div>
    {spots.length>0&&<div className="cocs-spots" role="group" aria-label={`${spots.length} enemies spotted`}><span className="eyebrow">SPOTTED</span>{spots.map((spot:any)=><span key={spot.id} className="cocs-spot-chip" aria-label={`Enemy ${spot.id} spotted for ${spot.remainingSeconds} seconds`}>◈ {spot.remainingSeconds}s</span>)}</div>}
   </div>
+  {traversal&&(traversal.deviceCount>0||traversal.depotCount>0)&&<div className="cocs-traversal" role="group" aria-label="Traversal devices and depots">
+   {traversal.channel&&<p className="cocs-traversal__channel" role="status" aria-live="polite"><span aria-hidden="true">{traversal.channelDevice?.mark}</span> {traversal.channel.label} {traversal.channelDevice?.label} · {traversal.channel.remainingSeconds}s <b>{Math.round((traversal.channel.percent??0)*100)}%</b></p>}
+   {traversal.deviceCount>0&&<ul className="cocs-traversal__list" aria-label="Devices">
+    {traversal.devices.map((device:any)=><li key={device.id} className={`cocs-device cocs-device--${device.state}`} aria-label={`${device.label} ${device.stateLabel}${device.timerSeconds>0?`, ${device.timerSeconds} seconds remaining`:''}${device.channel?`, ${device.channel.label}`:''}`}><span className="cocs-device__mark" aria-hidden="true">{device.mark}</span><span className="cocs-device__state" aria-hidden="true">{device.stateMark}</span> {device.stateLabel}</li>)}
+   </ul>}
+   {traversal.depotCount>0&&<ul className="cocs-traversal__list" aria-label="Depots">
+    {traversal.depots.map((depot:any)=><li key={depot.id} className={`cocs-depot${depot.mine?' is-mine':''}${depot.enemy?' is-enemy':''}${depot.contested?' is-contested':''}`} aria-label={`${depot.label} ${depot.ownerLabel}${depot.capturePercent>0?`, ${depot.capturePercent} percent captured`:''}. Loaner ${depot.vehicle.state}`}><span className="cocs-depot__mark" aria-hidden="true">{depot.mark}</span> {depot.ownerLabel}{depot.capturePercent>0?` ${depot.capturePercent}%`:''} <small>LOANER {depot.vehicle.state}</small></li>)}
+   </ul>}
+   {traversal.arrivalActive&&<p className="cocs-traversal__arrival" role="status">ARRIVAL PROTECTION · {traversal.arrivalSeconds}s</p>}
+  </div>}
   <div className="cocs-strip" role="group" aria-label="Order strip. Arm a verb, pick a node, then issue.">
    <div className="cocs-strip__verbs">
     {strip.buttons.map((button:any)=><button key={button.id} type="button" className={`cocs-verb${button.armed?' is-armed':''}${button.disabled?' is-disabled':''}`} aria-pressed={button.armed} disabled={button.disabled} title={button.disabled?`${button.label} unavailable: ${button.reason}`:button.hint} onClick={()=>command.armCocsVerb(button.id)}>{button.label}</button>)}
    </div>
+   {traversal&&<p className="cocs-strip__context" role="status"><span aria-hidden="true">◈</span> {traversal.context}</p>}
    <p className="cocs-strip__prompt" role="status" aria-live="polite">{strip.armedLabel&&!strip.targetLabel?`${strip.armedLabel} · PICK A NODE`:strip.armedLabel&&strip.targetLabel?`${strip.armedLabel} → ${strip.targetLabel}`:'ARM AN ORDER'}{strip.notice&&<span className="cocs-strip__notice">{strip.notice}</span>}</p>
    {strip.nodes.length>0&&<ul className="cocs-picker">{strip.nodes.map((node:any)=><li key={node.id}><button type="button" aria-pressed={strip.target===node.id} onClick={()=>command.pickCocsTarget(node.id)}><span className="cocs-picker__index">{node.index}</span><span aria-hidden="true">{node.mark}</span> {node.label} <small>{node.ownerLabel}</small></button></li>)}</ul>}
    <button type="button" className="cocs-issue" disabled={!strip.canIssue} onClick={()=>command.issueCocsOrder()} aria-label={strip.armedLabel?`Issue ${strip.armedLabel} order${strip.targetLabel?` on ${strip.targetLabel}`:''}`:'Issue order'}>{strip.armedLabel?`ISSUE ${strip.armedLabel}`:'ISSUE'}</button>

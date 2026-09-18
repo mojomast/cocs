@@ -22,6 +22,7 @@
 //   node scripts/cocs-validate.mjs
 //   SEEDS=1,2,3,4,5,6 SECS=600 node scripts/cocs-validate.mjs
 //   POLICY=off node scripts/cocs-validate.mjs          # disable the bot policy
+//   TRAVERSAL=on node scripts/cocs-validate.mjs        # W20 tactical device/depot autopilot
 //   MAP=lattice-slice MODE=cocs node scripts/cocs-validate.mjs
 import {pathToFileURL} from 'node:url';
 import {Match} from '../game/core.mjs';
@@ -36,6 +37,9 @@ export function run(seed, { seconds = 600, players = 8, mapId = 'lattice-slice',
     mode, botCount: players - 1, humanCount: 1, aiSeats: true, difficulty: 'normal', timeLimit: seconds, fragLimit: 9999,
   };
   if (process.env.POLICY === 'off') options.cocsPolicy = () => [];
+  // W20: the tactical traversal autopilot is opt-in. `TRAVERSAL=on` turns it on
+  // so the gate table can be compared on vs off in one receipt.
+  if (process.env.TRAVERSAL === 'on') options.objective = {traversalBotUse: true};
   const m = new Match('chatgpt', 'openclaw', seeded(seed), mapId, options);
   m.pickups = [];
   const total = Math.round(seconds / DT);
@@ -96,7 +100,7 @@ export function run(seed, { seconds = 600, players = 8, mapId = 'lattice-slice',
     depotCaptures: traversal.depotCaptures ?? 0,
   };
   return {
-    seed, seconds, ticks, over: m.over, overReason: m.overReason || null,
+    seed, seconds, ticks, over: m.over, overReason: m.overReason || null, botUse: options.objective?.traversalBotUse === true,
     strict: ticks ? contest / ticks : 0,
     fightPoint: ticks ? fight / ticks : 0,
     multiFront: ticks ? multi / ticks : 0,
