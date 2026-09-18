@@ -10,6 +10,8 @@ deterministic, offline, and free of new runtime dependencies.
 - `assets/moth/manifest.json` — the list of jobs to run (engine, params, inputs,
   and how to turn each result into game data).
 - `game/moth-assets.mjs` — the pure runtime reader the game imports.
+- `game/moth-audio.mjs` — the Web Audio bank/player for baked beds, spaces and
+  stingers (lazy, inert without an `AudioContext`).
 - `game/moth-maps.mjs` — turns a baked quantum labyrinth graph into a playable
   arena.
 - `game/moth-baked.mjs` — generated; do not edit by hand.
@@ -33,8 +35,10 @@ If a key is ever pasted into a shared surface, rotate it at
 # Show the engine catalog and the credit cost per run.
 MOTH_API_KEY=... node scripts/moth-bake.mjs catalog
 
-# Generate the local source art that image engines consume.
-MOTH_API_KEY=... node scripts/moth-bake.mjs sources
+# Generate the local source art and seed audio that engines consume. This is
+# free and deterministic: no key and no credits (writes sources/bed-seed.wav
+# for qrc-audio via makeSourceAudio).
+node scripts/moth-bake.mjs sources
 
 # Run every enabled job in the manifest and rewrite game/moth-baked.mjs.
 MOTH_API_KEY=... node scripts/moth-bake.mjs run
@@ -42,6 +46,11 @@ MOTH_API_KEY=... node scripts/moth-bake.mjs run
 # Re-run a single job, or force a fresh submission (otherwise it reuses the
 # recorded job id / looks for an existing result).
 MOTH_API_KEY=... node scripts/moth-bake.mjs run --only blur-panel --force
+
+# Rebuild the purely local records (`ir`, `echo-map`) from the raw results
+# already committed under public/moth/files — offline, no key, no credits. This
+# is how the cavern tap map was repaired after the shallow-extraction bug.
+node scripts/moth-bake.mjs repair [--only ir-cavern]
 ```
 
 The first successful run of a job records its `jobId` back into the manifest, so
@@ -77,6 +86,8 @@ Decoders are dependency-free: PNG (filters 0–4, truecolour/palette, 8-bit), ZI
 | `level-graph` | inline JSON | a compact room grid: size, coupling, cell states, metrics |
 | `motif` | MIDI | flattened note steps from a reservoir-reordered melody |
 | `ir` | WAV (+ taps JSON) | a same-origin impulse-response descriptor for convolution reverb |
+| `audio-clip` | WAV | a trimmed/resampled/normalised bed or stinger descriptor (`url`, `seconds`, `sampleRate`, `channels`, `loopStart`, `loopEnd`, `gain`); the processed WAV is written next to the raw result, never embedded |
+| `echo-map` | trajectory JSON | a compact tap map (`spaces.*`) for a delay/feedback space, read recursively from `extras.taps` / `extras.tap_map.taps` / `data.extras.taps` |
 | `seed` | inline JSON | random bytes, a uint32 seed, and the entropy witness |
 
 ## Engines and game use
@@ -90,10 +101,11 @@ Decoders are dependency-free: PNG (filters 0–4, truecolour/palette, 8-bit), ZI
 | `tessa-image-v1` | 1 | sphere-encoded PNG (≤64×64) | palette-quantized albedo overrides |
 | `blur-core-v1` | 1 | blurred N-D grid JSON | **bump/normal maps and animated effects** (`normals.*`, `effects.*`) |
 | `retrocausal-echo-v1` | 2 | WAV impulse response | **convolution reverb** for the soundtrack (`irs.*`) |
+| `otoc-echo-v1` | 1 | trajectory JSON | **tap maps** (`spaces.*`) driving a delay/feedback space |
 | `qrc-midi-v1` / `blur-midi-v1` | 5 / 1 | MIDI | **motif data** for the soundtrack (`motifs.*`) |
 | `comet-qrng-v1` | 5 | random bytes + entropy certificate | provably-fair seeds |
 | `qrc-image-v1` | 5 | animated GIF | animated textures, loading art |
-| `qrc-audio-v1` | 5 | WAV | ambient beds, echo tails |
+| `qrc-audio-v1` | 5 | WAV | ambient beds, stingers and room-tone (`audio.*`) |
 
 `mode: "emu"` runs on the Aer simulator (no QPU access needed). Real-hardware
 runs use the top-level `mode: "qpu"` plus `backend_name`/`qpu_token`, cost more,
@@ -163,7 +175,7 @@ accessor returns `null` and the game falls back to its procedural generators.
 ```js
 import { configureMothAssets, mothAssetsStatus } from './game/moth-assets.mjs';
 configureMothAssets();               // defaults to the generated MOTH_BAKED
-mothAssetsStatus();                  // { active, version, textures, normals, materials, sky, effects, levels, seeds, motifs, irs }
+mothAssetsStatus();                  // { active, version, textures, normals, materials, sky, effects, levels, seeds, motifs, irs, audio, spaces }
 
 mothSurfaceOverride('weathered_concrete'); // albedo { width, height, data } | null
 mothNormalOverride('rock');                // baked normal map | null
@@ -171,7 +183,11 @@ mothMaterialLut('entanglement');           // { size, r, t } | null
 mothSky('nebula');                         // equirect { width, height, data } | null
 mothEffect('quantum-rift');                // { fps, frames:[{width,height,data}] } | null
 mothIr('cavern');                          // { url, seconds, sampleRate, channels, taps } | null
-                                           // also: open-air, tunnel, hall, cathedral
+                                           // also: open-air, tunnel, hall, cathedral, cavern, void
+mothAudioClip('bed-ritual');               // { url, seconds, sampleRate, channels, loopStart, loopEnd, gain } | null
+mothAudioNames();                          // ['bed-ritual', ...]
+mothEchoMap('arena');                      // { lattice, sites, depth, seed, count, taps } | null
+mothEchoMapNames();                        // ['arena', ...]
 mothMotif('moth-oracle');                  // { bpm, notes:[{step,midi,dur,vel}] } | null
 mothLevel('moth-backrooms');               // graph copy | null
 mothSeed('moth-daily');                    // { seed, hex, bytes(), bell, certificate } | null
@@ -187,6 +203,40 @@ mothProvenance();                          // which engine/job produced each ass
 - `MATERIAL_PRESETS.entanglement` plus `mothMaterialLutTexture(name)` expose the
   iridescent LUTs; `game/moth-material.mjs` (`createMothLutMaterial`) builds a
   `MeshStandardMaterial` that samples the LUT by Fresnel, and is unit-tested.
+
+## Moth audio playback (`game/moth-audio.mjs`)
+
+The baked `audio.*` beds and `spaces.*` echo maps are played through a small Web
+Audio layer that mirrors the sampled bank's contract: lazy `fetch` +
+`decodeAudioData`, one in-flight decode per clip, remembered failures, a decoded
+bytes budget with oldest-first eviction, and loop points applied with
+`AudioBufferSourceNode.loopStart/loopEnd`.
+
+```js
+import { MothAudioBank, MothAudio } from './game/moth-audio.mjs';
+const bank = new MothAudioBank({ ctx });                       // ctx = AudioContext
+const moth = new MothAudio({ ctx, bank, destinations: { ambience: syn.ambienceBus, effects: syn.effectsBus } });
+await bank.preloadGroup(moth.desiredBeds());                   // per-scene preload
+moth.setScene('game').setIntensity(0.6).setBedMood('storm');   // fixed, deterministic routing
+moth.setSpace('arena');                                        // loads an echo map
+moth.playStinger('sting-victory', { duck: 0.5 });
+// once per frame: moth.tick();
+```
+
+- **Inert by default.** With no `AudioContext`, on reduced motion, before a clip
+  has decoded, or with `enabled: false`, every method is a no-op and the
+  procedural SFX, `MusicEngine`, and the CC0 sampled orchestra sound exactly as
+  they do today.
+- **Bounded.** At most `maxBeds` (3) looped beds are resident; oldest-first
+  eviction fades and stops the oldest. The bank enforces a 12 MiB decoded-audio
+  budget (`maxBytes`).
+- **Deterministic.** Bed selection is a fixed scene/mood/weather table
+  (`MOTH_SCENE_BEDS`/`MOTH_MOOD_BEDS`/`MOTH_WEATHER_BEDS`), never `Math.random`.
+- **Additive wiring.** `SynthAudio.setMothAudio(instance)` attaches a layer and
+  forwards `setScene`/`setIntensity`/`setBedMood`, `tick()` and disposal through
+  guarded calls. The layer is never constructed by `SynthAudio` itself, so the
+  music work on `feat/music-sampler` is untouched; `audioStatus().moth` reports
+  the attached layer's status.
 
 ## Moth soundtrack (`game/music.mjs`)
 
@@ -269,6 +319,25 @@ tread crosshatch), `weave` (`cells`: 2x2 carbon twill), `mesh` (`cells`:
 expanded-metal slit lattice) and `stars` (`cloudFreq`, `starDensity`: equirect
 star band for skies). Shared knobs: `seed`, `size`, `wide`, `palette`,
 `contrast`, `freq`.
+
+`makeSourceAudio` renders the deterministic, original mono seed WAV that
+`qrc-audio-v1` consumes (`sources/bed-seed.wav`) — the audio analogue of
+`makeSourceArt`. Kinds are `drone` (a slowly evolving partial stack with soft
+pulses; the default), `noise` (a smoothed noise bed) and `pulse` (decaying
+periodic pulses); shared knobs are `seconds`, `sampleRate`, `seed`,
+`sampleFormat` and `fadeSeconds`, plus kind-specific ones. It is a pure function
+of the spec, so the seed is free, committed and reproducible.
+
+`audio-clip` writes its processed WAV next to the raw result and records a
+descriptor (`url`, `seconds`, `sampleRate`, `channels`, `loopStart`, `loopEnd`,
+`gain`) rather than base64, so beds never bloat `game/moth-baked.mjs`. Set
+`embed: true` only for tiny cues. Useful bake options: `trim`/`threshold`/`pad`,
+`trimStart`/`trimEnd`, `mixdown`, `maxChannels`, `targetSampleRate`,
+`maxSeconds`, `normalize`/`peak`, `gain`, `loopStart`/`loopEnd`, `detectLoop`
+with `loopSearch`/`loopWindow`/`loopThreshold`, `loopCrossfade`, `url`/`urlBase`
+and `meta` (routing hints). `echo-map` reads the same envelopes recursively and
+emits `{ lattice, sites, depth, seed, count, taps }` into the `spaces` bucket
+with `maxTaps`/`includeZ`.
 
 blur-core-v1 never receives a grid through the manifest; `generateValues`
 synthesizes one so the job stays deterministic and offline: `height`

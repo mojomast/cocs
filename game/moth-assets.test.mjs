@@ -4,6 +4,7 @@ import {
   configureMothAssets, resetMothAssets, mothAssetsStatus,
   mothSurfaceOverride, mothTextureNames, mothMaterialLut, mothMaterialNames,
   mothLevel, mothLevelNames, mothSeed, mothSeedNames, mothMotif, mothProvenance,
+  mothAudioClip, mothAudioNames, mothEchoMap, mothEchoMapNames,
 } from './moth-assets.mjs';
 
 const b64 = (bytes) => Buffer.from(bytes).toString('base64');
@@ -109,4 +110,40 @@ test('a malformed configuration degrades to inert rather than throwing', () => {
   configureMothAssets({ version: 1, textures: { broken: { width: 1, height: 1, data: null } } });
   assert.equal(mothSurfaceOverride('broken'), null, 'undecodable base64 yields null');
   resetMothAssets();
+});
+
+test('audio clips and echo maps are exposed as isolated copies', () => {
+  resetMothAssets();
+  assert.equal(mothAudioClip('bed-ritual'), null);
+  assert.equal(mothEchoMap('arena'), null);
+  assert.deepEqual(mothAudioNames(), []);
+  assert.deepEqual(mothEchoMapNames(), []);
+
+  configureMothAssets({
+    version: 3,
+    audio: { 'bed-ritual': { url: '/moth/files/bed-ritual/clip.wav', seconds: 11.5, sampleRate: 22050, channels: 1, loopStart: 0.5, loopEnd: 11.5, gain: 0.9 } },
+    spaces: { arena: { lattice: 'square', sites: 20, depth: 8, seed: 12345, count: 1, taps: [{ site: 0, depth: 4, level: 0.9, timeMs: 120 }] } },
+  });
+  try {
+    const status = mothAssetsStatus();
+    assert.equal(status.audio, 1);
+    assert.equal(status.spaces, 1);
+    assert.deepEqual(mothAudioNames(), ['bed-ritual']);
+    assert.deepEqual(mothEchoMapNames(), ['arena']);
+
+    const clip = mothAudioClip('bed-ritual');
+    assert.equal(clip.url, '/moth/files/bed-ritual/clip.wav');
+    assert.deepEqual([clip.loopStart, clip.loopEnd], [0.5, 11.5]);
+    clip.loopStart = 99;
+    assert.equal(mothAudioClip('bed-ritual').loopStart, 0.5, 'mutating a returned clip does not touch the registry');
+    assert.equal(mothAudioClip('missing'), null);
+
+    const map = mothEchoMap('arena');
+    assert.equal(map.count, 1);
+    map.taps[0].site = 99;
+    assert.equal(mothEchoMap('arena').taps[0].site, 0, 'mutating a returned map does not touch the registry');
+    assert.equal(mothEchoMap('missing'), null);
+  } finally {
+    resetMothAssets();
+  }
 });
