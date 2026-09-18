@@ -334,6 +334,62 @@ export function cocsEconomyView(snapshot, player) {
 }
 
 /**
+ * OPERATIONS Director read model (design §6.4). Pure view of `snapshot.director`
+ * plus `snapshot.waves`/`snapshot.command`; null in PvPvE `cocs` so the same
+ * `CocsReadout` stays mode-isolated and the new component only appears in co-op.
+ */
+export function cocsDirectorView(snapshot) {
+  if (!snapshot || typeof snapshot !== 'object' || snapshot.coop !== true) return null;
+  const director = snapshot.director;
+  if (!director || typeof director !== 'object') return null;
+  const siege = director.siege ?? {};
+  const waves = snapshot.waves ?? {};
+  const command = snapshot.command ?? null;
+  const fronts = Array.isArray(director.fronts) ? director.fronts : [];
+  return {
+    coop: true,
+    tier: director.tier ?? 'D1',
+    tierLabel: director.tierLabel ?? '',
+    phase: director.phase ?? 'intermission',
+    wave: num(director.wave, 0),
+    waveCount: num(director.waveCount, 5),
+    waveLabel: director.waveLabel ?? '',
+    modifier: director.modifier ?? null,
+    budget: {
+      current: num(director.budget?.current, 0),
+      spent: num(director.budget?.spent, 0),
+      rate: num(director.budget?.rate, 0),
+      cap: num(director.budget?.cap, 0),
+      peak: num(director.budget?.peak, 0),
+    },
+    pressure: num(director.pressure, 0),
+    fronts: fronts.map(front => ({nodeId: front.nodeId, strength: num(front.strength, 0)})),
+    telegraph: director.telegraph ? {kind: director.telegraph.kind, nodeId: director.telegraph.nodeId ?? null, seconds: num(director.telegraph.seconds, 0)} : null,
+    boss: director.boss ? {actorId: director.boss.actorId, type: director.boss.type, phase: num(director.boss.phase, 1)} : null,
+    retarget: director.retarget ? {nodeId: director.retarget.nodeId, reason: director.retarget.reason} : null,
+    secondsRemaining: num(director.secondsRemaining, 0),
+    siege: {
+      armed: siege.armed === true,
+      hqId: siege.hqId ?? 'hq-0',
+      health: num(siege.health, 0),
+      max: num(siege.max, 1),
+      percent: Math.max(0, Math.min(1, num(siege.percent, siege.max ? num(siege.health, 0) / siege.max : 0))),
+      attackers: num(siege.attackers, 0),
+      defenders: num(siege.defenders, 0),
+      damage: num(siege.damage, 0),
+      repairs: num(siege.repairs, 0),
+    },
+    waves: {cleared: num(waves.cleared, 0), par: num(waves.par, 5), forceAlive: num(waves.forceAlive, 0), forceTotal: num(waves.forceTotal, 0)},
+    command: command ? {
+      humans: num(command.humans, 0),
+      slicePerPlayer: num(command.slicePerPlayer, 0),
+      executor: command.executor ?? null,
+      threads: {used: num(command.threads?.used, 0), cap: num(command.threads?.cap, 0)},
+    } : null,
+  };
+}
+
+/**
  * Fold the board, snapshot, player and strip state into the single object
  * `CocsReadout` renders. Returns null outside cocs (mode isolation). `board` is
  * `cocsBoard(hud, player)` so the HUD derivation stays in one place.
@@ -360,5 +416,6 @@ export function cocsCommandView(board, snapshot, player, strip) {
     spots: economy?.spots ?? [],
     scanTarget: {nodeId: scanNode ?? null, label: scanLabel, active: economy?.scan?.active === true},
     strip: view,
+    director: cocsDirectorView(snapshot),
   };
 }

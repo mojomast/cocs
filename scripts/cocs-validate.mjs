@@ -25,6 +25,7 @@
 //   MAP=lattice-slice MODE=cocs node scripts/cocs-validate.mjs
 import {pathToFileURL} from 'node:url';
 import {Match} from '../game/core.mjs';
+import {setCoopTier} from '../game/cocs-coop.mjs';
 
 const DT = 1 / 60;
 const seeded = seed => { let n = seed >>> 0; return () => ((n = (Math.imul(n, 1664525) + 1013904223) >>> 0) / 4294967296); };
@@ -105,6 +106,57 @@ export function run(seed, { seconds = 600, players = 8, mapId = 'lattice-slice',
   };
 }
 
+// OPERATIONS (`cocs-coop`) acceptance harness. A first-time team is simulated
+// with `aiSeats:true` "human" seats driven by the duty Chief; team 1 is the
+// persistent garrison plus the Director wave force. Reports the D1 wave-5 win
+// rate, per-wave durations, HQ siege activity and the step p95 at 24 actors.
+export function runCoop(seed, {seconds = 900, tier = 'D1', humans = 4, bots = 2, mapId = 'lattice-slice'} = {}) {
+  const m = new Match('chatgpt', 'openclaw', seeded(seed), mapId, {
+    mode: 'cocs-coop', humanCount: humans, botCount: bots, aiSeats: true, timeLimit: seconds,
+  });
+  if (tier && tier !== 'D1') setCoopTier(m.objectiveState, tier);
+  const total = Math.round(seconds / DT);
+  const samples = [];
+  let ticks = 0;
+  for (let i = 0; i < total && !m.over; i++) {
+    const t0 = process.hrtime.bigint();
+    m.step(DT, {inputs: {}});
+    samples.push(Number(process.hrtime.bigint() - t0) / 1e6);
+    ticks++;
+  }
+  samples.sort((a, b) => a - b);
+  const p95 = samples.length ? samples[Math.min(samples.length - 1, Math.floor(samples.length * 0.95))] : 0;
+  const st = m.objectiveState, coop = st.coop;
+  return {
+    seed, tier, seconds, ticks, over: m.over, overReason: m.overReason || null, winner: st.winner ?? null,
+    wavesCleared: coop.wavesCleared, waveCount: coop.waveCount, win: m.overReason === 'operation-complete',
+    waveDurations: coop.stats.waveDurations.map(d => Math.round(d * 10) / 10),
+    peakPressure: Math.round(coop.stats.peakPressure * 10) / 10,
+    hqDamage: Math.round(coop.stats.hqDamage), hqRepairs: Math.round(coop.stats.hqRepairs),
+    siege: coop.siege.armed === true, spawns: coop.stats.spawns,
+    stepP95Ms: Math.round(p95 * 1000) / 1000, actors: m.actors.length,
+  };
+}
+
+export function summariseCoop(runs) {
+  const wins = runs.filter(r => r.win).length;
+  const byReason = runs.reduce((acc, r) => { const k = r.overReason ?? 'clock'; acc[k] = (acc[k] ?? 0) + 1; return acc; }, {});
+  const maxStepP95Ms = Math.max(0, ...runs.map(r => r.stepP95Ms || 0));
+  const avgWaves = runs.length ? runs.reduce((a, r) => a + r.wavesCleared, 0) / runs.length : 0;
+  return {
+    gate: {d1Wave5WinRate: '35-65%', stepP95: '<=8ms @24 actors'},
+    result: {
+      sample: runs.length,
+      wins,
+      winRate: `${runs.length ? ((wins / runs.length) * 100).toFixed(1) : '0.0'}%`,
+      avgWavesCleared: avgWaves.toFixed(2),
+      byReason,
+      maxStepP95Ms,
+    },
+    runs,
+  };
+}
+
 export function summarise(runs) {
   const avg = k => (runs.length ? runs.reduce((a, r) => a + r[k], 0) / runs.length : 0);
   const decided = runs.filter(r => r.winner !== null);
@@ -170,6 +222,14 @@ if (invokedDirectly) {
   const seconds = Number(process.env.SECS || 600);
   const mapId = process.env.MAP || 'lattice-slice';
   const mode = process.env.MODE || 'cocs';
-  const runs = seeds.map(seed => run(seed, { seconds, mapId, mode }));
-  console.log(JSON.stringify(summarise(runs), null, 2));
+  if (mode === 'cocs-coop') {
+    const tier = (process.env.TIER || 'D1').toUpperCase();
+    const humans = Number(process.env.HUMANS || 4);
+    const bots = Number(process.env.BOTS || 2);
+    const runs = seeds.map(seed => runCoop(seed, {seconds: Number(process.env.SECS || 900), tier, humans, bots, mapId}));
+    console.log(JSON.stringify(summariseCoop(runs), null, 2));
+  } else {
+    const runs = seeds.map(seed => run(seed, { seconds, mapId, mode }));
+    console.log(JSON.stringify(summarise(runs), null, 2));
+  }
 }

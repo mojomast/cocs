@@ -8,6 +8,7 @@ import {abilityRing,movementHud} from '../../../game/hud-class.mjs';
 import {MOVEMENT_VERBS} from '../../../game/kits.mjs';
 import {harnessAbility} from '../../../game/harness-profiles.mjs';
 import {wingChip} from '../../../game/class-ui.mjs';
+import {OperationsDirectorHud} from './OperationsDirectorHud';
 
 const FRAG_COOLDOWN=7;
 
@@ -129,6 +130,7 @@ export function PlayingHud({ui}:ScreenProps){
   return <div className={`game-hud${hud.spectate&&hideHud?' hide-hud':''}${touchControls&&!hud.spectate?' touch-mode':''}`}>
   <div className="match-top" role="region" aria-label="Live match status"><div className="match-context"><span className="eyebrow">{hud.mapName?.toUpperCase()} / {hudRoute}</span><strong>{hud.modeName?.toUpperCase()}</strong><small className="phase-label">PHASE / {phase}</small>{isTeamMode(hudMode)&&<small className="team-label">{teamName(player.team)} TEAM · {hud.spectate?'FOLLOWING':'YOU'}</small>}</div><div className="match-clock" aria-label={`${hud.spectate?'Spectating':`${clock(hud.config.timeLimit-hud.time)} remaining`}`}><strong>{hud.spectate?'SPECTATING':clock(hud.config.timeLimit-hud.time)}</strong><small>{hud.net?'NETWORK MATCH':hud.config.botCount===0?'SOLO PRACTICE':isSingle?`FIRST TO ${hud.config.fragLimit} ${modeGoal(hudMode).toLowerCase()}`:''}</small></div><div className="frag-counter"><strong>{armsrace?ladderStatus(player,WEAPONS.length).rung+1:isTeamMode(hudMode)?teamScoreText(hud.teamScores??hud.teams)||player.frags:player.frags}<span>{hud.spectate?'':` / ${armsrace?WEAPONS.length:hud.config.fragLimit}`}</span></strong><small>{hud.spectate?`FOLLOWING ${player.name.toUpperCase()}`:armsrace?'LADDER RUNG':isTeamMode(hudMode)?modeGoal(hudMode):'YOUR FRAGS'}</small></div></div>
   {cocsCommand&&!hud.spectate&&<CocsReadout command={cocsCommand} teamName={teamName}/>}
+  {cocsCommand?.director&&!hud.spectate&&<OperationsDirectorHud director={cocsCommand.director}/>}
   {hud.spectate&&hud.net&&runtime.current&&<button type="button" className="spectator-return" onClick={()=>changeMode('lobby')}>RETURN TO LOBBY</button>}
   {hud.spectateLocal&&runtime.current&&<div className="spectate-cam-panel" role="status"><span className="eyebrow">SPECTATE BOTS</span><strong>{(CAMERA_MODE_LABELS as any)[runtime.current?.cameraMode]||String(runtime.current?.cameraMode||'auto').toUpperCase()}</strong><small>B CYCLE CAMERA · [ / ] FOLLOW BOT · F FREE CAM{runtime.current?.cameraMode==='free'?' · WASD / SPACE / SHIFT / CTRL':''}</small></div>}
   {isSingle&&<SinglePlayerHud single={single} onSelectUpgrade={selectHordeUpgrade} onResumeCheckpoint={resumeSingleplayer}/>}

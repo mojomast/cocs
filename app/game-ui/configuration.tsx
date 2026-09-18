@@ -14,7 +14,7 @@ import {DEFAULT_BINDINGS,KEYBIND_ACTIONS,KEYBIND_OPTIONS,rebindAction} from '../
 
 // Modes still stabilising get an explicit PREVIEW badge in the setup list so a
 // local bot match reads as a prototype, not a finished mode.
-const PREVIEW_MODES=new Set(['cocs']);
+const PREVIEW_MODES=new Set(['cocs','cocs-coop']);
 const SCORE_RULES:any={
  cocs:{label:'Lattice target',objective:'LATTICE CONTROL',min:1,max:7,step:1},
  laps:{label:'Lap limit',objective:'LAPS',min:1,max:10,step:1},
