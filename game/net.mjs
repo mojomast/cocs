@@ -411,7 +411,10 @@ export class NetClient {
  }
   createShadow(mapId, config, loadout) {
     const character = loadout?.character ?? 'chatgpt', harness = loadout?.harness ?? 'openclaw';
-    this.shadow = isVehicleMode(config?.mode) ? null : new Match(character, harness, Math.random, getMap(mapId).id, { ...(config || {}), humanCount: 1, botCount: 0, ...(loadout ? { loadouts: { 0: loadout } } : {}) });
+    // M0 §4: the prediction shadow never pathfinds, so skip the 0.1 m nav flood
+    // (respawn/reconnect included). The floor lattice is still baked by Match,
+    // so moveActor/ray prediction stays on the fast path.
+    this.shadow = isVehicleMode(config?.mode) ? null : new Match(character, harness, Math.random, getMap(mapId).id, { ...(config || {}), humanCount: 1, botCount: 0, skipNav: true, ...(loadout ? { loadouts: { 0: loadout } } : {}) });
    this.resynced = false;
    this.inputSeq = 0;
    this.pendingInputs = [];

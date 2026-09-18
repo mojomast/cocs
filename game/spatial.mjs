@@ -72,8 +72,12 @@ function gridBounds(arena, blocks) {
 export function makeBlockIndex(arena) {
   if (!arena || typeof arena !== 'object') throw new TypeError('Invalid arena');
   const cached = indexCache.get(arena);
-  if (cached) return cached;
   const blocks = Array.isArray(arena.blocks) ? arena.blocks : [];
+  // Deep-frozen map templates (MAPS via map-schema.freeze) are immutable, so
+  // their grid is reused forever. A mutable arena (tests, tooling) is reindexed
+  // when its block list identity or length changes; an in-place field edit must
+  // call invalidateBlockIndex (the documented runtime-arena contract).
+  if (cached && (Object.isFrozen(arena) || (cached.blocksRef === blocks && cached.blocksLength === blocks.length))) return cached;
 
   let maxHalf = 0;
   for (const block of blocks) maxHalf = Math.max(maxHalf, (block.w || 0) / 2, (block.d || 0) / 2);
@@ -115,6 +119,8 @@ export function makeBlockIndex(arena) {
   const index = {
     arena,
     blocks,
+    blocksRef: blocks,
+    blocksLength: blocks.length,
     cell,
     bounds: state.bounds,
     cols,

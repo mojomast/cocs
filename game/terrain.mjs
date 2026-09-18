@@ -1,3 +1,4 @@
+import {invalidateFloorLattice} from './floor-lattice.mjs';
 const EPSILON=1e-9;
 const triangleCache=new WeakMap(),wallTriangleCache=new WeakMap(),wallSegmentCache=new WeakMap();
 
@@ -231,7 +232,7 @@ export function stampTerrainFloor(terrain,footprint,height,id='authored-floor',{
     else surfaces.push(addition);
   }
   terrain.surfaces=surfaces;terrain.walls=walls;
-  triangleCache.delete(terrain);wallTriangleCache.delete(terrain);wallSegmentCache.delete(terrain);
+  triangleCache.delete(terrain);wallTriangleCache.delete(terrain);wallSegmentCache.delete(terrain);invalidateFloorLattice(terrain);
   terrain.height=(x,z)=>terrainSupportAt(x,z,terrain)?.y??null;
   return authored;
 }

@@ -1,6 +1,6 @@
 # M0 — Performance foundation migration
 
-Status: **modules + tests landed, integration intentionally deferred.**
+Status: **integration landed (W9, `feat/m0-integration`).**
 Wave W2 produced two pure, additive modules and their equivalence/perf gates:
 
 - `game/floor-lattice.mjs` — baked, triangle-exact terrain floor query.

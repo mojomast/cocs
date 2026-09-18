@@ -8,7 +8,9 @@ import {createOperatorVerbState,resetOperatorVerbState,setOperatorVerbActive,ste
 import {turnToward} from './character-anim.mjs';
 import {resolveGear} from './progression.mjs';
 import {resolveAttachments,applyAttachmentsToWeapon} from './attachments.mjs';
-import {terrainRayHit,terrainSupportAt,terrainWallSegments} from './terrain.mjs';
+import {terrainRayHit,terrainWallSegments} from './terrain.mjs';
+import {floorHeightAtLattice,makeFloorQuery} from './floor-lattice.mjs';
+import {blockObstructed,blockSupportTop,candidates,collisionHash,NAV_BAKE_VERSION,rayCandidates} from './spatial.mjs';
 import {createVehicle,GUNTRUCK,respawnVehicle,stepVehicle,stepVehicleWeapon,vehicleCanEnter,vehicleMuzzles,vehicleSeatFor,vehicleSeatPosition,vehicleMounted,takeVehicleSeat,leaveVehicleSeat,vehicleSeatOpen} from './vehicles.mjs';
 import {objectiveTemplate} from './mode-data.mjs';
 import {cocsSnapshot} from './cocs.mjs';
@@ -77,8 +79,21 @@ export function traversalTables(arena){
 }
  const surfacesOf=arena=>arena.platforms||arena.surfaces||[];
  const surfaceY=surface=>surface.y??surface.topY??0;
-  export function floorAt(x,z,arena=MAPS[0]){if(arena.terrain){return terrainSupportAt(x,z,arena.terrain,arena.terrain.maxSlope??.9)?.y??null;}const surfaces=surfacesOf(arena);if(surfaces.length){let floor=null;for(const surface of surfaces)if(Math.abs(x-surface.x)<=surface.w/2&&Math.abs(z-surface.z)<=surface.d/2)floor=floor===null?surfaceY(surface):Math.max(floor,surfaceY(surface));return floor;}if(!arena.raised)return 0;let floor=0,solid=arena.blocks.some(b=>b.kind!=='deck'&&Math.abs(x-b.x)<=b.w/2&&Math.abs(z-b.z)<=b.d/2);for(const b of arena.blocks)if(b.kind==='deck'&&Math.abs(x-b.x)<=b.w/2&&Math.abs(z-b.z)<=b.d/2)floor=Math.max(floor,b.h);if(!arena.bounds&&!solid&&z<=-9)floor=Math.max(floor,3.8);else if(!arena.bounds&&!solid&&Math.abs(x)>8.2&&Math.abs(x)<14&&z<3)floor=Math.max(floor,(3-z)/12*3.8);return floor;}
-  const supportAt=(x,z,arena)=>{let y=floorAt(x,z,arena);if(y===null)return null;for(const b of arena.blocks)if(b.kind!=='deck'&&Math.abs(x-b.x)<=b.w/2+RULES.radius&&Math.abs(z-b.z)<=b.d/2+RULES.radius)y=Math.max(y,b.h);return y;};
+   // M0: one baked floor lattice per arena, cached in a WeakMap. The entry is
+   // rebuilt when generation reassigns `terrain.surfaces` (stampTerrainFloor),
+   // so a stale bake can never outlive the mesh it was rasterized from. Queries
+   // stay on the brute mesh until Match/navigation/payload explicitly bake,
+   // which happens only after generation.
+   const floorQueryCache=new WeakMap();
+   function floorQueryOf(arena){
+    const surfaces=arena?.terrain?.surfaces;
+    let entry=floorQueryCache.get(arena);
+    if(!entry||entry.surfaces!==surfaces){entry={query:makeFloorQuery(arena),surfaces};floorQueryCache.set(arena,entry);}
+    return entry.query;
+   }
+   function bakeFloorQuery(arena){const query=floorQueryOf(arena);if(arena?.terrain&&query.source!=='lattice')query.bake();return query;}
+  export function floorAt(x,z,arena=MAPS[0]){if(arena.terrain){const query=floorQueryOf(arena);return query.source==='lattice'?floorHeightAtLattice(query.lattice,x,z,query.maxSlope):(query(x,z)?.y??null);}const surfaces=surfacesOf(arena);if(surfaces.length){let floor=null;for(const surface of surfaces)if(Math.abs(x-surface.x)<=surface.w/2&&Math.abs(z-surface.z)<=surface.d/2)floor=floor===null?surfaceY(surface):Math.max(floor,surfaceY(surface));return floor;}if(!arena.raised)return 0;let floor=0,solid=arena.blocks.some(b=>b.kind!=='deck'&&Math.abs(x-b.x)<=b.w/2&&Math.abs(z-b.z)<=b.d/2);for(const b of arena.blocks)if(b.kind==='deck'&&Math.abs(x-b.x)<=b.w/2&&Math.abs(z-b.z)<=b.d/2)floor=Math.max(floor,b.h);if(!arena.bounds&&!solid&&z<=-9)floor=Math.max(floor,3.8);else if(!arena.bounds&&!solid&&Math.abs(x)>8.2&&Math.abs(x)<14&&z<3)floor=Math.max(floor,(3-z)/12*3.8);return floor;}
+  const supportAt=(x,z,arena)=>{let y=floorAt(x,z,arena);if(y===null)return null;const top=blockSupportTop(arena,x,z,RULES.radius);if(top!==null)y=Math.max(y,top);return y;};
   // Presentation contacts choose an existing surface below the body's origin,
   // never the top of an overhead wall. Legacy h is still absolute solid top.
   export function presentationSupportAt(x,z,arena=MAPS[0],referenceY=Infinity){
@@ -88,14 +103,14 @@ export function traversalTables(arena){
   }
   const segmentDistance=(x,z,a,b)=>{const dx=b.x-a.x,dz=b.z-a.z,length=dx*dx+dz*dz;if(length<=1e-9)return Math.hypot(x-a.x,z-a.z);const t=clamp(((x-a.x)*dx+(z-a.z)*dz)/length,0,1);return Math.hypot(x-(a.x+dx*t),z-(a.z+dz*t));};
   const terrainObstructed=(x,y,z,r,arena)=>arena.terrain?.walls?.length>0&&terrainWallSegments(arena.terrain).some(({a,b})=>y<Math.max(a.y,b.y)-1e-6&&y+RULES.height>Math.min(a.y,b.y)+1e-6&&segmentDistance(x,z,a,b)<r);
- export function obstructed(x,y,z,r=RULES.radius,arena=MAPS[0]){return arena.blocks.some(b=>Math.abs(x-b.x)<b.w/2+r&&Math.abs(z-b.z)<b.d/2+r&&y<b.h-1e-6&&y+RULES.height>0)||terrainObstructed(x,y,z,r,arena);}
+ export function obstructed(x,y,z,r=RULES.radius,arena=MAPS[0]){return blockObstructed(arena,x,y,z,r)||terrainObstructed(x,y,z,r,arena);}
 export const MOVE={friction:6,stopSpeed:2,groundAccel:10,airAccel:3.5,airCap:1.6,sprint:1.375,crouch:.4,slideBoost:9.6,slideMin:.35,slideFriction:2.5,slideCooldown:.5,terminal:2.2,eyeStanding:1.45,eyeCrouch:.95,baseHeight:1.8};
 // Point-blank melee: a short forward arc, no ammo, brief cooldown. Gives every
 // loadout an answer inside its own face and a reason to finish hurt targets.
 // `arc` is the minimum forward alignment (a dot threshold: larger is tighter);
 // OpenClaw's Grip passive widens the cone, relaxing the threshold.
 export const MELEE={range:2.4,damage:45,cooldown:.6,arc:.2};
-const canStand=(x,y,z,r,arena)=>!arena.blocks.some(b=>Math.abs(x-b.x)<b.w/2+r&&Math.abs(z-b.z)<b.d/2+r&&y<b.h-1e-6&&b.h<y+MOVE.baseHeight);
+const canStand=(x,y,z,r,arena)=>!candidates(arena,x,z,r).some(b=>Math.abs(x-b.x)<b.w/2+r&&Math.abs(z-b.z)<b.d/2+r&&y<b.h-1e-6&&b.h<y+MOVE.baseHeight);
 const accelerate=(a,ix,iz,wishSpeed,accel,dt)=>{const add=wishSpeed-(a.vx*ix+a.vz*iz);if(add<=0)return;const amount=Math.min(accel*dt*wishSpeed,add);a.vx+=ix*amount;a.vz+=iz*amount;};
 export const SELF_BLAST_MARGIN=1.15;
 // Linear damage falloff for hitscan weapons: full damage inside `start`, tapering
@@ -104,10 +119,10 @@ export function damageFalloff(weapon,distance){const f=weapon?.falloff;if(!f||!N
 export function blastUnsafe(weapon,distance){const radius=Number(weapon?.radius),splash=Number(weapon?.splash),d=Number(distance);if(!(radius>0)||!(splash>0)||!Number.isFinite(d))return false;return d<radius*SELF_BLAST_MARGIN;}
 export function moveActor(a,input,dt,arena=MAPS[0],config={speed:1,gravity:1},ropeLines=null){
  // Recover corrected/older embedded state without lifting actors through tall solids.
- for(const b of arena.blocks)if(Math.abs(a.x-b.x)<b.w/2+RULES.radius&&Math.abs(a.z-b.z)<b.d/2+RULES.radius&&a.y<b.h-1e-6){
-  const candidates=[{x:b.x-b.w/2-RULES.radius-1e-6,y:a.y,z:a.z},{x:b.x+b.w/2+RULES.radius+1e-6,y:a.y,z:a.z},{x:a.x,y:a.y,z:b.z-b.d/2-RULES.radius-1e-6},{x:a.x,y:a.y,z:b.z+b.d/2+RULES.radius+1e-6}];
-  if(b.h-a.y<=.25)candidates.push({x:a.x,y:b.h,z:a.z});
-    const bounds=boundsOf(arena);const p=candidates.filter(p=>{const floor=floorAt(p.x,p.z,arena);return p.x>=bounds.minX&&p.x<=bounds.maxX&&p.z>=bounds.minZ&&p.z<=bounds.maxZ&&floor!==null&&floor<=p.y+1e-6&&!obstructed(p.x,p.y,p.z,RULES.radius,arena);}).sort((p,q)=>dist(a,p)-dist(a,q))[0];
+ for(const b of candidates(arena,a.x,a.z,RULES.radius))if(Math.abs(a.x-b.x)<b.w/2+RULES.radius&&Math.abs(a.z-b.z)<b.d/2+RULES.radius&&a.y<b.h-1e-6){
+  const spots=[{x:b.x-b.w/2-RULES.radius-1e-6,y:a.y,z:a.z},{x:b.x+b.w/2+RULES.radius+1e-6,y:a.y,z:a.z},{x:a.x,y:a.y,z:b.z-b.d/2-RULES.radius-1e-6},{x:a.x,y:a.y,z:b.z+b.d/2+RULES.radius+1e-6}];
+  if(b.h-a.y<=.25)spots.push({x:a.x,y:b.h,z:a.z});
+    const bounds=boundsOf(arena);const p=spots.filter(p=>{const floor=floorAt(p.x,p.z,arena);return p.x>=bounds.minX&&p.x<=bounds.maxX&&p.z>=bounds.minZ&&p.z<=bounds.maxZ&&floor!==null&&floor<=p.y+1e-6&&!obstructed(p.x,p.y,p.z,RULES.radius,arena);}).sort((p,q)=>dist(a,p)-dist(a,q))[0];
   if(p){if(p.x!==a.x)a.vx=0;if(p.z!==a.z)a.vz=0;if(p.y!==a.y)a.vy=0;Object.assign(a,p);}
  }
  if(a.zipRide){const ride=a.zipRide;ride.t+=dt;const u=clamp(ride.t/ride.duration,0,1);a.x=ride.from.x+(ride.to.x-ride.from.x)*u;a.y=ride.from.y+(ride.to.y-ride.from.y)*u;a.z=ride.from.z+(ride.to.z-ride.from.z)*u;a.vx=a.vy=a.vz=0;a.grounded=false;if(u>=1){a.zipRide=null;a.grounded=true;a.lastValid={x:a.x,y:a.y,z:a.z};}const railBounds=boundsOf(arena);a.x=clamp(a.x,railBounds.minX,railBounds.maxX);a.z=clamp(a.z,railBounds.minZ,railBounds.maxZ);return;}
@@ -171,15 +186,15 @@ export function moveActor(a,input,dt,arena=MAPS[0],config={speed:1,gravity:1},ro
  for(const axis of ['x','z']){
   const value=a[axis]+a[axis==='x'?'vx':'vz']*step;
   const nx=axis==='x'?value:a.x,nz=axis==='z'?value:a.z;
-    const f=floorAt(nx,nz,arena);let top=null;for(const b of arena.blocks)if(b.kind!=='deck'&&Math.abs(nx-b.x)<b.w/2+RULES.radius&&Math.abs(nz-b.z)<b.d/2+RULES.radius&&(top===null||b.h>top))top=b.h;let ny=f!==null&&Math.abs(f-a.y)<.25&&a.vy<=0&&a.grounded?f:a.y;if(top!==null&&a.grounded&&a.vy<=0&&a.y>=top-1e-6&&a.y-top<.35)ny=Math.max(ny,top);
+    const f=floorAt(nx,nz,arena);let top=null;for(const b of candidates(arena,nx,nz,RULES.radius))if(b.kind!=='deck'&&Math.abs(nx-b.x)<b.w/2+RULES.radius&&Math.abs(nz-b.z)<b.d/2+RULES.radius&&(top===null||b.h>top))top=b.h;let ny=f!==null&&Math.abs(f-a.y)<.25&&a.vy<=0&&a.grounded?f:a.y;if(top!==null&&a.grounded&&a.vy<=0&&a.y>=top-1e-6&&a.y-top<.35)ny=Math.max(ny,top);
   // The ramp meets the deck before the actor's center crosses the terrain seam.
-  if(a.grounded&&a.vy<=0)for(const b of arena.blocks)if(b.kind==='deck'&&Math.abs(nx-b.x)<b.w/2+RULES.radius&&Math.abs(nz-b.z)<b.d/2+RULES.radius&&Math.abs(b.h-a.y)<.25)ny=Math.max(ny,b.h);
+  if(a.grounded&&a.vy<=0)for(const b of candidates(arena,nx,nz,RULES.radius))if(b.kind==='deck'&&Math.abs(nx-b.x)<b.w/2+RULES.radius&&Math.abs(nz-b.z)<b.d/2+RULES.radius&&Math.abs(b.h-a.y)<.25)ny=Math.max(ny,b.h);
     if((a.traversalFlight&&a.traversalTarget||!obstructed(nx,ny,nz,RULES.radius,arena))&&(f===null||f-a.y<.3)){a[axis]=value;a.y=ny;}else a[axis==='x'?'vx':'vz']=0;
  }
   const hb=boundsOf(arena);a.x=clamp(a.x,hb.minX,hb.maxX);a.z=clamp(a.z,hb.minZ,hb.maxZ);
   a.vy-=gravity*step;const nextY=a.y+a.vy*step;let f=floorAt(a.x,a.z,arena);
   // A solid top is a landing surface only when the feet cross it while falling.
-  for(const b of arena.blocks)if(Math.abs(a.x-b.x)<b.w/2+RULES.radius&&Math.abs(a.z-b.z)<b.d/2+RULES.radius&&a.y>=b.h-1e-6&&nextY<=b.h)f=Math.max(f??-Infinity,b.h);
+  for(const b of candidates(arena,a.x,a.z,RULES.radius))if(Math.abs(a.x-b.x)<b.w/2+RULES.radius&&Math.abs(a.z-b.z)<b.d/2+RULES.radius&&a.y>=b.h-1e-6&&nextY<=b.h)f=Math.max(f??-Infinity,b.h);
    if(f!==null&&nextY<=f){a.y=f;a.vy=0;a.grounded=true;a.sliding=a.sliding&&input.crouch===true;a.traversalFlight=false;a.traversalTarget=null;}else{a.y=nextY;a.grounded=false;}
    const target=a.traversalTarget,targetFloor=target&&floorAt(target.x,target.z,arena);if(a.traversalFlight&&target&&targetFloor!==null&&a.vy<=0&&Math.hypot(a.x-target.x,a.z-target.z)<=.9&&a.y<=targetFloor+.35){a.x=target.x;a.z=target.z;a.y=targetFloor;a.vx=a.vy=a.vz=0;a.grounded=true;a.traversalFlight=false;a.traversalTarget=null;}
   const bounds=boundsOf(arena);a.x=clamp(a.x,bounds.minX,bounds.maxX);a.z=clamp(a.z,bounds.minZ,bounds.maxZ);
@@ -201,7 +216,7 @@ export function moveActor(a,input,dt,arena=MAPS[0],config={speed:1,gravity:1},ro
    const support=supportAt(a.x,a.z,arena);if(a.grounded&&support!==null&&Math.abs(a.y-support)<.35)a.lastValid={x:a.x,y:a.y,z:a.z};
 }
 function boxHit(o,d,b,max){let lo=0,hi=max;for(const k of ['x','y','z']){const c=k==='y'?b.h/2:b[k],s=k==='x'?b.w/2:k==='z'?b.d/2:b.h/2;if(Math.abs(d[k])<1e-8){if(o[k]<c-s||o[k]>c+s)return null;}else{let t1=(c-s-o[k])/d[k],t2=(c+s-o[k])/d[k];if(t1>t2)[t1,t2]=[t2,t1];lo=Math.max(lo,t1);hi=Math.min(hi,t2);if(lo>hi)return null;}}return lo;}
-  export function rayWorld(o,d,max=100,arena=MAPS[0]){if(!finitePoint(o)||!finitePoint(d)||(!Number.isFinite(max)&&max!==Infinity)||max<0||Math.hypot(d.x,d.y,d.z)<=1e-9)return 0;let best=max;for(const b of arena.blocks){const t=boxHit(o,d,b,best);if(t!==null&&t<best)best=t;}
+  export function rayWorld(o,d,max=100,arena=MAPS[0]){if(!finitePoint(o)||!finitePoint(d)||(!Number.isFinite(max)&&max!==Infinity)||max<0||Math.hypot(d.x,d.y,d.z)<=1e-9)return 0;let best=max;for(const b of rayCandidates(arena,o,d,best)){const t=boxHit(o,d,b,best);if(t!==null&&t<best)best=t;}
    if(arena.terrain){const hit=terrainRayHit(o,d,best,arena.terrain);if(hit&&hit.distance<best)best=hit.distance;}
    else {
     // Analytic floor/ramp intersection by bounded ray marching, refined at first crossing.
@@ -213,7 +228,7 @@ function actorHit(o,d,a,max){const s=Number.isFinite(a.hitScale)&&a.hitScale>0?a
 function hitActor(o,d,a,max){const local=v(o.x,o.y-a.y,o.z);return actorHit(local,d,a,max);}
 function hitVehicle(o,d,vehicle,max){const p=vehicle.position,local=v(o.x-p.x,o.y-p.y,o.z-p.z),size=vehicle.config?.dimensions||GUNTRUCK.dimensions;return boxHit(local,d,{x:0,z:0,w:size.width,d:size.length,h:size.height},max);}
 const vehicleRadius=vehicle=>Math.hypot((vehicle.config?.dimensions||GUNTRUCK.dimensions).width/2,(vehicle.config?.dimensions||GUNTRUCK.dimensions).length/2);
-export function walkEdge(a,b,arena=MAPS[0]){const l=dist(a,b);if(l>6.5)return false;const n=Math.max(1,Math.ceil(l/.2));let prev=a.y;for(let i=0;i<=n;i++){const x=a.x+(b.x-a.x)*i/n,z=a.z+(b.z-a.z)*i/n;let y=floorAt(x,z,arena);if(y===null)return false;for(const block of arena.blocks)if(block.kind==='deck'&&Math.abs(x-block.x)<block.w/2+.52&&Math.abs(z-block.z)<block.d/2+.52&&Math.abs(block.h-y)<.25)y=Math.max(y,block.h);if(Math.abs(y-prev)>.3||obstructed(x,y,z,.52,arena))return false;prev=y;}return true;}
+export function walkEdge(a,b,arena=MAPS[0]){const l=dist(a,b);if(l>6.5)return false;const n=Math.max(1,Math.ceil(l/.2));let prev=a.y;for(let i=0;i<=n;i++){const x=a.x+(b.x-a.x)*i/n,z=a.z+(b.z-a.z)*i/n;let y=floorAt(x,z,arena);if(y===null)return false;for(const block of candidates(arena,x,z,.52))if(block.kind==='deck'&&Math.abs(x-block.x)<block.w/2+.52&&Math.abs(z-block.z)<block.d/2+.52&&Math.abs(block.h-y)<.25)y=Math.max(y,block.h);if(Math.abs(y-prev)>.3||obstructed(x,y,z,.52,arena))return false;prev=y;}return true;}
  function navigationEdges(nodes,arena){
   // Next-gen maps can be large and organic; connect only nearby nodes via a
   // spatial grid so the graph stays O(n) instead of O(n^2).
@@ -236,7 +251,7 @@ export function walkEdge(a,b,arena=MAPS[0]){const l=dist(a,b);if(l>6.5)return fa
   const newNodes=best.map(idx=>nodes[idx]),newEdges=best.map(idx=>edges[idx].filter(j=>keep.has(j)).map(j=>keep.get(j)));
   nodes.length=0;nodes.push(...newNodes);edges.length=0;edges.push(...newEdges);
  }
-  export function navigation(arena=MAPS[0]){const nodes=[],grid=new Map(),cell=.1;const addNode=(x,z)=>{const y=floorAt(x,z,arena);if(y===null)return;if(obstructed(x,y,z,.65,arena))return;const cx=Math.floor(x/cell),cz=Math.floor(z/cell);for(let dx=-1;dx<=1;dx++)for(let dz=-1;dz<=1;dz++){const bucket=grid.get(`${cx+dx}|${cz+dz}`);if(bucket)for(const i of bucket)if(Math.hypot(nodes[i].x-x,nodes[i].z-z)<.1)return;}const key=`${cx}|${cz}`;let bucket=grid.get(key);if(!bucket){bucket=[];grid.set(key,bucket);}bucket.push(nodes.length);nodes.push(v(x,y,z));};
+  export function navigation(arena=MAPS[0]){bakeFloorQuery(arena);const nodes=[],grid=new Map(),cell=.1;const addNode=(x,z)=>{const y=floorAt(x,z,arena);if(y===null)return;if(obstructed(x,y,z,.65,arena))return;const cx=Math.floor(x/cell),cz=Math.floor(z/cell);for(let dx=-1;dx<=1;dx++)for(let dz=-1;dz<=1;dz++){const bucket=grid.get(`${cx+dx}|${cz+dz}`);if(bucket)for(const i of bucket)if(Math.hypot(nodes[i].x-x,nodes[i].z-z)<.1)return;}const key=`${cx}|${cz}`;let bucket=grid.get(key);if(!bucket){bucket=[];grid.set(key,bucket);}bucket.push(nodes.length);nodes.push(v(x,y,z));};
    // Racing uses its centerline driver, not an infantry grid over hundreds of rails.
    // Keep the public navigation graph useful for registry validation and tooling.
    if(arena.race){
@@ -245,13 +260,20 @@ export function walkEdge(a,b,arena=MAPS[0]){const l=dist(a,b);if(l>6.5)return fa
    }
    const bounds=boundsOf(arena),step=arena.nextGen?6:3;for(let x=Math.ceil(bounds.minX/step)*step;x<=bounds.maxX;x+=step)for(let z=Math.ceil(bounds.minZ/step)*step;z<=bounds.maxZ;z+=step)addNode(x,z);if(arena.raised)for(const [x,z]of [[-1.8,-3.6],[1.8,-3.6],[-1.8,-6],[1.8,-6],[0,-7.5],[-6,-7.5],[6,-7.5]])addNode(x,z);for(const p of arena.navNodes||[]){const nx=Array.isArray(p)?p[0]:p.x,nz=Array.isArray(p)?p[1]:p.z;addNode(nx,nz);}for(const [,x,z]of arena.pickups)addNode(x,z);for(const [x,z]of arena.spawns)addNode(x,z);for(const p of [...traversalSource(arena,'trampolines'),...traversalSource(arena,'jumpPads'),...traversalSource(arena,'boostLaunchers'),...traversalSource(arena,'launchers'),...traversalSource(arena,'teleporters')])addNode(p.x,p.z);const edges=arena.nextGen?navigationEdges(nodes,arena):nodes.map((a,i)=>nodes.map((b,j)=>j!==i&&walkEdge(a,b,arena)?j:-1).filter(j=>j>=0));for(const link of arena.jumpLinks||[]){const from=nearest(link.source,nodes),to=nearest(link.target,nodes);if(from!==to&&!edges[from].includes(to))edges[from].push(to);}const addLinkEdge=(from,to)=>{const f=nearest(from,nodes),t=nearest(to,nodes);if(f!==t&&!edges[f].includes(t))edges[f].push(t);};for(const tp of traversalSource(arena,'teleporters')){const to=resolvePoint(tp.target??tp.to);if(Number.isFinite(tp.x)&&to)addLinkEdge({x:tp.x,y:0,z:tp.z},{x:to.x,y:to.y??0,z:to.z});}if(arena.nextGen)pruneToLargestComponent(nodes,edges);return {nodes,edges};}
 const navigationCache=new Map();
-function matchNavigation(arena){
- if(!navigationCache.has(arena)){
+const EMPTY_NAV=Object.freeze({nodes:Object.freeze([]),edges:Object.freeze([])});
+// Nav reuse contract (docs/M0-MIGRATION.md §3): map id + generation seed +
+// collision hash + construction version. collisionHash folds blocks, the baked
+// floor lattice and the wall segments, so any geometry edit invalidates.
+function navCacheKey(arena){const seed=arena?.genSeed??arena?.seed??0;return `${arena?.id??'arena'}|${seed}|${collisionHash(arena)}|${NAV_BAKE_VERSION}`;}
+function matchNavigation(arena,{skipNav=false}={}){
+ if(skipNav)return EMPTY_NAV;
+ const key=navCacheKey(arena);
+ if(!navigationCache.has(key)){
   const graph=navigation(arena);
   graph.nodes.forEach(Object.freeze);graph.edges.forEach(Object.freeze);
-  Object.freeze(graph.nodes);Object.freeze(graph.edges);navigationCache.set(arena,Object.freeze(graph));
+  Object.freeze(graph.nodes);Object.freeze(graph.edges);navigationCache.set(key,Object.freeze(graph));
  }
- return navigationCache.get(arena);
+ return navigationCache.get(key);
 }
 export function nearest(p,nodes){let id=0,best=Infinity;nodes.forEach((n,i)=>{const d=dist(p,n);if(d<best){id=i;best=d;}});return id;}
 
@@ -273,10 +295,10 @@ export class Match{
     // `aiSeats` gives every seat (including the leading human seats) the bot AI,
     // and `botPolicy` overrides the AI policy for balance-neutral sweeps. Both
     // are harness-only: net/server never set them, so live paths are untouched.
-    this.config=normalizeConfig(options);this.mutators=mutatorEffects(this.config);this.loadout=resolveMatchLoadout(this.config);this.humanCount=Math.max(1,Math.min(Math.round(options.humanCount??1),8));this.aiSeats=options.aiSeats===true;this.botPolicy=options.botPolicy??null;this.cocsPolicy=options.cocsPolicy??(this.config.mode==='cocs'?cocsDutyPolicy:null);
+    this.config=normalizeConfig(options);this.mutators=mutatorEffects(this.config);this.loadout=resolveMatchLoadout(this.config);this.humanCount=Math.max(1,Math.min(Math.round(options.humanCount??1),8));this.aiSeats=options.aiSeats===true;this.skipNav=options.skipNav===true;this.botPolicy=options.botPolicy??null;this.cocsPolicy=options.cocsPolicy??(this.config.mode==='cocs'?cocsDutyPolicy:null);
     const vehicleMode=this.config.mode==='puma-race'||this.config.mode==='puma-soccer';
     if(vehicleMode){this.config.botCount=this.config.mode==='puma-soccer'?Math.max(0,Math.min(3,4-this.humanCount)):Math.min(this.config.botCount,8-this.humanCount);if(!getMap(mapId).race)mapId=this.config.mode==='puma-soccer'?'puma-pitch':'puma-circuit';}
-    this.difficulty=DIFFICULTIES.find(d=>d.id===this.config.difficulty);this.arena=getMap(mapId);const nav=vehicleMode?{nodes:[],edges:[]}:matchNavigation(this.arena);this.nav=nav.nodes;this.edges=nav.edges;{const arenaBounds=boundsOf(this.arena);this.center={x:(arenaBounds.minX+arenaBounds.maxX)/2,z:(arenaBounds.minZ+arenaBounds.maxZ)/2};}this.spawns=this.arena.spawns.map(([x,z])=>v(x,floorAt(x,z,this.arena),z));this.random=random;this.time=0;this.over=false;this.suddenDeath=false;this.armsraceWinner=null;this.events=[];this.feed=[];this.rockets=[];this.deployables=[];this.ropeLines=[];this.ropeSerial=0;this.pendingLoadouts=new Map();this.stats={shots:0,kills:0,pickups:0,powers:0,respawns:0,falls:0};this.serial=0;this.teamScores={0:0,1:0};this.vehicleHits=new Map();this.spawnHeat=new Map();
+    this.difficulty=DIFFICULTIES.find(d=>d.id===this.config.difficulty);this.arena=getMap(mapId);if(this.arena.terrain)bakeFloorQuery(this.arena);const nav=vehicleMode?{nodes:[],edges:[]}:matchNavigation(this.arena,{skipNav:this.skipNav});this.nav=nav.nodes;this.edges=nav.edges;{const arenaBounds=boundsOf(this.arena);this.center={x:(arenaBounds.minX+arenaBounds.maxX)/2,z:(arenaBounds.minZ+arenaBounds.maxZ)/2};}this.spawns=this.arena.spawns.map(([x,z])=>v(x,floorAt(x,z,this.arena),z));this.random=random;this.time=0;this.over=false;this.suddenDeath=false;this.armsraceWinner=null;this.events=[];this.feed=[];this.rockets=[];this.deployables=[];this.ropeLines=[];this.ropeSerial=0;this.pendingLoadouts=new Map();this.stats={shots:0,kills:0,pickups:0,powers:0,respawns:0,falls:0};this.serial=0;this.teamScores={0:0,1:0};this.vehicleHits=new Map();this.spawnHeat=new Map();
    const defaults={0:this.arena.spawns.filter((_,i)=>i%2===0),1:this.arena.spawns.filter((_,i)=>i%2===1)};
     this.teamSpawns=teamPoints(this.arena.teamSpawns,defaults);
     // Team-only maps author no FFA spawn list. Derive one from the navigation
@@ -294,7 +316,7 @@ export class Match{
    for(const team of [0,1])if(!Number.isFinite(this.flagSpawns[team][0])||!Number.isFinite(this.flagSpawns[team][1]))this.flagSpawns[team]=[this.center.x,this.center.z];
     this.flags=this.config.mode==='ctf'?{0:{team:0,state:'at-base',x:this.flagSpawns[0][0],z:this.flagSpawns[0][1],carrier:null},1:{team:1,state:'at-base',x:this.flagSpawns[1][0],z:this.flagSpawns[1][1],carrier:null}}:[];
     for(const f of Object.values(this.flags))f.y=floorAt(f.x,f.z,this.arena)??0;
-    this.objectiveState=this.config.mode==='payload'?payloadTemplate(this.arena,{segments:this.config.fragLimit,navigation:nav,floorAt,walkEdge,obstructed}):objectiveTemplate(this.config.mode,this.arena,this.config);this.objectiveEventState=new Map();
+    this.objectiveState=this.config.mode==='payload'?payloadTemplate(this.arena,{segments:this.config.fragLimit,navigation:this.skipNav?null:nav,floorAt,walkEdge,obstructed}):objectiveTemplate(this.config.mode,this.arena,this.config);this.objectiveEventState=new Map();
   // Objective zones must sit on ground the nav graph can reach; a zone on an isolated walkable pocket leaves bots stranded just outside its radius.
   if(this.objectiveState&&(this.objectiveState.kind==='koth'||this.objectiveState.kind==='domination'))for(const zone of this.objectiveState.zones){const node=this.nav[nearest(zone,this.nav)];if(node&&Math.hypot(node.x-zone.x,node.z-zone.z)>2.5){zone.x=node.x;zone.z=node.z;if(Number.isFinite(node.y))zone.y=node.y;}}
   // King of the Hill cycles its single hill between authored capture points so
