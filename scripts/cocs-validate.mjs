@@ -73,6 +73,18 @@ export function run(seed, { seconds = 600, players = 8, mapId = 'lattice-slice',
   let half = null;
   for (const [t, scores] of trace) if (t <= halfTime + 1e-9) half = scores;
   if (!half && trace.length) half = trace[0][1];
+  const st = m.objectiveState;
+  const economy = {
+    fluxSpent: { 0: st?.fluxSpent?.[0] ?? 0, 1: st?.fluxSpent?.[1] ?? 0 },
+    fluxRemaining: { 0: st?.flux?.[0] ?? 0, 1: st?.flux?.[1] ?? 0 },
+    fluxEarned: { 0: st?.fluxEarned?.[0] ?? 0, 1: st?.fluxEarned?.[1] ?? 0 },
+    scoutsSpawned: (st?.scoutStats?.[0]?.spawned ?? 0) + (st?.scoutStats?.[1]?.spawned ?? 0),
+    scoutsKilled: (st?.scoutStats?.[0]?.killed ?? 0) + (st?.scoutStats?.[1]?.killed ?? 0),
+    scoutsExpired: (st?.scoutStats?.[0]?.expired ?? 0) + (st?.scoutStats?.[1]?.expired ?? 0),
+    scoutsScans: (st?.scoutStats?.[0]?.scans ?? 0) + (st?.scoutStats?.[1]?.scans ?? 0),
+    ordersCompleted: st?.orderStats?.completed ?? 0,
+    ordersByVerb: { ...(st?.orderStats?.byVerb ?? {}) },
+  };
   return {
     seed, seconds, ticks, over: m.over, overReason: m.overReason || null,
     strict: ticks ? contest / ticks : 0,
@@ -80,6 +92,7 @@ export function run(seed, { seconds = 600, players = 8, mapId = 'lattice-slice',
     multiFront: ticks ? multi / ticks : 0,
     avgLive: ticks ? liveSum / ticks : 0,
     half, winner, scores: s,
+    economy,
   };
 }
 
@@ -95,6 +108,15 @@ export function summarise(runs) {
     return (h[0] < h[1] ? 0 : 1) === r.winner;
   }).length;
   const pct = v => `${(v * 100).toFixed(1)}%`;
+  const total = k => runs.reduce((a, r) => a + (Number(r.economy?.[k]) || 0), 0);
+  const totalPair = k => ({
+    0: runs.reduce((a, r) => a + (Number(r.economy?.[k]?.[0]) || 0), 0),
+    1: runs.reduce((a, r) => a + (Number(r.economy?.[k]?.[1]) || 0), 0),
+  });
+  const byVerb = runs.reduce((acc, r) => {
+    for (const [verb, count] of Object.entries(r.economy?.ordersByVerb ?? {})) acc[verb] = (acc[verb] ?? 0) + count;
+    return acc;
+  }, {});
   return {
     gate: { strictContest: '>=35%', fightPoint: '>=60%', trailingHalfWins: '>=25%' },
     result: {
@@ -105,10 +127,21 @@ export function summarise(runs) {
       leaderAtHalfWins: `${leaderAtHalfWins}/${decided.length}`,
       trailingAtHalfWins: `${trailingAtHalfWins}/${decided.length}`,
     },
+    economy: {
+      fluxSpent: totalPair('fluxSpent'),
+      fluxRemaining: totalPair('fluxRemaining'),
+      fluxEarned: totalPair('fluxEarned'),
+      scoutsSpawned: total('scoutsSpawned'),
+      scoutsKilled: total('scoutsKilled'),
+      scoutsExpired: total('scoutsExpired'),
+      scoutsScans: total('scoutsScans'),
+      ordersCompleted: total('ordersCompleted'),
+      ordersByVerb: byVerb,
+    },
     runs: runs.map(r => ({
       seed: r.seed, over: r.over, reason: r.overReason, duration: `${(r.ticks / 60).toFixed(1)}s`,
       strict: pct(r.strict), fightPoint: pct(r.fightPoint), multiFront: pct(r.multiFront),
-      half: r.half, winner: r.winner, scores: r.scores,
+      half: r.half, winner: r.winner, scores: r.scores, economy: r.economy,
     })),
   };
 }

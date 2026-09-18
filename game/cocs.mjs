@@ -40,6 +40,10 @@
 import {modeRule} from './config.mjs';
 import {RULES} from './data.mjs';
 import {terrainSupportAt} from './terrain.mjs';
+import {
+  FLUX_CAP, FLUX_PASSIVE_PER_SECOND, FLUX_START, ORDER_REWARD, REQ_EARN, SUBAGENTS,
+  neglectPassiveFlux, neglectState, neglectTick, scoreEvent, subagentUpkeep,
+} from './cocs-economy.mjs';
 
 export const COCS_KIND = 'cocs';
 // The frozen node archetypes. Authored maps may spell a few of these
@@ -48,10 +52,24 @@ export const COCS_KIND = 'cocs';
 export const COCS_ARCHETYPES = Object.freeze(['front', 'economy', 'relay', 'hq', 'array']);
 export const COCS_CAPTURABLE = Object.freeze(['front', 'economy', 'relay']);
 export const COCS_ANCHORS = Object.freeze(['hq', 'array']);
-export const COCS_ORDER_VERBS = Object.freeze(['HOLD', 'ATTACK']);
-// FLUX/second a connected node pays (V0a has no FLUX pool yet, so this also
-// seeds the objective score-at-time). Mirrors mode spec §4.2.
+export const COCS_ORDER_VERBS = Object.freeze(['HOLD', 'ATTACK', 'SCAN']);
+// FLUX/second a connected node pays. Mirrors mode spec §4.2; the §6.5 passive
+// +1/s team term is added on top by `stepCocs`.
 export const COCS_INCOME = Object.freeze({front: 1, economy: 3, relay: 0, hq: 0, array: 0});
+// §8.1 SCOUT as a first-class unit. `SCAN` marks enemies in the target area as
+// `SPOT`ted for the spotting team; with no fog in V1 the payoff is the §8.1
+// +15% team damage bonus against a marked target.
+export const COCS_SCOUT = Object.freeze({
+  role: 'scout',
+  spawnCost: SUBAGENTS.scout.spawnCost,
+  lifespanSeconds: SUBAGENTS.scout.lifespanSeconds,
+  refundFraction: SUBAGENTS.scout.refundFraction,
+  cap: SUBAGENTS.scout.cap,
+});
+export const COCS_SCAN_RADIUS = 12;
+export const COCS_SCAN_ARRIVE = 4;
+export const COCS_SPOT_SECONDS = 8;
+export const COCS_SPOT_DAMAGE_BONUS = 0.15;
 // Objective score banked when a node flips. Objectives are primary (§6A.4).
 export const COCS_CAPTURE_POINTS = Object.freeze({front: 10, economy: 15, relay: 20, hq: 0, array: 50});
 export const COCS_OPENING_FRACTION = 0.22;
@@ -317,6 +335,25 @@ export function cocsTemplate(mode, arena, config = {}) {
     dominance: {team: null, progress: 0, target: Math.max(1, num(objective.dominanceHold, 90)), fast: false},
     scores: {0: 0, 1: 0},
     income: {0: 0, 1: 0},
+    // --- §6.5/§6A.5 two-layer economy ---------------------------------------
+    flux: {0: FLUX_START, 1: FLUX_START},
+    fluxCap: FLUX_CAP,
+    fluxEarned: {0: 0, 1: 0},
+    fluxSpent: {0: 0, 1: 0},
+    fluxUpkeep: {0: 0, 1: 0},
+    fluxIncome: {0: 0, 1: 0},
+    neglect: {0: neglectState(), 1: neglectState()},
+    // --- §8 SCOUT subagent ---------------------------------------------------
+    scoutCap: Math.max(1, Math.round(num(config?.objective?.scoutCap, COCS_SCOUT.cap))),
+    scanRadius: COCS_SCAN_RADIUS,
+    spotSeconds: COCS_SPOT_SECONDS,
+    spotBonus: COCS_SPOT_DAMAGE_BONUS,
+    scans: {0: null, 1: null},
+    scouts: {0: null, 1: null},
+    scoutSlots: {0: null, 1: null},
+    scoutStats: {0: {spawned: 0, killed: 0, expired: 0, scans: 0}, 1: {spawned: 0, killed: 0, expired: 0, scans: 0}},
+    spots: {},
+    orderStats: {issued: 0, completed: 0, byVerb: {HOLD: 0, ATTACK: 0, SCAN: 0}},
     cuts: [],
     tasks: {0: null, 1: null},
     pendingOrders: [],
@@ -521,6 +558,18 @@ export function processCocsOrder(match, state, order) {
   if ((team !== 0 && team !== 1) || !COCS_ORDER_VERBS.includes(verb) || target === null) return reject();
   const node = nodeById(state, target);
   if (!node) return reject();
+  if (verb === 'SCAN') {
+    const ok = issueScanOrder(match, state, team, node);
+    entry.ok = ok;
+    state.orderLog.push(entry);
+    trimOrderLog(state);
+    if (!ok) return false;
+    state.orderStats.issued = num(state.orderStats.issued, 0) + 1;
+    state.orderStats.byVerb[verb] = num(state.orderStats.byVerb?.[verb], 0) + 1;
+    if (state.scans?.[team]) { state.scans[team].peerId = entry.peerId; state.scans[team].cardId = entry.cardId; }
+    match?.emit?.('cocs-order', {team, verb, node: node.id, tick: entry.tick, peerId: entry.peerId, cardId: entry.cardId});
+    return true;
+  }
   const owned = node.owner === team;
   if (verb === 'ATTACK' && !capturableBy(state, node.id, team)) return reject();
   if (verb === 'HOLD' && !owned && !capturableBy(state, node.id, team)) return reject();
@@ -528,6 +577,8 @@ export function processCocsOrder(match, state, order) {
   entry.ok = true;
   state.orderLog.push(entry);
   trimOrderLog(state);
+  state.orderStats.issued = num(state.orderStats.issued, 0) + 1;
+  state.orderStats.byVerb[verb] = num(state.orderStats.byVerb?.[verb], 0) + 1;
   match?.emit?.('cocs-order', {team, verb, node: node.id, tick: entry.tick, peerId: entry.peerId, cardId: entry.cardId});
   return true;
 }
@@ -545,6 +596,280 @@ export function stubCocsPolicy(state, context = {}) {
     orders.push({tick, peerId: `chief-${team}`, cardId: `${team}-${tick}`, team, verb: 'ATTACK', target: front});
   }
   return orders;
+}
+
+// ---------------------------------------------------------------------------
+// §6A.5 Personal REQUISITION (`REQ`) — per-actor accrual.
+// ---------------------------------------------------------------------------
+// `REQ` lives on the actor (`actor.req`) and mirrors into `scoreStats` so the
+// objective-first scoreboard and the §6A.9 conversion can read one number. The
+// helpers are pure; `stepCocs` owns the clock.
+export function addActorReq(actor, amount) {
+  if (!actor) return 0;
+  const delta = Math.max(0, num(amount, 0));
+  if (!(delta > 0)) return num(actor.req, 0);
+  actor.req = num(actor.req, 0) + delta;
+  actor.reqEarned = num(actor.reqEarned, 0) + delta;
+  if (!actor.scoreStats || typeof actor.scoreStats !== 'object') actor.scoreStats = {};
+  actor.scoreStats.reqEarned = num(actor.scoreStats.reqEarned, 0) + delta;
+  return actor.req;
+}
+
+// ---------------------------------------------------------------------------
+// §8 SCOUT subagent (V0b). One first-class actor per team, spawned by a `SCAN`
+// order, driven by the RNG-free `cocsScoutInput` policy in `cocs-bots.mjs`,
+// retired on lifespan or death. `match.actors[id]` index identity is load-
+// bearing across the engine, so a scout slot is *recycled* rather than spliced
+// out of the roster: the actor stays at the tail with a stable id.
+// ---------------------------------------------------------------------------
+function nextActorId(match) {
+  let next = 0;
+  for (const actor of match?.actors ?? []) if (num(actor?.id, -1) >= next) next = actor.id + 1;
+  return next;
+}
+
+function hqNodeFor(state, team) {
+  return (state?.nodes ?? []).find(node => node.archetype === 'hq' && node.owner === team) ?? null;
+}
+
+// Lattice hop count between two nodes; 0 when they are the same/unreachable.
+function latticeHops(state, fromId, toId) {
+  if (!fromId || !toId) return 0;
+  if (fromId === toId) return 0;
+  const seen = new Set([fromId]);
+  const queue = [[fromId, 0]];
+  while (queue.length) {
+    const [id, depth] = queue.shift();
+    for (const next of neighbors(state, id)) {
+      if (seen.has(next)) continue;
+      if (next === toId) return depth + 1;
+      seen.add(next);
+      queue.push([next, depth + 1]);
+    }
+  }
+  return 0;
+}
+
+export function activeScoutActor(match, state, team) {
+  const actor = scoutSlotActor(match, state, team);
+  if (!actor || actor.health <= 0) return null;
+  return actor;
+}
+
+// The recycled slot actor even while dead — used by the lifecycle step to retire
+// a killed scout and pay the bounty.
+function scoutSlotActor(match, state, team) {
+  const id = state?.scouts?.[team];
+  if (id === null || id === undefined) return null;
+  const actor = match?.actors?.[id];
+  if (!actor || actor.isScout !== true || actor.scoutActive === false) return null;
+  return actor;
+}
+
+function ensureScoutSlot(match, state, team) {
+  const slotId = state.scoutSlots?.[team];
+  if (slotId !== null && slotId !== undefined && match.actors[slotId]) return match.actors[slotId];
+  const actor = match.actor(nextActorId(match), 'chatgpt', 'openclaw');
+  actor.team = team;
+  actor.isNpc = true;
+  actor.isScout = true;
+  actor.scoutTeam = team;
+  actor.scoutActive = false;
+  actor.name = 'Scout';
+  actor.meleeDamage = 0;
+  actor.npcProfile = {health: SUBAGENTS.scout.health, armor: SUBAGENTS.scout.armor, speedMult: 1, damageMult: 0.15, scale: 0.82, color: team === 0 ? '#7fd4ff' : '#ffb27f', accent: '#0b1a24', points: 0};
+  match.actors.push(actor);
+  state.scoutSlots[team] = actor.id;
+  return actor;
+}
+
+function scoutTargetPoint(state, nodeId) {
+  const node = nodeById(state, nodeId);
+  return node ? {x: node.x, y: num(node.y, 0), z: node.z} : null;
+}
+
+// Spawn (or re-activate) a team's scout against a target node. Deducts the
+// §8.1 spawn cost from the team `FLUX` pool; returns null when unaffordable or
+// the cap is already filled.
+export function spawnScout(match, state, team, nodeId) {
+  if (!match || !state) return null;
+  if (activeScoutActor(match, state, team)) return null;
+  if (num(state.flux?.[team], 0) < COCS_SCOUT.spawnCost) return null;
+  const actor = ensureScoutSlot(match, state, team);
+  state.flux[team] = num(state.flux[team], 0) - COCS_SCOUT.spawnCost;
+  state.fluxSpent[team] = num(state.fluxSpent[team], 0) + COCS_SCOUT.spawnCost;
+  state.scouts[team] = actor.id;
+  actor.scoutActive = true;
+  actor.scoutScanned = false;
+  actor.scoutReturning = false;
+  actor.scoutIdle = false;
+  actor.scoutScans = 0;
+  actor.scoutTargetNode = nodeId ?? null;
+  actor.scoutTarget = scoutTargetPoint(state, nodeId);
+  actor.scoutExpireTick = num(state.tick, 0) + Math.max(1, Math.round(COCS_SCOUT.lifespanSeconds / (RULES.dt || 1 / 60)));
+  if (!actor.bot) actor.bot = {route: [], think: 0, target: -1, memory: 0, reaction: 0, stuck: 0, last: {x: 0, y: 0, z: 0}, state: 'roam', patrol: 0, flank: null, flankDone: false, recover: 0, suppressed: 0, threat: -1, standoff: null, strafeReverse: -99};
+  match.spawn(actor);
+  // Park the scout at its own HQ: a deterministic, legible rally point that
+  // does not depend on the engine's spawn-scoring roll.
+  const home = hqNodeFor(state, team);
+  if (home) {
+    actor.x = home.x; actor.z = home.z; actor.y = num(home.y, 0);
+    actor.lastValid = {x: actor.x, y: actor.y, z: actor.z};
+    actor.vx = actor.vy = actor.vz = 0;
+  }
+  actor.isScout = true;
+  actor.scoutActive = true;
+  state.scoutStats[team].spawned = num(state.scoutStats[team].spawned, 0) + 1;
+  match.emit?.('cocs-scout-spawn', {team, actor: actor.id, node: nodeId ?? null, cost: COCS_SCOUT.spawnCost, target: actor.scoutTarget});
+  return actor;
+}
+
+// Retire a scout without touching roster indices. Dead/expired slots stay in
+// `match.actors` with health 0 and an effectively infinite respawn timer so the
+// engine never revives them; the slot is reused by the next spawn.
+function retireScout(match, state, team, actor, reason = 'expire') {
+  if (!actor || actor.isScout !== true || actor.scoutActive === false) return false;
+  const stats = state.scoutStats[team] ?? (state.scoutStats[team] = {spawned: 0, killed: 0, expired: 0, scans: 0});
+  const completed = actor.scoutScanned === true;
+  if (reason === 'killed') {
+    stats.killed = num(stats.killed, 0) + 1;
+    // §8.2 bounty: the enemy team is paid `clamp(round(15 x upkeep), 6, 48)`
+    // FLUX, plus the §6A.4 kill-subagent score. The figure is the subagent's
+    // live supply-load cost, captured on the last economy tick.
+    const upkeep = num(actor.scoutUpkeep, subagentUpkeep(SUBAGENTS.scout.id, 1, {hops: 0, foundries: 0}));
+    const bounty = Math.max(6, Math.min(48, Math.round(15 * upkeep)));
+    state.flux[1 - team] = Math.min(num(state.fluxCap, FLUX_CAP), num(state.flux[1 - team], 0) + bounty);
+    state.fluxEarned[1 - team] = num(state.fluxEarned[1 - team], 0) + bounty;
+    const reward = scoreEvent({kind: 'killSubagent'});
+    state.scores[1 - team] = num(state.scores[1 - team], 0) + (typeof reward.teamOP === 'number' ? reward.teamOP : 0);
+    const killer = num(actor.lastHitBy, -1) >= 0 ? match.actors[actor.lastHitBy] : null;
+    if (killer && killer.team !== team) {
+      addActorReq(killer, reward.req);
+      killer.scoreStats.objectivePoints = num(killer.scoreStats.objectivePoints, 0) + reward.personalOP;
+      killer.scoreStats.subagentKills = num(killer.scoreStats.subagentKills, 0) + 1;
+    }
+    match.emit?.('cocs-scout-killed', {team, actor: actor.id, killer: killer?.id ?? null, bounty, x: actor.x, z: actor.z});
+  } else {
+    stats.expired = num(stats.expired, 0) + 1;
+    if (completed) {
+      const refund = Math.round(COCS_SCOUT.spawnCost * COCS_SCOUT.refundFraction);
+      state.flux[team] = Math.min(num(state.fluxCap, FLUX_CAP), num(state.flux[team], 0) + refund);
+      state.fluxEarned[team] = num(state.fluxEarned[team], 0) + refund;
+    }
+    match.emit?.('cocs-scout-expire', {team, actor: actor.id, scanned: completed, reason});
+  }
+  actor.scoutActive = false;
+  actor.health = 0;
+  actor.dead = 1e9;
+  actor.bot = null;
+  actor.scoutTarget = null;
+  actor.scoutTargetNode = null;
+  actor.scoutReturning = false;
+  actor.scoutIdle = false;
+  actor.vx = actor.vy = actor.vz = 0;
+  const home = hqNodeFor(state, team);
+  if (home) { actor.x = home.x; actor.z = home.z; actor.y = num(home.y, 0); }
+  state.scouts[team] = null;
+  return true;
+}
+
+// Mark every living enemy inside the scan area. Deterministic: actor order is
+// the roster order, and the marks are pure state (no RNG, no wall clock).
+function performScan(match, state, team, actor, at) {
+  const spots = state.spots ?? (state.spots = {});
+  const until = num(state.tick, 0) + Math.max(1, Math.round(COCS_SPOT_SECONDS / (RULES.dt || 1 / 60)));
+  let marked = 0;
+  for (const target of match.actors ?? []) {
+    if (!target || target.health <= 0) continue;
+    if (target.team !== 0 && target.team !== 1) continue;
+    if (target.team === team) continue;
+    if (Math.hypot(num(target.x, 0) - at.x, num(target.z, 0) - at.z) > COCS_SCAN_RADIUS) continue;
+    spots[target.id] = {team, until, by: actor.id, x: num(target.x, 0), z: num(target.z, 0), atTick: num(state.tick, 0)};
+    marked++;
+  }
+  actor.scoutScans = num(actor.scoutScans, 0) + 1;
+  state.scoutStats[team].scans = num(state.scoutStats[team].scans, 0) + 1;
+  match.emit?.('cocs-scan', {team, actor: actor.id, x: at.x, z: at.z, marked, until});
+  return marked;
+}
+
+// Issue a `SCAN` order. Spawns a scout when the team has none (and can pay);
+// otherwise re-targets the live one. Returns false when the order is illegal.
+export function issueScanOrder(match, state, team, node) {
+  const active = activeScoutActor(match, state, team);
+  if (!active) {
+    const spawned = spawnScout(match, state, team, node.id);
+    if (!spawned) return false;
+  } else {
+    active.scoutTargetNode = node.id;
+    active.scoutTarget = scoutTargetPoint(state, node.id);
+    active.scoutReturning = false;
+    active.scoutScanned = false;
+  }
+  state.scans[team] = {nodeId: node.id, tick: num(state.tick, 0), until: num(state.tick, 0) + Math.max(1, num(state.orderTtlTicks, 1)), peerId: null, cardId: null};
+  return true;
+}
+
+// Advance one team's scout one fixed step: arrive -> scan -> return -> retire.
+function stepScoutTeam(match, state, team, dt) {
+  const actor = scoutSlotActor(match, state, team);
+  if (!actor) return;
+  if (actor.health <= 0) { retireScout(match, state, team, actor, 'killed'); return; }
+  if (num(state.tick, 0) >= num(actor.scoutExpireTick, Infinity)) { retireScout(match, state, team, actor, 'expire'); return; }
+  const scan = state.scans?.[team];
+  if (scan && actor.scoutReturning !== true) {
+    const node = nodeById(state, scan.nodeId);
+    if (node) {
+      actor.scoutTargetNode = node.id;
+      actor.scoutTarget = scoutTargetPoint(state, node.id);
+    }
+  }
+  if (actor.scoutScanned !== true) {
+    const target = actor.scoutTarget;
+    if (target && Math.hypot(actor.x - target.x, actor.z - target.z) <= COCS_SCAN_ARRIVE) {
+      performScan(match, state, team, actor, target);
+      actor.scoutScanned = true;
+      actor.scoutReturning = true;
+      const home = hqNodeFor(state, team);
+      actor.scoutTargetNode = home ? home.id : null;
+      actor.scoutTarget = home ? {x: home.x, y: num(home.y, 0), z: home.z} : null;
+    }
+  } else if (actor.scoutReturning === true) {
+    const home = hqNodeFor(state, team);
+    if (!home || Math.hypot(actor.x - home.x, actor.z - home.z) <= COCS_SCAN_ARRIVE) retireScout(match, state, team, actor, 'return');
+  }
+  void dt;
+}
+
+// Objective presence `REQ` (§6A.5): +0.25/s while a living player stands in a
+// node radius their team owns or that is contested. No AFK drip.
+function accruePresenceReq(match, state, dt) {
+  for (const node of capturableNodes(state)) {
+    for (const actor of match.actors ?? []) {
+      if (!actor || actor.health <= 0) continue;
+      if (actor.team !== 0 && actor.team !== 1) continue;
+      if (actor.isScout === true) continue;
+      if (node.owner !== actor.team && node.contested !== true) continue;
+      if (Math.hypot(actor.x - node.x, actor.z - node.z) > node.r) continue;
+      addActorReq(actor, REQ_EARN.objectivePresencePerSecond * dt);
+    }
+  }
+}
+
+// ---------------------------------------------------------------------------
+// §8.1 SPOT combat leverage. Read by `Match.damage` (mode-guarded): a damage
+// source on the spotting team deals `+15%` to a marked target while its mark is
+// live. Pure; returns 1 for every non-cocs path.
+// ---------------------------------------------------------------------------
+export function cocsSpotDamageScale(match, source, target) {
+  const state = match?.objectiveState;
+  if (!state || state.kind !== COCS_KIND) return 1;
+  if (!source || !target || source === target) return 1;
+  if (source.team !== 0 && source.team !== 1) return 1;
+  const spot = state.spots?.[target.id];
+  if (!spot || spot.team !== source.team) return 1;
+  if (num(state.tick, 0) > num(spot.until, 0)) return 1;
+  return 1 + COCS_SPOT_DAMAGE_BONUS;
 }
 
 // ---------------------------------------------------------------------------
@@ -587,7 +912,33 @@ function captureNode(match, state, node, team, actors) {
   node.progress = {0: 0, 1: 0};
   node.contested = false;
   state.scores[team] = num(state.scores[team], 0) + (COCS_CAPTURE_POINTS[node.archetype] ?? 0);
-  for (const actor of actors ?? []) actor.scoreStats.objectiveCaptures = (actor.scoreStats.objectiveCaptures ?? 0) + 1;
+  // §6A.4/§6A.5 capture reward: each participating actor banks `+8 REQ` and the
+  // personal objective term from the one economy table.
+  const capture = scoreEvent({kind: 'capture'});
+  const participants = [...(actors ?? [])].sort((a, b) => a.id - b.id);
+  for (const actor of participants) {
+    actor.scoreStats.objectiveCaptures = (actor.scoreStats.objectiveCaptures ?? 0) + 1;
+    addActorReq(actor, capture.req);
+    actor.scoreStats.objectivePoints = num(actor.scoreStats.objectivePoints, 0) + capture.personalOP;
+  }
+  // §6A.6 order completion: a live HOLD/ATTACK task on the captured node pays
+  // `+20` team OP and `+15 REQ` to every contributor in radius, capped so a
+  // whole team cannot farm one order. The issuer's extra personal OP needs a
+  // seat id; the V0b duty Chief is not a player, so only contributors are paid.
+  if (nodeOrderTeams(state, node)[team] && state.tasks?.[team]) {
+    state.tasks[team] = null;
+    state.scores[team] = num(state.scores[team], 0) + ORDER_REWARD.teamOP;
+    state.orderStats.completed = num(state.orderStats.completed, 0) + 1;
+    const contributors = participants.slice(0, Math.max(1, ORDER_REWARD.contributorCap));
+    for (const actor of contributors) {
+      const reward = scoreEvent({kind: 'order', role: 'contributor'});
+      addActorReq(actor, reward.req);
+      actor.scoreStats.objectivePoints = num(actor.scoreStats.objectivePoints, 0) + reward.personalOP;
+      actor.scoreStats.ordersContributed = num(actor.scoreStats.ordersContributed, 0) + 1;
+      actor.ordersContributed = num(actor.ordersContributed, 0) + 1;
+    }
+    match?.emit?.('cocs-order-complete', {team, node: node.id, contributors: contributors.map(actor => actor.id), teamOP: ORDER_REWARD.teamOP});
+  }
   if (node.archetype === 'array') state.arrayWinner = team;
   match?.emit?.('cocs-capture', {node: node.id, team, archetype: node.archetype, score: state.scores[team]});
   updateLiveNodes(state);
@@ -662,12 +1013,37 @@ export function cocsOutcome(match) {
 }
 
 // ---------------------------------------------------------------------------
-// Snapshot subtree. Byte-for-byte the frozen interface: id-keyed `nodes`,
-// `scores`, `liveNodeIds` and `winner` (all delta-friendly).
+// Snapshot subtree. Id-keyed and delta-friendly: `nodes`, `scores`,
+// `liveNodeIds` and `winner` are the frozen V0a interface; the V0b economy adds
+// `flux`/`req`/`scouts`/`spots` additively (no base64, no actor object copies).
 // ---------------------------------------------------------------------------
 export function cocsSnapshot(match) {
   const state = match?.objectiveState;
   if (!state || state.kind !== COCS_KIND) return null;
+  const scouts = [];
+  for (const team of [0, 1]) {
+    const actor = activeScoutActor(match, state, team);
+    if (!actor) continue;
+    scouts.push({
+      id: actor.id, team,
+      node: actor.scoutTargetNode ?? null,
+      x: num(actor.x, 0), z: num(actor.z, 0),
+      scanned: actor.scoutScanned === true,
+      returning: actor.scoutReturning === true,
+      idle: actor.scoutIdle === true,
+      expireTick: num(actor.scoutExpireTick, 0),
+    });
+  }
+  const spots = [];
+  for (const id of Object.keys(state.spots ?? {}).map(Number).sort((a, b) => a - b)) {
+    const spot = state.spots[id];
+    if (!spot) continue;
+    spots.push({id, team: spot.team, until: num(spot.until, 0), x: num(spot.x, 0), z: num(spot.z, 0), by: spot.by ?? null});
+  }
+  const req = (match?.actors ?? [])
+    .filter(actor => actor && (actor.team === 0 || actor.team === 1))
+    .sort((a, b) => a.id - b.id)
+    .map(actor => ({id: actor.id, req: num(actor.req, 0), earned: num(actor.reqEarned, 0), spent: num(actor.reqSpent, 0)}));
   return {
     nodes: state.nodes.map(node => ({
       id: node.id,
@@ -682,6 +1058,26 @@ export function cocsSnapshot(match) {
     scores: {0: num(state.scores?.[0], 0), 1: num(state.scores?.[1], 0)},
     liveNodeIds: [...(state.liveNodeIds ?? [])],
     winner: state.winner ?? null,
+    // --- V0b economy / subagent surface (UI: exact field names) ------------
+    flux: {0: num(state.flux?.[0], 0), 1: num(state.flux?.[1], 0)},
+    fluxCap: num(state.fluxCap, FLUX_CAP),
+    fluxIncome: {0: num(state.fluxIncome?.[0], 0), 1: num(state.fluxIncome?.[1], 0)},
+    fluxUpkeep: {0: num(state.fluxUpkeep?.[0], 0), 1: num(state.fluxUpkeep?.[1], 0)},
+    fluxSpent: {0: num(state.fluxSpent?.[0], 0), 1: num(state.fluxSpent?.[1], 0)},
+    neglect: {0: num(state.neglect?.[0]?.value, 0), 1: num(state.neglect?.[1]?.value, 0)},
+    req,
+    scouts,
+    scoutStats: {
+      0: {...(state.scoutStats?.[0] ?? {})},
+      1: {...(state.scoutStats?.[1] ?? {})},
+    },
+    spots,
+    scans: {0: state.scans?.[0]?.nodeId ?? null, 1: state.scans?.[1]?.nodeId ?? null},
+    orderStats: {issued: num(state.orderStats?.issued, 0), completed: num(state.orderStats?.completed, 0), byVerb: {...(state.orderStats?.byVerb ?? {HOLD: 0, ATTACK: 0, SCAN: 0})}},
+    scoutCap: num(state.scoutCap, COCS_SCOUT.cap),
+    scanRadius: COCS_SCAN_RADIUS,
+    spotSeconds: COCS_SPOT_SECONDS,
+    spotBonus: COCS_SPOT_DAMAGE_BONUS,
   };
 }
 
@@ -724,6 +1120,55 @@ export function stepCocs(match, dt = RULES.dt) {
   const {income} = connectivityIncome(state);
   state.income = income;
   for (const team of [0, 1]) state.scores[team] = num(state.scores[team], 0) + income[team] * dt;
+
+  // 4a. §6A.5 objective presence `REQ` (personal).
+  accruePresenceReq(match, state, dt);
+
+  // 4b. §6.5 team `FLUX`: passive + connected-node income, then the §6.5
+  //     supply-load upkeep of every active subagent. `NEGLECT` only ever scales
+  //     the passive term and is inert without a seated human commander.
+  for (const team of [0, 1]) {
+    const neglect = neglectTick(state.neglect?.[team] ?? neglectState(), dt, {humanCommander: false, activeOrder: false, contributed: false});
+    state.neglect[team] = neglect;
+    const passive = neglectPassiveFlux(FLUX_PASSIVE_PER_SECOND, neglect);
+    const rate = passive + income[team];
+    state.fluxIncome[team] = rate;
+    const before = num(state.flux[team], 0);
+    const grown = Math.min(num(state.fluxCap, FLUX_CAP), before + rate * dt);
+    state.fluxEarned[team] = num(state.fluxEarned[team], 0) + Math.max(0, grown - before);
+    state.flux[team] = grown;
+  }
+  for (const team of [0, 1]) {
+    const scout = activeScoutActor(match, state, team);
+    let upkeep = 0;
+    if (scout) {
+      const home = hqNodeFor(state, team);
+      const hops = scout.scoutTargetNode && home ? latticeHops(state, home.id, scout.scoutTargetNode) : 0;
+      upkeep = subagentUpkeep(SUBAGENTS.scout.id, 1, {hops, foundries: 0});
+    }
+    state.fluxUpkeep[team] = upkeep;
+    if (scout) {
+      scout.scoutUpkeep = upkeep;
+      const drain = upkeep * dt;
+      if (num(state.flux[team], 0) >= drain) {
+        state.flux[team] = num(state.flux[team], 0) - drain;
+        scout.scoutIdle = false;
+      } else {
+        // `FLUX` 0: the agent goes IDLE rather than dying (§6.5).
+        state.flux[team] = 0;
+        scout.scoutIdle = true;
+      }
+    }
+  }
+
+  // 4c. §8 SCOUT lifecycle: arrive -> scan -> return -> retire, plus expiry.
+  for (const team of [0, 1]) stepScoutTeam(match, state, team, dt);
+
+  // 4d. Expire `SPOT` marks on the fixed tick clock.
+  for (const key of Object.keys(state.spots ?? {})) {
+    const spot = state.spots[key];
+    if (!spot || num(state.tick, 0) > num(spot.until, 0)) delete state.spots[key];
+  }
 
   // 5. Dominance, front and the team-score mirror (HUD / Match.leaders).
   updateDominance(state, dt);
