@@ -346,10 +346,19 @@ export function cocsDirectorView(snapshot) {
   const waves = snapshot.waves ?? {};
   const command = snapshot.command ?? null;
   const fronts = Array.isArray(director.fronts) ? director.fronts : [];
+  const tierCopy = director.tierCopy ?? {};
+  const intermission = director.intermission ?? null;
+  const bonus = Array.isArray(snapshot.bonus) ? snapshot.bonus : [];
   return {
     coop: true,
     tier: director.tier ?? 'D1',
     tierLabel: director.tierLabel ?? '',
+    tierCopy: {
+      label: tierCopy.label ?? director.tierLabel ?? '',
+      copy: tierCopy.copy ?? '',
+      modifiers: Array.isArray(tierCopy.modifiers) ? [...tierCopy.modifiers] : [],
+      band: Array.isArray(tierCopy.band) ? [...tierCopy.band] : [],
+    },
     phase: director.phase ?? 'intermission',
     wave: num(director.wave, 0),
     waveCount: num(director.waveCount, 5),
@@ -380,6 +389,43 @@ export function cocsDirectorView(snapshot) {
       repairs: num(siege.repairs, 0),
     },
     waves: {cleared: num(waves.cleared, 0), par: num(waves.par, 5), forceAlive: num(waves.forceAlive, 0), forceTotal: num(waves.forceTotal, 0)},
+    intermission: intermission ? {
+      open: intermission.open === true,
+      secondsRemaining: num(intermission.secondsRemaining, 0),
+      budget: num(intermission.budget, 0),
+      spent: num(intermission.spent, 0),
+      windows: num(intermission.windows, 0),
+      byType: {
+        FORTIFY: num(intermission.byType?.FORTIFY, 0), REPAIR: num(intermission.byType?.REPAIR, 0),
+        RESUPPLY: num(intermission.byType?.RESUPPLY, 0), REINFORCE: num(intermission.byType?.REINFORCE, 0),
+      },
+      sinks: (Array.isArray(intermission.sinks) ? intermission.sinks : []).map(sink => ({
+        verb: sink.verb, id: sink.id ?? sink.verb, label: sink.label ?? sink.verb,
+        cost: num(sink.cost, 0), target: sink.target ?? 'team',
+        description: sink.description ?? '',
+        available: sink.available !== false, affordable: sink.affordable !== false, enabled: sink.enabled === true,
+      })),
+      log: (Array.isArray(intermission.log) ? intermission.log : []).slice(-4).map(entry => ({...entry})),
+    } : null,
+    bonus: bonus.map(entry => ({
+      id: entry.id, label: entry.label ?? entry.id, state: entry.state ?? 'open',
+      progress: num(entry.progress, 0), target: Math.max(1, num(entry.target, 1)),
+    })),
+    bonusTelemetry: snapshot.bonusTelemetry ? {
+      done: [...(snapshot.bonusTelemetry.done ?? [])],
+      failed: [...(snapshot.bonusTelemetry.failed ?? [])],
+      flux: num(snapshot.bonusTelemetry.flux, 0),
+      req: num(snapshot.bonusTelemetry.req, 0),
+      commendations: num(snapshot.bonusTelemetry.commendations, 0),
+    } : {done: [], failed: [], flux: 0, req: 0, commendations: 0},
+    reserve: snapshot.reserves ? {enabled: snapshot.reserves.enabled === true, tickets: num(snapshot.reserves.tickets, 0), burns: num(snapshot.reserves.burns, 0)} : null,
+    rewards: snapshot.rewards ? {
+      win: snapshot.rewards.win === true, retention: num(snapshot.rewards.retention, 1),
+      tierRewardMultiplier: num(snapshot.rewards.tierRewardMultiplier, 1),
+      commendations: num(snapshot.rewards.commendations, 0),
+      leftover: num(snapshot.rewards.leftover, 0),
+      bonusCommendations: num(snapshot.rewards.bonusCommendations, 0),
+    } : null,
     command: command ? {
       humans: num(command.humans, 0),
       slicePerPlayer: num(command.slicePerPlayer, 0),

@@ -20,13 +20,14 @@
 // ---------------------------------------------------------------------------
 
 import {RULES} from './data.mjs';
-import {SUBAGENTS} from './cocs-economy.mjs';
-import {capturableNodes, nodeById} from './cocs.mjs';
+import {SUBAGENTS, convertCoopReq} from './cocs-economy.mjs';
+import {addActorReq, capturableNodes, compareCocsOrders, nodeById, repairLink} from './cocs.mjs';
 import {spawnGroup, updateEnemyRoles} from './singleplayer.mjs';
 import {
-  COOP_ECONOMY, COOP_PACING, COOP_SIEGE, DIRECTOR_COSTS,
-  OPERATIONS_WAVE_COUNT, DEFAULT_COCS_TIER, directorTier, normalizeCocsTier,
-  directorWavePlan,
+  COOP_AUTO_SPEND, COOP_BONUS_ORDER, COOP_ECONOMY, COOP_PACING,
+  COOP_RESERVE, COOP_REWARDS, COOP_SIEGE, COOP_SINK_ORDER, COOP_SINKS, DIRECTOR_COSTS,
+  OPERATIONS_WAVE_COUNT, DEFAULT_COCS_TIER, bonusObjective, coopSink, directorTier,
+  directorTierCopy, normalizeCocsTier, directorWavePlan,
 } from './cocs-difficulty.mjs';
 import {
   directorAccrue, directorBossType, directorCap, directorForceAlive, directorFronts,
@@ -65,8 +66,33 @@ export function createCoopState(state, {tier = DEFAULT_COCS_TIER} = {}) {
     wavesCleared: 0,
     phase: 'intermission',
     intermission: true,
+    intermissionOpen: false,
     intermissionTicks: ticks(COOP_PACING.intermissionLeadSeconds),
     phaseTicks: 0,
+    // --- O1b intermission spend window ------------------------------------
+    pendingSpends: [],
+    spendLog: [],
+    spendStats: {FORTIFY: 0, REPAIR: 0, RESUPPLY: 0, REINFORCE: 0, flux: 0, windows: 0},
+    fortify: {},                 // nodeId -> {resist, untilWave}
+    threadBonus: 0,
+    squadIds: [],
+    autoSpend: COOP_AUTO_SPEND.enabled,
+    // --- O1b bonus objectives ---------------------------------------------
+    bonus: {
+      queue: [],
+      open: [],
+      state: [],                 // {id,label,state:'open'|'done'|'failed',progress,target}
+      done: [],
+      failed: [],
+      flux: 0,
+      req: 0,
+      commendations: 0,
+    },
+    bonusHoldTicks: 0,
+    gateLost: false,
+    // --- O1b optional team-wipe RESERVE -----------------------------------
+    reserve: {enabled: COOP_RESERVE.enabled, tickets: COOP_RESERVE.start, wipeTicks: 0, burns: 0},
+    rewards: null,
     waveTicks: 0,
     waveTimerTicks: 0,
     tick: 0,
@@ -121,7 +147,9 @@ export function createCoopState(state, {tier = DEFAULT_COCS_TIER} = {}) {
     stats: {
       spawns: 0, spent: 0, reinforcements: 0, escalations: 0, overruns: 0,
       waveDurations: [], hqDamage: 0, hqRepairs: 0, peakPressure: data.start, clampedTicks: 0,
+      fluxPinnedTicks: 0, reserveBurns: 0, partialPayouts: 0,
     },
+    windowSpend: {FORTIFY: 0, REPAIR: 0, RESUPPLY: 0, REINFORCE: 0},
     winner: null,
     message: null,
   };
@@ -138,6 +166,11 @@ export function setCoopTier(state, tier) {
   coop.pressure = data.start;
   coop.stats.peakPressure = data.start;
   coop.initialized = false;
+  // Bonus/queue and the tier's simultaneous-open budget are tier data, so a
+  // mid-run tier change rebuilds them deterministically.
+  coop.bonus = {queue: [], open: [], state: [], done: [], failed: [], flux: 0, req: 0, commendations: 0};
+  coop.bonusHoldTicks = 0;
+  coop.gateLost = false;
   return coop;
 }
 
@@ -163,6 +196,9 @@ export function initCoop(match, state) {
   coop.intermission = true;
   coop.phase = 'intermission';
   coop.intermissionTicks = ticks(COOP_PACING.intermissionLeadSeconds);
+  coop.reserve.enabled = match?.config?.objective?.reserve === true || match?.config?.coopReserve === true || coop.reserve.enabled === true;
+  if (!coop.bonus.queue.length && !coop.bonus.open.length && !coop.bonus.state.length) coop.bonus.queue = [...COOP_BONUS_ORDER];
+  openBonuses(match, coop);
   match.emit?.('director-init', {tier: coop.tier, waveCount: coop.waveCount, boss: coop.bossType, hq: coop.siege.hqId});
   return coop;
 }
@@ -200,7 +236,7 @@ export function coopCommandState(match, state, nowTick = null) {
     slicePerPlayer: sliceCount,
     executor,
     leaseUntil: (Math.floor(tick / COOP_EXECUTOR_LEASE_TICKS) + 1) * COOP_EXECUTOR_LEASE_TICKS,
-    threads: {used: coopActiveThreads(match), cap: Math.min(COOP_THREAD_CAP, (humans.length || 1) + 1)},
+    threads: {used: coopActiveThreads(match), cap: Math.min(COOP_THREAD_CAP, (humans.length || 1) + 1 + num(coop.threadBonus, 0))},
     slices: [{id: 0, allowance}, {id: 1, allowance}],
     flux,
   };
@@ -220,6 +256,410 @@ export function coopOrderGate(match, state, {team, verb, peerId} = {}) {
     if (command.humans > 0 && !chief && String(peerId) !== String(command.executor)) return {ok: false, reason: 'executor'};
   }
   return {ok: true, reason: null};
+}
+
+// ---------------------------------------------------------------------------
+// O1b intermission spend window + FLUX sinks (design §3.3).
+//
+// The window is the between-wave `intermission` phase *after* at least one wave
+// has been cleared (the pre-wave-1 deploy beat is not a spend window). Every
+// spend is a `{tick, peerId, cardId, verb, target}` record that is queued on
+// `coop.pendingSpends`, sorted by the same `(tick, peerId, cardId)` comparator as
+// an order, and applied by `coopSpend`. Effects route through the shipped
+// economy helpers (team FLUX debit, `addActorReq`, `repairLink`) — no parallel
+// currency. `coopAutoSpend` lets a no-UI / AI-seat team exercise the sinks
+// deterministically so FLUX no longer pins at the cap.
+// ---------------------------------------------------------------------------
+export function intermissionOpen(coop) {
+  return Boolean(coop && coop.phase === 'intermission' && coop.intermissionOpen === true);
+}
+
+const CAPTURABLE_SINK_TARGETS = Object.freeze(['front', 'economy', 'relay']);
+
+function sinkTargetValid(state, sink, target) {
+  if (sink.target === 'node') {
+    const node = nodeById(state, target);
+    return Boolean(node && node.owner === 0 && CAPTURABLE_SINK_TARGETS.includes(node.archetype));
+  }
+  if (sink.target === 'hq') return nodeById(state, COOP_SIEGE.hqId) !== null;
+  return true;
+}
+
+function repairOneDevice(state) {
+  const devices = state?.traversal?.devices;
+  if (!devices) return false;
+  for (const id of Object.keys(devices).sort()) {
+    const device = devices[id];
+    if (device && device.state === 'cut') {
+      device.state = 'live';
+      device.timer = 0;
+      return true;
+    }
+  }
+  return false;
+}
+
+function applySink(match, state, sink, target) {
+  const coop = state.coop;
+  if (sink.verb === 'FORTIFY') {
+    const node = nodeById(state, target);
+    if (!node) return;
+    node.captureResist = sink.captureResist;
+    node.fortifiedWave = coop.wave;
+    coop.fortify[node.id] = {resist: sink.captureResist, untilWave: coop.wave + Math.max(1, sink.waves), atTick: num(coop.tick, 0)};
+    return;
+  }
+  if (sink.verb === 'REPAIR') {
+    const before = coop.siege.health;
+    coop.siege.health = Math.min(coop.siege.max, coop.siege.health + Math.max(0, num(sink.hqHeal, 0)));
+    coop.stats.hqRepairs = num(coop.stats.hqRepairs, 0) + Math.max(0, coop.siege.health - before);
+    const cut = [...(state.cuts ?? [])].sort((a, b) => String(a).localeCompare(String(b)))[0];
+    if (cut) repairLink(state, cut);
+    repairOneDevice(state);
+    return;
+  }
+  if (sink.verb === 'RESUPPLY') {
+    const reqMult = num(state.reqMult, 1);
+    for (const actor of match.actors ?? []) {
+      if (!actor || actor.health <= 0 || actor.team !== 0 || actor.isDirectorWave === true) continue;
+      if (actor.health < actor.maxHealth) actor.health = actor.maxHealth;
+      if (Number.isFinite(actor.maxArmor)) actor.armor = Math.max(num(actor.armor, 0), actor.maxArmor);
+      // Refill the ammo belt (the horde `resupplyHorde` pattern): only slots the
+      // actor already carries, or its active weapon, and never an infinite one.
+      if (Array.isArray(actor.ammo)) {
+        for (let index = 0; index < actor.ammo.length; index++) {
+          const amount = actor.ammo[index];
+          if (amount === Infinity) continue;
+          if (index !== actor.weapon && !(amount > 0)) continue;
+          const cap = match?.weaponForIndex?.(actor, index)?.cap;
+          if (Number.isFinite(cap)) actor.ammo[index] = cap;
+        }
+      }
+      addActorReq(actor, Math.max(0, num(sink.req, 0)) * reqMult);
+    }
+    return;
+  }
+  if (sink.verb === 'REINFORCE') {
+    spawnCoopSquad(match, state);
+    coop.threadBonus = Math.min(COOP_THREAD_CAP, num(coop.threadBonus, 0) + Math.max(0, num(sink.threads, 0)));
+  }
+}
+
+/** Apply one validated intermission spend. Returns `{ok, reason}`. */
+export function coopSpend(match, state, spend = {}) {
+  const coop = state?.coop;
+  if (!coop) return {ok: false, reason: 'no-coop'};
+  const verb = String(spend.verb ?? spend.id ?? '').trim().toUpperCase();
+  const sink = coopSink(verb);
+  if (!sink) return {ok: false, reason: 'unknown-sink'};
+  if (!intermissionOpen(coop)) return {ok: false, reason: 'window-closed'};
+  const target = spend.target ?? null;
+  if (!sinkTargetValid(state, sink, target)) return {ok: false, reason: 'target'};
+  const flux = num(state.flux?.[0], 0);
+  if (flux + 1e-9 < sink.cost) return {ok: false, reason: 'flux'};
+  applySink(match, state, sink, target);
+  state.flux[0] = flux - sink.cost;
+  state.fluxSpent[0] = num(state.fluxSpent?.[0], 0) + sink.cost;
+  coop.spendStats[verb] = num(coop.spendStats[verb], 0) + 1;
+  coop.spendStats.flux = num(coop.spendStats.flux, 0) + sink.cost;
+  coop.windowSpend[verb] = num(coop.windowSpend[verb], 0) + 1;
+  coop.spendLog.push({
+    tick: num(spend.tick, coop.tick), peerId: String(spend.peerId ?? ''), cardId: String(spend.cardId ?? ''),
+    verb, cost: sink.cost, target: target === null ? null : String(target), ok: true,
+  });
+  match.emit?.('coop-spend', {wave: coop.wave, verb, cost: sink.cost, target, budget: Math.round(num(state.flux[0], 0) * 100) / 100});
+  return {ok: true, reason: null, verb, cost: sink.cost, target};
+}
+
+/** Drain queued spends in the deterministic `(tick, peerId, cardId)` order. */
+export function processCocsSpends(match, state) {
+  const coop = state?.coop;
+  if (!coop) return 0;
+  const queued = (coop.pendingSpends ?? []).splice(0, coop.pendingSpends.length);
+  queued.sort(compareCocsOrders);
+  let applied = 0;
+  for (const spend of queued) {
+    if (!spend || typeof spend !== 'object') continue;
+    if (!Number.isFinite(spend.tick)) spend.tick = num(coop.tick, 0);
+    const result = coopSpend(match, state, spend);
+    if (result.ok) { applied++; continue; }
+    coop.spendLog.push({
+      tick: num(spend.tick, coop.tick), peerId: String(spend.peerId ?? ''), cardId: String(spend.cardId ?? ''),
+      verb: String(spend.verb ?? spend.id ?? '').toUpperCase(), cost: coopSink(spend.verb)?.cost ?? null,
+      target: spend.target ?? null, ok: false, reason: result.reason,
+    });
+  }
+  return applied;
+}
+
+// Friendly squad bot (REINFORCE). A normal AI ally on team 0, so the shipped
+// bot brain and `cocsTeamPlan` drive it; it never captures for the Director and
+// never counts as wave force. Capped so the actor budget stays ≤ 24.
+export function spawnCoopSquad(match, state) {
+  const coop = state?.coop;
+  if (!coop) return null;
+  const cap = Math.max(0, Math.round(num(COOP_SINKS.REINFORCE.squadCap, 1)));
+  const live = (coop.squadIds ?? []).filter(id => (actorById(match, id)?.health ?? 0) > 0).length;
+  if (live >= cap) return null;
+  const id = nextActorId(match);
+  const actor = match.actor(id, 'chatgpt', 'openclaw');
+  actor.team = 0;
+  actor.isCoopSquad = true;
+  actor.name = 'Squad';
+  actor.maxHealth = Math.max(num(actor.maxHealth, 0), 120);
+  actor.health = actor.maxHealth;
+  if (!actor.bot) actor.bot = {route: [], think: 0, target: -1, memory: 0, reaction: 0, stuck: 0, last: {x: 0, y: 0, z: 0}, state: 'roam', patrol: 0, flank: null, flankDone: false, recover: 0, suppressed: 0, threat: -1, standoff: null, strafeReverse: -99};
+  match.actors.push(actor);
+  match.spawn(actor);
+  coop.squadIds.push(id);
+  match.emit?.('coop-reinforce', {wave: coop.wave, actor: id, squad: live + 1, cap});
+  return id;
+}
+
+function autoSinkLimit(coop, state, sink) {
+  if (sink.verb === 'REPAIR') return 1;
+  if (sink.verb === 'RESUPPLY') return 2;
+  if (sink.verb === 'REINFORCE') return Math.max(0, Math.round(num(COOP_SINKS.REINFORCE.squadCap, 1)));
+  if (sink.verb === 'FORTIFY') return Math.max(1, capturableNodes(state).filter(node => node.owner === 0).length);
+  return 0;
+}
+
+function autoSinkTarget(match, state, sink) {
+  if (sink.verb === 'FORTIFY') {
+    const candidates = capturableNodes(state)
+      .filter(node => node.owner === 0 && num(node.captureResist, 0) <= 0)
+      .sort((a, b) => String(a.id).localeCompare(String(b.id)));
+    return candidates.length ? candidates[0].id : undefined;
+  }
+  if (sink.verb === 'REPAIR') {
+    const hq = nodeById(state, COOP_SIEGE.hqId);
+    const damaged = hq && state.coop.siege.health < state.coop.siege.max;
+    const cut = (state.cuts ?? []).length > 0 || Boolean(state?.traversal?.devices && Object.values(state.traversal.devices).some(device => device?.state === 'cut'));
+    return damaged || cut ? null : undefined;
+  }
+  if (sink.verb === 'REINFORCE') {
+    const cap = Math.max(0, Math.round(num(COOP_SINKS.REINFORCE.squadCap, 1)));
+    const live = (state.coop.squadIds ?? []).filter(id => (actorById(match, id)?.health ?? 0) > 0).length;
+    return live < cap ? null : undefined;
+  }
+  return null;
+}
+
+/**
+ * Deterministic no-UI auto-spend: after a cleared wave, convert pooled FLUX into
+ * preparation until the reserve floor is reached (or no sink is applicable).
+ * At most `autoSinkLimit` of each sink per window. Returns the spend count.
+ */
+export function coopAutoSpend(match, state) {
+  const coop = state?.coop;
+  if (!coop || coop.autoSpend !== true || !intermissionOpen(coop)) return 0;
+  const cap = num(state.fluxCap, COOP_ECONOMY.fluxCap);
+  const floor = cap * Math.max(0, Math.min(0.9, num(COOP_AUTO_SPEND.reserveFraction, 0.15)));
+  let spends = 0;
+  let guard = 0;
+  while (num(state.flux?.[0], 0) > floor + 1e-9 && guard++ < 64) {
+    let did = false;
+    for (const verb of COOP_SINK_ORDER) {
+      const sink = COOP_SINKS[verb];
+      if (num(coop.windowSpend[verb], 0) >= autoSinkLimit(coop, state, sink)) continue;
+      const target = autoSinkTarget(match, state, sink);
+      if (target === undefined) continue;
+      const result = coopSpend(match, state, {
+        tick: num(coop.tick, 0), peerId: 'chief-0',
+        cardId: `auto-${verb}-${coop.wave}-${num(coop.windowSpend[verb], 0)}`,
+        verb, target,
+      });
+      if (result.ok) { spends++; did = true; }
+    }
+    if (!did) break;
+  }
+  return spends;
+}
+
+// Fortify lasts one wave: clear any expired resist at the next wave start.
+function expireFortify(coop, wave, state = null) {
+  for (const id of Object.keys(coop.fortify ?? {})) {
+    const entry = coop.fortify[id];
+    if (entry && num(entry.untilWave, 0) >= wave) continue;
+    delete coop.fortify[id];
+    const node = state ? nodeById(state, id) : null;
+    if (node) node.captureResist = 0;
+  }
+  return coop.fortify;
+}
+
+// ---------------------------------------------------------------------------
+// O1b bonus objectives (design §3.4). One open at a time (tier `bonusOpen`
+// allows two on D3/D4); rewards route into team FLUX + personal REQ +
+// COMMENDATIONs, never a parallel currency.
+// ---------------------------------------------------------------------------
+function bonusProgressTarget(def) {
+  if (def.kind === 'hold-all') return def.target;
+  if (def.kind === 'wave-under-time') return 1;
+  if (def.kind === 'own-siphons') return 2;
+  return 1;
+}
+
+function openBonuses(match, coop) {
+  const maxOpen = Math.max(1, Math.round(num(directorTier(coop.tier).bonusOpen, 1)));
+  while (coop.bonus.open.length < maxOpen && coop.bonus.queue.length) {
+    const id = coop.bonus.queue.shift();
+    const def = bonusObjective(id);
+    if (!def) continue;
+    coop.bonus.open.push(id);
+    coop.bonus.state.push({id, label: def.label, state: 'open', progress: 0, target: bonusProgressTarget(def)});
+    coop.bonus.state.sort((a, b) => String(a.id).localeCompare(String(b.id)));
+    match?.emit?.('coop-bonus', {id, state: 'open', label: def.label});
+  }
+}
+
+function resolveBonus(match, state, id, outcome) {
+  const coop = state.coop;
+  const index = coop.bonus.state.findIndex(entry => entry.id === id);
+  if (index < 0 || coop.bonus.state[index].state !== 'open') return false;
+  const entry = coop.bonus.state[index];
+  if (outcome !== 'done') {
+    entry.state = 'failed';
+    coop.bonus.failed.push(id);
+    coop.bonus.state.splice(index, 1);
+    coop.bonus.open = coop.bonus.open.filter(value => value !== id);
+    match.emit?.('coop-bonus', {id, state: 'failed', label: entry.label});
+    openBonuses(match, coop);
+    return false;
+  }
+  const def = bonusObjective(id);
+  entry.state = 'done';
+  entry.progress = entry.target;
+  coop.bonus.done.push(id);
+  coop.bonus.state.splice(index, 1);
+  coop.bonus.open = coop.bonus.open.filter(value => value !== id);
+  const tierMult = Math.max(0, num(directorTier(coop.tier).rewardMultiplier, 1));
+  let flux = Math.round(Math.max(0, num(def.teamFlux, 0)) * tierMult);
+  if (num(def.teamFluxPercent, 0) > 0) flux += Math.round(waveRewardFlux(coop, directorTier(coop.tier)) * num(def.teamFluxPercent, 0));
+  if (flux > 0) {
+    const cap = num(state.fluxCap, COOP_ECONOMY.fluxCap);
+    const before = num(state.flux?.[0], 0);
+    state.flux[0] = Math.min(cap, before + flux);
+    state.fluxEarned[0] = num(state.fluxEarned?.[0], 0) + Math.max(0, state.flux[0] - before);
+  }
+  const req = Math.round(Math.max(0, num(def.req, 0)) * tierMult);
+  if (req > 0) {
+    for (const actor of match.actors ?? []) {
+      if (!actor || actor.health <= 0 || actor.team !== 0 || actor.isDirectorWave === true) continue;
+      addActorReq(actor, req * num(state.reqMult, 1));
+    }
+  }
+  const commendations = Math.max(0, Math.round(num(def.commendations, 0)));
+  coop.bonus.flux += flux;
+  coop.bonus.req += req;
+  coop.bonus.commendations += commendations;
+  match.emit?.('coop-bonus', {id, state: 'done', label: entry.label, flux, req, commendations});
+  openBonuses(match, coop);
+  return true;
+}
+
+// Continuous bonus checks (hold-all latch, no-breach gate tracking).
+function stepCoopBonus(match, state) {
+  const coop = state.coop;
+  if (!coop.bonus.state.length) return;
+  const capturable = capturableNodes(state);
+  const held = capturable.filter(node => node.owner === 0).length;
+  for (const entry of coop.bonus.state) {
+    if (entry.state !== 'open') continue;
+    const def = bonusObjective(entry.id);
+    if (!def) continue;
+    if (def.kind === 'hold-all') {
+      entry.progress = held;
+      entry.target = def.target;
+      if (held >= def.target) {
+        coop.bonusHoldTicks += 1;
+        if (coop.bonusHoldTicks >= ticks(def.holdSeconds)) resolveBonus(match, state, entry.id, 'done');
+      } else {
+        coop.bonusHoldTicks = 0;
+      }
+    } else if (def.kind === 'hold-gate') {
+      const gate = nodeById(state, def.gate);
+      if (gate && gate.owner === 1) coop.gateLost = true;
+    } else if (def.kind === 'own-siphons') {
+      entry.progress = capturable.filter(node => node.archetype === 'economy' && node.owner === 0).length;
+      entry.target = 2;
+    }
+  }
+}
+
+// Wave-clear bonus resolution: under-time and (on wave 3) flawless-siphon.
+function resolveWaveBonuses(match, state) {
+  const coop = state.coop;
+  const open = new Set(coop.bonus.open);
+  if (open.has('under-time')) {
+    const def = bonusObjective('under-time');
+    const fast = coop.waveTicks <= Math.max(1, coop.waveTimerTicks) * num(def.fraction, 0.7);
+    resolveBonus(match, state, 'under-time', fast ? 'done' : 'failed');
+  }
+  if (open.has('flawless-siphon') && coop.wave === num(bonusObjective('flawless-siphon')?.wave, 3)) {
+    const siphons = capturableNodes(state).filter(node => node.archetype === 'economy' && node.owner === 0).length;
+    resolveBonus(match, state, 'flawless-siphon', siphons >= 2 ? 'done' : 'failed');
+  }
+}
+
+// End-of-operation bonus resolution: close out anything still open.
+function finalizeBonuses(match, state) {
+  const coop = state.coop;
+  for (const id of [...coop.bonus.open]) {
+    const def = bonusObjective(id);
+    if (!def) continue;
+    if (def.kind === 'hold-gate') resolveBonus(match, state, id, coop.gateLost ? 'failed' : 'done');
+    else resolveBonus(match, state, id, 'failed');
+  }
+}
+
+// ---------------------------------------------------------------------------
+// O1b partial rewards (design §3.5) + telemetry.
+// ---------------------------------------------------------------------------
+export function coopRewardSummary(match, state, {mvp = false, cfg = {}} = {}) {
+  const coop = state?.coop;
+  if (!coop) return null;
+  const tier = directorTier(coop.tier);
+  const win = coop.wavesCleared >= coop.waveCount;
+  let leftover = 0;
+  for (const actor of match.actors ?? []) {
+    if (!actor || actor.team !== 0 || actor.isNpc === true || actor.isDirectorWave === true) continue;
+    const earned = num(actor.reqEarned, num(actor.req, 0));
+    const spent = num(actor.reqSpent, 0);
+    leftover += Math.max(0, earned - spent);
+  }
+  const scores = state.scores ?? {0: 0, 1: 0};
+  const objShare = num(scores[0], 0) + num(scores[1], 0) > 0 ? num(scores[0], 0) / (num(scores[0], 0) + num(scores[1], 0)) : 1;
+  const conversion = convertCoopReq(leftover, objShare, win, mvp, {
+    tierRewardMultiplier: tier.rewardMultiplier,
+    failureRetention: COOP_REWARDS.failureRetention,
+    bonusCommendations: coop.bonus.commendations,
+    cfg,
+  });
+  return {
+    tier: coop.tier, win, wavesCleared: coop.wavesCleared, waveCount: coop.waveCount,
+    leftover: Math.round(leftover * 100) / 100,
+    bonus: {done: [...coop.bonus.done], failed: [...coop.bonus.failed], flux: coop.bonus.flux, req: coop.bonus.req, commendations: coop.bonus.commendations},
+    ...conversion,
+  };
+}
+
+// Intermission/budget telemetry for the validator and the ops review.
+export function coopSpendReport(match, state) {
+  const coop = state?.coop;
+  if (!coop) return null;
+  const ticks = Math.max(1, num(coop.tick, 0));
+  const cap = num(state.fluxCap, COOP_ECONOMY.fluxCap);
+  return {
+    windows: num(coop.spendStats.windows, 0),
+    byType: {FORTIFY: num(coop.spendStats.FORTIFY, 0), REPAIR: num(coop.spendStats.REPAIR, 0), RESUPPLY: num(coop.spendStats.RESUPPLY, 0), REINFORCE: num(coop.spendStats.REINFORCE, 0)},
+    fluxSpent: Math.round(num(coop.spendStats.flux, 0) * 100) / 100,
+    budgetClampedFraction: Math.round((num(coop.stats.clampedTicks, 0) / ticks) * 1000) / 1000,
+    fluxPinnedFraction: Math.round((num(coop.stats.fluxPinnedTicks, 0) / ticks) * 1000) / 1000,
+    fluxCap: cap,
+    bonusDone: [...coop.bonus.done],
+    bonusFailed: [...coop.bonus.failed],
+  };
 }
 
 // ---------------------------------------------------------------------------
@@ -399,8 +839,11 @@ function startWave(match, state) {
   coop.phaseTicks = 0;
   coop.phase = 'build_up';
   coop.intermission = false;
+  coop.intermissionOpen = false;
   coop.targetNode = null;
   coop.fronts = [];
+  expireFortify(coop, coop.wave, state);
+  coop.windowSpend = {FORTIFY: 0, REPAIR: 0, RESUPPLY: 0, REINFORCE: 0};
   refreshTargets(match, state);
   const plan = directorWavePlan(coop.wave, coop.tier);
   coop.composition = plan.composition;
@@ -434,20 +877,35 @@ function clearWave(match, state) {
   coop.stats.peakPressure = Math.max(coop.stats.peakPressure, coop.pressure);
   coopResupply(match, state);
   match.emit?.('director-wave-cleared', {wave: coop.wave, cleared: coop.wavesCleared, waveCount: coop.waveCount, duration: coop.waveTicks * (RULES.dt || 1 / 60), reward: rewardFor(coop, tier)});
+  // O1b wave bonuses resolve on the clear (under-time, flawless-siphon).
+  resolveWaveBonuses(match, state);
   if (coop.wavesCleared >= coop.waveCount) {
     coop.phase = 'relax';
+    coop.intermissionOpen = false;
     coop.message = 'OPERATION COMPLETE';
+    finalizeBonuses(match, state);
     return;
   }
   coop.phase = 'intermission';
   coop.intermission = true;
-  coop.intermissionTicks = ticks(tier.intermissionSeconds);
   coop.waveForceTotal = 0;
+  coop.intermissionOpen = coop.wavesCleared > 0;
+  coop.intermissionTicks = ticks(tier.intermissionSeconds);
+  coop.windowSpend = {FORTIFY: 0, REPAIR: 0, RESUPPLY: 0, REINFORCE: 0};
   match.emit?.('director-intermission', {wave: coop.wave, nextWave: coop.wave + 1, seconds: tier.intermissionSeconds, budget: coop.pressure});
+  if (coop.intermissionOpen) {
+    coop.spendStats.windows = num(coop.spendStats.windows, 0) + 1;
+    match.emit?.('coop-intermission-open', {wave: coop.wave, nextWave: coop.wave + 1, seconds: tier.intermissionSeconds, budget: Math.round(num(state.flux?.[0], 0) * 100) / 100});
+    coopAutoSpend(match, state);
+  }
+}
+
+function waveRewardFlux(coop, tier) {
+  return Math.round((COOP_ECONOMY.waveRewardBase + COOP_ECONOMY.waveRewardPerWave * coop.wave) * tier.rewardMultiplier);
 }
 
 function rewardFor(coop, tier) {
-  return Math.round((COOP_ECONOMY.waveRewardBase + COOP_ECONOMY.waveRewardPerWave * coop.wave) * tier.rewardMultiplier);
+  return waveRewardFlux(coop, tier);
 }
 
 export function coopResupply(match, state) {
@@ -506,11 +964,18 @@ function maybeReinforce(match, state) {
   const tier = directorTier(coop.tier);
   // D1 ships the tutorial curve: baseline + scripted escalations only. D2+ add
   // periodic PRESSURE reinforcement spends (the tier table's reinforcement row).
-  if ((tier.reinforceEvents ?? 0) <= 0) return;
+  // O1b: every tier (including D1) converts a *surplus* budget near the cap into
+  // reinforcements on a short interval, so the visible meter is actually spent.
+  const relief = coop.pressure >= directorCap(coop.tier) * COOP_PACING.reliefFraction;
+  if ((tier.reinforceEvents ?? 0) <= 0 && !relief) return;
   const live = coop.waveIds.reduce((count, id) => count + ((actorById(match, id)?.health ?? 0) > 0 ? 1 : 0), 0);
   if (live >= COOP_WAVE_LIVE_CAP) return;
   coop.reinforceTimer += RULES.dt;
-  if (coop.reinforceTimer < tier.reinforceSeconds) return;
+  // Relief uses the tier's published `reliefSeconds` (D1 3 s … D4 4 s), which is
+  // faster than the authored reinforcement cadence so a surplus budget is spent
+  // instead of pinning at the cap. Non-relief spending keeps `reinforceSeconds`.
+  const interval = relief ? num(tier.reliefSeconds, Math.min(tier.reinforceSeconds, COOP_PACING.reliefSeconds)) : tier.reinforceSeconds;
+  if (coop.reinforceTimer < interval) return;
   coop.reinforceTimer = 0;
   if (!coop.reinforceOrder.length) return;
   const entry = coop.reinforceOrder[coop.reinforceIndex % coop.reinforceOrder.length];
@@ -654,6 +1119,27 @@ function stepSiege(match, state, dt) {
 }
 
 // ---------------------------------------------------------------------------
+// Optional team-wipe RESERVE (design §1.3 / §7.2). Inert unless enabled. A full
+// team wipe (no living team-0 actor for `wipeSeconds`) burns one reserve ticket;
+// at zero tickets the operation is lost.
+// ---------------------------------------------------------------------------
+function stepReserve(match, state, dt) {
+  const coop = state.coop;
+  const reserve = coop.reserve;
+  if (!reserve || reserve.enabled !== true) return;
+  const anyTeam0 = (match.actors ?? []).some(actor => actor && actor.health > 0 && actor.team === 0 && actor.isDirectorWave !== true);
+  if (anyTeam0) { reserve.wipeTicks = 0; return; }
+  reserve.wipeTicks = num(reserve.wipeTicks, 0) + 1;
+  if (reserve.wipeTicks < ticks(COOP_RESERVE.wipeSeconds)) return;
+  reserve.wipeTicks = 0;
+  reserve.tickets = Math.max(0, num(reserve.tickets, 0) - 1);
+  reserve.burns = num(reserve.burns, 0) + 1;
+  coop.stats.reserveBurns = num(coop.stats.reserveBurns, 0) + 1;
+  match.emit?.('coop-reserve', {tickets: reserve.tickets, burn: reserve.burns, wave: coop.wave});
+  void dt;
+}
+
+// ---------------------------------------------------------------------------
 // Step.
 // ---------------------------------------------------------------------------
 export function stepCoop(match, state, dt) {
@@ -665,6 +1151,8 @@ export function stepCoop(match, state, dt) {
   coop.command = coopCommandState(match, state);
   // Dead wave force never respawns.
   pruneDirectorDead(match, state);
+  // O1b intermission spends queue through the same deterministic order path.
+  processCocsSpends(match, state);
   // Budget accrual on the phase factor.
   const tickRate = directorRate(coop.tier, coop.phase);
   const cap = directorCap(coop.tier);
@@ -672,9 +1160,16 @@ export function stepCoop(match, state, dt) {
   if (coop.pressure >= cap - 1e-9) { coop.pressureClampedTicks++; coop.stats.clampedTicks++; }
   coop.pressurePeak = Math.max(coop.pressurePeak, coop.pressure);
   coop.stats.peakPressure = Math.max(coop.stats.peakPressure, coop.pressure);
+  // Team FLUX pin (the V0b acceptance gap O1b's sinks close).
+  const fluxCap = num(state.fluxCap, COOP_ECONOMY.fluxCap);
+  if (num(state.flux?.[0], 0) >= fluxCap - 1e-9) coop.stats.fluxPinnedTicks = num(coop.stats.fluxPinnedTicks, 0) + 1;
   // Advance the wave machine.
   if (coop.phase === 'intermission') stepIntermission(match, state);
   else stepWave(match, state, dt);
+  // O1b bonus objective latch (hold-all / no-breach).
+  stepCoopBonus(match, state);
+  // Optional team-wipe RESERVE loss (inert unless enabled by config).
+  stepReserve(match, state, dt);
   // Stage -> spawn.
   flushPending(match, state);
   // Siege + shipped enemy role abilities (boss stomp, mortar, sapper, auras).
@@ -700,17 +1195,29 @@ export function stepCoop(match, state, dt) {
 export function coopOutcome(match, state) {
   const coop = state?.coop;
   if (!coop) return null;
-  if (coop.siege.health <= 0) return {winner: 1, reason: 'hq-destroyed'};
-  if (coop.wavesCleared >= coop.waveCount) {
+  let outcome = null;
+  if (coop.reserve?.enabled === true && num(coop.reserve.tickets, 0) <= 0) outcome = {winner: 1, reason: 'team-wipe'};
+  else if (coop.siege.health <= 0) outcome = {winner: 1, reason: 'hq-destroyed'};
+  else if (coop.wavesCleared >= coop.waveCount) {
     const hq = nodeById(state, coop.siege.hqId);
-    if (!hq || hq.owner === 0) return {winner: 0, reason: 'operation-complete'};
-    return {winner: 1, reason: 'hq-lost'};
+    outcome = (!hq || hq.owner === 0) ? {winner: 0, reason: 'operation-complete'} : {winner: 1, reason: 'hq-lost'};
+  } else {
+    const dominance = state.dominance;
+    if (dominance && dominance.team === 1 && dominance.progress >= dominance.target) outcome = {winner: 1, reason: 'dominance'};
+    else {
+      const limit = Math.max(1, num(match?.config?.timeLimit, RULES.timeLimit));
+      if (num(match?.time, 0) >= limit) outcome = {winner: 1, reason: 'operation-failed'};
+    }
   }
-  const dominance = state.dominance;
-  if (dominance && dominance.team === 1 && dominance.progress >= dominance.target) return {winner: 1, reason: 'dominance'};
-  const limit = Math.max(1, num(match?.config?.timeLimit, RULES.timeLimit));
-  if (num(match?.time, 0) >= limit) return {winner: 1, reason: 'operation-failed'};
-  return null;
+  if (!outcome) return null;
+  // O1b partial rewards: convert once, at the terminal frame, through the
+  // existing REQ→COMMENDATIONS model, and emit the ops-review summary.
+  if (!coop.rewards) {
+    coop.rewards = coopRewardSummary(match, state);
+    if (coop.stats.partialPayouts !== undefined) coop.stats.partialPayouts = outcome.winner === 0 ? 0 : 1;
+    match.emit?.('operation-summary', {reason: outcome.reason, ...coop.rewards, spend: coopSpendReport(match, state)});
+  }
+  return outcome;
 }
 
 // ---------------------------------------------------------------------------
@@ -721,6 +1228,33 @@ function phaseSecondsRemaining(coop) {
   return Math.max(0, (coop.waveTimerTicks - coop.waveTicks) * (RULES.dt || 1 / 60));
 }
 
+// The spend-window catalog as a HUD-ready array: which sink can be bought now,
+// what it costs and what it does. Pure read of state; no side effects.
+function sinkViews(match, state) {
+  const coop = state?.coop;
+  const open = intermissionOpen(coop);
+  const cap = num(state.fluxCap, COOP_ECONOMY.fluxCap);
+  const budget = num(state.flux?.[0], 0);
+  const views = [];
+  for (const verb of COOP_SINK_ORDER) {
+    const sink = COOP_SINKS[verb];
+    let available = true;
+    if (sink.verb === 'FORTIFY') available = capturableNodes(state).some(node => node.owner === 0 && num(node.captureResist, 0) <= 0);
+    else if (sink.verb === 'REPAIR') available = coop.siege.health < coop.siege.max || (state.cuts ?? []).length > 0 || Boolean(state?.traversal?.devices && Object.values(state.traversal.devices).some(device => device?.state === 'cut'));
+    else if (sink.verb === 'REINFORCE') {
+      const live = (coop.squadIds ?? []).filter(id => (actorById(match, id)?.health ?? 0) > 0).length;
+      available = live < Math.max(0, Math.round(num(sink.squadCap, 1)));
+    }
+    views.push({
+      verb, id: sink.id, label: sink.label, cost: sink.cost, target: sink.target,
+      description: sink.description, available,
+      affordable: budget + 1e-9 >= sink.cost,
+      enabled: open && available && budget + 1e-9 >= sink.cost,
+    });
+  }
+  return views;
+}
+
 export function cocsDirectorSnapshot(match, state) {
   const coop = state?.coop;
   if (!coop) return null;
@@ -729,6 +1263,7 @@ export function cocsDirectorSnapshot(match, state) {
   return {
     tier: coop.tier,
     tierLabel: coop.tierLabel,
+    tierCopy: directorTierCopy(coop.tier),
     phase: coop.phase,
     wave: coop.wave,
     waveCount: coop.waveCount,
@@ -750,6 +1285,19 @@ export function cocsDirectorSnapshot(match, state) {
     boss: coop.bossId !== null ? {actorId: coop.bossId, type: coop.bossType, phase: coop.bossPhase} : null,
     retarget: coop.targetNode ? {nodeId: coop.targetNode, reason: coop.siege.armed ? 'siege' : 'weakest-front'} : null,
     pressure: clamp01(coop.pressure / Math.max(1, directorCap(coop.tier))),
+    intermission: {
+      open: coop.intermissionOpen === true,
+      secondsRemaining: coop.phase === 'intermission' ? Math.round(Math.max(0, coop.intermissionTicks) * (RULES.dt || 1 / 60) * 10) / 10 : 0,
+      budget: Math.round(num(state.flux?.[0], 0) * 100) / 100,
+      spent: Math.round(num(coop.spendStats.flux, 0) * 100) / 100,
+      windows: num(coop.spendStats.windows, 0),
+      byType: {
+        FORTIFY: num(coop.spendStats.FORTIFY, 0), REPAIR: num(coop.spendStats.REPAIR, 0),
+        RESUPPLY: num(coop.spendStats.RESUPPLY, 0), REINFORCE: num(coop.spendStats.REINFORCE, 0),
+      },
+      sinks: sinkViews(match, state),
+      log: (coop.spendLog ?? []).slice(-8).map(entry => ({...entry})),
+    },
     siege: {
       armed: siege.armed === true,
       hqId: siege.hqId,
@@ -769,6 +1317,8 @@ export function cocsDirectorSnapshot(match, state) {
       escalations: coop.stats.escalations,
       overruns: coop.stats.overruns,
       peakPressure: Math.round(coop.stats.peakPressure * 100) / 100,
+      clampedTicks: num(coop.stats.clampedTicks, 0),
+      fluxPinnedTicks: num(coop.stats.fluxPinnedTicks, 0),
     },
   };
 }
@@ -798,7 +1348,19 @@ export function cocsCoopSnapshot(match, state) {
       threads: {...command.threads},
       slices: command.slices.map(entry => ({...entry})),
     } : null,
-    bonus: [],
+    bonus: (coop.bonus.state ?? [])
+      .map(entry => ({id: entry.id, label: entry.label, state: entry.state, progress: num(entry.progress, 0), target: num(entry.target, 1)}))
+      .sort((a, b) => String(a.id).localeCompare(String(b.id))),
+    bonusTelemetry: {
+      done: [...coop.bonus.done], failed: [...coop.bonus.failed],
+      flux: coop.bonus.flux, req: coop.bonus.req, commendations: coop.bonus.commendations,
+    },
+    reserves: {
+      enabled: coop.reserve.enabled === true,
+      tickets: Math.max(0, num(coop.reserve.tickets, 0)),
+      burns: num(coop.reserve.burns, 0),
+    },
+    rewards: coop.rewards,
   };
 }
 
@@ -813,5 +1375,9 @@ export function coopKillReport(match, state) {
     hqDamage: Math.round(coop.stats.hqDamage),
     hqRepairs: Math.round(coop.stats.hqRepairs),
     sieges: coop.siege.armed ? 1 : 0,
+    spend: coopSpendReport(match, state),
+    bonus: {done: [...coop.bonus.done], failed: [...coop.bonus.failed], flux: coop.bonus.flux, req: coop.bonus.req, commendations: coop.bonus.commendations},
+    reserve: {enabled: coop.reserve.enabled === true, tickets: num(coop.reserve.tickets, 0), burns: num(coop.reserve.burns, 0)},
+    rewards: coop.rewards ?? coopRewardSummary(match, state),
   };
 }

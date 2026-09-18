@@ -769,6 +769,41 @@ export function convertReq(leftover,objShare,win,mvp,cfg={}){
  return convertReqBreakdown(leftover,objShare,win,mvp,cfg).commendations;
 }
 
+/**
+ * OPERATIONS partial-reward conversion (design §3.5 / §4.3). Reuses the exact
+ * §6A.9.2 `convertReqBreakdown` path — no parallel currency — and layers the two
+ * co-op-only factors on top:
+ *   * `tierRewardMultiplier` (D1 1.0 … D4 2.0) scales the leftover `REQ` pool;
+ *   * `retention` is 1.0 on a win and `failureRetention` (0.25) on a failure;
+ *   * `bonusCommendations` are the optional-objective tokens, added last.
+ *
+ * @returns the `convertReqBreakdown` shape plus `{retention, tierRewardMultiplier,
+ * bonusCommendations, scaledPool, commendations}`.
+ */
+export function convertCoopReq(leftover,objShare,win,mvp,opts={}){
+ const c=opts&&typeof opts==='object'?opts:{};
+ const tierMult=Math.max(0,num(c.tierRewardMultiplier,1));
+ const retention=win===true||win===1?COOP_WIN_RETENTION:(c.failureRetention!=null?clamp(c.failureRetention,0,1):COOP_FAILURE_RETENTION);
+ const bonus=Math.max(0,Math.round(num(c.bonusCommendations,0)));
+ const scaledPool=Math.max(0,num(leftover,0))*tierMult*retention;
+ const breakdown=convertReqBreakdown(scaledPool,objShare,win,mvp,c.cfg??{});
+ const commendations=breakdown.commendations+bonus;
+ return deepFreeze({
+  ...breakdown,
+  retention:round(retention,4),
+  tierRewardMultiplier:tierMult,
+  bonusCommendations:bonus,
+  scaledPool:round(scaledPool),
+  commendations,
+ });
+}
+
+// Published co-op retention defaults (kept here so `cocs-difficulty.mjs` stays
+// an engine-free data module and the economy owns the conversion math). They
+// mirror `COOP_REWARDS`; the co-op caller passes the table in explicitly.
+export const COOP_FAILURE_RETENTION=0.25;
+export const COOP_WIN_RETENTION=1.0;
+
 // §6A.9.4 pacing targets, calibrated to the §6A.5 median `REQ` earn.
 export const MATCH_REQ=deepFreeze({minutesMin:22,minutesMax:25,medianMin:250,medianMax:400});
 export const COMMENDATION_PACING=deepFreeze({

@@ -25,7 +25,8 @@
 //   MAP=lattice-slice MODE=cocs node scripts/cocs-validate.mjs
 import {pathToFileURL} from 'node:url';
 import {Match} from '../game/core.mjs';
-import {setCoopTier} from '../game/cocs-coop.mjs';
+import {coopKillReport, coopRewardSummary, coopSpendReport, setCoopTier} from '../game/cocs-coop.mjs';
+import {COOP_SINK_ORDER} from '../game/cocs-difficulty.mjs';
 
 const DT = 1 / 60;
 const seeded = seed => { let n = seed >>> 0; return () => ((n = (Math.imul(n, 1664525) + 1013904223) >>> 0) / 4294967296); };
@@ -127,6 +128,9 @@ export function runCoop(seed, {seconds = 900, tier = 'D1', humans = 4, bots = 2,
   samples.sort((a, b) => a - b);
   const p95 = samples.length ? samples[Math.min(samples.length - 1, Math.floor(samples.length * 0.95))] : 0;
   const st = m.objectiveState, coop = st.coop;
+  const spend = coopSpendReport(m, st);
+  const rewards = coop.rewards ?? coopRewardSummary(m, st);
+  const report = coopKillReport(m, st);
   return {
     seed, tier, seconds, ticks, over: m.over, overReason: m.overReason || null, winner: st.winner ?? null,
     wavesCleared: coop.wavesCleared, waveCount: coop.waveCount, win: m.overReason === 'operation-complete',
@@ -135,7 +139,54 @@ export function runCoop(seed, {seconds = 900, tier = 'D1', humans = 4, bots = 2,
     hqDamage: Math.round(coop.stats.hqDamage), hqRepairs: Math.round(coop.stats.hqRepairs),
     siege: coop.siege.armed === true, spawns: coop.stats.spawns,
     stepP95Ms: Math.round(p95 * 1000) / 1000, actors: m.actors.length,
+    spend,
+    bonus: {done: report.bonus.done, failed: report.bonus.failed, flux: report.bonus.flux, req: report.bonus.req, commendations: report.bonus.commendations},
+    rewards: {
+      win: rewards.win, retention: rewards.retention, tierRewardMultiplier: rewards.tierRewardMultiplier,
+      leftover: rewards.leftover, commendations: rewards.commendations, bonusCommendations: rewards.bonusCommendations,
+    },
+    fluxPinnedFraction: spend.fluxPinnedFraction,
   };
+}
+
+const totalSpends = run => {
+  const byType = run?.spend?.byType ?? {};
+  return Object.values(byType).reduce((sum, value) => sum + (Number(value) || 0), 0);
+};
+
+/**
+ * `director-exploit` sweep alarm (design §6.7). A run matrix is unhealthy when
+ * the visible levers stop mattering: the Director budget pinning at the cap, the
+ * team FLUX pinning at the cap (the V0b gap O1b's sinks must close), the spend
+ * window never being used, or a win with no pressure taken at all.
+ */
+export function exploitAlarms(runs) {
+  const total = Math.max(1, runs.length);
+  const alarms = [];
+  const wins = runs.filter(r => r.win).length;
+  const winRate = wins / total;
+  // Team FLUX pinning at the cap is the V0b acceptance gap the sinks must close.
+  const pinned = runs.filter(r => Number(r.fluxPinnedFraction ?? 0) > 0.30).length;
+  if (pinned / total > 0.5) alarms.push(`flux-pinned:${pinned}/${total}`);
+  // A spend window that never spends means the sinks are dead weight.
+  const noSpend = runs.filter(r => Number(r.spend?.windows ?? 0) > 0 && totalSpends(r) === 0).length;
+  if (noSpend > 0) alarms.push(`no-intermission-spends:${noSpend}`);
+  // The real trivialisation signal: a budget clamped at the cap *and* an
+  // effortless win. On a normal D1 the live-force cap can hold the budget at the
+  // cap for a while without the wave being trivial, so a clamp alone is only a
+  // reported warning (see `exploitWarnings`), never an alarm.
+  const clamped = runs.filter(r => Number(r.spend?.budgetClampedFraction ?? 0) > 0.30).length;
+  if (clamped / total > 0.5 && winRate > 0.9) alarms.push(`trivial-win:${clamped}/${total}`);
+  const freeWin = runs.filter(r => r.win && Number(r.hqDamage ?? 0) <= 0 && totalSpends(r) === 0).length;
+  if (freeWin > 0) alarms.push(`free-win:${freeWin}`);
+  return alarms;
+}
+
+/** Non-gating health warnings (reported, never fail a sweep on their own). */
+export function exploitWarnings(runs) {
+  const total = Math.max(1, runs.length);
+  const clamped = runs.filter(r => Number(r.spend?.budgetClampedFraction ?? 0) > 0.30).length;
+  return clamped / total > 0.5 ? [`pressure-clamped:${clamped}/${total}`] : [];
 }
 
 export function summariseCoop(runs) {
@@ -143,8 +194,23 @@ export function summariseCoop(runs) {
   const byReason = runs.reduce((acc, r) => { const k = r.overReason ?? 'clock'; acc[k] = (acc[k] ?? 0) + 1; return acc; }, {});
   const maxStepP95Ms = Math.max(0, ...runs.map(r => r.stepP95Ms || 0));
   const avgWaves = runs.length ? runs.reduce((a, r) => a + r.wavesCleared, 0) / runs.length : 0;
+  const spendByType = COOP_SINK_ORDER.reduce((acc, verb) => { acc[verb] = 0; return acc; }, {});
+  let windows = 0, fluxSpent = 0, bonusDone = 0, bonusFailed = 0, partialPayouts = 0;
+  for (const run of runs) {
+    for (const verb of COOP_SINK_ORDER) spendByType[verb] += Number(run.spend?.byType?.[verb] ?? 0);
+    windows += Number(run.spend?.windows ?? 0);
+    fluxSpent += Number(run.spend?.fluxSpent ?? 0);
+    bonusDone += (run.bonus?.done ?? []).length;
+    bonusFailed += (run.bonus?.failed ?? []).length;
+    if (run.rewards && run.rewards.retention < 1) partialPayouts++;
+  }
+  const alarms = exploitAlarms(runs);
+  const warnings = exploitWarnings(runs);
   return {
-    gate: {d1Wave5WinRate: '35-65%', stepP95: '<=8ms @24 actors'},
+    gate: {
+      d1Wave5WinRate: '35-65%', d2WinRate: '28-58%',
+      stepP95: '<=8ms @24 actors', fluxPinned: '<=30% of match',
+    },
     result: {
       sample: runs.length,
       wins,
@@ -152,7 +218,12 @@ export function summariseCoop(runs) {
       avgWavesCleared: avgWaves.toFixed(2),
       byReason,
       maxStepP95Ms,
+      alarms,
+      warnings,
+      directorExploit: alarms.length > 0,
     },
+    intermission: {windows, byType: spendByType, fluxSpent: Math.round(fluxSpent * 100) / 100, partialPayouts},
+    bonus: {done: bonusDone, failed: bonusFailed},
     runs,
   };
 }
