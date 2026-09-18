@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {MAPS} from './maps.mjs';
 import {RULES} from './data.mjs';
-import {blockObstructed, blockSupportTop, candidates, collisionHash, makeBlockIndex, NAV_BAKE_VERSION, rayCandidates} from './spatial.mjs';
+import {blockObstructed, blockSupportTop, bakeBlockBvh, blockBvhHash, BLOCK_BVH_VERSION, candidates, collisionHash, invalidateBlockIndex, makeBlockIndex, NAV_BAKE_VERSION, rayBlockHit, rayCandidates, rayWorldBlockHit} from './spatial.mjs';
 
 const DEFAULT_BOUNDS = {minX: -13.55, maxX: 13.55, minZ: -13.55, maxZ: 13.55};
 const boundsOf = arena => arena.bounds || DEFAULT_BOUNDS;
@@ -157,6 +157,73 @@ test('deferred/absent blocks are handled without an index', () => {
   assert.throws(() => candidates(null, 0, 0, 1));
   assert.throws(() => candidates({blocks: []}, NaN, 0, 1));
   assert.throws(() => rayCandidates({blocks: []}, {x: 0, y: 0, z: 0}, {x: 1, y: 0, z: 0}, -1));
+});
+
+// ---- block ray BVH (W13) --------------------------------------------------
+
+test('block ray BVH returns the exact brute-force nearest hit on every map', () => {
+  const random = rng(20260918);
+  for (const map of MAPS) {
+    const index = makeBlockIndex(map);
+    const bounds = boundsOf(map);
+    for (let i = 0; i < 300; i++) {
+      const margin = 8;
+      const o = {
+        x: bounds.minX - margin + random() * (bounds.maxX - bounds.minX + margin * 2),
+        y: random() * 14 - 3,
+        z: bounds.minZ - margin + random() * (bounds.maxZ - bounds.minZ + margin * 2),
+      };
+      let d;
+      const mode = i % 8;
+      if (mode === 0) d = {x: 0, y: -1, z: 0}; // straight down
+      else if (mode === 1) d = {x: 1, y: 0, z: 0}; // axis-aligned
+      else if (mode === 2) d = {x: 0, y: 0, z: 1};
+      else if (mode === 3) d = {x: 5e-9, y: -1, z: 1e-9}; // near-zero XZ
+      else {
+        const yaw = random() * Math.PI * 2, pitch = (random() - 0.5) * Math.PI;
+        d = {x: Math.sin(yaw) * Math.cos(pitch), y: Math.sin(pitch), z: Math.cos(yaw) * Math.cos(pitch)};
+      }
+      const max = [Infinity, 1, 6, 30, 200][i % 5];
+      const brute = bruteRay(map, o, d, max).best;
+      const viaIndex = index.rayBlockHit(o, d, max);
+      const viaFree = rayWorldBlockHit(map, o, d, max);
+      const eq = (a, b) => (Number.isFinite(a) || Number.isFinite(b)) ? Math.abs(a - b) <= 1e-9 : a === b;
+      assert.ok(eq(brute, viaIndex), `${map.id} index ray hit ${viaIndex} vs ${brute}`);
+      assert.ok(eq(brute, viaFree), `${map.id} free ray hit ${viaFree} vs ${brute}`);
+    }
+  }
+});
+
+test('block BVH bake is deterministic and shares the block-index invalidation contract', () => {
+  const blocks = MAPS.flatMap(map => map.blocks || []);
+  assert.ok(blocks.length > 8, 'sample blocks exist');
+  assert.equal(blockBvhHash(bakeBlockBvh(blocks)), blockBvhHash(bakeBlockBvh(blocks)), 'the same blocks bake the same tree');
+  assert.equal(blockBvhHash(bakeBlockBvh(blocks)).startsWith(`${BLOCK_BVH_VERSION}:`), true);
+
+  // Leaf size only changes the tree shape, never the answer.
+  const small = bakeBlockBvh(blocks, {leafSize: 1});
+  const large = bakeBlockBvh(blocks, {leafSize: 64});
+  const random = rng(31415);
+  for (let i = 0; i < 300; i++) {
+    const o = {x: random() * 60 - 30, y: random() * 12 - 2, z: random() * 60 - 30};
+    const yaw = random() * Math.PI * 2, pitch = (random() - 0.5) * Math.PI;
+    const d = {x: Math.sin(yaw) * Math.cos(pitch), y: Math.sin(pitch), z: Math.cos(yaw) * Math.cos(pitch)};
+    const max = [Infinity, 5, 40][i % 3];
+    const a = rayBlockHit(small, o, d, max), b = rayBlockHit(large, o, d, max);
+    assert.ok((Number.isFinite(a) || Number.isFinite(b)) ? Math.abs(a - b) <= 1e-9 : a === b, `leaf-size invariant ray ${i}`);
+  }
+
+  // A mutable arena rebuilds the whole broadphase (grid + BVH) on a length
+  // change, and invalidateBlockIndex drops it explicitly.
+  const runtime = {blocks: blocks.map(b => ({...b}))};
+  const first = makeBlockIndex(runtime);
+  const firstHash = blockBvhHash(first.rayBvh());
+  runtime.blocks.push({x: 0, z: 0, w: 2, d: 2, h: 2, kind: 'crate'});
+  const second = makeBlockIndex(runtime);
+  assert.notEqual(second, first, 'a block length change rebuilds the index');
+  assert.notEqual(blockBvhHash(second.rayBvh()), firstHash, 'the ray structure tracks the block list');
+  invalidateBlockIndex(runtime);
+  assert.notEqual(makeBlockIndex(runtime), first, 'invalidateBlockIndex drops the cached broadphase');
 });
 
 test('collisionHash is a stable nav-cache signature', () => {

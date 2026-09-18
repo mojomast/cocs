@@ -44,6 +44,11 @@ export function flankDestination(match,a,enemy){
 }
 
 const COVER_SAFETY_CAP=12,COVER_SAFETY_WEIGHT=.55,COVER_MAX_ROUTE=34;
+// Worst-case slack between a node's route cost and its cover score: the largest
+// possible safety benefit (cap*weight) plus the worst range penalty (-6). A
+// candidate whose route cost minus this slack already exceeds the best score
+// found cannot win (or tie), so the scan can stop.
+const COVER_SCORE_SLACK=COVER_SAFETY_CAP*COVER_SAFETY_WEIGHT+6;
 // Single-source shortest path over the nav graph. One flood gives route cost to
 // every node, so cover scoring is O(E log V) per call instead of one A* per
 // candidate.
@@ -69,30 +74,78 @@ export function routeTo(match,a,point){
  if(Array.isArray(nodes)&&nodes.length&&Array.isArray(edges)){const result=astar(a,point,nodes,edges);return {cost:result.cost,reachable:result.reachable};}
  return {cost:Math.hypot(a.x-point.x,a.z-point.z),reachable:true};
 }
+// A flood is a pure function of (source, graph) and the nav graph is static for
+// a match, so repeated cover checks from the same nearest node reuse it. The
+// cache is a bounded FIFO; eviction order is the call order, so surviving
+// entries are deterministic for a given sequence.
+const dijkstraCache=new WeakMap(),DIJKSTRA_CACHE_MAX=96;
+function cachedDijkstra(from,nodes,edges){
+ let entry=dijkstraCache.get(nodes);
+ if(!entry||entry.edges!==edges){entry={edges,floods:new Map(),order:[]};dijkstraCache.set(nodes,entry);}
+ const hit=entry.floods.get(from);
+ if(hit)return hit;
+ const flood=dijkstraFrom(from,nodes,edges);
+ entry.floods.set(from,flood);entry.order.push(from);
+ if(entry.order.length>DIJKSTRA_CACHE_MAX)entry.floods.delete(entry.order.shift());
+ return flood;
+}
+// Per-node cover geometry (non-finite exclusion + obstruction) depends only on
+// the nav graph and arena, never the threat, so it is baked once per graph.
+const coverNodeCache=new WeakMap();
+function coverNodeSafety(match,nodes){
+ const cached=coverNodeCache.get(nodes);
+ if(cached&&cached.arena===match.arena)return cached;
+ const y=new Float64Array(nodes.length),safe=new Uint8Array(nodes.length);
+ for(let i=0;i<nodes.length;i++){
+  const node=nodes[i];
+  if(!Number.isFinite(node.x)||!Number.isFinite(node.z))continue;
+  const ny=Number.isFinite(node.y)?node.y:(floorAt(node.x,node.z,match.arena)??0);
+  y[i]=ny;
+  safe[i]=obstructed(node.x,ny,node.z,RULES.radius*.9,match.arena)?0:1;
+ }
+ const entry={arena:match.arena,y,safe};coverNodeCache.set(nodes,entry);return entry;
+}
 // Seeks reachable cover that breaks line of sight to a visible threat. Bots
 // defending a fixed objective use this to disengage and re-peek instead of
 // trading at low health. Candidates are scored by route cost, a capped
 // safety-distance benefit (farther from the threat is safer, up to a cap), and
 // whether the threat remains inside the bot's weapon range. Pure and
 // deterministic: equal inputs always resolve to the same node.
+//
+// Scoring is exact but accelerated: candidates are visited in ascending route
+// cost, and the visibility ray is only cast while the node's route cost can
+// still yield a score that beats (or index-ties) the incumbent. Nodes whose
+// static obstruction fails, and nodes beyond the route budget, are excluded
+// before any ray, and floods/geometry are cached across calls. The chosen node
+// and the index tie-break are identical to the linear scan.
 export function coverPoint(match,a,threat){
  if(!a||!threat||!match?.nav?.length)return null;
  const nodes=match.nav,edges=Array.isArray(match.edges)?match.edges:null,threatEye=eye(threat),threatX=threat.x??0,threatZ=threat.z??0;
- const weaponRange=WEAPONS[a.weapon??0]?.range??70,costs=edges?dijkstraFrom(nearest(a,nodes),nodes,edges):null;
- let best=null,bestScore=Infinity;
+ const weaponRange=WEAPONS[a.weapon??0]?.range??70;
+ const geometry=coverNodeSafety(match,nodes);
+ const costs=edges?cachedDijkstra(nearest(a,nodes),nodes,edges):null;
+ const candidates=[];
  for(let index=0;index<nodes.length;index++){
+  if(!geometry.safe[index])continue;
   const node=nodes[index];
-  if(!Number.isFinite(node.x)||!Number.isFinite(node.z))continue;
-  const y=Number.isFinite(node.y)?node.y:(floorAt(node.x,node.z,match.arena)??0);
-  if(obstructed(node.x,y,node.z,RULES.radius*.9,match.arena))continue;
-  if(match.visible({x:node.x,y:y+1.2,z:node.z},threatEye))continue;
   const cost=costs?costs[index]:Math.hypot(a.x-node.x,a.z-node.z);
   if(!Number.isFinite(cost)||cost>COVER_MAX_ROUTE||cost<1.5)continue;
+  candidates.push(index);
+ }
+ if(costs)candidates.sort((p,q)=>{const d=costs[p]-costs[q];return d!==0?d:p-q;});
+ else candidates.sort((p,q)=>{const d=Math.hypot(a.x-nodes[p].x,a.z-nodes[p].z)-Math.hypot(a.x-nodes[q].x,a.z-nodes[q].z);return d!==0?d:p-q;});
+ let best=null,bestScore=Infinity,bestIndex=-1;
+ for(let k=0;k<candidates.length;k++){
+  const index=candidates[k],node=nodes[index];
+  const cost=costs?costs[index]:Math.hypot(a.x-node.x,a.z-node.z);
+  if(cost-COVER_SCORE_SLACK>bestScore)break;
   const threatDistance=Math.hypot(node.x-threatX,node.z-threatZ);
   const safety=Math.min(threatDistance,COVER_SAFETY_CAP)*COVER_SAFETY_WEIGHT;
   const usable=threatDistance<=weaponRange?0:-6;
   const score=cost-safety+usable;
-  if(score<bestScore){bestScore=score;best={x:node.x,y,z:node.z};}
+  if(!(score<bestScore||(score===bestScore&&index<bestIndex)))continue;
+  if(match.visible({x:node.x,y:geometry.y[index]+1.2,z:node.z},threatEye))continue;
+  bestScore=score;bestIndex=index;best={x:node.x,y:geometry.y[index],z:node.z};
  }
  return best;
 }

@@ -383,3 +383,114 @@ is **0.4%**; the residual is the block-ray branch (`boxHit` 26.8% of step CPU,
 `rayCandidateBlocks` 4.3%), bot pathfinding (`dijkstraFrom` 9.8%, `nearest`
 3.3%) and GC (5.5%). Closing that gap means a block ray BVH and/or cached bot
 paths (out of M1 scope: the block broadphase is intentionally untouched).
+
+---
+
+# M2 — Block ray BVH + cached cover pathing
+
+Status: **landed (W13, `feat/block-bvh`).** M1 fixed the terrain ray path, but
+the 24-actor step still missed ≤8 ms on convoy-line (13.6 ms) and frostline
+(11.9 ms). The post-M1 profile put the residual on the block-ray branch
+(`boxHit` 26.8% of step CPU, `rayCandidateBlocks` 4.3%) and bot pathfinding
+(`dijkstraFrom` 9.8%, plus cover scoring's per-node `obstructed`/`visible`).
+M2 adds a deterministic block-AABB BVH to `rayWorld` and caches the cover flood
+and geometry. No bot decision changes.
+
+## 7. `game/spatial.mjs` — block ray BVH
+
+### API
+
+```js
+import {
+  bakeBlockBvh, rayBlockHit, rayWorldBlockHit, blockBvhHash,
+  BLOCK_BVH_VERSION, DEFAULT_BLOCK_BVH_LEAF,
+} from './spatial.mjs';
+
+const bvh = makeBlockIndex(arena).rayBvh();   // lazily baked per arena
+rayBlockHit(bvh, origin, dir, max);            // nearest block entry distance, or max
+rayWorldBlockHit(arena, origin, dir, max);     // index lookup + query
+blockBvhHash(bvh);                             // '1:deadbeef'
+```
+
+- `bakeBlockBvh(blocks, {leafSize})` copies every block AABB (x ∈ b.x ± w/2,
+  y ∈ [0, h], z ∈ b.z ± d/2 — exactly `core.boxHit`'s arithmetic) into a
+  `Float64Array`, then splits by the **median of centroids on the widest axis**
+  with the original block index as the tie-break, matching `terrain-bvh.mjs`.
+  `DEFAULT_BLOCK_BVH_LEAF = 8`; node AABBs carry `1e-7` slack.
+- `rayBlockHit` runs an exact slab-DAG traversal and returns the same nearest
+  distance as the linear `min(boxHit)` scan. Node tests use a tighter `1e-12`
+  parallel epsilon than `boxHit`'s `1e-8`, so a node can only be pruned when its
+  hull is genuinely beyond the incumbent — never a real hit. The result is a
+  distance only, so ties (equal distance) cannot change `rayWorld`'s value.
+- The BVH is baked lazily onto the **same cached block index** as the uniform
+  grid, so the existing `invalidateBlockIndex` contract (identity/length change
+  on mutable arenas, frozen `MAPS` templates cached forever) invalidates both.
+  `rayCandidates`/`boxHit` remain as the oracle and for obstruction/support.
+
+### Switch point (the only `core.mjs` edit)
+
+```js
+// before
+let best = max;
+for (const b of rayCandidates(arena, o, d, best)) { const t = boxHit(o, d, b, best); if (t !== null && t < best) best = t; }
+// after
+let best = rayWorldBlockHit(arena, o, d, max);
+```
+
+## 8. `game/bots.mjs` — cached cover pathing
+
+`coverPoint` was O(nav) floods **and** O(nav) visibility rays per call, on every
+defensive bot think. It now:
+
+- memoizes `dijkstraFrom` floods per (graph, source) in a bounded 96-entry FIFO
+  (a flood is a pure function of the static nav graph and source node);
+- bakes the per-node cover geometry (non-finite exclusion + `obstructed`) once
+  per graph/arena instead of re-testing every node on every call;
+- visits the in-budget, statically-safe candidates in **ascending route cost**
+  and only casts a visibility ray while the node's cost can still yield a score
+  that beats (or index-ties) the incumbent. The break bound is the worst-case
+  score slack `cap*weight + 6`.
+
+The chosen node and the lowest-index tie-break are bit-identical to the previous
+linear scan (`bot-navigation.test.mjs` asserts this against a literal copy of the
+old loop over 4 400 synthetic + real-map scenarios). All other bot decisions are
+untouched; `astar`/`path`/`flankDestination`/`patrolPoint` are unchanged.
+
+## 9. Measured results (same box, Node 22)
+
+`Match.step` p95/p50 (ms), combined-arms, 1 human + 11 bots (@12) and 8 humans +
+16 AI seats (@24), 120-step warm-up, 800 samples, median of 5 runs:
+
+| map | 12 p95 before | 12 p95 after | 24 p95 before | 24 p95 after | 24 p50 before | 24 p50 after |
+| --- | --- | --- | --- | --- | --- | --- |
+| titan-valley | 1.93 | **1.56** | 18.48 | **2.67** | 1.59 | **1.30** |
+| convoy-line | 12.51 | **1.20** | 13.60 | **2.31** | 1.34 | **1.05** |
+| frostline | 10.40 | **2.12** | 11.85 | **3.51** | 1.58 | **1.56** |
+
+Block BVH build and query (index path): build p50 **0.13/0.12/0.016 ms**,
+p95 0.52/0.16/0.02 ms; `rayBlockHit` p50 **0.93/0.97/0.41 µs** on
+titan-valley/convoy-line/frostline.
+
+Steady-state profile (convoy-line @24, 3 000 steps): `coverPoint` inclusive
+**55% (W9) → 40% (M1) → 9.9%**, `dijkstraFrom` self **8.7% → 2.6%**,
+`rayWorld` inclusive **47% → 6.6%**, `boxHit` 28.3% self is gone (replaced by
+`rayBlockHit` 5.0% incl + `blockNodeEntry` 2.2%), GC **3.7% → 2.7%**. The
+residual is spread noise across bot bookkeeping (`nearest`/`dist`/
+spawn-placement), not a single hot path.
+
+## 10. Parity, determinism and tests
+
+- Block BVH vs brute force: **140 000** random rays across every `MAPS` arena
+  (axis-aligned, near-parallel, `max ∈ {1,3,6,12,30,40,∞}`), **0 mismatches**.
+- `coverPoint` vs the pre-W13 linear scan: **4 400** scenarios, **0 mismatches**.
+- Seeded runs: 8 scenarios × 500 steps (combined-arms + ctf on
+  titan-valley/convoy-line/frostline/lattice-slice) produce **byte-identical**
+  `snapshot()` output **and** byte-identical emitted-event streams versus
+  `a034685`.
+- Committed: `spatial.test.mjs` adds BVH nearest-hit parity, deterministic
+  bake/hash, leaf-size invariance and `invalidateBlockIndex` coverage;
+  `bot-navigation.test.mjs` adds the linear-scan equivalence oracle.
+
+### Remaining miss
+
+None. `step p95 ≤8 ms @24` is met on all three maps (2.31–3.51 ms).
