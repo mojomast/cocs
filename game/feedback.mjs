@@ -334,12 +334,12 @@ const BED_MOODS=Object.freeze({
  storm:Object.freeze({filter:420,tone:48,gain:.024,sub:.005,air:.012,windFreq:900,wind:2,tense:.003,tenseFreq:60}),
 });
 export class SynthAudio{
- constructor({announcer=false}={}){this.ctx=null;this.muted=false;this.voices=new Set();this.noiseBuffer=null;this.master=null;this.lastDamage=null;this.lastReport=null;this.lastHit=-Infinity;this.footPhase=0;this.wasGrounded=undefined;this.lastVy=0;this.engine=null;this.bed=null;this.bedMood='default';this.ambientBed=true;this.stepVariant=0;this.landVariant=0;this.reloadVariant=0;this.intensity=0;this.bedScale=.75;this.musicEnabled=true;this.announcer=announcer===true;this.announced=new Set();this.lastCue=null;this.mode='default';this.theme=MODE_THEMES.default;this.soundtrack='default';this.reverbUrl=null;this.reverbWet=0.42;this.reverbLoaded=false;this.reverbSpace=null;this.lastSting=null;this.heartbeatTimer=0;this.reportSerial=0;this.space=null;this.surfaceResolver=null;this.windScale=null;this._reverbPending=false;this.jumpVariant=0;
+ constructor({announcer=false}={}){this.ctx=null;this.muted=false;this.voices=new Set();this.noiseBuffer=null;this.master=null;this.lastDamage=null;this.lastReport=null;this.lastHit=-Infinity;this.footPhase=0;this.wasGrounded=undefined;this.lastVy=0;this.engine=null;this.bed=null;this.bedMood='default';this.ambientBed=true;this.stepVariant=0;this.landVariant=0;this.reloadVariant=0;this.intensity=0;this.bedScale=.75;this.musicEnabled=true;this.announcer=announcer===true;this.announced=new Set();this.lastCue=null;this.mode='default';this.theme=MODE_THEMES.default;this.soundtrack='default';this.reverbUrl=null;this.reverbWet=0.30;this.reverbLoaded=false;this.reverbSpace=null;this.lastSting=null;this.heartbeatTimer=0;this.reportSerial=0;this.space=null;this.surfaceResolver=null;this.windScale=null;this._reverbPending=false;this.jumpVariant=0;
   // Gain buses. `muteGain` sits between the master and the destination so a
   // master mute silences every branch immediately; music/effects/ambience each
   // have their own bus for independent volume control. Voice chat lives in
   // game/voice.mjs and is deliberately outside this graph.
-  this.musicEngine=null;this.effectsBus=null;this.ambienceBus=null;this.muteGain=null;
+  this.musicEngine=null;this.musicBus=null;this.effectsBus=null;this.ambienceBus=null;this.muteGain=null;
   this.volumes={master:.9,music:.7,effects:1,ambience:.8};
   this.status='off';this.scene='menu';this._announceAt=new Map();this._stingDuckTimer=null;
   // Optional Moth audio layer (game/moth-audio.mjs). Never created here; the
@@ -398,8 +398,8 @@ export class SynthAudio{
  // Register a same-origin impulse response to attach on the next unlock. A new
  // URL cancels any in-flight attach for the old URL; the settle callback checks
  // the URL again before latching so a stale load cannot win.
- setReverbUrl(url,wet=0.42){this.reverbUrl=url||null;const w=Number(wet);this.reverbWet=Number.isFinite(w)?w:.42;this.reverbLoaded=false;this._reverbPending=false;if(this.ctx&&this.ctx.state==='running')this.unlock();return Boolean(url);}
- // Select a baked space IR by name (open-air/tunnel/hall/cathedral/cavern).
+ setReverbUrl(url,wet=0.30){this.reverbUrl=url||null;const w=Number(wet);this.reverbWet=Number.isFinite(w)?w:.30;this.reverbLoaded=false;this._reverbPending=false;if(this.ctx&&this.ctx.state==='running')this.unlock();return Boolean(url);}
+ // Select a baked space IR by name (open-air/tunnel/hall/cathedral/cavern/void).
  // Resolved through the Moth registry; an unknown name falls back to `cavern`,
  // and a missing registry keeps whatever URL is already wired so a partial bake
  // never silences the reverb. Re-selecting the active space is a no-op, which
@@ -423,6 +423,9 @@ export class SynthAudio{
   this.master.connect(this.muteGain);this.muteGain.connect(ctx.destination);
   this.effectsBus=ctx.createGain();this.effectsBus.gain.value=this.volumes.effects;this.effectsBus.connect(this.master);
   this.ambienceBus=ctx.createGain();this.ambienceBus.gain.value=this.volumes.ambience;this.ambienceBus.connect(this.master);
+  // The soundtrack's own gain stage, so the in-game music slider is real: the
+  // engine sums into musicBus, which then feeds the master.
+  this.musicBus=ctx.createGain();this.musicBus.gain.value=this.volumes.music;this.musicBus.connect(this.master);
   // Shared "space" send: a fixed delay + damped feedback loop. Weapon tails,
   // explosions and thunder route part of their output here so distant fights
   // keep depth without a convolution IR or per-sound scheduling. Optional:
@@ -436,7 +439,7 @@ export class SynthAudio{
     this.space={send,delay,damp,fb,wet};
    }catch{this.space=null;}
   }
-  try{this.musicEngine=new MusicEngine({ctx,destination:this.master,theme:this.theme,noiseBuffer:this.noiseBuffer,seed:(Date.now()&0xffff)||1});}
+  try{this.musicEngine=new MusicEngine({ctx,destination:this.musicBus,theme:this.theme,noiseBuffer:this.noiseBuffer,seed:(Date.now()&0xffff)||1});}
   catch{this.musicEngine=null;}
   if(this.musicEngine){this.musicEngine.setEnabled(this.musicEnabled);this.musicEngine.setMuted(this.muted);this.musicEngine.setScene(this.scene);this.musicEngine.setSoundtrack(this.soundtrack||'default');}
   this.status=ctx.state||'suspended';
@@ -461,6 +464,7 @@ export class SynthAudio{
   const v=Math.max(0,Math.min(1.5,Number(value)));
   this.volumes[key]=Number.isFinite(v)?v:this.volumes[key];
   if(key==='master'&&this.master)try{this.master.gain.value=this.volumes.master;}catch{}
+  if(key==='music'&&this.musicBus)try{this.musicBus.gain.value=this.volumes.music;}catch{}
   if(key==='effects'&&this.effectsBus)try{this.effectsBus.gain.value=this.volumes.effects;}catch{}
   if(key==='ambience'&&this.ambienceBus)try{this.ambienceBus.gain.value=this.volumes.ambience;}catch{}
   return this.volumes[key];
@@ -468,7 +472,9 @@ export class SynthAudio{
  getVolume(kind){return this.volumes[kind]??null;}
  // Scene drives the soundtrack arrangement: menus get the menu theme, matches
  // get exploration/combat layered by intensity.
- setScene(scene){this.scene=scene==='menu'?'menu':'game';this.musicEngine?.setScene(this.scene==='menu'?'menu':(this.intensity>=.34?'combat':'explore'));this.mothAudio?.setScene?.(this.scene);return this.scene;}
+ setScene(scene){const key=scene==='menu'?'menu':scene==='results'?'results':'game';this.scene=key;this.musicEngine?.setScene(key==='menu'?'menu':key==='results'?'results':(this.intensity>=.34?'combat':'explore'));this.mothAudio?.setScene?.(key);return this.scene;}
+ // Victory/defeat selects the results arrangement (Picardy tonic on a win).
+ setOutcome(outcome){return this.musicEngine?.setOutcome?.(outcome)??null;}
  previewMusic(scene='menu',seconds=8){this._ensureBuses();const r=this.musicEngine?.preview(scene,seconds);this.unlock();return r??null;}
  // Select an arrangement pack (e.g. 'halo'); delegates to the music engine.
  setSoundtrack(name='default'){this.soundtrack=(name==='halo')?'halo':'default';this._ensureBuses();this.theme=this.soundtrack==='halo'?HALO_THEME:(MODE_THEMES[this.mode]||MODE_THEMES.default);return this.musicEngine?.setSoundtrack(this.soundtrack)??this.soundtrack;}
@@ -491,7 +497,7 @@ export class SynthAudio{
    return this.musicEngine.setReverb(buffer,opts);
   }catch{return false;}
  }
- audioStatus(){return {state:this.ctx?(this.ctx.state||'suspended'):'unavailable',status:this.status,enabled:this.musicEnabled,muted:this.muted,scene:this.scene,intensity:this.intensity,voices:this.voices.size,notes:this.musicEngine?.notesScheduled??0,music:this.musicEngine?.status?.()??'off',reverb:this.reverbLoaded?'ready':(this._reverbPending?'loading':(this.reverbUrl?'pending':'off')),space:this.reverbSpace,moth:this.mothAudio?.status?.()??null};}
+ audioStatus(){return {state:this.ctx?(this.ctx.state||'suspended'):'unavailable',status:this.status,enabled:this.musicEnabled,muted:this.muted,scene:this.scene,intensity:this.intensity,voices:this.voices.size,notes:this.musicEngine?.notesScheduled??0,music:this.musicEngine?.status?.()??'off',reverb:this.reverbLoaded?'ready':(this._reverbPending?'loading':(this.reverbUrl?'pending':'off')),space:this.reverbSpace,moth:this.mothAudio?.status?.()??null,samples:this.musicEngine?.sampleStatus?.()??null};}
  // Low, continuous ambience bed: filtered noise hiss plus a sub tone, faded in
  // through the master gain. Owned by the audio instance and torn down in dispose.
  _bed(on){
@@ -622,6 +628,8 @@ export class SynthAudio{
   this.lastSting=outcome;
   // Duck the soundtrack under the sting so the result reads clearly, then ease
   // it back. The timer is cleared on disposal so it cannot outlive the engine.
+  // The soundtrack also moves to the results scene, where the motif turns major.
+  this.musicEngine?.setOutcome?.(outcome);
   this.musicEngine?.setDuck(1);
   if(this._stingDuckTimer)clearTimeout(this._stingDuckTimer);
   this._stingDuckTimer=setTimeout(()=>{this._stingDuckTimer=null;this.musicEngine?.setDuck(0);},1400);
@@ -908,5 +916,5 @@ export class SynthAudio{
   const vehicle=(vehicles||[]).find(v=>v.id===player.vehicleId||v.driver===player.id),vx=vehicle?(vehicle.vx??vehicle.velocity?.x??0):0,vz=vehicle?(vehicle.vz??vehicle.velocity?.z??0):0,boosting=Boolean(vehicle&&(vehicle.boosting===true||(vehicle.boostCooldown??0)>0||(vehicle.effects?.turbo>0)));
   this._engine(vehicle?Math.hypot(vx,vz):0,Boolean(vehicle),boosting);}
  _engine(speed,active,boosting=false){if(!this.ctx)return;if(active&&!this.muted){if(!this.engine){const osc=this.ctx.createOscillator(),sub=this.ctx.createOscillator(),f=this.ctx.createBiquadFilter(),g=this.ctx.createGain();osc.type='sawtooth';sub.type='triangle';f.type='lowpass';f.frequency.value=700;g.gain.value=.0001;osc.connect(f);sub.connect(f);f.connect(g);g.connect(this.effectsBus||this.master);osc.start();sub.start();this.engine={osc,sub,f,g};}const s=cl(speed/20,0,1),boostMult=boosting?1.35:1,t=this.ctx.currentTime;this.engine.osc.frequency.setTargetAtTime((55+s*120)*boostMult,t,.1);this.engine.sub.frequency.setTargetAtTime((28+s*40)*boostMult,t,.1);this.engine.g.gain.setTargetAtTime((.022+s*.05)*(boosting?1.2:1),t,.12);this.engine.f.frequency.setTargetAtTime((500+s*1200)*(boosting?1.4:1),t,.15);}else if(this.engine){const {osc,sub,g}=this.engine,t=this.ctx.currentTime;g.gain.setTargetAtTime(.0001,t,.08);this.engine=null;setTimeout(()=>{try{osc.stop();sub.stop();}catch{}},300);}}
- dispose(){if(this._stingDuckTimer){clearTimeout(this._stingDuckTimer);this._stingDuckTimer=null;}try{this.musicEngine?.dispose();}catch{}this.musicEngine=null;try{this.mothAudio?.dispose?.();}catch{}this.mothAudio=null;if(this.engine){try{this.engine.osc.stop();this.engine.sub.stop();}catch{}this.engine=null;}if(this.bed){for(const node of Object.values(this.bed)){if(node&&typeof node.stop==='function')try{node.stop();}catch{}if(node&&typeof node.disconnect==='function')try{node.disconnect();}catch{}}this.bed=null;}for(const token of this.voices){clearTimeout(token.timer);for(const n of token.nodes){try{n.disconnect();}catch{}}}this.voices.clear();this._announceAt?.clear?.();this.lastSting=null;if(this.space){for(const node of Object.values(this.space)){try{node.disconnect();}catch{}}this.space=null;}for(const bus of [this.effectsBus,this.ambienceBus,this.master,this.muteGain]){try{bus?.disconnect();}catch{}}this.effectsBus=null;this.ambienceBus=null;this.master=null;this.muteGain=null;this.ctx?.close();this.ctx=null;this.status='off';}
+ dispose(){if(this._stingDuckTimer){clearTimeout(this._stingDuckTimer);this._stingDuckTimer=null;}try{this.musicEngine?.dispose();}catch{}this.musicEngine=null;try{this.mothAudio?.dispose?.();}catch{}this.mothAudio=null;if(this.engine){try{this.engine.osc.stop();this.engine.sub.stop();}catch{}this.engine=null;}if(this.bed){for(const node of Object.values(this.bed)){if(node&&typeof node.stop==='function')try{node.stop();}catch{}if(node&&typeof node.disconnect==='function')try{node.disconnect();}catch{}}this.bed=null;}for(const token of this.voices){clearTimeout(token.timer);for(const n of token.nodes){try{n.disconnect();}catch{}}}this.voices.clear();this._announceAt?.clear?.();this.lastSting=null;if(this.space){for(const node of Object.values(this.space)){try{node.disconnect();}catch{}}this.space=null;}for(const bus of [this.effectsBus,this.ambienceBus,this.musicBus,this.master,this.muteGain]){try{bus?.disconnect();}catch{}}this.effectsBus=null;this.ambienceBus=null;this.musicBus=null;this.master=null;this.muteGain=null;this.ctx?.close();this.ctx=null;this.status='off';}
 }

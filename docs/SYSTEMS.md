@@ -1037,8 +1037,10 @@ quantum-blurred height fields) while keeping procedural roughness, and exposes
 the entanglement reflectance LUT through the `entanglement` material preset and
 `mothMaterialLutTexture`. `game/moth-material.mjs` builds a Fresnel-sampled
 iridescent `MeshStandardMaterial` from a LUT. `game/music.mjs` can play a
-Halo-flavoured soundtrack pack (choir pad, drone, taiko, bells) with a
-convolution reverb decoded from the baked `retrocausal-echo` impulse response.
+Halo-flavoured soundtrack pack (strings, low brass, taiko, timpani, bells, choir
+pad, drone) with a convolution reverb decoded from the baked `retrocausal-echo`
+impulse response; the orchestral voices stream the baked CC0 sample set from
+`/music/*` (see §13.2).
 `game/moth-maps.mjs` maps a `labyrinth-v1` graph onto a room grid — nodes to
 rooms, quantum couplings to doorways, radiating qubits to objectives —
 guaranteeing a walk-connected labyrinth on the 6 m navigation grid. The baked
@@ -1076,16 +1078,36 @@ announcer callouts.
 
 `MusicEngine` is a small step sequencer layered over the Web Audio graph. It owns
 three sub-buses (`menu`, `explore`, `combat`) plus a shared percussion bus, all
-under a music bus fed to `SynthAudio`'s master. `ARRANGEMENTS` and
+under a music bus fed to `SynthAudio`'s master, with a convolution reverb send and
+a lazy chorus send (an 18 ms LFO-swept delay). `ARRANGEMENTS` and
 `CHORD_PROGRESSIONS` are pure data sharing the active `MODE_THEMES` root/scale, so
 menu, exploration and combat are recognisably the same piece; each arrangement
 carries bass, kick/snare/hat, an arpeggio and (combat) a lead, with four-bar phrase
-fills. `tick()` — called once per rendered frame by `ArenaView`/`app/page.tsx`,
-including in menus — schedules notes with a bounded look-ahead using
-`AudioContext.currentTime`, so timing is frame-rate independent and a suspended tab
-resumes without a backlog. `setScene`/`setIntensity` crossfade the buses,
-`setDuck` eases the music under stings, `preview` forces a scene for an audition,
-and `dispose` stops and disconnects every held note and bus.
+fills. The halo pack adds a `brass` low line, `timpani` downbeats, tribal taiko
+and high bells for cinematic register separation. `tick()` — called once per
+rendered frame by `ArenaView`/`app/page.tsx`, including in menus — schedules notes
+with a bounded look-ahead using `AudioContext.currentTime`, so timing is
+frame-rate independent and a suspended tab resumes without a backlog.
+`setScene`/`setIntensity` crossfade the buses, `setDuck` eases the music under
+stings, `preview` forces a scene for an audition, and `dispose` stops and
+disconnects every held note, bus, send and sample buffer.
+
+**Sampled instruments.** Baked CC0 samples (`public/music/`, served at
+`/music/*`; see `assets/music/README.md`) back the orchestral voices through
+`game/sampler.mjs`. The bake writes Ogg + AAC `.m4a` at 44.1 kHz mono with loop
+points in seconds, and `SampleBank` fetches, decodes and caches them lazily per
+instrument — decoding never blocks the scheduler. Selection is deterministic: the
+nearest-`midi` sample is pitch-shifted with `playbackRate`, the velocity layer and
+same-pitch round-robin come from the engine's seeded RNG, and the choice is folded
+into `scheduleChecksum`. If a buffer is not decoded yet (or the context cannot
+decode), the voice transparently falls back to the oscillator path, so Node tests
+and blocked-autoplay paths stay silent-safe and reproducible. Voicing: pad →
+`strings-pad`, brass → `low-brass`, kick/taiko → `taiko`, bells → `bells`,
+downbeats → `timpani`; synth leads/arps keep oscillator voices, upgraded with
+detuned unison stacks, velocity-brightened filters and FM/additive bell partials.
+The choir (the one colour the CC0 set cannot supply) is a detuned-saw stack shaped
+by a three-peak formant bank (620/1180/2600 Hz). `sampleStatus()` reports the
+loaded/total per instrument through `audioStatus().samples`.
 
 `SynthAudio` builds the bus graph in `_ensureBuses` (master → mute gain →
 destination, with effects/ambience/music children), exposes `setMuted` (which sets

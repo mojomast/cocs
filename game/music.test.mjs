@@ -19,7 +19,7 @@ function engine(overrides={}){
 }
 
 test('arrangements share a tonal centre and carry bass, percussion and higher content',()=>{
- assert.deepEqual([...MUSIC_SCENES],['menu','explore','combat']);
+ assert.deepEqual([...MUSIC_SCENES],['menu','explore','combat','results']);
  for(const [scene,arr] of Object.entries(ARRANGEMENTS)){
   assert.ok(arr.bpm>=80&&arr.bpm<=140,`${scene} tempo is musical`);
   assert.ok(arr.bass.length>0,`${scene} has bass`);
@@ -146,17 +146,18 @@ test('setReverb is a safe no-op without a convolver and attaches when available'
  assert.equal(convolver.disconnected,true,'the convolver is released on dispose');
 });
 
-test('a baked motif drives the lead voice, quantised to the active scale',()=>{
+test('the built-in COCS leitmotif drives the halo lead and an external motif still quantises',()=>{
  const {e,ctx}=engine();
  e.setSoundtrack('halo');
+ assert.equal(e.arrangements.combat.lead,'cocs','the halo combat layer reads the built-in leitmotif');
  const notes=[{step:0,midi:62,dur:4},{step:4,midi:65,dur:4},{step:8,midi:69,dur:4},{step:12,midi:72,dur:4}];
  assert.equal(e.setMotif({bpm:60,notes}),4,'every note maps to a scale degree');
  assert.ok(e.motifLead.every(d=>Number.isInteger(d)),'degrees are integers');
- assert.equal(e.arrangements.combat.lead,'motif','the halo combat layer reads the motif');
  e.setScene('combat');e.setIntensity(1);
  let scheduled=0;for(let i=0;i<40;i++){ctx.currentTime+=.05;scheduled+=e.tick();}
- assert.ok(scheduled>0&&e.notesScheduled>0,'the motif lead schedules');
- assert.equal(e.setMotif(null),0,'clearing the motif disables the lead');
+ assert.ok(scheduled>0&&e.notesScheduled>0,'the leitmotif lead schedules');
+ assert.ok(e.notesBy.lead>0,'the developed motif actually sounds');
+ assert.equal(e.setMotif(null),0,'clearing the motif disables the external motif');
  assert.equal(e.motifLead,null);
 });
 
@@ -186,7 +187,8 @@ test('both packs carry eight-bar phrasing, multi-bar themes and counter-lines',(
  const leadOf=arr=>Array.isArray(arr.lead)?arr.lead:arr.leadFallback;
  assert.ok(ARRANGEMENTS.menu.lead.length>=16&&ARRANGEMENTS.combat.lead.length>=16,'default leads are multi-bar themes');
  assert.ok(leadOf(HALO_ARRANGEMENTS.combat).length>=16,'the halo fallback lead is a developed line');
- assert.ok(leadOf(HALO_ARRANGEMENTS.menu)===undefined,'the halo menu stays chant-like without a lead');
+ assert.ok(leadOf(HALO_ARRANGEMENTS.menu).length>=4,'the halo menu augments the motif rather than dropping the lead');
+ assert.ok(HALO_ARRANGEMENTS.combat.lead==='cocs'&&HALO_ARRANGEMENTS.results?.lead==='cocs','halo combat and results voice the leitmotif');
  for(const scene of MUSIC_SCENES){
   assert.ok(ARRANGEMENTS[scene].counter.length>=8,`default ${scene} has an offbeat counter-line`);
   assert.ok(HALO_ARRANGEMENTS[scene].counter.length>=8,`halo ${scene} has an offbeat counter-line`);
@@ -251,7 +253,8 @@ test('scene changes run a bounded exit-swell/entrance-accent transition',()=>{
  // In-game the arrangement follows intensity, not setScene: the transport keeps
  // running, so the rest of the current bar carries the exit swell.
  e.setScene('combat');e.setIntensity(0.1);
- runTicks(e,ctx,6);
+ // The transport is not reset: the entrance lands on the next downbeat.
+ runTicks(e,ctx,60);
  assert.equal(e._activeScene(),'explore');
  assert.equal(e.transitions,1,'leaving the menu is one transition');
  assert.equal(e.transition.to,'explore','the first transition lands on exploration material');
