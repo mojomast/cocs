@@ -16,6 +16,85 @@ record in [VERIFICATION.md](VERIFICATION.md).
 
 ---
 
+## v7.1 · CHORUS — 2026-09-18
+
+A composed soundtrack on a real CC0 sampled orchestra, Moth pass 3 effects and
+reverb spaces, and the Moth audio pipeline. Presentation and audio only: no
+`core.mjs`, `game/protocol.mjs` or `server/` change, so the deploy is web-only.
+
+### Soundtrack
+
+- **Composed, not looped.** `game/music.mjs` gains a per-bar chord-quality
+  table and functional eight-bar progressions in D natural minor for menu,
+  explore, combat and results (i-VI-III-VII, i-VI-iv-v, the borrowed major V
+  and a Picardy I), so pads, brass and choir voice a real triad. The recurring
+  COCS leitmotif is developed per scene: augmented menu statement, diatonic +2
+  sequence in bars 5-8, combat inversion, staccato diminution as the
+  low-string ostinato, Picardy-major results and a bell fragment `[1,2,0,0]`
+  at every eight-bar turn. A shared 32-bar form (intro/build/climax/transition/
+  outro) adds fills at bars 4/8/16/24/28/32 and a four-bar bpm ramp.
+- **Phrases accumulate.** `setScene`/`setSoundtrack` no longer reset the
+  transport, strings/bass/drone/lead move into the samples' natural range,
+  combat plays sampled strings, and `maxVoices` rises 26 -> 44 with a separate
+  sustained-voice budget (four transient slots reserved).
+- **A CC0 sampled orchestra.** 172 samples (9.55 MiB) baked reproducibly from
+  VSCO 2 CE and VCSL by `scripts/music-bake.mjs`, served same-origin from
+  `/music/*`: strings sustains and spiccato, low brass and staccato, trumpet
+  pad, timpani hits and rolls, bells, tubular bells, gong, cymbals, harp and
+  taiko. `game/sampler.mjs` streams and decodes Ogg (AAC `.m4a` fallback)
+  lazily; selection is seeded (nearest midi, preferred velocity layer,
+  same-pitch round-robin) and folded into `scheduleChecksum`; an undecoded or
+  failed buffer falls back to the oscillator voice, so Node tests and blocked
+  autoplay stay inert.
+- **A real music bus and results arrangement.** `SynthAudio` owns a `musicBus`
+  between the engine and master, so the settings music slider attenuates the
+  soundtrack. The master chain gains a limiter (-10 dB, 4:1, +6 dB makeup) and
+  a tanh ceiling, orchestral seating pans and a retuned reverb send (wet 0.30
+  with a 250 Hz high-pass and 30 ms pre-delay). `setOutcome` gives victory and
+  defeat their own results arrangement.
+
+### Moth pass 3
+
+- **Six effect sequences.** New deterministic generators bake bloom
+  (explosions), vortex (teleports), contract (capture rings), rise (heals and
+  support pickups), shield (shield breaks, walls and overshields) and snow
+  (weather drift) - 18 jobs at three frames each. `_mothFx` prefers the
+  dedicated sheet and falls back to the previous arc-burst/spark-impact cue.
+- **Four reverb spaces.** open-air (short early reflections), tunnel (chain
+  slapback), hall (medium square diffusion) and cathedral (long 7 s build)
+  join cavern and void. `mothSpaceFor(arenaId)` picks one per arena (interiors
+  and tunnels override open-air) and `SynthAudio.setSpace(name)` swaps the
+  response on `setAudio` and every arena build, defaulting to open-air with a
+  cavern fallback.
+
+### Moth audio pipeline
+
+- **Runtime layer.** New `game/moth-audio.mjs`: a lazy `MothAudioBank`
+  (fetch/decode cache, budget eviction, loop windows) and a `MothAudio` layer
+  for beds, spaces and stingers (at most three concurrent beds, fixed scene
+  routing). It is inert without an `AudioContext`, before decode, or under
+  reduced motion, and `SynthAudio` forwards through guarded hooks.
+- **First bakes.** The 5 s `void` IR, the `arena` echo map (153 taps), the
+  `bed-ritual` ambience clip (10.68 s) and the `moth-victory`/`moth-defeat`
+  motifs. The `ir` baker now extracts taps recursively (`extras.taps`), fixing
+  the long-empty `irs.cavern.taps`; the offline `repair` command rebuilds
+  descriptors from committed raw results with no API call or credits.
+
+### Consolidation
+
+- One record per real space (`cavern`, `open-air`, `tunnel`, `hall`,
+  `cathedral`, `void`). `ir-openair` is deleted as a byte-identical duplicate of
+  `ir-open-air` and must not be re-added; the surviving `ir-tunnel` is the
+  3.5 s corridor response. `scripts/merge-baked-variants.mjs` unions the pass-3
+  and audio baked modules offline, and the manifest settles at 80 jobs.
+
+### Scope
+
+- `core.mjs`, `game/protocol.mjs` and `server/` are untouched, so this is a
+  web-only deploy and connected multiplayer clients are not disconnected.
+
+---
+
 ## v7.0 · DOCTRINE — 2026-09-17
 
 The class and harness overhaul is complete: data-driven kits, live spec

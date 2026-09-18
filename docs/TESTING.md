@@ -131,16 +131,18 @@ duplicate "every combat mode completes" loop was removed outright from
 
 ## Current counts
 
-Last verified on release v7.0 (2026-09-17), on the `feat/class-overhaul`
-worktree (the class/harness overhaul merged fast-forward into production at
-`0facf42`):
+Last verified on release v7.1 (2026-09-18), on the `feat/v71-chorus`
+worktree (the soundtrack overhaul, Moth pass 3 and the Moth audio pipeline
+merged fast-forward into production at `185ab8f`):
 
-- `npm run test:game` — **1953 tests: 1946 pass, 0 fail, 7 skipped**, across
-  176 `game/*.test.mjs` files (726 s). The overhaul adds focused suites for the wing riders,
-  spec passives, gear dominance, TTK envelope, movement input, respawn loadout
-  and UI, HUD class helpers, class presentation, bot loadouts and the
-  single-hit clamp; the all-arena `route-sweep` and the balance sweep remain
-  opt-in. The production checkout re-ran `changelog` at **3/3**.
+- `npm run test:game` — **2010 tests: 2003 pass, 0 fail, 7 skipped**, across
+  181 `game/*.test.mjs` files (1135 s). The audio pass adds focused suites for
+  the sampled bank (`sampler`), arrangement/leitmotif/form (`music-arrangement`),
+  the Moth audio bank and layer (`moth-audio`), the audio bakers
+  (`moth-bake-audio`) and the pass-3 generators (`moth-bake-generators`), and
+  extends the existing `music`/`feedback`/`moth-assets`/`moth-wiring` suites;
+  the all-arena `route-sweep` and the balance sweep remain opt-in. The
+  production checkout re-ran `changelog` at **3/3**.
 - The 7 skipped tests are long simulations (an exhaustive 8-bot all-modes sweep,
   an 18k-step 4-bot match, a 10k-step 8-bot race, a 4×1800-step platform-bot
   sweep, both opt-in `route-sweep` cases over all 41 arenas × 9 verbs and all 39
@@ -148,14 +150,12 @@ worktree (the class/harness overhaul merged fast-forward into production at
   in a browser) that take many minutes on a machine without 3D hardware. They are
   opt-in: run `npm run test:game:slow` (or `COCS_SLOW_TESTS=1 npm run test:game`)
   on a machine with the budget. `--test-timeout` is set on every script so a
-  stuck test fails instead of hanging forever. The class-overhaul gate ran the
-  slow subset (`COCS_SLOW_TESTS=1` over `config`, `core`, `gameplay`, `race`)
-  at **132/132 pass, 0 skipped**, and the opt-in `route-sweep` passes all 41
-  arenas × 9 verbs plus bot navigation on all 39 non-race arenas.
+  stuck test fails instead of hanging forever. The opt-in `route-sweep` passes
+  all 41 arenas × 9 verbs plus bot navigation on all 39 non-race arenas.
 - `npm run test:server` — **159 pass, 0 fail**, across 16 `server/*.test.mjs`
   files.
 - `node --test tests/*.test.mjs` — **7 pass, 0 fail** (SSR, UI contract,
-  deployment), re-ran against the v6.6 production build; the v7.0 deploy
+  deployment), re-ran against the v7.1 production build; the v7.1 deploy
   re-verifies the served assets.
 - `npx tsc --noEmit` — clean; `npm run lint` — 0 errors (487 warnings only);
   bounded `vinext build` — green.

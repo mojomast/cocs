@@ -435,6 +435,37 @@ assets. Full procedure and verification: [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md
 Recent releases. The full history lives in
 [docs/CHANGELOG.md](docs/CHANGELOG.md).
 
+### v7.1 · CHORUS — 2026-09-18
+- The soundtrack is composed instead of looped. `game/music.mjs` gains
+  functional eight-bar progressions in D natural minor with real triads and a
+  recurring COCS leitmotif developed per scene (augmented statement, +2
+  sequence, combat inversion, staccato ostinato, Picardy results, a bell
+  fragment at every turn), inside a shared 32-bar form. Phrases accumulate
+  because the transport no longer resets, and the voice budget rises from 26 to
+  44 with four transient slots reserved.
+- A CC0 sampled orchestra ships: 172 samples (9.55 MiB) baked reproducibly from
+  VSCO 2 CE and VCSL and served from `/music/*` (strings, low brass, trumpet
+  pad, timpani, bells, tubular bells, gong, cymbals, harp, taiko).
+  `game/sampler.mjs` decodes Ogg with an AAC fallback, picks samples from the
+  seeded engine RNG and folds the choice into the schedule checksum, falling
+  back to oscillator voices when a buffer is missing. A real `musicBus` makes
+  the settings music slider work, the master chain adds a limiter and ceiling,
+  and the results screen plays its own victory/defeat arrangement.
+- Moth pass 3 bakes six effect sequences (bloom, vortex, contract, rise, shield,
+  snow) and four reverb spaces (open-air, tunnel, hall, cathedral).
+  `mothSpaceFor(arenaId)` picks a space per arena and `SynthAudio.setSpace`
+  swaps it on every arena build.
+- The Moth audio pipeline ships in `game/moth-audio.mjs`: a lazy bank and layer
+  for beds, spaces and stingers, with the 5 s `void` IR, the `arena` echo map,
+  the `bed-ritual` ambience clip and the `moth-victory`/`moth-defeat` motifs.
+  The `ir` baker's recursive tap extraction fixes the empty `cavern` taps, and
+  an offline `repair` rebuilds descriptors with no API call or credits.
+- Consolidation: one record per real space (`cavern`, `open-air`, `tunnel`,
+  `hall`, `cathedral`, `void`), the `ir-openair` duplicate deleted, and a
+  80-job manifest.
+- Scope: `core.mjs`, `game/protocol.mjs` and `server/` are untouched, so this
+  is a web-only deploy and multiplayer clients are not disconnected.
+
 ### v7.0 · DOCTRINE — 2026-09-17
 - The class and harness overhaul is complete. The hidden harness stat
   multipliers are gone: seven behavioural spec passives (Grip, Express,

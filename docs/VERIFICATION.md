@@ -1,5 +1,126 @@
 # COCS verification report
 
+## Release 7.1 - CHORUS (the soundtrack overhaul, Moth pass 3 and the Moth audio pipeline)
+
+**Scope.** The music overhaul, Moth pass 3 and the Moth audio pipeline on
+`feat/v71-chorus` (tip `185ab8f`), merged **fast-forward** into the production
+line (`improvement/phase2-audio-visual`, previously `636f609` = v7.0).
+Presentation and audio only: `game/core.mjs`, `game/protocol.mjs` and
+`server/**` are untouched, so this is a **web-only** deploy and connected
+multiplayer clients are not disconnected. The only production-side code change
+in the release commit is the version footer and digest; the feature work arrived
+with the fast-forward merge.
+
+- **Composition (`8229f89`):** `game/music.mjs` gains a per-bar chord-quality
+  table and functional eight-bar progressions in D natural minor for
+  menu/explore/combat/results (i-VI-III-VII, i-VI-iv-v, borrowed major V,
+  Picardy I), a recurring COCS leitmotif developed per scene (augmented
+  statement, +2 sequence in bars 5-8, combat inversion, staccato diminution as
+  the low-string ostinato, Picardy results, bell fragment `[1,2,0,0]` at every
+  eight-bar turn), a shared 32-bar form with fills at 4/8/16/24/28/32 and a
+  four-bar bpm ramp. The transport no longer resets on
+  `setScene`/`setSoundtrack`, registers rise into the samples' natural range,
+  combat plays sampled strings, and `maxVoices` moves 26 -> 44 with a separate
+  sustained-voice budget. The mix adds a `musicBus`, a -10 dB / 4:1 / +6 dB
+  limiter with a tanh ceiling, orchestral seating pans and a retuned reverb
+  send (wet 0.30, 250 Hz high-pass, 30 ms pre-delay). `setOutcome` gives the
+  results screen its own arrangement.
+- **Sampled orchestra (`662eab5`, `92f5fd0`, `9fa5231`):** 172 CC0 samples
+  (9.55 MiB, mono 44.1 kHz) baked from VSCO 2 CE and VCSL by
+  `scripts/music-bake.mjs` and served same-origin from `/music/*`. New
+  `game/sampler.mjs` is a lazy `SampleBank` that decodes Ogg (AAC `.m4a`
+  fallback) without blocking the scheduler; selection is seeded (nearest midi,
+  preferred velocity layer, same-pitch round-robin) and folded into
+  `scheduleChecksum`, and an undecoded or failed buffer falls back to the
+  oscillator voice, so Node tests and blocked autoplay stay inert. Instrument
+  ids: strings-pad, low-strings-stacc, low-brass, brass-stacc, trumpet-pad,
+  timpani, timpani-roll, bells, tubular-bells, gong, cymbal-swell,
+  cymbal-crash, harp and taiko. No choir is baked (no CC0 source exists), so
+  the formant-synth fallback remains.
+- **Moth pass 3 (`f44c778`, merged `349a1b4`):** six new generated effect
+  sequences - bloom (explosions), vortex (teleports), contract (capture rings),
+  rise (heals and support pickups), shield (shield breaks, walls and
+  overshields) and snow (weather drift), 18 jobs at three frames each - wired
+  through `_mothFx` with fallback to arc-burst/spark-impact. Four new
+  `retrocausal-echo-v1` spaces join cavern and void: open-air (short early
+  reflections), tunnel (chain slapback), hall (medium square diffusion) and
+  cathedral (long 7 s build). `mothSpaceFor(arenaId)` picks one per arena and
+  `SynthAudio.setSpace(name)` swaps it on `setAudio` and every arena build,
+  defaulting to open-air with a cavern fallback.
+- **Moth audio (`339e731`, `8cb8ff0`, `a8f41d3`, `a4333aa`, merged
+  `a134f68`):** `scripts/moth-bake.mjs` gains a dependency-free WAV codec, the
+  `audio-clip` and `echo-map` bakers, `makeSourceAudio` and `audio`/`spaces`
+  buckets; the `ir` baker now extracts taps recursively (`extras.taps`,
+  `extras.tap_map.taps`, `data.extras.taps`), fixing the long-empty
+  `irs.cavern.taps`. New `game/moth-audio.mjs` holds a lazy `MothAudioBank`
+  (fetch/decode cache, budget eviction, loop windows) and a `MothAudio` layer
+  for beds, spaces and stingers (at most three concurrent beds, fixed scene
+  routing), inert without an `AudioContext`, before decode or under reduced
+  motion; `SynthAudio` forwards through guarded hooks. First bakes: the 5 s
+  `void` IR (64-tap map), the `arena` echo map (153 taps, 128 kept), the
+  `bed-ritual` ambience clip (10.68 s) and the `moth-victory`/`moth-defeat`
+  motifs. The offline `repair` command rebuilds descriptors from committed raw
+  results with no API call or credits (the only spend was 13 credits across the
+  audio batches, with one rejected 422 re-parameterised rather than resubmitted).
+- **Consolidation (`185ab8f`):** one record per real space (`cavern`,
+  `open-air`, `tunnel`, `hall`, `cathedral`, `void`); `ir-openair` is deleted as
+  a byte-identical duplicate of `ir-open-air` and must not be re-added; the
+  surviving `ir-tunnel` is the audio branch's 3.5 s corridor response.
+  `scripts/merge-baked-variants.mjs` unions the pass-3 and audio baked modules
+  offline and the manifest settles at 80 jobs.
+- **Gate (full merged-tree run in `/home/mojo/projects/tokenarena-v71`):**
+  `npm run test:game` **2010 tests: 2003 pass, 0 fail, 7 skipped** across 181
+  `game/*.test.mjs` files (1135 s); `npm run test:server` **159/159**;
+  `node --test tests/*.test.mjs` **7/7**; `npx tsc --noEmit` clean;
+  `npm run lint` 0 errors (487 warnings); bounded `vinext build` green. The 7
+  skips are the same opt-in long simulations plus the browser-only
+  `OfflineAudioContext` render. New coverage lands in `game/sampler.test.mjs`,
+  `game/music-arrangement.test.mjs`, `game/moth-audio.test.mjs`,
+  `game/moth-bake-audio.test.mjs`, `game/moth-bake-generators.test.mjs` and
+  extended `music`/`feedback`/`moth-assets`/`moth-wiring` suites.
+- **Production targeted gate:** `game/changelog.test.mjs` **3/3**,
+  `npm run test:server` **159/159**, `npx tsc --noEmit` clean and
+  `npm run lint` 0 errors (487 warnings) in `/home/mojo/projects/tokenarena`.
+- **Deploy:** `npm run deploy` (**web-only**) rebuilt the working tree (with the
+  v7.1 bump uncommitted) and restarted `token-arena-web.service` only -
+  `ActiveEnterTimestamp` `Fri 2026-09-18 02:17:13 UTC`. `token-arena-server.service`
+  stayed active on its v7.0 start (`Thu 2026-09-17 23:50:18 UTC`) because no
+  `server/`, `core.mjs` or `protocol.mjs` file changed, so connected
+  multiplayer clients were not disconnected. `npm run verify:deployment --
+  https://arena.ussyco.de` verified the served HTML (footer
+  `v7.1 · CHORUS`) and its 12 linked CSS/JS assets, and `GET /api/version`
+  returns `{"version":"v7.1"}`. As in v7.0 the first HTML fetch during the
+  restart returned a transient 502 and `scripts/deploy.sh` retried to success.
+- **Live deploy smoke (production `arena.ussyco.de`, after the deploy):** a
+  bounded headless Chromium/SwiftShader run (`/tmp/opencode/live-smoke-v71.cjs`,
+  adapted from the v7.0 script, exit 0, JSON in
+  `/tmp/opencode/release-v71-smoke.json`) - footer `v7.1 · CHORUS`;
+  `GET /api/version` 200 `{"version":"v7.1"}`; the attract reel rendered a
+  planned shot (subject `Kimi`, reason `explosion`, shot start fixed across
+  four samples); the selection screen showed the v7.0 wing chip (`TACTICIAN`);
+  ENTER ARENA started a 3-actor bot match (`mode: playing`, match clock
+  advancing 0.167 -> 0.250 s). **Asset checks:** `GET /music/manifest.json`
+  200 `application/json` with **172 samples**, `GET
+  /music/samples/bells-glock-g4-p.ogg` 200 (36,211 bytes, `OggS`), and `GET
+  /moth/files/ir-tunnel/result.wav` 200 (308,744 bytes, `RIFF`). Zero console
+  errors and zero page errors across the whole run. Screenshots:
+  `/tmp/opencode/release-v71-smoke.png` (title + footer),
+  `/tmp/opencode/release-v71-smoke-selection.png` (class identity) and
+  `/tmp/opencode/release-v71-smoke-match.png` (bot match). The `fps` figure is
+  SwiftShader, not hardware-GPU evidence.
+- **Rollback point:** `636f609` (v7.0 · DOCTRINE), the last production commit
+  before the fast-forward merge; `scripts/deploy.sh` additionally restores the
+  previous `dist/` and restarts the web service automatically if a deploy step
+  fails.
+- **Limitations (honest scope):** the live smoke is a SwiftShader/CPU render,
+  not hardware-GPU or frame-rate evidence. Browser audio was not auditioned in
+  CI: this Node environment has no `OfflineAudioContext`, so the real-render
+  test skips as before and loudness, stereo image and transition feel remain a
+  manual listening pass. Sampled routing is deterministic and unit-verified,
+  but decode on real hardware is best-effort and falls back cleanly. Moth audio
+  stays inert without an `AudioContext` by design. The published Moth assets
+  are committed offline bakes (no runtime API, no key, no network fetch).
+
 ## Release 7.0 - DOCTRINE (the class/harness overhaul and the Phase-5 balance gate)
 
 **Scope.** The class/harness overhaul (Phases 1-4) and the Phase-5 balance
