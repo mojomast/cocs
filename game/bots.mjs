@@ -8,7 +8,7 @@ import {OPERATOR_KITS} from './kits.mjs';
 import {enemyBehavior} from './enemy-types.mjs';
 import {turnToward} from './character-anim.mjs';
 import {payloadPosition} from './payload.mjs';
-import {cocsAssignment,cocsBotDestination} from './cocs-bots.mjs';
+import {cocsAssignment,cocsBotDestination,cocsScoutInput} from './cocs-bots.mjs';
 import {vehicleSeatFor,vehicleMounted} from './vehicles.mjs';
 const v=(x=0,y=0,z=0)=>({x,y,z});
 const norm=a=>{const l=Math.hypot(a.x,a.y,a.z)||1;return v(a.x/l,a.y/l,a.z/l)};
@@ -258,6 +258,9 @@ export function botMovementIntent(match,a,b,input,dt,targetDistance=Infinity){
 }
 
 export function botInput(match,a,dt){const b=a.bot,hints=harnessBotHints(a.harness)||{range:[6,16],retreatHealth:.4,power:'hurt'},operator=operatorProfile(a.character),behavior=a.npcType?enemyBehavior(a):botBehavior(a);b.behavior=behavior;b.fired=false;const lethal=match.mutators?.oneShot===true||match.mutators?.instagib===true,retreatAt=clamp(behavior.retreat*.6+(hints.retreatHealth??.4)*.4+(lethal?.18:0),.12,.85);b.think-=dt;b.memory=Math.max(0,b.memory-dt);b.suppressed=Math.max(0,(b.suppressed||0)-dt);b.vehicleCooldown=Math.max(0,(b.vehicleCooldown||0)-dt);b.reaction=Math.max(0,b.reaction-dt);if(a.traversalFlight||a.zipRide)return {};if(a.vehicleId!==null&&a.vehicleSeat==='passenger')return {interact:true};if(a.vehicleId!==null&&a.vehicleSeat==='gunner'){const mounted=match.vehicleById(a.vehicleId);if(!mounted||mounted.driver===null)return {interact:true};}const ride=a.vehicleId===null&&(b.vehicleCooldown||0)<=0&&behavior.vehicle>.32?match.vehicles.find(vehicle=>{const seat=vehicleSeatFor(vehicle);return seat&&seat.role!=='passenger'&&Math.hypot(a.x-vehicle.position.x,a.z-vehicle.position.z)<2.4&&Math.abs(a.y-vehicle.position.y)<(vehicle.config?.flight===true?3.2:2.4);}):null;if(ride&&!match.flagCarrier(a))return {interact:true};
+  // LATTICE STRIKE SCOUT (§8, V0b): a first-class spotter walks its scan route
+  // and never enters the combat/targeting branch. RNG-free and mode-guarded.
+  if(a.isScout===true&&match.config.mode==='cocs')return cocsScoutInput(match,a);
     if(b.think<=0){b.think=clamp((match.difficulty.think+match.random()*.15)*(behavior.thinkScale||1),match.difficulty.think*.6,(match.difficulty.think+.15)*1.4);const candidates=match.actors.filter(t=>t!==a&&t.health>0&&dist(a,t)<(a.botScan||25)&&match.visible(eye(a),eye(t))&&(!(t.powerups?.cloak>0)||dist(a,t)<4)&&(!teamMode(match.config)||t.team!==a.team)),locks=new Map();for(const ally of match.actors)if(ally!==a&&ally.bot&&Number.isInteger(ally.bot.target)&&ally.bot.target>=0)locks.set(ally.bot.target,(locks.get(ally.bot.target)||0)+1);const ranked=candidates.map(t=>{let score=dist(a,t)+match.random()*1.5+(locks.get(t.id)||0)*(2+behavior.hold*7);if(behavior.personality==='opportunist')score+=(t.health||100)*.14;if(behavior.role==='ambusher')score+=Math.max(0,dist(a,t)-9)*1.5;if(match.objectiveState?.kind==='juggernaut'&&t.id===match.objectiveState.juggernautId)score-=18;if(behavior.hold>.7)score+=Math.max(0,behavior.range[1]-dist(a,t))*.4;if(behavior.archetype==='flanker')score+=Math.max(0,dist(a,t)-9)*.25;else if(behavior.archetype==='sharpshooter')score-=Math.min(dist(a,t),26)*.06;else if(behavior.archetype==='rusher')score-=Math.max(0,9-dist(a,t))*.18;else if(behavior.archetype==='defender')score+=Math.max(0,dist(a,t)-13)*.22;else if(behavior.archetype==='support')score+=(t.health||100)*.06;
  // Finish the wounded and punish anyone already shooting a teammate. Both are
  // deterministic (health + distance only) and make target choice less random.

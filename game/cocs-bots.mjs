@@ -50,9 +50,10 @@
 // ---------------------------------------------------------------------------
 
 import {
-  COCS_CAPTURE_POINTS, COCS_INCOME, COCS_KIND,
+  COCS_CAPTURE_POINTS, COCS_INCOME, COCS_KIND, COCS_SCAN_ARRIVE, COCS_SCAN_RADIUS,
   capturableBy, capturableNodes, nodeById,
 } from './cocs.mjs';
+import {SUBAGENTS} from './cocs-economy.mjs';
 
 // A team may commit at most 60 % of its living roster to one node.
 export const COCS_SPREAD_FRACTION = 0.6;
@@ -62,6 +63,9 @@ const THREAT_PAD = 10;
 // is 2 s, so a task never lapses between reissues). Deliberately not 0 or 1 so
 // tick 1 stays order-silent for the arrival-order tests.
 const POLICY_INTERVAL = 45;
+// SCAN cadence (900 ticks = 15 s): the duty Chief screens with a scout when one
+// is not already alive and the team can pay the §8.1 spawn cost.
+const POLICY_SCAN_INTERVAL = 900;
 // --- W8 comeback / rotation pressure ---------------------------------------
 // A team is "behind" when the enemy holds an outright majority of the
 // capturable lattice (the same threshold that arms dominance) or is running a
@@ -330,12 +334,6 @@ export function cocsBotDestination(match, a, assignment, state = match?.objectiv
   return {x: node.x, y: zone.y, z: node.z};
 }
 
-// ---------------------------------------------------------------------------
-// Duty policy. Deterministic (no RNG): one HOLD/ATTACK order per team on a
-// fixed cadence. Skips a node the enemy is currently attacking so two standing
-// attack orders cannot cancel into an order-only deadlock; the bots decide that
-// node. Returns [] off-cadence so the step's RNG order is untouched.
-// ---------------------------------------------------------------------------
 function localPresence(actors, node, team, pad) {
   let friendly = 0;
   let hostile = 0;
@@ -346,6 +344,114 @@ function localPresence(actors, node, team, pad) {
     else if (actor.team === 1 - team) hostile++;
   }
   return {friendly, hostile};
+}
+
+// ---------------------------------------------------------------------------
+// §8 SCOUT policy (V0b). `cocsScoutInput` is deliberately RNG-free and never
+// reaches the combat branch of `botInput`: a scout walks to its scan area, then
+// home, and does not fire. `cocsScanTarget` picks the screen node the Chief
+// asks for: an enemy-held node first, then a contested one, never an owned
+// quiet rear.
+// ---------------------------------------------------------------------------
+export function cocsScanTarget(state, team) {
+  let best = null;
+  let bestScore = -Infinity;
+  for (const node of capturableNodes(state).filter(entry => entry.live === true).sort(idSort)) {
+    const enemyHeld = node.owner === 1 - team;
+    const contested = (node.progress?.[team] ?? 0) > 0 || (node.progress?.[1 - team] ?? 0) > 0;
+    const score = (enemyHeld ? 3 : 0) + (contested ? 2 : 0) + (node.owner === team ? -1 : 0);
+    if (score > bestScore) { bestScore = score; best = node; }
+  }
+  return best;
+}
+
+// A live scout from the policy's point of view (the actor roster, not the
+// engine's slot table, so unit tests can drive this with plain objects).
+function liveScout(actors, state, team) {
+  const id = state?.scouts?.[team];
+  if (id === null || id === undefined) return null;
+  const actor = (actors ?? []).find(entry => entry && entry.id === id);
+  if (!actor || actor.isScout !== true || actor.scoutActive === false || actor.health <= 0) return null;
+  return actor;
+}
+
+// Lightweight deterministic nav routing for scouts. The engine's bot brain
+// already owns `route`, so scout routing reuses that field; it is a plain
+// unweighted BFS over the cached nav graph and never draws the RNG.
+function scoutNearestNode(match, x, z) {
+  let best = 0;
+  let bestDistance = Infinity;
+  const nav = match?.nav ?? [];
+  for (let index = 0; index < nav.length; index++) {
+    const distance = Math.hypot(nav[index].x - x, nav[index].z - z);
+    if (distance < bestDistance) { bestDistance = distance; best = index; }
+  }
+  return best;
+}
+
+function scoutRoute(match, from, to) {
+  const nav = match?.nav ?? [];
+  const edges = match?.edges ?? [];
+  if (!nav.length) return null;
+  const start = scoutNearestNode(match, from.x, from.z);
+  const goal = scoutNearestNode(match, to.x, to.z);
+  if (start === goal) return [start];
+  const prev = new Int32Array(nav.length).fill(-1);
+  const seen = new Uint8Array(nav.length);
+  const queue = [start];
+  seen[start] = 1;
+  for (let head = 0; head < queue.length; head++) {
+    const node = queue[head];
+    if (node === goal) break;
+    for (const next of edges[node] ?? []) {
+      if (!Number.isInteger(next) || next < 0 || next >= nav.length || seen[next]) continue;
+      seen[next] = 1;
+      prev[next] = node;
+      queue.push(next);
+    }
+  }
+  if (!seen[goal]) return null;
+  const route = [];
+  for (let node = goal; node !== -1; node = prev[node]) route.push(node);
+  route.reverse();
+  return route;
+}
+
+// Scout movement: pure, deterministic, no RNG and no combat. The engine's actor
+// loop integrates the returned input through the normal movement path.
+export function cocsScoutInput(match, a) {
+  const state = match?.objectiveState;
+  if (!state || state.kind !== COCS_KIND) return {};
+  if (!a || a.isScout !== true || a.scoutActive === false) return {};
+  if (a.scoutIdle === true) return {};
+  const target = a.scoutTarget;
+  if (!target) return {};
+  const arrive = a.scoutReturning === true ? COCS_SCAN_ARRIVE : Math.max(1.5, COCS_SCAN_ARRIVE * 0.75);
+  const direct = Math.hypot(target.x - a.x, target.z - a.z);
+  if (direct <= arrive) return {};
+  const b = a.bot ?? (a.bot = {route: []});
+  // Replan when the route is empty, the destination drifts, or ~0.9 s elapses.
+  const drifted = !b.routeDest || Math.hypot(target.x - b.routeDest.x, target.z - b.routeDest.z) > 2;
+  if (!b.route?.length || drifted || num(b.routeAt, -1) <= num(match.time, 0)) {
+    b.route = scoutRoute(match, {x: a.x, z: a.z}, target) ?? [];
+    b.routeAt = num(match.time, 0) + 0.9;
+    b.routeDest = {x: target.x, z: target.z};
+  }
+  while (b.route.length > 1) {
+    const node = match.nav?.[b.route[0]];
+    if (node && Math.hypot(node.x - a.x, node.z - a.z) < 2) b.route.shift();
+    else break;
+  }
+  const waypoint = b.route.length ? match.nav?.[b.route[0]] : null;
+  const point = waypoint ?? target;
+  const dx = point.x - a.x, dz = point.z - a.z;
+  const distance = Math.hypot(dx, dz);
+  if (distance <= 0.5) return {};
+  return {x: dx / distance, z: dz / distance, sprint: true};
+}
+
+function num(value, fallback) {
+  return Number.isFinite(Number(value)) ? Number(value) : fallback;
 }
 
 export function cocsDutyPolicy(state, context = {}) {
@@ -384,6 +490,13 @@ export function cocsDutyPolicy(state, context = {}) {
     if (!node) continue;
     if (node.owner === team) verb = 'HOLD';
     orders.push({tick, peerId: `chief-${team}`, cardId: `${team}-${tick}`, team, verb, target: node.id});
+    // §8 SCAN: on the slower screening cadence, ask for a scout when none is
+    // alive and the team can pay. Appended after the duty order so the
+    // HOLD/ATTACK surface is unchanged and sorts first by cardId.
+    if (tick % POLICY_SCAN_INTERVAL === 0 && !liveScout(actors, state, team) && (Number(state.flux?.[team]) || 0) >= SUBAGENTS.scout.spawnCost) {
+      const scan = cocsScanTarget(state, team);
+      if (scan) orders.push({tick, peerId: `chief-${team}`, cardId: `scan-${team}-${tick}`, team, verb: 'SCAN', target: scan.id});
+    }
   }
   return orders;
 }

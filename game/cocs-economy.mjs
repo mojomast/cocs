@@ -259,6 +259,55 @@ export function isReqForbidden(id){
 }
 
 // ===========================================================================
+// §6.5 / §8.1 Team `FLUX` supply load and subagent upkeep
+// ===========================================================================
+// `FLUX` is the one always-on team resource (§6.2/§6.5): start 80, cap 240.
+// §6.5's single superlinear supply-load model replaces the rev-1 flat upkeep:
+// the N-th active agent pays a slot multiplier (1-3 x1.0, 4 x1.6, 5 x2.2,
+// 6 x3.0), plus +5%/lattice hop (cap +25%) and -10%/connected foundry (cap
+// -30%). Role bases are §6.5's; where §8.1's role table disagrees (SCOUT 0.5
+// vs 0.4) the §6.5 economy table wins.
+export const FLUX_START=80;
+export const FLUX_CAP=240;
+export const FLUX_PASSIVE_PER_SECOND=1;
+export const SUBAGENT_UPKEEP=deepFreeze({scout:0.4,harvester:0.6,builder:0.8,fighter:1.0,saboteur:1.0});
+export const SUPPLY_SLOT_MULTIPLIERS=deepFreeze([1.0,1.0,1.0,1.6,2.2,3.0]);
+export const HOP_SURCHARGE_PER_HOP=0.05;
+export const HOP_SURCHARGE_CAP=0.25;
+export const FOUNDRY_UPKEEP_REDUCTION=0.1;
+export const FOUNDRY_REDUCTION_CAP=0.3;
+
+/** Supply-load slot multiplier for the N-th active subagent (1-based). */
+export function supplySlotMultiplier(slot=1){
+ const index=clamp(Math.round(num(slot,1)),1,SUPPLY_SLOT_MULTIPLIERS.length)-1;
+ return SUPPLY_SLOT_MULTIPLIERS[index];
+}
+
+/**
+ * Effective `FLUX`/s upkeep of one active subagent under the §6.5 supply-load
+ * model. Unknown roles are free (0).
+ * @param {string} role `scout|harvester|builder|fighter|saboteur`
+ * @param {number} slot 1-based active-slot index
+ * @param {{hops?:number,foundries?:number}} [ctx]
+ */
+export function subagentUpkeep(role,slot=1,ctx={}){
+ const base=SUBAGENT_UPKEEP[String(role||'').trim().toLowerCase()];
+ if(!base)return 0;
+ const hops=Math.max(0,Math.round(num(ctx.hops,0)));
+ const foundries=Math.max(0,Math.round(num(ctx.foundries,0)));
+ const hopScale=1+Math.min(HOP_SURCHARGE_CAP,HOP_SURCHARGE_PER_HOP*hops);
+ const foundryScale=1-Math.min(FOUNDRY_REDUCTION_CAP,FOUNDRY_UPKEEP_REDUCTION*foundries);
+ return round(base*supplySlotMultiplier(slot)*hopScale*foundryScale,3);
+}
+
+// §8.1 launch role envelope + the §6.5 spawn-cost seam. V0b ships only `scout`.
+// `upkeep` mirrors the §6.5 role base; the per-slot/hop/foundry scaling is
+// applied by `subagentUpkeep`, never baked into the table.
+export const SUBAGENTS=deepFreeze({
+ scout:{id:'scout',name:'Scout',spawnCost:7,upkeep:SUBAGENT_UPKEEP.scout,health:80,armor:0,speed:9.5,lifespanSeconds:90,cap:1,refundFraction:0.4},
+});
+
+// ===========================================================================
 // §6A.6 NEGLECT — the anti-grief team meter
 // ===========================================================================
 export const NEGLECT=deepFreeze({
@@ -686,11 +735,14 @@ export const COMMENDATION_PACING=deepFreeze({
 const cocsEconomy={
  ARCHETYPE_WEIGHTS,SCORE_EVENTS,ORDER_REWARD,SUPPLY_CUT,ARRAY_CAPTURE,
  REQ_EARN,REQ_ITEMS,REQ_COSTS,REQ_FORBIDDEN,
+ FLUX_START,FLUX_CAP,FLUX_PASSIVE_PER_SECOND,SUBAGENT_UPKEEP,SUPPLY_SLOT_MULTIPLIERS,
+ HOP_SURCHARGE_PER_HOP,HOP_SURCHARGE_CAP,FOUNDRY_UPKEEP_REDUCTION,FOUNDRY_REDUCTION_CAP,SUBAGENTS,
  NEGLECT,NEGLECT_EFFECTS,
  GEAR_CAPS,REQ_CAPS,COMBINED_CAPS,
  TRAVERSAL,DEVICE_PARAMS,LANE_IDENTITIES,
  META_DEFAULTS,MATCH_REQ,COMMENDATION_PACING,
  scoreEvent,tallyScores,reqEarn,reqEarnBreakdown,purchaseCost,reqPurchase,
+ supplySlotMultiplier,subagentUpkeep,
  neglectState,neglectTick,neglectEffect,neglectPassiveFlux,
  composeCaps,withinCombinedCaps,resolveSpawnLoadout,
  validateTraversal,validateLane,arrivalProtection,tickArrival,canTraverse,
