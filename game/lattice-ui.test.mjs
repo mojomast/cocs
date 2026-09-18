@@ -7,7 +7,7 @@ import assert from 'node:assert/strict';
 import {readFile} from 'node:fs/promises';
 import * as T from 'three';
 import {cocsBoard,cocsArchetypeLabel,cocsArchetypeMark,cocsResultSummary,commandBrief,objectiveCopy,modeTargetText,modeGoal,scoreAnnouncer} from './hud.mjs';
-import {COCS_SCAN_COST,cocsArmVerb,cocsClearStrip,cocsCommandView,cocsEconomyView,cocsIssueOrder,cocsPickTarget,cocsSpotView,cocsStripState,cocsStripView,cocsSyncStrip,cocsTargetableNodes} from './cocs-orders.mjs';
+import {COCS_SCAN_COST,cocsArmVerb,cocsClearStrip,cocsCommandView,cocsDirectorView,cocsEconomyView,cocsIssueOrder,cocsPickTarget,cocsSpotView,cocsStripState,cocsStripView,cocsSyncStrip,cocsTargetableNodes} from './cocs-orders.mjs';
 import {GAME_MODES} from './config.mjs';
 import {mapsForMode,resolveMapForMode,arenaSupportsMode,maxBotsFor,recommendedBots} from './arenas.mjs';
 import {radarBlip,radarContacts} from './radar.mjs';
@@ -420,4 +420,45 @@ test('the PlayingHud strip is wired to the page cocs command bag', async () => {
   assert.ok(page.includes('cocs:{orders:cocsOrders}'), 'issued orders enter Match.step through the human path');
   assert.ok(hud.includes('cocsCommand') && hud.includes('ISSUE') && hud.includes('SCAN'), 'the strip renders its verbs and confirm');
   assert.ok(hud.includes('radar-spotted'), 'the radar renders the spot mark');
+});
+
+test('the Operations Director HUD surfaces the O1b spend window, sinks and tier copy', async () => {
+  const root = new URL('../', import.meta.url);
+  const hud = await readFile(new URL('app/ui/screens/OperationsDirectorHud.tsx', root), 'utf8');
+  for (const token of ['tierCopy', 'intermission', 'sinks', 'bonus', 'SPEND WINDOW', 'modifiers']) {
+    assert.ok(hud.includes(token), `OperationsDirectorHud surfaces ${token}`);
+  }
+  // The published modifier copy/table is exposed through the pure view too.
+  const view = cocsDirectorView({
+    coop: true,
+    director: {
+      tier: 'D4', tierLabel: 'OVERWATCH', phase: 'intermission', wave: 2, waveCount: 5, waveLabel: 'PRESSURE',
+      tierCopy: {label: 'OVERWATCH', copy: 'Three fronts.', modifiers: ['3 FRONTS', 'SUPPLY CUT'], band: [0.12, 0.4]},
+      budget: {current: 10, spent: 0, rate: 0, cap: 380, peak: 10}, pressure: 0.02,
+      fronts: [], composition: {}, modifier: 'mixed',
+      intermission: {
+        open: true, secondsRemaining: 20, budget: 180, spent: 95, windows: 1,
+        byType: {FORTIFY: 1, REPAIR: 0, RESUPPLY: 1, REINFORCE: 0},
+        sinks: [{verb: 'RESUPPLY', label: 'RESUPPLY', cost: 35, target: 'team', available: true, affordable: true, enabled: true}],
+        log: [],
+      },
+      siege: {armed: false, health: 1400, max: 1400, percent: 1, attackers: 0, defenders: 0},
+      waves: {cleared: 1, par: 5, forceAlive: 0, forceTotal: 5},
+    },
+    waves: {cleared: 1, par: 5, forceAlive: 0, forceTotal: 5},
+    bonus: [{id: 'hold-all', label: 'HOLD ALL', state: 'open', progress: 3, target: 5}],
+    bonusTelemetry: {done: [], failed: [], flux: 0, req: 0, commendations: 0},
+    reserves: {enabled: false, tickets: 6, burns: 0},
+  });
+  assert.ok(view);
+  assert.equal(view.tierCopy.label, 'OVERWATCH');
+  assert.deepEqual(view.tierCopy.modifiers, ['3 FRONTS', 'SUPPLY CUT']);
+  assert.equal(view.intermission.open, true);
+  assert.equal(view.intermission.sinks[0].cost, 35);
+  assert.equal(view.intermission.sinks[0].enabled, true);
+  assert.equal(view.bonus[0].id, 'hold-all');
+  assert.equal(view.bonus[0].progress, 3);
+  assert.equal(view.bonus[0].target, 5);
+  // The PvPvE surface stays without an intermission/bonus lane.
+  assert.equal(cocsDirectorView({coop: false, director: null}), null);
 });

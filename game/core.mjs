@@ -708,6 +708,11 @@ export class Match{
      if(!state||state.kind!=='cocs')return;
      const orders=inputs?.cocs?.orders;
      if(Array.isArray(orders)&&orders.length)(state.pendingOrders??=[]).push(...orders);
+     // OPERATIONS (O1b) between-wave spends ride the same `{cocs:{...}}` bag and
+     // the same deterministic `(tick, peerId, cardId)` sort. Non-coop `cocs` has
+     // no spend window, so this is a no-op there.
+     const spends=inputs?.cocs?.spends;
+     if(state.coop&&Array.isArray(spends)&&spends.length)(state.coop.pendingSpends??=[]).push(...spends);
     }
     power(a){if(this.race||this.over||a.health<=0||a.cooldown>0||this.mutators.instagib||this.flagCarrier(a)||a.isVip===true||a.movement?.carrier?.suppressActive===true)return false;const h=HARNESSES.find(h=>h.id===a.harness),ability=harnessAbility(a.harness)||h;const harness=a.harness;a.protection=0;a.cooldown=Math.max(0,(ability.cooldown??h.cooldown)*(this.mutators.fastPowers?.5:1)*a.cooldownMultiplier+riderBonus(a.character,harness,'cooldown',0,{trigger:'end'}));a.active=(ability.duration??h.duration)+riderBonus(a.character,harness,'duration',0,{trigger:'activate'});a.activeSpeedMultiplier=ability.speed??h.magnitude??1;this.stats.powers++;this.emit('power',{actor:a.id,harness,pos:eye(a),duration:a.active});
    // Riders whose trigger is the activation itself: cleanse, a timed speed

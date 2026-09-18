@@ -266,7 +266,13 @@ test('the snapshot exposes director, waves and command for the HUD', () => {
   assert.ok(cocs.director.budget.cap > 0);
   assert.equal(typeof cocs.director.siege.health, 'number');
   assert.ok(cocs.waves && cocs.command);
-  assert.equal(cocs.bonus.length, 0);
+  // O1b populates the bonus lane with at most the tier's simultaneous-open
+  // budget (D1 = 1) and exposes the intermission spend window.
+  assert.ok(Array.isArray(cocs.bonus));
+  assert.ok(cocs.bonus.length <= DIRECTOR_TIERS.D1.bonusOpen, 'D1 opens one bonus at a time');
+  assert.ok(cocs.bonus.every(entry => typeof entry.id === 'string' && entry.state === 'open'));
+  assert.ok(cocs.director.intermission, 'the spend window is in the snapshot');
+  assert.ok(Array.isArray(cocs.director.intermission.sinks));
   // The pure view the HUD renders is mode-isolated and safe on a sparse snapshot.
   const view = cocsDirectorView(cocs);
   assert.ok(view);

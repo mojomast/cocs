@@ -999,7 +999,11 @@ function captureNodeStep(match, state, node, dt, rate) {
     for (const actor of actors[team]) actor.scoreStats.objectiveTime = (actor.scoreStats.objectiveTime ?? 0) + dt;
     return;
   }
-  node.progress[team] = clamp01(num(node.progress[team], 0) + rate);
+  // OPERATIONS FORTIFY (O1b): a hardened node resists an enemy capture. The
+  // resist is mode-local data set only by the co-op sink path; PvPvE never
+  // carries it, so this is a no-op outside `cocs-coop`.
+  const resist = clamp01(num(node.captureResist, 0));
+  node.progress[team] = clamp01(num(node.progress[team], 0) + rate * (1 - resist));
   if (node.progress[team] >= 1 - EPSILON) captureNode(match, state, node, team, actors[team]);
 }
 

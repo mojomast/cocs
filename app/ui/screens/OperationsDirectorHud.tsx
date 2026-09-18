@@ -27,6 +27,11 @@ export function OperationsDirectorHud({director}: {director: any}) {
   const telegraph = director.telegraph ? `TELEGRAPH ${String(director.telegraph.kind).toUpperCase()} ${director.telegraph.nodeId ?? ''} ${tenths(director.telegraph.seconds)}s` : 'NO SPAWN SIGNAL';
   const boss = director.boss ? `BOSS ${String(director.boss.type).toUpperCase()} P${director.boss.phase}` : null;
   const executor = director.command?.executor;
+  const tierCopy = director.tierCopy ?? null;
+  const intermission = director.intermission ?? null;
+  const sinks = Array.isArray(intermission?.sinks) ? intermission.sinks : [];
+  const bonus = Array.isArray(director.bonus) ? director.bonus : [];
+  const modifiers: string[] = Array.isArray(tierCopy?.modifiers) ? tierCopy.modifiers : [];
   return (
     <section className="director-readout" role="region" aria-label={`Operations Director. Wave ${director.wave} of ${director.waveCount}, ${phase}. Pressure ${whole(director.budget.current)} of ${director.budget.cap}. HQ ${whole(siege.health)} of ${whole(siege.max)}${siege.armed ? ', under siege' : ', safe'}.`}>
       <div className="director-readout__head">
@@ -50,6 +55,18 @@ export function OperationsDirectorHud({director}: {director: any}) {
         {executor !== undefined && executor !== null ? `EXECUTOR ${executor} · ` : ''}
         {director.command ? `THREADS ${director.command.threads.used}/${director.command.threads.cap} · SLICE ${director.command.slicePerPlayer}` : ''}
       </p>}
+      {tierCopy && <p className="director-readout__copy" data-tier={director.tier}><b>{director.tier} · {tierCopy.label}</b> {tierCopy.copy} {modifiers.length > 0 && <small>{modifiers.join(' · ')}</small>}</p>}
+      {bonus.length > 0 && <p className="director-readout__bonus" aria-live="polite">
+        {bonus.map((entry: any) => `BONUS ${entry.label} ${whole(entry.progress)}/${whole(entry.target)}`).join(' · ')}
+      </p>}
+      {intermission && intermission.open && <div className="director-readout__spend" role="group" aria-label={`Intermission spend window. ${tenths(intermission.secondsRemaining)} seconds, ${whole(intermission.budget)} FLUX available.`}>
+        <p className="director-readout__line">SPEND WINDOW <b>{tenths(intermission.secondsRemaining)}s</b> · FLUX <b>{whole(intermission.budget)}</b>{intermission.spent > 0 ? ` · SPENT ${whole(intermission.spent)}` : ''}</p>
+        <ul className="director-readout__sinks">
+          {sinks.map((sink: any) => <li key={sink.verb} className={sink.enabled ? 'is-ready' : 'is-locked'}>
+            <b>{sink.label}</b> <small>{whole(sink.cost)} FLUX</small>{sink.enabled ? '' : sink.available ? ' · UNFUNDED' : ' · N/A'}
+          </li>)}
+        </ul>
+      </div>}
     </section>
   );
 }

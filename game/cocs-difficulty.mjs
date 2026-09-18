@@ -25,6 +25,7 @@ export const DIRECTOR_TIERS = Object.freeze({
     intermissionSeconds: 30,
     waveTimerMultiplier: 1.0,
     reinforceSeconds: 12,
+    reliefSeconds: 4,
     reinforceEvents: 0,
     compositionPool: 'core',
     countScale: 0.9,
@@ -32,6 +33,12 @@ export const DIRECTOR_TIERS = Object.freeze({
     denial: false,
     bossPhaseStart: 1,
     rewardMultiplier: 1.0,
+    bonusOpen: 1,
+    // Published player-facing copy (design §4.2). Surfaced verbatim by the HUD
+    // and the validator; `band` is the documented win-rate band (§7.1/§7.2).
+    copy: 'Five escalating waves, one contested front, the Director budget tutorialised.',
+    modifiers: Object.freeze(['1 FRONT', 'NO MODIFIER']),
+    band: Object.freeze([0.35, 0.65]),
   }),
   D2: Object.freeze({
     id: 'D2', label: 'ENCIRCLED',
@@ -40,6 +47,7 @@ export const DIRECTOR_TIERS = Object.freeze({
     intermissionSeconds: 28,
     waveTimerMultiplier: 0.95,
     reinforceSeconds: 9,
+    reliefSeconds: 4.5,
     reinforceEvents: 1,
     compositionPool: 'core+',
     countScale: 1.05,
@@ -47,6 +55,10 @@ export const DIRECTOR_TIERS = Object.freeze({
     denial: false,
     bossPhaseStart: 1,
     rewardMultiplier: 1.25,
+    bonusOpen: 1,
+    copy: 'A second simultaneous front, intermission reinforcement events and a faster escalation clock.',
+    modifiers: Object.freeze(['2 FRONTS', 'REINFORCEMENTS', 'FASTER CLOCK']),
+    band: Object.freeze([0.28, 0.58]),
   }),
   D3: Object.freeze({
     id: 'D3', label: 'DENIAL',
@@ -55,6 +67,7 @@ export const DIRECTOR_TIERS = Object.freeze({
     intermissionSeconds: 26,
     waveTimerMultiplier: 0.90,
     reinforceSeconds: 7,
+    reliefSeconds: 4,
     reinforceEvents: 2,
     compositionPool: 'denial',
     countScale: 1.10,
@@ -62,6 +75,10 @@ export const DIRECTOR_TIERS = Object.freeze({
     denial: true,
     bossPhaseStart: 2,
     rewardMultiplier: 1.5,
+    bonusOpen: 2,
+    copy: 'Denial and spotting bodies, a hardened Director front, and relay-sabotage events cut a link.',
+    modifiers: Object.freeze(['2 FRONTS', 'DENIAL BODIES', 'HARDENED FRONT', 'RELAY SABOTAGE']),
+    band: Object.freeze([0.20, 0.48]),
   }),
   D4: Object.freeze({
     id: 'D4', label: 'OVERWATCH',
@@ -70,6 +87,7 @@ export const DIRECTOR_TIERS = Object.freeze({
     intermissionSeconds: 24,
     waveTimerMultiplier: 0.80,
     reinforceSeconds: 6,
+    reliefSeconds: 4,
     reinforceEvents: 2,
     compositionPool: 'all',
     countScale: 1.15,
@@ -77,6 +95,10 @@ export const DIRECTOR_TIERS = Object.freeze({
     denial: true,
     bossPhaseStart: 3,
     rewardMultiplier: 2.0,
+    bonusOpen: 2,
+    copy: 'Three fronts, supply-cut and relay-sabotage events, compressed timers, and a combined-arms final wave that starts the boss at phase 3.',
+    modifiers: Object.freeze(['3 FRONTS', 'SUPPLY CUT', 'RELAY SABOTAGE', 'PHASE-3 BOSS']),
+    band: Object.freeze([0.12, 0.40]),
   }),
 });
 
@@ -104,6 +126,89 @@ export const COOP_ECONOMY = Object.freeze({
   waveRewardPerWave: 15,
 });
 
+// ---------------------------------------------------------------------------
+// O1b intermission sinks (design §3.3). Concrete FLUX sinks applied through the
+// existing deterministic order/economy path: every spend is `{tick, peerId,
+// cardId, verb, target}` and is sorted exactly like a `HOLD/ATTACK/SCAN` order,
+// so the outcome cannot depend on network arrival order. `target` is a node id,
+// the HQ id, or null for team-wide sinks.
+//
+// Costs are pure data. Effects resolve through the shipped economy helpers (team
+// FLUX debit, `addActorReq`, `repairLink`) — no parallel currency is created.
+// ---------------------------------------------------------------------------
+export const COOP_SINKS = Object.freeze({
+  FORTIFY: Object.freeze({
+    id: 'FORTIFY', verb: 'FORTIFY', label: 'FORTIFY', target: 'node', cost: 60,
+    captureResist: 0.5, waves: 1,
+    description: 'Harden a held node: enemies capture it 50% slower for one wave.',
+  }),
+  REPAIR: Object.freeze({
+    id: 'REPAIR', verb: 'REPAIR', label: 'REPAIR', target: 'hq', cost: 45,
+    hqHeal: 420, links: 1,
+    description: 'Restore HQ integrity and repair one cut supply link.',
+  }),
+  RESUPPLY: Object.freeze({
+    id: 'RESUPPLY', verb: 'RESUPPLY', label: 'RESUPPLY', target: 'team', cost: 35,
+    heal: 1, armor: 1, req: 24,
+    description: 'Refill team health and armour; grant every operator REQ.',
+  }),
+  REINFORCE: Object.freeze({
+    id: 'REINFORCE', verb: 'REINFORCE', label: 'REINFORCE', target: 'team', cost: 50,
+    squad: 1, threads: 1, squadCap: 2,
+    description: 'Call in one friendly squad bot and one extra THREAD for the next wave.',
+  }),
+});
+export const COOP_SINK_ORDER = Object.freeze(['RESUPPLY', 'REPAIR', 'FORTIFY', 'REINFORCE']);
+export const COOP_SINK_VERBS = Object.freeze(COOP_SINK_ORDER.map(id => COOP_SINKS[id].verb));
+export const COOP_SINK_SPEND_FLOOR = 0.4; // auto-spend keeps below this fraction only when a sink is needed
+
+// Auto-spend policy (validator / no-UI teams): the duty Chief converts pooled
+// FLUX into preparation on wave clear. Deterministic priority, no RNG, at most
+// one of each sink per intermission. A real player spends through the same
+// `coopSpend` path; this only exists so an AI-driven team still exercises the
+// sinks (and so FLUX stops pinning at the cap in the acceptance telemetry).
+export const COOP_AUTO_SPEND = Object.freeze({ enabled: true, reserveFraction: 0.15 });
+
+// O1b bonus objectives (design §3.4). One is open at a time (D3/D4 allow two);
+// rewards route into the existing team FLUX + personal REQ + COMMENDATION model.
+export const COOP_BONUS = Object.freeze({
+  'hold-all': Object.freeze({
+    id: 'hold-all', label: 'HOLD ALL', kind: 'hold-all', holdSeconds: 10,
+    target: 5, teamFlux: 80, req: 40,
+    description: 'Hold all five capturable nodes simultaneously for 10 s.',
+  }),
+  'under-time': Object.freeze({
+    id: 'under-time', label: 'UNDER TIME', kind: 'wave-under-time', fraction: 0.7,
+    teamFluxPercent: 0.1, req: 15,
+    description: 'Clear a wave within 70% of its timer.',
+  }),
+  'flawless-siphon': Object.freeze({
+    id: 'flawless-siphon', label: 'FLAWLESS SIPHON', kind: 'own-siphons', wave: 3,
+    teamFlux: 40, req: 25,
+    description: 'Own both siphons at the end of Wave 3.',
+  }),
+  'no-breach': Object.freeze({
+    id: 'no-breach', label: 'NO BREACH', kind: 'hold-gate', gate: 'front-0',
+    teamFlux: 0, req: 0, commendations: 1,
+    description: 'Never lose the gate adjacent to hq-0 for the whole operation.',
+  }),
+});
+export const COOP_BONUS_ORDER = Object.freeze(['hold-all', 'under-time', 'flawless-siphon', 'no-breach']);
+
+// O1b partial rewards (design §3.5 / §4.3): a failed operation still converts
+// 25% of the run's REQ; the tier reward multiplier scales the pool.
+export const COOP_REWARDS = Object.freeze({
+  failureRetention: 0.25,
+  winRetention: 1.0,
+});
+
+// Optional team-wipe RESERVE lose condition (design §1.3 / §7.2). Inert by
+// default; a mode config or test enables it. `wipeSeconds` is how long every
+// team-0 operator must be simultaneously down before a reserve ticket burns.
+export const COOP_RESERVE = Object.freeze({
+  enabled: false, start: 6, wipeSeconds: 8, maxPerWave: 1,
+});
+
 // L4D-style pacing: BUILD_UP -> PEAK -> RELAX, with INTERMISSION between waves.
 export const COOP_PACING = Object.freeze({
   buildUpFraction: 0.40,
@@ -113,6 +218,12 @@ export const COOP_PACING = Object.freeze({
   reinforceSeconds: 6,
   overrunSeconds: 10,
   intermissionLeadSeconds: 3,   // a short "next wave" beat after a clear
+  // PRESSURE relief (O1b): once the Director budget reaches this fraction of the
+  // cap it converts the surplus into reinforcement bodies on a short interval,
+  // even on a tier with no authored reinforcement events. This is what stops the
+  // budget pinning at the cap for a whole match and keeps the meter meaningful.
+  reliefFraction: 0.85,
+  reliefSeconds: 3,
 });
 
 // Archetype PRESSURE costs. A reinforcement is only spawned when the budget
@@ -238,3 +349,42 @@ export const COOP_SIEGE = Object.freeze({
 });
 
 export const SIEGE_ASSAULT_EVENT = 'director-siege';
+
+// Published tier copy table for the HUD/help line. Frozen, pure data.
+export function directorTierCopy(tierId = DEFAULT_COCS_TIER) {
+  const tier = directorTier(tierId);
+  return {
+    id: tier.id,
+    label: tier.label,
+    copy: tier.copy ?? '',
+    modifiers: [...(tier.modifiers ?? [])],
+    band: [...(tier.band ?? [])],
+  };
+}
+
+export const DIRECTOR_TIER_COPY = Object.freeze(
+  COCS_TIERS.reduce((table, id) => { table[id] = Object.freeze(directorTierCopy(id)); return table; }, {}),
+);
+
+// Bonus descriptor by id (null when unknown). Frozen copy of the pure data.
+export function bonusObjective(id) {
+  const bonus = COOP_BONUS[id];
+  return bonus ? {...bonus} : null;
+}
+
+// The bonus ids a tier opens, in authored order.
+export function tierBonusObjectives(tierId = DEFAULT_COCS_TIER) {
+  return COOP_BONUS_ORDER.slice(0, Math.max(0, Math.round(directorTier(tierId).bonusOpen ?? 1)));
+}
+
+// Sink descriptor by verb or id (null when unknown).
+export function coopSink(idOrVerb) {
+  const key = String(idOrVerb ?? '').trim().toUpperCase();
+  const sink = COOP_SINKS[key] ?? Object.values(COOP_SINKS).find(entry => entry.id === key || entry.verb === key);
+  return sink ? {...sink} : null;
+}
+
+// Sink cost for a verb (Infinity when unknown so it can never be afforded).
+export function coopSinkCost(idOrVerb) {
+  return coopSink(idOrVerb)?.cost ?? Infinity;
+}
