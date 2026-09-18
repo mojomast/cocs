@@ -12,6 +12,7 @@ import {terrainRayHit,terrainSupportAt,terrainWallSegments} from './terrain.mjs'
 import {createVehicle,GUNTRUCK,respawnVehicle,stepVehicle,stepVehicleWeapon,vehicleCanEnter,vehicleMuzzles,vehicleSeatFor,vehicleSeatPosition,vehicleMounted,takeVehicleSeat,leaveVehicleSeat,vehicleSeatOpen} from './vehicles.mjs';
 import {objectiveTemplate} from './mode-data.mjs';
 import {cocsSnapshot} from './cocs.mjs';
+import {cocsDutyPolicy} from './cocs-bots.mjs';
 import {deathPlan} from './deaths.mjs';
 import {payloadPosition,payloadProgress,payloadTemplate} from './payload.mjs';
 import {initializeRace,stepRace,raceStandings,raceSnapshot} from './race.mjs';
@@ -272,7 +273,7 @@ export class Match{
     // `aiSeats` gives every seat (including the leading human seats) the bot AI,
     // and `botPolicy` overrides the AI policy for balance-neutral sweeps. Both
     // are harness-only: net/server never set them, so live paths are untouched.
-    this.config=normalizeConfig(options);this.mutators=mutatorEffects(this.config);this.loadout=resolveMatchLoadout(this.config);this.humanCount=Math.max(1,Math.min(Math.round(options.humanCount??1),8));this.aiSeats=options.aiSeats===true;this.botPolicy=options.botPolicy??null;this.cocsPolicy=options.cocsPolicy??null;
+    this.config=normalizeConfig(options);this.mutators=mutatorEffects(this.config);this.loadout=resolveMatchLoadout(this.config);this.humanCount=Math.max(1,Math.min(Math.round(options.humanCount??1),8));this.aiSeats=options.aiSeats===true;this.botPolicy=options.botPolicy??null;this.cocsPolicy=options.cocsPolicy??(this.config.mode==='cocs'?cocsDutyPolicy:null);
     const vehicleMode=this.config.mode==='puma-race'||this.config.mode==='puma-soccer';
     if(vehicleMode){this.config.botCount=this.config.mode==='puma-soccer'?Math.max(0,Math.min(3,4-this.humanCount)):Math.min(this.config.botCount,8-this.humanCount);if(!getMap(mapId).race)mapId=this.config.mode==='puma-soccer'?'puma-pitch':'puma-circuit';}
     this.difficulty=DIFFICULTIES.find(d=>d.id===this.config.difficulty);this.arena=getMap(mapId);const nav=vehicleMode?{nodes:[],edges:[]}:matchNavigation(this.arena);this.nav=nav.nodes;this.edges=nav.edges;{const arenaBounds=boundsOf(this.arena);this.center={x:(arenaBounds.minX+arenaBounds.maxX)/2,z:(arenaBounds.minZ+arenaBounds.maxZ)/2};}this.spawns=this.arena.spawns.map(([x,z])=>v(x,floorAt(x,z,this.arena),z));this.random=random;this.time=0;this.over=false;this.suddenDeath=false;this.armsraceWinner=null;this.events=[];this.feed=[];this.rockets=[];this.deployables=[];this.ropeLines=[];this.ropeSerial=0;this.pendingLoadouts=new Map();this.stats={shots:0,kills:0,pickups:0,powers:0,respawns:0,falls:0};this.serial=0;this.teamScores={0:0,1:0};this.vehicleHits=new Map();this.spawnHeat=new Map();
