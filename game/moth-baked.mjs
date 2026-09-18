@@ -712,6 +712,426 @@ export const MOTH_BAKED = {
         }
       ]
     },
+    "moth-victory": {
+      "bpm": 120,
+      "ppq": 480,
+      "notes": [
+        {
+          "step": 1,
+          "midi": 69,
+          "dur": 4,
+          "vel": 96
+        },
+        {
+          "step": 1,
+          "midi": 63,
+          "dur": 8,
+          "vel": 96
+        },
+        {
+          "step": 1,
+          "midi": 62,
+          "dur": 20,
+          "vel": 96
+        },
+        {
+          "step": 5,
+          "midi": 65,
+          "dur": 12,
+          "vel": 96
+        },
+        {
+          "step": 9,
+          "midi": 64,
+          "dur": 4,
+          "vel": 96
+        },
+        {
+          "step": 9,
+          "midi": 69,
+          "dur": 16,
+          "vel": 96
+        },
+        {
+          "step": 13,
+          "midi": 68,
+          "dur": 8,
+          "vel": 96
+        },
+        {
+          "step": 17,
+          "midi": 67,
+          "dur": 8,
+          "vel": 96
+        },
+        {
+          "step": 21,
+          "midi": 66,
+          "dur": 4,
+          "vel": 96
+        },
+        {
+          "step": 25,
+          "midi": 63,
+          "dur": 12,
+          "vel": 96
+        },
+        {
+          "step": 25,
+          "midi": 62,
+          "dur": 16,
+          "vel": 96
+        },
+        {
+          "step": 29,
+          "midi": 69,
+          "dur": 4,
+          "vel": 96
+        },
+        {
+          "step": 33,
+          "midi": 65,
+          "dur": 4,
+          "vel": 96
+        },
+        {
+          "step": 33,
+          "midi": 60,
+          "dur": 8,
+          "vel": 96
+        },
+        {
+          "step": 37,
+          "midi": 61,
+          "dur": 4,
+          "vel": 96
+        },
+        {
+          "step": 41,
+          "midi": 58,
+          "dur": 8,
+          "vel": 96
+        },
+        {
+          "step": 41,
+          "midi": 64,
+          "dur": 8,
+          "vel": 96
+        },
+        {
+          "step": 41,
+          "midi": 65,
+          "dur": 8,
+          "vel": 96
+        },
+        {
+          "step": 41,
+          "midi": 66,
+          "dur": 8,
+          "vel": 96
+        },
+        {
+          "step": 49,
+          "midi": 68,
+          "dur": 12,
+          "vel": 96
+        },
+        {
+          "step": 49,
+          "midi": 69,
+          "dur": 16,
+          "vel": 96
+        }
+      ]
+    },
+    "moth-defeat": {
+      "bpm": 120,
+      "ppq": 480,
+      "notes": [
+        {
+          "step": 1,
+          "midi": 63,
+          "dur": 4,
+          "vel": 96
+        },
+        {
+          "step": 1,
+          "midi": 64,
+          "dur": 4,
+          "vel": 96
+        },
+        {
+          "step": 1,
+          "midi": 65,
+          "dur": 4,
+          "vel": 96
+        },
+        {
+          "step": 1,
+          "midi": 67,
+          "dur": 4,
+          "vel": 96
+        },
+        {
+          "step": 1,
+          "midi": 66,
+          "dur": 8,
+          "vel": 96
+        },
+        {
+          "step": 1,
+          "midi": 58,
+          "dur": 12,
+          "vel": 96
+        },
+        {
+          "step": 1,
+          "midi": 59,
+          "dur": 12,
+          "vel": 96
+        },
+        {
+          "step": 1,
+          "midi": 68,
+          "dur": 12,
+          "vel": 96
+        },
+        {
+          "step": 1,
+          "midi": 69,
+          "dur": 28,
+          "vel": 96
+        },
+        {
+          "step": 1,
+          "midi": 62,
+          "dur": 44,
+          "vel": 96
+        },
+        {
+          "step": 9,
+          "midi": 64,
+          "dur": 4,
+          "vel": 96
+        },
+        {
+          "step": 9,
+          "midi": 65,
+          "dur": 4,
+          "vel": 96
+        },
+        {
+          "step": 9,
+          "midi": 60,
+          "dur": 16,
+          "vel": 96
+        },
+        {
+          "step": 9,
+          "midi": 63,
+          "dur": 24,
+          "vel": 96
+        },
+        {
+          "step": 9,
+          "midi": 61,
+          "dur": 28,
+          "vel": 96
+        },
+        {
+          "step": 13,
+          "midi": 66,
+          "dur": 8,
+          "vel": 96
+        },
+        {
+          "step": 13,
+          "midi": 67,
+          "dur": 16,
+          "vel": 96
+        },
+        {
+          "step": 17,
+          "midi": 58,
+          "dur": 4,
+          "vel": 96
+        },
+        {
+          "step": 17,
+          "midi": 59,
+          "dur": 4,
+          "vel": 96
+        },
+        {
+          "step": 17,
+          "midi": 65,
+          "dur": 4,
+          "vel": 96
+        },
+        {
+          "step": 17,
+          "midi": 68,
+          "dur": 4,
+          "vel": 96
+        },
+        {
+          "step": 25,
+          "midi": 65,
+          "dur": 4,
+          "vel": 96
+        },
+        {
+          "step": 25,
+          "midi": 59,
+          "dur": 8,
+          "vel": 96
+        },
+        {
+          "step": 25,
+          "midi": 68,
+          "dur": 12,
+          "vel": 96
+        },
+        {
+          "step": 25,
+          "midi": 64,
+          "dur": 20,
+          "vel": 96
+        },
+        {
+          "step": 25,
+          "midi": 58,
+          "dur": 24,
+          "vel": 96
+        },
+        {
+          "step": 25,
+          "midi": 66,
+          "dur": 32,
+          "vel": 96
+        },
+        {
+          "step": 29,
+          "midi": 60,
+          "dur": 16,
+          "vel": 96
+        },
+        {
+          "step": 33,
+          "midi": 67,
+          "dur": 24,
+          "vel": 96
+        },
+        {
+          "step": 37,
+          "midi": 59,
+          "dur": 12,
+          "vel": 96
+        },
+        {
+          "step": 37,
+          "midi": 65,
+          "dur": 12,
+          "vel": 96
+        },
+        {
+          "step": 37,
+          "midi": 63,
+          "dur": 28,
+          "vel": 96
+        },
+        {
+          "step": 37,
+          "midi": 69,
+          "dur": 32,
+          "vel": 96
+        },
+        {
+          "step": 41,
+          "midi": 61,
+          "dur": 16,
+          "vel": 96
+        },
+        {
+          "step": 41,
+          "midi": 68,
+          "dur": 16,
+          "vel": 96
+        },
+        {
+          "step": 49,
+          "midi": 60,
+          "dur": 4,
+          "vel": 96
+        },
+        {
+          "step": 49,
+          "midi": 62,
+          "dur": 12,
+          "vel": 96
+        },
+        {
+          "step": 57,
+          "midi": 58,
+          "dur": 8,
+          "vel": 96
+        },
+        {
+          "step": 57,
+          "midi": 59,
+          "dur": 8,
+          "vel": 96
+        },
+        {
+          "step": 57,
+          "midi": 64,
+          "dur": 8,
+          "vel": 96
+        },
+        {
+          "step": 57,
+          "midi": 65,
+          "dur": 8,
+          "vel": 96
+        },
+        {
+          "step": 61,
+          "midi": 61,
+          "dur": 4,
+          "vel": 96
+        },
+        {
+          "step": 61,
+          "midi": 67,
+          "dur": 8,
+          "vel": 96
+        },
+        {
+          "step": 61,
+          "midi": 68,
+          "dur": 8,
+          "vel": 96
+        },
+        {
+          "step": 65,
+          "midi": 60,
+          "dur": 4,
+          "vel": 96
+        },
+        {
+          "step": 65,
+          "midi": 62,
+          "dur": 4,
+          "vel": 96
+        },
+        {
+          "step": 65,
+          "midi": 66,
+          "dur": 4,
+          "vel": 96
+        }
+      ]
+    },
     "moth-oracle": {
       "bpm": 120,
       "ppq": 480,
@@ -1857,6 +2277,590 @@ export const MOTH_BAKED = {
           "timeMs": 670
         }
       ]
+    },
+    "tunnel": {
+      "url": "/moth/files/ir-tunnel/result.wav",
+      "seconds": 3.5,
+      "sampleRate": 22050,
+      "channels": 2,
+      "taps": [
+        {
+          "site": 3,
+          "depth": 1,
+          "level": 0.3967,
+          "polarity": -1,
+          "fRe": -0.3967,
+          "fIm": 0,
+          "timeMs": 75
+        },
+        {
+          "site": 4,
+          "depth": 1,
+          "level": 0.4119,
+          "polarity": -1,
+          "fRe": -0.4119,
+          "fIm": 0,
+          "timeMs": 75
+        },
+        {
+          "site": 5,
+          "depth": 1,
+          "level": 0.14255,
+          "polarity": 1,
+          "fRe": 0.14255,
+          "fIm": 0,
+          "timeMs": 75
+        },
+        {
+          "site": 2,
+          "depth": 2,
+          "level": 0.5054,
+          "polarity": 1,
+          "fRe": 0.56026,
+          "fIm": 0.03819,
+          "timeMs": 150
+        },
+        {
+          "site": 3,
+          "depth": 2,
+          "level": 0.50119,
+          "polarity": -1,
+          "fRe": -0.55445,
+          "fIm": 0.0519,
+          "timeMs": 150
+        },
+        {
+          "site": 4,
+          "depth": 2,
+          "level": 0.44892,
+          "polarity": -1,
+          "fRe": -0.45439,
+          "fIm": -0.20573,
+          "timeMs": 150
+        },
+        {
+          "site": 5,
+          "depth": 2,
+          "level": 0.16628,
+          "polarity": -1,
+          "fRe": -0.17992,
+          "fIm": 0.04196,
+          "timeMs": 150
+        },
+        {
+          "site": 6,
+          "depth": 2,
+          "level": 0.42033,
+          "polarity": 1,
+          "fRe": 0.46698,
+          "fIm": 0.0071,
+          "timeMs": 150
+        },
+        {
+          "site": 1,
+          "depth": 3,
+          "level": 0.59233,
+          "polarity": 1,
+          "fRe": 0.72198,
+          "fIm": 0.11621,
+          "timeMs": 225
+        },
+        {
+          "site": 2,
+          "depth": 3,
+          "level": 0.11297,
+          "polarity": -1,
+          "fRe": -0.10153,
+          "fIm": 0.09563,
+          "timeMs": 225
+        },
+        {
+          "site": 3,
+          "depth": 3,
+          "level": 0.23776,
+          "polarity": -1,
+          "fRe": -0.088,
+          "fIm": 0.28003,
+          "timeMs": 225
+        },
+        {
+          "site": 4,
+          "depth": 3,
+          "level": 0.15917,
+          "polarity": 1,
+          "fRe": 0.19359,
+          "fIm": 0.03375,
+          "timeMs": 225
+        },
+        {
+          "site": 5,
+          "depth": 3,
+          "level": 0.15983,
+          "polarity": 1,
+          "fRe": 0.19143,
+          "fIm": -0.04783,
+          "timeMs": 225
+        },
+        {
+          "site": 6,
+          "depth": 3,
+          "level": 0.11101,
+          "polarity": -1,
+          "fRe": -0.10942,
+          "fIm": 0.08251,
+          "timeMs": 225
+        },
+        {
+          "site": 7,
+          "depth": 3,
+          "level": 0.76913,
+          "polarity": 1,
+          "fRe": 0.94948,
+          "fIm": 0.01082,
+          "timeMs": 225
+        },
+        {
+          "site": 0,
+          "depth": 4,
+          "level": 0.43051,
+          "polarity": 1,
+          "fRe": 0.58854,
+          "fIm": -0.04878,
+          "timeMs": 300
+        },
+        {
+          "site": 1,
+          "depth": 4,
+          "level": 0.08031,
+          "polarity": 1,
+          "fRe": 0.10146,
+          "fIm": -0.04293,
+          "timeMs": 300
+        },
+        {
+          "site": 2,
+          "depth": 4,
+          "level": 0.09068,
+          "polarity": -1,
+          "fRe": -0.10235,
+          "fIm": 0.07069,
+          "timeMs": 300
+        },
+        {
+          "site": 3,
+          "depth": 4,
+          "level": 0.38518,
+          "polarity": -1,
+          "fRe": -0.49193,
+          "fIm": 0.19281,
+          "timeMs": 300
+        },
+        {
+          "site": 5,
+          "depth": 4,
+          "level": 0.21018,
+          "polarity": -1,
+          "fRe": -0.27061,
+          "fIm": 0.09947,
+          "timeMs": 300
+        },
+        {
+          "site": 6,
+          "depth": 4,
+          "level": 0.03956,
+          "polarity": -1,
+          "fRe": -0.04353,
+          "fIm": 0.0324,
+          "timeMs": 300
+        },
+        {
+          "site": 7,
+          "depth": 4,
+          "level": 0.0855,
+          "polarity": 1,
+          "fRe": 0.09146,
+          "fIm": -0.07344,
+          "timeMs": 300
+        },
+        {
+          "site": 0,
+          "depth": 5,
+          "level": 0.1986,
+          "polarity": 1,
+          "fRe": 0.30223,
+          "fIm": -0.01683,
+          "timeMs": 375
+        },
+        {
+          "site": 1,
+          "depth": 5,
+          "level": 0.19509,
+          "polarity": 1,
+          "fRe": 0.29442,
+          "fIm": -0.04164,
+          "timeMs": 375
+        },
+        {
+          "site": 2,
+          "depth": 5,
+          "level": 0.114,
+          "polarity": 1,
+          "fRe": 0.14393,
+          "fIm": 0.09732,
+          "timeMs": 375
+        },
+        {
+          "site": 3,
+          "depth": 5,
+          "level": 0.17691,
+          "polarity": 1,
+          "fRe": 0.25168,
+          "fIm": -0.09674,
+          "timeMs": 375
+        },
+        {
+          "site": 4,
+          "depth": 5,
+          "level": 0.08569,
+          "polarity": -1,
+          "fRe": -0.12873,
+          "fIm": 0.02203,
+          "timeMs": 375
+        },
+        {
+          "site": 5,
+          "depth": 5,
+          "level": 0.0507,
+          "polarity": 1,
+          "fRe": 0.02118,
+          "fIm": 0.07431,
+          "timeMs": 375
+        },
+        {
+          "site": 6,
+          "depth": 5,
+          "level": 0.08598,
+          "polarity": 1,
+          "fRe": 0.06771,
+          "fIm": 0.11219,
+          "timeMs": 375
+        },
+        {
+          "site": 7,
+          "depth": 5,
+          "level": 0.1946,
+          "polarity": -1,
+          "fRe": -0.28315,
+          "fIm": -0.08831,
+          "timeMs": 375
+        },
+        {
+          "site": 0,
+          "depth": 6,
+          "level": 0.32187,
+          "polarity": 1,
+          "fRe": 0.54327,
+          "fIm": 0.04451,
+          "timeMs": 450
+        },
+        {
+          "site": 1,
+          "depth": 6,
+          "level": 0.11435,
+          "polarity": 1,
+          "fRe": 0.19326,
+          "fIm": 0.01244,
+          "timeMs": 450
+        },
+        {
+          "site": 2,
+          "depth": 6,
+          "level": 0.05023,
+          "polarity": 1,
+          "fRe": 0.0416,
+          "fIm": -0.07419,
+          "timeMs": 450
+        },
+        {
+          "site": 3,
+          "depth": 6,
+          "level": 0.12588,
+          "polarity": 1,
+          "fRe": 0.20228,
+          "fIm": 0.06727,
+          "timeMs": 450
+        },
+        {
+          "site": 4,
+          "depth": 6,
+          "level": 0.07385,
+          "polarity": 1,
+          "fRe": 0.09788,
+          "fIm": 0.07785,
+          "timeMs": 450
+        },
+        {
+          "site": 5,
+          "depth": 6,
+          "level": 0.14525,
+          "polarity": 1,
+          "fRe": 0.2231,
+          "fIm": -0.10359,
+          "timeMs": 450
+        },
+        {
+          "site": 6,
+          "depth": 6,
+          "level": 0.15108,
+          "polarity": 1,
+          "fRe": 0.24708,
+          "fIm": 0.06643,
+          "timeMs": 450
+        },
+        {
+          "site": 7,
+          "depth": 6,
+          "level": 0.11958,
+          "polarity": 1,
+          "fRe": 0.16554,
+          "fIm": -0.11665,
+          "timeMs": 450
+        },
+        {
+          "site": 0,
+          "depth": 7,
+          "level": 0.12595,
+          "polarity": 1,
+          "fRe": 0.06226,
+          "fIm": 0.22867,
+          "timeMs": 525
+        },
+        {
+          "site": 1,
+          "depth": 7,
+          "level": 0.20379,
+          "polarity": 1,
+          "fRe": 0.30252,
+          "fIm": 0.23565,
+          "timeMs": 525
+        },
+        {
+          "site": 2,
+          "depth": 7,
+          "level": 0.26424,
+          "polarity": 1,
+          "fRe": 0.49622,
+          "fIm": -0.03132,
+          "timeMs": 525
+        },
+        {
+          "site": 3,
+          "depth": 7,
+          "level": 0.06524,
+          "polarity": 1,
+          "fRe": 0.11854,
+          "fIm": -0.03196,
+          "timeMs": 525
+        },
+        {
+          "site": 4,
+          "depth": 7,
+          "level": 0.18743,
+          "polarity": 1,
+          "fRe": 0.3355,
+          "fIm": 0.10873,
+          "timeMs": 525
+        },
+        {
+          "site": 5,
+          "depth": 7,
+          "level": 0.10726,
+          "polarity": 1,
+          "fRe": 0.18895,
+          "fIm": -0.07093,
+          "timeMs": 525
+        },
+        {
+          "site": 6,
+          "depth": 7,
+          "level": 0.08391,
+          "polarity": 1,
+          "fRe": 0.15785,
+          "fIm": 0.00377,
+          "timeMs": 525
+        },
+        {
+          "site": 7,
+          "depth": 7,
+          "level": 0.06091,
+          "polarity": 1,
+          "fRe": 0.11433,
+          "fIm": -0.00796,
+          "timeMs": 525
+        },
+        {
+          "site": 0,
+          "depth": 8,
+          "level": 0.13608,
+          "polarity": 1,
+          "fRe": 0.27214,
+          "fIm": 0.08297,
+          "timeMs": 600
+        },
+        {
+          "site": 1,
+          "depth": 8,
+          "level": 0.06796,
+          "polarity": 1,
+          "fRe": 0.07895,
+          "fIm": 0.11814,
+          "timeMs": 600
+        },
+        {
+          "site": 2,
+          "depth": 8,
+          "level": 0.23442,
+          "polarity": 1,
+          "fRe": 0.4897,
+          "fIm": 0.0199,
+          "timeMs": 600
+        },
+        {
+          "site": 3,
+          "depth": 8,
+          "level": 0.12035,
+          "polarity": 1,
+          "fRe": 0.24889,
+          "fIm": -0.03703,
+          "timeMs": 600
+        },
+        {
+          "site": 4,
+          "depth": 8,
+          "level": 0.05979,
+          "polarity": -1,
+          "fRe": -0.01688,
+          "fIm": 0.12386,
+          "timeMs": 600
+        },
+        {
+          "site": 5,
+          "depth": 8,
+          "level": 0.03364,
+          "polarity": -1,
+          "fRe": -0.00681,
+          "fIm": 0.07001,
+          "timeMs": 600
+        },
+        {
+          "site": 6,
+          "depth": 8,
+          "level": 0.04928,
+          "polarity": -1,
+          "fRe": -0.00074,
+          "fIm": 0.10303,
+          "timeMs": 600
+        },
+        {
+          "site": 7,
+          "depth": 8,
+          "level": 0.06902,
+          "polarity": 1,
+          "fRe": 0.14392,
+          "fIm": 0.01038,
+          "timeMs": 600
+        },
+        {
+          "site": 0,
+          "depth": 9,
+          "level": 0.03016,
+          "polarity": -1,
+          "fRe": -0.04989,
+          "fIm": 0.04919,
+          "timeMs": 675
+        },
+        {
+          "site": 1,
+          "depth": 9,
+          "level": 0.08092,
+          "polarity": 1,
+          "fRe": 0.18799,
+          "fIm": -0.00045,
+          "timeMs": 675
+        },
+        {
+          "site": 2,
+          "depth": 9,
+          "level": 0.09343,
+          "polarity": 1,
+          "fRe": 0.21688,
+          "fIm": 0.00872,
+          "timeMs": 675
+        },
+        {
+          "site": 3,
+          "depth": 9,
+          "level": 0.02579,
+          "polarity": 1,
+          "fRe": 0.0107,
+          "fIm": 0.05895,
+          "timeMs": 675
+        },
+        {
+          "site": 4,
+          "depth": 9,
+          "level": 0.06592,
+          "polarity": 1,
+          "fRe": 0.12309,
+          "fIm": -0.09109,
+          "timeMs": 675
+        },
+        {
+          "site": 5,
+          "depth": 9,
+          "level": 0.06647,
+          "polarity": -1,
+          "fRe": -0.11126,
+          "fIm": 0.10707,
+          "timeMs": 675
+        },
+        {
+          "site": 6,
+          "depth": 9,
+          "level": 0.03753,
+          "polarity": 1,
+          "fRe": 0.00781,
+          "fIm": 0.08683,
+          "timeMs": 675
+        },
+        {
+          "site": 7,
+          "depth": 9,
+          "level": 0.07956,
+          "polarity": 1,
+          "fRe": 0.1651,
+          "fIm": 0.08309,
+          "timeMs": 675
+        },
+        {
+          "site": 0,
+          "depth": 10,
+          "level": 0.11411,
+          "polarity": 1,
+          "fRe": 0.27414,
+          "fIm": 0.10769,
+          "timeMs": 750
+        },
+        {
+          "site": 1,
+          "depth": 10,
+          "level": 0.08271,
+          "polarity": 1,
+          "fRe": 0.2135,
+          "fIm": -0.00074,
+          "timeMs": 750
+        }
+      ]
     }
   },
   "audio": {
@@ -1891,7 +2895,1299 @@ export const MOTH_BAKED = {
       }
     }
   },
-  "spaces": {},
+  "spaces": {
+    "arena": {
+      "lattice": "square",
+      "sites": 24,
+      "depth": 8,
+      "seed": 12345,
+      "count": 153,
+      "taps": [
+        {
+          "site": 0,
+          "depth": 5,
+          "level": 0.999013,
+          "polarity": 1,
+          "fRe": 0.999013,
+          "fIm": -0.000074,
+          "x": 0,
+          "y": 0
+        },
+        {
+          "site": 0,
+          "depth": 6,
+          "level": 0.967371,
+          "polarity": 1,
+          "fRe": 0.967366,
+          "fIm": -0.003016,
+          "x": 0,
+          "y": 0
+        },
+        {
+          "site": 0,
+          "depth": 7,
+          "level": 0.917266,
+          "polarity": 1,
+          "fRe": 0.917184,
+          "fIm": -0.012219,
+          "x": 0,
+          "y": 0
+        },
+        {
+          "site": 0,
+          "depth": 8,
+          "level": 0.873552,
+          "polarity": 1,
+          "fRe": 0.873539,
+          "fIm": -0.004746,
+          "x": 0,
+          "y": 0
+        },
+        {
+          "site": 1,
+          "depth": 4,
+          "level": 0.989531,
+          "polarity": 1,
+          "fRe": 0.989528,
+          "fIm": 0.002277,
+          "x": 1,
+          "y": 0
+        },
+        {
+          "site": 1,
+          "depth": 5,
+          "level": 0.941863,
+          "polarity": 1,
+          "fRe": 0.941857,
+          "fIm": 0.003609,
+          "x": 1,
+          "y": 0
+        },
+        {
+          "site": 1,
+          "depth": 6,
+          "level": 0.755032,
+          "polarity": 1,
+          "fRe": 0.754994,
+          "fIm": 0.007573,
+          "x": 1,
+          "y": 0
+        },
+        {
+          "site": 1,
+          "depth": 7,
+          "level": 0.631741,
+          "polarity": 1,
+          "fRe": 0.631737,
+          "fIm": -0.002164,
+          "x": 1,
+          "y": 0
+        },
+        {
+          "site": 1,
+          "depth": 8,
+          "level": 0.679769,
+          "polarity": 1,
+          "fRe": 0.679683,
+          "fIm": 0.010816,
+          "x": 1,
+          "y": 0
+        },
+        {
+          "site": 2,
+          "depth": 3,
+          "level": 0.959231,
+          "polarity": 1,
+          "fRe": 0.959231,
+          "fIm": -0.000008,
+          "x": 2,
+          "y": 0
+        },
+        {
+          "site": 2,
+          "depth": 4,
+          "level": 0.798046,
+          "polarity": 1,
+          "fRe": 0.798001,
+          "fIm": 0.008478,
+          "x": 2,
+          "y": 0
+        },
+        {
+          "site": 2,
+          "depth": 5,
+          "level": 0.701794,
+          "polarity": 1,
+          "fRe": 0.701164,
+          "fIm": 0.02974,
+          "x": 2,
+          "y": 0
+        },
+        {
+          "site": 2,
+          "depth": 6,
+          "level": 0.340123,
+          "polarity": 1,
+          "fRe": 0.339975,
+          "fIm": 0.010027,
+          "x": 2,
+          "y": 0
+        },
+        {
+          "site": 2,
+          "depth": 7,
+          "level": 0.430584,
+          "polarity": 1,
+          "fRe": 0.429982,
+          "fIm": 0.022757,
+          "x": 2,
+          "y": 0
+        },
+        {
+          "site": 2,
+          "depth": 8,
+          "level": 0.47395,
+          "polarity": 1,
+          "fRe": 0.473634,
+          "fIm": 0.017286,
+          "x": 2,
+          "y": 0
+        },
+        {
+          "site": 3,
+          "depth": 2,
+          "level": 0.951463,
+          "polarity": 1,
+          "fRe": 0.951447,
+          "fIm": -0.00554,
+          "x": 3,
+          "y": 0
+        },
+        {
+          "site": 3,
+          "depth": 3,
+          "level": 0.772094,
+          "polarity": 1,
+          "fRe": 0.771882,
+          "fIm": -0.0181,
+          "x": 3,
+          "y": 0
+        },
+        {
+          "site": 3,
+          "depth": 4,
+          "level": 0.418314,
+          "polarity": 1,
+          "fRe": 0.417936,
+          "fIm": -0.017782,
+          "x": 3,
+          "y": 0
+        },
+        {
+          "site": 3,
+          "depth": 5,
+          "level": 0.347064,
+          "polarity": 1,
+          "fRe": 0.345877,
+          "fIm": 0.028673,
+          "x": 3,
+          "y": 0
+        },
+        {
+          "site": 3,
+          "depth": 6,
+          "level": 0.283918,
+          "polarity": 1,
+          "fRe": 0.269123,
+          "fIm": 0.090455,
+          "x": 3,
+          "y": 0
+        },
+        {
+          "site": 3,
+          "depth": 7,
+          "level": 0.413863,
+          "polarity": 1,
+          "fRe": 0.413289,
+          "fIm": 0.021783,
+          "x": 3,
+          "y": 0
+        },
+        {
+          "site": 3,
+          "depth": 8,
+          "level": 0.285425,
+          "polarity": 1,
+          "fRe": 0.285364,
+          "fIm": -0.005913,
+          "x": 3,
+          "y": 0
+        },
+        {
+          "site": 4,
+          "depth": 3,
+          "level": 0.956157,
+          "polarity": 1,
+          "fRe": 0.956155,
+          "fIm": 0.002112,
+          "x": 4,
+          "y": 0
+        },
+        {
+          "site": 4,
+          "depth": 4,
+          "level": 0.75288,
+          "polarity": 1,
+          "fRe": 0.752836,
+          "fIm": 0.008126,
+          "x": 4,
+          "y": 0
+        },
+        {
+          "site": 4,
+          "depth": 5,
+          "level": 0.748851,
+          "polarity": 1,
+          "fRe": 0.748126,
+          "fIm": 0.032939,
+          "x": 4,
+          "y": 0
+        },
+        {
+          "site": 4,
+          "depth": 6,
+          "level": 0.403166,
+          "polarity": 1,
+          "fRe": 0.402669,
+          "fIm": 0.020004,
+          "x": 4,
+          "y": 0
+        },
+        {
+          "site": 4,
+          "depth": 7,
+          "level": 0.424393,
+          "polarity": 1,
+          "fRe": 0.42375,
+          "fIm": 0.023349,
+          "x": 4,
+          "y": 0
+        },
+        {
+          "site": 4,
+          "depth": 8,
+          "level": 0.441662,
+          "polarity": 1,
+          "fRe": 0.441583,
+          "fIm": 0.008332,
+          "x": 4,
+          "y": 0
+        },
+        {
+          "site": 5,
+          "depth": 4,
+          "level": 0.995301,
+          "polarity": 1,
+          "fRe": 0.9953,
+          "fIm": -0.001407,
+          "x": 5,
+          "y": 0
+        },
+        {
+          "site": 5,
+          "depth": 5,
+          "level": 0.929613,
+          "polarity": 1,
+          "fRe": 0.929608,
+          "fIm": -0.002809,
+          "x": 5,
+          "y": 0
+        },
+        {
+          "site": 5,
+          "depth": 6,
+          "level": 0.603653,
+          "polarity": 1,
+          "fRe": 0.603607,
+          "fIm": -0.007516,
+          "x": 5,
+          "y": 0
+        },
+        {
+          "site": 5,
+          "depth": 7,
+          "level": 0.667273,
+          "polarity": 1,
+          "fRe": 0.667138,
+          "fIm": -0.01342,
+          "x": 5,
+          "y": 0
+        },
+        {
+          "site": 5,
+          "depth": 8,
+          "level": 0.65341,
+          "polarity": 1,
+          "fRe": 0.653409,
+          "fIm": -0.000808,
+          "x": 5,
+          "y": 0
+        },
+        {
+          "site": 6,
+          "depth": 4,
+          "level": 0.994982,
+          "polarity": 1,
+          "fRe": 0.994982,
+          "fIm": 0.000591,
+          "x": 0,
+          "y": 1
+        },
+        {
+          "site": 6,
+          "depth": 5,
+          "level": 0.965019,
+          "polarity": 1,
+          "fRe": 0.965014,
+          "fIm": 0.003171,
+          "x": 0,
+          "y": 1
+        },
+        {
+          "site": 6,
+          "depth": 6,
+          "level": 0.842084,
+          "polarity": 1,
+          "fRe": 0.842083,
+          "fIm": 0.001268,
+          "x": 0,
+          "y": 1
+        },
+        {
+          "site": 6,
+          "depth": 7,
+          "level": 0.680785,
+          "polarity": 1,
+          "fRe": 0.68074,
+          "fIm": -0.007858,
+          "x": 0,
+          "y": 1
+        },
+        {
+          "site": 6,
+          "depth": 8,
+          "level": 0.701463,
+          "polarity": 1,
+          "fRe": 0.701447,
+          "fIm": -0.004756,
+          "x": 0,
+          "y": 1
+        },
+        {
+          "site": 7,
+          "depth": 3,
+          "level": 0.971845,
+          "polarity": 1,
+          "fRe": 0.971841,
+          "fIm": 0.002698,
+          "x": 1,
+          "y": 1
+        },
+        {
+          "site": 7,
+          "depth": 4,
+          "level": 0.844294,
+          "polarity": 1,
+          "fRe": 0.84428,
+          "fIm": 0.004757,
+          "x": 1,
+          "y": 1
+        },
+        {
+          "site": 7,
+          "depth": 5,
+          "level": 0.716688,
+          "polarity": 1,
+          "fRe": 0.716586,
+          "fIm": 0.012115,
+          "x": 1,
+          "y": 1
+        },
+        {
+          "site": 7,
+          "depth": 6,
+          "level": 0.424313,
+          "polarity": 1,
+          "fRe": 0.424273,
+          "fIm": 0.005811,
+          "x": 1,
+          "y": 1
+        },
+        {
+          "site": 7,
+          "depth": 7,
+          "level": 0.507883,
+          "polarity": 1,
+          "fRe": 0.507863,
+          "fIm": 0.004497,
+          "x": 1,
+          "y": 1
+        },
+        {
+          "site": 7,
+          "depth": 8,
+          "level": 0.4955,
+          "polarity": 1,
+          "fRe": 0.495487,
+          "fIm": 0.003695,
+          "x": 1,
+          "y": 1
+        },
+        {
+          "site": 8,
+          "depth": 2,
+          "level": 0.893745,
+          "polarity": 1,
+          "fRe": 0.893656,
+          "fIm": -0.012622,
+          "x": 2,
+          "y": 1
+        },
+        {
+          "site": 8,
+          "depth": 3,
+          "level": 0.630992,
+          "polarity": 1,
+          "fRe": 0.630907,
+          "fIm": -0.010404,
+          "x": 2,
+          "y": 1
+        },
+        {
+          "site": 8,
+          "depth": 4,
+          "level": 0.26368,
+          "polarity": 1,
+          "fRe": 0.26357,
+          "fIm": 0.007603,
+          "x": 2,
+          "y": 1
+        },
+        {
+          "site": 8,
+          "depth": 5,
+          "level": 0.292301,
+          "polarity": 1,
+          "fRe": 0.2923,
+          "fIm": -0.00092,
+          "x": 2,
+          "y": 1
+        },
+        {
+          "site": 8,
+          "depth": 6,
+          "level": 0.299924,
+          "polarity": 1,
+          "fRe": 0.299751,
+          "fIm": -0.010198,
+          "x": 2,
+          "y": 1
+        },
+        {
+          "site": 8,
+          "depth": 7,
+          "level": 0.363413,
+          "polarity": 1,
+          "fRe": 0.363195,
+          "fIm": 0.012581,
+          "x": 2,
+          "y": 1
+        },
+        {
+          "site": 8,
+          "depth": 8,
+          "level": 0.209858,
+          "polarity": 1,
+          "fRe": 0.209372,
+          "fIm": 0.014273,
+          "x": 2,
+          "y": 1
+        },
+        {
+          "site": 9,
+          "depth": 1,
+          "level": 0.540089,
+          "polarity": 1,
+          "fRe": 0.540089,
+          "fIm": 0,
+          "x": 3,
+          "y": 1
+        },
+        {
+          "site": 9,
+          "depth": 2,
+          "level": 0.248332,
+          "polarity": -1,
+          "fRe": -0.237229,
+          "fIm": -0.073427,
+          "x": 3,
+          "y": 1
+        },
+        {
+          "site": 9,
+          "depth": 3,
+          "level": 0.152007,
+          "polarity": 1,
+          "fRe": 0.139347,
+          "fIm": -0.060731,
+          "x": 3,
+          "y": 1
+        },
+        {
+          "site": 9,
+          "depth": 4,
+          "level": 0.098552,
+          "polarity": 1,
+          "fRe": 0.097184,
+          "fIm": -0.016365,
+          "x": 3,
+          "y": 1
+        },
+        {
+          "site": 9,
+          "depth": 5,
+          "level": 0.136991,
+          "polarity": 1,
+          "fRe": 0.136222,
+          "fIm": -0.0145,
+          "x": 3,
+          "y": 1
+        },
+        {
+          "site": 9,
+          "depth": 6,
+          "level": 0.081954,
+          "polarity": 1,
+          "fRe": 0.081829,
+          "fIm": 0.004514,
+          "x": 3,
+          "y": 1
+        },
+        {
+          "site": 9,
+          "depth": 7,
+          "level": 0.113617,
+          "polarity": 1,
+          "fRe": 0.111384,
+          "fIm": -0.022416,
+          "x": 3,
+          "y": 1
+        },
+        {
+          "site": 9,
+          "depth": 8,
+          "level": 0.06474,
+          "polarity": 1,
+          "fRe": 0.064715,
+          "fIm": -0.001794,
+          "x": 3,
+          "y": 1
+        },
+        {
+          "site": 10,
+          "depth": 2,
+          "level": 0.840993,
+          "polarity": 1,
+          "fRe": 0.840858,
+          "fIm": -0.015065,
+          "x": 4,
+          "y": 1
+        },
+        {
+          "site": 10,
+          "depth": 3,
+          "level": 0.56863,
+          "polarity": 1,
+          "fRe": 0.568588,
+          "fIm": 0.006929,
+          "x": 4,
+          "y": 1
+        },
+        {
+          "site": 10,
+          "depth": 4,
+          "level": 0.285843,
+          "polarity": 1,
+          "fRe": 0.284798,
+          "fIm": 0.024419,
+          "x": 4,
+          "y": 1
+        },
+        {
+          "site": 10,
+          "depth": 5,
+          "level": 0.255917,
+          "polarity": 1,
+          "fRe": 0.255374,
+          "fIm": 0.01666,
+          "x": 4,
+          "y": 1
+        },
+        {
+          "site": 10,
+          "depth": 6,
+          "level": 0.247748,
+          "polarity": 1,
+          "fRe": 0.247328,
+          "fIm": -0.014421,
+          "x": 4,
+          "y": 1
+        },
+        {
+          "site": 10,
+          "depth": 7,
+          "level": 0.291835,
+          "polarity": 1,
+          "fRe": 0.291512,
+          "fIm": 0.013729,
+          "x": 4,
+          "y": 1
+        },
+        {
+          "site": 10,
+          "depth": 8,
+          "level": 0.218748,
+          "polarity": 1,
+          "fRe": 0.218488,
+          "fIm": 0.010659,
+          "x": 4,
+          "y": 1
+        },
+        {
+          "site": 11,
+          "depth": 3,
+          "level": 0.97566,
+          "polarity": 1,
+          "fRe": 0.975657,
+          "fIm": 0.0021,
+          "x": 5,
+          "y": 1
+        },
+        {
+          "site": 11,
+          "depth": 4,
+          "level": 0.832123,
+          "polarity": 1,
+          "fRe": 0.832047,
+          "fIm": -0.011217,
+          "x": 5,
+          "y": 1
+        },
+        {
+          "site": 11,
+          "depth": 5,
+          "level": 0.772869,
+          "polarity": 1,
+          "fRe": 0.772869,
+          "fIm": 0.00033,
+          "x": 5,
+          "y": 1
+        },
+        {
+          "site": 11,
+          "depth": 6,
+          "level": 0.488096,
+          "polarity": 1,
+          "fRe": 0.488057,
+          "fIm": -0.006201,
+          "x": 5,
+          "y": 1
+        },
+        {
+          "site": 11,
+          "depth": 7,
+          "level": 0.48505,
+          "polarity": 1,
+          "fRe": 0.484993,
+          "fIm": 0.007427,
+          "x": 5,
+          "y": 1
+        },
+        {
+          "site": 11,
+          "depth": 8,
+          "level": 0.437951,
+          "polarity": 1,
+          "fRe": 0.437941,
+          "fIm": 0.00297,
+          "x": 5,
+          "y": 1
+        },
+        {
+          "site": 12,
+          "depth": 3,
+          "level": 0.99778,
+          "polarity": 1,
+          "fRe": 0.997779,
+          "fIm": 0.001599,
+          "x": 0,
+          "y": 2
+        },
+        {
+          "site": 12,
+          "depth": 4,
+          "level": 0.930493,
+          "polarity": 1,
+          "fRe": 0.930493,
+          "fIm": 0.000253,
+          "x": 0,
+          "y": 2
+        },
+        {
+          "site": 12,
+          "depth": 5,
+          "level": 0.826441,
+          "polarity": 1,
+          "fRe": 0.826436,
+          "fIm": 0.002777,
+          "x": 0,
+          "y": 2
+        },
+        {
+          "site": 12,
+          "depth": 6,
+          "level": 0.715961,
+          "polarity": 1,
+          "fRe": 0.71596,
+          "fIm": -0.001579,
+          "x": 0,
+          "y": 2
+        },
+        {
+          "site": 12,
+          "depth": 7,
+          "level": 0.672192,
+          "polarity": 1,
+          "fRe": 0.672192,
+          "fIm": 0.001034,
+          "x": 0,
+          "y": 2
+        },
+        {
+          "site": 12,
+          "depth": 8,
+          "level": 0.60673,
+          "polarity": 1,
+          "fRe": 0.606543,
+          "fIm": -0.015039,
+          "x": 0,
+          "y": 2
+        },
+        {
+          "site": 13,
+          "depth": 2,
+          "level": 0.945502,
+          "polarity": 1,
+          "fRe": 0.945485,
+          "fIm": -0.005681,
+          "x": 1,
+          "y": 2
+        },
+        {
+          "site": 13,
+          "depth": 3,
+          "level": 0.852482,
+          "polarity": 1,
+          "fRe": 0.852442,
+          "fIm": 0.008262,
+          "x": 1,
+          "y": 2
+        },
+        {
+          "site": 13,
+          "depth": 4,
+          "level": 0.495257,
+          "polarity": 1,
+          "fRe": 0.495146,
+          "fIm": 0.010465,
+          "x": 1,
+          "y": 2
+        },
+        {
+          "site": 13,
+          "depth": 5,
+          "level": 0.479613,
+          "polarity": 1,
+          "fRe": 0.479402,
+          "fIm": 0.014235,
+          "x": 1,
+          "y": 2
+        },
+        {
+          "site": 13,
+          "depth": 6,
+          "level": 0.449022,
+          "polarity": 1,
+          "fRe": 0.449017,
+          "fIm": -0.002078,
+          "x": 1,
+          "y": 2
+        },
+        {
+          "site": 13,
+          "depth": 7,
+          "level": 0.409433,
+          "polarity": 1,
+          "fRe": 0.409432,
+          "fIm": 0.000623,
+          "x": 1,
+          "y": 2
+        },
+        {
+          "site": 13,
+          "depth": 8,
+          "level": 0.255305,
+          "polarity": 1,
+          "fRe": 0.255247,
+          "fIm": 0.005445,
+          "x": 1,
+          "y": 2
+        },
+        {
+          "site": 14,
+          "depth": 1,
+          "level": 0.527544,
+          "polarity": 1,
+          "fRe": 0.527544,
+          "fIm": 0,
+          "x": 2,
+          "y": 2
+        },
+        {
+          "site": 14,
+          "depth": 2,
+          "level": 0.198559,
+          "polarity": -1,
+          "fRe": -0.174863,
+          "fIm": -0.094069,
+          "x": 2,
+          "y": 2
+        },
+        {
+          "site": 14,
+          "depth": 3,
+          "level": 0.083946,
+          "polarity": 1,
+          "fRe": 0.020937,
+          "fIm": -0.081293,
+          "x": 2,
+          "y": 2
+        },
+        {
+          "site": 14,
+          "depth": 4,
+          "level": 0.109966,
+          "polarity": 1,
+          "fRe": 0.109106,
+          "fIm": -0.013731,
+          "x": 2,
+          "y": 2
+        },
+        {
+          "site": 14,
+          "depth": 5,
+          "level": 0.187032,
+          "polarity": 1,
+          "fRe": 0.186726,
+          "fIm": -0.0107,
+          "x": 2,
+          "y": 2
+        },
+        {
+          "site": 14,
+          "depth": 6,
+          "level": 0.148969,
+          "polarity": 1,
+          "fRe": 0.147842,
+          "fIm": -0.018296,
+          "x": 2,
+          "y": 2
+        },
+        {
+          "site": 14,
+          "depth": 7,
+          "level": 0.141325,
+          "polarity": 1,
+          "fRe": 0.140725,
+          "fIm": -0.013008,
+          "x": 2,
+          "y": 2
+        },
+        {
+          "site": 14,
+          "depth": 8,
+          "level": 0.079563,
+          "polarity": 1,
+          "fRe": 0.079478,
+          "fIm": -0.003695,
+          "x": 2,
+          "y": 2
+        },
+        {
+          "site": 15,
+          "depth": 1,
+          "level": 0.604234,
+          "polarity": -1,
+          "fRe": -0.604234,
+          "fIm": 0,
+          "x": 3,
+          "y": 2
+        },
+        {
+          "site": 15,
+          "depth": 2,
+          "level": 0.382523,
+          "polarity": -1,
+          "fRe": -0.317893,
+          "fIm": 0.212764,
+          "x": 3,
+          "y": 2
+        },
+        {
+          "site": 15,
+          "depth": 3,
+          "level": 0.515907,
+          "polarity": -1,
+          "fRe": -0.463684,
+          "fIm": 0.226181,
+          "x": 3,
+          "y": 2
+        },
+        {
+          "site": 15,
+          "depth": 4,
+          "level": 0.068258,
+          "polarity": -1,
+          "fRe": -0.048483,
+          "fIm": 0.048048,
+          "x": 3,
+          "y": 2
+        },
+        {
+          "site": 15,
+          "depth": 6,
+          "level": 0.101468,
+          "polarity": 1,
+          "fRe": 0.095394,
+          "fIm": 0.034581,
+          "x": 3,
+          "y": 2
+        },
+        {
+          "site": 15,
+          "depth": 7,
+          "level": 0.030983,
+          "polarity": 1,
+          "fRe": 0.011219,
+          "fIm": 0.02888,
+          "x": 3,
+          "y": 2
+        },
+        {
+          "site": 16,
+          "depth": 1,
+          "level": 0.749858,
+          "polarity": 1,
+          "fRe": 0.749858,
+          "fIm": 0,
+          "x": 4,
+          "y": 2
+        },
+        {
+          "site": 16,
+          "depth": 2,
+          "level": 0.165868,
+          "polarity": 1,
+          "fRe": 0.134339,
+          "fIm": -0.09729,
+          "x": 4,
+          "y": 2
+        },
+        {
+          "site": 16,
+          "depth": 3,
+          "level": 0.174945,
+          "polarity": 1,
+          "fRe": 0.148427,
+          "fIm": -0.092601,
+          "x": 4,
+          "y": 2
+        },
+        {
+          "site": 16,
+          "depth": 4,
+          "level": 0.203081,
+          "polarity": 1,
+          "fRe": 0.202977,
+          "fIm": -0.006508,
+          "x": 4,
+          "y": 2
+        },
+        {
+          "site": 16,
+          "depth": 5,
+          "level": 0.274602,
+          "polarity": 1,
+          "fRe": 0.274569,
+          "fIm": -0.004287,
+          "x": 4,
+          "y": 2
+        },
+        {
+          "site": 16,
+          "depth": 6,
+          "level": 0.146433,
+          "polarity": 1,
+          "fRe": 0.14565,
+          "fIm": -0.015124,
+          "x": 4,
+          "y": 2
+        },
+        {
+          "site": 16,
+          "depth": 7,
+          "level": 0.126375,
+          "polarity": 1,
+          "fRe": 0.126373,
+          "fIm": -0.000677,
+          "x": 4,
+          "y": 2
+        },
+        {
+          "site": 16,
+          "depth": 8,
+          "level": 0.086444,
+          "polarity": 1,
+          "fRe": 0.086375,
+          "fIm": -0.00345,
+          "x": 4,
+          "y": 2
+        },
+        {
+          "site": 17,
+          "depth": 2,
+          "level": 0.918053,
+          "polarity": 1,
+          "fRe": 0.918046,
+          "fIm": -0.003701,
+          "x": 5,
+          "y": 2
+        },
+        {
+          "site": 17,
+          "depth": 3,
+          "level": 0.632527,
+          "polarity": 1,
+          "fRe": 0.632374,
+          "fIm": 0.013931,
+          "x": 5,
+          "y": 2
+        },
+        {
+          "site": 17,
+          "depth": 4,
+          "level": 0.09682,
+          "polarity": 1,
+          "fRe": 0.096749,
+          "fIm": -0.003718,
+          "x": 5,
+          "y": 2
+        },
+        {
+          "site": 17,
+          "depth": 5,
+          "level": 0.341443,
+          "polarity": 1,
+          "fRe": 0.341187,
+          "fIm": -0.013218,
+          "x": 5,
+          "y": 2
+        },
+        {
+          "site": 17,
+          "depth": 6,
+          "level": 0.378464,
+          "polarity": 1,
+          "fRe": 0.378303,
+          "fIm": -0.011045,
+          "x": 5,
+          "y": 2
+        },
+        {
+          "site": 17,
+          "depth": 7,
+          "level": 0.35622,
+          "polarity": 1,
+          "fRe": 0.355813,
+          "fIm": 0.017032,
+          "x": 5,
+          "y": 2
+        },
+        {
+          "site": 17,
+          "depth": 8,
+          "level": 0.2641,
+          "polarity": 1,
+          "fRe": 0.264097,
+          "fIm": 0.001211,
+          "x": 5,
+          "y": 2
+        },
+        {
+          "site": 18,
+          "depth": 4,
+          "level": 0.995046,
+          "polarity": 1,
+          "fRe": 0.995046,
+          "fIm": -0.000192,
+          "x": 0,
+          "y": 3
+        },
+        {
+          "site": 18,
+          "depth": 5,
+          "level": 0.960616,
+          "polarity": 1,
+          "fRe": 0.960615,
+          "fIm": 0.001506,
+          "x": 0,
+          "y": 3
+        },
+        {
+          "site": 18,
+          "depth": 6,
+          "level": 0.87113,
+          "polarity": 1,
+          "fRe": 0.871117,
+          "fIm": -0.004774,
+          "x": 0,
+          "y": 3
+        },
+        {
+          "site": 18,
+          "depth": 7,
+          "level": 0.778586,
+          "polarity": 1,
+          "fRe": 0.778282,
+          "fIm": -0.021735,
+          "x": 0,
+          "y": 3
+        },
+        {
+          "site": 18,
+          "depth": 8,
+          "level": 0.675276,
+          "polarity": 1,
+          "fRe": 0.675245,
+          "fIm": -0.006468,
+          "x": 0,
+          "y": 3
+        },
+        {
+          "site": 19,
+          "depth": 3,
+          "level": 0.988968,
+          "polarity": 1,
+          "fRe": 0.988959,
+          "fIm": 0.004238,
+          "x": 1,
+          "y": 3
+        },
+        {
+          "site": 19,
+          "depth": 4,
+          "level": 0.769571,
+          "polarity": 1,
+          "fRe": 0.76957,
+          "fIm": 0.000771,
+          "x": 1,
+          "y": 3
+        },
+        {
+          "site": 19,
+          "depth": 5,
+          "level": 0.678957,
+          "polarity": 1,
+          "fRe": 0.678884,
+          "fIm": 0.009981,
+          "x": 1,
+          "y": 3
+        },
+        {
+          "site": 19,
+          "depth": 6,
+          "level": 0.430913,
+          "polarity": 1,
+          "fRe": 0.430695,
+          "fIm": 0.013714,
+          "x": 1,
+          "y": 3
+        },
+        {
+          "site": 19,
+          "depth": 7,
+          "level": 0.549445,
+          "polarity": 1,
+          "fRe": 0.548339,
+          "fIm": 0.034847,
+          "x": 1,
+          "y": 3
+        },
+        {
+          "site": 19,
+          "depth": 8,
+          "level": 0.482257,
+          "polarity": 1,
+          "fRe": 0.482109,
+          "fIm": 0.011961,
+          "x": 1,
+          "y": 3
+        },
+        {
+          "site": 20,
+          "depth": 2,
+          "level": 0.891167,
+          "polarity": 1,
+          "fRe": 0.891077,
+          "fIm": -0.012671,
+          "x": 2,
+          "y": 3
+        },
+        {
+          "site": 20,
+          "depth": 3,
+          "level": 0.685385,
+          "polarity": 1,
+          "fRe": 0.685367,
+          "fIm": 0.004964,
+          "x": 2,
+          "y": 3
+        },
+        {
+          "site": 20,
+          "depth": 4,
+          "level": 0.150988,
+          "polarity": 1,
+          "fRe": 0.150258,
+          "fIm": 0.014831,
+          "x": 2,
+          "y": 3
+        }
+      ],
+      "irFile": null,
+      "irUrl": null
+    }
+  },
   "provenance": {
     "labyrinth-arena": {
       "engine": "labyrinth-v1",
@@ -2187,6 +4483,20 @@ export const MOTH_BAKED = {
       "name": "moth-echo",
       "credits": 1
     },
+    "motif-victory": {
+      "engine": "blur-midi-v1",
+      "jobId": "d5ca3c9f-086d-4c72-8f4e-26cceaa411bc",
+      "mode": "emu",
+      "name": "moth-victory",
+      "credits": 1
+    },
+    "motif-defeat": {
+      "engine": "blur-midi-v1",
+      "jobId": "9e0fa817-03d1-4de1-85eb-a1045b7f3729",
+      "mode": "emu",
+      "name": "moth-defeat",
+      "credits": 1
+    },
     "motif-oracle": {
       "engine": "qrc-midi-v1",
       "jobId": "098130a7-f65e-4adb-8cf2-3cf23bb37c51",
@@ -2270,6 +4580,27 @@ export const MOTH_BAKED = {
       "mode": "emu",
       "name": "openair",
       "credits": 2
+    },
+    "ir-tunnel": {
+      "engine": "retrocausal-echo-v1",
+      "jobId": "6265504f-9102-41ad-af39-16c806b6f660",
+      "mode": "emu",
+      "name": "tunnel",
+      "credits": 2
+    },
+    "echo-arena": {
+      "engine": "otoc-echo-v1",
+      "jobId": "1868b921-53bf-4131-8aec-c585d503e302",
+      "mode": "emu",
+      "name": "arena",
+      "credits": 1
+    },
+    "bed-ritual": {
+      "engine": "qrc-audio-v1",
+      "jobId": "3b80b014-18da-412a-8c14-06d7fc668593",
+      "mode": "emu",
+      "name": "bed-ritual",
+      "credits": 5
     }
   }
 };

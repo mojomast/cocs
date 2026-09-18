@@ -1309,6 +1309,54 @@
       "jobId": "ab73506d-8ca2-4475-a422-586f140a9b10"
     },
     {
+      "id": "motif-victory",
+      "engine": "blur-midi-v1",
+      "enabled": true,
+      "credits": 1,
+      "consumer": "results/victory motif via MusicEngine.setMotif",
+      "input": {
+        "midi": "sources/motif.mid"
+      },
+      "params": {
+        "strength": 0.25,
+        "reach": 0.15,
+        "qubits": 20,
+        "threshold": 0.08,
+        "margin": 0.15
+      },
+      "raw": "motif-victory",
+      "bake": {
+        "type": "motif",
+        "name": "moth-victory",
+        "bucket": "motifs"
+      },
+      "jobId": "d5ca3c9f-086d-4c72-8f4e-26cceaa411bc"
+    },
+    {
+      "id": "motif-defeat",
+      "engine": "blur-midi-v1",
+      "enabled": true,
+      "credits": 1,
+      "consumer": "defeat motif via MusicEngine.setMotif",
+      "input": {
+        "midi": "sources/motif.mid"
+      },
+      "params": {
+        "strength": 0.5,
+        "reach": 0.35,
+        "qubits": 20,
+        "threshold": 0.1,
+        "margin": 0.15
+      },
+      "raw": "motif-defeat",
+      "bake": {
+        "type": "motif",
+        "name": "moth-defeat",
+        "bucket": "motifs"
+      },
+      "jobId": "9e0fa817-03d1-4de1-85eb-a1045b7f3729"
+    },
+    {
       "id": "motif-oracle",
       "engine": "qrc-midi-v1",
       "enabled": true,
@@ -1641,11 +1689,91 @@
       "jobId": "8bc9c452-a577-4c03-91be-3674886d4d16"
     },
     {
+      "id": "ir-tunnel",
+      "engine": "retrocausal-echo-v1",
+      "enabled": true,
+      "credits": 2,
+      "consumer": "long corridor reverb for tunnel/substation maps via SynthAudio.setReverbUrl",
+      "params": {
+        "emit": "audio",
+        "ir_seconds": 3.5,
+        "sr": 22050,
+        "output_format": "pcm_16",
+        "lattice": "chain",
+        "n_sites": 8,
+        "depth": 12,
+        "master_ms": 900,
+        "theta_zz": 1.0995574287564276,
+        "theta_x": 0.9424777960769379,
+        "theta_z": 0.15,
+        "kick": "Z",
+        "disorder": 0.2,
+        "seed": 202,
+        "decay": 0.9,
+        "feedback": 0.6,
+        "feedback_source": "all",
+        "min_level": 0.05,
+        "max_regen": 32,
+        "negative_mode": "reverse",
+        "stereo_width": 1,
+        "mix": 1,
+        "ref_floor": 0.02,
+        "include_tap_map": true
+      },
+      "raw": "ir-tunnel",
+      "bake": {
+        "type": "ir",
+        "name": "tunnel",
+        "bucket": "irs"
+      },
+      "jobId": "6265504f-9102-41ad-af39-16c806b6f660"
+    },
+    {
+      "id": "ir-void",
+      "engine": "retrocausal-echo-v1",
+      "enabled": true,
+      "credits": 2,
+      "consumer": "huge, diffuse reverb for the Void/neon maps; also a room-tone source. Audio-completion batch attempt (2026-09-18) was rejected at submission with a 422 ('params do not match the engine schema'): the plan's `stereo_width: 1.2` exceeds the engine maximum of 1.0, so no job was created and no credit was charged. The param is corrected to 1 here; per the batch rule a rejected job is not resubmitted in the same run, so ir-void is deferred to the next batch (2 cr, jobId not yet recorded).",
+      "params": {
+        "emit": "audio",
+        "ir_seconds": 5,
+        "sr": 22050,
+        "output_format": "pcm_16",
+        "lattice": "square",
+        "width": 4,
+        "height": 4,
+        "depth": 16,
+        "theta_zz": 0.7853981634,
+        "theta_x": 0.6,
+        "theta_z": 0.4,
+        "kick": "Z",
+        "disorder": 0.35,
+        "seed": 303,
+        "decay": 0.95,
+        "feedback": 0.35,
+        "feedback_source": "all",
+        "diffusion_ms": 400,
+        "min_level": 0.04,
+        "max_regen": 48,
+        "negative_mode": "phase",
+        "stereo_width": 1,
+        "mix": 1,
+        "ref_floor": 0.02,
+        "include_tap_map": true
+      },
+      "raw": "ir-void",
+      "bake": {
+        "type": "ir",
+        "name": "void",
+        "bucket": "irs"
+      }
+    },
+    {
       "id": "echo-arena",
       "engine": "otoc-echo-v1",
       "enabled": true,
       "credits": 1,
-      "consumer": "minimum pipeline proof (1 of 8 cr): tap map for the delay/feedback space; exercises the echo-map baker. First attempt (2026-09-18, job 99b64320-2524-4f17-8f69-8e2eeb43ef02) failed: 5x5=25 qubits exceeds the aer budget of 24 ('too_many_qubits', retryable:false), so no space was produced. The grid is reduced to 6x4=24 for the next batch (do not resubmit without a fresh 1 cr).",
+      "consumer": "minimum pipeline proof (1 of 8 cr): tap map for the delay/feedback space; exercises the echo-map baker. First attempt (2026-09-18, job 99b64320-2524-4f17-8f69-8e2eeb43ef02) failed: 5x5=25 qubits exceeds the aer budget of 24 ('too_many_qubits', retryable:false), so no space was produced. Corrected to a 6x4=24 grid and resubmitted in the audio-completion batch (fresh 1 cr).",
       "params": {
         "lattice": "square",
         "width": 6,
@@ -1669,7 +1797,8 @@
         "name": "arena",
         "bucket": "spaces",
         "maxTaps": 128
-      }
+      },
+      "jobId": "1868b921-53bf-4131-8aec-c585d503e302"
     },
     {
       "id": "bed-ritual",

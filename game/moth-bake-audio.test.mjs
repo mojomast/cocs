@@ -69,6 +69,33 @@ test('the regenerated module carries the cavern taps and no embedded audio', asy
   }
 });
 
+test('the audio-completion batch descriptors are baked without embedded audio', async () => {
+  const { MOTH_BAKED } = await import('../game/moth-baked.mjs');
+  const arena = MOTH_BAKED.spaces.arena;
+  assert.equal(arena.lattice, 'square');
+  assert.equal(arena.sites, 24, 'the 6x4=24 echo map keeps its site count');
+  assert.equal(arena.depth, 8);
+  assert.equal(arena.seed, 12345);
+  assert.ok(arena.count > 0 && arena.taps.length > 0);
+
+  const tunnel = MOTH_BAKED.irs.tunnel;
+  assert.equal(tunnel.url, '/moth/files/ir-tunnel/result.wav');
+  assert.ok(tunnel.seconds > 3 && tunnel.seconds < 4, 'the 3.5 s corridor IR');
+  assert.ok(tunnel.taps.length > 0, 'the IR carries a compact tap map');
+
+  for (const name of ['moth-victory', 'moth-defeat']) {
+    const motif = MOTH_BAKED.motifs[name];
+    assert.ok(motif, `${name} is baked`);
+    assert.ok(motif.notes.length > 0, `${name} has notes`);
+    assert.equal(motif.bpm, 120);
+  }
+  for (const bucket of ['audio', 'spaces', 'irs']) {
+    for (const record of Object.values(MOTH_BAKED[bucket] || {})) {
+      assert.notEqual(typeof record.data, 'string', `${bucket} descriptors must not embed base64 audio`);
+    }
+  }
+});
+
 // ---------------------------------------------------------------------------
 // WAV codec
 // ---------------------------------------------------------------------------
@@ -211,6 +238,34 @@ test('echo-map compacts a trajectory envelope from extras.taps', () => {
   assert.equal(record.value.seed, 12345);
   assert.equal(record.value.taps[0].fRe, 0.8123);
   assert.equal(record.value.taps[0].timeMs, 160);
+});
+
+test('echo-map reads metadata from the real otoc-echo { output } envelope', () => {
+  const envelope = {
+    output: {
+      result_type: 'trajectory',
+      data: { sites: 24, steps: 8 },
+      extras: {
+        lattice: 'square', width: 6, height: 4,
+        spec: { n_sites: 24, depth: 8, lattice: 'square', seed: 777 },
+        taps: [{ site: 0, depth: 5, F_re: 0.9, F_im: 0.01, level: 0.9, polarity: 1, x: 0, y: 0 }],
+      },
+      provenance: { seed: 777 },
+    },
+  };
+  const record = BAKERS['echo-map']({ id: 'echo-arena' }, {
+    result: envelope,
+    bake: { type: 'echo-map', name: 'arena', bucket: 'spaces', maxTaps: 128 },
+    job: { id: 'echo-arena' },
+    rawName: 'echo-arena',
+    publicDir: '/moth/files/echo-arena',
+  });
+  assert.equal(record.bucket, 'spaces');
+  assert.equal(record.value.lattice, 'square', 'the wrapper is unwrapped for lattice');
+  assert.equal(record.value.sites, 24);
+  assert.equal(record.value.depth, 8);
+  assert.equal(record.value.seed, 777);
+  assert.equal(record.value.count, 1);
 });
 
 test('echo-map reads a data.extras.taps envelope from a JSON slot', () => {

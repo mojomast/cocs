@@ -900,12 +900,28 @@ export function tapsFrom(value) {
 function firstNumber(...values) { for (const value of values) if (typeof value === 'number' && Number.isFinite(value)) return value; return null; }
 function firstString(...values) { for (const value of values) if (typeof value === 'string' && value) return value; return null; }
 
+// Unwrap the engine envelopes. `retrocausal-echo`/`otoc-echo` trajectories are
+// often nested under `output` (the job result wraps the engine payload as
+// `{ output: { extras, provenance, ... } }`); the metadata has to be read from
+// that inner envelope or the compact `spaces` record loses lattice/sites/depth/seed.
+function envelopeOf(value) {
+  let node = value;
+  for (let i = 0; i < 4 && node && typeof node === 'object'; i++) {
+    if (node.extras || node.spec || node.provenance) return node;
+    if (node.output && typeof node.output === 'object') node = node.output;
+    else if (node.result && typeof node.result === 'object') node = node.result;
+    else break;
+  }
+  return node && typeof node === 'object' ? node : {};
+}
+
 function envelopeMeta(value) {
-  const extras = value?.extras ?? {};
-  const spec = extras.spec ?? value?.spec ?? {};
-  const params = value?.params ?? {};
-  const provenance = value?.provenance ?? {};
-  const data = value?.data ?? {};
+  const envelope = envelopeOf(value);
+  const extras = envelope.extras ?? {};
+  const spec = extras.spec ?? envelope.spec ?? {};
+  const params = envelope.params ?? {};
+  const provenance = envelope.provenance ?? {};
+  const data = envelope.data ?? {};
   return {
     lattice: firstString(spec.lattice, extras.lattice, params.lattice),
     sites: firstNumber(spec.n_sites, extras.n_sites, extras.sites, data.sites, params.n_sites),
