@@ -399,6 +399,7 @@
 .mode-selection .operator-caption { background: linear-gradient(transparent, #081318e8); padding: 24px 8px 12px; }
 .mode-options { grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); }
 .mode-option em { display: block; margin-top: 8px; color: #b6efd2; font: 11px monospace; line-height: 1.45; }
+.mode-option .mode-preview { display: inline-block; margin-top: 6px; padding: 2px 7px; border: 1px solid rgba(255,209,102,.5); border-radius: 999px; color: var(--warn-soft); font: 600 10px var(--font-mono); letter-spacing: .14em; }
 .ctf-objective { position: absolute; top: 106px; left: 50%; transform: translateX(-50%); display: flex; flex-wrap: wrap; justify-content: center; gap: 8px 14px; max-width: min(600px, 80vw); padding: 9px 14px; border: 1px solid #8de9cb66; background: #081818df; color: #d5f7e6; font: 12px monospace; text-align: center; text-shadow: 0 1px 3px #000; }
 .ctf-objective strong { color: #83f4d5; letter-spacing: 1px; }
 .ctf-objective::before { content: 'RED / BLUE'; color: #91b9b2; letter-spacing: 1px; }
@@ -1084,6 +1085,32 @@ html, body { overscroll-behavior: none; }
 .objective-copy strong{font:800 clamp(13px,1.15vw,18px)/1.2 var(--font-ui);letter-spacing:.02em;color:#eafff5}
 .objective-copy small{font:11px/1.4 var(--font-ui);color:var(--text-dim);max-width:52ch}
 .objective-tags{display:flex;flex-wrap:wrap;justify-content:center;gap:6px}
+/* LATTICE STRIKE front-line readout. Top-left mirror of the radar: team OP
+   score, live-node roster and the capture hint. Ownership reads as a shape
+   glyph + word, so it never depends on colour alone. */
+.cocs-readout{position:absolute;top:calc(var(--safe-top) + 96px);left:var(--safe-left);z-index:var(--z-panel,2);width:min(252px,44vw);
+  display:grid;gap:6px;padding:10px 12px;border:1px solid var(--border);border-left:3px solid var(--accent);
+  border-radius:var(--radius-md);background:linear-gradient(110deg,#081a1be6,#0d1f1dd9);box-shadow:0 12px 30px #0008;text-shadow:0 1px 3px #000}
+.cocs-readout__head{display:flex;justify-content:space-between;align-items:baseline;gap:8px}
+.cocs-readout__head .eyebrow{font-size:10px;letter-spacing:.18em}
+.cocs-readout__count{font:600 10px var(--font-mono);letter-spacing:.1em;color:var(--text-mute)}
+.cocs-readout__scores{display:flex;align-items:baseline;justify-content:space-between;gap:6px;font:600 11px var(--font-mono);color:var(--text-dim)}
+.cocs-readout__scores b{font-size:15px;color:#eafff5}
+.cocs-readout__scores .is-lead b{color:var(--accent-soft)}
+.cocs-readout__op{font-size:9px;letter-spacing:.2em;color:var(--text-mute)}
+.cocs-readout__nodes{list-style:none;display:grid;gap:3px;margin:0;padding:0}
+.cocs-node{display:grid;grid-template-columns:auto 1fr auto;align-items:center;gap:7px;font:600 11px var(--font-mono);color:var(--text-dim)}
+.cocs-node__mark{font-size:12px;line-height:1;color:var(--text-mute)}
+.cocs-node__label{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.cocs-node__status{font-size:10px;letter-spacing:.06em;color:var(--text-mute);white-space:nowrap}
+.cocs-node--mine .cocs-node__mark,.cocs-node--mine .cocs-node__status{color:var(--accent-soft)}
+.cocs-node--enemy .cocs-node__mark,.cocs-node--enemy .cocs-node__status{color:#ff9e9e}
+.cocs-node--contested .cocs-node__mark,.cocs-node--contested .cocs-node__status{color:var(--warn-soft)}
+.cocs-readout__own{display:flex;justify-content:space-between;gap:8px;font:600 10px var(--font-mono);color:var(--text-mute)}
+.cocs-readout__own b{color:#eafff5}
+.cocs-readout__hint{margin:0;font:600 10px var(--font-mono);letter-spacing:.05em;color:#eafff5}
+.game-hud.hide-hud .cocs-readout{display:none}
+@media(max-width:760px){.cocs-readout{top:calc(var(--safe-top) + 74px);width:min(200px,62vw);padding:7px 9px}.cocs-node{font-size:10px}.cocs-readout__scores b{font-size:13px}}
 .game-hud.hide-hud :is(.hud-bottom,.objective-bar,.stat-card,.ability-card,.hud-pills,.hud-bottom-note){display:none}
 @media (max-width:760px){
   .hud-bottom{grid-template-columns:minmax(0,1fr) minmax(0,1fr);grid-template-areas:'objective objective' 'left right';gap:8px}
