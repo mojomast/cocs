@@ -16,8 +16,9 @@ test('every combat game mode has a next-gen map and the canonical set is one-per
   // procedurally generated combat arena, and the single-player Horde/Campaign
   // modes reuse the existing arenas. VIP Escort, Holdout and Uplink are
   // objective variants layered on existing combat arenas, so they reuse a map
-  // rather than claiming a new canonical next-gen arena.
-  const combatModes = GAME_MODES.filter(mode => !['puma-race','puma-soccer','horde','campaign','vip-escort','holdout','uplink','cocs'].includes(mode.id));
+  // rather than claiming a new canonical next-gen arena. LATTICE STRIKE (both
+  // `cocs` and the co-op `cocs-coop`) reuses its authored `lattice-slice`.
+  const combatModes = GAME_MODES.filter(mode => !['puma-race','puma-soccer','horde','campaign','vip-escort','holdout','uplink','cocs','cocs-coop'].includes(mode.id));
   assert.equal(new Set(NEXTGEN_MAPS.map(map => map.id)).size, NEXTGEN_MAPS.length);
   const modes = new Set(NEXTGEN_MAPS.map(primaryMode));
   for (const mode of combatModes) assert.ok(modes.has(mode.id), `missing next-gen map for ${mode.id}`);

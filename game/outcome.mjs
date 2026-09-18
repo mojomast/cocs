@@ -1,4 +1,4 @@
-import {teamMode} from './config.mjs';
+import {teamMode,isCocsMode} from './config.mjs';
 
 // Shared end-of-match ranking so the in-match leaderboard (Match.leaders), the
 // award path (actorWon) and match history all read the same ordering.
@@ -18,7 +18,7 @@ export const scoreStatsOf = actor => {
 export const rankTuple = (actor, mode) => {
   const frags = Number(actor?.frags) || 0;
   // LATTICE STRIKE is objective-first: captures, then node time, then frags.
-  if (mode === 'cocs') {
+  if (isCocsMode(mode)) {
     const stats = scoreStatsOf(actor) ?? ZERO_STATS;
     return [stats.objectiveCaptures, stats.objectiveTime, frags];
   }
@@ -55,7 +55,7 @@ export function actorWon(result, mode, actor) {
     const winner = result.race?.winnerId ?? result.winner;
     return winner !== null && winner !== undefined && winner === actor.id;
   }
-  if (mode === 'cocs') {
+  if (isCocsMode(mode)) {
     // COCS resolves to a team: dominance, array capture or score at time. The
     // authoritative winner is the team; a score-less result awards nobody.
     if (result.winner !== null && result.winner !== undefined) return result.winner === actor.team;

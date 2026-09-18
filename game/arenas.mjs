@@ -17,7 +17,7 @@ export const DEFAULT_MAX_BOTS=8;
 // against it only when the mode exists, so `arenas.mjs` stays valid on a tree
 // where `config.mjs` has not landed it yet (arenas.test asserts every `play`
 // entry is a real GAME_MODES id).
-const COCS_PLAY=GAME_MODES.some(mode=>mode.id==='cocs')?['cocs']:[];
+const COCS_PLAY=GAME_MODES.filter(mode=>mode.rules?.score==='cocs').map(mode=>mode.id);
 
 const AUTHOR={
  'puma-circuit':{group:'vehicle',scale:'battle',play:['puma-race']},

@@ -578,7 +578,7 @@ function stepCampaign(match,state,dt){
 // allocation-light: one pass for auras, one for support pulses, one for sapper
 // fuses. Every bonus is recomputed from a stored base each frame so buffs never
 // compound when auras overlap.
-function updateEnemyRoles(match,state,dt){
+export function updateEnemyRoles(match,state,dt){
  const ids=state.enemies;
  if(!ids||!ids.length)return;
  const allies=[];

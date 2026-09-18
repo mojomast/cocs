@@ -45,6 +45,8 @@ import {
   neglectPassiveFlux, neglectState, neglectTick, scoreEvent, subagentUpkeep,
 } from './cocs-economy.mjs';
 import {createTraversalState, stepCocsTraversal, cocsTraversalSnapshot} from './cocs-traversal.mjs';
+import {COOP_ECONOMY} from './cocs-difficulty.mjs';
+import {cocsCoopSnapshot, coopOrderGate, coopOutcome, createCoopState, stepCoop} from './cocs-coop.mjs';
 
 export const COCS_KIND = 'cocs';
 // The frozen node archetypes. Authored maps may spell a few of these
@@ -297,6 +299,13 @@ function buildAdjacency(edges) {
 export function cocsTemplate(mode, arena, config = {}) {
   const rules = modeRule(mode);
   const objective = rules.objective ?? {};
+  // LATTICE STRIKE: OPERATIONS is the `coop:true` branch of the same objective
+  // kind. It raises the one-sided economy, seeds the Operations Director state
+  // and adds the HQ-siege loss. Non-coop `cocs` keeps its exact V0b constants.
+  const coop = rules.coop === true;
+  const economy = coop
+    ? COOP_ECONOMY
+    : {fluxStart: FLUX_START, fluxCap: FLUX_CAP, fluxPassivePerSecond: FLUX_PASSIVE_PER_SECOND, reqMultiplier: 1};
   const authored = readAuthoredLattice(arena);
   const source = authored ?? synthesizeLattice(arena);
   const captureSeconds = Math.max(0.5, num(config?.objective?.captureSeconds ?? objective.captureSeconds, DEFAULT_CAPTURE_SECONDS));
@@ -337,8 +346,13 @@ export function cocsTemplate(mode, arena, config = {}) {
     scores: {0: 0, 1: 0},
     income: {0: 0, 1: 0},
     // --- §6.5/§6A.5 two-layer economy ---------------------------------------
-    flux: {0: FLUX_START, 1: FLUX_START},
-    fluxCap: FLUX_CAP,
+    flux: {0: economy.fluxStart, 1: economy.fluxStart},
+    fluxCap: economy.fluxCap,
+    fluxPassive: economy.fluxPassivePerSecond,
+    reqMult: economy.reqMultiplier,
+    coop: false,
+    coopMode: coop,
+    coopTier: 'D1',
     fluxEarned: {0: 0, 1: 0},
     fluxSpent: {0: 0, 1: 0},
     fluxUpkeep: {0: 0, 1: 0},
@@ -369,6 +383,10 @@ export function cocsTemplate(mode, arena, config = {}) {
   // §6A traversal layer (V0b): authored devices/depots only. An unauthored map
   // stays `null` so every prior mode/behaviour is untouched.
   state.traversal = createTraversalState(arena, {botUse: config?.objective?.traversalBotUse === true});
+  if (coop) {
+    state.coopTier = config?.objective?.tier ?? config?.coopTier ?? 'D1';
+    state.coop = createCoopState(state, {tier: state.coopTier});
+  }
   updateLiveNodes(state);
   state.front = frontState(state);
   return state;
@@ -562,6 +580,12 @@ export function processCocsOrder(match, state, order) {
   if ((team !== 0 && team !== 1) || !COCS_ORDER_VERBS.includes(verb) || target === null) return reject();
   const node = nodeById(state, target);
   if (!node) return reject();
+  // OPERATIONS command gates (owner decision 3): a big card (SCAN) needs the
+  // rotating executor lease, and every spend must fit the player's FLUX slice.
+  if (state.coopMode === true) {
+    const gate = coopOrderGate(match, state, {team, verb, peerId: entry.peerId});
+    if (!gate.ok) { entry.reason = gate.reason; return reject(); }
+  }
   if (verb === 'SCAN') {
     const ok = issueScanOrder(match, state, team, node);
     entry.ok = ok;
@@ -855,7 +879,7 @@ function accruePresenceReq(match, state, dt) {
       if (actor.isScout === true) continue;
       if (node.owner !== actor.team && node.contested !== true) continue;
       if (Math.hypot(actor.x - node.x, actor.z - node.z) > node.r) continue;
-      addActorReq(actor, REQ_EARN.objectivePresencePerSecond * dt);
+      addActorReq(actor, REQ_EARN.objectivePresencePerSecond * num(state.reqMult, 1) * dt);
     }
   }
 }
@@ -893,6 +917,11 @@ function nodeActors(match, node) {
   const actors = {0: [], 1: []};
   for (const actor of match?.actors ?? []) {
     if (!actor || actor.health <= 0 || (actor.team !== 0 && actor.team !== 1)) continue;
+    // Director wave force fights *for* the point but never captures it: the
+    // persistent garrison owns ground, the non-respawning wave is the clear
+    // condition. Boss summons carry no wave id but are still Director bodies.
+    if (actor.isDirectorWave === true) continue;
+    if (match?.objectiveState?.coop && actor.isNpc === true && actor.team === 1) continue;
     if (Math.hypot(actor.x - node.x, actor.z - node.z) > node.r) continue;
     if (Math.abs(num(actor.y, 0) - node.y) > 5) continue;
     present[actor.team] = true;
@@ -1087,6 +1116,8 @@ export function cocsSnapshot(match) {
     spotBonus: COCS_SPOT_DAMAGE_BONUS,
     // --- §6A traversal devices/depots (V0b) --------------------------------
     traversal: cocsTraversalSnapshot(state),
+    // --- OPERATIONS (`cocs-coop`) director surface --------------------------
+    ...(state.coop ? cocsCoopSnapshot(match, state) : {}),
   };
 }
 
@@ -1105,7 +1136,10 @@ export function stepCocs(match, dt = RULES.dt) {
   const pending = (state.pendingOrders ??= []).splice(0, state.pendingOrders.length);
   if (typeof match.cocsPolicy === 'function') {
     const produced = match.cocsPolicy(state, {tick: now, time: match.time, dt, random: match.random, actors: match.actors, mode: match.config?.mode});
-    if (Array.isArray(produced)) for (const order of produced) if (order) pending.push(order);
+    // In OPERATIONS the Operations Director is team 1's commander: the duty
+    // Chief only issues team-0 orders, so an order-presence capture can never
+    // hand the Director ground it is not physically holding.
+    if (Array.isArray(produced)) for (const order of produced) if (order && !(state.coop && order.team === 1)) pending.push(order);
   }
   for (const order of pending) if (order && !finite(order.tick)) order.tick = now;
   pending.sort(compareCocsOrders);
@@ -1139,7 +1173,7 @@ export function stepCocs(match, dt = RULES.dt) {
   for (const team of [0, 1]) {
     const neglect = neglectTick(state.neglect?.[team] ?? neglectState(), dt, {humanCommander: false, activeOrder: false, contributed: false});
     state.neglect[team] = neglect;
-    const passive = neglectPassiveFlux(FLUX_PASSIVE_PER_SECOND, neglect);
+    const passive = neglectPassiveFlux(num(state.fluxPassive, FLUX_PASSIVE_PER_SECOND), neglect);
     const rate = passive + income[team];
     state.fluxIncome[team] = rate;
     const before = num(state.flux[team], 0);
@@ -1184,6 +1218,11 @@ export function stepCocs(match, dt = RULES.dt) {
   //     the same fixed tick as every other cocs timer, with no RNG draw.
   stepCocsTraversal(match, state, dt);
 
+  // 4f. OPERATIONS Director (co-op only): PRESSURE budget, pacing machine,
+  //     scripted escalations, wave force spawning and the HQ siege. Non-coop
+  //     `cocs` never enters this branch, so V0a/V0b behaviour is untouched.
+  if (state.coop) stepCoop(match, state, dt);
+
   // 5. Dominance, front and the team-score mirror (HUD / Match.leaders).
   updateDominance(state, dt);
   state.front = frontState(state);
@@ -1191,7 +1230,7 @@ export function stepCocs(match, dt = RULES.dt) {
   match.teamScores[1] = state.scores[1];
 
   // 6. Resolve once.
-  const outcome = cocsOutcome(match);
+  const outcome = state.coop ? coopOutcome(match, state) : cocsOutcome(match);
   if (outcome) {
     state.winner = outcome.winner;
     state.winReason = outcome.reason;

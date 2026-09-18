@@ -85,7 +85,7 @@ test('complete catalog is exactly the compatibility-rule-eligible mode/map pairs
 test('complete catalog includes legacy maps where playable and explains drops', () => {
  assert.deepEqual(ROTATIONS,['curated','complete']);
  const report=exclusionReport({legacy:false});
- assert.deepEqual(report.modes.map(entry=>entry.mode).sort(),['campaign','horde']);
+ assert.deepEqual(report.modes.map(entry=>entry.mode).sort(),['campaign','cocs-coop','horde']);
  for(const entry of [...report.modes,...report.maps,...report.pairs]){
   assert.equal(typeof entry.reason,'string');
   assert.ok(entry.reason.length>0,'a reason is always attached');

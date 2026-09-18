@@ -17,6 +17,12 @@ export const GAME_MODES = [
   // HQ. `score:'cocs'` keeps the objective-first ranking in outcome.mjs; the
   // node/income tuning lives under `objective` and is read by cocs.mjs.
   {id:'cocs',name:'Lattice Strike',description:'Capture linked lattice nodes. You can only take a node next to one you own, and a node only pays while a supply line links it back to your HQ. Hold the lattice, not the frag count.',rules:{team:true,score:'cocs',fragLimit:5,minFragLimit:1,maxFragLimit:7,vehicles:false,maxBots:8,suddenDeathSeconds:15,objective:{kind:'cocs',captureSeconds:5,liveOpening:3,liveMax:5,endgameLive:5,dominanceHold:90,dominanceFast:45}}},
+  // LATTICE STRIKE: OPERATIONS (O1a) — the co-op, Director-driven siege. It
+  // shares the `cocs` objective kind and the lattice/FLUX/REQ/strip systems but
+  // branches on `coop:true`: all humans are team 0, team 1 is the persistent
+  // Director garrison + non-respawning wave force, and the run is one 5-wave
+  // operation (win on Wave 5 clear; lose to dominance, the clock or the HQ siege).
+  {id:'cocs-coop',name:'Lattice Strike: Operations',description:'Hold the lattice against a Director-driven siege. Five waves, one team, no enemy commander. Clear the operation with your HQ intact.',rules:{team:true,score:'cocs',coop:true,fragLimit:0,minFragLimit:0,maxFragLimit:0,vehicles:false,maxBots:16,timeLimit:900,suddenDeathSeconds:0,objective:{kind:'cocs',captureSeconds:5,liveOpening:3,liveMax:5,endgameLive:5,dominanceCount:3,dominanceHold:120,dominanceFast:60}}},
   {id:'payload',name:'Payload',description:'Escort the payload cart down the track to the final point. Checkpoints bank progress; defenders stall it and roll it back. Attackers win on delivery, defenders on the clock.',rules:{team:true,score:'payload',fragLimit:3,minFragLimit:1,maxFragLimit:6,objective:{kind:'payload',captureSeconds:5}}},
   {id:'puma-race',name:'Puma Circuit',description:'Race Pumas around the circuit. Cross every gate in order and finish the lap target first.',rules:{team:false,score:'laps',fragLimit:3,minFragLimit:1,maxFragLimit:10,maxBots:7,vehicles:true}},
   {id:'puma-soccer',name:'Puma Soccer',description:'Team car soccer on the circuit infield. Fling the ball into the enemy goal while defending your own.',rules:{team:true,score:'goals',fragLimit:5,minFragLimit:1,maxFragLimit:15,maxBots:3,vehicles:true}},
@@ -141,6 +147,10 @@ const number=(v,fallback,min,max)=>typeof v==='number'&&Number.isFinite(v)?Math.
 const choice=(v,values,fallback)=>values.includes(v)?v:fallback;
 export const modeRule=mode=>GAME_MODES.find(m=>m.id===mode)?.rules||GAME_MODES[0].rules;
 export const teamMode=modeOrConfig=>Boolean(modeRule(typeof modeOrConfig==='string'?modeOrConfig:modeOrConfig?.mode).team);
+// LATTICE STRIKE family: both the PvPvE `cocs` and the co-op `cocs-coop` share
+// `score:'cocs'`. Engine/UI seams that used to test `mode==='cocs'` use this so
+// adding OPERATIONS never changes the original mode's behaviour.
+export const isCocsMode=modeOrConfig=>modeRule(typeof modeOrConfig==='string'?modeOrConfig:modeOrConfig?.mode).score==='cocs';
 export function normalizeConfig(value={}){
  const c=value&&typeof value==='object'?{...value}:{};
   // A `mutators` list is folded into the canonical flags before sanitizing so
@@ -151,7 +161,7 @@ export function normalizeConfig(value={}){
   if(mode==='puma-race'||mode==='puma-soccer')Object.assign(c,{speed:1,gravity:1,damage:1,fastPowers:false,lifeSteal:false,unlimitedAmmo:false,suddenDeath:false,randomLoadout:false,oneShot:false,instagib:false,mirrorLoadout:false,bounty:false,berserk:false,bigHead:false,noRecoil:false,startingWeapon:0});
     const rules=modeRule(mode),minGoal=rules.minFragLimit??(mode==='ctf'?1:5),maxGoal=rules.maxFragLimit??50;
     const checkpointValue=c.checkpoint===null||c.checkpoint===undefined?null:(Number.isFinite(Number(c.checkpoint))&&Number(c.checkpoint)>=0?Math.round(Number(c.checkpoint)):null);
-    const normalized={mode,botCount:Math.round(number(c.botCount,DEFAULT_CONFIG.botCount,0,rules.maxBots??8)),difficulty:choice(c.difficulty,DIFFICULTIES.map(d=>d.id),DEFAULT_CONFIG.difficulty),fragLimit:Math.round(number(c.fragLimit,rules.fragLimit??15,minGoal,maxGoal)),timeLimit:Math.round(number(c.timeLimit,300,60,900)),respawn:number(c.respawn,2,1,5),speed:choice(c.speed,[.75,1,1.25,1.5],1),gravity:choice(c.gravity,[.4,.7,1],1),damage:choice(c.damage,[.5,1,1.5,2],1),fastPowers:c.fastPowers===true,lifeSteal:c.lifeSteal===true,unlimitedAmmo:c.unlimitedAmmo===true,suddenDeath:c.suddenDeath===true,randomLoadout:c.randomLoadout===true,oneShot:c.oneShot===true,instagib:c.instagib===true,mirrorLoadout:c.mirrorLoadout===true,bounty:c.bounty===true,berserk:c.berserk===true,bigHead:c.bigHead===true,noRecoil:c.noRecoil===true,endless:c.endless===true,startingWeapon:Math.round(number(c.startingWeapon,0,0,Math.max(0,WEAPONS.length-1))),playerName:typeof c.playerName==='string'?c.playerName.replace(/[\u0000-\u001f\u007f]/g,'').trim().slice(0,20):'',mission:choice(c.mission,CAMPAIGN_MISSION_IDS,DEFAULT_MISSION_ID),loadout:normalizeLoadout(c.loadout),checkpoint:checkpointValue};
+    const normalized={mode,botCount:Math.round(number(c.botCount,DEFAULT_CONFIG.botCount,0,rules.maxBots??8)),difficulty:choice(c.difficulty,DIFFICULTIES.map(d=>d.id),DEFAULT_CONFIG.difficulty),fragLimit:Math.round(number(c.fragLimit,rules.fragLimit??15,minGoal,maxGoal)),timeLimit:Math.round(number(c.timeLimit,rules.timeLimit??300,60,900)),respawn:number(c.respawn,2,1,5),speed:choice(c.speed,[.75,1,1.25,1.5],1),gravity:choice(c.gravity,[.4,.7,1],1),damage:choice(c.damage,[.5,1,1.5,2],1),fastPowers:c.fastPowers===true,lifeSteal:c.lifeSteal===true,unlimitedAmmo:c.unlimitedAmmo===true,suddenDeath:c.suddenDeath===true,randomLoadout:c.randomLoadout===true,oneShot:c.oneShot===true,instagib:c.instagib===true,mirrorLoadout:c.mirrorLoadout===true,bounty:c.bounty===true,berserk:c.berserk===true,bigHead:c.bigHead===true,noRecoil:c.noRecoil===true,endless:c.endless===true,startingWeapon:Math.round(number(c.startingWeapon,0,0,Math.max(0,WEAPONS.length-1))),playerName:typeof c.playerName==='string'?c.playerName.replace(/[\u0000-\u001f\u007f]/g,'').trim().slice(0,20):'',mission:choice(c.mission,CAMPAIGN_MISSION_IDS,DEFAULT_MISSION_ID),loadout:normalizeLoadout(c.loadout),checkpoint:checkpointValue};
     return {...normalized,mutators:Object.freeze(activeMutators(normalized))};
 }
 export function normalizeDisplay(value={}){

@@ -34,7 +34,7 @@ const MAP_ID_SET=new Set(MAP_IDS);
 // the labels stay here so the UI can explain what was dropped.
 export const DEMO_CATEGORY_BY_MODE=Object.freeze({
  deathmatch:'infantry',teamdeathmatch:'infantry',instagib:'infantry',rockets:'infantry',arsenal:'infantry',armsrace:'infantry',juggernaut:'infantry','team-elimination':'infantry',
- ctf:'objectives',koth:'objectives',domination:'objectives',assault:'objectives',payload:'objectives',holdout:'objectives',uplink:'objectives','vip-escort':'objectives',cocs:'objectives',
+ ctf:'objectives',koth:'objectives',domination:'objectives',assault:'objectives',payload:'objectives',holdout:'objectives',uplink:'objectives','vip-escort':'objectives',cocs:'objectives','cocs-coop':'objectives',
  'combined-arms':'vehicles','puma-race':'racing','puma-soccer':'soccer',
  horde:'survival',campaign:'campaign',
 });
@@ -139,6 +139,10 @@ export const DEMO_MODE_EXCLUSIONS=Object.freeze({
  campaign:Object.freeze({
   reason:'single-player-scripted',
   detail:'Campaign missions are a scripted, story-driven single-player sequence with mission drivers and checkpoints (game/singleplayer.mjs + game/campaign-data.mjs); a bot-only preview never advances the script.',
+ }),
+ 'cocs-coop':Object.freeze({
+  reason:'co-op-operation',
+  detail:'OPERATIONS is a Director-driven co-op siege: an idle bot preview has no human team to clear waves and would only demonstrate the Director spawner, not the mode.',
  }),
 });
 

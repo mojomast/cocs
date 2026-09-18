@@ -1,6 +1,6 @@
 import {raceDisplay,soccerDisplay} from './race-ui.mjs';
 import {WEAPONS} from './data.mjs';
-import {teamMode} from './config.mjs';
+import {teamMode,isCocsMode} from './config.mjs';
 
 export function vehicleHud(player, vehicles = [], flags = [], spectate = false) {
   if (spectate || !player || !(player.health > 0)) return {vehicle: null, prompt: ''};
@@ -220,7 +220,7 @@ export function scoreAnnouncer(hud, prevScores) {
   const mode = hud?.config?.mode ?? hud?.mode, capture = mode === 'ctf', soccer = mode === 'puma-soccer';
   // LATTICE STRIKE OP income is continuous, so every integer crossing would
   // fire an announcer. The dedicated lattice readout owns the score instead.
-  if (mode === 'cocs') return null;
+  if (isCocsMode(mode)) return null;
   for (const team of [0, 1]) {
     const before = Math.floor(Number(prevScores[team])), after = Math.floor(Number(scores[team]));
     if (!Number.isFinite(before) || !Number.isFinite(after) || after <= before) continue;
@@ -335,7 +335,7 @@ export const isTeamMode = mode => teamMode(typeof mode === 'string' ? mode : (mo
 
 export const modeGoal = mode => {
   const score = mode?.rules?.score;
-  if (mode?.id === 'cocs') return 'LATTICE CONTROL';
+  if (isCocsMode(mode?.id)) return 'LATTICE CONTROL';
   if (mode?.id === 'holdout') return 'QUORUM HOLD';
   if (mode?.id === 'uplink') return 'RELAY STAGES';
   if (score === 'laps') return 'LAPS';
@@ -362,7 +362,7 @@ export const modeTargetText = (mode, target) => {
   if (mode?.id === 'holdout') return 'HOLD A QUORUM';
   if (mode?.id === 'uplink') return 'RUN THE RELAY';
   if (mode?.id === 'vip-escort') return 'ESCORT THE VIP';
-  if (mode?.id === 'cocs') return 'HOLD THE LATTICE';
+  if (isCocsMode(mode?.id)) return 'HOLD THE LATTICE';
   const goal = modeGoal(mode);
   return Number.isFinite(limit) ? `FIRST TO ${limit} ${goal}` : goal;
 };
@@ -389,7 +389,7 @@ export const flagText = hud => {
 };
 
 export const modeColumns = mode => mode === 'ctf' ? [['captures', 'CAP'], ['flagPickups', 'PICK'], ['flagReturns', 'RET'], ['flagDrops', 'DROP']]
-  : mode === 'cocs' ? [['objectiveCaptures', 'CAPTURES'], ['objectiveTime', 'NODE TIME'], ['frags', 'FRAGS']]
+  : isCocsMode(mode) ? [['objectiveCaptures', 'CAPTURES'], ['objectiveTime', 'NODE TIME'], ['frags', 'FRAGS']]
   : mode === 'koth' ? [['objectiveTime', 'HILL TIME'], ['objectiveCaptures', 'CAP'], ['objectiveContests', 'CONTEST']]
     : mode === 'holdout' ? [['objectiveTime', 'ZONE TIME'], ['objectiveCaptures', 'CAP'], ['objectiveContests', 'CONTEST']]
       : mode === 'uplink' ? [['objectiveCaptures', 'RELAY'], ['objectiveContests', 'CONTEST']]
@@ -405,7 +405,7 @@ export const modeColumns = mode => mode === 'ctf' ? [['captures', 'CAP'], ['flag
 
 export const modePrimary = (mode, actor) => {
   const stats = scoreStats(actor);
-  if (mode === 'cocs') return [stats.objectiveCaptures, stats.objectiveTime];
+  if (isCocsMode(mode)) return [stats.objectiveCaptures, stats.objectiveTime];
   if (mode === 'ctf') return [stats.captures, stats.flagPickups + stats.flagReturns + stats.flagDrops];
   if (mode === 'koth' || mode === 'domination' || mode === 'combined-arms') return [stats.objectiveTime, stats.objectiveCaptures];
   if (mode === 'holdout') return [stats.objectiveTime, stats.objectiveCaptures];
@@ -525,8 +525,12 @@ export function cocsResultSummary(hud, player) {
   const iWon = winner !== null && board.team !== null && winner === board.team;
   const why = reason === 'array' ? 'the ARRAY anchor was captured'
     : reason === 'dominance' ? 'the lattice was held to the dominance timer'
-      : reason === 'time' ? 'the clock ran out on objective score'
-        : 'the lattice was decided';
+      : reason === 'operation-complete' ? 'all five waves were cleared'
+        : reason === 'operation-failed' ? 'the operation clock ran out'
+          : reason === 'hq-destroyed' ? 'the HQ fell to the Director siege'
+            : reason === 'hq-lost' ? 'HQ control was lost'
+              : reason === 'time' ? 'the clock ran out on objective score'
+                : 'the lattice was decided';
   const outcome = winner === null ? 'The lattice was a draw' : iWon ? 'Your team took the lattice' : 'The enemy took the lattice';
   const line = `${teamName(0)} ${scoreText(board.scores[0])} – ${scoreText(board.scores[1])} ${teamName(1)} · ${board.owned[0]}–${board.owned[1]} nodes`;
   return `${outcome}: ${why}. ${line}.`;
@@ -545,7 +549,7 @@ export function commandBrief(hud, player, mode) {
     return {title, action, detail: `${teamName(mine)} ${myGoals} \u2013 ${theirGoals} ${teamName(theirs)} \u00b7 GOALS ${myGoals} / ${soccer.goalLimit}`, status: `${soccer.ballInPlay ? 'BALL LIVE' : String(soccer.phase).toUpperCase()} \u00b7 ${soccer.time}`};
   }
   if (id === 'ctf') return {title: carrying ? 'RETURN THE FLAG' : 'BREAK THEIR LINE', action: carrying ? 'Reach your base to capture.' : enemyFlag?.state === 'carried' ? 'Escort the carrier home.' : ownFlag?.state === 'dropped' ? 'Recover your flag.' : 'Take the enemy flag.', detail: `${team} ${carrying ? 'CARRIER' : 'DEFENSE'} · ${flagText(hud)}`, status: `${teamScore(hud, player?.team)} / ${target} CAPTURES`};
-  if (id === 'cocs') {
+  if (isCocsMode(id)) {
     const board = cocsBoard(hud, player), front = board.front;
     return {
       title: board.contestedCount ? 'BREAK THE LATTICE' : board.myNodes > 0 ? 'HOLD THE LATTICE' : 'TAKE THE LATTICE',

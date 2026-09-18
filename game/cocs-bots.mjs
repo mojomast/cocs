@@ -217,7 +217,7 @@ export function cocsComebackTargets(state, actors, team, targets = null) {
 export function cocsTeamPlan(match, state, team) {
   const actors = match?.actors ?? [];
   const roster = actors
-    .filter(actor => actor && actor.health > 0 && actor.team === team)
+    .filter(actor => actor && actor.health > 0 && actor.team === team && actor.isDirectorWave !== true)
     .sort((a, b) => a.id - b.id);
   const targets = cocsAttackTargets(state, team);
   const task = (state.tasks?.[team] && state.tick <= state.tasks[team].until) ? state.tasks[team] : null;
