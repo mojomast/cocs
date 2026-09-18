@@ -1,10 +1,11 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {Match} from './core.mjs';
-import {cocsTemplate,COCS_KIND} from './cocs.mjs';
+import {cocsTemplate,COCS_KIND,updateLiveNodes} from './cocs.mjs';
 import {
-  COCS_SPREAD_FRACTION,cocsAssignment,cocsAttackTargets,cocsBotDestination,
-  cocsDefenceNode,cocsDutyPolicy,cocsTeamPlan,cocsThreat,
+  COCS_COMEBACK_GARRISON, COCS_SPREAD_FRACTION, cocsAssignment, cocsAttackTargets,
+  cocsBotDestination, cocsComebackTargets, cocsDefenceNode, cocsDeficit, cocsDutyPolicy,
+  cocsNodeDeficit, cocsScoreDeficit, cocsTeamPlan, cocsThreat, cocsWeakness,
 } from './cocs-bots.mjs';
 
 // A small authored lattice: both teams can reach the shared `hub` relay from
@@ -187,3 +188,136 @@ test('a seeded cocs match with the duty policy is byte-identical across runs', (
   assert.ok(first.actors.some(actor => actor.bot?.cocsNode), 'bots were assigned to lattice nodes');
   assert.deepEqual(second.snapshot(), first.snapshot());
 });
+
+// ---------------------------------------------------------------------------
+// W8 comeback / rotation pressure. A full five-capturable lattice so a trailing
+// squad has three legal enemy-held targets to re-concentrate across.
+// ---------------------------------------------------------------------------
+const latticeArena = () => ({
+  id: 'cocs-comeback-test',
+  bounds: {minX: -120, maxX: 120, minZ: -120, maxZ: 120},
+  nodes: [
+    {id: 'hq-0', kind: 'hq', x: -108, z: 0, radius: 12, owner: 0},
+    {id: 'front-0', kind: 'front', x: -54, z: 0, radius: 14},
+    {id: 'econ-n', kind: 'economy', x: 0, z: 25, radius: 14},
+    {id: 'relay-0', kind: 'relay', x: 0, z: 0, radius: 14},
+    {id: 'econ-s', kind: 'economy', x: 0, z: -25, radius: 14},
+    {id: 'front-1', kind: 'front', x: 54, z: 0, radius: 14},
+    {id: 'hq-1', kind: 'hq', x: 108, z: 0, radius: 12, owner: 1},
+  ],
+  lattice: {edges: [
+    ['hq-0', 'front-0'], ['hq-1', 'front-1'],
+    ['front-0', 'relay-0'], ['relay-0', 'front-1'],
+    ['front-0', 'econ-n'], ['front-1', 'econ-n'], ['relay-0', 'econ-n'],
+    ['front-0', 'econ-s'], ['front-1', 'econ-s'], ['relay-0', 'econ-s'],
+  ]},
+});
+const latticeState = () => cocsTemplate('cocs', latticeArena(), {});
+const slotsByNode = plan => {
+  const map = new Map();
+  for (const slot of plan.slots) map.set(slot.nodeId, (map.get(slot.nodeId) ?? 0) + 1);
+  return map;
+};
+
+test('deficit helpers fire on a lost node majority and on a score lead, never off-mode', () => {
+  const st = state(); // 3 capturable -> outright majority is 2
+  for (const node of st.nodes) if (node.id === 'hub' || node.id === 'front-1') node.owner = 1;
+  assert.equal(cocsNodeDeficit(st, 0), true, 'team 0 is a node down to the enemy majority');
+  assert.equal(cocsNodeDeficit(st, 1), false, 'the majority holder is not in deficit');
+  assert.equal(cocsDeficit(st, 0), true);
+  st.scores = {0: 100, 1: 10};
+  assert.equal(cocsScoreDeficit(st, 1), true, 'a 10x score gap registers');
+  assert.equal(cocsScoreDeficit(st, 0), false);
+  assert.equal(cocsDeficit(st, 1), true, 'the score signal alone enters the stance');
+  st.nodes.find(node => node.id === 'hub').owner = 0;
+  assert.equal(cocsNodeDeficit(st, 0), false, 'node parity is not a deficit');
+  const foreign = {...st, kind: 'domination'};
+  assert.equal(cocsNodeDeficit(foreign, 0), false);
+  assert.equal(cocsScoreDeficit(foreign, 0), false);
+  assert.equal(cocsDeficit(foreign, 0), false);
+  assert.deepEqual(cocsComebackTargets(foreign, [], 0), [], 'no comeback targets leak off-mode');
+});
+
+test('the comeback concentrates on the weakest frontier and splits across two nodes', () => {
+  const st = latticeState();
+  st.nodes.find(node => node.id === 'front-0').owner = 0;
+  for (const id of ['relay-0', 'econ-n', 'econ-s']) st.nodes.find(node => node.id === id).owner = 1;
+  updateLiveNodes(st);
+  const roster = [
+    ...bots(0, 4, {x: -54, z: 0}),
+    {id: 1, team: 1, health: 100, x: 0, z: 25},   // econ-n defender
+    {id: 3, team: 1, health: 100, x: 0, z: 0},    // relay defenders
+    {id: 5, team: 1, health: 100, x: 5, z: 0},
+  ];
+  const plan = cocsTeamPlan(matchFor(roster, st), st, 0);
+  assert.equal(plan.deficit, true);
+  assert.equal(plan.nodeDeficit, true, 'the enemy holds an outright majority (3 of 5)');
+  const node = id => st.nodes.find(entry => entry.id === id);
+  assert.ok(cocsWeakness(roster, node('econ-s'), 0) < cocsWeakness(roster, node('relay-0'), 0), 'the undefended siphon is the weakest frontier');
+  assert.deepEqual(plan.comeback.map(entry => entry.node.id), ['econ-s', 'econ-n', 'relay-0'], 'undefended siphon, then the singly-held siphon, then the relay');
+  assert.ok(plan.comeback.map(entry => entry.node.id).indexOf('econ-s') < plan.comeback.map(entry => entry.node.id).indexOf('relay-0'));
+  assert.equal(plan.attackCap, Math.ceil(4 * 0.5), 'two nodes carry the attack, never one all-in stack');
+  const byNode = slotsByNode(plan);
+  assert.equal(byNode.get('econ-s'), 2, 'the weakest node is the primary');
+  assert.equal(byNode.get('econ-n'), 1, 'a second front stays alive');
+  assert.equal(byNode.get('relay-0') ?? 0, 0, 'the strongest target is not fed the pack');
+  assert.equal(byNode.get('front-0'), 1, 'the last held node keeps a token screen');
+  assert.equal(plan.holds[0].count, COCS_COMEBACK_GARRISON, 'the garrison is recalled to a token');
+  for (const [nodeId, count] of byNode) if (nodeId !== 'front-0') assert.ok(count <= plan.attackCap, `${nodeId} respects the comeback attack cap`);
+});
+
+test('the comeback target order is deterministic and independent of actor array order', () => {
+  const st = latticeState();
+  st.nodes.find(node => node.id === 'front-0').owner = 0;
+  for (const id of ['relay-0', 'econ-n', 'econ-s']) st.nodes.find(node => node.id === id).owner = 1;
+  updateLiveNodes(st);
+  const roster = [
+    ...bots(0, 4, {x: -54, z: 0}),
+    {id: 1, team: 1, health: 100, x: 0, z: 25},
+    {id: 3, team: 1, health: 100, x: 0, z: 0},
+    {id: 5, team: 1, health: 100, x: 5, z: 0},
+  ];
+  const first = cocsTeamPlan(matchFor(roster, st), st, 0);
+  const second = cocsTeamPlan(matchFor([...roster].reverse(), st), st, 0);
+  assert.deepEqual(second.comeback.map(entry => entry.node.id), first.comeback.map(entry => entry.node.id));
+  const slots = plan => plan.slots.map(slot => `${slot.nodeId}:${slot.kind}`).sort();
+  assert.deepEqual(slots(second), slots(first), 'the slot multiset is identical under a shuffled roster');
+  // Pure: planning never rewrites the objective state.
+  const before = JSON.stringify(st.nodes.map(node => [node.id, node.owner, node.progress]));
+  cocsTeamPlan(matchFor(roster, st), st, 0);
+  assert.equal(JSON.stringify(st.nodes.map(node => [node.id, node.owner, node.progress])), before);
+});
+
+test('a score-only deficit re-concentrates the attack but keeps the garrison', () => {
+  const st = latticeState();
+  for (const id of ['front-0', 'econ-s']) st.nodes.find(node => node.id === id).owner = 0;
+  for (const id of ['relay-0', 'econ-n']) st.nodes.find(node => node.id === id).owner = 1;
+  st.scores = {0: 10, 1: 100};
+  updateLiveNodes(st);
+  const roster = [
+    ...bots(0, 4, {x: -54, z: 0}),
+    {id: 1, team: 1, health: 100, x: -52, z: 0},
+    {id: 3, team: 1, health: 100, x: -56, z: 2},
+    {id: 5, team: 1, health: 100, x: -56, z: -2},
+  ];
+  const plan = cocsTeamPlan(matchFor(roster, st), st, 0);
+  assert.equal(plan.deficit, true);
+  assert.equal(plan.nodeDeficit, false, 'node parity means no recall');
+  assert.equal(plan.attackCap, Math.ceil(4 * 0.5), 'the attack still re-concentrates');
+  assert.equal(plan.holds[0].count, 3, 'the pushed front is defended at full strength');
+});
+
+test('a leading team keeps the ordinary value order and spread cap', () => {
+  const st = latticeState();
+  for (const id of ['front-0', 'relay-0', 'econ-s']) st.nodes.find(node => node.id === id).owner = 0;
+  for (const id of ['front-1', 'econ-n']) st.nodes.find(node => node.id === id).owner = 1;
+  updateLiveNodes(st);
+  const roster = bots(0, 4, {x: -54, z: 0});
+  const plan = cocsTeamPlan(matchFor(roster, st), st, 0);
+  assert.equal(plan.deficit, false, 'a node majority is not a deficit');
+  assert.deepEqual(plan.comeback, []);
+  assert.equal(plan.attackCap, plan.cap, 'the ordinary spread cap is retained');
+  const firstAttack = plan.duties.find(duty => duty.kind === 'attack');
+  assert.equal(firstAttack.nodeId, cocsAttackTargets(st, 0)[0].node.id, 'leading squads still push the highest-value node');
+});
+
