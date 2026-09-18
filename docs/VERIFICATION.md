@@ -1,5 +1,112 @@
 # COCS verification report
 
+## Release 7.2 - ECHO (the Moth audio assets wired into the game)
+
+**Scope.** The Moth-audio wiring on `feat/moth-audio-wiring` (tip `4b9862b`),
+merged **fast-forward** into the production line
+(`improvement/phase2-audio-visual`, previously `86822be` = v7.1). Presentation
+and audio only: `game/core.mjs`, `game/protocol.mjs` and `server/**` are
+untouched, so this is a **web-only** deploy and connected multiplayer clients
+are not disconnected. The feature work arrived with the fast-forward merge; the
+only production-side code change in the release commit is the version footer
+and digest.
+
+- **Lazy mount (`4b9862b`, `app/page.tsx`):** `SynthAudio` gains
+  `setMothAudioFactory`/`setMothEnabled` and builds the layer in `_ensureBuses`
+  once the real context and its `ambience`/`effects` buses exist. The page
+  registers a factory that returns `null` without a usable `AudioContext`,
+  `decodeAudioData` or `fetch`, so nothing fetches or decodes before the first
+  user gesture and the layer stays inert in Node. `dispose()` releases and
+  disables it.
+- **`bed-ritual` ambience:** the 10.68 s baked clip plays on the ambience bus
+  at layer gain `0.4` - chosen against the raw clip's `-12.46 dBFS` peak - and
+  is routed to `menu`/`explore`/`results` while `combat` is deliberately left
+  to the score and SFX.
+- **Outcome motifs:** `SynthAudio.setOutcome` selects `moth-victory`/
+  `moth-defeat` from `moth-assets` and hands it to `MusicEngine.setMotif`; the
+  results arrangement opts in with `leadMotif` and keeps `COCS_MOTIF` as the
+  static fallback. The real path is the victory/defeat sting, which routes
+  through `setOutcome`.
+- **Echo map:** `SynthAudio.setEchoMap(name)` re-tunes the shared effects
+  delay/feedback/wet send from the baked `spaces.arena` map (`count: 153`,
+  `taps: 128`, `depth: 8`); `mothEchoFor(arenaId)` defaults every arena to it
+  and `view` applies it beside `setSpace` in `setAudio` and `_buildArena`. The
+  map is remembered before the buses exist and applied in `_ensureBuses`.
+- **Six spaces reachable:** `mothSpaceFor` routes `neon-vertical`, `aether` and
+  `ironfall-megastructure` to `void`, so open-air, tunnel, hall, cathedral,
+  cavern and void are each selected by some arena.
+- **Silent-safe / reduced motion:** `MothAudio` gains
+  `setEnabled`/`setReducedMotion`, which stop every live bed and tear down the
+  owned space graph; reduced motion always wins and the host toggle forwards
+  through `SynthAudio.setMothEnabled`. `audioStatus()` adds `echo` beside
+  `space`/`moth`/`samples`.
+- **Gate (full merged-tree run in `/home/mojo/projects/tokenarena-w15`):**
+  `npm run test:game` **2018 tests: 2011 pass, 0 fail, 7 skipped** across 182
+  `game/*.test.mjs` files (553 s); `npm run test:server` **159/159**;
+  `node --test tests/*.test.mjs` **7/7**; `npx tsc --noEmit` clean;
+  `npm run lint` 0 errors (488 warnings); bounded `vinext build` green. The 7
+  skips are the same opt-in long simulations plus the browser-only
+  `OfflineAudioContext` render. New coverage lands in
+  `game/moth-audio-wiring.test.mjs` (deferred factory mount/dispose, scene
+  routing, outcome motif selection, echo-map selection, reduced motion and the
+  no-context path) and extends `game/moth-wiring.test.mjs` with the per-arena
+  echo map.
+- **Production targeted gate:** `game/changelog.test.mjs` **3/3**,
+  `npm run test:server` **159/159**, `npx tsc --noEmit` clean and
+  `npm run lint` 0 errors (488 warnings) in `/home/mojo/projects/tokenarena`.
+- **Deploy:** `npm run deploy` (**web-only**) rebuilt the working tree (with the
+  v7.2 bump uncommitted) and restarted `token-arena-web.service` only -
+  `ActiveEnterTimestamp` `Fri 2026-09-18 15:49:10 UTC`.
+  `token-arena-server.service` stayed active on its v7.0 start
+  (`Thu 2026-09-17 23:50:18 UTC`) because no `server/`, `core.mjs` or
+  `protocol.mjs` file changed, so connected multiplayer clients were not
+  disconnected. As in v7.0/v7.1 the first HTML fetch during the restart returned
+  a transient 502 and `scripts/deploy.sh` retried to success.
+  `npm run verify:deployment` verified the served HTML (footer `v7.2 · ECHO`)
+  and its 12 linked CSS/JS assets, and `GET /api/version` returns
+  `{"version":"v7.2"}`.
+- **Live deploy smoke (production `arena.ussyco.de`, after the deploy):** a
+  bounded headless Chromium/SwiftShader run (`/tmp/opencode/live-smoke-v72.cjs`,
+  adapted from the v7.1 script, exit 0, JSON in
+  `/tmp/opencode/release-v72-smoke.json`) - footer `v7.2 · ECHO`;
+  `GET /api/version` 200 `{"version":"v7.2"}`; the attract reel rendered a
+  planned shot (subject `ChatGPT`, reason `zone alpha capturing`); the
+  selection screen showed the v7.0 wing chip (`TACTICIAN`); ENTER ARENA started
+  a 3-actor bot match (`mode: playing`, match clock advancing 0.433 -> 1.133 s).
+  **Asset checks:** `GET /music/manifest.json` 200 `application/json` with
+  **172 samples**, `GET /music/samples/bells-glock-g4-p.ogg` 200 (36,211 bytes,
+  `OggS`), `GET /moth/files/bed-ritual/clip.wav` 200 (471,032 bytes, `RIFF`)
+  and `GET /moth/files/ir-void/result.wav` 200 (441,044 bytes, `RIFF`). Zero
+  console errors and zero page errors across the whole run. The live
+  `window.tokenArenaAudio()` after the first gesture reported `echo: "arena"`,
+  `space: "hall"` and `moth.active: true` (scene `game`, bank active), with
+  `samples.loaded` 172/172 - the deferred factory mounted and the echo map was
+  applied in production. Screenshots: `/tmp/opencode/release-v72-smoke.png`
+  (title + footer), `/tmp/opencode/release-v72-smoke-selection.png` and
+  `/tmp/opencode/release-v72-smoke-match.png`. The `fps` figure is SwiftShader,
+  not hardware-GPU evidence.
+- **Rollback point:** `86822be` (v7.1 · CHORUS), the last production commit
+  before the fast-forward merge; `scripts/deploy.sh` additionally restores the
+  previous `dist/` and restarts the web service automatically if a deploy step
+  fails.
+- **Limitations (honest scope):** the live smoke is a SwiftShader/CPU render,
+  not hardware-GPU or frame-rate evidence. Browser audio was not auditioned in
+  CI: this Node environment has no `OfflineAudioContext`, so loudness, stereo
+  image and the transition feel remain a manual listening pass (see the
+  checklist below). Decode on real hardware is best-effort and falls back
+  cleanly; the Moth layer is inert without an `AudioContext` by design; and the
+  published assets are committed offline bakes (no runtime API, no key, no
+  network fetch).
+- **Human listening check:** with sound on and reduced motion off, (1) the
+  menu, explore and results screens sit on a low ritual ambience bed that stops
+  in combat; (2) winning and losing the results lead now resolve on different
+  baked motifs (a Picardy-style win, a darker defeat) instead of the same COCS
+  line, with the built-in line as the fallback if the motif is missing; (3)
+  gunfire and explosions in an arena carry a slightly longer, tap-driven tail;
+  and (4) the neon/void theatres audition the long `void` reverb rather than
+  the default open-air tail. A user gesture is still required before any of
+  this starts.
+
 ## Release 7.1 - CHORUS (the soundtrack overhaul, Moth pass 3 and the Moth audio pipeline)
 
 **Scope.** The music overhaul, Moth pass 3 and the Moth audio pipeline on

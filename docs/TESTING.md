@@ -131,18 +131,20 @@ duplicate "every combat mode completes" loop was removed outright from
 
 ## Current counts
 
-Last verified on release v7.1 (2026-09-18), on the `feat/v71-chorus`
-worktree (the soundtrack overhaul, Moth pass 3 and the Moth audio pipeline
-merged fast-forward into production at `185ab8f`):
+Last verified on release v7.2 (2026-09-18), on the `feat/moth-audio-wiring`
+worktree (the Moth audio wiring merged fast-forward into production at
+`4b9862b`):
 
-- `npm run test:game` — **2010 tests: 2003 pass, 0 fail, 7 skipped**, across
-  181 `game/*.test.mjs` files (1135 s). The audio pass adds focused suites for
-  the sampled bank (`sampler`), arrangement/leitmotif/form (`music-arrangement`),
-  the Moth audio bank and layer (`moth-audio`), the audio bakers
-  (`moth-bake-audio`) and the pass-3 generators (`moth-bake-generators`), and
-  extends the existing `music`/`feedback`/`moth-assets`/`moth-wiring` suites;
-  the all-arena `route-sweep` and the balance sweep remain opt-in. The
-  production checkout re-ran `changelog` at **3/3**.
+- `npm run test:game` — **2018 tests: 2011 pass, 0 fail, 7 skipped**, across
+  182 `game/*.test.mjs` files (553 s). The wiring pass adds
+  `moth-audio-wiring` (deferred factory mount/dispose, scene routing, outcome
+  motif selection, echo-map selection, reduced motion and the no-context path)
+  and extends `moth-wiring` with the per-arena echo map, on top of the v7.1
+  audio suites (sampled bank `sampler`, arrangement/leitmotif/form
+  `music-arrangement`, the Moth bank and layer `moth-audio`, the audio bakers
+  `moth-bake-audio` and the pass-3 generators `moth-bake-generators`); the
+  all-arena `route-sweep` and the balance sweep remain opt-in. The production
+  checkout re-ran `changelog` at **3/3**.
 - The 7 skipped tests are long simulations (an exhaustive 8-bot all-modes sweep,
   an 18k-step 4-bot match, a 10k-step 8-bot race, a 4×1800-step platform-bot
   sweep, both opt-in `route-sweep` cases over all 41 arenas × 9 verbs and all 39
@@ -155,9 +157,9 @@ merged fast-forward into production at `185ab8f`):
 - `npm run test:server` — **159 pass, 0 fail**, across 16 `server/*.test.mjs`
   files.
 - `node --test tests/*.test.mjs` — **7 pass, 0 fail** (SSR, UI contract,
-  deployment), re-ran against the v7.1 production build; the v7.1 deploy
+  deployment), re-ran against the v7.2 production build; the v7.2 deploy
   re-verifies the served assets.
-- `npx tsc --noEmit` — clean; `npm run lint` — 0 errors (487 warnings only);
+- `npx tsc --noEmit` — clean; `npm run lint` — 0 errors (488 warnings only);
   bounded `vinext build` — green.
 - `game/archive/*.test.mjs` — 2 files, run on demand, not counted above.
   `game/archive/balance-sweep.test.mjs` is the opt-in balance sweep hook

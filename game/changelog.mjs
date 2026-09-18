@@ -1,12 +1,22 @@
 // In-game patch notes. The title-screen footer is the running version; this
 // module is the human-readable release digest the Changelog screen renders. The
 // full historical record lives in docs/CHANGELOG.md and is linked from the UI.
-export const RELEASE_VERSION = 'v7.1';
-export const RELEASE_CODENAME = 'CHORUS';
+export const RELEASE_VERSION = 'v7.2';
+export const RELEASE_CODENAME = 'ECHO';
 export const REPO_URL = 'https://github.com/mojomast/tokenarena';
 export const FULL_CHANGELOG_URL = `${REPO_URL}/blob/main/docs/CHANGELOG.md`;
 
 export const CHANGELOG = [
+  {version:'v7.2',codename:'ECHO',date:'2026-09-18',tag:'The Moth audio assets wired into the game: a ritual ambience bed, baked outcome motifs, a per-arena echo map and the void space',highlights:[
+    '`MothAudio` is mounted lazily instead of only existing in the library. `app/page.tsx` registers a deferred `SynthAudio.setMothAudioFactory` that builds `MothAudioBank` + `MothAudio` once a real `AudioContext` and the `ambience`/`effects` buses exist (the first user gesture), so nothing fetches or decodes before then and the layer stays inert when no context can be created.',
+    'The baked `bed-ritual` clip plays as a low menu/explore/results ambience on the ambience bus at layer gain 0.4 - chosen against the raw clip\'s -12 dBFS peak - while combat deliberately leaves the space to the score and SFX. Scene routing keeps the bed for `menu`/`explore` and nulls it for `combat`.',
+    'Victory and defeat now voice the baked `moth-victory`/`moth-defeat` motifs through `MusicEngine.setMotif`. The results arrangement opts into an external take with `leadMotif`, so it prefers the loaded outcome motif and falls back to the built-in COCS line when nothing is loaded; `SynthAudio.setOutcome` selects the take and the victory/defeat sting route reaches it.',
+    'The 153-tap baked `arena` echo map re-tunes the shared effects delay/feedback send that gunfire, explosions and thunder already route into (`SynthAudio.setEchoMap`, applied in `_ensureBuses` and beside `setSpace` on `setAudio` and every arena build). Its depth drives the feedback and the tap levels drive wetness, so the tail gains depth without rebuilding the node graph; `audioStatus().echo` reports the selection.',
+    'The neon/void theatres (`neon-vertical`, `aether` and `ironfall-megastructure`) now map to the baked `void` IR, so all six baked reverb spaces - open-air, tunnel, hall, cathedral, cavern and void - are reachable through `mothSpaceFor`.',
+    'The layer is silent-safe: it starts nothing without an `AudioContext` or before a clip decodes, and it is fully disabled under reduced motion. The settings reduced-motion toggle forwards through `SynthAudio.setMothEnabled`; `MothAudio.setEnabled`/`setReducedMotion` stop every live bed and tear down the owned space graph, and re-enabling only restores playback when the context is usable and reduced motion is clear.',
+    '`audioStatus()` now reports `space` (the active IR), `echo` (the echo map), `moth` (the attached layer status) and `samples`, so the live mix can be inspected without a debugger.',
+    'Scope: this is a presentation and audio wiring release. No `core.mjs`, `game/protocol.mjs` or `server/` file changed, so the deploy is web-only and connected multiplayer clients are not disconnected.',
+  ]},
   {version:'v7.1',codename:'CHORUS',date:'2026-09-18',tag:'A composed soundtrack on a real CC0 sampled orchestra, Moth pass 3, and the Moth audio pipeline',highlights:[
     'The soundtrack is composed instead of looped. `game/music.mjs` gains a per-bar chord-quality table and functional 8-bar progressions in D natural minor for menu, explore, combat and results (i-VI-III-VII, i-VI-iv-v, the borrowed major V and a Picardy I), so pads, brass and choir voice a real triad instead of a static root.',
     'A recurring COCS leitmotif is developed per scene: an augmented menu statement, a diatonic +2 sequence in bars 5-8, an inversion in combat, a staccato diminution as the low-string ostinato, a Picardy-major resolution at the results, and a bell fragment `[1,2,0,0]` at every eight-bar turn. A shared 32-bar form (intro/build/climax/transition/outro) adds fills at bars 4/8/16/24/28/32 and a four-bar bpm ramp.',

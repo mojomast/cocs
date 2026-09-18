@@ -435,6 +435,27 @@ assets. Full procedure and verification: [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md
 Recent releases. The full history lives in
 [docs/CHANGELOG.md](docs/CHANGELOG.md).
 
+### v7.2 · ECHO — 2026-09-18
+- The Moth audio assets are wired into the game. `app/page.tsx` registers a
+  deferred `SynthAudio.setMothAudioFactory`, so `MothAudioBank` + `MothAudio`
+  are built lazily on the first user gesture, once a real `AudioContext` and
+  the `ambience`/`effects` buses exist. Nothing fetches or decodes before then,
+  and the layer is inert with no context or under reduced motion (the settings
+  toggle forwards through `SynthAudio.setMothEnabled`).
+- The baked `bed-ritual` clip is the low menu/explore/results ambience on the
+  ambience bus at layer gain `0.4` (the raw clip peaked at `-12 dBFS`), while
+  combat leaves the space to the score and SFX. The baked
+  `moth-victory`/`moth-defeat` motifs replace the built-in results lead through
+  `MusicEngine.setMotif`; the results arrangement opts in with `leadMotif` and
+  falls back to the COCS line when no motif is loaded.
+- The 153-tap baked `arena` echo map retunes the shared gunfire/explosion
+  effects delay tail via `SynthAudio.setEchoMap`, applied per arena by
+  `mothEchoFor`, and the neon/void theatres now use the `void` IR, so all six
+  baked reverb spaces are reachable. `audioStatus()` reports `space`, `echo`,
+  `moth` and `samples`.
+- Scope: `core.mjs`, `game/protocol.mjs` and `server/` are untouched, so this
+  is a web-only deploy and multiplayer clients are not disconnected.
+
 ### v7.1 · CHORUS — 2026-09-18
 - The soundtrack is composed instead of looped. `game/music.mjs` gains
   functional eight-bar progressions in D natural minor with real triads and a

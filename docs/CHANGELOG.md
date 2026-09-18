@@ -16,6 +16,65 @@ record in [VERIFICATION.md](VERIFICATION.md).
 
 ---
 
+## v7.2 · ECHO — 2026-09-18
+
+The Moth audio assets are wired into the game. v7.1 shipped `MothAudioBank` and
+`MothAudio` plus the baked `bed-ritual` bed, `arena` echo map and
+`moth-victory`/`moth-defeat` motifs, but the layer was never instantiated; this
+release mounts it and uses every baked asset. Presentation and audio only: no
+`core.mjs`, `game/protocol.mjs` or `server/` change, so the deploy is web-only.
+
+### Wiring
+
+- **Lazy mount on the first gesture.** `app/page.tsx` registers a deferred
+  `SynthAudio.setMothAudioFactory` that builds `MothAudioBank` + `MothAudio`
+  against the real `AudioContext` and the `ambience`/`effects` buses once they
+  exist. Nothing fetches or decodes before the first user gesture, and the
+  factory returns `null` when no usable context, `decodeAudioData` or `fetch`
+  is available, so the layer stays inert on constrained hosts and in Node.
+  Disposal releases the layer and switches it off.
+- **`bed-ritual` ambience.** The 10.68 s baked clip plays as a low
+  menu/explore/results bed on the ambience bus at layer gain `0.4`, chosen
+  against the raw clip's `-12 dBFS` peak so the bed sits under the score.
+  Scene routing (`menu`/`explore` -> `bed-ritual`, `combat` -> none) keeps
+  combat to the score and SFX; the results screen keeps the low ambience.
+- **Baked outcome motifs.** `SynthAudio.setOutcome` hands the
+  `moth-victory`/`moth-defeat` motif to the soundtrack lead via
+  `MusicEngine.setMotif`. The results arrangement opts in with `leadMotif`, so
+  it voices the loaded take and falls back to the built-in COCS line when no
+  motif is loaded. The real path is the victory/defeat sting, which routes
+  through `setOutcome`.
+- **`arena` echo map.** `SynthAudio.setEchoMap(name)` re-tunes the shared
+  effects delay/feedback/wet send that gunfire, explosions and thunder already
+  route into, from the 153-tap baked `spaces.arena` map (its `depth` drives
+  feedback, its tap levels drive wetness). `mothEchoFor(arenaId)` defaults
+  every arena to it and `view` applies it beside `setSpace` on `setAudio` and
+  every arena build. The map is remembered before the buses exist and applied
+  in `_ensureBuses`, so offline use is safe.
+- **All six reverb spaces reachable.** `mothSpaceFor` now routes the
+  neon/void theatres (`neon-vertical`, `aether`, `ironfall-megastructure`) to
+  the baked `void` IR, alongside `open-air` (default), `tunnel`, `hall`,
+  `cathedral` and `cavern`.
+- **Silent-safe and reduced-motion aware.** `MothAudio` starts nothing without
+  a context or before decode. Under reduced motion it is constructed disabled
+  and the host toggle forwards through `SynthAudio.setMothEnabled`;
+  `setEnabled`/`setReducedMotion` stop every live bed and tear down the owned
+  space graph, and re-enabling only restores playback when the context is
+  usable and the preference is clear.
+- **Honest status.** `audioStatus()` gains `echo` beside `space`, `moth` and
+  `samples`, so the active IR, echo map, layer status and sampled-bank status
+  are all inspectable.
+
+### Scope
+
+- `core.mjs`, `game/protocol.mjs` and `server/` are untouched, so this is a
+  web-only deploy and connected multiplayer clients are not disconnected. New
+  coverage lands in `game/moth-audio-wiring.test.mjs` and extends the existing
+  `moth-wiring`/`moth-audio` suites; `docs/MOTH.md` and `docs/SYSTEMS.md`
+  document the wiring.
+
+---
+
 ## v7.1 · CHORUS — 2026-09-18
 
 A composed soundtrack on a real CC0 sampled orchestra, Moth pass 3 effects and
