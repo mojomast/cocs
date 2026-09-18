@@ -21,6 +21,13 @@ producing this document. The only paid-tier call made was the free `catalog` com
 > as `enabled: false`; the 8-credit proof batch runs them once. See `docs/MOTH.md`
 > for the shipped API and options. The remaining §4.5 asset-id chaining and the
 > §4.2 `audio-stitch` baker are still deferred.
+>
+> **v7.1 consolidation.** The proposed `ir-openair` job below was not kept: its
+> `result.wav` is byte-identical to pass 3's `ir-open-air`, so the merged
+> manifest ships a single `open-air` record (`ir-open-air`) and the `ir-openair`
+> job/files were deleted. Do not re-add `ir-openair`; see the "v7.1 space
+> consolidation" note in [`../MOTH.md`](../MOTH.md). The 3.5 s `ir-tunnel`
+> described here is the surviving tunnel response.
 
 **Method / sources**
 

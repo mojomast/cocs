@@ -162,10 +162,20 @@ The baked assets are used, not just showcased:
 - **Motifs** — the baked `moth-oracle` motif drives the Halo soundtrack's combat
   lead via `MusicEngine.setMotif`.
 - **Reverb IR** — `SynthAudio.setSpace(name)` swaps between the baked
-  `open-air`, `tunnel`, `hall`, `cathedral` and `cavern` responses.
+  `open-air`, `tunnel`, `hall`, `cathedral`, `cavern` and `void` responses.
   `mothSpaceFor(arenaId)` picks one per map (interiors/tunnels/caverns override
   the open-air default); `view` applies it on `setAudio` and on every arena
   build, and re-selecting the active space is a no-op.
+
+  > **v7.1 space consolidation.** Pass 3 and the audio pipeline each baked an
+  > open-air and a tunnel response under different job ids. The v7.1 merge keeps
+  > exactly one record per real space:
+  > `cavern`, `open-air`, `tunnel`, `hall`, `cathedral`, `void`. The audio
+  > branch's `ir-openair` job and files were **deleted** — they were a
+  > byte-identical duplicate of pass 3's `ir-open-air` (`result.wav` sha
+  > `8ee9bccb…`) — so do not re-add `ir-openair`. The surviving `ir-tunnel` is
+  > the audio branch's 3.5 s corridor response; pass 3's 2.2 s / 40 ms-tap take
+  > was dropped. `hall` and `cathedral` come from pass 3, `void` from audio.
 
 ## Runtime API (`game/moth-assets.mjs`)
 
