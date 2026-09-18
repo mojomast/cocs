@@ -126,8 +126,16 @@ const MOTH_SPACE_MAPS=Object.freeze({
  'moth-backrooms':'cavern',
  catacombs:'tunnel',substation:'tunnel',slagworks:'tunnel',forge:'tunnel',
  atrium:'cathedral',colosseum:'hall','derelict-station':'hall',fortress:'hall',throne:'hall',gauntlet:'hall',
+ // The neon/void theatres share the long `void` response, so all six baked
+ // spaces (open-air/tunnel/hall/cathedral/cavern/void) are reachable.
+ 'neon-vertical':'void',aether:'void','ironfall-megastructure':'void',
 });
 export function mothSpaceFor(arenaId){return MOTH_SPACE_MAPS[String(arenaId)]||'open-air';}
+// Baked Moth echo/tap map per map. Every arena reads the single baked `arena`
+// map so the shared gunfire/explosion send keeps its depth; the table exists so
+// a future per-map take can override the default without touching callers.
+const MOTH_ECHO_MAPS=Object.freeze({ arena:'arena' });
+export function mothEchoFor(arenaId){return MOTH_ECHO_MAPS[String(arenaId)]||'arena';}
 const terrainTextureKind=key=>({grass:'grass',dirt:'sand',rock:'rock',cliff:'rock',concrete:'weathered_concrete',metal:'industrial_mesh',ice:'ice',sand:'sand',snow:'ice',ash:'weathered_concrete',stone:'rough_stucco',lava:'corrugated_metal'}[key]||'rock');
 // Collision proxies that next-gen maps render as smooth geometry instead of a box.
 const NEXTGEN_PROXY=new Set(['cave','tunnel','rock','tree','crate','column']);
@@ -1052,7 +1060,7 @@ export class ArenaView{
      }
     }
     buildArena(arena=MAPS[0]){return withAssets(this.arenaAssets??=new ModelAssets(),()=>this._buildArena(arena));}
-    _buildArena(arena=MAPS[0]){this._disposeMothSprites();if(this.worldGroup){this.scene.remove(this.worldGroup);this.disposeObject(this.worldGroup);for(const resource of this.renderResources||[])resource.dispose();this.renderResources?.clear();this.flagAssets=null;}this.sky=null;this.mountains=null;this.objectiveModels=new Map();this._mothRift=null;this._mothRiftSheet=null;this.mapId=arena.id;this.viewAudio?.setSpace?.(mothSpaceFor(arena.id));const world=new T.Group();this.worldGroup=world;this.scene.add(world);this.scene.background=new T.Color(arena.background);this.scene.fog=new T.FogExp2(arena.background,.018);const bounds=arenaBounds(arena),legacy=!arena.bounds,minX=bounds.minX,maxX=bounds.maxX,minZ=bounds.minZ,maxZ=bounds.maxZ,width=maxX-minX,depth=maxZ-minZ;
+    _buildArena(arena=MAPS[0]){this._disposeMothSprites();if(this.worldGroup){this.scene.remove(this.worldGroup);this.disposeObject(this.worldGroup);for(const resource of this.renderResources||[])resource.dispose();this.renderResources?.clear();this.flagAssets=null;}this.sky=null;this.mountains=null;this.objectiveModels=new Map();this._mothRift=null;this._mothRiftSheet=null;this.mapId=arena.id;this.viewAudio?.setSpace?.(mothSpaceFor(arena.id));this.viewAudio?.setEchoMap?.(mothEchoFor(arena.id));const world=new T.Group();this.worldGroup=world;this.scene.add(world);this.scene.background=new T.Color(arena.background);this.scene.fog=new T.FogExp2(arena.background,.018);const bounds=arenaBounds(arena),legacy=!arena.bounds,minX=bounds.minX,maxX=bounds.maxX,minZ=bounds.minZ,maxZ=bounds.maxZ,width=maxX-minX,depth=maxZ-minZ;
     const look=arenaLooks[arena.id]||arenaLooks.exchange,[floorColor,wallColor,trimColor,skyColor,groundColor,fogDensity,metal]=look;
     this.scene.fog.density=fogDensity;world.userData.look=arena.id;
     for(const light of this.scene.children){if(light.userData?.rimLight)continue;if(light.isHemisphereLight){light.color.set(skyColor);light.groundColor.set(groundColor);light.intensity=arena.terrain?2.5:1.8;}if(light.isDirectionalLight){light.color.set(skyColor);light.intensity=arena.terrain?3.1:2.4;light.position.set(arena.id==='aether'?-18:18,24,arena.id==='foundry'?-12:10);}}
@@ -1789,7 +1797,7 @@ export class ArenaView{
     this._raceCam={mode,segment,x,y,z,lookX,lookY,lookZ};
     return true;
    }
-   setAudio(audio){this.viewAudio=audio||null;if(audio&&this._modeTheme)audio.setModeTheme?.(this._modeTheme);audio?.setSpace?.(mothSpaceFor(this.mapId));return this.viewAudio;}
+   setAudio(audio){this.viewAudio=audio||null;if(audio&&this._modeTheme)audio.setModeTheme?.(this._modeTheme);audio?.setSpace?.(mothSpaceFor(this.mapId));audio?.setEchoMap?.(mothEchoFor(this.mapId));return this.viewAudio;}
    // Victory/defeat sting for the end-of-match screen. The audio object owns the
    // voice cap, mute handling and disposal; the view only forwards the outcome
    // and the active mode theme. Returns the sting result (or null when absent).

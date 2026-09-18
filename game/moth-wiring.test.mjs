@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import * as T from 'three';
-import {ArenaView, mothAtmosphereFor, mothSpaceFor} from './view.mjs';
+import {ArenaView, mothAtmosphereFor, mothSpaceFor, mothEchoFor} from './view.mjs';
 import {MAPS} from './maps.mjs';
 import {DEFAULT_DISPLAY} from './config.mjs';
 import {ModelAssets} from './effects-fx.mjs';
@@ -51,6 +51,18 @@ test('map spaces pick the baked reverb by room and default to open-air', () => {
   assert.equal(mothSpaceFor('derelict-station'), 'hall');
   assert.equal(mothSpaceFor('blood-gulch'), 'open-air', 'outdoor maps default to open-air');
   assert.equal(mothSpaceFor(undefined), 'open-air');
+  // The void theatres fill the sixth baked space, so every IR has a map.
+  assert.equal(mothSpaceFor('neon-vertical'), 'void');
+  assert.equal(mothSpaceFor('aether'), 'void');
+  assert.equal(mothSpaceFor('ironfall-megastructure'), 'void');
+  const reachable = new Set(['open-air', 'tunnel', 'hall', 'cathedral', 'cavern', 'void'].map(id => mothSpaceFor({ 'open-air': 'blood-gulch', tunnel: 'catacombs', hall: 'colosseum', cathedral: 'atrium', cavern: 'moth-backrooms', void: 'neon-vertical' }[id])));
+  assert.equal(reachable.size, 6, 'all six baked spaces are selected by some arena');
+});
+
+test('map echo maps default to the baked arena send', () => {
+  assert.equal(mothEchoFor('blood-gulch'), 'arena');
+  assert.equal(mothEchoFor('moth-backrooms'), 'arena');
+  assert.equal(mothEchoFor(undefined), 'arena');
 });
 
 test('_mothFx prefers a dedicated sequence and falls back to the old cue', () => {

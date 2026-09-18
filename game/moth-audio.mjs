@@ -157,7 +157,22 @@ export class MothAudioBank {
 // The player layer owned by the audio host. Selects and crossfades up to
 // `maxBeds` looped beds, fires one-shot stingers, and owns an optional
 // delay/feedback "space" graph. It never touches MusicEngine.
+/**
+ * @typedef {Object} MothAudioOptions
+ * @property {object|null} [ctx] Live AudioContext (null keeps the layer inert)
+ * @property {object|null} [bank] A MothAudioBank; one is built when omitted
+ * @property {Record<string, object>} [destinations] Bus names to destination nodes
+ * @property {Record<string, string|null>|null} [sceneBeds] Scene routing overrides
+ * @property {Record<string, string|null>|null} [moodBeds] Mood routing overrides
+ * @property {Record<string, string|null>|null} [weatherBeds] Weather routing overrides
+ * @property {number} [maxBeds] Concurrent looped beds
+ * @property {number} [gain] Layer output gain
+ * @property {boolean} [reducedMotion] Disables playback entirely
+ * @property {boolean} [enabled] Host opt-in
+ * @property {boolean} [buildSpaceGraph] Own a delay graph for setSpace()
+ */
 export class MothAudio {
+  /** @param {MothAudioOptions} [options] */
   constructor({
     ctx = null,
     bank = null,
@@ -177,7 +192,8 @@ export class MothAudio {
     this.maxBeds = Math.max(1, Math.round(maxBeds) || 1);
     this.gain = Number.isFinite(gain) ? gain : 0.8;
     this.reducedMotion = reducedMotion === true;
-    this.enabled = enabled !== false && !this.reducedMotion && usableContext(ctx);
+    this.requestedEnabled = enabled !== false;
+    this.enabled = this.requestedEnabled && !this.reducedMotion && usableContext(ctx);
     this.buildSpaceGraph = buildSpaceGraph !== false;
     this.sceneBeds = Object.freeze({ ...MOTH_SCENE_BEDS, ...(sceneBeds || {}) });
     this.moodBeds = Object.freeze({ ...MOTH_MOOD_BEDS, ...(moodBeds || {}) });
@@ -198,6 +214,35 @@ export class MothAudio {
   _destination(kind) {
     const destinations = this.destinations || {};
     return destinations[kind] || destinations.ambience || destinations.effects || destinations.master || null;
+  }
+
+  // Runtime gate for reduced motion / constrained hosts. Disabling stops every
+  // bed and tears down the space graph so no new sound starts; re-enabling is
+  // only possible when the layer was not requested off and the context is usable.
+  _syncEnabled() {
+    const next = this.requestedEnabled && !this.reducedMotion && usableContext(this.ctx);
+    if (next === this.enabled) return this.enabled;
+    this.enabled = next;
+    if (!next) {
+      for (const bed of [...this.beds]) this._stopBed(bed);
+      this._teardownSpace();
+    } else {
+      this._reconcile();
+    }
+    return this.enabled;
+  }
+
+  // Host opt-in/out (e.g. the reduced-motion toggle). Returns the live state.
+  setEnabled(on) {
+    this.requestedEnabled = on !== false;
+    return this._syncEnabled();
+  }
+
+  // Reduced motion always wins: it disables playback and keeps it disabled
+  // until the preference is cleared, then restores the requested state.
+  setReducedMotion(on) {
+    this.reducedMotion = on === true;
+    return this._syncEnabled();
   }
 
   // The ordered bed set for the current scene/intensity/mood/weather. Pure and
@@ -421,6 +466,7 @@ export class MothAudio {
     this._teardownSpace();
     this.bank?.dispose?.();
     this.space = null;
+    this.requestedEnabled = false;
     this.enabled = false;
   }
 }

@@ -159,13 +159,20 @@ The baked assets are used, not just showcased:
   cue when a sheet is missing.
 - **Arena** — `moth-backrooms` is registered as a `variant` next-gen map
   (Quantum Labyrinth) so it appears in the normal rotation.
-- **Motifs** — the baked `moth-oracle` motif drives the Halo soundtrack's combat
-  lead via `MusicEngine.setMotif`.
+- **Motifs** — the baked `moth-oracle` motif is handed to `MusicEngine.setMotif`
+  and the results scene opts into an external take (`leadMotif`), so the baked
+  `moth-victory`/`moth-defeat` motifs replace the built-in COCS line on a win or
+  loss and fall back to COCS when nothing is loaded.
 - **Reverb IR** — `SynthAudio.setSpace(name)` swaps between the baked
   `open-air`, `tunnel`, `hall`, `cathedral`, `cavern` and `void` responses.
   `mothSpaceFor(arenaId)` picks one per map (interiors/tunnels/caverns override
-  the open-air default); `view` applies it on `setAudio` and on every arena
-  build, and re-selecting the active space is a no-op.
+  the open-air default, and the neon/void theatres map to `void`); `view`
+  applies it on `setAudio` and on every arena build, and re-selecting the active
+  space is a no-op. All six baked responses are reachable.
+- **Echo map** — `SynthAudio.setEchoMap(name)` re-tunes the shared effects
+  delay/feedback send (the tail gunfire, explosions and thunder already route
+  into) from a baked `spaces.*` map. `mothEchoFor(arenaId)` defaults every arena
+  to the baked `arena` map; `view` applies it beside `setSpace`.
 
   > **v7.1 space consolidation.** Pass 3 and the audio pipeline each baked an
   > open-air and a tunnel response under different job ids. The v7.1 merge keeps
@@ -243,10 +250,37 @@ moth.playStinger('sting-victory', { duck: 0.5 });
 - **Deterministic.** Bed selection is a fixed scene/mood/weather table
   (`MOTH_SCENE_BEDS`/`MOTH_MOOD_BEDS`/`MOTH_WEATHER_BEDS`), never `Math.random`.
 - **Additive wiring.** `SynthAudio.setMothAudio(instance)` attaches a layer and
-  forwards `setScene`/`setIntensity`/`setBedMood`, `tick()` and disposal through
-  guarded calls. The layer is never constructed by `SynthAudio` itself, so the
-  music work on `feat/music-sampler` is untouched; `audioStatus().moth` reports
-  the attached layer's status.
+  forwards `setScene`/`setIntensity`/`setBedMood`, `setEnabled`, `tick()` and
+  disposal through guarded calls. The host may defer construction with
+  `SynthAudio.setMothAudioFactory((ctx, syn) => instance)`: the factory runs once
+  the first `AudioContext` and its buses exist, so nothing fetches or decodes
+  before a user gesture. `audioStatus().moth` reports the attached layer's
+  status; `audioStatus().echo` reports the selected echo map.
+
+### In-world wiring (`app/page.tsx`)
+
+The page registers a deferred factory that builds `MothAudioBank` + `MothAudio`
+with the real context and the `ambience`/`effects` buses. The layer is inert
+with no context, before a clip decodes, or under reduced motion; the settings
+reduced-motion toggle forwards through `SynthAudio.setMothEnabled`.
+
+| Asset | Bus | Where it plays | Notes |
+| --- | --- | --- | --- |
+| `bed-ritual` | `ambience` | menu, explore and results | low gain (`0.4`), loop points `0.5–10.5 s`; combat keeps the score/SFX space |
+| `moth-victory` / `moth-defeat` | `music` (lead voice) | results screen | via `MusicEngine.setMotif` + the results `leadMotif`; a win and a loss load different takes |
+| `arena` (echo map) | `effects` send | all arenas | `setEchoMap` retunes the gunfire/explosion delay tail; `depth` drives feedback |
+| `void` IR | `music` convolver | `neon-vertical`, `aether`, `ironfall-megastructure` | the other five spaces come from the open-air default and the interior map table |
+
+**Why a lead motif, not a stinger.** The baked `moth-victory`/`moth-defeat`
+records are note data (MIDI), not decodable WAV clips, so
+`MothAudio.playStinger` (which plays a decoded bank buffer) cannot voice them.
+`MusicEngine.setMotif` is the contract that consumes motif records, and the
+results arrangement already reacts to `setOutcome`; adding `leadMotif: true`
+lets that scene prefer the outcome take while keeping `COCS_MOTIF` as its
+static fallback. The arena echo map is applied to `SynthAudio`'s existing
+effects send (the node graph gunfire already uses) rather than MothAudio's own
+unconnected delay graph; `MothAudio.setSpace` still records the active map for
+`status()`.
 
 ## Moth soundtrack (`game/music.mjs`)
 

@@ -1119,6 +1119,21 @@ and announcer cues are deduped with a short per-cue cooldown. Announcer ownershi
 `ArenaView` owns capture/flag/goal cues, `app/page.tsx` owns kill/score/objective
 cues.
 
+**Moth audio layer (`game/moth-audio.mjs`).** Baked Moth beds, echo maps and
+outcome motifs layer *behind* the synthesized audio. `app/page.tsx` registers a
+deferred `SynthAudio.setMothAudioFactory` so `MothAudioBank` + `MothAudio` are
+built once a real `AudioContext` and the `ambience`/`effects` buses exist; the
+layer is inert with no context, before a clip decodes, or under reduced motion
+(the settings toggle forwards through `SynthAudio.setMothEnabled`). In-world:
+`bed-ritual` is a low menu/explore/results ambience on the `ambience` bus (combat
+is left to the score and SFX); `moth-victory`/`moth-defeat` replace the results
+lead through `MusicEngine.setMotif` (the results arrangement opts in with
+`leadMotif`); the baked `arena` echo map retunes `SynthAudio`'s shared effects
+delay/feedback send (`setEchoMap`), giving gunfire and explosions a tap-driven
+tail; and `mothSpaceFor` routes the neon/void theatres to the `void` IR so all
+six baked reverb spaces are reachable. `audioStatus()` reports `space` (IR),
+`echo` (echo map), `moth` (layer status) and `samples`.
+
 ### 13.3 HUD, radar, scoreboard
 
 - `game/hud.mjs` is a set of pure derivations covering vehicle prompts, reload

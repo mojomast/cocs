@@ -229,8 +229,9 @@ export const HALO_ARRANGEMENTS = frozen({
     brass: [[0, 0, 4], [8, 4, 4], [12, 0, 4]],
     arp: [0, 2, 4, 2, 3, 5, 4, 2],
     counter: [4, 2, 0, 2, 4, 5, 4, 2], counterShift: 12,
-    // Picardy: the motif with every minor third raised, ending major.
-    lead: 'cocs', leadRate: 1, leadMajor: true, leadOctave: 1,
+    // Picardy: the motif with every minor third raised, ending major. A baked
+    // victory/defeat motif, when one is loaded, replaces the built-in line here.
+    lead: 'cocs', leadMotif: true, leadRate: 1, leadMajor: true, leadOctave: 1,
     leadType: 'triangle', leadGain: 0.024,
     strings: true, pad: true, swell: 0.35,
   },
@@ -696,7 +697,10 @@ export class MusicEngine {
   _leadFor(arr, bar = this.bar) {
     let lead = null;
     if (Array.isArray(arr.lead)) lead = arr.lead;
-    else if (arr.lead === 'cocs') lead = COCS_MOTIF;
+    // `leadMotif` lets a scene that normally voices the built-in leitmotif defer
+    // to an externally baked motif (e.g. the Moth victory/defeat takes) while
+    // keeping `COCS_MOTIF` as the static fallback when none is loaded.
+    else if (arr.lead === 'cocs') lead = arr.leadMotif && this.motifLead?.length ? this.motifLead : COCS_MOTIF;
     else if (arr.lead === 'motif') lead = this.motifLead?.length ? this.motifLead : (Array.isArray(arr.leadFallback) ? arr.leadFallback : null);
     if (!lead?.length) return null;
     const secondHalf = (((bar % 8) + 8) % 8) >= 4;

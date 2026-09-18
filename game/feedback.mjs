@@ -3,7 +3,7 @@ import {WEAPONS} from './data.mjs';
 import {precipParticleAdds} from './environment.mjs';
 import {MusicEngine,HALO_THEME} from './music.mjs';
 import {footstepProfile,impactProfile,reportStyle,reportVariation,eventSeed,mixUnit} from './sfx-design.mjs';
-import {mothIr} from './moth-assets.mjs';
+import {mothIr,mothEchoMap,mothMotif} from './moth-assets.mjs';
 
 // Per-space reverb wetness for the baked convolution IRs. `cavern` keeps the
 // historical .42; drier outdoor/tunnel responses sit lower, big interiors higher.
@@ -343,16 +343,43 @@ export class SynthAudio{
   this.volumes={master:.9,music:.7,effects:1,ambience:.8};
   this.status='off';this.scene='menu';this._announceAt=new Map();this._stingDuckTimer=null;
   // Optional Moth audio layer (game/moth-audio.mjs). Never created here; the
-  // host opts in with setMothAudio(). All forwarding is guarded so an absent
-  // layer is a no-op and this stays merge-friendly with the music work.
-  this.mothAudio=null;
+  // host opts in with setMothAudio() or registers a factory with
+  // setMothAudioFactory() so the layer is built once a real AudioContext exists.
+  // All forwarding is guarded so an absent layer is a no-op and this stays
+  // merge-friendly with the music work.
+  this.mothAudio=null;this.mothAudioFactory=null;this.mothEnabled=true;
+  // Baked echo/tap map applied to the shared effects send (gunfire/explosions).
+  this.echoMap=null;
  }
  // Attach (or clear) a MothAudio instance and seed it with the current state.
  // Additive and inert without an instance; returns the layer for chaining.
  setMothAudio(audio){
   this.mothAudio=audio||null;
-  if(this.mothAudio){try{this.mothAudio.setScene?.(this.scene);this.mothAudio.setIntensity?.(this.intensity);this.mothAudio.setBedMood?.(this.bedMood);}catch{}}
+  if(this.mothAudio){try{this.mothAudio.setEnabled?.(this.mothEnabled);this.mothAudio.setScene?.(this.scene);this.mothAudio.setIntensity?.(this.intensity);this.mothAudio.setBedMood?.(this.bedMood);}catch{}}
   return this.mothAudio;
+ }
+ // Deferred mount: the Moth layer needs a live AudioContext, which the host
+ // creates on its first user gesture (start()). The host registers a factory
+ // that runs exactly once, as soon as the context and its buses exist, and the
+ // built layer is attached with setMothAudio(). Inert when no factory is set.
+ setMothAudioFactory(factory){
+  this.mothAudioFactory=typeof factory==='function'?factory:null;
+  return this._ensureMothAudio();
+ }
+ _ensureMothAudio(){
+  if(this.mothAudio||typeof this.mothAudioFactory!=='function'||!this.ctx)return this.mothAudio;
+  const factory=this.mothAudioFactory;this.mothAudioFactory=null;
+  let built=null;
+  try{built=factory(this.ctx,this)||null;}catch{built=null;}
+  if(built)this.setMothAudio(built);else this.mothAudio=null;
+  return this.mothAudio;
+ }
+ // Runtime gate forwarded to the layer (reduced motion / constrained hosts).
+ setMothEnabled(on){
+  this.mothEnabled=on!==false;
+  this.mothAudio?.setEnabled?.(this.mothEnabled);
+  if(this.mothEnabled&&this.mothAudio){try{this.mothAudio.setScene?.(this.scene);this.mothAudio.setIntensity?.(this.intensity);this.mothAudio.setBedMood?.(this.bedMood);}catch{}}
+  return this.mothEnabled;
  }
  mothAudioStatus(){return this.mothAudio?.status?.()??null;}
  // Start (or resume) the audio engine. Returns a promise that resolves once the
@@ -415,6 +442,35 @@ export class SynthAudio{
   this.setReverbUrl(ir.url,w);
   return this.reverbUrl;
  }
+ // Apply a baked Moth echo/tap map to the shared effects send that gunfire,
+ // explosions and thunder already route into. Keeps the existing node graph and
+ // only re-tunes its delay/feedback/wet tail. Safe before the context exists:
+ // the name is remembered and applied in `_ensureBuses`. The map has no
+ // per-tap times in the v7.1 bake, so `depth` drives the feedback and the tap
+ // count/levels drive wetness; a future map with `timeMs` seeds the delay.
+ setEchoMap(name){
+  const map=typeof name==='string'&&name?mothEchoMap(name):null;
+  this.echoMap=map?name:null;
+  try{this.mothAudio?.setSpace?.(this.echoMap);}catch{}
+  this._applyEchoMap();
+  return this.echoMap;
+ }
+ _applyEchoMap(){
+  if(!this.space||!this.echoMap)return false;
+  const map=mothEchoMap(this.echoMap);if(!map)return false;
+  const taps=Array.isArray(map.taps)?map.taps:[];
+  const first=taps.find(tap=>Number.isFinite(tap?.timeMs)&&tap.timeMs>0);
+  const delay=first?cl(first.timeMs/1000,.04,.6):.16;
+  const depth=Number.isFinite(Number(map.depth))?Number(map.depth):8;
+  const levels=taps.map(tap=>Math.abs(Number(tap?.level))).filter(Number.isFinite);
+  const mean=levels.length?levels.reduce((sum,v)=>sum+v,0)/levels.length:.5;
+  const t=this.ctx?.currentTime||0;
+  const set=(param,value)=>{try{if(param?.setTargetAtTime)param.setTargetAtTime(value,t,.05);else if(param)param.value=value;}catch{}};
+  set(this.space.delay?.delayTime,delay);
+  set(this.space.fb?.gain,cl(.25+depth*.02,.2,.6));
+  set(this.space.wet?.gain,cl(.42+mean*.22,.35,.7));
+  return true;
+ }
  _ensureBuses(){
   if(!this.ctx||this.master)return;
   const ctx=this.ctx;
@@ -439,9 +495,13 @@ export class SynthAudio{
     this.space={send,delay,damp,fb,wet};
    }catch{this.space=null;}
   }
+  this._applyEchoMap();
   try{this.musicEngine=new MusicEngine({ctx,destination:this.musicBus,theme:this.theme,noiseBuffer:this.noiseBuffer,seed:(Date.now()&0xffff)||1});}
   catch{this.musicEngine=null;}
   if(this.musicEngine){this.musicEngine.setEnabled(this.musicEnabled);this.musicEngine.setMuted(this.muted);this.musicEngine.setScene(this.scene);this.musicEngine.setSoundtrack(this.soundtrack||'default');}
+  // The context and buses now exist, so a deferred Moth layer can be built and
+  // attached. Idempotent: the factory is consumed on first success.
+  this._ensureMothAudio();
   this.status=ctx.state||'suspended';
  }
  // Immediate master mute. The mute gain is set synchronously (not ramped) so a
@@ -474,7 +534,17 @@ export class SynthAudio{
  // get exploration/combat layered by intensity.
  setScene(scene){const key=scene==='menu'?'menu':scene==='results'?'results':'game';this.scene=key;this.musicEngine?.setScene(key==='menu'?'menu':key==='results'?'results':(this.intensity>=.34?'combat':'explore'));this.mothAudio?.setScene?.(key);return this.scene;}
  // Victory/defeat selects the results arrangement (Picardy tonic on a win).
- setOutcome(outcome){return this.musicEngine?.setOutcome?.(outcome)??null;}
+ // Victory/defeat also hands the baked Moth outcome motif to the soundtrack's
+ // lead voice. Motifs are note data (not decodable clips), so this is the
+ // `MusicEngine.setMotif` route rather than `MothAudio.playStinger`; the results
+ // arrangement opts in with `leadMotif` and falls back to the built-in COCS
+ // line when no motif is loaded. An unknown outcome clears the motif.
+ setOutcome(outcome){
+  const key=outcome==='victory'||outcome==='defeat'?outcome:null;
+  const motif=key?mothMotif(`moth-${key}`):null;
+  if(motif)this.setMotif(motif);else if(!key)this.setMotif(null);
+  return this.musicEngine?.setOutcome?.(outcome)??null;
+ }
  previewMusic(scene='menu',seconds=8){this._ensureBuses();const r=this.musicEngine?.preview(scene,seconds);this.unlock();return r??null;}
  // Select an arrangement pack (e.g. 'halo'); delegates to the music engine.
  setSoundtrack(name='default'){this.soundtrack=(name==='halo')?'halo':'default';this._ensureBuses();this.theme=this.soundtrack==='halo'?HALO_THEME:(MODE_THEMES[this.mode]||MODE_THEMES.default);return this.musicEngine?.setSoundtrack(this.soundtrack)??this.soundtrack;}
@@ -497,7 +567,7 @@ export class SynthAudio{
    return this.musicEngine.setReverb(buffer,opts);
   }catch{return false;}
  }
- audioStatus(){return {state:this.ctx?(this.ctx.state||'suspended'):'unavailable',status:this.status,enabled:this.musicEnabled,muted:this.muted,scene:this.scene,intensity:this.intensity,voices:this.voices.size,notes:this.musicEngine?.notesScheduled??0,music:this.musicEngine?.status?.()??'off',reverb:this.reverbLoaded?'ready':(this._reverbPending?'loading':(this.reverbUrl?'pending':'off')),space:this.reverbSpace,moth:this.mothAudio?.status?.()??null,samples:this.musicEngine?.sampleStatus?.()??null};}
+ audioStatus(){return {state:this.ctx?(this.ctx.state||'suspended'):'unavailable',status:this.status,enabled:this.musicEnabled,muted:this.muted,scene:this.scene,intensity:this.intensity,voices:this.voices.size,notes:this.musicEngine?.notesScheduled??0,music:this.musicEngine?.status?.()??'off',reverb:this.reverbLoaded?'ready':(this._reverbPending?'loading':(this.reverbUrl?'pending':'off')),space:this.reverbSpace,echo:this.echoMap,moth:this.mothAudio?.status?.()??null,samples:this.musicEngine?.sampleStatus?.()??null};}
  // Low, continuous ambience bed: filtered noise hiss plus a sub tone, faded in
  // through the master gain. Owned by the audio instance and torn down in dispose.
  _bed(on){
@@ -628,8 +698,9 @@ export class SynthAudio{
   this.lastSting=outcome;
   // Duck the soundtrack under the sting so the result reads clearly, then ease
   // it back. The timer is cleared on disposal so it cannot outlive the engine.
-  // The soundtrack also moves to the results scene, where the motif turns major.
-  this.musicEngine?.setOutcome?.(outcome);
+  // The soundtrack also moves to the results scene, where the baked victory or
+  // defeat motif (or the arrangement's major fallback) is voiced.
+  this.setOutcome(outcome);
   this.musicEngine?.setDuck(1);
   if(this._stingDuckTimer)clearTimeout(this._stingDuckTimer);
   this._stingDuckTimer=setTimeout(()=>{this._stingDuckTimer=null;this.musicEngine?.setDuck(0);},1400);
