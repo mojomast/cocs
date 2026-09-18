@@ -8,7 +8,8 @@ import {createOperatorVerbState,resetOperatorVerbState,setOperatorVerbActive,ste
 import {turnToward} from './character-anim.mjs';
 import {resolveGear} from './progression.mjs';
 import {resolveAttachments,applyAttachmentsToWeapon} from './attachments.mjs';
-import {terrainRayHit,terrainWallSegments} from './terrain.mjs';
+import {terrainWallSegments} from './terrain.mjs';
+import {ensureTerrainBvh,terrainRayHitFast} from './terrain-bvh.mjs';
 import {floorHeightAtLattice,makeFloorQuery} from './floor-lattice.mjs';
 import {blockObstructed,blockSupportTop,candidates,collisionHash,NAV_BAKE_VERSION,rayCandidates} from './spatial.mjs';
 import {createVehicle,GUNTRUCK,respawnVehicle,stepVehicle,stepVehicleWeapon,vehicleCanEnter,vehicleMuzzles,vehicleSeatFor,vehicleSeatPosition,vehicleMounted,takeVehicleSeat,leaveVehicleSeat,vehicleSeatOpen} from './vehicles.mjs';
@@ -217,7 +218,7 @@ export function moveActor(a,input,dt,arena=MAPS[0],config={speed:1,gravity:1},ro
 }
 function boxHit(o,d,b,max){let lo=0,hi=max;for(const k of ['x','y','z']){const c=k==='y'?b.h/2:b[k],s=k==='x'?b.w/2:k==='z'?b.d/2:b.h/2;if(Math.abs(d[k])<1e-8){if(o[k]<c-s||o[k]>c+s)return null;}else{let t1=(c-s-o[k])/d[k],t2=(c+s-o[k])/d[k];if(t1>t2)[t1,t2]=[t2,t1];lo=Math.max(lo,t1);hi=Math.min(hi,t2);if(lo>hi)return null;}}return lo;}
   export function rayWorld(o,d,max=100,arena=MAPS[0]){if(!finitePoint(o)||!finitePoint(d)||(!Number.isFinite(max)&&max!==Infinity)||max<0||Math.hypot(d.x,d.y,d.z)<=1e-9)return 0;let best=max;for(const b of rayCandidates(arena,o,d,best)){const t=boxHit(o,d,b,best);if(t!==null&&t<best)best=t;}
-   if(arena.terrain){const hit=terrainRayHit(o,d,best,arena.terrain);if(hit&&hit.distance<best)best=hit.distance;}
+   if(arena.terrain){const hit=terrainRayHitFast(ensureTerrainBvh(arena.terrain),o,d,best);if(hit&&hit.distance<best)best=hit.distance;}
    else {
     // Analytic floor/ramp intersection by bounded ray marching, refined at first crossing.
     for(let t=.12;t<best;t+=.16){const p=add(o,d,t),floor=floorAt(p.x,p.z,arena);if(floor!==null&&p.y<floor){let lo=Math.max(0,t-.16),hi=t;for(let i=0;i<7;i++){const m=(lo+hi)/2,q=add(o,d,m),qFloor=floorAt(q.x,q.z,arena);if(qFloor!==null&&q.y<qFloor)hi=m;else lo=m;}best=hi;break;}}

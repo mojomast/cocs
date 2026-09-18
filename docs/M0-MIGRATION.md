@@ -282,3 +282,104 @@ Required change (M1):
 
 Until `skipNav` lands, the lattice/broadphase alone do not help
 `createShadow`, because the graph construction is what stalls.
+
+---
+
+# M1 — Terrain ray BVH
+
+Status: **landed (W11, `feat/terrain-bvh`).** W9 left one profile miss: `rayWorld`
+still called `terrainRayHit`, which linearly scans every surface triangle **and
+rebuilds every wall triangle per ray** (`wallTriangles` was never cached), so
+`visible`/`rayWorld` p95 stayed in the 100–350 µs range on terrain maps and the
+24-actor step missed the 8 ms budget. M1 adds a deterministic BVH over the same
+surface + wall triangle set.
+
+## 5. `game/terrain-bvh.mjs`
+
+### API
+
+```js
+import {
+  bakeTerrainBvh, ensureTerrainBvh, invalidateTerrainBvh,
+  terrainRayHitFast, terrainRayTriangles, terrainBvhHash,
+  TERRAIN_BVH_VERSION, DEFAULT_TERRAIN_BVH_LEAF,
+} from './terrain-bvh.mjs';
+
+const bvh = ensureTerrainBvh(arena.terrain);          // WeakMap-cached per terrain
+terrainRayHitFast(bvh, origin, dir, maxDistance);      // {distance,normal,surfaceId,material} | null
+invalidateTerrainBvh(arena.terrain);                   // generation-time stamps only
+bvh.hash;                                              // '1:deadbeef'
+```
+
+- `bakeTerrainBvh(terrain, {leafSize})` copies `terrainRayTriangles(terrain)`
+  (cached surface triangles **then** cached wall triangles, the exact order and
+  set `terrainRayHit` scans) into `Float64Array` vertex/normal blocks, then
+  recursively splits by the **median of centroids on the widest axis**, using the
+  original triangle index as the tie-break. The build is a pure function of the
+  triangle list + leaf size; `terrainBvhHash` folds the node bounds, indices,
+  vertices and normals into an FNV-1a string for serialized comparison.
+- `DEFAULT_TERRAIN_BVH_LEAF = 12`. Query p95 is flat for 8–16 and build cost
+  drops sharply past 8; 12 was the best p95/build balance on titan-valley.
+  Node AABBs carry a `1e-7` slack so traversal can never prune a numerically
+  boundary hit; the triangle test itself always uses the raw vertices.
+- `terrainRayHitFast` is the exact Möller–Trumbore arithmetic of `terrain.mjs`
+  `rayTriangle`, so distances are bit-identical to the brute path. Ties (equal
+  distance, e.g. a ray through a shared mesh edge) resolve to the **lowest
+  triangle index**, the first one the brute scan would have kept.
+- The cache is a `WeakMap<terrain, Map<leafSize, bvh>>`. `MAPS` is deep-frozen,
+  so one bake is shared by every `Match` on a map; only generation-time stamps
+  invalidate it.
+
+### Switch point (the only shared-file edits)
+
+`core.mjs`:
+
+```js
+// before
+if (arena.terrain) { const hit = terrainRayHit(o, d, best, arena.terrain); if (hit && hit.distance < best) best = hit.distance; }
+// after
+if (arena.terrain) { const hit = terrainRayHitFast(ensureTerrainBvh(arena.terrain), o, d, best); if (hit && hit.distance < best) best = hit.distance; }
+```
+
+`terrain.mjs`: `stampTerrainFloor` already cleared the triangle/wall caches and
+the floor lattice; it now also calls `invalidateTerrainBvh(terrain)`. The block
+broadphase (`rayCandidates`/`boxHit`) and every other branch of `rayWorld` are
+untouched. `terrainRayHit` stays as the brute oracle (`m0-integration.test.mjs`
+compares the accelerated `rayWorld` against it).
+
+## 6. Measured results (same Ryzen-class box, Node 22, `--test-concurrency=2`)
+
+`visible`/`rayWorld` p95 (µs), `Match.step` p95 (ms, 8 combined-arms humans +
+bots, 500 steps after 80 warm-up), BVH build (ms):
+
+| map | visible p95 before | after | rayWorld p95 before | after | build |
+| --- | --- | --- | --- | --- | --- |
+| titan-valley | 141.0 | **15.6** | 137.7 | **10.2** | 3.2 ms |
+| convoy-line | 107.8 | **12.7** | 108.6 | **9.7** | 1.8 ms |
+| frostline | 344.1 | **7.0** | 360.3 | **4.9** | 0.4 ms |
+
+| map | 12-actor step p50→p95 before | after | 24-actor step p50→p95 before | after |
+| --- | --- | --- | --- | --- |
+| titan-valley | 1.95 → 3.81 ms | **0.87 → 2.02 ms** | 6.95 → 10.80 ms | **1.73 → 3.13 ms** |
+| convoy-line | 1.68 → 3.61 ms | **0.85 → 2.06 ms** | 5.11 → 122.4 ms* | 1.80 → **14.24 ms** |
+| frostline | 4.19 → 8.87 ms | **0.75 → 2.42 ms** | 12.56 → 492.3 ms* | 1.99 → **12.09 ms** |
+
+\* The pre-BVH 24-actor tails were GC storms: `terrainRayHit` allocated a fresh
+`[...surfaces, ...walls]` array and rebuilt every wall triangle on **every ray**.
+The same runs' p50 (5–13 ms) is the honest pre-change steady state.
+
+Per-query microbench (test log): BVH p50 1.7 µs / p95 3.5 µs on titan-valley
+(1940 tris, 50.8× the 85.5 µs brute p50); frostline 1.8/2.9 µs vs 252.5 µs brute
+(137×, mostly the removed per-ray wall rebuild); build 0.4–4.7 ms across the 5
+reference maps.
+
+### Remaining miss
+
+`visible` p95 ≤15 µs is met at 15.6/12.7/7.0 µs (titan-valley is at the noise
+floor). `step p95 ≤8 ms @24` is met on titan-valley (3.1 ms) but **not** on
+convoy-line (14.2 ms) or frostline (12.1 ms). A steady-state CPU profile after
+M1 shows the terrain path is no longer the cost — `terrainRayHitFast` self time
+is **0.4%**; the residual is the block-ray branch (`boxHit` 26.8% of step CPU,
+`rayCandidateBlocks` 4.3%), bot pathfinding (`dijkstraFrom` 9.8%, `nearest`
+3.3%) and GC (5.5%). Closing that gap means a block ray BVH and/or cached bot
+paths (out of M1 scope: the block broadphase is intentionally untouched).
