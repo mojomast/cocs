@@ -44,6 +44,7 @@ import {
   FLUX_CAP, FLUX_PASSIVE_PER_SECOND, FLUX_START, ORDER_REWARD, REQ_EARN, SUBAGENTS,
   neglectPassiveFlux, neglectState, neglectTick, scoreEvent, subagentUpkeep,
 } from './cocs-economy.mjs';
+import {createTraversalState, stepCocsTraversal, cocsTraversalSnapshot} from './cocs-traversal.mjs';
 
 export const COCS_KIND = 'cocs';
 // The frozen node archetypes. Authored maps may spell a few of these
@@ -365,6 +366,9 @@ export function cocsTemplate(mode, arena, config = {}) {
     winReason: null,
   };
   state.zones = capturable.map(node => ({id: node.id, x: node.x, z: node.z, y: node.y, radius: node.r}));
+  // §6A traversal layer (V0b): authored devices/depots only. An unauthored map
+  // stays `null` so every prior mode/behaviour is untouched.
+  state.traversal = createTraversalState(arena, {botUse: config?.objective?.traversalBotUse === true});
   updateLiveNodes(state);
   state.front = frontState(state);
   return state;
@@ -1081,6 +1085,8 @@ export function cocsSnapshot(match) {
     scanRadius: COCS_SCAN_RADIUS,
     spotSeconds: COCS_SPOT_SECONDS,
     spotBonus: COCS_SPOT_DAMAGE_BONUS,
+    // --- §6A traversal devices/depots (V0b) --------------------------------
+    traversal: cocsTraversalSnapshot(state),
   };
 }
 
@@ -1172,6 +1178,11 @@ export function stepCocs(match, dt = RULES.dt) {
     const spot = state.spots[key];
     if (!spot || num(state.tick, 0) > num(spot.until, 0)) delete state.spots[key];
   }
+
+  // 4e. §6A traversal layer: neutral device cut/lock/repair state, the 2.5 s
+  //     shared cooldown, arrival protection and depot capture/loaners. All on
+  //     the same fixed tick as every other cocs timer, with no RNG draw.
+  stepCocsTraversal(match, state, dt);
 
   // 5. Dominance, front and the team-score mirror (HUD / Match.leaders).
   updateDominance(state, dt);

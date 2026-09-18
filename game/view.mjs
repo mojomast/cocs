@@ -1471,6 +1471,10 @@ export class ArenaView{
       // always-visible beacon. Follows the createObjectiveModel/disposeObject
       // lifecycle so nothing leaks on mode change or dispose.
       cocsNodes(match){const input=match?.objectives??match?.objectiveState;return match?.cocs?.nodes??input?.cocs?.nodes??input?.nodes??[];}
+      // V0b traversal markers: id-keyed devices (live/cut/locked) and depots
+      // (owner/contest tinted). Presentation only, reusing the objective-marker
+      // lifecycle; a fuller order-strip/UI is a follow-up.
+      cocsTraversal(match){const input=match?.objectives??match?.objectiveState;const source=match?.cocs?.traversal??input?.traversal??input?.cocs?.traversal;if(!source)return {devices:[],depots:[]};const list=value=>Array.isArray(value)?value:Object.keys(value||{}).map(id=>({id,...value[id]}));return {devices:list(source.devices),depots:list(source.depots)};}
       objectiveMarkZones(match){const input=match?.objectives??match?.objectiveState;return input?.kind==='cocs'?(match?.cocs?.nodes??input?.nodes??[]):(input?.zones||[]);}
       styleCocsModel(g,node){
        const archetype=String(node?.archetype??'front');
@@ -1566,6 +1570,35 @@ export class ArenaView{
         g.userData.identifier=key;
         g.userData.cocsLive=live;g.userData.cocsContested=contested;g.userData.cocsOwner=owner;
         g.scale.setScalar(reduced||!contested?1:1.03+.05*Math.sin(time*5+(key.length||0)));
+       }
+       // §6A traversal devices/depots: small always-on beacons tinted by state
+       // and owner. Keyed separately from nodes so they follow the same
+       // create/dispose lifecycle and never collide with a node id.
+       const traversal=this.cocsTraversal(match);
+       for(const device of traversal.devices){
+        if(!device||device.id===undefined||device.id===null)continue;
+        const key=`traversal:device:${device.id}`,deviceState=String(device.state??'live');
+        let g=this.objectiveModels.get(key);
+        if(!g){g=this.createObjectiveModel({id:key,radius:2.2,owner:null,contested:false,progress:0},arena);g.userData.cocsDevice=true;this.objectiveModels.set(key,g);this.worldGroup?.add(g);}
+        active.add(key);
+        const color=deviceState==='cut'?'#ff6b6b':deviceState==='locked'?'#ffd166':'#7fe3c8';
+        for(const mat of [g.userData.baseMat,g.userData.areaMat,g.userData.beaconMat]){mat.color.set(color);mat.emissive?.set(color);}
+        g.userData.progress.visible=false;g.userData.beacon.visible=true;
+        g.position.set(Number(device.x)||0,0,Number(device.z)||0);
+        g.userData.identifier=key;g.userData.cocsDeviceState=deviceState;
+       }
+       for(const depot of traversal.depots){
+        if(!depot||depot.id===undefined||depot.id===null)continue;
+        const key=`traversal:depot:${depot.id}`,radius=Math.max(3,Math.min(10,Number(depot.radius)||6));
+        const owner=depot.owner===0||depot.owner===1?depot.owner:null,contested=depot.contested===true;
+        let g=this.objectiveModels.get(key);
+        if(!g){g=this.createObjectiveModel({id:key,radius,owner,contested,progress:0},arena);g.userData.cocsDepot=true;this.objectiveModels.set(key,g);this.worldGroup?.add(g);}
+        active.add(key);
+        const color=contested?'#ffd166':owner===null?NEUTRAL:this.objectiveColor(owner,arena);
+        for(const mat of [g.userData.baseMat,g.userData.areaMat,g.userData.beaconMat]){mat.color.set(color);mat.emissive?.set(color);}
+        g.userData.progress.visible=false;g.userData.beacon.visible=true;
+        g.position.set(Number(depot.x)||0,Number(depot.y)||0,Number(depot.z)||0);
+        g.userData.identifier=key;g.userData.cocsDepotOwner=owner;
        }
        for(const [key,g] of this.objectiveModels)if(!active.has(key)){this.worldGroup?.remove(g);this.disposeObject(g);this.objectiveModels.delete(key);}
       }

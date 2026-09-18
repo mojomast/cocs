@@ -74,6 +74,7 @@ export function run(seed, { seconds = 600, players = 8, mapId = 'lattice-slice',
   for (const [t, scores] of trace) if (t <= halfTime + 1e-9) half = scores;
   if (!half && trace.length) half = trace[0][1];
   const st = m.objectiveState;
+  const traversal = st?.traversal?.stats ?? {};
   const economy = {
     fluxSpent: { 0: st?.fluxSpent?.[0] ?? 0, 1: st?.fluxSpent?.[1] ?? 0 },
     fluxRemaining: { 0: st?.flux?.[0] ?? 0, 1: st?.flux?.[1] ?? 0 },
@@ -84,6 +85,14 @@ export function run(seed, { seconds = 600, players = 8, mapId = 'lattice-slice',
     scoutsScans: (st?.scoutStats?.[0]?.scans ?? 0) + (st?.scoutStats?.[1]?.scans ?? 0),
     ordersCompleted: st?.orderStats?.completed ?? 0,
     ordersByVerb: { ...(st?.orderStats?.byVerb ?? {}) },
+    deviceUses: traversal.uses ?? 0,
+    deviceCuts: traversal.cuts ?? 0,
+    deviceLocks: traversal.locks ?? 0,
+    deviceRepairs: traversal.repairs ?? 0,
+    vehicleSpawns: traversal.vehicleSpawns ?? 0,
+    vehicleUses: traversal.vehicleUses ?? 0,
+    arrivals: traversal.arrivals ?? 0,
+    depotCaptures: traversal.depotCaptures ?? 0,
   };
   return {
     seed, seconds, ticks, over: m.over, overReason: m.overReason || null,
@@ -137,6 +146,14 @@ export function summarise(runs) {
       scoutsScans: total('scoutsScans'),
       ordersCompleted: total('ordersCompleted'),
       ordersByVerb: byVerb,
+      deviceUses: total('deviceUses'),
+      deviceCuts: total('deviceCuts'),
+      deviceLocks: total('deviceLocks'),
+      deviceRepairs: total('deviceRepairs'),
+      vehicleSpawns: total('vehicleSpawns'),
+      vehicleUses: total('vehicleUses'),
+      arrivals: total('arrivals'),
+      depotCaptures: total('depotCaptures'),
     },
     runs: runs.map(r => ({
       seed: r.seed, over: r.over, reason: r.overReason, duration: `${(r.ticks / 60).toFixed(1)}s`,
