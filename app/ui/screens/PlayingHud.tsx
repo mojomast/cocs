@@ -8,6 +8,7 @@ import {abilityRing,movementHud} from '../../../game/hud-class.mjs';
 import {MOVEMENT_VERBS} from '../../../game/kits.mjs';
 import {harnessAbility} from '../../../game/harness-profiles.mjs';
 import {wingChip} from '../../../game/class-ui.mjs';
+import {cocsBoard} from '../../../game/hud.mjs';
 
 const FRAG_COOLDOWN=7;
 
@@ -28,9 +29,41 @@ export function SpectatorBoard({groups=[],objective,onFollow}:{groups?:any[];obj
  </div>;
 }
 
+// LATTICE STRIKE front-line strip. The board is derived in game/hud.mjs from the
+// frozen cocs snapshot; this is a pure view. Ownership reads as a shape glyph
+// plus a word (never colour alone) and the capture hint is the live objective
+// line, so the readout stays legible at a glance.
+function CocsReadout({board,teamName}:{board:any;teamName:(team:any)=>string}){
+ if(!board)return null;
+ const amount=(value:any)=>Number.isFinite(Number(value))?String(Math.round(Number(value)*10)/10):'0';
+ const nodes=board.live||[],mine=board.myNodes??0,enemy=board.enemyNodes??0;
+ return <div className="cocs-readout" role="status" aria-label={`Lattice front. ${board.hint}. ${board.liveCount} live nodes.`}>
+  <div className="cocs-readout__head"><span className="eyebrow">LATTICE FRONT</span><span className="cocs-readout__count">{board.liveCount} LIVE</span></div>
+  <div className="cocs-readout__scores" aria-label={`Objective score: ${teamName(0)} ${amount(board.scores[0])}, ${teamName(1)} ${amount(board.scores[1])}`}>
+   <span className={board.leader===0?'is-lead':''}>{teamName(0)} <b>{amount(board.scores[0])}</b></span>
+   <span className="cocs-readout__op" aria-hidden="true">OP</span>
+   <span className={board.leader===1?'is-lead':''}>{teamName(1)} <b>{amount(board.scores[1])}</b></span>
+  </div>
+  <ul className="cocs-readout__nodes">
+   {nodes.map((node:any)=><li key={node.id} className={`cocs-node${node.mine?' cocs-node--mine':''}${node.enemy?' cocs-node--enemy':''}${node.contested?' cocs-node--contested':''}`} aria-label={`${node.label}: ${node.ownerLabel}${node.contested?' contested':''}${node.progressPercent>0&&!node.mine?` ${node.progressPercent} percent captured`:''}`}>
+    <span className="cocs-node__mark" aria-hidden="true">{node.mark}</span>
+    <span className="cocs-node__label">{node.label}</span>
+    <span className="cocs-node__status">{node.ownerLabel}{node.progressPercent>0&&!node.mine?` ${node.progressPercent}%`:''}</span>
+   </li>)}
+   {!nodes.length&&<li className="cocs-node cocs-node--neutral"><span className="cocs-node__mark" aria-hidden="true">○</span><span className="cocs-node__label">NO NODES</span><span className="cocs-node__status">STAND BY</span></li>}
+  </ul>
+  <div className="cocs-readout__own">
+   <span aria-label={`Your team owns ${mine} nodes`}>{teamName(board.team??0)} <b>{mine}</b> NODES</span>
+   <span aria-label={`The enemy owns ${enemy} nodes`}>{teamName((board.team??0)===0?1:0)} <b>{enemy}</b> NODES</span>
+  </div>
+  <p className="cocs-readout__hint">{board.hint}</p>
+ </div>;
+}
+
 export function PlayingHud({ui}:ScreenProps){
  const {hud,player,display,brief,phase,hudRoute,hudMap,hudMode,isTeamMode,teamName,modeGoal,ladderStatus,flagText,armsrace,WEAPONS,activePower,powerIcon,radar,radarCols,radarBlip,marker,reloadFill,reloading,posture,killNotice,suddenBanner,startBanner,scoreCue,damageIndicator,damageNumberStyle,reducedMotion,vehiclePrompt,vehicle,ammoEmpty,ammoLow,hideHud,touchControls,pointerHint,requestLock,chatOpen,isSingle,single,selectHordeUpgrade,resumeSingleplayer,spectatorTeams,CAMERA_MODE_LABELS,runtime,changeMode,grenadeStatus,streakStatus,killFeedWeapon,voiceState,voiceHint,escapeHint,clock,teamScoreText,ammoText,weaponTag}=ui;
  if(!hud||!player)return null;
+ const cocs=hudMode?.id==='cocs'?cocsBoard(hud,player):null;
  const callout=!hud.spectate&&hud.killCue?hud.killCue:null;
  const kill=!hud.spectate&&killNotice&&killNotice.age<1.5?killNotice:null;
  const announcement=suddenBanner?'sudden':startBanner?'start':scoreCue?'score':callout?'callout':kill?'kill':null;
@@ -62,6 +95,7 @@ export function PlayingHud({ui}:ScreenProps){
   })):[];
   return <div className={`game-hud${hud.spectate&&hideHud?' hide-hud':''}${touchControls&&!hud.spectate?' touch-mode':''}`}>
   <div className="match-top" role="region" aria-label="Live match status"><div className="match-context"><span className="eyebrow">{hud.mapName?.toUpperCase()} / {hudRoute}</span><strong>{hud.modeName?.toUpperCase()}</strong><small className="phase-label">PHASE / {phase}</small>{isTeamMode(hudMode)&&<small className="team-label">{teamName(player.team)} TEAM · {hud.spectate?'FOLLOWING':'YOU'}</small>}</div><div className="match-clock" aria-label={`${hud.spectate?'Spectating':`${clock(hud.config.timeLimit-hud.time)} remaining`}`}><strong>{hud.spectate?'SPECTATING':clock(hud.config.timeLimit-hud.time)}</strong><small>{hud.net?'NETWORK MATCH':hud.config.botCount===0?'SOLO PRACTICE':isSingle?`FIRST TO ${hud.config.fragLimit} ${modeGoal(hudMode).toLowerCase()}`:''}</small></div><div className="frag-counter"><strong>{armsrace?ladderStatus(player,WEAPONS.length).rung+1:isTeamMode(hudMode)?teamScoreText(hud.teamScores??hud.teams)||player.frags:player.frags}<span>{hud.spectate?'':` / ${armsrace?WEAPONS.length:hud.config.fragLimit}`}</span></strong><small>{hud.spectate?`FOLLOWING ${player.name.toUpperCase()}`:armsrace?'LADDER RUNG':isTeamMode(hudMode)?modeGoal(hudMode):'YOUR FRAGS'}</small></div></div>
+  {cocs&&!hud.spectate&&<CocsReadout board={cocs} teamName={teamName}/>}
   {hud.spectate&&hud.net&&runtime.current&&<button type="button" className="spectator-return" onClick={()=>changeMode('lobby')}>RETURN TO LOBBY</button>}
   {hud.spectateLocal&&runtime.current&&<div className="spectate-cam-panel" role="status"><span className="eyebrow">SPECTATE BOTS</span><strong>{(CAMERA_MODE_LABELS as any)[runtime.current?.cameraMode]||String(runtime.current?.cameraMode||'auto').toUpperCase()}</strong><small>B CYCLE CAMERA · [ / ] FOLLOW BOT · F FREE CAM{runtime.current?.cameraMode==='free'?' · WASD / SPACE / SHIFT / CTRL':''}</small></div>}
   {isSingle&&<SinglePlayerHud single={single} onSelectUpgrade={selectHordeUpgrade} onResumeCheckpoint={resumeSingleplayer}/>}

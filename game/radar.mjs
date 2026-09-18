@@ -73,7 +73,17 @@ export function radarContacts(hud, player, {range = DEFAULT_RANGE} = {}) {
     if (!point) continue;
     contacts.push({kind: 'actor', id: actor.id, x: point.x, y: point.y, team: actor.team, self: actor.id === player.id, dead: !(Number(actor.health) > 0), vehicle: actor.vehicleId != null, revealed: point.clamped === true, offscreen: point.offscreen === true, bearing: point.bearing ?? null});
   }
-  for (const zone of Array.isArray(hud.objectives?.zones) ? hud.objectives.zones : []) {
+  // LATTICE STRIKE nodes carry `{owner, contested, progress:[p0,p1], live}` on
+  // the frozen cocs subtree, so the dial shows real control instead of the
+  // owner-less `objectives.zones` shortcut. Owned nodes read full; a capture
+  // in progress shows the leading team's share.
+  const cocsRadar = hud.objectives?.kind === 'cocs' && Array.isArray(hud.cocs?.nodes) ? hud.cocs.nodes : null;
+  const zoneSource = cocsRadar ? cocsRadar.map(node => {
+    const p = Array.isArray(node?.progress) ? node.progress : [0, 0];
+    const p0 = Number(p[0]) || 0, p1 = Number(p[1]) || 0, owned = node?.owner === 0 || node?.owner === 1;
+    return {id: node?.id, x: node?.x, z: node?.z, owner: owned ? node.owner : null, contested: node?.contested === true, progress: Math.round((owned ? 1 : Math.max(p0, p1)) * 100), captureTeam: owned ? node.owner : p0 > p1 ? 0 : p1 > p0 ? 1 : null};
+  }) : (hud.objectives?.zones || []);
+  for (const zone of Array.isArray(zoneSource) ? zoneSource : []) {
     const point = place(zone?.x, zone?.z);
     if (!point) continue;
     contacts.push({kind: 'zone', id: zone.id, label: zoneLabel(zone.id), x: point.x, y: point.y, owner: zone.owner ?? null, contested: zone.contested === true, progress: Number.isFinite(zone.progress) ? zone.progress : null, captureTeam: zone.captureTeam ?? null});
