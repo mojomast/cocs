@@ -1733,7 +1733,7 @@
       "engine": "retrocausal-echo-v1",
       "enabled": true,
       "credits": 2,
-      "consumer": "huge, diffuse reverb for the Void/neon maps; also a room-tone source. Audio-completion batch attempt (2026-09-18) was rejected at submission with a 422 ('params do not match the engine schema'): the plan's `stereo_width: 1.2` exceeds the engine maximum of 1.0, so no job was created and no credit was charged. The param is corrected to 1 here; per the batch rule a rejected job is not resubmitted in the same run, so ir-void is deferred to the next batch (2 cr, jobId not yet recorded).",
+      "consumer": "huge, diffuse reverb for the Void/neon maps; also a room-tone source. Audio-completion batch attempt (2026-09-18) was rejected at submission with a 422 ('params do not match the engine schema'): the plan's `stereo_width: 1.2` exceeds the engine maximum of 1.0, so no job was created and no credit was charged. Corrected to 1 here and baked in the follow-up run (2 cr, jobId recorded).",
       "params": {
         "emit": "audio",
         "ir_seconds": 5,
@@ -1766,7 +1766,8 @@
         "type": "ir",
         "name": "void",
         "bucket": "irs"
-      }
+      },
+      "jobId": "f721962c-584c-471b-9584-75b93c13e1c4"
     },
     {
       "id": "echo-arena",
