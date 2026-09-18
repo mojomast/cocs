@@ -1062,13 +1062,18 @@ function writeModule(baked) {
 
 // ---------------------------------------------------------------------------
 // Offline repair: rebuild the purely local, file-derived records (`ir`,
-// `echo-map`) from the raw results already committed under public/moth/files,
-// without an API call or a credit. This is how the shallow-tap bug is fixed for
-// the shipped `irs.cavern` record and how `echo-map` records are (re)generated.
+// `echo-map`, `audio-clip`) from the raw results already committed under
+// public/moth/files, without an API call or a credit. This is how the shallow-tap
+// bug is fixed for the shipped `irs.cavern` record, how `echo-map` records are
+// (re)generated, and how an `audio-clip` descriptor is corrected (for example an
+// over-long loop window) without paying for another engine run.
 // ---------------------------------------------------------------------------
 
-// Purely local bake types whose inputs are all committed raw files.
-const LOCAL_BAKE_TYPES = new Set(['ir', 'echo-map']);
+// Purely local bake types whose inputs are all committed raw files. `audio-clip`
+// joins them when `embed:false`: it decodes the downloaded `result.wav`, writes
+// the processed clip next to it and records a URL, so a descriptor-only fix
+// (e.g. a loop window that overran the real clip length) reparses offline.
+const LOCAL_BAKE_TYPES = new Set(['ir', 'echo-map', 'audio-clip']);
 
 // Map whatever the pipeline or an older download named a raw result onto the
 // slot keys a baker expects: `result.wav`, `ir.json`/`ir-json`, etc.
@@ -1093,7 +1098,7 @@ export function readLocalResult(dir) {
 // Rebuild the `irs`/`spaces` records for every enabled local-type job that has a
 // committed raw dir. Pure over the filesystem; exported for the regression tests.
 export function rebuildLocalBakes({ only, filesDir = FILES_DIR, manifest = readManifest(), log = () => {} } = {}) {
-  const out = { irs: {}, spaces: {} };
+  const out = { irs: {}, spaces: {}, audio: {} };
   for (const job of manifest.jobs || []) {
     if (job.enabled === false && job.id !== only) continue;
     if (only && job.id !== only) continue;
@@ -1121,7 +1126,7 @@ export async function repairModule({ only, log = () => {} } = {}) {
   const baked = mod.MOTH_BAKED;
   const rebuilt = rebuildLocalBakes({ only, log });
   for (const bucket of ['textures', 'normals', 'materials', 'sky', 'effects', 'levels', 'seeds', 'motifs', 'irs', 'audio', 'spaces']) baked[bucket] ??= {};
-  for (const bucket of ['irs', 'spaces']) Object.assign(baked[bucket], rebuilt[bucket]);
+  for (const bucket of ['irs', 'spaces', 'audio']) Object.assign(baked[bucket], rebuilt[bucket]);
   writeModule(baked);
   return { baked, rebuilt };
 }
@@ -1510,7 +1515,7 @@ async function main() {
   if (command === 'sources') { writeSources(); return; }
   if (command === 'repair') {
     const { rebuilt } = await repairModule({ only: args.only, log: (m) => console.error(m) });
-    const counts = { irs: Object.keys(rebuilt.irs).length, spaces: Object.keys(rebuilt.spaces).length };
+    const counts = { irs: Object.keys(rebuilt.irs).length, spaces: Object.keys(rebuilt.spaces).length, audio: Object.keys(rebuilt.audio).length };
     console.error(`\nRepaired offline (no credits): ${JSON.stringify(counts)}`);
     return;
   }

@@ -1399,8 +1399,499 @@ export const MOTH_BAKED = {
           "timeMs": 400
         }
       ]
+    },
+    "openair": {
+      "url": "/moth/files/ir-openair/result.wav",
+      "seconds": 1.5,
+      "sampleRate": 22050,
+      "channels": 2,
+      "taps": [
+        {
+          "site": 3,
+          "depth": 1,
+          "level": 0.43558,
+          "polarity": 1,
+          "fRe": 0.43558,
+          "fIm": 0,
+          "timeMs": 130
+        },
+        {
+          "site": 8,
+          "depth": 1,
+          "level": 0.43558,
+          "polarity": 1,
+          "fRe": 0.43558,
+          "fIm": 0,
+          "timeMs": 160
+        },
+        {
+          "site": 9,
+          "depth": 1,
+          "level": 0.43558,
+          "polarity": -1,
+          "fRe": -0.43558,
+          "fIm": 0,
+          "timeMs": 160
+        },
+        {
+          "site": 10,
+          "depth": 1,
+          "level": 0.43558,
+          "polarity": 1,
+          "fRe": 0.43558,
+          "fIm": 0,
+          "timeMs": 160
+        },
+        {
+          "site": 15,
+          "depth": 1,
+          "level": 0.43558,
+          "polarity": 1,
+          "fRe": 0.43558,
+          "fIm": 0,
+          "timeMs": 190
+        },
+        {
+          "site": 2,
+          "depth": 2,
+          "level": 0.4101,
+          "polarity": 1,
+          "fRe": 0.68336,
+          "fIm": -0.01414,
+          "timeMs": 290
+        },
+        {
+          "site": 3,
+          "depth": 2,
+          "level": 0.06402,
+          "polarity": -1,
+          "fRe": -0.09988,
+          "fIm": -0.03751,
+          "timeMs": 290
+        },
+        {
+          "site": 4,
+          "depth": 2,
+          "level": 0.4101,
+          "polarity": 1,
+          "fRe": 0.68336,
+          "fIm": -0.01414,
+          "timeMs": 290
+        },
+        {
+          "site": 7,
+          "depth": 2,
+          "level": 0.50444,
+          "polarity": 1,
+          "fRe": 0.84071,
+          "fIm": -0.00475,
+          "timeMs": 320
+        },
+        {
+          "site": 8,
+          "depth": 2,
+          "level": 0.07243,
+          "polarity": -1,
+          "fRe": -0.11453,
+          "fIm": -0.03814,
+          "timeMs": 320
+        },
+        {
+          "site": 9,
+          "depth": 2,
+          "level": 0.16206,
+          "polarity": -1,
+          "fRe": -0.23183,
+          "fIm": 0.1386,
+          "timeMs": 320
+        },
+        {
+          "site": 10,
+          "depth": 2,
+          "level": 0.07243,
+          "polarity": -1,
+          "fRe": -0.11453,
+          "fIm": -0.03814,
+          "timeMs": 320
+        },
+        {
+          "site": 11,
+          "depth": 2,
+          "level": 0.50444,
+          "polarity": 1,
+          "fRe": 0.84071,
+          "fIm": -0.00475,
+          "timeMs": 320
+        },
+        {
+          "site": 14,
+          "depth": 2,
+          "level": 0.4101,
+          "polarity": 1,
+          "fRe": 0.68336,
+          "fIm": -0.01414,
+          "timeMs": 350
+        },
+        {
+          "site": 15,
+          "depth": 2,
+          "level": 0.06402,
+          "polarity": -1,
+          "fRe": -0.09988,
+          "fIm": -0.03751,
+          "timeMs": 350
+        },
+        {
+          "site": 16,
+          "depth": 2,
+          "level": 0.4101,
+          "polarity": 1,
+          "fRe": 0.68336,
+          "fIm": -0.01414,
+          "timeMs": 350
+        },
+        {
+          "site": 1,
+          "depth": 3,
+          "level": 0.31853,
+          "polarity": 1,
+          "fRe": 0.88471,
+          "fIm": -0.01396,
+          "timeMs": 450
+        },
+        {
+          "site": 2,
+          "depth": 3,
+          "level": 0.13047,
+          "polarity": 1,
+          "fRe": 0.36139,
+          "fIm": -0.02732,
+          "timeMs": 450
+        },
+        {
+          "site": 3,
+          "depth": 3,
+          "level": 0.05666,
+          "polarity": 1,
+          "fRe": 0.15547,
+          "fIm": -0.02455,
+          "timeMs": 450
+        },
+        {
+          "site": 4,
+          "depth": 3,
+          "level": 0.13105,
+          "polarity": 1,
+          "fRe": 0.36302,
+          "fIm": -0.02704,
+          "timeMs": 450
+        },
+        {
+          "site": 5,
+          "depth": 3,
+          "level": 0.31823,
+          "polarity": 1,
+          "fRe": 0.88386,
+          "fIm": -0.01482,
+          "timeMs": 450
+        },
+        {
+          "site": 6,
+          "depth": 3,
+          "level": 0.34382,
+          "polarity": 1,
+          "fRe": 0.95505,
+          "fIm": 0.00008,
+          "timeMs": 480
+        },
+        {
+          "site": 7,
+          "depth": 3,
+          "level": 0.1532,
+          "polarity": 1,
+          "fRe": 0.42526,
+          "fIm": -0.01584,
+          "timeMs": 480
+        },
+        {
+          "site": 8,
+          "depth": 3,
+          "level": 0.04409,
+          "polarity": 1,
+          "fRe": 0.12188,
+          "fIm": -0.012,
+          "timeMs": 480
+        },
+        {
+          "site": 9,
+          "depth": 3,
+          "level": 0.04653,
+          "polarity": -1,
+          "fRe": -0.01923,
+          "fIm": 0.1278,
+          "timeMs": 480
+        },
+        {
+          "site": 10,
+          "depth": 3,
+          "level": 0.04432,
+          "polarity": 1,
+          "fRe": 0.1225,
+          "fIm": -0.01238,
+          "timeMs": 480
+        },
+        {
+          "site": 11,
+          "depth": 3,
+          "level": 0.15842,
+          "polarity": 1,
+          "fRe": 0.4398,
+          "fIm": -0.01501,
+          "timeMs": 480
+        },
+        {
+          "site": 13,
+          "depth": 3,
+          "level": 0.31853,
+          "polarity": 1,
+          "fRe": 0.88471,
+          "fIm": -0.01396,
+          "timeMs": 510
+        },
+        {
+          "site": 14,
+          "depth": 3,
+          "level": 0.13047,
+          "polarity": 1,
+          "fRe": 0.36139,
+          "fIm": -0.02732,
+          "timeMs": 510
+        },
+        {
+          "site": 15,
+          "depth": 3,
+          "level": 0.05666,
+          "polarity": 1,
+          "fRe": 0.15547,
+          "fIm": -0.02455,
+          "timeMs": 510
+        },
+        {
+          "site": 16,
+          "depth": 3,
+          "level": 0.13105,
+          "polarity": 1,
+          "fRe": 0.36302,
+          "fIm": -0.02704,
+          "timeMs": 510
+        },
+        {
+          "site": 17,
+          "depth": 3,
+          "level": 0.31823,
+          "polarity": 1,
+          "fRe": 0.88386,
+          "fIm": -0.01482,
+          "timeMs": 510
+        },
+        {
+          "site": 0,
+          "depth": 4,
+          "level": 0.20634,
+          "polarity": 1,
+          "fRe": 0.95527,
+          "fIm": -0.00494,
+          "timeMs": 610
+        },
+        {
+          "site": 1,
+          "depth": 4,
+          "level": 0.12375,
+          "polarity": 1,
+          "fRe": 0.57246,
+          "fIm": -0.02306,
+          "timeMs": 610
+        },
+        {
+          "site": 2,
+          "depth": 4,
+          "level": 0.0791,
+          "polarity": 1,
+          "fRe": 0.36542,
+          "fIm": -0.02412,
+          "timeMs": 610
+        },
+        {
+          "site": 3,
+          "depth": 4,
+          "level": 0.06046,
+          "polarity": 1,
+          "fRe": 0.27972,
+          "fIm": -0.01059,
+          "timeMs": 610
+        },
+        {
+          "site": 4,
+          "depth": 4,
+          "level": 0.07866,
+          "polarity": 1,
+          "fRe": 0.36306,
+          "fIm": -0.02817,
+          "timeMs": 610
+        },
+        {
+          "site": 5,
+          "depth": 4,
+          "level": 0.12722,
+          "polarity": 1,
+          "fRe": 0.58797,
+          "fIm": -0.03446,
+          "timeMs": 610
+        },
+        {
+          "site": 6,
+          "depth": 4,
+          "level": 0.16638,
+          "polarity": 1,
+          "fRe": 0.77025,
+          "fIm": -0.00606,
+          "timeMs": 640
+        },
+        {
+          "site": 7,
+          "depth": 4,
+          "level": 0.07077,
+          "polarity": 1,
+          "fRe": 0.3273,
+          "fIm": -0.01462,
+          "timeMs": 640
+        },
+        {
+          "site": 8,
+          "depth": 4,
+          "level": 0.04483,
+          "polarity": 1,
+          "fRe": 0.20746,
+          "fIm": 0.00596,
+          "timeMs": 640
+        },
+        {
+          "site": 9,
+          "depth": 4,
+          "level": 0.03195,
+          "polarity": 1,
+          "fRe": 0.1472,
+          "fIm": 0.01438,
+          "timeMs": 640
+        },
+        {
+          "site": 10,
+          "depth": 4,
+          "level": 0.04721,
+          "polarity": 1,
+          "fRe": 0.21854,
+          "fIm": -0.00232,
+          "timeMs": 640
+        },
+        {
+          "site": 11,
+          "depth": 4,
+          "level": 0.08156,
+          "polarity": 1,
+          "fRe": 0.37722,
+          "fIm": -0.01672,
+          "timeMs": 640
+        },
+        {
+          "site": 12,
+          "depth": 4,
+          "level": 0.20634,
+          "polarity": 1,
+          "fRe": 0.95527,
+          "fIm": -0.00494,
+          "timeMs": 670
+        },
+        {
+          "site": 13,
+          "depth": 4,
+          "level": 0.12375,
+          "polarity": 1,
+          "fRe": 0.57246,
+          "fIm": -0.02306,
+          "timeMs": 670
+        },
+        {
+          "site": 14,
+          "depth": 4,
+          "level": 0.0791,
+          "polarity": 1,
+          "fRe": 0.36542,
+          "fIm": -0.02412,
+          "timeMs": 670
+        },
+        {
+          "site": 15,
+          "depth": 4,
+          "level": 0.06046,
+          "polarity": 1,
+          "fRe": 0.27972,
+          "fIm": -0.01059,
+          "timeMs": 670
+        },
+        {
+          "site": 16,
+          "depth": 4,
+          "level": 0.07866,
+          "polarity": 1,
+          "fRe": 0.36306,
+          "fIm": -0.02817,
+          "timeMs": 670
+        },
+        {
+          "site": 17,
+          "depth": 4,
+          "level": 0.12722,
+          "polarity": 1,
+          "fRe": 0.58797,
+          "fIm": -0.03446,
+          "timeMs": 670
+        }
+      ]
     }
   },
+  "audio": {
+    "bed-ritual": {
+      "container": "wav",
+      "format": "pcm",
+      "sampleFormat": "pcm16",
+      "sampleRate": 22050,
+      "channels": 1,
+      "frames": 235494,
+      "seconds": 10.68,
+      "loopStart": 0.5,
+      "loopEnd": 10.5,
+      "gain": 3.778501,
+      "peak": 0.23819,
+      "trimStart": 0,
+      "trimEnd": 10.68,
+      "source": {
+        "sampleRate": 22050,
+        "channels": 1,
+        "bits": 16,
+        "format": "pcm",
+        "frames": 235494,
+        "seconds": 10.68
+      },
+      "file": "clip.wav",
+      "url": "/moth/files/bed-ritual/clip.wav",
+      "meta": {
+        "kind": "bed",
+        "group": "ritual",
+        "bus": "ambience"
+      }
+    }
+  },
+  "spaces": {},
   "provenance": {
     "labyrinth-arena": {
       "engine": "labyrinth-v1",
@@ -1772,10 +2263,15 @@ export const MOTH_BAKED = {
       "mode": "emu",
       "name": "industrial_mesh",
       "credits": 1
+    },
+    "ir-openair": {
+      "engine": "retrocausal-echo-v1",
+      "jobId": "8bc9c452-a577-4c03-91be-3674886d4d16",
+      "mode": "emu",
+      "name": "openair",
+      "credits": 2
     }
-  },
-  "spaces": {},
-  "audio": {}
+  }
 };
 
 export default MOTH_BAKED;

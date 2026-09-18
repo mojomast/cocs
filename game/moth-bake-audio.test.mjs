@@ -259,6 +259,32 @@ test('rebuildLocalBakes repairs ir/echo-map records from committed raw files', (
   }
 });
 
+test('rebuildLocalBakes repairs an audio-clip descriptor from a committed result.wav', () => {
+  const dir = tmpDir('repair-clip');
+  try {
+    const jobDir = path.join(dir, 'bed-test');
+    fs.mkdirSync(jobDir, { recursive: true });
+    fs.writeFileSync(path.join(jobDir, 'result.wav'), toneWav(2, 8000));
+    const manifest = {
+      jobs: [{
+        id: 'bed-test', engine: 'qrc-audio-v1', enabled: true, raw: 'bed-test',
+        bake: { type: 'audio-clip', name: 'bed-test', bucket: 'audio', mixdown: true, embed: false, urlBase: '/moth/files', loopStart: 0.25, loopEnd: 1.5, normalize: true, peak: 0.9 },
+      }],
+    };
+    const rebuilt = rebuildLocalBakes({ filesDir: dir, manifest, log: () => {} });
+    const record = rebuilt.audio['bed-test'];
+    assert.ok(record, 'the audio bucket is rebuilt offline');
+    assert.equal(record.url, '/moth/files/bed-test/clip.wav');
+    assert.equal(record.file, 'clip.wav');
+    assert.equal(record.loopStart, 0.25);
+    assert.equal(record.loopEnd, 1.5);
+    assert.equal(Object.prototype.hasOwnProperty.call(record, 'data'), false, 'a repaired clip is not embedded');
+    assert.ok(fs.existsSync(path.join(jobDir, 'clip.wav')), 'the processed WAV is written next to the raw result');
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 test('readLocalResult maps legacy and current download names to slots', () => {
   const dir = tmpDir('local');
   try {

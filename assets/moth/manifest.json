@@ -1602,7 +1602,7 @@
     {
       "id": "ir-openair",
       "engine": "retrocausal-echo-v1",
-      "enabled": false,
+      "enabled": true,
       "credits": 2,
       "consumer": "minimum pipeline proof (2 of 8 cr): per-map reverb space; exercises the ir baker + WAV serve/decode/reverb",
       "params": {
@@ -1637,18 +1637,19 @@
         "type": "ir",
         "name": "openair",
         "maxTaps": 64
-      }
+      },
+      "jobId": "8bc9c452-a577-4c03-91be-3674886d4d16"
     },
     {
       "id": "echo-arena",
       "engine": "otoc-echo-v1",
-      "enabled": false,
+      "enabled": true,
       "credits": 1,
-      "consumer": "minimum pipeline proof (1 of 8 cr): tap map for the delay/feedback space; exercises the echo-map baker",
+      "consumer": "minimum pipeline proof (1 of 8 cr): tap map for the delay/feedback space; exercises the echo-map baker. First attempt (2026-09-18, job 99b64320-2524-4f17-8f69-8e2eeb43ef02) failed: 5x5=25 qubits exceeds the aer budget of 24 ('too_many_qubits', retryable:false), so no space was produced. The grid is reduced to 6x4=24 for the next batch (do not resubmit without a fresh 1 cr).",
       "params": {
         "lattice": "square",
-        "width": 5,
-        "height": 5,
+        "width": 6,
+        "height": 4,
         "depth": 8,
         "kick": "Z",
         "theta_zz": 0.7853981634,
@@ -1673,9 +1674,9 @@
     {
       "id": "bed-ritual",
       "engine": "qrc-audio-v1",
-      "enabled": false,
+      "enabled": true,
       "credits": 5,
-      "consumer": "minimum pipeline proof (5 of 8 cr): ambient bed -> ambienceBus; exercises makeSourceAudio -> upload -> WAV -> the audio-clip baker -> the runtime bank",
+      "consumer": "minimum pipeline proof (5 of 8 cr): ambient bed -> ambienceBus; exercises makeSourceAudio -> upload -> WAV -> the audio-clip baker -> the runtime bank. Verified shape: slot `result` is pcm16/22050/mono; duration = length*chunk_seconds - (length-1)*crossfade = 12 - 11*0.12 = 10.68 s, so the loop window is 0.5..10.5 s (11.5 s overran the clip).",
       "input": {
         "audio": "sources/bed-seed.wav"
       },
@@ -1698,7 +1699,7 @@
         "embed": false,
         "urlBase": "/moth/files",
         "loopStart": 0.5,
-        "loopEnd": 11.5,
+        "loopEnd": 10.5,
         "normalize": true,
         "peak": 0.9,
         "meta": {
@@ -1706,7 +1707,8 @@
           "group": "ritual",
           "bus": "ambience"
         }
-      }
+      },
+      "jobId": "3b80b014-18da-412a-8c14-06d7fc668593"
     }
   ]
 }
