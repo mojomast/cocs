@@ -11,7 +11,7 @@ import {resolveAttachments,applyAttachmentsToWeapon} from './attachments.mjs';
 import {terrainWallSegments} from './terrain.mjs';
 import {ensureTerrainBvh,terrainRayHitFast} from './terrain-bvh.mjs';
 import {floorHeightAtLattice,makeFloorQuery} from './floor-lattice.mjs';
-import {blockObstructed,blockSupportTop,candidates,collisionHash,NAV_BAKE_VERSION,rayCandidates} from './spatial.mjs';
+import {blockObstructed,blockSupportTop,candidates,collisionHash,NAV_BAKE_VERSION,rayWorldBlockHit} from './spatial.mjs';
 import {createVehicle,GUNTRUCK,respawnVehicle,stepVehicle,stepVehicleWeapon,vehicleCanEnter,vehicleMuzzles,vehicleSeatFor,vehicleSeatPosition,vehicleMounted,takeVehicleSeat,leaveVehicleSeat,vehicleSeatOpen} from './vehicles.mjs';
 import {objectiveTemplate} from './mode-data.mjs';
 import {cocsSnapshot,cocsSpotDamageScale} from './cocs.mjs';
@@ -217,7 +217,7 @@ export function moveActor(a,input,dt,arena=MAPS[0],config={speed:1,gravity:1},ro
    const support=supportAt(a.x,a.z,arena);if(a.grounded&&support!==null&&Math.abs(a.y-support)<.35)a.lastValid={x:a.x,y:a.y,z:a.z};
 }
 function boxHit(o,d,b,max){let lo=0,hi=max;for(const k of ['x','y','z']){const c=k==='y'?b.h/2:b[k],s=k==='x'?b.w/2:k==='z'?b.d/2:b.h/2;if(Math.abs(d[k])<1e-8){if(o[k]<c-s||o[k]>c+s)return null;}else{let t1=(c-s-o[k])/d[k],t2=(c+s-o[k])/d[k];if(t1>t2)[t1,t2]=[t2,t1];lo=Math.max(lo,t1);hi=Math.min(hi,t2);if(lo>hi)return null;}}return lo;}
-  export function rayWorld(o,d,max=100,arena=MAPS[0]){if(!finitePoint(o)||!finitePoint(d)||(!Number.isFinite(max)&&max!==Infinity)||max<0||Math.hypot(d.x,d.y,d.z)<=1e-9)return 0;let best=max;for(const b of rayCandidates(arena,o,d,best)){const t=boxHit(o,d,b,best);if(t!==null&&t<best)best=t;}
+  export function rayWorld(o,d,max=100,arena=MAPS[0]){if(!finitePoint(o)||!finitePoint(d)||(!Number.isFinite(max)&&max!==Infinity)||max<0||Math.hypot(d.x,d.y,d.z)<=1e-9)return 0;let best=rayWorldBlockHit(arena,o,d,max);
    if(arena.terrain){const hit=terrainRayHitFast(ensureTerrainBvh(arena.terrain),o,d,best);if(hit&&hit.distance<best)best=hit.distance;}
    else {
     // Analytic floor/ramp intersection by bounded ray marching, refined at first crossing.

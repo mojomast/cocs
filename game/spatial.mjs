@@ -115,6 +115,17 @@ export function makeBlockIndex(arena) {
     cells,
     serial: 0,
     seen: new Int32Array(blocks.length),
+    blockBvh: null,
+    blockBvhRef: null,
+  };
+  const rayBvh = () => {
+    // In-place block edits on a mutable arena must go through
+    // invalidateBlockIndex, which drops this whole state; a frozen template is
+    // baked once. Identity/length changes already rebuild via the guard above.
+    if (state.blockBvh && state.blockBvhRef === blocks) return state.blockBvh;
+    state.blockBvh = bakeBlockBvh(blocks);
+    state.blockBvhRef = blocks;
+    return state.blockBvh;
   };
   const index = {
     arena,
@@ -127,6 +138,8 @@ export function makeBlockIndex(arena) {
     rows,
     candidates: (x, z, r) => candidateBlocks(state, x, z, r),
     rayCandidates: (origin, direction, max) => rayCandidateBlocks(state, origin, direction, max),
+    rayBvh,
+    rayBlockHit: (origin, direction, max) => rayBlockHit(rayBvh(), origin, direction, max),
   };
   indexCache.set(arena, index);
   return index;
@@ -244,10 +257,197 @@ function rayCandidateBlocks(state, origin, direction, max) {
   return out;
 }
 
+// ---- block ray BVH --------------------------------------------------------
+//
+// The uniform grid above narrows a world ray to a superset of blocks, but on a
+// long ray across a dense map it still hands `boxHit` dozens of candidates. A
+// deterministic median-split BVH over the static block AABBs prunes the tree by
+// the current nearest hit instead, so `rayWorld` tests only the handful of
+// boxes the ray actually reaches. The traversal returns the *same* nearest
+// entry distance as the linear `min(boxHit)` scan: node AABBs are conservative
+// hulls of their contents, the leaf test runs the identical box arithmetic
+// (core.boxHit, mirrored below so spatial.mjs stays independent of core), and
+// ties are distance-equal so the numeric result cannot drift.
+//
+// Build determinism mirrors terrain-bvh.mjs: median split on the widest centroid
+// axis, original block index as the tie-break, so an arena always bakes the
+// same tree. The BVH lives on the same cached index as the grid, so the
+// documented `invalidateBlockIndex` contract (identity/length change on mutable
+// arenas, frozen templates cached forever) covers both structures.
+
+export const BLOCK_BVH_VERSION = 1;
+export const DEFAULT_BLOCK_BVH_LEAF = 8;
+
+const RAY_EPS = 1e-12;
+const BOUND_PAD = 1e-7;
+const MAX_BLOCK_STACK = 256;
+
+// Bit-for-bit the arithmetic of core.mjs boxHit, unrolled over x, y, z. Kept
+// local so the block semantics have one home and core's ray path can delegate.
+function boxHitDistance(o, d, b, max) {
+  let lo = 0, hi = max;
+  const wx = b.w / 2, dz = b.d / 2;
+  // x
+  if (Math.abs(d.x) < 1e-8) { if (o.x < b.x - wx || o.x > b.x + wx) return null; }
+  else { let t1 = (b.x - wx - o.x) / d.x, t2 = (b.x + wx - o.x) / d.x; if (t1 > t2) { const t = t1; t1 = t2; t2 = t; } lo = Math.max(lo, t1); hi = Math.min(hi, t2); if (lo > hi) return null; }
+  // y (core's boxHit centres at b.h/2 with half-extent b.h/2, i.e. [0, b.h])
+  if (Math.abs(d.y) < 1e-8) { if (o.y < 0 || o.y > b.h) return null; }
+  else { let t1 = (0 - o.y) / d.y, t2 = (b.h - o.y) / d.y; if (t1 > t2) { const t = t1; t1 = t2; t2 = t; } lo = Math.max(lo, t1); hi = Math.min(hi, t2); if (lo > hi) return null; }
+  // z
+  if (Math.abs(d.z) < 1e-8) { if (o.z < b.z - dz || o.z > b.z + dz) return null; }
+  else { let t1 = (b.z - dz - o.z) / d.z, t2 = (b.z + dz - o.z) / d.z; if (t1 > t2) { const t = t1; t1 = t2; t2 = t; } lo = Math.max(lo, t1); hi = Math.min(hi, t2); if (lo > hi) return null; }
+  return lo;
+}
+
+/** Bake a block-AABB BVH. Pure; use `ensureBlockBvh` on the hot path. */
+export function bakeBlockBvh(blocks, options = {}) {
+  if (!Array.isArray(blocks)) throw new TypeError('Invalid block list');
+  const leafSize = Math.max(1, Math.floor(options.leafSize ?? DEFAULT_BLOCK_BVH_LEAF));
+  const count = blocks.length;
+  const box = new Float64Array(count * 6);
+  const centroid = new Float64Array(count * 3);
+  for (let i = 0; i < count; i++) {
+    const b = blocks[i] || {};
+    const w = Number.isFinite(b.w) ? b.w : 0, d = Number.isFinite(b.d) ? b.d : 0, h = Number.isFinite(b.h) ? b.h : 0;
+    const x = Number.isFinite(b.x) ? b.x : 0, z = Number.isFinite(b.z) ? b.z : 0;
+    const minX = x - w / 2, maxX = x + w / 2, minY = Math.min(0, h), maxY = Math.max(0, h), minZ = z - d / 2, maxZ = z + d / 2;
+    const bb = i * 6;
+    box[bb] = minX; box[bb + 1] = minY; box[bb + 2] = minZ; box[bb + 3] = maxX; box[bb + 4] = maxY; box[bb + 5] = maxZ;
+    const cb = i * 3;
+    centroid[cb] = (minX + maxX) / 2; centroid[cb + 1] = (minY + maxY) / 2; centroid[cb + 2] = (minZ + maxZ) / 2;
+  }
+  const order = new Int32Array(count);
+  for (let i = 0; i < count; i++) order[i] = i;
+  const nodeBounds = [], nodeLeft = [], nodeRight = [], nodeStart = [], nodeCount = [];
+  const addNode = (minX, minY, minZ, maxX, maxY, maxZ, left, right, start, count2) => {
+    nodeBounds.push(minX - BOUND_PAD, minY - BOUND_PAD, minZ - BOUND_PAD, maxX + BOUND_PAD, maxY + BOUND_PAD, maxZ + BOUND_PAD);
+    nodeLeft.push(left); nodeRight.push(right); nodeStart.push(start); nodeCount.push(count2);
+    return nodeLeft.length - 1;
+  };
+  const buildRange = (lo, hi) => {
+    let minX = Infinity, minY = Infinity, minZ = Infinity, maxX = -Infinity, maxY = -Infinity, maxZ = -Infinity;
+    let cMinX = Infinity, cMaxX = -Infinity, cMinY = Infinity, cMaxY = -Infinity, cMinZ = Infinity, cMaxZ = -Infinity;
+    for (let p = lo; p < hi; p++) {
+      const i = order[p], bb = i * 6;
+      if (box[bb] < minX) minX = box[bb]; if (box[bb + 3] > maxX) maxX = box[bb + 3];
+      if (box[bb + 1] < minY) minY = box[bb + 1]; if (box[bb + 4] > maxY) maxY = box[bb + 4];
+      if (box[bb + 2] < minZ) minZ = box[bb + 2]; if (box[bb + 5] > maxZ) maxZ = box[bb + 5];
+      const cb = i * 3;
+      if (centroid[cb] < cMinX) cMinX = centroid[cb]; if (centroid[cb] > cMaxX) cMaxX = centroid[cb];
+      if (centroid[cb + 1] < cMinY) cMinY = centroid[cb + 1]; if (centroid[cb + 1] > cMaxY) cMaxY = centroid[cb + 1];
+      if (centroid[cb + 2] < cMinZ) cMinZ = centroid[cb + 2]; if (centroid[cb + 2] > cMaxZ) cMaxZ = centroid[cb + 2];
+    }
+    const span = Math.max(cMaxX - cMinX, cMaxY - cMinY, cMaxZ - cMinZ);
+    const rangeCount = hi - lo;
+    if (rangeCount <= leafSize || !(span > 1e-12)) return addNode(minX, minY, minZ, maxX, maxY, maxZ, -1, -1, lo, rangeCount);
+    const ex = cMaxX - cMinX, ey = cMaxY - cMinY, ez = cMaxZ - cMinZ;
+    const axis = ey > ex && ey >= ez ? 1 : ez > ex ? 2 : 0;
+    order.subarray(lo, hi).sort((p, q) => {
+      const diff = centroid[p * 3 + axis] - centroid[q * 3 + axis];
+      return diff !== 0 ? diff : p - q;
+    });
+    const mid = (lo + hi) >> 1;
+    const left = buildRange(lo, mid);
+    const right = buildRange(mid, hi);
+    return addNode(minX, minY, minZ, maxX, maxY, maxZ, left, right, -1, -1);
+  };
+  const root = count > 0 ? buildRange(0, count) : -1;
+  return {
+    version: BLOCK_BVH_VERSION,
+    leafSize,
+    blocks,
+    count,
+    root,
+    nodeBounds: Float64Array.from(nodeBounds),
+    nodeLeft: Int32Array.from(nodeLeft),
+    nodeRight: Int32Array.from(nodeRight),
+    nodeStart: Int32Array.from(nodeStart),
+    nodeCount: Int32Array.from(nodeCount),
+    order,
+  };
+}
+
+// Slab entry distance to one node, or -1 on miss. Conservative (RAY_EPS is
+// tighter than boxHit's 1e-8 parallel threshold) so it can only fail to prune.
+function blockNodeEntry(bvh, index, ox, oy, oz, dx, dy, dz, maxT) {
+  const bounds = bvh.nodeBounds, base = index * 6;
+  let tmin = 0, tmax = maxT;
+  if (Math.abs(dx) < RAY_EPS) { if (ox < bounds[base] || ox > bounds[base + 3]) return -1; }
+  else { const inv = 1 / dx; let t1 = (bounds[base] - ox) * inv, t2 = (bounds[base + 3] - ox) * inv; if (t1 > t2) { const t = t1; t1 = t2; t2 = t; } if (t1 > tmin) tmin = t1; if (t2 < tmax) tmax = t2; if (tmin > tmax) return -1; }
+  if (Math.abs(dy) < RAY_EPS) { if (oy < bounds[base + 1] || oy > bounds[base + 4]) return -1; }
+  else { const inv = 1 / dy; let t1 = (bounds[base + 1] - oy) * inv, t2 = (bounds[base + 4] - oy) * inv; if (t1 > t2) { const t = t1; t1 = t2; t2 = t; } if (t1 > tmin) tmin = t1; if (t2 < tmax) tmax = t2; if (tmin > tmax) return -1; }
+  if (Math.abs(dz) < RAY_EPS) { if (oz < bounds[base + 2] || oz > bounds[base + 5]) return -1; }
+  else { const inv = 1 / dz; let t1 = (bounds[base + 2] - oz) * inv, t2 = (bounds[base + 5] - oz) * inv; if (t1 > t2) { const t = t1; t1 = t2; t2 = t; } if (t1 > tmin) tmin = t1; if (t2 < tmax) tmax = t2; if (tmin > tmax) return -1; }
+  return tmin;
+}
+
+const blockStack = new Int32Array(MAX_BLOCK_STACK);
+const blockStackEntry = new Float64Array(MAX_BLOCK_STACK);
+
+/**
+ * Nearest block entry distance for the ray, exactly equal to
+ * `min(boxHit(o,d,b,max))` over the arena's blocks. Returns `max` when nothing
+ * is hit (the caller combines it with terrain by strict `<`, so a tie keeps the
+ * block result, matching the linear scan).
+ */
+export function rayBlockHit(bvh, origin, direction, max = Infinity) {
+  if (!bvh || typeof bvh !== 'object') throw new TypeError('Invalid block bvh');
+  if (!origin || !direction) throw new TypeError('Invalid ray query');
+  const ox = origin.x, oy = origin.y, oz = origin.z;
+  const dx = direction.x, dy = direction.y, dz = direction.z;
+  if (![ox, oy, oz, dx, dy, dz].every(finite)) throw new TypeError('Invalid ray query');
+  if ((!Number.isFinite(max) && max !== Infinity) || max < 0) throw new TypeError('Invalid ray query');
+  let best = max;
+  if (bvh.root < 0) return best;
+  const rootEntry = blockNodeEntry(bvh, bvh.root, ox, oy, oz, dx, dy, dz, max);
+  if (rootEntry < 0) return best;
+  blockStack[0] = bvh.root; blockStackEntry[0] = rootEntry;
+  let sp = 1;
+  const blocks = bvh.blocks;
+  while (sp > 0) {
+    --sp;
+    const node = blockStack[sp];
+    const leafCount = bvh.nodeCount[node];
+    if (leafCount >= 0) {
+      const start = bvh.nodeStart[node];
+      for (let p = start; p < start + leafCount; p++) {
+        const t = boxHitDistance(origin, direction, blocks[bvh.order[p]], best);
+        if (t !== null && t < best) best = t;
+      }
+      continue;
+    }
+    const left = bvh.nodeLeft[node], right = bvh.nodeRight[node];
+    const leftEntry = blockNodeEntry(bvh, left, ox, oy, oz, dx, dy, dz, best);
+    const rightEntry = blockNodeEntry(bvh, right, ox, oy, oz, dx, dy, dz, best);
+    if (leftEntry >= 0 && rightEntry >= 0) {
+      if (sp + 2 > MAX_BLOCK_STACK) return best; // balanced tree: unreachable
+      if (leftEntry < rightEntry) { blockStack[sp] = right; blockStackEntry[sp] = rightEntry; sp++; blockStack[sp] = left; blockStackEntry[sp] = leftEntry; sp++; }
+      else { blockStack[sp] = left; blockStackEntry[sp] = leftEntry; sp++; blockStack[sp] = right; blockStackEntry[sp] = rightEntry; sp++; }
+    } else if (leftEntry >= 0) { blockStack[sp] = left; blockStackEntry[sp] = leftEntry; sp++; }
+    else if (rightEntry >= 0) { blockStack[sp] = right; blockStackEntry[sp] = rightEntry; sp++; }
+  }
+  return best;
+}
+
+/** Stable content hash of a baked block BVH (determinism / cache-key tests). */
+export function blockBvhHash(bvh) {
+  if (!bvh || typeof bvh !== 'object') throw new TypeError('Invalid block bvh');
+  if (typeof bvh.hash === 'string') return bvh.hash;
+  let h = 0x811c9dc5;
+  const fold = array => {
+    const bytes = new Uint8Array(array.buffer, array.byteOffset, array.byteLength);
+    for (let i = 0; i < bytes.length; i++) { h ^= bytes[i]; h = Math.imul(h, 0x01000193) >>> 0; }
+  };
+  fold(bvh.nodeBounds); fold(bvh.nodeLeft); fold(bvh.nodeRight); fold(bvh.nodeStart); fold(bvh.nodeCount); fold(bvh.order);
+  bvh.hash = `${BLOCK_BVH_VERSION}:${hex(h)}`;
+  return bvh.hash;
+}
+
 // ---- top-level convenience + integration helpers --------------------------
 
 export function candidates(arena, x, z, r) { return makeBlockIndex(arena).candidates(x, z, r); }
 export function rayCandidates(arena, origin, direction, max) { return makeBlockIndex(arena).rayCandidates(origin, direction, max); }
+export function rayWorldBlockHit(arena, origin, direction, max = Infinity) { return makeBlockIndex(arena).rayBlockHit(origin, direction, max); }
 
 /**
  * The block half of core.obstructed, using the broadphase. Exact same
