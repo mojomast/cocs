@@ -66,9 +66,61 @@ const latticeSlice={
  ],
  terminals:[terminal('relay-0-terminal','relay-0','relay',0,6)],
  lanes:[
-  lane('north-road','vehicle-road',[[-108,NORTH],[-54,NORTH],[0,NORTH],[54,NORTH],[108,NORTH]],{width:8,slopeCap:.3}),
-  lane('centre-cqc','cqc',[[-108,CENTRE],[-54,CENTRE],[0,CENTRE],[54,CENTRE],[108,CENTRE]],{width:6,slopeCap:.2}),
-  lane('south-flank','zipline-flank',[[-108,SOUTH],[-54,SOUTH],[0,SOUTH],[54,SOUTH],[108,SOUTH]],{width:7,slopeCap:.25}),
+  lane('north-road','vehicle-road',[[-108,NORTH],[-54,NORTH],[0,NORTH],[54,NORTH],[108,NORTH]],{width:8,slopeCap:.3,identity:'vehicle-road',vehicles:true,bypassFraction:.5,chokepoints:2,landmark:'gantry'}),
+  lane('centre-cqc','cqc',[[-108,CENTRE],[-54,CENTRE],[0,CENTRE],[54,CENTRE],[108,CENTRE]],{width:6,slopeCap:.2,identity:'cqc',vehicles:false,bypassFraction:.5,chokepoints:2,landmark:'foundry-chimney'}),
+  lane('south-flank','zipline-flank',[[-108,SOUTH],[-54,SOUTH],[0,SOUTH],[54,SOUTH],[108,SOUTH]],{width:7,slopeCap:.25,identity:'zipline-flank',vehicles:false,bypassFraction:.5,chokepoints:1,landmark:'relay-spire'}),
+ ],
+ // §6A.1/§6A.2 traversal devices. Neutral, one-way ziplines on the south flank,
+ // a ring-road launcher on the north vehicle lane and CQC teleporters/trampolines
+ // down the centre. Every exit carries the §6A.3 arrival contract (r >= 5 m,
+ // >= 1.0 s, >= 15 m from every spawn, >= 2 approaches, off every capture radius).
+ traversal:[
+  // North vehicle road: one launcher bridges the ring road (secondary traversal).
+  {id:'lap-n',kind:'launcher',lane:'north-road',from:{x:-30,z:NORTH,y:0},target:{x:-52,z:-42,y:0},
+   arrival:{x:-52,z:-42,r:5,seconds:1.5,approaches:2,enemySpawnDistanceMeters:75},
+   lockable:true,cuttable:true,vehiclesAllowed:false,bypassFraction:.5},
+  // Centre CQC: short source teleporters and two terrace trampolines. No vehicles.
+  {id:'tp-c-w',kind:'teleporter',lane:'centre-cqc',from:{x:-36,z:CENTRE,y:0},to:{x:-20,z:CENTRE,y:0},
+   arrival:{x:-20,z:CENTRE,r:5,seconds:1.5,approaches:2,enemySpawnDistanceMeters:92},
+   cuttable:true,lockable:true,vehiclesAllowed:false,bypassFraction:.5},
+  {id:'tp-c-e',kind:'teleporter',lane:'centre-cqc',from:{x:36,z:CENTRE,y:0},to:{x:20,z:CENTRE,y:0},
+   arrival:{x:20,z:CENTRE,r:5,seconds:1.5,approaches:2,enemySpawnDistanceMeters:92},
+   cuttable:true,lockable:true,vehiclesAllowed:false,bypassFraction:.5},
+  {id:'pad-c-n',kind:'jump-pad',lane:'centre-cqc',from:{x:-16,z:16,y:0},power:16,
+   arrival:{x:-16,z:22,r:5,seconds:1.2,approaches:2,enemySpawnDistanceMeters:98},
+   cuttable:true,lockable:true,vehiclesAllowed:false,bypassFraction:.4},
+  {id:'pad-c-s',kind:'jump-pad',lane:'centre-cqc',from:{x:16,z:-16,y:0},power:16,
+   arrival:{x:16,z:-22,r:5,seconds:1.2,approaches:2,enemySpawnDistanceMeters:98},
+   cuttable:true,lockable:true,vehiclesAllowed:false,bypassFraction:.4},
+  // South flank: the fastest rotate, the most cuttable. Four one-way ziplines
+  // and two jump pads; no vehicles.
+  {id:'zip-s-w',kind:'zipline',lane:'south-flank',from:{x:-40,z:SOUTH,y:0},to:{x:-6,z:44,y:0},
+   arrival:{x:-6,z:44,r:5,seconds:1.5,approaches:2,enemySpawnDistanceMeters:113},
+   cuttable:true,vehiclesAllowed:false,bypassFraction:.5,speed:9},
+  {id:'zip-s-e',kind:'zipline',lane:'south-flank',from:{x:40,z:SOUTH,y:0},to:{x:6,z:44,y:0},
+   arrival:{x:6,z:44,r:5,seconds:1.5,approaches:2,enemySpawnDistanceMeters:114},
+   cuttable:true,vehiclesAllowed:false,bypassFraction:.5,speed:9},
+  {id:'zip-s-w2',kind:'zipline',lane:'south-flank',from:{x:-88,z:SOUTH,y:0},to:{x:-60,z:46,y:0},
+   arrival:{x:-60,z:46,r:5,seconds:1.5,approaches:2,enemySpawnDistanceMeters:68},
+   cuttable:true,vehiclesAllowed:false,bypassFraction:.5,speed:9},
+  {id:'zip-s-e2',kind:'zipline',lane:'south-flank',from:{x:88,z:SOUTH,y:0},to:{x:60,z:46,y:0},
+   arrival:{x:60,z:46,r:5,seconds:1.5,approaches:2,enemySpawnDistanceMeters:73},
+   cuttable:true,vehiclesAllowed:false,bypassFraction:.5,speed:9},
+  {id:'pad-s-w',kind:'jump-pad',lane:'south-flank',from:{x:-26,z:SOUTH,y:0},power:15,
+   arrival:{x:-26,z:44,r:5,seconds:1.2,approaches:2,enemySpawnDistanceMeters:95},
+   cuttable:true,lockable:true,vehiclesAllowed:false,bypassFraction:.4},
+  {id:'pad-s-e',kind:'jump-pad',lane:'south-flank',from:{x:30,z:SOUTH,y:0},power:15,
+   arrival:{x:30,z:44,r:5,seconds:1.2,approaches:2,enemySpawnDistanceMeters:95},
+   cuttable:true,lockable:true,vehiclesAllowed:false,bypassFraction:.4},
+ ],
+ // §6A.1/§6A.7 depots: one never-capturable HQ depot per team plus two neutral
+ // forward depots, all on the north vehicle road. Sited >=30 m from a node
+ // capture centre and >=12 m from a chokepoint, with the owner-only 6 m apron.
+ depots:[
+  {id:'depot-hq-w',lane:'north-road',team:0,hq:true,x:-100,z:NORTH,y:0,exits:2,nodeDistanceMeters:51,chokepointDistanceMeters:22,vehicle:'puma'},
+  {id:'depot-hq-e',lane:'north-road',team:1,hq:true,x:100,z:NORTH,y:0,exits:2,nodeDistanceMeters:51,chokepointDistanceMeters:22,vehicle:'puma'},
+  {id:'depot-fwd-w',lane:'north-road',team:null,x:-70,z:NORTH,y:0,exits:2,nodeDistanceMeters:53,chokepointDistanceMeters:20,vehicle:'puma'},
+  {id:'depot-fwd-e',lane:'north-road',team:null,x:70,z:NORTH,y:0,exits:2,nodeDistanceMeters:53,chokepointDistanceMeters:20,vehicle:'puma'},
  ],
  teamSpawns:teamSpawns([[-116,0],[-112,-4],[-112,4]],[[116,0],[112,4],[112,-4]]),
  flagSpawns:flagSpawns(-116,116),

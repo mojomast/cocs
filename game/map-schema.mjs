@@ -1,3 +1,4 @@
+import {validateTraversal,validateLane} from './cocs-economy.mjs';
 export const freeze=value=>{if(value&&typeof value==='object'&&!Object.isFrozen(value)){Object.values(value).forEach(freeze);Object.freeze(value);}return value;};
 export const wall=(x,z,w,d,h=9,kind='wall')=>({x,z,w,d,h,kind});
 export const cover=(x,z,w=3,d=2,h=2,kind='cover')=>({x,z,w,d,h,kind});
@@ -54,6 +55,75 @@ const inBounds=(bounds,x,z)=>x>=bounds.minX&&x<=bounds.maxX&&z>=bounds.minZ&&z<=
 const PLAY_BOUNDS_FRONTAGE_MAX=240;
 const rectangle=b=>Boolean(b)&&finite(b.minX)&&finite(b.maxX)&&finite(b.minZ)&&finite(b.maxZ)&&b.minX<b.maxX&&b.minZ<b.maxZ;
 const latticeFrame=map=>rectangle(map.playBounds)?{...map.playBounds,label:'playBounds'}:rectangle(map.bounds)?{...map.bounds,label:'map.bounds'}:null;
+
+// §6A.2.1 traversal layer: the map opts in by authoring `traversal`/`depots`.
+// When it does, all three lanes must carry the fixed doctrine fields, every
+// device must match its lane identity, and every exit must honour arrival
+// protection (>=5 m, >=1.0 s, >=15 m from every spawn, >=2 approaches, off a
+// capture radius). Legacy maps that never author the layer see no new errors.
+function traversalContext(map){
+ const lanes=Array.isArray(map.lanes)?map.lanes:[];
+ const nodes=Array.isArray(map.nodes)?map.nodes:[];
+ const spawns=[];
+ const collect=value=>{
+  if(!value)return;
+  if(Array.isArray(value)){
+   if(Array.isArray(value[0])){for(const entry of value)collect(entry);}
+   else if(finite(value[0])&&finite(value[1]))spawns.push({x:value[0],z:value[1]});
+  }else if(typeof value==='object'){
+   if(finite(value.x)&&finite(value.z))spawns.push({x:value.x,z:value.z});
+   else for(const entry of Object.values(value))collect(entry);
+  }
+ };
+ collect(map.teamSpawns);
+ if(!spawns.length)collect(map.spawns);
+ return {lanes,nodes,spawns,requireLane:true,requireArrival:true};
+}
+
+function traversalLayerIssues(map){
+ const errors=[];
+ if(map.traversal===undefined&&map.depots===undefined)return errors;
+ const context=traversalContext(map);
+ if(map.traversal!==undefined){
+  if(!Array.isArray(map.traversal))errors.push('map.traversal must be an array of devices');
+  else{
+   const ids=new Set();
+   for(const [index,device] of map.traversal.entries()){
+    const label=`traversal[${index}]`;
+    if(!device||typeof device!=='object'){errors.push(`${label} must be an object`);continue;}
+    if(typeof device.id!=='string'||!device.id)errors.push(`${label}.id must be a non-empty string`);
+    else if(ids.has(device.id))errors.push(`${label}.id ${device.id} is duplicated`);
+    else ids.add(device.id);
+    for(const error of validateTraversal(device,context).errors)errors.push(`${label}: ${error}`);
+   }
+  }
+ }
+ if(map.depots!==undefined){
+  if(!Array.isArray(map.depots))errors.push('map.depots must be an array of depots');
+  else{
+   const ids=new Set();
+   for(const [index,depot] of map.depots.entries()){
+    const label=`depots[${index}]`;
+    if(!depot||typeof depot!=='object'){errors.push(`${label} must be an object`);continue;}
+    if(typeof depot.id!=='string'||!depot.id)errors.push(`${label}.id must be a non-empty string`);
+    else if(ids.has(depot.id))errors.push(`${label}.id ${depot.id} is duplicated`);
+    else ids.add(depot.id);
+    if(depot.team!==undefined&&depot.team!==null&&depot.team!==0&&depot.team!==1)errors.push(`${label}.team must be 0, 1 or null`);
+    for(const error of validateTraversal({...depot,kind:'depot'},context).errors)errors.push(`${label}: ${error}`);
+   }
+  }
+ }
+ const lanes=Array.isArray(map.lanes)?map.lanes:[];
+ const identities=new Set();
+ for(const [index,laneObj] of lanes.entries()){
+  const label=`lanes[${index}]`;
+  for(const error of validateLane(laneObj,{requireDoctrine:true}).errors)errors.push(`${label}: ${error}`);
+  const identity=laneObj?.identity??laneObj?.kind;
+  if(identities.has(identity))errors.push(`${label}: identity ${identity} is duplicated`);
+  identities.add(identity);
+ }
+ return errors;
+}
 
 // All structural v3 checks live here so `validateMapSchema` (presence-gated)
 // and `validateLattice` (doctrine) can never drift apart.
@@ -129,6 +199,7 @@ function latticeIssues(map){
    if(l.slopeCap!==undefined&&(!finite(l.slopeCap)||l.slopeCap<=0))errors.push(`${label}.slopeCap must be a positive number`);
   }
  }
+ errors.push(...traversalLayerIssues(map));
  return errors;
 }
 

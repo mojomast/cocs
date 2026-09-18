@@ -551,6 +551,18 @@ export const LANE_IDENTITIES=deepFreeze([
 ]);
 export const LANE_IDENTITY_KINDS=deepFreeze(['vehicle-road','cqc','zipline-flank']);
 
+// §6A.2.1 device → lane identity. A device kind may only be authored on a lane
+// whose fixed identity permits it (north launcher, centre teleporter/trampoline,
+// south zipline/jump-pad); depots are the only vehicle-lane device.
+export const DEVICE_LANE_KINDS=deepFreeze({
+ zipline:['zipline-flank'],
+ teleporter:['cqc'],
+ 'jump-pad':['cqc','zipline-flank'],
+ launcher:['vehicle-road'],
+ depot:['vehicle-road'],
+});
+const CAPTURABLE_FOR_ARRIVAL=deepFreeze(['front','economy','relay']);
+
 /** Arrival-protection state applied once on device arrival. */
 export function arrivalProtection(){
  return deepFreeze({active:true,remaining:TRAVERSAL.arrivalSeconds,damageReduction:TRAVERSAL.arrivalDamageReduction,telegraph:TRAVERSAL.arrivalTelegraph});
@@ -569,12 +581,13 @@ export function canTraverse(cooldownRemaining){
 }
 
 const anchorOk=anchor=>anchor&&typeof anchor==='object'&&Number.isFinite(num(anchor.x,NaN))&&Number.isFinite(num(anchor.z,NaN));
+const pointDistance=(a,b)=>Math.hypot(num(a?.x,0)-num(b?.x,0),num(a?.z,0)-num(b?.z,0));
 
 /**
  * Validate a traversal device against §6A.1/§6A.2.1. Pure; returns
  * `{ok,kind,errors[]}`. Depot entries use `{kind:'depot',hq?,exits,...}`.
  */
-export function validateTraversal(device){
+export function validateTraversal(device,context=null){
  const errors=[];
  if(!device||typeof device!=='object'){
   return deepFreeze({ok:false,kind:null,errors:['device must be an object']});
@@ -624,24 +637,64 @@ export function validateTraversal(device){
  if(Number.isFinite(num(device.bypassFraction,NaN))&&(device.bypassFraction<TRAVERSAL.bypassMin||device.bypassFraction>TRAVERSAL.bypassMax)){
   errors.push('bypass fraction must be in [0.34,0.75]');
  }
+ // --- §6A.2.1 map-level doctrine (only with a context) --------------------
+ if(context&&typeof context==='object'&&kind){
+  const lanes=Array.isArray(context.lanes)?context.lanes:[];
+  const lane=lanes.find(entry=>entry&&entry.id===device.lane)??null;
+  if(context.requireLane===true&&!lane)errors.push(`device lane ${device.lane??'(missing)'} must reference an authored lane`);
+  if(lane){
+   const identity=lane.identity??lane.kind;
+   const allowed=DEVICE_LANE_KINDS[kind];
+   if(allowed&&!allowed.includes(identity))errors.push(`${kind} may not sit on a ${identity} lane`);
+   if(kind==='depot'&&identity!=='vehicle-road')errors.push('depot must sit on a vehicle-road lane');
+  }
+  const arrival=anchorOk(device.arrival)?device.arrival:null;
+  const hasApproaches=Number.isFinite(num(device.approaches,NaN))||Number.isFinite(num(device.approachCount,NaN));
+  if(arrival&&context.requireArrival!==false){
+   if(hasApproaches){
+    const approaches=Number.isFinite(num(device.approaches,NaN))?num(device.approaches,0):num(device.approachCount,0);
+    if(approaches<2)errors.push('arrival must have >= 2 approaches (no dead end)');
+   }
+   if(Array.isArray(context.spawns)&&context.spawns.length){
+    let nearest=Infinity;
+    for(const spawn of context.spawns)nearest=Math.min(nearest,pointDistance(arrival,spawn));
+    if(nearest<TRAVERSAL.enemySpawnClearanceMeters)errors.push('arrival must be >= 15 m from every spawn');
+   }
+   if(Array.isArray(context.nodes)){
+    const assault=context.assaultLanes===true||lane?.assault===true;
+    if(!assault){
+     for(const n of context.nodes){
+      if(!n||!CAPTURABLE_FOR_ARRIVAL.includes(n.archetype))continue;
+      if(pointDistance(arrival,n)<=num(n.r,0)){errors.push(`arrival must not sit inside ${n.id}'s capture radius`);break;}
+     }
+    }
+   }
+  }
+ }
  return deepFreeze({ok:errors.length===0,kind,errors:deepFreeze(errors)});
 }
 
 /** Validate one lane descriptor against the §6A.2 identity table. */
-export function validateLane(lane){
+export function validateLane(lane,context={}){
  const errors=[];
  if(!lane||typeof lane!=='object')return deepFreeze({ok:false,errors:['lane must be an object']});
  if(typeof lane.id!=='string'||!lane.id.trim())errors.push('lane id required');
- if(!LANE_IDENTITY_KINDS.includes(lane.identity))errors.push('identity must be vehicle-road, cqc or zipline-flank');
- const expected=LANE_IDENTITIES.find(entry=>entry.identity===lane.identity);
- if(expected&&lane.vehicles!==expected.vehicles)errors.push(`${lane.identity} vehicle permission must be ${expected.vehicles}`);
+ const identity=lane.identity??lane.kind;
+ if(!LANE_IDENTITY_KINDS.includes(identity))errors.push('identity must be vehicle-road, cqc or zipline-flank');
+ const expected=LANE_IDENTITIES.find(entry=>entry.identity===identity);
+ if(expected&&lane.vehicles!==undefined&&lane.vehicles!==expected.vehicles)errors.push(`${identity} vehicle permission must be ${expected.vehicles}`);
+ else if(context.requireDoctrine===true&&lane.vehicles!==expected?.vehicles)errors.push(`${identity} vehicle permission must be ${expected?.vehicles}`);
  const traversalKind=lane.traversal&&lane.traversal.kind;
  if(traversalKind!=null&&!LANE_IDENTITY_KINDS.includes(traversalKind))errors.push('traversal.kind must be a lane identity kind');
- if(traversalKind!=null&&lane.identity!=null&&traversalKind!==lane.identity)errors.push('traversal.kind must match the lane identity');
+ if(traversalKind!=null&&identity!=null&&traversalKind!==identity)errors.push('traversal.kind must match the lane identity');
+ if(context.requireDoctrine===true&&lane.traversal?.kind==null)errors.push('traversal.kind required');
  if(Number.isFinite(num(lane.bypassFraction,NaN))&&(lane.bypassFraction<TRAVERSAL.bypassMin||lane.bypassFraction>TRAVERSAL.bypassMax)){
+  errors.push('bypass fraction must be in [0.34,0.75]');
+ }else if(context.requireDoctrine===true&&!Number.isFinite(num(lane.bypassFraction,NaN))){
   errors.push('bypass fraction must be in [0.34,0.75]');
  }
  if(Number.isFinite(num(lane.chokepoints,NaN))&&(num(lane.chokepoints,0)<1||num(lane.chokepoints,0)>2))errors.push('lanes keep 1-2 chokepoints');
+ else if(context.requireDoctrine===true&&!Number.isFinite(num(lane.chokepoints,NaN)))errors.push('lanes keep 1-2 chokepoints');
  if(typeof lane.landmark!=='string'||!lane.landmark.trim())errors.push('landmark required');
  return deepFreeze({ok:errors.length===0,errors:deepFreeze(errors)});
 }
@@ -739,7 +792,7 @@ const cocsEconomy={
  HOP_SURCHARGE_PER_HOP,HOP_SURCHARGE_CAP,FOUNDRY_UPKEEP_REDUCTION,FOUNDRY_REDUCTION_CAP,SUBAGENTS,
  NEGLECT,NEGLECT_EFFECTS,
  GEAR_CAPS,REQ_CAPS,COMBINED_CAPS,
- TRAVERSAL,DEVICE_PARAMS,LANE_IDENTITIES,
+ TRAVERSAL,DEVICE_PARAMS,LANE_IDENTITIES,LANE_IDENTITY_KINDS,DEVICE_LANE_KINDS,DEVICE_STATES,TRAVERSAL_KINDS,
  META_DEFAULTS,MATCH_REQ,COMMENDATION_PACING,
  scoreEvent,tallyScores,reqEarn,reqEarnBreakdown,purchaseCost,reqPurchase,
  supplySlotMultiplier,subagentUpkeep,
