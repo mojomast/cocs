@@ -6,6 +6,22 @@ producing this document. The only paid-tier call made was the free `catalog` com
 **Deliverables:** this plan and [`moth-audio-manifest.json`](./moth-audio-manifest.json)
 (a proposed job list to merge into `assets/moth/manifest.json`).
 
+> **Implementation status (offline plumbing landed).** The game pipeline now
+> mirrors the generic `mothbake` mechanisms described in §4–§5:
+> `scripts/moth-bake.mjs` carries a dependency-free WAV codec, a recursive
+> `tapsFrom()` extractor (fixing the `extras.taps` bug so `irs.cavern.taps` is no
+> longer `[]`), an `audio-clip` baker (descriptor + hosted URL, loop detection,
+> resample/trim/gain), an `echo-map` baker, a deterministic `makeSourceAudio`
+> seed generator, the `audio`/`spaces` buckets, and an offline `repair` command
+> that rebuilds `ir`/`echo-map` records from committed raw results with no API
+> call. The runtime readers live in `game/moth-assets.mjs`
+> (`mothAudioClip`/`mothAudioNames`/`mothEchoMap`) and the Web Audio bank/player
+> in `game/moth-audio.mjs`. The three minimum-pipeline-proof jobs
+> (`ir-openair`, `echo-arena`, `bed-ritual`) are committed to the game manifest
+> as `enabled: false`; the 8-credit proof batch runs them once. See `docs/MOTH.md`
+> for the shipped API and options. The remaining §4.5 asset-id chaining and the
+> §4.2 `audio-stitch` baker are still deferred.
+
 **Method / sources**
 
 1. Free `catalog` command (`node bin/mothbake.mjs catalog`, 2026-09-17) for credits and I/O types.

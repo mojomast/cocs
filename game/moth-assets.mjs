@@ -82,7 +82,7 @@ export function resetMothAssets() { registry = null; }
 const count = (value) => Object.keys(value || {}).length;
 
 export function mothAssetsStatus() {
-  if (!registry) return { active: false, version: null, textures: 0, normals: 0, materials: 0, sky: 0, effects: 0, levels: 0, seeds: 0, motifs: 0, irs: 0 };
+  if (!registry) return { active: false, version: null, textures: 0, normals: 0, materials: 0, sky: 0, effects: 0, levels: 0, seeds: 0, motifs: 0, irs: 0, audio: 0, spaces: 0 };
   const source = registry.source;
   return {
     active: true,
@@ -96,6 +96,8 @@ export function mothAssetsStatus() {
     seeds: count(source.seeds),
     motifs: count(source.motifs),
     irs: count(source.irs),
+    audio: count(source.audio),
+    spaces: count(source.spaces),
   };
 }
 
@@ -153,6 +155,31 @@ export function mothIr(name) {
 
 export function mothIrNames() {
   return registry ? Object.keys(registry.source.irs || {}) : [];
+}
+
+// An audio clip descriptor for a bed/stinger/room-tone: { url, seconds,
+// sampleRate, channels, loopStart, loopEnd, gain, ... }. The WAV is served
+// same-origin from /moth/files; fetch and decodeAudioData it at runtime.
+export function mothAudioClip(name) {
+  if (!registry || typeof name !== 'string') return null;
+  const record = registry.source.audio?.[name];
+  return record ? clone(record) : null;
+}
+
+export function mothAudioNames() {
+  return registry ? Object.keys(registry.source.audio || {}) : [];
+}
+
+// A compact echo/tap map: { lattice, sites, depth, seed, count, taps }. Drives
+// the delay/feedback space without shipping a WAV.
+export function mothEchoMap(name) {
+  if (!registry || typeof name !== 'string') return null;
+  const record = registry.source.spaces?.[name];
+  return record ? clone(record) : null;
+}
+
+export function mothEchoMapNames() {
+  return registry ? Object.keys(registry.source.spaces || {}) : [];
 }
 
 // Reflectance/transmittance LUTs produced by the entanglement shader engine.

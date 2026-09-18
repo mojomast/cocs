@@ -9,6 +9,7 @@
 //   MOTH_API_KEY=... node scripts/moth-bake.mjs catalog
 //   MOTH_API_KEY=... node scripts/moth-bake.mjs sources
 //   MOTH_API_KEY=... node scripts/moth-bake.mjs run [--only <id>] [--force] [--dry]
+//   node scripts/moth-bake.mjs repair [--only <id>]   # offline, no key/credits
 //
 // The API key is read from the environment only; it is never written to disk or
 // the emitted module. Baked job ids are recorded back into the manifest so a
@@ -17,7 +18,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import zlib from 'node:zlib';
-import { fileURLToPath } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const BASE = process.env.MOTH_API_BASE || 'https://api.mothquantum.com';
@@ -264,7 +265,7 @@ function hdrToRgb8(hdr, size) {
 // Bakers: turn a finished job into the compact runtime record
 // ---------------------------------------------------------------------------
 
-const BAKERS = {
+export const BAKERS = {
   // A quantum-transformed tile, downscaled to a small RGBA texture.
   'texture-tile'(job, ctx) {
     const png = ctx.files.get('result');
@@ -381,15 +382,177 @@ const BAKERS = {
     const wav = ctx.files.get('result');
     if (!wav) throw new Error('ir: no result WAV');
     const info = wavInfo(wav);
+    // Taps live at `extras.taps` (trajectory) or `extras.tap_map.taps` (media);
+    // the recursive extractor finds either. The old shallow read left the
+    // shipped `irs.cavern.taps` empty.
     let taps = null;
     const tapBuffer = ctx.files.get('taps') || ctx.files.get('ir');
     if (tapBuffer) {
-      try { const parsed = JSON.parse(tapBuffer.toString('utf8')); taps = (Array.isArray(parsed) ? parsed : parsed.taps || parsed.ir || []).slice(0, 64); } catch { taps = null; }
+      const found = tapsFrom(parseMaybeJson(tapBuffer));
+      taps = found ? found.slice(0, ctx.bake?.maxTaps ?? 64).map((tap) => compactTap(tap, ctx.bake?.includeZ === true)) : null;
     }
     return {
       bucket: 'irs', key: ctx.bake.name || job.id,
-      value: { url: `${ctx.publicDir}/result.wav`, seconds: Math.round(info.seconds * 1000) / 1000, sampleRate: info.sampleRate, channels: info.channels, taps },
+      value: { url: `${ctx.publicDir}/result.wav`, seconds: round(info.seconds), sampleRate: info.sampleRate, channels: info.channels, taps },
     };
+  },
+  // A WAV clip (ambient bed, stinger, room-tone) decoded, trimmed, resampled and
+  // peak-normalised into a descriptor. The game serves the processed WAV from
+  // its own public dir and records a URL rather than embedding base64, so a
+  // multi-second bed never bloats `game/moth-baked.mjs`; `embed: true` is still
+  // available for tiny cues. Loop points are seconds from the start of the final
+  // clip; `detectLoop` finds a seam deterministically when none are given.
+  'audio-clip'(job, ctx) {
+    const type = 'audio-clip';
+    const options = ctx.bake ?? {};
+    const slot = options.slot ?? 'result';
+    const file = ctx.files.get(slot);
+    if (!file) throw new Error(`${type}: output slot "${slot}" missing`);
+    const decoded = decodeWav(file, { maxChannels: options.maxChannels ?? 8 });
+    const sourceSampleRate = decoded.sampleRate;
+    const inputFrames = decoded.frames;
+    let sampleRate = sourceSampleRate;
+    let channels = options.mixdown ? [mixdownChannels(decoded.channelData)] : decoded.channelData;
+
+    const threshold = options.threshold ?? 0.001;
+    if (typeof threshold !== 'number' || !(threshold >= 0)) throw new Error(`${type}.threshold must be a non-negative number`);
+    const pad = options.pad ?? 0;
+    if (typeof pad !== 'number' || !(pad >= 0)) throw new Error(`${type}.pad must be a non-negative number`);
+    const explicitStart = options.trimStart == null ? null : Number(options.trimStart);
+    const explicitEnd = options.trimEnd == null ? null : Number(options.trimEnd);
+    const auto = options.trim === false ? null : autoTrim(decoded.channelData, threshold);
+    let start = explicitStart !== null ? Math.round(explicitStart * sampleRate) : auto ? auto.first : 0;
+    let end = explicitEnd !== null ? Math.round(explicitEnd * sampleRate) : auto ? auto.last + 1 : inputFrames;
+    if (auto && options.trim !== false) {
+      const padding = Math.round(pad * sampleRate);
+      if (explicitStart === null) start -= padding;
+      if (explicitEnd === null) end += padding;
+    }
+    start = clamp(start, 0, inputFrames);
+    end = clamp(end, 0, inputFrames);
+    if (end <= start) throw new Error(`${type}: trim range is empty (${start}..${end} of ${inputFrames} frames)`);
+    channels = channels.map((channel) => channel.subarray(start, end));
+
+    const userGain = options.gain == null ? 1 : Number(options.gain);
+    if (!Number.isFinite(userGain) || userGain < 0) throw new Error(`${type}.gain must be a non-negative number`);
+    channels = applyGain(channels, userGain);
+
+    const targetSampleRate = options.targetSampleRate == null ? null : Number(options.targetSampleRate);
+    if (targetSampleRate !== null) {
+      if (!(targetSampleRate > 0)) throw new Error(`${type}.targetSampleRate must be a positive number`);
+      channels = resampleLinear(channels, sampleRate, targetSampleRate);
+      sampleRate = targetSampleRate;
+    }
+    const maxSeconds = options.maxSeconds == null ? null : Number(options.maxSeconds);
+    if (maxSeconds !== null) {
+      if (!(maxSeconds > 0)) throw new Error(`${type}.maxSeconds must be a positive number`);
+      channels = limitFrames(channels, Math.max(1, Math.round(maxSeconds * sampleRate)));
+    }
+    const frames = channels[0].length;
+    const seconds = frames / sampleRate;
+
+    let loopStart = options.loopStart == null ? null : Number(options.loopStart);
+    let loopEnd = options.loopEnd == null ? null : Number(options.loopEnd);
+    let loopScore = null;
+    if (loopStart === null && loopEnd === null && options.detectLoop) {
+      const detected = detectLoop(channels, sampleRate, {
+        searchSeconds: options.loopSearch == null ? undefined : Number(options.loopSearch),
+        windowSeconds: options.loopWindow == null ? undefined : Number(options.loopWindow),
+        threshold: options.loopThreshold == null ? undefined : Number(options.loopThreshold),
+      });
+      loopStart = detected.loopStart;
+      loopEnd = detected.loopEnd;
+      loopScore = detected.score;
+    }
+    if (loopStart !== null && (loopStart < 0 || loopStart > seconds)) throw new Error(`${type}.loopStart ${loopStart} is outside the clip (0..${round(seconds)})`);
+    if (loopEnd !== null && (loopEnd < 0 || loopEnd > seconds)) throw new Error(`${type}.loopEnd ${loopEnd} is outside the clip (0..${round(seconds)})`);
+    if (loopStart !== null && loopEnd !== null && loopStart >= loopEnd) throw new Error(`${type}.loopStart ${loopStart} must be less than loopEnd ${loopEnd}`);
+    const loopCrossfade = options.loopCrossfade == null ? null : Number(options.loopCrossfade);
+    if (loopCrossfade !== null && loopCrossfade > 0) {
+      if (loopEnd === null) throw new Error(`${type}.loopCrossfade needs a loop window (set loopStart/loopEnd or detectLoop: true)`);
+      channels = crossfadeAtSeam(channels, Math.round((loopStart ?? 0) * sampleRate), Math.round(loopEnd * sampleRate), Math.round(loopCrossfade * sampleRate));
+    }
+
+    const peak = peakOf(channels);
+    const target = options.peak == null ? 1 : Number(options.peak);
+    const preset = options.normalize === false || peak === 0 ? 1 : target / peak;
+    channels = scaleChannels(channels, preset);
+    const sampleFormat = options.sampleFormat ?? 'pcm16';
+    if (!SAMPLE_FORMATS.has(sampleFormat)) throw new Error(`${type}.sampleFormat "${sampleFormat}" unsupported`);
+
+    const fileName = typeof options.file === 'string' ? options.file : 'clip.wav';
+    const value = {
+      container: 'wav',
+      format: sampleFormat.startsWith('float') ? 'float' : 'pcm',
+      sampleFormat,
+      sampleRate,
+      channels: channels.length,
+      frames,
+      seconds: round(seconds),
+      loopStart,
+      loopEnd,
+      gain: round(userGain * preset),
+      peak: round(peak),
+    };
+    if (loopScore !== null) value.loopScore = loopScore;
+    if (userGain !== 1) value.userGain = round(userGain);
+    value.trimStart = round(start / sourceSampleRate);
+    value.trimEnd = round(end / sourceSampleRate);
+    if (targetSampleRate !== null) value.targetSampleRate = targetSampleRate;
+    value.source = { sampleRate: sourceSampleRate, channels: decoded.channels, bits: decoded.bits, format: decoded.format, frames: inputFrames, seconds: round(inputFrames / sourceSampleRate) };
+    const encoded = encodeWav(channels, { sampleRate, format: sampleFormat });
+    if (options.embed === true) value.data = encoded.toString('base64');
+    else {
+      if (!ctx.dir) throw new Error(`${type}: embed:false needs a writeable ctx.dir`);
+      fs.mkdirSync(ctx.dir, { recursive: true });
+      fs.writeFileSync(path.join(ctx.dir, fileName), encoded);
+      value.file = fileName;
+    }
+    value.url = resolveAudioUrl(options, ctx, fileName);
+    if (options.meta != null) value.meta = options.meta;
+    return { bucket: options.bucket ?? 'audio', key: options.name ?? job.id, value };
+  },
+  // A compact tap map reduced from an `otoc-echo`/`retrocausal-echo` envelope.
+  // The envelope may arrive inline (`ctx.result`) or as a JSON output slot; taps
+  // are read recursively (`extras.taps`, `extras.tap_map.taps`,
+  // `data.extras.taps`). The record is small enough to drive a delay/feedback
+  // graph or a synthetic reverb without shipping a WAV.
+  'echo-map'(job, ctx) {
+    const type = 'echo-map';
+    const options = ctx.bake ?? {};
+    const candidates = [];
+    const seen = new Set();
+    const push = (slot, value) => {
+      if (value === undefined || value === null || seen.has(slot)) return;
+      seen.add(slot);
+      candidates.push({ slot, value });
+    };
+    push('result', ctx.result?.result ?? ctx.result);
+    if (typeof options.slot === 'string' && ctx.files?.has(options.slot)) push(options.slot, parseMaybeJson(ctx.files.get(options.slot)));
+    for (const slot of [options.tapsSlot ?? 'taps', 'ir', 'tap_map']) if (ctx.files?.has(slot)) push(slot, parseMaybeJson(ctx.files.get(slot)));
+    if (ctx.files) for (const [slot, buffer] of ctx.files) push(slot, parseMaybeJson(buffer));
+    let found = null;
+    for (const candidate of candidates) {
+      const taps = tapsFrom(candidate.value);
+      if (taps && taps.length) { found = { source: candidate, taps }; break; }
+    }
+    if (!found) throw new Error(`${type}: no tap map found in the result or JSON slots`);
+    const maxTaps = options.maxTaps ?? 64;
+    if (!Number.isInteger(maxTaps) || maxTaps <= 0) throw new Error(`${type}.maxTaps must be a positive integer`);
+    const meta = envelopeMeta(found.source.value);
+    const includeZ = options.includeZ === true;
+    const value = {
+      lattice: meta.lattice,
+      sites: meta.sites,
+      depth: meta.depth,
+      seed: meta.seed,
+      count: found.taps.length,
+      taps: found.taps.slice(0, maxTaps).map((tap) => compactTap(tap, includeZ)),
+      irFile: null,
+      irUrl: typeof options.url === 'string' || typeof options.urlBase === 'string' ? resolveAudioUrl(options, ctx, 'result.json') : null,
+    };
+    if (options.meta != null) value.meta = options.meta;
+    return { bucket: options.bucket ?? 'spaces', key: options.name ?? job.id, value };
   },
   // A MIDI motif re-sequenced by the quantum reservoir, flattened to steps.
   'motif'(job, ctx) {
@@ -451,18 +614,342 @@ function gridToRamp(field, width, height, tint = 'quantum') {
   }
   return rgb;
 }
-function wavInfo(buffer) {
-  if (buffer.toString('ascii', 0, 4) !== 'RIFF' || buffer.toString('ascii', 8, 12) !== 'WAVE') throw new Error('ir: not a WAV');
-  let offset = 12, channels = 1, sampleRate = 44100, bits = 16, dataBytes = 0;
-  while (offset + 8 <= buffer.length) {
-    const id = buffer.toString('ascii', offset, offset + 4);
-    const size = buffer.readUInt32LE(offset + 4);
-    if (id === 'fmt ') { channels = buffer.readUInt16LE(offset + 10); sampleRate = buffer.readUInt32LE(offset + 12); bits = buffer.readUInt16LE(offset + 22); }
-    else if (id === 'data') dataBytes = size;
+// ---------------------------------------------------------------------------
+// WAV codec + audio helpers (ported from the generic mothbake pipeline)
+//
+// Everything here is dependency-free and deterministic: PCM/float decode into
+// normalised float channels, linear resampling is a documented approximation,
+// loop detection is an amplitude-aware normalised difference, and the seam
+// crossfade is equal-power. The game's `ir`/`audio-clip`/`echo-map` bakers and
+// `makeSourceAudio` all share these, mirroring `mothbake/src/decoders/wav.mjs`
+// and `mothbake/src/bakers/audio.mjs`.
+// ---------------------------------------------------------------------------
+
+const SAMPLE_FORMATS = new Set(['pcm8', 'pcm16', 'pcm24', 'pcm32', 'float32']);
+const FORMAT_NAMES = { 1: 'pcm', 3: 'float', 6: 'alaw', 7: 'mulaw', 0xfffe: 'extensible' };
+const PCM_BITS = new Set([8, 16, 24, 32]);
+const TAP_KEYS = ['taps', 'tap_map', 'ir', 'feedback_taps'];
+
+export const round = (value) => Math.round(value * 1e6) / 1e6;
+export const clamp = (value, min, max) => Math.max(min, Math.min(max, value));
+
+function asBuffer(buffer) {
+  return Buffer.isBuffer(buffer) ? buffer : Buffer.from(buffer.buffer ?? buffer, buffer.byteOffset ?? 0, buffer.byteLength ?? buffer.length);
+}
+
+function parseWav(buffer) {
+  const buf = asBuffer(buffer);
+  if (buf.length < 44) throw new Error('wav: file too small');
+  if (buf.toString('ascii', 0, 4) !== 'RIFF' || buf.toString('ascii', 8, 12) !== 'WAVE') throw new Error('wav: not a RIFF/WAVE file');
+  let offset = 12, formatCode = 1, channels = 1, sampleRate = 44100, bits = 16, blockAlign = 0, dataOffset = -1, dataBytes = 0, sawFmt = false, sawData = false;
+  while (offset + 8 <= buf.length) {
+    const id = buf.toString('ascii', offset, offset + 4);
+    const size = buf.readUInt32LE(offset + 4);
+    const body = offset + 8;
+    if (id === 'fmt ') {
+      if (size < 16 || body + 16 > buf.length) throw new Error('wav: truncated fmt chunk');
+      formatCode = buf.readUInt16LE(body);
+      channels = buf.readUInt16LE(body + 2);
+      sampleRate = buf.readUInt32LE(body + 4);
+      blockAlign = buf.readUInt16LE(body + 12);
+      bits = buf.readUInt16LE(body + 14);
+      if (formatCode === 0xfffe && size >= 40) formatCode = buf.readUInt16LE(body + 24);
+      sawFmt = true;
+    } else if (id === 'data') {
+      dataBytes = Math.min(size, buf.length - body);
+      dataOffset = body;
+      sawData = true;
+    }
     offset += 8 + size + (size % 2);
   }
-  const seconds = dataBytes / Math.max(1, channels * (bits / 8) * sampleRate);
-  return { channels, sampleRate, bits, seconds };
+  if (!sawFmt) throw new Error('wav: fmt chunk missing');
+  if (!sawData) throw new Error('wav: data chunk missing');
+  if (!channels || !sampleRate) throw new Error('wav: invalid channel count or sample rate');
+  const bytesPerSample = Math.max(1, Math.ceil(bits / 8));
+  const frameBytes = blockAlign || channels * bytesPerSample;
+  return {
+    format: FORMAT_NAMES[formatCode] || `code-${formatCode}`,
+    formatCode, channels, sampleRate, bits, bytesPerSample, blockAlign: frameBytes, dataOffset, dataBytes,
+    frames: Math.floor(dataBytes / frameBytes),
+    seconds: dataBytes / Math.max(1, frameBytes * sampleRate),
+  };
+}
+
+// Container inspection used by the `ir` baker (format, channels, rate, frames).
+export function wavInfo(buffer) {
+  const info = parseWav(buffer);
+  return { format: info.format, channels: info.channels, sampleRate: info.sampleRate, bits: info.bits, dataBytes: info.dataBytes, frames: info.frames, seconds: info.seconds };
+}
+
+// Decode PCM (8/16/24/32) or 32-bit float samples into normalised float channels.
+export function decodeWav(buffer, options = {}) {
+  const { mixdown = false, maxChannels = 8 } = options;
+  const info = parseWav(buffer);
+  const buf = asBuffer(buffer);
+  const { formatCode, bits, channels } = info;
+  if (formatCode !== 1 && formatCode !== 3) throw new Error(`wav: format "${info.format}" is not supported (only PCM and 32-bit float)`);
+  if (formatCode === 1 && !PCM_BITS.has(bits)) throw new Error(`wav: ${bits}-bit PCM unsupported (expected 8, 16, 24 or 32)`);
+  if (formatCode === 3 && bits !== 32) throw new Error(`wav: ${bits}-bit float unsupported (only 32-bit float)`);
+  if (channels > maxChannels) throw new Error(`wav: ${channels} channels exceed maxChannels=${maxChannels}`);
+  const read = sampleReader(formatCode, bits);
+  const channelData = Array.from({ length: channels }, () => new Float32Array(info.frames));
+  for (let frame = 0; frame < info.frames; frame++) {
+    const base = info.dataOffset + frame * info.blockAlign;
+    for (let channel = 0; channel < channels; channel++) channelData[channel][frame] = read(buf, base + channel * info.bytesPerSample);
+  }
+  const result = { format: formatCode === 1 ? 'pcm' : 'float', sampleRate: info.sampleRate, bits, channels, frames: info.frames, seconds: info.seconds, dataBytes: info.dataBytes, channelData };
+  if (mixdown) result.samples = mixdownChannels(channelData);
+  return result;
+}
+
+function sampleReader(formatCode, bits) {
+  if (formatCode === 3) return (buffer, offset) => buffer.readFloatLE(offset);
+  if (bits === 8) return (buffer, offset) => (buffer.readUInt8(offset) - 128) / 128;
+  if (bits === 16) return (buffer, offset) => buffer.readInt16LE(offset) / 32768;
+  if (bits === 24) {
+    return (buffer, offset) => {
+      const value = buffer[offset] | (buffer[offset + 1] << 8) | (buffer[offset + 2] << 16);
+      return (value & 0x800000 ? value - 0x1000000 : value) / 8388608;
+    };
+  }
+  return (buffer, offset) => buffer.readInt32LE(offset) / 2147483648;
+}
+
+export function mixdownChannels(channelData) {
+  if (channelData.length === 1) return channelData[0];
+  const frames = channelData[0].length;
+  const out = new Float32Array(frames);
+  for (const channel of channelData) for (let i = 0; i < frames; i++) out[i] += channel[i];
+  for (let i = 0; i < frames; i++) out[i] /= channelData.length;
+  return out;
+}
+
+const ENCODE_BITS = { pcm8: 8, pcm16: 16, pcm24: 24, pcm32: 32, float32: 32 };
+
+export function encodeWav(samples, options = {}) {
+  const { sampleRate = 44100, format = 'pcm16' } = options;
+  const bits = ENCODE_BITS[format];
+  if (!bits) throw new Error(`wav: unknown encode format "${format}" (expected ${[...SAMPLE_FORMATS].join(', ')})`);
+  let channelData;
+  if (Array.isArray(samples)) channelData = samples;
+  else if (ArrayBuffer.isView(samples)) channelData = [samples];
+  else channelData = null;
+  if (!channelData || !channelData.length) throw new Error('wav: encode needs at least one channel of samples');
+  const channels = channelData.length;
+  const frames = channelData[0].length;
+  for (const channel of channelData) if (channel.length !== frames) throw new Error('wav: encode channels must all have the same length');
+  const bytesPerSample = bits / 8;
+  const dataBytes = frames * channels * bytesPerSample;
+  const buffer = Buffer.alloc(44 + dataBytes);
+  buffer.write('RIFF', 0, 'ascii');
+  buffer.writeUInt32LE(36 + dataBytes, 4);
+  buffer.write('WAVE', 8, 'ascii');
+  buffer.write('fmt ', 12, 'ascii');
+  buffer.writeUInt32LE(16, 16);
+  buffer.writeUInt16LE(format === 'float32' ? 3 : 1, 20);
+  buffer.writeUInt16LE(channels, 22);
+  buffer.writeUInt32LE(sampleRate, 24);
+  buffer.writeUInt32LE(sampleRate * channels * bytesPerSample, 28);
+  buffer.writeUInt16LE(channels * bytesPerSample, 32);
+  buffer.writeUInt16LE(bits, 34);
+  buffer.write('data', 36, 'ascii');
+  buffer.writeUInt32LE(dataBytes, 40);
+  let offset = 44;
+  for (let frame = 0; frame < frames; frame++) {
+    for (let channel = 0; channel < channels; channel++) {
+      const value = channelData[channel][frame];
+      if (format === 'float32') buffer.writeFloatLE(value, offset);
+      else {
+        const clamped = clamp(value, -1, 1);
+        if (bits === 8) buffer.writeUInt8(Math.round(clamped * 127) + 128, offset);
+        else if (bits === 16) buffer.writeInt16LE(Math.round(clamped * 32767), offset);
+        else if (bits === 24) {
+          const scaled = clamp(Math.round(clamped * 8388607), -8388608, 8388607);
+          buffer.writeUInt8(scaled & 0xff, offset);
+          buffer.writeUInt8((scaled >> 8) & 0xff, offset + 1);
+          buffer.writeUInt8((scaled >> 16) & 0xff, offset + 2);
+        } else buffer.writeInt32LE(Math.round(clamped * 2147483647), offset);
+      }
+      offset += bytesPerSample;
+    }
+  }
+  return buffer;
+}
+
+export function applyGain(channelData, gain) {
+  if (gain === 1) return channelData;
+  return channelData.map((channel) => {
+    const scaled = new Float32Array(channel.length);
+    for (let i = 0; i < channel.length; i++) scaled[i] = channel[i] * gain;
+    return scaled;
+  });
+}
+
+export function scaleChannels(channelData, gain) {
+  if (gain === 1) return channelData;
+  return channelData.map((channel) => {
+    const scaled = new Float32Array(channel.length);
+    for (let i = 0; i < channel.length; i++) scaled[i] = clamp(channel[i] * gain, -1, 1);
+    return scaled;
+  });
+}
+
+export function limitFrames(channelData, maxFrames) {
+  if (channelData[0].length <= maxFrames) return channelData;
+  return channelData.map((channel) => channel.subarray(0, maxFrames));
+}
+
+export function peakOf(channelData) {
+  let peak = 0;
+  for (const channel of channelData) for (let i = 0; i < channel.length; i++) { const value = Math.abs(channel[i]); if (value > peak) peak = value; }
+  return peak;
+}
+
+export function autoTrim(channelData, threshold) {
+  const frames = channelData[0].length;
+  let first = -1, last = -1;
+  for (let i = 0; i < frames; i++) {
+    let level = 0;
+    for (const channel of channelData) { const value = Math.abs(channel[i]); if (value > level) level = value; }
+    if (level >= threshold) { if (first < 0) first = i; last = i; }
+  }
+  return first < 0 ? null : { first, last };
+}
+
+export function resampleLinear(channelData, fromRate, toRate) {
+  if (fromRate === toRate) return channelData;
+  const frames = channelData[0].length;
+  const outFrames = Math.max(1, Math.round((frames * toRate) / fromRate));
+  if (outFrames === frames) return channelData;
+  const last = frames - 1;
+  const step = fromRate / toRate;
+  return channelData.map((channel) => {
+    const out = new Float32Array(outFrames);
+    for (let i = 0; i < outFrames; i++) {
+      const source = Math.min(i * step, last);
+      const i0 = Math.floor(source);
+      const i1 = Math.min(i0 + 1, last);
+      const t = source - i0;
+      out[i] = channel[i0] * (1 - t) + channel[i1] * t;
+    }
+    return out;
+  });
+}
+
+// Deterministic loop-seam finder: scores seam continuity with an amplitude-aware
+// normalised difference, walking back from the tail and accepting the first
+// candidate above `threshold` (so the longest seamless loop wins).
+export function detectLoop(channelData, sampleRate, options = {}) {
+  const frames = channelData[0].length;
+  const windowFrames = Math.max(1, Math.min(Math.round((options.windowSeconds ?? 0.02) * sampleRate), Math.max(1, Math.floor(frames / 2))));
+  const searchFrames = Math.max(windowFrames, Math.min(frames, Math.round((options.searchSeconds ?? 1) * sampleRate)));
+  const startAt = Math.max(2 * windowFrames, frames - searchFrames);
+  const threshold = options.threshold ?? 0.5;
+  let best = { end: frames, score: -Infinity };
+  for (let end = frames; end >= startAt; end--) {
+    let score = 0;
+    for (const channel of channelData) {
+      let diff = 0, energy = 0;
+      for (let i = 0; i < windowFrames; i++) {
+        const a = channel[i], b = channel[end - windowFrames + i];
+        const delta = a - b;
+        diff += delta * delta;
+        energy += a * a + b * b;
+      }
+      score += energy > 0 ? 1 - diff / energy : 1;
+    }
+    score /= channelData.length;
+    if (score > best.score) best = { end, score };
+    if (score >= threshold) { best = { end, score }; break; }
+  }
+  return { loopStart: 0, loopEnd: round(best.end / sampleRate), score: round(Math.max(0, best.score)) };
+}
+
+export function crossfadeAtSeam(channelData, loopStartFrame, loopEndFrame, fadeFrames) {
+  if (fadeFrames <= 0) return channelData;
+  const frames = channelData[0].length;
+  if (loopEndFrame + fadeFrames > frames) throw new Error(`audio: loopCrossfade needs ${fadeFrames} frames after loopEnd but only ${frames - loopEndFrame} remain`);
+  if (loopStartFrame + fadeFrames > loopEndFrame) throw new Error('audio: loopCrossfade is longer than the loop window');
+  return channelData.map((channel) => {
+    const out = Float32Array.from(channel);
+    for (let i = 0; i < fadeFrames; i++) {
+      const angle = ((i + 1) / (fadeFrames + 1)) * (Math.PI / 2);
+      out[loopStartFrame + i] = clamp(out[loopStartFrame + i] * Math.sin(angle) + out[loopEndFrame + i] * Math.cos(angle), -1, 1);
+    }
+    return out;
+  });
+}
+
+// Recursive tap extractor. Engine envelopes place taps at `extras.taps`
+// (trajectory), `extras.tap_map.taps` (media) or `data.extras.taps`, and some
+// envelopes carry a numeric `extras.taps` count alongside the real array — so a
+// shallow recursive search under known keys is the only robust read.
+export function tapsFrom(value) {
+  const queue = [[value, 0]];
+  const seen = new Set();
+  while (queue.length) {
+    const [node, depth] = queue.shift();
+    if (!node || typeof node !== 'object' || depth > 4 || seen.has(node)) continue;
+    seen.add(node);
+    for (const key of TAP_KEYS) if (Array.isArray(node[key]) && node[key].length) return node[key];
+    for (const child of Object.values(node)) if (child && typeof child === 'object' && !Array.isArray(child)) queue.push([child, depth + 1]);
+  }
+  return null;
+}
+
+function firstNumber(...values) { for (const value of values) if (typeof value === 'number' && Number.isFinite(value)) return value; return null; }
+function firstString(...values) { for (const value of values) if (typeof value === 'string' && value) return value; return null; }
+
+function envelopeMeta(value) {
+  const extras = value?.extras ?? {};
+  const spec = extras.spec ?? value?.spec ?? {};
+  const params = value?.params ?? {};
+  const provenance = value?.provenance ?? {};
+  const data = value?.data ?? {};
+  return {
+    lattice: firstString(spec.lattice, extras.lattice, params.lattice),
+    sites: firstNumber(spec.n_sites, extras.n_sites, extras.sites, data.sites, params.n_sites),
+    depth: firstNumber(spec.depth, extras.depth, data.steps, params.depth),
+    seed: firstNumber(provenance.seed, spec.seed, extras.seed, params.seed),
+  };
+}
+
+function compactTap(tap, includeZ) {
+  const compact = {
+    site: round(tap.site),
+    depth: round(tap.depth),
+    level: round(tap.level),
+    polarity: tap.polarity ?? 1,
+    fRe: round(tap.F_re ?? tap.f_re ?? 0),
+    fIm: round(tap.F_im ?? tap.f_im ?? 0),
+  };
+  if (typeof tap.x === 'number') compact.x = tap.x;
+  if (typeof tap.y === 'number') compact.y = tap.y;
+  if (includeZ && typeof tap.z === 'number') compact.z = tap.z;
+  if (typeof tap.time_ms === 'number') compact.timeMs = tap.time_ms;
+  else if (typeof tap.timeMs === 'number') compact.timeMs = tap.timeMs;
+  return compact;
+}
+
+function parseMaybeJson(buffer) {
+  if (!buffer) return undefined;
+  if (typeof buffer === 'object' && !Buffer.isBuffer(buffer)) return buffer;
+  try { return JSON.parse(buffer.toString('utf8')); } catch { return undefined; }
+}
+
+// Resolve the hosted URL for a processed clip: an explicit `url` template
+// ({raw}/{slot}/{file}), `urlBase` plus the job's raw dir, or the job's public
+// dir. Mirrors the mothbake `resolveUrl` convention.
+export function resolveAudioUrl(options, ctx, fileName) {
+  const rawName = ctx.rawName ?? ctx.job?.raw ?? ctx.job?.id ?? '';
+  if (typeof options.url === 'string') {
+    return options.url
+      .replaceAll('{raw}', rawName)
+      .replaceAll('{slot}', options.slot ?? 'result')
+      .replaceAll('{file}', fileName);
+  }
+  if (typeof options.urlBase === 'string') return `${options.urlBase.replace(/\/+$/, '')}/${rawName}/${fileName}`;
+  return `${ctx.publicDir}/${fileName}`;
 }
 
 // ---------------------------------------------------------------------------
@@ -523,7 +1010,7 @@ async function downloadOutputs(result, dir, log) {
 export async function runManifest({ only, force = false, dry = false, strict = false, log = console.error } = {}) {
   const key = dry ? null : readKey();
   const manifest = readManifest();
-  const baked = { version: manifest.version || 1, generator: 'scripts/moth-bake.mjs', textures: {}, normals: {}, materials: {}, sky: {}, effects: {}, levels: {}, seeds: {}, motifs: {}, irs: {}, provenance: {} };
+  const baked = { version: manifest.version || 1, generator: 'scripts/moth-bake.mjs', textures: {}, normals: {}, materials: {}, sky: {}, effects: {}, levels: {}, seeds: {}, motifs: {}, irs: {}, audio: {}, spaces: {}, provenance: {} };
   const failures = [];
   for (const job of manifest.jobs || []) {
     if (job.enabled === false) { log(`- ${job.id}: disabled`); continue; }
@@ -538,7 +1025,7 @@ export async function runManifest({ only, force = false, dry = false, strict = f
       if (bake?.type) {
         const baker = BAKERS[bake.type];
         if (!baker) throw new Error(`unknown baker: ${bake.type}`);
-        const out = baker(job, { files, result, bake, job, publicDir: `/moth/files/${job.raw || job.id}` });
+        const out = baker(job, { files, result, bake, job, dir, rawName: job.raw || job.id, publicDir: `/moth/files/${job.raw || job.id}` });
         applyBaked(baked, out);
         log(`  baked ${out.bucket}.${out.key}${out.merge === 'frames' ? `[${out.index}]` : ''}`);
       }
@@ -571,6 +1058,72 @@ function writeModule(baked) {
   const header = `// GENERATED by scripts/moth-bake.mjs — do not edit by hand.\n// Regenerate with: MOTH_API_KEY=... node scripts/moth-bake.mjs run\n// Source engines: Moth Quantum Atlas (https://api.mothquantum.com).\n\n`;
   fs.writeFileSync(MODULE_OUT, `${header}export const MOTH_BAKED = ${JSON.stringify(baked, null, 2)};\n\nexport default MOTH_BAKED;\n`);
   console.log(`wrote ${path.relative(ROOT, MODULE_OUT)}`);
+}
+
+// ---------------------------------------------------------------------------
+// Offline repair: rebuild the purely local, file-derived records (`ir`,
+// `echo-map`) from the raw results already committed under public/moth/files,
+// without an API call or a credit. This is how the shallow-tap bug is fixed for
+// the shipped `irs.cavern` record and how `echo-map` records are (re)generated.
+// ---------------------------------------------------------------------------
+
+// Purely local bake types whose inputs are all committed raw files.
+const LOCAL_BAKE_TYPES = new Set(['ir', 'echo-map']);
+
+// Map whatever the pipeline or an older download named a raw result onto the
+// slot keys a baker expects: `result.wav`, `ir.json`/`ir-json`, etc.
+export function readLocalResult(dir) {
+  const files = new Map();
+  let result = null;
+  if (!fs.existsSync(dir)) return { files, result };
+  for (const name of fs.readdirSync(dir)) {
+    const full = path.join(dir, name);
+    let stat;
+    try { stat = fs.statSync(full); } catch { continue; }
+    if (!stat.isFile()) continue;
+    if (name === 'result.json') { try { result = JSON.parse(fs.readFileSync(full, 'utf8')); } catch {} continue; }
+    if (name === 'result.wav') { files.set('result', fs.readFileSync(full)); continue; }
+    if (name.endsWith('.json')) { const slot = name.slice(0, -5); if (slot !== 'result') files.set(slot, fs.readFileSync(full)); continue; }
+    if (name.endsWith('-json')) { files.set(name.slice(0, -5), fs.readFileSync(full)); continue; }
+    if (name.endsWith('.wav')) { files.set(name.slice(0, -4), fs.readFileSync(full)); continue; }
+  }
+  return { files, result };
+}
+
+// Rebuild the `irs`/`spaces` records for every enabled local-type job that has a
+// committed raw dir. Pure over the filesystem; exported for the regression tests.
+export function rebuildLocalBakes({ only, filesDir = FILES_DIR, manifest = readManifest(), log = () => {} } = {}) {
+  const out = { irs: {}, spaces: {} };
+  for (const job of manifest.jobs || []) {
+    if (job.enabled === false && job.id !== only) continue;
+    if (only && job.id !== only) continue;
+    const type = job.bake?.type;
+    if (!LOCAL_BAKE_TYPES.has(type)) continue;
+    const dir = path.join(filesDir, job.raw || job.id);
+    if (!fs.existsSync(dir)) { log(`- ${job.id}: no raw dir, skipped`); continue; }
+    const { files, result } = readLocalResult(dir);
+    try {
+      const record = BAKERS[type](job, { files, result, bake: job.bake, job, dir, rawName: job.raw || job.id, publicDir: `/moth/files/${job.raw || job.id}` });
+      out[record.bucket][record.key] = record.value;
+      log(`repaired ${record.bucket}.${record.key}`);
+    } catch (error) {
+      log(`- ${job.id}: ${error.message}`);
+    }
+  }
+  return out;
+}
+
+// Patch the generated module in place with a fresh offline rebuild of the local
+// records. The module is imported with a cache-busting query so repeated calls
+// in one process see the current file.
+export async function repairModule({ only, log = () => {} } = {}) {
+  const mod = await import(`${pathToFileURL(MODULE_OUT).href}?v=${Date.now()}`);
+  const baked = mod.MOTH_BAKED;
+  const rebuilt = rebuildLocalBakes({ only, log });
+  for (const bucket of ['textures', 'normals', 'materials', 'sky', 'effects', 'levels', 'seeds', 'motifs', 'irs', 'audio', 'spaces']) baked[bucket] ??= {};
+  for (const bucket of ['irs', 'spaces']) Object.assign(baked[bucket], rebuilt[bucket]);
+  writeModule(baked);
+  return { baked, rebuilt };
 }
 
 // ---------------------------------------------------------------------------
@@ -821,6 +1374,15 @@ function writeSources(log = console.error) {
     fs.writeFileSync(target, encodeMidi(SEED_MOTIF, { ppq: 480, bpm: 60 }));
     log(`wrote ${path.relative(ROOT, target)}`);
   }
+  // Free, deterministic seed audio for qrc-audio. Only written when a job
+  // references it (or when no filter is active), matching the source-art rule.
+  for (const [name, spec] of Object.entries(SOURCE_AUDIO)) {
+    const file = `${name}.wav`;
+    if (wanted.size && !wanted.has(file)) continue;
+    const target = path.join(SOURCES_DIR, file);
+    fs.writeFileSync(target, makeSourceAudio({ name, ...spec }));
+    log(`wrote ${path.relative(ROOT, target)}`);
+  }
 }
 
 // A slow, modal seed motif in D natural minor — original, for qrc-midi/blur-midi
@@ -835,6 +1397,89 @@ const SEED_MOTIF = [
   { tick: 4800, dur: 960, midi: 65, vel: 78 },
   { tick: 5760, dur: 1440, midi: 69, vel: 90 },
 ];
+
+// ---------------------------------------------------------------------------
+// Deterministic source audio (the audio analogue of the source art above).
+//
+// `qrc-audio-v1` consumes an audio file and returns a re-sequenced WAV, but it
+// has no committed input. `makeSourceAudio` renders a small original mono WAV as
+// a pure function of its spec (a seeded RNG, no external samples, no API call),
+// so the qrc-audio input is free and reproducible. `writeSources` emits
+// `assets/moth/sources/bed-seed.wav` for any job that references it.
+// ---------------------------------------------------------------------------
+
+const seedRng = (seed) => {
+  let state = (seed >>> 0) || 1;
+  return () => {
+    state = (state + 0x6d2b79f5) | 0;
+    let t = Math.imul(state ^ (state >>> 15), 1 | state);
+    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+};
+
+const SOURCE_AUDIO = {
+  'bed-seed': { kind: 'drone', seconds: 8, sampleRate: 22050, seed: 7, baseHz: 55 },
+};
+
+const AUDIO_KINDS = {
+  // A slow evolving drone with gentle partial drift and soft pulses.
+  drone({ frames, sampleRate, spec, rnd }) {
+    const base = spec.baseHz ?? 55;
+    const partials = spec.partials ?? [[1, 1], [2, 0.4], [3, 0.2], [4.5, 0.12], [6.01, 0.08]];
+    const phases = partials.map(() => rnd() * Math.PI * 2);
+    const drift = partials.map(() => (rnd() - 0.5) * (spec.detune ?? 0.4));
+    const lfoRate = spec.lfoRate ?? 0.07;
+    const lfoPhase = rnd() * Math.PI * 2;
+    const pulseSeconds = Math.max(0.1, spec.pulseSeconds ?? 2.5);
+    const pulseLevel = spec.pulseLevel ?? 0.22;
+    const out = new Float32Array(frames);
+    for (let i = 0; i < frames; i++) {
+      const t = i / sampleRate;
+      let value = 0;
+      for (let p = 0; p < partials.length; p++) value += Math.sin(2 * Math.PI * base * (partials[p][0] + drift[p]) * t + phases[p]) * partials[p][1];
+      const lfo = 0.6 + 0.4 * Math.sin(2 * Math.PI * lfoRate * t + lfoPhase);
+      const pulse = Math.exp(-Math.pow(((t % pulseSeconds) - 0.05) / 0.12, 2)) * pulseLevel;
+      out[i] = clamp(value * 0.3 * lfo + pulse * 0.6, -1, 1);
+    }
+    return out;
+  },
+  // A one-pole smoothed noise bed (a cheap, dependency-free texture).
+  noise({ frames, sampleRate, spec, rnd }) {
+    const smooth = Math.max(1, Math.round(((spec.smoothMs ?? 30) / 1000) * sampleRate));
+    const out = new Float32Array(frames);
+    let state = 0;
+    for (let i = 0; i < frames; i++) { state += (rnd() * 2 - 1 - state) / smooth; out[i] = clamp(state * 2.4, -1, 1); }
+    return out;
+  },
+  // Exponentially decaying pulses on a fixed period.
+  pulse({ frames, sampleRate, spec }) {
+    const period = Math.max(1, Math.round((spec.pulseSeconds ?? 0.5) * sampleRate));
+    const width = Math.max(1, Math.round(((spec.pulseMs ?? 40) / 1000) * sampleRate));
+    const out = new Float32Array(frames);
+    for (let i = 0; i < frames; i++) { const phase = i % period; out[i] = phase < width ? Math.exp(-phase / (width * 0.35)) : 0; }
+    return out;
+  },
+};
+
+// Render a deterministic, original mono WAV. Spec: `{ kind, seconds, sampleRate,
+// seed, sampleFormat, fadeSeconds, ...kind knobs }`.
+export function makeSourceAudio(spec = {}) {
+  const merged = { ...(SOURCE_AUDIO[spec.name] || {}), ...spec };
+  const kind = merged.kind ?? 'drone';
+  const render = AUDIO_KINDS[kind];
+  if (!render) throw new Error(`sources: unknown audio kind "${kind}" (expected ${Object.keys(AUDIO_KINDS).join(', ')})`);
+  const seconds = merged.seconds ?? 8;
+  const sampleRate = merged.sampleRate ?? 22050;
+  if (!(seconds > 0)) throw new Error('sources: audio seconds must be a positive number');
+  if (!(sampleRate > 0)) throw new Error('sources: audio sampleRate must be a positive number');
+  const frames = Math.max(1, Math.round(seconds * sampleRate));
+  const rnd = seedRng(merged.seed ?? 7);
+  const out = render({ frames, sampleRate, spec: merged, rnd });
+  const fade = Math.min(Math.round((merged.fadeSeconds ?? 0.05) * sampleRate), Math.floor(frames / 2));
+  for (let i = 0; i < fade; i++) { const gain = i / fade; out[i] *= gain; out[frames - 1 - i] *= gain; }
+  return encodeWav([out], { sampleRate, format: merged.sampleFormat ?? 'pcm16' });
+}
 
 // ---------------------------------------------------------------------------
 // CLI
@@ -863,9 +1508,15 @@ async function main() {
     return;
   }
   if (command === 'sources') { writeSources(); return; }
+  if (command === 'repair') {
+    const { rebuilt } = await repairModule({ only: args.only, log: (m) => console.error(m) });
+    const counts = { irs: Object.keys(rebuilt.irs).length, spaces: Object.keys(rebuilt.spaces).length };
+    console.error(`\nRepaired offline (no credits): ${JSON.stringify(counts)}`);
+    return;
+  }
   if (command === 'run') {
     const { baked, failures } = await runManifest({ only: args.only, force: args.force, dry: args.dry, log: (m) => console.error(m) });
-    const buckets = ['textures', 'normals', 'materials', 'sky', 'effects', 'levels', 'seeds', 'motifs', 'irs'];
+    const buckets = ['textures', 'normals', 'materials', 'sky', 'effects', 'levels', 'seeds', 'motifs', 'irs', 'audio', 'spaces'];
     const counts = Object.fromEntries(buckets.map((key) => [key, Object.keys(baked[key] || {}).length]));
     console.error(`\nBaked: ${JSON.stringify(counts)} · jobs: ${Object.keys(baked.provenance).length} · failed: ${failures.length}`);
     return;

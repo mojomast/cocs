@@ -1598,6 +1598,115 @@
         "size": 48
       },
       "jobId": "fd723f45-7f1a-4b6d-8da5-a29427fdb8eb"
+    },
+    {
+      "id": "ir-openair",
+      "engine": "retrocausal-echo-v1",
+      "enabled": false,
+      "credits": 2,
+      "consumer": "minimum pipeline proof (2 of 8 cr): per-map reverb space; exercises the ir baker + WAV serve/decode/reverb",
+      "params": {
+        "emit": "audio",
+        "ir_seconds": 1.5,
+        "sr": 22050,
+        "output_format": "pcm_16",
+        "lattice": "square",
+        "width": 6,
+        "height": 3,
+        "depth": 4,
+        "theta_zz": 0.7853981634,
+        "theta_x": 0.85,
+        "theta_z": 0.2,
+        "kick": "Z",
+        "disorder": 0,
+        "seed": 101,
+        "decay": 0.6,
+        "feedback": 0.25,
+        "feedback_source": "kick",
+        "diffusion_ms": 60,
+        "min_level": 0.05,
+        "max_regen": 12,
+        "negative_mode": "phase",
+        "stereo_width": 1,
+        "mix": 1,
+        "ref_floor": 0.02,
+        "include_tap_map": true
+      },
+      "raw": "ir-openair",
+      "bake": {
+        "type": "ir",
+        "name": "openair",
+        "maxTaps": 64
+      }
+    },
+    {
+      "id": "echo-arena",
+      "engine": "otoc-echo-v1",
+      "enabled": false,
+      "credits": 1,
+      "consumer": "minimum pipeline proof (1 of 8 cr): tap map for the delay/feedback space; exercises the echo-map baker",
+      "params": {
+        "lattice": "square",
+        "width": 5,
+        "height": 5,
+        "depth": 8,
+        "kick": "Z",
+        "theta_zz": 0.7853981634,
+        "theta_x": 0.6,
+        "theta_z": 0.4,
+        "disorder": 0.15,
+        "seed": 12345,
+        "exact": true,
+        "shots": 4096,
+        "include_taps": true,
+        "include_z": false,
+        "min_tap_level": 0.03
+      },
+      "raw": "echo-arena",
+      "bake": {
+        "type": "echo-map",
+        "name": "arena",
+        "bucket": "spaces",
+        "maxTaps": 128
+      }
+    },
+    {
+      "id": "bed-ritual",
+      "engine": "qrc-audio-v1",
+      "enabled": false,
+      "credits": 5,
+      "consumer": "minimum pipeline proof (5 of 8 cr): ambient bed -> ambienceBus; exercises makeSourceAudio -> upload -> WAV -> the audio-clip baker -> the runtime bank",
+      "input": {
+        "audio": "sources/bed-seed.wav"
+      },
+      "params": {
+        "chunk_seconds": 1,
+        "length": 12,
+        "crossfade": 120,
+        "loop": true,
+        "quality": "moderate",
+        "seed": 11,
+        "variation": 0.6
+      },
+      "raw": "bed-ritual",
+      "bake": {
+        "type": "audio-clip",
+        "name": "bed-ritual",
+        "bucket": "audio",
+        "sampleFormat": "pcm16",
+        "mixdown": true,
+        "embed": false,
+        "urlBase": "/moth/files",
+        "loopStart": 0.5,
+        "loopEnd": 11.5,
+        "normalize": true,
+        "peak": 0.9,
+        "meta": {
+          "kind": "bed",
+          "group": "ritual",
+          "bus": "ambience"
+        }
+      }
     }
   ]
 }

@@ -337,7 +337,19 @@ export class SynthAudio{
   this.musicEngine=null;this.effectsBus=null;this.ambienceBus=null;this.muteGain=null;
   this.volumes={master:.9,music:.7,effects:1,ambience:.8};
   this.status='off';this.scene='menu';this._announceAt=new Map();this._stingDuckTimer=null;
+  // Optional Moth audio layer (game/moth-audio.mjs). Never created here; the
+  // host opts in with setMothAudio(). All forwarding is guarded so an absent
+  // layer is a no-op and this stays merge-friendly with the music work.
+  this.mothAudio=null;
  }
+ // Attach (or clear) a MothAudio instance and seed it with the current state.
+ // Additive and inert without an instance; returns the layer for chaining.
+ setMothAudio(audio){
+  this.mothAudio=audio||null;
+  if(this.mothAudio){try{this.mothAudio.setScene?.(this.scene);this.mothAudio.setIntensity?.(this.intensity);this.mothAudio.setBedMood?.(this.bedMood);}catch{}}
+  return this.mothAudio;
+ }
+ mothAudioStatus(){return this.mothAudio?.status?.()??null;}
  // Start (or resume) the audio engine. Returns a promise that resolves once the
  // context is running; a rejected/blocked resume is surfaced through `status`
  // rather than swallowed so the UI can offer a retry. Safe to call repeatedly.
@@ -435,7 +447,7 @@ export class SynthAudio{
  getVolume(kind){return this.volumes[kind]??null;}
  // Scene drives the soundtrack arrangement: menus get the menu theme, matches
  // get exploration/combat layered by intensity.
- setScene(scene){this.scene=scene==='menu'?'menu':'game';this.musicEngine?.setScene(this.scene==='menu'?'menu':(this.intensity>=.34?'combat':'explore'));return this.scene;}
+ setScene(scene){this.scene=scene==='menu'?'menu':'game';this.musicEngine?.setScene(this.scene==='menu'?'menu':(this.intensity>=.34?'combat':'explore'));this.mothAudio?.setScene?.(this.scene);return this.scene;}
  previewMusic(scene='menu',seconds=8){this._ensureBuses();const r=this.musicEngine?.preview(scene,seconds);this.unlock();return r??null;}
  // Select an arrangement pack (e.g. 'halo'); delegates to the music engine.
  setSoundtrack(name='default'){this.soundtrack=(name==='halo')?'halo':'default';this._ensureBuses();this.theme=this.soundtrack==='halo'?HALO_THEME:(MODE_THEMES[this.mode]||MODE_THEMES.default);return this.musicEngine?.setSoundtrack(this.soundtrack)??this.soundtrack;}
@@ -458,7 +470,7 @@ export class SynthAudio{
    return this.musicEngine.setReverb(buffer,opts);
   }catch{return false;}
  }
- audioStatus(){return {state:this.ctx?(this.ctx.state||'suspended'):'unavailable',status:this.status,enabled:this.musicEnabled,muted:this.muted,scene:this.scene,intensity:this.intensity,voices:this.voices.size,notes:this.musicEngine?.notesScheduled??0,music:this.musicEngine?.status?.()??'off',reverb:this.reverbLoaded?'ready':(this._reverbPending?'loading':(this.reverbUrl?'pending':'off'))};}
+ audioStatus(){return {state:this.ctx?(this.ctx.state||'suspended'):'unavailable',status:this.status,enabled:this.musicEnabled,muted:this.muted,scene:this.scene,intensity:this.intensity,voices:this.voices.size,notes:this.musicEngine?.notesScheduled??0,music:this.musicEngine?.status?.()??'off',reverb:this.reverbLoaded?'ready':(this._reverbPending?'loading':(this.reverbUrl?'pending':'off')),moth:this.mothAudio?.status?.()??null};}
  // Low, continuous ambience bed: filtered noise hiss plus a sub tone, faded in
  // through the master gain. Owned by the audio instance and torn down in dispose.
  _bed(on){
@@ -533,6 +545,7 @@ export class SynthAudio{
  // When the bed is not running yet the mood is remembered for the next start.
  setBedMood(mood){
   this.bedMood=BED_MOODS[mood]?mood:'default';
+  this.mothAudio?.setBedMood?.(this.bedMood);
   if(!this.bed||!this.ctx)return this.bedMood;
   const profile=BED_MOODS[this.bedMood],t=this.ctx.currentTime;
   try{this.bed.f.frequency.setTargetAtTime(profile.filter,t,1.2);this.bed.osc.frequency.setTargetAtTime(profile.tone,t,1.2);this.bed.g.gain.setTargetAtTime(profile.gain,t,1.2);this.bed.og.gain.setTargetAtTime(profile.sub,t,1.2);}catch{}
@@ -551,6 +564,7 @@ export class SynthAudio{
   const next=cl(Number(value)||0,0,1);this.intensity=next;
   this.musicEngine?.setIntensity(next);
   this.musicEngine?.setScene(this.scene==='menu'?'menu':(next>=.34?'combat':'explore'));
+  this.mothAudio?.setIntensity?.(next);
   this.bedScale=.55+next*.55;
   if(this.ctx&&this.bed){const profile=BED_MOODS[this.bedMood]||BED_MOODS.default,t=this.ctx.currentTime;try{this.bed.g.gain.setTargetAtTime(profile.gain*this.bedScale,t,.5);this.bed.og.gain.setTargetAtTime(profile.sub*this.bedScale,t,.55);}catch{}try{if(this.bed.windG)this.bed.windG.gain.setTargetAtTime((profile.air||0)*this._windScale(profile)*(.5+this.bedScale*.5),t,.6);if(this.bed.tenseG)this.bed.tenseG.gain.setTargetAtTime((profile.tense||0)*next*next,t,.7);}catch{}}
   return this.intensity;
@@ -568,7 +582,7 @@ export class SynthAudio{
  }
  // Advance the soundtrack scheduler. Called once per rendered frame from the
  // host so note timing is driven by the AudioContext clock, not the frame rate.
- tick(){return this.musicEngine?.tick?.()??0;}
+ tick(){const scheduled=this.musicEngine?.tick?.()??0;this.mothAudio?.tick?.();return scheduled;}
  // Victory/defeat sting: a short arpeggio built from the active mode scale. It
  // reuses the shared voice cap and disposal path, and is a no-op when muted or
  // when the context has not started.
@@ -873,5 +887,5 @@ export class SynthAudio{
   const vehicle=(vehicles||[]).find(v=>v.id===player.vehicleId||v.driver===player.id),vx=vehicle?(vehicle.vx??vehicle.velocity?.x??0):0,vz=vehicle?(vehicle.vz??vehicle.velocity?.z??0):0,boosting=Boolean(vehicle&&(vehicle.boosting===true||(vehicle.boostCooldown??0)>0||(vehicle.effects?.turbo>0)));
   this._engine(vehicle?Math.hypot(vx,vz):0,Boolean(vehicle),boosting);}
  _engine(speed,active,boosting=false){if(!this.ctx)return;if(active&&!this.muted){if(!this.engine){const osc=this.ctx.createOscillator(),sub=this.ctx.createOscillator(),f=this.ctx.createBiquadFilter(),g=this.ctx.createGain();osc.type='sawtooth';sub.type='triangle';f.type='lowpass';f.frequency.value=700;g.gain.value=.0001;osc.connect(f);sub.connect(f);f.connect(g);g.connect(this.effectsBus||this.master);osc.start();sub.start();this.engine={osc,sub,f,g};}const s=cl(speed/20,0,1),boostMult=boosting?1.35:1,t=this.ctx.currentTime;this.engine.osc.frequency.setTargetAtTime((55+s*120)*boostMult,t,.1);this.engine.sub.frequency.setTargetAtTime((28+s*40)*boostMult,t,.1);this.engine.g.gain.setTargetAtTime((.022+s*.05)*(boosting?1.2:1),t,.12);this.engine.f.frequency.setTargetAtTime((500+s*1200)*(boosting?1.4:1),t,.15);}else if(this.engine){const {osc,sub,g}=this.engine,t=this.ctx.currentTime;g.gain.setTargetAtTime(.0001,t,.08);this.engine=null;setTimeout(()=>{try{osc.stop();sub.stop();}catch{}},300);}}
- dispose(){if(this._stingDuckTimer){clearTimeout(this._stingDuckTimer);this._stingDuckTimer=null;}try{this.musicEngine?.dispose();}catch{}this.musicEngine=null;if(this.engine){try{this.engine.osc.stop();this.engine.sub.stop();}catch{}this.engine=null;}if(this.bed){for(const node of Object.values(this.bed)){if(node&&typeof node.stop==='function')try{node.stop();}catch{}if(node&&typeof node.disconnect==='function')try{node.disconnect();}catch{}}this.bed=null;}for(const token of this.voices){clearTimeout(token.timer);for(const n of token.nodes){try{n.disconnect();}catch{}}}this.voices.clear();this._announceAt?.clear?.();this.lastSting=null;if(this.space){for(const node of Object.values(this.space)){try{node.disconnect();}catch{}}this.space=null;}for(const bus of [this.effectsBus,this.ambienceBus,this.master,this.muteGain]){try{bus?.disconnect();}catch{}}this.effectsBus=null;this.ambienceBus=null;this.master=null;this.muteGain=null;this.ctx?.close();this.ctx=null;this.status='off';}
+ dispose(){if(this._stingDuckTimer){clearTimeout(this._stingDuckTimer);this._stingDuckTimer=null;}try{this.musicEngine?.dispose();}catch{}this.musicEngine=null;try{this.mothAudio?.dispose?.();}catch{}this.mothAudio=null;if(this.engine){try{this.engine.osc.stop();this.engine.sub.stop();}catch{}this.engine=null;}if(this.bed){for(const node of Object.values(this.bed)){if(node&&typeof node.stop==='function')try{node.stop();}catch{}if(node&&typeof node.disconnect==='function')try{node.disconnect();}catch{}}this.bed=null;}for(const token of this.voices){clearTimeout(token.timer);for(const n of token.nodes){try{n.disconnect();}catch{}}}this.voices.clear();this._announceAt?.clear?.();this.lastSting=null;if(this.space){for(const node of Object.values(this.space)){try{node.disconnect();}catch{}}this.space=null;}for(const bus of [this.effectsBus,this.ambienceBus,this.master,this.muteGain]){try{bus?.disconnect();}catch{}}this.effectsBus=null;this.ambienceBus=null;this.master=null;this.muteGain=null;this.ctx?.close();this.ctx=null;this.status='off';}
 }
