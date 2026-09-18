@@ -75,6 +75,43 @@ test('the cocs template synthesizes the 5-capturable V0a lattice on warfront', (
  for (const entry of state.nodes) assert.deepEqual(entry.progress, {0: 0, 1: 0});
 });
 
+test('dominance arms only on an outright majority of the capturable lattice', () => {
+ const five = cocsTemplate('cocs', getMap('warfront'), {});
+ assert.equal(five.dominanceCount, 3, 'five capturable nodes need three: a 2-of-3 plurality no longer arms dominance');
+ assert.equal(five.dominanceFastCount, 4, 'four of five is the fast hold');
+ // A three-capturable authored lattice still floors at a bare majority of two.
+ const arena = {
+  id: 'three-cap', bounds: {minX: -60, maxX: 60, minZ: -10, maxZ: 10},
+  nodes: [
+   {id: 'hq-0', kind: 'hq', x: -50, z: 0, radius: 4, owner: 0},
+   {id: 'front-0', kind: 'front', x: -25, z: 0, radius: 4},
+   {id: 'relay-c', kind: 'relay', x: 0, z: 0, radius: 4},
+   {id: 'front-1', kind: 'front', x: 25, z: 0, radius: 4},
+   {id: 'hq-1', kind: 'hq', x: 50, z: 0, radius: 4, owner: 1},
+  ],
+  lattice: [['hq-0', 'front-0'], ['front-0', 'relay-c'], ['relay-c', 'front-1'], ['front-1', 'hq-1']],
+ };
+ const three = cocsTemplate('cocs', arena, {});
+ assert.equal(three.dominanceCount, 2);
+ assert.equal(three.dominanceFastCount, 3);
+});
+
+test('dominance progress resets when the outright majority is broken', () => {
+ const match = cocsMatch({cocsPolicy: () => []});
+ const state = match.objectiveState;
+ const capturable = state.nodes.filter(entry => ['front', 'economy', 'relay'].includes(entry.archetype));
+ capturable[0].owner = 0; capturable[1].owner = 0; capturable[2].owner = 0;
+ for (let i = 0; i < 10; i++) stepCocs(match, 1 / 60);
+ assert.equal(state.dominance.team, 0, 'three of five arms the timer');
+ assert.ok(state.dominance.progress > 0);
+ // Flip one held node to the enemy: 2-1 with two neutral is still a plurality
+ // but no longer an outright majority, so the ratchet must reset.
+ capturable[2].owner = 1;
+ stepCocs(match, 1 / 60);
+ assert.equal(state.dominance.team, null);
+ assert.equal(state.dominance.progress, 0);
+});
+
 test('the cocs template prefers an authored arena.nodes + arena.lattice', () => {
  const arena = {
   id: 'authored-test',
@@ -304,6 +341,31 @@ test('a valid ATTACK order captures a node without any actor in the zone', () =>
  }
  assert.equal(front.owner, 0);
  assert.equal(front.progress[0], 0, 'progress resets on capture');
+});
+
+test('a standing order cannot freeze a node against a real attacker', () => {
+ const match = cocsMatch({cocsPolicy: () => []});
+ const state = match.objectiveState;
+ const front = node(state, 'front-w');
+ front.owner = 1; // enemy holds the gate; team 0 reaches it through its own HQ
+ place(match, 0, front);
+ // The enemy commander keeps issuing HOLD, but has no body on the point.
+ state.tasks[1] = {verb: 'HOLD', nodeId: 'front-w', tick: 0, until: 1e9, peerId: 'chief-1', cardId: 'hold'};
+ const ticks = Math.ceil(state.captureSeconds / (1 / 60)) + 4;
+ for (let i = 0; i < ticks; i++) stepCocs(match, 1 / 60);
+ assert.equal(front.owner, 0, 'the order aura alone cannot hold an owned node');
+ assert.equal(front.contested, false, 'an order is not a contest');
+});
+
+test('an enemy order alone cannot block a neutral capture', () => {
+ const match = cocsMatch({cocsPolicy: () => []});
+ const state = match.objectiveState;
+ const front = node(state, 'front-w');
+ place(match, 0, front);
+ state.tasks[1] = {verb: 'ATTACK', nodeId: 'front-w', tick: 0, until: 1e9, peerId: 'chief-1', cardId: 'attack'};
+ const ticks = Math.ceil(state.captureSeconds / (1 / 60)) + 4;
+ for (let i = 0; i < ticks; i++) stepCocs(match, 1 / 60);
+ assert.equal(front.owner, 0, 'the attacker with a body takes the node');
 });
 
 test('the stub cocsPolicy issues orders and a seeded run is byte-identical', () => {

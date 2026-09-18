@@ -17,8 +17,10 @@
 //     node the team already owns — back-caps are impossible);
 //   * connectivity income (a node only pays while a same-team path links it
 //     back to its HQ; a link-cut denies it and everything downstream);
-//   * live-node selection (3 in the opening, up to 5 in the mid game, all
-//     capturable nodes in the endgame);
+//   * live-node selection (a frontier node — owned or adjacent to owned — is
+//     always live so adjacency-gated capture can never be frozen out; neutral
+//     nodes are padded in to the opening/mid floor, and the endgame opens the
+//     whole capturable lattice);
 //   * one front indicator plus a deterministic duty-AI order hook.
 //
 // Determinism contract (§11.6):
@@ -280,9 +282,17 @@ export function cocsTemplate(mode, arena, config = {}) {
   const source = authored ?? synthesizeLattice(arena);
   const captureSeconds = Math.max(0.5, num(config?.objective?.captureSeconds ?? objective.captureSeconds, DEFAULT_CAPTURE_SECONDS));
   const capturable = source.nodes.filter(node => isCapturableArchetype(node.archetype));
-  // Standard: hold 5 of 7; Skirmish: hold 4 of 5. `ceil(2/3 · n)` agrees with
-  // both, so an authored lattice scales without touching the mode row.
-  const dominanceCount = Math.max(1, Math.round(num(objective.dominanceCount, Math.ceil(capturable.length * 2 / 3))));
+  // Dominance arms only on an OUTRIGHT majority of the capturable lattice
+  // (`> n/2`, i.e. 3 of 5 on the V0a slice). A mere plurality is not enough, so
+  // one won relay fight can no longer start the 90 s ratchet: the losing side
+  // keeps a legal recapture and a comeback window. `dominanceCount` can still be
+  // overridden per mode/config.
+  const majority = Math.floor(capturable.length / 2) + 1;
+  const dominanceCount = Math.max(1, Math.round(num(objective.dominanceCount, majority)));
+  // The fast hold needs one node beyond the bare majority (4 of 5 on the V0a
+  // slice); the sustained hold is the outright-majority window itself. Either
+  // timer resets the moment the majority is lost, so a swallowed lead is
+  // always recoverable by taking a node back.
   const dominanceFastCount = Math.max(dominanceCount, Math.round(num(objective.dominanceFastCount, Math.min(capturable.length, dominanceCount + 1))));
   const state = {
     kind: COCS_KIND,
@@ -324,28 +334,31 @@ export function cocsTemplate(mode, arena, config = {}) {
 }
 
 // ---------------------------------------------------------------------------
-// Live-node selection. A capturable node is live when it is owned or adjacent
-// to an owned node; the phase then clamps the set (3 opening / up to 5 mid /
-// every capturable node endgame, after §3.2 and §4.1).
+// Live-node selection. A capturable node is frontier when it is owned or
+// adjacent to an owned node — i.e. a node either team could legally take or
+// must legally defend. Every frontier node is ALWAYS live: capture is
+// adjacency-gated, so de-listing a frontier (as a hard cap smaller than the
+// frontier would) freezes that team's own progression and lets one side lock
+// the other out of its own gate. The phase floor only pads *neutral* nodes in,
+// to the opening/mid `liveMin` or the endgame `endgameLive`; `liveMax` is the
+// intended lattice scale, not a truncation cap.
 // ---------------------------------------------------------------------------
 export function updateLiveNodes(state) {
   const capturable = capturableNodes(state);
   const index = new Map(state.nodes.map(node => [node.id, node]));
-  const desired = new Set();
-  for (const node of capturable) if (node.owner === 0 || node.owner === 1) desired.add(node.id);
+  const frontier = new Set();
+  for (const node of capturable) if (node.owner === 0 || node.owner === 1) frontier.add(node.id);
   for (const node of capturable) {
-    if (desired.has(node.id)) continue;
-    if (neighbors(state, node.id).some(id => { const other = index.get(id); return other && (other.owner === 0 || other.owner === 1); })) desired.add(node.id);
+    if (frontier.has(node.id)) continue;
+    if (neighbors(state, node.id).some(id => { const other = index.get(id); return other && (other.owner === 0 || other.owner === 1); })) frontier.add(node.id);
   }
-  let cap;
-  if (state.endgame) cap = Math.max(state.endgameLive, desired.size);
-  else if (state.phase === 'opening') cap = state.liveMin;
-  else cap = state.liveMax;
-  // Pad to the floor (3) and, in the endgame, to the guaranteed live count.
-  for (const node of capturable) { if (desired.size >= state.liveMin) break; desired.add(node.id); }
-  if (state.endgame) for (const node of capturable) { if (desired.size >= cap) break; desired.add(node.id); }
-  const ordered = capturable.filter(node => desired.has(node.id)).map(node => node.id);
-  const live = ordered.slice(0, cap);
+  const live = capturable.filter(node => frontier.has(node.id)).map(node => node.id);
+  const floor = state.endgame ? state.endgameLive : state.liveMin;
+  const target = Math.min(capturable.length, Math.max(floor, live.length));
+  for (const node of capturable) {
+    if (live.length >= target) break;
+    if (!frontier.has(node.id)) live.push(node.id);
+  }
   state.liveNodeIds = live;
   const liveSet = new Set(live);
   for (const node of state.nodes) node.live = liveSet.has(node.id);
@@ -535,12 +548,18 @@ export function stubCocsPolicy(state, context = {}) {
 }
 
 // ---------------------------------------------------------------------------
-// Capture. Presence is actors inside the node radius (plus an active order
-// task); a team's presence only counts when it owns the node or the node is
-// capturable by it. Contesting rolls both sides back at .75/s; holding an owned
-// node bleeds the enemy's progress and banks objective time.
+// Capture. Two distinct concepts:
+//   * **actor presence** — living actors inside the node radius; the only thing
+//     that can contest or freeze another team's progress.
+//   * **order presence** — a live HOLD/ATTACK task on the node. It can push an
+//     uncontested capture (a lone duty order still takes an empty node) but it
+//     can never contest against, or block, an actual enemy actor. That is what
+//     stops a standing order from making an owned node effectively
+//     uncapturable while its squad is somewhere else.
+// Contesting rolls both sides back at .75/s; holding an owned node bleeds the
+// enemy's progress and banks objective time.
 // ---------------------------------------------------------------------------
-function nodePresence(match, state, node) {
+function nodeActors(match, node) {
   const present = {0: false, 1: false};
   const actors = {0: [], 1: []};
   for (const actor of match?.actors ?? []) {
@@ -550,11 +569,17 @@ function nodePresence(match, state, node) {
     present[actor.team] = true;
     actors[actor.team].push(actor);
   }
+  return {present, actors};
+}
+
+// Live order tasks, keyed by team, for one node.
+function nodeOrderTeams(state, node) {
+  const ordered = {0: false, 1: false};
   for (const team of [0, 1]) {
     const task = state.tasks?.[team];
-    if (task && task.nodeId === node.id && state.tick <= task.until) present[team] = true;
+    if (task && task.nodeId === node.id && state.tick <= task.until) ordered[team] = true;
   }
-  return {present, actors};
+  return ordered;
 }
 
 function captureNode(match, state, node, team, actors) {
@@ -569,26 +594,28 @@ function captureNode(match, state, node, team, actors) {
 }
 
 function captureNodeStep(match, state, node, dt, rate) {
-  const {present, actors} = nodePresence(match, state, node);
-  const teams = [];
+  const {present, actors} = nodeActors(match, node);
+  const ordered = nodeOrderTeams(state, node);
+  // A team works the node when it has actors there, or an active order there
+  // with no enemy actor on the point. Only actual actors can contest.
+  const engaged = [];
   for (const team of [0, 1]) {
-    if (!present[team]) continue;
-    if (node.owner === team || capturableBy(state, node.id, team)) teams.push(team);
+    if (!present[team] && !(ordered[team] && !present[1 - team])) continue;
+    if (node.owner === team || capturableBy(state, node.id, team)) engaged.push(team);
   }
-  node.contested = teams.length > 1;
-  if (teams.length === 0) return;
-  if (teams.length > 1) {
-    for (const team of teams) node.progress[team] = Math.max(0, num(node.progress[team], 0) - rate * 0.75);
+  node.contested = engaged.length > 1;
+  if (engaged.length === 0) return;
+  if (engaged.length > 1) {
+    for (const team of engaged) node.progress[team] = Math.max(0, num(node.progress[team], 0) - rate * 0.75);
     return;
   }
-  const team = teams[0], other = team === 0 ? 1 : 0;
+  const team = engaged[0], other = team === 0 ? 1 : 0;
+  node.progress[other] = Math.max(0, num(node.progress[other], 0) - rate * 0.75);
   if (node.owner === team) {
-    node.progress[other] = Math.max(0, num(node.progress[other], 0) - rate * 0.75);
     for (const actor of actors[team]) actor.scoreStats.objectiveTime = (actor.scoreStats.objectiveTime ?? 0) + dt;
     return;
   }
   node.progress[team] = clamp01(num(node.progress[team], 0) + rate);
-  node.progress[other] = Math.max(0, num(node.progress[other], 0) - rate * 0.75);
   if (node.progress[team] >= 1 - EPSILON) captureNode(match, state, node, team, actors[team]);
 }
 

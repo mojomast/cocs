@@ -10,10 +10,14 @@
 // move the floor.
 //
 // The layout is rotationally symmetric (x,z) -> (-x,-z), matching the rev-3
-// authoritative lattice: one HQ behind each front anchor, a single central
-// relay, and the three fixed lane identities (north vehicle road / centre CQC
-// / south zipline flank). The full 7+2+2 catalogue lives in a later wave; this
-// slice is the minimal graph W1 can drive with authored coordinates.
+// authoritative lattice: one HQ behind each front anchor, a central relay
+// flanked by a shared economy siphon to the north and south. Each siphon is
+// adjacent to *both* front gates and the relay, so it is a genuine meeting node
+// rather than a one-team back-cap: either side can contest it from its own
+// gate, which is what forces a second and third simultaneous front. Five
+// capturable nodes also stops one won relay fight from arming dominance. The
+// full 7+2+2 catalogue lives in a later wave; this slice is the minimal graph
+// W1 can drive with authored coordinates.
 import {freeze,wall,cover,zone,node,edge,lane,terminal,teamSpawns,flagSpawns} from './map-schema.mjs';
 
 // Rot-180 mirror so every authored block has an opposite twin.
@@ -21,25 +25,45 @@ const mirror=block=>({...block,x:-block.x,z:-block.z});
 const paired=(...blocks)=>blocks.flatMap(block=>[block,mirror(block)]);
 
 const NORTH=-50,CENTRE=0,SOUTH=50;
+// The two shared siphons sit just off the central relay so a single scrum on
+// the core can contest more than one node at once (multi-front) and the teams
+// meet on the point instead of in transit.
+const ECON_N=25,ECON_S=-25;
 
 const latticeSlice={
  id:'lattice-slice',name:'Lattice Slice',tag:'LATTICE STRIKE / V0a SLICE',
- description:'A flat, rotationally symmetric 240 m theatre slice: two HQ compounds, two front gates and a central relay joined by a north vehicle road, a centre CQC lane and a south flank lane.',
+ description:'A flat, rotationally symmetric 240 m theatre slice: two HQ compounds, two front gates and a tight central lattice of a relay flanked by a north and a south economy siphon, joined by a north vehicle road, a centre CQC lane and a south flank lane.',
  color:'#7fe3c8',background:'#06141a',
  raised:false,nextGen:true,
  bounds:{minX:-120,maxX:120,minZ:-120,maxZ:120},
- // Frontage is HQ-to-HQ across the contested (x) axis; the band is 240 x 240
- // so lane separation (50 m) and adjacent-node spacing (54 m) are the authored
- // doctrine values, not the footprint.
+ // Frontage is HQ-to-HQ across the contested (x) axis; the band is 240 x 240.
+ // Lane separation (50 m) and the gate spacing (54 m) are the authored doctrine
+ // values; the shared siphons sit 25 m off the central relay, inside the 54 m
+ // gate spacing (declared cap 60 m).
  playBounds:{minX:-120,maxX:120,minZ:-120,maxZ:120,frontage:240,laneSep:50,maxNodeSpacing:60},
+ // Seven nodes: 2 HQ anchors + 5 capturable (west gate, north siphon, centre
+ // relay, south siphon, east gate). Rot-180 pairs:
+ //   hq-0 <-> hq-1, front-0 <-> front-1, econ-n <-> econ-s.
+ // econ-n / econ-s each neighbour BOTH gates and the relay, so both teams have
+ // a legal approach to every shared node. Capturable radii are 14 m: the
+ // control points are large enough that a nearby scrum genuinely counts as
+ // fighting *on* the point rather than 11 m off it (the authored doctrine
+ // radius for a contested node).
  nodes:[
   node('hq-0',-108,0,12,'hq'),
   node('hq-1',108,0,12,'hq'),
-  node('front-0',-54,0,10,'front'),
-  node('front-1',54,0,10,'front'),
-  node('relay-0',0,0,10,'relay'),
+  node('front-0',-54,0,14,'front'),
+  node('econ-n',0,ECON_N,14,'economy'),
+  node('relay-0',0,0,14,'relay'),
+  node('econ-s',0,ECON_S,14,'economy'),
+  node('front-1',54,0,14,'front'),
  ],
- lattice:[edge('hq-0','front-0'),edge('front-0','relay-0'),edge('relay-0','front-1'),edge('front-1','hq-1')],
+ lattice:[
+  edge('hq-0','front-0'),edge('hq-1','front-1'),
+  edge('front-0','relay-0'),edge('relay-0','front-1'),
+  edge('front-0','econ-n'),edge('front-1','econ-n'),edge('relay-0','econ-n'),
+  edge('front-1','econ-s'),edge('front-0','econ-s'),edge('relay-0','econ-s'),
+ ],
  terminals:[terminal('relay-0-terminal','relay-0','relay',0,6)],
  lanes:[
   lane('north-road','vehicle-road',[[-108,NORTH],[-54,NORTH],[0,NORTH],[54,NORTH],[108,NORTH]],{width:8,slopeCap:.3}),
@@ -85,6 +109,7 @@ const latticeSlice={
  objectiveZones:[zone(-54,0,6,'front-west'),zone(0,0,6,'relay'),zone(54,0,6,'front-east')],
  navNodes:[
   {x:-108,z:0},{x:-81,z:0},{x:-54,z:0},{x:-27,z:0},{x:0,z:0},{x:27,z:0},{x:54,z:0},{x:81,z:0},{x:108,z:0},
+  {x:0,z:ECON_N},{x:0,z:ECON_S},
   {x:-108,z:NORTH},{x:-54,z:NORTH},{x:0,z:NORTH},{x:54,z:NORTH},{x:108,z:NORTH},
   {x:-108,z:SOUTH},{x:-54,z:SOUTH},{x:0,z:SOUTH},{x:54,z:SOUTH},{x:108,z:SOUTH},
   {x:-54,z:-30},{x:54,z:30},{x:-54,z:30},{x:54,z:-30},
@@ -92,7 +117,9 @@ const latticeSlice={
  landmarks:[
   {label:'WEST HQ',x:-108,z:0,y:6},
   {label:'WEST FRONT',x:-54,z:0,y:5},
+  {label:'NORTH SIPHON',x:0,z:ECON_N,y:5},
   {label:'FOUNDRY RELAY',x:0,z:0,y:7},
+  {label:'SOUTH SIPHON',x:0,z:ECON_S,y:5},
   {label:'EAST FRONT',x:54,z:0,y:5},
   {label:'EAST HQ',x:108,z:0,y:6},
  ],

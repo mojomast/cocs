@@ -11,6 +11,7 @@ import {navigation} from './core.mjs';
 import {Match} from './core.mjs';
 import {arenaMeta} from './arenas.mjs';
 import {GAME_MODES} from './config.mjs';
+import {cocsTemplate,enterEndgame} from './cocs.mjs';
 
 const SLICE=getMap('lattice-slice');
 const TTC_SPEED=6; // m/s reference run speed for the doctrine TTC proxy.
@@ -49,14 +50,14 @@ test('the lattice slice is registered, immutable and schema v3 valid',()=>{
 
 test('the slice authors the frozen lattice interface',()=>{
  const archetypes=SLICE.nodes.map(n=>n.archetype);
- assert.equal(SLICE.nodes.length,5,'five nodes');
- assert.deepEqual([...archetypes].sort(),['front','front','hq','hq','relay']);
+ assert.equal(SLICE.nodes.length,7,'seven nodes: 2 HQ anchors + 5 capturable');
+ assert.deepEqual([...archetypes].sort(),['economy','economy','front','front','hq','hq','relay']);
  assert.equal(archetypes.filter(a=>a==='hq').length,2,'one HQ per side');
  assert.equal(SLICE.terminals.length,1);
  assert.equal(SLICE.lanes.length,3);
  assert.deepEqual(SLICE.lanes.map(l=>l.kind).sort(),['cqc','vehicle-road','zipline-flank']);
  assert.ok(SLICE.lanes.every(l=>l.traversal.kind===l.kind));
- assert.ok(SLICE.nodes.filter(n=>CAPTURABLE_ARCHETYPES.includes(n.archetype)).length>=3);
+ assert.equal(SLICE.nodes.filter(n=>CAPTURABLE_ARCHETYPES.includes(n.archetype)).length,5,'the slice fields five capturable nodes');
 });
 
 test('the slice layout is rotationally symmetric (x,z)->(-x,-z)',()=>{
@@ -72,6 +73,25 @@ test('the slice layout is rotationally symmetric (x,z)->(-x,-z)',()=>{
  }
 });
 
+test('the authored slice resolves to a five-capturable cocs lattice and the mode row agrees',()=>{
+ const state=cocsTemplate('cocs',SLICE,{});
+ assert.equal(state.synthesized,false,'the authored lattice wins over the stand-in');
+ const capturable=state.nodes.filter(n=>CAPTURABLE_ARCHETYPES.includes(n.archetype));
+ assert.equal(capturable.length,5);
+ assert.equal(state.zones.length,5,'the generic zone view reads the five capturable centres');
+ assert.ok(capturable.every(n=>n.r>=12),'contested control points use a 12 m+ capture radius');
+ // Outright majority (3 of 5) arms dominance; the first won fight cannot.
+ assert.equal(state.dominanceCount,3);
+ assert.equal(state.dominanceFastCount,4);
+ // The mode row and the authored map agree on the live budget.
+ const objective=GAME_MODES.find(mode=>mode.id==='cocs').rules.objective;
+ assert.equal(state.liveMin,objective.liveOpening);
+ assert.equal(state.liveMax,objective.liveMax);
+ assert.equal(state.endgameLive,objective.endgameLive);
+ enterEndgame(state);
+ assert.ok(capturable.every(n=>n.live===true),'every capturable node opens in the endgame');
+});
+
 test('playBounds, node spacing and lanes sit inside the doctrine bands',()=>{
  const p=SLICE.playBounds;
  assert.equal(p.frontage,240);
@@ -83,10 +103,12 @@ test('playBounds, node spacing and lanes sit inside the doctrine bands',()=>{
   assert.ok(n.x>=p.minX&&n.x<=p.maxX&&n.z>=p.minZ&&n.z<=p.maxZ,`${n.id} inside playBounds`);
   assert.ok(Number.isFinite(n.r)&&n.r>0);
  }
- // Adjacent lattice-node spacing is the doctrine measurement (<=140 m).
+ // Adjacent lattice-node spacing is the doctrine measurement: every authored
+ // edge stays inside the declared cap (and the 140 m doctrine ceiling).
  const byId=new Map(SLICE.nodes.map(n=>[n.id,n]));
  for(const [a,b] of SLICE.lattice){
   const spacing=Math.hypot(byId.get(a).x-byId.get(b).x,byId.get(a).z-byId.get(b).z);
+  assert.ok(spacing<=p.maxNodeSpacing,`${a}-${b} spacing ${spacing.toFixed(1)} m <= declared ${p.maxNodeSpacing}`);
   assert.ok(spacing<=140,`${a}-${b} spacing ${spacing.toFixed(1)} m`);
  }
  for(const lane of SLICE.lanes)for(const [x,z] of lane.waypoints){
