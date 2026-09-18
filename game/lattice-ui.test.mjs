@@ -4,11 +4,13 @@
 // cocs HUD readout, the in-world node markers and the radar ownership blips.
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import {readFile} from 'node:fs/promises';
 import * as T from 'three';
 import {cocsBoard,cocsArchetypeLabel,cocsArchetypeMark,cocsResultSummary,commandBrief,objectiveCopy,modeTargetText,modeGoal,scoreAnnouncer} from './hud.mjs';
+import {COCS_SCAN_COST,cocsArmVerb,cocsClearStrip,cocsCommandView,cocsEconomyView,cocsIssueOrder,cocsPickTarget,cocsSpotView,cocsStripState,cocsStripView,cocsSyncStrip,cocsTargetableNodes} from './cocs-orders.mjs';
 import {GAME_MODES} from './config.mjs';
 import {mapsForMode,resolveMapForMode,arenaSupportsMode,maxBotsFor,recommendedBots} from './arenas.mjs';
-import {radarContacts} from './radar.mjs';
+import {radarBlip,radarContacts} from './radar.mjs';
 import {Match} from './core.mjs';
 import {ArenaView} from './view.mjs';
 import {DEFAULT_DISPLAY} from './config.mjs';
@@ -199,4 +201,223 @@ test('cocs markers prune stale nodes and clear on a mode switch', () => {
   view.updateObjectives({time: 4, objectives: {kind: 'koth', zones: []}}, arena);
   assert.equal(view.objectiveModels.size, 0);
   assert.equal(view.worldGroup.children.length, 0);
+});
+
+// ---------------------------------------------------------------------------
+// V0b order strip + economy readout + SPOT presentation.
+// ---------------------------------------------------------------------------
+const economyHud = () => {
+  const hud = sampleHud();
+  Object.assign(hud.cocs, {
+    tick: 100,
+    flux: {0: 120.5, 1: 64},
+    fluxCap: 240,
+    fluxIncome: {0: 2, 1: 3},
+    fluxUpkeep: {0: 0.42, 1: 0},
+    fluxSpent: {0: 7, 1: 0},
+    req: [{id: 0, req: 32.5, earned: 45, spent: 12.5}, {id: 1, req: 3, earned: 3, spent: 0}],
+    scouts: [{id: 9, team: 0, node: 'relay-0', x: -2, z: 1, scanned: false, returning: false, idle: false, expireTick: 5400}],
+    scoutStats: {0: {spawned: 2, killed: 1, expired: 1, scans: 3}, 1: {spawned: 0, killed: 0, expired: 0, scans: 0}},
+    spots: [
+      {id: 1, team: 0, until: 130, x: -50, z: 0, by: 9},
+      {id: 2, team: 0, until: 80, x: 0, z: 0, by: 9},
+      {id: 3, team: 1, until: 130, x: 50, z: 0, by: 9},
+    ],
+    scans: {0: 'relay-0', 1: null},
+    orderStats: {issued: 5, completed: 2, byVerb: {HOLD: 1, ATTACK: 3, SCAN: 1}},
+    scoutCap: 1,
+    scanRadius: 12,
+    spotSeconds: 8,
+    spotBonus: 0.15,
+  });
+  return hud;
+};
+
+test('the V0b order strip arms a verb, picks a target and issues the engine verb', () => {
+  const board = cocsBoard(economyHud(), {team: 0});
+  assert.deepEqual(cocsTargetableNodes(board, null), []);
+  let strip = cocsStripState();
+  // GO collapses onto the engine's HOLD verb and toggles off when re-armed.
+  strip = cocsArmVerb(strip, 'GO');
+  assert.equal(strip.armed, 'GO');
+  assert.equal(cocsArmVerb(strip, 'GO').armed, null, 're-arming disarms the strip');
+  const goNodes = cocsTargetableNodes(board, strip.armed);
+  const owned = goNodes.find(node => node.mine === true);
+  assert.ok(owned, 'an owned node is a legal GO target');
+  strip = cocsPickTarget(strip, owned.id, goNodes);
+  assert.equal(strip.target, owned.id);
+  const view = cocsStripView(strip, {tick: 100, flux: 120, nodes: goNodes});
+  assert.equal(view.canIssue, true);
+  assert.equal(view.armedLabel, 'GO');
+  assert.equal(view.targetLabel, owned.label);
+  const issued = cocsIssueOrder(strip, {tick: 100, peerId: 'me', team: 0, flux: 120});
+  assert.equal(issued.order.verb, 'HOLD', 'GO maps to HOLD on the wire');
+  assert.equal(issued.order.target, owned.id);
+  assert.ok(issued.order.cardId.length > 0);
+  assert.equal(issued.state.pending.verb, 'HOLD');
+  assert.equal(issued.state.armed, null, 'issuing disarms');
+  const pendingView = cocsStripView(issued.state, {tick: 100, flux: 120, nodes: goNodes, nodeLabels: {[owned.id]: {label: owned.label, mark: owned.mark}}});
+  assert.equal(pendingView.pending.verb, 'HOLD');
+  assert.equal(pendingView.pending.target, owned.id);
+  assert.ok(pendingView.pending.text.includes(owned.label));
+  const filed = cocsSyncStrip(issued.state, {tick: 100 + 121});
+  assert.ok(filed.issued, 'the pending order files as issued');
+  assert.equal(filed.pending, null);
+  // Picking and issuing with no verb armed is a safe no-op.
+  const blank = cocsIssueOrder(cocsStripState(), {tick: 0, team: 0, flux: 80});
+  assert.equal(blank.order, null);
+  assert.equal(blank.state.notice, 'ARM A VERB');
+});
+
+test('SCAN is disabled and rejected while FLUX is below the scout cost', () => {
+  const board = cocsBoard(economyHud(), {team: 0});
+  let strip = cocsArmVerb(cocsStripState(), 'SCAN');
+  const nodes = cocsTargetableNodes(board, 'SCAN');
+  strip = cocsPickTarget(strip, nodes[0].id, nodes);
+  assert.equal(strip.target, nodes[0].id);
+  const poor = cocsStripView(strip, {tick: 0, flux: COCS_SCAN_COST - 1, nodes, scanCost: COCS_SCAN_COST});
+  const scanButton = poor.buttons.find(button => button.id === 'SCAN');
+  assert.equal(scanButton.disabled, true);
+  assert.equal(scanButton.reason, 'FLUX LOW');
+  assert.equal(poor.canIssue, false);
+  const rejected = cocsIssueOrder(strip, {tick: 0, team: 0, flux: COCS_SCAN_COST - 1});
+  assert.equal(rejected.order, null);
+  assert.equal(rejected.state.notice, 'FLUX LOW');
+  const issued = cocsIssueOrder(strip, {tick: 0, team: 0, flux: COCS_SCAN_COST});
+  assert.equal(issued.order.verb, 'SCAN');
+  assert.equal(issued.order.target, nodes[0].id);
+  assert.equal(COCS_SCAN_COST, 7, '§8.1 scout spawn cost');
+});
+
+test('the strip blocks a second issue inside the cooldown window', () => {
+  const board = cocsBoard(economyHud(), {team: 0});
+  const attackNodes = cocsTargetableNodes(board, 'ATTACK');
+  assert.ok(attackNodes.length > 0);
+  assert.equal(attackNodes.every(node => node.mine !== true), true, 'ATTACK never targets a node you own');
+  const target = attackNodes[0].id;
+  let strip = cocsPickTarget(cocsArmVerb(cocsStripState(), 'ATTACK'), target, attackNodes);
+  const first = cocsIssueOrder(strip, {tick: 10, team: 0, flux: 80});
+  assert.ok(first.order);
+  strip = cocsPickTarget(cocsArmVerb(first.state, 'ATTACK'), target, cocsTargetableNodes(board, 'ATTACK'));
+  const second = cocsIssueOrder(strip, {tick: 11, team: 0, flux: 80});
+  assert.equal(second.order, null);
+  assert.equal(second.state.notice, 'COOLDOWN');
+  const later = cocsIssueOrder(strip, {tick: 100, team: 0, flux: 80});
+  assert.ok(later.order, 'the cooldown expires on the tick clock');
+  // A cleared strip drops the armed verb and target.
+  const cleared = cocsClearStrip(strip);
+  assert.equal(cleared.armed, null);
+  assert.equal(cleared.target, null);
+});
+
+test('cocsTargetableNodes narrows by verb and the command view is mode-isolated', () => {
+  const hud = economyHud();
+  const board = cocsBoard(hud, {team: 0});
+  const scan = cocsTargetableNodes(board, 'SCAN').map(node => node.id);
+  const hold = cocsTargetableNodes(board, 'GO').map(node => node.id);
+  const attack = cocsTargetableNodes(board, 'ATTACK').map(node => node.id);
+  assert.deepEqual(scan, ['front-0', 'relay-0', 'front-1'], 'SCAN lists every capturable node');
+  assert.ok(hold.includes('front-0'), 'GO keeps your own nodes');
+  assert.equal(attack.includes('front-0'), false, 'ATTACK drops your own nodes');
+  assert.ok(cocsTargetableNodes(board, 'SCAN').every(node => node.archetype !== 'hq'), 'HQ is never a strip target');
+  assert.equal(cocsCommandView(null, hud.cocs, {team: 0}, cocsStripState()), null);
+  assert.equal(cocsCommandView(board, null, {team: 0}, cocsStripState()), null);
+  const command = cocsCommandView(board, hud.cocs, {team: 0}, cocsStripState());
+  assert.ok(command);
+  assert.equal(command.scanTarget.nodeId, 'relay-0');
+  assert.equal(command.scanTarget.label, 'RELAY');
+  assert.deepEqual(command.strip.buttons.map(button => button.label), ['SCAN', 'GO', 'ATTACK']);
+  assert.equal(command.spots.length, 1, 'only the live friendly mark at tick 100');
+});
+
+test('cocsEconomyView reads the FLUX bar, REQ chip, order tally and scout card', () => {
+  const hud = economyHud();
+  const money = cocsEconomyView(hud.cocs, {id: 0, team: 0});
+  assert.equal(money.team, 0);
+  assert.equal(money.flux, 120.5);
+  assert.equal(money.fluxCap, 240);
+  assert.equal(money.income, 2);
+  assert.equal(money.upkeep, 0.42);
+  assert.equal(money.net, 1.58);
+  assert.equal(money.spent, 7);
+  assert.equal(money.req.value, 32.5);
+  assert.equal(money.orders.issued, 5);
+  assert.equal(money.orders.completed, 2);
+  assert.deepEqual(money.orders.byVerb, {HOLD: 1, ATTACK: 3, SCAN: 1});
+  assert.equal(money.scout.alive, true);
+  assert.equal(money.scout.node, 'relay-0');
+  assert.equal(money.scoutStats.scans, 3);
+  assert.equal(money.scan.nodeId, 'relay-0');
+  assert.equal(money.spotCount, 1);
+  assert.equal(money.spotBonus, 0.15);
+  assert.equal(cocsEconomyView(null, {team: 0}), null);
+  const spectator = cocsEconomyView(hud.cocs, {team: null});
+  assert.equal(spectator.team, null);
+  assert.equal(spectator.flux, 0);
+  assert.equal(spectator.req.value, 0);
+});
+
+test('cocsSpotView ages SPOT marks against the sim tick and drops expired ones', () => {
+  const spots = cocsSpotView(economyHud().cocs, 0);
+  assert.equal(spots.length, 1);
+  assert.equal(spots[0].id, 1);
+  assert.equal(spots[0].remainingSeconds, 0.5);
+  assert.equal(spots[0].by, 9);
+  const later = cocsSpotView({...economyHud().cocs, tick: 200}, 0);
+  assert.equal(later.length, 0, 'the mark expires exactly on the tick');
+  assert.deepEqual(cocsSpotView(null, 0), []);
+  assert.deepEqual(cocsSpotView(economyHud().cocs, null), []);
+});
+
+test('the radar marks spotted enemies for the spotting team only', () => {
+  const hud = economyHud();
+  hud.actors = [{id: 0, team: 0, x: 0, z: 0, yaw: 0, health: 100}, {id: 1, team: 1, x: 10, z: 0, yaw: 0, health: 100}];
+  const player = {id: 0, team: 0, x: 0, z: 0, yaw: 0};
+  const {contacts} = radarContacts(hud, player, {range: 400});
+  const enemy = contacts.find(contact => contact.kind === 'actor' && contact.id === 1);
+  assert.ok(enemy);
+  assert.equal(enemy.spotted, true);
+  assert.equal(radarBlip(enemy, player).spotted, true);
+  assert.equal(contacts.find(contact => contact.kind === 'actor' && contact.id === 0).spotted, false, 'you never spot yourself');
+  // The enemy's own dial does not read the friendly mark.
+  const enemyView = radarContacts(hud, {id: 1, team: 1, x: 10, z: 0, yaw: 0}, {range: 400});
+  assert.equal(enemyView.contacts.find(contact => contact.kind === 'actor' && contact.id === 1).spotted, false);
+  hud.cocs.tick = 200;
+  const expired = radarContacts(hud, player, {range: 400}).contacts.find(contact => contact.kind === 'actor' && contact.id === 1);
+  assert.equal(expired.spotted, false, 'an expired mark stops rendering');
+});
+
+test('spotted enemies carry a world mark that expires with the sim tick', () => {
+  const view = markerView(false);
+  const model = new T.Group();
+  view.actorModels = new Map([[5, model]]);
+  view.playerId = 0;
+  const actors = [{id: 0, team: 0, x: 0, z: 0, health: 100}, {id: 5, team: 1, x: 10, z: 0, health: 100}];
+  const match = {time: 1, actors, objectiveState: {kind: 'cocs', tick: 100, spots: {5: {team: 0, until: 130, by: 0, x: 10, z: 0}}}};
+  view.updateSpots(match);
+  const mark = model.userData.spotMark;
+  assert.ok(mark, 'the mark is attached to the spotted actor');
+  assert.equal(mark.visible, true, 'the mark renders in-world');
+  assert.equal(mark.children.length, 2, 'ring plus chevron, a shape not just a colour');
+  match.objectiveState.tick = 200;
+  view.updateSpots(match);
+  assert.equal(mark.visible, false, 'the mark expires on the tick clock');
+  // Snapshot-shaped input (net/spectate) reads the same way.
+  const snapshot = {time: 1, actors, cocs: {tick: 100, spots: [{id: 5, team: 0, until: 130, by: 0, x: 10, z: 0}]}};
+  view.updateSpots(snapshot);
+  assert.equal(mark.visible, true);
+  // A mark for the other team never outlines the model for this player.
+  const enemySource = {time: 1, actors, cocs: {tick: 100, spots: [{id: 5, team: 1, until: 130, by: 9, x: 10, z: 0}]}};
+  view.updateSpots(enemySource);
+  assert.equal(mark.visible, false);
+});
+
+test('the PlayingHud strip is wired to the page cocs command bag', async () => {
+  const root = new URL('../', import.meta.url);
+  const page = await readFile(new URL('app/page.tsx', root), 'utf8');
+  const hud = await readFile(new URL('app/ui/screens/PlayingHud.tsx', root), 'utf8');
+  for (const token of ['cocsCommand', 'armCocsVerb', 'pickCocsTarget', 'issueCocsOrder']) assert.ok(page.includes(token), `page wires ${token}`);
+  assert.ok(page.includes('cocs:{orders:cocsOrders}'), 'issued orders enter Match.step through the human path');
+  assert.ok(hud.includes('cocsCommand') && hud.includes('ISSUE') && hud.includes('SCAN'), 'the strip renders its verbs and confirm');
+  assert.ok(hud.includes('radar-spotted'), 'the radar renders the spot mark');
 });

@@ -1484,6 +1484,55 @@ export class ArenaView{
         label.userData.objective=true;label.userData.noCameraOcclusion=true;g.userData.cocsLabel=label;
        }
       }
+      // V0b SPOT marks. A `SCAN` order marks every living enemy inside the scan
+      // radius for `spotSeconds`; this is presentation only (the +15% team
+      // damage lives in `Match.damage`). A spotted enemy gets an always-on-
+      // read ring + chevron above the head for exactly the remaining window,
+      // aged against the sim tick so the mark expires on the fixed clock.
+      cocsSpots(match){
+       const input=match?.objectives??match?.objectiveState;
+       const source=match?.cocs?.spots??input?.cocs?.spots??input?.spots;
+       if(Array.isArray(source))return source;
+       if(source&&typeof source==='object')return Object.keys(source).map(id=>({id:Number(id),...source[id]}));
+       return [];
+      }
+      cocsTick(match){const input=match?.objectives??match?.objectiveState;const tick=Number(match?.cocs?.tick??input?.cocs?.tick??input?.tick);return Number.isFinite(tick)?tick:null;}
+      ensureSpotMark(model){
+       if(!model?.userData)return null;
+       if(model.userData.spotMark)return model.userData.spotMark;
+       const group=new T.Group();group.name='cocs-spot';
+       const mat=new T.MeshBasicMaterial({color:'#ffd166',transparent:true,opacity:.95,depthTest:false,depthWrite:false});
+       const ring=new T.Mesh(new T.TorusGeometry(.42,.045,6,28),mat);ring.rotation.x=Math.PI/2;ring.position.y=1.35;group.add(ring);
+       const chevron=new T.Mesh(new T.ConeGeometry(.16,.3,4),mat);chevron.rotation.x=Math.PI;chevron.position.y=1.72;group.add(chevron);
+       group.traverse(node=>{node.userData.objective=true;node.userData.noCameraOcclusion=true;node.renderOrder=90;});
+       group.visible=false;model.add(group);model.userData.spotMark=group;return group;
+      }
+      updateSpots(match){
+       const spots=this.cocsSpots(match),tick=this.cocsTick(match),actors=match?.actors||[];
+       const local=actors.find(actor=>actor&&actor.id===this.playerId)||null;
+       const team=local&&(local.team===0||local.team===1)?local.team:null;
+       const byId=new Map(actors.filter(actor=>actor&&actor.id!==undefined).map(actor=>[actor.id,actor]));
+       const marked=new Set();
+       if(team!==null&&tick!==null){
+        for(const spot of spots){
+         if(!spot||spot.team!==team)continue;
+         if(!(Number(spot.until)>=tick))continue;
+         if(spot.id===undefined||spot.id===null)continue;
+         const target=byId.get(Number(spot.id));
+         if(!target||!(Number(target.health)>0))continue;
+         marked.add(Number(spot.id));
+        }
+       }
+       this.actorModels??=new Map();
+       for(const [id,model] of this.actorModels){
+        const mark=model?.userData?.spotMark;
+        if(mark)mark.visible=marked.has(id);
+       }
+       for(const id of marked){
+        const model=this.actorModels.get(id);
+        if(model)this.ensureSpotMark(model).visible=true;
+       }
+      }
       updateCocsObjectives(match,arena=MAPS[0]){
        const nodes=this.cocsNodes(match);
        this.objectiveModels??=new Map();
@@ -2029,7 +2078,7 @@ export class ArenaView{
     try{return this._renderFrame(mode,match,delta,time);}finally{this._capturePerf(perfStart);}
    }
    _renderFrame(mode,match,delta,time){this.motionQuery??=window.matchMedia?.('(prefers-reduced-motion: reduce)');this.resize();this._sampleQuality(delta);const reduced=this.reduced();if(mode!==this._lastMode){this._lastMode=mode;this.clearFreeMotion();}if((mode==='selection'||mode==='progression')&&!this.showcaseState){if(this.showcaseExpected){this.renderer.render(this.scene,this.camera);return;}const m=this.menu.model;m.rotation.y=Math.PI+.25+(reduced?0:Math.sin(time*.25)*.2);m.position.y=.17+(reduced?0:Math.sin(time)*.025);m.userData.rig?.update({dt:Math.max(0,Math.min(.1,delta||0)),time,speed:0,maxSpeed:8,grounded:true});this.renderer.render(this.menu.scene,this.menu.camera);return;}if((mode==='selection'||mode==='theater'||mode==='progression'||mode==='changelog'||mode==='browse'||mode==='lobby')&&!match)match=this.showcaseState;
-      if(!match)return;const owner=this.cameraOwner,actors=match.actors||[],follow=owner==='manual'&&this.manualFollowId!=null?this.manualFollowId:null,freeCam=owner==='free'&&this._freeCam===true,cinematic=this.cinema===true&&!!this.director&&!freeCam,raceActive=cameraOwnerAllowsRace(owner)&&!this.directorLock&&!!match.race;let player=cinematic?actors[0]:(actors.find(a=>a.id===this.playerId)||actors[0]);if(follow!=null)player=actors.find(a=>a.id===follow)||player;if(!cinematic&&(this.spectator||follow!=null))player=spectateActor(actors,follow??this.spectatorTarget)||player;if(!player)return;const arena=match.arena||MAPS.find(a=>a.id===match.mapId)||MAPS[0];const savedPlayerId=this.playerId;this.updateFlags(match,arena);this.updateObjectives(match,arena);this.updateWaypoint(match,arena);this.updatePayloadModel(match,arena,time);this.updateMothRift(time);if(cinematic)this.playerId=-1;const cinemaPose=cinematic?this.director.update(match,Math.max(0,delta),match.events||[]):null;if(freeCam){this.camera.position.set(this.freePose.x,this.freePose.y,this.freePose.z);this.camera.rotation.set(this.freePose.pitch,this.freePose.yaw,0,'YXZ');}else if(cinemaPose&&!raceActive){this.camera.position.set(cinemaPose.x,cinemaPose.y,cinemaPose.z);this.camera.rotation.set(cinemaPose.pitch,cinemaPose.yaw,cinemaPose.roll||0,'YXZ');this._clearCamera(player,delta,cinemaPose.cut);this._applyFreeExitBlend(delta,reduced);}else{const pres=this._interpEnabled?this._presentActor(player.id):null,px=pres&&!pres.snapped?pres.x:(player.x||0),py=pres&&!pres.snapped?pres.y:(player.y||0),pz=pres&&!pres.snapped?pres.z:(player.z||0);const eyeY=py+(player.health>0?(player.eyeHeight??1.45):.65),yaw=(player.yaw||0)+(player.punchYaw||0),pitch=(player.pitch||0)+(player.punchPitch||0);if(this.spectator&&this.spectatorThird===true){const dist=4.6,cos=Math.cos(pitch);this.camera.position.set(px+Math.sin(yaw)*dist*cos,eyeY+1.1-Math.sin(pitch)*dist,pz+Math.cos(yaw)*dist*cos);}else this.camera.position.set(px,eyeY,pz);this.camera.rotation.set(pitch,yaw,0,'YXZ');this._applyFreeExitBlend(delta,reduced);}this.cameraShake??=new CameraShake();const aiming=this.aim===true||player.ads===true,baseFov=this.display?.fov??82;
+      if(!match)return;const owner=this.cameraOwner,actors=match.actors||[],follow=owner==='manual'&&this.manualFollowId!=null?this.manualFollowId:null,freeCam=owner==='free'&&this._freeCam===true,cinematic=this.cinema===true&&!!this.director&&!freeCam,raceActive=cameraOwnerAllowsRace(owner)&&!this.directorLock&&!!match.race;let player=cinematic?actors[0]:(actors.find(a=>a.id===this.playerId)||actors[0]);if(follow!=null)player=actors.find(a=>a.id===follow)||player;if(!cinematic&&(this.spectator||follow!=null))player=spectateActor(actors,follow??this.spectatorTarget)||player;if(!player)return;const arena=match.arena||MAPS.find(a=>a.id===match.mapId)||MAPS[0];const savedPlayerId=this.playerId;this.updateFlags(match,arena);this.updateObjectives(match,arena);this.updateSpots(match);this.updateWaypoint(match,arena);this.updatePayloadModel(match,arena,time);this.updateMothRift(time);if(cinematic)this.playerId=-1;const cinemaPose=cinematic?this.director.update(match,Math.max(0,delta),match.events||[]):null;if(freeCam){this.camera.position.set(this.freePose.x,this.freePose.y,this.freePose.z);this.camera.rotation.set(this.freePose.pitch,this.freePose.yaw,0,'YXZ');}else if(cinemaPose&&!raceActive){this.camera.position.set(cinemaPose.x,cinemaPose.y,cinemaPose.z);this.camera.rotation.set(cinemaPose.pitch,cinemaPose.yaw,cinemaPose.roll||0,'YXZ');this._clearCamera(player,delta,cinemaPose.cut);this._applyFreeExitBlend(delta,reduced);}else{const pres=this._interpEnabled?this._presentActor(player.id):null,px=pres&&!pres.snapped?pres.x:(player.x||0),py=pres&&!pres.snapped?pres.y:(player.y||0),pz=pres&&!pres.snapped?pres.z:(player.z||0);const eyeY=py+(player.health>0?(player.eyeHeight??1.45):.65),yaw=(player.yaw||0)+(player.punchYaw||0),pitch=(player.pitch||0)+(player.punchPitch||0);if(this.spectator&&this.spectatorThird===true){const dist=4.6,cos=Math.cos(pitch);this.camera.position.set(px+Math.sin(yaw)*dist*cos,eyeY+1.1-Math.sin(pitch)*dist,pz+Math.cos(yaw)*dist*cos);}else this.camera.position.set(px,eyeY,pz);this.camera.rotation.set(pitch,yaw,0,'YXZ');this._applyFreeExitBlend(delta,reduced);}this.cameraShake??=new CameraShake();const aiming=this.aim===true||player.ads===true,baseFov=this.display?.fov??82;
 const activeSight=this._activeSight=resolveActiveSight({weapon:player.weapon,optic:player.attachments?.visual?.optic,aiming});
 // Player FOV is updated with the weapon pose below; director/free camera keep ownership here.
 if(cinemaPose)this.camera.fov=Math.max(50,Math.min(100,cinemaPose.fov||this.camera.fov));if(freeCam)this.camera.fov=Math.max(50,Math.min(100,this.display?.fov??82));this.camera.updateProjectionMatrix();

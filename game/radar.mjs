@@ -49,6 +49,22 @@ export function radarContacts(hud, player, {range = DEFAULT_RANGE} = {}) {
   if (!hud || !Number.isFinite(px) || !Number.isFinite(pz)) return {contacts, range: span};
   const yaw = Number(player.yaw) || 0, cos = Math.cos(yaw), sin = Math.sin(yaw);
   const reveal = (Number(player?.powerups?.recon) || 0) > 0;
+  // LATTICE STRIKE `SPOT` marks (V0b). `until` is a sim tick, so a contact is
+  // spotted only while the mark is live for the local player's team. Radar is a
+  // pure presentation read of the snapshot; the damage bonus is engine-side.
+  const cocsSpots = Array.isArray(hud?.cocs?.spots) ? hud.cocs.spots : null;
+  const cocsTick = Number.isFinite(Number(hud?.cocs?.tick)) ? Number(hud.cocs.tick) : (Number(hud?.time) || 0) * 60;
+  const spotFor = actor => {
+   if (!cocsSpots || !(player?.team === 0 || player?.team === 1)) return null;
+   if (!(Number(actor?.health) > 0)) return null;
+   for (const spot of cocsSpots) {
+    if (!spot || Number(spot.id) !== Number(actor.id)) continue;
+    if (spot.team !== player.team) continue;
+    if (!(Number(spot.until) >= cocsTick)) continue;
+    return spot;
+   }
+   return null;
+  };
   const place = (x, z, always = false) => {
     const dx = Number(x) - px, dz = Number(z) - pz;
     if (!Number.isFinite(dx) || !Number.isFinite(dz)) return null;
@@ -71,7 +87,8 @@ export function radarContacts(hud, player, {range = DEFAULT_RANGE} = {}) {
     }
     const point = place(actor?.x, actor?.z, reveal && actor.id !== player.id && !teammate);
     if (!point) continue;
-    contacts.push({kind: 'actor', id: actor.id, x: point.x, y: point.y, team: actor.team, self: actor.id === player.id, dead: !(Number(actor.health) > 0), vehicle: actor.vehicleId != null, revealed: point.clamped === true, offscreen: point.offscreen === true, bearing: point.bearing ?? null});
+    const spot = spotFor(actor);
+    contacts.push({kind: 'actor', id: actor.id, x: point.x, y: point.y, team: actor.team, self: actor.id === player.id, dead: !(Number(actor.health) > 0), vehicle: actor.vehicleId != null, revealed: point.clamped === true, offscreen: point.offscreen === true, bearing: point.bearing ?? null, spotted: spot !== null, spotUntil: spot ? Number(spot.until) : null});
   }
   // LATTICE STRIKE nodes carry `{owner, contested, progress:[p0,p1], live}` on
   // the frozen cocs subtree, so the dial shows real control instead of the
@@ -164,10 +181,11 @@ const offscreenIndicator = contact => {
 /** @param {{red:string,blue:string,hostile:string,self:string,teammate:string,neutral:string,contested:string,payload:string}} [palette] */
 export function radarBlip(contact, player, palette = RADAR_COLORS.default) {
   const colors = palette ?? RADAR_COLORS.default;
-  const fill = radarBlipColor(contact, player, colors);
+  const base = radarBlipColor(contact, player, colors);
+  const fill = contact?.spotted === true ? colors.contested : base;
   const anchor = radarAnchor(contact);
   const offscreen = offscreenIndicator(contact);
-  if (contact?.kind === 'actor') return {kind: 'actor', shape: 'circle', ...anchor, r: contact.self ? .07 : .05, fill, dead: contact.dead === true, revealed: contact.revealed === true, self: contact.self === true, offscreen: contact.offscreen === true, indicator: offscreen};
+  if (contact?.kind === 'actor') return {kind: 'actor', shape: 'circle', ...anchor, r: contact.self ? .07 : .05, fill, dead: contact.dead === true, revealed: contact.revealed === true, self: contact.self === true, offscreen: contact.offscreen === true, spotted: contact.spotted === true, indicator: offscreen};
   if (contact?.kind === 'zone') return {kind: 'zone', shape: 'rect', ...anchor, rect: {x: anchor.cx - .06, y: anchor.cy - .06, width: .12, height: .12}, fill, label: contact.label ?? null, owner: contact.owner ?? null, contested: contact.contested === true, progress: Number.isFinite(contact.progress) ? contact.progress : null, captureTeam: contact.captureTeam ?? null};
   if (contact?.kind === 'payload') {
     const progress = Number.isFinite(contact.progress) ? contact.progress : null;

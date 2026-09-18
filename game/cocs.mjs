@@ -1045,6 +1045,9 @@ export function cocsSnapshot(match) {
     .sort((a, b) => a.id - b.id)
     .map(actor => ({id: actor.id, req: num(actor.req, 0), earned: num(actor.reqEarned, 0), spent: num(actor.reqSpent, 0)}));
   return {
+    // Sim tick. `spots[].until` is a tick, so presentation subtracts this to
+    // age the SPOT window without reaching into the live state.
+    tick: num(state.tick, 0),
     nodes: state.nodes.map(node => ({
       id: node.id,
       x: node.x,

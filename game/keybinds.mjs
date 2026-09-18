@@ -6,6 +6,10 @@ export const DEFAULT_BINDINGS = Object.freeze({
   forward: 'KeyW', back: 'KeyS', left: 'KeyA', right: 'KeyD',
   jump: 'Space', sprint: 'ShiftLeft', crouch: 'ControlLeft',
   reload: 'KeyR', melee: 'KeyF', grenade: 'KeyG', power: 'KeyQ', mobility: 'KeyX', interact: 'KeyE', voice: 'KeyV',
+  // LATTICE STRIKE (`cocs`) V0b order strip. SCAN / GO / ATTACK arm the strip's
+  // three verbs; a node is then picked with the number keys or a click. Bound
+  // like every other action so a player can remap them in Settings.
+  commandScan: 'KeyN', commandGo: 'KeyM', commandAttack: 'KeyP',
 });
 
 export const KEYBIND_ACTIONS = Object.freeze(Object.keys(DEFAULT_BINDINGS));
