@@ -37,6 +37,7 @@ import {
 } from './cocs-director.mjs';
 import {COOP_ROLES, coopRole, roleAbility, roleAbilityTargets} from './cocs-roles.mjs';
 import {TERMINAL_KINDS, repairTerminal, terminalInteract, vaultAction} from './cocs-terminals.mjs';
+import {latticeInteractionRate} from './lattice-support.mjs';
 
 export const COOP_KIND = 'cocs-coop';
 export const NPC_DEAD = 1e9;
@@ -716,7 +717,7 @@ function stepCoopPrimes(match, state, dt) {
     const actor = actorById(match, channel.actor);
     const near = actor && actor.health > 0 && Math.hypot(num(actor.x, 0) - node.x, num(actor.z, 0) - node.z) <= Math.max(num(node.r, 4), PRIME_LEASH);
     if (!near || node.contested === true) { node.primeChannel = null; match?.emit?.('cocs-prime-interrupt', {node: node.id, actor: channel.actor}); continue; }
-    channel.remaining = Math.max(0, num(channel.remaining, 0) - dt);
+    channel.remaining = Math.max(0, num(channel.remaining, 0) - dt * latticeInteractionRate(match, actor));
     if (!(channel.remaining > 0)) completePrime(match, state, node);
   }
   for (const node of state.nodes ?? []) if (node?.prime && num(state.tick, 0) > num(node.prime.until, 0)) node.prime = null;

@@ -49,6 +49,7 @@ import {createTraversalState, stepCocsTraversal, cocsTraversalSnapshot, humanDev
 import {createTerminalState, stepCocsTerminals, cocsTerminalsSnapshot, humanTerminalInteract} from './cocs-terminals.mjs';
 import {COOP_ECONOMY} from './cocs-difficulty.mjs';
 import {cocsCoopSnapshot, coopOrderGate, coopOutcome, createCoopState, stepCoop} from './cocs-coop.mjs';
+import {latticeCaptureRate, latticeCaptureResist, latticeSupportSnapshot, stepLatticeSupport} from './lattice-support.mjs';
 
 export const COCS_KIND = 'cocs';
 // The frozen node archetypes. Authored maps may spell a few of these
@@ -1441,14 +1442,16 @@ export function cocsTeamVisibility(match, state, team) {
     if (actor.team !== 0 && actor.team !== 1) continue;
     const own = actor.team === t;
     const spot = state.spots?.[actor.id];
-    // V1 has no fog: a mark is global, so both teams read the same contact set.
-    // The per-team computation is what the V2 per-peer filter will replace.
-    const spotted = Boolean(spot && num(state.tick, 0) <= num(spot.until, 0));
-    if (!own && !spotted) continue;
+    // Legacy SCAN contacts remain global in V1. Field recon is team-scoped and
+    // information-only, while using the same shipped team-marker presentation.
+    const spotted = Boolean(spot && (spot.intelOnly !== true || spot.team === t) && num(state.tick, 0) <= num(spot.until, 0));
+    const fieldIntel = state.fieldSupport?.intel?.[t]?.[actor.id];
+    const revealed = Boolean(fieldIntel && fieldIntel.until > state.tick && !(actor.powerups?.cloak > 0));
+    if (!own && !spotted && !revealed) continue;
     contacts.push({
       id: actor.id, team: actor.team, own,
-      x: num(actor.x, 0), z: num(actor.z, 0),
-      spotted, isSubagent: actor.isSubagent === true,
+      x: revealed && !own && !spotted ? fieldIntel.x : num(actor.x, 0), z: revealed && !own && !spotted ? fieldIntel.z : num(actor.z, 0),
+      spotted, ...(revealed ? {revealed: true} : {}), isSubagent: actor.isSubagent === true,
       role: actor.subagentRole ?? (actor.isScout === true ? 'scout' : null),
     });
   }
@@ -1524,7 +1527,7 @@ export function cocsSpotDamageScale(match, source, target) {
   if (!source || !target || source === target) return 1;
   if (source.team !== 0 && source.team !== 1) return 1;
   const spot = state.spots?.[target.id];
-  if (!spot || spot.team !== source.team) return 1;
+  if (!spot || spot.intelOnly === true || spot.team !== source.team) return 1;
   if (num(state.tick, 0) > num(spot.until, 0)) return 1;
   return 1 + COCS_SPOT_DAMAGE_BONUS;
 }
@@ -1628,10 +1631,9 @@ function captureNodeStep(match, state, node, dt, rate) {
     for (const actor of actors[team]) actor.scoreStats.objectiveTime = (actor.scoreStats.objectiveTime ?? 0) + dt;
     return;
   }
-  // OPERATIONS FORTIFY (O1b): a hardened node resists an enemy capture. The
-  // resist is mode-local data set only by the co-op sink path; PvPvE never
-  // carries it, so this is a no-op outside `cocs-coop`.
-  const resist = clamp01(num(node.captureResist, 0));
+  // OPERATIONS FORTIFY and a field ward resist enemy capture. Take the stronger
+  // effect; duplicate engineers cannot multiply the defensive budget.
+  const resist = clamp01(Math.max(num(node.captureResist, 0), latticeCaptureResist(state, node, team)));
   // O1c terminal HACK (§4.3) and HARVESTER PRIME (§4.8/§8.1): both are
   // co-op-only node windows created by `cocs-terminals.mjs`/`cocs-coop.mjs`.
   // PvPvE never sets `node.hack`/`node.prime`, so this multiplies by 1 there.
@@ -1639,7 +1641,10 @@ function captureNodeStep(match, state, node, dt, rate) {
     ? Math.max(1, num(node.hack.multiplier, 1)) : 1;
   const prime = node.prime && node.prime.team === team && num(state.tick, 0) <= num(node.prime.captureUntil, 0)
     ? Math.max(1, num(node.prime.captureMultiplier, 1)) : 1;
-  node.progress[team] = clamp01(num(node.progress[team], 0) + rate * (1 - resist) * hack * prime);
+  // Preserve existing HACK/PRIME tuning; a field kit takes the max rather than
+  // multiplying that budget or stacking with other contributors.
+  const field = latticeCaptureRate(match, actors[team]);
+  node.progress[team] = clamp01(num(node.progress[team], 0) + rate * (1 - resist) * Math.max(hack * prime, field));
   if (node.progress[team] >= 1 - EPSILON) captureNode(match, state, node, team, actors[team]);
 }
 
@@ -1711,7 +1716,7 @@ export function cocsSnapshot(match) {
   for (const id of Object.keys(state.spots ?? {}).map(Number).sort((a, b) => a - b)) {
     const spot = state.spots[id];
     if (!spot) continue;
-    spots.push({id, team: spot.team, until: num(spot.until, 0), x: num(spot.x, 0), z: num(spot.z, 0), by: spot.by ?? null});
+    spots.push({id, team: spot.team, until: num(spot.until, 0), x: num(spot.x, 0), z: num(spot.z, 0), by: spot.by ?? null, ...(spot.intelOnly === true ? {intelOnly: true} : {})});
   }
   const req = (match?.actors ?? [])
     .filter(actor => actor && (actor.team === 0 || actor.team === 1))
@@ -1721,6 +1726,7 @@ export function cocsSnapshot(match) {
     // Sim tick. `spots[].until` is a tick, so presentation subtracts this to
     // age the SPOT window without reaching into the live state.
     tick: num(state.tick, 0),
+    fieldSupport: latticeSupportSnapshot(state),
     nodes: state.nodes.map(node => ({
       id: node.id,
       x: node.x,
@@ -1848,6 +1854,9 @@ export function stepCocs(match, dt = RULES.dt) {
     if (node.archetype === 'array' && state.endgame !== true) { node.contested = false; continue; }
     captureNodeStep(match, state, node, dt, rate);
   }
+
+  // Physical presence and contest are current before field support executes.
+  stepLatticeSupport(match, state, dt, {connectedToHq});
 
   // 4. Connectivity income and the objective score-at-time.
   const {income} = connectivityIncome(state);
