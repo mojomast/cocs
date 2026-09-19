@@ -258,7 +258,7 @@ export const teamMode=modeOrConfig=>Boolean(modeRule(typeof modeOrConfig==='stri
 // LATTICE STRIKE family: both the PvPvE `cocs` and the co-op `cocs-coop` share
 // `score:'cocs'`. Engine/UI seams that used to test `mode==='cocs'` use this so
 // adding OPERATIONS never changes the original mode's behaviour.
-export const isCocsMode=modeOrConfig=>modeRule(typeof modeOrConfig==='string'?modeOrConfig:modeOrConfig?.mode).score==='cocs';
+export const isCocsMode=modeOrConfig=>modeRule(typeof modeOrConfig==='string'?modeOrConfig:modeOrConfig?.mode??modeOrConfig?.id).score==='cocs';
 export function normalizeConfig(value={}){
  const c=value&&typeof value==='object'?{...value}:{};
   // A `mutators` list is folded into the canonical flags before sanitizing so
