@@ -2,6 +2,8 @@
 // Coordinates: +Z stock, -Z muzzle; points agree with view's existing flash table.
 import * as T from 'three';
 import {attachIronSights,attachScope} from '../sights.mjs';
+import {currentAssets} from '../effects-fx.mjs';
+import {barrelGeometry,beveledBox,joinedGeometry,placedGeometry} from '../model-geometry.mjs';
 
 export const CHASSIS = Object.freeze([
  // width, receiver height, receiver length, muzzle Z/Y, barrel radius, stock length
@@ -19,18 +21,21 @@ export const CHASSIS = Object.freeze([
 export const chassisFor=type=>CHASSIS[type]||CHASSIS[0];
 
 export function buildChassis(type,g,ctx){
- const {box,cylinder,ring,geo,palette}=ctx,{dark,light,glow}=palette;
+ const {cylinder,ring,geo,palette}=ctx,{dark,light,glow}=palette;
  const [w,h,len,mz,my,r,stockLen]=chassisFor(type),top=my+h/2,front=-len;
  const part=(name)=>{const p=new T.Group();p.name=name;g.add(p);return p;};
  const named=(name,n)=>{n.name=name;return n;};
- const b=(p,w,h,d,x,y,z,m=dark)=>box(p,w,h,d,x,y,z,m);
+ const b=(p,w,h,d,x,y,z,m=dark)=>machinedBox(ctx,p,w,h,d,x,y,z,m);
  const tube=(p,rad,length,x,y,z,name='barrel')=>{
-  // Unit open tube: shared across all ten weapons, never a capped cylinder
-  // pretending to be a bore. Wall thickness comes from the muzzle lip.
-  const n=new T.Mesh(geo('phase1-open-tube-12',()=>new T.CylinderGeometry(1,1,1,12,1,true)),light);
+   const n=new T.Mesh(geo('lattice-turned-bore-24',()=>barrelGeometry(24)),light);
   n.rotation.x=Math.PI/2;n.scale.set(rad,length,rad);n.position.set(x,y,z);p.add(n);n.name=name;return n;
  };
- const receiver=named('receiver',b(g,w,h,len,0,my,-len/2));
+ // Broad-radius energy chambers, slab-sided kinetic breeches, and a rounded
+ // launch housing have deliberately different cross sections at the same rig
+ // envelope. All sight/muzzle coordinates remain defined by CHASSIS.
+ const roundness=[.025,.095,.018,.035,.065,.04,.045,.025,.018,.022][type]??.025;
+ const receiver=new T.Mesh(geo(`lattice-receiver-${type}`,()=>beveledBox(w,h,len,roundness,2)),dark);
+ receiver.name='receiver';receiver.position.set(0,my,-len/2);g.add(receiver);
  // Lower receiver bridges grip/feed rather than separate floating blocks.
  b(g,w*.74,.055,len*.65,0,my-h/2-.02,-len*.36);
  const grip=named('grip',b(g,.065,.18,.095,0,my-h/2-.09,-.035));grip.rotation.x=-.22;
@@ -79,7 +84,7 @@ export function buildChassis(type,g,ctx){
  }
  const feed=part('feed');
  if(type===5){
-  const drum=named('grenade-drum',cylinder(feed,.125,.125,.23,0,my-.17,-.25,light,12));drum.rotation.x=Math.PI/2;
+   const drum=named('grenade-drum',cylinder(feed,.125,.125,.23,0,my-.17,-.25,light,24));drum.rotation.x=Math.PI/2;
   // Connected center axle and one indexing latch, not individual floating rounds.
   b(g,.065,.08,.09,0,my-.08,-.25);
   b(feed,.028,.07,.05,.125,my-.15,-.25);
@@ -101,6 +106,7 @@ export function buildChassis(type,g,ctx){
  b(g,.012,.05,.16,w/2+.004,my+.015,-len*.48,light); // carrier race
  b(bolt,.023,.032,.075,w/2+.013,my+.015,-len*.45);
  b(bolt,.047,.024,.025,w/2+.032,my+.015,-len*.38,light);
+ addChassisMachining(type,g,barrel,feed,ctx);
  // Rebase rotating assemblies at their actual hinge/cell center, preserving
  // every mesh's rest position. Existing runtime rotations must not orbit origin.
  for(const [node,pivot] of type===2?[[feed,[0,my-h/2-.09,-.28]]]:type===3?[[barrel,[0,my,front]]]:[]){
@@ -128,14 +134,83 @@ export function buildChassis(type,g,ctx){
 // Five meshes: receiver, muzzle/barrel, shoulder support, grip, feed. This is
 // intentional authored simplification; no detailed viewmodel is built/discarded.
 export function buildSimpleWeaponBody(type,g,ctx){
- const {box,cylinder,palette:{dark,light}}=ctx;
+ // The live world-body hook predates custom geo in its context. Honor that
+ // contract through its active asset scope, also allowing standalone builders.
+ if(!ctx.geo)ctx={...ctx,geo:(key,make)=>{const assets=currentAssets();return assets?assets.geometry(key,make):make();}};
+ const {geo,palette:{dark,light}}=ctx;
+ const box=(...args)=>machinedBox(ctx,...args);
  const [w,h,len,mz,my,r,stockLen]=chassisFor(type);
  const named=(name,n)=>{n.name=name;return n;};
  named('receiver',box(g,w,h,len,0,my,-len/2,dark));
- const barrel=type===3?box(g,.31,.12,-mz-len,0,my,(mz-len)/2,light):cylinder(g,r,r,-mz-len,0,my,(mz-len)/2,light,8);
- if(type!==3)barrel.rotation.x=Math.PI/2;named('barrel',barrel);
+ const barrel=new T.Mesh(geo(`lattice-world-bore-${type}`,()=>{
+  const make=x=>placedGeometry(barrelGeometry(10).scale(r,-mz-len,r),[x,0,0],[Math.PI/2,0,0]);
+  return type===3?joinedGeometry([make(-.12),make(.12)]):make(0);
+ }),light);barrel.position.set(0,my,(mz-len)/2);g.add(barrel);named('barrel',barrel);
  named('stock',box(g,w*.75,h*.65,stockLen,0,my-.03,stockLen/2-.01,dark));
  named('grip',box(g,.07,.19,.09,0,my-h/2-.08,-.03,dark));
- named('feed',box(g,type===7?.20:type===5?.23:.09,type===1?.07:type===9?.27:.16,type===5?.23:.13,type===7?-.07:0,my-h/2-.09,-.25,light));
+ if(type===5){const feed=new T.Mesh(geo('lattice-world-drum',()=>new T.CylinderGeometry(.125,.125,.23,12).rotateX(Math.PI/2)),light);feed.position.set(0,my-h/2-.09,-.25);g.add(named('feed',feed));}
+ else named('feed',box(g,type===7?.20:.09,type===1?.07:type===9?.27:.16,.13,type===7?-.07:0,my-h/2-.09,-.25,light));
  g.userData.simple=true;g.userData.muzzlePoint=[0,my,mz];
+}
+
+function machinedBox(ctx,parent,w,h,d,x,y,z,material){
+ const radius=Math.min(.018,Math.min(w,h,d)*.22);
+ const mesh=new T.Mesh(ctx.geo(`lattice-bevel|${w}|${h}|${d}`,()=>beveledBox(w,h,d,radius)),material);
+ mesh.position.set(x,y,z);parent.add(mesh);return mesh;
+}
+
+// Two batched machined assemblies per weapon, not a draw call per fastener.
+// Barrel hardware follows break-action hinges; feed flutes follow reloads.
+function addChassisMachining(type,g,barrel,feed,ctx){
+ const [w,h,len,mz,my,r]=chassisFor(type),{light,dark}=ctx.palette;
+ const add=(parent,key,material,make)=>{
+  const n=new T.Mesh(ctx.geo(`lattice-machining-${type}-${key}`,()=>joinedGeometry(make())),material);
+  n.name=`machined-${key}`;parent.add(n);return n;
+ };
+ const plate=(w,h,d,p,rotation)=>placedGeometry(beveledBox(w,h,d),p,rotation);
+ add(g,'receiver-inlays',light,()=>{
+  const parts=[];
+  for(const s of [-1,1]){
+   // Slender inset side rails leave the resolved weapon finish dominant.
+   parts.push(plate(.008,h*.17,len*.70,[s*(w/2+.002),my-h*.20,-len*.50]));
+   for(const z of [-len*.26,-len*.72]){
+    const pin=new T.CylinderGeometry(.010,.010,.012,8);pin.rotateZ(Math.PI/2);pin.translate(s*(w/2+.004),my+.022,z);parts.push(pin);
+   }
+  }
+  return parts;
+ });
+ if(type===5){
+  add(feed,'drum-flutes',dark,()=>Array.from({length:6},(_,i)=>{
+   const a=i*Math.PI/3;
+   return plate(.038,.014,.18,[Math.sin(a)*.122,my-.17+Math.cos(a)*.122,-.25],[0,0,-a]);
+  }));
+ }else{
+  add(barrel,'barrel-hardware',type===2||type===6?light:dark,()=>{
+   const parts=[],length=-mz-len;
+   if(type===2){
+    for(const s of [-1,1])for(let i=0;i<3;i++)parts.push(plate(.042,.09,.022,[s*.066,my,-len-length*(.20+i*.24)]));
+   }else if(type===6){
+    // Open C-shaped induction yokes distinguish the shock fork from the
+    // rail weapon's rectangular accelerator blocks, without obscuring its bore.
+    for(let i=0;i<3;i++){
+     const yoke=new T.TorusGeometry(.085,.012,6,20,Math.PI*1.65);
+     yoke.rotateZ(Math.PI*.675);yoke.translate(0,my,-len-length*(.20+i*.24));parts.push(yoke);
+    }
+   }else if(type===1||type===4||type===7){
+    // Large launch-tube collars, plasma cooling ribs, heavy flak heat sink.
+    const count=type===4?4:2;
+    for(let i=0;i<count;i++){
+     const ring=new T.TorusGeometry(r*(type===1?1.07:1.16),type===1?.014:.009,6,24);
+     ring.translate(0,my,-len-length*(.20+i*(.60/Math.max(1,count-1))));parts.push(ring);
+    }
+   }else{
+    // Ribbed pump saddle, precision barrel ferrules or compact vented shroud.
+    for(let i=0;i<(type===3?4:3);i++){
+     const width=type===3?.29:type===8?.070:.095;
+     parts.push(plate(width,.018,.026,[0,my-r*.80,-len-length*(.15+i*.15)]));
+    }
+   }
+   return parts;
+  });
+ }
 }

@@ -2,8 +2,10 @@
 // Provides material shaders, high-detail attachments, and glowing energy conduit meshes.
 
 import * as T from 'three';
-import { WEAPONS } from './data.mjs';
+import { CHARACTERS, WEAPONS } from './data.mjs';
 import { surfaceTextures as defaultSurfaceTextures } from './textures.mjs';
+import {currentAssets} from './effects-fx.mjs';
+import {beveledBox,contourGeometry,joinedGeometry,placedGeometry} from './model-geometry.mjs';
 
 export const FIDELITY_PRESETS = Object.freeze({
   LOW: { segments: 8, glowIntensity: 0.5, dynamicShadows: false },
@@ -469,12 +471,174 @@ export function enhanceOperatorModel(robot, { color = '#57e6cd', accent = '#2c35
 }
 
 
-// Character-only geometry pass: no weapon geometry or material retuning.
+// Authored helmet proportions, not random greebles or palette swaps. Existing
+// wing/harness pieces remain attached to the same head/chest/shoulder joints.
+export const OPERATOR_FORMS=Object.freeze({
+ chatgpt:{name:'Surveyor',width:.184,depth:.174,height:1.00,jaw:.73,power:.86,visor:.064,eyes:'split',cheek:.050},
+ claude:{name:'Warden',width:.193,depth:.174,height:1.06,jaw:.88,power:.60,visor:.052,eyes:'bar',cheek:.070},
+ grok:{name:'Outrider',width:.169,depth:.182,height:.94,jaw:.58,power:.66,visor:.045,eyes:'mono',cheek:.038},
+ meta:{name:'Bulwark',width:.205,depth:.182,height:.91,jaw:.92,power:.57,visor:.056,eyes:'split',cheek:.077},
+ gemini:{name:'Duplex',width:.177,depth:.167,height:1.12,jaw:.67,power:.77,visor:.078,eyes:'dual',cheek:.042},
+ deepseek:{name:'Bathys',width:.173,depth:.193,height:1.07,jaw:.62,power:.84,visor:.082,eyes:'diver',cheek:.057},
+ mistral:{name:'Slipstream',width:.174,depth:.189,height:.93,jaw:.59,power:.70,visor:.046,eyes:'swept',cheek:.038},
+ kimi:{name:'Orbital',width:.188,depth:.182,height:1.04,jaw:.76,power:1.00,visor:.106,eyes:'constellation',cheek:.042},
+ qwen:{name:'Lamellar',width:.191,depth:.173,height:1.02,jaw:.81,power:.55,visor:.050,eyes:'triple',cheek:.066},
+});
+
+function operatorGeometry(key,make){const assets=currentAssets();return assets?assets.geometry(`lattice-operator-${key}`,make):make();}
+function operatorMaterial(key,make){const assets=currentAssets();return assets?assets.material(`lattice-operator-${key}`,make):make();}
+
+// Replacements run before GPU upload. Keep cached originals alive for other
+// actors; unowned originals can be released once no mesh in this actor uses them.
+function replaceOperatorGeometry(robot,node,geometry){
+ if(!node?.isMesh)return;
+ const previous=node.geometry;node.geometry=geometry;
+ if(previous===geometry||currentAssets()?.resources.has(previous))return;
+ let used=false;robot.traverse(n=>{if(n.geometry===previous)used=true;});if(!used)previous.dispose();
+}
+
+function faceplateGeometry(form){
+ const p=[],uv=[],index=[],segments=20;
+ for(let row=0;row<3;row++)for(let i=0;i<=segments;i++){
+  const a=(i/segments-.5)*2.2;
+  p.push(Math.sin(a)*form.width*.87,(row/2-.5)*form.visor+.018-Math.abs(Math.sin(a))*.012,-Math.cos(a)*form.depth*.60-form.depth*.48);
+  uv.push(i/segments,row/2);
+ }
+ for(let row=0;row<2;row++)for(let i=0;i<segments;i++){
+  const a=row*(segments+1)+i,b=a+segments+1;index.push(a,b,a+1,b,b+1,a+1);
+ }
+ const geo=new T.BufferGeometry();geo.setAttribute('position',new T.Float32BufferAttribute(p,3));geo.setAttribute('uv',new T.Float32BufferAttribute(uv,2));geo.setIndex(index);geo.computeVertexNormals();return geo;
+}
+
+function helmetHardware(form,id){
+ const parts=[],plate=(size,p,rotation)=>parts.push(placedGeometry(beveledBox(...size),p,rotation));
+ for(const s of [-1,1]){
+  // Swept mandibular plates terminate at the visor, leaving a black gasket.
+  plate([form.cheek,.103,.104],[s*form.width*.77,-.074,-form.depth*.62],[.16,0,s*.16]);
+  const ear=new T.CylinderGeometry(.042,.046,.025,16);ear.rotateZ(Math.PI/2);ear.translate(s*(form.width+.005),.018,.006);parts.push(ear);
+ }
+ if(id==='claude'||id==='meta')plate([form.width*1.18,.048,.068],[0,-.135,-form.depth*.61]);
+ else if(id==='qwen')for(let i=0;i<3;i++)plate([.15-i*.025,.025,.07],[0,.122+i*.023,-.104+i*.034]);
+ else if(id==='mistral')for(const s of [-1,1])plate([.028,.042,.18],[s*.13,.106,.024],[.16,s*.18,0]);
+ else if(id==='deepseek')plate([.060,.097,.091],[0,-.09,-.164],[.22,0,0]);
+ else if(id==='grok')plate([.044,.047,.19],[.048,.148,.022],[.08,0,-.10]);
+ else plate([.11,.033,.075],[0,-.119,-form.depth*.71]);
+ return joinedGeometry(parts);
+}
+
+function opticGeometry(form){
+ const parts=[],z=-form.depth*1.10;
+ const strip=(w,h,x,y,angle=0)=>parts.push(placedGeometry(beveledBox(w,h,.012,.004),[x,y,z],[0,0,angle]));
+ const lens=(x,y,r)=>{const g=new T.SphereGeometry(r,16,8);g.scale(1,.83,.25);g.translate(x,y,z);parts.push(g);};
+ switch(form.eyes){
+  case 'dual':lens(-.071,.022,.032);lens(.071,.022,.032);break;
+  case 'mono':strip(.142,.016,0,.022,-.08);lens(.093,.016,.021);break;
+  case 'bar':strip(.21,.016,0,.02);break;
+  case 'diver':strip(.052,.046,-.049,.018);strip(.052,.046,.049,.018);break;
+  case 'swept':strip(.093,.017,-.051,.023,.17);strip(.093,.017,.051,.023,-.17);break;
+  case 'constellation':lens(0,.022,.027);lens(-.07,.028,.014);lens(.07,.028,.014);break;
+  case 'triple':for(const x of [-.067,0,.067])strip(.043,.020,x,.022);break;
+  default:strip(.075,.020,-.047,.022);strip(.075,.020,.047,.022);
+ }
+ return joinedGeometry(parts);
+}
+
+function sculptOperator(robot){
+ const data=robot.userData,j=data.joints;
+ // robotModel's existing signature supplies identity through its immutable hull
+ // colour; team recolouring only happens after this construction hook.
+ const id=CHARACTERS.find(c=>c.color===data.color)?.id;
+ if(!id||!j.head)return;
+ const f=OPERATOR_FORMS[id],head=j.head,[shell,visor,eye]=head.children;
+ data.operatorIdentity={id,name:f.name};head.name=`operator-head-${id}`;
+ replaceOperatorGeometry(robot,shell,operatorGeometry(`helmet-${id}`,()=>contourGeometry([
+  [-.16*f.height,0,0],[-.153*f.height,f.width*f.jaw*.8,f.depth*.63,-.006],
+  [-.115*f.height,f.width*f.jaw,f.depth*.83,-.008],[-.035,f.width*.98,f.depth],
+  [.070,f.width,f.depth],[.125*f.height,f.width*.90,f.depth*.93],
+  [.174*f.height,f.width*.57,f.depth*.62],[.19*f.height,0,0],
+ ],{segments:32,power:f.power})));
+ shell.scale.set(1,1,1);shell.name=`helmet-shell-${id}`;
+ replaceOperatorGeometry(robot,visor,operatorGeometry(`visor-${id}`,()=>faceplateGeometry(f)));visor.position.set(0,0,0);visor.scale.set(1,1,1);visor.name='inset-visor';
+ replaceOperatorGeometry(robot,eye,operatorGeometry(`optics-${id}`,()=>opticGeometry(f)));eye.position.set(0,0,0);eye.scale.set(1,1,1);eye.name=`optics-${f.eyes}`;
+ const hardware=new T.Mesh(operatorGeometry(`helmet-hardware-${id}`,()=>helmetHardware(f,id)),data.armor);
+ hardware.name='helmet-mandible-and-comms';hardware.castShadow=hardware.receiveShadow=true;head.add(hardware);
+ // Keep public brow/nub handles, but turn the old floating bubbles into a visor
+ // seal and a recessed status lamp. They retain the existing low-detail policy.
+ if(data.visor?.brow){
+  const brow=data.visor.brow;
+  replaceOperatorGeometry(robot,brow,operatorGeometry(`brow-${id}`,()=>beveledBox(f.width*1.58,.026,.041,.009,2)));
+  brow.position.set(0,.026+f.visor*.5,-f.depth*.85);brow.scale.set(1,1,1);
+ }
+ if(data.visor?.nub){data.visor.nub.position.set(0,-.089,-f.depth*.99);data.visor.nub.scale.set(.46,.3,.28);}
+ // Shaped cuirass and abdomen: the team-owned material is retained verbatim.
+ const torso=data.torso,chestShell=j.chest.children.find(n=>n.isMesh&&n.material===data.armor);
+ for(const [node,key,sections] of [
+  [torso,'abdomen',[[-.26,0,0],[-.235,.14,.11],[-.14,.19,.135],[.035,.235,.158],[.20,.22,.146],[.26,0,0]]],
+  [chestShell,'cuirass',[[-.23,0,0],[-.20,.16,.12],[-.09,.255,.17],[.075,.27,.166],[.15,.235,.14],[.21,.15,.11],[.23,0,0]]],
+ ])if(node){replaceOperatorGeometry(robot,node,operatorGeometry(key,()=>contourGeometry(sections,{segments:32,power:.65})));node.scale.set(1,1,1);}
+ // Capsule subdivision buys visible elbow/knee contours without increasing
+ // articulated objects. Shared primitives remain shared across the whole roster.
+ for(const joint of [j.armUpperL,j.armUpperR,j.forearmL,j.forearmR,j.legUpperL,j.legUpperR,j.legLowerL,j.legLowerR]){
+  for(const n of joint?.children||[]){
+   if(n.geometry?.type==='CapsuleGeometry'){
+    const p=n.geometry.parameters;
+    replaceOperatorGeometry(robot,n,operatorGeometry(`limb-${p.radius}-${p.length}`,()=>new T.CapsuleGeometry(p.radius,p.length,4,16)));
+   }else if(n.geometry?.type==='BoxGeometry'){
+    const p=n.geometry.parameters;
+    replaceOperatorGeometry(robot,n,operatorGeometry(`plate-${p.width}-${p.height}-${p.depth}`,()=>beveledBox(p.width,p.height,p.depth,.008,2)));
+   }
+  }
+ }
+ // One merged, optional close-range detail draw for collar clasps and vent slits.
+ const seams=new T.Mesh(operatorGeometry('cuirass-seams',()=>joinedGeometry([
+  ...[-1,1].flatMap(s=>[
+   placedGeometry(beveledBox(.038,.11,.018),[s*.183,.071,-.158],[0,0,s*.20]),
+   ...[0,1,2].map(i=>placedGeometry(beveledBox(.064,.009,.015),[s*.12,-.113-i*.019,-.146])),
+  ]),
+ ])),operatorMaterial('gasket',()=>new T.MeshStandardMaterial({color:'#17262e',metalness:.5,roughness:.55})));
+ seams.name='cuirass-vents';seams.userData.lodDetail=true;seams.castShadow=false;seams.receiveShadow=false;j.chest.add(seams);
+}
+
+// Native Three LOD is evaluated per-camera (including preview cameras) without
+// changing view's presentation API. Only mesh leaves are duplicated; animation
+// joints, materials, and all public references remain the original objects.
+// Hidden low meshes also make uncached preview-resource disposal complete.
+function installOperatorLOD(robot){
+ const software=robot.children.some(n=>n.userData.blobShadow===true),nodes=[];
+ robot.userData.joints.root.traverse(n=>{
+  if(!n.isMesh||n.userData.lodDetail||n.material?.transparent)return;
+  // The five-mesh world weapon already has its own deliberately tiny budget.
+  for(let p=n;p&&p!==robot;p=p.parent)if(p.userData.weapon)return;
+  const p=n.geometry.parameters,type=n.geometry.type;
+  let make,key;
+  if(type==='CapsuleGeometry'){key=`capsule-${p.radius}-${p.length}`;make=()=>new T.CapsuleGeometry(p.radius,p.length,2,8);}
+  else if(type==='SphereGeometry'&&p.widthSegments>8){key=`sphere-${p.radius}`;make=()=>new T.SphereGeometry(p.radius,8,6);}
+  else if(type==='ContourGeometry'){key=`contour-${JSON.stringify(p.sections)}-${p.power}`;make=()=>contourGeometry(p.sections,{segments:12,power:p.power});}
+  else if(type==='BeveledBoxGeometry'&&p.segments>1){key=`bevel-${p.width}-${p.height}-${p.depth}-${p.radius}`;make=()=>beveledBox(p.width,p.height,p.depth,p.radius,1);}
+  if(make)nodes.push({node:n,geometry:operatorGeometry(`lod-${key}`,make)});
+ });
+ const levels=[];
+ for(const {node,geometry} of nodes){
+  const parent=node.parent,lod=new T.LOD(),low=new T.Mesh(geometry,node.material);
+  lod.name=`detail-${node.name||node.geometry.type}`;
+  low.name=`distance-${node.name||node.geometry.type}`;
+  low.position.copy(node.position);low.quaternion.copy(node.quaternion);low.scale.copy(node.scale);
+  low.castShadow=node.castShadow;low.receiveShadow=node.receiveShadow;
+  parent.add(lod);lod.addLevel(node,0);lod.addLevel(low,18,.15);
+  // SoftwareRenderer does not process Three LOD: start and stay on its low mesh.
+  lod.autoUpdate=!software;node.visible=!software;low.visible=software;
+  levels.push(lod);
+ }
+ robot.userData.modelLOD={distance:18,hysteresis:.15,levels,software};
+}
+
+// Character-only geometry pass. Invoke once after robotModel installs joints.
 // Invoke once after robotModel installs userData.joints, before first animation.
 export function refineOperatorCharacter(robot) {
   const data=robot?.userData,j=data?.joints;
   if(!j) return null;
   if(data.characterRefinement) return data.characterRefinement;
+  sculptOperator(robot);
   if(j.hips) j.hips.position.y=.7835; // .34 thigh + .35 shin + .0935 sole
   if(j.torso) j.torso.position.y=.22;
   if(j.chest) j.chest.position.y=.30;
@@ -484,16 +648,18 @@ export function refineOperatorCharacter(robot) {
   // Aim rotation remains view-owned; weapon geometry/anchors are never rewritten.
   if(data.gunAnchor) { data.gunAnchor.position.set(.04,.06,-.08); j.gunAnchor=data.gunAnchor; }
   const plateMaterial=data.armor ?? new T.MeshStandardMaterial({color:'#2c3540'});
-  const armor=new T.Mesh(new T.BoxGeometry(.34,.19,.04),plateMaterial);
+  const armor=new T.Mesh(operatorGeometry('sternum',()=>joinedGeometry([-1,1].map(s=>placedGeometry(beveledBox(.166,.18,.038,.012,2),[s*.085,0,0],[0,s*.12,s*.13])))),plateMaterial);
   armor.name='articulated-sternum';armor.position.set(0,-.055,-.19);j.chest?.add(armor);
-  const handMaterial=new T.MeshStandardMaterial({color:'#18262c',roughness:.65});
-  const palmGeometry=new T.BoxGeometry(.09,.10,.075),fingerGeometry=new T.BoxGeometry(.085,.045,.045);
+  const handMaterial=operatorMaterial('glove',()=>new T.MeshStandardMaterial({color:'#18262c',roughness:.65}));
+  const palmGeometry=operatorGeometry('glove',()=>joinedGeometry([
+   beveledBox(.09,.10,.075,.014,2),
+   ...[-.027,0,.027].map(x=>placedGeometry(beveledBox(.024,.045,.045,.009),[x,-.026,-.048])),
+  ]));
   const result={armor};
   for(const side of ['L','R']) {
     const fore=j[`forearm${side}`];if(!fore) continue;
     const hand=new T.Group();hand.name=`hand-${side}`;hand.position.set(0,-.275,0);fore.add(hand);
     const palm=new T.Mesh(palmGeometry,handMaterial);hand.add(palm);
-    const fingers=new T.Mesh(fingerGeometry,handMaterial);fingers.position.set(0,-.026,-.048);hand.add(fingers);
     const grip=new T.Group();grip.name=`grip-${side}`;grip.position.set(0,-.015,-.055);hand.add(grip);
     result[`hand${side}`]=hand;result[`grip${side}`]=grip;
     j[`hand${side}`]=hand;
@@ -501,6 +667,7 @@ export function refineOperatorCharacter(robot) {
   armor.castShadow=armor.receiveShadow=true;
   for(const hand of [result.handL,result.handR])hand?.traverse(n=>{if(n.isMesh)n.castShadow=n.receiveShadow=true;});
   data.characterRefinement=result;
+  if(data.operatorIdentity)installOperatorLOD(robot);
   // Capture the revised proportions as bind transforms, not the old floating rig.
   data.rig?.captureBind();
   return result;
