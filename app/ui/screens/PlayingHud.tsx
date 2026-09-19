@@ -98,6 +98,15 @@ function CocsReadout({command,teamName}:{command:any;teamName:(team:any)=>string
     {traversal.depots.map((depot:any)=><li key={depot.id} className={`cocs-depot${depot.mine?' is-mine':''}${depot.enemy?' is-enemy':''}${depot.contested?' is-contested':''}`} aria-label={`${depot.label} ${depot.ownerLabel}${depot.capturePercent>0?`, ${depot.capturePercent} percent captured`:''}. Loaner ${depot.vehicle.state}`}><span className="cocs-depot__mark" aria-hidden="true">{depot.mark}</span> {depot.ownerLabel}{depot.capturePercent>0?` ${depot.capturePercent}%`:''} <small>LOANER {depot.vehicle.state}</small></li>)}
    </ul>}
    {traversal.arrivalActive&&<p className="cocs-traversal__arrival" role="status">ARRIVAL PROTECTION · {traversal.arrivalSeconds}s</p>}
+   {command.interactPrompt&&<p className={`cocs-interact cocs-interact--${command.interactPrompt.source}`} role="status" aria-live="polite" aria-label={`${command.interactPrompt.verb} ${command.interactPrompt.label}. Press ${command.interactPrompt.key}. ${command.interactPrompt.anchored?'At the anchor':`${command.interactPrompt.distanceMeters} meters away`}${command.interactPrompt.channelPercent>0?`, ${command.interactPrompt.channelPercent} percent channelled`:''}`}>
+    <span className="cocs-interact__mark" aria-hidden="true">{command.interactPrompt.mark}</span>
+    <b className="cocs-interact__verb">{command.interactPrompt.verb}</b>
+    <span className="cocs-interact__label">{command.interactPrompt.label}</span>
+    <kbd className="cocs-interact__key">{command.interactPrompt.key}</kbd>
+    <small className="cocs-interact__state">{command.interactPrompt.anchored?'ANCHORED':`${command.interactPrompt.distanceMeters}m`}{command.interactPrompt.channelPercent>0?` · ${command.interactPrompt.channelPercent}%`:''}</small>
+   </p>}
+   {!command.interactPrompt&&traversal.deviceCount>0&&<p className="cocs-interact cocs-interact--idle" role="status"><span aria-hidden="true">⇢</span> STAND ON AN ANCHOR · <kbd>{traversal.interactKey}</kbd> RIDE · CUT · REPAIR</p>}
+   {command.depotPrompt&&<p className="cocs-interact cocs-interact--depot" role="status"><span aria-hidden="true">{command.depotPrompt.mark}</span> {command.depotPrompt.hint} <small>{command.depotPrompt.ownerLabel}{command.depotPrompt.capturePercent>0?` · ${command.depotPrompt.capturePercent}%`:''}</small></p>}
   </div>}
   <div className="cocs-strip" role="group" aria-label="Order strip. Arm a verb, pick a node, then issue.">
    <div className="cocs-strip__verbs">

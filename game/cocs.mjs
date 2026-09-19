@@ -45,8 +45,8 @@ import {
   neglectPassiveFlux, neglectState, neglectTick, reqItem, reqPurchase, scoreEvent, subagentUpkeep,
 } from './cocs-economy.mjs';
 import {PVP_ROLE_IDS, coopRole, roleAbility} from './cocs-roles.mjs';
-import {createTraversalState, stepCocsTraversal, cocsTraversalSnapshot} from './cocs-traversal.mjs';
-import {createTerminalState, stepCocsTerminals, cocsTerminalsSnapshot} from './cocs-terminals.mjs';
+import {createTraversalState, stepCocsTraversal, cocsTraversalSnapshot, humanDeviceInteract} from './cocs-traversal.mjs';
+import {createTerminalState, stepCocsTerminals, cocsTerminalsSnapshot, humanTerminalInteract} from './cocs-terminals.mjs';
 import {COOP_ECONOMY} from './cocs-difficulty.mjs';
 import {cocsCoopSnapshot, coopOrderGate, coopOutcome, createCoopState, stepCoop} from './cocs-coop.mjs';
 
@@ -1792,6 +1792,23 @@ export function cocsSnapshot(match) {
     // --- OPERATIONS (`cocs-coop`) director surface --------------------------
     ...(state.coop ? cocsCoopSnapshot(match, state) : {}),
   };
+}
+
+// ---------------------------------------------------------------------------
+// Human interact edge. Called by `Match.step` once per actor on the rising edge
+// of `controls.interact`, before the movement/vehicle branch. Devices win over
+// terminals (they occupy different ground); both helpers are deterministic and
+// bot-free. Returns the applied record or null when the edge hit nothing.
+// ---------------------------------------------------------------------------
+export function cocsHumanInteract(match, state, actorId) {
+  if (!state || state.kind !== COCS_KIND) return null;
+  const actor = match?.actors?.[actorId];
+  if (!actor || actor.bot) return null;
+  const device = humanDeviceInteract(match, state, actor);
+  if (device) return {source: 'device', ...device};
+  const terminal = humanTerminalInteract(match, state, actor);
+  if (terminal) return {source: 'terminal', ...terminal};
+  return null;
 }
 
 // ---------------------------------------------------------------------------

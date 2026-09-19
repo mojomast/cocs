@@ -212,6 +212,7 @@ function tickArrivals(match, traversal, dt) {
 // Device state machine
 // ===========================================================================
 const sabotageAction = device => (device.kind === 'zipline' || device.kind === 'teleporter' ? 'cut' : 'lock');
+const TRAVERSABLE_KINDS = new Set(['zipline', 'jump-pad', 'teleporter', 'launcher']);
 
 function enemyNear(match, anchor, team, meters = DEVICE_INTERACT_METERS) {
  for (const actor of match?.actors ?? []) {
@@ -546,6 +547,49 @@ export function deviceInteract(match, state, actorId, deviceId, action = null) {
  } else if (device.state !== 'live') return false;
  if (!actorAtAnchor(actor, device.from)) return false;
  return startDeviceChannel(match, traversal, device, actor, resolved);
+}
+
+/**
+ * The human `interact` edge against the §6A device layer. Deterministic: one
+ * nearest device within the 6 m interact reach, ties broken by sorted id. On a
+ * live device the existing reaches disambiguate the single bind — at the 0.9 m
+ * anchor a traversable device is ridden (`useDevice`), while anywhere else in
+ * the 6 m band a cuttable/lockable one starts its cut/lock channel. A dead
+ * device starts the repair channel. Returns `{deviceId, kind, action}` or null.
+ *
+ * This is the human twin of the bot-only `tryDeviceUse`/`tryDeviceSabotage`
+ * path; bots never call it and their behaviour is untouched.
+ */
+export function humanDeviceInteract(match, state, actor) {
+ const traversal = state?.traversal;
+ if (!traversal || !actor || actor.health <= 0) return null;
+ if (actor.team !== 0 && actor.team !== 1) return null;
+ if (actor.vehicleId !== null && actor.vehicleId !== undefined) return null;
+ let nearest = null;
+ let nearestDistance = Infinity;
+ for (const id of sortedStrings(traversal.devices)) {
+  const device = traversal.devices[id];
+  if (!device?.from) continue;
+  const d = distance(actor, device.from);
+  if (!(d <= DEVICE_INTERACT_METERS)) continue;
+  if (nearest === null || d < nearestDistance - 1e-9) { nearest = device; nearestDistance = d; }
+ }
+ if (!nearest) return null;
+ const anchored = nearestDistance <= TRAVERSAL.anchorReachMeters + 1e-9 && actorAtAnchor(actor, nearest.from);
+ if (nearest.state === 'live') {
+  if (anchored && TRAVERSABLE_KINDS.has(nearest.kind)) {
+   return useDeviceInternal(match, traversal, nearest, actor) ? {deviceId: nearest.id, kind: nearest.kind, action: 'use'} : null;
+  }
+  if (nearest.cuttable === true || nearest.lockable === true) {
+   const action = sabotageAction(nearest);
+   return deviceInteract(match, state, actor.id, nearest.id, action) ? {deviceId: nearest.id, kind: nearest.kind, action} : null;
+  }
+  return null;
+ }
+ if (nearest.cuttable === true || nearest.lockable === true) {
+  return deviceInteract(match, state, actor.id, nearest.id, 'repair') ? {deviceId: nearest.id, kind: nearest.kind, action: 'repair'} : null;
+ }
+ return null;
 }
 
 // ===========================================================================

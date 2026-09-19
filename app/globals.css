@@ -1161,6 +1161,18 @@ html, body { overscroll-behavior: none; }
 .cocs-depot.is-contested{border-color:var(--warn-soft,#ffd166)}
 .cocs-device small,.cocs-depot small{color:var(--text-mute);font-size:9px}
 .cocs-traversal__arrival{margin:0;font:600 10px var(--font-mono);letter-spacing:.05em;color:#9fd8ff}
+/* Human interact prompt: the nearest device/terminal verb the interact bind runs.
+   Shape glyph + verb word + key, never colour alone; the channel fill animates
+   only its width and is neutralised under reduced motion. */
+.cocs-interact{display:flex;flex-wrap:wrap;align-items:baseline;gap:5px;margin:0;padding:4px 7px;border:1px solid var(--border);border-left:3px solid var(--accent);border-radius:var(--radius-sm,4px);background:#0a191acc;font:600 10px var(--font-mono);letter-spacing:.05em;color:var(--text-mute)}
+.cocs-interact__mark{font-size:12px;line-height:1;color:var(--text-dim)}
+.cocs-interact__verb{color:#eafff5;letter-spacing:.08em}
+.cocs-interact__label{color:var(--text-dim)}
+.cocs-interact__key{min-width:16px;padding:1px 5px;border:1px solid var(--border);border-radius:3px;text-align:center;color:#ffe066}
+.cocs-interact__state{margin-left:auto;color:var(--text-mute);font-size:9px}
+.cocs-interact--idle{border-left-color:var(--border);opacity:.85}
+.cocs-interact--depot{border-left-color:#9fd8ff}
+@media (prefers-reduced-motion: reduce){.cocs-interact{transition:none}}
 .radar-spotted__ring{opacity:.9}
 .radar-spotted__mark{opacity:.95}
 @media (prefers-reduced-motion: reduce){.cocs-verb,.cocs-issue,.cocs-picker button{transition:none}}

@@ -13,7 +13,7 @@
 // order. One verb per arm; a target is a node id; an order is the exact
 // `{tick, peerId, cardId, team, verb, target}` object `Match.step(dt,{cocs})`
 // consumes.
-import {SUBAGENTS} from './cocs-economy.mjs';
+import {SUBAGENTS, TRAVERSAL} from './cocs-economy.mjs';
 import {RULES} from './data.mjs';
 
 const TICK_SECONDS = Number.isFinite(RULES?.dt) && RULES.dt > 0 ? RULES.dt : 1 / 60;
@@ -462,7 +462,99 @@ const cocsDepotOwnerLabel = (owner, team, contested) => contested ? 'CONTESTED'
       : team !== null ? 'ENEMY'
         : `TEAM ${owner}`;
 
-export function cocsTraversalView(snapshot, player) {
+// --- Human interact prompt (§6A.1 "one-input rule") ------------------------
+// The 6 m sabotage/repair band matches `DEVICE_INTERACT_METERS`; the 0.9 m
+// anchor use reach matches `TRAVERSAL.anchorReachMeters`. The view mirrors the
+// engine's `humanDeviceInteract` selection so the verb on screen is the verb the
+// `interact` edge will run. Mode-isolated: only a traversal terminal subtree
+// produces a prompt, and the key label is injected by the page.
+const COCS_INTERACT_REACH_METERS = 6;
+const COCS_ANCHOR_REACH_METERS = num(TRAVERSAL?.anchorReachMeters, 0.9);
+const COCS_TRAVERSABLE_KINDS = new Set(['zipline', 'jump-pad', 'teleporter', 'launcher']);
+const COCS_DEVICE_VERBS = Object.freeze({use: 'RIDE', cut: 'CUT', lock: 'LOCK', repair: 'REPAIR'});
+const COCS_TERMINAL_VERB_ORDER = Object.freeze(['DEPLOY', 'HACK', 'VAULT', 'SABOTAGE']);
+const cocsInteractKey = options => String(options?.interactKey ?? 'E');
+const cocsDistance = num => Math.round(Math.max(0, num) * 10) / 10;
+const cocsSabotageVerb = kind => (kind === 'zipline' || kind === 'teleporter' ? 'cut' : 'lock');
+
+// The nearest device inside the 6 m interact band, resolved to the verb the
+// engine would run: RIDE at the 0.9 m anchor for a live traversable device,
+// CUT/LOCK for a live cuttable/lockable one, REPAIR when it is dead.
+function cocsDevicePrompt(devices, player, options) {
+  if (!finite(player?.x) || !finite(player?.z)) return null;
+  let nearest = null;
+  let nearestDistance = Infinity;
+  for (const device of devices) {
+    const d = Math.hypot(player.x - device.x, player.z - device.z);
+    if (!(d <= COCS_INTERACT_REACH_METERS)) continue;
+    if (nearest === null || d < nearestDistance - 1e-9) { nearest = device; nearestDistance = d; }
+  }
+  if (!nearest) return null;
+  const anchored = nearestDistance <= COCS_ANCHOR_REACH_METERS + 1e-9;
+  let action = null;
+  if (nearest.state === 'live') {
+    if (anchored && COCS_TRAVERSABLE_KINDS.has(nearest.kind)) action = 'use';
+    else if (COCS_TRAVERSABLE_KINDS.has(nearest.kind)) action = cocsSabotageVerb(nearest.kind);
+  } else action = 'repair';
+  if (!action) return null;
+  const channelPercent = nearest.channel ? Math.round(Math.max(0, Math.min(1, nearest.channel.percent ?? 0)) * 100) : 0;
+  const verb = COCS_DEVICE_VERBS[action];
+  const distance = cocsDistance(nearestDistance);
+  return {
+    source: 'device',
+    id: nearest.id,
+    kind: nearest.kind,
+    label: nearest.label,
+    mark: nearest.mark,
+    action,
+    verb,
+    key: cocsInteractKey(options),
+    anchored,
+    distance,
+    distanceMeters: distance,
+    state: nearest.state,
+    stateLabel: nearest.stateLabel,
+    channelPercent,
+    channel: nearest.channel,
+    hint: action === 'use' ? 'PRESS TO RIDE'
+      : action === 'repair' ? 'PRESS TO REPAIR'
+        : `PRESS TO ${verb}`,
+    text: `${verb} ${nearest.label}`,
+  };
+}
+
+// A capture/enter hint for the closest depot (inside a 12 m read band; the
+// authored capture radius is not on the snapshot). Loaner state reuses the
+// READY/SPAWNING/RETURN/NONE vocabulary already shown in the depot list.
+function cocsDepotPrompt(depots, player) {
+  if (!finite(player?.x) || !finite(player?.z)) return null;
+  let nearest = null;
+  let nearestDistance = Infinity;
+  for (const depot of depots) {
+    const d = Math.hypot(player.x - depot.x, player.z - depot.z);
+    if (!(d <= 12)) continue;
+    if (nearest === null || d < nearestDistance - 1e-9) { nearest = depot; nearestDistance = d; }
+  }
+  if (!nearest) return null;
+  const hint = nearest.mine
+    ? (nearest.vehicle.available ? `ENTER LOANER AT ${nearest.label}` : `LOANER ${nearest.vehicle.state}`)
+    : nearest.contested ? `${nearest.label} CONTESTED`
+      : `HOLD ${nearest.label} TO CAPTURE${nearest.capturePercent > 0 ? ` · ${nearest.capturePercent}%` : ''}`;
+  return {
+    id: nearest.id,
+    label: nearest.label,
+    mark: nearest.mark,
+    ownerLabel: nearest.ownerLabel,
+    capturePercent: nearest.capturePercent,
+    vehicle: nearest.vehicle,
+    mine: nearest.mine,
+    distance: cocsDistance(nearestDistance),
+    hint,
+    text: hint,
+  };
+}
+
+export function cocsTraversalView(snapshot, player, options = {}) {
   if (!snapshot || typeof snapshot !== 'object') return null;
   const raw = snapshot.traversal;
   if (!raw || typeof raw !== 'object') return null;
@@ -561,6 +653,9 @@ export function cocsTraversalView(snapshot, player) {
     ownDepot,
     targetDepot,
     context,
+    interactKey: cocsInteractKey(options),
+    prompt: cocsDevicePrompt(devices, player, options),
+    depotPrompt: cocsDepotPrompt(depots, player),
   };
 }
 
@@ -614,6 +709,7 @@ const COCS_TERMINAL_KINDS = Object.freeze({
   HACK: Object.freeze({label: 'HACK', mark: '⌨', prompt: 'HACK THE RELAY'}),
   DEPLOY: Object.freeze({label: 'DEPLOY', mark: '◱', prompt: 'DEPLOY THE BEACON'}),
   VAULT: Object.freeze({label: 'VAULT', mark: '▣', prompt: 'CRACK THE VAULT'}),
+  SABOTAGE: Object.freeze({label: 'SABOTAGE', mark: '✂', prompt: 'CUT THE SUPPLY LINK'}),
 });
 const COCS_TERMINAL_STATES = Object.freeze({
   locked: Object.freeze({label: 'LOCKED', mark: '▣'}),
@@ -1026,12 +1122,62 @@ function cocsRolesFromObject(roles) {
 const cocsTerminalKind = kind => COCS_TERMINAL_KINDS[String(kind ?? '').toUpperCase()] ?? {label: String(kind ?? 'TERMINAL').toUpperCase(), mark: '◆', prompt: 'USE TERMINAL'};
 const cocsTerminalState = state => COCS_TERMINAL_STATES[String(state ?? '').toLowerCase()] ?? {label: String(state ?? 'LOCKED').toUpperCase(), mark: '▣'};
 
+// Which terminal verb the `interact` edge would run for the local actor right
+// now. Mirrors `humanTerminalInteract`: DEPLOY only on your own node, VAULT
+// (store), HACK/SABOTAGE on a live terminal.
+function cocsTerminalActionable(terminal, verb) {
+  if (verb === 'DEPLOY') return terminal.mine === true;
+  if (verb === 'VAULT') return true;
+  if (verb === 'HACK' || verb === 'SABOTAGE') return terminal.state === 'available';
+  return false;
+}
+
+function cocsTerminalPrompt(terminals, player, options) {
+  if (!finite(player?.x) || !finite(player?.z)) return null;
+  let chosen = null;
+  let chosenDistance = Infinity;
+  let chosenRank = Infinity;
+  for (const terminal of terminals) {
+    if (!finite(terminal.x) || !finite(terminal.z)) continue;
+    const d = Math.hypot(player.x - terminal.x, player.z - terminal.z);
+    if (!(d <= COCS_INTERACT_REACH_METERS)) continue;
+    if (!cocsTerminalActionable(terminal, terminal.kind)) continue;
+    const rank = COCS_TERMINAL_VERB_ORDER.indexOf(terminal.kind);
+    if (chosen === null || d < chosenDistance - 1e-9 || (Math.abs(d - chosenDistance) <= 1e-9 && rank < chosenRank)) {
+      chosen = terminal;
+      chosenDistance = d;
+      chosenRank = rank;
+    }
+  }
+  if (!chosen) return null;
+  const distance = cocsDistance(chosenDistance);
+  return {
+    source: 'terminal',
+    id: chosen.id,
+    kind: chosen.kind,
+    label: chosen.label,
+    mark: chosen.kindMark,
+    verb: chosen.kind,
+    key: cocsInteractKey(options),
+    distance,
+    distanceMeters: distance,
+    state: chosen.state,
+    stateLabel: chosen.stateLabel,
+    channelPercent: chosen.progressPercent,
+    owner: chosen.owner,
+    mine: chosen.mine,
+    enemy: chosen.enemy,
+    hint: chosen.hint,
+    text: `${chosen.kind} ${chosen.label}`,
+  };
+}
+
 /**
  * Terminal prompts/states for HACK / DEPLOY / VAULT plus whatever role surface a
  * future wave exposes. Every entry carries a shape glyph *and* a word so state
  * is never colour-only. `hasTerminals` is what the HUD gates on.
  */
-export function cocsTerminalView(snapshot, player, board) {
+export function cocsTerminalView(snapshot, player, board, options = {}) {
   if (!snapshot || typeof snapshot !== 'object') return null;
   const team = player?.team === 0 || player?.team === 1 ? Number(player.team) : null;
   const terminals = cocsTerminalList(snapshot).filter(Boolean).map((raw, index) => {
@@ -1045,6 +1191,7 @@ export function cocsTerminalView(snapshot, player, board) {
       id, kind: kind.label, kindMark: kind.mark, prompt: kind.prompt,
       label: String(raw.label ?? raw.name ?? `${kind.label} ${index + 1}`),
       nodeId: raw.nodeId ?? raw.node ?? null,
+      x: num(raw.x, NaN), z: num(raw.z, NaN),
       state: stateId, stateLabel: state.label, stateMark: state.mark,
       owner, mine: owner !== null && team !== null && owner === team,
       enemy: owner !== null && team !== null && owner !== team,
@@ -1077,6 +1224,7 @@ export function cocsTerminalView(snapshot, player, board) {
     terminals,
     roles,
     hasRoles: roles.length > 0,
+    prompt: cocsTerminalPrompt(terminals, player, options),
     hint: terminals.length ? `${available} READY · ${active} ACTIVE · ${blocked} LOCKED` : (boardHint ?? 'NO TERMINALS'),
   };
 }
@@ -1086,7 +1234,7 @@ export function cocsTerminalView(snapshot, player, board) {
  * `CocsReadout` renders. Returns null outside cocs (mode isolation). `board` is
  * `cocsBoard(hud, player)` so the HUD derivation stays in one place.
  */
-export function cocsCommandView(board, snapshot, player, strip) {
+export function cocsCommandView(board, snapshot, player, strip, options = {}) {
   if (!board || !snapshot || typeof snapshot !== 'object') return null;
   const economy = cocsEconomyView(snapshot, player);
   const armed = strip?.armed ?? null;
@@ -1102,8 +1250,8 @@ export function cocsCommandView(board, snapshot, player, strip) {
   });
   const scanNode = economy?.scan?.nodeId ?? null;
   const scanLabel = scanNode === null || scanNode === undefined ? null : nodeLabels[String(scanNode)]?.label ?? String(scanNode);
-  const traversal = cocsTraversalView(snapshot, player);
-  const terminals = cocsTerminalView(snapshot, player, board);
+  const traversal = cocsTraversalView(snapshot, player, options);
+  const terminals = cocsTerminalView(snapshot, player, board, options);
   // PvP-1 rung + own-team role board (section 3.1/§11.3). Null for co-op and
   // every non-laddered match, so the existing HUD stays mode-isolated.
   const team = economy?.team ?? (player?.team === 1 ? 1 : 0);
@@ -1122,5 +1270,10 @@ export function cocsCommandView(board, snapshot, player, strip) {
     spend: cocsSpendView(snapshot, player),
     boardView: cocsBoardView(board, snapshot, player, {economy, traversal, terminals}),
     terminals,
+    // The single nearest thing the `interact` bind would use: a §6A device
+    // first, else an O1c terminal. `depotPrompt` is the separate capture/enter
+    // hint, since depots deliberately do not ride the device bind.
+    interactPrompt: traversal?.prompt ?? terminals?.prompt ?? null,
+    depotPrompt: traversal?.depotPrompt ?? null,
   };
 }

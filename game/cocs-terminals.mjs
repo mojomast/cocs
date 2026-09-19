@@ -241,6 +241,63 @@ export function terminalInteract(match, state, actorId, terminalId, verb = null,
   return started;
 }
 
+// Fixed tie-break for the three terminals a relay/array authors at the same
+// spot: prefer DEPLOY (own node) then HACK (enemy/neutral node) then VAULT, with
+// SABOTAGE last. Within a tie the sorted id keeps the pick deterministic.
+const HUMAN_TERMINAL_ORDER = Object.freeze(['DEPLOY', 'HACK', 'VAULT', 'SABOTAGE']);
+
+function terminalActionable(match, state, terminal, actor, kind) {
+  refreshOwnership(state, terminal);
+  if (kind === 'DEPLOY') return terminal.owner === actor.team;
+  if (kind === 'VAULT') return true;
+  if (kind === 'HACK' || kind === 'SABOTAGE') {
+    if (terminal.state !== 'live' || terminal.channel) return false;
+    return !enemyNear(match, terminal, actor.team);
+  }
+  return false;
+}
+
+/**
+ * The human `interact` edge against the O1c terminal layer. Sorted and
+ * deterministic: the nearest terminal within its reach whose verb is currently
+ * actionable for the actor, ties on the fixed `DEPLOY/HACK/VAULT/SABOTAGE`
+ * order. Returns `{terminalId, kind, action}` or null. `cocs` PvPvE authors no
+ * terminals, so this is a no-op there.
+ */
+export function humanTerminalInteract(match, state, actor) {
+  const terminals = state?.terminals?.terminals;
+  if (!terminals || !actor || actor.health <= 0) return null;
+  if (actor.team !== 0 && actor.team !== 1) return null;
+  let chosen = null;
+  let chosenDistance = Infinity;
+  let chosenRank = Infinity;
+  for (const id of Object.keys(terminals).sort()) {
+    const terminal = terminals[id];
+    if (!terminal) continue;
+    const reach = terminalReach(terminal);
+    const d = distance(actor, terminal);
+    if (!(d <= reach)) continue;
+    const kind = String(terminal.kind ?? '').toUpperCase();
+    if (!terminalActionable(match, state, terminal, actor, kind)) continue;
+    const rank = HUMAN_TERMINAL_ORDER.indexOf(kind);
+    if (chosen === null || d < chosenDistance - 1e-9
+      || (Math.abs(d - chosenDistance) <= 1e-9 && rank < chosenRank)
+      || (Math.abs(d - chosenDistance) <= 1e-9 && rank === chosenRank && id < chosen.id)) {
+      chosen = terminal;
+      chosenDistance = d;
+      chosenRank = rank;
+    }
+  }
+  if (!chosen) return null;
+  const kind = String(chosen.kind ?? '').toUpperCase();
+  if (kind === 'VAULT') {
+    const stored = terminalInteract(match, state, actor.id, chosen.id, 'VAULT', 'store');
+    return stored.ok ? {terminalId: chosen.id, kind, action: 'store'} : null;
+  }
+  const started = terminalInteract(match, state, actor.id, chosen.id, kind);
+  return started.ok ? {terminalId: chosen.id, kind, action: kind.toLowerCase()} : null;
+}
+
 /** Advance one fixed tick. Called by `stepCocs` in co-op only. */
 export function stepCocsTerminals(match, state, dt) {
   const terminals = state?.terminals;

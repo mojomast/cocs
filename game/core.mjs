@@ -15,7 +15,7 @@ import {floorHeightAtLattice,makeFloorQuery} from './floor-lattice.mjs';
 import {blockObstructed,blockSupportTop,candidates,collisionHash,NAV_BAKE_VERSION,rayWorldBlockHit} from './spatial.mjs';
 import {createVehicle,GUNTRUCK,respawnVehicle,stepVehicle,stepVehicleWeapon,vehicleCanEnter,vehicleMuzzles,vehicleSeatFor,vehicleSeatPosition,vehicleMounted,takeVehicleSeat,leaveVehicleSeat,vehicleSeatOpen} from './vehicles.mjs';
 import {objectiveTemplate} from './mode-data.mjs';
-import {cocsSnapshot,cocsSpotDamageScale,compareCocsOrders,cocsEconomyAction,cocsCommandAction,cocsBuyAction} from './cocs.mjs';
+import {cocsSnapshot,cocsSpotDamageScale,compareCocsOrders,cocsEconomyAction,cocsCommandAction,cocsBuyAction,cocsHumanInteract} from './cocs.mjs';
 import {coopBuyAction,coopCommandAction,coopTerminalAction} from './cocs-coop.mjs';
 import {arrivalDamageScale,depotApronImmune,noteVehicleUse} from './cocs-traversal.mjs';
 import {cocsDutyPolicy} from './cocs-bots.mjs';
@@ -946,7 +946,7 @@ export class Match{
      a.inputJump=jumpHeld;a.inputCrouch=crouchHeld;a.inputMobility=mobilityHeld;
      }else a.glideSteer=0;
      if(a.vehicleId!==null){if(controls.interact)this.releaseVehicle(a,undefined,'exit');else if(a.vehicleSeat==='driver')this.driveVehicle(a,controls,dt);else if(a.vehicleSeat==='gunner')this.gunnerVehicle(a,controls,dt);else{const ride=this.vehicleById(a.vehicleId);if(ride)this.syncVehicleActor(a,ride);}}
-     else if(!(controls.interact&&this.enterVehicle(a))){const wasGrounded=a.grounded===true,traversalRide=a.traversalFlight===true||a.zipRide!==null;moveActor(a,controls,dt,this.arena,this.config,this.ropeLines);a.movementLanded=a.health>0&&a.vehicleId===null&&a.grounded===true&&wasGrounded!==true&&a.traversalEvent===null&&traversalRide!==true&&a.vy<=0;}const bodyTurn=(this.difficulty?.id==='nightmare'?10:this.difficulty?.id==='hard'?8:this.difficulty?.id==='normal'?6:4)*dt;const nextBody=turnToward(a.bodyYaw??a.yaw,a.yaw,bodyTurn);a.bodyYaw=Math.atan2(Math.sin(nextBody),Math.cos(nextBody));
+     else{const cocsState=isCocsMode(this.config)?this.objectiveState:null,interactHeld=cocsState?(cocsState._interactHeld??={})[a.id]===true:false,interactPressed=controls.interact===true;if(cocsState)cocsState._interactHeld[a.id]=interactPressed;const cocsUsed=interactPressed&&!interactHeld&&a.bot==null&&Boolean(cocsHumanInteract(this,cocsState,a.id));if(!(cocsUsed||(controls.interact&&this.enterVehicle(a)))){const wasGrounded=a.grounded===true,traversalRide=a.traversalFlight===true||a.zipRide!==null;moveActor(a,controls,dt,this.arena,this.config,this.ropeLines);a.movementLanded=a.health>0&&a.vehicleId===null&&a.grounded===true&&wasGrounded!==true&&a.traversalEvent===null&&traversalRide!==true&&a.vy<=0;}}const bodyTurn=(this.difficulty?.id==='nightmare'?10:this.difficulty?.id==='hard'?8:this.difficulty?.id==='normal'?6:4)*dt;const nextBody=turnToward(a.bodyYaw??a.yaw,a.yaw,bodyTurn);a.bodyYaw=Math.atan2(Math.sin(nextBody),Math.cos(nextBody));
     if(a.traversalEvent){const evt=a.traversalEvent;a.traversalEvent=null;this.emit(evt.type,{actor:a.id,id:evt.id,from:evt.from,to:evt.to});}
     if(this.arena.voidY!==undefined&&a.y<this.arena.voidY){this.fall(a);continue;}this.objective(a);if(ext&&a.vehicleId===null){if(ext.power)this.power(a);if(ext.fire)this.fire(a);if(ext.grenade)this.throwGrenade(a);}
   for(const p of this.pickups)if(!p.wait&&dist(a,p)<1.05)this.collect(a,p);
