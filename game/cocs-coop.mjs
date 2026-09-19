@@ -21,10 +21,10 @@
 
 import {RULES} from './data.mjs';
 import {SUBAGENTS, convertCoopReq} from './cocs-economy.mjs';
-import {addActorReq, capturableNodes, compareCocsOrders, nodeById, repairLink} from './cocs.mjs';
+import {addActorReq, capturableNodes, compareCocsOrders, connectivityIncome, cutLink, nodeById, repairLink} from './cocs.mjs';
 import {spawnGroup, updateEnemyRoles} from './singleplayer.mjs';
 import {
-  COOP_AUTO_SPEND, COOP_BONUS_ORDER, COOP_ECONOMY, COOP_PACING,
+  COOP_AUTO_SPEND, COOP_BONUS_ORDER, COOP_DENIAL, COOP_ECONOMY, COOP_PACING,
   COOP_RESERVE, COOP_REWARDS, COOP_SIEGE, COOP_SINK_ORDER, COOP_SINKS, DIRECTOR_COSTS,
   OPERATIONS_WAVE_COUNT, DEFAULT_COCS_TIER, bonusObjective, coopSink, directorTier,
   directorTierCopy, normalizeCocsTier, directorWavePlan,
@@ -34,6 +34,8 @@ import {
   directorPhase, directorPickSpawn, directorRate, directorReinforcementOrder,
   directorSpend, siegeShouldArm, siegeShouldLift,
 } from './cocs-director.mjs';
+import {COOP_ROLES, coopRole, roleAbility, roleAbilityTargets} from './cocs-roles.mjs';
+import {repairTerminal} from './cocs-terminals.mjs';
 
 export const COOP_KIND = 'cocs-coop';
 export const NPC_DEAD = 1e9;
@@ -90,6 +92,9 @@ export function createCoopState(state, {tier = DEFAULT_COCS_TIER} = {}) {
     },
     bonusHoldTicks: 0,
     gateLost: false,
+    // --- O1c D3/D4 denial mechanics ---------------------------------------
+    hardenedNodeId: null,
+    denial: null,
     // --- O1b optional team-wipe RESERVE -----------------------------------
     reserve: {enabled: COOP_RESERVE.enabled, tickets: COOP_RESERVE.start, wipeTicks: 0, burns: 0},
     rewards: null,
@@ -144,6 +149,18 @@ export function createCoopState(state, {tier = DEFAULT_COCS_TIER} = {}) {
       radius: COOP_SIEGE.radius,
     },
     command: null,
+    // --- O1c per-player command gates -------------------------------------
+    // Per-player spend is tracked for UI `remaining` and telemetry only; the
+    // gate itself is the published cap check (`cost <= floor(flux/slices)`),
+    // not a separate wallet. Reset at each wave start / intermission.
+    commandSpent: {wave: 0, byPeer: {}, flux: 0},
+    leaseRequests: [],
+    pendingLease: null,
+    // --- O1c subagents (roles) + role abilities ---------------------------
+    subagents: {},                 // id -> {id, role, team, spawnedTick, nodeId}
+    subagentIds: [],
+    subagentStats: {spawned: 0, killed: 0, expired: 0, byRole: {fighter: 0, harvester: 0, builder: 0, scout: 0}},
+    roleStats: {primes: 0, primeCompletions: 0, rallies: 0, repairs: 0, spots: 0},
     stats: {
       spawns: 0, spent: 0, reinforcements: 0, escalations: 0, overruns: 0,
       waveDurations: [], hqDamage: 0, hqRepairs: 0, peakPressure: data.start, clampedTicks: 0,
@@ -206,8 +223,15 @@ export function initCoop(match, state) {
 // ---------------------------------------------------------------------------
 // Command (owner decision 3): shared FLUX, per-player slice cap, rotating
 // executor lease for big cards, THREADS concurrency gate. Pure reads of the
-// live roster; the engine applies the gate in cocs.mjs.
+// live roster; the engine applies the gate in cocs.mjs and `coopSpend` applies
+// it to the between-wave window.
 // ---------------------------------------------------------------------------
+// Big cards draw from the whole pool but need the rotating EXECUTOR lease
+// (design §5.2). `SCAN` is the only big card at O1c; `REINFORCE` is the big
+// between-wave sink (it consumes a THREAD). PvPvE never consults either set.
+export const COOP_BIG_CARDS = Object.freeze(['SCAN']);
+export const COOP_BIG_SINKS = Object.freeze(['REINFORCE']);
+
 export function coopHumanIds(match) {
   return (match?.actors ?? [])
     .filter(actor => actor && actor.health > 0 && actor.team === 0 && actor.isNpc !== true && actor.bot == null)
@@ -215,48 +239,151 @@ export function coopHumanIds(match) {
     .sort((a, b) => a - b);
 }
 
+/** Living team-0 humans as `{id, name}` (deterministic id order). */
+export function coopHumans(match) {
+  return (match?.actors ?? [])
+    .filter(actor => actor && actor.health > 0 && actor.team === 0 && actor.isNpc !== true && actor.bot == null)
+    .map(actor => ({id: actor.id, name: actor.name ?? `P${actor.id}`}))
+    .sort((a, b) => a.id - b.id);
+}
+
 export function coopActiveThreads(match) {
   let used = 0;
-  for (const actor of match?.actors ?? []) if (actor && actor.health > 0 && actor.isScout === true) used++;
+  for (const actor of match?.actors ?? []) {
+    if (!actor || actor.health <= 0) continue;
+    if (actor.isSubagent === true || actor.isScout === true) used++;
+  }
   return used;
+}
+
+// `slices = max(2, humans)` — the published per-player spend cap divisor.
+export function coopSliceCount(humanCount) {
+  return Math.max(2, Math.max(0, Math.round(num(humanCount, 0))));
+}
+
+// The rotating executor. A recorded lease request wins the next rotation for
+// the requesting human (deterministic: earliest request tick, then peer id).
+export function coopExecutorId(humans, coop, tick) {
+  if (!humans.length) return 'chief';
+  const start = Math.floor(tick / COOP_EXECUTOR_LEASE_TICKS);
+  const slot = start % humans.length;
+  const requests = [...(coop?.leaseRequests ?? [])]
+    .filter(entry => entry && entry.tick <= start * COOP_EXECUTOR_LEASE_TICKS)
+    .sort((a, b) => num(a.tick, 0) - num(b.tick, 0) || String(a.peerId).localeCompare(String(b.peerId)));
+  for (const request of requests) {
+    const id = humans.find(human => String(human) === String(request.peerId));
+    if (id !== undefined) return id;
+  }
+  return humans[slot];
 }
 
 export function coopCommandState(match, state, nowTick = null) {
   const coop = state?.coop;
   if (!coop) return null;
-  const tick = num(nowTick, num(coop.tick, 0));
+  const tick = nowTick === null || nowTick === undefined ? num(coop.tick, 0) : num(nowTick, num(coop.tick, 0));
   const humans = coopHumanIds(match);
-  const sliceCount = Math.max(2, humans.length || 0) || 2;
+  const sliceCount = coopSliceCount(humans.length);
   const flux = num(state.flux?.[0], 0);
   const allowance = Math.max(0, Math.floor(flux / sliceCount));
-  const leaseSlot = Math.floor(tick / COOP_EXECUTOR_LEASE_TICKS) % Math.max(1, humans.length);
-  const executor = humans.length ? humans[leaseSlot] : 'chief';
+  const spent = coop.commandSpent?.byPeer ?? {};
+  const leaseStart = Math.floor(tick / COOP_EXECUTOR_LEASE_TICKS);
+  const executor = coopExecutorId(humans, coop, tick);
+  const slices = humans.length
+    ? humans.map(id => {
+      const byPlayer = Math.max(0, num(spent[String(id)], 0));
+      return {id, allowance, remaining: Math.max(0, allowance - byPlayer), spent: byPlayer};
+    })
+    : [{id: 'chief', allowance: flux, remaining: flux, spent: 0}];
   return {
     humans: humans.length,
     slicePerPlayer: sliceCount,
     executor,
-    leaseUntil: (Math.floor(tick / COOP_EXECUTOR_LEASE_TICKS) + 1) * COOP_EXECUTOR_LEASE_TICKS,
-    threads: {used: coopActiveThreads(match), cap: Math.min(COOP_THREAD_CAP, (humans.length || 1) + 1 + num(coop.threadBonus, 0))},
-    slices: [{id: 0, allowance}, {id: 1, allowance}],
+    leaseUntil: (leaseStart + 1) * COOP_EXECUTOR_LEASE_TICKS,
+    threads: {used: coopActiveThreads(match), cap: Math.min(COOP_THREAD_CAP, humans.length + 1 + num(coop.threadBonus, 0))},
+    slices,
+    lease: {
+      executor,
+      until: (leaseStart + 1) * COOP_EXECUTOR_LEASE_TICKS,
+      start: leaseStart * COOP_EXECUTOR_LEASE_TICKS,
+      slot: humans.length ? leaseStart % humans.length : null,
+      humans: humans.length,
+      chief: humans.length === 0,
+      requestable: humans.length > 1,
+      requests: [...(coop.leaseRequests ?? [])].map(entry => ({peerId: String(entry.peerId), tick: num(entry.tick, 0)})),
+    },
     flux,
   };
+}
+
+/** Record a lease request from a player; granted at the next rotation. */
+export function coopRequestLease(state, peerId, tick = null) {
+  const coop = state?.coop;
+  if (!coop || peerId === null || peerId === undefined) return false;
+  const requests = coop.leaseRequests ?? (coop.leaseRequests = []);
+  const at = num(tick, num(coop.tick, 0));
+  const existing = requests.find(entry => String(entry.peerId) === String(peerId));
+  if (existing) { existing.tick = at; return true; }
+  requests.push({peerId: String(peerId), tick: at});
+  requests.sort((a, b) => num(a.tick, 0) - num(b.tick, 0) || String(a.peerId).localeCompare(String(b.peerId)));
+  return true;
+}
+
+function commandPeerGate(command, {peerId}) {
+  const id = String(peerId ?? '');
+  const chief = id.startsWith('chief');
+  const human = command.slices.find(entry => String(entry.id) === id) ?? null;
+  if (command.humans > 0 && !chief && !human) return {human: null, chief, reject: 'executor'};
+  return {human, chief, reject: null};
 }
 
 // Applies the co-op command gates to one order. Returns `{ok, reason}`.
 // Big cards (SCAN) need the rotating executor lease; when no human holds it,
 // the duty Chief proxies. Every spend must fit the player's FLUX slice.
-export function coopOrderGate(match, state, {team, verb, peerId} = {}) {
+export function coopOrderGate(match, state, {verb, peerId} = {}) {
   const coop = state?.coop;
   if (!coop) return {ok: true, reason: null};
   const command = coopCommandState(match, state);
-  if (verb === 'SCAN') {
-    const cost = num(SUBAGENTS?.scout?.spawnCost, 7);
-    if (cost > (command.slices?.[team]?.allowance ?? Infinity)) return {ok: false, reason: 'slice'};
-    const chief = String(peerId ?? '').startsWith('chief');
-    if (command.humans > 0 && !chief && String(peerId) !== String(command.executor)) return {ok: false, reason: 'executor'};
+  const gate = commandPeerGate(command, {peerId});
+  if (gate.reject) return {ok: false, reason: gate.reject};
+  const key = String(verb ?? '').toUpperCase();
+  if (COOP_BIG_CARDS.includes(key)) {
+    const cost = key === 'SCAN' ? num(SUBAGENTS?.scout?.spawnCost, 7) : 0;
+    if (command.humans > 0 && !gate.chief && String(peerId) !== String(command.executor)) return {ok: false, reason: 'executor'};
+    if (gate.human && cost > gate.human.allowance) return {ok: false, reason: 'slice'};
+    if (!gate.human && command.humans === 0 && cost > command.flux) return {ok: false, reason: 'slice'};
   }
   return {ok: true, reason: null};
 }
+
+// The between-wave equivalent of `coopOrderGate`: the same slice + lease gates
+// applied to a sink spend. Unknown/Chief peers fall back to the pooled path.
+export function coopSpendGate(match, state, {verb, peerId} = {}) {
+  const coop = state?.coop;
+  if (!coop) return {ok: false, reason: 'no-coop'};
+  const sink = coopSink(verb);
+  if (!sink) return {ok: false, reason: 'unknown-sink'};
+  const command = coopCommandState(match, state);
+  const gate = commandPeerGate(command, {peerId});
+  if (gate.reject) return {ok: false, reason: gate.reject};
+  if (COOP_BIG_SINKS.includes(sink.id) && command.humans > 0 && !gate.chief && String(peerId) !== String(command.executor)) {
+    return {ok: false, reason: 'executor'};
+  }
+  if (gate.human && sink.cost > gate.human.allowance) return {ok: false, reason: 'slice'};
+  return {ok: true, reason: null};
+}
+
+function noteCommandSpend(coop, peerId, cost) {
+  const id = String(peerId ?? '');
+  if (!id || id.startsWith('chief')) return;
+  coop.commandSpent ??= {wave: num(coop.wave, 0), byPeer: {}, flux: 0};
+  coop.commandSpent.byPeer[id] = num(coop.commandSpent.byPeer[id], 0) + Math.max(0, num(cost, 0));
+  coop.commandSpent.flux = num(coop.commandSpent.flux, 0) + Math.max(0, num(cost, 0));
+}
+
+function resetCommandSpend(coop) {
+  coop.commandSpent = {wave: num(coop.wave, 0), byPeer: {}, flux: 0};
+}
+
 
 // ---------------------------------------------------------------------------
 // O1b intermission spend window + FLUX sinks (design §3.3).
@@ -299,7 +426,36 @@ function repairOneDevice(state) {
   return false;
 }
 
-function applySink(match, state, sink, target) {
+// O1c REPAIR depth: also bring a cut/locked terminal back and force an owned
+// forward depot's loaner to respawn (the traversal step does the spawn work on
+// the next tick, so this stays deterministic and allocation-free).
+function repairOneTerminal(state) {
+  const terminals = state?.terminals?.terminals;
+  if (!terminals) return false;
+  for (const id of Object.keys(terminals).sort()) {
+    const terminal = terminals[id];
+    if (terminal && terminal.state !== 'live') return repairTerminal(state, terminal);
+  }
+  return false;
+}
+
+function restoreDepotLoaner(state) {
+  const depots = state?.traversal?.depots;
+  const vehicles = state?.vehicles;
+  if (!depots) return false;
+  for (const id of Object.keys(depots).sort()) {
+    const depot = depots[id];
+    if (!depot || depot.owner !== 0 || depot.hq === true) continue;
+    const vehicle = depot.vehicleId != null ? (vehicles ?? []).find(entry => entry && entry.id === depot.vehicleId) : null;
+    if (vehicle && vehicle.health > 0) continue;
+    depot.vehicleId = null;
+    depot.respawn = 0;
+    return true;
+  }
+  return false;
+}
+
+function applySink(match, state, sink, target, opts = {}) {
   const coop = state.coop;
   if (sink.verb === 'FORTIFY') {
     const node = nodeById(state, target);
@@ -316,6 +472,9 @@ function applySink(match, state, sink, target) {
     const cut = [...(state.cuts ?? [])].sort((a, b) => String(a).localeCompare(String(b)))[0];
     if (cut) repairLink(state, cut);
     repairOneDevice(state);
+    // O1c: terminals and depot loaners are part of "REPAIR a damaged terminal".
+    repairOneTerminal(state);
+    restoreDepotLoaner(state);
     return;
   }
   if (sink.verb === 'RESUPPLY') {
@@ -340,7 +499,7 @@ function applySink(match, state, sink, target) {
     return;
   }
   if (sink.verb === 'REINFORCE') {
-    spawnCoopSquad(match, state);
+    spawnCoopSquad(match, state, {role: opts.role});
     coop.threadBonus = Math.min(COOP_THREAD_CAP, num(coop.threadBonus, 0) + Math.max(0, num(sink.threads, 0)));
   }
 }
@@ -355,11 +514,16 @@ export function coopSpend(match, state, spend = {}) {
   if (!intermissionOpen(coop)) return {ok: false, reason: 'window-closed'};
   const target = spend.target ?? null;
   if (!sinkTargetValid(state, sink, target)) return {ok: false, reason: 'target'};
+  // O1c per-player gate: slice cap + executor lease for big sinks. The duty
+  // Chief (no humans, or a `chief-*` peer) proxies on the pooled path.
+  const gate = coopSpendGate(match, state, {verb, peerId: spend.peerId});
+  if (!gate.ok) return {ok: false, reason: gate.reason};
   const flux = num(state.flux?.[0], 0);
   if (flux + 1e-9 < sink.cost) return {ok: false, reason: 'flux'};
-  applySink(match, state, sink, target);
+  applySink(match, state, sink, target, {role: spend.role});
   state.flux[0] = flux - sink.cost;
   state.fluxSpent[0] = num(state.fluxSpent?.[0], 0) + sink.cost;
+  noteCommandSpend(coop, spend.peerId, sink.cost);
   coop.spendStats[verb] = num(coop.spendStats[verb], 0) + 1;
   coop.spendStats.flux = num(coop.spendStats.flux, 0) + sink.cost;
   coop.windowSpend[verb] = num(coop.windowSpend[verb], 0) + 1;
@@ -395,25 +559,243 @@ export function processCocsSpends(match, state) {
 // Friendly squad bot (REINFORCE). A normal AI ally on team 0, so the shipped
 // bot brain and `cocsTeamPlan` drive it; it never captures for the Director and
 // never counts as wave force. Capped so the actor budget stays ≤ 24.
-export function spawnCoopSquad(match, state) {
+//
+// O1c: an optional `role` (`fighter|harvester|builder|scout`) selects the
+// §8.1 role envelope and registers the actor on the co-op subagent roster so
+// THREADS, upkeep and the role abilities all read one list.
+export function spawnCoopSquad(match, state, {role = 'fighter'} = {}) {
   const coop = state?.coop;
   if (!coop) return null;
   const cap = Math.max(0, Math.round(num(COOP_SINKS.REINFORCE.squadCap, 1)));
   const live = (coop.squadIds ?? []).filter(id => (actorById(match, id)?.health ?? 0) > 0).length;
   if (live >= cap) return null;
+  const def = coopRole(role) ?? COOP_ROLES.fighter;
   const id = nextActorId(match);
   const actor = match.actor(id, 'chatgpt', 'openclaw');
   actor.team = 0;
   actor.isCoopSquad = true;
-  actor.name = 'Squad';
-  actor.maxHealth = Math.max(num(actor.maxHealth, 0), 120);
-  actor.health = actor.maxHealth;
+  actor.isSubagent = true;
+  actor.subagentRole = def.id;
+  actor.subagentTick = num(coop.tick, 0);
+  actor.name = def.name;
   if (!actor.bot) actor.bot = {route: [], think: 0, target: -1, memory: 0, reaction: 0, stuck: 0, last: {x: 0, y: 0, z: 0}, state: 'roam', patrol: 0, flank: null, flankDone: false, recover: 0, suppressed: 0, threat: -1, standoff: null, strafeReverse: -99};
   match.actors.push(actor);
   match.spawn(actor);
+  // `spawn()` re-derives maxHealth from the class loadout; apply the role
+  // envelope afterwards so the §8.1 numbers win.
+  actor.maxHealth = def.health;
+  actor.health = actor.maxHealth;
   coop.squadIds.push(id);
-  match.emit?.('coop-reinforce', {wave: coop.wave, actor: id, squad: live + 1, cap});
+  coop.subagentIds.push(id);
+  coop.subagents[id] = {id, role: def.id, team: 0, spawnedTick: num(coop.tick, 0), nodeId: null};
+  coop.subagentStats.spawned = num(coop.subagentStats.spawned, 0) + 1;
+  coop.subagentStats.byRole[def.id] = num(coop.subagentStats.byRole[def.id], 0) + 1;
+  match.emit?.('coop-reinforce', {wave: coop.wave, actor: id, squad: live + 1, cap, role: def.id});
   return id;
+}
+
+// ---------------------------------------------------------------------------
+// O1c subagents (roles): upkeep + the active prime. A co-op subagent is any
+// team-0 actor tagged `isSubagent` (a REINFORCE squad) or the team-0 scout. The
+// §6.5 superlinear supply load is applied by slot (id-sorted), so the 4th–6th
+// agent is genuinely expensive.
+// ---------------------------------------------------------------------------
+export function coopSubagentActors(match, coop) {
+  const ids = new Set([...(coop?.subagentIds ?? [])]);
+  for (const actor of match?.actors ?? []) {
+    if (actor && actor.health > 0 && (actor.isSubagent === true || actor.isScout === true)) ids.add(actor.id);
+  }
+  return [...ids].sort((a, b) => a - b).map(id => actorById(match, id)).filter(actor => actor && actor.health > 0);
+}
+
+function stepCoopSubagents(match, state, dt) {
+  const coop = state.coop;
+  // The team-0 scout's upkeep already rides the `stepCocs` scout lifecycle, so
+  // only the REINFORCE squad roles are charged here (no double drain).
+  const actors = coopSubagentActors(match, coop).filter(actor => actor.isScout !== true);
+  let upkeep = 0;
+  for (let index = 0; index < actors.length; index++) {
+    const actor = actors[index];
+    const role = actor.subagentRole ?? (actor.isScout === true ? 'scout' : 'fighter');
+    const home = (state.nodes ?? []).find(node => node.archetype === 'hq' && node.owner === 0) ?? null;
+    const target = nodeById(state, actor.subagentNode ?? coop.targetNode ?? null);
+    const hops = home && target ? Math.max(0, Math.round(Math.hypot(home.x - target.x, home.z - target.z) / 62)) : 0;
+    const perSecond = subagentUpkeepFor(role, index + 1, {hops});
+    upkeep += perSecond;
+    const drain = perSecond * dt;
+    if (num(state.flux?.[0], 0) >= drain) {
+      state.flux[0] = num(state.flux?.[0], 0) - drain;
+      actor.subagentIdle = false;
+    } else {
+      state.flux[0] = 0;
+      actor.subagentIdle = true;
+    }
+  }
+  // The scout's own upkeep already rides the scout lifecycle; avoid double
+  // draining by only charging the non-scout squad here.
+  coop.subagentUpkeep = upkeep;
+  void dt;
+}
+
+function subagentUpkeepFor(role, slot, ctx) {
+  const def = coopRole(role) ?? COOP_ROLES.fighter;
+  const base = num(def.upkeep, 0);
+  const slotMultiplier = [1, 1, 1, 1.6, 2.2, 3][Math.max(0, Math.min(5, slot - 1))];
+  const hopScale = 1 + Math.min(0.25, 0.05 * Math.max(0, num(ctx?.hops, 0)));
+  return base * slotMultiplier * hopScale;
+}
+
+// ---------------------------------------------------------------------------
+// Role abilities (O1c). The multi-target contract lives in `cocs-roles.mjs`;
+// these are the engine effects. `PRIME` is the §4.8 logistics channel (one
+// active prime per node; taking damage interrupts a human's channel, a
+// HARVESTER never enters a contested zone), `RALLY` is the friendly multi-target
+// ability, `REPAIR` fixes every broken device/terminal.
+// ---------------------------------------------------------------------------
+const PRIME_LEASH = 14;
+
+/** Start the active HARVESTER/human prime on one owned economy node. */
+export function coopPrimeNode(match, state, actor, nodeId) {
+  const coop = state?.coop;
+  if (!coop || !actor || actor.health <= 0) return {ok: false, reason: 'missing'};
+  const node = nodeById(state, nodeId);
+  if (!node || node.archetype !== 'economy' || node.owner !== 0) return {ok: false, reason: 'target'};
+  if (node.primeChannel || (node.prime && num(state.tick, 0) <= num(node.prime.until, 0))) return {ok: false, reason: 'already-primed'};
+  const ability = roleAbility('harvester', 'PRIME');
+  const seconds = num(ability?.seconds, 8);
+  node.primeChannel = {actor: actor.id, remaining: seconds, total: seconds};
+  actor.subagentNode = node.id;
+  coop.roleStats.primes = num(coop.roleStats.primes, 0) + 1;
+  match?.emit?.('cocs-prime-start', {node: node.id, actor: actor.id, seconds});
+  return {ok: true, reason: null, node: node.id};
+}
+
+function completePrime(match, state, node) {
+  const channel = node.primeChannel;
+  if (!channel) return false;
+  const ability = roleAbility('harvester', 'PRIME');
+  const actor = actorById(match, channel.actor);
+  node.prime = {
+    team: 0,
+    by: channel.actor,
+    until: num(state.tick, 0) + ticks(num(ability?.fluxSeconds, 30)),
+    captureUntil: num(state.tick, 0) + ticks(num(ability?.captureSeconds, 10)),
+    fluxBonus: num(ability?.fluxBonus, 0.5),
+    captureMultiplier: num(ability?.captureMultiplier, 1.5),
+  };
+  node.primeChannel = null;
+  const coop = state.coop;
+  coop.roleStats.primeCompletions = num(coop.roleStats.primeCompletions, 0) + 1;
+  match?.emit?.('cocs-prime', {node: node.id, actor: channel.actor, team: 0, seconds: num(ability?.fluxSeconds, 30)});
+  void actor;
+  return true;
+}
+
+function stepCoopPrimes(match, state, dt) {
+  for (const node of state.nodes ?? []) {
+    if (!node?.primeChannel) continue;
+    const channel = node.primeChannel;
+    const actor = actorById(match, channel.actor);
+    const near = actor && actor.health > 0 && Math.hypot(num(actor.x, 0) - node.x, num(actor.z, 0) - node.z) <= Math.max(num(node.r, 4), PRIME_LEASH);
+    if (!near || node.contested === true) { node.primeChannel = null; match?.emit?.('cocs-prime-interrupt', {node: node.id, actor: channel.actor}); continue; }
+    channel.remaining = Math.max(0, num(channel.remaining, 0) - dt);
+    if (!(channel.remaining > 0)) completePrime(match, state, node);
+  }
+  for (const node of state.nodes ?? []) if (node?.prime && num(state.tick, 0) > num(node.prime.until, 0)) node.prime = null;
+}
+
+// A HARVESTER autonomously primes owned rear siphons (design §4.8): it never
+// enters a contested zone, only picks the lowest-id owned economy node with no
+// hostile inside its radius + 10, and cannot replace a human on the front.
+function maybeHarvesterPrime(match, state) {
+  const coop = state.coop;
+  const harvesters = coopSubagentActors(match, coop).filter(actor => actor.subagentRole === 'harvester' && actor.isScout !== true);
+  if (!harvesters.length) return;
+  const candidates = capturableNodes(state)
+    .filter(node => node.archetype === 'economy' && node.owner === 0 && !node.primeChannel && !node.prime)
+    .sort((a, b) => String(a.id).localeCompare(String(b.id)));
+  for (const node of candidates) {
+    const hostile = (match.actors ?? []).some(actor => actor && actor.health > 0 && actor.team === 1 && Math.hypot(num(actor.x, 0) - node.x, num(actor.z, 0) - node.z) <= num(node.r, 4) + 10);
+    if (hostile) continue;
+    const harvester = harvesters.find(actor => !actor.subagentNode) ?? harvesters[0];
+    if (harvester) { coopPrimeNode(match, state, harvester, node.id); return; }
+  }
+}
+
+/** The friendly multi-target ability: buff every team-0 actor in radius. */
+export function coopRoleRally(match, state, actor, ability = null) {
+  const coop = state?.coop;
+  if (!coop || !actor) return [];
+  const def = ability ?? roleAbility('fighter', 'RALLY');
+  const targets = roleAbilityTargets(match, state, actor, def);
+  const shield = num(def?.shield, 0);
+  const heal = num(def?.heal, 0);
+  const seconds = num(def?.seconds, 0);
+  for (const id of targets) {
+    const target = actorById(match, id);
+    if (!target) continue;
+    if (shield > 0) target.temporaryShield = Math.max(num(target.temporaryShield, 0), shield);
+    if (heal > 0) target.health = Math.min(target.maxHealth, num(target.health, 0) + heal);
+  }
+  if (targets.length) coop.roleStats.rallies = num(coop.roleStats.rallies, 0) + 1;
+  match?.emit?.('cocs-role-rally', {actor: actor.id, role: actor.subagentRole ?? 'fighter', targets, shield, seconds});
+  return targets;
+}
+
+/** Repair every broken device/terminal (the BUILDER multi-target ability). */
+export function coopRoleRepair(match, state, actor) {
+  const coop = state?.coop;
+  if (!coop || !actor) return [];
+  const def = roleAbility('builder', 'REPAIR');
+  const targets = roleAbilityTargets(match, state, actor, def);
+  const repaired = [];
+  for (const id of targets) {
+    if (String(id).startsWith('terminal:')) {
+      const terminal = state.terminals?.terminals?.[String(id).slice('terminal:'.length)];
+      if (terminal && repairTerminal(state, terminal)) repaired.push(id);
+      continue;
+    }
+    const device = state?.traversal?.devices?.[id];
+    if (device && device.state !== 'live') {
+      device.state = 'live';
+      device.timer = 0;
+      device.repairs = num(device.repairs, 0) + 1;
+      if (state.traversal?.stats) state.traversal.stats.repairs = num(state.traversal.stats.repairs, 0) + 1;
+      repaired.push(id);
+    }
+  }
+  if (repaired.length) coop.roleStats.repairs = num(coop.roleStats.repairs, 0) + 1;
+  match?.emit?.('cocs-role-repair', {actor: actor.id, repaired});
+  return repaired;
+}
+
+/**
+ * Explicit role action entry point (tests / future UI).
+ * `verb` is `RALLY|PRIME|REPAIR|SPOT`; `target` is a node id for PRIME.
+ */
+export function coopRoleAction(match, state, actorId, verb, {target = null} = {}) {
+  const actor = actorById(match, actorId);
+  if (!actor) return {ok: false, reason: 'missing'};
+  const key = String(verb ?? '').toUpperCase();
+  if (key === 'PRIME') return coopPrimeNode(match, state, actor, target);
+  if (key === 'RALLY') return {ok: true, reason: null, targets: coopRoleRally(match, state, actor)};
+  if (key === 'REPAIR') return {ok: true, reason: null, targets: coopRoleRepair(match, state, actor)};
+  if (key === 'SPOT') {
+    const def = roleAbility('scout', 'SPOT');
+    const targets = roleAbilityTargets(match, state, actor, def);
+    const coop = state?.coop;
+    if (coop && targets.length) coop.roleStats.spots = num(coop.roleStats.spots, 0) + 1;
+    match?.emit?.('cocs-role-spot', {actor: actor.id, targets});
+    return {ok: true, reason: null, targets};
+  }
+  return {ok: false, reason: 'unknown-verb'};
+}
+
+function stepCoopRoles(match, state, dt) {
+  stepCoopPrimes(match, state, dt);
+  // Autonomous prime on a slow deterministic cadence (no RNG).
+  if (num(state.tick, 0) > 0 && num(state.tick, 0) % 120 === 0) maybeHarvesterPrime(match, state);
+  void dt;
 }
 
 function autoSinkLimit(coop, state, sink) {
@@ -452,7 +834,13 @@ function autoSinkTarget(match, state, sink) {
  */
 export function coopAutoSpend(match, state) {
   const coop = state?.coop;
-  if (!coop || coop.autoSpend !== true || !intermissionOpen(coop)) return 0;
+  if (!coop) return 0;
+  const enabled = coop.autoSpend === true || coop.autoSpend === 'force';
+  if (!enabled || !intermissionOpen(coop)) return 0;
+  // The auto-spend is the **no-human fallback** (O1c §5.2): when any human is
+  // seated the real per-player spend path owns the window, and only an explicit
+  // `'force'` (validator/test) overrides that.
+  if (coop.autoSpend !== 'force' && coopHumanIds(match).length > 0) return 0;
   const cap = num(state.fluxCap, COOP_ECONOMY.fluxCap);
   const floor = cap * Math.max(0, Math.min(0.9, num(COOP_AUTO_SPEND.reserveFraction, 0.15)));
   let spends = 0;
@@ -464,6 +852,8 @@ export function coopAutoSpend(match, state) {
       if (num(coop.windowSpend[verb], 0) >= autoSinkLimit(coop, state, sink)) continue;
       const target = autoSinkTarget(match, state, sink);
       if (target === undefined) continue;
+      // The AI-seat fallback fields the tuned combat squad; explicit callers can
+      // still request any role through `coopSpend({role})`.
       const result = coopSpend(match, state, {
         tick: num(coop.tick, 0), peerId: 'chief-0',
         cardId: `auto-${verb}-${coop.wave}-${num(coop.windowSpend[verb], 0)}`,
@@ -559,6 +949,21 @@ function resolveBonus(match, state, id, outcome) {
 }
 
 // Continuous bonus checks (hold-all latch, no-breach gate tracking).
+// The `no-breach` gate is derived from `hq-0` adjacency, not hardcoded to
+// `front-0`: the authored lattice always has a capturable gate next to the
+// player HQ, and a retrofit map may name it anything.
+export function coopBreachGateId(state) {
+  const nodes = state?.nodes ?? [];
+  const hq = nodes.find(node => node.id === 'hq-0') ?? nodes.find(node => node.archetype === 'hq' && node.owner === 0) ?? null;
+  if (!hq) return 'front-0';
+  const neighbours = [...(state.adjacency?.[hq.id] ?? [])].sort((a, b) => String(a).localeCompare(String(b)));
+  for (const id of neighbours) {
+    const node = nodeById(state, id);
+    if (node && node.archetype !== 'hq' && node.archetype !== 'array') return node.id;
+  }
+  return 'front-0';
+}
+
 function stepCoopBonus(match, state) {
   const coop = state.coop;
   if (!coop.bonus.state.length) return;
@@ -578,7 +983,7 @@ function stepCoopBonus(match, state) {
         coop.bonusHoldTicks = 0;
       }
     } else if (def.kind === 'hold-gate') {
-      const gate = nodeById(state, def.gate);
+      const gate = nodeById(state, coopBreachGateId(state));
       if (gate && gate.owner === 1) coop.gateLost = true;
     } else if (def.kind === 'own-siphons') {
       entry.progress = capturable.filter(node => node.archetype === 'economy' && node.owner === 0).length;
@@ -844,7 +1249,12 @@ function startWave(match, state) {
   coop.fronts = [];
   expireFortify(coop, coop.wave, state);
   coop.windowSpend = {FORTIFY: 0, REPAIR: 0, RESUPPLY: 0, REINFORCE: 0};
+  resetCommandSpend(coop);
   refreshTargets(match, state);
+  // D3/D4 hardened site: the Director's current front resists a recapture while
+  // the Director holds it (content only, never a stat). Cleared at wave end.
+  coop.hardenedNodeId = tier.hardened === true ? coop.targetNode : null;
+  coop.denial = null;
   const plan = directorWavePlan(coop.wave, coop.tier);
   coop.composition = plan.composition;
   coop.modifier = plan.modifier;
@@ -958,6 +1368,42 @@ function fireEscalation(match, state, event) {
   }
 }
 
+// D3/D4 denial mechanics (design §4.1/§4.2): the Director periodically cuts one
+// of the team's own supply links for a short window, and a hardened front
+// resists a team-0 recapture while the Director holds it. Content only.
+function stepCoopDenial(match, state) {
+  const coop = state.coop;
+  const tier = directorTier(coop.tier);
+  if (coop.hardenedNodeId) {
+    const node = nodeById(state, coop.hardenedNodeId);
+    if (node) {
+      if (node.owner === 1) node.captureResist = Math.max(num(node.captureResist, 0), 0.5);
+      else if (num(node.captureResist, 0) > 0 && !coop.fortify?.[node.id]) node.captureResist = 0;
+    }
+  }
+  if (tier.denial !== true) return;
+  if (coop.denial) {
+    if (num(coop.tick, 0) > num(coop.denial.until, 0)) {
+      repairLink(state, coop.denial.nodeId);
+      match.emit?.('director-denial-end', {node: coop.denial.nodeId, wave: coop.wave});
+      coop.denial = null;
+    }
+    return;
+  }
+  if (coop.wave < COOP_DENIAL.minWave) return;
+  const interval = ticks(COOP_DENIAL.intervalSeconds);
+  if (!(interval > 0) || num(coop.tick, 0) % interval !== 0) return;
+  const connected = new Set(connectivityIncome(state).connected[0] ?? []);
+  const candidates = capturableNodes(state)
+    .filter(node => node.owner === 0 && connected.has(node.id))
+    .sort((a, b) => (a.archetype === 'relay' ? 0 : 1) - (b.archetype === 'relay' ? 0 : 1) || String(a.id).localeCompare(String(b.id)));
+  const target = candidates[0];
+  if (!target) return;
+  cutLink(state, target.id);
+  coop.denial = {nodeId: target.id, until: num(coop.tick, 0) + ticks(COOP_DENIAL.cutSeconds)};
+  match.emit?.('director-denial', {node: target.id, wave: coop.wave, seconds: COOP_DENIAL.cutSeconds});
+}
+
 function maybeReinforce(match, state) {
   const coop = state.coop;
   if (coop.phase !== 'build_up' && coop.phase !== 'peak') return;
@@ -996,6 +1442,7 @@ function stepWave(match, state, dt) {
   const coop = state.coop;
   coop.waveTicks += 1;
   coop.phaseTicks += 1;
+  stepCoopDenial(match, state);
   const phase = directorPhase(coop.waveTicks, coop.waveTimerTicks, false);
   if (phase !== coop.phase) {
     coop.phase = phase;
@@ -1148,7 +1595,18 @@ export function stepCoop(match, state, dt) {
   if (!coop.initialized) initCoop(match, state);
   coop.tick = num(coop.tick, 0) + 1;
   coop.elapsed += dt;
+  // A player lease request queued by `prepareCocs` is recorded for the next
+  // rotation (deterministic: earliest request tick, then peer id).
+  if (coop.pendingLease !== null && coop.pendingLease !== undefined) {
+    coopRequestLease(state, coop.pendingLease, coop.tick);
+    coop.pendingLease = null;
+  }
   coop.command = coopCommandState(match, state);
+  // Consume any lease request granted by the current rotation window.
+  if (Array.isArray(coop.leaseRequests) && coop.leaseRequests.length) {
+    const leaseStart = Math.floor(num(coop.tick, 0) / COOP_EXECUTOR_LEASE_TICKS) * COOP_EXECUTOR_LEASE_TICKS;
+    coop.leaseRequests = coop.leaseRequests.filter(request => num(request.tick, 0) > leaseStart);
+  }
   // Dead wave force never respawns.
   pruneDirectorDead(match, state);
   // O1b intermission spends queue through the same deterministic order path.
@@ -1168,6 +1626,9 @@ export function stepCoop(match, state, dt) {
   else stepWave(match, state, dt);
   // O1b bonus objective latch (hold-all / no-breach).
   stepCoopBonus(match, state);
+  // O1c subagent upkeep (the §6.5 supply load) + role abilities (prime/rally/repair).
+  stepCoopSubagents(match, state, dt);
+  stepCoopRoles(match, state, dt);
   // Optional team-wipe RESERVE loss (inert unless enabled by config).
   stepReserve(match, state, dt);
   // Stage -> spawn.
@@ -1233,7 +1694,6 @@ function phaseSecondsRemaining(coop) {
 function sinkViews(match, state) {
   const coop = state?.coop;
   const open = intermissionOpen(coop);
-  const cap = num(state.fluxCap, COOP_ECONOMY.fluxCap);
   const budget = num(state.flux?.[0], 0);
   const views = [];
   for (const verb of COOP_SINK_ORDER) {
@@ -1284,6 +1744,8 @@ export function cocsDirectorSnapshot(match, state) {
     telegraph: coop.lastTelegraph ? {...coop.lastTelegraph} : null,
     boss: coop.bossId !== null ? {actorId: coop.bossId, type: coop.bossType, phase: coop.bossPhase} : null,
     retarget: coop.targetNode ? {nodeId: coop.targetNode, reason: coop.siege.armed ? 'siege' : 'weakest-front'} : null,
+    denial: coop.denial ? {nodeId: coop.denial.nodeId, until: num(coop.denial.until, 0)} : null,
+    hardened: coop.hardenedNodeId ? {nodeId: coop.hardenedNodeId, resist: 0.5} : null,
     pressure: clamp01(coop.pressure / Math.max(1, directorCap(coop.tier))),
     intermission: {
       open: coop.intermissionOpen === true,
@@ -1346,8 +1808,34 @@ export function cocsCoopSnapshot(match, state) {
       executor: command.executor,
       leaseUntil: command.leaseUntil,
       threads: {...command.threads},
-      slices: command.slices.map(entry => ({...entry})),
+      // Per-player slices with the live allowance/remaining the HUD shows.
+      slices: command.slices.map(entry => ({id: entry.id, allowance: entry.allowance, remaining: entry.remaining, spent: entry.spent})),
+      // The rotating EXECUTOR lease, additively (design §5.2/§6.4).
+      lease: {...command.lease, requests: command.lease.requests.map(entry => ({...entry}))},
+      flux: command.flux,
+      spent: {...(coop.commandSpent ?? {byPeer: {}}).byPeer},
     } : null,
+    // O1c subagent roles + ability telemetry (additive).
+    roles: {
+      threads: {used: command ? command.threads.used : 0, cap: command ? command.threads.cap : 0},
+      byRole: {...(coop.subagentStats?.byRole ?? {})},
+      spawned: num(coop.subagentStats?.spawned, 0),
+      stats: {...(coop.roleStats ?? {})},
+      agents: coopSubagentActors(match, coop).map(actor => ({
+        id: actor.id, role: actor.subagentRole ?? (actor.isScout === true ? 'scout' : 'fighter'),
+        team: actor.team, health: Math.round(num(actor.health, 0)), max: Math.round(num(actor.maxHealth, 0)),
+        nodeId: actor.subagentNode ?? null, idle: actor.subagentIdle === true,
+      })),
+    },
+    primes: (state.nodes ?? [])
+      .filter(node => node?.prime || node?.primeChannel)
+      .map(node => ({
+        nodeId: node.id,
+        active: Boolean(node.prime && num(state.tick, 0) <= num(node.prime.until, 0)),
+        until: node.prime ? num(node.prime.until, 0) : 0,
+        channel: node.primeChannel ? {actor: node.primeChannel.actor, remaining: Math.round(num(node.primeChannel.remaining, 0) * 100) / 100} : null,
+      }))
+      .sort((a, b) => String(a.nodeId).localeCompare(String(b.nodeId))),
     bonus: (coop.bonus.state ?? [])
       .map(entry => ({id: entry.id, label: entry.label, state: entry.state, progress: num(entry.progress, 0), target: num(entry.target, 1)}))
       .sort((a, b) => String(a.id).localeCompare(String(b.id))),

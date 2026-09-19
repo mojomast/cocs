@@ -119,8 +119,10 @@ test('wave plans scale count by tier and never inflate stats', () => {
   const d1 = directorWavePlan(5, 'D1');
   const d4 = directorWavePlan(5, 'D4');
   assert.equal(d1.wave, 5);
-  assert.equal(d1.fronts, DIRECTOR_TIERS.D1.fronts);
-  assert.equal(d4.fronts, DIRECTOR_TIERS.D4.fronts);
+  // The published per-wave front counts are authored (design §3.2): wave 5 is
+  // 2/2/3/3 on D1–D4, so D1's plan raises the tier's general 1-front cap.
+  assert.equal(d1.fronts, OPERATIONS_WAVES[4].fronts.D1);
+  assert.equal(d4.fronts, OPERATIONS_WAVES[4].fronts.D4);
   assert.ok(d4.timer < d1.timer, 'D4 compresses the wave timer');
   assert.equal(directorWavePlan(1, 'D4').fronts, 1, 'the tutorial wave is always one front');
   assert.equal(d1.boss, true);

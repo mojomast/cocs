@@ -66,11 +66,11 @@ export const DIRECTOR_TIERS = Object.freeze({
     rate: 5.2, cap: 320, start: 60,
     intermissionSeconds: 26,
     waveTimerMultiplier: 0.90,
-    reinforceSeconds: 7,
+    reinforceSeconds: 8,
     reliefSeconds: 4,
     reinforceEvents: 2,
     compositionPool: 'denial',
-    countScale: 1.10,
+    countScale: 0.98,
     hardened: true,
     denial: true,
     bossPhaseStart: 2,
@@ -86,11 +86,11 @@ export const DIRECTOR_TIERS = Object.freeze({
     rate: 6, cap: 380, start: 70,
     intermissionSeconds: 24,
     waveTimerMultiplier: 0.80,
-    reinforceSeconds: 6,
+    reinforceSeconds: 5,
     reliefSeconds: 4,
     reinforceEvents: 2,
     compositionPool: 'all',
-    countScale: 1.15,
+    countScale: 1.35,
     hardened: true,
     denial: true,
     bossPhaseStart: 3,
@@ -209,6 +209,15 @@ export const COOP_RESERVE = Object.freeze({
   enabled: false, start: 6, wipeSeconds: 8, maxPerWave: 1,
 });
 
+// D3/D4 denial mechanics (design §4.1/§4.2). The Director periodically cuts one
+// of the team's own supply links for a short window (relay sabotage / supply
+// cut). Pure data; the engine picks the deterministic target.
+export const COOP_DENIAL = Object.freeze({
+  intervalSeconds: 45,
+  cutSeconds: 20,
+  minWave: 2,
+});
+
 // L4D-style pacing: BUILD_UP -> PEAK -> RELAX, with INTERMISSION between waves.
 export const COOP_PACING = Object.freeze({
   buildUpFraction: 0.40,
@@ -240,25 +249,33 @@ export const DIRECTOR_COSTS = Object.freeze({
 export const OPERATIONS_WAVES = Object.freeze([
   Object.freeze({
     wave: 1, label: 'SIGNAL SPIKE', modifier: 'swarm', timer: 120,
+    // Published per-wave simultaneous fronts (design §3.2, D1/D2/D3/D4). The
+    // tier's `fronts` is the general cap; the authored wave overrides it where
+    // the table raises it (W4 on D1, W5 on D3/D4).
+    fronts: Object.freeze({D1: 1, D2: 1, D3: 1, D4: 1}),
     composition: Object.freeze({husk: 3, spitter: 1}), events: Object.freeze([]),
   }),
   Object.freeze({
     wave: 2, label: 'PRESSURE', modifier: 'mixed', timer: 150,
+    fronts: Object.freeze({D1: 1, D2: 2, D3: 2, D4: 2}),
     composition: Object.freeze({husk: 4, spitter: 2, sapper: 1}),
     events: Object.freeze([Object.freeze({kind: 'REINFORCE', at: 0.85})]),
   }),
   Object.freeze({
     wave: 3, label: 'DENIAL', modifier: 'artillery', timer: 150,
+    fronts: Object.freeze({D1: 1, D2: 2, D3: 2, D4: 3}),
     composition: Object.freeze({husk: 4, spitter: 2, mender: 1, sapper: 1}),
     events: Object.freeze([Object.freeze({kind: 'DENIAL', at: 0.50})]),
   }),
   Object.freeze({
     wave: 4, label: 'FLANK', modifier: 'flanked', timer: 150,
+    fronts: Object.freeze({D1: 2, D2: 2, D3: 2, D4: 3}),
     composition: Object.freeze({husk: 5, spitter: 2, lancer: 2, brute: 1}),
     events: Object.freeze([Object.freeze({kind: 'FLANK', at: 0.60})]),
   }),
   Object.freeze({
     wave: 5, label: 'LEGION', modifier: 'champion', timer: 180, boss: true,
+    fronts: Object.freeze({D1: 2, D2: 2, D3: 3, D4: 3}),
     composition: Object.freeze({husk: 6, spitter: 2, bulwark: 1, sentinel: 1, mortar: 1, lancer: 1}),
     events: Object.freeze([
       Object.freeze({kind: 'BOSS', at: 0.35}),
@@ -312,7 +329,11 @@ export function directorWavePlan(waveIndex, tierId = DEFAULT_COCS_TIER) {
   const tier = directorTier(tierId);
   const plan = operationsWave(waveIndex);
   const composition = directorComposition(waveIndex, tierId);
-  const fronts = plan.wave === 1 ? 1 : Math.max(1, Math.min(5, tier.fronts));
+  // Published per-wave fronts (design §3.2). The first wave is always the
+  // tutorial: one front regardless of tier.
+  const waveFronts = plan.fronts?.[tier.id];
+  const resolvedFronts = Number.isFinite(Number(waveFronts)) ? Number(waveFronts) : tier.fronts;
+  const fronts = plan.wave === 1 ? 1 : Math.max(1, Math.min(5, Math.round(resolvedFronts)));
   return {
     wave: plan.wave,
     label: plan.label,

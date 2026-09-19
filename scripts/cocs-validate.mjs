@@ -26,8 +26,8 @@
 //   MAP=lattice-slice MODE=cocs node scripts/cocs-validate.mjs
 import {pathToFileURL} from 'node:url';
 import {Match} from '../game/core.mjs';
-import {coopKillReport, coopRewardSummary, coopSpendReport, setCoopTier} from '../game/cocs-coop.mjs';
-import {COOP_SINK_ORDER} from '../game/cocs-difficulty.mjs';
+import {coopCommandState, coopKillReport, coopRewardSummary, coopSpendReport, setCoopTier} from '../game/cocs-coop.mjs';
+import {COOP_SINK_ORDER, DIRECTOR_TIERS} from '../game/cocs-difficulty.mjs';
 
 const DT = 1 / 60;
 const seeded = seed => { let n = seed >>> 0; return () => ((n = (Math.imul(n, 1664525) + 1013904223) >>> 0) / 4294967296); };
@@ -135,6 +135,9 @@ export function runCoop(seed, {seconds = 900, tier = 'D1', humans = 4, bots = 2,
   const spend = coopSpendReport(m, st);
   const rewards = coop.rewards ?? coopRewardSummary(m, st);
   const report = coopKillReport(m, st);
+  const command = coopCommandState(m, st);
+  const terminalStats = st.terminals ? {...st.terminals.stats} : null;
+  const primes = (st.nodes ?? []).filter(node => node?.prime || node?.primeChannel).length;
   return {
     seed, tier, seconds, ticks, over: m.over, overReason: m.overReason || null, winner: st.winner ?? null,
     wavesCleared: coop.wavesCleared, waveCount: coop.waveCount, win: m.overReason === 'operation-complete',
@@ -144,6 +147,20 @@ export function runCoop(seed, {seconds = 900, tier = 'D1', humans = 4, bots = 2,
     siege: coop.siege.armed === true, spawns: coop.stats.spawns,
     stepP95Ms: Math.round(p95 * 1000) / 1000, actors: m.actors.length,
     spend,
+    command: command ? {
+      humans: command.humans, slicePerPlayer: command.slicePerPlayer, executor: command.executor,
+      threads: {...command.threads},
+      slices: command.slices.map(entry => ({id: entry.id, allowance: entry.allowance, remaining: entry.remaining, spent: entry.spent})),
+      lease: {until: command.lease.until, humans: command.lease.humans, chief: command.lease.chief, requests: command.lease.requests.length},
+    } : null,
+    roles: {
+      spawned: coop.subagentStats.spawned, byRole: {...coop.subagentStats.byRole},
+      threads: coop.subagentStats.spawned,
+      stats: {...coop.roleStats},
+      squadAlive: (coop.squadIds ?? []).filter(id => (m.actors.find(a => a.id === id)?.health ?? 0) > 0).length,
+    },
+    primes,
+    terminals: terminalStats,
     bonus: {done: report.bonus.done, failed: report.bonus.failed, flux: report.bonus.flux, req: report.bonus.req, commendations: report.bonus.commendations},
     rewards: {
       win: rewards.win, retention: rewards.retention, tierRewardMultiplier: rewards.tierRewardMultiplier,
@@ -199,7 +216,10 @@ export function summariseCoop(runs) {
   const maxStepP95Ms = Math.max(0, ...runs.map(r => r.stepP95Ms || 0));
   const avgWaves = runs.length ? runs.reduce((a, r) => a + r.wavesCleared, 0) / runs.length : 0;
   const spendByType = COOP_SINK_ORDER.reduce((acc, verb) => { acc[verb] = 0; return acc; }, {});
-  let windows = 0, fluxSpent = 0, bonusDone = 0, bonusFailed = 0, partialPayouts = 0;
+  const roleByRole = {fighter: 0, harvester: 0, builder: 0, scout: 0};
+  const roleStats = {primes: 0, primeCompletions: 0, rallies: 0, repairs: 0, spots: 0};
+  const terminalStats = {hacks: 0, deploys: 0, sabotages: 0, repairs: 0, vaultStores: 0, vaultPulls: 0, interacts: 0};
+  let windows = 0, fluxSpent = 0, bonusDone = 0, bonusFailed = 0, partialPayouts = 0, primes = 0, squadAlive = 0, threadUsed = 0, threadCap = 0;
   for (const run of runs) {
     for (const verb of COOP_SINK_ORDER) spendByType[verb] += Number(run.spend?.byType?.[verb] ?? 0);
     windows += Number(run.spend?.windows ?? 0);
@@ -207,12 +227,18 @@ export function summariseCoop(runs) {
     bonusDone += (run.bonus?.done ?? []).length;
     bonusFailed += (run.bonus?.failed ?? []).length;
     if (run.rewards && run.rewards.retention < 1) partialPayouts++;
+    primes += Number(run.primes ?? 0);
+    squadAlive += Number(run.roles?.squadAlive ?? 0);
+    for (const role of Object.keys(roleByRole)) roleByRole[role] += Number(run.roles?.byRole?.[role] ?? 0);
+    for (const key of Object.keys(roleStats)) roleStats[key] += Number(run.roles?.stats?.[key] ?? 0);
+    if (run.terminals) for (const key of Object.keys(terminalStats)) terminalStats[key] += Number(run.terminals[key] ?? 0);
+    if (run.command) { threadUsed += run.command.threads?.used ?? 0; threadCap += run.command.threads?.cap ?? 0; }
   }
   const alarms = exploitAlarms(runs);
   const warnings = exploitWarnings(runs);
   return {
     gate: {
-      d1Wave5WinRate: '35-65%', d2WinRate: '28-58%',
+      d1Wave5WinRate: '35-65%', d2WinRate: '28-58%', d3WinRate: '20-48%', d4WinRate: '12-40%',
       stepP95: '<=8ms @24 actors', fluxPinned: '<=30% of match',
     },
     result: {
@@ -228,8 +254,36 @@ export function summariseCoop(runs) {
     },
     intermission: {windows, byType: spendByType, fluxSpent: Math.round(fluxSpent * 100) / 100, partialPayouts},
     bonus: {done: bonusDone, failed: bonusFailed},
+    roles: {spawned: roleByRole, stats: roleStats, primes, squadAlive, threads: {used: threadUsed, cap: threadCap}},
+    terminals: terminalStats,
     runs,
   };
+}
+
+/**
+ * D1–D4 gate table. Runs each tier on the same seed matrix and reports the
+ * published band, the measured win rate and whether it lands inside the band.
+ */
+export function summariseCoopTiers(byTier, bands = null) {
+  const table = {};
+  for (const tier of Object.keys(byTier)) {
+    const summary = byTier[tier];
+    const band = (bands?.[tier] ?? DIRECTOR_TIERS[tier]?.band ?? [0, 1]);
+    const rate = summary.result.sample ? summary.result.wins / summary.result.sample : 0;
+    table[tier] = {
+      label: DIRECTOR_TIERS[tier]?.label ?? tier,
+      band: `${Math.round(band[0] * 100)}-${Math.round(band[1] * 100)}%`,
+      winRate: summary.result.winRate,
+      inBand: rate >= band[0] - 1e-9 && rate <= band[1] + 1e-9,
+      avgWavesCleared: summary.result.avgWavesCleared,
+      byReason: summary.result.byReason,
+      spend: summary.intermission,
+      roles: summary.roles,
+      terminals: summary.terminals,
+      alarms: summary.result.alarms,
+    };
+  }
+  return {tiers: table, allInBand: Object.values(table).every(entry => entry.inBand)};
 }
 
 export function summarise(runs) {
@@ -298,11 +352,15 @@ if (invokedDirectly) {
   const mapId = process.env.MAP || 'lattice-slice';
   const mode = process.env.MODE || 'cocs';
   if (mode === 'cocs-coop') {
-    const tier = (process.env.TIER || 'D1').toUpperCase();
+    const tiers = (process.env.TIERS || process.env.TIER || 'D1').toUpperCase().split(',').map(t => t.trim()).filter(Boolean);
     const humans = Number(process.env.HUMANS || 4);
     const bots = Number(process.env.BOTS || 2);
-    const runs = seeds.map(seed => runCoop(seed, {seconds: Number(process.env.SECS || 900), tier, humans, bots, mapId}));
-    console.log(JSON.stringify(summariseCoop(runs), null, 2));
+    const byTier = {};
+    for (const tier of tiers) {
+      byTier[tier] = summariseCoop(seeds.map(seed => runCoop(seed, {seconds: Number(process.env.SECS || 900), tier, humans, bots, mapId})));
+    }
+    if (tiers.length === 1) console.log(JSON.stringify(byTier[tiers[0]], null, 2));
+    else console.log(JSON.stringify(summariseCoopTiers(byTier), null, 2));
   } else {
     const runs = seeds.map(seed => run(seed, { seconds, mapId, mode }));
     console.log(JSON.stringify(summarise(runs), null, 2));

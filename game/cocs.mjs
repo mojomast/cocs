@@ -45,6 +45,7 @@ import {
   neglectPassiveFlux, neglectState, neglectTick, scoreEvent, subagentUpkeep,
 } from './cocs-economy.mjs';
 import {createTraversalState, stepCocsTraversal, cocsTraversalSnapshot} from './cocs-traversal.mjs';
+import {createTerminalState, stepCocsTerminals, cocsTerminalsSnapshot} from './cocs-terminals.mjs';
 import {COOP_ECONOMY} from './cocs-difficulty.mjs';
 import {cocsCoopSnapshot, coopOrderGate, coopOutcome, createCoopState, stepCoop} from './cocs-coop.mjs';
 
@@ -386,6 +387,9 @@ export function cocsTemplate(mode, arena, config = {}) {
   if (coop) {
     state.coopTier = config?.objective?.tier ?? config?.coopTier ?? 'D1';
     state.coop = createCoopState(state, {tier: state.coopTier});
+    // O1c terminals are co-op only: PvPvE `cocs` behaviour and snapshots stay
+    // byte-identical, and a non-coop state keeps `terminals === null`.
+    state.terminals = createTerminalState(state);
   }
   updateLiveNodes(state);
   state.front = frontState(state);
@@ -492,7 +496,10 @@ export function connectivityIncome(state) {
     const owner = node.owner;
     if (owner !== 0 && owner !== 1) continue;
     if (!connectedToHq(state, node.id, owner)) continue;
-    income[owner] += COCS_INCOME[node.archetype] ?? 0;
+    // O1c HARVESTER PRIME (§4.8): an active prime on a node pays +50% FLUX.
+    // PvPvE never sets `node.prime`, so this is exactly 1 there.
+    const primed = node.prime && node.prime.team === owner && num(state.tick, 0) <= num(node.prime.until, 0);
+    income[owner] += (COCS_INCOME[node.archetype] ?? 0) * (primed ? 1 + num(node.prime.fluxBonus, 0) : 1);
     connected[owner].push(node.id);
   }
   return {income, connected};
@@ -1003,7 +1010,14 @@ function captureNodeStep(match, state, node, dt, rate) {
   // resist is mode-local data set only by the co-op sink path; PvPvE never
   // carries it, so this is a no-op outside `cocs-coop`.
   const resist = clamp01(num(node.captureResist, 0));
-  node.progress[team] = clamp01(num(node.progress[team], 0) + rate * (1 - resist));
+  // O1c terminal HACK (§4.3) and HARVESTER PRIME (§4.8/§8.1): both are
+  // co-op-only node windows created by `cocs-terminals.mjs`/`cocs-coop.mjs`.
+  // PvPvE never sets `node.hack`/`node.prime`, so this multiplies by 1 there.
+  const hack = node.hack && node.hack.team === team && num(state.tick, 0) <= num(node.hack.until, 0)
+    ? Math.max(1, num(node.hack.multiplier, 1)) : 1;
+  const prime = node.prime && node.prime.team === team && num(state.tick, 0) <= num(node.prime.captureUntil, 0)
+    ? Math.max(1, num(node.prime.captureMultiplier, 1)) : 1;
+  node.progress[team] = clamp01(num(node.progress[team], 0) + rate * (1 - resist) * hack * prime);
   if (node.progress[team] >= 1 - EPSILON) captureNode(match, state, node, team, actors[team]);
 }
 
@@ -1094,6 +1108,10 @@ export function cocsSnapshot(match) {
       progress: [num(node.progress?.[0], 0), num(node.progress?.[1], 0)],
       contested: node.contested === true,
       live: node.live === true,
+      // O1c terminal windows (co-op only; omitted in PvPvE so its snapshot
+      // stays byte-identical).
+      ...(node.hack ? {hack: {team: node.hack.team ?? null, until: num(node.hack.until, 0), multiplier: num(node.hack.multiplier, 1)}} : {}),
+      ...(node.prime ? {prime: {team: node.prime.team ?? null, until: num(node.prime.until, 0), fluxBonus: num(node.prime.fluxBonus, 0), captureUntil: num(node.prime.captureUntil, 0), captureMultiplier: num(node.prime.captureMultiplier, 1)}} : {}),
     })),
     scores: {0: num(state.scores?.[0], 0), 1: num(state.scores?.[1], 0)},
     liveNodeIds: [...(state.liveNodeIds ?? [])],
@@ -1120,6 +1138,8 @@ export function cocsSnapshot(match) {
     spotBonus: COCS_SPOT_DAMAGE_BONUS,
     // --- §6A traversal devices/depots (V0b) --------------------------------
     traversal: cocsTraversalSnapshot(state),
+    // --- O1c terminals (co-op only; absent in PvPvE) ------------------------
+    ...(state.terminals ? {terminals: cocsTerminalsSnapshot(state)} : {}),
     // --- OPERATIONS (`cocs-coop`) director surface --------------------------
     ...(state.coop ? cocsCoopSnapshot(match, state) : {}),
   };
@@ -1221,6 +1241,10 @@ export function stepCocs(match, dt = RULES.dt) {
   //     shared cooldown, arrival protection and depot capture/loaners. All on
   //     the same fixed tick as every other cocs timer, with no RNG draw.
   stepCocsTraversal(match, state, dt);
+
+  // 4e-bis. O1c terminals (HACK/DEPLOY/VAULT/SABOTAGE) + the HARVESTER prime.
+  //     Co-op only; `state.terminals` is null in PvPvE so this is a no-op.
+  if (state.terminals) stepCocsTerminals(match, state, dt);
 
   // 4f. OPERATIONS Director (co-op only): PRESSURE budget, pacing machine,
   //     scripted escalations, wave force spawning and the HQ siege. Non-coop
