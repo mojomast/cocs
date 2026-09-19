@@ -1,12 +1,23 @@
 // In-game patch notes. The title-screen footer is the running version; this
 // module is the human-readable release digest the Changelog screen renders. The
 // full historical record lives in docs/CHANGELOG.md and is linked from the UI.
-export const RELEASE_VERSION = 'v7.2';
-export const RELEASE_CODENAME = 'ECHO';
+export const RELEASE_VERSION = 'v8.0';
+export const RELEASE_CODENAME = 'LATTICE';
 export const REPO_URL = 'https://github.com/mojomast/tokenarena';
 export const FULL_CHANGELOG_URL = `${REPO_URL}/blob/main/docs/CHANGELOG.md`;
 
 export const CHANGELOG = [
+  {version:'v8.0',codename:'LATTICE',date:'2026-09-19',tag:'LATTICE STRIKE: a lattice/economy objective mode, OPERATIONS co-op against a Director, and the networking that carries both',highlights:[
+    'Two new modes ship together. `cocs` is LATTICE STRIKE, a 4v4/8v8 objective mode, and `cocs-coop` is LATTICE STRIKE: OPERATIONS, 1-8 humans plus bots against the Operations Director. The LATTICE `PLAYER_LIMIT` is 32 while every other mode keeps its previous cap of 8, so the mode is wired for two full teams without changing existing rooms.',
+    'The lattice is the objective. A node pays team income only while a supply line still connects it to the owning HQ, and a team can only capture a node adjacent to ground it already holds, so the front is a readable line instead of scattered capture points. Majority dominance, a comeback-policy bot and a five-node slice are the tuning core.',
+    'The economy is three currencies. FLUX is team-scoped and buys subagents, fortifications and tools; REQUISITION is personal; COMMENDATIONS are account-level. A duty Chief (or a seated human commander) turns one-button orders - SCAN / GO / ATTACK - into a push, and per-team `intel`, `contacts` and `roleBoard` keep each side informed.',
+    'Traversal and logistics are real objects. Ziplines, jump pads, teleporters and launchers move actors along lanes; forward depots capture and spawn loaners; and the interact edge is wired for humans as well as bots, so `E` rides a device at its anchor, cuts or locks it from the 6 m ring, repairs a sabotaged device, captures a depot and starts a terminal HACK / DEPLOY / VAULT channel with on-screen prompts.',
+    'OPERATIONS runs against a Director. The Operations Director spends a PRESSURE budget across five non-respawning waves, pushes the weakest node and ends in an HQ siege lose condition; an intermission spend window opens FLUX sinks (FORTIFY / REPAIR / RESUPPLY / REINFORCE), bonus objectives and 25 percent partial rewards. Roles and per-player gates constrain the push and D1-D4 publish the modifier tables without changing tier HP.',
+    'Every cocs action crosses the wire through one seam. Inputs enter only as `Match.step` `inputs.cocs`, sorted by `(tick, peerId, cardId)`, the server stays float-authoritative, token buckets rate-limit orders and a `cocs-reject` message reports refusals. `NetClient` predicts optimistically and reconciles, queue/lobby and the command seat are rung-aware, and validation is team-scoped so an off-team order is refused.',
+    'The snapshot budget is rate-only: mode-aware `playerLimit`, `effectiveSnapshotHz` at 20 Hz above 32 actors and no payload slimming. Two-client co-op and PvP harnesses are byte-identical, and a measured 24-actor match is about 1.1 Mbps with 32 actors about 1.5 Mbps.',
+    'The balance gates hold on the merged tip. OPERATIONS D1 wins 40 percent over ten seeds, and PvP 4v4 shows 48.1 percent strict contest, 88.1 percent fight-at-point and 30 percent trailing-at-half wins with no single dominant strategy.',
+    'Scope: this is the first release since v7.0 to change `core.mjs`, `game/protocol.mjs` and `server/` in the same deploy, so the authoritative game server restarts and connected multiplayer clients briefly disconnect.',
+  ]},
   {version:'v7.2',codename:'ECHO',date:'2026-09-18',tag:'The Moth audio assets wired into the game: a ritual ambience bed, baked outcome motifs, a per-arena echo map and the void space',highlights:[
     '`MothAudio` is mounted lazily instead of only existing in the library. `app/page.tsx` registers a deferred `SynthAudio.setMothAudioFactory` that builds `MothAudioBank` + `MothAudio` once a real `AudioContext` and the `ambience`/`effects` buses exist (the first user gesture), so nothing fetches or decodes before then and the layer stays inert when no context can be created.',
     'The baked `bed-ritual` clip plays as a low menu/explore/results ambience on the ambience bus at layer gain 0.4 - chosen against the raw clip\'s -12 dBFS peak - while combat deliberately leaves the space to the score and SFX. Scene routing keeps the bed for `menu`/`explore` and nulls it for `combat`.',

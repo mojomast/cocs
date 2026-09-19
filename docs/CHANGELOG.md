@@ -16,6 +16,73 @@ record in [VERIFICATION.md](VERIFICATION.md).
 
 ---
 
+## v8.0 · LATTICE — 2026-09-19
+
+LATTICE STRIKE ships. Two modes arrive together — `cocs` (4v4/8v8 objective
+PvPvE) and `cocs-coop` (OPERATIONS, 1–8 humans plus bots against the Operations
+Director) — on a shared lattice, economy, command and networking core. This is
+the first release since v7.0 to change `core.mjs`, `game/protocol.mjs` and
+`server/` in the same deploy, so the authoritative game server restarts and
+connected multiplayer clients briefly disconnect.
+
+### The lattice
+
+- **Nodes pay only while connected.** A node pays team income while a supply
+  line still connects it to the owning HQ; cut the line and the income stops.
+- **Capture is adjacency-gated.** A team can only take a node adjacent to
+  ground it already holds, so the front stays a readable line rather than
+  scattered capture points.
+- **Dominance and comeback.** Majority dominance, a comeback-policy bot and the
+  five-node `lattice-slice` map are the tuning core; 4v4 and 8v8 rungs set the
+  contest, fight-at-point and trailing-half gates.
+
+### Economy and command
+
+- **Three currencies.** FLUX is team-scoped (subagents, fortifications, tools),
+  REQUISITION is personal, and COMMENDATIONS are account-level.
+- **One-button command.** A duty Chief or a seated human commander turns
+  SCAN / GO / ATTACK into a push through the order strip and the command board;
+  per-team `intel`, `contacts` and `roleBoard` keep each side informed.
+
+### Traversal, depots and terminals
+
+- Ziplines, jump pads, teleporters and launchers move actors along lanes;
+  forward depots capture and spawn loaners; terminals run HACK / DEPLOY /
+  VAULT channels.
+- The interact edge is wired for humans as well as bots: `E` rides a device at
+  its anchor, cuts or locks it from the 6 m ring, repairs a sabotaged device,
+  captures a depot and starts a terminal channel, with on-screen prompts.
+
+### OPERATIONS
+
+- The Operations Director spends a PRESSURE budget across five non-respawning
+  waves, pushes the weakest node and ends in an HQ siege lose condition.
+- An intermission spend window opens FLUX sinks (FORTIFY / REPAIR / RESUPPLY /
+  REINFORCE), bonus objectives and 25% partial rewards; roles and per-player
+  gates constrain the push.
+- D1–D4 publish their modifier tables without changing tier HP; D1 measures a
+  40% win rate over ten seeds on the merged tip.
+
+### Networking
+
+- Every cocs action enters only through `Match.step` `inputs.cocs`, sorted by
+  `(tick, peerId, cardId)`; the server stays float-authoritative and a
+  `cocs-reject` message reports refusals. Token buckets rate-limit orders.
+- `NetClient` predicts optimistically and reconciles; queue/lobby and the
+  command seat are rung-aware and validation is team-scoped, so an off-team
+  order is refused.
+- The snapshot budget is rate-only: mode-aware `playerLimit`,
+  `effectiveSnapshotHz` at 20 Hz above 32 actors, no payload slimming. Two-
+  client co-op and PvP harnesses are byte-identical; a measured 24-actor match
+  is about 1.1 Mbps and 32 actors about 1.5 Mbps.
+
+### Balance
+
+- PvP 4v4: 48.1% strict contest, 88.1% fight-at-point, 30% trailing-at-half
+  wins, no single dominant strategy. OPERATIONS D1: 40% wins over ten seeds.
+
+---
+
 ## v7.2 · ECHO — 2026-09-18
 
 The Moth audio assets are wired into the game. v7.1 shipped `MothAudioBank` and
