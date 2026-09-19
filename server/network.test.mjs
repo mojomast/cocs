@@ -551,6 +551,70 @@ test('chat is room-scoped, reaches every peer and spectator, and errors outside 
  }
 });
 
+// LATTICE STRIKE (§11.2): the five C→S actions travel the real socket dispatch,
+// validate against the authoritative room and a rejection comes back as
+// `cocs-reject`. A test backdoor opens the intermission window so the spend path
+// is reachable without playing five waves.
+test('two WebSocket clients drive an OPERATIONS room: actions apply and refuses reach the peer', async () => {
+ let n = 5;
+ const random = () => ((n = (Math.imul(n, 1664525) + 1013904223) >>> 0) / 4294967296);
+ const { server, close, registry } = createGameServer({ tickDt: 1 / 6, random });
+ await new Promise(resolve => server.listen(0, resolve));
+ const url = `ws://127.0.0.1:${server.address().port}`;
+ let a, b;
+ try {
+  a = await connect(url); b = await connect(url);
+  send(a, { type: 'join', name: 'Alice', character: 'chatgpt', harness: 'openclaw' });
+  send(b, { type: 'join', name: 'Bob', character: 'claude', harness: 'hermes' });
+  await until(a, 'welcome');
+  const welcomeB = await until(b, 'welcome');
+  send(a, { type: 'host', config: { mode: 'cocs-coop', botCount: 6, timeLimit: 900 }, mapId: 'warfront' });
+  send(a, { type: 'start' });
+  await until(b, 'start');
+  await until(a, 'snapshot');
+  const room = registry.rooms.get('local');
+  const state = room.match.objectiveState;
+  const front = state.nodes.find(node => node.archetype === 'front');
+  front.owner = 0;
+  state.flux[0] = 240;
+  state.coop.phase = 'intermission';
+  state.coop.intermission = true;
+  state.coop.intermissionOpen = true;
+  state.coop.intermissionTicks = 99999;
+  const vaultId = Object.keys(state.terminals.terminals).find(id => state.terminals.terminals[id].kind === 'VAULT' && state.terminals.terminals[id].nodeId === 'hq-0');
+  const vault = state.terminals.terminals[vaultId];
+  const alice = room.match.actors.find(actor => actor.name === 'Alice');
+  Object.assign(alice, { x: vault.x, z: vault.z, y: 0 });
+  alice.req = 100;
+
+  send(a, { type: 'order', cardId: 'w-o', verb: 'HOLD', target: front.id, agent: 'chief' });
+  send(a, { type: 'economy', cardId: 'w-e', action: 'fortify', target: front.id });
+  send(b, { type: 'command', cardId: 'w-c', action: 'take' });
+  send(a, { type: 'terminal', cardId: 'w-t', terminalId: vaultId, action: 'vault-store' });
+  send(a, { type: 'buy', cardId: 'w-b', itemId: 'field-repair' });
+  const applied = await new Promise(resolve => {
+   const started = Date.now();
+   const poll = () => {
+    const done = state.coop.spendStats.FORTIFY >= 1 && state.terminals.vault.stores >= 1
+     && state.coop.commandSeat[0] === String(welcomeB.peerId) && alice.reqBuff === 'field-repair'
+     && state.orderStats.byVerb.HOLD >= 1;
+    if (done) resolve(true);
+    else if (Date.now() - started > 25000) resolve(false);
+    else setTimeout(poll, 50);
+   };
+   poll();
+  });
+  assert.ok(applied, 'orders, spends, terminals, commands and buys all applied over the wire');
+
+  send(a, { type: 'order', cardId: 'w-bad', verb: 'ATTACK', target: front.id });
+  const reject = await until(a, 'cocs-reject', 15000);
+  assert.equal(reject.cardId, 'w-bad');
+  assert.equal(reject.reason, 'wrong-team');
+ } finally {
+  a?.close(); b?.close(); close();
+ }
+});
+
 test('a reconnect racing the old socket reattaches the seat with the newest connection', async () => {
  const { server, close } = createGameServer({});
  await new Promise(resolve => server.listen(0, resolve));

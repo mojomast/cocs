@@ -651,8 +651,8 @@ export default function Home(){
    // --- LATTICE STRIKE V0b order strip ---------------------------------------
    // The pure state machine lives in `game/cocs-orders.mjs`; the page only owns
    // the current strip object, mirrors it into a ref so the global keydown can
-   // drive it, and pushes issued orders onto the local match queue. Net play is
-   // deliberately untouched (orders are local-only in V0b).
+   // drive it, and pushes issued orders onto the local match queue in
+   // single-player or onto the authoritative wire in a networked match.
    cocsStripRef.current=cocsStrip;
    const applyCocsStrip=(next:any)=>{cocsStripRef.current=next;setCocsStrip(next);};
    const cocsNow=()=>cocsStripRef.current??cocsStripState();
@@ -660,7 +660,7 @@ export default function Home(){
    const armCocsVerb=(id:string)=>applyCocsStrip(cocsArmVerb(cocsNow(),id));
    const pickCocsTarget=(target:any)=>{const nodes=cocsTargetableNodes(cocsBoard(hud,player),cocsNow().armed);applyCocsStrip(cocsPickTarget(cocsNow(),target,nodes));};
    const pickCocsIndex=(index:number)=>{const nodes=cocsTargetableNodes(cocsBoard(hud,player),cocsNow().armed);const node=nodes.find((entry:any)=>entry.index===index);if(node)pickCocsTarget(node.id);};
-   const issueCocsOrder=()=>{const r=runtime.current,state=cocsNow(),snapshot=hud?.cocs,team=cocsTeam(),tick=Number(snapshot?.tick)||0;const result=cocsIssueOrder(state,{tick,peerId:'human',cardId:`cocs-${team}-${tick}-${Number(state.seq)||0}`,team,flux:snapshot?.flux?.[team]??0});applyCocsStrip(result.state);if(result.order&&r)(r.cocsOrders??=[]).push(result.order);};
+   const issueCocsOrder=()=>{const r=runtime.current,state=cocsNow(),snapshot=hud?.cocs,team=cocsTeam(),tick=Number(snapshot?.tick)||0,cardId=`cocs-${team}-${tick}-${Number(state.seq)||0}`;const result=cocsIssueOrder(state,{tick,peerId:r?.net?.peerId??'human',cardId,team,flux:snapshot?.flux?.[team]??0});applyCocsStrip(result.state);if(!result.order||!r)return;if(r.net?.started&&!r.net.spectate){r.net.order(result.order.cardId,result.order.verb,result.order.target,'chief');return;}(r.cocsOrders??=[]).push(result.order);};
    const cancelCocsStrip=()=>applyCocsStrip(cocsClearStrip(cocsNow()));
    cocsControlRef.current={arm:armCocsVerb,pickIndex:pickCocsIndex,issue:issueCocsOrder,cancel:cancelCocsStrip,armed:()=>Boolean(cocsNow().armed)};
    const cocsView=isCocsMode(hudMode)?cocsCommandView(cocsBoard(hud,player),hud?.cocs,player,cocsStrip):null;
@@ -678,8 +678,8 @@ export default function Home(){
    const toggleCocsBoardPin=()=>setBoard({pinned:!cocsBoardRef.current.pinned,open:true});
    const moveCocsBoard=(delta:number)=>{const count=cocsBoardRef.current.count||0;if(!count)return;const next=(((cocsBoardRef.current.active??0)+delta)%count+count)%count;setBoard({active:next});};
    const selectCocsBoardCard=(id:any)=>{const index=(cocsBoardRef.current.ids??[]).indexOf(String(id));if(index>=0)setBoard({active:index});};
-   const activateCocsBoardCard=(card:any,action:string)=>{const r=runtime.current;if(!r||!card)return;r.singleNotice={type:'cocs-card',text:`${action==='retry'?'RETRY':'CHECK'} · ${card.verb} ${card.targetLabel}${action==='check'&&card.reason?` · ${card.reason}`:''}`,at:r.match?.time??0};};
-   const spendCocs=(verb:string,target:any)=>{const r=runtime.current,snapshot=hud?.cocs,tick=Number(snapshot?.tick)||0,team=cocsTeam(),seq=(Number(r?.cocsSpendSeq)||0)+1;if(!r)return;r.cocsSpendSeq=seq;(r.cocsSpends??=[]).push({tick,peerId:'human',cardId:`spend-${team}-${tick}-${seq}`,team,verb:String(verb).toUpperCase(),target:target??null});};
+   const activateCocsBoardCard=(card:any,action:string)=>{const r=runtime.current;if(!r||!card)return;if(r.net?.started&&!r.net.spectate){const verb=String(card.verb??'').toUpperCase(),cardId=`card-${card.id}-${action}`;if(['HACK','DEPLOY','SABOTAGE'].includes(verb)&&card.target!=null){r.net.terminal(card.target,verb.toLowerCase(),{cardId});return;}if(verb==='VAULT'&&card.target!=null){r.net.terminal(card.target,'vault-store',{cardId});return;}if(['FORTIFY','REPAIR','RESUPPLY','REINFORCE'].includes(verb)){r.net.economy(verb.toLowerCase(),{cardId,target:card.target??null,role:verb==='REINFORCE'?'fighter':null});return;}}r.singleNotice={type:'cocs-card',text:`${action==='retry'?'RETRY':'CHECK'} · ${card.verb} ${card.targetLabel}${action==='check'&&card.reason?` · ${card.reason}`:''}`,at:r.match?.time??0};};
+   const spendCocs=(verb:string,target:any)=>{const r=runtime.current,snapshot=hud?.cocs,tick=Number(snapshot?.tick)||0,team=cocsTeam(),seq=(Number(r?.cocsSpendSeq)||0)+1;if(!r)return;r.cocsSpendSeq=seq;const cardId=`spend-${team}-${tick}-${seq}`;if(r.net?.started&&!r.net.spectate){r.net.economy(String(verb).toLowerCase(),{cardId,target:target??null});return;}(r.cocsSpends??=[]).push({tick,peerId:'human',cardId,team,verb:String(verb).toUpperCase(),target:target??null});};
    if(runtime.current)cocsBoardControlRef.current={
      open:(open:boolean)=>openCocsBoard(open),
      close:()=>closeCocsBoard(),

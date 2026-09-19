@@ -20,8 +20,9 @@
 // ---------------------------------------------------------------------------
 
 import {RULES} from './data.mjs';
-import {SUBAGENTS, convertCoopReq} from './cocs-economy.mjs';
+import {SUBAGENTS, convertCoopReq, reqItem, reqPurchase} from './cocs-economy.mjs';
 import {addActorReq, capturableNodes, compareCocsOrders, connectivityIncome, cutLink, nodeById, repairLink} from './cocs.mjs';
+import {deviceInteract} from './cocs-traversal.mjs';
 import {spawnGroup, updateEnemyRoles} from './singleplayer.mjs';
 import {
   COOP_AUTO_SPEND, COOP_BONUS_ORDER, COOP_DENIAL, COOP_ECONOMY, COOP_PACING,
@@ -35,7 +36,7 @@ import {
   directorSpend, siegeShouldArm, siegeShouldLift,
 } from './cocs-director.mjs';
 import {COOP_ROLES, coopRole, roleAbility, roleAbilityTargets} from './cocs-roles.mjs';
-import {TERMINAL_KINDS, repairTerminal} from './cocs-terminals.mjs';
+import {TERMINAL_KINDS, repairTerminal, terminalInteract, vaultAction} from './cocs-terminals.mjs';
 
 export const COOP_KIND = 'cocs-coop';
 export const NPC_DEAD = 1e9;
@@ -149,6 +150,15 @@ export function createCoopState(state, {tier = DEFAULT_COCS_TIER} = {}) {
       radius: COOP_SIEGE.radius,
     },
     command: null,
+    // --- N1 command board wire state (design §5.1, §11.6) ------------------
+    // Commander seat/vote/route/policy are sim state: they are stepped on the
+    // fixed clock, snapshotted through `cocsCoopSnapshot` and survive a
+    // reconnect. `commandOrdersOptOut` is per actor (personal REQ order feed).
+    commandSeat: {0: null, 1: null},
+    commandVotes: {0: {}, 1: {}},
+    commandRoute: {0: null, 1: null},
+    commandPolicy: {0: null, 1: null},
+    commandOrdersOptOut: {},
     // --- O1c per-player command gates -------------------------------------
     // Per-player spend is tracked for UI `remaining` and telemetry only; the
     // gate itself is the published cap check (`cost <= floor(flux/slices)`),
@@ -312,6 +322,14 @@ export function coopCommandState(match, state, nowTick = null) {
       requests: [...(coop.leaseRequests ?? [])].map(entry => ({peerId: String(entry.peerId), tick: num(entry.tick, 0)})),
     },
     flux,
+    // N1 command board state, projected from the sim (deterministic + replay safe).
+    seat: {0: coop.commandSeat?.[0] ?? null, 1: coop.commandSeat?.[1] ?? null},
+    votes: {
+      0: Object.keys(coop.commandVotes?.[0] ?? {}).filter(peer => coop.commandVotes[0][peer] === true).sort(),
+      1: Object.keys(coop.commandVotes?.[1] ?? {}).filter(peer => coop.commandVotes[1][peer] === true).sort(),
+    },
+    route: {0: coop.commandRoute?.[0] ?? null, 1: coop.commandRoute?.[1] ?? null},
+    policy: {0: coop.commandPolicy?.[0] ?? null, 1: coop.commandPolicy?.[1] ?? null},
   };
 }
 
@@ -1887,6 +1905,12 @@ export function cocsCoopSnapshot(match, state) {
       lease: {...command.lease, requests: command.lease.requests.map(entry => ({...entry}))},
       flux: command.flux,
       spent: {...(coop.commandSpent ?? {byPeer: {}}).byPeer},
+      // N1 command board: seat/votes/route/policy round-trip through the
+      // snapshot so a reconnect resyncs the whole command state (§11.2).
+      seat: {...command.seat},
+      votes: {0: [...command.votes[0]], 1: [...command.votes[1]]},
+      route: {...command.route},
+      policy: {...command.policy},
     } : null,
     // O1c terminal HUD contract (flat array; raw tree preserved on
     // `snapshot.cocs.terminalState`). Sorted by id, so delta-friendly.
@@ -1926,6 +1950,131 @@ export function cocsCoopSnapshot(match, state) {
     },
     rewards: coop.rewards,
   };
+}
+
+// ---------------------------------------------------------------------------
+// N1 wire-action application (§11.2/§11.6). Every C→S action is validated and
+// applied inside `Match.step` at the single fixed point (`prepareCocs`), so the
+// live room, sweeps and NetHarness share one deterministic code path. These
+// helpers are pure state transitions: no wall clock, no RNG, sorted iteration.
+// ---------------------------------------------------------------------------
+
+/** Apply one validated terminal action to the authoritative sim. */
+export function coopTerminalAction(match, state, record = {}) {
+  const actor = actorById(match, record.actorId);
+  if (!actor || actor.health <= 0) return {ok: false, reason: 'missing'};
+  const action = String(record.action ?? '').toLowerCase();
+  const terminals = state?.terminals?.terminals;
+  const terminal = terminals ? terminals[record.terminalId] : null;
+  if (terminal) {
+    if (action === 'hack' || action === 'deploy') {
+      const started = terminalInteract(match, state, actor.id, record.terminalId, action.toUpperCase());
+      return {ok: started.ok === true, reason: started.reason ?? null};
+    }
+    if (action === 'repair') return {ok: repairTerminal(state, terminal) === true, reason: null};
+    if (action === 'vault-store') return vaultAction(match, state, terminal, actor, 'store');
+    if (action === 'vault-pull') return vaultAction(match, state, terminal, actor, 'pull');
+  }
+  // Traversal devices share the same action namespace but a different id space.
+  const device = state?.traversal?.devices?.[record.terminalId];
+  if (device && (action === 'cut' || action === 'lock' || action === 'repair')) {
+    const applied = deviceInteract(match, state, actor.id, record.terminalId, action);
+    return {ok: applied === true, reason: applied ? null : 'device-state'};
+  }
+  return {ok: false, reason: 'missing'};
+}
+
+/** Apply one validated command-board action to the authoritative sim. */
+export function coopCommandAction(match, state, record = {}) {
+  const coop = state?.coop;
+  if (!coop) return {ok: false, reason: 'no-command'};
+  const team = record.team === 1 ? 1 : 0;
+  const peerId = String(record.peerId ?? '');
+  coop.commandSeat ??= {0: null, 1: null};
+  coop.commandVotes ??= {0: {}, 1: {}};
+  coop.commandRoute ??= {0: null, 1: null};
+  coop.commandPolicy ??= {0: null, 1: null};
+  const action = String(record.action ?? '').toLowerCase();
+  if (action === 'take') {
+    coop.commandSeat[team] = peerId || null;
+    coop.commandVotes[team] = {};
+    return {ok: true, reason: null};
+  }
+  if (action === 'release') {
+    if (coop.commandSeat[team] !== peerId) return {ok: false, reason: 'not-commander'};
+    coop.commandSeat[team] = null;
+    return {ok: true, reason: null};
+  }
+  if (action === 'mutiny-vote') {
+    coop.commandVotes[team][peerId] = true;
+    const humans = team === 0 ? coopHumanIds(match) : (match?.actors ?? []).filter(actor => actor && actor.health > 0 && actor.team === 1 && actor.isNpc !== true && actor.bot == null).map(actor => actor.id).sort((a, b) => a - b);
+    const needed = Math.max(1, Math.floor(humans.length / 2) + 1);
+    const votes = coop.commandVotes[team];
+    const count = Object.keys(votes).filter(key => votes[key] === true).length;
+    if (humans.length > 0 && count >= needed && coop.commandSeat[team] !== peerId) {
+      coop.commandSeat[team] = peerId;
+      coop.commandVotes[team] = {};
+    }
+    return {ok: true, reason: null, votes: count, needed};
+  }
+  if (action === 'set-route') {
+    coop.commandRoute[team] = record.value === null || record.value === undefined ? null : String(record.value);
+    return {ok: true, reason: null};
+  }
+  if (action === 'policy') {
+    coop.commandPolicy[team] = record.value === null || record.value === undefined ? null : String(record.value);
+    return {ok: true, reason: null};
+  }
+  if (action === 'opt-out-orders') {
+    // Per-actor personal REQ opt-out (design §6A.6). Lives on the roster so the
+    // order-reward path can skip the actor without a parallel wallet.
+    const actor = actorById(match, record.actorId);
+    if (!actor) return {ok: false, reason: 'missing'};
+    actor.ordersOptOut = true;
+    coop.commandOrdersOptOut[String(actor.id)] = true;
+    return {ok: true, reason: null};
+  }
+  return {ok: false, reason: 'unknown-action'};
+}
+
+/** Apply one validated personal-REQ purchase to the authoritative sim. */
+export function coopBuyAction(match, state, record = {}) {
+  const actor = actorById(match, record.actorId);
+  if (!actor || actor.health <= 0) return {ok: false, reason: 'missing'};
+  const item = reqItem(record.itemId);
+  if (!item) return {ok: false, reason: 'unknown-item'};
+  if (item.launch !== true) return {ok: false, reason: 'not-launched'};
+  const team = actor.team === 1 ? 1 : 0;
+  const peerId = String(record.peerId ?? '');
+  const isCommander = state?.coop?.commandSeat?.[team] === peerId || (peerId === '' && item.commanderOnly !== true);
+  const relayOwned = (state?.nodes ?? []).some(node => node && node.archetype === 'relay' && node.owner === team);
+  const result = reqPurchase(record.itemId, {
+    balance: num(actor.req, 0),
+    isCommander,
+    activeBuffId: typeof actor.reqBuff === 'string' ? actor.reqBuff : null,
+    relayOwned,
+  });
+  if (!result.ok) return {ok: false, reason: result.reason ?? 'purchase'};
+  actor.req = result.balanceAfter;
+  actor.reqSpent = num(actor.reqSpent, 0) + num(result.cost, 0);
+  actor.reqBuff = item.id;
+  // Deterministic personal effects. Team-wide/commander items only record the
+  // purchase; their team payoff rides the existing economy in a later wave.
+  if (item.id === 'field-repair') actor.health = Math.min(num(actor.maxHealth, actor.health), num(actor.health, 0) + 50);
+  else if (item.id === 'overshield') actor.temporaryShield = Math.max(num(actor.temporaryShield, 0), 50);
+  else if (item.id === 'haste') {
+    actor.powerups ??= {};
+    actor.powerups.haste = Math.max(num(actor.powerups.haste, 0), 15);
+    match?.refreshPowerups?.(actor);
+  } else if (item.id === 'ammo-crate' && Array.isArray(actor.ammo)) {
+    for (let index = 0; index < actor.ammo.length; index++) {
+      if (actor.ammo[index] === Infinity) continue;
+      const cap = match?.weaponForIndex?.(actor, index)?.cap;
+      if (Number.isFinite(cap) && actor.ammo[index] < cap) actor.ammo[index] = cap;
+    }
+  }
+  match?.emit?.('cocs-buy', {actor: actor.id, team, itemId: item.id, cost: num(result.cost, 0), req: num(actor.req, 0)});
+  return {ok: true, reason: null, itemId: item.id, cost: num(result.cost, 0)};
 }
 
 export function coopKillReport(match, state) {

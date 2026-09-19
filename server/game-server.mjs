@@ -195,6 +195,13 @@ export function createGameServer({ port = 0, random, tickDt = 1 / 60, tickMs = 1
     case MESSAGE.HOST: peerRoom.get(peerId)?.host(peerId, msg.config, msg.mapId); break;
     case MESSAGE.GEAR: peerRoom.get(peerId)?.setGear(peerId, msg.gear, msg.attachments, undefined, msg.finish); break;
     case MESSAGE.LOADOUT: peerRoom.get(peerId)?.setLoadout(peerId, msg.character, msg.harness); break;
+    // LATTICE STRIKE actions (§11.2). Each handler applies its own per-peer
+    // token bucket and validates against the authoritative match.
+    case MESSAGE.ORDER: peerRoom.get(peerId)?.order(peerId, msg); break;
+    case MESSAGE.ECONOMY: peerRoom.get(peerId)?.economy(peerId, msg); break;
+    case MESSAGE.TERMINAL: peerRoom.get(peerId)?.terminal(peerId, msg); break;
+    case MESSAGE.COMMAND: peerRoom.get(peerId)?.command(peerId, msg); break;
+    case MESSAGE.BUY: peerRoom.get(peerId)?.buy(peerId, msg); break;
    case MESSAGE.START: peerRoom.get(peerId)?.start(peerId); break;
     case MESSAGE.INPUT: peerRoom.get(peerId)?.input(peerId, msg); break;
     case MESSAGE.CHAT: {

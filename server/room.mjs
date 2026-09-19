@@ -1,15 +1,33 @@
 import {Match} from '../game/core.mjs';
-import {normalizeConfig,teamMode} from '../game/config.mjs';
+import {normalizeConfig,teamMode,isCocsMode} from '../game/config.mjs';
 import {movementModeRule} from '../game/movement.mjs';
 import {isSinglePlayerMode} from '../game/singleplayer.mjs';
 import {actorWon} from '../game/outcome.mjs';
 import {getMap} from '../game/maps.mjs';
 import {resolveMapForMode} from '../game/arenas.mjs';
 import {CHARACTERS,resolveLoadout,RULES} from '../game/data.mjs';
+import {COCS_ORDER_LOG_LIMIT,capturableBy,nodeById} from '../game/cocs.mjs';
+import {COOP_BIG_SINKS,coopCommandState,coopOrderGate,coopSpendGate,intermissionOpen} from '../game/cocs-coop.mjs';
+import {coopSink} from '../game/cocs-difficulty.mjs';
+import {TERMINAL_KINDS} from '../game/cocs-terminals.mjs';
+import {SUBAGENTS,reqItem,reqPurchase} from '../game/cocs-economy.mjs';
 import {randomUUID} from 'node:crypto';
-import {validPlayerId,sanitizeText,parseInputEnvelope,PROTOCOL_VERSION,SNAPSHOT_DELTA_VERSION,SNAPSHOT_DELTA_MIN_BYTES,snapshotDelta,wireSize,MESSAGE} from '../game/protocol.mjs';
+import {validPlayerId,sanitizeText,parseInputEnvelope,PROTOCOL_VERSION,SNAPSHOT_DELTA_VERSION,SNAPSHOT_DELTA_MIN_BYTES,snapshotDelta,wireSize,MESSAGE,COCS_REJECT_LIMIT,parseOrderMessage,parseEconomyMessage,parseTerminalMessage,parseCommandMessage,parseBuyMessage} from '../game/protocol.mjs';
 
 export const PLAYER_LIMIT = 8;
+// LATTICE STRIKE (§11.5, owner decision 24): the COCS family admits up to 32
+// human seats for the 12v12 rung and spectator/reconnect headroom. Everything
+// else keeps the historical `PLAYER_LIMIT` so the 9th-player regression is
+// unchanged. `playerLimit(mode)` is the single gate both `join` and `start` use.
+export const COCS_PLAYER_LIMIT = 32;
+// Rate-only snapshot budget (§11.5, owner decision 20): above 32 actors the
+// mode drops to 20 Hz; no actor payload is slimmed, keyframes do not shrink.
+export const COCS_OVERLOAD_ACTORS = 32;
+export const COCS_OVERLOAD_SNAPSHOT_HZ = 20;
+// Per-peer token-bucket ceilings (§11.2). Mirrors the `setLoadout` anti-flood
+// style: a fixed one-second window with a bounded count per kind.
+export const COCS_RATE_LIMITS = Object.freeze({order: 10, economy: 8, terminal: 6, command: 4, buy: 4});
+export const playerLimit = mode => (isCocsMode(mode) ? COCS_PLAYER_LIMIT : PLAYER_LIMIT);
 export const SPECTATOR_LIMIT = 24;
 // Clients send inputs at 60 Hz; allow generous headroom and drop the excess so a
 // flooding client cannot burn simulation time or unbounded server work.
@@ -26,6 +44,13 @@ export const LOADOUT_FLOOD_MS = 500;
 export const LIFECYCLE_PHASES = Object.freeze(['lobby', 'warmup', 'live', 'results']);
 const object = value => value !== null && typeof value === 'object' && !Array.isArray(value);
 const bounded = (value, max) => typeof value === 'string' && value.length <= max;
+const num = (value, fallback = 0) => (Number.isFinite(Number(value)) ? Number(value) : fallback);
+// Economy `action` → intermission sink verb. `spawn` is the wire alias for a
+// REINFORCE squad (`role` selects the subagent role). Actions without a shipped
+// sink are rejected as `unknown-action`.
+const COCS_SINK_FOR = Object.freeze({spawn: 'REINFORCE', reinforce: 'REINFORCE', fortify: 'FORTIFY', repair: 'REPAIR', resupply: 'RESUPPLY'});
+// §8.1 SCOUT spawn cost is the price a `SCAN` order gates on.
+const COCS_SCAN_COST = num(SUBAGENTS?.scout?.spawnCost, 7);
 // Match.snapshot() shares mutable or deeply frozen nested branches (powerups,
 // objectiveNodes, ...), so quantizing it in place would corrupt authoritative
 // state or throw on frozen map data. The shared non-mutating clone quantizer
@@ -77,10 +102,196 @@ export class Room {
   this.pendingLoadouts = new Map();
   this.lifecycleRevision = 0;
   this.lastResult = null;
+  // LATTICE STRIKE wire queue (§11.2). Validated records wait here until the
+  // next fixed step drains them into `Match.step({cocs})`; there is deliberately
+  // no Room-side simulation queue. `cocsCards` mirrors the card board so a
+  // rejection can write the reason into the card's `blocker` state and a
+  // reconnect full snapshot carries it.
+  this.pendingCocs = {orders: [], spends: [], terminals: [], commands: [], buys: []};
+  this.cocsCards = new Map();
+  this.cocsSeq = 0;
  }
  send(peerId, msg) { this.out.push({ to: peerId, msg }); }
  broadcast(msg) { this.out.push({ to: null, msg }); }
  drain() { const msgs = this.out; this.out = []; return msgs; }
+ // -------------------------------------------------------------------
+ // LATTICE STRIKE message handlers (§11.2). Validation runs against the
+ // authoritative match: the peer's live actor owns the team, the node cost is
+ // the sim's float `flux`, and never a quantized client value. Accepted records
+ // wait for the next fixed step; a rejection emits `cocs-reject` and writes the
+ // reason into the card's blocker state.
+ // -------------------------------------------------------------------
+ cocsTick() { return num(this.match?.objectiveState?.tick, 0); }
+ cocsActor(peer) { return peer?.actorId !== null && peer?.actorId !== undefined ? this.match?.actors?.[peer.actorId] ?? null : null; }
+ cocsRate(peer, kind, now = Date.now()) {
+  const limit = COCS_RATE_LIMITS[kind];
+  if (!limit) return false;
+  if (!peer.cocsRate) peer.cocsRate = {};
+  const bucket = peer.cocsRate[kind];
+  if (!bucket || now - bucket.at >= 1000) peer.cocsRate[kind] = { at: now, count: 1 };
+  else if (bucket.count >= limit) return false;
+  else bucket.count++;
+  return true;
+ }
+ recordCocsCard(cardId, patch = {}) {
+  const id = String(cardId);
+  const existing = this.cocsCards.get(id) ?? { id, createdTick: this.cocsTick() };
+  this.cocsCards.set(id, { ...existing, ...patch, updatedTick: this.cocsTick() });
+  while (this.cocsCards.size > COCS_REJECT_LIMIT) this.cocsCards.delete(this.cocsCards.keys().next().value);
+  return this.cocsCards.get(id);
+ }
+ cocsCardList() {
+  return [...this.cocsCards.values()].sort((a, b) => String(a.id).localeCompare(String(b.id)));
+ }
+ rejectCocs(peerId, cardId, reason, extra = {}) {
+  const id = cardId === null || cardId === undefined ? `cocs-${++this.cocsSeq}` : String(cardId);
+  this.recordCocsCard(id, { blocker: reason, reason, state: 'blocked', ok: false, ...extra });
+  this.send(peerId, { type: MESSAGE.COCS_REJECT, cardId: id, reason, ...extra });
+  return false;
+ }
+ // Mirror a rejected order into the authoritative orderLog so the board's
+ // exception list never depends only on the transient feed (net P2-13).
+ noteOrderReject(state, record, reason) {
+  if (!state || state.kind !== 'cocs') return;
+  const log = state.orderLog ?? (state.orderLog = []);
+  log.push({ tick: num(record.tick, this.cocsTick()), peerId: String(record.peerId ?? ''), cardId: String(record.cardId ?? ''), team: record.team, verb: record.verb, target: record.target ?? null, ok: false, reason });
+  if (log.length > COCS_ORDER_LOG_LIMIT) log.splice(0, log.length - COCS_ORDER_LOG_LIMIT);
+ }
+ order(peerId, msg, now = Date.now()) {
+  const peer = this.peers.get(peerId);
+  const actor = this.cocsActor(peer);
+  if (!peer || peer.disconnectedAt !== null || peer.spectate || !this.match || this.roundOver || !actor || actor.health <= 0) return false;
+  if (!this.cocsRate(peer, 'order', now)) return this.rejectCocs(peerId, msg?.cardId ?? null, 'rate-limit');
+  const parsed = parseOrderMessage(msg);
+  if (!parsed) return this.rejectCocs(peerId, msg?.cardId ?? null, 'malformed');
+  const state = this.match.objectiveState;
+  const team = actor.team === 1 ? 1 : 0;
+  const record = { tick: this.cocsTick(), peerId: String(peerId), cardId: parsed.cardId, team, verb: parsed.verb, target: parsed.target, agent: parsed.agent ?? null };
+  if (!state || state.kind !== 'cocs') return this.rejectCocs(peerId, parsed.cardId, 'no-objective', { verb: parsed.verb, target: parsed.target });
+  const node = nodeById(state, parsed.target);
+  if (!node) { this.noteOrderReject(state, record, 'target'); return this.rejectCocs(peerId, parsed.cardId, 'target', { verb: parsed.verb, target: parsed.target }); }
+  const owned = node.owner === team;
+  if (parsed.verb === 'ATTACK' && !capturableBy(state, node.id, team)) { this.noteOrderReject(state, record, 'wrong-team'); return this.rejectCocs(peerId, parsed.cardId, 'wrong-team', { verb: parsed.verb, target: parsed.target }); }
+  if (parsed.verb === 'HOLD' && !owned && !capturableBy(state, node.id, team)) { this.noteOrderReject(state, record, 'wrong-team'); return this.rejectCocs(peerId, parsed.cardId, 'wrong-team', { verb: parsed.verb, target: parsed.target }); }
+  if (parsed.verb === 'SCAN' && num(state.flux?.[team], 0) + 1e-9 < COCS_SCAN_COST) { this.noteOrderReject(state, record, 'flux'); return this.rejectCocs(peerId, parsed.cardId, 'flux', { verb: parsed.verb, target: parsed.target }); }
+  if (state.coop) {
+   // The co-op gate keys slices/executor by the in-sim human actor id, not the
+   // transport peer id, so pass the authoritative actor identity.
+   const gate = coopOrderGate(this.match, state, { team, verb: parsed.verb, peerId: String(actor.id) });
+   if (!gate.ok) { this.noteOrderReject(state, record, gate.reason ?? 'blocked'); return this.rejectCocs(peerId, parsed.cardId, gate.reason ?? 'blocked', { verb: parsed.verb, target: parsed.target }); }
+   const command = coopCommandState(this.match, state);
+   if (parsed.verb === 'SCAN' && command && command.threads.used >= command.threads.cap) { this.noteOrderReject(state, record, 'no-thread'); return this.rejectCocs(peerId, parsed.cardId, 'no-thread', { verb: parsed.verb, target: parsed.target }); }
+  }
+  this.pendingCocs.orders.push(record);
+  this.recordCocsCard(parsed.cardId, { verb: parsed.verb, target: parsed.target, agent: parsed.agent ?? null, team, peerId: String(peerId), state: 'running', blocker: null, reason: null, ok: true });
+  return true;
+ }
+ economy(peerId, msg, now = Date.now()) {
+  const peer = this.peers.get(peerId);
+  const actor = this.cocsActor(peer);
+  if (!peer || peer.disconnectedAt !== null || peer.spectate || !this.match || this.roundOver || !actor || actor.health <= 0) return false;
+  if (!this.cocsRate(peer, 'economy', now)) return this.rejectCocs(peerId, msg?.cardId ?? null, 'rate-limit');
+  const parsed = parseEconomyMessage(msg);
+  if (!parsed) return this.rejectCocs(peerId, msg?.cardId ?? null, 'malformed');
+  const state = this.match.objectiveState;
+  if (!state || state.kind !== 'cocs' || !state.coop) return this.rejectCocs(peerId, parsed.cardId, 'no-coop', { action: parsed.action });
+  const team = actor.team === 1 ? 1 : 0;
+  if (parsed.action === 'opt-out-orders') {
+   this.pendingCocs.commands.push({ tick: this.cocsTick(), peerId: String(peerId), cardId: parsed.cardId, team, action: 'opt-out-orders', value: null, actorId: actor.id });
+   this.recordCocsCard(parsed.cardId, { verb: 'OPT-OUT-ORDERS', target: null, team, peerId: String(peerId), state: 'running', blocker: null, reason: null, ok: true });
+   return true;
+  }
+  const verb = COCS_SINK_FOR[parsed.action];
+  if (!verb) return this.rejectCocs(peerId, parsed.cardId, 'unknown-action', { action: parsed.action });
+  if (!intermissionOpen(state.coop)) return this.rejectCocs(peerId, parsed.cardId, 'window-closed', { verb });
+  const sink = coopSink(verb);
+  if (!sink) return this.rejectCocs(peerId, parsed.cardId, 'unknown-sink', { verb });
+  if (num(state.flux?.[0], 0) + 1e-9 < sink.cost) return this.rejectCocs(peerId, parsed.cardId, 'flux', { verb });
+  const command = coopCommandState(this.match, state);
+  if (COOP_BIG_SINKS.includes(verb) && command && command.threads.used >= command.threads.cap) return this.rejectCocs(peerId, parsed.cardId, 'no-thread', { verb });
+  const gate = coopSpendGate(this.match, state, { verb, peerId: String(actor.id) });
+  if (!gate.ok) return this.rejectCocs(peerId, parsed.cardId, gate.reason ?? 'blocked', { verb });
+  if (sink.target === 'node') {
+   const node = nodeById(state, parsed.target);
+   if (!node || node.owner !== 0 || !['front', 'economy', 'relay'].includes(node.archetype)) return this.rejectCocs(peerId, parsed.cardId, 'target', { verb });
+  }
+  const record = { tick: this.cocsTick(), peerId: String(peerId), cardId: parsed.cardId, verb, target: parsed.target ?? null, role: parsed.role ?? null };
+  this.pendingCocs.spends.push(record);
+  this.recordCocsCard(parsed.cardId, { verb, target: parsed.target ?? null, role: parsed.role ?? null, team, peerId: String(peerId), state: 'running', blocker: null, reason: null, ok: true });
+  return true;
+ }
+ terminal(peerId, msg, now = Date.now()) {
+  const peer = this.peers.get(peerId);
+  const actor = this.cocsActor(peer);
+  if (!peer || peer.disconnectedAt !== null || peer.spectate || !this.match || this.roundOver || !actor || actor.health <= 0) return false;
+  if (!this.cocsRate(peer, 'terminal', now)) return this.rejectCocs(peerId, msg?.cardId ?? null, 'rate-limit');
+  const parsed = parseTerminalMessage(msg);
+  if (!parsed) return this.rejectCocs(peerId, msg?.cardId ?? null, 'malformed');
+  const state = this.match.objectiveState;
+  if (!state || state.kind !== 'cocs' || !state.terminals) return this.rejectCocs(peerId, parsed.cardId, 'no-terminals', { action: parsed.action });
+  const actorId = parsed.actorId ?? actor.id;
+  if (actorId !== actor.id) return this.rejectCocs(peerId, parsed.cardId, 'wrong-actor', { action: parsed.action });
+  const terminal = state.terminals.terminals?.[parsed.terminalId] ?? null;
+  const device = state.traversal?.devices?.[parsed.terminalId] ?? null;
+  if (!terminal && !device) return this.rejectCocs(peerId, parsed.cardId, 'missing', { action: parsed.action });
+  const team = actor.team === 1 ? 1 : 0;
+  if (terminal) {
+   const kind = TERMINAL_KINDS[terminal.kind];
+   if (parsed.action === 'deploy' && terminal.owner !== team) return this.rejectCocs(peerId, parsed.cardId, 'not-owned', { action: parsed.action });
+   if ((parsed.action === 'hack' || parsed.action === 'cut') && terminal.state !== 'live') return this.rejectCocs(peerId, parsed.cardId, 'terminal-state', { action: parsed.action });
+   if (Math.hypot(num(actor.x, 0) - num(terminal.x, 0), num(actor.z, 0) - num(terminal.z, 0)) > num(kind?.reach, 6)) return this.rejectCocs(peerId, parsed.cardId, 'range', { action: parsed.action });
+   if (parsed.action === 'vault-pull' && num(state.flux?.[0], 0) + 1e-9 < num(TERMINAL_KINDS.VAULT?.pullCost, 8)) return this.rejectCocs(peerId, parsed.cardId, 'flux', { action: parsed.action });
+  }
+  this.pendingCocs.terminals.push({ tick: this.cocsTick(), peerId: String(peerId), cardId: parsed.cardId, terminalId: parsed.terminalId, action: parsed.action, actorId: actor.id });
+  this.recordCocsCard(parsed.cardId, { verb: parsed.action.toUpperCase(), target: parsed.terminalId, team, peerId: String(peerId), state: 'running', blocker: null, reason: null, ok: true });
+  return true;
+ }
+ command(peerId, msg, now = Date.now()) {
+  const peer = this.peers.get(peerId);
+  const actor = this.cocsActor(peer);
+  if (!peer || peer.disconnectedAt !== null || peer.spectate || !this.match || this.roundOver || !actor) return false;
+  if (!this.cocsRate(peer, 'command', now)) return this.rejectCocs(peerId, msg?.cardId ?? null, 'rate-limit');
+  const parsed = parseCommandMessage(msg);
+  if (!parsed) return this.rejectCocs(peerId, msg?.cardId ?? null, 'malformed');
+  const state = this.match.objectiveState;
+  if (!state || state.kind !== 'cocs' || !state.coop) return this.rejectCocs(peerId, parsed.cardId, 'no-command', { action: parsed.action });
+  const team = actor.team === 1 ? 1 : 0;
+  if (parsed.action === 'release' && (state.coop.commandSeat?.[team] ?? null) !== String(peerId)) return this.rejectCocs(peerId, parsed.cardId, 'not-commander', { action: parsed.action });
+  this.pendingCocs.commands.push({ tick: this.cocsTick(), peerId: String(peerId), cardId: parsed.cardId, team, action: parsed.action, value: parsed.value, actorId: actor.id });
+  this.recordCocsCard(parsed.cardId, { verb: parsed.action.toUpperCase(), target: null, team, peerId: String(peerId), state: 'running', blocker: null, reason: null, ok: true });
+  return true;
+ }
+ buy(peerId, msg, now = Date.now()) {
+  const peer = this.peers.get(peerId);
+  const actor = this.cocsActor(peer);
+  if (!peer || peer.disconnectedAt !== null || peer.spectate || !this.match || this.roundOver || !actor || actor.health <= 0) return false;
+  if (!this.cocsRate(peer, 'buy', now)) return this.rejectCocs(peerId, msg?.cardId ?? null, 'rate-limit');
+  const parsed = parseBuyMessage(msg);
+  if (!parsed) return this.rejectCocs(peerId, msg?.cardId ?? null, 'malformed');
+  const state = this.match.objectiveState;
+  if (!state || state.kind !== 'cocs' || !state.coop) return this.rejectCocs(peerId, parsed.cardId, 'no-coop', { itemId: parsed.itemId });
+  const actorId = parsed.actorId ?? actor.id;
+  if (actorId !== actor.id) return this.rejectCocs(peerId, parsed.cardId, 'wrong-actor', { itemId: parsed.itemId });
+  const item = reqItem(parsed.itemId);
+  if (!item) return this.rejectCocs(peerId, parsed.cardId, 'unknown-item', { itemId: parsed.itemId });
+  if (item.launch !== true) return this.rejectCocs(peerId, parsed.cardId, 'not-launched', { itemId: parsed.itemId });
+  const team = actor.team === 1 ? 1 : 0;
+  const relayOwned = (state.nodes ?? []).some(node => node && node.archetype === 'relay' && node.owner === team);
+  const result = reqPurchase(parsed.itemId, {
+   balance: num(actor.req, 0),
+   isCommander: state.coop.commandSeat?.[team] === String(peerId),
+   activeBuffId: typeof actor.reqBuff === 'string' ? actor.reqBuff : null,
+   relayOwned,
+  });
+  if (!result.ok) return this.rejectCocs(peerId, parsed.cardId, result.reason ?? 'purchase', { itemId: parsed.itemId });
+  this.pendingCocs.buys.push({ tick: this.cocsTick(), peerId: String(peerId), cardId: parsed.cardId, itemId: parsed.itemId, actorId: actor.id, depotId: parsed.depotId, targetCardId: parsed.targetCardId });
+  this.recordCocsCard(parsed.cardId, { verb: 'BUY', target: parsed.itemId, team, peerId: String(peerId), state: 'running', blocker: null, reason: null, ok: true });
+  return true;
+ }
+ effectiveSnapshotHz() {
+  const actors = this.match?.actors?.length ?? 0;
+  return actors > COCS_OVERLOAD_ACTORS ? Math.min(this.snapshotHz, COCS_OVERLOAD_SNAPSHOT_HZ) : this.snapshotHz;
+ }
  summary() {
   return { roomId: this.id, name: this.name, players: [...this.peers.values()].filter(p => p.disconnectedAt === null).length, started: this.started, mapId: this.mapId, config: this.config ? { ...this.config } : null };
  }
@@ -88,7 +299,12 @@ export class Room {
  // state (shared nested references such as powerups/gear) is never mutated.
  wireState() {
   if (!this.match) return null;
-  return quantizedCopy(this.match.snapshot());
+  const state = quantizedCopy(this.match.snapshot());
+  // The card board is a room-level projection of the sim's order/blocker state.
+  // Attaching it to the same `cocs` subtree means a reconnect full snapshot and
+  // every delta carry it for free (id-keyed, so `snapshotDelta` patches it).
+  if (state.cocs && this.cocsCards.size) state.cocs = { ...state.cocs, cards: this.cocsCardList() };
+  return state;
  }
  // Deterministic lifecycle view shared by the lobby message and the tests.
  lifecycle() {
@@ -227,7 +443,7 @@ export class Room {
   const active = this.started && !this.roundOver && !!this.match;
   const requestedPlayer = spectate !== true;
   const playerCount = [...this.peers.values()].filter(p => p.spectate !== true).length;
-  if (requestedPlayer && !active && playerCount >= PLAYER_LIMIT) { this.send(peerId, { type: 'error', message: 'room is full' }); return; }
+  if (requestedPlayer && !active && playerCount >= playerLimit(this.config?.mode)) { this.send(peerId, { type: 'error', message: 'room is full' }); return; }
   let isSpectator = spectate === true;
   if (requestedPlayer && active) isSpectator = true;
   if (isSpectator && [...this.peers.values()].filter(p => p.spectate === true).length >= SPECTATOR_LIMIT) { this.send(peerId, { type: 'error', message: 'spectator limit reached' }); return; }
@@ -288,7 +504,7 @@ export class Room {
   const mode = this.config?.mode ?? normalizeConfig({}).mode;
   const mapId = resolveMapForMode(this.mapId, mode, { legacy: true });
   if (mapId !== this.mapId) this.mapId = mapId;
-  const humanCount = Math.min(PLAYER_LIMIT, players.length);
+  const humanCount = Math.min(playerLimit(mode), players.length);
     this.match = new Match('chatgpt', 'openclaw', this.random, this.mapId, { ...this.config ?? {}, humanCount, loadouts: players.map(p => { const profile = this.progressProfile(p); return { character: p.character, harness: p.harness, gear: profile?.gear, attachments: profile?.attachments, finish: profile?.finish }; }) });
    if (this.match.race) this.config = { ...this.match.config };
   let i = 0;
@@ -523,12 +739,24 @@ export class Room {
      if (p.edgeGrenade) { ext.grenade = true; p.edgeGrenade = false; }
     inputs[p.actorId] = ext;
    }
-     this.match.step(RULES.dt, { inputs });
+     // Drain the validated wire queue into this one fixed step. There is no
+     // Room-side sim loop: `inputs.cocs` is the only entry point (§11.6.2).
+     const pendingCocs = this.pendingCocs;
+     const cocs = (pendingCocs.orders.length || pendingCocs.spends.length || pendingCocs.terminals.length || pendingCocs.commands.length || pendingCocs.buys.length)
+      ? {
+       orders: pendingCocs.orders.splice(0, pendingCocs.orders.length),
+       spends: pendingCocs.spends.splice(0, pendingCocs.spends.length),
+       terminals: pendingCocs.terminals.splice(0, pendingCocs.terminals.length),
+       commands: pendingCocs.commands.splice(0, pendingCocs.commands.length),
+       buys: pendingCocs.buys.splice(0, pendingCocs.buys.length),
+      }
+      : null;
+     this.match.step(RULES.dt, cocs ? { inputs, cocs } : { inputs });
     for (const p of this.peers.values()) if (p.actorId !== null && p.latest) p.appliedSeq = p.latestSeq;
    this.tickAcc -= RULES.dt;
    steps++;
     this.broadcastAt += RULES.dt;
-     if (!broadcasted && this.broadcastAt >= this.snapshotInterval) {
+     if (!broadcasted && this.broadcastAt >= 1 / this.effectiveSnapshotHz()) {
       broadcasted = true; this.broadcastAt = 0;
       const state = this.wireState();
       const seq = ++this.seq;

@@ -15,7 +15,8 @@ import {floorHeightAtLattice,makeFloorQuery} from './floor-lattice.mjs';
 import {blockObstructed,blockSupportTop,candidates,collisionHash,NAV_BAKE_VERSION,rayWorldBlockHit} from './spatial.mjs';
 import {createVehicle,GUNTRUCK,respawnVehicle,stepVehicle,stepVehicleWeapon,vehicleCanEnter,vehicleMuzzles,vehicleSeatFor,vehicleSeatPosition,vehicleMounted,takeVehicleSeat,leaveVehicleSeat,vehicleSeatOpen} from './vehicles.mjs';
 import {objectiveTemplate} from './mode-data.mjs';
-import {cocsSnapshot,cocsSpotDamageScale} from './cocs.mjs';
+import {cocsSnapshot,cocsSpotDamageScale,compareCocsOrders} from './cocs.mjs';
+import {coopBuyAction,coopCommandAction,coopTerminalAction} from './cocs-coop.mjs';
 import {arrivalDamageScale,depotApronImmune,noteVehicleUse} from './cocs-traversal.mjs';
 import {cocsDutyPolicy} from './cocs-bots.mjs';
 import {deathPlan} from './deaths.mjs';
@@ -28,6 +29,11 @@ import {spawnRouteContext,contestedPickupPenalty} from './spawn-placement.mjs';
 import * as bots from './bots.mjs';
 import * as objectives from './objectives.mjs';
 export const clamp=(n,a,b)=>Math.max(a,Math.min(b,n));
+// LATTICE STRIKE actor/human budgets (§11.5). The COCS family (PvPvE + co-op)
+// admits up to 32 human seats; every other mode keeps the historical 8.
+// `MAX_ACTORS` is the combined actor ceiling (humans + bots + live subagents).
+export const COCS_HUMAN_LIMIT=32;
+export const MAX_ACTORS=32;
 export const dist=(a,b)=>Math.hypot(a.x-b.x,a.y-b.y,a.z-b.z);
 const v=(x=0,y=0,z=0)=>({x,y,z});
 const add=(a,b,s=1)=>v(a.x+b.x*s,a.y+b.y*s,a.z+b.z*s);
@@ -298,7 +304,7 @@ export class Match{
     // `aiSeats` gives every seat (including the leading human seats) the bot AI,
     // and `botPolicy` overrides the AI policy for balance-neutral sweeps. Both
     // are harness-only: net/server never set them, so live paths are untouched.
-    this.config=normalizeConfig(options);this.mutators=mutatorEffects(this.config);this.loadout=resolveMatchLoadout(this.config);this.humanCount=Math.max(1,Math.min(Math.round(options.humanCount??1),8));this.aiSeats=options.aiSeats===true;this.skipNav=options.skipNav===true;this.botPolicy=options.botPolicy??null;this.cocsPolicy=options.cocsPolicy??(isCocsMode(this.config)?cocsDutyPolicy:null);
+    this.config=normalizeConfig(options);this.mutators=mutatorEffects(this.config);this.loadout=resolveMatchLoadout(this.config);this.humanCount=Math.max(1,Math.min(Math.round(options.humanCount??1),isCocsMode(this.config)?COCS_HUMAN_LIMIT:8));if(this.humanCount+this.config.botCount>MAX_ACTORS)this.config.botCount=Math.max(0,MAX_ACTORS-this.humanCount);this.aiSeats=options.aiSeats===true;this.skipNav=options.skipNav===true;this.botPolicy=options.botPolicy??null;this.cocsPolicy=options.cocsPolicy??(isCocsMode(this.config)?cocsDutyPolicy:null);
     const vehicleMode=this.config.mode==='puma-race'||this.config.mode==='puma-soccer';
     if(vehicleMode){this.config.botCount=this.config.mode==='puma-soccer'?Math.max(0,Math.min(3,4-this.humanCount)):Math.min(this.config.botCount,8-this.humanCount);if(!getMap(mapId).race)mapId=this.config.mode==='puma-soccer'?'puma-pitch':'puma-circuit';}
     this.difficulty=DIFFICULTIES.find(d=>d.id===this.config.difficulty);this.arena=getMap(mapId);if(this.arena.terrain)bakeFloorQuery(this.arena);const nav=vehicleMode?{nodes:[],edges:[]}:matchNavigation(this.arena,{skipNav:this.skipNav});this.nav=nav.nodes;this.edges=nav.edges;{const arenaBounds=boundsOf(this.arena);this.center={x:(arenaBounds.minX+arenaBounds.maxX)/2,z:(arenaBounds.minZ+arenaBounds.maxZ)/2};}this.spawns=this.arena.spawns.map(([x,z])=>v(x,floorAt(x,z,this.arena),z));this.random=random;this.time=0;this.over=false;this.suddenDeath=false;this.armsraceWinner=null;this.events=[];this.feed=[];this.rockets=[];this.deployables=[];this.ropeLines=[];this.ropeSerial=0;this.pendingLoadouts=new Map();this.stats={shots:0,kills:0,pickups:0,powers:0,respawns:0,falls:0};this.serial=0;this.teamScores={0:0,1:0};this.vehicleHits=new Map();this.spawnHeat=new Map();
@@ -391,7 +397,7 @@ export class Match{
     // seats become AI allies on team 0 ("bot-fillable, no queue floor").
     seatTeam(id){
      if(modeRule(this.config.mode).coop===true){
-      const human=Math.max(1,Math.min(8,this.humanCount??1));
+      const human=Math.max(1,this.humanCount??1);
       if(id<human)return 0;
       const botIndex=id-human;
       const fill=Math.max(0,COOP_TEAM_FLOOR-human);
@@ -717,6 +723,21 @@ export class Match{
      // rotation. Queued here and consumed at the single fixed point in stepCoop.
      const lease=inputs?.cocs?.lease;
      if(state.coop&&lease!==undefined&&lease!==null)state.coop.pendingLease=lease;
+     // N1 terminal/command/buy actions are applied at this same fixed point.
+     // They are sorted by the same `(tick, peerId, cardId)` comparator as an
+     // order, so outcome never depends on network arrival order (§11.6).
+     const terminals=inputs?.cocs?.terminals;
+     if(state.terminals&&Array.isArray(terminals)&&terminals.length){
+      for(const record of [...terminals].sort(compareCocsOrders))coopTerminalAction(this,state,record);
+     }
+     const commands=inputs?.cocs?.commands;
+     if(state.coop&&Array.isArray(commands)&&commands.length){
+      for(const record of [...commands].sort(compareCocsOrders))coopCommandAction(this,state,record);
+     }
+     const buys=inputs?.cocs?.buys;
+     if(state.coop&&Array.isArray(buys)&&buys.length){
+      for(const record of [...buys].sort(compareCocsOrders))coopBuyAction(this,state,record);
+     }
     }
     power(a){if(this.race||this.over||a.health<=0||a.cooldown>0||this.mutators.instagib||this.flagCarrier(a)||a.isVip===true||a.movement?.carrier?.suppressActive===true)return false;const h=HARNESSES.find(h=>h.id===a.harness),ability=harnessAbility(a.harness)||h;const harness=a.harness;a.protection=0;a.cooldown=Math.max(0,(ability.cooldown??h.cooldown)*(this.mutators.fastPowers?.5:1)*a.cooldownMultiplier+riderBonus(a.character,harness,'cooldown',0,{trigger:'end'}));a.active=(ability.duration??h.duration)+riderBonus(a.character,harness,'duration',0,{trigger:'activate'});a.activeSpeedMultiplier=ability.speed??h.magnitude??1;this.stats.powers++;this.emit('power',{actor:a.id,harness,pos:eye(a),duration:a.active});
    // Riders whose trigger is the activation itself: cleanse, a timed speed
