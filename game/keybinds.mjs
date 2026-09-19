@@ -6,6 +6,10 @@ export const DEFAULT_BINDINGS = Object.freeze({
   forward: 'KeyW', back: 'KeyS', left: 'KeyA', right: 'KeyD',
   jump: 'Space', sprint: 'ShiftLeft', crouch: 'ControlLeft',
   reload: 'KeyR', melee: 'KeyF', grenade: 'KeyG', power: 'KeyQ', mobility: 'KeyX', interact: 'KeyE', voice: 'KeyV',
+  // Free-cursor toggle (LATTICE UX). Releases pointer lock in place — without
+  // pausing or opening a menu — so any HUD surface can be clicked, then toggles
+  // combat back on. Remappable like every other action.
+  cursor: 'AltLeft',
   // LATTICE STRIKE (`cocs`) V0b order strip. SCAN / GO / ATTACK arm the strip's
   // three verbs; a node is then picked with the number keys or a click. Bound
   // like every other action so a player can remap them in Settings.
@@ -16,6 +20,17 @@ export const DEFAULT_BINDINGS = Object.freeze({
 });
 
 export const KEYBIND_ACTIONS = Object.freeze(Object.keys(DEFAULT_BINDINGS));
+
+// Human labels for the Settings UI and assistive tech. Every action has one so
+// the keybind grid never falls back to a raw identifier.
+export const KEYBIND_LABELS = Object.freeze({
+  forward: 'Move forward', back: 'Move back', left: 'Move left', right: 'Move right',
+  jump: 'Jump', sprint: 'Sprint', crouch: 'Crouch',
+  reload: 'Reload', melee: 'Melee', grenade: 'Frag', power: 'Harness ability', mobility: 'Mobility verb',
+  interact: 'Interact / use', voice: 'Push to talk', cursor: 'Free cursor (release mouse)',
+  commandScan: 'Order: scan', commandGo: 'Order: go / hold', commandAttack: 'Order: attack',
+  command: 'Command board (hold or toggle)', ping: 'Ping marker', radial: 'Order radial',
+});
 
 // Keys the shell owns (scoreboard, pause, chat, weapons, digits, crouch-alt).
 export const RESERVED_CODES = Object.freeze(['Tab', 'Escape', 'Enter', 'KeyT', 'KeyC', 'BracketLeft', 'BracketRight', 'Digit0', 'Digit1', 'Digit2', 'Digit3', 'Digit4', 'Digit5', 'Digit6', 'Digit7', 'Digit8', 'Digit9']);

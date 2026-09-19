@@ -10,7 +10,7 @@ import {objectiveCopy} from '../../game/hud.mjs';
 import {WEAPONS} from '../../game/data.mjs';
 import {QUICK_MATCH_PRESETS,presetConfig} from '../../game/replay.mjs';
 import {DISPLAY_PRESETS,applyDisplayPreset,normalizeAccessibility,paletteOptions,teamColorsFor} from '../../game/presets.mjs';
-import {DEFAULT_BINDINGS,KEYBIND_ACTIONS,KEYBIND_OPTIONS,rebindAction} from '../../game/keybinds.mjs';
+import {DEFAULT_BINDINGS,KEYBIND_ACTIONS,KEYBIND_LABELS,KEYBIND_OPTIONS,rebindAction} from '../../game/keybinds.mjs';
 
 // Modes still stabilising get an explicit PREVIEW badge in the setup list so a
 // local bot match reads as a prototype, not a finished mode.
@@ -60,12 +60,12 @@ export function KeybindsConfiguration({bindings,onChange,conflicts=[]}:any){
  },[capturing,bindings,onChange]);
  const patch=(action:string,code:string)=>onChange(rebindAction(bindings,action,code));
  return <div className="config-block keybinds-configuration"><h3>Controls</h3>
-  <p className="config-note">Select an action, then press any key to bind it. Escape cancels; occupied keys swap automatically.</p>
+  <p className="config-note">Select an action, then press any key to bind it. Escape cancels; occupied keys swap automatically. <b>Free cursor</b> releases the mouse during play — no pause — so you can click the spend window, command board and HUD panels.</p>
   <div className="keybind-grid" role="group" aria-label="Keyboard bindings">
-   {KEYBIND_ACTIONS.map(action=>{const code=bindings?.[action]??(DEFAULT_BINDINGS as any)[action];const armed=capturing===action;return <div key={action} className={`keybind-row${armed?' capturing':''}`}>
-    <span style={{minWidth:0}}>{action}</span>
-    <button type="button" className="keybind-key" aria-label={`Rebind ${action}, currently ${KEY_LABEL(code)}`} aria-pressed={armed} onClick={()=>setCapturing(armed?null:action)}>{armed?'PRESS A KEY…':KEY_LABEL(code)}</button>
-    <select aria-label={`${action} key`} value={code} onChange={e=>patch(action,e.target.value)}>{KEYBIND_OPTIONS.map(option=><option key={option} value={option}>{KEY_LABEL(option)}</option>)}</select>
+   {KEYBIND_ACTIONS.map(action=>{const code=bindings?.[action]??(DEFAULT_BINDINGS as any)[action];const armed=capturing===action;const label=(KEYBIND_LABELS as Record<string,string>)[action]??action;return <div key={action} className={`keybind-row${armed?' capturing':''}`}>
+    <span style={{minWidth:0}} title={action}>{label}{action==='cursor'&&<small> releases the mouse without pausing</small>}</span>
+    <button type="button" className="keybind-key" aria-label={`Rebind ${label}, currently ${KEY_LABEL(code)}`} aria-pressed={armed} onClick={()=>setCapturing(armed?null:action)}>{armed?'PRESS A KEY…':KEY_LABEL(code)}</button>
+    <select aria-label={`${label} key`} value={code} onChange={e=>patch(action,e.target.value)}>{KEYBIND_OPTIONS.map(option=><option key={option} value={option}>{KEY_LABEL(option)}</option>)}</select>
    </div>;})}
   </div>
   {conflicts.length?<p className="config-note" role="alert">Duplicate keys: {conflicts.join(', ')}</p>:<p className="config-note">One key per action; choosing an occupied key swaps the two actions.</p>}

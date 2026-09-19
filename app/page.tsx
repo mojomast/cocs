@@ -15,6 +15,9 @@ import {DEFAULT_CONFIG,DEFAULT_DISPLAY,DIFFICULTIES,normalizeConfig,normalizeDis
 import {HELP_SECTIONS,ONBOARDING_STEPS,ONBOARDING_STORAGE_KEY,shouldShowOnboarding} from '../game/onboarding.mjs';
 import {ACCESSIBILITY_STORAGE_KEY,PRESET_STORAGE_KEY,addPreset,defaultAccessibility,enginePaletteFor,normalizeAccessibility,normalizePreset,normalizePresets,radarPaletteFor,removePreset} from '../game/presets.mjs';
 import {DEFAULT_BINDINGS,KEYBIND_STORAGE_KEY,actionForCode,bindingConflicts,normalizeBindings} from '../game/keybinds.mjs';
+import {CURSOR_SURFACE,cursorActive,cursorBlockingSurfaces,cursorClear,cursorClose,cursorEscape,cursorHint,cursorLockGained,cursorLockLost,cursorOpen,cursorReset,cursorSurfaceText,cursorToggle,initialCursorMode} from '../game/cursor-mode.mjs';
+import {LOCAL_CARD_ACTION,LOCAL_CARD_SOURCE,latticePeerId,localBoardCards,mergeLocalBoard,withSinkTargets} from '../game/lattice-board.mjs';
+import {coopOrderGate,coopSpendGate} from '../game/cocs-coop.mjs';
 import {MatchConfiguration,DisplayConfiguration,PresetsConfiguration,KeybindsConfiguration,AccessibilityConfiguration} from './game-ui/configuration';
 import {GameChat} from './game-ui/game-chat';
 import {RaceHud} from './game-ui/race-hud';
@@ -88,6 +91,10 @@ const GitHubMark=({size=18}:{size?:number})=><svg width={size} height={size} vie
 const clock=(t:number)=>`${Math.floor(Math.max(0,t)/60).toString().padStart(2,'0')}:${Math.floor(Math.max(0,t)%60).toString().padStart(2,'0')}`;
 let reducedOverride=false;
 const reducedMotion=()=>combineReducedMotion(reducedOverride,typeof window!=='undefined'&&window.matchMedia?.('(prefers-reduced-motion: reduce)').matches===true);
+// B on the command board: a press shorter than this opens and stays open
+// (toggle); a longer hold closes on release (peek). Escape and the close button
+// always close it.
+const BOARD_HOLD_MS=250;
 const BRAND={name:'Colosseum Of Competitive Slop',abbr:'COCS',tagline:'Nine language models. Seven harnesses. One glorious colosseum of slop.'};
 const ACRONYM=[{letter:'C',word:'COLOSSEUM'},{letter:'O',word:'OF'},{letter:'C',word:'COMPETITIVE'},{letter:'S',word:'SLOP'}];
 const UNLOCK_GROUPS=[{kind:'gear',label:'GEAR'},{kind:'attachment',label:'WEAPON MODS'},{kind:'finish',label:'WEAPON FINISHES'},{kind:'crosshair',label:'RETICLES'}];
@@ -128,7 +135,18 @@ export default function Home(){
   const [hideHud,setHideHud]=useState(false),[thirdPerson,setThirdPerson]=useState(false),[bindings,setBindings]=useState<any>({...DEFAULT_BINDINGS});
   const [cocsStrip,setCocsStrip]=useState<any>(()=>cocsStripState());
   const [cocsBoard,setCocsBoard]=useState<any>({open:false,pinned:false,active:0});
-  const cocsStripRef=useRef<any>(null),cocsControlRef=useRef<any>(null),cocsBoardRef=useRef<any>({open:false,pinned:false,active:0,ids:[],cards:[],count:0,collapsed:false}),cocsBoardControlRef=useRef<any>(null);
+  const [cocsNotice,setCocsNotice]=useState<any>(null);
+  const cocsStripRef=useRef<any>(null),cocsControlRef=useRef<any>(null),cocsBoardRef=useRef<any>({open:false,pinned:false,active:0,ids:[],cards:[],count:0,collapsed:false}),cocsBoardControlRef=useRef<any>(null),boardHoldRef=useRef<{at:number,held:boolean}>({at:0,held:false});
+  // Cursor mode owns pointer lock intent for every interactive surface. The
+  // machine state lives in a ref so the global key handlers (registered once)
+  // and the pointer-lock listener read the live value; a mirror in React state
+  // drives the HUD chip and the CLICK TO FIGHT affordance.
+  const [cursorUi,setCursorUi]=useState<any>(()=>initialCursorMode());
+  const cursorRef=useRef<any>(cursorUi),lockChangeAtRef=useRef(0),requestLockRef=useRef<()=>void>(()=>{});
+  // Intermission spend: a per-window local dismissal so SKIP returns to combat
+  // without touching the deterministic sim (the window still closes itself).
+  const [spendDismissed,setSpendDismissed]=useState<number|null>(null);
+  const readoutPanelsRef=useRef<Set<string>>(new Set());
   const keyLabel=(code:string)=>String(code||'?').replace(/^Key/,'').replace(/^Digit/,'').replace(/^Arrow/,'').replace('ShiftLeft','Shift').replace('ShiftRight','ShiftR').replace('ControlLeft','Ctrl').replace('ControlRight','CtrlR').replace('AltLeft','Alt').replace('AltRight','AltR');
   const moveKeys=[bindings.forward,bindings.back,bindings.left,bindings.right].map(keyLabel).join('');
   const presetOptions={characters:CHARACTERS.map((c:any)=>c.id),harnesses:HARNESSES.map((h:any)=>h.id),maps:MAPS.map((m:any)=>m.id),gearSlots:GEAR_SLOTS.map((s:any)=>s.id),gearIds:GEAR.map((g:any)=>g.id),attachmentSlots:ATTACHMENT_SLOTS.map((s:any)=>s.id),attachmentIds:ATTACHMENTS.map((a:any)=>a.id),finishes:FINISH_IDS,crosshairs:CROSSHAIR_IDS};
@@ -177,14 +195,46 @@ export default function Home(){
   useEffect(()=>{chatAtBottom.current=true;setNewMessages(false);},[mode,netRoomId]);
   useEffect(()=>{if(mode!=='lobby')return;const frame=requestAnimationFrame(()=>{const el=lobbyChatRef.current;if(!el)return;if(chatAtBottom.current){el.scrollTop=el.scrollHeight;setNewMessages(false);}else setNewMessages(true);});return()=>cancelAnimationFrame(frame);},[chatLog,mode,netRoomId]);
  const chatInputRef=useRef<HTMLInputElement>(null),chatOpenRef=useRef(false);
-  useEffect(()=>{chatOpenRef.current=chatOpen;if(chatOpen){clearInput();document.exitPointerLock?.();chatInputRef.current?.focus();}else if(modeRef.current==='playing'){canvas.current?.focus({preventScroll:true});setPointerHint(document.pointerLockElement!==canvas.current);}},[chatOpen]);
+  useEffect(()=>{chatOpenRef.current=chatOpen;syncCursorSurface(CURSOR_SURFACE.CHAT,chatOpen);if(chatOpen){clearInput();chatInputRef.current?.focus();}else if(modeRef.current==='playing'){canvas.current?.focus({preventScroll:true});setPointerHint(document.pointerLockElement!==canvas.current);}},[chatOpen]);
   const selectedMode=GAME_MODES.find(m=>m.id===config.mode)!;
   const selectedMap=getMap(mapId),selectableMaps=[...mapsForMode(config.mode,{legacy:legacyMaps})].sort((a:any,b:any)=>Number(Boolean(b.nextGen))-Number(Boolean(a.nextGen)));
   const mapViewBox=(map:any)=>{const b=map.bounds;if(!b)return '-15 -15 30 30';const width=b.maxX-b.minX,depth=b.maxZ-b.minZ,p=Math.max(2,Math.max(width,depth)*.04);return `${b.minX-p} ${b.minZ-p} ${width+p*2} ${depth+p*2}`;};
  const selected=CHARACTERS.find((c:any)=>c.id===character)!,power=HARNESSES.find((h:any)=>h.id===harness)!;
  const myPeerId=runtime.current?.net?.peerId;
    const clearInput=()=>{setScores(false);const r=runtime.current;if(!r)return;r.keys.clear();r.fire=r.fireTap=r.jump=r.power=r.interact=r.drag=r.ads=r.reload=r.melee=false;r.grenade=false;if(r.touch){r.touch.moveX=0;r.touch.moveY=0;r.touch.sprint=false;r.touch.crouch=false;r.touch.fire=false;r.touch.ads=false;r.touch.mobility=false;}r.voice?.setPushToTalk(false);r.inputWeapon=-1;r.acc=0;if(r.net?.connected&&r.net.started&&!r.net.spectate)r.net.input({x:0,z:0,fire:false,jump:false,power:false,interact:false,sprint:false,crouch:false,ads:false,mobility:false,reload:false,melee:false,grenade:false});};
-   const changeMode=(m:Mode)=>{runtime.current?.voice?.setPushToTalk(false);runtime.current?.voice?.setSuppressed(true);if(runtime.current)runtime.current.voiceSuppressed=true;modeRef.current=m;setMode(m);setChatOpen(false);setSetupOpen(false);setSettings(false);clearInput();if(m!=='playing'){document.exitPointerLock?.();setPointerHint(false);}setScores(false);};
+   // --- Cursor mode ---------------------------------------------------------
+   // `game/cursor-mode.mjs` decides when the pointer must be free; this adapter
+   // performs the browser side effects (exit/request lock, clear combat inputs)
+   // and mirrors the state for the HUD. Every surface below registers through
+   // `syncCursorSurface` so there is exactly one owner of pointer lock.
+   const applyCursor=(result:any)=>{
+    if(!result)return result;
+    if(result.effects?.clearInput)clearInput();
+    cursorRef.current=result.state;setCursorUi(result.state);
+    if(result.effects?.unlock)document.exitPointerLock?.();
+    if(result.effects?.lock)requestLockRef.current?.();
+    return result;
+   };
+   const syncCursorSurface=(surface:string,active:boolean)=>{
+    const current=cursorRef.current;
+    if(active===current.surfaces.includes(surface))return;
+    applyCursor(active?cursorOpen(current,surface):cursorClose(current,surface));
+   };
+   const resetCursorMode=()=>{const next=cursorReset(cursorRef.current);if(next.changed){cursorRef.current=next.state;setCursorUi(next.state);}};
+   const toggleCursorMode=()=>{if(modeRef.current!=='playing'||demoOnlyRef.current)return false;const result=cursorToggle(cursorRef.current,CURSOR_SURFACE.FREE);if(!result.changed)return false;applyCursor(result);return true;};
+   // One obvious way back: only when no explicit surface holds the cursor.
+   const cursorResumeCombat=()=>{
+    const current=cursorRef.current;
+    if(cursorActive(current)&&!cursorBlockingSurfaces(current).length)applyCursor(cursorClear(current));
+    else if(!cursorActive(current))requestLockRef.current?.();
+   };
+   const toggleReadoutPanel=(id:string,open:boolean)=>{
+    const set=readoutPanelsRef.current,had=set.size>0;
+    if(open)set.add(id);else set.delete(id);
+    const has=set.size>0;
+    if(has!==had)syncCursorSurface(CURSOR_SURFACE.TERMINALS,has);
+   };
+   const changeMode=(m:Mode)=>{runtime.current?.voice?.setPushToTalk(false);runtime.current?.voice?.setSuppressed(true);if(runtime.current)runtime.current.voiceSuppressed=true;modeRef.current=m;setMode(m);setChatOpen(false);setSetupOpen(false);setSettings(false);clearInput();resetCursorMode();if(m!=='playing'){document.exitPointerLock?.();setPointerHint(false);}setScores(false);};
     const enterMenu=()=>{enteredRef.current=true;setEntered(true);setDemoOnly(false);runtime.current?.audio?.start?.();};
     const exitToTitle=()=>{runtime.current?.voice?.setPushToTalk(false);if(modeRef.current!=='selection')changeMode('selection');enteredRef.current=false;setEntered(false);setDemoOnly(false);setHud(null);setSetupOpen(false);setSettings(false);document.exitPointerLock?.();};
   const touchLook=(dx:number,dy:number)=>{const r=runtime.current;if(!r)return;if(demoOnlyRef.current&&demoSessionRef.current.state==='free'){const d=r.display||{},scale=.004*(r.lookSensitivity||1);demoFreeAdapter(r.view).look(-dx*scale,(d.invertY?1:-1)*dy*scale);return;}if(modeRef.current!=='playing'||chatOpenRef.current||r.net?.spectate||r.spectateLocal)return;const look=r.net?.started?r.look:r.match?.actors?.[0],d=r.display||{};if(look)applyLook(look,dx,dy,r.lookSensitivity*(d.touchSensitivity??1)*((r.ads||r.touch?.ads)?(d.adsSensitivity??1):1),d.invertY===true);};
@@ -415,7 +465,13 @@ export default function Home(){
   r.perf?.time('render',()=>view.render(modeRef.current,selectRenderState(modeRef.current,{match:r.match,demoState:r.demo?.state,netState:r.renderState,netStarted:r.net?.started===true}),(['playing','selection','theater','progression','browse','lobby','changelog'].includes(modeRef.current))?elapsed:0,now/1000));r.perf?.frame(now);
   if(r.match&&!r.spectateLocal&&now-hudAt>80){setHud(decorate(r.match.snapshot(),{damage:r.match.time-r.lastDamage<.25,hit:r.match.time-r.lastHit<.12,critical:r.match.time-(r.lastCritical??-10)<.14,kill:r.match.time-(r.lastKill??-10)<.24,pickup:r.match.time-r.pickupAt<1.5?r.pickupText:'',singleNotice:r.singleNotice&&r.match.time-r.singleNotice.at<4?r.singleNotice:null,fps:r.fps,renderer:view.renderer.isSoftware?'software':'webgl',pointerLocked:!!document.pointerLockElement},now));hudAt=now;}}catch(e:any){console.error('COCS frame failed',e);r.match=null;r.renderState=null;r.netViewReady=false;r.fire=r.fireTap=r.jump=r.power=r.interact=false;setHud(null);setError(`The arena renderer recovered from an error: ${String(e?.message||e)}. Try entering again.`);changeMode('selection');}raf=requestAnimationFrame(loop);};raf=requestAnimationFrame(loop);setReady(true);
    (window as any).tokenArenaSnapshot=()=>({mode:modeRef.current,fps:r.fps,renderer:view.renderer.isSoftware?'software':'webgl',drawCalls:view.renderer.info.render.calls,triangles:view.renderer.info.render.triangles,pointerLocked:document.pointerLockElement===canvas.current,net:r.net?.started===true,actorId:r.net?.actorId??0,camera:{x:view.camera.position.x,y:view.camera.position.y,z:view.camera.position.z,yaw:view.camera.rotation.y},...(r.match?.snapshot()??r.renderState??{}),showcase:r.showcase&&(['selection','browse','lobby'].includes(modeRef.current)||(modeRef.current==='theater'&&!r.demo))?r.showcase.match.snapshot():null,showcaseReady:!!view.showcaseState,showcaseExpected:view.showcaseExpected===true,showcaseModelFallback:view.showcaseExpected!==true&&!view.showcaseState,weather:view._weatherState?.().kind??null,weatherOverride:view._weatherOverride??null});
-   (window as any).tokenArenaDebug={state:()=>{const sc=r.showcase;return sc?{time:sc.time,index:r.showcaseIndex,reel:Array.isArray(r.showcaseReel)?r.showcaseReel.length:r.showcaseReel,modeId:sc.modeId,mapId:sc.mapId,over:sc.match.over===true}:null;},skip:()=>{if(r.showcase)r.showcase.time=SHOWCASE_MAX_SECONDS+1;return !!r.showcase;},next:()=>r.buildShowcase?.(),delta:()=>({hits:r.net?.deltaHits??0,misses:r.net?.deltaMisses??0,base:r.net?.deltaApplied??0,rate:r.net?.bandwidth?.rate(performance.now())??0}),aim:(on:boolean)=>{if(!r?.view)return false;r.ads=on===true;r.view.setAim(on===true);return true;},weapon:(n:number)=>{const a=r?.match?.actors?.[0];if(!a)return null;a.weapon=n;a.ammo[n]=Infinity;return a.weapon;},fire:(on:boolean)=>{if(!r)return false;r.fire=on===true;r.fireTap=on===true;return true;}};
+   (window as any).tokenArenaDebug={state:()=>{const sc=r.showcase;return sc?{time:sc.time,index:r.showcaseIndex,reel:Array.isArray(r.showcaseReel)?r.showcaseReel.length:r.showcaseReel,modeId:sc.modeId,mapId:sc.mapId,over:sc.match.over===true}:null;},skip:()=>{if(r.showcase)r.showcase.time=SHOWCASE_MAX_SECONDS+1;return !!r.showcase;},next:()=>r.buildShowcase?.(),delta:()=>({hits:r.net?.deltaHits??0,misses:r.net?.deltaMisses??0,base:r.net?.deltaApplied??0,rate:r.net?.bandwidth?.rate(performance.now())??0}),aim:(on:boolean)=>{if(!r?.view)return false;r.ads=on===true;r.view.setAim(on===true);return true;},weapon:(n:number)=>{const a=r?.match?.actors?.[0];if(!a)return null;a.weapon=n;a.ammo[n]=Infinity;return a.weapon;},fire:(on:boolean)=>{if(!r)return false;r.fire=on===true;r.fireTap=on===true;return true;},// Test-only: force the local co-op intermission window open/closed so UI
+// automation can exercise the spend surface without clearing a wave. The
+// wave clock still owns the real close; this only seeds the phase/ticks.
+// Test-only: pause the render loop so browser automation can capture the
+// HUD without wedging the software compositor. The loop keeps scheduling;
+// only the 3D render step stops, and the canvas holds its last frame.
+pauseRender:(on:boolean)=>{const previous=r.benchmarking===true;r.benchmarking=on===true;return previous;},spendWindow:(open:boolean,seconds=90)=>{const coop=r?.match?.objectiveState?.coop;if(!coop)return false;const dt=RULES.dt||1/60;if(open){coop.phase='intermission';coop.intermissionOpen=true;coop.intermissionTicks=Math.max(60,Math.round((Number(seconds)||90)/dt));}else{coop.intermissionOpen=false;coop.intermissionTicks=0;}return true;}};
     // Read-only attract-demo debug hook. It reconstructs the session/planner view
     // on demand (no new state, no per-frame React work) so automated checks can
     // sample the running shot without reaching into internal refs themselves.
@@ -482,6 +538,10 @@ export default function Home(){
     })();
     }catch(e:any){setError(`The 3D renderer could not start: ${e.message}. Try a desktop browser with WebGL enabled.`);setReady(true);runtime.current=null;}})();
     const keydown=(e:KeyboardEvent)=>{const r=runtime.current;
+     // Free-cursor toggle (default AltLeft): one remappable control that releases
+     // the pointer in place — no pause, no menu — and toggles combat back on.
+     const cursorBound=actionForCode(r?.bindings||bindings,e.code)==='cursor';
+     if(cursorBound&&!e.repeat&&modeRef.current==='playing'&&!demoOnlyRef.current&&!chatOpenRef.current&&!isEditable(e.target)&&!isEditable(document.activeElement)){e.preventDefault();toggleCursorMode();return;}
      if(r?.spectateLocal&&modeRef.current==='playing'&&!isEditable(e.target)&&!isEditable(document.activeElement)&&!chatOpenRef.current&&['KeyB','KeyF','KeyH','BracketLeft','BracketRight'].includes(e.code)){
       e.preventDefault();if(e.repeat)return;
       if(e.code==='KeyB')r.cameraMode=cycleCameraMode(r.cameraMode,1);
@@ -505,7 +565,14 @@ export default function Home(){
     const cocsBoardBound=actionForCode(r.bindings||bindings,e.code);
      const latticeMode=r.net?.started?r.renderState?.config?.mode:r.match?.config?.mode;
      const latticePlayer=isCocsMode(latticeMode)&&!r.net?.spectate&&!r.spectateLocal;
-     if(latticePlayer&&!e.repeat&&cocsBoardBound==='command'){e.preventDefault();cocsBoardControlRef.current?.open(true);return;}
+     if(latticePlayer&&!e.repeat&&cocsBoardBound==='command'){
+      e.preventDefault();
+      const control=cocsBoardControlRef.current,wasOpen=control?.isOpen()===true;
+      // Press closed: open and remember the press. Press open: toggle closed.
+      boardHoldRef.current={at:performance.now(),held:!wasOpen&&cocsBoardRef.current?.pinned!==true};
+      if(wasOpen)control?.close();else control?.open(true);
+      return;
+     }
      if(latticePlayer&&!e.repeat&&cocsBoardControlRef.current?.isOpen()){
      if(e.code==='ArrowDown'||e.code==='ArrowRight'){e.preventDefault();cocsBoardControlRef.current.move(1);return;}
      if(e.code==='ArrowUp'||e.code==='ArrowLeft'){e.preventDefault();cocsBoardControlRef.current.move(-1);return;}
@@ -517,22 +584,55 @@ export default function Home(){
      const orderKey=latticeOrderKey({mode:latticeMode,spectate:r.net?.spectate||r.spectateLocal,code:e.code,action:cocsBoardBound??'',armed:cocsControlRef.current?.armed(),repeat:e.repeat});
      if(orderKey){e.preventDefault();if(orderKey.type==='arm')cocsControlRef.current?.arm(orderKey.verb);else if(orderKey.type==='pick')cocsControlRef.current?.pickIndex(orderKey.index);else if(orderKey.type==='issue')cocsControlRef.current?.issue();else cocsControlRef.current?.cancel();return;}
      if((e.code==='KeyT'||e.code==='Enter')&&r.net?.started){chatOpenRef.current=true;syncVoice();clearInput();setChatOpen(true);e.preventDefault();return;}
-    if(e.code==='Escape'){e.preventDefault();changeMode(r.net?.started?'lobby':'paused');return;}
+    if(e.code==='Escape'){
+     const escaped=cursorEscape(cursorRef.current,{at:performance.now()});
+     if(cursorActive(cursorRef.current)){
+      e.preventDefault();
+      // The same physical press that exited pointer lock is consumed; a
+      // surface with its own Escape handler keeps the key; otherwise a
+      // second press may pause locally (network matches cannot pause).
+      if(escaped.effects.consumed||escaped.effects.blocked)return;
+      if(escaped.effects.requestPause){if(r.net?.started)setPointerHint(true);else changeMode('paused');return;}
+      return;
+     }
+     // Pointer still locked: the browser will release it and the lock
+     // listener enters cursor mode. Do not pause on top of that exit.
+     if(document.pointerLockElement===canvas.current||performance.now()-lockChangeAtRef.current<400)return;
+     e.preventDefault();changeMode(r.net?.started?'lobby':'paused');return;
+    }
     if(e.code==='Tab'){e.preventDefault();setScores(true);return;}
     if(r.net?.spectate)return;
      const bound=Object.values(r.bindings||bindings);if(bound.includes(e.code)||e.code==='KeyC'||e.code==='Tab')e.preventDefault();keys.add(e.code);
      const boundAction=actionForCode(r.bindings||bindings,e.code);if(!e.repeat){if(boundAction==='jump')r.jump=true;else if(boundAction==='power')r.power=true;else if(boundAction==='interact')r.interact=true;else if(boundAction==='reload')r.reload=true;else if(boundAction==='melee')r.melee=true;else if(boundAction==='grenade')r.grenade=true;}
-    if(!e.repeat&&(/^Digit[1-9]$/.test(e.code)||e.code==='Digit0')){const n=e.code==='Digit0'?9:Number(e.code.slice(-1))-1;if(n>=WEAPONS.length)return;if(r.net?.started||(r.match&&hasAmmo(r.match.actors[0].ammo[n])))r.inputWeapon=n;}
+    if(!e.repeat&&!cursorRef.current.surfaces.includes(CURSOR_SURFACE.SPEND)&&(/^Digit[1-9]$/.test(e.code)||e.code==='Digit0')){const n=e.code==='Digit0'?9:Number(e.code.slice(-1))-1;if(n>=WEAPONS.length)return;if(r.net?.started||(r.match&&hasAmmo(r.match.actors[0].ammo[n])))r.inputWeapon=n;}
    };
-  const keyup=(e:KeyboardEvent)=>{const r=runtime.current;if(actionForCode(r?.bindings||bindings,e.code)==='command'&&cocsBoardRef.current?.pinned!==true)cocsBoardControlRef.current?.close();if(actionForCode(r?.bindings||bindings,e.code)==='voice')r?.voice?.setPushToTalk(false);keys.delete(e.code);if(e.code==='Tab')setScores(false);};
+  const keyup=(e:KeyboardEvent)=>{const r=runtime.current;
+   if(actionForCode(r?.bindings||bindings,e.code)==='command'&&cocsBoardRef.current?.pinned!==true){
+    const hold=boardHoldRef.current;boardHoldRef.current={at:0,held:false};
+    // Short tap = toggle open; held longer = peek that closes on release.
+    if(hold.held&&performance.now()-hold.at>=BOARD_HOLD_MS)cocsBoardControlRef.current?.close();
+   }if(actionForCode(r?.bindings||bindings,e.code)==='voice')r?.voice?.setPushToTalk(false);keys.delete(e.code);if(e.code==='Tab')setScores(false);};
   const move=(e:MouseEvent)=>{const r=runtime.current;if(demoOnlyRef.current&&demoSessionRef.current.state==='free'&&(document.pointerLockElement===canvas.current||r?.drag)){const d=r?.display||{},gain=(r?.lookSensitivity||1)*(d.adsSensitivity??1);demoFreeAdapter(r?.view).look(-e.movementX*.002*gain,-(d.invertY?-1:1)*e.movementY*.002*gain);return;}if(modeRef.current!=='playing'||chatOpenRef.current||r?.net?.spectate||!r?.match&&!r?.net?.started||(document.pointerLockElement!==canvas.current&&!r.drag))return;if(r.spectateLocal){const d=r.display||{},gain=r.lookSensitivity*((r.ads||r.touch?.ads)?(d.adsSensitivity??1):1),inv=d.invertY?-1:1;if(r.view?.freeCam)r.view.freeLook(-e.movementX*.002*gain,-inv*e.movementY*.002*gain);else r.spectateDirector?.look?.(-e.movementX*.002*gain,-inv*e.movementY*.002*gain);return;}const look=r.net?.started?r.look:r.match.actors[0],d=r.display||{},gain=r.lookSensitivity*((r.ads||r.touch?.ads)?(d.adsSensitivity??1):1);look.yaw-=e.movementX*.002*gain;look.pitch=Math.max(-1.45,Math.min(1.45,look.pitch-(d.invertY?-1:1)*e.movementY*.002*gain));};
-  const down=(e:MouseEvent)=>{if(e.target!==canvas.current)return;const r=runtime.current;if(!r)return;if(demoOnlyRef.current&&demoSessionRef.current.state==='free'){canvas.current?.focus({preventScroll:true});if(document.pointerLockElement!==canvas.current)requestLock();return;}if(modeRef.current!=='playing'||chatOpenRef.current)return;if(r.net?.spectate)return;if(r.spectateLocal){canvas.current?.focus({preventScroll:true});if(document.pointerLockElement!==canvas.current)requestLock();return;}canvas.current?.focus({preventScroll:true});if(document.pointerLockElement!==canvas.current)requestLock();if(e.button===0){r.fire=true;r.fireTap=true;r.drag=true;}else if(e.button===2){e.preventDefault();r.ads=true;}};
+  const down=(e:MouseEvent)=>{
+   if(e.target!==canvas.current)return;
+   const r=runtime.current;if(!r)return;
+   // While the cursor is free the canvas never fires: a click is either the
+   // one obvious way back to combat or an inert click outside a surface.
+   if(cursorActive(cursorRef.current)){cursorResumeCombat();return;}
+   if(demoOnlyRef.current&&demoSessionRef.current.state==='free'){canvas.current?.focus({preventScroll:true});if(document.pointerLockElement!==canvas.current)requestLock();return;}if(modeRef.current!=='playing'||chatOpenRef.current)return;if(r.net?.spectate)return;if(r.spectateLocal){canvas.current?.focus({preventScroll:true});if(document.pointerLockElement!==canvas.current)requestLock();return;}canvas.current?.focus({preventScroll:true});if(document.pointerLockElement!==canvas.current)requestLock();if(e.button===0){r.fire=true;r.fireTap=true;r.drag=true;}else if(e.button===2){e.preventDefault();r.ads=true;}};
  const up=(e:MouseEvent)=>{const r=runtime.current;if(!r)return;if(e.button===0||e.button===undefined){r.fire=false;r.drag=false;}else if(e.button===2)r.ads=false;};
  const contextmenu=(e:MouseEvent)=>{if(e.target===canvas.current&&modeRef.current==='playing')e.preventDefault();};
    const pause=()=>{voiceGate.current.blurred=true;syncVoice();clearInput();if(demoOnlyRef.current)clearDemoInputs();if(modeRef.current==='playing'){if(runtime.current?.net?.started){setPointerHint(!runtime.current.net.spectate);document.exitPointerLock?.();}else changeMode('paused');}};
-  const lock=()=>{const r=runtime.current;if(!r)return;r.lockPending=false;if(demoOnlyRef.current){if(document.pointerLockElement===canvas.current){r.hadLock=true;canvas.current?.focus({preventScroll:true});setPointerHint(false);}else{r.hadLock=false;clearDemoInputs();}return;}if(document.pointerLockElement===canvas.current){r.hadLock=true;canvas.current?.focus({preventScroll:true});setPointerHint(false);}else{const hadLock=r.hadLock;r.hadLock=false;clearInput();if(modeRef.current==='playing'){if(r.net?.started)setPointerHint(!r.net.spectate&&!chatOpenRef.current);else if(hadLock)changeMode('paused');}}};
-  const lockError=()=>{if(runtime.current)runtime.current.lockPending=false;if(modeRef.current==='playing')setPointerHint(true);};
-  const wheel=(e:WheelEvent)=>{const r=runtime.current;if(modeRef.current!=='playing'||e.target!==canvas.current||blocksGameplay(chatOpenRef.current,r?.net?.spectate,e.target,document.activeElement)||(!r?.match&&!r?.net?.started)||e.deltaY===0)return;const p=r.net?.started?r.renderState?.actors?.find((a:any)=>a.id===r.net.actorId):r.match.actors[0];if(!p)return;e.preventDefault();const n=cycleWeapon(p.ammo,p.weapon,r.inputWeapon,e.deltaY);if(n>=0)r.inputWeapon=n;};
+  const lock=()=>{const r=runtime.current;if(!r)return;r.lockPending=false;lockChangeAtRef.current=performance.now();const locked=document.pointerLockElement===canvas.current;
+   if(demoOnlyRef.current){if(locked){r.hadLock=true;canvas.current?.focus({preventScroll:true});setPointerHint(false);}else{r.hadLock=false;clearDemoInputs();}return;}
+   if(locked){r.hadLock=true;canvas.current?.focus({preventScroll:true});setPointerHint(false);const gained=cursorLockGained(cursorRef.current);if(gained.changed)applyCursor(gained);return;}
+   r.hadLock=false;
+   // The browser released pointer lock (Escape, tab switch, element removal):
+   // enter cursor mode instead of pausing. Our own surface exits land here
+   // too but find the machine already in cursor mode and change nothing.
+   if(modeRef.current==='playing'){const lost=cursorLockLost(cursorRef.current,{at:performance.now()});if(lost.changed)applyCursor(lost);}};
+  const lockError=()=>{if(runtime.current)runtime.current.lockPending=false;if(modeRef.current==='playing'){setPointerHint(true);const lost=cursorLockLost(cursorRef.current,{at:performance.now()});if(lost.changed)applyCursor(lost);}};
+  const wheel=(e:WheelEvent)=>{const r=runtime.current;if(cursorActive(cursorRef.current))return;if(modeRef.current!=='playing'||e.target!==canvas.current||blocksGameplay(chatOpenRef.current,r?.net?.spectate,e.target,document.activeElement)||(!r?.match&&!r?.net?.started)||e.deltaY===0)return;const p=r.net?.started?r.renderState?.actors?.find((a:any)=>a.id===r.net.actorId):r.match.actors[0];if(!p)return;e.preventDefault();const n=cycleWeapon(p.ammo,p.weapon,r.inputWeapon,e.deltaY);if(n>=0)r.inputWeapon=n;};
    const focus=(e:FocusEvent)=>{if(modeRef.current==='playing'&&isEditable(e.target))clearInput();syncVoice();};
    const focusOut=()=>{queueMicrotask(()=>{if(!cancelled)syncVoice();});};
    const windowFocus=()=>{voiceGate.current.blurred=false;syncVoice();};
@@ -585,6 +685,7 @@ export default function Home(){
   useEffect(()=>{const onKey=(e:KeyboardEvent)=>{const host=onboarding!==null?onboardingRef.current:settings?settingsRef.current:setupOpen||mode==='paused'||mode==='results'?modalRef.current:singleOpen?singleRef.current:null;if((onboarding!==null||settings||setupOpen||singleOpen||mode==='paused'||mode==='results')&&e.key==='Tab'&&host){const focusable=[...host.querySelectorAll<HTMLElement>('button:not(:disabled),input,select,[tabindex]:not([tabindex="-1"])')];if(focusable.length){const next=e.shiftKey?focusable[focusable.length-1]:focusable[0];if(e.shiftKey?document.activeElement===focusable[0]:document.activeElement===focusable[focusable.length-1]){e.preventDefault();next.focus();}}return;}if(e.key!=='Escape')return;if(singleOpen){e.preventDefault();setSingleOpen(false);return;}if(onboarding!==null){e.preventDefault();finishOnboarding();return;}if(setupOpen){e.preventDefault();closeSetup();return;}if(settings){e.preventDefault();setSettings(false);return;}if(mode==='selection'&&enteredRef.current){e.preventDefault();exitToTitle();return;}if(mode==='browse'||mode==='progression'||mode==='changelog'){e.preventDefault();changeMode('selection');return;}if(mode==='theater'&&!demoPlaying){e.preventDefault();changeMode('selection');return;}if(mode==='lobby'){e.preventDefault();changeMode('selection');}};window.addEventListener('keydown',onKey);return()=>window.removeEventListener('keydown',onKey);},[setupOpen,singleOpen,onboarding,settings,mode,demoPlaying]);
   const saveSettings=(s:number,m:boolean,show:boolean=showcase,legacy:boolean=legacyMaps)=>{setSensitivity(s);setMuted(m);setShowcase(show);setLegacyMaps(legacy);if(runtime.current){runtime.current.lookSensitivity=s;runtime.current.audio.setMuted(m);runtime.current.showcaseEnabled=show;runtime.current.legacyArenas=legacy;}try{const prefs=JSON.parse(localStorage.getItem('token-arena-settings')||'{}');localStorage.setItem('token-arena-settings',JSON.stringify({...prefs,sensitivity:s,muted:m,showcase:show,legacyArenas:legacy,touch:touchControls,voiceVolume:voicePrefs.current.volume,voiceThreshold:voicePrefs.current.threshold}));}catch{}};
   const requestLock=()=>{const r=runtime.current;if(!r||r.lockPending||document.pointerLockElement===canvas.current)return;canvas.current?.focus({preventScroll:true});const failed=()=>{r.lockPending=false;if(modeRef.current==='playing')setPointerHint(true);};if(!canvas.current?.requestPointerLock){failed();return;}r.lockPending=true;try{const result=canvas.current.requestPointerLock();result?.catch(failed);}catch{failed();}};
+  requestLockRef.current=requestLock;
    const createVoice=(n:any)=>{const r=runtime.current;if(!r||n!==r.net)return;disposeVoice();const voice:any=new VoiceChat({net:n});voice.onState=(state?:any)=>{if(state&&n===runtime.current?.net&&runtime.current?.voice===voice)setVoiceState(state);};r.voice=voice;r.voiceSuppressed=undefined;voice.setVolume(voicePrefs.current.volume);voice.setThreshold(voicePrefs.current.threshold);syncVoice();n.onVoiceSignal=(msg:any)=>{if(n===runtime.current?.net&&runtime.current?.voice===voice)voice.handleSignal(msg);};};
     const wireNet=(n:any)=>{const r=runtime.current,old=r.net;disposeVoice();resetChat();r.net=n;if(old&&old!==n)old.close();createVoice(n);n.onStart=()=>{if(n!==runtime.current?.net)return;syncNetInfo();r.match=null;r.renderState=null;r.netViewReady=false;r.lastAudio=0;r.spectateTarget=null;r.view.setSpectatorTarget(null);r.showcaseMatchedId=null;r.view.setShowcase(null);r.view.setCinema(false);r.view.setDirector(null);r.recorder=new DemoRecorder({state:r.net?.state||null,recordHz:18,meta:{net:true,mapId:r.net?.state?.mapId,mode:r.net?.state?.config?.mode}});r.lastDamage=r.lastHit=r.lastCritical=r.pickupAt=-10;r.damageNumbers=[];r.damageDir=null;r.damageDirAt=-10;r.prevScores=null;r.announceCue=null;r.announceAt=-10;r.killTimes=[];r.killCue=null;r.killCueAt=-10;r.acc=0;r.audio.start();r.audio.setModeTheme?.(r.net?.state?.config?.mode);setHud(null);changeMode('playing');canvas.current?.focus({preventScroll:true});setPointerHint(!n.spectate&&document.pointerLockElement!==canvas.current);};
     n.onResults=(m:any)=>{if(n!==runtime.current?.net)return;syncNetInfo();if(r.recorder){const finished=r.recorder.finish({mapId:r.net?.state?.mapId,mode:r.net?.state?.config?.mode,net:true});r.recorder=null;r.saveRecording?.(finished);}document.exitPointerLock?.();{const mode:any=r.net?.state?.config?.mode,actor:any=(m.state.actors||[]).find((a:any)=>a.id===r.net?.actorId)||(m.state.actors||[])[0];if(mode&&actor){const won=actorWon(m.state,mode,actor),modeInfo:any=GAME_MODES.find((g:any)=>g.id===mode),mapId=r.net?.state?.mapId,mapInfo:any=mapId?getMap(mapId):null;saveMatchHistory({...m.state,win:won},actor,{mode,modeName:modeInfo?.name,mapId,mapName:mapInfo?.name,duration:m.state.time,at:Date.now()});r.audio?.sting?.(won?'victory':'defeat');}}setHud({...m.state,net:true,actorId:r.net?.actorId,spectate:r.net?.spectate,fps:r.fps,renderer:r.view.renderer.isSoftware?'software':'webgl',pointerLocked:false,damage:false,hit:false,pickup:''});changeMode('results');};
@@ -679,7 +780,14 @@ export default function Home(){
    const armCocsVerb=(id:string)=>applyCocsStrip(cocsArmVerb(cocsNow(),id));
     const pickCocsTarget=(target:any)=>{const nodes=cocsTargetableNodes(latticeBoardView(hud,player),cocsNow().armed);applyCocsStrip(cocsPickTarget(cocsNow(),target,nodes));};
     const pickCocsIndex=(index:number)=>{const nodes=cocsTargetableNodes(latticeBoardView(hud,player),cocsNow().armed);const node=nodes.find((entry:any)=>entry.index===index);if(node)pickCocsTarget(node.id);};
-   const issueCocsOrder=()=>{const r=runtime.current,state=cocsNow(),snapshot=hud?.cocs,team=cocsTeam(),tick=Number(snapshot?.tick)||0,cardId=`cocs-${team}-${tick}-${Number(state.seq)||0}`;const result=cocsIssueOrder(state,{tick,peerId:r?.net?.peerId??'human',cardId,team,flux:snapshot?.flux?.[team]??0});applyCocsStrip(result.state);if(!result.order||!r)return;if(r.net?.started&&!r.net.spectate){r.net.order(result.order.cardId,result.order.verb,result.order.target,'chief');return;}(r.cocsOrders??=[]).push(result.order);};
+   const issueCocsOrder=()=>{const r=runtime.current,state=cocsNow(),snapshot=hud?.cocs,team=cocsTeam(),tick=Number(snapshot?.tick)||0,cardId=`cocs-${team}-${tick}-${Number(state.seq)||0}`,peerId=latticePeerId(r?.net,r?.match);
+    const result=cocsIssueOrder(state,{tick,peerId,cardId,team,flux:snapshot?.flux?.[team]??0});
+    if(!result.order){applyCocsStrip(result.state);return;}
+    const gate=r?.match?.objectiveState?.coop?coopOrderGate(r.match,r.match.objectiveState,{verb:result.order.verb,peerId}):null;
+    if(gate&&gate.ok!==true){applyCocsStrip({...result.state,pending:null,issued:null,notice:`REJECTED · ${String(gate.reason).toUpperCase()}`});return;}
+    applyCocsStrip(result.state);if(!r)return;
+    if(r.net?.started&&!r.net.spectate){r.net.order(result.order.cardId,result.order.verb,result.order.target,'chief');return;}
+    (r.cocsOrders??=[]).push(result.order);};
    const cancelCocsStrip=()=>applyCocsStrip(cocsClearStrip(cocsNow()));
    cocsControlRef.current={arm:armCocsVerb,pickIndex:pickCocsIndex,issue:issueCocsOrder,cancel:cancelCocsStrip,armed:()=>Boolean(cocsNow().armed)};
     const latticeMap=isCocsMode(hudMode)?getMap(hud?.mapId??mapId):null;
@@ -691,8 +799,14 @@ export default function Home(){
    // here so the global keydown can drive hold-to-peek, pointer-locked listbox
    // navigation and the damage auto-collapse. The board is never opened outside
    // local cocs play and never steals pointer capture.
-   const cocsBoardIds=cocsView?.boardView?.listboxIds??[];
-   const cocsBoardCards=cocsView?.boardView?.cards??[];
+   // Local snapshots carry no orderLog/cards, so derive the rest of the board
+   // from nodes/sinks/terminals/roles/orderStats and resolve every sink target
+   // to a real node id (the sim rejects the literal 'node').
+   const cocsSpendView=withSinkTargets(cocsView?.spend??null,hud?.cocs,player);
+   const localCards=cocsView?.boardView?localBoardCards(latticeBoard,hud?.cocs,player,{spend:cocsSpendView,economy:cocsView.economy}):[];
+   const mergedBoard=cocsView?.boardView?mergeLocalBoard(cocsView.boardView,localCards):cocsView?.boardView??null;
+   const cocsBoardIds=mergedBoard?.listboxIds??[];
+   const cocsBoardCards=mergedBoard?.cards??[];
    const boardCollapsed=Boolean(hud?.damage&&Number(hud?.time)-Number(hud?.damageDirAt)<2);
    cocsBoardRef.current={...cocsBoardRef.current,open:cocsBoard.open===true,pinned:cocsBoard.pinned===true,active:cocsBoard.active??0,ids:cocsBoardIds,cards:cocsBoardCards,count:cocsBoardIds.length,collapsed:boardCollapsed};
    const setBoard=(patch:any)=>{cocsBoardRef.current={...cocsBoardRef.current,...patch};setCocsBoard((s:any)=>({...s,...patch}));};
@@ -701,8 +815,42 @@ export default function Home(){
    const toggleCocsBoardPin=()=>setBoard({pinned:!cocsBoardRef.current.pinned,open:true});
    const moveCocsBoard=(delta:number)=>{const count=cocsBoardRef.current.count||0;if(!count)return;const next=(((cocsBoardRef.current.active??0)+delta)%count+count)%count;setBoard({active:next});};
    const selectCocsBoardCard=(id:any)=>{const index=(cocsBoardRef.current.ids??[]).indexOf(String(id));if(index>=0)setBoard({active:index});};
-   const activateCocsBoardCard=(card:any,action:string)=>{const r=runtime.current;if(!r||!card)return;if(r.net?.started&&!r.net.spectate){const verb=String(card.verb??'').toUpperCase(),cardId=`card-${card.id}-${action}`;if(['HACK','DEPLOY','SABOTAGE'].includes(verb)&&card.target!=null){r.net.terminal(card.target,verb.toLowerCase(),{cardId});return;}if(verb==='VAULT'&&card.target!=null){r.net.terminal(card.target,'vault-store',{cardId});return;}if(['FORTIFY','REPAIR','RESUPPLY','REINFORCE'].includes(verb)){r.net.economy(verb.toLowerCase(),{cardId,target:card.target??null,role:verb==='REINFORCE'?'fighter':null});return;}}r.singleNotice={type:'cocs-card',text:`${action==='retry'?'RETRY':'CHECK'} · ${card.verb} ${card.targetLabel}${action==='check'&&card.reason?` · ${card.reason}`:''}`,at:r.match?.time??0};};
-   const spendCocs=(verb:string,target:any)=>{const r=runtime.current,snapshot=hud?.cocs,tick=Number(snapshot?.tick)||0,team=cocsTeam(),seq=(Number(r?.cocsSpendSeq)||0)+1;if(!r)return;r.cocsSpendSeq=seq;const cardId=`spend-${team}-${tick}-${seq}`;if(r.net?.started&&!r.net.spectate){r.net.economy(String(verb).toLowerCase(),{cardId,target:target??null});return;}(r.cocsSpends??=[]).push({tick,peerId:'human',cardId,team,verb:String(verb).toUpperCase(),target:target??null});};
+   // One dispatch for mouse clicks and the keyboard Enter path. Locally derived
+   // cards queue through the same deterministic `(tick, peerId, cardId)` shape
+   // as the order strip; gates are pre-flighted so a refusal is visible.
+   const activateCocsBoardCard=(card:any,action:string)=>{
+    const r=runtime.current;if(!r||!card)return {ok:false,reason:'NO MATCH'};
+    const peerId=latticePeerId(r.net,r.match),verb=String(card.verb??'').toUpperCase(),tick=Number(hud?.cocs?.tick)||0,team=cocsTeam();
+    const notify=(ok:boolean,text:string)=>setCocsNotice({ok,text,id:Date.now()});
+    if(card.source===LOCAL_CARD_SOURCE.ORDER||action===LOCAL_CARD_ACTION.ISSUE){
+     const target=card.target??null,cardId=`board-${team}-${tick}-${verb}-${target??'team'}`;
+     const gate=r.match?.objectiveState?.coop&&!r.net?.started?coopOrderGate(r.match,r.match.objectiveState,{verb,peerId}):null;
+     if(gate&&gate.ok!==true){notify(false,`${verb} REJECTED · ${String(gate.reason).toUpperCase()}`);return {ok:false,reason:String(gate.reason)};}
+     if(r.net?.started&&!r.net.spectate)r.net.order(cardId,verb,target,'chief');else (r.cocsOrders??=[]).push({tick,peerId,cardId,team,verb,target});
+     notify(true,`${verb} ${card.targetLabel} · ORDER ACCEPTED`);return {ok:true,reason:null};
+    }
+    if(card.source===LOCAL_CARD_SOURCE.SPEND||action===LOCAL_CARD_ACTION.BUY){
+     const result=spendCocs(card.verb,card.target);
+     notify(result?.ok===true,result?.ok===true?`${verb} ${card.targetLabel??''} · QUEUED`:`${verb} REJECTED · ${result?.reason??'UNAVAILABLE'}`);
+     return result;
+    }
+    if(r.net?.started&&!r.net.spectate){const cardId=`card-${card.id}-${action}`;if(['HACK','DEPLOY','SABOTAGE'].includes(verb)&&card.target!=null){r.net.terminal(card.target,verb.toLowerCase(),{cardId});return {ok:true,reason:null};}if(verb==='VAULT'&&card.target!=null){r.net.terminal(card.target,'vault-store',{cardId});return {ok:true,reason:null};}if(['FORTIFY','REPAIR','RESUPPLY','REINFORCE'].includes(verb)){r.net.economy(verb.toLowerCase(),{cardId,target:card.target??null,role:verb==='REINFORCE'?'fighter':null});return {ok:true,reason:null};}}
+    notify(action==='retry',`${action==='retry'?'RETRY':'CHECK'} · ${card.verb} ${card.targetLabel}${card.reason?` · ${card.reason}`:''}`);
+    return {ok:true,reason:null};
+   };
+   // Returns {ok, reason} so the spend window and board can confirm or refuse
+   // visibly. Local matches are pre-flighted against the authoritative gates;
+   // online matches let the server decide and report through the snapshot log.
+   const spendCocs=(verb:string,target:any)=>{
+    const r=runtime.current,snapshot=hud?.cocs,tick=Number(snapshot?.tick)||0,team=cocsTeam(),seq=(Number(r?.cocsSpendSeq)||0)+1,peerId=latticePeerId(r?.net,r?.match);
+    if(!r)return {ok:false,reason:'NO MATCH'};
+    const verbId=String(verb).toUpperCase();
+    if((verbId==='FORTIFY'||verbId==='REPAIR')&&(target===null||target===undefined||target==='node'||target==='hq'))return {ok:false,reason:'PICK A TARGET'};
+    if(r.match?.objectiveState?.coop&&!(r.net?.started)){const gate=coopSpendGate(r.match,r.match.objectiveState,{verb:verbId,peerId});if(gate.ok!==true)return {ok:false,reason:String(gate.reason).toUpperCase()};}
+    r.cocsSpendSeq=seq;const cardId=`spend-${team}-${tick}-${seq}`;
+    if(r.net?.started&&!r.net.spectate){r.net.economy(verbId.toLowerCase(),{cardId,target:target??null});return {ok:true,reason:null,cardId};}
+    (r.cocsSpends??=[]).push({tick,peerId,cardId,team,verb:verbId,target:target??null});return {ok:true,reason:null,cardId};
+   };
    if(runtime.current)cocsBoardControlRef.current={
      open:(open:boolean)=>openCocsBoard(open),
      close:()=>closeCocsBoard(),
@@ -710,12 +858,44 @@ export default function Home(){
      move:(delta:number)=>moveCocsBoard(delta),
      first:()=>setBoard({active:0}),
      last:()=>setBoard({active:Math.max(0,(cocsBoardRef.current.count||1)-1)}),
-     activate:()=>{const id=cocsBoardRef.current.ids?.[cocsBoardRef.current.active??0];const card=(cocsBoardRef.current.cards??[]).find((entry:any)=>entry.id===id);if(card)activateCocsBoardCard(card,card.status==='blocked'?'check':'check');},
+     activate:()=>{const id=cocsBoardRef.current.ids?.[cocsBoardRef.current.active??0];const card=(cocsBoardRef.current.cards??[]).find((entry:any)=>entry.id===id);if(card)activateCocsBoardCard(card,card.action??(card.status==='blocked'?'retry':'check'));},
    };
-   const cocsCommand=cocsView?{...cocsView,armCocsVerb,pickCocsTarget,issueCocsOrder,cancelCocsStrip,spendCocs,selectBoardCard:selectCocsBoardCard,activateBoardCard:activateCocsBoardCard,closeBoard:closeCocsBoard,toggleBoardPin:toggleCocsBoardPin,boardOpen:cocsBoard.open===true&&!boardCollapsed,boardCollapsed,boardPinned:cocsBoard.pinned===true,boardActive:cocsBoardIds[cocsBoard.active??0]??cocsBoardIds[0]??null}:null;
+       // The spend window is snapshot-driven; SKIP only dismisses this window
+    // locally (the deterministic sim still closes it on its own clock). The
+    // `windows` counter identifies the current window so a new one re-opens.
+    const spendOpen=Boolean(hud?.cocs?.director?.intermission?.open)&&isCocsMode(hud?.config?.mode);
+    const spendWindow=Number(hud?.cocs?.director?.intermission?.windows)||0;
+    const spendVisible=spendOpen&&spendDismissed!==spendWindow;
+    const skipSpend=()=>{if(spendOpen)setSpendDismissed(spendWindow);};
+    const reopenSpend=()=>setSpendDismissed(null);
+const cocsCommand=cocsView?{...cocsView,boardView:mergedBoard??cocsView.boardView,spend:cocsSpendView??cocsView.spend,armCocsVerb,pickCocsTarget,issueCocsOrder,cancelCocsStrip,spendCocs,spendVisible,skipSpend,reopenSpend,notice:cocsNotice,onReadoutPanel:toggleReadoutPanel,cursorKey:keyLabel(bindings.cursor??DEFAULT_BINDINGS.cursor),selectBoardCard:selectCocsBoardCard,activateBoardCard:activateCocsBoardCard,closeBoard:closeCocsBoard,toggleBoardPin:toggleCocsBoardPin,boardOpen:cocsBoard.open===true&&!boardCollapsed,boardCollapsed,boardPinned:cocsBoard.pinned===true,boardActive:cocsBoardIds[cocsBoard.active??0]??cocsBoardIds[0]??null}:null;
    const aimActor=player||hud?.actors?.[0],aimWeapon=aimActor?WEAPONS[aimActor.weapon??0]||WEAPONS[0]:null,aimSpread=aimActor?effectiveSpread(aimActor,aimWeapon,{handling:harnessWeaponHandling(aimActor.harness,aimActor.weapon)}):0,crosshairGap=dynamicCrosshairGap(aimSpread,display.size),reloadFill=reloadProgress(aimActor),reloading=Boolean(aimActor?.reloading),posture=postureLabel(aimActor),marker=hitMarker(hud,player),ammoEmpty=Boolean(player&&typeof player.ammo?.[player.weapon]==='number'&&player.ammo[player.weapon]===0),ammoLow=lowAmmo(player,WEAPONS);
     const killNotice=killBanner(hud,player),suddenBanner=suddenDeathBanner(hud),startBanner=matchStartBanner(hud,undefined,hudMode),scoreCue=hud?.scoreCue&&hud.scoreCue.age<1.6?hud.scoreCue:null,damageIndicator=hud?.damageDir&&hud.time-hud.damageDirAt<.8?hud.damageDir:null,awards=matchAwards(hud),radar=radarContacts(hud,player),radarCols=radarPaletteFor(accessibility.palette);
     const respawn=respawnOverlayView(hud,player);
+    // --- Cursor surfaces ----------------------------------------------------
+    // Every interactive overlay registers here. The first one releases the
+    // pointer and clears combat inputs; the last one to close asks for combat
+    // back. The effects only run on a real transition, so a surface opening
+    // while the cursor is already free does not unlock twice.
+    useEffect(()=>{if(!cocsNotice)return;const timer=setTimeout(()=>setCocsNotice(null),4200);return()=>clearTimeout(timer);},[cocsNotice?.id]);
+    useEffect(()=>{syncCursorSurface(CURSOR_SURFACE.SPEND,spendVisible);},[spendVisible]);
+    useEffect(()=>{syncCursorSurface(CURSOR_SURFACE.BOARD,cocsBoard.open===true&&!boardCollapsed);},[cocsBoard.open,boardCollapsed]);
+    useEffect(()=>{syncCursorSurface(CURSOR_SURFACE.SCOREBOARD,scores);},[scores]);
+    useEffect(()=>{syncCursorSurface(CURSOR_SURFACE.SETTINGS,settings);},[settings]);
+    useEffect(()=>{syncCursorSurface(CURSOR_SURFACE.PAUSE,mode==='paused');},[mode]);
+    useEffect(()=>{syncCursorSurface(CURSOR_SURFACE.RESULTS,mode==='results');},[mode]);
+    useEffect(()=>{syncCursorSurface(CURSOR_SURFACE.DEMO,demoSession.state==='options');},[demoSession.state]);
+    useEffect(()=>{syncCursorSurface(CURSOR_SURFACE.RESPAWN,respawn.open===true);},[respawn.open]);
+    // A new spend window clears a previous SKIP and announces itself once: a
+    // HUD caption (when captions are on) plus the objective announcer motif.
+    useEffect(()=>{
+     if(!spendOpen){setSpendDismissed(null);return;}
+     const r=runtime.current;if(!r)return;
+     r.caption='INTERMISSION · SPEND WINDOW OPEN · SPEND FLUX OR SKIP';
+     r.captionAt=Number(hud?.time)||0;
+     r.audio?.announcerCue?.('objective');
+    },[spendOpen,spendWindow]);
+
    const {vehicle,prompt:vehiclePrompt}=vehicleHud(player,hud?.vehicles,hud?.flags,hud?.spectate);
    const scoreboard=renderScoreboard(hud);
    // Demo dock/options view data. The session is plain state mirrored from
@@ -748,7 +928,7 @@ export default function Home(){
    demos,demoPlaying,refreshDemos:()=>runtime.current?.refreshDemos?.(),start:()=>start(),ready,error,previewRef,headActions,backToDemo,BRAND,showcaseLive,CHANGELOG,RELEASE_VERSION,RELEASE_CODENAME,FULL_CHANGELOG_URL,exportDemo:(id:any)=>runtime.current?.exportDemoFile?.(id),importDemo:(file:any)=>runtime.current?.importDemoFile?.(file),
    player,awards,scoreboard,respawn,switchRespawnLoadout,resultTitle,resultDescription,resume,nextArena,campaignNext,isSingle,single,selectHordeUpgrade:chooseHordeUpgrade,resumeSingleplayer,lastDemo,prefs,pauseQuick,toggleCaptions,toggleReducedMotion,ONBOARDING_STEPS,helpSections:HELP_SECTIONS,onboarding,setOnboarding,finishOnboarding,modalRef,singleRef,settingsRef,onboardingRef,runtime,
    demoNotice,demoPaused,demoTime,demoSpeed,demoRig,demoInfo,stopDemo:()=>runtime.current?.stopDemo?.(),removeDemo:(id:any)=>runtime.current?.removeDemo?.(id),playDemo:(id:any)=>runtime.current?.playDemo?.(id),setDemoPaused,setDemoTime,setDemoSpeed,setDemoRig,CAMERA_RIGS,clock,
-   hud,brief,phase,hudRoute,hudMap,hudMode,isTeamMode,modeGoal,ladderStatus,flagText,armsrace,WEAPONS,activePower,radar,radarCols,radarBlip,crosshairGap,marker,reloadFill,reloading,posture,killNotice,suddenBanner,startBanner,scoreCue,damageIndicator,damageNumberStyle,reducedMotion,vehiclePrompt,vehicle,ammoEmpty,ammoLow,hideHud,pointerHint,requestLock,chatOpen,spectatorBoard,spectatorTeams,CAMERA_MODE_LABELS,grenadeStatus,streakStatus,killFeedWeapon,voiceHint,escapeHint,teamScoreText,ammoText,weaponTag,REPO_URL,weaponRangeLabel,cocsCommand,
+   hud,brief,phase,hudRoute,hudMap,hudMode,isTeamMode,modeGoal,ladderStatus,flagText,armsrace,WEAPONS,activePower,radar,radarCols,radarBlip,crosshairGap,marker,reloadFill,reloading,posture,killNotice,suddenBanner,startBanner,scoreCue,damageIndicator,damageNumberStyle,reducedMotion,vehiclePrompt,vehicle,ammoEmpty,ammoLow,hideHud,pointerHint,requestLock,chatOpen,cursor:{active:cursorActive(cursorUi),surfaces:cursorUi.surfaces,label:cursorSurfaceText(cursorUi),hint:cursorHint(cursorUi,{key:bindings.cursor??DEFAULT_BINDINGS.cursor}),key:String(keyLabel(bindings.cursor??DEFAULT_BINDINGS.cursor)).toUpperCase(),blocked:cursorBlockingSurfaces(cursorUi).length>0,resume:cursorResumeCombat},spectatorBoard,spectatorTeams,CAMERA_MODE_LABELS,grenadeStatus,streakStatus,killFeedWeapon,voiceHint,escapeHint,teamScoreText,ammoText,weaponTag,REPO_URL,weaponRangeLabel,cocsCommand,
   };
   return <><main style={{'--ui-scale':display.uiScale??1} as any} className={`arena-app mode-${mode}${(config.mode==='puma-race'||config.mode==='puma-soccer')?' race-setup':''}${(isRace||isSoccer)?' race-active':''} palette-${accessibility.palette}${accessibility.palette!=='default'?' palette-colorblind':''}${accessibility.highContrast?' ui-contrast':''}`}>
   <canvas ref={canvas} tabIndex={-1} role="img" className="arena-canvas" aria-label="Colosseum Of Competitive Slop 3D game"/>

@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {DEFAULT_BINDINGS, KEYBIND_ACTIONS, KEYBIND_OPTIONS, actionForCode, bindingConflicts, normalizeBindings, rebindAction} from './keybinds.mjs';
+import {DEFAULT_BINDINGS, KEYBIND_ACTIONS, KEYBIND_LABELS, KEYBIND_OPTIONS, actionForCode, bindingConflicts, normalizeBindings, rebindAction} from './keybinds.mjs';
 
 test('explicit rebinding swaps occupied keys regardless of action order', () => {
   for (const [action, occupied] of [['forward', 'back'], ['back', 'forward']]) {
@@ -46,11 +46,32 @@ test('codes resolve to actions and conflicts are reported', () => {
 
 test('mobility binds to KeyX and stays remappable like every other action', () => {
   assert.equal(DEFAULT_BINDINGS.mobility, 'KeyX');
-  assert.equal(KEYBIND_ACTIONS.length, 20, '17 historical actions plus the three O1c command surfaces');
+  assert.equal(KEYBIND_ACTIONS.length, 21, '17 historical actions, the free-cursor toggle and the three O1c command surfaces');
   assert.ok(KEYBIND_OPTIONS.includes('KeyX'), 'KeyX is offered in the settings dropdown');
   assert.deepEqual(rebindAction(DEFAULT_BINDINGS, 'mobility', 'KeyZ'), {...DEFAULT_BINDINGS, mobility: 'KeyZ'});
   assert.deepEqual(normalizeBindings({mobility: 'nonsense'}).mobility, 'KeyX');
   assert.equal(actionForCode(normalizeBindings({}), 'KeyZ'), null, 'KeyZ stays free');
+});
+
+test('free cursor binds to AltLeft by default and stays remappable', () => {
+  assert.equal(DEFAULT_BINDINGS.cursor, 'AltLeft');
+  assert.equal(actionForCode(normalizeBindings({}), 'AltLeft'), 'cursor');
+  assert.equal(actionForCode(normalizeBindings({}), 'AltRight'), null, 'only the bound Alt is the toggle');
+  assert.ok(KEYBIND_OPTIONS.includes('AltLeft'), 'AltLeft is offered in the settings dropdown');
+  assert.ok(KEYBIND_OPTIONS.includes('AltRight'), 'AltRight can be chosen as a replacement');
+  const rebound = rebindAction(DEFAULT_BINDINGS, 'cursor', 'KeyZ');
+  assert.equal(rebound.cursor, 'KeyZ');
+  assert.equal(actionForCode(rebound, 'AltLeft'), null);
+  assert.deepEqual(bindingConflicts(rebound), []);
+  const swapped = rebindAction(DEFAULT_BINDINGS, 'cursor', 'KeyX');
+  assert.equal(swapped.cursor, 'KeyX', 'choosing an occupied key takes it');
+  assert.equal(swapped.mobility, 'AltLeft', 'and hands the old key to the displaced action');
+});
+
+test('every bindable action has a human label for the settings grid', () => {
+  for (const action of KEYBIND_ACTIONS) assert.ok(KEYBIND_LABELS[action], `${action} has a label`);
+  assert.match(KEYBIND_LABELS.cursor, /cursor/i);
+  assert.match(KEYBIND_LABELS.command, /command board/i);
 });
 
 test('normalization never produces duplicate bindings', () => {
@@ -63,9 +84,10 @@ test('normalization never produces duplicate bindings', () => {
 });
 
 test('reserved shell keys are rejected and not offered', () => {
-  const bindings = normalizeBindings({jump: 'Tab', melee: 'KeyC', power: 'Enter'});
+  const bindings = normalizeBindings({jump: 'Tab', melee: 'KeyC', power: 'Enter', cursor: 'Escape'});
   assert.equal(bindings.jump, DEFAULT_BINDINGS.jump);
   assert.equal(bindings.melee, DEFAULT_BINDINGS.melee);
   assert.equal(bindings.power, DEFAULT_BINDINGS.power);
+  assert.equal(bindings.cursor, 'AltLeft', 'the free-cursor toggle cannot steal Escape');
   for (const code of ['Tab', 'Escape', 'Enter', 'KeyT', 'KeyC', 'Digit1']) assert.ok(!KEYBIND_OPTIONS.includes(code), `${code} reserved`);
 });
