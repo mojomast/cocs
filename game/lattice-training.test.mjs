@@ -1,5 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import {Match} from './core.mjs';
 import {TRAINING_STEPS,createTraining,evaluateTraining,trainingView,skipTraining} from './lattice-training.mjs';
 
 const actors = [{id:0,x:0,z:0},{id:1,x:40,z:0}];
@@ -82,4 +83,29 @@ test('skipping is honored and idempotent',()=>{
  assert.equal(skipped.done,true);assert.equal(skipped.skipped,true);
  assert.equal(skipTraining(skipped),skipped,'an ended course is not rewritten');
  assert.equal(trainingView(skipped).done,true);
+});
+
+test('a real match drives the course from authoritative movement',()=>{
+ const match=new Match('chatgpt','openclaw',()=>.5,'lattice-slice',{mode:'cocs',botCount:3,humanCount:1,timeLimit:300,cocsPolicy:()=>[]});
+ const actor=match.actors[0];
+ let training=createTraining('cocs',{start:{x:actor.x,z:actor.z}});
+ const lattice=match.arena?.lattice??[];
+ let processed=0;
+ const step=()=>{
+  match.step(1/60,{x:1,z:0});
+  const fresh=match.events.filter(event=>event.id>processed);
+  if(fresh.length)processed=fresh[fresh.length-1].id;
+  training=evaluateTraining(training,{snapshot:match.snapshot(),events:fresh,playerId:0,lattice}).training;
+ };
+ for(let i=0;i<60*30&&!training.completed.includes('move');i++)step();
+ assert.ok(training.completed.includes('move'),`moved from the spawn anchor (${actor.x.toFixed(1)}, ${actor.z.toFixed(1)})`);
+ // Shots from the real match advance the fire step even while nothing is hit.
+ for(let i=0;i<60*4&&!training.completed.includes('fire');i++){
+  match.step(1/60,{x:1,z:0,fire:true,fireTap:true});
+  const fresh=match.events.filter(event=>event.id>processed);
+  if(fresh.length)processed=fresh[fresh.length-1].id;
+  training=evaluateTraining(training,{snapshot:match.snapshot(),events:fresh,playerId:0,lattice}).training;
+ }
+ assert.ok(training.completed.includes('fire'),'live fire advances from real shot events');
+ assert.equal(trainingView(training).index,2,'the course is on the capture step');
 });
