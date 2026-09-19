@@ -1,12 +1,18 @@
 // In-game patch notes. The title-screen footer is the running version; this
 // module is the human-readable release digest the Changelog screen renders. The
 // full historical record lives in docs/CHANGELOG.md and is linked from the UI.
-export const RELEASE_VERSION = 'v8.1';
-export const RELEASE_CODENAME = 'FOUNDRY';
+export const RELEASE_VERSION = 'v8.2';
+export const RELEASE_CODENAME = 'LADDER';
 export const REPO_URL = 'https://github.com/mojomast/tokenarena';
 export const FULL_CHANGELOG_URL = `${REPO_URL}/blob/main/docs/CHANGELOG.md`;
 
 export const CHANGELOG = [
+  {version:'v8.2',codename:'LADDER',date:'2026-09-19',tag:'Per-team intelligence, a server-authoritative ranked ladder, and deeper Operations field work',highlights:[
+    'LATTICE snapshots are per-team now. Each peer receives only its own team\'s private intelligence - team contacts and spots, the order feed, the command and role boards and team wallet views - while shared world state still arrives for every actor. Filtering runs at the server seam, spectators get a deliberately neutral view, and offline/local matches are unchanged. The release ships the visibility leak test that proves a team-1 client cannot read team-0 intel, plus the measured snapshot budget before and after.',
+    'Ranked arrives as a server-authoritative ladder. Queue ranked or unranked, with rating persisted through the existing progression store, placement games, documented K and team aggregation rules, and post-match deltas applied exactly once even across a reconnect. Clients cannot submit or spoof a rating; unranked play keeps the exact v8.1 behaviour. The online screens show your rating, rank band and the ranked queue state.',
+    'Operations field work deepens. Allied bots now buy and use subagent roles, start terminal HACK / DEPLOY / VAULT channels under the same ownership and contest rules humans get, complete PRIME captures and use traversal devices and depots in ordinary co-op rather than only under the validator flag. Personal REQUISITION can buy a loaner Puma through an authored, authoritative spend action with caps and feedback, and the legacy duplicate terminal state is removed in favour of the single UI contract.',
+    'Scope: this release changes simulation and server code, so the authoritative game server restarts and connected multiplayer clients briefly disconnect.',
+  ]},
   {version:'v8.1',codename:'FOUNDRY',date:'2026-09-19',tag:'Lattice Foundry terrain and bases, vertical grappling, distinct operator field roles, sculpted models and a first-match field guide',highlights:[
     'The `lattice-slice` stand-in is replaced in place by **Lattice Foundry**, a purpose-built 240 x 144 m industrial theatre that preserves the stable map id, the seven-node graph and the five capturable objectives. Every HQ, front gate, siphon, relay and depot owns a physical compound now: West and East Command behind offset blast screens, buttressed West/East Bastion gate courts, a four-entry Foundry Relay ringed by four 17 m chimney solids, sunken North/South Siphon pump courts, and four drive-through depots with collision piers and service sheds.',
     'Height is a real choice, not a decoration. Eight double-ramped roofs, four slag ridges, terrain basins and two freight chicanes give every lane an elevated option while each objective keeps an ordinary walking route for loadouts without a movement verb. The map is real collision geometry: variable terrain height, 104 collision solids and 1,103 navigable graph nodes at 49,280 static triangles across 85 mesh batches. A 24-seat match constructs in 166 ms with 3.89 ms p95 steps in validation, the first objective contest lands at 11.1 s and multiple fronts are contested for 10.8 s of a 30 s smoke.',

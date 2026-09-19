@@ -16,6 +16,34 @@ record in [VERIFICATION.md](VERIFICATION.md).
 
 ---
 
+## v8.2 · LADDER — 2026-09-19
+
+Per-team intelligence, a server-authoritative ranked ladder, and deeper
+Operations field work. This release changes simulation and server code, so the
+authoritative game server restarts and connected multiplayer clients briefly
+disconnect.
+
+### Per-team snapshots
+
+- Each peer receives only its own team's private intelligence; shared world
+  state still arrives for every actor. Spectators get a neutral view and
+  offline/local matches are unchanged.
+- The release ships a visibility leak test and the measured snapshot budget
+  before and after.
+
+### Ranked ladder
+
+- Server-authoritative rating, placements and documented team aggregation;
+  deltas apply exactly once across reconnects and clients cannot spoof a
+  rating. Unranked play keeps the v8.1 behaviour.
+- The online screens show rating, rank band and the ranked queue state.
+
+### Operations depth
+
+- Allied bots use roles, terminal channels, PRIME and traversal by default.
+- Personal REQUISITION buys a loaner Puma through an authored spend action.
+- The legacy duplicate terminal state is removed in favour of one UI contract.
+
 ## v8.1 · FOUNDRY — 2026-09-19
 
 Lattice Foundry: the LATTICE battlefield becomes a real place, the grapple
