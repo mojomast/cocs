@@ -150,6 +150,10 @@ export function createTraversalState(arena, options = {}) {
    captureCooldown: 0,
    captures: 0,
    vehicleSpawns: 0,
+   purchases: 0,
+   purchaseId: null,
+   purchaseBy: null,
+   purchaseTick: 0,
   };
  }
  return {
@@ -159,10 +163,14 @@ export function createTraversalState(arena, options = {}) {
   cooldowns: {},
   arrivals: {},
   near: {},
-  // Bots do not yet path onto devices; the engine half and the explicit
-  // `useDevice` hook are live, and a later bot-POI pass can enable auto-use.
+  // OPERATIONS fields its allies on the devices by default (`stepCocsTraversal`
+  // flips this on for `state.coop`); PvPvE keeps the opt-in gate.
   botUse: options.botUse === true,
-  stats: {uses: 0, cuts: 0, repairs: 0, locks: 0, vehicleSpawns: 0, vehicleUses: 0, arrivals: 0, depotCaptures: 0},
+  // `null` = every team may use devices (the explicit PvP opt-in); a team
+  // number restricts the autopilot to that team (the OPERATIONS default keeps
+  // the Director force's prior movement untouched).
+  botUseTeam: null,
+  stats: {uses: 0, cuts: 0, repairs: 0, locks: 0, vehicleSpawns: 0, vehicleUses: 0, arrivals: 0, depotCaptures: 0, purchases: 0},
  };
 }
 
@@ -213,6 +221,10 @@ function tickArrivals(match, traversal, dt) {
 // ===========================================================================
 const sabotageAction = device => (device.kind === 'zipline' || device.kind === 'teleporter' ? 'cut' : 'lock');
 const TRAVERSABLE_KINDS = new Set(['zipline', 'jump-pad', 'teleporter', 'launcher']);
+// The default OPERATIONS autopilot is allied-only; an explicit PvP opt-in
+// leaves `botUseTeam` null so both teams share the device layer.
+const teamUsesDevices = (traversal, team) =>
+ traversal.botUseTeam === null || traversal.botUseTeam === undefined || traversal.botUseTeam === team;
 
 function enemyNear(match, anchor, team, meters = DEVICE_INTERACT_METERS) {
  for (const actor of match?.actors ?? []) {
@@ -326,6 +338,7 @@ function tryDeviceUse(match, traversal) {
   if (!deviceUsable(device) || !device.from) continue;
   for (const actor of [...(match?.actors ?? [])].filter(Boolean).sort((a, b) => a.id - b.id)) {
    if (actor.health <= 0 || (actor.team !== 0 && actor.team !== 1)) continue;
+   if (!teamUsesDevices(traversal, actor.team)) continue;
    if (!actor.bot) continue;
    const intent = actor.bot.cocsDevice;
    // The tactical planner (`cocsTraversalChoice`) is authoritative: it posts an
@@ -363,6 +376,7 @@ function tryDeviceSabotage(match, traversal, dt) {
    const action = sabotageAction(device);
    for (const actor of [...(match?.actors ?? [])].filter(Boolean).sort((a, b) => a.id - b.id)) {
     if (actor.health <= 0 || (actor.team !== 0 && actor.team !== 1)) continue;
+    if (!teamUsesDevices(traversal, actor.team)) continue;
     if (!actor.bot) continue;
     if (!actorAtAnchor(actor, device.from)) continue;
     if (enemyNear(match, device.from, actor.team)) continue;
@@ -372,6 +386,7 @@ function tryDeviceSabotage(match, traversal, dt) {
   } else if (device.cuttable || device.lockable) {
    for (const actor of [...(match?.actors ?? [])].filter(Boolean).sort((a, b) => a.id - b.id)) {
     if (actor.health <= 0 || (actor.team !== 0 && actor.team !== 1)) continue;
+    if (!teamUsesDevices(traversal, actor.team)) continue;
     if (!actor.bot) continue;
     if (!actorAtAnchor(actor, device.from)) continue;
     if (enemyNear(match, device.from, actor.team)) continue;
@@ -490,13 +505,53 @@ export function noteVehicleUse(traversal, vehicle) {
 }
 
 /**
- * The §6A.5 `REQ`-purchase seam is deliberately stubbed for this wave: the
- * first-come depot loaner ships, while buying a Puma with personal `REQ` is
- * labelled but not wired. Kept here so the deployment menu has one stable call
- * to light up later without touching the engine.
+ * The §6A.5/§6A.7 `REQ`-bought Puma. The personal `REQ` debit and validation
+ * live in `coopBuyAction` (the one authoritative spend point); this helper owns
+ * the deterministic world mutation: one live bought Puma per depot, spawned at
+ * the depot pad with the same 3 s immunity and `depotId` tagging as the free
+ * loaner. A destroyed purchase can be re-bought; a live one blocks a duplicate.
  */
-export function purchaseDepotVehicle() {
- return {ok: false, item: 'puma', cost: 150, reason: 'req-purchase-v1-later'};
+export function depotPurchaseState(match, depot) {
+  if (!depot || depot.purchaseId == null) return {available: true, vehicle: null};
+  const vehicle = (match?.vehicles ?? []).find(entry => entry && entry.id === depot.purchaseId) ?? null;
+  return {available: !(vehicle && vehicle.health > 0), vehicle};
+}
+
+/** Spawn one bought Puma at its depot. Pure world mutation, no currency. */
+export function purchaseDepotVehicle(match, state, depot, actor) {
+  if (!depot || !actor || depot.owner !== actor.team) return {ok: false, reason: 'depot'};
+  const current = depotPurchaseState(match, depot);
+  if (!current.available) return {ok: false, reason: 'vehicle'};
+  depot.purchases = num(depot.purchases, 0) + 1;
+  const id = `${depot.id}-buy-${depot.purchases}`;
+  const template = {...PUMA, id, kind: 'puma'};
+  const vehicle = createVehicle(template);
+  vehicle.id = id;
+  vehicle.kind = 'puma';
+  vehicle.depotId = depot.id;
+  vehicle.ownerTeam = actor.team;
+  vehicle.purchasedBy = actor.id;
+  // Offset from the free loaner's pad point so the two Pumas never spawn inside
+  // each other; the exact offsets are authored data, not RNG.
+  const position = {
+   x: num(depot.vehicleOffset.x, depot.x) + 3,
+   y: num(depot.vehicleOffset.y, depot.y),
+   z: num(depot.vehicleOffset.z, depot.z) + 3,
+  };
+  vehicle.spawn = {...position};
+  respawnVehicle(vehicle, position, 0);
+  vehicle.spawnImmunity = depot.spawnImmunitySeconds;
+  vehicle.lastTeam = actor.team;
+  match.vehicles.push(vehicle);
+  depot.purchaseId = id;
+  depot.purchaseBy = actor.id;
+  depot.purchaseTick = num(state?.tick, 0);
+  if (state?.traversal?.stats) {
+   state.traversal.stats.purchases = num(state.traversal.stats.purchases, 0) + 1;
+   state.traversal.stats.vehicleSpawns = num(state.traversal.stats.vehicleSpawns, 0) + 1;
+  }
+  match.emit?.('cocs-depot-purchase', {depot: depot.id, vehicle: id, team: actor.team, actor: actor.id, item: 'puma'});
+  return {ok: true, reason: null, vehicle};
 }
 
 // ===========================================================================
@@ -506,6 +561,17 @@ export function purchaseDepotVehicle() {
 export function stepCocsTraversal(match, state, dt) {
  const traversal = state?.traversal;
  if (!traversal) return null;
+ // OPERATIONS exercises the traversal/depot layer by default: allied bots are
+ // the ones driving devices and loaners when a human team is bot-filled. PvPvE
+ // `cocs` keeps its explicit `traversalBotUse` opt-in (byte-identical). A test
+ // or mode may still opt out with `state.coop.traversalBotUse === false`.
+ if (state.coop && state.coop.traversalBotUse !== false && traversal.botUse !== true) {
+  traversal.botUse = true;
+  // The Director force keeps its pre-O1d movement: the default autopilot is the
+  // allied (team 0) team only. An explicit `objective.traversalBotUse` build
+  // leaves `botUseTeam` null so both teams use devices, as before.
+  if (traversal.botUseTeam === null || traversal.botUseTeam === undefined) traversal.botUseTeam = 0;
+ }
  traversal.tick = num(traversal.tick, 0) + 1;
  for (const key of Object.keys(traversal.cooldowns)) {
   const next = num(traversal.cooldowns[key], 0) - dt;
@@ -625,6 +691,7 @@ export function cocsTraversalSnapshot(state) {
    progress: [round(depot.progress?.[0]), round(depot.progress?.[1])],
    contested: depot.contested === true,
    vehicle: {id: depot.vehicleId, health: num(depot.vehicleHealth, 0), respawn: round(depot.respawn)},
+   purchase: depot.purchaseId ? {id: depot.purchaseId, by: depot.purchaseBy ?? null, atTick: num(depot.purchaseTick, 0)} : null,
   };
  });
  const arrivals = sortedIds(traversal.arrivals).map(id => ({actor: id, remaining: round(traversal.arrivals[id].remaining), telegraph: traversal.arrivals[id].telegraph === true, x: num(traversal.arrivals[id].x, 0), z: num(traversal.arrivals[id].z, 0)}));

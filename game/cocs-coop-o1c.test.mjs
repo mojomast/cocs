@@ -258,8 +258,9 @@ test('terminals expose HACK/DEPLOY/VAULT/SABOTAGE lifecycles and a snapshot', ()
   for (let i = 0; i < ticks(3) + 3 && sit.state !== 'cut'; i++) { pin(m, actor, relay.x, relay.z); m.step(DT, {inputs: {}}); }
   assert.equal(sit.state, 'cut');
   assert.ok(state.cuts.includes('relay-0'), 'the cut denies the relay link');
-  // The snapshot exposes the flat UI contract array (id-sorted) and keeps the
-  // raw id-keyed tree available on `terminalState`.
+  // The snapshot exposes the flat UI contract array (id-sorted) plus the
+  // cumulative `terminalStats`; `state.terminals.terminals` is the raw tree the
+  // array is built from and `terminalState` is no longer a consumer contract.
   const snap = cocsSnapshot(m);
   assert.ok(Array.isArray(snap.terminals), 'the cocs snapshot exposes a flat terminal array');
   const sabotageEntry = snap.terminals.find(entry => entry.id === 'sabotage-relay-0');
@@ -271,8 +272,8 @@ test('terminals expose HACK/DEPLOY/VAULT/SABOTAGE lifecycles and a snapshot', ()
       assert.ok(Object.hasOwn(entry, key), `terminal entry carries ${key}`);
     }
   }
-  assert.ok(Array.isArray(snap.terminalState?.terminals), 'the raw id-keyed terminal tree stays available');
-  assert.ok(snap.terminalState.terminals.some(entry => entry.id === 'hack-relay-0'));
+  assert.equal(typeof snap.terminalStats, 'object', 'cumulative terminal stats ride the same contract');
+  assert.ok(snap.terminalStats.hacks >= 1 && snap.terminalStats.vaultStores >= 1 && snap.terminalStats.vaultPulls >= 1);
   // A running channel surfaces as `active` with live progress on the UI array.
   assert.equal(terminalInteract(m, state, actor.id, 'hack-relay-0', 'HACK').ok, true);
   pin(m, actor, relay.x, relay.z);
@@ -492,7 +493,7 @@ test('O1c terminals/roles/command stay out of PvPvE `cocs` snapshots', () => {
   step(coop, 30);
   const coopSnap = cocsSnapshot(coop);
   assert.ok(Array.isArray(coopSnap.terminals) && coopSnap.terminals.length > 0, 'co-op exposes the flat terminal array');
-  assert.ok(coopSnap.coop && Array.isArray(coopSnap.terminalState?.terminals), 'the raw id-keyed tree stays available as terminalState');
+  assert.equal(typeof coopSnap.terminalStats, 'object', 'co-op exposes cumulative terminal stats');
   assert.ok(coopSnap.command && coopSnap.command.lease, 'command.lease is exposed additively');
   assert.ok(Array.isArray(coopSnap.command.slices));
   assert.ok(coopSnap.roles && coopSnap.roles.threads, 'the role/thread tree is exposed');

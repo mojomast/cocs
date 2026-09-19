@@ -22,7 +22,7 @@
 import {RULES} from './data.mjs';
 import {SUBAGENTS, convertCoopReq, reqItem, reqPurchase} from './cocs-economy.mjs';
 import {addActorReq, capturableNodes, compareCocsOrders, connectivityIncome, cutLink, nodeById, repairLink} from './cocs.mjs';
-import {deviceInteract} from './cocs-traversal.mjs';
+import {depotPurchaseState, deviceInteract, purchaseDepotVehicle} from './cocs-traversal.mjs';
 import {spawnGroup, updateEnemyRoles} from './singleplayer.mjs';
 import {
   COOP_AUTO_SPEND, COOP_BONUS_ORDER, COOP_DENIAL, COOP_ECONOMY, COOP_PACING,
@@ -47,6 +47,12 @@ export const COOP_RETARGET_SECONDS = 5;
 export const COOP_WAVE_LIVE_CAP = 12;
 export const COOP_EXECUTOR_LEASE_TICKS = 600; // 10 s at RULES.dt
 export const COOP_THREAD_CAP = 6;
+// O1c role depth: the Chief fills a combat body first, then the authored roles
+// by need, rotating the fallback deterministically. A role agent retires to HQ
+// at the end of its §8.1 lifespan, so the squad turns over across an operation
+// and every authored role can be fielded.
+export const COOP_ROLE_ROTATION = Object.freeze(['fighter', 'harvester', 'builder', 'scout']);
+export const COOP_BOT_ABILITY_TICKS = Object.freeze({rally: 600, repair: 300, spot: 480});
 
 const num = (value, fallback = 0) => (Number.isFinite(Number(value)) ? Number(value) : fallback);
 const clamp01 = value => Math.max(0, Math.min(1, value));
@@ -54,6 +60,8 @@ const ticks = seconds => Math.max(1, Math.round(num(seconds, 0) / (RULES.dt || 1
 // Actor lookup by id, never by array index: the roster is not guaranteed to be
 // id-indexed once other systems (scout slots, wave force) allocate ids.
 const actorById = (match, id) => (match?.actors ?? []).find(actor => actor && actor.id === id) ?? null;
+// A subagent that has not retired to HQ is live for THREADS/upkeep/squad caps.
+export const coopSubagentLive = actor => Boolean(actor && actor.health > 0 && actor.subagentRetired !== true);
 
 // ---------------------------------------------------------------------------
 // State.
@@ -167,6 +175,9 @@ export function createCoopState(state, {tier = DEFAULT_COCS_TIER} = {}) {
     commandSpent: {wave: 0, byPeer: {}, flux: 0},
     leaseRequests: [],
     pendingLease: null,
+    // Personal REQ purchases (the depot deployment menu, §6A.7). Bounded and
+    // deterministic; exposed additively on the co-op snapshot for the feed/HUD.
+    buyLog: [],
     // --- O1c subagents (roles) + role abilities ---------------------------
     subagents: {},                 // id -> {id, role, team, spawnedTick, nodeId}
     subagentIds: [],
@@ -575,6 +586,73 @@ export function processCocsSpends(match, state) {
   return applied;
 }
 
+// ---------------------------------------------------------------------------
+// O1c allied role policy. Deterministic, id-free and need-driven: the Chief
+// fields a FIGHTER baseline, then a BUILDER when something is broken, a
+// HARVESTER when the team owns a siphon, a SCOUT while enemies are up; the
+// authored rotation is the fallback so late windows still turn the roster over.
+// ---------------------------------------------------------------------------
+function brokenTargetNear(match, a, state, meters = Infinity) {
+  let found = false;
+  const close = point => {
+    if (!point) return false;
+    if (meters === Infinity) return true;
+    return Math.hypot(num(point.x, 0) - num(a?.x, 0), num(point.z, 0) - num(a?.z, 0)) <= meters;
+  };
+  const devices = state?.traversal?.devices ?? {};
+  for (const id of Object.keys(devices).sort()) {
+    const device = devices[id];
+    if (device && device.state !== 'live' && close(device.from)) { found = true; break; }
+  }
+  if (!found) {
+    const terminals = state?.terminals?.terminals ?? {};
+    for (const id of Object.keys(terminals).sort()) {
+      const terminal = terminals[id];
+      if (terminal && terminal.state !== 'live' && close(terminal)) { found = true; break; }
+    }
+  }
+  return found;
+}
+
+/**
+ * The authored role the Chief buys next, as a pure function of sorted state.
+ * The opening keeps the shipped parity (two FIGHTERS), then the utility slot
+ * rotates through the authored roles by wave (`builder -> scout -> harvester`)
+ * and takes the first one whose need exists and which is not already live.
+ * While the team is behind on the lattice the second slot stays a FIGHTER, so
+ * fielding a support role never costs the front a body.
+ */
+export function coopAutoRole(match, state, coop = state?.coop) {
+  if (!coop) return 'fighter';
+  const live = coopSubagentActors(match, coop).filter(actor => actor.subagentRole);
+  const has = role => live.some(actor => actor.subagentRole === role);
+  if (!has('fighter')) return 'fighter';
+  const capturable = capturableNodes(state);
+  const own = capturable.filter(node => node.owner === 0).length;
+  const enemy = capturable.filter(node => node.owner === 1).length;
+  const behind = enemy > own;
+  if (behind || num(coop.wavesCleared, 0) < 2) return 'fighter';
+  const need = {
+    builder: brokenTargetNear(match, live[0], state),
+    harvester: capturable.some(node => node.archetype === 'economy' && node.owner === 0),
+    scout: (match?.actors ?? []).some(actor => actor && actor.health > 0 && actor.team === 1 && actor.isDirectorWave !== true),
+  };
+  const rotation = ['builder', 'scout', 'harvester'];
+  const wave = Math.max(1, Math.round(num(coop.wave, 1)));
+  for (let step = 0; step < rotation.length; step++) {
+    const role = rotation[(wave + step) % rotation.length];
+    if (need[role] && !has(role)) return role;
+  }
+  // Every needed utility is already live: keep the authored order turning so a
+  // late window can still field an unfielded role.
+  const spawned = Math.max(0, Math.round(num(coop.subagentStats?.spawned, 0)));
+  for (let step = 0; step < COOP_ROLE_ROTATION.length; step++) {
+    const role = COOP_ROLE_ROTATION[(spawned + step) % COOP_ROLE_ROTATION.length];
+    if (!has(role)) return role;
+  }
+  return 'fighter';
+}
+
 // Friendly squad bot (REINFORCE). A normal AI ally on team 0, so the shipped
 // bot brain and `cocsTeamPlan` drive it; it never captures for the Director and
 // never counts as wave force. Capped so the actor budget stays ≤ 24.
@@ -586,31 +664,50 @@ export function spawnCoopSquad(match, state, {role = 'fighter'} = {}) {
   const coop = state?.coop;
   if (!coop) return null;
   const cap = Math.max(0, Math.round(num(COOP_SINKS.REINFORCE.squadCap, 1)));
-  const live = (coop.squadIds ?? []).filter(id => (actorById(match, id)?.health ?? 0) > 0).length;
+  const live = (coop.squadIds ?? []).filter(id => coopSubagentLive(actorById(match, id))).length;
   if (live >= cap) return null;
   const def = coopRole(role) ?? COOP_ROLES.fighter;
-  const id = nextActorId(match);
-  const actor = match.actor(id, 'chatgpt', 'openclaw');
+  // Reuse a retired role slot so a long operation's role churn never grows the
+  // actor roster (the scout-slot recycling contract). One new actor per
+  // concurrent squad slot at most.
+  const reused = coopRetiredSlot(match, coop);
+  const actor = reused ?? match.actor(nextActorId(match), 'chatgpt', 'openclaw');
+  const id = actor.id;
+  if (!reused) match.actors.push(actor);
   actor.team = 0;
   actor.isCoopSquad = true;
   actor.isSubagent = true;
-  actor.subagentRole = def.id;
-  actor.subagentTick = num(coop.tick, 0);
-  actor.name = def.name;
+  actor.subagentRetired = false;
+  actor.isNpc = false;
   if (!actor.bot) actor.bot = {route: [], think: 0, target: -1, memory: 0, reaction: 0, stuck: 0, last: {x: 0, y: 0, z: 0}, state: 'roam', patrol: 0, flank: null, flankDone: false, recover: 0, suppressed: 0, threat: -1, standoff: null, strafeReverse: -99};
-  match.actors.push(actor);
   match.spawn(actor);
+  // A reused slot may carry a pending engine respawn; its spawn already ran.
+  actor.dead = 0;
   // `spawn()` re-derives maxHealth from the class loadout; apply the role
   // envelope afterwards so the §8.1 numbers win.
+  actor.subagentRole = def.id;
+  actor.subagentTick = num(coop.tick, 0);
+  actor.subagentNode = null;
+  actor.subagentIdle = false;
+  actor.name = def.name;
   actor.maxHealth = def.health;
   actor.health = actor.maxHealth;
-  coop.squadIds.push(id);
-  coop.subagentIds.push(id);
+  if (!coop.squadIds.includes(id)) coop.squadIds.push(id);
+  if (!coop.subagentIds.includes(id)) coop.subagentIds.push(id);
   coop.subagents[id] = {id, role: def.id, team: 0, spawnedTick: num(coop.tick, 0), nodeId: null};
   coop.subagentStats.spawned = num(coop.subagentStats.spawned, 0) + 1;
   coop.subagentStats.byRole[def.id] = num(coop.subagentStats.byRole[def.id], 0) + 1;
-  match.emit?.('coop-reinforce', {wave: coop.wave, actor: id, squad: live + 1, cap, role: def.id});
+  match.emit?.('coop-reinforce', {wave: coop.wave, actor: id, squad: live + 1, cap, role: def.id, reused: Boolean(reused)});
   return id;
+}
+
+function coopRetiredSlot(match, coop) {
+  const ids = [...new Set(coop?.subagentIds ?? [])].sort((a, b) => a - b);
+  for (const id of ids) {
+    const actor = actorById(match, id);
+    if (actor && actor.subagentRetired === true) return actor;
+  }
+  return null;
 }
 
 // ---------------------------------------------------------------------------
@@ -624,11 +721,62 @@ export function coopSubagentActors(match, coop) {
   for (const actor of match?.actors ?? []) {
     if (actor && actor.health > 0 && (actor.isSubagent === true || actor.isScout === true)) ids.add(actor.id);
   }
-  return [...ids].sort((a, b) => a - b).map(id => actorById(match, id)).filter(actor => actor && actor.health > 0);
+  return [...ids].sort((a, b) => a - b).map(id => actorById(match, id)).filter(actor => coopSubagentLive(actor));
+}
+
+// §8.1 lifespan: a role agent returns to HQ at the end of its authored life
+// instead of dying. It stays a stable actor id (the engine's array-index
+// identity is load-bearing) but stops consuming THREADS/upkeep and leaves the
+// lattice plan, so the next intermission can call up another authored role.
+function retireExpiredCoopRoles(match, state) {
+  if (!state?.coop) return 0;
+  let retired = 0;
+  for (const actor of coopSubagentActors(match, state.coop).filter(entry => entry.isScout !== true)) {
+    const def = coopRole(actor.subagentRole ?? 'fighter');
+    const lifespanTicks = ticks(num(def?.lifespanSeconds, 120));
+    if (num(state.coop.tick, 0) - num(actor.subagentTick, 0) < lifespanTicks) continue;
+    if (retireCoopSubagent(match, state, actor)) retired++;
+  }
+  return retired;
+}
+
+function retireCoopSubagent(match, state, actor) {
+  if (!actor || actor.subagentRetired === true) return false;
+  if (actor.vehicleId !== null && actor.vehicleId !== undefined) releaseCoopVehicle(match, actor);
+  actor.subagentRetired = true;
+  actor.isSubagent = false;
+  actor.isCoopSquad = false;
+  actor.subagentIdle = false;
+  actor.bot = null;
+  actor.isNpc = true;
+  const home = (state?.nodes ?? []).find(node => node.archetype === 'hq' && node.owner === 0) ?? null;
+  if (home) {
+    actor.x = home.x;
+    actor.z = home.z;
+    actor.y = num(home.y, 0);
+    actor.vx = 0; actor.vy = 0; actor.vz = 0;
+  }
+  actor.health = Math.max(1, num(actor.health, 1));
+  match?.emit?.('coop-subagent-retire', {actor: actor.id, role: actor.subagentRole ?? null, wave: num(state?.coop?.wave, 0)});
+  return true;
+}
+
+function releaseCoopVehicle(match, actor) {
+  try {
+    match?.releaseVehicle?.(actor, undefined, 'retire');
+  } catch {
+    actor.vehicleId = null;
+    actor.vehicleSeat = null;
+  }
 }
 
 function stepCoopSubagents(match, state, dt) {
   const coop = state.coop;
+  // Retire roles that have lived their authored lifespan before the intermission
+  // spend, so the Chief's `coopAutoSpend` refits the squad in the same window
+  // rather than leaving a body gap. Mid-wave retirements never happen: an
+  // expired agent finishes the wave it is fighting.
+  if (coop.phase === 'intermission') retireExpiredCoopRoles(match, state);
   // The team-0 scout's upkeep already rides the `stepCocs` scout lifecycle, so
   // only the REINFORCE squad roles are charged here (no double drain).
   const actors = coopSubagentActors(match, coop).filter(actor => actor.isScout !== true);
@@ -737,7 +885,15 @@ function maybeHarvesterPrime(match, state) {
     const hostile = (match.actors ?? []).some(actor => actor && actor.health > 0 && actor.team === 1 && Math.hypot(num(actor.x, 0) - node.x, num(actor.z, 0) - node.z) <= num(node.r, 4) + 10);
     if (hostile) continue;
     const harvester = harvesters.find(actor => !actor.subagentNode) ?? harvesters[0];
-    if (harvester) { coopPrimeNode(match, state, harvester, node.id); return; }
+    // Only a HARVESTER already on station starts the channel; the agent walks
+    // to its siphon first (`cocsRoleDestination`), then the Chief primes. This
+    // stops the start/cancel churn when the channel would be interrupted by the
+    // leash on the very next tick.
+    if (!harvester) continue;
+    const station = Math.max(num(node.r, 4), PRIME_LEASH);
+    if (Math.hypot(num(harvester.x, 0) - node.x, num(harvester.z, 0) - node.z) > station) continue;
+    coopPrimeNode(match, state, harvester, node.id);
+    return;
   }
 }
 
@@ -762,11 +918,22 @@ export function coopRoleRally(match, state, actor, ability = null) {
 }
 
 /** Repair every broken device/terminal (the BUILDER multi-target ability). */
-export function coopRoleRepair(match, state, actor) {
+export function coopRoleRepair(match, state, actor, options = {}) {
   const coop = state?.coop;
   if (!coop || !actor) return [];
   const def = roleAbility('builder', 'REPAIR');
-  const targets = roleAbilityTargets(match, state, actor, def);
+  const radius = num(options.radius, Infinity);
+  const inReach = id => {
+    if (radius === Infinity) return true;
+    const terminal = String(id).startsWith('terminal:')
+      ? state.terminals?.terminals?.[String(id).slice('terminal:'.length)]
+      : null;
+    const device = terminal ? null : state?.traversal?.devices?.[id];
+    const point = terminal ?? device?.from ?? device?.target ?? device;
+    if (!point) return false;
+    return Math.hypot(num(point.x, 0) - num(actor.x, 0), num(point.z, 0) - num(actor.z, 0)) <= radius;
+  };
+  const targets = roleAbilityTargets(match, state, actor, def).filter(inReach);
   const repaired = [];
   for (const id of targets) {
     if (String(id).startsWith('terminal:')) {
@@ -802,18 +969,70 @@ export function coopRoleAction(match, state, actorId, verb, {target = null} = {}
   if (key === 'SPOT') {
     const def = roleAbility('scout', 'SPOT');
     const targets = roleAbilityTargets(match, state, actor, def);
+    // §8.1/§4.7: SPOT is combat leverage, not intel — every marked enemy takes
+    // +15% from the spotter's team while the window runs (read by
+    // `cocsDamageScale`). Same mark shape as the SCAN sweep.
+    const until = num(state.tick, 0) + Math.max(1, Math.round(num(def?.seconds, 8) / (RULES.dt || 1 / 60)));
+    if (targets.length) {
+      state.spots ??= {};
+      for (const id of targets) {
+        const target = actorById(match, id);
+        if (!target) continue;
+        state.spots[id] = {team: actor.team, until, by: actor.id, x: num(target.x, 0), z: num(target.z, 0), atTick: num(state.tick, 0)};
+      }
+    }
     const coop = state?.coop;
     if (coop && targets.length) coop.roleStats.spots = num(coop.roleStats.spots, 0) + 1;
-    match?.emit?.('cocs-role-spot', {actor: actor.id, targets});
+    match?.emit?.('cocs-role-spot', {actor: actor.id, targets, until, bonus: num(def?.damageBonus, 0.15)});
     return {ok: true, reason: null, targets};
   }
   return {ok: false, reason: 'unknown-verb'};
+}
+
+// Allied role agents fire their authored ability on a fixed cadence when a
+// legal target exists. Deterministic, id-sorted, no RNG:
+//   FIGHTER  RALLY when a squadmate is wounded inside the rally radius;
+//   BUILDER  REPAIR when a broken terminal/device is within reach;
+//   SCOUT    SPOT when an enemy is inside the spot radius.
+// HARVESTER PRIME rides the existing `maybeHarvesterPrime` cadence.
+function stepCoopBotAbilities(match, state) {
+  const coop = state?.coop;
+  if (!coop) return;
+  const tick = num(state.tick, 0);
+  const agents = coopSubagentActors(match, coop)
+    .filter(actor => actor.isScout !== true && actor.subagentRole)
+    .sort((a, b) => a.id - b.id);
+  for (const actor of agents) {
+    const role = actor.subagentRole;
+    const ready = cooldown => tick - num(actor.subagentAbilityAt, -1e9) >= cooldown;
+    if (role === 'fighter' && ready(COOP_BOT_ABILITY_TICKS.rally)) {
+      const targets = roleAbilityTargets(match, state, actor, roleAbility('fighter', 'RALLY'));
+      const wounded = targets.some(id => {
+        const target = actorById(match, id);
+        return target && num(target.health, 0) < num(target.maxHealth, 1) - 1;
+      });
+      if (!wounded) continue;
+      actor.subagentAbilityAt = tick;
+      coopRoleRally(match, state, actor);
+    } else if (role === 'builder' && ready(COOP_BOT_ABILITY_TICKS.repair)) {
+      if (!brokenTargetNear(match, actor, state, 14)) continue;
+      actor.subagentAbilityAt = tick;
+      coopRoleRepair(match, state, actor, {radius: 14});
+    } else if (role === 'scout' && ready(COOP_BOT_ABILITY_TICKS.spot)) {
+      const targets = roleAbilityTargets(match, state, actor, roleAbility('scout', 'SPOT'));
+      if (!targets.length) continue;
+      actor.subagentAbilityAt = tick;
+      coopRoleAction(match, state, actor.id, 'SPOT');
+    }
+  }
 }
 
 function stepCoopRoles(match, state, dt) {
   stepCoopPrimes(match, state, dt);
   // Autonomous prime on a slow deterministic cadence (no RNG).
   if (num(state.tick, 0) > 0 && num(state.tick, 0) % 120 === 0) maybeHarvesterPrime(match, state);
+  // Allied role agents use their authored abilities on their own cadence.
+  if (num(state.tick, 0) > 0) stepCoopBotAbilities(match, state);
   void dt;
 }
 
@@ -840,7 +1059,7 @@ function autoSinkTarget(match, state, sink) {
   }
   if (sink.verb === 'REINFORCE') {
     const cap = Math.max(0, Math.round(num(COOP_SINKS.REINFORCE.squadCap, 1)));
-    const live = (state.coop.squadIds ?? []).filter(id => (actorById(match, id)?.health ?? 0) > 0).length;
+    const live = (state.coop.squadIds ?? []).filter(id => coopSubagentLive(actorById(match, id))).length;
     return live < cap ? null : undefined;
   }
   return null;
@@ -864,9 +1083,17 @@ export function coopAutoSpend(match, state) {
   const floor = cap * Math.max(0, Math.min(0.9, num(COOP_AUTO_SPEND.reserveFraction, 0.15)));
   let spends = 0;
   let guard = 0;
+  // The Chief refits an empty squad slot first: a retained squad is the whole
+  // point of the intermission window, and it keeps the later sink pass from
+  // draining the FLUX the REINFORCE callback needs. Authored order otherwise.
+  const order = [...COOP_SINK_ORDER];
+  if (autoSinkTarget(match, state, COOP_SINKS.REINFORCE) === null) {
+    order.splice(order.indexOf('REINFORCE'), 1);
+    order.unshift('REINFORCE');
+  }
   while (num(state.flux?.[0], 0) > floor + 1e-9 && guard++ < 64) {
     let did = false;
-    for (const verb of COOP_SINK_ORDER) {
+    for (const verb of order) {
       const sink = COOP_SINKS[verb];
       if (num(coop.windowSpend[verb], 0) >= autoSinkLimit(coop, state, sink)) continue;
       const target = autoSinkTarget(match, state, sink);
@@ -877,6 +1104,7 @@ export function coopAutoSpend(match, state) {
         tick: num(coop.tick, 0), peerId: 'chief-0',
         cardId: `auto-${verb}-${coop.wave}-${num(coop.windowSpend[verb], 0)}`,
         verb, target,
+        ...(sink.verb === 'REINFORCE' ? {role: coopAutoRole(match, state, coop)} : {}),
       });
       if (result.ok) { spends++; did = true; }
     }
@@ -1324,6 +1552,8 @@ function clearWave(match, state) {
   match.emit?.('director-intermission', {wave: coop.wave, nextWave: coop.wave + 1, seconds: tier.intermissionSeconds, budget: coop.pressure});
   if (coop.intermissionOpen) {
     coop.spendStats.windows = num(coop.spendStats.windows, 0) + 1;
+    // Lifespans end before the spend window so the Chief can refit the squad.
+    retireExpiredCoopRoles(match, state);
     match.emit?.('coop-intermission-open', {wave: coop.wave, nextWave: coop.wave + 1, seconds: tier.intermissionSeconds, budget: Math.round(num(state.flux?.[0], 0) * 100) / 100});
     coopAutoSpend(match, state);
   }
@@ -1538,6 +1768,10 @@ function stepIntermission(match, state) {
   const coop = state.coop;
   coop.phaseTicks += 1;
   coop.intermissionTicks -= 1;
+  // The spend window keeps converting surplus FLUX into next-wave prep: a
+  // short deterministic cadence lets the Chief refill a squad that just retired
+  // (the one-shot clearWave call runs before retirement).
+  if (coop.intermissionOpen && num(coop.tick, 0) > 0 && num(coop.tick, 0) % 60 === 0) coopAutoSpend(match, state);
   if (coop.intermissionTicks <= 0) startWave(match, state);
 }
 
@@ -1565,7 +1799,7 @@ function stepSiege(match, state, dt) {
       if (!actor || actor.health <= 0) continue;
       if (Math.hypot(actor.x - hq.x, actor.z - hq.z) > siege.radius) continue;
       if (actor.team === 1) attackers++;
-      else if (actor.team === 0 && actor.isDirectorWave !== true) defenders++;
+      else if (actor.team === 0 && actor.isDirectorWave !== true && actor.subagentRetired !== true) defenders++;
     }
   }
   siege.attackers = attackers;
@@ -1721,7 +1955,7 @@ function sinkViews(match, state) {
     if (sink.verb === 'FORTIFY') available = capturableNodes(state).some(node => node.owner === 0 && num(node.captureResist, 0) <= 0);
     else if (sink.verb === 'REPAIR') available = coop.siege.health < coop.siege.max || (state.cuts ?? []).length > 0 || Boolean(state?.traversal?.devices && Object.values(state.traversal.devices).some(device => device?.state === 'cut'));
     else if (sink.verb === 'REINFORCE') {
-      const live = (coop.squadIds ?? []).filter(id => (actorById(match, id)?.health ?? 0) > 0).length;
+      const live = (coop.squadIds ?? []).filter(id => coopSubagentLive(actorById(match, id))).length;
       available = live < Math.max(0, Math.round(num(sink.squadCap, 1)));
     }
     views.push({
@@ -1913,9 +2147,14 @@ export function cocsCoopSnapshot(match, state) {
       route: {...command.route},
       policy: {...command.policy},
     } : null,
-    // O1c terminal HUD contract (flat array; raw tree preserved on
-    // `snapshot.cocs.terminalState`). Sorted by id, so delta-friendly.
+    // O1c terminal HUD contract (flat array; the single UI contract is
+    // `snapshot.cocs.terminals`, built from `state.terminals.terminals`). The
+    // cumulative stats are additive on `terminalStats`; the legacy raw-tree
+    // duplicate is no longer a consumer contract.
     terminals: coopTerminalSnapshot(state),
+    terminalStats: state.terminals ? {...(state.terminals.stats ?? {})} : null,
+    // Personal REQ purchases, for the order feed / ops review.
+    buys: (coop.buyLog ?? []).slice(-8).map(entry => ({...entry})),
     // O1c subagent roles + ability telemetry (additive).
     roles: {
       threads: {used: command ? command.threads.used : 0, cap: command ? command.threads.cap : 0},
@@ -2044,11 +2283,23 @@ export function coopBuyAction(match, state, record = {}) {
   if (!actor || actor.health <= 0) return {ok: false, reason: 'missing'};
   const item = reqItem(record.itemId);
   if (!item) return {ok: false, reason: 'unknown-item'};
-  if (item.launch !== true) return {ok: false, reason: 'not-launched'};
+  // `launch` is the PvPvE launch list; `coopLaunch` is the OPERATIONS list
+  // (currently the Puma). Both are authored catalogue flags.
+  if (item.launch !== true && item.coopLaunch !== true) return {ok: false, reason: 'not-launched'};
   const team = actor.team === 1 ? 1 : 0;
+  // The Puma needs a friendly depot before any REQ moves (the depot is the
+  // spend point, §6A.7) and a free purchase slot (one live bought Puma/depot).
+  let depot = null;
+  if (item.id === 'puma') {
+    depot = state?.traversal?.depots?.[String(record.depotId ?? '')] ?? null;
+    if (!depot || depot.owner !== team) return {ok: false, reason: 'depot'};
+    if (!depotPurchaseState(match, depot).available) return {ok: false, reason: 'vehicle'};
+  }
   const peerId = String(record.peerId ?? '');
   const isCommander = state?.coop?.commandSeat?.[team] === peerId || (peerId === '' && item.commanderOnly !== true);
   const relayOwned = (state?.nodes ?? []).some(node => node && node.archetype === 'relay' && node.owner === team);
+  // Quantization never authorizes a spend: the authoritative float `actor.req`
+  // is compared directly, so 149.999 does not buy a 150 item.
   const result = reqPurchase(record.itemId, {
     balance: num(actor.req, 0),
     isCommander,
@@ -2061,7 +2312,18 @@ export function coopBuyAction(match, state, record = {}) {
   actor.reqBuff = item.id;
   // Deterministic personal effects. Team-wide/commander items only record the
   // purchase; their team payoff rides the existing economy in a later wave.
-  if (item.id === 'field-repair') actor.health = Math.min(num(actor.maxHealth, actor.health), num(actor.health, 0) + 50);
+  let vehicleId = null;
+  if (item.id === 'puma') {
+    const spawned = purchaseDepotVehicle(match, state, depot, actor);
+    if (!spawned.ok) {
+      // The world changed between the precheck and the debit; refund in full so
+      // a rejected purchase can never consume REQ.
+      actor.req = num(actor.req, 0) + num(result.cost, 0);
+      actor.reqSpent = Math.max(0, num(actor.reqSpent, 0) - num(result.cost, 0));
+      return {ok: false, reason: spawned.reason ?? 'vehicle'};
+    }
+    vehicleId = spawned.vehicle?.id ?? null;
+  } else if (item.id === 'field-repair') actor.health = Math.min(num(actor.maxHealth, actor.health), num(actor.health, 0) + 50);
   else if (item.id === 'overshield') actor.temporaryShield = Math.max(num(actor.temporaryShield, 0), 50);
   else if (item.id === 'haste') {
     actor.powerups ??= {};
@@ -2074,8 +2336,20 @@ export function coopBuyAction(match, state, record = {}) {
       if (Number.isFinite(cap) && actor.ammo[index] < cap) actor.ammo[index] = cap;
     }
   }
-  match?.emit?.('cocs-buy', {actor: actor.id, team, itemId: item.id, cost: num(result.cost, 0), req: num(actor.req, 0)});
-  return {ok: true, reason: null, itemId: item.id, cost: num(result.cost, 0)};
+  match?.emit?.('cocs-buy', {
+    actor: actor.id, team, itemId: item.id, cost: num(result.cost, 0), req: num(actor.req, 0),
+    ...(vehicleId ? {vehicle: vehicleId, depot: depot.id} : {}),
+  });
+  if (state?.coop) {
+    state.coop.buyLog ??= [];
+    state.coop.buyLog.push({
+      tick: num(state.tick, 0), actor: actor.id, team, itemId: item.id,
+      cost: num(result.cost, 0), req: num(actor.req, 0),
+      ...(vehicleId ? {vehicle: vehicleId, depot: depot.id} : {}),
+    });
+    if (state.coop.buyLog.length > 16) state.coop.buyLog.splice(0, state.coop.buyLog.length - 16);
+  }
+  return {ok: true, reason: null, itemId: item.id, cost: num(result.cost, 0), ...(vehicleId ? {vehicleId, depotId: depot.id} : {})};
 }
 
 export function coopKillReport(match, state) {
