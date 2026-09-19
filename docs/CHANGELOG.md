@@ -64,6 +64,8 @@ connected multiplayer clients briefly disconnect.
 - The legacy duplicate terminal state is removed in favour of one UI contract.
 - **Measured:** D1 wins 5/12 seeds (41.7%, in band) with scouts, harvesters and
   terminals in real use (553 terminal interactions, 37 hacks, 70 deploys).
+  D2–D4 remain published difficulty data plus the existing smoke test this
+  pass; D1 is the validated acceptance tier (design §4.1/§7.2).
 
 ### Real traversal
 
