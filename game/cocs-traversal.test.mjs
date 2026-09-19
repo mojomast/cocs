@@ -8,7 +8,7 @@
 // determinism (no new RNG draws) and mode isolation.
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {Match} from './core.mjs';
+import {Match,floorAt} from './core.mjs';
 import {LATTICE_MAPS} from './lattice-maps.mjs';
 import {validateMapSchema,validateLattice} from './map-schema.mjs';
 import {
@@ -28,7 +28,7 @@ const flatRng = () => 0.5;
 const cocsMatch = (over = {}) => new Match('chatgpt', 'openclaw', flatRng, 'lattice-slice', {
  mode: 'cocs', botCount: 0, humanCount: 1, timeLimit: 120, cocsPolicy: () => [], ...over,
 });
-const pin = (actor, x, z, y = 0) => { actor.x = x; actor.z = z; actor.y = y; actor.vx = actor.vy = actor.vz = 0; actor.grounded = true; actor.health = 200; actor.maxHealth = 200; actor.armor = 0; actor.protection = 0; };
+const pin = (actor, x, z, y = floorAt(x,z,SLICE)) => { actor.x = x; actor.z = z; actor.y = y; actor.vx = actor.vy = actor.vz = 0; actor.grounded = true; actor.health = 200; actor.maxHealth = 200; actor.armor = 0; actor.protection = 0; };
 const hold = (match, actor, x, z, ticks) => { for (let i = 0; i < ticks; i++) { pin(actor, x, z); match.step(DT, {inputs: {}}); } };
 
 // ---------------------------------------------------------------------------
@@ -132,7 +132,8 @@ test('device use relocates, applies arrival protection and the shared 2.5 s cool
  actor.team = 0;
  pin(actor, -40, 50);
  assert.equal(useDevice(match, state, actor.id, 'zip-s-w'), true);
- assert.ok(Math.abs(actor.x - (-6)) < 1e-6 && Math.abs(actor.z - 44) < 1e-6, `arrived at ${actor.x},${actor.z}`);
+ const target=state.traversal.devices['zip-s-w'].to;
+ assert.ok(Math.hypot(actor.x-target.x,actor.y-target.y,actor.z-target.z)<1e-6, `arrived at ${actor.x},${actor.z}`);
  assert.equal(state.traversal.stats.uses, 1);
  assert.ok(actor.cocsArrival && actor.cocsArrival.remaining > 1.4 && actor.cocsArrival.damageReduction === 0.5);
  assert.equal(arrivalDamageScale(actor), 0.5);
@@ -156,7 +157,8 @@ test('bot auto-use is opt-in: two ticks of intent trigger the device when enable
  pin(actor, -40, 50);
  stepCocsTraversal(match, state, DT);
  assert.equal(state.traversal.stats.uses, 1, 'the second tick fires');
- assert.ok(Math.abs(actor.x - (-6)) < 1e-6 && Math.abs(actor.z - 44) < 1e-6);
+ const target=state.traversal.devices['zip-s-w'].to;
+ assert.ok(Math.hypot(actor.x-target.x,actor.y-target.y,actor.z-target.z)<1e-6);
 });
 
 test('a zipline cut needs a 3 s hold and lasts 45 s; either team may repair it in 6 s', () => {
@@ -190,7 +192,7 @@ test('a pad locks for 30 s behind a 2.5 s channel and repairs in 4 s', () => {
  const actor = match.actors[0];
  actor.team = 1;
  const from = state.traversal.devices['pad-s-w'].from;
- const ax = from.x + 5;
+ const ax = from.x - 5; // clear side of the Foundry freight baffle
  pin(actor, ax, from.z);
  assert.equal(deviceInteract(match, state, actor.id, 'pad-s-w', 'lock'), true);
  hold(match, actor, ax, from.z, Math.round(2.6 / DT));
@@ -321,7 +323,7 @@ test('the cocs snapshot exposes id-keyed, delta-friendly traversal state', () =>
  match.step(DT, {inputs: {}});
  const snapshot = cocsSnapshot(match);
  assert.ok(snapshot.traversal);
- assert.equal(snapshot.traversal.devices.length, 11);
+ assert.equal(snapshot.traversal.devices.length, SLICE.traversal.length);
  assert.equal(snapshot.traversal.depots.length, 4);
  const zip = snapshot.traversal.devices.find(device => device.id === 'zip-s-w');
  assert.deepEqual(Object.keys(zip).sort(), ['channel', 'id', 'kind', 'lane', 'state', 'timer', 'to', 'x', 'z']);

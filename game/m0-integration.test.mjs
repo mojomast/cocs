@@ -11,8 +11,8 @@ import {terrainSupportAt, terrainRayHit} from './terrain.mjs';
 // same answers as the pre-M0 brute-force oracles on terrain and non-terrain
 // maps, and that seeded runs stay byte-identical.
 
-const TERRAIN_MAPS = ['titan-valley', 'convoy-line', 'catacombs'];
-const NON_TERRAIN_MAPS = ['lattice-slice', 'exchange', 'crosswire'];
+const TERRAIN_MAPS = ['titan-valley', 'convoy-line', 'catacombs', 'lattice-slice'];
+const NON_TERRAIN_MAPS = ['exchange', 'crosswire'];
 const DEFAULT_BOUNDS = {minX: -13.55, maxX: 13.55, minZ: -13.55, maxZ: 13.55};
 const boundsOf = arena => arena.bounds || DEFAULT_BOUNDS;
 

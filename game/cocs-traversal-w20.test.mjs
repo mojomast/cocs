@@ -8,7 +8,8 @@
 // consumption of `bot.cocsDevice`, and mode isolation.
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {Match} from './core.mjs';
+import {Match,floorAt} from './core.mjs';
+import {LATTICE_MAPS} from './lattice-maps.mjs';
 import {normalizeConfig} from './config.mjs';
 import {cocsSnapshot} from './cocs.mjs';
 import {
@@ -22,7 +23,7 @@ import {cocsCommandView, cocsTraversalView} from './cocs-orders.mjs';
 
 const DT = 1 / 60;
 const seeded = seed => { let n = seed >>> 0; return () => ((n = (Math.imul(n, 1664525) + 1013904223) >>> 0) / 4294967296); };
-const pin = (actor, x, z) => { actor.x = x; actor.z = z; actor.y = 0; actor.vx = actor.vy = actor.vz = 0; actor.grounded = true; actor.health = 200; actor.maxHealth = 200; actor.armor = 0; actor.protection = 0; };
+const pin = (actor, x, z) => { actor.x = x; actor.z = z; actor.y = floorAt(x,z,LATTICE_MAPS[0]); actor.vx = actor.vy = actor.vz = 0; actor.grounded = true; actor.health = 200; actor.maxHealth = 200; actor.armor = 0; actor.protection = 0; };
 
 const cocsMatch = (over = {}) => new Match('chatgpt', 'openclaw', seeded(0xC0C5), 'lattice-slice', {
   mode: 'cocs', humanCount: 1, botCount: 7, aiSeats: true, difficulty: 'normal', timeLimit: 600,
