@@ -215,7 +215,8 @@ function readAuthoredLattice(arena) {
       else owner = null;
     }
     if (owner !== 0 && owner !== 1) owner = null;
-    return {id, x, z, y, r, archetype, owner, progress: {0: 0, 1: 0}, contested: false, live: false};
+    const label = typeof entry.label === 'string' && entry.label ? entry.label : null;
+    return {id, x, z, y, r, archetype, owner, label, progress: {0: 0, 1: 0}, contested: false, live: false};
   }).filter(Boolean);
   if (!nodes.length) return null;
   let source = null;
@@ -655,7 +656,15 @@ export function processCocsOrder(match, state, order) {
     target: target === null ? null : String(target),
     ok: false,
   };
-  const reject = () => { state.orderLog.push(entry); trimOrderLog(state); return false; };
+  const reject = (reason = entry.reason ?? 'blocked') => {
+    entry.reason = reason;
+    state.orderLog.push(entry);
+    trimOrderLog(state);
+    // Local matches have no wire `cocs-reject`; the sim event is what makes a
+    // refused order visible (and it reaches the wire as a normal match event).
+    match?.emit?.('cocs-order-rejected', {team, verb, node: entry.target, reason, peerId: entry.peerId, cardId: entry.cardId});
+    return false;
+  };
   if ((team !== 0 && team !== 1) || !COCS_ORDER_VERBS.includes(verb) || target === null) return reject();
   const node = nodeById(state, target);
   if (!node) return reject();
@@ -663,7 +672,7 @@ export function processCocsOrder(match, state, order) {
   // rotating executor lease, and every spend must fit the player's FLUX slice.
   if (state.coopMode === true) {
     const gate = coopOrderGate(match, state, {team, verb, peerId: entry.peerId});
-    if (!gate.ok) { entry.reason = gate.reason; return reject(); }
+    if (!gate.ok) { entry.reason = gate.reason; return reject(gate.reason); }
   }
   if (verb === 'SCAN' && state.coopMode !== true) {
     // PvP-1 THREADS gate: a SCAN spawns a scout, which itself occupies a thread.
@@ -679,7 +688,7 @@ export function processCocsOrder(match, state, order) {
     state.orderStats.issued = num(state.orderStats.issued, 0) + 1;
     state.orderStats.byVerb[verb] = num(state.orderStats.byVerb?.[verb], 0) + 1;
     if (state.scans?.[team]) { state.scans[team].peerId = entry.peerId; state.scans[team].cardId = entry.cardId; }
-    match?.emit?.('cocs-order', {team, verb, node: node.id, tick: entry.tick, peerId: entry.peerId, cardId: entry.cardId});
+    match?.emit?.('cocs-order', {team, verb, node: node.id, label: node.label ?? null, tick: entry.tick, peerId: entry.peerId, cardId: entry.cardId});
     return true;
   }
   const owned = node.owner === team;
@@ -691,7 +700,7 @@ export function processCocsOrder(match, state, order) {
   trimOrderLog(state);
   state.orderStats.issued = num(state.orderStats.issued, 0) + 1;
   state.orderStats.byVerb[verb] = num(state.orderStats.byVerb?.[verb], 0) + 1;
-  match?.emit?.('cocs-order', {team, verb, node: node.id, tick: entry.tick, peerId: entry.peerId, cardId: entry.cardId});
+  match?.emit?.('cocs-order', {team, verb, node: node.id, label: node.label ?? null, tick: entry.tick, peerId: entry.peerId, cardId: entry.cardId});
   return true;
 }
 
@@ -1620,11 +1629,14 @@ function captureNode(match, state, node, team, actors) {
   // `+20` team OP and `+15 REQ` to every contributor in radius, capped so a
   // whole team cannot farm one order. The issuer's extra personal OP needs a
   // seat id; the V0b duty Chief is not a player, so only contributors are paid.
-  if (nodeOrderTeams(state, node)[team] && state.tasks?.[team]) {
+  const orderTeam = nodeOrderTeams(state, node)[team];
+  let orderCompleted = false, orderVerb = null, contributors = [];
+  if (orderTeam && state.tasks?.[team]) {
+    orderVerb = state.tasks[team].verb ?? null;
     state.tasks[team] = null;
     state.scores[team] = num(state.scores[team], 0) + ORDER_REWARD.teamOP;
     state.orderStats.completed = num(state.orderStats.completed, 0) + 1;
-    const contributors = participants.slice(0, Math.max(1, ORDER_REWARD.contributorCap));
+    contributors = participants.slice(0, Math.max(1, ORDER_REWARD.contributorCap));
     for (const actor of contributors) {
       const reward = scoreEvent({kind: 'order', role: 'contributor'});
       addActorReq(actor, reward.req);
@@ -1632,10 +1644,19 @@ function captureNode(match, state, node, team, actors) {
       actor.scoreStats.ordersContributed = num(actor.scoreStats.ordersContributed, 0) + 1;
       actor.ordersContributed = num(actor.ordersContributed, 0) + 1;
     }
-    match?.emit?.('cocs-order-complete', {team, node: node.id, contributors: contributors.map(actor => actor.id), teamOP: ORDER_REWARD.teamOP});
+    orderCompleted = true;
+    match?.emit?.('cocs-order-complete', {team, node: node.id, label: node.label, verb: orderVerb, contributors: contributors.map(actor => actor.id), teamOP: ORDER_REWARD.teamOP});
   }
   if (node.archetype === 'array') state.arrayWinner = team;
-  match?.emit?.('cocs-capture', {node: node.id, team, archetype: node.archetype, score: state.scores[team]});
+  // The objective beat carries everything the presentation needs to celebrate
+  // (or mourn) it without re-deriving rewards from the snapshot: the authored
+  // label, the exact OP/REQ paid to participants and whether a live order paid.
+  match?.emit?.('cocs-capture', {
+    node: node.id, label: node.label, team, archetype: node.archetype, score: state.scores[team],
+    reward: {op: COCS_CAPTURE_POINTS[node.archetype] ?? 0, req: capture.req, personalOP: capture.personalOP},
+    participants: participants.map(actor => actor.id),
+    orderCompleted, orderVerb, teamOP: orderCompleted ? ORDER_REWARD.teamOP : 0,
+  });
   updateLiveNodes(state);
 }
 
@@ -1762,6 +1783,7 @@ export function cocsSnapshot(match) {
       x: node.x,
       z: node.z,
       archetype: node.archetype,
+      ...(node.label ? {label: node.label} : {}),
       owner: node.owner ?? null,
       progress: [num(node.progress?.[0], 0), num(node.progress?.[1], 0)],
       contested: node.contested === true,

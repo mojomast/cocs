@@ -582,6 +582,12 @@ export function processCocsSpends(match, state) {
       verb: String(spend.verb ?? spend.id ?? '').toUpperCase(), cost: coopSink(spend.verb)?.cost ?? null,
       target: spend.target ?? null, ok: false, reason: result.reason,
     });
+    // The wire answers refusals with `cocs-reject`; a local match needs the
+    // same visible beat, so the spend window can say why a sink did not apply.
+    match?.emit?.('coop-spend-rejected', {
+      verb: String(spend.verb ?? spend.id ?? '').toUpperCase(), target: spend.target ?? null,
+      reason: result.reason, peerId: String(spend.peerId ?? ''), cardId: String(spend.cardId ?? ''),
+    });
   }
   return applied;
 }

@@ -241,8 +241,57 @@ export function scoreAnnouncer(hud, prevScores) {
   return null;
 }
 
-const awardScore = actor => (Number(actor?.frags) || 0) * 3 + stat(actor, 'objectiveTime') + stat(actor, 'captures') * 5 + stat(actor, 'flagReturns') * 2;
-const stat = (actor, field) => Number(actor?.scoreStats?.[field]) || 0;
+// LATTICE objective beats. One pure translation from an authoritative cocs
+// event to the banner/announcer model the match page renders. Kept separate
+// from `scoreAnnouncer` because OP income is continuous while these beats are
+// event-driven: a capture, an order completing, a refusal, a terminal.
+const reasonWords = value => String(value ?? 'blocked').replace(/-/g, ' ').toUpperCase();
+export function cocsAnnouncement(event, player) {
+  if (!event || typeof event !== 'object') return null;
+  const team = player?.team === 1 ? 1 : 0;
+  const mine = event.team === team;
+  const paid = Array.isArray(event.participants) && event.participants.includes(player?.id);
+  switch (event.type) {
+    case 'cocs-capture': {
+      const label = String(event.label ?? event.node ?? 'NODE').toUpperCase();
+      const parts = [];
+      if (Number(event.reward?.op) > 0) parts.push(`+${Number(event.reward.op)} OP`);
+      if (paid && Number(event.reward?.req) > 0) parts.push(`+${Number(event.reward.req)} REQ`);
+      if (event.orderCompleted === true) parts.push('ORDER COMPLETE');
+      return {kind: 'capture', team: event.team, mine, text: `${mine ? 'OBJECTIVE SECURED' : 'OBJECTIVE LOST'} · ${label}`, detail: parts.join(' · ')};
+    }
+    case 'cocs-order-complete': {
+      const label = String(event.label ?? event.node ?? 'NODE').toUpperCase();
+      const contributed = Array.isArray(event.contributors) && event.contributors.includes(player?.id);
+      return {kind: 'order', team: event.team, mine, text: `ORDER COMPLETE · ${label}`,
+        detail: [contributed ? 'YOUR SQUAD PAID' : 'TEAM PAID', Number(event.teamOP) > 0 ? `+${Number(event.teamOP)} TEAM OP` : ''].filter(Boolean).join(' · ')};
+    }
+    case 'cocs-order-rejected':
+      return {kind: 'refused', team: event.team, mine, text: `ORDER REFUSED · ${reasonWords(event.reason)}`,
+        detail: [event.verb, event.label ?? event.node].filter(Boolean).join(' · ').toUpperCase()};
+    case 'coop-spend-rejected':
+      return {kind: 'refused', team, mine: true, text: `SPEND REFUSED · ${reasonWords(event.reason)}`, detail: String(event.verb ?? '').toUpperCase()};
+    case 'cocs-order':
+      return {kind: 'order-issued', team: event.team, mine, text: `${String(event.verb ?? 'ORDER').toUpperCase()} · ${String(event.label ?? event.node ?? '').toUpperCase()}`,
+        detail: mine ? 'ORDER SENT' : 'TEAM ORDER'};
+    case 'cocs-terminal-hack':
+    case 'cocs-terminal-deploy':
+    case 'cocs-terminal-vault': {
+      if (event.team !== team) return null;
+      return {kind: 'terminal', team, mine, text: `${String(event.type.split('-')[2] ?? 'TERMINAL').toUpperCase()} COMPLETE`, detail: String(event.terminal ?? '').toUpperCase()};
+    }
+    case 'director-wave-cleared':
+      return {kind: 'wave', team, mine, text: `WAVE ${event.wave ?? ''} CLEARED`.trim(), detail: ''};
+    case 'director-siege':
+      return {kind: 'siege', team, mine: true, text: 'HQ UNDER SIEGE', detail: 'FALL BACK AND CLEAR THE BREACH'};
+    case 'director-siege-lifted':
+      return {kind: 'siege', team, mine: true, text: 'HQ SECURE', detail: 'SIEGE LIFTED'};
+    default:
+      return null;
+  }
+}
+
+const awardScore = actor => (Number(actor?.frags) || 0) * 3 + stat(actor, 'objectiveTime') + stat(actor, 'captures') * 5 + stat(actor, 'flagReturns') * 2;const stat = (actor, field) => Number(actor?.scoreStats?.[field]) || 0;
 const ratio = actor => { const kills = Number(actor?.frags) || 0, deaths = Number(actor?.deaths) || 0; return deaths > 0 ? kills / deaths : kills; };
 
 export function matchAwards(hud) {
