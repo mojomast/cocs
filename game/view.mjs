@@ -21,7 +21,7 @@ import {foundryDetails,styleFoundryObjective} from './lattice-foundry-view.mjs';
 import {latticePresentationChanges} from './lattice-feedback.mjs';
 import {smoothNormals,positionColors} from './terrain-normals.mjs';
 import {TEAM_PALETTE,teamPresentation,teamMark,updateTeamMark,applyActorTeam} from './team-presentation.mjs';
-import {spectateActor} from './hud.mjs';
+import {spectateActor,latticeAnnounceCue} from './hud.mjs';
 import {NEUTRAL} from './radar.mjs';
 import {cavernShell,facadeDetails,tunnelRenderPaths,propId,applyPropDamage,propBreakPlan,isBreakable} from './structures.mjs';
 import {raceDemoMode,raceDemoPose,RACE_DEMO_MODE_SECONDS} from './race-camera.mjs';
@@ -1751,8 +1751,14 @@ export class ArenaView{
        if(e.type==='vehicle-destroyed'&&!reduced){this.cameraShake??=new CameraShake();const local=this.actorModels?.get(this.playerId),p=e.pos;const wasInside=e.driver===this.playerId||(e.occupants&&e.occupants.includes(this.playerId));if(wasInside)this.cameraShake.add(.85);else if(local&&p){const distance=Math.hypot(local.position.x-(p.x||0),local.position.z-(p.z||0));if(distance<18)this.cameraShake.add(.7*(1-distance/18));}else if(e.actor===this.playerId)this.cameraShake.add(.7);}
        // Optional announcer cue. The audio object owns the voice cap and mute
        // handling; the view only decides which mode events are announceable.
+       // LATTICE objective beats join the same channel: a secured capture reads
+       // as a capture, a lost one as a neutral objective call, refusals as a
+       // low feint, order/terminal/wave completes as objective and the HQ siege
+       // as the boss cue.
        const announceType=e.type==='soccer-goal'?'goal':e.type==='zone-capture'?'capture':e.type;
-       if(!reduced&&this.viewAudio?.announcerCue&&['capture','flag-pickup','flag-return','goal'].includes(announceType))this.viewAudio.announcerCue(announceType);
+       const latticeCue=latticeAnnounceCue(e,this.playerId);
+       if(!reduced&&this.viewAudio?.announcerCue){if(latticeCue)this.viewAudio.announcerCue(latticeCue);else if(['capture','flag-pickup','flag-return','goal'].includes(announceType))this.viewAudio.announcerCue(announceType);}
+       if(e.type==='cocs-capture'&&e.participants?.includes(this.playerId)&&!reduced)this._fovPulse=Math.max(this._fovPulse||0,.32);
        // Movement/spec telegraphs (§6.3): wind-ups, movement starts, landings,
        // slam shocks, hooks/ropes and the threat ping. Every branch below is
        // reduced-motion aware.

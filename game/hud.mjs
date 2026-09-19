@@ -291,6 +291,30 @@ export function cocsAnnouncement(event, player) {
   }
 }
 
+// Which announcer cue a LATTICE beat uses. Pure so the view can consume it
+// without duplicating the event table; only events that represent a completed
+// team beat return a cue (issuing an order stays silent).
+export function latticeAnnounceCue(event, playerId) {
+  switch (event?.type) {
+    case 'cocs-capture':
+      return Array.isArray(event.participants) && event.participants.includes(playerId) ? 'capture' : 'objective';
+    case 'cocs-order-complete':
+    case 'cocs-terminal-hack':
+    case 'cocs-terminal-deploy':
+    case 'cocs-terminal-vault':
+    case 'director-wave-cleared':
+    case 'director-siege-lifted':
+      return 'objective';
+    case 'cocs-order-rejected':
+    case 'coop-spend-rejected':
+      return 'feint';
+    case 'director-siege':
+      return 'boss';
+    default:
+      return null;
+  }
+}
+
 const awardScore = actor => (Number(actor?.frags) || 0) * 3 + stat(actor, 'objectiveTime') + stat(actor, 'captures') * 5 + stat(actor, 'flagReturns') * 2;const stat = (actor, field) => Number(actor?.scoreStats?.[field]) || 0;
 const ratio = actor => { const kills = Number(actor?.frags) || 0, deaths = Number(actor?.deaths) || 0; return deaths > 0 ? kills / deaths : kills; };
 

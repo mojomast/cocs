@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {Match} from './core.mjs';
-import {cocsAnnouncement} from './hud.mjs';
+import {cocsAnnouncement,latticeAnnounceCue} from './hud.mjs';
 
 const DT = 1 / 60;
 const cocsMatch = (mapId = 'warfront', over = {}) => new Match('chatgpt', 'openclaw', () => .5, mapId, {mode: 'cocs', botCount: 0, humanCount: 1, timeLimit: 300, cocsPolicy: () => [], ...over});
@@ -100,4 +100,15 @@ test('the objective-beat model distinguishes secured, lost, paid and refused', (
   const refused = cocsAnnouncement({type: 'coop-spend-rejected', verb: 'FORTIFY', reason: 'window-closed'}, {id: 0, team: 0});
   assert.equal(refused.text, 'SPEND REFUSED · WINDOW CLOSED');
   assert.equal(cocsAnnouncement({type: 'damage'}, {id: 0, team: 0}), null);
+});
+
+test('announcer cues are reserved for completed beats and refusals', () => {
+  assert.equal(latticeAnnounceCue({type: 'cocs-capture', participants: [0]}, 0), 'capture');
+  assert.equal(latticeAnnounceCue({type: 'cocs-capture', participants: [4]}, 0), 'objective', 'losing a node is a neutral call');
+  assert.equal(latticeAnnounceCue({type: 'cocs-order'}, 0), null, 'issuing an order stays silent');
+  assert.equal(latticeAnnounceCue({type: 'cocs-order-complete'}, 0), 'objective');
+  assert.equal(latticeAnnounceCue({type: 'cocs-order-rejected'}, 0), 'feint');
+  assert.equal(latticeAnnounceCue({type: 'coop-spend-rejected'}, 0), 'feint');
+  assert.equal(latticeAnnounceCue({type: 'director-siege'}, 0), 'boss');
+  assert.equal(latticeAnnounceCue({type: 'damage'}, 0), null);
 });
