@@ -183,8 +183,8 @@ test('campaign display surfaces waypoint distance, steps, story and boss',()=>{
  test('keybind remap UI is keyboard reachable and labelled per action',async()=>{
   const html=await renderSsr('app/game-ui/configuration.tsx','KeybindsConfiguration',`{bindings:{forward:'KeyW',back:'KeyS',left:'KeyA',right:'KeyD',jump:'Space',sprint:'ShiftLeft',crouch:'ControlLeft',reload:'KeyR',melee:'KeyF',grenade:'KeyG',power:'KeyQ',interact:'KeyE',voice:'KeyV'},onChange:()=>{},conflicts:[]}`);
   assert.match(html,/role="group" aria-label="Keyboard bindings"/);
-  assert.match(html,/aria-label="Rebind forward, currently W"/);
-  assert.match(html,/aria-label="forward key"/);
+  assert.match(html,/aria-label="Rebind Move forward, currently W"/);
+  assert.match(html,/aria-label="Move forward key"/);
   assert.match(html,/aria-pressed="false"/);
   assert.match(html,/RESET KEYS/);
  });

@@ -2,7 +2,7 @@
 +++ b/game/view.mjs
 @@ -20,8 +20,8 @@
  import {TEAM_PALETTE,teamPresentation,teamMark,updateTeamMark,applyActorTeam} from './team-presentation.mjs';
- import {spectateActor} from './hud.mjs';
+ import {spectateActor,latticeAnnounceCue} from './hud.mjs';
  import {NEUTRAL} from './radar.mjs';
 -import {cavernShell,propId,applyPropDamage,propBreakPlan,isBreakable} from './structures.mjs';
 +import {cavernShell,facadeDetails,tunnelRenderPaths,propId,applyPropDamage,propBreakPlan,isBreakable} from './structures.mjs';
