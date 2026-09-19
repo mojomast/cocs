@@ -53,7 +53,10 @@ const TRAINING_EVENT_MATCHERS = freeze({
 
 const TERMINAL_EVENTS = Object.freeze(['cocs-terminal-hack', 'cocs-terminal-deploy', 'cocs-terminal-vault', 'cocs-terminal-sabotage']);
 
-/** Fresh training state. `start` anchors the MOVE OUT step at the spawn point. */
+/** Fresh training state. `start` anchors the MOVE OUT step at the spawn point.
+ * @param {string} mode
+ * @param {{start?: {x:number,z:number}|null, skipped?: boolean}} [options]
+ */
 export function createTraining(mode, {start = null, skipped = false} = {}) {
   if (!isCocsMode(mode)) return null;
   return {
@@ -111,6 +114,8 @@ const stepSatisfied = (id, {snapshot, events, playerId, lattice, counts}) => {
  * Advance the training by one authoritative beat. `events` are this frame's
  * `Match.events`; `snapshot` is `{actors, nodes}` from the match snapshot.
  * Returns a new training object plus the step that just completed.
+ * @param {any} training
+ * @param {{snapshot?: any, events?: any[], playerId?: number, lattice?: any[], moveDistance?: number}} [context]
  */
 export function evaluateTraining(training, {snapshot = null, events = [], playerId = 0, lattice = [], moveDistance = 12} = {}) {
   if (!training || training.done) return {training, completedNow: null};

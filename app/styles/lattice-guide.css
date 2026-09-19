@@ -19,8 +19,7 @@
 .lattice-interaction-hint kbd{display:grid;place-items:center;min-width:32px;min-height:32px;border:1px solid var(--accent);border-radius:4px;font:800 18px var(--font-mono);color:var(--accent)}
 .lattice-interaction-hint span{display:grid;gap:4px}.lattice-interaction-hint b{font:700 12px var(--font-mono)}.lattice-interaction-hint small{font:9px var(--font-mono);color:var(--text-dim)}
 .lattice-loadout-role{display:grid;gap:5px;margin-top:10px;padding:12px;border:1px solid var(--border-strong);border-radius:6px;background:#12312b80}
-.lattice-loadout-role b{font-size:14px;color:var(--accent-soft)}
-.lattice-loadout-role p,.lattice-kit-details p{margin:4px 0;font:12px/1.5 var(--font-ui);color:var(--text-dim)}
+.lattice-loadout-role b{font-size:14px;color:var(--accent-soft)}.lattice-loadout-role p,.lattice-kit-details p{margin:4px 0;font:12px/1.5 var(--font-ui);color:var(--text-dim)}
 .lattice-kit-details b{font:700 11px var(--font-mono);color:var(--accent-soft)}
 .lattice-hud .lattice-terminal-details .cocs-terminals{position:static;width:100%;padding:6px 0;box-shadow:none;border:0;background:none}
 .lattice-hud .director-readout{position:absolute;top:calc(var(--safe-top) + 290px);right:var(--safe-right);width:min(270px,32vw);max-height:calc(100dvh - 455px);overflow:auto;pointer-events:auto;padding:12px;border:1px solid var(--border);border-right:3px solid var(--warn);border-radius:8px;background:#07171eef;color:var(--text);font:11px/1.5 var(--font-mono);scrollbar-width:thin}
@@ -68,3 +67,13 @@
 .lattice-tactical p{margin:6px 0 0;font:9px var(--font-mono)}
 .lattice-guide summary:focus-visible,.cocs-readout summary:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
 @media(max-width:760px){.lattice-guide__steps,.lattice-guide__legend{grid-template-columns:1fr}.lattice-guide{padding:12px}.cocs-readout{max-height:calc(100dvh - 250px)}}
+/* Field Training banner: bottom-centre, above the ability ring, never blocking
+   the reticle or the interaction prompt. */
+.lattice-training-banner{position:absolute;left:50%;bottom:calc(var(--safe-bottom) + 118px);transform:translateX(-50%);z-index:var(--z-panel,2);width:min(520px,86vw);display:grid;gap:4px;padding:10px 14px 12px;border:1px solid var(--border-strong);border-left:3px solid var(--accent);border-radius:var(--radius-md);background:linear-gradient(120deg,#08201ff2,#0a1a1ce8);box-shadow:0 12px 30px #0008;text-shadow:0 1px 3px #000;pointer-events:none}
+.lattice-training-banner .eyebrow{font-size:10px;letter-spacing:.16em;color:var(--text-dim)}
+.lattice-training-banner b{font:700 13px var(--font-mono);letter-spacing:.04em;color:var(--accent-soft)}
+.lattice-training-banner p{margin:0;font:12px/1.5 var(--font-ui);color:var(--text)}
+.lattice-training-banner__bar{display:block;height:3px;margin-top:3px;border-radius:999px;background:#0c2a28;overflow:hidden}
+.lattice-training-banner__bar::before{content:'';display:block;height:100%;width:calc(var(--progress,0)*100%);background:var(--accent)}
+.lattice-hud .lattice-training-banner{bottom:calc(var(--safe-bottom) + 130px)}
+@media(max-width:760px){.lattice-training-banner{bottom:calc(var(--safe-bottom) + 148px);width:min(360px,92vw);padding:8px 10px}.lattice-training-banner p{font-size:11px}}
