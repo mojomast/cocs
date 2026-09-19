@@ -36,6 +36,13 @@ disconnect.
 - Server-authoritative rating, placements and documented team aggregation;
   deltas apply exactly once across reconnects and clients cannot spoof a
   rating. Unranked play keeps the v8.1 behaviour.
+- **Contract:** start 1000, floor 100, ceiling 3500; K 48 provisional (<10
+  matches), 32 duel, 24 team; each member rated against the opponent roster
+  average with a ±64 per-player cap; zero-sum settlement with a deterministic
+  correction. Tiers run Bronze → Master with I/II/III divisions.
+- **Settlement:** id `<roomId>:<matchCount>` persisted with a 512-entry ring;
+  duplicate ids are rejected, admission is token-verified, bots are pinned out
+  of rated rooms and a spoofed client rating is ignored in favour of the store.
 - The online screens show rating, rank band and the ranked queue state.
 
 ### Operations depth
