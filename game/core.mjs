@@ -103,6 +103,43 @@ export function traversalTables(arena){
    function bakeFloorQuery(arena){const query=floorQueryOf(arena);if(arena?.terrain&&query.source!=='lattice')query.bake();return query;}
   export function floorAt(x,z,arena=MAPS[0]){if(arena.terrain){const query=floorQueryOf(arena);return query.source==='lattice'?floorHeightAtLattice(query.lattice,x,z,query.maxSlope):(query(x,z)?.y??null);}const surfaces=surfacesOf(arena);if(surfaces.length){let floor=null;for(const surface of surfaces)if(Math.abs(x-surface.x)<=surface.w/2&&Math.abs(z-surface.z)<=surface.d/2)floor=floor===null?surfaceY(surface):Math.max(floor,surfaceY(surface));return floor;}if(!arena.raised)return 0;let floor=0,solid=arena.blocks.some(b=>b.kind!=='deck'&&Math.abs(x-b.x)<=b.w/2&&Math.abs(z-b.z)<=b.d/2);for(const b of arena.blocks)if(b.kind==='deck'&&Math.abs(x-b.x)<=b.w/2&&Math.abs(z-b.z)<=b.d/2)floor=Math.max(floor,b.h);if(!arena.bounds&&!solid&&z<=-9)floor=Math.max(floor,3.8);else if(!arena.bounds&&!solid&&Math.abs(x)>8.2&&Math.abs(x)<14&&z<3)floor=Math.max(floor,(3-z)/12*3.8);return floor;}
   const supportAt=(x,z,arena)=>{let y=floorAt(x,z,arena);if(y===null)return null;const top=blockSupportTop(arena,x,z,RULES.radius);if(top!==null)y=Math.max(y,top);return y;};
+  // A roof above the actor is not its floor. Keep the fast heightfield query
+  // for ordinary movement, and resolve stacked surfaces only when necessary.
+  const floorBelow=(x,z,y,arena)=>{
+   const floor=floorAt(x,z,arena);if(floor===null||floor<=y+1e-6)return floor;
+   if(arena.terrain){const hit=terrainRayHitFast(ensureTerrainBvh(arena.terrain),v(x,y+1e-5,z),v(0,-1,0),1000);return hit&&hit.normal[1]>.5?y+1e-5-hit.distance:null;}
+   const surfaces=surfacesOf(arena);if(surfaces.length){let below=null;for(const s of surfaces)if(surfaceY(s)<=y+1e-6&&Math.abs(x-s.x)<=s.w/2&&Math.abs(z-s.z)<=s.d/2)below=Math.max(below??-Infinity,surfaceY(s));return below;}
+   return 0;
+  };
+  // Terrain can include thin overhead surfaces which the horizontal block
+  // collision query cannot see. Rays sweep both the feet and head footprint.
+  const surfaceRayDistance=(origin,dir,max,arena)=>{
+   if(arena.terrain)return terrainRayHitFast(ensureTerrainBvh(arena.terrain),origin,dir,max)?.distance??max;
+   let best=max;if(Math.abs(dir.y)>1e-9)for(const s of surfacesOf(arena)){const t=(surfaceY(s)-origin.y)/dir.y;if(t>=0&&t<best&&Math.abs(origin.x+dir.x*t-s.x)<=s.w/2&&Math.abs(origin.z+dir.z*t-s.z)<=s.d/2)best=t;}return best;
+  };
+  const bodyOffsets=r=>[[0,0],[-r,-r],[-r,r],[r,-r],[r,r]];
+  const bodyCeiling=(x,y,z,r,arena,range=RULES.height)=>{
+   let ceiling=Infinity;for(const [dx,dz] of bodyOffsets(r)){const origin=v(x+dx,y+1e-5,z+dz),hit=surfaceRayDistance(origin,v(0,1,0),range,arena);if(hit<range)ceiling=Math.min(ceiling,origin.y+hit);}return ceiling;
+  };
+  const grappleSweepClear=(from,to,r,arena)=>{
+   if(bodyCeiling(to.x,to.y,to.z,r,arena)<to.y+RULES.height-1e-6)return false;
+   const distance=dist(from,to);if(distance<1e-9)return true;const dir=norm(v(to.x-from.x,to.y-from.y,to.z-from.z));
+   for(const [dx,dz] of bodyOffsets(r))for(const h of [1e-5,RULES.height])if(surfaceRayDistance(v(from.x+dx,from.y+h,from.z+dz),dir,distance+1e-6,arena)<distance-1e-6)return false;
+   return true;
+  };
+  const grappleLanding=(hit,origin,arena)=>{
+   const delta=v(hit.x-origin.x,hit.y-origin.y,hit.z-origin.z),length=Math.hypot(delta.x,delta.z);
+   if(length<1e-6)return null;
+   // An upward hit on a horizontal terrain plane is an underside, not a lip.
+   if(arena.terrain&&delta.y>0){const face=terrainRayHitFast(ensureTerrainBvh(arena.terrain),origin,norm(delta),dist(origin,hit)+.01);if(face&&Math.abs(face.distance-dist(origin,hit))<.02&&Math.abs(face.normal[1])>.5)return null;}
+   for(const inset of [.65,1]){
+    const x=hit.x+delta.x/length*inset,z=hit.z+delta.z/length*inset,y=supportAt(x,z,arena),bounds=boundsOf(arena);
+    // A modest mantle only: no hauling up an arbitrarily tall wall from its base.
+    if(y===null||y<hit.y-.3||y>hit.y+RULES.height||y+.08>ceilingFor(arena)||x<bounds.minX||x>bounds.maxX||z<bounds.minZ||z>bounds.maxZ)continue;
+    if(!obstructed(x,y+.08,z,RULES.radius,arena)&&bodyCeiling(x,y+.08,z,RULES.radius,arena)>=y+.08+RULES.height)return {x,y:y+.08,z};
+   }
+   return null;
+  };
   // Presentation contacts choose an existing surface below the body's origin,
   // never the top of an overhead wall. Legacy h is still absolute solid top.
   export function presentationSupportAt(x,z,arena=MAPS[0],referenceY=Infinity){
@@ -201,7 +238,8 @@ export function moveActor(a,input,dt,arena=MAPS[0],config={speed:1,gravity:1},ro
     if((a.traversalFlight&&a.traversalTarget||!obstructed(nx,ny,nz,RULES.radius,arena))&&(f===null||f-a.y<.3)){a[axis]=value;a.y=ny;}else a[axis==='x'?'vx':'vz']=0;
  }
   const hb=boundsOf(arena);a.x=clamp(a.x,hb.minX,hb.maxX);a.z=clamp(a.z,hb.minZ,hb.maxZ);
-  a.vy-=gravity*step;const nextY=a.y+a.vy*step;let f=floorAt(a.x,a.z,arena);
+   a.vy-=gravity*step;let nextY=a.y+a.vy*step;let f=floorBelow(a.x,a.z,a.y+.25,arena);
+   if(nextY>a.y){const ceiling=bodyCeiling(a.x,a.y,a.z,RULES.radius,arena,RULES.height+nextY-a.y);if(nextY+RULES.height>ceiling){nextY=Math.max(a.y,ceiling-RULES.height);a.vy=0;}}
   // A solid top is a landing surface only when the feet cross it while falling.
   for(const b of candidates(arena,a.x,a.z,RULES.radius))if(Math.abs(a.x-b.x)<b.w/2+RULES.radius&&Math.abs(a.z-b.z)<b.d/2+RULES.radius&&a.y>=b.h-1e-6&&nextY<=b.h)f=Math.max(f??-Infinity,b.h);
    if(f!==null&&nextY<=f){a.y=f;a.vy=0;a.grounded=true;a.sliding=a.sliding&&input.crouch===true;a.traversalFlight=false;a.traversalTarget=null;}else{a.y=nextY;a.grounded=false;}
@@ -591,7 +629,7 @@ export class Match{
     }
    }
    const motion=frame.motion;
-   if(motion&&motion.position){a.x=motion.position.x;a.y=motion.position.y;a.z=motion.position.z;if(motion.keepMomentum!==true){a.vx=0;a.vz=0;}}
+   if(motion&&motion.position){const lifted=motion.position.y>a.y+1e-6;a.x=motion.position.x;a.y=motion.position.y;a.z=motion.position.z;if(motion.keepMomentum!==true){a.vx=0;a.vz=0;}if(lifted){a.grounded=false;a.coyote=0;a.jumpHeld=false;a.jumpCutArmed=false;}}
    if(motion&&Number.isFinite(motion.vy))a.vy=motion.vy;
    a.glideSteer=motion&&Number.isFinite(motion.airControl)?motion.airControl:0;
    for(const event of frame.events){const {type,...data}=event;this.emit(type,{actor:a.id,...data});}
@@ -930,7 +968,7 @@ export class Match{
       slam:controls.slam===true,
       interrupted:false,
      },{
-      dt,x:a.x,y:a.y,z:a.z,vy:a.vy,yaw:a.yaw,pitch:a.pitch,grounded:a.grounded===true,
+       dt,x:a.x,y:a.y,z:a.z,vy:a.vy,yaw:a.yaw,pitch:a.pitch,origin:eye(a),grounded:a.grounded===true,
       landed:a.movementLanded===true,
       ceilingY:ceilingFor(this.arena),
       carrying:a.carryingFlag===true,vip:a.isVip===true,juggernaut:a.juggernaut===true,
@@ -938,7 +976,9 @@ export class Match{
       verbActive:movementState.phase==='active'||(a.active>0&&abilityOf(a.harness)?.kind==='dash'),
       firing,dead:a.health<=0,
       floorAt:(x,z)=>floorAt(x,z,this.arena),
-      obstructed:(x,y,z,r)=>obstructed(x,y,z,r,this.arena),
+       obstructed:(x,y,z,r)=>obstructed(x,y,z,r,this.arena),
+       sweepClear:(from,to,r)=>grappleSweepClear(from,to,r,this.arena),
+       grappleLanding:(hit,origin)=>grappleLanding(hit,origin,this.arena),
       bounds:boundsOf(this.arena),
       castRay:(origin,dir,maxDistance)=>{const distance=rayWorld(origin,dir,maxDistance,this.arena);if(!(distance<maxDistance))return null;const hit=add(origin,dir,distance);return {x:hit.x,y:hit.y,z:hit.z,distance};},
      });
