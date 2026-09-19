@@ -21,6 +21,7 @@
 // ---------------------------------------------------------------------------
 
 import {RULES} from './data.mjs';
+import {latticeInteractionRate} from './lattice-support.mjs';
 
 const finite = value => typeof value === 'number' && Number.isFinite(value);
 const num = (value, fallback = 0) => (finite(value) ? value : fallback);
@@ -179,7 +180,7 @@ function tickTerminalChannel(match, state, terminal, dt) {
   const actor = (match?.actors ?? []).find(entry => entry && entry.id === channel.actor) ?? null;
   const stable = actor && actor.health > 0 && actorAtTerminal(actor, terminal) && !enemyNear(match, terminal, actor.team);
   if (!stable) { terminal.channel = null; return; }
-  channel.remaining = Math.max(0, num(channel.remaining, 0) - dt);
+  channel.remaining = Math.max(0, num(channel.remaining, 0) - dt * latticeInteractionRate(match, actor));
   if (!(channel.remaining > 0)) completeTerminalChannel(match, state, terminal);
 }
 

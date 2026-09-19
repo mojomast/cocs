@@ -4,6 +4,7 @@ import {abilityOf, harnessBotHints, harnessVehicle} from './harness-profiles.mjs
 // imports only attachments.mjs and cosmetics.mjs, and neither imports kits.mjs
 // (or anything that imports it), so this static edge cannot form a cycle.
 import {resolveGear} from './progression.mjs';
+import {LATTICE_OPERATOR_ROLES, LATTICE_HARNESS_ROLES} from './lattice-roles.mjs';
 
 // ---------------------------------------------------------------------------
 // COCS class & harness data model (docs/design/CLASS_OVERHAUL.md §13).
@@ -14,10 +15,10 @@ import {resolveGear} from './progression.mjs';
 // behavioural tradeoff passive and one wing rider.
 //
 // This module is data plus one resolver. It imports no view/app code, never
-// mutates data.mjs, and deep-freezes everything it exports. Phase 3A promotes
-// the 21 rider strings to structured, inert effect descriptors and adds the 7
-// behavioural spec passives (§3.3/§3.6). No engine hot path consumes them yet,
-// so behaviour is unchanged.
+// mutates data.mjs, and deep-freezes everything it exports. Combat consumes
+// the 21 structured riders and 7 behavioural spec passives (§3.3/§3.6).
+// `lattice` joins the separate, mode-scoped field-role hook vocabulary used by
+// lattice-support.mjs and the loadout-tip UI.
 // ---------------------------------------------------------------------------
 
 const deepFreeze = value => {
@@ -171,7 +172,7 @@ const rawKits = [
   },
 ];
 
-export const OPERATOR_KITS = deepFreeze(rawKits.map(kit => ({...kit, affinity: affinityFor(kit.preferred)})));
+export const OPERATOR_KITS = deepFreeze(rawKits.map(kit => ({...kit, affinity: affinityFor(kit.preferred), lattice: LATTICE_OPERATOR_ROLES[kit.id]})));
 
 const KIT_BY_ID = Object.fromEntries(OPERATOR_KITS.map(kit => [kit.id, kit]));
 const VERB_BY_ID = Object.fromEntries(MOVEMENT_VERBS.map(verb => [verb.id, verb]));
@@ -235,7 +236,7 @@ export const SPEC_EFFECT_TARGETS = deepFreeze(['self', 'enemies', 'ability']);
 //
 // `riders` holds the 21 wing riders: one per spec × wing, each a shared trigger,
 // labelled effect descriptors and the human sentence kept for UI legibility.
-// Phase 3A keeps them inert data — no engine hot path reads them yet.
+// spec-effects.mjs resolves these descriptors for the shared engine dispatch.
 const makeRider = (wing, id, trigger, description, effects) => ({wing, id, trigger, description, effects});
 
 const rawSpecs = {
@@ -400,6 +401,7 @@ export const SPECS = deepFreeze(HARNESSES.map(harness => {
     },
     riders: raw.riders,
     movementHook: MOVEMENT_HOOK_BY_SPEC[harness.id],
+    lattice: LATTICE_HARNESS_ROLES[harness.id],
     vehicle: harnessVehicle(harness.id),
     bot: harnessBotHints(harness.id),
   };
@@ -469,6 +471,7 @@ export function resolveKit(character, harness, gear) {
     rider: spec.riders[kit.wing],
     movement,
     movementHook: spec.movementHook,
+    lattice: Object.freeze({operator: kit.lattice, harness: spec.lattice}),
     stats: Object.freeze({...stats}),
     affinity: kit.affinity,
     gear: resolvedGear,

@@ -17,6 +17,7 @@ import {createVehicle,GUNTRUCK,respawnVehicle,stepVehicle,stepVehicleWeapon,vehi
 import {objectiveTemplate} from './mode-data.mjs';
 import {cocsSnapshot,cocsSpotDamageScale,compareCocsOrders,cocsEconomyAction,cocsCommandAction,cocsBuyAction,cocsHumanInteract} from './cocs.mjs';
 import {coopBuyAction,coopCommandAction,coopTerminalAction} from './cocs-coop.mjs';
+import {queueLatticePower,queueLatticeSwap} from './lattice-support.mjs';
 import {arrivalDamageScale,depotApronImmune,noteVehicleUse} from './cocs-traversal.mjs';
 import {cocsDutyPolicy} from './cocs-bots.mjs';
 import {deathPlan} from './deaths.mjs';
@@ -774,6 +775,7 @@ export class Match{
    // Riders whose trigger is the activation itself: cleanse, a timed speed
    // window and the skipped-holster charge. None of these alter the pinned
    // power() bookkeeping or the emitted event payload.
+   queueLatticePower(this,a);
    const riderCleanse=riderEffect(a.character,harness,'cleanse',{trigger:'activate'});if(riderCleanse&&riderCleanse.status==='slow')a.slow=0;
    const riderSpeed=riderEffect(a.character,harness,'speed',{trigger:'activate'});if(riderSpeed){a.riderSpeedBonus=riderBonus(a.character,harness,'speed',0,{trigger:'activate'});a.riderSpeedTimer=Math.max(a.riderSpeedTimer||0,riderNumber(a.character,harness,'speed','duration',0,{trigger:'activate'}));}
    const riderHolster=riderEffect(a.character,harness,'holster',{trigger:'activate'});if(riderHolster&&riderHolster.mode==='skip')a.holsterSkip=(a.holsterSkip||0)+Math.max(1,riderHolster.charges??1);
@@ -813,6 +815,7 @@ export class Match{
     const switchedWeapon=this.weaponForIndex(a,index);
     ADAPTIVE.onSwap(a.verbState,{magazine:Math.min(Number.isFinite(a.ammo?.[index])?a.ammo[index]:0,Number.isFinite(switchedWeapon.ammo)?switchedWeapon.ammo:0)});
     this.emit('weapon-switch',{actor:a.id,weapon:index,source});
+    queueLatticeSwap(this,a);
     return true;
    }
    detonate(pos,radius,damage,source){if(!(radius>0)||!finitePoint(pos))return;const blast={x:pos.x,y:pos.y+.35,z:pos.z};for(const a of this.actors){if(a.health<=0||a===source)continue;if(teamMode(this.config)&&source&&a.team===source.team)continue;const p=eye(a),d=dist(pos,p);if(d<radius&&(d<radius*.6||this.visible(blast,p)))this.damage(a,clampSingleHit(damage*(1-d/radius),{targetHealth:a.maxHealth}),source);}for(const vehicle of this.vehicles){if(vehicle.health<=0||vehicleMounted(vehicle,source?.id))continue;const d=Math.hypot(vehicle.position.x-pos.x,vehicle.position.z-pos.z);if(d<radius&&(d<radius*.6||this.visible(blast,vehicle.position))&&!this.vehicleFriendlyFire(vehicle,source))this.damageVehicle(vehicle,damage*(1-d/radius),source);}this.emit('explosion',{pos:{x:pos.x,y:pos.y,z:pos.z}});}
