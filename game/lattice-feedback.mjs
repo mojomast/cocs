@@ -34,3 +34,49 @@ export function latticeCaption(event){
  if(event?.type?.startsWith('cocs-terminal-'))return `Terminal ${event.type.slice('cocs-terminal-'.length)} complete`;
  return null;
 }
+
+// Presentation-only transition detection for the LATTICE world markers. The
+// authoritative events (`cocs-capture`, `cocs-depot-capture`) carry ids but no
+// positions, so the view compares the marker state it drew last frame against
+// this frame and sparks the difference. Pure and allocation-light: no RNG, no
+// timers, and the returned `next` map is the only state the caller keeps.
+const markerPoint = (source, radius) => ({
+ x: Number(source?.x) || 0,
+ y: Number(source?.y) || 0,
+ z: Number(source?.z) || 0,
+ radius: Math.max(2.5, Math.min(14, Number(radius ?? source?.r ?? source?.radius) || 6)),
+});
+
+export function latticePresentationChanges(previous, { nodes = [], depots = [], devices = [] } = {}) {
+ const before = previous && typeof previous === 'object' ? previous : {};
+ const next = {}, captures = [];
+ for (const node of nodes) {
+  if (!node || node.id === undefined || node.id === null) continue;
+  const key = `node:${node.id}`;
+  const owner = node.owner === 0 || node.owner === 1 ? node.owner : null;
+  const state = { owner, ...markerPoint(node) };
+  next[key] = state;
+  const was = before[key];
+  if (was && was.owner !== owner) captures.push({ ...state, lost: owner === null });
+ }
+ for (const depot of depots) {
+  if (!depot || depot.id === undefined || depot.id === null) continue;
+  const key = `depot:${depot.id}`;
+  const owner = depot.owner === 0 || depot.owner === 1 ? depot.owner : null;
+  const state = { owner, ...markerPoint(depot, 4) };
+  next[key] = state;
+  const was = before[key];
+  if (was && was.owner !== owner) captures.push({ ...state, lost: owner === null, depot: true });
+ }
+ const deviceChanges = [];
+ for (const device of devices) {
+  if (!device || device.id === undefined || device.id === null) continue;
+  const key = `device:${device.id}`;
+  const state = String(device.state ?? 'live');
+  next[key] = { state, ...markerPoint(device, 2.2) };
+  const was = before[key];
+  if (was && was.state !== state) deviceChanges.push({ from: was.state, to: state, ...markerPoint(device, 2.2) });
+ }
+ return { next, captures, deviceChanges };
+}
+
