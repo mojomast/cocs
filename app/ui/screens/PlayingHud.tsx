@@ -12,6 +12,7 @@ import {OperationsDirectorHud} from './OperationsDirectorHud';
 import {CommandBoardHud} from './CommandBoardHud';
 import {SpendWindowHud} from './SpendWindowHud';
 import {CocsTerminalsHud} from './CocsTerminalsHud';
+import {LatticeTactical} from './LatticeGuide';
 
 const FRAG_COOLDOWN=7;
 
@@ -51,21 +52,23 @@ function CocsReadout({command,teamName}:{command:any;teamName:(team:any)=>string
  const spots=command.spots??[];
  const scoutState=scout.alive?(scout.idle?'IDLE':scout.returning?'RETURNING':scout.scanned?'SCANNED':'EN ROUTE'):'READY';
  return <div className="cocs-readout" role="region" aria-label={`Lattice front. ${board.hint}. ${board.liveCount} live nodes.`}>
-  <div className="cocs-readout__head"><span className="eyebrow">LATTICE FRONT</span><span className="cocs-readout__count">{board.liveCount} LIVE</span></div>
+   <div className="cocs-readout__head"><span className="eyebrow">LATTICE FRONT</span><span className="cocs-readout__count">{board.liveCount} LIVE</span></div>
+   {command.coach&&<div className="lattice-coach" role="status"><b>{command.coach.title}</b><p>{command.coach.detail}</p></div>}
+   {command.coach&&<details className="lattice-map-details"><summary>SUPPLY MAP · NEXT OBJECTIVE</summary><LatticeTactical coach={command.coach}/></details>}
   <div className="cocs-readout__scores" aria-label={`Objective score: ${teamName(0)} ${amount(board.scores[0])}, ${teamName(1)} ${amount(board.scores[1])}`}>
    <span className={board.leader===0?'is-lead':''}>{teamName(0)} <b>{amount(board.scores[0])}</b></span>
    <span className="cocs-readout__op" aria-hidden="true">OP</span>
    <span className={board.leader===1?'is-lead':''}>{teamName(1)} <b>{amount(board.scores[1])}</b></span>
   </div>
-  <ul className="cocs-readout__nodes">
+   <details className="lattice-node-details"><summary>NODE STATUS · {mine} OWNED / {enemy} ENEMY</summary><ul className="cocs-readout__nodes">
    {nodes.map((node:any)=><li key={node.id} className={`cocs-node${node.mine?' cocs-node--mine':''}${node.enemy?' cocs-node--enemy':''}${node.contested?' cocs-node--contested':''}`} aria-label={`${node.label}: ${node.ownerLabel}${node.contested?' contested':''}${node.progressPercent>0&&!node.mine?` ${node.progressPercent} percent captured`:''}`}>
     <span className="cocs-node__mark" aria-hidden="true">{node.mark}</span>
     <span className="cocs-node__label">{node.label}</span>
     <span className="cocs-node__status">{node.ownerLabel}{node.progressPercent>0&&!node.mine?` ${node.progressPercent}%`:''}</span>
    </li>)}
    {!nodes.length&&<li className="cocs-node cocs-node--neutral"><span className="cocs-node__mark" aria-hidden="true">○</span><span className="cocs-node__label">NO NODES</span><span className="cocs-node__status">STAND BY</span></li>}
-  </ul>
-  <div className="cocs-readout__own">
+   </ul></details>
+   <div className="cocs-readout__own">
    <span aria-label={`Your team owns ${mine} nodes`}>{teamName(board.team??0)} <b>{mine}</b> NODES</span>
    <span aria-label={`The enemy owns ${enemy} nodes`}>{teamName((board.team??0)===0?1:0)} <b>{enemy}</b> NODES</span>
   </div>
@@ -91,13 +94,13 @@ function CocsReadout({command,teamName}:{command:any;teamName:(team:any)=>string
   </div>
   {traversal&&(traversal.deviceCount>0||traversal.depotCount>0)&&<div className="cocs-traversal" role="group" aria-label="Traversal devices and depots">
    {traversal.channel&&<p className="cocs-traversal__channel" role="status" aria-live="polite"><span aria-hidden="true">{traversal.channelDevice?.mark}</span> {traversal.channel.label} {traversal.channelDevice?.label} · {traversal.channel.remainingSeconds}s <b>{Math.round((traversal.channel.percent??0)*100)}%</b></p>}
-   {traversal.deviceCount>0&&<ul className="cocs-traversal__list" aria-label="Devices">
+    <details><summary>ROUTES &amp; DEPOTS</summary>{traversal.deviceCount>0&&<ul className="cocs-traversal__list" aria-label="Devices">
     {traversal.devices.map((device:any)=><li key={device.id} className={`cocs-device cocs-device--${device.state}`} aria-label={`${device.label} ${device.stateLabel}${device.timerSeconds>0?`, ${device.timerSeconds} seconds remaining`:''}${device.channel?`, ${device.channel.label}`:''}`}><span className="cocs-device__mark" aria-hidden="true">{device.mark}</span><span className="cocs-device__state" aria-hidden="true">{device.stateMark}</span> {device.stateLabel}</li>)}
    </ul>}
    {traversal.depotCount>0&&<ul className="cocs-traversal__list" aria-label="Depots">
     {traversal.depots.map((depot:any)=><li key={depot.id} className={`cocs-depot${depot.mine?' is-mine':''}${depot.enemy?' is-enemy':''}${depot.contested?' is-contested':''}`} aria-label={`${depot.label} ${depot.ownerLabel}${depot.capturePercent>0?`, ${depot.capturePercent} percent captured`:''}. Loaner ${depot.vehicle.state}`}><span className="cocs-depot__mark" aria-hidden="true">{depot.mark}</span> {depot.ownerLabel}{depot.capturePercent>0?` ${depot.capturePercent}%`:''} <small>LOANER {depot.vehicle.state}</small></li>)}
    </ul>}
-   {traversal.arrivalActive&&<p className="cocs-traversal__arrival" role="status">ARRIVAL PROTECTION · {traversal.arrivalSeconds}s</p>}
+    </details>{traversal.arrivalActive&&<p className="cocs-traversal__arrival" role="status">ARRIVAL PROTECTION · {traversal.arrivalSeconds}s</p>}
    {command.interactPrompt&&<p className={`cocs-interact cocs-interact--${command.interactPrompt.source}`} role="status" aria-live="polite" aria-label={`${command.interactPrompt.verb} ${command.interactPrompt.label}. Press ${command.interactPrompt.key}. ${command.interactPrompt.anchored?'At the anchor':`${command.interactPrompt.distanceMeters} meters away`}${command.interactPrompt.channelPercent>0?`, ${command.interactPrompt.channelPercent} percent channelled`:''}`}>
     <span className="cocs-interact__mark" aria-hidden="true">{command.interactPrompt.mark}</span>
     <b className="cocs-interact__verb">{command.interactPrompt.verb}</b>
@@ -110,12 +113,13 @@ function CocsReadout({command,teamName}:{command:any;teamName:(team:any)=>string
   </div>}
   <div className="cocs-strip" role="group" aria-label="Order strip. Arm a verb, pick a node, then issue.">
    <div className="cocs-strip__verbs">
-    {strip.buttons.map((button:any)=><button key={button.id} type="button" className={`cocs-verb${button.armed?' is-armed':''}${button.disabled?' is-disabled':''}`} aria-pressed={button.armed} disabled={button.disabled} title={button.disabled?`${button.label} unavailable: ${button.reason}`:button.hint} onClick={()=>command.armCocsVerb(button.id)}>{button.label}</button>)}
+     {strip.buttons.map((button:any)=><button key={button.id} type="button" className={`cocs-verb${button.armed?' is-armed':''}${button.disabled?' is-disabled':''}`} aria-pressed={button.armed} disabled={button.disabled} title={button.disabled?`${button.label} unavailable: ${button.reason}`:button.hint} onClick={()=>command.armCocsVerb(button.id)}>{button.label} <kbd>{command.keys?.[button.id==='SCAN'?'commandScan':button.id==='GO'?'commandGo':'commandAttack']}</kbd></button>)}
    </div>
    {traversal&&<p className="cocs-strip__context" role="status"><span aria-hidden="true">◈</span> {traversal.context}</p>}
    <p className="cocs-strip__prompt" role="status" aria-live="polite">{strip.armedLabel&&!strip.targetLabel?`${strip.armedLabel} · PICK A NODE`:strip.armedLabel&&strip.targetLabel?`${strip.armedLabel} → ${strip.targetLabel}`:'ARM AN ORDER'}{strip.notice&&<span className="cocs-strip__notice">{strip.notice}</span>}</p>
-   {strip.nodes.length>0&&<ul className="cocs-picker">{strip.nodes.map((node:any)=><li key={node.id}><button type="button" aria-pressed={strip.target===node.id} onClick={()=>command.pickCocsTarget(node.id)}><span className="cocs-picker__index">{node.index}</span><span aria-hidden="true">{node.mark}</span> {node.label} <small>{node.ownerLabel}</small></button></li>)}</ul>}
-   <button type="button" className="cocs-issue" disabled={!strip.canIssue} onClick={()=>command.issueCocsOrder()} aria-label={strip.armedLabel?`Issue ${strip.armedLabel} order${strip.targetLabel?` on ${strip.targetLabel}`:''}`:'Issue order'}>{strip.armedLabel?`ISSUE ${strip.armedLabel}`:'ISSUE'}</button>
+    {strip.armed&&strip.nodes.length>0&&<ul className="cocs-picker">{strip.nodes.map((node:any)=><li key={node.id}><button type="button" aria-pressed={strip.target===node.id} onClick={()=>command.pickCocsTarget(node.id)}><span className="cocs-picker__index">{node.index}</span><span aria-hidden="true">{node.mark}</span> {node.label} <small>{node.ownerLabel}</small></button></li>)}</ul>}
+    {strip.armed&&<button type="button" className="cocs-issue" disabled={!strip.canIssue} onClick={()=>command.issueCocsOrder()} aria-label={strip.armedLabel?`Issue ${strip.armedLabel} order${strip.targetLabel?` on ${strip.targetLabel}`:''}`:'Issue order'}>ENTER · ISSUE {strip.armedLabel}</button>}
+    <p className="cocs-strip__help">Verb → number → ENTER · ESC cancels. Hold {command.keys?.command??'B'} for the board. Field guide: pause menu.</p>
    {strip.pending&&<p className="cocs-strip__pending" role="status">SENDING {strip.pending.text}…</p>}
    {strip.issued&&!strip.pending&&<p className="cocs-strip__issued" role="status">LAST {strip.issued.text}</p>}
   </div>

@@ -4,11 +4,14 @@ import {ArrowUpRight,Check,ChevronDown,ChevronRight,Crosshair,Flag,Hexagon,LockK
 import type {ScreenProps} from '../contract';
 import {ActionRail,Banner,Btn,Meter,PageHead,Panel,Segmented,SelectCard,Shell,Stats,TopBar} from '../primitives';
 import {kitView,operatorCard,specSheet} from '../../../game/class-ui.mjs';
+import {LatticeBriefing} from './LatticeGuide';
+import {isLattice} from '../../../game/lattice-guide.mjs';
 
 export function SelectionScreen({ui}:ScreenProps){
   const {entered,showcaseLive,character,chooseCharacter,CHARACTERS=[],selected,harness,setHarness,HARNESSES=[],power,powerIcon,config,start,startSpectate,quickStart,setSetupOpen,setSingleOpen,changeMode,connectNet,openBrowser,netConnected,profile,demos=[],previewRef,headActions,backToDemo,notice,challenges=[],presets=[],loadPreset,deletePreset,openSettings}=ui;
   const [previewTab,setPreviewTab]=useState('model');
   const [moreOpen,setMoreOpen]=useState(false);
+  const [latticeIntro,setLatticeIntro]=useState<string|null>(null);
   const note=character==='claude'?'Enhanced health, armor and speed offset the Claude Code harness lock.':'Each operator trades durability for mobility. Pick the stats that fit your style.';
   // Class/spec identity comes from the kit data directly (never through the
   // page's loose `ui` bag): wing chip, role, signature and movement verb.
@@ -26,8 +29,8 @@ export function SelectionScreen({ui}:ScreenProps){
    {id:'rockets',name:'Rocket Arena',tag:'Unlimited rockets for everyone',icon:<Rocket size={20}/>},
    {id:'instagib',name:'Instagib',tag:'Rail only · one unprotected hit kills',icon:<Crosshair size={20}/>},
    {id:'armsrace',name:'Arms Race',tag:'Every kill promotes you up the rack',icon:<Swords size={20}/>},
-   {id:'cocs',name:'Lattice Strike',tag:'PREVIEW · linked-node capture war mode',icon:<Hexagon size={20}/>},
-   {id:'cocs-coop',name:'Lattice Strike: Operations',tag:'PREVIEW · five-wave PvE siege with the Operations Director',icon:<Hexagon size={20}/>},
+    {id:'cocs',name:'Lattice Strike',tag:'Team territory war · briefing & deployment',icon:<Hexagon size={20}/>},
+    {id:'cocs-coop',name:'Lattice Strike: Operations',tag:'Co-op · defend your HQ against five Director waves',icon:<Hexagon size={20}/>},
    {id:'horde',name:'Horde',tag:'Solo survival against escalating waves',icon:<Skull size={20}/>},
    {id:'campaign',name:'Campaign',tag:'Scripted solo missions with objectives',icon:<Play size={20}/>},
    {id:'spectate',name:'Spectate',tag:'Watch a cinematic AI match',icon:<Film size={20}/>},
@@ -65,7 +68,11 @@ export function SelectionScreen({ui}:ScreenProps){
   return <Shell className={`shell--showcase${entered?'':' shell--awaiting'}`} head={<TopBar sub="CUSTOM MATCH">{headActions}</TopBar>} rail={rail}>
   <div className="stack">
    <PageHead eyebrow="COLOSSEUM SETUP" title={<>Choose your intelligence<span>.</span></>} lede="Pick an operator, strap on a harness, then tune the rules. Nine rival models are already talking trash — only one leaves with bragging rights."/>
-   {notice&&<Banner>{notice}</Banner>}
+    {notice&&<Banner>{notice}</Banner>}
+    {(latticeIntro||isLattice(config?.mode))&&<Panel label="LATTICE / DEPLOYMENT BRIEFING" meta="NEW HERE? START WITH YOUR FRONT GATE">
+     <LatticeBriefing mode={latticeIntro??config.mode} bindings={ui.bindings}/>
+     {latticeIntro&&<div className="row"><Btn variant="primary" onClick={()=>{quickStart?.(latticeIntro);setLatticeIntro(null);}}>DEPLOY {latticeIntro==='cocs-coop'?'OPERATIONS':'LATTICE STRIKE'}</Btn><Btn variant="ghost" onClick={()=>setLatticeIntro(null)}>BACK TO LOADOUT</Btn></div>}
+    </Panel>}
    <div className="layout layout--lead">
     <div className="stack">
      <Panel className="panel--dense panel--operator" label="01 / OPERATOR" meta={`${CHARACTERS.length} AVAILABLE`} actions={<Btn size="sm" variant="ghost" onClick={ui.shuffle} title="Random compatible operator, harness and arena"><span className="shuffle-long">SHUFFLE LOADOUT / MAP</span><span className="shuffle-short" aria-hidden="true">SHUFFLE</span></Btn>}>
@@ -111,7 +118,7 @@ export function SelectionScreen({ui}:ScreenProps){
        </div>}
      </div>
      <Panel label="03 / QUICK START" meta="LAUNCHES INSTANTLY">
-       <div className="grid-cards">{activities.map((a)=><SelectCard key={a.id} onClick={()=>quickStart?.(a.id)} ariaLabel={`${a.name}: ${a.tag}`} icon={a.icon} name={a.name} tag={a.tag} meta={<Play size={15}/>}/>)}</div>
+        <div className="grid-cards">{activities.map((a)=><SelectCard key={a.id} onClick={()=>{if(isLattice(a.id)){setLatticeIntro(a.id);document.querySelector('.shell')?.scrollTo({top:0,behavior:'instant'});}else quickStart?.(a.id);}} ariaLabel={`${a.name}: ${a.tag}`} icon={a.icon} name={a.name} tag={a.tag} meta={<Play size={15}/>}/>)}</div>
        <p className="field-note">Starts now with <b>{selected?.name}</b>, the <b>{power?.name}</b> harness and your current rules on a {ui.selectedMode?.name} arena. Fine-tune everything under MATCH SETUP, or pick a specific arena there. New objective modes — Juggernaut, Team Elimination, VIP Escort, Payload and Assault — live there too; the full legend is under Graphics &amp; settings → Help.</p>
      </Panel>
      <Panel label="LOADOUT PRESETS" meta={`${presets.length} SAVED`} actions={<Btn size="sm" variant="ghost" onClick={()=>setSetupOpen(true)}>MANAGE</Btn>}>

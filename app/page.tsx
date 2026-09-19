@@ -72,6 +72,7 @@ import {PerfTracker,BENCHMARK_PRESET,benchmarkReport,benchmarkDisplay} from '../
 import {ammoText,boundList,cocsResultSummary,cocsBoard,commandBrief,damageBearing,damageNumberStyle,dynamicCrosshairGap,escapeHint,flagText,hitMarker,isTeamMode,killBanner,killCallout,connectionQuality,modeGoal,modePrimary,nextSpectateTarget,spectatorBoard,spectatorTeams,killFeedWeapon,lowAmmo,matchAwards,matchStartBanner,scoreText,suddenDeathBanner,grenadeStatus,killstreakCallout,ladderStatus,streakStatus,audioCaption,postureLabel,projectToScreen,reloadProgress,scoreAnnouncer,teamName,teamScoreText,vehicleHud,voiceHint,weaponRangeLabel,weaponTag} from '../game/hud.mjs';
 import {cocsArmVerb,cocsClearStrip,cocsCommandView,cocsIssueOrder,cocsPickTarget,cocsStripState,cocsTargetableNodes} from '../game/cocs-orders.mjs';
 import {cocsBoard as latticeBoardView} from '../game/hud.mjs';
+import {latticeCoach,latticeKeys,latticeNodeLabel,latticeOrderKey} from '../game/lattice-guide.mjs';
 import {configureMothAssets,mothIr,mothMotif} from '../game/moth-assets.mjs';
 import {MothAudioBank,MothAudio} from '../game/moth-audio.mjs';
 
@@ -497,8 +498,10 @@ export default function Home(){
     // arrows/Home/End move the listbox, Enter acts and Escape closes. It is
     // keyboard-only while the pointer is locked and never captures the pointer.
     const cocsBoardBound=actionForCode(r.bindings||bindings,e.code);
-    if(r.match&&!r.net?.started&&!e.repeat&&cocsBoardBound==='command'){e.preventDefault();cocsBoardControlRef.current?.open(true);return;}
-    if(r.match&&!r.net?.started&&!e.repeat&&cocsBoardControlRef.current?.isOpen()){
+     const latticeMode=r.net?.started?r.renderState?.config?.mode:r.match?.config?.mode;
+     const latticePlayer=isCocsMode(latticeMode)&&!r.net?.spectate&&!r.spectateLocal;
+     if(latticePlayer&&!e.repeat&&cocsBoardBound==='command'){e.preventDefault();cocsBoardControlRef.current?.open(true);return;}
+     if(latticePlayer&&!e.repeat&&cocsBoardControlRef.current?.isOpen()){
      if(e.code==='ArrowDown'||e.code==='ArrowRight'){e.preventDefault();cocsBoardControlRef.current.move(1);return;}
      if(e.code==='ArrowUp'||e.code==='ArrowLeft'){e.preventDefault();cocsBoardControlRef.current.move(-1);return;}
      if(e.code==='Home'){e.preventDefault();cocsBoardControlRef.current.first();return;}
@@ -506,16 +509,12 @@ export default function Home(){
      if(e.code==='Enter'||e.code==='Space'){e.preventDefault();cocsBoardControlRef.current.activate();return;}
      if(e.code==='Escape'){e.preventDefault();cocsBoardControlRef.current.close();return;}
     }
-    if((e.code==='KeyT'||e.code==='Enter')&&r.net?.started){chatOpenRef.current=true;syncVoice();clearInput();setChatOpen(true);e.preventDefault();return;}
+     const orderKey=latticeOrderKey({mode:latticeMode,spectate:r.net?.spectate||r.spectateLocal,code:e.code,action:cocsBoardBound??'',armed:cocsControlRef.current?.armed(),repeat:e.repeat});
+     if(orderKey){e.preventDefault();if(orderKey.type==='arm')cocsControlRef.current?.arm(orderKey.verb);else if(orderKey.type==='pick')cocsControlRef.current?.pickIndex(orderKey.index);else if(orderKey.type==='issue')cocsControlRef.current?.issue();else cocsControlRef.current?.cancel();return;}
+     if((e.code==='KeyT'||e.code==='Enter')&&r.net?.started){chatOpenRef.current=true;syncVoice();clearInput();setChatOpen(true);e.preventDefault();return;}
     if(e.code==='Escape'){e.preventDefault();changeMode(r.net?.started?'lobby':'paused');return;}
     if(e.code==='Tab'){e.preventDefault();setScores(true);return;}
     if(r.net?.spectate)return;
-     // LATTICE STRIKE V0b order strip keys. The three remappable command verbs
-     // arm SCAN / GO / ATTACK; once armed, the number row picks the node. Local
-     // play only — net orders are deliberately out of scope for V0b.
-     const cocsBound=actionForCode(r.bindings||bindings,e.code);
-     if(r.match&&!r.net?.started&&!e.repeat&&(cocsBound==='commandScan'||cocsBound==='commandGo'||cocsBound==='commandAttack')){e.preventDefault();cocsControlRef.current?.arm(cocsBound==='commandScan'?'SCAN':cocsBound==='commandGo'?'GO':'ATTACK');return;}
-     if(r.match&&!r.net?.started&&!e.repeat&&/^Digit[1-9]$/.test(e.code)&&cocsControlRef.current?.armed()){e.preventDefault();cocsControlRef.current.pickIndex(Number(e.code.slice(-1)));return;}
      const bound=Object.values(r.bindings||bindings);if(bound.includes(e.code)||e.code==='KeyC'||e.code==='Tab')e.preventDefault();keys.add(e.code);
      const boundAction=actionForCode(r.bindings||bindings,e.code);if(!e.repeat){if(boundAction==='jump')r.jump=true;else if(boundAction==='power')r.power=true;else if(boundAction==='interact')r.interact=true;else if(boundAction==='reload')r.reload=true;else if(boundAction==='melee')r.melee=true;else if(boundAction==='grenade')r.grenade=true;}
     if(!e.repeat&&(/^Digit[1-9]$/.test(e.code)||e.code==='Digit0')){const n=e.code==='Digit0'?9:Number(e.code.slice(-1))-1;if(n>=WEAPONS.length)return;if(r.net?.started||(r.match&&hasAmmo(r.match.actors[0].ammo[n])))r.inputWeapon=n;}
@@ -672,7 +671,11 @@ export default function Home(){
    const issueCocsOrder=()=>{const r=runtime.current,state=cocsNow(),snapshot=hud?.cocs,team=cocsTeam(),tick=Number(snapshot?.tick)||0,cardId=`cocs-${team}-${tick}-${Number(state.seq)||0}`;const result=cocsIssueOrder(state,{tick,peerId:r?.net?.peerId??'human',cardId,team,flux:snapshot?.flux?.[team]??0});applyCocsStrip(result.state);if(!result.order||!r)return;if(r.net?.started&&!r.net.spectate){r.net.order(result.order.cardId,result.order.verb,result.order.target,'chief');return;}(r.cocsOrders??=[]).push(result.order);};
    const cancelCocsStrip=()=>applyCocsStrip(cocsClearStrip(cocsNow()));
    cocsControlRef.current={arm:armCocsVerb,pickIndex:pickCocsIndex,issue:issueCocsOrder,cancel:cancelCocsStrip,armed:()=>Boolean(cocsNow().armed)};
-    const cocsView=isCocsMode(hudMode)?cocsCommandView(latticeBoardView(hud,player),hud?.cocs,player,cocsStrip,{interactKey:keyLabel(bindings.interact)}):null;
+    const latticeMap=isCocsMode(hudMode)?getMap(hud?.mapId??mapId):null;
+    const latticeBoard=latticeBoardView(hud,player);
+    for(const node of latticeBoard.nodes)node.label=latticeNodeLabel({id:node.id},latticeMap);
+    const cocsView:any=isCocsMode(hudMode)?cocsCommandView(latticeBoard,hud?.cocs,player,cocsStrip,{interactKey:keyLabel(bindings.interact)}):null;
+    if(cocsView){cocsView.coach=latticeCoach(hud,player,latticeMap);cocsView.keys=latticeKeys(bindings);}
    // O1c — the board is a client-side overlay. State (open/pinned/active) lives
    // here so the global keydown can drive hold-to-peek, pointer-locked listbox
    // navigation and the damage auto-collapse. The board is never opened outside

@@ -1,0 +1,38 @@
+/* Quiet, legible field instructions. No timed dismissal or motion dependency. */
+.lattice-guide{padding:18px;border:1px solid var(--border);border-radius:8px;background:linear-gradient(125deg,#102a2b,#07171d);color:var(--text)}
+.lattice-guide h3{margin:5px 0 8px;font-size:22px;line-height:1.2}
+.lattice-guide__goal{max-width:80ch;color:var(--accent-soft);font-size:14px;line-height:1.6}
+.lattice-guide__steps{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:16px;list-style:none;margin:18px 0;padding:0}
+.lattice-guide__steps li{padding-left:12px;border-left:2px solid var(--border-strong)}
+.lattice-guide__steps b{font:700 11px var(--font-mono);letter-spacing:.08em}
+.lattice-guide p{margin:6px 0;font:13px/1.6 var(--font-ui);color:var(--text-dim)}
+.lattice-guide summary,.cocs-readout summary{cursor:pointer;min-height:32px;align-content:center;font:600 10px/1.5 var(--font-mono);color:var(--accent-soft)}
+.lattice-guide summary{min-height:44px;font-size:12px}
+.lattice-guide__legend{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px;margin:12px 0}
+.lattice-guide__legend dt{font:700 11px var(--font-mono);color:var(--accent-soft)}
+.lattice-guide__legend dd{margin:5px 0;font:12px/1.5 var(--font-ui);color:var(--text-dim)}
+.lattice-guide--compact .lattice-guide__steps{grid-template-columns:1fr}
+.lattice-coach{padding:8px;border:1px solid var(--border-strong);border-radius:5px;background:#15312d}
+.lattice-coach b{font:700 11px/1.4 var(--font-mono);color:var(--accent-soft)}
+.lattice-coach p{margin:5px 0 0;font:12px/1.45 var(--font-ui);color:var(--text)}
+.cocs-readout{max-height:calc(100dvh - 270px);overflow:auto;overscroll-behavior:contain;scrollbar-width:thin;pointer-events:auto}
+.cocs-readout .cocs-readout__own,.cocs-readout .cocs-readout__hint{display:none}
+.cocs-readout .cocs-readout__rung{font-size:10px}
+.cocs-readout .cocs-readout__rung small{display:none}
+.cocs-strip__help{margin:0;font:10px/1.5 var(--font-ui);color:var(--text-dim)}
+.cocs-verb kbd{display:block;color:var(--accent-soft);font-size:10px}
+.cocs-readout .cocs-verb,.cocs-readout .cocs-issue,.cocs-readout .cocs-picker button{min-height:44px}
+.lattice-tactical{padding:8px 0;color:var(--text-dim)}
+.lattice-tactical__head{display:flex;justify-content:space-between;font:8px var(--font-mono)}
+.lattice-tactical svg{display:block;width:100%;max-height:150px;margin-top:8px;background:#041218;border-radius:5px;overflow:visible}
+.lattice-tactical line{stroke:#476569;stroke-width:1.3;stroke-dasharray:3 3}
+.lattice-tactical line.is-linked{stroke:var(--accent);stroke-dasharray:none;stroke-width:2}
+.lattice-tactical rect{fill:#5c6b6f;stroke:#d7e6e5;stroke-width:1}
+.lattice-tactical .is-mine rect{fill:#326254;stroke:var(--accent)}
+.lattice-tactical .is-enemy rect{fill:#733b45;stroke:#ffc2c5}
+.lattice-tactical text{fill:#fff;font:bold 7px var(--font-mono)}
+.lattice-tactical .target-ring{fill:none;stroke:var(--warn);stroke-width:1.4}
+.lattice-tactical .player-dot{fill:#fff;stroke:#152d39;stroke-width:1.2}
+.lattice-tactical p{margin:6px 0 0;font:9px var(--font-mono)}
+.lattice-guide summary:focus-visible,.cocs-readout summary:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+@media(max-width:760px){.lattice-guide__steps,.lattice-guide__legend{grid-template-columns:1fr}.lattice-guide{padding:12px}.cocs-readout{max-height:calc(100dvh - 250px)}}

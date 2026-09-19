@@ -1,6 +1,7 @@
 @import "tailwindcss";
 @import "tw-animate-css";
 @import "./styles/ui.css";
+@import "./styles/lattice-guide.css";
 @custom-variant dark (&:is(.dark *));
 :root{
   /* Surfaces */

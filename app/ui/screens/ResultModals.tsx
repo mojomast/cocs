@@ -3,6 +3,7 @@ import {useState} from 'react';
 import {Award,Crosshair,Flag,Shield,Skull,Target,Trophy,Zap} from 'lucide-react';
 import {Modal,Panel,Btn,Stats,Tabs,Chip,Meter} from '../primitives';
 import type {ScreenProps} from '../contract';
+import {LatticeBriefing} from './LatticeGuide';
 
 const MEDAL_ICONS:any={mvp:Trophy,objective:Target,flag:Flag,captures:Flag,accuracy:Crosshair,damage:Zap,flawless:Shield,ratio:Crosshair,deaths:Skull};
 const medalIcon=(id:string)=>{const Icon=MEDAL_ICONS[id]||Award;return <Icon size={16}/>;};
@@ -45,8 +46,9 @@ export function PauseModal({ui}:ScreenProps){
      <Btn onClick={()=>openSettings?.('game')}>OPEN GRAPHICS &amp; SETTINGS</Btn>
     </div>
    </Panel>
-  </div>
- </Modal>;
+   </div>
+   <LatticeBriefing mode={ui.hud?.config?.mode} bindings={ui.bindings} compact/>
+  </Modal>;
 }
 
 // Post-match summary card: result line, XP/level progress, prestige progress

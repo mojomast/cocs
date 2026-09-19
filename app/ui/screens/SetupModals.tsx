@@ -2,6 +2,7 @@
 import type {ScreenProps} from '../contract';
 import {MatchConfiguration,PresetsConfiguration} from '../../game-ui/configuration';
 import {Modal,Btn,Segmented,SelectCard,Panel,Chip,Meter} from '../primitives';
+import {LatticeBriefing} from './LatticeGuide';
 
 export function SetupModal({ui}:ScreenProps){
  const {setupOpen,closeSetup,config,setConfig,mapId,setMapId,selectableMaps=[],start,presets=[],savePreset,loadPreset,deletePreset,selectedMap,ready,error,MapPlan,mapViewBox,modalRef}=ui;
@@ -15,7 +16,8 @@ export function SetupModal({ui}:ScreenProps){
     <PresetsConfiguration presets={presets} onSave={savePreset} onLoad={loadPreset} onDelete={deletePreset}/>
    </div>
    <div className="stack">
-    <MatchConfiguration config={config} excludeModes={['horde','campaign']} onChange={setConfig}/>
+     <MatchConfiguration config={config} excludeModes={['horde','campaign']} onChange={setConfig}/>
+     <LatticeBriefing mode={config?.mode} bindings={ui.bindings} compact/>
    </div>
   </div>
  </Modal>;

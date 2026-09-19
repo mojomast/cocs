@@ -6,6 +6,7 @@ export const ONBOARDING_STEPS = Object.freeze([
   Object.freeze({id: 'move', title: 'MOVE', detail: 'WASD to move, Space to jump, Shift to sprint, Ctrl or C to crouch and slide.'}),
   Object.freeze({id: 'fight', title: 'FIGHT', detail: 'Left mouse fires, right mouse aims, R reloads, F melees and G throws a frag. Scroll or use 1-0 to switch weapons.'}),
   Object.freeze({id: 'objective', title: 'PLAY THE OBJECTIVE', detail: 'Hold the hill, carry the flag, or push the payload cart. The current goal and score run along the top of the screen.'}),
+  Object.freeze({id: 'lattice', title: 'LATTICE STRIKE', detail: 'Start at your front gate. Stand inside a capture ring, then take a linked node. Keep the supply line back to HQ connected to earn team FLUX. LATTICE quick start opens a field briefing; the pause menu keeps it available during play.'}),
   Object.freeze({id: 'systems', title: 'NEW SYSTEMS', detail: 'Juggernaut, Team Elimination and VIP Escort remix the objective; Horde waves grant lasting upgrades; dailies and Theater highlights track progress.'}),
   Object.freeze({id: 'mutators', title: 'MUTATORS & WEATHER', detail: 'Match Setup toggles mutators like One-shot, Bounty, Berserk, Random weapon and Sudden death. Arenas pick their own weather — rain, snow, ash or storms — and time of day; reduce motion clears it.'}),
   Object.freeze({id: 'career', title: 'PRESTIGE & ACHIEVEMENTS', detail: 'Milestones unlock achievements for bonus XP, and overflow XP past level 60 banks prestige ranks with permanent XP bonuses. Track both under Rank → Career track.'}),
@@ -17,6 +18,20 @@ export const ONBOARDING_STEPS = Object.freeze([
 // Skimmable in-game legend for the systems added on top of the core loop. Kept
 // engine-free so the Help tab, the tests and any future tooling share one source.
 export const HELP_SECTIONS = Object.freeze([
+  Object.freeze({
+    id: 'lattice', title: 'LATTICE STRIKE & OPERATIONS',
+    summary: 'Take connected ground, support the push, protect your HQ.',
+    items: Object.freeze([
+      'FIRST MINUTE · Leave HQ for your front gate. Stand in the capture ring and clear opponents; capture is automatic. Next, push the central relay or a side siphon linked to a node you own.',
+      'SUPPLY · Connected nodes earn team FLUX. Losing a link to HQ stops that income, even if the forward node still belongs to you. Defend the links as well as the points.',
+      'WIN · In PvP, hold a majority long enough for dominance; at the time limit, objective score decides. In OPERATIONS, clear all five Director waves before time expires and keep the HQ alive.',
+      'COMMAND · Arm SCAN, GO/HOLD or ATTACK, select a numbered target, then press Enter to issue. Escape cancels an armed order. Hold the command-board key to inspect the team plan. The field briefing and HUD show your remapped keys.',
+      'ROUTES · At an anchor, Interact rides the device. In its outer ring it may CUT/LOCK instead; read the prompt first. A broken route offers REPAIR. Ground routes are available to every loadout.',
+      'DEPOTS & TERMINALS · Hold a depot apron to capture; Interact enters its loaner. In OPERATIONS, Interact at a terminal starts the displayed HACK / DEPLOY / VAULT action; protect the channel.',
+      'CLIMB · Grapple users aim at a higher solid surface and hold Mobility to reel upward; release to detach. Other operators have their own mobility verbs. Use the ramps when your mobility is unavailable.',
+      'SPEND · OPERATIONS opens a between-wave FLUX window for fortify, repair, resupply and reinforce. Respond to the HQ siege alarm before committing to another forward push.',
+    ]),
+  }),
   Object.freeze({
     id: 'modes',
     title: 'OBJECTIVE MODES',
