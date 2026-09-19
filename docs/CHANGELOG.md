@@ -25,11 +25,23 @@ disconnect.
 
 ### Per-team snapshots
 
-- Each peer receives only its own team's private intelligence; shared world
-  state still arrives for every actor. Spectators get a neutral view and
-  offline/local matches are unchanged.
-- The release ships a visibility leak test and the measured snapshot budget
-  before and after.
+- Each peer receives only its own team's private intelligence: team contacts
+  and spots, the order feed, command and role boards, team wallets, per-actor
+  REQUISITION and the private `cocs-*` event feed. Shared world state still
+  arrives for every actor; spectators get a public-only view and offline/local
+  matches are byte-identical.
+- **Contract:** `filterCocsSnapshot(state, team)` in `game/cocs-intel.mjs` is a
+  pure, frozen field table — team maps reduce to the recipient's key, team
+  arrays/stats drop enemy entries, per-actor private fields are stripped from
+  enemy actors and the event feed keeps a documented public allow-list.
+- **Cost:** measured egress drops from 103.4 to 92.0 KiB/s (about 0.85 →
+  0.75 Mbps) at 30 Hz with no reconciliation change, and the protocol version
+  does not move — absent sections read as empty.
+- **Visibility leak test:** a real two-peer proof that team 1 cannot read team
+  0 intel, contacts, spots, cards, role board, command seat or wallets, plus a
+  spectator view and byte-deterministic per-team delta chains.
+- Known V1 limit, documented rather than silent: the top-level `actors` array
+  still carries enemy positions for rendering; true fog is a separate feature.
 
 ### Ranked ladder
 
