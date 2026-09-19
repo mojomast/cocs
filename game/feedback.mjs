@@ -4,6 +4,7 @@ import {precipParticleAdds} from './environment.mjs';
 import {MusicEngine,HALO_THEME} from './music.mjs';
 import {footstepProfile,impactProfile,reportStyle,reportVariation,eventSeed,mixUnit} from './sfx-design.mjs';
 import {mothIr,mothEchoMap,mothMotif} from './moth-assets.mjs';
+import {latticeSoundCue} from './lattice-feedback.mjs';
 
 // Per-space reverb wetness for the baked convolution IRs. `cavern` keeps the
 // historical .42; drier outdoor/tunnel responses sit lower, big interiors higher.
@@ -889,7 +890,8 @@ export class SynthAudio{
    this._noise(t+.12+u*.5,out,nodes,{duration:.06+u*.08,gain:.16*vol*(1-i/Math.max(1,n)*.5),type:'bandpass',freq:500+u*1800,sweep:180+u*260,q:.8,attack:.004});
   }
  }
- event(e,player){if(!this.ctx||!e||!player)return;const local=this._isLocal(e,player),pos=e.from??e.pos,pan=this._panFor(pos,player);
+  event(e,player){if(!this.ctx||!e||!player)return;const local=this._isLocal(e,player),pos=e.from??e.pos,pan=this._panFor(pos,player);
+   const latticeCue=latticeSoundCue(e,player);if(latticeCue){this._beat(latticeCue,0,1,.2);return;}
   if(e.type==='shot'||e.type==='vehicle-shot'||e.type==='launch'){const same=this.lastReport&&e.time!=null&&this.lastReport.time===e.time&&this.lastReport.actor===e.actor&&this.lastReport.weapon===e.weapon&&this.lastReport.type===e.type;this.lastReport=e;if(same)return;const vehicle=e.type==='vehicle-shot',vol=local?1:this._falloff(pos,player,vehicle?42:34)*(vehicle?.95:.9);if(vol>.01){if(vehicle)this._chaingun(pan,vol);else this._gunshot(e,local,pan,vol,player);}return;}
   if(e.type==='dryfire'){if(local)this._click(0,1,.08,1500);return;}
   if(e.type==='grenade'){const vol=local?1:this._falloff(pos,player,24);if(vol>.02)this._play(.18,pan,(t,out,nodes)=>{this._click(pan,vol,.06,1400);this._noise(t+.02,out,nodes,{duration:.12,gain:.22*vol,type:'bandpass',freq:800,sweep:300,q:.8});this._tone(t+.03,out,nodes,{freq:280,duration:.1,type:'triangle',gain:.08*vol,end:140});});return;}

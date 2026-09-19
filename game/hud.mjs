@@ -1,6 +1,7 @@
 import {raceDisplay,soccerDisplay} from './race-ui.mjs';
 import {WEAPONS} from './data.mjs';
 import {teamMode,isCocsMode} from './config.mjs';
+import {latticeCaption} from './lattice-feedback.mjs';
 
 export function vehicleHud(player, vehicles = [], flags = [], spectate = false) {
   if (spectate || !player || !(player.health > 0)) return {vehicle: null, prompt: ''};
@@ -159,6 +160,7 @@ export function streakStatus(player) {
 
 export function audioCaption(event) {
   const type = event?.type;
+  const lattice=latticeCaption(event);if(lattice)return {text:lattice};
   // LATTICE STRIKE command events route into the same captions pipeline (§13.4).
   if (type === 'cocs-order') return {text: `Order ${String(event.verb ?? '').toUpperCase()}${event.node ? ` ${event.node}` : ''}`};
   if (type === 'coop-spend') return {text: `Spend ${String(event.verb ?? '').toUpperCase()} · ${Math.round(Number(event.cost) || 0)} FLUX`};
