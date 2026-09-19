@@ -75,9 +75,9 @@ test('a team-1 peer cannot read team-0 private sections while shared fields stil
   assert.deepEqual(keysOf(snap1.cocs[path]), ['1'], `team-1 snapshot keeps ${path}[1]`);
  }
  assert.deepEqual(keysOf(snap0.cocs.commander.seat), ['0']);
- assert.equal(snap0.cocs.commander.seat[0], '1');
+ assert.equal(snap0.cocs.commander.seat[0], '0');
  assert.deepEqual(keysOf(snap1.cocs.commander.seat), ['1']);
- assert.equal(snap1.cocs.commander.seat[1], '2');
+ assert.equal(snap1.cocs.commander.seat[1], '1');
  assert.equal(snap0.cocs.commander.seat[1], undefined, 'the enemy command seat never reaches team 0');
  assert.equal(snap1.cocs.commander.seat[0], undefined, 'the enemy command seat never reaches team 1');
  assert.deepEqual(keysOf(snap0.cocs.fieldSupport.intel), ['0']);
@@ -149,7 +149,7 @@ test('the OPERATIONS command board is team 0 only and redacted for spectators', 
  const player = lastTo(msgs, 'snapshot', 1).state;
  const spec = lastTo(msgs, 'snapshot', 2).state;
  assert.deepEqual(keysOf(player.cocs.command.seat), ['0'], 'per-team map inside the co-op board is filtered');
- assert.equal(player.cocs.command.seat[0], '1');
+ assert.equal(player.cocs.command.seat[0], '0');
  assert.ok(player.cocs.command.slices.length >= 1, 'team 0 keeps its own slices');
  assert.deepEqual(keysOf(player.cocs.flux), ['0'], 'the Director team FLUX is not shipped');
  assert.equal(spec.cocs.command, null, 'spectator command board is redacted');

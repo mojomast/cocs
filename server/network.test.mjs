@@ -568,6 +568,7 @@ test('two WebSocket clients drive an OPERATIONS room: actions apply and refuses 
   send(b, { type: 'join', name: 'Bob', character: 'claude', harness: 'hermes' });
   await until(a, 'welcome');
   const welcomeB = await until(b, 'welcome');
+  assert.equal(typeof welcomeB.peerId, 'number', 'the second peer has a numeric transport peer id');
   send(a, { type: 'host', config: { mode: 'cocs-coop', botCount: 6, timeLimit: 900 }, mapId: 'warfront' });
   send(a, { type: 'start' });
   await until(b, 'start');
@@ -584,6 +585,7 @@ test('two WebSocket clients drive an OPERATIONS room: actions apply and refuses 
   const vaultId = Object.keys(state.terminals.terminals).find(id => state.terminals.terminals[id].kind === 'VAULT' && state.terminals.terminals[id].nodeId === 'hq-0');
   const vault = state.terminals.terminals[vaultId];
   const alice = room.match.actors.find(actor => actor.name === 'Alice');
+  const bob = room.match.actors.find(actor => actor.name === 'Bob');
   Object.assign(alice, { x: vault.x, z: vault.z, y: 0 });
   alice.req = 100;
 
@@ -596,7 +598,7 @@ test('two WebSocket clients drive an OPERATIONS room: actions apply and refuses 
    const started = Date.now();
    const poll = () => {
     const done = state.coop.spendStats.FORTIFY >= 1 && state.terminals.vault.stores >= 1
-     && state.coop.commandSeat[0] === String(welcomeB.peerId) && alice.reqBuff === 'field-repair'
+     && state.coop.commandSeat[0] === String(bob.id) && alice.reqBuff === 'field-repair'
      && state.orderStats.byVerb.HOLD >= 1;
     if (done) resolve(true);
     else if (Date.now() - started > 25000) resolve(false);
