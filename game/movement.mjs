@@ -72,6 +72,9 @@ import {clamp01} from './math.mjs';
 //        bounds: match.arena.bounds,
 //        // required only by aimed verbs (grapple / rope), wire core's rayWorld:
 //        castRay: (origin, dir, maxDistance) => ({x, y, z, distance}) | null,
+//        // grapple body sweep and nearby standable ledge (optional):
+//        sweepClear: (from, to, radius) => boolean,
+//        grappleLanding: (hit, origin) => ({x, y, z}) | null,
 //      });
 //
 //    Apply the frame in the same tick, in this order:
@@ -199,11 +202,11 @@ export const MOVEMENT_EVENTS = deepFreeze([
 ]);
 
 // `movementSnapshot()` is the netcode field list: numbers, booleans, strings and
-// two shallow points. Everything else in the state object is derived or static.
+// anchor/arrival points. Everything else in the state object is derived or static.
 export const MOVEMENT_SNAPSHOT_FIELDS = deepFreeze([
   'v', 'verb', 'phase', 'enabled', 'charges', 'maxCharges', 'cooldown',
   'fuel', 'maxFuel', 'fuelRecharge', 'windup', 'recovery', 'activeTime',
-  'landingArmed', 'chains', 'miss', 'anchor', 'grapple',
+  'landingArmed', 'chains', 'miss', 'anchor', 'grapple', 'grappleLanding',
 ]);
 
 // The input surface `stepMovement` reads. Jump-family verbs ride the existing
@@ -545,6 +548,7 @@ function baseState() {
     miss: 0,
     anchor: null,
     grapple: null,
+    grappleLanding: null,
     carrier: null,
   };
 }
@@ -645,6 +649,7 @@ export function resetMovement(state, options = {}) {
   state.miss = 0;
   state.anchor = null;
   state.grapple = null;
+  state.grappleLanding = null;
   return state;
 }
 
@@ -856,6 +861,7 @@ function finishVerb(state, frame, {cooldown = null, recovery = null, reason = 'e
   state.windup = 0;
   state.windupTotal = 0;
   state.grapple = null;
+  state.grappleLanding = null;
   const cd = cooldown === null ? params.cooldown : cooldown;
   if (state.maxCharges === 0) {
     if (cd > 0) state.cooldown = Math.max(state.cooldown, cd);
@@ -976,6 +982,10 @@ const VERBS = {
       return true;
     }
     state.grapple = {x: hit.x, y: hit.y, z: hit.z};
+    // The ray hits a surface, not a place where an actor's feet can stand.
+    // Core may resolve a nearby ledge; every step toward it is still swept.
+    state.grappleLanding = params.liftScale > 0 && typeof ctx.grappleLanding === 'function'
+      ? ctx.grappleLanding(hit, origin) : null;
     state.phase = 'active';
     state.activeTime = 0;
     state.landingArmed = false;
@@ -1163,25 +1173,65 @@ function stepGrapple(state, ctx, frame, dt) {
     finishVerb(state, frame, {cooldown: params.missCooldown, reason: 'miss'});
     return true;
   }
-  const dx = anchor.x - num(ctx.x);
-  const dy = anchor.y - num(ctx.y);
-  const dz = anchor.z - num(ctx.z);
-  const distance = Math.hypot(dx, dy, dz);
-  if (distance <= 0.35) {
-    finishVerb(state, frame, {reason: 'arrive'});
-    frame.events.push({type: 'grapple-release', verb: state.verb, reason: 'arrive'});
+  const end = reason => {
+    finishVerb(state, frame, {reason});
+    frame.events.push({type: 'grapple-release', verb: state.verb, reason});
     return true;
-  }
+  };
+  state.activeTime += dt;
+  // A held hook must never become an unlimited hover, even after a correction
+  // or a carrier pickup removes the lift it was using.
+  if (state.activeTime > params.distance / params.reel * 3 + 1) return end('timeout');
+  const lifts = params.liftScale > 0;
+  const target = lifts && state.grappleLanding ? state.grappleLanding : anchor;
+  const dx = target.x - num(ctx.x);
+  const dy = target.y - num(ctx.y);
+  const dz = target.z - num(ctx.z);
+  const distance = Math.hypot(dx, dy, dz);
+  if (distance <= (state.grappleLanding ? 0.08 : 0.35)) return end('arrive');
   const direction = {x: dx / distance, y: dy / distance, z: dz / distance};
-  if (params.liftScale <= 0 && direction.y > 0) {
+  if (!lifts && direction.y > 0) {
     direction.y = 0;
     const length = Math.hypot(direction.x, direction.z) || 1;
     direction.x /= length;
     direction.z /= length;
   }
+  if (direction.y > 0) direction.y *= params.liftScale;
   const stepDistance = Math.min(params.reel * dt, distance);
-  frame.motion = {position: directTranslation(pointOf(ctx), direction, stepDistance, ctx), vy: null, airControl: null, keepMomentum: false, mode: 'pull'};
+  const from = pointOf(ctx);
+  let position = grappleTranslation(from, direction, stepDistance, ctx);
+  // At a wall, climb along its outside before crossing the lip. Do not climb
+  // above the resolved landing or invent an escape route around an overhang.
+  if (position.blocked && lifts && state.grappleLanding && dy > 0.01) {
+    const remaining = stepDistance - position.moved;
+    const up = grappleTranslation(position, {x: 0, y: 1, z: 0}, Math.min(remaining * params.liftScale, dy), ctx);
+    position = {...up, moved: position.moved + up.moved};
+  }
+  frame.motion = {position, vy: lifts ? 0 : null, airControl: null, keepMomentum: false, mode: 'pull'};
+  state.landingArmed = state.landingArmed || position.y > from.y;
+  if (position.moved < 1e-6) return end('blocked');
   return false;
+}
+
+// Unlike blink, reeling never snaps feet to the highest floor in the column:
+// that floor may be a roof above us. Sweep the actual 3D path and stop at it.
+function grappleTranslation(from, direction, distance, ctx) {
+  let target = {x: from.x, y: from.y, z: from.z}, moved = 0;
+  const steps = Math.ceil(distance / MOVEMENT_PROBE_STEP);
+  for (let i = 1; i <= steps; i++) {
+    const step = Math.min(distance, i * MOVEMENT_PROBE_STEP);
+    const next = {x: from.x + direction.x * step, y: from.y + direction.y * step, z: from.z + direction.z * step};
+    const ground = typeof ctx.floorAt === 'function' ? ctx.floorAt(next.x, next.z) : null;
+    if (!inBounds(ctx.bounds ?? INF_BOUNDS, next.x, next.z) || next.y > (ctx.ceilingY ?? Infinity)
+      || (ground !== null && ground > next.y + 1e-6)
+      || ctx.obstructed?.(next.x, next.y, next.z, MOVE_PROBE_RADIUS)
+      || (ctx.sweepClear && !ctx.sweepClear(target, next, MOVE_PROBE_RADIUS))) {
+      return {...target, moved, blocked: true};
+    }
+    target = next;
+    moved = step;
+  }
+  return {...target, moved, blocked: false};
 }
 
 function stepActive(state, ctx, input, frame, dt) {
@@ -1331,7 +1381,7 @@ export function interruptMovement(state, reason = 'external') {
   const refunded = phase === 'charging' ? 'charge' : phase === 'windup' ? 'attempt' : null;
   // An effect that already fired keeps its cost: start the recharge / lockout
   // timer the normal end would have started.
-  if (phase === 'active' && state.maxCharges > 0 && state.cooldown <= 0 && state.params.cooldown > 0) {
+  if (phase === 'active' && (state.maxCharges > 0 || state.verb === 'grapple') && state.cooldown <= 0 && state.params.cooldown > 0) {
     state.cooldown = state.params.cooldown;
   }
   state.phase = 'ready';
@@ -1340,6 +1390,7 @@ export function interruptMovement(state, reason = 'external') {
   state.windupTotal = 0;
   state.grapple = null;
   state.landingArmed = false;
+  state.grappleLanding = null;
   return {interrupted: true, phase, reason, refunded};
 }
 
@@ -1375,6 +1426,7 @@ export function movementSnapshot(state) {
     miss: state.miss,
     anchor,
     grapple,
+    grappleLanding: state.grappleLanding ? {...state.grappleLanding} : null,
   };
 }
 
@@ -1396,5 +1448,7 @@ export function applyMovementSnapshot(state, snapshot) {
   state.grapple = snapshot.grapple && Number.isFinite(snapshot.grapple.x)
     ? {x: snapshot.grapple.x, y: snapshot.grapple.y, z: snapshot.grapple.z}
     : null;
+  state.grappleLanding = snapshot.grappleLanding && Number.isFinite(snapshot.grappleLanding.x)
+    ? {...snapshot.grappleLanding} : null;
   return state;
 }
