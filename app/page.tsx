@@ -71,6 +71,7 @@ import {terrainSupportAt} from '../game/terrain.mjs';
 import {PerfTracker,BENCHMARK_PRESET,benchmarkReport,benchmarkDisplay} from '../game/perf.mjs';
 import {ammoText,boundList,cocsResultSummary,cocsBoard,commandBrief,damageBearing,damageNumberStyle,dynamicCrosshairGap,escapeHint,flagText,hitMarker,isTeamMode,killBanner,killCallout,connectionQuality,modeGoal,modePrimary,nextSpectateTarget,spectatorBoard,spectatorTeams,killFeedWeapon,lowAmmo,matchAwards,matchStartBanner,scoreText,suddenDeathBanner,grenadeStatus,killstreakCallout,ladderStatus,streakStatus,audioCaption,postureLabel,projectToScreen,reloadProgress,scoreAnnouncer,teamName,teamScoreText,vehicleHud,voiceHint,weaponRangeLabel,weaponTag} from '../game/hud.mjs';
 import {cocsArmVerb,cocsClearStrip,cocsCommandView,cocsIssueOrder,cocsPickTarget,cocsStripState,cocsTargetableNodes} from '../game/cocs-orders.mjs';
+import {cocsBoard as latticeBoardView} from '../game/hud.mjs';
 import {configureMothAssets,mothIr,mothMotif} from '../game/moth-assets.mjs';
 import {MothAudioBank,MothAudio} from '../game/moth-audio.mjs';
 
@@ -666,12 +667,12 @@ export default function Home(){
    const cocsNow=()=>cocsStripRef.current??cocsStripState();
    const cocsTeam=()=>player?.team===0||player?.team===1?Number(player.team):0;
    const armCocsVerb=(id:string)=>applyCocsStrip(cocsArmVerb(cocsNow(),id));
-   const pickCocsTarget=(target:any)=>{const nodes=cocsTargetableNodes(cocsBoard(hud,player),cocsNow().armed);applyCocsStrip(cocsPickTarget(cocsNow(),target,nodes));};
-   const pickCocsIndex=(index:number)=>{const nodes=cocsTargetableNodes(cocsBoard(hud,player),cocsNow().armed);const node=nodes.find((entry:any)=>entry.index===index);if(node)pickCocsTarget(node.id);};
+    const pickCocsTarget=(target:any)=>{const nodes=cocsTargetableNodes(latticeBoardView(hud,player),cocsNow().armed);applyCocsStrip(cocsPickTarget(cocsNow(),target,nodes));};
+    const pickCocsIndex=(index:number)=>{const nodes=cocsTargetableNodes(latticeBoardView(hud,player),cocsNow().armed);const node=nodes.find((entry:any)=>entry.index===index);if(node)pickCocsTarget(node.id);};
    const issueCocsOrder=()=>{const r=runtime.current,state=cocsNow(),snapshot=hud?.cocs,team=cocsTeam(),tick=Number(snapshot?.tick)||0,cardId=`cocs-${team}-${tick}-${Number(state.seq)||0}`;const result=cocsIssueOrder(state,{tick,peerId:r?.net?.peerId??'human',cardId,team,flux:snapshot?.flux?.[team]??0});applyCocsStrip(result.state);if(!result.order||!r)return;if(r.net?.started&&!r.net.spectate){r.net.order(result.order.cardId,result.order.verb,result.order.target,'chief');return;}(r.cocsOrders??=[]).push(result.order);};
    const cancelCocsStrip=()=>applyCocsStrip(cocsClearStrip(cocsNow()));
    cocsControlRef.current={arm:armCocsVerb,pickIndex:pickCocsIndex,issue:issueCocsOrder,cancel:cancelCocsStrip,armed:()=>Boolean(cocsNow().armed)};
-   const cocsView=isCocsMode(hudMode)?cocsCommandView(cocsBoard(hud,player),hud?.cocs,player,cocsStrip,{interactKey:keyLabel(bindings.interact)}):null;
+    const cocsView=isCocsMode(hudMode)?cocsCommandView(latticeBoardView(hud,player),hud?.cocs,player,cocsStrip,{interactKey:keyLabel(bindings.interact)}):null;
    // O1c — the board is a client-side overlay. State (open/pinned/active) lives
    // here so the global keydown can drive hold-to-peek, pointer-locked listbox
    // navigation and the damage auto-collapse. The board is never opened outside
