@@ -4,7 +4,7 @@ import {normalizeConfig,DIFFICULTIES,GAME_MODES,spawnLoadout,spawnInventory,load
 import {COOP_GARRISON_BOTS,COOP_TEAM_FLOOR} from './cocs-difficulty.mjs';
 import {abilityOf,harnessAbility,harnessVehicle,harnessWeaponHandling} from './harness-profiles.mjs';
 import {passiveBonus,passiveEffect,passiveScale,riderAmount,riderBonus,riderEffect,riderNumber,riderScale} from './spec-effects.mjs';
-import {createMovementState,resetMovement,refreshMovementParams,stepMovement,movementSnapshot,applyMovementSnapshot,ceilingFor,movementModeRule} from './movement.mjs';
+import {createMovementState,resetMovement,refreshMovementParams,stepMovement,movementSnapshot,applyMovementSnapshot,ceilingFor,movementModeRule,buildZipRide,resolveZipRide,stepZipRide,zipRidePoint,zipRideFace,zipRideDetachClear,ZIP_RIDE} from './movement.mjs';
 import {createOperatorVerbState,resetOperatorVerbState,setOperatorVerbActive,stepOperatorVerbState,operatorVerbSnapshot,operatorVerbFor,ADAPTIVE,REVISION,HEAT,DEEP_COMPUTE,BRACED,ALIGNMENT_REVIEW,LONG_CONTEXT,TOOL_USE,EFFORTLESS,clampSingleHit} from './operator-verbs.mjs';
 import {turnToward} from './character-anim.mjs';
 import {resolveGear} from './progression.mjs';
@@ -18,7 +18,7 @@ import {objectiveTemplate} from './mode-data.mjs';
 import {cocsSnapshot,cocsSpotDamageScale,compareCocsOrders,cocsEconomyAction,cocsCommandAction,cocsBuyAction,cocsHumanInteract} from './cocs.mjs';
 import {coopBuyAction,coopCommandAction,coopTerminalAction} from './cocs-coop.mjs';
 import {queueLatticePower,queueLatticeSwap} from './lattice-support.mjs';
-import {arrivalDamageScale,depotApronImmune,noteVehicleUse} from './cocs-traversal.mjs';
+import {arrivalDamageScale,depotApronImmune,noteVehicleUse,applyArrivalProtection} from './cocs-traversal.mjs';
 import {cocsDutyPolicy} from './cocs-bots.mjs';
 import {deathPlan} from './deaths.mjs';
 import {payloadPosition,payloadProgress,payloadTemplate} from './payload.mjs';
@@ -182,6 +182,14 @@ export const SELF_BLAST_MARGIN=1.15;
 // to `min` at `end` and beyond. Weapons without falloff always deal full damage.
 export function damageFalloff(weapon,distance){const f=weapon?.falloff;if(!f||!Number.isFinite(distance))return 1;const start=Number(f.start)||0,end=Number(f.end),min=Number.isFinite(f.min)?f.min:1;if(distance<=start)return 1;if(!(end>start))return min;const t=Math.min(1,(distance-start)/(end-start));return 1+(min-1)*t;}
 export function blastUnsafe(weapon,distance){const radius=Number(weapon?.radius),splash=Number(weapon?.splash),d=Number(distance);if(!(radius>0)||!(splash>0)||!Number.isFinite(d))return false;return d<radius*SELF_BLAST_MARGIN;}
+// The world adapter a zipline ride resolves against. `clear` covers both solid
+// walls (obstructed) and overhead surfaces (bodyCeiling), so a raised cable can
+// never thread a rider through a roof; `floorAt` rejects paths under terrain.
+const zipWorldFor=arena=>({
+ floorAt:(x,z)=>floorAt(x,z,arena),
+ clear:(x,y,z,r)=>!obstructed(x,y,z,r,arena)&&bodyCeiling(x,y,z,r,arena)>=y+RULES.height-1e-6,
+ radius:RULES.radius,
+});
 export function moveActor(a,input,dt,arena=MAPS[0],config={speed:1,gravity:1},ropeLines=null){
  // Recover corrected/older embedded state without lifting actors through tall solids.
  for(const b of candidates(arena,a.x,a.z,RULES.radius))if(Math.abs(a.x-b.x)<b.w/2+RULES.radius&&Math.abs(a.z-b.z)<b.d/2+RULES.radius&&a.y<b.h-1e-6){
@@ -190,7 +198,33 @@ export function moveActor(a,input,dt,arena=MAPS[0],config={speed:1,gravity:1},ro
     const bounds=boundsOf(arena);const p=spots.filter(p=>{const floor=floorAt(p.x,p.z,arena);return p.x>=bounds.minX&&p.x<=bounds.maxX&&p.z>=bounds.minZ&&p.z<=bounds.maxZ&&floor!==null&&floor<=p.y+1e-6&&!obstructed(p.x,p.y,p.z,RULES.radius,arena);}).sort((p,q)=>dist(a,p)-dist(a,q))[0];
   if(p){if(p.x!==a.x)a.vx=0;if(p.z!==a.z)a.vz=0;if(p.y!==a.y)a.vy=0;Object.assign(a,p);}
  }
- if(a.zipRide){const ride=a.zipRide;ride.t+=dt;const u=clamp(ride.t/ride.duration,0,1);a.x=ride.from.x+(ride.to.x-ride.from.x)*u;a.y=ride.from.y+(ride.to.y-ride.from.y)*u;a.z=ride.from.z+(ride.to.z-ride.from.z)*u;a.vx=a.vy=a.vz=0;a.grounded=false;if(u>=1){a.zipRide=null;a.grounded=true;a.lastValid={x:a.x,y:a.y,z:a.z};}const railBounds=boundsOf(arena);a.x=clamp(a.x,railBounds.minX,railBounds.maxX);a.z=clamp(a.z,railBounds.minZ,railBounds.maxZ);return;}
+ if(a.zipRide){
+  // A true cable ride: resolve the authored line against the world once, then
+  // travel it at the authored speed with arc-length progress, face the travel
+  // direction, allow a safe jump-off and detach on the landing floor.
+  const ride=a.zipRide;
+  if(ride.resolved!==true)resolveZipRide(ride,zipWorldFor(arena));
+  if(ride.blocked===true){a.zipRide=null;a.grounded=true;}
+  else{
+   const out=stepZipRide(ride,dt);
+   a.x=out.x;a.y=out.y;a.z=out.z;a.vx=a.vy=a.vz=0;a.grounded=false;
+   const heading=zipRideFace(a.yaw??0,out.tx,out.tz,10,dt);a.yaw=heading;a.bodyYaw=heading;
+   if(input&&input.jump===true&&ride.jumpOff!==false&&ride.t>=ZIP_RIDE.lockSeconds&&zipRideDetachClear(a.x,a.y,a.z,zipWorldFor(arena))){
+    // Jump-off keeps the cable's horizontal speed plus a short hop. The detach
+    // check refuses a hop into a wall, a roof or a void, so the exit is safe.
+    const speed=Math.max(.1,ride.speed)*ZIP_RIDE.jumpSpeedScale;
+    a.vx=out.tx*speed;a.vz=out.tz*speed;a.vy=ZIP_RIDE.jumpLift;a.zipRide=null;a.grounded=false;
+    a.traversalEvent={type:'zipline-jump',id:ride.id??null,from:{...ride.from},to:{x:a.x,y:a.y,z:a.z}};
+   }else if(out.done){
+    const end=zipRidePoint(ride,1),floor=floorAt(end.x,end.z,arena),landed=floor!==null&&end.y<=floor+.35;
+    a.zipRide=null;a.x=end.x;a.z=end.z;a.y=landed?floor:end.y;a.grounded=landed;
+    a.vx=a.vy=a.vz=0;
+    if(landed)a.lastValid={x:a.x,y:a.y,z:a.z};
+    a.traversalEvent={type:'zipline-arrival',id:ride.id??null,from:{...ride.from},to:{x:a.x,y:a.y,z:a.z}};
+   }
+  }
+  const railBounds=boundsOf(arena);a.x=clamp(a.x,railBounds.minX,railBounds.maxX);a.z=clamp(a.z,railBounds.minZ,railBounds.maxZ);return;
+ }
  // CTF carriers are visibly heavier: a modeRule-driven multiplier (default .9)
  // applies only while `carryingFlag` is set, so every other mode moves untouched.
  // Spec passives and riders add named, §4.7-bounded flat bonuses here — never a
@@ -262,7 +296,7 @@ export function moveActor(a,input,dt,arena=MAPS[0],config={speed:1,gravity:1},ro
   // A solid top is a landing surface only when the feet cross it while falling.
   for(const b of candidates(arena,a.x,a.z,RULES.radius))if(Math.abs(a.x-b.x)<b.w/2+RULES.radius&&Math.abs(a.z-b.z)<b.d/2+RULES.radius&&a.y>=b.h-1e-6&&nextY<=b.h)f=Math.max(f??-Infinity,b.h);
    if(f!==null&&nextY<=f){a.y=f;a.vy=0;a.grounded=true;a.sliding=a.sliding&&input.crouch===true;a.traversalFlight=false;a.traversalTarget=null;}else{a.y=nextY;a.grounded=false;}
-   const target=a.traversalTarget,targetFloor=target&&floorAt(target.x,target.z,arena);if(a.traversalFlight&&target&&targetFloor!==null&&a.vy<=0&&Math.hypot(a.x-target.x,a.z-target.z)<=.9&&a.y<=targetFloor+.35){a.x=target.x;a.z=target.z;a.y=targetFloor;a.vx=a.vy=a.vz=0;a.grounded=true;a.traversalFlight=false;a.traversalTarget=null;}
+   const target=a.traversalTarget,targetFloor=target&&floorAt(target.x,target.z,arena);if(a.traversalFlight&&target&&targetFloor!==null&&a.vy<=0&&Math.hypot(a.x-target.x,a.z-target.z)<=.9&&a.y<=targetFloor+.35){a.x=target.x;a.z=target.z;a.y=targetFloor;a.vx=a.vy=a.vz=0;a.grounded=true;a.traversalFlight=false;a.traversalTarget=null;a.traversalEvent={type:'launcher-arrival',id:a.traversalPad??null,from:null,to:{x:a.x,y:a.y,z:a.z}};}
   const bounds=boundsOf(arena);a.x=clamp(a.x,bounds.minX,bounds.maxX);a.z=clamp(a.z,bounds.minZ,bounds.maxZ);
  }
  // Cancel a slide that dropped below its speed floor after the minimum duration.
@@ -272,7 +306,7 @@ export function moveActor(a,input,dt,arena=MAPS[0],config={speed:1,gravity:1},ro
     const teleporter=a.vehicleId===null&&(a.traversalCooldown||0)<=0?teleporters.find(p=>Math.hypot(a.x-p.x,a.z-p.z)<.85&&Math.abs(a.y-(Number.isFinite(p.y)?p.y:(floor??a.y)))<.7):null;
     const zipline=!a.zipRide&&!teleporter&&floor!==null&&a.grounded&&(a.traversalCooldown||0)<=0?[...ziplines,...(ropeLines||[])].find(z=>{const from=resolvePoint(z.from);return from&&Math.hypot(a.x-from.x,a.z-from.z)<.9&&Math.abs(a.y-(from.y??floor))<.7;}):null;
     if(teleporter){const from={x:a.x,y:a.y,z:a.z},to=resolvePoint(teleporter.to);if(to){a.x=to.x;a.y=Number.isFinite(to.y)?to.y:(floorAt(to.x,to.z,arena)??a.y);a.z=to.z;a.vx=a.vy=a.vz=0;a.grounded=true;a.traversalCooldown=teleporter.cooldown??1;a.traversalPad=teleporter.id;a.lastValid={x:a.x,y:a.y,z:a.z};a.traversalEvent={type:'teleport',id:teleporter.id,from,to:{x:a.x,y:a.y,z:a.z}};}}
-    else if(zipline){const from=resolvePoint(zipline.from),to=resolvePoint(zipline.to),fy=Number.isFinite(from.y)?from.y:floor,ty=Number.isFinite(to.y)?to.y:(floorAt(to.x,to.z,arena)??fy),distance=Math.hypot(to.x-from.x,ty-fy,to.z-from.z),speed=zipline.speed??9;a.zipRide={from:{x:from.x,y:fy,z:from.z},to:{x:to.x,y:ty,z:to.z},t:0,duration:Math.max(.35,distance/speed)};a.grounded=false;a.traversalCooldown=zipline.cooldown??1.2;a.traversalPad=zipline.id;a.traversalEvent={type:'zipline',id:zipline.id,from:{x:from.x,y:fy,z:from.z},to:{x:to.x,y:ty,z:to.z}};}
+    else if(zipline){const from=resolvePoint(zipline.from),to=resolvePoint(zipline.to),fy=Number.isFinite(from.y)?from.y:floor,ty=Number.isFinite(to.y)?to.y:(floorAt(to.x,to.z,arena)??fy),ride=buildZipRide({id:zipline.id,from:{x:from.x,y:fy,z:from.z},to:{x:to.x,y:ty,z:to.z},speed:zipline.speed??9,sag:zipline.sag??0,cooldown:zipline.cooldown??1.2,blendMeters:zipline.blendMeters});if(ride&&!resolveZipRide(ride,zipWorldFor(arena)).blocked){a.zipRide=ride;a.grounded=false;a.traversalCooldown=ride.cooldown||1.2;a.traversalPad=zipline.id;a.traversalEvent={type:'zipline',id:zipline.id,from:{...ride.from},to:{...ride.to}};}}
    else if(pad&&a.traversalPad!==pad.id&&(a.traversalCooldown||0)<=0){
     if(pad.type==='trampoline')a.vy=Math.max(a.vy,pad.power??RULES.jump*1.5);
      else {const gravity=RULES.gravity*(config.gravity??1),target=pad.target,deltaY=(target?.y??0)-a.y,launchY=pad.vy??(pad.power??14)*.55,discriminant=launchY*launchY-2*gravity*deltaY,time=target&&discriminant>=0?(launchY+Math.sqrt(discriminant))/gravity:null,d=target&&time>0?norm(v((target.x-a.x)/time,0,(target.z-a.z)/time)):norm(v(pad.dir?.[0]??0,0,pad.dir?.[1]??0)),horizontal=target?Math.hypot(target.x-a.x,target.z-a.z)/(time||1):pad.power??14;a.vx=d.x*horizontal;a.vz=d.z*horizontal;a.vy=launchY;a.traversalTarget=target||null;}
@@ -1008,7 +1042,10 @@ export class Match{
      }else a.glideSteer=0;
      if(a.vehicleId!==null){if(controls.interact)this.releaseVehicle(a,undefined,'exit');else if(a.vehicleSeat==='driver')this.driveVehicle(a,controls,dt);else if(a.vehicleSeat==='gunner')this.gunnerVehicle(a,controls,dt);else{const ride=this.vehicleById(a.vehicleId);if(ride)this.syncVehicleActor(a,ride);}}
      else{const cocsState=isCocsMode(this.config)?this.objectiveState:null,interactHeld=cocsState?(cocsState._interactHeld??={})[a.id]===true:false,interactPressed=controls.interact===true;if(cocsState)cocsState._interactHeld[a.id]=interactPressed;const cocsUsed=interactPressed&&!interactHeld&&a.bot==null&&Boolean(cocsHumanInteract(this,cocsState,a.id));if(!(cocsUsed||(controls.interact&&this.enterVehicle(a)))){const wasGrounded=a.grounded===true,traversalRide=a.traversalFlight===true||a.zipRide!==null;moveActor(a,controls,dt,this.arena,this.config,this.ropeLines);a.movementLanded=a.health>0&&a.vehicleId===null&&a.grounded===true&&wasGrounded!==true&&a.traversalEvent===null&&traversalRide!==true&&a.vy<=0;}}const bodyTurn=(this.difficulty?.id==='nightmare'?10:this.difficulty?.id==='hard'?8:this.difficulty?.id==='normal'?6:4)*dt;const nextBody=turnToward(a.bodyYaw??a.yaw,a.yaw,bodyTurn);a.bodyYaw=Math.atan2(Math.sin(nextBody),Math.cos(nextBody));
-    if(a.traversalEvent){const evt=a.traversalEvent;a.traversalEvent=null;this.emit(evt.type,{actor:a.id,id:evt.id,from:evt.from,to:evt.to});}
+    if(a.traversalEvent){const evt=a.traversalEvent;a.traversalEvent=null;this.emit(evt.type,{actor:a.id,id:evt.id,from:evt.from,to:evt.to});
+     // §6A.3 arrival protection lands with the rider / flier, not at boarding:
+     // the 1.5 s window starts when the cable releases or the arc touches down.
+     if((evt.type==='zipline-arrival'||evt.type==='launcher-arrival')&&this.objectiveState?.traversal)applyArrivalProtection(this.objectiveState.traversal,a,this.objectiveState.traversal.tick);}
     if(this.arena.voidY!==undefined&&a.y<this.arena.voidY){this.fall(a);continue;}this.objective(a);if(ext&&a.vehicleId===null){if(ext.power)this.power(a);if(ext.fire)this.fire(a);if(ext.grenade)this.throwGrenade(a);}
   for(const p of this.pickups)if(!p.wait&&dist(a,p)<1.05)this.collect(a,p);
   }

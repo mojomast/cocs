@@ -50,7 +50,6 @@ export function foundryDetails(world,arena,{detail,material,textLabel,palette,tr
    detail(alongX?2:.14,.025,alongX?.14:2,x,floor(x,z)+.018,z,ivory);
   }
  }
- const wires=[];
  for(const d of arena.traversal){
   const p=d.from,ink=d.kind==='teleporter'?mint:amber;
   detail(2,.10,2,p.x,p.y+.05,p.z,dark);
@@ -60,14 +59,6 @@ export function foundryDetails(world,arena,{detail,material,textLabel,palette,tr
   }
   const label=d.kind==='zipline'?'ZIP / E':d.kind==='jump-pad'?'LIFT / E':d.kind==='launcher'?'LAUNCH / E':'TRANSIT / E';
   textLabel(world,label,p.x,p.y+1.7,p.z,.3,d.kind==='teleporter'?'#72e0d0':'#e7b55b');
-  if(d.kind==='zipline'){
-   wires.push(p.x,p.y+3,p.z,d.to.x,d.to.y+3,d.to.z);
-   for(const q of [p,d.to])detail(.9,.12,.9,q.x,q.y+3,q.z,copper);
-  }
- }
- if(wires.length){
-  const g=new T.BufferGeometry();g.setAttribute('position',new T.Float32BufferAttribute(wires,3));
-  const cable=new T.LineSegments(g,new T.LineBasicMaterial({color:'#e7b55b'}));cable.userData.foundryCable=true;world.add(cable);
  }
  // Four-entry compounds read as different facilities at first glance. Ground
  // chevrons and apron markings lead to the actual clear mouths, not fake doors.
