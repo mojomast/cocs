@@ -16,6 +16,100 @@ record in [VERIFICATION.md](VERIFICATION.md).
 
 ---
 
+## v8.1 · FOUNDRY — 2026-09-19
+
+Lattice Foundry: the LATTICE battlefield becomes a real place, the grapple
+climbs, every operator and harness earns a field role, operators and weapons are
+rebuilt with distinct high-detail geometry, and new players get a field guide.
+`core.mjs` changed (the grapple lift and the class support queue), so the
+authoritative game server restarts and connected multiplayer clients briefly
+disconnect.
+
+### Lattice Foundry
+
+- **The stand-in slice is replaced in place.** The stable `lattice-slice` id,
+  the seven-node graph and the five capturable objectives are preserved; the
+  flat floor and square margins become a 240 × 144 m industrial theatre.
+- **Every structure is real.** West and East Command compounds sit behind
+  offset blast screens; West and East Bastion gate courts carry butted
+  entrances; the four-entry Foundry Relay is ringed by four 17 m chimneys; the
+  North and South Siphons are sunken pump courts; four drive-through depots own
+  collision piers and service sheds.
+- **Height options on every lane.** Eight double-ramped roofs, four slag
+  ridges, terrain basins and two freight chicanes create elevated routes while
+  every objective keeps an ordinary walking approach.
+- **Measured.** 104 collision solids, 1,103 connected nav nodes, 49,280 static
+  triangles across 85 batches; a 24-seat match constructs in 166 ms with
+  3.89 ms p95 steps; the first contest lands at 11.10 s and multiple fronts are
+  contested for 10.8 s of a 30 s smoke.
+- **Readable.** Fixed daylight, brighter slate/copper materials, thinner fog,
+  and thin terrain-following capture rings replace the opaque capture disk.
+  Authored node names reach the HUD: West/East Command, West/East Bastion,
+  Foundry Relay, North/South Siphon.
+
+### Vertical grappling
+
+- **The hook climbs.** The reel lift was cancelled by grounded movement on the
+  same frame, which is why it only ever moved players horizontally. The reel
+  now owns its vertical velocity, sweeps the real 3D path, clears a standable
+  lip up to 1.8 m above the anchor, and detaches on obstruction, release,
+  arrival or timeout rather than passing through ceilings and overhangs.
+- **Rules preserved.** Range (14 m), cooldowns, the Juggernaut lift scale and
+  the carrier no-lift rules are unchanged, and snapshots still reconcile the
+  ledge destination. Integration tests climb a 5 m roof and a 7 m terrace under
+  `Match.step`, including delayed snapshots and correction replay.
+
+### Operator and harness field roles
+
+- **Nine operators.** Mistral captures faster on the move, Grok needs Heat,
+  DeepSeek and Kimi spot from overwatch or on the move, Meta braces to repair a
+  cut link, Claude cleanses a nearby ally, ChatGPT shares ammunition after a
+  swap, Gemini opens a swap capture window and Qwen accelerates timed
+  objectives, capture and terminal channels.
+- **Seven harnesses.** OpenClaw strips hostile capture progress, Hermes trades
+  personal REQ for team FLUX at a connected siphon, OpenCode shares ammunition,
+  Claude Code cleanses, Codex repairs a cut link and its sabotaged terminal,
+  Cline opens a dash capture window and Roo wards an owned point.
+- **Bounded.** Capture uses the strongest contribution and caps at 1.35×,
+  supply moves existing ammunition, reconnaissance grants information rather
+  than SCAN's damage bonus, and shared cooldowns stop identical support from
+  stacking. The vocabulary is declarative and inert outside the LATTICE modes.
+
+### Balance on Foundry
+
+- **PvP 4v4, eight seeds:** 60.2% strict contest (gate 35%), 89.8%
+  fight-at-point (gate 60%), 12.1% multi-front, 4.92 average live nodes, no
+  single dominant strategy, trailing team 2/8.
+- **Operations D1 re-tuned.** Foundry's longer rotations initially pushed the
+  tutorial tier below its published band (6 wins in 20 seeds), so D1's body
+  count scale moves 0.9 → 0.85. The re-validated sample wins **7 of 14 seeds
+  (50%)**, inside the 35–65% band, with no Director exploit alarms and a
+  7.1 ms step p95.
+
+### Models and presentation
+
+- **Nine sculpted operators** with distinct helmet, visor and jaw silhouettes,
+  refined cuirass and limb geometry; **ten weapons** with beveled receivers,
+  hollow barrels and per-family hardware; native distance LOD at 18 m.
+- **Measured** at unchanged 63–65 visible draw objects near (11,972–12,820
+  triangles) and 6,216–6,964 triangles at distance. Muzzle anchors, ADS,
+  reload mechanisms, grip sockets and team materials are untouched.
+- **Procedural feedback.** LATTICE earcons for secured/lost ground, rides,
+  terminals, waves and the HQ siege alarm, plus capture, depot and route-state
+  spark bursts, all reduced-motion aware and captioned.
+
+### New-player onboarding
+
+- **Deployment briefing** for both LATTICE modes with the objective, the
+  first-minute steps, map symbols and the live key bindings.
+- **In-game coaching:** the next legal objective and its distance, a supply-link
+  diagram, a field-role panel, and an interaction prompt beside the reticle for
+  RIDE / CUT / REPAIR / terminals / depot vehicles.
+- **Orders work online.** SCAN / GO / ATTACK → number → Enter now issues in
+  network matches instead of local play only; Escape cancels, and chat and
+  weapon keys keep their normal behaviour while no order is armed.
+- **Long form:** [LATTICE-FIELD-GUIDE.md](LATTICE-FIELD-GUIDE.md).
+
 ## v8.0 · LATTICE — 2026-09-19
 
 LATTICE STRIKE ships. Two modes arrive together — `cocs` (4v4/8v8 objective
