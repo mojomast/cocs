@@ -106,11 +106,24 @@ export function traversalTables(arena){
   const supportAt=(x,z,arena)=>{let y=floorAt(x,z,arena);if(y===null)return null;const top=blockSupportTop(arena,x,z,RULES.radius);if(top!==null)y=Math.max(y,top);return y;};
   // A roof above the actor is not its floor. Keep the fast heightfield query
   // for ordinary movement, and resolve stacked surfaces only when necessary.
+  // The caller's reference includes the move layer's 0.3 m step-up allowance,
+  // so a legal small step can never turn the floor into a hole; when the
+  // heightfield reports a surface the actor is under, the first real support
+  // below wins (terrain ray, then authored surfaces, then deck/solid tops).
   const floorBelow=(x,z,y,arena)=>{
    const floor=floorAt(x,z,arena);if(floor===null||floor<=y+1e-6)return floor;
-   if(arena.terrain){const hit=terrainRayHitFast(ensureTerrainBvh(arena.terrain),v(x,y+1e-5,z),v(0,-1,0),1000);return hit&&hit.normal[1]>.5?y+1e-5-hit.distance:null;}
-   const surfaces=surfacesOf(arena);if(surfaces.length){let below=null;for(const s of surfaces)if(surfaceY(s)<=y+1e-6&&Math.abs(x-s.x)<=s.w/2&&Math.abs(z-s.z)<=s.d/2)below=Math.max(below??-Infinity,surfaceY(s));return below;}
-   return 0;
+   let below=null;
+   if(arena.terrain){const hit=terrainRayHitFast(ensureTerrainBvh(arena.terrain),v(x,y+1e-5,z),v(0,-1,0),1000);if(hit&&hit.normal[1]>.5)below=y+1e-5-hit.distance;}
+   const surfaces=surfacesOf(arena);for(const s of surfaces)if(surfaceY(s)<=y+1e-6&&Math.abs(x-s.x)<=s.w/2&&Math.abs(z-s.z)<=s.d/2)below=Math.max(below??-Infinity,surfaceY(s));
+   // Authored tops are real support even where a heightfield reports the
+   // terrain above them (tunnels, service decks and covered lanes).
+   for(const b of candidates(arena,x,z,RULES.radius))if(b.h<=y+1e-6&&Math.abs(x-b.x)<=b.w/2+RULES.radius&&Math.abs(z-b.z)<=b.d/2+RULES.radius)below=Math.max(below??-Infinity,b.h);
+   // Terrain: a real lower surface wins. With none found, an actor less than a
+   // body height under the heightfield is embedded (a teleport, a step or a
+   // shove into a slope) and heals upward; deeper and it is genuinely under an
+   // overhang, where no floor is the honest answer.
+   if(arena.terrain)return below??((floor-y)<=RULES.height?floor:null);
+   return below??0;
   };
   // Terrain can include thin overhead surfaces which the horizontal block
   // collision query cannot see. Rays sweep both the feet and head footprint.
@@ -120,7 +133,12 @@ export function traversalTables(arena){
   };
   const bodyOffsets=r=>[[0,0],[-r,-r],[-r,r],[r,-r],[r,r]];
   const bodyCeiling=(x,y,z,r,arena,range=RULES.height)=>{
-   let ceiling=Infinity;for(const [dx,dz] of bodyOffsets(r)){const origin=v(x+dx,y+1e-5,z+dz),hit=surfaceRayDistance(origin,v(0,1,0),range,arena);if(hit<range)ceiling=Math.min(ceiling,origin.y+hit);}return ceiling;
+   let ceiling=Infinity;for(const [dx,dz] of bodyOffsets(r)){const origin=v(x+dx,y+1e-5,z+dz),hit=surfaceRayDistance(origin,v(0,1,0),range,arena);
+    // Only a surface at or above head height is a ceiling. Sloped ground beside
+    // the feet reads as a hit a few centimetres up, and treating that as a
+    // ceiling would cancel every jump and launch on real terrain.
+    if(hit<range){const at=origin.y+hit;if(at>=y+RULES.height-1e-6)ceiling=Math.min(ceiling,at);}}
+   return ceiling;
   };
   const grappleSweepClear=(from,to,r,arena)=>{
    if(bodyCeiling(to.x,to.y,to.z,r,arena)<to.y+RULES.height-1e-6)return false;
@@ -239,7 +257,7 @@ export function moveActor(a,input,dt,arena=MAPS[0],config={speed:1,gravity:1},ro
     if((a.traversalFlight&&a.traversalTarget||!obstructed(nx,ny,nz,RULES.radius,arena))&&(f===null||f-a.y<.3)){a[axis]=value;a.y=ny;}else a[axis==='x'?'vx':'vz']=0;
  }
   const hb=boundsOf(arena);a.x=clamp(a.x,hb.minX,hb.maxX);a.z=clamp(a.z,hb.minZ,hb.maxZ);
-   a.vy-=gravity*step;let nextY=a.y+a.vy*step;let f=floorBelow(a.x,a.z,a.y+.25,arena);
+   a.vy-=gravity*step;let nextY=a.y+a.vy*step;let f=floorBelow(a.x,a.z,a.y+.3,arena);
    if(nextY>a.y){const ceiling=bodyCeiling(a.x,a.y,a.z,RULES.radius,arena,RULES.height+nextY-a.y);if(nextY+RULES.height>ceiling){nextY=Math.max(a.y,ceiling-RULES.height);a.vy=0;}}
   // A solid top is a landing surface only when the feet cross it while falling.
   for(const b of candidates(arena,a.x,a.z,RULES.radius))if(Math.abs(a.x-b.x)<b.w/2+RULES.radius&&Math.abs(a.z-b.z)<b.d/2+RULES.radius&&a.y>=b.h-1e-6&&nextY<=b.h)f=Math.max(f??-Infinity,b.h);
