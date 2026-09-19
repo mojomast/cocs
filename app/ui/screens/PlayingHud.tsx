@@ -124,7 +124,8 @@ function CocsReadout({command,teamName,player}:{command:any;teamName:(team:any)=
     {strip.armed&&<button type="button" className="cocs-issue" disabled={!strip.canIssue} onClick={()=>command.issueCocsOrder()} aria-label={strip.armedLabel?`Issue ${strip.armedLabel} order${strip.targetLabel?` on ${strip.targetLabel}`:''}`:'Issue order'}>ENTER · ISSUE {strip.armedLabel}</button>}
     <p className="cocs-strip__help">Verb → number → ENTER · ESC cancels. Hold {command.keys?.command??'B'} for the board. Field guide: pause menu.</p>
    {strip.pending&&<p className="cocs-strip__pending" role="status">SENDING {strip.pending.text}…</p>}
-   {strip.issued&&!strip.pending&&<p className="cocs-strip__issued" role="status">LAST {strip.issued.text}</p>}
+    {strip.issued&&!strip.pending&&<p className="cocs-strip__issued" role="status">LAST {strip.issued.text}</p>}
+    <button type="button" className="cocs-board-inline" onClick={command.toggleBoardPin}>{command.keys?.command??'B'} · COMMAND BOARD <small>{command.boardView?.summary?.needsYou??0} NEED YOU</small></button>
   </div>
  </div>;
 }
@@ -161,7 +162,7 @@ export function PlayingHud({ui}:ScreenProps){
    lives:hud.objectives?.kind==='elimination'?(Number(hud.objectives.lives?.[group.team])||0):null,
    players:group.players,
   })):[];
-  return <div className={`game-hud${hud.spectate&&hideHud?' hide-hud':''}${touchControls&&!hud.spectate?' touch-mode':''}`}>
+   return <div className={`game-hud${cocsCommand?' lattice-hud':''}${hud.spectate&&hideHud?' hide-hud':''}${touchControls&&!hud.spectate?' touch-mode':''}`}>
   <div className="match-top" role="region" aria-label="Live match status"><div className="match-context"><span className="eyebrow">{hud.mapName?.toUpperCase()} / {hudRoute}</span><strong>{hud.modeName?.toUpperCase()}</strong><small className="phase-label">PHASE / {phase}</small>{isTeamMode(hudMode)&&<small className="team-label">{teamName(player.team)} TEAM · {hud.spectate?'FOLLOWING':'YOU'}</small>}</div><div className="match-clock" aria-label={`${hud.spectate?'Spectating':`${clock(hud.config.timeLimit-hud.time)} remaining`}`}><strong>{hud.spectate?'SPECTATING':clock(hud.config.timeLimit-hud.time)}</strong><small>{hud.net?'NETWORK MATCH':hud.config.botCount===0?'SOLO PRACTICE':isSingle?`FIRST TO ${hud.config.fragLimit} ${modeGoal(hudMode).toLowerCase()}`:''}</small></div><div className="frag-counter"><strong>{armsrace?ladderStatus(player,WEAPONS.length).rung+1:isTeamMode(hudMode)?teamScoreText(hud.teamScores??hud.teams)||player.frags:player.frags}<span>{hud.spectate?'':` / ${armsrace?WEAPONS.length:hud.config.fragLimit}`}</span></strong><small>{hud.spectate?`FOLLOWING ${player.name.toUpperCase()}`:armsrace?'LADDER RUNG':isTeamMode(hudMode)?modeGoal(hudMode):'YOUR FRAGS'}</small></div></div>
    {cocsCommand&&!hud.spectate&&<CocsReadout command={cocsCommand} teamName={teamName} player={player}/>}
   {cocsCommand?.spend&&!hud.spectate&&<SpendWindowHud spend={cocsCommand.spend} onSpend={cocsCommand.spendCocs} reducedMotion={reducedMotion()}/>}

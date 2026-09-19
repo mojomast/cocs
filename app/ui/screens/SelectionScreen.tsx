@@ -122,7 +122,7 @@ export function SelectionScreen({ui}:ScreenProps){
        </div>}
      </div>
      <Panel label="03 / QUICK START" meta="LAUNCHES INSTANTLY">
-        <div className="grid-cards">{activities.map((a)=><SelectCard key={a.id} onClick={()=>{if(isLattice(a.id)){setLatticeIntro(a.id);document.querySelector('.shell')?.scrollTo({top:0,behavior:'instant'});}else quickStart?.(a.id);}} ariaLabel={`${a.name}: ${a.tag}`} icon={a.icon} name={a.name} tag={a.tag} meta={<Play size={15}/>}/>)}</div>
+        <div className="grid-cards">{activities.map((a)=><SelectCard key={a.id} onClick={()=>{if(isLattice(a.id)){setLatticeIntro(a.id);document.querySelector('.shell-body')?.scrollTo({top:0,behavior:'instant'});}else quickStart?.(a.id);}} ariaLabel={`${a.name}: ${a.tag}`} icon={a.icon} name={a.name} tag={a.tag} meta={<Play size={15}/>}/>)}</div>
        <p className="field-note">Starts now with <b>{selected?.name}</b>, the <b>{power?.name}</b> harness and your current rules on a {ui.selectedMode?.name} arena. Fine-tune everything under MATCH SETUP, or pick a specific arena there. New objective modes — Juggernaut, Team Elimination, VIP Escort, Payload and Assault — live there too; the full legend is under Graphics &amp; settings → Help.</p>
      </Panel>
      <Panel label="LOADOUT PRESETS" meta={`${presets.length} SAVED`} actions={<Btn size="sm" variant="ghost" onClick={()=>setSetupOpen(true)}>MANAGE</Btn>}>

@@ -26,6 +26,16 @@
 .cocs-strip__help{margin:0;font:10px/1.5 var(--font-ui);color:var(--text-dim)}
 .cocs-verb kbd{display:block;color:var(--accent-soft);font-size:10px}
 .cocs-readout .cocs-verb,.cocs-readout .cocs-issue,.cocs-readout .cocs-picker button{min-height:44px}
+.cocs-board-inline{min-height:44px;display:flex;justify-content:space-between;align-items:center;gap:6px;padding:6px;border:1px solid var(--border);border-radius:4px;background:#0b1a18;color:var(--accent-soft);font:700 10px var(--font-mono);cursor:pointer}
+.cocs-board-inline small{font:9px var(--font-mono);color:var(--text-dim)}
+.lattice-hud>.cocs-board-chip{display:none}
+.lattice-hud .frag-counter strong{font-size:clamp(18px,2.2vw,32px);white-space:nowrap}
+.lattice-hud .frag-counter strong>span{display:none}
+.lattice-hud .hud-bottom{grid-template-columns:auto minmax(0,1fr) auto}
+.lattice-hud .ability-card{flex-shrink:0;padding:7px;min-width:72px;max-width:100px}
+.lattice-hud .ability-card .stat-label{font:700 10px/1.4 var(--font-mono);text-align:center;overflow-wrap:normal}
+.lattice-hud .ability-card .stat-note{font:10px var(--font-mono)}
+@media(max-width:1050px){.lattice-hud .hud-bottom{grid-template-columns:1fr auto}.lattice-hud .objective-bar{display:none}}
 .lattice-tactical{padding:8px 0;color:var(--text-dim)}
 .lattice-tactical__head{display:flex;justify-content:space-between;font:8px var(--font-mono)}
 .lattice-tactical svg{display:block;width:100%;max-height:150px;margin-top:8px;background:#041218;border-radius:5px;overflow:visible}
