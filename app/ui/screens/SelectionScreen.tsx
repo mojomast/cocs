@@ -1,6 +1,6 @@
 'use client';
 import {useState} from 'react';
-import {ArrowUpRight,Check,ChevronDown,ChevronRight,Crosshair,Flag,Hexagon,LockKeyhole,Play,Rocket,Shield,Skull,Sparkles,Swords,Target,Film,Users,Zap} from 'lucide-react';
+import {ArrowUpRight,Check,ChevronDown,ChevronRight,Crosshair,Flag,GraduationCap,Hexagon,LockKeyhole,Play,Rocket,Shield,Skull,Sparkles,Swords,Target,Film,Users,Zap} from 'lucide-react';
 import type {ScreenProps} from '../contract';
 import {ActionRail,Banner,Btn,Meter,PageHead,Panel,Segmented,SelectCard,Shell,Stats,TopBar} from '../primitives';
 import {kitView,operatorCard,specSheet} from '../../../game/class-ui.mjs';
@@ -31,6 +31,8 @@ export function SelectionScreen({ui}:ScreenProps){
    {id:'rockets',name:'Rocket Arena',tag:'Unlimited rockets for everyone',icon:<Rocket size={20}/>},
    {id:'instagib',name:'Instagib',tag:'Rail only · one unprotected hit kills',icon:<Crosshair size={20}/>},
    {id:'armsrace',name:'Arms Race',tag:'Every kill promotes you up the rack',icon:<Swords size={20}/>},
+   {id:'field-training',training:'cocs',name:'Field Training',tag:'Guided first match · capture, supply, orders, devices',icon:<GraduationCap size={20}/>},
+   {id:'operations-training',training:'cocs-coop',name:'Operations Training',tag:'Guided co-op · spend window, terminals, waves',icon:<GraduationCap size={20}/>},
     {id:'cocs',name:'Lattice Strike',tag:'Team territory war · briefing & deployment',icon:<Hexagon size={20}/>},
     {id:'cocs-coop',name:'Lattice Strike: Operations',tag:'Co-op · defend your HQ against five Director waves',icon:<Hexagon size={20}/>},
    {id:'horde',name:'Horde',tag:'Solo survival against escalating waves',icon:<Skull size={20}/>},
@@ -122,7 +124,7 @@ export function SelectionScreen({ui}:ScreenProps){
        </div>}
      </div>
       <Panel label="03 / QUICK START" meta="PICK A MODE">
-        <div className="grid-cards">{activities.map((a)=><SelectCard key={a.id} onClick={()=>{if(isLattice(a.id)){setLatticeIntro(a.id);ui.setConfig?.({...config,mode:a.id,...latticePracticeDefaults(a.id)});document.querySelector('.shell-body')?.scrollTo({top:0,behavior:'instant'});}else quickStart?.(a.id);}} ariaLabel={`${a.name}: ${a.tag}`} icon={a.icon} name={a.name} tag={a.tag} meta={<Play size={15}/>}/>)}</div>
+        <div className="grid-cards">{activities.map((a)=><SelectCard key={a.id} onClick={()=>{if(a.training){ui.startTraining?.(a.training);return;}if(isLattice(a.id)){setLatticeIntro(a.id);ui.setConfig?.({...config,mode:a.id,...latticePracticeDefaults(a.id)});document.querySelector('.shell-body')?.scrollTo({top:0,behavior:'instant'});}else quickStart?.(a.id);}} ariaLabel={`${a.name}: ${a.tag}`} icon={a.icon} name={a.name} tag={a.tag} meta={<Play size={15}/>}/>)}</div>
        <p className="field-note">Starts now with <b>{selected?.name}</b>, the <b>{power?.name}</b> harness and your current rules on a {ui.selectedMode?.name} arena. Fine-tune everything under MATCH SETUP, or pick a specific arena there. New objective modes — Juggernaut, Team Elimination, VIP Escort, Payload and Assault — live there too; the full legend is under Graphics &amp; settings → Help.</p>
      </Panel>
      <Panel label="LOADOUT PRESETS" meta={`${presets.length} SAVED`} actions={<Btn size="sm" variant="ghost" onClick={()=>setSetupOpen(true)}>MANAGE</Btn>}>
