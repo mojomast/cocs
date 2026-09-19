@@ -61,8 +61,9 @@ test('orders from each team apply to their own team only', () => {
  assert.equal(room.order(1, {cardId: 'o0', verb: 'HOLD', target: fronts.team0}), true);
  assert.equal(room.order(2, {cardId: 'o1', verb: 'HOLD', target: fronts.team1}), true);
  for (let i = 0; i < 4; i++) room.tick(RULES.dt);
- assert.equal(state.tasks[0].peerId, '1');
- assert.equal(state.tasks[1].peerId, '2');
+ // Tasks are keyed by the acting actor id (peer 1 = actor 0, peer 2 = actor 1).
+ assert.equal(state.tasks[0].peerId, '0');
+ assert.equal(state.tasks[1].peerId, '1');
  assert.equal(state.tasks[0].nodeId, fronts.team0);
  assert.equal(state.tasks[1].nodeId, fronts.team1);
  assert.notEqual(state.tasks[0].nodeId, state.tasks[1].nodeId, 'a team order never becomes the other team task');
@@ -114,16 +115,21 @@ test('the PvP economy buys a rung-legal role and the command seat is team-scoped
  assert.equal(room.economy(1, {cardId: 'e0', action: 'reinforce', role: 'fighter'}), true);
  const before = state.flux[0];
  for (let i = 0; i < 4; i++) room.tick(RULES.dt);
- assert.equal(state.command.seat[0], '1');
- assert.equal(state.command.seat[1], '2');
+ assert.equal(state.command.seat[0], '0');
+ assert.equal(state.command.seat[1], '1');
  assert.equal(state.roleSpawns[0].length, 1, 'team 0 fielded one role');
  assert.equal(state.roleSpawns[1].length, 0, 'the team-0 spend never touched team 1');
  assert.ok(state.flux[0] < before, 'the role cost came out of team 0 FLUX');
  const snapshot = room.wireState().cocs;
- assert.equal(snapshot.commander.seat[0], '1');
- assert.equal(snapshot.commander.seat[1], '2');
+ assert.equal(snapshot.commander.seat[0], '0');
+ assert.equal(snapshot.commander.seat[1], '1');
  assert.equal(snapshot.roleBoard[0].agents.length, 1);
  assert.equal(snapshot.roleBoard[1].agents.length, 0);
+ // The accepted role spend settles its card from the sim spend log.
+ const spend = state.spendLog.find(entry => entry.cardId === 'e0');
+ assert.equal(spend?.ok, true, 'the sim recorded the accepted spend');
+ assert.equal(spend?.peerId, '0', 'the sim log keys the acting actor id');
+ assert.equal(room.cocsCardList().find(card => card.id === 'e0')?.state, 'done', 'the spend card reached a terminal state');
 });
 
 test('the PvP traversal terminal surface validates a device action', () => {
@@ -171,13 +177,13 @@ test('a reconnect resends the full PvP command board with cocs state', () => {
  const token = room.peers.get(1).token;
  assert.equal(room.command(1, {cardId: 'm1', action: 'take'}), true);
  for (let i = 0; i < 2; i++) room.tick(RULES.dt);
- assert.equal(room.match.objectiveState.command.seat[0], '1');
+ assert.equal(room.match.objectiveState.command.seat[0], '0', 'the seat holds actor 0 (peer 1)');
  room.disconnect(1);
  room.drain();
  room.join(9, 'ignored', 'chatgpt', 'openclaw', token);
  const snapshot = find(room.drain(), 'snapshot', 9);
  assert.ok(snapshot, 'the reconnected peer gets a full snapshot immediately');
- assert.equal(snapshot.state.cocs.commander.seat[0], '1', 'the PvP command seat round-trips');
+ assert.equal(snapshot.state.cocs.commander.seat[0], '0', 'the PvP command seat round-trips');
  assert.ok(Array.isArray(snapshot.state.cocs.cards), 'the card board round-trips too');
 });
 

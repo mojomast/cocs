@@ -100,6 +100,12 @@ export const COCS_CAPTURE_POINTS = Object.freeze({front: 10, economy: 15, relay:
 export const COCS_OPENING_FRACTION = 0.22;
 export const COCS_ENDGAME_FRACTION = 0.68;
 export const COCS_ORDER_LOG_LIMIT = 64;
+// PvP role-spend outcome log (the between-wave `coop.spendLog` analogue). The
+// room mirrors every accepted action card as `running`; this bounded,
+// deterministic log is the sim-side authority the room settles those cards
+// from, so the board never depends on network-side guesses about an outcome.
+// Plain state (not part of the snapshot) and trimmed like `orderLog`.
+export const COCS_SPEND_LOG_LIMIT = 64;
 const DEFAULT_RADIUS = 4;
 const DEFAULT_CAPTURE_SECONDS = 5;
 const ORDER_TTL_SECONDS = 2;
@@ -413,6 +419,7 @@ export function cocsTemplate(mode, arena, config = {}) {
     tasks: {0: null, 1: null},
     pendingOrders: [],
     orderLog: [],
+    spendLog: [],
     orderTtlTicks: Math.max(1, Math.round(ORDER_TTL_SECONDS / (RULES.dt || 1 / 60))),
     // --- PvP-1 rung ladder + two-team command + role board -------------------
     // `rung` is null for co-op and for an un-laddered practice `cocs`; the role
@@ -1345,8 +1352,31 @@ export function cocsCommandAction(match, state, record = {}) {
  * Sinks with no PvP implementation (FORTIFY/REPAIR/RESUPPLY) are refused. The
  * same gates apply here and in the duty board, so a wire spend can never exceed
  * what the deterministic Chief could do. Pure, id-sorted, no RNG.
+ *
+ * Public wrapper: applies the action and records its outcome in the bounded
+ * `state.spendLog`, so the room can settle the action card it mirrored.
  */
 export function cocsEconomyAction(match, state, record = {}) {
+ const result = applyCocsEconomyAction(match, state, record);
+ if (state && state.kind === COCS_KIND && state.coopMode !== true) {
+  const log = state.spendLog ?? (state.spendLog = []);
+  log.push({
+   tick: num(record.tick, state.tick), peerId: String(record.peerId ?? ''), cardId: String(record.cardId ?? ''),
+   team: record.team === 1 ? 1 : 0, verb: String(record.action ?? '').toLowerCase(),
+   role: record.role ?? null, target: record.target ?? null,
+   ok: result.ok === true, reason: result.reason ?? null,
+  });
+  trimSpendLog(state);
+ }
+ return result;
+}
+
+function trimSpendLog(state) {
+ const log = state.spendLog;
+ if (Array.isArray(log) && log.length > COCS_SPEND_LOG_LIMIT) log.splice(0, log.length - COCS_SPEND_LOG_LIMIT);
+}
+
+function applyCocsEconomyAction(match, state, record = {}) {
   if (!match || !state || state.kind !== COCS_KIND || state.coopMode === true) return {ok: false, reason: 'no-economy'};
   const team = record.team === 1 ? 1 : 0;
   const action = String(record.action ?? '').toLowerCase();
