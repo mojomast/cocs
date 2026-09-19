@@ -154,6 +154,21 @@ export class NetClient {
   this.cocsBlockers = new Map();
   this.cocsPending = new Map();
   this.lastCocsReject = null;
+  // Ranked/status surfaces (existing protocol v3 messages the ranked ladder
+  // dispatches: `queue`, `leaderboard`, `profile`, `matchmade`). The payloads
+  // are stored verbatim so a readout can render before or after a `lobby`
+  // message; no protocol shape changes. `leaderboardRows`/`rankedProfile` are
+  // the common convenience aliases.
+  this.queueMessage = null;
+  this.leaderboardMessage = null;
+  this.leaderboardRows = [];
+  this.profileMessage = null;
+  this.rankedProfile = null;
+  this.matchmadeMessage = null;
+  this.onQueue = null;
+  this.onLeaderboard = null;
+  this.onProfile = null;
+  this.onMatchmade = null;
  }
  connect(url = this.url) {
   if (url) this.url = url;
@@ -325,6 +340,28 @@ export class NetClient {
      break;
     }
       case MESSAGE.PROGRESSION: this.progression = msg.profile ?? this.progression; this.onProgression?.(msg); break;
+      // Ranked/status messages the ranked ladder dispatches over the existing
+      // v3 envelope. They are consumed, stored and forwarded unchanged: the
+      // readout survives `lobby` updates because nothing below clears them, and
+      // a status that arrives before a lobby is already on the client state.
+      case MESSAGE.QUEUE:
+       this.queueMessage = msg;
+       this.onQueue?.(msg);
+       break;
+      case MESSAGE.LEADERBOARD:
+       this.leaderboardMessage = msg;
+       this.leaderboardRows = Array.isArray(msg.rows) ? msg.rows : [];
+       this.onLeaderboard?.(msg);
+       break;
+      case MESSAGE.PROFILE:
+       this.profileMessage = msg;
+       this.rankedProfile = msg.profile ?? null;
+       this.onProfile?.(msg);
+       break;
+      case MESSAGE.MATCHMADE:
+       this.matchmadeMessage = msg;
+       this.onMatchmade?.(msg);
+       break;
      case MESSAGE.RESULTS: this.roundOver = true; this.state = msg.state; this.onResults?.(msg); break;
     case MESSAGE.CHAT:
      this.chatLog.push(msg);
@@ -381,8 +418,17 @@ export class NetClient {
   // Reconcile optimistic LATTICE STRIKE cards against the authoritative
   // snapshot: a card the server has accepted (running/done) is no longer
   // pending, and a blocked card records its reason locally.
+  //
+  // V2 per-team filtering (§11.4/§12.7) can omit the whole `cocs` subtree or any
+  // team-private section (cards, intel, contacts, spots, wallets) for this peer.
+  // Every read here is therefore optional: an absent card board is "nothing to
+  // reconcile" and leaves optimistic cards pending until their own authoritative
+  // card or a `cocs-reject` arrives. The rule is unchanged: a peer's own
+  // accepted cards always sit on its filtered board, so only foreign or
+  // unknown entries are invisible, and those were never this client's cards.
   _reconcileCocs(state) {
-   const cards = state?.cocs?.cards;
+   const cocs = state !== null && typeof state === 'object' && !Array.isArray(state) ? state.cocs : null;
+   const cards = cocs !== null && typeof cocs === 'object' && !Array.isArray(cocs) ? cocs.cards : null;
    if (!Array.isArray(cards) || !this.cocsPending.size) return;
    for (const card of cards) {
     if (!card || card.id === undefined || card.id === null) continue;
