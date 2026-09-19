@@ -1222,6 +1222,7 @@ html, body { overscroll-behavior: none; }
 .cocs-card__eta{color:var(--text-mute);font-size:.8em}
 .cocs-card__actions{grid-column:1/-1;display:flex;gap:5px}
 .cocs-card__actions button{border:1px solid var(--border);border-radius:var(--radius-sm,4px);background:#0b1a18;color:#eafff5;font:700 .8em var(--font-mono);letter-spacing:.06em;padding:3px 8px;cursor:pointer}
+.cocs-card__actions .cocs-card__act{border-color:var(--accent);background:#123a33;color:#eafff5}
 .cocs-card__actions button:hover{border-color:var(--accent)}
 .cocs-board__empty{color:var(--text-mute);font-size:.85em}
 
@@ -1235,8 +1236,14 @@ html, body { overscroll-behavior: none; }
 .cocs-spend__meta b{color:#eafff5}
 .cocs-spend__meta .is-you{color:var(--accent-soft)}
 .cocs-spend__sinks{list-style:none;display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:6px;margin:0;padding:0}
-.cocs-sink{width:100%;display:grid;gap:4px;padding:8px 10px;border:1px solid var(--border);border-left:3px solid var(--accent);border-radius:var(--radius-sm,4px);background:rgba(10,24,24,.82);color:var(--text-dim);text-align:left;cursor:pointer}
-.cocs-sink.is-locked{border-left-color:var(--text-mute);opacity:.7;cursor:not-allowed}
+.cocs-sink{width:100%;display:grid;border:1px solid var(--border);border-left:3px solid var(--accent);border-radius:var(--radius-sm,4px);background:rgba(10,24,24,.82);color:var(--text-dim)}
+.cocs-sink__buy{width:100%;display:grid;gap:4px;padding:8px 10px;border:0;background:none;color:inherit;text-align:left;font:inherit;letter-spacing:inherit;cursor:pointer}
+.cocs-sink.is-locked{border-left-color:var(--text-mute);opacity:.7}
+.cocs-sink.is-locked .cocs-sink__buy{cursor:not-allowed}
+.cocs-sink__target{display:flex;align-items:center;gap:8px;padding:0 10px 8px;font:700 .78em var(--font-mono);letter-spacing:.06em;color:var(--text-mute)}
+.cocs-sink__target select{flex:1;min-height:44px;padding:4px 6px;border:1px solid var(--border);border-radius:var(--radius-sm,4px);background:#0b1a18;color:#eafff5;font:700 .95em var(--font-mono)}
+.cocs-sink__target-note{display:block;padding:0 10px 8px;font:700 .78em var(--font-mono);letter-spacing:.05em;color:var(--text-mute)}
+.cocs-sink__target-note b{color:#eafff5}
 .cocs-sink__label{display:flex;justify-content:space-between;gap:8px;color:#eafff5}
 .cocs-sink__label b{letter-spacing:.06em}
 .cocs-sink__label small{color:var(--text-mute);font-size:.82em}
@@ -1248,6 +1255,52 @@ html, body { overscroll-behavior: none; }
 .cocs-spend__log{display:flex;flex-wrap:wrap;gap:8px;margin:0;font:700 .82em var(--font-mono);color:var(--text-mute)}
 .cocs-spend__log .is-failed{color:#ffb27f}
 .cocs-spend__empty{color:var(--text-mute);font-size:.86em}
+/* Spend window opening banner, countdown bar, purchase confirmation and the
+   explicit skip. Every actionable row is >=44px and never hover-only. */
+.cocs-spend__timer{height:6px;border:1px solid var(--border);border-radius:3px;background:#04110f;overflow:hidden}
+.cocs-spend__timer i{display:block;height:100%;background:linear-gradient(90deg,#2ee6c8,#8dffb0)}
+.cocs-spend__banner{display:grid;gap:2px;margin:0;padding:8px 10px;border:1px solid var(--accent);border-radius:var(--radius-sm,4px);background:#0d2b27e6;color:#eafff5;font:700 .92em var(--font-mono);letter-spacing:.06em;animation:cocs-spend-in .25s ease}
+.cocs-spend__banner span{color:#c9f3e6;font-size:.9em}
+.cocs-spend__banner small{color:var(--text-mute);font-size:.8em}
+@keyframes cocs-spend-in{from{opacity:0;transform:translateY(-4px)}to{opacity:1;transform:none}}
+.cocs-spend__confirm{margin:0;font:700 .88em var(--font-mono);letter-spacing:.05em;color:#8dffb0}
+.cocs-spend__confirm i{font-style:normal}
+.cocs-spend__confirm.is-failed{color:var(--warn-soft,#ffd166)}
+.cocs-spend__footer{display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap;border-top:1px solid var(--border);padding-top:8px}
+.cocs-spend__help{font:600 .78em var(--font-mono);color:var(--text-mute);letter-spacing:.05em}
+.cocs-spend__skip{min-height:44px;display:inline-flex;align-items:center;gap:8px;padding:8px 14px;border:1px solid var(--border);border-radius:var(--radius-sm,4px);background:#0b1a18;color:#eafff5;font:700 .86em var(--font-mono);letter-spacing:.08em;cursor:pointer}
+.cocs-spend__skip:hover,.cocs-spend__skip:focus-visible{border-color:var(--accent)}
+.cocs-sink{min-height:44px}
+.cocs-sink.is-active{border-color:var(--accent);box-shadow:inset 0 0 0 1px var(--accent)}
+.cocs-sink__key{display:inline-grid;place-items:center;min-width:20px;height:20px;margin-right:6px;padding:0 4px;border:1px solid var(--border);border-radius:3px;color:var(--text-mute);font-size:.78em}
+.cocs-sink__label{align-items:center}
+.cocs-sink__label b{color:#eafff5}
+/* Board affordances: 44px mouse targets, a visible return-to-combat hint and a
+   focus ring that never depends on hover. */
+.cocs-board__pin,.cocs-board__close,.cocs-board__expand{min-height:44px}
+.cocs-board__expand{padding:0 6px}
+.cocs-board__close{padding:0 10px}
+.cocs-card__actions button{min-height:44px;min-width:64px}
+.cocs-board :is(button,[role='option']):focus-visible,.cocs-spend :is(button,[role='option']):focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+.cocs-board__hint{position:sticky;bottom:0;margin:0;padding:6px 0 2px;border-top:1px solid var(--border);background:linear-gradient(180deg,transparent,#071617f2 30%);font:700 .8em var(--font-mono);letter-spacing:.05em;color:var(--text-mute)}
+.cocs-board__hint b{color:#eafff5}
+/* Cursor mode: the chip names the surface that owns the pointer and the
+   CLICK TO FIGHT button is the one obvious way back to combat. */
+.cursor-chip{position:absolute;left:50%;top:calc(var(--safe-top) + 62px);transform:translateX(-50%);z-index:6;display:inline-flex;align-items:center;gap:7px;max-width:70vw;padding:5px 10px;border:1px solid var(--border);border-radius:999px;background:#0a191ae6;color:#eafff5;font:700 .82em var(--font-mono);letter-spacing:.08em;text-shadow:0 1px 3px #000;pointer-events:none}
+.cursor-chip kbd{font-size:.95em}
+.cursor-chip.has-surface{border-color:var(--warn-soft,#ffd166)}
+.cursor-chip.has-surface span{color:var(--warn-soft,#ffd166);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.cursor-resume{position:absolute;inset:0;z-index:6;display:grid;place-items:center;pointer-events:none}
+.cursor-resume__button{pointer-events:auto;display:grid;gap:5px;justify-items:center;min-width:min(260px,80vw);min-height:64px;padding:14px 24px;border:1px solid var(--accent);border-radius:var(--radius-md);background:#08201fee;color:#eafff5;font:800 15px var(--font-mono);letter-spacing:.14em;text-shadow:0 2px 5px #000;box-shadow:0 14px 40px #000a;cursor:pointer}
+.cursor-resume__button small{font:700 10px var(--font-mono);letter-spacing:.1em;color:var(--text-mute)}
+.cursor-resume__button:hover,.cursor-resume__button:focus-visible{border-color:#eafff5;box-shadow:0 0 0 2px var(--accent),0 14px 40px #000a}
+.cocs-spend.is-reduced .cocs-spend__banner{animation:none}
+.cocs-spend-chip{position:absolute;left:50%;top:calc(var(--safe-top) + 96px);transform:translateX(-50%);z-index:var(--z-board,5);min-height:44px;display:inline-flex;align-items:center;gap:8px;padding:8px 14px;border:1px solid var(--accent);border-radius:var(--radius-md);background:#08201fe6;color:#eafff5;font:800 .86em var(--font-mono);letter-spacing:.08em;cursor:pointer;pointer-events:auto}
+.cocs-spend-chip:hover,.cocs-spend-chip:focus-visible{border-color:#eafff5}
+.cocs-notice{position:absolute;left:50%;top:calc(var(--safe-top) + 140px);transform:translateX(-50%);z-index:7;display:inline-flex;align-items:center;gap:7px;max-width:70vw;padding:7px 12px;border:1px solid var(--accent);border-radius:var(--radius-md);background:#0d2b27ee;color:#eafff5;font:700 .84em var(--font-mono);letter-spacing:.06em;box-shadow:0 10px 30px #0009;pointer-events:none}
+.cocs-notice i{font-style:normal;color:#8dffb0}
+.cocs-notice.is-failed{border-color:var(--warn-soft,#ffd166)}
+.cocs-notice.is-failed i{color:var(--warn-soft,#ffd166)}
 
 .cocs-terminals{position:absolute;left:var(--safe-left);bottom:calc(var(--safe-bottom) + 178px);z-index:var(--z-panel,2);width:min(320px,48vw);display:grid;gap:6px;padding:9px 11px;border:1px solid var(--border);border-left:3px solid var(--accent);border-radius:var(--radius-md);background:linear-gradient(110deg,#081a1be6,#0d1f1dd9);box-shadow:0 12px 30px #0008;text-shadow:0 1px 3px #000}
 .cocs-terminals__head{display:flex;align-items:baseline;gap:8px;margin:0}
