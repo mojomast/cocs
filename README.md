@@ -419,6 +419,8 @@ assets. Full procedure and verification: [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md
 
 ## Documentation
 
+- [LATTICE STRIKE field guide](docs/LATTICE-FIELD-GUIDE.md): first match, map symbols, traversal, orders and operator/harness roles.
+
 | Document | Contents |
 |---|---|
 | [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) | Module map, data flow, invariants, extension guide. |
