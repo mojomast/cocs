@@ -46,6 +46,11 @@ disconnect.
   and thin terrain-following capture rings replace the opaque capture disk.
   Authored node names reach the HUD: West/East Command, West/East Bastion,
   Foundry Relay, North/South Siphon.
+- **Movement contract.** The shared floor/ceiling resolver is pinned by a new
+  regression suite: sloped ground can never read as a ceiling and cancel a
+  jump, a body embedded just under the heightfield heals to the surface instead
+  of falling through it, and boost pads still complete their arc to the
+  authored target.
 
 ### Vertical grappling
 
