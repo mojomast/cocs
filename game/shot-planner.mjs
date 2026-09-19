@@ -65,7 +65,8 @@ export const PLANNER = {
  minShot: 2.2, reducedMinShot: 3.4,          // minimum duration of an action shot
  hysteresis: .12, reducedHysteresis: .22,    // score margin needed to leave a shot
  killHold: 2.4, objectiveHold: 2.6,          // hold windows for a beat to resolve
- momentCutWindow: .8,                        // fresh moment beats cut in this immediately
+ momentCutWindow: .8,                        // fresh beats may interrupt a related encounter
+ allowFirstPerson: true,
  eventMemory: 5,                             // seconds of event history that matter
  maxSubjects: 3, maxRigsPerSubject: 3, maxCandidates: 12,
  fireRange: 26, pursuitRange: 30, vehicleRange: 48, soccerRange: 42,
@@ -234,6 +235,33 @@ function damagePairs(ctx) {
  return map;
 }
 
+// Misses are still action. Use the recorded shot segment (not bot intent) to
+// identify an opponent under fire before the first damage event arrives.
+function shootingSubjects(ctx, out) {
+ const pairs = new Set();
+ for (let i = ctx.recent.length - 1; i >= 0; i--) {
+  const { ev, age } = ctx.recent[i];
+  if (ev.type !== 'shot' || !ev.from || !ev.to) continue;
+  const shooter = ctx.byId.get(ev.actor);
+  if (!selectable(shooter)) continue;
+  const dx = ev.to.x - ev.from.x, dz = ev.to.z - ev.from.z, length2 = dx * dx + dz * dz;
+  if (!(length2 > 1)) continue;
+  const opponent = ctx.actors.filter(a => selectable(a) && a.id !== shooter.id && enemyOf(ctx, shooter, a))
+   .map(a => {
+    const t = clamp(((a.x - ev.from.x) * dx + (a.z - ev.from.z) * dz) / length2, 0, 1);
+    return { a, distance: Math.hypot(a.x - ev.from.x - t * dx, a.z - ev.from.z - t * dz) };
+   }).filter(({ a, distance }) => distance < 3 && dist2d(a, shooter) <= ctx.cfg.fireRange * 2)
+   .sort((a, b) => a.distance - b.distance || a.a.id - b.a.id)[0]?.a;
+  if (!opponent) continue;
+  const targets = [shooter.id, opponent.id].sort((a, b) => a - b), key = `fight:${targets.join(':')}`;
+  if (pairs.has(key)) continue;
+  pairs.add(key);
+  out.push(makeSubject({ key, kind: 'firefight', reason: `exchange ${shooter.name ?? shooter.id}/${opponent.name ?? opponent.id}`,
+   targets, primary: targets[0], anchor: mixPoint(chestOf(shooter), chestOf(opponent), .5),
+   relevance: .62, recency: clamp(1 - age / ctx.cfg.eventMemory, 0, 1), age }));
+ }
+}
+
 function encounterSubjects(ctx, out) {
  // Kills (and the death aftermath) are the strongest beats in the planner.
  for (const { ev, age } of ctx.recent) {
@@ -250,17 +278,18 @@ function encounterSubjects(ctx, out) {
    if (!targets.length) continue; // dead and missing: skip, never invent a subject
    const recency = clamp(1 - age / 3.5, 0, 1);
    out.push(makeSubject({
-    kind: 'kill', reason: `kill ${victim && victim.name ? victim.name : ev.actor ?? '?'}`,
-    targets, primary: targets[0], anchor,
+    key: `death:${ev.id ?? ev.time}:${ev.actor}:${ev.killer}`, kind: 'kill', reason: `kill ${victim && victim.name ? victim.name : ev.actor ?? '?'}`,
+    targets, primary: targets[0], victim: ev.actor, anchor,
     relevance: clamp(.35 + .55 * recency + .1, 0, 1), recency, moment: true, age, hold: ctx.cfg.killHold,
    }));
   } else if (ev.type === 'explosion') {
    if (!ev.pos || !Number.isFinite(ev.pos.x)) continue;
    const anchor = { x: ev.pos.x, y: num(ev.pos.y) + .6, z: ev.pos.z };
    const near = ctx.actors.filter(a => selectable(a) && dist2d(a, anchor) <= 10).map(a => a.id).sort((a, b) => a - b).slice(0, 3);
+   if (!near.length) continue;
    const recency = clamp(1 - age / 3, 0, 1);
    out.push(makeSubject({
-    kind: 'kill', reason: 'explosion', targets: near, primary: near[0] ?? null, anchor,
+    key: `explosion:${ev.id ?? ev.time}:${anchor.x}:${anchor.z}`, kind: 'kill', reason: 'explosion', targets: near, primary: near[0] ?? null, anchor,
     relevance: clamp(.45 + .5 * recency, 0, 1), recency, moment: true, age, hold: ctx.cfg.objectiveHold,
    }));
   } else if (ev.type === 'melee' && hasId(ev.hit)) {
@@ -273,7 +302,7 @@ function encounterSubjects(ctx, out) {
    if (!targets.length) continue;
    const recency = clamp(1 - age / 3, 0, 1);
    out.push(makeSubject({
-    kind: 'kill', reason: `melee ${attacker && attacker.name ? attacker.name : ev.actor ?? '?'}`, targets, primary: targets[0], anchor,
+    key: `melee:${ev.id ?? ev.time}:${ev.actor}:${ev.hit}`, kind: 'kill', reason: `melee ${attacker && attacker.name ? attacker.name : ev.actor ?? '?'}`, targets, primary: targets[0], anchor,
     relevance: clamp(.4 + .5 * recency, 0, 1), recency, moment: true, age, hold: ctx.cfg.killHold,
    }));
   } else if (ev.type === 'vehicle-destroyed') {
@@ -285,7 +314,7 @@ function encounterSubjects(ctx, out) {
    const merged = [...new Set([...targets, ...near])].slice(0, 3);
    const recency = clamp(1 - age / 3, 0, 1);
    out.push(makeSubject({
-    kind: 'vehicle', reason: 'vehicle destroyed', targets: merged, primary: merged[0] ?? null, anchor,
+    key: `destroyed:${ev.id ?? ev.time}:${ev.vehicle}`, kind: 'vehicle', reason: 'vehicle destroyed', targets: merged, primary: merged[0] ?? null, anchor,
     relevance: clamp(.5 + .45 * recency, 0, 1), recency, moment: true, age, hold: ctx.cfg.objectiveHold,
    }));
   }
@@ -301,7 +330,7 @@ function encounterSubjects(ctx, out) {
   const damage = clamp(rec.damage / 120, 0, 1);
   const anchor = { x: (px(a) + px(b)) / 2, y: (num(a.y) + num(b.y)) / 2 + 1.15, z: (pz(a) + pz(b)) / 2 };
   out.push(makeSubject({
-   kind: 'firefight', reason: `firefight ${a.name ?? a.id}/${b.name ?? b.id}`,
+   key: `fight:${rec.a}:${rec.b}`, kind: 'firefight', reason: `firefight ${a.name ?? a.id}/${b.name ?? b.id}`,
    targets: [rec.a, rec.b], primary: rec.a, anchor,
    relevance: clamp(.40 + .30 * (rec.mutual ? 1 : 0) + .20 * closeness + .10 * damage, 0, 1),
    recency, moment: false, age: rec.age, hold: 0,
@@ -325,7 +354,7 @@ function objectiveSubjects(ctx, out) {
    const targets = [carrier.id, ...pursuers.slice(0, 2).map(x => x.a.id)];
    const threat = pursuers.length ? clamp(1 - pursuers[0].d / ctx.cfg.pursuitRange, 0, 1) : 0;
    out.push(makeSubject({
-    kind: 'objective', reason: `flag carrier ${carrier.name ?? carrier.id}`,
+    key: `flag:${flag.team}:carrier:${carrier.id}`, kind: 'objective', reason: `flag carrier ${carrier.name ?? carrier.id}`,
     targets, primary: carrier.id, anchor: { x: px(carrier), y: num(carrier.y) + 1.15, z: pz(carrier) },
     relevance: clamp(.45 + .25 * threat + .15 * (pursuers.length ? 1 : 0) + .15, 0, 1),
     recency: 1, moment: false, age: 0, hold: ctx.cfg.objectiveHold,
@@ -334,7 +363,7 @@ function objectiveSubjects(ctx, out) {
    const anchor = { x: flag.x, y: num(flag.y) + .4, z: num(flag.z) };
    const near = ctx.actors.filter(a => selectable(a) && dist2d(a, anchor) <= 12).map(a => a.id).sort((a, b) => a - b).slice(0, 3);
    out.push(makeSubject({
-    kind: 'objective', reason: 'dropped flag', targets: near, primary: near[0] ?? null, anchor,
+    key: `flag:${flag.team}:dropped`, kind: 'objective', reason: 'dropped flag', targets: near, primary: near[0] ?? null, anchor,
     relevance: clamp(.32 + .2 * (near.length ? 1 : 0), 0, 1),
     recency: 1, moment: false, age: 0, hold: ctx.cfg.objectiveHold,
    }));
@@ -351,7 +380,7 @@ function objectiveSubjects(ctx, out) {
   if (!inside.length && !contested && !capturing && progress <= 0) continue;
   const tags = [contested ? 'contested' : capturing ? 'capturing' : 'held'];
   out.push(makeSubject({
-   kind: 'objective', reason: `zone ${zone.id ?? ''} ${tags[0]}`.replace(/\s+/g, ' ').trim(),
+   key: `zone:${zone.id ?? `${zone.x}:${zone.z}`}`, kind: 'objective', reason: `zone ${zone.id ?? ''} ${tags[0]}`.replace(/\s+/g, ' ').trim(),
    targets: inside, primary: inside[0] ?? null,
    anchor: { x: zone.x, y: num(zone.y, 0) + 1, z: zone.z },
    relevance: clamp(.42 + .28 * (contested ? 1 : 0) + .18 * progress + .12 * (inside.length ? 1 : 0), 0, 1),
@@ -368,7 +397,7 @@ function objectiveSubjects(ctx, out) {
   const progress = clamp(num(payload.progress, 0), 0, 1);
   const reason = contested ? 'payload contested' : pushing ? 'payload push' : 'payload';
   out.push(makeSubject({
-   kind: 'objective', reason, targets: near, primary: near[0] ?? null,
+   key: 'payload', kind: 'objective', reason, targets: near, primary: near[0] ?? null,
    anchor: { x: p.x, y: num(p.y) + 1.2, z: p.z },
    relevance: clamp(.45 + .25 * (pushing ? 1 : 0) + .20 * (contested ? 1 : 0) + .10 * progress, 0, 1),
    recency: 1, moment: false, age: 0, hold: ctx.cfg.objectiveHold,
@@ -475,7 +504,7 @@ function raceSubjects(ctx, out) {
  }
  if (!best) return;
  out.push(makeSubject({
-  kind: 'race', reason: best.reason, targets: best.targets, primary: best.primary, anchor: best.anchor,
+  key: `race:${best.targets.slice().sort((a,b)=>a-b).join(':')}`, kind: 'race', reason: best.reason, targets: best.targets, primary: best.primary, anchor: best.anchor,
   relevance: best.rel, recency: 1, moment: false, age: 0, hold: ctx.cfg.objectiveHold,
  }));
 }
@@ -499,7 +528,7 @@ function soccerSubjects(ctx, out) {
  if (goalDistance > ctx.cfg.soccerRange && !near.length) return;
  const anchor = { x: ball.x + num(ball.vx) * .45, y: num(ball.y) + .7, z: ball.z + num(ball.vz) * .45 };
  out.push(makeSubject({
-  kind: 'soccer', reason: goalDistance <= ctx.cfg.soccerRange ? 'soccer attack' : 'soccer ball',
+  key: 'soccer:ball', kind: 'soccer', reason: goalDistance <= ctx.cfg.soccerRange ? 'soccer attack' : 'soccer ball',
   targets: near.slice(0, 2).map(x => x.id), primary: near[0] ? near[0].id : null, anchor,
   relevance: clamp(.40 + .35 * clamp(1 - goalDistance / ctx.cfg.soccerRange, 0, 1) + .25 * clamp(speed / 18, 0, 1), 0, 1),
   recency: 1, moment: false, age: 0, hold: ctx.cfg.objectiveHold,
@@ -523,19 +552,25 @@ function objectiveAnchor(ctx) {
 function buildSubjects(ctx) {
  const out = [];
  encounterSubjects(ctx, out);
+ shootingSubjects(ctx, out);
  objectiveSubjects(ctx, out);
  vehicleSubjects(ctx, out);
  raceSubjects(ctx, out);
  soccerSubjects(ctx, out);
- for (const s of out) s.rank = s.relevance * (.55 + .45 * clamp(s.recency, 0, 1)) + (s.moment ? .18 : 0);
+ for (const s of out) {
+  s.key ??= `${s.kind}:${s.reason}:${s.primary ?? ''}`;
+  s.rank = s.relevance * (.55 + .45 * clamp(s.recency, 0, 1)) + (s.moment ? .18 : 0);
+ }
  out.sort((a, b) => b.rank - a.rank || (KIND_ORDER[a.kind] ?? 9) - (KIND_ORDER[b.kind] ?? 9) || (a.primary ?? -1) - (b.primary ?? -1));
  // Collapse near-duplicates (e.g. the same death event ingested twice).
  const deduped = [];
  for (const s of out) {
-  const duplicate = deduped.find(d => d.kind === s.kind && dist2d(d.anchor, s.anchor) < 4 && d.targets.some(id => s.targets.includes(id)));
+  const duplicate = deduped.find(d => d.key === s.key);
   if (!duplicate) deduped.push(s);
  }
- return deduped.slice(0, ctx.cfg.maxSubjects * 2);
+ // Candidate composition is bounded separately. Never evict the held encounter
+ // just because several higher-ranked events arrived elsewhere this frame.
+ return deduped;
 }
 
 function subjectActors(subject, ctx) {
@@ -560,13 +595,15 @@ function facing2(primary, opponent) {
 function stableAngle(ctx, target, key) {
  const prev = ctx.previous && ctx.previous.pose;
  if (prev && Number.isFinite(prev.x)) {
-  const dx = prev.x - target.x, dz = prev.z - target.z;
+  const origin = ctx.previous.aim || target;
+  const dx = prev.x - origin.x, dz = prev.z - origin.z;
   if (Math.hypot(dx, dz) > 1.5) return Math.atan2(dz, dx);
  }
  return hashUnit(key) * TAU;
 }
 
 function firstPersonReadable(subject, ctx) {
+ if (!ctx.cfg.allowFirstPerson) return false;
  const { primary } = subjectActors(subject, ctx);
  if (!primary || primary.vehicleId != null) return false;
  // The subject's aim is only readable while they are actually shooting or
@@ -600,7 +637,7 @@ function composeCandidate(subject, rig, ctx) {
  let pose = null, aim = null, framing = 'stable', fov = 66;
  if (rig === 'ots') {
   if (!primary) return null;
-  const f = facing2(primary, opponent);
+  const f = facing2(primary, opponent || (subject.kind === 'kill' ? anchor : null));
   const side = perp2(f, ctx.shoulder ?? 1);
   const base = chestOf(primary);
   pose = {
@@ -614,7 +651,7 @@ function composeCandidate(subject, rig, ctx) {
   fov = 62;
  } else if (rig === 'side') {
   if (!primary) return null;
-  const f = facing2(primary, opponent);
+  const f = facing2(primary, opponent || (subject.kind === 'kill' ? anchor : null));
   const side = perp2(f, 1);
   const base = chestOf(primary);
   pose = { x: base.x + side.x * cfg.sideDistance, y: num(primary.y) + 1.6, z: base.z + side.z * cfg.sideDistance };
@@ -622,8 +659,8 @@ function composeCandidate(subject, rig, ctx) {
   framing = 'side';
   fov = 66;
  } else if (rig === 'combat') {
-  if (!primary || !opponent) return null;
-  const a = chestOf(primary), b = chestOf(opponent);
+  if (!primary || (!opponent && subject.kind !== 'kill')) return null;
+  const a = chestOf(primary), b = opponent ? chestOf(opponent) : anchor;
   const mid = { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2, z: (a.z + b.z) / 2 };
   const line = normal2(b.x - a.x, b.z - a.z);
   const side = perp2(line, ctx.shoulder ?? 1);
@@ -649,6 +686,10 @@ function composeCandidate(subject, rig, ctx) {
   if (primary) dir = normal2(anchor.x - px(primary), anchor.z - pz(primary));
   if (!dir || (!dir.x && !dir.z)) dir = normal2(anchor.x - ctx.center.x, anchor.z - ctx.center.z);
   if (!dir || (!dir.x && !dir.z)) dir = { x: 0, z: -1 };
+  if (ctx.previous && ctx.previous.subjectKey === subject.key && ctx.previous.rig === rig) {
+   const angle = stableAngle(ctx, anchor, subject.key);
+   dir = { x: Math.cos(angle), z: Math.sin(angle) };
+  }
   pose = { x: anchor.x + dir.x * cfg.objectiveDistance, y: anchor.y + cfg.objectiveHeight, z: anchor.z + dir.z * cfg.objectiveDistance };
   aim = { x: anchor.x, y: anchor.y + .4, z: anchor.z };
   framing = 'objective';
@@ -832,11 +873,22 @@ function composeIncumbent(ctx) {
  if (!prev || !prev.rig || !prev.pose) return null;
  if (prev.rig === 'flyover' && Number.isFinite(prev.minUntil) && ctx.now > prev.minUntil) return null; // short context only
  const ids = Array.isArray(prev.targets) ? prev.targets : [];
+ // Follow the resolution of this very encounter from the same side. A victim
+ // dying must not invalidate the shot and send the camera to a distant fight.
+ if (prev.subjectKind === 'firefight') {
+  const resolution = ctx.subjects.find(s => s.key.startsWith('death:') && ids.includes(s.victim) && s.primary === prev.primary
+   && s.age <= ctx.cfg.momentCutWindow && dist2d(s.anchor, prev.anchor) < 12);
+  if (resolution) {
+   const candidate = composeCandidate(resolution, prev.rig, ctx);
+   if (candidate) { candidate.incumbent = true; candidate.promoted = true; return candidate; }
+  }
+ }
  let subject = null;
  if (prev.subjectKind === 'establish' || prev.subjectKind === 'flyover') {
   subject = fallbackSubject(ctx);
  } else {
-  subject = ctx.subjects.find(s => s.kind === prev.subjectKind && s.targets.some(id => ids.includes(id)));
+  subject = ctx.subjects.find(s => prev.subjectKey ? s.key === prev.subjectKey
+   : s.kind === prev.subjectKind && s.targets.length === ids.length && s.targets.every(id => ids.includes(id)));
  }
  if (!subject) return null;
  const candidate = composeCandidate(subject, prev.rig, ctx);
@@ -985,7 +1037,7 @@ function makeDecision(candidate, ctx, options) {
  const transition = options.transition || (continuing
   ? { type: 'blend', dur: Number((.25 * (ctx.reduced ? 1.6 : 1)).toFixed(3)) }
   : transitionBetween(candidate, ctx));
- const minUntil = continuing && Number.isFinite(ctx.previous && ctx.previous.minUntil)
+ const minUntil = continuing && !candidate.promoted && Number.isFinite(ctx.previous && ctx.previous.minUntil)
   ? ctx.previous.minUntil
   : ctx.now + holdFor(subject, ctx.cfg, ctx.reduced);
  const pose = candidate.pose;
@@ -995,6 +1047,7 @@ function makeDecision(candidate, ctx, options) {
   targets: [...subject.targets],
   primary: subject.primary ?? null,
   subjectKind: subject.kind,
+  subjectKey: subject.key ?? subject.kind,
   anchor: { ...subject.anchor },
   framing: candidate.framing,
   visibility: Number(candidate.vis.toFixed(4)),
@@ -1036,12 +1089,20 @@ function select(ctx, candidates, incumbent) {
  const best = candidates.length ? candidates[0] : null;
  const freshBest = best && best.subject.moment && best.subject.age <= cfg.momentCutWindow;
  if (incumbent) {
-  const incumbentFresh = incumbent.subject.moment && incumbent.subject.age <= cfg.momentCutWindow;
+  const held = Number.isFinite(ctx.previous.minUntil) && ctx.now < ctx.previous.minUntil;
+  const idle = incumbent.subject.kind === 'establish' || incumbent.subject.kind === 'flyover';
+  const related = best && best.subject.targets.some(id => incumbent.subject.targets.includes(id))
+   && dist2d(best.subject.anchor, incumbent.subject.anchor) < 12;
+  // A beat may resolve the encounter we are watching; unrelated highlights
+  // cannot steal its hold. In particular a stream of explosions is not a cut
+  // clock. Calm establishing shots can give way as soon as real action starts.
+  const interrupt = freshBest && !incumbent.subject.moment && (idle || related);
+  const actionAppeared = idle && best && !['establish', 'flyover'].includes(best.subject.kind);
   const beat = incumbent.subject.moment || incumbent.subject.kind === 'objective' || incumbent.subject.kind === 'vip';
   const margin = (ctx.reduced ? cfg.reducedHysteresis : cfg.hysteresis)
    + (beat && Number.isFinite(ctx.previous.minUntil) && ctx.now <= ctx.previous.minUntil ? SCORING.holdBreak : 0);
   const force = ctx.forceCut;
-  const override = force || (best && best.score > incumbent.score + margin) || (freshBest && !incumbentFresh);
+  const override = force || interrupt || actionAppeared || (!held && best && best.score > incumbent.score + margin);
   if (!override) return makeDecision(incumbent, ctx, { continuing: true });
   let chosen = best || incumbent;
   if (chosen !== incumbent && chosen.rig === ctx.previous.rig) {

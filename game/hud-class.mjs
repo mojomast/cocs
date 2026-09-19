@@ -17,6 +17,7 @@
 // Both helpers are total: malformed or partial snapshots return neutral values
 // rather than throwing, because the HUD renders every 80 ms from network data.
 import {riderBonus} from './spec-effects.mjs';
+import {formatCountdown} from './format-ui.mjs';
 
 const num = (value, fallback = 0) => {
   const n = Number(value);
@@ -85,9 +86,9 @@ export function abilityRing(player = {}, ability = null, config = {}, state = {}
   const seconds = active ? activeSeconds : cooldown;
   const label = reason === 'vehicle' ? 'DRIVING'
     : disabled ? 'OFF'
-    : active ? `ACTIVE ${seconds.toFixed(1)}s`
+    : active ? `ACTIVE ${formatCountdown(seconds)}s`
     : ready ? 'READY'
-    : `${seconds.toFixed(1)}s`;
+    : `${formatCountdown(seconds)}s`;
   return {ratio, ready, active, disabled, seconds, label, reason, max};
 }
 
@@ -148,9 +149,9 @@ export function movementHud(movement = null, kitMovement = null) {
   const note = !enabled ? 'OFF'
     : phase === 'charging' || phase === 'windup' ? (charge === null ? 'WIND-UP' : `CHARGING ${Math.round(charge * 100)}%`)
     : phase === 'active' ? 'ACTIVE'
-    : maxCharges > 0 ? `${Math.round(charges)}/${maxCharges}${cooldown > 0 ? ` · ${cooldown.toFixed(1)}s` : ''}`
-    : maxFuel > 0 ? `${Math.round(clamp01(fuel / Math.max(1e-9, maxFuel)) * 100)}%${cooldown > 0 ? ` · ${cooldown.toFixed(1)}s` : ''}`
-    : cooldown > 0 ? `${cooldown.toFixed(1)}s`
+    : maxCharges > 0 ? `${Math.round(charges)}/${maxCharges}${cooldown > 0 ? ` · ${formatCountdown(cooldown)}s` : ''}`
+    : maxFuel > 0 ? `${Math.round(clamp01(fuel / Math.max(1e-9, maxFuel)) * 100)}%${cooldown > 0 ? ` · ${formatCountdown(cooldown)}s` : ''}`
+    : cooldown > 0 ? `${formatCountdown(cooldown)}s`
     : 'READY';
   return {phase, charges, maxCharges, cooldown, fuel, maxFuel, windup, windupTotal, charge, verb, name, ready, enabled, progress, note};
 }

@@ -45,6 +45,7 @@ export const CURSOR_SURFACE = Object.freeze({
   SETTINGS: 'settings',
   DEMO: 'demo',
   RESPAWN: 'respawn',
+  TRAINING: 'training',
   VOICE: 'voice',
 });
 
@@ -63,6 +64,7 @@ export const CURSOR_SURFACE_LABELS = Object.freeze({
   [CURSOR_SURFACE.SETTINGS]: 'SETTINGS',
   [CURSOR_SURFACE.DEMO]: 'DEMO CONTROLS',
   [CURSOR_SURFACE.RESPAWN]: 'RESPAWN',
+  [CURSOR_SURFACE.TRAINING]: 'LESSON COMPLETE',
   [CURSOR_SURFACE.VOICE]: 'VOICE',
 });
 

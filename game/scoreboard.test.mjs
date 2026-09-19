@@ -4,6 +4,17 @@ import {renderToStaticMarkup} from 'react-dom/server';
 import {renderScoreboard} from './scoreboard.mjs';
 import {PUMA_PITCH} from './soccer-maps.mjs';
 
+test('Lattice scoreboard shows real kills once and readable objective contribution',()=>{
+ for(const mode of ['cocs','cocs-coop']){
+  const html=renderToStaticMarkup(renderScoreboard({config:{mode},actorId:0,teamScores:{0:12.000000000001,1:4},actors:[{id:0,name:'Scout',team:0,frags:7,deaths:2,scoreStats:{objectiveCaptures:3,objectiveTime:20.000000000001}}]}));
+  assert.match(html,/>KILLS</);
+  assert.doesNotMatch(html,/>FRAGS</,'no redundant column backed by a missing score statistic');
+  assert.match(html,/<strong>7<\/strong>/);
+  assert.match(html,/>20s</);
+  assert.doesNotMatch(html,/20\.0|000000/);
+ }
+});
+
 const soccerSnapshot={
  config:{mode:'puma-soccer'},
  actorId:0,

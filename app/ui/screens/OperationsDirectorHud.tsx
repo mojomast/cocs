@@ -7,10 +7,11 @@
 // meter. Deliberately separate from `CocsReadout` so device/depot UI can evolve
 // without touching it. Shape+word, never colour alone (spec §12.9).
 import * as React from 'react';
+import {formatNumber,formatWhole,formatCountdown,formatResource} from '../../../game/format-ui.mjs';
 
 const pct = (value: number) => `${Math.round(Math.max(0, Math.min(1, value)) * 100)}%`;
-const whole = (value: number) => `${Math.round(Number.isFinite(value) ? value : 0)}`;
-const tenths = (value: number) => (Number.isFinite(value) ? value.toFixed(1) : '0.0');
+const whole = formatWhole;
+const countdown = formatCountdown;
 const PHASE_LABEL: Record<string, string> = {
   intermission: 'INTERMISSION',
   build_up: 'BUILD-UP',
@@ -24,7 +25,7 @@ export function OperationsDirectorHud({director}: {director: any}) {
   const siege = director.siege ?? {armed: false, percent: 1, health: 0, max: 0, attackers: 0, defenders: 0};
   const fronts = Array.isArray(director.fronts) ? director.fronts : [];
   const frontText = fronts.length ? fronts.map((front: any) => front.nodeId).join(' + ') : 'STAGING';
-  const telegraph = director.telegraph ? `TELEGRAPH ${String(director.telegraph.kind).toUpperCase()} ${director.telegraph.nodeId ?? ''} ${tenths(director.telegraph.seconds)}s` : 'NO SPAWN SIGNAL';
+  const telegraph = director.telegraph ? `TELEGRAPH ${String(director.telegraph.kind).toUpperCase()} ${director.telegraph.nodeId ?? ''} ${countdown(director.telegraph.seconds)}s` : 'NO SPAWN SIGNAL';
   const boss = director.boss ? `BOSS ${String(director.boss.type).toUpperCase()} P${director.boss.phase}` : null;
   const executor = director.command?.executor;
   const tierCopy = director.tierCopy ?? null;
@@ -41,8 +42,8 @@ export function OperationsDirectorHud({director}: {director: any}) {
       <div className="director-readout__meter" aria-hidden="true">
         <i className={`director-readout__phase director-readout__phase--${director.phase}`} style={{width: pct(director.pressure)}}/>
       </div>
-      <p className="director-readout__line"><span className="director-readout__phase-label">{phase}</span> · PRESSURE <b>{whole(director.budget.current)}</b>/{whole(director.budget.cap)} <small>+{tenths(director.budget.rate)}/s</small></p>
-      <p className="director-readout__line">FRONT <b>{frontText}</b> · FORCE <b>{director.waves.forceAlive}</b>/{director.waves.forceTotal} · {director.secondsRemaining > 0 ? `${tenths(director.secondsRemaining)}s` : '—'}</p>
+      <p className="director-readout__line"><span className="director-readout__phase-label">{phase}</span> · PRESSURE <b>{whole(director.budget.current)}</b>/{whole(director.budget.cap)} <small>+{formatNumber(director.budget.rate)}/s</small></p>
+      <p className="director-readout__line">FRONT <b>{frontText}</b> · FORCE <b>{director.waves.forceAlive}</b>/{director.waves.forceTotal} · {director.secondsRemaining > 0 ? `${countdown(director.secondsRemaining)}s` : '—'}</p>
       <p className={`director-readout__telegraph${director.telegraph ? ' is-live' : ''}`}>{telegraph}{boss ? ` · ${boss}` : ''}</p>
       <div className={`director-readout__hq${siege.armed ? ' is-siege' : ''}`} role="group" aria-label={`Headquarters ${siege.hqId} ${whole(siege.health)} of ${whole(siege.max)}${siege.armed ? ' under siege' : ''}`}>
         <span className="eyebrow">{siege.armed ? 'HQ UNDER SIEGE' : 'HQ SECURE'}</span>
@@ -60,8 +61,8 @@ export function OperationsDirectorHud({director}: {director: any}) {
       {bonus.length > 0 && <p className="director-readout__bonus" aria-live="polite">
         {bonus.map((entry: any) => `BONUS ${entry.label} ${whole(entry.progress)}/${whole(entry.target)}`).join(' · ')}
       </p>}
-      {intermission && intermission.open && <div className="director-readout__spend" role="group" aria-label={`Intermission spend window. ${tenths(intermission.secondsRemaining)} seconds, ${whole(intermission.budget)} FLUX available.`}>
-        <p className="director-readout__line">SPEND WINDOW <b>{tenths(intermission.secondsRemaining)}s</b> · FLUX <b>{whole(intermission.budget)}</b>{intermission.spent > 0 ? ` · SPENT ${whole(intermission.spent)}` : ''}</p>
+      {intermission && intermission.open && <div className="director-readout__spend" role="group" aria-label={`Intermission spend window. ${countdown(intermission.secondsRemaining)} seconds, ${formatResource(intermission.budget)} FLUX available.`}>
+        <p className="director-readout__line">SPEND WINDOW <b>{countdown(intermission.secondsRemaining)}s</b> · FLUX <b>{formatResource(intermission.budget)}</b>{intermission.spent > 0 ? ` · SPENT ${whole(intermission.spent)}` : ''}</p>
         <ul className="director-readout__sinks">
           {sinks.map((sink: any) => <li key={sink.verb} className={sink.enabled ? 'is-ready' : 'is-locked'}>
             <b>{sink.label}</b> <small>{whole(sink.cost)} FLUX</small>{sink.enabled ? '' : sink.available ? ' · UNFUNDED' : ' · N/A'}

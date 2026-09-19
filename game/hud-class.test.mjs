@@ -76,7 +76,7 @@ test('disabled ability cards report DRIVING for vehicles and OFF otherwise', () 
   assert.equal(carrier.reason, 'carrier');
   const recharging = abilityRing(player({cooldown: 4}), {cooldown: 10}, {});
   assert.equal(recharging.disabled, false);
-  assert.equal(recharging.label, '4.0s');
+  assert.equal(recharging.label, '4s');
   // A flag carrier in any other mode still shows the normal ring.
   assert.equal(abilityRing(player({carryingFlag: true}), {cooldown: 10}, {mode: 'deathmatch'}).disabled, false);
 });
@@ -93,7 +93,7 @@ test('a charge verb reads ready at full, spent during cooldown, off when strippe
   closeTo(ready.progress, 1);
   const spent = movementHud({phase: 'ready', enabled: true, verb: 'grapple', charges: 0, maxCharges: 1, cooldown: 2, fuel: 0, maxFuel: 0}, verb('grapple'));
   assert.equal(spent.ready, false);
-  assert.equal(spent.note, '0/1 · 2.0s');
+  assert.equal(spent.note, '0/1 · 2s');
   closeTo(spent.progress, 0);
   const stripped = movementHud({phase: 'ready', enabled: false, verb: 'grapple', charges: 0, maxCharges: 1, cooldown: 0, fuel: 0, maxFuel: 0}, verb('grapple'));
   assert.equal(stripped.ready, false);
@@ -130,7 +130,7 @@ test('wind-up and charging phases report charge progress', () => {
 test('cooldown-only verbs progress against the kit budget and snapshot-only snapshots still label', () => {
   const cooling = movementHud({phase: 'ready', enabled: true, verb: 'blink-step', charges: 0, maxCharges: 0, cooldown: 3, fuel: 0, maxFuel: 0}, verb('blink-step'));
   assert.equal(cooling.ready, false);
-  assert.equal(cooling.note, '3.0s');
+  assert.equal(cooling.note, '3s');
   closeTo(cooling.progress, .5, 1e-9, 'half of the 6 s blink budget');
   const bare = movementHud({phase: 'ready', enabled: true, verb: 'blink-step', cooldown: 0});
   assert.equal(bare.name, 'Blink Step', 'the verb id is title-cased without the kit record');

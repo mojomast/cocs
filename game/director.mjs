@@ -34,6 +34,7 @@ export class CinematicDirector{
   this.radius=Math.max(1,num(options.radius,14));
   this.cutEvery=Math.max(.1,num(options.cutEvery,3.2));
   this.minShot=Number.isFinite(options.minShot)?Math.max(1,options.minShot):null;
+  this.allowFirstPerson=options.allowFirstPerson!==false;
   this.reduced=reduced===true||(reduced===undefined&&typeof globalThis!=='undefined'&&typeof globalThis.matchMedia==='function'&&globalThis.matchMedia('(prefers-reduced-motion: reduce)').matches);
   this.planner=options.planner!==false;
   this._rig='orbit';
@@ -155,7 +156,11 @@ export class CinematicDirector{
   this._resolveArena(s);
   this._refreshPois(s);
   let time;
-  if(Number.isFinite(s.time)){time=s.time;this._time=time;}else{this._time+=step;time=this._time;}
+  if(Number.isFinite(s.time)){
+   time=s.time;
+   if(time<this._time){this._plan=null;this._seen.clear();this._recentEvents=[];this._needsCut=true;}
+   this._time=time;
+  }else{this._time+=step;time=this._time;}
   const raw=Array.isArray(events)?events:(Array.isArray(s.events)?s.events:[]);
   const highlight=this._ingestEvents(raw,time);
   const planned=this.planner&&this._autoCut&&!this._manual.rig&&!this._manual.target;
@@ -170,7 +175,7 @@ export class CinematicDirector{
    state:s,events:this._recentEvents,safety:this._safety(),previous:this._plan,
    time,dt:step,reduced:this.reduced,random:this.random,center:this.center,radius:this.radius,
    forceCut:this._forceCut===true,
-   options:this.minShot===null?{maxShot:this.cutEvery}:{minShot:this.minShot,maxShot:this.cutEvery},
+   options:{allowFirstPerson:this.allowFirstPerson,maxShot:this.cutEvery,...(this.minShot===null?{}:{minShot:this.minShot,reducedMinShot:Math.max(this.minShot,3.4)})},
   });
   const first=this._plan===null;
   const cutoff=first||this._forceCut===true||(plan.incumbent===false&&plan.transition.type==='cut');
@@ -193,7 +198,7 @@ export class CinematicDirector{
    const cap=firstPerson?Infinity:(this.reduced?DIRECTOR_MOTION.maxSpeedReduced:DIRECTOR_MOTION.maxSpeed)*step;
    const dx=px-this._pos.x,dy=py-this._pos.y,dz=pz-this._pos.z;
    const len=Math.hypot(dx,dy,dz);
-   const scale=len>cap?cap/len:k;
+   const scale=len>0?Math.min(k,cap/len):0;
    this._pos.x+=dx*scale;this._pos.y+=dy*scale;this._pos.z+=dz*scale;
    this._clearPlannedPosition();
    const baseYaw=yawTo(this._pos,this.aim),basePitch=pitchTo(this._pos,this.aim);
@@ -203,8 +208,9 @@ export class CinematicDirector{
     this._pitch=clamp(basePitch,-MAX_PITCH,MAX_PITCH);
    }else{
     const maxTurn=(this.reduced?DIRECTOR_MOTION.maxTurnReduced:DIRECTOR_MOTION.maxTurn)*step;
-    this._heading+=clamp(Math.atan2(Math.sin(baseYaw-this._heading),Math.cos(baseYaw-this._heading)),-maxTurn,maxTurn);
-    this._pitch+=clamp(basePitch-this._pitch,-maxTurn*.8,maxTurn*.8);
+    const turnK=1-Math.exp(-(this.reduced?4:7)*step);
+    this._heading+=clamp(Math.atan2(Math.sin(baseYaw-this._heading),Math.cos(baseYaw-this._heading))*turnK,-maxTurn,maxTurn);
+    this._pitch+=clamp((basePitch-this._pitch)*turnK,-maxTurn*.8,maxTurn*.8);
    }
   }
   const want=clamp(fin(plan.pose.fov,70),55,85);

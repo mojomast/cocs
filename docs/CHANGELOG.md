@@ -16,6 +16,42 @@ record in [VERIFICATION.md](VERIFICATION.md).
 
 ---
 
+## v8.3 · CLARITY — 2026-09-19
+
+An interface and presentation pass based on playtest feedback.
+
+- **Readable numbers:** shared presentation formatting removes floating-point
+  tails and redundant zeroes from operator stats, settings, scores, economy,
+  cooldowns and results. Counts stay whole, rates/speeds use at most one decimal,
+  K/D uses at most two, and long countdowns use whole seconds with tenths only
+  in the final five seconds. Spendable balances round down. Simulation values
+  retain their original precision.
+- **Compact spectating:** one bounded, collapsible side roster replaces wrapping
+  bot cards and duplicate detail panels. It keeps team alive counts, HP, kills,
+  down/current indicators, one followed-bot detail area, previous/next controls
+  and expandable camera options. Local clicks now select the director target;
+  the HUD follows that same actor.
+- **A steadier title demo:** stable encounter identity stops opponent swaps
+  inside a shot. Four-second minimum holds and an eight-second stale-shot
+  threshold keep a fight readable. Third-person framing and kill-aftermath
+  continuity preserve context; corrected speed caps and angular easing remove
+  camera lurches. Startup frame deltas are clamped against negative timestamps
+  after expensive scene preparation. Explicit camera controls remain available.
+- **Field Training clarity:** current task, goal progress and next lesson are
+  explicit. A completion beat pauses the local match and releases the cursor;
+  deliberate continuation lets the player read each lesson. Evidence is scoped
+  to the current task and local actor rather
+  than consuming old actions or allied bots' work. The supply lesson now uses
+  nodes from the actual `Match.snapshot().cocs` contract.
+- **Interface usability:** scoreboards derive their column layout from the
+  actual mode data, including streak and ping. Lattice no longer shows an
+  incorrect duplicate FRAGS statistic. Spend panels are height-bounded and
+  scrollable; keyboard selection moves focus, native controls own their Enter
+  key, and held purchase shortcuts do not repeatedly buy.
+- **Audit and next steps:** [Gameplay / UX / fun-factor plan](GAMEPLAY-UX-FUN-PLAN.md)
+  records evidence, priorities, phases and acceptance criteria. D2–D4 difficulty
+  measurement remains deferred as requested.
+
 ## v8.2 · FIELDWORK — 2026-09-19
 
 A ranked ladder, per-team intelligence, Operations depth, real ziplines, an

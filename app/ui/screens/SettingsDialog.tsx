@@ -4,6 +4,7 @@ import {LockKeyhole,Shield,Swords} from 'lucide-react';
 import type {ScreenProps} from '../contract';
 import {Modal,Btn,Tabs,Panel,Chip,Empty} from '../primitives';
 import {HELP_SECTIONS} from '../../../game/onboarding.mjs';
+import {formatNumber,formatWhole} from '../../../game/format-ui.mjs';
 
 type HelpSection={id:string;title:string;summary?:string;items?:readonly string[]};
 
@@ -39,11 +40,11 @@ export function ArsenalInspector({WEAPONS=[],CHARACTERS=[],ATTACHMENTS=[],ATTACH
    <h3 style={{color:weapon.color}}>{weapon.name}</h3>
    <div className="row" style={{gap:6}}><Chip>{weaponRangeLabel?.(weapon)}</Chip><Chip>{Math.round(Number(weapon.damage)||0)} DMG</Chip><Chip>{Number(weapon.interval)>0?`${Math.round(60/Number(weapon.interval))} RPM`:'—'}</Chip></div>
    <p className="field-note">{weapon.description}</p>
-   <p className="field-note">{Number(weapon.ammo)>0?`${weapon.ammo} / ${weapon.cap} ROUNDS`:'UNLIMITED AMMO'}{weapon.splash?` · ${weapon.splash} SPLASH`:''}</p>
+    <p className="field-note">{Number(weapon.ammo)>0?`${formatWhole(weapon.ammo)} / ${formatWhole(weapon.cap)} ROUNDS`:'UNLIMITED AMMO'}{weapon.splash?` · ${formatNumber(weapon.splash)} SPLASH`:''}</p>
   </Panel>)}</div>}
   {tab==='operators'&&<div className="grid-cards">{CHARACTERS.map((operator:any)=><Panel key={operator.id} label="OPERATOR" meta={operator.tag}>
    <h3 style={{color:operator.color}}>{operator.name}</h3>
-   <div className="row" style={{gap:6}}><Chip>{operator.stats.health} HP</Chip><Chip>{operator.stats.armor} ARM</Chip><Chip>{operator.stats.speed} M/S</Chip></div>
+    <div className="row" style={{gap:6}}><Chip>{formatWhole(operator.stats.health)} HP</Chip><Chip>{formatWhole(operator.stats.armor)} ARM</Chip><Chip>{formatNumber(operator.stats.speed)} M/S</Chip></div>
    <p className="field-note">{operator.detail}</p>
   </Panel>)}</div>}
   {tab==='attachments'&&<div className="stack">{ATTACHMENT_SLOTS.map((slot:any)=>{const items=ATTACHMENTS.filter((item:any)=>item.slot===slot.id);if(!items.length)return null;return <div key={slot.id} className="stack stack--tight">

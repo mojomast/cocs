@@ -15,9 +15,10 @@
 // as an order — local co-op and network both ride the same call. Shape + word,
 // no colour-only state, reduced-motion snap.
 import * as React from 'react';
+import {formatResource,formatCountdown} from '../../../game/format-ui.mjs';
 
-const whole = (value: any) => String(Math.round(Number.isFinite(Number(value)) ? Number(value) : 0));
-const tenths = (value: any) => (Number.isFinite(Number(value)) ? Number(value).toFixed(1) : '0.0');
+const whole = formatResource;
+const countdown = formatCountdown;
 
 export function SpendWindowHud({spend, onSpend, onSkip, cursorKey = 'ALT', reducedMotion}: any) {
   const reduced = reducedMotion === true;
@@ -28,6 +29,7 @@ export function SpendWindowHud({spend, onSpend, onSkip, cursorKey = 'ALT', reduc
   // Node-targeted sinks (FORTIFY) let the player choose between held nodes; the
   // page resolved the legal options, so the select can never offer a bad id.
   const [targets, setTargets] = React.useState<Record<string, string>>({});
+  const buyButtons = React.useRef<(HTMLButtonElement | null)[]>([]);
   // The window only publishes the remaining time, so the bar is proportioned
   // against the first value seen on open. The clock and the seconds text remain
   // the authoritative read; the bar is a second, shape-based cue.
@@ -58,13 +60,24 @@ export function SpendWindowHud({spend, onSpend, onSkip, cursorKey = 'ALT', reduc
     handlerRef.current = (event: KeyboardEvent) => {
       if (!spend?.open) return;
       const code = event.code;
-      if ((event.target as HTMLElement)?.tagName === 'SELECT' && (code === 'Enter' || code === 'Space' || code === 'ArrowDown' || code === 'ArrowUp')) return;
+      if (event.defaultPrevented || event.altKey || event.ctrlKey || event.metaKey) return;
+      const target = event.target as HTMLElement;
+      // Native controls own their keys: Enter on SKIP must never buy a sink,
+      // and typing/searching a target select must not spend or close the panel.
+      if (target?.matches('select,input,textarea,[contenteditable="true"]')) return;
+      if (event.repeat && /^(Enter|Space|Digit[1-4]|KeyS|Escape)$/.test(code)) { event.preventDefault(); event.stopPropagation(); return; }
+      if (target?.closest('button,a') && (code === 'Enter' || code === 'Space')) return;
       const step = (delta: number) => {
         if (!sinks.length) return;
-        setActive(index => Math.max(0, Math.min(sinks.length - 1, index + delta)));
+        let index = active + delta;
+        while (index >= 0 && index < sinks.length && !sinks[index].enabled) index += delta;
+        if (index < 0 || index >= sinks.length) return;
+        setActive(index);
+        buyButtons.current[index]?.focus();
       };
       if (code === 'ArrowDown' || code === 'ArrowRight') { event.preventDefault(); event.stopPropagation(); step(1); return; }
       if (code === 'ArrowUp' || code === 'ArrowLeft') { event.preventDefault(); event.stopPropagation(); step(-1); return; }
+      if (event.repeat) return;
       if (code === 'Enter' || code === 'Space') { event.preventDefault(); event.stopPropagation(); buy(sinks[active]); return; }
       if (/^Digit[1-4]$/.test(code)) { event.preventDefault(); event.stopPropagation(); buy(sinks[Number(code.slice(-1)) - 1]); return; }
       if (code === 'KeyS' || code === 'Escape') { event.preventDefault(); event.stopPropagation(); onSkip?.(); }
@@ -97,27 +110,27 @@ export function SpendWindowHud({spend, onSpend, onSkip, cursorKey = 'ALT', reduc
     <section
       className={`cocs-spend${reduced ? ' is-reduced' : ''}`}
       role="region"
-      aria-label={`Intermission spend window, ${tenths(remaining)} seconds, ${whole(spend.budget)} flux available. Press 1 to 4 to buy, S to skip.`}
+      aria-label={`Intermission spend window, ${countdown(remaining)} seconds, ${whole(spend.budget)} flux available. Press 1 to 4 to buy, S to skip.`}
       aria-keyshortcuts="1 2 3 4 Enter S Escape"
     >
       <header className="cocs-spend__head">
         <span className="eyebrow">SPEND WINDOW</span>
-        <strong className="cocs-spend__clock" aria-live="off">{tenths(remaining)}s</strong>
+        <strong className="cocs-spend__clock" aria-live="off">{countdown(remaining)}s</strong>
         <span className="cocs-spend__flux">FLUX <b>{whole(spend.budget)}</b></span>
       </header>
-      <div className="cocs-spend__timer" role="progressbar" aria-label={`${tenths(remaining)} seconds left in the spend window`} aria-valuemin={0} aria-valuemax={Math.round(total)} aria-valuenow={Math.round(remaining)}>
+      <div className="cocs-spend__timer" role="progressbar" aria-label={`${countdown(remaining)} seconds left in the spend window`} aria-valuemin={0} aria-valuemax={Math.round(total)} aria-valuenow={Math.round(remaining)}>
         <i style={{width: `${Math.round(ratio * 100)}%`}} />
       </div>
       {announce && (
         <p className="cocs-spend__banner" role="status">
           <b>SPEND WINDOW OPEN</b>
-          <span>{whole(spend.budget)} FLUX · {tenths(remaining)}s TO SPEND</span>
+          <span>{whole(spend.budget)} FLUX · {countdown(remaining)}s TO SPEND</span>
           <small>CLICK A SINK OR PRESS 1–4 · {cursorKey} FREES THE MOUSE · S SKIPS</small>
         </p>
       )}
       <div className="cocs-spend__meta">
         <span aria-label={`Your flux slice: ${whole(allowance.remaining)} of ${whole(allowance.allowance)} remaining`}>SLICE <b>{whole(allowance.remaining)}</b> LEFT</span>
-        <span className={executor.you ? 'is-you' : ''} aria-label={`Executor lease ${executor.label}, ${tenths(executor.secondsRemaining)} seconds remaining${executor.you ? ', you hold it' : ''}`}>EXECUTOR <b>▸ {executor.label}</b>{executor.you ? ' (YOU)' : ''} · {tenths(executor.secondsRemaining)}s</span>
+        <span className={executor.you ? 'is-you' : ''} aria-label={`Executor lease ${executor.label}, ${countdown(executor.secondsRemaining)} seconds remaining${executor.you ? ', you hold it' : ''}`}>EXECUTOR <b>▸ {executor.label}</b>{executor.you ? ' (YOU)' : ''} · {countdown(executor.secondsRemaining)}s</span>
         <span aria-label={`Threads ${whole(threads.used)} of ${whole(threads.cap)}${threads.perPlayer > 0 ? `, ${whole(threads.perPlayer)} each` : ''}`}>THREADS <b>{whole(threads.used)}/{whole(threads.cap)}</b>{threads.perPlayer > 0 ? ` · ${whole(threads.perPlayer)} EACH` : ''}</span>
       </div>
       <ul className="cocs-spend__sinks" aria-label="Flux sinks">
@@ -129,6 +142,7 @@ export function SpendWindowHud({spend, onSpend, onSkip, cursorKey = 'ALT', reduc
           <li key={sink.id}>
             <div className={`cocs-sink${sink.enabled ? ' is-ready' : ' is-locked'}${active === index ? ' is-active' : ''}`}>
               <button
+                ref={element => { buyButtons.current[index] = element; }}
                 type="button"
                 className="cocs-sink__buy"
                 disabled={!sink.enabled}

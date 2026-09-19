@@ -323,7 +323,7 @@ test('campaign display surfaces waypoint distance, steps, story and boss',()=>{
    {key:'t0',team:0,label:'RED TEAM',score:4,lives:2,players:[{id:0,name:'ChatGPT',health:80,current:true,juggernaut:true,points:9}]},
    {key:'t1',team:1,label:'BLUE TEAM',score:1,lives:3,players:[{id:1,name:'Grok',health:60,current:false,juggernaut:false,points:0}]},
   ];
-  const html=await renderSsr('app/ui/screens/PlayingHud.tsx','SpectatorBoard',`{groups:${JSON.stringify(groups)},objective:{title:'TEAM ELIMINATION',line:'TEAM LIVES REMAINING'},onFollow:()=>{}}`);
+  const html=await renderSsr('app/ui/screens/SpectatorBoard.tsx','SpectatorBoard',`{groups:${JSON.stringify(groups)},objective:{title:'TEAM ELIMINATION',line:'TEAM LIVES REMAINING'},onFollow:()=>{}}`);
   assert.match(html,/role="group" aria-label="Spectator targets"/);
   assert.match(html,/RED TEAM/);
   assert.match(html,/BLUE TEAM/);

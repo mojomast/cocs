@@ -6,6 +6,7 @@ import {RadioGroup,RadioGroupItem} from '@/components/ui/radio-group';
 import {Select,SelectTrigger,SelectValue,SelectContent,SelectItem} from '@/components/ui/select';
 import {DEFAULT_CONFIG,DEFAULT_DISPLAY,GAME_MODES,DIFFICULTIES} from '../../game/config.mjs';
 import {maxBotsFor} from '../../game/arenas.mjs';
+import {formatNumber} from '../../game/format-ui.mjs';
 import {objectiveCopy} from '../../game/hud.mjs';
 import {WEAPONS} from '../../game/data.mjs';
 import {QUICK_MATCH_PRESETS,presetConfig} from '../../game/replay.mjs';
@@ -36,7 +37,7 @@ const LOCK_COPY:any={
 };
 
 function Choice({label,value,options,onChange,disabled=false}:any){return <div className="config-field"><span>{label}</span><Select value={String(value)} onValueChange={onChange} disabled={disabled}><SelectTrigger aria-label={label}><SelectValue/></SelectTrigger><SelectContent className="arena-select">{options.map((o:any)=><SelectItem key={o[0]} value={String(o[0])}>{o[1]}</SelectItem>)}</SelectContent></Select></div>;}
-function Range({label,value,min,max,step=1,onChange,suffix=''}:any){return <div className="config-field"><label>{label}<output>{value}{suffix}</output></label><Slider aria-label={label} value={[value]} min={min} max={max} step={step} onValueChange={([v])=>onChange(v)}/></div>;}
+function Range({label,value,min,max,step=1,onChange,suffix=''}:any){const text=`${formatNumber(value,2)}${suffix}`;return <div className="config-field"><label>{label}<output>{text}</output></label><Slider aria-label={label} aria-valuetext={text} value={[value]} min={min} max={max} step={step} onValueChange={([v])=>onChange(v)}/></div>;}
 function Toggle({label,checked,onChange,disabled=false}:any){return <label className="config-toggle"><span>{label}</span><Switch aria-label={label} checked={checked} onCheckedChange={onChange} disabled={disabled}/></label>;}
 const KEY_LABEL=(code:string)=>String(code||'?').replace(/^Key/,'').replace(/^Digit/,'').replace(/^Arrow/,'').replace('ShiftLeft','Shift').replace('ShiftRight','ShiftR').replace('ControlLeft','Ctrl').replace('ControlRight','CtrlR').replace('AltLeft','Alt').replace('AltRight','AltR');
 

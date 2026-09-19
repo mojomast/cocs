@@ -49,7 +49,7 @@ test('a firefight beats a teammate-only cluster',()=>{
  assert.ok(plan.score>0);
 });
 
-test('kill moments are chosen, cut in immediately and then held',()=>{
+test('a kill resolves the current encounter without cutting away and is then held',()=>{
  const actors=[actor(1,0,0,{team:0}),actor(2,6,0,{team:1}),actor(3,20,20,{team:0}),actor(4,22,20,{team:1})];
  const firefight=[damage(1,2,1,15),damage(1,1,2,15)];
  let previous=call(snap(1,actors,{events:firefight}));
@@ -58,8 +58,9 @@ test('kill moments are chosen, cut in immediately and then held',()=>{
  const events=[...firefight,killEvent];
  const kill=call(snap(1.2,actors,{events}),{previous});
  assert.equal(kill.subjectKind,'kill');
- assert.equal(kill.incumbent,false);
- assert.equal(kill.transition.type,'cut','a fresh kill cuts in');
+  assert.equal(kill.incumbent,true);
+  assert.equal(kill.transition.type,'blend','the watched encounter resolves in the same shot');
+  assert.equal(kill.rig,previous.rig);
  assert.ok(kill.minUntil>=1.2+PLANNER.killHold-1e-9,`minUntil ${kill.minUntil}`);
  assert.deepEqual(kill.targets,[1,2]);
  const held=call(snap(1.3,actors,{events}),{previous:kill});
@@ -161,7 +162,7 @@ test('an unsafe shot change becomes a cut and a safe one blends',()=>{
  assert.equal(current.subjectKind,'firefight');
  // A previous shot on a subject that no longer exists, parked a few metres
  // from the new composition with the same heading: a nearby, compatible change.
- const previous={...current,incumbent:true,subjectKind:'firefight',targets:[97,98],primary:97,
+  const previous={...current,incumbent:true,subjectKind:'firefight',subjectKey:'fight:97:98',targets:[97,98],primary:97,
   pose:{...current.pose,x:current.pose.x-3,z:current.pose.z-2},minUntil:0,startedAt:0,
   watch:{...current.watch,recentRigs:[],recentTargets:[],recentAngles:[]}};
  const safe=call(state,{previous});
@@ -214,9 +215,12 @@ test('minimum shot duration and hysteresis ignore small score changes',()=>{
  assert.equal(tiny.subjectKind,'objective');
  const killEvent={type:'death',id:4,time:1.2,actor:4,killer:3,pos:{x:-19,y:0,z:-20}};
  const kill=call(snap(1.2,[...actors,...extra],{objectives,events:[...events,killEvent]}),{previous:tiny});
- assert.equal(kill.incumbent,false,'a fresh kill overrides a resolving beat');
- assert.equal(kill.subjectKind,'kill');
- assert.equal(kill.transition.type,'cut');
+  assert.equal(kill.incumbent,true,'an unrelated kill cannot interrupt a resolving beat');
+  assert.equal(kill.subjectKind,'objective');
+  const requested=call(snap(1.2,[...actors,...extra],{objectives,events:[...events,killEvent]}),{previous:tiny,forceCut:true});
+  assert.equal(requested.incumbent,false,'an explicit cut still overrides the hold');
+  assert.equal(requested.subjectKind,'kill');
+  assert.equal(requested.transition.type,'cut');
 });
 
 test('the repetition penalty prefers a fresh rig over an immediate repeat',()=>{
@@ -292,4 +296,79 @@ test('the planner only ever returns known rigs, finite poses and bounded scores'
   assert.ok(previous.targets.every(id=>actors.some(a=>a.id===id)),'targets always exist in the state');
   assert.ok(SHOT_RIG_TO_RIG[previous.rig],'every planner rig maps onto a director rig');
  }
+});
+
+test('an incumbent keeps its exact encounter when a stronger fight shares its actor',()=>{
+ const actors=[actor(1,0,0),actor(2,8,0),actor(4,-12,0)];
+ const events=[damage(1,2,1,10)];
+ const first=call(snap(1,actors,{events}));
+ const rival=[...events,damage(1.1,4,1,100),damage(1.1,1,4,100)];
+ const held=call(snap(1.1,actors,{events:rival}),{previous:first});
+ assert.equal(held.incumbent,true);
+ assert.deepEqual(held.targets,[1,2],'sharing a shooter does not silently replace the opponent');
+ assert.deepEqual(held.anchor,first.anchor);
+ // Flood the ranking with other encounters: shortlist eviction is not a cut.
+ for(let i=10;i<24;i+=2){
+  actors.push(actor(i,30,i),actor(i+1,32,i));
+  rival.push(damage(1.2,i,i+1,100),damage(1.2,i+1,i,100));
+ }
+ const crowded=call(snap(1.2,actors,{events:rival}),{previous:held});
+ assert.equal(crowded.incumbent,true);
+ assert.deepEqual(crowded.targets,[1,2]);
+});
+
+test('a burst of highlights holds the original beat instead of chasing each explosion',()=>{
+ const actors=[actor(1,0,0),actor(2,6,0),actor(3,35,0),actor(4,40,0)];
+ const firstEvent={type:'death',id:1,time:0,actor:2,killer:1,pos:{x:6,y:0,z:0}};
+ const events=[firstEvent];
+ let previous=call(snap(0,actors,{events}),{options:{minShot:4,allowFirstPerson:false}});
+ const first=previous;
+ for(let frame=1;frame<=180;frame++){
+  const time=frame/60;
+  if(frame%15===0)events.push({type:'explosion',id:frame,time,pos:{x:frame%30===0?4:38,y:0,z:0}});
+  previous=call(snap(time,actors,{events}),{previous,options:{minShot:4,allowFirstPerson:false}});
+  assert.equal(previous.incumbent,true,`unexpected switch at ${time}`);
+  assert.equal(previous.subjectKey,first.subjectKey);
+  assert.deepEqual(previous.anchor,first.anchor);
+ }
+});
+
+test('a shot exchange attracts the camera before damage and upgrades without changing encounter',()=>{
+ const actors=[actor(1,12,0),actor(2,20,0),actor(3,-30,0,{team:1})];
+ const previous=call(snap(0,actors));
+ const shot={type:'shot',id:1,time:.1,actor:1,from:{x:12,y:1,z:0},to:{x:24,y:1,z:1}};
+ const exchange=call(snap(.1,actors,{events:[shot]}),{previous,options:{allowFirstPerson:false}});
+ assert.equal(exchange.subjectKind,'firefight');
+ assert.deepEqual(exchange.targets,[1,2]);
+ const lull=call(snap(2,actors,{events:[shot]}),{previous:exchange,options:{allowFirstPerson:false}});
+ assert.equal(lull.incumbent,true,'a reload between shots does not bounce back to the wide fallback');
+ const hit=call(snap(.2,actors,{events:[shot,damage(.2,2,1,20)]}),{previous:exchange});
+ assert.equal(hit.incumbent,true);
+ assert.equal(hit.subjectKey,exchange.subjectKey);
+ const empty=call(snap(.1,actors,{events:[{...shot,to:{x:12,y:1,z:24}}]}));
+ assert.equal(empty.subjectKind,'establish','shooting empty scenery is not an encounter');
+});
+
+test('objective composition keeps its side when the primary crosses the anchor',()=>{
+ const objectives={zones:[{id:'hill',x:0,z:0,radius:6,contested:true}]};
+ const actors=[actor(1,-.1,0),actor(2,1,1)];
+ const first=call(snap(0,actors,{objectives}),{options:{maxRigsPerSubject:1}});
+ assert.equal(first.rig,'objective');
+ const crossed=call(snap(.1,[{...actors[0],x:.1},actors[1]],{objectives}),{previous:first});
+ assert.equal(crossed.incumbent,true);
+ assert.ok(Math.hypot(crossed.pose.x-first.pose.x,crossed.pose.z-first.pose.z)<.01,'no 180-degree flip across the objective');
+});
+
+test('the death of the watched opponent retains the killer and camera side',()=>{
+ const actors=[actor(1,0,0),actor(2,8,0),actor(3,35,0),actor(4,40,0)];
+ const events=[damage(0,2,1,30),damage(0,1,2,30)];
+ const first=call(snap(0,actors,{events}),{options:{allowFirstPerson:false}});
+ const death={type:'death',id:99,time:.2,actor:2,killer:1,pos:{x:8,y:0,z:0}};
+ const after=call(snap(.2,[actors[0],{...actors[1],dead:1,health:0},...actors.slice(2)],
+  {events:[...events,death,damage(.2,4,3,100),damage(.2,3,4,100)]}),{previous:first,options:{allowFirstPerson:false}});
+ assert.equal(after.incumbent,true);
+ assert.equal(after.primary,1);
+ assert.deepEqual(after.targets,[1]);
+ assert.equal(after.rig,first.rig);
+ assert.ok(Math.hypot(after.pose.x-first.pose.x,after.pose.z-first.pose.z)<.1,'the victim disappearing does not swing the camera around');
 });

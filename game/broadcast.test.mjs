@@ -33,6 +33,13 @@ test('team broadcast surfaces both team scores', () => {
   assert.deepEqual(data.metrics.slice(0, 2).map(metric => metric.value), ['1', '2']);
 });
 
+test('continuous objective scores do not leak floating-point tails into the title strip', () => {
+  const data = demoBroadcast({config:{mode:'juggernaut',timeLimit:60},time:4,actors:[{...actor(0,'ChatGPT'),points:3.0000000000000009,juggernaut:true}]});
+  assert.equal(data.metrics.find(metric=>metric.label==='POINTS').value,'3');
+  const teams = demoBroadcast({config:{mode:'koth'},teamScores:{0:12.000000000003,1:6.666666666666},actors:[actor(0,'Claude')]});
+  assert.deepEqual(teams.metrics.slice(0,2).map(metric=>metric.value),['12','6.7']);
+});
+
 test('race broadcast reports the front runner, lap and gates', () => {
   const snap = {config: {mode: 'puma-race', fragLimit: 3, timeLimit: 120}, time: 30, actors: [actor(0, 'Grok'), actor(1, 'Kimi')], race: {phase: 'racing', laps: 3, gates: [1, 2, 3, 4], standings: [{actorId: 1, position: 1, lap: 2}, {actorId: 0, position: 2, lap: 1}]}};
   const data = demoBroadcast(snap);

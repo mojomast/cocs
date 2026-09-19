@@ -665,6 +665,13 @@
 }
 @media (max-width:720px){
   .rail-more{grid-column:1 / -1}
+  .shell--showcase .shell-rail{gap:10px;padding-top:10px;padding-bottom:calc(10px + var(--safe-bottom))}
+  .shell--showcase .rail-summary{flex-wrap:nowrap;overflow-x:auto;max-width:100%;gap:6px;scrollbar-width:thin;padding-bottom:3px}
+  .shell--showcase .rail-summary .chip{flex-shrink:0}
+  .shell--showcase .rail-more{grid-column:auto}
+  .shell--showcase .rail-more.is-open .rail-more__body{position:absolute;left:12px;right:12px;bottom:100%;max-height:45dvh;overflow-y:auto;padding:12px;background:#091c20;border:1px solid var(--ui-line);border-radius:8px;box-shadow:0 -8px 30px #0008}
+  .shell--showcase .rail-actions>.btn-primary{flex-wrap:wrap;white-space:normal;gap:4px 10px;padding:10px;min-width:0}
+  .shell--showcase .rail-actions>.btn-primary small{order:2;flex:1 1 100%;max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:9px}
 }
 
 /* C6 — rooms toolbar input keeps the QUICK JOIN button on the same row. */

@@ -31,7 +31,7 @@ export function buildShowcase({r,view,showcaseOk,makeRng,pickShowcase,normalizeC
    if(spec.seatVehicles)seatShowcaseVehicles(m,spec.seatVehicles);
    // Clear the countdown and start the cars moving before the first menu frame.
    for(let tick=0;tick<Math.round(4/RULES.dt);tick++)m.step(RULES.dt,{inputs:{}});
-   const bd=m.arena.bounds,arenaR=bd?Math.hypot(bd.maxX-bd.minX,bd.maxZ-bd.minZ)/2:30,director=new CinematicDirector({random:makeRng(),center:m.center,radius:11,cutEvery:2.1,tour:true,reduced:reducedMotion(),tourRadius:Math.min(30,Math.max(16,arenaR*.42)),structures:m.arena.structures});
+   const bd=m.arena.bounds,arenaR=bd?Math.hypot(bd.maxX-bd.minX,bd.maxZ-bd.minZ)/2:30,director=new CinematicDirector({random:makeRng(),center:m.center,radius:11,minShot:4,cutEvery:8,allowFirstPerson:false,tour:true,reduced:reducedMotion(),tourRadius:Math.min(30,Math.max(16,arenaR*.42)),structures:m.arena.structures,arena:m.arena});
    // Only now that the match exists do we touch the live view, and we reset the
    // cinema camera first so a previous race rig cannot leak into the new scene.
    view.setCinema(false);

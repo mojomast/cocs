@@ -1,6 +1,7 @@
 'use client';
 import type {ReactNode,ButtonHTMLAttributes,KeyboardEvent as ReactKeyboardEvent} from 'react';
 import {Crosshair,X} from 'lucide-react';
+import {formatNumber} from '../../game/format-ui.mjs';
 
 export function TopBar({sub,children}:{sub:ReactNode;children?:ReactNode}){
  return <header className="shell-head">
@@ -58,7 +59,7 @@ export function Tabs({value,onChange,tabs,ariaLabel}:{value:string;onChange:(v:s
 }
 
 export function Stats({items,className=''}:{items:{label:ReactNode;value:ReactNode;hint?:ReactNode}[];className?:string}){
- return <dl className={`stats${className?' '+className:''}`}>{items.map((s,i)=><div className="stat" key={i}><dt>{s.label}</dt><dd>{s.value}{s.hint&&<small> {s.hint}</small>}</dd></div>)}</dl>;
+  return <dl className={`stats${className?' '+className:''}`}>{items.map((s,i)=><div className="stat" key={i}><dt>{s.label}</dt><dd>{typeof s.value==='number'?formatNumber(s.value):s.value}{s.hint&&<small> {s.hint}</small>}</dd></div>)}</dl>;
 }
 
 export function Field({label,value,children,note}:{label:ReactNode;value?:ReactNode;children:ReactNode;note?:ReactNode}){

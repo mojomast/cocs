@@ -1,67 +1,113 @@
 # LATTICE FIELD TRAINING
 
-A short, skippable, do-then-teach course that runs as an ordinary local match.
-The point is to make the mode legible before a player's first real match:
-capture, supply, orders, devices, depots — and, in Operations, the spend
-window, terminals and waves.
+A self-paced tutorial inside a local practice match. Quick Start offers Field
+Training (`cocs`) and Operations Training (`cocs-coop`). Both use Lattice Foundry
+(`lattice-slice`), easy difficulty, a 15-minute match, default weapon and movement
+rules, and a small bot roster (3 / 1 configured bots respectively). Operations
+also supplies its normal Director forces. Saved mutators, custom objectives,
+weapons and difficulty do not leak into training; only the player name and chosen
+operator/harness loadout carry over.
 
-## Principles
+## Pacing and presentation
 
-- **Play first, explain second.** Every step completes by doing the real thing
-  in a real match; text explains *why* once it is done.
-- **One step at a time.** The banner shows the current step only, with the
-  next step locked until the current one completes. No checklist wall.
-- **Never a gate.** Training is local, bots fill the enemy team, and the
-  player can skip or leave at any step. It does not affect ranked or records.
-- **Authoritative detection.** Steps advance from `Match.events` and the
-  snapshot only (`game/lattice-training.mjs`), never from UI state, so a
-  replay or a network match would teach identically.
-- **Accessible by default.** Text + captions for every step, remappable keys
-  in the copy, no timed steps, reduced-motion safe.
+- **One visible lesson, one evidence window.** The HUD labels CURRENT LESSON,
+  shows its number, goal instructions, numeric progress and progress bar, actual
+  remapped controls, and a separate NEXT LESSON preview.
+- **Explicit completion beat.** Completing a goal retains that lesson as STEP
+  CLEAR with a short explanation of what was learned. It stays there until the
+  player chooses START NEXT LESSON. There is no automatic countdown that can
+  move past an unread instruction. The last lesson offers FINISH TRAINING,
+  followed by a completion summary and KEEP PLAYING.
+- **Fresh evidence.** Actions during previous lessons or completion screens do
+  not pre-complete future lessons. Continue resets lesson counters, channel
+  observations and hold timers. Replayed event IDs and events timestamped at or
+  before the new lesson boundary are ignored. At most one lesson can complete
+  per evaluation.
+- **Cursor access and reading breaks.** Completing a lesson pauses the local
+  simulation and releases the cursor automatically. START NEXT LESSON resumes
+  the match; the final summary stays paused until KEEP PLAYING. During an active
+  lesson the footer shows the remapped free-cursor key (Left Alt by default),
+  and Escape opens the ordinary pause menu. Tutorial buttons do not reuse Enter
+  globally, where it issues orders or confirms purchases.
+- **Readable and accessible.** Current/clear announcements are polite live
+  regions; continuously changing numeric progress is outside that region.
+  Native progress and button semantics, visible keyboard focus, responsive
+  scrolling, and animation-free styling support keyboard and reduced-motion use.
 
-## Course
+## Course and authoritative completion evidence
 
-Both modes share the first-minute steps and then diverge. Steps in order:
+| Lesson | Goal | Evidence after lesson entry |
+|---|---|---|
+| MOVE OUT | Move 12 m from spawn | Living local actor's maximum distance from the starting point |
+| LIVE FIRE | Fire five shots; hits optional | Five local `shot` events |
+| TAKE YOUR FRONT | Capture your HQ-adjacent front, or defend it if already owned | `cocs-capture` includes the local player in participants at that front; alternatively three uninterrupted seconds alive inside its owned, uncontested capture ring |
+| KEEP THE LINE | Maintain a supplied objective for three seconds | Owned graph path from an owned HQ to a front, relay or siphon; HQ/array-only links do not count |
+| ISSUE AN ORDER | Issue an accepted order | Fresh `cocs-order` from the local issuer; rejected orders and explicit bot issuers do not count |
+| RIDE THE ROUTE | Use a route at its anchor | Local `cocs-device-use`; cutting, locking and repairing do not count |
+| SECURE A DEPOT | Secure a non-HQ depot apron | Fresh friendly depot capture with local living presence, or three seconds defending an already-owned, uncontested apron; entering the vehicle is optional |
+| SPEND THE WINDOW | Buy one available support action | Fresh `coop-spend`; auto-spending is disabled for the practice match |
+| USE A TERMINAL | Complete your own HACK, DEPLOY or SABOTAGE channel | Matching team completion event immediately following an observed local channel at that terminal; teammate channels and interrupted channels do not count |
+| HOLD THE WAVE | Help clear the next Director wave | Fresh team `director-wave-cleared` observation |
 
-| # | `cocs` | `cocs-coop` | Completes when |
-|---|---|---|---|
-| 1 | MOVE OUT | MOVE OUT | the player travels 12 m from spawn |
-| 2 | LIVE FIRE | LIVE FIRE | 5 local `shot` events |
-| 3 | TAKE YOUR FRONT | TAKE YOUR FRONT | a team-0 `cocs-capture` |
-| 4 | KEEP THE LINE | KEEP THE LINE | an owned node links back to an owned HQ |
-| 5 | ISSUE AN ORDER | SPEND THE WINDOW | a team `cocs-order` / `coop-spend` |
-| 6 | RIDE THE ROUTE | ISSUE AN ORDER | `cocs-device-use` / team `cocs-order` |
-| 7 | SECURE A DEPOT | START A TERMINAL | `cocs-depot-capture` / a terminal channel |
-| 8 | — | HOLD THE WAVE | `director-wave-cleared` |
-| 9 | — | RIDE THE ROUTE | `cocs-device-use` |
+Field Training order: move → fire → capture → connect → order → device → depot.
+Operations order: move → fire → capture → connect → spend → order → terminal →
+wave → device.
 
-## Integration
+Capture and depot defence alternatives allow progress after a teammate captured
+the objective before its lesson. Those alternatives still require new local
+participation. Supply/wave are explicitly shared-world observations; firing,
+movement, riding, orders, capture participation and terminal channels are local
+practice. VAULT is not a required tutorial action because its instantaneous
+team event does not carry local actor attribution.
 
-- **Entry:** a FIELD TRAINING card in the Quick Start panel (above the two
-  LATTICE modes). It starts a local `cocs` or `cocs-coop` match on Lattice
-  Foundry with a low bot count and this plan attached.
-- **In match:** a compact banner renders `trainingView(training)`: title,
-  `index/total`, the current step's title and detail, and a completed tick
-  list behind a details fold. The existing field coach and interaction
-  prompts keep running.
-- **Between steps:** the completed step's line stays for a few seconds as a
-  "STEP CLEAR" beat with the usual announcer treatment.
-- **Exit:** pause menu offers END TRAINING; completion offers a small XP
-  award and a RETURN TO LOADOUT button. Skipping never blocks progression.
-- **Operations extras:** the spend-window step waits for a real spend window
-  and instructs the cursor-mode controls from the UX pass; the terminal step
-  accepts any of HACK / DEPLOY / VAULT.
+## Exit, match limits and records
 
-## Engine
+END TUTORIAL dismisses guidance at any point and leaves the practice match
+running. KEEP PLAYING does the same after completion. The ordinary pause menu's
+RETURN TO LOADOUT exits the match. Neither skipping nor dismissing the completion
+card claims unearned lessons as completed.
 
-`game/lattice-training.mjs` is a pure module:
+Practice matches award **no XP, challenges, achievements or match-history entry**,
+including when played to the end after dismissing the tutorial. The page keeps a
+separate practice-match identity so removing the HUD cannot turn the session into
+a recorded match. At a normal victory, defeat or timeout, practice returns to
+selection with an explicit practice-ended/replay notice. Automatic finished-match
+recording is also bypassed for this practice path.
 
-- `createTraining(mode, {start})` → frozen plan cursor, `null` outside LATTICE.
-- `evaluateTraining(training, {snapshot, events, playerId, lattice})` → the
-  next state plus the step that just completed; never mutates inputs.
-- `trainingView(training)` → banner model for the HUD.
-- `skipTraining(training)` → idempotent early end.
+The tutorial is not a protected staged scenario: dominance, the 15-minute limit,
+Director progression and Operations HQ loss conditions still apply. A spend
+lesson can require waiting for the next window. If the operation ends first,
+restart training from Quick Start. A dedicated non-ending lesson arena or staged
+Director remains a separate scenario-design task.
 
-`game/lattice-training.test.mjs` drives the whole course for both modes with
-synthetic events and snapshots, proves enemy actions teach nothing, and
-checks the supply-link step against the map lattice.
+## Engine and UI integration
+
+`game/lattice-training.mjs` owns the pure plan and state machine:
+
+- `trainingConfig(mode, {playerName})` creates a clean normalized practice preset.
+- `createTraining(mode, {start, time})` starts lesson zero; returns `null` outside
+  the LATTICE modes.
+- `evaluateTraining(training, {snapshot, events, playerId, lattice})` consumes
+  authoritative updates and returns `{training, completedNow}`. It reads the
+  actual **`Match.snapshot().cocs.nodes`** shape, objective-zone capture radii,
+  traversal depots and terminal channel snapshots. Root-level synthetic `nodes`
+  remain supported. Simulation time drives holds; paused time earns nothing.
+- `continueTraining(training, {time})` acknowledges only a completed lesson and
+  opens the next evidence window. Page integration clears buffered events at
+  the same boundary.
+- `trainingView(training)` exposes phase, current/next steps, current-goal
+  progress, completed lessons and overall course progress.
+- `trainingControls(stepId, bindings)` resolves controls from live bindings.
+- `skipTraining(training)` is an honest, idempotent early end.
+
+`app/ui/screens/LatticeTrainingHud.tsx` and its colocated CSS module render the
+tutorial; `PlayingHud.tsx` only mounts it. Tutorial callbacks and practice-match
+lifecycle handling live in narrow sections of `app/page.tsx`.
+
+## Focused verification
+
+Run `node --test game/lattice-training.test.mjs`. Coverage includes both complete
+courses, acknowledgement boundaries, stale/duplicate events, local-vs-bot
+attribution, hold interruption/pause, already-captured objectives, remapped copy,
+clean practice presets, skip semantics, and a real Match regression that reaches
+the live nested snapshot supply check after verifying movement and firing.

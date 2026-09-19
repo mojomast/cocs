@@ -346,3 +346,27 @@ test('reduced motion keeps stable, longer-held shots with zero roll',()=>{
  assert.ok(d.plan.minUntil-t>=3.3,`reduced hold ${d.plan.minUntil-t} should be the longer one`);
  assert.notEqual(d.plan.rig,'flyover');
 });
+
+test('small subject motion eases through the speed-cap threshold without a camera lurch',()=>{
+ const d=new CinematicDirector({arena:openArena,allowFirstPerson:false,minShot:4,cutEvery:8});
+ const actors=[actor(1,0,0),actor(2,8,0)];
+ const events=[{type:'damage',time:0,actor:2,source:1,amount:20},{type:'damage',time:0,actor:1,source:2,amount:20}];
+ const first=d.update(state(0,actors,{events}),1/60,events);
+ const moved=actors.map(a=>({...a,x:a.x+.3}));
+ const next=d.update(state(1/60,moved,{events}),1/60,events);
+ assert.equal(next.cut,false);
+ const distance=Math.hypot(next.x-first.x,next.y-first.y,next.z-first.z);
+ assert.ok(distance>0&&distance<.05,`small tracking correction should ease, got ${distance}`);
+});
+
+test('rewinding resets held encounters and event deduplication',()=>{
+ const d=new CinematicDirector({arena:openArena,allowFirstPerson:false});
+ const actors=[actor(1,0,0),actor(2,8,0)];
+ const event={type:'death',id:10,time:10,actor:2,killer:1,pos:{x:8,y:0,z:0}};
+ d.update(state(10,actors),1/60,[event]);
+ const rewind=d.update(state(0,actors),1/60,[]);
+ assert.equal(rewind.cut,true);
+ assert.equal(d.plan.subjectKind,'establish','a future kill does not survive a rewind');
+ d.update(state(10,actors),1/60,[event]);
+ assert.equal(d.plan.subjectKind,'kill','the replayed event can be ingested again');
+});

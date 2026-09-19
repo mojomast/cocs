@@ -1,12 +1,20 @@
 // In-game patch notes. The title-screen footer is the running version; this
 // module is the human-readable release digest the Changelog screen renders. The
 // full historical record lives in docs/CHANGELOG.md and is linked from the UI.
-export const RELEASE_VERSION = 'v8.2';
-export const RELEASE_CODENAME = 'FIELDWORK';
+export const RELEASE_VERSION = 'v8.3';
+export const RELEASE_CODENAME = 'CLARITY';
 export const REPO_URL = 'https://github.com/mojomast/tokenarena';
 export const FULL_CHANGELOG_URL = `${REPO_URL}/blob/main/docs/CHANGELOG.md`;
 
 export const CHANGELOG = [
+  {version:'v8.3',codename:'CLARITY',date:'2026-09-19',tag:'Readable numbers, compact spectating, steadier action cameras and player-paced Field Training',highlights:[
+    'Numbers are formatted for a glance: operator stats, settings, objective scores, economy, cooldowns and results lose floating-point tails and unnecessary trailing zeroes. Long countdowns use whole seconds; the last five seconds retain useful tenths. Spendable balances round down so the display cannot promise an unaffordable purchase.',
+    'Spectating uses a compact, collapsible side roster with one followed-bot detail area, team alive counts, health and kills. Previous/next and camera controls remain available, inactive actors keep their place, and the selected bot now drives the local camera and HUD together.',
+    'The title demo holds a coherent fight instead of swapping opponents mid-shot. Four-second minimum holds, stable encounter identity, kill-aftermath continuity, third-person framing and corrected position/rotation easing make action easier to follow.',
+    'Field Training gets explicit current goals, progress, upcoming lessons and a completion beat before continuing. Lesson-scoped evidence prevents old actions or allied bots from silently skipping personal tasks; the supply lesson reads the real match snapshot.',
+    'The wider UI pass fixes scoreboard column alignment and removes the incorrect duplicate Lattice FRAGS column. Spend panels scroll within short screens; keyboard focus, native button activation and repeat protection make purchases and returning to combat more predictable.',
+    'A gameplay, UX and fun-factor audit publishes evidence-backed priorities and an implementation plan in docs/GAMEPLAY-UX-FUN-PLAN.md. Harder Operations difficulty measurements remain deferred.',
+  ]},
   {version:'v8.2',codename:'FIELDWORK',date:'2026-09-19',tag:'A ranked ladder, per-team intelligence, Operations depth, real ziplines and a guided way to learn the mode',highlights:[
     'LATTICE snapshots are per-team now. Each peer receives only its own team\'s private intelligence - team contacts and spots, the order feed, the command and role boards, team wallets, per-actor REQUISITION and the private `cocs-*` event feed - while shared world state still arrives for every actor. Filtering runs at the server seam as a pure, frozen field table, spectators get a deliberately public-only view, offline/local matches are byte-identical and the protocol version does not move: absent sections read as empty. The release ships the visibility leak test that proves a team-1 client cannot read team-0 intel, and the measured snapshot budget drops from 103.4 to 92.0 KiB/s at 30 Hz with no reconciliation change.',
     'Ranked arrives as a server-authoritative ladder. Queue ranked or unranked, with rating persisted through the existing progression store, placement games, documented K and team aggregation rules, and post-match deltas applied exactly once even across a reconnect. Clients cannot submit or spoof a rating; unranked play keeps the exact v8.1 behaviour. The online screens show your rating, rank band and the ranked queue state.',

@@ -4,6 +4,7 @@ import {Award,Crosshair,Flag,Shield,Skull,Target,Trophy,Zap} from 'lucide-react'
 import {Modal,Panel,Btn,Stats,Tabs,Chip,Meter} from '../primitives';
 import type {ScreenProps} from '../contract';
 import {LatticeBriefing} from './LatticeGuide';
+import {formatNumber} from '../../../game/format-ui.mjs';
 
 const MEDAL_ICONS:any={mvp:Trophy,objective:Target,flag:Flag,captures:Flag,accuracy:Crosshair,damage:Zap,flawless:Shield,ratio:Crosshair,deaths:Skull};
 const medalIcon=(id:string)=>{const Icon=MEDAL_ICONS[id]||Award;return <Icon size={16}/>;};
@@ -66,7 +67,7 @@ export function MatchSummaryCard({summary}:any){
   <Stats items={[
    {label:'KILLS',value:summary.kills},
    {label:'DEATHS',value:summary.deaths},
-   {label:'K/D',value:Number(summary.kd||0).toFixed(2)},
+   {label:'K/D',value:formatNumber(summary.kd,2)},
    {label:'TIME',value:`${Math.round(Number(summary.duration)||0)}s`},
    {label:'XP EARNED',value:`+${summary.xp}`},
   ]}/>

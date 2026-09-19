@@ -1,6 +1,7 @@
 'use client';
 import {useState} from 'react';
 import type {ScreenProps} from '../contract';
+import {formatNumber} from '../../../game/format-ui.mjs';
 import {ActionRail,Banner,Btn,Chip,Meter,PageHead,Panel,SelectCard,Shell,Stats,Tabs,TopBar} from '../primitives';
 
 const resultTone=(result:string)=>result==='win'?'accent':result==='draw'?'warn':'danger';
@@ -128,10 +129,10 @@ export function ProgressionScreen({ui}:ScreenProps){
        <span className="row history-row__stats"><Chip tone={resultTone(h.result)}>{String(h.result).toUpperCase()}</Chip><span className="label">K/D {h.kills}/{h.deaths}</span></span>
       </div>)}</div>:<p className="field-note">Finish a match to start logging your mode, arena, result and K/D on this device.</p>}
      </Panel>
-     <Panel label="LOCAL LEADERBOARD" meta={historyTotals?`K/D ${Number(historyTotals.kd||0).toFixed(2)} · ${historyTotals.bestKills} BEST`:'PERSONAL BESTS'}>
+      <Panel label="LOCAL LEADERBOARD" meta={historyTotals?`K/D ${formatNumber(historyTotals.kd,2)} · ${historyTotals.bestKills} BEST`:'PERSONAL BESTS'}>
       {historyLeaderboard.length?<div className="leaderboard">{historyLeaderboard.map((row:any)=><div key={row.mode} className="leaderboard-row">
        <span className="card-main"><span className="card-name">{modeName(row.mode)}<small>{row.matches} MATCH{row.matches===1?'':'ES'} · {row.wins}W/{row.losses}L{row.draws?`/${row.draws}D`:''}</small></span></span>
-       <span className="row leaderboard-row__stats"><span className="label">BEST {row.bestKills} K</span><span className="label">K/D {Number(row.bestKd||0).toFixed(2)}</span></span>
+        <span className="row leaderboard-row__stats"><span className="label">BEST {row.bestKills} K</span><span className="label">K/D {formatNumber(row.bestKd,2)}</span></span>
       </div>)}</div>:<p className="field-note">Your per-mode personal bests appear here as you play. This leaderboard is stored locally.</p>}
      </Panel>
      </div>

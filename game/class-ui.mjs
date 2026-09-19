@@ -6,6 +6,7 @@
 // — an unknown id returns null (or a normalised fallback through resolveKit)
 // rather than throwing, because the screen renders on every keystroke.
 import {CHARACTERS, HARNESSES} from './data.mjs';
+import {formatNumber,formatWhole} from './format-ui.mjs';
 import {MOVEMENT_VERBS, OPERATOR_KITS, SPECS, WINGS, resolveKit} from './kits.mjs';
 
 const CHARACTER_BY_ID = Object.fromEntries(CHARACTERS.map(c => [c.id, c]));
@@ -91,7 +92,7 @@ export function budgetLine(verb) {
   for (const [key, format] of BUDGET_FIELDS) {
     const value = num(budget[key]);
     if (value === null || value === 0) continue;
-    parts.push(format(value));
+    parts.push(format(Number(formatNumber(value,2))));
   }
   return parts.length ? parts.join(' · ') : null;
 }
@@ -162,7 +163,7 @@ export function operatorCard(character) {
     strength: wing?.domain ?? null,
     weakness: wing?.pays ?? null,
     stats,
-    statsLine: stats ? `${stats.health} HP · ${stats.armor} ARM · ${stats.speed} m/s` : null,
+    statsLine: stats ? `${formatWhole(stats.health)} HP · ${formatWhole(stats.armor)} ARM · ${formatNumber(stats.speed)} m/s` : null,
   });
 }
 

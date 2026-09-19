@@ -1,0 +1,21 @@
+.panel{position:absolute;left:50%;bottom:calc(var(--safe-bottom,0px) + 126px);transform:translateX(-50%);z-index:var(--z-panel,2);width:min(560px,90vw);max-height:54vh;overflow:auto;display:grid;gap:9px;padding:14px 16px;border:1px solid #4d8f88;border-left:4px solid var(--accent,#78e3c8);border-radius:10px;background:#091c20f5;box-shadow:0 10px 30px #0008;color:#edf6f5;pointer-events:auto;font:14px/1.45 var(--font-ui,sans-serif);font-variant-numeric:tabular-nums;text-shadow:0 1px 2px #000}
+/* Active instructions sit above the sightline. Completion can use the larger
+   reading card because the local match is paused and the cursor is released. */
+.panel[data-training-phase="active"]{top:calc(var(--safe-top,0px) + 96px);bottom:auto;max-height:calc(50dvh - var(--safe-top,0px) - 116px);padding:10px 12px;gap:6px;font-size:12px}
+.panel[data-training-phase="active"] h2{font-size:16px}
+.panel[data-training-phase="active"] .next{display:flex;flex-wrap:wrap;align-items:baseline;gap:4px 10px;padding-top:5px;font-size:12px}
+.panel[data-training-phase="active"] .footer{display:flex;justify-content:space-between;align-items:center;gap:8px}
+.panel[data-training-phase="active"] .actions button{min-height:36px;padding:6px 9px;font-size:10px}
+.header{display:flex;flex-wrap:wrap;justify-content:space-between;gap:4px;font:700 10px/1.5 var(--font-mono,monospace);letter-spacing:.07em;color:#adc6c6}
+.phase{font:700 12px/1.5 var(--font-mono,monospace);color:var(--accent-soft,#a8f5dc);letter-spacing:.06em}
+.panel h2{margin:2px 0 5px;font:800 19px/1.2 var(--font-ui,sans-serif);color:#fff}
+.panel p{margin:0}
+.goal{display:flex;justify-content:space-between;gap:8px;font-size:12px}.goal b{font-size:10px;letter-spacing:.06em;color:#adc6c6}
+.progress{display:block;width:100%;height:7px;border:0;border-radius:4px;overflow:hidden;background:#284046;accent-color:#83e8c7}.progress::-webkit-progress-bar{background:#284046}.progress::-webkit-progress-value{background:#83e8c7}.progress::-moz-progress-bar{background:#83e8c7}
+.controls{font:600 12px/1.6 var(--font-mono,monospace);color:#d3e7eb}
+.next{display:grid;gap:2px;border-top:1px solid #476b6c;padding-top:8px;font-size:13px}.next b{font-size:10px;letter-spacing:.08em;color:#adc6c6}.next small{color:#c2d8d8;font-size:12px}
+.footer{display:grid;gap:8px}.footer small{font-size:11px;color:#adc6c6}.actions{display:flex;flex-wrap:wrap;gap:8px}.actions button{min-height:40px;padding:8px 12px;border:1px solid #5f8989;border-radius:5px;background:#152e34;color:#eaf9f8;font:700 11px/1.3 var(--font-mono,monospace);cursor:pointer}.actions button.primary{background:#a8f5dc;color:#06221c;border-color:#a8f5dc}.actions button:focus-visible{outline:3px solid #fff;outline-offset:3px}.actions button:hover{filter:brightness(1.12)}
+@media(max-width:760px){.panel{bottom:calc(var(--safe-bottom,0px) + 140px);padding:10px 12px;gap:7px;font-size:13px;max-height:48vh}.panel h2{font-size:17px}.actions button{min-height:44px}.goal{flex-wrap:wrap}}
+@media(max-height:600px){.panel{bottom:calc(var(--safe-bottom,0px) + 80px);max-height:56vh}}
+@media(max-width:760px){.panel[data-training-phase="active"] .actions button{min-height:44px}}
+@media(max-height:600px) and (min-width:761px){.panel[data-training-phase="active"]{top:calc(var(--safe-top,0px) + 72px);left:auto;right:var(--safe-right,12px);bottom:auto;transform:none;width:min(340px,42vw);max-height:calc(100dvh - var(--safe-top,0px) - var(--safe-bottom,0px) - 132px)}}

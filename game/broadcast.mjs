@@ -38,7 +38,7 @@ const ranked = actors => [...(Array.isArray(actors) ? actors : [])]
   .filter(actor => actor && actor.spectator !== true)
   .sort((a, b) => (Number(b.frags) || 0) - (Number(a.frags) || 0));
 
-const metric = (label, value) => ({label, value: value === null || value === undefined || value === '' ? '—' : String(value)});
+const metric = (label, value) => ({label, value: value === null || value === undefined || value === '' ? '—' : typeof value === 'number' ? scoreText(value) : String(value)});
 
 export function demoBroadcast(snapshot, options) {
   const {modeName = null, mapName = null} = options || {};

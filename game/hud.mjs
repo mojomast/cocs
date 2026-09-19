@@ -2,6 +2,7 @@ import {raceDisplay,soccerDisplay} from './race-ui.mjs';
 import {WEAPONS} from './data.mjs';
 import {teamMode,isCocsMode} from './config.mjs';
 import {latticeCaption} from './lattice-feedback.mjs';
+import {formatNumber,formatCountdown} from './format-ui.mjs';
 
 export function vehicleHud(player, vehicles = [], flags = [], spectate = false) {
   if (spectate || !player || !(player.health > 0)) return {vehicle: null, prompt: ''};
@@ -176,7 +177,7 @@ export function audioCaption(event) {
 
 export function grenadeStatus(player) {
   const cooldown = Math.max(0, Number(player?.grenadeCooldown) || 0);
-  return { ready: cooldown <= 0, cooldown, label: cooldown <= 0 ? 'FRAG READY' : `FRAG ${cooldown.toFixed(1)}s` };
+  return { ready: cooldown <= 0, cooldown, label: cooldown <= 0 ? 'FRAG READY' : `FRAG ${formatCountdown(cooldown)}s` };
 }
 
 export function matchStartBanner(hud, duration = 2.6, mode) {
@@ -326,11 +327,11 @@ export function matchAwards(hud) {
   const mvp = top(awardScore);
   if (awardScore(mvp) > 0) awards.push({id: 'mvp', label: 'MATCH MVP', name: mvp.name, value: `${Number(mvp.frags) || 0} FRAGS`});
   const objective = top(actor => stat(actor, 'objectiveTime'));
-  if (stat(objective, 'objectiveTime') > 0) awards.push({id: 'objective', label: 'MOST OBJECTIVE TIME', name: objective.name, value: `${stat(objective, 'objectiveTime').toFixed(1)}s`});
+  if (stat(objective, 'objectiveTime') > 0) awards.push({id: 'objective', label: 'MOST OBJECTIVE TIME', name: objective.name, value: `${formatNumber(stat(objective, 'objectiveTime'))}s`});
   const runner = top(actor => stat(actor, 'captures') * 3 + stat(actor, 'flagReturns') * 2 + stat(actor, 'flagPickups'));
   if (stat(runner, 'captures') + stat(runner, 'flagReturns') + stat(runner, 'flagPickups') > 0) awards.push({id: 'flag', label: 'FLAG RUNNER', name: runner.name, value: `${stat(runner, 'captures')} CAP · ${stat(runner, 'flagReturns')} RET`});
   const accurate = top(ratio);
-  if (ratio(accurate) >= 1) awards.push({id: 'ratio', label: 'BEST K/D', name: accurate.name, value: ratio(accurate).toFixed(2)});
+  if (ratio(accurate) >= 1) awards.push({id: 'ratio', label: 'BEST K/D', name: accurate.name, value: formatNumber(ratio(accurate),2)});
   const flagHands = top(actor => stat(actor, 'captures'));
   if (stat(flagHands, 'captures') > 0) awards.push({id: 'captures', label: 'MOST CAPTURES', name: flagHands.name, value: `${stat(flagHands, 'captures')} CAP`});
   const sharpshooter = top(actor => { const shots = stat(actor, 'shots'); return shots > 0 ? stat(actor, 'hits') / shots : 0; });
@@ -384,10 +385,11 @@ export function spectatorBoard(actors, targetId) {
 // Spectator board, grouped by side. Free agents (no team) sort last so team
 // modes read top-to-bottom like the scoreboard. `points` is the juggernaut
 // point ledger keyed by actor id; it is not stored on the actor itself.
-export function spectatorTeams(actors, targetId, {points = {}} = {}) {
-  const live = (Array.isArray(actors) ? actors : []).filter(a => a && a.health > 0);
+// The compact roster includes inactive actors so team totals stay stable.
+export function spectatorTeams(actors, targetId, {points = {}, includeInactive = false} = {}) {
+  const roster = (Array.isArray(actors) ? actors : []).filter(a => a && (includeInactive || a.health > 0));
   const byTeam = new Map();
-  for (const a of live) {
+  for (const a of roster) {
     const team = a.team === undefined || a.team === null || Number.isNaN(Number(a.team)) ? null : Number(a.team);
     const key = team === null ? 'free' : `t${team}`;
     if (!byTeam.has(key)) byTeam.set(key, {key, team, players: []});
@@ -396,6 +398,9 @@ export function spectatorTeams(actors, targetId, {points = {}} = {}) {
       name: a.name || `A${a.id}`,
       team,
       health: a.health,
+      armor: Number(a.armor) || 0,
+      frags: Number(a.frags) || 0,
+      deaths: Number(a.deaths) || 0,
       current: a.id === targetId,
       juggernaut: a.juggernaut === true,
       points: Number(points?.[a.id]) || 0,
@@ -452,7 +457,7 @@ export const modeTargetText = (mode, target) => {
   return Number.isFinite(limit) ? `FIRST TO ${limit} ${goal}` : goal;
 };
 
-export const scoreText = value => Number.isInteger(Number(value)) ? String(Number(value)) : Number(value || 0).toFixed(1);
+export const scoreText = value => formatNumber(value);
 export const teamScore = (hud, team) => Number(hud?.teamScores?.[team] ?? 0);
 export const teamScoreText = scores => Array.isArray(scores)
   ? scores.map(s => `${s.name ?? s.team ?? 'TEAM'} ${scoreText(s.score ?? s.captures ?? s.frags ?? 0)}`).join('  ·  ')
@@ -474,7 +479,7 @@ export const flagText = hud => {
 };
 
 export const modeColumns = mode => mode === 'ctf' ? [['captures', 'CAP'], ['flagPickups', 'PICK'], ['flagReturns', 'RET'], ['flagDrops', 'DROP']]
-  : isCocsMode(mode) ? [['objectiveCaptures', 'CAPTURES'], ['objectiveTime', 'NODE TIME'], ['frags', 'FRAGS']]
+  : isCocsMode(mode) ? [['objectiveCaptures', 'CAPTURES'], ['objectiveTime', 'NODE TIME']]
   : mode === 'koth' ? [['objectiveTime', 'HILL TIME'], ['objectiveCaptures', 'CAP'], ['objectiveContests', 'CONTEST']]
     : mode === 'holdout' ? [['objectiveTime', 'ZONE TIME'], ['objectiveCaptures', 'CAP'], ['objectiveContests', 'CONTEST']]
       : mode === 'uplink' ? [['objectiveCaptures', 'RELAY'], ['objectiveContests', 'CONTEST']]

@@ -13,7 +13,7 @@ on your machine, and every asset is procedural.
 
 [**Play it live**](https://arena.ussyco.de) · [Source](https://github.com/mojomast/tokenarena)
 
-![version](https://img.shields.io/badge/version-v8.2%20FIELDWORK-2dd4bf)
+![version](https://img.shields.io/badge/version-v8.3%20CLARITY-2dd4bf)
 ![runtime](https://img.shields.io/badge/runtime-Node%2022.13%2B-339933)
 ![engine](https://img.shields.io/badge/engine-Three.js-000000)
 ![tests](https://img.shields.io/badge/tests-game%20%C2%B7%20server%20%C2%B7%20SSR-4c9f70)

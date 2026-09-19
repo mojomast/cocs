@@ -256,12 +256,12 @@ test('matchAwards names the standout players across the round stats', () => {
   const by = id => awards.find(a => a.id === id);
   assert.equal(by('mvp').name, 'ChatGPT');
   assert.equal(by('objective').name, 'Claude');
-  assert.equal(by('objective').value, '20.0s');
+  assert.equal(by('objective').value, '20s');
   assert.equal(by('flag').name, 'ChatGPT');
   assert.equal(by('deaths').name, 'Grok');
   assert.equal(by('deaths').value, '11 DEATHS');
   assert.equal(by('ratio').name, 'ChatGPT');
-  assert.equal(by('ratio').value, '3.00');
+  assert.equal(by('ratio').value, '3');
 });
 
 test('matchAwards stays silent for solo practice and malformed input', () => {
@@ -346,7 +346,7 @@ test('grenade status reports readiness and remaining cooldown',()=>{
  assert.deepEqual(grenadeStatus({grenadeCooldown:0}),{ready:true,cooldown:0,label:'FRAG READY'});
  const cooling=grenadeStatus({grenadeCooldown:3.24});
  assert.equal(cooling.ready,false);
- assert.equal(cooling.label,'FRAG 3.2s');
+ assert.equal(cooling.label,'FRAG 3.3s');
  assert.equal(grenadeStatus(undefined).ready,true);
 });
 

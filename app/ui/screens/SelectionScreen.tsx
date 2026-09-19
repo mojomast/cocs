@@ -7,6 +7,7 @@ import {kitView,operatorCard,specSheet} from '../../../game/class-ui.mjs';
 import {LatticeBriefing} from './LatticeGuide';
 import {isLattice,latticePracticeDefaults} from '../../../game/lattice-guide.mjs';
 import {latticeLoadoutRoles} from '../../../game/lattice-roles.mjs';
+import {formatNumber,formatWhole} from '../../../game/format-ui.mjs';
 
 export function SelectionScreen({ui}:ScreenProps){
   const {entered,showcaseLive,character,chooseCharacter,CHARACTERS=[],selected,harness,setHarness,HARNESSES=[],power,powerIcon,config,start,startSpectate,quickStart,setSetupOpen,setSingleOpen,changeMode,connectNet,openBrowser,netConnected,profile,demos=[],previewRef,headActions,backToDemo,notice,challenges=[],presets=[],loadPreset,deletePreset,openSettings}=ui;
@@ -80,13 +81,13 @@ export function SelectionScreen({ui}:ScreenProps){
    <div className="layout layout--lead">
     <div className="stack">
      <Panel className="panel--dense panel--operator" label="01 / OPERATOR" meta={`${CHARACTERS.length} AVAILABLE`} actions={<Btn size="sm" variant="ghost" onClick={ui.shuffle} title="Random compatible operator, harness and arena"><span className="shuffle-long">SHUFFLE LOADOUT / MAP</span><span className="shuffle-short" aria-hidden="true">SHUFFLE</span></Btn>}>
-      <div className="grid-cards">{CHARACTERS.map((c:any,i:number)=>{const card=operatorCard(c.id);return <SelectCard key={c.id} selected={character===c.id} onClick={()=>chooseCharacter(c.id)} ariaLabel={`${c.name}: ${card?`${card.roleLabel} · ${card.signature.name}. `:''}${c.stats.health} health, ${c.stats.armor} armor, ${c.stats.speed} meters per second`} icon={<Hexagon size={22} strokeWidth={1.4}/>} name={c.name} tag={c.tag} meta={character===c.id?<Check size={17}/>:String(i+1).padStart(2,'0')} stats={<>
-       <span className="card-chip card-chip--stat">{c.stats.health} HP · {c.stats.armor} ARM · {c.stats.speed} m/s</span>
+       <div className="grid-cards">{CHARACTERS.map((c:any,i:number)=>{const card=operatorCard(c.id);return <SelectCard key={c.id} selected={character===c.id} onClick={()=>chooseCharacter(c.id)} ariaLabel={`${c.name}: ${card?`${card.roleLabel} · ${card.signature.name}. `:''}${formatWhole(c.stats.health)} health, ${formatWhole(c.stats.armor)} armor, ${formatNumber(c.stats.speed)} meters per second`} icon={<Hexagon size={22} strokeWidth={1.4}/>} name={c.name} tag={c.tag} meta={character===c.id?<Check size={17}/>:String(i+1).padStart(2,'0')} stats={<>
+        <span className="card-chip card-chip--stat">{formatWhole(c.stats.health)} HP · {formatWhole(c.stats.armor)} ARM · {formatNumber(c.stats.speed)} m/s</span>
        {card?.wing&&<span className="card-chip card-chip--wing" style={{color:card.wing.color}}>{card.wing.label}</span>}
        {card&&<span className="card-chip">{card.roleLabel}</span>}
        {card&&<span className="card-chip card-chip--verb" title={card.signature.line}>{card.signature.name}</span>}
       </>}/>;})}</div>
-      <Stats items={[{label:'MAX HEALTH',value:selected?.stats?.health},{label:'SPAWN ARMOR',value:selected?.stats?.armor},{label:'MOVE SPEED',value:Number(((selected?.stats?.speed||0)*(config?.speed||1)).toFixed(2)),hint:'m/s'}]}/>
+       <Stats items={[{label:'MAX HEALTH',value:formatWhole(selected?.stats?.health)},{label:'SPAWN ARMOR',value:formatWhole(selected?.stats?.armor)},{label:'MOVE SPEED',value:formatNumber((selected?.stats?.speed||0)*(config?.speed||1)),hint:'m/s'}]}/>
        <p className="field-note">{note}</p>
        {latticeRole&&<div className="lattice-loadout-role"><span className="eyebrow">LATTICE / {latticeRole.operator.role.toUpperCase()}</span><b>{latticeRole.operator.name}</b><p>{latticeRole.operator.description}</p></div>}
      </Panel>
@@ -95,7 +96,7 @@ export function SelectionScreen({ui}:ScreenProps){
       <div className="panel-body--tight harness-detail">
        <p className="eyebrow"><i/>{power?.power} <span className="chip">Q</span></p>
        <p className="field-note">{power?.description}</p>
-       <div className="row"><span className="chip">{power?.stat}</span><span className="chip">{power?.cooldown}s COOLDOWN</span>{spec&&<span className="chip chip--accent">{spec.kindLabel}</span>}{spec?.hookLabel&&<span className="chip">{spec.hookLabel} HOOK</span>}</div>
+        <div className="row"><span className="chip">{power?.stat}</span><span className="chip">{formatNumber(power?.cooldown)}s COOLDOWN</span>{spec&&<span className="chip chip--accent">{spec.kindLabel}</span>}{spec?.hookLabel&&<span className="chip">{spec.hookLabel} HOOK</span>}</div>
        {spec&&<p className="field-note"><b>TRADEOFF · {spec.tradeoff.name} · {spec.passive.triggerLabel}</b> {spec.tradeoff.description}</p>}
         {rider&&<p className="field-note"><b>{wing?.label} RIDER</b> {rider.description}</p>}
         {latticeRole&&<div className="lattice-loadout-role"><span className="eyebrow">LATTICE / {latticeRole.harness.role.toUpperCase()}</span><b>{latticeRole.harness.name}</b><p>{latticeRole.harness.description}</p></div>}
