@@ -205,7 +205,11 @@ export const REQ_ITEMS=deepFreeze([
  {id:'supply-drop',name:'Supply Drop',category:'team',cost:80,launch:true,teamWide:true,personalBuff:false,commanderOnly:true},
  {id:'recon-pulse',name:'Recon Pulse',category:'team',cost:60,launch:true,teamWide:true,personalBuff:false,commanderOnly:true},
  {id:'fortify-doctrine',name:'Fortify Doctrine',category:'team',cost:100,launch:true,teamWide:true,personalBuff:false,commanderOnly:true},
- {id:'puma',name:'Puma Light Transport',category:'vehicle',cost:150,launch:false,teamWide:false,personalBuff:false},
+ // The Puma is a launch OPERATIONS purchase (§6A.5: "Puma ... yes (V1)"). It is
+ // flagged `coopLaunch` rather than `launch` so the PvPvE buy path (which has no
+ // depot vehicle seam) can never charge for a vehicle it cannot spawn; the co-op
+ // buy path (`coopBuyAction`) accepts both flags.
+ {id:'puma',name:'Puma Light Transport',category:'vehicle',cost:150,launch:false,coopLaunch:true,teamWide:false,personalBuff:false},
  {id:'tier-upgrade',name:'Agent Tier Upgrade',category:'agent',cost:25,launch:false,teamWide:false,personalBuff:false},
  {id:'oracle-unlock',name:'Oracle Unlock',category:'agent',cost:120,launch:false,teamWide:false,personalBuff:false,requiresRelay:true},
 ]);
@@ -214,6 +218,9 @@ export const REQ_COSTS=deepFreeze(Object.fromEntries(REQ_ITEMS.map(item=>[item.i
 export const PERSONAL_BUFF_IDS=deepFreeze(REQ_ITEMS.filter(item=>item.personalBuff).map(item=>item.id));
 export const TEAM_WIDE_REQ_IDS=deepFreeze(REQ_ITEMS.filter(item=>item.teamWide).map(item=>item.id));
 export const LAUNCH_REQ_IDS=deepFreeze(REQ_ITEMS.filter(item=>item.launch).map(item=>item.id));
+// OPERATIONS launch set: the mode-local items that only the co-op buy/depot path
+// may charge for (currently the Puma loaner purchase, §6A.5/§6A.7).
+export const COOP_LAUNCH_REQ_IDS=deepFreeze(REQ_ITEMS.filter(item=>item.launch===true||item.coopLaunch===true).map(item=>item.id));
 
 // Hard firewall: `REQ` is personal and may never buy a respawn, debit the team
 // `RESERVE` budget, or create team `FLUX`. §6.2 / §6A.5 / §6A.8.
@@ -822,7 +829,7 @@ export const COMMENDATION_PACING=deepFreeze({
 
 const cocsEconomy={
  ARCHETYPE_WEIGHTS,SCORE_EVENTS,ORDER_REWARD,SUPPLY_CUT,ARRAY_CAPTURE,
- REQ_EARN,REQ_ITEMS,REQ_COSTS,REQ_FORBIDDEN,
+ REQ_EARN,REQ_ITEMS,REQ_COSTS,REQ_FORBIDDEN,COOP_LAUNCH_REQ_IDS,
  FLUX_START,FLUX_CAP,FLUX_PASSIVE_PER_SECOND,SUBAGENT_UPKEEP,SUPPLY_SLOT_MULTIPLIERS,
  HOP_SURCHARGE_PER_HOP,HOP_SURCHARGE_CAP,FOUNDRY_UPKEEP_REDUCTION,FOUNDRY_REDUCTION_CAP,SUBAGENTS,
  NEGLECT,NEGLECT_EFFECTS,

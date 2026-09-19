@@ -41,6 +41,9 @@ export const TERMINAL_KINDS = Object.freeze({
 });
 export const TERMINAL_VERBS = Object.freeze(['HACK', 'DEPLOY', 'VAULT', 'SABOTAGE']);
 export const TERMINAL_INTERACT_SECONDS = 3;
+// Allied-bot cadence between terminal actions (10 s at RULES.dt). The HACK
+// window is 6 s, so a parked bot cannot keep a relay permanently doubled.
+export const BOT_TERMINAL_COOLDOWN_TICKS = 600;
 
 /** The deterministic terminal catalog derived from the authored lattice. */
 export function readTerminals(state) {
@@ -299,6 +302,63 @@ export function humanTerminalInteract(match, state, actor) {
   return started.ok ? {terminalId: chosen.id, kind, action: kind.toLowerCase()} : null;
 }
 
+/**
+ * The allied-bot `interact` edge against the O1c terminal layer. Bots go
+ * through the *same* `startTerminalChannel`/`vaultAction` entry points as the
+ * human edge, so range, ownership (`DEPLOY` only while owned) and contest
+ * (`HACK`/`SABOTAGE` only with no enemy inside 6 m) are identical by
+ * construction. The only bot-specific rule is a per-actor cadence: a bot parked
+ * on a relay does not re-channel every tick. VAULT uses the same `store` choice
+ * the human edge makes. SABOTAGE is not auto-fired by allies (the Director
+ * force owns denial; allies HACK/DEPLOY/VAULT). Deterministic: sorted
+ * terminals, fixed tie-break, no RNG and no wall clock.
+ *
+ * @returns {{terminalId:string,kind:string,action:string}|null}
+ */
+export function botTerminalInteract(match, state, actor) {
+  const terminals = state?.terminals?.terminals;
+  if (!terminals || !actor || actor.health <= 0) return null;
+  // Allied team only, and only AI-controlled actors: a human peer's own input
+  // owns their interactions.
+  if (actor.team !== 0) return null;
+  if (actor.bot == null || actor.isScout === true || actor.isDirectorWave === true) return null;
+  const tick = num(state.tick, 0);
+  if (tick - num(actor.bot.terminalAt, -Infinity) < BOT_TERMINAL_COOLDOWN_TICKS) return null;
+  let chosen = null;
+  let chosenDistance = Infinity;
+  let chosenRank = Infinity;
+  for (const id of Object.keys(terminals).sort()) {
+    const terminal = terminals[id];
+    if (!terminal || terminal.channel) continue;
+    const reach = terminalReach(terminal);
+    const d = distance(actor, terminal);
+    if (!(d <= reach)) continue;
+    const kind = String(terminal.kind ?? '').toUpperCase();
+    if (kind === 'SABOTAGE') continue;
+    if (!terminalActionable(match, state, terminal, actor, kind)) continue;
+    const rank = HUMAN_TERMINAL_ORDER.indexOf(kind);
+    if (chosen === null || d < chosenDistance - 1e-9
+      || (Math.abs(d - chosenDistance) <= 1e-9 && rank < chosenRank)
+      || (Math.abs(d - chosenDistance) <= 1e-9 && rank === chosenRank && id < chosen.id)) {
+      chosen = terminal;
+      chosenDistance = d;
+      chosenRank = rank;
+    }
+  }
+  if (!chosen) return null;
+  const kind = String(chosen.kind ?? '').toUpperCase();
+  // Stamp the cadence before the action so a failed attempt still pays it.
+  actor.bot.terminalAt = tick;
+  if (kind === 'VAULT') {
+    const stored = vaultAction(match, state, chosen, actor, 'store');
+    return stored.ok ? {terminalId: chosen.id, kind, action: 'store'} : null;
+  }
+  const started = startTerminalChannel(match, state, chosen, actor, kind);
+  if (!started.ok) return null;
+  chosen.channel.team = actor.team;
+  return {terminalId: chosen.id, kind, action: kind.toLowerCase()};
+}
+
 /** Advance one fixed tick. Called by `stepCocs` in co-op only. */
 export function stepCocsTerminals(match, state, dt) {
   const terminals = state?.terminals;
@@ -319,10 +379,23 @@ export function stepCocsTerminals(match, state, dt) {
   for (const node of state.nodes ?? []) {
     if (node?.hack && num(state.tick, 0) > num(node.hack.until, 0)) node.hack = null;
   }
+  // Allied bots then take their interact opportunity, id-sorted.
+  if (state.coop) {
+    const actors = (match?.actors ?? [])
+      .filter(actor => actor && actor.health > 0 && actor.team === 0 && actor.bot != null)
+      .sort((a, b) => a.id - b.id);
+    for (const actor of actors) botTerminalInteract(match, state, actor);
+  }
   return terminals;
 }
 
-/** Additive, id-keyed snapshot tree for the HUD (delta-friendly). */
+/**
+ * @deprecated Legacy raw-tree projection consumed by `cocs.mjs` as
+ * `snapshot.cocs.terminalState`. The single UI contract is the flat, id-sorted
+ * `snapshot.cocs.terminals` array (`coopTerminalSnapshot`) built from the same
+ * `state.terminals.terminals` tree, plus its `stats` on `terminalStats`.
+ * Kept only until the engine consumer drops the duplicate field.
+ */
 export function cocsTerminalsSnapshot(state) {
   const terminals = state?.terminals;
   if (!terminals) return null;

@@ -236,7 +236,7 @@ export function cocsComebackTargets(state, actors, team, targets = null) {
 export function cocsTeamPlan(match, state, team) {
   const actors = match?.actors ?? [];
   const roster = actors
-    .filter(actor => actor && actor.health > 0 && actor.team === team && actor.isDirectorWave !== true)
+    .filter(actor => actor && actor.health > 0 && actor.team === team && actor.isDirectorWave !== true && actor.subagentRetired !== true)
     .sort((a, b) => a.id - b.id);
   const targets = cocsAttackTargets(state, team);
   const task = (state.tasks?.[team] && state.tick <= state.tasks[team].until) ? state.tasks[team] : null;
@@ -355,6 +355,78 @@ export function cocsAssignment(match, a, state = match?.objectiveState) {
   return {nodeId: slot.nodeId, kind: slot.kind, role: slot.kind, depotId: slot.depotId ?? null, vehicleId: slot.vehicleId ?? null, depotFallback: slot.depotFallback ?? null, index, team, plan};
 }
 
+// ---------------------------------------------------------------------------
+// O1c role-agent destinations. Any subagent bought through REINFORCE walks to
+// the place its verb works: HARVESTER -> an owned siphon with no hostile inside
+// its radius + 10 m (the §8.1 "never enters a contested zone" rule), BUILDER ->
+// the nearest broken terminal/device, SCOUT -> its screen node. The plain
+// lattice slot is the fallback, so an agent whose verb has no legal target keeps
+// fighting with its squad. All lists sorted; no RNG, no actor id branching.
+// ---------------------------------------------------------------------------
+function hostileNear(match, node, meters) {
+  for (const actor of match?.actors ?? []) {
+    if (!actor || actor.health <= 0 || actor.team !== 1) continue;
+    if (Math.hypot(num(actor.x, 0) - node.x, num(actor.z, 0) - node.z) <= meters) return true;
+  }
+  return false;
+}
+
+function nearestBrokenTarget(match, a, state) {
+  let best = null;
+  let bestDistance = Infinity;
+  const consider = (id, point, y) => {
+    if (!point) return;
+    const distance = Math.hypot(num(point.x, 0) - num(a.x, 0), num(point.z, 0) - num(a.z, 0));
+    if (distance > bestDistance + 1e-9) return;
+    if (distance < bestDistance - 1e-9 || !best || id < best.id) {
+      bestDistance = distance;
+      best = {id, x: num(point.x, 0), y: num(y, 0), z: num(point.z, 0)};
+    }
+  };
+  const devices = state?.traversal?.devices ?? {};
+  for (const id of Object.keys(devices).sort()) {
+    const device = devices[id];
+    if (!device || device.state === 'live') continue;
+    consider(id, device.from, device.from?.y);
+  }
+  const terminals = state?.terminals?.terminals ?? {};
+  for (const id of Object.keys(terminals).sort()) {
+    const terminal = terminals[id];
+    if (!terminal || terminal.state === 'live') continue;
+    consider(id, terminal, terminal.y);
+  }
+  return best;
+}
+
+/** The role agent's authored verb destination, or null for the normal duty. */
+export function cocsRoleDestination(match, a, state = match?.objectiveState) {
+  const role = a?.subagentRole;
+  if (!state?.coop || !role || !a || a.health <= 0) return null;
+  if (role === 'harvester') {
+    // Stay on the node this harvester is already channeling: starting a prime
+    // must not move the agent off the channel it just started.
+    const channelNode = a.subagentNode ? nodeById(state, a.subagentNode) : null;
+    if (channelNode?.primeChannel && channelNode.primeChannel.actor === a.id) {
+      return {x: channelNode.x, y: num(channelNode.y, 0), z: channelNode.z};
+    }
+    const tick = num(state.tick, 0);
+    const primed = node => node.primeChannel || (node.prime && tick <= num(node.prime.until, 0));
+    for (const node of capturableNodes(state).filter(entry => entry.archetype === 'economy' && entry.owner === 0 && !primed(entry)).sort(idSort)) {
+      if (hostileNear(match, node, node.r + 10)) continue;
+      return {x: node.x, y: num(node.y, 0), z: node.z};
+    }
+    return null;
+  }
+  if (role === 'builder') {
+    const target = nearestBrokenTarget(match, a, state);
+    return target ? {x: target.x, y: target.y, z: target.z} : null;
+  }
+  // FIGHTER and SCOUT stay with the squad on the lattice point: the fighter's
+  // RALLY and the scout's SPOT both fire in contact, so neither wanders off the
+  // front (the SCAN scout already owns long-range screening).
+  return null;
+}
+
 // A destination inside the target node's radius. `Match.zoneSlot` places
 // attackers on a ring facing their own spawn (so the two teams meet across the
 // point) and defenders on a defensive ring; reusing it keeps the existing
@@ -363,6 +435,19 @@ export function cocsAssignment(match, a, state = match?.objectiveState) {
 // lattice push (and can grab the freshly spawned loaner on the way out).
 export function cocsBotDestination(match, a, assignment, state = match?.objectiveState) {
   if (!assignment) return null;
+  // An actively channeling HARVESTER holds its node even if its lattice duty
+  // changed: starting a prime must not move the agent off the channel.
+  const channelNode = a?.subagentNode ? nodeById(state, a.subagentNode) : null;
+  if (channelNode?.primeChannel && channelNode.primeChannel.actor === a.id) {
+    return {x: channelNode.x, y: num(channelNode.y, 0), z: channelNode.z};
+  }
+  // OPERATIONS role agents walk to their authored verb before falling back to
+  // the normal lattice duty: a HARVESTER to an owned siphon, a BUILDER to a
+  // broken terminal/device, a SCOUT to its screen node. Pure and id-free.
+  if (assignment.kind === 'hold' || assignment.kind === 'attack') {
+    const roleDestination = cocsRoleDestination(match, a, state);
+    if (roleDestination) return roleDestination;
+  }
   if (assignment.kind === 'depot' && assignment.depotId) {
     const depot = state?.traversal?.depots?.[assignment.depotId];
     if (depot && depot.owner !== a?.team) {
@@ -439,6 +524,7 @@ function nearestHostile(actors, at, team) {
 export function cocsTraversalChoice(match, a, destination, state = match?.objectiveState) {
   const traversal = state?.traversal;
   if (!traversal || traversal.botUse !== true || !a || !destination) return null;
+  if (traversal.botUseTeam !== null && traversal.botUseTeam !== undefined && a.team !== traversal.botUseTeam) return null;
   if (a.vehicleId !== null && a.vehicleId !== undefined) return null;
   if (a.health <= 0) return null;
   if (num(traversal.cooldowns?.[a.id], 0) > 0) return null;
@@ -510,6 +596,7 @@ export function cocsDepotDuty(state, actors = [], team, plan = null) {
   // keeps the pre-W20 pure-lattice behaviour, so the W7/W8/W10 gates are
   // untouched by default.
   if (traversal.botUse !== true) return null;
+  if (traversal.botUseTeam !== null && traversal.botUseTeam !== undefined && traversal.botUseTeam !== team) return null;
   if (cocsDeficit(state, team)) return null;
   const roster = plan?.roster ?? [];
   if (roster.length < COCS_DEPOT_MIN_ROSTER) return null;
@@ -526,6 +613,7 @@ export function cocsDepotDuty(state, actors = [], team, plan = null) {
 export function cocsVehicleDuty(match, state, team, plan = null) {
   const traversal = state?.traversal;
   if (!state || state.kind !== COCS_KIND || !traversal?.depots || traversal.botUse !== true) return null;
+  if (traversal.botUseTeam !== null && traversal.botUseTeam !== undefined && traversal.botUseTeam !== team) return null;
   if (cocsDeficit(state, team)) return null;
   const roster = plan?.roster ?? [];
   if (roster.length < COCS_DEPOT_MIN_ROSTER) return null;
