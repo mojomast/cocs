@@ -15,6 +15,10 @@
 .lattice-coach{padding:8px;border:1px solid var(--border-strong);border-radius:5px;background:#15312d}
 .lattice-coach b{font:700 11px/1.4 var(--font-mono);color:var(--accent-soft)}
 .lattice-coach p{margin:5px 0 0;font:12px/1.45 var(--font-ui);color:var(--text)}
+.lattice-loadout-role{display:grid;gap:5px;margin-top:10px;padding:12px;border:1px solid var(--border-strong);border-radius:6px;background:#12312b80}
+.lattice-loadout-role b{font-size:14px;color:var(--accent-soft)}
+.lattice-loadout-role p,.lattice-kit-details p{margin:4px 0;font:12px/1.5 var(--font-ui);color:var(--text-dim)}
+.lattice-kit-details b{font:700 11px var(--font-mono);color:var(--accent-soft)}
 .cocs-readout{max-height:calc(100dvh - 270px);overflow:auto;overscroll-behavior:contain;scrollbar-width:thin;pointer-events:auto}
 .cocs-readout .cocs-readout__own,.cocs-readout .cocs-readout__hint{display:none}
 .cocs-readout .cocs-readout__rung{font-size:10px}

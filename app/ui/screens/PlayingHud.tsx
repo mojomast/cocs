@@ -13,6 +13,7 @@ import {CommandBoardHud} from './CommandBoardHud';
 import {SpendWindowHud} from './SpendWindowHud';
 import {CocsTerminalsHud} from './CocsTerminalsHud';
 import {LatticeTactical} from './LatticeGuide';
+import {latticeLoadoutRoles} from '../../../game/lattice-roles.mjs';
 
 const FRAG_COOLDOWN=7;
 
@@ -40,7 +41,7 @@ export function SpectatorBoard({groups=[],objective,onFollow}:{groups?:any[];obj
 // the three-button SCAN / GO / ATTACK strip: arm a verb, pick a live node, then
 // issue. Disabled verbs explain why (cooldown / FLUX low) and never rely on
 // colour; the animation-free markup is reduced-motion safe.
-function CocsReadout({command,teamName}:{command:any;teamName:(team:any)=>string}){
+function CocsReadout({command,teamName,player}:{command:any;teamName:(team:any)=>string;player:any}){
  if(!command)return null;
  const {board,economy,strip,scanTarget,traversal}=command;
  if(!board||!strip)return null;
@@ -50,11 +51,13 @@ function CocsReadout({command,teamName}:{command:any;teamName:(team:any)=>string
  const flux=economy?.flux??0,fluxCap=economy?.fluxCap??0,net=economy?.net??0,fluxPercent=Math.round((economy?.fluxPercent??0)*100);
  const req=economy?.req??{value:0,earned:0},orders=economy?.orders??{issued:0,completed:0},scout=economy?.scout??{alive:false},stats=economy?.scoutStats??{spawned:0,killed:0,scans:0};
  const spots=command.spots??[];
- const scoutState=scout.alive?(scout.idle?'IDLE':scout.returning?'RETURNING':scout.scanned?'SCANNED':'EN ROUTE'):'READY';
+  const scoutState=scout.alive?(scout.idle?'IDLE':scout.returning?'RETURNING':scout.scanned?'SCANNED':'EN ROUTE'):'READY';
+  const fieldRole=latticeLoadoutRoles(player.character,player.harness);
  return <div className="cocs-readout" role="region" aria-label={`Lattice front. ${board.hint}. ${board.liveCount} live nodes.`}>
    <div className="cocs-readout__head"><span className="eyebrow">LATTICE FRONT</span><span className="cocs-readout__count">{board.liveCount} LIVE</span></div>
    {command.coach&&<div className="lattice-coach" role="status"><b>{command.coach.title}</b><p>{command.coach.detail}</p></div>}
    {command.coach&&<details className="lattice-map-details"><summary>SUPPLY MAP · NEXT OBJECTIVE</summary><LatticeTactical coach={command.coach}/></details>}
+   <details className="lattice-kit-details"><summary>YOUR FIELD ROLE · {fieldRole.operator.role.toUpperCase()}</summary><b>{fieldRole.operator.name}</b><p>{fieldRole.operator.description}</p><b>{command.keys?.power??'Q'} · {fieldRole.harness.name}</b><p>{fieldRole.harness.description}</p></details>
   <div className="cocs-readout__scores" aria-label={`Objective score: ${teamName(0)} ${amount(board.scores[0])}, ${teamName(1)} ${amount(board.scores[1])}`}>
    <span className={board.leader===0?'is-lead':''}>{teamName(0)} <b>{amount(board.scores[0])}</b></span>
    <span className="cocs-readout__op" aria-hidden="true">OP</span>
@@ -160,7 +163,7 @@ export function PlayingHud({ui}:ScreenProps){
   })):[];
   return <div className={`game-hud${hud.spectate&&hideHud?' hide-hud':''}${touchControls&&!hud.spectate?' touch-mode':''}`}>
   <div className="match-top" role="region" aria-label="Live match status"><div className="match-context"><span className="eyebrow">{hud.mapName?.toUpperCase()} / {hudRoute}</span><strong>{hud.modeName?.toUpperCase()}</strong><small className="phase-label">PHASE / {phase}</small>{isTeamMode(hudMode)&&<small className="team-label">{teamName(player.team)} TEAM · {hud.spectate?'FOLLOWING':'YOU'}</small>}</div><div className="match-clock" aria-label={`${hud.spectate?'Spectating':`${clock(hud.config.timeLimit-hud.time)} remaining`}`}><strong>{hud.spectate?'SPECTATING':clock(hud.config.timeLimit-hud.time)}</strong><small>{hud.net?'NETWORK MATCH':hud.config.botCount===0?'SOLO PRACTICE':isSingle?`FIRST TO ${hud.config.fragLimit} ${modeGoal(hudMode).toLowerCase()}`:''}</small></div><div className="frag-counter"><strong>{armsrace?ladderStatus(player,WEAPONS.length).rung+1:isTeamMode(hudMode)?teamScoreText(hud.teamScores??hud.teams)||player.frags:player.frags}<span>{hud.spectate?'':` / ${armsrace?WEAPONS.length:hud.config.fragLimit}`}</span></strong><small>{hud.spectate?`FOLLOWING ${player.name.toUpperCase()}`:armsrace?'LADDER RUNG':isTeamMode(hudMode)?modeGoal(hudMode):'YOUR FRAGS'}</small></div></div>
-  {cocsCommand&&!hud.spectate&&<CocsReadout command={cocsCommand} teamName={teamName}/>}
+   {cocsCommand&&!hud.spectate&&<CocsReadout command={cocsCommand} teamName={teamName} player={player}/>}
   {cocsCommand?.spend&&!hud.spectate&&<SpendWindowHud spend={cocsCommand.spend} onSpend={cocsCommand.spendCocs} reducedMotion={reducedMotion()}/>}
   {cocsCommand?.boardView&&!hud.spectate&&<CommandBoardHud command={cocsCommand} open={cocsCommand.boardOpen===true} collapsed={cocsCommand.boardCollapsed===true} pinned={cocsCommand.boardPinned===true} activeId={cocsCommand.boardActive} reducedMotion={reducedMotion()} onSelect={cocsCommand.selectBoardCard} onActivate={cocsCommand.activateBoardCard} onClose={cocsCommand.closeBoard} onTogglePin={cocsCommand.toggleBoardPin}/>}
   {cocsCommand?.terminals&&!hud.spectate&&<CocsTerminalsHud terminals={cocsCommand.terminals} reducedMotion={reducedMotion()}/>}

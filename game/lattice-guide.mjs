@@ -3,6 +3,11 @@
 import {DEFAULT_BINDINGS} from './keybinds.mjs';
 
 export const isLattice = mode => mode === 'cocs' || mode === 'cocs-coop';
+// Quick-start must fill a real front rather than inherit a three-player FFA.
+// Custom match setup still owns its explicit roster and time settings.
+export const latticePracticeDefaults = mode => mode === 'cocs'
+  ? {botCount: 7, timeLimit: 900, difficulty: 'normal', rung: '4v4'}
+  : mode === 'cocs-coop' ? {botCount: 3, timeLimit: 900, difficulty: 'normal'} : {};
 export function latticeKeys(bindings = {}) {
   const label = action => String(bindings[action] ?? DEFAULT_BINDINGS[action])
     .replace(/^Key/, '').replace(/^Digit/, '').replace(/Left$|Right$/, '').toUpperCase();

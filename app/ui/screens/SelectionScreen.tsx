@@ -6,12 +6,14 @@ import {ActionRail,Banner,Btn,Meter,PageHead,Panel,Segmented,SelectCard,Shell,St
 import {kitView,operatorCard,specSheet} from '../../../game/class-ui.mjs';
 import {LatticeBriefing} from './LatticeGuide';
 import {isLattice} from '../../../game/lattice-guide.mjs';
+import {latticeLoadoutRoles} from '../../../game/lattice-roles.mjs';
 
 export function SelectionScreen({ui}:ScreenProps){
   const {entered,showcaseLive,character,chooseCharacter,CHARACTERS=[],selected,harness,setHarness,HARNESSES=[],power,powerIcon,config,start,startSpectate,quickStart,setSetupOpen,setSingleOpen,changeMode,connectNet,openBrowser,netConnected,profile,demos=[],previewRef,headActions,backToDemo,notice,challenges=[],presets=[],loadPreset,deletePreset,openSettings}=ui;
   const [previewTab,setPreviewTab]=useState('model');
   const [moreOpen,setMoreOpen]=useState(false);
   const [latticeIntro,setLatticeIntro]=useState<string|null>(null);
+  const latticeRole=(latticeIntro||isLattice(config?.mode))?latticeLoadoutRoles(character,harness):null;
   const note=character==='claude'?'Enhanced health, armor and speed offset the Claude Code harness lock.':'Each operator trades durability for mobility. Pick the stats that fit your style.';
   // Class/spec identity comes from the kit data directly (never through the
   // page's loose `ui` bag): wing chip, role, signature and movement verb.
@@ -83,7 +85,8 @@ export function SelectionScreen({ui}:ScreenProps){
        {card&&<span className="card-chip card-chip--verb" title={card.signature.line}>{card.signature.name}</span>}
       </>}/>;})}</div>
       <Stats items={[{label:'MAX HEALTH',value:selected?.stats?.health},{label:'SPAWN ARMOR',value:selected?.stats?.armor},{label:'MOVE SPEED',value:Number(((selected?.stats?.speed||0)*(config?.speed||1)).toFixed(2)),hint:'m/s'}]}/>
-      <p className="field-note">{note}</p>
+       <p className="field-note">{note}</p>
+       {latticeRole&&<div className="lattice-loadout-role"><span className="eyebrow">LATTICE / {latticeRole.operator.role.toUpperCase()}</span><b>{latticeRole.operator.name}</b><p>{latticeRole.operator.description}</p></div>}
      </Panel>
      <Panel className="panel--dense panel--harness" label="02 / HARNESS" meta={spec?`${spec.kindLabel} ACTIVE`:'ACTIVE ABILITY'}>
       <div className="grid-cards">{HARNESSES.map((h:any)=>{const locked=character==='claude'&&h.id!=='claudecode';const hSpec=specSheet(h.id);return <SelectCard key={h.id} selected={harness===h.id} disabled={locked} onClick={()=>{setHarness(h.id);ui.setNotice?.('');}} ariaLabel={`${h.name}: ${h.power}${hSpec?` · ${hSpec.tradeoff.name} — ${hSpec.tradeoff.description}`:''}`} icon={powerIcon?powerIcon(h.id,20):<Shield size={20}/>} name={h.name} tag={h.power} meta={locked?<LockKeyhole size={15}/>:harness===h.id?<Check size={17}/>:h.key}/>;})}</div>
@@ -92,7 +95,8 @@ export function SelectionScreen({ui}:ScreenProps){
        <p className="field-note">{power?.description}</p>
        <div className="row"><span className="chip">{power?.stat}</span><span className="chip">{power?.cooldown}s COOLDOWN</span>{spec&&<span className="chip chip--accent">{spec.kindLabel}</span>}{spec?.hookLabel&&<span className="chip">{spec.hookLabel} HOOK</span>}</div>
        {spec&&<p className="field-note"><b>TRADEOFF · {spec.tradeoff.name} · {spec.passive.triggerLabel}</b> {spec.tradeoff.description}</p>}
-       {rider&&<p className="field-note"><b>{wing?.label} RIDER</b> {rider.description}</p>}
+        {rider&&<p className="field-note"><b>{wing?.label} RIDER</b> {rider.description}</p>}
+        {latticeRole&&<div className="lattice-loadout-role"><span className="eyebrow">LATTICE / {latticeRole.harness.role.toUpperCase()}</span><b>{latticeRole.harness.name}</b><p>{latticeRole.harness.description}</p></div>}
       </div>
      </Panel>
     </div>
