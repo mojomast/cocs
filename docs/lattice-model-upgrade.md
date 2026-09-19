@@ -143,8 +143,39 @@ marks/outline, measures:
 
 The roster has 3,266 allocated meshes, including inactive LOD/effect leaves.
 The combined shared cache for the roster and all ten detailed/world weapons is
-322 geometries / 47 materials, with **1,868,880 bytes (~1.78 MiB)** of geometry
+324 geometries / 47 materials, with **1,878,256 bytes (~1.79 MiB)** of geometry
 attribute/index arrays. Unique actor armor/status materials are additional.
+
+### Capsule-dimension correction
+
+The parent WebGL gallery exposed stretched limbs in the initial implementation.
+Three r185's `CapsuleGeometry.parameters` names its straight middle section
+`height`, not `length`. Both the near refinement and distance-LOD reconstruction
+now preserve `height` in the constructor and cache key. This also separates the
+upper-arm and shin geometries, which share radius `.082` but have different
+middle-section heights (`.20` and `.23`). Forearms retain `.19`, and thighs `.25`.
+
+The added regression first failed against the original implementation with
+`height 1 !== 0.2`. It now checks all nine operators, both arm/leg sides, near/far
+levels and software mode: authored radius/height, actual full capsule bounds,
+unit mesh scale, independent cache entries for same-radius/different-height
+limbs, and whole-body standing bounds above the soles and below 2.1 units.
+The other added reconstruction parameter reads were audited: Three's sphere
+and box fields, and the explicitly authored contour/bevel metadata, match their
+constructors. No equivalent primitive-parameter mismatch was found.
+
+Remeasurement after this correction leaves every vertex, triangle, visible draw
+and allocated mesh count in the tables unchanged. The two correctly separated
+cache entries add 9,376 bytes, reflected in the updated cache totals above.
+
+Correction verification: **35 focused checks passed**, run serially:
+
+```sh
+node --test --test-concurrency=1 \
+  game/lattice-models.test.mjs game/phase1-characters.test.mjs \
+  game/phase1-grips.test.mjs game/phase1-character-integration.test.mjs
+node scripts/measure-lattice-models.mjs
+```
 
 ## Verification and remaining limits
 
@@ -158,8 +189,9 @@ runtime, presentation, rig, sights and ADS tests cover the retained contracts.
 Tests run serially (`--test-concurrency=1`); no full build or full suite is needed
 for this isolated geometry change.
 
-Focused verification: **84 passing checks total**: 80 across the focused files
-and four named model checks selected from `view.test.mjs`:
+Initial upgrade verification: **84 passing checks total** before the added
+capsule regression: 80 across the focused files and four named model checks
+selected from `view.test.mjs`. The commands below now include the new regression:
 
 ```sh
 node --test --test-concurrency=1 \
