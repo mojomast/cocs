@@ -70,6 +70,10 @@ function CocsReadout({command,teamName}:{command:any;teamName:(team:any)=>string
    <span aria-label={`The enemy owns ${enemy} nodes`}>{teamName((board.team??0)===0?1:0)} <b>{enemy}</b> NODES</span>
   </div>
   <p className="cocs-readout__hint">{board.hint}</p>
+  {command.rung&&<div className="cocs-readout__rung" role="status" aria-label={`Rung ${command.rung}. Roles ${(command.roleBoard?.allow??[]).join(', ')}. Threads ${command.roleBoard?.threads?.used??0} of ${command.roleBoard?.threads?.cap??0}.`}>
+   <span className="eyebrow">RUNG</span> <b>{String(command.rung).toUpperCase()}</b>
+   {command.roleBoard&&<small>ROLES {(command.roleBoard.allow??[]).map((role:any)=>String(role).toUpperCase()).join(' · ')} · THREADS {command.roleBoard.threads?.used??0}/{command.roleBoard.threads?.cap??0}</small>}
+  </div>}
   <div className="cocs-readout__economy" role="group" aria-label="Team economy">
    <div className="cocs-flux" aria-label={`Team flux ${whole(flux)} of ${whole(fluxCap)}, ${net>=0?'plus':'minus'} ${Math.abs(net).toFixed(1)} per second`}>
     <span className="eyebrow">FLUX</span>

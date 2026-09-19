@@ -14,7 +14,8 @@ import {
 import {FLUX_CAP, FLUX_START} from './cocs-economy.mjs';
 import {COOP_ROLE_IDS, PVP_ROLE_IDS, ROLE_ABILITIES, coopRole, roleAbility} from './cocs-roles.mjs';
 import {
-  COCS_ROLE_TARGET_CONCURRENCY, COCS_SIPHON_FLUX, cocsDutyRolePolicy, cocsRoleActors,
+  COCS_ROLE_TARGET_CONCURRENCY, COCS_SIPHON_FLUX, cocsBuyAction, cocsCommandAction,
+  cocsDutyRolePolicy, cocsEconomyAction, cocsRoleActors,
   cocsRoleAllowedOnRung, cocsRoleBoardSnapshot, cocsRoleSpawn, cocsSaboteurAct, cocsSapper,
   cocsSiphon, cocsSnapshot, cocsTeamCommand, cocsTeamVisibility, cocsThreadsUsed, spawnScout,
 } from './cocs.mjs';
@@ -319,6 +320,87 @@ test('PvP snapshot exposes rung/intel/contacts/roleBoard and co-op exposes none 
   assert.equal(coop.objectiveState.rung, null);
   assert.equal(coop.objectiveState.roleAllow, null);
   assert.equal(coopSnap.coop, true, 'co-op keeps its own director/command surface');
+});
+
+// ---------------------------------------------------------------------------
+// PvP wire action surface (command seat, role economy, personal REQ).
+// ---------------------------------------------------------------------------
+test('the PvP command seat is team-scoped and round-trips through the snapshot', () => {
+ const match = pvpMatch('8v8');
+ const state = match.objectiveState;
+ assert.deepEqual(cocsCommandAction(match, state, {team: 0, peerId: 'p1', action: 'take'}), {ok: true, reason: null});
+ assert.equal(state.command.seat[0], 'p1');
+ assert.equal(state.command.seat[1], null, 'a team-0 take never seats team 1');
+ assert.equal(cocsCommandAction(match, state, {team: 1, peerId: 'p2', action: 'release'}).reason, 'not-commander');
+ state.command.seat[1] = 'p2';
+ assert.equal(cocsCommandAction(match, state, {team: 1, peerId: 'p2', action: 'release'}).ok, true);
+ assert.equal(state.command.seat[1], null);
+ const snap = cocsSnapshot(match);
+ assert.equal(snap.commander.seat[0], 'p1');
+ assert.equal(snap.commander.seat[1], null);
+});
+
+test('the PvP role economy spends team FLUX through the rung allow-list', () => {
+ const four = pvpMatch('4v4');
+ const fourState = four.objectiveState;
+ fourState.flux[0] = 240;
+ assert.equal(cocsEconomyAction(four, fourState, {team: 0, action: 'reinforce', role: 'saboteur'}).reason, 'role', '4v4 cannot field SABOTEUR');
+ assert.equal(cocsEconomyAction(four, fourState, {team: 0, action: 'fortify', target: 'front-e'}).reason, 'no-sink');
+ const fighter = cocsEconomyAction(four, fourState, {team: 0, action: 'spawn', role: 'fighter'});
+ assert.equal(fighter.ok, true);
+ assert.equal(fourState.roleSpawns[0].length, 1);
+ assert.equal(fourState.roleSpawns[1].length, 0, 'a team-0 spend never touches team 1');
+ // THREADS gate: fill the cap, then refuse the next role.
+ fourState.threads[0].cap = 1;
+ assert.equal(cocsEconomyAction(four, fourState, {team: 0, action: 'reinforce', role: 'fighter'}).reason, 'no-thread');
+
+ // 8v8 can field the SCOUT; a live scout retargets instead of spawning again.
+ const eight = pvpMatch('8v8');
+ const eightState = eight.objectiveState;
+ eightState.flux[0] = 240;
+ const first = cocsEconomyAction(eight, eightState, {team: 0, action: 'spawn', role: 'scout', target: 'front-w'});
+ assert.equal(first.ok, true);
+ const retarget = cocsEconomyAction(eight, eightState, {team: 0, action: 'spawn', role: 'scout', target: 'front-e'});
+ assert.equal(retarget.retargeted, true);
+ assert.equal(eight.actors[first.actor].scoutTargetNode, 'front-e', 'the live scout retargets for free');
+});
+
+test('PvP spends reach the sim only through Match.step and are deterministic', () => {
+ const run = () => {
+  const match = pvpMatch('8v8');
+  const state = match.objectiveState;
+  state.flux[0] = 240; state.flux[1] = 240;
+  match.step(DT, {cocs: {
+   commands: [{tick: 0, peerId: 'p1', cardId: 'c1', team: 0, action: 'take'}],
+   spends: [{tick: 0, peerId: 'p1', cardId: 's1', team: 0, action: 'reinforce', role: 'fighter'}],
+  }});
+  for (let i = 0; i < 5; i++) match.step(DT, {inputs: {}});
+  return JSON.stringify({command: state.command, players: state.roleSpawns});
+ };
+ assert.equal(run(), run(), 'the same seeded action order is byte-identical');
+ const match = pvpMatch('8v8');
+ const state = match.objectiveState;
+ state.flux[0] = 240;
+ match.step(DT, {cocs: {spends: [{tick: 0, peerId: 'p1', cardId: 's1', team: 0, action: 'reinforce', role: 'fighter'}]}});
+ assert.equal(state.roleSpawns[0].length, 1, 'the spend reached the sim');
+ assert.ok(state.flux[0] < 240, 'the role cost came out of team FLUX');
+});
+
+test('PvP personal REQ buys apply to the buying actor and honour the team seat', () => {
+ const match = pvpMatch('8v8');
+ const state = match.objectiveState;
+ const actor = match.actors[0];
+ actor.req = 100;
+ // A non-commander cannot buy a commander-only item.
+ const gated = cocsBuyAction(match, state, {actorId: actor.id, peerId: 'p1', itemId: 'supply-drop'});
+ assert.equal(gated.ok, false);
+ assert.equal(gated.reason, 'commander-only');
+ state.command.seat[0] = 'p1';
+ const bought = cocsBuyAction(match, state, {actorId: actor.id, peerId: 'p1', itemId: 'field-repair'});
+ assert.equal(bought.ok, true);
+ assert.equal(actor.reqBuff, 'field-repair');
+ assert.ok(actor.reqSpent >= 40);
+ assert.equal(state.command.seat[1], null, 'the buy never seats the enemy team');
 });
 
 // ---------------------------------------------------------------------------

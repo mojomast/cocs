@@ -42,7 +42,7 @@ import {RULES} from './data.mjs';
 import {terrainSupportAt} from './terrain.mjs';
 import {
   FLUX_CAP, FLUX_PASSIVE_PER_SECOND, FLUX_START, ORDER_REWARD, REQ_EARN, SUBAGENTS,
-  neglectPassiveFlux, neglectState, neglectTick, scoreEvent, subagentUpkeep,
+  neglectPassiveFlux, neglectState, neglectTick, reqItem, reqPurchase, scoreEvent, subagentUpkeep,
 } from './cocs-economy.mjs';
 import {PVP_ROLE_IDS, coopRole, roleAbility} from './cocs-roles.mjs';
 import {createTraversalState, stepCocsTraversal, cocsTraversalSnapshot} from './cocs-traversal.mjs';
@@ -423,6 +423,12 @@ export function cocsTemplate(mode, arena, config = {}) {
       0: {used: 0, cap: rung ? rung.threads : COCS_ROLE_THREAD_BASE},
       1: {used: 0, cap: rung ? rung.threads : COCS_ROLE_THREAD_BASE},
     },
+    // PvP-1 per-team command seat (§5.7, §11.2/§11.3). The seat is an opaque
+    // peer id (or null) per team; the room validates the transport peer, the sim
+    // records it, and the snapshot round-trips it so a reconnect resyncs the
+    // whole board. Co-op keeps its own `state.coop` command state and never
+    // reads this.
+    command: {seat: {0: null, 1: null}, votes: {0: {}, 1: {}}, route: {0: null, 1: null}, policy: {0: null, 1: null}},
     roleSpawns: {0: [], 1: []},
     roleStats: {
       0: {spawned: 0, killed: 0, expired: 0, byRole: {}},
@@ -650,6 +656,11 @@ export function processCocsOrder(match, state, order) {
   if (state.coopMode === true) {
     const gate = coopOrderGate(match, state, {team, verb, peerId: entry.peerId});
     if (!gate.ok) { entry.reason = gate.reason; return reject(); }
+  }
+  if (verb === 'SCAN' && state.coopMode !== true) {
+    // PvP-1 THREADS gate: a SCAN spawns a scout, which itself occupies a thread.
+    // The duty board and the wire both honour the same per-team cap.
+    if (cocsThreadsUsed(match, state, team) >= num(state.threads?.[team]?.cap, COCS_ROLE_THREAD_BASE)) { entry.reason = 'no-thread'; return reject(); }
   }
   if (verb === 'SCAN') {
     const ok = issueScanOrder(match, state, team, node);
@@ -1273,6 +1284,150 @@ export function cocsRoleBoardSnapshot(match, state, team) {
 }
 
 /**
+ * PvP-1 command board action (§5.7/§11.2). The room validates the transport
+ * peer and the team; this records the seat/route/policy on the authoritative
+ * state so a reconnect resync is complete. Pure state mutation, no RNG, no
+ * clock. Co-op routes to `coopCommandAction` instead.
+ */
+export function cocsCommandAction(match, state, record = {}) {
+  if (!state || state.kind !== COCS_KIND || state.coopMode === true) return {ok: false, reason: 'no-command'};
+  const cmd = state.command;
+  if (!cmd) return {ok: false, reason: 'no-command'};
+  cmd.seat ??= {0: null, 1: null};
+  cmd.votes ??= {0: {}, 1: {}};
+  cmd.route ??= {0: null, 1: null};
+  cmd.policy ??= {0: null, 1: null};
+  const team = record.team === 1 ? 1 : 0;
+  const peerId = String(record.peerId ?? '');
+  const action = String(record.action ?? '').toLowerCase();
+  if (action === 'take') {
+    cmd.seat[team] = peerId || null;
+    cmd.votes[team] = {};
+    return {ok: true, reason: null};
+  }
+  if (action === 'release') {
+    if (cmd.seat[team] !== peerId) return {ok: false, reason: 'not-commander'};
+    cmd.seat[team] = null;
+    return {ok: true, reason: null};
+  }
+  if (action === 'mutiny-vote') {
+    cmd.votes[team][peerId] = true;
+    // A mutiny needs a strict majority of the team's living human seats. Bots
+    // never vote, so the duty Chief can never be replaced by AI seats.
+    const humans = (match?.actors ?? [])
+      .filter(actor => actor && actor.health > 0 && actor.team === team && actor.isNpc !== true && actor.bot == null)
+      .map(actor => actor.id)
+      .sort((a, b) => a - b);
+    const needed = Math.max(1, Math.floor(humans.length / 2) + 1);
+    const votes = cmd.votes[team];
+    const count = Object.keys(votes).filter(key => votes[key] === true).length;
+    if (humans.length > 0 && count >= needed && cmd.seat[team] !== peerId) {
+      cmd.seat[team] = peerId;
+      cmd.votes[team] = {};
+    }
+    return {ok: true, reason: null, votes: count, needed};
+  }
+  if (action === 'set-route') { cmd.route[team] = record.value === null || record.value === undefined ? null : String(record.value); return {ok: true, reason: null}; }
+  if (action === 'policy') { cmd.policy[team] = record.value === null || record.value === undefined ? null : String(record.value); return {ok: true, reason: null}; }
+  if (action === 'opt-out-orders') {
+    const actor = match?.actors?.[record.actorId];
+    if (!actor || actor.team !== team) return {ok: false, reason: 'missing'};
+    actor.ordersOptOut = true;
+    return {ok: true, reason: null};
+  }
+  return {ok: false, reason: 'unknown-action'};
+}
+
+/**
+ * PvP-1 economy action (§11.2): a `spawn`/`reinforce` spend buys one role from
+ * the team's rung allow-list out of its own FLUX under its own THREADS cap.
+ * Sinks with no PvP implementation (FORTIFY/REPAIR/RESUPPLY) are refused. The
+ * same gates apply here and in the duty board, so a wire spend can never exceed
+ * what the deterministic Chief could do. Pure, id-sorted, no RNG.
+ */
+export function cocsEconomyAction(match, state, record = {}) {
+  if (!match || !state || state.kind !== COCS_KIND || state.coopMode === true) return {ok: false, reason: 'no-economy'};
+  const team = record.team === 1 ? 1 : 0;
+  const action = String(record.action ?? '').toLowerCase();
+  if (action === 'opt-out-orders') {
+    const actor = match.actors?.[record.actorId];
+    if (!actor || actor.team !== team) return {ok: false, reason: 'missing'};
+    actor.ordersOptOut = true;
+    return {ok: true, reason: null};
+  }
+  if (action !== 'spawn' && action !== 'reinforce') return {ok: false, reason: 'no-sink'};
+  const role = String(record.role ?? 'fighter').trim().toLowerCase();
+  const cap = num(state.threads?.[team]?.cap, COCS_ROLE_THREAD_BASE);
+  if (!cocsRoleAllowedOnRung(state, role)) return {ok: false, reason: 'role'};
+  if (role === 'scout') {
+    // A live scout retargets for free; only a fresh spawn consumes a new thread.
+    const node = nodeById(state, record.target);
+    if (!node) return {ok: false, reason: 'target'};
+    const active = activeScoutActor(match, state, team);
+    if (active) {
+      active.scoutTargetNode = node.id;
+      active.scoutTarget = scoutTargetPoint(state, node.id);
+      active.scoutReturning = false;
+      active.scoutScanned = false;
+      return {ok: true, reason: null, role, actor: active.id, retargeted: true};
+    }
+    if (cocsThreadsUsed(match, state, team) >= cap) return {ok: false, reason: 'no-thread'};
+    if (num(state.flux?.[team], 0) + 1e-9 < COCS_SCOUT.spawnCost) return {ok: false, reason: 'flux'};
+    const actor = spawnScout(match, state, team, node.id);
+    return actor ? {ok: true, reason: null, role, actor: actor.id} : {ok: false, reason: 'refused'};
+  }
+  if (cocsThreadsUsed(match, state, team) >= cap) return {ok: false, reason: 'no-thread'};
+  const def = coopRole(role);
+  if (!def) return {ok: false, reason: 'role'};
+  if (num(state.flux?.[team], 0) + 1e-9 < num(def.spawnCost, 0)) return {ok: false, reason: 'flux'};
+  const actor = cocsRoleSpawn(match, state, team, role, record.target ?? null);
+  return actor ? {ok: true, reason: null, role, actor: actor.id} : {ok: false, reason: 'refused'};
+}
+
+/**
+ * PvP-1 personal-REQ purchase (§6A.5/§6A.7). Mirrors the co-op buy path but reads
+ * the PvP command seat instead of `state.coop.commandSeat`, so a commander-only
+ * item is gated per team. Deterministic item effects; no RNG.
+ */
+export function cocsBuyAction(match, state, record = {}) {
+  if (!state || state.kind !== COCS_KIND || state.coopMode === true) return {ok: false, reason: 'no-economy'};
+  const actor = match?.actors?.[record.actorId];
+  if (!actor || actor.health <= 0) return {ok: false, reason: 'missing'};
+  const item = reqItem(record.itemId);
+  if (!item) return {ok: false, reason: 'unknown-item'};
+  if (item.launch !== true) return {ok: false, reason: 'not-launched'};
+  const team = actor.team === 1 ? 1 : 0;
+  const peerId = String(record.peerId ?? '');
+  const isCommander = state?.command?.seat?.[team] === peerId;
+  const relayOwned = (state?.nodes ?? []).some(node => node && node.archetype === 'relay' && node.owner === team);
+  const result = reqPurchase(record.itemId, {
+    balance: num(actor.req, 0),
+    isCommander,
+    activeBuffId: typeof actor.reqBuff === 'string' ? actor.reqBuff : null,
+    relayOwned,
+  });
+  if (!result.ok) return {ok: false, reason: result.reason ?? 'purchase'};
+  actor.req = result.balanceAfter;
+  actor.reqSpent = num(actor.reqSpent, 0) + num(result.cost, 0);
+  actor.reqBuff = item.id;
+  if (item.id === 'field-repair') actor.health = Math.min(num(actor.maxHealth, actor.health), num(actor.health, 0) + 50);
+  else if (item.id === 'overshield') actor.temporaryShield = Math.max(num(actor.temporaryShield, 0), 50);
+  else if (item.id === 'haste') {
+    actor.powerups ??= {};
+    actor.powerups.haste = Math.max(num(actor.powerups.haste, 0), 15);
+    match?.refreshPowerups?.(actor);
+  } else if (item.id === 'ammo-crate' && Array.isArray(actor.ammo)) {
+    for (let index = 0; index < actor.ammo.length; index++) {
+      if (actor.ammo[index] === Infinity) continue;
+      const weaponCap = match?.weaponForIndex?.(actor, index)?.cap;
+      if (Number.isFinite(weaponCap) && actor.ammo[index] < weaponCap) actor.ammo[index] = weaponCap;
+    }
+  }
+  match?.emit?.('cocs-buy', {actor: actor.id, team, itemId: item.id, cost: num(result.cost, 0), req: num(actor.req, 0)});
+  return {ok: true, reason: null, itemId: item.id, cost: num(result.cost, 0)};
+}
+
+/**
  * Section 11.4 per-team visibility. `intel`/`contacts` are computed separately
  * for each team so one shared value can never leak between sides. V1 still emits
  * every actor to every peer, so both teams receive equal values; the shape is
@@ -1617,6 +1772,16 @@ export function cocsSnapshot(match) {
         intel: {0: visibility0.intel, 1: visibility1.intel},
         contacts: {0: visibility0.contacts, 1: visibility1.contacts},
         roleBoard: {0: cocsRoleBoardSnapshot(match, state, 0), 1: cocsRoleBoardSnapshot(match, state, 1)},
+        // PvP-1 two-team command seat (§5.7/§11.3). The peer-id seat, live vote
+        // tally, route and policy ride the frozen snapshot so a reconnect resyncs
+        // the whole board. Pure numbers/strings, id-keyed by team.
+        commander: {
+          seat: {0: state.command?.seat?.[0] ?? null, 1: state.command?.seat?.[1] ?? null},
+          votes: {0: Object.keys(state.command?.votes?.[0] ?? {}).filter(key => state.command.votes[0][key] === true).length,
+                  1: Object.keys(state.command?.votes?.[1] ?? {}).filter(key => state.command.votes[1][key] === true).length},
+          route: {0: state.command?.route?.[0] ?? null, 1: state.command?.route?.[1] ?? null},
+          policy: {0: state.command?.policy?.[0] ?? null, 1: state.command?.policy?.[1] ?? null},
+        },
         sabotage: Object.keys(state.sabotage ?? {}).sort().map(nodeId => ({nodeId, ...state.sabotage[nodeId]})),
       };
     })()),

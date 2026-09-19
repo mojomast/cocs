@@ -1,6 +1,6 @@
 import {CHARACTERS,HARNESSES,WEAPONS,POWERUPS,ECONOMY_PICKUPS,economyPickup,RULES,resolveLoadout} from './data.mjs';
 import {MAPS,getMap,pickupWeapon} from './maps.mjs';
-import {normalizeConfig,DIFFICULTIES,GAME_MODES,spawnLoadout,spawnInventory,loadoutFor,loadoutAllows,loadoutStart,mutatorEffects,modeWeapon,modeRule,teamMode,isCocsMode} from './config.mjs';
+import {normalizeConfig,DIFFICULTIES,GAME_MODES,spawnLoadout,spawnInventory,loadoutFor,loadoutAllows,loadoutStart,mutatorEffects,modeWeapon,modeRule,teamMode,isCocsMode,cocsRung} from './config.mjs';
 import {COOP_GARRISON_BOTS,COOP_TEAM_FLOOR} from './cocs-difficulty.mjs';
 import {abilityOf,harnessAbility,harnessVehicle,harnessWeaponHandling} from './harness-profiles.mjs';
 import {passiveBonus,passiveEffect,passiveScale,riderAmount,riderBonus,riderEffect,riderNumber,riderScale} from './spec-effects.mjs';
@@ -15,7 +15,7 @@ import {floorHeightAtLattice,makeFloorQuery} from './floor-lattice.mjs';
 import {blockObstructed,blockSupportTop,candidates,collisionHash,NAV_BAKE_VERSION,rayWorldBlockHit} from './spatial.mjs';
 import {createVehicle,GUNTRUCK,respawnVehicle,stepVehicle,stepVehicleWeapon,vehicleCanEnter,vehicleMuzzles,vehicleSeatFor,vehicleSeatPosition,vehicleMounted,takeVehicleSeat,leaveVehicleSeat,vehicleSeatOpen} from './vehicles.mjs';
 import {objectiveTemplate} from './mode-data.mjs';
-import {cocsSnapshot,cocsSpotDamageScale,compareCocsOrders} from './cocs.mjs';
+import {cocsSnapshot,cocsSpotDamageScale,compareCocsOrders,cocsEconomyAction,cocsCommandAction,cocsBuyAction} from './cocs.mjs';
 import {coopBuyAction,coopCommandAction,coopTerminalAction} from './cocs-coop.mjs';
 import {arrivalDamageScale,depotApronImmune,noteVehicleUse} from './cocs-traversal.mjs';
 import {cocsDutyPolicy} from './cocs-bots.mjs';
@@ -304,7 +304,14 @@ export class Match{
     // `aiSeats` gives every seat (including the leading human seats) the bot AI,
     // and `botPolicy` overrides the AI policy for balance-neutral sweeps. Both
     // are harness-only: net/server never set them, so live paths are untouched.
-    this.config=normalizeConfig(options);this.mutators=mutatorEffects(this.config);this.loadout=resolveMatchLoadout(this.config);this.humanCount=Math.max(1,Math.min(Math.round(options.humanCount??1),isCocsMode(this.config)?COCS_HUMAN_LIMIT:8));if(this.humanCount+this.config.botCount>MAX_ACTORS)this.config.botCount=Math.max(0,MAX_ACTORS-this.humanCount);this.aiSeats=options.aiSeats===true;this.skipNav=options.skipNav===true;this.botPolicy=options.botPolicy??null;this.cocsPolicy=options.cocsPolicy??(isCocsMode(this.config)?cocsDutyPolicy:null);
+    this.config=normalizeConfig(options);this.mutators=mutatorEffects(this.config);this.loadout=resolveMatchLoadout(this.config);
+    // Human-seat ceiling. The COCS family admits up to 32 seats (`COCS_PLAYER_LIMIT`);
+    // a laddered PvP `cocs` rung narrows that to its published total so an 8v8
+    // room can never seat a 17th human. `cocs-coop` and every other mode keep
+    // their historical envelope.
+    const rungTable=isCocsMode(this.config)&&this.config.mode==='cocs'?cocsRung(this.config.rung):null;
+    const humanCap=isCocsMode(this.config)?(rungTable?rungTable.total:COCS_HUMAN_LIMIT):8;
+    this.humanCount=Math.max(1,Math.min(Math.round(options.humanCount??1),humanCap));if(this.humanCount+this.config.botCount>MAX_ACTORS)this.config.botCount=Math.max(0,MAX_ACTORS-this.humanCount);this.aiSeats=options.aiSeats===true;this.skipNav=options.skipNav===true;this.botPolicy=options.botPolicy??null;this.cocsPolicy=options.cocsPolicy??(isCocsMode(this.config)?cocsDutyPolicy:null);
     const vehicleMode=this.config.mode==='puma-race'||this.config.mode==='puma-soccer';
     if(vehicleMode){this.config.botCount=this.config.mode==='puma-soccer'?Math.max(0,Math.min(3,4-this.humanCount)):Math.min(this.config.botCount,8-this.humanCount);if(!getMap(mapId).race)mapId=this.config.mode==='puma-soccer'?'puma-pitch':'puma-circuit';}
     this.difficulty=DIFFICULTIES.find(d=>d.id===this.config.difficulty);this.arena=getMap(mapId);if(this.arena.terrain)bakeFloorQuery(this.arena);const nav=vehicleMode?{nodes:[],edges:[]}:matchNavigation(this.arena,{skipNav:this.skipNav});this.nav=nav.nodes;this.edges=nav.edges;{const arenaBounds=boundsOf(this.arena);this.center={x:(arenaBounds.minX+arenaBounds.maxX)/2,z:(arenaBounds.minZ+arenaBounds.maxZ)/2};}this.spawns=this.arena.spawns.map(([x,z])=>v(x,floorAt(x,z,this.arena),z));this.random=random;this.time=0;this.over=false;this.suddenDeath=false;this.armsraceWinner=null;this.events=[];this.feed=[];this.rockets=[];this.deployables=[];this.ropeLines=[];this.ropeSerial=0;this.pendingLoadouts=new Map();this.stats={shots:0,kills:0,pickups:0,powers:0,respawns:0,falls:0};this.serial=0;this.teamScores={0:0,1:0};this.vehicleHits=new Map();this.spawnHeat=new Map();
@@ -403,6 +410,18 @@ export class Match{
       const fill=Math.max(0,COOP_TEAM_FLOOR-human);
       if(botIndex<fill)return 0;
       return (botIndex-fill)<COOP_GARRISON_BOTS?1:0;
+     }
+     // LATTICE STRIKE PvP (section 3.1): the second human team. Humans alternate
+     // 0,1,0,1… so a two-client room always puts one human on each side, and bot
+     // seats fill the smaller side first so the published rung total stays level.
+     // Every other non-coop team mode keeps the historical `id % 2` seat.
+     if(isCocsMode(this.config)){
+      const human=Math.max(0,this.humanCount??0);
+      if(id<human)return id%2;
+      const botIndex=id-human;
+      // An odd human count leaves team 1 one seat short; the first bot fills it
+      // and the rest alternate, so `human + bot` per team stays balanced.
+      return (botIndex+(human%2))%2;
      }
      return id%2;
     }
@@ -718,7 +737,13 @@ export class Match{
      // the same deterministic `(tick, peerId, cardId)` sort. Non-coop `cocs` has
      // no spend window, so this is a no-op there.
      const spends=inputs?.cocs?.spends;
-     if(state.coop&&Array.isArray(spends)&&spends.length)(state.coop.pendingSpends??=[]).push(...spends);
+     if(Array.isArray(spends)&&spends.length){
+      if(state.coop)(state.coop.pendingSpends??=[]).push(...spends);
+      // PvP-1 role board: `spawn`/`reinforce` spend the team FLUX on a role the
+      // rung allows, gated by THREADS + affordability in the sim. Sorted on the
+      // same `(tick, peerId, cardId)` key as every other COCS record.
+      else for(const record of [...spends].sort(compareCocsOrders))cocsEconomyAction(this,state,record);
+     }
      // OPERATIONS (O1c) executor-lease request: any player may ask for the next
      // rotation. Queued here and consumed at the single fixed point in stepCoop.
      const lease=inputs?.cocs?.lease;
@@ -727,16 +752,22 @@ export class Match{
      // They are sorted by the same `(tick, peerId, cardId)` comparator as an
      // order, so outcome never depends on network arrival order (§11.6).
      const terminals=inputs?.cocs?.terminals;
-     if(state.terminals&&Array.isArray(terminals)&&terminals.length){
+     if(Array.isArray(terminals)&&terminals.length){
       for(const record of [...terminals].sort(compareCocsOrders))coopTerminalAction(this,state,record);
      }
      const commands=inputs?.cocs?.commands;
-     if(state.coop&&Array.isArray(commands)&&commands.length){
-      for(const record of [...commands].sort(compareCocsOrders))coopCommandAction(this,state,record);
+     if(Array.isArray(commands)&&commands.length){
+      for(const record of [...commands].sort(compareCocsOrders)){
+       if(state.coop)coopCommandAction(this,state,record);
+       else cocsCommandAction(this,state,record);
+      }
      }
      const buys=inputs?.cocs?.buys;
-     if(state.coop&&Array.isArray(buys)&&buys.length){
-      for(const record of [...buys].sort(compareCocsOrders))coopBuyAction(this,state,record);
+     if(Array.isArray(buys)&&buys.length){
+      for(const record of [...buys].sort(compareCocsOrders)){
+       if(state.coop)coopBuyAction(this,state,record);
+       else cocsBuyAction(this,state,record);
+      }
      }
     }
     power(a){if(this.race||this.over||a.health<=0||a.cooldown>0||this.mutators.instagib||this.flagCarrier(a)||a.isVip===true||a.movement?.carrier?.suppressActive===true)return false;const h=HARNESSES.find(h=>h.id===a.harness),ability=harnessAbility(a.harness)||h;const harness=a.harness;a.protection=0;a.cooldown=Math.max(0,(ability.cooldown??h.cooldown)*(this.mutators.fastPowers?.5:1)*a.cooldownMultiplier+riderBonus(a.character,harness,'cooldown',0,{trigger:'end'}));a.active=(ability.duration??h.duration)+riderBonus(a.character,harness,'duration',0,{trigger:'activate'});a.activeSpeedMultiplier=ability.speed??h.magnitude??1;this.stats.powers++;this.emit('power',{actor:a.id,harness,pos:eye(a),duration:a.active});

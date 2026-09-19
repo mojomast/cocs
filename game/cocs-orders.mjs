@@ -759,9 +759,13 @@ export function cocsBoardView(board, snapshot, player, options = {}) {
         reason: terminal.stateLabel,
       });
     }
-    // NEEDS YOU: the shared gates. Only surface one card per gate.
-    const threadsCap = num(command?.threads?.cap, 0);
-    const threadsUsed = num(command?.threads?.used, 0);
+    // NEEDS YOU: the shared gates. Only surface one card per gate. PvP-1 reads
+    // the player's own team board (per-team THREADS) when the rung is live;
+    // co-op falls back to the flat `command.threads` it always had.
+    const boardTeam = player?.team === 1 ? 1 : 0;
+    const roleThreads = snapshot?.roleBoard?.[boardTeam]?.threads ?? null;
+    const threadsCap = num(roleThreads?.cap, num(command?.threads?.cap, 0));
+    const threadsUsed = num(roleThreads?.used, num(command?.threads?.used, 0));
     const front = board.front;
     if (threadsCap > 0 && threadsUsed >= threadsCap) raw.push({
       id: 'gate-threads', verb: 'HOLD', target: front?.id ?? null, agent: 'scrapper',
@@ -1100,9 +1104,16 @@ export function cocsCommandView(board, snapshot, player, strip) {
   const scanLabel = scanNode === null || scanNode === undefined ? null : nodeLabels[String(scanNode)]?.label ?? String(scanNode);
   const traversal = cocsTraversalView(snapshot, player);
   const terminals = cocsTerminalView(snapshot, player, board);
+  // PvP-1 rung + own-team role board (section 3.1/§11.3). Null for co-op and
+  // every non-laddered match, so the existing HUD stays mode-isolated.
+  const team = economy?.team ?? (player?.team === 1 ? 1 : 0);
+  const roleBoard = snapshot.roleBoard?.[team] ?? null;
   return {
     board,
     economy,
+    rung: snapshot.rung ?? null,
+    roleBoard,
+    commander: snapshot.commander ?? null,
     spots: economy?.spots ?? [],
     scanTarget: {nodeId: scanNode ?? null, label: scanLabel, active: economy?.scan?.active === true},
     strip: view,

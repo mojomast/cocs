@@ -68,6 +68,42 @@ export function cocsRoleAllowed(rung,role){
  if(!table)return true;
  return table.roles.includes(String(role??'').trim().toLowerCase());
 }
+// ---------------------------------------------------------------------------
+// Lobby/queue plan (section 3.1). A rung is only entered when its human floor
+// is met; below the floor the queue falls back to the rung below (and below
+// 4v4 the room routes to OPERATIONS or the practice sandbox). This is the one
+// serializable descriptor the server publishes to the lobby and the matchmaker
+// so the UI can say exactly why a rung is (or is not) open. `botFill` is the
+// stable bot ratio used to top a started match up to the rung's total; it is
+// only applied once `meetsMinimum` is true so a rung is never silently
+// auto-started on a bot majority. Pure, frozen, no clock.
+// ---------------------------------------------------------------------------
+export function cocsRungPlan(rung,humans){
+ const table=cocsRung(rung);
+ if(!table)return null;
+ const present=Math.max(0,Math.min(table.total,Math.round(Number(humans)||0)));
+ const meetsMinimum=cocsRungMeetsMinimum(table.id,present);
+ return Object.freeze({
+  id:table.id,
+  name:table.name,
+  variant:table.variant,
+  perTeam:table.perTeam,
+  total:table.total,
+  humans:present,
+  minHumans:table.minHumans,
+  meetsMinimum,
+  belowMinimum:!meetsMinimum,
+  botFill:cocsRungFill(table.id,present),
+  roleAllow:Object.freeze([...table.roles]),
+ });
+}
+/** The rung below `rung` in the published ladder, or null at the floor. */
+export function cocsRungBelow(rung){
+ const table=cocsRung(rung);
+ if(!table)return null;
+ const index=COCS_RUNG_IDS.indexOf(table.id);
+ return index>0?COCS_RUNG_IDS[index-1]:null;
+}
 /** The role allow-list for a rung (all five when the rung is unknown). */
 export function cocsRungRoles(rung){
  return [...(cocsRung(rung)?.roles??COCS_RUNGS['8v8'].roles)];

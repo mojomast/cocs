@@ -1,15 +1,16 @@
 import {Match} from '../game/core.mjs';
-import {normalizeConfig,teamMode,isCocsMode} from '../game/config.mjs';
+import {normalizeConfig,teamMode,isCocsMode,cocsRung,cocsRungPlan,cocsRungBelow} from '../game/config.mjs';
 import {movementModeRule} from '../game/movement.mjs';
 import {isSinglePlayerMode} from '../game/singleplayer.mjs';
 import {actorWon} from '../game/outcome.mjs';
 import {getMap} from '../game/maps.mjs';
 import {resolveMapForMode} from '../game/arenas.mjs';
 import {CHARACTERS,resolveLoadout,RULES} from '../game/data.mjs';
-import {COCS_ORDER_LOG_LIMIT,capturableBy,nodeById} from '../game/cocs.mjs';
+import {COCS_ORDER_LOG_LIMIT,capturableBy,nodeById,cocsRoleAllowedOnRung,cocsThreadsUsed} from '../game/cocs.mjs';
 import {COOP_BIG_SINKS,coopCommandState,coopOrderGate,coopSpendGate,intermissionOpen} from '../game/cocs-coop.mjs';
 import {coopSink} from '../game/cocs-difficulty.mjs';
 import {TERMINAL_KINDS} from '../game/cocs-terminals.mjs';
+import {coopRole} from '../game/cocs-roles.mjs';
 import {SUBAGENTS,reqItem,reqPurchase} from '../game/cocs-economy.mjs';
 import {randomUUID} from 'node:crypto';
 import {validPlayerId,sanitizeText,parseInputEnvelope,PROTOCOL_VERSION,SNAPSHOT_DELTA_VERSION,SNAPSHOT_DELTA_MIN_BYTES,snapshotDelta,wireSize,MESSAGE,COCS_REJECT_LIMIT,parseOrderMessage,parseEconomyMessage,parseTerminalMessage,parseCommandMessage,parseBuyMessage} from '../game/protocol.mjs';
@@ -181,6 +182,11 @@ export class Room {
    if (!gate.ok) { this.noteOrderReject(state, record, gate.reason ?? 'blocked'); return this.rejectCocs(peerId, parsed.cardId, gate.reason ?? 'blocked', { verb: parsed.verb, target: parsed.target }); }
    const command = coopCommandState(this.match, state);
    if (parsed.verb === 'SCAN' && command && command.threads.used >= command.threads.cap) { this.noteOrderReject(state, record, 'no-thread'); return this.rejectCocs(peerId, parsed.cardId, 'no-thread', { verb: parsed.verb, target: parsed.target }); }
+  } else if (parsed.verb === 'SCAN') {
+   // PvP-1 THREADS gate (the co-op executor lease has no PvP analogue): a SCAN
+   // spawns a scout that itself occupies one of the team's threads.
+   const cap = num(state.threads?.[team]?.cap, 3);
+   if (cocsThreadsUsed(this.match, state, team) >= cap) { this.noteOrderReject(state, record, 'no-thread'); return this.rejectCocs(peerId, parsed.cardId, 'no-thread', { verb: parsed.verb, target: parsed.target }); }
   }
   this.pendingCocs.orders.push(record);
   this.recordCocsCard(parsed.cardId, { verb: parsed.verb, target: parsed.target, agent: parsed.agent ?? null, team, peerId: String(peerId), state: 'running', blocker: null, reason: null, ok: true });
@@ -194,8 +200,28 @@ export class Room {
   const parsed = parseEconomyMessage(msg);
   if (!parsed) return this.rejectCocs(peerId, msg?.cardId ?? null, 'malformed');
   const state = this.match.objectiveState;
-  if (!state || state.kind !== 'cocs' || !state.coop) return this.rejectCocs(peerId, parsed.cardId, 'no-coop', { action: parsed.action });
+  if (!state || state.kind !== 'cocs') return this.rejectCocs(peerId, parsed.cardId, 'no-objective', { action: parsed.action });
   const team = actor.team === 1 ? 1 : 0;
+  // PvP-1 role board (§11.2): `spawn`/`reinforce` buys one role from the team's
+  // rung allow-list under the same THREADS + FLUX gate the duty Chief uses.
+  // Sinks with no PvP implementation are refused, never silently dropped.
+  if (!state.coop) {
+   if (parsed.action === 'opt-out-orders') {
+    this.pendingCocs.commands.push({ tick: this.cocsTick(), peerId: String(peerId), cardId: parsed.cardId, team, action: 'opt-out-orders', value: null, actorId: actor.id });
+    this.recordCocsCard(parsed.cardId, { verb: 'OPT-OUT-ORDERS', target: null, team, peerId: String(peerId), state: 'running', blocker: null, reason: null, ok: true });
+    return true;
+   }
+   if (parsed.action !== 'spawn' && parsed.action !== 'reinforce') return this.rejectCocs(peerId, parsed.cardId, 'no-sink', { action: parsed.action });
+   const role = String(parsed.role ?? 'fighter').trim().toLowerCase();
+   if (!cocsRoleAllowedOnRung(state, role)) return this.rejectCocs(peerId, parsed.cardId, 'role', { role });
+   if (cocsThreadsUsed(this.match, state, team) >= num(state.threads?.[team]?.cap, 3)) return this.rejectCocs(peerId, parsed.cardId, 'no-thread', { role });
+   const cost = role === 'scout' ? COCS_SCAN_COST : num(coopRole(role)?.spawnCost, 0);
+   if (num(state.flux?.[team], 0) + 1e-9 < cost) return this.rejectCocs(peerId, parsed.cardId, 'flux', { role });
+   if (role === 'scout' && !nodeById(state, parsed.target)) return this.rejectCocs(peerId, parsed.cardId, 'target', { role });
+   this.pendingCocs.spends.push({ tick: this.cocsTick(), peerId: String(peerId), cardId: parsed.cardId, action: parsed.action, role, target: parsed.target ?? null, team });
+   this.recordCocsCard(parsed.cardId, { verb: role === 'scout' ? 'SCAN' : 'REINFORCE', target: parsed.target ?? null, role, team, peerId: String(peerId), state: 'running', blocker: null, reason: null, ok: true });
+   return true;
+  }
   if (parsed.action === 'opt-out-orders') {
    this.pendingCocs.commands.push({ tick: this.cocsTick(), peerId: String(peerId), cardId: parsed.cardId, team, action: 'opt-out-orders', value: null, actorId: actor.id });
    this.recordCocsCard(parsed.cardId, { verb: 'OPT-OUT-ORDERS', target: null, team, peerId: String(peerId), state: 'running', blocker: null, reason: null, ok: true });
@@ -228,10 +254,13 @@ export class Room {
   const parsed = parseTerminalMessage(msg);
   if (!parsed) return this.rejectCocs(peerId, msg?.cardId ?? null, 'malformed');
   const state = this.match.objectiveState;
-  if (!state || state.kind !== 'cocs' || !state.terminals) return this.rejectCocs(peerId, parsed.cardId, 'no-terminals', { action: parsed.action });
+  // PvPvE `cocs` has no terminals, but it does have the §6A traversal device
+  // layer (cut/lock/repair on neutral devices). `cocs-coop` has both. Only
+  // refuse when neither exists.
+  if (!state || state.kind !== 'cocs' || (!state.terminals && !state.traversal?.devices)) return this.rejectCocs(peerId, parsed.cardId, 'no-terminals', { action: parsed.action });
   const actorId = parsed.actorId ?? actor.id;
   if (actorId !== actor.id) return this.rejectCocs(peerId, parsed.cardId, 'wrong-actor', { action: parsed.action });
-  const terminal = state.terminals.terminals?.[parsed.terminalId] ?? null;
+  const terminal = state.terminals?.terminals?.[parsed.terminalId] ?? null;
   const device = state.traversal?.devices?.[parsed.terminalId] ?? null;
   if (!terminal && !device) return this.rejectCocs(peerId, parsed.cardId, 'missing', { action: parsed.action });
   const team = actor.team === 1 ? 1 : 0;
@@ -240,7 +269,13 @@ export class Room {
    if (parsed.action === 'deploy' && terminal.owner !== team) return this.rejectCocs(peerId, parsed.cardId, 'not-owned', { action: parsed.action });
    if ((parsed.action === 'hack' || parsed.action === 'cut') && terminal.state !== 'live') return this.rejectCocs(peerId, parsed.cardId, 'terminal-state', { action: parsed.action });
    if (Math.hypot(num(actor.x, 0) - num(terminal.x, 0), num(actor.z, 0) - num(terminal.z, 0)) > num(kind?.reach, 6)) return this.rejectCocs(peerId, parsed.cardId, 'range', { action: parsed.action });
-   if (parsed.action === 'vault-pull' && num(state.flux?.[0], 0) + 1e-9 < num(TERMINAL_KINDS.VAULT?.pullCost, 8)) return this.rejectCocs(peerId, parsed.cardId, 'flux', { action: parsed.action });
+   if (parsed.action === 'vault-pull' && num(state.flux?.[team], 0) + 1e-9 < num(TERMINAL_KINDS.VAULT?.pullCost, 8)) return this.rejectCocs(peerId, parsed.cardId, 'flux', { action: parsed.action });
+  } else if (device) {
+   // Traversal devices are neutral: validate the action belongs to the device
+   // state and that the actor is within the §6A interact reach.
+   const reach = 6;
+   if (Math.hypot(num(actor.x, 0) - num(device.from?.x, 0), num(actor.z, 0) - num(device.from?.z, 0)) > reach + 1e-6) return this.rejectCocs(peerId, parsed.cardId, 'range', { action: parsed.action });
+   if (parsed.action === 'repair' ? device.state === 'live' : device.state !== 'live') return this.rejectCocs(peerId, parsed.cardId, 'device-state', { action: parsed.action });
   }
   this.pendingCocs.terminals.push({ tick: this.cocsTick(), peerId: String(peerId), cardId: parsed.cardId, terminalId: parsed.terminalId, action: parsed.action, actorId: actor.id });
   this.recordCocsCard(parsed.cardId, { verb: parsed.action.toUpperCase(), target: parsed.terminalId, team, peerId: String(peerId), state: 'running', blocker: null, reason: null, ok: true });
@@ -254,9 +289,13 @@ export class Room {
   const parsed = parseCommandMessage(msg);
   if (!parsed) return this.rejectCocs(peerId, msg?.cardId ?? null, 'malformed');
   const state = this.match.objectiveState;
-  if (!state || state.kind !== 'cocs' || !state.coop) return this.rejectCocs(peerId, parsed.cardId, 'no-command', { action: parsed.action });
+  // PvP-1: `cocs` runs a per-team command seat (§5.7); `cocs-coop` keeps its
+  // own `state.coop` command surface. Both are team-scoped: a peer can only
+  // touch the seat for its own actor's team.
+  if (!state || state.kind !== 'cocs') return this.rejectCocs(peerId, parsed.cardId, 'no-command', { action: parsed.action });
   const team = actor.team === 1 ? 1 : 0;
-  if (parsed.action === 'release' && (state.coop.commandSeat?.[team] ?? null) !== String(peerId)) return this.rejectCocs(peerId, parsed.cardId, 'not-commander', { action: parsed.action });
+  const seat = state.coop ? state.coop.commandSeat?.[team] ?? null : state.command?.seat?.[team] ?? null;
+  if (parsed.action === 'release' && seat !== String(peerId)) return this.rejectCocs(peerId, parsed.cardId, 'not-commander', { action: parsed.action });
   this.pendingCocs.commands.push({ tick: this.cocsTick(), peerId: String(peerId), cardId: parsed.cardId, team, action: parsed.action, value: parsed.value, actorId: actor.id });
   this.recordCocsCard(parsed.cardId, { verb: parsed.action.toUpperCase(), target: null, team, peerId: String(peerId), state: 'running', blocker: null, reason: null, ok: true });
   return true;
@@ -269,7 +308,7 @@ export class Room {
   const parsed = parseBuyMessage(msg);
   if (!parsed) return this.rejectCocs(peerId, msg?.cardId ?? null, 'malformed');
   const state = this.match.objectiveState;
-  if (!state || state.kind !== 'cocs' || !state.coop) return this.rejectCocs(peerId, parsed.cardId, 'no-coop', { itemId: parsed.itemId });
+  if (!state || state.kind !== 'cocs') return this.rejectCocs(peerId, parsed.cardId, 'no-objective', { itemId: parsed.itemId });
   const actorId = parsed.actorId ?? actor.id;
   if (actorId !== actor.id) return this.rejectCocs(peerId, parsed.cardId, 'wrong-actor', { itemId: parsed.itemId });
   const item = reqItem(parsed.itemId);
@@ -277,9 +316,12 @@ export class Room {
   if (item.launch !== true) return this.rejectCocs(peerId, parsed.cardId, 'not-launched', { itemId: parsed.itemId });
   const team = actor.team === 1 ? 1 : 0;
   const relayOwned = (state.nodes ?? []).some(node => node && node.archetype === 'relay' && node.owner === team);
+  // Commander-only items read the PvP command seat in PvP and the co-op seat in
+  // OPERATIONS; both are team-scoped and resolved from the authoritative actor.
+  const isCommander = state.coop ? state.coop.commandSeat?.[team] === String(peerId) : state.command?.seat?.[team] === String(peerId);
   const result = reqPurchase(parsed.itemId, {
    balance: num(actor.req, 0),
-   isCommander: state.coop.commandSeat?.[team] === String(peerId),
+   isCommander,
    activeBuffId: typeof actor.reqBuff === 'string' ? actor.reqBuff : null,
    relayOwned,
   });
@@ -294,6 +336,42 @@ export class Room {
  }
  summary() {
   return { roomId: this.id, name: this.name, players: [...this.peers.values()].filter(p => p.disconnectedAt === null).length, started: this.started, mapId: this.mapId, config: this.config ? { ...this.config } : null };
+ }
+ // -------------------------------------------------------------------
+ // LATTICE STRIKE PvP rung (§3.1). `cocs-coop` is rung-free by construction;
+ // a PvP `cocs` room with no explicit rung is a practice match and reports
+ // `practice:true`. The plan is recomputed from the live seat count so the
+ // lobby always states the human floor, the exact bot fill a start would use,
+ // and whether the rung is below minimum (with the fallback rung, if any).
+ // -------------------------------------------------------------------
+ cocsRungInfo() {
+  const mode = this.config?.mode ?? null;
+  if (mode !== 'cocs') return { pvp: false, rung: null, plan: null, practice: false };
+  const rung = cocsRung(this.config?.rung)?.id ?? null;
+  if (!rung) return { pvp: true, practice: true, rung: null, plan: null };
+  const humans = [...this.peers.values()].filter(p => p.spectate !== true).length;
+  return { pvp: true, practice: false, rung, plan: cocsRungPlan(rung, humans) };
+ }
+ cocsLobby() {
+  const info = this.cocsRungInfo();
+  if (!info.pvp) return null;
+  if (!info.plan) return { rung: null, practice: true };
+  const plan = info.plan;
+  return {
+   rung: info.rung,
+   practice: false,
+   name: plan.name,
+   variant: plan.variant,
+   perTeam: plan.perTeam,
+   total: plan.total,
+   humans: plan.humans,
+   minHumans: plan.minHumans,
+   meetsMinimum: plan.meetsMinimum,
+   belowMinimum: plan.belowMinimum,
+   botFill: plan.botFill,
+   roleAllow: [...plan.roleAllow],
+   fallback: plan.belowMinimum ? (cocsRungBelow(info.rung) ?? null) : null,
+  };
  }
  // Outbound snapshots are quantized from a deep copy so the authoritative match
  // state (shared nested references such as powerups/gear) is never mutated.
@@ -338,7 +416,7 @@ export class Room {
  }
  lobby() {
   return { type: 'lobby', roomId: this.id, name: this.name, hostId: this.hostId, started: this.started,
-   config: this.config ? { ...this.config } : null, mapId: this.mapId, lifecycle: this.lifecycle(),
+   config: this.config ? { ...this.config } : null, mapId: this.mapId, lifecycle: this.lifecycle(), cocs: this.cocsLobby(),
    players: [...this.peers.values()].map(p => ({ peerId: p.id, name: p.name, character: p.character, harness: p.harness, actorId: p.actorId, ready: this.ready.has(p.id) || p.ready, connected: p.disconnectedAt === null, spectate: p.spectate === true, voiceSession: p.voiceSession })) };
  }
  // Mark a player ready for the warmup gate. Ready state is keyed by the stable
@@ -505,7 +583,23 @@ export class Room {
   const mapId = resolveMapForMode(this.mapId, mode, { legacy: true });
   if (mapId !== this.mapId) this.mapId = mapId;
   const humanCount = Math.min(playerLimit(mode), players.length);
-    this.match = new Match('chatgpt', 'openclaw', this.random, this.mapId, { ...this.config ?? {}, humanCount, loadouts: players.map(p => { const profile = this.progressProfile(p); return { character: p.character, harness: p.harness, gear: profile?.gear, attachments: profile?.attachments, finish: profile?.finish }; }) });
+    // LATTICE STRIKE PvP rung gate (§3.1). A laddered `cocs` room only starts on
+    // its published human floor; below the floor it refuses and names the rung
+    // fallback (or OPERATIONS / the practice sandbox) instead of silently bot-
+    // filling a rung. Once the floor is met the remaining seats are bots at a
+    // stable ratio for the whole match (no mid-match bot-ratio changes).
+    const rung = mode === 'cocs' ? cocsRung(this.config?.rung)?.id ?? null : null;
+    let startConfig = { ...this.config ?? {} };
+    if (rung) {
+     const plan = cocsRungPlan(rung, humanCount);
+     if (!plan || !plan.meetsMinimum) {
+      const fallback = cocsRungBelow(rung);
+      this.send(peerId, { type: 'error', message: plan ? `below-minimum: ${rung} needs ${plan.minHumans} humans (have ${plan.humans})${fallback ? ` — fall back to ${fallback}` : ' — use LATTICE STRIKE: OPERATIONS or the practice sandbox'}` : 'below-minimum' });
+      return false;
+     }
+     startConfig = { ...startConfig, rung, botCount: Math.max(Number(startConfig.botCount) || 0, plan.botFill) };
+    }
+    this.match = new Match('chatgpt', 'openclaw', this.random, this.mapId, { ...startConfig, humanCount, loadouts: players.map(p => { const profile = this.progressProfile(p); return { character: p.character, harness: p.harness, gear: profile?.gear, attachments: profile?.attachments, finish: profile?.finish }; }) });
    if (this.match.race) this.config = { ...this.match.config };
   let i = 0;
    for (const p of players) { p.actorId = i; this.match.actors[i].name = p.name; p.latest = null; p.receivedSeq = p.latestSeq = p.appliedSeq = 0; p.lastSerial = 0; p.edgeJump = p.edgePower = p.edgeInteract = false; p.lastJump = p.lastPower = p.lastInteract = false; p.edgeMelee = p.lastMelee = false; p.edgeReload = p.lastReload = false; p.edgeGrenade = false; p.lastGrenade = false; i++; }
