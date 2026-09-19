@@ -417,7 +417,8 @@ test('the PlayingHud strip is wired to the page cocs command bag', async () => {
   const page = await readFile(new URL('app/page.tsx', root), 'utf8');
   const hud = await readFile(new URL('app/ui/screens/PlayingHud.tsx', root), 'utf8');
   for (const token of ['cocsCommand', 'armCocsVerb', 'pickCocsTarget', 'issueCocsOrder']) assert.ok(page.includes(token), `page wires ${token}`);
-  assert.ok(page.includes('cocs:{orders:cocsOrders}'), 'issued orders enter Match.step through the human path');
+  assert.ok(page.includes('cocs:{orders:cocsOrders'), 'issued orders enter Match.step through the human path');
+  assert.ok(page.includes('spends:cocsSpends'), 'queued intermission spends enter Match.step through the same path');
   assert.ok(hud.includes('cocsCommand') && hud.includes('ISSUE') && hud.includes('SCAN'), 'the strip renders its verbs and confirm');
   assert.ok(hud.includes('radar-spotted'), 'the radar renders the spot mark');
 });

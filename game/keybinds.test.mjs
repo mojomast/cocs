@@ -46,7 +46,7 @@ test('codes resolve to actions and conflicts are reported', () => {
 
 test('mobility binds to KeyX and stays remappable like every other action', () => {
   assert.equal(DEFAULT_BINDINGS.mobility, 'KeyX');
-  assert.equal(KEYBIND_ACTIONS.length, 17, '13 historical actions plus mobility and the three command-strip verbs');
+  assert.equal(KEYBIND_ACTIONS.length, 20, '17 historical actions plus the three O1c command surfaces');
   assert.ok(KEYBIND_OPTIONS.includes('KeyX'), 'KeyX is offered in the settings dropdown');
   assert.deepEqual(rebindAction(DEFAULT_BINDINGS, 'mobility', 'KeyZ'), {...DEFAULT_BINDINGS, mobility: 'KeyZ'});
   assert.deepEqual(normalizeBindings({mobility: 'nonsense'}).mobility, 'KeyX');

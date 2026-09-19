@@ -564,6 +564,469 @@ export function cocsTraversalView(snapshot, player) {
   };
 }
 
+// ---------------------------------------------------------------------------
+// O1c — the command board (design §5.1/§5.4/§5.8), between-wave spend window
+// (§5.2 of COCS-OPERATIONS) and terminals/roles (§12.3a). Everything here is a
+// pure read of the frozen snapshot plus the already-derived `board`; the UI
+// components are dumb renderers. Card telemetry is still thin on the sim side,
+// so the derivations below prefer an explicit `snapshot.cards` (or
+// `snapshot.command.cards`) array when a future wave exposes one and otherwise
+// synthesise the exception list from the signals that already exist: the order
+// log, the live scout, the traversal channel, terminals and the command gates.
+// ---------------------------------------------------------------------------
+
+/** The board never takes more than 42% of the viewport width (spec §5.4). */
+export const COCS_BOARD_WIDTH_PERCENT = 42;
+/** At most 6–8 cards on the face; everything else is a count behind an expander. */
+export const COCS_BOARD_VISIBLE_CARDS = 8;
+export const COCS_BOARD_MIN_VISIBLE_CARDS = 6;
+export const COCS_BOARD_SECTION_LABELS = Object.freeze({needs: 'NEEDS YOU', running: 'RUNNING', done: 'DONE'});
+/** One vocabulary, everywhere: queued | running | blocked | done (§5.2). */
+export const COCS_BOARD_STATUS = Object.freeze({
+  queued: Object.freeze({label: 'QUEUED', mark: '◷'}),
+  running: Object.freeze({label: 'RUNNING', mark: '▶'}),
+  blocked: Object.freeze({label: 'BLOCKED', mark: '⚠'}),
+  done: Object.freeze({label: 'DONE', mark: '✔'}),
+});
+/** One blocker reason vocabulary (§5.1). */
+export const COCS_BLOCKER_LABELS = Object.freeze({
+  contested: 'CONTESTED',
+  'no-relay': 'NO RELAY',
+  'out-of-flux': 'OUT OF FLUX',
+  'no-thread': 'NO THREAD',
+  dependency: 'DEPENDENCY',
+});
+const COCS_BOARD_VERB_MARKS = Object.freeze({
+  SCAN: '⌖', MOVE: '➤', HOLD: '⛨', ATTACK: '⚔', BUILD: '⚒',
+  FORTIFY: '▤', REPAIR: '✚', RESUPPLY: '⇪', REINFORCE: '✦',
+  HACK: '⌨', DEPLOY: '◱', VAULT: '▣',
+});
+const COCS_AGENT_LABELS = Object.freeze({
+  scrapper: 'SCRAPPER', adept: 'ADEPT', oracle: 'ORACLE',
+  scout: 'SCOUT', fighter: 'FIGHTER', harvester: 'HARVESTER', builder: 'BUILDER', saboteur: 'SABOTEUR', chief: 'CHIEF',
+});
+const COCS_BOARD_STATUS_IDS = Object.freeze(['queued', 'running', 'blocked', 'done']);
+const COCS_BOARD_BLOCKER_IDS = Object.freeze(Object.keys(COCS_BLOCKER_LABELS));
+const COCS_TERMINAL_KINDS = Object.freeze({
+  HACK: Object.freeze({label: 'HACK', mark: '⌨', prompt: 'HACK THE RELAY'}),
+  DEPLOY: Object.freeze({label: 'DEPLOY', mark: '◱', prompt: 'DEPLOY THE BEACON'}),
+  VAULT: Object.freeze({label: 'VAULT', mark: '▣', prompt: 'CRACK THE VAULT'}),
+});
+const COCS_TERMINAL_STATES = Object.freeze({
+  locked: Object.freeze({label: 'LOCKED', mark: '▣'}),
+  available: Object.freeze({label: 'AVAILABLE', mark: '▷'}),
+  active: Object.freeze({label: 'ACTIVE', mark: '◈'}),
+  complete: Object.freeze({label: 'COMPLETE', mark: '✔'}),
+  blocked: Object.freeze({label: 'BLOCKED', mark: '⚠'}),
+  contested: Object.freeze({label: 'CONTESTED', mark: '⚑'}),
+});
+
+const clamp01 = value => Math.max(0, Math.min(1, num(value, 0)));
+const cocsBoardCostPips = (cost, flux) => {
+  const c = num(cost, 0);
+  if (c <= 0) return 0;
+  const pool = Math.max(1, num(flux, 0));
+  return Math.max(1, Math.min(5, Math.ceil((c / pool) * 5)));
+};
+const boardStatusId = value => (COCS_BOARD_STATUS_IDS.includes(String(value)) ? String(value) : 'queued');
+const boardBlockerId = value => (COCS_BOARD_BLOCKER_IDS.includes(String(value)) ? String(value) : 'dependency');
+
+/**
+ * Normalize one card. `options.cards` / `snapshot.cards` entries already in the
+ * card schema pass straight through with defaults filled in.
+ */
+function cocsBoardCard(input, ctx = {}) {
+  const source = input && typeof input === 'object' ? input : {};
+  const verb = String(source.verb ?? 'HOLD').toUpperCase();
+  const status = boardStatusId(source.status);
+  const blocker = status === 'blocked' ? boardBlockerId(source.blocker) : null;
+  const cost = num(source.cost, 0);
+  const flux = num(ctx.flux, 0);
+  const target = source.target ?? null;
+  return {
+    id: String(source.id ?? `${verb}-${target ?? 'team'}`),
+    verb,
+    verbMark: COCS_BOARD_VERB_MARKS[verb] ?? '●',
+    target,
+    targetLabel: String(source.targetLabel ?? source.label ?? target ?? 'TEAM'),
+    agent: String(source.agent ?? 'chief').toLowerCase(),
+    agentLabel: source.agentLabel ?? COCS_AGENT_LABELS[String(source.agent ?? 'chief').toLowerCase()] ?? String(source.agent ?? 'CHIEF').toUpperCase(),
+    cost,
+    costPips: num(source.costPips, cocsBoardCostPips(cost, flux)),
+    status,
+    statusLabel: COCS_BOARD_STATUS[status].label,
+    statusMark: COCS_BOARD_STATUS[status].mark,
+    blocker,
+    blockerLabel: blocker ? COCS_BLOCKER_LABELS[blocker] : null,
+    reason: source.reason ?? (blocker ? COCS_BLOCKER_LABELS[blocker] : null),
+    etaSeconds: round(num(source.etaSeconds ?? source.eta, 0), 1),
+    owner: source.owner ?? null,
+    repeat: Math.max(0, Math.floor(num(source.repeat, 0))),
+    impact: String(source.impact ?? ''),
+    focus: Math.max(0, Math.min(100, num(source.focus, 0))),
+    confidence: ['good', 'fair', 'poor'].includes(source.confidence) ? source.confidence : null,
+    dep: source.dep ?? null,
+  };
+}
+
+const COCS_ORDER_FAIL_REASONS = Object.freeze({
+  contested: 'contested', 'no-relay': 'no-relay', flux: 'out-of-flux', 'out-of-flux': 'out-of-flux',
+  slice: 'out-of-flux', allowance: 'out-of-flux', executor: 'no-thread', thread: 'no-thread',
+  'no-thread': 'no-thread', dependency: 'dependency', target: 'dependency',
+});
+
+const cocsNodeLabel = (board, id) => {
+  const node = (board?.nodes ?? []).find(entry => String(entry?.id) === String(id));
+  return node?.label ?? (id === null || id === undefined ? 'TEAM' : String(id));
+};
+
+/** Pull an explicit card array from any of the places a wave may expose it. */
+function cocsExplicitCards(snapshot, options) {
+  for (const candidate of [options?.cards, snapshot?.cards, snapshot?.command?.cards, snapshot?.director?.cards]) {
+    if (Array.isArray(candidate) && candidate.length) return candidate;
+  }
+  return null;
+}
+
+function cocsOrderCards(snapshot, board) {
+  const log = Array.isArray(snapshot?.orderLog) ? snapshot.orderLog
+    : Array.isArray(snapshot?.command?.orderLog) ? snapshot.command.orderLog : [];
+  return log.filter(Boolean).slice(-8).map((entry, index) => {
+    const ok = entry.ok === true;
+    const reason = String(entry.reason ?? '');
+    const blocker = ok ? null : (COCS_ORDER_FAIL_REASONS[reason] ?? 'dependency');
+    return {
+      id: `order-${entry.cardId ?? `${entry.verb}-${entry.target}-${index}`}`,
+      verb: String(entry.verb ?? 'HOLD').toUpperCase(),
+      target: entry.target ?? null,
+      targetLabel: cocsNodeLabel(board, entry.target),
+      agent: String(entry.verb) === 'SCAN' ? 'scout' : 'chief',
+      status: ok ? 'done' : 'blocked',
+      blocker,
+      reason: reason ? String(reason).toUpperCase() : null,
+      owner: entry.peerId ?? null,
+    };
+  });
+}
+
+/**
+ * Derive the 3-section exception list (§5.1). Prefers an explicit card array;
+ * otherwise synthesises from the order log, scout, traversal channel, terminals
+ * and the shared command gates. Pure: no clock, no RNG.
+ */
+export function cocsBoardView(board, snapshot, player, options = {}) {
+  if (!board || !snapshot || typeof snapshot !== 'object') return null;
+  const economy = options.economy ?? null;
+  const traversal = options.traversal ?? cocsTraversalView(snapshot, player);
+  const terminals = options.terminals ?? cocsTerminalView(snapshot, player, board);
+  const flux = num(economy?.flux, num(snapshot?.flux?.[player?.team === 1 ? 1 : 0], 0));
+  const command = snapshot.command && typeof snapshot.command === 'object' ? snapshot.command : null;
+  const ctx = {flux};
+  const explicit = cocsExplicitCards(snapshot, options);
+  const raw = explicit ? [...explicit] : [...cocsOrderCards(snapshot, board)];
+
+  if (!explicit) {
+    // RUNNING: the live scout and any traversal channel.
+    if (economy?.scout?.alive) {
+      const scout = economy.scout;
+      raw.push({
+        id: 'scout', verb: 'SCAN', target: scout.node, agent: 'scout',
+        targetLabel: cocsNodeLabel(board, scout.node),
+        status: scout.idle ? 'blocked' : 'running',
+        blocker: scout.idle ? 'out-of-flux' : null,
+        reason: scout.idle ? 'AGENT IDLE' : null,
+        etaSeconds: 0,
+      });
+    }
+    if (traversal?.channelDevice && traversal.channel) {
+      raw.push({
+        id: `channel-${traversal.channelDevice.id}`, verb: 'BUILD', target: traversal.channelDevice.id,
+        agent: 'builder', targetLabel: traversal.channelDevice.label,
+        status: 'running', etaSeconds: traversal.channel.remainingSeconds,
+      });
+    }
+    for (const terminal of terminals?.terminals ?? []) {
+      if (terminal.state === 'active') raw.push({
+        id: `terminal-${terminal.id}`, verb: terminal.kind, target: terminal.id, agent: 'adept',
+        targetLabel: terminal.label, status: 'running',
+      });
+      else if (terminal.state === 'contested' || terminal.state === 'blocked') raw.push({
+        id: `terminal-${terminal.id}`, verb: terminal.kind, target: terminal.id, agent: 'adept',
+        targetLabel: terminal.label, status: 'blocked', blocker: terminal.state === 'contested' ? 'contested' : 'dependency',
+        reason: terminal.stateLabel,
+      });
+    }
+    // NEEDS YOU: the shared gates. Only surface one card per gate.
+    const threadsCap = num(command?.threads?.cap, 0);
+    const threadsUsed = num(command?.threads?.used, 0);
+    const front = board.front;
+    if (threadsCap > 0 && threadsUsed >= threadsCap) raw.push({
+      id: 'gate-threads', verb: 'HOLD', target: front?.id ?? null, agent: 'scrapper',
+      targetLabel: front?.label ?? 'TEAM', status: 'blocked', blocker: 'no-thread', reason: 'NO THREAD',
+      impact: `THREADS ${threadsUsed}/${threadsCap}`,
+    });
+    if (flux <= 0) raw.push({
+      id: 'gate-flux', verb: 'HOLD', target: front?.id ?? null, agent: 'scrapper',
+      targetLabel: front?.label ?? 'TEAM', status: 'blocked', blocker: 'out-of-flux', reason: 'OUT OF FLUX',
+    });
+    if (front?.contested && !front.mine) raw.push({
+      id: `gate-contested-${front.id}`, verb: 'HOLD', target: front.id, agent: 'fighter',
+      targetLabel: front.label, status: 'blocked', blocker: 'contested', reason: 'CONTESTED',
+      impact: `${front.progressPercent}% CAPTURED`,
+    });
+    // DONE: the completed-order tally, so the expander has real rows.
+    const completed = Math.max(0, Math.floor(num(snapshot?.orderStats?.completed, 0)));
+    for (let i = 0; i < completed; i++) raw.push({
+      id: `done-${i}`, verb: 'HOLD', target: null, agent: 'chief', targetLabel: 'COMPLETED WORK', status: 'done',
+    });
+  }
+
+  const cards = raw.filter(Boolean).map(card => cocsBoardCard(card, ctx));
+  const needs = cards.filter(card => card.status === 'blocked');
+  const running = cards.filter(card => card.status === 'running' || card.status === 'queued');
+  const done = cards.filter(card => card.status === 'done');
+  const visibleNeeds = needs.slice(0, COCS_BOARD_VISIBLE_CARDS);
+  const runningRoom = Math.max(0, COCS_BOARD_VISIBLE_CARDS - visibleNeeds.length);
+  const visibleRunning = running.slice(0, runningRoom);
+  const doneRoom = Math.max(0, runningRoom - visibleRunning.length);
+  const visibleDone = done.slice(0, doneRoom);
+  const section = (id, list, visible) => ({
+    id, label: COCS_BOARD_SECTION_LABELS[id], count: list.length,
+    cards: visible, hidden: Math.max(0, list.length - visible.length),
+    expandable: list.length > visible.length,
+  });
+  const sections = [section('needs', needs, visibleNeeds), section('running', running, visibleRunning), section('done', done, visibleDone)];
+  const visibleCards = sections.flatMap(entry => entry.cards);
+  return {
+    widthPercent: COCS_BOARD_WIDTH_PERCENT,
+    maxVisible: COCS_BOARD_VISIBLE_CARDS,
+    sections,
+    cards,
+    visibleCards,
+    visibleCount: visibleCards.length,
+    listboxIds: visibleCards.map(card => card.id),
+    summary: {
+      needsYou: needs.length,
+      running: running.length,
+      done: done.length,
+      blocked: needs.length,
+      chip: `⚠ ${needs.length} blocked · ▶ ${running.length}`,
+    },
+    hint: board.hint,
+    front: board.front ? {id: board.front.id, label: board.front.label, ownerLabel: board.front.ownerLabel} : null,
+  };
+}
+
+/** `aria-live` "Needs you" sentence for the board (§12.9). */
+export function cocsBoardAnnouncement(view) {
+  if (!view) return '';
+  const needs = view.sections.find(section => section.id === 'needs');
+  const count = needs?.count ?? 0;
+  if (!count) return 'Needs you: none.';
+  const first = needs.cards[0] ?? view.cards.find(card => card.status === 'blocked') ?? null;
+  const detail = first ? `${first.verb} ${first.targetLabel} blocked: ${first.blockerLabel ?? first.reason ?? 'BLOCKED'}` : 'blocked work';
+  return `Needs you: ${count}. ${detail}.`;
+}
+
+/** Keyboard listbox state for the board (§5.4: pointer-locked nav is keyboard-only). */
+export function cocsBoardListbox(view) {
+  const ids = view?.listboxIds ?? [];
+  return {index: 0, activeId: ids[0] ?? null, count: ids.length};
+}
+export function cocsBoardMove(state, delta, length) {
+  const count = Math.max(0, Math.floor(num(length, state?.count ?? 0)));
+  if (!count) return {index: 0, activeId: null, count: 0};
+  const from = Math.max(0, Math.min(count - 1, num(state?.index, 0)));
+  const index = ((from + num(delta, 0)) % count + count) % count;
+  return {index, activeId: state?.ids?.[index] ?? null, count};
+}
+export function cocsBoardSetActive(state, index, length) {
+  const count = Math.max(0, Math.floor(num(length, state?.count ?? 0)));
+  if (!count) return {index: 0, activeId: null, count: 0};
+  const clamped = Math.max(0, Math.min(count - 1, Math.floor(num(index, 0))));
+  return {index: clamped, activeId: state?.ids?.[clamped] ?? null, count};
+}
+
+/** Reduced-motion contract for the board/spend surfaces: snap, never animate. */
+export function cocsBoardMotion(reduced) {
+  const snap = reduced === true;
+  return {reduced: snap, snap, transitionSeconds: snap ? 0 : 0.18, sweep: !snap, flashRateCapHz: 2};
+}
+
+// ---------------------------------------------------------------------------
+// Between-wave spend window (COCS-OPERATIONS §5.2 / design §3.3).
+// ---------------------------------------------------------------------------
+function cocsAllowance(command, player, budget) {
+  const humans = Math.max(0, Math.floor(num(command?.humans, 0)));
+  const perPlayer = Math.max(0, Math.floor(num(command?.slicePerPlayer, 0))) || Math.max(1, humans);
+  const team = player?.team === 0 || player?.team === 1 ? Number(player.team) : 0;
+  const raw = command?.slices;
+  const peer = String(player?.peerId ?? player?.id ?? '');
+  let entry = null;
+  if (Array.isArray(raw)) entry = raw.find(slice => slice && String(slice.peerId ?? slice.playerId ?? slice.id) === peer) ?? raw[team] ?? raw[0] ?? null;
+  else if (raw && typeof raw === 'object') entry = raw[peer] ?? raw[team] ?? null;
+  const allowance = entry ? num(entry.allowance, 0) : Math.floor(num(budget, 0) / Math.max(1, perPlayer));
+  return {
+    humans,
+    perPlayer,
+    team,
+    allowance,
+    cap: entry ? num(entry.cap, allowance) : perPlayer,
+    remaining: entry ? num(entry.remaining ?? entry.allowance, allowance) : allowance,
+    playerId: entry ? String(entry.peerId ?? entry.playerId ?? peer) : null,
+  };
+}
+
+/**
+ * The intermission spend window as a pure read. `null` outside co-op or before a
+ * window exists, which keeps the panel mode-isolated. `sinks[].reason` is the
+ * single disable explanation the UI renders (never colour-only).
+ */
+export function cocsSpendView(snapshot, player) {
+  if (!snapshot || typeof snapshot !== 'object') return null;
+  const director = snapshot.director;
+  if (!director || typeof director !== 'object') return null;
+  const intermission = director.intermission;
+  if (!intermission || typeof intermission !== 'object') return null;
+  const command = snapshot.command && typeof snapshot.command === 'object' ? snapshot.command : null;
+  const tick = num(snapshot.tick, 0);
+  const open = intermission.open === true;
+  const budget = num(intermission.budget, num(snapshot.flux?.[0], 0));
+  const allowance = cocsAllowance(command, player, budget);
+  const sinks = (Array.isArray(intermission.sinks) ? intermission.sinks : []).filter(Boolean).map(sink => {
+    const verb = String(sink.verb ?? sink.id ?? '').toUpperCase();
+    const cost = num(sink.cost, 0);
+    const available = sink.available !== false;
+    const affordable = sink.affordable !== false && budget + 1e-9 >= cost;
+    // The sim is the authority on the gate. A wave that publishes an explicit
+    // slice enforcement flag (W21+) lets the HUD pre-block an overslice spend;
+    // until then the allowance is surfaced as an indicator only.
+    const sliceEnforced = command?.enforceSlices === true || sink.sliceEnforced === true || sink.sliceBlocked === true;
+    const sliceBlocked = sliceEnforced && allowance.cap > 0 && cost > allowance.remaining + 1e-9;
+    let reason = null;
+    if (!open) reason = 'WINDOW CLOSED';
+    else if (!available) reason = 'NOT AVAILABLE';
+    else if (!affordable) reason = 'FLUX LOW';
+    else if (sliceBlocked) reason = 'SLICE LOW';
+    return {
+      verb, id: String(sink.id ?? sink.verb ?? verb), label: String(sink.label ?? verb),
+      cost, target: sink.target ?? 'team', description: String(sink.description ?? ''),
+      available, affordable, sliceBlocked,
+      enabled: open && available && affordable && !sliceBlocked,
+      reason,
+      effect: String(sink.description ?? sink.effect ?? ''),
+    };
+  });
+  const executorId = command?.executor ?? command?.lease?.executor ?? null;
+  const leaseUntil = command?.leaseUntil ?? command?.lease?.until ?? command?.lease?.leaseUntil ?? null;
+  const leaseSeconds = leaseUntil !== null && Number.isFinite(Number(leaseUntil))
+    ? round(Math.max(0, (Number(leaseUntil) - tick) * TICK_SECONDS), 1)
+    : round(Math.max(0, num(command?.lease?.secondsRemaining ?? command?.executorSeconds, 0)), 1);
+  const executorName = command?.executorName ?? command?.lease?.name ?? null;
+  const you = executorId !== null && executorId !== undefined && player
+    && (String(executorId) === String(player.peerId ?? player.id) || (player.name && String(executorId) === String(player.name)));
+  const threadsUsed = num(command?.threads?.used, 0);
+  const threadsCap = num(command?.threads?.cap, 0);
+  const threadsPerPlayer = threadsCap > 0 && allowance.humans > 0 ? Math.ceil(threadsCap / allowance.humans) : threadsCap;
+  return {
+    open,
+    secondsRemaining: round(num(intermission.secondsRemaining, 0), 1),
+    budget: round(budget, 1),
+    spent: round(num(intermission.spent, 0), 1),
+    windows: num(intermission.windows, 0),
+    byType: {
+      FORTIFY: num(intermission.byType?.FORTIFY, 0), REPAIR: num(intermission.byType?.REPAIR, 0),
+      RESUPPLY: num(intermission.byType?.RESUPPLY, 0), REINFORCE: num(intermission.byType?.REINFORCE, 0),
+    },
+    log: (Array.isArray(intermission.log) ? intermission.log : []).slice(-4).map(entry => ({...entry})),
+    sinks,
+    allowance,
+    threads: {used: threadsUsed, cap: threadsCap, perPlayer: threadsPerPlayer},
+    executor: {
+      id: executorId, name: executorName,
+      label: executorId === null || executorId === undefined ? 'CHIEF' : (executorName ?? (String(executorId) === 'chief' ? 'CHIEF' : String(executorId))),
+      chief: executorId === null || executorId === undefined || String(executorId) === 'chief',
+      you: Boolean(you),
+      secondsRemaining: leaseSeconds,
+    },
+    canSpend: open && sinks.some(sink => sink.enabled),
+    canAffordAny: sinks.some(sink => sink.affordable),
+  };
+}
+
+// ---------------------------------------------------------------------------
+// Terminals + the extra role surface (§12.3a: HACK / DEPLOY / VAULT).
+// ---------------------------------------------------------------------------
+function cocsTerminalList(snapshot) {
+  for (const candidate of [snapshot?.terminals, snapshot?.coop?.terminals, snapshot?.director?.terminals, snapshot?.traversal?.terminals, snapshot?.command?.terminals]) {
+    if (Array.isArray(candidate) && candidate.length) return candidate;
+  }
+  return [];
+}
+function cocsRoleList(snapshot) {
+  for (const candidate of [snapshot?.roles, snapshot?.coop?.roles, snapshot?.command?.roles, snapshot?.director?.roles]) {
+    if (Array.isArray(candidate) && candidate.length) return candidate;
+  }
+  return [];
+}
+const cocsTerminalKind = kind => COCS_TERMINAL_KINDS[String(kind ?? '').toUpperCase()] ?? {label: String(kind ?? 'TERMINAL').toUpperCase(), mark: '◆', prompt: 'USE TERMINAL'};
+const cocsTerminalState = state => COCS_TERMINAL_STATES[String(state ?? '').toLowerCase()] ?? {label: String(state ?? 'LOCKED').toUpperCase(), mark: '▣'};
+
+/**
+ * Terminal prompts/states for HACK / DEPLOY / VAULT plus whatever role surface a
+ * future wave exposes. Every entry carries a shape glyph *and* a word so state
+ * is never colour-only. `hasTerminals` is what the HUD gates on.
+ */
+export function cocsTerminalView(snapshot, player, board) {
+  if (!snapshot || typeof snapshot !== 'object') return null;
+  const team = player?.team === 0 || player?.team === 1 ? Number(player.team) : null;
+  const terminals = cocsTerminalList(snapshot).filter(Boolean).map((raw, index) => {
+    const kind = cocsTerminalKind(raw.kind ?? raw.type ?? raw.verb);
+    const stateId = String(raw.state ?? (raw.complete === true ? 'complete' : raw.active === true ? 'active' : raw.locked === true ? 'locked' : 'available')).toLowerCase();
+    const state = cocsTerminalState(stateId);
+    const owner = raw.owner === 0 || raw.owner === 1 ? Number(raw.owner) : null;
+    const progress = clamp01(raw.progress ?? (num(raw.total, 0) > 0 ? 1 - num(raw.remaining, 0) / num(raw.total, 0) : 0));
+    const id = String(raw.id ?? `${kind.label}-${index}`);
+    return {
+      id, kind: kind.label, kindMark: kind.mark, prompt: kind.prompt,
+      label: String(raw.label ?? raw.name ?? `${kind.label} ${index + 1}`),
+      nodeId: raw.nodeId ?? raw.node ?? null,
+      state: stateId, stateLabel: state.label, stateMark: state.mark,
+      owner, mine: owner !== null && team !== null && owner === team,
+      enemy: owner !== null && team !== null && owner !== team,
+      progress, progressPercent: Math.round(progress * 100),
+      remainingSeconds: round(num(raw.remainingSeconds ?? raw.remaining, 0), 1),
+      actor: raw.actor ?? raw.peerId ?? null,
+      hint: String(raw.hint ?? kind.prompt),
+      wired: raw.wired !== false,
+    };
+  });
+  const roles = cocsRoleList(snapshot).filter(Boolean).map((raw, index) => {
+    const id = String(raw.id ?? raw.role ?? raw.name ?? `role-${index}`);
+    return {
+      id, label: String(raw.label ?? raw.name ?? id).toUpperCase(),
+      mark: String(raw.mark ?? '◆'),
+      state: String(raw.state ?? 'ready').toLowerCase(),
+      stateLabel: String(raw.stateLabel ?? raw.state ?? 'READY').toUpperCase(),
+      count: num(raw.count, 0), cap: num(raw.cap, 0),
+      detail: String(raw.detail ?? raw.description ?? ''),
+    };
+  });
+  const active = terminals.filter(terminal => terminal.state === 'active').length;
+  const available = terminals.filter(terminal => terminal.state === 'available').length;
+  const blocked = terminals.filter(terminal => terminal.state === 'blocked' || terminal.state === 'contested' || terminal.state === 'locked').length;
+  const boardHint = board?.front ? `AT ${board.front.label}` : null;
+  return {
+    hasTerminals: terminals.length > 0,
+    count: terminals.length,
+    active, available, blocked,
+    terminals,
+    roles,
+    hasRoles: roles.length > 0,
+    hint: terminals.length ? `${available} READY · ${active} ACTIVE · ${blocked} LOCKED` : (boardHint ?? 'NO TERMINALS'),
+  };
+}
+
 /**
  * Fold the board, snapshot, player and strip state into the single object
  * `CocsReadout` renders. Returns null outside cocs (mode isolation). `board` is
@@ -585,13 +1048,18 @@ export function cocsCommandView(board, snapshot, player, strip) {
   });
   const scanNode = economy?.scan?.nodeId ?? null;
   const scanLabel = scanNode === null || scanNode === undefined ? null : nodeLabels[String(scanNode)]?.label ?? String(scanNode);
+  const traversal = cocsTraversalView(snapshot, player);
+  const terminals = cocsTerminalView(snapshot, player, board);
   return {
     board,
     economy,
     spots: economy?.spots ?? [],
     scanTarget: {nodeId: scanNode ?? null, label: scanLabel, active: economy?.scan?.active === true},
     strip: view,
-    traversal: cocsTraversalView(snapshot, player),
+    traversal,
     director: cocsDirectorView(snapshot),
+    spend: cocsSpendView(snapshot, player),
+    boardView: cocsBoardView(board, snapshot, player, {economy, traversal, terminals}),
+    terminals,
   };
 }
