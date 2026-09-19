@@ -11,9 +11,9 @@
 // draw is taken anywhere in this file and no wall-clock is read. Device and
 // depot updates are a pure function of the previous state + `dt` + living actor
 // positions, so a seeded run is byte-identical.
-import {
- DEVICE_PARAMS, TRAVERSAL, traversalKind, arrivalProtection, tickArrival,
-} from './cocs-economy.mjs';
+import {DEVICE_PARAMS, TRAVERSAL, traversalKind, arrivalProtection, tickArrival} from './cocs-economy.mjs';
+import {RULES} from './data.mjs';
+import {buildZipRide} from './movement.mjs';
 import {PUMA, createVehicle, respawnVehicle} from './vehicles.mjs';
 
 const finite = value => typeof value === 'number' && Number.isFinite(value);
@@ -69,6 +69,11 @@ function normalizeDevice(raw, index) {
   arrival: arrival ? {...arrival, r: num(arrival.r, TRAVERSAL.arrivalMinRadius), seconds: num(arrival.seconds, TRAVERSAL.arrivalSeconds)} : null,
   power: num(raw.power, 16),
   speed: num(raw.speed, params.speed ?? TRAVERSAL.ziplineSpeed),
+  sag: num(raw.sag, 0),
+  lift: num(raw.lift, 0),
+  minDuration: finite(raw.minDuration) ? raw.minDuration : null,
+  blendMeters: finite(raw.blendMeters) ? raw.blendMeters : null,
+  jumpOff: raw.jumpOff !== false,
   cuttable: raw.cuttable === true,
   lockable: raw.lockable === true,
   onFootOnly: params.onFootOnly !== false,
@@ -239,6 +244,7 @@ function enemyNear(match, anchor, team, meters = DEVICE_INTERACT_METERS) {
 function actorAtAnchor(actor, anchor) {
  if (!actor || actor.health <= 0) return false;
  if (actor.vehicleId !== null && actor.vehicleId !== undefined) return false;
+ if (actor.zipRide) return false; // a rider is not a stable channel anchor
  if (!anchor) return false;
  return distance(actor, anchor) <= DEVICE_INTERACT_METERS && Math.abs(num(actor.y, 0) - num(anchor.y, num(actor.y, 0))) <= 2;
 }
@@ -298,6 +304,7 @@ function useDeviceInternal(match, traversal, device, actor) {
  if (!actor || actor.health <= 0) return false;
  if (actor.team !== 0 && actor.team !== 1) return false;
  if (device.onFootOnly && !(actor.vehicleId === null || actor.vehicleId === undefined)) return false;
+ if (actor.zipRide) return false;
  if (!device.from) return false;
  if (!(num(traversal.cooldowns[actor.id], 0) <= 0)) return false;
  if (device.kind === 'jump-pad' && actor.grounded !== true) return false;
@@ -306,6 +313,50 @@ function useDeviceInternal(match, traversal, device, actor) {
  const from = {x: num(actor.x, 0), y: num(actor.y, 0), z: num(actor.z, 0)};
  if (device.kind === 'jump-pad') {
   actor.vy = Math.max(num(actor.vy, 0), device.power);
+  actor.grounded = false;
+ } else if (device.kind === 'zipline' && destination) {
+  // A zipline is ridden, not blinked: board at the authored cable anchor with a
+  // real path the engine steps. Arrival protection is applied by the Match when
+  // the cable releases the rider (`zipline-arrival`).
+  const lift = num(device.lift, 0);
+  const anchorY = (finite(device.from.y) ? device.from.y : from.y) + lift;
+  const exitY = (finite(destination.y) ? destination.y : from.y) + lift;
+  const ride = buildZipRide({
+   id: device.id,
+   from: {x: device.from.x, y: anchorY, z: device.from.z},
+   to: {x: destination.x, y: exitY, z: destination.z},
+   speed: device.speed,
+   sag: num(device.sag, 0),
+   cooldown: device.sharedCooldown,
+   minDuration: device.minDuration ?? undefined,
+   blendMeters: device.blendMeters ?? undefined,
+   jumpOff: device.jumpOff,
+  });
+  if (!ride) return false;
+  actor.x = device.from.x;
+  actor.z = device.from.z;
+  actor.y = anchorY;
+  actor.vx = actor.vy = actor.vz = 0;
+  actor.grounded = false;
+  actor.zipRide = ride;
+ } else if (device.kind === 'launcher' && destination) {
+  // A launcher is a ballistic flight, not a blink. Same shape as the core
+  // boost seam: solve the launch arc to the authored target and let the
+  // actor's traversalTarget landing resolve over the next ticks.
+  const gravity = RULES.gravity;
+  const launchY = Math.max(.1, num(device.vy, num(device.power, 14) * .55));
+  const dx = destination.x - num(actor.x, 0);
+  const dz = destination.z - num(actor.z, 0);
+  const flat = Math.hypot(dx, dz) || 1;
+  const deltaY = (finite(destination.y) ? destination.y : num(actor.y, 0)) - num(actor.y, 0);
+  const discriminant = launchY * launchY - 2 * gravity * deltaY;
+  const time = discriminant >= 0 ? (launchY + Math.sqrt(discriminant)) / gravity : null;
+  const horizontal = time && time > 0 ? flat / time : num(device.power, 14);
+  actor.vx = dx / flat * horizontal;
+  actor.vz = dz / flat * horizontal;
+  actor.vy = launchY;
+  actor.traversalTarget = {x: destination.x, y: finite(destination.y) ? destination.y : num(actor.y, 0), z: destination.z};
+  actor.traversalFlight = true;
   actor.grounded = false;
  } else if (destination) {
   actor.x = destination.x;
@@ -316,14 +367,17 @@ function useDeviceInternal(match, traversal, device, actor) {
   actor.lastValid = {x: actor.x, y: actor.y, z: actor.z};
  }
  actor.traversalCooldown = device.sharedCooldown;
- actor.traversalEvent = {
-  type: device.kind,
-  id: device.id,
-  from,
-  to: {x: num(actor.x, 0), y: num(actor.y, 0), z: num(actor.z, 0)},
- };
- if (device.arrivalProtection || (device.arrival && device.kind === 'launcher')) applyArrivalProtection(traversal, actor, traversal.tick);
- traversal.cooldowns[actor.id] = device.sharedCooldown;
+ // The core traversal vocabulary names the portal event `teleport`; the device
+ // kind is `teleporter`. Keep the wire event in the view/audio-safe form.
+ const eventType = device.kind === 'teleporter' ? 'teleport' : device.kind;
+ actor.traversalEvent = actor.zipRide
+  ? {type: eventType, id: device.id, from: {...actor.zipRide.from}, to: {...actor.zipRide.to}}
+  : {type: eventType, id: device.id, from, to: {x: num(actor.x, 0), y: num(actor.y, 0), z: num(actor.z, 0)}};
+ if (device.kind !== 'zipline' && device.kind !== 'launcher' && (device.arrivalProtection || device.arrival)) applyArrivalProtection(traversal, actor, traversal.tick);
+ // The shared gate opens one cooldown *after* the cable releases the rider, so
+ // a long ride never spends its own lockout mid-air (actor.traversalCooldown
+ // mirrors this because the core ride seam keeps it frozen while riding).
+ traversal.cooldowns[actor.id] = device.sharedCooldown + (actor.zipRide ? num(actor.zipRide.duration, 0) : 0);
  device.uses = num(device.uses, 0) + 1;
  traversal.stats.uses = num(traversal.stats.uses, 0) + 1;
  match?.emit?.('cocs-device-use', {device: device.id, kind: device.kind, actor: actor.id, to: {x: actor.x, z: actor.z}});
@@ -631,6 +685,7 @@ export function humanDeviceInteract(match, state, actor) {
  if (!traversal || !actor || actor.health <= 0) return null;
  if (actor.team !== 0 && actor.team !== 1) return null;
  if (actor.vehicleId !== null && actor.vehicleId !== undefined) return null;
+ if (actor.zipRide) return null; // no device channels while riding a cable
  let nearest = null;
  let nearestDistance = Infinity;
  for (const id of sortedStrings(traversal.devices)) {

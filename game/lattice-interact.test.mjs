@@ -45,9 +45,16 @@ test('a human actor at a device anchor rides it on the interact edge', () => {
   pin(actor, device.from.x, device.from.z);
   interact(match, actor.id, true);
   assert.equal(state.traversal.stats.uses, 1, 'the live zipline fired');
+  // A zipline is ridden, not blinked: the ride is live and the actor has not
+  // arrived yet. Arrival protection lands with the rider, not at boarding.
+  assert.ok(actor.zipRide, 'the rider boards the cable');
+  assert.ok(Math.hypot(actor.x-device.to.x,actor.z-device.to.z)>10, `still on the cable (${actor.x},${actor.z})`);
+  for (let i = 0; i < 400 && actor.zipRide; i++) interact(match, actor.id, i === 0);
+  assert.equal(actor.zipRide, null, 'released at the far anchor');
   assert.ok(Math.hypot(actor.x-device.to.x,actor.y-device.to.y,actor.z-device.to.z)<1e-6, `arrived at ${actor.x},${actor.z}`);
   assert.ok(actor.cocsArrival && actor.cocsArrival.remaining > 1.4, 'arrival protection applied');
-  // A second held tick at the destination must not re-fire (no device there).
+  // A held interact tick at the destination must not re-fire (no device there)
+  // and the shared cooldown keeps the far anchor from being re-used instantly.
   interact(match, actor.id, true);
   assert.equal(state.traversal.stats.uses, 1);
 });

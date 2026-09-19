@@ -335,7 +335,7 @@ const BED_MOODS=Object.freeze({
  storm:Object.freeze({filter:420,tone:48,gain:.024,sub:.005,air:.012,windFreq:900,wind:2,tense:.003,tenseFreq:60}),
 });
 export class SynthAudio{
- constructor({announcer=false}={}){this.ctx=null;this.muted=false;this.voices=new Set();this.noiseBuffer=null;this.master=null;this.lastDamage=null;this.lastReport=null;this.lastHit=-Infinity;this.footPhase=0;this.wasGrounded=undefined;this.lastVy=0;this.engine=null;this.bed=null;this.bedMood='default';this.ambientBed=true;this.stepVariant=0;this.landVariant=0;this.reloadVariant=0;this.intensity=0;this.bedScale=.75;this.musicEnabled=true;this.announcer=announcer===true;this.announced=new Set();this.lastCue=null;this.mode='default';this.theme=MODE_THEMES.default;this.soundtrack='default';this.reverbUrl=null;this.reverbWet=0.30;this.reverbLoaded=false;this.reverbSpace=null;this.lastSting=null;this.heartbeatTimer=0;this.reportSerial=0;this.space=null;this.surfaceResolver=null;this.windScale=null;this._reverbPending=false;this.jumpVariant=0;
+ constructor({announcer=false}={}){this.ctx=null;this.muted=false;this.voices=new Set();this.noiseBuffer=null;this.master=null;this.lastDamage=null;this.lastReport=null;this.lastHit=-Infinity;this.footPhase=0;this.wasGrounded=undefined;this.lastVy=0;this.engine=null;this.zipLoop=null;this.bed=null;this.bedMood='default';this.ambientBed=true;this.stepVariant=0;this.landVariant=0;this.reloadVariant=0;this.intensity=0;this.bedScale=.75;this.musicEnabled=true;this.announcer=announcer===true;this.announced=new Set();this.lastCue=null;this.mode='default';this.theme=MODE_THEMES.default;this.soundtrack='default';this.reverbUrl=null;this.reverbWet=0.30;this.reverbLoaded=false;this.reverbSpace=null;this.lastSting=null;this.heartbeatTimer=0;this.reportSerial=0;this.space=null;this.surfaceResolver=null;this.windScale=null;this._reverbPending=false;this.jumpVariant=0;
   // Gain buses. `muteGain` sits between the master and the destination so a
   // master mute silences every branch immediately; music/effects/ambience each
   // have their own bus for independent volume control. Voice chat lives in
@@ -892,6 +892,16 @@ export class SynthAudio{
  }
   event(e,player){if(!this.ctx||!e||!player)return;const local=this._isLocal(e,player),pos=e.from??e.pos,pan=this._panFor(pos,player);
    const latticeCue=latticeSoundCue(e,player);if(latticeCue){this._beat(latticeCue,0,1,.2);return;}
+   // Traversal accents ride the shared synth/voice cap. A cocs device-use
+   // keeps its lattice earcon above; these are the mechanical beats at the
+   // cable and the portal, layered on the same event stream.
+   if(e.type==='teleport'||e.type==='teleporter'){const vol=local?1:this._falloff(pos,player,36);if(vol>.02)this._teleport(pan,vol,local);return;}
+   if(e.type==='zipline'){const from=e.from??pos,vol=local?1:this._falloff(from,player,30);if(vol>.03)this._ziplineStart(pan,vol);return;}
+   if(e.type==='zipline-arrival'){const to=e.to??pos,vol=local?1:this._falloff(to,player,30);if(vol>.03)this._ziplineArrival(pan,vol);return;}
+   if(e.type==='zipline-jump'){if(local)this._click(0,1,.05,1100);return;}
+   if(e.type==='launcher'){const from=e.from??pos,vol=local?1:this._falloff(from,player,32);if(vol>.03)this._launcherStart(pan,vol);return;}
+   if(e.type==='launcher-arrival'){const to=e.to??pos,vol=local?1:this._falloff(to,player,32);if(vol>.03)this._ziplineArrival(pan,vol);return;}
+   if(e.type==='jump-pad'){const vol=local?1:this._falloff(pos,player,22);if(vol>.05)this._play(.24,pan,(t,out,nodes)=>{this._noise(t,out,nodes,{duration:.16,gain:.24*vol,type:'lowpass',freq:700,sweep:180,q:.8});this._tone(t,out,nodes,{freq:150,duration:.2,type:'triangle',gain:.1*vol,end:420});});return;}
   if(e.type==='shot'||e.type==='vehicle-shot'||e.type==='launch'){const same=this.lastReport&&e.time!=null&&this.lastReport.time===e.time&&this.lastReport.actor===e.actor&&this.lastReport.weapon===e.weapon&&this.lastReport.type===e.type;this.lastReport=e;if(same)return;const vehicle=e.type==='vehicle-shot',vol=local?1:this._falloff(pos,player,vehicle?42:34)*(vehicle?.95:.9);if(vol>.01){if(vehicle)this._chaingun(pan,vol);else this._gunshot(e,local,pan,vol,player);}return;}
   if(e.type==='dryfire'){if(local)this._click(0,1,.08,1500);return;}
   if(e.type==='grenade'){const vol=local?1:this._falloff(pos,player,24);if(vol>.02)this._play(.18,pan,(t,out,nodes)=>{this._click(pan,vol,.06,1400);this._noise(t+.02,out,nodes,{duration:.12,gain:.22*vol,type:'bandpass',freq:800,sweep:300,q:.8});this._tone(t+.03,out,nodes,{freq:280,duration:.1,type:'triangle',gain:.08*vol,end:140});});return;}
@@ -987,7 +997,37 @@ export class SynthAudio{
   }
   this.wasLowHealth=isLowHealth;
   const vehicle=(vehicles||[]).find(v=>v.id===player.vehicleId||v.driver===player.id),vx=vehicle?(vehicle.vx??vehicle.velocity?.x??0):0,vz=vehicle?(vehicle.vz??vehicle.velocity?.z??0):0,boosting=Boolean(vehicle&&(vehicle.boosting===true||(vehicle.boostCooldown??0)>0||(vehicle.effects?.turbo>0)));
-  this._engine(vehicle?Math.hypot(vx,vz):0,Boolean(vehicle),boosting);}
+  this._engine(vehicle?Math.hypot(vx,vz):0,Boolean(vehicle),boosting);
+  const ride=player.zipRide;
+  this._zipLoop(Boolean(ride&&player.vehicleId==null&&player.health>0),ride?Math.max(1,Number(ride.speed)||9):9);}
  _engine(speed,active,boosting=false){if(!this.ctx)return;if(active&&!this.muted){if(!this.engine){const osc=this.ctx.createOscillator(),sub=this.ctx.createOscillator(),f=this.ctx.createBiquadFilter(),g=this.ctx.createGain();osc.type='sawtooth';sub.type='triangle';f.type='lowpass';f.frequency.value=700;g.gain.value=.0001;osc.connect(f);sub.connect(f);f.connect(g);g.connect(this.effectsBus||this.master);osc.start();sub.start();this.engine={osc,sub,f,g};}const s=cl(speed/20,0,1),boostMult=boosting?1.35:1,t=this.ctx.currentTime;this.engine.osc.frequency.setTargetAtTime((55+s*120)*boostMult,t,.1);this.engine.sub.frequency.setTargetAtTime((28+s*40)*boostMult,t,.1);this.engine.g.gain.setTargetAtTime((.022+s*.05)*(boosting?1.2:1),t,.12);this.engine.f.frequency.setTargetAtTime((500+s*1200)*(boosting?1.4:1),t,.15);}else if(this.engine){const {osc,sub,g}=this.engine,t=this.ctx.currentTime;g.gain.setTargetAtTime(.0001,t,.08);this.engine=null;setTimeout(()=>{try{osc.stop();sub.stop();}catch{}},300);}}
- dispose(){if(this._stingDuckTimer){clearTimeout(this._stingDuckTimer);this._stingDuckTimer=null;}try{this.musicEngine?.dispose();}catch{}this.musicEngine=null;try{this.mothAudio?.dispose?.();}catch{}this.mothAudio=null;if(this.engine){try{this.engine.osc.stop();this.engine.sub.stop();}catch{}this.engine=null;}if(this.bed){for(const node of Object.values(this.bed)){if(node&&typeof node.stop==='function')try{node.stop();}catch{}if(node&&typeof node.disconnect==='function')try{node.disconnect();}catch{}}this.bed=null;}for(const token of this.voices){clearTimeout(token.timer);for(const n of token.nodes){try{n.disconnect();}catch{}}}this.voices.clear();this._announceAt?.clear?.();this.lastSting=null;if(this.space){for(const node of Object.values(this.space)){try{node.disconnect();}catch{}}this.space=null;}for(const bus of [this.effectsBus,this.ambienceBus,this.musicBus,this.master,this.muteGain]){try{bus?.disconnect();}catch{}}this.effectsBus=null;this.ambienceBus=null;this.musicBus=null;this.master=null;this.muteGain=null;this.ctx?.close();this.ctx=null;this.status='off';}
+ _zipLoop(active,speed=9){if(!this.ctx)return;const on=active===true&&!this.muted;if(on){if(!this.zipLoop){const osc=this.ctx.createOscillator(),hum=this.ctx.createOscillator(),f=this.ctx.createBiquadFilter(),g=this.ctx.createGain();osc.type='sawtooth';hum.type='triangle';f.type='bandpass';f.frequency.value=1100;f.Q.value=.7;g.gain.value=.0001;osc.connect(f);hum.connect(f);f.connect(g);g.connect(this.effectsBus||this.master);osc.start();hum.start();this.zipLoop={osc,hum,f,g};}const t=this.ctx.currentTime,s=cl(speed/14,0,1);this.zipLoop.osc.frequency.setTargetAtTime(120+s*90,t,.15);this.zipLoop.hum.frequency.setTargetAtTime(60+s*45,t,.15);this.zipLoop.f.frequency.setTargetAtTime(900+s*800,t,.15);this.zipLoop.g.gain.setTargetAtTime(.012+s*.02,t,.12);}else if(this.zipLoop){const {osc,hum,g}=this.zipLoop,t=this.ctx.currentTime;g.gain.setTargetAtTime(.0001,t,.08);this.zipLoop=null;setTimeout(()=>{try{osc.stop();hum.stop();}catch{}},300);}}
+ // Teleporter charge/whoosh/arrival shimmer. One voice token per event.
+ _teleport(pan,vol,local){this._play(.52,pan,(t,out,nodes)=>{
+  this._tone(t,out,nodes,{freq:150,duration:.22,type:'sawtooth',gain:.1*vol,end:720});
+  this._noise(t+.04,out,nodes,{duration:.3,gain:.34*vol,type:'bandpass',freq:600,sweep:2600,q:.9,attack:.005});
+  this._noise(t+.16,out,nodes,{duration:.16,gain:.2*vol,type:'highpass',freq:1800,sweep:4200});
+  this._tone(t+.2,out,nodes,{freq:880,duration:.22,type:'triangle',gain:.11*vol,end:1320});
+  this._tone(t+.24,out,nodes,{freq:1760,duration:.18,type:'sine',gain:.05*vol,end:1320});
+  if(local)this._tone(t+.02,out,nodes,{freq:60,duration:.3,type:'sine',gain:.12,end:32});
+ },{send:.3*vol});}
+ // Cable start: a ratchet clip plus the handle grab. Arrival: brake thump + chime.
+ _ziplineStart(pan,vol){this._play(.28,pan,(t,out,nodes)=>{
+  this._click(pan,vol,.07,1500);
+  this._noise(t+.02,out,nodes,{duration:.16,gain:.22*vol,type:'highpass',freq:2200,sweep:700});
+  this._tone(t+.05,out,nodes,{freq:320,duration:.16,type:'triangle',gain:.08*vol,end:180});
+ });}
+ _ziplineArrival(pan,vol){this._play(.34,pan,(t,out,nodes)=>{
+  this._noise(t,out,nodes,{duration:.2,gain:.3*vol,type:'lowpass',freq:900,sweep:220,q:.8});
+  this._tone(t,out,nodes,{freq:140,duration:.2,type:'sine',gain:.12*vol,end:70});
+  this._tone(t+.04,out,nodes,{freq:660,duration:.2,type:'triangle',gain:.08*vol,end:990});
+ },{send:.24*vol});}
+ // Launcher: a rising pneumatic whoosh under the ballistic arc. Arrival reuses
+ // the cable-brake thump so every traversal landing shares one accent.
+ _launcherStart(pan,vol){this._play(.42,pan,(t,out,nodes)=>{
+  this._noise(t,out,nodes,{duration:.34,gain:.4*vol,type:'bandpass',freq:500,sweep:2400,q:.8,attack:.004});
+  this._tone(t,out,nodes,{freq:120,duration:.3,type:'sawtooth',gain:.14*vol,end:520});
+  this._tone(t+.04,out,nodes,{freq:240,duration:.24,type:'triangle',gain:.08*vol,end:660});
+ },{send:.3*vol});}
+ dispose(){if(this._stingDuckTimer){clearTimeout(this._stingDuckTimer);this._stingDuckTimer=null;}try{this.musicEngine?.dispose();}catch{}this.musicEngine=null;try{this.mothAudio?.dispose?.();}catch{}this.mothAudio=null;if(this.engine){try{this.engine.osc.stop();this.engine.sub.stop();}catch{}this.engine=null;}if(this.zipLoop){try{this.zipLoop.osc.stop();this.zipLoop.hum.stop();}catch{}this.zipLoop=null;}if(this.bed){for(const node of Object.values(this.bed)){if(node&&typeof node.stop==='function')try{node.stop();}catch{}if(node&&typeof node.disconnect==='function')try{node.disconnect();}catch{}}this.bed=null;}for(const token of this.voices){clearTimeout(token.timer);for(const n of token.nodes){try{n.disconnect();}catch{}}}this.voices.clear();this._announceAt?.clear?.();this.lastSting=null;if(this.space){for(const node of Object.values(this.space)){try{node.disconnect();}catch{}}this.space=null;}for(const bus of [this.effectsBus,this.ambienceBus,this.musicBus,this.master,this.muteGain]){try{bus?.disconnect();}catch{}}this.effectsBus=null;this.ambienceBus=null;this.musicBus=null;this.master=null;this.muteGain=null;this.ctx?.close();this.ctx=null;this.status='off';}
 }

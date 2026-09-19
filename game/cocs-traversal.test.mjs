@@ -125,16 +125,25 @@ test('validateLane doctrine requires the fixed identity fields once the layer op
 // ---------------------------------------------------------------------------
 // Device state machine
 // ---------------------------------------------------------------------------
-test('device use relocates, applies arrival protection and the shared 2.5 s cooldown', () => {
+test('device use boards a real ride, arrival protection lands with the rider and the shared cooldown holds', () => {
  const match = cocsMatch();
  const state = match.objectiveState;
  const actor = match.actors[0];
  actor.team = 0;
  pin(actor, -40, 50);
  assert.equal(useDevice(match, state, actor.id, 'zip-s-w'), true);
- const target=state.traversal.devices['zip-s-w'].to;
- assert.ok(Math.hypot(actor.x-target.x,actor.y-target.y,actor.z-target.z)<1e-6, `arrived at ${actor.x},${actor.z}`);
+ const device = state.traversal.devices['zip-s-w'];
+ const target = device.to;
+ // A zipline is ridden, not blinked: the ride is live and the actor is still
+ // at the boarding anchor instead of the destination.
+ assert.ok(actor.zipRide, 'the zipline ride is live');
+ assert.ok(Math.hypot(actor.x-target.x,actor.z-target.z)>10, `not teleported (${actor.x},${actor.z})`);
+ assert.ok(!actor.cocsArrival, 'arrival protection waits for the landing');
  assert.equal(state.traversal.stats.uses, 1);
+ // Ride it out on the fixed clock; protection applies at the far anchor.
+ for (let i = 0; i < 400 && actor.zipRide; i++) match.step(DT, {inputs: {}});
+ assert.equal(actor.zipRide, null, 'the ride releases at the far anchor');
+ assert.ok(Math.hypot(actor.x-target.x,actor.y-target.y,actor.z-target.z)<1e-6, `arrived at ${actor.x},${actor.z}`);
  assert.ok(actor.cocsArrival && actor.cocsArrival.remaining > 1.4 && actor.cocsArrival.damageReduction === 0.5);
  assert.equal(arrivalDamageScale(actor), 0.5);
  // The shared cooldown blocks a second traversal until it elapses.
@@ -157,6 +166,8 @@ test('bot auto-use is opt-in: two ticks of intent trigger the device when enable
  pin(actor, -40, 50);
  stepCocsTraversal(match, state, DT);
  assert.equal(state.traversal.stats.uses, 1, 'the second tick fires');
+ assert.ok(actor.zipRide, 'the bot boards the cable instead of blinking');
+ for (let i = 0; i < 400 && actor.zipRide; i++) match.step(DT, {inputs: {}});
  const target=state.traversal.devices['zip-s-w'].to;
  assert.ok(Math.hypot(actor.x-target.x,actor.y-target.y,actor.z-target.z)<1e-6);
 });

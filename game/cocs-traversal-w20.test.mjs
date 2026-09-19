@@ -209,11 +209,13 @@ test('stepCocsTraversal fires a planned device once the bot reaches the anchor',
   actor.bot.cocsDevice = 'zip-s-w2';
   stepCocsTraversal(match, state, DT);
   assert.equal(state.traversal.stats.uses, 1);
+  assert.ok(actor.zipRide, 'the bot boards the cable instead of blinking');
+  assert.equal(actor.bot.cocsDevice, null, 'the fired intent is cleared');
+  for (let i = 0; i < 400 && actor.zipRide; i++) match.step(DT, {inputs: {}});
   assert.ok(Math.abs(actor.x - (-60)) < 1e-6 && Math.abs(actor.z - 46) < 1e-6, `landed ${actor.x},${actor.z}`);
   assert.ok(actor.cocsArrival?.remaining > 1.4, 'arrival protection applied');
   const arrival = cocsSnapshot(match).traversal.arrivals.find(entry => entry.actor === actor.id);
   assert.ok(arrival && Math.abs(arrival.x - (-60)) < 1e-6 && Math.abs(arrival.z - 46) < 1e-6, 'arrival telegraph carries the landing');
-  assert.equal(actor.bot.cocsDevice, null, 'the fired intent is cleared');
 });
 
 test('a planned bot more than the reach from the anchor does not fire', () => {

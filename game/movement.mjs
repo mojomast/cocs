@@ -1452,3 +1452,252 @@ export function applyMovementSnapshot(state, snapshot) {
     ? {...snapshot.grappleLanding} : null;
   return state;
 }
+
+// ===========================================================================
+// Zipline rides (cable path, sag, arc-length stepping, collision-safe resolve)
+// ---------------------------------------------------------------------------
+// A ride is a plain, JSON-safe object so it rides snapshots, deltas and the
+// netcode shadow exactly like `movement`. `from`/`to` are the authored cable
+// anchors; the rider's feet travel a quadratic (sagging) cable between them and
+// blend down to the landing floor over the final metres. All math is closed
+// form and deterministic: no RNG, no wall clock, no terrain generation. The
+// caller injects the world through `resolveZipRide(ride, world)`, so the same
+// path resolves identically in the sim and in the client shadow.
+// ===========================================================================
+export const ZIP_RIDE = deepFreeze({
+  defaultSpeed: 9,
+  minDuration: .85,
+  lockSeconds: .35,
+  maxLift: 6,
+  liftStep: .5,
+  clearance: .35,
+  samples: 24,
+  jumpSpeedScale: .92,
+  jumpLift: 3.2,
+  landingBlendMeters: 4.5,
+});
+
+const ZIP_ARC_SEGMENTS = 12;
+
+const zipEase = t => t * t * (3 - 2 * t);
+const zipWrap = angle => {
+  let a = (angle + Math.PI) % (Math.PI * 2);
+  if (a < 0) a += Math.PI * 2;
+  return a - Math.PI;
+};
+
+/** Raw cable point at curve parameter `u` in [0, 1] (sag only, no landing). */
+export function zipCablePoint(ride, u) {
+  const t = clamp01(num(u));
+  const a = ride.from, b = ride.to, sag = Math.max(0, num(ride.sag));
+  const it = 1 - t;
+  const cy = (a.y + b.y) * .5 - 2 * sag;
+  return {
+    x: it * it * a.x + 2 * it * t * ((a.x + b.x) * .5) + t * t * b.x,
+    y: it * it * a.y + 2 * it * t * cy + t * t * b.y,
+    z: it * it * a.z + 2 * it * t * ((a.z + b.z) * .5) + t * t * b.z,
+  };
+}
+
+/**
+ * Rider feet at curve parameter `u` in [0, 1]. Identical to the cable except
+ * for the final landing blend, which eases the feet down onto `ride.landY` so
+ * a high anchor never ends airborne.
+ */
+export function zipRidePoint(ride, u) {
+  const point = zipCablePoint(ride, u);
+  const landY = ride.landY;
+  if (Number.isFinite(landY)) {
+    const from = num(ride.blendFrom, 1);
+    const t = clamp01(num(u));
+    if (from < 1 && t > from) {
+      const k = zipEase((t - from) / (1 - from));
+      point.y += (landY - point.y) * k;
+    }
+  }
+  return point;
+}
+
+/** Cumulative arc lengths (normalised curve parameter samples) for one ride. */
+export function zipArcTable(ride) {
+  const table = new Array(ZIP_ARC_SEGMENTS + 1);
+  let previous = zipRidePoint(ride, 0), total = 0;
+  table[0] = 0;
+  for (let i = 1; i <= ZIP_ARC_SEGMENTS; i++) {
+    const point = zipRidePoint(ride, i / ZIP_ARC_SEGMENTS);
+    total += Math.hypot(point.x - previous.x, point.y - previous.y, point.z - previous.z);
+    table[i] = total;
+    previous = point;
+  }
+  return table;
+}
+
+/** Approximate ridden path length in metres. */
+export function zipRideLength(ride) {
+  const table = zipArcTable(ride);
+  return table[table.length - 1];
+}
+
+/**
+ * Build a ride from authored cable anchors. Returns null without valid anchors.
+ * `landY` is unknown until `resolveZipRide` sees the world; the initial length
+ * and duration are the cable-only estimates and are refreshed on resolve.
+ */
+export function buildZipRide({
+  id = null, from, to, speed, sag, cooldown, minDuration, jumpOff, blendMeters,
+} = {}) {
+  if (!from || !to) return null;
+  const ride = {
+    id: id === null || id === undefined ? null : String(id),
+    from: {x: num(from.x), y: num(from.y), z: num(from.z)},
+    to: {x: num(to.x), y: num(to.y), z: num(to.z)},
+    speed: Math.max(.1, num(speed, ZIP_RIDE.defaultSpeed)),
+    sag: Math.max(0, num(sag, 0)),
+    minDuration: Math.max(.1, num(minDuration, ZIP_RIDE.minDuration)),
+    blendMeters: Math.max(0, num(blendMeters, ZIP_RIDE.landingBlendMeters)),
+    jumpOff: jumpOff !== false,
+    cooldown: Math.max(0, num(cooldown, 0)),
+    t: 0,
+    length: 0,
+    duration: 0,
+    landY: null,
+    blendFrom: 1,
+    lift: 0,
+    resolved: false,
+    blocked: false,
+    truncated: false,
+  };
+  const chord = Math.hypot(ride.to.x - ride.from.x, ride.to.z - ride.from.z);
+  ride.blendFrom = Math.max(0, Math.min(.92, 1 - ride.blendMeters / Math.max(1, chord)));
+  ride.length = zipRideLength(ride);
+  ride.duration = Math.max(ride.minDuration, ride.length / ride.speed);
+  return ride;
+}
+
+/**
+ * Resolve a built ride against the world exactly once:
+ *  1. if every rider sample is clear, keep the authored cable;
+ *  2. otherwise raise the whole cable (up to `maxLift`) until it is clear;
+ *  3. otherwise shorten the line to the last clear sample;
+ *  4. if even the first sample is unsafe, block the ride.
+ * `world` = `{floorAt(x,z), clear(x,y,z,r), radius, clearance?, maxLift?, liftStep?,
+ * samples?}`. Mutates and returns `{blocked, ride, lifted?, truncated?}`.
+ */
+export function resolveZipRide(ride, world = {}) {
+  if (!ride || typeof ride !== 'object') return {blocked: true, ride: null};
+  if (ride.resolved === true) return {blocked: ride.blocked === true, ride};
+  const floorAt = typeof world.floorAt === 'function' ? world.floorAt : null;
+  const clear = typeof world.clear === 'function' ? world.clear : null;
+  const radius = num(world.radius, .4);
+  const samples = Math.max(4, Math.round(num(world.samples, ZIP_RIDE.samples)));
+  const maxLift = Math.max(0, num(world.maxLift, ZIP_RIDE.maxLift));
+  const liftStep = Math.max(.1, num(world.liftStep, ZIP_RIDE.liftStep));
+  const settle = () => {
+    const floor = floorAt ? floorAt(ride.to.x, ride.to.z) : null;
+    const end = zipCablePoint(ride, 1);
+    ride.landY = floor !== null && floor <= end.y + .05 ? floor : null;
+    ride.length = zipRideLength(ride);
+    ride.duration = Math.max(ride.minDuration, ride.length / ride.speed);
+    ride.arc = null;
+  };
+  const unsafeAt = i => {
+    const point = zipRidePoint(ride, i / samples);
+    if (clear && !clear(point.x, point.y, point.z, radius)) return true;
+    if (floorAt) {
+      // Terrain clipping is riding *below* the floor; skimming just above it
+      // (boarding ramps, ground-level ropes) is legal and stays readable.
+      const floor = floorAt(point.x, point.z);
+      if (floor !== null && point.y < floor - .01) return true;
+    }
+    return false;
+  };
+  const firstUnsafe = () => {
+    for (let i = 0; i <= samples; i++) if (unsafeAt(i)) return i;
+    return -1;
+  };
+  const base = {...ride.from}, baseTo = {...ride.to};
+  settle();
+  let unsafe = firstUnsafe();
+  if (unsafe < 0) { ride.resolved = true; return {blocked: false, ride}; }
+  for (let lift = liftStep; lift <= maxLift + 1e-9; lift += liftStep) {
+    ride.from = {x: base.x, y: base.y + lift, z: base.z};
+    ride.to = {x: baseTo.x, y: baseTo.y + lift, z: baseTo.z};
+    settle();
+    if (firstUnsafe() < 0) {
+      ride.resolved = true;
+      ride.lift = lift;
+      return {blocked: false, ride, lifted: lift};
+    }
+  }
+  ride.from = base;
+  ride.to = baseTo;
+  settle();
+  let lastSafe = -1;
+  for (let i = 0; i <= samples; i++) {
+    if (unsafeAt(i)) break;
+    lastSafe = i;
+  }
+  if (lastSafe <= 0) {
+    ride.blocked = true;
+    ride.resolved = true;
+    return {blocked: true, ride};
+  }
+  const cut = Math.max(1, lastSafe - 1) / samples;
+  const end = zipRidePoint(ride, cut);
+  ride.to = {x: end.x, y: end.y, z: end.z};
+  ride.blendFrom = 1;
+  ride.truncated = true;
+  settle();
+  ride.resolved = true;
+  return {blocked: firstUnsafe() >= 0, ride, truncated: true};
+}
+
+const ZIP_STEP = {x: 0, y: 0, z: 0, tx: 0, tz: 0, progress: 0, u: 0, done: false};
+
+/**
+ * Advance one fixed tick along the resolved cable at (up to) the authored
+ * speed. Writes into `out` (defaults to a shared scratch object) and returns it.
+ * Travel is monotonic: `progress` never decreases and `done` latches on the
+ * final tick.
+ */
+export function stepZipRide(ride, dt, out = ZIP_STEP) {
+  if (!ride) return out;
+  const table = Array.isArray(ride.arc) && ride.arc.length > 1 ? ride.arc : (ride.arc = zipArcTable(ride));
+  const total = table[table.length - 1] || 0;
+  ride.t = Math.min(num(ride.duration, 0), num(ride.t, 0) + Math.max(0, num(dt)));
+  const progress = ride.duration > 0 ? Math.min(1, ride.t / ride.duration) : 1;
+  const target = total * progress;
+  let index = 1;
+  while (index < table.length - 1 && table[index] < target) index++;
+  const span = table[index] - table[index - 1];
+  const segment = span > 1e-9 ? (target - table[index - 1]) / span : 0;
+  const u = ((index - 1) + segment) / (table.length - 1);
+  const point = zipRidePoint(ride, u);
+  const ahead = zipRidePoint(ride, Math.min(1, u + 1e-3));
+  let tx = ahead.x - point.x, tz = ahead.z - point.z;
+  const length = Math.hypot(tx, tz);
+  if (length > 1e-9) { tx /= length; tz /= length; } else { tx = 0; tz = 0; }
+  out.x = point.x; out.y = point.y; out.z = point.z;
+  out.tx = tx; out.tz = tz;
+  out.u = u; out.progress = progress;
+  out.done = ride.t >= num(ride.duration, 0);
+  return out;
+}
+
+/** Face the direction of travel, bounded to `rate` rad/s. Pure. */
+export function zipRideFace(yaw, tx, tz, rate, dt) {
+  if (!(Math.abs(tx) > 1e-6 || Math.abs(tz) > 1e-6)) return num(yaw);
+  const target = Math.atan2(-tx, -tz);
+  const turn = Math.max(-rate * dt, Math.min(rate * dt, zipWrap(target - num(yaw))));
+  return num(yaw) + turn;
+}
+
+/** True when a rider at `point` can safely leave the cable and fall to ground. */
+export function zipRideDetachClear(x, y, z, world = {}) {
+  const floorAt = typeof world.floorAt === 'function' ? world.floorAt : null;
+  const clear = typeof world.clear === 'function' ? world.clear : null;
+  if (!floorAt || !clear) return true;
+  const floor = floorAt(x, z);
+  if (floor === null || floor > y + ZIP_RIDE.clearance) return false;
+  return clear(x, floor + .05, z, num(world.radius, .4));
+}
