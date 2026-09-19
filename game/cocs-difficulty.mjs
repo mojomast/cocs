@@ -28,7 +28,7 @@ export const DIRECTOR_TIERS = Object.freeze({
     reliefSeconds: 4,
     reinforceEvents: 0,
     compositionPool: 'core',
-    countScale: 0.9,
+    countScale: 0.85,
     hardened: false,
     denial: false,
     bossPhaseStart: 1,
