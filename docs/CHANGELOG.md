@@ -16,12 +16,12 @@ record in [VERIFICATION.md](VERIFICATION.md).
 
 ---
 
-## v8.2 · LADDER — 2026-09-19
+## v8.2 · FIELDWORK — 2026-09-19
 
-Per-team intelligence, a server-authoritative ranked ladder, and deeper
-Operations field work. This release changes simulation and server code, so the
-authoritative game server restarts and connected multiplayer clients briefly
-disconnect.
+A ranked ladder, per-team intelligence, Operations depth, real ziplines, an
+objective feedback kit and a guided way to learn the mode. This release changes
+simulation and server code, so the authoritative game server restarts and
+connected multiplayer clients briefly disconnect.
 
 ### Per-team snapshots
 
@@ -62,6 +62,44 @@ disconnect.
 - Allied bots use roles, terminal channels, PRIME and traversal by default.
 - Personal REQUISITION buys a loaner Puma through an authored spend action.
 - The legacy duplicate terminal state is removed in favour of one UI contract.
+- **Measured:** D1 wins 5/12 seeds (41.7%, in band) with scouts, harvesters and
+  terminals in real use (553 terminal interactions, 37 hacks, 70 deploys).
+
+### Real traversal
+
+- **Ziplines ride the cable.** The old LATTICE device moved the rider in one
+  frame while the ride interpolator only served legacy arenas. A ride now
+  travels the authored cable with sag at its authored speed, faces travel,
+  holds a readable minimum duration, allows a safe jump-off and collision-checks
+  its path (raise ≤6 m, then truncate, then refuse) instead of clipping.
+  Foundry cables measure 2.4–2.9 s with the rider on the wire.
+- **Teleporters and launchers** get departure and arrival beats at both ends:
+  portal column and expanding ring, local FOV pulse, spark/wind particles,
+  spatial audio, pooled and quality-scaled with reduced-motion variants.
+
+### Objective feedback
+
+- Captures carry the authored node label, the exact OP and REQ paid and the
+  participant list; orders carry their target label and completion reward;
+  refused orders and refused spends emit visible events with a reason.
+- A pure objective-beat model (`cocsAnnouncement`, `latticeAnnounceCue`) turns
+  those events into HUD banners and announcer cues — secured/lost, order
+  complete, terminal, wave, siege, refusal — with a camera pulse on a local
+  capture and a neutral call when a node is lost.
+
+### Interfaces and training
+
+- A cursor-mode owner releases mouse lock for the spend window, command board
+  and overlays, makes them clickable and keyboard-operable, and adds a
+  remappable free-cursor control; the spend window announces itself, shows
+  affordability and results, and resolves FORTIFY to a real owned node.
+- Local orders and spends now send the acting actor id instead of `human`, so
+  the simulation applies a player's commands instead of silently refusing them.
+- **Field Training** is a skippable, no-time-pressure course that teaches by
+  playing: move out, live fire, take a front, keep the supply line, spend the
+  surplus, issue an order, start a terminal, hold a wave, ride a route. The
+  engine is pure (`game/lattice-training.mjs`) and documented in
+  [LATTICE-TRAINING.md](LATTICE-TRAINING.md).
 
 ## v8.1 · FOUNDRY — 2026-09-19
 
