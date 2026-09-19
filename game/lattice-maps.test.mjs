@@ -1,7 +1,5 @@
-// Lattice slice map — V0a theatre stand-in (docs/design/COCS-MAP-ARCHITECTURE.md
-// §1, §5; COCS-MODE-SPEC.md §4). Verifies the authored map satisfies the schema
-// v3 contract, the lattice doctrine, nav reachability and the construction
-// budget *before* the M0 nav bake exists.
+// Lattice Foundry's stable queue id / strategic graph contract. Detailed
+// physical route, anchor, rendering and combat gates are in lattice-foundry*.test.mjs.
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import {MAPS,getMap} from './maps.mjs';

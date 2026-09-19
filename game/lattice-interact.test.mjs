@@ -8,7 +8,8 @@
 // the map legible without colour.
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {Match} from './core.mjs';
+import {Match,floorAt} from './core.mjs';
+import {LATTICE_MAPS} from './lattice-maps.mjs';
 import {cocsSnapshot} from './cocs.mjs';
 import {cocsCommandView, cocsTerminalView, cocsTraversalView} from './cocs-orders.mjs';
 
@@ -21,7 +22,7 @@ const cocsMatch = (over = {}) => new Match('chatgpt', 'openclaw', flatRng, 'latt
 const coopMatch = (over = {}) => new Match('chatgpt', 'openclaw', flatRng, 'lattice-slice', {
   mode: 'cocs-coop', humanCount: 1, botCount: 0, timeLimit: 900, ...over,
 });
-const pin = (actor, x, z, y = 0) => {
+const pin = (actor, x, z, y = floorAt(x,z,LATTICE_MAPS[0])) => {
   actor.x = x; actor.z = z; actor.y = y;
   actor.vx = actor.vy = actor.vz = 0; actor.grounded = true;
   actor.health = 200; actor.maxHealth = 200; actor.armor = 0; actor.protection = 0;
@@ -44,7 +45,7 @@ test('a human actor at a device anchor rides it on the interact edge', () => {
   pin(actor, device.from.x, device.from.z);
   interact(match, actor.id, true);
   assert.equal(state.traversal.stats.uses, 1, 'the live zipline fired');
-  assert.ok(Math.abs(actor.x - (-6)) < 1e-6 && Math.abs(actor.z - 44) < 1e-6, `arrived at ${actor.x},${actor.z}`);
+  assert.ok(Math.hypot(actor.x-device.to.x,actor.y-device.to.y,actor.z-device.to.z)<1e-6, `arrived at ${actor.x},${actor.z}`);
   assert.ok(actor.cocsArrival && actor.cocsArrival.remaining > 1.4, 'arrival protection applied');
   // A second held tick at the destination must not re-fire (no device there).
   interact(match, actor.id, true);

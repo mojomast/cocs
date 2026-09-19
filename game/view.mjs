@@ -17,6 +17,7 @@ import {CharacterRig} from './character-anim.mjs';
 import {CharacterLifecycle,alignLivingCharacter} from './rig.mjs';
 import {refineOperatorCharacter} from './models.mjs';
 import {terrainTriangles,terrainWallTriangles} from './terrain.mjs';
+import {foundryDetails,styleFoundryObjective} from './lattice-foundry-view.mjs';
 import {smoothNormals,positionColors} from './terrain-normals.mjs';
 import {TEAM_PALETTE,teamPresentation,teamMark,updateTeamMark,applyActorTeam} from './team-presentation.mjs';
 import {spectateActor} from './hud.mjs';
@@ -513,9 +514,8 @@ const arenaLooks={
    gauntlet:['#3a2a24','#221812','#c07a5a','#ffb089','#150d09',.0135,.6],
    'dune-ravine':['#8a6a3c','#5f4a2c','#d8b878','#ffe6b0','#3a2a16',.006,.2],
    'ember-caldera':['#5a2e22','#3a1d16','#c07a4a','#ffcfa0','#1d0c07',.012,.5],
-   // LATTICE STRIKE slice: a cold relay-teal theatre with its own fog band, so
-   // the canonical-map identity test sees a distinct material/atmosphere pair.
-   'lattice-slice':['#24443c','#183029','#79c7a8','#b9fff0','#0d241f',.0145,.5],
+   // Daylit slate/copper foundry: readable courtyards and long lane silhouettes.
+   'lattice-slice':['#718388','#8b9a9a','#d7d3bc','#fff0d3','#87958a',.0038,.18],
    };
 // Pooled, presentation-only debris for destructible props. It mirrors the
 // DeathPool contract (fixed slots, deterministic transforms, exactly-once
@@ -1161,6 +1161,9 @@ export class ArenaView{
    }
    // Next-gen maps keep these as invisible collision proxies and draw smooth geometry in buildNextGen.
    if(arena.nextGen===true&&NEXTGEN_PROXY.has(b.kind)){body.visible=false;continue;}
+   // Foundry has its own restrained copper/ceramic kit pass below; stacking the
+   // legacy full-height panels over it obscures doors and doubles the art bill.
+   if(arena.foundry)continue;
    // Keep the complete collision box visible: rock fractures and armor are surface treatments.
    if(rock){const positions=[];for(const sign of [-1,1])for(let row=1;row<=3;row++){const y=b.h*row/4;positions.push(b.x-b.w/2,y,b.z+sign*(b.d/2+.006),b.x+b.w/2,y+.12,b.z+sign*(b.d/2+.006));positions.push(b.x+sign*(b.w/2+.006),y,b.z-b.d/2,b.x+sign*(b.w/2+.006),y-.08,b.z+b.d/2);}const geometry=new T.BufferGeometry();geometry.setAttribute('position',new T.Float32BufferAttribute(positions,3));const fractures=new T.LineSegments(geometry,new T.LineBasicMaterial({color:'#514e40'}));fractures.userData.rockDetail=true;world.add(fractures);detail(b.w*.72,.014,b.d*.68,b.x,b.h+.008,b.z,trim);continue;}
    const accent=bunker?teamMats[b.x<0?0:1]:glow;
@@ -1184,6 +1187,7 @@ export class ArenaView{
   if(!islands&&!arena.terrain){for(let x=minX+2;x<maxX;x+=4)for(let z=minZ+2;z<maxZ;z+=4)detail(1.2,.012,.035,x,.012,z,trim);
    if(arena.id==='launchpad')for(let x=minX+3;x<maxX-2;x+=3)for(const sign of [-1,1])detail(1.5,.016,.22,x,.024,sign*10,glow);
   }
+   foundryDetails(world,arena,{detail,material,textLabel,palette,trim,glow});
    for(const [mat,entry] of detailBatches){const geometry=new T.BufferGeometry();geometry.setAttribute('position',new T.Float32BufferAttribute(entry.positions,3));geometry.computeVertexNormals();paintGeometry(geometry,arenaSeed+77,.14);const mesh=new T.Mesh(geometry,mat);mesh.userData.arenaDetail=true;mesh.receiveShadow=true;world.add(mesh);}unit.dispose();
  if(arena.raised){for(const x of [-11.05,11.05]){const length=Math.hypot(12,3.8),ramp=box(world,5.5,.18,length,x,1.83,-3,floor);ramp.rotation.x=Math.atan(3.8/12);for(const sx of [-2.2,2.2]){const strip=box(world,.06,.04,length,x+sx,1.96,-3,glow);strip.rotation.x=Math.atan(3.8/12);}}box(world,27,.06,.07,0,3.84,-9,glow);}
  if(arena.id==='crosswire'){for(const x of [-1.6,1.6])box(world,.055,.03,26,x,.04,0,glow);for(const z of [-1.6,1.6])box(world,26,.03,.055,0,.04,z,glow);ring(world,2,.025,0,6.2,0,glow);}
@@ -1198,7 +1202,7 @@ export class ArenaView{
    // the test mock keep individual meshes for predictable depth ordering).
    this._batchArenaBlocks(world);
    // Unused family colors never reach the scene's normal disposal traversal.
-   const usedMaterials=new Set();world.traverse(n=>{if(n.material)usedMaterials.add(n.material);});for(const mat of new Set(palette))if(!usedMaterials.has(mat))mat.dispose();   const skyPhaseName=skyPhase(arena),halo=HALO_MAPS.has(arena.id),sunDir=arena.id==='aether'?[-18,24,-12]:arena.id==='foundry'?[18,24,-12]:[18,24,10],quality=this._quality();this.scene.userData.sky={background:arena.background,phase:skyPhaseName,seed:arenaSeed,halo,sunDir,mood:biomeAmbience(arena).mood,weather:this.weatherState?this.weatherState.kind:'clear'};if(this.renderer?.isSoftware!==true){this.sky=addSky(world,{background:arena.background,radius:185,phase:skyPhaseName,seed:arenaSeed,starCount:Math.round((skyPhaseName==='night'?520:0)*quality.stars),halo,sunDir});this.mountains=addMountains(world,{background:arena.background,seed:arenaSeed,radius:150,count:Math.max(8,Math.round(26*quality.scatter)),base:-12,detail:quality.scatterDetail});if(arena.terrain)this.scatterWind=addScatter(world,{terrain:arena.terrain,bounds,seed:arenaSeed,wind:true,density:quality.scatter,detail:quality.scatterDetail,biome:arena.biome})||[];const atmosphere=mothAtmosphereFor(arena.id);if(atmosphere)this._applyMothAtmosphere(atmosphere);}
+    const usedMaterials=new Set();world.traverse(n=>{if(n.material)usedMaterials.add(n.material);});for(const mat of new Set(palette))if(!usedMaterials.has(mat))mat.dispose();   const skyPhaseName=skyPhase(arena),halo=HALO_MAPS.has(arena.id),sunDir=arena.id==='aether'?[-18,24,-12]:arena.id==='foundry'?[18,24,-12]:[18,24,10],quality=this._quality();this.scene.userData.sky={background:arena.background,phase:skyPhaseName,seed:arenaSeed,halo,sunDir,mood:biomeAmbience(arena).mood,weather:this.weatherState?this.weatherState.kind:'clear'};if(this.renderer?.isSoftware!==true){this.sky=addSky(world,{background:arena.background,radius:185,phase:skyPhaseName,seed:arenaSeed,starCount:Math.round((skyPhaseName==='night'?520:0)*quality.stars),halo,sunDir});this.mountains=addMountains(world,{background:arena.background,seed:arenaSeed,radius:150,count:Math.max(8,Math.round(26*quality.scatter)),base:-12,detail:quality.scatterDetail});if(arena.terrain&&arena.scatter!==false)this.scatterWind=addScatter(world,{terrain:arena.terrain,bounds,seed:arenaSeed,wind:true,density:quality.scatter,detail:quality.scatterDetail,biome:arena.biome})||[];const atmosphere=mothAtmosphereFor(arena.id);if(atmosphere)this._applyMothAtmosphere(atmosphere);}
     else this.scatterWind=[];
     this.ambientFx=null;this.ambientPool?.dispose?.();this.ambientPool=null;this.ambientConfig=ambientProfile(arena,skyPhaseName);this.ambientSeed=arenaSeed;this.ambientAnchors=smokeAnchors(bounds,arenaSeed,4);
     this.weatherFx=null;this.weatherPool?.dispose?.();this.weatherPool=null;this.initWeather(arena);
@@ -1572,7 +1576,7 @@ export class ArenaView{
         const progress=Math.round((owned?1:Math.max(p0,p1))*100);
         const radius=Math.max(2.5,Math.min(14,Number(node.r??node.radius)||6));
         let g=this.objectiveModels.get(key);
-        if(!g){g=this.createObjectiveModel({id:node.id,radius,owner,contested,progress},arena);g.userData.cocsNode=true;this.objectiveModels.set(key,g);this.worldGroup?.add(g);}
+        if(!g){g=this.createObjectiveModel({...node,radius,owner,contested,progress},arena);styleFoundryObjective(g,node,arena);g.userData.cocsNode=true;this.objectiveModels.set(key,g);this.worldGroup?.add(g);}
         active.add(key);this.styleCocsModel(g,node);
         const color=contested?'#ffd166':owned?this.objectiveColor(owner,arena):(COCS_NODE_TINTS[archetype]??NEUTRAL);
         const progressColor=contested?'#ffd166':capturing===0||capturing===1?this.objectiveColor(capturing,arena):'#eafff5';
@@ -1588,6 +1592,7 @@ export class ArenaView{
         g.userData.progress.visible=progress>0;
         const dim=!anchor&&!live,alpha=dim?.38:1;
         for(const mat of [g.userData.baseMat,g.userData.areaMat]){mat.opacity=alpha;mat.transparent=true;}
+        if(g.userData.foundryRing)g.userData.areaMat.opacity=alpha*.36;
         g.userData.beacon.visible=anchor||live;
         g.userData.identifier=key;
         g.userData.cocsLive=live;g.userData.cocsContested=contested;g.userData.cocsOwner=owner;
@@ -1597,16 +1602,19 @@ export class ArenaView{
        // and owner. Keyed separately from nodes so they follow the same
        // create/dispose lifecycle and never collide with a node id.
        const traversal=this.cocsTraversal(match);
+       // Compact traversal snapshots omit Y. Resolve their map anchor on the
+       // authored surface so Foundry's beacons/arrival rings are not buried.
+       const groundMark=p=>Number.isFinite(p.y)?p.y:(arena.terrain?.height?.(Number(p.x)||0,Number(p.z)||0)??0);
        for(const device of traversal.devices){
         if(!device||device.id===undefined||device.id===null)continue;
         const key=`traversal:device:${device.id}`,deviceState=String(device.state??'live');
         let g=this.objectiveModels.get(key);
-        if(!g){g=this.createObjectiveModel({id:key,radius:2.2,owner:null,contested:false,progress:0},arena);g.userData.cocsDevice=true;this.objectiveModels.set(key,g);this.worldGroup?.add(g);}
+        if(!g){g=this.createObjectiveModel({id:key,radius:2.2,owner:null,contested:false,progress:0},arena);styleFoundryObjective(g,device,arena);g.userData.cocsDevice=true;this.objectiveModels.set(key,g);this.worldGroup?.add(g);}
         active.add(key);
         const color=deviceState==='cut'?'#ff6b6b':deviceState==='locked'?'#ffd166':'#7fe3c8';
         for(const mat of [g.userData.baseMat,g.userData.areaMat,g.userData.beaconMat]){mat.color.set(color);mat.emissive?.set(color);}
         g.userData.progress.visible=false;g.userData.beacon.visible=true;
-        g.position.set(Number(device.x)||0,0,Number(device.z)||0);
+        g.position.set(Number(device.x)||0,groundMark(device),Number(device.z)||0);
         g.userData.identifier=key;g.userData.cocsDeviceState=deviceState;
        }
        for(const depot of traversal.depots){
@@ -1614,12 +1622,12 @@ export class ArenaView{
         const key=`traversal:depot:${depot.id}`,radius=Math.max(3,Math.min(10,Number(depot.radius)||6));
         const owner=depot.owner===0||depot.owner===1?depot.owner:null,contested=depot.contested===true;
         let g=this.objectiveModels.get(key);
-        if(!g){g=this.createObjectiveModel({id:key,radius,owner,contested,progress:0},arena);g.userData.cocsDepot=true;this.objectiveModels.set(key,g);this.worldGroup?.add(g);}
+        if(!g){g=this.createObjectiveModel({id:key,radius,owner,contested,progress:0},arena);styleFoundryObjective(g,depot,arena);g.userData.cocsDepot=true;this.objectiveModels.set(key,g);this.worldGroup?.add(g);}
         active.add(key);
         const color=contested?'#ffd166':owner===null?NEUTRAL:this.objectiveColor(owner,arena);
         for(const mat of [g.userData.baseMat,g.userData.areaMat,g.userData.beaconMat]){mat.color.set(color);mat.emissive?.set(color);}
         g.userData.progress.visible=false;g.userData.beacon.visible=true;
-        g.position.set(Number(depot.x)||0,Number(depot.y)||0,Number(depot.z)||0);
+        g.position.set(Number(depot.x)||0,groundMark(depot),Number(depot.z)||0);
         g.userData.identifier=key;g.userData.cocsDepotOwner=owner;
        }
        // §6A.3 arrival telegraph: a short blue landing ring where a device just
@@ -1629,11 +1637,11 @@ export class ArenaView{
         if(!arrival||arrival.telegraph!==true)continue;
         const key=`traversal:arrival:${arrival.id}`;
         let g=this.objectiveModels.get(key);
-        if(!g){g=this.createObjectiveModel({id:key,radius:3.4,owner:null,contested:false,progress:0},arena);g.userData.cocsArrival=true;this.objectiveModels.set(key,g);this.worldGroup?.add(g);}
+        if(!g){g=this.createObjectiveModel({id:key,radius:3.4,owner:null,contested:false,progress:0},arena);styleFoundryObjective(g,arrival,arena);g.userData.cocsArrival=true;this.objectiveModels.set(key,g);this.worldGroup?.add(g);}
         active.add(key);
         for(const mat of [g.userData.baseMat,g.userData.areaMat,g.userData.beaconMat]){mat.color.set('#9fd8ff');mat.emissive?.set('#9fd8ff');}
         g.userData.progress.visible=false;g.userData.beacon.visible=true;
-        g.position.set(Number(arrival.x)||0,0,Number(arrival.z)||0);
+        g.position.set(Number(arrival.x)||0,groundMark(arrival),Number(arrival.z)||0);
         g.userData.identifier=key;g.userData.cocsArrivalSeconds=Number(arrival.remaining)||0;
         g.scale.setScalar(reduced?1:1+Math.sin(time*9+(key.length||0))*.06);
        }
