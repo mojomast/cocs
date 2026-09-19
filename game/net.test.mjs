@@ -522,3 +522,35 @@ test('net.loadout remembers the latest pair and sends the v3 loadout message', (
  assert.deepEqual(client.seatLoadout, {character: 'grok', harness: 'hermes'}, 'the latest pair replaces the previous one');
  assert.deepEqual(sent.at(-1), {type: MESSAGE.LOADOUT, character: 'grok', harness: 'hermes'});
 });
+
+test('ranked status messages are consumed and survive a lobby update', () => {
+ const client = new NetClient();
+ const seen = {queue: 0, leaderboard: 0, profile: 0, matchmade: 0};
+ client.onQueue = () => seen.queue++;
+ client.onLeaderboard = () => seen.leaderboard++;
+ client.onProfile = () => seen.profile++;
+ client.onMatchmade = () => seen.matchmade++;
+ assert.equal(client.queueMessage, null);
+ // The exact payload shapes the ranked server dispatches (existing v3 names).
+ client.onMessage(JSON.stringify({type: 'queue', status: 'queued', queue: 'ranked', position: 2, size: 5, rating: 1500}));
+ assert.equal(client.queueMessage.status, 'queued');
+ assert.equal(client.queueMessage.position, 2);
+ client.onMessage(JSON.stringify({type: 'leaderboard', mode: 'cocs', rows: [{id: 'a', rating: 1600}]}));
+ assert.equal(client.leaderboardMessage.mode, 'cocs');
+ assert.deepEqual(client.leaderboardRows, [{id: 'a', rating: 1600}]);
+ client.onMessage(JSON.stringify({type: 'profile', profile: {id: 'p', rating: 1500}}));
+ assert.equal(client.rankedProfile.rating, 1500);
+ client.onMessage(JSON.stringify({type: 'matchmade', roomId: 'r', team: 0, rating: 1500, ranked: true, teams: []}));
+ assert.equal(client.matchmadeMessage.roomId, 'r');
+ assert.deepEqual(seen, {queue: 1, leaderboard: 1, profile: 1, matchmade: 1});
+ // A lobby arrival must not clear the ranked readout.
+ client.onMessage(JSON.stringify({type: 'lobby', roomId: 'r', hostId: 1, players: []}));
+ assert.equal(client.queueMessage.status, 'queued', 'queue status survives a lobby');
+ assert.equal(client.rankedProfile.rating, 1500, 'ranked profile survives a lobby');
+ assert.deepEqual(client.leaderboardRows.length, 1);
+ // Unknown/malformed payloads stay tolerated.
+ assert.doesNotThrow(() => client.onMessage(JSON.stringify({type: 'leaderboard'})));
+ assert.deepEqual(client.leaderboardRows, []);
+ assert.doesNotThrow(() => client.onMessage(JSON.stringify({type: 'queue'})));
+ assert.equal(client.queueMessage.type, 'queue');
+});

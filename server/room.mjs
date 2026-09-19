@@ -14,6 +14,10 @@ import {coopRole} from '../game/cocs-roles.mjs';
 import {SUBAGENTS,reqItem,reqPurchase} from '../game/cocs-economy.mjs';
 import {randomUUID} from 'node:crypto';
 import {validPlayerId,sanitizeText,parseInputEnvelope,PROTOCOL_VERSION,SNAPSHOT_DELTA_VERSION,SNAPSHOT_DELTA_MIN_BYTES,snapshotDelta,wireSize,MESSAGE,COCS_REJECT_LIMIT,parseOrderMessage,parseEconomyMessage,parseTerminalMessage,parseCommandMessage,parseBuyMessage} from '../game/protocol.mjs';
+// V2 per-team snapshot filtering (§11.4/§12.7). Applied per peer at this wire
+// seam only; local/solo play reads `Match.snapshot()` directly and stays
+// byte-identical.
+import {filterCocsSnapshot,cocsEventVisible} from '../game/cocs-intel.mjs';
 
 export const PLAYER_LIMIT = 8;
 // LATTICE STRIKE (§11.5, owner decision 24): the COCS family admits up to 32
@@ -83,7 +87,11 @@ export class Room {
   // frame (the transport drops replaceable snapshots under backpressure) can
   // re-sync without waiting for the next match. Default: one keyframe a second.
   this.keyframeEvery = Math.max(0, Math.floor(Number(options.keyframeEvery) || this.snapshotHz));
+  // The raw last broadcast (`lastSnapshot`) is kept for compatibility and
+  // diagnostics; the delta chains are per filtered view (`lastViewSnapshots`),
+  // because each team's wire content differs (§11.4).
   this.lastSnapshot = null;
+  this.lastViewSnapshots = new Map();
   this.deltaFrames = 0;
   this.fullFrames = 0;
   this.out = [];
@@ -384,6 +392,40 @@ export class Room {
   if (state.cocs && this.cocsCards.size) state.cocs = { ...state.cocs, cards: this.cocsCardList() };
   return state;
  }
+ // The view a peer's snapshot is filtered by: its actor's team (0/1) or `null`
+ // for a spectator / a peer without a live actor. Teams never change mid-match,
+ // and a spectator can never be used as an oracle for either team's private
+ // data (§11.4). Returned to the tick loop so at most three filtered frames are
+ // built per broadcast (team 0, team 1, spectator).
+ peerCocsView(peer) {
+  if (!peer || peer.spectate === true) return null;
+  const actor = peer.actorId === null || peer.actorId === undefined ? null : this.match?.actors?.[peer.actorId] ?? null;
+  if (!actor || (actor.team !== 0 && actor.team !== 1)) return null;
+  return actor.team === 1 ? 1 : 0;
+ }
+ // Per-team projection of `wireState()` (§11.4/§12.7). `filterCocsSnapshot`
+ // returns the raw state by identity when the mode has no `cocs` subtree, so
+ // non-COCS modes and every offline path are byte-identical.
+ wireStateFor(view) {
+  const state = this.wireState();
+  return state ? filterCocsSnapshot(state, view) : null;
+ }
+ // One outbound `results` state per recipient view; non-COCS (and single-team)
+ // rooms collapse to one shared state and keep the historic `to: null`
+ // broadcast. Snapshots and results share the same per-team filtering (§11.4).
+ sendResults(result) {
+  if (!result) return;
+  const views = new Map();
+  const forPeer = peer => {
+   const view = this.peerCocsView(peer);
+   if (!views.has(view)) views.set(view, filterCocsSnapshot(result, view));
+   return views.get(view);
+  };
+  const states = [...this.peers.values()].map(forPeer);
+  const uniform = states.length === 0 || states.every(state => state === states[0]);
+  if (uniform) this.broadcast({ type: 'results', state: states[0] ?? filterCocsSnapshot(result, null) });
+  else for (const p of this.peers.values()) this.send(p.id, { type: 'results', state: forPeer(p) });
+ }
  // Deterministic lifecycle view shared by the lobby message and the tests.
  lifecycle() {
   const players = [...this.peers.values()].filter(p => p.spectate !== true);
@@ -509,11 +551,11 @@ export class Room {
     this.broadcast(this.lobby());
     if (this.started && !this.roundOver && this.match) {
      this.send(peerId, { type: 'start', config: { ...this.match.config }, mapId: this.match.arena.id });
-     const state = this.wireState(), seq = ++this.seq;
+     const state = this.wireStateFor(this.peerCocsView(existing)), seq = ++this.seq;
      existing.snapshotBase = { seq, state };
      this.send(peerId, { type: 'snapshot', seq, acks: { [existing.actorId]: existing.appliedSeq }, state });
      } else if (this.match?.over) {
-      this.send(peerId, { type: 'results', state: this.match.snapshot() });
+      this.send(peerId, { type: 'results', state: filterCocsSnapshot(this.match.snapshot(), this.peerCocsView(existing)) });
      }
     return;
    }
@@ -539,11 +581,11 @@ export class Room {
   if (requestedPlayer && active) this.send(peerId, { type: 'error', message: 'Match in progress — you joined as a spectator.' });
   if (isSpectator && this.started && !this.roundOver && this.match) {
    this.send(peerId, { type: 'start', config: { ...this.match.config }, mapId: this.match.arena.id });
-    const state = this.wireState(), seq = ++this.seq;
+    const state = this.wireStateFor(this.peerCocsView(this.peers.get(peerId))), seq = ++this.seq;
     peer.snapshotBase = { seq, state };
     this.send(peerId, { type: 'snapshot', seq, acks: { [this.peers.get(peerId)?.actorId ?? -1]: 0 }, state });
    } else if (isSpectator && this.match?.over) {
-    this.send(peerId, { type: 'results', state: this.match.snapshot() });
+    this.send(peerId, { type: 'results', state: filterCocsSnapshot(this.match.snapshot(), this.peerCocsView(this.peers.get(peerId))) });
    }
  }
  disconnect(peerId) {
@@ -613,8 +655,9 @@ export class Room {
   this.tickAcc = 0;
   this.broadcastAt = 0;
   // A new match invalidates every delta chain: the first post-start frame is a
-  // full snapshot and each peer's base is reset.
+  // full snapshot and each peer's (per-view) base is reset.
   this.lastSnapshot = null;
+  this.lastViewSnapshots.clear();
   for (const p of this.peers.values()) p.snapshotBase = null;
   this.broadcast(this.lobby());
   this.broadcast({ type: 'start', config: { ...this.config }, mapId: this.mapId });
@@ -799,9 +842,15 @@ export class Room {
    if (p.disconnectedAt !== null || (p.actorId === null && !p.spectate) || p.lastSerial >= newest) continue;
    let index = 0;
    while (shared[index].id <= p.lastSerial) index++;
-   const delta = shared.slice(index);
+   // V2 (§11.4/§12.7): team-private COCS events (orders, scans, buys, role
+   // bodies) only reach the issuing team; world-observable COCS events and every
+   // non-COCS event are unchanged. A peer's serial still advances past the
+   // filtered entries, so the shared feed can never drift or replay.
+   const view = this.peerCocsView(p);
+   const delta = [];
+   for (let i = index; i < shared.length; i++) if (cocsEventVisible(shared[i], view)) delta.push(shared[i]);
    p.lastSerial = newest;
-   this.send(p.id, { type: 'events', items: delta });
+   if (delta.length) this.send(p.id, { type: 'events', items: delta });
   }
  }
  tick(dt) {
@@ -852,26 +901,40 @@ export class Room {
     this.broadcastAt += RULES.dt;
      if (!broadcasted && this.broadcastAt >= 1 / this.effectiveSnapshotHz()) {
       broadcasted = true; this.broadcastAt = 0;
-      const state = this.wireState();
+      const rawState = this.wireState();
       const seq = ++this.seq;
       const acks = {};
       for (const p of this.peers.values()) if (p.actorId !== null) acks[p.actorId] = p.appliedSeq;
-      const prev = this.lastSnapshot;
       const keyframe = this.keyframeEvery > 0 && seq % this.keyframeEvery === 0;
-      // The patch is identical for every peer whose base is the previous
-      // broadcast, so it is computed once per tick rather than once per peer.
-      let patch = null;
-      if (!keyframe && prev) {
-       patch = snapshotDelta(prev.state, state);
-       if (patch && wireSize({ type: MESSAGE.SNAPSHOT_DELTA, seq, base: prev.seq, acks, patch }) + SNAPSHOT_DELTA_MIN_BYTES >= wireSize({ type: MESSAGE.SNAPSHOT, seq, acks, state })) patch = null;
-      }
+      // V2 per-team filtering (§11.4/§12.7): the content depends only on the
+      // recipient's view (team 0, team 1, or spectator), so at most three frames
+      // and three delta chains are built per broadcast. Every peer on the same
+      // view shares one patch; a peer whose base is the previous frame of its
+      // own view gets it, everyone else gets the filtered full snapshot.
+      const viewFrames = new Map();
+      const frameFor = view => {
+       let frame = viewFrames.get(view);
+       if (frame) return frame;
+       const state = filterCocsSnapshot(rawState, view);
+       const prev = this.lastViewSnapshots.get(view) ?? null;
+       let patch = null;
+       if (!keyframe && prev) {
+        patch = snapshotDelta(prev.state, state);
+        if (patch && wireSize({ type: MESSAGE.SNAPSHOT_DELTA, seq, base: prev.seq, acks, patch }) + SNAPSHOT_DELTA_MIN_BYTES >= wireSize({ type: MESSAGE.SNAPSHOT, seq, acks, state })) patch = null;
+       }
+       frame = { state, prev, patch };
+       viewFrames.set(view, frame);
+       return frame;
+      };
       for (const p of this.peers.values()) {
-       const canDelta = !!patch && p.deltaVersion >= SNAPSHOT_DELTA_VERSION && prev && p.snapshotBase?.seq === prev.seq;
-       if (canDelta) { this.send(p.id, { type: MESSAGE.SNAPSHOT_DELTA, v: PROTOCOL_VERSION, seq, base: prev.seq, acks, patch }); this.deltaFrames++; }
-       else { this.send(p.id, { type: MESSAGE.SNAPSHOT, v: PROTOCOL_VERSION, seq, acks, state }); this.fullFrames++; }
-       p.snapshotBase = { seq, state };
+       const frame = frameFor(this.peerCocsView(p));
+       const canDelta = !!frame.patch && p.deltaVersion >= SNAPSHOT_DELTA_VERSION && frame.prev && p.snapshotBase?.seq === frame.prev.seq;
+       if (canDelta) { this.send(p.id, { type: MESSAGE.SNAPSHOT_DELTA, v: PROTOCOL_VERSION, seq, base: frame.prev.seq, acks, patch: frame.patch }); this.deltaFrames++; }
+       else { this.send(p.id, { type: MESSAGE.SNAPSHOT, v: PROTOCOL_VERSION, seq, acks, state: frame.state }); this.fullFrames++; }
+       p.snapshotBase = { seq, state: frame.state };
       }
-      this.lastSnapshot = { seq, state };
+      for (const [view, frame] of viewFrames) this.lastViewSnapshots.set(view, { seq, state: frame.state });
+      this.lastSnapshot = { seq, state: rawState };
      }
      if (this.match.over) { ended = true; break; }
   }
@@ -894,7 +957,7 @@ export class Room {
      catch {}
     }
    }
-   this.broadcast({ type: 'results', state: result });
+   this.sendResults(result);
   }
  }
 }

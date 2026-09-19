@@ -5,6 +5,12 @@ import {clamp} from './math.mjs';
 // so bumping this constant cannot strand an older client. Version 3 adds the
 // held `mobility` input field and the `loadout` respawn-switch message
 // (docs/design/CLASS_OVERHAUL.md §5, §12.2 Phase 4).
+//
+// LATTICE STRIKE V2 per-team snapshot filtering (`game/cocs-intel.mjs`,
+// `server/room.mjs`) deliberately does NOT bump this version: it removes fields
+// from the existing `cocs` subtree for the non-recipient team, and every client
+// reader already treats an absent `cocs` section as empty. A v3 peer keeps
+// receiving valid v3 envelopes, so no compatibility statement changes.
 export const PROTOCOL_VERSION = 3;
 // Snapshot-delta revisions. v2 diffs id-keyed arrays element-wise; a peer only
 // receives deltas for a revision it advertised, so a v1 client keeps getting
