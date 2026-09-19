@@ -1,4 +1,5 @@
 import {Room} from './room.mjs';
+import {cocsRung,cocsRungPlan} from '../game/config.mjs';
 
 const CODE_ALPHABET = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
 
@@ -58,12 +59,22 @@ export function balanceTeams(players = [], {random = Math.random} = {}) {
 export class Matchmaker {
  constructor(options = {}) {
   this.random = options.random ?? Math.random;
-  this.teamSize = Math.max(1, Math.min(8, Number(options.teamSize) || TEAM_SIZE));
-  this.minPlayers = Math.max(2, Math.min(this.teamSize * 2, Number(options.minPlayers) || 2));
+  // LATTICE STRIKE PvP queue (§3.1). A rung owns the per-team size and the
+  // human floor; the queue then drafts only once the floor is met and reports
+  // the stable bot fill a room would use. Without a rung the historical
+  // `teamSize * 2` draft is unchanged.
+  this.rung = cocsRung(options.rung)?.id ?? null;
+  const rungTable = cocsRung(this.rung);
+  this.teamSize = rungTable ? rungTable.perTeam : Math.max(1, Math.min(8, Number(options.teamSize) || TEAM_SIZE));
+  this.minPlayers = rungTable
+   ? Math.max(2, Math.min(this.teamSize * 2, rungTable.minHumans))
+   : Math.max(2, Math.min(this.teamSize * 2, Number(options.minPlayers) || 2));
   this.max = Math.max(this.minPlayers, Number(options.max) || QUEUE_MAX);
   this.entries = [];
   this.sequence = 0;
  }
+ /** The live rung plan for the queued population, or null without a rung. */
+ plan() { return this.rung ? cocsRungPlan(this.rung, this.entries.length) : null; }
  enqueue(entry = {}) {
   const peerId = entry.peerId;
   if (peerId === undefined || peerId === null) return null;
@@ -94,11 +105,24 @@ export class Matchmaker {
  list() { return this.entries.map(({peerId, name, rating}) => ({peerId, name, rating})); }
  // Pop a full draft when enough players are waiting. Returns null otherwise.
  draft() {
-  const size = Math.min(this.teamSize * 2, this.entries.length);
+  const needed = this.teamSize * 2;
+  const size = Math.min(needed, this.entries.length);
   if (size < this.minPlayers) return null;
+  // A laddered draft only opens on the rung's human floor; below it the queue
+  // reports no draft so the caller can fall back to OPERATIONS / practice
+  // instead of silently auto-starting on a bot majority.
+  const plan = this.plan();
+  if (this.rung && (!plan || !plan.meetsMinimum)) return null;
   const players = this.entries.slice(0, size);
   this.entries = this.entries.slice(size);
-  return {players, ...balanceTeams(players, {random: this.random})};
+  const draft = {players, ...balanceTeams(players, {random: this.random})};
+  if (this.rung) {
+   draft.rung = this.rung;
+   draft.botFill = Math.max(0, needed - size);
+   draft.meetsMinimum = plan.meetsMinimum;
+   draft.roleAllow = [...plan.roleAllow];
+  }
+  return draft;
  }
 }
 

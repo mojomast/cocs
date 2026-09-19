@@ -85,6 +85,11 @@ function geometry(scope,key,make){const assets=scope===undefined?currentAssets()
 const WING_BY_CHARACTER=Object.fromEntries(OPERATOR_KITS.map(kit=>[kit.id,WINGS.find(wing=>wing.id===kit.wing)]));
 // Movement/spec events that carry a telegraph cue in ArenaView.effect().
 const TELEGRAPH_EVENTS=new Set(['windup-start','windup-interrupt','charge-start','move-start','landing-recovery','fuel-empty','slam-launch','slam-impact','grapple-hook','grapple-release','rope-place','rope-expire','threat-ping']);
+// LATTICE STRIKE node identity. Each archetype gets a distinct zero-cost tint
+// for neutral nodes (owned nodes use the team colour) and a distinct emblem
+// primitive, so a node reads by archetype and owner without relying on colour.
+const COCS_NODE_LABELS={front:'FRONT',economy:'ECON',relay:'RELAY',array:'ARRAY',hq:'HQ'};
+const COCS_NODE_TINTS={front:'#c8d6cf',economy:'#7fe3c8',relay:'#bf9cff',array:'#6dbfff',hq:'#9fb4c4'};
 export function box(parent,w,h,d,x,y,z,mat,assets){const m=new T.Mesh(geometry(assets,`b|${w}|${h}|${d}`,()=>new T.BoxGeometry(w,h,d)),mat);m.position.set(x,y,z);parent.add(m);return m;}
 function cylinder(parent,r1,r2,h,x,y,z,mat,segments=12,assets){const m=new T.Mesh(geometry(assets,`c|${r1}|${r2}|${h}|${segments}`,()=>new T.CylinderGeometry(r1,r2,h,segments)),mat);m.position.set(x,y,z);parent.add(m);return m;}
 export function ring(parent,r,t,x,y,z,mat,rx=Math.PI/2,assets){const m=new T.Mesh(geometry(assets,`t|${r}|${t}`,()=>new T.TorusGeometry(r,t,6,32)),mat);m.position.set(x,y,z);m.rotation.x=rx;parent.add(m);return m;}
@@ -508,6 +513,9 @@ const arenaLooks={
    gauntlet:['#3a2a24','#221812','#c07a5a','#ffb089','#150d09',.0135,.6],
    'dune-ravine':['#8a6a3c','#5f4a2c','#d8b878','#ffe6b0','#3a2a16',.006,.2],
    'ember-caldera':['#5a2e22','#3a1d16','#c07a4a','#ffcfa0','#1d0c07',.012,.5],
+   // LATTICE STRIKE slice: a cold relay-teal theatre with its own fog band, so
+   // the canonical-map identity test sees a distinct material/atmosphere pair.
+   'lattice-slice':['#24443c','#183029','#79c7a8','#b9fff0','#0d241f',.0145,.5],
    };
 // Pooled, presentation-only debris for destructible props. It mirrors the
 // DeathPool contract (fixed slots, deterministic transforms, exactly-once
@@ -1477,7 +1485,161 @@ export class ArenaView{
       if(beacon)beacon.material.emissiveIntensity=reduced?1:1+.6*Math.sin(t*4);
       if(halo)halo.scale.setScalar(reduced?1:1+.08*Math.sin(t*4));
      }
-        updateObjectives(match,arena=MAPS[0]){const input=match?.objectives??match?.objectiveState;if(!input||!['koth','domination','assault','payload','extraction'].includes(input.kind)){this.clearObjectiveMarkers();return;}this.objectiveModels??=new Map();const active=new Set(),reduced=this.reduced(),software=this.renderer?.isSoftware===true,assaultActive=input.kind==='assault'&&Number.isFinite(input.active)?input.active:-1;for(const [zoneIndex,zone] of (input.kind==='extraction'?[{id:'extract',x:input.extract?.x,z:input.extract?.z,radius:input.escortRadius??6,progress:input.captureSeconds>0?Math.max(0,Math.min(100,(Number(input.progress)||0)/Number(input.captureSeconds)*100)):0,owner:Number.isInteger(input.escortTeam)?input.escortTeam:null,captureTeam:null,contested:false}]:input.zones||[]).entries()){if(!zone)continue;const key=String(zone.id??active.size),p=pointOf(zone),owner=zone.contested?'contested':zone.owner,capture=zone.captureTeam??zone.owner,progress=Math.max(0,Math.min(100,Number(zone.progress)||0)),radius=Math.max(.8,Number(zone.radius)||3.5);let g=this.objectiveModels.get(key);if(!g){g=this.createObjectiveModel(zone,arena);this.objectiveModels.set(key,g);this.worldGroup?.add(g);}active.add(key);const color=zone.contested?'#ffd166':this.objectiveColor(owner,arena),progressColor=zone.contested?'#ffd166':this.objectiveColor(capture,arena);g.position.set(p.x||0,p.y||0,p.z||0);g.userData.baseMat.color.set(color);g.userData.baseMat.emissive.set(color);g.userData.areaMat.color.set(color);g.userData.areaMat.emissive.set(color);g.userData.beaconMat.color.set(color);g.userData.beaconMat.emissive.set(color);g.userData.progressMat.color.set(progressColor);g.userData.progressMat.emissive.set(progressColor);g.userData.progressMat.opacity=progress>0?1:0;g.userData.progressMat.transparent=true;if(g.userData.radius!==radius){g.userData.area.geometry.dispose();g.userData.area.geometry=new T.CylinderGeometry(radius,radius,.035,32);g.userData.base.geometry.dispose();g.userData.base.geometry=new T.TorusGeometry(radius,.11,6,32);g.userData.progress.geometry.dispose();g.userData.progress.geometry=software?new T.RingGeometry(radius-.2,radius+.2,32,1,0,Math.PI*2*progress/100):new T.RingGeometry(radius-.2,radius+.2,32);if(!software)g.userData.progress.geometry.setDrawRange(0,Math.ceil(progress/100*32)*6);g.userData.radius=radius;}if(g.userData.progressValue!==progress){if(software){g.userData.progress.geometry.dispose();g.userData.progress.geometry=new T.RingGeometry(radius-.2,radius+.2,32,1,0,Math.PI*2*progress/100);}else g.userData.progress.geometry.setDrawRange(0,Math.ceil(progress/100*32)*6);g.userData.progressValue=progress;}g.userData.progress.visible=progress>0;g.userData.identifier=String(zone.id??'zone');g.userData.emblem.material=g.userData.progressMat;const sectorActive=input.kind==='assault'&&zoneIndex===assaultActive,sectorDim=input.kind==='assault'&&!sectorActive;g.userData.assaultActive=sectorActive;if(input.kind==='assault'){g.userData.areaMat.opacity=sectorDim?.16:1;g.userData.areaMat.transparent=true;g.userData.baseMat.opacity=sectorDim?.32:1;g.userData.baseMat.transparent=true;g.userData.areaMat.emissiveIntensity=sectorActive?1.9:sectorDim?.3:1.25;g.userData.baseMat.emissiveIntensity=sectorActive?2:sectorDim?.35:1.25;if(!g.userData.assaultLabel&&typeof document!=='undefined'&&typeof document.createElement==='function'){const assaultLabel=textLabel(g,String(zone.id??'sector').toUpperCase(),0,2.7,0,.5,sectorActive?'#ffffff':'#95a3ac');assaultLabel.userData.objective=true;assaultLabel.userData.noCameraOcclusion=true;g.userData.assaultLabel=assaultLabel;}if(g.userData.assaultLabel)g.userData.assaultLabel.visible=sectorActive;}g.scale.y=reduced?1:sectorActive?1.04+.1*Math.sin((match.time||0)*5):sectorDim?1:1+.06*Math.sin((match.time||0)*4+(zone.id?.length||0));}for(const [key,g] of this.objectiveModels)if(!active.has(key)){this.worldGroup?.remove(g);this.disposeObject(g);this.objectiveModels.delete(key);}}
+      // LATTICE STRIKE (`cocs`) world markers. A node is an objective area with
+      // its archetype emblem (front cone / economy cube / relay octahedron /
+      // array icosahedron / HQ hex pillar), tinted by owner and labelled in
+      // world. Not-live capturable nodes dim; live nodes and anchors keep the
+      // always-visible beacon. Follows the createObjectiveModel/disposeObject
+      // lifecycle so nothing leaks on mode change or dispose.
+      cocsNodes(match){const input=match?.objectives??match?.objectiveState;return match?.cocs?.nodes??input?.cocs?.nodes??input?.nodes??[];}
+      // V0b traversal markers: id-keyed devices (live/cut/locked), depots
+      // (owner/contest tinted) and arrival telegraphs. Presentation only,
+      // reusing the objective-marker lifecycle; the order-strip readout is
+      // derived in `cocs-orders.mjs`.
+      cocsTraversal(match){const input=match?.objectives??match?.objectiveState;const source=match?.cocs?.traversal??input?.traversal??input?.cocs?.traversal;if(!source)return {devices:[],depots:[],arrivals:[]};const list=value=>Array.isArray(value)?value:Object.keys(value||{}).map(id=>({id,...value[id]}));const arrivals=(Array.isArray(source.arrivals)?source.arrivals:[]).map(entry=>({...entry,id:entry?.id??`arrival-${entry?.actor}`}));return {devices:list(source.devices),depots:list(source.depots),arrivals};}
+      objectiveMarkZones(match){const input=match?.objectives??match?.objectiveState;return input?.kind==='cocs'?(match?.cocs?.nodes??input?.nodes??[]):(input?.zones||[]);}
+      styleCocsModel(g,node){
+       const archetype=String(node?.archetype??'front');
+       if(g.userData.cocsArchetype!==archetype){
+        const make={front:()=>new T.ConeGeometry(.4,.7,4),economy:()=>new T.BoxGeometry(.5,.5,.5),relay:()=>new T.OctahedronGeometry(.44),array:()=>new T.IcosahedronGeometry(.46,0),hq:()=>new T.CylinderGeometry(.52,.52,.44,6)}[archetype]??null;
+        if(make&&g.userData.emblem){g.userData.emblem.geometry.dispose();g.userData.emblem.geometry=make();}
+        g.userData.cocsArchetype=archetype;
+       }
+       if(!g.userData.cocsLabel&&typeof document!=='undefined'&&typeof document.createElement==='function'){
+        const label=textLabel(g,COCS_NODE_LABELS[archetype]??'NODE',0,2.6,0,.85,'#eafff5');
+        label.userData.objective=true;label.userData.noCameraOcclusion=true;g.userData.cocsLabel=label;
+       }
+      }
+      // V0b SPOT marks. A `SCAN` order marks every living enemy inside the scan
+      // radius for `spotSeconds`; this is presentation only (the +15% team
+      // damage lives in `Match.damage`). A spotted enemy gets an always-on-
+      // read ring + chevron above the head for exactly the remaining window,
+      // aged against the sim tick so the mark expires on the fixed clock.
+      cocsSpots(match){
+       const input=match?.objectives??match?.objectiveState;
+       const source=match?.cocs?.spots??input?.cocs?.spots??input?.spots;
+       if(Array.isArray(source))return source;
+       if(source&&typeof source==='object')return Object.keys(source).map(id=>({id:Number(id),...source[id]}));
+       return [];
+      }
+      cocsTick(match){const input=match?.objectives??match?.objectiveState;const tick=Number(match?.cocs?.tick??input?.cocs?.tick??input?.tick);return Number.isFinite(tick)?tick:null;}
+      ensureSpotMark(model){
+       if(!model?.userData)return null;
+       if(model.userData.spotMark)return model.userData.spotMark;
+       const group=new T.Group();group.name='cocs-spot';
+       const mat=new T.MeshBasicMaterial({color:'#ffd166',transparent:true,opacity:.95,depthTest:false,depthWrite:false});
+       const ring=new T.Mesh(new T.TorusGeometry(.42,.045,6,28),mat);ring.rotation.x=Math.PI/2;ring.position.y=1.35;group.add(ring);
+       const chevron=new T.Mesh(new T.ConeGeometry(.16,.3,4),mat);chevron.rotation.x=Math.PI;chevron.position.y=1.72;group.add(chevron);
+       group.traverse(node=>{node.userData.objective=true;node.userData.noCameraOcclusion=true;node.renderOrder=90;});
+       group.visible=false;model.add(group);model.userData.spotMark=group;return group;
+      }
+      updateSpots(match){
+       const spots=this.cocsSpots(match),tick=this.cocsTick(match),actors=match?.actors||[];
+       const local=actors.find(actor=>actor&&actor.id===this.playerId)||null;
+       const team=local&&(local.team===0||local.team===1)?local.team:null;
+       const byId=new Map(actors.filter(actor=>actor&&actor.id!==undefined).map(actor=>[actor.id,actor]));
+       const marked=new Set();
+       if(team!==null&&tick!==null){
+        for(const spot of spots){
+         if(!spot||spot.team!==team)continue;
+         if(!(Number(spot.until)>=tick))continue;
+         if(spot.id===undefined||spot.id===null)continue;
+         const target=byId.get(Number(spot.id));
+         if(!target||!(Number(target.health)>0))continue;
+         marked.add(Number(spot.id));
+        }
+       }
+       this.actorModels??=new Map();
+       for(const [id,model] of this.actorModels){
+        const mark=model?.userData?.spotMark;
+        if(mark)mark.visible=marked.has(id);
+       }
+       for(const id of marked){
+        const model=this.actorModels.get(id);
+        if(model)this.ensureSpotMark(model).visible=true;
+       }
+      }
+      updateCocsObjectives(match,arena=MAPS[0]){
+       const nodes=this.cocsNodes(match);
+       this.objectiveModels??=new Map();
+       const active=new Set(),reduced=this.reduced(),software=this.renderer?.isSoftware===true,time=Number(match?.time)||0;
+       for(const node of nodes){
+        if(!node||node.id===undefined||node.id===null)continue;
+        const key=String(node.id),archetype=String(node.archetype??'front'),live=node.live===true,contested=node.contested===true,anchor=archetype==='hq'||archetype==='array';
+        const owned=node.owner===0||node.owner===1,owner=owned?node.owner:null;
+        const p0=Math.max(0,Math.min(1,Number(node.progress?.[0])||0)),p1=Math.max(0,Math.min(1,Number(node.progress?.[1])||0));
+        const capturing=owned?owner:(p0>p1?0:p1>p0?1:null);
+        const progress=Math.round((owned?1:Math.max(p0,p1))*100);
+        const radius=Math.max(2.5,Math.min(14,Number(node.r??node.radius)||6));
+        let g=this.objectiveModels.get(key);
+        if(!g){g=this.createObjectiveModel({id:node.id,radius,owner,contested,progress},arena);g.userData.cocsNode=true;this.objectiveModels.set(key,g);this.worldGroup?.add(g);}
+        active.add(key);this.styleCocsModel(g,node);
+        const color=contested?'#ffd166':owned?this.objectiveColor(owner,arena):(COCS_NODE_TINTS[archetype]??NEUTRAL);
+        const progressColor=contested?'#ffd166':capturing===0||capturing===1?this.objectiveColor(capturing,arena):'#eafff5';
+        g.position.set(Number(node.x)||0,Number(node.y)||0,Number(node.z)||0);
+        for(const mat of [g.userData.baseMat,g.userData.areaMat,g.userData.beaconMat]){mat.color.set(color);mat.emissive?.set(color);}
+        g.userData.progressMat.color.set(progressColor);g.userData.progressMat.emissive?.set(progressColor);
+        g.userData.progressMat.opacity=progress>0?1:0;g.userData.progressMat.transparent=true;
+        if(g.userData.progressValue!==progress){
+         if(software){g.userData.progress.geometry.dispose();g.userData.progress.geometry=new T.RingGeometry(Math.max(.1,radius-.2),radius+.2,32,1,0,Math.PI*2*progress/100);}
+         else g.userData.progress.geometry.setDrawRange(0,Math.ceil(progress/100*32)*6);
+         g.userData.progressValue=progress;
+        }
+        g.userData.progress.visible=progress>0;
+        const dim=!anchor&&!live,alpha=dim?.38:1;
+        for(const mat of [g.userData.baseMat,g.userData.areaMat]){mat.opacity=alpha;mat.transparent=true;}
+        g.userData.beacon.visible=anchor||live;
+        g.userData.identifier=key;
+        g.userData.cocsLive=live;g.userData.cocsContested=contested;g.userData.cocsOwner=owner;
+        g.scale.setScalar(reduced||!contested?1:1.03+.05*Math.sin(time*5+(key.length||0)));
+       }
+       // §6A traversal devices/depots: small always-on beacons tinted by state
+       // and owner. Keyed separately from nodes so they follow the same
+       // create/dispose lifecycle and never collide with a node id.
+       const traversal=this.cocsTraversal(match);
+       for(const device of traversal.devices){
+        if(!device||device.id===undefined||device.id===null)continue;
+        const key=`traversal:device:${device.id}`,deviceState=String(device.state??'live');
+        let g=this.objectiveModels.get(key);
+        if(!g){g=this.createObjectiveModel({id:key,radius:2.2,owner:null,contested:false,progress:0},arena);g.userData.cocsDevice=true;this.objectiveModels.set(key,g);this.worldGroup?.add(g);}
+        active.add(key);
+        const color=deviceState==='cut'?'#ff6b6b':deviceState==='locked'?'#ffd166':'#7fe3c8';
+        for(const mat of [g.userData.baseMat,g.userData.areaMat,g.userData.beaconMat]){mat.color.set(color);mat.emissive?.set(color);}
+        g.userData.progress.visible=false;g.userData.beacon.visible=true;
+        g.position.set(Number(device.x)||0,0,Number(device.z)||0);
+        g.userData.identifier=key;g.userData.cocsDeviceState=deviceState;
+       }
+       for(const depot of traversal.depots){
+        if(!depot||depot.id===undefined||depot.id===null)continue;
+        const key=`traversal:depot:${depot.id}`,radius=Math.max(3,Math.min(10,Number(depot.radius)||6));
+        const owner=depot.owner===0||depot.owner===1?depot.owner:null,contested=depot.contested===true;
+        let g=this.objectiveModels.get(key);
+        if(!g){g=this.createObjectiveModel({id:key,radius,owner,contested,progress:0},arena);g.userData.cocsDepot=true;this.objectiveModels.set(key,g);this.worldGroup?.add(g);}
+        active.add(key);
+        const color=contested?'#ffd166':owner===null?NEUTRAL:this.objectiveColor(owner,arena);
+        for(const mat of [g.userData.baseMat,g.userData.areaMat,g.userData.beaconMat]){mat.color.set(color);mat.emissive?.set(color);}
+        g.userData.progress.visible=false;g.userData.beacon.visible=true;
+        g.position.set(Number(depot.x)||0,Number(depot.y)||0,Number(depot.z)||0);
+        g.userData.identifier=key;g.userData.cocsDepotOwner=owner;
+       }
+       // §6A.3 arrival telegraph: a short blue landing ring where a device just
+       // dropped an actor. Reduced-motion holds a static ring; nobody relies on
+       // the pulse to read the state.
+       for(const arrival of traversal.arrivals){
+        if(!arrival||arrival.telegraph!==true)continue;
+        const key=`traversal:arrival:${arrival.id}`;
+        let g=this.objectiveModels.get(key);
+        if(!g){g=this.createObjectiveModel({id:key,radius:3.4,owner:null,contested:false,progress:0},arena);g.userData.cocsArrival=true;this.objectiveModels.set(key,g);this.worldGroup?.add(g);}
+        active.add(key);
+        for(const mat of [g.userData.baseMat,g.userData.areaMat,g.userData.beaconMat]){mat.color.set('#9fd8ff');mat.emissive?.set('#9fd8ff');}
+        g.userData.progress.visible=false;g.userData.beacon.visible=true;
+        g.position.set(Number(arrival.x)||0,0,Number(arrival.z)||0);
+        g.userData.identifier=key;g.userData.cocsArrivalSeconds=Number(arrival.remaining)||0;
+        g.scale.setScalar(reduced?1:1+Math.sin(time*9+(key.length||0))*.06);
+       }
+       for(const [key,g] of this.objectiveModels)if(!active.has(key)){this.worldGroup?.remove(g);this.disposeObject(g);this.objectiveModels.delete(key);}
+      }
+        updateObjectives(match,arena=MAPS[0]){const input=match?.objectives??match?.objectiveState;if(input?.kind==='cocs'){this.updateCocsObjectives(match,arena);return;}if(!input||!['koth','domination','assault','payload','extraction'].includes(input.kind)){this.clearObjectiveMarkers();return;}this.objectiveModels??=new Map();const active=new Set(),reduced=this.reduced(),software=this.renderer?.isSoftware===true,assaultActive=input.kind==='assault'&&Number.isFinite(input.active)?input.active:-1;for(const [zoneIndex,zone] of (input.kind==='extraction'?[{id:'extract',x:input.extract?.x,z:input.extract?.z,radius:input.escortRadius??6,progress:input.captureSeconds>0?Math.max(0,Math.min(100,(Number(input.progress)||0)/Number(input.captureSeconds)*100)):0,owner:Number.isInteger(input.escortTeam)?input.escortTeam:null,captureTeam:null,contested:false}]:input.zones||[]).entries()){if(!zone)continue;const key=String(zone.id??active.size),p=pointOf(zone),owner=zone.contested?'contested':zone.owner,capture=zone.captureTeam??zone.owner,progress=Math.max(0,Math.min(100,Number(zone.progress)||0)),radius=Math.max(.8,Number(zone.radius)||3.5);let g=this.objectiveModels.get(key);if(!g){g=this.createObjectiveModel(zone,arena);this.objectiveModels.set(key,g);this.worldGroup?.add(g);}active.add(key);const color=zone.contested?'#ffd166':this.objectiveColor(owner,arena),progressColor=zone.contested?'#ffd166':this.objectiveColor(capture,arena);g.position.set(p.x||0,p.y||0,p.z||0);g.userData.baseMat.color.set(color);g.userData.baseMat.emissive.set(color);g.userData.areaMat.color.set(color);g.userData.areaMat.emissive.set(color);g.userData.beaconMat.color.set(color);g.userData.beaconMat.emissive.set(color);g.userData.progressMat.color.set(progressColor);g.userData.progressMat.emissive.set(progressColor);g.userData.progressMat.opacity=progress>0?1:0;g.userData.progressMat.transparent=true;if(g.userData.radius!==radius){g.userData.area.geometry.dispose();g.userData.area.geometry=new T.CylinderGeometry(radius,radius,.035,32);g.userData.base.geometry.dispose();g.userData.base.geometry=new T.TorusGeometry(radius,.11,6,32);g.userData.progress.geometry.dispose();g.userData.progress.geometry=software?new T.RingGeometry(radius-.2,radius+.2,32,1,0,Math.PI*2*progress/100):new T.RingGeometry(radius-.2,radius+.2,32);if(!software)g.userData.progress.geometry.setDrawRange(0,Math.ceil(progress/100*32)*6);g.userData.radius=radius;}if(g.userData.progressValue!==progress){if(software){g.userData.progress.geometry.dispose();g.userData.progress.geometry=new T.RingGeometry(radius-.2,radius+.2,32,1,0,Math.PI*2*progress/100);}else g.userData.progress.geometry.setDrawRange(0,Math.ceil(progress/100*32)*6);g.userData.progressValue=progress;}g.userData.progress.visible=progress>0;g.userData.identifier=String(zone.id??'zone');g.userData.emblem.material=g.userData.progressMat;const sectorActive=input.kind==='assault'&&zoneIndex===assaultActive,sectorDim=input.kind==='assault'&&!sectorActive;g.userData.assaultActive=sectorActive;if(input.kind==='assault'){g.userData.areaMat.opacity=sectorDim?.16:1;g.userData.areaMat.transparent=true;g.userData.baseMat.opacity=sectorDim?.32:1;g.userData.baseMat.transparent=true;g.userData.areaMat.emissiveIntensity=sectorActive?1.9:sectorDim?.3:1.25;g.userData.baseMat.emissiveIntensity=sectorActive?2:sectorDim?.35:1.25;if(!g.userData.assaultLabel&&typeof document!=='undefined'&&typeof document.createElement==='function'){const assaultLabel=textLabel(g,String(zone.id??'sector').toUpperCase(),0,2.7,0,.5,sectorActive?'#ffffff':'#95a3ac');assaultLabel.userData.objective=true;assaultLabel.userData.noCameraOcclusion=true;g.userData.assaultLabel=assaultLabel;}if(g.userData.assaultLabel)g.userData.assaultLabel.visible=sectorActive;}g.scale.y=reduced?1:sectorActive?1.04+.1*Math.sin((match.time||0)*5):sectorDim?1:1+.06*Math.sin((match.time||0)*4+(zone.id?.length||0));}for(const [key,g] of this.objectiveModels)if(!active.has(key)){this.worldGroup?.remove(g);this.disposeObject(g);this.objectiveModels.delete(key);}}
      updateVehicleModels(match){const reduced=this.reduced(),now=typeof performance!=='undefined'?performance.now():0;for(const vehicle of match.vehicles||[]){const model=this.vehicleModels?.get(vehicle.id);if(!model)continue;const p=vehicle.position||vehicle,x=p.x??0,y=p.y??0,z=p.z??0,yaw=vehicle.yaw??vehicle.heading??0,health=vehicle.health??1,respawn=vehicle.respawnTimer??0,vehiclePres=this._interpEnabled?this._presentVehicle(vehicle.id):null;model.visible=health>0&&respawn<=0;model.position.set(x,y,z);model.rotation.y=yaw;model.rotation.z=vehicle.roll??0;model.rotation.x=vehicle.pitchBody??vehicle.pitch??0;if(vehiclePres&&!vehiclePres.snapped){model.position.set(vehiclePres.x,vehiclePres.y,vehiclePres.z);model.rotation.y=vehiclePres.yaw;}const speed=Math.hypot(vehicle.vx??0,vehicle.vz??0),stamp=Number.isFinite(match.time)?match.time:now/1000,dt=Math.max(0,Math.min(.1,stamp-(model.userData.spinTime??stamp)));model.userData.spinTime=stamp;const odometer=(model.userData.odometer??0)+speed*dt;model.userData.odometer=odometer;for(const wheel of model.userData.wheels||[])wheel.rotation.x=odometer/.42;const turret=model.userData.turret;if(turret)turret.rotation.y=Number.isFinite(vehicle.turretYaw)?vehicle.turretYaw:0;const heat=vehicle.heat??0,flash=(model.userData.flashUntil??0)>now;for(const gun of model.userData.guns||[]){gun.mount.scale.setScalar(1+heat*.08);gun.flash.visible=!reduced&&flash;}if(!reduced&&(vehicle.boosting===true||((vehicle.boostCooldown??0)>0&&speed>11)||(vehicle.effects?.turbo>0))){if(stamp-(model.userData.lastExhaust??0)>=.04){model.userData.lastExhaust=stamp;this.effectPool??=new EffectPool(this.scene);const backDist=1.35,exX=x+Math.sin(yaw)*backDist,exY=y+.32,exZ=z+Math.cos(yaw)*backDist;this.effectPool.add({pos:V(exX,exY,exZ),color:(vehicle.effects?.turbo>0)?'#ff6622':'#00e5ff',endColor:(vehicle.effects?.turbo>0)?'#ff2200':'#0055ff',fade:'smooth',damping:1.2,size:.14,life:.22,expand:1.5,velocity:V(Math.sin(yaw)*2.5+(Math.random()-.5)*.4,Math.random()*.3,Math.cos(yaw)*2.5+(Math.random()-.5)*.4)});}}}}
      syncVehicles(match){this.vehicleModels??=new Map();const assets=this.modelAssets??=new ModelAssets();const active=new Set((match.vehicles||[]).map(vehicle=>vehicle.id));for(const [id,model] of this.vehicleModels)if(!active.has(id)){this.scene.remove(model);this.disposeObject(model);this.vehicleModels.delete(id);}for(const vehicle of match.vehicles||[]){if(this.vehicleModels.has(vehicle.id))continue;const model=vehicleModel(vehicle.kind,assets,this.renderer?.isSoftware===true);this.vehicleModels.set(vehicle.id,model);this.scene.add(model);}this._trackAssets(assets);}
     _trackAssets(assets=this.modelAssets){if(!assets)return;const shared=this.sharedResources??=new Set();for(const resource of assets.resources)shared.add(resource);}
@@ -1996,7 +2158,7 @@ export class ArenaView{
     try{return this._renderFrame(mode,match,delta,time);}finally{this._capturePerf(perfStart);}
    }
    _renderFrame(mode,match,delta,time){this.motionQuery??=window.matchMedia?.('(prefers-reduced-motion: reduce)');this.resize();this._sampleQuality(delta);const reduced=this.reduced();if(mode!==this._lastMode){this._lastMode=mode;this.clearFreeMotion();}if((mode==='selection'||mode==='progression')&&!this.showcaseState){if(this.showcaseExpected){this.renderer.render(this.scene,this.camera);return;}const m=this.menu.model;m.rotation.y=Math.PI+.25+(reduced?0:Math.sin(time*.25)*.2);m.position.y=.17+(reduced?0:Math.sin(time)*.025);m.userData.rig?.update({dt:Math.max(0,Math.min(.1,delta||0)),time,speed:0,maxSpeed:8,grounded:true});this.renderer.render(this.menu.scene,this.menu.camera);return;}if((mode==='selection'||mode==='theater'||mode==='progression'||mode==='changelog'||mode==='browse'||mode==='lobby')&&!match)match=this.showcaseState;
-      if(!match)return;const owner=this.cameraOwner,actors=match.actors||[],follow=owner==='manual'&&this.manualFollowId!=null?this.manualFollowId:null,freeCam=owner==='free'&&this._freeCam===true,cinematic=this.cinema===true&&!!this.director&&!freeCam,raceActive=cameraOwnerAllowsRace(owner)&&!this.directorLock&&!!match.race;let player=cinematic?actors[0]:(actors.find(a=>a.id===this.playerId)||actors[0]);if(follow!=null)player=actors.find(a=>a.id===follow)||player;if(!cinematic&&(this.spectator||follow!=null))player=spectateActor(actors,follow??this.spectatorTarget)||player;if(!player)return;const arena=match.arena||MAPS.find(a=>a.id===match.mapId)||MAPS[0];const savedPlayerId=this.playerId;this.updateFlags(match,arena);this.updateObjectives(match,arena);this.updateWaypoint(match,arena);this.updatePayloadModel(match,arena,time);this.updateMothRift(time);if(cinematic)this.playerId=-1;const cinemaPose=cinematic?this.director.update(match,Math.max(0,delta),match.events||[]):null;if(freeCam){this.camera.position.set(this.freePose.x,this.freePose.y,this.freePose.z);this.camera.rotation.set(this.freePose.pitch,this.freePose.yaw,0,'YXZ');}else if(cinemaPose&&!raceActive){this.camera.position.set(cinemaPose.x,cinemaPose.y,cinemaPose.z);this.camera.rotation.set(cinemaPose.pitch,cinemaPose.yaw,cinemaPose.roll||0,'YXZ');this._clearCamera(player,delta,cinemaPose.cut);this._applyFreeExitBlend(delta,reduced);}else{const pres=this._interpEnabled?this._presentActor(player.id):null,px=pres&&!pres.snapped?pres.x:(player.x||0),py=pres&&!pres.snapped?pres.y:(player.y||0),pz=pres&&!pres.snapped?pres.z:(player.z||0);const eyeY=py+(player.health>0?(player.eyeHeight??1.45):.65),yaw=(player.yaw||0)+(player.punchYaw||0),pitch=(player.pitch||0)+(player.punchPitch||0);if(this.spectator&&this.spectatorThird===true){const dist=4.6,cos=Math.cos(pitch);this.camera.position.set(px+Math.sin(yaw)*dist*cos,eyeY+1.1-Math.sin(pitch)*dist,pz+Math.cos(yaw)*dist*cos);}else this.camera.position.set(px,eyeY,pz);this.camera.rotation.set(pitch,yaw,0,'YXZ');this._applyFreeExitBlend(delta,reduced);}this.cameraShake??=new CameraShake();const aiming=this.aim===true||player.ads===true,baseFov=this.display?.fov??82;
+      if(!match)return;const owner=this.cameraOwner,actors=match.actors||[],follow=owner==='manual'&&this.manualFollowId!=null?this.manualFollowId:null,freeCam=owner==='free'&&this._freeCam===true,cinematic=this.cinema===true&&!!this.director&&!freeCam,raceActive=cameraOwnerAllowsRace(owner)&&!this.directorLock&&!!match.race;let player=cinematic?actors[0]:(actors.find(a=>a.id===this.playerId)||actors[0]);if(follow!=null)player=actors.find(a=>a.id===follow)||player;if(!cinematic&&(this.spectator||follow!=null))player=spectateActor(actors,follow??this.spectatorTarget)||player;if(!player)return;const arena=match.arena||MAPS.find(a=>a.id===match.mapId)||MAPS[0];const savedPlayerId=this.playerId;this.updateFlags(match,arena);this.updateObjectives(match,arena);this.updateSpots(match);this.updateWaypoint(match,arena);this.updatePayloadModel(match,arena,time);this.updateMothRift(time);if(cinematic)this.playerId=-1;const cinemaPose=cinematic?this.director.update(match,Math.max(0,delta),match.events||[]):null;if(freeCam){this.camera.position.set(this.freePose.x,this.freePose.y,this.freePose.z);this.camera.rotation.set(this.freePose.pitch,this.freePose.yaw,0,'YXZ');}else if(cinemaPose&&!raceActive){this.camera.position.set(cinemaPose.x,cinemaPose.y,cinemaPose.z);this.camera.rotation.set(cinemaPose.pitch,cinemaPose.yaw,cinemaPose.roll||0,'YXZ');this._clearCamera(player,delta,cinemaPose.cut);this._applyFreeExitBlend(delta,reduced);}else{const pres=this._interpEnabled?this._presentActor(player.id):null,px=pres&&!pres.snapped?pres.x:(player.x||0),py=pres&&!pres.snapped?pres.y:(player.y||0),pz=pres&&!pres.snapped?pres.z:(player.z||0);const eyeY=py+(player.health>0?(player.eyeHeight??1.45):.65),yaw=(player.yaw||0)+(player.punchYaw||0),pitch=(player.pitch||0)+(player.punchPitch||0);if(this.spectator&&this.spectatorThird===true){const dist=4.6,cos=Math.cos(pitch);this.camera.position.set(px+Math.sin(yaw)*dist*cos,eyeY+1.1-Math.sin(pitch)*dist,pz+Math.cos(yaw)*dist*cos);}else this.camera.position.set(px,eyeY,pz);this.camera.rotation.set(pitch,yaw,0,'YXZ');this._applyFreeExitBlend(delta,reduced);}this.cameraShake??=new CameraShake();const aiming=this.aim===true||player.ads===true,baseFov=this.display?.fov??82;
 const activeSight=this._activeSight=resolveActiveSight({weapon:player.weapon,optic:player.attachments?.visual?.optic,aiming});
 // Player FOV is updated with the weapon pose below; director/free camera keep ownership here.
 if(cinemaPose)this.camera.fov=Math.max(50,Math.min(100,cinemaPose.fov||this.camera.fov));if(freeCam)this.camera.fov=Math.max(50,Math.min(100,this.display?.fov??82));this.camera.updateProjectionMatrix();
@@ -2020,7 +2182,7 @@ if(freeCam){this.lowHealthOverlay?.update(false,time,delta,reduced,this.camera);
    this.updateRace(match,time);
    if(raceActive){if(cinematic)this._raceDemoCamera(match,arena,player,delta,time,reduced);else{const standingsCar=match.race.kind==='soccer'?match.race.standings?.find(r=>r.actorId===player.id)?.vehicleId:null;const car=match.vehicles?.find(v=>v.id===player.vehicleId)||(match.race.kind==='soccer'?(match.vehicles?.find(v=>v.id===standingsCar)||match.vehicles?.[0]):null);if(car){const centerline=arena?.race?.centerline||match.race?.centerline||match.arena?.race?.centerline||[],pose=raceDemoPose({mode:'chase',centerline,vehicle:car});this.camera.position.set(pose.x,pose.y,pose.z);this.camera.lookAt(pose.lookX,pose.lookY,pose.lookZ);}}}
    for(const actor of actors){const model=this.actorModels.get(actor.id);if(model)this.styleActor(model,actor,this.display?.teamPalette);}
-   for(const zone of (match.objectives??match.objectiveState)?.zones||[]){const model=this.objectiveModels?.get(String(zone.id));if(!model)continue;const mark=model.userData.teamMark??=teamMark();if(!mark.parent){mark.position.y=1.45;mark.scale.setScalar(2);model.add(mark);mark.traverse(n=>{n.userData.objective=true;n.userData.noCameraOcclusion=true;});}updateTeamMark(mark,zone.contested?null:zone.owner);}
+   for(const zone of this.objectiveMarkZones(match)){const model=this.objectiveModels?.get(String(zone.id));if(!model)continue;const mark=model.userData.teamMark??=teamMark();if(!mark.parent){mark.position.y=1.45;mark.scale.setScalar(2);model.add(mark);mark.traverse(n=>{n.userData.objective=true;n.userData.noCameraOcclusion=true;});}updateTeamMark(mark,zone.contested?null:zone.owner);}
        if((this.qualitySettings?.modelDetail??1)<1)this._applyModelDetail();
     (match.pickups||[]).forEach((p,i)=>{const m=this.pickupModels[i];if(!m)return;m.visible=(p.wait||0)<=0;m.rotation.y=reduced?0:time*.8;m.position.y=(p.y||0)+(reduced?0:Math.sin(time*2+i)*.07);});
    // Persistent projectile markers keep their identity frame to frame, and trail

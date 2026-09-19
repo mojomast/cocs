@@ -32,7 +32,123 @@ export const MESSAGE = Object.freeze({
  // Additive v3 frame: a validated team-mode respawn loadout switch. FFA and
  // solo modes lock their pick, so the server refuses it there (Phase 4).
  LOADOUT:'loadout',
+ // Additive v3 frames: the LATTICE STRIKE wire surface (§11.2). A v3 peer that
+ // does not know them never receives them (the server only answers a client
+ // that sends them), so the envelope stays backward compatible. `cocs-reject`
+ // is the S→C reason for a refused C→S action.
+ ORDER:'order', ECONOMY:'economy', TERMINAL:'terminal', COMMAND:'command', BUY:'buy',
+ COCS_REJECT:'cocs-reject',
 });
+
+// ---------------------------------------------------------------------------
+// LATTICE STRIKE action vocabulary + strict validators (§11.2).
+//
+// Every field is bounded: ids are short safe strings, enums are allow-lists,
+// actor ids are non-negative integers. Anything else is `null`, which the room
+// treats as a protocol rejection. These parsers never read the authoritative
+// sim, so a quantized client value can never authorise a spend (§11.6.6).
+// ---------------------------------------------------------------------------
+export const COCS_ORDER_VERBS = Object.freeze(['HOLD', 'ATTACK', 'SCAN']);
+// §11.2 lists the agent/card verbs; the intermission FLUX sinks (FORTIFY /
+// REPAIR / RESUPPLY / REINFORCE) ride the same frame as additive aliases so one
+// economy surface covers both. `spawn` is the wire alias for a REINFORCE squad.
+export const COCS_ECONOMY_ACTIONS = Object.freeze(['spawn', 'recall', 'compact', 'retry', 'escalate', 'pull', 'opt-out-orders', 'fortify', 'repair', 'resupply', 'reinforce']);
+export const COCS_TERMINAL_ACTIONS = Object.freeze(['hack', 'deploy', 'vault-store', 'vault-pull', 'repair', 'lock', 'cut', 'depot-capture']);
+export const COCS_COMMAND_ACTIONS = Object.freeze(['take', 'release', 'mutiny-vote', 'set-route', 'policy']);
+export const COCS_ACTION_ID_MAX = 64;
+export const COCS_ACTION_STRING_MAX = 64;
+export const COCS_AGENT_MAX = 24;
+// Card-failure state and the reject feed share one bound (§11.2/§11.5): keep
+// the newest entries and drop the oldest.
+export const COCS_REJECT_LIMIT = 300;
+
+const safeId = value => (typeof value === 'string' && value.length >= 1 && value.length <= COCS_ACTION_ID_MAX && /^[A-Za-z0-9_:.-]+$/.test(value) ? value : null);
+const optionalId = value => value === null || value === undefined ? null : safeId(value);
+const safeString = (value, max = COCS_ACTION_STRING_MAX) => (typeof value === 'string' && value.length >= 1 && value.length <= max ? value : null);
+const enumValue = (value, list) => {
+ const text = typeof value === 'string' ? value : '';
+ for (const entry of list) {
+  if (entry === text) return entry;
+  if (entry.toUpperCase() === text.toUpperCase()) return entry;
+ }
+ return null;
+};
+const actorIndex = value => (Number.isInteger(value) && value >= 0 && value <= 65535 ? value : null);
+const tickOf = value => (Number.isInteger(value) && value >= 0 && value <= 0x7fffffff ? value : null);
+
+/** Parse a C→S `order` frame: `{cardId, verb, target, agent}`. */
+export function parseOrderMessage(msg) {
+ if (!object(msg)) return null;
+ const cardId = safeId(msg.cardId);
+ const verb = enumValue(msg.verb, COCS_ORDER_VERBS);
+ const target = safeId(msg.target);
+ if (!cardId || !verb || !target) return null;
+ if (msg.agent !== undefined && msg.agent !== null && !safeId(msg.agent)) return null;
+ return {cardId, verb, target, agent: optionalId(msg.agent), tick: tickOf(msg.tick)};
+}
+
+/** Parse a C→S `economy` frame: `{action, cardId, role, target, actorId?}`. */
+export function parseEconomyMessage(msg) {
+ if (!object(msg)) return null;
+ const cardId = safeId(msg.cardId);
+ const action = enumValue(msg.action ?? msg.verb, COCS_ECONOMY_ACTIONS);
+ if (!cardId || !action) return null;
+ const actorId = msg.actorId === undefined || msg.actorId === null ? null : actorIndex(msg.actorId);
+ if (msg.actorId !== undefined && msg.actorId !== null && actorId === null) return null;
+ if ((msg.role !== undefined && msg.role !== null && !safeId(msg.role)) || (msg.target !== undefined && msg.target !== null && !safeId(msg.target))) return null;
+ return {
+  cardId, action,
+  role: optionalId(msg.role),
+  target: optionalId(msg.target),
+  actorId,
+  tick: tickOf(msg.tick),
+ };
+}
+
+/** Parse a C→S `terminal` frame: `{terminalId, action}`. */
+export function parseTerminalMessage(msg) {
+ if (!object(msg)) return null;
+ const terminalId = safeId(msg.terminalId);
+ const action = enumValue(msg.action, COCS_TERMINAL_ACTIONS);
+ if (!terminalId || !action) return null;
+ const actorId = msg.actorId === undefined || msg.actorId === null ? null : actorIndex(msg.actorId);
+ if (msg.actorId !== undefined && msg.actorId !== null && actorId === null) return null;
+ if (msg.cardId !== undefined && msg.cardId !== null && !safeId(msg.cardId)) return null;
+ return {terminalId, action: action.toLowerCase(), cardId: optionalId(msg.cardId), actorId, tick: tickOf(msg.tick)};
+}
+
+/** Parse a C→S `command` frame: `{action, value}`. */
+export function parseCommandMessage(msg) {
+ if (!object(msg)) return null;
+ const action = enumValue(msg.action, COCS_COMMAND_ACTIONS);
+ if (!action) return null;
+ if (msg.cardId !== undefined && msg.cardId !== null && !safeId(msg.cardId)) return null;
+ const raw = msg.value;
+ if (raw !== undefined && raw !== null && !Number.isInteger(raw) && typeof raw !== 'string') return null;
+ const value = raw === undefined || raw === null ? null : (typeof raw === 'string' ? safeString(raw) : actorIndex(raw));
+ if (raw !== undefined && raw !== null && value === null) return null;
+ return {action: action.toLowerCase(), value, cardId: optionalId(msg.cardId), tick: tickOf(msg.tick)};
+}
+
+/** Parse a C→S `buy` frame: `{itemId, depotId?, targetCardId?}`. */
+export function parseBuyMessage(msg) {
+ if (!object(msg)) return null;
+ const itemId = safeId(msg.itemId);
+ if (!itemId) return null;
+ for (const key of ['depotId', 'targetCardId', 'cardId']) {
+  if (msg[key] !== undefined && msg[key] !== null && !safeId(msg[key])) return null;
+ }
+ const actorId = msg.actorId === undefined || msg.actorId === null ? null : actorIndex(msg.actorId);
+ if (msg.actorId !== undefined && msg.actorId !== null && actorId === null) return null;
+ return {
+  itemId,
+  depotId: optionalId(msg.depotId),
+  targetCardId: optionalId(msg.targetCardId),
+  cardId: optionalId(msg.cardId),
+  actorId,
+  tick: tickOf(msg.tick),
+ };
+}
 
 export const validPlayerId = id => typeof id === 'string' && /^[A-Za-z0-9-]{8,64}$/.test(id);
 export const validProgressToken = token => typeof token === 'string' && /^[A-Za-z0-9_-]{16,128}$/.test(token);

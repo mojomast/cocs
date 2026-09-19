@@ -1,11 +1,12 @@
 // Payload: one team escorts a cart along an authored route while the other
 // stalls and rolls it back. Pure and engine-free, like assault.mjs, so the sim,
 // replay, network and tests share the same rules.
-import {terrainSupportAt} from './terrain.mjs';
+import {ensureFloorLattice,floorHeightAtLattice} from './floor-lattice.mjs';
 const boundsOf=arena=>arena.bounds||{minX:-13.55,maxX:13.55,minZ:-13.55,maxZ:13.55};
 // Route points must sit on the ground so the cart and checkpoint rings are not
-// buried on terrain maps (titan-valley, riverbend, convoy-line).
-const groundAt=(arena,x,z,fallback)=>{const safe=Number.isFinite(fallback)?fallback:0;if(!arena.terrain)return safe;const support=terrainSupportAt(x,z,arena.terrain,arena.terrain.maxSlope??.9);return support?support.y:safe;};
+// buried on terrain maps (titan-valley, riverbend, convoy-line). M0: resolve the
+// shared baked lattice instead of scanning every triangle per waypoint.
+const groundAt=(arena,x,z,fallback)=>{const safe=Number.isFinite(fallback)?fallback:0;if(!arena.terrain)return safe;const hint=arena.playBounds||arena.bounds;const lattice=ensureFloorLattice(arena.terrain,1,hint?{bounds:hint}:{});return floorHeightAtLattice(lattice,x,z,arena.terrain.maxSlope??.9)??safe;};
 const insideBlock=(arena,x,z,y=0)=>(arena.blocks||[]).some(block=>Math.abs(x-block.x)<=block.w/2&&Math.abs(z-block.z)<=block.d/2&&y<block.h-1e-6);
 const inBounds=(arena,x,z)=>{const b=boundsOf(arena);return x>=b.minX&&x<=b.maxX&&z>=b.minZ&&z<=b.maxZ;};
 const pair=value=>Array.isArray(value)?(Number.isFinite(value[0])&&Number.isFinite(value[1])?{x:value[0],z:value[1]}:null):value&&Number.isFinite(value.x)&&Number.isFinite(value.z)?{x:value.x,z:value.z}:null;

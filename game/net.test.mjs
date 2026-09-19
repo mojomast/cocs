@@ -66,6 +66,31 @@ test('shadow prediction mirrors the authoritative simulation step-for-step',()=>
   assert.equal(a.grounded,server.actors[0].grounded,`grounded diverged at ${t}`);
  }
 });
+test('a skipNav prediction shadow matches a full-nav single-actor match step-for-step',()=>{
+ const client=new NetClient();
+ client.createShadow('crosswire',config);
+ const shadow=client.shadow;
+ assert.equal(shadow.nav.length,0,'the prediction shadow never pays the nav flood');
+ const full=new Match('chatgpt','openclaw',rng(),'crosswire',config);
+ const seed={x:0,y:0,z:5,vx:0,vy:0,vz:0,yaw:0,pitch:0,grounded:true,protection:0,health:100,jumpBuffer:0,coyote:0,shotWait:0};
+ Object.assign(shadow.actors[0],seed);Object.assign(full.actors[0],seed);
+ const moves=[
+  {x:1,z:0,yaw:0,pitch:0,fire:false},
+  {x:1,z:0,jump:true},
+  {x:.5,z:.5,yaw:.4,pitch:.1,fire:true},
+  {x:0,z:0,yaw:1.2,pitch:.3,fire:true},
+  {x:0,z:0,yaw:1.2,power:true},
+  {x:-1,z:.5,yaw:2,fire:false},
+ ];
+ for(let t=0;t<300;t++){
+  const input={...moves[t%moves.length]};
+  client.predict(input);
+  full.step(1/60,{inputs:{0:{...input}}});
+  const a=shadow.actors[0],b=full.actors[0];
+  for(const key of ['x','y','z','vx','vy','vz','yaw','pitch','grounded','health','protection'])
+   assert.equal(a[key],b[key],`${key} diverged at ${t}`);
+ }
+});
 test('snapshot resync converges the shadow to the authoritative state',()=>{
  const server=new Match('chatgpt','openclaw',rng(),'crosswire',config);
  const client=new NetClient();

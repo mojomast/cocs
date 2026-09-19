@@ -1,6 +1,6 @@
 import {clamp,dist,eye,aim,blastUnsafe,walkEdge,floorAt,obstructed,nearest} from './core.mjs';
 import {POWERUPS,WEAPONS,RULES} from './data.mjs';
-import {modeWeapon,teamMode,loadoutAllows,loadoutStart} from './config.mjs';
+import {modeWeapon,teamMode,loadoutAllows,loadoutStart,isCocsMode} from './config.mjs';
 import {harnessBotHints,preferredHarnessWeapon} from './harness-profiles.mjs';
 import {operatorProfile,preferredOperatorWeapon} from './operator-profiles.mjs';
 import {botBehavior,botWeaponBandPick} from './bot-personalities.mjs';
@@ -8,6 +8,7 @@ import {OPERATOR_KITS} from './kits.mjs';
 import {enemyBehavior} from './enemy-types.mjs';
 import {turnToward} from './character-anim.mjs';
 import {payloadPosition} from './payload.mjs';
+import {cocsAssignment,cocsBotDestination,cocsScoutInput,cocsTraversalChoice} from './cocs-bots.mjs';
 import {vehicleSeatFor,vehicleMounted} from './vehicles.mjs';
 const v=(x=0,y=0,z=0)=>({x,y,z});
 const norm=a=>{const l=Math.hypot(a.x,a.y,a.z)||1;return v(a.x/l,a.y/l,a.z/l)};
@@ -43,6 +44,11 @@ export function flankDestination(match,a,enemy){
 }
 
 const COVER_SAFETY_CAP=12,COVER_SAFETY_WEIGHT=.55,COVER_MAX_ROUTE=34;
+// Worst-case slack between a node's route cost and its cover score: the largest
+// possible safety benefit (cap*weight) plus the worst range penalty (-6). A
+// candidate whose route cost minus this slack already exceeds the best score
+// found cannot win (or tie), so the scan can stop.
+const COVER_SCORE_SLACK=COVER_SAFETY_CAP*COVER_SAFETY_WEIGHT+6;
 // Single-source shortest path over the nav graph. One flood gives route cost to
 // every node, so cover scoring is O(E log V) per call instead of one A* per
 // candidate.
@@ -68,30 +74,78 @@ export function routeTo(match,a,point){
  if(Array.isArray(nodes)&&nodes.length&&Array.isArray(edges)){const result=astar(a,point,nodes,edges);return {cost:result.cost,reachable:result.reachable};}
  return {cost:Math.hypot(a.x-point.x,a.z-point.z),reachable:true};
 }
+// A flood is a pure function of (source, graph) and the nav graph is static for
+// a match, so repeated cover checks from the same nearest node reuse it. The
+// cache is a bounded FIFO; eviction order is the call order, so surviving
+// entries are deterministic for a given sequence.
+const dijkstraCache=new WeakMap(),DIJKSTRA_CACHE_MAX=96;
+function cachedDijkstra(from,nodes,edges){
+ let entry=dijkstraCache.get(nodes);
+ if(!entry||entry.edges!==edges){entry={edges,floods:new Map(),order:[]};dijkstraCache.set(nodes,entry);}
+ const hit=entry.floods.get(from);
+ if(hit)return hit;
+ const flood=dijkstraFrom(from,nodes,edges);
+ entry.floods.set(from,flood);entry.order.push(from);
+ if(entry.order.length>DIJKSTRA_CACHE_MAX)entry.floods.delete(entry.order.shift());
+ return flood;
+}
+// Per-node cover geometry (non-finite exclusion + obstruction) depends only on
+// the nav graph and arena, never the threat, so it is baked once per graph.
+const coverNodeCache=new WeakMap();
+function coverNodeSafety(match,nodes){
+ const cached=coverNodeCache.get(nodes);
+ if(cached&&cached.arena===match.arena)return cached;
+ const y=new Float64Array(nodes.length),safe=new Uint8Array(nodes.length);
+ for(let i=0;i<nodes.length;i++){
+  const node=nodes[i];
+  if(!Number.isFinite(node.x)||!Number.isFinite(node.z))continue;
+  const ny=Number.isFinite(node.y)?node.y:(floorAt(node.x,node.z,match.arena)??0);
+  y[i]=ny;
+  safe[i]=obstructed(node.x,ny,node.z,RULES.radius*.9,match.arena)?0:1;
+ }
+ const entry={arena:match.arena,y,safe};coverNodeCache.set(nodes,entry);return entry;
+}
 // Seeks reachable cover that breaks line of sight to a visible threat. Bots
 // defending a fixed objective use this to disengage and re-peek instead of
 // trading at low health. Candidates are scored by route cost, a capped
 // safety-distance benefit (farther from the threat is safer, up to a cap), and
 // whether the threat remains inside the bot's weapon range. Pure and
 // deterministic: equal inputs always resolve to the same node.
+//
+// Scoring is exact but accelerated: candidates are visited in ascending route
+// cost, and the visibility ray is only cast while the node's route cost can
+// still yield a score that beats (or index-ties) the incumbent. Nodes whose
+// static obstruction fails, and nodes beyond the route budget, are excluded
+// before any ray, and floods/geometry are cached across calls. The chosen node
+// and the index tie-break are identical to the linear scan.
 export function coverPoint(match,a,threat){
  if(!a||!threat||!match?.nav?.length)return null;
  const nodes=match.nav,edges=Array.isArray(match.edges)?match.edges:null,threatEye=eye(threat),threatX=threat.x??0,threatZ=threat.z??0;
- const weaponRange=WEAPONS[a.weapon??0]?.range??70,costs=edges?dijkstraFrom(nearest(a,nodes),nodes,edges):null;
- let best=null,bestScore=Infinity;
+ const weaponRange=WEAPONS[a.weapon??0]?.range??70;
+ const geometry=coverNodeSafety(match,nodes);
+ const costs=edges?cachedDijkstra(nearest(a,nodes),nodes,edges):null;
+ const candidates=[];
  for(let index=0;index<nodes.length;index++){
+  if(!geometry.safe[index])continue;
   const node=nodes[index];
-  if(!Number.isFinite(node.x)||!Number.isFinite(node.z))continue;
-  const y=Number.isFinite(node.y)?node.y:(floorAt(node.x,node.z,match.arena)??0);
-  if(obstructed(node.x,y,node.z,RULES.radius*.9,match.arena))continue;
-  if(match.visible({x:node.x,y:y+1.2,z:node.z},threatEye))continue;
   const cost=costs?costs[index]:Math.hypot(a.x-node.x,a.z-node.z);
   if(!Number.isFinite(cost)||cost>COVER_MAX_ROUTE||cost<1.5)continue;
+  candidates.push(index);
+ }
+ if(costs)candidates.sort((p,q)=>{const d=costs[p]-costs[q];return d!==0?d:p-q;});
+ else candidates.sort((p,q)=>{const d=Math.hypot(a.x-nodes[p].x,a.z-nodes[p].z)-Math.hypot(a.x-nodes[q].x,a.z-nodes[q].z);return d!==0?d:p-q;});
+ let best=null,bestScore=Infinity,bestIndex=-1;
+ for(let k=0;k<candidates.length;k++){
+  const index=candidates[k],node=nodes[index];
+  const cost=costs?costs[index]:Math.hypot(a.x-node.x,a.z-node.z);
+  if(cost-COVER_SCORE_SLACK>bestScore)break;
   const threatDistance=Math.hypot(node.x-threatX,node.z-threatZ);
   const safety=Math.min(threatDistance,COVER_SAFETY_CAP)*COVER_SAFETY_WEIGHT;
   const usable=threatDistance<=weaponRange?0:-6;
   const score=cost-safety+usable;
-  if(score<bestScore){bestScore=score;best={x:node.x,y,z:node.z};}
+  if(!(score<bestScore||(score===bestScore&&index<bestIndex)))continue;
+  if(match.visible({x:node.x,y:geometry.y[index]+1.2,z:node.z},threatEye))continue;
+  bestScore=score;bestIndex=index;best={x:node.x,y:geometry.y[index],z:node.z};
  }
  return best;
 }
@@ -256,16 +310,32 @@ export function botMovementIntent(match,a,b,input,dt,targetDistance=Infinity){
  return input;
 }
 
-export function botInput(match,a,dt){const b=a.bot,hints=harnessBotHints(a.harness)||{range:[6,16],retreatHealth:.4,power:'hurt'},operator=operatorProfile(a.character),behavior=a.npcType?enemyBehavior(a):botBehavior(a);b.behavior=behavior;b.fired=false;const lethal=match.mutators?.oneShot===true||match.mutators?.instagib===true,retreatAt=clamp(behavior.retreat*.6+(hints.retreatHealth??.4)*.4+(lethal?.18:0),.12,.85);b.think-=dt;b.memory=Math.max(0,b.memory-dt);b.suppressed=Math.max(0,(b.suppressed||0)-dt);b.vehicleCooldown=Math.max(0,(b.vehicleCooldown||0)-dt);b.reaction=Math.max(0,b.reaction-dt);if(a.traversalFlight||a.zipRide)return {};if(a.vehicleId!==null&&a.vehicleSeat==='passenger')return {interact:true};if(a.vehicleId!==null&&a.vehicleSeat==='gunner'){const mounted=match.vehicleById(a.vehicleId);if(!mounted||mounted.driver===null)return {interact:true};}const ride=a.vehicleId===null&&(b.vehicleCooldown||0)<=0&&behavior.vehicle>.32?match.vehicles.find(vehicle=>{const seat=vehicleSeatFor(vehicle);return seat&&seat.role!=='passenger'&&Math.hypot(a.x-vehicle.position.x,a.z-vehicle.position.z)<2.4&&Math.abs(a.y-vehicle.position.y)<(vehicle.config?.flight===true?3.2:2.4);}):null;if(ride&&!match.flagCarrier(a))return {interact:true};
+export function botInput(match,a,dt){const b=a.bot,hints=harnessBotHints(a.harness)||{range:[6,16],retreatHealth:.4,power:'hurt'},operator=operatorProfile(a.character),behavior=a.npcType?enemyBehavior(a):botBehavior(a);b.behavior=behavior;b.fired=false;const lethal=match.mutators?.oneShot===true||match.mutators?.instagib===true,retreatAt=clamp(behavior.retreat*.6+(hints.retreatHealth??.4)*.4+(lethal?.18:0),.12,.85);b.think-=dt;b.memory=Math.max(0,b.memory-dt);b.suppressed=Math.max(0,(b.suppressed||0)-dt);b.vehicleCooldown=Math.max(0,(b.vehicleCooldown||0)-dt);b.reaction=Math.max(0,b.reaction-dt);
+   // LATTICE STRIKE depot loaner: a bot that drove to its objective dismounts
+   // once it reaches the point so it holds on foot. Mode-guarded, deterministic.
+   if(a.vehicleId!==null&&a.vehicleSeat==='driver'&&isCocsMode(match.config)&&b.destination&&Math.hypot(a.x-b.destination.x,a.z-b.destination.z)<6){b.vehicleCooldown=8;return {interact:true};}
+   if(a.traversalFlight||a.zipRide)return {};if(a.vehicleId!==null&&a.vehicleSeat==='passenger')return {interact:true};if(a.vehicleId!==null&&a.vehicleSeat==='gunner'){const mounted=match.vehicleById(a.vehicleId);if(!mounted||mounted.driver===null)return {interact:true};}const ride=a.vehicleId===null&&(b.vehicleCooldown||0)<=0&&behavior.vehicle>.32?match.vehicles.find(vehicle=>{const seat=vehicleSeatFor(vehicle);return seat&&seat.role!=='passenger'&&Math.hypot(a.x-vehicle.position.x,a.z-vehicle.position.z)<2.4&&Math.abs(a.y-vehicle.position.y)<(vehicle.config?.flight===true?3.2:2.4);}):null;if(ride&&!match.flagCarrier(a))return {interact:true};
+  // LATTICE STRIKE SCOUT (§8, V0b): a first-class spotter walks its scan route
+  // and never enters the combat/targeting branch. RNG-free and mode-guarded.
+  if(a.isScout===true&&isCocsMode(match.config))return cocsScoutInput(match,a);
     if(b.think<=0){b.think=clamp((match.difficulty.think+match.random()*.15)*(behavior.thinkScale||1),match.difficulty.think*.6,(match.difficulty.think+.15)*1.4);const candidates=match.actors.filter(t=>t!==a&&t.health>0&&dist(a,t)<(a.botScan||25)&&match.visible(eye(a),eye(t))&&(!(t.powerups?.cloak>0)||dist(a,t)<4)&&(!teamMode(match.config)||t.team!==a.team)),locks=new Map();for(const ally of match.actors)if(ally!==a&&ally.bot&&Number.isInteger(ally.bot.target)&&ally.bot.target>=0)locks.set(ally.bot.target,(locks.get(ally.bot.target)||0)+1);const ranked=candidates.map(t=>{let score=dist(a,t)+match.random()*1.5+(locks.get(t.id)||0)*(2+behavior.hold*7);if(behavior.personality==='opportunist')score+=(t.health||100)*.14;if(behavior.role==='ambusher')score+=Math.max(0,dist(a,t)-9)*1.5;if(match.objectiveState?.kind==='juggernaut'&&t.id===match.objectiveState.juggernautId)score-=18;if(behavior.hold>.7)score+=Math.max(0,behavior.range[1]-dist(a,t))*.4;if(behavior.archetype==='flanker')score+=Math.max(0,dist(a,t)-9)*.25;else if(behavior.archetype==='sharpshooter')score-=Math.min(dist(a,t),26)*.06;else if(behavior.archetype==='rusher')score-=Math.max(0,9-dist(a,t))*.18;else if(behavior.archetype==='defender')score+=Math.max(0,dist(a,t)-13)*.22;else if(behavior.archetype==='support')score+=(t.health||100)*.06;
  // Finish the wounded and punish anyone already shooting a teammate. Both are
  // deterministic (health + distance only) and make target choice less random.
  if(behavior.archetype==='rusher'||behavior.archetype==='flanker')score+=(t.health||100)*.05;
  if(Number.isInteger(t.bot?.threat)&&t.bot.threat===a.id)score-=2.5;
  return {t,score};}).sort((c,d)=>c.score-d.score),target=ranked.length?ranked[0].t:null;if(target){if(b.target!==target.id)b.reaction=match.difficulty.reaction+match.random()*.25;b.target=target.id;b.memory=1.5;b.seen={x:target.x,y:target.y,z:target.z};}else if(!b.memory)b.target=-1;
-    const criticalHealth=a.health<a.maxHealth*retreatAt,objectiveMode=['ctf','koth','domination','teamdeathmatch','assault','combined-arms','payload','juggernaut','team-elimination','holdout','uplink','vip-escort'].includes(match.config.mode),supply=objectiveMode?undefined:match.pickups.filter(p=>!p.wait&&match.useful(a,p)&&(walkEdge(a,p,match.arena)||path(a,p,match.nav,match.edges).length>1)).sort((c,d)=>(dist(a,c)+match.spreadBias(a,c)*4*behavior.supply-(c.kind==='health'&&a.health<a.maxHealth*.55?20:0))-(dist(a,d)+match.spreadBias(a,d)*4*behavior.supply-(d.kind==='health'&&a.health<a.maxHealth*.55?20:0)))[0],healthSupply=objectiveMode?match.pickups.filter(p=>!p.wait&&(p.kind==='health'||p.kind==='megahealth')&&match.useful(a,p)&&dist(a,p)<=8&&(walkEdge(a,p,match.arena)||path(a,p,match.nav,match.edges).length>1)).sort((c,d)=>dist(a,c)-dist(a,d))[0]:undefined,strategicSupply=objectiveMode?match.pickups.filter(p=>!p.wait&&match.useful(a,p)&&(p.kind==='armor'||p.kind==='megahealth'||POWERUPS.some(power=>power.id===p.kind))&&dist(a,p)<=3&&walkEdge(a,p,match.arena)).sort((c,d)=>dist(a,c)-dist(a,d))[0]:undefined,needs=objectiveMode?(criticalHealth&&healthSupply||strategicSupply):(supply&&(criticalHealth||(a.ammo.slice(1).every(n=>n===0)&&supply.kind!=='health')||(a.health<a.maxHealth*.7&&supply.kind==='health')));
+    const criticalHealth=a.health<a.maxHealth*retreatAt,objectiveMode=['ctf','koth','domination','teamdeathmatch','assault','combined-arms','payload','juggernaut','team-elimination','holdout','uplink','vip-escort','cocs','cocs-coop'].includes(match.config.mode),supply=objectiveMode?undefined:match.pickups.filter(p=>!p.wait&&match.useful(a,p)&&(walkEdge(a,p,match.arena)||path(a,p,match.nav,match.edges).length>1)).sort((c,d)=>(dist(a,c)+match.spreadBias(a,c)*4*behavior.supply-(c.kind==='health'&&a.health<a.maxHealth*.55?20:0))-(dist(a,d)+match.spreadBias(a,d)*4*behavior.supply-(d.kind==='health'&&a.health<a.maxHealth*.55?20:0)))[0],healthSupply=objectiveMode?match.pickups.filter(p=>!p.wait&&(p.kind==='health'||p.kind==='megahealth')&&match.useful(a,p)&&dist(a,p)<=8&&(walkEdge(a,p,match.arena)||path(a,p,match.nav,match.edges).length>1)).sort((c,d)=>dist(a,c)-dist(a,d))[0]:undefined,strategicSupply=objectiveMode?match.pickups.filter(p=>!p.wait&&match.useful(a,p)&&(p.kind==='armor'||p.kind==='megahealth'||POWERUPS.some(power=>power.id===p.kind))&&dist(a,p)<=3&&walkEdge(a,p,match.arena)).sort((c,d)=>dist(a,c)-dist(a,d))[0]:undefined,needs=objectiveMode?(criticalHealth&&healthSupply||strategicSupply):(supply&&(criticalHealth||(a.ammo.slice(1).every(n=>n===0)&&supply.kind!=='health')||(a.health<a.maxHealth*.7&&supply.kind==='health')));
      const duel=behavior.objective<.4&&target&&b.target>=0&&b.memory>0&&!needs;
-     if(match.config.mode==='ctf'){const carrying=Object.values(match.flags).some(f=>f.carrier===a.id),enemy=match.flags[1-a.team],own=match.flags[a.team],enemyDistance=dist(a,enemy),ownDistance=dist(a,own);if(carrying){b.state='flag-return';b.destination={x:own.x,y:0,z:own.z};}else if(needs){b.state='seek';b.destination=objectiveMode?needs:supply;}else if(behavior.hold>.62&&own.state!=='at-base'){b.state='flag-defend';b.destination={x:own.x,y:0,z:own.z};}else if((own.state==='dropped'||own.carrier!==null)&&(ownDistance<=enemyDistance||behavior.hold>.62)){b.state='flag-defend';b.destination={x:own.x,y:0,z:own.z};}else if(enemy.state==='carried'){b.state='flag-defend';b.destination=match.defensivePost(a);}else{b.state='flag-attack';b.destination=enemyDistance>38||behavior.flank>.7?match.flankDestination(a,enemy):{x:enemy.x,y:0,z:enemy.z};}}else if(needs){b.state='seek';b.destination=objectiveMode?needs:supply;}else if((match.config.mode==='koth'||match.config.mode==='domination'||match.config.mode==='combined-arms'||match.config.mode==='holdout'||match.config.mode==='uplink')&&match.objectiveState){const zones=match.objectiveState.zones,assignment=objectiveAssignment(match,a,zones);if(assignment){const zone=assignment.zone,centroid=teamCentroid(match,a),scattered=dist(a,centroid)>26&&assignment.role!=='defend';b.state=scattered?'regroup':'objective';b.objectiveRole=assignment.role;b.destination=scattered?centroid:match.zoneSlot(a,zone,a.team);}else{const owned=zones.filter(z=>z.owner===a.team),enemyZones=zones.filter(z=>z.owner!==a.team),holdZone=behavior.hold>.62&&owned.length?owned.slice().sort((x,y)=>dist(a,x)-dist(a,y))[0]:null,defendZone=match.zoneDefense(a,owned),pushPool=enemyZones.length?enemyZones:zones,pushZone=pushPool.slice().sort((x,y)=>dist(a,x)-dist(a,y))[0],zone=defendZone||holdZone||pushZone;b.state='objective';b.objectiveRole='attack';b.destination=match.zoneSlot(a,zone,a.team);}}else if(match.config.mode==='assault'&&match.objectiveState&&!duel){const sectors=match.objectiveState.sectors||[],active=sectors[Math.min(match.objectiveState.active??0,Math.max(0,sectors.length-1))];if(active){const defending=a.team===(match.objectiveState.defender??1);b.state=defending?'hold':'objective';b.destination=defending?match.zoneSlot(a,{...active,owner:a.team},a.team):match.zoneSlot(a,active,a.team);}else b.state='roam';}else if(match.config.mode==='payload'&&match.objectiveState&&!duel){const st=match.objectiveState,pos=st.position??payloadPosition(st),attacking=a.team===(st.attacker??0);b.state=attacking?'objective':'hold';b.destination=attacking?match.zoneSlot(a,{id:'payload',x:pos.x,z:pos.z,y:pos.y,radius:st.radius,owner:a.team},a.team):{x:pos.x,y:pos.y,z:pos.z};}else if(match.config.mode==='vip-escort'&&match.objectiveState&&!duel){const st=match.objectiveState,vip=match.actors.find(x=>x.id===st.vipId&&x.health>0),anchor=vip?{x:vip.x,y:vip.y??0,z:vip.z}:{x:st.extract.x,y:st.extract.y??0,z:st.extract.z},escort=a.team===(st.escortTeam??0),vipAtExtract=Boolean(vip)&&Math.hypot(vip.x-st.extract.x,vip.z-st.extract.z)<=st.escortRadius;b.state='objective';b.destination=escort&&vipAtExtract?{x:st.extract.x,y:st.extract.y??0,z:st.extract.z}:anchor;}else if(match.config.mode==='juggernaut'&&match.objectiveState){const st=match.objectiveState,jug=match.actors.find(x=>x.id===st.juggernautId&&x.health>0),zones=st.zones||[];if(a.juggernaut){const zone=zones.slice().sort((x,y)=>dist(a,x)-dist(a,y))[0];b.state='objective';b.destination=zone?match.zoneSlot(a,zone,a.team):{x:match.center.x,y:0,z:match.center.z};}else if(jug){b.state='objective';b.destination=dist(a,jug)>40?match.flankDestination(a,jug):{x:jug.x,y:jug.y??0,z:jug.z};}else{const zone=zones.slice().sort((x,y)=>dist(a,x)-dist(a,y))[0];b.state='roam';b.destination=zone?match.zoneSlot(a,zone,a.team):match.patrolPoint(a);}}else if(match.config.mode==='team-elimination'&&match.objectiveState){const zone=(match.objectiveState.zones||[]).slice().sort((x,y)=>dist(a,x)-dist(a,y))[0];b.state='objective';b.destination=zone?match.zoneSlot(a,zone,a.team):match.patrolPoint(a);}else if(target){if(behavior.flank>.65&&dist(a,target)>12){b.state='flank';b.destination=match.flankDestination(a,target);}else if(behavior.hold>.72&&dist(a,target)>16){b.state='hold';b.destination=match.defensivePost(a);}else{b.state='engage';b.destination={x:target.x,y:target.y,z:target.z};}}else if(b.memory){b.state='pursue';b.destination=b.seen;}else{b.state='roam';if(!b.destination||dist(a,b.destination)<2.5)b.destination=match.patrolPoint(a);}
+     if(match.config.mode==='ctf'){const carrying=Object.values(match.flags).some(f=>f.carrier===a.id),enemy=match.flags[1-a.team],own=match.flags[a.team],enemyDistance=dist(a,enemy),ownDistance=dist(a,own);if(carrying){b.state='flag-return';b.destination={x:own.x,y:0,z:own.z};}else if(needs){b.state='seek';b.destination=objectiveMode?needs:supply;}else if(behavior.hold>.62&&own.state!=='at-base'){b.state='flag-defend';b.destination={x:own.x,y:0,z:own.z};}else if((own.state==='dropped'||own.carrier!==null)&&(ownDistance<=enemyDistance||behavior.hold>.62)){b.state='flag-defend';b.destination={x:own.x,y:0,z:own.z};}else if(enemy.state==='carried'){b.state='flag-defend';b.destination=match.defensivePost(a);}else{b.state='flag-attack';b.destination=enemyDistance>38||behavior.flank>.7?match.flankDestination(a,enemy):{x:enemy.x,y:0,z:enemy.z};}}else if(needs){b.state='seek';b.destination=objectiveMode?needs:supply;}else if((match.config.mode==='koth'||match.config.mode==='domination'||match.config.mode==='combined-arms'||match.config.mode==='holdout'||match.config.mode==='uplink')&&match.objectiveState){const zones=match.objectiveState.zones,assignment=objectiveAssignment(match,a,zones);if(assignment){const zone=assignment.zone,centroid=teamCentroid(match,a),scattered=dist(a,centroid)>26&&assignment.role!=='defend';b.state=scattered?'regroup':'objective';b.objectiveRole=assignment.role;b.destination=scattered?centroid:match.zoneSlot(a,zone,a.team);}else{const owned=zones.filter(z=>z.owner===a.team),enemyZones=zones.filter(z=>z.owner!==a.team),holdZone=behavior.hold>.62&&owned.length?owned.slice().sort((x,y)=>dist(a,x)-dist(a,y))[0]:null,defendZone=match.zoneDefense(a,owned),pushPool=enemyZones.length?enemyZones:zones,pushZone=pushPool.slice().sort((x,y)=>dist(a,x)-dist(a,y))[0],zone=defendZone||holdZone||pushZone;b.state='objective';b.objectiveRole='attack';b.destination=match.zoneSlot(a,zone,a.team);}}else if(isCocsMode(match.config)&&match.objectiveState){if(a.isDirectorWave===true&&a.directorNode){const node=(match.objectiveState.nodes||[]).find(entry=>entry.id===a.directorNode);if(node){b.state='objective';b.objectiveRole='attack';b.cocsNode=node.id;const zone={id:node.id,x:node.x,z:node.z,y:Number.isFinite(node.y)?node.y:(match.center?.y??0),radius:node.r??4,owner:node.owner};b.destination=typeof match.zoneSlot==='function'?match.zoneSlot(a,zone,a.team):{x:node.x,y:zone.y,z:node.z};}else{b.state='roam';if(!b.destination||dist(a,b.destination)<2.5)b.destination=match.patrolPoint(a);}}else{const assignment=cocsAssignment(match,a,match.objectiveState);if(assignment&&assignment.nodeId){const cocsDestination=cocsBotDestination(match,a,assignment,match.objectiveState);b.state='objective';b.objectiveRole=assignment.kind;b.cocsNode=assignment.nodeId;b.destination=cocsDestination||null;}else{b.state='roam';if(!b.destination||dist(a,b.destination)<2.5)b.destination=match.patrolPoint(a);}}}else if(match.config.mode==='assault'&&match.objectiveState&&!duel){const sectors=match.objectiveState.sectors||[],active=sectors[Math.min(match.objectiveState.active??0,Math.max(0,sectors.length-1))];if(active){const defending=a.team===(match.objectiveState.defender??1);b.state=defending?'hold':'objective';b.destination=defending?match.zoneSlot(a,{...active,owner:a.team},a.team):match.zoneSlot(a,active,a.team);}else b.state='roam';}else if(match.config.mode==='payload'&&match.objectiveState&&!duel){const st=match.objectiveState,pos=st.position??payloadPosition(st),attacking=a.team===(st.attacker??0);b.state=attacking?'objective':'hold';b.destination=attacking?match.zoneSlot(a,{id:'payload',x:pos.x,z:pos.z,y:pos.y,radius:st.radius,owner:a.team},a.team):{x:pos.x,y:pos.y,z:pos.z};}else if(match.config.mode==='vip-escort'&&match.objectiveState&&!duel){const st=match.objectiveState,vip=match.actors.find(x=>x.id===st.vipId&&x.health>0),anchor=vip?{x:vip.x,y:vip.y??0,z:vip.z}:{x:st.extract.x,y:st.extract.y??0,z:st.extract.z},escort=a.team===(st.escortTeam??0),vipAtExtract=Boolean(vip)&&Math.hypot(vip.x-st.extract.x,vip.z-st.extract.z)<=st.escortRadius;b.state='objective';b.destination=escort&&vipAtExtract?{x:st.extract.x,y:st.extract.y??0,z:st.extract.z}:anchor;}else if(match.config.mode==='juggernaut'&&match.objectiveState){const st=match.objectiveState,jug=match.actors.find(x=>x.id===st.juggernautId&&x.health>0),zones=st.zones||[];if(a.juggernaut){const zone=zones.slice().sort((x,y)=>dist(a,x)-dist(a,y))[0];b.state='objective';b.destination=zone?match.zoneSlot(a,zone,a.team):{x:match.center.x,y:0,z:match.center.z};}else if(jug){b.state='objective';b.destination=dist(a,jug)>40?match.flankDestination(a,jug):{x:jug.x,y:jug.y??0,z:jug.z};}else{const zone=zones.slice().sort((x,y)=>dist(a,x)-dist(a,y))[0];b.state='roam';b.destination=zone?match.zoneSlot(a,zone,a.team):match.patrolPoint(a);}}else if(match.config.mode==='team-elimination'&&match.objectiveState){const zone=(match.objectiveState.zones||[]).slice().sort((x,y)=>dist(a,x)-dist(a,y))[0];b.state='objective';b.destination=zone?match.zoneSlot(a,zone,a.team):match.patrolPoint(a);}else if(target){if(behavior.flank>.65&&dist(a,target)>12){b.state='flank';b.destination=match.flankDestination(a,target);}else if(behavior.hold>.72&&dist(a,target)>16){b.state='hold';b.destination=match.defensivePost(a);}else{b.state='engage';b.destination={x:target.x,y:target.y,z:target.z};}}else if(b.memory){b.state='pursue';b.destination=b.seen;}else{b.state='roam';if(!b.destination||dist(a,b.destination)<2.5)b.destination=match.patrolPoint(a);}
+   // LATTICE W20 tactical traversal: route through a device only when it
+   // shortens the push (or buys a disengage) and its landing is not defended.
+   // `cocsTraversalChoice` is RNG-free; with bot-use off it always returns null,
+   // leaving this mode's prior behaviour byte-identical.
+   if(isCocsMode(match.config)&&match.objectiveState&&b){
+     const deviceIntent=cocsTraversalChoice(match,a,b.destination,match.objectiveState);
+     b.cocsDevice=deviceIntent?deviceIntent.deviceId:null;
+     if(deviceIntent)b.destination={x:deviceIntent.x,y:deviceIntent.y,z:deviceIntent.z};
+   }
    if(target&&target.health>0&&b.memory>0&&(b.state==='objective'||b.state==='hold'||b.state==='flag-defend'||b.state==='flag-return'||a.juggernaut)&&(a.health<a.maxHealth*retreatAt||b.suppressed>0)){
     const cover=coverPoint(match,a,target);
     if(cover){b.state='cover';b.destination=cover;b.route=[];}
@@ -308,6 +378,14 @@ let delta=dest?v(dest.x-a.x,0,dest.z-a.z):v(0,0,0),l=Math.hypot(delta.x,delta.z)
     if(!a.cooldown&&shouldPower)match.power(a);
     if(a.juggernaut&&!a.cooldown&&t&&dist(a,t)<(behavior.range[1]||20))match.power(a);
  }else if(l>.2){const roamTurn=(match.difficulty.id==='easy'?2.5:match.difficulty.id==='normal'?4:8);a.yaw=turnToward(a.yaw,Math.atan2(-delta.x,-delta.z),roamTurn*dt);}
+ // LATTICE STRIKE stance: keep the fight on the point. When a cocs-assigned
+ // bot is engaged, bias its combat movement back toward the assigned node
+ // centre so a long weapon standoff cannot pull both teams just outside the
+ // capture radius. Mode-guarded; no other mode reaches this branch.
+ if(isCocsMode(match.config)&&b.cocsNode&&b.state==='objective'&&b.objectiveRole!=='depot'&&b.objectiveRole!=='vehicle'){
+  const node=(match.objectiveState?.nodes||[]).find(entry=>entry.id===b.cocsNode);
+  if(node){const dx=node.x-a.x,dz=node.z-a.z,centre=Math.hypot(dx,dz);if(centre>.05){const comfort=node.r*.35,pull=centre>comfort?1.6:.6;input.x=(input.x||0)*.35+dx/centre*pull;input.z=(input.z||0)*.35+dz/centre*pull;const centred=Math.hypot(input.x||0,input.z||0);if(centred>1e-4){input.x/=centred;input.z/=centred;}}if(canSee&&Number.isFinite(b.standoff))b.standoff=Math.min(b.standoff,node.r*.4);}
+ }
  const sep=a.grounded?match.separation(a,behavior.spacing):{x:0,z:0};if(sep.x||sep.z){input.x=(input.x||0)+sep.x*.95;input.z=(input.z||0)+sep.z*.95;}const inputLength=Math.hypot(input.x||0,input.z||0);if(inputLength>1e-4){input.x/=inputLength;input.z/=inputLength;}
  if(a.npcZone&&!zoneFreeEngage(match,a,b,behavior)){const zone=a.npcZone,leash=zoneLeash(zone),distance=zoneDistance(a,zone),dx=zone.x-a.x,dz=zone.z-a.z,length=Math.hypot(dx,dz)||1,nextX=a.x+(input.x||0)*1.2,nextZ=a.z+(input.z||0)*1.2;if(distance>leash||Math.hypot(nextX-zone.x,nextZ-zone.z)>leash){input.x=dx/length;input.z=dz/length;}}
 const postured=Math.hypot(input.x||0,input.z||0)>.1;if(postured){input.sprint=!a.crouching&&(!canSee||dist(a,canSee?t:(b.destination||a))>22);if(!canSee&&a.health<a.maxHealth*retreatAt&&a.grounded&&(a.slideCooldown||0)<=0&&Math.hypot(a.vx||0,a.vz||0)>6)input.crouch=true;}if(canSee&&!input.sprint){const range=dist(a,t);input.ads=range>9&&range<34&&(a.ammo?.[a.weapon]??0)>0;}

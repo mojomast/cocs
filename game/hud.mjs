@@ -1,6 +1,6 @@
 import {raceDisplay,soccerDisplay} from './race-ui.mjs';
 import {WEAPONS} from './data.mjs';
-import {teamMode} from './config.mjs';
+import {teamMode,isCocsMode} from './config.mjs';
 
 export function vehicleHud(player, vehicles = [], flags = [], spectate = false) {
   if (spectate || !player || !(player.health > 0)) return {vehicle: null, prompt: ''};
@@ -158,7 +158,16 @@ export function streakStatus(player) {
 }
 
 export function audioCaption(event) {
-  const text = CAPTION_EVENTS[event?.type];
+  const type = event?.type;
+  // LATTICE STRIKE command events route into the same captions pipeline (§13.4).
+  if (type === 'cocs-order') return {text: `Order ${String(event.verb ?? '').toUpperCase()}${event.node ? ` ${event.node}` : ''}`};
+  if (type === 'coop-spend') return {text: `Spend ${String(event.verb ?? '').toUpperCase()} · ${Math.round(Number(event.cost) || 0)} FLUX`};
+  if (type === 'director-intermission') return {text: `Intermission · wave ${Number(event.nextWave) || ''}`.trim()};
+  if (type === 'coop-intermission-open') return {text: 'Spend window open'};
+  if (type === 'coop-reinforce') return {text: 'Reinforcements called'};
+  if (type === 'coop-reserve') return {text: 'Reserve ticket burned'};
+  if (type === 'operation-summary') return {text: `Operation summary · ${String(event.reason ?? '').replace(/-/g, ' ')}`};
+  const text = CAPTION_EVENTS[type];
   return text ? { text } : null;
 }
 
@@ -218,6 +227,9 @@ export function scoreAnnouncer(hud, prevScores) {
   const scores = hud?.teamScores;
   if (!scores || !prevScores) return null;
   const mode = hud?.config?.mode ?? hud?.mode, capture = mode === 'ctf', soccer = mode === 'puma-soccer';
+  // LATTICE STRIKE OP income is continuous, so every integer crossing would
+  // fire an announcer. The dedicated lattice readout owns the score instead.
+  if (isCocsMode(mode)) return null;
   for (const team of [0, 1]) {
     const before = Math.floor(Number(prevScores[team])), after = Math.floor(Number(scores[team]));
     if (!Number.isFinite(before) || !Number.isFinite(after) || after <= before) continue;
@@ -332,6 +344,7 @@ export const isTeamMode = mode => teamMode(typeof mode === 'string' ? mode : (mo
 
 export const modeGoal = mode => {
   const score = mode?.rules?.score;
+  if (isCocsMode(mode?.id)) return 'LATTICE CONTROL';
   if (mode?.id === 'holdout') return 'QUORUM HOLD';
   if (mode?.id === 'uplink') return 'RELAY STAGES';
   if (score === 'laps') return 'LAPS';
@@ -358,6 +371,7 @@ export const modeTargetText = (mode, target) => {
   if (mode?.id === 'holdout') return 'HOLD A QUORUM';
   if (mode?.id === 'uplink') return 'RUN THE RELAY';
   if (mode?.id === 'vip-escort') return 'ESCORT THE VIP';
+  if (isCocsMode(mode?.id)) return 'HOLD THE LATTICE';
   const goal = modeGoal(mode);
   return Number.isFinite(limit) ? `FIRST TO ${limit} ${goal}` : goal;
 };
@@ -384,6 +398,7 @@ export const flagText = hud => {
 };
 
 export const modeColumns = mode => mode === 'ctf' ? [['captures', 'CAP'], ['flagPickups', 'PICK'], ['flagReturns', 'RET'], ['flagDrops', 'DROP']]
+  : isCocsMode(mode) ? [['objectiveCaptures', 'CAPTURES'], ['objectiveTime', 'NODE TIME'], ['frags', 'FRAGS']]
   : mode === 'koth' ? [['objectiveTime', 'HILL TIME'], ['objectiveCaptures', 'CAP'], ['objectiveContests', 'CONTEST']]
     : mode === 'holdout' ? [['objectiveTime', 'ZONE TIME'], ['objectiveCaptures', 'CAP'], ['objectiveContests', 'CONTEST']]
       : mode === 'uplink' ? [['objectiveCaptures', 'RELAY'], ['objectiveContests', 'CONTEST']]
@@ -399,6 +414,7 @@ export const modeColumns = mode => mode === 'ctf' ? [['captures', 'CAP'], ['flag
 
 export const modePrimary = (mode, actor) => {
   const stats = scoreStats(actor);
+  if (isCocsMode(mode)) return [stats.objectiveCaptures, stats.objectiveTime];
   if (mode === 'ctf') return [stats.captures, stats.flagPickups + stats.flagReturns + stats.flagDrops];
   if (mode === 'koth' || mode === 'domination' || mode === 'combined-arms') return [stats.objectiveTime, stats.objectiveCaptures];
   if (mode === 'holdout') return [stats.objectiveTime, stats.objectiveCaptures];
@@ -414,6 +430,7 @@ export const modePrimary = (mode, actor) => {
 
 // Match-rules copy for each scoring model. Null means the mode needs no extra note.
 export const objectiveCopy = score => ({
+  cocs: 'Take linked lattice nodes. A node is capturable only next to one your team already owns, and it only pays objective score while a supply line links it back to your HQ. Hold the lattice, not the frag count.',
   laps: 'Race through every numbered checkpoint in order. First across the line wins. Mystery boxes hold turbo, shield, oil or pulse. All racers use equal Puma chassis; operator, harness and combat gear give no advantage.',
   frags: 'First operator to the frag target wins. Eliminate opponents to bank frags; every death sets your own count back.',
   teamFrags: 'Both teams race to the shared team-frag target. Kill together and avoid friendly fire to keep the lead.',
@@ -428,6 +445,106 @@ export const objectiveCopy = score => ({
   elimination: 'Shared team lives and no free respawns: every death burns a ticket for your side. The first team out of lives loses the round.',
 })[score] || null;
 
+// ---------------------------------------------------------------------------
+// LATTICE STRIKE (`cocs`) front-line readout.
+//
+// The frozen cocs snapshot carries `{nodes, scores, liveNodeIds, winner}` and
+// nothing else. Phase, dominance progress, income and the exact `front` pick are
+// internal to `game/cocs.mjs`, so these helpers derive the player-facing readout
+// from the snapshot alone and never depend on fields W7 has not frozen in. A
+// node is `{id, archetype, owner, progress:[p0,p1], contested, live}`.
+export const COCS_ARCHETYPE_LABELS = Object.freeze({front: 'FRONT', economy: 'ECON', relay: 'RELAY', hq: 'HQ', array: 'ARRAY'});
+export const COCS_ARCHETYPE_MARKS = Object.freeze({front: '▲', economy: '◆', relay: '⬢', hq: '⌂', array: '⬣'});
+export const cocsArchetypeLabel = archetype => COCS_ARCHETYPE_LABELS[String(archetype)] ?? 'NODE';
+// Shape glyphs pair with the text label so ownership/state never reads by
+// colour alone (the accessibility rule §8.1).
+export const cocsArchetypeMark = archetype => COCS_ARCHETYPE_MARKS[String(archetype)] ?? '●';
+
+const cocsProgress = value => Math.max(0, Math.min(1, Number(value) || 0));
+const cocsOwnerStatus = (owner, contested, team) => contested ? 'CONTESTED'
+  : owner === null || owner === undefined ? 'NEUTRAL'
+    : team !== null && owner === team ? 'YOURS'
+      : team !== null ? 'ENEMY'
+        : teamName(owner);
+
+export function cocsBoard(hud, player) {
+  const state = hud?.cocs;
+  const team = player?.team === 0 || player?.team === 1 ? Number(player.team) : null;
+  const raw = Array.isArray(state?.nodes) ? state.nodes : [];
+  const nodes = raw.map((node, index) => {
+    const progress = Array.isArray(node?.progress) ? node.progress : [0, 0];
+    const p0 = cocsProgress(progress[0]), p1 = cocsProgress(progress[1]);
+    const owner = node?.owner === 0 || node?.owner === 1 ? node.owner : null;
+    const contested = node?.contested === true, live = node?.live === true;
+    const myProgress = team === 0 ? p0 : team === 1 ? p1 : 0;
+    const enemyProgress = team === 0 ? p1 : team === 1 ? p0 : 0;
+    return {
+      id: String(node?.id ?? index),
+      archetype: node?.archetype ?? 'front',
+      label: cocsArchetypeLabel(node?.archetype),
+      mark: cocsArchetypeMark(node?.archetype),
+      owner, ownerLabel: cocsOwnerStatus(owner, contested, team),
+      mine: owner !== null && team !== null && owner === team,
+      enemy: owner !== null && team !== null && owner !== team,
+      contested, live, progress: [p0, p1], myProgress, enemyProgress,
+      progressPercent: Math.round(Math.max(p0, p1) * 100),
+    };
+  });
+  const live = nodes.filter(node => node.live);
+  const owned = {0: 0, 1: 0};
+  for (const node of nodes) if (node.owner === 0 || node.owner === 1) owned[node.owner]++;
+  const contested = nodes.filter(node => node.contested === true);
+  // Mirror `frontState`'s global pick: the live node with the most combined
+  // capture progress. Fall back to a contested live node, a node the player is
+  // taking, then the first live node.
+  let front = null, best = 0;
+  for (const node of live) {
+    const total = node.progress[0] + node.progress[1];
+    if (total > best + 1e-9) { best = total; front = node; }
+  }
+  if (!front) front = live.find(node => node.contested) ?? live.find(node => node.myProgress > 0) ?? live[0] ?? null;
+  const scores = {0: Number(state?.scores?.[0]) || 0, 1: Number(state?.scores?.[1]) || 0};
+  const other = team === null ? null : team === 0 ? 1 : 0;
+  let hint = 'CAPTURE A NODE ADJACENT TO ONE YOU OWN';
+  if (front) {
+    if (front.contested) hint = `CONTEST ${front.label} · ${front.progressPercent}%`;
+    else if (!front.mine && front.myProgress > 0) hint = `CAPTURING ${front.label} · ${front.progressPercent}%`;
+    else if (front.mine && front.enemyProgress > 0) hint = `DEFEND ${front.label} · ENEMY ${Math.round(front.enemyProgress * 100)}%`;
+    else hint = `PUSH ${front.label} · ${front.ownerLabel}`;
+  }
+  const leader = scores[0] === scores[1] ? null : scores[0] > scores[1] ? 0 : 1;
+  return {
+    team, nodes, live, liveCount: live.length,
+    owned, ownedCount: owned[0] + owned[1],
+    contested, contestedCount: contested.length,
+    myNodes: team === null ? null : owned[team],
+    enemyNodes: other === null ? null : owned[other],
+    scores, myScore: team === null ? null : scores[team], enemyScore: other === null ? null : scores[other],
+    leader, front, hint, winner: state?.winner ?? null,
+  };
+}
+
+// One-line "why did this end" for the results screen. Reads only the frozen
+// snapshot plus `overReason` (which `Match.snapshot` already carries).
+export function cocsResultSummary(hud, player) {
+  if (hud?.objectives?.kind !== 'cocs' && !hud?.cocs) return null;
+  const board = cocsBoard(hud, player);
+  const winner = hud?.cocs?.winner ?? hud?.winner ?? null;
+  const reason = String(hud?.overReason ?? '');
+  const iWon = winner !== null && board.team !== null && winner === board.team;
+  const why = reason === 'array' ? 'the ARRAY anchor was captured'
+    : reason === 'dominance' ? 'the lattice was held to the dominance timer'
+      : reason === 'operation-complete' ? 'all five waves were cleared'
+        : reason === 'operation-failed' ? 'the operation clock ran out'
+          : reason === 'hq-destroyed' ? 'the HQ fell to the Director siege'
+            : reason === 'hq-lost' ? 'HQ control was lost'
+              : reason === 'time' ? 'the clock ran out on objective score'
+                : 'the lattice was decided';
+  const outcome = winner === null ? 'The lattice was a draw' : iWon ? 'Your team took the lattice' : 'The enemy took the lattice';
+  const line = `${teamName(0)} ${scoreText(board.scores[0])} – ${scoreText(board.scores[1])} ${teamName(1)} · ${board.owned[0]}–${board.owned[1]} nodes`;
+  return `${outcome}: ${why}. ${line}.`;
+}
+
 export function commandBrief(hud, player, mode) {
   const id = mode?.id ?? hud?.config?.mode, objective = hud?.objectives, kind = objective?.kind, team = teamName(player?.team), target = hud?.config?.fragLimit ?? 0;
   const carrying = Array.isArray(hud?.flags) && hud.flags.some(f => f.carrier === player?.id);
@@ -441,6 +558,15 @@ export function commandBrief(hud, player, mode) {
     return {title, action, detail: `${teamName(mine)} ${myGoals} \u2013 ${theirGoals} ${teamName(theirs)} \u00b7 GOALS ${myGoals} / ${soccer.goalLimit}`, status: `${soccer.ballInPlay ? 'BALL LIVE' : String(soccer.phase).toUpperCase()} \u00b7 ${soccer.time}`};
   }
   if (id === 'ctf') return {title: carrying ? 'RETURN THE FLAG' : 'BREAK THEIR LINE', action: carrying ? 'Reach your base to capture.' : enemyFlag?.state === 'carried' ? 'Escort the carrier home.' : ownFlag?.state === 'dropped' ? 'Recover your flag.' : 'Take the enemy flag.', detail: `${team} ${carrying ? 'CARRIER' : 'DEFENSE'} · ${flagText(hud)}`, status: `${teamScore(hud, player?.team)} / ${target} CAPTURES`};
+  if (isCocsMode(id)) {
+    const board = cocsBoard(hud, player), front = board.front;
+    return {
+      title: board.contestedCount ? 'BREAK THE LATTICE' : board.myNodes > 0 ? 'HOLD THE LATTICE' : 'TAKE THE LATTICE',
+      action: 'Capture a node next to one you already own. A node only pays while a supply line links it back to your HQ.',
+      detail: `${team} ${scoreText(board.myScore ?? 0)} OP · ${board.myNodes ?? 0} NODES · ${board.liveCount} LIVE`,
+      status: board.contestedCount ? `${board.contestedCount} CONTESTED · ${board.hint}` : front ? `${front.label} FRONT · ${board.hint}` : 'HOLD THE LATTICE',
+    };
+  }
   if (id === 'armsrace') {
     const ladder = ladderStatus(player, WEAPONS.length);
     const current = WEAPONS[Number(player?.weapon)]?.name;

@@ -34,7 +34,7 @@ const MAP_ID_SET=new Set(MAP_IDS);
 // the labels stay here so the UI can explain what was dropped.
 export const DEMO_CATEGORY_BY_MODE=Object.freeze({
  deathmatch:'infantry',teamdeathmatch:'infantry',instagib:'infantry',rockets:'infantry',arsenal:'infantry',armsrace:'infantry',juggernaut:'infantry','team-elimination':'infantry',
- ctf:'objectives',koth:'objectives',domination:'objectives',assault:'objectives',payload:'objectives',holdout:'objectives',uplink:'objectives','vip-escort':'objectives',
+ ctf:'objectives',koth:'objectives',domination:'objectives',assault:'objectives',payload:'objectives',holdout:'objectives',uplink:'objectives','vip-escort':'objectives',cocs:'objectives','cocs-coop':'objectives',
  'combined-arms':'vehicles','puma-race':'racing','puma-soccer':'soccer',
  horde:'survival',campaign:'campaign',
 });
@@ -140,9 +140,13 @@ export const DEMO_MODE_EXCLUSIONS=Object.freeze({
   reason:'single-player-scripted',
   detail:'Campaign missions are a scripted, story-driven single-player sequence with mission drivers and checkpoints (game/singleplayer.mjs + game/campaign-data.mjs); a bot-only preview never advances the script.',
  }),
+ 'cocs-coop':Object.freeze({
+  reason:'co-op-operation',
+  detail:'OPERATIONS is a Director-driven co-op siege: an idle bot preview has no human team to clear waves and would only demonstrate the Director spawner, not the mode.',
+ }),
 });
 
-export const demoModeEligible=mode=>typeof mode==='string'&&!DEMO_MODE_EXCLUSIONS[mode]&&MODE_IDS.includes(mode);
+export const demoModeEligible=mode=>typeof mode==='string'&&!DEMO_MODE_EXCLUSIONS[mode]&&MODE_IDS.includes(mode)&&mapsForMode(mode).length>0;
 
 // `legacy` defaults to true for the catalog/eligibility helpers (the full
 // registry view); `pickNext` and `scenarioSpec` default to false to match the
@@ -408,25 +412,26 @@ function startPass(state,catalog,key,rng){
  return state;
 }
 
-const scoreOrder=(a,b)=>a[0]-b[0]||a[1]-b[1]||a[2]-b[2];
+const scoreOrder=(a,b)=>{const length=Math.max(a.length,b.length);for(let i=0;i<length;i++){const delta=(a[i]??0)-(b[i]??0);if(delta)return delta;}return 0;};
 
-function candidateScore(scenario,passCounts,index){
+function candidateScore(scenario,passCounts,index,{lastId=null,lastMap=null}={}){
  const maps=scenarioMaps(scenario);
  let mapUse=0;
  if(maps.length){mapUse=Math.min(...maps.map(mapId=>passCounts.maps[mapId]||0));}
- return [passCounts.modes[scenario.mode]||0,mapUse,index];
+ const repeatId=scenario.id===lastId?1:0;
+ const repeatMap=maps.length&&lastMap&&maps.every(mapId=>mapId===lastMap)?1:0;
+ return [passCounts.modes[scenario.mode]||0,repeatId,repeatMap,mapUse,index];
 }
 
-// Coverage-aware choice: least-used mode first, then least-used map, with the
-// shuffled pass order as the deterministic tie-break. The last scenario and the
-// last map are excluded while any alternative exists.
+// Coverage-aware choice: least-used mode first, because a pass must show every
+// mode before any repeat (full-pass mode coverage). Within that tier the last
+// scenario and last map are avoided as tie-breaks, then least-used map, then the
+// shuffled pass order. Filtering the avoid-last rules *before* scoring could
+// hide the last unseen mode behind a repeated one, so they stay in the key.
 function chooseEntry(entries,state){
- let list=entries;
- if(list.length>1){const filtered=list.filter(entry=>entry.scenario.id!==state.lastId);if(filtered.length)list=filtered;}
- if(list.length>1&&state.lastMap){const filtered=list.filter(entry=>scenarioMaps(entry.scenario).some(mapId=>mapId!==state.lastMap));if(filtered.length)list=filtered;}
- let best=list[0],bestScore=null;
- list.forEach((entry,index)=>{
-  const score=candidateScore(entry.scenario,state.passCounts,index);
+ let best=null,bestScore=null;
+ entries.forEach((entry,index)=>{
+  const score=candidateScore(entry.scenario,state.passCounts,index,{lastId:state.lastId,lastMap:state.lastMap});
   if(!bestScore||scoreOrder(score,bestScore)<0){best=entry;bestScore=score;}
  });
  return best;

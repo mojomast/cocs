@@ -1,6 +1,7 @@
 import {CHARACTERS,HARNESSES,WEAPONS,POWERUPS,ECONOMY_PICKUPS,economyPickup,RULES,resolveLoadout} from './data.mjs';
 import {MAPS,getMap,pickupWeapon} from './maps.mjs';
-import {normalizeConfig,DIFFICULTIES,GAME_MODES,spawnLoadout,spawnInventory,loadoutFor,loadoutAllows,loadoutStart,mutatorEffects,modeWeapon,modeRule,teamMode} from './config.mjs';
+import {normalizeConfig,DIFFICULTIES,GAME_MODES,spawnLoadout,spawnInventory,loadoutFor,loadoutAllows,loadoutStart,mutatorEffects,modeWeapon,modeRule,teamMode,isCocsMode,cocsRung} from './config.mjs';
+import {COOP_GARRISON_BOTS,COOP_TEAM_FLOOR} from './cocs-difficulty.mjs';
 import {abilityOf,harnessAbility,harnessVehicle,harnessWeaponHandling} from './harness-profiles.mjs';
 import {passiveBonus,passiveEffect,passiveScale,riderAmount,riderBonus,riderEffect,riderNumber,riderScale} from './spec-effects.mjs';
 import {createMovementState,resetMovement,refreshMovementParams,stepMovement,movementSnapshot,applyMovementSnapshot,ceilingFor,movementModeRule} from './movement.mjs';
@@ -8,9 +9,16 @@ import {createOperatorVerbState,resetOperatorVerbState,setOperatorVerbActive,ste
 import {turnToward} from './character-anim.mjs';
 import {resolveGear} from './progression.mjs';
 import {resolveAttachments,applyAttachmentsToWeapon} from './attachments.mjs';
-import {terrainRayHit,terrainSupportAt,terrainWallSegments} from './terrain.mjs';
+import {terrainWallSegments} from './terrain.mjs';
+import {ensureTerrainBvh,terrainRayHitFast} from './terrain-bvh.mjs';
+import {floorHeightAtLattice,makeFloorQuery} from './floor-lattice.mjs';
+import {blockObstructed,blockSupportTop,candidates,collisionHash,NAV_BAKE_VERSION,rayWorldBlockHit} from './spatial.mjs';
 import {createVehicle,GUNTRUCK,respawnVehicle,stepVehicle,stepVehicleWeapon,vehicleCanEnter,vehicleMuzzles,vehicleSeatFor,vehicleSeatPosition,vehicleMounted,takeVehicleSeat,leaveVehicleSeat,vehicleSeatOpen} from './vehicles.mjs';
 import {objectiveTemplate} from './mode-data.mjs';
+import {cocsSnapshot,cocsSpotDamageScale,compareCocsOrders,cocsEconomyAction,cocsCommandAction,cocsBuyAction,cocsHumanInteract} from './cocs.mjs';
+import {coopBuyAction,coopCommandAction,coopTerminalAction} from './cocs-coop.mjs';
+import {arrivalDamageScale,depotApronImmune,noteVehicleUse} from './cocs-traversal.mjs';
+import {cocsDutyPolicy} from './cocs-bots.mjs';
 import {deathPlan} from './deaths.mjs';
 import {payloadPosition,payloadProgress,payloadTemplate} from './payload.mjs';
 import {initializeRace,stepRace,raceStandings,raceSnapshot} from './race.mjs';
@@ -21,6 +29,11 @@ import {spawnRouteContext,contestedPickupPenalty} from './spawn-placement.mjs';
 import * as bots from './bots.mjs';
 import * as objectives from './objectives.mjs';
 export const clamp=(n,a,b)=>Math.max(a,Math.min(b,n));
+// LATTICE STRIKE actor/human budgets (§11.5). The COCS family (PvPvE + co-op)
+// admits up to 32 human seats; every other mode keeps the historical 8.
+// `MAX_ACTORS` is the combined actor ceiling (humans + bots + live subagents).
+export const COCS_HUMAN_LIMIT=32;
+export const MAX_ACTORS=32;
 export const dist=(a,b)=>Math.hypot(a.x-b.x,a.y-b.y,a.z-b.z);
 const v=(x=0,y=0,z=0)=>({x,y,z});
 const add=(a,b,s=1)=>v(a.x+b.x*s,a.y+b.y*s,a.z+b.z*s);
@@ -75,8 +88,21 @@ export function traversalTables(arena){
 }
  const surfacesOf=arena=>arena.platforms||arena.surfaces||[];
  const surfaceY=surface=>surface.y??surface.topY??0;
-  export function floorAt(x,z,arena=MAPS[0]){if(arena.terrain){return terrainSupportAt(x,z,arena.terrain,arena.terrain.maxSlope??.9)?.y??null;}const surfaces=surfacesOf(arena);if(surfaces.length){let floor=null;for(const surface of surfaces)if(Math.abs(x-surface.x)<=surface.w/2&&Math.abs(z-surface.z)<=surface.d/2)floor=floor===null?surfaceY(surface):Math.max(floor,surfaceY(surface));return floor;}if(!arena.raised)return 0;let floor=0,solid=arena.blocks.some(b=>b.kind!=='deck'&&Math.abs(x-b.x)<=b.w/2&&Math.abs(z-b.z)<=b.d/2);for(const b of arena.blocks)if(b.kind==='deck'&&Math.abs(x-b.x)<=b.w/2&&Math.abs(z-b.z)<=b.d/2)floor=Math.max(floor,b.h);if(!arena.bounds&&!solid&&z<=-9)floor=Math.max(floor,3.8);else if(!arena.bounds&&!solid&&Math.abs(x)>8.2&&Math.abs(x)<14&&z<3)floor=Math.max(floor,(3-z)/12*3.8);return floor;}
-  const supportAt=(x,z,arena)=>{let y=floorAt(x,z,arena);if(y===null)return null;for(const b of arena.blocks)if(b.kind!=='deck'&&Math.abs(x-b.x)<=b.w/2+RULES.radius&&Math.abs(z-b.z)<=b.d/2+RULES.radius)y=Math.max(y,b.h);return y;};
+   // M0: one baked floor lattice per arena, cached in a WeakMap. The entry is
+   // rebuilt when generation reassigns `terrain.surfaces` (stampTerrainFloor),
+   // so a stale bake can never outlive the mesh it was rasterized from. Queries
+   // stay on the brute mesh until Match/navigation/payload explicitly bake,
+   // which happens only after generation.
+   const floorQueryCache=new WeakMap();
+   function floorQueryOf(arena){
+    const surfaces=arena?.terrain?.surfaces;
+    let entry=floorQueryCache.get(arena);
+    if(!entry||entry.surfaces!==surfaces){entry={query:makeFloorQuery(arena),surfaces};floorQueryCache.set(arena,entry);}
+    return entry.query;
+   }
+   function bakeFloorQuery(arena){const query=floorQueryOf(arena);if(arena?.terrain&&query.source!=='lattice')query.bake();return query;}
+  export function floorAt(x,z,arena=MAPS[0]){if(arena.terrain){const query=floorQueryOf(arena);return query.source==='lattice'?floorHeightAtLattice(query.lattice,x,z,query.maxSlope):(query(x,z)?.y??null);}const surfaces=surfacesOf(arena);if(surfaces.length){let floor=null;for(const surface of surfaces)if(Math.abs(x-surface.x)<=surface.w/2&&Math.abs(z-surface.z)<=surface.d/2)floor=floor===null?surfaceY(surface):Math.max(floor,surfaceY(surface));return floor;}if(!arena.raised)return 0;let floor=0,solid=arena.blocks.some(b=>b.kind!=='deck'&&Math.abs(x-b.x)<=b.w/2&&Math.abs(z-b.z)<=b.d/2);for(const b of arena.blocks)if(b.kind==='deck'&&Math.abs(x-b.x)<=b.w/2&&Math.abs(z-b.z)<=b.d/2)floor=Math.max(floor,b.h);if(!arena.bounds&&!solid&&z<=-9)floor=Math.max(floor,3.8);else if(!arena.bounds&&!solid&&Math.abs(x)>8.2&&Math.abs(x)<14&&z<3)floor=Math.max(floor,(3-z)/12*3.8);return floor;}
+  const supportAt=(x,z,arena)=>{let y=floorAt(x,z,arena);if(y===null)return null;const top=blockSupportTop(arena,x,z,RULES.radius);if(top!==null)y=Math.max(y,top);return y;};
   // Presentation contacts choose an existing surface below the body's origin,
   // never the top of an overhead wall. Legacy h is still absolute solid top.
   export function presentationSupportAt(x,z,arena=MAPS[0],referenceY=Infinity){
@@ -86,14 +112,14 @@ export function traversalTables(arena){
   }
   const segmentDistance=(x,z,a,b)=>{const dx=b.x-a.x,dz=b.z-a.z,length=dx*dx+dz*dz;if(length<=1e-9)return Math.hypot(x-a.x,z-a.z);const t=clamp(((x-a.x)*dx+(z-a.z)*dz)/length,0,1);return Math.hypot(x-(a.x+dx*t),z-(a.z+dz*t));};
   const terrainObstructed=(x,y,z,r,arena)=>arena.terrain?.walls?.length>0&&terrainWallSegments(arena.terrain).some(({a,b})=>y<Math.max(a.y,b.y)-1e-6&&y+RULES.height>Math.min(a.y,b.y)+1e-6&&segmentDistance(x,z,a,b)<r);
- export function obstructed(x,y,z,r=RULES.radius,arena=MAPS[0]){return arena.blocks.some(b=>Math.abs(x-b.x)<b.w/2+r&&Math.abs(z-b.z)<b.d/2+r&&y<b.h-1e-6&&y+RULES.height>0)||terrainObstructed(x,y,z,r,arena);}
+ export function obstructed(x,y,z,r=RULES.radius,arena=MAPS[0]){return blockObstructed(arena,x,y,z,r)||terrainObstructed(x,y,z,r,arena);}
 export const MOVE={friction:6,stopSpeed:2,groundAccel:10,airAccel:3.5,airCap:1.6,sprint:1.375,crouch:.4,slideBoost:9.6,slideMin:.35,slideFriction:2.5,slideCooldown:.5,terminal:2.2,eyeStanding:1.45,eyeCrouch:.95,baseHeight:1.8};
 // Point-blank melee: a short forward arc, no ammo, brief cooldown. Gives every
 // loadout an answer inside its own face and a reason to finish hurt targets.
 // `arc` is the minimum forward alignment (a dot threshold: larger is tighter);
 // OpenClaw's Grip passive widens the cone, relaxing the threshold.
 export const MELEE={range:2.4,damage:45,cooldown:.6,arc:.2};
-const canStand=(x,y,z,r,arena)=>!arena.blocks.some(b=>Math.abs(x-b.x)<b.w/2+r&&Math.abs(z-b.z)<b.d/2+r&&y<b.h-1e-6&&b.h<y+MOVE.baseHeight);
+const canStand=(x,y,z,r,arena)=>!candidates(arena,x,z,r).some(b=>Math.abs(x-b.x)<b.w/2+r&&Math.abs(z-b.z)<b.d/2+r&&y<b.h-1e-6&&b.h<y+MOVE.baseHeight);
 const accelerate=(a,ix,iz,wishSpeed,accel,dt)=>{const add=wishSpeed-(a.vx*ix+a.vz*iz);if(add<=0)return;const amount=Math.min(accel*dt*wishSpeed,add);a.vx+=ix*amount;a.vz+=iz*amount;};
 export const SELF_BLAST_MARGIN=1.15;
 // Linear damage falloff for hitscan weapons: full damage inside `start`, tapering
@@ -102,10 +128,10 @@ export function damageFalloff(weapon,distance){const f=weapon?.falloff;if(!f||!N
 export function blastUnsafe(weapon,distance){const radius=Number(weapon?.radius),splash=Number(weapon?.splash),d=Number(distance);if(!(radius>0)||!(splash>0)||!Number.isFinite(d))return false;return d<radius*SELF_BLAST_MARGIN;}
 export function moveActor(a,input,dt,arena=MAPS[0],config={speed:1,gravity:1},ropeLines=null){
  // Recover corrected/older embedded state without lifting actors through tall solids.
- for(const b of arena.blocks)if(Math.abs(a.x-b.x)<b.w/2+RULES.radius&&Math.abs(a.z-b.z)<b.d/2+RULES.radius&&a.y<b.h-1e-6){
-  const candidates=[{x:b.x-b.w/2-RULES.radius-1e-6,y:a.y,z:a.z},{x:b.x+b.w/2+RULES.radius+1e-6,y:a.y,z:a.z},{x:a.x,y:a.y,z:b.z-b.d/2-RULES.radius-1e-6},{x:a.x,y:a.y,z:b.z+b.d/2+RULES.radius+1e-6}];
-  if(b.h-a.y<=.25)candidates.push({x:a.x,y:b.h,z:a.z});
-    const bounds=boundsOf(arena);const p=candidates.filter(p=>{const floor=floorAt(p.x,p.z,arena);return p.x>=bounds.minX&&p.x<=bounds.maxX&&p.z>=bounds.minZ&&p.z<=bounds.maxZ&&floor!==null&&floor<=p.y+1e-6&&!obstructed(p.x,p.y,p.z,RULES.radius,arena);}).sort((p,q)=>dist(a,p)-dist(a,q))[0];
+ for(const b of candidates(arena,a.x,a.z,RULES.radius))if(Math.abs(a.x-b.x)<b.w/2+RULES.radius&&Math.abs(a.z-b.z)<b.d/2+RULES.radius&&a.y<b.h-1e-6){
+  const spots=[{x:b.x-b.w/2-RULES.radius-1e-6,y:a.y,z:a.z},{x:b.x+b.w/2+RULES.radius+1e-6,y:a.y,z:a.z},{x:a.x,y:a.y,z:b.z-b.d/2-RULES.radius-1e-6},{x:a.x,y:a.y,z:b.z+b.d/2+RULES.radius+1e-6}];
+  if(b.h-a.y<=.25)spots.push({x:a.x,y:b.h,z:a.z});
+    const bounds=boundsOf(arena);const p=spots.filter(p=>{const floor=floorAt(p.x,p.z,arena);return p.x>=bounds.minX&&p.x<=bounds.maxX&&p.z>=bounds.minZ&&p.z<=bounds.maxZ&&floor!==null&&floor<=p.y+1e-6&&!obstructed(p.x,p.y,p.z,RULES.radius,arena);}).sort((p,q)=>dist(a,p)-dist(a,q))[0];
   if(p){if(p.x!==a.x)a.vx=0;if(p.z!==a.z)a.vz=0;if(p.y!==a.y)a.vy=0;Object.assign(a,p);}
  }
  if(a.zipRide){const ride=a.zipRide;ride.t+=dt;const u=clamp(ride.t/ride.duration,0,1);a.x=ride.from.x+(ride.to.x-ride.from.x)*u;a.y=ride.from.y+(ride.to.y-ride.from.y)*u;a.z=ride.from.z+(ride.to.z-ride.from.z)*u;a.vx=a.vy=a.vz=0;a.grounded=false;if(u>=1){a.zipRide=null;a.grounded=true;a.lastValid={x:a.x,y:a.y,z:a.z};}const railBounds=boundsOf(arena);a.x=clamp(a.x,railBounds.minX,railBounds.maxX);a.z=clamp(a.z,railBounds.minZ,railBounds.maxZ);return;}
@@ -169,15 +195,15 @@ export function moveActor(a,input,dt,arena=MAPS[0],config={speed:1,gravity:1},ro
  for(const axis of ['x','z']){
   const value=a[axis]+a[axis==='x'?'vx':'vz']*step;
   const nx=axis==='x'?value:a.x,nz=axis==='z'?value:a.z;
-    const f=floorAt(nx,nz,arena);let top=null;for(const b of arena.blocks)if(b.kind!=='deck'&&Math.abs(nx-b.x)<b.w/2+RULES.radius&&Math.abs(nz-b.z)<b.d/2+RULES.radius&&(top===null||b.h>top))top=b.h;let ny=f!==null&&Math.abs(f-a.y)<.25&&a.vy<=0&&a.grounded?f:a.y;if(top!==null&&a.grounded&&a.vy<=0&&a.y>=top-1e-6&&a.y-top<.35)ny=Math.max(ny,top);
+    const f=floorAt(nx,nz,arena);let top=null;for(const b of candidates(arena,nx,nz,RULES.radius))if(b.kind!=='deck'&&Math.abs(nx-b.x)<b.w/2+RULES.radius&&Math.abs(nz-b.z)<b.d/2+RULES.radius&&(top===null||b.h>top))top=b.h;let ny=f!==null&&Math.abs(f-a.y)<.25&&a.vy<=0&&a.grounded?f:a.y;if(top!==null&&a.grounded&&a.vy<=0&&a.y>=top-1e-6&&a.y-top<.35)ny=Math.max(ny,top);
   // The ramp meets the deck before the actor's center crosses the terrain seam.
-  if(a.grounded&&a.vy<=0)for(const b of arena.blocks)if(b.kind==='deck'&&Math.abs(nx-b.x)<b.w/2+RULES.radius&&Math.abs(nz-b.z)<b.d/2+RULES.radius&&Math.abs(b.h-a.y)<.25)ny=Math.max(ny,b.h);
+  if(a.grounded&&a.vy<=0)for(const b of candidates(arena,nx,nz,RULES.radius))if(b.kind==='deck'&&Math.abs(nx-b.x)<b.w/2+RULES.radius&&Math.abs(nz-b.z)<b.d/2+RULES.radius&&Math.abs(b.h-a.y)<.25)ny=Math.max(ny,b.h);
     if((a.traversalFlight&&a.traversalTarget||!obstructed(nx,ny,nz,RULES.radius,arena))&&(f===null||f-a.y<.3)){a[axis]=value;a.y=ny;}else a[axis==='x'?'vx':'vz']=0;
  }
   const hb=boundsOf(arena);a.x=clamp(a.x,hb.minX,hb.maxX);a.z=clamp(a.z,hb.minZ,hb.maxZ);
   a.vy-=gravity*step;const nextY=a.y+a.vy*step;let f=floorAt(a.x,a.z,arena);
   // A solid top is a landing surface only when the feet cross it while falling.
-  for(const b of arena.blocks)if(Math.abs(a.x-b.x)<b.w/2+RULES.radius&&Math.abs(a.z-b.z)<b.d/2+RULES.radius&&a.y>=b.h-1e-6&&nextY<=b.h)f=Math.max(f??-Infinity,b.h);
+  for(const b of candidates(arena,a.x,a.z,RULES.radius))if(Math.abs(a.x-b.x)<b.w/2+RULES.radius&&Math.abs(a.z-b.z)<b.d/2+RULES.radius&&a.y>=b.h-1e-6&&nextY<=b.h)f=Math.max(f??-Infinity,b.h);
    if(f!==null&&nextY<=f){a.y=f;a.vy=0;a.grounded=true;a.sliding=a.sliding&&input.crouch===true;a.traversalFlight=false;a.traversalTarget=null;}else{a.y=nextY;a.grounded=false;}
    const target=a.traversalTarget,targetFloor=target&&floorAt(target.x,target.z,arena);if(a.traversalFlight&&target&&targetFloor!==null&&a.vy<=0&&Math.hypot(a.x-target.x,a.z-target.z)<=.9&&a.y<=targetFloor+.35){a.x=target.x;a.z=target.z;a.y=targetFloor;a.vx=a.vy=a.vz=0;a.grounded=true;a.traversalFlight=false;a.traversalTarget=null;}
   const bounds=boundsOf(arena);a.x=clamp(a.x,bounds.minX,bounds.maxX);a.z=clamp(a.z,bounds.minZ,bounds.maxZ);
@@ -199,8 +225,8 @@ export function moveActor(a,input,dt,arena=MAPS[0],config={speed:1,gravity:1},ro
    const support=supportAt(a.x,a.z,arena);if(a.grounded&&support!==null&&Math.abs(a.y-support)<.35)a.lastValid={x:a.x,y:a.y,z:a.z};
 }
 function boxHit(o,d,b,max){let lo=0,hi=max;for(const k of ['x','y','z']){const c=k==='y'?b.h/2:b[k],s=k==='x'?b.w/2:k==='z'?b.d/2:b.h/2;if(Math.abs(d[k])<1e-8){if(o[k]<c-s||o[k]>c+s)return null;}else{let t1=(c-s-o[k])/d[k],t2=(c+s-o[k])/d[k];if(t1>t2)[t1,t2]=[t2,t1];lo=Math.max(lo,t1);hi=Math.min(hi,t2);if(lo>hi)return null;}}return lo;}
-  export function rayWorld(o,d,max=100,arena=MAPS[0]){if(!finitePoint(o)||!finitePoint(d)||(!Number.isFinite(max)&&max!==Infinity)||max<0||Math.hypot(d.x,d.y,d.z)<=1e-9)return 0;let best=max;for(const b of arena.blocks){const t=boxHit(o,d,b,best);if(t!==null&&t<best)best=t;}
-   if(arena.terrain){const hit=terrainRayHit(o,d,best,arena.terrain);if(hit&&hit.distance<best)best=hit.distance;}
+  export function rayWorld(o,d,max=100,arena=MAPS[0]){if(!finitePoint(o)||!finitePoint(d)||(!Number.isFinite(max)&&max!==Infinity)||max<0||Math.hypot(d.x,d.y,d.z)<=1e-9)return 0;let best=rayWorldBlockHit(arena,o,d,max);
+   if(arena.terrain){const hit=terrainRayHitFast(ensureTerrainBvh(arena.terrain),o,d,best);if(hit&&hit.distance<best)best=hit.distance;}
    else {
     // Analytic floor/ramp intersection by bounded ray marching, refined at first crossing.
     for(let t=.12;t<best;t+=.16){const p=add(o,d,t),floor=floorAt(p.x,p.z,arena);if(floor!==null&&p.y<floor){let lo=Math.max(0,t-.16),hi=t;for(let i=0;i<7;i++){const m=(lo+hi)/2,q=add(o,d,m),qFloor=floorAt(q.x,q.z,arena);if(qFloor!==null&&q.y<qFloor)hi=m;else lo=m;}best=hi;break;}}
@@ -211,7 +237,7 @@ function actorHit(o,d,a,max){const s=Number.isFinite(a.hitScale)&&a.hitScale>0?a
 function hitActor(o,d,a,max){const local=v(o.x,o.y-a.y,o.z);return actorHit(local,d,a,max);}
 function hitVehicle(o,d,vehicle,max){const p=vehicle.position,local=v(o.x-p.x,o.y-p.y,o.z-p.z),size=vehicle.config?.dimensions||GUNTRUCK.dimensions;return boxHit(local,d,{x:0,z:0,w:size.width,d:size.length,h:size.height},max);}
 const vehicleRadius=vehicle=>Math.hypot((vehicle.config?.dimensions||GUNTRUCK.dimensions).width/2,(vehicle.config?.dimensions||GUNTRUCK.dimensions).length/2);
-export function walkEdge(a,b,arena=MAPS[0]){const l=dist(a,b);if(l>6.5)return false;const n=Math.max(1,Math.ceil(l/.2));let prev=a.y;for(let i=0;i<=n;i++){const x=a.x+(b.x-a.x)*i/n,z=a.z+(b.z-a.z)*i/n;let y=floorAt(x,z,arena);if(y===null)return false;for(const block of arena.blocks)if(block.kind==='deck'&&Math.abs(x-block.x)<block.w/2+.52&&Math.abs(z-block.z)<block.d/2+.52&&Math.abs(block.h-y)<.25)y=Math.max(y,block.h);if(Math.abs(y-prev)>.3||obstructed(x,y,z,.52,arena))return false;prev=y;}return true;}
+export function walkEdge(a,b,arena=MAPS[0]){const l=dist(a,b);if(l>6.5)return false;const n=Math.max(1,Math.ceil(l/.2));let prev=a.y;for(let i=0;i<=n;i++){const x=a.x+(b.x-a.x)*i/n,z=a.z+(b.z-a.z)*i/n;let y=floorAt(x,z,arena);if(y===null)return false;for(const block of candidates(arena,x,z,.52))if(block.kind==='deck'&&Math.abs(x-block.x)<block.w/2+.52&&Math.abs(z-block.z)<block.d/2+.52&&Math.abs(block.h-y)<.25)y=Math.max(y,block.h);if(Math.abs(y-prev)>.3||obstructed(x,y,z,.52,arena))return false;prev=y;}return true;}
  function navigationEdges(nodes,arena){
   // Next-gen maps can be large and organic; connect only nearby nodes via a
   // spatial grid so the graph stays O(n) instead of O(n^2).
@@ -234,7 +260,7 @@ export function walkEdge(a,b,arena=MAPS[0]){const l=dist(a,b);if(l>6.5)return fa
   const newNodes=best.map(idx=>nodes[idx]),newEdges=best.map(idx=>edges[idx].filter(j=>keep.has(j)).map(j=>keep.get(j)));
   nodes.length=0;nodes.push(...newNodes);edges.length=0;edges.push(...newEdges);
  }
-  export function navigation(arena=MAPS[0]){const nodes=[],grid=new Map(),cell=.1;const addNode=(x,z)=>{const y=floorAt(x,z,arena);if(y===null)return;if(obstructed(x,y,z,.65,arena))return;const cx=Math.floor(x/cell),cz=Math.floor(z/cell);for(let dx=-1;dx<=1;dx++)for(let dz=-1;dz<=1;dz++){const bucket=grid.get(`${cx+dx}|${cz+dz}`);if(bucket)for(const i of bucket)if(Math.hypot(nodes[i].x-x,nodes[i].z-z)<.1)return;}const key=`${cx}|${cz}`;let bucket=grid.get(key);if(!bucket){bucket=[];grid.set(key,bucket);}bucket.push(nodes.length);nodes.push(v(x,y,z));};
+  export function navigation(arena=MAPS[0]){bakeFloorQuery(arena);const nodes=[],grid=new Map(),cell=.1;const addNode=(x,z)=>{const y=floorAt(x,z,arena);if(y===null)return;if(obstructed(x,y,z,.65,arena))return;const cx=Math.floor(x/cell),cz=Math.floor(z/cell);for(let dx=-1;dx<=1;dx++)for(let dz=-1;dz<=1;dz++){const bucket=grid.get(`${cx+dx}|${cz+dz}`);if(bucket)for(const i of bucket)if(Math.hypot(nodes[i].x-x,nodes[i].z-z)<.1)return;}const key=`${cx}|${cz}`;let bucket=grid.get(key);if(!bucket){bucket=[];grid.set(key,bucket);}bucket.push(nodes.length);nodes.push(v(x,y,z));};
    // Racing uses its centerline driver, not an infantry grid over hundreds of rails.
    // Keep the public navigation graph useful for registry validation and tooling.
    if(arena.race){
@@ -243,13 +269,20 @@ export function walkEdge(a,b,arena=MAPS[0]){const l=dist(a,b);if(l>6.5)return fa
    }
    const bounds=boundsOf(arena),step=arena.nextGen?6:3;for(let x=Math.ceil(bounds.minX/step)*step;x<=bounds.maxX;x+=step)for(let z=Math.ceil(bounds.minZ/step)*step;z<=bounds.maxZ;z+=step)addNode(x,z);if(arena.raised)for(const [x,z]of [[-1.8,-3.6],[1.8,-3.6],[-1.8,-6],[1.8,-6],[0,-7.5],[-6,-7.5],[6,-7.5]])addNode(x,z);for(const p of arena.navNodes||[]){const nx=Array.isArray(p)?p[0]:p.x,nz=Array.isArray(p)?p[1]:p.z;addNode(nx,nz);}for(const [,x,z]of arena.pickups)addNode(x,z);for(const [x,z]of arena.spawns)addNode(x,z);for(const p of [...traversalSource(arena,'trampolines'),...traversalSource(arena,'jumpPads'),...traversalSource(arena,'boostLaunchers'),...traversalSource(arena,'launchers'),...traversalSource(arena,'teleporters')])addNode(p.x,p.z);const edges=arena.nextGen?navigationEdges(nodes,arena):nodes.map((a,i)=>nodes.map((b,j)=>j!==i&&walkEdge(a,b,arena)?j:-1).filter(j=>j>=0));for(const link of arena.jumpLinks||[]){const from=nearest(link.source,nodes),to=nearest(link.target,nodes);if(from!==to&&!edges[from].includes(to))edges[from].push(to);}const addLinkEdge=(from,to)=>{const f=nearest(from,nodes),t=nearest(to,nodes);if(f!==t&&!edges[f].includes(t))edges[f].push(t);};for(const tp of traversalSource(arena,'teleporters')){const to=resolvePoint(tp.target??tp.to);if(Number.isFinite(tp.x)&&to)addLinkEdge({x:tp.x,y:0,z:tp.z},{x:to.x,y:to.y??0,z:to.z});}if(arena.nextGen)pruneToLargestComponent(nodes,edges);return {nodes,edges};}
 const navigationCache=new Map();
-function matchNavigation(arena){
- if(!navigationCache.has(arena)){
+const EMPTY_NAV=Object.freeze({nodes:Object.freeze([]),edges:Object.freeze([])});
+// Nav reuse contract (docs/M0-MIGRATION.md §3): map id + generation seed +
+// collision hash + construction version. collisionHash folds blocks, the baked
+// floor lattice and the wall segments, so any geometry edit invalidates.
+function navCacheKey(arena){const seed=arena?.genSeed??arena?.seed??0;return `${arena?.id??'arena'}|${seed}|${collisionHash(arena)}|${NAV_BAKE_VERSION}`;}
+function matchNavigation(arena,{skipNav=false}={}){
+ if(skipNav)return EMPTY_NAV;
+ const key=navCacheKey(arena);
+ if(!navigationCache.has(key)){
   const graph=navigation(arena);
   graph.nodes.forEach(Object.freeze);graph.edges.forEach(Object.freeze);
-  Object.freeze(graph.nodes);Object.freeze(graph.edges);navigationCache.set(arena,Object.freeze(graph));
+  Object.freeze(graph.nodes);Object.freeze(graph.edges);navigationCache.set(key,Object.freeze(graph));
  }
- return navigationCache.get(arena);
+ return navigationCache.get(key);
 }
 export function nearest(p,nodes){let id=0,best=Infinity;nodes.forEach((n,i)=>{const d=dist(p,n);if(d<best){id=i;best=d;}});return id;}
 
@@ -271,10 +304,17 @@ export class Match{
     // `aiSeats` gives every seat (including the leading human seats) the bot AI,
     // and `botPolicy` overrides the AI policy for balance-neutral sweeps. Both
     // are harness-only: net/server never set them, so live paths are untouched.
-    this.config=normalizeConfig(options);this.mutators=mutatorEffects(this.config);this.loadout=resolveMatchLoadout(this.config);this.humanCount=Math.max(1,Math.min(Math.round(options.humanCount??1),8));this.aiSeats=options.aiSeats===true;this.botPolicy=options.botPolicy??null;
+    this.config=normalizeConfig(options);this.mutators=mutatorEffects(this.config);this.loadout=resolveMatchLoadout(this.config);
+    // Human-seat ceiling. The COCS family admits up to 32 seats (`COCS_PLAYER_LIMIT`);
+    // a laddered PvP `cocs` rung narrows that to its published total so an 8v8
+    // room can never seat a 17th human. `cocs-coop` and every other mode keep
+    // their historical envelope.
+    const rungTable=isCocsMode(this.config)&&this.config.mode==='cocs'?cocsRung(this.config.rung):null;
+    const humanCap=isCocsMode(this.config)?(rungTable?rungTable.total:COCS_HUMAN_LIMIT):8;
+    this.humanCount=Math.max(1,Math.min(Math.round(options.humanCount??1),humanCap));if(this.humanCount+this.config.botCount>MAX_ACTORS)this.config.botCount=Math.max(0,MAX_ACTORS-this.humanCount);this.aiSeats=options.aiSeats===true;this.skipNav=options.skipNav===true;this.botPolicy=options.botPolicy??null;this.cocsPolicy=options.cocsPolicy??(isCocsMode(this.config)?cocsDutyPolicy:null);
     const vehicleMode=this.config.mode==='puma-race'||this.config.mode==='puma-soccer';
     if(vehicleMode){this.config.botCount=this.config.mode==='puma-soccer'?Math.max(0,Math.min(3,4-this.humanCount)):Math.min(this.config.botCount,8-this.humanCount);if(!getMap(mapId).race)mapId=this.config.mode==='puma-soccer'?'puma-pitch':'puma-circuit';}
-    this.difficulty=DIFFICULTIES.find(d=>d.id===this.config.difficulty);this.arena=getMap(mapId);const nav=vehicleMode?{nodes:[],edges:[]}:matchNavigation(this.arena);this.nav=nav.nodes;this.edges=nav.edges;{const arenaBounds=boundsOf(this.arena);this.center={x:(arenaBounds.minX+arenaBounds.maxX)/2,z:(arenaBounds.minZ+arenaBounds.maxZ)/2};}this.spawns=this.arena.spawns.map(([x,z])=>v(x,floorAt(x,z,this.arena),z));this.random=random;this.time=0;this.over=false;this.suddenDeath=false;this.armsraceWinner=null;this.events=[];this.feed=[];this.rockets=[];this.deployables=[];this.ropeLines=[];this.ropeSerial=0;this.pendingLoadouts=new Map();this.stats={shots:0,kills:0,pickups:0,powers:0,respawns:0,falls:0};this.serial=0;this.teamScores={0:0,1:0};this.vehicleHits=new Map();this.spawnHeat=new Map();
+    this.difficulty=DIFFICULTIES.find(d=>d.id===this.config.difficulty);this.arena=getMap(mapId);if(this.arena.terrain)bakeFloorQuery(this.arena);const nav=vehicleMode?{nodes:[],edges:[]}:matchNavigation(this.arena,{skipNav:this.skipNav});this.nav=nav.nodes;this.edges=nav.edges;{const arenaBounds=boundsOf(this.arena);this.center={x:(arenaBounds.minX+arenaBounds.maxX)/2,z:(arenaBounds.minZ+arenaBounds.maxZ)/2};}this.spawns=this.arena.spawns.map(([x,z])=>v(x,floorAt(x,z,this.arena),z));this.random=random;this.time=0;this.over=false;this.suddenDeath=false;this.armsraceWinner=null;this.events=[];this.feed=[];this.rockets=[];this.deployables=[];this.ropeLines=[];this.ropeSerial=0;this.pendingLoadouts=new Map();this.stats={shots:0,kills:0,pickups:0,powers:0,respawns:0,falls:0};this.serial=0;this.teamScores={0:0,1:0};this.vehicleHits=new Map();this.spawnHeat=new Map();
    const defaults={0:this.arena.spawns.filter((_,i)=>i%2===0),1:this.arena.spawns.filter((_,i)=>i%2===1)};
     this.teamSpawns=teamPoints(this.arena.teamSpawns,defaults);
     // Team-only maps author no FFA spawn list. Derive one from the navigation
@@ -292,7 +332,7 @@ export class Match{
    for(const team of [0,1])if(!Number.isFinite(this.flagSpawns[team][0])||!Number.isFinite(this.flagSpawns[team][1]))this.flagSpawns[team]=[this.center.x,this.center.z];
     this.flags=this.config.mode==='ctf'?{0:{team:0,state:'at-base',x:this.flagSpawns[0][0],z:this.flagSpawns[0][1],carrier:null},1:{team:1,state:'at-base',x:this.flagSpawns[1][0],z:this.flagSpawns[1][1],carrier:null}}:[];
     for(const f of Object.values(this.flags))f.y=floorAt(f.x,f.z,this.arena)??0;
-    this.objectiveState=this.config.mode==='payload'?payloadTemplate(this.arena,{segments:this.config.fragLimit,navigation:nav,floorAt,walkEdge,obstructed}):objectiveTemplate(this.config.mode,this.arena,this.config);this.objectiveEventState=new Map();
+    this.objectiveState=this.config.mode==='payload'?payloadTemplate(this.arena,{segments:this.config.fragLimit,navigation:this.skipNav?null:nav,floorAt,walkEdge,obstructed}):objectiveTemplate(this.config.mode,this.arena,this.config);this.objectiveEventState=new Map();
   // Objective zones must sit on ground the nav graph can reach; a zone on an isolated walkable pocket leaves bots stranded just outside its radius.
   if(this.objectiveState&&(this.objectiveState.kind==='koth'||this.objectiveState.kind==='domination'))for(const zone of this.objectiveState.zones){const node=this.nav[nearest(zone,this.nav)];if(node&&Math.hypot(node.x-zone.x,node.z-zone.z)>2.5){zone.x=node.x;zone.z=node.z;if(Number.isFinite(node.y))zone.y=node.y;}}
   // King of the Hill cycles its single hill between authored capture points so
@@ -358,7 +398,34 @@ export class Match{
      const mirrored=this.loadout?{...this.loadout,start}:null;
      return {loadout:base.loadout,weapon:start,ammo:spawnInventory(this.config,mirrored)};
     }
-    actor(id,character,harness){const l=resolveLoadout(character,harness),actor={id,...l,team:teamMode(this.config)?id%2:undefined,name:CHARACTERS.find(c=>c.id===l.character).name,frags:0,deaths:0,streak:0,ladder:0,scoreStats:{captures:0,flagPickups:0,flagReturns:0,flagDrops:0,objectiveTime:0,objectiveCaptures:0,objectiveNeutralizations:0,objectiveContests:0,shots:0,hits:0,damage:0},x:0,y:0,z:0,lastValid:null,vx:0,vy:0,vz:0,yaw:0,pitch:0,bodyYaw:0,grounded:true,coyote:0,jumpBuffer:0,health:0,armor:0,spawnArmor:0,dead:0,vehicleId:null,vehicleSeat:null,vehicleSeatIndex:0,weapon:this.startingLoadout().weapon,ammo:this.startingLoadout().ammo,cooldown:0,active:0,slow:0,slowMultiplier:.55,shotWait:0,grenadeCooldown:0,protection:0,shots:0,traversalCooldown:0,traversalPad:null,traversalTarget:null,zipRide:null,carryingFlag:false,carrySpeedMultiplier:1,spread:0,punchYaw:0,punchPitch:0,punchVelYaw:0,punchVelPitch:0,reloading:false,reloadTimer:0,reloadDuration:0,reloadWeapon:-1,melee:0,weaponSwitch:0,burst:0,burstTimer:0,sprinting:false,crouching:false,sliding:false,slideTimer:0,slideCooldown:0,eyeHeight:MOVE.eyeStanding,baseHeight:MOVE.baseHeight,ads:false,jumpHeld:false,jumpCutArmed:false,powerups:{},speedMultiplier:1,damageMultiplier:1,cooldownMultiplier:1,temporaryShield:0,activeSpeedMultiplier:1,hitScale:this.mutators.bigHead?1.5:1,juggernaut:false,juggernautShield:0,juggernautDamage:1,upgradeWeapon:null,upgradeTimer:0,upgradeBase:-1,movement:null,verbState:null,threatPing:0,riderSpeedBonus:0,riderSpeedTimer:0,holsterSkip:0,braceTimer:0,braceMitigation:0,braceKnockbackScale:1,firingThisTick:false,movementLanded:false,glideSteer:0,inputJump:false,inputCrouch:false,inputMobility:false,bot:this.aiSeats!==true&&id<this.humanCount?null:{route:[],think:0,target:-1,memory:0,reaction:0,stuck:0,last:v(),state:'roam',patrol:0,flank:null,flankDone:false,recover:0,suppressed:0,threat:-1,standoff:null,strafeReverse:-99,weaponCommitUntil:0,coverCache:null,coverCacheAt:-99}};applyHarnessProfile(actor);actor.botScan=botScanRange(this.difficulty,this.arena);if(actor.bot&&this.botPolicy)actor.bot.policy=this.botPolicy;actor.movement=createMovementState({character:actor.character,harness:actor.harness},{mode:this.config.mode,npc:actor.isNpc===true});actor.verbState=createOperatorVerbState(actor.character);return actor;}
+    // Team seat assignment. Non-coop team modes keep the historical alternating
+    // `id%2` seat, so no other mode changes. OPERATIONS puts every human on
+    // team 0 and caps the persistent Director garrison on team 1; overflow bot
+    // seats become AI allies on team 0 ("bot-fillable, no queue floor").
+    seatTeam(id){
+     if(modeRule(this.config.mode).coop===true){
+      const human=Math.max(1,this.humanCount??1);
+      if(id<human)return 0;
+      const botIndex=id-human;
+      const fill=Math.max(0,COOP_TEAM_FLOOR-human);
+      if(botIndex<fill)return 0;
+      return (botIndex-fill)<COOP_GARRISON_BOTS?1:0;
+     }
+     // LATTICE STRIKE PvP (section 3.1): the second human team. Humans alternate
+     // 0,1,0,1… so a two-client room always puts one human on each side, and bot
+     // seats fill the smaller side first so the published rung total stays level.
+     // Every other non-coop team mode keeps the historical `id % 2` seat.
+     if(isCocsMode(this.config)){
+      const human=Math.max(0,this.humanCount??0);
+      if(id<human)return id%2;
+      const botIndex=id-human;
+      // An odd human count leaves team 1 one seat short; the first bot fills it
+      // and the rest alternate, so `human + bot` per team stays balanced.
+      return (botIndex+(human%2))%2;
+     }
+     return id%2;
+    }
+    actor(id,character,harness){const l=resolveLoadout(character,harness),actor={id,...l,team:teamMode(this.config)?this.seatTeam(id):undefined,name:CHARACTERS.find(c=>c.id===l.character).name,frags:0,deaths:0,streak:0,ladder:0,scoreStats:{captures:0,flagPickups:0,flagReturns:0,flagDrops:0,objectiveTime:0,objectiveCaptures:0,objectiveNeutralizations:0,objectiveContests:0,shots:0,hits:0,damage:0},x:0,y:0,z:0,lastValid:null,vx:0,vy:0,vz:0,yaw:0,pitch:0,bodyYaw:0,grounded:true,coyote:0,jumpBuffer:0,health:0,armor:0,spawnArmor:0,dead:0,vehicleId:null,vehicleSeat:null,vehicleSeatIndex:0,weapon:this.startingLoadout().weapon,ammo:this.startingLoadout().ammo,cooldown:0,active:0,slow:0,slowMultiplier:.55,shotWait:0,grenadeCooldown:0,protection:0,shots:0,traversalCooldown:0,traversalPad:null,traversalTarget:null,zipRide:null,carryingFlag:false,carrySpeedMultiplier:1,spread:0,punchYaw:0,punchPitch:0,punchVelYaw:0,punchVelPitch:0,reloading:false,reloadTimer:0,reloadDuration:0,reloadWeapon:-1,melee:0,weaponSwitch:0,burst:0,burstTimer:0,sprinting:false,crouching:false,sliding:false,slideTimer:0,slideCooldown:0,eyeHeight:MOVE.eyeStanding,baseHeight:MOVE.baseHeight,ads:false,jumpHeld:false,jumpCutArmed:false,powerups:{},speedMultiplier:1,damageMultiplier:1,cooldownMultiplier:1,temporaryShield:0,activeSpeedMultiplier:1,hitScale:this.mutators.bigHead?1.5:1,juggernaut:false,juggernautShield:0,juggernautDamage:1,upgradeWeapon:null,upgradeTimer:0,upgradeBase:-1,movement:null,verbState:null,threatPing:0,riderSpeedBonus:0,riderSpeedTimer:0,holsterSkip:0,braceTimer:0,braceMitigation:0,braceKnockbackScale:1,firingThisTick:false,movementLanded:false,glideSteer:0,inputJump:false,inputCrouch:false,inputMobility:false,bot:this.aiSeats!==true&&id<this.humanCount?null:{route:[],think:0,target:-1,memory:0,reaction:0,stuck:0,last:v(),state:'roam',patrol:0,flank:null,flankDone:false,recover:0,suppressed:0,threat:-1,standoff:null,strafeReverse:-99,weaponCommitUntil:0,coverCache:null,coverCacheAt:-99}};applyHarnessProfile(actor);actor.botScan=botScanRange(this.difficulty,this.arena);if(actor.bot&&this.botPolicy)actor.bot.policy=this.botPolicy;actor.movement=createMovementState({character:actor.character,harness:actor.harness},{mode:this.config.mode,npc:actor.isNpc===true});actor.verbState=createOperatorVerbState(actor.character);return actor;}
   // ---------------------------------------------------------------------
   // Phase 2 class wiring (docs/design/CLASS_OVERHAUL.md §3.2, §3.4, §3.6,
   // §3.7, §4.4, §4.7; module contracts in movement.mjs / operator-verbs.mjs).
@@ -544,11 +611,11 @@ export class Match{
     releaseVehicle(a,vehicle=this.vehicleById(a.vehicleId),reason='exit'){
     if(this.race)return false;
     if(!vehicle){a.vehicleId=null;a.vehicleSeat=null;a.vehicleSeatIndex=0;a.vx=a.vy=a.vz=0;a.grounded=true;resetMovement(this._movementState(a),this._kitOptions(a));return false;}leaveVehicleSeat(vehicle,a.id);const flight=vehicle.config?.flight===true,size=vehicle.config?.dimensions||GUNTRUCK.dimensions,right=v(Math.cos(vehicle.heading),0,-Math.sin(vehicle.heading)),candidates=[add(vehicle.position,right,size.width/2+RULES.radius+.18),add(vehicle.position,right,-(size.width/2+RULES.radius+.18)),add(vehicle.position,right,0)];let chosen=flight?{x:vehicle.position.x,y:vehicle.position.y,z:vehicle.position.z}:null;if(!chosen)for(const candidate of candidates){const y=floorAt(candidate.x,candidate.z,this.arena);if(y!==null&&!obstructed(candidate.x,y,candidate.z,RULES.radius,this.arena)){chosen={x:candidate.x,y,z:candidate.z};break;}}a.vehicleId=null;a.vehicleSeat=null;a.vehicleSeatIndex=0;if(chosen){Object.assign(a,chosen);a.lastValid={...chosen};}a.vx=a.vy=a.vz=0;a.grounded=!flight;a.movementLanded=false;resetMovement(this._movementState(a),this._kitOptions(a));a.glideSteer=0;this._clearRopes(a);this.emit('vehicle-exit',{actor:a.id,vehicle:vehicle.id,reason});return true;}
-    enterVehicle(a){if(this.flagCarrier(a))return false;const vehicle=this.vehicles.find(candidate=>{if(!vehicleSeatFor(candidate)||vehicleMounted(candidate,a.id))return false;return Math.hypot(a.x-candidate.position.x,a.z-candidate.position.z)<2.4&&Math.abs(a.y-candidate.position.y)<(candidate.config?.flight===true?3.2:2.4);});if(!vehicle)return false;const seat=vehicleSeatFor(vehicle);takeVehicleSeat(vehicle,a.id,seat.role,seat.index);this.syncVehicleActor(a,vehicle);a.movementLanded=false;resetMovement(this._movementState(a),this._kitOptions(a));this._clearRopes(a);if(Number.isFinite(a.team))vehicle.lastTeam=a.team;if(seat.role==='driver')a.yaw=vehicle.heading-Math.PI;this.emit('vehicle-enter',{actor:a.id,vehicle:vehicle.id,seat:seat.role});return true;}
+    enterVehicle(a){if(this.flagCarrier(a))return false;const vehicle=this.vehicles.find(candidate=>{if(!vehicleSeatFor(candidate)||vehicleMounted(candidate,a.id))return false;return Math.hypot(a.x-candidate.position.x,a.z-candidate.position.z)<2.4&&Math.abs(a.y-candidate.position.y)<(candidate.config?.flight===true?3.2:2.4);});if(!vehicle)return false;const seat=vehicleSeatFor(vehicle);takeVehicleSeat(vehicle,a.id,seat.role,seat.index);this.syncVehicleActor(a,vehicle);a.movementLanded=false;resetMovement(this._movementState(a),this._kitOptions(a));this._clearRopes(a);if(Number.isFinite(a.team))vehicle.lastTeam=a.team;noteVehicleUse(this.objectiveState?.traversal,vehicle);if(seat.role==='driver')a.yaw=vehicle.heading-Math.PI;this.emit('vehicle-enter',{actor:a.id,vehicle:vehicle.id,seat:seat.role});return true;}
    vehicleOccupants(vehicle){return [vehicle.driver,vehicle.gunner,...(vehicle.passengers||[])].filter(id=>id!=null);}
   vehicleTeam(vehicle){for(const id of this.vehicleOccupants(vehicle)){const occupant=this.actors.find(a=>a.id===id);if(occupant&&Number.isFinite(occupant.team))return occupant.team;}return undefined;}
   vehicleFriendlyFire(vehicle,source){const crew=this.vehicleTeam(vehicle)??vehicle?.lastTeam;return Boolean(teamMode(this.config)&&source&&Number.isFinite(crew)&&crew===source.team&&!this.vehicleOccupants(vehicle).includes(source.id));}
-    damageVehicle(vehicle,amount,source){if(this.race||!vehicle||vehicle.health<=0||this.over||this.vehicleFriendlyFire(vehicle,source))return 0;const driver=this.actors.find(a=>a.id===vehicle.driver),skill=driver?harnessVehicle(driver.harness):null,actual=Math.min(vehicle.health,Math.max(0,amount*this.config.damage*(skill?.armor??1)));vehicle.health-=actual;this.emit('vehicle-damage',{vehicle:vehicle.id,actor:source?.id,amount:actual,health:vehicle.health});if(vehicle.health<=0){const occupants=[vehicle.driver,vehicle.gunner,...(vehicle.passengers||[])].filter(id=>id!=null).map(id=>this.actors.find(a=>a.id===id)).filter(Boolean);const driverId=vehicle.driver,occupantIds=occupants.map(o=>o.id);for(const occupant of occupants)this.releaseVehicle(occupant,vehicle,'destroyed');if(driver)this.damage(driver,70,source);else for(const occupant of occupants)this.damage(occupant,40,source);vehicle.health=0;vehicle.respawnTimer=vehicle.config?.respawn??GUNTRUCK.respawn;vehicle.velocity.x=vehicle.velocity.z=0;this.emit('vehicle-destroyed',{vehicle:vehicle.id,actor:source?.id,pos:{...vehicle.position},driver:driverId,occupants:occupantIds});}return actual;}
+    damageVehicle(vehicle,amount,source){if(this.race||!vehicle||vehicle.health<=0||this.over||this.vehicleFriendlyFire(vehicle,source))return 0;if((vehicle.spawnImmunity||0)>0)return 0;const driver=this.actors.find(a=>a.id===vehicle.driver),skill=driver?harnessVehicle(driver.harness):null,actual=Math.min(vehicle.health,Math.max(0,amount*this.config.damage*(skill?.armor??1)));vehicle.health-=actual;this.emit('vehicle-damage',{vehicle:vehicle.id,actor:source?.id,amount:actual,health:vehicle.health});if(vehicle.health<=0){const occupants=[vehicle.driver,vehicle.gunner,...(vehicle.passengers||[])].filter(id=>id!=null).map(id=>this.actors.find(a=>a.id===id)).filter(Boolean);const driverId=vehicle.driver,occupantIds=occupants.map(o=>o.id);for(const occupant of occupants)this.releaseVehicle(occupant,vehicle,'destroyed');if(driver)this.damage(driver,70,source);else for(const occupant of occupants)this.damage(occupant,40,source);vehicle.health=0;vehicle.respawnTimer=vehicle.config?.respawn??GUNTRUCK.respawn;vehicle.velocity.x=vehicle.velocity.z=0;this.emit('vehicle-destroyed',{vehicle:vehicle.id,actor:source?.id,pos:{...vehicle.position},driver:driverId,occupants:occupantIds});}return actual;}
        fireVehicle(vehicle,a,aimYaw=a.yaw,aimPitch=a.pitch){if(!vehicle.lastStep?.fired)return;const skill=harnessVehicle(a.harness),damageScale=skill?.gunnerDamage??1,gun=GUNTRUCK.mountedChaingun,origins=vehicleMuzzles(vehicle),base=aim(aimYaw+(a.punchYaw||0),aimPitch+(a.punchPitch||0));const pivot=v(vehicle.position.x,vehicle.position.y+1.18,vehicle.position.z),pivotDir=norm(add(base,v((this.random()-.5)*.018,(this.random()-.5)*.018,(this.random()-.5)*.018)));let pivotRange=this.rayWorld(pivot,pivotDir,gun.range);for(const other of this.actors)if(other!==a&&other.health>0&&!vehicleMounted(vehicle,other.id)&&(!teamMode(this.config)||other.team!==a.team)){const hit=hitActor(pivot,pivotDir,other,pivotRange);if(hit!==null&&hit<pivotRange)pivotRange=hit;}for(const other of this.vehicles)if(other!==vehicle&&other.health>0&&!this.vehicleFriendlyFire(other,a)){const hit=hitVehicle(pivot,pivotDir,other,pivotRange);if(hit!==null&&hit<pivotRange)pivotRange=hit;}const focus=add(pivot,pivotDir,pivotRange);for(const barrel of vehicle.lastStep.muzzles||[0,1]){if(!origins[barrel]||!finitePoint(origins[barrel]))continue;const spread=.018,direction=norm(add(norm(v(focus.x-origins[barrel].x,focus.y-origins[barrel].y,focus.z-origins[barrel].z)),v((this.random()-.5)*spread,(this.random()-.5)*spread,(this.random()-.5)*spread)));if(!finitePoint(direction))continue;let range=this.rayWorld(origins[barrel],direction,gun.range),target=null,vehicleTarget=null;for(const other of this.actors)if(other!==a&&other.health>0&&!vehicleMounted(vehicle,other.id)&&(!teamMode(this.config)||other.team!==a.team)){const hit=hitActor(origins[barrel],direction,other,range);if(hit!==null){range=hit;target=other;vehicleTarget=null;}}for(const other of this.vehicles)if(other!==vehicle&&other.health>0&&!this.vehicleFriendlyFire(other,a)){const hit=hitVehicle(origins[barrel],direction,other,range);if(hit!==null&&hit<range){range=hit;target=null;vehicleTarget=other;}}if(target)this.damage(target,gun.damage*damageScale,a);else if(vehicleTarget)this.damageVehicle(vehicleTarget,gun.damage*damageScale,a);this.emit('vehicle-shot',{vehicle:vehicle.id,actor:a.id,barrel,weapon:0,from:origins[barrel],to:add(origins[barrel],direction,range),hit:target?.id??vehicleTarget?.id??null});}a.shots+=2;a.scoreStats.shots+=2;this.stats.shots+=2;}
    vehicleGround(x,z){const y=floorAt(x,z,this.arena);if(y===null)return null;if(!this.arena.terrain)return y;const e=.6,yx=floorAt(x+e,z,this.arena),yz=floorAt(x,z+e,this.arena);if(yx!==null&&yz!==null)return {y,normal:norm(v(-(yx-y)/e,1,-(yz-y)/e))};return y;}
     autoGunnerTarget(vehicle,a){let best=null,bestD=Infinity;const origin=v(vehicle.position.x,vehicle.position.y+1.7,vehicle.position.z);for(const b of this.actors){if(b===a||b.health<=0||(teamMode(this.config)&&b.team===a.team))continue;const d=Math.hypot(b.x-vehicle.position.x,b.z-vehicle.position.z);if(d>90||d>=bestD)continue;if(!this.visible(origin,eye(b)))continue;bestD=d;best={x:b.x,y:b.y,z:b.z};}return best;}
@@ -601,7 +668,20 @@ export class Match{
     this._movementState(a);resetMovement(a.movement,this._kitOptions(a));this._clearRopes(a);
     setOperatorVerbActive(this._verbState(a),this._operatorVerbActive(a));resetOperatorVerbState(a.verbState,'spawn');if(this.mutators.randomLoadout&&modeWeapon(this.config,this.loadout)===null){const pool=WEAPONS.map((_,index)=>index).filter(index=>loadoutAllows(this.loadout,index));const pick=pool.length?pool[Math.floor(this.random()*pool.length)]:0;a.weapon=pick;const w=WEAPONS[pick];if(w)a.ammo[pick]=this.config.unlimitedAmmo?Infinity:Math.max(a.ammo[pick]||0,w.ammo);}if(this.config.mode==='armsrace'){const rung=Math.max(0,Math.min(WEAPONS.length-1,a.ladder??0));a.weapon=rung;const rw=WEAPONS[rung];if(rw&&!this.config.unlimitedAmmo)a.ammo[rung]=Math.max(a.ammo[rung]||0,rw.ammo);}
     if(a.bot)a.bot={route:[],think:0,target:-1,memory:0,reaction:0,stuck:0,last:v(a.x,a.y,a.z),state:'roam',patrol:0,flank:null,flankDone:false,recover:0,suppressed:0,threat:-1,standoff:null,strafeReverse:-99};if(a.bot&&this.botPolicy)a.bot.policy=this.botPolicy;this.stats.respawns++;this.emit('spawn',{actor:a.id,pos:v(a.x,a.y+1,a.z)});}
-    damage(target,amount,source,ability=false){if(this.race||this.over||target.health<=0||target.protection>0)return 0;const guardrail=activeBuff(target,'resistance')??0,braceMitigation=(target.braceTimer||0)>0?(target.braceMitigation||0):0,riderMitigation=target.active>0?riderAmount(target.character,target.harness,'mitigation',0,{trigger:'active'}):0,mitigation=Math.min(.5,Math.max(guardrail,braceMitigation,riderMitigation));let damage=((this.config.mode==='instagib'||this.mutators.oneShot)?10000:amount*this.mutators.damageMultiplier)*(source?.damageMultiplier||1)*(1-mitigation)*(this.mutators.berserk&&(source?.streak||0)>=3?1.2:1);const facingshield=target.npcShield;if(facingshield&&source&&source!==target){const fdx=source.x-target.x,fdz=source.z-target.z,fdist=Math.hypot(fdx,fdz);if(fdist>1e-4){const facingX=-Math.sin(target.yaw||0),facingZ=-Math.cos(target.yaw||0),dot=(fdx/fdist)*facingX+(fdz/fdist)*facingZ,arc=Number.isFinite(facingshield.arc)?facingshield.arc:.6;if(dot>=Math.cos(arc))damage*=1-(facingshield.reduction??.7);else if(dot<=-Math.cos(arc))damage*=facingshield.flankBonus??1.4;}}// Class damage-taken hooks fire before the shield stages (§3.2): Braced
+    damage(target,amount,source,ability=false){if(this.race||this.over||target.health<=0||target.protection>0)return 0;
+   // §6A.3 owner-only 6 m depot apron: a team can mount up without being camped.
+   // Mode-neutral when no cocs depot owns the ground.
+   if(depotApronImmune(this,target,source))return 0;const guardrail=activeBuff(target,'resistance')??0,braceMitigation=(target.braceTimer||0)>0?(target.braceMitigation||0):0,riderMitigation=target.active>0?riderAmount(target.character,target.harness,'mitigation',0,{trigger:'active'}):0,mitigation=Math.min(.5,Math.max(guardrail,braceMitigation,riderMitigation));let damage=((this.config.mode==='instagib'||this.mutators.oneShot)?10000:amount*this.mutators.damageMultiplier)*(source?.damageMultiplier||1)*(1-mitigation)*(this.mutators.berserk&&(source?.streak||0)>=3?1.2:1);
+  // LATTICE STRIKE SCOUT `SPOT` (§8.1, V0b): a target marked by an enemy scout
+  // takes +15% from the spotting team. Mode-guarded and pure; every other mode
+  // and every unmarked target is exactly 1x. `lastHitBy` lets `stepCocs`
+  // attribute an agent kill without a second damage hook.
+  damage*=cocsSpotDamageScale(this,source,target);
+  // §6A.3 arrival protection: 1.5 s of 50% DR after a zipline/pad/launcher/
+  // teleporter arrival. Pure; 1x for every actor without a live window.
+  damage*=arrivalDamageScale(target);
+  if(source&&source!==target&&isCocsMode(this.config))target.lastHitBy=source.id;
+  const facingshield=target.npcShield;if(facingshield&&source&&source!==target){const fdx=source.x-target.x,fdz=source.z-target.z,fdist=Math.hypot(fdx,fdz);if(fdist>1e-4){const facingX=-Math.sin(target.yaw||0),facingZ=-Math.cos(target.yaw||0),dot=(fdx/fdist)*facingX+(fdz/fdist)*facingZ,arc=Number.isFinite(facingshield.arc)?facingshield.arc:.6;if(dot>=Math.cos(arc))damage*=1-(facingshield.reduction??.7);else if(dot<=-Math.cos(arc))damage*=facingshield.flankBonus??1.4;}}// Class damage-taken hooks fire before the shield stages (§3.2): Braced
   // restarts its out-of-combat window, Alignment Review pauses its build.
   if(damage>0){const targetSignatures=this._verbState(target);BRACED.onDamage(targetSignatures);ALIGNMENT_REVIEW.onDamage(targetSignatures);}
   const shieldBefore=(target.temporaryShield||0)+(target.juggernautShield||0)+(target.armor||0);const shield=Math.min(target.temporaryShield||0,damage);target.temporaryShield-=shield;damage-=shield;const jugGuard=Math.min(target.juggernautShield||0,damage);target.juggernautShield=(target.juggernautShield||0)-jugGuard;damage-=jugGuard;
@@ -644,6 +724,52 @@ export class Match{
      updateAssault(dt){return objectives.updateAssault(this,dt);}
     updatePayload(dt){return objectives.updatePayload(this,dt);}
     updateObjectives(dt=RULES.dt){return objectives.updateObjectives(this,dt);}
+    // LATTICE STRIKE order hook (V0a, §11.1/§11.6): every order enters the sim
+    // only through `Match.step(dt,{cocs:{orders}})`; they are queued here and
+    // consumed by `stepCocs` at the single fixed point inside `updateObjectives`.
+    // There is no Room-side queue, so sweeps, bots and NetHarness share one path.
+    prepareCocs(inputs){
+     const state=this.objectiveState;
+     if(!state||state.kind!=='cocs')return;
+     const orders=inputs?.cocs?.orders;
+     if(Array.isArray(orders)&&orders.length)(state.pendingOrders??=[]).push(...orders);
+     // OPERATIONS (O1b) between-wave spends ride the same `{cocs:{...}}` bag and
+     // the same deterministic `(tick, peerId, cardId)` sort. Non-coop `cocs` has
+     // no spend window, so this is a no-op there.
+     const spends=inputs?.cocs?.spends;
+     if(Array.isArray(spends)&&spends.length){
+      if(state.coop)(state.coop.pendingSpends??=[]).push(...spends);
+      // PvP-1 role board: `spawn`/`reinforce` spend the team FLUX on a role the
+      // rung allows, gated by THREADS + affordability in the sim. Sorted on the
+      // same `(tick, peerId, cardId)` key as every other COCS record.
+      else for(const record of [...spends].sort(compareCocsOrders))cocsEconomyAction(this,state,record);
+     }
+     // OPERATIONS (O1c) executor-lease request: any player may ask for the next
+     // rotation. Queued here and consumed at the single fixed point in stepCoop.
+     const lease=inputs?.cocs?.lease;
+     if(state.coop&&lease!==undefined&&lease!==null)state.coop.pendingLease=lease;
+     // N1 terminal/command/buy actions are applied at this same fixed point.
+     // They are sorted by the same `(tick, peerId, cardId)` comparator as an
+     // order, so outcome never depends on network arrival order (§11.6).
+     const terminals=inputs?.cocs?.terminals;
+     if(Array.isArray(terminals)&&terminals.length){
+      for(const record of [...terminals].sort(compareCocsOrders))coopTerminalAction(this,state,record);
+     }
+     const commands=inputs?.cocs?.commands;
+     if(Array.isArray(commands)&&commands.length){
+      for(const record of [...commands].sort(compareCocsOrders)){
+       if(state.coop)coopCommandAction(this,state,record);
+       else cocsCommandAction(this,state,record);
+      }
+     }
+     const buys=inputs?.cocs?.buys;
+     if(Array.isArray(buys)&&buys.length){
+      for(const record of [...buys].sort(compareCocsOrders)){
+       if(state.coop)coopBuyAction(this,state,record);
+       else cocsBuyAction(this,state,record);
+      }
+     }
+    }
     power(a){if(this.race||this.over||a.health<=0||a.cooldown>0||this.mutators.instagib||this.flagCarrier(a)||a.isVip===true||a.movement?.carrier?.suppressActive===true)return false;const h=HARNESSES.find(h=>h.id===a.harness),ability=harnessAbility(a.harness)||h;const harness=a.harness;a.protection=0;a.cooldown=Math.max(0,(ability.cooldown??h.cooldown)*(this.mutators.fastPowers?.5:1)*a.cooldownMultiplier+riderBonus(a.character,harness,'cooldown',0,{trigger:'end'}));a.active=(ability.duration??h.duration)+riderBonus(a.character,harness,'duration',0,{trigger:'activate'});a.activeSpeedMultiplier=ability.speed??h.magnitude??1;this.stats.powers++;this.emit('power',{actor:a.id,harness,pos:eye(a),duration:a.active});
    // Riders whose trigger is the activation itself: cleanse, a timed speed
    // window and the skipped-holster charge. None of these alter the pinned
@@ -820,7 +946,7 @@ export class Match{
      a.inputJump=jumpHeld;a.inputCrouch=crouchHeld;a.inputMobility=mobilityHeld;
      }else a.glideSteer=0;
      if(a.vehicleId!==null){if(controls.interact)this.releaseVehicle(a,undefined,'exit');else if(a.vehicleSeat==='driver')this.driveVehicle(a,controls,dt);else if(a.vehicleSeat==='gunner')this.gunnerVehicle(a,controls,dt);else{const ride=this.vehicleById(a.vehicleId);if(ride)this.syncVehicleActor(a,ride);}}
-     else if(!(controls.interact&&this.enterVehicle(a))){const wasGrounded=a.grounded===true,traversalRide=a.traversalFlight===true||a.zipRide!==null;moveActor(a,controls,dt,this.arena,this.config,this.ropeLines);a.movementLanded=a.health>0&&a.vehicleId===null&&a.grounded===true&&wasGrounded!==true&&a.traversalEvent===null&&traversalRide!==true&&a.vy<=0;}const bodyTurn=(this.difficulty?.id==='nightmare'?10:this.difficulty?.id==='hard'?8:this.difficulty?.id==='normal'?6:4)*dt;const nextBody=turnToward(a.bodyYaw??a.yaw,a.yaw,bodyTurn);a.bodyYaw=Math.atan2(Math.sin(nextBody),Math.cos(nextBody));
+     else{const cocsState=isCocsMode(this.config)?this.objectiveState:null,interactHeld=cocsState?(cocsState._interactHeld??={})[a.id]===true:false,interactPressed=controls.interact===true;if(cocsState)cocsState._interactHeld[a.id]=interactPressed;const cocsUsed=interactPressed&&!interactHeld&&a.bot==null&&Boolean(cocsHumanInteract(this,cocsState,a.id));if(!(cocsUsed||(controls.interact&&this.enterVehicle(a)))){const wasGrounded=a.grounded===true,traversalRide=a.traversalFlight===true||a.zipRide!==null;moveActor(a,controls,dt,this.arena,this.config,this.ropeLines);a.movementLanded=a.health>0&&a.vehicleId===null&&a.grounded===true&&wasGrounded!==true&&a.traversalEvent===null&&traversalRide!==true&&a.vy<=0;}}const bodyTurn=(this.difficulty?.id==='nightmare'?10:this.difficulty?.id==='hard'?8:this.difficulty?.id==='normal'?6:4)*dt;const nextBody=turnToward(a.bodyYaw??a.yaw,a.yaw,bodyTurn);a.bodyYaw=Math.atan2(Math.sin(nextBody),Math.cos(nextBody));
     if(a.traversalEvent){const evt=a.traversalEvent;a.traversalEvent=null;this.emit(evt.type,{actor:a.id,id:evt.id,from:evt.from,to:evt.to});}
     if(this.arena.voidY!==undefined&&a.y<this.arena.voidY){this.fall(a);continue;}this.objective(a);if(ext&&a.vehicleId===null){if(ext.power)this.power(a);if(ext.fire)this.fire(a);if(ext.grenade)this.throwGrenade(a);}
   for(const p of this.pickups)if(!p.wait&&dist(a,p)<1.05)this.collect(a,p);
@@ -846,7 +972,7 @@ export class Match{
   }
   const alive=this.rockets.length?[]:this.rockets;for(const r of this.rockets){const w=WEAPONS[r.weapon??1];r.life-=dt;if(r.homing>0){let target=null,best=(r.homing||0)*50;const owner=this.actors[r.owner];for(const b of this.actors)if(b.id!==r.owner&&b.health>0&&(!teamMode(this.config)||b.team!==owner?.team)){const d=dist(r.pos,eye(b));if(d<best){best=d;target=b;}}if(target){const desired=norm(v(target.x-r.pos.x,(target.y??0)+.9-r.pos.y,target.z-r.pos.z)),t=clamp((r.homingTurnRate||3)*dt,0,1);r.dir=norm(v(r.dir.x+(desired.x-r.dir.x)*t,r.dir.y+(desired.y-r.dir.y)*t,r.dir.z+(desired.z-r.dir.z)*t));if(w.gravity)r.vy=r.dir.y*w.speed;}}const velocity=w.gravity?v(r.dir.x*w.speed,(r.vy??r.dir.y*w.speed)-RULES.gravity*w.gravity*dt,r.dir.z*w.speed):v(r.dir.x*w.speed,r.dir.y*w.speed,r.dir.z*w.speed);if(w.gravity)r.vy=velocity.y;const travel=Math.hypot(velocity.x,velocity.y,velocity.z)*dt,direction=norm(velocity);let range=this.rayWorld(r.pos,direction,travel),hit=null,hitVehicleRef=null;for(const a of this.actors)if(a.id!==r.owner&&a.health>0&&(!teamMode(this.config)||a.team!==this.actors[r.owner]?.team)){const t=hitActor(r.pos,direction,a,range);if(t!==null&&t<range){range=t;hit=a;hitVehicleRef=null;}}for(const vehicle of this.vehicles)if(vehicle.health>0&&!vehicleMounted(vehicle,r.owner)&&!this.vehicleFriendlyFire(vehicle,this.actors[r.owner])){const t=hitVehicle(r.pos,direction,vehicle,range);if(t!==null&&t<range){range=t;hit=null;hitVehicleRef=vehicle;}}
     const impact=add(r.pos,direction,range<travel?Math.max(0,range-.025):travel),floor=floorAt(impact.x,impact.z,this.arena);r.pos=impact;if(range<travel&&!hit&&!hitVehicleRef&&w.bounce>0&&r.bounces<3&&floor!==null&&impact.y<=floor+.08){r.vy=Math.abs(r.vy)*w.bounce;r.bounces++;alive.push(r);}else if(range<travel||r.life<=0){if(hitVehicleRef)this.damageVehicle(hitVehicleRef,w.damage*(r.damageMultiplier||1),this.actors[r.owner]);this.explode(r,hit);}else alive.push(r);}
-    this.rockets=alive;this.stepDeployables(dt);this.updateObjectives(dt);this.updateSinglePlayer(dt);
+    this.rockets=alive;this.stepDeployables(dt);this.prepareCocs(inputs);this.updateObjectives(dt);this.updateSinglePlayer(dt);
     // Arms Race is ladder-ranked: promotions outrank raw frags everywhere, so a
     // lower-rung player can never be handed the match on a frag tie-break.
     const ffaLeaders=()=>{if(this.config.mode==='armsrace'){const top=Math.max(...this.actors.map(a=>a.ladder??0)),cascade=this.actors.filter(a=>(a.ladder??0)===top),max=Math.max(...cascade.map(a=>a.frags));return cascade.filter(a=>a.frags===max);}if(this.objectiveState?.kind==='juggernaut'){const points=this.objectiveState.points||{},max=Math.max(...this.actors.map(a=>points[a.id]||0));return this.actors.filter(a=>(points[a.id]||0)===max);}const max=Math.max(...this.actors.map(a=>a.frags));return this.actors.filter(a=>a.frags===max);};
@@ -861,6 +987,7 @@ export class Match{
   leaders(){if(this.modeState&&this.modeState.kind)return this.actors.filter(a=>a.id===this.modeState.playerId);if(this.race){if(this.race.kind==='soccer'){const id=soccerStandings(this.race)[0]?.actorId;return this.actors.filter(a=>a.id===id);}const id=this.race.winnerId??raceStandings(this.race)[0]?.actorId;return this.actors.filter(a=>a.id===id);}if(this.objectiveState?.kind==='juggernaut'){const points=this.objectiveState.points||{},max=Math.max(...this.actors.map(a=>points[a.id]||0));return this.actors.filter(a=>(points[a.id]||0)===max);}if(teamMode(this.config)){const max=Math.max(...Object.values(this.teamScores));return this.actors.filter(a=>this.teamScores[a.team]===max);}if(this.config.mode==='armsrace'&&this.armsraceWinner!==null&&this.armsraceWinner!==undefined)return this.actors.filter(a=>a.id===this.armsraceWinner);return rankLeaders(this.actors,this.config.mode);}
      snapshot(){const mode=GAME_MODES.find(m=>m.id===this.config.mode),leaders=this.leaders(),objective=this.config.mode==='ctf'?{nodes:this.arena.objectiveNodes||[],flags:Object.values(this.flags).map(f=>({...f})),winner:null,leaders:[...new Set(leaders.map(a=>a.team))]}:this.objectiveState?{kind:this.objectiveState.kind,zones:this.objectiveState.zones.map(z=>({...z})),active:this.objectiveState.active,attacker:this.objectiveState.attacker,defender:this.objectiveState.defender,breached:this.objectiveState.breached,winner:this.objectiveState.winner,leaders:[...new Set(leaders.map(a=>a.team))],...(this.objectiveState.kind==='payload'?{payload:{position:{...(this.objectiveState.position||payloadPosition(this.objectiveState))},distance:this.objectiveState.distance,total:this.objectiveState.total,speed:this.objectiveState.speed,radius:this.objectiveState.radius,pushing:this.objectiveState.pushing,contested:this.objectiveState.contested,delivered:this.objectiveState.delivered,checkpointsReached:this.objectiveState.checkpointsReached,checkpointCount:this.objectiveState.checkpoints.length,progress:payloadProgress(this.objectiveState)}}:this.objectiveState.kind==='elimination'?{lives:{...(this.objectiveState.lives||{})},livesPerTeam:this.objectiveState.livesPerTeam,eliminations:{...(this.objectiveState.eliminations||{})},deaths:{...(this.objectiveState.deaths||{})},attrition:{...(this.objectiveState.attrition||{})},suddenDeath:this.objectiveState.suddenDeath===true,tiebreak:this.objectiveState.tiebreak??null}:this.objectiveState.kind==='juggernaut'?{juggernautId:this.objectiveState.juggernautId,points:{...(this.objectiveState.points||{})},suddenDeath:this.objectiveState.suddenDeath===true,tiebreak:this.objectiveState.tiebreak??null}:this.objectiveState.kind==='extraction'?{extract:{...(this.objectiveState.extract||{})},vipId:this.objectiveState.vipId??null,escortTeam:this.objectiveState.escortTeam??null,defenderTeam:this.objectiveState.defenderTeam??null,vipDead:this.objectiveState.vipDead===true,progress:Number(this.objectiveState.progress)||0,captureSeconds:Number(this.objectiveState.captureSeconds)||0,escortRadius:Number(this.objectiveState.escortRadius)||6}:this.objectiveState.holdCount?{holdCount:this.objectiveState.holdCount,holdSeconds:this.objectiveState.holdSeconds,holdProgress:{...(this.objectiveState.holdProgress||{})},holdTeam:this.objectiveState.holdTeam??null}:Array.isArray(this.objectiveState.stages)?{stage:this.objectiveState.stage,stageCount:this.objectiveState.stageCount,stageCaptures:{...(this.objectiveState.stageCaptures||{})}}:{})}:null,teamMax=Math.max(...Object.values(this.teamScores)),winningTeams=[0,1].filter(team=>this.teamScores[team]===teamMax);return {
       ...(this.race?{race:this.race.kind==='soccer'?soccerSnapshot(this.race):raceSnapshot(this.race)}:{}),
+      ...(this.objectiveState?.kind==='cocs'?{cocs:cocsSnapshot(this)}:{}),
       config:{...this.config},modeName:mode.name,mapId:this.arena.id,mapName:this.arena.name,time:this.time,over:this.over,overReason:this.overReason??null,suddenDeath:this.suddenDeath===true,feed:this.feed.map(f=>({...f})),actors:this.actors.slice().sort((a,b)=>a.id-b.id).map(a=>({...a,movement:movementSnapshot(a.movement),verbState:operatorVerbSnapshot(a.verbState),scoreStats:{...a.scoreStats},bot:a.bot?{state:a.bot.state,route:[...a.bot.route]}:null,ammo:a.ammo.map(n=>Number.isFinite(n)?n:'∞')})),vehicles:this.vehicles.map(vehicle=>({id:vehicle.id,kind:vehicle.kind,x:vehicle.position.x,y:vehicle.position.y,z:vehicle.position.z,vx:vehicle.velocity.x,vy:vehicle.vy??0,vz:vehicle.velocity.z,yaw:vehicle.heading,roll:vehicle.roll,pitchBody:vehicle.pitchBody,flight:vehicle.config?.flight===true,altitude:vehicle.position.y,turretYaw:vehicle.turretYaw,health:vehicle.health,maxHealth:vehicle.maxHealth,driver:vehicle.driver,gunner:vehicle.gunner,passengers:[...(vehicle.passengers||[])],heat:vehicle.heat,overheated:vehicle.overheated,respawnTimer:vehicle.respawnTimer})),pickups:this.pickups.map(p=>({...p})),deployables:this.deployables.map(d=>({...d})),flags:Object.values(this.flags).map(f=>({...f})),teamScores:{0:this.teamScores[0],1:this.teamScores[1]},
       winner:this.race?(this.race.kind==='soccer'?this.race.winnerTeam:this.race.winnerId):(this.config.mode==='armsrace'&&this.armsraceWinner!==null&&this.armsraceWinner!==undefined?this.armsraceWinner:objective?.winner??(this.over&&teamMode(this.config)&&winningTeams.length===1?winningTeams[0]:null)),objectives:objective,projectiles:this.rockets.length,rockets:this.rockets.map(r=>({...r,pos:{...r.pos}})),stats:{...this.stats},leaders:leaders.map(a=>a.name),singleplayer:this.modeState?singlePlayerSnapshot(this.modeState,this):null};}
 }

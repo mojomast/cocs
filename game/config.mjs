@@ -1,5 +1,113 @@
 import {WEAPONS} from './data.mjs';
 import {CAMPAIGN_MISSION_IDS,DEFAULT_MISSION_ID} from './campaign-data.mjs';
+// ---------------------------------------------------------------------------
+// LATTICE STRIKE population ladder (PvP-1). Section 3.1 publishes the 4v4 and
+// 8v8 `cocs` rungs; `cocs-coop` (OPERATIONS) is a single human team and never
+// consults a rung. This table is the single data source for a rung's seat
+// count, live-node floor, role allow-list and opening economy. The role
+// allow-list is load-bearing: `cocsRoleAllowed` gates which subagent roles the
+// duty board / policy may spawn, so 4v4 can never field SCOUT or SABOTEUR.
+//
+// The economy numbers mirror `cocs-economy.mjs` (FLUX start 80 / cap 240,
+// base THREADS 3) exactly; `cocs-economy.test.mjs` pins the cross-module
+// equality so the two tables cannot drift.
+// ---------------------------------------------------------------------------
+export const COCS_RUNGS=Object.freeze({
+ '4v4':Object.freeze({
+  id:'4v4',name:'Skirmish-lite',variant:'cocs',humans:8,perTeam:4,total:8,minHumans:8,
+  roles:Object.freeze(['fighter','harvester','builder']),
+  live:Object.freeze({opening:3,max:5,endgame:5}),
+  dominance:Object.freeze({hold:90,fast:45}),
+  threads:3,fluxStart:80,fluxCap:240,depotsPerTeam:1,vehiclesPerTeam:1,
+ }),
+ '8v8':Object.freeze({
+  id:'8v8',name:'Skirmish',variant:'cocs',humans:16,perTeam:8,total:16,minHumans:8,
+  roles:Object.freeze(['fighter','harvester','builder','scout','saboteur']),
+  live:Object.freeze({opening:3,max:5,endgame:5}),
+  dominance:Object.freeze({hold:120,fast:60}),
+  threads:3,fluxStart:80,fluxCap:240,depotsPerTeam:2,vehiclesPerTeam:2,
+ }),
+});
+export const COCS_RUNG_IDS=Object.freeze(Object.keys(COCS_RUNGS));
+/** Resolve a rung id (case-insensitive) to its frozen table entry, or null. */
+export function cocsRung(id){
+ const key=String(id??'').trim().toLowerCase();
+ return COCS_RUNGS[key]??null;
+}
+/** Infer the rung from the intended actor count (humans + bots). <=8 is 4v4,
+ * <=16 is 8v8; above the published ladder there is no rung (12v12 is gated). */
+export function cocsRungForPlayers(players){
+ const n=Math.max(0,Math.round(Number(players)||0));
+ if(n<=0)return null;
+ if(n<=COCS_RUNGS['4v4'].total)return '4v4';
+ if(n<=COCS_RUNGS['8v8'].total)return '8v8';
+ return null;
+}
+/** The rung a config resolves to, or null for a legacy (ungated) practice match. */
+export function cocsRungOf(config){
+ return cocsRung(config?.rung)?.id??null;
+}
+/** Bot seats needed to fill a rung to its published total (stable ratio). */
+export function cocsRungFill(rung,humans){
+ const table=cocsRung(rung);
+ if(!table)return 0;
+ const present=Math.max(0,Math.min(table.total,Math.round(Number(humans)||0)));
+ return table.total-present;
+}
+/** `true` when `humans` clears the rung's below-minimum floor (section 3.1). */
+export function cocsRungMeetsMinimum(rung,humans){
+ const table=cocsRung(rung);
+ if(!table)return false;
+ const floor=Math.max(1,Number.isFinite(Number(table.minHumans))?Number(table.minHumans):table.humans);
+ return Math.round(Number(humans)||0)>=floor;
+}
+/** `true` when `role` is on `rung`'s allow-list. A null/unknown rung allows
+ * every role so existing practice matches keep the full launch set. */
+export function cocsRoleAllowed(rung,role){
+ const table=cocsRung(rung);
+ if(!table)return true;
+ return table.roles.includes(String(role??'').trim().toLowerCase());
+}
+// ---------------------------------------------------------------------------
+// Lobby/queue plan (section 3.1). A rung is only entered when its human floor
+// is met; below the floor the queue falls back to the rung below (and below
+// 4v4 the room routes to OPERATIONS or the practice sandbox). This is the one
+// serializable descriptor the server publishes to the lobby and the matchmaker
+// so the UI can say exactly why a rung is (or is not) open. `botFill` is the
+// stable bot ratio used to top a started match up to the rung's total; it is
+// only applied once `meetsMinimum` is true so a rung is never silently
+// auto-started on a bot majority. Pure, frozen, no clock.
+// ---------------------------------------------------------------------------
+export function cocsRungPlan(rung,humans){
+ const table=cocsRung(rung);
+ if(!table)return null;
+ const present=Math.max(0,Math.min(table.total,Math.round(Number(humans)||0)));
+ const meetsMinimum=cocsRungMeetsMinimum(table.id,present);
+ return Object.freeze({
+  id:table.id,
+  name:table.name,
+  variant:table.variant,
+  perTeam:table.perTeam,
+  total:table.total,
+  humans:present,
+  minHumans:table.minHumans,
+  meetsMinimum,
+  belowMinimum:!meetsMinimum,
+  botFill:cocsRungFill(table.id,present),
+  roleAllow:Object.freeze([...table.roles]),
+ });
+}
+/** The rung below `rung` in the published ladder, or null at the floor. */
+export function cocsRungBelow(rung){
+ const table=cocsRung(rung);
+ if(!table)return null;
+ const index=COCS_RUNG_IDS.indexOf(table.id);
+ return index>0?COCS_RUNG_IDS[index-1]:null;
+}
+/** The role allow-list for a rung (all five when the rung is unknown). */
+export function cocsRungRoles(rung){
+ return [...(cocsRung(rung)?.roles??COCS_RUNGS['8v8'].roles)];
+}
 export const GAME_MODES = [
  {id:'deathmatch',name:'Deathmatch',description:'Everyone for themselves. Start with a Pulse Rifle, scavenge the rest, first to the frag limit wins.',rules:{team:false,score:'frags',fragLimit:15,suddenDeathSeconds:12}},
   {id:'ctf',name:'Capture the Flag',description:'Steal the enemy flag and run it home while keeping your own safe. Classic, chaotic, worth it.',rules:{team:true,score:'captures',fragLimit:3,carrierSpeed:.9,suddenDeathSeconds:15}},
@@ -12,6 +120,17 @@ export const GAME_MODES = [
   {id:'arsenal',name:'Full Arsenal',description:'Every weapon unlocked with unlimited ammo from the first spawn. Choose violence, repeatedly.',loadout:{weapons:'all',start:0,infinite:true}},
   {id:'armsrace',name:'Arms Race',description:'Every kill promotes you to the next weapon in the rack. Finish the last gun to win.',rules:{team:false,score:'ladder',fragLimit:10,minFragLimit:10,maxFragLimit:10}},
   {id:'combined-arms',name:'Combined Arms',description:'Command infantry, armour and aircraft across the largest battlefields. Hold the zones together.',rules:{team:true,score:'zoneTime',fragLimit:200,minFragLimit:50,maxFragLimit:900,vehicles:true,suddenDeathSeconds:15,objective:{kind:'domination',captureSeconds:6},maxBots:16}},
+  // LATTICE STRIKE (V0a): linked objective nodes where a node can only be
+  // captured next to one you already own, and only pays while connected back to
+  // HQ. `score:'cocs'` keeps the objective-first ranking in outcome.mjs; the
+  // node/income tuning lives under `objective` and is read by cocs.mjs.
+  {id:'cocs',name:'Lattice Strike',description:'Capture linked lattice nodes. You can only take a node next to one you own, and a node only pays while a supply line links it back to your HQ. Hold the lattice, not the frag count.',rules:{team:true,score:'cocs',fragLimit:5,minFragLimit:1,maxFragLimit:7,vehicles:false,maxBots:16,suddenDeathSeconds:15,rungs:COCS_RUNGS,objective:{kind:'cocs',captureSeconds:5,liveOpening:3,liveMax:5,endgameLive:5,dominanceHold:90,dominanceFast:45}}},
+  // LATTICE STRIKE: OPERATIONS (O1a) — the co-op, Director-driven siege. It
+  // shares the `cocs` objective kind and the lattice/FLUX/REQ/strip systems but
+  // branches on `coop:true`: all humans are team 0, team 1 is the persistent
+  // Director garrison + non-respawning wave force, and the run is one 5-wave
+  // operation (win on Wave 5 clear; lose to dominance, the clock or the HQ siege).
+  {id:'cocs-coop',name:'Lattice Strike: Operations',description:'Hold the lattice against a Director-driven siege. Five waves, one team, no enemy commander. Clear the operation with your HQ intact.',rules:{team:true,score:'cocs',coop:true,fragLimit:0,minFragLimit:0,maxFragLimit:0,vehicles:false,maxBots:16,timeLimit:900,suddenDeathSeconds:0,objective:{kind:'cocs',captureSeconds:5,liveOpening:3,liveMax:5,endgameLive:5,dominanceCount:3,dominanceHold:120,dominanceFast:60}}},
   {id:'payload',name:'Payload',description:'Escort the payload cart down the track to the final point. Checkpoints bank progress; defenders stall it and roll it back. Attackers win on delivery, defenders on the clock.',rules:{team:true,score:'payload',fragLimit:3,minFragLimit:1,maxFragLimit:6,objective:{kind:'payload',captureSeconds:5}}},
   {id:'puma-race',name:'Puma Circuit',description:'Race Pumas around the circuit. Cross every gate in order and finish the lap target first.',rules:{team:false,score:'laps',fragLimit:3,minFragLimit:1,maxFragLimit:10,maxBots:7,vehicles:true}},
   {id:'puma-soccer',name:'Puma Soccer',description:'Team car soccer on the circuit infield. Fling the ball into the enemy goal while defending your own.',rules:{team:true,score:'goals',fragLimit:5,minFragLimit:1,maxFragLimit:15,maxBots:3,vehicles:true}},
@@ -131,11 +250,15 @@ export function mutatorEffects(config={}){
  });
 }
 export const DEFAULT_CONFIG = Object.freeze({mode:'deathmatch',botCount:2,difficulty:'easy',fragLimit:15,timeLimit:300,respawn:2,speed:1,gravity:1,damage:1,fastPowers:false,lifeSteal:false,unlimitedAmmo:false,suddenDeath:false,randomLoadout:false,oneShot:false,instagib:false,mirrorLoadout:false,bounty:false,berserk:false,bigHead:false,noRecoil:false,endless:false,startingWeapon:0,playerName:'',mission:DEFAULT_MISSION_ID,loadout:null,mutators:Object.freeze([]),checkpoint:null});
-export const DEFAULT_DISPLAY = Object.freeze({fov:82,crosshair:'cross',color:'#c2ffea',size:1,showFps:false,showWeapon:true,resolutionScale:.5,resolutionCap:'auto',bloom:0,exposure:1.15,postFx:false,quality:'auto',effectsQuality:'auto',cameraShake:1,weaponBob:1,teamPalette:'default',reducedMotion:false,invertY:false,adsSensitivity:.85,touchSensitivity:1,captions:false,showKillFeed:true,showDamageNumbers:true,showRadar:true});
+export const DEFAULT_DISPLAY = Object.freeze({fov:82,crosshair:'cross',color:'#c2ffea',size:1,showFps:false,showWeapon:true,resolutionScale:.5,resolutionCap:'auto',bloom:0,exposure:1.15,postFx:false,quality:'auto',effectsQuality:'auto',cameraShake:1,weaponBob:1,teamPalette:'default',reducedMotion:false,invertY:false,adsSensitivity:.85,touchSensitivity:1,captions:false,showKillFeed:true,showDamageNumbers:true,showRadar:true,uiScale:1});
 const number=(v,fallback,min,max)=>typeof v==='number'&&Number.isFinite(v)?Math.max(min,Math.min(max,v)):fallback;
 const choice=(v,values,fallback)=>values.includes(v)?v:fallback;
 export const modeRule=mode=>GAME_MODES.find(m=>m.id===mode)?.rules||GAME_MODES[0].rules;
 export const teamMode=modeOrConfig=>Boolean(modeRule(typeof modeOrConfig==='string'?modeOrConfig:modeOrConfig?.mode).team);
+// LATTICE STRIKE family: both the PvPvE `cocs` and the co-op `cocs-coop` share
+// `score:'cocs'`. Engine/UI seams that used to test `mode==='cocs'` use this so
+// adding OPERATIONS never changes the original mode's behaviour.
+export const isCocsMode=modeOrConfig=>modeRule(typeof modeOrConfig==='string'?modeOrConfig:modeOrConfig?.mode).score==='cocs';
 export function normalizeConfig(value={}){
  const c=value&&typeof value==='object'?{...value}:{};
   // A `mutators` list is folded into the canonical flags before sanitizing so
@@ -146,12 +269,21 @@ export function normalizeConfig(value={}){
   if(mode==='puma-race'||mode==='puma-soccer')Object.assign(c,{speed:1,gravity:1,damage:1,fastPowers:false,lifeSteal:false,unlimitedAmmo:false,suddenDeath:false,randomLoadout:false,oneShot:false,instagib:false,mirrorLoadout:false,bounty:false,berserk:false,bigHead:false,noRecoil:false,startingWeapon:0});
     const rules=modeRule(mode),minGoal=rules.minFragLimit??(mode==='ctf'?1:5),maxGoal=rules.maxFragLimit??50;
     const checkpointValue=c.checkpoint===null||c.checkpoint===undefined?null:(Number.isFinite(Number(c.checkpoint))&&Number(c.checkpoint)>=0?Math.round(Number(c.checkpoint)):null);
-    const normalized={mode,botCount:Math.round(number(c.botCount,DEFAULT_CONFIG.botCount,0,rules.maxBots??8)),difficulty:choice(c.difficulty,DIFFICULTIES.map(d=>d.id),DEFAULT_CONFIG.difficulty),fragLimit:Math.round(number(c.fragLimit,rules.fragLimit??15,minGoal,maxGoal)),timeLimit:Math.round(number(c.timeLimit,300,60,900)),respawn:number(c.respawn,2,1,5),speed:choice(c.speed,[.75,1,1.25,1.5],1),gravity:choice(c.gravity,[.4,.7,1],1),damage:choice(c.damage,[.5,1,1.5,2],1),fastPowers:c.fastPowers===true,lifeSteal:c.lifeSteal===true,unlimitedAmmo:c.unlimitedAmmo===true,suddenDeath:c.suddenDeath===true,randomLoadout:c.randomLoadout===true,oneShot:c.oneShot===true,instagib:c.instagib===true,mirrorLoadout:c.mirrorLoadout===true,bounty:c.bounty===true,berserk:c.berserk===true,bigHead:c.bigHead===true,noRecoil:c.noRecoil===true,endless:c.endless===true,startingWeapon:Math.round(number(c.startingWeapon,0,0,Math.max(0,WEAPONS.length-1))),playerName:typeof c.playerName==='string'?c.playerName.replace(/[\u0000-\u001f\u007f]/g,'').trim().slice(0,20):'',mission:choice(c.mission,CAMPAIGN_MISSION_IDS,DEFAULT_MISSION_ID),loadout:normalizeLoadout(c.loadout),checkpoint:checkpointValue};
-    return {...normalized,mutators:Object.freeze(activeMutators(normalized))};
+    const normalized={mode,botCount:Math.round(number(c.botCount,DEFAULT_CONFIG.botCount,0,rules.maxBots??8)),difficulty:choice(c.difficulty,DIFFICULTIES.map(d=>d.id),DEFAULT_CONFIG.difficulty),fragLimit:Math.round(number(c.fragLimit,rules.fragLimit??15,minGoal,maxGoal)),timeLimit:Math.round(number(c.timeLimit,rules.timeLimit??300,60,900)),respawn:number(c.respawn,2,1,5),speed:choice(c.speed,[.75,1,1.25,1.5],1),gravity:choice(c.gravity,[.4,.7,1],1),damage:choice(c.damage,[.5,1,1.5,2],1),fastPowers:c.fastPowers===true,lifeSteal:c.lifeSteal===true,unlimitedAmmo:c.unlimitedAmmo===true,suddenDeath:c.suddenDeath===true,randomLoadout:c.randomLoadout===true,oneShot:c.oneShot===true,instagib:c.instagib===true,mirrorLoadout:c.mirrorLoadout===true,bounty:c.bounty===true,berserk:c.berserk===true,bigHead:c.bigHead===true,noRecoil:c.noRecoil===true,endless:c.endless===true,startingWeapon:Math.round(number(c.startingWeapon,0,0,Math.max(0,WEAPONS.length-1))),playerName:typeof c.playerName==='string'?c.playerName.replace(/[\u0000-\u001f\u007f]/g,'').trim().slice(0,20):'',mission:choice(c.mission,CAMPAIGN_MISSION_IDS,DEFAULT_MISSION_ID),loadout:normalizeLoadout(c.loadout),checkpoint:checkpointValue};
+    // The LATTICE `objective` override is an authored seam (node/income tuning +
+    // the opt-in `traversalBotUse` flag). It is preserved only when supplied, so
+    // `normalizeConfig(null)` still deep-equals `DEFAULT_CONFIG`. Pure data; a
+    // non-object override is dropped like every other malformed field.
+    const objective=c.objective&&typeof c.objective==='object'&&!Array.isArray(c.objective)?{...c.objective}:null;
+    // The PvPvE rung (section 3.1) rides the config only when explicitly asked
+    // for on `cocs`; `cocs-coop` and every other mode stay rung-free, so
+    // `normalizeConfig(null)` still deep-equals the frozen default.
+    const rung=mode==='cocs'?cocsRung(c.rung)?.id??null:null;
+    return {...normalized,...(objective?{objective}:{}),...(rung?{rung}:{}),mutators:Object.freeze(activeMutators(normalized))};
 }
 export function normalizeDisplay(value={}){
  const c=value&&typeof value==='object'?value:{};
- return {fov:Math.round(number(c.fov,82,65,110)),crosshair:choice(c.crosshair,['cross','dot','ring','chevron','split'],'cross'),color:typeof c.color==='string'&&/^#[0-9a-f]{6}$/i.test(c.color)?c.color:'#c2ffea',size:number(c.size,1,.6,1.8),showFps:c.showFps===true,showWeapon:c.showWeapon!==false,resolutionScale:number(c.resolutionScale,.5,.5,1.5),resolutionCap:choice(c.resolutionCap,['auto','1080p','1440p','native'],'auto'),bloom:number(c.bloom,0,0,1),exposure:number(c.exposure,1.15,.6,1.8),postFx:c.postFx===true,quality:choice(c.quality,['auto','low','medium','high'],'auto'),effectsQuality:choice(c.effectsQuality,['auto','low','medium','high'],'auto'),cameraShake:number(c.cameraShake,1,0,1.5),weaponBob:number(c.weaponBob,1,0,1.5),teamPalette:choice(c.teamPalette,['default','colorblind'],'default'),reducedMotion:c.reducedMotion===true,invertY:c.invertY===true,adsSensitivity:number(c.adsSensitivity,.85,.2,1.5),touchSensitivity:number(c.touchSensitivity,1,.3,3),captions:c.captions===true,showKillFeed:c.showKillFeed!==false,showDamageNumbers:c.showDamageNumbers!==false,showRadar:c.showRadar!==false};
+ return {fov:Math.round(number(c.fov,82,65,110)),crosshair:choice(c.crosshair,['cross','dot','ring','chevron','split'],'cross'),color:typeof c.color==='string'&&/^#[0-9a-f]{6}$/i.test(c.color)?c.color:'#c2ffea',size:number(c.size,1,.6,1.8),showFps:c.showFps===true,showWeapon:c.showWeapon!==false,resolutionScale:number(c.resolutionScale,.5,.5,1.5),resolutionCap:choice(c.resolutionCap,['auto','1080p','1440p','native'],'auto'),bloom:number(c.bloom,0,0,1),exposure:number(c.exposure,1.15,.6,1.8),postFx:c.postFx===true,quality:choice(c.quality,['auto','low','medium','high'],'auto'),effectsQuality:choice(c.effectsQuality,['auto','low','medium','high'],'auto'),cameraShake:number(c.cameraShake,1,0,1.5),weaponBob:number(c.weaponBob,1,0,1.5),teamPalette:choice(c.teamPalette,['default','colorblind'],'default'),reducedMotion:c.reducedMotion===true,invertY:c.invertY===true,adsSensitivity:number(c.adsSensitivity,.85,.2,1.5),touchSensitivity:number(c.touchSensitivity,1,.3,3),captions:c.captions===true,showKillFeed:c.showKillFeed!==false,showDamageNumbers:c.showDamageNumbers!==false,showRadar:c.showRadar!==false,uiScale:number(c.uiScale,1,.8,1.4)};
 }
 // ---------------------------------------------------------------------------
 // Mode loadouts. A mode may pin starting weapons, allowed weapons, infinite

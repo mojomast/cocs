@@ -8,6 +8,10 @@ import {abilityRing,movementHud} from '../../../game/hud-class.mjs';
 import {MOVEMENT_VERBS} from '../../../game/kits.mjs';
 import {harnessAbility} from '../../../game/harness-profiles.mjs';
 import {wingChip} from '../../../game/class-ui.mjs';
+import {OperationsDirectorHud} from './OperationsDirectorHud';
+import {CommandBoardHud} from './CommandBoardHud';
+import {SpendWindowHud} from './SpendWindowHud';
+import {CocsTerminalsHud} from './CocsTerminalsHud';
 
 const FRAG_COOLDOWN=7;
 
@@ -28,8 +32,98 @@ export function SpectatorBoard({groups=[],objective,onFollow}:{groups?:any[];obj
  </div>;
 }
 
+// LATTICE STRIKE front-line strip. The board/economy/strip model is derived in
+// `game/cocs-orders.mjs` from the frozen cocs snapshot; this is a pure view.
+// Ownership reads as a shape glyph plus a word (never colour alone) and the
+// capture hint is the live objective line. The V0b one-button command layer is
+// the three-button SCAN / GO / ATTACK strip: arm a verb, pick a live node, then
+// issue. Disabled verbs explain why (cooldown / FLUX low) and never rely on
+// colour; the animation-free markup is reduced-motion safe.
+function CocsReadout({command,teamName}:{command:any;teamName:(team:any)=>string}){
+ if(!command)return null;
+ const {board,economy,strip,scanTarget,traversal}=command;
+ if(!board||!strip)return null;
+ const amount=(value:any)=>Number.isFinite(Number(value))?String(Math.round(Number(value)*10)/10):'0';
+ const whole=(value:any)=>Number.isFinite(Number(value))?String(Math.round(Number(value))):'0';
+ const nodes=board.live||[],mine=board.myNodes??0,enemy=board.enemyNodes??0;
+ const flux=economy?.flux??0,fluxCap=economy?.fluxCap??0,net=economy?.net??0,fluxPercent=Math.round((economy?.fluxPercent??0)*100);
+ const req=economy?.req??{value:0,earned:0},orders=economy?.orders??{issued:0,completed:0},scout=economy?.scout??{alive:false},stats=economy?.scoutStats??{spawned:0,killed:0,scans:0};
+ const spots=command.spots??[];
+ const scoutState=scout.alive?(scout.idle?'IDLE':scout.returning?'RETURNING':scout.scanned?'SCANNED':'EN ROUTE'):'READY';
+ return <div className="cocs-readout" role="region" aria-label={`Lattice front. ${board.hint}. ${board.liveCount} live nodes.`}>
+  <div className="cocs-readout__head"><span className="eyebrow">LATTICE FRONT</span><span className="cocs-readout__count">{board.liveCount} LIVE</span></div>
+  <div className="cocs-readout__scores" aria-label={`Objective score: ${teamName(0)} ${amount(board.scores[0])}, ${teamName(1)} ${amount(board.scores[1])}`}>
+   <span className={board.leader===0?'is-lead':''}>{teamName(0)} <b>{amount(board.scores[0])}</b></span>
+   <span className="cocs-readout__op" aria-hidden="true">OP</span>
+   <span className={board.leader===1?'is-lead':''}>{teamName(1)} <b>{amount(board.scores[1])}</b></span>
+  </div>
+  <ul className="cocs-readout__nodes">
+   {nodes.map((node:any)=><li key={node.id} className={`cocs-node${node.mine?' cocs-node--mine':''}${node.enemy?' cocs-node--enemy':''}${node.contested?' cocs-node--contested':''}`} aria-label={`${node.label}: ${node.ownerLabel}${node.contested?' contested':''}${node.progressPercent>0&&!node.mine?` ${node.progressPercent} percent captured`:''}`}>
+    <span className="cocs-node__mark" aria-hidden="true">{node.mark}</span>
+    <span className="cocs-node__label">{node.label}</span>
+    <span className="cocs-node__status">{node.ownerLabel}{node.progressPercent>0&&!node.mine?` ${node.progressPercent}%`:''}</span>
+   </li>)}
+   {!nodes.length&&<li className="cocs-node cocs-node--neutral"><span className="cocs-node__mark" aria-hidden="true">○</span><span className="cocs-node__label">NO NODES</span><span className="cocs-node__status">STAND BY</span></li>}
+  </ul>
+  <div className="cocs-readout__own">
+   <span aria-label={`Your team owns ${mine} nodes`}>{teamName(board.team??0)} <b>{mine}</b> NODES</span>
+   <span aria-label={`The enemy owns ${enemy} nodes`}>{teamName((board.team??0)===0?1:0)} <b>{enemy}</b> NODES</span>
+  </div>
+  <p className="cocs-readout__hint">{board.hint}</p>
+  {command.rung&&<div className="cocs-readout__rung" role="status" aria-label={`Rung ${command.rung}. Roles ${(command.roleBoard?.allow??[]).join(', ')}. Threads ${command.roleBoard?.threads?.used??0} of ${command.roleBoard?.threads?.cap??0}.`}>
+   <span className="eyebrow">RUNG</span> <b>{String(command.rung).toUpperCase()}</b>
+   {command.roleBoard&&<small>ROLES {(command.roleBoard.allow??[]).map((role:any)=>String(role).toUpperCase()).join(' · ')} · THREADS {command.roleBoard.threads?.used??0}/{command.roleBoard.threads?.cap??0}</small>}
+  </div>}
+  <div className="cocs-readout__economy" role="group" aria-label="Team economy">
+   <div className="cocs-flux" aria-label={`Team flux ${whole(flux)} of ${whole(fluxCap)}, ${net>=0?'plus':'minus'} ${Math.abs(net).toFixed(1)} per second`}>
+    <span className="eyebrow">FLUX</span>
+    <span className="cocs-flux__track" aria-hidden="true"><i style={{width:`${fluxPercent}%`}}/></span>
+    <b>{whole(flux)}</b><small>/{whole(fluxCap)}</small>
+    <em className={net<0?'is-drain':''}>{net>=0?'+':''}{net.toFixed(1)}/s</em>
+   </div>
+   <div className="cocs-chips">
+    <span className="cocs-chip" aria-label={`Personal requisition ${whole(req.value)}`}>REQ <b>{whole(req.value)}</b></span>
+    <span className="cocs-chip" aria-label={`Orders issued ${orders.issued}, completed ${orders.completed}`}>ORD <b>{orders.issued}</b>/<b>{orders.completed}</b></span>
+    <span className="cocs-chip" aria-label={`Scout ${scoutState}. ${stats.spawned} spawned, ${stats.killed} killed, ${stats.scans} scans`}>SCOUT <b>{scoutState}</b><small>{stats.spawned}S · {stats.killed}K · {stats.scans}SCAN</small></span>
+    <span className="cocs-chip" aria-label={scanTarget?.nodeId?`Chief scan target ${scanTarget.label}`:'No chief scan target'}>CHIEF SCAN <b>{scanTarget?.nodeId?scanTarget.label:'NONE'}</b></span>
+   </div>
+   {spots.length>0&&<div className="cocs-spots" role="group" aria-label={`${spots.length} enemies spotted`}><span className="eyebrow">SPOTTED</span>{spots.map((spot:any)=><span key={spot.id} className="cocs-spot-chip" aria-label={`Enemy ${spot.id} spotted for ${spot.remainingSeconds} seconds`}>◈ {spot.remainingSeconds}s</span>)}</div>}
+  </div>
+  {traversal&&(traversal.deviceCount>0||traversal.depotCount>0)&&<div className="cocs-traversal" role="group" aria-label="Traversal devices and depots">
+   {traversal.channel&&<p className="cocs-traversal__channel" role="status" aria-live="polite"><span aria-hidden="true">{traversal.channelDevice?.mark}</span> {traversal.channel.label} {traversal.channelDevice?.label} · {traversal.channel.remainingSeconds}s <b>{Math.round((traversal.channel.percent??0)*100)}%</b></p>}
+   {traversal.deviceCount>0&&<ul className="cocs-traversal__list" aria-label="Devices">
+    {traversal.devices.map((device:any)=><li key={device.id} className={`cocs-device cocs-device--${device.state}`} aria-label={`${device.label} ${device.stateLabel}${device.timerSeconds>0?`, ${device.timerSeconds} seconds remaining`:''}${device.channel?`, ${device.channel.label}`:''}`}><span className="cocs-device__mark" aria-hidden="true">{device.mark}</span><span className="cocs-device__state" aria-hidden="true">{device.stateMark}</span> {device.stateLabel}</li>)}
+   </ul>}
+   {traversal.depotCount>0&&<ul className="cocs-traversal__list" aria-label="Depots">
+    {traversal.depots.map((depot:any)=><li key={depot.id} className={`cocs-depot${depot.mine?' is-mine':''}${depot.enemy?' is-enemy':''}${depot.contested?' is-contested':''}`} aria-label={`${depot.label} ${depot.ownerLabel}${depot.capturePercent>0?`, ${depot.capturePercent} percent captured`:''}. Loaner ${depot.vehicle.state}`}><span className="cocs-depot__mark" aria-hidden="true">{depot.mark}</span> {depot.ownerLabel}{depot.capturePercent>0?` ${depot.capturePercent}%`:''} <small>LOANER {depot.vehicle.state}</small></li>)}
+   </ul>}
+   {traversal.arrivalActive&&<p className="cocs-traversal__arrival" role="status">ARRIVAL PROTECTION · {traversal.arrivalSeconds}s</p>}
+   {command.interactPrompt&&<p className={`cocs-interact cocs-interact--${command.interactPrompt.source}`} role="status" aria-live="polite" aria-label={`${command.interactPrompt.verb} ${command.interactPrompt.label}. Press ${command.interactPrompt.key}. ${command.interactPrompt.anchored?'At the anchor':`${command.interactPrompt.distanceMeters} meters away`}${command.interactPrompt.channelPercent>0?`, ${command.interactPrompt.channelPercent} percent channelled`:''}`}>
+    <span className="cocs-interact__mark" aria-hidden="true">{command.interactPrompt.mark}</span>
+    <b className="cocs-interact__verb">{command.interactPrompt.verb}</b>
+    <span className="cocs-interact__label">{command.interactPrompt.label}</span>
+    <kbd className="cocs-interact__key">{command.interactPrompt.key}</kbd>
+    <small className="cocs-interact__state">{command.interactPrompt.anchored?'ANCHORED':`${command.interactPrompt.distanceMeters}m`}{command.interactPrompt.channelPercent>0?` · ${command.interactPrompt.channelPercent}%`:''}</small>
+   </p>}
+   {!command.interactPrompt&&traversal.deviceCount>0&&<p className="cocs-interact cocs-interact--idle" role="status"><span aria-hidden="true">⇢</span> STAND ON AN ANCHOR · <kbd>{traversal.interactKey}</kbd> RIDE · CUT · REPAIR</p>}
+   {command.depotPrompt&&<p className="cocs-interact cocs-interact--depot" role="status"><span aria-hidden="true">{command.depotPrompt.mark}</span> {command.depotPrompt.hint} <small>{command.depotPrompt.ownerLabel}{command.depotPrompt.capturePercent>0?` · ${command.depotPrompt.capturePercent}%`:''}</small></p>}
+  </div>}
+  <div className="cocs-strip" role="group" aria-label="Order strip. Arm a verb, pick a node, then issue.">
+   <div className="cocs-strip__verbs">
+    {strip.buttons.map((button:any)=><button key={button.id} type="button" className={`cocs-verb${button.armed?' is-armed':''}${button.disabled?' is-disabled':''}`} aria-pressed={button.armed} disabled={button.disabled} title={button.disabled?`${button.label} unavailable: ${button.reason}`:button.hint} onClick={()=>command.armCocsVerb(button.id)}>{button.label}</button>)}
+   </div>
+   {traversal&&<p className="cocs-strip__context" role="status"><span aria-hidden="true">◈</span> {traversal.context}</p>}
+   <p className="cocs-strip__prompt" role="status" aria-live="polite">{strip.armedLabel&&!strip.targetLabel?`${strip.armedLabel} · PICK A NODE`:strip.armedLabel&&strip.targetLabel?`${strip.armedLabel} → ${strip.targetLabel}`:'ARM AN ORDER'}{strip.notice&&<span className="cocs-strip__notice">{strip.notice}</span>}</p>
+   {strip.nodes.length>0&&<ul className="cocs-picker">{strip.nodes.map((node:any)=><li key={node.id}><button type="button" aria-pressed={strip.target===node.id} onClick={()=>command.pickCocsTarget(node.id)}><span className="cocs-picker__index">{node.index}</span><span aria-hidden="true">{node.mark}</span> {node.label} <small>{node.ownerLabel}</small></button></li>)}</ul>}
+   <button type="button" className="cocs-issue" disabled={!strip.canIssue} onClick={()=>command.issueCocsOrder()} aria-label={strip.armedLabel?`Issue ${strip.armedLabel} order${strip.targetLabel?` on ${strip.targetLabel}`:''}`:'Issue order'}>{strip.armedLabel?`ISSUE ${strip.armedLabel}`:'ISSUE'}</button>
+   {strip.pending&&<p className="cocs-strip__pending" role="status">SENDING {strip.pending.text}…</p>}
+   {strip.issued&&!strip.pending&&<p className="cocs-strip__issued" role="status">LAST {strip.issued.text}</p>}
+  </div>
+ </div>;
+}
+
 export function PlayingHud({ui}:ScreenProps){
- const {hud,player,display,brief,phase,hudRoute,hudMap,hudMode,isTeamMode,teamName,modeGoal,ladderStatus,flagText,armsrace,WEAPONS,activePower,powerIcon,radar,radarCols,radarBlip,marker,reloadFill,reloading,posture,killNotice,suddenBanner,startBanner,scoreCue,damageIndicator,damageNumberStyle,reducedMotion,vehiclePrompt,vehicle,ammoEmpty,ammoLow,hideHud,touchControls,pointerHint,requestLock,chatOpen,isSingle,single,selectHordeUpgrade,resumeSingleplayer,spectatorTeams,CAMERA_MODE_LABELS,runtime,changeMode,grenadeStatus,streakStatus,killFeedWeapon,voiceState,voiceHint,escapeHint,clock,teamScoreText,ammoText,weaponTag}=ui;
+ const {hud,player,display,brief,phase,hudRoute,hudMap,hudMode,isTeamMode,teamName,modeGoal,ladderStatus,flagText,armsrace,WEAPONS,activePower,powerIcon,radar,radarCols,radarBlip,marker,reloadFill,reloading,posture,killNotice,suddenBanner,startBanner,scoreCue,damageIndicator,damageNumberStyle,reducedMotion,vehiclePrompt,vehicle,ammoEmpty,ammoLow,hideHud,touchControls,pointerHint,requestLock,chatOpen,isSingle,single,selectHordeUpgrade,resumeSingleplayer,spectatorTeams,CAMERA_MODE_LABELS,runtime,changeMode,grenadeStatus,streakStatus,killFeedWeapon,voiceState,voiceHint,escapeHint,clock,teamScoreText,ammoText,weaponTag,cocsCommand}=ui;
  if(!hud||!player)return null;
  const callout=!hud.spectate&&hud.killCue?hud.killCue:null;
  const kill=!hud.spectate&&killNotice&&killNotice.age<1.5?killNotice:null;
@@ -62,6 +156,11 @@ export function PlayingHud({ui}:ScreenProps){
   })):[];
   return <div className={`game-hud${hud.spectate&&hideHud?' hide-hud':''}${touchControls&&!hud.spectate?' touch-mode':''}`}>
   <div className="match-top" role="region" aria-label="Live match status"><div className="match-context"><span className="eyebrow">{hud.mapName?.toUpperCase()} / {hudRoute}</span><strong>{hud.modeName?.toUpperCase()}</strong><small className="phase-label">PHASE / {phase}</small>{isTeamMode(hudMode)&&<small className="team-label">{teamName(player.team)} TEAM · {hud.spectate?'FOLLOWING':'YOU'}</small>}</div><div className="match-clock" aria-label={`${hud.spectate?'Spectating':`${clock(hud.config.timeLimit-hud.time)} remaining`}`}><strong>{hud.spectate?'SPECTATING':clock(hud.config.timeLimit-hud.time)}</strong><small>{hud.net?'NETWORK MATCH':hud.config.botCount===0?'SOLO PRACTICE':isSingle?`FIRST TO ${hud.config.fragLimit} ${modeGoal(hudMode).toLowerCase()}`:''}</small></div><div className="frag-counter"><strong>{armsrace?ladderStatus(player,WEAPONS.length).rung+1:isTeamMode(hudMode)?teamScoreText(hud.teamScores??hud.teams)||player.frags:player.frags}<span>{hud.spectate?'':` / ${armsrace?WEAPONS.length:hud.config.fragLimit}`}</span></strong><small>{hud.spectate?`FOLLOWING ${player.name.toUpperCase()}`:armsrace?'LADDER RUNG':isTeamMode(hudMode)?modeGoal(hudMode):'YOUR FRAGS'}</small></div></div>
+  {cocsCommand&&!hud.spectate&&<CocsReadout command={cocsCommand} teamName={teamName}/>}
+  {cocsCommand?.spend&&!hud.spectate&&<SpendWindowHud spend={cocsCommand.spend} onSpend={cocsCommand.spendCocs} reducedMotion={reducedMotion()}/>}
+  {cocsCommand?.boardView&&!hud.spectate&&<CommandBoardHud command={cocsCommand} open={cocsCommand.boardOpen===true} collapsed={cocsCommand.boardCollapsed===true} pinned={cocsCommand.boardPinned===true} activeId={cocsCommand.boardActive} reducedMotion={reducedMotion()} onSelect={cocsCommand.selectBoardCard} onActivate={cocsCommand.activateBoardCard} onClose={cocsCommand.closeBoard} onTogglePin={cocsCommand.toggleBoardPin}/>}
+  {cocsCommand?.terminals&&!hud.spectate&&<CocsTerminalsHud terminals={cocsCommand.terminals} reducedMotion={reducedMotion()}/>}
+  {cocsCommand?.director&&!hud.spectate&&<OperationsDirectorHud director={cocsCommand.director}/>}
   {hud.spectate&&hud.net&&runtime.current&&<button type="button" className="spectator-return" onClick={()=>changeMode('lobby')}>RETURN TO LOBBY</button>}
   {hud.spectateLocal&&runtime.current&&<div className="spectate-cam-panel" role="status"><span className="eyebrow">SPECTATE BOTS</span><strong>{(CAMERA_MODE_LABELS as any)[runtime.current?.cameraMode]||String(runtime.current?.cameraMode||'auto').toUpperCase()}</strong><small>B CYCLE CAMERA · [ / ] FOLLOW BOT · F FREE CAM{runtime.current?.cameraMode==='free'?' · WASD / SPACE / SHIFT / CTRL':''}</small></div>}
   {isSingle&&<SinglePlayerHud single={single} onSelectUpgrade={selectHordeUpgrade} onResumeCheckpoint={resumeSingleplayer}/>}
@@ -74,7 +173,7 @@ export function PlayingHud({ui}:ScreenProps){
   {hud.preparing&&<div className="preparing-overlay" role="status" aria-live="polite"><span className="eyebrow">PREPARING ARENA</span><small>Compiling shaders and warming the arena…</small></div>}
   {hud.caption&&<div className="audio-caption" role="status" aria-live="polite">{hud.caption}</div>}
   {display.showKillFeed!==false&&<div className="kill-feed" role="log" aria-live="polite" aria-relevant="additions" aria-label="Kill feed">{hud.feed?.filter((e:any)=>hud.time-e.time<6).slice(-4).map((e:any,i:number)=>{const feedWing=typeof e.killerCharacter==='string'?wingChip(e.killerCharacter):null;const label=killFeedWeapon(e,WEAPONS);return <div key={`${e.time}-${i}`}>{feedWing&&<small className="kill-feed-wing" style={{color:feedWing.color,border:`1px solid ${feedWing.color}66`,borderRadius:4,padding:'0 4px'}} title={`${feedWing.name} · ${feedWing.label}`}>{feedWing.label}</small>}<span>{e.killer}</span><Crosshair size={12}/>{label&&<small className={e.ability===true?'kill-feed-ability':''}>{label}</small>}<span>{e.victim}</span>{e.self&&<small>SELF</small>}</div>;})}</div>}
-  {!hud.spectate&&display.showRadar!==false&&<div className="radar" aria-hidden="true"><svg viewBox="-1.18 -1.18 2.36 2.36" role="presentation"><circle className="radar-ring" r="1"/><circle className="radar-ring" r=".5"/><line className="radar-axis" x1="-1" y1="0" x2="1" y2="0"/><line className="radar-axis" x1="0" y1="-1" x2="0" y2="1"/><polygon className="radar-view" points="0,-.18 -.11,.12 .11,.12"/><line className="radar-sweep" x1="0" y1="0" x2="0" y2="-1"/>{radar.contacts.map((c:any,i:number)=>{const b:any=radarBlip(c,player,radarCols);if(b.shape==='circle')return <circle key={`a${c.id}`} cx={b.cx} cy={b.cy} r={b.r} fill={b.fill} className={`${b.dead?'radar-dead':''} ${b.revealed?'radar-revealed':''}`}/>;if(b.shape==='rect')return <g key={`z${c.id}`}><rect x={b.rect.x} y={b.rect.y} width={b.rect.width} height={b.rect.height} fill={b.fill}/>{b.label&&<text className="radar-zone-label" x={b.cx} y={b.cy} textAnchor="middle" dominantBaseline="central" fill={b.fill}>{b.label}</text>}</g>;if(b.shape==='payload'){const circ=2*Math.PI*b.ring.r;return <g key="payload"><circle cx={b.cx} cy={b.cy} r={b.ring.r} fill="none" stroke={b.fill} strokeWidth={b.ring.thickness} strokeDasharray={`${(b.progressRatio??0)*circ} ${circ}`} transform={`rotate(-90 ${b.cx} ${b.cy})`} className={b.clamped?'radar-revealed':''}/><rect x={b.cx-.05} y={b.cy-.05} width=".1" height=".1" fill={b.fill}/>{b.delivered&&<circle cx={b.cx} cy={b.cy} r=".026" fill="#fff"/>}</g>;}return <polygon key={`f${b.team??'n'}-${c.index??i}`} points={b.points} fill={b.fill}/>;})}{radar.contacts.map((c:any)=>{const b:any=radarBlip(c,player,radarCols);return b.indicator?<g key={`indicator-${c.id}`} className="radar-indicator"><circle cx={b.cx} cy={b.cy} r={b.indicator.ring.r} fill="none" stroke={b.fill} strokeWidth={b.indicator.ring.thickness}/><polygon points={b.indicator.arrow} fill={b.fill}/></g>:null;})}</svg></div>}
+  {!hud.spectate&&display.showRadar!==false&&<div className="radar" aria-hidden="true"><svg viewBox="-1.18 -1.18 2.36 2.36" role="presentation"><circle className="radar-ring" r="1"/><circle className="radar-ring" r=".5"/><line className="radar-axis" x1="-1" y1="0" x2="1" y2="0"/><line className="radar-axis" x1="0" y1="-1" x2="0" y2="1"/><polygon className="radar-view" points="0,-.18 -.11,.12 .11,.12"/><line className="radar-sweep" x1="0" y1="0" x2="0" y2="-1"/>{radar.contacts.map((c:any,i:number)=>{const b:any=radarBlip(c,player,radarCols);if(b.shape==='circle')return <g key={`a${c.id}`} className={b.spotted?'radar-spotted':''}>{b.spotted&&<circle className="radar-spotted__ring" cx={b.cx} cy={b.cy} r={b.r*2.4} fill="none" stroke={b.fill} strokeWidth=".018"/>}<circle cx={b.cx} cy={b.cy} r={b.r} fill={b.fill} className={`${b.dead?'radar-dead':''} ${b.revealed?'radar-revealed':''}`}/>{b.spotted&&<polygon className="radar-spotted__mark" points={`${b.cx},${b.cy-.032} ${b.cx-.026},${b.cy+.018} ${b.cx+.026},${b.cy+.018}`} fill={b.fill}/>}</g>;if(b.shape==='rect')return <g key={`z${c.id}`}><rect x={b.rect.x} y={b.rect.y} width={b.rect.width} height={b.rect.height} fill={b.fill}/>{b.label&&<text className="radar-zone-label" x={b.cx} y={b.cy} textAnchor="middle" dominantBaseline="central" fill={b.fill}>{b.label}</text>}</g>;if(b.shape==='payload'){const circ=2*Math.PI*b.ring.r;return <g key="payload"><circle cx={b.cx} cy={b.cy} r={b.ring.r} fill="none" stroke={b.fill} strokeWidth={b.ring.thickness} strokeDasharray={`${(b.progressRatio??0)*circ} ${circ}`} transform={`rotate(-90 ${b.cx} ${b.cy})`} className={b.clamped?'radar-revealed':''}/><rect x={b.cx-.05} y={b.cy-.05} width=".1" height=".1" fill={b.fill}/>{b.delivered&&<circle cx={b.cx} cy={b.cy} r=".026" fill="#fff"/>}</g>;}return <polygon key={`f${b.team??'n'}-${c.index??i}`} points={b.points} fill={b.fill}/>;})}{radar.contacts.map((c:any)=>{const b:any=radarBlip(c,player,radarCols);return b.indicator?<g key={`indicator-${c.id}`} className="radar-indicator"><circle cx={b.cx} cy={b.cy} r={b.indicator.ring.r} fill="none" stroke={b.fill} strokeWidth={b.indicator.ring.thickness}/><polygon points={b.indicator.arrow} fill={b.fill}/></g>:null;})}</svg></div>}
   {hud.spectate&&<SpectatorBoard groups={specGroups} objective={brief?{title:brief.title,line:brief.detail}:null} onFollow={(id:any)=>{const r=runtime.current;if(!r)return;r.spectateTarget=id;r.view.setSpectatorTarget(id);}}/>}
   {hud.spectate?<div className="spectator-tag" role="status" aria-live="polite"><span className="eyebrow">YOU ARE SPECTATING</span><h2>NO SEAT</h2><p>Following {player.name} live. Snapshot feed only — no inputs sent.</p>{!hud.spectateLocal&&<p className="spectator-controls">[ / ] follow · H hide HUD · P third person · ESC lobby</p>}</div>:player.health>0?<><SightReticle ui={ui}/>{marker&&<div className={`hitmarker ${marker}`} role="status" aria-live="polite" aria-label={marker==='kill'?'Elimination confirmed':marker==='critical'?'Critical hit confirmed':'Hit confirmed'}><span/><span/></div>}{reloading&&<div className="reload-indicator" role="status" aria-live="polite" aria-label={`Reloading ${Math.round(reloadFill*100)} percent`}><span className="reload-label">RELOADING</span><span className="reload-track"><i style={{width:`${Math.round(reloadFill*100)}%`}}/></span></div>}{posture&&<div className="posture-chip" role="status">{posture}</div>}</>:<div className="death-message"><span className="eyebrow">CONNECTION LOST</span><h2>RECOMPILING</h2><p>Respawning in {Math.max(1,Math.ceil(player.dead))}…</p></div>}
   {hud.damage&&!hud.spectate&&<div className="damage-vignette"/>}

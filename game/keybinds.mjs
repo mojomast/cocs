@@ -6,6 +6,13 @@ export const DEFAULT_BINDINGS = Object.freeze({
   forward: 'KeyW', back: 'KeyS', left: 'KeyA', right: 'KeyD',
   jump: 'Space', sprint: 'ShiftLeft', crouch: 'ControlLeft',
   reload: 'KeyR', melee: 'KeyF', grenade: 'KeyG', power: 'KeyQ', mobility: 'KeyX', interact: 'KeyE', voice: 'KeyV',
+  // LATTICE STRIKE (`cocs`) V0b order strip. SCAN / GO / ATTACK arm the strip's
+  // three verbs; a node is then picked with the number keys or a click. Bound
+  // like every other action so a player can remap them in Settings.
+  commandScan: 'KeyN', commandGo: 'KeyM', commandAttack: 'KeyP',
+  // O1c command surfaces (design §13.4): the board hold-to-peek, the ping
+  // marker and the order radial. Registered so they are remappable in Settings.
+  command: 'KeyB', ping: 'KeyU', radial: 'KeyK',
 });
 
 export const KEYBIND_ACTIONS = Object.freeze(Object.keys(DEFAULT_BINDINGS));
@@ -18,7 +25,7 @@ const CODE = /^(Key[A-Z]|Digit[0-9]|Arrow(Up|Down|Left|Right)|Space|ShiftLeft|Sh
 
 // The single source of truth for both validation and the settings dropdown, so
 // every accepted binding is representable and no reserved key is offered.
-const EXTRA_CODES = ['KeyH', 'KeyI', 'KeyJ', 'KeyK', 'KeyL', 'KeyM', 'KeyN', 'KeyO', 'KeyP', 'KeyU', 'KeyY', 'KeyZ', 'ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', 'ShiftRight', 'ControlRight', 'AltLeft', 'AltRight', 'Semicolon', 'Quote', 'Comma', 'Period', 'Slash', 'Backquote', 'Minus', 'Equal'];
+const EXTRA_CODES = ['KeyB','KeyH', 'KeyI', 'KeyJ', 'KeyK', 'KeyL', 'KeyM', 'KeyN', 'KeyO', 'KeyP', 'KeyU', 'KeyY', 'KeyZ', 'ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', 'ShiftRight', 'ControlRight', 'AltLeft', 'AltRight', 'Semicolon', 'Quote', 'Comma', 'Period', 'Slash', 'Backquote', 'Minus', 'Equal'];
 export const KEYBIND_OPTIONS = Object.freeze([...new Set([...Object.values(DEFAULT_BINDINGS), ...EXTRA_CODES])].filter(code => !RESERVED.has(code)));
 
 export const isKeybindCode = value => typeof value === 'string' && CODE.test(value) && !RESERVED.has(value);

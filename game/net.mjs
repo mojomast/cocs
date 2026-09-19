@@ -2,7 +2,7 @@ import {getMap} from './maps.mjs';
 import {Match} from './core.mjs';
 import {RULES} from './data.mjs';
 import {clamp, lerp} from './math.mjs';
-import {MESSAGE, PROTOCOL_VERSION, SNAPSHOT_DELTA_VERSION, SNAPSHOT_DELTA_MIN_BYTES, validPlayerId, validProgressToken, snapshotDelta, applySnapshotDelta, wireSize, BandwidthMeter} from './protocol.mjs';
+import {MESSAGE, PROTOCOL_VERSION, SNAPSHOT_DELTA_VERSION, SNAPSHOT_DELTA_MIN_BYTES, COCS_REJECT_LIMIT, validPlayerId, validProgressToken, snapshotDelta, applySnapshotDelta, wireSize, BandwidthMeter} from './protocol.mjs';
 
 export const DEFAULT_SERVER_URL = 'ws://localhost:4000';
 const createPlayerId=()=>{try{return globalThis.crypto?.randomUUID?.()??`p-${Math.random().toString(36).slice(2)}-${Date.now().toString(36)}`;}catch{return `p-${Math.random().toString(36).slice(2)}-${Date.now().toString(36)}`;}};
@@ -84,6 +84,10 @@ export class NetClient {
   this.onClose = null;
   this.onProgression = null;
   this.onVoiceSignal = null;
+  // LATTICE STRIKE reject surface: a refused C→S action never leaves optimistic
+  // client state stuck. `cocsRejects` is the bounded feed, `cocsBlockers` the
+  // per-card blocker reason, and `cocsPending` the optimistic in-flight cards.
+  this.onCocsReject = null;
   this.baseRenderDelay = clamp(Number(options.renderDelay) || RENDER_DELAY_DEFAULT, RENDER_DELAY_MIN, RENDER_DELAY_MAX);
   this.protocolVersion = PROTOCOL_VERSION;
   this.bandwidth = new BandwidthMeter({windowMs: 5000, capacity: 300});
@@ -146,6 +150,10 @@ export class NetClient {
   this.lastError = '';
   this.chatLog = [];
   this.voiceIceServers = [{ urls: 'stun:stun.l.google.com:19302' }];
+  this.cocsRejects = [];
+  this.cocsBlockers = new Map();
+  this.cocsPending = new Map();
+  this.lastCocsReject = null;
  }
  connect(url = this.url) {
   if (url) this.url = url;
@@ -203,6 +211,47 @@ export class NetClient {
  }
    input(input) { const seq=++this.inputSeq,value={...(input||{})};this.pendingInputs.push({seq,input:value});if(this.pendingInputs.length>240)this.pendingInputs.splice(0,this.pendingInputs.length-240);this.send({type:'input',seq,input:value});return seq; }
   chat(text) { this.send({ type: 'chat', text }); }
+  // -------------------------------------------------------------------
+  // LATTICE STRIKE wire actions (§11.2). Each records an optimistic in-flight
+  // card so a `cocs-reject` can clear it; the authoritative snapshot reconciles.
+  // -------------------------------------------------------------------
+  _trackCocs(cardId, kind) {
+   if (cardId === null || cardId === undefined || cardId === '') return null;
+   const id = String(cardId);
+   this.cocsPending.set(id, { cardId: id, kind, at: this._now() });
+   return id;
+  }
+  order(cardId, verb, target, agent) {
+   const id = this._trackCocs(cardId, 'order');
+   return this.send({ type: MESSAGE.ORDER, cardId: id, verb: String(verb ?? '').toUpperCase(), target: String(target ?? ''), ...(agent ? { agent: String(agent) } : {}) });
+  }
+  economy(action, { cardId, role = null, target = null, actorId } = {}) {
+   const id = this._trackCocs(cardId, 'economy');
+   return this.send({
+    type: MESSAGE.ECONOMY, cardId: id, action: String(action ?? '').toLowerCase(),
+    ...(role ? { role: String(role) } : {}),
+    ...(target !== null && target !== undefined ? { target: String(target) } : {}),
+    ...(actorId !== undefined ? { actorId } : {}),
+   });
+  }
+  terminal(terminalId, action, { cardId, actorId } = {}) {
+   const id = this._trackCocs(cardId, 'terminal');
+   return this.send({ type: MESSAGE.TERMINAL, terminalId: String(terminalId ?? ''), action: String(action ?? '').toLowerCase(), ...(id ? { cardId: id } : {}), ...(actorId !== undefined ? { actorId } : {}) });
+  }
+  command(action, value = null, { cardId } = {}) {
+   const id = this._trackCocs(cardId, 'command');
+   return this.send({ type: MESSAGE.COMMAND, action: String(action ?? '').toLowerCase(), ...(value !== null && value !== undefined ? { value } : {}), ...(id ? { cardId: id } : {}) });
+  }
+  buy(itemId, { depotId, targetCardId, cardId, actorId } = {}) {
+   const id = this._trackCocs(cardId, 'buy');
+   return this.send({
+    type: MESSAGE.BUY, itemId: String(itemId ?? ''),
+    ...(depotId ? { depotId: String(depotId) } : {}),
+    ...(targetCardId ? { targetCardId: String(targetCardId) } : {}),
+    ...(id ? { cardId: id } : {}),
+    ...(actorId !== undefined ? { actorId } : {}),
+   });
+  }
  onMessage(data) {
   let msg;
   try { msg = JSON.parse(data); } catch { return; }
@@ -245,6 +294,9 @@ export class NetClient {
      this.buffer = [];
      this.snapshotSeq = 0;
      this.events = [];
+     this.cocsRejects = [];
+     this.cocsBlockers.clear();
+     this.cocsPending.clear();
      this.state = null;
      this.inputSeq = 0;
      this.pendingInputs = [];
@@ -263,7 +315,16 @@ export class NetClient {
     break;
     case MESSAGE.SNAPSHOT: this.push(msg); break;
     case MESSAGE.SNAPSHOT_DELTA: this.pushDelta(msg); break;
-     case MESSAGE.PROGRESSION: this.progression = msg.profile ?? this.progression; this.onProgression?.(msg); break;
+     case MESSAGE.COCS_REJECT: {
+     this.lastCocsReject = msg;
+     const id = msg.cardId === null || msg.cardId === undefined ? null : String(msg.cardId);
+     if (id !== null) { this.cocsBlockers.set(id, msg); this.cocsPending.delete(id); }
+     this.cocsRejects.push(msg);
+     if (this.cocsRejects.length > COCS_REJECT_LIMIT) this.cocsRejects.splice(0, this.cocsRejects.length - COCS_REJECT_LIMIT);
+     this.onCocsReject?.(msg);
+     break;
+    }
+      case MESSAGE.PROGRESSION: this.progression = msg.profile ?? this.progression; this.onProgression?.(msg); break;
      case MESSAGE.RESULTS: this.roundOver = true; this.state = msg.state; this.onResults?.(msg); break;
     case MESSAGE.CHAT:
      this.chatLog.push(msg);
@@ -287,6 +348,7 @@ export class NetClient {
    while (this.buffer.length > this.bufferTarget) this.buffer.shift();
   this.state = msg.state;
    this._rememberBase(msg);
+   this._reconcileCocs(msg.state);
    const actors = Array.isArray(msg.state?.actors) ? msg.state.actors.filter(a => a && typeof a === 'object') : [];
    if (msg.state?.race) {
     // Race IDs, inventory and standings belong exclusively to the server.
@@ -315,6 +377,20 @@ export class NetClient {
   }
   _now() {
    try { return performance.now(); } catch { return 0; }
+  }
+  // Reconcile optimistic LATTICE STRIKE cards against the authoritative
+  // snapshot: a card the server has accepted (running/done) is no longer
+  // pending, and a blocked card records its reason locally.
+  _reconcileCocs(state) {
+   const cards = state?.cocs?.cards;
+   if (!Array.isArray(cards) || !this.cocsPending.size) return;
+   for (const card of cards) {
+    if (!card || card.id === undefined || card.id === null) continue;
+    const id = String(card.id);
+    if (!this.cocsPending.has(id)) continue;
+    if (card.state === 'blocked') { this.cocsBlockers.set(id, { cardId: id, reason: card.blocker ?? card.reason ?? 'blocked' }); continue; }
+    this.cocsPending.delete(id);
+   }
   }
   // Keep a bounded map of sequence -> authoritative state so a later delta can
   // be reconstructed. Only full snapshots become bases.
@@ -411,7 +487,10 @@ export class NetClient {
  }
   createShadow(mapId, config, loadout) {
     const character = loadout?.character ?? 'chatgpt', harness = loadout?.harness ?? 'openclaw';
-    this.shadow = isVehicleMode(config?.mode) ? null : new Match(character, harness, Math.random, getMap(mapId).id, { ...(config || {}), humanCount: 1, botCount: 0, ...(loadout ? { loadouts: { 0: loadout } } : {}) });
+    // M0 §4: the prediction shadow never pathfinds, so skip the 0.1 m nav flood
+    // (respawn/reconnect included). The floor lattice is still baked by Match,
+    // so moveActor/ray prediction stays on the fast path.
+    this.shadow = isVehicleMode(config?.mode) ? null : new Match(character, harness, Math.random, getMap(mapId).id, { ...(config || {}), humanCount: 1, botCount: 0, skipNav: true, ...(loadout ? { loadouts: { 0: loadout } } : {}) });
    this.resynced = false;
    this.inputSeq = 0;
    this.pendingInputs = [];
