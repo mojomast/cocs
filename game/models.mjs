@@ -582,7 +582,9 @@ function sculptOperator(robot){
   for(const n of joint?.children||[]){
    if(n.geometry?.type==='CapsuleGeometry'){
     const p=n.geometry.parameters;
-    replaceOperatorGeometry(robot,n,operatorGeometry(`limb-${p.radius}-${p.length}`,()=>new T.CapsuleGeometry(p.radius,p.length,4,16)));
+    // Three r185 stores the straight section as height, not length. Preserve
+    // it in both construction and the key (upper arm/shin share a radius).
+    replaceOperatorGeometry(robot,n,operatorGeometry(`limb-${p.radius}-${p.height}`,()=>new T.CapsuleGeometry(p.radius,p.height,4,16)));
    }else if(n.geometry?.type==='BoxGeometry'){
     const p=n.geometry.parameters;
     replaceOperatorGeometry(robot,n,operatorGeometry(`plate-${p.width}-${p.height}-${p.depth}`,()=>beveledBox(p.width,p.height,p.depth,.008,2)));
@@ -611,7 +613,7 @@ function installOperatorLOD(robot){
   for(let p=n;p&&p!==robot;p=p.parent)if(p.userData.weapon)return;
   const p=n.geometry.parameters,type=n.geometry.type;
   let make,key;
-  if(type==='CapsuleGeometry'){key=`capsule-${p.radius}-${p.length}`;make=()=>new T.CapsuleGeometry(p.radius,p.length,2,8);}
+  if(type==='CapsuleGeometry'){key=`capsule-${p.radius}-${p.height}`;make=()=>new T.CapsuleGeometry(p.radius,p.height,2,8);}
   else if(type==='SphereGeometry'&&p.widthSegments>8){key=`sphere-${p.radius}`;make=()=>new T.SphereGeometry(p.radius,8,6);}
   else if(type==='ContourGeometry'){key=`contour-${JSON.stringify(p.sections)}-${p.power}`;make=()=>contourGeometry(p.sections,{segments:12,power:p.power});}
   else if(type==='BeveledBoxGeometry'&&p.segments>1){key=`bevel-${p.width}-${p.height}-${p.depth}-${p.radius}`;make=()=>beveledBox(p.width,p.height,p.depth,p.radius,1);}

@@ -37,6 +37,43 @@ test('native distance LOD preserves joints, material references and returns to t
  assets.dispose();
 });
 
+test('authored limb dimensions and whole-body bounds survive near, far and software capsule reconstruction',()=>{
+ // Independent dimensions from the robot rig's authored upper/forearm/thigh/
+ // shin primitives. Three r185 calls the straight middle section `height`;
+ // passing an absent parameter silently constructs a one-metre section.
+ const authored={armUpper:[.082,.20],forearm:[.068,.19],legUpper:[.10,.25],legLower:[.082,.23]};
+ const assets=new ModelAssets();
+ for(const c of CHARACTERS)for(const software of [false,true]){
+  const model=robotModel(c.id,assets,software),j=model.userData.joints;
+  for(const distance of [5,50]){
+   selectModelLOD(model,{distance,detail:distance<18?1:0});
+   for(const [limb,[radius,height]] of Object.entries(authored))for(const side of ['L','R']){
+    const joint=j[`${limb}${side}`],lod=joint.children.find(n=>n.isLOD&&n.levels[0].object.geometry.type==='CapsuleGeometry');
+    assert.ok(lod,`${c.id} ${limb}${side}: capsule stays on its articulation joint`);
+    assert.equal(lod.levels.filter(level=>level.object.visible).length,1);
+    for(const {object:mesh} of lod.levels){
+     const g=mesh.geometry;g.computeBoundingBox();const size=g.boundingBox.getSize(new T.Vector3());
+     const label=`${c.id} ${limb}${side}, distance=${distance}, software=${software}, radial=${g.parameters.radialSegments}`;
+     assert.equal(g.parameters.height,height,`${label}: authored straight-section height`);
+     assert.equal(g.parameters.radius,radius,`${label}: authored radius`);
+     assert.ok(Math.abs(size.y-(height+radius*2))<1e-6,`${label}: full capsule bounds include two hemispheres`);
+     assert.ok(Math.abs(size.x-radius*2)<1e-6&&Math.abs(size.z-radius*2)<1e-6,`${label}: subdivision does not inflate limb girth`);
+     assert.deepEqual(mesh.scale.toArray(),[1,1,1],`${label}: dimensions are not concealed by corrective scaling`);
+    }
+   }
+   // The upper arm and shin share a radius, but have different heights. Cache
+   // keys must distinguish them for both subdivisions, across the whole roster.
+   const capsule=joint=>joint.children.find(n=>n.isLOD&&n.levels[0].object.geometry.type==='CapsuleGeometry');
+   for(let level=0;level<2;level++)assert.notEqual(capsule(j.armUpperL).levels[level].object.geometry,capsule(j.legLowerL).levels[level].object.geometry);
+   const bounds=new T.Box3().setFromObject(j.root,true);
+   assert.ok(bounds.min.y>=-.004,`${c.id}: no body mesh protrudes below the planted soles (${bounds.min.y})`);
+   assert.ok(bounds.max.y<2.1,`${c.id}: body and harness remain within the authored standing envelope (${bounds.max.y})`);
+  }
+  ArenaView.prototype.disposeObject.call({sharedResources:assets.resources},model);
+ }
+ assets.dispose();
+});
+
 test('32-actor assembled roster and all weapon bodies stay inside deliberate draw/triangle budgets',()=>{
  const report=measureLatticeModels();
  for(const row of report.operators){assert.ok(row.near.drawObjects<=65);assert.ok(row.near.triangles<13000);assert.ok(row.distantLow.triangles<7100);}
