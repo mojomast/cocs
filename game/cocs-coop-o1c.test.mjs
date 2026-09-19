@@ -258,10 +258,30 @@ test('terminals expose HACK/DEPLOY/VAULT/SABOTAGE lifecycles and a snapshot', ()
   for (let i = 0; i < ticks(3) + 3 && sit.state !== 'cut'; i++) { pin(m, actor, relay.x, relay.z); m.step(DT, {inputs: {}}); }
   assert.equal(sit.state, 'cut');
   assert.ok(state.cuts.includes('relay-0'), 'the cut denies the relay link');
-  // The snapshot carries the id-keyed terminal tree.
+  // The snapshot exposes the flat UI contract array (id-sorted) and keeps the
+  // raw id-keyed tree available on `terminalState`.
   const snap = cocsSnapshot(m);
-  assert.ok(Array.isArray(snap.terminals.terminals));
-  assert.ok(snap.terminals.terminals.some(entry => entry.id === 'hack-relay-0'));
+  assert.ok(Array.isArray(snap.terminals), 'the cocs snapshot exposes a flat terminal array');
+  const sabotageEntry = snap.terminals.find(entry => entry.id === 'sabotage-relay-0');
+  assert.equal(sabotageEntry.state, 'blocked', 'a cut terminal maps to the blocked UI state');
+  assert.equal(sabotageEntry.simState, 'cut', 'the raw sim state is preserved');
+  assert.ok(snap.terminals.some(entry => entry.id === 'hack-relay-0'));
+  for (const entry of snap.terminals) {
+    for (const key of ['id', 'kind', 'nodeId', 'label', 'state', 'owner', 'progress', 'remainingSeconds', 'actor', 'hint']) {
+      assert.ok(Object.hasOwn(entry, key), `terminal entry carries ${key}`);
+    }
+  }
+  assert.ok(Array.isArray(snap.terminalState?.terminals), 'the raw id-keyed terminal tree stays available');
+  assert.ok(snap.terminalState.terminals.some(entry => entry.id === 'hack-relay-0'));
+  // A running channel surfaces as `active` with live progress on the UI array.
+  assert.equal(terminalInteract(m, state, actor.id, 'hack-relay-0', 'HACK').ok, true);
+  pin(m, actor, relay.x, relay.z);
+  m.step(DT, {inputs: {}});
+  const active = cocsSnapshot(m).terminals.find(entry => entry.id === 'hack-relay-0');
+  assert.equal(active.state, 'active', 'a running channel reads active');
+  assert.equal(active.actor, actor.id, 'the channel actor is surfaced');
+  assert.ok(active.progress > 0 && active.progress < 1, 'progress advances with the channel');
+  assert.ok(active.remainingSeconds > 0 && active.remainingSeconds <= 3, 'remaining seconds are exposed');
 });
 
 test('the HACK window doubles capture progress and expires on the tick clock', () => {
@@ -471,8 +491,23 @@ test('O1c terminals/roles/command stay out of PvPvE `cocs` snapshots', () => {
   const coop = coopMatch({seed: 41});
   step(coop, 30);
   const coopSnap = cocsSnapshot(coop);
-  assert.ok(coopSnap.terminals && Array.isArray(coopSnap.terminals.terminals));
+  assert.ok(Array.isArray(coopSnap.terminals) && coopSnap.terminals.length > 0, 'co-op exposes the flat terminal array');
+  assert.ok(coopSnap.coop && Array.isArray(coopSnap.terminalState?.terminals), 'the raw id-keyed tree stays available as terminalState');
   assert.ok(coopSnap.command && coopSnap.command.lease, 'command.lease is exposed additively');
   assert.ok(Array.isArray(coopSnap.command.slices));
   assert.ok(coopSnap.roles && coopSnap.roles.threads, 'the role/thread tree is exposed');
+});
+
+test('the co-op snapshot feeds the terminal/role UI views end to end', async () => {
+  const {cocsTerminalView} = await import('./cocs-orders.mjs');
+  const m = coopMatch({seed: 67});
+  step(m, 2);
+  const snap = cocsSnapshot(m);
+  const view = cocsTerminalView(snap, {id: 0, team: 0}, {nodes: [], front: null, hint: null});
+  assert.equal(view.hasTerminals, true, 'the terminal panel lights up from the sim snapshot');
+  assert.ok(view.terminals.length > 0);
+  assert.equal(view.terminals.every(terminal => terminal.kindMark.length > 0 && terminal.stateLabel.length > 0), true);
+  assert.equal(view.hasRoles, true, 'the W21 role object normalizes into entries');
+  assert.deepEqual(view.roles.map(role => role.id).sort(), ['builder', 'fighter', 'harvester', 'scout']);
+  assert.equal(view.roles.every(role => role.label.length > 0 && role.stateLabel.length > 0), true);
 });

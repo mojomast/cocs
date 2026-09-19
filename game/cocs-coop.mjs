@@ -35,7 +35,7 @@ import {
   directorSpend, siegeShouldArm, siegeShouldLift,
 } from './cocs-director.mjs';
 import {COOP_ROLES, coopRole, roleAbility, roleAbilityTargets} from './cocs-roles.mjs';
-import {repairTerminal} from './cocs-terminals.mjs';
+import {TERMINAL_KINDS, repairTerminal} from './cocs-terminals.mjs';
 
 export const COOP_KIND = 'cocs-coop';
 export const NPC_DEAD = 1e9;
@@ -1785,6 +1785,79 @@ export function cocsDirectorSnapshot(match, state) {
   };
 }
 
+// ---------------------------------------------------------------------------
+// O1c terminal HUD contract. The objective tree keeps terminals in
+// `state.terminals.terminals` (id-keyed); the UI reads a flat array at
+// `snapshot.cocs.terminals`. Each entry keeps every raw field and adds the
+// presentation contract `{id, kind, nodeId, label, state, owner, progress,
+// remainingSeconds, actor, hint}`. `state` is the UI state (`active` while a
+// channel runs, `blocked`/`locked` for cut/locked, `complete` when finished,
+// else `available`); the sim state is preserved as `simState`.
+// ---------------------------------------------------------------------------
+const COCS_TERMINAL_HINTS = Object.freeze({
+  HACK: 'HACK THE RELAY',
+  DEPLOY: 'DEPLOY THE ORACLE',
+  VAULT: 'CRACK THE VAULT',
+  SABOTAGE: 'CUT THE SUPPLY LINK',
+});
+
+function cocsTerminalUiState(terminal) {
+  if (terminal?.channel) return 'active';
+  const sim = String(terminal?.state ?? 'live').toLowerCase();
+  if (sim === 'cut') return 'blocked';
+  if (sim === 'locked') return 'locked';
+  if (sim === 'complete' || sim === 'done') return 'complete';
+  return 'available';
+}
+
+/** UI-contract array for `state.terminals.terminals` (id-sorted, delta-friendly). */
+export function coopTerminalSnapshot(state) {
+  const terminals = state?.terminals?.terminals;
+  if (!terminals) return [];
+  return Object.keys(terminals).sort().map(id => {
+    const terminal = terminals[id];
+    const kind = String(terminal.kind ?? '').toUpperCase();
+    const def = TERMINAL_KINDS[kind] ?? null;
+    const channel = terminal.channel ? {
+      actor: terminal.channel.actor ?? null,
+      action: terminal.channel.action ?? null,
+      remaining: Math.round(num(terminal.channel.remaining, 0) * 10) / 10,
+      total: Math.round(num(terminal.channel.total, 0) * 10) / 10,
+    } : null;
+    const total = num(terminal.channel?.total, 0);
+    const progress = terminal.channel && total > 0
+      ? clamp01(1 - num(terminal.channel.remaining, 0) / total)
+      : 0;
+    return {
+      // --- UI contract -----------------------------------------------------
+      id: String(id),
+      kind,
+      nodeId: terminal.nodeId ?? null,
+      label: def?.label ?? kind,
+      state: cocsTerminalUiState(terminal),
+      owner: terminal.owner === 0 || terminal.owner === 1 ? Number(terminal.owner) : null,
+      progress,
+      progressPercent: Math.round(progress * 100),
+      remainingSeconds: Math.round(num(channel ? channel.remaining : terminal.timer, 0) * 10) / 10,
+      actor: channel?.actor ?? null,
+      hint: COCS_TERMINAL_HINTS[kind] ?? 'USE TERMINAL',
+      // --- raw fields preserved (the sim tree is untouched) ----------------
+      simState: String(terminal.state ?? 'live'),
+      x: Math.round(num(terminal.x, 0) * 1000) / 1000,
+      z: Math.round(num(terminal.z, 0) * 1000) / 1000,
+      timer: Math.round(num(terminal.timer, 0) * 1000) / 1000,
+      channel,
+      hackedTeam: terminal.hackedTeam ?? null,
+      deployedTeam: terminal.deployedTeam ?? null,
+      uses: num(terminal.uses, 0),
+      hacks: num(terminal.hacks, 0),
+      deploys: num(terminal.deploys, 0),
+      sabotages: num(terminal.sabotages, 0),
+      repairs: num(terminal.repairs, 0),
+    };
+  });
+}
+
 export function cocsCoopSnapshot(match, state) {
   const coop = state?.coop;
   if (!coop) return null;
@@ -1815,6 +1888,9 @@ export function cocsCoopSnapshot(match, state) {
       flux: command.flux,
       spent: {...(coop.commandSpent ?? {byPeer: {}}).byPeer},
     } : null,
+    // O1c terminal HUD contract (flat array; raw tree preserved on
+    // `snapshot.cocs.terminalState`). Sorted by id, so delta-friendly.
+    terminals: coopTerminalSnapshot(state),
     // O1c subagent roles + ability telemetry (additive).
     roles: {
       threads: {used: command ? command.threads.used : 0, cap: command ? command.threads.cap : 0},

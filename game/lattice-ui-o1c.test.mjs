@@ -339,6 +339,47 @@ test('the O1c captions route through audioCaption', async () => {
   assert.equal(audioCaption({type: 'not-a-real-event'}), null);
 });
 
+test('the role surface normalizes the W21 object shape into UI entries', () => {
+  const snapshot = {
+    roles: {
+      threads: {used: 2, cap: 5},
+      byRole: {fighter: 3, harvester: 1, builder: 0, scout: 0},
+      spawned: 4,
+      stats: {primes: 1, primeCompletions: 1, rallies: 0, repairs: 0, spots: 0},
+      agents: [
+        {id: 4, role: 'fighter', team: 0, health: 120, max: 160, nodeId: 'front-0', idle: false},
+        {id: 5, role: 'fighter', team: 0, health: 80, max: 160, nodeId: 'front-0', idle: true},
+        {id: 6, role: 'harvester', team: 0, health: 90, max: 90, nodeId: null, idle: false},
+      ],
+    },
+  };
+  const view = cocsTerminalView(snapshot, {id: 0, team: 0}, sampleBoard());
+  assert.equal(view.hasRoles, true);
+  assert.equal(view.roles.length, 4, 'one entry per role');
+  const fighter = view.roles.find(role => role.id === 'fighter');
+  assert.equal(fighter.label, 'FIGHTER');
+  assert.equal(fighter.mark, '⚔');
+  assert.equal(fighter.count, 2, 'live fighter agents');
+  assert.equal(fighter.cap, 3, 'the cumulative byRole tally');
+  assert.equal(fighter.state, 'active');
+  assert.ok(fighter.detail.includes('2 LIVE'));
+  const harvester = view.roles.find(role => role.id === 'harvester');
+  assert.equal(harvester.count, 1);
+  assert.equal(harvester.state, 'active');
+  const builder = view.roles.find(role => role.id === 'builder');
+  assert.equal(builder.count, 0);
+  assert.equal(builder.cap, 0);
+  assert.equal(builder.state, 'ready');
+  assert.equal(builder.stateLabel, 'READY');
+  assert.equal(builder.mark, '⚒');
+  // An explicit array still passes straight through (the W22 contract).
+  const explicit = cocsTerminalView({roles: [{id: 'builder', label: 'builder', mark: '⚒', state: 'active', stateLabel: 'ACTIVE', count: 1, cap: 2}]}, {id: 0, team: 0}, sampleBoard());
+  assert.equal(explicit.roles[0].label, 'BUILDER');
+  assert.equal(explicit.roles[0].mark, '⚒');
+  assert.equal(explicit.roles[0].count, 1);
+  assert.equal(explicit.roles[0].cap, 2);
+});
+
 test('the spend cost constant stays pinned to the SCAN price', () => {
   assert.equal(COCS_SCAN_COST, 7);
 });

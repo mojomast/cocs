@@ -605,6 +605,9 @@ const COCS_AGENT_LABELS = Object.freeze({
   scrapper: 'SCRAPPER', adept: 'ADEPT', oracle: 'ORACLE',
   scout: 'SCOUT', fighter: 'FIGHTER', harvester: 'HARVESTER', builder: 'BUILDER', saboteur: 'SABOTEUR', chief: 'CHIEF',
 });
+// §8.1 role glyphs for the synthesized (object-shaped) role surface. An
+// explicit array keeps whatever mark it carries.
+const COCS_ROLE_MARKS = Object.freeze({fighter: '⚔', harvester: '⛏', builder: '⚒', scout: '⌖'});
 const COCS_BOARD_STATUS_IDS = Object.freeze(['queued', 'running', 'blocked', 'done']);
 const COCS_BOARD_BLOCKER_IDS = Object.freeze(Object.keys(COCS_BLOCKER_LABELS));
 const COCS_TERMINAL_KINDS = Object.freeze({
@@ -964,10 +967,57 @@ function cocsTerminalList(snapshot) {
   return [];
 }
 function cocsRoleList(snapshot) {
-  for (const candidate of [snapshot?.roles, snapshot?.coop?.roles, snapshot?.command?.roles, snapshot?.director?.roles]) {
+  const candidates = [snapshot?.roles, snapshot?.coop?.roles, snapshot?.command?.roles, snapshot?.director?.roles];
+  for (const candidate of candidates) {
     if (Array.isArray(candidate) && candidate.length) return candidate;
   }
+  // W21 publishes roles as an object `{threads, byRole, spawned, stats, agents}`.
+  // Synthesize the flat UI list from it so the panel is never dark.
+  for (const candidate of candidates) {
+    const normalized = cocsRolesFromObject(candidate);
+    if (normalized.length) return normalized;
+  }
   return [];
+}
+
+/**
+ * Normalize the object-shaped role surface into the UI's `{id,label,mark,state,
+ * stateLabel,count,cap,detail}` entries: one per role, live `agents` supplying
+ * `count` and the cumulative `byRole` tally supplying `cap`. Pure and sorted.
+ */
+function cocsRolesFromObject(roles) {
+  if (!roles || typeof roles !== 'object') return [];
+  const agents = Array.isArray(roles.agents) ? roles.agents.filter(Boolean) : [];
+  const byRole = roles.byRole && typeof roles.byRole === 'object' ? roles.byRole : {};
+  const ids = [];
+  for (const id of Object.keys(byRole)) if (!ids.includes(id)) ids.push(id);
+  for (const agent of agents) {
+    const id = String(agent.role ?? '');
+    if (id && !ids.includes(id)) ids.push(id);
+  }
+  ids.sort((a, b) => String(a).localeCompare(String(b)));
+  return ids.map(id => {
+    const live = agents.filter(agent => String(agent.role) === id && num(agent.health, 0) > 0);
+    const count = live.length;
+    const spawned = Math.max(count, Math.floor(num(byRole[id], count)));
+    const idle = count > 0 && live.every(agent => agent.idle === true);
+    const state = count > 0 ? (idle ? 'idle' : 'active') : spawned > 0 ? 'down' : 'ready';
+    const nodes = [...new Set(live.map(agent => agent.nodeId).filter(value => value !== null && value !== undefined))].sort((a, b) => String(a).localeCompare(String(b)));
+    const detail = state === 'active' ? `${count} LIVE${nodes.length ? ` · ${nodes[0]}` : ''}`
+      : state === 'idle' ? `${count} IDLE`
+        : state === 'down' ? 'REBUILDING'
+          : '';
+    return {
+      id,
+      label: COCS_AGENT_LABELS[id] ?? id.toUpperCase(),
+      mark: COCS_ROLE_MARKS[id] ?? '◆',
+      state,
+      stateLabel: state.toUpperCase(),
+      count,
+      cap: spawned,
+      detail,
+    };
+  });
 }
 const cocsTerminalKind = kind => COCS_TERMINAL_KINDS[String(kind ?? '').toUpperCase()] ?? {label: String(kind ?? 'TERMINAL').toUpperCase(), mark: '◆', prompt: 'USE TERMINAL'};
 const cocsTerminalState = state => COCS_TERMINAL_STATES[String(state ?? '').toLowerCase()] ?? {label: String(state ?? 'LOCKED').toUpperCase(), mark: '▣'};

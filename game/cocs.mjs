@@ -1139,7 +1139,9 @@ export function cocsSnapshot(match) {
     // --- §6A traversal devices/depots (V0b) --------------------------------
     traversal: cocsTraversalSnapshot(state),
     // --- O1c terminals (co-op only; absent in PvPvE) ------------------------
-    ...(state.terminals ? {terminals: cocsTerminalsSnapshot(state)} : {}),
+    // The UI reads the flat `terminals` array from `cocsCoopSnapshot`; the raw
+    // id-keyed tree stays available as `terminalState` (vault + stats included).
+    ...(state.terminals ? {terminalState: cocsTerminalsSnapshot(state)} : {}),
     // --- OPERATIONS (`cocs-coop`) director surface --------------------------
     ...(state.coop ? cocsCoopSnapshot(match, state) : {}),
   };
