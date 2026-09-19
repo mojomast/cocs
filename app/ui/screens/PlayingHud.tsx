@@ -58,6 +58,7 @@ function CocsReadout({command,teamName,player}:{command:any;teamName:(team:any)=
    {command.coach&&<div className="lattice-coach" role="status"><b>{command.coach.title}</b><p>{command.coach.detail}</p></div>}
    {command.coach&&<details className="lattice-map-details"><summary>SUPPLY MAP · NEXT OBJECTIVE</summary><LatticeTactical coach={command.coach}/></details>}
    <details className="lattice-kit-details"><summary>YOUR FIELD ROLE · {fieldRole.operator.role.toUpperCase()}</summary><b>{fieldRole.operator.name}</b><p>{fieldRole.operator.description}</p><b>{command.keys?.power??'Q'} · {fieldRole.harness.name}</b><p>{fieldRole.harness.description}</p></details>
+   {(command.terminals?.hasTerminals||command.terminals?.hasRoles)&&<details className="lattice-terminal-details"><summary>TERMINALS &amp; SUPPORT ROLES</summary><CocsTerminalsHud terminals={command.terminals} reducedMotion/></details>}
   <div className="cocs-readout__scores" aria-label={`Objective score: ${teamName(0)} ${amount(board.scores[0])}, ${teamName(1)} ${amount(board.scores[1])}`}>
    <span className={board.leader===0?'is-lead':''}>{teamName(0)} <b>{amount(board.scores[0])}</b></span>
    <span className="cocs-readout__op" aria-hidden="true">OP</span>
@@ -167,7 +168,6 @@ export function PlayingHud({ui}:ScreenProps){
    {cocsCommand&&!hud.spectate&&<CocsReadout command={cocsCommand} teamName={teamName} player={player}/>}
   {cocsCommand?.spend&&!hud.spectate&&<SpendWindowHud spend={cocsCommand.spend} onSpend={cocsCommand.spendCocs} reducedMotion={reducedMotion()}/>}
   {cocsCommand?.boardView&&!hud.spectate&&<CommandBoardHud command={cocsCommand} open={cocsCommand.boardOpen===true} collapsed={cocsCommand.boardCollapsed===true} pinned={cocsCommand.boardPinned===true} activeId={cocsCommand.boardActive} reducedMotion={reducedMotion()} onSelect={cocsCommand.selectBoardCard} onActivate={cocsCommand.activateBoardCard} onClose={cocsCommand.closeBoard} onTogglePin={cocsCommand.toggleBoardPin}/>}
-  {cocsCommand?.terminals&&!hud.spectate&&<CocsTerminalsHud terminals={cocsCommand.terminals} reducedMotion={reducedMotion()}/>}
   {cocsCommand?.director&&!hud.spectate&&<OperationsDirectorHud director={cocsCommand.director}/>}
   {hud.spectate&&hud.net&&runtime.current&&<button type="button" className="spectator-return" onClick={()=>changeMode('lobby')}>RETURN TO LOBBY</button>}
   {hud.spectateLocal&&runtime.current&&<div className="spectate-cam-panel" role="status"><span className="eyebrow">SPECTATE BOTS</span><strong>{(CAMERA_MODE_LABELS as any)[runtime.current?.cameraMode]||String(runtime.current?.cameraMode||'auto').toUpperCase()}</strong><small>B CYCLE CAMERA · [ / ] FOLLOW BOT · F FREE CAM{runtime.current?.cameraMode==='free'?' · WASD / SPACE / SHIFT / CTRL':''}</small></div>}

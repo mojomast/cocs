@@ -19,6 +19,21 @@
 .lattice-loadout-role b{font-size:14px;color:var(--accent-soft)}
 .lattice-loadout-role p,.lattice-kit-details p{margin:4px 0;font:12px/1.5 var(--font-ui);color:var(--text-dim)}
 .lattice-kit-details b{font:700 11px var(--font-mono);color:var(--accent-soft)}
+.lattice-hud .lattice-terminal-details .cocs-terminals{position:static;width:100%;padding:6px 0;box-shadow:none;border:0;background:none}
+.lattice-hud .director-readout{position:absolute;top:calc(var(--safe-top) + 290px);right:var(--safe-right);width:min(270px,32vw);max-height:calc(100dvh - 455px);overflow:auto;pointer-events:auto;padding:12px;border:1px solid var(--border);border-right:3px solid var(--warn);border-radius:8px;background:#07171eef;color:var(--text);font:11px/1.5 var(--font-mono);scrollbar-width:thin}
+.director-readout__head{display:grid;gap:5px}
+.director-readout__head .eyebrow{font-size:10px;letter-spacing:.08em}
+.director-readout__wave{font-size:14px;font-weight:800;color:var(--warn)}
+.director-readout p{margin:6px 0;color:var(--text-dim)}
+.director-readout__meter,.director-readout__hq-track{display:block;height:5px;overflow:hidden;border-radius:3px;background:#233939;margin:8px 0}
+.director-readout__meter i,.director-readout__hq-track i{display:block;height:100%;background:var(--accent)}
+.director-readout__hq{padding:8px;border:1px solid var(--border);border-radius:4px;margin-top:8px}
+.director-readout__hq.is-siege{border-color:var(--danger);color:var(--warn)}
+.director-readout__hq.is-siege .director-readout__hq-track i{background:var(--danger)}
+.director-readout summary{cursor:pointer;min-height:36px;align-content:center;font-size:10px;color:var(--accent-soft)}
+.director-readout__copy small{display:block}
+.director-readout__sinks{padding-left:16px}
+@media(max-width:760px){.lattice-hud .director-readout{top:calc(var(--safe-top) + 205px);width:calc(100vw - 230px);min-width:135px;padding:7px;font-size:9px;max-height:calc(100dvh - 390px)}.director-readout__wave{font-size:11px}}
 .cocs-readout{max-height:calc(100dvh - 270px);overflow:auto;overscroll-behavior:contain;scrollbar-width:thin;pointer-events:auto}
 .cocs-readout .cocs-readout__own,.cocs-readout .cocs-readout__hint{display:none}
 .cocs-readout .cocs-readout__rung{font-size:10px}

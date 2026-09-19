@@ -50,6 +50,7 @@ export function OperationsDirectorHud({director}: {director: any}) {
         <span className="director-readout__hq-value">{whole(siege.health)}/{whole(siege.max)}</span>
         {siege.armed && <small>{siege.attackers} ATK · {siege.defenders} DEF</small>}
       </div>
+      <details><summary>WAVE DETAILS &amp; MODIFIERS</summary>
       {(director.command || director.retarget) && <p className="director-readout__aux">
         {director.retarget ? `TARGET ${director.retarget.nodeId} · ` : ''}
         {executor !== undefined && executor !== null ? `EXECUTOR ${executor} · ` : ''}
@@ -67,6 +68,7 @@ export function OperationsDirectorHud({director}: {director: any}) {
           </li>)}
         </ul>
       </div>}
+      </details>
     </section>
   );
 }
