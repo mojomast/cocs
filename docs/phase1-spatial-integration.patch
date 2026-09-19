@@ -23,6 +23,9 @@
 +   }
     // Next-gen maps keep these as invisible collision proxies and draw smooth geometry in buildNextGen.
     if(arena.nextGen===true&&NEXTGEN_PROXY.has(b.kind)){body.visible=false;continue;}
+    // Foundry has its own restrained copper/ceramic kit pass below; stacking the
+    // legacy full-height panels over it obscures doors and doubles the art bill.
+    if(arena.foundry)continue;
     // Keep the complete collision box visible: rock fractures and armor are surface treatments.
 @@ -983,10 +990,15 @@
    const mesh=(g,m,x,y,z,rx=0,ry=0,rz=0)=>{const o=new T.Mesh(g,m);o.position.set(x,y,z);o.rotation.set(rx,ry,rz);o.castShadow=true;o.receiveShadow=true;world.add(o);return o;};
