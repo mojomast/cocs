@@ -15,6 +15,9 @@
 .lattice-coach{padding:8px;border:1px solid var(--border-strong);border-radius:5px;background:#15312d}
 .lattice-coach b{font:700 11px/1.4 var(--font-mono);color:var(--accent-soft)}
 .lattice-coach p{margin:5px 0 0;font:12px/1.45 var(--font-ui);color:var(--text)}
+.lattice-interaction-hint{position:absolute;left:50%;top:calc(50% + 72px);transform:translateX(-50%);display:flex;align-items:center;gap:10px;max-width:80vw;padding:9px 12px;border:1px solid var(--accent);border-radius:7px;background:#071b20ed;color:var(--text);box-shadow:0 3px 20px #0006;pointer-events:none}
+.lattice-interaction-hint kbd{display:grid;place-items:center;min-width:32px;min-height:32px;border:1px solid var(--accent);border-radius:4px;font:800 18px var(--font-mono);color:var(--accent)}
+.lattice-interaction-hint span{display:grid;gap:4px}.lattice-interaction-hint b{font:700 12px var(--font-mono)}.lattice-interaction-hint small{font:9px var(--font-mono);color:var(--text-dim)}
 .lattice-loadout-role{display:grid;gap:5px;margin-top:10px;padding:12px;border:1px solid var(--border-strong);border-radius:6px;background:#12312b80}
 .lattice-loadout-role b{font-size:14px;color:var(--accent-soft)}
 .lattice-loadout-role p,.lattice-kit-details p{margin:4px 0;font:12px/1.5 var(--font-ui);color:var(--text-dim)}
