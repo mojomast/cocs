@@ -6,8 +6,13 @@ import {awardMatch,defaultProgression,matchSummaryCard,normalizeGear,normalizePr
 import {normalizeAttachments} from '../game/attachments.mjs';
 import {FINISH_IDS} from '../game/cosmetics.mjs';
 import {validPlayerId,validProgressToken} from '../game/protocol.mjs';
+import {MAX_DELTA,PLACEMENT_MATCHES,clampRating,defaultLadderRecord,normalizeLadderRecord,rankFor} from '../game/ranked.mjs';
 
 export const PLAYER_CAP=500;
+// How many settled match ids the ladder store remembers for the exactly-once
+// guard. A server restart cannot replay an in-memory room, so this is a
+// belt-and-braces bound: recent settlements survive a reload, older ids age out.
+export const LADDER_SETTLEMENT_CAP=512;
 export {validPlayerId,validProgressToken};
 const newToken=()=>randomBytes(24).toString('hex');
 
@@ -75,6 +80,9 @@ export class ProgressionStore{
   this._retryAt=0;
   this._failures=0;
   this.lastPersistError=null;
+  this.ladder=new Map();
+  this.ladderSettled=new Map();
+  this.ladderOrder=[];
   if(this.file)this.load();
  }
  load(){
@@ -82,6 +90,7 @@ export class ProgressionStore{
    const raw=JSON.parse(fs.readFileSync(this.file,'utf8'));
    const entries=Array.isArray(raw)?raw:Array.isArray(raw?.players)?raw.players:[];
    this.players=new Map();this.tokens=new Map();
+   this.ladder=new Map();this.ladderSettled=new Map();this.ladderOrder=[];
    for(const entry of entries){
     const id=entry?.id;
     if(!validPlayerId(id))continue;
@@ -92,12 +101,75 @@ export class ProgressionStore{
     if(previous?.ownerToken)this.tokens.delete(previous.ownerToken);
     this.players.set(id,profile);
    }
-  }catch{this.players=new Map();this.tokens=new Map();}
+   // Ladder ratings live beside the career profiles in the same atomic store so
+   // one write persists both. Legacy array/{players} files simply boot unrated.
+   const ladderSource=raw&&typeof raw==='object'&&!Array.isArray(raw)?raw.ladder:null;
+   if(ladderSource&&typeof ladderSource==='object'){
+    const ratings=ladderSource.players&&typeof ladderSource.players==='object'?ladderSource.players:{};
+    for(const [id,value] of Object.entries(ratings)){
+     if(!validPlayerId(id))continue;
+     const record=normalizeLadderRecord(value);
+     if(record)this.ladder.set(id,record);
+    }
+    for(const item of Array.isArray(ladderSource.settled)?ladderSource.settled:[]){
+     const matchId=typeof item?.matchId==='string'&&item.matchId?item.matchId.slice(0,64):null;
+     if(!matchId||this.ladderSettled.has(matchId))continue;
+     this.ladderSettled.set(matchId,{matchId,count:Math.max(0,Math.floor(Number(item.count)||0))});
+     this.ladderOrder.push(matchId);
+    }
+    while(this.ladderOrder.length>LADDER_SETTLEMENT_CAP)this.ladderSettled.delete(this.ladderOrder.shift());
+   }
+  }catch{this.players=new Map();this.tokens=new Map();this.ladder=new Map();this.ladderSettled=new Map();this.ladderOrder=[];}
  }
  touch(id){const profile=this.players.get(id);if(profile){this.players.delete(id);this.players.set(id,profile);}return profile;}
- clone(profile){return profile?{...profile,byMode:Object.fromEntries(Object.entries(profile.byMode||{}).map(([mode,stats])=>[mode,{...(stats||{})}])),gear:{...profile.gear},attachments:{...profile.attachments},unlocks:{...profile.unlocks},achievements:{...(profile.achievements||{})}}:null;}
+ clone(profile){if(!profile)return null;const copy={...profile,byMode:Object.fromEntries(Object.entries(profile.byMode||{}).map(([mode,stats])=>[mode,{...(stats||{})}])),gear:{...profile.gear},attachments:{...profile.attachments},unlocks:{...profile.unlocks},achievements:{...(profile.achievements||{})}};if(validPlayerId(profile.id))copy.ladder=this.ladderFor(profile.id);return copy;}
  get(id){if(!validPlayerId(id)||!this.players.has(id))return null;return this.clone(this.touch(id));}
  getOwned(id,token){if(!validPlayerId(id)||!validProgressToken(token))return null;const profile=this.players.get(id);if(!profile||profile.ownerToken!==token)return null;return this.clone(this.touch(id));}
+ // -------------------------------------------------------------------
+ // Ranked V2 ladder. Ratings live in the same store and file as careers so a
+ // reload restores them; settlements are keyed by match id so a result can
+ // never be applied twice.
+ // -------------------------------------------------------------------
+ ladderFor(id){if(!validPlayerId(id))return {...defaultLadderRecord()};const record=this.ladder.get(id);return record?{...record}:{...defaultLadderRecord()};}
+ ladderRating(id){return this.ladderFor(id).rating;}
+ ladderBoard({limit=50}={}){
+  const rows=[];
+  for(const [id,record] of this.ladder){
+   if(!this.players.has(id))continue;
+   const rank=rankFor(record.rating,record.matches);
+   rows.push({playerId:id,rating:record.rating,matches:record.matches,peak:record.peak,provisional:record.matches<PLACEMENT_MATCHES,rank});
+  }
+  rows.sort((a,b)=>b.rating-a.rating||a.matches-b.matches||String(a.playerId).localeCompare(String(b.playerId)));
+  const max=Math.max(1,Math.min(500,Number(limit)||50));
+  return rows.slice(0,max).map((row,index)=>({...row,position:index+1}));
+ }
+ // Apply one finished match. `entries` come from game/ranked.mjs `settleMatch`
+ // and carry {playerId, delta}. The store recomputes each rating from the
+ // current record, so a duplicated or replayed settlement cannot move a rating
+ // twice; a duplicate match id is rejected outright and returns null.
+ applyLadderSettlement(matchId,entries){
+  const key=typeof matchId==='string'&&matchId?matchId.slice(0,64):null;
+  if(!key||this.ladderSettled.has(key))return null;
+  const applied=[];
+  for(const entry of Array.isArray(entries)?entries:[]){
+   if(!entry||!validPlayerId(entry?.playerId))continue;
+   const delta=Number(entry.delta);
+   if(!Number.isFinite(delta))continue;
+   this.ensure(entry.playerId);
+   const current=this.ladder.get(entry.playerId)??defaultLadderRecord();
+   const before=current.rating;
+   const after=clampRating(before+Math.max(-MAX_DELTA,Math.min(MAX_DELTA,Math.round(delta))));
+   const appliedDelta=after-before;
+   const next={rating:after,matches:current.matches+1,peak:Math.max(current.peak??before,after),lastDelta:appliedDelta,lastMatchId:key};
+   this.ladder.set(entry.playerId,next);
+   applied.push({playerId:entry.playerId,before,after,delta:appliedDelta,matches:next.matches,placement:current.matches<PLACEMENT_MATCHES});
+  }
+  this.ladderSettled.set(key,{matchId:key,count:applied.length});
+  this.ladderOrder.push(key);
+  while(this.ladderOrder.length>LADDER_SETTLEMENT_CAP)this.ladderSettled.delete(this.ladderOrder.shift());
+  this._dirty=true;this._rev++;this.flush();
+  return applied.length?applied:null;
+ }
  setPinned(ids){this.pinned=ids instanceof Set?ids:new Set(ids??[]);}
  uniqueId(){let id;do{id=randomUUID();}while(this.players.has(id));return id;}
  identify(playerId,token){
@@ -170,6 +242,7 @@ export class ProgressionStore{
    const profile=this.players.get(id);
    if(profile?.ownerToken)this.tokens.delete(profile.ownerToken);
    this.players.delete(id);
+   this.ladder.delete(id);
   }
  }
  persist(){
@@ -180,7 +253,8 @@ export class ProgressionStore{
    try{
     await fsp.mkdir(path.dirname(this.file),{recursive:true});
     const rev=this._rev;
-    await fsp.writeFile(tmp,JSON.stringify([...this.players.values()],null,1));
+    const payload={version:2,players:[...this.players.values()],ladder:{players:Object.fromEntries([...this.ladder].filter(([id])=>this.players.has(id))),settled:this.ladderOrder.map(matchId=>({...this.ladderSettled.get(matchId),matchId}))}};
+    await fsp.writeFile(tmp,JSON.stringify(payload,null,1));
     await fsp.rename(tmp,this.file);
     if(this._rev===rev)this._dirty=false;
     this._retryAt=0;this._failures=0;this.lastPersistError=null;

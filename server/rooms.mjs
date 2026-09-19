@@ -104,9 +104,12 @@ export class Matchmaker {
  position(peerId) { return this.entries.findIndex(item => item.peerId === peerId); }
  list() { return this.entries.map(({peerId, name, rating}) => ({peerId, name, rating})); }
  // Pop a full draft when enough players are waiting. Returns null otherwise.
- draft() {
+ // `even` is opt-in (ranked): an odd queue waits one more player instead of
+ // starting a 2v1, so every ranked draft fields two equal sides.
+ draft({even = false} = {}) {
   const needed = this.teamSize * 2;
-  const size = Math.min(needed, this.entries.length);
+  let size = Math.min(needed, this.entries.length);
+  if (even && size % 2 !== 0) size -= 1;
   if (size < this.minPlayers) return null;
   // A laddered draft only opens on the rung's human floor; below it the queue
   // reports no draft so the caller can fall back to OPERATIONS / practice

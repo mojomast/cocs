@@ -1,22 +1,32 @@
 'use client';
 import {useState} from 'react';
 import {MatchConfiguration} from '../../game-ui/configuration';
-import {Shell,TopBar,PageHead,Panel,Btn,Tabs,Field,Chip,Empty,Banner,ActionRail,SelectCard} from '../primitives';
+import {Shell,TopBar,PageHead,Panel,Btn,Tabs,Field,Chip,Empty,Banner,ActionRail,SelectCard,Segmented} from '../primitives';
 import type {ScreenProps} from '../contract';
 import {inviteLink} from '../../../game/invite.mjs';
+import {PLACEMENT_MATCHES,rankFor} from '../../../game/ranked.mjs';
 
 const copyText=async(text:string)=>{
  try{await navigator.clipboard.writeText(text);return true;}catch{}
  try{const el=document.createElement('textarea');el.value=text;el.setAttribute('readonly','');el.style.position='fixed';el.style.opacity='0';document.body.appendChild(el);el.select();const ok=document.execCommand('copy');el.remove();return ok;}catch{return false;}
 };
 
+// Shape + word cues mirror every colour cue: a gain, loss or hold is never
+// communicated with green/red alone. `aria-hidden` marks the glyph as decoration
+// because the word beside it already carries the meaning.
+const deltaShape=(delta:number)=>delta>0?'▲':delta<0?'▼':'▬';
+const deltaWord=(delta:number)=>delta>0?'GAINED':delta<0?'LOST':'HELD';
+const deltaText=(delta:number)=>`${delta>0?'+':''}${delta}`;
+const placementText=(row:any)=>row?.provisional?`PLACEMENTS ${Math.min(Number(row.matches)||0,PLACEMENT_MATCHES)}/${PLACEMENT_MATCHES}`:`${Number(row?.matches)||0} RATED MATCHES`;
+
 const FILTER_ALL='all';
 const filterLabel=(value:any)=>String(value||'').replace(/[-_]+/g,' ').replace(/\b\w/g,(c:string)=>c.toUpperCase());
 const sizeBucket=(players:any)=>{const n=Number(players)||0;return n===0?'empty':n<=2?'small':n<=5?'medium':'large';};
 
 export function BrowseScreen({ui}:ScreenProps){
- const {rooms=[],matches=[],netUrl='',setNetUrl,roomName='',setRoomName,netError,quickJoin,createRoom,joinRoom,refreshNet,changeMode,headActions,teamName,renderScoreboard,config,quickStart,GAME_MODES=[],getMap,DIFFICULTIES=[]}=ui;
+ const {rooms=[],matches=[],netUrl='',setNetUrl,roomName='',setRoomName,netError,quickJoin,createRoom,joinRoom,refreshNet,changeMode,headActions,teamName,renderScoreboard,config,quickStart,GAME_MODES=[],getMap,DIFFICULTIES=[],myPeerId,ranked,rankedQueued,queueRanked,cancelQueue}=ui;
  const [tab,setTab]=useState('create');
+ const [queueMode,setQueueMode]=useState('unranked');
  const [modeFilter,setModeFilter]=useState(FILTER_ALL);
  const [mapFilter,setMapFilter]=useState(FILTER_ALL);
  const [sizeFilter,setSizeFilter]=useState(FILTER_ALL);
@@ -25,6 +35,10 @@ export function BrowseScreen({ui}:ScreenProps){
  const [practiceMode,setPracticeMode]=useState('deathmatch');
  const [practiceBots,setPracticeBots]=useState(3);
  const [practiceDifficulty,setPracticeDifficulty]=useState('normal');
+ const rankedMode=queueMode==='ranked';
+ const myRank=ranked?.players?.[myPeerId]??null;
+ const rankInfo=myRank?rankFor(myRank.rating,myRank.matches):null;
+ const lastMatch=ranked?.last?.entries?.find((entry:any)=>entry.peerId===myPeerId)??null;
  const live=rooms.filter((r:any)=>r.started||r.players>0).length;
  const roomModes=[...new Set(rooms.map((r:any)=>r.config?.mode).filter(Boolean))];
  const roomMaps=[...new Set(rooms.map((r:any)=>r.mapId).filter(Boolean))];
@@ -40,8 +54,24 @@ export function BrowseScreen({ui}:ScreenProps){
    <div className="toolbar">
     <span className="toolbar-title">SERVER</span>
     <input className="ui-input" value={netUrl} onChange={e=>setNetUrl(e.target.value)} placeholder="ws://host:port" aria-label="Game server address" spellCheck={false}/>
-    <Btn variant="primary" onClick={quickJoin}>QUICK JOIN</Btn>
+    <Segmented value={queueMode} onChange={setQueueMode} ariaLabel="Matchmaking queue" options={[
+     {value:'unranked',label:<>{queueMode==='unranked'?'✓ ':''}UNRANKED</>},
+     {value:'ranked',label:<>{queueMode==='ranked'?'✓ ':''}RANKED</>},
+    ]}/>
+    {rankedMode
+     ? (rankedQueued?<Btn onClick={cancelQueue}>LEAVE RANKED QUEUE</Btn>:<Btn variant="primary" onClick={queueRanked}>FIND RANKED MATCH</Btn>)
+     : <Btn variant="primary" onClick={quickJoin}>QUICK JOIN</Btn>}
    </div>
+   <Panel label="RANKED LADDER" meta={rankedMode?'QUEUE · RANKED':'QUEUE · UNRANKED (DEFAULT)'} bodyClass="stack">
+    {rankInfo?<>
+     <p className="field-note" role="status">RATING <b>{rankInfo.rating}</b> · <b>{rankInfo.label}</b> · {placementText(myRank)}</p>
+     {lastMatch
+      ?<p className="field-note"><span aria-hidden="true">{deltaShape(lastMatch.delta)}</span> {deltaWord(lastMatch.delta)} {deltaText(lastMatch.delta)} RATING · LAST RATED MATCH</p>
+      :<p className="field-note">NO RATED MATCH THIS SESSION.</p>}
+    </>:<p className="field-note">RATINGS ARE SERVER-AUTHORITATIVE. QUICK JOIN LOADS YOUR LADDER ROW FROM THE LOBBY.</p>}
+    {rankedQueued&&<p role="status">IN RANKED QUEUE · <b>SEARCHING FOR AN EVEN MATCH</b> · LEAVE THE QUEUE ANY TIME.</p>}
+    {ranked?.queue==='ranked'&&<p className="field-note" role="status">RANKED LOBBY · {ranked.active?'MATCH LIVE':'WAITING FOR HOST'} · MATCH {ranked.matchId??'—'}</p>}
+   </Panel>
    {netError&&<Banner tone="error">{netError}</Banner>}
    {(config?.mode==='puma-race'||config?.mode==='puma-soccer')&&<p className="field-note">PUMA {config.mode==='puma-race'?'RACE':'SOCCER'} / Equal chassis for every driver. Operator is your identity only. Harnesses, weapons and combat gear are inactive.</p>}
    <Panel label="PRACTICE VS BOTS" meta="OFFLINE · INSTANT" bodyClass="stack">
@@ -99,13 +129,18 @@ export function BrowseScreen({ui}:ScreenProps){
 }
 
 export function LobbyScreen({ui}:ScreenProps){
- const {netPlayers=[],myPeerId,netRoomId,netError,chatLog=[],chatDraft='',setChatDraft,sendChat,newMessages,setNewMessages,lobbyInputRef,lobbyChatRef,chatAtBottom,voicePanel,config,setConfig,mapId,setMapId,selectableMaps=[],selectedMap,selectedMode,hostAndStart,reconnectNet,resumeNet,disconnectNet,net={}}=ui;
+ const {netPlayers=[],myPeerId,netRoomId,netError,chatLog=[],chatDraft='',setChatDraft,sendChat,newMessages,setNewMessages,lobbyInputRef,lobbyChatRef,chatAtBottom,voicePanel,config,setConfig,mapId,setMapId,selectableMaps=[],selectedMap,selectedMode,hostAndStart,reconnectNet,resumeNet,disconnectNet,net={},ranked,rankedQueued,queueRanked,cancelQueue}=ui;
  const connected=!!net.connected;
  const chatAtBottomRef=chatAtBottom;
  const [copied,setCopied]=useState(false);
+ const myRank=ranked?.players?.[myPeerId]??null;
+ const rankInfo=myRank?rankFor(myRank.rating,myRank.matches):null;
+ const lastMatch=ranked?.last?.entries?.find((entry:any)=>entry.peerId===myPeerId)??null;
  const invite=typeof window!=='undefined'?inviteLink(window.location.href,netRoomId,{spectate:net.spectate===true}):null;
  const copyInvite=async()=>{if(!invite)return;if(await copyText(invite)){setCopied(true);setTimeout(()=>setCopied(false),2200);}};
  return <Shell head={<TopBar sub={netRoomId?`ROOM ${netRoomId}`:'NETWORK LOBBY'}>{ui.headActions}</TopBar>} rail={<ActionRail>
+   {ranked?.queue!=='ranked'&&(rankedQueued?<Btn onClick={cancelQueue}>LEAVE RANKED QUEUE</Btn>:<Btn onClick={queueRanked}>FIND RANKED MATCH</Btn>)}
+   {ranked?.queue==='ranked'&&<Chip tone="accent">RANKED</Chip>}
    {netRoomId&&<Btn onClick={copyInvite}>{copied?'LINK COPIED':'COPY INVITE LINK'}</Btn>}
    {net.isHost?<Btn variant="primary" onClick={hostAndStart} disabled={!connected}>START NETWORK MATCH</Btn>:<Chip tone={connected?'default':'danger'}>{connected?(net.spectate?'SPECTATING':'WAITING ON HOST'):'DISCONNECTED'}</Chip>}
    <Btn variant="danger" onClick={disconnectNet}>DISCONNECT</Btn>
@@ -141,6 +176,12 @@ export function LobbyScreen({ui}:ScreenProps){
     <Panel label="VOICE">{voicePanel}</Panel>
    </div>
    <Panel label="02 / MATCH CONTROL" meta={connected?(net.isHost?'YOU ARE HOST':'WAITING ON HOST'):'OFFLINE'} bodyClass="stack">
+    {(rankInfo||ranked?.queue==='ranked')&&<div className="stack stack--tight" role="status" aria-label="Ranked status">
+     <p className="field-note">{ranked?.queue==='ranked'?'RANKED · RATED MATCH':'CASUAL · UNRANKED'}{ranked?.matchId?` · MATCH ${ranked.matchId}`:''}{ranked?.active?' · LIVE':''}</p>
+     {rankInfo&&<p className="field-note">YOUR RATING <b>{rankInfo.rating}</b> · <b>{rankInfo.label}</b> · {placementText(myRank)}</p>}
+     {lastMatch&&<p className="field-note"><span aria-hidden="true">{deltaShape(lastMatch.delta)}</span> {deltaWord(lastMatch.delta)} {deltaText(lastMatch.delta)} RATING · LAST MATCH</p>}
+     {ranked?.skipped>0&&<p className="field-note">RATED SETTLEMENT SKIPPED · MODE OR BOT RULES NOT RATED.</p>}
+    </div>}
     {!connected?<>
      {netError&&<Banner tone="error">{netError||'Connection lost.'}</Banner>}
      <Btn variant="primary" onClick={reconnectNet}>RECONNECT</Btn>

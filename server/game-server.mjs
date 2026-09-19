@@ -5,6 +5,9 @@ import { RoomRegistry, Matchmaker, ratingFor } from './rooms.mjs';
 import { MatchHistory } from './history.mjs';
 import { ProgressionStore } from './progression.mjs';
 import { MESSAGE } from '../game/protocol.mjs';
+import { normalizeConfig, teamMode } from '../game/config.mjs';
+import { actorWon } from '../game/outcome.mjs';
+import { PLACEMENT_MATCHES, isRankedMode, settleMatch } from '../game/ranked.mjs';
 import { createHmac } from 'node:crypto';
 
 export function voiceConfig(peerId, env = process.env, now = Date.now()) {
@@ -49,6 +52,10 @@ export function createGameServer({ port = 0, random, tickDt = 1 / 60, tickMs = 1
  const progression = new ProgressionStore(progressionPath);
   const registry = new RoomRegistry({ random, graceMs, history, progression, snapshotHz, onError: (error, room) => console.error(`room ${room?.id ?? '?'} tick failed`, error) });
   const matchmaker = new Matchmaker({ random });
+  // Ranked queue: a second Matchmaker with the same deterministic rules, kept
+  // separate so unranked drafting is byte-for-byte the shipped behaviour and a
+  // ranked queue can never be pulled into an unranked room (or vice versa).
+  const rankedMatchmaker = new Matchmaker({ random });
   const sockets = new Map();
  const socketPeer = new WeakMap();
  const peerRoom = new Map();
@@ -126,20 +133,29 @@ export function createGameServer({ port = 0, random, tickDt = 1 / 60, tickMs = 1
  // Pop a balanced draft from the matchmaking queue and seat every player in a
  // fresh room. Team assignments are sent to each peer so the client can show
  // the balanced sides before the host starts. Returns the new room or null.
- function draftQueue() {
-  const draft = matchmaker.draft();
+ // A ranked draft marks the room server-side: the settlement pass only ever
+ // touches rooms carrying that marker, so unranked play cannot move a rating.
+ function draftQueue(queue = matchmaker, ranked = false) {
+  const draft = queue.draft(ranked ? { even: true } : undefined);
   if (!draft) return null;
-  const room = registry.create('Matchmade');
-  if (!room) { for (const player of draft.players) matchmaker.enqueue(player); return null; }
+  const room = registry.create(ranked ? 'Ranked' : 'Matchmade');
+  if (!room) { for (const player of draft.players) queue.enqueue(player); return null; }
+  if (ranked) {
+   room.ranked = { queue: 'ranked', matchId: null, matchCount: 0, settled: false, skipped: 0, lastSettlement: null };
+   // Ranked lobbies run without bots: the lobby default is a clean team match
+   // and the HOST/START dispatch paths pin botCount to 0 so a client cannot opt
+   // back into AI opponents for a rated game.
+   room.config = normalizeConfig({ mode: 'teamdeathmatch', botCount: 0 });
+  }
   draft.teams.forEach((team, teamIndex) => {
    for (const player of team) {
     const ws = sockets.get(player.peerId);
-    if (!ws || ws.readyState !== ws.OPEN) { matchmaker.remove(player.peerId); continue; }
+    if (!ws || ws.readyState !== ws.OPEN) { queue.remove(player.peerId); continue; }
     room.join(player.peerId, player.name, undefined, undefined, '', false, player.playerId, player.progressToken);
     if (!room.peers.has(player.peerId)) continue;
     releaseSeat(player.peerId);
     peerRoom.set(player.peerId, room);
-    sendTo(player.peerId, { type: 'matchmade', roomId: room.id, team: teamIndex, rating: player.rating, teams: draft.teams.map(t => t.map(p => ({ peerId: p.peerId, name: p.name, rating: p.rating }))) });
+    sendTo(player.peerId, { type: 'matchmade', roomId: room.id, team: teamIndex, rating: player.rating, ranked, teams: draft.teams.map(t => t.map(p => ({ peerId: p.peerId, name: p.name, rating: p.rating }))) });
    }
   });
   return room;
@@ -173,14 +189,22 @@ export function createGameServer({ port = 0, random, tickDt = 1 / 60, tickMs = 1
    break;
   }
   case 'queue': {
+   // Ranked entries are only admitted when the peer proves ownership of a
+   // career with its progress token: the queue rating then comes from the
+   // server-side ladder, never from the message. `msg.rating` is ignored on
+   // purpose so a client cannot hand itself a rating.
+   const ranked = msg.ranked === true;
    const profile = progression.getOwned(msg.playerId, msg.progressToken);
-   const entry = matchmaker.enqueue({ peerId, name: msg.name, rating: ratingFor(profile), playerId: msg.playerId, progressToken: msg.progressToken });
+   if (ranked && !profile) { sendTo(peerId, { type: 'error', message: 'ranked queue requires a verified career' }); break; }
+   const queue = ranked ? rankedMatchmaker : matchmaker;
+   const playerId = ranked ? profile.id : msg.playerId;
+   const entry = queue.enqueue({ peerId, name: msg.name, rating: ranked ? progression.ladderRating(profile.id) : ratingFor(profile), playerId, progressToken: msg.progressToken, ranked });
    if (!entry) { sendTo(peerId, { type: 'error', message: 'matchmaking queue is full' }); break; }
-   sendTo(peerId, { type: 'queue', status: 'queued', position: matchmaker.position(peerId), size: matchmaker.size(), rating: entry.rating });
+   sendTo(peerId, { type: 'queue', status: 'queued', queue: ranked ? 'ranked' : 'unranked', position: queue.position(peerId), size: queue.size(), rating: entry.rating });
    break;
   }
-  case 'queue-leave': matchmaker.remove(peerId); sendTo(peerId, { type: 'queue', status: 'left', size: matchmaker.size() }); break;
-  case 'queue-list': sendTo(peerId, { type: 'queue', status: 'list', players: matchmaker.list() }); break;
+  case 'queue-leave': matchmaker.remove(peerId); rankedMatchmaker.remove(peerId); sendTo(peerId, { type: 'queue', status: 'left', size: matchmaker.size(), rankedSize: rankedMatchmaker.size() }); break;
+  case 'queue-list': sendTo(peerId, { type: 'queue', status: 'list', players: matchmaker.list(), ranked: rankedMatchmaker.list() }); break;
   case MESSAGE.HISTORY: {
    if (!historyCache || historyCacheVersion !== history.version) { historyCache = history.all(); historyCacheVersion = history.version; }
    sendTo(peerId, { type: 'history', matches: historyCache });
@@ -192,7 +216,16 @@ export function createGameServer({ port = 0, random, tickDt = 1 / 60, tickMs = 1
    sendTo(peerId, { type: 'profile', profile });
    break;
   }
-    case MESSAGE.HOST: peerRoom.get(peerId)?.host(peerId, msg.config, msg.mapId); break;
+    case MESSAGE.HOST: {
+     const room = peerRoom.get(peerId);
+     // Ranked policy: bots are pinned off before the room validates the config,
+     // so a host cannot farm a rated match against the easy AI.
+     if (room?.ranked && msg.config && typeof msg.config === 'object' && !Array.isArray(msg.config)) {
+      msg = { ...msg, config: { ...msg.config, botCount: 0 } };
+     }
+     room?.host(peerId, msg.config, msg.mapId);
+     break;
+    }
     case MESSAGE.GEAR: peerRoom.get(peerId)?.setGear(peerId, msg.gear, msg.attachments, undefined, msg.finish); break;
     case MESSAGE.LOADOUT: peerRoom.get(peerId)?.setLoadout(peerId, msg.character, msg.harness); break;
     // LATTICE STRIKE actions (§11.2). Each handler applies its own per-peer
@@ -202,7 +235,12 @@ export function createGameServer({ port = 0, random, tickDt = 1 / 60, tickMs = 1
     case MESSAGE.TERMINAL: peerRoom.get(peerId)?.terminal(peerId, msg); break;
     case MESSAGE.COMMAND: peerRoom.get(peerId)?.command(peerId, msg); break;
     case MESSAGE.BUY: peerRoom.get(peerId)?.buy(peerId, msg); break;
-   case MESSAGE.START: peerRoom.get(peerId)?.start(peerId); break;
+   case MESSAGE.START: {
+     const room = peerRoom.get(peerId);
+     if (room?.ranked && room.config) room.config = { ...room.config, botCount: 0 };
+     room?.start(peerId);
+     break;
+   }
     case MESSAGE.INPUT: peerRoom.get(peerId)?.input(peerId, msg); break;
     case MESSAGE.CHAT: {
      const room = peerRoom.get(peerId);
@@ -225,22 +263,121 @@ export function createGameServer({ port = 0, random, tickDt = 1 / 60, tickMs = 1
   const first = msg.items[0]?.id;
   if (peer && Number.isInteger(first) && first > 0) peer.lastSerial = Math.min(peer.lastSerial, first - 1);
  }
+ // Ranked lobby projection. Attached to the existing `lobby` message so the
+ // client gets queue mode, live match id, the last settlement and each seated
+ // player's public ladder row without a new wire type.
+ function rankedLobbyView(room) {
+  const players = {};
+  let any = false;
+  for (const peer of room.peers.values()) {
+   if (!peer.playerId) continue;
+   const record = progression.ladderFor(peer.playerId);
+   players[peer.id] = { rating: record.rating, matches: record.matches, peak: record.peak, provisional: record.matches < PLACEMENT_MATCHES };
+   any = true;
+  }
+  if (!any && !room.ranked) return null;
+  return {
+   queue: room.ranked ? 'ranked' : 'unranked',
+   active: room.started === true && room.roundOver !== true,
+   matchId: room.ranked?.matchId ?? null,
+   settled: room.ranked?.matchCount ?? 0,
+   skipped: room.ranked?.skipped ?? 0,
+   ...(room.ranked?.lastSettlement ? { last: room.ranked.lastSettlement } : {}),
+   players,
+  };
+ }
+ // Settle every ranked room whose authoritative match just ended. Only rooms
+ // marked by draftQueue are eligible, so unranked play can never move a rating.
+ // Exactly once: `ranked.settled` arms per match and the progression store also
+ // rejects a repeated match id, so a reconnect, duplicated tick or server
+ // restart cannot apply the same delta twice.
+ function settleRankedRooms() {
+  for (const room of registry.rooms.values()) {
+   const ranked = room.ranked;
+   if (!ranked || !room.started) continue;
+   if (!room.roundOver) {
+    if (ranked.settled || ranked.matchId) { ranked.settled = false; ranked.matchId = null; }
+    continue;
+   }
+   if (ranked.settled || !room.lastResult) continue;
+   ranked.settled = true;
+   const result = room.lastResult;
+   const mode = result?.config?.mode ?? room.config?.mode ?? null;
+   const config = { ...(room.config ?? {}), ...(result?.config ?? {}) };
+   // Rated lobbies run without bots (HOST/START pin botCount to 0) and only in
+   // ranked-eligible modes. Anything else is a practice result and is skipped.
+   if (!isRankedMode(mode) || Number(config.botCount) > 0) { ranked.skipped++; continue; }
+   const actors = new Map((Array.isArray(result.actors) ? result.actors : []).map(actor => [actor.id, actor]));
+   const seated = [...room.peers.values()].filter(peer => !peer.spectate && peer.playerId && peer.actorId !== null && peer.actorId !== undefined && actors.has(peer.actorId));
+   if (seated.length < 2) { ranked.skipped++; continue; }
+   const isTeam = teamMode(mode);
+   const groups = new Map();
+   for (const peer of seated) {
+    const actor = actors.get(peer.actorId);
+    const key = isTeam && (actor.team === 0 || actor.team === 1) ? `team:${actor.team}` : `solo:${peer.id}`;
+    if (!groups.has(key)) groups.set(key, []);
+    groups.get(key).push(peer);
+   }
+   if (groups.size < 2) { ranked.skipped++; continue; }
+   const keys = [...groups.keys()].sort((a, b) => a.localeCompare(b));
+   const roster = {};
+   const byPlayer = new Map();
+   for (const peer of seated) {
+    const record = progression.ladderFor(peer.playerId);
+    roster[peer.playerId] = { rating: record.rating, matches: record.matches };
+    byPlayer.set(peer.playerId, peer);
+   }
+   const settlement = settleMatch({
+    teams: keys.map(key => groups.get(key).map(peer => peer.playerId)),
+    scores: keys.map(key => {
+     if (isTeam) {
+      const team = Number(key.slice(key.indexOf(':') + 1));
+      return result.winner === team ? 1 : result.winner === null || result.winner === undefined ? 0.5 : 0;
+     }
+     return groups.get(key).some(peer => actorWon(result, mode, actors.get(peer.actorId))) ? 1 : 0;
+    }),
+    players: roster,
+   });
+   if (!settlement) { ranked.skipped++; continue; }
+   const matchId = `${room.id}:${ranked.matchCount + 1}`;
+   const applied = progression.applyLadderSettlement(matchId, settlement.entries);
+   ranked.matchCount++;
+   ranked.matchId = matchId;
+   const appliedById = new Map((applied ?? []).map(entry => [entry.playerId, entry]));
+   ranked.lastSettlement = {
+    matchId,
+    mode,
+    entries: settlement.entries.filter(entry => appliedById.has(entry.playerId)).map(entry => {
+     const peer = byPlayer.get(entry.playerId);
+     const record = appliedById.get(entry.playerId);
+     return { peerId: peer?.id ?? null, playerId: entry.playerId, name: peer?.name ?? '', team: entry.team, win: entry.score === 1, placement: entry.placement, before: record.before, delta: record.delta, rating: record.after };
+    }),
+   };
+   room.broadcast({ ...room.lobby(), ranked: rankedLobbyView(room) });
+  }
+ }
  function flush() {
   for (const room of registry.rooms.values()) {
-    for (const { to, msg } of room.drain()) {
-     if (msg.type === MESSAGE.VOICE_SIGNAL && (!room.voicePeers(msg.from, to, msg) ||
-      peerRoom.get(msg.from) !== room || peerRoom.get(to) !== room ||
-      sockets.get(msg.from)?.readyState !== 1)) continue;
-      const text = JSON.stringify(msg);
-     if (to === null) {
-      for (const ws of wss.clients) if (ws.readyState === ws.OPEN && peerRoom.get(socketPeer.get(ws)) === room) deliver(ws, msg, text);
-     } else {
-       const ws = sockets.get(to);
-       if (msg.type === MESSAGE.VOICE_CONFIG && peerRoom.get(to) !== room) continue;
-       if (!ws || ws.readyState !== ws.OPEN) { rewindEvents(room, to, msg); continue; }
-       if (!deliver(ws, msg, text)) rewindEvents(room, to, msg);
-     }
+   for (const entry of room.drain()) {
+    const { to } = entry;
+    let { msg } = entry;
+    if (msg.type === 'lobby') {
+     const ranked = rankedLobbyView(room);
+     if (ranked) msg = { ...msg, ranked };
     }
+    if (msg.type === MESSAGE.VOICE_SIGNAL && (!room.voicePeers(msg.from, to, msg) ||
+     peerRoom.get(msg.from) !== room || peerRoom.get(to) !== room ||
+     sockets.get(msg.from)?.readyState !== 1)) continue;
+     const text = JSON.stringify(msg);
+    if (to === null) {
+     for (const ws of wss.clients) if (ws.readyState === ws.OPEN && peerRoom.get(socketPeer.get(ws)) === room) deliver(ws, msg, text);
+    } else {
+      const ws = sockets.get(to);
+      if (msg.type === MESSAGE.VOICE_CONFIG && peerRoom.get(to) !== room) continue;
+      if (!ws || ws.readyState !== ws.OPEN) { rewindEvents(room, to, msg); continue; }
+      if (!deliver(ws, msg, text)) rewindEvents(room, to, msg);
+    }
+   }
   }
   for (const ws of wss.clients) if (ws.pendingEssential?.length) pumpEssential(ws);
  }
@@ -263,6 +400,7 @@ export function createGameServer({ port = 0, random, tickDt = 1 / 60, tickMs = 1
   ws.on('close', () => {
    sockets.delete(peerId);
    matchmaker.remove(peerId);
+   rankedMatchmaker.remove(peerId);
    const room = peerRoom.get(peerId);
    if (room) { room.disconnect(peerId); peerRoom.delete(peerId); }
    flush();
@@ -271,7 +409,11 @@ export function createGameServer({ port = 0, random, tickDt = 1 / 60, tickMs = 1
  });
   const timer = setInterval(() => {
    try { registry.tickAll(tickDt); registry.expireAll(); } catch (error) { console.error('server tick failed', error); }
-   try { while (matchmaker.size() >= matchmaker.teamSize * 2) { if (!draftQueue()) break; } } catch (error) { console.error('matchmaking draft failed', error); }
+   // Settle ranked results before drafting so a finished match frees its room
+   // and the next queue pops against fresh ratings.
+   try { settleRankedRooms(); } catch (error) { console.error('ranked settlement failed', error); }
+   try { while (matchmaker.size() >= matchmaker.teamSize * 2) { if (!draftQueue(matchmaker, false)) break; } } catch (error) { console.error('matchmaking draft failed', error); }
+   try { while (rankedMatchmaker.size() >= rankedMatchmaker.minPlayers) { if (!draftQueue(rankedMatchmaker, true)) break; } } catch (error) { console.error('ranked matchmaking draft failed', error); }
   try {
    const pinned = new Set();
    for (const room of registry.rooms.values()) for (const p of room.peers.values()) if (p.playerId) pinned.add(p.playerId);
