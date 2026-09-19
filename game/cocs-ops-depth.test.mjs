@@ -75,6 +75,11 @@ test('the Chief fills a fighter baseline then rotates the authored utility roles
   state.coop.wave = 3;
   assert.equal(coopAutoRole(m, state), 'builder', 'wave 3 repairs with the BUILDER when something is broken');
   device.state = 'live';
+  // Wave 3+ fields repair cover even before something breaks.
+  state.coop.wavesCleared = 3;
+  assert.equal(coopAutoRole(m, state), 'builder', 'an unfilled BUILDER is taken as repair cover');
+  state.coop.subagentStats.byRole.builder = 1; // one has now been fielded this run
+  assert.equal(coopAutoRole(m, state), 'scout', 'once a BUILDER is fielded the rotation continues');
   // Behind on the lattice keeps the combat body.
   for (const front of capturable(state).filter(entry => entry.archetype === 'front')) front.owner = 1;
   assert.equal(coopAutoRole(m, state), 'fighter', 'a lattice deficit keeps the second slot a FIGHTER');
