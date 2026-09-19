@@ -51,8 +51,10 @@ test('lattice strike is registered as a preview mode on the slice map', () => {
   assert.equal(arenaSupportsMode('lattice-slice', 'cocs'), true);
   assert.equal(arenaSupportsMode('exchange', 'cocs'), false);
   assert.equal(resolveMapForMode('colosseum', 'cocs'), 'lattice-slice');
-  assert.equal(maxBotsFor('cocs'), 8);
-  assert.equal(recommendedBots('cocs', 'lattice-slice'), 8);
+  assert.equal(maxBotsFor('cocs'), 16);
+  // PvP-1: `cocs` now budgets 16 seats (8v8), so the warzone-scale slice's 11
+  // suggested bots are no longer clamped to the old 8-seat cap.
+  assert.equal(recommendedBots('cocs', 'lattice-slice'), 11);
 });
 
 test('a local cocs bot match starts on the slice and steps the lattice', () => {
