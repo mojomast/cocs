@@ -638,6 +638,11 @@ export function coopAutoRole(match, state, coop = state?.coop) {
   const enemy = capturable.filter(node => node.owner === 1).length;
   const behind = enemy > own;
   if (behind || num(coop.wavesCleared, 0) < 2) return 'fighter';
+  // Repair cover: an operation that has never fielded a BUILDER takes one once
+  // the opening is over, even before something breaks — its REPAIR verb is what
+  // keeps devices and terminals in the fight. Later windows rotate the rest.
+  const fielded = role => num(coop.subagentStats?.byRole?.[role], 0) > 0;
+  if (!fielded('builder') && !has('builder') && num(coop.wavesCleared, 0) >= 3) return 'builder';
   const need = {
     builder: brokenTargetNear(match, live[0], state),
     harvester: capturable.some(node => node.archetype === 'economy' && node.owner === 0),
