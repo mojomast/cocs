@@ -1,5 +1,77 @@
 import {WEAPONS} from './data.mjs';
 import {CAMPAIGN_MISSION_IDS,DEFAULT_MISSION_ID} from './campaign-data.mjs';
+// ---------------------------------------------------------------------------
+// LATTICE STRIKE population ladder (PvP-1). Section 3.1 publishes the 4v4 and
+// 8v8 `cocs` rungs; `cocs-coop` (OPERATIONS) is a single human team and never
+// consults a rung. This table is the single data source for a rung's seat
+// count, live-node floor, role allow-list and opening economy. The role
+// allow-list is load-bearing: `cocsRoleAllowed` gates which subagent roles the
+// duty board / policy may spawn, so 4v4 can never field SCOUT or SABOTEUR.
+//
+// The economy numbers mirror `cocs-economy.mjs` (FLUX start 80 / cap 240,
+// base THREADS 3) exactly; `cocs-economy.test.mjs` pins the cross-module
+// equality so the two tables cannot drift.
+// ---------------------------------------------------------------------------
+export const COCS_RUNGS=Object.freeze({
+ '4v4':Object.freeze({
+  id:'4v4',name:'Skirmish-lite',variant:'cocs',humans:8,perTeam:4,total:8,minHumans:8,
+  roles:Object.freeze(['fighter','harvester','builder']),
+  live:Object.freeze({opening:3,max:5,endgame:5}),
+  dominance:Object.freeze({hold:90,fast:45}),
+  threads:3,fluxStart:80,fluxCap:240,depotsPerTeam:1,vehiclesPerTeam:1,
+ }),
+ '8v8':Object.freeze({
+  id:'8v8',name:'Skirmish',variant:'cocs',humans:16,perTeam:8,total:16,minHumans:8,
+  roles:Object.freeze(['fighter','harvester','builder','scout','saboteur']),
+  live:Object.freeze({opening:3,max:5,endgame:5}),
+  dominance:Object.freeze({hold:120,fast:60}),
+  threads:3,fluxStart:80,fluxCap:240,depotsPerTeam:2,vehiclesPerTeam:2,
+ }),
+});
+export const COCS_RUNG_IDS=Object.freeze(Object.keys(COCS_RUNGS));
+/** Resolve a rung id (case-insensitive) to its frozen table entry, or null. */
+export function cocsRung(id){
+ const key=String(id??'').trim().toLowerCase();
+ return COCS_RUNGS[key]??null;
+}
+/** Infer the rung from the intended actor count (humans + bots). <=8 is 4v4,
+ * <=16 is 8v8; above the published ladder there is no rung (12v12 is gated). */
+export function cocsRungForPlayers(players){
+ const n=Math.max(0,Math.round(Number(players)||0));
+ if(n<=0)return null;
+ if(n<=COCS_RUNGS['4v4'].total)return '4v4';
+ if(n<=COCS_RUNGS['8v8'].total)return '8v8';
+ return null;
+}
+/** The rung a config resolves to, or null for a legacy (ungated) practice match. */
+export function cocsRungOf(config){
+ return cocsRung(config?.rung)?.id??null;
+}
+/** Bot seats needed to fill a rung to its published total (stable ratio). */
+export function cocsRungFill(rung,humans){
+ const table=cocsRung(rung);
+ if(!table)return 0;
+ const present=Math.max(0,Math.min(table.total,Math.round(Number(humans)||0)));
+ return table.total-present;
+}
+/** `true` when `humans` clears the rung's below-minimum floor (section 3.1). */
+export function cocsRungMeetsMinimum(rung,humans){
+ const table=cocsRung(rung);
+ if(!table)return false;
+ const floor=Math.max(1,Number.isFinite(Number(table.minHumans))?Number(table.minHumans):table.humans);
+ return Math.round(Number(humans)||0)>=floor;
+}
+/** `true` when `role` is on `rung`'s allow-list. A null/unknown rung allows
+ * every role so existing practice matches keep the full launch set. */
+export function cocsRoleAllowed(rung,role){
+ const table=cocsRung(rung);
+ if(!table)return true;
+ return table.roles.includes(String(role??'').trim().toLowerCase());
+}
+/** The role allow-list for a rung (all five when the rung is unknown). */
+export function cocsRungRoles(rung){
+ return [...(cocsRung(rung)?.roles??COCS_RUNGS['8v8'].roles)];
+}
 export const GAME_MODES = [
  {id:'deathmatch',name:'Deathmatch',description:'Everyone for themselves. Start with a Pulse Rifle, scavenge the rest, first to the frag limit wins.',rules:{team:false,score:'frags',fragLimit:15,suddenDeathSeconds:12}},
   {id:'ctf',name:'Capture the Flag',description:'Steal the enemy flag and run it home while keeping your own safe. Classic, chaotic, worth it.',rules:{team:true,score:'captures',fragLimit:3,carrierSpeed:.9,suddenDeathSeconds:15}},
@@ -16,7 +88,7 @@ export const GAME_MODES = [
   // captured next to one you already own, and only pays while connected back to
   // HQ. `score:'cocs'` keeps the objective-first ranking in outcome.mjs; the
   // node/income tuning lives under `objective` and is read by cocs.mjs.
-  {id:'cocs',name:'Lattice Strike',description:'Capture linked lattice nodes. You can only take a node next to one you own, and a node only pays while a supply line links it back to your HQ. Hold the lattice, not the frag count.',rules:{team:true,score:'cocs',fragLimit:5,minFragLimit:1,maxFragLimit:7,vehicles:false,maxBots:8,suddenDeathSeconds:15,objective:{kind:'cocs',captureSeconds:5,liveOpening:3,liveMax:5,endgameLive:5,dominanceHold:90,dominanceFast:45}}},
+  {id:'cocs',name:'Lattice Strike',description:'Capture linked lattice nodes. You can only take a node next to one you own, and a node only pays while a supply line links it back to your HQ. Hold the lattice, not the frag count.',rules:{team:true,score:'cocs',fragLimit:5,minFragLimit:1,maxFragLimit:7,vehicles:false,maxBots:16,suddenDeathSeconds:15,rungs:COCS_RUNGS,objective:{kind:'cocs',captureSeconds:5,liveOpening:3,liveMax:5,endgameLive:5,dominanceHold:90,dominanceFast:45}}},
   // LATTICE STRIKE: OPERATIONS (O1a) — the co-op, Director-driven siege. It
   // shares the `cocs` objective kind and the lattice/FLUX/REQ/strip systems but
   // branches on `coop:true`: all humans are team 0, team 1 is the persistent
@@ -167,7 +239,11 @@ export function normalizeConfig(value={}){
     // `normalizeConfig(null)` still deep-equals `DEFAULT_CONFIG`. Pure data; a
     // non-object override is dropped like every other malformed field.
     const objective=c.objective&&typeof c.objective==='object'&&!Array.isArray(c.objective)?{...c.objective}:null;
-    return {...normalized,...(objective?{objective}:{}),mutators:Object.freeze(activeMutators(normalized))};
+    // The PvPvE rung (section 3.1) rides the config only when explicitly asked
+    // for on `cocs`; `cocs-coop` and every other mode stay rung-free, so
+    // `normalizeConfig(null)` still deep-equals the frozen default.
+    const rung=mode==='cocs'?cocsRung(c.rung)?.id??null:null;
+    return {...normalized,...(objective?{objective}:{}),...(rung?{rung}:{}),mutators:Object.freeze(activeMutators(normalized))};
 }
 export function normalizeDisplay(value={}){
  const c=value&&typeof value==='object'?value:{};

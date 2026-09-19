@@ -1,0 +1,344 @@
+// LATTICE STRIKE PvP-1 (section 12.3b) — rung ladder, two-team command,
+// SABOTEUR, and the per-team `cocs` visibility shape.
+//
+// The rung ladder is data (`game/config.mjs`); the two-team command, the role
+// board and the SABOTEUR verbs live in `game/cocs.mjs`. Everything here is
+// deterministic: one injected RNG, fixed `RULES.dt`, id-sorted arrays.
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import {Match} from './core.mjs';
+import {
+  DEFAULT_CONFIG, GAME_MODES, COCS_RUNGS, COCS_RUNG_IDS, cocsRung, cocsRungForPlayers,
+  cocsRungOf, cocsRoleAllowed, cocsRungRoles, normalizeConfig, cocsRungFill, cocsRungMeetsMinimum,
+} from './config.mjs';
+import {FLUX_CAP, FLUX_START} from './cocs-economy.mjs';
+import {COOP_ROLE_IDS, PVP_ROLE_IDS, ROLE_ABILITIES, coopRole, roleAbility} from './cocs-roles.mjs';
+import {
+  COCS_ROLE_TARGET_CONCURRENCY, COCS_SIPHON_FLUX, cocsDutyRolePolicy, cocsRoleActors,
+  cocsRoleAllowedOnRung, cocsRoleBoardSnapshot, cocsRoleSpawn, cocsSaboteurAct, cocsSapper,
+  cocsSiphon, cocsSnapshot, cocsTeamCommand, cocsTeamVisibility, cocsThreadsUsed, spawnScout,
+} from './cocs.mjs';
+
+const DT = 1 / 60;
+
+function mulberry32(seed) {
+  let a = seed >>> 0;
+  return () => {
+    a |= 0; a = (a + 0x6D2B79F5) | 0;
+    let t = Math.imul(a ^ (a >>> 15), 1 | a);
+    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+}
+
+// A PvP `cocs` match on the warfront stand-in lattice. `rung` is explicit, like
+// a laddered queue entry; `npc:false` keeps the roster deterministic.
+const pvpMatch = (rung = null, over = {}) => new Match('chatgpt', 'openclaw', () => 0.5, 'warfront', {
+  mode: 'cocs', ...(rung ? {rung} : {}), botCount: 3, humanCount: 1, timeLimit: 300, ...over,
+});
+const coopMatch = () => new Match('chatgpt', 'openclaw', mulberry32(11), 'warfront', {
+  mode: 'cocs-coop', botCount: 2, humanCount: 4, aiSeats: true, timeLimit: 900,
+});
+const node = (state, id) => state.nodes.find(entry => entry.id === id);
+const step = (match, ticks) => { for (let i = 0; i < ticks && !match.over; i++) match.step(DT, {inputs: {}}); };
+
+// ---------------------------------------------------------------------------
+// Rung ladder.
+// ---------------------------------------------------------------------------
+test('the 4v4 and 8v8 rungs publish the section 3.1 seat, role and economy data', () => {
+  assert.deepEqual(COCS_RUNG_IDS, ['4v4', '8v8']);
+  assert.equal(cocsRung('4v4'), COCS_RUNGS['4v4']);
+  assert.equal(cocsRung(' 8V8 '), COCS_RUNGS['8v8'], 'rung ids resolve case-insensitively');
+  assert.equal(cocsRung('12v12'), null, 'the gated flagship is not a rung row');
+  assert.equal(cocsRungForPlayers(8), '4v4');
+  assert.equal(cocsRungForPlayers(16), '8v8');
+  assert.equal(cocsRungForPlayers(24), null, '12v12 is gated, not silently opened');
+
+  const four = COCS_RUNGS['4v4'];
+  const eight = COCS_RUNGS['8v8'];
+  assert.deepEqual(four.roles, ['fighter', 'harvester', 'builder']);
+  assert.deepEqual(eight.roles, ['fighter', 'harvester', 'builder', 'scout', 'saboteur']);
+  assert.equal(four.total, 8);
+  assert.equal(eight.total, 16);
+  // The rung economy mirrors the one economy module (section 3.2/6.5).
+  for (const rung of [four, eight]) {
+    assert.equal(rung.fluxStart, FLUX_START);
+    assert.equal(rung.fluxCap, FLUX_CAP);
+    assert.equal(rung.threads, 3);
+    assert.deepEqual(rung.live, {opening: 3, max: 5, endgame: 5});
+  }
+  // The allow-list gate: 4v4 can never field SCOUT or SABOTEUR.
+  assert.equal(cocsRoleAllowed('4v4', 'scout'), false);
+  assert.equal(cocsRoleAllowed('4v4', 'saboteur'), false);
+  assert.equal(cocsRoleAllowed('4v4', 'fighter'), true);
+  assert.equal(cocsRoleAllowed('8v8', 'saboteur'), true);
+  assert.equal(cocsRoleAllowed(null, 'saboteur'), true, 'an un-laddered practice match keeps all five');
+  assert.deepEqual(cocsRungRoles('4v4'), ['fighter', 'harvester', 'builder']);
+  // Bot fill keeps a stable ratio to the rung's published total.
+  assert.equal(cocsRungFill('4v4', 8), 0);
+  assert.equal(cocsRungFill('8v8', 8), 8);
+  assert.equal(cocsRungFill('8v8', 16), 0);
+  assert.equal(cocsRungMeetsMinimum('4v4', 8), true);
+  assert.equal(cocsRungMeetsMinimum('8v8', 7), false, 'below the 4v4 floor the queue falls back, never auto-starts');
+  assert.equal(cocsRungMeetsMinimum('8v8', 8), true);
+});
+
+test('a rung rides the normalized config, and every other mode stays rung-free', () => {
+  assert.equal(normalizeConfig({mode: 'cocs', rung: '8v8'}).rung, '8v8');
+  assert.equal(normalizeConfig({mode: 'cocs', rung: 'nonsense'}).rung, undefined);
+  assert.equal(normalizeConfig({mode: 'cocs'}).rung, undefined, 'an un-laddered practice match is untouched');
+  assert.equal(normalizeConfig({mode: 'cocs-coop', rung: '8v8'}).rung, undefined, 'co-op never has a rung');
+  assert.equal(normalizeConfig({mode: 'deathmatch', rung: '8v8'}).rung, undefined);
+  assert.equal(cocsRungOf({rung: '4v4'}), '4v4');
+  assert.equal(cocsRungOf({}), null);
+  // `normalizeConfig(null)` still deep-equals the frozen default.
+  assert.deepEqual(normalizeConfig(null), DEFAULT_CONFIG);
+  const cocsMode = GAME_MODES.find(mode => mode.id === 'cocs');
+  assert.equal(cocsMode.rules.maxBots, 16, 'the 8v8 rung budgets 16 seats');
+  assert.equal(cocsMode.rules.rungs, COCS_RUNGS);
+  assert.equal(GAME_MODES.find(mode => mode.id === 'cocs-coop').rules.rungs, undefined);
+});
+
+test('the rung gates which roles the board can spawn, and co-op keeps its own set', () => {
+  assert.deepEqual(COOP_ROLE_IDS, ['fighter', 'harvester', 'builder', 'scout']);
+  assert.deepEqual(PVP_ROLE_IDS, ['fighter', 'harvester', 'builder', 'scout', 'saboteur']);
+  assert.ok(coopRole('saboteur'), 'SABOTEUR is in the shared role table');
+
+  const four = pvpMatch('4v4');
+  assert.equal(four.objectiveState.rung, '4v4');
+  assert.deepEqual(four.objectiveState.roleAllow, ['fighter', 'harvester', 'builder']);
+  assert.equal(cocsRoleSpawn(four, four.objectiveState, 0, 'saboteur'), null, 'no SABOTEUR on 4v4');
+  assert.equal(cocsRoleSpawn(four, four.objectiveState, 0, 'scout'), null, 'the role board never doubles the SCAN scout');
+  assert.equal(spawnScout(four, four.objectiveState, 0, node(four.objectiveState, 'front-e')), null, '4v4 cannot spawn a SCAN scout');
+  assert.ok(cocsRoleSpawn(four, four.objectiveState, 0, 'fighter'), 'a 4v4-legal role spawns');
+
+  const eight = pvpMatch('8v8');
+  assert.equal(eight.objectiveState.rung, '8v8');
+  assert.deepEqual(eight.objectiveState.roleAllow, ['fighter', 'harvester', 'builder', 'scout', 'saboteur']);
+  assert.ok(cocsRoleSpawn(eight, eight.objectiveState, 1, 'saboteur'), '8v8 fields SABOTEUR');
+  assert.equal(cocsRoleAllowedOnRung(eight.objectiveState, 'saboteur'), true);
+  assert.equal(cocsRoleAllowedOnRung(four.objectiveState, 'saboteur'), false);
+
+  // The duty board never queues a role the rung excludes: 4v4 spawns only the
+  // three-role set; 8v8 can rotate SABOTEUR in.
+  const board = pvpMatch('4v4');
+  for (let tick = 1; tick <= 2400; tick++) {
+    board.objectiveState.tick = tick;
+    cocsDutyRolePolicy(board, board.objectiveState, {tick});
+    for (const team of [0, 1]) {
+      assert.equal((board.objectiveState.roleStats[team].byRole.saboteur ?? 0), 0, `4v4 team ${team} never spawns SABOTEUR`);
+      assert.equal((board.objectiveState.roleStats[team].byRole.scout ?? 0), 0, `4v4 team ${team} never spawns SCOUT`);
+    }
+  }
+});
+
+// ---------------------------------------------------------------------------
+// Two-team command.
+// ---------------------------------------------------------------------------
+test('each team runs its own duty Chief with its own FLUX, THREADS and orders', () => {
+  const match = pvpMatch('8v8');
+  const state = match.objectiveState;
+  step(match, 4);
+  const command0 = cocsTeamCommand(match, state, 0);
+  const command1 = cocsTeamCommand(match, state, 1);
+  assert.deepEqual(command0.chief, 'chief-0');
+  assert.deepEqual(command1.chief, 'chief-1');
+  assert.equal(command0.team, 0);
+  assert.equal(command1.team, 1);
+  assert.deepEqual(command0.threads.cap, 3);
+  assert.deepEqual(command1.threads.cap, 3);
+  assert.equal(command0.flux, state.flux[0]);
+  assert.equal(command1.flux, state.flux[1]);
+
+  // Per-team orders are independent: a team-0 ATTACK task never becomes team 1's.
+  const stateTask = {verb: 'ATTACK', nodeId: 'front-e', tick: 1, until: 9999, peerId: 'chief-0', cardId: '0-1'};
+  state.tasks[0] = stateTask;
+  assert.equal(cocsTeamCommand(match, state, 0).task.nodeId, 'front-e');
+  assert.equal(cocsTeamCommand(match, state, 1).task, null);
+});
+
+test('two-team order processing is arrival-order independent', () => {
+  const orders = [
+    {tick: 1, peerId: 'c', cardId: '3', team: 1, verb: 'ATTACK', target: 'front-e'},
+    {tick: 1, peerId: 'a', cardId: '1', team: 0, verb: 'ATTACK', target: 'front-w'},
+    {tick: 1, peerId: 'b', cardId: '2', team: 0, verb: 'HOLD', target: 'front-w'},
+    {tick: 1, peerId: 'a', cardId: '0', team: 1, verb: 'HOLD', target: 'front-e'},
+  ];
+  const runOrder = list => {
+    const match = pvpMatch('8v8');
+    const state = match.objectiveState;
+    state.pendingOrders = [...list];
+    // Consume both teams' tasks so the last valid order per team wins.
+    match.step(DT, {inputs: {}});
+    return JSON.stringify({0: state.tasks[0], 1: state.tasks[1]});
+  };
+  const forward = runOrder(orders);
+  const reversed = runOrder([...orders].reverse());
+  assert.equal(forward, reversed, 'reversing arrival order cannot change either team task');
+});
+
+test('the per-team role board spawns deterministically from the rung cadence', () => {
+  const first = pvpMatch('8v8');
+  const second = pvpMatch('8v8');
+  for (const match of [first, second]) {
+    for (let tick = 1; tick <= 1200 && !match.over; tick++) match.step(DT, {inputs: {}});
+  }
+  const board0 = cocsRoleBoardSnapshot(first, first.objectiveState, 0);
+  const board1 = cocsRoleBoardSnapshot(second, second.objectiveState, 0);
+  assert.deepEqual(board0, board1, 'a fixed seed yields a byte-identical role board');
+  // The live roster never exceeds the board's target concurrency.
+  for (const team of [0, 1]) {
+    assert.ok(cocsRoleActors(first, first.objectiveState, team).length <= COCS_ROLE_TARGET_CONCURRENCY);
+    assert.equal(cocsThreadsUsed(first, first.objectiveState, team), cocsTeamCommand(first, first.objectiveState, team).threads.used);
+  }
+});
+
+// ---------------------------------------------------------------------------
+// SABOTEUR.
+// ---------------------------------------------------------------------------
+test('SABOTEUR ships the SAPPER and SIPHON abilities and is 8v8-only', () => {
+  const abilities = ROLE_ABILITIES.saboteur;
+  assert.ok(Array.isArray(abilities) && abilities.length === 2);
+  assert.equal(roleAbility('saboteur', 'ATTACK').label, 'SAPPER');
+  assert.equal(roleAbility('saboteur', 'SIPHON').label, 'SIPHON');
+  assert.ok(roleAbility('saboteur', 'ATTACK').enemyOnly);
+  assert.ok(roleAbility('saboteur', 'SIPHON').enemyOnly);
+  const def = coopRole('saboteur');
+  assert.equal(def.spawnCost, 14);
+  assert.equal(def.health, 90);
+  assert.equal(def.lifespanSeconds, 90);
+});
+
+test('SAPPER cuts an enemy link, pays the denial bounty and expires its window', () => {
+  const match = pvpMatch('8v8');
+  const state = match.objectiveState;
+  const saboteur = cocsRoleSpawn(match, state, 0, 'saboteur', 'front-e');
+  assert.ok(saboteur);
+  // Make front-e enemy-owned and connected so the cut actually denies income.
+  const frontE = node(state, 'front-e');
+  frontE.owner = 1;
+  assert.equal(frontE.owner, 1);
+  saboteur.x = frontE.x; saboteur.z = frontE.z; saboteur.y = frontE.y;
+  const fluxBefore = state.flux[0];
+  const result = cocsSapper(match, state, saboteur, 'front-e');
+  assert.equal(result.ok, true);
+  assert.ok(state.cuts.includes('front-e'), 'the sappered node is cut');
+  assert.ok(state.sabotage['front-e'], 'the sapper window is tracked');
+  assert.ok(state.flux[0] > fluxBefore, 'the cut pays the section 9.2 bounty');
+  assert.equal(result.denied, 1, 'front-e itself is denied');
+
+  // A second sapper on an already-cut node is refused (the siphon path owns it).
+  assert.equal(cocsSapper(match, state, saboteur, 'front-e').ok, false);
+  // The window expires and the link is repaired on the shared tick clock.
+  state.tick = state.sabotage['front-e'].until + 1;
+  step(match, 1);
+  assert.equal(state.cuts.includes('front-e'), false, 'the cut cannot outlive its window');
+});
+
+test('SIPHON moves enemy FLUX into the saboteur team and cannot go negative', () => {
+  const match = pvpMatch('8v8');
+  const state = match.objectiveState;
+  const saboteur = cocsRoleSpawn(match, state, 0, 'saboteur', 'econ-e');
+  const econ = node(state, 'econ-e');
+  econ.owner = 1;
+  saboteur.x = econ.x; saboteur.z = econ.z;
+  state.flux[1] = 40;
+  const mine = state.flux[0];
+  const taken = cocsSiphon(match, state, saboteur, 'econ-e');
+  assert.equal(taken.ok, true);
+  assert.equal(taken.flux, COCS_SIPHON_FLUX);
+  assert.equal(state.flux[1], 28);
+  assert.equal(state.flux[0], mine + COCS_SIPHON_FLUX);
+  // Empty enemy pool: bounded, no negative FLUX.
+  state.flux[1] = 1;
+  assert.equal(cocsSiphon(match, state, saboteur, 'econ-e').flux, 1);
+  assert.equal(state.flux[1], 0);
+  assert.equal(cocsSiphon(match, state, saboteur, 'econ-e').ok, false);
+});
+
+test('the SABOTEUR act selects SAPPER on a live node and SIPHON on a cut one', () => {
+  const match = pvpMatch('8v8');
+  const state = match.objectiveState;
+  const saboteur = cocsRoleSpawn(match, state, 0, 'saboteur', 'econ-e');
+  const econ = node(state, 'econ-e');
+  econ.owner = 1;
+  saboteur.x = econ.x; saboteur.z = econ.z;
+  const sapper = cocsSaboteurAct(match, state, saboteur);
+  assert.equal(sapper.ok, true);
+  assert.ok(state.sabotage['econ-e']);
+  // Now cut: the same actor siphons instead of re-cutting.
+  state.tick = 0;
+  state.cuts.push('econ-e');
+  state.flux[1] = 30;
+  const siphon = cocsSaboteurAct(match, state, saboteur);
+  assert.equal(siphon.ok, true);
+  assert.equal(siphon.flux, COCS_SIPHON_FLUX);
+});
+
+// ---------------------------------------------------------------------------
+// Visibility shape (section 11.4).
+// ---------------------------------------------------------------------------
+test('intel/contacts are computed per team and never share one value', () => {
+  const match = pvpMatch('8v8');
+  const state = match.objectiveState;
+  state.flux[0] = 99;
+  state.flux[1] = 11;
+  const view0 = cocsTeamVisibility(match, state, 0);
+  const view1 = cocsTeamVisibility(match, state, 1);
+  assert.notEqual(view0.intel, view1.intel, 'each team gets its own intel object');
+  assert.notEqual(view0.contacts, view1.contacts, 'each team gets its own contacts array');
+  assert.equal(view0.intel.team, 0);
+  assert.equal(view1.intel.team, 1);
+  assert.equal(view0.intel.flux, 99);
+  assert.equal(view1.intel.flux, 11);
+  for (const intel of [view0.intel, view1.intel]) {
+    for (const key of ['team', 'rung', 'knownNodes', 'enemyNodes', 'contacts', 'spots', 'flux', 'cutNodes']) {
+      assert.ok(Object.hasOwn(intel, key), `intel.${key} is part of the shape`);
+    }
+  }
+  const snapshot = cocsSnapshot(match);
+  assert.equal(snapshot.intel[0].team, 0);
+  assert.equal(snapshot.intel[1].team, 1);
+  assert.ok(Array.isArray(snapshot.contacts[0]));
+  assert.ok(Array.isArray(snapshot.contacts[1]));
+});
+
+test('PvP snapshot exposes rung/intel/contacts/roleBoard and co-op exposes none of them', () => {
+  const pvp = pvpMatch('4v4');
+  const pvpSnap = cocsSnapshot(pvp);
+  assert.equal(pvpSnap.rung, '4v4');
+  assert.ok(pvpSnap.intel && pvpSnap.contacts && pvpSnap.roleBoard);
+  assert.deepEqual(pvpSnap.roleBoard[0].allow, ['fighter', 'harvester', 'builder']);
+
+  const coop = coopMatch();
+  const coopSnap = cocsSnapshot(coop);
+  assert.equal(coopSnap.rung, undefined);
+  assert.equal(coopSnap.intel, undefined);
+  assert.equal(coopSnap.contacts, undefined);
+  assert.equal(coopSnap.roleBoard, undefined);
+  assert.equal(coop.objectiveState.rung, null);
+  assert.equal(coop.objectiveState.roleAllow, null);
+  assert.equal(coopSnap.coop, true, 'co-op keeps its own director/command surface');
+});
+
+// ---------------------------------------------------------------------------
+// Sweep harness.
+// ---------------------------------------------------------------------------
+test('the PvP sweep reports its rung/gates and alarms only team dominance', async () => {
+  const {run, summarise, pvpBalanceAlarms} = await import('../scripts/cocs-validate.mjs');
+  assert.deepEqual(
+    pvpBalanceAlarms([{winner: 0, overReason: 'dominance'}, {winner: 0, overReason: 'dominance'}, {winner: 0, overReason: 'dominance'}, {winner: 0, overReason: 'dominance'}]),
+    ['team-dominance:0/4'],
+  );
+  assert.deepEqual(
+    pvpBalanceAlarms([{winner: 0, overReason: 'dominance'}, {winner: 1, overReason: 'dominance'}, {winner: 0, overReason: 'time'}, {winner: 1, overReason: 'time'}]),
+    [],
+    'a shared dominance win reason is the designed end condition, not a dominant strategy',
+  );
+  const runs = [run(1, {seconds: 20, rung: '4v4'})];
+  const summary = summarise(runs);
+  assert.equal(summary.result.rung, '4v4');
+  assert.equal(summary.result.sample, 1);
+  assert.ok(summary.economy.rolesByRole, 'the sweep reports the per-role spawn tally');
+  assert.deepEqual(summary.gate, {strictContest: '>=35%', fightPoint: '>=60%', trailingHalfWins: '>=25%'});
+});

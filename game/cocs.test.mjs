@@ -282,8 +282,8 @@ test('cocsSnapshot is id-keyed and round-trips through snapshotDelta', () => {
  const state = match.objectiveState;
  const base = cocsSnapshot(match);
  assert.deepEqual(Object.keys(base).sort(), [
-  'flux', 'fluxCap', 'fluxIncome', 'fluxSpent', 'fluxUpkeep', 'liveNodeIds', 'neglect',
-  'nodes', 'orderStats', 'req', 'scanRadius', 'scans', 'scores', 'scoutCap',
+  'contacts', 'flux', 'fluxCap', 'fluxIncome', 'fluxSpent', 'fluxUpkeep', 'intel', 'liveNodeIds', 'neglect',
+  'nodes', 'orderStats', 'req', 'roleBoard', 'rung', 'sabotage', 'scanRadius', 'scans', 'scores', 'scoutCap',
   'scoutStats', 'scouts', 'spotBonus', 'spotSeconds', 'spots', 'tick', 'traversal', 'winner',
  ]);
  assert.equal(base.nodes.find(entry => entry.id === 'front-w').archetype, 'front');

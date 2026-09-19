@@ -37,13 +37,14 @@
 //   * all timers are tick counts at `RULES.dt=1/60`, no wall-clock.
 // ---------------------------------------------------------------------------
 
-import {modeRule} from './config.mjs';
+import {modeRule, cocsRung, cocsRungOf} from './config.mjs';
 import {RULES} from './data.mjs';
 import {terrainSupportAt} from './terrain.mjs';
 import {
   FLUX_CAP, FLUX_PASSIVE_PER_SECOND, FLUX_START, ORDER_REWARD, REQ_EARN, SUBAGENTS,
   neglectPassiveFlux, neglectState, neglectTick, scoreEvent, subagentUpkeep,
 } from './cocs-economy.mjs';
+import {PVP_ROLE_IDS, coopRole, roleAbility} from './cocs-roles.mjs';
 import {createTraversalState, stepCocsTraversal, cocsTraversalSnapshot} from './cocs-traversal.mjs';
 import {createTerminalState, stepCocsTerminals, cocsTerminalsSnapshot} from './cocs-terminals.mjs';
 import {COOP_ECONOMY} from './cocs-difficulty.mjs';
@@ -74,6 +75,25 @@ export const COCS_SCAN_RADIUS = 12;
 export const COCS_SCAN_ARRIVE = 4;
 export const COCS_SPOT_SECONDS = 8;
 export const COCS_SPOT_DAMAGE_BONUS = 0.15;
+// ---------------------------------------------------------------------------
+// PvP-1 two-team command + role board (§3.1, §8.1, §12.3b).
+//   * `COCS_ROLE_THREAD_BASE` is the §5.3 base concurrency (3), matching every
+//     rung table; a rung overrides it and the PvP command caps concurrent
+//     subagents/scouts at it.
+//   * `COCS_ROLE_SPAWN_INTERVAL` is the duty board's deterministic role-unit
+//     cadence (6 s). No RNG, no clock: every team issues on the same tick.
+//   * `COCS_ROLE_TARGET_CONCURRENCY` keeps the board from flooding the lattice:
+//     each team fields at most two role units on top of the free scout.
+//   * `COCS_SABOTAGE_SECONDS` is the SABOTEUR sapper cut window when no ability
+//     table value is present.
+// ---------------------------------------------------------------------------
+export const COCS_ROLE_THREAD_BASE = 3;
+export const COCS_ROLE_SPAWN_INTERVAL = 360;
+export const COCS_ROLE_TARGET_CONCURRENCY = 2;
+export const COCS_SABOTAGE_SECONDS = 45;
+export const COCS_SIPHON_FLUX = 12;
+export const COCS_ROLE_REACH = 3;
+export const COCS_VISIBILITY_TEAMS = Object.freeze([0, 1]);
 // Objective score banked when a node flips. Objectives are primary (§6A.4).
 export const COCS_CAPTURE_POINTS = Object.freeze({front: 10, economy: 15, relay: 20, hq: 0, array: 50});
 export const COCS_OPENING_FRACTION = 0.22;
@@ -304,9 +324,20 @@ export function cocsTemplate(mode, arena, config = {}) {
   // kind. It raises the one-sided economy, seeds the Operations Director state
   // and adds the HQ-siege loss. Non-coop `cocs` keeps its exact V0b constants.
   const coop = rules.coop === true;
+  // PvP-1 rung ladder (§3.1). `cocs-coop` is a single human team and never
+  // consults a rung; a PvP `cocs` match with no explicit rung stays on the full
+  // five-role launch set (a practice match, not a laddered queue entry). The
+  // rung owns the opening economy, the live-node floor and the role allow-list.
+  const rungId = coop ? null : cocsRungOf(config);
+  const rung = cocsRung(rungId);
   const economy = coop
     ? COOP_ECONOMY
-    : {fluxStart: FLUX_START, fluxCap: FLUX_CAP, fluxPassivePerSecond: FLUX_PASSIVE_PER_SECOND, reqMultiplier: 1};
+    : {
+      fluxStart: rung ? rung.fluxStart : FLUX_START,
+      fluxCap: rung ? rung.fluxCap : FLUX_CAP,
+      fluxPassivePerSecond: FLUX_PASSIVE_PER_SECOND,
+      reqMultiplier: 1,
+    };
   const authored = readAuthoredLattice(arena);
   const source = authored ?? synthesizeLattice(arena);
   const captureSeconds = Math.max(0.5, num(config?.objective?.captureSeconds ?? objective.captureSeconds, DEFAULT_CAPTURE_SECONDS));
@@ -318,6 +349,11 @@ export function cocsTemplate(mode, arena, config = {}) {
   // overridden per mode/config.
   const majority = Math.floor(capturable.length / 2) + 1;
   const dominanceCount = Math.max(1, Math.round(num(objective.dominanceCount, majority)));
+  // A rung may scale the dominance window (§3.1 Skirmish shape): a larger 8v8
+  // lattice gets a longer sustained hold so a swallowed lead stays recoverable,
+  // while 4v4 keeps the published 90/45. This is content timing, never HP/damage.
+  const dominanceHold = Math.max(1, rung ? rung.dominance.hold : num(objective.dominanceHold, 90));
+  const dominanceFastSeconds = Math.max(1, rung ? rung.dominance.fast : num(objective.dominanceFast, 45));
   // The fast hold needs one node beyond the bare majority (4 of 5 on the V0a
   // slice); the sustained hold is the outright-majority window itself. Either
   // timer resets the moment the majority is lost, so a swallowed lead is
@@ -336,14 +372,16 @@ export function cocsTemplate(mode, arena, config = {}) {
     phase: 'opening',
     endgame: false,
     captureSeconds,
-    liveMin: Math.max(1, Math.round(num(objective.liveOpening, 3))),
-    liveMax: Math.max(1, Math.round(num(objective.liveMax, 5))),
-    endgameLive: Math.max(1, Math.round(num(objective.endgameLive, 5))),
+    // The rung owns the live-node floor when present (§3.1); both published
+    // rungs match the mode rules, so an un-laddered match is unchanged.
+    liveMin: Math.max(1, Math.round(rung ? rung.live.opening : num(objective.liveOpening, 3))),
+    liveMax: Math.max(1, Math.round(rung ? rung.live.max : num(objective.liveMax, 5))),
+    endgameLive: Math.max(1, Math.round(rung ? rung.live.endgame : num(objective.endgameLive, 5))),
     dominanceCount,
     dominanceFastCount,
-    dominanceHold: Math.max(1, num(objective.dominanceHold, 90)),
-    dominanceFast: Math.max(1, num(objective.dominanceFast, 45)),
-    dominance: {team: null, progress: 0, target: Math.max(1, num(objective.dominanceHold, 90)), fast: false},
+    dominanceHold,
+    dominanceFast: dominanceFastSeconds,
+    dominance: {team: null, progress: 0, target: dominanceHold, fast: false},
     scores: {0: 0, 1: 0},
     income: {0: 0, 1: 0},
     // --- §6.5/§6A.5 two-layer economy ---------------------------------------
@@ -375,6 +413,26 @@ export function cocsTemplate(mode, arena, config = {}) {
     pendingOrders: [],
     orderLog: [],
     orderTtlTicks: Math.max(1, Math.round(ORDER_TTL_SECONDS / (RULES.dt || 1 / 60))),
+    // --- PvP-1 rung ladder + two-team command + role board -------------------
+    // `rung` is null for co-op and for an un-laddered practice `cocs`; the role
+    // allow-list is then the full launch set. `threads` is the §5.3 per-team
+    // concurrency budget and `roleSpawns` the id-sorted live-role roster.
+    rung: rungId,
+    roleAllow: coop ? null : [...(rung ? rung.roles : PVP_ROLE_IDS)],
+    threads: {
+      0: {used: 0, cap: rung ? rung.threads : COCS_ROLE_THREAD_BASE},
+      1: {used: 0, cap: rung ? rung.threads : COCS_ROLE_THREAD_BASE},
+    },
+    roleSpawns: {0: [], 1: []},
+    roleStats: {
+      0: {spawned: 0, killed: 0, expired: 0, byRole: {}},
+      1: {spawned: 0, killed: 0, expired: 0, byRole: {}},
+    },
+    // SABOTEUR sapper windows, keyed by node id: {team, actor, until}. The
+    // sapper cuts through the shared `cuts` list; this map only owns the repair
+    // timer so a cut cannot outlive its window.
+    sabotage: {},
+    siphonStats: {0: {count: 0, flux: 0}, 1: {count: 0, flux: 0}},
     tick: 0,
     front: null,
     arrayWinner: null,
@@ -728,6 +786,9 @@ function scoutTargetPoint(state, nodeId) {
 // the cap is already filled.
 export function spawnScout(match, state, team, nodeId) {
   if (!match || !state) return null;
+  // PvP-1 rung allow-list: a 4v4 rung fields FIGHTER/HARVESTER/BUILDER only, so
+  // its board can never spawn the SCOUT. A null rung (practice/co-op) allows it.
+  if (!cocsRoleAllowedOnRung(state, COCS_SCOUT.role)) return null;
   if (activeScoutActor(match, state, team)) return null;
   if (num(state.flux?.[team], 0) < COCS_SCOUT.spawnCost) return null;
   const actor = ensureScoutSlot(match, state, team);
@@ -874,6 +935,412 @@ function stepScoutTeam(match, state, team, dt) {
     if (!home || Math.hypot(actor.x - home.x, actor.z - home.z) <= COCS_SCAN_ARRIVE) retireScout(match, state, team, actor, 'return');
   }
   void dt;
+}
+
+// ===========================================================================
+// PvP-1: two-team command, the per-team role board and per-team visibility.
+//
+// Every team runs its own duty Chief (`chief-0` / `chief-1`), its own FLUX and
+// THREADS budget and its own role roster. Nothing here is shared between the
+// teams: the revision-1 bug where both sides read one computed value cannot
+// occur because `cocsTeamCommand` / `cocsTeamVisibility` are pure functions of
+// `(match, state, team)`. All lists are id-sorted, every timer is a tick count
+// at `RULES.dt`, and no code path draws the RNG.
+// ===========================================================================
+const nodeIdSort = (a, b) => String(a?.id ?? '').localeCompare(String(b?.id ?? ''));
+const SABOTEUR_INTERVAL_TICKS = Math.max(1, Math.round(3 / (RULES.dt || 1 / 60)));
+
+/** Living role-board actors for one team (excludes the free SCAN scout). */
+export function cocsRoleActors(match, state, team) {
+  const list = state?.roleSpawns?.[team] ?? [];
+  const out = [];
+  for (const id of list) {
+    const actor = match?.actors?.[id];
+    if (actor && actor.health > 0 && actor.isSubagent === true && actor.subagentTeam === team) out.push(actor);
+  }
+  return out;
+}
+
+/** THREADS in use by one team: every living subagent plus the SCAN scout. */
+export function cocsThreadsUsed(match, state, team) {
+  let used = 0;
+  for (const actor of match?.actors ?? []) {
+    if (!actor || actor.health <= 0) continue;
+    if (actor.team !== team) continue;
+    if (actor.isSubagent === true || actor.isScout === true) used++;
+  }
+  return used;
+}
+
+/** The published allow-list gate. A null rung (co-op / practice) allows all. */
+export function cocsRoleAllowedOnRung(state, role) {
+  const allow = state?.roleAllow;
+  if (!Array.isArray(allow)) return true;
+  return allow.includes(String(role ?? '').trim().toLowerCase());
+}
+
+/**
+ * One team's command readout (section 5.3 + 5.9). Pure: no clock, no RNG. The
+ * duty Chief for `team` reads exactly this, so FLUX and THREADS can never be
+ * spent by the other team's board.
+ */
+export function cocsTeamCommand(match, state, team) {
+  if (!state || state.kind !== COCS_KIND) return null;
+  const t = team === 0 || team === 1 ? Number(team) : 0;
+  const cap = num(state.threads?.[t]?.cap, COCS_ROLE_THREAD_BASE);
+  const used = cocsThreadsUsed(match, state, t);
+  const task = state.tasks?.[t] ?? null;
+  return {
+    team: t,
+    rung: state.rung ?? null,
+    chief: `chief-${t}`,
+    flux: num(state.flux?.[t], 0),
+    threads: {used, cap, free: Math.max(0, cap - used)},
+    roles: [...(state.roleAllow ?? [])],
+    task: task ? {verb: task.verb, nodeId: task.nodeId, until: task.until} : null,
+    squads: cocsRoleActors(match, state, t).map(actor => ({
+      id: actor.id, role: actor.subagentRole ?? null, health: num(actor.health, 0),
+      max: num(actor.maxHealth, 0), nodeId: actor.subagentNode ?? null,
+    })),
+  };
+}
+
+// A deterministic hint node for a freshly-spawned role. Saboteurs and
+// harvesters get their thematic target; other roles take the team's front.
+function cocsRoleTargetNode(state, team, role) {
+  const enemy = 1 - team;
+  const capturable = [...capturableNodes(state)].sort(nodeIdSort);
+  if (role === 'saboteur') {
+    const enemyOwned = capturable.filter(node => node.owner === enemy && (node.archetype === 'relay' || node.archetype === 'economy'));
+    return (enemyOwned[0] ?? capturable.find(node => node.owner === enemy) ?? null)?.id ?? null;
+  }
+  if (role === 'harvester') {
+    return (capturable.find(node => node.owner === team && node.archetype === 'economy')
+      ?? capturable.find(node => node.owner === team) ?? null)?.id ?? null;
+  }
+  if (role === 'builder') {
+    return (capturable.find(node => node.owner === team) ?? capturable.find(node => node.owner === null) ?? null)?.id ?? null;
+  }
+  return frontState(state).byTeam?.[team]?.nodeId ?? capturable.find(node => node.owner === enemy)?.id ?? null;
+}
+
+/**
+ * Spawn one PvP role unit for `team`. The allow-list is the hard gate: a 4v4
+ * rung can never field SCOUT or SABOTEUR, and an 8v8 rung can. Returns the new
+ * actor or null when the rung/economy/THREADS gate refuses.
+ */
+export function cocsRoleSpawn(match, state, team, roleId, nodeId = null) {
+  if (!match || !state || state.coopMode === true) return null;
+  if (team !== 0 && team !== 1) return null;
+  const key = String(roleId ?? '').trim().toLowerCase();
+  const def = coopRole(key);
+  if (!def) return null;
+  if (!cocsRoleAllowedOnRung(state, key)) return null;
+  // Scouts ride the SCAN path (`spawnScout`); the role board never duplicates.
+  if (key === 'scout') return null;
+  const cap = num(state.threads?.[team]?.cap, COCS_ROLE_THREAD_BASE);
+  if (cocsThreadsUsed(match, state, team) >= cap) return null;
+  const cost = num(def.spawnCost, 0);
+  if (num(state.flux?.[team], 0) + 1e-9 < cost) return null;
+  const actor = match.actor(nextActorId(match), 'chatgpt', 'openclaw');
+  actor.team = team;
+  actor.isNpc = true;
+  actor.isSubagent = true;
+  actor.subagentRole = key;
+  actor.subagentTeam = team;
+  actor.subagentNode = nodeId ?? null;
+  actor.subagentExpireTick = num(state.tick, 0) + Math.max(1, Math.round(num(def.lifespanSeconds, 90) / (RULES.dt || 1 / 60)));
+  actor.name = def.name;
+  actor.meleeDamage = 0;
+  actor.npcProfile = {
+    health: def.health, armor: def.armor, speedMult: 1,
+    damageMult: key === 'fighter' || key === 'saboteur' ? 1 : 0.15,
+    scale: 0.8, color: team === 0 ? '#7fd4ff' : '#ffb27f', accent: '#0b1a24', points: 0,
+  };
+  if (!actor.bot) actor.bot = {route: [], think: 0, target: -1, memory: 0, reaction: 0, stuck: 0, last: {x: 0, y: 0, z: 0}, state: 'roam', patrol: 0, flank: null, flankDone: false, recover: 0, suppressed: 0, threat: -1, standoff: null, strafeReverse: -99};
+  match.actors.push(actor);
+  match.spawn(actor);
+  actor.maxHealth = def.health;
+  actor.health = actor.maxHealth;
+  state.flux[team] = num(state.flux[team], 0) - cost;
+  state.fluxSpent[team] = num(state.fluxSpent[team], 0) + cost;
+  (state.roleSpawns[team] ??= []).push(actor.id);
+  const stats = state.roleStats[team] ?? (state.roleStats[team] = {spawned: 0, killed: 0, expired: 0, byRole: {}});
+  stats.spawned = num(stats.spawned, 0) + 1;
+  stats.byRole[key] = num(stats.byRole[key], 0) + 1;
+  match.emit?.('cocs-role-spawn', {team, role: key, actor: actor.id, cost, node: nodeId ?? null});
+  return actor;
+}
+
+// The economy nodes currently linked back to `team`'s HQ. Used to price a cut
+// (`20 + 5 x deniedNodes`, section 9.2) deterministically.
+function connectedNodeIds(state, team) {
+  const out = [];
+  for (const node of capturableNodes(state)) {
+    if (node.owner !== team) continue;
+    if (connectedToHq(state, node.id, team)) out.push(node.id);
+  }
+  return out;
+}
+
+/**
+ * SABOTEUR `SAPPER` (section 8.1: "cut supply links"). Cuts the target enemy
+ * node's link for its window and pays the section 9.2 cut bounty scaled by how
+ * many downstream nodes the cut actually denies. Pure state mutation, no RNG.
+ */
+export function cocsSapper(match, state, actor, nodeId) {
+  if (!actor || actor.subagentRole !== 'saboteur' || actor.health <= 0) return {ok: false, reason: 'role'};
+  const team = actor.team;
+  if (team !== 0 && team !== 1) return {ok: false, reason: 'team'};
+  const node = nodeById(state, nodeId);
+  if (!node) return {ok: false, reason: 'target'};
+  if (node.owner !== 1 - team) return {ok: false, reason: 'target'};
+  if (Math.hypot(num(actor.x, 0) - node.x, num(actor.z, 0) - node.z) > num(node.r, 4) + COCS_ROLE_REACH) return {ok: false, reason: 'range'};
+  if ((state.sabotage ?? {})[node.id]) return {ok: false, reason: 'already-cut'};
+  const ability = roleAbility('saboteur', 'ATTACK') ?? {};
+  const seconds = num(ability.cutSeconds, COCS_SABOTAGE_SECONDS);
+  const before = new Set(connectedNodeIds(state, node.owner));
+  cutLink(state, node.id);
+  const after = new Set(connectedNodeIds(state, node.owner));
+  let denied = 0;
+  for (const id of before) if (!after.has(id)) denied++;
+  state.sabotage[node.id] = {team, actor: actor.id, until: num(state.tick, 0) + Math.max(1, Math.round(seconds / (RULES.dt || 1 / 60)))};
+  const bounty = Math.max(6, Math.min(48, num(ability.bountyBase, 20) + num(ability.bountyPerNode, 5) * denied));
+  state.flux[team] = Math.min(num(state.fluxCap, FLUX_CAP), num(state.flux[team], 0) + bounty);
+  state.fluxEarned[team] = num(state.fluxEarned[team], 0) + bounty;
+  const reward = scoreEvent({kind: 'cut', deniedNodes: denied});
+  state.scores[team] = num(state.scores[team], 0) + (typeof reward.teamOP === 'number' ? reward.teamOP : 0);
+  addActorReq(actor, reward.req);
+  actor.scoreStats.objectivePoints = num(actor.scoreStats.objectivePoints, 0) + reward.personalOP;
+  actor.scoreStats.cuts = num(actor.scoreStats.cuts, 0) + 1;
+  match?.emit?.('cocs-sapper', {team, actor: actor.id, node: node.id, seconds, denied, bounty});
+  return {ok: true, reason: null, node: node.id, denied, bounty};
+}
+
+/**
+ * SABOTEUR `SIPHON` (section 8.1 / 6.5). Pulls FLUX out of the enemy pool on an
+ * already-cut enemy node; a deterministic, bounded denial with no RNG.
+ */
+export function cocsSiphon(match, state, actor, nodeId) {
+  if (!actor || actor.subagentRole !== 'saboteur' || actor.health <= 0) return {ok: false, reason: 'role'};
+  const team = actor.team;
+  if (team !== 0 && team !== 1) return {ok: false, reason: 'team'};
+  const node = nodeById(state, nodeId);
+  if (!node || node.owner !== 1 - team) return {ok: false, reason: 'target'};
+  const ability = roleAbility('saboteur', 'SIPHON') ?? {};
+  const amount = Math.max(0, num(ability.flux, COCS_SIPHON_FLUX));
+  const enemy = 1 - team;
+  const take = Math.min(amount, num(state.flux?.[enemy], 0));
+  if (!(take > 0)) return {ok: false, reason: 'empty'};
+  state.flux[enemy] = num(state.flux[enemy], 0) - take;
+  state.flux[team] = Math.min(num(state.fluxCap, FLUX_CAP), num(state.flux[team], 0) + take);
+  const stats = state.siphonStats[team] ?? (state.siphonStats[team] = {count: 0, flux: 0});
+  stats.count = num(stats.count, 0) + 1;
+  stats.flux = num(stats.flux, 0) + take;
+  addActorReq(actor, num(ability.req, 0));
+  actor.scoreStats.siphons = num(actor.scoreStats.siphons, 0) + 1;
+  match?.emit?.('cocs-siphon', {team, actor: actor.id, node: node.id, enemy, flux: take});
+  return {ok: true, reason: null, node: node.id, flux: take};
+}
+
+/** Use the SABOTEUR ability on the best target currently in reach. */
+export function cocsSaboteurAct(match, state, actor) {
+  if (!actor || actor.subagentRole !== 'saboteur' || actor.health <= 0) return null;
+  const team = actor.team;
+  if (team !== 0 && team !== 1) return null;
+  let best = null;
+  let bestDistance = Infinity;
+  for (const node of capturableNodes(state)) {
+    if (node.owner !== 1 - team) continue;
+    if (node.archetype !== 'relay' && node.archetype !== 'economy') continue;
+    const distance = Math.hypot(num(actor.x, 0) - node.x, num(actor.z, 0) - node.z);
+    if (distance > num(node.r, 4) + COCS_ROLE_REACH) continue;
+    if (distance < bestDistance - 1e-9 || (Math.abs(distance - bestDistance) < 1e-9 && best && String(node.id) < String(best.id))) {
+      bestDistance = distance;
+      best = node;
+    }
+  }
+  if (!best) return null;
+  // A cut node is already denied: the saboteur then siphons instead of
+  // re-cutting, so both verbs are live in one deterministic rotation.
+  if ((state.cuts ?? []).includes(best.id)) return cocsSiphon(match, state, actor, best.id);
+  return cocsSapper(match, state, actor, best.id);
+}
+
+// Retire one role actor without touching roster indices. Dead/expired units stay
+// in `match.actors` with health 0 and an infinite respawn timer so the engine
+// never revives them; the slot is simply abandoned (ids are never reused).
+function retireCocsRole(match, state, team, actor, reason = 'expire') {
+  if (!actor || actor.isSubagent !== true || actor.subagentTeam !== team) return false;
+  const role = actor.subagentRole ?? null;
+  const def = coopRole(role);
+  const stats = state.roleStats[team] ?? (state.roleStats[team] = {spawned: 0, killed: 0, expired: 0, byRole: {}});
+  if (reason === 'killed') {
+    stats.killed = num(stats.killed, 0) + 1;
+    const upkeep = num(actor.subagentUpkeep, subagentUpkeep(role, 1, {hops: 0, foundries: 0}));
+    const bounty = Math.max(6, Math.min(48, Math.round(15 * upkeep)));
+    const enemy = 1 - team;
+    state.flux[enemy] = Math.min(num(state.fluxCap, FLUX_CAP), num(state.flux[enemy], 0) + bounty);
+    state.fluxEarned[enemy] = num(state.fluxEarned[enemy], 0) + bounty;
+    const reward = scoreEvent({kind: 'killSubagent'});
+    state.scores[enemy] = num(state.scores[enemy], 0) + (typeof reward.teamOP === 'number' ? reward.teamOP : 0);
+    const killer = num(actor.lastHitBy, -1) >= 0 ? match.actors[actor.lastHitBy] : null;
+    if (killer && killer.team !== team) {
+      addActorReq(killer, reward.req);
+      killer.scoreStats.objectivePoints = num(killer.scoreStats.objectivePoints, 0) + reward.personalOP;
+      killer.scoreStats.subagentKills = num(killer.scoreStats.subagentKills, 0) + 1;
+    }
+    match?.emit?.('cocs-role-killed', {team, role, actor: actor.id, killer: killer?.id ?? null, bounty});
+  } else {
+    stats.expired = num(stats.expired, 0) + 1;
+    const refund = Math.round(num(def?.spawnCost, 0) * num(def?.refundFraction, 0.4));
+    state.flux[team] = Math.min(num(state.fluxCap, FLUX_CAP), num(state.flux[team], 0) + refund);
+    state.fluxEarned[team] = num(state.fluxEarned[team], 0) + refund;
+    match?.emit?.('cocs-role-expire', {team, role, actor: actor.id, refund});
+  }
+  actor.health = 0;
+  actor.dead = 1e9;
+  actor.bot = null;
+  actor.vx = actor.vy = actor.vz = 0;
+  return true;
+}
+
+// `true` when `team` trails on the node tally or the objective score, using the
+// same signals as the W8 bot comeback (`game/cocs-bots.mjs`). Pure; the role
+// board gives a trailing team an extra thread so the fifth role is a comeback
+// option rather than a snowball lever (section 9).
+function cocsTeamBehind(state, team) {
+  const capturable = capturableNodes(state);
+  if (!capturable.length) return false;
+  let owned = 0, enemy = 0;
+  for (const node of capturable) {
+    if (node.owner === team) owned++;
+    else if (node.owner === 1 - team) enemy++;
+  }
+  const majority = Math.max(1, Math.round(state.dominanceCount ?? (Math.floor(capturable.length / 2) + 1)));
+  if (enemy > owned && enemy >= majority) return true;
+  const mine = Math.max(0, Number(state.scores?.[team]) || 0);
+  const theirs = Math.max(0, Number(state.scores?.[1 - team]) || 0);
+  return theirs > mine + 0.15 * (mine + theirs);
+}
+
+// The duty board's deterministic spawn decision. Runs on the shared
+// `COCS_ROLE_SPAWN_INTERVAL` tick. Role units are the section 9 "underdog gets
+// new options" lever, not a snowball: a team trailing on the node tally or the
+// objective score fields up to `COCS_ROLE_TARGET_CONCURRENCY` board units,
+// while a level or leading team fields none. The rotation walks the rung
+// allow-list (SCAN scouts excluded because `spawnScout` owns them). No RNG draw.
+export function cocsDutyRolePolicy(match, state, context = {}) {
+  if (!match || !state || state.kind !== COCS_KIND) return [];
+  if (state.coopMode === true || !state.rung) return [];
+  const tick = num(context.tick, num(state.tick, 0));
+  if (tick <= 0 || tick % COCS_ROLE_SPAWN_INTERVAL !== 0) return [];
+  const events = [];
+  for (const team of [0, 1]) {
+    const targetConcurrency = cocsTeamBehind(state, team) ? COCS_ROLE_TARGET_CONCURRENCY : 0;
+    if (targetConcurrency <= 0) continue;
+    if (cocsRoleActors(match, state, team).length >= targetConcurrency) continue;
+    const candidates = (state.roleAllow ?? []).filter(role => role !== 'scout');
+    if (!candidates.length) continue;
+    const serial = num(state.roleStats?.[team]?.spawned, 0);
+    const role = candidates[serial % candidates.length];
+    const target = cocsRoleTargetNode(state, team, role);
+    const actor = cocsRoleSpawn(match, state, team, role, target);
+    if (actor) events.push({team, role, actor: actor.id, node: target});
+  }
+  return events;
+}
+
+/** Per-team role board snapshot (id-keyed, delta-friendly, sorted). */
+export function cocsRoleBoardSnapshot(match, state, team) {
+  const t = team === 0 || team === 1 ? Number(team) : 0;
+  const stats = state?.roleStats?.[t] ?? {spawned: 0, killed: 0, expired: 0, byRole: {}};
+  return {
+    team: t,
+    rung: state?.rung ?? null,
+    allow: [...(state?.roleAllow ?? [])],
+    threads: {used: cocsThreadsUsed(match, state, t), cap: num(state?.threads?.[t]?.cap, COCS_ROLE_THREAD_BASE)},
+    spawned: num(stats.spawned, 0),
+    killed: num(stats.killed, 0),
+    expired: num(stats.expired, 0),
+    byRole: {...(stats.byRole ?? {})},
+    agents: cocsRoleActors(match, state, t).map(actor => ({
+      id: actor.id, role: actor.subagentRole ?? null, team: t,
+      health: num(actor.health, 0), max: num(actor.maxHealth, 0),
+      nodeId: actor.subagentNode ?? null,
+    })),
+  };
+}
+
+/**
+ * Section 11.4 per-team visibility. `intel`/`contacts` are computed separately
+ * for each team so one shared value can never leak between sides. V1 still emits
+ * every actor to every peer, so both teams receive equal values; the shape is
+ * what makes the V2 per-peer filter safe to add. Pure and id-sorted.
+ */
+export function cocsTeamVisibility(match, state, team) {
+  const t = team === 0 || team === 1 ? Number(team) : 0;
+  const contacts = [];
+  for (const actor of match?.actors ?? []) {
+    if (!actor || actor.health <= 0) continue;
+    if (actor.team !== 0 && actor.team !== 1) continue;
+    const own = actor.team === t;
+    const spot = state.spots?.[actor.id];
+    // V1 has no fog: a mark is global, so both teams read the same contact set.
+    // The per-team computation is what the V2 per-peer filter will replace.
+    const spotted = Boolean(spot && num(state.tick, 0) <= num(spot.until, 0));
+    if (!own && !spotted) continue;
+    contacts.push({
+      id: actor.id, team: actor.team, own,
+      x: num(actor.x, 0), z: num(actor.z, 0),
+      spotted, isSubagent: actor.isSubagent === true,
+      role: actor.subagentRole ?? (actor.isScout === true ? 'scout' : null),
+    });
+  }
+  contacts.sort((a, b) => a.id - b.id);
+  const nodes = (state?.nodes ?? []).map(node => ({id: node.id, owner: node.owner ?? null, live: node.live === true}));
+  const intel = {
+    team: t,
+    rung: state?.rung ?? null,
+    // V1: known == owned or live (public lattice truth), so both teams read the
+    // same values. The shape is per-team and ready for the V2 filter.
+    knownNodes: nodes.filter(node => node.owner === t || node.live).map(node => node.id),
+    enemyNodes: nodes.filter(node => node.owner === (1 - t)).map(node => node.id),
+    contacts: contacts.map(entry => entry.id),
+    spots: contacts.filter(entry => entry.spotted).map(entry => entry.id),
+    flux: num(state?.flux?.[t], 0),
+    cutNodes: [...(state?.cuts ?? [])].sort(),
+  };
+  return {intel, contacts};
+}
+
+// Advance the PvP role board one fixed step: retire dead/expired units, pay
+// bounties, run the SABOTEUR verb and expire sapper windows. Called by
+// `stepCocs` for PvP only; co-op keeps its own squad lifecycle.
+export function stepCocsRoles(match, state, dt) {
+  if (!match || !state || state.coopMode === true) return state;
+  const tick = num(state.tick, 0);
+  for (const team of [0, 1]) {
+    const list = state.roleSpawns?.[team] ?? [];
+    for (let index = list.length - 1; index >= 0; index--) {
+      const actor = match.actors?.[list[index]];
+      if (!actor || actor.isSubagent !== true || actor.subagentTeam !== team) { list.splice(index, 1); continue; }
+      if (actor.health <= 0) { retireCocsRole(match, state, team, actor, 'killed'); list.splice(index, 1); continue; }
+      if (tick >= num(actor.subagentExpireTick, Infinity)) { retireCocsRole(match, state, team, actor, 'expire'); list.splice(index, 1); continue; }
+      if (actor.subagentRole === 'saboteur' && tick >= num(actor.saboteurReadyAt, 0)) {
+        const acted = cocsSaboteurAct(match, state, actor);
+        if (acted && acted.ok) actor.saboteurReadyAt = tick + SABOTEUR_INTERVAL_TICKS;
+      }
+    }
+    state.threads[team].used = cocsThreadsUsed(match, state, team);
+  }
+  for (const nodeId of Object.keys(state.sabotage ?? {}).sort()) {
+    const entry = state.sabotage[nodeId];
+    if (!entry) continue;
+    if (tick >= num(entry.until, 0)) { repairLink(state, nodeId); delete state.sabotage[nodeId]; }
+  }
+  void dt;
+  return state;
 }
 
 // Objective presence `REQ` (§6A.5): +0.25/s while a living player stands in a
@@ -1138,6 +1605,21 @@ export function cocsSnapshot(match) {
     spotBonus: COCS_SPOT_DAMAGE_BONUS,
     // --- §6A traversal devices/depots (V0b) --------------------------------
     traversal: cocsTraversalSnapshot(state),
+    // --- PvP-1 rung / two-team command / per-team visibility (§11.4) --------
+    // Per-team `intel`/`contacts` are computed separately (so one shared value
+    // can never leak between sides), though V1 still emits equal values to both
+    // teams. Co-op keeps its own director/roles surface and adds none of these.
+    ...(state.coop ? {} : (() => {
+      const visibility0 = cocsTeamVisibility(match, state, 0);
+      const visibility1 = cocsTeamVisibility(match, state, 1);
+      return {
+        rung: state.rung ?? null,
+        intel: {0: visibility0.intel, 1: visibility1.intel},
+        contacts: {0: visibility0.contacts, 1: visibility1.contacts},
+        roleBoard: {0: cocsRoleBoardSnapshot(match, state, 0), 1: cocsRoleBoardSnapshot(match, state, 1)},
+        sabotage: Object.keys(state.sabotage ?? {}).sort().map(nodeId => ({nodeId, ...state.sabotage[nodeId]})),
+      };
+    })()),
     // --- O1c terminals (co-op only; absent in PvPvE) ------------------------
     // The UI reads the flat `terminals` array from `cocsCoopSnapshot`; the raw
     // id-keyed tree stays available as `terminalState` (vault + stats included).
@@ -1215,7 +1697,16 @@ export function stepCocs(match, dt = RULES.dt) {
       const hops = scout.scoutTargetNode && home ? latticeHops(state, home.id, scout.scoutTargetNode) : 0;
       upkeep = subagentUpkeep(SUBAGENTS.scout.id, 1, {hops, foundries: 0});
     }
-    state.fluxUpkeep[team] = upkeep;
+    // PvP-1 role units ride the same §6.5 supply-load model, slot-priced in
+    // id order, so the 4th–6th thread is genuinely expensive. Empty in co-op.
+    const roleActors = state.coopMode === true ? [] : cocsRoleActors(match, state, team);
+    let roleUpkeep = 0;
+    for (let slot = 0; slot < roleActors.length; slot++) {
+      const perSecond = subagentUpkeep(roleActors[slot].subagentRole, slot + 1, {hops: 0, foundries: 0});
+      roleActors[slot].subagentUpkeep = perSecond;
+      roleUpkeep += perSecond;
+    }
+    state.fluxUpkeep[team] = upkeep + roleUpkeep;
     if (scout) {
       scout.scoutUpkeep = upkeep;
       const drain = upkeep * dt;
@@ -1228,10 +1719,26 @@ export function stepCocs(match, dt = RULES.dt) {
         scout.scoutIdle = true;
       }
     }
+    for (const actor of roleActors) {
+      const drain = num(actor.subagentUpkeep, 0) * dt;
+      if (num(state.flux[team], 0) >= drain) {
+        state.flux[team] = num(state.flux[team], 0) - drain;
+        actor.subagentIdle = false;
+      } else {
+        state.flux[team] = 0;
+        actor.subagentIdle = true;
+      }
+    }
   }
 
   // 4c. §8 SCOUT lifecycle: arrive -> scan -> return -> retire, plus expiry.
   for (const team of [0, 1]) stepScoutTeam(match, state, team, dt);
+
+  // 4c-bis. PvP-1 role board: the duty Chief for each team spawns from its own
+  //     rung allow-list, then the role lifecycle runs the SABOTEUR verb and
+  //     expires sapper windows. Co-op is untouched (`state.rung` is null).
+  cocsDutyRolePolicy(match, state, {tick: now, time: match.time, dt});
+  stepCocsRoles(match, state, dt);
 
   // 4d. Expire `SPOT` marks on the fixed tick clock.
   for (const key of Object.keys(state.spots ?? {})) {

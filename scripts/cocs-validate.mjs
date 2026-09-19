@@ -21,11 +21,14 @@
 // Usage:
 //   node scripts/cocs-validate.mjs
 //   SEEDS=1,2,3,4,5,6 SECS=600 node scripts/cocs-validate.mjs
+//   RUNG=4v4 node scripts/cocs-validate.mjs              # 4v4 ladder (8 seats, 3 roles)
+//   RUNG=8v8 node scripts/cocs-validate.mjs              # 8v8 ladder (16 seats, all five)
 //   POLICY=off node scripts/cocs-validate.mjs          # disable the bot policy
 //   TRAVERSAL=on node scripts/cocs-validate.mjs        # W20 tactical device/depot autopilot
 //   MAP=lattice-slice MODE=cocs node scripts/cocs-validate.mjs
 import {pathToFileURL} from 'node:url';
 import {Match} from '../game/core.mjs';
+import {cocsRung, cocsRungForPlayers} from '../game/config.mjs';
 import {coopCommandState, coopKillReport, coopRewardSummary, coopSpendReport, setCoopTier} from '../game/cocs-coop.mjs';
 import {COOP_SINK_ORDER, DIRECTOR_TIERS} from '../game/cocs-difficulty.mjs';
 
@@ -33,15 +36,22 @@ const DT = 1 / 60;
 const seeded = seed => { let n = seed >>> 0; return () => ((n = (Math.imul(n, 1664525) + 1013904223) >>> 0) / 4294967296); };
 const near = (a, n, extra = 0) => Math.hypot(a.x - n.x, a.z - n.z) <= n.r + extra;
 
-export function run(seed, { seconds = 600, players = 8, mapId = 'lattice-slice', mode = 'cocs' } = {}) {
+export function run(seed, { seconds = 600, players = null, rung = null, mapId = 'lattice-slice', mode = 'cocs', team = null } = {}) {
+  // A rung owns the seat count (4v4 = 8, 8v8 = 16). `team` can pin the leading
+  // "human" seat to one side so a two-team mirror can be sampled deliberately;
+  // null leaves the engine's own seat assignment.
+  const rungId = cocsRung(rung)?.id ?? (mode === 'cocs' ? cocsRungForPlayers(players) : null);
+  const seats = players ?? (cocsRung(rungId)?.total ?? 8);
   const options = {
-    mode, botCount: players - 1, humanCount: 1, aiSeats: true, difficulty: 'normal', timeLimit: seconds, fragLimit: 9999,
+    mode, botCount: seats - 1, humanCount: 1, aiSeats: true, difficulty: 'normal', timeLimit: seconds, fragLimit: 9999,
   };
+  if (rungId) options.rung = rungId;
   if (process.env.POLICY === 'off') options.cocsPolicy = () => [];
   // W20: the tactical traversal autopilot is opt-in. `TRAVERSAL=on` turns it on
   // so the gate table can be compared on vs off in one receipt.
   if (process.env.TRAVERSAL === 'on') options.objective = {traversalBotUse: true};
   const m = new Match('chatgpt', 'openclaw', seeded(seed), mapId, options);
+  if (team === 0 || team === 1) m.actors[0].team = team;
   m.pickups = [];
   const total = Math.round(seconds / DT);
   let ticks = 0, contest = 0, fight = 0, multi = 0, liveSum = 0;
@@ -81,6 +91,17 @@ export function run(seed, { seconds = 600, players = 8, mapId = 'lattice-slice',
   if (!half && trace.length) half = trace[0][1];
   const st = m.objectiveState;
   const traversal = st?.traversal?.stats ?? {};
+  const roleStats = {byRole: {}, spawned: 0, killed: 0, expired: 0, siphons: 0, siphonFlux: 0, sappers: 0};
+  for (const team of [0, 1]) {
+    const stats = st?.roleStats?.[team] ?? {};
+    roleStats.spawned += Number(stats.spawned ?? 0);
+    roleStats.killed += Number(stats.killed ?? 0);
+    roleStats.expired += Number(stats.expired ?? 0);
+    for (const [role, count] of Object.entries(stats.byRole ?? {})) roleStats.byRole[role] = (roleStats.byRole[role] ?? 0) + Number(count ?? 0);
+    roleStats.siphons += Number(st?.siphonStats?.[team]?.count ?? 0);
+    roleStats.siphonFlux += Number(st?.siphonStats?.[team]?.flux ?? 0);
+  }
+  roleStats.sappers = Number(st?.orderStats?.byVerb?.SAPPER ?? 0) + Object.keys(st?.sabotage ?? {}).length;
   const economy = {
     fluxSpent: { 0: st?.fluxSpent?.[0] ?? 0, 1: st?.fluxSpent?.[1] ?? 0 },
     fluxRemaining: { 0: st?.flux?.[0] ?? 0, 1: st?.flux?.[1] ?? 0 },
@@ -89,6 +110,13 @@ export function run(seed, { seconds = 600, players = 8, mapId = 'lattice-slice',
     scoutsKilled: (st?.scoutStats?.[0]?.killed ?? 0) + (st?.scoutStats?.[1]?.killed ?? 0),
     scoutsExpired: (st?.scoutStats?.[0]?.expired ?? 0) + (st?.scoutStats?.[1]?.expired ?? 0),
     scoutsScans: (st?.scoutStats?.[0]?.scans ?? 0) + (st?.scoutStats?.[1]?.scans ?? 0),
+    rolesSpawned: roleStats.spawned,
+    rolesByRole: roleStats.byRole,
+    rolesKilled: roleStats.killed,
+    rolesExpired: roleStats.expired,
+    sappers: roleStats.sappers,
+    siphons: roleStats.siphons,
+    siphonFlux: roleStats.siphonFlux,
     ordersCompleted: st?.orderStats?.completed ?? 0,
     ordersByVerb: { ...(st?.orderStats?.byVerb ?? {}) },
     deviceUses: traversal.uses ?? 0,
@@ -102,6 +130,7 @@ export function run(seed, { seconds = 600, players = 8, mapId = 'lattice-slice',
   };
   return {
     seed, seconds, ticks, over: m.over, overReason: m.overReason || null, botUse: options.objective?.traversalBotUse === true,
+    rung: rungId, players: seats, actors: m.actors.length,
     strict: ticks ? contest / ticks : 0,
     fightPoint: ticks ? fight / ticks : 0,
     multiFront: ticks ? multi / ticks : 0,
@@ -286,6 +315,25 @@ export function summariseCoopTiers(byTier, bands = null) {
   return {tiers: table, allInBand: Object.values(table).every(entry => entry.inBand)};
 }
 
+/**
+ * PvP balance alarm (section 12.3b: no `always-oracle-wins` /
+ * `always-scrapper-wins`). A run matrix is unhealthy when one side wins almost
+ * every decided match. (A shared win *reason* such as `dominance` is the
+ * designed LATTICE end condition, not a dominant strategy, so it is reported
+ * but never alarmed.) Reported, never gating on its own.
+ */
+export function pvpBalanceAlarms(runs) {
+  const decided = (runs ?? []).filter(run => run.winner !== null);
+  const alarms = [];
+  if (decided.length >= 4) {
+    const team0 = decided.filter(run => run.winner === 0).length;
+    const team1 = decided.length - team0;
+    if (team0 / decided.length >= 0.8) alarms.push(`team-dominance:0/${decided.length}`);
+    if (team1 / decided.length >= 0.8) alarms.push(`team-dominance:1/${decided.length}`);
+  }
+  return alarms;
+}
+
 export function summarise(runs) {
   const avg = k => (runs.length ? runs.reduce((a, r) => a + r[k], 0) / runs.length : 0);
   const decided = runs.filter(r => r.winner !== null);
@@ -307,15 +355,26 @@ export function summarise(runs) {
     for (const [verb, count] of Object.entries(r.economy?.ordersByVerb ?? {})) acc[verb] = (acc[verb] ?? 0) + count;
     return acc;
   }, {});
+  const byRole = runs.reduce((acc, r) => {
+    for (const [role, count] of Object.entries(r.economy?.rolesByRole ?? {})) acc[role] = (acc[role] ?? 0) + count;
+    return acc;
+  }, {});
+  const rungs = [...new Set(runs.map(r => r.rung).filter(Boolean))];
+  const alarms = pvpBalanceAlarms(runs);
   return {
     gate: { strictContest: '>=35%', fightPoint: '>=60%', trailingHalfWins: '>=25%' },
     result: {
+      rung: rungs.length === 1 ? rungs[0] : (rungs.length ? rungs.join('+') : null),
+      sample: runs.length,
+      actors: runs.length ? Math.round(runs.reduce((a, r) => a + (Number(r.actors) || 0), 0) / runs.length) : 0,
       strictContest: pct(avg('strict')),
       fightPoint: pct(avg('fightPoint')),
       multiFront: pct(avg('multiFront')),
       avgLiveNodes: avg('avgLive').toFixed(2),
       leaderAtHalfWins: `${leaderAtHalfWins}/${decided.length}`,
       trailingAtHalfWins: `${trailingAtHalfWins}/${decided.length}`,
+      alarms,
+      singleDominantStrategy: alarms.some(alarm => alarm.startsWith('team-dominance') || alarm.startsWith('reason-dominance')),
     },
     economy: {
       fluxSpent: totalPair('fluxSpent'),
@@ -325,6 +384,13 @@ export function summarise(runs) {
       scoutsKilled: total('scoutsKilled'),
       scoutsExpired: total('scoutsExpired'),
       scoutsScans: total('scoutsScans'),
+      rolesSpawned: total('rolesSpawned'),
+      rolesByRole: byRole,
+      rolesKilled: total('rolesKilled'),
+      rolesExpired: total('rolesExpired'),
+      sappers: total('sappers'),
+      siphons: total('siphons'),
+      siphonFlux: total('siphonFlux'),
       ordersCompleted: total('ordersCompleted'),
       ordersByVerb: byVerb,
       deviceUses: total('deviceUses'),
@@ -337,7 +403,7 @@ export function summarise(runs) {
       depotCaptures: total('depotCaptures'),
     },
     runs: runs.map(r => ({
-      seed: r.seed, over: r.over, reason: r.overReason, duration: `${(r.ticks / 60).toFixed(1)}s`,
+      seed: r.seed, rung: r.rung, over: r.over, reason: r.overReason, duration: `${(r.ticks / 60).toFixed(1)}s`,
       strict: pct(r.strict), fightPoint: pct(r.fightPoint), multiFront: pct(r.multiFront),
       half: r.half, winner: r.winner, scores: r.scores, economy: r.economy,
     })),
@@ -362,7 +428,8 @@ if (invokedDirectly) {
     if (tiers.length === 1) console.log(JSON.stringify(byTier[tiers[0]], null, 2));
     else console.log(JSON.stringify(summariseCoopTiers(byTier), null, 2));
   } else {
-    const runs = seeds.map(seed => run(seed, { seconds, mapId, mode }));
+    const rung = process.env.RUNG || null;
+    const runs = seeds.map(seed => run(seed, { seconds, mapId, mode, rung }));
     console.log(JSON.stringify(summarise(runs), null, 2));
   }
 }

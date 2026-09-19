@@ -21,6 +21,10 @@
 import {SUBAGENT_UPKEEP} from './cocs-economy.mjs';
 
 export const COOP_ROLE_IDS = Object.freeze(['fighter', 'harvester', 'builder', 'scout']);
+// The full launch set (§8.1). PvPvE `cocs` fields the role the rung's allow-list
+// publishes: 4v4 is `FIGHTER/HARVESTER/BUILDER`, 8v8 is all five. OPERATIONS
+// fields the first four; SABOTEUR joins PvPvE.
+export const PVP_ROLE_IDS = Object.freeze(['fighter', 'harvester', 'builder', 'scout', 'saboteur']);
 // The OPERATIONS subset is the first four roles (§8.1); SABOTEUR joins PvPvE.
 export const COOP_ROLES = Object.freeze({
   fighter: Object.freeze({
@@ -41,6 +45,15 @@ export const COOP_ROLES = Object.freeze({
   scout: Object.freeze({
     id: 'scout', name: 'Scout', verb: 'SPOT', combat: false,
     spawnCost: 7, upkeep: SUBAGENT_UPKEEP.scout, health: 80, armor: 0, speed: 9.5,
+    lifespanSeconds: 90, refundFraction: 0.4, radius: 12,
+  }),
+  // PvP-1 (§8.1): the fifth role. Cuts an enemy supply link (SAPPER) and
+  // siphons an enemy node's income into its own pool (SIPHON). 8v8-only via the
+  // rung allow-list; deterministic and RNG-free. Upkeep/spawn numbers come from
+  // the one economy table like every other role.
+  saboteur: Object.freeze({
+    id: 'saboteur', name: 'Saboteur', verb: 'ATTACK', combat: true,
+    spawnCost: 14, upkeep: SUBAGENT_UPKEEP.saboteur, health: 90, armor: 0, speed: 9.0,
     lifespanSeconds: 90, refundFraction: 0.4, radius: 12,
   }),
 });
@@ -70,6 +83,13 @@ export const ROLE_ABILITIES = Object.freeze({
   ]),
   scout: Object.freeze([
     Object.freeze({id: 'spot', verb: 'SPOT', label: 'SPOT', target: 'enemy', radius: 12, seconds: 8, damageBonus: 0.15}),
+  ]),
+  // PvP-1 SABOTEUR (§8.1). `sapper` cuts one enemy supply link for a window;
+  // `siphon` pulls FLUX out of an enemy node's pool. Both are field-readable
+  // denial verbs, both pure numbers applied by `cocs.mjs`, and both RNG-free.
+  saboteur: Object.freeze([
+    Object.freeze({id: 'sapper', verb: 'ATTACK', label: 'SAPPER', target: 'node', archetypes: Object.freeze(['relay', 'economy']), enemyOnly: true, cutSeconds: 45, bountyBase: 20, bountyPerNode: 5, deniedSeconds: 6}),
+    Object.freeze({id: 'siphon', verb: 'SIPHON', label: 'SIPHON', target: 'node', archetypes: Object.freeze(['relay', 'economy']), enemyOnly: true, seconds: 8, flux: 12, req: 4}),
   ]),
 });
 
@@ -132,7 +152,10 @@ export function roleAbilityTargets(match, state, origin, ability) {
       if (!node) continue;
       if (node.archetype === 'hq' || node.archetype === 'array') continue;
       if (archetypes && !archetypes.includes(node.archetype)) continue;
-      if (ability.ownedByTeam !== false && node.owner !== team) continue;
+      // `enemyOnly` (SABOTEUR) targets a node the *other* team owns; neutral
+      // and own nodes are never legal.
+      if (ability.enemyOnly === true) { if (node.owner !== (1 - team)) continue; }
+      else if (ability.ownedByTeam !== false && node.owner !== team) continue;
       if (radius > 0 && origin) {
         const r = num(node.r, 4) + radius;
         if (distance(origin, node) > r) continue;
@@ -177,7 +200,7 @@ export function roleAbilityPreview(match, state, origin, ability) {
 }
 
 const cocsRoles = {
-  COOP_ROLE_IDS, COOP_ROLES, coopRole, ROLE_ABILITIES, roleAbility, roleAbilities,
+  COOP_ROLE_IDS, PVP_ROLE_IDS, COOP_ROLES, coopRole, ROLE_ABILITIES, roleAbility, roleAbilities,
   friendlyAbilities, roleAbilityTargets, roleAbilityPreview,
 };
 
