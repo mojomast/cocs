@@ -206,22 +206,53 @@ export function simpleWeaponModel(type=0,assets,visual=null,finish=null){
   return g;
  });
 }
-function hornetModel(software=false){const g=new T.Group();g.name='hornet';const hull=material('#3c4652',.7,.4),dark=material('#20262e',.6,.5),accent=material('#ffb35c',.4,.3,true),glass=material('#20323d',.6,.12);
- box(g,1.1,.7,4.6,0,0,-.1,hull);box(g,.7,.5,1.2,0,.25,1.6,hull);
- const nose=new T.Mesh(new T.ConeGeometry(.5,1.4,10),hull);nose.rotation.x=-Math.PI/2;nose.position.set(0,0,-2.6);g.add(nose);
- const pod=new T.Mesh(new T.SphereGeometry(.18,8,6),dark);pod.position.set(0,-.38,-1.8);g.add(pod);
- const lens=new T.Mesh(new T.SphereGeometry(.08,6,4),accent);lens.position.set(0,-.38,-1.96);g.add(lens);
- const canopy=new T.Mesh(new T.SphereGeometry(.62,12,8),glass);canopy.scale.set(1,.7,1.5);canopy.position.set(0,.5,.2);g.add(canopy);
- for(const s of [-1,1]){const wing=box(g,2.6,.14,1.5,s*1.7,0,.2,hull);wing.rotation.z=s*.05;box(g,.5,.3,.9,s*2.3,0,.5,dark);box(g,.16,.5,.9,s*2.3,-.1,.5,accent);const beacon=new T.Mesh(new T.BoxGeometry(.06,.06,.18),s>0?new T.MeshBasicMaterial({color:'#33ff77'}):new T.MeshBasicMaterial({color:'#ff3333'}));beacon.position.set(s*3.02,.06,.2);g.add(beacon);}
-  box(g,1.8,.12,.7,0,.35,2.1,hull);box(g,.12,.7,1,0,.6,2.4,dark);
-  for(const s of [-1,1]){const fin=box(g,.06,.45,.65,s*.55,.65,1.9,hull);fin.rotation.x=-.2;fin.rotation.z=s*.12;}
-  for(const s of [-1,1])box(g,.24,.14,.6,s*.75,-.28,.35,dark);
-  const engines=[],guns=[];
- for(const s of [-1,1]){const nac=cylinder(g,.4,.46,1.8,s*1.7,-.1,.6,dark,12);nac.rotation.x=Math.PI/2;const glow=new T.Mesh(new T.CylinderGeometry(.34,.34,.2,12),accent);glow.rotation.x=Math.PI/2;glow.position.set(s*1.7,-.1,1.55);g.add(glow);engines.push(glow);}
- for(const s of [-1,1]){const mount=new T.Group();mount.position.set(s*1.6,-.05,-1.2);g.add(mount);const barrel=cylinder(mount,.09,.09,1.2,0,0,-.6,dark,8);barrel.rotation.x=Math.PI/2;const flash=new T.Mesh(new T.SphereGeometry(.16,6,4),new T.MeshBasicMaterial({color:'#ffd9a0'}));flash.position.set(0,0,-1.2);flash.visible=false;mount.add(flash);guns.push({mount,barrel,flash});}
+function hornetModel(software=false){
+ const g=new T.Group();g.name='hornet';
+ const hull=material('#929eae',.75,.34),dark=material('#202630',.65,.5),panel=material('#101c2b',.45,.58),trim=material('#53677b',.8,.32),accent=material('#ff794b',.4,.3,true),glass=material('#123448',.7,.12);
+ // Hornet-only geometry: spherical interceptor cockpit and four solar S-foils.
+ const sphere=(parent,r,x,y,z,mat,sx=1,sy=1,sz=1)=>{const mesh=new T.Mesh(new T.SphereGeometry(r,40,28),mat);mesh.position.set(x,y,z);mesh.scale.set(sx,sy,sz);parent.add(mesh);return mesh;};
+ const hoop=(parent,r,t,x,y,z,mat)=>{const mesh=new T.Mesh(new T.TorusGeometry(r,t,12,64),mat);mesh.position.set(x,y,z);parent.add(mesh);return mesh;};
+ const tube=(parent,a,b,length,x,y,z,mat)=>{const mesh=cylinder(parent,a,b,length,x,y,z,mat,32);mesh.rotation.x=Math.PI/2;return mesh;};
+ sphere(g,.88,0,.12,-.3,hull,1,1,1.12);
+ sphere(g,.7,0,.12,-.94,glass,1,1,.34);
+ hoop(g,.69,.065,0,.12,-1.05,hull);hoop(g,.29,.038,0,.12,-1.185,trim);
+ for(let i=0;i<8;i++){const a=i*Math.PI/4;const rib=box(g,.047,.39,.045,Math.sin(a)*.48,.12+Math.cos(a)*.48,-1.13,hull);rib.rotation.z=-a;}
+ tube(g,.28,.28,.07,0,.12,-1.2,glass);
+ sphere(g,.5,0,.05,.95,hull,1,.75,2.15);
+ const nose=new T.Mesh(new T.ConeGeometry(.34,1.55,32),hull);nose.rotation.x=-Math.PI/2;nose.position.set(0,-.3,-1.65);g.add(nose);
+ for(const s of [-1,1]){box(g,.08,.1,1.35,s*.27,-.27,-1.55,accent);for(let j=0;j<5;j++)box(g,.16,.08,.08,s*.38,.32,.55+j*.22,dark);}
+ hoop(g,.39,.065,0,.05,1.88,trim);tube(g,.28,.32,.12,0,.05,1.92,dark);
+ const engines=[],guns=[];
+ for(const s of [-1,1])for(const v of [-1,1]){
+  const wing=new T.Group();wing.position.set(s*.58,.12,.35);wing.rotation.z=s*v*.48;g.add(wing);
+  box(wing,2.35,.15,1.5,s*1.16,0,0,hull);
+  // Recessed solar cells on both faces, with structural perimeter and ribs.
+  for(const face of [-1,1]){
+   box(wing,2.12,.025,1.27,s*1.17,face*.092,0,panel);
+   for(let j=0;j<9;j++)box(wing,.022,.027,1.24,s*(.2+j*.24),face*.112,0,trim);
+   box(wing,2.12,.028,.032,s*1.17,face*.112,0,trim);
+  }
+  for(const z of [-.74,.74])box(wing,2.4,.2,.07,s*1.16,0,z,trim);
+  box(wing,.1,.21,1.5,s*2.32,0,0,hull);
+  tube(wing,.3,.34,1.6,s*.6,0,.4,hull);
+  for(const z of [-.41,.95,1.13])hoop(wing,.31,.045,s*.6,0,z,trim);
+  tube(wing,.25,.25,.05,s*.6,0,-.43,dark);
+  sphere(wing,.11,s*.6,0,-.47,trim,1,1,.5);
+  tube(wing,.25,.29,.25,s*.6,0,1.24,dark);
+  const glow=tube(wing,.21,.21,.045,s*.6,0,1.38,accent);engines.push(glow);
+  hoop(wing,.25,.04,s*.6,0,1.4,hull);
+  const mount=new T.Group();mount.position.set(s*2.23,0,-.48);wing.add(mount);
+  tube(mount,.14,.18,.65,0,0,-.13,hull);
+  const barrel=tube(mount,.065,.09,1.65,0,0,-1.12,dark);
+  for(const z of [-.5,-.7,-1.8])hoop(mount,.095,.025,0,0,z,trim);
+  tube(mount,.105,.08,.18,0,0,-1.98,hull);
+  const flash=new T.Mesh(new T.SphereGeometry(.16,16,12),new T.MeshBasicMaterial({color:'#ffd9a0'}));flash.position.set(0,0,-2.1);flash.visible=false;mount.add(flash);guns.push({mount,barrel,flash});
+  box(wing,.16,.035,.35,s*1.96,.135,.48,accent);
+ }
  g.traverse(n=>{if(n.isMesh){n.castShadow=true;n.receiveShadow=true;}});
- if(software)addBlobShadow(g,2.3,.32);
- g.userData={kind:'hornet',vehicle:true,wheels:[],turret:null,barrels:engines,guns,flashUntil:0,color:'#5c6b7a'};return g;}
+ if(software)addBlobShadow(g,2.8,.32);
+ g.userData={kind:'hornet',vehicle:true,wheels:[],turret:null,barrels:engines,guns,flashUntil:0,color:'#929eae'};return g;
+}
 export function vehicleModel(kind='puma',assets,software=false){return withAssets(assets,()=>{
  if(kind==='hornet')return hornetModel(software);
  const g=new T.Group();g.name='warthog';
