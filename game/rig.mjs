@@ -3,9 +3,9 @@
 
 import { clamp, lerp } from './math.mjs';
 import * as T from 'three';
-import {corpseRotation} from './deaths.mjs';
+import {corpseRotation,corpseTreatment,fallDuration} from './deaths.mjs';
 import {chassisFor} from './weapon-models/chassis.mjs';
-import { CharacterRig, characterPose, advancePhase, strideFrequency, TAU } from './character-anim.mjs';
+import { CharacterRig, characterPose, deathLimbPose, advancePhase, strideFrequency, TAU } from './character-anim.mjs';
 
 export { CharacterRig, characterPose, advancePhase, strideFrequency, TAU };
 
@@ -219,6 +219,15 @@ export function solveTwoBoneIK(rootPos, targetPos, upperLength, lowerLength, pol
 // Character presentation ownership; never writes authoritative actor state.
 // World transforms belong to the view while alive, exclusively here while dead.
 const finite = (n, fallback = 0) => Number.isFinite(n) ? n : fallback;
+// Directional deaths fall away from the killing shot (the old view code used
+// atan2(-dir.x,-dir.z)); void falls and self-damage carry no direction and keep
+// the actor's own yaw. Returns null when the direction is absent or degenerate.
+function deathYaw(direction) {
+  const dx = Number.isFinite(direction?.x) ? direction.x : null;
+  const dz = Number.isFinite(direction?.z) ? direction.z : null;
+  if (dx !== null && dz !== null && Math.hypot(dx, dz) > 1e-6) return Math.atan2(-dx, -dz);
+  return null;
+}
 // One-time conservative body envelope in model-local coordinates. Excludes
 // floor rings, shields and labels: these are siblings of the articulated root.
 function bodyEnvelope(model) {
@@ -332,7 +341,7 @@ export class CharacterLifecycle {
   }
   state(model) { return this.records.get(model)?.state ?? 'alive'; }
   ownsTransform(model) { return ['dying', 'settled'].includes(this.state(model)); }
-  update(model, actor, {time = 0, plan = {}, reduced = false, sampleGround, hidden = false} = {}) {
+  update(model, actor, {time = 0, plan = {}, reduced = false, sampleGround, hidden = false, direction = null, authoritative = false} = {}) {
     time = finite(time);
     let record = this.records.get(model);
     if (actor.health > 0) {
@@ -354,29 +363,48 @@ export class CharacterLifecycle {
     if (!record || !this.ownsTransform(model)) {
       const bind = [];
       model.traverse(node => bind.push({node,position:node.position.clone(),quaternion:node.quaternion.clone(),scale:node.scale.clone(),order:node.rotation.order,visible:node.visible}));
-      record = {state:'dying',start:time,age:0,bind,plan:{...plan},x:finite(actor.x),y:finite(actor.y),z:finite(actor.z),yaw:finite(actor.bodyYaw,finite(actor.yaw)),expired:false};
+      const directed = deathYaw(direction);
+      record = {state:'dying',start:time,age:0,bind,plan:{...plan},planLocked:authoritative===true,x:finite(actor.x),y:finite(actor.y),z:finite(actor.z),yaw:directed ?? finite(actor.bodyYaw,finite(actor.yaw)),yawLocked:directed !== null,expired:false,limbed:false,baseScale:{x:finite(model.scale?.x,1),y:finite(model.scale?.y,1),z:finite(model.scale?.z,1)}};
       this.records.set(model,record);this.active.set(model,record);
       model.userData.rig?.reset();
       model.userData.rig?.apply(characterPose({}));
       if (model.userData.rig) model.userData.rig.lifecycle = 'dying';
+      record.head = model.userData.head ?? null;
       record.contacts = bodyEnvelope(model);
       while (this.active.size > this.maxCorpses) {
         const [old,entry] = this.active.entries().next().value;
         entry.expired = true; entry.state = 'settled'; old.visible = false; this.active.delete(old);
       }
     }
+    // The view poses the corpse in the actor pass before the death event is
+    // dispatched, so the authoritative plan and the killing direction can both
+    // arrive one frame after the record was created. Adopt them during that
+    // first beat and restart the fall clock so the whole arc replays from the
+    // authoritative context; after the window the settled timeline stands.
+    if (authoritative === true && record.planLocked !== true && record.age <= .12) {
+      record.plan = {...plan};
+      record.planLocked = true;
+      record.start = time;
+      record.age = 0;
+      record.limbed = false;
+    }
+    if (!record.yawLocked) {
+      const late = deathYaw(direction);
+      if (late !== null) { record.yaw = late; record.yawLocked = true; }
+    }
     record.age = Math.max(record.age,time-record.start);
-    const duration = record.plan.crumple ? 1.05 : .55;
-    const fall = reduced ? 1 : clamp(record.age/duration,0,1);
+    const fall = reduced ? 1 : clamp(record.age/fallDuration(record.plan),0,1);
     const ease = fall*fall*(3-2*fall);
+    const treatment = corpseTreatment(record.plan,fall);
     record.state = fall === 1 ? 'settled' : 'dying';
     if (model.userData.rig) model.userData.rig.lifecycle = record.state;
     model.userData.corpse = true;
-    if (model.userData.head) model.userData.head.visible = record.plan.hideHead !== true;
+    if (record.head) record.head.visible = !treatment.hideHead;
+    if (record.baseScale) model.scale.set(record.baseScale.x*treatment.scale.x,record.baseScale.y*treatment.scale.y,record.baseScale.z*treatment.scale.z);
     if (record.age >= Math.min(this.maxLifetime,Math.max(.1,finite(record.plan.duration,this.maxLifetime)))) {
       record.expired = true; this.active.delete(model);
     }
-    model.visible = !hidden && !record.plan.hideBody && !record.expired;
+    model.visible = !hidden && !treatment.hideBody && !record.expired;
     // Expired/evicted bodies never resume work or become visible before respawn.
     for (const node of [model.userData.shield,model.userData.base,...(model.userData.teamMarks??[])]) if(node) node.visible=false;
     if (!model.visible) return record.state;
@@ -406,6 +434,12 @@ export class CharacterLifecycle {
     // No fake floor in voids; bounded gravity until the lifetime cap hides it.
     model.position.y += Number.isFinite(lift) ? lift : -Math.min(20,4.9*record.age*record.age);
     model.updateWorldMatrix(true,true);
+    // Seeded limb splay while the fall advances; the frame that reaches the
+    // settled pose writes once more and then the corpse is left untouched.
+    if (model.userData.rig && !record.limbed) {
+      model.userData.rig.applyCorpse(deathLimbPose({pose:record.plan.pose,style:record.plan.style,seed:record.plan.seed??0,splay:record.plan.splay,roll:record.plan.roll,spin:record.plan.spin,progress:fall,reduced}));
+      if (fall >= 1) record.limbed = true;
+    }
     return record.state;
   }
   // Removal is a disposal hook, not a revive; callers discard the model.

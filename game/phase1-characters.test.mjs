@@ -83,6 +83,83 @@ test('rig reset restores bind joint transforms, not stale airborne/crouch offset
 test('death directional profiles preserve distinct left/right/back silhouettes',()=>{
  assert.ok(corpseRotation({pose:'left'}).z>1.5);assert.ok(corpseRotation({pose:'right'}).z< -1.5);assert.ok(corpseRotation({pose:'back'}).x< -1.5);
 });
+test('a killing direction orients the fall yaw while void and self deaths keep the actor yaw',()=>{
+ const life=new rigs.CharacterLifecycle(),plan={pose:'forward',style:'ragdoll',seed:2,spin:0,roll:0,duration:3};
+ const directional=actorModel();
+ life.update(directional,actor,{time:0,plan,direction:{x:1,z:0},sampleGround:()=>3});
+ assert.ok(Math.abs(directional.rotation.y-Math.atan2(-1,0))<1e-9,'the corpse falls away from the shot');
+ const selfDeath=actorModel();
+ life.update(selfDeath,actor,{time:0,plan,direction:null,sampleGround:()=>3});
+ assert.ok(Math.abs(selfDeath.rotation.y-actor.yaw)<1e-9,'self and void deaths keep the actor yaw');
+ const junk=actorModel();
+ life.update(junk,actor,{time:0,plan,direction:{x:NaN,z:'sideways'},sampleGround:()=>3});
+ assert.ok(Math.abs(junk.rotation.y-actor.yaw)<1e-9,'an invalid direction falls back to the actor yaw');
+ life.update(directional,actor,{time:1,sampleGround:()=>3});
+ assert.ok(Number.isFinite(directional.rotation.y)&&Math.abs(directional.rotation.y)<=Math.PI+1,'the settled tumble stays bounded');
+ // The view's actor pass runs before the death event is dispatched, so a
+ // direction can arrive one frame later. It is adopted once, then locked.
+ const late=actorModel();
+ life.update(late,actor,{time:0,plan,direction:null,sampleGround:()=>3});
+ assert.ok(Math.abs(late.rotation.y-actor.yaw)<1e-9);
+ life.update(late,actor,{time:.02,plan,direction:{x:-1,z:0},sampleGround:()=>3});
+ assert.ok(Math.abs(late.rotation.y-Math.atan2(1,0))<1e-9,'a late direction is adopted');
+ life.update(late,actor,{time:1,plan,direction:{x:1,z:0},sampleGround:()=>3});
+ assert.ok(Math.abs(late.rotation.y-Math.atan2(1,0))<1e-9,'the adopted direction stays locked');
+});
+test('per-pose fall arcs settle at distinct times and a settled corpse is never rewritten',()=>{
+ const at=(pose,time)=>{const m=actorModel(),life=new rigs.CharacterLifecycle(),plan={pose,style:'ragdoll',seed:4,duration:3};life.update(m,actor,{time:0,plan,sampleGround:()=>3});life.update(m,actor,{time,plan,sampleGround:()=>3});return {state:life.state(m),rotation:m.rotation.clone(),m};};
+ assert.equal(at('forward',.6).state,'settled');
+ assert.equal(at('crumple',.6).state,'dying');
+ assert.equal(at('crumple',1.2).state,'settled');
+ assert.ok(Math.abs(at('forward',.3).rotation.x-at('back',.3).rotation.x)>1e-6,'forward and back tilt opposite ways');
+ assert.ok(at('left',.3).rotation.z>0&&at('right',.3).rotation.z<0,'left and right roll opposite ways');
+ const limbNames=['armUpperL','armUpperR','forearmL','forearmR','legUpperL','legUpperR','legLowerL','legLowerR','footL','footR','hips','torso','chest'];
+ const limbModel=()=>{const m=actorModel();for(const name of limbNames){const g=new T.Group();m.userData.joints.root.add(g);m.userData.joints[name]=g;}return m;};
+ const silhouettes=new Set();
+ for(let seed=0;seed<8;seed++){
+  const m=limbModel(),life=new rigs.CharacterLifecycle(),plan={pose:'forward',style:'ragdoll',seed,splay:.8,duration:3};
+  life.update(m,actor,{time:0,plan,sampleGround:()=>3});
+  life.update(m,actor,{time:1,plan,sampleGround:()=>3});
+  const j=m.userData.joints;
+  silhouettes.add([j.armUpperL.rotation.z,j.armUpperR.rotation.z,j.legUpperL.rotation.x,j.head.rotation.y].map(v=>v.toFixed(3)).join(','));
+ }
+ assert.ok(silhouettes.size>=6,`seeded corpse silhouettes, got ${silhouettes.size}`);
+ const m=limbModel(),life=new rigs.CharacterLifecycle(),plan={pose:'sprawl',style:'spinout',seed:6,splay:.6,duration:3};
+ let writes=0;const rig=m.userData.rig,write=rig.applyCorpse.bind(rig);rig.applyCorpse=pose=>{writes++;return write(pose);};
+ life.update(m,actor,{time:0,plan,sampleGround:()=>3});
+ life.update(m,actor,{time:1,plan,sampleGround:()=>3});
+ const settled=m.userData.joints.armUpperL.rotation.z,atSettle=writes;
+ life.update(m,actor,{time:1.5,plan,sampleGround:()=>3});
+ life.update(m,actor,{time:2,plan,sampleGround:()=>3});
+ assert.equal(writes,atSettle,'the settled corpse stops writing');
+ assert.equal(m.userData.joints.armUpperL.rotation.z,settled);
+ assert.ok(writes>=2,'the fall and the settle both write');
+});
+test('style treatments drive head timing, energy scale-out and splatter flattening',()=>{
+ const run=(plan,time)=>{const m=actorModel(),life=new rigs.CharacterLifecycle();life.update(m,actor,{time:0,plan,sampleGround:()=>3});life.update(m,actor,{time,plan,sampleGround:()=>3});return m;};
+ const early=run({pose:'forward',style:'headpop',hideHead:true,seed:1,duration:3},.05);
+ assert.equal(early.userData.head.visible,true,'the headpop head survives the first beat');
+ const popped=run({pose:'forward',style:'headpop',hideHead:true,seed:1,duration:3},1);
+ assert.equal(popped.userData.head.visible,false,'the head is gone by the settle');
+ const vaporized=run({pose:'forward',style:'vaporize',energy:true,hideBody:true,seed:1,duration:3},1);
+ assert.ok(vaporized.scale.x>=.499&&vaporized.scale.x<=.501,'an energy corpse scales out to half size');
+ const combusted=run({pose:'forward',style:'combust',fire:true,seed:1,duration:3},1);
+ assert.ok(combusted.scale.y<1&&combusted.scale.y>=.4,'a combusting corpse sinks without vanishing');
+ const splattered=run({pose:'forward',style:'splatter',flatten:true,seed:1,duration:3},1);
+ assert.ok(splattered.scale.x>1&&splattered.scale.y<1,'a splatter corpse stays low and wide');
+});
+test('every pose and style settles horizontal and bounded',()=>{
+ for(const style of ['ragdoll','headpop','gibs','burst','combust','vaporize','splatter','electrocute','crumple','spinout','collapse'])
+  for(const pose of ['forward','back','left','right','crumple','sprawl'])
+   for(const reduced of [true,false]){
+    const m=actorModel(),life=new rigs.CharacterLifecycle();
+    life.update(m,actor,{time:0,reduced,plan:{pose,style,seed:3,duration:3},sampleGround:()=>3});
+    life.update(m,actor,{time:2,reduced,sampleGround:()=>3});
+    if(!m.visible)continue;
+    const up=new T.Vector3(0,1,0).applyQuaternion(m.quaternion);assert.ok(Math.abs(up.y)<.1,`${pose}/${style}/reduced=${reduced}`);
+    for(const value of [m.rotation.x,m.rotation.y,m.rotation.z])assert.ok(Number.isFinite(value)&&Math.abs(value)<=Math.PI+1);
+   }
+});
 test('operator refinement attaches armor to chest and hands/grip sockets to forearms',()=>{
  assert.equal(typeof models.refineOperatorCharacter,'function');
  const m=actorModel(),j=m.userData.joints;

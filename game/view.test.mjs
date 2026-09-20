@@ -12,6 +12,7 @@ import BLOOD_GULCH from './blood-gulch.mjs';
 import {MAPS} from './maps.mjs';
 import {terrainTriangles,terrainWallTriangles} from './terrain.mjs';
 import {resolveAttachments} from './attachments.mjs';
+import {corpseRotation,deathStyleFor} from './deaths.mjs';
 import {surfaceTextures,clearSurfaceTextures} from './textures.mjs';
 
 function fixture(t,{dpr=1,software=false,width=800,height=450}={}){
@@ -1892,4 +1893,184 @@ test('setGraphicsLab accepts target stacks and never allocates them on a non-Web
  assert.equal(view.graphicsLab.targets.bots.palette,'ember','target stacks survive normalization');
  assert.equal(renderer.isWebGLRenderer,undefined);
  assert.equal(view._weaponLab,null);assert.equal(view._botLab,null);assert.equal(view._labDisplayTarget,null,'a non-WebGL renderer keeps today\'s appearance');
+});
+
+test('spawnDeath replays the authoritative style and threads the kill direction',t=>{
+ const {view}=playable(t);
+ view.scene=new T.Scene();view.deathContext=new Map();view.characterGroundAt=()=>0;view.actorModels=new Map();
+ view.spawnDeath({type:'death',actor:5,pos:{x:0,y:0,z:0},weapon:0,overkill:0,seed:11,style:'spinout',direction:{x:1,z:0}},false);
+ const ctx=view.deathContext.get(5);
+ assert.equal(ctx.plan.style,'spinout','the sim style wins over the recomputed one');
+ assert.equal(ctx.style,'spinout');
+ assert.deepEqual(ctx.direction,{x:1,z:0});
+ assert.equal(ctx.plan.sound,'thud');
+ assert.ok(view.deathPool.slots.some(slot=>slot.active),'the debris pool receives the plan');
+ const model=new T.Group();view.actorModels.set(5,model);
+ const actor={id:5,x:0,y:0,z:0,yaw:.4,bodyYaw:.4,health:0};
+ view.poseCorpse(model,actor,{time:0});
+ view.poseCorpse(model,actor,{time:2});
+ // The settled 90-degree tilt is a gimbal-lock pose, so compare the full
+ // orientation rather than a decomposed Euler y.
+ const expected=new T.Object3D(),rot=corpseRotation(ctx.plan,1,Math.atan2(-1,0),false);
+ expected.rotation.set(rot.x,rot.y,rot.z,'YXZ');
+ assert.ok(model.quaternion.angleTo(expected.quaternion)<1e-9,'the fall orientation follows the killing direction');
+ assert.equal(view.characterLifecycle.state(model),'settled');
+ view.spawnDeath({type:'death',actor:6,pos:{x:1,y:0,z:0},weapon:0,seed:2,style:'bogus'},false);
+ assert.equal(view.deathContext.get(6).plan.style,deathStyleFor({weapon:0,seed:2}),'an invalid style falls back to the planner');
+ view.deathPool.dispose();view.effectPool?.dispose();
+});
+
+test('a death context arriving one frame late still owns the corpse plan',t=>{
+ const {view}=playable(t);
+ view.scene=new T.Scene();view.deathContext=new Map();view.actorModels=new Map();view.characterGroundAt=()=>0;
+ const model=new T.Group();model.userData={head:{visible:true}};
+ const actor={id:9,x:0,y:0,z:0,yaw:0,bodyYaw:0,health:0};
+ // The actor pass runs before the event loop, so the first poseCorpse falls
+ // back to a hashed plan and the authoritative one arrives a frame later.
+ view.poseCorpse(model,actor,{time:0});
+ const record=view.characterLifecycle.records.get(model);
+ assert.notEqual(record.plan.style,'headpop');
+ view.spawnDeath({type:'death',actor:9,pos:{x:0,y:0,z:0},weapon:1,overkill:0,seed:3,style:'headpop',direction:{x:1,z:0}},false);
+ view.poseCorpse(model,actor,{time:.02});
+ assert.equal(record.plan.style,'headpop','the late authoritative plan replaces the fallback');
+ assert.equal(record.start,.02,'the fall clock restarts with the adopted plan');
+ view.poseCorpse(model,actor,{time:1.5});
+ assert.equal(model.userData.head.visible,false,'the authoritative headpop head removal wins');
+ const expected=new T.Object3D(),rot=corpseRotation(view.deathContext.get(9).plan,1,Math.atan2(-1,0),false);
+ expected.rotation.set(rot.x,rot.y,rot.z,'YXZ');
+ assert.ok(Math.abs(Math.abs(model.quaternion.dot(expected.quaternion))-1)<1e-9,'the late direction also orients the fall');
+ view.deathPool?.dispose();view.effectPool?.dispose();
+});
+
+test('hit reactions scale the flinch with damage and clear the lean on expiry',t=>{
+ const {view}=playable(t);
+ view.scene=new T.Scene();view.actorModels=new Map();
+ const model=new T.Group();view.actorModels.set(7,model);
+ const hit=(id,amount)=>view.applyHitReaction({type:'damage',id,actor:7,amount,seed:3,direction:{x:1,z:0},pos:{x:0,y:1,z:0}},false);
+ const light=hit(1,3);view._updateHitReactions();
+ const lightStrength=model.userData.hitStrength,lean=Math.abs(model.rotation.z);
+ assert.ok(lightStrength>0&&lightStrength<.2,`a graze flinches lightly (${lightStrength})`);
+ assert.ok(lean>0,'even a graze leans the model a little');
+ const heavy=hit(2,35);view._updateHitReactions();
+ assert.equal(model.userData.hitStrength,1,'a heavy hit saturates the rig flinch channel');
+ assert.ok(Math.abs(model.rotation.z)>lean,'the heavy hit leans further');
+ assert.ok(light.strength<heavy.strength,'flinch strength scales with damage');
+ view.hitFlinch.set(7,{strength:1,until:0,lean:.2,pushX:.1,pushZ:0});
+ assert.equal(view._updateHitReactions(),0,'an expired flinch is dropped');
+ assert.equal(view.hitFlinch.has(7),false);
+ assert.equal(model.rotation.x,0);assert.equal(model.rotation.z,0);assert.equal(model.userData.hitStrength,0,'the stored lean is cleared');
+ view.hitPool?.dispose();
+});
+
+test('a new match clears corpses, death context, debris and hit feedback',t=>{
+ const {view}=playable(t);
+ view.scene=new T.Scene();view.hands=new T.Group();view.scene.add(view.hands);view.characterGroundAt=()=>0;
+ view.buildArena=()=>{};view.clearObjectiveMarkers=()=>{};view.syncVehicles=()=>{};view.updateFlags=()=>{};view.updateObjectives=()=>{};view._trackAssets=()=>{};
+ view.pickupModels=[];view.flagModels=new Map();view.vehicleModels=new Map();view.worldGroup=new T.Group();view.mapId='crosswire';
+ view.spawnDeath({type:'death',actor:4,pos:{x:0,y:1,z:0},weapon:1,overkill:0,seed:1,style:'gibs'},false);
+ view.applyHitReaction({type:'damage',id:1,actor:4,amount:20,seed:1,direction:{x:1,z:0},pos:{x:0,y:1,z:0}},false);
+ view.shellFx().spawn({x:0,y:1,z:0},{seed:1});
+ const debug=view.debugDeath({actor:80,style:'ragdoll',seed:2,x:0,y:1,z:0,settle:false});
+ assert.ok(view.deathContext.size>0&&view.hitPool.slots.some(s=>s.active)&&view.shellPool.slots.some(s=>s.active),'the first match leaves state behind');
+ view.setMatch({arena:{id:'crosswire'},actors:[],pickups:[],serial:0});
+ assert.equal(view.deathContext.size,0);
+ assert.equal(view.deathPool.slots.filter(s=>s.active).length,0);
+ assert.equal(view.hitPool.slots.filter(s=>s.active).length,0);
+ assert.equal(view.hitFlinch.size,0);
+ assert.equal(view.shellPool.slots.filter(s=>s.active).length,0);
+ assert.equal(view._debugCorpses.size,0);
+ assert.equal(view.characterLifecycle.active.size,0);
+ assert.equal(debug.model.parent,null,'the debug corpse leaves the scene');
+ view.deathPool.dispose();view.hitPool.dispose();view.shellPool.dispose();view.effectPool?.dispose();
+});
+
+test('reduced motion freezes the Moth rift frames and tumble',t=>{
+ const {view}=playable(t);
+ const frames=[{},{},{},{}];
+ view._mothRiftSheet={frames,fps:10,index:0,mat:{map:frames[0],needsUpdate:false},mesh:{rotation:{z:0}}};
+ view._mothRift={rotation:{y:0,x:0}};
+ assert.equal(view.updateMothRift(5.3,true),null,'reduced motion skips the rift pass');
+ assert.equal(view._mothRiftSheet.index,0);
+ assert.equal(view._mothRiftSheet.mesh.rotation.z,0);
+ assert.equal(view._mothRift.rotation.y,0);
+ view.updateMothRift(5.3,false);
+ assert.equal(view._mothRiftSheet.index,Math.floor((5.3*10)%frames.length));
+ assert.ok(view._mothRift.rotation.y>0,'full motion tumbles the landmark');
+});
+
+test('the local melee event drives a bounded deterministic viewmodel swing',t=>{
+ const {view}=playable(t);
+ view.scene=new T.Scene();view.hands=new T.Group();view.scene.add(view.hands);view.actorModels=new Map();
+ view.effect({type:'melee',actor:7,id:3,pos:{x:0,y:1,z:0}});
+ assert.ok(view._meleeSwing,'the local melee event starts a swing');
+ const step=()=>{view.hands.position.set(0,0,0);view.hands.quaternion.identity();view.hands.rotation.set(0,0,0,'XYZ');return view._applyMeleeSwing(1/60,false);};
+ let peak=0,turn=0,frames=0,guard=0;
+ while(view._meleeSwing&&guard++<40){step();peak=Math.max(peak,Math.hypot(view.hands.position.x,view.hands.position.y,view.hands.position.z));turn=Math.max(turn,Math.abs(view.hands.rotation.x),Math.abs(view.hands.rotation.z));frames++;}
+ assert.ok(guard<40&&!view._meleeSwing,'the swing ends');
+ assert.ok(frames>=10&&frames<=20,`the swing spans ~${frames} frames`);
+ assert.ok(peak>0&&peak<=.18,`the swing offset stays bounded (${peak})`);
+ assert.ok(turn>0&&turn<=1,`the swing rotation stays bounded (${turn})`);
+ assert.equal(view.meleeSwing().duration,.22,'the default arc spans the melee window');
+ view._meleeSwing=null;
+ view.effect({type:'melee',actor:3,id:4,pos:{x:0,y:1,z:0}});
+ assert.ok(!view._meleeSwing,'a remote melee never swings the local viewmodel');
+ view.meleeSwing();view.hands.position.set(1,2,3);
+ view._applyMeleeSwing(1/60,true);
+ assert.equal(view._meleeSwing,null,'reduced motion snaps the swing away');
+ assert.equal(view.hands.position.z,3);
+ view.effectPool?.dispose();
+});
+
+test('ballistic shots eject pooled casings inside the quality budget',t=>{
+ const {view}=playable(t);
+ view.scene=new T.Scene();view.hands=new T.Group();view.scene.add(view.hands);view.hands.visible=true;view.actorModels=new Map();
+ view.currentWeapon=-1;view.firstPerson=view._acquireWeapon(0,null,null);view.hands.add(view.firstPerson);
+ const origin=view.hands.getWorldPosition(new T.Vector3());
+ const slot=view._ejectShell({type:'shot',actor:7,weapon:0,id:9});
+ assert.ok(slot&&slot.active,'a ballistic local shot ejects a casing');
+ assert.ok(slot.obj.position.distanceTo(origin)>.02,'the casing leaves the weapon side, not its origin');
+ assert.equal(view.shellPool.limit,view._quality().deaths,'the casing budget follows the quality deaths budget');
+ for(let i=0;i<view.shellPool.limit*3;i++)view.shellPool.spawn({x:0,y:0,z:0},{seed:i});
+ assert.ok(view.shellPool.slots.length<=view.shellPool.limit,'casings stay inside the budget');
+ assert.equal(view._ejectShell({type:'shot',actor:7,weapon:4,id:10}),null,'plasma throws no case');
+ assert.equal(view._ejectShell({type:'shot',actor:7,weapon:2,id:11}),null,'rail throws no case');
+ assert.equal(view._ejectShell({type:'shot',actor:7,weapon:6,id:12}),null,'lightning throws no case');
+ assert.equal(view._ejectShell({type:'shot',actor:3,weapon:0,id:13}),null,'remote shooters never allocate a casing');
+ view.renderer.isSoftware=true;
+ assert.equal(view._ejectShell({type:'shot',actor:7,weapon:0,id:14}),null,'the CPU renderer skips casings');
+ view.renderer.isSoftware=false;
+ const active=view.shellPool.slots.find(s=>s.active),y=active.obj.position.y,opacity=active.material.opacity,vy=active.velocity.y;
+ active.life=active.total*.2;active.velocity.y=-1;
+ view.shellPool.update(.05);
+ assert.ok(active.velocity.y<vy,'gravity pulls the casing down');
+ assert.ok(active.obj.position.y<y,'the falling casing loses height');
+ assert.ok(active.material.opacity<opacity,'casings fade out');
+ view.shellPool.dispose();view.shellPool=null;
+});
+
+test('debugDeath spawns a deterministic settled corpse without touching actor models',t=>{
+ const {view}=playable(t);
+ view.scene=new T.Scene();view.hands=new T.Group();view.characterGroundAt=()=>0;
+ const opts=Object.freeze({actor:90,character:'chatgpt',style:'headpop',seed:5,direction:{x:1,z:0},x:0,y:2,z:0,settle:true});
+ const first=view.debugDeath(opts);
+ const second=view.debugDeath(opts);
+ assert.equal(first.style,'headpop');
+ assert.equal(first.plan.style,'headpop','the explicit style is honoured');
+ assert.equal(first.settled,true);
+ assert.ok(first.model.visible);
+ assert.equal(view.characterLifecycle.state(first.model),'settled');
+ assert.equal(view.characterLifecycle.state(second.model),'settled');
+ assert.ok(Math.abs(Math.abs(first.model.quaternion.dot(second.model.quaternion))-1)<1e-9,'repeats are deterministic');
+ const expected=new T.Object3D(),rot=corpseRotation(first.plan,1,Math.atan2(-1,0),false);
+ expected.rotation.set(rot.x,rot.y,rot.z,'YXZ');
+ assert.ok(Math.abs(Math.abs(first.model.quaternion.dot(expected.quaternion))-1)<1e-9,'the direction orients the debug corpse');
+ assert.equal(view.actorModels.size,0,'the debug corpse never joins the live actor map');
+ const before=view.lastEvent;
+ for(let i=0;i<12;i++)view.debugDeath({actor:100+i,style:'ragdoll',seed:i,settle:false});
+ assert.ok(view._debugCorpses.size<=8,'debug corpses stay bounded');
+ assert.equal(view.lastEvent,before,'no simulation cursor is touched');
+ const reduced=view.debugDeath({actor:97,style:'spinout',seed:1,reduced:true,settle:false,x:0,y:2,z:0});
+ assert.equal(view.characterLifecycle.state(reduced.model),'settled','reduced motion settles instantly');
+ assert.ok(view._clearDebugDeaths()<=8);
+ view.deathPool?.dispose();view.effectPool?.dispose();
 });

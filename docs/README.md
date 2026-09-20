@@ -13,6 +13,8 @@ reference.
 | [VERIFICATION.md](VERIFICATION.md) | Dated release evidence and the remaining validation gaps. |
 | [GRAPHICS-LAB.md](GRAPHICS-LAB.md) | Opt-in developer graphics preview, stackable effects and controls. |
 | [design/MOTH-GRAPHICS-PLAN.md](design/MOTH-GRAPHICS-PLAN.md) | Extensive Moth API/mothbake research and the material-variety roadmap. |
+| [design/GRAPHICS-EDGE-PLAN.md](design/GRAPHICS-EDGE-PLAN.md) | Post-processing/edge research, the finish pass, and rejected techniques. |
+| [design/ANIMATION-PASS.md](design/ANIMATION-PASS.md) | Death variety restoration, hit feedback, viewmodel and UI motion. |
 | [V8.4-IMPROVEMENT-PLAN.md](V8.4-IMPROVEMENT-PLAN.md) | Post-release multi-track audit and prioritized corrective roadmap. |
 | [spec/SPEC.md](spec/SPEC.md) | Historical design specification (kept as a record). |
 | [spec/DEVPLAN.md](spec/DEVPLAN.md) | Historical development plan (kept as a record). |

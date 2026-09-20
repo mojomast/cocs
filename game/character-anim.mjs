@@ -14,6 +14,7 @@
 //   so the walk never reads as a "puppet" flail.
 
 import {clamp, lerp} from './math.mjs';
+import {hashUnit} from './deaths.mjs';
 
 export const TAU = Math.PI * 2;
 
@@ -245,6 +246,70 @@ export function characterPose(state = {}) {
   return pose;
 }
 
+// ---- Corpse limb solver ----------------------------------------------------
+//
+// Deterministic, bounded limb splay for lifecycle-owned corpses. The living
+// path never reads this; `CharacterRig.applyCorpse` is the only writer while a
+// rig is dead, so `apply` keeps refusing stray living-path writes. Arms and
+// legs settle from plan.splay/plan.pose/plan.roll plus a per-limb seeded
+// offset, so two corpses of the same style never share one silhouette. Pure:
+// no clock and no Math.random.
+export function deathLimbPose({pose='forward',style='ragdoll',seed=0,splay=.5,roll=0,spin=0,progress=1,reduced=false}={}){
+ const out=basePose();
+ const s=clamp(splay,0,1),p=reduced?1:clamp(progress,0,1),settle=p*p*(3-2*p);
+ const lean=clamp(roll,-1,1),tumble=clamp(spin,-1.6,1.6);
+ const rnd=salt=>hashUnit(seed,salt);
+ const aL=rnd(11),aR=rnd(17),lL=rnd(23),lR=rnd(29),loll=rnd(41);
+ const wide=.6+.85*s+(Math.abs(tumble)>.9?.15:0);
+ const armL={shoulderX:-.5,shoulderZ:.4,elbowX:-.7};
+ const armR={shoulderX:-.45,shoulderZ:-.45,elbowX:-.65};
+ const legL={hipX:.15,kneeX:.4,ankleX:-.05};
+ const legR={hipX:.1,kneeX:.5,ankleX:-.04};
+ if(pose==='back'){
+  armL.shoulderX=-.1-.35*aL;armL.shoulderZ=.65+.25*wide+.35*aL;armL.elbowX=-.2-.3*aL;
+  armR.shoulderX=-.15-.4*aR;armR.shoulderZ=-(.7+.4*aR);armR.elbowX=-.3-.35*aR;
+  legL.hipX=.08+.25*lL;legL.kneeX=.35+.55*lL;legR.hipX=.06+.3*lR;legR.kneeX=.4+.6*lR;
+ }else if(pose==='left'||pose==='right'){
+  const side=pose==='left'?1:-1;
+  const under=side>0?armL:armR,over=side>0?armR:armL,underLeg=side>0?legL:legR,overLeg=side>0?legR:legL;
+  under.shoulderX=-.05-.1*aL;under.shoulderZ=side*(.3+.2*aL);under.elbowX=-1.05-.15*aL;
+  over.shoulderX=-.5-.3*aR;over.shoulderZ=-side*(.45+.35*aR);over.elbowX=-.45-.35*aR;
+  underLeg.hipX=.2+.25*lL;underLeg.kneeX=.35+.4*lL;
+  overLeg.hipX=-.25-.25*lR;overLeg.kneeX=.8+.35*lR;
+ }else if(pose==='crumple'){
+  armL.shoulderX=-.3-.2*aL;armL.shoulderZ=.4+.15*aL;armL.elbowX=-1.1-.1*aL;
+  armR.shoulderX=-.35-.2*aR;armR.shoulderZ=-(.4+.15*aR);armR.elbowX=-1.05-.1*aR;
+  legL.hipX=-(.5+.2*lL);legL.kneeX=1.0+.2*lL;legR.hipX=-(.45+.25*lR);legR.kneeX=1.05+.15*lR;
+ }else if(pose==='sprawl'){
+  armL.shoulderX=-.35-.3*aL;armL.shoulderZ=.9+.35*aL;armL.elbowX=-.25-.45*aL;
+  armR.shoulderX=-.3-.35*aR;armR.shoulderZ=-(.95+.3*aR);armR.elbowX=-.3-.4*aR;
+  legL.hipX=.35+.4*lL;legL.kneeX=.25+.4*lL;legR.hipX=.2+.45*lR;legR.kneeX=.35+.5*lR;
+ }else{
+  // forward faceplant: arms reach out ahead, one shoulder leading the seed.
+  armL.shoulderX=-.55-.45*aL;armL.shoulderZ=.3+.4*wide*.55+.35*aL;armL.elbowX=-.95-.25*aL;
+  armR.shoulderX=-.35-.5*aR;armR.shoulderZ=-(.2+.4*wide*.55+.35*aR);armR.elbowX=-.6-.4*aR;
+  legL.hipX=.12+.3*lL;legL.kneeX=.3+.5*lL;legR.hipX=.05+.42*lR;legR.kneeX=.45+.6*lR;
+ }
+ // Style beats: disintegrating styles fold in, spin/sprawl spreads wider, the
+ // splatter flatten recipe straightens the legs so the wide body reads.
+ if(style==='crumple'||style==='collapse'){armL.elbowX-=.15;armR.elbowX-=.15;legL.kneeX+=.15;legR.kneeX+=.15;}
+ if(style==='spinout'){armL.shoulderZ+=.14;armR.shoulderZ-=.14;}
+ if(style==='splatter'||style==='vaporize'){legL.kneeX*=.7;legR.kneeX*=.7;}
+ // Roll bias shifts both arms and legs toward the settled lean side.
+ armL.shoulderZ+=lean*.12;armR.shoulderZ+=lean*.12;
+ legL.hipX+=lean*.08;legR.hipX+=lean*.08;
+ const bound=(value,limit=1.25)=>Math.max(-limit,Math.min(limit,Number.isFinite(value)?value:0));
+ const blend=(target,source)=>target.map((value,index)=>clamp(lerp(value,source[index],settle),-1.25,1.25));
+ [out.armL.shoulderX,out.armL.shoulderZ,out.armL.elbowX]=blend([out.armL.shoulderX,out.armL.shoulderZ,out.armL.elbowX],[bound(armL.shoulderX),bound(armL.shoulderZ),bound(armL.elbowX)]);
+ [out.armR.shoulderX,out.armR.shoulderZ,out.armR.elbowX]=blend([out.armR.shoulderX,out.armR.shoulderZ,out.armR.elbowX],[bound(armR.shoulderX),bound(armR.shoulderZ),bound(armR.elbowX)]);
+ [out.legL.hipX,out.legL.kneeX,out.legL.ankleX]=blend([out.legL.hipX,out.legL.kneeX,out.legL.ankleX],[bound(legL.hipX),bound(legL.kneeX),bound(-legL.hipX*.35)]);
+ [out.legR.hipX,out.legR.kneeX,out.legR.ankleX]=blend([out.legR.hipX,out.legR.kneeX,out.legR.ankleX],[bound(legR.hipX),bound(legR.kneeX),bound(-legR.hipX*.35)]);
+ out.torso={x:clamp(lerp(out.torso.x,.05+lean*.08,settle),-1.25,1.25),y:clamp((aR-aL)*.25*settle,-.6,.6),z:clamp(lean*.2*settle,-.5,.5)};
+ out.chest={x:0,y:clamp((aL-aR)*.12*settle,-.4,.4),z:clamp(lean*.12*settle,-.4,.4)};
+ out.head={x:clamp(lerp(out.head.x,.08+lean*.12,settle),-1.25,1.25),y:clamp((loll-.5)*.6*settle,-.6,.6),z:clamp((lean*.3+(aL-.5)*.2)*settle,-.6,.6)};
+ return out;
+}
+
 // ---- Rig ------------------------------------------------------------------
 
 // Applies poses to a joint hierarchy. Joint objects are plain Three.js
@@ -335,6 +400,18 @@ export class CharacterRig {
 
   apply(pose) {
     if (this.lifecycle && this.lifecycle !== 'alive') return;
+    this._writePose(pose);
+  }
+
+  // Lifecycle-only corpse channel. `apply` keeps refusing dead writes so the
+  // living view path can never fight the death pose; this is the single writer
+  // CharacterLifecycle uses for its seeded limb splay while a rig is dead.
+  applyCorpse(pose) {
+    if (!this.lifecycle || this.lifecycle === 'alive') return;
+    this._writePose(pose);
+  }
+
+  _writePose(pose) {
     this.pose = pose;
     const j = this.joints;
     // The robot mesh faces -Z, but the rig poses are authored for a +Z front, so

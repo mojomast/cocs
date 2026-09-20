@@ -446,6 +446,10 @@ Recent releases. The full history lives in
 - Per-target stacks: WORLD / WEAPON / BOTS each with their own master, mix,
   palette and layers. Weapon stays crisp and bots follow the world until
   enabled; bots are depth-tested so walls occlude them.
+- Animation pass: death variety restored (direction topple, per-pose arcs,
+  seeded silhouettes, style treatments), stronger hit flinches, a melee swing,
+  shell casings, style-aware death audio, and UI entrance motion with an
+  in-game reduced-motion gate.
 - Graphics-edge pass (research-backed): static dither kills 8-bit banding, a
   contrast-adaptive sharpen recovers FXAA softness, and environment reflections
   scale with the tier. Runs whenever post-processing or the graphics lab runs.

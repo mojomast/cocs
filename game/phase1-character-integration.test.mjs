@@ -46,6 +46,17 @@ test('unapplied integration handles corpse -> respawn using real view/model meth
  assert.equal(view.characterLifecycle.state(model),'respawning');assert.equal(model.position.x,8);assert.equal(model.rotation.x,0);assert.equal(model.visible,true);
  ArenaView.prototype.reviveCorpse.call(view,model,{...actor,health:100},{time:.2});assert.equal(view.characterLifecycle.state(model),'alive');
 });
+test('live poseCorpse orients the fall from the stored kill direction',async()=>{
+ const {ArenaView,robotModel}=await integrated();
+ const view={deathContext:new Map(),hitFlinch:new Map(),playerId:99,reduced:()=>false,characterGroundAt:()=>2};
+ const model=robotModel('chatgpt'),actor={id:1,x:0,y:2,z:0,yaw:0,bodyYaw:0,health:0};
+ view.deathContext.set(1,{plan:{pose:'forward',style:'ragdoll',seed:4,spin:0,roll:0,duration:3},direction:{x:1,z:0}});
+ ArenaView.prototype.poseCorpse.call(view,model,actor,{time:0});
+ assert.ok(Math.abs(model.rotation.y-Math.atan2(-1,0))<1e-9,'the fall faces away from the shot before the tilt');
+ ArenaView.prototype.poseCorpse.call(view,model,actor,{time:2});
+ assert.ok(Math.abs(Math.abs(model.rotation.x)-Math.PI/2)<1e-6,'the directional corpse settles horizontal');
+});
+
 test('integration gates interpolation and leaves the lead-owned view byte-identical',()=>{
  const candidate=candidateFromPatch();
  assert.match(candidate,/state\(model\)!=='alive'\)continue;\s*const pose=this\._presentActor/);

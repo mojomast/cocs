@@ -148,6 +148,26 @@ export default function Home(){
   useEffect(()=>{graphicsLabRef.current=graphicsLab;},[graphicsLab]);
   useEffect(()=>()=>{if(graphicsNoticeTimer.current)clearTimeout(graphicsNoticeTimer.current);},[]);
   const showGraphicsNotice=(text:string)=>{setGraphicsNotice(text);if(graphicsNoticeTimer.current)clearTimeout(graphicsNoticeTimer.current);graphicsNoticeTimer.current=setTimeout(()=>setGraphicsNotice(''),1900);};
+  // Reduced motion is the in-game display toggle OR the OS query. `motionReduced`
+  // renders the `motion-reduced` root class so CSS can gate animation/transition
+  // on the toggle alone; the OS preference is sampled into state (never during
+  // render) so the server and the first client render agree.
+  const [osReducedMotion,setOsReducedMotion]=useState(false);
+  useEffect(()=>{
+   const query=window.matchMedia?.('(prefers-reduced-motion: reduce)');
+   if(!query)return;
+   const update=()=>setOsReducedMotion(query.matches===true);
+   update();
+   query.addEventListener?.('change',update);
+   return()=>query.removeEventListener?.('change',update);
+  },[]);
+  const motionReduced=display.reducedMotion===true||osReducedMotion;
+  // Radix portals render outside `.arena-app`, so mirror the class on <html>:
+  // `.motion-reduced` selectors then reach portalled select/popper surfaces too.
+  useEffect(()=>{
+   document.documentElement.classList.toggle('motion-reduced',motionReduced);
+   return()=>document.documentElement.classList.remove('motion-reduced');
+  },[motionReduced]);
   const [presets,setPresets]=useState<any[]>([]);
   const [netInfo,setNetInfo]=useState<any>({connected:false,peerId:null,hostId:null,isHost:false,started:false,spectate:false,actorId:null,roundOver:false,roomId:null});
   // Ranked V2 online state: the server's ladder projection from the last lobby
@@ -579,7 +599,7 @@ export default function Home(){
   r.perf?.time('render',()=>view.render(modeRef.current,selectRenderState(modeRef.current,{match:r.match,demoState:r.demo?.state,netState:r.renderState,netStarted:r.net?.started===true}),(['playing','selection','theater','progression','browse','lobby','changelog'].includes(modeRef.current))?elapsed:0,now/1000));r.perf?.frame(now);
   if(r.match&&!r.spectateLocal&&now-hudAt>(menuOpenRef.current?250:80)){const hudSnap=r.match.snapshot();if(r.training){const step=evaluateTraining(r.training,{snapshot:hudSnap,events:r.trainingEvents.splice(0),playerId:0,lattice:r.match.arena?.lattice??[]});r.training=step.training;if(step.completedNow){studyEmit('training_step_completed',{lesson:String(r.training.mode),index:Number(r.training.index)});r.announceCue={kind:'objective',team:r.match.actors[0]?.team??0,text:`STEP CLEAR · ${step.completedNow.title}`,detail:''};r.announceAt=r.match.time;}}setHud(decorate(hudSnap,{training:trainingView(r.training),damage:r.match.time-r.lastDamage<.25,hit:r.match.time-r.lastHit<.12,critical:r.match.time-(r.lastCritical??-10)<.14,kill:r.match.time-(r.lastKill??-10)<.24,pickup:r.match.time-r.pickupAt<1.5?r.pickupText:'',singleNotice:r.singleNotice&&r.match.time-r.singleNotice.at<4?r.singleNotice:null,fps:r.fps,renderer:view.renderer.isSoftware?'software':'webgl',pointerLocked:!!document.pointerLockElement},now));hudAt=now;}}catch(e:any){console.error('COCS frame failed',e);r.match=null;r.renderState=null;r.netViewReady=false;r.fire=r.fireTap=r.jump=r.power=r.interact=false;setHud(null);setError(`The arena renderer recovered from an error: ${String(e?.message||e)}. Try entering again.`);changeMode('selection');}raf=requestAnimationFrame(loop);};raf=requestAnimationFrame(loop);setReady(true);
    (window as any).tokenArenaSnapshot=()=>({mode:modeRef.current,fps:r.fps,renderer:view.renderer.isSoftware?'software':'webgl',drawCalls:view.renderer.info.render.calls,triangles:view.renderer.info.render.triangles,pointerLocked:document.pointerLockElement===canvas.current,input:{fire:r.fire,fireTap:r.fireTap,jump:r.jump,ads:r.ads,interact:r.interact,touch:{moveX:r.touch?.moveX??0,moveY:r.touch?.moveY??0,sprint:r.touch?.sprint===true,fire:r.touch?.fire===true,jump:r.touch?.jump===true}},net:r.net?.started===true,actorId:r.net?.actorId??0,camera:{x:view.camera.position.x,y:view.camera.position.y,z:view.camera.position.z,yaw:view.camera.rotation.y},...(r.match?.snapshot()??r.renderState??{}),showcase:r.showcase&&(['selection','browse','lobby'].includes(modeRef.current)||(modeRef.current==='theater'&&!r.demo))?r.showcase.match.snapshot():null,showcaseReady:!!view.showcaseState,showcaseExpected:view.showcaseExpected===true,showcaseModelFallback:view.showcaseExpected!==true&&!view.showcaseState,weather:view._weatherState?.().kind??null,weatherOverride:view._weatherOverride??null});
-   (window as any).tokenArenaDebug={finish:(opts?:any)=>r?.view?.setPolish?.(opts===undefined?null:opts)??null,post:()=>{const v=r?.view;return v?{passes:(v.composer?.passes||[]).map((x:any)=>x.name||x.constructor?.name||'?'),polish:v._polish??null,sharpen:v.finishPass?.uniforms?.sharpen?.value??null,dither:v.finishPass?.uniforms?.dither?.value??null,error:v._postError??null,postFx:v.display?.postFx??null,reduced:v.reduced?.()??null,eligible:v.renderer instanceof Object&&v.renderer?.isWebGLRenderer===true}:null;},state:()=>{const sc=r.showcase;return sc?{time:sc.time,index:r.showcaseIndex,reel:Array.isArray(r.showcaseReel)?r.showcaseReel.length:r.showcaseReel,modeId:sc.modeId,mapId:sc.mapId,over:sc.match.over===true}:null;},skip:()=>{if(r.showcase)r.showcase.time=SHOWCASE_MAX_SECONDS+1;return !!r.showcase;},next:()=>r.buildShowcase?.(),delta:()=>({hits:r.net?.deltaHits??0,misses:r.net?.deltaMisses??0,base:r.net?.deltaApplied??0,rate:r.net?.bandwidth?.rate(performance.now())??0}),aim:(on:boolean)=>{if(!r?.view)return false;r.ads=on===true;r.view.setAim(on===true);return true;},weapon:(n:number)=>{const a=r?.match?.actors?.[0];if(!a)return null;a.weapon=n;a.ammo[n]=Infinity;return a.weapon;},fire:(on:boolean)=>{if(!r)return false;r.fire=on===true;r.fireTap=on===true;return true;},// Test-only: force the local co-op intermission window open/closed so UI
+   (window as any).tokenArenaDebug={death:(opts?:any)=>r?.view?.debugDeath?.(opts)??null,finish:(opts?:any)=>r?.view?.setPolish?.(opts===undefined?null:opts)??null,post:()=>{const v=r?.view;return v?{passes:(v.composer?.passes||[]).map((x:any)=>x.name||x.constructor?.name||'?'),polish:v._polish??null,sharpen:v.finishPass?.uniforms?.sharpen?.value??null,dither:v.finishPass?.uniforms?.dither?.value??null,error:v._postError??null,postFx:v.display?.postFx??null,reduced:v.reduced?.()??null,eligible:v.renderer instanceof Object&&v.renderer?.isWebGLRenderer===true}:null;},state:()=>{const sc=r.showcase;return sc?{time:sc.time,index:r.showcaseIndex,reel:Array.isArray(r.showcaseReel)?r.showcaseReel.length:r.showcaseReel,modeId:sc.modeId,mapId:sc.mapId,over:sc.match.over===true}:null;},skip:()=>{if(r.showcase)r.showcase.time=SHOWCASE_MAX_SECONDS+1;return !!r.showcase;},next:()=>r.buildShowcase?.(),delta:()=>({hits:r.net?.deltaHits??0,misses:r.net?.deltaMisses??0,base:r.net?.deltaApplied??0,rate:r.net?.bandwidth?.rate(performance.now())??0}),aim:(on:boolean)=>{if(!r?.view)return false;r.ads=on===true;r.view.setAim(on===true);return true;},weapon:(n:number)=>{const a=r?.match?.actors?.[0];if(!a)return null;a.weapon=n;a.ammo[n]=Infinity;return a.weapon;},fire:(on:boolean)=>{if(!r)return false;r.fire=on===true;r.fireTap=on===true;return true;},// Test-only: force the local co-op intermission window open/closed so UI
 // automation can exercise the spend surface without clearing a wave. The
 // wave clock still owns the real close; this only seeds the phase/ticks.
 // Test-only: pause the render loop so browser automation can capture the
@@ -1143,7 +1163,14 @@ const cocsCommand=cocsView?{...cocsView,boardView:mergedBoard??cocsView.boardVie
     // pointer and clears combat inputs; the last one to close asks for combat
     // back. The effects only run on a real transition, so a surface opening
     // while the cursor is already free does not unlock twice.
-    useEffect(()=>{if(!cocsNotice)return;const timer=setTimeout(()=>setCocsNotice(null),4200);return()=>clearTimeout(timer);},[cocsNotice?.id]);
+    // Two beats: mark the notice `leaving` for a short CSS exit, then unmount.
+    // The queue key stays `id`, so the leaving update never restarts it.
+    useEffect(()=>{
+     if(!cocsNotice)return;
+     const leaving=setTimeout(()=>setCocsNotice((notice:any)=>notice?{...notice,leaving:true}:notice),4050);
+     const clear=setTimeout(()=>setCocsNotice(null),4200);
+     return()=>{clearTimeout(leaving);clearTimeout(clear);};
+    },[cocsNotice?.id]);
     useEffect(()=>{syncCursorSurface(CURSOR_SURFACE.SPEND,spendVisible);},[spendVisible]);
     useEffect(()=>{syncCursorSurface(CURSOR_SURFACE.BOARD,cocsBoard.open===true&&!boardCollapsed);},[cocsBoard.open,boardCollapsed]);
     // F05: the Tab glance is passive and never registers here; only the
@@ -1248,7 +1275,7 @@ const cocsCommand=cocsView?{...cocsView,boardView:mergedBoard??cocsView.boardVie
    demoNotice,demoPaused,demoTime,demoSpeed,demoRig,demoInfo,stopDemo:()=>runtime.current?.stopDemo?.(),removeDemo:(id:any)=>runtime.current?.removeDemo?.(id),playDemo:(id:any)=>runtime.current?.playDemo?.(id),setDemoPaused,setDemoTime,setDemoSpeed,setDemoRig,CAMERA_RIGS,clock,
    hud,brief,phase,hudRoute,hudMap,hudMode,isTeamMode,modeGoal,ladderStatus,flagText,armsrace,WEAPONS,activePower,radar,radarCols,radarBlip,crosshairGap,marker,reloadFill,reloading,posture,killNotice,suddenBanner,startBanner,scoreCue,damageIndicator,damageNumberStyle,reducedMotion,vehiclePrompt,vehicle,ammoEmpty,ammoLow,hideHud,pointerHint,requestLock,chatOpen,cursor:{active:cursorActive(cursorUi),surfaces:cursorUi.surfaces,label:cursorSurfaceText(cursorUi),hint:cursorHint(cursorUi,{key:bindings.cursor??DEFAULT_BINDINGS.cursor}),key:String(keyLabel(bindings.cursor??DEFAULT_BINDINGS.cursor)).toUpperCase(),blocked:cursorBlockingSurfaces(cursorUi).length>0,resume:cursorResumeCombat},spectatorBoard,spectatorTeams,CAMERA_MODE_LABELS,grenadeStatus,streakStatus,killFeedWeapon,voiceHint,escapeHint,teamScoreText,ammoText,weaponTag,REPO_URL,weaponRangeLabel,cocsCommand,
   };
-  return <><main style={{'--ui-scale':display.uiScale??1} as any} className={`arena-app mode-${mode}${(config.mode==='puma-race'||config.mode==='puma-soccer')?' race-setup':''}${(isRace||isSoccer)?' race-active':''} palette-${accessibility.palette}${accessibility.palette!=='default'?' palette-colorblind':''}${accessibility.highContrast?' ui-contrast':''}`}>
+  return <><main style={{'--ui-scale':display.uiScale??1} as any} className={`arena-app${motionReduced?' motion-reduced':''} mode-${mode}${(config.mode==='puma-race'||config.mode==='puma-soccer')?' race-setup':''}${(isRace||isSoccer)?' race-active':''} palette-${accessibility.palette}${accessibility.palette!=='default'?' palette-colorblind':''}${accessibility.highContrast?' ui-contrast':''}`}>
   <canvas ref={canvas} tabIndex={-1} role="img" className="arena-canvas" aria-label="Colosseum Of Competitive Slop 3D game"/>
   {!entered&&!demoOnly&&<><TitleScreen ui={ui}/><div className="title-footer"><span>v8.6 · PRISM</span>{githubLink}</div></>}
   {!entered&&demoOnly&&<DemoControls state={demoSession.state} labels={demoLabels} subjects={broadcast?.subjects??[]} cameraStyle={demoSession.cameraStyle} hudVisible={demoSession.hudVisible} pinned={demoPinned(demoSession)} freeSpeed={demoSession.freeSpeed} running={demoRunning} notice={demoSession.notice} error={demoSession.error}

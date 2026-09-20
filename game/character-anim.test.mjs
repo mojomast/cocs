@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {advancePhase, angleDelta, characterPose, CharacterRig, clamp, damp, dampAngle, strideFrequency, turnToward, TAU} from './character-anim.mjs';
+import {advancePhase, angleDelta, characterPose, CharacterRig, deathLimbPose, clamp, damp, dampAngle, strideFrequency, turnToward, TAU} from './character-anim.mjs';
 
 const allAngles = pose => {
   const out = [];
@@ -121,6 +121,46 @@ test('CharacterRig arms landing compression on ground contact transition', () =>
   // Recovers over time
   for (let i = 0; i < 30; i++) rig.update({ dt: 1 / 60, grounded: true });
   assert.ok(rig.land < 0.1, 'landing compression settles back to rest');
+});
+
+test('death limb solver is deterministic, seeded, pose-aware and bounded', () => {
+ const opts = {pose: 'forward', style: 'ragdoll', seed: 7, splay: .8, roll: .3, spin: 1, progress: 1};
+ const first = deathLimbPose(opts);
+ assert.deepEqual(first, deathLimbPose(opts), 'same plan and seed settle the same silhouette');
+ const neutral = deathLimbPose({...opts, progress: 0});
+ const neutralOther = deathLimbPose({...opts, progress: 0, seed: 99});
+ assert.deepEqual(neutral.armL, neutralOther.armL, 'progress zero is a seed-independent rest pose');
+ assert.deepEqual(neutral.legL, neutralOther.legL);
+ assert.notDeepEqual(neutral.armL, first.armL, 'the settle blends away from the rest arms');
+ assert.notDeepEqual(neutral.legL, first.legL, 'the settle blends away from the rest legs');
+ assert.deepEqual(deathLimbPose({...opts, progress: 0, reduced: true}), first, 'reduced motion snaps to the settled pose');
+ const silhouettes = new Set();
+ for (let seed = 0; seed < 12; seed++) {
+  const pose = deathLimbPose({...opts, seed});
+  silhouettes.add([pose.armL.shoulderZ, pose.armR.shoulderZ, pose.legL.kneeX, pose.legR.kneeX].map(v => v.toFixed(3)).join(','));
+  for (const angle of allAngles(pose)) assert.ok(Number.isFinite(angle) && Math.abs(angle) <= 1.25, `bounded ${angle}`);
+ }
+ assert.ok(silhouettes.size >= 10, `different seeds spread differently, got ${silhouettes.size}`);
+ const crumple = deathLimbPose({pose: 'crumple', style: 'crumple', seed: 1, progress: 1});
+ const sprawl = deathLimbPose({pose: 'sprawl', style: 'sprawl', seed: 1, progress: 1});
+ assert.ok(Math.abs(sprawl.armL.shoulderZ) > Math.abs(crumple.armL.shoulderZ), 'sprawl spreads wider than a crumple');
+ assert.notDeepEqual([sprawl.armL.shoulderX, sprawl.legL.hipX], [crumple.armL.shoulderX, crumple.legL.hipX]);
+});
+
+test('corpse posing is lifecycle-only while apply keeps refusing dead writes', () => {
+ const node = () => ({position: {x: 0, y: 0, z: 0}, rotation: {x: 0, y: 0, z: 0, set(x, y, z) { this.x = x; this.y = y; this.z = z; }}});
+ const joints = {root: node(), hips: node(), torso: node(), chest: node(), head: node(), armUpperL: node(), armUpperR: node(), forearmL: node(), forearmR: node(), legUpperL: node(), legUpperR: node(), legLowerL: node(), legLowerR: node(), footL: node(), footR: node()};
+ const rig = new CharacterRig(joints);
+ rig.applyCorpse(deathLimbPose({seed: 1}));
+ assert.ok(!rig.pose, 'a living rig refuses corpse posing');
+ rig.reset();
+ rig.lifecycle = 'dying';
+ rig.apply(characterPose({crouch: 1}));
+ assert.ok(!rig.pose, 'apply still refuses dead writes');
+ const pose = deathLimbPose({pose: 'sprawl', style: 'sprawl', seed: 2, progress: 1});
+ rig.applyCorpse(pose);
+ assert.equal(rig.pose, pose);
+ assert.ok(Math.abs(joints.armUpperL.rotation.z) > 0, 'the corpse channel writes the limbs');
 });
 
 test('reduced motion plants the refined contact gait while full motion lifts the stride', () => {

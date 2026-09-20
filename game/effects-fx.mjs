@@ -273,6 +273,53 @@ export class HitReactionFX{
  dispose(){for(const slot of this.slots){this.scene.remove(slot.obj);slot.material?.dispose();slot.material=null;}this.slots=[];this.mote?.dispose();this.mote=null;}
 }
 
+// Pooled ballistic shell casings. One shared box geometry and a fixed slot
+// budget reused oldest-first, so sustained fire never allocates. The view
+// spawns them at the viewmodel's ejection port with a deterministic fling;
+// they fall, tumble and fade. Reduced motion and the CPU renderer never spawn.
+const SHELL_GRAVITY=12;
+export class ShellPool{
+ constructor(scene,limit=24){
+  this.scene=scene;this.limit=Math.max(2,limit|0);this.slots=[];this.serial=0;
+  this.geometry=new T.BoxGeometry(.018,.018,.036);
+ }
+ _slot(){
+  let slot=this.slots.find(s=>!s.active);
+  if(slot)return slot;
+  if(this.slots.length>=this.limit){this.slots.sort((a,b)=>a.serial-b.serial);return this.slots[0]||null;}
+  const material=new T.MeshBasicMaterial({transparent:true,depthWrite:false});
+  const obj=new T.Mesh(this.geometry,material);obj.visible=false;obj.frustumCulled=false;this.scene.add(obj);
+  slot={obj,material,active:false,serial:0,velocity:{x:0,y:0,z:0},spin:{x:0,y:0,z:0}};
+  this.slots.push(slot);return slot;
+ }
+ spawn(pos,{velocity=null,color='#d9b45b',life=.9,seed=0,reduced=false}={}){
+  if(!pos||reduced)return null;
+  const slot=this._slot();if(!slot)return null;
+  const vx=Number.isFinite(velocity?.x)?velocity.x:0,vy=Number.isFinite(velocity?.y)?velocity.y:1.2,vz=Number.isFinite(velocity?.z)?velocity.z:0;
+  slot.obj.visible=true;slot.material.color.set(color);slot.material.opacity=1;
+  slot.obj.position.set(Number(pos.x)||0,Number(pos.y)||0,Number(pos.z)||0);
+  slot.obj.rotation.set(hashUnit(seed,1)*Math.PI,hashUnit(seed,2)*Math.PI,hashUnit(seed,3)*Math.PI);
+  slot.velocity={x:vx+(hashUnit(seed,4)-.5)*.7,y:vy+hashUnit(seed,5)*.5,z:vz+(hashUnit(seed,6)-.5)*.7};
+  slot.spin={x:(hashUnit(seed,7)-.5)*18,y:(hashUnit(seed,8)-.5)*18,z:(hashUnit(seed,9)-.5)*18};
+  slot.active=true;slot.serial=++this.serial;slot.life=slot.total=Math.max(.2,Math.min(2,Number(life)||.9));
+  return slot;
+ }
+ update(dt){
+  const step=Math.max(0,Math.min(Number(dt)||0,.1));
+  for(const slot of this.slots){
+   if(!slot.active)continue;
+   slot.life-=step;
+   if(slot.life<=0){slot.active=false;slot.obj.visible=false;continue;}
+   const v=slot.velocity;v.y-=SHELL_GRAVITY*step;
+   slot.obj.position.x+=v.x*step;slot.obj.position.y+=v.y*step;slot.obj.position.z+=v.z*step;
+   slot.obj.rotation.x+=slot.spin.x*step;slot.obj.rotation.y+=slot.spin.y*step;slot.obj.rotation.z+=slot.spin.z*step;
+   slot.material.opacity=Math.min(1,slot.life/(slot.total*.45));
+  }
+ }
+ clear(){for(const slot of this.slots){slot.active=false;slot.obj.visible=false;}}
+ dispose(){for(const slot of this.slots){this.scene.remove(slot.obj);slot.material.dispose();}this.slots=[];this.geometry.dispose();}
+}
+
 // Pooled telegraph cues for movement and spec events (wind-ups, dashes,
 // landings, fuel-out sparks, slam shockwaves, grapple hooks, rope anchors and
 // the Linted threat ping). A fixed slot budget with three shared unit

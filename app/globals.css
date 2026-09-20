@@ -55,7 +55,11 @@
 @media(max-width:1050px){.loadout-grid{grid-template-columns:225px 1fr 280px;gap:16px}.controls-brief>span{display:none}.operator-name{font-size:15px}.roster-panel .section-label>span:last-child{display:none}.bottom-hud{left:18px;right:18px;gap:10px}.vitals{min-width:200px;gap:15px;padding:15px}.ability-hud{padding:12px}.weapon-hud{padding:12px}.wordmark small{display:none}}
 @media(max-width:760px){.selection-heading h1{font-size:28px}.operator-caption h2{font-size:32px}.operator-card{padding:8px;gap:6px}.operator-name{font-size:14px}.operator-name small{font-size:12px;letter-spacing:.3px}.harness-card{padding:9px;gap:8px}.harness-icon svg{width:19px}.selection-footer{flex-wrap:wrap;padding:15px 0}.map-info{flex:1}.desktop-note{display:block;color:#b3c5b7;font-size:12px;text-align:center;margin:8px 0 24px}.selection-screen{background:linear-gradient(#080f1355,#080f13bb 40%,#080f13 55%)}.game-modal h2{font-size:28px}}
 @media(prefers-reduced-motion:reduce){*{scroll-behavior:auto!important;transition:none!important}}
+/* The in-game toggle mirrors the OS query: `.motion-reduced` is rendered on the
+   app root (and mirrored on <html>) by app/page.tsx. */
+.motion-reduced,.motion-reduced *{scroll-behavior:auto!important;transition:none!important}
 @media(prefers-reduced-motion:reduce){.crosshair.hit{transform:translate(-50%,-50%)}}
+.motion-reduced .crosshair.hit{transform:translate(-50%,-50%)}
 
 .ability-detail footer{flex-wrap:wrap;row-gap:5px}.operator-card,.harness-card{flex-shrink:0}.harness-panel{padding-bottom:8px}.controls-brief{flex-wrap:wrap;justify-content:flex-end}.selection-heading>p:last-child,.roster-note,.ability-detail p{font-size:14px}.operator-name small{letter-spacing:.4px}.operator-number,.harness-key{font-size:12px}.operator-caption .eyebrow{font-size:12px}.operator-caption>p:last-child{font-size:14px}
 
@@ -367,6 +371,7 @@
 @keyframes radar-sweep { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
 @media (max-width: 600px) { .radar { width: 118px; height: 118px; top: 104px; right: 14px; } .kill-feed { top: 236px; } }
 @media (prefers-reduced-motion: reduce) { .radar-sweep { animation: none; } }
+.motion-reduced .radar-sweep { animation: none; }
 .next-arena-button { display: flex; align-items: center; justify-content: space-between; gap: 12px; text-align: left; }
 .next-arena-button small { display: block; font: 12px monospace; line-height: 1.5; color: #a4bdb1; margin-top: 6px; }
 .ammo-warning { padding: 6px 10px; background: #241c13ed; border: 1px solid #ffc48970; color: #ffce9c; font: 12px monospace; line-height: 1.5; text-align: center; }
@@ -579,6 +584,9 @@
   .ammo-warning.pulse { animation: none; }
   .reload-track > i { transition: none; }
 }
+.motion-reduced .hitmarker.hit, .motion-reduced .hitmarker.critical, .motion-reduced .hitmarker.kill { animation: none; }
+.motion-reduced .ammo-warning.pulse { animation: none; }
+.motion-reduced .reload-track > i { transition: none; }
 
 /* Combat feedback: floating damage, directional hit, kill banner and announcer. */
 .damage-numbers { position: absolute; inset: 0; overflow: hidden; pointer-events: none; }
@@ -616,6 +624,12 @@
   .kill-callout { animation: none; }
   .objective-announcer { animation: none; }
 }
+.motion-reduced .damage-number { transition: none; }
+.motion-reduced .damage-direction { animation: none; }
+.motion-reduced .damage-flash { animation: none; opacity: .55; }
+.motion-reduced .kill-banner { animation: none; }
+.motion-reduced .kill-callout { animation: none; }
+.motion-reduced .objective-announcer { animation: none; }
 
 /* Source link in menus */
 a.icon-button.github-link{text-decoration:none}
@@ -666,6 +680,7 @@ a.icon-button.github-link>span{position:absolute;width:1px;height:1px;overflow:h
 @media(max-width:760px){.theater-card{flex-wrap:wrap}.theater-bar{flex-wrap:wrap}.theater-clock{min-width:0}.theater-scrub{min-width:140px}}
 
 /* Title screen */
+@keyframes fadeIn{from{opacity:0}to{opacity:1}}
 .title-screen{position:absolute;inset:0;z-index:5;display:flex;flex-direction:column;align-items:center;justify-content:center;overflow:hidden;background:radial-gradient(ellipse at center,rgba(4,9,12,.72) 0%,rgba(4,9,12,.9) 60%,rgba(2,6,8,.97) 100%);animation:fadeIn .35s ease}
 .selection-screen.awaiting-start{opacity:0;pointer-events:none}
 .selection-screen{transition:opacity .45s ease}
@@ -686,7 +701,9 @@ a.icon-button.github-link>span{position:absolute;width:1px;height:1px;overflow:h
 .title-footer{position:absolute;left:0;right:0;bottom:22px;display:flex;justify-content:center;align-items:center;gap:24px;z-index:2;font:11px monospace;letter-spacing:1.4px;color:#7f9d90}
 .title-footer .github-link{width:auto;padding:8px 12px;gap:8px}
 .title-footer .github-link>span{position:static;width:auto;height:auto;clip:auto}
-@media(prefers-reduced-motion:reduce){.title-pulse{animation:none}}
+@media(prefers-reduced-motion:reduce){.title-pulse{animation:none}.title-screen{animation:none}}
+.motion-reduced .title-pulse{animation:none}
+.motion-reduced .title-screen{animation:none}
 @media(max-width:600px){.title-tagline{margin-bottom:16px}.title-meta{gap:12px}.title-footer{font-size:10px;gap:12px}}
 
 /* Slimmed menu action bar */
@@ -747,6 +764,7 @@ a.icon-button.github-link>span{position:absolute;width:1px;height:1px;overflow:h
 .rank-blurb{margin:8px 0 0;font-size:12px;color:#8ba79b;font-style:italic}
 .arsenal-list small{display:block;font-size:10px;line-height:1.4;color:#7f9d90;letter-spacing:0;margin-top:3px}
 @media(prefers-reduced-motion:reduce){.title-letter{animation:none;opacity:1;transform:none}}
+.motion-reduced .title-letter{animation:none;opacity:1;transform:none}
 @media(max-width:600px){.title-logo{gap:8px}.title-letter b{font-size:clamp(52px,17vw,110px)}.title-letter i{font-size:8px;letter-spacing:.5px}.wordmark-full{display:none}}
 
 /* HUD v2.7 — readouts scale with the viewport, with cinematic announcement effects. */
@@ -796,6 +814,7 @@ a.icon-button.github-link>span{position:absolute;width:1px;height:1px;overflow:h
 @keyframes killPop{0%{opacity:0;transform:translate(-50%,12px) scale(.82)}15%{opacity:1;transform:translate(-50%,0) scale(1.06)}32%{transform:translate(-50%,0) scale(1)}100%{opacity:0;transform:translate(-50%,-10px) scale(1)}}
 @media(max-width:600px){.vitals{min-width:0;padding:10px}.health strong{font-size:clamp(28px,9vw,44px)}.match-clock,.frag-counter strong{font-size:clamp(22px,7vw,34px)}.frag-counter strong{white-space:normal;line-height:1.15}.weapon-hud strong{font-size:clamp(26px,8vw,42px)}.objective-announcer strong{font-size:clamp(30px,11vw,52px)}}
 @media(prefers-reduced-motion:reduce){.objective-announcer,.kill-banner,.kill-feed>div,.objective-announcer::before,.objective-announcer::after{animation:none}}
+.motion-reduced .objective-announcer,.motion-reduced .kill-banner,.motion-reduced .kill-feed>div,.motion-reduced .objective-announcer::before,.motion-reduced .objective-announcer::after{animation:none}
 
 /* Touch controls (mobile): a move stick, a floating look stick and a
    prioritised action cluster. The look surface stops above the button strip so
@@ -1002,6 +1021,7 @@ html, body { overscroll-behavior: none; }
 @media(prefers-reduced-motion:reduce){
   .hud-bar>i{transition:none}
 }
+.motion-reduced .hud-bar>i{transition:none}
 
 
 /* HUD layering + touch clearance (v3.1): combat feedback must never be
@@ -1057,6 +1077,9 @@ html, body { overscroll-behavior: none; }
 .stat-card--vitals.is-low .vital--health .stat-value{color:#ff6b81}
 .stat-card--vitals.is-low .vital--health .stat-bar>i{background:#ff4757;box-shadow:0 0 8px #ff4757cc}
 @keyframes health-pulse{from{box-shadow:0 0 4px #ff475744,0 8px 22px #0008}to{box-shadow:0 0 16px #ff4757aa,0 8px 22px #0008}}
+/* Low-health keeps its red border and bar glow; only the pulse is cut. */
+@media(prefers-reduced-motion:reduce){.stat-card--vitals.is-low{animation:none}}
+.motion-reduced .stat-card--vitals.is-low{animation:none}
 .vital--armor .stat-value{color:#9fd0ff}
 .vital--armor .stat-bar>i{background:#6dbfff}
 .vital--armor.is-empty{opacity:.55}
@@ -1185,9 +1208,11 @@ html, body { overscroll-behavior: none; }
 .cocs-interact--idle{border-left-color:var(--border);opacity:.85}
 .cocs-interact--depot{border-left-color:#9fd8ff}
 @media (prefers-reduced-motion: reduce){.cocs-interact{transition:none}}
+.motion-reduced .cocs-interact{transition:none}
 .radar-spotted__ring{opacity:.9}
 .radar-spotted__mark{opacity:.95}
 @media (prefers-reduced-motion: reduce){.cocs-verb,.cocs-issue,.cocs-picker button{transition:none}}
+.motion-reduced .cocs-verb,.motion-reduced .cocs-issue,.motion-reduced .cocs-picker button{transition:none}
 /* ==========================================================================
    O1c — command board (≤42% peek panel), between-wave spend window and the
    terminals/roles surface. Shape + word only, reduced-motion snaps, and the
@@ -1310,6 +1335,7 @@ html, body { overscroll-behavior: none; }
 .cursor-resume__button small{font:700 10px var(--font-mono);letter-spacing:.1em;color:var(--text-mute)}
 .cursor-resume__button:hover,.cursor-resume__button:focus-visible{border-color:#eafff5;box-shadow:0 0 0 2px var(--accent),0 14px 40px #000a}
 .cocs-spend.is-reduced .cocs-spend__banner{animation:none}
+.motion-reduced .cocs-spend__banner{animation:none}
 .cocs-spend-chip{position:absolute;left:50%;top:calc(var(--safe-top) + 96px);transform:translateX(-50%);z-index:calc(var(--z-touch,6) + 1);min-height:44px;display:inline-flex;align-items:center;gap:8px;padding:8px 14px;border:1px solid var(--accent);border-radius:var(--radius-md);background:#08201fe6;color:#eafff5;font:800 .86em var(--font-mono);letter-spacing:.08em;cursor:pointer;pointer-events:auto}
 .cocs-spend-chip:hover,.cocs-spend-chip:focus-visible{border-color:#eafff5}
 .cocs-notice{position:absolute;left:50%;top:calc(var(--safe-top) + 140px);transform:translateX(-50%);z-index:7;display:inline-flex;align-items:center;gap:7px;max-width:70vw;padding:7px 12px;border:1px solid var(--accent);border-radius:var(--radius-md);background:#0d2b27ee;color:#eafff5;font:700 .84em var(--font-mono);letter-spacing:.06em;box-shadow:0 10px 30px #0009;pointer-events:none}
@@ -1341,6 +1367,7 @@ html, body { overscroll-behavior: none; }
 @media (prefers-reduced-motion: reduce){
   .cocs-board,.cocs-board *,.cocs-spend,.cocs-spend *,.cocs-terminals,.cocs-terminals *, .cocs-board-chip{transition:none!important;animation:none!important}
 }
+.motion-reduced .cocs-board,.motion-reduced .cocs-board *,.motion-reduced .cocs-spend,.motion-reduced .cocs-spend *,.motion-reduced .cocs-terminals,.motion-reduced .cocs-terminals *,.motion-reduced .cocs-board-chip{transition:none!important;animation:none!important}
 @media(max-width:900px){
   .cocs-board{width:min(92vw,420px)!important;max-width:92vw!important;top:calc(var(--safe-top) + 80px)}
   .cocs-spend{width:min(94vw,660px)}
@@ -1453,6 +1480,9 @@ html, body { overscroll-behavior: none; }
  /* The ability/movement rings keep their fill; only the entrance pop is cut. */
  .ability-card.is-ready,.movement-card.is-ready{animation:none}
 }
+.motion-reduced .sp-upgrade{transition:none}
+.motion-reduced .sp-upgrade:active{transform:none}
+.motion-reduced .ability-card.is-ready,.motion-reduced .movement-card.is-ready{animation:none}
 
 /* ==========================================================================
    Pass 3 — spectator board grouping + objective strip + a clear "you are

@@ -5,6 +5,7 @@ import {MusicEngine,HALO_THEME} from './music.mjs';
 import {footstepProfile,impactProfile,reportStyle,reportVariation,eventSeed,mixUnit} from './sfx-design.mjs';
 import {mothIr,mothEchoMap,mothMotif} from './moth-assets.mjs';
 import {latticeSoundCue} from './lattice-feedback.mjs';
+import {deathPlan} from './deaths.mjs';
 
 // Per-space reverb wetness for the baked convolution IRs. `cavern` keeps the
 // historical .42; drier outdoor/tunnel responses sit lower, big interiors higher.
@@ -334,6 +335,40 @@ const BED_MOODS=Object.freeze({
  hot:Object.freeze({filter:200,tone:38,gain:.02,sub:.008,air:.005,windFreq:600,wind:1.1,tense:.004,tenseFreq:55}),
  storm:Object.freeze({filter:420,tone:48,gain:.024,sub:.005,air:.012,windFreq:900,wind:2,tense:.003,tenseFreq:60}),
 });
+
+// ---- Death sound families --------------------------------------------------
+//
+// The sim stamps each death with the planner's style (deaths.mjs) and the
+// planner owns the style -> `sound` recipe. A stream may also ship a ready-made
+// `sound`; otherwise the table below maps the style the stream already carries
+// and, when even that is missing, the same kill context is replayed through the
+// planner. Anything absent or junk resolves to null, which keeps the legacy
+// death voice. feedback.test.mjs probes the planner so this table can never
+// drift from RECIPES unnoticed.
+export const DEATH_SOUND_FAMILIES=Object.freeze(['thud','pop','splat','burst','boom','zap']);
+export const DEATH_STYLE_SOUNDS=Object.freeze({
+ ragdoll:'thud',headpop:'pop',gibs:'splat',burst:'burst',combust:'boom',vaporize:'zap',
+ splatter:'splat',electrocute:'zap',crumple:'thud',spinout:'thud',collapse:'thud',
+});
+const DEATH_SOUND_SET=new Set(DEATH_SOUND_FAMILIES);
+// Bounded voice length per family so every variant is short; the default keeps
+// the historical .6 s death token.
+const DEATH_VOICE_DURATIONS=Object.freeze({thud:.5,pop:.32,splat:.55,burst:.52,boom:.75,zap:.36});
+// Resolve the family a death event should voice. Only existing event fields are
+// read: optional `sound`, the planner `style`, then the planner kill context.
+export function deathSoundFor(e){
+ if(!e||typeof e!=='object')return null;
+ if(typeof e.sound==='string'&&DEATH_SOUND_SET.has(e.sound))return e.sound;
+ const style=typeof e.style==='string'?e.style:null;
+ if(style&&DEATH_STYLE_SOUNDS[style])return DEATH_STYLE_SOUNDS[style];
+ // Replays or pre-style events can recover the family from the same context the
+ // sim used; an empty context never guesses a family.
+ if(Number.isInteger(e.weapon)||e.fall===true){
+  const plan=deathPlan({weapon:Number.isInteger(e.weapon)?e.weapon:null,overkill:e.overkill,fall:e.fall===true,seed:Number.isFinite(Number(e.seed))?Number(e.seed):0,headshot:e.headshot===true});
+  if(DEATH_SOUND_SET.has(plan.sound))return plan.sound;
+ }
+ return null;
+}
 export class SynthAudio{
  constructor({announcer=false}={}){this.ctx=null;this.muted=false;this.voices=new Set();this.noiseBuffer=null;this.master=null;this.lastDamage=null;this.lastReport=null;this.lastHit=-Infinity;this.footPhase=0;this.wasGrounded=undefined;this.lastVy=0;this.engine=null;this.zipLoop=null;this.bed=null;this.bedMood='default';this.ambientBed=true;this.stepVariant=0;this.landVariant=0;this.reloadVariant=0;this.intensity=0;this.bedScale=.75;this.musicEnabled=true;this.announcer=announcer===true;this.announced=new Set();this.lastCue=null;this.mode='default';this.theme=MODE_THEMES.default;this.soundtrack='default';this.reverbUrl=null;this.reverbWet=0.30;this.reverbLoaded=false;this.reverbSpace=null;this.lastSting=null;this.heartbeatTimer=0;this.reportSerial=0;this.space=null;this.surfaceResolver=null;this.windScale=null;this._reverbPending=false;this.jumpVariant=0;
   // Gain buses. `muteGain` sits between the master and the destination so a
@@ -737,6 +772,60 @@ export class SynthAudio{
  // Confirmation chirp layered into the death voice: a short rising pair so a
  // scoring player hears the kill without spending a second voice slot.
  _killConfirm(t,out,nodes,vol=1){const gain=Math.min(.1,.075*vol);this._tone(t+.02,out,nodes,{freq:1180,duration:.08,type:'triangle',gain,end:1860});this._tone(t+.09,out,nodes,{freq:1660,duration:.07,type:'sine',gain:gain*.7,end:840});}
+  // The historical generic death voice. Kept bit-for-bit so an event without a
+  // planner family (or with an unknown one) sounds exactly as it always did.
+  _legacyDeath(t,out,nodes,g,local){this._noise(t,out,nodes,{duration:.4,gain:.35*g,type:'lowpass',freq:1200,sweep:120,q:.7});this._tone(t,out,nodes,{freq:local?220:180,duration:.45,type:'sawtooth',gain:.12*g,end:40});this._noise(t+.05,out,nodes,{duration:.22,gain:.16*g,type:'bandpass',freq:700,sweep:200,q:.6});}
+  // Style-aware death synthesis. One family replaces the generic voice (never
+  // stacked on top of it) and the whole variant lives in the caller's single
+  // voice token, on the caller's `t`, with the same `vol`/pan contract. Pitch
+  // and level micro-variation come only from the event seed, so identical
+  // events synthesize identically on every client and replay.
+  _deathVoice(t,out,nodes,{sound=null,vol=1,local=false,seed=0}={}){
+   const g=cl(vol,0,1);
+   if(!sound){this._legacyDeath(t,out,nodes,g,local);return;}
+   const pitch=1+(mixUnit(seed)-.5)*.1,level=g*(.96+mixUnit((seed^0x85ebca6b)>>>0)*.08);
+   if(sound==='thud'){
+    this._noise(t,out,nodes,{duration:.3,gain:.3*level,type:'lowpass',freq:520*pitch,sweep:80,q:.8,attack:.004});
+    this._tone(t,out,nodes,{freq:78*pitch,duration:.4,type:'sine',gain:.19*level,end:30});
+    this._noise(t+.03,out,nodes,{duration:.2,gain:.12*level,type:'bandpass',freq:190*pitch,sweep:60,q:.9});
+   }else if(sound==='pop'){
+    this._noise(t,out,nodes,{duration:.03,attack:.0008,gain:.26*level,type:'highpass',freq:1800*pitch,sweep:600});
+    this._tone(t,out,nodes,{freq:430*pitch,duration:.16,type:'sine',gain:.14*level,end:95});
+    this._noise(t+.005,out,nodes,{duration:.12,gain:.18*level,type:'bandpass',freq:900*pitch,sweep:280,q:1.4});
+    this._tone(t+.02,out,nodes,{freq:210*pitch,duration:.1,type:'triangle',gain:.08*level,end:70});
+   }else if(sound==='splat'){
+    this._noise(t,out,nodes,{duration:.42,attack:.006,gain:.3*level,type:'lowpass',freq:1600*pitch,sweep:160,q:.6});
+    this._tone(t,out,nodes,{freq:150*pitch,duration:.3,type:'sine',gain:.08*level,end:45});
+    this._noise(t+.02,out,nodes,{duration:.3,gain:.17*level,type:'bandpass',freq:520*pitch,sweep:90,q:1.1});
+    this._noise(t+.01,out,nodes,{duration:.06,gain:.09*level,type:'highpass',freq:2400*pitch,sweep:800});
+   }else if(sound==='burst'){
+    this._noise(t,out,nodes,{duration:.04,attack:.0008,gain:.22*level,type:'bandpass',freq:2600*pitch,sweep:400,q:1});
+    this._noise(t+.005,out,nodes,{duration:.38,gain:.26*level,type:'lowpass',freq:900*pitch,sweep:70,q:.7});
+    this._tone(t,out,nodes,{freq:112*pitch,duration:.35,type:'sine',gain:.15*level,end:32});
+    this._tone(t+.01,out,nodes,{freq:265*pitch,duration:.12,type:'square',gain:.06*level,end:80});
+   }else if(sound==='boom'){
+    this._noise(t,out,nodes,{duration:.55,attack:.012,gain:.28*level,type:'lowpass',freq:640*pitch,sweep:50,q:.8});
+    this._tone(t,out,nodes,{freq:54*pitch,duration:.6,type:'sine',gain:.18*level,end:24});
+    this._tone(t,out,nodes,{freq:38*pitch,duration:.7,type:'sine',gain:.1*level,end:20});
+    this._noise(t+.08,out,nodes,{duration:.4,gain:.09*level,type:'bandpass',freq:300*pitch,sweep:90,q:.5,attack:.03});
+   }else if(sound==='zap'){
+    this._noise(t,out,nodes,{duration:.1,gain:.24*level,type:'highpass',freq:2600*pitch,sweep:900});
+    this._tone(t,out,nodes,{freq:1400*pitch,duration:.12,type:'sawtooth',gain:.13*level,end:180});
+    this._tone(t+.02,out,nodes,{freq:320*pitch,duration:.14,type:'square',gain:.08*level,end:2200});
+    this._noise(t+.04,out,nodes,{duration:.18,gain:.11*level,type:'bandpass',freq:4200*pitch,sweep:1200,q:.8});
+   }else this._legacyDeath(t,out,nodes,g,local);
+  }
+  // Short bright hit-confirm bell for precision or high-damage hits. Layered
+  // over the existing hitmarker inside that voice token; `amount` and the
+  // optional critical/headshot flags are the only inputs. Level is bounded to
+  // the hitmarker so a chip hit stays quiet and a crit gains a top partial.
+  _hitBell(t,out,nodes,{amount=0,precision=false,vol=1}={}){
+   const strength=cl(Number(amount)/48,0,1),level=cl(vol,0,1)*(.55+.45*strength);
+   this._noise(t,out,nodes,{duration:.018,attack:.0008,gain:.2*level,type:'highpass',freq:3400,sweep:5200});
+   this._tone(t,out,nodes,{freq:2480,duration:.07,type:'triangle',gain:.055*level});
+   this._tone(t+.012,out,nodes,{freq:3720,duration:.09,type:'sine',gain:.04*level});
+   if(precision)this._tone(t+.026,out,nodes,{freq:4960,duration:.05,type:'sine',gain:.028*level});
+  }
   _makeNoise(){const ctx=this.ctx,length=Math.max(1,Math.floor(ctx.sampleRate)),buffer=ctx.createBuffer(1,length,ctx.sampleRate),data=buffer.getChannelData(0);let last=0;for(let i=0;i<length;i++){const white=Math.random()*2-1;last=(last+.02*white)/1.02;data[i]=white*.75+last*.5;}return buffer;}
   _dest(pan){const out=this.ctx.createStereoPanner?this.ctx.createStereoPanner():this.ctx.createGain();if(out.pan)out.pan.value=cl(pan||0,-1,1);out.connect(this.effectsBus||this.master);return out;}
   _play(duration,pan,build,opts){if(!this.ctx||this.muted||this.voices.size>=30)return;const t=this.ctx.currentTime,out=this._dest(pan),nodes=[out],token={nodes};if(opts&&opts.send>0&&this.space){try{const snd=this.ctx.createGain();snd.gain.value=cl(Number(opts.send)||0,0,1);out.connect(snd);snd.connect(this.space.send);nodes.push(snd);}catch{}}build(t,out,nodes);this.voices.add(token);token.timer=setTimeout(()=>{for(const n of nodes){try{n.disconnect();}catch{}}this.voices.delete(token);},Math.max(30,(duration+.15)*1000));}
@@ -906,8 +995,8 @@ export class SynthAudio{
   if(e.type==='dryfire'){if(local)this._click(0,1,.08,1500);return;}
   if(e.type==='grenade'){const vol=local?1:this._falloff(pos,player,24);if(vol>.02)this._play(.18,pan,(t,out,nodes)=>{this._click(pan,vol,.06,1400);this._noise(t+.02,out,nodes,{duration:.12,gain:.22*vol,type:'bandpass',freq:800,sweep:300,q:.8});this._tone(t+.03,out,nodes,{freq:280,duration:.1,type:'triangle',gain:.08*vol,end:140});});return;}
   if(e.type==='explosion'){const vol=this._falloff(pos,player,42);if(vol>.02){const seed=eventSeed(e);this._play(.85,pan,(t,out,nodes)=>{this._noise(t,out,nodes,{duration:.5,gain:.8*vol,type:'lowpass',freq:900,sweep:60,q:.8});this._noise(t,out,nodes,{duration:.05,attack:.001,gain:.5*vol,type:'highpass',freq:2400,sweep:600});this._tone(t,out,nodes,{freq:120,duration:.5,type:'sine',gain:.35*vol,end:34});this._tone(t,out,nodes,{freq:60,duration:.75,type:'sine',gain:.3*vol,end:28});this._debris(t,out,nodes,{vol,seed,cap:Math.round(vol*3.4)});},{send:.45*vol});}return;}
-  if(e.type==='damage'){this.lastDamage=e;if(this._isLocal(e,player)){this._play(e.shieldBreak?.24:.18,0,(t,out,nodes)=>{this._noise(t,out,nodes,{duration:.14,gain:.4,type:'lowpass',freq:700,sweep:200,q:.7});this._tone(t,out,nodes,{freq:150,duration:.14,type:'triangle',gain:.18,end:60});if(e.shieldBreak){this._noise(t,out,nodes,{duration:.2,gain:.42,type:'bandpass',freq:1800,sweep:300,q:1.2});this._tone(t+.02,out,nodes,{freq:260,duration:.18,type:'sawtooth',gain:.2,end:55});this._tone(t+.03,out,nodes,{freq:2100,duration:.16,type:'triangle',gain:.14,end:620});this._noise(t+.04,out,nodes,{duration:.12,gain:.2,type:'highpass',freq:3200,sweep:900,q:.8});}if(e.critical||e.headshot)this._noise(t+.01,out,nodes,{duration:.03,gain:.2,type:'highpass',freq:2600,sweep:4200});});}else if(this._isScorer(e.source,player)&&e.amount>0){const stamp=this.ctx.currentTime;if(stamp-this.lastHit>=.045){this.lastHit=stamp;const crit=Boolean(e.critical||e.headshot||Number(e.amount)>=48);this._play(crit?.16:.12,0,(t,out,nodes)=>{if(crit){this._noise(t,out,nodes,{duration:.04,gain:.28,type:'highpass',freq:2200,sweep:3600});this._tone(t,out,nodes,{freq:1950,duration:.11,type:'triangle',gain:.16,end:2600});this._tone(t+.02,out,nodes,{freq:2900,duration:.09,type:'sine',gain:.11,end:3400});this._tone(t+.04,out,nodes,{freq:140,duration:.11,type:'sine',gain:.09,end:70});}else{this._noise(t,out,nodes,{duration:.05,gain:.26,type:'highpass',freq:1600,sweep:2600});this._tone(t,out,nodes,{freq:1250,duration:.07,type:'sine',gain:.11,end:1800});this._tone(t+.02,out,nodes,{freq:180,duration:.07,type:'sine',gain:.06,end:90});}if(e.shieldBreak){this._noise(t,out,nodes,{duration:.12,gain:.32,type:'bandpass',freq:2400,sweep:600,q:1.4});this._tone(t+.01,out,nodes,{freq:1600,duration:.1,type:'sawtooth',gain:.12,end:400});this._tone(t+.03,out,nodes,{freq:900,duration:.14,type:'triangle',gain:.1,end:1800});}});} }return;}
-  if(e.type==='death'){const vol=local?1:this._falloff(pos,player,32);if(vol>.02)this._play(.6,pan,(t,out,nodes)=>{this._noise(t,out,nodes,{duration:.4,gain:.35*vol,type:'lowpass',freq:1200,sweep:120,q:.7});this._tone(t,out,nodes,{freq:local?220:180,duration:.45,type:'sawtooth',gain:.12*vol,end:40});this._noise(t+.05,out,nodes,{duration:.22,gain:.16*vol,type:'bandpass',freq:700,sweep:200,q:.6});if(this._isScorer(e.source,player)&&e.source!==e.actor&&e.actor!==player.id)this._killConfirm(t,out,nodes,vol);},{send:.3*vol});return;}
+  if(e.type==='damage'){this.lastDamage=e;if(this._isLocal(e,player)){this._play(e.shieldBreak?.24:.18,0,(t,out,nodes)=>{this._noise(t,out,nodes,{duration:.14,gain:.4,type:'lowpass',freq:700,sweep:200,q:.7});this._tone(t,out,nodes,{freq:150,duration:.14,type:'triangle',gain:.18,end:60});if(e.shieldBreak){this._noise(t,out,nodes,{duration:.2,gain:.42,type:'bandpass',freq:1800,sweep:300,q:1.2});this._tone(t+.02,out,nodes,{freq:260,duration:.18,type:'sawtooth',gain:.2,end:55});this._tone(t+.03,out,nodes,{freq:2100,duration:.16,type:'triangle',gain:.14,end:620});this._noise(t+.04,out,nodes,{duration:.12,gain:.2,type:'highpass',freq:3200,sweep:900,q:.8});}if(e.critical||e.headshot)this._noise(t+.01,out,nodes,{duration:.03,gain:.2,type:'highpass',freq:2600,sweep:4200});});}else if(this._isScorer(e.source,player)&&e.amount>0){const stamp=this.ctx.currentTime;if(stamp-this.lastHit>=.045){this.lastHit=stamp;const crit=Boolean(e.critical||e.headshot||Number(e.amount)>=48);this._play(crit?.16:.12,0,(t,out,nodes)=>{if(crit){this._noise(t,out,nodes,{duration:.04,gain:.28,type:'highpass',freq:2200,sweep:3600});this._tone(t,out,nodes,{freq:1950,duration:.11,type:'triangle',gain:.16,end:2600});this._tone(t+.02,out,nodes,{freq:2900,duration:.09,type:'sine',gain:.11,end:3400});this._tone(t+.04,out,nodes,{freq:140,duration:.11,type:'sine',gain:.09,end:70});}else{this._noise(t,out,nodes,{duration:.05,gain:.26,type:'highpass',freq:1600,sweep:2600});this._tone(t,out,nodes,{freq:1250,duration:.07,type:'sine',gain:.11,end:1800});this._tone(t+.02,out,nodes,{freq:180,duration:.07,type:'sine',gain:.06,end:90});}if(e.shieldBreak){this._noise(t,out,nodes,{duration:.12,gain:.32,type:'bandpass',freq:2400,sweep:600,q:1.4});this._tone(t+.01,out,nodes,{freq:1600,duration:.1,type:'sawtooth',gain:.12,end:400});this._tone(t+.03,out,nodes,{freq:900,duration:.14,type:'triangle',gain:.1,end:1800});}if(crit)this._hitBell(t,out,nodes,{amount:e.amount,precision:Boolean(e.critical||e.headshot)});});} }return;}
+  if(e.type==='death'){const vol=local?1:this._falloff(pos,player,32);if(vol>.02){const sound=deathSoundFor(e),seed=Number.isFinite(Number(e.seed))?Number(e.seed)>>>0:eventSeed(e),scorer=e.source??e.killer;this._play(DEATH_VOICE_DURATIONS[sound]??.6,pan,(t,out,nodes)=>{this._deathVoice(t,out,nodes,{sound,vol,local,seed});if(this._isScorer(scorer,player)&&scorer!==e.actor&&e.actor!==player.id)this._killConfirm(t,out,nodes,vol);},{send:.3*vol});}return;}
   if(e.type==='fall'){const vol=local?1:this._falloff(pos,player,26);if(vol>.03)this._play(.34,pan,(t,out,nodes)=>{this._noise(t,out,nodes,{duration:.28,gain:.26*vol,type:'lowpass',freq:600,sweep:120,q:.7,attack:.03});this._tone(t,out,nodes,{freq:74,duration:.3,type:'sine',gain:.14*vol,end:30});});return;}
   if(e.type==='reload'){if(e.actor===player.id)this._reload(e.weapon??player.weapon,e.state);return;}
   if(e.type==='melee'){if(e.actor===player.id)this._melee(e.weapon??player.weapon,e.hit!=null,e.surface??e.material);return;}

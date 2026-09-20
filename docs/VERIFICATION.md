@@ -46,14 +46,17 @@ loop, 23 stackable effects (three built from baked Moth assets with selectable
 sources), eleven starting recipes, per-target WORLD / WEAPON / BOTS stacks with
 depth-tested bot compositing and an isolated weapon pass, a research-backed
 finish pass (static dithering for 8-bit banding, contrast-adaptive sharpening,
-tier-scaled environment reflections), plus a paid 15-job Moth batch and the
-material variety that consumes it: nine masked surface variants, two reflectance
-LUTs, an ember sky, two quantum scalar fields and a 16-frame QRC glyph
-animation, wired into surface variants, arena skies/LUTs and the lab. No
-simulation, server, protocol or dependency change; the game server does not need
-a restart. Default rendering is unchanged: the lab is off until a player enables
-it, post-processing remains opt-in, and target stacks allocate nothing until
-enabled.
+tier-scaled environment reflections), and an animation pass that restores death
+variety (direction topple, per-pose arcs, seeded silhouettes, style treatments)
+alongside strength-scaled hit flinches, a melee swing, shell casings,
+style-aware death audio and gated UI motion. This sits on top of a paid 15-job
+Moth batch and the material variety that consumes it: nine masked surface
+variants, two reflectance LUTs, an ember sky, two quantum scalar fields and a
+16-frame QRC glyph animation, wired into surface variants, arena skies/LUTs and
+the lab. No simulation, server, protocol or dependency change; the game server
+does not need a restart. Default rendering is unchanged: the lab is off until a
+player enables it, post-processing remains opt-in, and target stacks allocate
+nothing until enabled.
 
 - `docs/GRAPHICS-LAB.md` — hotkeys, controls, render contract and limitations.
 - `docs/design/GRAPHICS-EDGE-PLAN.md` — the graphics-edge research notes,
@@ -67,9 +70,9 @@ enabled.
 
 **Automated release gate (2026-09-20).**
 
-- `npm test`: pass. Game tests: 2,671 pass, 8 approved skips, 0 fail (2,679
+- `npm test`: pass. Game tests: 2,693 pass, 8 approved skips, 0 fail (2,701
   tests); server tests: 209 pass, 0 fail; TypeScript: pass; verified production
-  build: pass; SSR/UI and deployment-contract tests: 82 pass, 0 fail.
+  build: pass; SSR/UI and deployment-contract tests: 90 pass, 0 fail.
 - Moth-focused suites are part of that run: bake-runner integrity
   (`moth-bake-run.test.mjs`), GIF decode / grid-texture / GIF-frame bakers and
   generated sources (`moth-bake-pixels.test.mjs`), variant generation and mixed
@@ -89,7 +92,7 @@ enabled.
   harness executes the real `GraphicsLabPass` on a headless WebGL renderer with
   a deterministic color/checker input and proves every catalogue layer (23,
   including the three built from baked Moth assets with every non-default asset
-  option) and every starting recipe (9) and the full stack change pixels;
+  option) and every starting recipe (11) and the full stack change pixels;
   zero-mix and the original half of split mode match the untouched image
   exactly; and all combinations reuse one shader program. It then drives the
   real UI: recipe loading, the randomizer, layer stacking, A/B bypass, split

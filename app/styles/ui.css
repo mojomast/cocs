@@ -246,6 +246,8 @@
 @keyframes logo-sheen{0%{transform:translateX(-180%) rotate(14deg);opacity:0}18%{opacity:.85}42%{opacity:0}100%{transform:translateX(420%) rotate(14deg);opacity:0}}
 @media (max-width:520px){.logo{gap:4px}.logo-glyph{font-size:clamp(46px,15vw,96px)}.logo-word{letter-spacing:.5px}}
 @media (prefers-reduced-motion:reduce){.logo-letter{animation:none;opacity:1;transform:none}.logo-glyph::after{animation:none}}
+.motion-reduced .logo-letter{animation:none;opacity:1;transform:none}
+.motion-reduced .logo-glyph::after{animation:none}
 .shell--awaiting{opacity:0;pointer-events:none}
 
 /* ---------- Preview stage (menu) ---------- */
@@ -340,6 +342,8 @@
   .btn,.meter > i{transition:none}
   .spin-slow{animation:none}
 }
+.motion-reduced .btn,.motion-reduced .meter > i{transition:none}
+.motion-reduced .spin-slow{animation:none}
 
 /* Progression columns: rank+preview rail, gear, and a wide unlock body. */
 .progression-grid{grid-template-columns:minmax(260px,340px) minmax(0,1fr) minmax(0,1.55fr)}
@@ -509,6 +513,7 @@
 @media (prefers-reduced-motion:reduce){
   .mission-select,.display-presets button{transition:none}
 }
+.motion-reduced .mission-select,.motion-reduced .display-presets button{transition:none}
 
 /* ==========================================================================
    Pass 5 — prestige / season track and achievements. Career rows reuse the
@@ -556,6 +561,7 @@
 @media (prefers-reduced-motion:reduce){
   .achievement-row,.prestige-row{transition:none}
 }
+.motion-reduced .achievement-row,.motion-reduced .prestige-row{transition:none}
 
 /* ---------- Patch-notes list (Changelog screen) ---------- */
 .changelog-list{display:flex;flex-direction:column;gap:8px;margin:0;padding:0;list-style:none}
@@ -606,6 +612,7 @@
 @media (prefers-reduced-motion:reduce){
   .demo-broadcast,.demo-broadcast .demo-broadcast__live i,.demo-broadcast .demo-broadcast__track{animation:none}
 }
+.motion-reduced .demo-broadcast,.motion-reduced .demo-broadcast .demo-broadcast__live i,.motion-reduced .demo-broadcast .demo-broadcast__track{animation:none}
 
 /* ---------- Back-to-demo playback controls ---------- */
 .demo-controls{position:fixed;top:calc(var(--safe-top) + 18px);left:50%;transform:translateX(-50%);z-index:7;
@@ -814,3 +821,60 @@
   .respawn-overlay__kit{padding-left:0;border-left:0;border-top:1px solid var(--ui-line);padding-top:10px}
   .respawn-pick{min-height:44px}
 }
+
+/* ==========================================================================
+   Motion — short mount entrances for dialogs, toasts, notices and the menu
+   screens, plus the authoritative reduced-motion gates.
+   `prefers-reduced-motion: reduce` and the in-game `motion-reduced` root class
+   (app/page.tsx; mirrored on <html> so portalled surfaces are covered) are
+   treated as equivalent: every animation below is disabled by both.
+   ========================================================================== */
+@keyframes ui-fade-in{from{opacity:0}to{opacity:1}}
+@keyframes ui-toast-in{from{opacity:0;transform:translate(-50%,-8px)}to{opacity:1;transform:translate(-50%,0)}}
+@keyframes ui-toast-out{from{opacity:1;transform:translate(-50%,0)}to{opacity:0;transform:translate(-50%,-6px)}}
+@keyframes ui-notice-in{from{opacity:0;transform:translate(-50%,6px)}to{opacity:1;transform:translate(-50%,0)}}
+
+/* Dialog layer: the backdrop and the panel both fade. The panel deliberately
+   never scales/translates: the dialog geometry contract (44px footer targets,
+   panel inside the viewport) is measured against the settled box, so entrance
+   motion may only animate paint, not layout or transforms. Removing
+   `modal--hidden` or mounting the layer restarts the animation, so a
+   keepMounted modal still animates every time it opens. */
+.modal:not(.modal--hidden){animation:ui-fade-in .16s ease-out}
+.modal:not(.modal--hidden) .modal-panel{animation:ui-fade-in .17s ease-out}
+
+/* Toasts and notices rise in where they are centred. The `is-leaving` state is
+   the only exit plumbing (cocs notices) and reuses the same centring shift. */
+.unlock-toast,.achievement-toast{animation:ui-toast-in .18s ease-out}
+.graphics-hotkey-notice,.cocs-notice{animation:ui-notice-in .18s ease-out}
+.cocs-notice.is-leaving{animation:ui-toast-out .15s ease-in forwards}
+.sp-notice{animation:ui-fade-in .18s ease-out}
+
+/* Menu screens: the selection shell appears when the title hands over, and the
+   progression/changelog shells mount on their own. The title letters keep their
+   staggered animation on top of the stage fade. */
+.title-stage,.shell--showcase:not(.shell--awaiting){animation:ui-fade-in .28s ease-out}
+
+/* Phones lay toasts out full-width and un-centred, so those only fade. */
+@media (max-width:720px){
+  .unlock-toast,.achievement-toast{animation-name:ui-fade-in}
+}
+
+/* Portalled Radix select/popper content: `transition:none` never stopped the
+   tw-animate-css enter/exit keyframes. The portal sits outside `.arena-app`, so
+   it is reached by the <html> mirror of the class (or the OS query). */
+@media (prefers-reduced-motion:reduce){
+  [data-slot="select-content"][data-state]{animation:none!important}
+}
+.motion-reduced [data-slot="select-content"][data-state]{animation:none!important}
+
+@media (prefers-reduced-motion:reduce){
+  .modal:not(.modal--hidden),.modal:not(.modal--hidden) .modal-panel,
+  .unlock-toast,.achievement-toast,.graphics-hotkey-notice,.cocs-notice,
+  .cocs-notice.is-leaving,.sp-notice,.title-stage,
+  .shell--showcase:not(.shell--awaiting){animation:none}
+}
+.motion-reduced .modal:not(.modal--hidden),.motion-reduced .modal:not(.modal--hidden) .modal-panel,
+.motion-reduced .unlock-toast,.motion-reduced .achievement-toast,.motion-reduced .graphics-hotkey-notice,
+.motion-reduced .cocs-notice,.motion-reduced .cocs-notice.is-leaving,.motion-reduced .sp-notice,
+.motion-reduced .title-stage,.motion-reduced .shell--showcase:not(.shell--awaiting){animation:none}

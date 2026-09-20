@@ -1,7 +1,8 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import * as T from 'three';
-import {WeaponFeedback,EffectPool,SynthAudio,AmbientFX,WeatherFX,EMPTY_CHANNELS,MODE_THEMES} from './feedback.mjs';
+import {WeaponFeedback,EffectPool,SynthAudio,AmbientFX,WeatherFX,EMPTY_CHANNELS,MODE_THEMES,DEATH_SOUND_FAMILIES,DEATH_STYLE_SOUNDS,deathSoundFor} from './feedback.mjs';
+import {deathPlan,DEATH_STYLES} from './deaths.mjs';
 import {SURFACE_KINDS,surfaceKind,footstepProfile,impactProfile,reportVariation,mixUnit,eventSeed} from './sfx-design.mjs';
 import {weatherPreset} from './environment.mjs';
 import {HARNESSES} from './data.mjs';
@@ -242,6 +243,12 @@ test('kill confirmations layer into the death voice and follow the spectated act
  assert.equal(confirms.length,1,'the watched actor scoring a kill adds one confirmation');
  audio.event({type:'death',actor:7,source:7,pos:{x:0,z:0}},spectator);
  assert.equal(confirms.length,1,'a local death never confirms a kill');
+ // The simulation emits `killer` on deaths (never `source`), and a void fall has
+ // no killer at all. Both spellings must work and a fall must stay silent.
+ audio.event({type:'death',actor:11,killer:9,pos:{x:0,z:0}},spectator);
+ assert.equal(confirms.length,2,'the simulator killer field confirms the kill');
+ audio.event({type:'death',actor:12,killer:null,fall:true,self:true,pos:{x:0,z:0}},spectator);
+ assert.equal(confirms.length,2,'a void fall never confirms a kill');
 });
 
 test('the soundtrack plays from a quiet menu and layers combat with intensity',()=>{
@@ -775,5 +782,118 @@ test('setSpace selects baked space IRs, defaults wetness per space and falls bac
   assert.equal(offline.setSpace('hall'),'/moth/files/ir-cavern/result.wav');
   assert.equal(offline.reverbUrl,'/moth/files/ir-cavern/result.wav');
  }finally{offline.dispose();}
+});
+
+test('death styles resolve to planner sound families without drift',()=>{
+ const probe=style=>{for(let weapon=0;weapon<=9;weapon++)for(let seed=0;seed<512;seed++){const plan=deathPlan({weapon,overkill:0,seed});if(plan.style===style)return plan;}return null;};
+ assert.deepEqual([...DEATH_SOUND_FAMILIES],['thud','pop','splat','burst','boom','zap']);
+ for(const style of DEATH_STYLES){
+  const plan=probe(style);
+  assert.ok(plan,`${style} is reachable from the planner`);
+  assert.equal(DEATH_STYLE_SOUNDS[style],plan.sound,`${style} maps to the planner family`);
+  assert.equal(deathSoundFor({style}),plan.sound);
+ }
+ assert.equal(new Set(Object.values(DEATH_STYLE_SOUNDS)).size,DEATH_SOUND_FAMILIES.length,'every family is reachable from a style');
+ assert.equal(deathSoundFor({sound:'pop'}),'pop','a direct sound wins');
+ assert.equal(deathSoundFor({sound:'laser',style:'headpop'}),'pop','an unknown sound falls through to the style');
+ assert.equal(deathSoundFor({style:'not-a-style'}),null,'an unknown style keeps the legacy voice');
+ assert.equal(deathSoundFor({}),null);
+ assert.equal(deathSoundFor(null),null);
+ const context=deathPlan({weapon:2,seed:11});
+ assert.equal(deathSoundFor({weapon:2,seed:11}),context.sound,'a style-less event recovers its family from the planner context');
+ assert.equal(deathSoundFor({fall:true,seed:3}),'thud','fall deaths resolve the ragdoll family');
+ assert.equal(deathSoundFor({weapon:'nonsense'}),null,'a junk weapon is not a kill context');
+});
+
+test('death sound families synthesize distinct seeded envelopes and fall back to the legacy voice',()=>{
+ const legacy=[
+  {kind:'noise',duration:.4,gain:.35,type:'lowpass',freq:1200,sweep:120,q:.7},
+  {kind:'tone',freq:180,duration:.45,type:'sawtooth',gain:.12,end:40},
+  {kind:'noise',duration:.22,gain:.16,type:'bandpass',freq:700,sweep:200,q:.6},
+ ];
+ const capture=()=>{const {audio}=audioFixture2(),layers=[];
+  audio._play=(duration,pan,build,opts)=>{layers.push({play:{duration,pan,send:opts?.send}});build(0,{},[]);};
+  audio._noise=(t,out,nodes,options)=>layers.push({kind:'noise',...options});
+  audio._tone=(t,out,nodes,options)=>layers.push({kind:'tone',...options});
+  return {audio,layers};
+ };
+ const run=extra=>{const {audio,layers}=capture();audio.event({type:'death',actor:1,source:1,pos:{x:0,z:0},...extra},player);return layers;};
+ const defaultRun=run({});
+ assert.deepEqual(defaultRun[0].play,{duration:.6,pan:0,send:.3},'the default death keeps its length, pan and send');
+ assert.deepEqual(defaultRun.slice(1),legacy,'an event with no family keeps the legacy voice');
+ assert.equal(run({actor:7,source:7}).slice(1).find(layer=>layer.kind==='tone').freq,220,'the legacy local tone is unchanged');
+ assert.deepEqual(run({sound:'not-a-family'}).slice(1),legacy,'an unknown family keeps the legacy voice');
+ assert.deepEqual(run({style:'nonsense'}).slice(1),legacy,'an unknown style keeps the legacy voice');
+ assert.deepEqual(run({style:'headpop'}),run({sound:'pop'}),'a style-only event resolves the mapped family');
+ const signatures={};
+ for(const family of DEATH_SOUND_FAMILIES){
+  const first=run({sound:family,seed:7}),replay=run({sound:family,seed:7});
+  assert.deepEqual(first,replay,'the same seed synthesizes identically');
+  assert.ok(first.length>=4&&first.length<=7,`${family} stays a bounded voice`);
+  assert.ok(first.slice(1).every(layer=>Number.isFinite(layer.gain)),`${family} layers are finite`);
+  assert.notDeepEqual(run({sound:family,seed:8}),first,'a new seed shifts the family');
+  signatures[family]=JSON.stringify(first);
+ }
+ signatures.legacy=JSON.stringify(defaultRun);
+ assert.equal(new Set(Object.values(signatures)).size,DEATH_SOUND_FAMILIES.length+1,'every family is distinct from the legacy voice and each other');
+ const level=layers=>layers.slice(1).reduce((sum,layer)=>sum+layer.gain,0);
+ for(const family of DEATH_SOUND_FAMILIES)assert.ok(level(run({sound:family,seed:7}))<=level(defaultRun)*1.2,`${family} does not average louder than the legacy death`);
+ const one=run({sound:'boom',seed:3});
+ assert.equal(one.filter(layer=>layer.play).length,1,'one voice token per death, never a stacked layer');
+ assert.equal(one[0].play.send,.3,'the shared spatial send is unchanged');
+ assert.ok(!one.slice(1).some(layer=>layer.freq===1200&&layer.type==='lowpass'),'the family replaces the general death noise instead of stacking on it');
+});
+
+test('death variants keep routing, panning, level and mute gates unchanged',()=>{
+ const capture=()=>{const {audio}=audioFixture2(),plays=[];
+  audio._play=(duration,pan,build,opts)=>{plays.push({duration,pan,send:opts?.send});build(0,{},[]);};
+  audio._noise=()=>{};audio._tone=()=>{};
+  return {audio,plays};
+ };
+ const remote={x:20,z:0};
+ const routed=DEATH_SOUND_FAMILIES.map(family=>{const {audio,plays}=capture();audio.event({type:'death',actor:1,source:1,pos:remote,sound:family},player);return plays;});
+ assert.ok(routed.every(plays=>plays.length===1),'every family still spends exactly one remote voice');
+ assert.ok(routed.every(plays=>plays[0].pan===routed[0][0].pan),'panning does not vary by family');
+ assert.ok(routed.every(plays=>plays[0].send===routed[0][0].send),'the distance-shaped send does not vary by family');
+ const spectator={...player,spectator:true,spectatorTarget:9};
+ const local=capture();
+ local.audio.event({type:'death',actor:9,source:9,pos:{x:0,z:0},sound:'zap'},spectator);
+ assert.equal(local.plays.length,1,'the watched actor still voices the family locally');
+ local.audio.event({type:'death',actor:1,source:9,sound:'zap'},spectator);
+ assert.equal(local.plays.length,1,'an unrelated death stays silent');
+ const self=capture();
+ self.audio.event({type:'death',actor:7,source:7,pos:{x:0,z:0},sound:'splat'},{...player,reduced:true});
+ assert.equal(self.plays.length,1,'sound is not motion-gated: reduced players still hear the family');
+ const {audio,nodes}=audioFixture2();
+ audio.muted=true;
+ const before=nodes.length;
+ audio.event({type:'death',actor:7,pos:{x:0,z:0},sound:'boom'},player);
+ assert.equal(nodes.length,before,'muting still silences every death family');
+ audio.muted=false;
+ audio.event({type:'death',actor:7,pos:{x:0,z:0},sound:'boom'},player);
+ assert.ok(nodes.length>before,'unmuting restores the family voice');
+ audio.dispose();
+});
+
+test('precision and high-damage hit confirms layer a bounded deterministic bell',()=>{
+ const capture=()=>{const {audio}=audioFixture2(),layers=[];
+  audio._play=(duration,pan,build)=>{layers.push({duration});build(0,{},[]);};
+  audio._noise=(t,out,nodes,options)=>layers.push(options);
+  audio._tone=(t,out,nodes,options)=>layers.push(options);
+  return {audio,layers};
+ };
+ const hit=extra=>{const {audio,layers}=capture();audio.event({type:'damage',id:1,time:1,actor:3,source:7,amount:12,...extra},player);return layers;};
+ const bell=layers=>layers.filter(layer=>[2480,3720,4960,3400].includes(layer.freq));
+ const body=hit({}),heavy=hit({amount:52}),crit=hit({amount:20,headshot:true}),flag=hit({amount:20,critical:true});
+ assert.equal(bell(body).length,0,'a body shot keeps its existing hit confirm');
+ assert.equal(bell(heavy).length,3,'high damage layers the high-damage bell');
+ assert.equal(bell(crit).length,4,'precision adds the top partial');
+ assert.ok(flag.some(layer=>layer.freq===4960),'the critical flag rings like a headshot');
+ assert.ok(!heavy.some(layer=>layer.freq===4960),'high damage keeps the plain two-partial bell');
+ assert.ok(!hit({amount:47}).some(layer=>layer.freq===2480),'a hit under the threshold stays unchanged');
+ assert.deepEqual(hit({amount:52}),heavy,'the bell is deterministic');
+ const incoming=capture();
+ incoming.audio.event({type:'damage',id:2,time:2,actor:7,source:3,amount:52},player);
+ assert.equal(bell(incoming.layers).length,0,'damage taken does not ring the attacker bell');
 });
 

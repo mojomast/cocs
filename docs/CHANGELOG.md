@@ -26,11 +26,16 @@ paid Moth material pack and the offline variety pipeline behind it.
   bands, palette remap, print dots, crosshatch, ink and neon contours, ordered
   dither, phosphor screen, paper grain, and three baked-Moth-asset layers (grain,
   signal glyphs, spectral coat) with an asset picker each.
-- Nine editable starting recipes, including Blueprint, Thermal, Moth Print,
+- Eleven editable starting recipes, including Blueprint, Thermal, Moth Print,
   Pocket Ink (a saved player roll) and Ghost Rivals.
 - Per-target stacks: WORLD / WEAPON / BOTS each get their own master, mix,
   palette and layers. The weapon stays crisp and bots follow the world stack
   until enabled; bots render in a depth-tested pass so walls occlude them.
+- Animation pass: restored death variety (killing-direction topple, per-pose
+  fall arcs, seeded limb silhouettes, style treatments), strength-scaled hit
+  flinches, a melee swing, shell casings, style-aware death audio, and UI
+  entrance motion gated by the in-game reduced-motion setting. See
+  [Animation pass](design/ANIMATION-PASS.md).
 - Graphics-edge research pass: a static dither removes 8-bit gradient banding, a
   contrast-adaptive sharpen recovers FXAA-softened detail, and environment
   reflections scale with the quality tier. Active with post-processing or the

@@ -34,7 +34,7 @@ const FRAG_COOLDOWN=7;
 // colour; the animation-free markup is reduced-motion safe.
 const fallbackKey = (action: string) => bindingLabel((DEFAULT_BINDINGS as any)[action]).toUpperCase();
 
-function CocsReadout({command,teamName,player}:{command:any;teamName:(team:any)=>string;player:any}){
+function CocsReadout({command,teamName,player,reducedMotion}:{command:any;teamName:(team:any)=>string;player:any;reducedMotion:boolean}){
  if(!command)return null;
  const {board,economy,strip,scanTarget,traversal}=command;
  if(!board||!strip)return null;
@@ -52,7 +52,7 @@ function CocsReadout({command,teamName,player}:{command:any;teamName:(team:any)=
     <details className="lattice-tactical-details" onToggle={e=>command.onReadoutPanel?.('tactical',e.currentTarget.open)}><summary>TACTICAL VIEW · MAP / ECONOMY / ROUTES</summary>
     {command.coach&&<details className="lattice-map-details" onToggle={e=>command.onReadoutPanel?.('map',e.currentTarget.open)}><summary>SUPPLY MAP · NEXT OBJECTIVE</summary><LatticeTactical coach={command.coach}/></details>}
    <details className="lattice-kit-details" onToggle={e=>command.onReadoutPanel?.('kit',e.currentTarget.open)}><summary>YOUR FIELD ROLE · {fieldRole.operator.role.toUpperCase()}</summary><b>{fieldRole.operator.name}</b><p>{fieldRole.operator.description}</p><b>{command.keys?.power??fallbackKey('power')} · {fieldRole.harness.name}</b><p>{fieldRole.harness.description}</p></details>
-   {(command.terminals?.hasTerminals||command.terminals?.hasRoles)&&<details className="lattice-terminal-details" onToggle={e=>command.onReadoutPanel?.('terminals',e.currentTarget.open)}><summary>TERMINALS &amp; SUPPORT ROLES</summary><CocsTerminalsHud terminals={command.terminals} reducedMotion/></details>}
+   {(command.terminals?.hasTerminals||command.terminals?.hasRoles)&&<details className="lattice-terminal-details" onToggle={e=>command.onReadoutPanel?.('terminals',e.currentTarget.open)}><summary>TERMINALS &amp; SUPPORT ROLES</summary><CocsTerminalsHud terminals={command.terminals} reducedMotion={reducedMotion}/></details>}
   <div className="cocs-readout__scores" aria-label={`Objective score: ${teamName(0)} ${amount(board.scores[0])}, ${teamName(1)} ${amount(board.scores[1])}`}>
    <span className={board.leader===0?'is-lead':''}>{teamName(0)} <b>{amount(board.scores[0])}</b></span>
    <span className="cocs-readout__op" aria-hidden="true">OP</span>
@@ -195,10 +195,10 @@ export function PlayingHud({ui}:ScreenProps){
    {cursor?.active&&<div className={`cursor-chip${cursor.blocked?' has-surface':''}`} role="group" aria-label="Cursor released. Mouse input reaches the interface."><kbd>{cursor.key}</kbd> · CURSOR{cursor.blocked&&cursor.label?<span>{cursor.label}</span>:null}</div>}
    {!hud.spectate&&cursor?.active&&!cursor.blocked&&<div className="cursor-resume" role="group" aria-label="Return to combat"><button type="button" className="cursor-resume__button" onClick={cursor.resume}><b>CLICK TO FIGHT</b><small>{cursor.key} OR CLICK · MOUSE CAPTURED</small></button></div>}
 
-   {cocsCommand&&!hud.spectate&&<CocsReadout command={cocsCommand} teamName={teamName} player={player}/>}
+   {cocsCommand&&!hud.spectate&&<CocsReadout command={cocsCommand} teamName={teamName} player={player} reducedMotion={reducedMotion()}/>}
    {cocsCommand?.interactPrompt&&!hud.spectate&&player.health>0&&<div className="lattice-interaction-hint" aria-hidden="true"><kbd>{cocsCommand.interactPrompt.key}</kbd><span><b>{cocsCommand.interactPrompt.verb} · {cocsCommand.interactPrompt.label}</b><small>{cocsCommand.interactPrompt.channelPercent>0?`${cocsCommand.interactPrompt.channelPercent}% · KEEP THE AREA CLEAR`:cocsCommand.interactPrompt.anchored?'AT THE ANCHOR':`${cocsCommand.interactPrompt.distanceMeters} m · READ THE ACTION BEFORE USING`}</small></span></div>}
   {cocsCommand?.spend&&cocsCommand.spendVisible===false&&!hud.spectate&&<button type="button" className="cocs-spend-chip" aria-label={`Spend window open, ${Math.round(cocsCommand.spend.secondsRemaining)} seconds left. Activate to reopen.`} onClick={cocsCommand.reopenSpend}><span aria-hidden="true">▦</span> SPEND WINDOW · {Math.round(Number(cocsCommand.spend.secondsRemaining)||0)}s · OPEN</button>}
-   {cocsCommand?.notice&&<div className={`cocs-notice${cocsCommand.notice.ok?'':' is-failed'}`} role="group" aria-label={`Action notice: ${cocsCommand.notice.text}`}><i aria-hidden="true">{cocsCommand.notice.ok?'✓':'✕'}</i> {cocsCommand.notice.text}</div>}
+   {cocsCommand?.notice&&<div className={`cocs-notice${cocsCommand.notice.ok?'':' is-failed'}${cocsCommand.notice.leaving?' is-leaving':''}`} role="group" aria-label={`Action notice: ${cocsCommand.notice.text}`}><i aria-hidden="true">{cocsCommand.notice.ok?'✓':'✕'}</i> {cocsCommand.notice.text}</div>}
    {cocsCommand?.spend&&cocsCommand.spendVisible!==false&&!hud.spectate&&<SpendWindowHud spend={cocsCommand.spend} onSpend={cocsCommand.spendCocs} onSkip={cocsCommand.skipSpend} cursorKey={cocsCommand.cursorKey} reducedMotion={reducedMotion()}/>}
   {cocsCommand?.boardView&&!hud.spectate&&<CommandBoardHud command={cocsCommand} open={cocsCommand.boardOpen===true} collapsed={cocsCommand.boardCollapsed===true} pinned={cocsCommand.boardPinned===true} activeId={cocsCommand.boardActive} reducedMotion={reducedMotion()} commandKey={cocsCommand.commandKey} commandShortcut={cocsCommand.commandShortcut} onSelect={cocsCommand.selectBoardCard} onActivate={cocsCommand.activateBoardCard} onClose={cocsCommand.closeBoard} onTogglePin={cocsCommand.toggleBoardPin}/>}
   {cocsCommand?.director&&!hud.spectate&&<OperationsDirectorHud director={cocsCommand.director}/>}
@@ -218,7 +218,15 @@ export function PlayingHud({ui}:ScreenProps){
   {hud.spectate&&<SpectatorBoard groups={specGroups} objective={brief?{title:brief.title,line:brief.detail}:null} camera={hud.spectateLocal?runtime.current?.cameraMode:undefined} cameraModes={hud.spectateLocal?CAMERA_MODE_LABELS:undefined} onCamera={(mode:string)=>{const r=runtime.current;if(!r)return;r.cameraMode=mode;if(mode==='auto')r.spectateDirector?.reframe(r.match?.snapshot());r.applySpectateCamera?.(0);}} controls={hud.spectateLocal?spectatorControls({local:true,cursorKey:cursor?.key??'ALT',bindings:ui.bindings}):spectatorControls({local:false,cursorKey:cursor?.key??'ALT',bindings:ui.bindings})} onFollow={(id:any)=>{const r=runtime.current;if(!r)return;if(hud.spectateLocal){if(r.spectateDirector?.setTarget(id)){if(r.cameraMode==='free')r.cameraMode='chase';r.applySpectateCamera?.(0);}}else{r.spectateTarget=id;r.view.setSpectatorTarget(id);}}}/>}
   {hud.spectate?null:player.health>0?<><SightReticle ui={ui}/>{marker&&<div className={`hitmarker ${marker}`} aria-hidden="true"><span/><span/></div>}{reloading&&<div className="reload-indicator" aria-hidden="true"><span className="reload-label">RELOADING</span><span className="reload-track"><i style={{width:`${Math.round(reloadFill*100)}%`}}/></span></div>}{posture&&<div className="posture-chip">{posture}</div>}</>:<div className="death-message" role="group" aria-label="Eliminated. Respawning."><span className="eyebrow">CONNECTION LOST</span><h2>RECOMPILING</h2><p aria-hidden="true">Respawning in {Math.max(1,Math.ceil(player.dead))}…</p></div>}
   {hud.damage&&!hud.spectate&&<div className="damage-vignette"/>}
-  {display.showDamageNumbers!==false&&hud.damageNumbers?.length?<div className="damage-numbers" aria-hidden="true">{hud.damageNumbers.map((n:any)=>{const fade=damageNumberStyle((performance.now()-n.born)/1000,{reduced:reducedMotion()});return <span key={n.id} className={`damage-number ${n.kill?'kill':n.critical?'critical':'hit'}`} style={{left:`${n.x}px`,top:`${n.y}px`,opacity:fade.opacity,transform:`translate(-50%,-50%) translateY(${fade.dy}px)`}}>{n.amount}</span>;})}</div>:null}
+  {display.showDamageNumbers!==false&&hud.damageNumbers?.length?<div className="damage-numbers" aria-hidden="true">{hud.damageNumbers.map((n:any)=>{
+   const reduced=reducedMotion();
+   const fade=damageNumberStyle((performance.now()-n.born)/1000,{reduced});
+   // Criticals/kills rise further and settle with a small bounded scale pop;
+   // both are skipped entirely when motion is reduced or the style says done.
+   const emphasis=n.critical||n.kill?1.35:1;
+   const pop=reduced||fade.done?1:1+Math.max(0,Math.min(1,fade.opacity))*(n.kill?.05:.07);
+   return <span key={n.id} className={`damage-number ${n.kill?'kill':n.critical?'critical':'hit'}`} style={{left:`${n.x}px`,top:`${n.y}px`,opacity:fade.opacity,transform:`translate(-50%,-50%) translateY(${fade.dy*emphasis}px)${pop===1?'':` scale(${pop.toFixed(3)})`}`}}>{n.amount}</span>;
+  })}</div>:null}
   {damageIndicator&&!hud.spectate&&(damageIndicator.hasSource?<div className="damage-direction" style={{'--damage-angle':`${-damageIndicator.angle}rad`} as any} aria-hidden="true"><i/></div>:<div className="damage-flash" aria-hidden="true"/>)}
   <div className="hud-lower"><div className="hud-messages"><div className="pickup-message">{player.slow>0?`CONTEXT JAM · ${formatCountdown(player.slow)}s`:Object.entries(player.powerups??{}).filter(([,seconds]:any)=>seconds>0).map(([id,seconds]:any)=>`${id.toUpperCase()} · ${formatCountdown(seconds)}s`).join('  ·  ')||hud.pickup}</div>
   {player.protection>0&&player.health>0&&!hud.spectate&&<div className="spawn-protection"><Shield size={15}/> SPAWN PROTECTION</div>}
