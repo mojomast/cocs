@@ -222,8 +222,122 @@ function hornetModel(software=false){const g=new T.Group();g.name='hornet';const
  g.traverse(n=>{if(n.isMesh){n.castShadow=true;n.receiveShadow=true;}});
  if(software)addBlobShadow(g,2.3,.32);
  g.userData={kind:'hornet',vehicle:true,wheels:[],turret:null,barrels:engines,guns,flashUntil:0,color:'#5c6b7a'};return g;}
+// Titan-only siege model: +Z is forward, with the cannon mouth at the authored
+// (0, 1.5, 1.6) muzzle. No shared vehicle geometry or simulation values change.
+function titanModel(software=false){
+ const g=new T.Group();g.name='titan';
+ const armor=material('#626b59',.48,.56),edge=material('#a1a38a',.5,.43),
+  dark=material('#252e30',.65,.48),rubber=material('#151b1c',.08,.88),
+  steel=material('#8a989d',.8,.3),mark=material('#c9ad68',.3,.6),
+  optic=material('#76bcc5',.35,.23,true),lamp=material('#e4cf99',.25,.3,true);
+ // Small emissive surfaces only: broad armor highlights come from real bevels.
+ const plate=(parent,w,h,d,x,y,z,mat,b=.045)=>{
+  b=Math.min(b,w/5,h/5,d/5);
+  const geo=geometry(undefined,`titan-bevel|${w}|${h}|${d}|${b}`,()=>{
+   const shape=new T.Shape(),a=w/2-b,c=h/2-b,k=Math.min(a,c)*.2;
+   shape.moveTo(-a+k,-c);shape.lineTo(a-k,-c);shape.lineTo(a,-c+k);
+   shape.lineTo(a,c-k);shape.lineTo(a-k,c);shape.lineTo(-a+k,c);
+   shape.lineTo(-a,c-k);shape.lineTo(-a,-c+k);shape.closePath();
+   const result=new T.ExtrudeGeometry(shape,{depth:d-2*b,bevelEnabled:true,bevelThickness:b,bevelSize:b,bevelSegments:3,steps:1,curveSegments:1});
+   result.translate(0,0,-d/2+b);return result;
+  });
+  const mesh=new T.Mesh(geo,mat);mesh.position.set(x,y,z);parent.add(mesh);return mesh;
+ };
+ const hull=new T.Group();hull.name='siege-armored-hull';g.add(hull);
+ plate(hull,2.28,.44,5.1,0,.59,0,dark,.09);
+ plate(hull,2.34,.55,4.85,0,.98,0,armor,.1);
+ plate(hull,2.3,.28,1.28,0,1.22,1.75,edge,.07).rotation.x=-.16;
+ plate(hull,2.25,.25,.32,0,.66,2.52,dark);
+ // Three crew access points: paired forward hatches and turret commander hatch.
+ for(const s of [-1,1]){
+  plate(hull,.68,.1,.74,s*.57,1.36,1.25,armor);
+  plate(hull,.37,.1,.12,s*.57,1.44,1.58,dark,.02);
+  box(hull,.26,.035,.025,s*.57,1.455,1.648,optic);
+  plate(hull,.36,.24,.14,s*.91,1.02,2.43,dark);
+  box(hull,.24,.1,.03,s*.91,1.03,2.51,lamp);
+  plate(hull,.22,.22,.3,s*.72,.57,2.61,steel);
+  // Continuous track beds, articulated shoes and eight exposed road wheels.
+  plate(hull,.62,.86,4.98,s*1.18,.52,0,rubber,.12);
+  for(let i=0;i<28;i++){
+   const z=-2.33+i*(4.66/27);
+   for(const y of [.12,.92])plate(hull,.66,.12,.125,s*1.18,y,z,dark,.018);
+  }
+  for(const end of [-1,1])for(let i=1;i<8;i++){
+   const a=-Math.PI/2+i*Math.PI/8;
+   const shoe=plate(hull,.66,.12,.15,s*1.18,.52+Math.sin(a)*.4,end*(2.33+Math.cos(a)*.27),dark,.018);
+   shoe.rotation.x=end*(Math.PI/2-a);
+  }
+  // Raised side skirts leave the hubs visible and give filters large value breaks.
+  for(let i=0;i<6;i++){
+   const z=-2.05+i*.82;
+   plate(hull,.18,.48,.73,s*1.43,1.02,z,armor,.04);
+   plate(hull,.035,.12,.55,s*1.53,1.13,z,i===4?mark:edge,.008);
+   for(const dz of [-.25,.25])cylinder(hull,.035,.035,.035,s*1.54,.91,z+dz,steel,12).rotation.z=Math.PI/2;
+  }
+  plate(hull,.48,.22,.64,s*.76,1.32,-2.04,dark);
+  for(let i=0;i<7;i++)box(hull,.4,.04,.045,s*.76,1.45,-2.28+i*.075,steel);
+  cylinder(hull,.12,.14,.48,s*.96,1.04,-2.48,dark,32).rotation.x=Math.PI/2;
+  box(hull,.19,.085,.04,s*.89,.91,-2.54,mark);
+ }
+ const wheels=[];
+ for(const s of [-1,1])for(let i=0;i<8;i++){
+  const wheel=new T.Group();wheel.position.set(s*1.28,.51,-2.1+i*.6);g.add(wheel);
+  cylinder(wheel,.37,.37,.48,0,0,0,rubber,48).rotation.z=Math.PI/2;
+  cylinder(wheel,.28,.28,.5,0,0,0,edge,48).rotation.z=Math.PI/2;
+  cylinder(wheel,.13,.13,.54,0,0,0,dark,32).rotation.z=Math.PI/2;
+  for(let j=0;j<8;j++){
+   const a=j*Math.PI/4;
+   cylinder(wheel,.025,.025,.035,s*.27,Math.sin(a)*.205,Math.cos(a)*.205,steel,10).rotation.z=Math.PI/2;
+  }
+  wheels.push(wheel);
+ }
+ const turret=new T.Group();turret.name='titan-siege-turret';turret.position.set(0,1.5,-.72);g.add(turret);
+ cylinder(turret,.89,.96,.2,0,-.19,0,dark,64);
+ plate(turret,1.96,.57,1.96,0,.09,-.16,armor,.095);
+ for(const s of [-1,1]){
+  plate(turret,.46,.45,1.26,s*.84,.14,.17,edge,.065).rotation.y=s*.14;
+  plate(turret,.07,.22,.73,s*1.07,.14,-.36,mark,.014);
+  // Recessed sight and armored smoke-launcher cluster.
+  plate(turret,.3,.23,.32,s*.61,.44,.35,dark);
+  box(turret,.21,.095,.025,s*.61,.46,.524,optic);
+  for(let i=0;i<3;i++)cylinder(turret,.065,.075,.27,s*.99,.3,-.42-i*.18,dark,24).rotation.z=s*.55;
+ }
+ cylinder(turret,.36,.38,.09,0,.42,-.48,edge,48);
+ plate(turret,.32,.08,.12,0,.51,-.48,dark,.018);
+ cylinder(turret,.025,.035,.68,-.7,.69,-.82,dark,16);
+ plate(turret,1.42,.36,.42,0,.12,-1.24,dark);
+ for(let i=0;i<5;i++)plate(turret,.23,.24,.12,-.52+i*.26,.14,-1.5,armor,.025);
+ const mount=new T.Group();mount.name='single-siege-cannon';turret.add(mount);
+ plate(mount,.66,.51,.57,0,0,.72,dark,.075);
+ const barrel=cylinder(mount,.135,.17,1.25,0,0,1.48,steel,64);barrel.rotation.x=Math.PI/2;
+ for(const z of [1.01,1.2,1.82])cylinder(mount,.19,.19,.11,0,0,z,dark,48).rotation.x=Math.PI/2;
+ plate(mount,.39,.33,.26,0,0,2.18,edge,.04);
+ // A recessed black bore and thick rim, rather than a solid capped gun tip.
+ cylinder(mount,.118,.118,.012,0,0,2.315,rubber,48).rotation.x=Math.PI/2;
+ ring(mount,.145,.028,0,0,2.32,steel,0);
+ const flash=new T.Mesh(new T.SphereGeometry(.23,16,12),new T.MeshBasicMaterial({color:'#ffe1a6'}));
+ flash.position.set(0,0,2.32);flash.visible=false;mount.add(flash);
+ // Batch stationary detailing by material, retaining independent wheel/turret
+// transforms. Source geometry stays in ModelAssets; only temporary clones die.
+ const batch=parent=>{
+  const buckets=new Map();
+  for(const mesh of [...parent.children])if(mesh.isMesh){
+   mesh.updateMatrix();const geo=mesh.geometry.index?mesh.geometry.toNonIndexed():mesh.geometry.clone();geo.applyMatrix4(mesh.matrix);
+   if(!buckets.has(mesh.material))buckets.set(mesh.material,[]);
+   buckets.get(mesh.material).push(geo);parent.remove(mesh);
+   if(!currentAssets())mesh.geometry.dispose();
+  }
+  for(const [mat,parts] of buckets){const merged=mergeGeometries(parts,false);for(const part of parts)part.dispose();if(merged)parent.add(new T.Mesh(merged,mat));}
+ };
+ batch(hull);batch(turret);for(const wheel of wheels)batch(wheel);
+ g.traverse(n=>{if(n.isMesh){n.castShadow=true;n.receiveShadow=true;}});
+ if(software)addBlobShadow(g,2.8,.35);
+ g.userData={kind:'titan',vehicle:true,wheels,turret,barrels:[barrel],guns:[{mount,barrel,flash}],flashUntil:0,color:'#626b59'};
+ return g;
+}
 export function vehicleModel(kind='puma',assets,software=false){return withAssets(assets,()=>{
  if(kind==='hornet')return hornetModel(software);
+ if(kind==='titan')return titanModel(software);
  const g=new T.Group();g.name='warthog';
  const cache=new Map();
  const matc=(color,metal=.5,rough=.42,emissive=false,opts={})=>{const key=`${color}|${metal}|${rough}|${emissive?1:0}|${opts.transparent?1:0}|${opts.opacity??1}`;let mat=cache.get(key);if(!mat){mat=material(color,metal,rough,emissive);if(opts.transparent){mat.transparent=true;mat.opacity=opts.opacity??.55;}if(opts.flat)mat.flatShading=true;cache.set(key,mat);}return mat;};
