@@ -1,0 +1,18 @@
+<!doctype html>
+<html lang="en"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>COCS · Announcer auditions</title>
+<style>body{background:#10141c;color:#e8edf5;font:17px system-ui;max-width:1100px;margin:40px auto;padding:20px}h1{color:#b5f268}section{padding:16px;border:1px solid #637183;border-radius:12px;margin:16px 0} .takes{display:flex;flex-wrap:wrap;gap:16px}label{display:grid;gap:8px}button{background:#b5f268;color:#10141c;padding:10px;border:0;border-radius:6px;cursor:pointer}audio{max-width:100%}#status{color:#d4e5ff}</style>
+<h1>COCS · Announcer auditions</h1><p>OmniVoice Studio · three seeds per cue · synthetic voice, no reference recording.</p><p>These are asset auditions, not a change to in-game audio. Listen to each take before approving.</p><p id="status">Loading manifest…</p><main></main>
+<script type="module">
+const status=document.querySelector('#status');
+try {
+ const response=await fetch('./manifest.json');if(!response.ok)throw Error('Manifest unavailable');
+ const {clips}=await response.json();const groups=Map.groupBy(clips,c=>c.cue);
+ for(const [cue,takes] of groups){
+  const section=document.createElement('section'),title=document.createElement('h2'),row=document.createElement('div');title.textContent=`${cue} — ${takes[0].text}`;row.className='takes';section.append(title,row);
+  for(const take of takes){const label=document.createElement('label'),audio=document.createElement('audio');label.append(`Seed ${take.seed} · ${take.duration.toFixed(2)}s`);audio.controls=true;audio.preload='none';audio.src='./'+take.file;label.append(audio);row.append(label);}
+  document.querySelector('main').append(section);
+ }
+ status.textContent=`${clips.length} clips · ${groups.size} event types`;
+ document.addEventListener('play',event=>{for(const audio of document.querySelectorAll('audio'))if(audio!==event.target)audio.pause();},true);
+}catch(error){status.textContent='Could not load clips: '+error.message;}
+</script></html>
