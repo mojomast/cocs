@@ -642,7 +642,7 @@ export class SynthAudio{
   // optional: the manifest loads once the graph exists, takes decode on first
   // use, and any fetch/decode failure leaves the procedural cue in charge.
   this.announcerPack=null;this._announcerPackPromise=null;this._announcerTake=0;
-  this._announcerVoiceUntil=0;this.announcerFetch=null;this.announcerGain=.9;
+  this._announcerVoiceUntil=0;this.announcerFetch=null;this.announcerGain=1.05;
   this.announcerPackUrl='/audio/announcer/manifest.json';this.announcerPackBase='/audio/announcer';
   // Optional Moth audio layer (game/moth-audio.mjs). Never created here; the
   // host opts in with setMothAudio() or registers a factory with
@@ -1011,7 +1011,7 @@ export class SynthAudio{
  // instead of being replaced for the session; a fresh match does the same when
  // it starts. Returning to the menu also ends any live-match dedupe so the next
  // FIGHT sting can fire.
- setScene(scene){const key=scene==='menu'?'menu':scene==='results'?'results':'game';this.scene=key;if(key==='menu'){this.matchEnd();if(this.musicEngine?.outcome)this.setOutcome(null);}this.musicEngine?.setScene(key==='menu'?'menu':key==='results'?'results':(this.intensity>=.34?'combat':'explore'));this.mothAudio?.setScene?.(key);return this.scene;}
+ setScene(scene){const key=scene==='menu'?'menu':scene==='results'?'results':'game';this.scene=key;if(key==='menu'){this.matchEnd();if(this.engine)this._engine(0,false);if(this.skidLoop)this._skidLoop(false,0);if(this.musicEngine?.outcome)this.setOutcome(null);}this.musicEngine?.setScene(key==='menu'?'menu':key==='results'?'results':(this.intensity>=.34?'combat':'explore'));this.mothAudio?.setScene?.(key);return this.scene;}
  // Victory/defeat selects the results arrangement (Picardy tonic on a win).
  // Victory/defeat also hands the baked Moth outcome motif to the soundtrack's
  // lead voice. Motifs are note data (not decodable clips), so this is the
@@ -1134,7 +1134,7 @@ export class SynthAudio{
   if(!state||typeof state!=='object')return {started:false,countdown:null,final:null};
   const mode=state.config?.mode??state.mode??null;
   if(mode&&mode!==this.mode)this.setModeTheme(mode);
-  if(state.over===true){this.matchEnd();return {started:false,countdown:null,final:null};}
+  if(state.over===true||this.scene!=='game'){this.matchEnd();return {started:false,countdown:null,final:null};}
   const started=this.matchStart().played===true;
   const countdown=state.race?this.countdown(state.race):null;
   const limit=Number(state.config?.timeLimit);
@@ -1495,9 +1495,9 @@ export class SynthAudio{
   return ready?this._startAnnouncerTake(pack.buffers.get(ready.file),now):false;
  }
  _startAnnouncerTake(buffer,now){
-  const duration=Math.min(12,Math.max(.12,Number(buffer.duration)||1))+.08,gain=cl(Number(this.announcerGain)||.9,.2,1.4);
+  const duration=Math.min(12,Math.max(.12,Number(buffer.duration)||1))+.08,gain=cl(Number(this.announcerGain)||1.05,.2,1.4);
   let played=false;
-  this._play(duration,0,(t,out,nodes)=>{const src=this.ctx.createBufferSource();src.buffer=buffer;const g=this.ctx.createGain();g.gain.value=gain;src.connect(g);g.connect(out);try{src.start(t);src.stop(t+duration);}catch{}nodes.push(src,g);played=true;});
+  this._play(duration,0,(t,out,nodes)=>{const src=this.ctx.createBufferSource();src.buffer=buffer;const g=this.ctx.createGain();g.gain.value=gain;src.connect(g);g.connect(out);try{src.start(t);src.stop(t+duration);}catch{}nodes.push(src,g);played=true;},{priority:true});
   if(!played)return false;
   this._announcerVoiceUntil=now+duration;
   return 'played';
@@ -1520,7 +1520,7 @@ export class SynthAudio{
   const sampled=this._playAnnouncerTake(cue.id,now);
   if(sampled==='played'){this.lastCue=cue.id;return {cue:cue.id,played:true,sampled:true};}
   if(sampled==='busy')return {cue:cue.id,played:false,sampled:true,busy:true};
-  this._play(cue.length+.1,0,(t,out,nodes)=>{this._tone(t,out,nodes,{freq:cue.freq,duration:cue.length*.45,type:'triangle',gain:.06,end:mid});this._tone(t+cue.length*.5,out,nodes,{freq:mid,duration:cue.length*.45,type:'triangle',gain:.05,end:cue.end});this._tone(t+cue.length*.82,out,nodes,{freq:cue.end,duration:cue.length*.32,type:'sine',gain:.035,end:cue.end*1.06});});
+  this._play(cue.length+.1,0,(t,out,nodes)=>{this._tone(t,out,nodes,{freq:cue.freq,duration:cue.length*.45,type:'triangle',gain:.09,end:mid});this._tone(t+cue.length*.5,out,nodes,{freq:mid,duration:cue.length*.45,type:'triangle',gain:.075,end:cue.end});this._tone(t+cue.length*.82,out,nodes,{freq:cue.end,duration:cue.length*.32,type:'sine',gain:.05,end:cue.end*1.06});},{priority:true});
   this.lastCue=cue.id;return {cue:cue.id,played:true};
  }
  // High-value announcer dispatch: the per-cue cooldown plus a global cadence
@@ -1607,7 +1607,7 @@ export class SynthAudio{
   }
   _makeNoise(){const ctx=this.ctx,length=Math.max(1,Math.floor(ctx.sampleRate)),buffer=ctx.createBuffer(1,length,ctx.sampleRate),data=buffer.getChannelData(0);let last=0;for(let i=0;i<length;i++){const white=Math.random()*2-1;last=(last+.02*white)/1.02;data[i]=white*.75+last*.5;}return buffer;}
   _dest(pan){const out=this.ctx.createStereoPanner?this.ctx.createStereoPanner():this.ctx.createGain();if(out.pan)out.pan.value=cl(pan||0,-1,1);out.connect(this.effectsBus||this.master);return out;}
-  _play(duration,pan,build,opts){if(!this.ctx||this.muted||this.voices.size>=30)return;const t=this.ctx.currentTime,out=this._dest(pan),nodes=[out],token={nodes};if(opts&&opts.send>0&&this.space){try{const snd=this.ctx.createGain();snd.gain.value=cl(Number(opts.send)||0,0,1);out.connect(snd);snd.connect(this.space.send);nodes.push(snd);}catch{}}build(t,out,nodes);this.voices.add(token);token.timer=setTimeout(()=>{for(const n of nodes){try{n.disconnect();}catch{}}this.voices.delete(token);},Math.max(30,(duration+.15)*1000));}
+  _play(duration,pan,build,opts){if(!this.ctx||this.muted||(this.voices.size>=30&&!(opts&&opts.priority)))return;const t=this.ctx.currentTime,out=this._dest(pan),nodes=[out],token={nodes};if(opts&&opts.send>0&&this.space){try{const snd=this.ctx.createGain();snd.gain.value=cl(Number(opts.send)||0,0,1);out.connect(snd);snd.connect(this.space.send);nodes.push(snd);}catch{}}build(t,out,nodes);this.voices.add(token);token.timer=setTimeout(()=>{for(const n of nodes){try{n.disconnect();}catch{}}this.voices.delete(token);},Math.max(30,(duration+.15)*1000));}
   _noise(t,out,nodes,{duration=.08,gain=.1,type='bandpass',freq=800,q=1,sweep=null,attack=.002}){if(!this.ctx||!this.ctx.createBufferSource||typeof this.ctx.createBiquadFilter!=='function')return;const src=this.ctx.createBufferSource();src.buffer=this.noiseBuffer;src.loop=true;const f=this.ctx.createBiquadFilter();f.type=type;f.frequency.setValueAtTime(Math.max(30,freq),t);f.Q.value=q;if(sweep)f.frequency.exponentialRampToValueAtTime(Math.max(30,sweep),t+duration);const g=this.ctx.createGain();g.gain.setValueAtTime(.0001,t);g.gain.linearRampToValueAtTime(Math.max(.0002,gain),t+attack);g.gain.exponentialRampToValueAtTime(.0001,t+duration);src.connect(f);f.connect(g);g.connect(out);src.start(t);src.stop(t+duration+.03);nodes.push(src,f,g);}
   _tone(t,out,nodes,{freq,duration=.08,type='sine',gain=.05,end=0,attack=.003}){const o=this.ctx.createOscillator();o.type=type;o.frequency.setValueAtTime(Math.max(20,freq),t);if(end)o.frequency.exponentialRampToValueAtTime(Math.max(20,end),t+duration);const g=this.ctx.createGain();g.gain.setValueAtTime(.0001,t);g.gain.linearRampToValueAtTime(Math.max(.0002,gain),t+attack);g.gain.exponentialRampToValueAtTime(.0001,t+duration);o.connect(g);g.connect(out);o.start(t);o.stop(t+duration+.03);nodes.push(o,g);}
  tone(freq,duration=.08,type='sine',gain=.04,end=0){this._play(duration,0,(t,out,nodes)=>this._tone(t,out,nodes,{freq,duration,type,gain,end,attack:.006}));}

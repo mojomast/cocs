@@ -1314,6 +1314,7 @@ test('match start is an idempotent FIGHT sting and countdowns edge 3-2-1-GO',()=
  assert.deepEqual(beeps,[{beat:3,go:false},{beat:2,go:false},{beat:1,go:false},{beat:0,go:true}]);
  // The one-call snapshot entry point is safe to run every frame.
  const frame={config:{mode:'cocs',timeLimit:600},time:0,over:false,race:{phase:'countdown',countdown:3}};
+ audio.scene='game';
  assert.equal(audio.setMatchState(frame).started,true,'the live snapshot can drive the match start');
  assert.equal(audio.setMatchState(frame).started,false,'a repeated frame cannot re-fire the sting');
  assert.equal(audio.setMatchState(frame).countdown.played,false,'a repeated countdown frame stays silent');
@@ -1830,5 +1831,36 @@ test('combat intensity never overrides the menu or results arrangement',()=>{
  audio.scene='menu';
  audio.setIntensity(1);
  assert.equal(scenes.at(-1),'menu','the menu never flips to combat');
+ audio.dispose();
+});
+
+test('a stale live match cannot restart the sting while the host is on the menu',()=>{
+ const {audio}=audioFixture2();let stings=0;audio._fightSting=()=>{stings++;return true;};
+ audio.setScene('game');
+ const frame={config:{mode:'team-deathmatch',timeLimit:600},time:10,over:false};
+ assert.equal(audio.setMatchState(frame).started,true,'the live match starts once');
+ assert.equal(audio.setMatchState(frame).started,false,'the same match stays deduped');
+ // Leaving the round to the menu ends the live match, but the page keeps
+ // handing the last match to update() until a new round starts.
+ audio.setScene('menu');
+ for(let i=0;i<10;i++)audio.setMatchState(frame);
+ assert.equal(stings,1,'the FIGHT sting never replays while the menu owns the screen');
+ assert.equal(audio._matchLive,false,'the stale frame does not re-arm the match');
+ assert.equal(audio.setMatchState({...frame,over:true}).started,false,'an over frame stays ended');
+ audio.setScene('game');
+ assert.equal(audio.setMatchState(frame).started,true,'a fresh game scene can start the next round');
+ assert.equal(stings,2);
+ audio.dispose();
+});
+
+test('announcer calls keep a priority slot when the SFX budget is saturated',()=>{
+ const {audio,nodes}=audioFixture2();
+ audio.announcer=true;
+ for(let i=0;i<30;i++)audio.voices.add({nodes:[]});
+ const before=nodes.length;
+ const result=audio.announcerCue('score');
+ assert.equal(result.played,true,'the callout still schedules at the 30-voice cap');
+ assert.ok(nodes.length>before,'the priority path created its nodes');
+ assert.ok(audio.voices.size>30,'the callout is allowed above the budget');
  audio.dispose();
 });

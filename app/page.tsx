@@ -631,7 +631,11 @@ export default function Home(){
     else {view.setPreviewRect(null);if(['selection','browse','lobby','progression','changelog'].includes(modeRef.current)&&r.showcaseEnabled!==false&&!r.demo&&view.renderer?.isSoftware!==true&&now-(r.showcaseRetryAt||0)>3000){r.showcaseRetryAt=now;r.buildShowcase?.();}}
    if(r.demo&&modeRef.current==='theater'){const d=r.demo;if(!d.paused){d.time=Math.min(d.player.duration,d.time+elapsed*d.speed);if(d.time>=d.player.duration)d.paused=true;}const offset=d.player.keyframes?.[0]?.time||0,state=d.player.sample(d.time);state.events=d.player.eventsBetween(offset+(d.lastT||0),offset+d.time);d.lastT=d.time;d.state=state;view.setCinema(true);view.setDirector(d.director);view.setPlayerId(-1);if(now-d.hudAt>100){d.hudAt=now;setDemoTime(d.time);setDemoPaused(d.paused);}}
   if(!r.match&&r.net?.started&&r.net.state)r.voice?.updateSpatial(r.net.state);
-  if(r.match&&r.match.actors[0])audio.update(r.match.actors[0],r.match.vehicles,elapsed,r.match.arena?.terrain?{surfaceAt:(x:number,z:number)=>terrainSupportAt(x,z,r.match.arena.terrain)?.material,match:r.match}:{match:r.match});
+  // The local match only drives audio while it owns the screen: a stale match
+  // left over after leaving/ending a round must not restart the FIGHT sting
+  // (setScene('menu') ends the match every frame) or keep an engine loop alive
+  // in the menu.
+  if(r.match&&r.match.actors[0]&&['playing','paused','results'].includes(modeRef.current))audio.update(r.match.actors[0],r.match.vehicles,elapsed,r.match.arena?.terrain?{surfaceAt:(x:number,z:number)=>terrainSupportAt(x,z,r.match.arena.terrain)?.material,match:r.match}:{match:r.match});
   view.setShowcaseExpected?.(r.showcaseEnabled!==false&&!r.demo&&view.renderer?.isSoftware!==true&&['selection','browse','lobby','progression','changelog'].includes(modeRef.current));
   view.setInterpolation({enabled:modeRef.current==='playing'&&r.match!=null&&r.net?.started!==true&&!r.spectateLocal,alpha:RULES.dt>0?Math.max(0,Math.min(1,r.acc/RULES.dt)):1});
   r.perf?.time('render',()=>view.render(modeRef.current,selectRenderState(modeRef.current,{match:r.match,demoState:r.demo?.state,netState:r.renderState,netStarted:r.net?.started===true}),(['playing','selection','theater','progression','browse','lobby','changelog'].includes(modeRef.current))?elapsed:0,now/1000));r.perf?.frame(now);

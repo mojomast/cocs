@@ -143,3 +143,26 @@ the `feat/omnivoice-announcer-pack` PR) is now wired into `SynthAudio`:
 
 Verified in a live browser: manifest + three capture takes requested, `ready`
 reaching 3 by the second cue, zero console errors.
+
+## Menu FIGHT replay and announcer audibility
+
+Two follow-up defects from player reports:
+
+- **The FIGHT fanfare replayed continuously at the menu.** Leaving a round
+  leaves the page holding the last match while the render loop keeps calling
+  `audio.update(match, …)`, and the menu scene calls `matchEnd()` every frame —
+  so `setMatchState` re-armed `matchStart()` on every frame and `_fightSting`
+  stacked dozens of takes (player report: "a bunch of noise when I return to
+  the menu"). The page now only feeds the local match to `update()` while it
+  owns the screen (`playing`/`paused`/`results`, matching `selectRenderState`),
+  and `setMatchState` refuses to start a match unless the host scene is the game
+  scene. `setScene('menu')` also releases any running engine/skid loop. A
+  throttled-browser stack capture that previously attributed ~10 FIGHT stings
+  and ~100 sources to the transition now shows zero.
+- **The announcer was inaudible in combat.** Announcer cues shared the 30-voice
+  SFX budget with gunfire, so a busy fight silently dropped them. `_play` now
+  accepts a `priority` reservation used by the sampled takes and the procedural
+  fallback (bounded to the announcer's own single-voice rule), the fallback
+  motif is louder, and sampled takes play at a slightly higher gain. Team
+  Deathmatch score calls and kill-streak calls are therefore audible over a
+  firefight.

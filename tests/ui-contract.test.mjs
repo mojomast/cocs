@@ -104,3 +104,8 @@ test('the crosshair depth knobs stay additive and keep the reticle CSS-var contr
  assert.match(css, /\.crosshair-advanced \[data-slot=slider\] \{ min-height: 44px; \}/, 'the new sliders keep a 44 px touch row');
  assert.match(css, /\.crosshair-advanced \.config-toggle \{ min-height: 44px;/, 'the new toggles keep a 44 px touch row');
 });
+
+test('the page only feeds a local match to the audio engine while it owns the screen', async () => {
+  const page = await readFile(new URL('app/page.tsx', root), 'utf8');
+  assert.match(page, /\['playing','paused','results'\]\.includes\(modeRef\.current\)\)audio\.update\(r\.match\.actors\[0\]/, 'the stale-match audio update is gated to screen-owning modes');
+});
