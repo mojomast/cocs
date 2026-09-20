@@ -1,12 +1,19 @@
 // In-game patch notes. The title-screen footer is the running version; this
 // module is the human-readable release digest the Changelog screen renders. The
 // full historical record lives in docs/CHANGELOG.md and is linked from the UI.
-export const RELEASE_VERSION = 'v8.5';
-export const RELEASE_CODENAME = 'HANDOFF';
+export const RELEASE_VERSION = 'v8.6';
+export const RELEASE_CODENAME = 'PRISM';
 export const REPO_URL = 'https://github.com/mojomast/tokenarena';
 export const FULL_CHANGELOG_URL = `${REPO_URL}/blob/main/docs/CHANGELOG.md`;
 
 export const CHANGELOG = [
+  {version:'v8.6',codename:'PRISM',date:'2026-09-20',tag:'A preview graphics lab: stack effects, compare art directions, and find your flavor',highlights:[
+    'Graphics & settings now includes Graphics lab · Preview, an opt-in developer drawer beside the live arena. Twelve effects stack independently: pixels, prism separation, light bleed, color bands, palette remapping, halftone, crosshatch, ink contours, neon contours, ordered dithering, phosphor texture and paper grain.',
+    'Six starting recipes explore distinct looks: Circuit Print, Neon Cathedral, Pocket Arena, Field Sketch, Ghost Signal and Ember Press. Adjust each layer, switch palettes, blend the whole mix, bypass for A/B, or compare original and styled halves with a movable divider.',
+    'Recipes save on this device and export as JSON. Reset restores the original look. The lab defaults off, uses one combined WebGL shader pass, keeps the HUD and first-person weapon crisp, and uses stationary patterns under reduced motion.',
+    'An extensive Moth API and mothbake plan documents material families, structure-preserving wear, coherent color/normal/roughness variation, anti-tiling, selective iridescence, bake integrity and performance budgets. It is a researched roadmap, not a new batch of generated assets.',
+    'Scope: web presentation and research documentation only. No game-server restart or protocol change is required.',
+  ]},
   {version:'v8.5',codename:'HANDOFF',date:'2026-09-20',tag:'Authoritative actions, identified builds, verified routes and a training course that cannot be cut short',highlights:[
     'COCS actions are round-scoped and idempotent. Orders, economy actions, terminals, commands and REQ purchases carry a round revision and a per-player sequence; a duplicate delivery applies once and returns the cached outcome, reuse with a different payload is refused, and stale-round frames are rejected. Accepted HOLD/ATTACK tasks stay RUNNING until the objective actually completes, expires or is replaced instead of reporting DONE at acceptance.',
     'The Command Board, strip, coach and authority agree end to end: orders read QUEUED until the authoritative simulation confirms them, refusals always carry a reason, and a same-round reconnect reconciles from the snapshot while a rematch starts clean.',

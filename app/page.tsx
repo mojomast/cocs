@@ -57,6 +57,7 @@ import {buildShowcase as buildShowcaseFactory} from '../game/showcase-build.mjs'
 import {demoBroadcast} from '../game/broadcast.mjs';
 import {roomFromLocation,spectateFromLocation} from '../game/invite.mjs';
 import {CHANGELOG,RELEASE_VERSION,RELEASE_CODENAME,FULL_CHANGELOG_URL} from '../game/changelog.mjs';
+import {useGraphicsLab} from './ui/useGraphicsLab';
 import {DemoBroadcast} from './ui/DemoBroadcast';
 import {DemoControls} from './ui/DemoControls';
 import {DemoOptions} from './ui/DemoOptions';
@@ -138,6 +139,7 @@ export default function Home(){
   const [challengeState,setChallengeState]=useState<any>(()=>normalizeChallengeState({}));
   const [history,setHistory]=useState<any>(()=>emptyHistory());
   const [settingsTab,setSettingsTab]=useState('game');
+  const graphicsLab=useGraphicsLab(runtime,ready);
   const [presets,setPresets]=useState<any[]>([]);
   const [netInfo,setNetInfo]=useState<any>({connected:false,peerId:null,hostId:null,isHost:false,started:false,spectate:false,actorId:null,roundOver:false,roomId:null});
   // Ranked V2 online state: the server's ladder projection from the last lobby
@@ -1211,7 +1213,7 @@ const cocsCommand=cocsView?{...cocsView,boardView:mergedBoard??cocsView.boardVie
    selected,selectedMap,selectedMode,selectableMaps,power,powerIcon,CHARACTERS,HARNESSES,GAME_MODES,DIFFICULTIES,mapsForMode,getMap,missionFor,isMissionUnlocked,CAMPAIGN_MISSIONS,MapPlan,mapViewBox,
    profile,campaign,nextMissionId,isMissionComplete,challenges:challengeStatus(challengeState),weeklyChallenges:weeklyStatus(challengeState),UNLOCKS,UNLOCK_GROUPS,GEAR,GEAR_SLOTS,ATTACHMENTS,ATTACHMENT_SLOTS,WEAPON_FINISHES,CROSSHAIR_STYLES,levelFromXp,rankTitle,rankBlurb,unlockedItems,
    achievements:careerAchievements,ACHIEVEMENTS,prestige:prestigeFromXp(profile.xp),PRESTIGE_TIERS,PRESTIGE_XP,prestigeTier,prestigeXpBonus,
-   history,historyTotals:historyTotals(history),historyLeaderboard:historyLeaderboard(history),clearHistory,campaignMissions:campaignMissionView(CAMPAIGN_MISSIONS as any,campaign,singleMission as any),campaignSummary:campaignProgressSummary(CAMPAIGN_MISSIONS as any,campaign),startCampaignMission,settingsTab,setSettingsTab,openSettings,
+    history,historyTotals:historyTotals(history),historyLeaderboard:historyLeaderboard(history),clearHistory,campaignMissions:campaignMissionView(CAMPAIGN_MISSIONS as any,campaign,singleMission as any),campaignSummary:campaignProgressSummary(CAMPAIGN_MISSIONS as any,campaign),startCampaignMission,settingsTab,setSettingsTab,openSettings,graphicsLab,
    rooms,matches,netUrl,setNetUrl,roomName,setRoomName,netError,quickJoin,createRoom,joinRoom,refreshNet,teamName,renderScoreboard,
    ranked:netRanked,rankedQueued:netQueued,queueRanked,cancelQueue,
    net:netInfo,netPlayers,myPeerId,netRoomId,netConnected:netInfo.connected,chatLog,chatDraft,setChatDraft,sendChat,newMessages,setNewMessages,lobbyInputRef,lobbyChatRef,chatAtBottom,voicePanel,voiceState,hostAndStart,reconnectNet,resumeNet,disconnectNet,
@@ -1222,7 +1224,7 @@ const cocsCommand=cocsView?{...cocsView,boardView:mergedBoard??cocsView.boardVie
   };
   return <><main style={{'--ui-scale':display.uiScale??1} as any} className={`arena-app mode-${mode}${(config.mode==='puma-race'||config.mode==='puma-soccer')?' race-setup':''}${(isRace||isSoccer)?' race-active':''} palette-${accessibility.palette}${accessibility.palette!=='default'?' palette-colorblind':''}${accessibility.highContrast?' ui-contrast':''}`}>
   <canvas ref={canvas} tabIndex={-1} role="img" className="arena-canvas" aria-label="Colosseum Of Competitive Slop 3D game"/>
-  {!entered&&!demoOnly&&<><TitleScreen ui={ui}/><div className="title-footer"><span>v8.5 · HANDOFF</span>{githubLink}</div></>}
+  {!entered&&!demoOnly&&<><TitleScreen ui={ui}/><div className="title-footer"><span>v8.6 · PRISM</span>{githubLink}</div></>}
   {!entered&&demoOnly&&<DemoControls state={demoSession.state} labels={demoLabels} subjects={broadcast?.subjects??[]} cameraStyle={demoSession.cameraStyle} hudVisible={demoSession.hudVisible} pinned={demoPinned(demoSession)} freeSpeed={demoSession.freeSpeed} running={demoRunning} notice={demoSession.notice} error={demoSession.error}
     onEnterArena={enterArenaFromDemo} onPrevScenario={()=>skipDemoScenario(-1)} onNextScenario={()=>skipDemoScenario(1)}
     onAuto={()=>demoTransition({type:'auto'})} onFollow={demoFollow} onFree={demoToggleFree} onStyle={demoCycleStyle} onResetView={demoResetView}

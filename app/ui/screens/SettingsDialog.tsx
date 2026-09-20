@@ -5,6 +5,7 @@ import type {ScreenProps} from '../contract';
 import {Modal,Btn,Tabs,Panel,Chip,Empty} from '../primitives';
 import {HELP_SECTIONS} from '../../../game/onboarding.mjs';
 import {formatNumber,formatWhole} from '../../../game/format-ui.mjs';
+import {GraphicsLabPanel} from './GraphicsLabPanel';
 
 type HelpSection={id:string;title:string;summary?:string;items?:readonly string[]};
 
@@ -73,10 +74,11 @@ export function SettingsDialog({ui,opener=null}:ScreenProps&{opener?:HTMLElement
  const tab=settingsTab||'game';
  // WP2.1: the exact opener is captured by the page before any lower dialog
  // becomes inert, and the Modal primitive returns focus to it on close.
- return <Modal open={settings} restoreFocus={opener} onClose={()=>setSettings(false)} size="xl" eyebrow="GRAPHICS & SETTINGS" title="Tune your arena" description="Changes apply immediately and are saved on this device." panelRef={settingsRef} footer={<Btn onClick={()=>setSettings(false)}>CLOSE</Btn>}>
+  return <Modal open={settings} restoreFocus={opener} onClose={()=>setSettings(false)} size="xl" className={tab==='graphics-lab'?'modal--graphics-lab':''} eyebrow={tab==='graphics-lab'?'DEVELOPER / GRAPHICS PREVIEW':'GRAPHICS & SETTINGS'} title={tab==='graphics-lab'?'Find your flavor.':'Tune your arena'} description={tab==='graphics-lab'?'Live world preview · stackable shader experiments':'Changes apply immediately and are saved on this device.'} panelRef={settingsRef} footer={<Btn onClick={()=>setSettings(false)}>CLOSE</Btn>}>
   <div className="stack">
-   <Tabs value={tab} onChange={(v:string)=>setSettingsTab?.(v)} ariaLabel="Settings sections" tabs={[{value:'game',label:'Game'},{value:'study',label:'Study'},{value:'help',label:'Help'},{value:'arsenal',label:'Arsenal'},{value:'about',label:'About'}]}/>
-   {tab==='game'&&<Panel>{prefs}</Panel>}
+    <Tabs value={tab} onChange={(v:string)=>setSettingsTab?.(v)} ariaLabel="Settings sections" tabs={[{value:'game',label:'Game'},{value:'graphics-lab',label:'Graphics lab · Preview'},{value:'study',label:'Study'},{value:'help',label:'Help'},{value:'arsenal',label:'Arsenal'},{value:'about',label:'About'}]}/>
+    {tab==='game'&&<Panel>{prefs}</Panel>}
+    {tab==='graphics-lab'&&<GraphicsLabPanel lab={ui.graphicsLab}/>}
    {tab==='study'&&<StudyRecorderPanel study={study}/>}
    {tab==='help'&&<HelpSections sections={helpSections}/>}
    {tab==='arsenal'&&<ArsenalInspector WEAPONS={WEAPONS} CHARACTERS={CHARACTERS} ATTACHMENTS={ATTACHMENTS} ATTACHMENT_SLOTS={ATTACHMENT_SLOTS} GEAR={GEAR} GEAR_SLOTS={GEAR_SLOTS} WEAPON_FINISHES={WEAPON_FINISHES} CROSSHAIR_STYLES={CROSSHAIR_STYLES} profile={profile} weaponRangeLabel={weaponRangeLabel}/>}

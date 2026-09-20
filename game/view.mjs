@@ -47,6 +47,8 @@ import {RenderPass} from 'three/addons/postprocessing/RenderPass.js';
 import {UnrealBloomPass} from 'three/addons/postprocessing/UnrealBloomPass.js';
 import {ShaderPass} from 'three/addons/postprocessing/ShaderPass.js';
 import {OutputPass} from 'three/addons/postprocessing/OutputPass.js';
+import {normalizeGraphicsLab} from './graphics-lab.mjs';
+import {GraphicsLabPass} from './graphics-lab-pass.mjs';
 import {VignetteShader} from 'three/addons/shaders/VignetteShader.js';
 import {FXAAShader} from 'three/addons/shaders/FXAAShader.js';
 export {SynthAudio} from './feedback.mjs';
@@ -1050,26 +1052,32 @@ export class ArenaView{
      // resolution; a 100% world render is capped by the resolution budget (resolution.mjs).
      if(this.perf){const dom=this.renderer.domElement||{},dpr=window.devicePixelRatio;this.perf.viewport={cssWidth:w,cssHeight:h,devicePixelRatio:Number.isFinite(dpr)?dpr:1,bufferWidth:dom.width??Math.round(w*ratio),bufferHeight:dom.height??Math.round(h*ratio),scale:ratio};}
      this.camera.aspect=w/h;this.camera.updateProjectionMatrix();this.menu.camera.aspect=w/h;this.menu.camera.updateProjectionMatrix();if(this.weaponCamera){this.weaponCamera.aspect=w/h;this.weaponCamera.updateProjectionMatrix();}this._syncPost?.();}
-         _syncPost(){
-     const eligible=this.renderer instanceof T.WebGLRenderer,q=this.qualitySettings||this._quality(),bloomStrength=Number(this.display?.bloom)*Number(q.bloom);
-     const want=postStage({eligible,reduced:this.reduced(),postFx:this.display?.postFx});
-     if(!want){if(this.composer){disposeComposer(this.composer);this.composer=null;this.bloomPass=null;this.vignettePass=null;this.aaPass=null;this._postKey=null;}this._postW=0;this._postH=0;this._postRatio=0;return;}
+     setGraphicsLab(prefs){this.graphicsLab=normalizeGraphicsLab(prefs);this._syncPost();}
+          _syncPost(){
+      const eligible=this.renderer instanceof T.WebGLRenderer,q=this.qualitySettings||this._quality();
+      const base=postStage({eligible,reduced:this.reduced(),postFx:this.display?.postFx});
+      const lab=eligible&&this.graphicsLab?.enabled===true;
+      const bloomStrength=base?Number(this.display?.bloom)*Number(q.bloom):0;
+      const want=base||lab;
+      if(!want){if(this.composer){disposeComposer(this.composer);this.composer=null;this.bloomPass=null;this.vignettePass=null;this.aaPass=null;this.graphicsLabPass=null;this._postKey=null;}this._postW=0;this._postH=0;this._postRatio=0;return;}
      // A zero-strength bloom used to leave its expensive processing running. The
      // pass is now omitted entirely, and the vignette/FXAA passes follow the
      // quality tier, so the composed path only contains passes that do work.
-     const key=`${bloomStrength>0?1:0}|${q.vignette!==false?1:0}|${q.fxaa!==false?1:0}`;
-     if(this.composer&&this._postKey!==key){disposeComposer(this.composer);this.composer=null;this.bloomPass=null;this.vignettePass=null;this.aaPass=null;}
+      const key=`${bloomStrength>0?1:0}|${base&&q.vignette!==false?1:0}|${base&&q.fxaa!==false?1:0}|lab:${lab?1:0}`;
+      if(this.composer&&this._postKey!==key){disposeComposer(this.composer);this.composer=null;this.bloomPass=null;this.vignettePass=null;this.aaPass=null;this.graphicsLabPass=null;}
      if(!this.composer){try{const composer=new EffectComposer(this.renderer);composer.addPass(new RenderPass(this.scene,this.camera));
       if(bloomStrength>0){this.bloomPass=new UnrealBloomPass(new T.Vector2(1,1),bloomStrength,.72,.9);composer.addPass(this.bloomPass);}
-      if(q.vignette!==false){const vignette=new ShaderPass(VignetteShader);vignette.uniforms.offset.value=1.05;vignette.uniforms.darkness.value=.92;composer.addPass(vignette);this.vignettePass=vignette;}
+       if(base&&q.vignette!==false){const vignette=new ShaderPass(VignetteShader);vignette.uniforms.offset.value=1.05;vignette.uniforms.darkness.value=.92;composer.addPass(vignette);this.vignettePass=vignette;}
       composer.addPass(new OutputPass());
       // FXAA follows OutputPass (sRGB). The default framebuffer still requests
       // MSAA for the direct path and the post-composer weapon pass, so this pass
       // only covers the composer's non-MSAA render targets.
-      if(q.fxaa!==false){const aa=new ShaderPass(FXAAShader);aa.name='fxaa';composer.addPass(aa);this.aaPass=aa;}
+       if(base&&q.fxaa!==false){const aa=new ShaderPass(FXAAShader);aa.name='fxaa';composer.addPass(aa);this.aaPass=aa;}
+       if(lab){this.graphicsLabPass=new GraphicsLabPass();composer.addPass(this.graphicsLabPass);}
       this.composer=composer;this._postKey=key;this._postW=0;this._postH=0;this._postRatio=0;}catch{this.composer=null;return;}}
      if(this.bloomPass)this.bloomPass.strength=bloomStrength;
-     const w=Math.max(1,this.renderer.domElement.clientWidth),h=Math.max(1,this.renderer.domElement.clientHeight),ratio=this.pixelRatio??1;
+      const w=Math.max(1,this.renderer.domElement.clientWidth),h=Math.max(1,this.renderer.domElement.clientHeight),ratio=this.pixelRatio??1;
+      if(this.graphicsLabPass)this.graphicsLabPass.configure(this.graphicsLab,w,h);
      if(this._postW!==w||this._postH!==h||this._postRatio!==ratio){
       applyComposerSize(this.composer,w,h,ratio);
       // Independent bloom budget applied after composer resizing, so a resize can

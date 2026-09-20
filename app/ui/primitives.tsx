@@ -113,7 +113,7 @@ export function firstFocusableIn(host:HTMLElement|null|undefined){
  return list.find(element=>element&&(typeof element.getClientRects!=='function'||element.getClientRects().length>0))??null;
 }
 
-export function Modal({open,onClose,size='md',title,eyebrow,description,children,footer,closeLabel='Close',panelRef,keepMounted=false,bodyClass='',covered=false,restoreFocus=null}:{open:boolean;onClose:()=>void;size?:'sm'|'md'|'lg'|'xl';title:ReactNode;eyebrow?:ReactNode;description?:ReactNode;children:ReactNode;footer?:ReactNode;closeLabel?:string;panelRef?:React.Ref<HTMLElement>;keepMounted?:boolean;bodyClass?:string;covered?:boolean;restoreFocus?:HTMLElement|null}){
+export function Modal({open,onClose,size='md',title,eyebrow,description,children,footer,closeLabel='Close',panelRef,keepMounted=false,bodyClass='',className='',covered=false,restoreFocus=null}:{open:boolean;onClose:()=>void;size?:'sm'|'md'|'lg'|'xl';title:ReactNode;eyebrow?:ReactNode;description?:ReactNode;children:ReactNode;footer?:ReactNode;closeLabel?:string;panelRef?:React.Ref<HTMLElement>;keepMounted?:boolean;bodyClass?:string;className?:string;covered?:boolean;restoreFocus?:HTMLElement|null}){
  const panelElement=useRef<HTMLElement|null>(null);
  const opener=useRef<HTMLElement|null>(null);
  const wasOpen=useRef(false);
@@ -158,7 +158,7 @@ export function Modal({open,onClose,size='md',title,eyebrow,description,children
  if(!open&&!keepMounted)return null;
  const titleId=`modal-${String(title).replace(/\W+/g,'-').toLowerCase()}`;
  const hidden=!open,coveredLayer=open&&covered;
- return <div className={`modal${hidden?' modal--hidden':''}${coveredLayer?' modal--covered':''}`} aria-hidden={hidden||coveredLayer} inert={coveredLayer||undefined} onMouseDown={e=>{if(open&&!coveredLayer&&e.target===e.currentTarget)onClose();}}>
+  return <div className={`modal${hidden?' modal--hidden':''}${coveredLayer?' modal--covered':''}${className?' '+className:''}`} aria-hidden={hidden||coveredLayer} inert={coveredLayer||undefined} onMouseDown={e=>{if(open&&!coveredLayer&&e.target===e.currentTarget)onClose();}}>
   <section ref={panelRef??panelElement} tabIndex={-1} className={`modal-panel modal-panel--${size}`} role="dialog" aria-modal={open&&!coveredLayer?true:undefined} aria-labelledby={titleId}>
    <header className="modal-head">
     <div>{eyebrow&&<p className="eyebrow"><i/>{eyebrow}</p>}<h2 className="modal-title" id={titleId}>{title}</h2>{description&&<p className="modal-desc">{description}</p>}</div>

@@ -21,6 +21,7 @@ a real browser and is documented below.
 | `lint` | `bash scripts/sites-env.sh -- eslint .` | ESLint over the repo (ignores `dist`, `.next`) |
 | `deploy` | `bash scripts/deploy.sh` | Build + restart + verify + rollback |
 | `test:browser` | `node scripts/verify-browser.mjs` | Browser evidence against an already-running app (not part of `npm test`) |
+| `test:graphics-lab` | `node scripts/verify-graphics-lab.mjs` | GPU shader output + graphics-lab UI evidence against a running dev preview |
 | `test:browser:install` | `playwright install chromium` | Install the pinned Chromium build for the browser harness |
 | `test` | `test:game` && `test:server` && `typecheck` && `build` && `node --test tests/*.test.mjs` | Full CI-style gate |
 
@@ -213,6 +214,32 @@ useful evidence, not harness breakage.
 
 ---
 
+## Graphics lab harness (`npm run test:graphics-lab`)
+
+`scripts/verify-graphics-lab.mjs` is a second Playwright runner for the opt-in
+Graphics lab preview. Like `test:browser` it is not part of `npm test` and never
+starts or stops the app; unlike it, it imports source modules through Vite and
+therefore targets a **dev server** (`BROWSER_BASE_URL`, default
+`http://127.0.0.1:4173`), not a production build.
+
+It proves two things. First, actual GPU output: a deterministic color/checker
+`DataTexture` is rendered through the real `GraphicsLabPass` on a headless
+WebGL renderer, and every individual effect, every starting recipe and the full
+twelve-layer stack must change pixels; zero-mix and the original half of split
+mode must match the untouched image exactly; and all combinations must reuse one
+shader program (uniform-only reconfiguration, no recompilation). Second, the
+real UI: recipe loading, independent layer stacking, A/B bypass, split mode,
+reset-to-off, drawer geometry at the five standard viewport/UI-scale cases,
+device-local persistence across reload, and that the drawer opens from a paused
+match as the single modal dialog without stealing the pause state.
+
+Every run writes screenshots and `verification.json` to the gitignored
+`artifacts/graphics-lab/`. It does **not** prove art-direction quality, human
+preference, physical-device WebGL behaviour or performance on real hardware;
+those remain human review items.
+
+---
+
 ## What is pinned / contract-tested
 
 - **SSR strings** — `tests/rendered-html.test.mjs` pins the rendered HTML
@@ -239,10 +266,11 @@ useful evidence, not harness breakage.
 
 ## Current counts
 
-Last verified on release v8.5 HANDOFF (2026-09-20); the v8.5 gate recorded:
+Last verified on release v8.6 PRISM (2026-09-20); the v8.6 gate recorded:
 
-- `npm run test:game` — **2,571 pass, 0 fail, 8 skipped** across the
-  `game/*.test.mjs` suite. The eight skips are the opt-in long simulations and
+- `npm run test:game` — **2,575 pass, 0 fail, 8 skipped** across the
+  `game/*.test.mjs` suite (2,583 tests). The eight skips are the opt-in long
+  simulations and
   the browser-only render: the D1-D4 sampled win-rate sweep, the exhaustive
   8-bot mode sweep, the 18k-step 4-bot match, the 10k-step 8-bot race, the
   4×1800-step platform-bot sweep, both `route-sweep` cases (movement verbs over
@@ -262,6 +290,11 @@ Last verified on release v8.5 HANDOFF (2026-09-20); the v8.5 gate recorded:
   testing, reticle-corridor checks, overflow checks and console/page-error
   checks. The first v8.5 candidate run caught a real post-match crash this way;
   the harness is a release gate for the surfaces it covers.
+- `npm run test:graphics-lab` (against a running dev preview) — **pass**: the
+  real GPU shader changes pixels for all twelve effects, all six recipes and the
+  full stack in one program; zero-mix and split-original are pixel-identical;
+  the drawer, stacking, bypass, reset, persistence and paused-match modal
+  behaviour pass at all five viewports. Run at v8.6 (2026-09-20).
 - `game/archive/*.test.mjs` — 2 files, run on demand, not counted above.
   `game/archive/balance-sweep.test.mjs` is the opt-in balance sweep hook
   (`COCS_SLOW_TESTS=1` smoke, `COCS_SWEEP=full` full profile; tier alarms are
@@ -276,15 +309,14 @@ them after changes rather than trusting this table.
 
 ## Honest limitations
 
-- **No GPU verification in this environment.** `view.test.mjs` and
-  `software.test.mjs` verify geometry, scene-graph wiring, quality-tier logic
-  and the CPU renderer's unit behaviour. The optional `npm run test:browser`
-  harness verifies DOM geometry, hit testing, console cleanliness and the HUD
-  matrix in Chromium, but none of these verify WebGL output, shader
-  compilation, shadow quality, bloom, or frame rate on real hardware.
-  A passing suite is not GPU performance evidence.
-- **Visual claims are geometry/unit-verified.** "The model has a muzzle anchor"
-  is testable; "it looks correct" is not tested here.
+- **GPU output is verified by shader harness, not by frame pacing.** The
+  graphics-lab harness compiles and executes the real shader in headless
+  Chromium (SwiftShader in CI) and asserts pixel changes and identity for
+  bypass/zero-mix. `view.test.mjs` and `software.test.mjs` verify geometry,
+  scene-graph wiring, quality-tier logic and the CPU renderer's unit behaviour.
+  None of these measure frame rate, shadow quality, texture quality at
+  glancing angles or visual appeal on real hardware. A passing suite is not GPU
+  performance evidence.
 - **The archive suite is slow.** `expansion.test.mjs` was measured in the ~12
   minute range; expect `test:archive` to dominate any full run.
 - **SSR tests require a build.** `tests/rendered-html.test.mjs` imports

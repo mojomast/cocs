@@ -16,6 +16,27 @@ record in [VERIFICATION.md](VERIFICATION.md).
 
 ---
 
+## v8.6 · PRISM — 2026-09-20
+
+An opt-in developer graphics lab for choosing the game's visual flavor.
+
+- Twelve stackable effects: pixel mosaic, prism split, light bleed, color bands,
+  palette remap, print dots, crosshatch, ink and neon contours, ordered dither,
+  phosphor screen, and paper grain.
+- Six editable starting recipes: Circuit Print, Neon Cathedral, Pocket Arena,
+  Field Sketch, Ghost Signal, and Ember Press.
+- Side-drawer live preview (bottom sheet in portrait), individual parameters,
+  palette choice, overall mix, A/B bypass, split comparison, device-local saving,
+  JSON recipe export, and reset. Original graphics remain the default.
+- One fused display-space ShaderPass, stationary patterns, software-renderer
+  fallback reporting, and crisp HUD/first-person weapon rendering.
+- Actual GPU pixel checks for each effect and recipe, zero-mix and split-mode
+  identity checks, plus browser control/layout verification.
+- Extensive [Moth graphics research and plan](design/MOTH-GRAPHICS-PLAN.md):
+  material-family variants, coordinated wear and relief, industrial anti-tiling,
+  API capability audit, artifact-pipeline hardening, and proposed budgets.
+- Web presentation only; no game-server restart, new dependency, or protocol change.
+
 ## v8.5 · HANDOFF — 2026-09-20
 
 The reliability handoff: actions that apply exactly once, builds that can be

@@ -13,7 +13,7 @@ on your machine, and every asset is procedural.
 
 [**Play it live**](https://arena.ussyco.de) · [Source](https://github.com/mojomast/tokenarena)
 
-![version](https://img.shields.io/badge/version-v8.5%20HANDOFF-2dd4bf)
+![version](https://img.shields.io/badge/version-v8.6%20PRISM-2dd4bf)
 ![runtime](https://img.shields.io/badge/runtime-Node%2022.13%2B-339933)
 ![engine](https://img.shields.io/badge/engine-Three.js-000000)
 ![tests](https://img.shields.io/badge/tests-game%20%C2%B7%20server%20%C2%B7%20SSR-4c9f70)
@@ -439,6 +439,16 @@ assets. Full procedure and verification: [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md
 
 Recent releases. The full history lives in
 [docs/CHANGELOG.md](docs/CHANGELOG.md).
+
+### v8.6 · PRISM — 2026-09-20
+- **Graphics & settings → Graphics lab · Preview:** twelve independent shader
+  layers and six starting recipes for exploring a distinctive art direction.
+- Live drawer, individual controls, palettes, overall mix, A/B bypass, split
+  comparison, local persistence, JSON export, and reset. Off by default.
+- One combined WebGL shader pass; the HUD and first-person weapon remain crisp.
+- [Graphics lab guide](docs/GRAPHICS-LAB.md) and an extensive
+  [Moth material-variety plan](docs/design/MOTH-GRAPHICS-PLAN.md).
+- Web-only preview feature; no game-server restart or protocol change required.
 
 ### v8.5 · HANDOFF — 2026-09-20
 - COCS orders, spends, terminals, commands and REQ purchases are round-scoped

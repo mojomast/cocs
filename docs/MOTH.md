@@ -1,5 +1,12 @@
 # Moth Quantum asset pipeline
 
+For the current graphics research and proposed material-variety work, see
+[Moth graphics plan](design/MOTH-GRAPHICS-PLAN.md). It audits the current runtime
+and bake path, distinguishes live API contracts from historical limits, and
+prioritizes structure-preserving wear, coherent material channels, and safe
+partial publication. The in-game [Graphics lab](GRAPHICS-LAB.md) is the separate
+opt-in preview for experimenting with screen-space style.
+
 The game can bake presentation assets from [Moth Quantum](https://mothquantum.com)
 engines and load them at runtime. Everything is generated **offline**, decoded
 with zero dependencies, and committed as data, so the shipped game stays
