@@ -91,6 +91,31 @@ reported `{loaded:true, ready:3, failed:0}` by the second cue with zero console
 errors. The tracked production browser matrix ran at **5/5 viewports**. Active
 matches disconnected briefly on the restart.
 
+**Production update — depth II, vehicle pack and LATTICE wiring (2026-09-20).**
+Commits `eb4eba5` and `a1f3b5e` were fast-forwarded to
+`improvement/phase2-audio-visual` and deployed with
+`npm run deploy -- --with-game-server`. The gate verified exact identities at
+web and game server `eb4eba5` `v8.6-eb4eba5` protocol 3 and then `a1f3b5e`
+`v8.6-a1f3b5e` protocol 3 after the usual transient 502. The tracked
+production browser matrix ran at **5/5 viewports**. The four asset-workshop
+vehicle models were verified with isolated WebGL renders (Hornet 53, Titan 86,
+Scout 29, Transport 52 batched meshes) plus in-tree contract/clearance tests,
+and a LATTICE browser check confirmed depot loaners exist in the sim and the
+new TEAM FLUX purchase strip and NEGLECT chip render. The Blood Gulch map PR
+(#6) was **not** included: its raised roof decks are only reachable by the
+launcher (the authored ramp does not connect to walkable ground), so the
+legacy traversal review and navigation reachability gates fail; it was
+returned for a follow-up with exact reproduction notes. Active matches
+disconnected briefly on each restart.
+
+**Production update — particle title logo (2026-09-20).** Commit `8f3063d` was
+fast-forwarded to `improvement/phase2-audio-visual` and deployed web-only
+(`npm run deploy`); the game server stayed on `4f52725` and the gate verified
+the compatible identity pair. The tracked production browser matrix ran at
+**5/5 viewports**, and the title particle logo was exercised in local and
+production browser checks (canvas active, reduced-motion static frame, zero
+console errors). No players were disconnected.
+
 **Production update — physics, animation and audio pass (2026-09-20).** Commit
 `d9411c3` was fast-forwarded to `improvement/phase2-audio-visual` and deployed
 with `npm run deploy -- --with-game-server` (sim, vehicles, progression and the
