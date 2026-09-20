@@ -6,6 +6,7 @@ import {footstepProfile,impactProfile,reportStyle,reportVariation,eventSeed,mixU
 import {mothIr,mothEchoMap,mothMotif} from './moth-assets.mjs';
 import {latticeSoundCue,createLatticeAudioState} from './lattice-feedback.mjs';
 import {deathPlan} from './deaths.mjs';
+import {createAnnouncerSelector} from './announcer-clips.mjs';
 
 // Per-space reverb wetness for the baked convolution IRs. `cavern` keeps the
 // historical .42; drier outdoor/tunnel responses sit lower, big interiors higher.
@@ -637,6 +638,12 @@ export class SynthAudio{
   // current state cannot re-trigger the transform foley. Bounded like the
   // announcer dedupe map; the sim only emits on flips, this is belt-and-braces.
   this._altStates=new Map();
+  // Sampled announcer voice pack (public/audio/announcer). URL-backed and
+  // optional: the manifest loads once the graph exists, takes decode on first
+  // use, and any fetch/decode failure leaves the procedural cue in charge.
+  this.announcerPack=null;this._announcerPackPromise=null;this._announcerTake=0;
+  this._announcerVoiceUntil=0;this.announcerFetch=null;this.announcerGain=.9;
+  this.announcerPackUrl='/audio/announcer/manifest.json';this.announcerPackBase='/audio/announcer';
   // Optional Moth audio layer (game/moth-audio.mjs). Never created here; the
   // host opts in with setMothAudio() or registers a factory with
   // setMothAudioFactory() so the layer is built once a real AudioContext exists.
@@ -720,6 +727,9 @@ export class SynthAudio{
    // Keep the musical clock off the frame path: RAF can be throttled in a
    // hidden/heavy tab, and a later frame would otherwise replay missed steps.
    this.musicEngine?.setAutoTick?.(true);
+   // The sampled announcer pack is opt-in with the announcer preference and
+   // never blocks startup: the manifest fetch is fire-and-forget.
+   if(this.announcer)this.loadAnnouncerPack();
    this.noiseBuffer??=this._makeNoise();
    if(this.ambientBed!==false)this._bed(true);
    this._precip(this.weather);
@@ -1153,7 +1163,7 @@ export class SynthAudio{
    return this.musicEngine.setReverb(buffer,opts);
   }catch{return false;}
  }
- audioStatus(){return {state:this.ctx?(this.ctx.state||'suspended'):'unavailable',status:this.status,enabled:this.musicEnabled,muted:this.muted,scene:this.scene,intensity:this.intensity,tension:this.tension,escalation:this.escalation,variation:this.musicEngine?.variation??0,palette:this.musicEngine?.paletteName??'default',kit:this.musicEngine?.kitName??'default',voices:this.voices.size,notes:this.musicEngine?.notesScheduled??0,music:this.musicEngine?.status?.()??'off',musicVoices:this.musicEngine?.voices?.length??0,sustainVoices:this.musicEngine?.sustainVoices??0,sustainBudget:this.musicEngine?.sustainBudget??0,peakVoices:this.musicEngine?.peakVoices??0,layers:this.musicEngine?.layers?{...this.musicEngine.layers}:null,transitions:this.musicEngine?.transitions??0,pendingResponses:this.musicEngine?.pendingResponses?.length??0,reverb:this.reverbLoaded?'ready':(this._reverbPending?'loading':(this.reverbUrl?'pending':'off')),space:this.reverbSpace,echo:this.echoMap,weather:this.weather,biome:this.biomeMood,glue:this.effectsGlue?'on':'off',filter:this.masterFilter?'on':'off',duck:this._musicDuck??0,cutoff:this._mixCutoff??20000,mixLevel:this._mixLevel??1,killcam:this.killcam===true,spectating:this.spectating===true,moth:this.mothAudio?.status?.()??null,samples:this.musicEngine?.sampleStatus?.()??null};}
+ audioStatus(){return {state:this.ctx?(this.ctx.state||'suspended'):'unavailable',status:this.status,enabled:this.musicEnabled,muted:this.muted,scene:this.scene,intensity:this.intensity,tension:this.tension,escalation:this.escalation,variation:this.musicEngine?.variation??0,palette:this.musicEngine?.paletteName??'default',kit:this.musicEngine?.kitName??'default',voices:this.voices.size,notes:this.musicEngine?.notesScheduled??0,music:this.musicEngine?.status?.()??'off',musicVoices:this.musicEngine?.voices?.length??0,sustainVoices:this.musicEngine?.sustainVoices??0,sustainBudget:this.musicEngine?.sustainBudget??0,peakVoices:this.musicEngine?.peakVoices??0,layers:this.musicEngine?.layers?{...this.musicEngine.layers}:null,transitions:this.musicEngine?.transitions??0,pendingResponses:this.musicEngine?.pendingResponses?.length??0,reverb:this.reverbLoaded?'ready':(this._reverbPending?'loading':(this.reverbUrl?'pending':'off')),space:this.reverbSpace,echo:this.echoMap,weather:this.weather,biome:this.biomeMood,glue:this.effectsGlue?'on':'off',filter:this.masterFilter?'on':'off',duck:this._musicDuck??0,cutoff:this._mixCutoff??20000,mixLevel:this._mixLevel??1,killcam:this.killcam===true,spectating:this.spectating===true,announcerVoice:{loaded:Boolean(this.announcerPack),ready:this.announcerPack?.buffers?.size??0,pending:this.announcerPack?.pending?.size??0,failed:this.announcerPack?.failed?.size??0},moth:this.mothAudio?.status?.()??null,samples:this.musicEngine?.sampleStatus?.()??null};}
  // Low, continuous ambience bed: filtered noise hiss plus a sub tone, faded in
  // through the master gain. Owned by the audio instance and torn down in dispose.
  _bed(on){
@@ -1416,7 +1426,7 @@ export class SynthAudio{
   this._stingDuckTimer=setTimeout(()=>{this._stingDuckTimer=null;this.musicEngine?.setDuck(0);},1400);
   return {outcome,played:true};
  }
- setAnnouncer(on){this.announcer=on===true;return this.announcer;}
+ setAnnouncer(on){this.announcer=on===true;if(this.announcer&&this.ctx)this.loadAnnouncerPack();return this.announcer;}
  // Music on/off is independent of the global mute: disabling it silences and
  // pauses only the soundtrack, while effects, ambience and the announcer keep
  // playing. Re-enabling attempts an autoplay unlock and resumes scheduling.
@@ -1426,9 +1436,78 @@ export class SynthAudio{
   if(this.musicEnabled)this.unlock();
   return this.musicEnabled;
  }
+ // ---- Sampled announcer voice pack -----------------------------------------
+ // Load the OmniVoice pack. `clips` installs a manifest directly (tests and
+ // hosts that already fetched it); otherwise the URL is fetched once. Returns
+ // the installed pack, or null while a fetch is in flight.
+ loadAnnouncerPack(opts={}){
+  if(this.announcerPack)return this.announcerPack;
+  const url=typeof opts.url==='string'?opts.url:this.announcerPackUrl;
+  const base=typeof opts.base==='string'?opts.base:this.announcerPackBase;
+  if(Array.isArray(opts.clips))return this._installAnnouncerPack(opts.clips,base);
+  if(this._announcerPackPromise)return null;
+  const fetchFn=opts.fetchFn??this.announcerFetch??(typeof fetch==='function'?fetch.bind(globalThis):null);
+  if(!fetchFn||!url)return null;
+  this._announcerPackPromise=Promise.resolve().then(()=>fetchFn(url)).then(res=>res&&typeof res.json==='function'?res.json():res).then(data=>{const list=Array.isArray(data?.clips)?data.clips:null;if(list&&!this.announcerPack)this._installAnnouncerPack(list,base);return this.announcerPack;}).catch(()=>null).finally(()=>{this._announcerPackPromise=null;});
+  return null;
+ }
+ _installAnnouncerPack(clips,baseUrl){
+  let selector=null;
+  try{selector=createAnnouncerSelector(clips,()=>mixUnit(this._announcerTake++));}catch{selector=null;}
+  if(!selector)return null;
+  const byCue=new Map();
+  for(const clip of clips){if(!clip||typeof clip.file!=='string'||typeof clip.cue!=='string')continue;const group=byCue.get(clip.cue)??[];group.push(clip);byCue.set(clip.cue,group);}
+  this.announcerPack={baseUrl:typeof baseUrl==='string'&&baseUrl?baseUrl:this.announcerPackBase,selector,byCue,buffers:new Map(),pending:new Map(),failed:new Set()};
+  return this.announcerPack;
+ }
+ // Kick (and cache) one take's decode. Only an already-decoded buffer is
+ // returned, so a sampled beat is never played late: the procedural cue covers
+ // the first hearing and the take is ready from the next one.
+ _announcerBuffer(clip){
+  const pack=this.announcerPack;
+  if(!pack||!this.ctx||!clip?.file)return null;
+  const key=clip.file,ready=pack.buffers.get(key);
+  if(ready)return ready;
+  if(pack.failed.has(key)||pack.pending.has(key))return null;
+  const ctx=this.ctx,fetchFn=this.announcerFetch??(typeof fetch==='function'?fetch.bind(globalThis):null);
+  if(!fetchFn||typeof ctx.decodeAudioData!=='function'){pack.failed.add(key);return null;}
+  const task=Promise.resolve().then(()=>fetchFn(`${pack.baseUrl}/${clip.file}`)).then(res=>{if(!res||res.ok===false)throw new Error('announcer fetch failed');return res.arrayBuffer();}).then(bytes=>new Promise((resolve,reject)=>{try{ctx.decodeAudioData(bytes,resolve,reject);}catch(error){reject(error);}})).then(buffer=>{if(buffer&&this.announcerPack===pack)pack.buffers.set(key,buffer);return buffer??null;}).catch(()=>{if(this.announcerPack===pack)pack.failed.add(key);return null;}).finally(()=>{try{pack.pending.delete(key);}catch{}});
+  pack.pending.set(key,task);
+  return null;
+ }
+ // Returns 'played' when a decoded take started, 'busy' when another take is
+ // still speaking (the cue is dropped rather than talking over it) and false
+ // when no sampled take was available. Every take of the cue is decoded on
+ // first use so rotation is fully sampled from the second beat onward, and a
+ // chosen take that is still streaming falls back to any decoded sibling
+ // rather than dropping to the synth voice.
+ _playAnnouncerTake(cueId,now){
+  const pack=this.announcerPack;
+  if(!pack)return false;
+  if(now<this._announcerVoiceUntil)return 'busy';
+  const group=pack.byCue.get(cueId);
+  if(!group||!group.length)return false;
+  for(const clip of group)this._announcerBuffer(clip);
+  const clip=pack.selector(cueId);
+  const chosen=clip?this._announcerBuffer(clip):null;
+  if(chosen)return this._startAnnouncerTake(chosen,now);
+  const ready=group.find(candidate=>pack.buffers.has(candidate.file));
+  return ready?this._startAnnouncerTake(pack.buffers.get(ready.file),now):false;
+ }
+ _startAnnouncerTake(buffer,now){
+  const duration=Math.min(12,Math.max(.12,Number(buffer.duration)||1))+.08,gain=cl(Number(this.announcerGain)||.9,.2,1.4);
+  let played=false;
+  this._play(duration,0,(t,out,nodes)=>{const src=this.ctx.createBufferSource();src.buffer=buffer;const g=this.ctx.createGain();g.gain.value=gain;src.connect(g);g.connect(out);try{src.start(t);src.stop(t+duration);}catch{}nodes.push(src,g);played=true;});
+  if(!played)return false;
+  this._announcerVoiceUntil=now+duration;
+  return 'played';
+ }
  // Optional announcer cue: a short two-note motif keyed by mode event. A short
  // per-cue cooldown dedupes the two event paths that can report the same moment
  // (view effect dispatch and the HUD snapshot), so one event makes one sound.
+ // The callout owns the front of the mix: one short, bounded duck under it.
+ // A decoded sampled take owns the beat outright; until it is ready the
+ // procedural motif covers this one and the fetch/decode runs for next time.
  announcerCue(type){
   const cue=ANNOUNCE_CUES[type];if(!cue)return null;
   if(!this.announcer||!this.ctx||this.muted)return {cue:cue.id,played:false};
@@ -1437,8 +1516,10 @@ export class SynthAudio{
   if(Number.isFinite(last)&&now-last<.25)return {cue:cue.id,played:false,deduped:true};
   this._announceAt.set(cue.id,now);
   const mid=cue.mid??cue.end;
-  // The callout owns the front of the mix: one short, bounded duck under it.
   this._duckMusic(.32,.45);
+  const sampled=this._playAnnouncerTake(cue.id,now);
+  if(sampled==='played'){this.lastCue=cue.id;return {cue:cue.id,played:true,sampled:true};}
+  if(sampled==='busy')return {cue:cue.id,played:false,sampled:true,busy:true};
   this._play(cue.length+.1,0,(t,out,nodes)=>{this._tone(t,out,nodes,{freq:cue.freq,duration:cue.length*.45,type:'triangle',gain:.06,end:mid});this._tone(t+cue.length*.5,out,nodes,{freq:mid,duration:cue.length*.45,type:'triangle',gain:.05,end:cue.end});this._tone(t+cue.length*.82,out,nodes,{freq:cue.end,duration:cue.length*.32,type:'sine',gain:.035,end:cue.end*1.06});});
   this.lastCue=cue.id;return {cue:cue.id,played:true};
  }
@@ -2505,6 +2586,9 @@ export class SynthAudio{
   this._tone(t+.04,out,nodes,{freq:240,duration:.24,type:'triangle',gain:.08*vol,end:660});
  },{send:.3*vol});}
  dispose(){if(this._stingDuckTimer){clearTimeout(this._stingDuckTimer);this._stingDuckTimer=null;}if(this._musicDuckTimer){clearTimeout(this._musicDuckTimer);this._musicDuckTimer=null;}this._musicDuck=0;this.killcam=false;this.spectating=false;try{this.musicEngine?.dispose();}catch{}this.musicEngine=null;this._musicBeats.clear();try{this.mothAudio?.dispose?.();}catch{}this.mothAudio=null;if(this.engine){try{this.engine.osc.stop();this.engine.sub.stop();this.engine.boost?.stop();}catch{}this.engine=null;}if(this.zipLoop){try{this.zipLoop.osc.stop();this.zipLoop.hum.stop();}catch{}this.zipLoop=null;}if(this.skidLoop){try{this.skidLoop.osc.stop();this.skidLoop.hum.stop();}catch{}this.skidLoop=null;}if(this.bed){for(const node of Object.values(this.bed)){if(node&&typeof node.stop==='function')try{node.stop();}catch{}if(node&&typeof node.disconnect==='function')try{node.disconnect();}catch{}}this.bed=null;}for(const token of this.voices){clearTimeout(token.timer);for(const n of token.nodes){try{n.disconnect();}catch{}}}this.voices.clear();this._announceAt?.clear?.();this._altStates?.clear?.();this.lastSting=null;
+ // The sampled announcer pack is dropped with the graph; decoded takes are
+ // re-fetched on the next start and an in-flight decode cannot latch.
+ this.announcerPack=null;this._announcerPackPromise=null;this._announcerVoiceUntil=0;
  // Release the precipitation presence, the pending mag-in timers and every
  // bounded edge-state map so a disposed engine cannot retain a timer or a zone.
  if(this.precip){for(const node of Object.values(this.precip)){if(node&&typeof node.stop==='function')try{node.stop();}catch{}if(node&&typeof node.disconnect==='function')try{node.disconnect();}catch{}}this.precip=null;}

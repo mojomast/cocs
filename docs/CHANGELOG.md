@@ -72,6 +72,14 @@ paid Moth material pack and the offline variety pipeline behind it.
   are dropped instead of bursting, the music clock no longer depends on the
   render frame, and the results arrangement is no longer overwritten. See
   [Depth and dynamics pass](design/DEPTH-PASS.md).
+- OmniVoice announcer pack: the twelve match callouts (capture, flag
+  pickup/return, goal, streaks, multikill, victory/defeat, score, boss,
+  objective) now play real generated speech from a URL-backed pack of three
+  seeded takes each, selected deterministically and never overlapping. The
+  procedural motifs remain the fallback for the first hearing or a failed
+  fetch, the announcer preference/mute/effects volume gate the pack unchanged,
+  and `audioStatus().announcerVoice` reports the decoded/pending/failed take
+  counts. See [Announcer voice pack](ANNOUNCER_VOICE_PACK.md).
 - Animation pass: restored death variety (killing-direction topple, per-pose
   fall arcs, seeded limb silhouettes, style treatments), strength-scaled hit
   flinches, a melee swing, shell casings, style-aware death audio, and UI

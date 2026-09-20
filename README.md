@@ -477,6 +477,10 @@ Recent releases. The full history lives in
   UX. Fixes the intermittent soundtrack regression (late steps no longer burst,
   the music clock is independent of the render frame, and the results take is
   preserved). See [Depth and dynamics pass](design/DEPTH-PASS.md).
+- Announcer voice pack: real generated speech for the twelve match callouts,
+  three seeded takes each, decoded on demand and rotated deterministically,
+  with the procedural motifs as fallback. See
+  [Announcer voice pack](docs/ANNOUNCER_VOICE_PACK.md).
 - Graphics-edge pass (research-backed): static dither kills 8-bit banding, a
   contrast-adaptive sharpen recovers FXAA softness, and environment reflections
   scale with the tier. Runs whenever post-processing or the graphics lab runs.

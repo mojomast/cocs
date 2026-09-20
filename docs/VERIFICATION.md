@@ -62,6 +62,21 @@ production at **5/5 viewports** with `commitDirty: false`, including the
 LATTICE short-landscape flow that caught the HUD corridor regression during
 local testing.
 
+**Production update — depth and dynamics pass with the soundtrack fix
+(2026-09-20).** Commit `b16ff02` was fast-forwarded to
+`improvement/phase2-audio-visual` and deployed with
+`npm run deploy -- --with-game-server` (sim, vehicles, progression and the
+server-side modules changed). The deploy gate verified exact identities at web
+`b16ff02` `v8.6-b16ff02` protocol 3 and game server `b16ff02` `v8.6-b16ff02`
+protocol 3 after the usual transient 502, and the graphics-lab harness reported
+`{"ok":true}`. The tracked production browser matrix ran at **5/5 viewports**.
+This release also carries the reported music regression fix: late scheduler
+steps are dropped instead of bursting, the music clock no longer depends on the
+render frame, and the results arrangement is preserved. The scheduler was
+validated against a deliberately throttled headless browser (1 fps): before the
+fix most menu starts were scheduled 50-400 ms late, after it **zero late starts**
+with continuous scheduling. Active matches disconnected briefly on the restart.
+
 **Production update — physics, animation and audio pass (2026-09-20).** Commit
 `d9411c3` was fast-forwarded to `improvement/phase2-audio-visual` and deployed
 with `npm run deploy -- --with-game-server` (sim, vehicles, progression and the
@@ -116,7 +131,7 @@ enabled.
 
 **Automated release gate (2026-09-20).**
 
-- `npm test`: pass. Game tests: 2,987 pass, 9 approved skips, 0 fail (2,996
+- `npm test`: pass. Game tests: 2,995 pass, 9 approved skips, 0 fail (3,004
   tests); server tests: 212 pass, 0 fail; TypeScript: pass; verified production
   build: pass; SSR/UI and deployment-contract tests: 117 pass, 0 fail.
 - Moth-focused suites are part of that run: bake-runner integrity

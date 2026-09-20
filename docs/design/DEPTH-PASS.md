@@ -124,3 +124,22 @@ a future report can be diagnosed without a reload.
 - The music stability fix was validated against a deliberately throttled
   headless browser: before the fix most menu starts were scheduled 50-400 ms
   late (bursts); after it, zero late starts and continuous scheduling at 1 fps.
+
+## Announcer voice pack
+
+The OmniVoice pack (`public/audio/announcer`, 12 cues x 3 seeded takes, from
+the `feat/omnivoice-announcer-pack` PR) is now wired into `SynthAudio`:
+
+- the manifest loads on the first audio start (opt-in with the announcer
+  preference) and each cue's three takes decode on first use;
+- a decoded take replaces the procedural motif, deterministic seeded selection
+  rotates takes without immediate repeats, and speech never overlaps a second
+  cue;
+- the motif remains the fallback for the first hearing and any fetch/decode
+  failure, and mute/preference/effects-volume/cadence gates apply unchanged;
+- `audioStatus().announcerVoice` reports `{loaded, ready, pending, failed}`,
+  the debug hook `tokenArenaDebug.announcer(cue)` auditions any cue, and
+  `dispose()` drops decoded takes.
+
+Verified in a live browser: manifest + three capture takes requested, `ready`
+reaching 3 by the second cue, zero console errors.

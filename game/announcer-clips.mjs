@@ -1,5 +1,7 @@
-// Asset-pack helper; deliberately not wired into SynthAudio yet.
-// Keep state per player instance, not globally. Never immediately repeat a take.
+// Asset-pack helper for the URL-backed OmniVoice announcer takes.
+// SynthAudio loads the manifest, decodes takes on first use and selects them
+// through this helper; state stays per player instance, never global, and a
+// take never repeats immediately.
 export function createAnnouncerSelector(clips, random = Math.random) {
  const groups = new Map(), previous = new Map();
  for (const clip of clips) {

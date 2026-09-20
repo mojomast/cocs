@@ -19,6 +19,7 @@ reference.
 | [design/QOL-PASS.md](design/QOL-PASS.md) | Visual fidelity, audio coverage, bot/mode gameplay, online and HUD quality-of-life. |
 | [design/PHYSICS-AND-AUDIO-PASS.md](design/PHYSICS-AND-AUDIO-PASS.md) | Ragdoll physics, animation depth, music expansion and the graphics/gameplay wave. |
 | [design/DEPTH-PASS.md](design/DEPTH-PASS.md) | Vehicle/sentry depth, audio dynamics, music kits, HUD/lobby depth and the music stability fix. |
+| [ANNOUNCER_VOICE_PACK.md](ANNOUNCER_VOICE_PACK.md) | The OmniVoice announcer pack: takes, provenance, and the SynthAudio playback integration. |
 | [V8.4-IMPROVEMENT-PLAN.md](V8.4-IMPROVEMENT-PLAN.md) | Post-release multi-track audit and prioritized corrective roadmap. |
 | [spec/SPEC.md](spec/SPEC.md) | Historical design specification (kept as a record). |
 | [spec/DEVPLAN.md](spec/DEVPLAN.md) | Historical development plan (kept as a record). |
