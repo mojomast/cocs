@@ -85,6 +85,11 @@ paid Moth material pack and the offline variety pipeline behind it.
   the audio engine off-screen, and a match cannot start outside the game scene),
   and announcer callouts keep a priority voice slot so a busy firefight cannot
   drop them.
+- Particle title logo: the title mark is rendered as a point cloud over the live
+  menu scene — letters rasterised from the DOM glyphs, assembled from a drifting
+  haze with a wake and pointer repulsion, deterministic and reduced-motion safe,
+  with the original DOM logo as the fallback. See
+  [Depth and dynamics pass](design/DEPTH-PASS.md#particle-title-logo).
 - Animation pass: restored death variety (killing-direction topple, per-pose
   fall arcs, seeded limb silhouettes, style treatments), strength-scaled hit
   flinches, a melee swing, shell casings, style-aware death audio, and UI

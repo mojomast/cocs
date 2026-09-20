@@ -481,6 +481,11 @@ Recent releases. The full history lives in
   three seeded takes each, decoded on demand and rotated deterministically,
   with the procedural motifs as fallback. See
   [Announcer voice pack](docs/ANNOUNCER_VOICE_PACK.md).
+- Particle title logo: the title mark is a deterministic point cloud over the
+  live menu scene (rasterised from the DOM glyphs, with a wake, pointer
+  repulsion and reduced-motion static frame), keeping the original DOM logo as
+  the fallback. See
+  [Depth and dynamics pass](docs/design/DEPTH-PASS.md#particle-title-logo).
 - Graphics-edge pass (research-backed): static dither kills 8-bit banding, a
   contrast-adaptive sharpen recovers FXAA softness, and environment reflections
   scale with the tier. Runs whenever post-processing or the graphics lab runs.

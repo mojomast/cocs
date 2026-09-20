@@ -166,3 +166,33 @@ Two follow-up defects from player reports:
   motif is louder, and sampled takes play at a slightly higher gain. Team
   Deathmatch score calls and kill-streak calls are therefore audible over a
   firefight.
+
+## Particle title logo
+
+The title mark is now a point cloud over the live menu/showcase scene, in the
+spirit of the mx.works ship: letters rasterised from the DOM glyphs, sampled
+into 4.5k-9k particle targets, assembled from a loose haze, drifting with
+per-particle noise, pouring a wake off to the lower-left, and shoving away from
+the pointer before settling home. Ambient dust motes drift through the box.
+
+- `game/particle-logo.mjs` is the pure half: deterministic mask sampling
+  (growing stride, deterministic jitter), particle state, the fixed-step
+  simulation with wake/dust shares, and per-particle render alpha. Covered by
+  `game/particle-logo.test.mjs` (sampling bounds, determinism, settling, pointer
+  repulsion, reduced snap, wake fade, PRNG).
+- `app/game-ui/particle-logo.tsx` is the canvas host: it measures the DOM logo
+  shell, rasterises the glyphs from their computed fonts, decodes targets,
+  renders with normal (not additive) blending so the mark stays legible over
+  bright gameplay, and runs fixed 16.6 ms substeps so assembly speed does not
+  depend on frame rate. It owns its renderer, geometry, material, observers and
+  listeners, and disposes all of them on unmount.
+- Gates: reduced motion renders one fully assembled static frame (no drift, no
+  pointer); a failed WebGL context, a raster with fewer than 600 targets, or a
+  missing canvas keeps the original DOM logo (the glyphs are hidden only after a
+  frame has rendered). The canvas is `aria-hidden`, the `h1` keeps its
+  accessible name, and a soft radial vignette behind the mark keeps it readable
+  over bright scenery.
+- Budget: no new assets (the raster is generated at runtime from system fonts),
+  and the extra WebGL context exists only while the title screen is mounted.
+  `?particleDebug=1` exposes the mask, target histogram and a QA render of the
+  targets on the canvas dataset.

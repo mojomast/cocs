@@ -236,6 +236,13 @@
 /* Animated boot logo: letters slide in one at a time, a period after each,
    the word beneath. */
 .logo{display:flex;align-items:flex-start;justify-content:center;gap:clamp(5px,1.5vw,26px);margin:4px 0 2px;max-width:100%;perspective:900px}
+.logo-shell{position:relative;display:flex;justify-content:center;max-width:100%}
+.logo-shell::before{content:'';position:absolute;inset:-16% -10%;background:radial-gradient(58% 132% at 50% 46%,rgba(3,14,20,.74),rgba(3,14,20,.2) 58%,rgba(3,14,20,0) 78%);pointer-events:none;opacity:0;transition:opacity .45s ease-out}
+.has-particle-logo::before{opacity:1}
+.particle-logo-canvas{position:absolute;inset:0;width:100%;height:100%;pointer-events:none;transition:opacity .45s ease-out;z-index:1}
+.has-particle-logo .logo-glyph,.has-particle-logo .logo-word{visibility:hidden}
+@media (prefers-reduced-motion:reduce){.particle-logo-canvas,.logo-shell::before{transition:none}}
+.motion-reduced .particle-logo-canvas,.motion-reduced .logo-shell::before{transition:none}
 .logo-letter{display:flex;flex-direction:column;align-items:center;gap:clamp(4px,.7vw,10px);opacity:0;transform:translateY(-140%) rotateX(48deg) skewX(-18deg) scale(.78);animation:logo-in .62s cubic-bezier(.2,.9,.25,1.12) forwards;animation-delay:calc(var(--i)*170ms + 180ms)}
 .logo-glyph{position:relative;overflow:hidden;font-family:var(--font-display);font-size:clamp(58px,16vw,228px);line-height:.8;font-weight:900;letter-spacing:-.03em;color:#eafff5;text-transform:uppercase;text-shadow:0 2px 0 #24564a,0 6px 0 #12302a,0 12px 30px rgba(0,0,0,.75),0 0 54px rgba(131,244,213,.4)}
 .logo-glyph::after{content:'';position:absolute;top:-20%;bottom:-20%;left:0;width:34%;background:linear-gradient(90deg,transparent,rgba(255,255,255,.55),transparent);transform:translateX(-180%) rotate(14deg);mix-blend-mode:screen;animation:logo-sheen 4.4s ease-in-out infinite;animation-delay:calc(1.3s + var(--i)*.28s)}

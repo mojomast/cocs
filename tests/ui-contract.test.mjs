@@ -109,3 +109,20 @@ test('the page only feeds a local match to the audio engine while it owns the sc
   const page = await readFile(new URL('app/page.tsx', root), 'utf8');
   assert.match(page, /\['playing','paused','results'\]\.includes\(modeRef\.current\)\)audio\.update\(r\.match\.actors\[0\]/, 'the stale-match audio update is gated to screen-owning modes');
 });
+
+test('the title logo is a particle canvas with the DOM mark kept as the fallback', async () => {
+  const [screen, component, css] = await Promise.all([
+    readFile(new URL('app/ui/screens/TitleScreen.tsx', root), 'utf8'),
+    readFile(new URL('app/game-ui/particle-logo.tsx', root), 'utf8'),
+    readFile(new URL('app/styles/ui.css', root), 'utf8'),
+  ]);
+  assert.match(screen, /<ParticleLogo label=\{BRAND\?\.name\|\|'COCS'\}\/>/, 'the title mounts the particle canvas');
+  assert.match(screen, /<h1 className="logo" aria-label=\{BRAND\?\.name\|\|'COCS'\}>/, 'the DOM mark keeps its accessible name');
+  assert.match(component, /className="particle-logo-canvas" aria-hidden="true"/, 'the canvas is decorative');
+  assert.match(component, /classList\.add\('has-particle-logo'\)/, 'the DOM glyphs are hidden only after a frame renders');
+  assert.match(component, /matchMedia\?\.\('\(prefers-reduced-motion: reduce\)'\)/, 'reduced motion is detected for the static frame');
+  assert.match(component, /targets\.count < 600\) return null/, 'a sparse raster keeps the DOM logo instead');
+  assert.match(css, /\.has-particle-logo \.logo-glyph,\.has-particle-logo \.logo-word\{visibility:hidden\}/, 'the fallback stays in layout for assistive tech');
+  assert.match(css, /@media \(prefers-reduced-motion:reduce\)\{\.particle-logo-canvas,\.logo-shell::before\{transition:none\}\}/, 'the canvas fade has an OS gate');
+  assert.match(css, /\.motion-reduced \.particle-logo-canvas,\.motion-reduced \.logo-shell::before\{transition:none\}/, 'and an in-game twin');
+});
