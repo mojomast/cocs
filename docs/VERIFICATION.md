@@ -77,6 +77,20 @@ validated against a deliberately throttled headless browser (1 fps): before the
 fix most menu starts were scheduled 50-400 ms late, after it **zero late starts**
 with continuous scheduling. Active matches disconnected briefly on the restart.
 
+**Production update — OmniVoice announcer pack (2026-09-20).** Commit `faa5361`
+(which carries the `feat/omnivoice-announcer-pack` PR's assets verbatim and
+wires them into `SynthAudio`) was fast-forwarded to
+`improvement/phase2-audio-visual` and deployed with
+`npm run deploy -- --with-game-server`. The gate verified exact identities at
+web `faa5361` `v8.6-faa5361` protocol 3 and game server `faa5361`
+`v8.6-faa5361` protocol 3 after the usual transient 502.
+`/audio/announcer/manifest.json` (24,765 bytes) and the pack WAVs (e.g.
+`capture-42.wav`, 70,604 bytes) return 200. A live production browser check
+loaded the manifest, requested the three capture takes on the first cue and
+reported `{loaded:true, ready:3, failed:0}` by the second cue with zero console
+errors. The tracked production browser matrix ran at **5/5 viewports**. Active
+matches disconnected briefly on the restart.
+
 **Production update — physics, animation and audio pass (2026-09-20).** Commit
 `d9411c3` was fast-forwarded to `improvement/phase2-audio-visual` and deployed
 with `npm run deploy -- --with-game-server` (sim, vehicles, progression and the
