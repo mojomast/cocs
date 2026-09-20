@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {vehicleHud, escapeHint, voiceHint, spectatorControls, SPECTATOR_RESERVED_KEYS, reloadProgress, dynamicCrosshairGap, lowAmmo, postureLabel, hitMarker, projectToScreen, damageNumberStyle, boundList, damageBearing, killBanner, weaponTag, ammoText, commandBrief, isTeamMode, matchStartBanner, modeColumns, modeGoal, modePrimary, modeTargetText, objectiveCopy, suddenDeathBanner, grenadeStatus, killstreakCallout, ladderStatus, streakStatus, audioCaption, altFireLabel, scoreAnnouncer, multikillLabel, spreeLabel, recentKills, killCallout, matchAwards, killFeedWeapon, killFeedBadges, connectionQuality, qualityNote, damageLogEntry, damageRecap, assistCredit, DAMAGE_LOG_LIMIT, spectateActor, nextSpectateTarget, spectatorBoard, spectatorTeams, weaponRangeInfo, weaponRangeLabel, scoreStats, cocsDominanceStatus, cocsOperationsStatus, cocsOutcomeView, acceptCocsAnnouncement, cocsAnnouncePriority, cocsAnnouncementTTL, COCS_ANNOUNCE_PRIORITY, damageHitText, captionPriority, acceptCaption, CAPTION_TTL, teamStatusHud, economyHud} from './hud.mjs';
+import {readFile} from 'node:fs/promises';
+import {vehicleHud, escapeHint, voiceHint, spectatorControls, SPECTATOR_RESERVED_KEYS, reloadProgress, dynamicCrosshairGap, lowAmmo, postureLabel, hitMarker, projectToScreen, damageNumberStyle, boundList, damageBearing, killBanner, weaponTag, ammoText, commandBrief, isTeamMode, matchStartBanner, modeColumns, modeGoal, modePrimary, modeTargetText, objectiveCopy, suddenDeathBanner, grenadeStatus, killstreakCallout, ladderStatus, streakStatus, audioCaption, altFireLabel, scoreAnnouncer, multikillLabel, spreeLabel, recentKills, killCallout, matchAwards, killFeedWeapon, killFeedBadges, connectionQuality, qualityNote, damageLogEntry, damageRecap, assistCredit, DAMAGE_LOG_LIMIT, spectateActor, nextSpectateTarget, spectatorBoard, spectatorTeams, weaponRangeInfo, weaponRangeLabel, scoreStats, cocsDominanceStatus, cocsOperationsStatus, cocsOutcomeView, acceptCocsAnnouncement, cocsAnnouncePriority, cocsAnnouncementTTL, COCS_ANNOUNCE_PRIORITY, damageHitText, captionPriority, acceptCaption, CAPTION_TTL, teamStatusHud, economyHud, flagStatus, flagText, recordBadges} from './hud.mjs';
 import {WEAPONS} from './data.mjs';
 import {GAME_MODES,teamMode} from './config.mjs';
 import {soccerDisplay,soccerResult} from './race-ui.mjs';
@@ -364,6 +365,43 @@ test('matchAwards derives medals for captures, accuracy, damage and flawless rou
   assert.equal(bare.some(a => a.id === 'flawless'), false);
 });
 
+test('record badges lead the award strip as NEW RECORD chips in the existing shape', () => {
+  const records = [
+    {id: 'kills', label: 'BEST KILLS', value: '12', raw: 12},
+    {id: 'time', label: 'FASTEST WIN', value: '92s', raw: 92},
+  ];
+  const badges = recordBadges(records);
+  assert.deepEqual(badges[0], {id: 'record-kills', label: 'NEW RECORD', name: 'BEST KILLS', value: '12', record: true});
+  assert.equal(badges[1].name, 'FASTEST WIN');
+  assert.equal(badges[1].value, '92s');
+  const hud = {actors: [
+    awardActor(0, 'ChatGPT', 12, 4, {objectiveTime: 30, captures: 1}),
+    awardActor(1, 'Grok', 5, 11, {}),
+  ]};
+  const plain = matchAwards(hud);
+  const withRecords = matchAwards(hud, records);
+  assert.deepEqual(withRecords.slice(badges.length), plain, 'the existing award order and shape are untouched');
+  assert.equal(plain.some(award => award.record), false, 'the record flag never leaks into a plain award');
+  assert.equal(withRecords[0].label, 'NEW RECORD');
+  // Records still surface for a solo snapshot, where no rival award exists.
+  assert.deepEqual(matchAwards({}, records).map(badge => badge.name), ['BEST KILLS', 'FASTEST WIN']);
+  assert.deepEqual(recordBadges(), []);
+  assert.deepEqual(recordBadges(null), []);
+  assert.deepEqual(recordBadges([null, {id: 'kd', label: 'BEST K/D', value: '3'}]).map(badge => badge.id), ['record-kd']);
+  // A bare label string is accepted as a chip with no stat value.
+  assert.deepEqual(recordBadges(['BEST KILLS'])[0], {id: 'record-0', label: 'NEW RECORD', name: 'BEST KILLS', value: '', record: true});
+});
+
+test('the HUD model adds no live region for captions, records or objective reads', async () => {
+  const source = await readFile(new URL('./hud.mjs', import.meta.url), 'utf8');
+  assert.doesNotMatch(source, /aria-live|role="status"/, 'the pure model renders no live region');
+  const caption = acceptCaption(null, 0, {text: 'Flag contested', priority: captionPriority({type: 'flag-contest'})}, 1);
+  assert.deepEqual(Object.keys(caption).sort(), ['at', 'priority', 'text']);
+  const badge = recordBadges([{id: 'kills', label: 'BEST KILLS', value: '12'}])[0];
+  assert.deepEqual(Object.keys(badge).sort(), ['id', 'label', 'name', 'record', 'value']);
+  assert.equal('role' in badge || 'ariaLive' in badge, false, 'record chips carry data only');
+});
+
 test('weapon range labels expose band, effective range and falloff', () => {
   assert.equal(weaponRangeLabel({range: 24, falloff: {start: 6, end: 24, min: .4}}), 'SHORT · 6–24m · 40%');
   assert.equal(weaponRangeLabel({range: 90}), 'LONG · 90m');
@@ -435,6 +473,17 @@ test('audio captions describe events and ignore silent ones',()=>{
  assert.equal(audioCaption({type:'melee'}).text,'Melee');
  assert.equal(audioCaption({type:'spawn'}),null);
  assert.equal(audioCaption(null),null);
+});
+
+test('flag relay and objective contest beats have readable one-line captions',()=>{
+ assert.equal(audioCaption({type:'flag-pass',actor:1,to:2}).text,'Flag passed');
+ assert.equal(audioCaption({type:'flag-contest',team:0,count:2,actor:1}).text,'Flag contested');
+ assert.equal(audioCaption({type:'payload-contest',team:1,attacker:0,defender:1}).text,'Payload contested');
+ assert.equal(audioCaption({type:'holdout-progress',team:0,progress:12,window:30}).text,'Holdout progress');
+ // Caption models stay plain data: no surface, role or live-region fields.
+ for(const caption of [audioCaption({type:'flag-pass'}),audioCaption({type:'flag-contest'}),audioCaption({type:'payload-contest'})]){
+  assert.deepEqual(Object.keys(caption),['text']);
+ }
 });
 
 test('alt-fire captions name the same mode table the HUD chip reads',()=>{
@@ -568,6 +617,50 @@ test('matchStartBanner adds the objective target alongside mode and map', () => 
   assert.equal(banner.detail, 'INSTAGIB · EXCHANGE · FIRST TO 20 FRAGS');
   assert.equal(matchStartBanner({time: .5, modeName: 'Arms Race', mapName: 'Yard', config: {mode: 'armsrace', fragLimit: 10}}, 2.6, modeById('armsrace')).detail, 'ARMS RACE · YARD · CLIMB THE LADDER');
   assert.equal(matchStartBanner({time: .5, modeName: 'Capture the Flag', mapName: 'Exchange'}).detail, 'CAPTURE THE FLAG · EXCHANGE');
+});
+
+test('flag status labels a carried flag and a contested home stand without changing pinned copy', () => {
+  const hud = {
+    flags: [
+      {team: 0, state: 'at-base', carrier: null, x: 0, z: 0},
+      {team: 1, state: 'carried', carrier: 2, x: 4, z: 1},
+      {team: 2, state: 'dropped', carrier: null, x: 8, z: 2},
+    ],
+    actors: [{id: 2, name: 'Grok'}],
+  };
+  // With no contest reader attached the pinned copy is byte-identical.
+  assert.equal(flagText(hud), 'RED FLAG HOME  ·  BLUE FLAG CARRIED BY GROK  ·  TEAM 2 FLAG DROPPED');
+  assert.equal(flagText(hud, {}), 'RED FLAG HOME  ·  BLUE FLAG CARRIED BY GROK  ·  TEAM 2 FLAG DROPPED');
+  const rows = flagStatus(hud, {1: 2});
+  assert.equal(rows.length, 3);
+  assert.equal(rows[1].contested, true);
+  assert.equal(rows[1].count, 2);
+  assert.equal(rows[1].carrierName, 'Grok');
+  assert.equal(rows[1].text, 'BLUE FLAG CARRIED BY GROK · STAND CONTESTED');
+  assert.equal(rows[0].contested, false);
+  assert.equal(rows[0].text, 'RED FLAG HOME');
+  // A reader can stash its map on the snapshot, and an event-shaped value works.
+  const viaHud = flagStatus({...hud, flagContests: {0: true}});
+  assert.equal(viaHud[0].contested, true);
+  assert.equal(viaHud[0].count, 1);
+  assert.equal(flagText({...hud, flagContests: {0: {count: 3}}}), 'RED FLAG HOME · STAND CONTESTED  ·  BLUE FLAG CARRIED BY GROK  ·  TEAM 2 FLAG DROPPED');
+  assert.deepEqual(flagStatus({flags: []}), []);
+  assert.deepEqual(flagStatus(null), []);
+  assert.equal(flagText(null), '');
+});
+
+test('the CTF command brief reads a contested home stand through flagText', () => {
+  const hud = {
+    config: {mode: 'ctf', fragLimit: 3},
+    flags: [{team: 0, state: 'at-base'}, {team: 1, state: 'carried', carrier: 3}],
+    actors: [{id: 3, name: 'Grok'}],
+    flagContests: {0: 1},
+  };
+  const brief = commandBrief(hud, {id: 0, team: 0}, modeById('ctf'));
+  assert.match(brief.detail, /RED DEFENSE/);
+  assert.match(brief.detail, /RED FLAG HOME · STAND CONTESTED/);
+  assert.match(brief.detail, /BLUE FLAG CARRIED BY GROK/);
+  assert.equal(brief.status, '0 / 3 CAPTURES');
 });
 
 test('modeColumns covers the new objective and ladder scoreboards', () => {
@@ -915,6 +1008,28 @@ test('team status reads the uplink relay race, assault sectors and payload dista
  assert.match(payload.label, /PAYLOAD 43%, 84\/200m, CONTESTED\./);
 });
 
+test('team status names the payload contest sides so the block is readable, not just a word', () => {
+ const base = {actors: [{id: 0, team: 1, health: 100}], objectives: {kind: 'payload', attacker: 0, defender: 1, payload: {progress: 42, distance: 80, total: 200, contested: true, pushing: null, delivered: false, checkpointsReached: 1, checkpointCount: 3}}};
+ const view = teamStatusHud({id: 0, team: 1}, base);
+ assert.equal(view.payload.contested, true);
+ assert.equal(view.payload.attacker, 0);
+ assert.equal(view.payload.defender, 1);
+ assert.equal(view.payload.defending, true, 'the local team is the side stalling the cart');
+ assert.equal(view.payload.mine, false, 'mine keeps its pinned pushing-team meaning');
+ assert.equal(view.payload.text, 'PAYLOAD 42% · 80/200m · CONTESTED');
+ // A sliced payload object that repeats its own sides reads the same way.
+ const sliced = teamStatusHud({id: 0, team: 0}, {actors: [{id: 0, team: 0, health: 100}], objectives: {payload: {contested: false, attacker: 0, defender: 1, pushing: 0, progress: 10, distance: 10, total: 100}}});
+ assert.equal(sliced.payload.attacker, 0);
+ assert.equal(sliced.payload.defending, false);
+ assert.equal(sliced.payload.mine, true);
+ // An older snapshot without side fields still reads the contest without throwing.
+ const legacy = teamStatusHud({id: 0, team: 0}, {actors: [{id: 0, team: 0, health: 100}], objectives: {payload: {contested: true, progress: 1, distance: 1, total: 2}}});
+ assert.equal(legacy.payload.attacker, null);
+ assert.equal(legacy.payload.defender, null);
+ assert.equal(legacy.payload.defending, false);
+ assert.match(legacy.label, /CONTESTED/);
+});
+
 test('team status badges the VIP with live health or a down state', () => {
  const base = {teamScores: {0: 0, 1: 0}, actors: [{id: 0, team: 0, health: 100}, {id: 7, name: 'VIP', team: 0, isVip: true, health: 72, maxHealth: 100}], objectives: {kind: 'extraction', vipId: 7, escortTeam: 0, defenderTeam: 1, vipDead: false, progress: 2, captureSeconds: 4}};
  const view = teamStatusHud({id: 0, team: 0}, base);
@@ -1087,4 +1202,24 @@ test('caption priority protects the objective and callout bands', () => {
  assert.equal(tiebreak.text, 'Objective tiebreak');
  const preempt = acceptCaption(aura, 10, {text: 'SUDDEN DEATH', priority: captionPriority({type: 'sudden-death'})}, 11);
  assert.equal(preempt.text, 'SUDDEN DEATH', 'the sudden band still pre-empts a callout');
+});
+
+test('flag and payload contest calls hold the callout band while a relay stays an objective beat', () => {
+ assert.equal(captionPriority({type: 'flag-pass'}), 100);
+ assert.equal(captionPriority({type: 'flag-contest'}), 109);
+ assert.equal(captionPriority({type: 'payload-contest'}), 109);
+ assert.equal(captionPriority({type: 'holdout-progress'}), 85);
+ // A live contest cannot be clobbered by chatter or a relay line...
+ const contest = acceptCaption(null, 0, {text: 'Flag contested', priority: captionPriority({type: 'flag-contest'})}, 10);
+ assert.equal(contest.priority, 109);
+ assert.equal(acceptCaption(contest, 10, {text: 'Gunfire', priority: captionPriority({type: 'shot'})}, 11), null);
+ assert.equal(acceptCaption(contest, 10, {text: 'Flag passed', priority: captionPriority({type: 'flag-pass'})}, 11), null);
+ // ...while a hard objective beat can still pre-empt it.
+ assert.equal(acceptCaption(contest, 10, {text: 'MISSION FAILED', priority: captionPriority({type: 'mission-lost'})}, 11).text, 'MISSION FAILED');
+ // A relay line yields to a contest instead of blocking it.
+ const relay = acceptCaption(null, 0, {text: 'Flag passed', priority: captionPriority({type: 'flag-pass'})}, 10);
+ assert.equal(acceptCaption(relay, 10, {text: 'Flag contested', priority: captionPriority({type: 'flag-contest'})}, 11).text, 'Flag contested');
+ // The holdout tick and a fresh contest never claim each other's windows.
+ const holdout = acceptCaption(null, 0, {text: 'Holdout progress', priority: captionPriority({type: 'holdout-progress'})}, 10);
+ assert.equal(acceptCaption(holdout, 10, {text: 'Payload contested', priority: captionPriority({type: 'payload-contest'})}, 11).text, 'Payload contested');
 });

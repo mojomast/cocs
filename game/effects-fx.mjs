@@ -30,7 +30,24 @@ export class CameraShake{
 // at construction, so a barrel chain cannot grow the light count.
 export class MuzzleLightPool{
  constructor(scene,count=2,intensity=3.4,distance=7){this.scene=scene;this.intensity=intensity;this.lights=[];this.index=0;for(let i=0;i<count;i++){const light=new T.PointLight('#ffffff',0,distance,2);light.visible=false;light.userData.remaining=0;light.userData.total=1;light.userData.peak=intensity;scene.add(light);this.lights.push(light);}}
- flash(color,position,life=.06,intensity=this.intensity){if(!this.lights.length)return;const light=this.lights[this.index=(this.index+1)%this.lights.length];const peak=Number.isFinite(Number(intensity))?Math.max(0,Number(intensity)):this.intensity;light.color.set(color);light.userData.remaining=life;light.userData.total=life;light.userData.peak=peak;light.intensity=peak;light.visible=true;if(position)light.position.set(position.x,position.y,position.z);}
+ flash(color,position,life=.06,intensity=this.intensity){if(!this.lights.length)return;const light=this._slot(position);if(!light)return;const peak=Number.isFinite(Number(intensity))?Math.max(0,Number(intensity)):this.intensity;light.color.set(color);light.userData.remaining=life;light.userData.total=life;light.userData.peak=peak;light.intensity=peak;light.visible=true;if(position)light.position.set(position.x,position.y,position.z);return light;}
+ // Slot choice: round-robin over the idle lights preserves the historical order
+ // (the first flash of a burst keeps its old slot); once every light is pulsing,
+ // recycle the pulse farthest from the new flash so nearby muzzle flashes keep
+ // their own slot instead of all fighting for one light.
+ _slot(position){
+  if(!this.lights.length)return null;
+  for(let step=0;step<this.lights.length;step++){
+   this.index=(this.index+1)%this.lights.length;
+   if(this.lights[this.index].userData.remaining<=0)return this.lights[this.index];
+  }
+  let best=this.lights[0],bestDistance=-1;
+  for(const light of this.lights){
+   const dx=light.position.x-(Number(position?.x)||0),dy=light.position.y-(Number(position?.y)||0),dz=light.position.z-(Number(position?.z)||0),distance=dx*dx+dy*dy+dz*dz;
+   if(distance>bestDistance){bestDistance=distance;best=light;}
+  }
+  return best;
+ }
  update(dt){for(const light of this.lights){if(light.userData.remaining<=0){if(light.visible){light.visible=false;light.intensity=0;}continue;}light.userData.remaining-=dt;if(light.userData.remaining<=0){light.visible=false;light.intensity=0;}else light.intensity=light.userData.peak*(light.userData.remaining/light.userData.total);}}
  dispose(){for(const light of this.lights){light.parent?.remove(light);light.dispose?.();}this.lights=[];}
 }
@@ -83,13 +100,14 @@ export class RailBeamPool{
   slot={beam,core,ring,beamMat,coreMat,ringMat,active:false,serial:0,life:0,total:1};
   this.slots.push(slot);return slot;
  }
- spawn(from,to,color='#9fe8ff',reduced=false){
+ spawn(from,to,color='#9fe8ff',reduced=false,widthScale=1){
   if(!from||!to)return null;
   const slot=this._slot();if(!slot)return null;
   this.from.set(from.x||0,from.y||0,from.z||0);this.to.set(to.x||0,to.y||0,to.z||0);
   this.dir.subVectors(this.to,this.from);const len=this.dir.length()||.001;this.dir.normalize();
   this.quat.setFromUnitVectors(this.axis,this.dir);
-  const width=reduced?.07:.12;
+  const scale=Math.max(.2,Math.min(2.5,Number(widthScale)||1));
+  const width=(reduced?.07:.12)*scale;
   slot.beam.position.copy(this.from);slot.beam.quaternion.copy(this.quat);slot.beam.scale.set(width,width,len);
   slot.core.position.copy(this.from);slot.core.quaternion.copy(this.quat);slot.core.scale.set(width*.26,width*.26,len);
   slot.ring.position.copy(this.from);slot.ring.quaternion.copy(this.quat);slot.ring.scale.setScalar(.16);
@@ -299,6 +317,80 @@ export class ContactShadowPool{
  }
  clear(){for(const slot of this.slots){slot.active=false;slot.obj.visible=false;}this.byId.clear();}
  dispose(){for(const slot of this.slots){this.scene.remove(slot.obj);slot.material?.dispose();slot.material=null;}this.slots=[];this.byId.clear();this.geometry?.dispose();this.geometry=null;this.mask?.dispose();this.mask=null;}
+}
+
+// Spectator / kill-cam readability markers. One tiny pooled world marker built
+// only from generated geometry: a ground ring, an overhead chevron and an
+// optional killer bracket. `depthTest:false` keeps the followed subject
+// readable through geometry; there is no camera math, no texture and no
+// per-frame allocation. Slots are keyed by presentation role ('follow' /
+// 'killer') so a reused slot never carries a stale mark. The pulse is
+// presentational only: reduced motion (and the CPU renderer, which stays
+// cheap) holds the marker static.
+export const FOLLOW_MARKER_COLOR='#7fe7ff';
+export const KILLER_MARKER_COLOR='#ff6b6b';
+export class FollowMarkerPool{
+ constructor(scene,limit=2){
+  this.scene=scene;this.limit=Math.max(1,limit|0);this.slots=[];this.byKey=new Map();this.frame=0;this.serial=0;
+  this.ringGeo=new T.TorusGeometry(.34,.035,6,24);
+  this.chevronGeo=new T.ConeGeometry(.2,.3,4);
+  this.bracketGeo=new T.BoxGeometry(.055,.16,.02);
+ }
+ _slot(){
+  let slot=this.slots.find(entry=>!entry.active);
+  if(slot)return slot;
+  if(this.slots.length>=this.limit){this.slots.sort((a,b)=>a.serial-b.serial);return this.slots[0];}
+  const material=new T.MeshBasicMaterial({color:FOLLOW_MARKER_COLOR,transparent:true,depthTest:false,depthWrite:false});
+  const group=new T.Group();group.name='follow-marker';
+  const ring=new T.Mesh(this.ringGeo,material);ring.rotation.x=Math.PI/2;ring.position.y=.07;
+  const chevron=new T.Mesh(this.chevronGeo,material);chevron.rotation.x=Math.PI;chevron.position.y=1.72;
+  const bracket=new T.Group();bracket.position.y=1.02;bracket.visible=false;
+  for(const [x,y] of [[-.3,.3],[.3,.3],[-.3,-.3],[.3,-.3]]){
+   const bar=new T.Mesh(this.bracketGeo,material);bar.position.set(x,y,0);bar.rotation.z=x*y>0?-.785:.785;bracket.add(bar);
+  }
+  group.add(ring,chevron,bracket);
+  group.visible=false;group.frustumCulled=false;
+  group.traverse(node=>{node.renderOrder=95;node.userData.followMarker=true;});
+  this.scene.add(group);
+  slot={group,ring,chevron,bracket,material,active:false,serial:0,frame:-1};
+  this.slots.push(slot);return slot;
+ }
+ // Track one role for this frame. `kind` is 'follow' | 'killer'; the killer
+ // role swaps the chevron for the bracket. `pulse` is the caller's
+ // reduced-motion/software decision: false holds a static marker.
+ place(key,x,y,z,{color=FOLLOW_MARKER_COLOR,kind='follow',time=0,pulse=false}={}){
+  if(key==null)return null;
+  let slot=this.byKey.get(key);
+  if(!slot){
+   slot=this._slot();if(!slot)return null;
+   for(const [bound,entry] of this.byKey)if(entry===slot)this.byKey.delete(bound);
+   this.byKey.set(key,slot);
+  }
+  const t=Number(time)||0,killer=kind==='killer';
+  slot.frame=this.frame;
+  slot.group.position.set(Number(x)||0,Number(y)||0,Number(z)||0);
+  slot.material.color.set(color);
+  slot.material.opacity=killer?.95:.85;
+  const bob=pulse?Math.sin(t*3.6)*.07:0,beat=pulse?1+Math.sin(t*4.4)*.07:1;
+  slot.ring.scale.setScalar(beat);
+  slot.ring.visible=true;
+  slot.chevron.visible=!killer;
+  slot.chevron.position.y=1.72+bob;
+  slot.chevron.rotation.y=pulse?t*1.9:0;
+  slot.bracket.visible=killer;
+  slot.bracket.rotation.y=pulse?t*.8:0;
+  slot.group.visible=true;slot.active=true;
+  return slot;
+ }
+ // Hide every role that was not placed this frame and release its key, so a
+ // stopped follow or an ended kill-cam leaves nothing on screen.
+ end(){
+  for(const [key,slot] of this.byKey)if(slot.frame!==this.frame){slot.group.visible=false;slot.active=false;this.byKey.delete(key);}
+  this.frame++;
+  return this.byKey.size;
+ }
+ clear(){for(const slot of this.slots){slot.active=false;slot.group.visible=false;}this.byKey.clear();return 0;}
+ dispose(){for(const slot of this.slots){this.scene.remove(slot.group);slot.material?.dispose();slot.material=null;}this.slots=[];this.byKey.clear();this.ringGeo?.dispose();this.chevronGeo?.dispose();this.bracketGeo?.dispose();this.ringGeo=this.chevronGeo=this.bracketGeo=null;}
 }
 
 // Pooled death debris: flung limb/body chunks and lingering ground splats.

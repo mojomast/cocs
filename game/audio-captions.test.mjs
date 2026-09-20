@@ -43,6 +43,13 @@ test('pickup captions name the supply kind and keep the bare pickup line',()=>{
  assert.equal(audioCaption({type:'pickup',kind:'smg'}).text,'Weapon acquired');
 });
 
+test('flag relay, objective contest and holdout beats have one-line captions',()=>{
+ assert.equal(audioCaption({type:'flag-pass',actor:1,to:2}).text,'Flag passed');
+ assert.equal(audioCaption({type:'flag-contest',team:0,count:1,actor:1}).text,'Flag contested');
+ assert.equal(audioCaption({type:'payload-contest',team:1,attacker:0,defender:1}).text,'Payload contested');
+ assert.equal(audioCaption({type:'holdout-progress',team:0,progress:10,window:30}).text,'Holdout progress');
+});
+
 test('spawn captions real events but never the bare probe',()=>{
  assert.equal(audioCaption({type:'spawn'}),null,'a bare probe stays uncaptioned');
  assert.equal(audioCaption({type:'spawn',actor:0,pos:{x:1,z:2}}).text,'Respawn');

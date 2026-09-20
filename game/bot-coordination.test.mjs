@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {Match} from './core.mjs';
-import {objectiveAssignment,teamCentroid} from './bots.mjs';
+import {extractionBotOrders,objectiveAssignment,teamCentroid} from './bots.mjs';
 
 const rng=()=>.5;
 const seeded=(n=53)=>{let a=n;return()=>((a=(Math.imul(a,1664525)+1013904223)>>>0)/4294967296);};
@@ -86,4 +86,34 @@ test('holdout and uplink bots route to their objective zones',()=>{
   assert.ok(bots.every(bot=>['objective','regroup','hold','roam'].includes(bot.bot.state)),`${mode}: ${bots.map(bot=>bot.bot.state).join(',')}`);
   assert.ok(bots.some(bot=>Number.isFinite(bot.bot.destination?.x)&&Number.isFinite(bot.bot.destination?.z)),`${mode} bots get a destination`);
  }
+});
+
+test('VIP escort orders slot escorts near the package and converge hunters on it',()=>{
+ const m=new Match('kimi','roo',seeded(),'gauntlet',{mode:'vip-escort',botCount:5,humanCount:1,timeLimit:120,fragLimit:1});
+ m.pickups=[];
+ m.updateObjectives(1/60);
+ const state=m.objectiveState,vip=m.actors.find(actor=>actor.isVip);
+ assert.ok(vip,'the VIP deploys');
+ const escorts=m.actors.filter(actor=>actor.bot&&actor.team===state.escortTeam),hunter=m.actors.find(actor=>actor.bot&&actor.team!==state.escortTeam);
+ assert.ok(escorts.length>=2&&hunter,'the fixture fields escorts and hunters');
+ const orders=extractionBotOrders(m,escorts[0]);
+ assert.equal(orders.state,'objective');assert.equal(orders.role,'escort');
+ assert.ok(Math.hypot(orders.destination.x-vip.x,orders.destination.z-vip.z)<=state.escortRadius+1e-9,'the escort slot sits inside the bubble');
+ const hunt=extractionBotOrders(m,hunter);
+ assert.equal(hunt.state,'objective');assert.equal(hunt.role,'hunt');
+ assert.equal(hunt.destination.x,vip.x);assert.equal(hunt.destination.z,vip.z,'hunters converge on the live package');
+ assert.deepEqual(extractionBotOrders(m,escorts[0]),orders,'identical state resolves identical orders');
+ assert.notDeepEqual(extractionBotOrders(m,escorts[1]),orders,'actor ids spread across different slots');
+ // Once the package stands on the beacon, the escort ring moves to the beacon.
+ vip.x=state.extract.x;vip.z=state.extract.z;vip.y=state.extract.y??0;
+ const atBeacon=extractionBotOrders(m,escorts[0]);
+ assert.ok(Math.hypot(atBeacon.destination.x-state.extract.x,atBeacon.destination.z-state.extract.z)<=state.escortRadius+1e-9,'the beacon ring replaces the VIP ring');
+ // botInput wires the order into the existing objective branch (no duel when
+ // the other side is down, which is the branch's documented guard).
+ for(const actor of m.actors)if(actor!==escorts[0]&&actor.bot)actor.health=0;
+ escorts[0].bot.think=0;
+ m.botInput(escorts[0],1/60);
+ assert.equal(escorts[0].bot.state,'objective');
+ assert.equal(escorts[0].bot.objectiveRole,'escort');
+ assert.ok(Number.isFinite(escorts[0].bot.destination?.x)&&Number.isFinite(escorts[0].bot.destination?.z));
 });

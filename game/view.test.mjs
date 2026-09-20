@@ -4,7 +4,7 @@ import {ArenaView,BOT_LAYER,raceTrackModel,vehicleModel,vehicleKitKind,weaponMod
 import {normalizeGraphicsLab} from './graphics-lab.mjs';
 import {RACE_DEMO_MODE_SECONDS} from './race-camera.mjs';
 import {SoftwareRenderer} from './software.mjs';
-import {ModelAssets,CameraShake,MuzzleLightPool,LowHealthOverlay,DeathPool,DecalPool,killcamPose,KILLCAM_DURATION} from './effects-fx.mjs';
+import {ModelAssets,CameraShake,MuzzleLightPool,LowHealthOverlay,DeathPool,DecalPool,killcamPose,KILLCAM_DURATION,FOLLOW_MARKER_COLOR,KILLER_MARKER_COLOR} from './effects-fx.mjs';
 import {ambientProfile,biomeAmbience} from './environment.mjs';
 import {DEFAULT_DISPLAY} from './config.mjs';
 import * as T from 'three';
@@ -1352,6 +1352,7 @@ test('a local death triggers a short kill-cam that only moves the presentation c
  view.effect({type:'death',actor:7,pos:{x:3,y:0,z:2},time:10,seed:5,killer:8});
  assert.ok(view.killcam,'killing the local player starts a kill-cam');
  assert.equal(view.killcam.duration,KILLCAM_DURATION);
+ assert.equal(view.killcam.killerId,8,'the killer identity rides the kill-cam for the marker kit');
  const match={actors:[player],pickups:[],rockets:[],time:10.5,events:[]};
  const before=JSON.stringify(player);
  view.render('playing',match,.016,10.5);
@@ -2143,15 +2144,33 @@ test('a final hit lean decays into the ragdoll fall instead of snapping away',t=
  view.deathPool?.dispose();view.effectPool?.dispose();
 });
 
-test('per-kind vehicles layer a silhouette kit over the shared Puma hull',t=>{
+test('per-kind vehicles use dedicated high-detail models on WebGL',t=>{
  const puma=vehicleModel('puma');
- assert.equal(vehicleKitKind('puma'),null);
  assert.equal(puma.userData.kit,undefined,'the Puma keeps its pinned userData');
- let pumaParts=0;puma.traverse(n=>{if(n.userData?.vehicleKit)pumaParts++;});
- assert.equal(pumaParts,0,'the Puma hull carries no kit parts');
- const baseline=puma.children.length;
- for(const kind of ['titan','scout','transport']){
+ const meshCounts={};
+ for(const kind of ['hornet','titan','scout','transport']){
   const model=vehicleModel(kind);
+  assert.equal(model.name,kind==='transport'?'transport-apc':kind,`${kind} keeps its dedicated model name`);
+  assert.equal(model.userData.kind,kind);
+  assert.equal(model.userData.kit,undefined,`${kind} no longer layers a kit`);
+  assert.equal(model.userData.vehicle,true);
+  const wheels=model.userData.wheels??[];
+  if(kind!=='hornet')assert.ok(wheels.length>=4,`${kind} animates its wheels (${wheels.length})`);
+  if(kind!=='hornet')assert.ok(model.userData.turret,`${kind} exposes a turret`);
+  assert.ok(model.userData.guns.length>=1,`${kind} keeps a flashable gun`);
+  for(const gun of model.userData.guns)assert.ok(gun.mount&&gun.flash&&gun.barrel,`${kind} gun contract`);
+  let meshes=0;model.traverse(n=>{if(n.isMesh)meshes++;});
+  meshCounts[kind]=meshes;
+  assert.ok(meshes>=24&&meshes<=140,`${kind} stays detailed but batched (${meshes} meshes)`);
+ }
+ assert.equal(new Set(Object.values(meshCounts)).size,4,'each chassis keeps its own silhouette');
+});
+test('software vehicles keep the compact shared hull with silhouette kits',t=>{
+ assert.equal(vehicleKitKind('puma'),null);
+ const puma=vehicleModel('puma',undefined,true);
+ assert.equal(puma.userData.kit,undefined,'the Puma keeps its pinned userData');
+ for(const kind of ['titan','scout','transport']){
+  const model=vehicleModel(kind,undefined,true);
   assert.equal(model.userData.kind,kind);
   assert.equal(model.userData.kit,kind);
   assert.equal(model.scale.x,1,'the shared hull is never scaled: seat offsets stay authoritative');
@@ -2160,16 +2179,8 @@ test('per-kind vehicles layer a silhouette kit over the shared Puma hull',t=>{
   const parts=[];model.traverse(n=>{if(n.userData?.vehicleKit===kind)parts.push(n);});
   assert.ok(parts.length>=8,`${kind} adds a readable kit (${parts.length} parts)`);
   assert.ok(parts.some(n=>n.material?.emissive&&n.material.emissive.getHex()!==0),`${kind} carries emissive accents`);
-  assert.equal(model.children.length,baseline+parts.length,`${kind} only adds kit parts to the hull`);
-  const geometries=new Set(),materials=new Set();
-  model.traverse(n=>{if(n.geometry)geometries.add(n.geometry);if(n.material)for(const m of Array.isArray(n.material)?n.material:[n.material])materials.add(m);});
-  for(const g of geometries)g.dispose();for(const m of materials)m.dispose();
  }
- const geometries=new Set(),materials=new Set();
- puma.traverse(n=>{if(n.geometry)geometries.add(n.geometry);if(n.material)for(const m of Array.isArray(n.material)?n.material:[n.material])materials.add(m);});
- for(const g of geometries)g.dispose();for(const m of materials)m.dispose();
 });
-
 test('partial prop damage stages the intact instance before the break',t=>{
  const build=()=>{
   const view=Object.assign(Object.create(ArenaView.prototype),{renderResources:new Set(),renderer:{isSoftware:false},scene:new T.Scene(),motionQuery:{matches:false},display:{...DEFAULT_DISPLAY}});
@@ -2395,4 +2406,160 @@ test('the living pass advances deterministic secondary motion and pitches the ri
  view._alignLivingCharacters(match);
  assert.equal(JSON.stringify([...antenna[0].rotation.toArray?.()??[antenna[0].rotation.x,antenna[0].rotation.z]]),dead,'a dead actor is never re-posed');
  view.disposeObject(model);
+});
+
+const markerHarness=(overrides={})=>Object.assign(Object.create(ArenaView.prototype),{
+ scene:new T.Scene(),renderer:{isSoftware:false},camera:new T.PerspectiveCamera(),
+ actorModels:new Map(),display:{...DEFAULT_DISPLAY},motionQuery:{matches:false},
+ playerId:7,manualFollowId:null,spectatorTarget:null,spectator:false,spectatorThird:false,
+ cinema:false,director:null,_killcam:null,_cameraOwner:'auto',_freeCam:false,freePose:{x:0,y:6,z:0,yaw:0,pitch:0},
+ ...overrides,
+});
+
+test('spectator and kill-cam markers track the follow target, stay static and dispose once',()=>{
+ const view=markerHarness();
+ const actors=[{id:2,team:0,health:100,x:3,y:0,z:-4},{id:5,team:1,health:100,x:-2,y:0,z:6}];
+ const match={time:1,actors};
+ assert.equal(view.followTargetId(),null,'nothing is followed by default');
+ assert.equal(view._updateFollowMarkers(match,false),0);
+ assert.equal(view.followMarkers,undefined,'no target means no pooled marker is allocated');
+ // Spectated actor.
+ const target=new T.Group();target.position.set(3,0,-4);view.actorModels.set(2,target);
+ view.spectator=true;view.setSpectatorTarget(2);
+ assert.equal(view.followTargetId(),2);
+ assert.equal(view._updateFollowMarkers(match,false),1);
+ const pool=view.followMarkers,slot=pool.byKey.get('follow');
+ assert.ok(slot?.group.visible,'the followed actor carries the marker');
+ assert.deepEqual(slot.group.position.toArray(),[3,0,-4]);
+ assert.equal(slot.material.depthTest,false,'the marker reads through geometry');
+ assert.equal(slot.group.userData.followMarker,true);
+ assert.equal(slot.chevron.visible,true);
+ assert.equal(slot.bracket.visible,false);
+ assert.equal(slot.material.color.getHexString(),FOLLOW_MARKER_COLOR.slice(1));
+ // The pulse is presentation-only and tracks time under normal motion.
+ const firstY=slot.chevron.position.y,firstScale=slot.ring.scale.x;
+ view._updateFollowMarkers({time:1.6,actors},false);
+ assert.notEqual(slot.chevron.position.y,firstY,'the chevron bobs under normal motion');
+ assert.notEqual(slot.ring.scale.x,firstScale,'the ring beats under normal motion');
+ // Reduced motion holds the marker static.
+ view._updateFollowMarkers({time:2.4,actors},true);
+ const heldY=slot.chevron.position.y,heldScale=slot.ring.scale.x;
+ view._updateFollowMarkers({time:3.1,actors},true);
+ assert.equal(slot.chevron.position.y,heldY,'reduced motion freezes the chevron');
+ assert.equal(slot.ring.scale.x,heldScale,'reduced motion freezes the ring beat');
+ // The CPU renderer gets the same geometry-only marker, statically.
+ view.renderer={isSoftware:true};
+ view._updateFollowMarkers({time:4.2,actors},false);
+ assert.equal(slot.material.depthTest,false);
+ assert.equal(slot.ring.scale.x,heldScale,'the CPU renderer keeps the marker static');
+ // Manual follow outranks the spectator target.
+ const mate=new T.Group();mate.position.set(-2,0,6);view.actorModels.set(5,mate);
+ view.setManualFollow(5);
+ assert.equal(view.followTargetId(),5);
+ view._updateFollowMarkers({time:4.5,actors},true);
+ assert.equal(pool.byKey.get('follow').group.position.x,-2);
+ view.clearManualFollow();
+ // The local spectate director's target while the cinema owns the camera.
+ view.spectator=false;view.setSpectatorTarget(null);view.cinema=true;view.director={targetId:2};
+ assert.equal(view.followTargetId(),2);
+ // Kill-cam killer bracket (nothing while no kill-cam is active).
+ view.cinema=false;view.director=null;
+ assert.equal(view._killcam,null,'no kill-cam by default');
+ view._killcam={start:0,duration:KILLCAM_DURATION,focus:{x:3,y:0,z:-4},killerId:5,seed:1};
+ assert.equal(view._updateFollowMarkers(match,false),1,'the killer arm survives without a followed actor');
+ const bracket=pool.byKey.get('killer');
+ assert.equal(bracket.bracket.visible,true);assert.equal(bracket.chevron.visible,false);
+ assert.equal(bracket.material.color.getHexString(),KILLER_MARKER_COLOR.slice(1));
+ view._killcam=null;
+ assert.equal(view._updateFollowMarkers(match,false),0,'an ended kill-cam leaves no bracket');
+ assert.ok(pool.slots.every(entry=>!entry.active&&!entry.group.visible));
+ // Bounded pool and exactly-once disposal.
+ const resources=new Set([pool.ringGeo,pool.chevronGeo,pool.bracketGeo]);for(const entry of pool.slots)resources.add(entry.material);
+ const counts=new Map();for(const resource of resources){counts.set(resource,0);resource.addEventListener('dispose',()=>counts.set(resource,counts.get(resource)+1));}
+ pool.dispose();
+ assert.ok([...counts.values()].every(count=>count===1),'marker resources dispose exactly once');
+ assert.equal(view.scene.children.length,0);
+});
+
+test('spectator markers clear when the match is replaced',()=>{
+ const view=markerHarness({mapId:'crosswire',worldGroup:new T.Group(),pickupModels:[],flagModels:new Map(),deployableModels:new Map(),vehicleModels:new Map(),deathContext:new Map(),hitFlinch:new Map(),characterLifecycle:{clear(){},release(){},state:()=> 'alive'}});
+ view.scene.add(view.worldGroup);
+ view.actorModels=new Map([[2,new T.Group()]]);
+ view.spectator=true;view.setSpectatorTarget(2);
+ assert.equal(view._updateFollowMarkers({time:1,actors:[{id:2,x:1,y:0,z:1,health:100}]},false),1);
+ assert.ok(view.followMarkers.byKey.size,'a marker is live before the next match');
+ view.setMatch({arena:{id:'crosswire'},actors:[],pickups:[],serial:0,time:0});
+ assert.equal(view.followMarkers.byKey.size,0,'a new match clears every marker');
+ assert.ok(view.followMarkers.slots.every(entry=>!entry.active&&!entry.group.visible));
+});
+
+test('the carrier banner toggles with the flag snapshot, tints by team and disposes with the model',()=>{
+ const view=Object.assign(Object.create(ArenaView.prototype),{scene:new T.Scene(),renderer:{isSoftware:false},display:{...DEFAULT_DISPLAY},motionQuery:{matches:false},actorModels:new Map()});
+ const carrier=new T.Group(),mate=new T.Group(),bystander=new T.Group();
+ view.actorModels.set(1,carrier);view.actorModels.set(2,mate);view.actorModels.set(3,bystander);
+ const match={time:1,actors:[{id:1,team:0,carryingFlag:true},{id:2,team:1},{id:3,team:0}],flags:[{team:1,carrier:2}]};
+ assert.equal(view._syncCarryBanners(match),2,'carryingFlag and the flag carrier id both raise a banner');
+ const banner=carrier.userData.carryBanner;
+ assert.ok(banner&&banner.visible&&banner.parent===carrier);
+ assert.equal(banner.userData.carryBanner,true);
+ assert.ok(banner.children.every(node=>!node.layers.isEnabled(0)&&node.layers.isEnabled(BOT_LAYER)),'the banner rides the actor layer');
+ assert.equal(banner.userData.material.color.getHexString(),view.objectiveColor(0,MAPS[0]).replace('#',''));
+ assert.equal(bystander.userData.carryBanner,undefined,'a non-carrier allocates no banner');
+ assert.equal(view._ensureCarryBanner(carrier),banner,'the banner is built once per model');
+ // A raw flag snapshot with only the carrier id still marks the actor.
+ assert.equal(view._syncCarryBanners({...match,flags:[{team:0,carrier:3}]}),2);
+ assert.equal(bystander.userData.carryBanner.visible,true,'the flag snapshot carrier id raises the banner');
+ assert.equal(mate.userData.carryBanner.visible,false,'a returned flag clears its carrier banner');
+ // Dropped/returned flags and a changed snapshot clear the banner next frame.
+ assert.equal(view._syncCarryBanners({time:2,actors:[{id:1,team:0,carryingFlag:false},{id:2,team:1},{id:3,team:0}],flags:[{team:0,carrier:null},{team:1,carrier:null}]}),0);
+ assert.equal(banner.visible,false,'a returned flag clears the banner');
+ assert.equal(bystander.userData.carryBanner.visible,false);
+ // Disposal with the model: the banner's own generated resources release once.
+ const resources=new Set();banner.traverse(node=>{if(node.geometry)resources.add(node.geometry);if(node.material)resources.add(node.material);});
+ const counts=new Map();for(const resource of resources){counts.set(resource,0);resource.addEventListener('dispose',()=>counts.set(resource,counts.get(resource)+1));}
+ view.disposeObject(carrier);
+ assert.ok([...counts.values()].every(count=>count===1),'banner geometry and material dispose exactly once');
+});
+
+test('the payload tick ring lights one tick per checkpoint and the state rings read contest, push and delivery',()=>{
+ const view=payloadView();
+ const payload={...rawPayload,distance:20,checkpoints:[{id:'cp1'},{id:'cp2'},{id:'cp3'}],checkpointsReached:2,pushing:0,contested:false,delivered:false};
+ view.updatePayloadModel({objectiveState:payload},payloadArena,0);
+ const pig=view.payloadModel,ticks=pig.userData.ticks,ring=pig.userData.ring;
+ assert.equal(ticks.children.length,6,'the tick ring keeps six fixed slots');
+ assert.equal(ticks.children.filter(tick=>tick.visible).length,3,'unused ticks stay hidden');
+ assert.equal(ticks.children.filter(tick=>tick.material!==pig.userData.tickPending).length,2,'one tick lights per banked checkpoint');
+ assert.ok(ticks.children.slice(0,2).every(tick=>tick.scale.x>1),'banked ticks read larger');
+ for(const tick of ticks.children.slice(0,3))assert.ok(Math.abs(Math.hypot(tick.position.x,tick.position.z)-1.5)<1e-9,'ticks ride the ground hoop');
+ assert.equal(pig.userData.payloadState,'pushing');
+ assert.ok(Math.abs(ring.scale.x-(1+.4*.2))<1e-9,'the ground hoop grows with banked progress');
+ assert.ok(Math.abs(pig.userData.halo.scale.x-1)<1e-9,'a pushed cart keeps the emblem steady');
+ // Contested: the hoop beats and the halo pulses.
+ view.updatePayloadModel({objectiveState:{...payload,contested:true}},payloadArena,.5);
+ assert.equal(pig.userData.payloadState,'contested');
+ const contestedScale=ring.scale.x;
+ view.updatePayloadModel({objectiveState:{...payload,contested:true}},payloadArena,1);
+ assert.notEqual(ring.scale.x,contestedScale,'a contest beats the ground hoop');
+ // Delivered: the emblem halo flares while the hoop holds.
+ view.updatePayloadModel({objectiveState:{...payload,contested:false,delivered:true}},payloadArena,1);
+ assert.equal(pig.userData.payloadState,'delivered');
+ assert.equal(pig.userData.halo.scale.x,1.3,'delivery flares the emblem');
+ // Reduced motion holds every ring and tick static.
+ const reduced=payloadView(true);
+ reduced.updatePayloadModel({objectiveState:{...payload,contested:true}},payloadArena,1);
+ const reducedRing=reduced.payloadModel.userData.ring.scale.x;
+ reduced.updatePayloadModel({objectiveState:{...payload,contested:true}},payloadArena,2);
+ assert.equal(reduced.payloadModel.userData.ring.scale.x,reducedRing);
+ assert.equal(reduced.payloadModel.userData.ring.rotation.z,0);
+ assert.equal(reduced.payloadModel.userData.halo.scale.x,1);
+ view.disposeObject(view.scene);reduced.disposeObject(reduced.scene);
+});
+
+test('dedicated vehicle models keep their authored ground and hover clearance',t=>{
+ const limits={titan:[-.1,.35],scout:[-.15,.15],transport:[-.15,.15],hornet:[-.7,.2]};
+ for(const [kind,[min,max]] of Object.entries(limits)){
+  const box=new T.Box3().setFromObject(vehicleModel(kind));
+  assert.ok(box.min.y>=min&&box.min.y<=max,`${kind} sits at the authored clearance (${box.min.y.toFixed(3)})`);
+  assert.ok(box.max.y>1,`${kind} keeps its height (${box.max.y.toFixed(2)})`);
+ }
 });

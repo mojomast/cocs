@@ -62,7 +62,7 @@ export function DemoControls({
    <button type="button" className="demo-option" aria-label="Ascend while held" title="Ascend while held (Space)" {...hold(1)}><ArrowUp size={13}/> ASCEND</button>
    <button type="button" className="demo-option" aria-label="Descend while held" title="Descend while held (Ctrl/C)" {...hold(-1)}><ArrowDown size={13}/> DESCEND</button>
    <button type="button" className="demo-option" onClick={()=>onSpeed(-1)} aria-label={`Slower: current speed ${freeSpeed}`} title="Slower"><Gauge size={13}/> −</button>
-   <span className="demo-controls__label" style={{minWidth:70}} aria-live="polite">{freeSpeed} u/s</span>
+   <span className="demo-controls__label" style={{minWidth:70}} role="group" aria-label={`Free roam speed ${freeSpeed} units per second`}>{freeSpeed} u/s</span>
    <button type="button" className="demo-option" onClick={()=>onSpeed(1)} aria-label={`Faster: current speed ${freeSpeed}`} title="Faster (hold Shift to boost)"><Gauge size={13}/> +</button>
    <button type="button" className="demo-option" onClick={onResetView} title="Reset the camera pose (R)">RESET VIEW</button>
   </div>}

@@ -7,6 +7,7 @@ import {mothIr,mothEchoMap,mothMotif} from './moth-assets.mjs';
 import {latticeSoundCue,createLatticeAudioState} from './lattice-feedback.mjs';
 import {deathPlan} from './deaths.mjs';
 import {createAnnouncerSelector} from './announcer-clips.mjs';
+import {strideFrequency,advancePhase} from './character-anim.mjs';
 
 // Per-space reverb wetness for the baked convolution IRs. `cavern` keeps the
 // historical .42; drier outdoor/tunnel responses sit lower, big interiors higher.
@@ -236,6 +237,13 @@ export const ANNOUNCE_CUES=Object.freeze({
  bounty:Object.freeze({id:'bounty',freq:580,mid:870,end:1160,length:.26}),
  'enemy-flank':Object.freeze({id:'enemy-flank',freq:940,mid:660,end:420,length:.22}),
  'enemy-artillery':Object.freeze({id:'enemy-artillery',freq:340,mid:280,end:220,length:.34}),
+ // Holdout / payload / flag callouts. The payload contest, flag pass and flag
+ // contest are discrete world beats and dispatch through the cadence-guarded
+ // announcer table; a repeating holdout progress tick stays motif-only.
+ 'holdout-progress':Object.freeze({id:'holdout-progress',freq:560,mid:700,end:840,length:.26}),
+ 'payload-contest':Object.freeze({id:'payload-contest',freq:420,mid:640,end:900,length:.3}),
+ 'flag-pass':Object.freeze({id:'flag-pass',freq:720,mid:900,end:1080,length:.22}),
+ 'flag-contest':Object.freeze({id:'flag-contest',freq:600,mid:420,end:300,length:.28}),
 });
 // Global cadence guard for the high-value announcer dispatch: after one callout
 // lands, no other high-value callout may start within this window. The
@@ -248,6 +256,7 @@ const HIGH_VALUE_ANNOUNCE=Object.freeze({
  'zone-capture':false,'objective-win':false,'sudden-death':false,'mission-won':false,'mission-lost':false,
  'horde-wave':false,'boss-phase':false,'vip-down':false,'vip-extracted':false,'payload-delivered':false,
  'juggernaut-transfer':false,'enemy-flank':false,'enemy-artillery':false,
+ 'payload-contest':false,'flag-pass':false,'flag-contest':false,
  'armsrace-promote':true,'armsrace-demote':true,'weapon-upgrade':true,bounty:true,
 });
 const cl=(n,a,b)=>Math.max(a,Math.min(b,n));
@@ -327,6 +336,9 @@ export function pickupCue(kind){
 
 // Final-ten-seconds tension pulse. One motif, one voice, fired once per match.
 const FINAL_CUE=objective([0,-1,0,-1],.1,.22,.075);
+// Record/personal-best fallback: a bright four-note rise that keeps the beat in
+// one `_beat` token only when the soundtrack cannot answer the `award` response.
+const RECORD_CUE=objective([0,7,12,19],.07,.2,.08,true);
 // Match-start FIGHT sting: a short major fanfare with a low impact body.
 const FIGHT_CUE=Object.freeze({notes:Object.freeze([0,7,12]),step:.16,length:.22,gain:.11});
 
@@ -378,7 +390,7 @@ const MOVEMENT_VERBS=new Set(['air-dash','double-jump','super-jump','hover-jets'
 // Match-beat motifs keyed by mode event type, in semitones from the mode root.
 // These cover objective ticks, wave/boss beats and lifetime events that used to
 // be silent. One motif is still one `_play` voice.
-const EVENT_CUES=Object.freeze({
+export const EVENT_CUES=Object.freeze({
  'zone-score':objective([0,4,7],.05,.16,.055),
  'zone-progress':objective([0,4],.05,.14,.045),
  'zone-contested':objective([0,-1,0],.07,.18,.05),
@@ -436,6 +448,13 @@ const EVENT_CUES=Object.freeze({
  'deployable-destroyed':objective([7,3,-2],.07,.2,.065),
  'deployable-repaired':objective([0,4,7],.05,.16,.05),
  'deployable-fire':objective([12,7],.04,.1,.045),
+ // Holdout / payload / flag beats the gameplay layer reports: one bounded
+ // motif each, world-scoped through the generic EVENT_CUES dispatch (the two
+ // contest rows also ride the cadence-guarded announcer table below).
+ 'holdout-progress':objective([0,5],.05,.14,.05),
+ 'payload-contest':objective([0,-1],.06,.18,.055),
+ 'flag-pass':objective([0,7],.04,.14,.06),
+ 'flag-contest':objective([0,-1,0],.07,.18,.055),
 });
 
 // Layered Web Audio synth: filtered noise transients + tonal bodies, distance
@@ -458,6 +477,11 @@ const PRECIP_BEDS=Object.freeze({
  ash:Object.freeze({kind:'ash',type:'lowpass',freq:640,q:.6,gain:.012}),
  snow:Object.freeze({kind:'snow',type:'highpass',freq:900,q:.4,gain:.007}),
 });
+// Continuous crowd/audience bed: one looped noise source through a bandpass
+// plus a slow gust LFO, on the ambience bus. The layer is always built with the
+// bed but parked at .0001 until `setCrowd` raises it, so a match with no crowd
+// sounds exactly like the historical bed. Frequencies/gains are presentation-only.
+const CROWD_BED=Object.freeze({freq:760,q:.6,gain:.03,gust:.011,gustFreq:.09});
 
 // Continuous engine timbres keyed by the snapshot vehicle `kind`. Every profile
 // keeps the same bounded parameter surface (two-oscillator body plus a filtered
@@ -612,8 +636,159 @@ const HARMONIC_RESPONSES=Object.freeze({
  'assault-sector-lost':'loss','vip-down':'loss','mission-lost':'loss','elimination-life':'loss',
 });
 
+// ---- Remote movement foley --------------------------------------------------
+//
+// Movement foley was local-only: a networked match never heard another actor's
+// footsteps or landings. This planner turns `opts.match.actors` (the snapshot
+// actor stream) into a bounded, deterministic step/landing plan using the same
+// stride cadence the character rig uses (`strideFrequency`/`advancePhase`).
+// It is pure: no AudioContext, no timers, no wall clock. `SynthAudio` owns one
+// instance and feeds each plan entry into `_footstep`/`_landing` with an
+// explicit `{pan,vol,seed,variant}` so local calls stay byte-identical.
+//
+// Determinism: one state per actor id (insertion-order map, cap 32, oldest
+// evicted) holding the accumulated stride phase, the last grounded flag/vy and
+// the last emission time. dt comes from the snapshot clock (`match.time`)
+// deltas, so a throttled renderer produces the same cadence as a smooth one.
+// Steps are paced by half-cycle crossings (~two per stride), capped at two
+// voices per frame and floored at ~0.12 s per actor.
+export const REMOTE_FOLEY=Object.freeze({cap:32,minCadence:.12,gate:20,maxSteps:2,maxSpeed:8});
+export class RemoteStepPlanner{
+ constructor({cap=REMOTE_FOLEY.cap,minCadence=REMOTE_FOLEY.minCadence,gate=REMOTE_FOLEY.gate,maxSteps=REMOTE_FOLEY.maxSteps,maxSpeed=REMOTE_FOLEY.maxSpeed}={}){
+  this.cap=Math.max(1,Math.round(Number(cap)||REMOTE_FOLEY.cap));
+  this.minCadence=Math.max(0,Number(minCadence)||0);
+  this.gate=Math.max(1,Number(gate)||REMOTE_FOLEY.gate);
+  this.maxSteps=Math.max(1,Math.round(Number(maxSteps)||REMOTE_FOLEY.maxSteps));
+  this.maxSpeed=Math.max(.001,Number(maxSpeed)||REMOTE_FOLEY.maxSpeed);
+  this.states=new Map();
+ }
+ reset(){this.states.clear();}
+ // Access refreshes recency; a new actor is inserted and the oldest entry is
+ // evicted once the map is over `cap`, so a large snapshot stays bounded.
+ _state(id){
+  const state=this.states.get(id);
+  if(state){this.states.delete(id);this.states.set(id,state);return state;}
+  const fresh={id,phase:0,grounded:true,lastTime:null,lastVy:0,lastEmit:-Infinity,steps:0};
+  this.states.set(id,fresh);
+  while(this.states.size>this.cap)this.states.delete(this.states.keys().next().value);
+  return fresh;
+ }
+ // Plan one frame of remote foley. Returns `{id,kind,pan,vol,seed,variant,speed,
+ // impact,weapon}` entries where `kind` is 'step' or 'landing'. The listener is
+ // read for x/z/yaw only, so this stays pure and testable without a context.
+ plan(actors,{time=null,dt=0,listener=null,localId=null,maxSteps=this.maxSteps}={}){
+  const out=[];
+  if(!Array.isArray(actors)||!actors.length)return out;
+  const now=Number.isFinite(Number(time))?Number(time):null;
+  const frameDt=cl(Number(dt)||0,0,.1);
+  const cap=Math.max(0,Math.min(this.maxSteps,Math.round(Number(maxSteps)||this.maxSteps)));
+  const lx=Number(listener?.x),lz=Number(listener?.z),lyaw=Number(listener?.yaw)||0;
+  const haveListener=Number.isFinite(lx)&&Number.isFinite(lz);
+  const candidates=[];
+  for(const actor of actors){
+   if(!actor||actor.id==null||actor.id===localId)continue;
+   const health=Number(actor.health);
+   if(Number.isFinite(health)&&health<=0)continue;
+   if(actor.vehicleId!=null)continue;
+   if(!Number.isFinite(Number(actor.x))||!Number.isFinite(Number(actor.z)))continue;
+   candidates.push(actor);
+  }
+  candidates.sort((a,b)=>(a.id<b.id?-1:a.id>b.id?1:0));
+  let steps=0,landings=0;
+  for(const actor of candidates){
+   const state=this._state(actor.id);
+   const grounded=actor.grounded!==false;
+   const speed=Math.hypot(Number(actor.vx)||0,Number(actor.vz)||0);
+   const speedNorm=cl(speed/this.maxSpeed,0,1);
+   const stepDt=now!=null&&state.lastTime!=null?cl(now-state.lastTime,0,.1):frameDt;
+   const wasGrounded=state.grounded,prevVy=state.lastVy;
+   state.grounded=grounded;state.lastVy=Number(actor.vy)||0;
+   state.lastTime=now!=null?now:(state.lastTime!=null?state.lastTime+stepDt:stepDt);
+   // Pan and attenuation are shared by this actor's step and landing. The gate
+   // keeps a distant crowd from stacking voices; inaudible actors still have
+   // their phase/time state advanced so re-entering earshot does not burst.
+   let pan=0,vol=1;
+   if(haveListener){
+    const dx=Number(actor.x)-lx,dz=Number(actor.z)-lz,dist=Math.hypot(dx,dz);
+    vol=cl(1-dist/this.gate,0,1);
+    if(dist>1e-9)pan=cl((dx*Math.cos(lyaw)+dz*-Math.sin(lyaw))/dist*.9,-1,1)||0;
+   }
+   if(vol<=.02)continue;
+   if(grounded&&speed>1.4){
+    const before=state.phase;
+    const after=advancePhase(before,speedNorm,stepDt,true);
+    state.phase=after;
+    let crossings=Math.floor(after/Math.PI)-Math.floor(before/Math.PI);
+    if(after<before)crossings+=2;
+    if(crossings>0){
+     // Never faster than the half-stride cadence for this speed (so the plan is
+     // frame-rate independent) and never faster than the per-actor floor.
+     const frequency=strideFrequency(speedNorm,true),floor=Math.max(this.minCadence,frequency>0?.55/(frequency*2):0);
+     if(now==null||!Number.isFinite(state.lastEmit)||now-state.lastEmit>=floor){
+      for(let i=0;i<crossings&&steps<cap;i++){
+       steps++;state.steps++;state.lastEmit=now!=null?now:state.lastEmit+floor;
+       out.push({id:actor.id,kind:'step',pan,vol,speed,weapon:actor.weapon,variant:state.steps%3,seed:(Math.imul((Number(actor.id)||0)>>>0,2654435761)+Math.imul(state.steps,40503))>>>0});
+      }
+     }
+    }
+   }else{
+    state.phase=0;
+   }
+   if(wasGrounded===false&&grounded&&landings<cap){
+    const impact=cl(Math.abs(prevVy)/13,0,1);
+    if(impact>.12){
+     landings++;
+     state.lastEmit=now!=null?now:(Number.isFinite(state.lastEmit)?state.lastEmit+this.minCadence:0);
+     out.push({id:actor.id,kind:'landing',pan,vol,impact,weapon:actor.weapon,variant:state.steps%3,seed:(Math.imul((Number(actor.id)||0)>>>0,2246822519)+Math.imul(state.steps+97,40503))>>>0});
+    }
+   }
+  }
+  return out;
+ }
+}
+
+// ---- Crowd ambience ---------------------------------------------------------
+//
+// Pure 0..1 excitement level for the continuous crowd bed: nearby vehicles keep
+// an ambient audience murmur, the race/soccer phase swells it and the leader's
+// progress drives it toward the finish. Reads the live Match (raw `race.racers`)
+// and the snapshot (`race.standings`) defensively; missing objects stay silent.
+export function crowdLevel(match,player=null,vehicles=null){
+ if(!match||typeof match!=='object')return 0;
+ const race=match.race&&typeof match.race==='object'?match.race:(match.soccer&&typeof match.soccer==='object'?match.soccer:null);
+ let level=0;
+ // Nearby vehicles: a busy stretch of track/road reads as a crowd hum. The
+ // local player's own vehicle is excluded — that is engine foley, not audience.
+ const list=Array.isArray(vehicles)?vehicles:null;
+ if(list&&player&&Number.isFinite(player.x)&&Number.isFinite(player.z)){
+  let near=0;
+  for(const vehicle of list){
+   if(!vehicle||vehicle.id===player.vehicleId||vehicle.driver===player.id)continue;
+   const x=Number(vehicle.x??vehicle.position?.x),z=Number(vehicle.z??vehicle.position?.z);
+   if(!Number.isFinite(x)||!Number.isFinite(z))continue;
+   if(Math.hypot(x-player.x,z-player.z)<=28)near++;
+  }
+  level+=Math.min(.36,near*.09);
+ }
+ const phase=String(race?.phase??'');
+ if(phase==='racing'||phase==='playing'){
+  level+=.4;
+  const standings=Array.isArray(race.standings)?race.standings:(Array.isArray(race.racers)?race.racers:null);
+  const leader=standings&&standings.length?standings[0]:null;
+  if(leader){
+   const laps=Math.max(1,Number(race.laps)||1);
+   const completed=Number(leader.completedLaps),goals=Number(leader.goals);
+   if(Number.isFinite(completed))level+=.25*cl(completed/laps,0,1);
+   else if(Number.isFinite(goals))level+=.25*cl(goals/Math.max(1,Number(race.goalLimit)||1),0,1);
+   else if(Number.isFinite(Number(leader.progress)))level+=.25*cl(Number(leader.progress)/(laps*8),0,1);
+  }
+ }else if(phase==='countdown'||phase==='kickoff')level+=.3;
+ else if(phase==='over')level+=.18;
+ return cl(level,0,1);
+}
+
 export class SynthAudio{
- constructor({announcer=false}={}){this.ctx=null;this.muted=false;this.voices=new Set();this.noiseBuffer=null;this.master=null;this.lastDamage=null;this.lastReport=null;this.lastHit=-Infinity;this.footPhase=0;this.wasGrounded=undefined;this.lastVy=0;this.engine=null;this.zipLoop=null;this.bed=null;this.bedMood='default';this.ambientBed=true;this.stepVariant=0;this.landVariant=0;this.reloadVariant=0;this.intensity=0;this.bedScale=.75;this.musicEnabled=true;this.announcer=announcer===true;this.announced=new Set();this.lastCue=null;this.mode='default';this.theme=MODE_THEMES.default;this.soundtrack='default';this.reverbUrl=null;this.reverbWet=0.30;this.reverbLoaded=false;this.reverbSpace=null;this.lastSting=null;this.heartbeatTimer=0;this.reportSerial=0;this.space=null;this.surfaceResolver=null;this.windScale=null;this._reverbPending=false;this.jumpVariant=0;
+ constructor({announcer=false}={}){this.ctx=null;this.muted=false;this.voices=new Set();this.noiseBuffer=null;this.master=null;this.lastDamage=null;this.lastReport=null;this.lastHit=-Infinity;this.footPhase=0;this.wasGrounded=undefined;this.lastVy=0;this.engine=null;this.zipLoop=null;this.bed=null;this.bedMood='default';this.ambientBed=true;this.stepVariant=0;this.landVariant=0;this.reloadVariant=0;this.intensity=0;this.bedScale=.75;this.musicEnabled=true;this.crowdLevel=0;this.remoteSteps=new RemoteStepPlanner();this.announcer=announcer===true;this.announced=new Set();this.lastCue=null;this.mode='default';this.theme=MODE_THEMES.default;this.soundtrack='default';this.reverbUrl=null;this.reverbWet=0.30;this.reverbLoaded=false;this.reverbSpace=null;this.lastSting=null;this.heartbeatTimer=0;this.reportSerial=0;this.space=null;this.surfaceResolver=null;this.windScale=null;this._reverbPending=false;this.jumpVariant=0;
   // Gain buses. `muteGain` sits between the master and the destination so a
   // master mute silences every branch immediately; music/effects/ambience each
   // have their own bus for independent volume control. Voice chat lives in
@@ -660,6 +835,9 @@ export class SynthAudio{
   // host's snapshot or the event stream, never by a page timer, and each key is
   // idempotent so a reconnect or replay cannot double-fire.
   this._matchLive=false;this._matchKey=null;this._countdown={phase:null,beat:0};this._finalWarned=false;
+  // Last record id announced through noteRecord(), so a snapshot-driven host can
+  // call it every frame without repeating the award sting for the same best.
+  this._recordKey=null;
   // Bounded state for the throttled LATTICE HQ warning and the KOTH/domination
   // progress quantizer. Both maps are pruned oldest-first.
   this._latticeAudioState=createLatticeAudioState();this._zoneAudio=new Map();
@@ -679,8 +857,9 @@ export class SynthAudio{
   // palette selected. Pure state, applied by the engine's scheduler only.
   this.tension=0;this.escalation=0;this._lowHealthTension=0;
   // Last seeded-variation request (string key or integer id); re-applied when a
-  // deferred music engine is built on the first user gesture.
-  this.variationKey=null;
+  // deferred music engine is built on the first user gesture. `menuTab` is the
+  // same idea for the menu-only ornament seed.
+  this.variationKey=null;this.menuTab=null;
   // Bounded per-event-id dedupe for the event-driven music hooks, so a replayed
   // or repeated event can never fire the accent/escalation twice.
   this._musicBeats=new Set();
@@ -890,7 +1069,7 @@ export class SynthAudio{
   this._applyEchoMap();
   try{this.musicEngine=new MusicEngine({ctx,destination:this.musicBus,theme:this.theme,noiseBuffer:this.noiseBuffer,seed:(Date.now()&0xffff)||1});}
   catch{this.musicEngine=null;}
-  if(this.musicEngine){this.musicEngine.setEnabled(this.musicEnabled);this.musicEngine.setMuted(this.muted);this.musicEngine.setScene(this.scene);this.musicEngine.setSoundtrack(this.soundtrack||'default');this.musicEngine.setPalette?.(this.mode);this.musicEngine.setBiomePalette?.(this.bedMood);this.musicEngine.setTension?.(this.tension);this.musicEngine.setEscalation?.(this.escalation);if(this.variationKey!=null)this.musicEngine.setVariation?.(this.variationKey);}
+  if(this.musicEngine){this.musicEngine.setEnabled(this.musicEnabled);this.musicEngine.setMuted(this.muted);this.musicEngine.setScene(this.scene);this.musicEngine.setSoundtrack(this.soundtrack||'default');this.musicEngine.setPalette?.(this.mode);this.musicEngine.setBiomePalette?.(this.bedMood);this.musicEngine.setTension?.(this.tension);this.musicEngine.setEscalation?.(this.escalation);if(this.variationKey!=null)this.musicEngine.setVariation?.(this.variationKey);if(this.menuTab!=null)this.musicEngine.setMenuTab?.(this.menuTab);}
   // The context and buses now exist, so a deferred Moth layer can be built and
   // attached. Idempotent: the factory is consumed on first success.
   this._ensureMothAudio();
@@ -1045,7 +1224,7 @@ export class SynthAudio{
   // A new match releases any stale victory/defeat outcome so the fresh round
   // starts from the mode motif instead of the previous round's take.
   if(this.musicEngine?.outcome)this.setOutcome(null);
-  this._matchLive=true;this._matchKey=key;this._finalWarned=false;this._countdown={phase:null,beat:0};
+  this._matchLive=true;this._matchKey=key;this._finalWarned=false;this._countdown={phase:null,beat:0};this._recordKey=null;
   // A fresh match starts from rest: release any danger/escalation state and the
   // per-event music dedupe so a rematch can voice its hooks again.
   this.setTension(0);this.setEscalation(0);this._musicBeats.clear();
@@ -1176,14 +1355,16 @@ export class SynthAudio{
    const osc=this.ctx.createOscillator();osc.type='sine';osc.frequency.value=profile.tone;
    const og=this.ctx.createGain();og.gain.value=.0001;
    src.connect(f);f.connect(g);g.connect(this.ambienceBus||this.master);osc.connect(og);og.connect(this.ambienceBus||this.master);
-   // Wind bed (bandpassed noise plus a slow gust LFO) and tension drone
-   // (triangle whose gain follows combat intensity). Both are continuous and
-   // bounded: two sources, one LFO and three gains, torn down with the bed.
-   const wind=this._windLayer(profile),tense=this._tensionLayer(profile);
+   // Wind bed (bandpassed noise plus a slow gust LFO), tension drone (triangle
+   // whose gain follows combat intensity) and crowd layer (bandpassed noise plus
+   // a slow gust LFO, parked silent until setCrowd raises it). All are
+   // continuous and bounded: sources, LFOs and gains torn down with the bed.
+   const wind=this._windLayer(profile),tense=this._tensionLayer(profile),crowd=this._crowdLayer(profile);
    if(wind)wind.windG.gain.setTargetAtTime((profile.air||0)*this._windScale(profile),t,1);
    if(tense)tense.tenseG.gain.setTargetAtTime((profile.tense||0)*this.intensity*this.intensity,t,1);
+   if(crowd)crowd.crowdG.gain.setTargetAtTime(this._crowdGain(this.crowdLevel),t,1);
    src.start();osc.start();g.gain.setTargetAtTime(profile.gain,t,.8);og.gain.setTargetAtTime(profile.sub,t,.9);
-   this.bed=Object.assign({src,f,g,osc,og},wind||{},tense||{});
+   this.bed=Object.assign({src,f,g,osc,og},wind||{},tense||{},crowd||{});
   }else if(!on&&this.bed){
    for(const node of Object.values(this.bed)){if(node&&typeof node.stop==='function')try{node.stop();}catch{}if(node&&typeof node.disconnect==='function')try{node.disconnect();}catch{}}
    this.bed=null;
@@ -1203,6 +1384,37 @@ export class SynthAudio{
   }
   src.start();
   return {windSrc:src,windF:f,windG:g,windLfo:lfo,windLfoGain:lfoGain};
+ }
+ // Continuous crowd/audience layer: looped noise -> bandpass -> gain plus a slow
+ // gust LFO, on the ambience bus. Built with every bed but parked at .0001 until
+ // setCrowd() raises it, so default matches (and tests) hear exactly the old bed.
+ // The bed mood may scale the band through its optional `crowd` scalar.
+ _crowdLayer(profile){
+  if(typeof this.ctx.createBufferSource!=='function')return null;
+  const mood=cl(Number(profile?.crowd)||1,0,2);
+  const src=this.ctx.createBufferSource();src.buffer=this.noiseBuffer;src.loop=true;
+  const f=this.ctx.createBiquadFilter();f.type='bandpass';f.frequency.value=CROWD_BED.freq*mood;f.Q.value=CROWD_BED.q;
+  const g=this.ctx.createGain();g.gain.value=.0001;
+  src.connect(f);f.connect(g);g.connect(this.ambienceBus||this.master);
+  let lfo=null,lfoGain=null;
+  if(typeof this.ctx.createOscillator==='function'){
+   lfo=this.ctx.createOscillator();lfo.type='sine';lfo.frequency.value=CROWD_BED.gustFreq;
+   lfoGain=this.ctx.createGain();lfoGain.gain.value=CROWD_BED.gust;
+   lfo.connect(lfoGain);lfoGain.connect(g.gain);lfo.start();
+  }
+  src.start();
+  return {crowdSrc:src,crowdF:f,crowdG:g,crowdLfo:lfo,crowdLfoGain:lfoGain};
+ }
+ _crowdGain(level){return Math.max(.0001,CROWD_BED.gain*cl(Number(level)||0,0,1)*(.7+.3*this.bedScale));}
+ // Optional crowd override (0..1). Remembered while the bed is down and eased
+ // on the running layer with setTargetAtTime; zero parks the gain at .0001.
+ setCrowd(level){
+  const value=cl(Number(level)||0,0,1);
+  if(value===this.crowdLevel)return this.crowdLevel;
+  this.crowdLevel=value;
+  if(!this.bed||!this.ctx)return this.crowdLevel;
+  try{this.bed.crowdG?.gain.setTargetAtTime(this._crowdGain(value),this.ctx.currentTime||0,.8);}catch{}
+  return this.crowdLevel;
  }
  _tensionLayer(profile){
   if(typeof this.ctx.createOscillator!=='function')return null;
@@ -1266,6 +1478,7 @@ export class SynthAudio{
    if(this.bed.windG)this.bed.windG.gain.setTargetAtTime((profile.air||0)*this._windScale(profile)*(.5+this.bedScale*.5),t,1.4);
    if(this.bed.tenseOsc)this.bed.tenseOsc.frequency.setTargetAtTime(profile.tenseFreq||58,t,1.4);
    if(this.bed.tenseG)this.bed.tenseG.gain.setTargetAtTime((profile.tense||0)*this.intensity*this.intensity,t,1.2);
+   if(this.bed.crowdG)this.bed.crowdG.gain.setTargetAtTime(this._crowdGain(this.crowdLevel),t,1.4);
   }catch{}
   return this.bedMood;
  }
@@ -1338,7 +1551,7 @@ export class SynthAudio{
   this.musicEngine?.setScene(this.scene==='menu'?'menu':this.scene==='results'?'results':(next>=.34?'combat':'explore'));
   this.mothAudio?.setIntensity?.(next);
   this.bedScale=.55+next*.55;
-  if(this.ctx&&this.bed){const profile=BED_MOODS[this.bedMood]||BED_MOODS.default,t=this.ctx.currentTime;try{this.bed.g.gain.setTargetAtTime(profile.gain*this.bedScale,t,.5);this.bed.og.gain.setTargetAtTime(profile.sub*this.bedScale,t,.55);}catch{}try{if(this.bed.windG)this.bed.windG.gain.setTargetAtTime((profile.air||0)*this._windScale(profile)*(.5+this.bedScale*.5),t,.6);if(this.bed.tenseG)this.bed.tenseG.gain.setTargetAtTime((profile.tense||0)*next*next,t,.7);}catch{}}
+  if(this.ctx&&this.bed){const profile=BED_MOODS[this.bedMood]||BED_MOODS.default,t=this.ctx.currentTime;try{this.bed.g.gain.setTargetAtTime(profile.gain*this.bedScale,t,.5);this.bed.og.gain.setTargetAtTime(profile.sub*this.bedScale,t,.55);}catch{}try{if(this.bed.windG)this.bed.windG.gain.setTargetAtTime((profile.air||0)*this._windScale(profile)*(.5+this.bedScale*.5),t,.6);if(this.bed.tenseG)this.bed.tenseG.gain.setTargetAtTime((profile.tense||0)*next*next,t,.7);if(this.bed.crowdG)this.bed.crowdG.gain.setTargetAtTime(this._crowdGain(this.crowdLevel),t,.6);}catch{}}
   return this.intensity;
  }
  // Dynamic music state (forwarded to the soundtrack and applied only by the
@@ -1363,6 +1576,15 @@ export class SynthAudio{
  setVariation(key){
   this.variationKey=key==null?null:key;
   return this.musicEngine?.setVariation?.(key)??0;
+ }
+ // Optional menu-tab ornament seed, forwarded to the tested
+ // MusicEngine.setMenuTab. Menu scene only: it changes ornamental note choice,
+ // never the theme, arrangement or timbre. Safe before the deferred engine
+ // exists — the tab is remembered and re-applied in `_ensureBuses`.
+ setMenuTab(tab){
+  this.menuTab=typeof tab==='string'&&tab.length?tab:null;
+  this._ensureBuses();
+  return this.musicEngine?.setMenuTab?.(this.menuTab)??0;
  }
  // True when the soundtrack can answer a beat right now (built, enabled and
  // unmuted). The single-owner rule routes a beat to the music only when this is
@@ -1413,6 +1635,10 @@ export class SynthAudio{
    this._noise(t+.02,out,nodes,{duration:.32,gain:outcome==='victory'?.07:.055,type:'highpass',freq:2800,sweep:1200,q:.6,attack:.02});
   },{send:.28});
   this.lastSting=outcome;
+  // The announcer takes the result callout when enabled: one voice per beat
+  // (the per-cue cooldown swallows a repeated sting). The procedural callout
+  // complements the sting motif; a sampled take replaces it once decoded.
+  if(this.announcer===true)this.announcerCue(outcome);
   // Duck the soundtrack under the sting so the result reads clearly, then ease
   // it back. The timer is cleared on disposal so it cannot outlive the engine.
   // The soundtrack also moves to the results scene, where the baked victory or
@@ -1425,6 +1651,26 @@ export class SynthAudio{
   if(this._stingDuckTimer)clearTimeout(this._stingDuckTimer);
   this._stingDuckTimer=setTimeout(()=>{this._stingDuckTimer=null;this.musicEngine?.setDuck(0);},1400);
   return {outcome,played:true};
+ }
+ // Personal-best / record sting. The soundtrack owns the beat when it can
+ // answer: one queued `award` response on the next music step and no motif
+ // stacked under it (the single-owner rule, same as finalSecondsWarning). With
+ // music off, muted or unavailable the bounded RECORD_CUE keeps the beat in one
+ // voice token. Returns `{played,music}`.
+ recordSting(){
+  if(!this.ctx||this.muted)return {played:false,music:false};
+  const owned=this._musicResponse('award',{vol:1});
+  if(!owned)this._beat(RECORD_CUE,0,1,.28);
+  return {played:true,music:owned};
+ }
+ // Host-facing personal-best hook: pass the record's identity (or call every
+ // frame with the same key) and the same record never rings twice. A new key —
+ // a genuine new personal best — rings again. Re-armed by a fresh match.
+ noteRecord(key='personal-best'){
+  const id=key==null?'personal-best':String(key);
+  if(this._recordKey===id)return {played:false,deduped:true};
+  this._recordKey=id;
+  return {...this.recordSting(),key:id};
  }
  setAnnouncer(on){this.announcer=on===true;if(this.announcer&&this.ctx)this.loadAnnouncerPack();return this.announcer;}
  // Music on/off is independent of the global mute: disabling it silences and
@@ -1900,20 +2146,30 @@ export class SynthAudio{
   // Landing thump scaled by impact speed and surface. The variant shifts the
   // body tone so repeated jumps do not phase into one sample; default surface
   // numbers are unchanged from phase 1.
-  _landing(impact,weapon,surface){
-  this.landVariant=(this.landVariant+1)%3;
+  _landing(impact,weapon,surface,opts=null){
+  const override=opts&&Number.isFinite(Number(opts.variant))?((Math.trunc(Number(opts.variant))%3)+3)%3:null;
+  const variant=override??(this.landVariant=(this.landVariant+1)%3);
+  const pan=opts?cl(Number(opts.pan)||0,-1,1):0;
+  const level=opts&&Number.isFinite(Number(opts.vol))?cl(Number(opts.vol),0,1):1;
   const sp=footstepProfile(surface),heavy=(WEAPONS[weapon]?.feel?.kick?.[2]??16)<12;
-  this._play(.14,0,(t,out,nodes)=>{this._noise(t,out,nodes,{duration:.1,gain:(.05+.16*impact)*sp.gain,type:'lowpass',freq:420*sp.bright,sweep:160,q:.8*sp.q});this._tone(t,out,nodes,{freq:((heavy?76:90)+this.landVariant*8)*sp.body,duration:.12,type:'sine',gain:.05+.1*impact,end:45});if(sp.ring)this._tone(t+.01,out,nodes,{freq:sp.ring,duration:.1,type:'triangle',gain:.03+.04*impact,end:sp.ring*.5});if(sp.splash)this._noise(t+.015,out,nodes,{duration:.08,gain:(.04+.1*impact)*sp.gain,type:'bandpass',freq:1400,sweep:420,q:.7});});
+  this._play(.14,pan,(t,out,nodes)=>{this._noise(t,out,nodes,{duration:.1,gain:(.05+.16*impact)*sp.gain*level,type:'lowpass',freq:420*sp.bright,sweep:160,q:.8*sp.q});this._tone(t,out,nodes,{freq:((heavy?76:90)+variant*8)*sp.body,duration:.12,type:'sine',gain:(.05+.1*impact)*level,end:45});if(sp.ring)this._tone(t+.01,out,nodes,{freq:sp.ring,duration:.1,type:'triangle',gain:(.03+.04*impact)*level,end:sp.ring*.5});if(sp.splash)this._noise(t+.015,out,nodes,{duration:.08,gain:(.04+.1*impact)*sp.gain*level,type:'bandpass',freq:1400,sweep:420,q:.7});});
  }
  // Footstep variant selection rotates deterministically per step; the weapon
  // family biases the frequency and the surface profile shapes the band, body
  // and optional ring/debris layers so metal, wood, sand etc. read distinctly.
- _footstep(speed,weapon,surface){
-  this.stepVariant=(this.stepVariant+1)%3;
-  const sp=footstepProfile(surface),heavy=(WEAPONS[weapon]?.feel?.kick?.[2]??16)<12,vol=Math.min(.13*sp.gain,(.03+speed*.012)*sp.gain);
-  this._play(.09,0,(t,out,nodes)=>{
-   this._noise(t,out,nodes,{duration:.06,gain:vol,type:'lowpass',freq:((heavy?620:800)*sp.bright)+this.stepVariant*90+Math.min(700,speed*45),sweep:360,q:.9*sp.q});
-   this._tone(t,out,nodes,{freq:((heavy?90:110)*sp.body)+this.stepVariant*10,duration:.05,type:'sine',gain:vol*.5,end:60});
+ // The optional `{pan,vol,seed,variant}` surface (remote actors) substitutes a
+ // deterministic variant/seed and a distance level; local callers omit it and
+ // stay byte-identical, including the shared variant rotation.
+ _footstep(speed,weapon,surface,opts=null){
+  const override=opts&&Number.isFinite(Number(opts.variant))?((Math.trunc(Number(opts.variant))%3)+3)%3:null;
+  const variant=override??(this.stepVariant=(this.stepVariant+1)%3);
+  const pan=opts?cl(Number(opts.pan)||0,-1,1):0;
+  const level=opts&&Number.isFinite(Number(opts.vol))?cl(Number(opts.vol),0,1):1;
+  const pitch=opts&&opts.seed!=null?1+(mixUnit((Number(opts.seed)>>>0)^0x9e3779b9)-.5)*.12:1;
+  const sp=footstepProfile(surface),heavy=(WEAPONS[weapon]?.feel?.kick?.[2]??16)<12,vol=Math.min(.13*sp.gain,(.03+speed*.012)*sp.gain)*level;
+  this._play(.09,pan,(t,out,nodes)=>{
+   this._noise(t,out,nodes,{duration:.06,gain:vol,type:'lowpass',freq:(((heavy?620:800)*sp.bright)+variant*90+Math.min(700,speed*45))*pitch,sweep:360,q:.9*sp.q});
+   this._tone(t,out,nodes,{freq:(((heavy?90:110)*sp.body)+variant*10)*pitch,duration:.05,type:'sine',gain:vol*.5,end:60});
    if(sp.ring)this._tone(t+.008,out,nodes,{freq:sp.ring,duration:.07,type:'triangle',gain:vol*.5,end:sp.ring*.6});
    if(sp.splash)this._noise(t+.012,out,nodes,{duration:.07,gain:vol*.8,type:'bandpass',freq:1500,sweep:520,q:.7});
    const scatter=Math.min(3,Math.round(sp.scatter||0));
@@ -2204,7 +2460,9 @@ export class SynthAudio{
   if(e.type==='spawn'){if(local)this._spawnBoot();return;}
   // Per-kind pickup identity: health/armor/ammo/weapon each get their own motif.
   if(e.type==='pickup'){if(local)this._beat(pickupCue(e.kind),pan,1,.25);return;}
-  if(e.type==='powerup'||e.type.startsWith('flag')){if(!local&&e.type!=='flag-pickup'&&e.type!=='flag-drop'&&e.type!=='flag-return')return;this._beat(objectiveCue(e.type),pan,1,.25);return;}
+  // Legacy flag/powerup branch: only the historical types are voiced here; the
+  // pass/contest beats fall through to the world-scoped EVENT_CUES dispatch.
+  if(e.type==='powerup'||e.type==='flag-pickup'||e.type==='flag-drop'||e.type==='flag-return'){if(!local&&e.type!=='flag-pickup'&&e.type!=='flag-drop'&&e.type!=='flag-return')return;this._beat(objectiveCue(e.type),pan,1,.25);return;}
   // KOTH/domination progress is quantized to 25% buckets plus contested/owner
   // flips keyed per zone; a repeated tick is silent.
   if(e.type==='zone-progress'){const cue=this._zoneProgress(e);if(!cue)return;const vol=local?1:(pos?Math.max(.2,this._falloff(pos,player,44)):.9);this._beat(cue,pan,vol,.24);return;}
@@ -2478,6 +2736,11 @@ export class SynthAudio{
     }else this.footPhase=0;
   }else this.footPhase=0;
   this.wasSliding=Boolean(player.sliding&&player.grounded&&speed>2&&player.health>0&&player.vehicleId==null);
+  // Remote actor movement foley: the same snapshot that drives the engine also
+  // carries every other actor's velocity/grounded state. Local-only movement
+  // was the last silent hole in a networked match; the plan is one step per
+  // stride half-cycle plus landings, panned/attenuated and never priority.
+  if(opts&&opts.match)this._remoteMovement(opts.match,player,dt);
   const isLowHealth=Boolean(player.health>0&&player.health<=(player.maxHealth??100)*.28&&player.vehicleId==null&&!this.muted);
   if(isLowHealth){
     const entry=!this.wasLowHealth;
@@ -2520,7 +2783,27 @@ export class SynthAudio{
   this._engine(vehicle?Math.hypot(vx,vz):0,Boolean(vehicle),boosting,engineKind);
   this._skidLoop(Boolean(vehicle&&engineKind==='puma'&&Math.abs(lateral)>1.1),Math.abs(lateral),engineKind);
   const ride=player.zipRide;
-  this._zipLoop(Boolean(ride&&player.vehicleId==null&&player.health>0),ride?Math.max(1,Number(ride.speed)||9):9);}
+  this._zipLoop(Boolean(ride&&player.vehicleId==null&&player.health>0),ride?Math.max(1,Number(ride.speed)||9):9);
+  // Race/soccer crowd ambience: nearby vehicles keep a murmur, the phase and
+  // leader progress swell it. No match (menus, tests) computes a zero level,
+  // which parks the crowd layer at .0001 and leaves the bed untouched.
+  this.setCrowd(crowdLevel(opts?.match??null,player,vehicles));}
+ // Remote movement dispatch: plan from the snapshot actor stream, then voice
+ // each entry through the extended footstep/landing foley. Missing/short actor
+ // arrays are a no-op; the planner owns all bounded state (cap 32, 2 steps per
+ // frame, ~0.12 s per-actor cadence) and never requests a priority voice.
+ _remoteMovement(match,player,dt=0){
+  const actors=match&&Array.isArray(match.actors)?match.actors:null;
+  if(!actors||!actors.length)return 0;
+  const time=Number(match.time);
+  this.remoteSteps??=new RemoteStepPlanner();
+  const plans=this.remoteSteps.plan(actors,{time:Number.isFinite(time)?time:null,dt,listener:player,localId:player?.id??null});
+  for(const plan of plans){
+   if(plan.kind==='landing')this._landing(plan.impact,plan.weapon??0,null,plan);
+   else this._footstep(plan.speed,plan.weapon??0,null,plan);
+  }
+  return plans.length;
+ }
  _engine(speed,active,boosting=false,kind=null){if(!this.ctx)return;if(active&&!this.muted){const voice=engineVoice(kind,speed,boosting),profile=voice.profile;if(!this.engine){const osc=this.ctx.createOscillator(),sub=this.ctx.createOscillator(),boost=this.ctx.createOscillator(),bg=this.ctx.createGain(),f=this.ctx.createBiquadFilter(),g=this.ctx.createGain();osc.type=profile.osc;sub.type=profile.sub;boost.type=profile.osc;f.type='lowpass';f.frequency.value=700;g.gain.value=.0001;bg.gain.value=.0001;osc.connect(f);sub.connect(f);boost.connect(bg);bg.connect(f);f.connect(g);g.connect(this.effectsBus||this.master);osc.start();sub.start();boost.start();this.engine={osc,sub,boost,bg,f,g,kind:voice.kind};}
    if(this.engine.kind!==voice.kind){this.engine.kind=voice.kind;try{this.engine.osc.type=profile.osc;this.engine.boost.type=profile.osc;this.engine.sub.type=profile.sub;}catch{}}
    const t=this.ctx.currentTime;this.engine.osc.frequency.setTargetAtTime(voice.oscFreq,t,.1);this.engine.sub.frequency.setTargetAtTime(voice.subFreq,t,.1);this.engine.g.gain.setTargetAtTime(voice.gain,t,.12);this.engine.f.frequency.setTargetAtTime(voice.filterFreq,t,.15);
@@ -2586,6 +2869,9 @@ export class SynthAudio{
   this._tone(t+.04,out,nodes,{freq:240,duration:.24,type:'triangle',gain:.08*vol,end:660});
  },{send:.3*vol});}
  dispose(){if(this._stingDuckTimer){clearTimeout(this._stingDuckTimer);this._stingDuckTimer=null;}if(this._musicDuckTimer){clearTimeout(this._musicDuckTimer);this._musicDuckTimer=null;}this._musicDuck=0;this.killcam=false;this.spectating=false;try{this.musicEngine?.dispose();}catch{}this.musicEngine=null;this._musicBeats.clear();try{this.mothAudio?.dispose?.();}catch{}this.mothAudio=null;if(this.engine){try{this.engine.osc.stop();this.engine.sub.stop();this.engine.boost?.stop();}catch{}this.engine=null;}if(this.zipLoop){try{this.zipLoop.osc.stop();this.zipLoop.hum.stop();}catch{}this.zipLoop=null;}if(this.skidLoop){try{this.skidLoop.osc.stop();this.skidLoop.hum.stop();}catch{}this.skidLoop=null;}if(this.bed){for(const node of Object.values(this.bed)){if(node&&typeof node.stop==='function')try{node.stop();}catch{}if(node&&typeof node.disconnect==='function')try{node.disconnect();}catch{}}this.bed=null;}for(const token of this.voices){clearTimeout(token.timer);for(const n of token.nodes){try{n.disconnect();}catch{}}}this.voices.clear();this._announceAt?.clear?.();this._altStates?.clear?.();this.lastSting=null;
+ // Release the bounded remote-movement planner state and the crowd level so a
+ // disposed engine cannot retain per-actor gait state.
+ this.remoteSteps?.reset?.();this.crowdLevel=0;this._recordKey=null;
  // The sampled announcer pack is dropped with the graph; decoded takes are
  // re-fetched on the next start and an in-flight decode cannot latch.
  this.announcerPack=null;this._announcerPackPromise=null;this._announcerVoiceUntil=0;

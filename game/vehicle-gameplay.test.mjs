@@ -282,6 +282,39 @@ test('driver field repair applies the authored harness/class rates with a thrott
  assert.equal(codex.v.health,0,'a respawning wreck never repairs');
 });
 
+test('passenger and gunner seats field-repair the hull with the shared heartbeat',()=>{
+ const crew=(seat)=>{
+  const m=new Match('chatgpt','openclaw',()=>.5,'blood-gulch',{mode:'ctf',botCount:0,humanCount:2,respawn:1,loadouts:{1:{character:'chatgpt',harness:'codex'}}});
+  const [driver,rider]=m.actors,v=m.vehicles[0];
+  Object.assign(driver,{x:v.position.x,y:v.position.y,z:v.position.z,grounded:true,protection:0});
+  Object.assign(rider,{x:v.position.x,y:v.position.y,z:v.position.z,grounded:true,protection:0});
+  assert.ok(m.enterVehicle(driver));
+  if(seat==='gunner')assert.ok(m.enterVehicle(rider),'the rider takes the gunner seat');
+  else{takeVehicleSeat(v,rider.id,'passenger',0);m.syncVehicleActor(rider,v);}
+  assert.equal(rider.vehicleSeat,seat);
+  v.health=v.maxHealth/2;
+  return {m,rider,v};
+ };
+ const passenger=crew('passenger'),half=passenger.v.maxHealth/2;
+ for(let i=0;i<30;i++)passenger.m.step(1/60,{inputs:{}});
+ assert.ok(Math.abs(passenger.v.health-(half+6))<1e-9,`a passenger repairs 12/s (${passenger.v.health})`);
+ const heartbeats=passenger.m.events.filter(event=>event.type==='vehicle-repair');
+ assert.equal(heartbeats.length,1,'0.5 s of rider repair emits one heartbeat');
+ assert.equal(heartbeats[0].vehicleId,passenger.v.id);
+ assert.equal(heartbeats[0].kind,'puma');
+ assert.ok(heartbeats[0].amount>0);
+ const gunner=crew('gunner'),ghalf=gunner.v.maxHealth/2;
+ for(let i=0;i<30;i++)gunner.m.step(1/60,{inputs:{}});
+ assert.ok(Math.abs(gunner.v.health-(ghalf+6))<1e-9,`a gunner repairs 12/s (${gunner.v.health})`);
+ // Guards: a full hull never over-heals and a respawning wreck never repairs.
+ passenger.v.health=passenger.v.maxHealth;
+ for(let i=0;i<30;i++)passenger.m.step(1/60,{inputs:{}});
+ assert.equal(passenger.v.health,passenger.v.maxHealth,'a full hull never over-heals');
+ passenger.v.health=40;passenger.v.respawnTimer=passenger.v.config.respawn;
+ for(let i=0;i<30;i++)passenger.m.step(1/60,{inputs:{}});
+ assert.equal(passenger.v.health,40,'a respawning wreck never repairs');
+});
+
 test('a destroyed chassis respawns on its authored yaw and announces the respawn',()=>{
  const m=match(),a=m.actors[0],v=m.vehicles[0];
  assert.ok(Math.abs(v.spawnYaw-Math.PI/2)<1e-9,`spawn yaw stored (${v.spawnYaw})`);

@@ -22,6 +22,7 @@ import {
  matchSummaryCard,
  matchXp,
  nextUnlockFor,
+ nextUnlocksFor,
  normalizeGear,
  normalizeProgression,
  prestigeFromXp,
@@ -113,10 +114,17 @@ test('matchRewardSummary surfaces XP, level progress and the next unlock',()=>{
  assert.ok(summary.nextUnlock.level>=2);
  assert.equal(profile.unlocks[summary.nextUnlock.id],undefined);
  assert.equal(nextUnlockFor(profile).id,summary.nextUnlock.id);
+ // The discovery list keeps the single chip's ordering, sliced to three, and
+ // every entry is still locked on the profile that produced it.
+ assert.equal(summary.nextUnlocks.length,3,'the reward summary carries the next three unlocks');
+ assert.deepEqual(summary.nextUnlocks.map(item=>item.id),nextUnlocksFor(profile,3).map(item=>item.id));
+ assert.equal(summary.nextUnlocks[0].id,summary.nextUnlock.id);
+ for(const item of summary.nextUnlocks)assert.equal(profile.unlocks[item.id],undefined);
  const empty=matchRewardSummary();
  assert.equal(empty.gained,0);
  assert.equal(empty.level,1);
  assert.ok(empty.nextUnlock);
+ assert.equal(empty.nextUnlocks.length,3);
  const award=awardMatch(defaultProgression(),{win:true,actor:{frags:40,scoreStats:{captures:1}}});
  const live=matchRewardSummary(award);
  assert.equal(live.gained,award.gained);
@@ -238,6 +246,24 @@ test('career panels expose prestige/achievement aria and the page provides every
  }
 });
 
+test('nextUnlocksFor lists the next locked items in level order with a bounded slice',()=>{
+ const fresh=nextUnlocksFor(defaultProgression(),3);
+ assert.deepEqual(fresh,nextUnlocksFor(defaultProgression()).slice(0,3),'the default limit is three');
+ assert.equal(fresh.length,3);
+ for(let i=1;i<fresh.length;i++)assert.ok(fresh[i].level>fresh[i-1].level||(fresh[i].level===fresh[i-1].level&&fresh[i].name.localeCompare(fresh[i-1].name)>=0),'level then name ordering');
+ assert.deepEqual(nextUnlocksFor(defaultProgression(),2).map(item=>item.id),fresh.slice(0,2).map(item=>item.id));
+ assert.deepEqual(nextUnlocksFor(defaultProgression(),0),[]);
+ assert.deepEqual(nextUnlocksFor(defaultProgression(),-3),[]);
+ // A mid-career profile never sees an item it already owns, and the returned
+ // rows expose the fields the discovery lists render.
+ const mid=normalizeProgression({xp:totalXpForLevel(MAX_LEVEL-1)});
+ assert.ok(mid.level>1&&mid.level<MAX_LEVEL);
+ for(const item of nextUnlocksFor(mid,50)){
+  assert.equal(mid.unlocks[item.id],undefined,'a listed unlock is still locked');
+  for(const field of ['id','kind','name','level','description'])assert.ok(field in item,`${field} is surfaced`);
+ }
+ assert.equal(nextUnlocksFor(normalizeProgression({xp:totalXpForLevel(MAX_LEVEL)+PRESTIGE_XP*PRESTIGE_MAX_TIER*10}),3).length,0,'everything owned means an empty list');
+});
 test('matchSummaryCard composes the result, reward and career tracks',()=>{
  const hud={actorId:0,modeName:'Deathmatch',mapName:'Exchange',time:154,actors:[{id:0,frags:12,deaths:3}]};
  const profile=normalizeProgression({xp:500,matches:4,wins:2,kills:30});
@@ -258,6 +284,7 @@ test('matchSummaryCard composes the result, reward and career tracks',()=>{
  assert.equal(card.achievementCount,1);
  assert.deepEqual(card.achievements.map(a=>a.id),['first-blood']);
  assert.deepEqual(card.nextUnlock,reward.nextUnlock);
+ assert.deepEqual(card.nextUnlocks,reward.nextUnlocks,'the card reuses the reward summary list');
  const empty=matchSummaryCard();
  assert.equal(empty.result,null);
  assert.equal(empty.kills,0);

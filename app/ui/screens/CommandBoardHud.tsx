@@ -282,7 +282,7 @@ export function CommandBoardHud({command, open, collapsed, pinned, activeId, red
     >
       <header className="cocs-board__head">
         <span className="eyebrow">COMMAND · LATTICE</span>
-        <span className="cocs-board__chip" role="status">{summary.chip}</span>
+        <span className="cocs-board__chip" role="group" aria-label={`Board status: ${summary.chip}`}>{summary.chip}</span>
         <button type="button" className="cocs-board__pin" aria-label={pinned ? `Unpin command board (closes with ${commandKey} or Escape)` : 'Pin the command board open'} aria-pressed={pinned === true} onClick={onTogglePin}>{pinned ? 'PINNED' : 'PIN'}</button>
         <button type="button" className="cocs-board__close" aria-label="Close command board and return to combat" onClick={onClose}>× CLOSE</button>
       </header>

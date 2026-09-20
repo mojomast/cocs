@@ -6,7 +6,7 @@ import {aim,presentationSupportAt} from './core.mjs';
 import {MAPS,pickupWeapon} from './maps.mjs';
 import {normalizeDisplay} from './config.mjs';
 import {WeaponFeedback,EffectPool,AmbientFX,WeatherFX} from './feedback.mjs';
-import {ModelAssets,withAssets,currentAssets,CameraShake,MuzzleLightPool,LowHealthOverlay,RailBeamPool,DeathPool,DecalPool,RipplePool,ContactShadowPool,HitReactionFX,ShellPool,TelegraphPool,WeaponPreviewRig,killcamPose,KILLCAM_DURATION,AltProjectilePool,altRocketKind,altProjectileColor} from './effects-fx.mjs';
+import {ModelAssets,withAssets,currentAssets,CameraShake,MuzzleLightPool,LowHealthOverlay,RailBeamPool,DeathPool,DecalPool,RipplePool,ContactShadowPool,HitReactionFX,ShellPool,TelegraphPool,WeaponPreviewRig,killcamPose,KILLCAM_DURATION,AltProjectilePool,altRocketKind,altProjectileColor,FollowMarkerPool,FOLLOW_MARKER_COLOR,KILLER_MARKER_COLOR} from './effects-fx.mjs';
 import {createAbilityVfx} from './ability-vfx.mjs';
 import {deathPlan,deathStyleFor,hitReaction,hashUnit,fallDuration} from './deaths.mjs';
 import {resolveFinish} from './cosmetics.mjs';
@@ -113,6 +113,12 @@ export function bloomTuning(tier=0){
  if(level<=0)return {threshold:.9,radius:.72};
  if(level===1)return {threshold:.86,radius:.66};
  return {threshold:.82,radius:.6};
+}
+// Muzzle-light slot budget by tier: 2/3/4 for low/medium/high. High keeps the
+// historical four slots, so every pinned high-tier baseline is unchanged.
+export function muzzleLightCount(tier=0){
+ const level=Number.isFinite(Number(tier))?Number(tier):0;
+ return level>=2?4:level>=1?3:2;
 }
 // Surface-aware impact presentation. `dir` is the authoritative shot direction
 // (pointing into the surface) and `ground` the presentation support sample at
@@ -433,7 +439,7 @@ export function simpleWeaponModel(type=0,assets,visual=null,finish=null){
   return g;
  });
 }
-function hornetModel(software=false){const g=new T.Group();g.name='hornet';const hull=material('#3c4652',.7,.4),dark=material('#20262e',.6,.5),accent=material('#ffb35c',.4,.3,true),glass=material('#20323d',.6,.12);
+function hornetModelCompact(software=false){const g=new T.Group();g.name='hornet';const hull=material('#3c4652',.7,.4),dark=material('#20262e',.6,.5),accent=material('#ffb35c',.4,.3,true),glass=material('#20323d',.6,.12);
  box(g,1.1,.7,4.6,0,0,-.1,hull);box(g,.7,.5,1.2,0,.25,1.6,hull);
  const nose=new T.Mesh(new T.ConeGeometry(.5,1.4,10),hull);nose.rotation.x=-Math.PI/2;nose.position.set(0,0,-2.6);g.add(nose);
  const pod=new T.Mesh(new T.SphereGeometry(.18,8,6),dark);pod.position.set(0,-.38,-1.8);g.add(pod);
@@ -498,8 +504,390 @@ function buildVehicleKit(g,kit,matc){
  }
  return parts;
 }
+function hornetModelPoly(software=false){
+ const g=new T.Group();g.name='hornet';
+ const hull=material('#929eae',.75,.34),dark=material('#202630',.65,.5),panel=material('#101c2b',.45,.58),trim=material('#53677b',.8,.32),accent=material('#ff794b',.4,.3,true),glass=material('#123448',.7,.12);
+ // Hornet-only geometry: spherical interceptor cockpit and four solar S-foils.
+ const sphere=(parent,r,x,y,z,mat,sx=1,sy=1,sz=1)=>{const mesh=new T.Mesh(new T.SphereGeometry(r,40,28),mat);mesh.position.set(x,y,z);mesh.scale.set(sx,sy,sz);parent.add(mesh);return mesh;};
+ const hoop=(parent,r,t,x,y,z,mat)=>{const mesh=new T.Mesh(new T.TorusGeometry(r,t,12,64),mat);mesh.position.set(x,y,z);parent.add(mesh);return mesh;};
+ const tube=(parent,a,b,length,x,y,z,mat)=>{const mesh=cylinder(parent,a,b,length,x,y,z,mat,32);mesh.rotation.x=Math.PI/2;return mesh;};
+ sphere(g,.88,0,.12,-.3,hull,1,1,1.12);
+ sphere(g,.7,0,.12,-.94,glass,1,1,.34);
+ hoop(g,.69,.065,0,.12,-1.05,hull);hoop(g,.29,.038,0,.12,-1.185,trim);
+ for(let i=0;i<8;i++){const a=i*Math.PI/4;const rib=box(g,.047,.39,.045,Math.sin(a)*.48,.12+Math.cos(a)*.48,-1.13,hull);rib.rotation.z=-a;}
+ tube(g,.28,.28,.07,0,.12,-1.2,glass);
+ sphere(g,.5,0,.05,.95,hull,1,.75,2.15);
+ const nose=new T.Mesh(new T.ConeGeometry(.34,1.55,32),hull);nose.rotation.x=-Math.PI/2;nose.position.set(0,-.3,-1.65);g.add(nose);
+ for(const s of [-1,1]){box(g,.08,.1,1.35,s*.27,-.27,-1.55,accent);for(let j=0;j<5;j++)box(g,.16,.08,.08,s*.38,.32,.55+j*.22,dark);}
+ hoop(g,.39,.065,0,.05,1.88,trim);tube(g,.28,.32,.12,0,.05,1.92,dark);
+ const engines=[],guns=[];
+ for(const s of [-1,1])for(const v of [-1,1]){
+  const wing=new T.Group();wing.position.set(s*.58,.12,.35);wing.rotation.z=s*v*.48;g.add(wing);
+  box(wing,2.35,.15,1.5,s*1.16,0,0,hull);
+  // Recessed solar cells on both faces, with structural perimeter and ribs.
+  for(const face of [-1,1]){
+   box(wing,2.12,.025,1.27,s*1.17,face*.092,0,panel);
+   for(let j=0;j<9;j++)box(wing,.022,.027,1.24,s*(.2+j*.24),face*.112,0,trim);
+   box(wing,2.12,.028,.032,s*1.17,face*.112,0,trim);
+  }
+  for(const z of [-.74,.74])box(wing,2.4,.2,.07,s*1.16,0,z,trim);
+  box(wing,.1,.21,1.5,s*2.32,0,0,hull);
+  tube(wing,.3,.34,1.6,s*.6,0,.4,hull);
+  for(const z of [-.41,.95,1.13])hoop(wing,.31,.045,s*.6,0,z,trim);
+  tube(wing,.25,.25,.05,s*.6,0,-.43,dark);
+  sphere(wing,.11,s*.6,0,-.47,trim,1,1,.5);
+  tube(wing,.25,.29,.25,s*.6,0,1.24,dark);
+  const glow=tube(wing,.21,.21,.045,s*.6,0,1.38,accent);engines.push(glow);
+  hoop(wing,.25,.04,s*.6,0,1.4,hull);
+  const mount=new T.Group();mount.position.set(s*2.23,0,-.48);wing.add(mount);
+  tube(mount,.14,.18,.65,0,0,-.13,hull);
+  const barrel=tube(mount,.065,.09,1.65,0,0,-1.12,dark);
+  for(const z of [-.5,-.7,-1.8])hoop(mount,.095,.025,0,0,z,trim);
+  tube(mount,.105,.08,.18,0,0,-1.98,hull);
+  const flash=new T.Mesh(new T.SphereGeometry(.16,16,12),new T.MeshBasicMaterial({color:'#ffd9a0'}));flash.position.set(0,0,-2.1);flash.visible=false;mount.add(flash);guns.push({mount,barrel,flash});
+  box(wing,.16,.035,.35,s*1.96,.135,.48,accent);
+ }
+ g.traverse(n=>{if(n.isMesh){n.castShadow=true;n.receiveShadow=true;}});
+ if(software)addBlobShadow(g,2.8,.32);
+ // Match the authored hover/landing clearance of the compact model: the
+ // poly hull hangs 0.72m deeper otherwise and would clip the ground.
+ for(const child of g.children)child.position.y+=.72;
+ g.userData={kind:'hornet',vehicle:true,wheels:[],turret:null,barrels:engines,guns,flashUntil:0,color:'#929eae'};return g;
+}
+
+// Titan-only siege model: +Z is forward, with the cannon mouth at the authored
+// (0, 1.5, 1.6) muzzle. No shared vehicle geometry or simulation values change.
+function titanModel(software=false){
+ const g=new T.Group();g.name='titan';
+ const armor=material('#626b59',.48,.56),edge=material('#a1a38a',.5,.43),
+  dark=material('#252e30',.65,.48),rubber=material('#151b1c',.08,.88),
+  steel=material('#8a989d',.8,.3),mark=material('#c9ad68',.3,.6),
+  optic=material('#76bcc5',.35,.23,true),lamp=material('#e4cf99',.25,.3,true);
+ // Small emissive surfaces only: broad armor highlights come from real bevels.
+ const plate=(parent,w,h,d,x,y,z,mat,b=.045)=>{
+  b=Math.min(b,w/5,h/5,d/5);
+  const geo=geometry(undefined,`titan-bevel|${w}|${h}|${d}|${b}`,()=>{
+   const shape=new T.Shape(),a=w/2-b,c=h/2-b,k=Math.min(a,c)*.2;
+   shape.moveTo(-a+k,-c);shape.lineTo(a-k,-c);shape.lineTo(a,-c+k);
+   shape.lineTo(a,c-k);shape.lineTo(a-k,c);shape.lineTo(-a+k,c);
+   shape.lineTo(-a,c-k);shape.lineTo(-a,-c+k);shape.closePath();
+   const result=new T.ExtrudeGeometry(shape,{depth:d-2*b,bevelEnabled:true,bevelThickness:b,bevelSize:b,bevelSegments:3,steps:1,curveSegments:1});
+   result.translate(0,0,-d/2+b);return result;
+  });
+  const mesh=new T.Mesh(geo,mat);mesh.position.set(x,y,z);parent.add(mesh);return mesh;
+ };
+ const hull=new T.Group();hull.name='siege-armored-hull';g.add(hull);
+ plate(hull,2.28,.44,5.1,0,.59,0,dark,.09);
+ plate(hull,2.34,.55,4.85,0,.98,0,armor,.1);
+ plate(hull,2.3,.28,1.28,0,1.22,1.75,edge,.07).rotation.x=-.16;
+ plate(hull,2.25,.25,.32,0,.66,2.52,dark);
+ // Three crew access points: paired forward hatches and turret commander hatch.
+ for(const s of [-1,1]){
+  plate(hull,.68,.1,.74,s*.57,1.36,1.25,armor);
+  plate(hull,.37,.1,.12,s*.57,1.44,1.58,dark,.02);
+  box(hull,.26,.035,.025,s*.57,1.455,1.648,optic);
+  plate(hull,.36,.24,.14,s*.91,1.02,2.43,dark);
+  box(hull,.24,.1,.03,s*.91,1.03,2.51,lamp);
+  plate(hull,.22,.22,.3,s*.72,.57,2.61,steel);
+  // Continuous track beds, articulated shoes and eight exposed road wheels.
+  plate(hull,.62,.86,4.98,s*1.18,.52,0,rubber,.12);
+  for(let i=0;i<28;i++){
+   const z=-2.33+i*(4.66/27);
+   for(const y of [.12,.92])plate(hull,.66,.12,.125,s*1.18,y,z,dark,.018);
+  }
+  for(const end of [-1,1])for(let i=1;i<8;i++){
+   const a=-Math.PI/2+i*Math.PI/8;
+   const shoe=plate(hull,.66,.12,.15,s*1.18,.52+Math.sin(a)*.4,end*(2.33+Math.cos(a)*.27),dark,.018);
+   shoe.rotation.x=end*(Math.PI/2-a);
+  }
+  // Raised side skirts leave the hubs visible and give filters large value breaks.
+  for(let i=0;i<6;i++){
+   const z=-2.05+i*.82;
+   plate(hull,.18,.48,.73,s*1.43,1.02,z,armor,.04);
+   plate(hull,.035,.12,.55,s*1.53,1.13,z,i===4?mark:edge,.008);
+   for(const dz of [-.25,.25])cylinder(hull,.035,.035,.035,s*1.54,.91,z+dz,steel,12).rotation.z=Math.PI/2;
+  }
+  plate(hull,.48,.22,.64,s*.76,1.32,-2.04,dark);
+  for(let i=0;i<7;i++)box(hull,.4,.04,.045,s*.76,1.45,-2.28+i*.075,steel);
+  cylinder(hull,.12,.14,.48,s*.96,1.04,-2.48,dark,32).rotation.x=Math.PI/2;
+  box(hull,.19,.085,.04,s*.89,.91,-2.54,mark);
+ }
+ const wheels=[];
+ for(const s of [-1,1])for(let i=0;i<8;i++){
+  const wheel=new T.Group();wheel.position.set(s*1.28,.51,-2.1+i*.6);g.add(wheel);
+  cylinder(wheel,.37,.37,.48,0,0,0,rubber,48).rotation.z=Math.PI/2;
+  cylinder(wheel,.28,.28,.5,0,0,0,edge,48).rotation.z=Math.PI/2;
+  cylinder(wheel,.13,.13,.54,0,0,0,dark,32).rotation.z=Math.PI/2;
+  for(let j=0;j<8;j++){
+   const a=j*Math.PI/4;
+   cylinder(wheel,.025,.025,.035,s*.27,Math.sin(a)*.205,Math.cos(a)*.205,steel,10).rotation.z=Math.PI/2;
+  }
+  wheels.push(wheel);
+ }
+ const turret=new T.Group();turret.name='titan-siege-turret';turret.position.set(0,1.5,-.72);g.add(turret);
+ cylinder(turret,.89,.96,.2,0,-.19,0,dark,64);
+ plate(turret,1.96,.57,1.96,0,.09,-.16,armor,.095);
+ for(const s of [-1,1]){
+  plate(turret,.46,.45,1.26,s*.84,.14,.17,edge,.065).rotation.y=s*.14;
+  plate(turret,.07,.22,.73,s*1.07,.14,-.36,mark,.014);
+  // Recessed sight and armored smoke-launcher cluster.
+  plate(turret,.3,.23,.32,s*.61,.44,.35,dark);
+  box(turret,.21,.095,.025,s*.61,.46,.524,optic);
+  for(let i=0;i<3;i++)cylinder(turret,.065,.075,.27,s*.99,.3,-.42-i*.18,dark,24).rotation.z=s*.55;
+ }
+ cylinder(turret,.36,.38,.09,0,.42,-.48,edge,48);
+ plate(turret,.32,.08,.12,0,.51,-.48,dark,.018);
+ cylinder(turret,.025,.035,.68,-.7,.69,-.82,dark,16);
+ plate(turret,1.42,.36,.42,0,.12,-1.24,dark);
+ for(let i=0;i<5;i++)plate(turret,.23,.24,.12,-.52+i*.26,.14,-1.5,armor,.025);
+ const mount=new T.Group();mount.name='single-siege-cannon';turret.add(mount);
+ plate(mount,.66,.51,.57,0,0,.72,dark,.075);
+ const barrel=cylinder(mount,.135,.17,1.25,0,0,1.48,steel,64);barrel.rotation.x=Math.PI/2;
+ for(const z of [1.01,1.2,1.82])cylinder(mount,.19,.19,.11,0,0,z,dark,48).rotation.x=Math.PI/2;
+ plate(mount,.39,.33,.26,0,0,2.18,edge,.04);
+ // A recessed black bore and thick rim, rather than a solid capped gun tip.
+ cylinder(mount,.118,.118,.012,0,0,2.315,rubber,48).rotation.x=Math.PI/2;
+ ring(mount,.145,.028,0,0,2.32,steel,0);
+ const flash=new T.Mesh(new T.SphereGeometry(.23,16,12),new T.MeshBasicMaterial({color:'#ffe1a6'}));
+ flash.position.set(0,0,2.32);flash.visible=false;mount.add(flash);
+ // Batch stationary detailing by material, retaining independent wheel/turret
+// transforms. Source geometry stays in ModelAssets; only temporary clones die.
+ const batch=parent=>{
+  const buckets=new Map();
+  for(const mesh of [...parent.children])if(mesh.isMesh){
+   mesh.updateMatrix();const geo=mesh.geometry.index?mesh.geometry.toNonIndexed():mesh.geometry.clone();geo.applyMatrix4(mesh.matrix);
+   if(!buckets.has(mesh.material))buckets.set(mesh.material,[]);
+   buckets.get(mesh.material).push(geo);parent.remove(mesh);
+   if(!currentAssets())mesh.geometry.dispose();
+  }
+  for(const [mat,parts] of buckets){const merged=mergeGeometries(parts,false);for(const part of parts)part.dispose();if(merged)parent.add(new T.Mesh(merged,mat));}
+ };
+ batch(hull);batch(turret);for(const wheel of wheels)batch(wheel);
+ g.traverse(n=>{if(n.isMesh){n.castShadow=true;n.receiveShadow=true;}});
+ if(software)addBlobShadow(g,2.8,.35);
+ g.userData={kind:'titan',vehicle:true,wheels,turret,barrels:[barrel],guns:[{mount,barrel,flash}],flashUntil:0,color:'#626b59'};
+ return g;
+}
+
+// Dedicated recon chassis: +Z forward, four animated wheels and one light gun.
+// Scout-only cached geometry leaves the shared ground-vehicle draft untouched.
+function scoutModel(software=false){
+ const g=new T.Group();g.name='scout';
+ const hull=material('#708578',.48,.48),edge=material('#c3cbb3',.45,.4),dark=material('#202c30',.55,.56),rubber=material('#101619',.03,.92),metal=material('#91a5ad',.8,.3),seat=material('#424c43',.05,.86),lens=material('#194655',.65,.19),light=material('#b9e9ed',.2,.35,true),tail=material('#e77b4d',.2,.45,true);
+ // Broad chamfers catch lighting and outlines without relying on tiny textures.
+ const panel=(parent,w,h,d,x,y,z,mat,b=.035)=>{
+  const key=`scout-bevel|${w}|${h}|${d}|${b}`;
+  const geo=geometry(undefined,key,()=>{
+   const s=new T.Shape(),a=w/2-b,c=h/2-b;
+   s.moveTo(-a,-h/2);s.lineTo(a,-h/2);s.quadraticCurveTo(w/2,-h/2,w/2,-c);s.lineTo(w/2,c);s.quadraticCurveTo(w/2,h/2,a,h/2);s.lineTo(-a,h/2);s.quadraticCurveTo(-w/2,h/2,-w/2,c);s.lineTo(-w/2,-c);s.quadraticCurveTo(-w/2,-h/2,-a,-h/2);
+   const result=new T.ExtrudeGeometry(s,{depth:d-2*b,steps:1,bevelEnabled:true,bevelSegments:3,bevelSize:b*.45,bevelThickness:b,curveSegments:8});result.translate(0,0,-d/2+b);return result;
+  });
+  const m=new T.Mesh(geo,mat);m.position.set(x,y,z);parent.add(m);return m;
+ };
+ const torus=(parent,r,t,x,y,z,mat,side=false)=>{const m=new T.Mesh(geometry(undefined,`scout-torus|${r}|${t}`,()=>new T.TorusGeometry(r,t,12,48)),mat);m.position.set(x,y,z);if(side)m.rotation.y=Math.PI/2;parent.add(m);return m;};
+ panel(g,.78,.16,1.77,0,.32,0,dark);
+ panel(g,.72,.22,1.35,0,.44,-.08,hull);
+ const hood=panel(g,.74,.17,.62,0,.58,.64,hull);hood.rotation.x=.12;
+ panel(g,.38,.055,.46,0,.682,.63,edge,.014);
+ panel(g,.82,.1,.13,0,.37,1.01,metal,.02);
+ panel(g,.68,.14,.06,0,.49,.98,dark,.012);
+ for(let i=-3;i<=3;i++)box(g,.025,.09,.015,i*.075,.49,1.018,metal);
+ // Staggered two-place cockpit follows the driver's and passenger's seat layout.
+ for(const [x,z] of [[-.2,.1],[.2,-.5]]){
+  panel(g,.28,.09,.32,x,.52,z,seat,.018);
+  const back=panel(g,.28,.33,.085,x,.7,z-.15,seat,.02);back.rotation.x=-.13;
+  panel(g,.18,.105,.08,x,.91,z-.18,dark,.018);
+  for(const dx of [-.075,.075])box(g,.035,.25,.015,x+dx,.72,z-.093,dark);
+ }
+ panel(g,.62,.12,.13,0,.71,.35,dark,.02);
+ torus(g,.095,.015,-.2,.78,.27,metal).rotation.x=.6;
+ panel(g,.15,.065,.018,-.13,.752,.275,lens,.007);
+ for(const s of [-1,1]){
+  tube(g,s*.34,.47,.48,s*.34,1.04,.24,.023,metal,16);
+  tube(g,s*.34,1.04,.24,s*.34,1.04,-.63,.023,metal,16);
+  tube(g,s*.34,1.04,-.63,s*.36,.49,-.94,.023,metal,16);
+  tube(g,s*.38,.46,.37,s*.38,.46,-.66,.027,dark,16);
+  panel(g,.07,.16,.58,s*.365,.49,-.22,hull,.016);
+  panel(g,.13,.07,.15,s*.27,.61,.965,light,.014);
+  panel(g,.15,.06,.035,s*.27,.52,-.96,tail,.01);
+ }
+ for(const z of [.24,-.63])tube(g,-.34,1.04,z,.34,1.04,z,.023,metal,16);
+ tube(g,-.34,1.04,-.63,.34,.51,-.94,.018,dark,16);
+ // Independent wishbones, dampers, smooth rounded tires and actual tread blocks.
+ const wheels=[];
+ for(const x of [-.45,.45])for(const z of [-.75,.75]){
+  const s=Math.sign(x),wheel=new T.Group();wheel.position.set(x,.245,z);g.add(wheel);wheels.push(wheel);
+  torus(wheel,.174,.071,0,0,0,rubber,true);
+  cylinder(wheel,.132,.132,.137,0,0,0,dark,48).rotation.z=Math.PI/2;
+  cylinder(wheel,.105,.105,.15,0,0,0,metal,32).rotation.z=Math.PI/2;
+  cylinder(wheel,.045,.045,.165,0,0,0,dark,24).rotation.z=Math.PI/2;
+  for(let i=0;i<24;i++)for(const row of [-1,1]){
+   const a=i*Math.PI/12+row*.055;
+   const tread=box(wheel,.064,.024,.051,row*.036,Math.cos(a)*.239,Math.sin(a)*.239,rubber);tread.rotation.x=a;tread.rotation.y=row*.22;
+  }
+  for(let i=0;i<6;i++){const a=i*Math.PI/3;cylinder(wheel,.009,.009,.012,s*.083,Math.cos(a)*.071,Math.sin(a)*.071,dark,12).rotation.z=Math.PI/2;}
+  for(const dz of [-.13,.13])tube(g,s*.2,.34,z+dz,x,.245,z,.018,metal,16);
+  tube(g,s*.26,.51,z-.05,x,.27,z,.026,dark,20);
+  tube(g,s*.29,.45,z-.035,x,.27,z,.012,metal,16);
+  const arch=new T.Mesh(geometry(undefined,'scout-fender',()=>new T.TorusGeometry(.275,.026,10,40,Math.PI)),hull);arch.rotation.y=Math.PI/2;arch.position.set(x,.245,z);g.add(arch);
+ }
+ // Rear powerpack and a compact optics mast communicate scouting, not heavy armor.
+ panel(g,.55,.14,.25,0,.57,-.84,hull,.025);
+ for(let i=-2;i<=2;i++)box(g,.065,.015,.18,i*.087,.648,-.84,dark);
+ tube(g,.29,.65,-.85,.3,1.23,-.89,.009,metal,12);
+ cylinder(g,.055,.07,.08,.3,.69,-.85,dark,24);
+ panel(g,.19,.1,.12,.22,1.08,-.61,dark,.019);
+ cylinder(g,.032,.036,.022,.22,1.08,-.54,lens,32).rotation.x=Math.PI/2;
+ // Single forward barrel; muzzle tip stays at the simulation's (0,.9,.6).
+ const turret=new T.Group();turret.position.set(0,.79,.04);g.add(turret);
+ cylinder(turret,.115,.14,.065,0,0,0,dark,40);
+ panel(turret,.14,.13,.24,0,.11,.05,hull,.02);
+ panel(turret,.09,.12,.14,.115,.09,.025,dark,.015);
+ const mount=new T.Group();mount.position.set(0,.11,.16);turret.add(mount);
+ const barrel=cylinder(mount,.023,.032,.36,0,0,.18,metal,32);barrel.rotation.x=Math.PI/2;
+ for(const z of [.08,.17,.26])torus(mount,.033,.008,0,0,z,dark);
+ cylinder(mount,.038,.038,.04,0,0,.38,dark,32).rotation.x=Math.PI/2;
+ cylinder(mount,.02,.02,.003,0,0,.401,rubber,24).rotation.x=Math.PI/2;
+ const flash=new T.Mesh(geometry(undefined,'scout-flash',()=>new T.SphereGeometry(.07,12,8)),light);flash.position.z=.4;flash.visible=false;mount.add(flash);
+ g.traverse(n=>{if(n.isMesh){n.castShadow=true;n.receiveShadow=true;}});
+ flash.castShadow=false;
+ if(software)addBlobShadow(g,1.05,.3);
+ g.userData={kind:'scout',vehicle:true,wheels,turret,barrels:[barrel],guns:[{mount,barrel,flash}],flashUntil:0,color:'#708578'};
+ return g;
+}
+
+// Dedicated six-seat APC. Broad bevels and inset panels survive posterization,
+// outlines and bloom without relying on noisy textures or tiny emissive trim.
+function transportModel(software=false){
+ const g=new T.Group();g.name='transport-apc';
+ const armor=material('#657767',.38,.65),edge=material('#a8b49b',.42,.52),dark=material('#26332f',.5,.62),rubber=material('#141b1c',.03,.94),steel=material('#829296',.75,.38),glass=material('#183b49',.55,.24),mark=material('#d4bb76',.22,.65),lamp=material('#ffe1a1',.2,.4,true),red=material('#bd4636',.2,.48,true);
+ // Extruded rounded rectangles give genuine multi-segment edge highlights.
+ const plate=(parent,w,h,d,x,y,z,mat,b=.06)=>{
+  b=Math.min(b,w*.2,h*.2,d*.2);
+  const geo=geometry(undefined,`apc-bevel|${w}|${h}|${d}|${b}`,()=>{
+   const s=new T.Shape(),a=w/2-b,c=h/2-b,r=Math.min(.1,a*.3,c*.3);
+   s.moveTo(-a+r,-c);s.lineTo(a-r,-c);s.quadraticCurveTo(a,-c,a,-c+r);s.lineTo(a,c-r);s.quadraticCurveTo(a,c,a-r,c);s.lineTo(-a+r,c);s.quadraticCurveTo(-a,c,-a,c-r);s.lineTo(-a,-c+r);s.quadraticCurveTo(-a,-c,-a+r,-c);
+   const geo=new T.ExtrudeGeometry(s,{depth:d-2*b,steps:1,bevelEnabled:true,bevelSegments:3,bevelSize:b,bevelThickness:b,curveSegments:6});geo.translate(0,0,-d/2+b);return geo;
+  });
+  const m=new T.Mesh(geo,mat);m.position.set(x,y,z);parent.add(m);return m;
+ };
+ plate(g,2.04,.35,5.65,0,.58,0,dark,.1);
+ plate(g,2.32,.76,5.8,0,1.04,0,armor,.14);
+ plate(g,2.06,.88,4.48,0,1.62,-.52,armor,.14);
+ const nose=plate(g,2.18,.24,1.18,0,1.43,2.24,edge,.07);nose.rotation.x=.23;
+ plate(g,1.96,.13,4.36,0,2.09,-.52,edge,.045);
+ // Armored cab glazing: dark gaskets, thick center mullion, raised brows.
+ for(const side of [-1,1]){
+  const frame=plate(g,.86,.43,.12,side*.5,1.8,1.74,dark,.035);frame.rotation.x=.13;
+  const pane=plate(g,.72,.29,.045,side*.5,1.81,1.815,glass,.012);pane.rotation.x=.13;
+  plate(g,.92,.085,.2,side*.5,2.04,1.76,armor,.025);
+  plate(g,.13,.32,.65,side*1.05,1.79,1.17,dark,.025);
+  plate(g,.035,.22,.49,side*1.125,1.79,1.17,glass,.01);
+  // Three spaced armor sections define the protected passenger volume.
+  for(const z of [-2.12,-.94,.24]){
+   plate(g,.15,.63,.98,side*1.07,1.64,z,dark,.035);
+   plate(g,.13,.51,.87,side*1.16,1.64,z,edge,.035);
+   plate(g,.04,.115,.42,side*1.235,1.76,z,dark,.01);
+   for(const dz of [-.32,.32]){const bolt=cylinder(g,.035,.035,.035,side*1.25,1.48,z+dz,steel,12);bolt.rotation.z=Math.PI/2;}
+  }
+  plate(g,.16,.17,5.45,side*1.18,1.18,0,armor,.035);
+  plate(g,.24,.14,1.14,side*1.17,.7,-2.16,dark,.035);
+  // Front light recesses and short protective brush bars.
+  plate(g,.49,.24,.12,side*.8,1.14,2.93,dark,.035);
+  for(const dx of [-.12,.12]){const l=cylinder(g,.073,.073,.045,side*.8+dx,1.15,3.005,lamp,24);l.rotation.x=Math.PI/2;}
+  tube(g,side*1.02,.82,3.04,side*1.02,1.31,3.04,.04,steel,12);
+  plate(g,.17,.25,.09,side*.98,1.15,-2.96,red,.02);
+  plate(g,.055,.19,.55,side*1.25,1.33,1.65,mark,.012);
+ }
+ plate(g,2.28,.22,.22,0,.8,2.97,dark,.06);
+ plate(g,1.14,.3,.08,0,1.09,2.944,dark,.02);
+ for(let i=0;i<7;i++)box(g,.085,.22,.035,(i-3)*.145,1.09,2.996,steel);
+ // Rear boarding ramp, hydraulic hinges, non-slip steps and grab rails.
+ plate(g,1.68,1.16,.12,0,1.44,-2.86,dark,.04);
+ plate(g,1.48,1.02,.12,0,1.44,-2.95,armor,.05);
+ for(const y of [1.04,1.27,1.5,1.73])plate(g,1.28,.055,.045,0,y,-3.025,edge,.012);
+ for(const x of [-.62,.62]){cylinder(g,.075,.075,.29,x,.86,-2.98,steel,24).rotation.z=Math.PI/2;tube(g,x,1.64,-3.04,x,1.93,-3.04,.028,steel,12);}
+ plate(g,1.78,.11,.27,0,.68,-2.94,dark,.03);
+ // Six high-resolution tires; tread blocks and hubs rotate with existing wheel rig.
+ const wheels=[];
+ for(const side of [-1,1])for(const z of [-2.14,0,2.14]){
+  const wheel=new T.Group();wheel.position.set(side*1.09,.56,z);g.add(wheel);wheels.push(wheel);
+  const tireGeo=geometry(undefined,'apc-tire',()=>new T.TorusGeometry(.405,.145,12,48));
+  const tire=new T.Mesh(tireGeo,rubber);tire.rotation.y=Math.PI/2;wheel.add(tire);
+  cylinder(wheel,.33,.33,.29,0,0,0,rubber,48).rotation.z=Math.PI/2;
+  cylinder(wheel,.267,.267,.34,0,0,0,steel,32).rotation.z=Math.PI/2;
+  cylinder(wheel,.18,.18,.36,0,0,0,dark,32).rotation.z=Math.PI/2;
+  cylinder(wheel,.105,.105,.4,0,0,0,edge,24).rotation.z=Math.PI/2;
+  for(let i=0;i<32;i++)for(const row of [-1,1]){const a=i*Math.PI/16+row*.045;const tread=box(wheel,.145,.055,.085,row*.085,Math.cos(a)*.54,Math.sin(a)*.54,rubber);tread.rotation.x=a;tread.rotation.y=row*.2;}
+  for(let i=0;i<8;i++){const a=i*Math.PI/4;const bolt=cylinder(wheel,.027,.027,.035,side*.192,Math.cos(a)*.217,Math.sin(a)*.217,edge,12);bolt.rotation.z=Math.PI/2;}
+  const arch=new T.Mesh(geometry(undefined,'apc-fender',()=>new T.TorusGeometry(.625,.065,10,40,Math.PI)),armor);arch.rotation.y=Math.PI/2;arch.position.set(side*1.09,.56,z);g.add(arch);
+  tube(g,side*.7,.77,z-.24,side*1.05,.56,z,.075,steel,16);
+ }
+ // Roof escape hatch, cooling louvers, strapped stowage, short communications mast.
+ plate(g,1.12,.085,.88,0,2.18,.74,dark,.025);
+ plate(g,.96,.075,.74,0,2.24,.74,armor,.025);
+ tube(g,-.18,2.3,.73,.18,2.3,.73,.03,steel,12);
+ for(const side of [-1,1]){
+  plate(g,.39,.075,.81,side*.72,2.19,-2.12,dark,.018);
+  for(let i=0;i<6;i++)box(g,.32,.035,.055,side*.72,2.245,-2.43+i*.12,steel);
+  plate(g,.32,.25,.67,side*.79,2.26,-.66,armor,.035);
+  for(const z of [-.87,-.45])box(g,.34,.027,.07,side*.79,2.397,z,dark);
+ }
+ cylinder(g,.075,.09,.15,-.84,2.28,-1.4,dark,24);
+ tube(g,-.84,2.35,-1.4,-.87,2.82,-1.48,.015,steel,12);
+ // Defensive twin gun, not a siege cannon. Preserve turret and flash animation API.
+ const turret=new T.Group();turret.name='transport-defensive-turret';turret.position.set(0,2.16,-1.34);g.add(turret);
+ cylinder(turret,.52,.55,.13,0,.04,0,dark,48);
+ cylinder(turret,.43,.48,.19,0,.16,0,edge,48);
+ plate(turret,.94,.27,.7,0,.32,0,armor,.065);
+ const barrels=[],guns=[];
+ for(const x of [-.31,.31]){
+  const mount=new T.Group();mount.position.set(x,.33,.3);turret.add(mount);
+  plate(mount,.23,.22,.33,0,0,.03,dark,.04);
+  const barrel=cylinder(mount,.058,.073,.83,0,0,.49,steel,32);barrel.rotation.x=Math.PI/2;barrels.push(barrel);
+  for(const z of [.18,.32,.72,.91])cylinder(mount,.083,.083,.055,0,0,z,dark,24).rotation.x=Math.PI/2;
+  cylinder(mount,.044,.044,.012,0,0,.944,rubber,24).rotation.x=Math.PI/2;
+  const flash=new T.Mesh(geometry(undefined,'apc-flash',()=>new T.SphereGeometry(.14,12,8)),lamp);flash.position.set(0,0,.98);flash.visible=false;mount.add(flash);guns.push({mount,barrel,flash});
+ }
+ plate(turret,.23,.18,.24,0,.52,.1,dark,.03);plate(turret,.14,.085,.025,0,.54,.235,glass,.008);
+ g.traverse(n=>{if(n.isMesh){n.castShadow=true;n.receiveShadow=true;}});
+ if(software)addBlobShadow(g,3,.32);
+ g.userData={kind:'transport',vehicle:true,wheels,turret,barrels,guns,flashUntil:0,color:'#657767'};
+ return g;
+}
+
+// Merge the stationary meshes of a dedicated WebGL vehicle model into one mesh
+// per material, container by container. Animated containers stay intact: wheel
+// groups rotate, the turret yaws and gun mounts (with their barrels and muzzle
+// flashes) are never merged. Source geometry cached in ModelAssets is left for
+// the assets to dispose; temporary clones are released after merging.
+function batchVehicleModel(model){
+ const mounts=new Set();
+ for(const gun of model.userData?.guns||[])if(gun?.mount)mounts.add(gun.mount);
+ const merge=(parent)=>{
+  const buckets=new Map();
+  for(const mesh of [...parent.children])if(mesh.isMesh&&!mounts.has(mesh)){
+   mesh.updateMatrix();
+   const geo=mesh.geometry.index?mesh.geometry.toNonIndexed():mesh.geometry.clone();
+   geo.applyMatrix4(mesh.matrix);
+   if(!buckets.has(mesh.material))buckets.set(mesh.material,[]);
+   buckets.get(mesh.material).push(geo);
+   parent.remove(mesh);
+   if(!currentAssets())mesh.geometry.dispose();
+  }
+  for(const [mat,parts] of buckets){const merged=mergeGeometries(parts,false);for(const part of parts)part.dispose();if(merged){const mesh=new T.Mesh(merged,mat);mesh.castShadow=true;mesh.receiveShadow=true;parent.add(mesh);}}
+ };
+ const walk=(node)=>{merge(node);for(const child of [...node.children])if(child.isGroup){if(mounts.has(child))continue;walk(child);}};
+ walk(model);
+ return model;
+}
 export function vehicleModel(kind='puma',assets,software=false){return withAssets(assets,()=>{
- if(kind==='hornet')return hornetModel(software);
+ if(kind==='hornet')return software?hornetModelCompact(true):batchVehicleModel(hornetModelPoly(false));
+ if(!software){
+  if(kind==='titan')return titanModel(false);
+  if(kind==='scout')return batchVehicleModel(scoutModel(false));
+  if(kind==='transport')return batchVehicleModel(transportModel(false));
+ }
  const g=new T.Group();g.name='warthog';
  const cache=new Map();
  const matc=(color,metal=.5,rough=.42,emissive=false,opts={})=>{const key=`${color}|${metal}|${rough}|${emissive?1:0}|${opts.transparent?1:0}|${opts.opacity??1}`;let mat=cache.get(key);if(!mat){mat=material(color,metal,rough,emissive);if(opts.transparent){mat.transparent=true;mat.opacity=opts.opacity??.55;}if(opts.flat)mat.flatShading=true;cache.set(key,mat);}return mat;};
@@ -842,14 +1230,14 @@ export class ArenaView{
    if(this.renderer.isSoftware===true){this.camera.add(this.hands);}
    else{this.weaponScene=new T.Scene();this.weaponRoot=new T.Group();this.weaponScene.add(this.weaponRoot);this.weaponRoot.add(this.hands);this.weaponCamera=new T.PerspectiveCamera(this.weaponFov,1,.02,4);this.weaponScene.add(new T.HemisphereLight('#cfe9ff','#20262c',2.2));const weaponKey=new T.DirectionalLight('#ffffff',2.6);weaponKey.position.set(-2,4,3);this.weaponScene.add(weaponKey);}
    this._enableBotLayers();
-   this.scene.add(this.camera);this.currentWeapon=-1;this._weaponCache=new Map();this.aim=false;this.lowHealth=false;this.cameraShake=new CameraShake();this.muzzleLights=null;this.lowHealthOverlay=null;this.railPool=null;this.deathPool=null;this.deathContext=new Map();this.payloadModel=null;this.decalPool=null;this.ripplePool=null;this.contactShadows=null;this.weatherAdd=null;this._weatherSplashSerial=0;this.ambientFx=null;this.ambientPool=null;this.ambientConfig=null;this.ambientAnchors=[];this.scatterWind=[];this.killcamEnabled=true;this._killcam=null;this.hitPool=null;this.hitFlinch=new Map();
+   this.scene.add(this.camera);this.currentWeapon=-1;this._weaponCache=new Map();this.aim=false;this.lowHealth=false;this.cameraShake=new CameraShake();this.muzzleLights=null;this.lowHealthOverlay=null;this.railPool=null;this.deathPool=null;this.deathContext=new Map();this.payloadModel=null;this.decalPool=null;this.ripplePool=null;this.contactShadows=null;this.weatherAdd=null;this._weatherSplashSerial=0;this.ambientFx=null;this.ambientPool=null;this.ambientConfig=null;this.ambientAnchors=[];this.scatterWind=[];this.killcamEnabled=true;this._killcam=null;this.hitPool=null;this.hitFlinch=new Map();this.followMarkers=null;
    // Ability/harness visual effects: the seven harness actives, the nine
    // snapshot-driven signature verbs and the placed-rope cables. Self-contained
    // presentation-only pools; `setMatch` resets them and `dispose` releases
    // every geometry/material.
    this.abilityVfx=createAbilityVfx({quality:()=>this._quality(),reduced:()=>this.reduced(),wingColor:id=>this.actorModels?.get(id)?.userData?.wingColor??null});
    this.abilityVfx.attach(this.scene);
-   this._lightning=[];this._lightningAt=0;this._flash=0;this._wetSheenApplied=0;this.preview=null;this.showcaseExpected=false;if(this.renderer.isSoftware!==true){this.muzzleLights=new MuzzleLightPool(this.scene,4);this.lowHealthOverlay=new LowHealthOverlay(this.camera);if(typeof document!=='undefined')this.railPool=new RailBeamPool(this.scene,6);this.decalPool=new DecalPool(this.scene,18);const rim=new T.DirectionalLight('#7fd8ff',.55);rim.position.set(-7,6,-9);rim.userData.rimLight=true;this.scene.add(rim);}this.menu=this.makeMenu();this.cinema=false;this.director=null;this._cameraOwner='auto';this._freeCam=false;this._directorLock=false;this.manualFollowId=null;this.freePose={x:0,y:6,z:0,yaw:0,pitch:0};this.freeSpeed=FREE_CAM_DEFAULT_SPEED;this.freeBoost=FREE_CAM_BOOST;this._freeVel=null;this._freeExit=null;this._freeExitPose=null;this._lastMode=null;this.showcaseState=null;this.previewRect=null;this.raycaster=new T.Raycaster();this._occClear=0;this.resize();}
+   this._lightning=[];this._lightningAt=0;this._flash=0;this._wetSheenApplied=0;this.preview=null;this.showcaseExpected=false;if(this.renderer.isSoftware!==true){this.muzzleLights=new MuzzleLightPool(this.scene,muzzleLightCount(this.qualitySettings?.tier??0));this.lowHealthOverlay=new LowHealthOverlay(this.camera);if(typeof document!=='undefined')this.railPool=new RailBeamPool(this.scene,6);this.decalPool=new DecalPool(this.scene,18);const rim=new T.DirectionalLight('#7fd8ff',.55);rim.position.set(-7,6,-9);rim.userData.rimLight=true;this.scene.add(rim);}this.menu=this.makeMenu();this.cinema=false;this.director=null;this._cameraOwner='auto';this._freeCam=false;this._directorLock=false;this.manualFollowId=null;this.freePose={x:0,y:6,z:0,yaw:0,pitch:0};this.freeSpeed=FREE_CAM_DEFAULT_SPEED;this.freeBoost=FREE_CAM_BOOST;this._freeVel=null;this._freeExit=null;this._freeExitPose=null;this._lastMode=null;this.showcaseState=null;this.previewRect=null;this.raycaster=new T.Raycaster();this._occClear=0;this.resize();}
        reduced(){return reducedMotion(this.display?.reducedMotion, Boolean(this.motionQuery?.matches));}
        // Presentation-only quality tier. Lazily resolved so partially constructed
        // views in tests still get a sane budget, and cached so hot paths are free.
@@ -886,6 +1274,9 @@ export class ArenaView{
         // shared, so no extra GPU memory is allocated.
         if(this.scene&&Number.isFinite(q.environment))this.scene.environmentIntensity=q.environment;
         this._applyEffectsQuality();
+        // Muzzle-light budget follows the tier (2/3/4). The pool is fixed-size,
+        // so a tier change releases the old lights and builds the new budget.
+        if(this.scene&&this.muzzleLights){const count=muzzleLightCount(q.tier);if(this.muzzleLights.lights.length!==count){this.muzzleLights.dispose();this.muzzleLights=new MuzzleLightPool(this.scene,count);}}
         // The CPU renderer gets a hard per-frame triangle ceiling taken from the
         // active tier; WebGL lowers real geometry detail through _applyModelDetail.
         if(software&&this.renderer.setTriangleBudget)this.renderer.setTriangleBudget(frameTriangleBudget(this.quality,{software:true}));
@@ -1406,8 +1797,61 @@ export class ArenaView{
     // through `actorModels`, so nothing else depends on actor layer 0.
     _addActorModel(model){
      model?.traverse?.(node=>node.layers?.set(BOT_LAYER));
+     this._ensureCarryBanner(model);
      this.scene?.add(model);
      return model;
+    }
+    // CTF carrier readability: a small team-tinted banner parented to the actor
+    // model and shown only while the snapshot says the actor carries a flag. It
+    // is built once per model from generated geometry only and disposed with the
+    // model by the shared disposeObject pass.
+    _ensureCarryBanner(model){
+     const data=model?.userData;
+     if(!data||!model.add)return null;
+     if(data.carryBanner)return data.carryBanner;
+     const group=new T.Group();group.name='carry-banner';
+     const material=new T.MeshBasicMaterial({color:'#fff4dc',transparent:true,opacity:.92,depthWrite:false});
+     const pole=new T.Mesh(new T.CylinderGeometry(.014,.014,.46,5),material);pole.position.y=.23;
+     const banner=new T.Mesh(new T.BoxGeometry(.34,.22,.02),material);banner.position.set(.19,.3,0);
+     group.add(pole,banner);
+     group.position.set(.4,1.26,.06);group.rotation.y=-.35;group.visible=false;group.renderOrder=4;
+     group.traverse(node=>{node.layers?.set(BOT_LAYER);node.userData.objective=true;node.userData.noCameraOcclusion=true;});
+     group.userData.carryBanner=true;group.userData.material=material;
+     data.carryBanner=group;
+     model.add(group);
+     return group;
+    }
+    // Per-frame carrier pass. The authoritative signal is `actor.carryingFlag`;
+    // the flag snapshots' carrier ids are the cross-check, so a dropped or
+    // returned flag clears the banner on the same frame. Banners on models that
+    // are not carrying (or are hidden) stay invisible.
+    _syncCarryBanners(match){
+     const models=this.actorModels;
+     if(!models?.size)return 0;
+     const carriers=new Set();
+     for(const actor of match?.actors||[]){
+      if(!actor||actor.id===undefined||actor.carryingFlag!==true)continue;
+      carriers.add(actor.id);
+     }
+     const flags=match?.flags,rows=Array.isArray(flags)?flags:flags&&typeof flags==='object'?Object.values(flags):[];
+     for(const flag of rows){
+      if(!flag)continue;
+      const carrier=flag.carrier??flag.carrierId??flag.carriedBy;
+      if(carrier===null||carrier===undefined)continue;
+      carriers.add(Number.isFinite(Number(carrier))?Number(carrier):carrier);
+     }
+     const arena=match?.arena||MAPS.find(map=>map.id===match?.mapId)||MAPS[0];
+     let shown=0;
+     for(const [id,model] of models){
+      const carrying=carriers.has(id),banner=carrying?this._ensureCarryBanner(model):model?.userData?.carryBanner;
+      if(!banner)continue;
+      banner.visible=carrying&&model.visible!==false;
+      if(!banner.visible)continue;
+      shown++;
+      const actor=(match?.actors||[]).find(entry=>entry?.id===id),color=this.objectiveColor(actor?.team,arena),material=banner.userData.material;
+      if(material?.color)material.color.set(color);
+     }
+     return shown;
     }
     _makeMirrorCamera(){
      const source=this.camera,camera=new T.PerspectiveCamera(source?.fov??82,source?.aspect??1,source?.near??.08,source?.far??220);
@@ -1987,7 +2431,7 @@ export class ArenaView{
  for(let i=-4;i<=4;i++){box(scene,.25,9,.5,i*3,4,-6,dark);box(scene,.045,6,.04,i*3+.18,4,-5.72,glow);}
   const model=robotModel('chatgpt',undefined,this.renderer?.isSoftware===true);model.scale.setScalar(2.15);model.position.y=.17;model.rotation.y=.25;scene.add(model);return {scene,camera,model,id:'chatgpt'};}
   setCharacter(id){if(id===this.menu.id)return;this.disposeObject(this.menu.model);this.menu.scene.remove(this.menu.model);this.menu.model=robotModel(id,undefined,this.renderer?.isSoftware===true);this.menu.model.scale.setScalar(2.15);this.menu.model.position.y=.17;this.menu.scene.add(this.menu.model);this.menu.id=id;}
-      setMatch(match){this.clearFreeMotion();this.characterLifecycle?.clear();this.deathContext?.clear();this.deathPool?.clear();this.hitPool?.clear();this.hitFlinch?.clear();this.shellPool?.clear();this.ripplePool?.clear?.();this.contactShadows?.clear?.();this.abilityVfx?.reset();this._clearDebugDeaths?.();const arena=match.arena||MAPS.find(a=>a.id===match.mapId)||MAPS[0];this.clearObjectiveMarkers();if(this.payloadModel){this.scene.remove(this.payloadModel);this.disposeObject(this.payloadModel);this.payloadModel=null;}for(const m of [...this.actorModels.values(),...this.pickupModels,...(this.flagModels||new Map()).values(),...(this.deployableModels||new Map()).values()]){this.scene.remove(m);this.disposeObject(m);}this.flagModels=new Map();this.deployableModels=new Map();if(this.mapId!==arena.id)this.buildArena(arena);const assets=this.modelAssets??=new ModelAssets();this.actorModels=new Map((match.actors||[]).map(a=>{const m=robotModel(a.character,assets,this.renderer?.isSoftware===true);this._addActorModel(m);return [a.id,m];}));this.pickupModels=(match.pickups||[]).map(p=>{const g=new T.Group(),colors=PICKUP_COLORS,pickupColor=colors[p.kind]||'#8ad9d3',mat=this._mothLutMaterial(this._mothLutTheme(arena),{base:{color:pickupColor,metalness:.4,roughness:.3,emissive:pickupColor},phase:.15,intensity:.4})??material(pickupColor,.4,.3,true);if(p.kind==='health'){box(g,.6,.19,.19,0,.65,0,mat);box(g,.19,.6,.19,0,.65,0,mat);}else if(p.kind==='armor'){const m=new T.Mesh(geometry(assets,'pickup-armor-octa',()=>new T.OctahedronGeometry(.4)),mat);m.position.y=.7;g.add(m);}else if(['haste','overcharge','overshield'].includes(p.kind)){const m=new T.Mesh(geometry(assets,'pickup-power-ico',()=>new T.IcosahedronGeometry(.36,1)),mat);m.position.y=.7;g.add(m);ring(g,.55,.022,0,.07,0,mat);}else{const w=simpleWeaponModel(pickupWeapon(p.kind),assets);w.position.y=.75;w.scale.setScalar(.7);g.add(w);}if(!['haste','overcharge','overshield'].includes(p.kind))ring(g,.55,.022,0,.07,0,mat);g.position.set(p.x||0,p.y||0,p.z||0);this.scene.add(g);return g;});this._trackAssets(assets);this.syncVehicles(match);this.updateFlags(match,arena);this.updateObjectives(match,arena);this.effectPool?.clear();this.telegraphPool?.clear();for(const m of this.zipCarriages?.values()||[]){this.scene.remove(m);this.disposeObject(m);}this.zipCarriages?.clear();this._fovPulse=0;this.projectilePool?.clear();this.altProjectiles?.clear();this._clearMothSprites();this.railPool?.clear();this.deathContext?.clear();this.deathPool?.clear();this.decalPool?.clear();this.ambientFx?.reset();this.debrisPool?.clear();this.hitFlinch?.clear();this.hitPool?.clear();this._killcam=null;this.feedback?.reset();this.cameraShake?.reset();this.lowHealth=false;this.flashUntil=0;this.lastEvent=match.serial||0;this.currentWeapon=-1;this._adsTransition=0;this._adsController?.reset(this.display?.fov??82);this._nearActionAt=undefined;this._nearAction=0;this._cocsPresentation=null;this.resetPresentation();
+      setMatch(match){this.clearFreeMotion();this.characterLifecycle?.clear();this.deathContext?.clear();this.deathPool?.clear();this.hitPool?.clear();this.hitFlinch?.clear();this.shellPool?.clear();this.ripplePool?.clear?.();this.contactShadows?.clear?.();this.abilityVfx?.reset();this._clearDebugDeaths?.();const arena=match.arena||MAPS.find(a=>a.id===match.mapId)||MAPS[0];this.clearObjectiveMarkers();if(this.payloadModel){this.scene.remove(this.payloadModel);this.disposeObject(this.payloadModel);this.payloadModel=null;}for(const m of [...this.actorModels.values(),...this.pickupModels,...(this.flagModels||new Map()).values(),...(this.deployableModels||new Map()).values()]){this.scene.remove(m);this.disposeObject(m);}this.flagModels=new Map();this.deployableModels=new Map();if(this.mapId!==arena.id)this.buildArena(arena);const assets=this.modelAssets??=new ModelAssets();this.actorModels=new Map((match.actors||[]).map(a=>{const m=robotModel(a.character,assets,this.renderer?.isSoftware===true);this._addActorModel(m);return [a.id,m];}));this.pickupModels=(match.pickups||[]).map(p=>{const g=new T.Group(),colors=PICKUP_COLORS,pickupColor=colors[p.kind]||'#8ad9d3',mat=this._mothLutMaterial(this._mothLutTheme(arena),{base:{color:pickupColor,metalness:.4,roughness:.3,emissive:pickupColor},phase:.15,intensity:.4})??material(pickupColor,.4,.3,true);if(p.kind==='health'){box(g,.6,.19,.19,0,.65,0,mat);box(g,.19,.6,.19,0,.65,0,mat);}else if(p.kind==='armor'){const m=new T.Mesh(geometry(assets,'pickup-armor-octa',()=>new T.OctahedronGeometry(.4)),mat);m.position.y=.7;g.add(m);}else if(['haste','overcharge','overshield'].includes(p.kind)){const m=new T.Mesh(geometry(assets,'pickup-power-ico',()=>new T.IcosahedronGeometry(.36,1)),mat);m.position.y=.7;g.add(m);ring(g,.55,.022,0,.07,0,mat);}else{const w=simpleWeaponModel(pickupWeapon(p.kind),assets);w.position.y=.75;w.scale.setScalar(.7);g.add(w);}if(!['haste','overcharge','overshield'].includes(p.kind))ring(g,.55,.022,0,.07,0,mat);g.position.set(p.x||0,p.y||0,p.z||0);this.scene.add(g);return g;});this._trackAssets(assets);this.syncVehicles(match);this.updateFlags(match,arena);this.updateObjectives(match,arena);this.effectPool?.clear();this.telegraphPool?.clear();for(const m of this.zipCarriages?.values()||[]){this.scene.remove(m);this.disposeObject(m);}this.zipCarriages?.clear();this._fovPulse=0;this.projectilePool?.clear();this.altProjectiles?.clear();this._clearMothSprites();this.railPool?.clear();this.deathContext?.clear();this.deathPool?.clear();this.decalPool?.clear();this.ambientFx?.reset();this.debrisPool?.clear();this.hitFlinch?.clear();this.hitPool?.clear();this._killcam=null;this.feedback?.reset();this.cameraShake?.reset();this.lowHealth=false;this.flashUntil=0;this.lastEvent=match.serial||0;this.currentWeapon=-1;this._adsTransition=0;this._adsController?.reset(this.display?.fov??82);this._nearActionAt=undefined;this._nearAction=0;this._cocsPresentation=null;this.followMarkers?.clear();this.resetPresentation();
   // Per-mode music theme. The audio object retunes its running drone in place.
   const mode=match.config?.mode??match.mode;if(mode)this.viewAudio?.setModeTheme?.(mode);this._modeTheme=mode??this._modeTheme;}
       syncActors(match){const actors=match?.actors||[];for(const actor of actors)if(!this.actorModels.has(actor.id)){const model=robotModel(actor.character,this.modelAssets??=new ModelAssets(),this.renderer?.isSoftware===true);applyActorTeam(model,actor.team,this.display?.teamPalette);this._addActorModel(model);this.actorModels.set(actor.id,model);}const live=new Set(actors.map(actor=>actor.id));for(const [id,model] of this.actorModels)if(!live.has(id)){this.characterLifecycle?.release(model);this.scene.remove(model);this.disposeObject(model);this.actorModels.delete(id);}}
@@ -1996,6 +2440,19 @@ export class ArenaView{
    createFlagModel(team,arena){const resources=this.renderResources??=new Set(),color=this.objectiveColor(team,arena);const assets=this.flagAssets??={},poleGeo=assets.pole??=new T.CylinderGeometry(.035,.05,1.8,8),bannerGeo=assets.banner??=new T.BoxGeometry(.52,.32,.035),baseGeo=assets.base??=new T.CylinderGeometry(.34,.42,.08,16),mat=this._mothLutMaterial('entanglement',{base:{color,metalness:.35,roughness:.3,emissive:color},phase:.3,intensity:.5})??material(color,.35,.3,true);resources.add(poleGeo);resources.add(bannerGeo);resources.add(baseGeo);const g=new T.Group();const pole=new T.Mesh(poleGeo,mat);pole.position.y=.9;g.add(pole);const banner=new T.Mesh(bannerGeo,mat);banner.position.set(.24,1.55,0);g.add(banner);for(const z of [-.025,.025]){const mark=teamMark();mark.position.set(.24,1.55,z);updateTeamMark(mark,team);g.add(mark);}const base=new T.Mesh(baseGeo,mat);base.position.y=.04;g.add(base);g.userData={team,teamLabel:teamPresentation(team,this.display?.teamPalette)?.label??null,flag:true,banner,material:mat};return g;}
      updateFlags(match,arena=MAPS[0]){this.updateVehicleModels(match);const input=match?.flags;if(!input){for(const g of this.flagModels?.values()||[])g.visible=false;return;}const flags=Array.isArray(input)?input:Object.entries(input).map(([team,flag])=>({...flag,team:flag?.team??team}));const active=new Set();for(const flag of flags.slice(0,8)){if(!flag)continue;const team=flag.team??flag.teamId??flag.id??0,key=String(team);let g=this.flagModels.get(key);if(!g){g=this.createFlagModel(team,arena);this.flagModels.set(key,g);this.scene.add(g);}active.add(key);const carrier=flag.carrier??flag.carrierId??flag.carriedBy;g.visible=carrier==null&&flag.state!=='carried'&&flag.status!=='carried';const p=pointOf(flag);g.position.set(p.x||0,p.y||0,p.z||0);g.rotation.y=flag.yaw??0;const dropped=flag.dropped===true||flag.state==='dropped'||flag.status==='dropped';const pulse=dropped&&!this.reduced();g.scale.setScalar(pulse?1+Math.sin((match.time||0)*7)*.08:1);g.userData.banner.material.opacity=dropped?.75:1;g.userData.banner.material.transparent=true;const flagColor=this.objectiveColor(team,arena),flagMaterial=g.userData.material;if(flagMaterial){flagMaterial.color.set(flagColor);flagMaterial.emissive?.set(flagColor);g.userData.banner.material.color.set(flagColor);}}for(const [key,g] of this.flagModels)if(!active.has(key))g.visible=false;}
      objectiveColor(team,arena,neutral=NEUTRAL){return teamPresentation(team,this.display?.teamPalette)?.color??neutral;}
+     // Zone team marks. A contested zone keeps a readable owner mark instead of
+     // hiding it: the owner's bars when owned, one centred neutral bar when
+     // split or unowned. The zone pulse and the amber tint carry the contest, so
+     // the mark never disappears exactly when the fight is for the hill.
+     _styleZoneMark(mark,zone){
+      if(!mark?.children?.length)return null;
+      const owner=zone?.owner===0||zone?.owner===1?zone.owner:null,contested=zone?.contested===true;
+      updateTeamMark(mark,owner);
+      if(contested&&owner===null){mark.visible=true;mark.children[0].visible=true;mark.children[0].position.x=0;mark.children[1].visible=false;}
+      const material=mark.children[0].material;
+      if(material?.color)material.color.set(contested?'#ffd166':'#fff4dc');
+      return mark;
+     }
        createObjectiveModel(zone,arena){const radius=Math.max(.8,Number(zone.radius)||3.5),progressValue=Math.max(0,Math.min(100,Number(zone.progress)||0)),software=this.renderer?.isSoftware===true,g=new T.Group(),tint=this.objectiveColor(zone.owner,arena),lutName=this._mothLutTheme(arena),baseMat=material(tint,.25,.3,true),areaMat=material(tint,.15,.8,true),progressMat=this._mothLutMaterial(lutName,{base:{color:'#ffd166',metalness:.2,roughness:.25,emissive:'#ffd166'},phase:.45,intensity:.7})??material('#ffd166',.2,.25,true),beaconMat=this._mothLutMaterial(lutName,{base:{color:tint,metalness:.25,roughness:.3,emissive:tint},phase:.15,intensity:.6})??material(tint,.25,.3,true),beacon=cylinder(g,.09,.16,2.4,0,1.2,0,beaconMat,10),area=new T.Mesh(new T.CylinderGeometry(radius,radius,.035,32),areaMat),base=ring(g,radius,.11,0,.05,0,baseMat),progress=new T.Mesh(software?new T.RingGeometry(radius-.2,radius+.2,32,1,0,Math.PI*2*progressValue/100):new T.RingGeometry(radius-.2,radius+.2,32),progressMat),emblem=new T.Mesh(new T.CylinderGeometry(.34,.34,.08,8),progressMat);for(const mat of [baseMat,areaMat,progressMat])mat.depthWrite=false;beaconMat.depthTest=false;beaconMat.depthWrite=false;area.position.y=.018;area.renderOrder=1;base.renderOrder=1;progress.rotation.x=-Math.PI/2;progress.position.y=.07;progress.renderOrder=1;emblem.position.y=.13;emblem.renderOrder=1;beacon.renderOrder=100;if(!software)progress.geometry.setDrawRange(0,0);g.add(area,progress,emblem);g.userData={objective:true,area,base,beacon,progress,emblem,areaMat,baseMat,progressMat,beaconMat,radius,identifier:String(zone.id??'zone')};g.traverse(n=>{n.userData.objective=true;n.userData.noCameraOcclusion=true;});return g;}
      clearObjectiveMarkers(){for(const g of this.objectiveModels?.values()||[]){this.worldGroup?.remove(g);this.disposeObject(g);}this.objectiveModels?.clear();}
      // --- Moth-baked sprite effects ----------------------------------------
@@ -2070,9 +2527,15 @@ export class ArenaView{
       const ring=tag(new T.Mesh(new T.TorusGeometry(1.5,.09,8,36),glow));ring.rotation.x=Math.PI/2;ring.position.y=-1.18;ring.renderOrder=90;g.add(ring);
       const beacon=tag(cylinder(g,.07,.14,1.5,0,1.35,0,glow,10));g.add(beacon);
       const halo=tag(new T.Mesh(new T.TorusGeometry(.34,.05,8,24),glow));halo.rotation.x=Math.PI/2;halo.position.y=.9;g.add(halo);
+      // Checkpoint tick ring: six fixed ticks on the ground hoop, lit one per
+      // banked checkpoint. The slots are built once from one shared tiny
+      // geometry; unused ticks stay hidden.
+      const ticks=tag(new T.Group());ticks.name='payload-ticks';ticks.position.y=-1.18;g.add(ticks);
+      const tickGeo=new T.BoxGeometry(.16,.05,.1),tickPending=material('#5b6470',.3,.5);
+      for(let i=0;i<6;i++){const tick=tag(new T.Mesh(tickGeo,tickPending));tick.visible=false;tick.renderOrder=90;ticks.add(tick);}
       let question=null;
       if(typeof document!=='undefined'&&typeof document.createElement==='function'){question=textLabel(g,'?',0,2.35,0,.6,'#ffffff');question.userData.objective=true;question.userData.noCameraOcclusion=true;}
-      g.userData={payload:true,body,snout,wings,trotters,beacon,halo,ring,accentMaterials:[accent,glow],question,lastPosition:null};
+      g.userData={payload:true,body,snout,wings,trotters,beacon,halo,ring,ticks,tickGeo,tickPending,accentMaterials:[accent,glow],question,lastPosition:null};
       return g;
      }
      updatePayloadModel(match,arena=MAPS[0],time=0){
@@ -2090,9 +2553,38 @@ export class ArenaView{
       if(payload.contested&&!g.userData.contested&&!reduced)this._spawnMothSprite('arc-burst',{x:p.x||0,y:(p.y||0)+1.35,z:p.z||0},{size:3,opacity:.6,life:.5,grow:.5,slots:3});
       g.userData.contested=payload.contested===true;
       for(const part of g.userData.accentMaterials||[]){part.color.set(color);part.emissive?.set(color);}
-      const beacon=g.userData.beacon,halo=g.userData.halo;
-      if(beacon)beacon.material.emissiveIntensity=reduced?1:1+.6*Math.sin(t*4);
-      if(halo)halo.scale.setScalar(reduced?1:1+.08*Math.sin(t*4));
+      // Payload state on the existing rings: banked progress grows the ground
+      // hoop, a contest beats it, delivery flares the emblem halo, and pushing
+      // reads through the already team-tinted accent materials. Reduced motion
+      // holds every ring static.
+      const total=Math.max(1,Number(payload.total)||1),progress=Math.max(0,Math.min(1,(Number(payload.distance)||0)/total)),state=payload.delivered===true?'delivered':payload.contested===true?'contested':payload.pushing===0||payload.pushing===1?'pushing':'idle';
+      const beacon=g.userData.beacon,halo=g.userData.halo,ring=g.userData.ring;
+      if(beacon)beacon.material.emissiveIntensity=state==='delivered'?1.6:reduced?1:1+.6*Math.sin(t*4);
+      if(halo)halo.scale.setScalar(state==='delivered'?1.3:state==='contested'&&!reduced?1+.12*Math.sin(t*6):reduced?1:1+.08*Math.sin(t*4));
+      if(ring){ring.scale.setScalar(1+progress*.2+(state==='contested'&&!reduced?Math.abs(Math.sin(t*6))*.08:0));ring.rotation.z=reduced?0:t*.6;}
+      this._syncPayloadTicks(g,payload);
+      g.userData.payloadState=state;
+     }
+     // Light one tick per banked checkpoint on the payload's ground hoop. Always
+     // six slots, so the tick count never allocates during a match; reached ticks
+     // take the state-tinted accent material and a slightly larger scale.
+     _syncPayloadTicks(g,payload){
+      const data=g?.userData,ticks=data?.ticks;
+      if(!ticks?.children?.length)return 0;
+      const count=Math.max(0,Math.min(ticks.children.length,Array.isArray(payload?.checkpoints)?payload.checkpoints.length:0)),reached=Math.max(0,Math.min(count,Number(payload?.checkpointsReached)||0)),lit=data.accentMaterials?.[1]??data.accentMaterials?.[0]??data.tickPending;
+      ticks.visible=count>0;
+      for(let i=0;i<ticks.children.length;i++){
+       const tick=ticks.children[i],show=i<count;
+       tick.visible=show;
+       if(!show)continue;
+       const angle=(i+.5)/count*Math.PI*2,on=i<reached;
+       tick.position.set(Math.sin(angle)*1.5,0,Math.cos(angle)*1.5);
+       tick.rotation.y=angle;
+       tick.material=on?lit:data.tickPending;
+       tick.scale.setScalar(on?1.18:1);
+      }
+      data.ticksReached=reached;data.tickCount=count;
+      return reached;
      }
       // DEPLOYABLE SENTRIES. The sim fires from them while the renderer never
       // drew one; this mirrors the pickup lifecycle: one shared-geometry model
@@ -2354,7 +2846,7 @@ export class ArenaView{
        }
        for(const [key,g] of this.objectiveModels)if(!active.has(key)){this.worldGroup?.remove(g);this.disposeObject(g);this.objectiveModels.delete(key);}
       }
-        updateObjectives(match,arena=MAPS[0]){const input=match?.objectives??match?.objectiveState;if(input?.kind==='cocs'){this.updateCocsObjectives(match,arena);return;}if(!input||!['koth','domination','assault','payload','extraction'].includes(input.kind)){this.clearObjectiveMarkers();return;}this.objectiveModels??=new Map();const active=new Set(),reduced=this.reduced(),software=this.renderer?.isSoftware===true,assaultActive=input.kind==='assault'&&Number.isFinite(input.active)?input.active:-1;for(const [zoneIndex,zone] of (input.kind==='extraction'?[{id:'extract',x:input.extract?.x,z:input.extract?.z,radius:input.escortRadius??6,progress:input.captureSeconds>0?Math.max(0,Math.min(100,(Number(input.progress)||0)/Number(input.captureSeconds)*100)):0,owner:Number.isInteger(input.escortTeam)?input.escortTeam:null,captureTeam:null,contested:false}]:input.zones||[]).entries()){if(!zone)continue;const key=String(zone.id??active.size),p=pointOf(zone),owner=zone.contested?'contested':zone.owner,capture=zone.captureTeam??zone.owner,progress=Math.max(0,Math.min(100,Number(zone.progress)||0)),radius=Math.max(.8,Number(zone.radius)||3.5);let g=this.objectiveModels.get(key);if(!g){g=this.createObjectiveModel(zone,arena);this.objectiveModels.set(key,g);this.worldGroup?.add(g);}active.add(key);const color=zone.contested?'#ffd166':this.objectiveColor(owner,arena),progressColor=zone.contested?'#ffd166':this.objectiveColor(capture,arena);g.position.set(p.x||0,p.y||0,p.z||0);g.userData.baseMat.color.set(color);g.userData.baseMat.emissive.set(color);g.userData.areaMat.color.set(color);g.userData.areaMat.emissive.set(color);g.userData.beaconMat.color.set(color);g.userData.beaconMat.emissive.set(color);g.userData.progressMat.color.set(progressColor);g.userData.progressMat.emissive.set(progressColor);g.userData.progressMat.opacity=progress>0?1:0;g.userData.progressMat.transparent=true;if(g.userData.radius!==radius){g.userData.area.geometry.dispose();g.userData.area.geometry=new T.CylinderGeometry(radius,radius,.035,32);g.userData.base.geometry.dispose();g.userData.base.geometry=new T.TorusGeometry(radius,.11,6,32);g.userData.progress.geometry.dispose();g.userData.progress.geometry=software?new T.RingGeometry(radius-.2,radius+.2,32,1,0,Math.PI*2*progress/100):new T.RingGeometry(radius-.2,radius+.2,32);if(!software)g.userData.progress.geometry.setDrawRange(0,Math.ceil(progress/100*32)*6);g.userData.radius=radius;}if(g.userData.progressValue!==progress){if(software){g.userData.progress.geometry.dispose();g.userData.progress.geometry=new T.RingGeometry(radius-.2,radius+.2,32,1,0,Math.PI*2*progress/100);}else g.userData.progress.geometry.setDrawRange(0,Math.ceil(progress/100*32)*6);g.userData.progressValue=progress;}g.userData.progress.visible=progress>0;this._applyBeaconProgress(g,progress);g.userData.identifier=String(zone.id??'zone');g.userData.emblem.material=g.userData.progressMat;const sectorActive=input.kind==='assault'&&zoneIndex===assaultActive,sectorDim=input.kind==='assault'&&!sectorActive;g.userData.assaultActive=sectorActive;if(input.kind==='assault'){g.userData.areaMat.opacity=sectorDim?.16:1;g.userData.areaMat.transparent=true;g.userData.baseMat.opacity=sectorDim?.32:1;g.userData.baseMat.transparent=true;g.userData.areaMat.emissiveIntensity=sectorActive?1.9:sectorDim?.3:1.25;g.userData.baseMat.emissiveIntensity=sectorActive?2:sectorDim?.35:1.25;if(!g.userData.assaultLabel&&typeof document!=='undefined'&&typeof document.createElement==='function'){const assaultLabel=textLabel(g,String(zone.id??'sector').toUpperCase(),0,2.7,0,.5,sectorActive?'#ffffff':'#95a3ac');assaultLabel.userData.objective=true;assaultLabel.userData.noCameraOcclusion=true;g.userData.assaultLabel=assaultLabel;}if(g.userData.assaultLabel)g.userData.assaultLabel.visible=sectorActive;}g.scale.y=reduced?1:sectorActive?1.04+.1*Math.sin((match.time||0)*5):sectorDim?1:1+.06*Math.sin((match.time||0)*4+(zone.id?.length||0));}for(const [key,g] of this.objectiveModels)if(!active.has(key)){this.worldGroup?.remove(g);this.disposeObject(g);this.objectiveModels.delete(key);}}
+        updateObjectives(match,arena=MAPS[0]){const input=match?.objectives??match?.objectiveState;if(input?.kind==='cocs'){this.updateCocsObjectives(match,arena);return;}if(!input||!['koth','domination','assault','payload','extraction'].includes(input.kind)){this.clearObjectiveMarkers();return;}this.objectiveModels??=new Map();const active=new Set(),reduced=this.reduced(),software=this.renderer?.isSoftware===true,assaultActive=input.kind==='assault'&&Number.isFinite(input.active)?input.active:-1;for(const [zoneIndex,zone] of (input.kind==='extraction'?[{id:'extract',x:input.extract?.x,z:input.extract?.z,radius:input.escortRadius??6,progress:input.captureSeconds>0?Math.max(0,Math.min(100,(Number(input.progress)||0)/Number(input.captureSeconds)*100)):0,owner:Number.isInteger(input.escortTeam)?input.escortTeam:null,captureTeam:null,contested:false}]:input.zones||[]).entries()){if(!zone)continue;const key=String(zone.id??active.size),p=pointOf(zone),owner=zone.contested?'contested':zone.owner,capture=zone.captureTeam??zone.owner,progress=Math.max(0,Math.min(100,Number(zone.progress)||0)),radius=Math.max(.8,Number(zone.radius)||3.5);let g=this.objectiveModels.get(key);if(!g){g=this.createObjectiveModel(zone,arena);this.objectiveModels.set(key,g);this.worldGroup?.add(g);}active.add(key);const color=zone.contested?'#ffd166':this.objectiveColor(owner,arena),progressColor=zone.contested?'#ffd166':this.objectiveColor(capture,arena);g.position.set(p.x||0,p.y||0,p.z||0);g.userData.baseMat.color.set(color);g.userData.baseMat.emissive.set(color);g.userData.areaMat.color.set(color);g.userData.areaMat.emissive.set(color);g.userData.beaconMat.color.set(color);g.userData.beaconMat.emissive.set(color);g.userData.progressMat.color.set(progressColor);g.userData.progressMat.emissive.set(progressColor);g.userData.progressMat.opacity=progress>0?1:0;g.userData.progressMat.transparent=true;if(g.userData.radius!==radius){g.userData.area.geometry.dispose();g.userData.area.geometry=new T.CylinderGeometry(radius,radius,.035,32);g.userData.base.geometry.dispose();g.userData.base.geometry=new T.TorusGeometry(radius,.11,6,32);g.userData.progress.geometry.dispose();g.userData.progress.geometry=software?new T.RingGeometry(radius-.2,radius+.2,32,1,0,Math.PI*2*progress/100):new T.RingGeometry(radius-.2,radius+.2,32);if(!software)g.userData.progress.geometry.setDrawRange(0,Math.ceil(progress/100*32)*6);g.userData.radius=radius;}if(g.userData.progressValue!==progress){if(software){g.userData.progress.geometry.dispose();g.userData.progress.geometry=new T.RingGeometry(radius-.2,radius+.2,32,1,0,Math.PI*2*progress/100);}else g.userData.progress.geometry.setDrawRange(0,Math.ceil(progress/100*32)*6);g.userData.progressValue=progress;}g.userData.progress.visible=progress>0;this._applyBeaconProgress(g,progress);g.userData.identifier=String(zone.id??'zone');g.userData.emblem.material=g.userData.progressMat;const sectorActive=input.kind==='assault'&&zoneIndex===assaultActive,sectorDim=input.kind==='assault'&&!sectorActive;g.userData.assaultActive=sectorActive;if(input.kind==='assault'){g.userData.areaMat.opacity=sectorDim?.16:1;g.userData.areaMat.transparent=true;g.userData.baseMat.opacity=sectorDim?.32:1;g.userData.baseMat.transparent=true;g.userData.areaMat.emissiveIntensity=sectorActive?1.9:sectorDim?.3:1.25;g.userData.baseMat.emissiveIntensity=sectorActive?2:sectorDim?.35:1.25;if(!g.userData.assaultLabel&&typeof document!=='undefined'&&typeof document.createElement==='function'){const assaultLabel=textLabel(g,String(zone.id??'sector').toUpperCase(),0,2.7,0,.5,sectorActive?'#ffffff':'#95a3ac');assaultLabel.userData.objective=true;assaultLabel.userData.noCameraOcclusion=true;g.userData.assaultLabel=assaultLabel;}if(g.userData.assaultLabel)g.userData.assaultLabel.visible=sectorActive;}g.scale.y=reduced?1:sectorActive?1.04+.1*Math.sin((match.time||0)*5):sectorDim?1:zone.contested?1.05+.09*Math.sin((match.time||0)*6+(zone.id?.length||0)):1+.06*Math.sin((match.time||0)*4+(zone.id?.length||0));}for(const [key,g] of this.objectiveModels)if(!active.has(key)){this.worldGroup?.remove(g);this.disposeObject(g);this.objectiveModels.delete(key);}}
      updateVehicleModels(match){const reduced=this.reduced(),now=typeof performance!=='undefined'?performance.now():0;for(const vehicle of match.vehicles||[]){const model=this.vehicleModels?.get(vehicle.id);if(!model)continue;const p=vehicle.position||vehicle,x=p.x??0,y=p.y??0,z=p.z??0,yaw=vehicle.yaw??vehicle.heading??0,health=vehicle.health??1,respawn=vehicle.respawnTimer??0,vehiclePres=this._interpEnabled?this._presentVehicle(vehicle.id):null;model.visible=health>0&&respawn<=0;model.position.set(x,y,z);model.rotation.y=yaw;model.rotation.z=vehicle.roll??0;model.rotation.x=vehicle.pitchBody??vehicle.pitch??0;if(vehiclePres&&!vehiclePres.snapped){model.position.set(vehiclePres.x,vehiclePres.y,vehiclePres.z);model.rotation.y=vehiclePres.yaw;}const speed=Math.hypot(vehicle.vx??0,vehicle.vz??0),stamp=Number.isFinite(match.time)?match.time:now/1000,dt=Math.max(0,Math.min(.1,stamp-(model.userData.spinTime??stamp)));model.userData.spinTime=stamp;const odometer=(model.userData.odometer??0)+speed*dt;model.userData.odometer=odometer;for(const wheel of model.userData.wheels||[])wheel.rotation.x=odometer/.42;const turret=model.userData.turret;if(turret)turret.rotation.y=Number.isFinite(vehicle.turretYaw)?vehicle.turretYaw:0;const heat=vehicle.heat??0,flash=(model.userData.flashUntil??0)>now;for(const gun of model.userData.guns||[]){gun.mount.scale.setScalar(1+heat*.08);gun.flash.visible=!reduced&&flash;}if(!reduced&&(vehicle.boosting===true||((vehicle.boostCooldown??0)>0&&speed>11)||(vehicle.effects?.turbo>0))){if(stamp-(model.userData.lastExhaust??0)>=.04){model.userData.lastExhaust=stamp;this.effectPool??=new EffectPool(this.scene);const backDist=1.35,exX=x+Math.sin(yaw)*backDist,exY=y+.32,exZ=z+Math.cos(yaw)*backDist;this.effectPool.add({pos:V(exX,exY,exZ),color:(vehicle.effects?.turbo>0)?'#ff6622':'#00e5ff',endColor:(vehicle.effects?.turbo>0)?'#ff2200':'#0055ff',fade:'smooth',damping:1.2,size:.14,life:.22,expand:1.5,velocity:V(Math.sin(yaw)*2.5+(Math.random()-.5)*.4,Math.random()*.3,Math.cos(yaw)*2.5+(Math.random()-.5)*.4)});}}
    // Damaged-vehicle readability: below ~40% health a pooled smoke plume and
    // occasional sparks mark the wreck before it dies. Quality-scaled, WebGL
@@ -2382,7 +2874,7 @@ export class ArenaView{
     _trackAssets(assets=this.modelAssets){if(!assets)return;const shared=this.sharedResources??=new Set();for(const resource of assets.resources)shared.add(resource);}
     disposeObject(o){if(!o?.traverse)return;const shared=this.renderResources,modelShared=this.sharedResources,geometries=new Set(),materials=new Set(),textures=new Set();o.traverse(n=>{if(n.geometry&&!shared?.has(n.geometry)&&!modelShared?.has(n.geometry))geometries.add(n.geometry);if(n.material)for(const m of Array.isArray(n.material)?n.material:[n.material])if(!shared?.has(m)&&!modelShared?.has(m)){materials.add(m);for(const key of ['map','normalMap','roughnessMap','metalnessMap','emissiveMap','alphaMap','aoMap','bumpMap','displacementMap','envMap','lightMap','specularMap','gradientMap'])if(m[key]&&!m[key].userData?.surfaceKind&&!m[key].userData?.mothShared)textures.add(m[key]);}});for(const r of [...geometries,...materials,...textures])r.dispose();}
    effect(e){if(!e)return;this.effectPool??=new EffectPool(this.scene);this.feedback??=new WeaponFeedback();const reduced=this.reduced(),info=weaponInfo(e.weapon??0);
-   if(e.type==='death'){this.spawnDeath(e,reduced);if(this.killcamEnabled!==false&&!reduced&&e.pos&&(e.actor===this.playerId||this.spectator===true)){const focus={x:e.pos.x||0,y:e.pos.y||0,z:e.pos.z||0},killerModel=e.killer!=null?this.actorModels?.get(e.killer):null,killerPos=killerModel?.position;this._killcam={start:Number.isFinite(e.time)?e.time:0,duration:KILLCAM_DURATION,focus,killer:killerPos?{x:killerPos.x,y:killerPos.y,z:killerPos.z}:null,seed:((Number.isFinite(e.seed)?e.seed:(e.actor??0)*7)>>>0)||1};}}
+   if(e.type==='death'){this.spawnDeath(e,reduced);if(this.killcamEnabled!==false&&!reduced&&e.pos&&(e.actor===this.playerId||this.spectator===true)){const focus={x:e.pos.x||0,y:e.pos.y||0,z:e.pos.z||0},killerModel=e.killer!=null?this.actorModels?.get(e.killer):null,killerPos=killerModel?.position;this._killcam={start:Number.isFinite(e.time)?e.time:0,duration:KILLCAM_DURATION,focus,killer:killerPos?{x:killerPos.x,y:killerPos.y,z:killerPos.z}:null,killerId:Number.isInteger(e.killer)?e.killer:null,seed:((Number.isFinite(e.seed)?e.seed:(e.actor??0)*7)>>>0)||1};}}
     // A local melee swing is presentation-only: the sim owns the hit, the view
     // owns the weapon arc.
     if(e.type==='melee'&&e.actor===this.playerId&&!reduced)this.meleeSwing({duration:.22,seed:Number.isFinite(e.id)?e.id:0});
@@ -2626,20 +3118,20 @@ export class ArenaView{
     if(altSpec)return this._altShotEffect(e,altSpec,from,to,reduced);
     if(e.type==='dash'){if(from&&to)this.effectPool.add({from,to,color:'#c99aff',life:.12,size:.08});return;}
     if(e.type==='launch'){if(to){this.effectPool.add({pos:to,color,size:(feel.muzzle?.[0]||.12)*1.5,life:feel.muzzle?.[1]||.09});this.effectPool.add({pos:to,color:'#ffffff',size:.06,life:.08});}return;}
-      if(e.type==='vehicle-shot'){if(from&&to){this.effectPool.add({from,to,color,life:.08,size:.06,additive:true});this.effectPool.add({pos:to,color:'#fff2ce',size:.09,life:.12,expand:reduced?0:.3,additive:true});}return;}
+      if(e.type==='vehicle-shot'){if(from&&to){this.effectPool.add({from,to,color,life:.08,size:.06*tracerScale,additive:true});this.effectPool.add({pos:to,color:'#fff2ce',size:.09*tracerScale,life:.12,expand:reduced?0:.3,additive:true});}return;}
      // A trace whose visual origin was clamped behind a close wall (or that is
      // simply shorter than ~5cm) keeps its impact but drops the backwards line.
      if(e.suppressTrace){if(to)this.impact(weapon,to,color,reduced,e.hit,from);return;}
      if(!from||!to)return;
      {const dx=(to.x||0)-(from.x||0),dy=(to.y||0)-(from.y||0),dz=(to.z||0)-(from.z||0);if(dx*dx+dy*dy+dz*dz<.0025){this.impact(weapon,to,color,reduced,e.hit,from);return;}}
-    if(weapon===2&&this.railPool){this.railPool.spawn(from,to,color,reduced);this.railImpact(to,color,reduced);return;}
-    if(weapon===6){this.lightning(from,to,color,reduced);this.impact(weapon,to,color,reduced,e.hit,from);return;}
+    if(weapon===2&&this.railPool){this.railPool.spawn(from,to,color,reduced,tracerScale);this.railImpact(to,color,reduced);return;}
+    if(weapon===6){this.lightning(from,to,color,reduced,tracerScale);this.impact(weapon,to,color,reduced,e.hit,from);return;}
      if(weapon===3||weapon===7){this.effectPool.add({from,to,color,life:.06,size:(weapon===7?.055:.04)*tracerScale,additive:true});this.impact(weapon,to,color,reduced,e.hit,from);return;}
      if(weapon===8){this.effectPool.add({from,to,color,life:.14,size:.05*tracerScale,additive:true});this.effectPool.add({from,to,color:'#ffffff',life:.06,size:.022*tracerScale,additive:true});this.impact(weapon,to,color,reduced,e.hit,from);return;}
      if(weapon===9){this.effectPool.add({from,to,color,life:.05,size:.035*tracerScale,additive:true});this.impact(weapon,to,color,reduced,e.hit,from);return;}
      this.effectPool.add({from,to,color,life:tracer[0],size:tracer[1]*tracerScale,additive:true});this.effectPool.add({from,to,color:'#ffffff',life:tracer[0]*.6,size:Math.max(.022,tracer[1]*.4*tracerScale),additive:true});this.impact(weapon,to,color,reduced,e.hit,from);
    }
-   lightning(from,to,color,reduced){const segments=reduced?5:9,dx=(to.x-from.x)/segments,dy=(to.y-from.y)/segments,dz=(to.z-from.z)/segments,amp=reduced?.05:.16;let px=from.x,py=from.y,pz=from.z;for(let i=0;i<segments;i++){const last=i===segments-1,jitter=last?0:amp,ox=(Math.random()-.5)*jitter,oy=(Math.random()-.5)*jitter,oz=(Math.random()-.5)*jitter,nx=px+dx+ox,ny=py+dy+oy,nz=pz+dz+oz;this.effectPool.add({from:{x:px,y:py,z:pz},to:{x:nx,y:ny,z:nz},color,life:.07,size:.03});this.effectPool.add({from:{x:px,y:py,z:pz},to:{x:nx,y:ny,z:nz},color:'#ffffff',life:.04,size:.012});px=nx;py=ny;pz=nz;}}
+   lightning(from,to,color,reduced,widthScale=1){const segments=reduced?5:9,width=Math.max(.2,Math.min(2.5,Number(widthScale)||1)),dx=(to.x-from.x)/segments,dy=(to.y-from.y)/segments,dz=(to.z-from.z)/segments,amp=reduced?.05:.16;let px=from.x,py=from.y,pz=from.z;for(let i=0;i<segments;i++){const last=i===segments-1,jitter=last?0:amp,ox=(Math.random()-.5)*jitter,oy=(Math.random()-.5)*jitter,oz=(Math.random()-.5)*jitter,nx=px+dx+ox,ny=py+dy+oy,nz=pz+dz+oz;this.effectPool.add({from:{x:px,y:py,z:pz},to:{x:nx,y:ny,z:nz},color,life:.07,size:.03*width});this.effectPool.add({from:{x:px,y:py,z:pz},to:{x:nx,y:ny,z:nz},color:'#ffffff',life:.04,size:.012*width});px=nx;py=ny;pz=nz;}}
     railImpact(pos,color,reduced){this.effectPool.add({pos,color:'#e8f7ff',size:.2,life:.22,expand:reduced?0:.7,wireframe:!reduced});this.effectPool.add({pos,color,size:.12,life:.3,expand:reduced?0:.4});if(!reduced)for(let i=0;i<6;i++)this.effectPool.add({pos,color:'#ffffff',endColor:color,fade:'smooth',damping:2.5,gravity:6,size:.05,life:.24,velocity:V((Math.random()-.5)*7,(Math.random()-.2)*7,(Math.random()-.5)*7)});}
         // Branch a world impact on the shot direction: steep downward rays are
         // floor hits (terrain only when the presentation support sample matches
@@ -2698,7 +3190,7 @@ export class ArenaView{
   // side pairs; the rest fan from the tracer direction so the calls stay
   // camera-independent and testable.
   _altShotEffect(e,spec,from,to,reduced){
-   const pool=this.effectPool,weapon=e.weapon??0,color=spec.tracer;
+   const pool=this.effectPool,weapon=e.weapon??0,color=spec.tracer,tracerScale=Number(this._quality?.().tracers)||1;
    if(e.type==='launch'){
     if(to){pool.add({pos:to,color,size:.18,life:.14,expand:reduced?0:.35});pool.add({pos:to,color:'#ffffff',size:.07,life:.09});}
     return;
@@ -2712,28 +3204,28 @@ export class ArenaView{
    const stem=e.muzzleSide?shift(from,1,e.muzzleSide):from;
    const line=(a,b,thick,life=.1,coreColor='#ffffff')=>{pool.add({from:a,to:b,color,life,size:thick,additive:true});pool.add({from:a,to:b,color:coreColor,life:Math.min(life,.06),size:Math.max(.014,thick*.34),additive:true});};
    switch(spec.id){
-    case 'salvo':{for(const k of [-1,0,1])line(shift(stem,k*.05),shift(to,k*.32),.03,.09);break;}
-    case 'slug':{pool.add({from:stem,to,color:'#ffffff',life:.16,size:.13,additive:true});pool.add({from:stem,to,color,life:.1,size:.055,additive:true});break;}
+    case 'salvo':{for(const k of [-1,0,1])line(shift(stem,k*.05),shift(to,k*.32),.03*tracerScale,.09);break;}
+    case 'slug':{pool.add({from:stem,to,color:'#ffffff',life:.16,size:.13*tracerScale,additive:true});pool.add({from:stem,to,color,life:.1,size:.055*tracerScale,additive:true});break;}
     case 'overload':{
-     if(this.railPool)this.railPool.spawn(stem,to,color,reduced);
-     else pool.add({from:stem,to,color,life:.14,size:.16,additive:true});
-     pool.add({from:to,to:shift(to,2.4,dir),color:'#ffffff',life:.1,size:.04,additive:true});
+     if(this.railPool)this.railPool.spawn(stem,to,color,reduced,tracerScale);
+     else pool.add({from:stem,to,color,life:.14,size:.16*tracerScale,additive:true});
+     pool.add({from:to,to:shift(to,2.4,dir),color:'#ffffff',life:.1,size:.04*tracerScale,additive:true});
      this.railImpact(to,color,reduced);
      break;
     }
     case 'chain':{
-     this.lightning(stem,to,color,reduced);
-     for(const target of (Array.isArray(e.targets)?e.targets:[]).slice(0,4))if(target&&Number.isFinite(target.x))this.lightning(to,target,color,reduced);
+     this.lightning(stem,to,color,reduced,tracerScale);
+     for(const target of (Array.isArray(e.targets)?e.targets:[]).slice(0,4))if(target&&Number.isFinite(target.x))this.lightning(to,target,color,reduced,tracerScale);
      this.impact(weapon,to,color,reduced,e.hit,from);
      break;
     }
     case 'double':case 'twin':{
      const pellets=Number.isInteger(e.pellet)?[e.pellet]:[0,1];
-     for(const index of pellets){const k=index%2?1:-1;line(shift(stem,k*.05),shift(to,k*.06),spec.id==='twin'?.03:.045,spec.id==='twin'?.08:.14);}
+     for(const index of pellets){const k=index%2?1:-1;line(shift(stem,k*.05),shift(to,k*.06),(spec.id==='twin'?.03:.045)*tracerScale,spec.id==='twin'?.08:.14);}
      this.impact(weapon,to,color,reduced,e.hit,from);
      break;
     }
-    default:{line(from,to,.07,.09);this.impact(weapon,to,color,reduced,e.hit,from);break;}
+    default:{line(from,to,.07*tracerScale,.09);this.impact(weapon,to,color,reduced,e.hit,from);break;}
    }
   }
   // The keyed projectile pool. Lazily created on the first alt projectile so a
@@ -2806,10 +3298,10 @@ export class ArenaView{
   _explosionKit(pos,color,reduced,seed=0,scale=1){
    if(!pos||reduced)return 0;
    this.effectPool??=new EffectPool(this.scene);
-   const amount=Math.max(.6,Math.min(1.6,Number(scale)||1));
+   const amount=Math.max(.6,Math.min(1.6,Number(scale)||1)),particleScale=this._particleScale();
    let spawned=0;
    for(let i=0;i<3;i++){
-    this.effectPool.add({pos:V((pos.x||0)+(hashUnit(seed,i+1)-.5)*.6,(pos.y||0)+.3+hashUnit(seed,i+2)*.5,(pos.z||0)+(hashUnit(seed,i+3)-.5)*.6),color:'#2f2a26',endColor:'#0b0a09',fade:'smooth',size:.2*amount,life:1.1+hashUnit(seed,i+4)*.5,expand:.22,gravity:-.35,damping:1.1,startOpacity:.28,velocity:V((hashUnit(seed,i+5)-.5)*.7,.5+hashUnit(seed,i+6)*.5,(hashUnit(seed,i+7)-.5)*.7)});
+    this.effectPool.add({pos:V((pos.x||0)+(hashUnit(seed,i+1)-.5)*.6,(pos.y||0)+.3+hashUnit(seed,i+2)*.5,(pos.z||0)+(hashUnit(seed,i+3)-.5)*.6),color:'#2f2a26',endColor:'#0b0a09',fade:'smooth',size:.2*amount*particleScale,life:1.1+hashUnit(seed,i+4)*.5,expand:.22,gravity:-.35,damping:1.1,startOpacity:.28,velocity:V((hashUnit(seed,i+5)-.5)*.7,.5+hashUnit(seed,i+6)*.5,(hashUnit(seed,i+7)-.5)*.7)});
     spawned++;
    }
    if(this.muzzleLights){this.muzzleLights.flash(color||'#ffb066',pos,.24,4.2*amount);spawned++;}
@@ -3048,15 +3540,15 @@ export class ArenaView{
    if(shield&&!e.shieldBreak&&Number(e.shield)>0)model.userData.shieldPulseUntil=now+260;
    const victim=this._matchRef?.actors?.find?.(actor=>actor?.id===e.actor),maxHealth=Number(victim?.maxHealth)||0,health=Number(victim?.health)||0;
    if(!victim||!(maxHealth>0)||!(health>0)||health/maxHealth>.35)return 0;
-   const p=model.position||{};let spawned=0;
+   const p=model.position||{},particleScale=this._particleScale();let spawned=0;
    if(now-(model.userData.lowHealthSmokeAt??-Infinity)>=320){
     model.userData.lowHealthSmokeAt=now;this.effectPool??=new EffectPool(this.scene);
-    this.effectPool.add({pos:V(p.x||0,(p.y||0)+1.05,p.z||0),color:'#3d3a36',endColor:'#141210',fade:'exp',damping:.9,size:.16,life:.85,expand:.45,velocity:V((Math.random()-.5)*.4,.8+Math.random()*.6,(Math.random()-.5)*.4)});
+    this.effectPool.add({pos:V(p.x||0,(p.y||0)+1.05,p.z||0),color:'#3d3a36',endColor:'#141210',fade:'exp',damping:.9,size:.16*particleScale,life:.85,expand:.45,velocity:V((Math.random()-.5)*.4,.8+Math.random()*.6,(Math.random()-.5)*.4)});
     spawned++;
    }
    if(now-(model.userData.lowHealthSparkAt??-Infinity)>=700){
     model.userData.lowHealthSparkAt=now;this.effectPool??=new EffectPool(this.scene);
-    this.effectPool.add({pos:V((p.x||0)+(Math.random()-.5)*.6,(p.y||0)+.9,(p.z||0)+(Math.random()-.5)*.6),color:'#ffcf7a',endColor:'#7a2200',fade:'exp',damping:1.6,gravity:8,size:.05,life:.4,additive:true,velocity:V((Math.random()-.5)*3,Math.random()*2+.5,(Math.random()-.5)*3)});
+    this.effectPool.add({pos:V((p.x||0)+(Math.random()-.5)*.6,(p.y||0)+.9,(p.z||0)+(Math.random()-.5)*.6),color:'#ffcf7a',endColor:'#7a2200',fade:'exp',damping:1.6,gravity:8,size:.05*particleScale,life:.4,additive:true,velocity:V((Math.random()-.5)*3,Math.random()*2+.5,(Math.random()-.5)*3)});
     spawned++;
    }
    return spawned;
@@ -3469,6 +3961,41 @@ export class ArenaView{
    setKillcam(on){this.killcamEnabled=on!==false;if(!this.killcamEnabled)this._killcam=null;}
    get killcam(){return this._killcam;}
    killcamActive(){return this._killcam!==null;}
+   // Pure presentation query: which actor id the camera is following right now.
+   // Manual follow wins, then an explicit spectator target while spectating,
+   // then the local spectate/demo director's current subject while the cinema
+   // owns the camera.
+   followTargetId(){
+    if(Number.isInteger(this.manualFollowId))return this.manualFollowId;
+    if(this.spectator===true&&Number.isInteger(this.spectatorTarget))return this.spectatorTarget;
+    const target=this.director?.targetId;
+    if((this.cinema===true||this.spectator===true)&&Number.isInteger(target))return target;
+    return null;
+   }
+   // Spectator/kill-cam readability pass. A pooled ring+chevron marker tracks the
+   // followed actor and a killer bracket tracks `_killcam.killerId` while a
+   // kill-cam is active; with neither there is nothing on screen and no pool is
+   // allocated. Geometry-only (so the CPU renderer keeps a usable marker) and
+   // static under reduced motion.
+   _updateFollowMarkers(match,reduced=this.reduced()){
+    const followId=this.followTargetId(),killerId=Number.isInteger(this._killcam?.killerId)?this._killcam.killerId:null;
+    if(followId==null&&killerId==null){this.followMarkers?.clear();return 0;}
+    if(!this.scene)return 0;
+    const pool=this.followMarkers??=new FollowMarkerPool(this.scene,2),software=this.renderer?.isSoftware===true,time=Number(match?.time)||0;
+    const positionOf=id=>{
+     const model=this.actorModels?.get?.(id);
+     if(model&&model.visible!==false&&model.position)return model.position;
+     const actor=(match?.actors||[]).find(entry=>entry?.id===id);
+     return actor?{x:actor.x||0,y:actor.y||0,z:actor.z||0}:null;
+    };
+    let placed=0;
+    const follow=followId==null?null:positionOf(followId);
+    if(follow){pool.place('follow',follow.x,follow.y,follow.z,{color:FOLLOW_MARKER_COLOR,kind:'follow',time,pulse:!reduced&&!software});placed++;}
+    const killer=killerId==null?null:positionOf(killerId);
+    if(killer){pool.place('killer',killer.x,killer.y,killer.z,{color:KILLER_MARKER_COLOR,kind:'killer',time,pulse:!reduced&&!software});placed++;}
+    pool.end();
+    return placed;
+   }
    render(mode,match,delta,time){
     // Display frame cap. The host keeps stepping the fixed-dt simulation; only
     // this presentation frame is skipped, and the skipped wall-clock time is
@@ -3520,7 +4047,7 @@ if(freeCam){this.lowHealthOverlay?.update(false,time,delta,reduced,this.camera);
    this.updateRace(match,time);
    if(raceActive){if(cinematic)this._raceDemoCamera(match,arena,player,delta,time,reduced);else{const standingsCar=match.race.kind==='soccer'?match.race.standings?.find(r=>r.actorId===player.id)?.vehicleId:null;const car=match.vehicles?.find(v=>v.id===player.vehicleId)||(match.race.kind==='soccer'?(match.vehicles?.find(v=>v.id===standingsCar)||match.vehicles?.[0]):null);if(car){const centerline=arena?.race?.centerline||match.race?.centerline||match.arena?.race?.centerline||[],pose=raceDemoPose({mode:'chase',centerline,vehicle:car});this.camera.position.set(pose.x,pose.y,pose.z);this.camera.lookAt(pose.lookX,pose.lookY,pose.lookZ);}}}
    for(const actor of actors){const model=this.actorModels.get(actor.id);if(model)this.styleActor(model,actor,this.display?.teamPalette);}
-   for(const zone of this.objectiveMarkZones(match)){const model=this.objectiveModels?.get(String(zone.id));if(!model)continue;const mark=model.userData.teamMark??=teamMark();if(!mark.parent){mark.position.y=1.45;mark.scale.setScalar(2);model.add(mark);mark.traverse(n=>{n.userData.objective=true;n.userData.noCameraOcclusion=true;});}updateTeamMark(mark,zone.contested?null:zone.owner);}
+   for(const zone of this.objectiveMarkZones(match)){const model=this.objectiveModels?.get(String(zone.id));if(!model)continue;const mark=model.userData.teamMark??=teamMark();if(!mark.parent){mark.position.y=1.45;mark.scale.setScalar(2);model.add(mark);mark.traverse(n=>{n.userData.objective=true;n.userData.noCameraOcclusion=true;});}this._styleZoneMark(mark,zone);}
        if((this.qualitySettings?.modelDetail??1)<1)this._applyModelDetail();
     (match.pickups||[]).forEach((p,i)=>{const m=this.pickupModels[i];if(!m)return;m.visible=(p.wait||0)<=0;m.rotation.y=reduced?0:time*.8;m.position.y=(p.y||0)+(reduced?0:Math.sin(time*2+i)*.07);});
    // Persistent projectile markers keep their identity frame to frame, and trail
@@ -3572,7 +4099,7 @@ if(freeCam){this.lowHealthOverlay?.update(false,time,delta,reduced,this.camera);
     this._animateWeaponParts(this.firstPerson,player,reduced,delta);
     this._animateWeaponAlt(this.firstPerson,player,reduced,delta,time);
     this._updateWeaponHeat(this.firstPerson,reduced,delta);
-    this.firstPerson.userData.flash.visible=!reduced&&this.hands.visible&&this.flashUntil>performance.now();this.muzzleLights?.update(Math.max(0,delta));if(this.sun?.castShadow!==false&&this.renderer.shadowMap?.autoUpdate===false){const hz=Number(this._quality().shadowHz)||30;if(shadowDue(time,this._shadowAt,hz)){this._shadowAt=time;const focus=this.camera?.position;this._fitShadowFrustum(focus?.x??0,focus?.z??0,SHADOW_FIT_EXTENT);this.renderer.shadowMap.needsUpdate=true;}}this.updateSky();this._updateWind(time,reduced);this._updateAmbient(match,delta,time,reduced);const spMode=match.config?.mode==='campaign'||match.config?.mode==='horde';if(spMode)this.setWeather(match.weather??null);else if(!cinematic&&this._weatherOverride!==null)this.setWeather(null);this._updateWeather(arena,delta,mode);this._updateWeatherFx(delta,reduced,this._quality(),arena);const software=this.renderer?.isSoftware===true;this._updateLightning(delta,reduced,software);this._updateInteriorAmbience(delta,reduced);this._applyWetSheen(this._weatherState());this.hitPool?.update(Math.max(0,delta));this.shellPool?.update(Math.max(0,delta));this._updateHitReactions();this._alignLivingCharacters(match);this._updateDebris(delta);this._updateAudio(match,time);this._beginGpu();
+    this.firstPerson.userData.flash.visible=!reduced&&this.hands.visible&&this.flashUntil>performance.now();this.muzzleLights?.update(Math.max(0,delta));if(this.sun?.castShadow!==false&&this.renderer.shadowMap?.autoUpdate===false){const hz=Number(this._quality().shadowHz)||30;if(shadowDue(time,this._shadowAt,hz)){this._shadowAt=time;const focus=this.camera?.position;this._fitShadowFrustum(focus?.x??0,focus?.z??0,SHADOW_FIT_EXTENT);this.renderer.shadowMap.needsUpdate=true;}}this.updateSky();this._updateWind(time,reduced);this._updateAmbient(match,delta,time,reduced);const spMode=match.config?.mode==='campaign'||match.config?.mode==='horde';if(spMode)this.setWeather(match.weather??null);else if(!cinematic&&this._weatherOverride!==null)this.setWeather(null);this._updateWeather(arena,delta,mode);this._updateWeatherFx(delta,reduced,this._quality(),arena);const software=this.renderer?.isSoftware===true;this._updateLightning(delta,reduced,software);this._updateInteriorAmbience(delta,reduced);this._applyWetSheen(this._weatherState());this.hitPool?.update(Math.max(0,delta));this.shellPool?.update(Math.max(0,delta));this._updateHitReactions();this._alignLivingCharacters(match);this._updateFollowMarkers(match,reduced);this._syncCarryBanners(match);this._updateDebris(delta);this._updateAudio(match,time);this._beginGpu();
     // Per-target stacks: when bots are styled, the world composer renders
     // through a camera that excludes the actor layer and the scene depth is
     // preserved (autoClear off + depth-writing passes disabled) so the bot
@@ -3783,5 +4310,5 @@ if(freeCam){this.lowHealthOverlay?.update(false,time,delta,reduced,this.camera);
       }
       updateRace(match,time){syncRacePresentation(this,match,time);}
      _renderPreview(time,reduced){const rect=this.previewRect;if(!rect||rect.width<12||rect.height<12||!(this.renderer instanceof T.WebGLRenderer))return;const m=this.menu.model;m.rotation.y=Math.PI+.25+(reduced?0:Math.sin(time*.4)*.22);m.position.y=.17;const cam=this.menu.camera;cam.aspect=Math.max(.2,rect.width/rect.height);cam.updateProjectionMatrix();this._renderSceneInto(this.renderer,rect,this.menu.scene,cam);}
-          dispose(){this.characterLifecycle?.dispose?.();this.clearObjectiveMarkers();this.effectPool?.dispose();this.telegraphPool?.dispose();this.projectilePool?.dispose();this.railPool?.dispose();this.deathPool?.dispose();this.decalPool?.dispose();this.ripplePool?.dispose();this.ripplePool=null;this.contactShadows?.dispose();this.contactShadows=null;this.debrisPool?.dispose();this.debrisPool=null;this.hitPool?.dispose();this.hitPool=null;this.abilityVfx?.dispose();this.abilityVfx=null;this.hitFlinch?.clear();this.shellPool?.dispose();this.shellPool=null;this.altProjectiles?.dispose();this.altProjectiles=null;this._clearDebugDeaths();this.ambientPool?.dispose();this.weatherPool?.dispose();this.ambientFx=null;this.weatherFx=null;this._killcam=null;this.preview?.dispose();this.preview=null;this.previewAssets?.dispose?.();this.previewAssets=null;disposeComposer(this.composer);this.composer=null;this._disposeLabTargets();this.muzzleLights?.dispose();this.lowHealthOverlay?.dispose();this._disposeMothSprites();this.zipCarriages?.clear();this.deployableModels?.clear();this.disposeObject(this.scene);if(this.weaponScene)this.disposeObject(this.weaponScene);this.disposeObject(this.menu.scene);this.environmentRT?.dispose?.();for(const resource of this.renderResources||[])resource.dispose();this.renderResources?.clear();for(const resource of this.sharedResources||[])resource.dispose();this.sharedResources?.clear();this.modelAssets?.materials.clear();this.modelAssets?.geometries.clear();this.modelAssets?.resources.clear();this.arenaAssets?.materials.clear();this.arenaAssets?.geometries.clear();this.arenaAssets?.resources.clear();clearSurfaceTextures();for(const model of this._weaponCache?.values?.()||[])this.disposeObject(model);this._weaponCache?.clear();this._freeCam=false;this._directorLock=false;this.manualFollowId=null;this._cameraOwner='auto';this._freeExit=null;this.clearFreeMotion();this.resetFreeCam();this.renderer.dispose();}
+          dispose(){this.characterLifecycle?.dispose?.();this.clearObjectiveMarkers();this.followMarkers?.dispose();this.followMarkers=null;this.effectPool?.dispose();this.telegraphPool?.dispose();this.projectilePool?.dispose();this.railPool?.dispose();this.deathPool?.dispose();this.decalPool?.dispose();this.ripplePool?.dispose();this.ripplePool=null;this.contactShadows?.dispose();this.contactShadows=null;this.debrisPool?.dispose();this.debrisPool=null;this.hitPool?.dispose();this.hitPool=null;this.abilityVfx?.dispose();this.abilityVfx=null;this.hitFlinch?.clear();this.shellPool?.dispose();this.shellPool=null;this.altProjectiles?.dispose();this.altProjectiles=null;this._clearDebugDeaths();this.ambientPool?.dispose();this.weatherPool?.dispose();this.ambientFx=null;this.weatherFx=null;this._killcam=null;this.preview?.dispose();this.preview=null;this.previewAssets?.dispose?.();this.previewAssets=null;disposeComposer(this.composer);this.composer=null;this._disposeLabTargets();this.muzzleLights?.dispose();this.lowHealthOverlay?.dispose();this._disposeMothSprites();this.zipCarriages?.clear();this.deployableModels?.clear();this.disposeObject(this.scene);if(this.weaponScene)this.disposeObject(this.weaponScene);this.disposeObject(this.menu.scene);this.environmentRT?.dispose?.();for(const resource of this.renderResources||[])resource.dispose();this.renderResources?.clear();for(const resource of this.sharedResources||[])resource.dispose();this.sharedResources?.clear();this.modelAssets?.materials.clear();this.modelAssets?.geometries.clear();this.modelAssets?.resources.clear();this.arenaAssets?.materials.clear();this.arenaAssets?.geometries.clear();this.arenaAssets?.resources.clear();clearSurfaceTextures();for(const model of this._weaponCache?.values?.()||[])this.disposeObject(model);this._weaponCache?.clear();this._freeCam=false;this._directorLock=false;this.manualFollowId=null;this._cameraOwner='auto';this._freeExit=null;this.clearFreeMotion();this.resetFreeCam();this.renderer.dispose();}
 }

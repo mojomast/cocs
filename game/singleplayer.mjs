@@ -1,5 +1,6 @@
 import {resolveCampaignAnchors,campaignPoint,campaignGroupPoints} from './campaign-anchors.mjs';
-import {CHARACTERS,POWERUPS} from './data.mjs';
+import {CHARACTERS,POWERUPS,WEAPONS} from './data.mjs';
+import {loadoutAllows,modeWeapon} from './config.mjs';
 import {CAMPAIGN_MISSIONS,missionFor} from './campaign-data.mjs';
 import {applyEnemyFields,enemyById,enemyLeash,bossPhaseProfile,bossMaxPhase,ENEMY_SPEED_VARIANCE,DEFAULT_ENEMY_ID,NPC_ZONE_KINDS} from './enemy-types.mjs';
 import {coverPoint} from './bots.mjs';
@@ -48,10 +49,24 @@ const STORY_SECONDS = 7;
 // so a run never depends on Math.random. Choices reuse the shared POWERUPS
 // vocabulary and are re-applied on every resupply, making them run upgrades.
 export const HORDE_UPGRADE_GAPS = Object.freeze([3,4,5]);
-export const HORDE_UPGRADES = Object.freeze(POWERUPS.map(powerup=>Object.freeze({id:powerup.id,name:powerup.name,description:powerup.description,color:powerup.color,duration:powerup.duration})));
+// Horde-only run upgrades (v8.6 fieldwork). They are appended after the POWERUPS
+// rows so the existing offer order still opens on the shared vocabulary. Every
+// effect is expressed as an absolute, recomputed value (never `+=`), so
+// re-applying it at selection, on every wave-clear resupply or after a mid-wave
+// respawn is idempotent and can never compound.
+export const HORDE_VITALITY_SCALE = 1.3;
+export const HORDE_COOLANT_SCALE = 0.75;
+export const HORDE_SENTRY_SECONDS = 60;
+export const HORDE_ONLY_UPGRADES = Object.freeze([
+ Object.freeze({id:'vitality',name:'Vitality Overcharge',color:'#ff7ba8',duration:0,description:'Reinforce the frame: +30% maximum health for the rest of the run, topped up on every resupply.'}),
+ Object.freeze({id:'promotion',name:'Weapon Promotion',color:'#ffd166',duration:0,description:'A permanent field promotion to the best tier your loadout allows, re-issued with a full magazine.'}),
+ Object.freeze({id:'coolant',name:'Ability Coolant',color:'#8ecbff',duration:0,description:'Cuts every active-ability cooldown by 25% for the rest of the run.'}),
+ Object.freeze({id:'sentry',name:'Sentry Resupply',color:'#8affc1',duration:0,description:'A friendly sentry drops with every wave-clear resupply.'}),
+]);
+export const HORDE_UPGRADES = Object.freeze([...POWERUPS.map(powerup=>Object.freeze({id:powerup.id,name:powerup.name,description:powerup.description,color:powerup.color,duration:powerup.duration})),...HORDE_ONLY_UPGRADES]);
 const hordeUpgradeInfo = id => HORDE_UPGRADES.find(choice=>choice.id===id)||null;
 export function hordeUpgradeChoices(offerIndex=0){
- const ids=POWERUPS.map(powerup=>powerup.id),count=Math.min(3,ids.length),start=((Math.round(offerIndex)||0)%ids.length+ids.length)%ids.length,choices=[];
+ const ids=HORDE_UPGRADES.map(upgrade=>upgrade.id),count=Math.min(3,ids.length),start=((Math.round(offerIndex)||0)%ids.length+ids.length)%ids.length,choices=[];
  for(let i=0;i<count;i++)choices.push(ids[(start+i)%ids.length]);
  return choices;
 }
@@ -393,17 +408,74 @@ function startWave(match,state){
  match.emit('horde-modifier',{wave:state.wave,id:modifier.id,name:modifier.name,description:modifier.description});
 }
 
-// Applies one POWERUPS entry as a run-long horde blessing. The timed powerup
-// pipeline drives the actual stat change; the timer is stretched so the buff
-// survives the next wave and is refreshed again on every resupply.
-function grantHordeUpgrade(match,player,id){
+// Applies one HORDE_UPGRADES row as a run-long horde blessing. POWERUPS rows
+// ride the timed powerup pipeline with a stretched timer; the horde-only rows
+// below write absolute values only, so calling this again on a later resupply
+// or after a respawn converges on the same state instead of stacking.
+function grantHordeUpgrade(match,player,id,state=null){
  if(!player||player.health<=0)return false;
  const powerup=POWERUPS.find(entry=>entry.id===id);
- if(!powerup)return false;
- match.applyPowerup(player,id);
- if(player.powerups[id]!==undefined)player.powerups[id]=Math.max(player.powerups[id],(powerup.duration||0)*3);
- if(typeof match.refreshPowerups==='function')match.refreshPowerups(player);
- return true;
+ if(powerup){
+  match.applyPowerup(player,id);
+  if(player.powerups[id]!==undefined)player.powerups[id]=Math.max(player.powerups[id],(powerup.duration||0)*3);
+  if(typeof match.refreshPowerups==='function')match.refreshPowerups(player);
+  return true;
+ }
+ switch(id){
+  case 'vitality':{
+   const base=Number.isFinite(state?.baseMaxHealth)?state.baseMaxHealth:(state.baseMaxHealth=player.maxHealth);
+   player.maxHealth=Math.round(base*HORDE_VITALITY_SCALE);
+   player.health=Math.min(player.maxHealth,Math.max(player.health,player.maxHealth));
+   return true;
+  }
+  case 'promotion':{
+   // A pinned single-weapon mode never demotes its own weapon.
+   if(modeWeapon(match.config,match.loadout)!==null)return true;
+   let best=-1;
+   for(let index=WEAPONS.length-1;index>=0;index--)if(loadoutAllows(match.loadout,index)){best=index;break;}
+   if(best<0)return false;
+   player.upgradeWeapon=null;player.upgradeBase=-1;player.upgradeTimer=0;
+   player.weapon=best;player.weaponSwitch=Math.min(player.weaponSwitch||0,.2);
+   const weapon=match.weaponForIndex?.(player,best)??WEAPONS[best];
+   if(weapon)player.ammo[best]=match.config.unlimitedAmmo?Infinity:Math.max(player.ammo[best]||0,Number.isFinite(weapon.cap)?weapon.cap:weapon.ammo);
+   return true;
+  }
+  case 'coolant':{
+   player.cooldownMultiplier=Math.min(player.cooldownMultiplier||1,HORDE_COOLANT_SCALE);
+   return true;
+  }
+  case 'sentry':{
+   if(typeof match.deploySentry!=='function')return false;
+   // One horde sentry at a time: a later resupply refreshes its life instead
+   // of stacking turrets, which keeps the upgrade idempotent.
+   const existing=(match.deployables||[]).find(sentry=>sentry.owner===player.id&&sentry.health>0&&sentry.life>0);
+   if(existing){existing.life=Math.max(existing.life,HORDE_SENTRY_SECONDS);return true;}
+   return match.deploySentry(player,HORDE_SENTRY_SECONDS);
+  }
+  default:return false;
+ }
+}
+
+// Run-long passives are re-asserted every tick instead of once, so a mid-wave
+// respawn (which resets max health and cooldown multipliers) cannot silently
+// drop a purchased upgrade. Absolute recomputation keeps this idempotent.
+function enforceHordeUpgrades(state,player){
+ const upgrades=state?.upgrades;
+ if(!upgrades?.length||!player||player.health<=0)return;
+ if(upgrades.includes('vitality')){
+  const base=Number.isFinite(state.baseMaxHealth)?state.baseMaxHealth:(state.baseMaxHealth=player.maxHealth),target=Math.round(base*HORDE_VITALITY_SCALE);
+  if(player.maxHealth!==target)player.maxHealth=target;
+  if(player.health>player.maxHealth)player.health=player.maxHealth;
+ }
+ if(upgrades.includes('coolant'))player.cooldownMultiplier=Math.min(player.cooldownMultiplier||1,HORDE_COOLANT_SCALE);
+}
+// After a death, re-issue every run upgrade once the player is back on the
+// field. POWERUPS rows restart their timers, stat upgrades recompute, and the
+// sentry waits for the next resupply so a life is not a free turret.
+function reapplyHordeUpgrades(match,state,player){
+ state.reapplyUpgrades=false;
+ for(const id of state.upgrades||[])if(id!=='sentry')grantHordeUpgrade(match,player,id,state);
+ enforceHordeUpgrades(state,player);
 }
 
 export function resupplyHorde(match,state){
@@ -422,7 +494,7 @@ export function resupplyHorde(match,state){
   if(amount===Infinity||!Number.isFinite(cap))player.ammo[index]=Infinity;
   else player.ammo[index]=Math.max(amount,cap);
  }
- for(const id of state.upgrades||[])grantHordeUpgrade(match,player,id);
+ for(const id of state.upgrades||[])grantHordeUpgrade(match,player,id,state);
  match.emit('horde-resupply',{wave:state.wave,health:player.health,armor:player.armor,upgrades:(state.upgrades||[]).length});
  return true;
 }
@@ -447,7 +519,7 @@ export function selectHordeUpgrade(match,id){
  state.pendingUpgrade=null;
  state.upgradeSelected={id,wave:state.wave,at:match.time};
  const player=match.actors[0];
- if(player)grantHordeUpgrade(match,player,id);
+ if(player)grantHordeUpgrade(match,player,id,state);
  match.emit('horde-upgrade-selected',{id,wave:state.wave,count:state.upgrades.length});
  return true;
 }
@@ -876,6 +948,8 @@ function onPlayerDeath(match,state){
  state.lastPlayerHealth=match.actors[0]?.maxHealth??100;
  state.regenDelay=0;
  state.regenActive=false;
+ // Run upgrades are re-issued on the next living tick (see updateSinglePlayer).
+ state.reapplyUpgrades=true;
  match.emit('singleplayer-life',{lives:state.lives});
  if(state.lives<=0)lose(match,state,state.kind==='campaign'&&state.mission?`${state.mission.name} failed.`:'Out of lives.');
 }
@@ -887,6 +961,10 @@ export function updateSinglePlayer(match,dt){
  const player=match.actors[0];
  if(!player)return;
  if(player.deaths>(state.deaths||0)){state.deaths=player.deaths;onPlayerDeath(match,state);if(match.over)return;}
+ if(state.kind==='horde'){
+  if(state.reapplyUpgrades===true&&player.health>0)reapplyHordeUpgrades(match,state,player);
+  enforceHordeUpgrades(state,player);
+ }
  for(const actor of match.actors)if(actor.isNpc&&actor.health<=0&&(actor.dead??0)<NPC_DEAD)actor.dead=NPC_DEAD;
  updateEnemyRoles(match,state,dt);
  updateHealthRegen(match,state,dt);

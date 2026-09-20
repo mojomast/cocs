@@ -90,6 +90,19 @@ paid Moth material pack and the offline variety pipeline behind it.
   haze with a wake and pointer repulsion, deterministic and reduced-motion safe,
   with the original DOM logo as the fallback. See
   [Depth and dynamics pass](design/DEPTH-PASS.md#particle-title-logo).
+- Depth II pass: flag carriers can relay the flag and captures are blocked while
+  the stand is contested, payload defenders earn contest credit, passengers can
+  repair their vehicle, horde runs gained four run-defining upgrades and VIP
+  bots escort properly. Other actors' footsteps are finally audible, results
+  play the outcome sting/announcer take and records can fire the award response,
+  race and soccer get crowd ambience, spectators and kill-cams get world
+  markers, carriers get a banner and payload carts state rings, and the
+  scoreboard became a real table with an accessible local row. Subtitle
+  options, hold-vs-toggle input, per-zoom ADS, keybind import/export, theater
+  bookmarks/retention/red-blue labels and a weapon comparison table round it
+  out. The four `asset-workshop` PRs add dedicated high-detail Hornet, Titan,
+  Scout and Transport models on WebGL (batched, software keeps the compact
+  hull). See [Depth II pass](design/DEPTH-II-PASS.md).
 - Animation pass: restored death variety (killing-direction topple, per-pose
   fall arcs, seeded limb silhouettes, style treatments), strength-scaled hit
   flinches, a melee swing, shell casings, style-aware death audio, and UI

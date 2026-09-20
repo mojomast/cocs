@@ -2,12 +2,14 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
   HISTORY_LIMIT,
+  PERSONAL_BEST_LABELS,
   emptyHistory,
   historyEntryFromResult,
   historyLeaderboard,
   historyModes,
   historyTotals,
   kdRatio,
+  newPersonalBests,
   normalizeHistory,
   normalizeHistoryEntry,
   normalizeResult,
@@ -108,6 +110,57 @@ test('leaderboard records the fastest winning round as a personal best', () => {
   ]});
   const row = historyLeaderboard(history)[0];
   assert.equal(row.bestTime, 90);
+});
+
+test('newPersonalBests flags every record a first result sets, in board order', () => {
+  const first = historyEntryFromResult(
+    {win: true, actor: {frags: 12, deaths: 3, scoreStats: {}}, time: 92},
+    {mode: 'ctf', at: 100, duration: 92, score: 12, id: 'first'}
+  );
+  const records = newPersonalBests(emptyHistory(), first);
+  assert.deepEqual(records.map(record => [record.id, record.label, record.value]), [
+    ['kills', 'BEST KILLS', '12'],
+    ['kd', 'BEST K/D', '4'],
+    ['score', 'BEST SCORE', '12'],
+    ['time', 'FASTEST WIN', '92s'],
+  ]);
+  assert.equal(records[0].raw, 12);
+  assert.equal(records[3].raw, 92);
+  assert.ok(Object.isFrozen(PERSONAL_BEST_LABELS));
+  // No stored board at all behaves exactly like an empty history.
+  assert.deepEqual(newPersonalBests(null, first).map(record => record.id), ['kills', 'kd', 'score', 'time']);
+});
+
+test('newPersonalBests never re-flags a tie, a lower result or the stored entry', () => {
+  const best = entry({id: 'best', mode: 'deathmatch', kills: 12, deaths: 3, score: 12, duration: 90, at: 50});
+  const history = recordMatch(emptyHistory(), best);
+  assert.deepEqual(newPersonalBests(history, entry({id: 'tie', mode: 'deathmatch', kills: 12, deaths: 3, score: 12, duration: 90, at: 60})), []);
+  assert.deepEqual(newPersonalBests(history, entry({id: 'lower', mode: 'deathmatch', result: 'loss', kills: 4, deaths: 6, score: 4, duration: 300, at: 70})), []);
+  // The stored result ties its own board, so an idempotent re-read is silent.
+  assert.deepEqual(newPersonalBests(history, best), []);
+  // One improved stat on an otherwise tied line still flags that stat alone.
+  const improved = entry({id: 'improved', kills: 12, deaths: 6, score: 14, duration: 120, at: 80});
+  assert.deepEqual(newPersonalBests(history, improved).map(record => record.id), ['score']);
+  // A zero-stat round claims no record, not even a zero-value one.
+  const zero = entry({id: 'zero', result: 'draw', kills: 0, deaths: 0, score: 0, duration: 0, at: 90});
+  assert.deepEqual(newPersonalBests(history, zero), []);
+  assert.deepEqual(newPersonalBests(emptyHistory(), zero), []);
+});
+
+test('newPersonalBests records only a faster win, per mode, without mutating history', () => {
+  const history = normalizeHistory({entries: [
+    entry({id: 'slow', mode: 'deathmatch', result: 'win', kills: 10, deaths: 2, duration: 180, at: 10}),
+    entry({id: 'fast-loss', mode: 'deathmatch', result: 'loss', kills: 3, deaths: 9, duration: 40, at: 20}),
+  ]});
+  const before = JSON.stringify(history);
+  const faster = entry({id: 'fast', mode: 'deathmatch', result: 'win', kills: 6, deaths: 3, duration: 75, at: 30});
+  assert.deepEqual(newPersonalBests(history, faster).map(record => record.id), ['time']);
+  assert.deepEqual(newPersonalBests(history, entry({id: 'quick-loss', mode: 'deathmatch', result: 'loss', kills: 6, deaths: 3, duration: 20, at: 40})), []);
+  // Another mode's board never shields a first result in this mode.
+  const firstCtf = entry({id: 'ctf-first', mode: 'ctf', kills: 5, deaths: 5, score: 5, duration: 120, at: 50});
+  assert.deepEqual(newPersonalBests(history, firstCtf).map(record => record.id), ['kills', 'kd', 'score', 'time']);
+  assert.equal(JSON.stringify(history), before, 'the stored history is never mutated');
+  assert.deepEqual(newPersonalBests(history, firstCtf), newPersonalBests(history, firstCtf), 'deterministic across reads');
 });
 
 test('totals aggregate across every mode', () => {

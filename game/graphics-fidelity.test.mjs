@@ -4,10 +4,11 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import * as T from 'three';
-import {ArenaView,bloomTuning,weatherParticleCap,SHADOW_FIT_EXTENT} from './view.mjs';
+import {ArenaView,bloomTuning,weatherParticleCap,SHADOW_FIT_EXTENT,muzzleLightCount} from './view.mjs';
 import {ContactShadowPool,DecalPool,MuzzleLightPool,RipplePool} from './effects-fx.mjs';
 import {EffectPool} from './feedback.mjs';
 import {DEFAULT_DISPLAY} from './config.mjs';
+import {qualitySettings} from './post.mjs';
 
 const withDocument=t=>{
  const previous=Object.getOwnPropertyDescriptor(globalThis,'document');
@@ -83,6 +84,35 @@ test('the muzzle light pool carries four fixed slots and honours an intensity pu
  for(let i=0;i<40;i++)pool.flash('#ffffff',{x:0,y:0,z:0});
  assert.equal(scene.children.length,4,'the pool stays fixed-size');
  pool.dispose();assert.equal(scene.children.length,0);
+});
+
+test('the muzzle-light budget follows the tier and nearby flashes keep their own slot',()=>{
+ assert.equal(muzzleLightCount(0),2);assert.equal(muzzleLightCount(1),3);assert.equal(muzzleLightCount(2),4);
+ assert.equal(muzzleLightCount(9),4,'the high tier keeps the historical four slots');
+ assert.equal(muzzleLightCount(-1),2);assert.equal(muzzleLightCount(),2);
+ const scene=new T.Scene(),pool=new MuzzleLightPool(scene,4);
+ assert.equal(pool.flash('#ff8844',{x:0,y:0,z:0},.5,3).intensity,3);
+ assert.equal(pool.lights[1].intensity,3,'the historical slot order is preserved');
+ for(const position of [{x:0,y:0,z:0},{x:10,y:0,z:0},{x:0,y:0,z:10}])pool.flash('#ffffff',position,.5,2);
+ assert.ok(pool.lights.every(light=>light.userData.remaining>0),'all four lights are busy');
+ const before=pool.lights.map(light=>light.position.clone());
+ const chosen=pool.flash('#ffffff',{x:0,y:0,z:0},.5,2);
+ const recycled=pool.lights.indexOf(chosen),farthest=Math.max(...before.map(point=>point.lengthSq()));
+ assert.ok(Math.abs(before[recycled].lengthSq()-farthest)<1e-9,'the farthest pulse is recycled');
+ assert.ok(before[recycled].lengthSq()>1,'a nearby pulse is not recycled');
+ pool.update(.6);
+ assert.ok(pool.lights.every(light=>!light.visible&&light.intensity===0));
+ // A tiered view resizes the fixed bank on a quality change.
+ const view=viewHarness({scene:new T.Scene(),qualitySettings:qualitySettings('high')});
+ view.muzzleLights=new MuzzleLightPool(view.scene,4);
+ view.qualitySettings=qualitySettings('low');view._onQualityChange();
+ assert.equal(view.muzzleLights.lights.length,2,'the low tier drops to two lights');
+ assert.equal(view.scene.children.length,2);
+ view.qualitySettings=qualitySettings('medium');view._onQualityChange();
+ assert.equal(view.muzzleLights.lights.length,3);
+ view.qualitySettings=qualitySettings('high');view._onQualityChange();
+ assert.equal(view.muzzleLights.lights.length,4,'the high tier restores four');
+ view.muzzleLights.dispose();pool.dispose();
 });
 
 test('weather particle caps follow the preset budget, not the ambient mote count',()=>{

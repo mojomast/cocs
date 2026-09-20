@@ -186,6 +186,18 @@
 .crosshair-advanced [data-slot=slider] { min-height: 44px; }
 .crosshair-preview--ads { display: grid; place-items: center; }
 .crosshair-preview--ads .ads-reticle { display: block; position: static; transform: scale(var(--crosshair-size,1)); }
+/* Subtitle presentation, hold-vs-toggle and per-sight ADS controls: every new
+   accessibility/video control keeps a 44 px touch row like the crosshair set. */
+.caption-options, .input-options, .ads-advanced { display: grid; gap: 2px; margin: 6px 0 14px; padding: 10px 12px; border: 1px solid #66867444; border-radius: var(--radius-md); }
+.caption-options .config-field, .caption-options .config-toggle, .input-options .config-toggle, .ads-advanced .config-field { min-height: 44px; margin-bottom: 10px; }
+.caption-options .config-toggle, .input-options .config-toggle { min-height: 44px; }
+.caption-options [data-slot=slider], .ads-advanced [data-slot=slider] { min-height: 44px; }
+.caption-options [data-slot=select-trigger], .ads-advanced [data-slot=select-trigger] { min-height: 44px; }
+.keybind-transfer { display: grid; gap: 10px; margin-top: 14px; padding-top: 12px; border-top: 1px solid #63867b44; }
+.keybind-transfer__actions { display: flex; flex-wrap: wrap; gap: 10px; }
+.keybind-transfer__actions .text-button, .keybind-transfer > .text-button { min-height: 44px; }
+.keybind-transfer textarea { min-height: 88px; background: #09171b; border: 1px solid #587568; color: #deefe6; padding: 10px 12px; font: 12px/1.4 var(--font-mono); resize: vertical; }
+.keybind-transfer__error { color: #ff9a9a; }
 .arena-select { max-width: calc(100vw - 24px); }
 @container (max-width: 480px) {
   .config-grid, .mode-options, .map-options { grid-template-columns: minmax(0, 1fr); }
@@ -1016,7 +1028,10 @@ html, body { overscroll-behavior: none; }
 .spectate-cam-panel{position:absolute;left:50%;bottom:calc(max(44px,env(safe-area-inset-bottom)) + 150px);transform:translateX(-50%);max-width:calc(100% - var(--safe-left) - var(--safe-right));padding:8px 16px;text-align:center;background:#081818bd;border:1px solid #afebcb28;font:12px/1.5 var(--font-mono);letter-spacing:1.5px;color:#c3e9d0;text-shadow:0 2px 5px #000;pointer-events:none}
 .spectate-cam-panel .eyebrow{display:block}
 .spectate-cam-panel small{display:block;margin-top:4px;color:#8aad9a}
-.audio-caption{position:absolute;left:50%;bottom:calc(var(--safe-bottom) + 150px);transform:translateX(-50%);width:min(560px,calc(100% - var(--safe-left) - var(--safe-right)));padding:8px 14px;background:#071317e6;border:1px solid var(--border);border-left:3px solid var(--accent);color:#dff7ee;font:12px/1.5 var(--font-mono);letter-spacing:.06em;text-align:center;text-shadow:0 2px 5px #000;pointer-events:none}
+.audio-caption{position:absolute;left:50%;bottom:calc(var(--safe-bottom) + 150px);transform:translateX(-50%);width:min(560px,calc(100% - var(--safe-left) - var(--safe-right)));padding:8px 14px;background:#071317e6;border:1px solid var(--border);border-left:3px solid var(--accent);color:#dff7ee;font:calc(12px * var(--caption-scale,1))/1.5 var(--font-mono);letter-spacing:.06em;text-align:center;text-shadow:0 2px 5px #000;pointer-events:none}
+.audio-caption[data-caption-background=solid]{background:#071317}
+.audio-caption[data-caption-background=transparent]{background:transparent;border-color:transparent;border-left-color:var(--accent)}
+.audio-caption[data-caption-position=top]{bottom:auto;top:calc(var(--safe-top) + 150px)}
 
 /* --- Safe-area coverage for overlays that sat under notches/home bars. --- */
 .command-panel{top:calc(var(--safe-top) + 88px)}
@@ -1058,7 +1073,7 @@ html, body { overscroll-behavior: none; }
 @media(max-width:760px){
   .radar{width:112px;height:112px}
   .kill-feed{top:calc(var(--safe-top) + 232px);max-height:12dvh}
-  .audio-caption{bottom:calc(var(--safe-bottom) + 168px);font-size:11px}
+  .audio-caption{bottom:calc(var(--safe-bottom) + 168px);font-size:calc(11px * var(--caption-scale,1))}
 }
 
 /* --- Hide-HUD now hides the whole overlay, not a subset. --- */
@@ -1731,7 +1746,7 @@ html, body { overscroll-behavior: none; }
 .game-hud .verb-meter{font-size:calc(10px * var(--hud-scale,1))}
 .game-hud .kill-feed>div{font-size:calc(clamp(12px,.95vw,16px) * var(--hud-scale,1))}
 .game-hud .kill-feed small{font-size:calc(clamp(11px,.9vw,15px) * var(--hud-scale,1))}
-.game-hud .audio-caption{font-size:calc(12px * var(--hud-scale,1))}
+.game-hud .audio-caption{font-size:calc(12px * var(--hud-scale,1) * var(--caption-scale,1))}
 .game-hud .damage-source{font-size:calc(11px * var(--hud-scale,1))}
 .scores-overlay .scoreboard{font-size:calc(13px * var(--hud-scale,1))}
 .scores-overlay .score-row{font-size:calc(13px * var(--hud-scale,1))}
@@ -1741,7 +1756,7 @@ html, body { overscroll-behavior: none; }
 @media(max-width:760px){
  .game-hud .stat-card .stat-value{font-size:calc(clamp(18px,6vw,26px) * var(--hud-scale,1))}
  .game-hud .stat-card--ammo .stat-label,.game-hud .verb-meter{font-size:calc(9px * var(--hud-scale,1))}
- .game-hud .audio-caption{font-size:calc(11px * var(--hud-scale,1))}
+ .game-hud .audio-caption{font-size:calc(11px * var(--hud-scale,1) * var(--caption-scale,1))}
 }
 @media(max-height:520px){
  .game-hud .stat-card--ammo .stat-label{font-size:calc(9px * var(--hud-scale,1))}

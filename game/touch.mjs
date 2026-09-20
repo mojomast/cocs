@@ -74,14 +74,23 @@ export const isTouchDevice=()=>typeof window!=='undefined'&&(window.matchMedia?.
 // bind. Reload, power and interact stay one-shot edges consumed by the sim loop.
 // The alt button writes the held `touch.altFire` field `controlsFromState`
 // reads (the button id stays short as `alt`).
-export function applyTouchAction(runtime,action,pressed){
+//
+// Hold-vs-toggle: when the live display asks for `adsToggle`/`crouchToggle`, a
+// press flips the held flag instead of setting it and release leaves it latched.
+// The flag lives on the same `runtime.touch` field the sim already receives, so
+// the controls shape never changes. `prefs` lets the touch layer pass the live
+// display directly; without it the runtime's synced display is read, and a bare
+// runtime (unit tests, legacy saves) keeps the historical held behavior.
+export function applyTouchAction(runtime,action,pressed,prefs){
  if(!runtime)return null;
  runtime.touch??={};
+ const toggleSource=prefs&&typeof prefs==='object'?prefs:(runtime.display??null);
+ const adsToggle=toggleSource?.adsToggle===true,crouchToggle=toggleSource?.crouchToggle===true;
   if(action==='fire'){runtime.touch.fire=pressed;if(pressed)runtime.fireTap=true;}
-  else if(action==='ads')runtime.touch.ads=pressed;
+  else if(action==='ads'){if(adsToggle){if(pressed)runtime.touch.ads=runtime.touch.ads!==true;}else runtime.touch.ads=pressed;}
+  else if(action==='crouch'){if(crouchToggle){if(pressed)runtime.touch.crouch=runtime.touch.crouch!==true;}else runtime.touch.crouch=pressed;}
   else if(action==='alt')runtime.touch.altFire=pressed;
   else if(action==='jump'){runtime.touch.jump=pressed;if(pressed)runtime.jump=true;}
-  else if(action==='crouch')runtime.touch.crouch=pressed;
  else if(action==='mobility')runtime.touch.mobility=pressed;
  else if(action==='voice')runtime.voice?.setPushToTalk?.(pressed);
  else if(pressed){

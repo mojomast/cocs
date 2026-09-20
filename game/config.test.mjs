@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {Match,moveActor} from './core.mjs';
 import {resolveMapForMode} from './arenas.mjs';
-import {DEFAULT_CONFIG,DEFAULT_DISPLAY,normalizeConfig,normalizeDisplay,GAME_MODES,DIFFICULTIES,modeRule,MUTATORS,MUTATOR_IDS,activeMutators,mutatorEffects,applyMutators,loadoutFor,loadoutRule,loadoutAllows,loadoutStart,spawnInventory,spawnLoadout,LOADOUT_PRESETS,matchPlan,mutatorView,quickStartRules,FPS_CAPS,SHADOW_LEVELS} from './config.mjs';
+import {DEFAULT_CONFIG,DEFAULT_DISPLAY,normalizeConfig,normalizeDisplay,GAME_MODES,DIFFICULTIES,modeRule,MUTATORS,MUTATOR_IDS,activeMutators,mutatorEffects,applyMutators,loadoutFor,loadoutRule,loadoutAllows,loadoutStart,spawnInventory,spawnLoadout,LOADOUT_PRESETS,matchPlan,mutatorView,quickStartRules,FPS_CAPS,SHADOW_LEVELS,CAPTION_SCALE_MIN,CAPTION_SCALE_MAX,CAPTION_BACKGROUNDS,CAPTION_POSITIONS,ADS_SENSITIVITY_MULT_MIN,ADS_SENSITIVITY_MULT_MAX,ADS_SIGHT_MULTIPLIER_KEYS,adsSightBucket,adsSensitivityMultiplier} from './config.mjs';
 import {COOP_GARRISON_BOTS,COOP_TEAM_FLOOR,DEFAULT_COCS_TIER,OPERATIONS_WAVE_COUNT,configuredDirectorTier,coopRoster,coopWaveSummary} from './cocs-difficulty.mjs';
 import {slowSkip} from './test-support.mjs';
 import {CAMPAIGN_MISSIONS} from './campaign-data.mjs';
@@ -173,6 +173,74 @@ test('display clarity and caption preferences default safely',()=>{
   assert.equal(on.showKillFeed,false);
   assert.equal(on.showDamageNumbers,false);
   assert.equal(on.showRadar,false);
+});
+
+test('caption presentation and hold-vs-toggle preferences normalize additively',()=>{
+ const defaults=normalizeDisplay({});
+ assert.equal(defaults.captionScale,1);
+ assert.equal(defaults.captionBackground,'dim');
+ assert.equal(defaults.captionPosition,'bottom');
+ assert.equal(defaults.adsToggle,false);
+ assert.equal(defaults.crouchToggle,false);
+ assert.equal(defaults.sprintToggle,false);
+ assert.deepEqual([...CAPTION_BACKGROUNDS],['solid','dim','transparent']);
+ assert.deepEqual([...CAPTION_POSITIONS],['bottom','top']);
+ assert.equal(CAPTION_SCALE_MIN,.8);
+ assert.equal(CAPTION_SCALE_MAX,1.6);
+ const tuned=normalizeDisplay({captionScale:1.4,captionBackground:'solid',captionPosition:'top',adsToggle:true,crouchToggle:true,sprintToggle:true});
+ assert.equal(tuned.captionScale,1.4);
+ assert.equal(tuned.captionBackground,'solid');
+ assert.equal(tuned.captionPosition,'top');
+ assert.equal(tuned.adsToggle,true);
+ assert.equal(tuned.crouchToggle,true);
+ assert.equal(tuned.sprintToggle,true);
+ const clamped=normalizeDisplay({captionScale:9,captionBackground:'neon',captionPosition:'left',adsToggle:'yes',crouchToggle:1,sprintToggle:false});
+ assert.equal(clamped.captionScale,1.6,'caption scale clamps to the published top stop');
+ assert.equal(clamped.captionBackground,'dim','an unpublished background falls back to the shipped dim');
+ assert.equal(clamped.captionPosition,'bottom','an unpublished position falls back to bottom');
+ assert.equal(clamped.adsToggle,false,'a non-boolean toggle pref stays on the shipped held behavior');
+ assert.equal(clamped.crouchToggle,false);
+ assert.equal(normalizeDisplay({captionScale:-3}).captionScale,.8,'caption scale clamps to the low stop');
+ // A legacy save without the keys resolves to the shipped caption and held inputs.
+ const legacy=normalizeDisplay({fov:90});
+ assert.equal(legacy.captionScale,1);
+ assert.equal(legacy.captionBackground,'dim');
+ assert.equal(legacy.captionPosition,'bottom');
+ assert.equal(legacy.adsToggle,false);
+ const saved=JSON.parse(JSON.stringify({...DEFAULT_DISPLAY,captionScale:1.2,captionBackground:'transparent',captionPosition:'top',adsToggle:true,crouchToggle:true,sprintToggle:true}));
+ assert.deepEqual(normalizeDisplay(saved),saved,'saved JSON round-trips without drift');
+});
+
+test('per-sight ADS multipliers scale the scalar only while a sight is live',()=>{
+ assert.deepEqual([...Object.values(ADS_SIGHT_MULTIPLIER_KEYS)],['adsSensitivityNear','adsSensitivityHolo','adsSensitivityScope']);
+ assert.equal(ADS_SENSITIVITY_MULT_MIN,.4);
+ assert.equal(ADS_SENSITIVITY_MULT_MAX,1.6);
+ const display=normalizeDisplay({adsSensitivity:.8,adsSensitivityNear:.5,adsSensitivityHolo:1.2,adsSensitivityScope:1.5});
+ assert.equal(adsSightBucket({kind:'iron',magnification:1}),'near');
+ assert.equal(adsSightBucket({kind:'holo',magnification:1}),'holo','the sight kind wins over a 1x magnification');
+ assert.equal(adsSightBucket({kind:'scope',magnification:3.6}),'scope');
+ assert.equal(adsSightBucket({magnification:1}),'near','a kindless sight buckets by magnification');
+ assert.equal(adsSightBucket({magnification:1.5}),'holo');
+ assert.equal(adsSightBucket({magnification:3}),'scope');
+ assert.equal(adsSightBucket(null),null);
+ assert.equal(adsSightBucket({magnification:'nope'}),null);
+ assert.equal(adsSensitivityMultiplier(display,{kind:'iron',magnification:1}),.5);
+ assert.equal(adsSensitivityMultiplier(display,{kind:'holo',magnification:1}),1.2);
+ assert.equal(adsSensitivityMultiplier(display,{kind:'scope',magnification:3.6}),1.5);
+ assert.equal(adsSensitivityMultiplier(display,{magnification:2.5}),1.5);
+ assert.equal(adsSensitivityMultiplier(display,null),1,'no live sight keeps the scalar untouched');
+ assert.equal(adsSensitivityMultiplier(display,{}),1);
+ assert.equal(adsSensitivityMultiplier(null,{kind:'scope'}),1,'an absent display cannot invent a multiplier');
+ // Legacy saves default every multiplier to 1, so the scalar is the whole gain.
+ const legacy=normalizeDisplay({adsSensitivity:.6});
+ assert.equal(legacy.adsSensitivityNear,1);
+ assert.equal(legacy.adsSensitivityHolo,1);
+ assert.equal(legacy.adsSensitivityScope,1);
+ assert.equal(adsSensitivityMultiplier(legacy,{kind:'scope'}),1);
+ const clamped=normalizeDisplay({adsSensitivityNear:9,adsSensitivityHolo:0,adsSensitivityScope:-1});
+ assert.equal(clamped.adsSensitivityNear,1.6);
+ assert.equal(clamped.adsSensitivityHolo,.4);
+ assert.equal(clamped.adsSensitivityScope,.4);
 });
 
 test('touch layout, frame cap and shadow fields normalize deliberately', () => {

@@ -266,7 +266,13 @@ export function teamStatusHud(player, hud) {
    const state = objectives.payload, total = Math.max(0, Number(state.total) || 0), distance = Math.max(0, Number(state.distance) || 0);
    const pushing = hudTeam(state.pushing), percent = hudPercent(state.progress);
    const contested = state.contested === true, delivered = state.delivered === true, mine = pushing !== null && pushing === team;
-   payload = {percent, distance, total, contested, delivered, pushing, mine,
+   // Contest sides: the attacker owns the push, the defender stalls it. The
+   // frozen objective carries both; a sliced payload object may repeat them, so
+   // read either shape. `contested` and `mine` keep their pinned meanings.
+   const attacker = hudTeam(objectives.attacker) ?? hudTeam(state.attacker);
+   const defender = hudTeam(objectives.defender) ?? hudTeam(state.defender) ?? (attacker === null ? null : attacker === 0 ? 1 : 0);
+   payload = {percent, distance, total, contested, delivered, pushing, mine, attacker, defender,
+    defending: team !== null && defender !== null && defender === team,
     checkpointsReached: hudWhole(state.checkpointsReached), checkpointCount: hudWhole(state.checkpointCount),
     text: `PAYLOAD ${percent}% · ${hudMeters(distance)}/${hudMeters(total)}m${contested ? ' · CONTESTED' : delivered ? ' · DELIVERED' : mine ? ' · MOVING' : ''}`};
   } else if (kind === 'assault' && rows) {
@@ -348,7 +354,7 @@ export function suddenDeathBanner(hud) {
   return (hud?.suddenDeath === true || hud?.objectives?.suddenDeath === true) && hud?.over !== true ? { text: 'SUDDEN DEATH', detail: 'NEXT SCORE WINS' } : null;
 }
 
-const CAPTION_EVENTS = Object.freeze({shot:'Gunfire',explosion:'Explosion','vehicle-shot':'Vehicle gunfire',grenade:'Grenade out',melee:'Melee',reload:'Reloading',pickup:'Pickup',powerup:'Powerup','vehicle-enter':'Mounted vehicle','vehicle-exit':'Dismounted vehicle','vehicle-destroyed':'Vehicle destroyed','vehicle-splatter':'Vehicle splatter','zone-capture':'Zone captured','zone-score':'Objective scoring','zone-neutralized':'Zone neutralized','flag-pickup':'Flag taken','flag-return':'Flag returned','flag-drop':'Flag dropped',capture:'Flag captured','assault-sector-captured':'Sector captured','assault-sector-lost':'Sector lost','assault-breach':'Sector breached','payload-checkpoint':'Checkpoint reached','payload-delivered':'Payload delivered','soccer-goal':'Goal','killstreak':'Killstreak',death:'Elimination','mission-message':'Mission update','mission-won':'Mission complete','mission-lost':'Mission failed','horde-wave':'Wave incoming','horde-wave-cleared':'Wave cleared','horde-resupply':'Resupplied','horde-upgrade':'Upgrade available','horde-upgrade-selected':'Upgrade acquired','enemy-detonate':'Sapper detonation','singleplayer-checkpoint':'Checkpoint saved','npc-deploy':'Contacts','story-line':'Mission briefing','npc-bark':'Transmission','boss-phase':'Boss phase','armsrace-promote':'Ladder up','armsrace-demote':'Ladder down','juggernaut-transfer':'Crown taken','elimination-life':'Team life lost','vip-deploy':'VIP deployed','vip-down':'VIP down','vip-extracted':'VIP extracted','holdout-progress':'Holdout progress','holdout-win':'Holdout won','uplink-capture':'Uplink captured','uplink-stage':'Uplink advanced','uplink-win':'Uplink won','objective-win':'Objective secured','enemy-telegraph':'Incoming attack','boss-slam':'Boss slam','boss-summon':'Boss summon','mender-heal':'Ally healed','overseer-aura':'Overseer aura','phalanx-shield':'Phalanx shield','enemy-flank':'Flanking','enemy-artillery':'Artillery incoming','race-coin':'Coin collected','race-box':'Item box','race-boost':'Speed boost','race-item':'Item deployed','race-hazard-hit':'Hazard hit','race-lap':'Lap complete','race-finish':'Race finish',power:'Ability activated','threat-ping':'Threat ping',feint:'Radar feint','move-start':'Movement ability','move-end':'Movement ended','windup-start':'Movement wind-up','windup-end':'Movement wind-up ended','charge-start':'Movement charge','charge-release':'Movement released','charge-cancel':'Movement charge cancelled','slam-launch':'Slam launch','slam-impact':'Slam impact','grapple-hook':'Grapple hooked','grapple-release':'Grapple released','rope-place':'Rope deployed','rope-expire':'Rope expired','move-miss':'Movement missed','rope-miss':'Rope missed','move-blocked':'Movement blocked','fuel-empty':'Fuel empty','no-lift':'Movement blocked','chain-cancel':'Movement chained','landing-recovery':'Landing recovery','vehicle-damage':'Vehicle damaged','deployable':'Sentry deployed','deployable-fire':'Sentry firing','deployable-expire':'Sentry expired','weapon-upgrade':'Weapon upgrade',dryfire:'Empty magazine','weapon-switch':'Weapon switch','loadout-switch':'Loadout changed','horde-modifier':'Wave modifier','lattice-support':'Lattice support','vehicle-repair':'Vehicle repaired','deployable-destroyed':'Sentry destroyed','deployable-repaired':'Sentry repaired','objective-tiebreak':'Objective tiebreak','sudden-death':'Sudden death','weather-change':'Weather change','time-change':'Time of day change','bounty':'Bounty claimed','charge':'Charge','horde-summary':'Horde summary'});
+const CAPTION_EVENTS = Object.freeze({shot:'Gunfire',explosion:'Explosion','vehicle-shot':'Vehicle gunfire',grenade:'Grenade out',melee:'Melee',reload:'Reloading',pickup:'Pickup',powerup:'Powerup','vehicle-enter':'Mounted vehicle','vehicle-exit':'Dismounted vehicle','vehicle-destroyed':'Vehicle destroyed','vehicle-splatter':'Vehicle splatter','zone-capture':'Zone captured','zone-score':'Objective scoring','zone-neutralized':'Zone neutralized','flag-pickup':'Flag taken','flag-return':'Flag returned','flag-drop':'Flag dropped','flag-pass':'Flag passed','flag-contest':'Flag contested',capture:'Flag captured','assault-sector-captured':'Sector captured','assault-sector-lost':'Sector lost','assault-breach':'Sector breached','payload-checkpoint':'Checkpoint reached','payload-delivered':'Payload delivered','payload-contest':'Payload contested','soccer-goal':'Goal','killstreak':'Killstreak',death:'Elimination','mission-message':'Mission update','mission-won':'Mission complete','mission-lost':'Mission failed','horde-wave':'Wave incoming','horde-wave-cleared':'Wave cleared','horde-resupply':'Resupplied','horde-upgrade':'Upgrade available','horde-upgrade-selected':'Upgrade acquired','enemy-detonate':'Sapper detonation','singleplayer-checkpoint':'Checkpoint saved','npc-deploy':'Contacts','story-line':'Mission briefing','npc-bark':'Transmission','boss-phase':'Boss phase','armsrace-promote':'Ladder up','armsrace-demote':'Ladder down','juggernaut-transfer':'Crown taken','elimination-life':'Team life lost','vip-deploy':'VIP deployed','vip-down':'VIP down','vip-extracted':'VIP extracted','holdout-progress':'Holdout progress','holdout-win':'Holdout won','uplink-capture':'Uplink captured','uplink-stage':'Uplink advanced','uplink-win':'Uplink won','objective-win':'Objective secured','enemy-telegraph':'Incoming attack','boss-slam':'Boss slam','boss-summon':'Boss summon','mender-heal':'Ally healed','overseer-aura':'Overseer aura','phalanx-shield':'Phalanx shield','enemy-flank':'Flanking','enemy-artillery':'Artillery incoming','race-coin':'Coin collected','race-box':'Item box','race-boost':'Speed boost','race-item':'Item deployed','race-hazard-hit':'Hazard hit','race-lap':'Lap complete','race-finish':'Race finish',power:'Ability activated','threat-ping':'Threat ping',feint:'Radar feint','move-start':'Movement ability','move-end':'Movement ended','windup-start':'Movement wind-up','windup-end':'Movement wind-up ended','charge-start':'Movement charge','charge-release':'Movement released','charge-cancel':'Movement charge cancelled','slam-launch':'Slam launch','slam-impact':'Slam impact','grapple-hook':'Grapple hooked','grapple-release':'Grapple released','rope-place':'Rope deployed','rope-expire':'Rope expired','move-miss':'Movement missed','rope-miss':'Rope missed','move-blocked':'Movement blocked','fuel-empty':'Fuel empty','no-lift':'Movement blocked','chain-cancel':'Movement chained','landing-recovery':'Landing recovery','vehicle-damage':'Vehicle damaged','deployable':'Sentry deployed','deployable-fire':'Sentry firing','deployable-expire':'Sentry expired','weapon-upgrade':'Weapon upgrade',dryfire:'Empty magazine','weapon-switch':'Weapon switch','loadout-switch':'Loadout changed','horde-modifier':'Wave modifier','lattice-support':'Lattice support','vehicle-repair':'Vehicle repaired','deployable-destroyed':'Sentry destroyed','deployable-repaired':'Sentry repaired','objective-tiebreak':'Objective tiebreak','sudden-death':'Sudden death','weather-change':'Weather change','time-change':'Time of day change','bounty':'Bounty claimed','charge':'Charge','horde-summary':'Horde summary'});
 export function ladderStatus(player, total = 10) {
   const rung = Math.max(0, Math.floor(Number(player?.ladder) || 0));
   const size = Math.max(1, Math.floor(Number(total) || 10));
@@ -548,8 +554,13 @@ const CAPTION_PRIORITY_BY_TYPE = Object.freeze({
   'zone-capture': ASSISTIVE_PRIORITY.objective,
   'zone-score': ASSISTIVE_PRIORITY.objective,
   'flag-pickup': ASSISTIVE_PRIORITY.objective,
+  'flag-pass': ASSISTIVE_PRIORITY.objective,
   'payload-delivered': ASSISTIVE_PRIORITY.objective,
   'assault-breach': ASSISTIVE_PRIORITY.objective,
+  // A stand or cart under contest is a threat alert, not routine chatter: it
+  // holds its window in the callout band while a relay stays an objective beat.
+  'flag-contest': ASSISTIVE_PRIORITY.callout,
+  'payload-contest': ASSISTIVE_PRIORITY.callout,
   'boss-phase': ASSISTIVE_PRIORITY.sudden,
   'director-siege': ASSISTIVE_PRIORITY.sudden,
   // Sudden death and the time-limit tiebreak are objective-ending beats: they
@@ -572,8 +583,11 @@ const CAPTION_PRIORITY_BY_TYPE = Object.freeze({
   'deployable-destroyed': ASSISTIVE_PRIORITY.callout,
   bounty: ASSISTIVE_PRIORITY.callout,
   'horde-summary': ASSISTIVE_PRIORITY.objective,
-  // Support and economy beats sit in the notice band.
+  // Support and economy beats sit in the notice band. A holdout tick repeats
+  // every five seconds of held time, so it reads as notice-band progress and
+  // never claims the protection a discrete objective beat holds.
   'lattice-support': ASSISTIVE_PRIORITY.notice,
+  'holdout-progress': ASSISTIVE_PRIORITY.notice,
   'vehicle-repair': ASSISTIVE_PRIORITY.notice,
   'deployable-repaired': ASSISTIVE_PRIORITY.notice,
   'weapon-upgrade': ASSISTIVE_PRIORITY.notice,
@@ -881,9 +895,28 @@ export function latticeAnnounceCue(event, playerId) {
 const awardScore = actor => (Number(actor?.frags) || 0) * 3 + stat(actor, 'objectiveTime') + stat(actor, 'captures') * 5 + stat(actor, 'flagReturns') * 2;const stat = (actor, field) => Number(actor?.scoreStats?.[field]) || 0;
 const ratio = actor => { const kills = Number(actor?.frags) || 0, deaths = Number(actor?.deaths) || 0; return deaths > 0 ? kills / deaths : kills; };
 
-export function matchAwards(hud) {
+// NEW RECORD chips for the results card. `records` is `newPersonalBests`'
+// output (a record object or a bare label string); each maps onto the exact
+// `{id,label,name,value}` card the award strip already renders, so the results
+// screen can show a record without new markup, a new surface or a live region.
+// `record: true` marks the chip for styling; undefined rows are dropped rather
+// than rendered as an empty badge.
+export function recordBadges(records = []) {
+  const list = Array.isArray(records) ? records : [];
+  return list.map((record, index) => {
+    if (record === null || record === undefined) return null;
+    const source = typeof record === 'object' ? record : {label: record};
+    const label = typeof source.label === 'string' && source.label ? source.label : `RECORD ${index + 1}`;
+    const value = source.value === undefined || source.value === null ? '' : String(source.value);
+    const id = typeof source.id === 'string' && source.id ? source.id : String(index);
+    return {id: `record-${id}`, label: 'NEW RECORD', name: label, value, record: true};
+  }).filter(Boolean);
+}
+
+export function matchAwards(hud, records = []) {
+  const badges = recordBadges(records);
   const actors = (Array.isArray(hud?.actors) ? hud.actors : []).filter(actor => actor && actor.name && Number.isFinite(Number(actor.id)));
-  if (actors.length < 2) return [];
+  if (actors.length < 2) return badges;
   const top = score => actors.reduce((best, actor) => score(actor) > score(best) ? actor : best, actors[0]);
   const awards = [];
   const mvp = top(awardScore);
@@ -905,7 +938,9 @@ export function matchAwards(hud) {
   if ((Number(survivor.frags) || 0) > 0 && (Number(survivor.deaths) || 0) === 0) awards.push({id: 'flawless', label: 'UNTOUCHABLE · NO DEATHS', name: survivor.name, value: '0 DEATHS'});
   const generous = top(actor => Number(actor.deaths) || 0);
   if ((Number(generous.deaths) || 0) > 0) awards.push({id: 'deaths', label: 'FEED PROVIDER', name: generous.name, value: `${Number(generous.deaths) || 0} DEATHS`});
-  return awards;
+  // New records lead the strip: they describe the local result, while the
+  // existing awards keep their relative order and object shape untouched.
+  return [...badges, ...awards];
 }
 
 // Weapon range identity: a coarse SHORT/MID/LONG band plus the effective
@@ -1048,13 +1083,34 @@ export const scoreStats = actor => Object.fromEntries(SCORE_STAT_FIELDS.map(fiel
 
 const zoneName = (zone, index) => String(zone?.id ?? '').toLowerCase() === 'alpha' ? 'A' : String(zone?.id ?? '').toLowerCase() === 'bravo' ? 'B' : String(zone?.id ?? '').toLowerCase() === 'charlie' ? 'C' : String.fromCharCode(65 + index);
 export const dominationZoneText = (zones, playerTeam) => zones.map((zone, index) => `${zoneName(zone, index)} ${zone?.contested ? 'CONTESTED' : zone?.owner === null || zone?.owner === undefined ? 'NEUTRAL' : zone.owner === playerTeam ? 'YOUR CONTROL' : `${teamName(zone.owner)} CONTROL`}`).join(' · ');
-export const flagText = hud => {
-  if (!Array.isArray(hud?.flags) || !hud.flags.length) return '';
+// Per-flag read model for the compact CTF reader. A carried flag keeps naming
+// its carrier, and a home stand under contest appends `· STAND CONTESTED`.
+// Contest data is optional client-side state keyed by flag team: `true`, an
+// enemy count, or an event-shaped `{count}`. The page can stash it on the
+// snapshot (`hud.flagContests`) or pass it as the second argument; with no
+// contest data the pinned `flagText` copy is byte-identical to the historical
+// helper, so an older snapshot and every existing reader stay unchanged.
+const flagContestCount = value => {
+  if (value === true) return 1;
+  const count = Number(value && typeof value === 'object' ? value.count : value);
+  return Number.isFinite(count) && count > 0 ? Math.floor(count) : 0;
+};
+
+export function flagStatus(hud, contests = hud?.flagContests) {
+  if (!Array.isArray(hud?.flags) || !hud.flags.length) return [];
   return hud.flags.map(f => {
     const carrier = hud?.actors?.find(a => a.id === f.carrier);
-    return `${teamName(f.team)} FLAG ${f.state === 'at-base' ? 'HOME' : f.state === 'carried' ? `CARRIED BY ${carrier?.name?.toUpperCase() || `A${f.carrier}`}` : 'DROPPED'}`;
-  }).join('  ·  ');
-};
+    const count = flagContestCount(contests?.[f.team]);
+    const label = f.state === 'at-base' ? 'HOME' : f.state === 'carried' ? `CARRIED BY ${carrier?.name?.toUpperCase() || `A${f.carrier}`}` : 'DROPPED';
+    return {
+      team: f.team, state: f.state ?? null, carrier: f.carrier ?? null, carrierName: carrier?.name ?? null,
+      contested: count > 0, count,
+      text: `${teamName(f.team)} FLAG ${label}${count > 0 ? ' · STAND CONTESTED' : ''}`,
+    };
+  });
+}
+
+export const flagText = (hud, contests) => flagStatus(hud, contests).map(row => row.text).join('  ·  ');
 
 export const modeColumns = mode => mode === 'ctf' ? [['captures', 'CAP'], ['flagPickups', 'PICK'], ['flagReturns', 'RET'], ['flagDrops', 'DROP']]
   : isCocsMode(mode) ? [['objectiveCaptures', 'CAPTURES'], ['objectiveTime', 'NODE TIME']]

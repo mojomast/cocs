@@ -258,6 +258,14 @@ export function nextUnlockFor(profile){
  const unlocked=(profile&&typeof profile.unlocks==='object'&&profile.unlocks)||{};
  return UNLOCKS.filter(item=>unlocked[item.id]!==true).sort((a,b)=>a.level-b.level||String(a.name).localeCompare(String(b.name)))[0]||null;
 }
+// Discovery list for the selection/results surfaces: the next few locked items
+// in the same level order as the single next-unlock chip. Pure and bounded, so
+// the career strip can show "what is close" without re-deriving unlock math.
+export function nextUnlocksFor(profile,limit=3){
+ const unlocked=(profile&&typeof profile.unlocks==='object'&&profile.unlocks)||{};
+ const count=Math.max(0,Math.floor(Number(limit)||0));
+ return UNLOCKS.filter(item=>unlocked[item.id]!==true).sort((a,b)=>a.level-b.level||String(a.name).localeCompare(String(b.name))).slice(0,count).map(item=>({id:item.id,kind:item.kind,name:item.name,level:item.level,description:item.description}));
+}
 // Compact post-match summary card. Pure composition of the snapshot, the
 // reward strip and the career tracks so the results screen can surface
 // achievements and prestige progress without re-deriving them in JSX.
@@ -293,6 +301,7 @@ export function matchSummaryCard({hud=null,reward=null,profile=null,achievements
   achievements:unlocked.map(a=>({id:a.id,name:a.name,description:a.description,xp:Math.max(0,Math.floor(Number(a.xp)||0))})),
   achievementCount:unlocked.length,
   nextUnlock:reward?.nextUnlock||nextUnlockFor(p),
+  nextUnlocks:Array.isArray(reward?.nextUnlocks)?reward.nextUnlocks:nextUnlocksFor(p,3),
  };
 }
 
@@ -309,5 +318,6 @@ export function matchRewardSummary(award={}){
   achievements:Array.isArray(award?.achievements)?award.achievements:[],
   prestige:prestige.rank,prestigeTier:prestige.tier?{...prestige.tier}:null,prestigeProgress:prestige.progress,prestigeToNext:prestige.toNext,prestigeMaxed:prestige.maxed,
   nextUnlock:next?{id:next.id,kind:next.kind,name:next.name,level:next.level}:null,
+  nextUnlocks:nextUnlocksFor(profile,3),
  };
 }

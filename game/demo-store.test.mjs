@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { DEMO_VERSION, demoHeader, compressDemo } from './demo.mjs';
-import { setDemoStorage, saveDemo, getDemo, listDemos, deleteDemo, demoSummary, demoHighlights, demoOutcome, demoModes, demoMaps, filterDemos, sortDemos, demoFileName, demoUsage, demoUsageText, exportDemo, importDemo, importDemoToStore } from './demo-store.mjs';
+import { setDemoStorage, saveDemo, getDemo, listDemos, deleteDemo, demoSummary, demoSummaryText, demoHighlights, demoOutcome, demoModes, demoMaps, filterDemos, sortDemos, demoFileName, demoUsage, demoUsageText, demoBookmarks, addDemoBookmark, removeDemoBookmark, demoRetentionPlan, pruneDemos, exportDemo, importDemo, importDemoToStore } from './demo-store.mjs';
 
 function createMemoryStorage() {
   const meta = new Map();
@@ -123,16 +123,20 @@ test('demo filtering, sorting and outcomes are deterministic', () => {
   assert.deepEqual(sortDemos([], 'longest'), []);
   assert.deepEqual(demoModes(demos), ['ctf', 'deathmatch']);
   assert.deepEqual(demoMaps(demos), ['exchange', 'forge']);
+  // Team modes use the game's own RED / BLUE names and an explicit numeric
+  // winnerTeam slot so a caller never has to parse the display string.
   const team = {header: {config: {team: true}, teamScores: {0: 3, 1: 1}}, keyframes: [{time: 0, state: {config: {team: true}, teamScores: {0: 3, 1: 1}}}]};
-  assert.deepEqual(demoOutcome(team), {teamMode: true, winner: 'Team 1', scores: {0: 3, 1: 1}, score: '3–1'});
+  assert.deepEqual(demoOutcome(team), {teamMode: true, winner: 'RED', winnerTeam: 0, scores: {0: 3, 1: 1}, score: '3–1'});
   const ctf = {header: {config: {mode: 'ctf'}, mapId: 'exchange'}, keyframes: [{time: 0, state: {config: {mode: 'ctf'}, teamScores: {0: 5, 1: 2}}}]};
-  assert.deepEqual(demoOutcome(ctf), {teamMode: true, winner: 'Team 1', scores: {0: 5, 1: 2}, score: '5–2'});
+  assert.deepEqual(demoOutcome(ctf), {teamMode: true, winner: 'RED', winnerTeam: 0, scores: {0: 5, 1: 2}, score: '5–2'});
   const losing = {header: {config: {mode: 'teamdeathmatch'}}, keyframes: [{time: 0, state: {config: {mode: 'teamdeathmatch'}, teamScores: {0: 4, 1: 9}}}]};
-  assert.equal(demoOutcome(losing).winner, 'Team 2');
+  assert.equal(demoOutcome(losing).winner, 'BLUE');
+  assert.equal(demoOutcome(losing).winnerTeam, 1);
   const ffa = {keyframes: [{time: 0, state: {config: {team: false}, actors: [{id: 0, name: 'Claude', frags: 4}, {id: 1, name: 'ChatGPT', frags: 9}]}}]};
-  assert.deepEqual(demoOutcome(ffa), {teamMode: false, winner: 'ChatGPT', scores: null, score: '9 frags'});
+  assert.deepEqual(demoOutcome(ffa), {teamMode: false, winner: 'ChatGPT', winnerTeam: null, scores: null, score: '9 frags'});
   const tie = {header: {config: {team: true}, teamScores: {}}};
   assert.equal(demoOutcome(tie).winner, null);
+  assert.equal(demoOutcome(tie).winnerTeam, null);
   assert.equal(demoOutcome(tie).score, '0–0');
 });
 
@@ -198,13 +202,150 @@ test('demoUsage reports the library size when the store exposes it', async () =>
   assert.equal(demoUsageText({count: 2, bytes: 800}), '2 REPLAYS · 1 KB');
   assert.equal(demoUsageText(null), '0 REPLAYS');
 
-  // A store without sizes still counts, but never invents a measurement.
+  // A store without a usage() method counts from the summaries; a saved replay
+  // now carries its real compressed size, so the fallback is measured too.
   setDemoStorage(createMemoryStorage());
   await saveDemo(makeDemo());
   const counted = await demoUsage();
   assert.equal(counted.count, 1);
-  assert.equal(counted.measured, false);
-  assert.equal(demoUsageText(counted), '1 REPLAY');
+  assert.equal(counted.measured, true);
+  assert.ok(counted.bytes > 0);
+  assert.match(demoUsageText(counted), /^1 REPLAY · \d+ KB$/);
+  // Legacy meta entries with no size still count, but the byte total stays 0
+  // and is never presented as a measurement.
+  const legacy = createMemoryStorage();
+  legacy.meta.set('legacy', { id: 'legacy', createdAt: '2020-01-01T00:00:00Z' });
+  setDemoStorage(legacy);
+  const unscoped = await demoUsage();
+  assert.equal(unscoped.count, 1);
+  assert.equal(unscoped.measured, false);
+  assert.equal(demoUsageText(unscoped), '1 REPLAY');
+});
+
+test('saveDemo records the compressed byte count on the summary for retention', async () => {
+  const storage = createMemoryStorage();
+  setDemoStorage(storage);
+  const summary = await saveDemo(makeDemo({ timeLimit: 5, count: 4 }));
+  assert.ok(Number.isFinite(summary.bytes) && summary.bytes > 0, 'the summary carries the stored size');
+  const [listed] = await listDemos();
+  assert.equal(listed.bytes, summary.bytes, 'the stored summary matches what saveDemo returned');
+});
+
+test('replay bookmarks live in demo meta, surface on the summary and round-trip compression', async () => {
+  const storage = createMemoryStorage();
+  setDemoStorage(storage);
+  const summary = await saveDemo(makeDemo({ timeLimit: 5, count: 4 }));
+  assert.deepEqual(summary.bookmarks, [], 'a fresh replay has no bookmarks');
+
+  const marked = await addDemoBookmark(summary.id, { time: 1.234, label: 'Nice shot' });
+  assert.deepEqual(marked.bookmarks, [{ time: 1.23, label: 'Nice shot' }], 'the bookmark lands in the summary');
+  await addDemoBookmark(summary.id, { time: 3.5 });
+  // A duplicate stamp is ignored, and addDemoBookmark accepts a plain number.
+  const deduped = await addDemoBookmark(summary.id, 1.234);
+  assert.deepEqual(deduped.bookmarks, [{ time: 1.23, label: 'Nice shot' }, { time: 3.5 }]);
+  assert.equal(deduped.id, summary.id, 'bookmarking never mints a new replay id');
+
+  const loaded = await getDemo(summary.id);
+  assert.deepEqual(loaded.meta.bookmarks, [{ time: 1.23, label: 'Nice shot' }, { time: 3.5 }], 'meta round-trips through compression');
+  assert.equal(loaded.meta.tag, 'roundtrip', 'the original meta fields survive');
+
+  const cleaned = await removeDemoBookmark(summary.id, 1.23);
+  assert.deepEqual(cleaned.bookmarks, [{ time: 3.5 }]);
+  assert.equal(await addDemoBookmark('missing', { time: 1 }), null, 'a missing replay is a null result, not a throw');
+  await assert.rejects(() => addDemoBookmark(summary.id, { time: -1 }), /Invalid bookmark time/);
+});
+
+test('demoBookmarks normalizes hostile meta instead of trusting it', () => {
+  assert.deepEqual(demoBookmarks(null), []);
+  assert.deepEqual(demoBookmarks({ meta: { bookmarks: 'nope' } }), []);
+  assert.deepEqual(demoBookmarks({ meta: { bookmarks: [{ time: NaN }, { time: -4 }, { time: 2.002 }, { time: 2.004 }, { time: '3', label: '  x  ' }] } }),
+    [{ time: 2 }, { time: 3, label: 'x' }]);
+});
+
+test('demoRetentionPlan keeps everything by default and only removes past the policy', () => {
+  const demos = [
+    { id: 'newest', createdAt: '2024-03-01T00:00:00Z', bytes: 300 },
+    { id: 'middle', createdAt: '2024-02-01T00:00:00Z', bytes: 200 },
+    { id: 'oldest', createdAt: '2024-01-01T00:00:00Z', bytes: 100 },
+  ];
+  const off = demoRetentionPlan(demos);
+  assert.deepEqual(off.remove, [], 'no policy removes nothing');
+  assert.deepEqual(off.keep, ['newest', 'middle', 'oldest']);
+  assert.equal(off.measured, false, 'a size of zero disables size pruning rather than guessing');
+
+  const keepTwo = demoRetentionPlan(demos, { keep: 2 });
+  assert.deepEqual(keepTwo.remove, ['oldest']);
+  assert.deepEqual(keepTwo.keep, ['newest', 'middle']);
+
+  const limit = demoRetentionPlan(demos, { maxBytes: 400 });
+  assert.deepEqual(limit.remove, ['middle', 'oldest'], 'oldest-first deletion continues until the budget fits');
+  assert.deepEqual(limit.keep, ['newest']);
+  assert.equal(limit.measured, true);
+  assert.equal(limit.bytes, 300);
+  assert.equal(limit.sizeApplied, true);
+
+  const keepOneWithLimit = demoRetentionPlan(demos, { keep: 1, maxBytes: 1 });
+  assert.deepEqual(keepOneWithLimit.keep, ['newest'], 'keep is a hard floor even under a tiny byte limit');
+  assert.deepEqual(keepOneWithLimit.remove, ['middle', 'oldest']);
+
+  const unmeasured = demoRetentionPlan([{ id: 'a', createdAt: '2024-01-01T00:00:00Z' }], { maxBytes: 1 });
+  assert.equal(unmeasured.measured, false, 'a missing size never authorizes deletion');
+  assert.deepEqual(unmeasured.remove, []);
+});
+
+test('pruneDemos applies an opt-in policy against the live storage', async () => {
+  const storage = createMemoryStorage();
+  storage.usage = async () => ({
+    count: storage.meta.size,
+    bytes: [...storage.data.values()].reduce((total, record) => total + record.bytes.byteLength, 0),
+    entries: [...storage.data.entries()].map(([id, record]) => ({ id, bytes: record.bytes.byteLength })),
+  });
+  setDemoStorage(storage);
+  const first = await saveDemo({ ...makeDemo({ timeLimit: 2, count: 4 }), createdAt: '2024-01-01T00:00:00.000Z', id: 'keep-a' });
+  const second = await saveDemo({ ...makeDemo({ timeLimit: 2, count: 4 }), createdAt: '2024-02-01T00:00:00.000Z', id: 'keep-b' });
+  await saveDemo({ ...makeDemo({ timeLimit: 2, count: 40 }), createdAt: '2024-03-01T00:00:00.000Z', id: 'big-c' });
+  assert.equal((await listDemos()).length, 3);
+
+  const result = await pruneDemos({ keep: 2 });
+  assert.equal(result.applied, true);
+  assert.deepEqual(result.removed, ['keep-a'], 'keep-N prunes oldest-first');
+  assert.equal(result.removedCount, 1);
+  assert.equal(result.count, 2);
+  const remaining = await listDemos();
+  assert.deepEqual(remaining.map(demo => demo.id), ['big-c', 'keep-b']);
+  assert.ok(remaining.every(demo => Number.isFinite(demo.bytes) && demo.bytes > 0), 'kept summaries report real sizes');
+  assert.equal(first.id, 'keep-a');
+
+  const noop = await pruneDemos({});
+  assert.deepEqual(noop.removed, [], 'the default policy is keep-everything');
+  assert.equal(noop.applied, false);
+});
+
+test('demoSummaryText builds a timestamped, truthful result summary', () => {
+  const summary = { ...demoSummary(makeDemo({ timeLimit: 5, count: 4 })), winner: 'RED', score: '3–1', duration: 65 };
+  const text = demoSummaryText(summary, { now: Date.UTC(2024, 5, 1, 12, 0, 0) });
+  assert.match(text, /^COCS · REPLAY SUMMARY/);
+  assert.match(text, /Exchange · DEATHMATCH/);
+  assert.match(text, /RESULT · RED WINS \(3–1\)/);
+  assert.match(text, /DURATION · 1:05/);
+  assert.match(text, /RECORDED · 2020-01-01T00:00:00\.000Z/);
+  assert.match(text, /GENERATED · 2024-06-01T12:00:00\.000Z/);
+  assert.doesNotMatch(text, /BOOKMARKS/, 'an unbookmarked replay does not claim bookmarks');
+  assert.match(demoSummaryText({ ...summary, bookmarks: [{ time: 1 }] }), /BOOKMARKS · 1/);
+  assert.match(demoSummaryText({}, { now: 0 }), /NO WINNER/);
+});
+
+test('demoUsage surfaces the per-replay entries when the store measures them', async () => {
+  const storage = createMemoryStorage();
+  storage.usage = async () => ({ count: 2, bytes: 300, entries: [{ id: 'a', bytes: 100 }, { id: 'b', bytes: 200 }] });
+  setDemoStorage(storage);
+  const usage = await demoUsage();
+  assert.deepEqual(usage.entries, [{ id: 'a', bytes: 100 }, { id: 'b', bytes: 200 }]);
+  assert.equal(usage.bytes, 300);
+  setDemoStorage(createMemoryStorage());
+  const fallback = await demoUsage();
+  assert.equal(fallback.entries, undefined, 'a store without entries keeps the old shape');
+  assert.equal(fallback.count, 0);
 });
 
 test('trimDemo caps an oversized recording when saving', async () => {

@@ -38,7 +38,8 @@ registerHooks({
 
 const {rememberModalOpener, restoreModalFocus, firstFocusableIn} = await import('../app/ui/primitives.tsx');
 const {PauseModal, ResultsModal, RESULT_ACTION_IDS, createResultActionDispatcher, resultFooterDescriptors} = await import('../app/ui/screens/ResultModals.tsx');
-const {SettingsDialog} = await import('../app/ui/screens/SettingsDialog.tsx');
+const {SettingsDialog, HelpSections, filterHelpSections, WeaponCompare} = await import('../app/ui/screens/SettingsDialog.tsx');
+const {retentionPolicy} = await import('../app/ui/screens/TheaterScreen.tsx');
 
 const render = (element) => renderToStaticMarkup(element);
 const count = (html, needle) => (html.match(new RegExp(needle.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'g')) || []).length;
@@ -206,6 +207,63 @@ test('the settings Game tab keeps its tab ids and nests clear sections', () => {
  for (const moved of ['label="Subtitles / audio captions"', 'label="Reduce motion"', 'label="UI text scale"']) assert.ok(accessibilityBlock.includes(moved), `${moved} lives in the accessibility panel`);
  const displayBlock = config.slice(config.indexOf('export function DisplayConfiguration'));
  for (const gone of ['label="Subtitles / audio captions"', 'label="Reduce motion"', 'label="UI text scale"']) assert.ok(!displayBlock.includes(gone), `${gone} left the video panel`);
+});
+
+test('the Help filter searches title, summary and item text without a live region', () => {
+ const sections = [
+  {id: 'coach', title: 'FIRST-RUN COACH', summary: 'Replay the opening walkthrough any time.', items: ['Ten short steps.', React.createElement('button', {type: 'button'}, 'OPEN THE COACH')]},
+  {id: 'theater', title: 'THEATER & REPLAYS', summary: 'Watch the tape.', items: ['Bookmarks mark a moment worth keeping.']},
+  {id: 'modes', title: 'MODES', summary: 'Every mode.', items: ['Capture the flag by carrying it home.']},
+ ];
+ assert.deepEqual(filterHelpSections(sections, '').map(s => s.id), ['coach', 'theater', 'modes'], 'an empty query keeps every topic');
+ assert.deepEqual(filterHelpSections(sections, 'WALKTHROUGH').map(s => s.id), ['coach'], 'summaries match case-insensitively');
+ assert.deepEqual(filterHelpSections(sections, 'capture the flag').map(s => s.id), ['modes'], 'item text matches');
+ assert.deepEqual(filterHelpSections(sections, 'OPEN THE COACH').map(s => s.id), ['coach'], 'React-node items contribute their child text');
+ assert.deepEqual(filterHelpSections(sections, '  tape  ').map(s => s.id), ['theater'], 'the query is trimmed');
+ assert.deepEqual(filterHelpSections(sections, 'nothing here'), []);
+ assert.deepEqual(filterHelpSections(undefined, 'x'), []);
+
+ const html = render(React.createElement(HelpSections, {sections}));
+ assert.match(html, /<label class="config-field help-filter" for="help-filter-input">/, 'the filter input is labelled');
+ assert.match(html, /id="help-filter-input"[^>]*type="search"/, 'the filter is a search input');
+ assert.match(html, /3 OF 3 TOPICS/, 'the count is static text');
+ assert.match(html, /OPEN THE COACH/, 'the coach reopen control survives the unwrapped list');
+ assert.doesNotMatch(html, /aria-live/, 'the filter is not a live region');
+});
+
+test('the Arsenal weapon comparison derives DPS, falloff, mag/reload and effective range', () => {
+ const weapons = [
+  {name: 'Pulse Rifle', short: 'PULSE', damage: 11, interval: .1, range: 70, falloff: {start: 16, end: 70, min: .6}, ammo: Infinity, cap: Infinity, reload: 0},
+  {name: 'Scattergun', short: 'SCATTER', damage: 8.5, pellets: 8, interval: .78, range: 24, falloff: {start: 6, end: 24, min: .4}, ammo: 10, cap: 30, reload: 1.9},
+ ];
+ const html = render(React.createElement(WeaponCompare, {WEAPONS: weapons}));
+ assert.match(html, /WEAPON COMPARISON/);
+ assert.match(html, /DPS/, 'the DPS row exists');
+ assert.match(html, /<td>110<\/td>/, 'Pulse Rifle DPS is damage × pellets / interval');
+ assert.match(html, /<td>87\.2<\/td>/, 'Scattergun DPS folds pellets and interval');
+ assert.match(html, /<td>60%<\/td>/, 'the falloff floor is shown as a retained fraction');
+ assert.match(html, /<td>40%<\/td>/);
+ assert.match(html, /UNLIMITED · NO RELOAD/, 'infinite magazines are not formatted as numbers');
+ assert.match(html, /10 \/ 30 · 1\.9s RELOAD/, 'magazine and reload share one row');
+ assert.match(html, /LONG · 16–70m · 60%/, 'effective range comes from weaponRangeInfo');
+ assert.match(html, /SHORT · 6–24m · 40%/);
+ assert.match(html, /<select aria-label="Weapon A"/, 'both slots are labelled selects');
+ assert.match(html, /<select aria-label="Weapon B"/);
+ assert.match(html, /<caption class="sr-only">Weapon stat comparison<\/caption>/, 'the table is named');
+ assert.doesNotMatch(html, /aria-live/);
+ assert.match(render(React.createElement(WeaponCompare, {WEAPONS: []})), /No weapons loaded/, 'an empty rack is an empty state');
+
+ const source = readFileSync(join(ROOT, 'app/ui/screens/SettingsDialog.tsx'), 'utf8');
+ assert.match(source, /import \{weaponRangeInfo\} from '\.\.\/\.\.\/\.\.\/game\/hud\.mjs'/, 'the comparison imports the shared range model');
+ assert.match(source, /damage\)\|\|0\)\*pellets\)\/interval/, 'DPS is damage × pellets / interval');
+});
+
+test('the theater retention control maps every option to an opt-in prune policy', () => {
+ assert.deepEqual(retentionPolicy('all'), {keep: 0, maxMb: 0}, 'keep-everything is the default policy');
+ assert.deepEqual(retentionPolicy('keep:10'), {keep: 10, maxMb: 0});
+ assert.deepEqual(retentionPolicy('mb:250'), {keep: 0, maxMb: 250});
+ assert.deepEqual(retentionPolicy(''), {keep: 0, maxMb: 0});
+ assert.deepEqual(retentionPolicy('garbage'), {keep: 0, maxMb: 0});
 });
 
 test('the page wires Escape as Settings then Pause and passes the exact opener', () => {

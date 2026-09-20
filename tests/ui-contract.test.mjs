@@ -105,6 +105,139 @@ test('the crosshair depth knobs stay additive and keep the reticle CSS-var contr
  assert.match(css, /\.crosshair-advanced \.config-toggle \{ min-height: 44px;/, 'the new toggles keep a 44 px touch row');
 });
 
+// Subtitle presentation, hold-vs-toggle inputs and per-sight ADS multipliers
+// are additive display fields. The caption keeps its pinned class/role prefix
+// and only gains CSS vars/data attributes; every new control keeps a 44 px row.
+test('subtitle, hold-vs-toggle and per-sight ADS controls stay additive with 44 px rows', async () => {
+  const [config, panel, hud, css, page] = await Promise.all([
+    readFile(new URL('game/config.mjs', root), 'utf8'),
+    readFile(new URL('app/game-ui/configuration.tsx', root), 'utf8'),
+    readFile(new URL('app/ui/screens/PlayingHud.tsx', root), 'utf8'),
+    readFile(new URL('app/globals.css', root), 'utf8'),
+    readFile(new URL('app/page.tsx', root), 'utf8'),
+  ]);
+  assert.match(config, /captionScale:number\(c\.captionScale,1,CAPTION_SCALE_MIN,CAPTION_SCALE_MAX\)/, 'the caption scale is normalized additively');
+  assert.match(config, /captionBackground:choice\(c\.captionBackground,\[\.\.\.CAPTION_BACKGROUNDS\],'dim'\)/, 'the background falls back to the shipped dim');
+  assert.match(config, /captionPosition:choice\(c\.captionPosition,\[\.\.\.CAPTION_POSITIONS\],'bottom'\)/, 'the position falls back to bottom');
+  assert.match(config, /adsToggle:c\.adsToggle===true/, 'the ADS toggle defaults on the held behavior');
+  assert.match(config, /crouchToggle:c\.crouchToggle===true/);
+  assert.match(config, /sprintToggle:c\.sprintToggle===true/);
+  assert.match(config, /adsSensitivityNear:number\(c\.adsSensitivityNear,1,ADS_SENSITIVITY_MULT_MIN,ADS_SENSITIVITY_MULT_MAX\)/, 'per-sight multipliers clamp additively');
+  assert.match(config, /export function adsSensitivityMultiplier/, 'the resolver is a pure helper');
+  assert.match(config, /if\(kind==='iron'\)return 'near'/, 'the live sight kind picks the bucket');
+
+  assert.match(panel, /className="caption-options" role="group" aria-label="Subtitle presentation"/, 'the caption controls are one named group');
+  assert.match(panel, /label="Caption text size"/);
+  assert.match(panel, /label="Caption background"/);
+  assert.match(panel, /label="Caption position"/);
+  assert.match(panel, /className="input-options" role="group" aria-label="Hold or toggle controls"/, 'the toggles are one named group');
+  assert.match(panel, /label="ADS toggle"/);
+  assert.match(panel, /label="Crouch toggle"/);
+  assert.match(panel, /label="Sprint toggle"/);
+  assert.match(panel, /label="ADS multiplier · near sights"/);
+  assert.match(panel, /label="ADS multiplier · holo sights"/);
+  assert.match(panel, /label="ADS multiplier · scope sights"/);
+
+  assert.match(hud, /className="audio-caption" role="group"/, 'the pinned caption class/role prefix survives');
+  assert.match(hud, /'--caption-scale':String\(display\.captionScale\?\?1\)/, 'the caption scale rides a CSS var');
+  assert.match(hud, /data-caption-background=\{display\.captionBackground\?\?'dim'\}/, 'the background rides a data attribute');
+  assert.match(hud, /data-caption-position=\{display\.captionPosition\?\?'bottom'\}/, 'the position rides a data attribute');
+  assert.match(css, /\.audio-caption\[data-caption-background=solid\]\{background:#071317\}/);
+  assert.match(css, /\.audio-caption\[data-caption-position=top\]\{bottom:auto;top:calc\(var\(--safe-top\) \+ 150px\)\}/);
+  assert.match(css, /\.game-hud \.audio-caption\{font-size:calc\(12px \* var\(--hud-scale,1\) \* var\(--caption-scale,1\)\)\}/, 'the pinned HUD scale rule survives and stacks the caption scale');
+  assert.match(css, /\.caption-options \[data-slot=slider\], \.ads-advanced \[data-slot=slider\] \{ min-height: 44px; \}/, 'the new sliders keep a 44 px touch row');
+  assert.match(css, /\.caption-options \.config-toggle, \.input-options \.config-toggle \{ min-height: 44px; \}/, 'the new toggles keep a 44 px touch row');
+  assert.match(css, /\.keybind-transfer textarea \{ min-height: 88px;/, 'the import field is a real touch target');
+
+  assert.match(page, /adsSensitivityMultiplier\(d,r\?\.view\?\.getActiveSight\?\.\(\)\)/, 'the gain helper reads the live sight');
+  assert.equal((page.match(/\(d\.adsSensitivity\?\?1\)\*adsSightGain\(r,d\)/g) ?? []).length, 3, 'both mouse gain sites and the touch gain site use the per-sight scale');
+});
+
+// THEATER / PROGRESSION discovery wave: the page owns retention, bookmarks and
+// the next-three unlock list, and the screens render them without opening a
+// second live region. The `ui` bag fields are pinned here as well as by the
+// generic screen-field scan above.
+test('the page wires retention, replay bookmarks and the next-three unlock list', async () => {
+ const [page, theater, selection, results, settings] = await Promise.all([
+  readFile(new URL('app/page.tsx', root), 'utf8'),
+  readFile(new URL('app/ui/screens/TheaterScreen.tsx', root), 'utf8'),
+  readFile(new URL('app/ui/screens/SelectionScreen.tsx', root), 'utf8'),
+  readFile(new URL('app/ui/screens/ResultModals.tsx', root), 'utf8'),
+  readFile(new URL('app/ui/screens/SettingsDialog.tsx', root), 'utf8'),
+ ]);
+ assert.match(page, /const nextUnlocks=nextUnlocksFor\(profile,3\)/, 'the page computes the discovery list from the pure helper');
+ const start = page.indexOf('const ui:UiBag={');
+ const end = page.indexOf('};', start);
+ const bag = page.slice(start, end);
+ for (const field of ['nextUnlocks', 'pruneDemos', 'bookmarkDemo', 'removeBookmark']) {
+  assert.ok(new RegExp('(^|[,{\\s])' + field + '\\s*[:,}]').test(bag), `the ui bag provides ${field}`);
+ }
+ assert.match(selection, /nextUnlocks\.map\(/, 'Selection lists the next three unlocks');
+ assert.match(results, /NEXT UNLOCKS/, 'the results card renders the discovery list');
+ assert.match(theater, /demoSummaryText/, 'the Theater copy action builds the pure summary text');
+ assert.match(theater, /await copyToClipboard\(/, 'the copy resolves through the shared clipboard helper before success is claimed');
+ assert.match(theater, /COPIED/, 'success is a resolved-copy label');
+ assert.doesNotMatch(theater, /aria-live/, 'the Theater adds no live region');
+ assert.doesNotMatch(settings, /aria-live/, 'the help filter and comparison add no live region');
+ assert.match(settings, /filterHelpSections/, 'the Help filter is a pure helper');
+ assert.match(settings, /weaponRangeInfo/, 'the weapon comparison reads the shared range model');
+});
+
+// Screens that churned polite announcements tick-by-tick are demoted to plain
+// named groups. The HUD's single live channel is the only announcement surface.
+test('churning readouts are demoted from live regions to named groups', async () => {
+  const [director, demo, board, panel, page] = await Promise.all([
+    readFile(new URL('app/ui/screens/OperationsDirectorHud.tsx', root), 'utf8'),
+    readFile(new URL('app/ui/DemoControls.tsx', root), 'utf8'),
+    readFile(new URL('app/ui/screens/CommandBoardHud.tsx', root), 'utf8'),
+    readFile(new URL('app/game-ui/configuration.tsx', root), 'utf8'),
+    readFile(new URL('app/page.tsx', root), 'utf8'),
+  ]);
+  const lineWith = (source, needle) => source.split('\n').find(line => line.includes(needle)) ?? '';
+  const bonus = lineWith(director, 'director-readout__bonus');
+  assert.ok(bonus.includes('role="group"') && !bonus.includes('aria-live'), 'the bonus progress is a non-live group');
+  const speed = lineWith(demo, 'u/s');
+  assert.ok(speed.includes('role="group"') && !speed.includes('aria-live'), 'the free-speed value is a non-live group');
+  const chip = lineWith(board, 'cocs-board__chip');
+  assert.ok(chip.includes('role="group"') && !chip.includes('role="status"'), 'the duplicate board status chip is demoted');
+  const modeDetail = lineWith(panel, 'mode-detail');
+  assert.ok(modeDetail.includes('role="group"') && !modeDetail.includes('role="status"'), 'the mode detail is a non-live group');
+  const banner = lineWith(page, 'update-banner');
+  assert.ok(banner.includes('role="group"') && !banner.includes('role="status"'), 'the update banner is a non-live group');
+});
+
+// Keybind export/import rides the existing panel and the existing onChange, so
+// RESET KEYS and duplicate-key surfacing keep their behavior.
+test('the keybind panel exports and imports the action mapping beside RESET KEYS', async () => {
+  const panel = await readFile(new URL('app/game-ui/configuration.tsx', root), 'utf8');
+  assert.match(panel, /import \{[^}]*normalizeBindings[^}]*\} from '\.\.\/\.\.\/game\/keybinds\.mjs'/, 'the panel imports the same normalizer saved storage uses');
+  assert.match(panel, /const bindingJson=\(\)=>JSON\.stringify\(Object\.fromEntries\(KEYBIND_ACTIONS\.map/, 'export walks every bindable action');
+  assert.match(panel, /onChange\(normalizeBindings\(source\)\)/, 'import routes through the existing onChange');
+  assert.match(panel, /EXPORT JSON/);
+  assert.match(panel, /COPY JSON/);
+  assert.match(panel, /IMPORT JSON/);
+  assert.match(panel, /RESET KEYS/);
+  assert.match(panel, /Duplicate keys: \{conflicts\.join\(', '\)\}/, 'conflict surfacing survives');
+});
+
+// Interface-freeze audio host wiring: every newer channel is optional-chained,
+// and the hold-vs-toggle prefs latch the existing runtime flags so the sim input
+// shape never grows a field.
+test('the page hosts the optional audio channels and latches the toggle prefs', async () => {
+  const page = await readFile(new URL('app/page.tsx', root), 'utf8');
+  assert.match(page, /r\.audio\?\.setKillcam\?\.\(view\.killcamActive\?\.\(\)===true\)/, 'the frame loop mirrors the killcam state');
+  assert.match(page, /r\.audio\?\.setSpectating\?\.\(r\.net\?\.spectate===true\|\|r\.spectateLocal===true\)/, 'the frame loop mirrors spectating');
+  assert.match(page, /if\(r\.menuTab!==menuTab\)\{r\.menuTab=menuTab;r\.audio\?\.setMenuTab\?\.\(menuTab\);\}/, 'the menu tab only fires on a change and when the method exists');
+  assert.match(page, /audio\?\.announcerCue\?\.\(win\?'victory':'defeat'\)/, 'the local match over voices the result');
+  assert.match(page, /const toggleCrouch=\(boundAction==='crouch'\|\|e\.code==='KeyC'\)&&r\.display\?\.crouchToggle===true/);
+  assert.match(page, /const toggleSprint=boundAction==='sprint'&&r\.display\?\.sprintToggle===true/);
+  assert.match(page, /if\(!toggleCrouch&&!toggleSprint\)keys\.add\(e\.code\)/, 'a latched key never enters the held code set');
+  assert.match(page, /sprint:r\.toggleSprint===true\|\|r\.touch\?\.sprint===true,crouch:r\.toggleCrouch===true\|\|r\.touch\?\.crouch===true/, 'the latch feeds the existing sprint/crouch booleans');
+  assert.match(page, /if\(r\.display\?\.adsToggle===true\)r\.ads=r\.ads!==true;else r\.ads=true/, 'right mouse latches ADS when asked');
+  assert.match(page, /else if\(e\.button===2\)\{if\(r\.display\?\.adsToggle!==true\)r\.ads=false;\}/, 'release only clears the held ADS');
+  assert.match(page, /r\.toggleCrouch=false;r\.toggleSprint=false/, 'leaving combat clears both latches');
+});
+
 test('the page only feeds a local match to the audio engine while it owns the screen', async () => {
   const page = await readFile(new URL('app/page.tsx', root), 'utf8');
   assert.match(page, /\['playing','paused','results'\]\.includes\(modeRef\.current\)\)audio\.update\(r\.match\.actors\[0\]/, 'the stale-match audio update is gated to screen-owning modes');

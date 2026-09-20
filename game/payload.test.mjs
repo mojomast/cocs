@@ -166,3 +166,48 @@ test('a payload timeout hands the round to the defenders',()=>{
  assert.equal(match.snapshot().winner,1);
  assert.ok(match.events.some(event=>event.type==='payload-hold'));
 });
+
+// Neutral pins keep the contest rates comparable (no Tool Use multiplier).
+const neutralLoadouts={0:{character:'chatgpt',harness:'openclaw'},1:{character:'chatgpt',harness:'openclaw'},2:{character:'chatgpt',harness:'openclaw'}};
+const payloadFixture=(timeLimit=60)=>{
+ const m=new Match('chatgpt','openclaw',rng,'sunscar-canyon',{mode:'payload',botCount:0,humanCount:3,timeLimit,fragLimit:3,loadouts:neutralLoadouts});
+ const state=m.objectiveState;
+ return {m,state,attacker:m.actors.find(actor=>actor.team===state.attacker),defender:m.actors.find(actor=>actor.team===state.defender)};
+};
+const toCart=state=>actor=>Object.assign(actor,{x:state.position.x,y:state.position.y,z:state.position.z,health:100,protection:0});
+
+test('defenders bank the same cart objective time as attackers while contested',()=>{
+ const {m,state,attacker,defender}=payloadFixture();
+ const place=toCart(state);
+ place(attacker);place(defender);
+ m.updatePayload(1/60); // open the contest window
+ assert.equal(state.contested,true);
+ assert.equal(state.distance,0,'the contested cart never advances');
+ attacker.scoreStats.objectiveTime=0;defender.scoreStats.objectiveTime=0;
+ for(let i=0;i<120;i++){place(attacker);place(defender);m.updatePayload(1/60);}
+ assert.equal(state.contested,true);
+ assert.equal(state.distance,0,'the cart stays frozen for the whole window');
+ assert.ok(defender.scoreStats.objectiveTime>1,`defender contest time accrued (${defender.scoreStats.objectiveTime})`);
+ assert.ok(Math.abs(defender.scoreStats.objectiveTime-attacker.scoreStats.objectiveTime)<1e-9,`defenders earn the attacker rate (${defender.scoreStats.objectiveTime} vs ${attacker.scoreStats.objectiveTime})`);
+});
+
+test('a payload contest announces one bucketed beat per entry',()=>{
+ const {m,state,attacker,defender}=payloadFixture(120);
+ const place=toCart(state);
+ place(attacker);place(defender);
+ m.updatePayload(1/60);
+ const beats=()=>m.events.filter(event=>event.type==='payload-contest');
+ assert.equal(beats().length,1,'the contest start emits one beat');
+ assert.equal(beats()[0].team,state.defender);
+ assert.equal(beats()[0].attacker,state.attacker);
+ for(let i=0;i<30;i++){place(attacker);place(defender);m.updatePayload(1/60);}
+ assert.equal(beats().length,1,'a held contest never re-emits');
+ // Walk the defender out of the ring: the freeze releases and the push resumes.
+ Object.assign(defender,{x:state.position.x+60,z:state.position.z});
+ for(let i=0;i<300;i++){place(attacker);m.updatePayload(1/60);}
+ assert.equal(state.contested,false);
+ assert.ok(state.distance>0,'the push resumes once the ring is clear');
+ place(defender);
+ m.updatePayload(1/60);
+ assert.equal(beats().length,2,'a fresh contest entry re-announces');
+});

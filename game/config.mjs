@@ -267,7 +267,7 @@ export const SHADOW_LEVELS = Object.freeze(['high','low','off']);
 // Crosshair depth (additive): outline, base gap, arm thickness, a centre dot
 // and the ADS reticle colour. Every default reproduces the shipped reticle, so
 // a saved display object without these keys renders exactly as before.
-export const DEFAULT_DISPLAY = Object.freeze({fov:82,crosshair:'cross',color:'#c2ffea',size:1,crosshairOutline:true,crosshairGap:0,crosshairThickness:1,crosshairDot:false,adsColor:'#c2ffea',showFps:false,showWeapon:true,resolutionScale:.5,resolutionCap:'auto',bloom:0,exposure:1.15,postFx:false,quality:'auto',effectsQuality:'auto',cameraShake:1,weaponBob:1,teamPalette:'default',reducedMotion:false,invertY:false,adsSensitivity:.85,touchSensitivity:1,touchScale:1,touchOpacity:1,touchLeftHanded:false,fpsCap:0,shadows:'high',captions:false,showKillFeed:true,showDamageNumbers:true,showRadar:true,uiScale:1});
+export const DEFAULT_DISPLAY = Object.freeze({fov:82,crosshair:'cross',color:'#c2ffea',size:1,crosshairOutline:true,crosshairGap:0,crosshairThickness:1,crosshairDot:false,adsColor:'#c2ffea',showFps:false,showWeapon:true,resolutionScale:.5,resolutionCap:'auto',bloom:0,exposure:1.15,postFx:false,quality:'auto',effectsQuality:'auto',cameraShake:1,weaponBob:1,teamPalette:'default',reducedMotion:false,invertY:false,adsSensitivity:.85,adsSensitivityNear:1,adsSensitivityHolo:1,adsSensitivityScope:1,touchSensitivity:1,touchScale:1,touchOpacity:1,touchLeftHanded:false,fpsCap:0,shadows:'high',captions:false,captionScale:1,captionBackground:'dim',captionPosition:'bottom',showKillFeed:true,showDamageNumbers:true,showRadar:true,uiScale:1,adsToggle:false,crouchToggle:false,sprintToggle:false});
 const number=(v,fallback,min,max)=>typeof v==='number'&&Number.isFinite(v)?Math.max(min,Math.min(max,v)):fallback;
 const choice=(v,values,fallback)=>values.includes(v)?v:fallback;
 export const modeRule=mode=>GAME_MODES.find(m=>m.id===mode)?.rules||GAME_MODES[0].rules;
@@ -384,9 +384,42 @@ export function matchPlan(value={},{humans=1}={}){
   modifierLabel:modifiers.length?modifiers.map(entry=>entry.name).join(' · '):'NO MODIFIERS',
  });
 }
+export const CAPTION_SCALE_MIN=.8;
+export const CAPTION_SCALE_MAX=1.6;
+export const CAPTION_BACKGROUNDS=Object.freeze(['solid','dim','transparent']);
+export const CAPTION_POSITIONS=Object.freeze(['bottom','top']);
+// Per-sight ADS sensitivity multipliers (additive). The scalar `adsSensitivity`
+// stays the base; a bucket only scales it while that sight is live, so a save
+// without the keys resolves to exactly the shipped single scalar.
+export const ADS_SENSITIVITY_MULT_MIN=.4;
+export const ADS_SENSITIVITY_MULT_MAX=1.6;
+export const ADS_SIGHT_MULTIPLIER_KEYS=Object.freeze({near:'adsSensitivityNear',holo:'adsSensitivityHolo',scope:'adsSensitivityScope'});
+// Which multiplier bucket a resolved sight belongs to. The live sight's own
+// kind wins; a sight without one falls back to its magnification so a future
+// optic still buckets (<=1× near, <2× holo, otherwise scope). A missing sight
+// returns null and the caller keeps the scalar untouched.
+export function adsSightBucket(sight){
+ const kind=typeof sight?.kind==='string'?sight.kind:null;
+ if(kind==='iron')return 'near';
+ if(kind==='holo')return 'holo';
+ if(kind==='scope')return 'scope';
+ const mag=Number(sight?.magnification);
+ if(!Number.isFinite(mag))return null;
+ if(mag<=1.05)return 'near';
+ return mag<2?'holo':'scope';
+}
+// The multiplier that scales `display.adsSensitivity` for the active sight.
+// Unknown sights, absent display objects and legacy saves return 1, so the
+// effective ADS gain stays the documented scalar until a bucket is tuned.
+export function adsSensitivityMultiplier(display={},sight=null){
+ const bucket=adsSightBucket(sight);
+ if(!bucket)return 1;
+ const source=display&&typeof display==='object'?display:null;
+ return number(source?.[ADS_SIGHT_MULTIPLIER_KEYS[bucket]],1,ADS_SENSITIVITY_MULT_MIN,ADS_SENSITIVITY_MULT_MAX);
+}
 export function normalizeDisplay(value={}){
  const c=value&&typeof value==='object'?value:{};
- return {fov:Math.round(number(c.fov,82,65,110)),crosshair:choice(c.crosshair,['cross','dot','ring','chevron','split'],'cross'),color:typeof c.color==='string'&&/^#[0-9a-f]{6}$/i.test(c.color)?c.color:'#c2ffea',size:number(c.size,1,.6,1.8),crosshairOutline:c.crosshairOutline!==false,crosshairGap:number(c.crosshairGap,0,0,4),crosshairThickness:number(c.crosshairThickness,1,.6,2),crosshairDot:c.crosshairDot===true,adsColor:typeof c.adsColor==='string'&&/^#[0-9a-f]{6}$/i.test(c.adsColor)?c.adsColor:'#c2ffea',showFps:c.showFps===true,showWeapon:c.showWeapon!==false,resolutionScale:number(c.resolutionScale,.5,.5,1.5),resolutionCap:choice(c.resolutionCap,['auto','1080p','1440p','native'],'auto'),bloom:number(c.bloom,0,0,1),exposure:number(c.exposure,1.15,.6,1.8),postFx:c.postFx===true,quality:choice(c.quality,['auto','low','medium','high'],'auto'),effectsQuality:choice(c.effectsQuality,['auto','low','medium','high'],'auto'),cameraShake:number(c.cameraShake,1,0,1.5),weaponBob:number(c.weaponBob,1,0,1.5),teamPalette:choice(c.teamPalette,['default','colorblind'],'default'),reducedMotion:c.reducedMotion===true,invertY:c.invertY===true,adsSensitivity:number(c.adsSensitivity,.85,.2,1.5),touchSensitivity:number(c.touchSensitivity,1,.3,3),touchScale:number(c.touchScale,1,.8,1.3),touchOpacity:number(c.touchOpacity,1,.4,1),touchLeftHanded:c.touchLeftHanded===true,fpsCap:choice(c.fpsCap,[...FPS_CAPS],0),shadows:choice(c.shadows,[...SHADOW_LEVELS],'high'),captions:c.captions===true,showKillFeed:c.showKillFeed!==false,showDamageNumbers:c.showDamageNumbers!==false,showRadar:c.showRadar!==false,uiScale:number(c.uiScale,1,.8,1.4)};
+ return {fov:Math.round(number(c.fov,82,65,110)),crosshair:choice(c.crosshair,['cross','dot','ring','chevron','split'],'cross'),color:typeof c.color==='string'&&/^#[0-9a-f]{6}$/i.test(c.color)?c.color:'#c2ffea',size:number(c.size,1,.6,1.8),crosshairOutline:c.crosshairOutline!==false,crosshairGap:number(c.crosshairGap,0,0,4),crosshairThickness:number(c.crosshairThickness,1,.6,2),crosshairDot:c.crosshairDot===true,adsColor:typeof c.adsColor==='string'&&/^#[0-9a-f]{6}$/i.test(c.adsColor)?c.adsColor:'#c2ffea',showFps:c.showFps===true,showWeapon:c.showWeapon!==false,resolutionScale:number(c.resolutionScale,.5,.5,1.5),resolutionCap:choice(c.resolutionCap,['auto','1080p','1440p','native'],'auto'),bloom:number(c.bloom,0,0,1),exposure:number(c.exposure,1.15,.6,1.8),postFx:c.postFx===true,quality:choice(c.quality,['auto','low','medium','high'],'auto'),effectsQuality:choice(c.effectsQuality,['auto','low','medium','high'],'auto'),cameraShake:number(c.cameraShake,1,0,1.5),weaponBob:number(c.weaponBob,1,0,1.5),teamPalette:choice(c.teamPalette,['default','colorblind'],'default'),reducedMotion:c.reducedMotion===true,invertY:c.invertY===true,adsSensitivity:number(c.adsSensitivity,.85,.2,1.5),adsSensitivityNear:number(c.adsSensitivityNear,1,ADS_SENSITIVITY_MULT_MIN,ADS_SENSITIVITY_MULT_MAX),adsSensitivityHolo:number(c.adsSensitivityHolo,1,ADS_SENSITIVITY_MULT_MIN,ADS_SENSITIVITY_MULT_MAX),adsSensitivityScope:number(c.adsSensitivityScope,1,ADS_SENSITIVITY_MULT_MIN,ADS_SENSITIVITY_MULT_MAX),touchSensitivity:number(c.touchSensitivity,1,.3,3),touchScale:number(c.touchScale,1,.8,1.3),touchOpacity:number(c.touchOpacity,1,.4,1),touchLeftHanded:c.touchLeftHanded===true,fpsCap:choice(c.fpsCap,[...FPS_CAPS],0),shadows:choice(c.shadows,[...SHADOW_LEVELS],'high'),captions:c.captions===true,captionScale:number(c.captionScale,1,CAPTION_SCALE_MIN,CAPTION_SCALE_MAX),captionBackground:choice(c.captionBackground,[...CAPTION_BACKGROUNDS],'dim'),captionPosition:choice(c.captionPosition,[...CAPTION_POSITIONS],'bottom'),showKillFeed:c.showKillFeed!==false,showDamageNumbers:c.showDamageNumbers!==false,showRadar:c.showRadar!==false,uiScale:number(c.uiScale,1,.8,1.4),adsToggle:c.adsToggle===true,crouchToggle:c.crouchToggle===true,sprintToggle:c.sprintToggle===true};
 }
 // ---------------------------------------------------------------------------
 // Mode loadouts. A mode may pin starting weapons, allowed weapons, infinite

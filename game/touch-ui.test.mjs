@@ -4,7 +4,7 @@ import {readFile} from 'node:fs/promises';
 import {createElement} from 'react';
 import {renderToStaticMarkup} from 'react-dom/server';
 import ts from 'typescript';
-import {TOUCH_BUTTONS,touchDisplay,touchTargetSize,TOUCH_TARGET_MIN} from './touch.mjs';
+import {TOUCH_BUTTONS,applyTouchAction,touchDisplay,touchTargetSize,TOUCH_TARGET_MIN} from './touch.mjs';
 
 async function loadTouchControls(){
   const file = new URL('../app/game-ui/touch-controls.tsx', import.meta.url);
@@ -70,6 +70,47 @@ test('the rendered touch layer carries the display variables and the left-hand c
   assert.match(clamped, /--touch-scale:1\.3/);
   assert.match(clamped, /--touch-opacity:0\.4/);
   assert.doesNotMatch(clamped, /touch-layer--left-hand/);
+});
+
+test('the touch layer passes the hold-vs-toggle prefs without changing the rendered cluster', async () => {
+  const source = await readFile(new URL('../app/game-ui/touch-controls.tsx', import.meta.url), 'utf8');
+  assert.match(source, /const togglePrefs=\{adsToggle:display\?\.adsToggle===true,crouchToggle:display\?\.crouchToggle===true\}/, 'the live display prefs are read once');
+  assert.match(source, /applyTouchAction\(runtime\.current,action,true,togglePrefs\)/, 'presses latch through the shared handler');
+  assert.match(source, /applyTouchAction\(runtime\.current,action,false,togglePrefs\)/, 'releases leave a latch in place');
+  const {TouchControls} = await loadTouchControls();
+  const props = {runtime: {current: {}}, visible: true, onLook() {}, onSwap() {}, onPause() {}};
+  const off = renderToStaticMarkup(createElement(TouchControls, {...props, display: {adsToggle: false, crouchToggle: false}}));
+  const on = renderToStaticMarkup(createElement(TouchControls, {...props, display: {adsToggle: true, crouchToggle: true}}));
+  assert.equal(on, off, 'the prefs are additive: the cluster is identical for either value');
+});
+
+test('toggle prefs latch touch ADS and crouch while release leaves them held', () => {
+  const runtime = {display: {adsToggle: true, crouchToggle: true}};
+  applyTouchAction(runtime, 'ads', true);
+  assert.equal(runtime.touch.ads, true, 'a press arms the latched ADS');
+  applyTouchAction(runtime, 'ads', false);
+  assert.equal(runtime.touch.ads, true, 'release does not clear a latched ADS');
+  applyTouchAction(runtime, 'ads', true);
+  assert.equal(runtime.touch.ads, false, 'a second press turns it off again');
+  applyTouchAction(runtime, 'crouch', true);
+  applyTouchAction(runtime, 'crouch', false);
+  assert.equal(runtime.touch.crouch, true, 'crouch latches the same way');
+  applyTouchAction(runtime, 'crouch', true);
+  assert.equal(runtime.touch.crouch, false);
+  // The prefs default off: bare and explicit-off runtimes keep held behavior.
+  const held = {};
+  applyTouchAction(held, 'ads', true);
+  applyTouchAction(held, 'ads', false);
+  assert.equal(held.touch.ads, false, 'a bare runtime keeps the shipped held ADS');
+  const off = {display: {adsToggle: false, crouchToggle: false}};
+  applyTouchAction(off, 'crouch', true);
+  applyTouchAction(off, 'crouch', false);
+  assert.equal(off.touch.crouch, false, 'an explicit off keeps the shipped held crouch');
+  // The touch layer may pass the live prefs directly instead of the synced display.
+  const explicit = {};
+  applyTouchAction(explicit, 'ads', true, {adsToggle: true});
+  applyTouchAction(explicit, 'ads', false, {adsToggle: true});
+  assert.equal(explicit.touch.ads, true, 'explicit prefs latch on press and survive release');
 });
 
 test('the touch stylesheet mirrors the left-hand layout and keeps a 44px floor', async () => {

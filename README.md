@@ -486,6 +486,15 @@ Recent releases. The full history lives in
   repulsion and reduced-motion static frame), keeping the original DOM logo as
   the fallback. See
   [Depth and dynamics pass](docs/design/DEPTH-PASS.md#particle-title-logo).
+- Depth II pass: flag relays and contested stands, payload contest credit,
+  passenger repair, horde upgrades and VIP escort bots; remote footsteps,
+  result sting/announcer/award beats and crowd ambience; spectator/kill-cam
+  markers, carrier banners, payload state rings; a real table scoreboard,
+  subtitle options, hold-vs-toggle input, per-zoom ADS, keybind import/export
+  and theater/progression improvements. Also integrates the four
+  `asset-workshop` vehicle PRs (high-detail Hornet, Titan, Scout, Transport on
+  WebGL; batched; software keeps the compact hull). See
+  [Depth II pass](docs/design/DEPTH-II-PASS.md).
 - Graphics-edge pass (research-backed): static dither kills 8-bit banding, a
   contrast-adaptive sharpen recovers FXAA softness, and environment reflections
   scale with the tier. Runs whenever post-processing or the graphics lab runs.

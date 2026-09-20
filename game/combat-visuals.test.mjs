@@ -155,6 +155,70 @@ test('combat particle scaling keeps the high-tier baseline and thins lower tiers
  view.effectPool=null;
 });
 
+test('tier tracer scaling reaches the rail, shock, vehicle-shot and alt-fire branches',()=>{
+ const view=viewHarness({});
+ view.effectPool=new EffectPool(view.scene,128);
+ const added=[];view.effectPool.add=entry=>{added.push(entry);return entry;};
+ const sizes=()=>added.map(entry=>entry.size).filter(size=>Number.isFinite(size));
+ const clear=()=>{added.length=0;};
+ // High tier is the baseline: tracers are 1, so every authored size is kept.
+ view.shotEffect({type:'shot',weapon:6,from:{x:0,y:1,z:0},to:{x:0,y:1,z:-5}},{color:'#8ce8ff',feel:{}},false);
+ assert.ok(added.some(entry=>entry.size===.03)&&added.some(entry=>entry.size===.012),'the high-tier shock arc keeps its authored sizes');
+ clear();
+ view.shotEffect({type:'vehicle-shot',from:{x:0,y:1,z:0},to:{x:0,y:1,z:-5}},{color:'#ffd166',feel:{}},false);
+ assert.ok(added.some(entry=>entry.size===.06)&&added.some(entry=>entry.size===.09),'the high-tier vehicle tracer keeps its authored sizes');
+ clear();
+ const railCalls=[];view.railPool={spawn:(from,to,color,reduced,scale)=>{railCalls.push(scale);}};
+ view.shotEffect({type:'shot',weapon:2,from:{x:0,y:1,z:0},to:{x:0,y:1,z:-5}},{color:'#bf9cff',feel:{}},false);
+ assert.equal(railCalls.at(-1),1,'the high-tier rail keeps the authored width');
+ clear();
+ view._altShotEffect({type:'shot',weapon:0},{id:'salvo',tracer:'#8affc1'},{x:0,y:1,z:0},{x:0,y:1,z:-5},false);
+ assert.ok(added.some(entry=>Math.abs(entry.size-.03)<1e-9),'the high-tier alt salvo keeps its authored thickness');
+ // A lower tracer budget thins every branch from the same multiplier.
+ view.qualitySettings={...qualitySettings('medium')};view._combatParticleScale=undefined;view._effectsScale=1;
+ view.shotEffect({type:'shot',weapon:6,from:{x:0,y:1,z:0},to:{x:0,y:1,z:-5}},{color:'#8ce8ff',feel:{}},false);
+ assert.ok(Math.abs(sizes().reduce((min,size)=>Math.min(min,size),Infinity)-.012*.86)<1e-9,'the shock arc scales with the tier');
+ clear();
+ view.shotEffect({type:'vehicle-shot',from:{x:0,y:1,z:0},to:{x:0,y:1,z:-5}},{color:'#ffd166',feel:{}},false);
+ assert.ok(added.some(entry=>Math.abs(entry.size-.06*.86)<1e-9),'the vehicle tracer scales with the tier');
+ clear();
+ view.shotEffect({type:'shot',weapon:2,from:{x:0,y:1,z:0},to:{x:0,y:1,z:-5}},{color:'#bf9cff',feel:{}},false);
+ assert.ok(Math.abs(railCalls.at(-1)-.86)<1e-9,'the rail width scales with the tier');
+ clear();
+ view._altShotEffect({type:'shot',weapon:0},{id:'salvo',tracer:'#8affc1'},{x:0,y:1,z:0},{x:0,y:1,z:-5},false);
+ assert.ok(added.some(entry=>Math.abs(entry.size-.03*.86)<1e-9),'the alt salvo scales with the tier');
+ view.effectPool=null;
+});
+
+test('tier scaling reaches the explosion kit and low-health smoke without moving the high tier',()=>{
+ const view=viewHarness({characterGroundAt:()=>0});
+ const added=[];view.effectPool={add:entry=>{added.push(entry);return entry;}};
+ view._applyEffectsQuality();
+ assert.equal(view._particleScale(),1);
+ view._explosionKit({x:0,y:1,z:0},'#ffb066',false,7,1);
+ const high=added.filter(entry=>entry.color==='#2f2a26').map(entry=>entry.size);
+ assert.ok(high.length>=3&&high.every(size=>size===.2),'high-tier blast smoke keeps the authored size');
+ added.length=0;
+ view.display={...DEFAULT_DISPLAY,effectsQuality:'low'};view._applyEffectsQuality();
+ view._explosionKit({x:0,y:1,z:0},'#ffb066',false,7,1);
+ const low=added.filter(entry=>entry.color==='#2f2a26').map(entry=>entry.size);
+ assert.ok(low.length===high.length&&low.every(size=>Math.abs(size-.2*.4)<1e-9),'lower tiers thin the same smoke');
+ // Low-health actor smoke uses the same multiplier.
+ const model=new T.Group();model.position.set(1,0,2);
+ view.actorModels.set(5,model);view._matchRef={actors:[{id:5,health:10,maxHealth:100}]};
+ added.length=0;
+ assert.equal(view._damageReadability({actor:5},false),2,'a low-health hit still smokes and sparks');
+ const lowSmoke=added.filter(entry=>entry.color==='#3d3a36').map(entry=>entry.size);
+ assert.ok(lowSmoke.length===1&&Math.abs(lowSmoke[0]-.16*.4)<1e-9,'low-health smoke follows the tier');
+ added.length=0;
+ view.display={...DEFAULT_DISPLAY};view._applyEffectsQuality();
+ model.userData.lowHealthSmokeAt=-Infinity;
+ view._damageReadability({actor:5},false);
+ const highSmoke=added.filter(entry=>entry.color==='#3d3a36').map(entry=>entry.size);
+ assert.ok(highSmoke.length===1&&highSmoke[0]===.16,'high-tier low-health smoke is byte-identical');
+ view.effectPool=null;
+});
+
 test('decals hold full opacity for the first 60% of life then fade through the tail',()=>{
  const scene=new T.Scene(),pool=new DecalPool(scene,4);
  assert.equal(pool.limit,4);

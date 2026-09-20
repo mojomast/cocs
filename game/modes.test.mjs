@@ -149,3 +149,83 @@ test('bounds and traversal launch are deterministic, swept and cooldown gated',(
  Object.assign(a,{x:3,z:0,y:0,grounded:true,vx:0,vy:0,vz:0,traversalPad:null,traversalCooldown:0});moveActor(a,{},1/60,map,m.config);assert.ok(a.vx>0&&a.vy>0);assert.ok(a.x<=20);assert.ok(!Number.isNaN(a.x));
  Object.assign(a,{x:19.9,z:0,y:0,grounded:true,vx:100,vy:0,vz:0});moveActor(a,{},1,map,m.config);assert.ok(a.x<=20);assert.ok(a.y>=0);
 });
+
+test('CTF flag relay hands the flag to the nearest living teammate by distance then id',()=>{
+ const m=new Match('chatgpt','openclaw',rng,'exchange',{mode:'ctf',botCount:0,humanCount:5});
+ const [carrier,enemy,near,,other]=m.actors,equal=m.actors[4];
+ Object.assign(carrier,{x:m.flags[1].x,z:m.flags[1].z,health:100});
+ m.objective(carrier);
+ assert.equal(m.flags[1].carrier,carrier.id);
+ const y=carrier.y;
+ // The enemy is the closest body overall, but only same-team actors relay.
+ Object.assign(enemy,{x:carrier.x+1,y,z:carrier.z,health:100});
+ Object.assign(near,{x:carrier.x+2,y,z:carrier.z,health:100});
+ Object.assign(equal,{x:carrier.x,y,z:carrier.z+2,health:100});
+ Object.assign(other,{x:carrier.x+30,y,z:carrier.z,health:100});
+ m.step(1/60,{inputs:{0:{interact:true}}});
+ const pass=m.events.find(event=>event.type==='flag-pass');
+ assert.ok(pass,'the interact edge relays the flag');
+ assert.equal(pass.actor,carrier.id);
+ assert.equal(pass.to,near.id,'equal distances resolve to the lower actor id');
+ assert.equal(m.flags[1].carrier,near.id);
+ assert.equal(near.carryingFlag,true);assert.equal(near.carrySpeedMultiplier,.9);
+ assert.equal(carrier.carryingFlag,false);assert.equal(carrier.carrySpeedMultiplier,1);
+ assert.ok(Math.abs(pass.x-near.x)<1e-9&&Math.abs(pass.z-near.z)<1e-9,'the beat carries the flag position');
+ const beats=()=>m.events.filter(event=>event.type==='flag-pass').length;
+ m.step(1/60,{inputs:{0:{interact:true}}});
+ assert.equal(beats(),1,'holding interact never relays twice');
+});
+
+test('CTF carriers drop the flag at their feet when no teammate is in relay range',()=>{
+ const m=new Match('chatgpt','openclaw',rng,'exchange',{mode:'ctf',botCount:0,humanCount:2});
+ const [carrier,enemy]=m.actors;
+ Object.assign(carrier,{x:m.flags[1].x,z:m.flags[1].z,health:100});m.objective(carrier);
+ assert.equal(m.flags[1].carrier,carrier.id);
+ Object.assign(enemy,{x:carrier.x+40,z:carrier.z,health:100});
+ const before={x:carrier.x,y:carrier.y,z:carrier.z};
+ m.step(1/60,{inputs:{0:{interact:true}}});
+ const flag=m.flags[1];
+ assert.equal(flag.state,'dropped');assert.equal(flag.carrier,null);
+ assert.equal(carrier.carryingFlag,false);
+ assert.ok(Math.hypot(flag.x-before.x,flag.z-before.z)<1.5,'the flag lands at the carrier feet');
+ assert.ok(m.events.some(event=>event.type==='flag-drop'&&event.actor===carrier.id));
+ // The drop is not auto-re-picked while the relay lock holds...
+ m.step(1/60,{inputs:{0:{interact:true}}});
+ assert.equal(m.flags[1].carrier,null);
+ assert.equal(m.flags[1].state,'dropped');
+ // ...and once the relay lock lapses the carrier standing on it picks it up again.
+ m.time+=2;m.objective(carrier);
+ assert.equal(m.flags[1].carrier,carrier.id);
+});
+
+test('CTF captures are blocked by a living enemy in the home ring and announce each contest entry once',()=>{
+ const m=new Match('chatgpt','openclaw',rng,'exchange',{mode:'ctf',botCount:0,humanCount:4});
+ const [carrier,other,,defender]=m.actors;
+ Object.assign(carrier,{x:m.flags[1].x,z:m.flags[1].z,health:100});m.objective(carrier);
+ const home=m.flags[0],y=home.y;
+ Object.assign(defender,{x:home.x,y,z:home.z,health:100});
+ Object.assign(other,{x:home.x+30,y,z:home.z,health:100});
+ Object.assign(carrier,{x:home.x,y,z:home.z});
+ m.objective(carrier);
+ assert.equal(m.teamScores[0],0,'an enemy in the home ring blocks the capture');
+ assert.equal(m.flags[1].carrier,carrier.id,'the carrier keeps the flag');
+ const contests=()=>m.events.filter(event=>event.type==='flag-contest');
+ assert.equal(contests().length,1,'one bucketed beat on the contest entry');
+ assert.equal(contests()[0].team,0);
+ assert.equal(contests()[0].count,1);
+ for(let i=0;i<10;i++)m.objective(carrier);
+ assert.equal(contests().length,1,'a held contest never spams the beat');
+ // A second enemy joins the ring: the count bucket announces the escalation.
+ Object.assign(m.actors[1],{x:home.x+.5,y,z:home.z,health:100});
+ m.objective(carrier);
+ assert.equal(contests().length,2);
+ assert.equal(contests()[1].count,2);
+ assert.equal(m.teamScores[0],0,'the capture stays blocked');
+ // Clearing the ring lets the capture land.
+ Object.assign(defender,{x:home.x+40,z:home.z});
+ Object.assign(m.actors[1],{x:home.x+41,z:home.z});
+ m.objective(carrier);
+ assert.equal(m.teamScores[0],1,'the capture lands once the ring is clear');
+ assert.ok(m.events.some(event=>event.type==='capture'&&event.team===0));
+ assert.equal(m.flags[1].state,'at-base');
+});

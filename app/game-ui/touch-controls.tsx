@@ -62,8 +62,12 @@ export function TouchControls({runtime,visible,onLook,onSwap,onPause,onFullscree
  const lookMove=(e:ReactPointerEvent<HTMLDivElement>)=>{if(suspended)return;if(lookState.current.id!==e.pointerId)return;const dx=e.clientX-lookState.current.last.x,dy=e.clientY-lookState.current.last.y;lookState.current.last={x:e.clientX,y:e.clientY};if(dx||dy)cb.current.onLook(dx,dy);const kx=e.clientX-lookState.current.origin.x,ky=e.clientY-lookState.current.origin.y,m=Math.hypot(kx,ky),s=m>lookTravel?lookTravel/m:1;setKnob(lookKnobRef,kx*s,ky*s);};
  const lookUp=(e:ReactPointerEvent<HTMLDivElement>)=>{if(lookState.current.id!==e.pointerId)return;lookState.current.id=null;setKnob(lookKnobRef,0,0);placeBase(lookBaseRef,0,0,false);};
 
- const press=(action:string)=>{if(suspended)return;applyTouchAction(runtime.current,action,true);if(action==='swap')cb.current.onSwap();};
- const release=(action:string)=>{applyTouchAction(runtime.current,action,false);};
+ // Hold-vs-toggle follows the live display: a press latches when the pref is on
+ // and release leaves it. The sim input shape is untouched — the same
+ // `runtime.touch` fields carry the held state.
+ const togglePrefs={adsToggle:display?.adsToggle===true,crouchToggle:display?.crouchToggle===true};
+ const press=(action:string)=>{if(suspended)return;applyTouchAction(runtime.current,action,true,togglePrefs);if(action==='swap')cb.current.onSwap();};
+ const release=(action:string)=>{applyTouchAction(runtime.current,action,false,togglePrefs);};
  const holdProps=(action:string)=>({onPointerDown:(e:ReactPointerEvent<HTMLButtonElement>)=>{e.preventDefault();e.stopPropagation();if(suspended)return;capture(e.currentTarget,e.pointerId);press(action);},onPointerUp:(e:ReactPointerEvent<HTMLButtonElement>)=>{e.stopPropagation();release(action);},onPointerCancel:()=>release(action),onLostPointerCapture:()=>release(action)});
 
  if(!visible)return null;

@@ -103,27 +103,28 @@ export function renderScoreboard(source,history=false){
  const modeId=source?.config?.mode??source?.mode??'deathmatch',columns=modeColumns(modeId),teamScores=source?.teamScores,actorId=history?null:source?.actorId;
  const groups=scoreboardGroups(source,{history});
  const teamBanner=isTeamMode(modeId);
- const header=createElement('div',{className:'score-row labels',role:'row'},createElement('span',null,'OPERATOR'),createElement('strong',null,'KILLS'),createElement('span',null,'DEATHS'),createElement('span',null,'STREAK'),createElement('span',null,'PING'),columns.map(([,label])=>createElement('span',{key:label},label)));
+ const header=createElement('div',{className:'score-row labels',role:'row'},createElement('span',{role:'columnheader'},'OPERATOR'),createElement('strong',{role:'columnheader'},'KILLS'),createElement('span',{role:'columnheader'},'DEATHS'),createElement('span',{role:'columnheader'},'STREAK'),createElement('span',{role:'columnheader'},'PING'),columns.map(([,label])=>createElement('span',{key:label,role:'columnheader'},label)));
  let rank=0;
  const rows=[];
  for(const group of groups){
-  if(group.team!==null)rows.push(createElement('div',{className:`score-team-heading team-${group.team}`,'aria-label':`${group.label} score`,key:`head-${group.team}`},createElement('strong',null,group.label),createElement('span',null,scoreText(group.score))));
+  if(group.team!==null)rows.push(createElement('div',{className:`score-team-heading team-${group.team}`,'aria-label':`${group.label} score`,key:`head-${group.team}`,role:'row'},createElement('strong',{role:'rowheader'},group.label),createElement('span',{role:'cell'},scoreText(group.score))));
   for(const a of group.actors){
    rank++;
-   const stats=scoreStats(a),streak=streakLabel(a),ping=pingLabel(a),kitChip=actorKitChip(a);
-   rows.push(createElement('div',{className:`score-row ${a.id===actorId?'you':''} ${a.team!==null&&a.team!==undefined?`team-${a.team}`:''}`,key:a.id??`${a.name}-${rank}`,role:'row'},
-    createElement('span',null,createElement('b',null,String(rank).padStart(2,'0')),createElement('i',{style:{background:CHARACTERS.find(c=>c.id===a.character)?.color}}),a.name,
+   const stats=scoreStats(a),streak=streakLabel(a),ping=pingLabel(a),kitChip=actorKitChip(a),you=a.id===actorId;
+   rows.push(createElement('div',{className:`score-row ${you?'you':''} ${a.team!==null&&a.team!==undefined?`team-${a.team}`:''}`,key:a.id??`${a.name}-${rank}`,role:'row',...(you?{'aria-current':'true'}:{})},
+    createElement('span',{role:'rowheader'},createElement('b',null,String(rank).padStart(2,'0')),createElement('i',{style:{background:CHARACTERS.find(c=>c.id===a.character)?.color}}),a.name,
      kitChip?.wing&&createElement('small',{key:'wing',className:`score-chip score-chip--wing wing-${kitChip.wing.id}`,style:{color:kitChip.wing.color},title:`${kitChip.wing.name}${kitChip.spec?` · ${kitChip.spec.name}`:''}`},kitChip.wing.label),
      kitChip?.spec&&createElement('small',{key:'spec',className:'score-chip score-chip--spec',title:`${kitChip.spec.name} · ${kitChip.spec.power}`},kitChip.spec.name.toUpperCase()),
-     a.id===actorId&&createElement('small',null,'YOU')),
-    createElement('strong',null,Number(a.frags)||0),
-    createElement('span',null,Number(a.deaths)||0),
-    createElement('span',{className:streak?`streak streak-${streak.streak>=3?'hot':'warm'}`:'streak'},streak?streak.label:'-'),
-    createElement('span',{className:ping?`ping ping-${ping.quality}`:'ping'},ping?ping.label:'-'),
-    columns.map(([field])=>createElement('span',{key:field},metricText(field,stats[field],a)))));
+     you&&createElement('small',{'aria-hidden':'true'},'YOU'),
+     you&&createElement('span',{key:'you',className:'sr-only'},'YOU')),
+    createElement('strong',{role:'cell'},Number(a.frags)||0),
+    createElement('span',{role:'cell'},Number(a.deaths)||0),
+    createElement('span',{role:'cell',className:streak?`streak streak-${streak.streak>=3?'hot':'warm'}`:'streak'},streak?streak.label:'-'),
+    createElement('span',{role:'cell',className:ping?`ping ping-${ping.quality}`:'ping'},ping?ping.label:'-'),
+    columns.map(([field])=>createElement('span',{key:field,role:'cell'},metricText(field,stats[field],a)))));
   }
  }
-  return createElement('div',{className:`scoreboard mode-scoreboard mode-scoreboard-${modeId}`,style:{'--score-columns':4+columns.length,'--score-width':`${220+(4+columns.length)*68}px`},'aria-label':`${modeId} ${history?'match history':'standings'}`},
+  return createElement('div',{className:`scoreboard mode-scoreboard mode-scoreboard-${modeId}`,style:{'--score-columns':4+columns.length,'--score-width':`${220+(4+columns.length)*68}px`},role:'table','aria-label':`${modeId} ${history?'match history':'standings'}`},
   teamBanner&&createElement('div',{className:'team-score-banner','aria-label':'Team scores'},createElement('strong',null,modeId==='assault'?'SECTOR SCORE':modeId==='combined-arms'?'ZONE SCORE':'TEAM SCORE'),createElement('span',null,teamName(0),' ',scoreText(teamScores?.[0]??0)),createElement('span',null,teamName(1),' ',scoreText(teamScores?.[1]??0)),source?.winner!==null&&source?.winner!==undefined&&createElement('b',null,teamName(source.winner),' WINS')),
   header,
   rows);

@@ -6,17 +6,92 @@ import {Modal,Btn,Tabs,Panel,Chip,Empty} from '../primitives';
 import {HELP_SECTIONS} from '../../../game/onboarding.mjs';
 import {altSpecFor} from '../../../game/alt-fire.mjs';
 import {formatNumber,formatWhole} from '../../../game/format-ui.mjs';
+import {weaponRangeInfo} from '../../../game/hud.mjs';
 import {GraphicsLabPanel} from './GraphicsLabPanel';
 
-type HelpSection={id:string;title:string;summary?:string;items?:readonly string[]};
+type HelpSection={id:string;title:string;summary?:string;items?:readonly any[]};
+
+// Help items may be plain strings or controls (the page supplies the
+// first-run-coach reopen button), so the filter reads text recursively from
+// React elements without ever re-ordering or rebuilding the item list.
+export const helpItemText=(value:any):string=>{
+ if(value===null||value===undefined)return '';
+ if(typeof value==='string'||typeof value==='number')return String(value);
+ if(Array.isArray(value))return value.map(helpItemText).join(' ');
+ if(typeof value==='object')return helpItemText(value.props?.children);
+ return '';
+};
+
+export function filterHelpSections(sections:readonly HelpSection[]|undefined,query:string){
+ const list=Array.isArray(sections)?sections:[];
+ const needle=String(query??'').trim().toLowerCase();
+ if(!needle)return [...list];
+ return list.filter(section=>[section?.title,section?.summary,...(Array.isArray(section?.items)?section.items:[])]
+  .some(value=>helpItemText(value).toLowerCase().includes(needle)));
+}
 
 export function HelpSections({sections=HELP_SECTIONS}:{sections?:readonly HelpSection[]}){
+ const [query,setQuery]=useState('');
  if(!sections.length)return <p className="field-note">No help topics loaded.</p>;
- return <div className="help-sections">
-  {sections.map(section=><Panel key={section.id} label={section.title} meta={section.summary}>
-   <ul className="help-list">{section.items?.map((item:string,i:number)=><li key={i}>{item}</li>)}</ul>
-  </Panel>)}
+ const visible=filterHelpSections(sections,query);
+ return <div className="stack stack--tight help-search">
+  <label className="config-field help-filter" htmlFor="help-filter-input"><span>Filter topics</span>
+   <input id="help-filter-input" type="search" value={query} placeholder="capture, horde, settings…" onChange={e=>setQuery(e.target.value)}/>
+  </label>
+  <p className="field-note">{visible.length} OF {sections.length} TOPICS</p>
+  {visible.length?<div className="help-sections">
+   {visible.map(section=><Panel key={section.id} label={section.title} meta={section.summary}>
+    <ul className="help-list">{section.items?.map((item:any,i:number)=><li key={i}>{item}</li>)}</ul>
+   </Panel>)}
+  </div>:<p className="field-note">No help topics match that filter.</p>}
  </div>;
+}
+
+// Two-slot weapon comparison built from the same live weapon props the match
+// consumes: DPS is damage × pellets / interval, the falloff floor is the
+// retained damage fraction, mag/reload is the stored magazine and reload, and
+// the effective-range cell comes from the shared weaponRangeInfo band.
+const weaponDps=(weapon:any)=>{const interval=Math.max(.01,Number(weapon?.interval)||.1);const pellets=Number(weapon?.pellets)||1;return ((Number(weapon?.damage)||0)*pellets)/interval;};
+const weaponFalloffFloor=(weapon:any)=>{const min=Number(weapon?.falloff?.min);return Number.isFinite(min)?min:1;};
+const weaponMagText=(weapon:any)=>{
+ const ammo=Number(weapon?.ammo),cap=Number(weapon?.cap);
+ const mag=Number.isFinite(ammo)&&ammo>0?`${formatWhole(ammo)} / ${formatWhole(cap)}`:'UNLIMITED';
+ const reload=Number(weapon?.reload)>0?`${formatNumber(weapon.reload,1)}s RELOAD`:'NO RELOAD';
+ return `${mag} · ${reload}`;
+};
+const weaponRangeText=(weapon:any)=>{
+ const info=weaponRangeInfo(weapon);
+ const span=info.factor<1?`${Math.round(info.start)}–${Math.round(info.end)}m · ${Math.round(info.factor*100)}%`:`${Math.round(info.range)}m`;
+ return `${info.band} · ${span}`;
+};
+
+export function WeaponCompare({WEAPONS=[]}:{WEAPONS?:any[]}){
+ const [left,setLeft]=useState(0);
+ const [right,setRight]=useState(1);
+ if(!WEAPONS.length)return <Empty title="No weapons loaded"/>;
+ const max=Math.max(0,WEAPONS.length-1);
+ const a=WEAPONS[Math.min(left,max)],b=WEAPONS[Math.min(right,max)];
+ const rows=[
+  {label:'DPS',value:(weapon:any)=>formatNumber(weaponDps(weapon),1)},
+  {label:'FALLOFF FLOOR',value:(weapon:any)=>{const floor=weaponFalloffFloor(weapon);return floor<1?`${Math.round(floor*100)}%`:'100%';}},
+  {label:'MAG / RELOAD',value:(weapon:any)=>weaponMagText(weapon)},
+  {label:'EFFECTIVE RANGE',value:(weapon:any)=>weaponRangeText(weapon)},
+ ];
+ return <Panel label="WEAPON COMPARISON" meta="TWO SLOTS">
+  <div className="row weapon-compare-picks">
+   <label className="config-field"><span>Weapon A</span>
+    <select aria-label="Weapon A" value={Math.min(left,max)} onChange={e=>setLeft(Number(e.target.value))}>{WEAPONS.map((weapon:any,index:number)=><option key={weapon.name} value={index}>{weapon.name}</option>)}</select>
+   </label>
+   <label className="config-field"><span>Weapon B</span>
+    <select aria-label="Weapon B" value={Math.min(right,max)} onChange={e=>setRight(Number(e.target.value))}>{WEAPONS.map((weapon:any,index:number)=><option key={weapon.name} value={index}>{weapon.name}</option>)}</select>
+   </label>
+  </div>
+  <table className="weapon-compare">
+   <caption className="sr-only">Weapon stat comparison</caption>
+   <thead><tr><th scope="col">Stat</th><th scope="col">{a?.name}</th><th scope="col">{b?.name}</th></tr></thead>
+   <tbody>{rows.map(row=><tr key={row.label}><th scope="row">{row.label}</th><td>{row.value(a)}</td><td>{row.value(b)}</td></tr>)}</tbody>
+  </table>
+ </Panel>;
 }
 
 const levelOf=(item:any)=>Math.max(1,Math.round(Number(item?.level)||1));
@@ -38,13 +113,13 @@ export function ArsenalInspector({WEAPONS=[],CHARACTERS=[],ATTACHMENTS=[],ATTACH
    <span className="row" style={{gap:8}}><Chip tone="accent"><i/>{claimed} / {total} UNLOCKED</Chip><Chip>{CHARACTERS.length} OPERATORS · {WEAPONS.length} WEAPONS</Chip></span>
   </div>
   <Tabs value={tab} onChange={setTab} ariaLabel="Arsenal category" tabs={subtabs}/>
-  {tab==='weapons'&&<div className="grid-cards">{WEAPONS.map((weapon:any,index:number)=>{const alt=altSpecFor(index);return <Panel key={weapon.name} label={`${index+1} / WEAPON`} meta={weapon.short||''}>
+  {tab==='weapons'&&<div className="stack"><WeaponCompare WEAPONS={WEAPONS}/><div className="grid-cards">{WEAPONS.map((weapon:any,index:number)=>{const alt=altSpecFor(index);return <Panel key={weapon.name} label={`${index+1} / WEAPON`} meta={weapon.short||''}>
    <h3 style={{color:weapon.color}}>{weapon.name}</h3>
    <div className="row" style={{gap:6}}><Chip>{weaponRangeLabel?.(weapon)}</Chip><Chip>{Math.round(Number(weapon.damage)||0)} DMG</Chip><Chip>{Number(weapon.interval)>0?`${Math.round(60/Number(weapon.interval))} RPM`:'—'}</Chip>{alt&&<Chip tone="accent">ALT · {alt.label}</Chip>}</div>
    <p className="field-note">{weapon.description}</p>
    {alt&&<p className="field-note weapon-alt-note"><b>ALT FIRE</b> {alt.summary}</p>}
     <p className="field-note">{Number(weapon.ammo)>0?`${formatWhole(weapon.ammo)} / ${formatWhole(weapon.cap)} ROUNDS`:'UNLIMITED AMMO'}{weapon.splash?` · ${formatNumber(weapon.splash)} SPLASH`:''}</p>
-  </Panel>;})}</div>}
+  </Panel>;})}</div></div>}
   {tab==='operators'&&<div className="grid-cards">{CHARACTERS.map((operator:any)=><Panel key={operator.id} label="OPERATOR" meta={operator.tag}>
    <h3 style={{color:operator.color}}>{operator.name}</h3>
     <div className="row" style={{gap:6}}><Chip>{formatWhole(operator.stats.health)} HP</Chip><Chip>{formatWhole(operator.stats.armor)} ARM</Chip><Chip>{formatNumber(operator.stats.speed)} M/S</Chip></div>

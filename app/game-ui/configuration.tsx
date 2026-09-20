@@ -13,7 +13,7 @@ import {modeTargetText,objectiveCopy} from '../../game/hud.mjs';
 import {WEAPONS} from '../../game/data.mjs';
 import {QUICK_MATCH_PRESETS,presetConfig} from '../../game/replay.mjs';
 import {DISPLAY_PRESETS,PRESET_LIMIT,applyDisplayPreset,normalizeAccessibility,paletteOptions,teamColorsFor} from '../../game/presets.mjs';
-import {DEFAULT_BINDINGS,KEYBIND_ACTIONS,KEYBIND_LABELS,KEYBIND_OPTIONS,rebindAction} from '../../game/keybinds.mjs';
+import {DEFAULT_BINDINGS,KEYBIND_ACTIONS,KEYBIND_LABELS,KEYBIND_OPTIONS,normalizeBindings,rebindAction} from '../../game/keybinds.mjs';
 
 // Modes still stabilising get an explicit PREVIEW badge in the setup list so a
 // local bot match reads as a prototype, not a finished mode.
@@ -49,6 +49,9 @@ const KEY_LABEL=(code:string)=>String(code||'?').replace(/^Key/,'').replace(/^Di
 // prefer not to press the target key. Every control is focusable and labelled.
 export function KeybindsConfiguration({bindings,onChange,conflicts=[]}:any){
  const [capturing,setCapturing]=useState<string|null>(null);
+ const [importDraft,setImportDraft]=useState('');
+ const [transferNotice,setTransferNotice]=useState('');
+ const [transferError,setTransferError]=useState('');
  useEffect(()=>{
   if(!capturing)return;
   const onKey=(e:KeyboardEvent)=>{
@@ -62,6 +65,41 @@ export function KeybindsConfiguration({bindings,onChange,conflicts=[]}:any){
   return()=>window.removeEventListener('keydown',onKey,{capture:true});
  },[capturing,bindings,onChange]);
  const patch=(action:string,code:string)=>onChange(rebindAction(bindings,action,code));
+ // Portable export/import: the action -> key mapping (every value is a
+ // KEYBIND_OPTIONS member) as JSON, and an import that runs the payload through
+ // the same normalizer as saved storage. A partial, duplicated or hostile
+ // object can therefore never produce an unrepresentable binding.
+ const bindingJson=()=>JSON.stringify(Object.fromEntries(KEYBIND_ACTIONS.map(action=>[action,bindings?.[action]??(DEFAULT_BINDINGS as any)[action]])),null,2);
+ const copyBindings=async()=>{
+  const json=bindingJson();
+  try{
+   if(navigator.clipboard?.writeText)await navigator.clipboard.writeText(json);
+   else{const area=document.createElement('textarea');area.value=json;area.setAttribute('readonly','');document.body.appendChild(area);area.select();document.execCommand?.('copy');area.remove();}
+   setTransferError('');setTransferNotice('Keybinds copied as JSON.');
+  }catch{setTransferNotice('');setTransferError('Copy failed. Use EXPORT JSON to download instead.');}
+ };
+ const downloadBindings=()=>{
+  try{
+   const blob=new Blob([bindingJson()],{type:'application/json'});
+   const url=URL.createObjectURL(blob);
+   const link=document.createElement('a');
+   link.href=url;link.download='cocs-keybinds.json';
+   document.body.appendChild(link);link.click();link.remove();
+   setTimeout(()=>URL.revokeObjectURL(url),0);
+   setTransferError('');setTransferNotice('Keybinds exported to cocs-keybinds.json.');
+  }catch{setTransferNotice('');setTransferError('Export failed in this browser.');}
+ };
+ const importBindings=()=>{
+  const text=importDraft.trim();
+  if(!text){setTransferNotice('');setTransferError('Paste a keybind JSON object first.');return;}
+  let parsed:any=null;
+  try{parsed=JSON.parse(text);}catch{setTransferNotice('');setTransferError('That is not valid JSON.');return;}
+  const source=parsed&&typeof parsed==='object'&&!Array.isArray(parsed)?(parsed.bindings&&typeof parsed.bindings==='object'?parsed.bindings:parsed):null;
+  if(!source){setTransferNotice('');setTransferError('Expected a JSON object mapping each action to a key.');return;}
+  setCapturing(null);
+  setImportDraft('');setTransferError('');setTransferNotice('Keybinds imported.');
+  onChange(normalizeBindings(source));
+ };
  return <div className="config-block keybinds-configuration"><h3>Controls</h3>
   <p className="config-note">Select an action, then press any key to bind it. Escape cancels; occupied keys swap automatically. <b>Free cursor</b> releases the mouse during play — no pause — so you can click the spend window, command board and HUD panels.</p>
   <div className="keybind-grid" role="group" aria-label="Keyboard bindings">
@@ -73,6 +111,17 @@ export function KeybindsConfiguration({bindings,onChange,conflicts=[]}:any){
   </div>
   {conflicts.length?<p className="config-note" role="alert">Duplicate keys: {conflicts.join(', ')}</p>:<p className="config-note">One key per action; choosing an occupied key swaps the two actions.</p>}
   <button className="text-button" onClick={()=>{setCapturing(null);onChange({...DEFAULT_BINDINGS});}}>RESET KEYS</button>
+  <div className="keybind-transfer" role="group" aria-label="Keybind export and import">
+   <p className="config-note">Export the action-to-key map as JSON, or paste an exported file and import it. Imported keys are normalized exactly like a saved bindings table.</p>
+   <div className="keybind-transfer__actions">
+    <button type="button" className="text-button" onClick={downloadBindings}>EXPORT JSON</button>
+    <button type="button" className="text-button" onClick={()=>{void copyBindings();}}>COPY JSON</button>
+   </div>
+   <textarea aria-label="Paste keybinds JSON" placeholder={'{\n  "forward": "KeyW",\n  "jump": "Space"\n}'} rows={4} value={importDraft} onChange={e=>setImportDraft(e.target.value)}/>
+   <button type="button" className="text-button" onClick={importBindings} disabled={!importDraft.trim()}>IMPORT JSON</button>
+   {transferError&&<p className="config-note keybind-transfer__error" role="alert">{transferError}</p>}
+   {!transferError&&transferNotice&&<p className="config-note">{transferNotice}</p>}
+  </div>
  </div>;
 }
 
@@ -90,10 +139,22 @@ export function AccessibilityConfiguration({accessibility,onChange,display,onDis
  return <div className="config-block accessibility-configuration"><h3>Accessibility</h3>
   {view&&<>
    <Toggle label="Subtitles / audio captions" checked={view.captions===true} onChange={(v:boolean)=>patchDisplay({captions:v})}/>
+   <div className="caption-options" role="group" aria-label="Subtitle presentation">
+    <p className="config-note">Caption presentation: text size, backing panel and screen edge. Defaults keep the shipped caption exactly (100%, dim, bottom).</p>
+    <Range label="Caption text size" value={Math.round((view.captionScale??1)*100)} min={80} max={160} step={10} suffix="%" onChange={(v:number)=>patchDisplay({captionScale:v/100})}/>
+    <Choice label="Caption background" value={view.captionBackground??'dim'} options={[['solid','Solid'],['dim','Dim'],['transparent','Transparent']]} onChange={(v:string)=>patchDisplay({captionBackground:v})}/>
+    <Choice label="Caption position" value={view.captionPosition??'bottom'} options={[['bottom','Bottom'],['top','Top']]} onChange={(v:string)=>patchDisplay({captionPosition:v})}/>
+   </div>
    <Toggle label="Reduce motion" checked={view.reducedMotion===true} onChange={(v:boolean)=>patchDisplay({reducedMotion:v})}/>
    <Range label="UI text scale" value={Math.round((view.uiScale??1)*100)} min={80} max={140} step={10} suffix="%" onChange={(v:number)=>patchDisplay({uiScale:v/100})}/>
    <p className="config-note">UI text scale reaches the HUD cards, kill feed, captions, scoreboard and command surfaces (0.8×–1.4×). While Reduce motion is on: ADS snaps in immediately, weapon kick and sway stay still, and character foot stride freezes; camera shake and decorative motion stay off.</p>
   </>}
+  {view&&<div className="input-options" role="group" aria-label="Hold or toggle controls">
+   <p className="config-note">Toggle turns a held control into a press-on / press-off latch. Off keeps the shipped hold behavior. Touch controls follow the same setting.</p>
+   <Toggle label="ADS toggle" checked={view.adsToggle===true} onChange={(v:boolean)=>patchDisplay({adsToggle:v})}/>
+   <Toggle label="Crouch toggle" checked={view.crouchToggle===true} onChange={(v:boolean)=>patchDisplay({crouchToggle:v})}/>
+   <Toggle label="Sprint toggle" checked={view.sprintToggle===true} onChange={(v:boolean)=>patchDisplay({sprintToggle:v})}/>
+  </div>}
   <div className="config-field"><span>Colour vision palette</span>
    <div className="palette-options" role="radiogroup" aria-label="Colour vision palette">
     {paletteOptions().map(option=>{const colors=teamColorsFor(option.id),active=value.palette===option.id;return <button key={option.id} type="button" role="radio" aria-checked={active} aria-label={`${option.name}: ${option.detail}`} className={`palette-option${active?' active':''}`} onClick={()=>set({palette:option.id})}>
@@ -126,7 +187,7 @@ export function MatchConfiguration({config,onChange,excludeModes=[]}:any){const 
  <div className="section-label"><span>03 / MATCH SETUP</span><button className="text-button" onClick={()=>onChange({...DEFAULT_CONFIG,playerName:config.playerName})}>RESET MATCH RULES</button></div>
  <div className="quick-presets" role="group" aria-label="Quick match presets"><span className="eyebrow">QUICK MATCH PRESETS</span><div>{QUICK_MATCH_PRESETS.map(p=><button key={p.id} onClick={()=>onChange(presetConfig(p.id,config))}><strong>{p.name}</strong><small>{p.detail}</small></button>)}</div><p>Fresh rules; keeps your callsign, operator and arena. Saved mutators, objective overrides and the Director tier are cleared.</p></div>
        <RadioGroup className="mode-options mode-options--chips" aria-label="Game mode" value={config.mode} onValueChange={selectMode}>{GAME_MODES.filter((m:any)=>!excludeModes.includes(m.id)).map(m=>{const modeRules:any=m.rules||{},modeTarget=scoreRule(m);return <label className={`mode-option ${config.mode===m.id?'selected':''}`} key={m.id} htmlFor={`mode-${m.id}`}><div><strong>{m.name}</strong><small>{m.description}</small><em>{modeRules.team?'TEAM':'SOLO'} / {modeTarget.objective}</em>{PREVIEW_MODES.has(m.id)&&<em className="mode-preview">PREVIEW</em>}</div><RadioGroupItem id={`mode-${m.id}`} value={m.id} aria-label={m.name}/></label>})}</RadioGroup>
- <div className="mode-detail" role="status"><span className="label">{rules.team?'TEAM':'SOLO'} · {target.objective} · {mode.name}{coop?' · OPERATIONS':''}</span><p>{mode.description}</p>
+ <div className="mode-detail" role="group" aria-label={`${mode.name} mode details`}><span className="label">{rules.team?'TEAM':'SOLO'} · {target.objective} · {mode.name}{coop?' · OPERATIONS':''}</span><p>{mode.description}</p>
    <div className="row" aria-label="Effective launch rules"><span className="chip">{plan.duration}</span><span className="chip">{plan.rosterLabel}</span><span className="chip">{plan.modifierLabel}</span>{coop&&<span className="chip chip--accent">DIRECTOR {tierId} · {tier.label}</span>}<span className="chip">{coop?`${waveCount} WAVES · DEFEND HQ`:modeTargetText(mode,config.fragLimit)}</span></div>
   <p className="field-note">Effective launch: arena above, {plan.duration.toLowerCase()}, {plan.rosterLabel.toLowerCase()}{coop?`, Director tier ${tierId}`:''}. A mode that cannot play the chosen arena substitutes a compatible map automatically.</p>
  </div>
@@ -151,4 +212,4 @@ export function DisplayConfiguration({display,onChange}:any){const patch=(key:st
   <Range label="Crosshair thickness" value={display.crosshairThickness??1} min={.6} max={2} step={.1} suffix="×" onChange={(v:number)=>patch('crosshairThickness',v)}/>
   <Toggle label="Crosshair outline" checked={display.crosshairOutline!==false} onChange={(v:boolean)=>patch('crosshairOutline',v)}/>
   <Toggle label="Centre dot" checked={display.crosshairDot===true} onChange={(v:boolean)=>patch('crosshairDot',v)}/>
- </div><div className="crosshair-editor"><label>Crosshair color<input type="color" aria-label="Crosshair color" value={display.color} onChange={e=>patch('color',e.target.value)}/></label><div className="crosshair-preview"><div className={`crosshair shape-${display.crosshair}${display.crosshairOutline!==false?' has-outline':''}${display.crosshairDot===true?' has-dot':''}`} style={{'--crosshair-color':display.color,'--crosshair-size':display.size,'--crosshair-thickness':display.crosshairThickness??1} as any}><span/><span/><span/><span/></div></div></div><div className="crosshair-editor"><label>ADS reticle color<input type="color" aria-label="ADS reticle color" value={display.adsColor??display.color} onChange={e=>patch('adsColor',e.target.value)}/></label><div className="crosshair-preview crosshair-preview--ads"><div className="ads-reticle dot" style={{'--ads-color':display.adsColor??display.color,'--crosshair-size':display.size} as any}/></div></div><Toggle label="Show weapon model" checked={display.showWeapon} onChange={(v:boolean)=>patch('showWeapon',v)}/><Toggle label="Show FPS counter" checked={display.showFps} onChange={(v:boolean)=>patch('showFps',v)}/><Toggle label="Invert vertical look" checked={display.invertY===true} onChange={(v:boolean)=>patch('invertY',v)}/><Toggle label="Show kill feed" checked={display.showKillFeed!==false} onChange={(v:boolean)=>patch('showKillFeed',v)}/><Toggle label="Show damage numbers" checked={display.showDamageNumbers!==false} onChange={(v:boolean)=>patch('showDamageNumbers',v)}/><Toggle label="Show radar" checked={display.showRadar!==false} onChange={(v:boolean)=>patch('showRadar',v)}/><Range label="ADS sensitivity" value={display.adsSensitivity??.85} min={.2} max={1.5} step={.05} suffix="×" onChange={(v:number)=>patch('adsSensitivity',v)}/><Range label="Touch sensitivity" value={display.touchSensitivity??1} min={.3} max={3} step={.1} suffix="×" onChange={(v:number)=>patch('touchSensitivity',v)}/><Range label="Touch control scale" value={Math.round((display.touchScale??1)*100)} min={80} max={130} step={5} suffix="%" onChange={(v:number)=>patch('touchScale',v/100)}/><Range label="Touch control opacity" value={Math.round((display.touchOpacity??1)*100)} min={40} max={100} step={5} suffix="%" onChange={(v:number)=>patch('touchOpacity',v/100)}/><Toggle label="Left-handed touch layout" checked={display.touchLeftHanded===true} onChange={(v:boolean)=>patch('touchLeftHanded',v)}/><Choice label="Effects quality" value={display.effectsQuality??'auto'} options={[['auto','Auto'],['low','Low'],['medium','Medium'],['high','High']]} onChange={(v:string)=>patch('effectsQuality',v)}/><Range label="Camera shake" value={display.cameraShake??1} min={0} max={1.5} step={.1} suffix="×" onChange={(v:number)=>patch('cameraShake',v)}/><Range label="Weapon bob" value={display.weaponBob??1} min={0} max={1.5} step={.1} suffix="×" onChange={(v:number)=>patch('weaponBob',v)}/><p className="config-note">Covers image quality (resolution scale, glow, brightness, frame cap, shadows) and readability (crosshair, kill feed, damage numbers, radar). Touch layout scale, opacity and the left-handed switch apply to the on-screen controls; every touch target stays at least 44px. Subtitles, reduce motion, colour vision, high contrast and UI text scale live in the Accessibility section below.</p><button className="text-button" onClick={()=>onChange({...DEFAULT_DISPLAY})}>RESET VIEW</button></div>;}
+ </div><div className="crosshair-editor"><label>Crosshair color<input type="color" aria-label="Crosshair color" value={display.color} onChange={e=>patch('color',e.target.value)}/></label><div className="crosshair-preview"><div className={`crosshair shape-${display.crosshair}${display.crosshairOutline!==false?' has-outline':''}${display.crosshairDot===true?' has-dot':''}`} style={{'--crosshair-color':display.color,'--crosshair-size':display.size,'--crosshair-thickness':display.crosshairThickness??1} as any}><span/><span/><span/><span/></div></div></div><div className="crosshair-editor"><label>ADS reticle color<input type="color" aria-label="ADS reticle color" value={display.adsColor??display.color} onChange={e=>patch('adsColor',e.target.value)}/></label><div className="crosshair-preview crosshair-preview--ads"><div className="ads-reticle dot" style={{'--ads-color':display.adsColor??display.color,'--crosshair-size':display.size} as any}/></div></div><Toggle label="Show weapon model" checked={display.showWeapon} onChange={(v:boolean)=>patch('showWeapon',v)}/><Toggle label="Show FPS counter" checked={display.showFps} onChange={(v:boolean)=>patch('showFps',v)}/><Toggle label="Invert vertical look" checked={display.invertY===true} onChange={(v:boolean)=>patch('invertY',v)}/><Toggle label="Show kill feed" checked={display.showKillFeed!==false} onChange={(v:boolean)=>patch('showKillFeed',v)}/><Toggle label="Show damage numbers" checked={display.showDamageNumbers!==false} onChange={(v:boolean)=>patch('showDamageNumbers',v)}/><Toggle label="Show radar" checked={display.showRadar!==false} onChange={(v:boolean)=>patch('showRadar',v)}/><Range label="ADS sensitivity" value={display.adsSensitivity??.85} min={.2} max={1.5} step={.05} suffix="×" onChange={(v:number)=>patch('adsSensitivity',v)}/><div className="ads-advanced" role="group" aria-label="Per-sight ADS sensitivity multipliers"><Range label="ADS multiplier · near sights" value={display.adsSensitivityNear??1} min={.4} max={1.6} step={.05} suffix="×" onChange={(v:number)=>patch('adsSensitivityNear',v)}/><Range label="ADS multiplier · holo sights" value={display.adsSensitivityHolo??1} min={.4} max={1.6} step={.05} suffix="×" onChange={(v:number)=>patch('adsSensitivityHolo',v)}/><Range label="ADS multiplier · scope sights" value={display.adsSensitivityScope??1} min={.4} max={1.6} step={.05} suffix="×" onChange={(v:number)=>patch('adsSensitivityScope',v)}/><p className="config-note">The scalar above stays the base; each multiplier (0.4×–1.6×) applies only while that sight is live. Iron/near covers 1× optics, holo the mid zoom and scopes the high zoom.</p></div><Range label="Touch sensitivity" value={display.touchSensitivity??1} min={.3} max={3} step={.1} suffix="×" onChange={(v:number)=>patch('touchSensitivity',v)}/><Range label="Touch control scale" value={Math.round((display.touchScale??1)*100)} min={80} max={130} step={5} suffix="%" onChange={(v:number)=>patch('touchScale',v/100)}/><Range label="Touch control opacity" value={Math.round((display.touchOpacity??1)*100)} min={40} max={100} step={5} suffix="%" onChange={(v:number)=>patch('touchOpacity',v/100)}/><Toggle label="Left-handed touch layout" checked={display.touchLeftHanded===true} onChange={(v:boolean)=>patch('touchLeftHanded',v)}/><Choice label="Effects quality" value={display.effectsQuality??'auto'} options={[['auto','Auto'],['low','Low'],['medium','Medium'],['high','High']]} onChange={(v:string)=>patch('effectsQuality',v)}/><Range label="Camera shake" value={display.cameraShake??1} min={0} max={1.5} step={.1} suffix="×" onChange={(v:number)=>patch('cameraShake',v)}/><Range label="Weapon bob" value={display.weaponBob??1} min={0} max={1.5} step={.1} suffix="×" onChange={(v:number)=>patch('weaponBob',v)}/><p className="config-note">Covers image quality (resolution scale, glow, brightness, frame cap, shadows) and readability (crosshair, kill feed, damage numbers, radar). Touch layout scale, opacity and the left-handed switch apply to the on-screen controls; every touch target stays at least 44px. Subtitles, reduce motion, colour vision, high contrast and UI text scale live in the Accessibility section below.</p><button className="text-button" onClick={()=>onChange({...DEFAULT_DISPLAY})}>RESET VIEW</button></div>;}

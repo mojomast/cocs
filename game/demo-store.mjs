@@ -1,5 +1,6 @@
 import { compressDemo, decompressDemo, trimDemo, serializeDemo, parseDemo } from './demo.mjs';
 import { teamMode as isTeamMode } from './config.mjs';
+import { teamName } from './hud.mjs';
 
 const DB_NAME = 'token-arena-demos';
 const DB_VERSION = 1;
@@ -68,16 +69,19 @@ function createIndexedDbStorage() {
       db.close();
     },
     // Library size for the Theater usage line. Reads only the stored bytes so
-    // it never decompresses a replay just to report its size.
+    // it never decompresses a replay just to report its size. `entries` is the
+    // per-replay breakdown retention needs; the total stays authoritative.
     async usage() {
       const db = await openDb();
       const tx = db.transaction([META_STORE, DATA_STORE], 'readonly');
       const metas = await requestResult(tx.objectStore(META_STORE).getAll());
       const records = await requestResult(tx.objectStore(DATA_STORE).getAll());
       db.close();
+      const entries = (records || []).map(record => ({id: record?.id ?? null, bytes: recordByteSize(record)}));
       return {
         count: (metas || []).length,
-        bytes: (records || []).reduce((total, record) => total + recordByteSize(record), 0),
+        bytes: entries.reduce((total, entry) => total + entry.bytes, 0),
+        entries,
       };
     },
   };
@@ -144,14 +148,67 @@ export function demoOutcome(demo) {
   const actors = Array.isArray(state.actors) ? state.actors : [];
   if (teamMode) {
     const a = numeric(teamScores[0]), b = numeric(teamScores[1]);
-    const winner = a === b ? null : a > b ? 'Team 1' : 'Team 2';
-    return {teamMode: true, winner, scores: {0: a, 1: b}, score: `${a}–${b}`};
+    const winnerTeam = a === b ? null : a > b ? 0 : 1;
+    const winner = winnerTeam === null ? null : teamName(winnerTeam);
+    return {teamMode: true, winner, winnerTeam, scores: {0: a, 1: b}, score: `${a}–${b}`};
   }
   const ranked = actors.slice().sort((x, y) => numeric(y?.frags) - numeric(x?.frags));
   const top = ranked[0];
   const winner = top?.name || null;
   const frags = top ? numeric(top.frags) : 0;
-  return {teamMode: false, winner, scores: null, score: top ? `${frags} frags` : ''};
+  return {teamMode: false, winner, winnerTeam: null, scores: null, score: top ? `${frags} frags` : ''};
+}
+
+// ---------------------------------------------------------------------------
+// Replay bookmarks. They live in the demo's own `meta` object, which saveDemo
+// round-trips through compression, so a bookmark survives reload, export and
+// re-import with the replay it marks. The summary surfaces the normalized list
+// (sorted, de-duplicated, bounded) because the Theater dock reads summaries.
+const BOOKMARK_LIMIT = 200;
+
+export function demoBookmarks(demo) {
+  const raw = Array.isArray(demo?.meta?.bookmarks) ? demo.meta.bookmarks : [];
+  const seen = new Set();
+  const out = [];
+  for (const entry of raw) {
+    const time = Number(entry?.time);
+    if (!Number.isFinite(time) || time < 0) continue;
+    const stamp = Math.round(time * 100) / 100;
+    if (seen.has(stamp)) continue;
+    seen.add(stamp);
+    const label = typeof entry?.label === 'string' ? entry.label.trim().slice(0, 80) : '';
+    out.push(label ? {time: stamp, label} : {time: stamp});
+  }
+  return out.sort((a, b) => a.time - b.time).slice(0, BOOKMARK_LIMIT);
+}
+
+export async function addDemoBookmark(id, entry = {}) {
+  const demo = await getDemo(id);
+  if (!demo) return null;
+  const rawTime = typeof entry === 'number' ? entry : entry?.time;
+  const time = Number(rawTime);
+  if (!Number.isFinite(time) || time < 0) throw new Error('Invalid bookmark time');
+  const stamp = Math.round(time * 100) / 100;
+  const requested = typeof entry?.label === 'string' ? entry.label.trim().slice(0, 80) : '';
+  const existing = demoBookmarks(demo).find(mark => Math.abs(mark.time - stamp) < 0.005);
+  // Re-marking the same stamp keeps an existing label unless the caller sends
+  // a new one, so a plain time never silently erases a named bookmark.
+  const label = requested || existing?.label || '';
+  const bookmarks = [...demoBookmarks(demo).filter(mark => Math.abs(mark.time - stamp) >= 0.005), (label ? {time: stamp, label} : {time: stamp})]
+    .sort((a, b) => a.time - b.time)
+    .slice(0, BOOKMARK_LIMIT);
+  demo.meta = {...(demo?.meta || {}), bookmarks};
+  return saveDemo(demo);
+}
+
+export async function removeDemoBookmark(id, time) {
+  const demo = await getDemo(id);
+  if (!demo) return null;
+  const target = Number(time);
+  if (!Number.isFinite(target)) throw new Error('Invalid bookmark time');
+  const bookmarks = demoBookmarks(demo).filter(mark => Math.abs(mark.time - target) >= 0.005);
+  demo.meta = {...(demo?.meta || {}), bookmarks};
+  return saveDemo(demo);
 }
 
 export function demoSummary(demo) {
@@ -171,10 +228,40 @@ export function demoSummary(demo) {
     duration,
     frames: frames.length,
     highlights: demoHighlights(demo),
+    bookmarks: demoBookmarks(demo),
     teamMode: outcome.teamMode,
     winner: outcome.winner,
+    winnerTeam: outcome.winnerTeam,
     score: outcome.score,
   };
+}
+
+// One plain-text result summary for the Theater's COPY SUMMARY action. Kept
+// pure so the exact clipboard payload is testable; the copy itself only reports
+// success after the write resolves.
+export function demoSummaryText(summary, {now = Date.now()} = {}) {
+  const source = summary || {};
+  const clock = value => {
+    const total = Math.max(0, Math.round(Number(value) || 0));
+    return `${Math.floor(total / 60)}:${String(total % 60).padStart(2, '0')}`;
+  };
+  const iso = value => {
+    const date = new Date(value);
+    return Number.isFinite(date.getTime()) ? date.toISOString() : new Date(now).toISOString();
+  };
+  const highlights = Array.isArray(source.highlights) ? source.highlights : [];
+  const bookmarks = Array.isArray(source.bookmarks) ? source.bookmarks : [];
+  const lines = [
+    'COCS · REPLAY SUMMARY',
+    `${source.mapName || source.mapId || 'Unknown map'} · ${String(source.modeName || source.mode || 'match').toUpperCase()}`,
+    `RESULT · ${source.winner ? `${source.winner} WINS` : 'NO WINNER'}${source.score ? ` (${source.score})` : ''}`,
+    `DURATION · ${clock(source.duration)}`,
+    `RECORDED · ${iso(source.createdAt || now)}`,
+    `HIGHLIGHTS · ${highlights.length}`,
+    ...(bookmarks.length ? [`BOOKMARKS · ${bookmarks.length}`] : []),
+    `GENERATED · ${iso(now)}`,
+  ];
+  return lines.join('\n');
 }
 
 export function filterDemos(demos, {mode = 'all', mapId = 'all'} = {}) {
@@ -212,10 +299,16 @@ export async function saveDemo(demo) {
   const record = { ...demo, id };
   const maxSeconds = trimSeconds(record);
   const finished = maxSeconds === null ? record : trimDemo(record, maxSeconds);
-  const summary = demoSummary(finished);
   const bytes = await compressDemo(finished);
+  const summary = {...demoSummary(finished), bytes: byteLength(bytes)};
   await storage.save(summary, { id, bytes });
   return summary;
+}
+
+function byteLength(bytes) {
+  if (Number.isFinite(bytes?.byteLength)) return bytes.byteLength;
+  if (Number.isFinite(bytes?.length)) return bytes.length;
+  return 0;
 }
 
 export async function listDemos() {
@@ -246,10 +339,14 @@ export async function demoUsage() {
   if (typeof storage?.usage === 'function') {
     try {
       const usage = await storage.usage();
+      const entries = Array.isArray(usage?.entries)
+        ? usage.entries.map(entry => ({id: entry?.id ?? null, bytes: Math.max(0, Number(entry?.bytes) || 0)}))
+        : null;
       return {
         count: Math.max(0, Math.floor(Number(usage?.count) || 0)),
         bytes: Math.max(0, Number(usage?.bytes) || 0),
         measured: true,
+        ...(entries ? {entries} : {}),
       };
     } catch {}
   }
@@ -257,6 +354,87 @@ export async function demoUsage() {
   const list = Array.isArray(all) ? all : [];
   const bytes = list.reduce((total, demo) => total + (Number(demo?.bytes) || 0), 0);
   return {count: list.length, bytes, measured: bytes > 0};
+}
+
+// ---------------------------------------------------------------------------
+// Retention. Opt-in and keep-everything by default: a keep-N policy removes
+// everything past the newest N, and a max-MB policy removes oldest-first until
+// the known total fits. The plan is pure and refuses to guess: when any kept
+// replay has no measured size, size pruning is skipped (measured:false) instead
+// of deleting based on a fabricated number. `keep` is a hard floor.
+// ---------------------------------------------------------------------------
+export function demoRetentionPlan(demos, {keep = 0, maxBytes = 0, sizes = null} = {}) {
+  const list = sortDemos(demos, 'newest');
+  const keepCount = Math.max(0, Math.min(list.length, Math.floor(Number(keep) || 0)));
+  const limit = Math.max(0, Math.floor(Number(maxBytes) || 0));
+  const sizeOf = demo => {
+    const id = demo?.id;
+    const known = sizes && typeof sizes.get === 'function' ? sizes.get(id) : sizes?.[id];
+    const value = Number(known ?? demo?.bytes);
+    return Number.isFinite(value) && value >= 0 ? value : null;
+  };
+  const remove = new Set();
+  let measured = false;
+  let sizeApplied = false;
+  let keptBytes = 0;
+  if (limit > 0) {
+    measured = list.every(demo => sizeOf(demo) !== null);
+    if (measured) {
+      sizeApplied = true;
+      for (const demo of list) remove.add(demo.id);
+      for (const demo of list.slice(0, keepCount)) remove.delete(demo.id);
+      let running = list.slice(0, keepCount).reduce((total, demo) => total + sizeOf(demo), 0);
+      for (const demo of list.slice(keepCount)) {
+        const size = sizeOf(demo);
+        if (running + size <= limit) {
+          running += size;
+          remove.delete(demo.id);
+        } else {
+          break; // the oldest replays go first; a gap is never kept
+        }
+      }
+      keptBytes = running;
+    }
+  }
+  if (!sizeApplied && keepCount > 0) for (const demo of list.slice(keepCount)) remove.add(demo.id);
+  if (!sizeApplied) {
+    // Keep-policy-only plans report the known size of what stays, which is 0
+    // for unsized legacy records rather than an invented number.
+    keptBytes = list.reduce((total, demo) => remove.has(demo.id) ? total : total + (sizeOf(demo) ?? 0), 0);
+  }
+  return {
+    keep: list.filter(demo => !remove.has(demo.id)).map(demo => demo.id),
+    remove: list.filter(demo => remove.has(demo.id)).map(demo => demo.id),
+    measured,
+    bytes: keptBytes,
+    limit,
+    keepCount,
+    sizeApplied,
+  };
+}
+
+// Executes a retention policy against the live storage. Returns the plan plus
+// the ids actually removed and the post-prune count; when a size limit is asked
+// for and any replay has no measured size, nothing is deleted (measured:false,
+// applied:false) rather than guessing.
+export async function pruneDemos({keep = 0, maxMb = 0, maxBytes = 0} = {}) {
+  const list = await listDemos();
+  const usage = await demoUsage();
+  const sizes = new Map((Array.isArray(usage?.entries) ? usage.entries : []).map(entry => [entry.id, entry.bytes]));
+  const limit = Number(maxMb) > 0 ? Math.round(Number(maxMb) * 1024 * 1024) : Math.max(0, Math.floor(Number(maxBytes) || 0));
+  const plan = demoRetentionPlan(list, {keep, maxBytes: limit, sizes});
+  const removed = [];
+  for (const id of plan.remove) {
+    await storage.remove(id);
+    removed.push(id);
+  }
+  return {
+    ...plan,
+    removed,
+    removedCount: removed.length,
+    count: list.length - removed.length,
+    applied: plan.keepCount > 0 || plan.sizeApplied,
+  };
 }
 
 export function demoUsageText(usage) {

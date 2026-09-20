@@ -9,7 +9,7 @@ test('Lattice scoreboard shows real kills once and readable objective contributi
   const html=renderToStaticMarkup(renderScoreboard({config:{mode},actorId:0,teamScores:{0:12.000000000001,1:4},actors:[{id:0,name:'Scout',team:0,frags:7,deaths:2,scoreStats:{objectiveCaptures:3,objectiveTime:20.000000000001}}]}));
   assert.match(html,/>KILLS</);
   assert.doesNotMatch(html,/>FRAGS</,'no redundant column backed by a missing score statistic');
-  assert.match(html,/<strong>7<\/strong>/);
+  assert.match(html,/<strong role="cell">7<\/strong>/);
   assert.match(html,/>20s</);
   assert.doesNotMatch(html,/20\.0|000000/);
  }
@@ -70,7 +70,7 @@ test('the client-measured RTT is stamped onto the local scoreboard row only',()=
  const server={config:{mode:'deathmatch'},actorId:1,actors:[{id:1,name:'B',ping:80}]};
  assert.equal(stampLocalPing(server,1,42),server,'a server-reported value wins');
  const html=renderToStaticMarkup(renderScoreboard(stamped));
- assert.match(html,/<span class="ping ping-good">42<\/span>/,'the measured ping renders in the PING column');
+ assert.match(html,/<span role="cell" class="ping ping-good">42<\/span>/,'the measured ping renders in the PING column');
 });
 
 test('scoreboard rows carry a null-safe wing/spec chip',()=>{
@@ -135,4 +135,42 @@ test('absent ping and null team are never coerced to healthy values', () => {
   assert.equal(groups.length, 1);
   assert.equal(groups[0].team, null, 'an unassigned actor is not grouped under RED');
   assert.equal(groups[0].label, 'UNASSIGNED');
+});
+
+test('the scoreboard is one ARIA table with headers, cells and a marked local row', () => {
+  const source = {config: {mode: 'teamdeathmatch'}, actorId: 1, teamScores: {0: 3, 1: 5}, actors: [
+    {id: 0, name: 'A', team: 0, frags: 2, deaths: 1, ping: 30},
+    {id: 1, name: 'B', team: 1, frags: 6, deaths: 0, ping: 42},
+  ]};
+  const html = renderToStaticMarkup(renderScoreboard(source));
+  assert.match(html, /role="table" aria-label="teamdeathmatch standings"/, 'the root is the table and keeps its label');
+  assert.doesNotMatch(html, /role="rowgroup"/, 'no rowgroup wrapper may break the direct-child .score-row CSS');
+  assert.match(html, /<div class="score-row labels" role="row">/, 'the header row keeps its class, order and row role');
+  assert.match(html, /<span role="columnheader">OPERATOR<\/span>/);
+  assert.match(html, /<strong role="columnheader">KILLS<\/strong>/);
+  assert.match(html, /<span role="columnheader">DEATHS<\/span>/);
+  assert.match(html, /<span role="columnheader">STREAK<\/span>/);
+  assert.match(html, /<span role="columnheader">PING<\/span>/);
+  assert.match(html, /<strong role="cell">6<\/strong>/, 'frag totals are data cells');
+  assert.match(html, /<span role="rowheader"><b>01<\/b><i><\/i>B<small aria-hidden="true">YOU<\/small>/, 'the operator cell is the row header and keeps its order');
+  assert.match(html, /<div class="score-row you team-1" role="row" aria-current="true">/, 'the local row keeps its classes and gains aria-current');
+  assert.match(html, /<small aria-hidden="true">YOU<\/small><span class="sr-only">YOU<\/span>/, 'the visible YOU yields to one screen-reader label');
+  assert.match(html, /<strong role="rowheader">BLUE<\/strong><span role="cell">5<\/span>/, 'the team heading is a row, not an orphan div');
+  assert.match(html, /style="--score-columns:4;--score-width:492px"/, 'the pinned inline geometry vars survive');
+  assert.match(html, /class="scoreboard mode-scoreboard mode-scoreboard-teamdeathmatch"/, 'the class list and order survive');
+
+  const history = renderToStaticMarkup(renderScoreboard(source, true));
+  assert.doesNotMatch(history, /aria-current/, 'a history table never claims a local row');
+  assert.doesNotMatch(history, /sr-only/, 'and never fabricates the YOU marker');
+});
+
+test('the free-for-all table keeps one group and the same table semantics', () => {
+  const html = renderToStaticMarkup(renderScoreboard({config: {mode: 'deathmatch'}, actorId: 0, actors: [
+    {id: 0, name: 'A', frags: 1, deaths: 2},
+    {id: 1, name: 'B', frags: 5, deaths: 0},
+  ]}));
+  assert.match(html, /role="table"/);
+  assert.match(html, /<div class="score-row you " role="row" aria-current="true">/, 'the local FFA row is marked');
+  assert.match(html, /<span role="rowheader">/, 'every row exposes its operator as the row header');
+  assert.match(html, /<strong role="cell">5<\/strong>/, 'FFA sort and frag rendering are untouched');
 });

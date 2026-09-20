@@ -65,6 +65,7 @@ export function MatchSummaryCard({summary}:any){
  if(!summary)return null;
  const resultLabel=summary.result==='win'?'VICTORY':summary.result==='draw'?'DRAW':summary.result==='loss'?'DEFEAT':'MATCH';
  const achievements=Array.isArray(summary.achievements)?summary.achievements:[];
+ const nextUnlocks=Array.isArray(summary.nextUnlocks)?summary.nextUnlocks:[];
  return <section className="match-summary" role="group" aria-label="Match summary">
   <div className="match-summary-head">
    <span className={`match-summary-result result-${summary.result||'none'}`}>{resultLabel}</span>
@@ -88,6 +89,10 @@ export function MatchSummaryCard({summary}:any){
   {achievements.length>0&&<div className="stack stack--tight">
    <span className="label">ACHIEVEMENTS UNLOCKED · {achievements.length}</span>
    <div className="achievement-strip" role="list">{achievements.map((a:any)=><div key={a.id} className="achievement-row unlocked" role="listitem"><span className="achievement-icon" aria-hidden="true">★</span><span className="card-main"><span className="card-name">{a.name}<small>{a.description}</small></span></span><span className="label">+{a.xp} XP</span></div>)}</div>
+  </div>}
+  {nextUnlocks.length>0&&<div className="stack stack--tight">
+   <span className="label">NEXT UNLOCKS</span>
+   <div className="next-unlock-list" role="list">{nextUnlocks.map((item:any)=><div key={item.id} className="next-unlock-row" role="listitem"><span className="chip chip--accent">LV {item.level}</span><span className="card-main"><span className="card-name">{item.name}<small>{String(item.kind||'').toUpperCase()}</small></span></span></div>)}</div>
   </div>}
  </section>;
 }

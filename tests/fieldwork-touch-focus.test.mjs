@@ -125,6 +125,26 @@ test('portrait and short-landscape HUD clears the reticle corridor without hidin
   assert.match(css, /\.cocs-board\{[^}]*scroll-padding-bottom:52px/, 'keyboard focus scrolling clears the board hint');
 });
 
+test('the theater retention/bookmark, unlock and help/compare controls keep 44px rows and no live regions', async () => {
+ const [ui, theater, settings, selection, results] = await Promise.all([
+  read('app/styles/ui.css'),
+  read('app/ui/screens/TheaterScreen.tsx'),
+  read('app/ui/screens/SettingsDialog.tsx'),
+  read('app/ui/screens/SelectionScreen.tsx'),
+  read('app/ui/screens/ResultModals.tsx'),
+ ]);
+ for (const rule of ['.theater-bookmarks .btn{min-height:44px}', '.theater-retention select{min-height:44px', '.weapon-compare-picks select{min-height:44px', '.help-filter input{min-height:44px']) {
+  assert.ok(ui.includes(rule), `${rule} keeps the touch floor`);
+ }
+ assert.match(theater, /role="group" aria-label="Replay bookmarks"/, 'bookmarks are a named, non-live group beside the highlights');
+ assert.match(theater, /role="group" aria-label="Replay retention"/, 'retention is a named, non-live group');
+ assert.match(settings, /id="help-filter-input"/, 'the help filter is a labelled input');
+ assert.match(settings, /OF \{sections\.length\} TOPICS/, 'the help count is static text');
+ for (const [name, source] of [['theater', theater], ['settings', settings], ['selection', selection], ['results', results]]) {
+  assert.doesNotMatch(source, /aria-live/, `${name} adds no live region`);
+ }
+});
+
 test('touch display settings keep the 44px floor and the capture-layer token', async () => {
   const css = await read('app/globals.css');
   assert.match(css, /\.touch-layer\{z-index:var\(--z-touch\)\}/, 'the pinned capture-layer token is byte-identical');

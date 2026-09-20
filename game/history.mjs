@@ -138,6 +138,40 @@ export function historyLeaderboard(history, {mode = null} = {}) {
     .sort((a, b) => (b.wins - a.wins) || (b.bestKills - a.bestKills) || (b.kd - a.kd) || (b.matches - a.matches) || a.mode.localeCompare(b.mode));
 }
 
+// Labels and ranking order of the per-mode boards `newPersonalBests` reports.
+export const PERSONAL_BEST_LABELS = Object.freeze({
+  kills: 'BEST KILLS',
+  kd: 'BEST K/D',
+  score: 'BEST SCORE',
+  time: 'FASTEST WIN',
+});
+
+// The records a completed result sets, judged against the stored board for its
+// own mode. Pure and side-effect free: the history is only read, the comparison
+// is strict (a tie never re-flags), zero stats never claim a record, and the
+// fastest-round record only considers wins with a recorded duration. `value` is
+// a display string and `raw` the comparable number. A result already on the
+// board ties itself, so an idempotent re-read reports nothing; call with the
+// pre-record history to surface a freshly finished match.
+export function newPersonalBests(history, entry) {
+  const next = normalizeHistoryEntry(entry);
+  const board = historyLeaderboard(history, {mode: next.mode})[0] ?? null;
+  const records = [];
+  if (next.kills > 0 && (!board || next.kills > board.bestKills)) {
+    records.push({id: 'kills', label: PERSONAL_BEST_LABELS.kills, value: String(next.kills), raw: next.kills});
+  }
+  if (next.kills > 0 && next.kd > 0 && (!board || next.kd > board.bestKd)) {
+    records.push({id: 'kd', label: PERSONAL_BEST_LABELS.kd, value: String(next.kd), raw: next.kd});
+  }
+  if (next.score > 0 && (!board || next.score > board.bestScore)) {
+    records.push({id: 'score', label: PERSONAL_BEST_LABELS.score, value: String(next.score), raw: next.score});
+  }
+  if (next.result === 'win' && next.duration > 0 && (board?.bestTime == null || next.duration < board.bestTime)) {
+    records.push({id: 'time', label: PERSONAL_BEST_LABELS.time, value: `${Math.round(next.duration)}s`, raw: next.duration});
+  }
+  return records;
+}
+
 export function historyTotals(history) {
   const entries = normalizeHistory(history).entries;
   const totals = {matches: entries.length, wins: 0, losses: 0, draws: 0, kills: 0, deaths: 0, bestKills: 0, bestKd: 0, minutes: 0};

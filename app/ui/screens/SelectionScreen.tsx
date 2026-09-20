@@ -34,7 +34,7 @@ function planChips(plan:any,map:any,{reset=false}:any={}){
 }
 
 export function SelectionScreen({ui}:ScreenProps){
-  const {entered,showcaseLive,character,chooseCharacter,CHARACTERS=[],selected,harness,setHarness,HARNESSES=[],power,powerIcon,config,start,startSpectate,quickStart,setSetupOpen,setSingleOpen,changeMode,connectNet,openBrowser,netConnected,profile,demos=[],previewRef,headActions,backToDemo,notice,challenges=[],presets=[],loadPreset,deletePreset,openSettings}=ui;
+  const {entered,showcaseLive,character,chooseCharacter,CHARACTERS=[],selected,harness,setHarness,HARNESSES=[],power,powerIcon,config,start,startSpectate,quickStart,setSetupOpen,setSingleOpen,changeMode,connectNet,openBrowser,netConnected,profile,demos=[],previewRef,headActions,backToDemo,notice,challenges=[],presets=[],loadPreset,deletePreset,openSettings,nextUnlocks=[]}=ui;
   const [previewTab,setPreviewTab]=useState('model');
   const [moreOpen,setMoreOpen]=useState(false);
   const [latticeIntro,setLatticeIntro]=useState<string|null>(null);
@@ -212,6 +212,12 @@ export function SelectionScreen({ui}:ScreenProps){
        <button type="button" className="text-button" aria-label={`Load preset ${p.name}`} onClick={()=>loadPreset?.(p)}>{p.name}</button>
        <button type="button" className="text-button" aria-label={`Delete preset ${p.name}`} onClick={()=>deletePreset?.(p.id)}>×</button>
       </span>)}</div>:<p className="field-note">No presets yet. Save your full loadout — operator, harness, arena, rules, gear, mods, finish and reticle — from MATCH SETUP.</p>}
+     </Panel>
+     <Panel label="NEXT UNLOCKS" meta={nextUnlocks.length?`${nextUnlocks.length} UPCOMING`:'ALL CLAIMED'} actions={<Btn size="sm" variant="ghost" onClick={()=>changeMode('progression')}>TRACK</Btn>}>
+      {nextUnlocks.length?<ul className="next-unlock-list">{nextUnlocks.map((item:any)=><li key={item.id} className="next-unlock-row">
+       <span className="chip chip--accent">LV {item.level}</span>
+       <span className="card-main"><span className="card-name">{item.name}<small>{String(item.kind||'').toUpperCase()}{item.description?` · ${item.description}`:''}</small></span></span>
+      </li>)}</ul>:<p className="field-note">Every unlock is claimed. Prestige ranks keep earning XP.</p>}
      </Panel>
      <Panel label="DAILY CHALLENGES" meta={challenges.length?`${challenges.filter((c:any)=>c.done).length} / ${challenges.length} COMPLETE`:'ROTATING'} actions={<Btn size="sm" variant="ghost" onClick={()=>changeMode('progression')}>TRACK</Btn>}>
       {challenges.length?<div className="stack stack--tight">{challenges.map((c:any)=><div key={c.id} className="stack stack--tight challenge-row">

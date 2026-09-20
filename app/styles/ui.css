@@ -910,3 +910,45 @@
 .vote-rows{display:grid;gap:8px}
 .vote-row{display:grid;gap:5px;padding:8px 10px;border:1px solid var(--ui-line);border-radius:var(--radius-md);background:rgba(10,22,26,.45)}
 .vote-row .meter{min-height:8px}
+
+/* ==========================================================================
+   v8.6 theater retention / bookmarks / unlock discovery / help filter /
+   weapon comparison. Additive only: every new control keeps a 44 px touch row
+   and nothing here introduces motion, so there are no new reduced-motion twins
+   to gate.
+   ========================================================================== */
+.theater-retention{align-items:flex-end;gap:var(--ui-gap-3);flex-wrap:wrap}
+.theater-retention .config-field{flex:0 1 220px;min-width:180px;margin-bottom:0;gap:6px}
+.theater-retention select{min-height:44px;width:100%;padding:0 12px;border:1px solid var(--ui-line);border-radius:var(--radius-md);background:rgba(6,14,18,.7);color:var(--text);font-size:15px}
+.theater-retention select:hover{border-color:var(--accent-soft)}
+.theater-retention select:focus-visible{outline:2px solid var(--accent);outline-offset:1px}
+.theater-bookmarks{align-items:center;gap:6px}
+.theater-bookmarks .btn{min-height:44px}
+.bookmark-pair{display:inline-flex;align-items:center;gap:2px}
+.bookmark-pair .btn:first-child{padding-right:8px}
+
+.next-unlock-list{display:grid;gap:6px;margin:0;padding:0;list-style:none}
+.next-unlock-row{display:flex;align-items:center;gap:10px;min-width:0;padding:8px 10px;border:1px solid var(--ui-line);border-radius:var(--radius-md);background:rgba(10,22,26,.45)}
+.next-unlock-row .card-main{min-width:0}
+.next-unlock-row .card-name small{color:var(--text-mute);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+
+.help-filter{max-width:420px;margin-bottom:0}
+.help-filter input{min-height:44px;width:100%;padding:0 12px;border:1px solid var(--ui-line);border-radius:var(--radius-md);background:rgba(6,14,18,.7);color:var(--text);font-size:16px}
+.help-filter input:hover{border-color:var(--accent-soft)}
+.help-filter input:focus-visible{outline:2px solid var(--accent);outline-offset:1px}
+
+.weapon-compare-picks{align-items:flex-end;flex-wrap:wrap}
+.weapon-compare-picks .config-field{flex:1 1 220px;min-width:180px;margin-bottom:0;gap:6px}
+.weapon-compare-picks select{min-height:44px;width:100%;padding:0 12px;border:1px solid var(--ui-line);border-radius:var(--radius-md);background:rgba(6,14,18,.7);color:var(--text);font-size:15px}
+.weapon-compare-picks select:hover{border-color:var(--accent-soft)}
+.weapon-compare-picks select:focus-visible{outline:2px solid var(--accent);outline-offset:1px}
+.weapon-compare{width:100%;margin-top:12px;border-collapse:collapse;font-size:13px}
+.weapon-compare caption{text-align:left}
+.weapon-compare th,.weapon-compare td{padding:9px 10px;border:1px solid var(--ui-line);text-align:left;vertical-align:top}
+.weapon-compare thead th{font:11px var(--font-mono);letter-spacing:.08em;text-transform:uppercase;color:var(--accent);background:rgba(10,22,26,.6)}
+.weapon-compare tbody th{font:11px var(--font-mono);letter-spacing:.08em;text-transform:uppercase;color:var(--text-mute);white-space:nowrap}
+.weapon-compare td{font-variant-numeric:tabular-nums;color:var(--text-dim)}
+
+@media (max-width:720px){
+ .theater-retention .config-field{flex:1 1 100%}
+}

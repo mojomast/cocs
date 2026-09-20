@@ -60,7 +60,7 @@ export function OperationsDirectorHud({director}: {director: any}) {
         {director.command ? `THREADS ${director.command.threads.used}/${director.command.threads.cap} · SLICE ${director.command.slicePerPlayer}` : ''}
       </p>}
       {tierCopy && <p className="director-readout__copy" data-tier={director.tier}><b>{director.tier} · {tierCopy.label}</b> {tierCopy.copy} {modifiers.length > 0 && <small>{modifiers.join(' · ')}</small>}</p>}
-      {bonus.length > 0 && <p className="director-readout__bonus" aria-live="polite">
+      {bonus.length > 0 && <p className="director-readout__bonus" role="group" aria-label={`Bonus progress: ${bonus.map((entry: any) => `${entry.label} ${whole(entry.progress)} of ${whole(entry.target)}`).join(', ')}`}>
         {bonus.map((entry: any) => `BONUS ${entry.label} ${whole(entry.progress)}/${whole(entry.target)}`).join(' · ')}
       </p>}
       {intermission && intermission.open && <div className="director-readout__spend" role="group" aria-label={`Intermission spend window. ${countdown(intermission.secondsRemaining)} seconds, ${formatResource(intermission.budget)} FLUX available.`}>

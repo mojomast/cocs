@@ -5,7 +5,8 @@ import {GAME_MODES,DIFFICULTIES,normalizeConfig,DEFAULT_CONFIG} from './config.m
 import {CAMPAIGN_MISSIONS,missionFor} from './campaign-data.mjs';
 import {campaignLaunchCheckpoint,defaultCampaignProgress,setCheckpoint} from './campaign-progress.mjs';
 import {ENEMY_TYPES,ENEMY_SPEED_VARIANCE,enemyById,applyEnemyFields,enemyBehavior} from './enemy-types.mjs';
-import {initializeSinglePlayer,hordeWaveSize,hordeWaveComposition,hordeWaveModifier,hordeWavePlan,HORDE_WAVE_MODIFIERS,HORDE_UPGRADES,HORDE_TYPES,hordeUpgradeChoices,resupplyHorde,offerHordeUpgrade,selectHordeUpgrade,resumeSinglePlayer,applyCampaignCheckpoint,isSinglePlayerMode,singlePlayerSnapshot,spawnGroup,SINGLEPLAYER_MODES,hordeWaveScore,hordeBossWave,hordeWaveScoreTotal,HORDE_BOSS_BONUS} from './singleplayer.mjs';
+import {initializeSinglePlayer,hordeWaveSize,hordeWaveComposition,hordeWaveModifier,hordeWavePlan,HORDE_WAVE_MODIFIERS,HORDE_UPGRADES,HORDE_ONLY_UPGRADES,HORDE_VITALITY_SCALE,HORDE_COOLANT_SCALE,HORDE_SENTRY_SECONDS,HORDE_TYPES,hordeUpgradeChoices,resupplyHorde,offerHordeUpgrade,selectHordeUpgrade,resumeSinglePlayer,applyCampaignCheckpoint,isSinglePlayerMode,singlePlayerSnapshot,spawnGroup,SINGLEPLAYER_MODES,hordeWaveScore,hordeBossWave,hordeWaveScoreTotal,HORDE_BOSS_BONUS} from './singleplayer.mjs';
+import {POWERUPS,WEAPONS} from './data.mjs';
 import {HORDE_XP_CAP,hordeMatchXp} from './progression.mjs';
 
 const make=(mode,options={})=>new Match('chatgpt','openclaw',()=>.5,options.mapId||'convoy-line',{mode,botCount:3,humanCount:1,timeLimit:300,...options});
@@ -280,6 +281,51 @@ test('clearing the third horde wave offers an upgrade during intermission',()=>{
  assert.ok(match.modeState.wave>=3,'reached the upgrade wave');
  assert.ok(match.modeState.pendingUpgrade,'a choose-1-of-3 upgrade is offered');
  assert.equal(match.snapshot().singleplayer.upgrades.length,3);
+});
+
+test('horde-only upgrades append after the powerups and re-apply idempotently',()=>{
+ const powerupIds=POWERUPS.map(powerup=>powerup.id);
+ assert.equal(HORDE_ONLY_UPGRADES.length,4);
+ assert.deepEqual(HORDE_UPGRADES.slice(0,powerupIds.length).map(upgrade=>upgrade.id),powerupIds,'powerups keep the head of the offer table');
+ const hordeOnly=HORDE_ONLY_UPGRADES.map(upgrade=>upgrade.id);
+ assert.ok(hordeOnly.every(id=>!powerupIds.includes(id)),'horde-only ids stay distinct');
+ // Later offers rotate into the new rows while offer 0 is untouched.
+ assert.deepEqual(hordeUpgradeChoices(0),powerupIds.slice(0,3));
+ assert.ok(hordeUpgradeChoices(powerupIds.length-1).some(id=>hordeOnly.includes(id)),'later offers reach the horde-only rows');
+ const match=make('horde',{fragLimit:10,mapId:'colosseum'});
+ const state=match.modeState,player=match.actors[0];
+ const base=player.maxHealth;
+ state.upgrades=[...state.upgrades,...hordeOnly];
+ resupplyHorde(match,state);
+ const first={maxHealth:player.maxHealth,weapon:player.weapon,coolant:player.cooldownMultiplier,sentries:match.deployables.length};
+ assert.equal(player.maxHealth,Math.round(base*HORDE_VITALITY_SCALE),'vitality overcharges the frame');
+ assert.equal(player.weapon,WEAPONS.length-1,'promotion takes the best allowed tier');
+ assert.ok(player.ammo[player.weapon]>0,'the promoted weapon is loaded');
+ assert.ok(player.cooldownMultiplier<=HORDE_COOLANT_SCALE+1e-9,'coolant cuts the cooldown');
+ assert.equal(match.deployables.length,1,'one horde sentry drops on resupply');
+ assert.equal(match.deployables[0].life,HORDE_SENTRY_SECONDS);
+ // A second full pass converges on the same absolute state.
+ resupplyHorde(match,state);
+ assert.deepEqual({maxHealth:player.maxHealth,weapon:player.weapon,coolant:player.cooldownMultiplier,sentries:match.deployables.length},first,'re-applying never compounds');
+ assert.equal(match.deployables[0].life,HORDE_SENTRY_SECONDS,'the sentry is refreshed, not stacked');
+});
+
+test('horde run upgrades re-issue after a mid-wave death without compounding',()=>{
+ const match=make('horde',{fragLimit:10,mapId:'colosseum'});
+ const state=match.modeState,player=match.actors[0];
+ state.upgrades=['vitality','coolant','promotion'];
+ resupplyHorde(match,state);
+ const maxHealth=player.maxHealth,weapon=player.weapon,lives=state.lives;
+ assert.ok(maxHealth>100,'vitality raised the frame before the death');
+ player.protection=0;
+ match.damage(player,1e6,null);
+ assert.equal(player.health,0);
+ for(let i=0;i<300&&player.health<=0;i++)match.step(1/60,{inputs:{}});
+ assert.ok(player.health>0,'the run continues after a respawn');
+ assert.ok(state.lives<lives,'the death cost a life');
+ assert.equal(player.maxHealth,maxHealth,'vitality re-issued at the same absolute value');
+ assert.equal(player.weapon,weapon,'promotion re-issued');
+ assert.ok(player.cooldownMultiplier<=HORDE_COOLANT_SCALE+1e-9,'coolant re-issued');
 });
 
 test('horde composition fields the new archetypes without breaking wave one',()=>{
