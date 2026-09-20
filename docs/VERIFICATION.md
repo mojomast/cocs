@@ -30,6 +30,16 @@ browser matrix re-ran against production at **5/5 viewports** with a clean tree
 (`commitDirty:false`), zero console/page errors, and the usual hit-testing,
 reticle-corridor and overflow assertions. No game-server restart.
 
+**Production update — per-target stacks and the graphics-edge pass (2026-09-20).**
+Commit `9928d2b` was fast-forwarded to `improvement/phase2-audio-visual` and
+deployed web-only. The verification gate again saw one transient `502` during
+the restart and passed on the retry: footer `v8.6 · PRISM`, all 13 linked
+assets, and the compatible identity pair (web `9928d2b` `v8.6-9928d2b`, game
+server `b9c7a0a` `v8.5-b9c7a0a`, protocol 3). The tracked browser matrix re-ran
+against production at **5/5 viewports** with a clean tree
+(`commitDirty:false`), zero console/page errors, and the usual hit-testing,
+reticle-corridor and overflow assertions. No game-server restart.
+
 **Scope (web presentation, data and documentation, 2026-09-20).** An opt-in
 developer graphics preview, a global hotkey, a randomizer and a clipboard recipe
 loop, 23 stackable effects (three built from baked Moth assets with selectable
