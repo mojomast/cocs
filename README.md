@@ -441,12 +441,22 @@ Recent releases. The full history lives in
 [docs/CHANGELOG.md](docs/CHANGELOG.md).
 
 ### v8.6 · PRISM — 2026-09-20
-- **Graphics & settings → Graphics lab · Preview:** twelve independent shader
-  layers and six starting recipes for exploring a distinctive art direction.
+- **Graphics & settings → Graphics lab · Preview:** 23 independent shader
+  layers and nine starting recipes for exploring a distinctive art direction.
+- Global hotkey on the backquote key: tap to toggle the lab from anywhere,
+  Shift plus the same key opens the drawer. SURPRISE ME rolls a valid random
+  mix, COPY RECIPE copies the exact JSON, and PASTE A RECIPE JSON applies one
+  back for tuning.
 - Live drawer, individual controls, palettes, overall mix, A/B bypass, split
   comparison, local persistence, JSON export, and reset. Off by default.
+- Moth material slice: deterministic tile-safe surface variants from archived
+  raw bakes, replay-stable per-surface wear, structure-preserving grime and
+  roughness on grid surfaces, and explicit texture sampling with a retro option.
+- Three of the lab layers are built from baked Moth assets (grain, signal
+  glyphs, spectral coat); they no-op silently when assets are unavailable.
 - One combined WebGL shader pass; the HUD and first-person weapon remain crisp.
-- [Graphics lab guide](docs/GRAPHICS-LAB.md) and an extensive
+- [Graphics lab guide](docs/GRAPHICS-LAB.md), the implemented summary in
+  [Moth pipeline docs](docs/MOTH.md), and the extensive
   [Moth material-variety plan](docs/design/MOTH-GRAPHICS-PLAN.md).
 - Web-only preview feature; no game-server restart or protocol change required.
 

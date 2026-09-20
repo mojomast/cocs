@@ -7,7 +7,9 @@ import {chromium} from 'playwright';
 const base=process.env.BROWSER_BASE_URL||'http://127.0.0.1:4173';
 const out='artifacts/graphics-lab';await fs.mkdir(out,{recursive:true});
 const browser=await chromium.launch({headless:true});
-const page=await browser.newPage({viewport:{width:1366,height:768},hasTouch:true});
+const context=await browser.newContext({viewport:{width:1366,height:768},hasTouch:true});
+await context.grantPermissions(['clipboard-read','clipboard-write'],{origin:base});
+const page=await context.newPage();
 const errors=[];
 page.on('pageerror',e=>errors.push(e.message));
 page.on('console',e=>{if(e.type()==='error'&&!e.text().includes('favicon.svg'))errors.push(e.text());});
@@ -40,15 +42,58 @@ try{
   return {deltas,zeroMixDifference:difference(zero,original),leftDifference,programCount};
  });
  for(const [name,delta] of Object.entries(gpu.deltas))assert.ok(delta>100,`${name} changes rendered pixels`);
+ // The app configured the baked Moth registry, so the three accents must bind
+ // their textures and move pixels rather than silently no-op.
+ for(const id of ['mothgrain','mothsignal','mothcoat'])assert.ok(gpu.deltas[id]>100,`${id} uses the baked Moth assets`);
  assert.equal(gpu.zeroMixDifference,0);assert.equal(gpu.leftDifference,0);assert.equal(gpu.programCount,1);
  await page.getByRole('button',{name:'Enter the arena',exact:true}).click();
  await page.getByRole('button',{name:'Graphics & settings',exact:true}).click();
  await page.getByRole('tab',{name:'Graphics lab · Preview',exact:true}).click();
- for(const name of ['Circuit Print','Neon Cathedral','Pocket Arena','Field Sketch','Ghost Signal','Ember Press']){
+ // Includes Moth Print, which stacks the three baked Moth accents.
+ for(const name of ['Circuit Print','Neon Cathedral','Pocket Arena','Field Sketch','Ghost Signal','Ember Press','Blueprint','Thermal','Moth Print']){
   await page.getByRole('button',{name,exact:true}).click();
   await page.waitForTimeout(250);
   await page.screenshot({path:`${out}/${name.toLowerCase().replaceAll(' ','-')}.png`});
  }
+ // Randomize: every roll is a valid, active, persisted mix.
+ await page.getByRole('button',{name:/SURPRISE ME/}).click();
+ await page.waitForTimeout(200);
+ const rolled=await page.evaluate(()=>JSON.parse(localStorage.getItem('token-arena-graphics-lab-v1')));
+ assert.equal(rolled.enabled,true,'roll enables the lab');
+ assert.ok(Object.values(rolled.effects).filter(e=>e.enabled).length>=2,'roll stacks at least two layers');
+ assert.match(await page.locator('[data-graphics-lab] [role="status"]').innerText(),/Rolled/);
+ // Copy recipe: the clipboard payload parses and matches the live state.
+ await page.getByRole('button',{name:'COPY RECIPE',exact:true}).click();
+ await page.waitForTimeout(150);
+ const clip=await page.evaluate(()=>navigator.clipboard.readText());
+ const copied=JSON.parse(clip);
+ const live=await page.evaluate(()=>JSON.parse(localStorage.getItem('token-arena-graphics-lab-v1')));
+ assert.equal(copied.version,1,'copied recipe carries the schema version');
+ assert.deepEqual(copied.effects,live.effects,'copied recipe matches the live layers');
+ assert.equal(copied.bypass,false,'copied recipe omits transient bypass');
+ // Paste a recipe back in and apply it.
+ await page.getByText('Paste a recipe JSON').click();
+ await page.getByLabel('Recipe JSON').fill(JSON.stringify({version:1,enabled:true,palette:'sodium',mix:.9,effects:{pixel:{enabled:true,value:8},temperature:{enabled:true,value:.6}}}));
+ await page.getByRole('button',{name:'APPLY JSON',exact:true}).click();
+ await page.waitForTimeout(200);
+ const applied=await page.evaluate(()=>JSON.parse(localStorage.getItem('token-arena-graphics-lab-v1')));
+ assert.equal(applied.palette,'sodium','applied recipe changes the palette');
+ assert.equal(applied.effects.pixel.enabled,true,'applied recipe enables its layers');
+ assert.equal(applied.effects.temperature.value,.6,'applied recipe keeps its exact values');
+ // Hotkeys: ` toggles from anywhere; Shift+` opens this drawer.
+ await page.evaluate(()=>document.activeElement?.blur?.());
+ await page.keyboard.press('Backquote');
+ await page.waitForTimeout(150);
+ assert.equal((await page.evaluate(()=>JSON.parse(localStorage.getItem('token-arena-graphics-lab-v1')).enabled)),false,'` toggles the lab off');
+ assert.equal(await page.locator('.graphics-hotkey-notice').count(),1,'the toggle announces itself');
+ await page.keyboard.press('Backquote');
+ await page.waitForTimeout(150);
+ assert.equal((await page.evaluate(()=>JSON.parse(localStorage.getItem('token-arena-graphics-lab-v1')).enabled)),true,'` toggles it back on');
+ await page.keyboard.press('Shift+Backquote');
+ assert.equal(await page.locator('[data-graphics-lab]').count(),0,'Shift+` closes the drawer');
+ await page.keyboard.press('Shift+Backquote');
+ assert.equal(await page.locator('[data-graphics-lab]').count(),1,'Shift+` reopens on the lab tab');
+ assert.equal(await page.getByRole('tab',{name:'Graphics lab · Preview',exact:true}).getAttribute('aria-selected'),'true');
  const cb=page.getByRole('checkbox',{name:'Crosshatch',exact:false});await cb.check();
  await page.getByRole('checkbox',{name:'Phosphor screen',exact:false}).check();
  assert.equal(await cb.isChecked(),true,'layer toggles stack');

@@ -58,6 +58,7 @@ import {demoBroadcast} from '../game/broadcast.mjs';
 import {roomFromLocation,spectateFromLocation} from '../game/invite.mjs';
 import {CHANGELOG,RELEASE_VERSION,RELEASE_CODENAME,FULL_CHANGELOG_URL} from '../game/changelog.mjs';
 import {useGraphicsLab} from './ui/useGraphicsLab';
+import {GRAPHICS_LAB_HOTKEY,describeGraphicsLab} from '../game/graphics-lab.mjs';
 import {DemoBroadcast} from './ui/DemoBroadcast';
 import {DemoControls} from './ui/DemoControls';
 import {DemoOptions} from './ui/DemoOptions';
@@ -140,6 +141,13 @@ export default function Home(){
   const [history,setHistory]=useState<any>(()=>emptyHistory());
   const [settingsTab,setSettingsTab]=useState('game');
   const graphicsLab=useGraphicsLab(runtime,ready);
+  // Hotkey access: the once-registered key handlers read the live lab state from
+  // this ref, and a transient banner confirms every toggle made in-world.
+  const graphicsLabRef=useRef<ReturnType<typeof useGraphicsLab>|null>(null),graphicsNoticeTimer=useRef<ReturnType<typeof setTimeout>|null>(null);
+  const [graphicsNotice,setGraphicsNotice]=useState('');
+  useEffect(()=>{graphicsLabRef.current=graphicsLab;},[graphicsLab]);
+  useEffect(()=>()=>{if(graphicsNoticeTimer.current)clearTimeout(graphicsNoticeTimer.current);},[]);
+  const showGraphicsNotice=(text:string)=>{setGraphicsNotice(text);if(graphicsNoticeTimer.current)clearTimeout(graphicsNoticeTimer.current);graphicsNoticeTimer.current=setTimeout(()=>setGraphicsNotice(''),1900);};
   const [presets,setPresets]=useState<any[]>([]);
   const [netInfo,setNetInfo]=useState<any>({connected:false,peerId:null,hostId:null,isHost:false,started:false,spectate:false,actorId:null,roundOver:false,roomId:null});
   // Ranked V2 online state: the server's ladder projection from the last lobby
@@ -825,6 +833,24 @@ pauseRender:(on:boolean)=>{const previous=r.benchmarking===true;r.benchmarking=o
    // covered dialog never steals focus from the layer above it.
    const closeSetup=()=>{setSetupOpen(false);};
   useEffect(()=>{const onKey=(e:KeyboardEvent)=>{const host=settings?settingsRef.current:onboarding!==null?onboardingRef.current:singleOpen?singleRef.current:setupOpen||mode==='paused'||mode==='results'?modalRef.current:null;if((onboarding!==null||settings||setupOpen||singleOpen||mode==='paused'||mode==='results')&&e.key==='Tab'&&host){const focusable=[...host.querySelectorAll<HTMLElement>('button:not(:disabled),input,select,[tabindex]:not([tabindex="-1"])')];if(focusable.length){const next=e.shiftKey?focusable[focusable.length-1]:focusable[0];if(e.shiftKey?document.activeElement===focusable[0]:document.activeElement===focusable[focusable.length-1]){e.preventDefault();next.focus();}}return;}if(e.key!=='Escape')return;if(settings){e.preventDefault();setSettings(false);return;}if(mode==='paused'){e.preventDefault();resumeRef.current();return;}if(singleOpen){e.preventDefault();setSingleOpen(false);return;}if(onboarding!==null){e.preventDefault();finishOnboarding();return;}if(setupOpen){e.preventDefault();closeSetup();return;}if(mode==='selection'&&enteredRef.current){e.preventDefault();exitToTitle();return;}if(mode==='browse'||mode==='progression'||mode==='changelog'){e.preventDefault();changeMode('selection');return;}if(mode==='theater'&&!demoPlaying){e.preventDefault();changeMode('selection');return;}if(mode==='lobby'){e.preventDefault();changeMode('selection');}};window.addEventListener('keydown',onKey);return()=>window.removeEventListener('keydown',onKey);},[setupOpen,singleOpen,onboarding,settings,mode,demoPlaying]);
+  // Graphics lab hotkeys, live from every surface. A bare ` toggles the lab on
+  // and off in place (the fast A/B during play); Shift+` opens the developer
+  // drawer. Editable fields, chat and the command board keep their own keys.
+  useEffect(()=>{
+   const onKey=(e:KeyboardEvent)=>{
+    if(e.code!==GRAPHICS_LAB_HOTKEY||e.repeat||e.metaKey||e.ctrlKey||e.altKey)return;
+    if(isEditable(e.target)||isEditable(document.activeElement)||chatOpenRef.current)return;
+    if(cocsBoardControlRef.current?.isOpen())return;
+    e.preventDefault();
+    if(e.shiftKey){if(settings)setSettings(false);else openSettings('graphics-lab',canvas.current);return;}
+    const lab=graphicsLabRef.current;if(!lab)return;
+    if(lab.supported===false){showGraphicsNotice('Graphics lab needs WebGL');return;}
+    const next={...lab.value,enabled:!lab.value.enabled};
+    lab.update(next);
+    showGraphicsNotice(describeGraphicsLab(next));
+   };
+   window.addEventListener('keydown',onKey);return()=>window.removeEventListener('keydown',onKey);
+  },[settings]);
   const saveSettings=(s:number,m:boolean,show:boolean=showcase,legacy:boolean=legacyMaps)=>{setSensitivity(s);setMuted(m);setShowcase(show);setLegacyMaps(legacy);if(runtime.current){runtime.current.lookSensitivity=s;runtime.current.audio.setMuted(m);runtime.current.showcaseEnabled=show;runtime.current.legacyArenas=legacy;}try{const prefs=JSON.parse(localStorage.getItem('token-arena-settings')||'{}');localStorage.setItem('token-arena-settings',JSON.stringify({...prefs,sensitivity:s,muted:m,showcase:show,legacyArenas:legacy,touch:touchControls,voiceVolume:voicePrefs.current.volume,voiceThreshold:voicePrefs.current.threshold}));}catch{}};
   const requestLock=()=>{const r=runtime.current;if(!r||r.lockPending||document.pointerLockElement===canvas.current)return;canvas.current?.focus({preventScroll:true});const failed=()=>{r.lockPending=false;if(modeRef.current==='playing')setPointerHint(true);};if(!canvas.current?.requestPointerLock){failed();return;}r.lockPending=true;try{const result=canvas.current.requestPointerLock();result?.catch(failed);}catch{failed();}};
   requestLockRef.current=requestLock;
@@ -1240,6 +1266,7 @@ const cocsCommand=cocsView?{...cocsView,boardView:mergedBoard??cocsView.boardVie
   {mode==='theater'&&<TheaterScreen ui={ui}/>}
   {mode==='lobby'&&<LobbyScreen ui={ui}/>}
    {mode==='playing'&&runtime.current?.net?.connected&&<div className={`game-voice ${voiceOpen||voiceState.status==='requesting'||voiceState.error?'voice-open':''}`}>{voiceOpen||voiceState.status==='requesting'||voiceState.error?<div className="voice-docked">{voicePanel}<button className="voice-minimize" onClick={()=>setVoiceOpen(false)} aria-label="Minimize voice panel"><ChevronDown size={14}/></button></div>:<button className={`voice-pill ${voiceState.talking?'talking':''} ${voiceState.enabled?'enabled':''}`} onClick={()=>setVoiceOpen(true)} aria-label="Voice controls"><Mic size={13}/><span>{voiceState.talking?'TRANSMITTING':voiceState.enabled?`VOICE · ${voiceState.status}`:'VOICE · MIC OFF'}</span></button>}</div>}
+    {graphicsNotice&&<div className="graphics-hotkey-notice" role="status"><Terminal size={14}/><span>{graphicsNotice}</span></div>}
     {unlock&&<div className="unlock-toast" role="status"><Sparkles size={16}/><div><strong>{unlock.kind==='gear'?'GEAR UNLOCKED':unlock.kind==='attachment'?'WEAPON MOD UNLOCKED':unlock.kind==='finish'?'FINISH UNLOCKED':unlock.kind==='crosshair'?'RETICLE UNLOCKED':'UNLOCKED'}</strong><span>{unlock.name}</span></div>{unlock.gained?<em>+{unlock.gained} XP</em>:null}{unlockQueue.length>1?<em>+{unlockQueue.length-1} MORE</em>:null}<button className="text-button" onClick={()=>setUnlockQueue(q=>q.slice(1))} aria-label="Dismiss unlock">×</button></div>}
     {achievement&&<div className="achievement-toast" role="status" aria-label={`Achievement unlocked: ${achievement.name}`}><Trophy size={16}/><div><strong>ACHIEVEMENT UNLOCKED</strong><span>{achievement.name}</span><small>{achievement.description}</small></div>{achievement.xp?<em>+{achievement.xp} XP</em>:null}{achievementQueue.length>1?<em>+{achievementQueue.length-1} MORE</em>:null}<button className="text-button" onClick={dismissAchievement} aria-label="Dismiss achievement">×</button></div>}
   {entered&&mode==='selection'&&<OnboardingModal ui={ui}/>}

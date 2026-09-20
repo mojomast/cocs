@@ -1101,11 +1101,11 @@ export class ArenaView{
     const palette=[floor,wall,trim,glow],detailBatches=new Map(),indexedUnit=new T.BoxGeometry(1,1,1),unit=indexedUnit.toNonIndexed();indexedUnit.dispose();
     const arenaSeed=arenaSeedOf(arena),textured=this.renderer?.isSoftware!==true&&typeof document!=='undefined';
     clearSurfaceTextures();
-    const applyTextures=(mat,kind,rx,ry)=>this._mothSurface(mat,kind,rx,ry,arenaSeed);
+    const applyTextures=(mat,kind,rx,ry,key)=>this._mothSurface(mat,kind,rx,ry,arenaSeed,key);
     const variantBuckets={block:new Map(),detail:new Map(),terrain:new Map(),terrainWall:new Map()};
-    const variant=(scope,base,{map=false,kind='rock'}={})=>{const bucket=variantBuckets[scope];let clone=bucket.get(base);if(!clone){clone=base.clone();clone.vertexColors=true;clone.map=null;clone.normalMap=null;clone.roughnessMap=null;if(map)applyTextures(clone,kind,1,1);bucket.set(base,clone);palette.push(clone);}return clone;};
+    const variant=(scope,base,{map=false,kind='rock'}={})=>{const bucket=variantBuckets[scope];let clone=bucket.get(base);if(!clone){clone=base.clone();clone.vertexColors=true;clone.map=null;clone.normalMap=null;clone.roughnessMap=null;if(map)applyTextures(clone,kind,1,1,`${scope}:${kind}`);bucket.set(base,clone);palette.push(clone);}return clone;};
     const floorKind=arena.id==='neon-vertical'||arena.id==='crosswire'?'holographic_grid':(arena.id==='foundry'?'diamond_plate':(['ironfall-megastructure','substation','citadel','derelict-station'].includes(arena.id)?'metal_grating':(['launchpad','catwalk-breach'].includes(arena.id)?'carbon_fiber':'weathered_concrete')));
-    applyTextures(floor,floorKind,Math.max(2,Math.round(width/4)),Math.max(2,Math.round(depth/4)));
+    applyTextures(floor,floorKind,Math.max(2,Math.round(width/4)),Math.max(2,Math.round(depth/4)),`floor:${floorKind}`);
     // Moth Quantum signature: on the quantum labyrinth, build an iridescent
     // landmark from the entanglement LUTs and an animated rift from the baked
     // effect frames. The baked sky atmosphere is wired onto the standard sky
@@ -1161,7 +1161,7 @@ export class ArenaView{
            const strata=[];for(const {vertices} of [...terrainWallTriangles(arena.terrain),...terrainTriangles(arena.terrain).filter(tri=>tri.walkable===false)]){const low=Math.min(...vertices.map(p=>p[1])),high=Math.max(...vertices.map(p=>p[1]));for(let y=Math.ceil(low/1.6)*1.6;y<high;y+=1.6){const hits=[];for(let i=0;i<3;i++){const a=vertices[i],b=vertices[(i+1)%3];if((a[1]<=y&&b[1]>y)||(b[1]<=y&&a[1]>y)){const t=(y-a[1])/(b[1]-a[1]);hits.push([a[0]+t*(b[0]-a[0]),y,a[2]+t*(b[2]-a[2])]);}}if(hits.length===2)strata.push(...hits[0],...hits[1]);}}
      if(strata.length){const geometry=new T.BufferGeometry();geometry.setAttribute('position',new T.Float32BufferAttribute(strata,3));const lines=new T.LineSegments(geometry,new T.LineBasicMaterial({color:trimColor,transparent:true,opacity:.45,depthWrite:false}));lines.userData.strata=true;world.add(lines);terrainMaterials.cliff.polygonOffset=true;terrainMaterials.cliff.polygonOffsetFactor=1;terrainMaterials.cliff.polygonOffsetUnits=1;}
     }
-  const rockMat=applyTextures(material('#827d67',.02,.98),'rock',2,2),teamMats=TEAM_PALETTE.map(team=>material(team.color,.15,.8));
+  const rockMat=applyTextures(material('#827d67',.02,.98),'rock',2,2,'rock:ground'),teamMats=TEAM_PALETTE.map(team=>material(team.color,.15,.8));
   palette.push(rockMat,...teamMats);
   const raceMats=arena.race?{'race-rail':material('#e78b30',.08,.78),'race-infield':material('#203b30',.02,.96),'race-apron':material('#171e28',.02,.94),'soccer-wall':material('#2b3550',.12,.82),'soccer-goal':material('#eef2f6',.35,.4),stripe:material('#f4eddb',.05,.85)}:null;
   if(raceMats)palette.push(...Object.values(raceMats));
@@ -1215,7 +1215,7 @@ export class ArenaView{
  if(arena.id==='foundry')for(const x of [-4,4]){for(const z of [-2,0,2])box(world,1.8,.03,.35,x,5.77,z,glow);textLabel(world,'HOT',x,4,2.52,.35,'#ffc684');}
     if(!islands&&!arena.terrain){const edge=legacy?13.94:maxX-.06;textLabel(world,arena.name.toUpperCase(),(minX+maxX)/2,6.5,minZ+.06,1.3);textLabel(world,'02',minX+.06,5.8,(minZ+maxZ)/2,1.2,arena.color,Math.PI/2);textLabel(world,'01',maxX-.06,5.8,(minZ+maxZ)/2,1.2,arena.color,-Math.PI/2);for(const x of legacy?[-7,7]:[(minX+maxX)/2-width*.25,(minX+maxX)/2+width])box(world,.07,.04,depth*.77,x,.06,(minZ+maxZ)/2,glow);for(const z of legacy?[-10,0,10]:[minZ+depth/6,(minZ+maxZ)/2,maxZ-depth/6]){box(world,width,.3,.35,(minX+maxX)/2,8.5,z,trim);box(world,width*.72,.05,.15,(minX+maxX)/2,8.32,z,glow);}for(const x of legacy?[-12,12]:[minX+2,maxX-2]){const light=new T.PointLight(arena.color,28,15,2);light.position.set(x,5,(minZ+maxZ)/2);world.add(light);}}
     this.raceModels=new Map();
-    if(arena.race)raceTrackModel(arena.race,arena.color,world,undefined,{quality:this._quality(),surface:(mat,kind,rx,ry)=>this._mothSurface(mat,kind,rx,ry,arenaSeed)});
+    if(arena.race)raceTrackModel(arena.race,arena.color,world,undefined,{quality:this._quality(),surface:(mat,kind,rx,ry)=>this._mothSurface(mat,kind,rx,ry,arenaSeed,`race:${kind}`)});
     this.buildNextGen(world,arena);
    this.addTraversal(world,arena,glow);
    // Chunked static-architecture batches (real WebGL only; the CPU renderer and
@@ -1455,14 +1455,18 @@ export class ArenaView{
       return mat;
      }
      // Apply the baked Moth surface maps to a material. The macro anti-tiling
-     // enhancer runs on WebGL only and is a no-op for grid kinds; the CPU
-     // renderer keeps its flat authored materials. Shared by the arena build,
-     // next-gen props/structures and race/soccer presentation.
-     _mothSurface(mat,kind,rx,ry,seed=1){
+     // enhancer runs on WebGL only; grid kinds now get structure-preserving wear
+     // instead of the old no-op, and organic kinds get world-space break-up. The
+     // CPU renderer keeps its flat authored materials. `variantKey` is the
+     // replay-stable wear identity (arena|kind|repeat|region), so one wall never
+     // restyles itself between visits. Shared by the arena build, next-gen
+     // props/structures and race/soccer presentation.
+     _mothSurface(mat,kind,rx,ry,seed=1,variantKey){
       if(!mat||this.renderer?.isSoftware===true||typeof document==='undefined')return mat;
-      const maps=surfaceTextures(kind,{seed,repeat:[rx,ry]});
+      const key=variantKey||`${seed}:${kind}:${rx}x${ry}`;
+      const maps=surfaceTextures(kind,{seed,repeat:[rx,ry],variantKey:key});
       if(maps){mat.map=maps.map;mat.roughnessMap=maps.roughnessMap;mat.normalMap=maps.normalMap;mat.normalScale=new T.Vector2(.6,.6);}
-      if(maps&&this.renderer?.isWebGLRenderer===true)enhanceMothMaterial(mat,{kind,macro:mothMacroTexture()});
+      if(maps&&this.renderer?.isWebGLRenderer===true)enhanceMothMaterial(mat,{kind,macro:mothMacroTexture(),seed:key});
       return mat;
      }
      // Advance the Moth arena's animated rift: cycle the baked effect frames and

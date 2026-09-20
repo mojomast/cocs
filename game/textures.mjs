@@ -1,5 +1,6 @@
 import * as T from 'three';
 import {mothSurfaceOverride,mothNormalOverride,mothMaterialLut,mothSky,mothEffect} from './moth-assets.mjs';
+import {mothVariantFor,mothVariantRecord} from './moth-variants-runtime.mjs';
 
 // Deterministic value-noise / FBM surface maps. Everything is procedural and
 // cached per build; callers clearSurfaceTextures() before rebuilding a world so
@@ -641,7 +642,10 @@ function generatePatternPixel(kind, u, v, seed, channel, edge, layerScale = 1) {
   return null;
 }
 
-export function clearSurfaceTextures(){for(const textures of cache.values())for(const texture of Object.values(textures))texture?.dispose?.();cache.clear();try{macroCache?.dispose?.();}catch{}macroCache=null;for(const sky of skyCache.values())try{sky.texture?.dispose?.();}catch{}skyCache.clear();for(const effect of effectCache.values())for(const texture of effect.textures)try{texture?.dispose?.();}catch{}effectCache.clear();for(const texture of lutCache.values())try{texture?.dispose?.();}catch{}lutCache.clear();clearWetSheenTextures();}
+// Variant textures are shared by many surface entries, so they are disposed
+// once from their own cache; the per-entry loop skips them to avoid disposing
+// one texture twice.
+export function clearSurfaceTextures(){for(const textures of cache.values())for(const texture of Object.values(textures)){if(texture?.userData?.mothVariant)continue;texture?.dispose?.();}cache.clear();for(const texture of variantCache.values())texture?.dispose?.();variantCache.clear();try{macroCache?.dispose?.();}catch{}macroCache=null;for(const sky of skyCache.values())try{sky.texture?.dispose?.();}catch{}skyCache.clear();for(const effect of effectCache.values())for(const texture of effect.textures)try{texture?.dispose?.();}catch{}effectCache.clear();for(const texture of lutCache.values())try{texture?.dispose?.();}catch{}lutCache.clear();clearWetSheenTextures();}
 // Explicit PBR material presets for the surfaces that recur across the scene.
 // Callers spread these onto a MeshStandardMaterial so painted armour, exposed
 // steel, rubber, stone/concrete and energy read as physically distinct instead
@@ -694,9 +698,116 @@ export function wetSheenTexture({size=128,seed=1}={}){
 }
 export function clearWetSheenTextures(){for(const texture of wetCache.values())texture?.dispose?.();wetCache.clear();}
 
-export function surfaceTextures(kind='concrete',{size=96,seed=1,repeat=[1,1],normal=true,roughness=true,bump=false}={}){
+// Moth-baked and variant tiles are DataTextures, whose three.js defaults are
+// nearest filtering with no mip chain and no anisotropy. That reads as shimmer
+// at the grazing angles floors and long walls are viewed at, and it throws away
+// the micro detail the tiles carry. One explicit sampling policy fixes all of
+// them; `configureMothSampling({smooth:false})` restores the deliberate retro
+// mode (nearest filtering, single level) to match the old DataTexture look.
+const MOTH_SAMPLING_DEFAULT_ANISOTROPY=4;
+const mothSampling={smooth:true,anisotropy:MOTH_SAMPLING_DEFAULT_ANISOTROPY};
+const clampMothAnisotropy=value=>{
+ const numeric=Math.trunc(Number(value));
+ if(!Number.isFinite(numeric)||numeric<1)return 1;
+ return Math.min(16,numeric);
+};
+// `smooth:false` is the only value that selects retro: anything unknown keeps
+// the safe smooth default instead of flipping the look by accident.
+export function configureMothSampling(options={}){
+ const opts=options&&typeof options==='object'?options:{};
+ mothSampling.smooth=opts.smooth!==false;
+ mothSampling.anisotropy=clampMothAnisotropy(opts.anisotropy===undefined?MOTH_SAMPLING_DEFAULT_ANISOTROPY:opts.anisotropy);
+ // Live switch: already-built Moth textures are re-stamped with the new policy
+ // (needsUpdate re-uploads them), so a lab toggle changes the current scene
+ // without waiting for a cache rebuild. Procedural CanvasTextures are not Moth
+ // data and are deliberately left alone.
+ const seen=new Set();
+ const restamp=texture=>{
+  if(!texture?.isDataTexture||!texture.userData?.mothShared||seen.has(texture))return;
+  seen.add(texture);
+  applyMothSampling(texture);
+ };
+ for(const textures of cache.values())for(const texture of Object.values(textures))restamp(texture);
+ for(const texture of variantCache.values())restamp(texture);
+ restamp(macroCache);
+ return mothSamplingState();
+}
+// A copy, so callers cannot mutate the live policy by holding the result.
+export function mothSamplingState(){
+ return {smooth:mothSampling.smooth,anisotropy:mothSampling.anisotropy};
+}
+// One policy for every Moth DataTexture (baked albedo/normal, variant
+// albedo/roughness, macro). `mipmaps:false` stays single-level even in smooth
+// mode for callers that must not generate a chain.
+export function applyMothSampling(texture,{mipmaps=true}={}){
+ if(!texture)return texture;
+ const smooth=mothSampling.smooth,useMipmaps=smooth&&mipmaps!==false;
+ texture.wrapS=texture.wrapT=T.RepeatWrapping;
+ texture.magFilter=smooth?T.LinearFilter:T.NearestFilter;
+ texture.minFilter=useMipmaps?T.LinearMipmapLinearFilter:(smooth?T.LinearFilter:T.NearestFilter);
+ texture.generateMipmaps=useMipmaps;
+ texture.anisotropy=mothSampling.anisotropy;
+ texture.needsUpdate=true;
+ return texture;
+}
+
+// Variant tiles are uploaded once per (kind,id,channel,repeat) and shared by
+// every surface entry that selects the same variant, so changing a seed never
+// re-decodes or re-uploads an identical tile. They live in their own module
+// cache and clearSurfaceTextures releases each one exactly once.
+const variantCache=new Map();
+function mothVariantTexture(canonical,id,image,channel,repeat){
+ const key=`${canonical}|${id}|${channel}|${repeat[0]},${repeat[1]}`;
+ const cached=variantCache.get(key);
+ if(cached)return cached;
+ const texture=new T.DataTexture(image.data,image.width,image.height,T.RGBAFormat,T.UnsignedByteType);
+ texture.repeat.set(repeat[0],repeat[1]);
+ // Albedo is authored sRGB artwork; the roughness payload is numeric data and
+ // must stay linear so three.js does not apply the transfer function to it.
+ texture.colorSpace=channel===0?T.SRGBColorSpace:T.NoColorSpace;
+ texture.userData.surfaceKind=canonical;
+ texture.userData.source='moth-variant';
+ texture.userData.mothVariant={kind:canonical,id};
+ texture.userData.mothShared=true;
+ applyMothSampling(texture);
+ variantCache.set(key,texture);
+ return texture;
+}
+// Select a variant id without touching the payload: selection is a bounded
+// hash over the registry's id list, so the document-less SSR path pays nothing
+// and never decodes tiles it cannot use. 'original' is intentionally null: it
+// means "use the pre-variant baked albedo + procedural roughness path".
+function mothVariantId(canonical,variantKey){
+ try{
+  const id=mothVariantFor(canonical,variantKey);
+  return id&&id!=='original'?id:null;
+ }catch{return null;}
+}
+// Decode the selected payload on first use. The runtime module already
+// survives unknown kinds/ids and malformed base64; this wrapper also treats any
+// unexpected throw as "no variant", because a broken optional payload must
+// never break a surface request.
+function resolveMothVariant(canonical,id){
+ try{
+  const record=mothVariantRecord(canonical,id);
+  const albedo=record?.albedo,roughness=record?.roughness;
+  if(!albedo?.data||!roughness?.data)return null;
+  if(!Number.isFinite(albedo.width)||!Number.isFinite(albedo.height)||!Number.isFinite(roughness.width)||!Number.isFinite(roughness.height))return null;
+  if(albedo.data.length!==albedo.width*albedo.height*4||roughness.data.length!==roughness.width*roughness.height*4)return null;
+  return {albedo,roughness};
+ }catch{return null;}
+}
+
+// `variantKey` defaults to the seed, so existing callers become deterministic
+// per-surface variant selectors; pass an explicit arena/surface key to keep a
+// panel's wear stable across seed changes. Kinds without variants are untouched.
+export function surfaceTextures(kind='concrete',{size=96,seed=1,repeat=[1,1],normal=true,roughness=true,bump=false,variantKey=seed}={}){
  const canonical=canonicalTextureKind(kind);
- const key=`${canonical}|${size}|${seed}|${repeat[0]},${repeat[1]}|${normal?1:0}|${roughness?1:0}|${bump?1:0}`;
+ const variantId=mothVariantId(canonical,variantKey);
+ // The resolved id, not the raw key, joins the cache key: distinct keys that
+ // select the same variant can share, while a caller-supplied variantKey can
+ // never alias two variants into one cached result.
+ const key=`${canonical}|${size}|${seed}|${repeat[0]},${repeat[1]}|${normal?1:0}|${roughness?1:0}|${bump?1:0}|v:${variantId||''}`;
  const cached=cache.get(key);
  if(cached)return cached;
  if(typeof document==='undefined'||!document.createElement)return null;
@@ -759,8 +870,16 @@ export function surfaceTextures(kind='concrete',{size=96,seed=1,repeat=[1,1],nor
   return map;
  };
  let sharedField=null;
- const result={map:bakedAlbedoTexture(canonical,repeat)||make(0)};
- if(roughness)result.roughnessMap=make(1);
+ let result=null;
+ const variant=variantId?resolveMothVariant(canonical,variantId):null;
+ if(variant)try{
+  result={map:mothVariantTexture(canonical,variantId,variant.albedo,0,repeat)};
+  if(roughness)result.roughnessMap=mothVariantTexture(canonical,variantId,variant.roughness,1,repeat);
+ }catch{result=null;}
+ if(!result){
+  result={map:bakedAlbedoTexture(canonical,repeat)||make(0)};
+  if(roughness)result.roughnessMap=make(1);
+ }
  if(normal)result.normalMap=bakedNormalTexture(canonical,repeat)||make(2);
  if(bump)result.bumpMap=make(2);
  cache.set(key,result);
@@ -773,13 +892,12 @@ function bakedAlbedoTexture(canonical,repeat){
  const baked=mothSurfaceOverride(canonical);
  if(!baked)return null;
  const texture=new T.DataTexture(baked.data,baked.width,baked.height,T.RGBAFormat,T.UnsignedByteType);
- texture.wrapS=texture.wrapT=T.RepeatWrapping;
  texture.repeat.set(repeat[0],repeat[1]);
  texture.colorSpace=T.SRGBColorSpace;
- texture.needsUpdate=true;
  texture.userData.surfaceKind=canonical;
  texture.userData.source='moth';
  texture.userData.mothShared=true;
+ applyMothSampling(texture);
  return texture;
 }
 
@@ -789,13 +907,12 @@ function bakedNormalTexture(canonical,repeat){
  const baked=mothNormalOverride(canonical);
  if(!baked)return null;
  const texture=new T.DataTexture(baked.data,baked.width,baked.height,T.RGBAFormat,T.UnsignedByteType);
- texture.wrapS=texture.wrapT=T.RepeatWrapping;
  texture.repeat.set(repeat[0],repeat[1]);
  texture.colorSpace=T.NoColorSpace;
- texture.needsUpdate=true;
  texture.userData.surfaceKind=canonical;
  texture.userData.source='moth';
  texture.userData.mothShared=true;
+ applyMothSampling(texture);
  return texture;
 }
 
@@ -807,11 +924,10 @@ export function mothMacroTexture(){
  const baked=mothSurfaceOverride('macro-organic');
  if(!baked)return null;
  const texture=new T.DataTexture(baked.data,baked.width,baked.height,T.RGBAFormat,T.UnsignedByteType);
- texture.wrapS=texture.wrapT=T.RepeatWrapping;
  texture.colorSpace=T.NoColorSpace;
- texture.needsUpdate=true;
  texture.userData.mothMacro=true;
  texture.userData.mothShared=true;
+ applyMothSampling(texture);
  macroCache=texture;
  return texture;
 }

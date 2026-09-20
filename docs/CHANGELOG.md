@@ -18,18 +18,31 @@ record in [VERIFICATION.md](VERIFICATION.md).
 
 ## v8.6 · PRISM — 2026-09-20
 
-An opt-in developer graphics lab for choosing the game's visual flavor.
+An opt-in developer graphics lab for choosing the game's visual flavor, plus the
+first offline Moth material-variety slice.
 
-- Twelve stackable effects: pixel mosaic, prism split, light bleed, color bands,
-  palette remap, print dots, crosshatch, ink and neon contours, ordered dither,
-  phosphor screen, and paper grain.
-- Six editable starting recipes: Circuit Print, Neon Cathedral, Pocket Arena,
-  Field Sketch, Ghost Signal, and Ember Press.
+- 23 stackable effects: pixel and hex mosaic, row glitch, prism split, light
+  bleed, vignette, contrast, saturation, white balance, sharpen, solarize, color
+  bands, palette remap, print dots, crosshatch, ink and neon contours, ordered
+  dither, phosphor screen, paper grain, and three baked-Moth-asset layers (grain,
+  signal glyphs, spectral coat).
+- Nine editable starting recipes, including Blueprint, Thermal, and Moth Print.
+- Global hotkeys: tap the backquote key to toggle the lab from anywhere with a
+  banner; Shift plus that key opens the drawer. SURPRISE ME rolls a valid random
+  mix; COPY RECIPE copies the exact JSON and PASTE A RECIPE JSON applies one
+  back for tuning.
 - Side-drawer live preview (bottom sheet in portrait), individual parameters,
   palette choice, overall mix, A/B bypass, split comparison, device-local saving,
-  JSON recipe export, and reset. Original graphics remain the default.
+  JSON export, and reset. Original graphics remain the default.
 - One fused display-space ShaderPass, stationary patterns, software-renderer
   fallback reporting, and crisp HUD/first-person weapon rendering.
+- Moth material slice: deterministic tile-safe variants for four surface
+  families from archived raw bakes, replay-stable per-surface wear identity,
+  structure-preserving grime/roughness on grid surfaces, and an explicit
+  sampling policy with a retro-nearest option. No new paid Moth runs.
+- Bake-integrity hardening in the game runner, ported upstream to the generic
+  [mothbake](https://github.com/mojomast/mothbake) pipeline (merge-safe, atomic,
+  validated publication) with tests, docs, and an example.
 - Actual GPU pixel checks for each effect and recipe, zero-mix and split-mode
   identity checks, plus browser control/layout verification.
 - Extensive [Moth graphics research and plan](design/MOTH-GRAPHICS-PLAN.md):

@@ -224,14 +224,17 @@ therefore targets a **dev server** (`BROWSER_BASE_URL`, default
 
 It proves two things. First, actual GPU output: a deterministic color/checker
 `DataTexture` is rendered through the real `GraphicsLabPass` on a headless
-WebGL renderer, and every individual effect, every starting recipe and the full
-twelve-layer stack must change pixels; zero-mix and the original half of split
-mode must match the untouched image exactly; and all combinations must reuse one
-shader program (uniform-only reconfiguration, no recompilation). Second, the
-real UI: recipe loading, independent layer stacking, A/B bypass, split mode,
-reset-to-off, drawer geometry at the five standard viewport/UI-scale cases,
-device-local persistence across reload, and that the drawer opens from a paused
-match as the single modal dialog without stealing the pause state.
+WebGL renderer, and every catalogue layer (including the three layers built from
+baked Moth assets), every starting recipe and the full stack must change pixels;
+zero-mix and the original half of split mode must match the untouched image
+exactly; and all combinations must reuse one shader program (uniform-only
+reconfiguration, no recompilation). Second, the real UI: recipe loading, the
+SURPRISE ME randomizer, independent layer stacking, A/B bypass, split mode,
+clipboard recipe copy, pasting and applying a recipe JSON, the backquote toggles
+(` and Shift+`), reset-to-off, drawer geometry at the five standard
+viewport/UI-scale cases, device-local persistence across reload, and that the
+drawer opens from a paused match as the single modal dialog without stealing the
+pause state.
 
 Every run writes screenshots and `verification.json` to the gitignored
 `artifacts/graphics-lab/`. It does **not** prove art-direction quality, human
@@ -268,8 +271,8 @@ those remain human review items.
 
 Last verified on release v8.6 PRISM (2026-09-20); the v8.6 gate recorded:
 
-- `npm run test:game` — **2,575 pass, 0 fail, 8 skipped** across the
-  `game/*.test.mjs` suite (2,583 tests). The eight skips are the opt-in long
+- `npm run test:game` — **2,628 pass, 0 fail, 8 skipped** across the
+  `game/*.test.mjs` suite (2,636 tests). The eight skips are the opt-in long
   simulations and
   the browser-only render: the D1-D4 sampled win-rate sweep, the exhaustive
   8-bot mode sweep, the 18k-step 4-bot match, the 10k-step 8-bot race, the

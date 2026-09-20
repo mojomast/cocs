@@ -7,6 +7,17 @@ on portrait screens it becomes a bottom sheet. Closing it keeps the effects on.
 This is an opt-in art-direction preview, off by default. Preferences are saved
 on this device under `token-arena-graphics-lab-v1`.
 
+## Hotkeys
+
+- **` (backquote)** — toggle the lab on/off instantly from anywhere, including
+  mid-match, with a short banner that names the current mix. This is the fast
+  A/B; it never pauses, never opens a menu, and never types into a field.
+- **Shift + `** — open or close this drawer from anywhere. While playing it
+  releases the pointer through the normal Settings surface, so the world keeps
+  rendering behind the drawer for live comparison.
+
+Both keys are ignored while a text field, chat or the command board owns input.
+
 ## Try these first
 
 | Recipe | Direction |
@@ -17,17 +28,37 @@ on this device under `token-arena-graphics-lab-v1`.
 | Field Sketch | Warm paper palette, crosshatching, grain, ink |
 | Ghost Signal | Cyan phosphor, stationary scanlines/grille, subtle channel separation |
 | Ember Press | Plum/vermilion/gold science-fiction paperback treatment |
+| Blueprint | Navy drafting field, steel ink contours, white margin falloff |
+| Thermal | Infrared recon: hot edges, solarized highlights, video gain |
+| Moth Print | Baked Moth grain, signal glyphs and an iridescent spectral coat |
 
 Loading a recipe replaces the current mix. After that, every layer is
-independently switchable: pixel mosaic, prism split, light bleed, color bands,
-palette remap, print dots, crosshatch, ink contours, neon contours, ordered
-dither, phosphor screen, and paper grain. Each has its own parameter.
+independently switchable. The catalogue has 23 layers:
+
+- **Geometry and light:** pixel mosaic, hex mosaic, row glitch, prism split,
+  light bleed, vignette.
+- **Color:** contrast, saturation, white balance, sharpen, solarize, color
+  bands, palette remap.
+- **Print and screen:** halftone dots, crosshatch, ink contours, neon contours,
+  ordered dither, phosphor screen, paper grain.
+- **Moth assets:** Moth grain, signal glyphs, spectral coat — built from the
+  baked `macro-organic` tile, an effect frame and the entanglement LUT. They
+  silently no-op when the baked assets are unavailable (for example on a
+  software renderer) and the drawer says so.
+
+Each layer has its own parameter. The rest of the controls:
 
 - **Enable graphics lab:** master on/off, retaining the chosen layers.
+- **Surprise me:** roll a new mix. About half the rolls start from a starting
+  recipe with jittered values and the rest freeform; every roll is a valid,
+  immediately usable stack. Press again to keep rolling.
 - **Overall mix:** blend the shader result with the original world.
 - **A/B · Show original:** bypass without losing your recipe.
 - **Split comparison:** original on the left, styled on the right; adjustable divider.
 - **Previous / next look:** cycle through the starting recipes.
+- **Copy recipe:** put the JSON on the clipboard, ready to paste into a chat or
+  a note. **Paste a recipe JSON:** apply a recipe back verbatim — this is the
+  tuning loop.
 - **Export recipe:** download JSON to keep or share your preferred settings.
 - **Reset all / off:** restore the original world and clear the layer choices.
 
@@ -40,9 +71,12 @@ unavailable, the drawer says that the mix lasts only for the current visit.
 The existing EffectComposer owns the pipeline. The lab is one fused GLSL
 ShaderPass after OutputPass and FXAA, operating on display-space RGB. Effect
 switches and sliders change uniforms; switching individual layers does not
-compile twelve shaders or render the scene twelve times. Ink and neon share
+compile extra shaders or render the scene more than once. Ink and neon share
 their Sobel samples. Light bleed uses eight short-radius bright-neighbor reads;
 it is a compact local glow rather than a replacement for multiscale bloom.
+Sharpen and prism split add four and two reads. The three Moth-asset layers
+read up to three small baked textures that are created once, cached for the
+page, and never re-uploaded.
 
 The lab styles the world, including the menu's arena showcase. DOM HUD text,
 reticle, and the isolated first-person weapon remain crisp; the standalone
@@ -66,14 +100,16 @@ npm run test:graphics-lab
 ```
 
 The graphics harness renders a deterministic color/checker fixture through the
-actual GPU shader and proves all twelve effects, all six recipes, and the full
-stack change pixels. It verifies zero-mix and the original half of split mode
-match exactly and all combinations reuse one shader program. It then exercises
-the actual UI, stacking, bypass, reset, persistence, and drawer layout at the
-five required viewport/UI-scale cases. Screenshots/results land in ignored
+actual GPU shader and proves every catalogue layer (including the Moth-asset
+layers), every starting recipe, and the full stack change pixels. It verifies
+zero-mix and the original half of split mode match exactly and all combinations
+reuse one shader program. It then exercises the actual UI: recipes, randomizer,
+layer stacking, A/B bypass, split comparison, clipboard copy, JSON apply,
+hotkeys, reset, persistence, and drawer layout at the five required
+viewport/UI-scale cases. Screenshots/results land in ignored
 `artifacts/graphics-lab/`. This harness imports source modules through Vite and
 therefore targets a dev preview, not a production server.
 
-For the researched next step—richer Moth material families, coordinated surface
-wear, and less tiling—see [Moth graphics plan](design/MOTH-GRAPHICS-PLAN.md).
-That plan also records the API references behind these art-direction options.
+For the Moth material work behind these effects—material variants, coordinated
+surface wear, and less tiling—see the
+[Moth graphics plan](design/MOTH-GRAPHICS-PLAN.md).

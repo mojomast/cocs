@@ -3,42 +3,57 @@
 ## Release 8.6 - PRISM
 
 **Scope (web presentation and documentation, 2026-09-20).** An opt-in developer
-graphics preview plus a researched Moth material-variety plan, on top of the
-v8.5 release. No simulation, server, protocol, dependency or asset change; the
-game server does not need a restart. Default rendering is unchanged: the lab is
-off until a player enables it, and every effect is a display-space pass after
-`OutputPass`/FXAA.
+graphics preview, a global hotkey, a randomizer and a clipboard recipe loop, 23
+stackable effects (three built from baked Moth assets), nine starting recipes,
+plus the first offline Moth material-variety slice. No simulation, server,
+protocol, dependency or paid-bake change; the game server does not need a
+restart. Default rendering is unchanged: the lab is off until a player enables
+it, and every effect is a display-space pass after `OutputPass`/FXAA.
 
-- `docs/GRAPHICS-LAB.md` — controls, render contract and limitations.
+- `docs/GRAPHICS-LAB.md` — hotkeys, controls, render contract and limitations.
+- `docs/MOTH.md` — implemented material slice and module map.
 - `docs/design/MOTH-GRAPHICS-PLAN.md` — Moth API/mothbake audit and the
-  material-variety roadmap. It distinguishes verified live API contracts from
-  historical documentation and from proposed game-side work.
+  material-variety roadmap, now annotated with what is implemented.
+- Upstream `mothbake` commit `a35a2e67` — merge-safe, atomic and validated
+  publication with `merge: true` emitters, download validation, docs, an example
+  and 180 passing offline tests.
 
 **Automated release gate (2026-09-20).**
 
-- `npm test`: pass. Game tests: 2,575 pass, 8 approved skips, 0 fail (2,583
+- `npm test`: pass. Game tests: 2,628 pass, 8 approved skips, 0 fail (2,636
   tests); server tests: 209 pass, 0 fail; TypeScript: pass; verified production
   build: pass; SSR/UI and deployment-contract tests: 82 pass, 0 fail.
+- Moth-focused suites are part of that run: bake-runner integrity
+  (`moth-bake-run.test.mjs`), variant generation/selection
+  (`moth-variants.test.mjs`), texture variant consumption and sampling
+  (`moth-texture-variants.test.mjs`), and the structure-preserving surface
+  policy (`moth-surface.test.mjs`).
 - `npm run lint`: 0 errors; warning-level findings only.
 - `npm run test:graphics-lab` (against the running dev preview): **pass**. The
   harness executes the real `GraphicsLabPass` on a headless WebGL renderer with
-  a deterministic color/checker input and proves every individual effect, every
-  starting recipe and the full twelve-layer stack change pixels; zero-mix and
-  the original half of split mode match the untouched image exactly; and all
-  combinations reuse one shader program. It then drives the real UI: recipe
-  loading, independent layer stacking, A/B bypass, split comparison, reset,
-  drawer geometry at 1366×768, 1920×1080, 844×390, 390×844 and 844×390 at UI
-  scale 1.4, device-local persistence across reload, and opening the lab from a
-  paused match as the single `aria-modal` dialog without losing the pause state.
-  Recorded deltas are in `artifacts/graphics-lab/verification.json` (gitignored).
-- `npm run test:browser` was not re-run for this web-only preview; the v8.5
-  matrix remains the last recorded run for match/HUD surfaces.
+  a deterministic color/checker input and proves every catalogue layer (23,
+  including the three built from baked Moth assets), every starting recipe (9)
+  and the full stack change pixels; zero-mix and the original half of split mode
+  match the untouched image exactly; and all combinations reuse one shader
+  program. It then drives the real UI: recipe loading, the randomizer, layer
+  stacking, A/B bypass, split comparison, clipboard copy, JSON apply, the
+  backquote toggles, reset, drawer geometry at 1366×768, 1920×1080, 844×390,
+  390×844 and 844×390 at UI scale 1.4, device-local persistence across reload,
+  and opening the lab from a paused match as the single `aria-modal` dialog
+  without losing the pause state. Recorded deltas are in
+  `artifacts/graphics-lab/verification.json` (gitignored).
+- `npm run test:browser` (against the running app): **5/5 viewports pass** at
+  1366×768, 1920×1080, 844×390, 390×844 and 844×390 at UI scale 1.4, with hit
+  testing, reticle-corridor checks, overflow checks and console/page-error
+  assertions.
 
 **Boundary.** The graphics-lab harness proves shader execution, pixel change
 and UI behavior in headless Chromium (SwiftShader). It does not prove frame
 rate, artistic quality, colour accuracy on real panels, or physical-device
-behaviour. The Moth material plan is a researched roadmap; no new Moth bake was
-submitted and its proposed variants are not implemented by this release.
+behaviour. The Moth material slice is limited to the four offline variant
+families, structure-preserving wear and sampling; per-biome families, decals,
+higher-resolution/URL-backed textures and the new-bake coating/flow experiments
+remain proposals in the plan, and no new paid Moth run was submitted.
 
 ## Release 8.5 - HANDOFF
 

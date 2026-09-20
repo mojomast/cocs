@@ -264,8 +264,9 @@ test('natural palettes stay restrained while weathering drifts the channels', t 
   const images=recordingDocument(t);
   for(const kind of ['concrete','rock','sand','grass','ice','metal']){
     images.length=0;
-    surfaceTextures(kind,{seed:13,size:48});
-    const data=images[0].data;
+    const tex=surfaceTextures(kind,{seed:13,size:48});
+    // Variant kinds return a decoded DataTexture albedo instead of a canvas draw.
+    const data=tex?.map?.isDataTexture?tex.map.image.data:images[0].data;
     let saturation=0,spread=0,count=0;
     for(let i=0;i<data.length;i+=4){
       const max=Math.max(data[i],data[i+1],data[i+2]),min=Math.min(data[i],data[i+1],data[i+2]);

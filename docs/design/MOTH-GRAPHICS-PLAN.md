@@ -5,8 +5,15 @@
 **Tool inspected:** `mothbake` at `3e25930` in `/home/mojo/projects/mothbake`  
 **API inspected:** live public OpenAPI, `moth-api v0.41.0`  
 **Fetched schema SHA-256:** `b0695071d500e28457a7d18fc4ef2e94cb60989761eeafff2cdd90f9bf553e39`  
-**Status:** researched implementation plan. Material changes and new Moth bakes
-below are proposed; the separate shader lab is the current preview implementation.
+**Status:** partially implemented (v8.6 PRISM). G0 bake integrity is in the game
+runner **and** ported upstream to `mothbake` (`a35a2e67`: merge-safe, atomic,
+validated publication; download validation). G2/G3 first slice is in: offline
+deterministic variants for four kinds from archived raw bakes, per-surface
+variant keys, structure-preserving wear, and an explicit sampling policy. The
+graphics lab also gained three Moth-asset layers. Everything else below —
+additional families, decals, higher-resolution/URL-backed textures, coating and
+flow experiments needing new bakes — remains proposed. See
+[../MOTH.md](../MOTH.md) for the implemented summary.
 
 ## 1. Recommendation
 

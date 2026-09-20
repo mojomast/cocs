@@ -35,8 +35,10 @@ function readKey() {
   return key;
 }
 
-async function api(pathname, { method = 'GET', body, key, raw = false, headers = {} } = {}) {
-  const res = await fetch(BASE + pathname, {
+// `fetchImpl` is threaded through every network call so the runner and its
+// tests can run fully offline; the CLI never passes it and gets global fetch.
+async function api(pathname, { method = 'GET', body, key, raw = false, headers = {}, fetchImpl = fetch } = {}) {
+  const res = await fetchImpl(BASE + pathname, {
     method,
     headers: { ...(key ? { Authorization: `Bearer ${key}` } : {}), ...(body !== undefined ? { 'Content-Type': 'application/json' } : {}), ...headers },
     body: body === undefined ? undefined : (typeof body === 'string' ? body : JSON.stringify(body)),
@@ -56,32 +58,32 @@ async function api(pathname, { method = 'GET', body, key, raw = false, headers =
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
-export async function listEngines(key) {
-  const body = await api('/api/v1/engines', { key });
+export async function listEngines(key, options = {}) {
+  const body = await api('/api/v1/engines', { key, ...options });
   return body.engines || body.items || body.data || body;
 }
-export async function getEngine(key, id) {
-  return api(`/api/v1/engines/${encodeURIComponent(id)}`, { key });
+export async function getEngine(key, id, options = {}) {
+  return api(`/api/v1/engines/${encodeURIComponent(id)}`, { key, ...options });
 }
 
-export async function submitJob(key, engine, { params = {}, inputFiles, mode } = {}) {
+export async function submitJob(key, engine, { params = {}, inputFiles, mode, fetchImpl = fetch } = {}) {
   const body = { params };
   if (inputFiles) body.input_files = inputFiles;
   if (mode) body.mode = mode;
-  return api(`/api/v1/engines/${encodeURIComponent(engine)}/process`, { method: 'POST', key, body });
+  return api(`/api/v1/engines/${encodeURIComponent(engine)}/process`, { method: 'POST', key, body, fetchImpl });
 }
-export async function jobStatus(key, jobId) {
-  return api(`/api/v1/jobs/${encodeURIComponent(jobId)}/status`, { key });
+export async function jobStatus(key, jobId, { fetchImpl = fetch } = {}) {
+  return api(`/api/v1/jobs/${encodeURIComponent(jobId)}/status`, { key, fetchImpl });
 }
-export async function jobResult(key, jobId) {
-  return api(`/api/v1/jobs/${encodeURIComponent(jobId)}/result`, { key });
+export async function jobResult(key, jobId, { fetchImpl = fetch } = {}) {
+  return api(`/api/v1/jobs/${encodeURIComponent(jobId)}/result`, { key, fetchImpl });
 }
 
-export async function waitForJob(key, jobId, { timeoutMs = 15 * 60 * 1000, intervalMs = 1500, log = () => {} } = {}) {
+export async function waitForJob(key, jobId, { timeoutMs = 15 * 60 * 1000, intervalMs = 1500, log = () => {}, fetchImpl = fetch } = {}) {
   const started = Date.now();
   let last = null;
   while (Date.now() - started < timeoutMs) {
-    const status = await jobStatus(key, jobId);
+    const status = await jobStatus(key, jobId, { fetchImpl });
     const key2 = `${status.status}:${status.progress?.step || ''}`;
     if (key2 !== last) { last = key2; log(`  ${status.status}${status.progress?.step ? ` (${status.progress.step})` : ''}${status.progress?.detail ? ` — ${status.progress.detail}` : ''}`); }
     if (status.status === 'completed') return status;
@@ -97,15 +99,15 @@ export async function waitForJob(key, jobId, { timeoutMs = 15 * 60 * 1000, inter
 
 // Upload a local file through the create -> presigned PUT -> complete flow and
 // return its asset id, which engines consume via `input_files`.
-export async function uploadAsset(key, filePath, { contentType } = {}) {
+export async function uploadAsset(key, filePath, { contentType, fetchImpl = fetch } = {}) {
   const bytes = fs.readFileSync(filePath);
   const type = contentType || guessContentType(filePath);
-  const created = await api('/api/v1/assets', { method: 'POST', key, body: { filename: path.basename(filePath), content_type: type, size_bytes: bytes.length } });
+  const created = await api('/api/v1/assets', { method: 'POST', key, body: { filename: path.basename(filePath), content_type: type, size_bytes: bytes.length }, fetchImpl });
   const upload = created.upload;
   if (!upload?.url) throw new Error(`asset ${created.asset_id}: no presigned upload returned`);
-  const res = await fetch(upload.url, { method: upload.method || 'PUT', headers: upload.headers || {}, body: bytes });
+  const res = await fetchImpl(upload.url, { method: upload.method || 'PUT', headers: upload.headers || {}, body: bytes });
   if (!res.ok) throw new Error(`asset upload -> ${res.status}`);
-  await api(`/api/v1/assets/${encodeURIComponent(created.asset_id)}/complete`, { method: 'POST', key, body: {} });
+  await api(`/api/v1/assets/${encodeURIComponent(created.asset_id)}/complete`, { method: 'POST', key, body: {}, fetchImpl });
   return created.asset_id;
 }
 
@@ -972,19 +974,206 @@ export function resolveAudioUrl(options, ctx, fileName) {
 // Runner
 // ---------------------------------------------------------------------------
 
-function readManifest() {
-  if (!fs.existsSync(MANIFEST)) throw new Error(`manifest not found: ${MANIFEST}`);
-  return JSON.parse(fs.readFileSync(MANIFEST, 'utf8'));
+function readManifest(manifestPath = MANIFEST) {
+  if (!fs.existsSync(manifestPath)) throw new Error(`manifest not found: ${manifestPath}`);
+  return JSON.parse(fs.readFileSync(manifestPath, 'utf8'));
 }
-function writeManifest(manifest) { fs.writeFileSync(MANIFEST, JSON.stringify(manifest, null, 2) + '\n'); }
 
-async function resolveResult(key, job, log, force = false) {
-  // Reuse an already-paid job id when the manifest records one, unless the
-  // caller explicitly asked for a fresh submission.
+// The registry buckets the runner initializes and a published module must
+// carry. `version`/`generator` are metadata and `provenance` is validated
+// separately against the jobs whose records were actually produced.
+export const BUCKETS = ['textures', 'normals', 'materials', 'sky', 'effects', 'levels', 'seeds', 'motifs', 'irs', 'audio', 'spaces'];
+
+// Offline typo guard for `run --dry`; the live authority is `catalog`. Mirrors
+// the engines named in the manifest, docs/MOTH.md and the graphics plan.
+export const KNOWN_ENGINES = new Set([
+  'blur-v1', 'blur-core-v1', 'blur-midi-v1', 'deep-fryer-v1', 'entanglement-shader-v1',
+  'labyrinth-v1', 'graph-v1', 'qpixl-v1', 'toeplitz-v1', 'telablur-v1', 'tessa-image-v1',
+  'qrc-image-v1', 'qrc-train-v2', 'qrc-gen-v2', 'qrc-midi-v1', 'qrc-audio-v1',
+  'comet-qrng-v1', 'otoc-echo-v1', 'retrocausal-echo-v1',
+]);
+
+// Must mirror the branches in generateValues(): an unknown spec silently sends
+// no `values` parameter, which is exactly what a dry run should catch.
+const GENERATOR_TYPES = new Set(['height', 'radial', 'portal', 'spark', 'bloom', 'vortex', 'contract', 'rise', 'shield', 'snow']);
+
+export function emptyBaked(version = 1) {
+  const baked = { version, generator: 'scripts/moth-bake.mjs' };
+  for (const bucket of BUCKETS) baked[bucket] = {};
+  baked.provenance = {};
+  return baked;
+}
+
+// Write through a same-directory temp file and rename over the target, so a
+// crash or a validation error leaves the previous file untouched.
+export function writeFileAtomic(target, data) {
+  const dir = path.dirname(target);
+  fs.mkdirSync(dir, { recursive: true });
+  const tmp = path.join(dir, `.${path.basename(target)}.${process.pid}.${Math.random().toString(36).slice(2)}.tmp`);
+  try {
+    fs.writeFileSync(tmp, data);
+    fs.renameSync(tmp, target);
+  } catch (error) {
+    try { fs.unlinkSync(tmp); } catch {}
+    throw error;
+  }
+}
+
+export function writeManifest(manifest, manifestPath = MANIFEST) {
+  const next = `${JSON.stringify(manifest, null, 2)}\n`;
+  let previous = null;
+  try { previous = fs.readFileSync(manifestPath, 'utf8'); } catch {}
+  if (previous === next) return false;
+  writeFileAtomic(manifestPath, next);
+  return true;
+}
+
+function isPlainObject(value) {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return false;
+  const proto = Object.getPrototypeOf(value);
+  return proto === Object.prototype || proto === null;
+}
+
+// Reject anything JSON.stringify would silently mangle: functions, symbols,
+// undefined values (dropped keys), array holes (null), non-finite numbers
+// (null) and non-plain objects. Publication has to round-trip exactly.
+export function assertJsonSafe(value, label = 'registry') {
+  const seen = new Set();
+  const walk = (node, at) => {
+    if (node === null || typeof node === 'string' || typeof node === 'boolean') return;
+    if (typeof node === 'number') {
+      if (!Number.isFinite(node)) throw new Error(`${label}: ${at} is ${node}, which JSON would turn into null`);
+      return;
+    }
+    if (typeof node !== 'object') throw new Error(`${label}: ${at} is a ${typeof node}, which JSON cannot represent`);
+    if (seen.has(node)) throw new Error(`${label}: ${at} is a cycle`);
+    seen.add(node);
+    if (Array.isArray(node)) {
+      for (let index = 0; index < node.length; index++) {
+        if (!(index in node)) throw new Error(`${label}: ${at}[${index}] is a hole, which JSON would turn into null`);
+        walk(node[index], `${at}[${index}]`);
+      }
+    } else {
+      if (!isPlainObject(node)) throw new Error(`${label}: ${at} is not a plain object, so JSON would not round-trip it`);
+      for (const symbol of Object.getOwnPropertySymbols(node)) if (Object.getOwnPropertyDescriptor(node, symbol).enumerable) throw new Error(`${label}: ${at} has an enumerable symbol key, which JSON would drop`);
+      for (const [key, child] of Object.entries(node)) {
+        if (child === undefined) throw new Error(`${label}: ${at}.${key} is undefined, so JSON would drop it`);
+        walk(child, `${at}.${key}`);
+      }
+    }
+    seen.delete(node);
+  };
+  walk(value, '$');
+  return value;
+}
+
+// The aggregate must carry every expected bucket, be JSON-exact, and record
+// provenance for every job that succeeded (so a partial run cannot publish a
+// record whose provenance was never written).
+export function validateBakedForPublish(baked, expectedProvenance = []) {
+  if (!isPlainObject(baked)) throw new Error('baked registry must be a plain object');
+  for (const bucket of BUCKETS) {
+    if (!isPlainObject(baked[bucket])) throw new Error(`baked registry is missing the "${bucket}" bucket`);
+  }
+  if (!isPlainObject(baked.provenance)) throw new Error('baked registry is missing the "provenance" bucket');
+  for (const id of expectedProvenance) {
+    if (!isPlainObject(baked.provenance[id])) throw new Error(`provenance is missing a record for successful job "${id}"`);
+  }
+  assertJsonSafe(baked, 'baked registry');
+  return baked;
+}
+
+// Effects accumulate frames across separate jobs (`effect-rift-0/1/2`) and
+// separate runs, so replacing the whole key would lose the frames a selected
+// run did not touch. Merge frames by index and keep the previous ones.
+function mergeBakedEffects(previous = {}, fresh = {}) {
+  const merged = { ...previous };
+  for (const [key, entry] of Object.entries(fresh)) {
+    const prior = previous[key];
+    if (!isPlainObject(prior) || !Array.isArray(prior.frames) || !Array.isArray(entry?.frames)) { merged[key] = entry; continue; }
+    const frames = Array.from(prior.frames, (frame) => frame ?? null);
+    for (let index = 0; index < entry.frames.length; index++) frames[index] = entry.frames[index] ?? frames[index] ?? null;
+    merged[key] = { ...entry, frames };
+  }
+  return merged;
+}
+
+// Merge a run's records over the published registry, key by key: successful
+// jobs replace their own keys, non-selected and failed jobs keep the previous
+// values, and first-seen jobs add keys. No previous module means the run's
+// aggregate is published as-is, as today.
+export function mergeBakedRecords(previous, fresh) {
+  if (!previous) return fresh;
+  if (!fresh) return previous;
+  const merged = { ...previous, version: fresh.version ?? previous.version, generator: fresh.generator ?? previous.generator };
+  for (const bucket of BUCKETS) {
+    if (bucket === 'effects') merged.effects = mergeBakedEffects(previous.effects, fresh.effects);
+    else merged[bucket] = { ...(previous[bucket] || {}), ...(fresh[bucket] || {}) };
+  }
+  merged.provenance = { ...(previous.provenance || {}), ...(fresh.provenance || {}) };
+  return merged;
+}
+
+let importSeq = 0;
+// Import the previous registry with a cache-busting query so repeated calls in
+// one process see the current file. A missing module is not an error; a present
+// but broken one is, so a corrupt registry is never silently overwritten.
+export async function loadPublishedModule(modulePath = MODULE_OUT) {
+  if (!fs.existsSync(modulePath)) return null;
+  const mod = await import(`${pathToFileURL(modulePath).href}?v=${Date.now()}-${++importSeq}`);
+  const baked = mod.MOTH_BAKED ?? mod.default;
+  if (!isPlainObject(baked)) throw new Error(`${modulePath} does not export a MOTH_BAKED registry`);
+  return baked;
+}
+
+// Offline plan for `run --dry`: validate engines, bake types, generator specs
+// and local inputs, and report whether each job would reuse a paid job id or
+// submit one. Reads only; nothing here touches the network or writes.
+export function planDryRun({ manifest, root = ROOT, only, log = () => {} } = {}) {
+  const plans = [];
+  const failures = [];
+  const seen = new Set();
+  for (const job of manifest?.jobs || []) {
+    if (job.enabled === false) { log(`- ${job.id}: disabled`); continue; }
+    if (only && job.id !== only) continue;
+    const problems = [];
+    if (seen.has(job.id)) problems.push(`duplicate job id "${job.id}"`);
+    seen.add(job.id);
+    if (!KNOWN_ENGINES.has(job.engine)) problems.push(`unknown engine "${job.engine}"`);
+    if (job.bake && !BAKERS[job.bake.type]) problems.push(`unknown bake type "${job.bake.type}"`);
+    if (job.generateValues && !GENERATOR_TYPES.has(job.generateValues.type)) problems.push(`unknown generateValues type "${job.generateValues.type}"`);
+    for (const [slot, rel] of Object.entries(job.input || {})) {
+      const file = path.join(root, 'assets/moth', rel);
+      if (!fs.existsSync(file)) problems.push(`input ${slot} missing: ${file}`);
+    }
+    const action = job.jobId ? 'reuse' : 'submit';
+    plans.push({ id: job.id, engine: job.engine, action, jobId: job.jobId || null, problems });
+    if (problems.length) {
+      log(`- ${job.id}: ${problems.join('; ')}`);
+      failures.push({ id: job.id, engine: job.engine, message: problems.join('; ') });
+    } else {
+      log(`- ${job.id} (${job.engine}): would ${action === 'reuse' ? `reuse job ${job.jobId}` : 'submit a new job'}`);
+    }
+  }
+  return { plans, failures };
+}
+
+export async function resolveResult(key, job, log = () => {}, force = false, { fetchImpl = fetch, save = () => {} } = {}) {
+  // A recorded job id is only reused when the API confirms it is still
+  // completed. Anything else — failed, cancelled, still running, an
+  // unrecognized status, or a status request that errors — must never fall
+  // through to a fresh submission: that would silently spend credits when the
+  // user only meant to re-download an existing result. Require `--force`.
   if (job.jobId && !force) {
     log(`  reusing job ${job.jobId}`);
-    const status = await jobStatus(key, job.jobId).catch(() => null);
-    if (status?.status === 'completed') return jobResult(key, job.jobId);
+    let status;
+    try {
+      status = await jobStatus(key, job.jobId, { fetchImpl });
+    } catch (error) {
+      throw new Error(`recorded job ${job.id} (${job.jobId}) could not be verified: ${error.message}. Refusing to submit a fresh job automatically; pass --force to submit one (this spends credits).`);
+    }
+    if (status?.status === 'completed') return jobResult(key, job.jobId, { fetchImpl });
+    throw new Error(`recorded job ${job.id} (${job.jobId}) is ${status?.status ?? 'unknown'}, not completed. Refusing to submit a fresh job automatically; pass --force to submit one (this spends credits).`);
   }
   let inputFiles;
   if (job.input) {
@@ -992,70 +1181,105 @@ async function resolveResult(key, job, log, force = false) {
     for (const [slot, rel] of Object.entries(job.input)) {
       const file = path.join(ROOT, 'assets/moth', rel);
       if (!fs.existsSync(file)) throw new Error(`input ${slot} missing: ${file} (run "sources" first)`);
-      inputFiles[slot] = await uploadAsset(key, file);
+      inputFiles[slot] = await uploadAsset(key, file, { fetchImpl });
     }
   }
   const params = { ...(job.params || {}) };
   const generated = generateValues(job);
   if (generated) params.values = generated;
-  const submitted = await submitJob(key, job.engine, { params, inputFiles, mode: job.mode });
+  const submitted = await submitJob(key, job.engine, { params, inputFiles, mode: job.mode, fetchImpl });
+  if (!submitted?.job_id) throw new Error(`submit for "${job.id}" returned no job_id`);
   log(`  submitted ${submitted.job_id}`);
-  await waitForJob(key, submitted.job_id, { log });
+  // Persist the paid id before waiting: a crash or timeout during the wait must
+  // not lose a job that has already been paid for.
   job.jobId = submitted.job_id;
-  return jobResult(key, submitted.job_id);
+  save();
+  await waitForJob(key, submitted.job_id, { log, fetchImpl });
+  return jobResult(key, submitted.job_id, { fetchImpl });
 }
 
-async function downloadOutputs(result, dir, log) {
+export function normalizeContentType(value) {
+  if (typeof value !== 'string') return '';
+  return value.split(';')[0].trim().toLowerCase();
+}
+
+export async function downloadOutputs(result, dir, log = () => {}, { fetchImpl = fetch } = {}) {
   const files = new Map();
   fs.mkdirSync(dir, { recursive: true });
   for (const output of result.outputs || []) {
-    const res = await fetch(output.url);
+    if (!output?.url) throw new Error(`download ${output?.slot ?? '?'}: output has no url`);
+    const res = await fetchImpl(output.url);
+    if (!res.ok) throw new Error(`download ${output.url} -> ${res.status}${res.statusText ? ` ${res.statusText}` : ''}`);
+    const declared = normalizeContentType(output.content_type);
+    const actual = normalizeContentType(res.headers?.get?.('content-type'));
+    if (declared && actual !== declared) throw new Error(`download ${output.url}: content-type "${actual || '(none)'}" does not match the declared "${declared}"`);
     const buffer = Buffer.from(await res.arrayBuffer());
+    if (!buffer.length) throw new Error(`download ${output.url}: empty body`);
     files.set(output.slot, buffer);
     const ext = (output.content_type || 'bin').split('/').pop().replace(/[^a-z0-9]/gi, '');
     const target = path.join(dir, `${rgba(output.slot)}.${ext}`);
-    fs.writeFileSync(target, buffer);
+    writeFileAtomic(target, buffer);
     log(`  saved ${path.relative(ROOT, target)} (${buffer.length} bytes)`);
   }
   if (result.result !== undefined && result.result !== null) {
-    fs.writeFileSync(path.join(dir, 'result.json'), JSON.stringify(result.result, null, 2) + '\n');
+    writeFileAtomic(path.join(dir, 'result.json'), `${JSON.stringify(result.result, null, 2)}\n`);
   }
   return files;
 }
 
-export async function runManifest({ only, force = false, dry = false, strict = false, log = console.error } = {}) {
-  const key = dry ? null : readKey();
-  const manifest = readManifest();
-  const baked = { version: manifest.version || 1, generator: 'scripts/moth-bake.mjs', textures: {}, normals: {}, materials: {}, sky: {}, effects: {}, levels: {}, seeds: {}, motifs: {}, irs: {}, audio: {}, spaces: {}, provenance: {} };
+export async function runManifest({ only, force = false, dry = false, strict = false, log = console.error, manifestPath = MANIFEST, filesDir = FILES_DIR, modulePath = MODULE_OUT, fetchImpl = fetch } = {}) {
+  const manifest = readManifest(manifestPath);
+  const jobs = manifest.jobs || [];
+  // A misspelled `--only` id must fail loudly rather than quietly skip every
+  // job and publish nothing.
+  if (only && !jobs.some((job) => job.id === only)) throw new Error(`--only "${only}": no job with that id in ${path.relative(ROOT, manifestPath) || manifestPath}`);
+  if (dry) {
+    const { plans, failures } = planDryRun({ manifest, only, log });
+    if (failures.length) log(`\n${failures.length} job(s) failed validation: ${failures.map((f) => f.id).join(', ')}`);
+    return { baked: emptyBaked(manifest.version), fresh: emptyBaked(manifest.version), plans, failures, wrote: false };
+  }
+  const key = readKey();
+  const fresh = emptyBaked(manifest.version || 1);
   const failures = [];
-  for (const job of manifest.jobs || []) {
+  const succeeded = new Set();
+  const save = () => writeManifest(manifest, manifestPath);
+  for (const job of jobs) {
     if (job.enabled === false) { log(`- ${job.id}: disabled`); continue; }
     if (only && job.id !== only) continue;
     log(`\n> ${job.id} (${job.engine})`);
-    if (dry) { log('  dry run — skipped'); continue; }
-    const dir = path.join(FILES_DIR, job.raw || job.id);
+    const dir = path.join(filesDir, job.raw || job.id);
     try {
-      const result = await resolveResult(key, job, log, force);
-      const files = await downloadOutputs(result, dir, log);
+      const result = await resolveResult(key, job, log, force, { fetchImpl, save });
+      const files = await downloadOutputs(result, dir, log, { fetchImpl });
       const bake = job.bake;
       if (bake?.type) {
         const baker = BAKERS[bake.type];
         if (!baker) throw new Error(`unknown baker: ${bake.type}`);
         const out = baker(job, { files, result, bake, job, dir, rawName: job.raw || job.id, publicDir: `/moth/files/${job.raw || job.id}` });
-        applyBaked(baked, out);
+        applyBaked(fresh, out);
         log(`  baked ${out.bucket}.${out.key}${out.merge === 'frames' ? `[${out.index}]` : ''}`);
       }
-      baked.provenance[job.id] = { engine: job.engine, jobId: job.jobId || null, mode: job.mode || job.params?.mode || 'emu', name: bake?.name || null, credits: job.credits ?? null };
+      fresh.provenance[job.id] = { engine: job.engine, jobId: job.jobId || null, mode: job.mode || job.params?.mode || 'emu', name: bake?.name || null, credits: job.credits ?? null };
+      succeeded.add(job.id);
     } catch (error) {
       log(`  FAILED: ${error.message}`);
       failures.push({ id: job.id, engine: job.engine, message: error.message });
       if (strict) throw error;
     }
   }
-  writeManifest(manifest);
-  if (!dry) writeModule(baked);
+  const previous = await loadPublishedModule(modulePath);
+  const baked = mergeBakedRecords(previous, fresh);
+  let wrote = false;
+  if (succeeded.size === 0) {
+    // An interrupted or fully failed batch must not replace the last-known-good
+    // registry: leave the published module byte-identical.
+    log(previous ? '\nNo successful jobs — published registry left unchanged.' : '\nNo successful jobs — nothing to publish.');
+  } else {
+    wrote = Boolean(writeModule(baked, { modulePath, expectedProvenance: [...succeeded], log }));
+  }
+  writeManifest(manifest, manifestPath);
   if (failures.length) log(`\n${failures.length} job(s) failed: ${failures.map((f) => f.id).join(', ')}`);
-  return { baked, failures };
+  return { baked, fresh, failures, plans: [], wrote };
 }
 
 function applyBaked(baked, out) {
@@ -1069,11 +1293,26 @@ function applyBaked(baked, out) {
   bucket[out.key] = out.value;
 }
 
-function writeModule(baked) {
-  for (const effect of Object.values(baked.effects || {})) effect.frames = (effect.frames || []).filter(Boolean);
+// Keep frame indexes stable while dropping the sparse holes JSON would turn
+// into null, so a partial effect run cannot shift a later frame onto index 0.
+function normalizeEffectFrames(baked) {
+  const effects = {};
+  for (const [key, effect] of Object.entries(baked.effects || {})) {
+    const frames = Array.isArray(effect?.frames) ? Array.from(effect.frames, (frame) => frame ?? null) : effect?.frames;
+    if (Array.isArray(frames)) while (frames.length && frames[frames.length - 1] === null) frames.pop();
+    effects[key] = isPlainObject(effect) ? { ...effect, frames } : effect;
+  }
+  return { ...baked, effects };
+}
+
+export function writeModule(baked, { modulePath = MODULE_OUT, expectedProvenance = [], log = console.log } = {}) {
+  const normalized = normalizeEffectFrames(baked);
+  validateBakedForPublish(normalized, expectedProvenance);
   const header = `// GENERATED by scripts/moth-bake.mjs — do not edit by hand.\n// Regenerate with: MOTH_API_KEY=... node scripts/moth-bake.mjs run\n// Source engines: Moth Quantum Atlas (https://api.mothquantum.com).\n\n`;
-  fs.writeFileSync(MODULE_OUT, `${header}export const MOTH_BAKED = ${JSON.stringify(baked, null, 2)};\n\nexport default MOTH_BAKED;\n`);
-  console.log(`wrote ${path.relative(ROOT, MODULE_OUT)}`);
+  const text = `${header}export const MOTH_BAKED = ${JSON.stringify(normalized, null, 2)};\n\nexport default MOTH_BAKED;\n`;
+  writeFileAtomic(modulePath, text);
+  log(`wrote ${path.relative(ROOT, modulePath)}`);
+  return text;
 }
 
 // ---------------------------------------------------------------------------
@@ -1138,8 +1377,8 @@ export function rebuildLocalBakes({ only, filesDir = FILES_DIR, manifest = readM
 // records. The module is imported with a cache-busting query so repeated calls
 // in one process see the current file.
 export async function repairModule({ only, log = () => {} } = {}) {
-  const mod = await import(`${pathToFileURL(MODULE_OUT).href}?v=${Date.now()}`);
-  const baked = mod.MOTH_BAKED;
+  const baked = await loadPublishedModule();
+  if (!baked) throw new Error(`published registry not found: ${MODULE_OUT} (run a bake first)`);
   const rebuilt = rebuildLocalBakes({ only, log });
   for (const bucket of ['textures', 'normals', 'materials', 'sky', 'effects', 'levels', 'seeds', 'motifs', 'irs', 'audio', 'spaces']) baked[bucket] ??= {};
   for (const bucket of ['irs', 'spaces', 'audio']) Object.assign(baked[bucket], rebuilt[bucket]);
@@ -1631,10 +1870,16 @@ async function main() {
     return;
   }
   if (command === 'run') {
-    const { baked, failures } = await runManifest({ only: args.only, force: args.force, dry: args.dry, log: (m) => console.error(m) });
-    const buckets = ['textures', 'normals', 'materials', 'sky', 'effects', 'levels', 'seeds', 'motifs', 'irs', 'audio', 'spaces'];
-    const counts = Object.fromEntries(buckets.map((key) => [key, Object.keys(baked[key] || {}).length]));
-    console.error(`\nBaked: ${JSON.stringify(counts)} · jobs: ${Object.keys(baked.provenance).length} · failed: ${failures.length}`);
+    const { baked, failures, plans, wrote } = await runManifest({ only: args.only, force: args.force, dry: args.dry, log: (m) => console.error(m) });
+    if (args.dry) {
+      const reuse = plans.filter((p) => p.action === 'reuse').length;
+      console.error(`\nDry run: ${plans.length} job(s) planned (${reuse} reuse, ${plans.length - reuse} submit) · failed: ${failures.length}${wrote ? '' : ' · no files written'}`);
+    } else {
+      const counts = Object.fromEntries(BUCKETS.map((key) => [key, Object.keys(baked[key] || {}).length]));
+      console.error(`\nBaked: ${JSON.stringify(counts)} · jobs: ${Object.keys(baked.provenance).length} · failed: ${failures.length}`);
+    }
+    // A partial or failed batch must not look like success to CI or a shell.
+    if (failures.length) process.exitCode = 1;
     return;
   }
   throw new Error(`unknown command: ${command}`);
