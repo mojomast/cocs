@@ -9,15 +9,15 @@ import {
 } from './class-ui.mjs';
 
 const EXPECTED_BUDGET_LINES = {
-  'air-dash': '1 charge · 5.5 m · 2.5 s cooldown · 0.15 s landing',
-  'double-jump': '1 charge · 7.4 impulse',
-  'super-jump': '1 charge · 12.5 impulse · 0.55 s wind-up · 6 s cooldown · 0.25 s landing',
-  'hover-jets': '2.5 s fuel · 1.8 s recharge · 0.35 climb · 2.2 m/s descent · 0.2 s landing',
-  'brace-slam': '0.15 s wind-up · 4 m radius · 9 knockback · 8 s cooldown',
-  'safety-glide': '2 m/s descent · 4 steer',
-  grapple: '14 m · 12 m/s reel · 7 s cooldown · 3 s on miss',
-  'blink-step': '6 m · 0.3 s wind-up · 6 s cooldown',
-  'deployable-rope': '1 charge · 20 s anchor · 12 s cooldown',
+  'air-dash': '1 charge · 6 m · 2.2 s cooldown · 0.15 s landing',
+  'double-jump': '1 charge · 7.8 impulse',
+  'super-jump': '1 charge · 12.5 impulse · 0.45 s wind-up · 5 s cooldown · 0.25 s landing',
+  'hover-jets': '3 s fuel · 1.6 s recharge · 0.35 climb · 2.2 m/s descent · 0.2 s landing',
+  'brace-slam': '0.12 s wind-up · 4.5 m radius · 10 knockback · 7 s cooldown',
+  'safety-glide': '1.7 m/s descent · 4.5 steer',
+  grapple: '14 m · 12 m/s reel · 6 s cooldown · 2.5 s on miss',
+  'blink-step': '6 m · 0.25 s wind-up · 5 s cooldown',
+  'deployable-rope': '1 charge · 20 s anchor · 10 s cooldown',
 };
 
 test('input, kind, hook and trigger labels are human copy with total fallbacks', () => {

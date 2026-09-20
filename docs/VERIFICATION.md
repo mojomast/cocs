@@ -55,17 +55,22 @@ loop, 23 stackable effects (three built from baked Moth assets with selectable
 sources), eleven starting recipes, per-target WORLD / WEAPON / BOTS stacks with
 depth-tested bot compositing and an isolated weapon pass, a research-backed
 finish pass (static dithering for 8-bit banding, contrast-adaptive sharpening,
-tier-scaled environment reflections), and an animation pass that restores death
+tier-scaled environment reflections), an animation pass that restores death
 variety (direction topple, per-pose arcs, seeded silhouettes, style treatments)
 alongside strength-scaled hit flinches, a melee swing, shell casings,
-style-aware death audio and gated UI motion. This sits on top of a paid 15-job
+style-aware death audio and gated UI motion, and a combat pass that gives all
+ten weapons a held alt-fire mode (model morph plus distinct behaviour), tunes
+every harness active and operator verb with new snapshot-driven visuals and HUD
+meters, and hardens all nine movement verbs. This sits on top of a paid 15-job
 Moth batch and the material variety that consumes it: nine masked surface
 variants, two reflectance LUTs, an ember sky, two quantum scalar fields and a
 16-frame QRC glyph animation, wired into surface variants, arena skies/LUTs and
-the lab. No simulation, server, protocol or dependency change; the game server
-does not need a restart. Default rendering is unchanged: the lab is off until a
-player enables it, post-processing remains opt-in, and target stacks allocate
-nothing until enabled.
+the lab. The combat pass touches the simulation, server and input envelope
+(additive; protocol stays 3), so the release deploys the web and game server
+together and active matches disconnect briefly on the server restart. Default
+rendering is unchanged: the lab is off until a player enables it,
+post-processing remains opt-in, and target stacks allocate nothing until
+enabled.
 
 - `docs/GRAPHICS-LAB.md` — hotkeys, controls, render contract and limitations.
 - `docs/design/GRAPHICS-EDGE-PLAN.md` — the graphics-edge research notes,
@@ -79,9 +84,9 @@ nothing until enabled.
 
 **Automated release gate (2026-09-20).**
 
-- `npm test`: pass. Game tests: 2,693 pass, 8 approved skips, 0 fail (2,701
-  tests); server tests: 209 pass, 0 fail; TypeScript: pass; verified production
-  build: pass; SSR/UI and deployment-contract tests: 90 pass, 0 fail.
+- `npm test`: pass. Game tests: 2,762 pass, 8 approved skips, 0 fail (2,770
+  tests); server tests: 212 pass, 0 fail; TypeScript: pass; verified production
+  build: pass; SSR/UI and deployment-contract tests: 91 pass, 0 fail.
 - Moth-focused suites are part of that run: bake-runner integrity
   (`moth-bake-run.test.mjs`), GIF decode / grid-texture / GIF-frame bakers and
   generated sources (`moth-bake-pixels.test.mjs`), variant generation and mixed

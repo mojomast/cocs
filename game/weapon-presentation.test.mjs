@@ -42,3 +42,15 @@ test('weapon traces begin at transformed muzzles without mutating authoritative 
  const event={type:'shot',actor:8,weapon:2,from:{x:3,y:3,z:1},to:{x:12,y:3,z:-15}},original=structuredClone(event);view.effect(event);const trace=view.effectPool.slots.find(s=>s.line).obj;
  assert.ok(trace.position.distanceTo(weapon.userData.muzzle.getWorldPosition(new T.Vector3()))<1e-10);trace.updateMatrixWorld();assert.ok(new T.Vector3(0,0,1).applyMatrix4(trace.matrixWorld).distanceTo(new T.Vector3(12,3,-15))<1e-10);assert.deepEqual(event,original);view.effectPool.dispose();view.disposeObject(actor);
 });
+test('assembled weapons carry bounded hidden alt parts with resolved morph nodes',()=>{
+ const view=Object.create(ArenaView.prototype);
+ for(let type=0;type<WEAPONS.length;type++){
+  const model=weaponModel(type),parts=model.userData.altParts,rig=model.userData.altRig;
+  assert.ok(Array.isArray(parts)&&parts.length>=1&&parts.length<=6,`${type}: alt part budget (${parts?.length})`);
+  assert.ok(parts.every(part=>part.visible===false&&part.userData.altPart===true),`${type}: alt parts start hidden`);
+  assert.equal(model.userData.altMorph.id,['salvo','cluster','overload','slug','mortar','mine','chain','bomb','double','twin'][type]);
+  assert.ok(rig.move.length>=1&&rig.move.every(entry=>entry.node),`${type}: the morph moves a resolved node`);
+  assert.ok(rig.show.length>=1&&rig.show.every(entry=>entry.node),`${type}: the morph reveals resolved geometry`);
+  view.disposeObject(model);
+ }
+});

@@ -6,10 +6,13 @@ import {aim,presentationSupportAt} from './core.mjs';
 import {MAPS,pickupWeapon} from './maps.mjs';
 import {normalizeDisplay} from './config.mjs';
 import {WeaponFeedback,EffectPool,AmbientFX,WeatherFX} from './feedback.mjs';
-import {ModelAssets,withAssets,currentAssets,CameraShake,MuzzleLightPool,LowHealthOverlay,RailBeamPool,DeathPool,DecalPool,HitReactionFX,ShellPool,TelegraphPool,WeaponPreviewRig,killcamPose,KILLCAM_DURATION} from './effects-fx.mjs';
+import {ModelAssets,withAssets,currentAssets,CameraShake,MuzzleLightPool,LowHealthOverlay,RailBeamPool,DeathPool,DecalPool,HitReactionFX,ShellPool,TelegraphPool,WeaponPreviewRig,killcamPose,KILLCAM_DURATION,AltProjectilePool,altRocketKind,altProjectileColor} from './effects-fx.mjs';
+import {createAbilityVfx} from './ability-vfx.mjs';
 import {deathPlan,deathStyleFor,hitReaction,hashUnit,fallDuration} from './deaths.mjs';
 import {resolveFinish} from './cosmetics.mjs';
 import {buildWeaponBody} from './weapon-models/index.mjs';
+import {buildAltParts,applyAltMorph} from './weapon-models/alt-parts.mjs';
+import {ALT_FIRE,altSpecFor} from './alt-fire.mjs';
 import {buildSimpleWeaponBody} from './weapon-models/chassis.mjs';
 import {AdsController} from './weapon-ads.mjs';
 import {legacyWeaponBody} from './weapon-models/legacy.mjs';
@@ -191,6 +194,9 @@ export const VIEWMODEL_SCALE=1.1;
 export const VIEWMODEL_GUN_DISTANCE=.82;
 const buildSightError=(rear,front,aim)=>sightAlignmentError(rear,front,aim,VIEWMODEL_SCALE);
 function assembleWeapon(type,assets,visual,finish,body){return withAssets(assets,()=>{type=Number.isInteger(type)&&type>=0?type:0;const info=weaponInfo(type),finishColors=resolveFinish(finish,null),g=new T.Group(),dark=material(finishColors?.secondary||'#222f37'),light=material(finishColors?.accent||'#73848a'),glow=material(finishColors?.primary||info.color,.3,.3,true);g.userData.type=type;const ctx={T,info,material,box,cylinder,ring,geo:(key,make)=>geometry(assets,key,make),palette:{dark,light,glow}};body(type,g,ctx);
+  // Alt-fire parts are authored hidden and blended in by the view while the
+  // snapshot holds `player.alt`; they share the body's cached ctx resources.
+  buildAltParts(type,g,ctx);
   // Named anchors replace the old unconditional rail + iron sights. Every
   // builder already ships its own sights; the shared tail only records the
   // anchors used to derive ADS, attach the selected optic, and drive reload
@@ -626,7 +632,14 @@ export class ArenaView{
    if(this.renderer.isSoftware===true){this.camera.add(this.hands);}
    else{this.weaponScene=new T.Scene();this.weaponRoot=new T.Group();this.weaponScene.add(this.weaponRoot);this.weaponRoot.add(this.hands);this.weaponCamera=new T.PerspectiveCamera(this.weaponFov,1,.02,4);this.weaponScene.add(new T.HemisphereLight('#cfe9ff','#20262c',2.2));const weaponKey=new T.DirectionalLight('#ffffff',2.6);weaponKey.position.set(-2,4,3);this.weaponScene.add(weaponKey);}
    this._enableBotLayers();
-   this.scene.add(this.camera);this.currentWeapon=-1;this._weaponCache=new Map();this.aim=false;this.lowHealth=false;this.cameraShake=new CameraShake();this.muzzleLights=null;this.lowHealthOverlay=null;this.railPool=null;this.deathPool=null;this.deathContext=new Map();this.payloadModel=null;this.decalPool=null;this.ambientFx=null;this.ambientPool=null;this.ambientConfig=null;this.ambientAnchors=[];this.scatterWind=[];this.killcamEnabled=true;this._killcam=null;this.hitPool=null;this.hitFlinch=new Map();this._lightning=[];this._lightningAt=0;this._flash=0;this._wetSheenApplied=0;this.preview=null;this.showcaseExpected=false;if(this.renderer.isSoftware!==true){this.muzzleLights=new MuzzleLightPool(this.scene,2);this.lowHealthOverlay=new LowHealthOverlay(this.camera);if(typeof document!=='undefined')this.railPool=new RailBeamPool(this.scene,6);this.decalPool=new DecalPool(this.scene,18);const rim=new T.DirectionalLight('#7fd8ff',.55);rim.position.set(-7,6,-9);rim.userData.rimLight=true;this.scene.add(rim);}this.menu=this.makeMenu();this.cinema=false;this.director=null;this._cameraOwner='auto';this._freeCam=false;this._directorLock=false;this.manualFollowId=null;this.freePose={x:0,y:6,z:0,yaw:0,pitch:0};this.freeSpeed=FREE_CAM_DEFAULT_SPEED;this.freeBoost=FREE_CAM_BOOST;this._freeVel=null;this._freeExit=null;this._freeExitPose=null;this._lastMode=null;this.showcaseState=null;this.previewRect=null;this.raycaster=new T.Raycaster();this._occClear=0;this.resize();}
+   this.scene.add(this.camera);this.currentWeapon=-1;this._weaponCache=new Map();this.aim=false;this.lowHealth=false;this.cameraShake=new CameraShake();this.muzzleLights=null;this.lowHealthOverlay=null;this.railPool=null;this.deathPool=null;this.deathContext=new Map();this.payloadModel=null;this.decalPool=null;this.ambientFx=null;this.ambientPool=null;this.ambientConfig=null;this.ambientAnchors=[];this.scatterWind=[];this.killcamEnabled=true;this._killcam=null;this.hitPool=null;this.hitFlinch=new Map();
+   // Ability/harness visual effects: the seven harness actives, the nine
+   // snapshot-driven signature verbs and the placed-rope cables. Self-contained
+   // presentation-only pools; `setMatch` resets them and `dispose` releases
+   // every geometry/material.
+   this.abilityVfx=createAbilityVfx({quality:()=>this._quality(),reduced:()=>this.reduced(),wingColor:id=>this.actorModels?.get(id)?.userData?.wingColor??null});
+   this.abilityVfx.attach(this.scene);
+   this._lightning=[];this._lightningAt=0;this._flash=0;this._wetSheenApplied=0;this.preview=null;this.showcaseExpected=false;if(this.renderer.isSoftware!==true){this.muzzleLights=new MuzzleLightPool(this.scene,2);this.lowHealthOverlay=new LowHealthOverlay(this.camera);if(typeof document!=='undefined')this.railPool=new RailBeamPool(this.scene,6);this.decalPool=new DecalPool(this.scene,18);const rim=new T.DirectionalLight('#7fd8ff',.55);rim.position.set(-7,6,-9);rim.userData.rimLight=true;this.scene.add(rim);}this.menu=this.makeMenu();this.cinema=false;this.director=null;this._cameraOwner='auto';this._freeCam=false;this._directorLock=false;this.manualFollowId=null;this.freePose={x:0,y:6,z:0,yaw:0,pitch:0};this.freeSpeed=FREE_CAM_DEFAULT_SPEED;this.freeBoost=FREE_CAM_BOOST;this._freeVel=null;this._freeExit=null;this._freeExitPose=null;this._lastMode=null;this.showcaseState=null;this.previewRect=null;this.raycaster=new T.Raycaster();this._occClear=0;this.resize();}
        reduced(){return reducedMotion(this.display?.reducedMotion, Boolean(this.motionQuery?.matches));}
        // Presentation-only quality tier. Lazily resolved so partially constructed
        // views in tests still get a sane budget, and cached so hot paths are free.
@@ -1669,7 +1682,7 @@ export class ArenaView{
  for(let i=-4;i<=4;i++){box(scene,.25,9,.5,i*3,4,-6,dark);box(scene,.045,6,.04,i*3+.18,4,-5.72,glow);}
   const model=robotModel('chatgpt',undefined,this.renderer?.isSoftware===true);model.scale.setScalar(2.15);model.position.y=.17;model.rotation.y=.25;scene.add(model);return {scene,camera,model,id:'chatgpt'};}
   setCharacter(id){if(id===this.menu.id)return;this.disposeObject(this.menu.model);this.menu.scene.remove(this.menu.model);this.menu.model=robotModel(id,undefined,this.renderer?.isSoftware===true);this.menu.model.scale.setScalar(2.15);this.menu.model.position.y=.17;this.menu.scene.add(this.menu.model);this.menu.id=id;}
-      setMatch(match){this.clearFreeMotion();this.characterLifecycle?.clear();this.deathContext?.clear();this.deathPool?.clear();this.hitPool?.clear();this.hitFlinch?.clear();this.shellPool?.clear();this._clearDebugDeaths?.();const arena=match.arena||MAPS.find(a=>a.id===match.mapId)||MAPS[0];this.clearObjectiveMarkers();if(this.payloadModel){this.scene.remove(this.payloadModel);this.disposeObject(this.payloadModel);this.payloadModel=null;}for(const m of [...this.actorModels.values(),...this.pickupModels,...(this.flagModels||new Map()).values()]){this.scene.remove(m);this.disposeObject(m);}this.flagModels=new Map();if(this.mapId!==arena.id)this.buildArena(arena);const assets=this.modelAssets??=new ModelAssets();this.actorModels=new Map((match.actors||[]).map(a=>{const m=robotModel(a.character,assets,this.renderer?.isSoftware===true);this._addActorModel(m);return [a.id,m];}));this.pickupModels=(match.pickups||[]).map(p=>{const g=new T.Group(),colors={health:'#77efba',armor:'#6dbfff',rocket:'#ffb164',rail:'#bf9cff',scatter:'#ffde87',plasma:'#72cfff',grenade:'#ff806b',shock:'#8ce8ff',flak:'#ffd166',marksman:'#ffd27a',smg:'#8affc1',haste:'#72f1b8',overcharge:'#ff8f70',overshield:'#75baff',recon:'#7fe7ff',cloak:'#c8b6ff'},pickupColor=colors[p.kind]||'#8ad9d3',mat=this._mothLutMaterial(this._mothLutTheme(arena),{base:{color:pickupColor,metalness:.4,roughness:.3,emissive:pickupColor},phase:.15,intensity:.4})??material(pickupColor,.4,.3,true);if(p.kind==='health'){box(g,.6,.19,.19,0,.65,0,mat);box(g,.19,.6,.19,0,.65,0,mat);}else if(p.kind==='armor'){const m=new T.Mesh(geometry(assets,'pickup-armor-octa',()=>new T.OctahedronGeometry(.4)),mat);m.position.y=.7;g.add(m);}else if(['haste','overcharge','overshield'].includes(p.kind)){const m=new T.Mesh(geometry(assets,'pickup-power-ico',()=>new T.IcosahedronGeometry(.36,1)),mat);m.position.y=.7;g.add(m);ring(g,.55,.022,0,.07,0,mat);}else{const w=simpleWeaponModel(pickupWeapon(p.kind),assets);w.position.y=.75;w.scale.setScalar(.7);g.add(w);}if(!['haste','overcharge','overshield'].includes(p.kind))ring(g,.55,.022,0,.07,0,mat);g.position.set(p.x||0,p.y||0,p.z||0);this.scene.add(g);return g;});this._trackAssets(assets);this.syncVehicles(match);this.updateFlags(match,arena);this.updateObjectives(match,arena);this.effectPool?.clear();this.telegraphPool?.clear();for(const m of this.zipCarriages?.values()||[]){this.scene.remove(m);this.disposeObject(m);}this.zipCarriages?.clear();this._fovPulse=0;this.projectilePool?.clear();this._clearMothSprites();this.railPool?.clear();this.deathContext?.clear();this.deathPool?.clear();this.decalPool?.clear();this.ambientFx?.reset();this.debrisPool?.clear();this.hitFlinch?.clear();this.hitPool?.clear();this._killcam=null;this.feedback?.reset();this.cameraShake?.reset();this.lowHealth=false;this.flashUntil=0;this.lastEvent=match.serial||0;this.currentWeapon=-1;this._adsTransition=0;this._adsController?.reset(this.display?.fov??82);this._nearActionAt=undefined;this._nearAction=0;this._cocsPresentation=null;this.resetPresentation();
+      setMatch(match){this.clearFreeMotion();this.characterLifecycle?.clear();this.deathContext?.clear();this.deathPool?.clear();this.hitPool?.clear();this.hitFlinch?.clear();this.shellPool?.clear();this.abilityVfx?.reset();this._clearDebugDeaths?.();const arena=match.arena||MAPS.find(a=>a.id===match.mapId)||MAPS[0];this.clearObjectiveMarkers();if(this.payloadModel){this.scene.remove(this.payloadModel);this.disposeObject(this.payloadModel);this.payloadModel=null;}for(const m of [...this.actorModels.values(),...this.pickupModels,...(this.flagModels||new Map()).values()]){this.scene.remove(m);this.disposeObject(m);}this.flagModels=new Map();if(this.mapId!==arena.id)this.buildArena(arena);const assets=this.modelAssets??=new ModelAssets();this.actorModels=new Map((match.actors||[]).map(a=>{const m=robotModel(a.character,assets,this.renderer?.isSoftware===true);this._addActorModel(m);return [a.id,m];}));this.pickupModels=(match.pickups||[]).map(p=>{const g=new T.Group(),colors={health:'#77efba',armor:'#6dbfff',rocket:'#ffb164',rail:'#bf9cff',scatter:'#ffde87',plasma:'#72cfff',grenade:'#ff806b',shock:'#8ce8ff',flak:'#ffd166',marksman:'#ffd27a',smg:'#8affc1',haste:'#72f1b8',overcharge:'#ff8f70',overshield:'#75baff',recon:'#7fe7ff',cloak:'#c8b6ff'},pickupColor=colors[p.kind]||'#8ad9d3',mat=this._mothLutMaterial(this._mothLutTheme(arena),{base:{color:pickupColor,metalness:.4,roughness:.3,emissive:pickupColor},phase:.15,intensity:.4})??material(pickupColor,.4,.3,true);if(p.kind==='health'){box(g,.6,.19,.19,0,.65,0,mat);box(g,.19,.6,.19,0,.65,0,mat);}else if(p.kind==='armor'){const m=new T.Mesh(geometry(assets,'pickup-armor-octa',()=>new T.OctahedronGeometry(.4)),mat);m.position.y=.7;g.add(m);}else if(['haste','overcharge','overshield'].includes(p.kind)){const m=new T.Mesh(geometry(assets,'pickup-power-ico',()=>new T.IcosahedronGeometry(.36,1)),mat);m.position.y=.7;g.add(m);ring(g,.55,.022,0,.07,0,mat);}else{const w=simpleWeaponModel(pickupWeapon(p.kind),assets);w.position.y=.75;w.scale.setScalar(.7);g.add(w);}if(!['haste','overcharge','overshield'].includes(p.kind))ring(g,.55,.022,0,.07,0,mat);g.position.set(p.x||0,p.y||0,p.z||0);this.scene.add(g);return g;});this._trackAssets(assets);this.syncVehicles(match);this.updateFlags(match,arena);this.updateObjectives(match,arena);this.effectPool?.clear();this.telegraphPool?.clear();for(const m of this.zipCarriages?.values()||[]){this.scene.remove(m);this.disposeObject(m);}this.zipCarriages?.clear();this._fovPulse=0;this.projectilePool?.clear();this.altProjectiles?.clear();this._clearMothSprites();this.railPool?.clear();this.deathContext?.clear();this.deathPool?.clear();this.decalPool?.clear();this.ambientFx?.reset();this.debrisPool?.clear();this.hitFlinch?.clear();this.hitPool?.clear();this._killcam=null;this.feedback?.reset();this.cameraShake?.reset();this.lowHealth=false;this.flashUntil=0;this.lastEvent=match.serial||0;this.currentWeapon=-1;this._adsTransition=0;this._adsController?.reset(this.display?.fov??82);this._nearActionAt=undefined;this._nearAction=0;this._cocsPresentation=null;this.resetPresentation();
   // Per-mode music theme. The audio object retunes its running drone in place.
   const mode=match.config?.mode??match.mode;if(mode)this.viewAudio?.setModeTheme?.(mode);this._modeTheme=mode??this._modeTheme;}
       syncActors(match){const actors=match?.actors||[];for(const actor of actors)if(!this.actorModels.has(actor.id)){const model=robotModel(actor.character,this.modelAssets??=new ModelAssets(),this.renderer?.isSoftware===true);applyActorTeam(model,actor.team,this.display?.teamPalette);this._addActorModel(model);this.actorModels.set(actor.id,model);}const live=new Set(actors.map(actor=>actor.id));for(const [id,model] of this.actorModels)if(!live.has(id)){this.characterLifecycle?.release(model);this.scene.remove(model);this.disposeObject(model);this.actorModels.delete(id);}}
@@ -1978,7 +1991,8 @@ export class ArenaView{
        if(e.from&&(e.type==='shot'||e.type==='launch')){
         const local=e.actor===this.playerId,weapon=local?(this.hands?.visible?this.firstPerson:null):actorModel?.userData.weapon;
         if(weapon?.userData.type===e.weapon&&weapon.userData.muzzle){
-         const muzzle=weapon.userData.muzzle.getWorldPosition(V());
+         const muzzle=weapon.userData.muzzle.getWorldPosition(V()),twinSide=e.alt===true&&altSpecFor(e.weapon)?.id==='twin'?V(Math.abs(Number(e.pellet)||0)%2?-1:1,0,0).applyQuaternion(weapon.getWorldQuaternion(new T.Quaternion())).multiplyScalar(.062):null;
+         if(twinSide)muzzle.add(twinSide);
          if(local&&this.camera){
           // The viewmodel muzzle sits below/off the sight line, so the raw muzzle
           // point made shots read from the side of the gun. Project it onto the
@@ -1999,8 +2013,8 @@ export class ArenaView{
             else if(depth>limit)depth=limit;
            }
           }
-          e={...e,from:this.camera.position.clone().addScaledVector(forward,depth),muzzleFrom:muzzle};
-         }else e={...e,from:muzzle,muzzleFrom:muzzle};
+          e={...e,from:this.camera.position.clone().addScaledVector(forward,depth),muzzleFrom:muzzle,...(twinSide?{muzzleSide:twinSide}:{})};
+         }else e={...e,from:muzzle,muzzleFrom:muzzle,...(twinSide?{muzzleSide:twinSide}:{})};
         }
        }
      if(e.type==='shot'||e.type==='vehicle-shot'||e.type==='launch'||e.type==='dash')this.shotEffect(e,info,reduced);
@@ -2009,8 +2023,12 @@ export class ArenaView{
          // Blasts shatter nearby crates/barrels. Presentation-only and pooled.
          if(e.pos&&!reduced)this._mothFx('effect-explosion','arc-burst',e.pos,{size:e.type==='vehicle-destroyed'?4.4:3,opacity:.8,life:.5,grow:.6,slots:3});
          if(e.pos&&e.type==='explosion')this.breakPropsAt(e.pos,{radius:w===4?3.4:w===5?4.6:4,amount:w===4?60:45,serial:(e.id??0)+1,reduced});}
+      // Alt-fire projectile beats: keyed visuals from `launch`, burst on the
+      // matching `explosion`. Presentation only; the sim owns projectile state.
+      if(e.type==='launch'&&(e.alt===true||e.altId!=null))this._altLaunch(e,reduced);
+      if(e.type==='explosion'&&(e.alt===true||e.altId!=null||this.altProjectiles))this._altExplosion(e,reduced);
      if(e.type==='shot'||e.type==='launch'){const until=performance.now()+(info.feel?.muzzle?.[1]??.06)*1000,model=this.actorModels?.get(e.actor);if(model)model.userData.flashUntil=until;if(e.actor===this.playerId){this.feedback.shot(e.weapon,e.time);this.flashUntil=until;}if(e.type==='shot'&&!reduced)this._ejectShell(e);}if(e.type==='vehicle-shot'){const model=this.vehicleModels?.get(e.vehicle);if(model)model.userData.flashUntil=performance.now()+45;if(e.actor===this.playerId&&e.barrel===0){this.feedback.shot(0,e.time);this.flashUntil=performance.now()+45;}}
-       if((e.type==='shot'||e.type==='vehicle-shot')&&!reduced&&this.muzzleLights){const muzzleColor=e.type==='vehicle-shot'?'#ffd166':info.color,muzzleLife=info.feel?.muzzle?.[1]??.06;this.muzzleLights.flash(muzzleColor,e.muzzleFrom??e.from??e.pos,muzzleLife);}
+       if((e.type==='shot'||e.type==='vehicle-shot')&&!reduced&&this.muzzleLights){const muzzleColor=e.type==='vehicle-shot'?'#ffd166':(e.alt===true?altSpecFor(e.weapon)?.tracer:null)||info.color,muzzleLife=info.feel?.muzzle?.[1]??.06;this.muzzleLights.flash(muzzleColor,e.muzzleFrom??e.from??e.pos,muzzleLife);}
        // Baked sprite accents: traversal teleports flash a portal ring at both
        // ends, and remote muzzle flashes reuse the spark impact sheet so distant
        // fire reads at range. Local fire keeps the viewmodel flash only.
@@ -2184,7 +2202,11 @@ export class ArenaView{
      }
      return true;
     }
-   shotEffect(e,info,reduced){this.effectPool??=new EffectPool(this.scene);const from=e.from,to=e.to??e.pos,weapon=e.weapon??0,feel=info.feel||{},color=e.type==='vehicle-shot'?'#ffd166':(info.color||'#c2ffea'),tracerScale=this._quality().tracers,tracer=feel.tracer||[.085,.055];
+   shotEffect(e,info,reduced){this.effectPool??=new EffectPool(this.scene);const from=e.from,to=e.to??e.pos,weapon=e.weapon??0,feel=info.feel||{},color=e.type==='vehicle-shot'?'#ffd166':(info.color||'#c2ffea'),tracerScale=this._quality().tracers,tracer=feel.tracer||[.085,.055],altSpec=e.alt===true||e.altId!=null?altSpecFor(weapon):null;
+    // Alt-fire hitscan styles (three-fan salvo, slug beam, pierce overload,
+    // chain arcs, twin/double side pairs) all live in one branch so the base
+    // per-weapon tracers stay byte-for-byte unchanged.
+    if(altSpec)return this._altShotEffect(e,altSpec,from,to,reduced);
     if(e.type==='dash'){if(from&&to)this.effectPool.add({from,to,color:'#c99aff',life:.12,size:.08});return;}
     if(e.type==='launch'){if(to){this.effectPool.add({pos:to,color,size:(feel.muzzle?.[0]||.12)*1.5,life:feel.muzzle?.[1]||.09});this.effectPool.add({pos:to,color:'#ffffff',size:.06,life:.08});}return;}
       if(e.type==='vehicle-shot'){if(from&&to){this.effectPool.add({from,to,color,life:.08,size:.06,additive:true});this.effectPool.add({pos:to,color:'#fff2ce',size:.09,life:.12,expand:reduced?0:.3,additive:true});}return;}
@@ -2204,6 +2226,102 @@ export class ArenaView{
     railImpact(pos,color,reduced){this.effectPool.add({pos,color:'#e8f7ff',size:.2,life:.22,expand:reduced?0:.7,wireframe:!reduced});this.effectPool.add({pos,color,size:.12,life:.3,expand:reduced?0:.4});if(!reduced)for(let i=0;i<6;i++)this.effectPool.add({pos,color:'#ffffff',endColor:color,fade:'smooth',damping:2.5,gravity:6,size:.05,life:.24,velocity:V((Math.random()-.5)*7,(Math.random()-.2)*7,(Math.random()-.5)*7)});}
         _spawnImpactDecal(pos,reduced,weapon){if(this.renderer?.isSoftware===true||!pos)return;const limits=this._quality();if(!limits.decals)return;this.decalPool??=new DecalPool(this.scene,limits.decals);const seed=((this._decalSerial=(this._decalSerial??0)+1)*131+(weapon|0)*17)>>>0;this.decalPool.spawn(pos,{color:reduced?'#201a15':'#171310',size:reduced?.24:.32,life:reduced?3.5:6,reduced,seed});}
          impact(weapon,pos,color,reduced,hit){if(!pos)return;const base=hit?'#fff2ce':color;this._spawnImpactDecal(pos,reduced,weapon);if(!reduced)this._spawnMothSprite('spark-impact',pos,{size:hit?.5:.34,opacity:.55,life:.24,slots:3});this.effectPool.add({pos,color:'#fff2ce',size:.055,life:.07,additive:true});if(!reduced)this.effectPool.add({from:{x:pos.x,y:pos.y,z:pos.z},to:{x:pos.x,y:(pos.y||0)+.3,z:pos.z},color:base,life:.1,size:.026,additive:true});if(weapon===3||weapon===7){this.effectPool.add({pos,color:base,size:weapon===7?.13:.1,life:.14,expand:reduced?0:.5});if(!reduced)for(let i=0;i<4;i++)this.effectPool.add({pos,color:'#6b7681',size:.045,life:.3,velocity:V((Math.random()-.5)*6,Math.random()*3,(Math.random()-.5)*6)});return;}if(weapon===6){this.effectPool.add({pos,color:'#dff6ff',size:.11,life:.14,expand:reduced?0:.6});if(!reduced)for(let i=0;i<5;i++)this.effectPool.add({pos,color,size:.04,life:.2,velocity:V((Math.random()-.5)*8,(Math.random()-.5)*8,(Math.random()-.5)*8),wireframe:true});return;}if(weapon===4){this.effectPool.add({pos,color,size:.14,life:.2,expand:reduced?0:1.1});this.effectPool.add({pos,color:'#ffffff',size:.07,life:.14});return;}this.effectPool.add({pos,color:base,size:hit?.09:.055,life:hit?.16:.1,expand:reduced?0:.25});}
+  // ---- Alt-fire shot + projectile presentation (v8.6) ----------------------
+  // Hitscan alt styles. The base `shotEffect` table is untouched: only events
+  // tagged `alt`/`altId` route here. `muzzleSide` (twin) and `pellet` decide
+  // side pairs; the rest fan from the tracer direction so the calls stay
+  // camera-independent and testable.
+  _altShotEffect(e,spec,from,to,reduced){
+   const pool=this.effectPool,weapon=e.weapon??0,color=spec.tracer;
+   if(e.type==='launch'){
+    if(to){pool.add({pos:to,color,size:.18,life:.14,expand:reduced?0:.35});pool.add({pos:to,color:'#ffffff',size:.07,life:.09});}
+    return;
+   }
+   if(e.suppressTrace){if(to)this.impact(weapon,to,color,reduced,e.hit);return;}
+   if(!from||!to)return;
+   const dir=V((to.x||0)-(from.x||0),(to.y||0)-(from.y||0),(to.z||0)-(from.z||0)),length=dir.length()||1;
+   dir.multiplyScalar(1/length);
+   const side=V().crossVectors(dir,V(0,1,0));if(side.lengthSq()<1e-8)side.set(1,0,0);side.normalize();
+   const shift=(base,k,along=side)=>({x:base.x+along.x*k,y:base.y+along.y*k,z:base.z+along.z*k});
+   const stem=e.muzzleSide?shift(from,1,e.muzzleSide):from;
+   const line=(a,b,thick,life=.1,coreColor='#ffffff')=>{pool.add({from:a,to:b,color,life,size:thick,additive:true});pool.add({from:a,to:b,color:coreColor,life:Math.min(life,.06),size:Math.max(.014,thick*.34),additive:true});};
+   switch(spec.id){
+    case 'salvo':{for(const k of [-1,0,1])line(shift(stem,k*.05),shift(to,k*.32),.03,.09);break;}
+    case 'slug':{pool.add({from:stem,to,color:'#ffffff',life:.16,size:.13,additive:true});pool.add({from:stem,to,color,life:.1,size:.055,additive:true});break;}
+    case 'overload':{
+     if(this.railPool)this.railPool.spawn(stem,to,color,reduced);
+     else pool.add({from:stem,to,color,life:.14,size:.16,additive:true});
+     pool.add({from:to,to:shift(to,2.4,dir),color:'#ffffff',life:.1,size:.04,additive:true});
+     this.railImpact(to,color,reduced);
+     break;
+    }
+    case 'chain':{
+     this.lightning(stem,to,color,reduced);
+     for(const target of (Array.isArray(e.targets)?e.targets:[]).slice(0,4))if(target&&Number.isFinite(target.x))this.lightning(to,target,color,reduced);
+     this.impact(weapon,to,color,reduced,e.hit);
+     break;
+    }
+    case 'double':case 'twin':{
+     const pellets=Number.isInteger(e.pellet)?[e.pellet]:[0,1];
+     for(const index of pellets){const k=index%2?1:-1;line(shift(stem,k*.05),shift(to,k*.06),spec.id==='twin'?.03:.045,spec.id==='twin'?.08:.14);}
+     this.impact(weapon,to,color,reduced,e.hit);
+     break;
+    }
+    default:{line(from,to,.07,.09);this.impact(weapon,to,color,reduced,e.hit);break;}
+   }
+  }
+  // The keyed projectile pool. Lazily created on the first alt projectile so a
+  // match that never uses one allocates nothing; bounded and disposed with the
+  // view either way.
+  _altPool(){this.altProjectiles??=new AltProjectilePool(this.scene,Math.max(6,Math.min(16,Number(this.qualitySettings?.deaths)||12)));return this.altProjectiles;}
+  _syncAltProjectiles(rockets,time,reduced){
+   const rows=[];
+   for(const [index,rocket] of (rockets||[]).entries()){
+    const kind=altRocketKind(rocket);if(!kind)continue;
+    const present=this._interpEnabled?this._presentRocket(index):null,position=present&&!present.snapped?present:rocket.pos;if(!position)continue;
+    rows.push({id:rocket.id!=null?rocket.id:`#${index}`,kind,pos:{x:position.x||0,y:position.y||0,z:position.z||0},life:rocket.life,arm:rocket.arm,mine:rocket.mine===true});
+   }
+   if(!rows.length&&!this.altProjectiles)return null;
+   const pool=this._altPool();
+   pool.sync(rows,{time:Number.isFinite(time)?time:0,reduced:reduced===true});
+   return pool;
+  }
+  // Local `launch` beat: spawn the keyed visual immediately (before the next
+  // snapshot) and ping the sensor for a mine deploy.
+  _altLaunch(e,reduced){
+   const spec=altSpecFor(e.weapon??0),id=typeof e.altId==='string'?e.altId:spec?.id;
+   if(!['cluster','mortar','mine','bomb'].includes(id))return null;
+   const pos=e.from||e.pos||e.to;if(!pos)return null;
+   const slot=this._altPool().spawn({key:e.projectile??e.id??null,kind:id,pos,arm:e.arm,life:e.life,mine:e.mine===true||id==='mine',time:Number.isFinite(e.time)?e.time:0});
+   if(id==='mine'&&!reduced){const pool=this.telegraphPool??=new TelegraphPool(this.scene,20);pool.spawn({kind:'ring',pos,color:spec?.tracer||altProjectileColor(id),radius:.5,life:.5,grow:1.4,opacity:.55});}
+   return slot;
+  }
+  // Explosion beat: release the matching keyed projectile (id or nearest) and
+  // layer a kind-specific burst. Reduced motion keeps the flash, drops streaks.
+  _altExplosion(e,reduced){
+   const spec=altSpecFor(e.weapon??0),id=typeof e.altId==='string'?e.altId:spec?.kind==='projectile'?spec.id:null;
+   const key=e.projectile??e.rocketId??e.altId??e.mineId??null;
+   const removed=this.altProjectiles?this.altProjectiles.explode(key,e.pos||null):null;
+   const kind=removed?.kind||(id&&['cluster','mortar','mine','bomb'].includes(id)?id:null);
+   if(!kind)return null;
+   const pos=e.pos||removed?.pos;if(!pos)return null;
+   const color=altProjectileColor(kind),fx=this.effectPool??=new EffectPool(this.scene);
+   if(kind==='cluster'){
+    fx.add({pos,color,size:reduced?.22:.3,life:.22,expand:reduced?0:.9});
+    fx.add({pos,color,size:.09,life:.45,velocity:reduced?null:V(0,1.4,-2.2)});
+    if(!reduced)for(const k of [-1,1])fx.add({pos,color,size:.09,life:.45,velocity:V(k*3.4,.8,k*1.2)});
+   }else if(kind==='mortar'){
+    fx.add({pos,color,size:reduced?.24:.34,life:.28,expand:reduced?0:1.6});
+    if(!reduced)fx.add({pos,color:'#ffffff',size:.08,life:.14});
+   }else if(kind==='bomb'){
+    fx.add({pos,color,size:reduced?.24:.32,life:.24,expand:reduced?0:1.2});
+    if(!reduced)for(let i=0;i<6;i++){const a=i*Math.PI/3;fx.add({from:{x:pos.x||0,y:pos.y||0,z:pos.z||0},to:{x:(pos.x||0)+Math.cos(a)*2.2,y:(pos.y||0)+.5,z:(pos.z||0)+Math.sin(a)*2.2},color,life:.16,size:.03,additive:true});}
+   }else{
+    fx.add({pos,color,size:reduced?.2:.3,life:.3,expand:reduced?0:1.8});
+    if(!reduced)fx.add({pos,color:'#dff6ff',size:.07,life:.14});
+   }
+   return removed||{kind,key,pos};
+  }
   deathFx(){return this.deathPool??=new DeathPool(this.scene,this._quality().deaths,this._quality().splats);}
   spawnDeath(e,reduced){
    if(!e?.pos)return;
@@ -2258,6 +2376,9 @@ export class ArenaView{
   _ejectShell(e){
    const weapon=Number.isInteger(e.weapon)?e.weapon:-1;
    if(weapon===2||weapon===4||weapon===6)return null;
+   // Alt projectiles and the energy alts never throw a case; kinetic alts
+   // (salvo/slug/double/twin) keep the ballistic casing.
+   if(e?.alt===true){const spec=altSpecFor(weapon);if(!spec||spec.kind==='projectile'||spec.id==='overload'||spec.id==='chain')return null;}
    if(this.renderer?.isSoftware===true||!this.firstPerson||!this.hands?.visible||e.actor!==this.playerId)return null;
    const seed=((Number.isFinite(e.id)?e.id*31:0)+(weapon+1)*131)>>>0;
    this.hands.updateWorldMatrix(true,false);
@@ -2657,9 +2778,16 @@ if(freeCam){this.lowHealthOverlay?.update(false,time,delta,reduced,this.camera);
    // so 60 and 144 fps produce roughly the same number of trail particles.
    this.projectilePool??=new EffectPool(this.scene,64);this.projectilePool.clear();
    const trailEm=trailEmissions(this._trailAt,Math.min(Number(delta)||0,.1));this._trailAt=trailEm.remainder;const emitTrail=trailEm.count>0;
-   for(const [rocketIndex,r] of (match.rockets||[]).slice(0,64).entries())if(r.pos){const wp=r.weapon??0,pres=this._interpEnabled?this._presentRocket(rocketIndex):null,rp=pres&&!pres.snapped?pres:r.pos;if(wp===4){this.projectilePool.add({pos:rp,color:'#72cfff',size:.2,life:1});this.projectilePool.add({pos:rp,color:'#dff6ff',size:.09,life:1});}else if(wp===5)this.projectilePool.add({pos:rp,color:'#ffb27a',size:.13,life:1});else this.projectilePool.add({pos:rp,color:'#ffad61',size:.15,life:1});if(emitTrail&&!reduced&&this.effectPool&&this.renderer?.isSoftware!==true&&(wp===1||wp===4||wp===5)){this.effectPool.add({pos:V(rp.x,rp.y,rp.z),color:wp===4?'#72cfff':wp===5?'#ffb27a':'#ffad61',endColor:wp===4?'#003366':wp===5?'#551100':'#441100',fade:'smooth',damping:2,size:wp===4?.06:.08,life:.22,expand:1.2,velocity:V((Math.random()-.5)*.6,(Math.random()-.5)*.6,(Math.random()-.5)*.6)});} }
-  for(const e of (match.events||[]))if(e.id>this.lastEvent){this._noteCombatEvent(e,time);this.effect(e);this.lastEvent=e.id;}
-   this._updateMothSprites(Math.max(0,delta),this.camera);this.effectPool?.update(Math.max(0,delta));this.telegraphPool?.update(Math.max(0,delta));this.railPool?.update(Math.max(0,delta));this.deathPool?.update(Math.max(0,delta));this.decalPool?.update(Math.max(0,delta));
+   for(const [rocketIndex,r] of (match.rockets||[]).slice(0,64).entries())if(r.pos){const wp=r.weapon??0,pres=this._interpEnabled?this._presentRocket(rocketIndex):null,rp=pres&&!pres.snapped?pres:r.pos,altKind=altRocketKind(r);
+    if(altKind){const altColor=altProjectileColor(altKind);this.projectilePool.add({pos:rp,color:altColor,size:.17,life:1});if(altKind==='mortar')this.projectilePool.add({pos:rp,color:'#dff6ff',size:.07,life:1});if(emitTrail&&!reduced&&this.effectPool&&this.renderer?.isSoftware!==true)this.effectPool.add({pos:V(rp.x,rp.y,rp.z),color:altColor,endColor:altKind==='mine'?'#002244':'#441100',fade:'smooth',damping:2,size:altKind==='mortar'?.05:.07,life:.24,expand:1.2,velocity:V((Math.random()-.5)*.6,(Math.random()-.5)*.6,(Math.random()-.5)*.6)});}
+    else if(wp===4){this.projectilePool.add({pos:rp,color:'#72cfff',size:.2,life:1});this.projectilePool.add({pos:rp,color:'#dff6ff',size:.09,life:1});}else if(wp===5)this.projectilePool.add({pos:rp,color:'#ffb27a',size:.13,life:1});else this.projectilePool.add({pos:rp,color:'#ffad61',size:.15,life:1});if(!altKind&&emitTrail&&!reduced&&this.effectPool&&this.renderer?.isSoftware!==true&&(wp===1||wp===4||wp===5)){this.effectPool.add({pos:V(rp.x,rp.y,rp.z),color:wp===4?'#72cfff':wp===5?'#ffb27a':'#ffad61',endColor:wp===4?'#003366':wp===5?'#551100':'#441100',fade:'smooth',damping:2,size:wp===4?.06:.08,life:.22,expand:1.2,velocity:V((Math.random()-.5)*.6,(Math.random()-.5)*.6,(Math.random()-.5)*.6)});} }
+   this._syncAltProjectiles(match.rockets,time,reduced);
+  for(const e of (match.events||[]))if(e.id>this.lastEvent){this._noteCombatEvent(e,time);this.effect(e);this.abilityVfx?.handleEvent(e);this.lastEvent=e.id;}
+   // Ability VFX advance once per frame from the same snapshot the view renders.
+   // The update runs after the event loop so a rope placed this frame resolves
+   // its origin from the placer's current position.
+   this.abilityVfx?.update(Math.max(0,delta),match);
+   this._updateMothSprites(Math.max(0,delta),this.camera);this.effectPool?.update(Math.max(0,delta));this.altProjectiles?.update(Math.max(0,delta),{time,reduced});this.telegraphPool?.update(Math.max(0,delta));this.railPool?.update(Math.max(0,delta));this.deathPool?.update(Math.max(0,delta));this.decalPool?.update(Math.max(0,delta));
        this.hands.visible=player.health>0&&this.showWeapon!==false&&!this.spectator&&!cinematic&&!freeCam&&follow==null&&player.vehicleId==null;
     const weaponSig=`${player.finish??''}|${weaponVisualKey(player.attachments?.visual)}`;
      if(this.currentWeapon!==player.weapon||this._viewWeaponSig!==weaponSig){
@@ -2692,6 +2820,7 @@ if(freeCam){this.lowHealthOverlay?.update(false,time,delta,reduced,this.camera);
     if(!cinematic&&!freeCam&&!this._killcam&&follow==null){this.camera.fov=ads.fov+(reduced?0:(this._fovPulse||0)*6);this.camera.updateProjectionMatrix();}
 
     this._animateWeaponParts(this.firstPerson,player,reduced);
+    this._animateWeaponAlt(this.firstPerson,player,reduced,delta,time);
     this.firstPerson.userData.flash.visible=!reduced&&this.hands.visible&&this.flashUntil>performance.now();this.muzzleLights?.update(Math.max(0,delta));if(this.renderer.shadowMap?.autoUpdate===false){const hz=Number(this._quality().shadowHz)||30;if(shadowDue(time,this._shadowAt,hz)){this._shadowAt=time;this.renderer.shadowMap.needsUpdate=true;}}this.updateSky();this._updateWind(time,reduced);this._updateAmbient(match,delta,time,reduced);const spMode=match.config?.mode==='campaign'||match.config?.mode==='horde';if(spMode)this.setWeather(match.weather??null);else if(!cinematic&&this._weatherOverride!==null)this.setWeather(null);this._updateWeather(arena,delta,mode);this._updateWeatherFx(delta,reduced,this._quality());const software=this.renderer?.isSoftware===true;this._updateLightning(delta,reduced,software);this._applyWetSheen(this._weatherState());this.hitPool?.update(Math.max(0,delta));this.shellPool?.update(Math.max(0,delta));this._updateHitReactions();this._alignLivingCharacters(match);this._updateDebris(delta);this._updateAudio(match,time);this._beginGpu();
     // Per-target stacks: when bots are styled, the world composer renders
     // through a camera that excludes the actor layer and the scene depth is
@@ -2732,7 +2861,9 @@ if(freeCam){this.lowHealthOverlay?.update(false,time,delta,reduced,this.camera);
        const key=`${type}|${weaponVisualKey(visual)}|${finish??''}`;
        this._weaponCache??=new Map();
        const cached=this._weaponCache.get(key);
-       if(cached&&!cached.parent)return cached;
+       // A cached viewmodel returns to its rest pose before reuse so an alt
+       // morph left over from its last owner cannot leak into the next swap.
+       if(cached&&!cached.parent){cached.userData.altAmount=0;const spec=altSpecFor(cached.userData.type);applyAltMorph(cached,cached.userData.type,0,{reduced:true});if(spec)this._applyAltFlashColor(cached,spec,0);return cached;}
        const model=weaponModel(type,this.modelAssets??=new ModelAssets(),visual,finish);
        model.scale.setScalar(VIEWMODEL_SCALE);
        model.traverse(n=>{if(n.isMesh){n.renderOrder=100;}});
@@ -2819,7 +2950,36 @@ if(freeCam){this.lowHealthOverlay?.update(false,time,delta,reduced,this.camera);
        if(cell&&type===2)cell.rotation.z=cell.userData.baseRZ+progress*Math.PI*4;
        if(bolt){const kick=Math.max(0,Math.min(1,Number(this.feedback?.kick)||0));bolt.position.z=bolt.userData.baseZ+kick*.05;}
       }
+      // ---- Alt-fire viewmodel morph (v8.6) ---------------------------------
+      // Blends the hidden alt parts authored by weapon-models/alt-parts.mjs in
+      // while the snapshot holds `player.alt`, and tints the muzzle flash to the
+      // spec tracer colour. Reduced motion snaps both ways; otherwise the morph
+      // takes ~0.16 s and stays frame-rate independent.
+      _animateWeaponAlt(weapon,player,reduced,delta,time){
+       if(!weapon)return 0;
+       const type=Number.isInteger(player?.weapon)?player.weapon:(Number.isInteger(weapon.userData.type)?weapon.userData.type:0),spec=altSpecFor(type);
+       if(!spec)return 0;
+       const target=player?.alt===true?1:0,state=Number.isFinite(weapon.userData.altAmount)?weapon.userData.altAmount:0;
+       let amount;
+       if(reduced)amount=target;
+       else{const step=Math.max(0,Math.min(.1,Number(delta)||0)),next=state+(target>state?step/.16:-step/.16);amount=target>state?Math.min(target,next):Math.max(target,next);}
+       weapon.userData.altAmount=amount;
+       applyAltMorph(weapon,type,amount,{reduced,time});
+       this._applyAltFlashColor(weapon,spec,amount);
+       return amount;
+      }
+      _applyAltFlashColor(weapon,spec,amount){
+       const flash=weapon?.userData?.flash;if(!flash)return 0;
+       const tint=this._altTint??=new T.Color();tint.set(spec.tracer);
+       let tinted=0;
+       flash.traverse(node=>{
+        const material=node.material;if(!node.isMesh||!material?.color)return;
+        material.userData.altBaseColor??=material.color.clone();
+        material.color.copy(material.userData.altBaseColor).lerp(tint,amount);tinted++;
+       });
+       return tinted;
+      }
       updateRace(match,time){syncRacePresentation(this,match,time);}
      _renderPreview(time,reduced){const rect=this.previewRect;if(!rect||rect.width<12||rect.height<12||!(this.renderer instanceof T.WebGLRenderer))return;const m=this.menu.model;m.rotation.y=Math.PI+.25+(reduced?0:Math.sin(time*.4)*.22);m.position.y=.17;const cam=this.menu.camera;cam.aspect=Math.max(.2,rect.width/rect.height);cam.updateProjectionMatrix();this._renderSceneInto(this.renderer,rect,this.menu.scene,cam);}
-          dispose(){this.characterLifecycle?.clear();this.clearObjectiveMarkers();this.effectPool?.dispose();this.telegraphPool?.dispose();this.projectilePool?.dispose();this.railPool?.dispose();this.deathPool?.dispose();this.decalPool?.dispose();this.debrisPool?.dispose();this.debrisPool=null;this.hitPool?.dispose();this.hitPool=null;this.hitFlinch?.clear();this.shellPool?.dispose();this.shellPool=null;this._clearDebugDeaths();this.ambientPool?.dispose();this.weatherPool?.dispose();this.ambientFx=null;this.weatherFx=null;this._killcam=null;this.preview?.dispose();this.preview=null;this.previewAssets?.dispose?.();this.previewAssets=null;disposeComposer(this.composer);this.composer=null;this._disposeLabTargets();this.muzzleLights?.dispose();this.lowHealthOverlay?.dispose();this._disposeMothSprites();this.zipCarriages?.clear();this.disposeObject(this.scene);if(this.weaponScene)this.disposeObject(this.weaponScene);this.disposeObject(this.menu.scene);this.environmentRT?.dispose?.();for(const resource of this.renderResources||[])resource.dispose();this.renderResources?.clear();for(const resource of this.sharedResources||[])resource.dispose();this.sharedResources?.clear();this.modelAssets?.materials.clear();this.modelAssets?.geometries.clear();this.modelAssets?.resources.clear();this.arenaAssets?.materials.clear();this.arenaAssets?.geometries.clear();this.arenaAssets?.resources.clear();clearSurfaceTextures();for(const model of this._weaponCache?.values?.()||[])this.disposeObject(model);this._weaponCache?.clear();this._freeCam=false;this._directorLock=false;this.manualFollowId=null;this._cameraOwner='auto';this._freeExit=null;this.clearFreeMotion();this.resetFreeCam();this.renderer.dispose();}
+          dispose(){this.characterLifecycle?.clear();this.clearObjectiveMarkers();this.effectPool?.dispose();this.telegraphPool?.dispose();this.projectilePool?.dispose();this.railPool?.dispose();this.deathPool?.dispose();this.decalPool?.dispose();this.debrisPool?.dispose();this.debrisPool=null;this.hitPool?.dispose();this.hitPool=null;this.abilityVfx?.dispose();this.abilityVfx=null;this.hitFlinch?.clear();this.shellPool?.dispose();this.shellPool=null;this.altProjectiles?.dispose();this.altProjectiles=null;this._clearDebugDeaths();this.ambientPool?.dispose();this.weatherPool?.dispose();this.ambientFx=null;this.weatherFx=null;this._killcam=null;this.preview?.dispose();this.preview=null;this.previewAssets?.dispose?.();this.previewAssets=null;disposeComposer(this.composer);this.composer=null;this._disposeLabTargets();this.muzzleLights?.dispose();this.lowHealthOverlay?.dispose();this._disposeMothSprites();this.zipCarriages?.clear();this.disposeObject(this.scene);if(this.weaponScene)this.disposeObject(this.weaponScene);this.disposeObject(this.menu.scene);this.environmentRT?.dispose?.();for(const resource of this.renderResources||[])resource.dispose();this.renderResources?.clear();for(const resource of this.sharedResources||[])resource.dispose();this.sharedResources?.clear();this.modelAssets?.materials.clear();this.modelAssets?.geometries.clear();this.modelAssets?.resources.clear();this.arenaAssets?.materials.clear();this.arenaAssets?.geometries.clear();this.arenaAssets?.resources.clear();clearSurfaceTextures();for(const model of this._weaponCache?.values?.()||[])this.disposeObject(model);this._weaponCache?.clear();this._freeCam=false;this._directorLock=false;this.manualFollowId=null;this._cameraOwner='auto';this._freeExit=null;this.clearFreeMotion();this.resetFreeCam();this.renderer.dispose();}
 }

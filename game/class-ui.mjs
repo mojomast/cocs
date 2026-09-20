@@ -83,7 +83,7 @@ export function triggerLabel(trigger) {
   return hasText(trigger) ? TRIGGER_LABELS[trigger] ?? upper(trigger) : null;
 }
 
-// One line of the movement verb's budget, e.g. '1 charge · 5.5 m · 3.5 s
+// One line of the movement verb's budget, e.g. '1 charge · 6 m · 2.2 s
 // cooldown'. `null` marks a slot the plan left unspecified and is skipped.
 export function budgetLine(verb) {
   const budget = verb?.budget;

@@ -4,6 +4,7 @@ import {LockKeyhole,Shield,Swords} from 'lucide-react';
 import type {ScreenProps} from '../contract';
 import {Modal,Btn,Tabs,Panel,Chip,Empty} from '../primitives';
 import {HELP_SECTIONS} from '../../../game/onboarding.mjs';
+import {altSpecFor} from '../../../game/alt-fire.mjs';
 import {formatNumber,formatWhole} from '../../../game/format-ui.mjs';
 import {GraphicsLabPanel} from './GraphicsLabPanel';
 
@@ -37,12 +38,13 @@ export function ArsenalInspector({WEAPONS=[],CHARACTERS=[],ATTACHMENTS=[],ATTACH
    <span className="row" style={{gap:8}}><Chip tone="accent"><i/>{claimed} / {total} UNLOCKED</Chip><Chip>{CHARACTERS.length} OPERATORS · {WEAPONS.length} WEAPONS</Chip></span>
   </div>
   <Tabs value={tab} onChange={setTab} ariaLabel="Arsenal category" tabs={subtabs}/>
-  {tab==='weapons'&&<div className="grid-cards">{WEAPONS.map((weapon:any,index:number)=><Panel key={weapon.name} label={`${index+1} / WEAPON`} meta={weapon.short||''}>
+  {tab==='weapons'&&<div className="grid-cards">{WEAPONS.map((weapon:any,index:number)=>{const alt=altSpecFor(index);return <Panel key={weapon.name} label={`${index+1} / WEAPON`} meta={weapon.short||''}>
    <h3 style={{color:weapon.color}}>{weapon.name}</h3>
-   <div className="row" style={{gap:6}}><Chip>{weaponRangeLabel?.(weapon)}</Chip><Chip>{Math.round(Number(weapon.damage)||0)} DMG</Chip><Chip>{Number(weapon.interval)>0?`${Math.round(60/Number(weapon.interval))} RPM`:'—'}</Chip></div>
+   <div className="row" style={{gap:6}}><Chip>{weaponRangeLabel?.(weapon)}</Chip><Chip>{Math.round(Number(weapon.damage)||0)} DMG</Chip><Chip>{Number(weapon.interval)>0?`${Math.round(60/Number(weapon.interval))} RPM`:'—'}</Chip>{alt&&<Chip tone="accent">ALT · {alt.label}</Chip>}</div>
    <p className="field-note">{weapon.description}</p>
+   {alt&&<p className="field-note weapon-alt-note"><b>ALT FIRE</b> {alt.summary}</p>}
     <p className="field-note">{Number(weapon.ammo)>0?`${formatWhole(weapon.ammo)} / ${formatWhole(weapon.cap)} ROUNDS`:'UNLIMITED AMMO'}{weapon.splash?` · ${formatNumber(weapon.splash)} SPLASH`:''}</p>
-  </Panel>)}</div>}
+  </Panel>;})}</div>}
   {tab==='operators'&&<div className="grid-cards">{CHARACTERS.map((operator:any)=><Panel key={operator.id} label="OPERATOR" meta={operator.tag}>
    <h3 style={{color:operator.color}}>{operator.name}</h3>
     <div className="row" style={{gap:6}}><Chip>{formatWhole(operator.stats.health)} HP</Chip><Chip>{formatWhole(operator.stats.armor)} ARM</Chip><Chip>{formatNumber(operator.stats.speed)} M/S</Chip></div>

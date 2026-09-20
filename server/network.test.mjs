@@ -117,6 +117,48 @@ test('two real WebSocket clients join, play and receive results end-to-end', asy
  }
 });
 
+test('a held altFire input crosses the real socket dispatch and clears on release', async () => {
+ const { server, close, registry } = createGameServer({ tickDt: 1 / 6 });
+ await new Promise(resolve => server.listen(0, resolve));
+ const url = `ws://127.0.0.1:${server.address().port}`;
+ let a, b;
+ try {
+  a = await connect(url); b = await connect(url);
+  send(a, { type: 'join', name: 'Alice', character: 'chatgpt', harness: 'openclaw' });
+  send(b, { type: 'join', name: 'Bob', character: 'claude', harness: 'hermes' });
+  const welcomeA = await until(a, 'welcome');
+  await until(b, 'welcome');
+  await latest(a, 'lobby');
+  send(a, { type: 'host', config: { mode: 'deathmatch', botCount: 0, timeLimit: 300 }, mapId: 'crosswire' });
+  send(a, { type: 'start' });
+  await until(a, 'start');
+  await until(b, 'snapshot');
+  const room = registry.rooms.get('local');
+  const peer = room.peers.get(welcomeA.peerId);
+  assert.ok(peer, 'the authoritative room tracks the socket peer');
+  const settle = held => new Promise((resolve, reject) => {
+   const started = Date.now();
+   const poll = () => {
+    const matches = held ? peer.latest?.altFire === true : peer.latest?.altFire === undefined;
+    if (matches) resolve();
+    else if (Date.now() - started > 10000) reject(new Error(`altFire never became ${held ? 'held' : 'released'}`));
+    else setTimeout(poll, 20);
+   };
+   poll();
+  });
+  send(a, { type: 'input', input: { x: 0, z: 0, altFire: true } });
+  await settle(true);
+  // Several authoritative ticks run in this window; the held field must survive
+  // them because `peer.latest` is only rebuilt when the next message arrives.
+  await new Promise(resolve => setTimeout(resolve, 400));
+  assert.equal(peer.latest.altFire, true, 'a tick never consumes a held alt-fire');
+  send(a, { type: 'input', input: { x: 0, z: 0, altFire: false } });
+  await settle(false);
+ } finally {
+  a?.close(); b?.close(); close();
+ }
+});
+
 test('the loadout control message reaches the room and broadcasts the queued switch', async () => {
  const { server, close } = createGameServer({ tickDt: 1 / 6 });
  await new Promise(resolve => server.listen(0, resolve));

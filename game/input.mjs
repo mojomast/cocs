@@ -55,6 +55,10 @@ export function controlsFromState(state = {}) {
   // The class movement verb (grapple / blink step / deployable rope) is a held
   // input: the engine derives its press and release edges from the held state.
   if (state.mobility === true || state.touch?.mobility === true || held('mobility')) controls.mobility = true;
+  // Alt-fire is the same held contract (the client keeps sending true while the
+  // bind is down). `held` reads the binding defensively: a keybinds table that
+  // does not carry `altFire` yet yields undefined, which never matches a code.
+  if (state.altFire === true || state.touch?.altFire === true || held('altFire')) controls.altFire = true;
   if (state.interact) controls.interact = true;
   if (state.melee) controls.melee = true;
   if (state.grenade) controls.grenade = true;

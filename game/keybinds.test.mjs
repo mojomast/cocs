@@ -39,18 +39,36 @@ test('codes resolve to actions and conflicts are reported', () => {
   const bindings = normalizeBindings({});
   assert.equal(actionForCode(bindings, 'KeyG'), 'grenade');
   assert.equal(actionForCode(bindings, 'KeyX'), 'mobility');
-  assert.equal(actionForCode(bindings, 'KeyZ'), null);
+  assert.equal(actionForCode(bindings, 'KeyZ'), 'altFire');
   assert.deepEqual(bindingConflicts({forward: 'KeyW', back: 'KeyW', jump: 'Space', sprint: 'Space'}), ['KeyW', 'Space']);
   assert.equal(KEYBIND_ACTIONS.length, Object.keys(DEFAULT_BINDINGS).length);
 });
 
 test('mobility binds to KeyX and stays remappable like every other action', () => {
   assert.equal(DEFAULT_BINDINGS.mobility, 'KeyX');
-  assert.equal(KEYBIND_ACTIONS.length, 21, '17 historical actions, the free-cursor toggle and the three O1c command surfaces');
+  assert.equal(KEYBIND_ACTIONS.length, 22, '18 historical actions, the free-cursor toggle, the three O1c command surfaces and held alt fire');
   assert.ok(KEYBIND_OPTIONS.includes('KeyX'), 'KeyX is offered in the settings dropdown');
-  assert.deepEqual(rebindAction(DEFAULT_BINDINGS, 'mobility', 'KeyZ'), {...DEFAULT_BINDINGS, mobility: 'KeyZ'});
+  const rebound = rebindAction(DEFAULT_BINDINGS, 'mobility', 'KeyZ');
+  assert.equal(rebound.mobility, 'KeyZ');
+  assert.equal(rebound.altFire, 'KeyX', 'taking an occupied key hands KeyX to alt fire');
+  assert.deepEqual(normalizeBindings(rebound), rebound, 'the swap still normalizes');
+  assert.deepEqual(bindingConflicts(rebound), []);
   assert.deepEqual(normalizeBindings({mobility: 'nonsense'}).mobility, 'KeyX');
-  assert.equal(actionForCode(normalizeBindings({}), 'KeyZ'), null, 'KeyZ stays free');
+});
+
+test('alt fire binds to KeyZ without colliding with the command board or the HUD key', () => {
+  assert.equal(DEFAULT_BINDINGS.altFire, 'KeyZ');
+  assert.equal(KEYBIND_LABELS.altFire, 'Alt fire');
+  assert.ok(KEYBIND_OPTIONS.includes('KeyZ'), 'KeyZ is offered in the settings dropdown');
+  assert.equal(actionForCode(normalizeBindings({}), 'KeyZ'), 'altFire');
+  assert.notEqual(DEFAULT_BINDINGS.altFire, DEFAULT_BINDINGS.command, 'KeyB stays the command board');
+  assert.notEqual(DEFAULT_BINDINGS.altFire, 'KeyH', 'KeyH stays the HUD hide toggle');
+  const rebound = rebindAction(DEFAULT_BINDINGS, 'altFire', 'KeyJ');
+  assert.equal(rebound.altFire, 'KeyJ');
+  assert.equal(actionForCode(rebound, 'KeyJ'), 'altFire');
+  assert.equal(actionForCode(rebound, 'KeyZ'), null, 'the old key stops resolving after a remap');
+  assert.equal(rebound.mobility, 'KeyX', 'unrelated actions keep their defaults');
+  assert.deepEqual(bindingConflicts(rebound), []);
 });
 
 test('free cursor binds to AltLeft by default and stays remappable', () => {
@@ -61,7 +79,8 @@ test('free cursor binds to AltLeft by default and stays remappable', () => {
   assert.ok(KEYBIND_OPTIONS.includes('AltRight'), 'AltRight can be chosen as a replacement');
   const rebound = rebindAction(DEFAULT_BINDINGS, 'cursor', 'KeyZ');
   assert.equal(rebound.cursor, 'KeyZ');
-  assert.equal(actionForCode(rebound, 'AltLeft'), null);
+  assert.equal(rebound.altFire, 'AltLeft', 'the displaced alt fire takes the freed AltLeft');
+  assert.equal(actionForCode(rebound, 'AltLeft'), 'altFire');
   assert.deepEqual(bindingConflicts(rebound), []);
   const swapped = rebindAction(DEFAULT_BINDINGS, 'cursor', 'KeyX');
   assert.equal(swapped.cursor, 'KeyX', 'choosing an occupied key takes it');

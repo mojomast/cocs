@@ -63,39 +63,39 @@ test('MOVEMENT_SPECS flattens the nine §13.3 verbs in wing order with exact bud
   const byId = Object.fromEntries(MOVEMENT_SPECS.map(spec => [spec.id, spec]));
   assert.deepEqual(
     {charges: byId['air-dash'].maxCharges, distance: byId['air-dash'].distance, cooldown: byId['air-dash'].cooldown, windup: byId['air-dash'].windup, landing: byId['air-dash'].landing, duration: byId['air-dash'].duration},
-    {charges: 1, distance: 5.5, cooldown: 2.5, windup: 0, landing: 0.15, duration: 0.25},
+    {charges: 1, distance: 6, cooldown: 2.2, windup: 0, landing: 0.15, duration: 0.25},
   );
   assert.deepEqual(
     {charges: byId['double-jump'].maxCharges, impulse: byId['double-jump'].impulse, cooldown: byId['double-jump'].cooldown, landing: byId['double-jump'].landing, refreshOnGround: byId['double-jump'].refreshOnGround},
-    {charges: 1, impulse: 7.4, cooldown: 0, landing: 0, refreshOnGround: true},
+    {charges: 1, impulse: 7.8, cooldown: 0, landing: 0, refreshOnGround: true},
   );
   assert.deepEqual(
     {charges: byId['super-jump'].maxCharges, impulse: byId['super-jump'].impulse, windup: byId['super-jump'].windup, cooldown: byId['super-jump'].cooldown, landing: byId['super-jump'].landing},
-    {charges: 1, impulse: 12.5, windup: 0.55, cooldown: 6, landing: 0.25},
+    {charges: 1, impulse: 12.5, windup: 0.45, cooldown: 5, landing: 0.25},
   );
   assert.deepEqual(
     {fuel: byId['hover-jets'].fuel, recharge: byId['hover-jets'].fuelRecharge, climb: byId['hover-jets'].climb, descent: byId['hover-jets'].descent, landing: byId['hover-jets'].landing},
-    {fuel: 2.5, recharge: 1.8, climb: 0.35, descent: 2.2, landing: 0.2},
+    {fuel: 3, recharge: 1.6, climb: 0.35, descent: 2.2, landing: 0.2},
   );
   assert.deepEqual(
     {windup: byId['brace-slam'].windup, radius: byId['brace-slam'].radius, knockback: byId['brace-slam'].knockback, cooldown: byId['brace-slam'].cooldown, landing: byId['brace-slam'].landing, leap: byId['brace-slam'].leap, slamDescent: byId['brace-slam'].slamDescent},
-    {windup: 0.15, radius: 4, knockback: 9, cooldown: 8, landing: 0.4, leap: 7.5, slamDescent: 16},
+    {windup: 0.12, radius: 4.5, knockback: 10, cooldown: 7, landing: 0.4, leap: 7.5, slamDescent: 16},
   );
   assert.deepEqual(
     {fuel: byId['safety-glide'].fuel, recharge: byId['safety-glide'].fuelRecharge, descent: byId['safety-glide'].descent, steer: byId['safety-glide'].steer, landing: byId['safety-glide'].landing},
-    {fuel: 2.5, recharge: 1.8, descent: 2, steer: 4, landing: 0},
+    {fuel: 3, recharge: 1.6, descent: 1.7, steer: 4.5, landing: 0},
   );
   assert.deepEqual(
     {distance: byId.grapple.distance, reel: byId.grapple.reel, cooldown: byId.grapple.cooldown, missCooldown: byId.grapple.missCooldown, landing: byId.grapple.landing},
-    {distance: 14, reel: 12, cooldown: 7, missCooldown: 3, landing: 0},
+    {distance: 14, reel: 12, cooldown: 6, missCooldown: 2.5, landing: 0},
   );
   assert.deepEqual(
     {distance: byId['blink-step'].distance, windup: byId['blink-step'].windup, cooldown: byId['blink-step'].cooldown, landing: byId['blink-step'].landing},
-    {distance: 6, windup: 0.3, cooldown: 6, landing: 0},
+    {distance: 6, windup: 0.25, cooldown: 5, landing: 0},
   );
   assert.deepEqual(
     {charges: byId['deployable-rope'].maxCharges, anchorLife: byId['deployable-rope'].anchorLife, cooldown: byId['deployable-rope'].cooldown, distance: byId['deployable-rope'].distance, rideSpeed: byId['deployable-rope'].rideSpeed},
-    {charges: 1, anchorLife: 20, cooldown: 12, distance: 14, rideSpeed: 9},
+    {charges: 1, anchorLife: 20, cooldown: 10, distance: 14, rideSpeed: 10},
   );
   for (const spec of MOVEMENT_SPECS) {
     for (const [key, value] of Object.entries(spec)) {
@@ -219,27 +219,27 @@ test('mode coverage: off in Puma, NPCs never in horde/campaign, weakened in inst
 test('resolveMovementParams starts from §13.3 and applies the economy hook', () => {
   const base = resolveMovementParams('air-dash', {});
   assert.equal(base.maxCharges, 1);
-  assert.equal(base.cooldown, 2.5);
+  assert.equal(base.cooldown, 2.2);
   assert.equal(base.liftScale, 1);
   assert.equal(base.disabled, false);
   assert.equal(base.hook, null);
   const economy = resolveMovementParams('air-dash', {spec: 'hermes'});
   assert.equal(economy.hook, 'economy');
   assert.equal(economy.maxCharges, 2, '+1 charge');
-  closeTo(economy.cooldown, 2, EPS, '−20% cooldown');
+  closeTo(economy.cooldown, 2.2 * 0.8, EPS, '−20% cooldown');
   const hover = resolveMovementParams('hover-jets', {spec: 'hermes'});
-  closeTo(hover.fuel, 3.125, EPS, '+25% fuel');
+  closeTo(hover.fuel, 3 * 1.25, EPS, '+25% fuel');
   assert.equal(hover.cooldown, 0);
   const rope = resolveMovementParams('deployable-rope', {spec: 'hermes'});
   assert.equal(rope.maxCharges, 2);
-  closeTo(rope.cooldown, 9.6, EPS);
+  closeTo(rope.cooldown, 10 * 0.8, EPS);
 });
 
 test('mode weakening caps dash distance and raises blink wind-up', () => {
   assert.equal(resolveMovementParams('air-dash', {mode: 'instagib'}).distance, 4);
-  assert.equal(resolveMovementParams('air-dash', {mode: 'deathmatch'}).distance, 5.5);
+  assert.equal(resolveMovementParams('air-dash', {mode: 'deathmatch'}).distance, 6);
   assert.equal(resolveMovementParams('blink-step', {mode: 'rockets'}).windup, 0.45);
-  assert.equal(resolveMovementParams('blink-step', {mode: 'deathmatch'}).windup, 0.3);
+  assert.equal(resolveMovementParams('blink-step', {mode: 'deathmatch'}).windup, 0.25);
   assert.equal(resolveMovementParams('air-dash', {mode: 'puma-race'}).disabled, true);
 });
 
@@ -271,14 +271,14 @@ test('carrier weakening numbers: one charge, half fuel, +50% cooldown, no lift',
   const dash = resolveMovementParams('air-dash', {spec: 'hermes', carrying: true, character: 'qwen'});
   assert.equal(dash.hook, 'economy');
   assert.equal(dash.maxCharges, WEAKENED_CARRIER.charges, 'economy 2 → weakened 1');
-  closeTo(dash.cooldown, 2.5 * 0.8 * 1.5, EPS, '−20% then +50%');
+  closeTo(dash.cooldown, 2.2 * 0.8 * 1.5, EPS, '−20% then +50%');
   assert.equal(dash.liftScale, 0);
   const hover = resolveMovementParams('hover-jets', {spec: 'hermes', carrying: true, character: 'deepseek'});
-  closeTo(hover.fuel, 2.5 * 1.25 * 0.5, EPS, 'half of the economy pool');
+  closeTo(hover.fuel, 3 * 1.25 * 0.5, EPS, 'half of the economy pool');
   assert.equal(hover.liftScale, 0);
   const rope = resolveMovementParams('deployable-rope', {carrying: true, character: 'qwen'});
   assert.equal(rope.maxCharges, 1);
-  closeTo(rope.cooldown, 18, EPS, '12 s +50%');
+  closeTo(rope.cooldown, 15, EPS, '10 s +50%');
   assert.equal(rope.disabled, false, 'Qwen keeps the verb');
 });
 
@@ -299,7 +299,7 @@ test('Juggernaut keeps the verb at lift ×0.7 and freezes the shield airborne; V
 // 5. Air dash — start / step / end / cooldown / landing
 // ---------------------------------------------------------------------------
 
-test('air dash: airborne jump edge translates 5.5 m, spends the charge and preserves momentum', () => {
+test('air dash: airborne jump edge translates 6 m, spends the charge and preserves momentum', () => {
   const state = createMovementState({character: 'mistral', harness: 'openclaw'});
   assert.equal(state.verb, 'air-dash');
   assert.equal(state.hook, 'landing-control');
@@ -312,25 +312,25 @@ test('air dash: airborne jump edge translates 5.5 m, spends the charge and prese
   assert.equal(state.chains, 1);
   assert.equal(frame.motion.mode, 'dash');
   assert.equal(frame.motion.keepMomentum, true);
-  closeTo(frame.motion.position.moved, 5.5, 0.13, '5.5 m dash');
-  closeTo(frame.motion.position.z, -5.5, 0.13);
+  closeTo(frame.motion.position.moved, 6, 0.13, '6 m dash');
+  closeTo(frame.motion.position.z, -6, 0.13);
   closeTo(frame.motion.position.y, 4, EPS);
   assert.ok(frame.events.some(event => event.type === 'move-start' && event.reason === 'dash'));
 });
 
-test('air dash: 0.25 s active window then cooldown 2.5 s, recharge on the timer, landing recovery 0.15 s', () => {
+test('air dash: 0.25 s active window then cooldown 2.2 s, recharge on the timer, landing recovery 0.15 s', () => {
   const state = createMovementState({character: 'mistral', harness: 'openclaw'});
   step(state, {jump: true}, {grounded: false, y: 4, vy: 0});
   const frames = [];
   for (let i = 0; i < 40 && state.phase !== 'ready'; i++) frames.push(step(state, {}, {grounded: false, y: 4, vy: 0}));
   assert.equal(state.phase, 'ready');
   assert.ok(hasEvent(frames, 'move-end'));
-  closeTo(state.cooldown, 2.5, EPS, 'cooldown starts at end');
+  closeTo(state.cooldown, 2.2, EPS, 'cooldown starts at end');
   // Resource gate while empty.
   const blocked = step(state, {jump: true}, {grounded: false, y: 4, vy: 0});
   assert.equal(blocked.blocked, 'resources');
   // Recharge on the cooldown timer while grounded.
-  run(state, Math.ceil(2.5 / DT) + 4, () => ({}), () => ({grounded: true, y: 0, vy: 0}));
+  run(state, Math.ceil(2.2 / DT) + 4, () => ({}), () => ({grounded: true, y: 0, vy: 0}));
   assert.equal(state.charges, 1);
   assert.equal(state.cooldown, 0);
   // Landing recovery.
@@ -346,7 +346,7 @@ test('air dash: Cline chaining is the only cancel and chain links stay under the
   const chained = createMovementState({character: 'mistral', harness: 'cline'});
   assert.equal(chained.hook, 'chaining');
   const first = step(chained, {jump: true}, {grounded: false, y: 4, vy: 0});
-  closeTo(first.motion.position.moved, 5.5, 0.13);
+  closeTo(first.motion.position.moved, 6, 0.13);
   chained.charges = 1; // bank a second link (Cline's hook is about chaining, not economy)
   // Let the dash finish while pretending another source (class dash) is active.
   const frames = run(chained, 20, () => ({jump: true}), () => ({grounded: false, y: 4, vy: 0, verbActive: true}));
@@ -354,8 +354,8 @@ test('air dash: Cline chaining is the only cancel and chain links stay under the
   assert.ok(second, 'a second link activated while busy');
   assert.ok(second.actions.some(action => action.type === 'cancel-verb'), 'chaining cancels the other source');
   assert.ok(second.events.some(event => event.type === 'chain-cancel'));
-  closeTo(second.motion.position.moved, 5.5 * CHAIN_DISTANCE_CAP, 0.13, 'chained distance is capped at 1.4×');
-  assert.ok(second.motion.position.moved > 5.5, 'chain travels further than a single dash');
+  closeTo(second.motion.position.moved, 6 * CHAIN_DISTANCE_CAP, 0.13, 'chained distance is capped at 1.4×');
+  assert.ok(second.motion.position.moved > 6, 'chain travels further than a single dash');
 
   const plain = createMovementState({character: 'mistral', harness: 'openclaw'});
   const busy = step(plain, {jump: true}, {grounded: false, y: 4, vy: 0, verbActive: true});
@@ -378,10 +378,10 @@ test('air dash: held fire blocks activation unless the usage hook (OpenCode) all
 // 6. Double jump
 // ---------------------------------------------------------------------------
 
-test('double jump: impulse 7.4, one charge, refresh on ground only', () => {
+test('double jump: impulse 7.8, one charge, refresh on ground only', () => {
   const state = createMovementState({character: 'gemini', harness: 'openclaw'});
   const frame = step(state, {jump: true}, {grounded: false, y: 3, vy: -3});
-  closeTo(frame.motion.vy, 7.4, EPS);
+  closeTo(frame.motion.vy, 7.8, EPS);
   assert.equal(state.charges, 0);
   assert.equal(state.cooldown, 0);
   const again = step(state, {jump: true}, {grounded: false, y: 4, vy: 2});
@@ -397,7 +397,7 @@ test('double jump: impulse 7.4, one charge, refresh on ground only', () => {
 test('double jump: carrier lift scales — Juggernaut ×0.7, weakened ×0, blocked charges still spend', () => {
   const jug = createMovementState({character: 'gemini', harness: 'openclaw'}, {juggernaut: true});
   const jugFrame = step(jug, {jump: true}, {grounded: false, y: 3, vy: -3});
-  closeTo(jugFrame.motion.vy, 7.4 * 0.7, EPS, 'Juggernaut lift ×0.7');
+  closeTo(jugFrame.motion.vy, 7.8 * 0.7, EPS, 'Juggernaut lift ×0.7');
 
   const weakened = createMovementState({character: 'qwen', harness: 'hermes'}, {verbId: 'double-jump', carrying: true});
   assert.equal(weakened.params.liftScale, 0);
@@ -411,13 +411,13 @@ test('double jump: carrier lift scales — Juggernaut ×0.7, weakened ×0, block
 // 7. Super jump
 // ---------------------------------------------------------------------------
 
-test('super jump: crouch charge 0.55 s, release launches 12.5, early release cancels free', () => {
+test('super jump: crouch charge 0.45 s, release launches 12.5, early release cancels free', () => {
   const state = createMovementState({character: 'grok', harness: 'openclaw'});
   const started = step(state, {crouch: true}, {grounded: true, y: 0, vy: 0});
   assert.equal(state.phase, 'charging');
   assert.ok(started.events.some(event => event.type === 'charge-start'));
   run(state, 10, () => ({crouch: true}), () => ({grounded: true, y: 0, vy: 0}));
-  closeTo(movementChargeProgress(state), 10 / 60 / 0.55, 1e-3);
+  closeTo(movementChargeProgress(state), 10 / 60 / 0.45, 1e-3);
   const cancelled = step(state, {}, {grounded: true, y: 0, vy: 0});
   assert.equal(state.phase, 'ready');
   assert.equal(state.charges, 1, 'early release refunds the charge');
@@ -431,7 +431,7 @@ test('super jump: crouch charge 0.55 s, release launches 12.5, early release can
   closeTo(launched.motion.vy, 12.5, EPS);
   assert.equal(state.phase, 'ready');
   assert.equal(state.charges, 0);
-  closeTo(state.cooldown, 6, EPS, 'cooldown starts at end');
+  closeTo(state.cooldown, 5, EPS, 'cooldown starts at end');
   assert.ok(launched.events.some(event => event.type === 'charge-release'));
 
   const landed = step(state, {}, {grounded: true, landed: true, y: 0, vy: -3});
@@ -463,9 +463,9 @@ test('hover jets: jump-hold climbs 0.35 m/s and burns fuel/s, release ends it, l
   assert.ok(start.events.some(event => event.type === 'move-start' && event.reason === 'hover'));
   const climb = step(state, {jumpHeld: true}, {grounded: false, y: 5, vy: -1});
   closeTo(climb.motion.vy, 0.35, EPS);
-  closeTo(state.fuel, 2.5 - DT, 1e-9);
+  closeTo(state.fuel, 3 - DT, 1e-9);
   run(state, 59, () => ({jumpHeld: true}), () => ({grounded: false, y: 6, vy: 0}));
-  closeTo(state.fuel, 2.5 - 60 * DT, 1e-6, 'fuel/s drain');
+  closeTo(state.fuel, 3 - 60 * DT, 1e-6, 'fuel/s drain');
   const release = step(state, {}, {grounded: false, y: 6, vy: 0});
   assert.equal(state.phase, 'ready');
   assert.ok(release.events.some(event => event.type === 'move-end' && event.reason === 'release'));
@@ -487,16 +487,16 @@ test('hover jets: crouch brakes a fast descent to 2.2 m/s, no input cuts the jet
   assert.ok(cut.events.some(event => event.type === 'move-end'));
 });
 
-test('hover jets: fuel empties, recharges only on the ground over 1.8 s, and never crosses the ceiling', () => {
+test('hover jets: fuel empties, recharges only on the ground over 1.6 s, and never crosses the ceiling', () => {
   const state = createMovementState({character: 'deepseek', harness: 'openclaw'});
   step(state, {jumpHeld: true}, {grounded: false, y: 5, vy: -1});
   const frames = run(state, 200, () => ({jumpHeld: true}), () => ({grounded: false, y: 5, vy: -1}));
   assert.equal(state.fuel, 0);
   assert.equal(state.phase, 'ready');
   assert.ok(hasEvent(frames, 'fuel-empty'));
-  // Recharge while grounded: 2.5 fuel over 1.8 s.
-  run(state, Math.ceil(1.8 / DT) + 4, () => ({}), () => ({grounded: true, y: 0, vy: 0}));
-  closeTo(state.fuel, 2.5, EPS, 'full recharge');
+  // Recharge while grounded: 3 fuel over 1.6 s.
+  run(state, Math.ceil(1.6 / DT) + 4, () => ({}), () => ({grounded: true, y: 0, vy: 0}));
+  closeTo(state.fuel, 3, EPS, 'full recharge');
   // Ceiling: standing on the ceiling with the button held yields no climb.
   step(state, {jumpHeld: true}, {grounded: false, y: 24, vy: 0, ceilingY: 24});
   const ceiling = step(state, {jumpHeld: true}, {grounded: false, y: 24, vy: 0, ceilingY: 24});
@@ -512,13 +512,13 @@ test('hover jets: fuel empties, recharges only on the ground over 1.8 s, and nev
 // 9. Brace slam
 // ---------------------------------------------------------------------------
 
-test('brace slam: 0.15 s wind-up, leap, fast descent, impact and 0.4 s recovery', () => {
+test('brace slam: 0.12 s wind-up, leap, fast descent, impact and 0.4 s recovery', () => {
   const state = createMovementState({character: 'meta', harness: 'cline'});
   assert.equal(state.verb, 'brace-slam');
   assert.equal(state.hook, 'chaining');
   const windup = step(state, {jump: true, crouch: true}, {grounded: true, y: 0, vy: 0});
   assert.equal(state.phase, 'windup');
-  assert.ok(windup.events.some(event => event.type === 'windup-start' && Math.abs(event.duration - 0.15) < EPS));
+  assert.ok(windup.events.some(event => event.type === 'windup-start' && Math.abs(event.duration - 0.12) < EPS));
   const frames = run(state, 12, () => ({}), () => ({grounded: false, y: 1, vy: 3}));
   assert.ok(hasEvent(frames, 'slam-launch'));
   assert.equal(state.phase, 'active');
@@ -530,9 +530,9 @@ test('brace slam: 0.15 s wind-up, leap, fast descent, impact and 0.4 s recovery'
   closeTo(dive.motion.vy, -16, EPS, 'slam descent');
   const impact = step(state, {}, {grounded: true, landed: true, y: 0, vy: -8});
   assert.equal(state.phase, 'ready');
-  closeTo(state.cooldown, 8, EPS);
+  closeTo(state.cooldown, 7, EPS);
   closeTo(state.recovery, 0.4, EPS);
-  assert.ok(impact.actions.some(action => action.type === 'slam-impact' && action.radius === 4 && action.knockback === 9));
+  assert.ok(impact.actions.some(action => action.type === 'slam-impact' && action.radius === 4.5 && action.knockback === 10));
   assert.ok(hasEvent([impact], 'slam-impact'));
 });
 
@@ -550,7 +550,7 @@ test('brace slam: wind-up interrupt cancels before the leap fires', () => {
 // 10. Safety glide
 // ---------------------------------------------------------------------------
 
-test('safety glide: hold in air, clamp descent to 2 m/s, steer 4, fuel/s, no upward lift', () => {
+test('safety glide: hold in air, clamp descent to 1.7 m/s, steer 4.5, fuel/s, no upward lift', () => {
   const state = createMovementState({character: 'claude', harness: 'claudecode'});
   assert.equal(state.verb, 'safety-glide');
   const rising = step(state, {jumpHeld: true}, {grounded: false, y: 6, vy: 3});
@@ -558,10 +558,10 @@ test('safety glide: hold in air, clamp descent to 2 m/s, steer 4, fuel/s, no upw
   const start = step(state, {jumpHeld: true}, {grounded: false, y: 6, vy: -1});
   assert.equal(state.phase, 'active');
   const glide = step(state, {jumpHeld: true}, {grounded: false, y: 6, vy: -9});
-  closeTo(glide.motion.vy, -2, EPS);
-  closeTo(glide.motion.airControl, 4, EPS);
+  closeTo(glide.motion.vy, -1.7, EPS);
+  closeTo(glide.motion.airControl, 4.5, EPS);
   assert.ok(glide.motion.vy <= 0, 'no upward mobility');
-  closeTo(state.fuel, 2.5 - DT, 1e-9);
+  closeTo(state.fuel, 3 - DT, 1e-9);
   const release = step(state, {}, {grounded: false, y: 6, vy: -1});
   assert.equal(state.phase, 'ready');
   assert.ok(release.events.some(event => event.type === 'move-end'));
@@ -575,7 +575,7 @@ test('safety glide: hold in air, clamp descent to 2 m/s, steer 4, fuel/s, no upw
 // 11. Grapple
 // ---------------------------------------------------------------------------
 
-test('grapple: aim + hook reels at 12 m/s, arrival ends it and starts the 7 s cooldown', () => {
+test('grapple: aim + hook reels at 12 m/s, arrival ends it and starts the 6 s cooldown', () => {
   const state = createMovementState({character: 'chatgpt', harness: 'openclaw'});
   const anchor = {x: 0, y: 6, z: -10};
   const castRay = () => anchor;
@@ -589,24 +589,24 @@ test('grapple: aim + hook reels at 12 m/s, arrival ends it and starts the 7 s co
   const frames = run(state, 5, () => ({}), () => ({grounded: false, x: 0, y: 6, z: -9.8, vy: 0, castRay}));
   assert.equal(state.phase, 'ready');
   assert.ok(hasEvent(frames, 'grapple-release'));
-  closeTo(state.cooldown, 7 - 4 * DT, 0.05, 'hook cooldown');
+  closeTo(state.cooldown, 6 - 4 * DT, 0.05, 'hook cooldown');
 });
 
-test('grapple: a miss costs the 3 s miss cooldown, release cancels a hook', () => {
+test('grapple: a miss costs the 2.5 s miss cooldown, release cancels a hook', () => {
   const state = createMovementState({character: 'chatgpt', harness: 'openclaw'});
   const miss = step(state, {mobility: true}, {grounded: false, x: 0, y: 6, z: 0, castRay: () => null});
-  assert.equal(state.miss, 3);
-  closeTo(state.cooldown, 3, EPS);
+  assert.equal(state.miss, 2.5);
+  closeTo(state.cooldown, 2.5, EPS);
   assert.ok(hasEvent([miss], 'move-miss'));
   const blocked = step(state, {mobility: true}, {grounded: false, x: 0, y: 6, z: 0, castRay: () => ({x: 0, y: 6, z: -5})});
   assert.equal(blocked.blocked, 'cooldown');
-  run(state, Math.ceil(3 / DT) + 2, () => ({}), () => ({grounded: false, x: 0, y: 6, z: 0, vy: 0}));
+  run(state, Math.ceil(2.5 / DT) + 2, () => ({}), () => ({grounded: false, x: 0, y: 6, z: 0, vy: 0}));
   const hook = step(state, {mobility: true}, {grounded: false, x: 0, y: 6, z: 0, castRay: () => ({x: 0, y: 6, z: -10})});
   assert.equal(hook.blocked, null);
   const released = step(state, {mobilityReleased: true}, {grounded: false, x: 0, y: 6, z: 0, vy: 0});
   assert.equal(state.phase, 'ready');
   assert.ok(released.events.some(event => event.type === 'grapple-release' && event.reason === 'release'));
-  closeTo(state.cooldown, 7, EPS);
+  closeTo(state.cooldown, 6, EPS);
 });
 
 test('grapple: the no-world gate and weakened no-lift rule', () => {
@@ -625,19 +625,40 @@ test('grapple: the no-world gate and weakened no-lift rule', () => {
 // 12. Blink step
 // ---------------------------------------------------------------------------
 
-test('blink step: 0.3 s wind-up then a 6 m aimed translation and 6 s cooldown', () => {
+test('blink step: 0.25 s wind-up then a 6 m aimed translation and 5 s cooldown', () => {
   const state = createMovementState({character: 'kimi', harness: 'openclaw'});
   const start = step(state, {mobility: true}, {grounded: false, x: 0, y: 5, z: 0, aim: {x: 0, y: 0, z: -1}});
   assert.equal(state.phase, 'windup');
   assert.ok(hasEvent([start], 'windup-start'));
   assert.equal(state.cooldown, 0, 'nothing paid during wind-up');
+  assert.equal(state.chains, 0, 'a wind-up banks no chain link until it fires');
   const frames = run(state, 20, i => (i === 0 ? {mobility: true} : {}), () => ({grounded: false, x: 0, y: 5, z: 0, aim: {x: 0, y: 0, z: -1}}));
   const blink = frames.find(frame => frame.motion.mode === 'blink');
   assert.ok(blink, 'blink fired');
   closeTo(blink.motion.position.z, -6, 0.13, '6 m translation');
   assert.equal(state.phase, 'ready');
-  assert.ok(state.cooldown > 5.5 && state.cooldown <= 6, '6 s cooldown starts at end');
+  assert.equal(state.chains, 1, 'the fired blink banks exactly one link');
+  assert.ok(state.cooldown > 4.5 && state.cooldown <= 5, '5 s cooldown starts at end');
   assert.ok(hasEvent(frames, 'windup-end'));
+});
+
+// Regression: the chain link used to be banked at wind-up start, so an
+// interrupted (fully refunded) attempt still inflated the next blink to the
+// 1.4× chain cap. A refunded attempt must leave the first link at 6 m.
+test('blink step: an interrupted wind-up refunds the attempt and does not inflate the next blink', () => {
+  const state = createMovementState({character: 'kimi', harness: 'openclaw'});
+  step(state, {mobility: true}, {grounded: false, x: 0, y: 6, z: 0, aim: {x: 0, y: 0, z: -1}});
+  assert.equal(state.phase, 'windup');
+  const interrupted = step(state, {}, {grounded: false, x: 0, y: 6, z: 0, interrupted: true});
+  assert.equal(state.phase, 'ready');
+  assert.equal(state.chains, 0, 'the refunded attempt banks no link');
+  assert.equal(state.cooldown, 0, 'the refunded attempt pays no cooldown');
+  assert.ok(interrupted.events.some(event => event.type === 'windup-interrupt'));
+  const frames = run(state, 20, i => (i === 0 ? {mobility: true} : {}), () => ({grounded: false, x: 0, y: 6, z: 0, aim: {x: 0, y: 0, z: -1}}));
+  const blink = frames.find(frame => frame.motion.mode === 'blink');
+  assert.ok(blink, 'the retry fires');
+  closeTo(blink.motion.position.z, -6, 0.13, 'the retry is a first link, not a 1.4× chain link');
+  assert.equal(state.chains, 1);
 });
 
 test('blink step: an interrupt during wind-up refunds the attempt; instagib raises wind-up to 0.45 s', () => {
@@ -668,36 +689,36 @@ test('blink step: vertical aims clamp to the ceiling', () => {
 // 13. Deployable rope
 // ---------------------------------------------------------------------------
 
-test('deployable rope: places a 20 s anchor, charges one, cooldown 12 s, exposes the ride line', () => {
+test('deployable rope: places a 20 s anchor, charges one, cooldown 10 s, exposes the ride line', () => {
   const state = createMovementState({character: 'qwen', harness: 'openclaw'});
   const castRay = () => ({x: 4, y: 3, z: -8});
   const frame = step(state, {mobility: true}, {grounded: false, x: 0, y: 2, z: 0, castRay});
   assert.ok(state.anchor);
   closeTo(state.anchor.life, 20, EPS);
   assert.equal(state.charges, 0);
-  closeTo(state.cooldown, 12, EPS);
+  closeTo(state.cooldown, 10, EPS);
   const place = frame.actions.find(action => action.type === 'rope-place');
   assert.ok(place, 'rope-place action for the per-match zipline table');
   assert.deepEqual({x: place.to.x, y: place.to.y, z: place.to.z}, {x: 4, y: 3, z: -8});
-  assert.equal(place.speed, 9);
+  assert.equal(place.speed, 10);
   assert.ok(place.from);
   assert.ok(hasEvent([frame], 'rope-place'));
   const line = ropeLine(state);
   assert.deepEqual(line.to, {x: 4, y: 3, z: -8});
-  assert.equal(line.speed, 9);
+  assert.equal(line.speed, 10);
   assert.ok(line.from);
   const blocked = step(state, {mobility: true}, {grounded: false, x: 0, y: 2, z: 0, castRay});
   assert.equal(blocked.blocked, 'resources');
 });
 
-test('deployable rope: the anchor expires after 20 s with a rope-remove and recharges after 12 s', () => {
+test('deployable rope: the anchor expires after 20 s with a rope-remove and recharges after 10 s', () => {
   const state = createMovementState({character: 'qwen', harness: 'openclaw'});
   const castRay = () => ({x: 4, y: 3, z: -8});
   step(state, {mobility: true}, {grounded: false, x: 0, y: 2, z: 0, castRay});
-  run(state, Math.ceil(12 / DT) + 4, () => ({}), () => ({grounded: true, y: 0, vy: 0}));
-  assert.equal(state.charges, 1, 'recharge after the 12 s cooldown');
+  run(state, Math.ceil(10 / DT) + 4, () => ({}), () => ({grounded: true, y: 0, vy: 0}));
+  assert.equal(state.charges, 1, 'recharge after the 10 s cooldown');
   assert.ok(state.anchor, 'the 20 s anchor is still alive');
-  const frames = run(state, Math.ceil(8 / DT) + 4, () => ({}), () => ({grounded: false, x: 0, y: 2, z: 0}));
+  const frames = run(state, Math.ceil(10 / DT) + 4, () => ({}), () => ({grounded: false, x: 0, y: 2, z: 0}));
   assert.equal(state.anchor, null);
   assert.ok(hasEvent(frames, 'rope-expire'));
   assert.ok(actionsOf(frames).some(action => action.type === 'rope-remove'));
@@ -712,6 +733,132 @@ test('deployable rope: a miss is free (no charge, no cooldown)', () => {
   assert.equal(state.charges, 1);
   assert.equal(state.cooldown, 0);
   assert.ok(hasEvent([frame], 'rope-miss'));
+});
+
+// ---------------------------------------------------------------------------
+// 13b. Verb lifecycle sweep: every verb is useful, terminates and refills
+// ---------------------------------------------------------------------------
+// One deterministic script per verb. Each runs the verb from idle through its
+// whole effect (a real activation, not a block) back to `ready`, then proves
+// the resource economy returns to full on the ground. This is the "no stuck
+// states / charges refill" net for every verb at the tuned numbers.
+const START_EVENTS = new Set(['move-start', 'windup-start', 'charge-start', 'slam-launch']);
+// `start` is the actor's feet position; `groundedAt(i)` / `landedAt(i)` script
+// the world; `ctxAt(i)` adds the verb-specific callbacks. The runner applies
+// `frame.motion.position` between ticks exactly like the caller contract, so
+// aimed and translated verbs really travel toward their target.
+const LIFECYCLE_SCRIPTS = [
+  {
+    id: 'air-dash', character: 'mistral', start: {x: 0, y: 5, z: 0, vy: -1},
+    input: i => (i === 0 ? {jump: true} : {}),
+    groundedAt: () => false,
+    maxTicks: 30,
+  },
+  {
+    id: 'double-jump', character: 'gemini', start: {x: 0, y: 5, z: 0, vy: -1},
+    input: i => (i === 0 ? {jump: true} : {}),
+    groundedAt: () => false,
+    maxTicks: 5,
+  },
+  {
+    id: 'super-jump', character: 'grok', start: {x: 0, y: 0, z: 0, vy: 0},
+    input: i => (i < 40 ? {crouch: true} : {}),
+    groundedAt: () => true,
+    maxTicks: 50,
+  },
+  {
+    id: 'hover-jets', character: 'deepseek', start: {x: 0, y: 5, z: 0, vy: -1},
+    input: i => (i < 20 ? {jumpHeld: true} : {}),
+    groundedAt: () => false,
+    maxTicks: 30,
+  },
+  {
+    id: 'brace-slam', character: 'meta', start: {x: 0, y: 0, z: 0, vy: 0},
+    input: i => (i === 0 ? {slam: true} : {}),
+    groundedAt: i => i === 0 || i >= 20,
+    landedAt: i => i === 20,
+    maxTicks: 30,
+  },
+  {
+    id: 'safety-glide', character: 'claude', start: {x: 0, y: 6, z: 0, vy: -1},
+    input: i => (i < 20 ? {jumpHeld: true} : {}),
+    groundedAt: () => false,
+    maxTicks: 30,
+  },
+  {
+    id: 'grapple', character: 'chatgpt', start: {x: 0, y: 5, z: 0, vy: 0},
+    input: i => (i === 0 ? {mobility: true} : {}),
+    groundedAt: () => false,
+    ctxAt: () => ({castRay: () => ({x: 0, y: 5, z: -6})}),
+    maxTicks: 40,
+  },
+  {
+    id: 'blink-step', character: 'kimi', start: {x: 0, y: 5, z: 0, vy: 0},
+    input: i => (i === 0 ? {mobility: true} : {}),
+    groundedAt: () => false,
+    ctxAt: () => ({aim: {x: 0, y: 0, z: -1}}),
+    maxTicks: 25,
+  },
+  {
+    id: 'deployable-rope', character: 'qwen', start: {x: 0, y: 2, z: 0, vy: 0},
+    input: i => (i === 0 ? {mobility: true} : {}),
+    groundedAt: () => false,
+    ctxAt: () => ({castRay: () => ({x: 4, y: 3, z: -8})}),
+    maxTicks: 5,
+  },
+];
+
+test('verb lifecycle sweep: every verb activates, terminates and refills with no stuck state', () => {
+  for (const script of LIFECYCLE_SCRIPTS) {
+    const state = createMovementState({character: script.character, harness: 'openclaw'});
+    assert.equal(state.verb, script.id, 'the owning operator resolves the verb');
+    const actor = {...script.start};
+    let started = false;
+    for (let i = 0; i < script.maxTicks; i++) {
+      const frame = stepMovement(state, script.input(i), ctx({
+        x: actor.x, y: actor.y, z: actor.z, vy: actor.vy,
+        grounded: script.groundedAt(i),
+        landed: script.landedAt ? script.landedAt(i) : false,
+        ...(script.ctxAt ? script.ctxAt(i) : {}),
+      }));
+      if (frame.events.some(event => START_EVENTS.has(event.type))) started = true;
+      if (frame.motion.position) {
+        actor.x = frame.motion.position.x;
+        actor.y = frame.motion.position.y;
+        actor.z = frame.motion.position.z;
+      }
+      if (frame.motion.vy !== null) actor.vy = frame.motion.vy;
+    }
+    assert.ok(started, `${script.id} activated from its own input`);
+    assert.equal(state.phase, 'ready', `${script.id} reaches a terminal state, never stuck`);
+    assert.ok(state.recovery <= state.params.landing + EPS, `${script.id} recovery stays bounded`);
+    // Ground refill: charges come back (or fuel, or just the cooldown).
+    run(state, Math.ceil((state.params.cooldown + state.maxFuel * state.fuelRecharge + 1) / DT) + 4,
+      () => ({}), () => ({grounded: true, y: 0, vy: 0}));
+    if (state.maxCharges > 0) assert.equal(state.charges, state.maxCharges, `${script.id} charges refill on the ground`);
+    if (state.maxFuel > 0) assert.ok(Math.abs(state.fuel - state.maxFuel) <= EPS, `${script.id} fuel refills on the ground`);
+    assert.ok(state.cooldown <= EPS, `${script.id} cooldown reaches zero`);
+  }
+});
+
+test('verb lifecycle sweep: instagib and carrier gates stay independent of the tuned numbers', () => {
+  // Instagib still weakens dash distance and blink wind-up, never the reverse.
+  for (const mode of ['instagib', 'rockets', 'arsenal']) {
+    assert.equal(resolveMovementParams('air-dash', {mode}).distance, 4, `${mode} dash cap`);
+    assert.equal(resolveMovementParams('blink-step', {mode}).windup, 0.45, `${mode} blink wind-up floor`);
+  }
+  // The carrier rules still strip the default carrier and weaken the exception.
+  const dropped = createMovementState({character: 'mistral', harness: 'openclaw'}, {carrying: true, mode: 'ctf'});
+  assert.equal(dropped.enabled, false);
+  const weakened = createMovementState({character: 'qwen', harness: 'openclaw'}, {carrying: true, mode: 'ctf'});
+  assert.equal(weakened.carrier.reason, 'class');
+  assert.equal(weakened.params.liftScale, 0);
+  assert.equal(weakened.phase, 'ready', 'a spawn-quiet weakened verb has no in-flight state');
+  assert.equal(weakened.maxCharges, 1, 'the weakened charge cap holds');
+  closeTo(weakened.params.cooldown, 15, EPS, '10 s rope cooldown +50% while carrying');
+  // Reduced motion is a view-layer gate (view.mjs), so the movement module
+  // exposes no motion preference and the tuned numbers never read one.
+  assert.ok(!Object.keys(createMovementState({character: 'mistral', harness: 'hermes'})).includes('reduced'));
 });
 
 // ---------------------------------------------------------------------------
@@ -780,7 +927,7 @@ test('carrier weakening: a weakened hover cannot climb but still brakes; the fla
   const hover = createMovementState({character: 'deepseek', harness: 'hermes'}, {carrying: true, mode: 'ctf'});
   assert.equal(hover.carrier.reason, 'spec');
   assert.equal(hover.carrier.suppressActive, true);
-  closeTo(hover.maxFuel, 2.5 * 1.25 * 0.5, EPS);
+  closeTo(hover.maxFuel, 3 * 1.25 * 0.5, EPS);
   step(hover, {jumpHeld: true}, {grounded: false, y: 5, vy: -1});
   const climb = step(hover, {jumpHeld: true}, {grounded: false, y: 5, vy: -1});
   assert.equal(climb.motion.vy, null, 'no vertical lift');
@@ -789,7 +936,7 @@ test('carrier weakening: a weakened hover cannot climb but still brakes; the fla
   refreshMovementParams(hover, {carrying: false, mode: 'ctf'});
   assert.equal(hover.carrier.weakened, false);
   assert.equal(hover.params.liftScale, 1);
-  closeTo(hover.maxFuel, 3.125, EPS);
+  closeTo(hover.maxFuel, 3.75, EPS);
   assert.ok(hover.fuel <= hover.maxFuel, 'unchanged fuel is clamped to the refreshed pool');
 });
 
@@ -831,7 +978,7 @@ test('interruptMovement is a no-op when idle and starts the cooldown after a com
   assert.equal(info.interrupted, true);
   assert.equal(info.phase, 'active');
   assert.equal(info.refunded, null);
-  closeTo(idle.cooldown, 2, EPS, 'committed dash keeps its (economy) cooldown');
+  closeTo(idle.cooldown, 1.76, EPS, 'committed dash keeps its (economy) cooldown');
 });
 
 test('one movement source: vehicles, ziplines and traversal flight block activation', () => {
@@ -873,7 +1020,7 @@ test('movementActive / movementChargeProgress describe the live phase', () => {
   assert.equal(movementActive(state), false);
   closeTo(movementChargeProgress(state), 0, EPS, 'wind-up progress starts at 0 and fills to 1');
   run(state, 9, () => ({}), () => ({grounded: false, x: 0, y: 5, z: 0}));
-  closeTo(movementChargeProgress(state), 0.5, 0.02, 'half-way through the 0.3 s wind-up');
+  closeTo(movementChargeProgress(state), 0.6, 0.02, 'nine ticks into the 0.25 s wind-up');
   const dash = createMovementState({character: 'mistral', harness: 'openclaw'});
   step(dash, {jump: true}, {grounded: false, y: 4, vy: 0});
   assert.equal(movementActive(dash), true);
@@ -937,8 +1084,8 @@ test('§4.7 sweep: every resolved verb respects the chain, ceiling, field and in
     if (spec.id === 'blink-step') assert.ok(params.distance <= 6, 'blink ≤6 m');
     if (spec.id === 'grapple') assert.ok(params.distance <= 14, 'grapple ≤14 m');
     if (spec.id === 'brace-slam') {
-      assert.ok(params.radius <= 4, 'slam radius is the pinned 4 m');
-      assert.ok(params.knockback <= 9, 'slam knockback is the pinned 9');
+      assert.ok(params.radius <= 4.5, 'slam radius is the pinned 4.5 m');
+      assert.ok(params.knockback <= 10, 'slam knockback is the pinned 10');
     }
   }
   assert.equal(INTERACTION_BONUS_CAP, 1.35);

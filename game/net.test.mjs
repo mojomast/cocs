@@ -116,6 +116,44 @@ test('acknowledged snapshots rebase and replay only unacknowledged inputs',()=>{
  const expected=new Match('chatgpt','openclaw',rng(),'crosswire',config);expected.actors[0].id=0;Object.assign(expected.actors[0],authoritative);expected.step(1/60,{inputs:{0:second}});
  assert.deepEqual(client.pendingInputs.map(item=>item.seq),[2]);assert.equal(client.shadow.actors[0].x,expected.actors[0].x);assert.equal(client.shadow.actors[0].z,expected.actors[0].z);assert.equal(client.shadow.actors[0].yaw,.4);
 });
+test('input() sends the held altFire field and stores it for replay',()=>{
+ const client=new NetClient();
+ const frames=[];
+ client.send=msg=>{frames.push(msg);return true;};
+ const held={x:0,z:0,yaw:.25,pitch:0,fire:false,altFire:true};
+ const seq=client.input(held);
+ assert.equal(seq,1);
+ assert.equal(frames.length,1,'the held input crosses the wire');
+ assert.equal(frames[0].type,MESSAGE.INPUT);
+ assert.equal(frames[0].seq,seq);
+ assert.equal(frames[0].input.altFire,true,'the wire payload carries the held field');
+ assert.equal(client.pendingInputs.length,1);
+ assert.equal(client.pendingInputs[0].input.altFire,true,'the pending record keeps the held field');
+ const release=client.input({x:0,z:0,altFire:false});
+ assert.equal(release,2);
+ assert.equal(frames[1].input.altFire,false,'release crosses the wire explicitly');
+});
+test('acknowledged snapshots replay a held altFire input into the shadow identically',()=>{
+ const client=new NetClient();client.createShadow('crosswire',config);client.actorId=0;
+ const seed={...client.shadow.actors[0],id:0,x:0,y:0,z:5,vx:0,vy:0,vz:0,grounded:true,protection:0,health:100,ammo:[Infinity,0,0,0,0,0,0,0]};client.resync(seed);
+ const shadow=client.shadow;
+ const replayed=[];
+ const realStep=shadow.step.bind(shadow);
+ shadow.step=(dt,payload)=>{const input=payload?.inputs?.[shadow.actors[0].id];if(input)replayed.push({...input});return realStep(dt,payload);};
+ const held={x:0,z:0,yaw:.4,pitch:0,fire:false,altFire:true};
+ client.input(held);client.predict(held);
+ const authoritative={...client.shadow.actors[0]};
+ client.input(held);client.predict(held);
+ replayed.length=0;
+ client.push({seq:1,acks:{0:1},state:{time:1,actors:[authoritative],rockets:[],pickups:[],feed:[],config:{},mapId:'crosswire',mapName:'',modeName:'',projectiles:0,stats:{},leaders:[]}});
+ assert.deepEqual(client.pendingInputs.map(item=>item.seq),[2],'only the unacknowledged input replays');
+ assert.equal(replayed.length,1,'the pending input is replayed once');
+ assert.deepEqual(replayed[0],held,'the replayed input is exactly the sent controls object');
+ const expected=new Match('chatgpt','openclaw',rng(),'crosswire',config);expected.actors[0].id=0;Object.assign(expected.actors[0],authoritative);expected.step(1/60,{inputs:{0:held}});
+ assert.equal(client.shadow.actors[0].x,expected.actors[0].x);
+ assert.equal(client.shadow.actors[0].z,expected.actors[0].z);
+ assert.equal(client.shadow.actors[0].yaw,expected.actors[0].yaw);
+});
 test('resync, replay and prediction keep received nested actor state isolated',()=>{
  const server=new Match('chatgpt','openclaw',rng(),'crosswire',config);
  Object.assign(server.actors[0],{x:0,y:0,z:5,shotWait:0,powerups:{haste:5}});

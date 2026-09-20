@@ -1068,6 +1068,10 @@ export class Room {
   // sending true while the bind is down, and the core derives the press/release
   // edges. A forwarded pulse would fake a release and cancel an active grapple.
   if (i.mobility) ext.mobility = true;
+  // `altFire` follows the same held contract. Rebuilding `ext` on every message
+  // means a release (altFire false) drops the field, while `peer.latest` carries
+  // it through every tick in between.
+  if (i.altFire) ext.altFire = true;
     peer.latest = ext;
     peer.latestSeq = seq;
     if (i.fire && !this.match.race) peer.edgeFire = true;

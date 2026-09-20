@@ -472,3 +472,141 @@ export function killcamPose({elapsed=0,duration=KILLCAM_DURATION,focus=null,kill
  const lookX=fx.x+(hasKiller?(killer.x-fx.x)*.34*reveal:0),lookZ=fx.z+(hasKiller?(killer.z-fx.z)*.34*reveal:0);
  return {x,y,z,lookX,lookY:fx.y+.7,lookZ,fov:58+9*(1-phase),phase};
 }
+
+// ---- Alt-fire projectile visuals -------------------------------------------
+// Cluster pods, mortar orbs, flak shells and persistent proximity mines. One
+// small group per tracked projectile, a fixed slot budget reused oldest-first,
+// and shared pool geometry so a busy alt-fire match cannot grow GPU resources.
+// Mines are keyed by projectile/pending id: they spawn from the `launch` event,
+// keep updating from the snapshot `rockets` list (adopting the sim's id when it
+// appears), blink once armed, and leave on the matching `explosion` event, an
+// explicit remove, or their `life` expiry. Everything is presentation only.
+export const ALT_PROJECTILE_COLORS=Object.freeze({cluster:'#ffb066',mortar:'#c9a6ff',mine:'#8fd9ff',bomb:'#ff9a7a'});
+export const altProjectileColor=kind=>ALT_PROJECTILE_COLORS[kind]||'#ffb066';
+const ALT_PROJECTILE_KINDS=new Set(['cluster','mortar','mine','bomb']);
+// A snapshot rocket is an alt projectile when the sim tags it directly
+// (`mine`/`bomblets`/`flak`) or via the alt flag/id. The weapon fallback keeps
+// older snapshots readable.
+export function altRocketKind(rocket){
+ if(!rocket)return null;
+ if(rocket.mine===true)return 'mine';
+ if(Number(rocket.bomblets)>0)return 'cluster';
+ if(Number(rocket.flak)>0)return 'bomb';
+ if(rocket.alt!==true&&rocket.altId==null)return null;
+ if(typeof rocket.altId==='string'&&ALT_PROJECTILE_KINDS.has(rocket.altId))return rocket.altId;
+ const weapon=Number.isInteger(rocket.weapon)?rocket.weapon:-1;
+ return weapon===1?'cluster':weapon===4?'mortar':weapon===5?'mine':weapon===7?'bomb':null;
+}
+const MINE_BLINK_HZ=7;
+export class AltProjectilePool{
+ constructor(scene,limit=12){
+  this.scene=scene;this.limit=Math.max(4,limit|0);this.slots=[];this.byKey=new Map();this.serial=0;this.clock=0;
+  this.podGeo=new T.CylinderGeometry(.05,.028,.17,8);
+  this.orbGeo=new T.SphereGeometry(.155,10,8);
+  this.shellGeo=new T.SphereGeometry(.12,10,8);
+  this.mineGeo=new T.CylinderGeometry(.17,.17,.07,12);
+  this.eyeGeo=new T.SphereGeometry(.042,8,6);
+  this.prongGeo=new T.BoxGeometry(.016,.016,.13);
+ }
+ _slot(){
+  let slot=this.slots.find(s=>!s.active);
+  if(slot)return slot;
+  if(this.slots.length>=this.limit){slot=this.slots.slice().sort((a,b)=>a.serial-b.serial)[0];this._release(slot);return slot;}
+  const material=new T.MeshBasicMaterial({transparent:true,depthWrite:false});
+  const group=new T.Group();group.name='alt-projectile';
+  const body=new T.Mesh(this.orbGeo,material),disc=new T.Mesh(this.mineGeo,material),prongs=new T.Group(),eye=new T.Mesh(this.eyeGeo,material);
+  for(const s of [-1,0,1]){const prong=new T.Mesh(this.prongGeo,material);prong.position.set(s*.055,0,-.045);prong.rotation.z=s*.35;prongs.add(prong);}
+  group.add(body,disc,prongs,eye);group.visible=false;group.frustumCulled=false;this.scene.add(group);
+  slot={group,body,disc,prongs,eye,material,active:false,serial:0,key:null,pendingKey:null,kind:null,pos:{x:0,y:0,z:0},expires:Infinity,armedAt:Infinity,lastSeen:-Infinity};
+  this.slots.push(slot);return slot;
+ }
+ _release(slot){
+  if(slot.key!=null)this.byKey.delete(slot.key);
+  slot.key=null;slot.pendingKey=null;slot.kind=null;slot.active=false;slot.group.visible=false;slot.expires=Infinity;slot.armedAt=Infinity;slot.lastSeen=-Infinity;
+ }
+ _configure(slot){
+  const mine=slot.kind==='mine';
+  slot.body.visible=!mine;slot.disc.visible=mine;slot.prongs.visible=mine;slot.eye.visible=false;
+  if(!mine)slot.body.geometry=slot.kind==='cluster'?this.podGeo:slot.kind==='mortar'?this.orbGeo:this.shellGeo;
+  slot.material.color.set(altProjectileColor(slot.kind));
+ }
+ _place(slot,pos){
+  slot.pos.x=Number(pos?.x)||0;slot.pos.y=Number(pos?.y)||0;slot.pos.z=Number(pos?.z)||0;
+  slot.group.position.set(slot.pos.x,slot.pos.y,slot.pos.z);
+ }
+ // Immediate visual from a local `launch` event. The key is provisional: the
+ // next snapshot adopt pass binds the sim's rocket id and keeps the identity.
+ spawn({key=null,kind=null,pos=null,arm,life,mine=false,time=0}={}){
+  if(!kind||!pos)return null;
+  const now=Number.isFinite(time)?time:this.clock,slot=this._slot();
+  slot.kind=kind;slot.pendingKey=key!=null?String(key):null;slot.active=true;slot.serial=++this.serial;slot.lastSeen=now;
+  const isMine=mine||kind==='mine';
+  slot.expires=now+(Number.isFinite(life)?Math.max(.2,life):(isMine?7:4));
+  slot.armedAt=now+(isMine?(Number.isFinite(arm)?Math.max(0,arm):.45):0);
+  this._configure(slot);this._place(slot,pos);slot.group.visible=true;
+  return slot;
+ }
+ // Per-frame snapshot pass. Rows are {id,kind,pos,life,arm,mine}. Mines keep
+ // their life/arm budget from the launch event unless the snapshot supplies a
+ // shorter (remaining-time) value, so a constant total never extends them.
+ sync(rows,{time=0,reduced=false}={}){
+  const now=Number.isFinite(time)?time:this.clock;
+  for(const row of rows||[]){
+   if(!row?.kind||!row.pos)continue;
+   const id=row.id!=null?String(row.id):null;
+   let slot=id!=null?this.byKey.get(id):null;
+   if(!slot)slot=this.slots.find(s=>s.active&&s.key==null&&s.kind===row.kind&&Math.hypot(s.pos.x-row.pos.x,s.pos.y-row.pos.y,s.pos.z-row.pos.z)<5);
+   if(!slot)slot=this._slot();
+   if(slot.key!=null&&slot.key!==id){this.byKey.delete(slot.key);slot.key=null;}
+   if(slot.key==null&&id!=null){slot.key=id;this.byKey.set(id,slot);}
+   slot.kind=row.kind;slot.active=true;slot.serial=++this.serial;slot.lastSeen=now;
+   this._configure(slot);this._place(slot,row.pos);slot.group.visible=true;
+   if(row.kind==='mine'){
+    if(Number.isFinite(row.arm))slot.armedAt=Math.min(slot.armedAt,now+Math.max(0,row.arm));
+    if(Number.isFinite(row.life)){const expires=now+Math.max(.2,row.life);if(expires<slot.expires)slot.expires=expires;}
+   }
+  }
+  return this.activeCount();
+ }
+ activeCount(){let n=0;for(const slot of this.slots)if(slot.active)n++;return n;}
+ // Remove the projectile named by key (projectile id / pending id) or the
+ // nearest live one to an explosion position. Returns the removed identity so
+ // the view can pick a matching burst.
+ explode(key=null,pos=null){
+  let slot=key!=null?this.byKey.get(String(key)):null;
+  if(!slot&&key!=null)slot=this.slots.find(s=>s.active&&s.pendingKey===String(key))||null;
+  if(!slot&&pos){let best=null,bestDistance=4;for(const s of this.slots){if(!s.active)continue;const d=Math.hypot(s.pos.x-(pos.x||0),s.pos.y-(pos.y||0),s.pos.z-(pos.z||0));if(d<bestDistance){best=s;bestDistance=d;}}slot=best;}
+  if(!slot)return null;
+  const info={kind:slot.kind,key:slot.key??slot.pendingKey,pos:{...slot.pos}};
+  this._release(slot);
+  return info;
+ }
+ // Arming/blink, life expiry and idle cleanup. Non-mine projectiles vanish
+ // shortly after the snapshot stops listing them; mines hold until life ends.
+ update(dt,{time=NaN,reduced=false}={}){
+  const step=Math.max(0,Math.min(Number(dt)||0,.1));
+  const now=Number.isFinite(time)?time:(this.clock+=step);
+  for(const slot of this.slots){
+   if(!slot.active)continue;
+   if(slot.kind==='mine'){
+    if(now>=slot.expires){this._release(slot);continue;}
+    const armed=now>=slot.armedAt;
+    slot.eye.visible=armed&&(reduced||Math.floor(now*MINE_BLINK_HZ)%2===0);
+    slot.eye.scale.setScalar(armed?1:.6);
+    if(!reduced){slot.prongs.rotation.z+=step*1.4;slot.disc.rotation.z+=step*.5;}
+    else{slot.prongs.rotation.z=0;slot.disc.rotation.z=0;}
+   }else{
+    if(now>=slot.expires||now-slot.lastSeen>1.4){this._release(slot);continue;}
+    if(!reduced){slot.body.rotation.z+=step*2.5;if(slot.kind==='mortar')slot.body.rotation.x+=step*1.4;}
+   }
+  }
+  return this.activeCount();
+ }
+ clear(){for(const slot of this.slots)this._release(slot);}
+ dispose(){
+  for(const slot of this.slots){this.scene.remove(slot.group);slot.material.dispose();}
+  this.slots=[];this.byKey.clear();
+  for(const geo of [this.podGeo,this.orbGeo,this.shellGeo,this.mineGeo,this.eyeGeo,this.prongGeo])geo?.dispose();
+  this.podGeo=this.orbGeo=this.shellGeo=this.mineGeo=this.eyeGeo=this.prongGeo=null;
+ }
+}

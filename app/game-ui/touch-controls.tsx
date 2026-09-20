@@ -16,14 +16,14 @@ import {applyTouchAction,stickAxis} from '../../game/touch.mjs';
 // gets `touch-layer--suspended` (all capture is inert in CSS) and every handler
 // refuses to seed move/look/fire/jump, so a tap meant for the surface can never
 // leak into combat input.
-const LABELS:Record<string,string>={fire:'FIRE',ads:'ADS',jump:'JUMP',crouch:'SLIDE',reload:'RELOAD',power:'POWER',melee:'MELEE',grenade:'GRENADE',interact:'USE',swap:'SWAP',voice:'TALK',mobility:'MOBILITY'};
-const COMBAT_SMALL=['ads','crouch','reload','power','melee','mobility','grenade','interact','swap','voice'];
+const LABELS:Record<string,string>={fire:'FIRE',ads:'ADS',alt:'ALT FIRE',jump:'JUMP',crouch:'SLIDE',reload:'RELOAD',power:'POWER',melee:'MELEE',grenade:'GRENADE',interact:'USE',swap:'SWAP',voice:'TALK',mobility:'MOBILITY'};
+const COMBAT_SMALL=['ads','alt','crouch','reload','power','melee','mobility','grenade','interact','swap','voice'];
 const CAR_LABELS:Record<string,string>={crouch:'BRAKE',interact:'RESET',power:'BOOST',fire:'USE ITEM'};
 const STICK_RADIUS=66,STICK_KNOB=29,LOOK_TRAVEL=33;
 
 export function TouchControls({runtime,visible,onLook,onSwap,onPause,onFullscreen,fullscreen,mode,interactActive=false,interactLabel='USE',suspended=false}:{runtime:any;visible:boolean;onLook:(dx:number,dy:number)=>void;onSwap:()=>void;onPause:()=>void;onFullscreen?:()=>void;fullscreen?:boolean;mode?:string;interactActive?:boolean;interactLabel?:string;suspended?:boolean}){
  const race=mode==='puma-race',soccer=mode==='puma-soccer',car=race||soccer,lattice=mode==='cocs'||mode==='cocs-coop';
- const small=car?['crouch','interact']:lattice?['ads','crouch','reload','power','mobility','grenade','swap']:COMBAT_SMALL;
+ const small=car?['crouch','interact']:lattice?['ads','alt','crouch','reload','power','mobility','grenade','swap']:COMBAT_SMALL;
  const big=car?(soccer?['power']:['power','fire']):lattice&&interactActive?['fire','jump','interact']:['fire','jump'];
  const labels:Record<string,string>={...LABELS,...(car?CAR_LABELS:{}),...(lattice?{interact:interactLabel}:{})};
  const moveBaseRef=useRef<HTMLDivElement|null>(null),moveKnobRef=useRef<HTMLElement|null>(null),lookBaseRef=useRef<HTMLDivElement|null>(null),lookKnobRef=useRef<HTMLElement|null>(null);

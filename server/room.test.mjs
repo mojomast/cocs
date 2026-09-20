@@ -556,6 +556,47 @@ test('mobility is forwarded as a held input, never as an edge',()=>{
  assert.equal(a.inputMobility,false);
 });
 
+test('altFire is forwarded as a held input across ticks until the client releases it',()=>{
+ const room=new Room('r',rng());
+ room.join(1,'A','chatgpt','openclaw');room.host(1,{botCount:0,timeLimit:30},'crosswire');room.start(1);room.drain();
+ const peer=room.peers.get(1),a=room.match.actors[0];
+ const steps=[];
+ const realStep=room.match.step.bind(room.match);
+ room.match.step=(dt,payload)=>{steps.push(payload);return realStep(dt,payload);};
+ room.input(1,{seq:1,altFire:true});
+ assert.equal(peer.latest.altFire,true,'the held alt-fire reaches the simulation');
+ room.tick(1/60);
+ assert.equal(peer.latest.altFire,true,'a tick does not consume the held field');
+ assert.equal(steps.at(-1).inputs[a.id].altFire,true,'the drain loop feeds the held field into the step');
+ room.input(1,{seq:2,altFire:true,x:.5});
+ room.tick(1/60);
+ assert.equal(peer.latest.altFire,true,'holding keeps forwarding it like mobility');
+ assert.equal(steps.at(-1).inputs[a.id].altFire,true,'every held tick keeps the field');
+ room.input(1,{seq:3,altFire:false});
+ assert.equal(peer.latest.altFire,undefined,'release clears the held field');
+ room.tick(1/60);
+ assert.equal(peer.latest.altFire,undefined);
+ assert.ok(!steps.at(-1).inputs[a.id].altFire,'the released step carries no alt-fire');
+});
+
+test('a held altFire clears on disconnect and leave',()=>{
+ const room=new Room('r',rng(),{graceMs:1000});
+ room.join(1,'A','chatgpt','openclaw');room.host(1,{botCount:0,timeLimit:30},'crosswire');room.start(1);room.drain();
+ const peer=room.peers.get(1),a=room.match.actors[0];
+ room.input(1,{seq:1,altFire:true});
+ assert.equal(peer.latest.altFire,true);
+ room.disconnect(1);
+ assert.equal(peer.latest,null,'disconnect drops the held alt-fire with the peer state');
+ const steps=[];
+ const realStep=room.match.step.bind(room.match);
+ room.match.step=(dt,payload)=>{steps.push(payload);return realStep(dt,payload);};
+ room.tick(1/60);
+ assert.ok(!steps.some(step=>step.inputs?.[a.id]?.altFire),'a disconnected peer never feeds alt-fire again');
+ room.leave(1);
+ assert.equal(room.peers.has(1),false);
+ assert.equal(peer.latest,null,'the held alt-fire died with the peer');
+});
+
 test('votes from a disconnected peer stop counting toward quorum',()=>{
  const room=new Room('r',rng(),{graceMs:600000});
  room.join(1,'A');room.join(2,'B');room.join(3,'C');room.join(4,'D');

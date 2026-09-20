@@ -35,13 +35,13 @@
 |---|---|---|---|---|---|---|
 | **Mistral** | Striker | **Effortless** — stronger air control, longer slides, forgiving slide-hop timing | Air dash | Pure speed and movement tech | Lowest HP, no sustain | Flanker |
 | **Gemini** | Striker | **Revision** — carries two primaries; swapping skips holster time | Double jump | Range flexibility mid-fight | Low sustain; must juggle weapon bands; degrades in Arms Race and mode-pinned loadouts | Mid-range duelist |
-| **Grok** | Striker | **Heat** — consecutive hits build up to +12% fire rate (visible glow); decays 1.5 s after the last hit, resets on death | Super jump (crouch-charge) | Snowballing pressure | Punished by poke and disengage; weak when behind | Aggressive brawler |
+| **Grok** | Striker | **Heat** — consecutive hits build up to +16% fire rate (visible glow); decays 1.5 s after the last hit, resets on death | Super jump (crouch-charge) | Snowballing pressure | Punished by poke and disengage; weak when behind | Aggressive brawler |
 | **DeepSeek** | Vanguard | **Deep Compute** — sustained fire charges the next shot for bonus damage (takes the max with attachment charge; no one-shots) | Hover jets (fuel, bounded) | Highest HP, hardest single hit | Slow, must commit, flank-punished | Siege; holds long angles |
 | **Meta** | Vanguard | **Braced** — out-of-combat armor regen (spawn armor only); crouching halves knockback | Brace slam | Durable space-holding | Slowest; must stand and take it | Anchor / objective holder |
-| **Claude** | Vanguard | **Alignment Review** — holding ground builds a meter that grants a temporary absorb pool (~35 HP, 2.5 s) | Safety glide | Anchoring angles, holding ground | Must stop pressuring to charge; no mobility | Hold lines, early retreat |
+| **Claude** | Vanguard | **Alignment Review** — holding ground builds a meter that grants a temporary absorb pool (~45 HP, 3 s) | Safety glide | Anchoring angles, holding ground | Must stop pressuring to charge; no mobility | Hold lines, early retreat |
 | **ChatGPT** | Tactician | **Adaptive** — fastest weapon swap; first magazine after a swap keeps a handling bonus | Grapple | No bad matchup, no dead loadout | Nothing is best-in-class | Adaptive mid-band |
-| **Kimi** | Tactician | **Long Context** — enemies leave brief radar trails (≤1.5 s); slightly longer range band | Blink step (0.3 s wind-up) | Information plus long lanes | Fragile; loses close-quarters | Orbiter / sharpshooter |
-| **Qwen** | Tactician | **Tool Use** — faster pickups and timed objectives (cap 1.35×), better vehicles, plus a small combat floor (pickup reload + 2 s handling, +15% melee reach) | Deployable rope | Objectives, vehicles, economy | Weakest straight-up fighter | Optimizer; objective-first |
+| **Kimi** | Tactician | **Long Context** — enemies leave brief radar trails (≤1.5 s); slightly longer range band | Blink step (0.25 s wind-up, 5 s cooldown) | Information plus long lanes | Fragile; loses close-quarters | Orbiter / sharpshooter |
+| **Qwen** | Tactician | **Tool Use** — faster pickups and timed objectives (cap 1.35×), better vehicles, plus a small combat floor (pickup reload + 3.5 s handling, +15% melee reach) | Deployable rope | Objectives, vehicles, economy | Weakest straight-up fighter | Optimizer; objective-first |
 
 **Claude** is locked to the Claude Code harness; the lock is compensated by the
 strongest defensive class verb. **Qwen** is the one class that keeps a *weakened*
@@ -70,11 +70,11 @@ overhaul plan.
 
 | Harness | Active ability (`Q`) | Tradeoff passive | Movement hook | Strikers | Vanguards | Tacticians |
 |---|---|---|---|---|---|---|
-| **OpenClaw** | Claw Burst — radial damage + knockback | **Grip** — melee arc +25% | Landing knocks enemies back | Pull-in | Bigger knockback | Wider radius |
+| **OpenClaw** | Claw Burst — 6 m radial pulse, 30 damage + knockback | **Grip** — melee arc +25% | Landing knocks enemies back | Pull-in | Bigger knockback | Wider radius |
 | **Hermes** | Courier Rush — 1.6× speed burst | **Express** — can sprint while reloading | +1 charge / +25% fuel, −20% cooldown | Longer rush | 25% mitigation during the rush | Cooldown −1 s |
 | **OpenCode** | Parallel Burst — faster fire rate | **Multiplex** — reload continues while swapped | Verb usable while firing | Faster while active | Guardrail lasts +1 s | Skip the next holster |
 | **Claude Code** | Guardrail — 50% damage reduction | **Linted** — threat ping when an enemy holds a bead on you | Brace on landing | Cleanse slow on activation | +10% mitigation while active | Longer ping |
-| **Codex** | Recompile — instant heal | **Green Build** — reload 15% faster | Landing repairs a little; no fall damage | +1 s speed | Overheal up to +15% | Refill the equipped magazine |
+| **Codex** | Recompile — instant 45 HP heal | **Green Build** — reload 15% faster | Landing repairs a little; no fall damage | +1 s speed | Overheal up to +15% | Refill the equipped magazine |
 | **Cline** | Phase Step — aimed dash | **Off-road** — extra air control, longer slide | Air-dash cancel (the only cancel) | Travels further | Unstoppable but shorter | Radar feint at the origin |
 | **Roo Code** | Context Jam — radial slow | **Flood Fill** — ability radius +25%, damage −5% | Landing leaves a slow field | Drop it behind them | Stronger slow | Wider radius |
 

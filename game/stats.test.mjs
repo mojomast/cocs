@@ -27,7 +27,7 @@ for(const [i,c] of CHARACTERS.entries()){
   assert.equal(m.snapshot().actors[0].maxHealth,c.stats.health);assert.equal(m.snapshot().actors[0].moveSpeed,c.stats.speed);
   a.health=a.maxHealth-1;assert.equal(m.collect(a,{kind:'health'}),true);assert.equal(a.health,a.maxHealth);assert.equal(m.collect(a,{kind:'health'}),false);
   a.armor=99;m.collect(a,{kind:'armor'});assert.equal(a.armor,100);assert.equal(m.collect(a,{kind:'armor'}),false);
-  if(c.id!=='claude'){a.health=a.maxHealth-1;m.power(a);assert.equal(a.health,a.maxHealth);a.cooldown=0;a.health=1;m.power(a);assert.equal(a.health,36);}
+  if(c.id!=='claude'){a.health=a.maxHealth-1;m.power(a);assert.equal(a.health,a.maxHealth);a.cooldown=0;a.health=1;m.power(a);assert.equal(a.health,46);}
   a.health=a.maxHealth-1;b.protection=0;b.armor=0;m.damage(b,20,a);assert.equal(a.health,a.maxHealth);
   a.health=1;b.health=10;m.damage(b,1000,a);assert.equal(a.health,3.5);
  });

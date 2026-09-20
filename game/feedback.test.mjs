@@ -1,7 +1,8 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import * as T from 'three';
-import {WeaponFeedback,EffectPool,SynthAudio,AmbientFX,WeatherFX,EMPTY_CHANNELS,MODE_THEMES,DEATH_SOUND_FAMILIES,DEATH_STYLE_SOUNDS,deathSoundFor} from './feedback.mjs';
+import {WeaponFeedback,EffectPool,SynthAudio,AmbientFX,WeatherFX,EMPTY_CHANNELS,MODE_THEMES,DEATH_SOUND_FAMILIES,DEATH_STYLE_SOUNDS,deathSoundFor,altVoiceFor,ALT_VOICE_IDS,POWER_CUES} from './feedback.mjs';
+import {ALT_FIRE} from './alt-fire.mjs';
 import {deathPlan,DEATH_STYLES} from './deaths.mjs';
 import {SURFACE_KINDS,surfaceKind,footstepProfile,impactProfile,reportVariation,mixUnit,eventSeed} from './sfx-design.mjs';
 import {weatherPreset} from './environment.mjs';
@@ -897,3 +898,245 @@ test('precision and high-damage hit confirms layer a bounded deterministic bell'
  assert.equal(bell(incoming.layers).length,0,'damage taken does not ring the attacker bell');
 });
 
+
+// ---------------------------------------------------------------------------
+// Combat audio pass: alt-fire voices, alt-state foley, harness tails and
+// per-verb movement foley.
+// ---------------------------------------------------------------------------
+
+// Captures the synthesized layers of one voice call: the `_play` stub opens the
+// voice and the `_noise`/`_tone` stubs record every layer inside it, including
+// the scheduled offset `at` so motif notes and tails stay distinguishable.
+function voiceCapture(){
+ const {audio}=audioFixture2(),layers=[],plays=[];
+ audio._play=(duration,pan,build,opts)=>{plays.push({duration,pan,send:opts?.send});build(0,{},[]);};
+ audio._noise=(t,out,nodes,options)=>layers.push({kind:'noise',at:t,...options});
+ audio._tone=(t,out,nodes,options)=>layers.push({kind:'tone',at:t,...options});
+ return {audio,layers,plays};
+}
+const layerLevel=layers=>layers.reduce((sum,layer)=>sum+(Number(layer.gain)||0),0);
+
+test('alt voice ids mirror the alt-fire spec table and resolve from the event before the weapon index',()=>{
+ assert.deepEqual([...ALT_VOICE_IDS],ALT_FIRE.map(spec=>spec.sound),'the audio table stays aligned with ALT_FIRE');
+ assert.equal(altVoiceFor({alt:true,altId:'cluster'}),'cluster');
+ assert.equal(altVoiceFor({alt:true,altId:'mine',weapon:0}),'mine','a known altId wins over the weapon index');
+ assert.equal(altVoiceFor({alt:true,weapon:6}),'chain','the weapon index falls back to the alt spec sound');
+ assert.equal(altVoiceFor({alt:true,altId:'not-a-voice',weapon:3}),'slug','an unknown altId still resolves from the weapon');
+ assert.equal(altVoiceFor({alt:true,altId:'not-a-voice',weapon:42}),null,'both unknown resolves to no alt voice');
+ assert.equal(altVoiceFor({alt:true}),null,'a missing altId and weapon resolves to nothing');
+ assert.equal(altVoiceFor({alt:false,altId:'salvo',weapon:0}),null,'the alt flag gates the whole path');
+ assert.equal(altVoiceFor(null),null);
+ assert.equal(altVoiceFor('shot'),null);
+ const {audio,plays}=voiceCapture();
+ assert.equal(audio._altShot({type:'shot',weapon:42,alt:true,altId:'not-a-voice'},true,0,1,player),false,'an unresolvable alt spends no voice');
+ assert.equal(plays.length,0);
+});
+
+test('ten alt voices are short, deterministic, seeded and never louder than the normal report',()=>{
+ const signatures={};
+ const runAlt=(weapon,id,extra={})=>{const capture=voiceCapture();capture.audio._altShot({type:'shot',weapon,alt:true,altId:id,id:5,time:1,...extra},true,0,1,player);return capture;};
+ const runNormal=weapon=>{const capture=voiceCapture();capture.audio._gunshot({type:'shot',weapon,id:5,time:1},true,0,1,player);return capture;};
+ for(let weapon=0;weapon<ALT_VOICE_IDS.length;weapon++){
+  const id=ALT_VOICE_IDS[weapon];
+  const first=runAlt(weapon,id),replay=runAlt(weapon,id);
+  assert.deepEqual(first.layers,replay.layers,`${id} synthesizes identically for the same event seed`);
+  assert.deepEqual(first.plays,replay.plays,`${id} keeps the same voice length and pan`);
+  assert.equal(first.plays.length,1,`${id} spends exactly one voice token`);
+  assert.ok(first.plays[0].duration<=.4,`${id} stays under .4 s`);
+  assert.ok(first.layers.length>=4&&first.layers.length<=12,`${id} stays a bounded layer set`);
+  assert.ok(first.layers.every(layer=>Number.isFinite(layer.gain)),`${id} layers are finite`);
+  assert.notDeepEqual(runAlt(weapon,id,{id:6}).layers,first.layers,`${id} shifts pitch/level with a new seed`);
+  const normal=runNormal(weapon);
+  assert.ok(normal.layers.length>0);
+  assert.ok(layerLevel(first.layers)<=layerLevel(normal.layers),`${id} is not louder than weapon ${weapon}'s report`);
+  signatures[id]=JSON.stringify(first.layers);
+ }
+ assert.equal(new Set(Object.values(signatures)).size,ALT_VOICE_IDS.length,'every alt id has its own voice');
+});
+
+test('alt shots replace the generic report, keep routing and fall back safely for unknown ids',()=>{
+ const {audio}=audioFixture(),shots=[],plays=[];
+ audio._gunshot=(e,local,pan,vol)=>shots.push({weapon:e.weapon,local,vol});
+ audio._play=(duration,pan)=>plays.push({duration,pan});
+ audio.event({type:'shot',actor:7,weapon:0,alt:true,altId:'salvo',time:1,from:{x:0,z:0}},player);
+ assert.equal(shots.length,0,'a known alt replaces the generic report');
+ assert.equal(plays.length,1,'one alt voice per alt event');
+ audio.event({type:'shot',actor:7,weapon:0,alt:true,altId:'not-a-voice',time:2,from:{x:0,z:0}},player);
+ assert.equal(shots.length,0,'an unknown altId still resolves from the weapon index');
+ assert.equal(plays.length,2);
+ audio.event({type:'shot',actor:7,weapon:42,alt:true,altId:'not-a-voice',time:3,from:{x:0,z:0}},player);
+ assert.equal(shots.length,1,'an unresolvable alt falls back to the generic report');
+ audio.event({type:'shot',actor:7,weapon:0,time:4,from:{x:0,z:0}},player);
+ assert.equal(shots.length,2,'a normal shot keeps the generic report');
+ const near=voiceCapture(),mid=voiceCapture(),far=voiceCapture();
+ near.audio.event({type:'shot',actor:0,weapon:0,alt:true,altId:'salvo',time:5,from:{x:6,z:0}},player);
+ mid.audio.event({type:'shot',actor:0,weapon:0,alt:true,altId:'salvo',time:5,from:{x:20,z:0}},player);
+ far.audio.event({type:'shot',actor:0,weapon:0,alt:true,altId:'salvo',time:5,from:{x:40,z:0}},player);
+ assert.ok(mid.plays.length===1&&mid.layers.length>=4,'a distant alt report keeps its body');
+ assert.ok(layerLevel(mid.layers)<layerLevel(near.layers),'remote alt reports fall off with distance');
+ assert.equal(far.plays.length,0,'an out-of-range alt report stays silent');
+});
+
+test('same-tick alt pellets collapse to one voice and flak shards stay quiet ticks',()=>{
+ const pellets=voiceCapture();
+ for(let pellet=0;pellet<3;pellet++)pellets.audio.event({type:'shot',actor:7,weapon:0,alt:true,altId:'salvo',pellet,time:9,id:100+pellet,from:{x:0,z:0}},player);
+ assert.equal(pellets.plays.length,1,'a three-pellet salvo spends one alt voice');
+ const launch=voiceCapture();
+ launch.audio.event({type:'launch',actor:7,weapon:1,alt:true,altId:'cluster',id:41,time:10,pos:{x:0,z:0}},player);
+ assert.equal(launch.plays.length,1,'an alt projectile launch voices the cluster report');
+ const shards=voiceCapture();
+ shards.audio.event({type:'shot',actor:7,weapon:7,alt:true,altId:'bomb',shrapnel:0,id:52,time:11,hit:false,to:{x:2,z:0},from:{x:0,z:0}},player);
+ assert.equal(shards.plays.length,1,'a flak shard spends one quiet tick voice');
+ assert.ok(layerLevel(shards.layers)<1,'a shard is not the bomb launch report');
+});
+
+test('alt shots share the report impact tail but never double-confirm an actor hit',()=>{
+ const miss=voiceCapture();
+ miss.audio.event({type:'shot',actor:7,weapon:0,alt:true,altId:'salvo',id:1,time:1,hit:false,to:{x:3,z:0},surface:'metal'},player);
+ assert.ok(miss.layers.some(layer=>layer.kind==='noise'&&layer.freq>=2000),'a missed alt shot adds the metal impact band');
+ const hit=voiceCapture();
+ hit.audio.event({type:'shot',actor:7,weapon:0,alt:true,altId:'salvo',id:1,time:1,hit:{id:9},to:{x:3,z:0}},player);
+ assert.ok(hit.layers.length<miss.layers.length,'an actor hit gets no surface impact layers');
+});
+
+test('alt-state transform foley plays only on state flips, for local or nearby actors',()=>{
+ const {audio}=audioFixture(),plays=[];
+ audio._play=(duration,pan)=>plays.push({duration,pan});
+ audio.event({type:'alt-state',actor:7,weapon:0,alt:true},player);
+ assert.equal(plays.length,1,'the first flip deploys');
+ audio.event({type:'alt-state',actor:7,weapon:0,alt:true},player);
+ assert.equal(plays.length,1,'a repeated state makes no new sound');
+ audio.event({type:'alt-state',actor:7,weapon:0,alt:false},player);
+ assert.equal(plays.length,2,'flipping back plays the stow');
+ audio.event({type:'alt-state',actor:7,weapon:0,alt:false},player);
+ assert.equal(plays.length,2);
+ audio.event({type:'alt-state',actor:7,weapon:1,alt:true},player);
+ assert.equal(plays.length,3,'a fresh weapon deploy is not shadowed by the old weapon state');
+ audio.event({type:'alt-state',actor:7,weapon:1,alt:true},player);
+ assert.equal(plays.length,3,'the new weapon state still dedupes repeats');
+ audio.event({type:'alt-state',actor:9,weapon:2,alt:true,from:{x:200,z:0}},player);
+ assert.equal(plays.length,3,'a far remote flip stays silent');
+ audio.event({type:'alt-state',actor:10,weapon:2,alt:true,from:{x:6,z:0}},player);
+ assert.equal(plays.length,4,'a nearby remote flip is voiced');
+ const spectator={...player,spectator:true,spectatorTarget:9};
+ audio.event({type:'alt-state',actor:9,weapon:2,alt:false,from:{x:200,z:0}},spectator);
+ assert.equal(plays.length,5,'the watched actor flips locally for a spectator');
+ for(let actor=20;actor<100;actor++)audio.event({type:'alt-state',actor,weapon:0,alt:true},player);
+ assert.ok(audio._altStates.size<=64,'the per-actor flip memory stays bounded');
+ const a=voiceCapture(),b=voiceCapture(),c=voiceCapture();
+ a.audio.event({type:'alt-state',actor:11,weapon:0,alt:true,id:7,time:3,from:{x:0,z:0}},player);
+ b.audio.event({type:'alt-state',actor:12,weapon:0,alt:true,id:7,time:3,from:{x:0,z:0}},player);
+ c.audio.event({type:'alt-state',actor:13,weapon:0,alt:true,id:8,time:4,from:{x:0,z:0}},player);
+ assert.equal(a.plays.length,1);
+ assert.deepEqual(a.layers,b.layers,'the same flip synthesizes identically');
+ assert.notDeepEqual(c.layers,a.layers,'a new seed shifts the transform foley');
+});
+
+test('harness power motifs keep their notes and gain a bounded per-harness tail',()=>{
+ const root=MODE_THEMES.default.root,tails=new Set();
+ for(const [harness,cue] of Object.entries(POWER_CUES)){
+  assert.ok(Array.isArray(cue.notes)&&cue.notes.length>=2,`${harness} keeps its motif`);
+  assert.ok(cue.tail&&Number.isFinite(cue.tail.freq),`${harness} has a second layer`);
+  assert.ok(cue.tail.gain>0&&cue.tail.gain<=.06,`${harness} tail level is bounded`);
+  assert.ok(cue.tail.noiseGain>0&&cue.tail.noiseGain<=.05,`${harness} tail impact level is bounded`);
+  tails.add(JSON.stringify(cue.tail));
+  const {audio,layers,plays}=voiceCapture();
+  audio.event({type:'power',actor:7,harness,pos:{x:0,z:0}},player);
+  assert.equal(plays.length,1,`${harness} stays one voice`);
+  assert.equal(plays[0].pan,0,'pan is unchanged');
+  assert.ok(plays[0].duration>=cue.length+(cue.notes.length-1)*cue.step,`${harness} tail never shortens the motif`);
+  cue.notes.forEach((semi,i)=>{
+   const freq=root*Math.pow(2,semi/12);
+   assert.ok(layers.some(layer=>layer.kind==='tone'&&layer.freq===freq&&Math.abs(layer.at-i*cue.step)<1e-9&&layer.gain===cue.gain),`${harness} note ${i} keeps its level and timing`);
+  });
+  assert.ok(layers.some(layer=>layer.kind==='tone'&&layer.at===cue.tail.delay&&layer.freq===cue.tail.freq&&layer.gain===cue.tail.gain),`${harness} plays its tail tone`);
+  assert.ok(layers.some(layer=>layer.kind==='noise'&&layer.at===cue.tail.delay&&layer.freq===cue.tail.noise),`${harness} plays its tail impact`);
+  assert.ok(layerLevel(layers)<=.5,`${harness} stays bounded`);
+ }
+ assert.equal(tails.size,Object.keys(POWER_CUES).length,'each harness tail is its own voicing');
+ assert.equal(Object.keys(POWER_CUES).length,HARNESSES.length,'every harness has an activation motif');
+ const announced=voiceCapture();
+ announced.audio.announcer=true;
+ announced.audio.event({type:'power',actor:7,harness:'openclaw',pos:{x:0,z:0}},player);
+ assert.equal(announced.plays.length,2,'the announcer gate still adds exactly one callout');
+ assert.equal(announced.audio.lastCue,'power');
+ const remote=voiceCapture();
+ remote.audio.event({type:'power',actor:0,harness:'openclaw',pos:{x:0,z:0}},player);
+ assert.equal(remote.plays.length,0,'a remote activation stays silent');
+});
+
+const VERB_EVENTS={
+ 'air-dash':['move-start',{reason:'dash'}],
+ 'double-jump':['move-start',{reason:'double-jump'}],
+ 'super-jump':['charge-start',{duration:.55}],
+ 'hover-jets':['move-start',{reason:'hover'}],
+ 'brace-slam':['windup-start',{duration:.15}],
+ 'safety-glide':['move-start',{reason:'glide'}],
+ grapple:['grapple-hook',{pos:{x:1,y:2,z:3}}],
+ 'blink-step':['windup-start',{duration:.2}],
+ 'deployable-rope':['rope-place',{pos:{x:1,y:2,z:3}}],
+};
+test('movement verbs voice distinct foley while unknown verbs keep the generic fallback',()=>{
+ const signatures={};
+ for(const [verb,[type,extra]] of Object.entries(VERB_EVENTS)){
+  const {audio,layers,plays}=voiceCapture();
+  audio.event({type,actor:7,verb,...extra},player);
+  assert.equal(plays.length,1,`${verb} spends exactly one voice on ${type}`);
+  assert.ok(layers.length>=2,`${verb} has a layered voice`);
+  signatures[verb]=JSON.stringify(layers);
+ }
+ assert.equal(new Set(Object.values(signatures)).size,Object.keys(VERB_EVENTS).length,'every verb has its own voice');
+ // Every known verb still gets exactly one foley voice plus one announcement on
+ // its activation, so the announcer gating is unchanged.
+ const announcing=voiceCapture();
+ announcing.audio.announcer=true;
+ for(const verb of Object.keys(VERB_EVENTS)){
+  announcing.audio.ctx.currentTime+=1;
+  const before=announcing.plays.length;
+  announcing.audio.event({type:'move-start',actor:7,verb},player);
+  assert.equal(announcing.audio.lastCue,verb,`${verb} keeps its announcer cue`);
+  assert.equal(announcing.plays.length,before+2,`${verb} voices foley plus one announcement`);
+ }
+ // Fallbacks: no verb data and unknown verb ids both keep the pre-verb voice.
+ const noVerb=voiceCapture(),unknown=voiceCapture();
+ noVerb.audio.event({type:'move-start',actor:7},player);
+ unknown.audio.event({type:'move-start',actor:7,verb:'not-a-verb'},player);
+ assert.deepEqual(unknown.layers,noVerb.layers,'an unknown verb uses the generic move foley');
+ // A known verb with an unhandled event type also falls back, per event type.
+ for(const type of ['move-end','move-miss','move-blocked','windup-end','charge-release','fuel-empty','no-lift','chain-cancel','landing-recovery']){
+  const generic=voiceCapture(),known=voiceCapture();
+  generic.audio.event({type,actor:7},player);
+  known.audio.event({type,actor:7,verb:'air-dash'},player);
+  assert.deepEqual(known.layers,generic.layers,`${type} keeps the generic fallback for a known verb`);
+ }
+});
+
+test('every movement event spends at most one voice for any known verb',()=>{
+ const types=['move-start','move-end','move-miss','move-blocked','windup-start','windup-end','windup-interrupt','charge-start','charge-release','charge-cancel','slam-launch','slam-impact','grapple-hook','grapple-release','rope-place','rope-miss','rope-expire','fuel-empty','no-lift','chain-cancel','landing-recovery'];
+ for(const verb of Object.keys(VERB_EVENTS)){
+  for(const type of types){
+   const {audio,plays}=voiceCapture();
+   audio.event({type,actor:7,verb,pos:{x:1,y:1,z:1}},player);
+   assert.equal(plays.length,1,`${verb}/${type} spends one foley voice`);
+  }
+ }
+});
+
+test('alt and verb foley keep the shared mute, motion and voice-cap gates',()=>{
+ const {audio,nodes}=audioFixture2();
+ audio.muted=true;
+ const before=nodes.length;
+ audio.event({type:'shot',actor:7,weapon:0,alt:true,altId:'salvo',time:1},player);
+ audio.event({type:'alt-state',actor:7,weapon:0,alt:true},player);
+ audio.event({type:'move-start',actor:7,verb:'air-dash'},player);
+ assert.equal(nodes.length,before,'a muted mix allocates no nodes for the new voices');
+ audio.muted=false;
+ audio.event({type:'move-start',actor:7,verb:'air-dash',time:2},player);
+ assert.ok(nodes.length>before,'unmuting restores the verb foley');
+ const reduced=voiceCapture();
+ reduced.audio.event({type:'move-start',actor:7,verb:'air-dash'}, {...player,reduced:true});
+ assert.equal(reduced.plays.length,1,'sound is not motion-gated, matching the existing movement foley');
+ const capped=audioFixture2().audio;
+ for(let i=0;i<40;i++)capped.event({type:'move-start',actor:7,verb:'air-dash',time:i},player);
+ assert.equal(capped.voices.size,30,'the shared voice cap still bounds the new voices');
+});

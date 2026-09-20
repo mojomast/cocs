@@ -107,12 +107,12 @@ import {clamp01} from './math.mjs';
 // ---------------------------------------------------------------------------
 // NUMBERS
 // ---------------------------------------------------------------------------
-// Pinned by §13.3: air dash 5.5 m / 3.5 s / 1 charge / 0.15 s landing;
-// double jump impulse 7.4, one charge; super jump 0.55 s charge / 12.5 impulse /
-// 6 s; hover 2.5 s fuel / 1.8 s recharge / climb 0.35 / descent 2.2; slam
-// 0.15 s wind-up / 4 m radius / 9 knockback / 8 s; glide descent 2 m/s, steer 4;
-// grapple 14 m / 12 m/s reel / 7 s (3 s on miss); blink 6 m / 0.3 s wind-up /
-// 6 s; rope 1 charge / 20 s anchor / 12 s.
+// Pinned by §13.3: air dash 6 m / 2.2 s / 1 charge / 0.15 s landing;
+// double jump impulse 7.8, one charge; super jump 0.45 s charge / 12.5 impulse /
+// 5 s; hover 3 s fuel / 1.6 s recharge / climb 0.35 / descent 2.2; slam
+// 0.12 s wind-up / 4.5 m radius / 10 knockback / 7 s; glide descent 1.7 m/s,
+// steer 4.5; grapple 14 m / 12 m/s reel / 6 s (2.5 s on miss); blink 6 m /
+// 0.25 s wind-up / 5 s; rope 1 charge / 20 s anchor / 10 s.
 // Pinned by §3.6: air dash 0.25 s active; chain link ×0.7, cap 1.4× (§4.7);
 // economy +1 charge or +25% fuel and −20% cooldown; weakened carrier 1 charge,
 // half fuel, +50% cooldown, no vertical lift; Juggernaut lift ×0.7.
@@ -120,7 +120,7 @@ import {clamp01} from './math.mjs';
 // interaction cap 1.35×; ceiling min(vehicle maxAltitude 58, arena.ceiling ?? 24).
 // Numbers the plan left open (documented, tunable in Phase 5): brace-slam leap
 // 7.5 / slam descent 16 m/s / landing recovery 0.4 s; safety-glide fuel pool
-// 2.5 s and recharge 1.8 s; rope placement range 14 m and ride speed 9 m/s
+// 3 s and recharge 1.6 s; rope placement range 14 m and ride speed 10 m/s
 // (core's zipline default); landing-self Codex heal 8 / no fall damage and
 // Claude Code brace 1.2 s, 10% mitigation, 50% knockback; landing-control
 // OpenClaw 6 m/s knockback; hover without a held jump brakes the descent it
@@ -231,10 +231,10 @@ const CHOSEN = {
   // §3.4/"commitment": no pinned leap, slam descent or landing recovery yet.
   'brace-slam': {leap: 7.5, slamDescent: 16, landing: 0.4, impactLift: 0},
   // §3.6 pins fuel/s for glide but not the pool; reuse hover's §13.3 pool shape.
-  'safety-glide': {fuel: 2.5, fuelRecharge: 1.8},
+  'safety-glide': {fuel: 3, fuelRecharge: 1.6},
   // Rope placement range is not pinned; share the grapple's 14 m. Ride speed is
-  // core's zipline default (9 m/s). A miss is free (no pinned miss cooldown).
-  'deployable-rope': {distance: 14, rideSpeed: 9, missCooldown: 0},
+  // core's zipline default (now 10 m/s). A miss is free (no pinned miss cooldown).
+  'deployable-rope': {distance: 14, rideSpeed: 10, missCooldown: 0},
 };
 
 const buildSpec = verb => {
@@ -995,7 +995,6 @@ const VERBS = {
   },
   'blink-step'(state, ctx, input, frame) {
     if (input.mobility !== true) return null;
-    state.chains += 1;
     state.phase = 'windup';
     state.windup = state.params.windup;
     state.windupTotal = state.params.windup;
@@ -1068,7 +1067,10 @@ function advanceWindup(state, ctx, input, frame, dt) {
       direction.x /= length;
       direction.z /= length;
     }
-    const target = directTranslation(pointOf(ctx), direction, params.distance * chainLinkScale(Math.max(0, state.chains - 1)), ctx);
+    const target = directTranslation(pointOf(ctx), direction, params.distance * chainLinkScale(state.chains), ctx);
+    // The link is only banked once the translation actually fires: an
+    // interrupted wind-up is refunded, so it must not inflate the next link.
+    state.chains += 1;
     consumeCharge(state, frame, 'blink');
     state.landingArmed = direction.y > 0;
     frame.motion = {position: target, vy: null, airControl: null, keepMomentum: false, mode: 'blink'};
@@ -1109,7 +1111,7 @@ function advanceCharge(state, ctx, input, frame, dt) {
 }
 
 // Slam: hold the leap until the apex, then drive down hard. Landing fires the
-// §13.3 4 m / 9 knockback impulse and pays the chosen 0.4 s recovery.
+// §13.3 4.5 m / 10 knockback impulse and pays the chosen 0.4 s recovery.
 function stepSlam(state, ctx, frame) {
   const params = state.params;
   if (ctx.grounded === true) {
@@ -1147,7 +1149,7 @@ function stepHover(state, ctx, input, frame, dt) {
   return false;
 }
 
-// Glide: no lift, clamp the fall to 2 m/s and let the caller add up to 4 m/s
+// Glide: no lift, clamp the fall to 1.7 m/s and let the caller add up to 4.5 m/s
 // of horizontal air control. Fuel drains while it holds.
 function stepGlide(state, ctx, input, frame, dt) {
   const params = state.params;

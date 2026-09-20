@@ -105,8 +105,10 @@ test('no input, grounded and idle: the movement verb never moves and never emits
 // 2. Movement verbs end to end through Match.step
 // ---------------------------------------------------------------------------
 
-test('air dash end to end: jump, airborne jump edge, 5.5 m translation and landing recovery', () => {
-  const match = rig('mistral', 'openclaw');
+test('air dash end to end: jump, airborne jump edge, 6 m translation and landing recovery', () => {
+  // A clear 7 m lane on exchange (x = -24, running toward -z): the dash must
+  // travel its whole tuned 6 m, not stop on geometry.
+  const match = rig('mistral', 'openclaw', {spot: [-12, 12]});
   const actor = match.actors[0];
   const startZ = actor.z;
   tick(match, 0, {jump: true}); // normal hop first
@@ -115,15 +117,16 @@ test('air dash end to end: jump, airborne jump edge, 5.5 m translation and landi
   tick(match, 0, {jump: true}); // second press while airborne -> air dash
   assert.equal(actor.movement.phase, 'active', 'the dash is active');
   assert.equal(actor.movement.charges, 0, 'the dash spends its one charge');
-  assert.ok(Math.abs((actor.z - startZ) + 5.5) < 0.25, `dashed 5.5 m toward -z (got ${(actor.z - startZ).toFixed(2)})`);
+  assert.ok(Math.abs((actor.z - startZ) + 6) < 0.25, `dashed 6 m toward -z (got ${(actor.z - startZ).toFixed(2)})`);
   assert.ok(eventsOf(match, 'move-start').some(event => event.reason === 'dash'));
-  for (let i = 0; i < 150; i++) match.step(DT, {});
+  for (let i = 0; i < 20; i++) match.step(DT, {});
   assert.equal(actor.movement.phase, 'ready');
-  assert.ok(actor.movement.cooldown > 0, 'the 2.5 s cooldown starts at the end');
+  assert.ok(actor.movement.cooldown > 1.5, 'the 2.2 s cooldown starts at the end');
+  for (let i = 0; i < 150; i++) match.step(DT, {});
   assert.ok(eventsOf(match, 'landing-recovery').length >= 1, 'a clean landing pays the recovery beat');
 });
 
-test('blink step end to end: 0.3 s wind-up then a 6 m aimed translation with a 6 s cooldown', () => {
+test('blink step end to end: 0.25 s wind-up then a 6 m aimed translation with a 5 s cooldown', () => {
   const match = rig('kimi', 'openclaw', {spot: [0, 11]});
   const actor = match.actors[0];
   const startZ = actor.z;
@@ -133,7 +136,7 @@ test('blink step end to end: 0.3 s wind-up then a 6 m aimed translation with a 6
   for (let i = 0; i < 25; i++) match.step(DT, {});
   assert.equal(actor.movement.phase, 'ready');
   assert.ok(Math.abs((actor.z - startZ) + 6) < 0.3, `blinked ~6 m toward -z (got ${(actor.z - startZ).toFixed(2)})`);
-  assert.ok(actor.movement.cooldown > 5.5 && actor.movement.cooldown <= 6, 'the 6 s cooldown starts at the end');
+  assert.ok(actor.movement.cooldown > 4.5 && actor.movement.cooldown <= 5, 'the 5 s cooldown starts at the end');
   assert.ok(eventsOf(match, 'windup-end').length === 1);
 });
 
@@ -146,6 +149,7 @@ test('deployable rope end to end: placement registers a per-match line a rider c
   assert.equal(match.ropeLines.length, 1, 'the anchor lives in per-match state, not the arena tables');
   const line = match.ropeLines[0];
   assert.equal(line.owner, actor.id);
+  assert.equal(line.speed, 10, 'the tuned 10 m/s ride speed reaches core');
   assert.ok(line.to.z > actor.z, 'anchor placed downrange');
   // Ride it: stand at the line base and step; moveActor boards the rope.
   place(match, actor, [line.from.x, line.from.z], Math.PI);
@@ -155,6 +159,62 @@ test('deployable rope end to end: placement registers a per-match line a rider c
   for (let i = 0; i < 150 && actor.zipRide; i++) match.step(DT, {});
   assert.equal(actor.zipRide, null);
   assert.ok(actor.z > line.from.z + 3, `the ride carries the rider (z ${actor.z.toFixed(2)})`);
+});
+
+test('super jump end to end: crouch-charge 0.45 s launches 12.5 and pays a 5 s cooldown', () => {
+  const match = rig('grok', 'openclaw', {spot: [0, 8]});
+  const actor = match.actors[0];
+  actor.cooldown = 1e9; // keep the harness active out of the frame
+  tick(match, 0, {crouch: true});
+  assert.equal(actor.movement.phase, 'charging');
+  for (let i = 0; i < 40; i++) match.step(DT, {inputs: {0: {crouch: true}}});
+  assert.ok(actor.movement.windup >= actor.movement.windupTotal - 1e-9, 'the charge fills');
+  match.step(DT, {}); // release
+  assert.equal(actor.movement.phase, 'ready');
+  assert.equal(actor.movement.charges, 0, 'the leap spends the charge');
+  assert.ok(actor.vy > 11, `the tuned 12.5 impulse leaves the ground (vy ${actor.vy.toFixed(2)})`);
+  assert.ok(Math.abs(actor.movement.cooldown - 5) <= 1e-9, 'the 5 s cooldown starts at the end');
+  assert.ok(eventsOf(match, 'charge-release').length === 1);
+  for (let i = 0; i < 240; i++) match.step(DT, {});
+  assert.ok(eventsOf(match, 'landing-recovery').some(event => Math.abs(event.duration - 0.25) < 1e-9), 'the 0.25 s landing recovery lands');
+});
+
+test('hover jets end to end: the 3 s fuel pool climbs and drains, release ends it', () => {
+  const match = rig('deepseek', 'openclaw', {spot: [0, 8]});
+  const actor = match.actors[0];
+  actor.cooldown = 1e9;
+  tick(match, 0, {jump: true}); // leave the ground first
+  assert.equal(actor.grounded, false);
+  tick(match, 0, {jump: true}); // held jump: no new edge, so the jets start
+  assert.equal(actor.movement.phase, 'active', 'holding jump starts the jets');
+  assert.ok(actor.movement.maxFuel === 3, 'the tuned 3 s pool reaches the state');
+  for (let i = 0; i < 30; i++) match.step(DT, {inputs: {0: {jump: true}}});
+  assert.ok(actor.movement.fuel < 3 && actor.movement.fuel > 2, `the jets burn fuel (${actor.movement.fuel.toFixed(2)})`);
+  match.step(DT, {}); // release
+  assert.equal(actor.movement.phase, 'ready', 'releasing jump cuts the jets');
+  for (let i = 0; i < 240 && !actor.grounded; i++) match.step(DT, {});
+  assert.ok(actor.grounded, 'the actor settles back down');
+});
+
+test('safety glide end to end: holding jump after the apex clamps descent and steers 4.5', () => {
+  const match = rig('claude', 'claudecode', {spot: [0, 8]});
+  const actor = match.actors[0];
+  actor.cooldown = 1e9;
+  tick(match, 0, {jump: true});
+  let activated = 0;
+  for (let i = 0; i < 90 && !activated; i++) {
+    match.step(DT, {inputs: {0: {jump: true}}});
+    if (actor.movement.phase === 'active') activated = i + 1;
+  }
+  assert.ok(activated > 0, 'the glide starts once the hop is descending');
+  assert.equal(actor.movement.params.liftScale, 1, 'safety glide still never lifts');
+  const yBefore = actor.y;
+  for (let i = 0; i < 10; i++) match.step(DT, {inputs: {0: {jump: true}}});
+  assert.ok(actor.movement.fuel < 3, 'the tuned 3 s glide pool drains');
+  assert.ok(Math.abs(actor.glideSteer - 4.5) < 1e-9, 'the tuned 4.5 steer reaches moveActor');
+  assert.ok(actor.y < yBefore, 'the glide descends');
+  match.step(DT, {});
+  assert.equal(actor.movement.phase, 'ready', 'release ends the glide');
 });
 
 // ---------------------------------------------------------------------------
@@ -361,7 +421,7 @@ test('brace slam fires from a direct slam input edge', () => {
   assert.ok(eventsOf(match, 'slam-launch').length >= 1, 'the leap launched');
   assert.ok(eventsOf(match, 'slam-impact').length >= 1, 'the impact resolved on landing');
   assert.equal(actor.movement.charges, 0, 'the slam spent its charge');
-  assert.ok(actor.movement.cooldown > 0, 'the 8 s cooldown started');
+  assert.ok(actor.movement.cooldown > 0, 'the 7 s cooldown started');
 });
 
 // Regression: the Meta bot intent pressed `slam` only while airborne/descending

@@ -286,8 +286,8 @@ test('Roo Flood Fill reaches 25% further and pays with 5% less outgoing damage',
     assert.equal(m.power(a), true);
     return b.slow;
   };
-  assert.ok(slowMatch('roo') > 0, 'Flood Fill radius 8.75 reaches the target at 8 m');
-  assert.equal(slowMatch('openclaw'), 0, 'the base 5 m Claw Burst does not');
+  assert.ok(slowMatch('roo') > 0, 'Flood Fill radius 10 (plus the +1.5 rider) reaches the target at 8 m');
+  assert.equal(slowMatch('openclaw'), 0, 'the base 6 m Claw Burst plus its +1.5 rider does not reach 8 m');
 
   const shot = harness => {
     const m = match(harness, {humanCount: 2});

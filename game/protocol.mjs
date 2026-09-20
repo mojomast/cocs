@@ -11,6 +11,10 @@ import {clamp} from './math.mjs';
 // from the existing `cocs` subtree for the non-recipient team, and every client
 // reader already treats an absent `cocs` section as empty. A v3 peer keeps
 // receiving valid v3 envelopes, so no compatibility statement changes.
+//
+// The v8.6 held `altFire` input is additive in the same way: it rides inside
+// the existing `input` payload and a peer that does not know it simply never
+// emits or reads it, so it deliberately does not bump PROTOCOL_VERSION either.
 export const PROTOCOL_VERSION = 3;
 // Snapshot-delta revisions. v2 diffs id-keyed arrays element-wise; a peer only
 // receives deltas for a revision it advertised, so a v1 client keeps getting
@@ -219,6 +223,7 @@ export function parseInputEnvelope(msg) {
   interact: source.interact === true, sprint: source.sprint === true, crouch: source.crouch === true,
   ads: source.ads === true, reload: source.reload === true, melee: source.melee === true,
   grenade: source.grenade === true, mobility: source.mobility === true,
+  altFire: source.altFire === true,
  };
 }
 

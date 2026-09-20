@@ -54,7 +54,7 @@ test('a held mobility stream keeps an active grapple hooked and release clears i
   assert.equal(release.reason, 'release');
   assert.equal(state.phase, 'ready');
   assert.equal(a.inputMobility, false);
-  assert.ok(state.cooldown > 0, 'the released hook pays the 7 s cooldown');
+  assert.ok(state.cooldown > 0, 'the released hook pays the 6 s cooldown');
 });
 
 test('a one-tick mobility pulse at the movement layer does not cancel an active grapple', () => {

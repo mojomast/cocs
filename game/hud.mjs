@@ -1,5 +1,6 @@
 import {raceDisplay,soccerDisplay} from './race-ui.mjs';
 import {WEAPONS} from './data.mjs';
+import {ALT_FIRE,altSpecFor} from './alt-fire.mjs';
 import {teamMode,isCocsMode} from './config.mjs';
 import {latticeCaption} from './lattice-feedback.mjs';
 import {formatNumber,formatCountdown} from './format-ui.mjs';
@@ -185,9 +186,35 @@ export function streakStatus(player) {
   return streak >= 2 ? { streak, label: `${streak} STREAK` } : null;
 }
 
+// Alt-fire identity for captions. `mode` may be the weapon/spec index, the
+// spec id ('salvo' from `altId`), a pre-rendered label or the weapon index on a
+// `shot` event; anything unknown returns '' so a caption never names the wrong
+// mode.
+export function altFireLabel(event) {
+  const mode = event?.mode ?? event?.altMode ?? event?.altId ?? event?.weapon;
+  const spec = altSpecFor(mode) ?? (typeof mode === 'string' ? ALT_FIRE.find(entry => entry.id === mode.toLowerCase()) ?? null : null);
+  if (spec) return spec.label;
+  const direct = event?.modeLabel ?? event?.label;
+  return typeof direct === 'string' && direct ? direct.toUpperCase() : '';
+}
+
 export function audioCaption(event) {
   const type = event?.type;
   const lattice=latticeCaption(event);if(lattice)return {text:lattice};
+  // Alt-fire captions: the held mode change (`alt-state`, emitted by Match when
+  // `controls.altFire` flips) and each alt shot name the same mode label the HUD
+  // chip shows; alt hitscan `shot`s and projectile `launch`es replace the
+  // generic 'Gunfire' line instead of stacking a second caption.
+  if (type === 'alt-state' || type === 'alt-mode') {
+    const label = altFireLabel(event);
+    const off = event?.alt === false || event?.on === false;
+    return {text: `${off ? 'Alt mode off' : 'Alt mode'}${label ? ` · ${label}` : ''}`};
+  }
+  if (type === 'alt-fire' || ((type === 'shot' || type === 'launch') && event?.alt === true)) {
+    const label = altFireLabel(event);
+    return {text: label ? `Alt fire · ${label}` : 'Alt fire'};
+  }
+  if (type === 'alt-toggle') return {text: event?.on === false || event?.alt === false ? 'Alt fire off' : 'Alt fire on'};
   // LATTICE STRIKE command events route into the same captions pipeline (§13.4).
   if (type === 'cocs-order') return {text: `Order ${String(event.verb ?? '').toUpperCase()}${event.node ? ` ${event.node}` : ''}`};
   if (type === 'coop-spend') return {text: `Spend ${String(event.verb ?? '').toUpperCase()} · ${Math.round(Number(event.cost) || 0)} FLUX`};

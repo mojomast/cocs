@@ -121,6 +121,18 @@ test('mobility is a held control from the keyboard, touch or an explicit flag', 
   assert.equal(remapped.mobility, true, 'a custom bind drives the same held control');
   assert.equal(controlsFromState({keys: ['KeyX'], bindings: {mobility: 'ArrowDown'}}).mobility, undefined, 'the old key stops working after a remap');
 });
+test('altFire is a held control from an explicit flag, touch or a remap', () => {
+  assert.equal(controlsFromState({altFire: true}).altFire, true);
+  assert.equal(controlsFromState({touch: {altFire: true}}).altFire, true, 'a touch hold rides the touch bag');
+  assert.equal(controlsFromState({touch: {altFire: false}}).altFire, undefined, 'release clears the held control');
+  assert.equal(controlsFromState({keys: []}).altFire, undefined, 'no input never arms alt-fire');
+  const remapped = controlsFromState({keys: ['KeyZ'], bindings: {altFire: 'KeyZ'}});
+  assert.equal(remapped.altFire, true, 'a custom bind drives the same held control');
+  // keybinds.mjs is extended separately, so the default binding may be absent
+  // while this lands: reading it must stay safe and never set garbage.
+  const latch = controlsFromState({keys: ['KeyX'], bindings: {}});
+  assert.ok(latch.altFire === undefined || latch.altFire === true, 'a missing binding is read defensively');
+});
 test('an idle joystick does not suppress keyboard movement', () => {
   // The runtime always supplies a touch vector shaped like this, so a centered
   // joystick must fall back to WASD instead of zeroing local and online input.

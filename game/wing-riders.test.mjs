@@ -292,14 +292,20 @@ test('OpenClaw riders: pull-in, bigger knockback and a wider radius', () => {
   quiet(shover); quiet(shoved);
   Object.assign(shoved, {x: 3, health: 1000, maxHealth: 1000});
   assert.equal(shove.power(shover), true);
-  near(shoved.vx, 12 + 4, 1e-9);
+  near(shoved.vx, 14 + 4, 1e-9);
 
   const wide = bout('chatgpt', 'openclaw');
   const [caster, caught] = wide.actors;
   quiet(caster); quiet(caught);
-  Object.assign(caught, {x: 5.5, health: 1000, maxHealth: 1000});
+  Object.assign(caught, {x: 7, health: 1000, maxHealth: 1000});
   assert.equal(wide.power(caster), true);
-  assert.ok(caught.health < 1000, 'radius 5 + 1.5 reaches 5.5 m');
+  assert.ok(caught.health < 1000, 'radius 6 + 1.5 reaches 7 m');
+  const base = bout('mistral', 'openclaw');
+  const [plainCaster, outOfReach] = base.actors;
+  quiet(plainCaster); quiet(outOfReach);
+  Object.assign(outOfReach, {x: 7, health: 1000, maxHealth: 1000});
+  assert.equal(base.power(plainCaster), true);
+  assert.equal(outOfReach.health, 1000, 'the base 6 m Claw Burst does not reach 7 m');
 });
 
 test('Hermes riders: longer rush, 25% mitigation while active, cooldown −1 s', () => {
@@ -307,7 +313,7 @@ test('Hermes riders: longer rush, 25% mitigation while active, cooldown −1 s',
   const [rusher] = long.actors;
   quiet(rusher);
   assert.equal(long.power(rusher), true);
-  near(rusher.active, 4, 1e-9, 'striker rush +1 s');
+  near(rusher.active, 4.5, 1e-9, 'striker rush +1 s');
 
   const tough = bout('deepseek', 'hermes');
   const [tank, shooter] = tough.actors;
@@ -342,7 +348,7 @@ test('OpenCode riders: faster while active, longer burst, one skipped holster', 
   const [burst] = long.actors;
   quiet(burst);
   assert.equal(long.power(burst), true);
-  near(burst.active, 4, 1e-9, 'vanguard burst +1 s');
+  near(burst.active, 4.5, 1e-9, 'vanguard burst +1 s');
 
   const skip = bout('chatgpt', 'opencode');
   const [swapper] = skip.actors;
@@ -404,7 +410,7 @@ test('Codex riders: timed speed, capped overheal and a magazine refill', () => {
   quiet(hurt);
   hurt.health = 10;
   assert.equal(heal.power(hurt), true);
-  near(hurt.health, 45, 1e-9);
+  near(hurt.health, 55, 1e-9);
   assert.equal(hurt.temporaryShield, 0, 'a normal heal never overheals');
 
   const ammo = bout('chatgpt', 'codex');
@@ -421,13 +427,13 @@ test('Cline riders: longer dash, unstoppable shorter dash, radar feint', () => {
   const [longStep] = far.actors;
   quiet(longStep);
   assert.equal(far.power(longStep), true);
-  assert.ok(Math.abs(longStep.z) > 7.3 && Math.abs(longStep.z) <= 7.5, `striker dash ~7.5 m (${longStep.z})`);
+  assert.ok(Math.abs(longStep.z) > 8.5 && Math.abs(longStep.z) <= 8.8, `striker dash ~8.75 m (${longStep.z})`);
 
   const shortRun = bout('deepseek', 'cline');
   const [shortStep] = shortRun.actors;
   quiet(shortStep);
   assert.equal(shortRun.power(shortStep), true);
-  assert.ok(Math.abs(shortStep.z) > 4.5 && Math.abs(shortStep.z) <= 4.8, `vanguard dash ~4.8 m (${shortStep.z})`);
+  assert.ok(Math.abs(shortStep.z) > 5.45 && Math.abs(shortStep.z) <= 5.8, `vanguard dash ~5.6 m (${shortStep.z})`);
   assert.equal(shortRun._knockbackScale(shortStep), 0, 'unstoppable during the dash');
   shortStep.active = 0;
   assert.equal(shortRun._knockbackScale(shortStep), 1);
@@ -457,10 +463,10 @@ test('Roo riders: jam dropped behind, stronger slow, wider radius', () => {
   const behind = bout('mistral', 'roo', {humanCount: 3});
   const [dropper, front, back] = behind.actors;
   quiet(dropper); quiet(front); quiet(back);
-  Object.assign(front, {z: -8});
+  Object.assign(front, {z: -13});
   Object.assign(back, {z: 8});
   assert.equal(behind.power(dropper), true);
-  assert.equal(front.slow, 0, 'the field moves behind the striker: 8 m ahead is out of reach');
+  assert.equal(front.slow, 0, 'the field moves behind the striker: 13 m ahead is out of reach');
   assert.ok(back.slow > 0, 'the enemy chasing from behind is caught');
 
   const wide = bout('chatgpt', 'roo');
@@ -468,13 +474,13 @@ test('Roo riders: jam dropped behind, stronger slow, wider radius', () => {
   quiet(caster); quiet(caught);
   Object.assign(caught, {z: -9.5});
   assert.equal(wide.power(caster), true);
-  assert.ok(caught.slow > 0, 'radius 8.75 + 1.5 reaches 9.5 m');
+  assert.ok(caught.slow > 0, 'radius 10 + 1.5 reaches 9.5 m');
 
   const strong = bout('deepseek', 'roo');
   const [jammer, slowed] = strong.actors;
   quiet(jammer); quiet(slowed);
   Object.assign(slowed, {z: -4});
   assert.equal(strong.power(jammer), true);
-  near(slowed.slowMultiplier, 1 - (1 - .55) * 1.2, 1e-9, 'the vanguard slow is 20% stronger');
+  near(slowed.slowMultiplier, 1 - (1 - .5) * 1.2, 1e-9, 'the vanguard slow is 20% stronger');
   assert.ok(slowed.slowMultiplier >= .35, '§4.7 slow floor holds');
 });

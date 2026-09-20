@@ -231,6 +231,9 @@ export class NetClient {
   this.roomId = null;
   if (this.storage) { this.storage.removeItem(this.storageKey); this.storage.removeItem(this.roomKey); }
  }
+   // The full controls object crosses the wire unchanged, held fields
+   // (`mobility`, `altFire`) included. `push` replays the stored object verbatim
+   // into the prediction shadow, so a held field is never dropped or re-derived.
    input(input) { const seq=++this.inputSeq,value={...(input||{})};this.pendingInputs.push({seq,input:value});if(this.pendingInputs.length>240)this.pendingInputs.splice(0,this.pendingInputs.length-240);this.send({type:'input',seq,input:value});return seq; }
   chat(text) { this.send({ type: 'chat', text }); }
   // -------------------------------------------------------------------

@@ -58,7 +58,7 @@ test('real Match.step: first-person upward aim hooks the wall, lifts, mantles an
   assert.equal(a.grounded,true);
   assert.equal(a.movement.phase,'ready');
   assert.equal(releases(match)[0].reason,'arrive');
-  assert.ok(a.movement.cooldown > 0 && a.movement.cooldown <= 7);
+  assert.ok(a.movement.cooldown > 0 && a.movement.cooldown <= 6);
   assert.equal(releases(match).length,1,'holding the button does not reactivate');
 });
 
@@ -91,7 +91,7 @@ test('release while climbing stops the lift and ordinary gravity returns the act
   assert.ok(releasedY > 1);
   match.step(DT,{...input,mobility:false});
   assert.equal(a.movement.phase,'ready');
-  assert.equal(a.movement.cooldown,7);
+  assert.equal(a.movement.cooldown,6);
   assert.ok(a.vy < 0 && a.y < releasedY);
   run(match,{...input,mobility:false},120);
   assert.equal(a.y,0);
@@ -140,7 +140,7 @@ test('range, miss cooldown, arena ceiling and carrier restrictions survive the c
   const far = rig({position:{x:0,y:0,z:12}}), a = far.actors[0];
   far.step(DT,aimed(a));
   assert.equal(a.movement.grapple,null);
-  assert.equal(a.movement.cooldown,3);
+  assert.equal(a.movement.cooldown,2.5);
 
   const capped = rig({world:arena({ceiling:2})}), b = capped.actors[0];
   const cappedPath = run(capped,aimed(b));
@@ -193,7 +193,7 @@ test('carrier pickup during a hook cancels default lift and keeps the spent cool
   match.flags[1].carrier=a.id;a.carryingFlag=true;match._refreshCarrier(a);
   assert.equal(a.movement.grapple,null);
   assert.equal(a.movement.grappleLanding,null);
-  assert.equal(a.movement.cooldown,7);
+  assert.equal(a.movement.cooldown,6);
   const path = run(match,input,90);
   assert.ok(path.every(p=>p.y<y),'the canceled hook cannot finish the mantle');
   assert.equal(a.y,0);

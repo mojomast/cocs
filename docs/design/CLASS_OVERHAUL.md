@@ -158,7 +158,7 @@ recommended numbers live in §13.
 |---|---|---|---|---|
 | **Mistral** | **Effortless** — stronger air control and longer slides; slide-hop timing is more forgiving | fastest, best movement tech | lowest HP, no sustain | flanker (as today) |
 | **Gemini** | **Revision** — carries two primaries; swapping skips holster time (bloom already persists) | range flexibility mid-fight | low sustain; must juggle bands; degrades under Arms Race and mode-pinned weapons | mid-range duelist, band switching |
-| **Grok** | **Heat** — consecutive hits build Heat: visible glow and up to +12% fire rate; decays 1.5 s after the last hit, resets on death | snowballing pressure | punished by poke/disengage; weak when behind | aggressive brawler |
+| **Grok** | **Heat** — consecutive hits build Heat: visible glow and up to +16% fire rate; decays 1.5 s after the last hit, resets on death | snowballing pressure | punished by poke/disengage; weak when behind | aggressive brawler |
 
 **Vanguards — space, sustain, low mobility**
 
@@ -166,7 +166,7 @@ recommended numbers live in §13.
 |---|---|---|---|---|
 | **DeepSeek** | **Deep Compute** — sustained fire builds a visible charge; the next shot releases bonus damage. Takes the **max** with attachment charge, never multiplies it, and the bonus is capped so no single shot removes more than ~90% of a full-HP/0-armor target | highest HP, hardest single hit | slow, must commit, flank-punished | siege; holds long angles |
 | **Meta** | **Braced** — armor slowly regenerates out of combat (spawn armor only, never gear armor, disabled while airborne and for 1.5 s after damage); crouching without firing halves knockback | durable space-holder, objective anchor | slowest; must stand and take it | anchor/objective holder |
-| **Claude** | **Alignment Review** — holding ground (not sprinting/firing) builds a review meter; at threshold it grants a temporary **absorb pool** (~35 HP, 2.5 s), not a resistance multiplier (which would collide with Guardrail's 50% clamp) | team anchor, holds angles | must stop pressuring to charge; no mobility | hold lines, early retreat (sentinel) |
+| **Claude** | **Alignment Review** — holding ground (not sprinting/firing) builds a review meter; at threshold it grants a temporary **absorb pool** (~45 HP, 3 s), not a resistance multiplier (which would collide with Guardrail's 50% clamp) | team anchor, holds angles | must stop pressuring to charge; no mobility | hold lines, early retreat (sentinel) |
 
 **Tacticians — range, information, objectives, flexibility**
 
@@ -174,7 +174,7 @@ recommended numbers live in §13.
 |---|---|---|---|---|
 | **ChatGPT** | **Adaptive** — fastest weapon swap; after a swap, the first magazine keeps a small handling bonus | no bad matchup, no dead loadout | nothing is best-in-class | adaptive mid-band (as today) |
 | **Kimi** | **Long Context** — enemy movement leaves brief radar trails (TTL ≤1.5 s, one per enemy per 3 s); range band pushes slightly past others | information + long lanes | fragile; loses CQC | orbiter/sharpshooter with info |
-| **Qwen** | **Tool Use** — faster pickups and timed-objective interactions (cap 1.35×); vehicles handle better and repair faster; **plus a bounded combat floor**: ammo/weapon pickups grant a partial reload and 2 s of faster handling, and melee/tool reach is +15% | objectives, vehicles, economy | weakest straight-up kit; must play the map | optimizer; objective-first |
+| **Qwen** | **Tool Use** — faster pickups and timed-objective interactions (cap 1.35×); vehicles handle better and repair faster; **plus a bounded combat floor**: ammo/weapon pickups grant a partial reload and 3.5 s of faster handling, and melee/tool reach is +15% | objectives, vehicles, economy | weakest straight-up kit; must play the map | optimizer; objective-first |
 
 **Claude decision:** the Claude Code harness lock stays, and Claude is
 compensated through its class verb — Alignment Review charges faster and caps
@@ -239,7 +239,7 @@ exactly like the ability riders.
 | Meta | **Brace slam** | leap and slam with landing knockback | commitment, landing recovery, ground-only |
 | Claude | **Safety glide** | slow, steerable descent; cautious repositioning | no upward mobility, slow |
 | ChatGPT | **Grapple** | aim, hook, reel or swing; route opener | aim, cooldown, loud |
-| Kimi | **Blink step** | short aimed translation | wind-up (~0.3 s), loud cue, cooldown |
+| Kimi | **Blink step** | short aimed translation | wind-up (~0.25 s), loud cue, cooldown |
 | Qwen | **Deployable rope** | place an anchor that becomes a zip line anyone can ride | limited charges, anchor visible and timed |
 
 Verbs reuse existing engine systems wherever possible: Qwen's rope rides the
@@ -297,12 +297,12 @@ matrix 5 rules, not 63 bespoke interactions.
 |---|---|---|---|
 | Mistral · air dash | 1 charge, 0.25 s | yes (Cline hook), consumes the dash | normal |
 | Gemini · double jump | 1 charge, refreshes grounded | no | normal |
-| Grok · super jump | crouch-charge 0.55 s | no | recovery 0.25 s |
+| Grok · super jump | crouch-charge 0.45 s | no | recovery 0.25 s |
 | DeepSeek · hover jets | hold, fuel/s | no | soft 0.2 s |
-| Meta · brace slam | 0.15 s wind-up, leap | no | slam knockback |
+| Meta · brace slam | 0.12 s wind-up, leap | no | slam knockback |
 | Claude · safety glide | hold in air, fuel/s | no | normal |
 | ChatGPT · grapple | aim + hook | release only | normal |
-| Kimi · blink step | 0.3 s wind-up | no | normal |
+| Kimi · blink step | 0.25 s wind-up | no | normal |
 | Qwen · deployable rope | 1 charge, place anchor (20 s life) | no | normal |
 
 Plus three global rules: **one movement source** (no verb starts while another
@@ -472,7 +472,7 @@ band, and no class may one-shot a full-HP/0-armor target (§4.7).
 |---|---|---|
 | Temporary speed multipliers | additive (Σ−1), ≤ +60% over spawn walk | sprint stays a posture multiplier; momentum, pads and rocket jumps exempt |
 | Verb chain distance | ×0.7 per link, ≤1.4× best single verb | slide-hop allowed; only Cline cancels |
-| Fire rate | `shotWait ≥ base interval / 2.2` | Heat ≤ +12%, decays 1.5 s; enforce in one `effectiveInterval()` helper |
+| Fire rate | `shotWait ≥ base interval / 2.2` | Heat ≤ +16%, decays 1.5 s; enforce in one `effectiveInterval()` helper |
 | Single hit | ≤90 dmg on a full-HP/0-armor target; class charge takes max with attachment charge | one-shots only on already-damaged targets |
 | Spawn EHP | ≤1.5× roster min incl. armor absorb | health/armor only; regen = spawn armor only |
 | Damage mitigation | ≤60%, sources take max, never sum | Guardrail and Review are separate windows |
@@ -911,13 +911,17 @@ HP at 9.2/9.0/8.9 m/s; Vanguards 120 / 100+20 armor / 115+10 armor at
 7.7/7.6/7.8 m/s; Tacticians 100+5 / 90+10 / 100+10 at 8.6/8.7/8.5 m/s.
 Re-pin `game/stats.test.mjs` in the same commit.
 
-Movement budget baseline: air dash 5.5 m / 3.5 s / 1 charge / 0.15 s landing;
-double jump impulse 7.4, one charge; super jump 0.55 s charge / 12.5 impulse /
-6 s; hover 2.5 s fuel / 1.8 s recharge / climb 0.35 / descent 2.2; slam 0.15 s
-wind-up / 4 m radius / 9 knockback / 8 s; glide descent 2 m/s, steer 4; grapple
-14 m / 12 m/s reel / 7 s (3 s on miss); blink 6 m / 0.3 s wind-up / 6 s; rope 1
-charge / 20 s anchor / 12 s. Carrier weakened: 1 charge, half fuel, +50%
-cooldown, no vertical lift. New bind `mobility = KeyX` plus one touch button.
+Movement budget baseline (Phase-5 tune): air dash 6 m / 2.2 s / 1 charge /
+0.15 s landing; double jump impulse 7.8, one charge; super jump 0.45 s charge /
+12.5 impulse / 5 s; hover 3 s fuel / 1.6 s recharge / climb 0.35 / descent 2.2;
+slam 0.12 s wind-up / 4.5 m radius / 10 knockback / 7 s; glide descent 1.7 m/s,
+steer 4.5, pool 3 s / 1.6 s recharge; grapple 14 m / 12 m/s reel / 6 s (2.5 s on
+miss); blink 6 m / 0.25 s wind-up / 5 s; rope 1 charge / 20 s anchor / 10 s and a
+10 m/s ride. Harness active tune (Phase 5): Claw Burst radius 6 m / damage 30
+(knockback 14, lift 5); Courier Rush 3.5 s; Parallel Burst 3.5 s at 1/.55 fire
+rate; Guardrail 3.5 s; Recompile heals 45; Phase Step 7 m; Context Jam radius
+8 m at a .5 slow. Carrier weakened: 1 charge, half fuel, +50% cooldown, no
+vertical lift. New bind `mobility = KeyX` plus one touch button.
 
 ---
 

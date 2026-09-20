@@ -98,12 +98,12 @@ const NEUTRAL_REVIEW = deepFreeze({meter: 0, pool: 0, poolIn: 0, suppressed: fal
 // multiplier, so the §4.7 temporary-speed cap is untouched. Plan silent on the
 // exact multipliers; kept small and inside one movement family.
 // ---------------------------------------------------------------------------
-const EFFORTLESS_AIR_ACCEL_MULTIPLIER = 1.35; // chosen: MOVE.airAccel 3.5 -> 4.725
+const EFFORTLESS_AIR_ACCEL_MULTIPLIER = 1.4; // chosen: MOVE.airAccel 3.5 -> 4.9
 const EFFORTLESS_AIR_CAP_MULTIPLIER = 1.2; // chosen: MOVE.airCap 1.6 -> 1.92
 const EFFORTLESS_SLIDE_BOOST_MULTIPLIER = 1.15; // chosen: MOVE.slideBoost 9.6 -> 11.04
 const EFFORTLESS_SLIDE_FRICTION_MULTIPLIER = .8; // chosen: MOVE.slideFriction 2.5 -> 2.0
 const EFFORTLESS_SLIDE_MIN_BONUS = .12; // chosen: MOVE.slideMin .35 -> .47 s
-const EFFORTLESS_HOP_BUFFER_BONUS = .04; // chosen: jump buffer .12 -> .16 s
+const EFFORTLESS_HOP_BUFFER_BONUS = .05; // chosen: jump buffer .12 -> .17 s
 const EFFORTLESS_HOP_COYOTE_BONUS = .03; // chosen: coyote .1 -> .13 s
 
 // ---------------------------------------------------------------------------
@@ -118,14 +118,15 @@ export const REVISION_PRIMARY_BAND = Object.freeze(
 );
 
 // ---------------------------------------------------------------------------
-// Grok · Heat — consecutive hits build up to +12% fire rate; it decays 1.5 s
-// after the last hit and resets on death. Per-hit step and decay rate are
-// chosen; the cap and the decay delay are pinned by §3.2/§4.7.
+// Grok · Heat — consecutive hits build up to +16% fire rate; it decays 1.5 s
+// after the last hit and resets on death. The +16% ceiling is the class's own
+// design number; §4.7's fire-rate axis cap is `shotWait >= base interval / 2.2`,
+// and a full Heat meter stays far under it.
 // ---------------------------------------------------------------------------
-const HEAT_PER_HIT = .02; // chosen: six consecutive hits reach the cap
-const HEAT_MAX = .12; // §3.2/§4.7: +12% fire rate
+const HEAT_PER_HIT = .025; // chosen: five consecutive hits reach the cap
+const HEAT_MAX = .16; // §3.2: +16% fire rate (the §4.7 axis cap is the /2.2 rule)
 const HEAT_DECAY_DELAY = 1.5; // §3.2/§4.7: decay starts 1.5 s after the last hit
-const HEAT_DECAY_PER_SECOND = .12; // chosen: a full meter drains in 1 s once decay starts
+const HEAT_DECAY_PER_SECOND = .12; // chosen: a full meter drains in ~1.33 s once decay starts
 
 // ---------------------------------------------------------------------------
 // DeepSeek · Deep Compute — sustained fire charges the next shot for bonus
@@ -133,8 +134,8 @@ const HEAT_DECAY_PER_SECOND = .12; // chosen: a full meter drains in 1 s once de
 // final direct hit is clamped so it can never remove more than 90% of a
 // full-health target and never more than the §4.7 90-damage single-hit cap.
 // ---------------------------------------------------------------------------
-const DEEP_COMPUTE_MAX_BONUS = .35; // chosen: +35% at full charge
-const DEEP_COMPUTE_BUILD_SECONDS = 1.2; // chosen: 1.2 s of sustained fire fills the meter
+const DEEP_COMPUTE_MAX_BONUS = .4; // chosen: +40% at full charge
+const DEEP_COMPUTE_BUILD_SECONDS = 1; // chosen: 1 s of sustained fire fills the meter
 const DEEP_COMPUTE_DECAY_DELAY = 1.5; // chosen, mirrors Heat
 const DEEP_COMPUTE_DECAY_PER_SECOND = .5; // chosen: half a meter per second
 export const SINGLE_HIT_CAP = 90; // §4.7: <= 90 damage on a full-HP/0-armor target
@@ -146,20 +147,20 @@ export const ONE_SHOT_HEALTH_FRACTION = .9; // §3.2: the charged shot tops out 
 // without firing halves knockback. Regen rate is chosen.
 // ---------------------------------------------------------------------------
 const BRACED_COMBAT_SECONDS = 1.5; // §3.2: disabled for 1.5 s after damage
-const BRACED_REGEN_PER_SECOND = 5; // chosen: 20 spawn armor in 4 s
+const BRACED_REGEN_PER_SECOND = 6; // chosen: 18 of Meta's 20 spawn armor in 3 s
 const BRACED_KNOCKBACK_MULTIPLIER = .5; // §3.2: crouching halves knockback
 
 // ---------------------------------------------------------------------------
 // Claude · Alignment Review — holding ground (grounded, not sprinting, not
-// firing) builds a meter; at threshold it grants a temporary absorb pool of 35
-// HP for 2.5 s. Absorb, never a resistance multiplier, so it cannot collide
+// firing) builds a meter; at threshold it grants a temporary absorb pool of 45
+// HP for 3 s. Absorb, never a resistance multiplier, so it cannot collide
 // with Guardrail's 50% clamp. Charge time and the damage pause are chosen;
 // pool size and duration are pinned by §3.2.
 // ---------------------------------------------------------------------------
 const REVIEW_CHARGE_SECONDS = 1.5; // chosen (P5-2): 1.5 s of holding ground fills the meter; §10 decision 1 compensates the Claude Code lock with the strongest defensive class verb, and the Claude operator was the weakest vanguard at full sample
 const REVIEW_SUPPRESS_SECONDS = 1.5; // chosen: damage pauses the build (does not reset it)
-const REVIEW_ABSORB = 35; // §3.2: ~35 HP
-const REVIEW_DURATION = 2.5; // §3.2: 2.5 s
+const REVIEW_ABSORB = 45; // §3.2: ~45 HP
+const REVIEW_DURATION = 3; // §3.2: 3 s
 
 // ---------------------------------------------------------------------------
 // ChatGPT · Adaptive — fastest weapon swap; the first magazine after a swap
@@ -168,8 +169,8 @@ const REVIEW_DURATION = 2.5; // §3.2: 2.5 s
 // ---------------------------------------------------------------------------
 const ADAPTIVE_SWAP_MULTIPLIER = .5; // chosen: .45 s holster -> .225 s, the fastest swap
 const ADAPTIVE_FIRST_MAG_SECONDS = 6; // chosen: window ceiling when the magazine never ends
-const ADAPTIVE_INTERVAL_MULTIPLIER = .94; // chosen: -6% interval, far under §4.7's /2.2
-const ADAPTIVE_SPREAD_MULTIPLIER = .95; // chosen
+const ADAPTIVE_INTERVAL_MULTIPLIER = .93; // chosen: -7% interval, far under §4.7's /2.2
+const ADAPTIVE_SPREAD_MULTIPLIER = .94; // chosen
 
 // ---------------------------------------------------------------------------
 // Kimi · Long Context — enemies leave brief radar trails and the range band
@@ -178,18 +179,18 @@ const ADAPTIVE_SPREAD_MULTIPLIER = .95; // chosen
 // ---------------------------------------------------------------------------
 const LONG_CONTEXT_TRAIL_TTL = 1.5; // §3.2/§4.7: TTL <= 1.5 s
 const LONG_CONTEXT_TRAIL_INTERVAL = 3; // §3.2/§4.7: one trail per enemy per 3 s
-const LONG_CONTEXT_RANGE_MULTIPLIER = 1.08; // chosen: "slightly longer" band
+const LONG_CONTEXT_RANGE_MULTIPLIER = 1.10; // chosen: "slightly longer" band, ≤1.10
 
 // ---------------------------------------------------------------------------
 // Qwen · Tool Use — faster pickups and timed objectives (cap 1.35x, never on
 // flag pickup/capture), better vehicles, plus a bounded combat floor: a
-// partial reload and 2 s of faster handling on ammo/weapon pickups, and +15%
+// partial reload and 3.5 s of faster handling on ammo/weapon pickups, and +15%
 // melee reach. Vehicle handling combines with a harness skill by max, never
 // product; the repair tick is the only additive vehicle effect (§4.7).
 // ---------------------------------------------------------------------------
 const TOOL_USE_INTERACTION_CAP = 1.35; // §3.2/§4.7: interaction cap
-const TOOL_USE_HANDLING_SECONDS = 3; // chosen (P5-2): 3 s of faster handling after a pickup (Qwen was the bottom operator at full sample)
-const TOOL_USE_INTERVAL_MULTIPLIER = .9; // chosen (P5-2): -10% interval
+const TOOL_USE_HANDLING_SECONDS = 3.5; // chosen (P5-2): 3.5 s of faster handling after a pickup (Qwen was the bottom operator at full sample)
+const TOOL_USE_INTERVAL_MULTIPLIER = .88; // chosen (P5-2): -12% interval, at the §4.7-conscious handling floor
 const TOOL_USE_SPREAD_MULTIPLIER = .92; // chosen (P5-2)
 const TOOL_USE_RELOAD_FRACTION = .6; // chosen (P5-2): partial reload = 60% of a magazine
 const TOOL_USE_MELEE_REACH_MULTIPLIER = 1.15; // §3.2: +15% melee/tool reach
@@ -598,7 +599,7 @@ export const TOOL_USE = Object.freeze({
     if (verbInactive(state, 'tool-use')) return 1;
     return kind === 'objective' || kind === 'pickup' ? TOOL_USE_INTERACTION_CAP : 1;
   },
-  // Ammo/weapon pickup floor: partial reload + a 2 s handling window; returns
+  // Ammo/weapon pickup floor: partial reload + a 3.5 s handling window; returns
   // the rounds to add and whether the window opened; `reload` is bounded by
   // the missing ammo and refuses infinite magazines.
   onPickup(state, {magazine = 0, ammo = 0, cap = 0} = {}) {
@@ -695,12 +696,12 @@ const rawVerbs = {
     name: 'Heat',
     operator: 'grok',
     wing: 'striker',
-    summary: 'Consecutive hits build Heat to +12% fire rate; it decays 1.5 s after the last hit and resets on death.',
+    summary: 'Consecutive hits build Heat to +16% fire rate; it decays 1.5 s after the last hit and resets on death.',
     numbers: {perHit: HEAT_PER_HIT, maxFireRateBonus: HEAT_MAX, decayDelay: HEAT_DECAY_DELAY, decayPerSecond: HEAT_DECAY_PER_SECOND},
     integration: [
       {site: 'Match.damage() source side (core.mjs:396)', call: 'HEAT.onHitLanded(source.verbState)', effect: 'one stack per landed damaging hit; self and vehicle damage excluded'},
       {site: 'Match.step() actor tick (core.mjs:518)', call: 'HEAT.step(a.verbState, dt)', effect: 'idle decay starts 1.5 s after the last hit'},
-      {site: 'Match.fire() interval (core.mjs:472)', call: 'HEAT.fireRateMultiplier(a.verbState)', effect: 'divide shotWait by up to 1.12 (within the §4.7 effectiveInterval rule)'},
+      {site: 'Match.fire() interval (core.mjs:472)', call: 'HEAT.fireRateMultiplier(a.verbState)', effect: 'divide shotWait by up to 1.16 (within the §4.7 effectiveInterval rule)'},
       {site: 'HUD glow', call: 'HEAT.glow(a.verbState)', effect: '0..1 visible glow'},
     ],
   },
@@ -744,7 +745,7 @@ const rawVerbs = {
     name: 'Alignment Review',
     operator: 'claude',
     wing: 'vanguard',
-    summary: 'Holding ground builds a meter; at threshold it grants a 35 HP absorb pool for 2.5 s. Absorb, never a resistance multiplier.',
+    summary: 'Holding ground builds a meter; at threshold it grants a 45 HP absorb pool for 3 s. Absorb, never a resistance multiplier.',
     numbers: {chargeSeconds: REVIEW_CHARGE_SECONDS, suppressSeconds: REVIEW_SUPPRESS_SECONDS, absorb: REVIEW_ABSORB, duration: REVIEW_DURATION},
     integration: [
       {site: 'Match.step() actor tick (core.mjs:518)', call: 'ALIGNMENT_REVIEW.step(state, dt, {grounded: a.grounded, sprinting: a.sprinting, firing})', effect: 'builds meter, grants/expires the absorb pool'},
@@ -767,7 +768,7 @@ const rawVerbs = {
     },
     integration: [
       {site: 'Match.switchWeapon() holster (core.mjs:452)', call: 'ADAPTIVE.swapDelay(a.verbState, .45)', effect: 'halve the holster; then ADAPTIVE.onSwap(state, {magazine: min(a.ammo[i], w.ammo)})'},
-      {site: 'Match.fire() interval/spread (core.mjs:472, 478)', call: 'ADAPTIVE.handling(a.verbState)', effect: 'interval x.94, spread x.95 while the first magazine lasts'},
+      {site: 'Match.fire() interval/spread (core.mjs:472, 478)', call: 'ADAPTIVE.handling(a.verbState)', effect: 'interval x.93, spread x.94 while the first magazine lasts'},
       {site: 'Match.fire() shot / Match.startReload() (core.mjs:472, 430-438)', call: 'ADAPTIVE.onShot(state) / ADAPTIVE.onReload(state)', effect: 'consume the window'},
       {site: 'Match.step() actor tick (core.mjs:518)', call: 'ADAPTIVE.step(a.verbState, dt)', effect: '6 s window ceiling'},
     ],
@@ -782,7 +783,7 @@ const rawVerbs = {
     integration: [
       {site: 'Match.step() actor tick (core.mjs:518)', call: 'LONG_CONTEXT.record(state, {enemyId, x, z, cloaked: Boolean(enemy.powerups?.cloak), visible})', effect: 'one fresh trail per enemy per 3 s while visible'},
       {site: 'Match.step() actor tick (core.mjs:518)', call: 'LONG_CONTEXT.step(state, dt)', effect: 'expire trails after 1.5 s and tick cooldowns'},
-      {site: 'Match.fire() range/falloff (core.mjs:479-486)', call: 'LONG_CONTEXT.rangeMultiplier(state)', effect: 'scale w.range and falloff start/end by 1.08'},
+      {site: 'Match.fire() range/falloff (core.mjs:479-486)', call: 'LONG_CONTEXT.rangeMultiplier(state)', effect: 'scale w.range and falloff start/end by 1.10'},
       {site: 'HUD/radar (view.mjs)', call: 'LONG_CONTEXT.trails(state)', effect: 'draw copied trail points'},
     ],
   },
@@ -791,7 +792,7 @@ const rawVerbs = {
     name: 'Tool Use',
     operator: 'qwen',
     wing: 'tactician',
-    summary: 'Faster timed objectives and pickup channels (cap 1.35x, never flags), better vehicles, plus a combat floor: partial reload + 2 s handling on pickups and +15% melee reach.',
+    summary: 'Faster timed objectives and pickup channels (cap 1.35x, never flags), better vehicles, plus a combat floor: partial reload + 3.5 s handling on pickups and +15% melee reach.',
     numbers: {
       interactionCap: TOOL_USE_INTERACTION_CAP,
       handlingSeconds: TOOL_USE_HANDLING_SECONDS,
@@ -803,11 +804,11 @@ const rawVerbs = {
     },
     integration: [
       {site: 'objectives.mjs progress rates (zones/payload/uplink/extraction/holdout)', call: 'TOOL_USE.interactionMultiplier(state, {kind: "objective"})', effect: 'multiply progress dt by 1.35, never flag pickup/capture'},
-      {site: 'Match.collect() ammo/weapon pickups (core.mjs:497)', call: 'TOOL_USE.onPickup(state, {magazine, ammo, cap})', effect: 'add the returned rounds, open the 2 s window'},
-      {site: 'Match.fire() interval/spread (core.mjs:472, 478)', call: 'TOOL_USE.handling(state)', effect: 'interval x.92, spread x.94 during the window'},
+      {site: 'Match.collect() ammo/weapon pickups (core.mjs:497)', call: 'TOOL_USE.onPickup(state, {magazine, ammo, cap})', effect: 'add the returned rounds, open the 3.5 s window'},
+      {site: 'Match.fire() interval/spread (core.mjs:472, 478)', call: 'TOOL_USE.handling(state)', effect: 'interval x.88, spread x.92 during the window'},
       {site: 'Match.melee() range (core.mjs:494)', call: 'TOOL_USE.meleeRange(state, MELEE.range)', effect: '2.4 m -> 2.76 m'},
       {site: 'driveVehicle() (core.mjs:352)', call: 'TOOL_USE.vehicle(state)', effect: 'handling by max with harness skill; add repairPerSecond 4'},
-      {site: 'Match.step() actor tick (core.mjs:518)', call: 'TOOL_USE.step(a.verbState, dt)', effect: '2 s window ceiling'},
+      {site: 'Match.step() actor tick (core.mjs:518)', call: 'TOOL_USE.step(a.verbState, dt)', effect: '3.5 s window ceiling'},
     ],
   },
 };

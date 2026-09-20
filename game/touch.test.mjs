@@ -43,7 +43,8 @@ test('look steps accumulate yaw and clamp pitch',()=>{
  assert.equal(look.pitch,1.45);
  assert.deepEqual(lookStep(0,0,1),{yaw:0,pitch:0});
  assert.equal(applyLook(null,10,10),null);
- assert.equal(TOUCH_BUTTONS.length,12);
+ assert.equal(TOUCH_BUTTONS.length,13);
+ assert.ok(TOUCH_BUTTONS.includes('alt'));
  assert.ok(TOUCH_BUTTONS.includes('voice'));
  assert.ok(TOUCH_BUTTONS.includes('melee'));
  assert.ok(TOUCH_BUTTONS.includes('grenade'));
@@ -104,4 +105,14 @@ test('grenade is a touch button and a one-shot action',()=>{
  assert.ok(TOUCH_BUTTONS.includes('grenade'));
  const runtime={};applyTouchAction(runtime,'grenade',true);
  assert.equal(runtime.grenade,true);
+});
+
+test('alt fire is a held touch button fed through the touch bag',()=>{
+ assert.ok(TOUCH_BUTTONS.includes('alt'));
+ const runtime={};
+ applyTouchAction(runtime,'alt',true);
+ assert.equal(runtime.touch.altFire,true,'controlsFromState reads the held touch.altFire field');
+ assert.equal(runtime.altFire,undefined,'the button is held, never a one-shot on the runtime');
+ applyTouchAction(runtime,'alt',false);
+ assert.equal(runtime.touch.altFire,false,'release clears the held field');
 });

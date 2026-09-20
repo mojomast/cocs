@@ -2074,3 +2074,23 @@ test('debugDeath spawns a deterministic settled corpse without touching actor mo
  assert.ok(view._clearDebugDeaths()<=8);
  view.deathPool?.dispose();view.effectPool?.dispose();
 });
+
+test('alt-fire morph follows the snapshot flag and clears the projectile pool per match',t=>{
+ const {view}=playable(t);
+ const player={id:7,weapon:0,health:100,x:0,y:0,z:0,yaw:0,pitch:0,vx:0,vy:0,vz:0,grounded:true,alt:true};
+ const match={actors:[player],pickups:[],rockets:[{id:4,weapon:5,mine:true,pos:{x:2,y:0,z:-2},life:6,arm:.4}],time:1,events:[]};
+ view.render('playing',match,.05,1);
+ const model=view.firstPerson;
+ assert.ok(model&&model.userData.altAmount>0,'the alt amount starts blending from player.alt');
+ assert.ok(view.altProjectiles?.slots.some(slot=>slot.active&&slot.kind==='mine'),'a snapshot mine spawns a keyed visual');
+ for(let i=0;i<10;i++)view.render('playing',{...match,time:1+i*.05},.05,1+i*.05);
+ assert.equal(model.userData.altAmount,1,'the morph reaches the alt pose');
+ assert.equal(model.getObjectByName('alt-salvo-prong-l').visible,true,'the salvo prongs are revealed');
+ const colors=new Set();model.userData.flash.traverse(node=>{if(node.isMesh&&node.material?.color)colors.add(node.material.color.getHexString());});
+ assert.ok(colors.has('7de8ff'),'the muzzle flash takes the salvo tracer colour');
+ const pool=view.altProjectiles;
+ view.mapId=MAPS[0].id;
+ view.setMatch({arena:MAPS[0],actors:[],pickups:[],serial:5});
+ assert.equal(pool.activeCount(),0,'a new match clears the alt projectile pool');
+ view.effectPool?.dispose();view.altProjectiles?.dispose();view.disposeObject(view.scene);
+});

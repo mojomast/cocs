@@ -611,6 +611,11 @@
 .objective-announcer.score strong { color: #ffd9a0; font-size: clamp(22px, 4vw, 38px); }
 .objective-announcer.capture strong { color: #83f4d5; font-size: clamp(22px, 4vw, 38px); }
 .weapon-tag { display: inline-block; margin-left: 8px; padding: 1px 6px; border: 1px solid #83f4d555; background: #0d2420; color: #a6e5c9; font: 10px monospace; letter-spacing: 1px; vertical-align: middle; }
+/* Held alt-fire: the mode chip replaces the AUTO/SEMI tag while `player.alt`
+   is true, and the compact key hint sits on the note row under the ammo bar.
+   Both stay on one line and never wrap. */
+.weapon-tag--alt { border-color: #ffd16688; background: #2a2110; color: #ffe6b0; }
+.weapon-alt-hint { display: inline-block; padding: 1px 5px; border: 1px solid #ffffff24; border-radius: 4px; background: #00000040; color: var(--text-dim); font: 10px var(--font-mono); letter-spacing: .08em; white-space: nowrap; }
 @keyframes damage-direction { 0% { opacity: 0; } 12% { opacity: 1; } 100% { opacity: 0; } }
 @keyframes damage-flash { 0% { opacity: 0; } 12% { opacity: 1; } 100% { opacity: 0; } }
 @keyframes kill-banner { 0% { opacity: 0; transform: translate(-50%, -8px); } 12% { opacity: 1; transform: translate(-50%, 0); } 80% { opacity: 1; } 100% { opacity: 0; transform: translate(-50%, -6px); } }
@@ -855,6 +860,9 @@ html, body { overscroll-behavior: none; }
 .touch-tactical .touch-actions{grid-template-columns:repeat(4,auto)}
 .touch-voice { border-color: #8fd0ff66; color: #dff1ff; }
 .touch-voice:active, .touch-voice:focus { background: #123a52d9; border-color: #a9dcff; }
+/* Held alt-fire: the touch twin of the KeyZ / middle-mouse path. */
+.touch-alt { border-color: #ffd16666; color: #ffe6b0; }
+.touch-alt:active, .touch-alt:focus { background: #3a2c12d9; border-color: #ffd166; }
 .touch-util .touch-button { width: 42px; height: 42px; border-radius: 10px; }
 .touch-car .touch-actions { grid-template-columns: repeat(3, auto); }
 .touch-car .touch-primary .touch-button { width: 82px; height: 82px; }
@@ -1011,7 +1019,7 @@ html, body { overscroll-behavior: none; }
 }
 
 /* --- Hide-HUD now hides the whole overlay, not a subset. --- */
-.game-hud.hide-hud :is(.match-top,.command-panel,.kill-feed,.radar,.damage-numbers,.damage-vignette,.damage-direction,.damage-flash,.bottom-hud,.hud-lower,.hud-messages,.weapon-hud,.ability-hud,.vitals,.grenade-chip,.ladder-chip,.streak-chip,.posture-chip,.reload-indicator,.hitmarker,.kill-banner,.kill-callout,.objective-announcer,.audio-caption,.hud-bottom-note){display:none}
+.game-hud.hide-hud :is(.match-top,.command-panel,.kill-feed,.radar,.damage-numbers,.damage-vignette,.damage-direction,.damage-flash,.bottom-hud,.hud-lower,.hud-messages,.weapon-hud,.ability-hud,.vitals,.grenade-chip,.ladder-chip,.streak-chip,.posture-chip,.reload-indicator,.hitmarker,.kill-banner,.kill-callout,.objective-announcer,.audio-caption,.hud-bottom-note,.verb-meters){display:none}
 
 /* --- Boss/hold bars keep their semantic fill inside the shared track. --- */
 .sp-boss .hud-bar>i{background:#ff5a5a;border:0}
@@ -1084,7 +1092,16 @@ html, body { overscroll-behavior: none; }
 .vital--armor .stat-bar>i{background:#6dbfff}
 .vital--armor.is-empty{opacity:.55}
 .vital--armor.is-empty .stat-value{color:#62828f}
-.stat-card--ammo{min-width:150px}
+/* Weapon card: the verb readout and the ammo card share a right-aligned
+   column; the label line keeps name + mode tag on one nowrap line (the name
+   ellipsizes before it ever wraps) and the ALT hint moves to the note row
+   under the ammo bar. */
+.ammo-stack{display:flex;flex-direction:column;gap:6px;min-width:0;flex:none}
+.stat-card--ammo{min-width:184px;max-width:264px}
+.stat-card--ammo .stat-label{flex-wrap:nowrap;white-space:nowrap;gap:5px;letter-spacing:.06em;min-width:0;overflow:hidden}
+.stat-card--ammo .weapon-name{flex:none;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.stat-card--ammo .weapon-tag{flex:0 1 auto;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.weapon-alt-row{display:block;line-height:1.4;margin-top:2px}
 .stat-card--ammo .stat-value{color:#ffe6b0}
 .stat-card--ammo .stat-bar>i{background:#ffd166}
 .stat-card--ammo.is-empty{border-color:rgba(255,107,107,.5)}
@@ -1109,6 +1126,18 @@ html, body { overscroll-behavior: none; }
 .movement-card.is-active .ability-ring{background:conic-gradient(#b6ffd9 var(--fill),rgba(131,244,213,.14) 0)}
 .movement-card.is-disabled{opacity:.55}
 .movement-card .stat-label,.movement-card .stat-note{max-width:92px;overflow:hidden;text-overflow:ellipsis}
+/* Operator signature-verb readout: its own compact card directly above the
+   ammo card, one nowrap meter row (label · track · value) per exposed verb.
+   Only the bar width changes per snapshot; no animation or transition, so the
+   reduced-motion paths need no extra gate. */
+.verb-meters{display:grid;gap:4px;min-width:184px;max-width:264px;padding:6px 10px;border:1px solid var(--border);
+  border-radius:var(--radius-md);background:linear-gradient(180deg,#0a2020d9,#061314d9);box-shadow:0 8px 22px #0008;text-shadow:0 2px 4px #000}
+.verb-meter{display:flex;align-items:center;gap:6px;white-space:nowrap;font:10px var(--font-mono);letter-spacing:.08em;color:var(--text-dim);font-variant-numeric:tabular-nums}
+.verb-meter__label{color:var(--text-mute);flex:none}
+.verb-meter__track{display:block;flex:1 1 auto;min-width:28px;height:4px;border-radius:999px;background:#00000070;overflow:hidden}
+.verb-meter__track>i{display:block;height:100%;background:var(--accent)}
+.verb-meter__text{flex:none;min-width:34px;text-align:right;white-space:nowrap}
+.verb-meter--passive{padding:1px 6px;border:1px solid var(--border);border-radius:4px;color:var(--accent-soft);justify-self:start}
 @keyframes ability-pop{0%{transform:translateY(0) scale(1)}45%{transform:translateY(-3px) scale(1.1)}100%{transform:translateY(0) scale(1)}}
 .objective-bar{justify-self:center;display:grid;justify-items:center;gap:6px;max-width:min(560px,52vw);text-align:center;text-shadow:0 2px 5px #000}
 .compass{position:relative;display:grid;place-items:center;width:38px;height:38px;border-radius:50%;border:1px solid var(--border);
@@ -1374,7 +1403,7 @@ html, body { overscroll-behavior: none; }
   .cocs-terminals{width:min(60vw,320px);bottom:calc(var(--safe-bottom) + 210px)}
 }
 .game-hud.hide-hud :is(.cocs-board,.cocs-spend,.cocs-terminals,.cocs-board-chip){display:none}
-.game-hud.hide-hud :is(.hud-bottom,.objective-bar,.stat-card,.ability-card,.hud-pills,.hud-bottom-note){display:none}
+.game-hud.hide-hud :is(.hud-bottom,.objective-bar,.stat-card,.ability-card,.verb-meters,.hud-pills,.hud-bottom-note){display:none}
 @media (max-width:760px){
   .hud-bottom{grid-template-columns:minmax(0,1fr) minmax(0,1fr);grid-template-areas:'objective objective' 'left right';gap:8px}
   .objective-bar{grid-area:objective;max-width:94vw}
@@ -1386,6 +1415,40 @@ html, body { overscroll-behavior: none; }
   .ability-ring{width:44px;height:44px}
   .objective-copy small{display:none}
   .hud-lower{bottom:calc(var(--safe-bottom) + 220px)}
+}
+/* Narrow HUD: the verb + ammo column gets its own row above the ability cards,
+   so neither surface is ever crushed into a character-by-character strip. */
+@media (max-width:760px){
+  .hud-corner--right{display:grid;grid-template-columns:repeat(3,auto);justify-content:end;align-items:end;gap:8px 10px}
+  .ammo-stack{grid-column:1/-1;justify-self:end}
+  .stat-card--ammo,.verb-meters{min-width:150px;max-width:252px}
+  .stat-card--ammo .stat-label,.verb-meter{font-size:9px;letter-spacing:.04em}
+  .verb-meter__track{min-width:24px;height:3px}
+  .verb-meter__text{min-width:30px}
+}
+/* Short landscape: the bottom HUD must stay below the reticle corridor and the
+   ammo stack must clear the touch clusters in every mode. Hide the verb
+   readout, compact the ammo card and shrink the ability/movement/frag cards so
+   the container tops out under the corridor; the lattice-only corner padding
+   clears its wider (fire / jump / interact / vault) touch primary. */
+@media (max-height:520px){
+  .verb-meters{display:none}
+  .stat-card--ammo{min-width:150px;max-width:232px}
+  .stat-card--ammo .stat-label{font-size:9px;letter-spacing:.04em}
+  .stat-card--ammo .weapon-tag{font-size:9px;letter-spacing:.5px;padding:1px 5px}
+  .ammo-stack{gap:0}
+  .stat-card--ammo{padding:5px 9px;gap:2px}
+  .stat-card--ammo .stat-value{font-size:19px;line-height:1.05}
+  .stat-card--ammo .stat-bar{height:3px}
+  .weapon-alt-row{line-height:1.15;margin-top:0}
+  .ability-card{min-width:72px;padding:5px 6px;gap:2px}
+  .ability-ring{width:38px;height:38px}
+  .ability-ring::before{inset:4px}
+  .ability-card .stat-label{font-size:8px;line-height:1.25;letter-spacing:.06em}
+  .ability-card .stat-note{font-size:9px}
+  .frag-card .ability-ring>b{font-size:13px}
+  .movement-card .stat-label,.movement-card .stat-note{max-width:72px}
+  .game-hud.lattice-hud.touch-mode .hud-corner--right{padding-right:244px}
 }
 @media (max-width:760px){
   .game-hud.touch-mode .hud-bottom{bottom:calc(var(--safe-bottom) + 188px)}

@@ -66,49 +66,49 @@ export const WINGS = deepFreeze([
 export const MOVEMENT_VERBS = deepFreeze([
   {
     id: 'air-dash', name: 'Air Dash', owner: 'mistral', family: 'burst', input: 'jump',
-    budget: {charges: 1, distance: 5.5, cooldown: 2.5, windup: 0, landing: .15},
+    budget: {charges: 1, distance: 6, cooldown: 2.2, windup: 0, landing: .15},
     carrier: {drop: true, weakened: false, lift: false},
   },
   {
     id: 'double-jump', name: 'Double Jump', owner: 'gemini', family: 'burst', input: 'jump',
-    budget: {charges: 1, impulse: 7.4, cooldown: 0, windup: 0, landing: 0},
+    budget: {charges: 1, impulse: 7.8, cooldown: 0, windup: 0, landing: 0},
     carrier: {drop: true, weakened: false, lift: true},
   },
   {
     id: 'super-jump', name: 'Super Jump', owner: 'grok', family: 'burst', input: 'crouch',
-    budget: {charges: 1, impulse: 12.5, windup: .55, cooldown: 6, landing: .25},
+    budget: {charges: 1, impulse: 12.5, windup: .45, cooldown: 5, landing: .25},
     carrier: {drop: true, weakened: false, lift: true},
   },
   {
     id: 'hover-jets', name: 'Hover Jets', owner: 'deepseek', family: 'deliberate', input: 'jump-hold',
-    budget: {fuel: 2.5, fuelRecharge: 1.8, climb: .35, descent: 2.2, windup: 0, landing: .2},
+    budget: {fuel: 3, fuelRecharge: 1.6, climb: .35, descent: 2.2, windup: 0, landing: .2},
     carrier: {drop: true, weakened: false, lift: true},
   },
   {
     id: 'brace-slam', name: 'Brace Slam', owner: 'meta', family: 'deliberate', input: 'crouch-jump',
     // Landing recovery is "commitment" in §3.4 but has no pinned number yet.
-    budget: {windup: .15, radius: 4, knockback: 9, cooldown: 8, landing: null},
+    budget: {windup: .12, radius: 4.5, knockback: 10, cooldown: 7, landing: null},
     carrier: {drop: true, weakened: false, lift: true},
   },
   {
     id: 'safety-glide', name: 'Safety Glide', owner: 'claude', family: 'deliberate', input: 'jump-hold',
     // Glide fuel is a Phase-2 tuning slot: §3.6 pins fuel/s but not the pool.
-    budget: {fuel: null, descent: 2, steer: 4, windup: 0, landing: 0},
+    budget: {fuel: null, descent: 1.7, steer: 4.5, windup: 0, landing: 0},
     carrier: {drop: true, weakened: false, lift: false},
   },
   {
     id: 'grapple', name: 'Grapple', owner: 'chatgpt', family: 'tool', input: 'mobility',
-    budget: {distance: 14, reel: 12, cooldown: 7, missCooldown: 3, windup: 0, landing: 0},
+    budget: {distance: 14, reel: 12, cooldown: 6, missCooldown: 2.5, windup: 0, landing: 0},
     carrier: {drop: true, weakened: false, lift: true},
   },
   {
     id: 'blink-step', name: 'Blink Step', owner: 'kimi', family: 'tool', input: 'mobility',
-    budget: {distance: 6, windup: .3, cooldown: 6, landing: 0},
+    budget: {distance: 6, windup: .25, cooldown: 5, landing: 0},
     carrier: {drop: true, weakened: false, lift: true},
   },
   {
     id: 'deployable-rope', name: 'Deployable Rope', owner: 'qwen', family: 'tool', input: 'mobility',
-    budget: {charges: 1, anchorLife: 20, cooldown: 12, windup: 0, landing: 0},
+    budget: {charges: 1, anchorLife: 20, cooldown: 10, windup: 0, landing: 0},
     carrier: {drop: true, weakened: true, lift: true},
   },
 ]);
@@ -137,7 +137,7 @@ const rawKits = [
   },
   {
     id: 'grok', wing: 'striker', role: 'disruptor', preferred: [1, 5, 4], strafe: .9, movement: 'super-jump',
-    verb: {id: 'heat', name: 'Heat', description: 'Consecutive hits build Heat up to +12% fire rate; it decays 1.5 s after the last hit and resets on death.'},
+    verb: {id: 'heat', name: 'Heat', description: 'Consecutive hits build Heat up to +16% fire rate; it decays 1.5 s after the last hit and resets on death.'},
     bot: {archetype: 'rusher', mobility: 'engage'},
   },
   {
@@ -152,7 +152,7 @@ const rawKits = [
   },
   {
     id: 'claude', wing: 'vanguard', role: 'anchor', preferred: [2, 6, 8], strafe: .58, movement: 'safety-glide',
-    verb: {id: 'alignment-review', name: 'Alignment Review', description: 'Holding ground builds a review meter; at threshold it grants a temporary absorb pool of about 35 HP for 2.5 s.'},
+    verb: {id: 'alignment-review', name: 'Alignment Review', description: 'Holding ground builds a review meter; at threshold it grants a temporary absorb pool of about 45 HP for 3 s.'},
     bot: {archetype: 'defender', mobility: 'escape'},
   },
   {

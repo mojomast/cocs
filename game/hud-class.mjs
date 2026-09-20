@@ -14,10 +14,18 @@
 //     MOVEMENT_VERBS entry, e.g. `resolveKit(...).movement`) and only supplies
 //     the display name and the budget cooldown used for ring progress.
 //
-// Both helpers are total: malformed or partial snapshots return neutral values
+//   verbMeters(player)
+//     The operator signature-verb row: bounded 0..1 meters for whichever verb
+//     state `player.verbState` (operator-verbs.mjs `operatorVerbSnapshot`)
+//     exposes — Heat, Deep Compute, Braced, Alignment Review, Adaptive,
+//     Long Context, Tool Use — plus a passive name chip for the two verbs with
+//     no numeric state (Effortless, Revision).
+//
+// All helpers are total: malformed or partial snapshots return neutral values
 // rather than throwing, because the HUD renders every 80 ms from network data.
 import {riderBonus} from './spec-effects.mjs';
 import {formatCountdown} from './format-ui.mjs';
+import {OPERATOR_VERBS,DEEP_COMPUTE,HEAT,ALIGNMENT_REVIEW,ADAPTIVE,TOOL_USE} from './operator-verbs.mjs';
 
 const num = (value, fallback = 0) => {
   const n = Number(value);
@@ -154,4 +162,73 @@ export function movementHud(movement = null, kitMovement = null) {
     : cooldown > 0 ? `${formatCountdown(cooldown)}s`
     : 'READY';
   return {phase, charges, maxCharges, cooldown, fuel, maxFuel, windup, windupTotal, charge, verb, name, ready, enabled, progress, note};
+}
+
+/**
+ * Operator signature-verb meters from one `operatorVerbSnapshot()` record
+ * (`player.verbState`). The hook namespaces own every scale (Heat's cap,
+ * Deep Compute's charge, the Review absorb pool, the Adaptive first-mag and
+ * Tool Use windows, Braced's out-of-combat timer), so a reading can never
+ * drift from the behaviour it mirrors. Returns an empty list while the verb is
+ * inert (race/soccer/instagib clear it) or unknown, otherwise:
+ *   - id: stable key for React
+ *   - label: short uppercase name for the meter/chip
+ *   - value: bounded 0..1 reading (1 for passive chips)
+ *   - text: short current reading, e.g. '+8%' | '64%' | 'OUT 1.2s' | '2'
+ *   - passive: true when the verb has no numeric state; render a name chip
+ *     instead of a bar.
+ */
+export function verbMeters(player = {}) {
+  const state = player && typeof player === 'object' ? player.verbState : null;
+  if (!state || typeof state !== 'object' || !hasText(state.verb) || state.active !== true) return [];
+  const numbers = id => OPERATOR_VERBS[id]?.numbers ?? {};
+  switch (state.verb) {
+    case 'heat': {
+      const max = Math.max(1e-9, num(numbers('heat').maxFireRateBonus, .12));
+      const value = clamp01(num(HEAT.glow(state)));
+      return [{id: 'heat', label: 'HEAT', value, text: value > 0 ? `+${Math.round(value * max * 100)}%` : 'IDLE'}];
+    }
+    case 'deep-compute': {
+      const value = clamp01(num(DEEP_COMPUTE.charge(state)));
+      return [{id: 'compute', label: 'COMPUTE', value, text: `${Math.round(value * 100)}%`}];
+    }
+    case 'braced': {
+      const total = Math.max(1e-9, num(numbers('braced').combatSeconds, 1.5));
+      const combat = Math.max(0, num(state.combatIn));
+      return [{id: 'braced', label: 'BRACED', value: combat > 0 ? clamp01(1 - combat / total) : 1, text: combat > 0 ? `OUT ${formatCountdown(combat)}s` : 'REGEN'}];
+    }
+    case 'alignment-review': {
+      // One reading at a time: the live absorb pool outranks the build meter.
+      const status = ALIGNMENT_REVIEW.status(state);
+      const absorb = Math.max(1, num(numbers('alignment-review').absorb, 35));
+      if (status.pool > 0) return [{id: 'absorb', label: 'ABSORB', value: clamp01(status.pool / absorb), text: `${Math.round(status.pool)} HP`}];
+      const text = status.meter > 0 ? `${Math.round(status.meter * 100)}%` : status.suppressed ? 'PAUSED' : 'HOLD';
+      return [{id: 'align', label: 'ALIGN', value: clamp01(status.meter), text}];
+    }
+    case 'adaptive': {
+      const total = Math.max(1e-9, num(numbers('adaptive').firstMagSeconds, 6));
+      const left = Math.max(0, num(state.windowIn));
+      const open = ADAPTIVE.windowActive(state);
+      return [{id: 'first-mag', label: 'FIRST MAG', value: open ? clamp01(left / total) : 0, text: open ? `${formatCountdown(left)}s` : 'CLOSED'}];
+    }
+    case 'long-context': {
+      // Trails are the only bounded reading Long Context exposes; three is the
+      // display cap, not a sim limit.
+      const trails = Array.isArray(state.trails) ? state.trails.filter(trail => trail && num(trail.ttl) > 0).length : 0;
+      return [{id: 'trails', label: 'TRAILS', value: clamp01(trails / 3), text: `${trails}`}];
+    }
+    case 'tool-use': {
+      const total = Math.max(1e-9, num(numbers('tool-use').handlingSeconds, 3));
+      const left = Math.max(0, num(state.windowIn));
+      const open = TOOL_USE.windowActive(state);
+      return [{id: 'tool-use', label: 'TOOL USE', value: open ? clamp01(left / total) : 0, text: open ? `${formatCountdown(left)}s` : 'IDLE'}];
+    }
+    case 'effortless':
+    case 'revision': {
+      const name = OPERATOR_VERBS[state.verb]?.name ?? state.verb;
+      return [{id: state.verb, label: String(name).toUpperCase(), value: 1, text: 'PASSIVE', passive: true}];
+    }
+    default:
+      return [];
+  }
 }

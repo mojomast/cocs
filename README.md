@@ -450,6 +450,11 @@ Recent releases. The full history lives in
   seeded silhouettes, style treatments), stronger hit flinches, a melee swing,
   shell casings, style-aware death audio, and UI entrance motion with an
   in-game reduced-motion gate.
+- Combat pass: every weapon gets a held alt-fire mode (KeyZ / middle mouse /
+  touch ALT) that transforms its model and behaviour, from Pulse salvo and Rail
+  overload to proximity mines and flak bombs; harness actives hit harder,
+  operator verbs gain visuals and HUD meters, and all nine movement verbs are
+  tuned and hardened. See [Combat pass](design/COMBAT-PASS.md).
 - Graphics-edge pass (research-backed): static dither kills 8-bit banding, a
   contrast-adaptive sharpen recovers FXAA softness, and environment reflections
   scale with the tier. Runs whenever post-processing or the graphics lab runs.

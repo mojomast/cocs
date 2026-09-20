@@ -6,6 +6,10 @@ export const DEFAULT_BINDINGS = Object.freeze({
   forward: 'KeyW', back: 'KeyS', left: 'KeyA', right: 'KeyD',
   jump: 'Space', sprint: 'ShiftLeft', crouch: 'ControlLeft',
   reload: 'KeyR', melee: 'KeyF', grenade: 'KeyG', power: 'KeyQ', mobility: 'KeyX', interact: 'KeyE', voice: 'KeyV',
+  // Held alt-fire (`Match.altFire`). KeyZ is free: KeyB is the command board and
+  // KeyH hides the HUD, so neither default is touched. Middle mouse is a fixed
+  // second path for the same held state (set on mousedown, cleared on release).
+  altFire: 'KeyZ',
   // Free-cursor toggle (LATTICE UX). Releases pointer lock in place — without
   // pausing or opening a menu — so any HUD surface can be clicked, then toggles
   // combat back on. Remappable like every other action.
@@ -27,6 +31,7 @@ export const KEYBIND_LABELS = Object.freeze({
   forward: 'Move forward', back: 'Move back', left: 'Move left', right: 'Move right',
   jump: 'Jump', sprint: 'Sprint', crouch: 'Crouch',
   reload: 'Reload', melee: 'Melee', grenade: 'Frag', power: 'Harness ability', mobility: 'Mobility verb',
+  altFire: 'Alt fire',
   interact: 'Interact / use', voice: 'Push to talk', cursor: 'Free cursor (release mouse)',
   commandScan: 'Order: scan', commandGo: 'Order: go / hold', commandAttack: 'Order: attack',
   command: 'Command board (hold or toggle)', ping: 'Ping marker', radial: 'Order radial',

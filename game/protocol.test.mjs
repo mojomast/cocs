@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {MESSAGE,PROTOCOL_VERSION,SNAPSHOT_DELTA_VERSION,validPlayerId,validProgressToken,sanitizeText,parseInputEnvelope,snapshotDelta,applySnapshotDelta,wireSize,BandwidthMeter} from './protocol.mjs';
+import {controlsFromState} from './input.mjs';
 
 test('message types expose the canonical wire vocabulary',()=>{
  for(const type of [MESSAGE.JOIN,MESSAGE.CREATE,MESSAGE.LIST,MESSAGE.HISTORY,MESSAGE.HOST,MESSAGE.GEAR,MESSAGE.START,MESSAGE.INPUT,MESSAGE.CHAT,MESSAGE.LEAVE,MESSAGE.PING,MESSAGE.PONG,MESSAGE.WELCOME,MESSAGE.LOBBY,MESSAGE.ROOMS,MESSAGE.SNAPSHOT,MESSAGE.EVENTS,MESSAGE.RESULTS,MESSAGE.PROGRESSION,MESSAGE.ERROR,MESSAGE.VOICE_STATE,MESSAGE.VOICE_SIGNAL,MESSAGE.VOICE_CONFIG])assert.equal(typeof type,'string');
@@ -41,7 +42,7 @@ test('sanitizeText strips control characters, trims and truncates names and chat
 });
 
 test('parseInputEnvelope validates and clamps the nested wire envelope',()=>{
- const input=parseInputEnvelope({input:{x:5,z:-9,fire:true,yaw:1,pitch:5,weapon:2,sprint:true,crouch:false,mobility:true},seq:7});
+ const input=parseInputEnvelope({input:{x:5,z:-9,fire:true,yaw:1,pitch:5,weapon:2,sprint:true,crouch:false,mobility:true,altFire:true},seq:7});
  assert.equal(input.seq,7);
  assert.equal(input.x,1);
  assert.equal(input.z,-1);
@@ -52,10 +53,11 @@ test('parseInputEnvelope validates and clamps the nested wire envelope',()=>{
  assert.equal(input.sprint,true);
  assert.equal(input.crouch,false);
  assert.equal(input.mobility,true,'the held mobility bind is validated as a boolean');
+ assert.equal(input.altFire,true,'the held alt-fire bind is validated as a boolean');
 });
 
 test('parseInputEnvelope accepts the flattened ext payload used by the room',()=>{
- const input=parseInputEnvelope({x:Infinity,z:2,yaw:Infinity,pitch:NaN,weapon:2.5,jump:true,mobility:true});
+ const input=parseInputEnvelope({x:Infinity,z:2,yaw:Infinity,pitch:NaN,weapon:2.5,jump:true,mobility:true,altFire:true});
  assert.equal(input.seq,null);
  assert.equal(input.x,0);
  assert.equal(input.z,1);
@@ -64,6 +66,7 @@ test('parseInputEnvelope accepts the flattened ext payload used by the room',()=
  assert.equal(input.weapon,undefined);
  assert.equal(input.jump,true);
  assert.equal(input.mobility,true);
+ assert.equal(input.altFire,true);
 });
 
 test('parseInputEnvelope prefers the envelope sequence over the inner one',()=>{
@@ -84,7 +87,23 @@ test('parseInputEnvelope tolerates malformed frames with safe defaults',()=>{
   assert.equal(input.power,false);
   assert.equal(input.reload,false);
   assert.equal(input.mobility,false);
+  assert.equal(input.altFire,false);
  }
+});
+
+test('parseInputEnvelope accepts a held altFire and ignores junk values',()=>{
+ assert.equal(parseInputEnvelope({input:{x:0,z:0,altFire:true},seq:2}).altFire,true);
+ for(const junk of [1,0,'true','yes',{},[],null,undefined]){
+  assert.equal(parseInputEnvelope({input:{x:0,z:0,altFire:junk}}).altFire,false,`${String(junk)} is not a held alt-fire`);
+ }
+ assert.equal(parseInputEnvelope({}).altFire,false,'a missing field is a release');
+});
+
+test('the parsed altFire field round-trips through controlsFromState',()=>{
+ const held=parseInputEnvelope({input:{x:0,z:0,altFire:true}});
+ assert.equal(controlsFromState(held).altFire,true,'a parsed hold reaches the controls object');
+ const released=parseInputEnvelope({input:{x:0,z:0,altFire:false}});
+ assert.equal(controlsFromState(released).altFire,undefined,'a parsed release never sets the held control');
 });
 
 test('snapshotDelta round-trips through applySnapshotDelta and marks deletions', () => {

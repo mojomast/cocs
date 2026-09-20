@@ -20,15 +20,15 @@ const EXPECTED_BUFF = {openclaw: null, hermes: 'speed', opencode: 'fireRate', cl
 const EXPECTED_HOOK = {openclaw: 'landing-control', hermes: 'economy', opencode: 'usage', claudecode: 'landing-self', codex: 'landing-self', cline: 'chaining', roo: 'landing-control'};
 const EXPECTED_LIFT = {'air-dash': false, 'double-jump': true, 'super-jump': true, 'hover-jets': true, 'brace-slam': true, 'safety-glide': false, grapple: true, 'blink-step': true, 'deployable-rope': true};
 const EXPECTED_BUDGETS = {
-  'air-dash': {charges: 1, distance: 5.5, cooldown: 2.5, windup: 0, landing: .15},
-  'double-jump': {charges: 1, impulse: 7.4, cooldown: 0, windup: 0, landing: 0},
-  'super-jump': {charges: 1, impulse: 12.5, windup: .55, cooldown: 6, landing: .25},
-  'hover-jets': {fuel: 2.5, fuelRecharge: 1.8, climb: .35, descent: 2.2, windup: 0, landing: .2},
-  'brace-slam': {windup: .15, radius: 4, knockback: 9, cooldown: 8, landing: null},
-  'safety-glide': {fuel: null, descent: 2, steer: 4, windup: 0, landing: 0},
-  grapple: {distance: 14, reel: 12, cooldown: 7, missCooldown: 3, windup: 0, landing: 0},
-  'blink-step': {distance: 6, windup: .3, cooldown: 6, landing: 0},
-  'deployable-rope': {charges: 1, anchorLife: 20, cooldown: 12, windup: 0, landing: 0},
+  'air-dash': {charges: 1, distance: 6, cooldown: 2.2, windup: 0, landing: .15},
+  'double-jump': {charges: 1, impulse: 7.8, cooldown: 0, windup: 0, landing: 0},
+  'super-jump': {charges: 1, impulse: 12.5, windup: .45, cooldown: 5, landing: .25},
+  'hover-jets': {fuel: 3, fuelRecharge: 1.6, climb: .35, descent: 2.2, windup: 0, landing: .2},
+  'brace-slam': {windup: .12, radius: 4.5, knockback: 10, cooldown: 7, landing: null},
+  'safety-glide': {fuel: null, descent: 1.7, steer: 4.5, windup: 0, landing: 0},
+  grapple: {distance: 14, reel: 12, cooldown: 6, missCooldown: 2.5, windup: 0, landing: 0},
+  'blink-step': {distance: 6, windup: .25, cooldown: 5, landing: 0},
+  'deployable-rope': {charges: 1, anchorLife: 20, cooldown: 10, windup: 0, landing: 0},
 };
 
 test('three wings, nine kits, seven specs and nine movement verbs, all uniquely identified', () => {

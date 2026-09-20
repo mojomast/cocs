@@ -5,7 +5,8 @@ import type {ScreenProps} from '../contract';
 import {Shield,Crosshair,Move} from 'lucide-react';
 import {SinglePlayerHud} from '../../game-ui/singleplayer-hud';
 import {SightReticle} from './SightReticle';
-import {abilityRing,movementHud} from '../../../game/hud-class.mjs';
+import {abilityRing,movementHud,verbMeters} from '../../../game/hud-class.mjs';
+import {altModeLabel} from '../../../game/alt-fire.mjs';
 import {MOVEMENT_VERBS} from '../../../game/kits.mjs';
 import {harnessAbility} from '../../../game/harness-profiles.mjs';
 import {wingChip} from '../../../game/class-ui.mjs';
@@ -129,6 +130,7 @@ function CocsReadout({command,teamName,player,reducedMotion}:{command:any;teamNa
 export function PlayingHud({ui}:ScreenProps){
  const {hud,player,display,brief,phase,hudRoute,hudMap,hudMode,isTeamMode,teamName,modeGoal,ladderStatus,flagText,armsrace,WEAPONS,activePower,powerIcon,radar,radarCols,radarBlip,marker,reloadFill,reloading,posture,killNotice,suddenBanner,startBanner,scoreCue,damageIndicator,damageNumberStyle,reducedMotion,vehiclePrompt,vehicle,ammoEmpty,ammoLow,hideHud,touchControls,pointerHint,requestLock,chatOpen,isSingle,single,selectHordeUpgrade,resumeSingleplayer,spectatorTeams,CAMERA_MODE_LABELS,runtime,changeMode,grenadeStatus,streakStatus,killFeedWeapon,voiceState,voiceHint,escapeHint,clock,teamScoreText,ammoText,weaponTag,cocsCommand,cursor}=ui;
  const assistiveRef=useRef<any>(null);
+ const assistiveTextRef=useRef('');
  const [assistiveCue,setAssistiveCue]=useState<any>(null);
  // WP2.2: one prioritized, event-gated channel for the beats that must reach
  // assistive tech. Every readout around it is a non-live group; the ref-held
@@ -149,7 +151,15 @@ export function PlayingHud({ui}:ScreenProps){
   assistiveRef.current=assistiveRef.current??createAssistiveChannel();
   const step=assistiveChannelStep(assistiveRef.current,assistiveView,Number(hud?.time)||0);
   assistiveRef.current=step.state;
-  setAssistiveCue((previous:any)=>assistiveCueText(previous)===assistiveCueText(step.cue)?previous:step.cue);
+  // Only touch React state when the rendered text actually changes. Calling the
+  // setter every snapshot would still be a no-op value-wise, but a functional
+  // updater can miss React's eager bailout while other lanes are pending, which
+  // schedules a no-op update on every commit and trips the nested-passive limit.
+  const nextText=assistiveCueText(step.cue);
+  if(nextText!==assistiveTextRef.current){
+   assistiveTextRef.current=nextText;
+   setAssistiveCue(step.cue);
+  }
  });
  if(!hud||!player)return null;
  // Movement labels for the free-cam and pointer hints follow the same
@@ -168,6 +178,15 @@ export function PlayingHud({ui}:ScreenProps){
  const healthRatio=Math.max(0,Math.min(1,(Number(player.health)||0)/(player.maxHealth??100)));
  const armorRatio=Math.max(0,Math.min(1,(Number(player.armor)||0)/100));
  const ring=abilityRing(player,harnessAbility(player.harness)||activePower,hud.config||{},{over:hud.over===true});
+ // Operator signature-verb readings (Heat, Deep Compute, Braced, Review,
+ // Adaptive, Trails, Tool Use) so the always-on class passive is visible while
+ // playing. Pure and snapshot-only; an inert/unknown verb renders no row.
+ const verbs=verbMeters(player);
+ // Alt-fire identity: the held mode label when `player.alt` is true (the sim's
+ // Match.altFire state), otherwise the normal fire-mode tag. The hint follows
+ // the live binding; middle mouse is a fixed second path.
+ const altMode=player.alt===true?altModeLabel(player.weapon):'';
+ const altFireKey=bindingLabel(ui.bindings?.altFire??DEFAULT_BINDINGS.altFire).toUpperCase();
  const abilityDisabled=ring.disabled;
  const abilityActive=ring.active;
  const abilityRatio=ring.ratio;
@@ -246,7 +265,10 @@ export function PlayingHud({ui}:ScreenProps){
     <span className="objective-tags"><span className="chip chip--accent">{brief.detail}</span>{hud.captureNotice?<span className="chip chip--warn">{hud.captureNotice}</span>:(isTeamMode(hudMode)||hudMode?.id==='armsrace')&&<span className="chip">{brief.status}</span>}</span>
    </div>}
    <div className="hud-corner hud-corner--right">
-    {!hud.spectate&&player.health>0&&(vehicle?<div className={`stat-card stat-card--ammo${vehicle.overheated?' is-empty':''}`}><span className="stat-label">PUMA</span><strong className="stat-value">{Math.ceil(vehicle.health)}</strong><span className="stat-note">{Math.round(Math.max(0,Math.min(1,vehicle.heat))*100)}% HEAT{vehicle.overheated?' · OVERHEATED':''}</span></div>:<div className={`stat-card stat-card--ammo${ammoEmpty?' is-empty':''}`}><span className="stat-label">{weapon?.name||'WEAPON'}{weapon&&weaponTag(weapon)&&<b className="weapon-tag">{weaponTag(weapon)}</b>}</span><strong className="stat-value">{ammoText(ammoCount)}</strong><span className="stat-bar"><i style={{width:`${ammoRatio*100}%`}}/></span></div>)}
+    {!hud.spectate&&player.health>0&&<div className="ammo-stack">
+     {verbs.length>0&&<div className="verb-meters" role="group" aria-label={`Operator verb: ${verbs.map((meter:any)=>meter.passive?`${meter.label} passive`:`${meter.label} ${meter.text}`).join(', ')}`}>{verbs.map((meter:any)=>meter.passive?<span key={meter.id} className="verb-meter verb-meter--passive" aria-hidden="true">{meter.label}</span>:<span key={meter.id} className="verb-meter" aria-hidden="true"><span className="verb-meter__label">{meter.label}</span><span className="verb-meter__track"><i style={{width:`${Math.round(meter.value*100)}%`}}/></span><span className="verb-meter__text">{meter.text}</span></span>)}</div>}
+     {vehicle?<div className={`stat-card stat-card--ammo${vehicle.overheated?' is-empty':''}`}><span className="stat-label">PUMA</span><strong className="stat-value">{Math.ceil(vehicle.health)}</strong><span className="stat-note">{Math.round(Math.max(0,Math.min(1,vehicle.heat))*100)}% HEAT{vehicle.overheated?' · OVERHEATED':''}</span></div>:<div className={`stat-card stat-card--ammo${ammoEmpty?' is-empty':''}`}><span className="stat-label"><span className="weapon-name">{weapon?.name||'WEAPON'}</span>{weapon&&(altMode?<b className="weapon-tag weapon-tag--alt">{altMode}</b>:weaponTag(weapon)&&<b className="weapon-tag">{weaponTag(weapon)}</b>)}</span><strong className="stat-value">{ammoText(ammoCount)}</strong><span className="stat-bar"><i style={{width:`${ammoRatio*100}%`}}/></span><span className="weapon-alt-row"><kbd className="weapon-alt-hint" title="Alt fire (middle mouse also works)" aria-label={`Alt fire: ${altFireKey} or middle mouse`}>ALT {altFireKey}</kbd></span></div>}
+    </div>}
     {!hud.spectate&&<div className={`ability-card${abilityActive?' is-active':''}${abilityReady?' is-ready':''}${abilityDisabled?' is-disabled':''}`} role="group" aria-label={`Ability ${abilityReady?'ready':abilityDisabled?'unavailable':`recharging ${formatCountdown(player.cooldown)} seconds`}`}>
      <span className="ability-ring" style={{'--fill':`${abilityRatio}turn`} as any}>{powerIcon(player.harness,22)}</span>
      <span className="stat-label">{activePower?.power||'ABILITY'}</span>

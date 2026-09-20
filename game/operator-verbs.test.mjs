@@ -187,7 +187,7 @@ test('nothing applies unless the verb is active', () => {
 test('Mistral Effortless: stronger air control, longer slides, forgiving hop timing (movement only)', () => {
   const state = createOperatorVerbState('mistral');
   const air = EFFORTLESS.airControl(state);
-  close(air.airAccelMultiplier, 1.35);
+  close(air.airAccelMultiplier, 1.4);
   close(air.airCapMultiplier, 1.2);
   assert.ok(air.airAccelMultiplier > 1 && air.airCapMultiplier > 1);
   const slide = EFFORTLESS.slide(state);
@@ -197,9 +197,9 @@ test('Mistral Effortless: stronger air control, longer slides, forgiving hop tim
   assert.ok(slide.boostMultiplier > 1 && slide.frictionMultiplier < 1);
   close(.35 + slide.minSecondsBonus, .47, 1e-12);
   const hop = EFFORTLESS.hopWindow(state);
-  close(hop.jumpBufferBonus, .04);
+  close(hop.jumpBufferBonus, .05);
   close(hop.coyoteBonus, .03);
-  close(.12 + hop.jumpBufferBonus, .16);
+  close(.12 + hop.jumpBufferBonus, .17);
   close(.1 + hop.coyoteBonus, .13);
   // Movement identity only: no damage/resistance/fire-rate keys, no top-speed multiplier.
   for (const key of Object.keys(OPERATOR_VERBS.effortless.numbers)) {
@@ -227,20 +227,21 @@ test('Gemini Revision: the two-primary band comes from the kit and skips holster
   close(REVISION.swapSeconds(state, {}), .45, 'unknown endpoints keep the base');
 });
 
-test('Grok Heat: +12% cap, six-hit build, decay 1.5 s after the last hit, death reset', () => {
+test('Grok Heat: +16% cap, five-hit build, decay 1.5 s after the last hit, death reset', () => {
   const state = createOperatorVerbState('grok');
   assert.equal(HEAT.fireRateMultiplier(state), 1);
-  for (let hit = 0; hit < 6; hit++) HEAT.onHitLanded(state);
-  close(HEAT.heat(state), .12, 1e-12);
-  close(HEAT.fireRateMultiplier(state), 1.12, 1e-12);
-  close(HEAT.glow(state), 1);
+  for (let hit = 0; hit < 5; hit++) HEAT.onHitLanded(state);
+  close(HEAT.heat(state), .125, 1e-12);
+  close(HEAT.fireRateMultiplier(state), 1.125, 1e-12);
   for (let hit = 0; hit < 20; hit++) HEAT.onHitLanded(state);
-  close(HEAT.heat(state), .12, 1e-12, 'the cap holds');
+  close(HEAT.heat(state), .16, 1e-12, 'the cap holds');
+  close(HEAT.fireRateMultiplier(state), 1.16, 1e-12);
+  close(HEAT.glow(state), 1);
   HEAT.step(state, 1.49);
-  close(HEAT.heat(state), .12, 1e-12, 'no decay before 1.5 s');
+  close(HEAT.heat(state), .16, 1e-12, 'no decay before 1.5 s');
   HEAT.step(state, .02);
-  assert.ok(HEAT.heat(state) < .12 && HEAT.heat(state) > .11, 'decay begins after the 1.5 s window');
-  HEAT.step(state, 1);
+  assert.ok(HEAT.heat(state) < .16 && HEAT.heat(state) > .15, 'decay begins after the 1.5 s window');
+  HEAT.step(state, 2);
   close(HEAT.heat(state), 0);
   close(HEAT.fireRateMultiplier(state), 1);
   HEAT.onHitLanded(state);
@@ -248,24 +249,24 @@ test('Grok Heat: +12% cap, six-hit build, decay 1.5 s after the last hit, death 
   close(HEAT.heat(state), 0);
   assert.equal(HEAT.fireRateMultiplier(state), 1);
   HEAT.onHitLanded(state, {amount: 3});
-  close(HEAT.heat(state), .06, 1e-12);
+  close(HEAT.heat(state), .075, 1e-12);
 });
 
 test('DeepSeek Deep Compute: build, decay, max-with-attachment and charge consumption', () => {
   const state = createOperatorVerbState('deepseek');
   assert.equal(DEEP_COMPUTE.charge(state), 0);
   close(DEEP_COMPUTE.multiplier(state), 1);
-  DEEP_COMPUTE.step(state, .6, {firing: true});
+  DEEP_COMPUTE.step(state, .5, {firing: true});
   close(DEEP_COMPUTE.charge(state), .5, 1e-12);
-  DEEP_COMPUTE.step(state, .6, {firing: true});
+  DEEP_COMPUTE.step(state, .5, {firing: true});
   close(DEEP_COMPUTE.charge(state), 1, 1e-12);
-  close(DEEP_COMPUTE.multiplier(state), 1.35, 1e-12);
-  close(DEEP_COMPUTE.multiplier(state, {attachmentCharge: 1.2}), 1.35, 1e-12);
-  close(DEEP_COMPUTE.multiplier(state, {attachmentCharge: 2.2}), 2.2, 1e-12, 'max with attachment, never 1.35 * 2.2');
+  close(DEEP_COMPUTE.multiplier(state), 1.4, 1e-12);
+  close(DEEP_COMPUTE.multiplier(state, {attachmentCharge: 1.2}), 1.4, 1e-12);
+  close(DEEP_COMPUTE.multiplier(state, {attachmentCharge: 2.2}), 2.2, 1e-12, 'max with attachment, never 1.4 * 2.2');
   const shot = DEEP_COMPUTE.onShot(state, {baseDamage: 20, attachmentCharge: 1, targetHealth: 120});
-  close(shot.damage, 27, 1e-12);
-  close(shot.multiplier, 1.35, 1e-12);
-  close(shot.bonus, 7, 1e-12);
+  close(shot.damage, 28, 1e-12);
+  close(shot.multiplier, 1.4, 1e-12);
+  close(shot.bonus, 8, 1e-12);
   close(shot.charge, 1, 1e-12);
   assert.equal(shot.capped, false);
   close(DEEP_COMPUTE.charge(state), 0, 1e-12, 'the shot consumes the charge');
@@ -290,7 +291,7 @@ test('DeepSeek Deep Compute: build, decay, max-with-attachment and charge consum
 
 test('Deep Compute clamp: the max multiplier can never one-shot a full-health target (swept proof)', () => {
   const state = createOperatorVerbState('deepseek');
-  assert.equal(OPERATOR_VERBS['deep-compute'].numbers.maxBonusMultiplier, .35);
+  assert.equal(OPERATOR_VERBS['deep-compute'].numbers.maxBonusMultiplier, .4);
   assert.equal(SINGLE_HIT_CAP, 90);
   assert.equal(ONE_SHOT_HEALTH_FRACTION, .9);
   // Direct-hit ceiling helper (roster-wide, independent of the verb state).
@@ -340,7 +341,7 @@ test('Meta Braced: spawn-armor regen out of combat and crouch halving knockback'
   BRACED.step(state, 1.49);
   close(BRACED.armorRegen(state, .5, {spawnArmor: 20, currentArmor: 0}), 0);
   BRACED.step(state, .02);
-  close(BRACED.armorRegen(state, .5, {spawnArmor: 20, currentArmor: 0}), 2.5, 1e-12, 'regen resumes 1.5 s after damage');
+  close(BRACED.armorRegen(state, .5, {spawnArmor: 20, currentArmor: 0}), 3, 1e-12, 'regen resumes 1.5 s after damage');
   assert.equal(BRACED.regenActive(state, {spawnArmor: 20, currentArmor: 0}), true);
   close(BRACED.knockbackMultiplier(state, {crouching: true}), .5);
   close(BRACED.knockbackMultiplier(state, {crouching: true, firing: false}), .5);
@@ -348,7 +349,7 @@ test('Meta Braced: spawn-armor regen out of combat and crouch halving knockback'
   close(BRACED.knockbackMultiplier(state, {crouching: false, firing: true}), 1);
 });
 
-test('Claude Alignment Review: 1.5 s hold builds a 35 HP / 2.5 s absorb pool, no stacking', () => {
+test('Claude Alignment Review: 1.5 s hold builds a 45 HP / 3 s absorb pool, no stacking', () => {
   const state = createOperatorVerbState('claude');
   ALIGNMENT_REVIEW.step(state, 1, {grounded: false});
   close(ALIGNMENT_REVIEW.meter(state), 0, 1e-12, 'airborne does not build');
@@ -359,27 +360,27 @@ test('Claude Alignment Review: 1.5 s hold builds a 35 HP / 2.5 s absorb pool, no
   ALIGNMENT_REVIEW.step(state, 1.49, {});
   assert.ok(ALIGNMENT_REVIEW.meter(state) < 1 && ALIGNMENT_REVIEW.absorbPool(state) === 0);
   ALIGNMENT_REVIEW.step(state, .01, {});
-  close(ALIGNMENT_REVIEW.absorbPool(state), 35, 1e-12, 'the pool is ~35 HP');
-  close(ALIGNMENT_REVIEW.status(state).poolIn, 2.5, 1e-12, 'the pool lasts 2.5 s');
+  close(ALIGNMENT_REVIEW.absorbPool(state), 45, 1e-12, 'the pool is ~45 HP');
+  close(ALIGNMENT_REVIEW.status(state).poolIn, 3, 1e-12, 'the pool lasts 3 s');
   assert.equal(ALIGNMENT_REVIEW.absorbActive(state), true);
   ALIGNMENT_REVIEW.step(state, 1, {});
   close(ALIGNMENT_REVIEW.meter(state), 0, 1e-12, 'the pool blocks recharge, so it never stacks');
-  close(ALIGNMENT_REVIEW.absorbPool(state), 35, 1e-12);
-  ALIGNMENT_REVIEW.step(state, 1.49, {});
-  close(ALIGNMENT_REVIEW.absorbPool(state), 35, 1e-12);
+  close(ALIGNMENT_REVIEW.absorbPool(state), 45, 1e-12);
+  ALIGNMENT_REVIEW.step(state, 1.99, {});
+  close(ALIGNMENT_REVIEW.absorbPool(state), 45, 1e-12);
   ALIGNMENT_REVIEW.step(state, .02, {});
-  assert.equal(ALIGNMENT_REVIEW.absorbActive(state), false, 'the pool expires after 2.5 s');
+  assert.equal(ALIGNMENT_REVIEW.absorbActive(state), false, 'the pool expires after 3 s');
   close(ALIGNMENT_REVIEW.absorbPool(state), 0);
   // Absorb consumes before armor/health and reports the remainder.
   ALIGNMENT_REVIEW.step(state, 3, {});
   const first = ALIGNMENT_REVIEW.absorb(state, 20);
   close(first.absorbed, 20);
   close(first.remaining, 0);
-  close(first.pool, 15);
+  close(first.pool, 25);
   assert.equal(first.broke, false);
   const second = ALIGNMENT_REVIEW.absorb(state, 30);
-  close(second.absorbed, 15);
-  close(second.remaining, 15);
+  close(second.absorbed, 25);
+  close(second.remaining, 5);
   close(second.pool, 0);
   assert.equal(second.broke, true);
   assert.equal(ALIGNMENT_REVIEW.absorbActive(state), false);
@@ -397,8 +398,8 @@ test('Claude Alignment Review: 1.5 s hold builds a 35 HP / 2.5 s absorb pool, no
   // One huge dt still grants exactly one capped pool.
   const burst = createOperatorVerbState('claude');
   ALIGNMENT_REVIEW.step(burst, 100, {});
-  close(ALIGNMENT_REVIEW.absorbPool(burst), 35, 1e-12);
-  close(ALIGNMENT_REVIEW.status(burst).poolIn, 2.5, 1e-12);
+  close(ALIGNMENT_REVIEW.absorbPool(burst), 45, 1e-12);
+  close(ALIGNMENT_REVIEW.status(burst).poolIn, 3, 1e-12);
 });
 
 test('ChatGPT Adaptive: half holster time and a bounded first-magazine handling window', () => {
@@ -409,7 +410,7 @@ test('ChatGPT Adaptive: half holster time and a bounded first-magazine handling 
   assert.equal(ADAPTIVE.windowActive(state), false);
   ADAPTIVE.onSwap(state, {magazine: 10});
   assert.equal(ADAPTIVE.windowActive(state), true);
-  assert.deepEqual(ADAPTIVE.handling(state), {interval: .94, spread: .95});
+  assert.deepEqual(ADAPTIVE.handling(state), {interval: .93, spread: .94});
   for (let shot = 0; shot < 9; shot++) ADAPTIVE.onShot(state);
   assert.equal(ADAPTIVE.windowActive(state), true, 'nine of ten rounds still count as the first magazine');
   ADAPTIVE.onShot(state);
@@ -445,7 +446,7 @@ test('Kimi Long Context: 1.5 s trail TTL, one per enemy per 3 s, cloak suppressi
   assert.equal(LONG_CONTEXT.record(state, {enemyId: 1, x: 0, z: 0}), null, 'the 3 s cadence outlives the trail');
   LONG_CONTEXT.step(state, .02);
   assert.ok(LONG_CONTEXT.record(state, {enemyId: 1, x: 0, z: 0}), 'the cadence reopens at 3 s');
-  close(LONG_CONTEXT.rangeMultiplier(state), 1.08);
+  close(LONG_CONTEXT.rangeMultiplier(state), 1.10);
   assert.ok(LONG_CONTEXT.rangeMultiplier(state) <= 1.1, 'the band stays slight');
 });
 
@@ -458,11 +459,11 @@ test('Qwen Tool Use: 1.35x capped interactions, pickup reload + handling, reach 
   assert.equal(TOOL_USE.interactionMultiplier(state, {kind: 'unknown'}), 1);
   const pickup = TOOL_USE.onPickup(state, {magazine: 10, ammo: 2, cap: 30});
   assert.deepEqual(pickup, {reload: 6, active: true});
-  assert.deepEqual(TOOL_USE.handling(state), {interval: .9, spread: .92});
-  TOOL_USE.step(state, 2.99);
+  assert.deepEqual(TOOL_USE.handling(state), {interval: .88, spread: .92});
+  TOOL_USE.step(state, 3.49);
   assert.equal(TOOL_USE.windowActive(state), true);
   TOOL_USE.step(state, .02);
-  assert.equal(TOOL_USE.windowActive(state), false, '3 s handling window');
+  assert.equal(TOOL_USE.windowActive(state), false, '3.5 s handling window');
   assert.deepEqual(TOOL_USE.handling(state), {interval: 1, spread: 1});
   assert.equal(TOOL_USE.onPickup(state, {magazine: 10, ammo: 28, cap: 30}).reload, 2, 'bounded by the missing ammo');
   assert.equal(TOOL_USE.onPickup(state, {magazine: Infinity, ammo: Infinity, cap: Infinity}).reload, 0, 'no partial reload into an infinite magazine');
@@ -483,7 +484,10 @@ test('§4.7 bounded stacking: caps hold and no verb adds a top-speed multiplier'
   }
   const grok = createOperatorVerbState('grok');
   for (let hit = 0; hit < 50; hit++) HEAT.onHitLanded(grok);
-  assert.ok(HEAT.fireRateMultiplier(grok) <= 1.12 + 1e-12);
+  assert.ok(HEAT.fireRateMultiplier(grok) <= 1.16 + 1e-12);
+  // §4.7's fire-rate axis cap is the /2.2 effective-interval floor: Heat alone
+  // stays far under it, and only the meter's own ceiling moved.
+  assert.ok(1 / HEAT.fireRateMultiplier(grok) >= 1 / 2.2, 'Heat stays inside the §4.7 rate cap');
   const qwen = createOperatorVerbState('qwen');
   assert.ok(TOOL_USE.interactionMultiplier(qwen) <= 1.35);
   TOOL_USE.onPickup(qwen, {magazine: 10, ammo: 0, cap: 30});
@@ -496,8 +500,8 @@ test('§4.7 bounded stacking: caps hold and no verb adds a top-speed multiplier'
   for (const trail of LONG_CONTEXT.trails(kimi)) assert.ok(trail.ttl <= 1.5);
   const claude = createOperatorVerbState('claude');
   ALIGNMENT_REVIEW.step(claude, 100, {});
-  assert.ok(ALIGNMENT_REVIEW.absorbPool(claude) <= 35);
-  assert.ok(ALIGNMENT_REVIEW.status(claude).poolIn <= 2.5);
+  assert.ok(ALIGNMENT_REVIEW.absorbPool(claude) <= 45);
+  assert.ok(ALIGNMENT_REVIEW.status(claude).poolIn <= 3);
   const deepseek = createOperatorVerbState('deepseek');
   DEEP_COMPUTE.step(deepseek, 100, {firing: true});
   DEEP_COMPUTE.step(deepseek, 0, {firing: true});

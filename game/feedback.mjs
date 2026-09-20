@@ -270,22 +270,33 @@ const OBJECTIVE_CUES=Object.freeze({
 });
 const objectiveCue=type=>OBJECTIVE_CUES[type]||(typeof type==='string'&&type.startsWith('zone')?OBJECTIVE_CUES.zone:OBJECTIVE_CUES.default);
 
+// Optional short second layer for a `power` activation: a quiet tail/impact so
+// the harness reads as a bigger moment. It plays inside the motif's single
+// `_play` token and is deliberately bounded well under the motif's own level.
+const motifTail=(freq,gain,{end=freq*.5,type='sine',delay=.06,duration=.18,noise=0,noiseSweep=0,noiseGain=.03}={})=>Object.freeze({freq,end,gain,type,delay,duration,noise,noiseSweep:noiseSweep||Math.max(60,noise*.4),noiseGain});
+// A motif plus its activation tail. Notes/step/length/gain/shimmer keep the
+// exact per-harness values; only the new tail layer is added.
+const activation=(notes,step,length,gain,tail,shimmer=false)=>Object.freeze({notes:Object.freeze(notes),step,length,gain,shimmer,tail});
+
 // Per-harness activation motifs (§6.3). The `power` event already carries the
 // harness id, so an activation reads as the spec that fired instead of one
 // generic power blip. One motif is still one `_play` voice.
-const POWER_CUES=Object.freeze({
- openclaw:objective([0,-3,0],.06,.22,.09),
- hermes:objective([0,5,12],.05,.18,.08),
- opencode:objective([0,4,7,12],.04,.16,.075),
- claudecode:objective([0,-5],.08,.26,.08),
- codex:objective([0,7,12],.06,.24,.085),
- cline:objective([12,5,0],.04,.14,.075),
- roo:objective([0,-1,-5],.07,.24,.08,true),
+export const POWER_CUES=Object.freeze({
+ openclaw:activation([0,-3,0],.06,.22,.09,motifTail(170,.05,{end:88,type:'triangle',delay:.08,noise:420,noiseGain:.03})),
+ hermes:activation([0,5,12],.05,.18,.08,motifTail(560,.045,{end:940,type:'sine',delay:.05,noise:1900,noiseGain:.026})),
+ opencode:activation([0,4,7,12],.04,.16,.075,motifTail(1320,.04,{end:880,type:'square',delay:.06,duration:.14,noise:2400,noiseGain:.022})),
+ claudecode:activation([0,-5],.08,.26,.08,motifTail(112,.055,{end:70,type:'triangle',delay:.09,noise:300,noiseGain:.032})),
+ codex:activation([0,7,12],.06,.24,.085,motifTail(1560,.045,{end:1040,type:'triangle',delay:.07,noise:3200,noiseGain:.024})),
+ cline:activation([12,5,0],.04,.14,.075,motifTail(880,.04,{end:660,type:'square',delay:.05,duration:.13,noise:1400,noiseGain:.028})),
+ roo:activation([0,-1,-5],.07,.24,.08,motifTail(240,.05,{end:120,type:'sawtooth',delay:.08,noise:700,noiseGain:.032}),true),
 });
 
 // The movement module's shared event vocabulary (§3.6). Movement foley is
 // local-only: these are the verbs the local player is driving, not world beats.
 const MOVEMENT_EVENTS=new Set(['move-start','move-end','move-miss','move-blocked','windup-start','windup-end','windup-interrupt','charge-start','charge-release','charge-cancel','slam-launch','slam-impact','grapple-hook','grapple-release','rope-place','rope-miss','rope-expire','fuel-empty','no-lift','chain-cancel','landing-recovery']);
+// Verb ids the per-verb foley layer can identify. An event without one of these
+// (or without a verb field at all) keeps the generic per-type fallback voice.
+const MOVEMENT_VERBS=new Set(['air-dash','double-jump','super-jump','hover-jets','brace-slam','safety-glide','grapple','blink-step','deployable-rope']);
 
 // Match-beat motifs keyed by mode event type, in semitones from the mode root.
 // These cover objective ticks, wave/boss beats and lifetime events that used to
@@ -369,6 +380,39 @@ export function deathSoundFor(e){
  }
  return null;
 }
+// ---- Alt-fire voices -------------------------------------------------------
+//
+// Ten alt-fire weapon voices keyed by the ids `game/alt-fire.mjs` stamps on the
+// event (`altId`, mirrored by each spec's `sound` field). The indexed list below
+// matches ALT_FIRE's weapon order; feedback.test.mjs pins the two tables to each
+// other so they cannot drift. Each voice replaces the normal report in a single
+// short (≤.4 s) `_play` token, with pitch/level micro-variation taken only from
+// the event seed so identical events synthesize identically.
+export const ALT_VOICE_IDS=Object.freeze(['salvo','cluster','overload','slug','mortar','mine','chain','bomb','double','twin']);
+const ALT_VOICE_SET=new Set(ALT_VOICE_IDS);
+const ALT_VOICE_DURATIONS=Object.freeze({salvo:.3,cluster:.4,overload:.4,slug:.34,mortar:.36,mine:.32,chain:.3,bomb:.34,double:.32,twin:.3});
+
+// Resolve the alt voice an event should use. `alt` gates the alt path; a known
+// `altId` wins, then the weapon index (`ALT_VOICE_IDS[weapon]`, ALT_FIRE's
+// order). Anything missing or unknown resolves to null, so the caller can fall
+// back to the normal report instead of guessing a voice.
+export function altVoiceFor(e){
+ if(!e||typeof e!=='object')return null;
+ if(e.alt!==true&&e.alt!==1)return null;
+ const id=typeof e.altId==='string'?e.altId:null;
+ if(id&&ALT_VOICE_SET.has(id))return id;
+ const weapon=Number.isInteger(e.weapon)?e.weapon:-1;
+ const fallback=weapon>=0&&weapon<ALT_VOICE_IDS.length?ALT_VOICE_IDS[weapon]:null;
+ return fallback&&ALT_VOICE_SET.has(fallback)?fallback:null;
+}
+
+// Deterministic per-voice pitch/level, driven only by the event seed and bounded
+// tight enough that no alt voice can drift loud or off-family.
+function altVariation(seed){
+ const s=(Number(seed)||0)>>>0;
+ return Object.freeze({pitch:1+(mixUnit(s^0x9e3779b9)-.5)*.12,level:.94+mixUnit(s^0x85ebca6b)*.08});
+}
+
 export class SynthAudio{
  constructor({announcer=false}={}){this.ctx=null;this.muted=false;this.voices=new Set();this.noiseBuffer=null;this.master=null;this.lastDamage=null;this.lastReport=null;this.lastHit=-Infinity;this.footPhase=0;this.wasGrounded=undefined;this.lastVy=0;this.engine=null;this.zipLoop=null;this.bed=null;this.bedMood='default';this.ambientBed=true;this.stepVariant=0;this.landVariant=0;this.reloadVariant=0;this.intensity=0;this.bedScale=.75;this.musicEnabled=true;this.announcer=announcer===true;this.announced=new Set();this.lastCue=null;this.mode='default';this.theme=MODE_THEMES.default;this.soundtrack='default';this.reverbUrl=null;this.reverbWet=0.30;this.reverbLoaded=false;this.reverbSpace=null;this.lastSting=null;this.heartbeatTimer=0;this.reportSerial=0;this.space=null;this.surfaceResolver=null;this.windScale=null;this._reverbPending=false;this.jumpVariant=0;
   // Gain buses. `muteGain` sits between the master and the destination so a
@@ -378,6 +422,10 @@ export class SynthAudio{
   this.musicEngine=null;this.musicBus=null;this.effectsBus=null;this.ambienceBus=null;this.muteGain=null;
   this.volumes={master:.9,music:.7,effects:1,ambience:.8};
   this.status='off';this.scene='menu';this._announceAt=new Map();this._stingDuckTimer=null;
+  // Last held alt-fire state per actor, so an alt-state stream that repeats the
+  // current state cannot re-trigger the transform foley. Bounded like the
+  // announcer dedupe map; the sim only emits on flips, this is belt-and-braces.
+  this._altStates=new Map();
   // Optional Moth audio layer (game/moth-audio.mjs). Never created here; the
   // host opts in with setMothAudio() or registers a factory with
   // setMothAudioFactory() so the layer is built once a real AudioContext exists.
@@ -858,14 +906,138 @@ export class SynthAudio{
     else if(shape.layers==='tight')this._noise(t+.012,out,nodes,{duration:.03,gain:.35*vol,type:'highpass',freq:1400,sweep:600});
     else if(shape.layers==='supersonic')this._noise(t+.02,out,nodes,{duration:.05,gain:.2*vol,type:'highpass',freq:2600,sweep:900});
     if(tail>.04)this._noise(t+.03,out,nodes,{duration:.08+.22*tail,gain:.12*vol*tail,type:'bandpass',freq:shape.tailFreq*bright,sweep:shape.tailFreq*.4,q:.55,attack:.02});
-    // Surface-aware impact/ricochet at the endpoint when the shot hit geometry.
-    // A truthy `hit` is an actor and is already confirmed by the damage event.
-    if((e.hit==null||e.hit===false)&&e.to&&Number.isFinite(e.to.x)&&player){
-     const dist=Math.hypot((e.to.x||0)-(player.x||0),(e.to.z||0)-(player.z||0));
-     const iv=(local?Math.max(0,.5*(1-dist/26)):Math.max(0,1-dist/30)*.8)*vol;
-     if(iv>.02)this._impact(t+.012,out,nodes,{vol:iv,surface:e.surface??e.material,ricochet:dist>12});
-    }
+    this._shotImpact(t,out,nodes,e,local,player,vol);
    },{send:(.2+.3*Math.min(1,tail))*vol});
+  }
+  // Surface-aware impact/ricochet at a shot's endpoint when it hit geometry. A
+  // truthy `hit` is an actor and is already confirmed by the damage event, so
+  // only misses add layers. Shared by the normal and alt reports.
+  _shotImpact(t,out,nodes,e,local,player,vol){
+   if((e.hit==null||e.hit===false)&&e.to&&Number.isFinite(e.to.x)&&player){
+    const dist=Math.hypot((e.to.x||0)-(player.x||0),(e.to.z||0)-(player.z||0));
+    const iv=(local?Math.max(0,.5*(1-dist/26)):Math.max(0,1-dist/30)*.8)*vol;
+    if(iv>.02)this._impact(t+.012,out,nodes,{vol:iv,surface:e.surface??e.material,ricochet:dist>12});
+   }
+  }
+  // Alt-fire report: one voice token that replaces the normal gunshot (never
+  // layered on top). The id resolves from the event first, then the weapon's alt
+  // spec; an unresolvable alt returns false so the caller keeps `_gunshot`.
+  // Routing, panning, falloff, the surface impact and the shared space send all
+  // follow the normal report's contract.
+  _altShot(e,local,pan,vol,player){
+   const altId=altVoiceFor(e);
+   if(!altId)return false;
+   const seed=eventSeed(e)||(this.reportSerial=(this.reportSerial+1)>>>0);
+   // Flak shrapnel reuses the alt `shot` shape at impact time (bomb spec): voice
+   // each shard as one quiet tick instead of replaying the launch report. The
+   // same-tick shards share `time`, so the report dedupe collapses them to one.
+   if(e.shrapnel!=null){
+    const shard=cl(vol,0,1),shardPitch=altVariation(seed).pitch;
+    this._play(.14,pan,(t,out,nodes)=>{
+     this._noise(t,out,nodes,{duration:.04,attack:.0008,gain:.2*shard,type:'highpass',freq:2600,sweep:900,q:.9});
+     this._tone(t,out,nodes,{freq:880*shardPitch,duration:.05,type:'triangle',gain:.055*shard,end:360});
+    },{send:.08*shard});
+    return true;
+   }
+   this._play(ALT_VOICE_DURATIONS[altId]??.34,pan,(t,out,nodes)=>{
+    this._altVoice(altId,t,out,nodes,{vol,seed});
+    this._shotImpact(t,out,nodes,e,local,player,vol);
+   },{send:.2*cl(vol,0,1)});
+   return true;
+  }
+  // The ten alt voices. Every branch is one bounded layer set inside the
+  // caller's single voice token, mixed at or below the matching normal report's
+  // level, with `p`/`g` seeded pitch and level. Never plays the generic report.
+  _altVoice(altId,t,out,nodes,{vol=1,seed=0}={}){
+   const v=altVariation(seed),g=cl(vol,0,1)*v.level,p=v.pitch;
+   if(altId==='salvo'){
+    // Three quick chirps fanned across the trigger pull.
+    for(let i=0;i<3;i++){
+     const at=t+i*.055,step=i*.5;
+     this._noise(at,out,nodes,{duration:.05,attack:.001,gain:.19*g,type:'bandpass',freq:(1650+step*340)*p,sweep:(2600+step*520)*p,q:1.2});
+     this._tone(at,out,nodes,{freq:(620+step*180)*p,duration:.055,type:'triangle',gain:.075*g,end:(950+step*260)*p});
+    }
+   }else if(altId==='cluster'){
+    // Deep thump then the bomblets splitting off in a short crackle.
+    this._noise(t,out,nodes,{duration:.3,attack:.004,gain:.46*g,type:'lowpass',freq:430*p,sweep:70,q:.8});
+    this._tone(t,out,nodes,{freq:76*p,duration:.34,type:'sine',gain:.22*g,end:30});
+    this._tone(t,out,nodes,{freq:50*p,duration:.36,type:'sine',gain:.11*g,end:22});
+    for(let i=0;i<3;i++)this._noise(t+.13+i*.085,out,nodes,{duration:.05,gain:.15*g,type:'bandpass',freq:(1850+i*520)*p,sweep:(680+i*210)*p,q:1.5});
+   }else if(altId==='overload'){
+    // A quick charge bite, a descending beam and a sizzle tail.
+    this._tone(t,out,nodes,{freq:380*p,duration:.07,type:'sawtooth',gain:.1*g,end:1180*p});
+    this._tone(t+.05,out,nodes,{freq:1500*p,duration:.24,type:'sawtooth',gain:.15*g,end:250});
+    this._tone(t+.05,out,nodes,{freq:2500*p,duration:.2,type:'triangle',gain:.08*g,end:420});
+    this._noise(t+.04,out,nodes,{duration:.22,gain:.22*g,type:'bandpass',freq:2400*p,sweep:620,q:1.1});
+    this._noise(t+.12,out,nodes,{duration:.2,gain:.13*g,type:'bandpass',freq:1700,sweep:5200,q:.9,attack:.02});
+   }else if(altId==='slug'){
+    // One dense, punchy report with a much shorter tail than the shotgun burst.
+    this._noise(t,out,nodes,{duration:.05,attack:.0007,gain:.52*g,type:'lowpass',freq:880*p,sweep:170,q:1});
+    this._noise(t+.004,out,nodes,{duration:.11,gain:.32*g,type:'lowpass',freq:520*p,sweep:110,q:.8});
+    this._tone(t,out,nodes,{freq:128*p,duration:.17,type:'square',gain:.18*g,end:52});
+    this._tone(t,out,nodes,{freq:62*p,duration:.26,type:'sine',gain:.22*g,end:28});
+   }else if(altId==='mortar'){
+    // Soft lob: a lazy two-step whistle over an airy whoosh.
+    this._tone(t,out,nodes,{freq:520*p,duration:.14,type:'sine',gain:.09*g,end:780});
+    this._tone(t+.09,out,nodes,{freq:780*p,duration:.16,type:'sine',gain:.065*g,end:560});
+    this._noise(t,out,nodes,{duration:.28,gain:.11*g,type:'bandpass',freq:560,sweep:1500,q:.7,attack:.03});
+    this._noise(t+.2,out,nodes,{duration:.1,gain:.06*g,type:'bandpass',freq:900,sweep:340,q:.8});
+   }else if(altId==='mine'){
+    // Quiet deploy chirp and two soft sensor ticks as it arms.
+    this._tone(t,out,nodes,{freq:660*p,duration:.09,type:'triangle',gain:.07*g,end:940*p});
+    this._noise(t,out,nodes,{duration:.06,gain:.07*g,type:'bandpass',freq:1500*p,sweep:900,q:1.3});
+    this._tone(t+.14,out,nodes,{freq:1500*p,duration:.035,type:'square',gain:.05*g});
+    this._tone(t+.26,out,nodes,{freq:1180*p,duration:.03,type:'square',gain:.04*g});
+   }else if(altId==='chain'){
+    // A descending stack of three zaps, each quieter than the last.
+    for(let i=0;i<3;i++){
+     const at=t+i*.05,fade=1-i*.22;
+     this._noise(at,out,nodes,{duration:.06,attack:.0008,gain:.23*g*fade,type:'highpass',freq:(2600+i*520)*p,sweep:(1000+i*260)*p});
+     this._tone(at,out,nodes,{freq:(1450-i*260)*p,duration:.075,type:'sawtooth',gain:.1*g*fade,end:(430-i*70)*p});
+    }
+   }else if(altId==='bomb'){
+    // Hollow launch pop: a bright mouth transient over a short empty body.
+    this._noise(t,out,nodes,{duration:.04,attack:.0007,gain:.38*g,type:'bandpass',freq:2100*p,sweep:700,q:1.1});
+    this._noise(t+.006,out,nodes,{duration:.17,gain:.2*g,type:'lowpass',freq:860*p,sweep:220,q:.8});
+    this._tone(t,out,nodes,{freq:205*p,duration:.2,type:'triangle',gain:.13*g,end:78});
+    this._tone(t,out,nodes,{freq:94*p,duration:.24,type:'sine',gain:.11*g,end:38});
+   }else if(altId==='double'){
+    // Two crisp, evenly spaced taps.
+    for(let i=0;i<2;i++){
+     const at=t+i*.07;
+     this._noise(at,out,nodes,{duration:.03,attack:.0006,gain:.38*g,type:'highpass',freq:(2000+i*180)*p,sweep:(3400+i*240)*p});
+     this._tone(at,out,nodes,{freq:(560-i*50)*p,duration:.06,type:'square',gain:.11*g,end:(230-i*20)*p});
+     this._tone(at,out,nodes,{freq:175*p,duration:.09,type:'sine',gain:.09*g,end:58});
+    }
+   }else if(altId==='twin'){
+    // A fast doubled rattle: four alternating ticks with the second pair softer.
+    for(let i=0;i<4;i++){
+     const at=t+i*.032,accent=i%2===0?1:.82;
+     this._noise(at,out,nodes,{duration:.028,attack:.0006,gain:.18*g*accent,type:'highpass',freq:(1850+i*150)*p,sweep:2700+i*90});
+     this._noise(at,out,nodes,{duration:.035,gain:.09*g*accent,type:'lowpass',freq:640*p,sweep:240,q:.8});
+     this._tone(at,out,nodes,{freq:(148+i*9)*p,duration:.04,type:'square',gain:.05*g*accent,end:68});
+    }
+   }
+  }
+  // Alt-transform foley: a short mechanical deploy when the held mode flips on,
+  // a lighter stow when it flips off. One quiet voice token, seeded, and voiced
+  // only for the local/self actor or a nearby one like the other weapon foley.
+  _altState(pan,vol,on,seed=0){
+   const v=altVariation(seed),g=cl(vol,0,1)*v.level,p=v.pitch;
+   if(on){
+    this._play(.26,pan,(t,out,nodes)=>{
+     this._noise(t,out,nodes,{duration:.05,attack:.001,gain:.16*g,type:'bandpass',freq:1500,sweep:650,q:1.4});
+     this._tone(t+.01,out,nodes,{freq:210*p,duration:.12,type:'square',gain:.06*g,end:520});
+     this._noise(t+.05,out,nodes,{duration:.12,gain:.1*g,type:'lowpass',freq:720,sweep:170,q:.9});
+     this._tone(t+.06,out,nodes,{freq:118,duration:.14,type:'triangle',gain:.07*g,end:180});
+    },{send:.12*cl(vol,0,1)});
+   }else{
+    this._play(.2,pan,(t,out,nodes)=>{
+     this._noise(t,out,nodes,{duration:.06,gain:.09*g,type:'lowpass',freq:520,sweep:190,q:.8});
+     this._tone(t,out,nodes,{freq:170*p,duration:.1,type:'triangle',gain:.05*g,end:72});
+     this._noise(t+.03,out,nodes,{duration:.07,gain:.055*g,type:'bandpass',freq:900,sweep:420,q:1});
+    },{send:.1*cl(vol,0,1)});
+   }
   }
   // Surface-aware bullet impact/ricochet: one transient, one material tick, an
   // optional ricochet whine and up to three debris ticks. Bounded per impact.
@@ -879,13 +1051,20 @@ export class SynthAudio{
    for(let i=0;i<debris;i++)this._noise(t+.02+i*.035,out,nodes,{duration:.03,gain:p.gain*.3*v,type:'bandpass',freq:p.freq*(.6+i*.25),sweep:p.freq*.3,q:1});
   }
   // Match-beat motif player: one voice token, retuned to the active mode root,
-  // with an optional filtered shimmer. Bounded to the motif's note count.
+  // with an optional filtered shimmer. Bounded to the motif's note count. A cue
+  // may carry an optional `tail` second layer (harness activations): a quiet
+  // impact/tone that still lives inside the same voice token.
   _beat(cue,pan,vol=1,tailSend=.22){
    if(!cue||vol<=.02)return;
-   const root=this.theme?.root??58,notes=cue.notes||[];
-   this._play(cue.length+(notes.length-1)*cue.step+.12,pan,(t,out,nodes)=>{
+   const root=this.theme?.root??58,notes=cue.notes||[],layer=cue.tail;
+   this._play(cue.length+(notes.length-1)*cue.step+.12+(layer?(layer.delay||0)+(layer.duration??.18):0),pan,(t,out,nodes)=>{
     notes.forEach((semi,i)=>{const f=root*Math.pow(2,Number(semi)/12);this._tone(t+i*cue.step,out,nodes,{freq:f,duration:cue.length,type:cue.type||'triangle',gain:(cue.gain||.06)*vol,end:f*1.42});});
     if(cue.shimmer)this._noise(t+.01,out,nodes,{duration:.24,gain:.05*vol,type:'highpass',freq:3000,sweep:1400,q:.6,attack:.015});
+    if(layer){
+     const at=t+(layer.delay||0),duration=layer.duration??.18;
+     if(layer.noise>0)this._noise(at,out,nodes,{duration,gain:cl(layer.noiseGain,0,.05)*vol,type:'bandpass',freq:layer.noise,sweep:layer.noiseSweep,q:1.1,attack:.004});
+     this._tone(at,out,nodes,{freq:layer.freq,duration,type:layer.type||'sine',gain:cl(layer.gain,0,.06)*vol,end:layer.end??layer.freq*.5});
+    }
    },{send:tailSend*vol});
   }
   // Mounted chaingun: a heavier, layered thump so it reads differently from the
@@ -991,7 +1170,21 @@ export class SynthAudio{
    if(e.type==='launcher'){const from=e.from??pos,vol=local?1:this._falloff(from,player,32);if(vol>.03)this._launcherStart(pan,vol);return;}
    if(e.type==='launcher-arrival'){const to=e.to??pos,vol=local?1:this._falloff(to,player,32);if(vol>.03)this._ziplineArrival(pan,vol);return;}
    if(e.type==='jump-pad'){const vol=local?1:this._falloff(pos,player,22);if(vol>.05)this._play(.24,pan,(t,out,nodes)=>{this._noise(t,out,nodes,{duration:.16,gain:.24*vol,type:'lowpass',freq:700,sweep:180,q:.8});this._tone(t,out,nodes,{freq:150,duration:.2,type:'triangle',gain:.1*vol,end:420});});return;}
-  if(e.type==='shot'||e.type==='vehicle-shot'||e.type==='launch'){const same=this.lastReport&&e.time!=null&&this.lastReport.time===e.time&&this.lastReport.actor===e.actor&&this.lastReport.weapon===e.weapon&&this.lastReport.type===e.type;this.lastReport=e;if(same)return;const vehicle=e.type==='vehicle-shot',vol=local?1:this._falloff(pos,player,vehicle?42:34)*(vehicle?.95:.9);if(vol>.01){if(vehicle)this._chaingun(pan,vol);else this._gunshot(e,local,pan,vol,player);}return;}
+  if(e.type==='shot'||e.type==='vehicle-shot'||e.type==='launch'){const same=this.lastReport&&e.time!=null&&this.lastReport.time===e.time&&this.lastReport.actor===e.actor&&this.lastReport.weapon===e.weapon&&this.lastReport.type===e.type;this.lastReport=e;if(same)return;const vehicle=e.type==='vehicle-shot',vol=local?1:this._falloff(pos,player,vehicle?42:34)*(vehicle?.95:.9);if(vol>.01){if(vehicle)this._chaingun(pan,vol);else if(!this._altShot(e,local,pan,vol,player))this._gunshot(e,local,pan,vol,player);}return;}
+  // Held alt-fire state flips: a short transform foley, deduped defensively so
+  // a stream that repeats the current state still makes exactly one sound per
+  // flip. The local actor is always voiced; remote actors fall off like the
+  // other weapon foley.
+  if(e.type==='alt-state'){
+   // Keyed per actor and weapon: the sim silently resets `alt` on a weapon
+   // switch, so pressing alt again on the new weapon must still deploy.
+   const on=e.alt===true,actor=e.actor??e.actorId??null,key=actor==null?null:`${actor}:${Number.isInteger(e.weapon)?e.weapon:'?'}`,prev=key==null?undefined:this._altStates.get(key);
+   if(prev===on)return;
+   if(key!=null){if(this._altStates.size>=64)this._altStates.delete(this._altStates.keys().next().value);this._altStates.set(key,on);}
+   const altVol=local?1:this._falloff(e.from??pos,player,22);
+   if(altVol>.04)this._altState(pan,altVol,on,eventSeed(e));
+   return;
+  }
   if(e.type==='dryfire'){if(local)this._click(0,1,.08,1500);return;}
   if(e.type==='grenade'){const vol=local?1:this._falloff(pos,player,24);if(vol>.02)this._play(.18,pan,(t,out,nodes)=>{this._click(pan,vol,.06,1400);this._noise(t+.02,out,nodes,{duration:.12,gain:.22*vol,type:'bandpass',freq:800,sweep:300,q:.8});this._tone(t+.03,out,nodes,{freq:280,duration:.1,type:'triangle',gain:.08*vol,end:140});});return;}
   if(e.type==='explosion'){const vol=this._falloff(pos,player,42);if(vol>.02){const seed=eventSeed(e);this._play(.85,pan,(t,out,nodes)=>{this._noise(t,out,nodes,{duration:.5,gain:.8*vol,type:'lowpass',freq:900,sweep:60,q:.8});this._noise(t,out,nodes,{duration:.05,attack:.001,gain:.5*vol,type:'highpass',freq:2400,sweep:600});this._tone(t,out,nodes,{freq:120,duration:.5,type:'sine',gain:.35*vol,end:34});this._tone(t,out,nodes,{freq:60,duration:.75,type:'sine',gain:.3*vol,end:28});this._debris(t,out,nodes,{vol,seed,cap:Math.round(vol*3.4)});},{send:.45*vol});}return;}
@@ -1033,11 +1226,16 @@ export class SynthAudio{
    }return;
   }
   // Movement verbs (§3.4/§6.3): local-only foley keyed to the movement module's
-  // shared event vocabulary, plus an opt-in announcer motif per verb.
+  // shared event vocabulary, plus an opt-in announcer motif per verb. A known
+  // verb voices its own foley (`handled`); every other event — unknown verb,
+  // missing verb field or an unhandled type/verb pair — falls through to the
+  // generic per-type chain below, which stays bit-for-bit the pre-verb voice.
   if(MOVEMENT_EVENTS.has(e.type)){
    if(!local)return;
    const verb=typeof e.verb==='string'&&e.verb.length?e.verb:null;
-   if(e.type==='move-start')this._play(.22,pan,(t,out,nodes)=>{this._noise(t,out,nodes,{duration:.16,gain:.24,type:'bandpass',freq:900,sweep:2600,q:.7});this._tone(t,out,nodes,{freq:150,duration:.14,type:'triangle',gain:.05,end:320});});
+   const handled=Boolean(verb&&MOVEMENT_VERBS.has(verb)&&this._moveVerb(verb,e,pan));
+   if(handled){/* the per-verb voice already played */}
+   else if(e.type==='move-start')this._play(.22,pan,(t,out,nodes)=>{this._noise(t,out,nodes,{duration:.16,gain:.24,type:'bandpass',freq:900,sweep:2600,q:.7});this._tone(t,out,nodes,{freq:150,duration:.14,type:'triangle',gain:.05,end:320});});
    else if(e.type==='windup-start'||e.type==='charge-start'){const duration=Math.min(1,Math.max(.1,Number(e.duration)||.3));this._play(duration+.1,pan,(t,out,nodes)=>{this._tone(t,out,nodes,{freq:180,duration,type:'sawtooth',gain:.05,end:520});this._noise(t,out,nodes,{duration:.2,gain:.12,type:'bandpass',freq:600,sweep:1800,q:.8});});}
    else if(e.type==='slam-launch')this._play(.24,pan,(t,out,nodes)=>{this._noise(t,out,nodes,{duration:.18,gain:.28,type:'lowpass',freq:700,sweep:220,q:.7});this._tone(t,out,nodes,{freq:120,duration:.2,type:'triangle',gain:.1,end:420});});
    else if(e.type==='slam-impact')this._play(.42,pan,(t,out,nodes)=>{this._noise(t,out,nodes,{duration:.3,gain:.5,type:'lowpass',freq:520,sweep:90,q:.8});this._tone(t,out,nodes,{freq:70,duration:.32,type:'sine',gain:.22,end:28});this._debris(t,out,nodes,{vol:1,seed:eventSeed(e),cap:3});});
@@ -1050,6 +1248,212 @@ export class SynthAudio{
    return;
   }
  }
+  // Per-verb movement foley. Each handler returns true only when it voiced the
+  // event; returning false lets the generic per-type chain keep the pre-verb
+  // voice, so a known verb with an unhandled event type is still covered.
+  _moveVerb(verb,e,pan){
+   switch(verb){
+    case 'air-dash':return e.type==='move-start'?this._dashWhoosh(pan):false;
+    case 'double-jump':return e.type==='move-start'?this._jumpBounce(pan):false;
+    case 'super-jump':return this._superJumpFoley(e.type,pan,e);
+    case 'hover-jets':return this._hoverFoley(e.type,pan);
+    case 'brace-slam':return this._slamFoley(e.type,pan,e);
+    case 'safety-glide':return this._glideFoley(e.type,pan);
+    case 'grapple':return this._grappleFoley(e.type,pan);
+    case 'blink-step':return this._blinkFoley(e.type,pan,e);
+    case 'deployable-rope':return this._ropeFoley(e.type,pan);
+    default:return false;
+   }
+  }
+  _dashWhoosh(pan){
+   this._play(.26,pan,(t,out,nodes)=>{
+    this._noise(t,out,nodes,{duration:.2,gain:.24,type:'bandpass',freq:420,sweep:2700,q:.75,attack:.006});
+    this._noise(t+.02,out,nodes,{duration:.1,gain:.1,type:'highpass',freq:1200,sweep:3200,q:.6});
+    this._tone(t,out,nodes,{freq:205,duration:.16,type:'triangle',gain:.06,end:70});
+   });
+   return true;
+  }
+  _jumpBounce(pan){
+   this._play(.22,pan,(t,out,nodes)=>{
+    this._noise(t,out,nodes,{duration:.1,gain:.2,type:'lowpass',freq:540,sweep:220,q:.8});
+    this._tone(t,out,nodes,{freq:138,duration:.16,type:'triangle',gain:.1,end:460});
+    this._tone(t+.05,out,nodes,{freq:276,duration:.1,type:'sine',gain:.06,end:620});
+   });
+   return true;
+  }
+  _superJumpFoley(type,pan,e){
+   if(type==='charge-start'){
+    const duration=Math.min(1,Math.max(.1,Number(e.duration)||.3));
+    this._play(duration+.12,pan,(t,out,nodes)=>{
+     this._tone(t,out,nodes,{freq:160,duration,type:'sawtooth',gain:.055,end:620});
+     this._noise(t,out,nodes,{duration:duration*.85,gain:.1,type:'bandpass',freq:480,sweep:1500,q:.9,attack:.02});
+     this._tone(t+duration*.9,out,nodes,{freq:430,duration:.07,type:'triangle',gain:.05,end:540});
+    });
+    return true;
+   }
+   if(type==='move-start'){
+    // The impulse and the charge release land in the same frame: this is the
+    // launch thump, the release note below is its short upper snap.
+    this._play(.3,pan,(t,out,nodes)=>{
+     this._noise(t,out,nodes,{duration:.22,gain:.28,type:'lowpass',freq:640,sweep:140,q:.75,attack:.004});
+     this._tone(t,out,nodes,{freq:108,duration:.26,type:'sawtooth',gain:.13,end:430});
+     this._tone(t+.02,out,nodes,{freq:255,duration:.16,type:'triangle',gain:.07,end:760});
+    });
+    return true;
+   }
+   if(type==='charge-release'){
+    this._play(.18,pan,(t,out,nodes)=>{
+     this._noise(t,out,nodes,{duration:.1,gain:.14,type:'highpass',freq:1500,sweep:4200,q:.7});
+     this._tone(t,out,nodes,{freq:720,duration:.1,type:'triangle',gain:.05,end:1180});
+    });
+    return true;
+   }
+   return false;
+  }
+  _hoverFoley(type,pan){
+   if(type==='move-start'){
+    // Ignition plus a short loop-tick trill so the held jets read as running.
+    this._play(.34,pan,(t,out,nodes)=>{
+     this._noise(t,out,nodes,{duration:.26,gain:.13,type:'bandpass',freq:680,sweep:1400,q:.8,attack:.01});
+     this._tone(t,out,nodes,{freq:175,duration:.22,type:'sawtooth',gain:.055,end:270});
+     for(let i=0;i<3;i++)this._tone(t+.06+i*.09,out,nodes,{freq:880+i*70,duration:.04,type:'square',gain:.028,end:690+i*50});
+    });
+    return true;
+   }
+   if(type==='move-end'){
+    this._play(.2,pan,(t,out,nodes)=>{
+     this._noise(t,out,nodes,{duration:.14,gain:.09,type:'lowpass',freq:900,sweep:320,q:.8});
+     this._tone(t,out,nodes,{freq:235,duration:.12,type:'triangle',gain:.045,end:110});
+    });
+    return true;
+   }
+   return false;
+  }
+  _slamFoley(type,pan,e){
+   if(type==='windup-start'){
+    const duration=Math.min(.6,Math.max(.08,Number(e.duration)||.3));
+    this._play(duration+.1,pan,(t,out,nodes)=>{
+     this._tone(t,out,nodes,{freq:145,duration,type:'sawtooth',gain:.06,end:560});
+     this._noise(t,out,nodes,{duration:duration*.75,gain:.11,type:'bandpass',freq:480,sweep:1500,q:.9,attack:.02});
+     this._tone(t+duration*.92,out,nodes,{freq:320,duration:.06,type:'square',gain:.05,end:175});
+    });
+    return true;
+   }
+   if(type==='slam-launch'){
+    this._play(.26,pan,(t,out,nodes)=>{
+     this._noise(t,out,nodes,{duration:.2,gain:.3,type:'lowpass',freq:760,sweep:200,q:.75});
+     this._tone(t,out,nodes,{freq:118,duration:.22,type:'triangle',gain:.11,end:460});
+    });
+    return true;
+   }
+   if(type==='slam-impact'){
+    this._play(.4,pan,(t,out,nodes)=>{
+     this._noise(t,out,nodes,{duration:.3,gain:.44,type:'lowpass',freq:560,sweep:80,q:.85});
+     this._noise(t,out,nodes,{duration:.06,gain:.18,type:'highpass',freq:2200,sweep:700,q:.9});
+     this._tone(t,out,nodes,{freq:64,duration:.34,type:'sine',gain:.2,end:26});
+     this._debris(t,out,nodes,{vol:1,seed:eventSeed(e),cap:3});
+    });
+    return true;
+   }
+   return false;
+  }
+  _glideFoley(type,pan){
+   if(type==='move-start'){
+    this._play(.36,pan,(t,out,nodes)=>{
+     this._noise(t,out,nodes,{duration:.34,gain:.16,type:'bandpass',freq:1400,sweep:520,q:.5,attack:.05});
+     this._noise(t+.05,out,nodes,{duration:.24,gain:.09,type:'highpass',freq:2600,sweep:1200,q:.6,attack:.03});
+     this._tone(t,out,nodes,{freq:330,duration:.2,type:'sine',gain:.035,end:240});
+    });
+    return true;
+   }
+   if(type==='move-end'){
+    this._play(.26,pan,(t,out,nodes)=>{
+     this._noise(t,out,nodes,{duration:.24,gain:.1,type:'bandpass',freq:900,sweep:420,q:.6,attack:.03});
+     this._tone(t,out,nodes,{freq:290,duration:.14,type:'sine',gain:.03,end:180});
+    });
+    return true;
+   }
+   return false;
+  }
+  _grappleFoley(type,pan){
+   if(type==='grapple-hook'){
+    // Hook bite plus three reel ticks on the line.
+    this._play(.34,pan,(t,out,nodes)=>{
+     this._noise(t,out,nodes,{duration:.07,gain:.28,type:'bandpass',freq:1900,sweep:900,q:1.5});
+     this._tone(t,out,nodes,{freq:250,duration:.12,type:'triangle',gain:.09,end:520});
+     for(let i=0;i<3;i++)this._tone(t+.1+i*.07,out,nodes,{freq:640+i*160,duration:.035,type:'square',gain:.04,end:520+i*120});
+    });
+    return true;
+   }
+   if(type==='move-start'){
+    this._play(.22,pan,(t,out,nodes)=>{
+     this._noise(t,out,nodes,{duration:.16,gain:.12,type:'bandpass',freq:1000,sweep:2600,q:.8,attack:.01});
+     this._tone(t,out,nodes,{freq:190,duration:.14,type:'triangle',gain:.05,end:420});
+    });
+    return true;
+   }
+   if(type==='grapple-release'){
+    this._play(.2,pan,(t,out,nodes)=>{
+     this._noise(t,out,nodes,{duration:.12,gain:.16,type:'highpass',freq:2400,sweep:900,q:.9});
+     this._tone(t,out,nodes,{freq:520,duration:.1,type:'triangle',gain:.06,end:180});
+    });
+    return true;
+   }
+   return false;
+  }
+  _blinkFoley(type,pan,e){
+   if(type==='windup-start'){
+    const duration=Math.min(.6,Math.max(.05,Number(e.duration)||.2));
+    this._play(duration+.12,pan,(t,out,nodes)=>{
+     this._tone(t,out,nodes,{freq:620,duration,type:'sine',gain:.06,end:1480});
+     this._noise(t,out,nodes,{duration:duration*.8,gain:.09,type:'highpass',freq:1400,sweep:3600,q:.7,attack:.01});
+    });
+    return true;
+   }
+   if(type==='move-start'){
+    this._play(.24,pan,(t,out,nodes)=>{
+     this._noise(t,out,nodes,{duration:.16,gain:.2,type:'bandpass',freq:2400,sweep:700,q:1.1});
+     this._tone(t,out,nodes,{freq:1320,duration:.12,type:'sine',gain:.075,end:420});
+     this._tone(t+.01,out,nodes,{freq:660,duration:.1,type:'triangle',gain:.05,end:220});
+    });
+    return true;
+   }
+   if(type==='windup-end'){
+    this._play(.16,pan,(t,out,nodes)=>{
+     this._noise(t,out,nodes,{duration:.1,gain:.12,type:'highpass',freq:3200,sweep:900,q:.8});
+     this._tone(t,out,nodes,{freq:1180,duration:.09,type:'sine',gain:.05,end:360});
+    });
+    return true;
+   }
+   return false;
+  }
+  _ropeFoley(type,pan){
+   if(type==='rope-place'){
+    // Anchor thunk, line pay-out and three reel ticks.
+    this._play(.36,pan,(t,out,nodes)=>{
+     this._noise(t,out,nodes,{duration:.12,gain:.3,type:'lowpass',freq:700,sweep:220,q:.85,attack:.003});
+     this._tone(t,out,nodes,{freq:120,duration:.16,type:'triangle',gain:.12,end:64});
+     this._tone(t+.03,out,nodes,{freq:520,duration:.16,type:'sine',gain:.07,end:880});
+     for(let i=0;i<3;i++)this._tone(t+.1+i*.07,out,nodes,{freq:760+i*120,duration:.03,type:'square',gain:.035,end:600+i*90});
+    });
+    return true;
+   }
+   if(type==='move-start'){
+    this._play(.2,pan,(t,out,nodes)=>{
+     this._noise(t,out,nodes,{duration:.14,gain:.14,type:'bandpass',freq:1100,sweep:2500,q:.8,attack:.01});
+     this._tone(t,out,nodes,{freq:420,duration:.12,type:'triangle',gain:.05,end:720});
+    });
+    return true;
+   }
+   if(type==='rope-expire'){
+    this._play(.22,pan,(t,out,nodes)=>{
+     this._noise(t,out,nodes,{duration:.16,gain:.1,type:'highpass',freq:2000,sweep:600,q:.8});
+     this._tone(t,out,nodes,{freq:880,duration:.1,type:'sine',gain:.05,end:300});
+    });
+    return true;
+   }
+   return false;
+  }
   update(player,vehicles=[],dt=0,opts=null){if(!this.ctx||!player)return;if(this.muted){this._engine(0,false);this._bed(false);return;}if(!this.bed&&this.ambientBed!==false)this._bed(true);
   const surface=this._surfaceFor(player,opts);
   if(player.grounded&&this.wasGrounded===false&&player.vehicleId==null){const impact=cl(Math.abs(this.lastVy||0)/13,0,1);if(impact>.12)this._landing(impact,player.weapon,surface);}
@@ -1118,5 +1522,5 @@ export class SynthAudio{
   this._tone(t,out,nodes,{freq:120,duration:.3,type:'sawtooth',gain:.14*vol,end:520});
   this._tone(t+.04,out,nodes,{freq:240,duration:.24,type:'triangle',gain:.08*vol,end:660});
  },{send:.3*vol});}
- dispose(){if(this._stingDuckTimer){clearTimeout(this._stingDuckTimer);this._stingDuckTimer=null;}try{this.musicEngine?.dispose();}catch{}this.musicEngine=null;try{this.mothAudio?.dispose?.();}catch{}this.mothAudio=null;if(this.engine){try{this.engine.osc.stop();this.engine.sub.stop();}catch{}this.engine=null;}if(this.zipLoop){try{this.zipLoop.osc.stop();this.zipLoop.hum.stop();}catch{}this.zipLoop=null;}if(this.bed){for(const node of Object.values(this.bed)){if(node&&typeof node.stop==='function')try{node.stop();}catch{}if(node&&typeof node.disconnect==='function')try{node.disconnect();}catch{}}this.bed=null;}for(const token of this.voices){clearTimeout(token.timer);for(const n of token.nodes){try{n.disconnect();}catch{}}}this.voices.clear();this._announceAt?.clear?.();this.lastSting=null;if(this.space){for(const node of Object.values(this.space)){try{node.disconnect();}catch{}}this.space=null;}for(const bus of [this.effectsBus,this.ambienceBus,this.musicBus,this.master,this.muteGain]){try{bus?.disconnect();}catch{}}this.effectsBus=null;this.ambienceBus=null;this.musicBus=null;this.master=null;this.muteGain=null;this.ctx?.close();this.ctx=null;this.status='off';}
+ dispose(){if(this._stingDuckTimer){clearTimeout(this._stingDuckTimer);this._stingDuckTimer=null;}try{this.musicEngine?.dispose();}catch{}this.musicEngine=null;try{this.mothAudio?.dispose?.();}catch{}this.mothAudio=null;if(this.engine){try{this.engine.osc.stop();this.engine.sub.stop();}catch{}this.engine=null;}if(this.zipLoop){try{this.zipLoop.osc.stop();this.zipLoop.hum.stop();}catch{}this.zipLoop=null;}if(this.bed){for(const node of Object.values(this.bed)){if(node&&typeof node.stop==='function')try{node.stop();}catch{}if(node&&typeof node.disconnect==='function')try{node.disconnect();}catch{}}this.bed=null;}for(const token of this.voices){clearTimeout(token.timer);for(const n of token.nodes){try{n.disconnect();}catch{}}}this.voices.clear();this._announceAt?.clear?.();this._altStates?.clear?.();this.lastSting=null;if(this.space){for(const node of Object.values(this.space)){try{node.disconnect();}catch{}}this.space=null;}for(const bus of [this.effectsBus,this.ambienceBus,this.musicBus,this.master,this.muteGain]){try{bus?.disconnect();}catch{}}this.effectsBus=null;this.ambienceBus=null;this.musicBus=null;this.master=null;this.muteGain=null;this.ctx?.close();this.ctx=null;this.status='off';}
 }

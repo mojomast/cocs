@@ -126,6 +126,26 @@ test('PlayingHud: death is a non-live group and mounting while dead fabricates n
   assert.equal(announcer(dead), '', 'a fresh mount while already dead is not a new elimination');
 });
 
+test('PlayingHud: alt mode chip, live ALT hint and non-live operator verb meters', () => {
+  const alt = render(PlayingHud, {ui: ui({
+    player: player({alt: true, weapon: 0, verbState: {verb: 'heat', active: true, heat: .06, decayIn: 0}}),
+    bindings: {altFire: 'KeyJ'},
+  })});
+  assert.match(alt, /class="weapon-tag weapon-tag--alt">SALVO<\/b>/, 'the held alt mode replaces the AUTO/SEMI tag');
+  assert.match(alt, /class="weapon-alt-hint"[^>]*>ALT J<\/kbd>/, 'the ALT hint follows the live binding');
+  assert.match(alt, /class="verb-meters" role="group" aria-label="Operator verb: HEAT \+6%"/, 'the verb row is one labelled, non-live group');
+  assert.match(alt, /class="stat-label"><span class="weapon-name">RAIL<\/span>/, 'the weapon name has its own nowrap element');
+  assert.ok(alt.indexOf('weapon-alt-row') > alt.indexOf('stat-bar'), 'the ALT hint sits on the note row under the ammo bar');
+  assert.ok(alt.indexOf('verb-meters') < alt.indexOf('ability-card'), 'the verb readout is its own card outside the ability card');
+  assert.equal(liveCount(alt), 1, 'the meters add no live region');
+  assert.equal(announcer(alt), '', 'a steady meter reading does not churn the announcement channel');
+
+  const plain = render(PlayingHud, {ui: ui()});
+  assert.doesNotMatch(plain, /weapon-tag--alt/, 'the alt chip only appears while alt fire is held');
+  assert.doesNotMatch(plain, /verb-meters/, 'an actor without verb state renders no meter row');
+  assert.match(plain, /class="weapon-alt-hint"[^>]*>ALT Z<\/kbd>/, 'the default hint names the default KeyZ binding');
+});
+
 test('RespawnOverlay: passive team summary stays non-live and FFA never mounts the editor', () => {
   const passive = render(RespawnOverlay, {ui: {respawn: {open: true, allowed: true, respawnIn: 2.4, character: 'chatgpt', harness: 'openclaw'}, killNotice: {text: 'BOT 3 ELIMINATED YOU', detail: 'RAIL'}, cursor: {key: 'ALT'}, switchRespawnLoadout: () => {}}});
   assert.match(passive, /role="region"/, 'the passive summary is a region');

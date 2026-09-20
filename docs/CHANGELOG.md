@@ -31,6 +31,14 @@ paid Moth material pack and the offline variety pipeline behind it.
 - Per-target stacks: WORLD / WEAPON / BOTS each get their own master, mix,
   palette and layers. The weapon stays crisp and bots follow the world stack
   until enabled; bots render in a depth-tested pass so walls occlude them.
+- Combat pass: every weapon gains a held alt-fire mode (KeyZ / middle mouse /
+  touch ALT) that transforms the model and changes the behaviour — salvo, cluster,
+  overload, slug, mortar, proximity mine, chain, flak bomb, double tap and twin —
+  on the shared trigger cadence so triggers never stack. Harness actives hit
+  harder (Claw Burst 6 m/30, Recompile 45, Phase Step 7 m, Context Jam 8 m/.5,
+  longer rush/parallel/guardrail windows), operator signature verbs gain
+  snapshot-driven visuals and HUD meters, and all nine movement verbs are tuned
+  and covered verb-by-verb. See [Combat pass](design/COMBAT-PASS.md).
 - Animation pass: restored death variety (killing-direction topple, per-pose
   fall arcs, seeded limb silhouettes, style treatments), strength-scaled hit
   flinches, a melee swing, shell casings, style-aware death audio, and UI

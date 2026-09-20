@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {vehicleHud, escapeHint, voiceHint, spectatorControls, SPECTATOR_RESERVED_KEYS, reloadProgress, dynamicCrosshairGap, lowAmmo, postureLabel, hitMarker, projectToScreen, damageNumberStyle, boundList, damageBearing, killBanner, weaponTag, ammoText, commandBrief, isTeamMode, matchStartBanner, modeColumns, modeGoal, modePrimary, modeTargetText, objectiveCopy, suddenDeathBanner, grenadeStatus, killstreakCallout, ladderStatus, streakStatus, audioCaption, scoreAnnouncer, multikillLabel, spreeLabel, recentKills, killCallout, matchAwards, killFeedWeapon, connectionQuality, spectateActor, nextSpectateTarget, spectatorBoard, spectatorTeams, weaponRangeInfo, weaponRangeLabel, scoreStats, cocsDominanceStatus, cocsOperationsStatus, cocsOutcomeView, acceptCocsAnnouncement, cocsAnnouncePriority, cocsAnnouncementTTL, COCS_ANNOUNCE_PRIORITY} from './hud.mjs';
+import {vehicleHud, escapeHint, voiceHint, spectatorControls, SPECTATOR_RESERVED_KEYS, reloadProgress, dynamicCrosshairGap, lowAmmo, postureLabel, hitMarker, projectToScreen, damageNumberStyle, boundList, damageBearing, killBanner, weaponTag, ammoText, commandBrief, isTeamMode, matchStartBanner, modeColumns, modeGoal, modePrimary, modeTargetText, objectiveCopy, suddenDeathBanner, grenadeStatus, killstreakCallout, ladderStatus, streakStatus, audioCaption, altFireLabel, scoreAnnouncer, multikillLabel, spreeLabel, recentKills, killCallout, matchAwards, killFeedWeapon, connectionQuality, spectateActor, nextSpectateTarget, spectatorBoard, spectatorTeams, weaponRangeInfo, weaponRangeLabel, scoreStats, cocsDominanceStatus, cocsOperationsStatus, cocsOutcomeView, acceptCocsAnnouncement, cocsAnnouncePriority, cocsAnnouncementTTL, COCS_ANNOUNCE_PRIORITY} from './hud.mjs';
 import {WEAPONS} from './data.mjs';
 import {GAME_MODES,teamMode} from './config.mjs';
 import {soccerDisplay,soccerResult} from './race-ui.mjs';
@@ -385,6 +385,28 @@ test('audio captions describe events and ignore silent ones',()=>{
  assert.equal(audioCaption({type:'melee'}).text,'Melee');
  assert.equal(audioCaption({type:'spawn'}),null);
  assert.equal(audioCaption(null),null);
+});
+
+test('alt-fire captions name the same mode table the HUD chip reads',()=>{
+ assert.equal(altFireLabel({mode:0}),'SALVO');
+ assert.equal(altFireLabel({mode:'overload'}),'OVERLOAD');
+ assert.equal(altFireLabel({mode:'SALVO'}),'SALVO','a pre-rendered label resolves by id');
+ assert.equal(altFireLabel({modeLabel:'custom'}),'CUSTOM');
+ assert.equal(altFireLabel({mode:999}),'');
+ assert.equal(altFireLabel(null),'');
+ assert.equal(audioCaption({type:'alt-fire',mode:0}).text,'Alt fire · SALVO');
+ assert.equal(audioCaption({type:'alt-fire'}).text,'Alt fire','an unknown mode still names the beat');
+ assert.equal(audioCaption({type:'shot',alt:true,weapon:2}).text,'Alt fire · OVERLOAD','an alt-flagged shot replaces the generic gunfire line');
+ assert.equal(audioCaption({type:'shot',alt:true,altId:'chain',weapon:6}).text,'Alt fire · CHAIN','the sim altId resolves through the shared table');
+ assert.equal(audioCaption({type:'shot',weapon:2}).text,'Gunfire','a normal shot keeps the existing caption');
+ assert.equal(audioCaption({type:'launch',alt:true,altId:'mortar',weapon:4}).text,'Alt fire · MORTAR','an alt projectile launch names its mode');
+ assert.equal(audioCaption({type:'launch',weapon:4}),null,'a normal rocket launch keeps its existing silent caption');
+ assert.equal(audioCaption({type:'alt-state',weapon:0,alt:true}).text,'Alt mode · SALVO');
+ assert.equal(audioCaption({type:'alt-state',weapon:0,alt:false}).text,'Alt mode off · SALVO');
+ assert.equal(audioCaption({type:'alt-mode',mode:6}).text,'Alt mode · CHAIN');
+ assert.equal(audioCaption({type:'alt-mode'}).text,'Alt mode');
+ assert.equal(audioCaption({type:'alt-toggle',on:false}).text,'Alt fire off');
+ assert.equal(audioCaption({type:'alt-toggle',on:true}).text,'Alt fire on');
 });
 
 test('ladder and streak status describe arms race and killstreaks',()=>{

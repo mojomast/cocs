@@ -116,3 +116,22 @@ test('ability kinds, buffs and magnitudes are data-driven and memoized',()=>{
  assert.equal(abilityOf(undefined),null);
  assert.equal(abilityOf({}),null);
 });
+
+// Phase-5 tune pin: the shipped active numbers, one row per harness. The
+// golden parity fixture is the behavioural observation; this keeps the data
+// table and the resolved profile from drifting apart when either is re-tuned.
+test('the seven active abilities carry the tuned numbers',()=>{
+ const expected={
+  openclaw:{radius:6,damage:30,knockback:14,lift:5,cooldown:10},
+  hermes:{duration:3.5,speed:1.6,cooldown:10},
+  opencode:{duration:3.5,fireRate:1/.55,cooldown:14},
+  claudecode:{duration:3.5,resistance:.5,cooldown:10},
+  codex:{duration:2,heal:45,cooldown:16},
+  cline:{duration:.35,distance:7,cooldown:11},
+  roo:{duration:3,radius:8,slow:.5,cooldown:12},
+ };
+ for(const [id,fields] of Object.entries(expected)){
+  const ability=abilityOf(id);
+  for(const [key,value] of Object.entries(fields))assert.equal(ability[key],value,`${id}.${key}`);
+ }
+});
