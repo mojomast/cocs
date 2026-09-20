@@ -18,6 +18,18 @@ matrix re-ran against production at **5/5 viewports** with a clean tree
 (`commitDirty:false`), zero console/page errors, and the same hit-testing,
 reticle-corridor and overflow assertions as the local run.
 
+**Production update — Moth material pack (2026-09-20).** Commit `4375be4` was
+fast-forwarded to `improvement/phase2-audio-visual` and deployed web-only to the
+same URL. The verification gate again saw one transient `502`/stale-footer
+attempt during the restart and passed on the retry, publishing footer
+`v8.6 · PRISM`, all 13 linked assets, and the compatible identity pair (web
+`4375be4` `v8.6-4375be4`, game server `b9c7a0a` `v8.5-b9c7a0a`, protocol 3).
+The new raw assets (`sky-ember`, `tex-metal-oxide`, the `qrc-glyphs` GIF and the
+`entanglement-void` archive) and the `/moth` gallery all return 200. The tracked
+browser matrix re-ran against production at **5/5 viewports** with a clean tree
+(`commitDirty:false`), zero console/page errors, and the usual hit-testing,
+reticle-corridor and overflow assertions. No game-server restart.
+
 **Scope (web presentation, data and documentation, 2026-09-20).** An opt-in
 developer graphics preview, a global hotkey, a randomizer and a clipboard recipe
 loop, 23 stackable effects (three built from baked Moth assets with selectable
