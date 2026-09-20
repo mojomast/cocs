@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {MAPS} from './maps.mjs';
-import {objectiveTemplate} from './mode-data.mjs';
+import {authoredCapturePoints,objectiveTemplate} from './mode-data.mjs';
 import {floorAt,Match,obstructed} from './core.mjs';
 import {RULES} from './data.mjs';
 
@@ -53,6 +53,24 @@ test('assault objective builds exactly the configured fragLimit sector count',()
   assert.equal(state.defender,1);
   assert.deepEqual(state.sectors.map(s=>s.id),names.slice(0,count));
  }
+});
+
+test('authoredCapturePoints resolves the same opening points the objective uses, on and off objectiveZones maps',()=>{
+  const crosswire=MAPS.find(value=>value.id==='crosswire');
+  const authored=authoredCapturePoints(crosswire);
+  assert.deepEqual(authored.map(point=>point.id),['alpha','bravo','charlie'],'authored table order is preserved');
+  assert.deepEqual(authored.map(point=>[point.x,point.z]),[[-9,0],[0,-9],[9,0]],'crosswire uses its authored table points');
+  // A map with no objectiveZones and no authored table entry still resolves
+  // three distinct nav/spawn candidates instead of leaving the hill frozen.
+  const frostline=MAPS.find(value=>value.id==='frostline');
+  const candidates=authoredCapturePoints(frostline);
+  assert.equal(candidates.length,3,'candidate fallback still returns a full point set');
+  assert.ok(candidates.every(point=>Number.isFinite(point.x)&&Number.isFinite(point.z)),'candidate points are finite');
+  assert.equal(new Set(candidates.map(point=>`${point.x},${point.z}`)).size,3,'candidate points are distinct');
+  assert.deepEqual(authoredCapturePoints(frostline),candidates,'the resolution is deterministic');
+  // Next-gen maps expose their authored zones through the same helper.
+  const atrium=MAPS.find(value=>value.id==='atrium');
+  assert.deepEqual(authoredCapturePoints(atrium).map(point=>[point.x,point.z]),atrium.objectiveZones.map(zone=>[zone.x,zone.z]));
 });
 
 test('KOTH places the hill at the authored center on next-gen maps',()=>{

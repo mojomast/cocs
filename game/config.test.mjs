@@ -226,6 +226,18 @@ test('applyMutators sets canonical flags for every mutator id',()=>{
  }
 });
 
+test('sudden death and endless surface through mutatorView and matchPlan',()=>{
+ const c=normalizeConfig({mutators:['endless','suddenDeath']});
+ assert.deepEqual(c.mutators,['suddenDeath','endless'],'the fold stays in canonical order');
+ assert.equal(c.suddenDeath,true);
+ assert.equal(c.endless,true);
+ assert.deepEqual(mutatorView(c).map(entry=>entry.name),['Sudden Death','Endless']);
+ assert.equal(matchPlan(c).modifierLabel,'Sudden Death · Endless');
+ const flags=normalizeConfig({suddenDeath:true,endless:true});
+ assert.deepEqual(flags.mutators,['suddenDeath','endless'],'bare flags are surfaced as mutators too');
+ assert.equal(matchPlan({suddenDeath:true}).modifiers[0].name,'Sudden Death');
+});
+
 test('mode loadouts pin weapons, ammo and pickup availability without breaking legacy modes',()=>{
  const instagib=loadoutFor('instagib');
  assert.deepEqual(instagib.weapons,[2]);

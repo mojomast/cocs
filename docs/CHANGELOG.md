@@ -39,6 +39,15 @@ paid Moth material pack and the offline variety pipeline behind it.
   longer rush/parallel/guardrail windows), operator signature verbs gain
   snapshot-driven visuals and HUD meters, and all nine movement verbs are tuned
   and covered verb-by-verb. See [Combat pass](design/COMBAT-PASS.md).
+- Quality-of-life and fidelity pass: impact decals orient to the surface with
+  scorch marks, explosions pulse light and smoke, rain falls as streaks with
+  ground ripples, contact shadows and a view-tight shadow frustum sharpen the
+  image, procedural textures get mip/anisotropy, LATTICE Ops gets 20+ earcons,
+  a FIGHT sting/3-2-1-GO and richer weapon handling foley, bots use alt fire
+  and escort payloads, six lonely modes spread across the map pool, online
+  lobbies surface READY/warmup/map-vote/rematch plus a real RTT ping, and the
+  HUD gains hit attribution, a global text scale, settings sections and undo
+  safety. See [Quality-of-life pass](design/QOL-PASS.md).
 - Animation pass: restored death variety (killing-direction topple, per-pose
   fall arcs, seeded limb silhouettes, style treatments), strength-scaled hit
   flinches, a melee swing, shell casings, style-aware death audio, and UI

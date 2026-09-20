@@ -99,3 +99,21 @@ for(const arena of MAPS)test(`registry runtime placements: ${arena.id}`,t=>{
   }
   t.diagnostic(JSON.stringify({...counts,uniquePlacements:checked.size}));
 });
+
+test('widened mode pools launch real matches on the newly added arenas',()=>{
+  const additions={
+    juggernaut:['colosseum','moth-backrooms'],
+    'team-elimination':['frostline','skybreak'],
+    'vip-escort':['riverbend','catacombs'],
+    holdout:['frost-gate','convoy-line'],
+    uplink:['frost-gate','convoy-line'],
+    armsrace:['slagworks','ember-caldera'],
+    assault:['gauntlet','derelict-station'],
+  };
+  for(const [mode,ids] of Object.entries(additions))for(const id of ids){
+    const match=new Match('chatgpt','openclaw',()=>.5,id,{mode,botCount:0,humanCount:2,fragLimit:3});
+    assert.equal(match.arena.id,id,`${mode} launches on ${id}`);
+    assert.equal(match.config.mode,mode);
+    if(mode!=='armsrace')assert.ok(match.objectiveState?.zones?.length>0,`${mode} builds objective centers on ${id}`);
+  }
+});

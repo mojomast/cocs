@@ -1,11 +1,12 @@
 'use client';
-import {useState} from 'react';
+import {useRef,useState} from 'react';
 import {Award,Crosshair,Flag,Shield,Skull,Target,Trophy,Zap} from 'lucide-react';
 import {Modal,Panel,Btn,Stats,Tabs,Chip,Meter} from '../primitives';
 import type {ScreenProps} from '../contract';
 import {LatticeBriefing} from './LatticeGuide';
 import {formatNumber} from '../../../game/format-ui.mjs';
 import {matchLearningSummary} from '../../../game/result-learning.mjs';
+import {leaveNeedsConfirm} from '../../../game/net.mjs';
 
 const MEDAL_ICONS:any={mvp:Trophy,objective:Target,flag:Flag,captures:Flag,accuracy:Crosshair,damage:Zap,flawless:Shield,ratio:Crosshair,deaths:Skull};
 const medalIcon=(id:string)=>{const Icon=MEDAL_ICONS[id]||Award;return <Icon size={16}/>;};
@@ -201,6 +202,15 @@ export function resultFooterDescriptors({connected=false,isHost=false,plan=null,
 export function ResultsModal({ui}:ScreenProps){
  const {hud,awards,scoreboard,resultTitle,resultDescription,start,nextArena,surpriseMe,playDemo,disconnectNet,changeMode,lastDemo,net,modalRef,mode,reward,matchSummary,campaign,challenges,weeklyChallenges,ranked,rankedQueued,startSinglePlayer,startCampaignMission,queueRanked,cancelQueue,quickStart,getMap,settings}=ui;
  const [tab,setTab]=useState('summary');
+ // Destructive leave: a live or rated-unfinished match asks first; a finished
+ // round and a casual lobby keep the immediate path.
+ const ratedRoom=ranked?.queue==='ranked'||rankedQueued!=null;
+ const needsLeaveConfirm=leaveNeedsConfirm({started:net?.started===true,roundOver:net?.roundOver===true,rated:ratedRoom});
+ const [confirmLeave,setConfirmLeave]=useState(false);
+ // The results panel becomes inert the moment the confirm layer opens, so the
+ // exact opener must be captured before the commit (WP2.1 stacking contract).
+ const [leaveOpener,setLeaveOpener]=useState<HTMLElement|null>(null);
+ const requestLeave=()=>{if(needsLeaveConfirm){setLeaveOpener(typeof document!=='undefined'&&document.activeElement instanceof HTMLElement?document.activeElement:null);setConfirmLeave(true);}else disconnectNet?.();};
  const list=Array.isArray(hud?.actors)?hud.actors:[];
  // WP1.5 viewer model: only a seated player is a viewer. A spectator, or an
  // actorId that names no actor on the board, resolves to null — never to
@@ -234,7 +244,7 @@ export function ResultsModal({ui}:ScreenProps){
  // itself. A retry keeps the finished rules/map because the page still holds
  // them, a checkpoint resume reads the stored campaign checkpoint, and a
  // practice start leaves any rated queue first.
- const runNextAction=createResultActionDispatcher({start,nextArena,surpriseMe,playDemo,disconnectNet,changeMode,startSinglePlayer,startCampaignMission,queueRanked,cancelQueue,quickStart});
+ const runNextAction=createResultActionDispatcher({start,nextArena,surpriseMe,playDemo,disconnectNet:requestLeave,changeMode,startSinglePlayer,startCampaignMission,queueRanked,cancelQueue,quickStart});
  const rewardStrip=viewerActor&&reward?<div className="reward-strip row" role="group" aria-label="Match rewards">
   <strong className="reward-xp">+{Math.max(0,Number(reward.gained)||0)} XP</strong>
   <Chip tone="accent">LEVEL {Number(reward.level)||1}</Chip>
@@ -255,7 +265,7 @@ export function ResultsModal({ui}:ScreenProps){
  </>:null;
  // WP1.5: a spectator has no seat, so the modal reports the neutral match
  // reason from the model instead of a seated player's badge/description.
- return <Modal open={!!hud&&mode==='results'} covered={settings===true} onClose={()=>changeMode('selection')} size="lg" eyebrow="MATCH COMPLETE" title={hud?resultTitle(hud,viewerActor):undefined} description={hud?(viewerActor?resultDescription(hud,viewerActor):learning?.contribution?.endReason):undefined} panelRef={modalRef} footer={footer}>
+ return <><Modal open={!!hud&&mode==='results'} covered={settings===true||confirmLeave} onClose={()=>changeMode('selection')} size="lg" eyebrow="MATCH COMPLETE" title={hud?resultTitle(hud,viewerActor):undefined} description={hud?(viewerActor?resultDescription(hud,viewerActor):learning?.contribution?.endReason):undefined} panelRef={modalRef} footer={footer}>
   <LearningSummaryCard learning={learning}/>
   <NextMatchPanel plan={learning.next} onAction={runNextAction}/>
   {rewardStrip}
@@ -266,5 +276,12 @@ export function ResultsModal({ui}:ScreenProps){
    {tab==='stats'&&(statItems?<div className="stack"><Stats items={statItems}/>{Array.isArray(reward?.achievements)&&reward.achievements.length>0&&<div className="stack stack--tight"><span className="label">NEW ACHIEVEMENTS</span><div className="achievement-strip" role="list">{reward.achievements.map((a:any)=><div key={a.id} className="achievement-row unlocked" role="listitem"><span className="achievement-icon" aria-hidden="true">★</span><span className="card-main"><span className="card-name">{a.name}<small>{a.description}</small></span></span><span className="label">+{a.xp} XP</span></div>)}</div></div>}<div className="stack stack--tight"><span className="label">MEDALS EARNED</span><MedalStrip awards={awards} player={viewerActor}/></div></div>:<div className="match-awards">{awardsNode}</div>)}
    {tab==='awards'&&<MedalStrip awards={awards} player={viewerActor}/>}
   </div>
- </Modal>;
+ </Modal>
+ <Modal open={confirmLeave} onClose={()=>setConfirmLeave(false)} size="sm" eyebrow="CONFIRM" title="Leave the server?" restoreFocus={leaveOpener} footer={<>
+  <Btn onClick={()=>setConfirmLeave(false)}>STAY</Btn>
+  <Btn variant="danger" onClick={()=>{setConfirmLeave(false);disconnectNet?.();}}>LEAVE MATCH</Btn>
+ </>}>
+  <p className="field-note">{net?.started===true&&net?.roundOver!==true?'The round is still running.':ratedRoom?'This rated match is not finished.':''} The server holds your seat briefly after a disconnect, so reconnecting can return you to it.</p>
+ </Modal>
+ </>;
 }

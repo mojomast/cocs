@@ -276,8 +276,8 @@ those remain human review items.
 
 Last verified on release v8.6 PRISM (2026-09-20); the v8.6 gate recorded:
 
-- `npm run test:game` — **2,762 pass, 0 fail, 8 skipped** across the
-  `game/*.test.mjs` suite (2,770 tests). The eight skips are the opt-in long
+- `npm run test:game` — **2,836 pass, 0 fail, 8 skipped** across the
+  `game/*.test.mjs` suite (2,844 tests). The eight skips are the opt-in long
   simulations and
   the browser-only render: the D1-D4 sampled win-rate sweep, the exhaustive
   8-bot mode sweep, the 18k-step 4-bot match, the 10k-step 8-bot race, the

@@ -15,7 +15,7 @@ import {ensureTerrainBvh,terrainRayHitFast} from './terrain-bvh.mjs';
 import {floorHeightAtLattice,makeFloorQuery} from './floor-lattice.mjs';
 import {blockObstructed,blockSupportTop,candidates,collisionHash,NAV_BAKE_VERSION,rayWorldBlockHit} from './spatial.mjs';
 import {createVehicle,GUNTRUCK,respawnVehicle,stepVehicle,stepVehicleWeapon,vehicleCanEnter,vehicleMuzzles,vehicleSeatFor,vehicleSeatPosition,vehicleMounted,takeVehicleSeat,leaveVehicleSeat,vehicleSeatOpen} from './vehicles.mjs';
-import {objectiveTemplate} from './mode-data.mjs';
+import {objectiveTemplate,authoredCapturePoints} from './mode-data.mjs';
 import {cocsSnapshot,cocsSpotDamageScale,compareCocsOrders,cocsEconomyAction,cocsCommandAction,cocsBuyAction,cocsHumanInteract} from './cocs.mjs';
 import {coopBuyAction,coopCommandAction,coopTerminalAction} from './cocs-coop.mjs';
 import {queueLatticePower,queueLatticeSwap} from './lattice-support.mjs';
@@ -431,10 +431,16 @@ export class Match{
   // one fixed roof never decides the match. Points are snapped to the nav graph
   // exactly like the initial zone, which keeps the rotation deterministic.
   if(this.objectiveState?.kind==='koth'&&!Array.isArray(this.objectiveState.stages)){
-    const authored=(this.arena.objectiveZones||[]).filter(p=>Number.isFinite(p.x)&&Number.isFinite(p.z));
+    const authored=authoredCapturePoints(this.arena,modeRule(this.config.mode)).filter(p=>Number.isFinite(p.x)&&Number.isFinite(p.z));
     if(authored.length>1){
       const base=this.objectiveState.zones[0];
-      const rotation=authored.map((p,i)=>{const node=this.nav[nearest(p,this.nav)],drift=node&&Math.hypot(node.x-p.x,node.z-p.z)>2.5;return {id:p.id??`hill-${i}`,x:drift?node.x:p.x,z:drift?node.z:p.z,radius:p.radius??base.radius,y:Number.isFinite(p.y)?p.y:base.y};});
+      const snapped=authored.map((p,i)=>{const node=this.nav[nearest(p,this.nav)],drift=node&&Math.hypot(node.x-p.x,node.z-p.z)>2.5;return {id:p.id??`hill-${i}`,x:drift?node.x:p.x,z:drift?node.z:p.z,radius:p.radius??base.radius,y:Number.isFinite(p.y)?p.y:base.y};});
+      // Open the cycle on the point the objective itself chose (the nearest
+      // authored point to the initial hill) so the authored opening hill — and
+      // classic mirrored spawn parity — is preserved. Ties keep authored order.
+      let start=0,best=Infinity;
+      snapped.forEach((p,i)=>{const distance=Math.hypot(p.x-base.x,p.z-base.z);if(distance<best-1e-9){best=distance;start=i;}});
+      const rotation=snapped.slice(start).concat(snapped.slice(0,start));
       this.objectiveState.rotation=rotation;this.objectiveState.rotationIndex=0;
       this.objectiveState.rotationEvery=modeRule(this.config.mode).rotationSeconds??30;this.objectiveState.rotationTimer=this.objectiveState.rotationEvery;
       const first=rotation[0];base.id=first.id;base.x=first.x;base.z=first.z;base.radius=first.radius;if(Number.isFinite(first.y))base.y=first.y;

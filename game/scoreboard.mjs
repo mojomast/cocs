@@ -28,6 +28,26 @@ export function streakLabel(actor){
  return {ping:ms,quality,label:`${ms}`};
 }
 
+// The local client measures its own round-trip latency (`NetClient.rtt`); the
+// server never reports it as an actor field. Fill it onto the local row only,
+// never overwriting a server measurement and never inventing a row that is not
+// in the snapshot. A shallow copy keeps source snapshots immutable.
+export function stampLocalPing(source,actorId,rtt){
+ if(rtt===null||rtt===undefined||rtt==='')return source;
+ const ping=Number(rtt);
+ if(!Number.isFinite(ping)||ping<0||actorId===null||actorId===undefined)return source;
+ const actors=Array.isArray(source?.actors)?source.actors:null;
+ if(!actors)return source;
+ let stamped=false;
+ const next=actors.map(actor=>{
+  if(!actor||typeof actor!=='object'||actor.id!==actorId)return actor;
+  if(actor.ping!==null&&actor.ping!==undefined&&actor.ping!=='')return actor;
+  stamped=true;
+  return {...actor,ping};
+ });
+ return stamped?{...source,actors:next}:source;
+}
+
 // Null-safe wing/spec chip for one scoreboard row. Actors without a
 // character/harness (race and soccer snapshots, match history, tests) return
 // null, so the row renders exactly as it did before the class overhaul.

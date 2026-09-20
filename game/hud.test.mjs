@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {vehicleHud, escapeHint, voiceHint, spectatorControls, SPECTATOR_RESERVED_KEYS, reloadProgress, dynamicCrosshairGap, lowAmmo, postureLabel, hitMarker, projectToScreen, damageNumberStyle, boundList, damageBearing, killBanner, weaponTag, ammoText, commandBrief, isTeamMode, matchStartBanner, modeColumns, modeGoal, modePrimary, modeTargetText, objectiveCopy, suddenDeathBanner, grenadeStatus, killstreakCallout, ladderStatus, streakStatus, audioCaption, altFireLabel, scoreAnnouncer, multikillLabel, spreeLabel, recentKills, killCallout, matchAwards, killFeedWeapon, connectionQuality, spectateActor, nextSpectateTarget, spectatorBoard, spectatorTeams, weaponRangeInfo, weaponRangeLabel, scoreStats, cocsDominanceStatus, cocsOperationsStatus, cocsOutcomeView, acceptCocsAnnouncement, cocsAnnouncePriority, cocsAnnouncementTTL, COCS_ANNOUNCE_PRIORITY} from './hud.mjs';
+import {vehicleHud, escapeHint, voiceHint, spectatorControls, SPECTATOR_RESERVED_KEYS, reloadProgress, dynamicCrosshairGap, lowAmmo, postureLabel, hitMarker, projectToScreen, damageNumberStyle, boundList, damageBearing, killBanner, weaponTag, ammoText, commandBrief, isTeamMode, matchStartBanner, modeColumns, modeGoal, modePrimary, modeTargetText, objectiveCopy, suddenDeathBanner, grenadeStatus, killstreakCallout, ladderStatus, streakStatus, audioCaption, altFireLabel, scoreAnnouncer, multikillLabel, spreeLabel, recentKills, killCallout, matchAwards, killFeedWeapon, connectionQuality, spectateActor, nextSpectateTarget, spectatorBoard, spectatorTeams, weaponRangeInfo, weaponRangeLabel, scoreStats, cocsDominanceStatus, cocsOperationsStatus, cocsOutcomeView, acceptCocsAnnouncement, cocsAnnouncePriority, cocsAnnouncementTTL, COCS_ANNOUNCE_PRIORITY, damageHitText, captionPriority, acceptCaption, CAPTION_TTL} from './hud.mjs';
 import {WEAPONS} from './data.mjs';
 import {GAME_MODES,teamMode} from './config.mjs';
 import {soccerDisplay,soccerResult} from './race-ui.mjs';
@@ -186,6 +186,56 @@ test('ability kills name the active in the kill feed and banner detail', () => {
   assert.equal(own.detail, 'WITH PHASE STEP');
   const plain = killBanner({time:10, feed:[{killer:'Mistral', victim:'ChatGPT', self:false, time:9.4}]}, {name:'ChatGPT'});
   assert.equal('detail' in plain, false, 'a weapon kill adds no detail key');
+});
+
+test('killBanner attributes a plain weapon kill through the shared weapon table', () => {
+  const feed = {killer:'Grok', victim:'ChatGPT', self:false, time:9.4, weapon:2, ability:false};
+  const death = killBanner({time:10, feed:[feed]}, {name:'ChatGPT'}, WEAPONS);
+  assert.equal(death.kind, 'death');
+  assert.equal(death.text, 'Grok ELIMINATED YOU');
+  assert.equal(death.detail, 'RAIL');
+  assert.equal(killBanner({time:10, feed:[feed]}, {name:'Grok'}, WEAPONS).detail, 'WITH RAIL');
+  assert.equal('detail' in killBanner({time:10, feed:[feed]}, {name:'ChatGPT'}), false, 'a caller without the weapon table keeps the old line');
+  // An ability still wins the format when both are present.
+  assert.equal(killBanner({time:10, feed:[{...feed, ability:true, abilityName:'Claw Burst'}]}, {name:'ChatGPT'}, WEAPONS).detail, 'CLAW BURST');
+});
+
+test('damageHitText names the source, weapon, amount and remaining health', () => {
+  assert.equal(damageHitText({name:'Grok', weapon:2, amount:42, health:18}, WEAPONS), 'HIT BY GROK · RAIL · 42 · 18 HP');
+  assert.equal(damageHitText({amount:7}), 'HIT · 7');
+  assert.equal(damageHitText({name:'Mistral', ability:true, abilityName:'Claw Burst', amount:30}), 'HIT BY MISTRAL · CLAW BURST · 30');
+  assert.equal(damageHitText({name:'Grok', weapon:99, amount:12, health:88}, WEAPONS), 'HIT BY GROK · 12 · 88 HP', 'an unknown weapon index degrades without a dangling separator');
+  assert.equal(damageHitText({health:0}), 'HIT · 0 HP');
+  assert.equal(damageHitText({}), 'HIT');
+  assert.equal(damageHitText(null), '');
+  assert.equal(damageHitText(undefined), '');
+});
+
+test('caption priority reuses the assistive ranks and protects important lines', () => {
+  assert.equal(CAPTION_TTL, 2.2);
+  assert.equal(captionPriority({type:'mission-lost'}), 130);
+  assert.equal(captionPriority({type:'boss-phase'}), 120);
+  assert.equal(captionPriority({type:'killstreak'}), 109);
+  assert.equal(captionPriority({type:'shot'}), 80);
+  assert.equal(captionPriority(null), 80);
+  assert.ok(captionPriority({type:'mission-lost'}) > captionPriority({type:'shot'}));
+
+  const important = acceptCaption(null, 0, {text:'MISSION FAILED', priority:captionPriority({type:'mission-lost'})}, 10);
+  assert.equal(important.text, 'MISSION FAILED');
+  assert.equal(important.at, 10);
+  assert.equal(acceptCaption(important, 10, {text:'Gunfire', priority:captionPriority({type:'shot'})}, 11), null, 'routine chatter cannot clobber a protected line');
+  assert.equal(acceptCaption(important, 10, {text:'MISSION FAILED', priority:130}, 11), null, 'an identical line inside the window is deduped');
+  assert.equal(acceptCaption(important, 10, {text:'Gunfire', priority:80}, 13).text, 'Gunfire', 'the 2.2 s window still releases the line');
+
+  const boss = acceptCaption(null, 0, {text:'Boss phase', priority:120}, 1);
+  assert.equal(acceptCaption(boss, 1, {text:'MISSION FAILED', priority:130}, 2).text, 'MISSION FAILED', 'a higher-ranked beat still pre-empts');
+  const gun = acceptCaption(null, 0, {text:'Gunfire', priority:80}, 3);
+  assert.equal(acceptCaption(gun, 3, {text:'Explosion', priority:80}, 3.5).text, 'Explosion', 'routine captions stay last-write-wins');
+  assert.equal(acceptCaption(null, 0, {text:'   '}, 0), null);
+  assert.equal(acceptCaption(null, 0, null, 0), null);
+  // A legacy string state still participates as a routine line.
+  assert.equal(acceptCaption('Reloading', 1, {text:'Explosion', priority:80}, 2).text, 'Explosion');
+  assert.equal(acceptCaption('Reloading', 1, {text:'MISSION FAILED', priority:130}, 2).text, 'MISSION FAILED');
 });
 
 test('movement verbs, ability activations and threat pings have readable captions', () => {

@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {Match} from './core.mjs';
-import {normalizeConfig,activeMutators,mutatorEffects} from './config.mjs';
+import {normalizeConfig,activeMutators,mutatorEffects,MUTATORS} from './config.mjs';
 
 const seeded = (n = 31) => { let a = n; return () => ((a = (Math.imul(a, 1664525) + 1013904223) >>> 0) / 4294967296); };
 
@@ -98,4 +98,20 @@ test('the mutators list and explicit flags produce identical matches', () => {
   const viaFlags = new Match('chatgpt', 'openclaw', seeded(), 'crosswire', {mode: 'deathmatch', botCount: 0, humanCount: 2, oneShot: true, bigHead: true, timeLimit: 60});
   assert.deepEqual(viaList.mutators, viaFlags.mutators);
   assert.equal(viaList.actors[0].hitScale, viaFlags.actors[0].hitScale);
+});
+
+test('sudden death and endless join the canonical fold append-only', () => {
+  assert.deepEqual(MUTATORS.slice(-2).map(entry => entry.id), ['suddenDeath', 'endless'], 'new mutators are appended, never interleaved');
+  const late = normalizeConfig({mutators: ['endless', 'suddenDeath']});
+  assert.deepEqual(activeMutators(late), ['suddenDeath', 'endless'], 'the new mutators fold in catalog order');
+  assert.equal(late.suddenDeath, true);
+  assert.equal(late.endless, true);
+  const effects = mutatorEffects(late);
+  assert.equal(effects.suddenDeath, true, 'the effect view surfaces sudden death');
+  assert.equal(effects.endless, true, 'the effect view surfaces endless');
+  assert.deepEqual(effects.active, ['suddenDeath', 'endless']);
+  const flags = normalizeConfig({suddenDeath: true, endless: true});
+  assert.deepEqual(activeMutators(flags), activeMutators(late), 'list and bare flags resolve identically');
+  const launch = normalizeConfig({mutators: ['noRecoil', 'lowGravity', 'oneShot', 'turbo', 'bigHead']});
+  assert.deepEqual(activeMutators(launch), ['turbo', 'lowGravity', 'oneShot', 'bigHead', 'noRecoil'], 'the launch set keeps its pinned order');
 });

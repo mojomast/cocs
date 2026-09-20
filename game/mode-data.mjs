@@ -79,6 +79,15 @@ const authoredPoints=(arena,ids,rules)=>{
   }
   return candidatePoints(arena,ids,rules);
 };
+// The capture points an objective is built from, resolved through the exact
+// pipeline `objectiveTemplate` uses (authored table -> arena.objectiveZones ->
+// nav/spawn/pickup candidates). King of the Hill builds its moving-hill rotation
+// from these, so maps whose points come from authored or nav candidates rotate
+// instead of freezing on one roof. Pure and deterministic: the same arena always
+// returns the same point list, as plain-data copies safe for snapshots.
+export function authoredCapturePoints(arena,rules=modeRule('domination')){
+  return authoredPoints(arena,['alpha','bravo','charlie'],rules).map(p=>({id:p.id,x:p.x,z:p.z,radius:p.radius,y:p.y}));
+}
 export function objectiveTemplate(mode,arena,config){
  const rules=modeRule(mode),kind=rules.objective?.kind;
  // LATTICE STRIKE owns its whole template (nodes/edges/live set/phase) in

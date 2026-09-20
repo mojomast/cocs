@@ -455,6 +455,12 @@ Recent releases. The full history lives in
   overload to proximity mines and flak bombs; harness actives hit harder,
   operator verbs gain visuals and HUD meters, and all nine movement verbs are
   tuned and hardened. See [Combat pass](design/COMBAT-PASS.md).
+- Quality-of-life and fidelity pass: oriented impact decals and explosion
+  scorch, rain streaks and ripples, contact shadows and sharper shadows,
+  LATTICE earcons and match-start kickoff cues, bots that use alt-fire and
+  escort payloads, mode pools spread across the maps, real lobby READY/vote
+  flows and RTT ping, hit attribution, a global HUD text scale and settings
+  sections. See [Quality-of-life pass](design/QOL-PASS.md).
 - Graphics-edge pass (research-backed): static dither kills 8-bit banding, a
   contrast-adaptive sharpen recovers FXAA softness, and environment reflections
   scale with the tier. Runs whenever post-processing or the graphics lab runs.

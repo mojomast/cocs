@@ -216,3 +216,55 @@ test('SynthAudio forwards its state to an attached Moth layer and stays guarded'
   assert.equal(audio.mothAudioStatus(), null);
   audio.dispose();
 });
+
+test('baked clip gain is honoured by beds and stingers', async () => {
+  const { ctx } = stubContext();
+  const bank = new MothAudioBank({ ctx, resolve: (name) => name === 'loud' ? { url: '/moth/files/loud/clip.wav', seconds: 4, gain: 2.5 } : DESCRIPTORS[name] || null, fetchImpl: fetchOk() });
+  await bank.preload('loud');
+  const audio = new MothAudio({ ctx, bank, destinations: { ambience: ctx.createGain(), effects: ctx.createGain() }, gain: 0.5 });
+  assert.equal(audio.playBed('loud', { gain: 1.2 }), true);
+  assert.ok(Math.abs(audio.beds[0].target - 0.5 * 1.2 * 2.5) < 1e-9, 'the bed folds in the baked descriptor gain');
+  assert.equal(audio.playStinger('loud', { gain: 0.5 }), true);
+  assert.ok(Math.abs(audio.stingers[0].target - 0.5 * 0.5 * 2.5) < 1e-9, 'the stinger folds in the baked descriptor gain');
+  audio.dispose();
+});
+
+test('a missing bed stays silent without latching a bank failure', () => {
+  const { ctx } = stubContext();
+  const bank = makeBank({ ctx });
+  const audio = new MothAudio({ ctx, bank, destinations: { ambience: ctx.createGain(), effects: ctx.createGain() }, sceneBeds: { menu: 'bed-ghost', game: 'bed-ghost', explore: 'bed-ghost', combat: 'bed-ghost' } });
+  assert.equal(audio.playBed('bed-ghost'), false);
+  assert.equal(audio.playStinger('bed-ghost'), false);
+  assert.equal(audio.preloadScene(), 0, 'a missing bed is never queued for decode');
+  assert.equal(bank.state('bed-ghost'), 'missing');
+  assert.equal(bank.status().failed, 0, 'a missing descriptor is not a latched failure');
+  audio.setScene('game'); audio.setIntensity(1); audio.setBedMood('storm'); audio.setWeather('ash');
+  assert.equal(audio.status().bedCount, 0, 'the fallback chain stays silent');
+  assert.equal(bank.status().failed, 0, 'missing mood/weather beds never latch either');
+  assert.equal(bank.failed.has('bed-ghost'), false);
+  audio.dispose();
+});
+
+test('SynthAudio forwards setWeather through to the Moth layer and seeds it on attach', () => {
+  const calls = [];
+  const fake = {
+    setEnabled: () => {},
+    setScene: () => {},
+    setIntensity: () => {},
+    setBedMood: () => {},
+    setWeather: (v) => calls.push(v),
+    tick: () => {},
+    dispose: () => {},
+  };
+  const audio = new SynthAudio();
+  audio.setWeather('rain');
+  assert.deepEqual(calls, [], 'no attached layer is a no-op');
+  audio.setMothAudio(fake);
+  assert.deepEqual(calls, ['rain'], 'attaching seeds the active weather kind');
+  audio.setWeather('snow');
+  assert.equal(calls.at(-1), 'snow', 'weather changes are forwarded');
+  audio.setWeather(null);
+  assert.equal(calls.at(-1), null, 'clear weather clears the Moth weather bed');
+  audio.setMothAudio(null);
+  audio.dispose();
+});

@@ -25,11 +25,13 @@ export class CameraShake{
  apply(camera,time,reduced,intensity=1){if(reduced||this.magnitude<=0||!camera)return;const scale=Math.max(0,Math.min(1.5,Number(intensity)||0));if(scale<=0)return;const m=this.magnitude*scale,t=(time||0)*38+this.seed*13.7;camera.position.x+=Math.sin(t)*m*.05;camera.position.y+=Math.cos(t*1.31)*m*.045;camera.rotation.z+=Math.sin(t*1.7)*m*.028;camera.rotation.x+=Math.cos(t*1.13)*m*.014;}
 }
 
-// Fixed pool of point lights so automatic fire never allocates per shot.
+// Fixed pool of point lights so automatic fire never allocates per shot. The
+// same pool carries the slower, wider explosion pulse: the slot budget is fixed
+// at construction, so a barrel chain cannot grow the light count.
 export class MuzzleLightPool{
- constructor(scene,count=2,intensity=3.4,distance=7){this.scene=scene;this.intensity=intensity;this.lights=[];this.index=0;for(let i=0;i<count;i++){const light=new T.PointLight('#ffffff',0,distance,2);light.visible=false;light.userData.remaining=0;light.userData.total=1;scene.add(light);this.lights.push(light);}}
- flash(color,position,life=.06){if(!this.lights.length)return;const light=this.lights[this.index=(this.index+1)%this.lights.length];light.color.set(color);light.userData.remaining=life;light.userData.total=life;light.intensity=this.intensity;light.visible=true;if(position)light.position.set(position.x,position.y,position.z);}
- update(dt){for(const light of this.lights){if(light.userData.remaining<=0){if(light.visible){light.visible=false;light.intensity=0;}continue;}light.userData.remaining-=dt;if(light.userData.remaining<=0){light.visible=false;light.intensity=0;}else light.intensity=this.intensity*(light.userData.remaining/light.userData.total);}}
+ constructor(scene,count=2,intensity=3.4,distance=7){this.scene=scene;this.intensity=intensity;this.lights=[];this.index=0;for(let i=0;i<count;i++){const light=new T.PointLight('#ffffff',0,distance,2);light.visible=false;light.userData.remaining=0;light.userData.total=1;light.userData.peak=intensity;scene.add(light);this.lights.push(light);}}
+ flash(color,position,life=.06,intensity=this.intensity){if(!this.lights.length)return;const light=this.lights[this.index=(this.index+1)%this.lights.length];const peak=Number.isFinite(Number(intensity))?Math.max(0,Number(intensity)):this.intensity;light.color.set(color);light.userData.remaining=life;light.userData.total=life;light.userData.peak=peak;light.intensity=peak;light.visible=true;if(position)light.position.set(position.x,position.y,position.z);}
+ update(dt){for(const light of this.lights){if(light.userData.remaining<=0){if(light.visible){light.visible=false;light.intensity=0;}continue;}light.userData.remaining-=dt;if(light.userData.remaining<=0){light.visible=false;light.intensity=0;}else light.intensity=light.userData.peak*(light.userData.remaining/light.userData.total);}}
  dispose(){for(const light of this.lights){light.parent?.remove(light);light.dispose?.();}this.lights=[];}
 }
 
@@ -101,34 +103,83 @@ export class RailBeamPool{
  dispose(){for(const s of this.slots){this.scene.remove(s.beam,s.core,s.ring);s.beamMat.map?.dispose();s.beamMat.dispose();s.coreMat.dispose();s.ringMat.dispose();}this.slots=[];this.beamGeo.dispose();this.coreGeo.dispose();this.ringGeo.dispose();this.texture?.dispose();this.texture=null;}
 }
 
-// Flat impact/scorch decals: one shared quad, a fixed slot pool and per-slot
-// opacity so overlapping marks fade independently. The view creates this only
-// for WebGL and skips it on the CPU renderer to keep its draw-call budget flat.
+// Shared procedural alpha masks. One tiny canvas per pool, generated once: no
+// baked asset, no texture per spawn. The optional rim adds a faint dense band,
+// which is what makes a scorch read as a ring instead of a soft dot. Returns
+// null without a DOM so headless/CI pools stay fully functional (untextured).
+function makeRadialMask(size=64,{rim=0,rimWidth=.16}={}){
+ if(typeof document==='undefined'||!document.createElement)return null;
+ const canvas=document.createElement('canvas');canvas.width=size;canvas.height=size;
+ const ctx=canvas.getContext('2d');
+ if(!ctx?.createImageData||!ctx?.putImageData)return null;
+ const image=ctx.createImageData(size,size),data=image.data;
+ for(let y=0;y<size;y++)for(let x=0;x<size;x++){
+  const i=(y*size+x)*4,dx=(x+.5)/size*2-1,dy=(y+.5)/size*2-1,d=Math.min(1,Math.hypot(dx,dy));
+  let alpha=Math.pow(Math.max(0,1-d),1.6);
+  if(rim>0)alpha=Math.min(1,alpha+rim*Math.exp(-Math.pow((d-.74)/rimWidth,2)));
+  data[i]=data[i+1]=data[i+2]=255;data[i+3]=Math.round(255*Math.max(0,Math.min(1,alpha)));
+ }
+ ctx.putImageData(image,0,0);
+ const texture=new T.CanvasTexture(canvas);
+ texture.wrapS=texture.wrapT=T.ClampToEdgeWrapping;
+ texture.needsUpdate=true;
+ return texture;
+}
+
+// Impact/scorch decals: one shared quad and mask, a fixed slot pool and per-slot
+// opacity so overlapping marks fade independently. The quad is laid perpendicular
+// to the incoming shot so wall and ceiling hits stay on the surface; a missing
+// direction (or an explicit flat request) keeps the legacy ground-parallel stamp.
+// The view creates this only for WebGL and skips it on the CPU renderer to keep
+// its draw-call budget flat.
 export class DecalPool{
  constructor(scene,limit=18){
   this.scene=scene;this.limit=limit;this.slots=[];this.serial=0;
   this.geometry=new T.PlaneGeometry(1,1);
+  this.mask=makeRadialMask(64,{rim:.2});
+  this.axis=new T.Vector3(0,0,1);
+  this.normal=new T.Vector3();
+  this.tilt=new T.Quaternion();
+  this.roll=new T.Quaternion();
  }
  _slot(){
   let slot=this.slots.find(s=>!s.active);
   if(slot)return slot;
   if(this.slots.length>=this.limit){this.slots.sort((a,b)=>a.serial-b.serial);return this.slots[0];}
-  const material=new T.MeshBasicMaterial({transparent:true,depthWrite:false,side:T.DoubleSide});
+  const material=new T.MeshBasicMaterial({transparent:true,depthWrite:false,side:T.DoubleSide,map:this.mask??null});
   const obj=new T.Mesh(this.geometry,material);obj.visible=false;obj.frustumCulled=false;obj.renderOrder=3;
   obj.userData.decal=true;this.scene.add(obj);slot={obj,material,active:false,serial:0,size:1};this.slots.push(slot);return slot;
  }
- spawn(pos,{color='#171310',size=.32,life=5.5,reduced=false,seed=0}={}){
+ spawn(pos,{color='#171310',size=.32,life=5.5,reduced=false,seed=0,dir=null,flat=false}={}){
   if(!pos)return false;
   const slot=this._slot();if(!slot)return false;
   const yaw=hashUnit(seed||0)*Math.PI*2,scale=Math.max(.05,size);
+  // Surface normal = opposite the ray. Near-vertical normals stay horizontal
+  // (floor/ceiling), everything else follows the surface the impact is on.
+  const dx=Number(dir?.x)||0,dy=Number(dir?.y)||0,dz=Number(dir?.z)||0,length=Math.hypot(dx,dy,dz);
+  const oriented=!flat&&length>1e-6;
+  this.normal.set(oriented?-dx/length:0,oriented?-dy/length:1,oriented?-dz/length:0);
+  const vertical=Math.abs(this.normal.y)>.92;
+  this.tilt.setFromUnitVectors(this.axis,this.normal);
+  this.roll.setFromAxisAngle(this.normal,vertical?yaw:yaw*.35);
+  // Spin about the surface normal first, then tilt the plane onto it, so the
+  // quad normal stays exactly on the surface for both wall and floor hits.
+  slot.obj.quaternion.copy(this.roll).multiply(this.tilt);
   slot.obj.material.color.set(color);
   slot.obj.material.opacity=reduced?.46:.58;
   slot.obj.visible=true;
-  slot.obj.position.set(pos.x||0,(pos.y||0)+.025,pos.z||0);
-  slot.obj.rotation.set(-Math.PI/2,yaw,0);
+  const lift=vertical?.025:.02;
+  slot.obj.position.set((pos.x||0)+this.normal.x*lift,(pos.y||0)+this.normal.y*lift,(pos.z||0)+this.normal.z*lift);
   slot.obj.scale.setScalar(scale);
   slot.active=true;slot.serial=++this.serial;slot.size=scale;slot.life=slot.total=Math.max(.2,life);
   return true;
+ }
+ // A blast scorch: a broad soot ring plus a denser core, both stamped from the
+ // same shared mask so an explosion allocates no material or texture of its own.
+ scorch(pos,{color='#171310',size=.9,life=6,reduced=false,seed=0}={}){
+  const outer=this.spawn(pos,{color,size:size*1.7,life:life*1.35,reduced,seed,flat:true});
+  const inner=this.spawn(pos,{color,size,life,reduced,seed:(seed+13)>>>0,flat:true});
+  return outer||inner;
  }
  update(dt){
   for(const slot of this.slots){
@@ -141,7 +192,108 @@ export class DecalPool{
   }
  }
  clear(){for(const slot of this.slots){slot.active=false;slot.obj.visible=false;}}
- dispose(){for(const slot of this.slots){this.scene.remove(slot.obj);slot.material?.dispose();slot.material=null;}this.slots=[];this.geometry?.dispose();this.geometry=null;}
+ dispose(){for(const slot of this.slots){this.scene.remove(slot.obj);slot.material?.dispose();slot.material=null;}this.slots=[];this.geometry?.dispose();this.geometry=null;this.mask?.dispose();this.mask=null;}
+}
+
+// Pooled ground splashes for rain/storm. Each slot carries a landing delay so a
+// ripple appears when its drop would have hit the ground, then expands and
+// fades. One shared ring mask and one flat quad; a fixed slot budget reused
+// oldest-first. Presentation only: the CPU renderer never allocates it.
+export class RipplePool{
+ constructor(scene,limit=18){
+  this.scene=scene;this.limit=Math.max(2,limit|0);this.slots=[];this.serial=0;
+  this.geometry=new T.PlaneGeometry(1,1).rotateX(-Math.PI/2);
+  this.mask=makeRadialMask(48,{rim:.75,rimWidth:.1});
+ }
+ _slot(){
+  let slot=this.slots.find(s=>!s.active);
+  if(slot)return slot;
+  if(this.slots.length>=this.limit){this.slots.sort((a,b)=>a.serial-b.serial);return this.slots[0];}
+  const material=new T.MeshBasicMaterial({transparent:true,depthWrite:false,map:this.mask??null,blending:T.AdditiveBlending,side:T.DoubleSide});
+  const obj=new T.Mesh(this.geometry,material);obj.visible=false;obj.frustumCulled=false;obj.renderOrder=2;
+  obj.userData.ripple=true;this.scene.add(obj);slot={obj,material,active:false,serial:0,delay:0,life:0,total:1,base:.1,grow:.4,reduced:false};this.slots.push(slot);return slot;
+ }
+ // `delay` is the deterministic time-to-impact; the slot stays hidden until then
+ // so a splash reads as ground contact rather than a spawn flash.
+ spawn(pos,{color='#cfe0ef',delay=0,life=.5,size=.34,reduced=false,seed=0}={}){
+  if(!pos)return null;
+  const slot=this._slot();if(!slot)return null;
+  slot.obj.position.set(Number(pos.x)||0,Number(pos.y)||0,Number(pos.z)||0);
+  slot.obj.rotation.y=hashUnit(seed||0)*Math.PI*2;
+  slot.obj.scale.setScalar(size*.42);
+  slot.material.color.set(color);
+  slot.material.opacity=0;
+  slot.obj.visible=false;
+  slot.delay=Math.max(0,Number(delay)||0);
+  slot.life=slot.total=Math.max(.12,Number(life)||.5);
+  slot.base=Math.max(.05,size*.42);
+  slot.grow=Math.max(.05,Number(size)||.34);
+  slot.reduced=reduced===true;
+  slot.active=true;slot.serial=++this.serial;
+  return slot;
+ }
+ update(dt){
+  const step=Math.max(0,Math.min(Number(dt)||0,.1));
+  for(const slot of this.slots){
+   if(!slot.active)continue;
+   if(slot.delay>0){slot.delay-=step;if(slot.delay>0)continue;slot.obj.visible=true;}
+   slot.life-=step;
+   if(slot.life<=0){slot.active=false;slot.obj.visible=false;continue;}
+   const t=1-slot.life/slot.total;
+   // Reduced motion keeps the splash static: no expansion, only the fade.
+   slot.obj.scale.setScalar(slot.reduced?slot.base:slot.base+slot.grow*t);
+   slot.material.opacity=.5*(1-t)*(1-t);
+  }
+ }
+ clear(){for(const slot of this.slots){slot.active=false;slot.delay=0;slot.obj.visible=false;}}
+ dispose(){for(const slot of this.slots){this.scene.remove(slot.obj);slot.material?.dispose();slot.material=null;}this.slots=[];this.geometry?.dispose();this.geometry=null;this.mask?.dispose();this.mask=null;}
+}
+
+// WebGL contact shadows: a small fixed pool of soft radial quads that follow the
+// presentation positions of actors and vehicles. They ground a character where
+// the shadow map's bias loses contact; the CPU renderer keeps its per-model blob
+// shadows and never allocates this pool. Keys are presentation ids, so a slot is
+// reused frame to frame and the pool never grows past its limit.
+export class ContactShadowPool{
+ constructor(scene,limit=16){
+  this.scene=scene;this.limit=Math.max(2,limit|0);this.slots=[];this.byId=new Map();this.frame=0;this.serial=0;
+  this.geometry=new T.PlaneGeometry(1,1).rotateX(-Math.PI/2);
+  this.mask=makeRadialMask(64);
+ }
+ _slot(){
+  let slot=this.slots.find(s=>!s.active);
+  if(slot)return slot;
+  if(this.slots.length>=this.limit){this.slots.sort((a,b)=>a.serial-b.serial);return this.slots[0];}
+  const material=new T.MeshBasicMaterial({transparent:true,depthWrite:false,side:T.DoubleSide,map:this.mask??null,color:'#05080b'});
+  const obj=new T.Mesh(this.geometry,material);obj.visible=false;obj.frustumCulled=false;obj.renderOrder=2;
+  obj.userData.contactShadow=true;this.scene.add(obj);
+  slot={obj,material,active:false,serial:++this.serial,frame:-1};this.slots.push(slot);return slot;
+ }
+ // Track the shadow for one presentation id this frame. Missing ids are hidden by
+ // the following `end()`; existing keys keep their slot so a moving actor's
+ // shadow never flickers between pool entries.
+ place(id,x,y,z,{radius=.6,opacity=.42}={}){
+  if(id==null)return null;
+  let slot=this.byId.get(id);
+  if(!slot){
+   slot=this._slot();if(!slot)return null;
+   // A reused slot may still be keyed to a retired id; release that binding.
+   for(const [key,entry] of this.byId)if(entry===slot)this.byId.delete(key);
+   this.byId.set(id,slot);
+  }
+  slot.frame=this.frame;
+  slot.obj.position.set(Number(x)||0,Number(y)||0,Number(z)||0);
+  slot.obj.scale.setScalar(Math.max(.05,Number(radius)||.6));
+  slot.material.opacity=Math.max(0,Math.min(1,Number(opacity)||0));
+  slot.obj.visible=true;slot.active=true;
+  return slot;
+ }
+ end(){
+  for(const [id,slot] of this.byId)if(slot.frame!==this.frame){slot.obj.visible=false;slot.active=false;this.byId.delete(id);}
+  this.frame++;
+ }
+ clear(){for(const slot of this.slots){slot.active=false;slot.obj.visible=false;}this.byId.clear();}
+ dispose(){for(const slot of this.slots){this.scene.remove(slot.obj);slot.material?.dispose();slot.material=null;}this.slots=[];this.byId.clear();this.geometry?.dispose();this.geometry=null;this.mask?.dispose();this.mask=null;}
 }
 
 // Pooled death debris: flung limb/body chunks and lingering ground splats.

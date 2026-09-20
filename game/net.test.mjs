@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {Match} from './core.mjs';
-import {NetClient, NetHarness, interpolateSnapshots} from './net.mjs';
+import {NetClient, NetHarness, interpolateSnapshots, leaveNeedsConfirm, seatHoldSeconds, SEAT_HOLD_MS} from './net.mjs';
 import {MESSAGE} from './protocol.mjs';
 function rng(){let n=3;return()=>((n=(Math.imul(n,1664525)+1013904223)>>>0)/4294967296);}
 const config={humanCount:1,botCount:0,timeLimit:60};
@@ -591,4 +591,162 @@ test('ranked status messages are consumed and survive a lobby update', () => {
  assert.deepEqual(client.leaderboardRows, []);
  assert.doesNotThrow(() => client.onMessage(JSON.stringify({type: 'queue'})));
  assert.equal(client.queueMessage.type, 'queue');
+});
+
+test('the lobby lifecycle is stored verbatim and cleared when absent', () => {
+ const client = new NetClient();
+ assert.equal(client.lifecycle, null, 'no lifecycle before the first lobby');
+ const lifecycle = {
+  phase: 'warmup', revision: 4, warmup: 3, ready: 1, readyNeeded: 2, readyRatio: .5,
+  mapVotes: {crosswire: 2, foundry: 1}, mapVoteWinner: 'crosswire',
+  rematch: 1, rematchNeeded: 2, rematchReady: false,
+ };
+ client.onMessage(JSON.stringify({type: 'lobby', roomId: 'r', hostId: 1, players: [], lifecycle}));
+ assert.equal(client.lifecycle.phase, 'warmup');
+ assert.equal(client.lifecycle.warmup, 3);
+ assert.deepEqual(client.lifecycle.mapVotes, {crosswire: 2, foundry: 1});
+ assert.equal(client.lifecycle.mapVoteWinner, 'crosswire');
+ assert.equal(client.lifecycle.rematch, 1);
+ assert.equal(client.lifecycle.rematchNeeded, 2);
+ assert.equal(client.lifecycle.rematchReady, false);
+ // A lobby without a lifecycle view must not keep a stale gate.
+ client.onMessage(JSON.stringify({type: 'lobby', roomId: 'r', hostId: 1, players: []}));
+ assert.equal(client.lifecycle, null);
+ assert.doesNotThrow(() => client.onMessage(JSON.stringify({type: 'lobby', players: [], lifecycle: 'nope'})));
+ assert.equal(client.lifecycle, null, 'a malformed lifecycle is ignored, not stored');
+});
+
+test('the client sends the ready, map-vote, rematch and warmup verbs', () => {
+ const client = new NetClient();
+ const sent = [];
+ client.send = msg => { sent.push(msg); return true; };
+ client.ready(true);
+ assert.deepEqual(sent.at(-1), {type: MESSAGE.READY, ready: true});
+ client.ready(false);
+ assert.deepEqual(sent.at(-1), {type: MESSAGE.READY, ready: false});
+ client.ready();
+ assert.deepEqual(sent.at(-1), {type: MESSAGE.READY, ready: true}, 'ready defaults to true like the server');
+ client.mapVote('foundry');
+ assert.deepEqual(sent.at(-1), {type: MESSAGE.MAP_VOTE, mapId: 'foundry'});
+ assert.equal(client.mapVote(''), false, 'an empty map id never crosses the wire');
+ assert.equal(client.mapVote(null), false);
+ assert.equal(client.mapVote(42), false);
+ assert.equal(sent.length, 4, 'a malformed vote sends nothing');
+ client.rematch();
+ assert.deepEqual(sent.at(-1), {type: MESSAGE.REMATCH});
+ client.warmup();
+ assert.deepEqual(sent.at(-1), {type: MESSAGE.WARMUP});
+ client.warmup(true);
+ assert.deepEqual(sent.at(-1), {type: MESSAGE.WARMUP, cancel: true});
+});
+
+test('the ping loop derives RTT from the pong round trip without stacking probes', t => {
+ let clock = 1000;
+ t.mock.method(performance, 'now', () => clock);
+ const client = new NetClient();
+ const sent = [];
+ client.send = msg => { sent.push(msg); return true; };
+ client.connected = true;
+ assert.equal(client.rtt, null);
+ assert.equal(client.startPingLoop(), true);
+ // One probe in flight at a time: a tick while a probe is out sends nothing.
+ client._pingTick();
+ assert.deepEqual(sent, [{type: MESSAGE.PING}]);
+ client._pingTick();
+ assert.equal(sent.length, 1, 'a second tick never stacks a second probe');
+ assert.equal(client.rtt, null, 'a pong must arrive before any RTT exists');
+ clock = 1042;
+ assert.equal(client._onPong(), 42);
+ assert.equal(client.lastRtt, 42);
+ assert.equal(client.rtt, 42, 'the first sample is reported exactly');
+ assert.deepEqual(client.rttSamples, [42]);
+ // Later samples ease toward the new measurement instead of jumping.
+ client._pingTick();
+ assert.equal(sent.length, 2);
+ clock = 1162;
+ assert.equal(client._onPong(), 120);
+ assert.equal(client.lastRtt, 120);
+ assert.equal(client.rtt, 42 + (120 - 42) * .25);
+ assert.deepEqual(client.rttSamples, [42, 120]);
+ // A pong without an outstanding probe is ignored, never a sample.
+ const before = client.rtt;
+ assert.equal(client._onPong(), null);
+ assert.equal(client.rtt, before);
+ // A missing pong expires its probe and counts a miss; the slot is reusable.
+ client._pingTick();
+ clock += 6000;
+ assert.equal(client._pingTick(), true, 'the expired probe frees the slot for the next one');
+ assert.equal(client.pingMisses, 1);
+ assert.equal(sent.length, 4);
+ assert.equal(sent.at(-1).type, MESSAGE.PING);
+ // The probe only smooths while a reply is outstanding.
+ clock += 5;
+ assert.equal(client._onPong(), 5);
+ assert.equal(client.rtt, (42 + (120 - 42) * .25) + (5 - (42 + (120 - 42) * .25)) * .25);
+ client._stopPing();
+ assert.equal(client._pingTimer, null);
+ assert.equal(client.startPingLoop(), true);
+ assert.notEqual(client._pingTimer, null);
+ client.connected = false;
+ assert.equal(client.startPingLoop(), false, 'a disconnected client starts no loop');
+});
+
+test('RTT samples stay bounded and pongs without an outstanding probe are ignored', t => {
+ let clock = 0;
+ t.mock.method(performance, 'now', () => clock);
+ const client = new NetClient();
+ client.send = () => true;
+ client.connected = true;
+ for (let i = 0; i < 12; i++) {
+  clock += 10;
+  client._pingTick();
+  clock += 20;
+  client._onPong();
+ }
+ assert.equal(client.rttSamples.length, 8, 'the sample window is bounded');
+ assert.ok(client.rtt > 0 && client.rtt < 100, `a stable link reports a stable RTT (${client.rtt})`);
+ client._stopPing();
+});
+
+test('an unexpected close stamps the seat-hold window and an explicit close clears it', async t => {
+ const sockets = [];
+ class Socket {
+  static OPEN = 1;
+  constructor(){this.readyState = 0; sockets.push(this);}
+  close(){this.readyState = 3;}
+ }
+ t.mock.method(globalThis, 'WebSocket', function(){return new Socket();});
+ let clock = 500;
+ t.mock.method(performance, 'now', () => clock);
+ const client = new NetClient();
+ const pending = client.connect();
+ const ws = sockets[0];
+ ws.readyState = 1;
+ ws.onopen?.();
+ await pending;
+ assert.equal(client.disconnectedAt, null, 'a healthy socket has no hold window');
+ assert.notEqual(client._pingTimer, null, 'opening starts the probe loop');
+ clock = 900;
+ ws.readyState = 3;
+ ws.onclose?.();
+ assert.equal(client.disconnectedAt, 900, 'the client stamps its own observed disconnect');
+ assert.equal(client._pingTimer, null, 'closing stops the probe loop');
+});
+
+test('a destructive leave only confirms while a match is live or rated-unfinished', () => {
+ assert.equal(leaveNeedsConfirm(), false, 'no room leaves immediately');
+ assert.equal(leaveNeedsConfirm({started: true, roundOver: true}), false, 'a finished match leaves immediately');
+ assert.equal(leaveNeedsConfirm({started: true, roundOver: false}), true, 'a live match asks first');
+ assert.equal(leaveNeedsConfirm({rated: true, roundOver: true}), true, 'an un-started rated room asks first');
+ assert.equal(leaveNeedsConfirm({rated: true, started: true, roundOver: true}), false, 'a finished rated match leaves immediately');
+ assert.equal(leaveNeedsConfirm({rated: true, started: true, roundOver: false}), true);
+});
+
+test('the seat-hold estimate counts down from the client-observed disconnect', () => {
+ assert.equal(seatHoldSeconds(null, 0), null, 'no observed disconnect means no estimate');
+ assert.equal(seatHoldSeconds(Number.NaN, 0), null);
+ assert.equal(seatHoldSeconds(1000, 1000), SEAT_HOLD_MS / 1000);
+ assert.equal(seatHoldSeconds(1000, 15000), 6);
+ assert.equal(seatHoldSeconds(1000, 25000), 0, 'an expired window reports zero, never a negative');
+ assert.equal(seatHoldSeconds(1000, 30000, 5000), 0, 'a custom grace window is honored');
 });

@@ -1,7 +1,8 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import * as T from 'three';
-import {WeaponFeedback,EffectPool,SynthAudio,AmbientFX,WeatherFX,EMPTY_CHANNELS,MODE_THEMES,DEATH_SOUND_FAMILIES,DEATH_STYLE_SOUNDS,deathSoundFor,altVoiceFor,ALT_VOICE_IDS,POWER_CUES} from './feedback.mjs';
+import {WeaponFeedback,EffectPool,SynthAudio,AmbientFX,WeatherFX,EMPTY_CHANNELS,MODE_THEMES,DEATH_SOUND_FAMILIES,DEATH_STYLE_SOUNDS,deathSoundFor,altVoiceFor,ALT_VOICE_IDS,POWER_CUES,PICKUP_CUES,pickupCue} from './feedback.mjs';
+import {HALO_THEME} from './music.mjs';
 import {ALT_FIRE} from './alt-fire.mjs';
 import {deathPlan,DEATH_STYLES} from './deaths.mjs';
 import {SURFACE_KINDS,surfaceKind,footstepProfile,impactProfile,reportVariation,mixUnit,eventSeed} from './sfx-design.mjs';
@@ -55,16 +56,16 @@ test('pooled mesh traces honor widths and reset orientation and width on reuse',
  pool.clear();pool.add({from,to:from,size:.1,color:'#fff'});assert.equal(trace.scale.z,0);assert.ok(trace.quaternion.toArray().every(Number.isFinite));pool.dispose();
 });
 test('audio routes local and remote shots with identity falloff and dedupes bursts',()=>{
-  const {audio}=audioFixture(),shots=[],clicks=[];
+  const {audio}=audioFixture(),shots=[],dryfired=[];
   audio._gunshot=(e,local,pan,vol)=>shots.push({weapon:e.weapon,local,vol});
-  audio._click=(...args)=>clicks.push(args);
+  audio._dryfire=(pan)=>dryfired.push(pan);
   for(let weapon=0;weapon<8;weapon++)audio.event({type:'shot',actor:7,weapon,time:weapon,from:{x:100,z:100}},player);
   assert.equal(shots.length,8);assert.equal(new Set(shots.map(s=>s.weapon)).size,8);assert.ok(shots.every(s=>s.local===true&&s.vol===1));
   audio.event({type:'shot',actor:7,weapon:7,time:7,from:{x:100,z:100}},player);assert.equal(shots.length,8);
   audio.event({type:'shot',actor:0,weapon:0,time:8,from:{x:100,z:100}},player);assert.equal(shots.length,8);
   audio.event({type:'shot',actor:0,weapon:0,time:9,from:{x:0,z:0}},player);assert.equal(shots.length,9);assert.ok(shots.at(-1).local===false&&shots.at(-1).vol<1);
-  audio.event({type:'dryfire',actor:7,weapon:2},player);assert.equal(clicks.length,1);
-  audio.event({type:'dryfire',actor:0,weapon:2},player);assert.equal(clicks.length,1);
+  audio.event({type:'dryfire',actor:7,weapon:2},player);assert.equal(dryfired.length,1);
+  audio.event({type:'dryfire',actor:0,weapon:2},player);assert.equal(dryfired.length,1);
 });
 test('local damage, player hits and player kills give feedback while unrelated events stay silent',()=>{
   const {audio}=audioFixture(),plays=[];audio._play=(duration,pan)=>plays.push({duration,pan});audio._gunshot=()=>{};
@@ -1139,4 +1140,362 @@ test('alt and verb foley keep the shared mute, motion and voice-cap gates',()=>{
  const capped=audioFixture2().audio;
  for(let i=0;i<40;i++)capped.event({type:'move-start',actor:7,verb:'air-dash',time:i},player);
  assert.equal(capped.voices.size,30,'the shared voice cap still bounds the new voices');
+});
+
+// --- Priority audio pass: weapon handling, on-hit bundle, match flow ---------
+
+test('reload honours the end state and the event duration with per-weapon timbres',async()=>{
+ const {audio}=audioFixture2();const clicks=[],tones=[];
+ audio._click=(...args)=>clicks.push(args);
+ audio.tone=(...args)=>tones.push(args);
+ audio._reload(1,'start',1.2);
+ assert.equal(clicks.length,1,'the insert click opens the reload');
+ assert.equal(audio._reloadPending.size,1,'the mag-in click is scheduled from the event duration');
+ await new Promise(r=>setTimeout(r,120));
+ assert.equal(clicks.length,1,'the scheduled seat waits for the reload length');
+ audio._reload(1,'end');
+ assert.equal(clicks.length,2,'the end event seats the magazine immediately');
+ assert.equal(audio._reloadPending.size,0,'the pending seat is consumed');
+ assert.ok(clicks[1][3]>clicks[0][3],'the light weapon seat is brighter than its insert');
+ // A replayed end with no pending seat still voices exactly one seat click.
+ audio._reload(0,'end');
+ assert.equal(clicks.length,3);
+ assert.equal(audio._reload(0,'dust'),undefined,'unknown reload states stay silent');
+ // Heavy gear seats duller than light gear.
+ clicks.length=0;
+ audio._reload(1,'start',.2);audio._reload(1,'end');
+ audio._reload(0,'start',.2);audio._reload(0,'end');
+ assert.ok(clicks[1][3]<clicks[3][3],'the heavy weapon seats lower');
+ audio.dispose();
+});
+
+test('dryfire is a distinct empty-chamber voice, one per event',()=>{
+ const {audio}=audioFixture2();const plays=[],noises=[],tones=[];
+ audio._play=(duration,pan,build)=>{plays.push({duration,pan});build(0,{},[]);};
+ audio._noise=(t,o,n,opts)=>noises.push(opts);audio._tone=(t,o,n,opts)=>tones.push(opts);
+ audio.event({type:'dryfire',actor:7,weapon:2},player);
+ assert.equal(plays.length,1,'one voice');
+ assert.ok(noises.some(n=>n.type==='highpass'),'a metal chamber tick');
+ assert.ok(tones.some(t=>t.freq>1000),'a high spring snap');
+ assert.ok(tones.some(t=>t.freq<250),'an empty body thunk');
+ audio.event({type:'dryfire',actor:9,weapon:2},player);
+ assert.equal(plays.length,1,'a remote dryfire stays silent');
+});
+
+test('weapon switch splits holster and draw in one voice',()=>{
+ const {audio}=audioFixture2();const plays=[],noises=[];
+ audio._play=(duration,pan,build)=>{plays.push({duration,pan});build(0,{},[]);};
+ audio._noise=(t,o,n,opts)=>noises.push(opts);
+ audio.event({type:'weapon-switch',actor:7,weapon:2,source:'request'},player);
+ assert.equal(plays.length,1,'the whole swap is one voice');
+ const lightDraw=noises.find(n=>n.type==='highpass');
+ assert.ok(lightDraw,'the draw has a bright slide');
+ assert.ok(noises.some(n=>n.type==='lowpass'),'the holster has a dull drop');
+ noises.length=0;
+ audio.event({type:'weapon-switch',actor:7,weapon:1,source:'request'},player);
+ const heavyDraw=noises.find(n=>n.type==='highpass');
+ assert.ok(heavyDraw.freq<lightDraw.freq,'heavy gear draws duller');
+ noises.length=0;
+ audio.event({type:'weapon-switch',actor:9,weapon:1,source:'request'},player);
+ assert.equal(noises.length,0,'a remote swap stays silent');
+});
+
+test('vehicle damage voices a local hull ping scaled by amount and throttles chatter',()=>{
+ const {audio}=audioFixture2();const plays=[],tones=[];
+ audio._play=(duration,pan,build)=>{plays.push({duration,pan});build(0,{},[]);};
+ audio._tone=(t,o,n,opts)=>tones.push(opts);
+ const riding={...player,vehicleId:1};
+ audio.event({type:'vehicle-damage',vehicle:1,actor:0,amount:8,time:1,health:90},riding);
+ assert.equal(plays.length,1);
+ const soft=Math.max(...tones.map(t=>t.freq));
+ tones.length=0;
+ audio.event({type:'vehicle-damage',vehicle:1,actor:0,amount:38,time:1.2,health:60},riding);
+ assert.ok(Math.max(...tones.map(t=>t.freq))>soft,'a bigger hit pings higher');
+ tones.length=0;
+ audio.event({type:'vehicle-damage',vehicle:1,actor:0,amount:38,time:1.21,health:60},riding);
+ assert.equal(tones.length,0,'rapid hull hits are throttled');
+ audio.event({type:'vehicle-damage',vehicle:9,actor:0,amount:30,time:2},riding);
+ audio.event({type:'vehicle-damage',vehicle:2,actor:0,amount:30,time:3},player);
+ assert.equal(plays.length,2,'remote hulls and on-foot damage stay silent');
+});
+
+test('hitDirection pans a local thud by bearing and centers a missing angle',()=>{
+ const {audio}=audioFixture2();const plays=[];
+ audio._play=(duration,pan)=>plays.push({duration,pan});
+ const ahead=audio.hitDirection(0,20);
+ assert.deepEqual({directed:ahead.directed,pan:ahead.pan},{directed:true,pan:0});
+ const left=audio.hitDirection(Math.PI/2,20);
+ assert.ok(left.pan<-.8,'a positive bearing sits left of the mix');
+ const right=audio.hitDirection(-Math.PI/2,20);
+ assert.ok(right.pan>.8,'a negative bearing sits right of the mix');
+ const fallback=audio.hitDirection(NaN,20);
+ assert.deepEqual({directed:fallback.directed,pan:fallback.pan},{directed:false,pan:0},'a NaN angle falls back to the centered thud');
+ assert.equal(audio.hitDirection(undefined,20).directed,false);
+ assert.equal(plays.length,5,'one voice per call');
+ assert.equal(plays[4].pan,0);
+ audio.muted=true;
+ assert.equal(audio.hitDirection(0,20).played,false,'mute gates the thud');
+ audio.muted=false;
+ // A damage event that carries the bearing pans the same centered voice.
+ const routed=audioFixture2(),routedPlays=[];
+ routed.audio._play=(duration,pan)=>routedPlays.push({duration,pan});
+ routed.audio.event({type:'damage',id:1,time:1,actor:7,source:9,amount:20,angle:Math.PI/2},player);
+ assert.ok(routedPlays[0].pan<-.8,'a stamped bearing pans the local damage thud');
+ routed.audio.event({type:'damage',id:2,time:2,actor:7,source:9,amount:20},player);
+ assert.equal(routedPlays[1].pan,0,'an unstamped hit keeps the centered thud');
+ routed.audio.dispose();
+ // Called from the page right after the damage event, it merges into a short
+ // panned accent instead of doubling the impact.
+ const merged=audioFixture2(),mergedPlays=[];
+ merged.audio._play=(duration,pan,build)=>{mergedPlays.push({duration,pan});build(0,{},[]);};
+ merged.audio.event({type:'damage',id:1,time:1,actor:7,source:9,amount:20},player);
+ const before=mergedPlays.length;
+ const accent=merged.audio.hitDirection(Math.PI/2,20);
+ assert.equal(accent.merged,true,'a same-frame directional call merges');
+ assert.equal(mergedPlays.length,before+1,'the accent is one extra voice');
+ assert.ok(mergedPlays.at(-1).duration<.14,'the accent is shorter than the full thud');
+ assert.ok(mergedPlays.at(-1).pan<-.8,'the accent carries the bearing');
+ merged.audio.dispose();
+});
+
+test('low health warns once on the entry edge and keeps the heartbeat envelope',()=>{
+ const {audio}=audioFixture2();const plays=[];
+ audio._play=(duration,pan,build)=>{plays.push(duration);build(0,{},[]);};
+ const low={...player,health:20,maxHealth:100,grounded:true,vx:0,vy:0,vz:0};
+ audio.update(low,[],1/60);
+ assert.equal(plays.length,2,'the entry frame beats and warns');
+ assert.equal(plays[0],.22,'the heartbeat envelope duration pin is unchanged');
+ assert.equal(plays[1],.34,'the entry warning is its own one-shot');
+ audio.update(low,[],1/60);
+ assert.equal(plays.length,2,'the warning does not repeat on the next frame');
+ const afterWarn=plays.length;
+ audio.update({...low},[],1.2);
+ assert.ok(plays.length>afterWarn,'the heartbeat keeps ticking');
+ const heartbeats=plays.length;
+ audio.update({...low,health:100},[],1/60);
+ assert.equal(plays.length,heartbeats,'recovering above the threshold is silent');
+ audio.update(low,[],1/60);
+ assert.equal(plays.length,heartbeats+2,'dropping back under the threshold warns again');
+});
+
+test('a local spawn gets a boot-up cue and never the objective motif',()=>{
+ const {audio}=audioFixture2();const plays=[],beats=[];
+ audio._play=(duration,pan,build)=>{plays.push(duration);build(0,{},[]);};
+ audio._beat=(...args)=>beats.push(args);
+ audio.event({type:'spawn',actor:7,pos:{x:0,y:0,z:0},time:5},player);
+ assert.equal(plays.length,1,'the local spawn boots up');
+ assert.equal(beats.length,0,'spawn no longer falls through to the objective blip');
+ audio.event({type:'spawn',actor:9,pos:{x:0,y:0,z:0},time:5},player);
+ assert.equal(plays.length,1,'a remote spawn stays silent');
+});
+
+test('match start is an idempotent FIGHT sting and countdowns edge 3-2-1-GO',()=>{
+ const {audio}=audioFixture2();let stings=0;const beeps=[];
+ audio._fightSting=()=>{stings++;return true;};
+ audio._countdownBeep=(beat,go)=>beeps.push({beat,go});
+ audio.event({type:'spawn',id:1,time:.1,actor:3},player);
+ assert.equal(stings,1,'the opening spawn fires the FIGHT sting');
+ audio.event({type:'spawn',id:2,time:.2,actor:4},player);
+ assert.equal(stings,1,'the next opening spawn cannot repeat it');
+ for(let i=0;i<20;i++)audio.event({type:'damage',id:10+i,time:5+i,actor:7,source:0,amount:3},player);
+ assert.equal(stings,1,'later events never re-fire the sting');
+ audio.matchEnd();
+ audio.event({type:'spawn',id:99,time:.4,actor:3},player);
+ assert.equal(stings,2,'a rematch after matchEnd can fire again');
+ audio.matchEnd();
+ // Countdown: every number once and a GO on the countdown -> racing flip.
+ assert.deepEqual(audio.countdown({phase:'countdown',countdown:3}),{played:true,go:false,beat:3});
+ assert.deepEqual(audio.countdown({phase:'countdown',countdown:2.9}),{played:false,go:false,beat:3},'the same number does not repeat');
+ assert.deepEqual(audio.countdown({phase:'countdown',countdown:2}),{played:true,go:false,beat:2});
+ assert.deepEqual(audio.countdown({phase:'countdown',countdown:1}),{played:true,go:false,beat:1});
+ assert.deepEqual(audio.countdown({phase:'countdown',countdown:.4}),{played:false,go:false,beat:1});
+ assert.deepEqual(audio.countdown({phase:'racing',countdown:0}),{played:true,go:true,beat:0});
+ assert.deepEqual(audio.countdown({phase:'racing',countdown:0}),{played:false,go:false,beat:0});
+ assert.deepEqual(beeps,[{beat:3,go:false},{beat:2,go:false},{beat:1,go:false},{beat:0,go:true}]);
+ // The one-call snapshot entry point is safe to run every frame.
+ const frame={config:{mode:'cocs',timeLimit:600},time:0,over:false,race:{phase:'countdown',countdown:3}};
+ assert.equal(audio.setMatchState(frame).started,true,'the live snapshot can drive the match start');
+ assert.equal(audio.setMatchState(frame).started,false,'a repeated frame cannot re-fire the sting');
+ assert.equal(audio.setMatchState(frame).countdown.played,false,'a repeated countdown frame stays silent');
+ // A mid-race join (first report is already running) never fakes a GO.
+ const fresh=audioFixture2().audio;const freshBeeps=[];
+ fresh._countdownBeep=(beat,go)=>freshBeeps.push({beat,go});
+ assert.equal(fresh.countdown({phase:'playing',countdown:0}).played,false);
+ assert.equal(freshBeeps.length,0);
+ // Soccer kickoff uses the same detector.
+ assert.equal(fresh.countdown({phase:'kickoff',countdown:2.2}).beat,3);
+ assert.equal(fresh.countdown({phase:'playing',countdown:0}).go,true);
+ audio.dispose();fresh.dispose();
+});
+
+test('the final-ten-seconds warning fires once per match',()=>{
+ const {audio}=audioFixture2();const beats=[];
+ audio._beat=(cue,pan,vol)=>beats.push({cue,pan,vol});
+ assert.equal(audio.finalSecondsWarning(40).warned,false);
+ assert.equal(audio.finalSecondsWarning(10.2).warned,false,'the far side of ten is silent');
+ assert.equal(audio.finalSecondsWarning(9.5).warned,true);
+ assert.equal(beats.length,1,'one voice for the final call');
+ assert.equal(audio.finalSecondsWarning(8).warned,false,'it never repeats');
+ audio.matchStart({restart:true});
+ assert.equal(audio.finalSecondsWarning(9).warned,true,'a fresh match re-arms the warning');
+ audio.dispose();
+});
+
+test('zone progress is quantized per zone plus contested and owner flips',()=>{
+ const {audio}=audioFixture2();const beats=[];
+ audio._beat=(cue,pan,vol)=>beats.push({cue,pan,vol});
+ const ev=extra=>audio.event({type:'zone-progress',id:1,time:1,...extra},player);
+ ev({zone:'A',progress:4,team:0,contested:false});
+ assert.equal(beats.length,0,'the first sighting seeds silently');
+ ev({zone:'A',progress:8,team:0,contested:false});
+ assert.equal(beats.length,0,'a same-bucket tick stays silent');
+ ev({zone:'A',progress:26,team:0,contested:false});
+ assert.equal(beats.length,1,'the 25% bucket sounds');
+ ev({zone:'A',progress:51,team:0,contested:false});
+ ev({zone:'A',progress:76,team:0,contested:false});
+ assert.equal(beats.length,3);
+ ev({zone:'A',progress:80,team:0,contested:false});
+ assert.equal(beats.length,3,'holding a bucket stays quiet');
+ ev({zone:'A',progress:80,team:0,contested:true});
+ assert.equal(beats.length,4,'a contested flip sounds');
+ ev({zone:'A',progress:60,team:1,contested:true});
+ assert.equal(beats.length,5,'an owner flip sounds');
+ ev({zone:'B',progress:2,team:null,contested:false});
+ assert.equal(beats.length,5,'another zone seeds independently');
+ for(let i=0;i<100;i++)ev({zone:`Z${i}`,progress:30,team:0,contested:false});
+ assert.ok(audio._zoneAudio.size<=64,'the per-zone state stays bounded');
+ audio.dispose();
+});
+
+test('pickup kinds keep their own motifs and weapon pickups share one',()=>{
+ const {audio}=audioFixture2();const tones=[];
+ audio._play=(duration,pan,build)=>build(0,{},[]);
+ audio._tone=(t,o,n,opts)=>tones.push(opts.freq);
+ audio._noise=()=>{};
+ const pick=kind=>{tones.length=0;audio.event({type:'pickup',id:1,time:1,actor:7,kind},player);return [...tones];};
+ const health=pick('health'),armor=pick('armor'),ammo=pick('ammo'),rocket=pick('rocket'),rail=pick('rail');
+ assert.notDeepEqual(health,armor);
+ assert.notDeepEqual(health,ammo);
+ assert.notDeepEqual(armor,ammo);
+ assert.ok(health.length>=3,'health is a rising supply line');
+ assert.deepEqual(rocket,rail,'every weapon pickup shares the weapon identity');
+ assert.ok(PICKUP_CUES.weapon&&pickupCue('megahealth')===PICKUP_CUES.megahealth);
+ assert.equal(pickupCue('unknown-kind'),PICKUP_CUES.weapon);
+ assert.equal(pickupCue(null).notes.length,2,'a bare pickup keeps the historical motif');
+ audio.dispose();
+});
+
+test('misc objective beats have cue-table entries and one voice each',()=>{
+ const {audio}=audioFixture2();const plays=[],beats=[];
+ audio._play=(duration,pan,build)=>{plays.push(duration);build(0,{},[]);};
+ audio._beat=(cue,pan,vol)=>beats.push({cue,vol});
+ audio.setModeTheme('ctf');
+ const root=audio.theme.root;
+ for(const type of ['loadout-switch','threat-ping','mission-won','mission-lost','horde-upgrade','horde-modifier','assault-breach','payload-checkpoint','juggernaut-transfer'])audio.event({type,id:1,time:1,actor:7,from:{x:0,z:0}},player);
+ assert.equal(beats.length,9,'every misc beat spends one voice');
+ assert.equal(audio.theme.root,root,'the cue does not retune the theme');
+ // An actor-specific utility beat from another actor stays silent.
+ beats.length=0;
+ audio.event({type:'threat-ping',id:2,time:2,actor:9,from:{x:0,z:0}},player);
+ audio.event({type:'loadout-switch',id:3,time:2,actor:9,from:{x:0,z:0}},player);
+ assert.equal(beats.length,0,'remote utility beats are local-only');
+ audio.dispose();
+});
+
+test('cocs mode themes exist and leaving results restores the menu motif',()=>{
+ const {audio}=musicFixture();
+ assert.ok(MODE_THEMES.cocs&&MODE_THEMES['cocs-coop'],'the LATTICE modes have tonal centres');
+ assert.equal(audio.setModeTheme('cocs'),'cocs');
+ assert.equal(audio.theme,MODE_THEMES.cocs);
+ assert.equal(audio.setModeTheme('cocs-coop'),'cocs-coop');
+ assert.notEqual(MODE_THEMES.cocs.root,MODE_THEMES['cocs-coop'].root,'the two LATTICE modes stay distinct');
+ audio.setOutcome('victory');
+ assert.equal(audio.musicEngine.outcome,'victory');
+ assert.equal(audio.musicEngine.scene,'results');
+ audio.setScene('game');
+ assert.equal(audio.musicEngine.outcome,'victory','the results outcome survives the in-game scene request');
+ audio.matchStart({restart:true});
+ assert.equal(audio.musicEngine.outcome,null,'a new match releases the stale outcome');
+ audio.setOutcome('defeat');
+ audio.setScene('menu');
+ assert.equal(audio.musicEngine.outcome,null,'returning to the menu restores the menu motif');
+ assert.equal(audio.musicEngine.scene,'menu');
+ audio.setSoundtrack('halo');
+ audio.setModeTheme('cocs-coop');
+ assert.equal(audio.theme,HALO_THEME,'the halo pack keeps its single modal centre');
+ audio.dispose();
+});
+
+test('an outcome take is restored to the menu motif when it clears',()=>{
+ configureMothAssets({version:1,motifs:{'moth-victory':{bpm:60,notes:[{step:0,midi:62,dur:4},{step:4,midi:65,dur:4}]}}});
+ try{
+  const {audio}=musicFixture();
+  const menuMotif={bpm:60,notes:[{step:0,midi:69,dur:4},{step:4,midi:72,dur:4}]};
+  audio.setMotif(menuMotif);
+  const menuLead=[...audio.musicEngine.motifLead];
+  audio.setOutcome('victory');
+  assert.notDeepEqual(audio.musicEngine.motifLead,menuLead,'the victory take replaces the menu motif');
+  audio.setOutcome(null);
+  assert.deepEqual(audio.musicEngine.motifLead,menuLead,'clearing the outcome restores the menu motif');
+  audio.dispose();
+ }finally{resetMothAssets();}
+});
+
+test('weather routes the biome mood, precipitation presence and the Moth layer',()=>{
+ const {audio}=musicFixture();const moth=[];
+ audio.setMothAudio({setEnabled:()=>{},setScene:()=>{},setIntensity:()=>{},setBedMood:v=>moth.push(['mood',v]),setWeather:v=>moth.push(['weather',v]),tick:()=>{},dispose:()=>{}});
+ audio.setBiomeMood('hot');
+ assert.equal(audio.bedMood,'hot','the biome mood reaches the bed with no weather override');
+ assert.equal(audio.setArenaBiome('frostbite'),'cold','an arena id resolves through the shared biome table');
+ audio.setWeather('rain');
+ assert.equal(audio.weather,'rain');
+ assert.ok(audio.precip&&audio.precip.kind==='rain','rain starts a precipitation layer');
+ assert.notEqual(audio.bedMood,'default','the weather mood wins over the biome fallback');
+ assert.ok(moth.some(([k,v])=>k==='weather'&&v==='rain'),'the Moth layer receives the weather kind');
+ const layer=audio.precip;
+ audio.setWeather(null);
+ assert.equal(audio.precip,null,'clear weather releases the layer');
+ assert.ok(layer.src.stopped===true);
+ assert.equal(audio.bedMood,'cold','clear falls back to the biome mood');
+ assert.ok(moth.some(([k,v])=>k==='weather'&&v===null));
+ audio.setWeather('snow');
+ assert.equal(audio.precip.kind,'snow');
+ audio.setMuted(true);
+ assert.equal(audio.precip,null,'mute releases precipitation');
+ audio.setMuted(false);
+ assert.equal(audio.precip.kind,'snow','unmute restores the active weather layer');
+ audio.setWeather('bogus');
+ assert.equal(audio.weather,'clear','an unknown kind resolves through the shared preset table');
+ assert.equal(audio.precip,null);
+ // The view already sends the weather-driven bed mood; a storm mood alone is
+ // enough to bring the rain presence in when no explicit kind was set.
+ audio.setWeather(null);
+ audio.setBedMood('storm');
+ assert.ok(audio.precip&&audio.precip.kind==='rain','the storm bed mood infers the rain presence');
+ audio.setBedMood('cold');
+ assert.equal(audio.precip,null,'other moods stay silent without an explicit kind');
+ audio.dispose();
+});
+
+test('the effects glue compresses and soft-clips before the master, then disconnects',()=>{
+ const created=[];
+ const param=()=>({value:0,setValueAtTime(){},setTargetAtTime(){}});
+ const node=()=>{const n={gain:param(),frequency:param(),Q:param(),pan:param(),threshold:param(),knee:param(),ratio:param(),attack:param(),release:param(),curve:null,oversample:'',connect(to){this.to=to;},disconnect(){this.disconnected=true;},start(){},stop(){}};created.push(n);return n;};
+ const ctx={currentTime:0,state:'running',sampleRate:44100,destination:{},createGain:()=>node(),createOscillator:()=>node(),createBiquadFilter:()=>node(),createBufferSource:()=>node(),createStereoPanner:()=>node(),createDynamicsCompressor:()=>node(),createWaveShaper:()=>node(),createBuffer:(ch,len)=>({getChannelData:()=>new Float32Array(len)}),close(){this.closed=true;}};
+ const audio=new SynthAudio();audio.ctx=ctx;audio.noiseBuffer={};
+ audio._ensureBuses();
+ assert.ok(Array.isArray(audio.effectsGlue)&&audio.effectsGlue.length===2,'a compressor and a soft clip');
+ assert.equal(audio.effectsBus.to,audio.effectsGlue[0],'the effects bus feeds the glue, not the master');
+ assert.equal(audio.effectsGlue[0].to,audio.effectsGlue[1]);
+ assert.equal(audio.effectsGlue[1].to,audio.master);
+ assert.equal(audio.audioStatus().glue,'on');
+ const glue=[...audio.effectsGlue];
+ audio.dispose();
+ assert.ok(glue.every(n=>n.disconnected===true),'the glue is released on dispose');
+});
+
+test('without compressor or waveshaper the effects bus keeps the legacy topology',()=>{
+ const {audio}=audioFixture2();
+ assert.equal(audio.effectsGlue,null,'the fixture has neither node');
+ assert.equal(audio._makeEffectsGlue(),null);
 });

@@ -87,7 +87,9 @@ export function Banner({tone='default',children}:{tone?:'default'|'error'|'warn'
 // child dialog is stacked over: it stays rendered underneath (so the child can
 // be dismissed back into it) but leaves the accessibility tree, cannot receive
 // pointer or keyboard focus, and never claims `aria-modal`.
-const MODAL_FOCUS_SELECTOR='button:not(:disabled),input:not(:disabled),select:not(:disabled),textarea:not(:disabled),a[href],summary,[tabindex]:not([tabindex="-1"])';
+// Exported so the page-level Tab trap and the respawn editor cycle exactly the
+// same set of controls (links, textareas and summaries included).
+export const MODAL_FOCUS_SELECTOR='button:not(:disabled),input:not(:disabled),select:not(:disabled),textarea:not(:disabled),a[href],summary,[tabindex]:not([tabindex="-1"])';
 
 /** The element a dialog should return focus to. The page body itself is not an
  *  opener: a dialog opened over nothing must not focus the document on close. */

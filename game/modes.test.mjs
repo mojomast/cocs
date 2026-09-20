@@ -40,6 +40,18 @@ test('new modes register distinct mechanics without disturbing existing mode IDs
   assert.equal(GAME_MODES.find(m=>m.id==='deathmatch').rules.score,'frags');
 });
 
+test('instagib, rockets and arsenal pin explicit FFA sudden-death defaults',()=>{
+  for(const id of ['instagib','rockets','arsenal']){
+    const mode=GAME_MODES.find(entry=>entry.id===id);
+    assert.ok(mode?.rules,`${id} declares rules instead of borrowing Deathmatch`);
+    assert.equal(mode.rules.team,false);
+    assert.equal(mode.rules.score,'frags');
+    assert.equal(mode.rules.fragLimit,15);
+    assert.ok(mode.rules.suddenDeathSeconds>0&&mode.rules.suddenDeathSeconds<=60,`${id} sudden death`);
+    assert.equal(normalizeConfig({mode:id}).fragLimit,15);
+  }
+});
+
 test('CTF assigns teams, flag lifecycle and capture preconditions',()=>{
  const m=new Match('chatgpt','openclaw',rng,'exchange',{mode:'ctf',botCount:1,fragLimit:5});
  const [a,b]=m.actors;a.health=100;b.health=100;

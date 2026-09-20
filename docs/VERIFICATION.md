@@ -97,9 +97,9 @@ enabled.
 
 **Automated release gate (2026-09-20).**
 
-- `npm test`: pass. Game tests: 2,762 pass, 8 approved skips, 0 fail (2,770
+- `npm test`: pass. Game tests: 2,836 pass, 8 approved skips, 0 fail (2,844
   tests); server tests: 212 pass, 0 fail; TypeScript: pass; verified production
-  build: pass; SSR/UI and deployment-contract tests: 91 pass, 0 fail.
+  build: pass; SSR/UI and deployment-contract tests: 100 pass, 0 fail.
 - Moth-focused suites are part of that run: bake-runner integrity
   (`moth-bake-run.test.mjs`), GIF decode / grid-texture / GIF-frame bakers and
   generated sources (`moth-bake-pixels.test.mjs`), variant generation and mixed

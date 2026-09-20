@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { DEMO_VERSION, demoHeader, compressDemo } from './demo.mjs';
-import { setDemoStorage, saveDemo, getDemo, listDemos, deleteDemo, demoSummary, demoHighlights, demoOutcome, demoModes, demoMaps, filterDemos, sortDemos, demoFileName, exportDemo, importDemo, importDemoToStore } from './demo-store.mjs';
+import { setDemoStorage, saveDemo, getDemo, listDemos, deleteDemo, demoSummary, demoHighlights, demoOutcome, demoModes, demoMaps, filterDemos, sortDemos, demoFileName, demoUsage, demoUsageText, exportDemo, importDemo, importDemoToStore } from './demo-store.mjs';
 
 function createMemoryStorage() {
   const meta = new Map();
@@ -184,6 +184,27 @@ test('demoFileName sanitizes the mode and stamp', () => {
   const name = demoFileName({createdAt: '2020-01-02T03:04:05.000Z', header: {config: {mode: 'team death/match'}}});
   assert.match(name, /^cocs-replay-teamdeathmatch-20200102T030405000Z\.json$/);
   assert.match(demoFileName({}), /^cocs-replay-match-\d+\.json$/);
+});
+
+test('demoUsage reports the library size when the store exposes it', async () => {
+  const storage = createMemoryStorage();
+  storage.usage = async () => ({count: 3, bytes: 5 * 1024 * 1024});
+  setDemoStorage(storage);
+  assert.deepEqual(await demoUsage(), {count: 3, bytes: 5 * 1024 * 1024, measured: true});
+  assert.equal(demoUsageText({count: 3, bytes: 5 * 1024 * 1024}), '3 REPLAYS · 5.0 MB');
+  assert.equal(demoUsageText({count: 1, bytes: 2 * 1024 * 1024}), '1 REPLAY · 2.0 MB');
+  assert.equal(demoUsageText({count: 2, bytes: 12 * 1024 * 1024}), '2 REPLAYS · 12 MB');
+  assert.equal(demoUsageText({count: 1, bytes: 0}), '1 REPLAY');
+  assert.equal(demoUsageText({count: 2, bytes: 800}), '2 REPLAYS · 1 KB');
+  assert.equal(demoUsageText(null), '0 REPLAYS');
+
+  // A store without sizes still counts, but never invents a measurement.
+  setDemoStorage(createMemoryStorage());
+  await saveDemo(makeDemo());
+  const counted = await demoUsage();
+  assert.equal(counted.count, 1);
+  assert.equal(counted.measured, false);
+  assert.equal(demoUsageText(counted), '1 REPLAY');
 });
 
 test('trimDemo caps an oversized recording when saving', async () => {

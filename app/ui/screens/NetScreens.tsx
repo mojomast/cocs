@@ -1,9 +1,10 @@
 'use client';
-import {useState} from 'react';
+import {useEffect,useState} from 'react';
 import {MatchConfiguration} from '../../game-ui/configuration';
-import {Shell,TopBar,PageHead,Panel,Btn,Tabs,Field,Chip,Empty,Banner,ActionRail,SelectCard,Segmented} from '../primitives';
+import {Shell,TopBar,PageHead,Panel,Btn,Tabs,Field,Chip,Empty,Banner,ActionRail,SelectCard,Segmented,Modal} from '../primitives';
 import type {ScreenProps} from '../contract';
 import {inviteLink} from '../../../game/invite.mjs';
+import {leaveNeedsConfirm,seatHoldSeconds,SEAT_HOLD_MS} from '../../../game/net.mjs';
 import {PLACEMENT_MATCHES,rankFor} from '../../../game/ranked.mjs';
 
 const copyText=async(text:string)=>{
@@ -129,10 +130,37 @@ export function BrowseScreen({ui}:ScreenProps){
 }
 
 export function LobbyScreen({ui}:ScreenProps){
- const {netPlayers=[],myPeerId,netRoomId,netError,chatLog=[],chatDraft='',setChatDraft,sendChat,newMessages,setNewMessages,lobbyInputRef,lobbyChatRef,chatAtBottom,voicePanel,config,setConfig,mapId,setMapId,selectableMaps=[],selectedMap,selectedMode,hostAndStart,reconnectNet,resumeNet,disconnectNet,net={},ranked,rankedQueued,queueRanked,cancelQueue}=ui;
+ const {netPlayers=[],myPeerId,netRoomId,netError,chatLog=[],chatDraft='',setChatDraft,sendChat,newMessages,setNewMessages,lobbyInputRef,lobbyChatRef,chatAtBottom,voicePanel,config,setConfig,mapId,setMapId,selectableMaps=[],selectedMap,selectedMode,hostAndStart,reconnectNet,resumeNet,disconnectNet,netReady,netMapVote,netRematch,netWarmup,getMap,runtime,net={},ranked,rankedQueued,queueRanked,cancelQueue}=ui;
  const connected=!!net.connected;
  const chatAtBottomRef=chatAtBottom;
  const [copied,setCopied]=useState(false);
+ // Lobby lifecycle, mirrored verbatim from the server's `lifecycle()` payload.
+ // Every tally is authoritative; the local flags below only remember what this
+ // client just sent so a control can render its optimistic pressed state.
+ const lifecycle=net.lifecycle??null;
+ const ratedRoom=ranked?.queue==='ranked'||rankedQueued!=null;
+ const needsLeaveConfirm=leaveNeedsConfirm({started:net.started===true,roundOver:net.roundOver===true,rated:ratedRoom});
+ const [confirmLeave,setConfirmLeave]=useState(false);
+ const [voteMapId,setVoteMapId]=useState('');
+ // Optimistic local vote flags are scoped to a room+round key, so a new room or
+ // round derives a clean slate during render instead of resetting in effects.
+ const voteScopeKey=`${netRoomId}:${net.roundOver===true?'over':'live'}`;
+ const [voteScope,setVoteScope]=useState({key:voteScopeKey,map:null as string|null,rematch:false});
+ const scoped=voteScope.key===voteScopeKey?voteScope:{key:voteScopeKey,map:null,rematch:false};
+ const myMapVote=scoped.map,myRematchVote=scoped.rematch;
+ const setMyMapVote=(value:string)=>setVoteScope({key:voteScopeKey,map:value,rematch:scoped.rematch});
+ const setMyRematchVote=(value:boolean)=>setVoteScope({key:voteScopeKey,map:scoped.map,rematch:value});
+ // One-second mirror of the live transport: the seat-hold countdown and the
+ // measured RTT refresh on the interval stamp, never from a stale render.
+ const [uiTick,setUiTick]=useState(0);
+ useEffect(()=>{const id=setInterval(()=>setUiTick(typeof performance!=='undefined'?performance.now():Date.now()),1000);return()=>clearInterval(id);},[]);
+ const liveNet=runtime?.current?.net;
+ const holdLeft=uiTick?seatHoldSeconds(net.disconnectedAt??liveNet?.disconnectedAt,uiTick):null;
+ const liveRtt=Number.isFinite(liveNet?.rtt)?liveNet.rtt:(Number.isFinite(net.rtt)?net.rtt:null);
+ const voteOptions=Array.isArray(selectableMaps)?selectableMaps:[];
+ const voteValue=voteOptions.some((m:any)=>m?.id===voteMapId)?voteMapId:(voteOptions[0]?.id??mapId??'');
+ const voteRows=lifecycle?Object.entries(lifecycle.mapVotes??{}).map(([id,count]:[string,any])=>({id,name:getMap?.(id)?.name??id,votes:Number(count)||0})).sort((a:any,b:any)=>b.votes-a.votes||String(a.name).localeCompare(String(b.name))):[];
+ const rematchShort=lifecycle?Math.max(0,(Number(lifecycle.rematchNeeded)||0)-(Number(lifecycle.rematch)||0)):0;
  const myRank=ranked?.players?.[myPeerId]??null;
  const rankInfo=myRank?rankFor(myRank.rating,myRank.matches):null;
  const lastMatch=ranked?.last?.entries?.find((entry:any)=>entry.peerId===myPeerId)??null;
@@ -143,7 +171,7 @@ export function LobbyScreen({ui}:ScreenProps){
    {ranked?.queue==='ranked'&&<Chip tone="accent">RANKED</Chip>}
    {netRoomId&&<Btn onClick={copyInvite}>{copied?'LINK COPIED':'COPY INVITE LINK'}</Btn>}
    {net.isHost?<Btn variant="primary" onClick={hostAndStart} disabled={!connected}>START NETWORK MATCH</Btn>:<Chip tone={connected?'default':'danger'}>{connected?(net.spectate?'SPECTATING':'WAITING ON HOST'):'DISCONNECTED'}</Chip>}
-   <Btn variant="danger" onClick={disconnectNet}>DISCONNECT</Btn>
+   <Btn variant="danger" onClick={()=>{if(needsLeaveConfirm)setConfirmLeave(true);else disconnectNet();}}>DISCONNECT</Btn>
   </ActionRail>}>
    <PageHead eyebrow="PLAYERS ONLINE" title={<>Gather at the server<span>.</span></>} lede="First to join hosts the match. Escape during play returns here."/>
    {netRoomId&&<div className="toolbar">
@@ -155,8 +183,14 @@ export function LobbyScreen({ui}:ScreenProps){
    <Panel label="01 / PLAYERS" meta={`${netPlayers.length} CONNECTED`} bodyClass="stack">
     <div className="stack stack--tight">
      {netPlayers.map((p:any,i:number)=>{
-      const status=p.spectate?'SPECTATOR':p.connected===false?'DISCONNECTED · SEAT HELD':p.peerId===net.hostId?'HOST':p.actorId!==null&&p.actorId!==undefined?'IN MATCH':'READY';
-      return <SelectCard key={p.peerId} selected={p.peerId===myPeerId} name={p.name} tag={status} meta={p.spectate?'WATCH':p.connected===false?'…':p.actorId!==null&&p.actorId!==undefined?`A${p.actorId}`:String(i+1).padStart(2,'0')}/>;
+      const status=p.spectate?'SPECTATOR':p.connected===false?'DISCONNECTED · SEAT HELD':p.peerId===net.hostId?'HOST':p.actorId!==null&&p.actorId!==undefined?'IN MATCH':p.ready===true?'READY':'NOT READY';
+      const mine=p.peerId===myPeerId;
+      return <div key={p.peerId} className="row row--between">
+       <SelectCard selected={mine} name={p.name} tag={status} meta={p.spectate?'WATCH':p.connected===false?'…':p.actorId!==null&&p.actorId!==undefined?`A${p.actorId}`:String(i+1).padStart(2,'0')}/>
+       {!p.spectate&&(mine
+        ?<Btn size="sm" aria-pressed={p.ready===true} aria-label={p.ready===true?'Cancel your ready status':'Mark yourself ready'} onClick={()=>netReady(p.ready!==true)} disabled={!connected}>{p.ready===true?'READY ✓':'MARK READY'}</Btn>
+        :<Chip tone={p.ready===true?'accent':'default'}>{p.ready===true?'READY':'NOT READY'}</Chip>)}
+      </div>;
      })}
      {netPlayers.length===0&&<Empty title="No players">Waiting for players to connect.</Empty>}
     </div>
@@ -184,6 +218,7 @@ export function LobbyScreen({ui}:ScreenProps){
     </div>}
     {!connected?<>
      {netError&&<Banner tone="error">{netError||'Connection lost.'}</Banner>}
+     {holdLeft!==null&&<p className="field-note">{holdLeft>0?`SEAT HELD ~${holdLeft}s · RECONNECT before the server recycles your seat.`:'SEAT HOLD WINDOW PASSED · RECONNECT TO REJOIN.'}</p>}
      <Btn variant="primary" onClick={reconnectNet}>RECONNECT</Btn>
     </>:net.started&&(net.actorId!==null&&net.actorId!==undefined||net.spectate)&&!net.roundOver?<>
      <p className="field-note">Your match is still running. Return without restarting the round.</p>
@@ -200,7 +235,34 @@ export function LobbyScreen({ui}:ScreenProps){
      <p className="field-note">{selectedMode?.name} · {config?.botCount??0} BOTS · {netPlayers.length} PLAYERS</p>
      <Btn variant="primary" size="lg" onClick={hostAndStart} disabled={!connected}>START NETWORK MATCH</Btn>
     </>:<p className="field-note">Waiting for the host to choose match settings and start. You will be placed automatically.</p>}
+    {connected&&lifecycle&&<div className="stack stack--tight" role="group" aria-label="Lobby readiness">
+     <div className="row row--between"><span className="label">READINESS</span><span className="label">{Number(lifecycle.ready)||0} / {Number(lifecycle.readyNeeded)||0} READY</span></div>
+     {liveRtt!==null&&<p className="field-note">YOUR PING · {Math.round(liveRtt)}MS · {liveRtt<60?'GOOD':liveRtt<120?'FAIR':'POOR'}</p>}
+     {lifecycle.phase==='warmup'
+      ?<div className="row row--between"><p className="field-note">WARMUP · MATCH STARTS IN {Math.max(0,Math.ceil(Number(lifecycle.warmup)||0))}s</p>{net.isHost&&!net.spectate&&<Btn size="sm" onClick={()=>netWarmup(true)}>CANCEL WARMUP</Btn>}</div>
+      :net.isHost&&!net.spectate&&(net.started!==true||net.roundOver===true)&&<Btn size="sm" onClick={()=>netWarmup(false)} disabled={!connected}>START WARMUP · {Number(lifecycle.readyNeeded)||0} READY NEEDED</Btn>}
+     <p className="field-note">Ready feeds the warmup gate only: the host can still start directly at any time.</p>
+    </div>}
+    {connected&&lifecycle&&<div className="stack stack--tight" role="group" aria-label="Map votes">
+     <div className="row row--between"><span className="label">MAP VOTES</span><span className="label">{lifecycle.mapVoteWinner?`LEADING · ${getMap?.(lifecycle.mapVoteWinner)?.name??lifecycle.mapVoteWinner}`:'NO VOTES YET'}</span></div>
+     {voteRows.length>0&&<p className="field-note">{voteRows.map((row:any)=>`${row.name} · ${row.votes}`).join('   /   ')}</p>}
+     <div className="toolbar">
+      <label className="config-field"><span>Your map</span><select aria-label="Map vote" value={voteValue} onChange={e=>setVoteMapId(e.target.value)} disabled={!connected||net.spectate===true}>{voteOptions.map((m:any)=><option key={m.id} value={m.id}>{m.name}{lifecycle.mapVotes?.[m.id]?` · ${lifecycle.mapVotes[m.id]} VOTE${Number(lifecycle.mapVotes[m.id])===1?'':'S'}`:''}</option>)}</select></label>
+      <Btn size="sm" aria-pressed={myMapVote===voteValue} aria-label={myMapVote===voteValue?`Change your map vote to ${getMap?.(voteValue)?.name??voteValue}`:`Vote for ${getMap?.(voteValue)?.name??voteValue}`} onClick={()=>{if(!voteValue)return;setMyMapVote(voteValue);netMapVote(voteValue);}} disabled={!connected||net.spectate===true||!voteValue}>{myMapVote===voteValue?'VOTE CAST · CHANGE':'VOTE FOR MAP'}</Btn>
+     </div>
+    </div>}
+    {connected&&lifecycle&&net.started===true&&<div className="stack stack--tight" role="group" aria-label="Rematch vote">
+     <div className="row row--between"><span className="label">REMATCH</span><span className="label">{Number(lifecycle.rematch)||0} / {Number(lifecycle.rematchNeeded)||0} VOTES</span></div>
+     <Btn size="sm" aria-pressed={myRematchVote} aria-label={myRematchVote?'Your rematch vote is cast':'Vote for a rematch'} onClick={()=>{setMyRematchVote(true);netRematch();}} disabled={!connected||net.spectate===true||net.roundOver!==true}>{myRematchVote?'REMATCH VOTE CAST':'VOTE REMATCH'}</Btn>
+     <p className="field-note">{lifecycle.rematchReady===true?'GATE MET · THE HOST CAN RESTART WITHOUT A WARMUP.':net.roundOver!==true?'REMATCH VOTES COUNT ONCE THE ROUND ENDS.':`REMATCH NEEDS ${rematchShort} MORE VOTE${rematchShort===1?'':'S'}.`}</p>
+    </div>}
     {netError&&connected&&<Banner tone="error">{netError}</Banner>}
+    <Modal open={confirmLeave} onClose={()=>setConfirmLeave(false)} size="sm" eyebrow="CONFIRM" title="Leave this match?" footer={<>
+     <Btn onClick={()=>setConfirmLeave(false)}>STAY IN MATCH</Btn>
+     <Btn variant="danger" onClick={()=>{setConfirmLeave(false);disconnectNet();}}>LEAVE MATCH</Btn>
+    </>}>
+     <p className="field-note">{net.started===true&&net.roundOver!==true?'The round is still running.':ratedRoom?'This room is rated.':''} After a disconnect the server holds your seat for about {Math.round(SEAT_HOLD_MS/1000)}s, so reconnecting can return you to it.</p>
+    </Modal>
    </Panel>
   </div>
  </Shell>;

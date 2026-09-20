@@ -689,9 +689,9 @@ export function wetSheenTexture({size=128,seed=1}={}){
  }
  ctx.putImageData(image,0,0);
  const map=new T.CanvasTexture(canvas);
- map.wrapS=map.wrapT=T.RepeatWrapping;
  map.colorSpace=T.NoColorSpace;
- map.needsUpdate=true;
+ // Same mip/anisotropy policy as the Moth DataTextures, applied at creation.
+ applyMothSampling(map);
  map.userData.surfaceKind='wet';
  wetCache.set(key,map);
  return map;
@@ -719,8 +719,8 @@ export function configureMothSampling(options={}){
  mothSampling.anisotropy=clampMothAnisotropy(opts.anisotropy===undefined?MOTH_SAMPLING_DEFAULT_ANISOTROPY:opts.anisotropy);
  // Live switch: already-built Moth textures are re-stamped with the new policy
  // (needsUpdate re-uploads them), so a lab toggle changes the current scene
- // without waiting for a cache rebuild. Procedural CanvasTextures are not Moth
- // data and are deliberately left alone.
+ // without waiting for a cache rebuild. Procedural CanvasTextures follow the
+ // policy that was live when they were generated and are not re-stamped.
  const seen=new Set();
  const restamp=texture=>{
   if(!texture?.isDataTexture||!texture.userData?.mothShared||seen.has(texture))return;
@@ -880,10 +880,12 @@ export function surfaceTextures(kind='concrete',{size=96,seed=1,repeat=[1,1],nor
   }
   ctx.putImageData(image,0,0);
   const map=new T.CanvasTexture(canvas);
-  map.wrapS=map.wrapT=T.RepeatWrapping;
   map.repeat.set(repeat[0],repeat[1]);
   map.colorSpace=channel===0?T.SRGBColorSpace:T.NoColorSpace;
-  map.needsUpdate=true;
+  // One sampling policy for procedural tiles too: linear filtering with a real
+  // mip chain and anisotropy, matching the Moth DataTextures. Without it a
+  // floor viewed at a grazing angle shimmers and its micro detail aliases away.
+  applyMothSampling(map);
   map.userData.surfaceKind=canonical;
   return map;
  };

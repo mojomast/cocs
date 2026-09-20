@@ -115,6 +115,7 @@ test('PlayingHud ships one always-mounted live channel and no live countdown rea
     assert.match(source, /death:hud&&!hud\.spectate&&killNotice&&killNotice\.age<1\.5&&\(killNotice\.kind==='death'\|\|killNotice\.kind==='self'\)/, 'the elimination line carries the killer/ability when known');
     assert.match(source, /useEffect\(\(\)=>\{[\s\S]*?assistiveChannelStep\(assistiveRef\.current,assistiveView/, 'the channel advances once per snapshot outside render');
     assert.match(source, /<div className="visually-hidden" role="status" aria-live="polite" aria-atomic="true">\{assistiveText\}<\/div>/, 'the channel is the one always-mounted live region');
+    assert.equal((source.match(/role="status"/g) || []).length, 1, 'the HUD source ships exactly one live channel');
   });
 });
 
@@ -144,6 +145,34 @@ test('PlayingHud: alt mode chip, live ALT hint and non-live operator verb meters
   assert.doesNotMatch(plain, /weapon-tag--alt/, 'the alt chip only appears while alt fire is held');
   assert.doesNotMatch(plain, /verb-meters/, 'an actor without verb state renders no meter row');
   assert.match(plain, /class="weapon-alt-hint"[^>]*>ALT Z<\/kbd>/, 'the default hint names the default KeyZ binding');
+});
+
+test('PlayingHud: captions and the hit chip stay non-live and add no announcement', () => {
+  const hitText = 'HIT BY GROK · RAIL · 42 · 18 HP';
+  const html = render(PlayingHud, {ui: ui({
+    hud: hud({caption: 'Gunfire'}),
+    damageIndicator: {angle: .5, hasSource: true, text: hitText},
+  })});
+  assert.equal(liveCount(html), 1, 'exactly one live region while a caption and a hit chip are showing');
+  assert.equal(politeCount(html), 1);
+  assert.match(html, /class="audio-caption" role="group" aria-label="Caption\. Gunfire"/, 'the caption is readable on demand, not live');
+  assert.match(html, /class="damage-source" role="group" aria-label="Incoming hit\. HIT BY GROK · RAIL · 42 · 18 HP"/, 'the hit chip names the source, weapon, amount and remaining health');
+  assert.equal(announcer(html), '', 'a hit never churns the single announcement channel');
+  return read('app/ui/screens/PlayingHud.tsx').then(source => {
+    assert.doesNotMatch(source, /audio-caption[^>]*role="status"/, 'the caption never becomes a second live region');
+    assert.doesNotMatch(source, /damage-source[^>]*role="status"/, 'the hit chip is non-live by construction');
+  });
+});
+
+test('PlayingHud: the FFA death card names the killer and weapon without a new live region', () => {
+  const html = render(PlayingHud, {ui: ui({
+    player: player({health: 0, dead: 2.6}),
+    killNotice: {kind: 'death', text: 'GROK ELIMINATED YOU', detail: 'RAIL', age: .3},
+  })});
+  assert.match(html, /class="death-attribution">GROK ELIMINATED YOU · RAIL</, 'the FFA death card carries the attribution');
+  assert.match(html, /aria-label="Eliminated\. Respawning\."/, 'the group label stays stable for assistive tech');
+  assert.equal(liveCount(html), 1, 'attribution adds no live region');
+  assert.equal(announcer(html), '', 'the attribution is not a new announcement');
 });
 
 test('RespawnOverlay: passive team summary stays non-live and FFA never mounts the editor', () => {

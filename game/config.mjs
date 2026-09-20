@@ -116,9 +116,9 @@ export const GAME_MODES = [
   {id:'domination',name:'Domination',description:'Capture three control zones and bleed points for every second your team owns them.',rules:{team:true,score:'zoneTime',fragLimit:100,minFragLimit:1,maxFragLimit:900,vehicles:false,zoneBuffs:{alpha:'overshield',bravo:'haste',charlie:'overcharge'},suddenDeathSeconds:15,objective:{kind:'domination',captureSeconds:5}}},
   {id:'assault',name:'Assault',description:'Attackers take sectors in order, defenders hold to the last one. Breach the final sector to win.',rules:{team:true,score:'sectors',fragLimit:3,minFragLimit:1,maxFragLimit:9,objective:{kind:'assault',captureSeconds:6}}},
  {id:'teamdeathmatch',name:'Team Deathmatch',description:'Shared team score with friendly fire off. Win together or feed together.',rules:{team:true,score:'teamFrags',fragLimit:30,suddenDeathSeconds:15}},
-  {id:'instagib',name:'Instagib',description:'Rail only, unlimited ammo. One unprotected hit eliminates. No supplies, no powers, no mercy.',loadout:{weapons:[2],start:2,infinite:true,noPickups:true}},
-  {id:'rockets',name:'Rocket Arena',description:'Unlimited rockets for everyone. Health and armor stay on the menu.',loadout:{weapons:[1],start:1,infinite:true}},
-  {id:'arsenal',name:'Full Arsenal',description:'Every weapon unlocked with unlimited ammo from the first spawn. Choose violence, repeatedly.',loadout:{weapons:'all',start:0,infinite:true}},
+  {id:'instagib',name:'Instagib',description:'Rail only, unlimited ammo. One unprotected hit eliminates. No supplies, no powers, no mercy.',loadout:{weapons:[2],start:2,infinite:true,noPickups:true},rules:{team:false,score:'frags',fragLimit:15,suddenDeathSeconds:12}},
+  {id:'rockets',name:'Rocket Arena',description:'Unlimited rockets for everyone. Health and armor stay on the menu.',loadout:{weapons:[1],start:1,infinite:true},rules:{team:false,score:'frags',fragLimit:15,suddenDeathSeconds:12}},
+  {id:'arsenal',name:'Full Arsenal',description:'Every weapon unlocked with unlimited ammo from the first spawn. Choose violence, repeatedly.',loadout:{weapons:'all',start:0,infinite:true},rules:{team:false,score:'frags',fragLimit:15,suddenDeathSeconds:12}},
   {id:'armsrace',name:'Arms Race',description:'Every kill promotes you to the next weapon in the rack. Finish the last gun to win.',rules:{team:false,score:'ladder',fragLimit:10,minFragLimit:10,maxFragLimit:10}},
   {id:'combined-arms',name:'Combined Arms',description:'Command infantry, armour and aircraft across the largest battlefields. Hold the zones together.',rules:{team:true,score:'zoneTime',fragLimit:200,minFragLimit:50,maxFragLimit:900,vehicles:true,suddenDeathSeconds:15,objective:{kind:'domination',captureSeconds:6},maxBots:16}},
   // LATTICE STRIKE (V0a): linked objective nodes where a node can only be
@@ -186,6 +186,8 @@ export const MUTATORS = Object.freeze([
  Object.freeze({id:'berserk',name:'Berserk',field:'berserk',description:'+20% damage once a killer reaches a 3 streak.'}),
  Object.freeze({id:'bigHead',name:'Big Head',field:'bigHead',description:'Larger hitboxes. Aim is a suggestion.'}),
  Object.freeze({id:'noRecoil',name:'No Recoil',field:'noRecoil',description:'Weapons kick and bloom no more.'}),
+ Object.freeze({id:'suddenDeath',name:'Sudden Death',field:'suddenDeath',description:'A tied match enters a final sudden-death window before the clock runs out.'}),
+ Object.freeze({id:'endless',name:'Endless',field:'endless',description:'Horde runs never stop at the wave target. Survive as long as you can.'}),
 ]);
 export const MUTATOR_IDS=Object.freeze(MUTATORS.map(m=>m.id));
 // Applying a mutator id sets its canonical flag. Continuous mutators pick a
@@ -205,6 +207,8 @@ const MUTATOR_APPLY=Object.freeze({
  berserk:config=>{config.berserk=true;},
  bigHead:config=>{config.bigHead=true;},
  noRecoil:config=>{config.noRecoil=true;},
+ suddenDeath:config=>{config.suddenDeath=true;},
+ endless:config=>{config.endless=true;},
 });
 export function applyMutators(config,ids){
  const out=config&&typeof config==='object'?config:{};
@@ -248,6 +252,8 @@ export function mutatorEffects(config={}){
   berserk:set.has('berserk'),
   bigHead:set.has('bigHead'),
   noRecoil:set.has('noRecoil'),
+  suddenDeath:set.has('suddenDeath'),
+  endless:set.has('endless'),
  });
 }
 export const DEFAULT_CONFIG = Object.freeze({mode:'deathmatch',botCount:2,difficulty:'easy',fragLimit:15,timeLimit:300,respawn:2,speed:1,gravity:1,damage:1,fastPowers:false,lifeSteal:false,unlimitedAmmo:false,suddenDeath:false,randomLoadout:false,oneShot:false,instagib:false,mirrorLoadout:false,bounty:false,berserk:false,bigHead:false,noRecoil:false,endless:false,startingWeapon:0,playerName:'',mission:DEFAULT_MISSION_ID,loadout:null,mutators:Object.freeze([]),checkpoint:null});

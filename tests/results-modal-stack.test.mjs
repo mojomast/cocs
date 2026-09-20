@@ -167,6 +167,18 @@ test('footer descriptors are cluster/fallback only and every id routes through t
  assert.deepEqual(calls[8][1], ['campaign', 'convoy-run'], 'checkpoint actions carry their target mission');
 });
 
+test('the results footer leaves a finished lobby immediately and gates a live one', () => {
+ const {hud, actor} = latticeFixture();
+ const finished = baseUi({hud, player: actor, net: {connected: true, isHost: true, started: true, roundOver: true}});
+ const finishedHtml = render(React.createElement(ResultsModal, {ui: finished}));
+ assert.equal(count(finishedHtml, 'LEAVE SERVER'), 1);
+ assert.equal(count(finishedHtml, 'modal-panel--sm'), 0, 'a finished lobby confirms nothing');
+ const source = readFileSync(join(ROOT, 'app/ui/screens/ResultModals.tsx'), 'utf8');
+ assert.ok(source.includes('leaveNeedsConfirm('), 'the footer consults the shared leave gate');
+ assert.ok(source.includes('title="Leave the server?"'), 'the live confirm dialog exists');
+ assert.ok(source.includes('disconnectNet:requestLeave'), 'the leave-server action routes through the gate');
+});
+
 test('the footer CSS wraps, stacks at narrow widths and bounds its own scroll region', () => {
  const css = readFileSync(join(ROOT, 'app/styles/ui.css'), 'utf8');
  const foot = css.slice(css.indexOf('.modal-foot{'), css.indexOf('.modal-foot .modal-foot-primary'));
@@ -179,6 +191,23 @@ test('the footer CSS wraps, stacks at narrow widths and bounds its own scroll re
  assert.match(css, /@media \(pointer:coarse\)\{[\s\S]*?\.modal-foot \.btn[^{]*\{min-height:44px\}/, 'coarse pointers keep 44px targets');
 });
 
+test('the settings Game tab keeps its tab ids and nests clear sections', () => {
+ const page = readFileSync(join(ROOT, 'app/page.tsx'), 'utf8');
+ const settings = readFileSync(join(ROOT, 'app/ui/screens/SettingsDialog.tsx'), 'utf8');
+ for (const tab of ['game', 'graphics-lab', 'arsenal', 'study', 'help', 'about']) assert.ok(settings.includes(`{value:'${tab}'`), `the ${tab} tab id survives`);
+ for (const id of ['settings-audio', 'settings-video', 'settings-controls', 'settings-accessibility']) {
+  assert.equal((page.match(new RegExp(`id="${id}"`, 'g')) || []).length, 1, `the ${id} section anchor is unique`);
+ }
+ assert.match(page, /id="master-volume"[^>]*aria-label="Master volume"/, 'master volume is a settings control');
+ assert.ok(page.includes('id="announcer-switch"'), 'the announcer toggle is a settings control');
+ assert.ok(page.includes('display={display}') && page.includes('onDisplayChange='), 'the accessibility section owns the display-backed prefs');
+ const config = readFileSync(join(ROOT, 'app/game-ui/configuration.tsx'), 'utf8');
+ const accessibilityBlock = config.slice(config.indexOf('export function AccessibilityConfiguration'), config.indexOf('export function PresetsConfiguration'));
+ for (const moved of ['label="Subtitles / audio captions"', 'label="Reduce motion"', 'label="UI text scale"']) assert.ok(accessibilityBlock.includes(moved), `${moved} lives in the accessibility panel`);
+ const displayBlock = config.slice(config.indexOf('export function DisplayConfiguration'));
+ for (const gone of ['label="Subtitles / audio captions"', 'label="Reduce motion"', 'label="UI text scale"']) assert.ok(!displayBlock.includes(gone), `${gone} left the video panel`);
+});
+
 test('the page wires Escape as Settings then Pause and passes the exact opener', () => {
  const page = readFileSync(join(ROOT, 'app/page.tsx'), 'utf8');
  const closeSettings = page.indexOf('if(settings){e.preventDefault();setSettings(false);return;}');
@@ -189,6 +218,19 @@ test('the page wires Escape as Settings then Pause and passes the exact opener',
  assert.ok(page.includes('opener={settingsOpenerRef.current}'), 'the opener reaches SettingsDialog');
  const settings = readFileSync(join(ROOT, 'app/ui/screens/SettingsDialog.tsx'), 'utf8');
  assert.ok(settings.includes('restoreFocus={opener}'), 'SettingsDialog hands the opener to the modal primitive');
+});
+
+test('the page and respawn traps reuse the shared dialog focus selector', () => {
+ const page = readFileSync(join(ROOT, 'app/page.tsx'), 'utf8');
+ const respawn = readFileSync(join(ROOT, 'app/ui/screens/RespawnOverlay.tsx'), 'utf8');
+ const primitives = readFileSync(join(ROOT, 'app/ui/primitives.tsx'), 'utf8');
+ assert.match(primitives, /export const MODAL_FOCUS_SELECTOR=/, 'the selector is exported from the primitives');
+ for (const control of ['textarea:not(:disabled)', 'a[href]', 'summary']) assert.ok(primitives.includes(control), `the selector covers ${control}`);
+ assert.ok(page.includes("import {MODAL_FOCUS_SELECTOR} from './ui/primitives';"), 'the page imports the shared selector');
+ assert.ok(page.includes('host.querySelectorAll<HTMLElement>(MODAL_FOCUS_SELECTOR)'), 'the global modal trap uses it');
+ assert.ok(respawn.includes('host.querySelectorAll(MODAL_FOCUS_SELECTOR)'), 'the respawn editor uses it too');
+ assert.doesNotMatch(page, /'button:not\(:disabled\),input,select,\[tabindex\]/, 'the narrower trap selector is gone');
+ assert.doesNotMatch(respawn, /'button:not\(:disabled\),select,\[tabindex\]/, 'the respawn trap no longer drops links or textareas');
 });
 
 // ---------------------------------------------------------------------------

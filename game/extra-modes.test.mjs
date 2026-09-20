@@ -111,6 +111,26 @@ test('KOTH rotates the hill between authored points after the interval',()=>{
   assert.ok(m.events.some(e=>e.type==='hill-rotate'));
 });
 
+test('KOTH rotates hills on maps whose points come from the authored table or nav candidates',()=>{
+  for(const id of ['exchange','frostline']){
+    const m=new Match('chatgpt','openclaw',rng,id,{mode:'koth',botCount:0});
+    const state=m.objectiveState,hill=state.zones[0];
+    assert.ok(Array.isArray(state.rotation)&&state.rotation.length>1,`${id} builds a moving hill`);
+    assert.deepEqual([...state.rotation.map(point=>point.id)].sort(),['alpha','bravo','charlie'],`${id} rotation carries authored point ids`);
+    assert.ok(state.rotation.every(point=>Number.isFinite(point.x)&&Number.isFinite(point.z)),`${id} rotation points are finite`);
+    const roundTrip=JSON.parse(JSON.stringify(state.rotation));
+    assert.deepEqual(roundTrip,state.rotation,`${id} rotation stays snapshottable`);
+    const repeat=new Match('chatgpt','openclaw',rng,id,{mode:'koth',botCount:0});
+    assert.deepEqual(repeat.objectiveState.rotation,state.rotation,`${id} rotation is deterministic`);
+    const before={id:hill.id,x:hill.x,z:hill.z};
+    state.rotationTimer=0;
+    m.updateObjectives(1/60);
+    assert.notEqual(hill.id,before.id,`${id} rotates off the opening hill`);
+    assert.ok(Math.hypot(hill.x-before.x,hill.z-before.z)>1e-6,`${id} hill position moves`);
+    assert.ok(m.events.some(event=>event.type==='hill-rotate'),`${id} announces the rotation`);
+  }
+});
+
 test('domination and KOTH ownership grants the mapped powerup to occupants',()=>{
   const domination=new Match('chatgpt','openclaw',rng,'crosswire',{mode:'domination',botCount:0});
   const [a]=domination.actors,alpha=domination.objectiveState.zones.find(z=>z.id==='alpha');
@@ -328,7 +348,22 @@ test('both new modes complete with a winner at every difficulty',()=>{
 });
 
 test('score modes publish a bounded sudden-death window that resolves a tie',()=>{
-  for(const mode of ['deathmatch','ctf','koth','domination','teamdeathmatch','combined-arms'])assert.ok(modeRule(mode).suddenDeathSeconds>0&&modeRule(mode).suddenDeathSeconds<=60,`${mode} sudden death`);
+  for(const mode of ['deathmatch','ctf','koth','domination','teamdeathmatch','combined-arms','instagib','rockets','arsenal'])assert.ok(modeRule(mode).suddenDeathSeconds>0&&modeRule(mode).suddenDeathSeconds<=60,`${mode} sudden death`);
+  // The loadout FFA modes had been inheriting the Deathmatch fallback; pin the
+  // window on the mode entry itself so a data edit cannot silently drop it.
+  for(const mode of ['instagib','rockets','arsenal']){
+    const entry=GAME_MODES.find(value=>value.id===mode);
+    assert.ok(entry.rules&&Number.isFinite(entry.rules.suddenDeathSeconds),`${mode} declares its own sudden-death window`);
+    assert.equal(entry.rules.team,false);
+    assert.equal(entry.rules.score,'frags');
+    assert.equal(entry.rules.fragLimit,15);
+    const tied=new Match('chatgpt','openclaw',seeded(),'crosswire',{mode,botCount:0,humanCount:2,timeLimit:60,fragLimit:50});
+    const [first,second]=tied.actors;
+    first.frags=3;second.frags=3;
+    tied.time=tied.config.timeLimit-modeRule(mode).suddenDeathSeconds;
+    tied.step(1/60);
+    assert.equal(tied.suddenDeath,true,`${mode} opens sudden death on a level score`);
+  }
   const m=new Match('chatgpt','openclaw',seeded(),'crosswire',{mode:'deathmatch',botCount:0,humanCount:2,timeLimit:60,fragLimit:50});
   const [a,b]=m.actors;
   a.frags=3;b.frags=3;

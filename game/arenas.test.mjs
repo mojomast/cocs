@@ -65,6 +65,22 @@ test('mode filtering hides unsupported maps and honours legacy',()=>{
  assert.ok(mapsForMode('deathmatch',{legacy:true}).length>=activeMaps().length);
 });
 
+test('lonely mode pools are spread across compatible arenas',()=>{
+ const pool=mode=>mapsForMode(mode,{legacy:true}).map(map=>map.id);
+ for(const [mode,floor] of [['juggernaut',10],['team-elimination',10],['vip-escort',10],['holdout',12],['uplink',12],['armsrace',12],['assault',10]])
+  assert.ok(pool(mode).length>=floor,`${mode} pool widened (${pool(mode).length} maps)`);
+ assert.ok(arenaSupportsMode('colosseum','juggernaut'),'arena maps host the crown');
+ assert.ok(arenaSupportsMode('frostline','team-elimination'),'team battlefields host elimination');
+ assert.ok(arenaSupportsMode('riverbend','vip-escort'),'route maps host the VIP escort');
+ assert.ok(arenaSupportsMode('frost-gate','holdout')&&arenaSupportsMode('frost-gate','uplink'),'zone maps host the domination/koth variants');
+ assert.ok(arenaSupportsMode('atrium','armsrace'),'connected arenas host Arms Race');
+ assert.ok(arenaSupportsMode('warfront','assault'),'sector maps host assault');
+ // The moving-hill rotation can now resolve authored/nav points, but LATTICE
+ // content stays authored-only: no non-lattice map gains cocs or cocs-coop.
+ assert.deepEqual(pool('cocs'),['lattice-slice']);
+ assert.deepEqual(pool('cocs-coop'),['lattice-slice']);
+});
+
 test('legacy gating excludes archived arenas from shuffle and rotation',()=>{
  for(let k=0;k<20;k++)assert.equal(arenaMeta(shuffleSelection(()=>k/20,{legacy:false}).mapId).legacy,false);
  const next=nextArenaSelection('warfront',()=>.4,{legacy:false}).mapId;

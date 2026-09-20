@@ -327,3 +327,15 @@ test('without noise sources the engine falls back to tonal swells without crashi
  assert.ok(e.notesBy.impact>0,'entrance accents are tonal too');
  assert.ok(e.voices.length<=e.maxVoices);
 });
+
+test('clearing an outcome releases the results take without stranding the scene',()=>{
+ const {e}=engine();
+ assert.equal(e.setOutcome('victory'),'victory');
+ assert.equal(e.outcome,'victory');
+ assert.equal(e.scene,'results','a win moves the arrangement to the results take');
+ assert.equal(e.setOutcome(null),null);
+ assert.equal(e.outcome,null,'the outcome is released for the next round');
+ assert.equal(e.setOutcome('nonsense'),null);
+ assert.equal(e.outcome,null,'an unknown outcome never latches');
+ e.dispose();
+});

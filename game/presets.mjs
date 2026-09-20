@@ -71,6 +71,15 @@ export function removePreset(list, id) {
   return (Array.isArray(list) ? list : []).filter(item => item.id !== id);
 }
 
+// Undo for a delete: put the exact preset back at its remembered position and
+// keep the capacity rule, so undo can never smuggle an over-limit list in.
+export function restorePreset(list, preset, index = null) {
+  if (!preset || typeof preset !== 'object') return Array.isArray(list) ? list.slice(-PRESET_LIMIT) : [];
+  const kept = (Array.isArray(list) ? list : []).filter(item => item && item.id !== preset.id);
+  const at = Number.isInteger(index) ? Math.max(0, Math.min(index, kept.length)) : kept.length;
+  return [...kept.slice(0, at), preset, ...kept.slice(at)].slice(-PRESET_LIMIT);
+}
+
 export function findPreset(list, id) {
   return (Array.isArray(list) ? list : []).find(item => item.id === id) || null;
 }

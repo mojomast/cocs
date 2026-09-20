@@ -1,7 +1,7 @@
 'use client';
 import {useEffect,useRef,useState} from 'react';
 import type {ScreenProps} from '../contract';
-import {Btn,Chip} from '../primitives';
+import {Btn,Chip,MODAL_FOCUS_SELECTOR} from '../primitives';
 import {kitView,wingRider} from '../../../game/class-ui.mjs';
 import {CHARACTERS,HARNESSES,resolveLoadout} from '../../../game/data.mjs';
 
@@ -70,7 +70,7 @@ export function RespawnOverlay({ui}:ScreenProps){
  // a stray Tab cannot land on a locked HUD control behind the overlay.
  const trapTab=(event:any)=>{
   if(event.key!=='Tab')return;
-  const host=event.currentTarget,focusable=[...host.querySelectorAll('button:not(:disabled),select,[tabindex]:not([tabindex="-1"])')];
+  const host=event.currentTarget,focusable=[...host.querySelectorAll(MODAL_FOCUS_SELECTOR)];
   if(!focusable.length)return;
   if(!host.contains(document.activeElement)){event.preventDefault();focusable[0].focus();return;}
   const first=focusable[0],last=focusable[focusable.length-1];

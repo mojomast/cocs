@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {ACCESSIBILITY_PALETTES,ACCESSIBILITY_STORAGE_KEY,DEFAULT_PALETTE_ID,DISPLAY_PRESETS,PRESET_LIMIT,addPreset,applyDisplayPreset,defaultAccessibility,descriptivePresetName,enginePaletteFor,findPreset,normalizeAccessibility,normalizeLoadout,normalizePaletteId,normalizePreset,normalizePresets,paletteById,paletteIds,paletteOptions,radarPaletteFor,removePreset,teamColorsFor} from './presets.mjs';
+import {ACCESSIBILITY_PALETTES,ACCESSIBILITY_STORAGE_KEY,DEFAULT_PALETTE_ID,DISPLAY_PRESETS,PRESET_LIMIT,addPreset,applyDisplayPreset,defaultAccessibility,descriptivePresetName,enginePaletteFor,findPreset,normalizeAccessibility,normalizeLoadout,normalizePaletteId,normalizePreset,normalizePresets,paletteById,paletteIds,paletteOptions,radarPaletteFor,removePreset,restorePreset,teamColorsFor} from './presets.mjs';
 
 const options = {characters: ['chatgpt', 'claude'], harnesses: ['openclaw', 'cline'], maps: ['exchange', 'forge']};
 
@@ -42,6 +42,24 @@ test('removing and finding presets works by id', () => {
   assert.equal(findPreset(list, 'b').name, 'B');
   assert.equal(findPreset(list, 'z'), null);
   assert.deepEqual(removePreset(list, 'a').map(p => p.id), ['b']);
+});
+
+test('restorePreset undoes a delete at the remembered position inside the cap', () => {
+  const list = [{id: 'a', name: 'A'}, {id: 'b', name: 'B'}, {id: 'c', name: 'C'}];
+  const restored = restorePreset(removePreset(list, 'b'), list[1], 1);
+  assert.deepEqual(restored.map(p => p.id), ['a', 'b', 'c']);
+  assert.deepEqual(list.map(p => p.id), ['a', 'b', 'c'], 'the input list is not mutated');
+  // A preset the list already contains is replaced, not duplicated.
+  assert.deepEqual(restorePreset(list, list[1], 0).map(p => p.id), ['b', 'a', 'c']);
+  // Out-of-range or missing positions append safely.
+  assert.deepEqual(restorePreset(list, list[0], 99).map(p => p.id), ['b', 'c', 'a']);
+  assert.deepEqual(restorePreset([], {id: 'z', name: 'Z'}).map(p => p.id), ['z']);
+  assert.deepEqual(restorePreset(null, null), []);
+  const full = Array.from({length: PRESET_LIMIT}, (_, i) => ({id: `p${i}`, name: `P${i}`}));
+  const over = restorePreset(full, {id: 'extra', name: 'Extra'}, 4);
+  assert.equal(over.length, PRESET_LIMIT, 'the capacity rule still applies');
+  assert.ok(over.some(p => p.id === 'extra'), 'the restored preset survives inside the cap');
+  assert.equal(over[0].id, 'p1', 'the oldest preset is evicted, not the restored one');
 });
 
 test('display presets apply quality tiers without dropping unrelated options', () => {

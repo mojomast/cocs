@@ -1650,3 +1650,68 @@ html, body { overscroll-behavior: none; }
 @media(pointer:coarse){
  .spectator-compact button,.spectator-compact button.spectator-row,.spectator-compact .spectator-camera select,.spectator-compact .spectator-help summary{min-height:44px}
 }
+
+/* ==========================================================================
+   Accessibility pass — one global UI text scale and the HUD/death attribution
+   surfaces. `--ui-scale` (0.8–1.4×, Settings ▸ Accessibility) already drives
+   the command board; `--hud-scale` derives from the same value so the HUD
+   cards, scoreboard, kill feed and captions scale with it. Nothing here adds
+   motion, and the compact rules that keep the 844×390 corridor clear are
+   re-applied at the end of the block so the scale can never break them.
+   ========================================================================== */
+.game-hud{--hud-scale:clamp(.8,var(--ui-scale,1),1.4)}
+.scores-overlay{--hud-scale:clamp(.8,var(--ui-scale,1),1.4)}
+.game-hud .hud-pill{font-size:calc(11px * var(--hud-scale,1))}
+.game-hud .stat-card .stat-label{font-size:calc(10px * var(--hud-scale,1))}
+.game-hud .stat-card .stat-value{font-size:calc(clamp(22px,2.2vw,36px) * var(--hud-scale,1))}
+.game-hud .stat-card .stat-note{font-size:calc(10px * var(--hud-scale,1))}
+.game-hud .stat-card--vitals .stat-value{font-size:calc(clamp(20px,1.7vw,28px) * var(--hud-scale,1))}
+.game-hud .ability-card .stat-label{font-size:calc(1em * var(--hud-scale,1))}
+.game-hud .ability-card .stat-note{font-size:calc(1em * var(--hud-scale,1))}
+.game-hud .verb-meter{font-size:calc(10px * var(--hud-scale,1))}
+.game-hud .kill-feed>div{font-size:calc(clamp(12px,.95vw,16px) * var(--hud-scale,1))}
+.game-hud .kill-feed small{font-size:calc(clamp(11px,.9vw,15px) * var(--hud-scale,1))}
+.game-hud .audio-caption{font-size:calc(12px * var(--hud-scale,1))}
+.game-hud .damage-source{font-size:calc(11px * var(--hud-scale,1))}
+.scores-overlay .scoreboard{font-size:calc(13px * var(--hud-scale,1))}
+.scores-overlay .score-row{font-size:calc(13px * var(--hud-scale,1))}
+.scores-overlay .score-row.labels{font-size:calc(12px * var(--hud-scale,1))}
+.scores-overlay .score-row b,.scores-overlay .score-row small{font-size:calc(12px * var(--hud-scale,1))}
+/* Compact corridor: keep the existing stops, still multiplied by the scale. */
+@media(max-width:760px){
+ .game-hud .stat-card .stat-value{font-size:calc(clamp(18px,6vw,26px) * var(--hud-scale,1))}
+ .game-hud .stat-card--ammo .stat-label,.game-hud .verb-meter{font-size:calc(9px * var(--hud-scale,1))}
+ .game-hud .audio-caption{font-size:calc(11px * var(--hud-scale,1))}
+}
+@media(max-height:520px){
+ .game-hud .stat-card--ammo .stat-label{font-size:calc(9px * var(--hud-scale,1))}
+ .game-hud .stat-card--ammo .stat-value{font-size:calc(19px * var(--hud-scale,1))}
+ .game-hud .stat-card--ammo .weapon-tag{font-size:calc(9px * var(--hud-scale,1))}
+ .game-hud .ability-card .stat-label{font-size:calc(8px * var(--hud-scale,1))}
+ .game-hud .ability-card .stat-note{font-size:calc(9px * var(--hud-scale,1))}
+}
+
+/* Incoming-damage attribution chip. Non-live (role="group"), no animation, so
+   both reduced-motion paths are satisfied by doing nothing. Sits in the
+   message stack instead of the reticle corridor, so it can never overlap the
+   objective bar at any pinned viewport. */
+.damage-source{justify-self:center;display:inline-flex;align-items:center;gap:7px;max-width:100%;padding:5px 12px;border:1px solid #ff8f8f70;border-left:3px solid #ff6b6b;border-radius:var(--radius-md);background:#241013ed;color:#ffd9d9;font:700 11px var(--font-mono);letter-spacing:.08em;line-height:1.4;text-align:center;text-shadow:0 2px 4px #000}
+.game-hud.hide-hud .damage-source{display:none}
+.death-attribution{margin:10px 0 0;font:700 13px var(--font-mono);letter-spacing:.1em;color:#ffb4b4}
+
+/* Settings information architecture: one heading per section, with a stable
+   anchor id each surface can open. */
+.settings-section{display:grid;gap:2px;margin:0 0 22px;scroll-margin-top:16px}
+.settings-section+.settings-section{padding-top:18px;border-top:1px solid #66867455}
+.settings-section__title{margin:0 0 12px;font:800 12px var(--font-mono);letter-spacing:.16em;text-transform:uppercase;color:var(--accent-soft,var(--primary))}
+.preset-capacity{margin:0 0 10px}
+.preset-capacity.is-full{color:var(--warn-soft,#ffe0a8)}
+.preset-undo-toast{position:fixed;top:72px;left:50%;transform:translateX(-50%);z-index:var(--z-toast,60);display:flex;align-items:center;gap:12px;max-width:min(92vw,560px);padding:10px 14px;border:1px solid var(--warn-soft,#ffe0a8);background:rgba(27,22,14,.96);color:#ffe9b0;box-shadow:0 10px 30px #0008;font:700 12px var(--font-mono);letter-spacing:.08em}
+.preset-undo-toast .text-button{min-height:0;color:#ffe9b0}
+
+/* Theater usage line and the five-second replay-delete undo. */
+.theater-status{position:fixed;left:var(--safe-left);top:calc(var(--safe-top) + 84px);z-index:var(--z-panel,2);display:grid;gap:6px;justify-items:start;pointer-events:none}
+.theater-usage,.theater-undo{margin:0;display:inline-flex;align-items:center;gap:10px;padding:7px 11px;border:1px solid var(--border);border-left:3px solid var(--accent);background:rgba(6,20,24,.94);color:var(--text-dim);font:700 11px var(--font-mono);letter-spacing:.08em}
+.theater-usage{font-size:11px}
+.theater-undo{border-left-color:var(--warn-soft,#ffe0a8);color:#ffe9b0;pointer-events:auto}
+.theater-undo .text-button{min-height:0;color:inherit}

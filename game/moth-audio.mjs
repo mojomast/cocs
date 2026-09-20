@@ -211,6 +211,24 @@ export class MothAudio {
     this.preloads = 0;
   }
 
+  // Effective per-clip gain: the host layer gain, the caller's option and the
+  // baked descriptor's own gain. `sampler.mjs` honours the same descriptor
+  // field for the orchestral bank, so a quiet clip no longer has to be fought
+  // with a bespoke caller multiplier.
+  _clipGain(name, gain) {
+    const baked = Number(this.bank?.descriptor?.(name)?.gain);
+    return this.gain * (Number.isFinite(gain) ? gain : 1) * (Number.isFinite(baked) ? baked : 1);
+  }
+
+  // Queue a decode only for clips that exist in the bake. A missing descriptor
+  // stays a silent no-op instead of latching a bank failure, so a later
+  // registry/bake change can still bring the bed in.
+  _requestClip(name) {
+    if (!this.bank?.descriptor?.(name)) return false;
+    this.bank.preload(name);
+    return true;
+  }
+
   _destination(kind) {
     const destinations = this.destinations || {};
     return destinations[kind] || destinations.ambience || destinations.effects || destinations.master || null;
@@ -270,6 +288,7 @@ export class MothAudio {
     if (!this.enabled) return 0;
     let requested = 0;
     for (const name of this.desiredBeds()) {
+      if (!this.bank.descriptor?.(name)) continue;
       const state = this.bank.state(name);
       if (state === 'idle' || state === 'missing') { requested++; this.bank.preload(name); }
     }
@@ -285,7 +304,7 @@ export class MothAudio {
     for (const name of wanted) {
       if (this.beds.some((bed) => bed.name === name)) continue;
       if (this.playBed(name)) started++;
-      else this.bank.preload(name);
+      else this._requestClip(name);
     }
     return started;
   }
@@ -294,7 +313,7 @@ export class MothAudio {
   playBed(name, { bus = 'ambience', fade = 1, gain = 1, loop = true } = {}) {
     if (!this.enabled) return false;
     const buffer = this.bank.buffer(name);
-    if (!buffer) { this.bank.preload(name); return false; }
+    if (!buffer) { this._requestClip(name); return false; }
     const destination = this._destination(bus);
     if (!destination) return false;
     if (this.beds.length >= this.maxBeds) this._stopBed(this.beds.shift());
@@ -304,7 +323,7 @@ export class MothAudio {
       const window = this.bank.loopWindow(name);
       if (loop) { source.loop = true; source.loopStart = window.start; source.loopEnd = window.end; }
       const node = this.ctx.createGain();
-      const target = this.gain * gain;
+      const target = this._clipGain(name, gain);
       const time = this.ctx.currentTime || 0;
       if (fade > 0 && typeof node.gain.setTargetAtTime === 'function') {
         node.gain.value = 0.0001;
@@ -313,7 +332,7 @@ export class MothAudio {
       source.connect(node);
       node.connect(destination);
       source.start(time);
-      this.beds.push({ name, source, gain: node, started: time });
+      this.beds.push({ name, source, gain: node, target, started: time });
       this.plays++;
       return true;
     } catch { this.failures++; return false; }
@@ -323,14 +342,14 @@ export class MothAudio {
   playStinger(name, { bus = 'effects', gain = 1, fade = 0.01, pan = 0, duck = 0 } = {}) {
     if (!this.enabled) return false;
     const buffer = this.bank.buffer(name);
-    if (!buffer) { this.bank.preload(name); return false; }
+    if (!buffer) { this._requestClip(name); return false; }
     const destination = this._destination(bus);
     if (!destination) return false;
     try {
       const source = this.ctx.createBufferSource();
       source.buffer = buffer;
       const node = this.ctx.createGain();
-      const target = this.gain * gain;
+      const target = this._clipGain(name, gain);
       const time = this.ctx.currentTime || 0;
       if (fade > 0 && typeof node.gain.setTargetAtTime === 'function') {
         node.gain.value = 0.0001;
@@ -346,7 +365,7 @@ export class MothAudio {
       }
       tail.connect(destination);
       source.start(time);
-      this.stingers.push({ name, source, gain: node, tail, end: time + (Number(buffer.duration) || 0) });
+      this.stingers.push({ name, source, gain: node, tail, target, end: time + (Number(buffer.duration) || 0) });
       this.plays++;
       if (duck > 0) this._duck(duck);
       return true;
@@ -403,7 +422,8 @@ export class MothAudio {
     const depth = clamp(1 - amount * 0.6, 0, 1);
     const time = this.ctx?.currentTime || 0;
     for (const bed of this.beds) {
-      try { bed.gain.gain.setTargetAtTime(this.gain * depth, time, 0.04); bed.gain.gain.setTargetAtTime(this.gain, time + 0.35, 0.18); } catch {}
+      const base = Number.isFinite(bed.target) ? bed.target : this.gain;
+      try { bed.gain.gain.setTargetAtTime(base * depth, time, 0.04); bed.gain.gain.setTargetAtTime(base, time + 0.35, 0.18); } catch {}
     }
   }
 

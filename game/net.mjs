@@ -19,6 +19,38 @@ const isVehicleMode = mode => VEHICLE_MODES.has(mode);
 // How long a client keeps a sent snapshot as a delta base before falling back
 // to full snapshots. Bounded so the base map cannot grow without limit.
 const DELTA_HISTORY = 64;
+// Latency probe bounds. One probe is in flight at a time, so the wire cost is a
+// single tiny frame every PING_INTERVAL; a probe with no pong expires after
+// PING_TIMEOUT and only clears the outstanding sample, so a missing reply can
+// never leak a timer. Later samples ease toward the new measurement instead of
+// making the scoreboard chip flicker with every probe.
+const PING_INTERVAL = 1500;
+const PING_TIMEOUT = 5000;
+const PING_SMOOTHING = 0.25;
+
+// Client-side mirror of the server's default seat-hold grace (`server/room.mjs`
+// `graceMs`). The server does not put the configured value on the wire, so the
+// UI words its estimate with `~`.
+export const SEAT_HOLD_MS = 20000;
+
+// A destructive leave only asks for confirmation while a match is genuinely in
+// flight, or while a rated room has not finished. A finished round and a casual
+// lobby leave immediately.
+export function leaveNeedsConfirm({started = false, roundOver = false, rated = false} = {}) {
+ const live = started === true && roundOver !== true;
+ const ratedUnfinished = rated === true && !(started === true && roundOver === true);
+ return live || ratedUnfinished;
+}
+
+// Seconds left in the server's seat-hold window, measured from the client's own
+// observed disconnect (`NetClient.disconnectedAt`). Null when no disconnect has
+// been observed; clamped to 0 once the window has passed.
+export function seatHoldSeconds(disconnectedAt, now, graceMs = SEAT_HOLD_MS) {
+ if (!Number.isFinite(disconnectedAt)) return null;
+ const total = Number.isFinite(graceMs) && graceMs > 0 ? graceMs : SEAT_HOLD_MS;
+ const elapsed = Math.max(0, Number(now) - disconnectedAt);
+ return Math.max(0, Math.ceil((total - elapsed) / 1000));
+}
 
 // Pure entity interpolation shared by the live render path and the test
 // harness. Given two authoritative snapshots and an alpha in [0,1], returns a
@@ -99,6 +131,7 @@ export class NetClient {
   this.reset();
  }
  _disposeSocket() {
+  this._stopPing();
   if (this._pendingReject) { const reject = this._pendingReject; this._pendingReject = null; try { reject(new Error('superseded')); } catch {} }
   const ws = this.ws;
   if (!ws) return;
@@ -133,6 +166,17 @@ export class NetClient {
    this.events = [];
   this.state = null;
   this.shadow = null;
+  // Lobby lifecycle view, stored verbatim from the last `lobby` message. The
+  // page renders it and sends its verbs; the server stays authoritative.
+  this.lifecycle = null;
+  // Latency probe + seat-hold observation. Cleared on every connect/reset so a
+  // reconnect cannot display a stale RTT or an expired hold window.
+  this.rtt = null;
+  this.lastRtt = null;
+  this.rttSamples = [];
+  this.pingMisses = 0;
+  this.disconnectedAt = null;
+  this._stopPing();
    this.resynced = false;
    this.inputSeq = 0;
    this.pendingInputs = [];
@@ -191,9 +235,9 @@ export class NetClient {
    const current = () => this.ws === ws;
    this.ws = ws;
    this._pendingReject = reject;
-   ws.onopen = () => { if (!current()) return; this._pendingReject = null; this.connected = true; resolve(); };
+   ws.onopen = () => { if (!current()) return; this._pendingReject = null; this.connected = true; this.disconnectedAt = null; this.startPingLoop(); resolve(); };
    ws.onerror = () => { if (!current()) return; this._pendingReject = null; if (!this.connected) reject(new Error('connection failed')); };
-   ws.onclose = () => { if (!current()) return; const reject = this._pendingReject; this._pendingReject = null; this.connected = false; if (reject) reject(new Error('connection closed before open')); if (this.onClose && !this.closedByUser) this.onClose(); };
+   ws.onclose = () => { if (!current()) return; const reject = this._pendingReject; this._pendingReject = null; this.connected = false; this._stopPing(); if (reject) reject(new Error('connection closed before open')); if (!this.closedByUser) this.disconnectedAt = this._now(); if (this.onClose && !this.closedByUser) this.onClose(); };
    ws.onmessage = e => { if (!current()) return; this.onMessage(e.data); };
   });
  }
@@ -206,12 +250,60 @@ export class NetClient {
   this.ws.send(text);
   return true;
  }
+ // -------------------------------------------------------------------
+ // Latency probe. The server answers every `{type:'ping'}` with a pong, so the
+ // client clocks the round trip against its own monotonic clock. The loop is
+ // owned by the socket: it starts on open, stops on close/reconnect, and keeps
+ // at most one probe outstanding. A probe without a pong expires on the next
+ // tick (PING_TIMEOUT), which counts a miss and frees the outstanding slot —
+ // there is no second timer to leak.
+ // -------------------------------------------------------------------
+ startPingLoop() {
+  this._stopPing();
+  if (!this.connected) return false;
+  this._pingTimer = setInterval(() => this._pingTick(), PING_INTERVAL);
+  try { this._pingTimer?.unref?.(); } catch {}
+  return true;
+ }
+ _stopPing() {
+  if (this._pingTimer !== null && this._pingTimer !== undefined) { try { clearInterval(this._pingTimer); } catch {} }
+  this._pingTimer = null;
+  this._pingSentAt = null;
+ }
+ _pingTick() {
+  if (!this.connected) { this._stopPing(); return false; }
+  const now = this._now();
+  if (this._pingSentAt !== null && now - this._pingSentAt > PING_TIMEOUT) { this.pingMisses += 1; this._pingSentAt = null; }
+  if (this._pingSentAt !== null) return false;
+  this._pingSentAt = now;
+  if (!this.send({ type: MESSAGE.PING })) { this._pingSentAt = null; return false; }
+  return true;
+ }
+ _onPong() {
+  const sentAt = this._pingSentAt;
+  if (sentAt === null || sentAt === undefined) return null;
+  this._pingSentAt = null;
+  const sample = Math.max(0, this._now() - sentAt);
+  this.lastRtt = sample;
+  this.rtt = this.rtt === null ? sample : this.rtt + (sample - this.rtt) * PING_SMOOTHING;
+  this.rttSamples.push(sample);
+  if (this.rttSamples.length > 8) this.rttSamples.splice(0, this.rttSamples.length - 8);
+  return sample;
+ }
  join(name, character, harness, opts = {}) { this.seatLoadout = { character, harness }; this.send({ type: 'join', name, character, harness, token: this.token ?? '', roomId: opts.roomId || this.roomId || 'local', spectate: opts.spectate === true, playerId: this.playerId, progressToken: this.progressToken ?? '', v: PROTOCOL_VERSION, delta: SNAPSHOT_DELTA_VERSION }); }
  create(name, character, harness, playerName = '') { this.send({ type: 'create', name, playerName, character, harness, token: this.token ?? '', roomId: '', playerId: this.playerId, progressToken: this.progressToken ?? '', v: PROTOCOL_VERSION, delta: SNAPSHOT_DELTA_VERSION }); }
  list() { this.send({ type: 'list' }); }
  history() { this.send({ type: 'history' }); }
  host(config, mapId) { this.send({ type: 'host', config, mapId }); }
   start() { this.send({ type: 'start' }); }
+  // Lobby lifecycle verbs. The server owns the outcome; the next `lobby`
+  // message carries the authoritative lifecycle view. `ready` defaults to true,
+  // matching the server's own default; `mapVote` rejects an empty map id locally
+  // so a malformed vote never crosses the wire.
+  ready(ready = true) { return this.send({ type: MESSAGE.READY, ready: ready !== false }); }
+  mapVote(mapId) { return typeof mapId === 'string' && mapId ? this.send({ type: MESSAGE.MAP_VOTE, mapId }) : false; }
+  rematch() { return this.send({ type: MESSAGE.REMATCH }); }
+  warmup(cancel = false) { return this.send({ type: MESSAGE.WARMUP, ...(cancel === true ? { cancel: true } : {}) }); }
   gear(gear, attachments, finish) { this.send({ type: 'gear', gear, ...(attachments !== undefined ? { attachments } : {}), ...(finish !== undefined ? { finish } : {}) }); }
   // Team-mode respawn switch (§3.7, §12.2 Phase 4): remember the latest pair so a
   // reconnect or a fresh prediction shadow is built from it (createShadow reads
@@ -337,6 +429,9 @@ export class NetClient {
     this.config = msg.config;
     this.mapId = msg.mapId;
     this.started = msg.started;
+    // Lifecycle is mirrored verbatim: every tally in it is server-owned, and a
+    // lobby without one clears the view instead of keeping a stale gate.
+    this.lifecycle = msg.lifecycle && typeof msg.lifecycle === 'object' && !Array.isArray(msg.lifecycle) ? msg.lifecycle : null;
     this.spectate = this.players.find(p => p.peerId === this.peerId)?.spectate === true;
     this.actorId = this.players.find(p => p.peerId === this.peerId)?.actorId ?? null;
     this._observeRoundRevision(msg.roundRevision);
@@ -415,6 +510,7 @@ export class NetClient {
      if (this.chatLog.length > 100) this.chatLog.splice(0, this.chatLog.length - 100);
      this.onChat?.(msg);
      break;
+    case MESSAGE.PONG: this._onPong(); break;
     case MESSAGE.ERROR: this.lastError = msg.message; this.onError?.(msg); break;
    }
    } catch {}

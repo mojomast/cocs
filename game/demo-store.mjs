@@ -67,8 +67,28 @@ function createIndexedDbStorage() {
       await transactionDone(tx);
       db.close();
     },
+    // Library size for the Theater usage line. Reads only the stored bytes so
+    // it never decompresses a replay just to report its size.
+    async usage() {
+      const db = await openDb();
+      const tx = db.transaction([META_STORE, DATA_STORE], 'readonly');
+      const metas = await requestResult(tx.objectStore(META_STORE).getAll());
+      const records = await requestResult(tx.objectStore(DATA_STORE).getAll());
+      db.close();
+      return {
+        count: (metas || []).length,
+        bytes: (records || []).reduce((total, record) => total + recordByteSize(record), 0),
+      };
+    },
   };
 }
+
+const recordByteSize = record => {
+  const bytes = record?.bytes ?? record?.data;
+  if (Number.isFinite(bytes?.byteLength)) return bytes.byteLength;
+  if (Number.isFinite(bytes?.length)) return bytes.length;
+  return 0;
+};
 
 let storage = createIndexedDbStorage();
 
@@ -214,6 +234,39 @@ export async function getDemo(id) {
 
 export async function deleteDemo(id) {
   await storage.remove(id);
+}
+
+// ---------------------------------------------------------------------------
+// Library usage. The IndexedDB store reports the stored byte total directly;
+// any storage test double without `usage()` still gets a count, and `measured`
+// tells the caller whether a size is real instead of guessed. Kept pure so the
+// Theater line is testable without a browser.
+// ---------------------------------------------------------------------------
+export async function demoUsage() {
+  if (typeof storage?.usage === 'function') {
+    try {
+      const usage = await storage.usage();
+      return {
+        count: Math.max(0, Math.floor(Number(usage?.count) || 0)),
+        bytes: Math.max(0, Number(usage?.bytes) || 0),
+        measured: true,
+      };
+    } catch {}
+  }
+  const all = await storage.list();
+  const list = Array.isArray(all) ? all : [];
+  const bytes = list.reduce((total, demo) => total + (Number(demo?.bytes) || 0), 0);
+  return {count: list.length, bytes, measured: bytes > 0};
+}
+
+export function demoUsageText(usage) {
+  const count = Math.max(0, Math.floor(Number(usage?.count) || 0));
+  const label = `${count} ${count === 1 ? 'REPLAY' : 'REPLAYS'}`;
+  const bytes = Math.max(0, Number(usage?.bytes) || 0);
+  if (!bytes) return label;
+  const mb = bytes / (1024 * 1024);
+  const size = mb >= 10 ? `${Math.round(mb)} MB` : mb >= 1 ? `${mb.toFixed(1)} MB` : `${Math.max(1, Math.round(bytes / 1024))} KB`;
+  return `${label} · ${size}`;
 }
 
 // ---------------------------------------------------------------------------

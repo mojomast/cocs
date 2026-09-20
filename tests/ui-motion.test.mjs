@@ -139,6 +139,22 @@ test('the HUD passes the real reduced-motion value and keeps damage numbers boun
   assert.match(hud, /notice\.leaving\?' is-leaving'/, 'the leaving class reaches the notice');
 });
 
+test('the UI text scale reaches the HUD and keeps its compact stops', async () => {
+  const globals = await read(GLOBALS_CSS);
+  assert.match(globals, /\.game-hud\{--hud-scale:clamp\(\.8,var\(--ui-scale,1\),1\.4\)\}/, 'the HUD derives its scale from the same value the command board uses');
+  assert.match(globals, /\.scores-overlay\{--hud-scale:clamp\(\.8,var\(--ui-scale,1\),1\.4\)\}/, 'the scoreboard derives it too');
+  for (const selector of ['.game-hud .stat-card .stat-value', '.game-hud .kill-feed>div', '.game-hud .audio-caption', '.game-hud .damage-source', '.scores-overlay .score-row']) {
+    assert.ok(globals.includes(`${selector}{font-size:calc(`), `${selector} scales with --hud-scale`);
+  }
+  // The compact stops survive, still multiplied by the scale, so 844×390 cannot
+  // overflow when the slider is at either end.
+  const narrow = globals.slice(globals.lastIndexOf('@media(max-width:760px)'));
+  assert.ok(narrow.includes('.game-hud .stat-card .stat-value{font-size:calc(clamp(18px,6vw,26px) * var(--hud-scale,1))}'), 'the narrow stat-value stop is preserved');
+  const compact = globals.slice(globals.lastIndexOf('@media(max-height:520px)'));
+  assert.ok(compact.includes('.game-hud .ability-card .stat-label{font-size:calc(8px * var(--hud-scale,1))}'), 'the short-landscape ability stop is preserved');
+  assert.ok(compact.includes('.game-hud .stat-card--ammo .stat-value{font-size:calc(19px * var(--hud-scale,1))}'), 'the short-landscape ammo stop is preserved');
+});
+
 // ---------------------------------------------------------------------------
 // SSR: the real HUD renders the bounded emphasis, and the reduced path drops
 // both the scale pop and the rise without touching the damage-number contract.

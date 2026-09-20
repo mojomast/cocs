@@ -53,7 +53,25 @@ test('the soccer pitch map exposes the arena.race contract buildArena reads',()=
  assert.ok(PUMA_PITCH.race.pitch&&Number.isFinite(PUMA_PITCH.race.pitch.minX));
 });
 
-import {scoreboardGroups,streakLabel,pingLabel,actorKitChip} from './scoreboard.mjs';
+import {scoreboardGroups,streakLabel,pingLabel,actorKitChip,stampLocalPing} from './scoreboard.mjs';
+
+test('the client-measured RTT is stamped onto the local scoreboard row only',()=>{
+ const source={config:{mode:'deathmatch'},actorId:1,actors:[{id:0,name:'A',ping:30},{id:1,name:'B'}]};
+ const stamped=stampLocalPing(source,1,42);
+ assert.equal(stamped.actors.find(a=>a.id===1).ping,42,'the local row carries the measured RTT');
+ assert.equal(stamped.actors.find(a=>a.id===0).ping,30,'other rows keep the server value');
+ assert.equal(source.actors[1].ping,undefined,'the source snapshot is never mutated');
+ assert.equal(source.actors.length,stamped.actors.length);
+ assert.equal(stampLocalPing(source,1,null),source,'no measurement leaves the snapshot untouched');
+ assert.equal(stampLocalPing(source,1,undefined),source);
+ assert.equal(stampLocalPing(source,1,-5),source,'a negative measurement is not a ping');
+ assert.equal(stampLocalPing(source,null,42),source,'a spectator has no local row to stamp');
+ assert.equal(stampLocalPing(source,9,42),source,'an absent local actor is never invented');
+ const server={config:{mode:'deathmatch'},actorId:1,actors:[{id:1,name:'B',ping:80}]};
+ assert.equal(stampLocalPing(server,1,42),server,'a server-reported value wins');
+ const html=renderToStaticMarkup(renderScoreboard(stamped));
+ assert.match(html,/<span class="ping ping-good">42<\/span>/,'the measured ping renders in the PING column');
+});
 
 test('scoreboard rows carry a null-safe wing/spec chip',()=>{
  assert.equal(actorKitChip({}),null);

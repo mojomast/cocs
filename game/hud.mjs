@@ -5,6 +5,7 @@ import {teamMode,isCocsMode} from './config.mjs';
 import {latticeCaption} from './lattice-feedback.mjs';
 import {formatNumber,formatCountdown} from './format-ui.mjs';
 import {DEFAULT_BINDINGS,bindingLabel} from './keybinds.mjs';
+import {ASSISTIVE_PRIORITY} from './assistive-announce.mjs';
 
 // Every prompt below is a function of the live bindings, never a literal key.
 // `bindings` is optional so pure callers and tests keep a sensible default.
@@ -131,17 +132,21 @@ export function damageBearing(local, target) {
   return {angle, distance: Math.hypot(dx, dz)};
 }
 
-export function killBanner(hud, player) {
+export function killBanner(hud, player, weapons = []) {
   const latest = hud?.feed?.[0], when = Number(hud?.time), at = Number(latest?.time);
   if (!latest || !player || !Number.isFinite(at) || !Number.isFinite(when)) return null;
   const age = Math.max(0, when - at);
   const ability = latest.ability === true && typeof latest.abilityName === 'string' && latest.abilityName.length > 0
     ? latest.abilityName.toUpperCase() : null;
-  // Ability attribution rides in `detail` so the pinned text lines stay exactly
-  // as they are; the HUD only renders the detail when it is present.
-  if (latest.self && latest.victim === player.name) return {kind: 'self', text: 'ELIMINATED', age, ...(ability ? {detail: ability} : {})};
-  if (latest.killer === player.name && latest.victim !== player.name) return {kind: 'kill', text: `YOU ELIMINATED ${latest.victim ?? ''}`.trim(), age, ...(ability ? {detail: `WITH ${ability}`} : {})};
-  if (latest.victim === player.name && latest.killer !== player.name) return {kind: 'death', text: `${latest.killer ?? 'ARENA'} ELIMINATED YOU`, age, ...(ability ? {detail: ability} : {})};
+  // Attribution rides in `detail` so the pinned text lines stay exactly as they
+  // are; the HUD only renders the detail when it is present. An ability names
+  // the lethal blow; otherwise the killer's weapon index resolves through the
+  // shared weapon table, so a plain weapon kill is attributed too.
+  const weapon = ability ? null : killFeedWeapon(latest, weapons);
+  const detail = ability ?? weapon;
+  if (latest.self && latest.victim === player.name) return {kind: 'self', text: 'ELIMINATED', age, ...(detail ? {detail} : {})};
+  if (latest.killer === player.name && latest.victim !== player.name) return {kind: 'kill', text: `YOU ELIMINATED ${latest.victim ?? ''}`.trim(), age, ...(detail ? {detail: ability ? `WITH ${ability}` : `WITH ${weapon}`} : {})};
+  if (latest.victim === player.name && latest.killer !== player.name) return {kind: 'death', text: `${latest.killer ?? 'ARENA'} ELIMINATED YOU`, age, ...(detail ? {detail} : {})};
   return null;
 }
 
@@ -174,7 +179,7 @@ export function suddenDeathBanner(hud) {
   return (hud?.suddenDeath === true || hud?.objectives?.suddenDeath === true) && hud?.over !== true ? { text: 'SUDDEN DEATH', detail: 'NEXT SCORE WINS' } : null;
 }
 
-const CAPTION_EVENTS = Object.freeze({shot:'Gunfire',explosion:'Explosion','vehicle-shot':'Vehicle gunfire',grenade:'Grenade out',melee:'Melee',reload:'Reloading',pickup:'Pickup',powerup:'Powerup','vehicle-enter':'Mounted vehicle','vehicle-exit':'Dismounted vehicle','vehicle-destroyed':'Vehicle destroyed','vehicle-splatter':'Vehicle splatter','zone-capture':'Zone captured','zone-score':'Objective scoring','zone-neutralized':'Zone neutralized','flag-pickup':'Flag taken','flag-return':'Flag returned','flag-drop':'Flag dropped',capture:'Flag captured','assault-sector-captured':'Sector captured','assault-sector-lost':'Sector lost','assault-breach':'Sector breached','payload-checkpoint':'Checkpoint reached','payload-delivered':'Payload delivered','soccer-goal':'Goal','killstreak':'Killstreak',death:'Elimination','mission-message':'Mission update','mission-won':'Mission complete','mission-lost':'Mission failed','horde-wave':'Wave incoming','horde-wave-cleared':'Wave cleared','horde-resupply':'Resupplied','horde-upgrade':'Upgrade available','horde-upgrade-selected':'Upgrade acquired','enemy-detonate':'Sapper detonation','singleplayer-checkpoint':'Checkpoint saved','npc-deploy':'Contacts','story-line':'Mission briefing','npc-bark':'Transmission','boss-phase':'Boss phase','armsrace-promote':'Ladder up','armsrace-demote':'Ladder down','juggernaut-transfer':'Crown taken','elimination-life':'Team life lost','vip-deploy':'VIP deployed','vip-down':'VIP down','vip-extracted':'VIP extracted','holdout-progress':'Holdout progress','holdout-win':'Holdout won','uplink-capture':'Uplink captured','uplink-stage':'Uplink advanced','uplink-win':'Uplink won','objective-win':'Objective secured','enemy-telegraph':'Incoming attack','boss-slam':'Boss slam','boss-summon':'Boss summon','mender-heal':'Ally healed','overseer-aura':'Overseer aura','phalanx-shield':'Phalanx shield','enemy-flank':'Flanking','enemy-artillery':'Artillery incoming','race-coin':'Coin collected','race-box':'Item box','race-boost':'Speed boost','race-item':'Item deployed','race-hazard-hit':'Hazard hit','race-lap':'Lap complete','race-finish':'Race finish',power:'Ability activated','threat-ping':'Threat ping',feint:'Radar feint','move-start':'Movement ability','move-end':'Movement ended','windup-start':'Movement wind-up','windup-end':'Movement wind-up ended','charge-start':'Movement charge','charge-release':'Movement released','charge-cancel':'Movement charge cancelled','slam-launch':'Slam launch','slam-impact':'Slam impact','grapple-hook':'Grapple hooked','grapple-release':'Grapple released','rope-place':'Rope deployed','rope-expire':'Rope expired','move-miss':'Movement missed','rope-miss':'Rope missed','move-blocked':'Movement blocked','fuel-empty':'Fuel empty','no-lift':'Movement blocked','chain-cancel':'Movement chained','landing-recovery':'Landing recovery'});
+const CAPTION_EVENTS = Object.freeze({shot:'Gunfire',explosion:'Explosion','vehicle-shot':'Vehicle gunfire',grenade:'Grenade out',melee:'Melee',reload:'Reloading',pickup:'Pickup',powerup:'Powerup','vehicle-enter':'Mounted vehicle','vehicle-exit':'Dismounted vehicle','vehicle-destroyed':'Vehicle destroyed','vehicle-splatter':'Vehicle splatter','zone-capture':'Zone captured','zone-score':'Objective scoring','zone-neutralized':'Zone neutralized','flag-pickup':'Flag taken','flag-return':'Flag returned','flag-drop':'Flag dropped',capture:'Flag captured','assault-sector-captured':'Sector captured','assault-sector-lost':'Sector lost','assault-breach':'Sector breached','payload-checkpoint':'Checkpoint reached','payload-delivered':'Payload delivered','soccer-goal':'Goal','killstreak':'Killstreak',death:'Elimination','mission-message':'Mission update','mission-won':'Mission complete','mission-lost':'Mission failed','horde-wave':'Wave incoming','horde-wave-cleared':'Wave cleared','horde-resupply':'Resupplied','horde-upgrade':'Upgrade available','horde-upgrade-selected':'Upgrade acquired','enemy-detonate':'Sapper detonation','singleplayer-checkpoint':'Checkpoint saved','npc-deploy':'Contacts','story-line':'Mission briefing','npc-bark':'Transmission','boss-phase':'Boss phase','armsrace-promote':'Ladder up','armsrace-demote':'Ladder down','juggernaut-transfer':'Crown taken','elimination-life':'Team life lost','vip-deploy':'VIP deployed','vip-down':'VIP down','vip-extracted':'VIP extracted','holdout-progress':'Holdout progress','holdout-win':'Holdout won','uplink-capture':'Uplink captured','uplink-stage':'Uplink advanced','uplink-win':'Uplink won','objective-win':'Objective secured','enemy-telegraph':'Incoming attack','boss-slam':'Boss slam','boss-summon':'Boss summon','mender-heal':'Ally healed','overseer-aura':'Overseer aura','phalanx-shield':'Phalanx shield','enemy-flank':'Flanking','enemy-artillery':'Artillery incoming','race-coin':'Coin collected','race-box':'Item box','race-boost':'Speed boost','race-item':'Item deployed','race-hazard-hit':'Hazard hit','race-lap':'Lap complete','race-finish':'Race finish',power:'Ability activated','threat-ping':'Threat ping',feint:'Radar feint','move-start':'Movement ability','move-end':'Movement ended','windup-start':'Movement wind-up','windup-end':'Movement wind-up ended','charge-start':'Movement charge','charge-release':'Movement released','charge-cancel':'Movement charge cancelled','slam-launch':'Slam launch','slam-impact':'Slam impact','grapple-hook':'Grapple hooked','grapple-release':'Grapple released','rope-place':'Rope deployed','rope-expire':'Rope expired','move-miss':'Movement missed','rope-miss':'Rope missed','move-blocked':'Movement blocked','fuel-empty':'Fuel empty','no-lift':'Movement blocked','chain-cancel':'Movement chained','landing-recovery':'Landing recovery','vehicle-damage':'Vehicle damaged',dryfire:'Empty magazine','weapon-switch':'Weapon switch','loadout-switch':'Loadout changed','horde-modifier':'Wave modifier'});
 export function ladderStatus(player, total = 10) {
   const rung = Math.max(0, Math.floor(Number(player?.ladder) || 0));
   const size = Math.max(1, Math.floor(Number(total) || 10));
@@ -196,6 +201,17 @@ export function altFireLabel(event) {
   if (spec) return spec.label;
   const direct = event?.modeLabel ?? event?.label;
   return typeof direct === 'string' && direct ? direct.toUpperCase() : '';
+}
+
+// Bearing wording for the damage caption. `angle` is the relative bearing the
+// HUD's damageBearing produced: 0 ahead, positive to the left, wrapped to the
+// nearest 45-degree sector. Pure; unknown/NaN angles are handled by the caller.
+const BEARING_WORDS = ['front', 'front-left', 'left', 'back-left', 'back', 'back-right', 'right', 'front-right'];
+export function bearingWord(angle) {
+  const a = Number(angle);
+  if (!Number.isFinite(a)) return null;
+  const sector = Math.round(a / (Math.PI / 4));
+  return BEARING_WORDS[((sector % 8) + 8) % 8];
 }
 
 export function audioCaption(event) {
@@ -224,8 +240,111 @@ export function audioCaption(event) {
   if (type === 'coop-reinforce') return {text: 'Reinforcements called'};
   if (type === 'coop-reserve') return {text: 'Reserve ticket burned'};
   if (type === 'operation-summary') return {text: `Operation summary · ${String(event.reason ?? '').replace(/-/g, ' ')}`};
+  // Per-kind supply identity. A bare `pickup` keeps the historical 'Pickup'
+  // table line; a known supply kind names itself and any other kind is a weapon.
+  if (type === 'pickup') {
+    const kind = String(event?.kind ?? '');
+    const named = { health: 'Health acquired', armor: 'Armor acquired', ammo: 'Ammo acquired', megahealth: 'Mega health acquired' }[kind];
+    return { text: named ?? (kind ? 'Weapon acquired' : 'Pickup') };
+  }
+  // A live spawn event carries its actor and position; the bare `{type:'spawn'}`
+  // probe stays uncaptioned exactly as the historical table did.
+  if (type === 'spawn') return event?.actor != null || event?.pos != null ? { text: 'Respawn' } : null;
+  // Incoming damage: bearing wording when the host stamps the relative angle
+  // hud.damageBearing produced, otherwise a plain incoming line.
+  if (type === 'damage') {
+    const word = bearingWord(event?.angle ?? event?.bearing);
+    return { text: word ? `Damage taken · ${word}` : 'Damage taken' };
+  }
   const text = CAPTION_EVENTS[type];
   return text ? { text } : null;
+}
+
+// Short "who hit me" line for the non-live incoming-damage chip. The page
+// threads the authoritative event fields (attacker name, the attacker's weapon
+// index, the ability that landed the blow, the amount and the local actor's
+// remaining health) into one payload; this formats it exactly once so the chip
+// and any future surface cannot drift. Unknown parts never leave a dangling
+// separator.
+export function damageHitText(info, weapons = []) {
+  if (!info || typeof info !== 'object') return '';
+  const clean = value => typeof value === 'string' ? value.replace(/\s+/g, ' ').trim() : '';
+  const name = clean(info.name);
+  const ability = clean(info.abilityName) || (typeof info.ability === 'string' ? clean(info.ability) : '');
+  const index = Number.isInteger(info.weapon) ? info.weapon : null;
+  const weapon = index !== null && weapons?.[index]?.short ? clean(weapons[index].short) : '';
+  const amount = Math.max(0, Math.round(Number(info.amount) || 0));
+  const health = Number.isFinite(Number(info.health)) ? Math.max(0, Math.round(Number(info.health))) : null;
+  const parts = [name ? `HIT BY ${name.toUpperCase()}` : 'HIT'];
+  const detail = ability ? ability.toUpperCase() : weapon.toUpperCase();
+  if (detail) parts.push(detail);
+  if (amount > 0) parts.push(String(amount));
+  if (health !== null) parts.push(`${health} HP`);
+  return parts.join(' · ');
+}
+
+// ---------------------------------------------------------------------------
+// Caption replacement policy. Captions arrive event-by-event and are normally
+// last-write-wins, but a burst of routine lines (gunfire, reloads, pickups)
+// must not clobber an important beat (a mission failure, a boss phase, a
+// wave call) that is still inside its display window. The ranks are the
+// assistive channel's own priorities, so the two systems cannot disagree about
+// what matters, and `CAPTION_TTL` keeps the page's existing 2.2 s lifetime.
+export const CAPTION_TTL = 2.2;
+
+const CAPTION_PRIORITY_BY_TYPE = Object.freeze({
+  'mission-won': ASSISTIVE_PRIORITY.death,
+  'mission-lost': ASSISTIVE_PRIORITY.death,
+  death: ASSISTIVE_PRIORITY.death,
+  'objective-win': ASSISTIVE_PRIORITY.objective,
+  'zone-capture': ASSISTIVE_PRIORITY.objective,
+  'zone-score': ASSISTIVE_PRIORITY.objective,
+  'flag-pickup': ASSISTIVE_PRIORITY.objective,
+  'payload-delivered': ASSISTIVE_PRIORITY.objective,
+  'assault-breach': ASSISTIVE_PRIORITY.objective,
+  'boss-phase': ASSISTIVE_PRIORITY.sudden,
+  'director-siege': ASSISTIVE_PRIORITY.sudden,
+  'enemy-telegraph': ASSISTIVE_PRIORITY.callout,
+  killstreak: ASSISTIVE_PRIORITY.callout,
+  'vehicle-destroyed': ASSISTIVE_PRIORITY.callout,
+  'horde-wave': ASSISTIVE_PRIORITY.callout,
+  'horde-wave-cleared': ASSISTIVE_PRIORITY.callout,
+  'mission-message': ASSISTIVE_PRIORITY.notice,
+  'director-intermission': ASSISTIVE_PRIORITY.notice,
+  'singleplayer-checkpoint': ASSISTIVE_PRIORITY.notice,
+  'story-line': ASSISTIVE_PRIORITY.notice,
+  'npc-bark': ASSISTIVE_PRIORITY.notice,
+  'npc-deploy': ASSISTIVE_PRIORITY.notice,
+});
+
+// Rank for a caption event. Unknown/routine events share the channel's lowest
+// ranked band, so they never displace a protected line but still update freely.
+export function captionPriority(event) {
+  return CAPTION_PRIORITY_BY_TYPE[String(event?.type)] ?? ASSISTIVE_PRIORITY.order;
+}
+
+// Replacement policy: returns the entry to show (with `at`) or null when the
+// showing line survives. A protected line (callout and above) holds its window
+// against equal-or-lower ranks; routine captions stay last-write-wins; an
+// identical line inside the window is deduped instead of restarting the clock.
+export function acceptCaption(current, currentAt, candidate, at, ttl = CAPTION_TTL) {
+  const text = typeof candidate?.text === 'string' ? candidate.text.replace(/\s+/g, ' ').trim() : '';
+  if (!text) return null;
+  const when = Number.isFinite(Number(at)) ? Number(at) : 0;
+  const priority = Number.isFinite(Number(candidate?.priority)) ? Number(candidate.priority) : ASSISTIVE_PRIORITY.order;
+  const entry = {text, priority, at: when};
+  const shown = typeof current === 'string' && current
+    ? {text: current, priority: ASSISTIVE_PRIORITY.order}
+    : current && typeof current.text === 'string' && current.text ? current : null;
+  if (!shown) return entry;
+  const shownAt = Number(currentAt);
+  const age = Number.isFinite(shownAt) ? when - shownAt : Infinity;
+  const window = Number(ttl) > 0 ? Number(ttl) : CAPTION_TTL;
+  if (!(age >= 0) || age >= window) return entry;
+  if (shown.text === text) return null;
+  const shownPriority = Number.isFinite(Number(shown.priority)) ? Number(shown.priority) : ASSISTIVE_PRIORITY.order;
+  if (shownPriority >= ASSISTIVE_PRIORITY.callout && priority <= shownPriority) return null;
+  return entry;
 }
 
 export function grenadeStatus(player) {
@@ -464,7 +583,25 @@ export function latticeAnnounceCue(event, playerId) {
     case 'coop-spend-rejected':
       return 'feint';
     case 'director-siege':
+    case 'director-boss':
+    case 'director-phase':
+    case 'director-overrun':
       return 'boss';
+    case 'director-spawn-telegraph':
+    case 'director-escalation':
+    case 'director-retarget':
+    case 'director-reinforce':
+    case 'director-init':
+    case 'director-intermission':
+    case 'cocs-buy':
+      return 'objective';
+    case 'director-denial':
+      return 'feint';
+    case 'coop-resupply':
+    case 'coop-bonus':
+      return 'power';
+    case 'coop-reserve':
+      return 'defeat';
     default:
       return null;
   }
