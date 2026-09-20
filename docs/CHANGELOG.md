@@ -18,28 +18,29 @@ record in [VERIFICATION.md](VERIFICATION.md).
 
 ## v8.6 · PRISM — 2026-09-20
 
-An opt-in developer graphics lab for choosing the game's visual flavor, plus the
-first offline Moth material-variety slice.
+An opt-in developer graphics lab for choosing the game's visual flavor, plus a
+paid Moth material pack and the offline variety pipeline behind it.
 
 - 23 stackable effects: pixel and hex mosaic, row glitch, prism split, light
   bleed, vignette, contrast, saturation, white balance, sharpen, solarize, color
   bands, palette remap, print dots, crosshatch, ink and neon contours, ordered
   dither, phosphor screen, paper grain, and three baked-Moth-asset layers (grain,
-  signal glyphs, spectral coat).
+  signal glyphs, spectral coat) with an asset picker each.
 - Nine editable starting recipes, including Blueprint, Thermal, and Moth Print.
-- Global hotkeys: tap the backquote key to toggle the lab from anywhere with a
-  banner; Shift plus that key opens the drawer. SURPRISE ME rolls a valid random
-  mix; COPY RECIPE copies the exact JSON and PASTE A RECIPE JSON applies one
-  back for tuning.
+- Global hotkeys on the backquote key: tap to toggle the lab from anywhere, add
+  Shift to open the drawer. SURPRISE ME rolls a valid random mix; COPY RECIPE
+  copies the exact JSON and PASTE A RECIPE JSON applies one back for tuning.
 - Side-drawer live preview (bottom sheet in portrait), individual parameters,
   palette choice, overall mix, A/B bypass, split comparison, device-local saving,
   JSON export, and reset. Original graphics remain the default.
 - One fused display-space ShaderPass, stationary patterns, software-renderer
   fallback reporting, and crisp HUD/first-person weapon rendering.
-- Moth material slice: deterministic tile-safe variants for four surface
-  families from archived raw bakes, replay-stable per-surface wear identity,
-  structure-preserving grime/roughness on grid surfaces, and an explicit
-  sampling policy with a retro-nearest option. No new paid Moth runs.
+- Paid Moth batch (15 jobs): nine masked surface variants, two reflectance LUTs
+  (ceramic, void), an ember sky, two quantum scalar fields, and a 16-frame QRC
+  glyph animation decoded dependency-free.
+- Material variety: generated and baked variants share one stable per-surface
+  selection hash; grid surfaces keep their structure while gaining wear and
+  roughness; volcanic, cold and void arenas ride their own skies and LUTs.
 - Bake-integrity hardening in the game runner, ported upstream to the generic
   [mothbake](https://github.com/mojomast/mothbake) pipeline (merge-safe, atomic,
   validated publication) with tests, docs, and an example.

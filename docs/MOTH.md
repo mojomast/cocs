@@ -10,38 +10,61 @@ layers built directly from baked Moth assets.
 
 ## Material variety: what is implemented
 
-The first vertical slice of the plan is in the game today, entirely offline from
-archived raw bakes (no new paid runs):
+The plan's first two slices are in the game today — an offline pass from
+archived raw bakes, plus a paid 25-credit Moth batch (2026-09-20) that added
+fifteen new assets:
 
+- **Paid batch (v8.6, 15 jobs / 25 credits incl. two rejections and retries)** —
+  nine masked surface variants (`weathered_concrete-worn`,
+  `weathered_concrete-damp`, `metal-oxide`, `riveted_armor-scorched`,
+  `hex_paneling-mottle`, `rock-moss`, `ice-cracked`, `circuit_board-etch`,
+  `rough_stucco-weathered`) using blur-v1, deep-fryer-v1 and telablur-v1 with
+  locally generated wrap-safe masks; two reflectance LUTs
+  (`entanglement-ceramic`, `entanglement-void`); a warm `ember` sky; two
+  quantum scalar fields (`dust-field`, `flow-field`) built by blur-core-v1 from
+  the local `dust`/`flow` generators; and a 16-frame QRC glyph animation
+  (`qrc-glyphs`) via qrc-image-v1. The GIF is decoded dependency-free
+  (`scripts/moth-gif.mjs`) and baked whole in one paid job.
 - **Local variants** — `scripts/moth-variants.mjs` derives three related,
   deterministic, tile-seam-safe variants for `metal`, `weathered_concrete`,
   `rock` and `riveted_armor` from the archived 256 px raw outputs, enforcing a
   mean-neutral, structure-preserving transform and a byte budget. The generated
   records live in `game/moth-variants.mjs`; `game/moth-variants-runtime.mjs` is
-  the pure reader. Variant selection is a stable hash (no clock, RNG or load
-  order), so a wall keeps its wear identity across visits.
-- **Structure-preserving wear** — `game/moth-surface.mjs` now treats grid kinds
-  (paneling, grating, hazard stripes, riveted armor, …) with a `structure` policy
-  that never distorts the structural UV sampling but modulates grime and
+  the pure reader and now mixes the generated and baked variants behind one
+  stable selection hash (no clock, RNG or load order), so a wall keeps its wear
+  identity across visits.
+- **Structure-preserving wear** — `game/moth-surface.mjs` treats grid kinds
+  (paneling, grating, hazard stripes, riveted armor, …) with a `structure`
+  policy that never distorts the structural UV sampling but modulates grime and
   roughness independently, protecting saturated markings. Organic kinds keep
-  their break-up path but now vary on vertical surfaces, respect instancing, and
+  their break-up path but vary on vertical surfaces, respect instancing, and
   apply mean-neutral, strength-controlled macro modulation.
 - **Per-surface keys** — `game/view.mjs` passes a replay-stable variant key
   (`arena|kind|repeat|region`), so repeated floors and walls no longer all share
   one wear image.
+- **Arena dressing** — volcanic maps ride the `ember` sky and LUT, cold outposts
+  the `ceramic` LUT, void/neon interiors the `void` LUT; `mothLutThemeFor` and
+  `mothAtmosphereFor` are pure, contract-tested selectors.
 - **Explicit sampling** — `game/textures.mjs` sets a documented sampling policy
   for every Moth DataTexture (trilinear mips plus clamped anisotropy by default,
   with a deliberate retro-nearest mode available through
   `configureMothSampling`).
+- **Graphics lab** — three lab layers consume baked assets with an asset picker
+  each (grain: macro tile / dust field / flow field; signals: arc burst / QRC
+  glyphs; coat: all five LUTs).
 - **Upstream port** — the bake-integrity mechanisms this game's runner now uses
   (merge-safe partial publication, atomic and JSON-safe writes, download
   validation) were ported to the generic
   [mothbake](https://github.com/mojomast/mothbake) pipeline as opt-in emitter
   `merge: true` plus always-on hardening, with docs, examples and tests.
 
+The eager data module grew to ~1.7 MB with this batch and the budget test now
+caps it at 2 MiB; per the plan, the next asset growth must move to URL-backed
+textures instead of raising that number again.
+
 Still open from the plan: per-biome family weights, decals/sparse detail, higher
 resolution production tiles, URL-backed texture loading, and the coating/flow
-experiments that need new bakes.
+experiments that need further bakes.
 
 The game can bake presentation assets from [Moth Quantum](https://mothquantum.com)
 engines and load them at runtime. Everything is generated **offline**, decoded
@@ -59,6 +82,8 @@ deterministic, offline, and free of new runtime dependencies.
   arena.
 - `scripts/moth-variants.mjs` — offline generator for local material variants
   derived from archived raw bakes (no API, deterministic, budget-checked).
+- `scripts/moth-gif.mjs` — dependency-free GIF87a/89a decoder used by the
+  QRC-glyph bake (composited frames, transparency, disposal modes).
 - `game/moth-variants.mjs` — generated variant records; do not edit by hand.
 - `game/moth-variants-runtime.mjs` — pure variant reader and stable selection.
 - `game/moth-baked.mjs` — generated; do not edit by hand.

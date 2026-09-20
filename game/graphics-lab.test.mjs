@@ -9,14 +9,23 @@ import {configureMothAssets,resetMothAssets} from './moth-assets.mjs';
 function seeded(seed){let value=seed>>>0;return()=>{value=(value*1664525+1013904223)>>>0;return value/4294967296;};}
 const b64=bytes=>Buffer.from(bytes).toString('base64');
 // Tiny synthetic Moth bake: a 2x2 mid-grey tile, one 2x2 effect frame, and a
-// 2x2 R/T LUT. `lut:false` models a bake whose material never shipped.
-function mothFixture({lut=true}={}){
-  return {version:1,
-    textures:{'macro-organic':{width:2,height:2,data:b64(new Uint8Array([0,0,0,255,85,85,85,255,170,170,170,255,255,255,255,255]))}},
-    effects:{'arc-burst':{fps:10,frames:[{width:2,height:2,data:b64(new Uint8Array([255,0,0,255,0,255,0,255,0,0,255,255,255,255,0,255]))}]}},
-    ...(lut?{materials:{entanglement:{size:2,r:b64(new Uint8Array([0,0,0,255,0,0,0,0,0,128,0,0])),t:b64(new Uint8Array([0,0,0,0,0,0,0,0,0,64,0,0]))}}}:{}),
-  };
+// 2x2 R/T LUT. `lut:false` models a bake whose material never shipped; the
+// `fields`/`qrc`/`voidLut` flags ship the optional catalogue assets.
+function mothFixture({lut=true,fields=false,qrc=false,voidLut=false}={}){
+  const textures={'macro-organic':{width:2,height:2,data:b64(new Uint8Array([0,0,0,255,85,85,85,255,170,170,170,255,255,255,255,255]))}};
+  if(fields){
+    textures['dust-field']={width:2,height:2,data:b64(new Uint8Array([255,255,255,255,0,0,0,255,128,128,128,255,64,64,64,255]))};
+    textures['flow-field']={width:2,height:2,data:b64(new Uint8Array([10,10,10,255,200,200,200,255,30,30,30,255,240,240,240,255]))};
+  }
+  const effects={'arc-burst':{fps:10,frames:[{width:2,height:2,data:b64(new Uint8Array([255,0,0,255,0,255,0,255,0,0,255,255,255,255,0,255]))}]}};
+  if(qrc)effects['qrc-glyphs']={fps:8,frames:[{width:2,height:2,data:b64(new Uint8Array([0,255,0,255,255,255,255,255,255,0,255,255,0,0,0,255]))}]};
+  const materials=lut?{entanglement:{size:2,r:b64(new Uint8Array([0,0,0,255,0,0,0,0,0,128,0,0])),t:b64(new Uint8Array([0,0,0,0,0,0,0,0,0,64,0,0]))}}:{};
+  if(voidLut)materials['entanglement-void']={size:2,r:b64(new Uint8Array([0,0,0,255,255,255,255,255,0,255,0,0])),t:b64(new Uint8Array([0,0,0,0,255,255,255,255,0,128,0,0]))};
+  return {version:1,textures,effects,materials};
 }
+// Grayscale means of the synthetic field tiles above, used to prove the pass
+// measures each selected asset rather than assuming the default.
+const DUST_MEAN=447/1020,FLOW_MEAN=480/1020;
 
 test('preview defaults off; stale/corrupt settings cannot turn it on or inject shader values',()=>{
  for(const raw of [undefined,null,[],{version:99,enabled:true},{enabled:true}])assert.equal(graphicsLabActive(normalizeGraphicsLab(raw)),false);
@@ -121,5 +130,106 @@ test('one GPU material supports every combination through uniforms, including in
  for(const e of GRAPHICS_EFFECTS)assert.equal(pass.uniforms[e.id].value,e.max);
  s.effects.ink.enabled=false;pass.configure(s,390,844);assert.equal(pass.uniforms.ink.value,0);assert.equal(pass.material,material);assert.equal(pass.uniforms.neon.value,1.5);
  s.bypass=true;pass.configure(s,0,0);assert.equal(pass.enabled,false);assert.deepEqual(pass.uniforms.resolution.value.toArray(),[1,1]);
+ pass.dispose();
+});
+test('optioned layers normalize to a valid catalogue asset and drop unknown ids',()=>{
+ const defaults={mothgrain:'macro-organic',mothsignal:'arc-burst',mothcoat:'entanglement'};
+ for(const e of GRAPHICS_EFFECTS){
+  if(!e.options)continue;
+  assert.ok(e.options.length>=2,`${e.id} offers a choice`);
+  assert.ok(typeof e.assetLabel==='string'&&e.assetLabel.endsWith(' asset'),`${e.id} names its asset select`);
+  for(const o of e.options){
+   assert.equal(o.asset,o.id,`${e.id}:${o.id} reads its own registry key`);
+   assert.ok(o.label&&['surface','effect','lut'].includes(o.kind),`${e.id}:${o.id} is a complete descriptor`);
+  }
+ }
+ for(const [id,fallback] of Object.entries(defaults)){
+  const e=GRAPHICS_EFFECTS.find(effect=>effect.id===id);
+  assert.equal(e.options[0].id,fallback,`${id} ships ${fallback} as its default`);
+  const missing=normalizeGraphicsLab({version:1,enabled:true,effects:{[id]:{enabled:true,value:e.value}}});
+  assert.equal(missing.effects[id].option,fallback,'a save without options fills in the default');
+  const stale=normalizeGraphicsLab({version:1,enabled:true,effects:{[id]:{enabled:true,value:e.value,option:'nope'}}});
+  assert.equal(stale.effects[id].option,fallback,'an unknown option id falls back to the default');
+  assert.deepEqual(normalizeGraphicsLab(stale),stale,'the fallback stays normalized');
+ }
+ assert.equal(normalizeGraphicsLab({version:1,effects:{ink:{enabled:true,value:1,option:'dust-field'}}}).effects.ink.option,undefined,'optionless layers never grow an option');
+ const picked=normalizeGraphicsLab({version:1,effects:{mothcoat:{enabled:true,value:.4,option:'entanglement-void'}}});
+ assert.equal(picked.effects.mothcoat.option,'entanglement-void','a known option survives normalization');
+});
+test('exported and copied recipes carry the chosen option',()=>{
+ const s=graphicsRecipe('moth-print');
+ s.effects.mothgrain.option='flow-field';
+ s.effects.mothsignal.option='qrc-glyphs';
+ s.effects.mothcoat.option='entanglement-ceramic';
+ const saved=JSON.parse(serializeGraphicsLab(s));
+ assert.equal(saved.effects.mothgrain.option,'flow-field');
+ assert.equal(saved.effects.mothsignal.option,'qrc-glyphs');
+ assert.equal(saved.effects.mothcoat.option,'entanglement-ceramic');
+ assert.deepEqual(saved.effects,s.effects,'each layer round-trips with its option');
+ assert.equal(serializeGraphicsLab(saved),serializeGraphicsLab(s),'a round-tripped recipe is stable');
+ // A recipe stored before options existed hydrates to the defaults.
+ const legacy=JSON.parse(serializeGraphicsLab(graphicsRecipe('moth-print')));
+ for(const id of ['mothgrain','mothsignal','mothcoat'])delete legacy.effects[id].option;
+ const hydrated=normalizeGraphicsLab(legacy);
+ assert.equal(hydrated.effects.mothgrain.option,'macro-organic');
+ assert.equal(hydrated.effects.mothsignal.option,'arc-burst');
+ assert.equal(hydrated.effects.mothcoat.option,'entanglement');
+});
+test('randomizer rolls only catalogue options and keeps every stack normalized',()=>{
+ const rng=seeded(23),seen=new Set();
+ for(let i=0;i<80;i++){
+  const s=randomGraphicsLab(rng);
+  assert.deepEqual(s,normalizeGraphicsLab(s),'an option roll stays normalized');
+  for(const e of GRAPHICS_EFFECTS){
+   if(!e.options)continue;
+   const setting=s.effects[e.id];
+   assert.ok(e.options.some(o=>o.id===setting.option),`${e.id} stays inside the catalogue`);
+   if(setting.enabled)seen.add(`${e.id}:${setting.option}`);
+  }
+ }
+ assert.ok(seen.size>=2,'rolls vary Moth assets, not just slider values');
+});
+test('a missing option asset zeroes only its layer; switching options rebinds from the cache',()=>{
+ resetMothAssets();
+ configureMothAssets(mothFixture());
+ const pass=new GraphicsLabPass();
+ const s=normalizeGraphicsLab({version:1,enabled:true,effects:{
+  mothgrain:{enabled:true,value:.3,option:'dust-field'},
+  mothsignal:{enabled:true,value:.5,option:'qrc-glyphs'},
+  mothcoat:{enabled:true,value:.7,option:'entanglement-void'},
+  ink:{enabled:true,value:1},
+ }});
+ pass.configure(s,320,200);
+ for(const id of ['mothgrain','mothsignal','mothcoat'])assert.equal(pass.uniforms[id].value,0,`${id} drops to zero when its chosen asset is missing`);
+ assert.equal(pass.uniforms.mothgrainMap.value,null);
+ assert.equal(pass.uniforms.mothsignalMap.value,null);
+ assert.equal(pass.uniforms.mothcoatRamp.value,null);
+ assert.equal(pass.uniforms.ink.value,1,'other layers keep running');
+ // Ship the optional assets: the same selection binds and measures each tile.
+ configureMothAssets(mothFixture({fields:true,qrc:true,voidLut:true}));
+ const material=pass.material;
+ pass.configure(s,320,200);
+ assert.equal(pass.uniforms.mothgrain.value,.3);
+ assert.equal(pass.uniforms.mothsignal.value,.5);
+ assert.equal(pass.uniforms.mothcoat.value,.7);
+ const dust=pass.uniforms.mothgrainMap.value,arc=pass.uniforms.mothsignalMap.value;
+ assert.ok(dust?.isTexture&&arc?.isTexture,'the selected surface and effect frame bind');
+ assert.ok(pass.uniforms.mothcoatRamp.value?.isTexture,'the selected LUT ramp binds');
+ assert.ok(Math.abs(pass.uniforms.mothgrainMean.value-DUST_MEAN)<1e-9,'the grain mean is measured from the selected tile');
+ // Switching the option only changes uniforms; the texture follows the cache.
+ s.effects.mothgrain.option='flow-field';
+ s.effects.mothsignal.option='arc-burst';
+ pass.configure(s,320,200);
+ const flow=pass.uniforms.mothgrainMap.value;
+ assert.ok(flow?.isTexture&&flow!==dust,'another option binds a different texture');
+ assert.notEqual(pass.uniforms.mothsignalMap.value,arc,'another effect option binds a different frame');
+ assert.ok(Math.abs(pass.uniforms.mothgrainMean.value-FLOW_MEAN)<1e-9,'the mean follows the selected tile');
+ assert.equal(pass.material,material,'option switches never recompile the pass');
+ s.effects.mothgrain.option='dust-field';
+ s.effects.mothsignal.option='qrc-glyphs';
+ pass.configure(s,320,200);
+ assert.equal(pass.uniforms.mothgrainMap.value,dust,'switching back rebinds the cached texture');
+ assert.ok(Math.abs(pass.uniforms.mothgrainMean.value-DUST_MEAN)<1e-9,'the mean follows the option back');
+ assert.equal(pass.uniforms.mothsignalMap.value,arc,'the cached frame rebinds too');
  pass.dispose();
 });

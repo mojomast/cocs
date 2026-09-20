@@ -25,6 +25,7 @@ import {
 import { configureMothAssets, resetMothAssets } from './moth-assets.mjs';
 import {
   configureMothVariants,
+  mothBakedVariantNames,
   mothVariantFor,
   mothVariantNames,
   mothVariantRecord,
@@ -52,6 +53,21 @@ const keyFor = (kind, id) => {
   }
   throw new Error(`no key selects ${kind}/${id}`);
 };
+
+// A complete synthetic asset registry: only the textures/normals passed here
+// are present, so missing-record behavior is easy to exercise without the real
+// (and still changing) paid bake data.
+const assetsFixture = ({ textures = {}, normals = {} } = {}) => ({
+  version: 1,
+  textures,
+  normals,
+  materials: {},
+  sky: {},
+  effects: {},
+  levels: {},
+  seeds: {},
+  motifs: {},
+});
 
 test('a variant kind maps its albedo and roughness payloads onto Moth DataTextures', (t) => {
   resetMothVariants();
@@ -106,15 +122,23 @@ test('variantKey defaults to the seed and variant tiles are uploaded once', (t) 
   withDocument(t);
   t.after(() => clearSurfaceTextures());
 
-  const seedId = mothVariantFor('metal', 3);
-  assert.ok(seedId && seedId !== 'original', 'seed 3 selects a non-original variant');
-  const viaSeed = surfaceTextures('metal', { seed: 3, size: 32, repeat: [1, 1] });
+  // Find a seed whose default selection is a generated (paired-payload)
+  // variant: the baked variants would take the albedo-only path and cannot
+  // exercise the shared upload cache this test is about.
+  let seed = null;
+  for (let i = 0; i < 600 && seed === null; i++) {
+    const id = mothVariantFor('metal', i);
+    if (id && id !== 'original' && !mothBakedVariantNames('metal').includes(id)) seed = i;
+  }
+  assert.ok(seed !== null, 'metal has a reachable generated non-original variant');
+  const seedId = mothVariantFor('metal', seed);
+  const viaSeed = surfaceTextures('metal', { seed, size: 32, repeat: [1, 1] });
   assert.deepEqual(viaSeed.map.userData.mothVariant, { kind: 'metal', id: seedId }, 'the default variantKey is the seed');
-  assert.equal(surfaceTextures('metal', { seed: 3, size: 32, repeat: [1, 1] }), viaSeed, 'equal options reuse the cache entry');
+  assert.equal(surfaceTextures('metal', { seed, size: 32, repeat: [1, 1] }), viaSeed, 'equal options reuse the cache entry');
 
   // A different seed with an explicit key that resolves to the same variant
   // reuses the uploaded tile instead of decoding/uploading a second copy.
-  const viaKey = surfaceTextures('metal', { seed: 77, size: 32, repeat: [1, 1], variantKey: 3 });
+  const viaKey = surfaceTextures('metal', { seed: seed + 77, size: 32, repeat: [1, 1], variantKey: seed });
   assert.equal(viaKey.map.userData.mothVariant.id, seedId);
   assert.equal(viaKey.map, viaSeed.map, 'the same variant tile is shared across seeds');
   assert.equal(viaKey.roughnessMap, viaSeed.roughnessMap);
@@ -320,9 +344,10 @@ test('malformed or missing variant payloads fall back without throwing', (t) => 
   // The id is selectable but its base64 tile does not decode to the declared
   // dimensions, which is exactly the malformed-payload case.
   configureMothVariants({ kinds: { metal: [{ id: 'worn', albedo: { width: 2, height: 2, data: 'AAAA' }, roughness: { width: 2, height: 2, data: 'AAAA' } }] } });
-  assert.equal(mothVariantFor('metal', 'anything'), 'worn', 'the malformed id is selectable');
+  const wornKey = keyFor('metal', 'worn');
+  assert.equal(mothVariantFor('metal', wornKey), 'worn', 'the malformed id is selectable');
   let maps;
-  assert.doesNotThrow(() => { maps = surfaceTextures('metal', { seed: 7, size: 32 }); });
+  assert.doesNotThrow(() => { maps = surfaceTextures('metal', { seed: 7, size: 32, variantKey: wornKey }); });
   assert.equal(maps.map.isCanvasTexture, true, 'malformed albedo falls back to procedural');
   assert.equal(maps.map.userData.mothVariant, undefined);
   assert.equal(maps.roughnessMap.isCanvasTexture, true, 'malformed roughness falls back to procedural');
@@ -347,4 +372,124 @@ test('without a document variant kinds still return null without decoding (SSR p
   } finally {
     if (previous) Object.defineProperty(globalThis, 'document', previous);
   }
+});
+
+test('a baked variant maps its albedo and keeps procedural roughness plus the baked normal', (t) => {
+  resetMothVariants();
+  withDocument(t);
+  t.after(() => { clearSurfaceTextures(); resetMothAssets(); resetMothVariants(); });
+
+  const albedo = Uint8Array.from([5, 15, 25, 255, 35, 45, 55, 255, 65, 75, 85, 255, 95, 105, 115, 255]);
+  const normal = Uint8Array.from([128, 128, 255, 255, 128, 128, 255, 255, 128, 128, 255, 255, 128, 128, 255, 255]);
+  configureMothAssets(assetsFixture({
+    textures: {
+      metal: { width: 1, height: 1, data: b64(Uint8Array.from([200, 200, 200, 255])) },
+      'metal-oxide': { width: 2, height: 2, data: b64(albedo) },
+    },
+    normals: { metal: { width: 2, height: 2, data: b64(normal) } },
+  }));
+
+  const key = keyFor('metal', 'metal-oxide');
+  const maps = surfaceTextures('metal', { seed: 1, size: 32, repeat: [2, 3], variantKey: key });
+  assert.ok(maps?.map && maps?.roughnessMap && maps?.normalMap, 'all three maps are produced');
+
+  // Albedo: the baked variant payload byte-for-byte, sRGB, repeating, smooth.
+  assert.equal(maps.map.isDataTexture, true, 'the baked variant albedo is the map');
+  assert.equal(maps.map.image.width, 2);
+  assert.equal(maps.map.image.height, 2);
+  assert.deepEqual([...maps.map.image.data], [...albedo], 'the baked tile is used byte-for-byte');
+  assert.equal(maps.map.colorSpace, SRGBColorSpace);
+  assert.equal(maps.map.wrapS, RepeatWrapping);
+  assert.equal(maps.map.wrapT, RepeatWrapping);
+  assert.equal(maps.map.repeat.x, 2);
+  assert.equal(maps.map.repeat.y, 3);
+  assert.equal(maps.map.magFilter, LinearFilter);
+  assert.equal(maps.map.minFilter, LinearMipmapLinearFilter);
+  assert.equal(maps.map.generateMipmaps, true);
+  assert.equal(maps.map.anisotropy, 4);
+  assert.equal(maps.map.userData.surfaceKind, 'metal');
+  assert.equal(maps.map.userData.source, 'moth-variant');
+  assert.equal(maps.map.userData.mothShared, true, 'shared textures are never disposed by the view traversal');
+  assert.deepEqual(maps.map.userData.mothVariant, { kind: 'metal', id: 'metal-oxide', source: 'baked' });
+
+  // Roughness: no baked payload exists, so the procedural field stays.
+  assert.equal(maps.roughnessMap.isCanvasTexture, true, 'baked variants keep procedural roughness');
+  assert.equal(maps.roughnessMap.repeat.x, 2);
+  assert.equal(maps.roughnessMap.userData.surfaceKind, 'metal');
+  assert.equal(maps.roughnessMap.userData.mothVariant, undefined);
+  assert.notEqual(maps.roughnessMap, maps.map, 'albedo and roughness are distinct textures');
+
+  // Normal: the baked normal path is untouched and carries no variant tag.
+  assert.equal(maps.normalMap.isDataTexture, true, 'the baked normal is still used');
+  assert.equal(maps.normalMap.image.width, 2);
+  assert.equal(maps.normalMap.image.height, 2);
+  assert.equal(maps.normalMap.repeat.x, 2);
+  assert.equal(maps.normalMap.userData.source, 'moth');
+  assert.equal(maps.normalMap.userData.mothVariant, undefined);
+
+  // Equal options reuse the entry; a different seed shares the uploaded tile
+  // but keeps its own procedural roughness (and is disposed exactly once).
+  assert.equal(surfaceTextures('metal', { seed: 1, size: 32, repeat: [2, 3], variantKey: key }), maps, 'equal options reuse the cache entry');
+  const again = surfaceTextures('metal', { seed: 9, size: 32, repeat: [2, 3], variantKey: key });
+  assert.notEqual(again, maps, 'a different seed keeps its own surface entry');
+  assert.equal(again.map, maps.map, 'the baked albedo tile is uploaded once');
+  assert.notEqual(again.roughnessMap, maps.roughnessMap, 'procedural roughness stays per surface entry');
+  let disposed = 0;
+  maps.map.addEventListener('dispose', () => disposed++);
+  clearSurfaceTextures();
+  assert.equal(disposed, 1, 'the shared baked variant tile is disposed exactly once');
+});
+
+test('different surface keys reach different baked variants of one kind', (t) => {
+  resetMothVariants();
+  withDocument(t);
+  t.after(() => { clearSurfaceTextures(); resetMothAssets(); resetMothVariants(); });
+
+  configureMothAssets(assetsFixture({
+    textures: {
+      'weathered_concrete-worn': { width: 2, height: 2, data: b64(Uint8Array.from([10, 20, 30, 255, 40, 50, 60, 255, 70, 80, 90, 255, 100, 110, 120, 255])) },
+      'weathered_concrete-damp': { width: 2, height: 2, data: b64(Uint8Array.from([30, 60, 90, 255, 60, 90, 120, 255, 90, 120, 150, 255, 120, 150, 180, 255])) },
+    },
+  }));
+
+  const seen = new Set();
+  for (let i = 0; i < 64; i++) {
+    const maps = surfaceTextures('weathered_concrete', {
+      seed: 5,
+      size: 16,
+      repeat: [1, 1],
+      variantKey: `arena|weathered_concrete|1x1|panel-${i}`,
+    });
+    seen.add(maps.map.userData.mothVariant?.id ?? 'original');
+  }
+  assert.ok(seen.has('weathered_concrete-worn'), 'the worn bake is selectable');
+  assert.ok(seen.has('weathered_concrete-damp'), 'the damp bake is selectable');
+  assert.ok(
+    [...seen].some((id) => ['original', 'worn', 'stained'].includes(id)),
+    'generated variants of the same kind stay in the mix',
+  );
+});
+
+test('a missing baked record falls back silently and a later registry still upgrades', (t) => {
+  resetMothVariants();
+  withDocument(t);
+  t.after(() => { clearSurfaceTextures(); resetMothAssets(); resetMothVariants(); });
+
+  const key = keyFor('metal', 'metal-oxide');
+  configureMothAssets(assetsFixture());
+  let first;
+  assert.doesNotThrow(() => { first = surfaceTextures('metal', { seed: 1, size: 32, repeat: [1, 1], variantKey: key }); });
+  assert.ok(first?.map, 'the fallback still produces a surface');
+  assert.equal(first.map.userData.mothVariant, undefined, 'the fallback is not tagged as a variant');
+  assert.equal(first.roughnessMap.userData.mothVariant, undefined);
+
+  // The same options after the record lands must not hit a poisoned
+  // variant-keyed cache entry left behind by the earlier fallback.
+  const albedo = Uint8Array.from([7, 17, 27, 255, 37, 47, 57, 255, 67, 77, 87, 255, 97, 107, 117, 255]);
+  configureMothAssets(assetsFixture({ textures: { 'metal-oxide': { width: 2, height: 2, data: b64(albedo) } } }));
+  const second = surfaceTextures('metal', { seed: 1, size: 32, repeat: [1, 1], variantKey: key });
+  assert.equal(second.map.isDataTexture, true, 'the newly landed baked record is picked up');
+  assert.deepEqual([...second.map.image.data], [...albedo]);
+  assert.deepEqual(second.map.userData.mothVariant, { kind: 'metal', id: 'metal-oxide', source: 'baked' });
+  assert.equal(second.roughnessMap.isCanvasTexture, true);
 });

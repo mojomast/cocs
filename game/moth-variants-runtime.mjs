@@ -1,20 +1,48 @@
 // Runtime access to the deterministic material variants generated offline by
-// scripts/moth-variants.mjs (MOTH-GRAPHICS-PLAN.md §4.3, §5.1, §11 G2/G3).
+// scripts/moth-variants.mjs (MOTH-GRAPHICS-PLAN.md §4.3, §5.1, §11 G2/G3) and
+// to the Moth-baked variant tiles in game/moth-baked.mjs (`textures` bucket,
+// read through mothSurfaceOverride in game/moth-assets.mjs).
 //
 // This module is pure, dependency-free, has no three.js import and performs no
 // I/O, so it is safe in Node tests and server-side rendering. The committed
 // data module game/moth-variants.mjs holds base64 RGBA tiles; decoding is lazy
 // per kind and cached, and a seed change never re-decodes an identical tile.
+// Baked variants decode through moth-assets.mjs (one decode per configured
+// registry, cached there) and this module only wraps the decoded image, so no
+// payload is touched until a caller asks for it.
+//
+// A kind's variant pool is the generated ids (committed order) followed by the
+// baked ids from the fixed MOTH_BAKED_VARIANTS table below, and selection is a
+// stable hash over that list. The table is a constant, not a live registry
+// read, so the same key resolves to the same id in every process independent
+// of clock, RNG or load order; a selected record whose payload is missing or
+// malformed resolves to null and callers fall back to the single-record path.
 //
 // Typical consumer shape (variant wins, existing single record is the fallback):
 //
 //   import { mothVariantFor, mothVariantRecord } from './moth-variants-runtime.mjs';
-//   const id = mothVariantFor('metal', panelSeed);       // stable id or null
+//   const id = mothVariantFor('metal', panelSeed);            // stable id or null
 //   const variant = id ? mothVariantRecord('metal', id) : null;
-//   if (variant) use(variant.albedo, variant.roughness);
-//   else use(mothSurfaceOverride('metal'));               // existing baked record
+//   if (variant?.source === 'baked') use(variant.albedo);     // procedural roughness
+//   else if (variant) use(variant.albedo, variant.roughness); // generated pair
+//   else use(mothSurfaceOverride('metal'));                   // existing baked record
 
 import { MOTH_VARIANTS } from './moth-variants.mjs';
+import { mothSurfaceOverride } from './moth-assets.mjs';
+
+// kind -> baked texture key in game/moth-baked.mjs `textures`. Each listed key
+// becomes one variant of that kind, exactly once. Frozen so neither callers nor
+// tooling can reorder the pool after import.
+export const MOTH_BAKED_VARIANTS = Object.freeze({
+  weathered_concrete: Object.freeze(['weathered_concrete-worn', 'weathered_concrete-damp']),
+  metal: Object.freeze(['metal-oxide']),
+  riveted_armor: Object.freeze(['riveted_armor-scorched']),
+  hex_paneling: Object.freeze(['hex_paneling-mottle']),
+  rock: Object.freeze(['rock-moss']),
+  ice: Object.freeze(['ice-cracked']),
+  circuit_board: Object.freeze(['circuit_board-etch']),
+  rough_stucco: Object.freeze(['rough_stucco-weathered']),
+});
 
 // Selection is bounded: a malformed or hostile data module cannot make a
 // caller allocate an unbounded list.
@@ -91,7 +119,7 @@ function decodeImage(record) {
   return { width, height, data: bytes };
 }
 
-// registry = { source, cache: Map<kind, Array<record|null>> } or null.
+// registry = { source, cache: Map<kind, Map<id, record>> } or null.
 let registry = null;
 
 function defaultRegistry() {
@@ -118,8 +146,10 @@ export function mothVariantKinds() {
   return kinds.slice(0, MAX_KINDS);
 }
 
-// Variant ids for a kind, bounded and never throwing. Unknown kinds return [].
-export function mothVariantNames(kind) {
+// Generated variant ids only, in committed order. Kept internal so the public
+// mothVariantNames() can expose the mixed pool without callers having to know
+// which half a record came from.
+function generatedVariantNames(kind) {
   const source = ensureRegistry().source;
   const list = source && source.kinds && source.kinds[kind];
   if (!Array.isArray(list)) return [];
@@ -132,34 +162,119 @@ export function mothVariantNames(kind) {
   return names;
 }
 
-// Decoded {width,height,data} pairs, cached per kind. `id` is the variant id
-// returned by mothVariantFor/mothVariantNames; a numeric index is also accepted
-// for tooling. Returns null when the kind, id or payload is unavailable.
-export function mothVariantRecord(kind, id) {
+// Baked variant ids for a kind: the fixed table above, in table order. Pure and
+// static, so it answers even before game/moth-baked.mjs has landed a record.
+export function mothBakedVariantNames(kind) {
+  const list = typeof kind === 'string' ? MOTH_BAKED_VARIANTS[kind] : null;
+  if (!Array.isArray(list)) return [];
+  const names = [];
+  const limit = Math.min(list.length, MAX_VARIANTS_PER_KIND);
+  for (let i = 0; i < limit; i++) {
+    if (typeof list[i] === 'string' && list[i]) names.push(list[i]);
+  }
+  return names;
+}
+
+// Every variant id for a kind: generated ids first (committed order), then
+// baked ids (table order). This is the exact pool mothVariantFor() hashes over.
+// Unknown kinds return [], and a null variant registry disables the mixed pool
+// entirely (generated and baked) so callers fall back to the single-record
+// path. Never throws.
+export function mothVariantNames(kind) {
+  if (ensureRegistry().source == null) return [];
+  const names = generatedVariantNames(kind);
+  const baked = mothBakedVariantNames(kind);
+  if (baked.length === 0) return names;
+  return names.concat(baked).slice(0, MAX_VARIANTS_PER_KIND);
+}
+
+// Baked payload wrappers, keyed by variant id. A wrapper is reused only while
+// moth-assets returns the same decoded image object, so reconfiguring the asset
+// registry (tests, hot reload of the bake file) can never serve a stale tile. A
+// miss is never cached: the next call retries.
+const bakedCache = new Map();
+
+function validBakedImage(image) {
+  if (!image || typeof image !== 'object') return null;
+  const width = image.width | 0;
+  const height = image.height | 0;
+  if (width <= 0 || height <= 0) return null;
+  const data = image.data;
+  if (!data || typeof data.length !== 'number' || data.length !== width * height * 4) return null;
+  return { width, height, data };
+}
+
+function bakedVariantRecord(id) {
+  let override = null;
+  try {
+    override = mothSurfaceOverride(id);
+  } catch {
+    override = null;
+  }
+  const albedo = validBakedImage(override);
+  if (!albedo) {
+    bakedCache.delete(id);
+    return null;
+  }
+  const cached = bakedCache.get(id);
+  if (cached && cached.override === override) return cached.record;
+  const record = { source: 'baked', id, albedo };
+  bakedCache.set(id, { override, record });
+  return record;
+}
+
+// Generated records are decoded once per kind and cached by kind; malformed
+// entries are dropped. Keyed by id so a malformed entry cannot shift the
+// alignment of the ids returned by mothVariantNames().
+function generatedVariantRecords(kind) {
   const reg = ensureRegistry();
+  let decoded = reg.cache.get(kind);
+  if (decoded) return decoded;
+  decoded = new Map();
   const source = reg.source;
   const list = source && source.kinds && source.kinds[kind];
-  if (!Array.isArray(list) || list.length === 0) return null;
+  if (Array.isArray(list)) {
+    const limit = Math.min(list.length, MAX_VARIANTS_PER_KIND);
+    for (let i = 0; i < limit; i++) {
+      const entry = list[i];
+      const id = entry && entry.id;
+      if (typeof id !== 'string' || !id) continue;
+      const albedo = decodeImage(entry.albedo);
+      const roughness = decodeImage(entry.roughness);
+      if (albedo && roughness) decoded.set(id, { source: 'generated', id, albedo, roughness });
+    }
+  }
+  reg.cache.set(kind, decoded);
+  return decoded;
+}
+
+// Resolve one variant id to its decoded payload. `id` is a combined id from
+// mothVariantNames()/mothVariantFor(), or a numeric index into that list.
+// Generated variants always carry a paired roughness tile; baked variants only
+// carry an albedo (the caller keeps its procedural roughness). Returns null when
+// the kind, id or payload is unavailable, so callers can fall back.
+export function mothVariantRecord(kind, id) {
+  if (ensureRegistry().source == null) return null;
   const names = mothVariantNames(kind);
   if (names.length === 0) return null;
-  const index = typeof id === 'number' ? Math.trunc(id) : names.indexOf(String(id));
-  if (!Number.isInteger(index) || index < 0 || index >= names.length) return null;
-  let decoded = reg.cache.get(kind);
-  if (!decoded) {
-    decoded = new Array(names.length).fill(null);
-    for (let i = 0; i < names.length; i++) {
-      const albedo = decodeImage(list[i] && list[i].albedo);
-      const roughness = decodeImage(list[i] && list[i].roughness);
-      decoded[i] = albedo && roughness ? { id: names[i], albedo, roughness } : null;
-    }
-    reg.cache.set(kind, decoded);
+  let resolved = null;
+  if (typeof id === 'number') {
+    const index = Math.trunc(id);
+    if (!Number.isInteger(index) || index < 0 || index >= names.length) return null;
+    resolved = names[index];
+  } else {
+    resolved = String(id);
+    if (names.indexOf(resolved) < 0) return null;
   }
-  return decoded[index] ?? null;
+  if (mothBakedVariantNames(kind).includes(resolved)) return bakedVariantRecord(resolved);
+  return generatedVariantRecords(kind).get(resolved) ?? null;
 }
 
 // Deterministic variant selection from a stable key (number or short string).
-// Returns null when the kind has no variants, so callers fall back to the
-// existing single baked record for that kind.
+// The pool is mothVariantNames(kind) in order, so the mapping is identical in
+// every process and for the life of a committed data set. Returns null when the
+// kind has no variants (or the variant registry is disabled), so callers fall
+// back to the existing single baked record for that kind.
 export function mothVariantFor(kind, key) {
   const names = mothVariantNames(kind);
   if (names.length === 0) return null;
@@ -169,14 +284,19 @@ export function mothVariantFor(kind, key) {
 export function mothVariantStatus() {
   const reg = ensureRegistry();
   const kinds = mothVariantKinds();
+  const bakedKinds = Object.keys(MOTH_BAKED_VARIANTS);
   let variants = 0;
   for (const kind of kinds) variants += mothVariantNames(kind).length;
+  let bakedVariants = 0;
+  for (const kind of bakedKinds) bakedVariants += mothBakedVariantNames(kind).length;
   return {
     configured: reg.source != null,
     version: reg.source && reg.source.version != null ? reg.source.version : null,
     algorithm: reg.source && typeof reg.source.algorithm === 'string' ? reg.source.algorithm : null,
     kinds,
     variants,
+    bakedKinds,
+    bakedVariants,
     decodedKinds: [...reg.cache.keys()],
   };
 }

@@ -8,6 +8,8 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 import { MOTH_VARIANTS } from './moth-variants.mjs';
+import { MOTH_BAKED } from './moth-baked.mjs';
+import { configureMothAssets, resetMothAssets } from './moth-assets.mjs';
 import {
   ALGORITHM,
   KINDS,
@@ -24,7 +26,9 @@ import {
   writeModuleAtomic,
 } from '../scripts/moth-variants.mjs';
 import {
+  MOTH_BAKED_VARIANTS,
   configureMothVariants,
+  mothBakedVariantNames,
   mothVariantFor,
   mothVariantKinds,
   mothVariantNames,
@@ -39,6 +43,7 @@ const MODULE_PATH = path.join(HERE, 'moth-variants.mjs');
 const TMP_DIR = '/tmp/opencode/moth-variants-test';
 
 const decode = (b64) => new Uint8Array(Buffer.from(b64, 'base64'));
+const encode = (bytes) => Buffer.from(bytes).toString('base64');
 
 function withAlphaChecked(record, label) {
   assert.ok(record, `${label}: record present`);
@@ -194,14 +199,188 @@ test('selection is stable, distributed and bounded', () => {
   }
   const seen = new Set();
   for (let i = 0; i < 600; i++) seen.add(mothVariantFor('metal', `panel-${i}`));
-  assert.equal(seen.size, 3, 'sequential string keys reach all three variants');
+  assert.equal(seen.size, 4, 'sequential string keys reach all four metal variants');
+  assert.ok(seen.has('metal-oxide'), 'the baked variant joins the metal pool');
+  assert.ok(
+    seen.has('original') && seen.has('worn') && seen.has('stained'),
+    'the generated metal variants stay reachable',
+  );
   const seenNumbers = new Set();
   for (let i = 0; i < 600; i++) seenNumbers.add(mothVariantFor('metal', i));
-  assert.equal(seenNumbers.size, 3, 'numeric keys reach all three variants');
+  assert.equal(seenNumbers.size, 4, 'numeric keys reach all four variants');
+
+  // Per-surface keys (arena|kind|repeat|region in the game) must be able to
+  // land on different baked variants of one kind, while every generated id
+  // stays reachable from the same mixed pool.
+  const seenConcrete = new Set();
+  for (let i = 0; i < 600; i++) {
+    seenConcrete.add(mothVariantFor('weathered_concrete', `arena|weathered_concrete|2x2|panel-${i}`));
+  }
+  assert.equal(seenConcrete.size, 5, 'weathered_concrete reaches all five variants');
+  assert.ok(
+    seenConcrete.has('weathered_concrete-worn') && seenConcrete.has('weathered_concrete-damp'),
+    'both baked concrete variants are selectable',
+  );
+  assert.ok(
+    seenConcrete.has('original') && seenConcrete.has('worn') && seenConcrete.has('stained'),
+    'generated concrete variants are selectable too',
+  );
+
   assert.equal(mothVariantFor('not_a_kind', 1), null, 'unknown kind -> null');
   assert.equal(mothVariantFor('metal', null), mothVariantFor('metal', ''), 'nullish keys are stable');
   assert.deepEqual(mothVariantNames('not_a_kind'), [], 'unknown names -> empty');
   assert.equal(mothVariantRecord('not_a_kind', 'original'), null, 'unknown record -> null');
+
+  // Re-creating the registry must not reshuffle selection: the pool comes from
+  // committed data plus the fixed table, never from load order.
+  const runs = () => ['metal', 'weathered_concrete', 'rock'].map((kind) => mothVariantFor(kind, 'arena|2x2|panel-7'));
+  const before = runs();
+  resetMothVariants();
+  assert.deepEqual(runs(), before, 'selection survives a registry rebuild');
+  configureMothVariants();
+  assert.deepEqual(runs(), before, 'selection survives an explicit reconfigure');
+  resetMothVariants();
+});
+
+test('a kind enumerates its generated variants followed by its baked variants', () => {
+  resetMothVariants();
+  assert.deepEqual(mothVariantNames('metal'), ['original', 'worn', 'stained', 'metal-oxide']);
+  assert.deepEqual(mothVariantNames('weathered_concrete'), [
+    'original',
+    'worn',
+    'stained',
+    'weathered_concrete-worn',
+    'weathered_concrete-damp',
+  ]);
+  assert.deepEqual(mothVariantNames('riveted_armor'), ['original', 'worn', 'stained', 'riveted_armor-scorched']);
+  assert.deepEqual(mothVariantNames('rock'), ['original', 'worn', 'stained', 'rock-moss']);
+  assert.deepEqual(mothVariantNames('hex_paneling'), ['hex_paneling-mottle'], 'baked-only kind');
+  assert.deepEqual(mothVariantNames('ice'), ['ice-cracked']);
+  assert.deepEqual(mothVariantNames('circuit_board'), ['circuit_board-etch']);
+  assert.deepEqual(mothVariantNames('rough_stucco'), ['rough_stucco-weathered']);
+  assert.deepEqual(mothVariantNames('sand'), [], 'kinds without variants stay empty');
+  assert.deepEqual(mothBakedVariantNames('sand'), []);
+  assert.deepEqual(mothBakedVariantNames('not_a_kind'), []);
+  assert.deepEqual(mothBakedVariantNames(null), []);
+  assert.equal(Object.isFrozen(MOTH_BAKED_VARIANTS), true, 'the baked table is frozen');
+
+  const status = mothVariantStatus();
+  assert.deepEqual(status.bakedKinds, Object.keys(MOTH_BAKED_VARIANTS), 'status lists the baked kinds');
+  assert.equal(status.bakedVariants, 9, 'nine baked variants are in the table');
+  assert.ok(status.variants > status.bakedVariants, 'the generated variants still count too');
+});
+
+test('baked variants resolve to albedo-only records through the asset registry', () => {
+  resetMothVariants();
+  const albedoBytes = Uint8Array.from([1, 2, 3, 255, 4, 5, 6, 255, 7, 8, 9, 255, 10, 11, 12, 255]);
+  try {
+    configureMothAssets({
+      version: 1,
+      textures: { 'metal-oxide': { width: 2, height: 2, data: encode(albedoBytes) } },
+      normals: {}, materials: {}, sky: {}, effects: {}, levels: {}, seeds: {}, motifs: {},
+    });
+    const record = mothVariantRecord('metal', 'metal-oxide');
+    assert.ok(record, 'the configured baked record resolves');
+    assert.equal(record.source, 'baked', 'baked source is reported');
+    assert.equal(record.id, 'metal-oxide');
+    assert.equal(record.roughness, undefined, 'baked variants carry no roughness payload');
+    assert.equal(record.albedo.width, 2);
+    assert.equal(record.albedo.height, 2);
+    assert.deepEqual([...record.albedo.data], [...albedoBytes], 'the decoded payload is the baked tile');
+    assert.equal(mothVariantRecord('metal', 'metal-oxide'), record, 'the wrapper is stable while the registry is unchanged');
+    assert.equal(
+      mothVariantRecord('metal', mothVariantNames('metal').indexOf('metal-oxide')),
+      record,
+      'a numeric index into the mixed pool resolves the baked variant',
+    );
+
+    const generated = mothVariantRecord('metal', 'worn');
+    assert.equal(generated.source, 'generated', 'generated records report their source');
+    assert.ok(generated.albedo && generated.roughness, 'generated records keep the paired payloads');
+    assert.equal(
+      mothVariantRecord('metal', mothVariantNames('metal').indexOf('worn')),
+      generated,
+      'numeric indexes still resolve generated ids',
+    );
+  } finally {
+    resetMothVariants();
+    resetMothAssets();
+  }
+});
+
+test('missing or malformed baked records resolve to null without throwing', () => {
+  resetMothVariants();
+  try {
+    configureMothAssets({
+      version: 1,
+      textures: { 'metal-oxide': { width: 2, height: 2, data: 'AAAA' } },
+      normals: {}, materials: {}, sky: {}, effects: {}, levels: {}, seeds: {}, motifs: {},
+    });
+    assert.equal(mothVariantRecord('metal', 'metal-oxide'), null, 'a malformed payload resolves to null');
+    assert.doesNotThrow(() => mothVariantRecord('metal', 'metal-oxide'));
+
+    configureMothAssets({
+      version: 1,
+      textures: { 'metal-oxide': { width: 2, height: 2, data: null } },
+      normals: {}, materials: {}, sky: {}, effects: {}, levels: {}, seeds: {}, motifs: {},
+    });
+    assert.equal(mothVariantRecord('metal', 'metal-oxide'), null, 'a record without data resolves to null');
+
+    configureMothAssets({
+      version: 1,
+      textures: {}, normals: {}, materials: {}, sky: {}, effects: {}, levels: {}, seeds: {}, motifs: {},
+    });
+    assert.equal(mothVariantRecord('metal', 'metal-oxide'), null, 'a missing payload resolves to null');
+    assert.ok(mothVariantRecord('metal', 'worn'), 'generated records are unaffected by the asset registry');
+
+    // A later registry that does carry the tile clears the previous miss.
+    configureMothAssets({
+      version: 1,
+      textures: { 'metal-oxide': { width: 1, height: 1, data: encode(Uint8Array.from([9, 8, 7, 255])) } },
+      normals: {}, materials: {}, sky: {}, effects: {}, levels: {}, seeds: {}, motifs: {},
+    });
+    assert.equal(mothVariantRecord('metal', 'metal-oxide')?.source, 'baked', 'a later registry can resolve the id');
+  } finally {
+    resetMothVariants();
+    resetMothAssets();
+  }
+});
+
+test('the committed bake registry resolves every baked variant that has landed', (t) => {
+  resetMothVariants();
+  try {
+    configureMothAssets();
+    const landed = new Set(Object.keys(MOTH_BAKED.textures || {}));
+    let checked = 0;
+    let missing = 0;
+    for (const kind of Object.keys(MOTH_BAKED_VARIANTS)) {
+      const ids = mothBakedVariantNames(kind);
+      assert.equal(ids.length, MOTH_BAKED_VARIANTS[kind].length, `${kind}: the table enumerates`);
+      for (const id of ids) {
+        assert.ok(mothVariantNames(kind).includes(id), `${kind}/${id}: enumerated in the mixed pool`);
+        if (!landed.has(id)) {
+          missing++;
+          continue;
+        }
+        checked++;
+        const record = mothVariantRecord(kind, id);
+        assert.ok(record, `${kind}/${id}: the committed record resolves`);
+        assert.equal(record.source, 'baked', `${kind}/${id}: source`);
+        assert.equal(record.id, id, `${kind}/${id}: id`);
+        assert.equal(record.roughness, undefined, `${kind}/${id}: no roughness payload`);
+        assert.equal(
+          record.albedo.data.length,
+          record.albedo.width * record.albedo.height * 4,
+          `${kind}/${id}: RGBA payload length`,
+        );
+      }
+    }
+    assert.equal(checked + missing, 9, 'all nine table entries are accounted for');
+    if (missing > 0) t.diagnostic(`${missing}/9 baked payloads absent from game/moth-baked.mjs; payload checks skipped`);
+  } finally {
+    resetMothVariants();
+    resetMothAssets();
+  }
 });
 
 test('runtime decodes lazily, caches identical objects and degrades to null', () => {
@@ -220,9 +399,11 @@ test('runtime decodes lazily, caches identical objects and degrades to null', ()
 
   configureMothVariants(null);
   assert.deepEqual(mothVariantKinds(), [], 'null registry -> no kinds');
-  assert.deepEqual(mothVariantNames('metal'), []);
+  assert.deepEqual(mothVariantNames('metal'), [], 'a null registry disables the mixed pool');
   assert.equal(mothVariantRecord('metal', 'worn'), null);
   assert.equal(mothVariantFor('metal', 'panel-1'), null, 'null registry -> fallback signal');
+  assert.deepEqual(mothBakedVariantNames('metal'), ['metal-oxide'], 'the baked table stays enumerable for tooling');
+  assert.equal(mothVariantRecord('metal', 'metal-oxide'), null, 'but baked payloads stay off while disabled');
   assert.doesNotThrow(() => mothVariantStatus());
 
   resetMothVariants();

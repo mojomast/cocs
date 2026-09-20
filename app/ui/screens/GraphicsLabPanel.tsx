@@ -16,6 +16,12 @@ export function GraphicsLabPanel({lab}:{lab?:ReturnType<typeof useGraphicsLab>})
  const active=GRAPHICS_EFFECTS.filter(e=>s.effects[e.id].enabled);
  const patch=(p:Partial<GraphicsLabSettings>)=>update(v=>({...v,...p}));
  const effect=(id:string,p:Partial<GraphicsLabSettings['effects'][string]>)=>update(v=>({...v,effects:{...v.effects,[id]:{...v.effects[id],...p}}}));
+ // Catalogue entries may offer baked-asset choices; these read them without
+ // widening the generated settings type.
+ const layerOptions=(e:unknown):readonly {id:string;label:string}[]=>((e as {options?:readonly {id:string;label:string}[]}).options??[]);
+ const layerLabel=(e:unknown,fallback:string):string=>(e as {assetLabel?:string}).assetLabel??fallback;
+ const settingOption=(s:GraphicsLabSettings['effects'][string],options:readonly {id:string}[])=>{const chosen=(s as {option?:string}).option;return options.some(o=>o.id===chosen)?chosen:options[0]?.id??'';};
+ const setOption=(id:string,option:string)=>update(v=>({...v,effects:{...v.effects,[id]:{...v.effects[id],option} as GraphicsLabSettings['effects'][string]}}));
  const apply=(index:number)=>{const i=(index+GRAPHICS_RECIPES.length)%GRAPHICS_RECIPES.length;setRecipeIndex(i);update(graphicsRecipe(GRAPHICS_RECIPES[i].id));setMessage(`${GRAPHICS_RECIPES[i].name} loaded. Tweak or stack any effects below.`);};
  const randomize=()=>{setRecipeIndex(-1);update(randomGraphicsLab(Math.random));setMessage('Rolled a new mix. Press again to keep rolling, or tune the layers below.');};
  const copyRecipe=async()=>{
@@ -73,9 +79,11 @@ export function GraphicsLabPanel({lab}:{lab?:ReturnType<typeof useGraphicsLab>})
   <div className="graphics-lab__section-title"><b>02 / STACK YOUR LAYERS</b><span>{active.length} / {GRAPHICS_EFFECTS.length}</span></div>
   <div className="graphics-lab__layers">{GRAPHICS_EFFECTS.map(e=>{
    const setting=s.effects[e.id];
+   const options=layerOptions(e);
    return <section className={`graphics-lab__layer${setting.enabled?' is-on':''}`} key={e.id}>
     <label className="graphics-lab__layer-switch"><input type="checkbox" checked={setting.enabled} onChange={ev=>effect(e.id,{enabled:ev.target.checked})}/><b>{e.name}</b><span>{setting.enabled?'ON':'OFF'}</span></label>
     <p>{e.description}</p>
+    {options.length>0&&<label className="graphics-lab__option">{layerLabel(e,`${e.name} asset`)}<select aria-label={layerLabel(e,`${e.name} asset`)} value={settingOption(setting,options)} onChange={ev=>setOption(e.id,ev.target.value)}>{options.map(o=><option key={o.id} value={o.id}>{o.label}</option>)}</select></label>}
     <label className="graphics-lab__range">{e.label}<output>{Number(setting.value.toFixed(3))}{e.unit}</output><input aria-label={`${e.name} ${e.label}`} type="range" min={e.min} max={e.max} step={e.step} value={setting.value} disabled={!setting.enabled} onChange={ev=>effect(e.id,{value:Number(ev.target.value)})}/></label>
     <small>{e.cost}</small>
    </section>;

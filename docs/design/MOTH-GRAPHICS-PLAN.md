@@ -5,15 +5,18 @@
 **Tool inspected:** `mothbake` at `3e25930` in `/home/mojo/projects/mothbake`  
 **API inspected:** live public OpenAPI, `moth-api v0.41.0`  
 **Fetched schema SHA-256:** `b0695071d500e28457a7d18fc4ef2e94cb60989761eeafff2cdd90f9bf553e39`  
-**Status:** partially implemented (v8.6 PRISM). G0 bake integrity is in the game
+**Status:** largely implemented (v8.6 PRISM). G0 bake integrity is in the game
 runner **and** ported upstream to `mothbake` (`a35a2e67`: merge-safe, atomic,
-validated publication; download validation). G2/G3 first slice is in: offline
-deterministic variants for four kinds from archived raw bakes, per-surface
-variant keys, structure-preserving wear, and an explicit sampling policy. The
-graphics lab also gained three Moth-asset layers. Everything else below —
-additional families, decals, higher-resolution/URL-backed textures, coating and
-flow experiments needing new bakes — remains proposed. See
-[../MOTH.md](../MOTH.md) for the implemented summary.
+validated publication; download validation). G2/G3 first and second slices are
+in: offline deterministic variants, a paid 15-job Moth batch (nine masked surface
+variants, two LUTs, an ember sky, two scalar fields, a 16-frame QRC sheet),
+per-surface variant keys, structure-preserving wear, and an explicit sampling
+policy. §6 Experiments A/B (industrial and concrete wear), D (LUT study) and E
+(QRC frames) are partially executed by that batch; the graphics lab also gained
+three Moth-asset layers with asset pickers. Still proposed: further family
+weights, decals, higher-resolution/URL-backed textures (the eager module is at
+~1.7 MB; the next growth must move off base64), and the remaining experiments.
+See [../MOTH.md](../MOTH.md) for the implemented summary.
 
 ## 1. Recommendation
 

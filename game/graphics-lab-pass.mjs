@@ -176,8 +176,13 @@ export class GraphicsLabPass extends ShaderPass {
       let value=setting.enabled?setting.value:0;
       // A Moth accent with no baked asset is a silent no-op: force just that
       // layer to zero instead of sampling an unbound texture, and let every
-      // other layer keep running.
-      if(value>0&&MOTH_ACCENTS[e.id]&&!MOTH_ACCENTS[e.id](u))value=0;
+      // other layer keep running. The option is always a catalogue id by the
+      // time it reaches configure(); fall back to the first one for safety.
+      const accent=MOTH_ACCENTS[e.id];
+      if(value>0&&accent){
+        const option=e.options?.find(o=>o.id===setting.option)||e.options?.[0];
+        if(!option||!accent(u,option))value=0;
+      }
       u[e.id].value=value;
     }
     // Palette constants are display-space values, not three.Color's linear RGB.
@@ -191,12 +196,13 @@ export class GraphicsLabPass extends ShaderPass {
 
 // ---- Baked Moth accents -----------------------------------------------------
 // Each accent derives one small DataTexture from an asset the app already
-// decoded: the 64x64 macro-organic albedo, one 48x48 arc-burst frame, and a
-// 256x1 ramp scanned out of the entanglement R/T LUT. They are built on the
-// first enabled frame and cached at module scope, so the fused pass adds no
-// per-frame uploads, no render targets, and no recompiles. They are never
-// disposed: the source bytes live for the session, the cache is bounded by the
-// three ids below, and every lab pass shares the one copy.
+// decoded: a 64x64 surface tile (macro-organic, dust-field, flow-field), frame 0
+// of an effect sequence (arc-burst, qrc-glyphs), or a 256x1 ramp scanned out of
+// an entanglement R/T LUT. They are built on the first enabled frame and cached
+// at module scope under `effect:option`, so the fused pass adds no per-frame
+// uploads, no render targets, and no recompiles. They are never disposed: the
+// source bytes live for the session, the cache is bounded by the catalogue
+// options below, and every lab pass shares the one copy.
 const mothTextures=new Map();
 function mothDataTexture(data,width,height,wrap){
   const texture=new DataTexture(data,width,height);
@@ -206,12 +212,13 @@ function mothDataTexture(data,width,height,wrap){
   texture.needsUpdate=true;
   return texture;
 }
-// Mean-neutral grain: the neutral is the tile's own mean luminance, measured
-// once from the baked bytes (the shipped macro-organic tile reads ~0.431).
-function mothGrain(){
-  const cached=mothTextures.get('mothgrain');
+// Mean-neutral grain: the neutral is the selected tile's own mean luminance,
+// measured once from its baked bytes and recomputed whenever the option changes
+// (the shipped macro-organic tile reads ~0.431).
+function mothGrain(option){
+  const key=`mothgrain:${option.id}`,cached=mothTextures.get(key);
   if(cached)return cached;
-  const source=mothSurfaceOverride('macro-organic');
+  const source=mothSurfaceOverride(option.asset);
   if(!source?.data?.length||!(source.width>0)||!(source.height>0))return null;
   const pixels=source.width*source.height;
   let mean=0;
@@ -220,25 +227,27 @@ function mothGrain(){
     mean+=(.2126*source.data[o]+.7152*source.data[o+1]+.0722*source.data[o+2])/255;
   }
   const value={texture:mothDataTexture(source.data,source.width,source.height,RepeatWrapping),mean:mean/pixels};
-  mothTextures.set('mothgrain',value);
+  mothTextures.set(key,value);
   return value;
 }
-function mothSignal(){
-  const cached=mothTextures.get('mothsignal');
+// The lab contract is stationary, so an effect option contributes frame 0 only.
+function mothSignal(option){
+  const key=`mothsignal:${option.id}`,cached=mothTextures.get(key);
   if(cached)return cached;
-  const frame=mothEffect('arc-burst')?.frames?.[0];
+  const frame=mothEffect(option.asset)?.frames?.[0];
   if(!frame?.data?.length||!(frame.width>0)||!(frame.height>0))return null;
   const value={texture:mothDataTexture(frame.data,frame.width,frame.height,RepeatWrapping)};
-  mothTextures.set('mothsignal',value);
+  mothTextures.set(key,value);
   return value;
 }
-// A 256x1 RGBA ramp scanned row-major out of the entanglement LUT: R from the
+// A 256x1 RGBA ramp scanned row-major out of the selected LUT: R from the
 // reflectance mask, G from the transmittance mask, B their mix. The measured
-// per-channel mean is subtracted in the shader, so the coat stays mean-neutral.
-function mothCoatRamp(){
-  const cached=mothTextures.get('mothcoat');
+// per-channel mean is subtracted in the shader, so the coat stays mean-neutral
+// per selected asset.
+function mothCoatRamp(option){
+  const key=`mothcoat:${option.id}`,cached=mothTextures.get(key);
   if(cached)return cached;
-  const lut=mothMaterialLut('entanglement');
+  const lut=mothMaterialLut(option.asset);
   const size=Math.floor(lut?.size)||0;
   if(!size||!lut.r?.length||!lut.t?.length||lut.r.length<size*size*3||lut.t.length<size*size*3)return null;
   const steps=256,data=new Uint8Array(steps*4),mean=new Vector3();
@@ -249,13 +258,13 @@ function mothCoatRamp(){
     mean.x+=r;mean.y+=t;mean.z+=mix;
   }
   const value={texture:mothDataTexture(data,steps,1,ClampToEdgeWrapping),mean:mean.divideScalar(steps)};
-  mothTextures.set('mothcoat',value);
+  mothTextures.set(key,value);
   return value;
 }
-// One resolver per Moth layer: bind the texture when the bake is present, or
-// report false so configure() zeroes only that layer.
+// One resolver per Moth layer: bind the texture for the chosen option when the
+// bake is present, or report false so configure() zeroes only that layer.
 const MOTH_ACCENTS={
-  mothgrain(u){const grain=mothGrain();if(!grain)return false;u.mothgrainMap.value=grain.texture;u.mothgrainMean.value=grain.mean;return true;},
-  mothsignal(u){const signal=mothSignal();if(!signal)return false;u.mothsignalMap.value=signal.texture;return true;},
-  mothcoat(u){const coat=mothCoatRamp();if(!coat)return false;u.mothcoatRamp.value=coat.texture;u.mothcoatMean.value.copy(coat.mean);return true;},
+  mothgrain(u,option){const grain=mothGrain(option);if(!grain)return false;u.mothgrainMap.value=grain.texture;u.mothgrainMean.value=grain.mean;return true;},
+  mothsignal(u,option){const signal=mothSignal(option);if(!signal)return false;u.mothsignalMap.value=signal.texture;return true;},
+  mothcoat(u,option){const coat=mothCoatRamp(option);if(!coat)return false;u.mothcoatRamp.value=coat.texture;u.mothcoatMean.value.copy(coat.mean);return true;},
 };

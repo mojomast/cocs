@@ -122,12 +122,22 @@ const arenaSeedOf=arena=>String(arena?.id||'arena').split('').reduce((hash,char)
 // unused: the bake decodes to a fully black equirect (mean/max 0), so wiring it
 // would render a black dome instead of an atmosphere.
 const MOTH_ATMOSPHERE_MAPS=Object.freeze({
- 'ember-caldera':'ashen','slagworks':'ashen','forge':'ashen','ashen-rift':'ashen',
+ 'ember-caldera':'ember','slagworks':'ember','forge':'ember','ashen-rift':'ember',
  frostline:'frost','frost-gate':'frost',
  'neon-vertical':'void',aether:'void',substation:'void','derelict-station':'void','ironfall-megastructure':'void',
  'moth-backrooms':'void',
 });
 export function mothAtmosphereFor(arenaId){return MOTH_ATMOSPHERE_MAPS[String(arenaId)]||null;}
+// Baked Moth LUT family per arena. Volcanic maps ride the ember LUT, cold
+// outposts the ceramic one, the void/neon interiors the deep frustrated LUT, and
+// everything else the arcane one. The plain `entanglement` LUT stays on
+// flags/pickups so the original bake stays in play (and is the graphics lab's
+// default coat). Exported so the mapping is contract-tested like the sky/space
+// tables rather than only reachable through a live view instance.
+const MOTH_LUT_EMBER=['ember-caldera','slagworks','forge','ashen-rift'];
+const MOTH_LUT_VOID=['neon-vertical','aether','substation','derelict-station','ironfall-megastructure','moth-backrooms','crosswire'];
+const MOTH_LUT_CERAMIC=['frostline','frost-gate'];
+export function mothLutThemeFor(arenaId){const id=String(arenaId??'');if(MOTH_LUT_EMBER.includes(id))return'entanglement-ember';if(MOTH_LUT_VOID.includes(id))return'entanglement-void';if(MOTH_LUT_CERAMIC.includes(id))return'entanglement-ceramic';return'entanglement-arcane';}
 // Baked Moth reverb space per map. Interiors, tunnels and caverns override the
 // open-air default so the soundtrack's convolution tail matches the room the
 // player is actually in. Names match the `irs` keys in the baked module.
@@ -1442,10 +1452,9 @@ export class ArenaView{
      // --- Moth entanglement LUT materials ----------------------------------
      // The baked reflectance LUTs drive an iridescent fresnel film on a standard
      // material. Materials are created per landmark (and disposed with it) while
-     // the LUT texture itself is a shared cache owned by textures.mjs; volcanic
-     // maps ride the ember LUT, everything else the arcane one. The plain
-     // `entanglement` LUT stays on flags/pickups so the original bake is in play.
-     _mothLutTheme(arena){const id=arena?.id;return ['ember-caldera','slagworks','forge','ashen-rift'].includes(id)?'entanglement-ember':'entanglement-arcane';}
+     // the LUT texture itself is a shared cache owned by textures.mjs. The arena
+     // family picks the LUT; see `mothLutThemeFor` above.
+     _mothLutTheme(arena){return mothLutThemeFor(arena?.id);}
      _mothLutMaterial(name,{base={},phase=.35,intensity=.9,track=false}={}){
       if(this.renderer?.isWebGLRenderer!==true)return null;
       const lut=mothMaterialLutTexture(name);

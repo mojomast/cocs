@@ -443,17 +443,17 @@ Recent releases. The full history lives in
 ### v8.6 · PRISM — 2026-09-20
 - **Graphics & settings → Graphics lab · Preview:** 23 independent shader
   layers and nine starting recipes for exploring a distinctive art direction.
-- Global hotkey on the backquote key: tap to toggle the lab from anywhere,
-  Shift plus the same key opens the drawer. SURPRISE ME rolls a valid random
-  mix, COPY RECIPE copies the exact JSON, and PASTE A RECIPE JSON applies one
-  back for tuning.
+- Global backquote hotkey toggles the lab from anywhere; Shift plus that key
+  opens the drawer. SURPRISE ME rolls a valid random mix, COPY RECIPE copies the
+  exact JSON, and PASTE A RECIPE JSON applies one back for tuning.
 - Live drawer, individual controls, palettes, overall mix, A/B bypass, split
   comparison, local persistence, JSON export, and reset. Off by default.
-- Moth material slice: deterministic tile-safe surface variants from archived
-  raw bakes, replay-stable per-surface wear, structure-preserving grime and
-  roughness on grid surfaces, and explicit texture sampling with a retro option.
-- Three of the lab layers are built from baked Moth assets (grain, signal
-  glyphs, spectral coat); they no-op silently when assets are unavailable.
+- Paid Moth batch: nine masked surface variants, two reflectance LUTs (ceramic
+  and void), an ember sky, two quantum scalar fields, and a 16-frame QRC glyph
+  animation. Volcanic, cold and void arenas ride their own skies and LUTs.
+- Surface variety mixes generated and baked variants behind one replay-stable
+  selection hash; grid surfaces keep their structure while gaining wear and
+  roughness; three lab layers pick between the baked Moth assets.
 - One combined WebGL shader pass; the HUD and first-person weapon remain crisp.
 - [Graphics lab guide](docs/GRAPHICS-LAB.md), the implemented summary in
   [Moth pipeline docs](docs/MOTH.md), and the extensive

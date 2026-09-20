@@ -32,19 +32,29 @@ try{
   const difference=(a,b)=>a.reduce((total,v,i)=>total+Math.abs(v-b[i]),0);
   for(const e of GRAPHICS_EFFECTS){const s=normalizeGraphicsLab(neutral);s.effects[e.id]={enabled:true,value:e.max};deltas[e.id]=difference(render(s),original);}
   for(const r of GRAPHICS_RECIPES)deltas[r.id]=difference(render(graphicsRecipe(r.id)),original);
-  const all=normalizeGraphicsLab(neutral);for(const e of GRAPHICS_EFFECTS)all.effects[e.id]={enabled:true,value:e.value};
+  const all=normalizeGraphicsLab(neutral);for(const e of GRAPHICS_EFFECTS)all.effects[e.id]={...all.effects[e.id],enabled:true,value:e.value};
   deltas.all=difference(render(all),original);
+  // Non-default options must reuse the one program too: the switch is a uniform
+  // texture change, never a recompile. Pixels may not move when the optional
+  // bake is absent, so only the program count is asserted from this render.
+  const alternates=normalizeGraphicsLab(all);let optionSwitches=0;
+  for(const e of GRAPHICS_EFFECTS){
+   const alternate=e.options?.find(o=>o.id!==alternates.effects[e.id].option);
+   if(alternate){alternates.effects[e.id]={enabled:true,value:e.max,option:alternate.id};optionSwitches++;}
+  }
+  render(alternates);
   const zero=render({...all,mix:0});
   const split=render({...all,split:true,splitAt:.5});
   let leftDifference=0;for(let y=0;y<64;y++)for(let x=0;x<62;x++)for(let c=0;c<3;c++){const i=(y*128+x)*4+c;leftDifference+=Math.abs(split[i]-original[i]);}
   const programCount=renderer.info.programs.length;
   pass.dispose();target.dispose();texture.dispose();renderer.dispose();
-  return {deltas,zeroMixDifference:difference(zero,original),leftDifference,programCount};
+  return {deltas,zeroMixDifference:difference(zero,original),leftDifference,programCount,optionSwitches};
  });
  for(const [name,delta] of Object.entries(gpu.deltas))assert.ok(delta>100,`${name} changes rendered pixels`);
  // The app configured the baked Moth registry, so the three accents must bind
  // their textures and move pixels rather than silently no-op.
  for(const id of ['mothgrain','mothsignal','mothcoat'])assert.ok(gpu.deltas[id]>100,`${id} uses the baked Moth assets`);
+ assert.ok(gpu.optionSwitches>=3,'the non-default option render actually swapped all three Moth accents');
  assert.equal(gpu.zeroMixDifference,0);assert.equal(gpu.leftDifference,0);assert.equal(gpu.programCount,1);
  await page.getByRole('button',{name:'Enter the arena',exact:true}).click();
  await page.getByRole('button',{name:'Graphics & settings',exact:true}).click();
@@ -62,6 +72,12 @@ try{
  assert.equal(rolled.enabled,true,'roll enables the lab');
  assert.ok(Object.values(rolled.effects).filter(e=>e.enabled).length>=2,'roll stacks at least two layers');
  assert.match(await page.locator('[data-graphics-lab] [role="status"]').innerText(),/Rolled/);
+ // Options: a Moth layer can swap its baked asset. The choice persists, and the
+ // GPU block above already proved the switch reuses the one fused program.
+ await page.getByLabel('Moth coat asset').selectOption('entanglement-void');
+ await page.waitForTimeout(150);
+ const chosen=await page.evaluate(()=>JSON.parse(localStorage.getItem('token-arena-graphics-lab-v1')).effects.mothcoat.option);
+ assert.equal(chosen,'entanglement-void','the chosen Moth asset persists');
  // Copy recipe: the clipboard payload parses and matches the live state.
  await page.getByRole('button',{name:'COPY RECIPE',exact:true}).click();
  await page.waitForTimeout(150);
@@ -70,6 +86,7 @@ try{
  const live=await page.evaluate(()=>JSON.parse(localStorage.getItem('token-arena-graphics-lab-v1')));
  assert.equal(copied.version,1,'copied recipe carries the schema version');
  assert.deepEqual(copied.effects,live.effects,'copied recipe matches the live layers');
+ assert.equal(copied.effects.mothcoat.option,'entanglement-void','copied recipe carries the chosen option');
  assert.equal(copied.bypass,false,'copied recipe omits transient bypass');
  // Paste a recipe back in and apply it.
  await page.getByText('Paste a recipe JSON').click();

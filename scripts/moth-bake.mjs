@@ -19,6 +19,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import zlib from 'node:zlib';
 import { fileURLToPath, pathToFileURL } from 'node:url';
+import { decodeGif, isGif } from './moth-gif.mjs';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const BASE = process.env.MOTH_API_BASE || 'https://api.mothquantum.com';
@@ -210,6 +211,78 @@ export function unzip(buf) {
   return files;
 }
 
+// Minimal deterministic classic ZIP writer (store-only, no compression), used
+// to bundle local source art for engines that consume an archive. Fixed entry
+// order, fixed 1980 DOS timestamp and CRC32 per entry, so the bytes are a pure
+// function of the entry list and payloads.
+export function encodeZip(entries) {
+  const pairs = [];
+  const push = (name, data) => {
+    if (typeof name !== 'string' || !name) throw new Error('zip: entry names must be non-empty strings');
+    const buffer = Buffer.isBuffer(data) ? data : Buffer.from(data ?? []);
+    pairs.push([name, buffer]);
+  };
+  if (entries instanceof Map) for (const [name, data] of entries) push(name, data);
+  else if (Array.isArray(entries)) for (const entry of entries) push(Array.isArray(entry) ? entry[0] : entry?.name, Array.isArray(entry) ? entry[1] : entry?.data);
+  else if (entries && typeof entries === 'object') for (const [name, data] of Object.entries(entries)) push(name, data);
+  if (!pairs.length) throw new Error('zip: no entries to write');
+
+  const localParts = [];
+  const centralParts = [];
+  let offset = 0;
+  for (const [name, data] of pairs) {
+    const nameBytes = Buffer.from(name, 'utf8');
+    const flags = nameBytes.length !== name.length ? 0x0800 : 0; // UTF-8 names
+    const crc = crc32(data);
+    const local = Buffer.alloc(30);
+    local.writeUInt32LE(0x04034b50, 0);
+    local.writeUInt16LE(20, 4); // version needed
+    local.writeUInt16LE(flags, 6);
+    local.writeUInt16LE(0, 8); // stored
+    local.writeUInt16LE(0, 10); // time
+    local.writeUInt16LE(0x0021, 12); // date: 1980-01-01
+    local.writeUInt32LE(crc, 14);
+    local.writeUInt32LE(data.length, 18);
+    local.writeUInt32LE(data.length, 22);
+    local.writeUInt16LE(nameBytes.length, 26);
+    local.writeUInt16LE(0, 28);
+    localParts.push(local, nameBytes, data);
+
+    const central = Buffer.alloc(46);
+    central.writeUInt32LE(0x02014b50, 0);
+    central.writeUInt16LE(20, 4); // version made by
+    central.writeUInt16LE(20, 6); // version needed
+    central.writeUInt16LE(flags, 8);
+    central.writeUInt16LE(0, 10);
+    central.writeUInt16LE(0, 12);
+    central.writeUInt16LE(0x0021, 14);
+    central.writeUInt32LE(crc, 16);
+    central.writeUInt32LE(data.length, 20);
+    central.writeUInt32LE(data.length, 24);
+    central.writeUInt16LE(nameBytes.length, 28);
+    central.writeUInt16LE(0, 30); // extra length
+    central.writeUInt16LE(0, 32); // comment length
+    central.writeUInt16LE(0, 34); // disk number start
+    central.writeUInt16LE(0, 36); // internal attributes
+    central.writeUInt32LE(0, 38); // external attributes
+    central.writeUInt32LE(offset, 42);
+    centralParts.push(central, nameBytes);
+    offset += 30 + nameBytes.length + data.length;
+  }
+
+  const centralSize = centralParts.reduce((sum, part) => sum + part.length, 0);
+  const eocd = Buffer.alloc(22);
+  eocd.writeUInt32LE(0x06054b50, 0);
+  eocd.writeUInt16LE(0, 4); // this disk
+  eocd.writeUInt16LE(0, 6); // disk with the central directory
+  eocd.writeUInt16LE(pairs.length, 8);
+  eocd.writeUInt16LE(pairs.length, 10);
+  eocd.writeUInt32LE(centralSize, 12);
+  eocd.writeUInt32LE(offset, 16);
+  eocd.writeUInt16LE(0, 20); // comment length
+  return Buffer.concat([...localParts, ...centralParts, eocd]);
+}
+
 // Radiance RGBE (.hdr) decoder. Handles flat and modern RLE scanlines.
 export function decodeHdr(buf) {
   let p = 0;
@@ -308,6 +381,24 @@ export const BAKERS = {
     const normal = gridToNormal(field, size, size, ctx.bake.strength ?? 1.6);
     return { bucket: 'normals', key: ctx.bake.name || job.id, value: { width: size, height: size, data: Buffer.from(normal).toString('base64') } };
   },
+  // A grayscale texture record from a blur-core grid: the normalized field is
+  // written into R/G/B with a full alpha so a mask/height bake can be sampled
+  // like any other baked texture. `resampleGrid` maps the grid's own range to
+  // 0..1 and each field value maps to round(clamp(field, 0, 1) * 255) on all
+  // three colour channels.
+  'grid-texture'(job, ctx) {
+    const grid = gridOf(ctx.result);
+    if (!grid) throw new Error('grid-texture: blur-core grid missing');
+    const size = ctx.bake.size ?? 64;
+    if (!Number.isInteger(size) || size <= 0) throw new Error(`grid-texture: size ${size} must be a positive integer`);
+    const field = resampleGrid(grid, size, size);
+    const rgba = new Uint8Array(size * size * 4);
+    for (let i = 0; i < size * size; i++) {
+      const value = Math.round(clamp(field[i], 0, 1) * 255);
+      rgba[i * 4] = value; rgba[i * 4 + 1] = value; rgba[i * 4 + 2] = value; rgba[i * 4 + 3] = 255;
+    }
+    return { bucket: 'textures', key: ctx.bake.name || job.id, value: { width: size, height: size, data: Buffer.from(rgba).toString('base64') } };
+  },
   // One frame of an animated effect; frames merge into a single effects entry.
   'effect-frame'(job, ctx) {
     const grid = gridOf(ctx.result);
@@ -316,6 +407,36 @@ export const BAKERS = {
     const field = resampleGrid(grid, size, size);
     const rgba = gridToRamp(field, size, size, ctx.bake.tint || 'quantum');
     return { bucket: 'effects', key: ctx.bake.name || ctx.bake.effect || job.id, merge: 'frames', index: ctx.bake.index ?? 0, fps: ctx.bake.fps ?? 10, value: { width: size, height: size, data: Buffer.from(rgba).toString('base64') } };
+  },
+  // One composited frame of a decoded GIF (a `qrc-image-v1` result), resized
+  // with nearest sampling and merged per key/index exactly like `effect-frame`.
+  // `index` selects one GIF frame to bake; `fps` overrides the decoder's
+  // delay-derived rate. A GIF can also be baked whole with `all: true`, which
+  // emits the complete `{fps, frames}` entry in a single job — a 16-frame
+  // animation must not cost sixteen paid runs. The indexed path stays for
+  // effect sheets that are spread over jobs, like the generated sequences.
+  'gif-frames'(job, ctx) {
+    const file = ctx.files?.get('result');
+    if (!file) throw new Error('gif-frames: no result file');
+    if (!isGif(file)) throw new Error('gif-frames: result is not a GIF');
+    const gif = decodeGif(file);
+    const size = ctx.bake.size ?? 64;
+    if (!Number.isInteger(size) || size <= 0) throw new Error(`gif-frames: size ${size} must be a positive integer`);
+    const fps = ctx.bake.fps ?? gif.fps;
+    if (typeof fps !== 'number' || !(fps > 0)) throw new Error(`gif-frames: fps ${fps} must be a positive number`);
+    const key = ctx.bake.name || ctx.bake.effect || job.id;
+    if (ctx.bake.all === true) {
+      const frames = gif.frames.map(frame => {
+        const small = resizeNearest(frame.data, frame.width, frame.height, size, size, 4);
+        return { width: size, height: size, data: Buffer.from(small).toString('base64') };
+      });
+      return { bucket: 'effects', key, value: { fps, frames } };
+    }
+    const index = ctx.bake.index ?? 0;
+    if (!Number.isInteger(index) || index < 0 || index >= gif.frames.length) throw new Error(`gif-frames: index ${index} is outside the decoded GIF (0..${gif.frames.length - 1})`);
+    const frame = gif.frames[index];
+    const small = resizeNearest(frame.data, frame.width, frame.height, size, size, 4);
+    return { bucket: 'effects', key, merge: 'frames', index, fps, value: { width: size, height: size, data: Buffer.from(small).toString('base64') } };
   },
   // A quantum labyrinth graph, flattened into a deterministic room grid.
   'level-graph'(job, ctx) {
@@ -995,7 +1116,7 @@ export const KNOWN_ENGINES = new Set([
 
 // Must mirror the branches in generateValues(): an unknown spec silently sends
 // no `values` parameter, which is exactly what a dry run should catch.
-const GENERATOR_TYPES = new Set(['height', 'radial', 'portal', 'spark', 'bloom', 'vortex', 'contract', 'rise', 'shield', 'snow']);
+const GENERATOR_TYPES = new Set(['height', 'radial', 'portal', 'spark', 'bloom', 'vortex', 'contract', 'rise', 'shield', 'snow', 'dust', 'flow']);
 
 export function emptyBaked(version = 1) {
   const baked = { version, generator: 'scripts/moth-bake.mjs' };
@@ -1395,7 +1516,7 @@ const smoothStep = (t) => t * t * (3 - 2 * t);
 const valueNoise = (x, y, seed) => { const xi = Math.floor(x), yi = Math.floor(y), xf = x - xi, yf = y - yi; const a = hash2(xi, yi, seed), b = hash2(xi + 1, yi, seed), c = hash2(xi, yi + 1, seed), d = hash2(xi + 1, yi + 1, seed); const u = smoothStep(xf), v = smoothStep(yf); return (a * (1 - u) + b * u) * (1 - v) + (c * (1 - u) + d * u) * v; };
 const fbm2 = (x, y, seed, octaves = 4) => { let total = 0, amp = 0.5, freq = 1, norm = 0; for (let i = 0; i < octaves; i++) { total += valueNoise(x * freq, y * freq, seed + i * 131) * amp; norm += amp; amp *= 0.5; freq *= 2; } return total / norm; };
 
-const SOURCE_ART = {
+export const SOURCE_ART = {
   panel: { size: 256, palette: [0.62, 0.66, 0.72], pattern: 'noise', contrast: 0.45 },
   tile: { size: 64, palette: [0.55, 0.6, 0.66], pattern: 'noise', contrast: 0.45 },
   rock: { size: 256, palette: [0.5, 0.46, 0.4], pattern: 'noise', contrast: 0.7 },
@@ -1423,6 +1544,32 @@ const SOURCE_ART = {
   'sky-ashen': { size: 256, wide: 2, palette: [0.58, 0.5, 0.42], pattern: 'stars', contrast: 0.5, cloudFreq: 3.2, starDensity: 0.997, seed: 139 },
   'sky-frost': { size: 256, wide: 2, palette: [0.5, 0.62, 0.82], pattern: 'stars', contrast: 0.5, cloudFreq: 3.4, starDensity: 0.997, seed: 67 },
   'sky-void': { size: 256, wide: 2, palette: [0.26, 0.26, 0.42], pattern: 'stars', contrast: 0.5, cloudFreq: 3.6, starDensity: 0.997, seed: 149 },
+  // Material-mask pass: soft, wrap-aware grayscale masks for the blur-v1 and
+  // deep-fryer-v1 per-pixel mask input. Each family shapes wrapping noise into
+  // a distinct character (broad patches, vertical streaks, dotted corrosion,
+  // heat bloom, fracture veins, organic colonies) and is min/max normalised so
+  // the masked region reaches 255 and the background falls to near 0.
+  'mask-wear': { size: 256, pattern: 'mask', mask: 'wear', seed: 211 },
+  'mask-damp': { size: 256, pattern: 'mask', mask: 'damp', seed: 223 },
+  'mask-corrosion': { size: 256, pattern: 'mask', mask: 'corrosion', seed: 227 },
+  'mask-heat': { size: 256, pattern: 'mask', mask: 'heat', seed: 229 },
+  'mask-crack': { size: 256, pattern: 'mask', mask: 'crack', seed: 233 },
+  'mask-moss': { size: 256, pattern: 'mask', mask: 'moss', seed: 239 },
+  // Ember-toned equirectangular sky source for a blur-v1 sky bake.
+  'sky-ember': { size: 256, wide: 2, pattern: 'ember', seed: 241, cloudFreq: 3.1, horizon: 0.56, band: 0.2, sparkDensity: 0.9986 },
+  // Original 64px screen glyphs for the qrc-image vocabulary. Shapes are
+  // centred with a margin or deliberately periodic so a grid of tiles reads
+  // evenly; strokes wrap across tile edges (torus distance).
+  'glyph-01': { size: 64, pattern: 'glyph', glyph: 'ring' },
+  'glyph-02': { size: 64, pattern: 'glyph', glyph: 'spiral' },
+  'glyph-03': { size: 64, pattern: 'glyph', glyph: 'chevrons' },
+  'glyph-04': { size: 64, pattern: 'glyph', glyph: 'node' },
+  'glyph-05': { size: 64, pattern: 'glyph', glyph: 'triad' },
+  'glyph-06': { size: 64, pattern: 'glyph', glyph: 'orbit' },
+  'glyph-07': { size: 64, pattern: 'glyph', glyph: 'stairs' },
+  'glyph-08': { size: 64, pattern: 'glyph', glyph: 'burst' },
+  'glyph-09': { size: 64, pattern: 'glyph', glyph: 'lattice' },
+  'glyph-10': { size: 64, pattern: 'glyph', glyph: 'bars' },
 };
 
 // Wrapping value noise, so the source art tiles seamlessly and does not draw a
@@ -1440,15 +1587,274 @@ const tileFbm = (u, v, seed, freq, octaves = 4) => {
   for (let i = 0; i < octaves; i++) { total += valueNoiseT(u * f, v * f, seed + i * 131, f) * amp; norm += amp; amp *= 0.5; f *= 2; }
   return total / norm;
 };
+// Anisotropic wrapping value noise: `freqX`/`freqY` stretch the lattice per
+// axis, so the streak masks and the `flow` generator can run long along one
+// direction while still tiling seamlessly.
+const valueNoiseXY = (x, y, seed, px, py) => {
+  const xi = Math.floor(x), yi = Math.floor(y), xf = x - xi, yf = y - yi;
+  const x0 = wrapIndex(xi, px), x1 = wrapIndex(xi + 1, px), y0 = wrapIndex(yi, py), y1 = wrapIndex(yi + 1, py);
+  const a = hash2(x0, y0, seed), b = hash2(x1, y0, seed), c = hash2(x0, y1, seed), d = hash2(x1, y1, seed);
+  const u = smoothStep(xf), v = smoothStep(yf);
+  return (a * (1 - u) + b * u) * (1 - v) + (c * (1 - u) + d * u) * v;
+};
+const tileFbmXY = (u, v, seed, freqX, freqY, octaves = 4) => {
+  let total = 0, amp = 0.5, fx = freqX, fy = freqY, norm = 0;
+  for (let i = 0; i < octaves; i++) { total += valueNoiseXY(u * fx, v * fy, seed + i * 131, fx, fy) * amp; norm += amp; amp *= 0.5; fx *= 2; fy *= 2; }
+  return total / norm;
+};
+// Clamped smoothstep: 0 at/below edge0, 1 at/above edge1. Shapes mask coverage.
+const smoothRange = (edge0, edge1, value) => {
+  const span = edge1 - edge0 || 1;
+  const t = Math.max(0, Math.min(1, (value - edge0) / span));
+  return t * t * (3 - 2 * t);
+};
 const wrap01 = (t) => ((t % 1) + 1) % 1;
 
-function makeSourceArt(name, spec = SOURCE_ART.panel) {
+// One wrap-aware grayscale mask field in [0,1]. The families are deliberately
+// different shapes of the same wrapping noise:
+//   wear      broad patches where the effect should apply
+//   damp      vertical streaks that run down the surface
+//   corrosion a splotchy region broken into fine corrosive pits
+//   heat      broad, soft heat blooms with a shimmering core
+//   crack     thin fracture veins, veiled so they do not run the whole tile
+//   moss      soft organic colonies with a dotted growth edge
+function maskLum(kind, x, y, u, v, seed) {
+  const n = (fx, fy, offset, octaves) => tileFbmXY(u, v, seed + offset, fx, fy, octaves);
+  if (kind === 'wear') {
+    const patch = smoothRange(0.4, 0.72, n(3.2, 3.2, 0, 5));
+    const grain = n(11, 11, 131, 3);
+    return patch * (0.55 + 0.45 * grain);
+  }
+  if (kind === 'damp') {
+    const streak = smoothRange(0.38, 0.68, n(9, 1.6, 7, 5));
+    const patch = smoothRange(0.3, 0.75, n(2.2, 2.2, 71, 3));
+    return streak * (0.35 + 0.65 * patch);
+  }
+  if (kind === 'corrosion') {
+    const region = smoothRange(0.44, 0.72, n(4.5, 4.5, 17, 4));
+    const pits = smoothRange(0.52, 0.72, n(16, 16, 41, 3));
+    const speck = smoothRange(0.3, 0.75, hash2(x * 5 + 1, y * 5 + 3, seed + 613));
+    return region * (0.4 + 0.6 * pits) * (0.55 + 0.45 * speck);
+  }
+  if (kind === 'heat') {
+    const bloom = Math.pow(smoothRange(0.32, 0.78, n(2.6, 2.6, 23, 5)), 0.75);
+    const shimmer = 0.85 + 0.15 * n(14, 14, 97, 3);
+    return bloom * shimmer;
+  }
+  if (kind === 'crack') {
+    const ridge = Math.pow(1 - Math.abs(2 * n(3.4, 3.4, 29, 5) - 1), 5);
+    const fine = Math.pow(1 - Math.abs(2 * n(7.5, 7.5, 149, 4) - 1), 7);
+    const veil = 0.35 + 0.65 * smoothRange(0.3, 0.7, n(2.1, 2.1, 211, 3));
+    return (ridge * 0.8 + fine * 0.5) * veil;
+  }
+  if (kind === 'moss') {
+    const clump = smoothRange(0.42, 0.68, n(5, 5, 37, 5));
+    const colony = smoothRange(0.5, 0.68, n(13, 13, 83, 4));
+    const edge = 0.55 + 0.45 * smoothRange(0.4, 0.7, n(22, 22, 191, 3));
+    return Math.max(clump * edge, colony * 0.65);
+  }
+  return n(4, 4, 0, 4);
+}
+
+// Render a mask family as a grayscale PNG. The field is min/max normalised to
+// 0..255 so the masked region reaches full application and the background
+// falls to 0; R=G=B carries the value (the engines read luminance).
+function makeMaskArt(width, height, kind, seed) {
+  const field = new Float64Array(width * height);
+  let min = Infinity, max = -Infinity;
+  for (let y = 0; y < height; y++) for (let x = 0; x < width; x++) {
+    const value = maskLum(kind, x, y, x / width, y / height, seed);
+    field[y * width + x] = value;
+    if (value < min) min = value;
+    if (value > max) max = value;
+  }
+  const span = max - min || 1;
+  const rgb = new Uint8Array(width * height * 3);
+  for (let i = 0; i < field.length; i++) {
+    const value = Math.round(Math.max(0, Math.min(1, (field[i] - min) / span)) * 255);
+    rgb[i * 3] = value; rgb[i * 3 + 1] = value; rgb[i * 3 + 2] = value;
+  }
+  return encodePng(width, height, rgb);
+}
+
+// An equirectangular ember sky: a hot horizon band under dark smoke with sparse
+// bright embers, rendered through the same ember ramp as the effect frames.
+function makeEmberSky(width, height, spec) {
+  const seed = spec.seed ?? 241;
+  const horizon = spec.horizon ?? 0.55;
+  const band = spec.band ?? 0.2;
+  const field = new Float64Array(width * height);
+  for (let y = 0; y < height; y++) for (let x = 0; x < width; x++) {
+    const u = x / width, v = y / height;
+    const smoke = tileFbm(u, v, seed, spec.cloudFreq ?? 3.2, 5);
+    const glow = Math.exp(-Math.pow((v - horizon) / band, 2));
+    field[y * width + x] = Math.max(0, Math.min(1, glow * (0.3 + 0.85 * smoke) + smoke * 0.1));
+  }
+  const rgba = gridToRamp(field, width, height, 'ember');
+  const rgb = new Uint8Array(width * height * 3);
+  for (let i = 0; i < width * height; i++) {
+    rgb[i * 3] = rgba[i * 4]; rgb[i * 3 + 1] = rgba[i * 4 + 1]; rgb[i * 3 + 2] = rgba[i * 4 + 2];
+    if (hash2((i % width) * 3 + 1, Math.floor(i / width) * 7 + 5, seed + 991) > (spec.sparkDensity ?? 0.9986)) {
+      rgb[i * 3] = 255; rgb[i * 3 + 1] = 226; rgb[i * 3 + 2] = 170;
+    }
+  }
+  return encodePng(width, height, rgb);
+}
+
+// --- Glyph rasteriser -------------------------------------------------------
+// Strokes are measured to their nearest wrapped copy, so shapes that cross the
+// tile edge connect on the opposite side and a grid of tiles reads evenly.
+const wrapDelta = (value, size) => (value > size / 2 ? value - size : value < -size / 2 ? value + size : value);
+const segmentDistance = (px, py, ax, ay, bx, by) => {
+  const dx = bx - ax, dy = by - ay;
+  const lengthSq = dx * dx + dy * dy;
+  const t = lengthSq > 0 ? Math.max(0, Math.min(1, ((px - ax) * dx + (py - ay) * dy) / lengthSq)) : 0;
+  return Math.hypot(px - (ax + dx * t), py - (ay + dy * t));
+};
+const wrappedSegmentDistance = (x, y, ax, ay, bx, by, size) => segmentDistance(
+  x, y,
+  x + wrapDelta(ax - x, size), y + wrapDelta(ay - y, size),
+  x + wrapDelta(bx - x, size), y + wrapDelta(by - y, size),
+);
+const torusDistance = (x, y, cx, cy, size) => Math.hypot(wrapDelta(x - cx, size), wrapDelta(y - cy, size));
+const strokeCoverage = (distance, width) => Math.max(0, Math.min(1, (width - distance) / Math.max(0.75, width * 0.5)));
+
+// Ten original screen glyphs, each a distinct high-contrast shape. Shapes are
+// centred with a margin (ring, spiral, chevrons, triad, orbit, burst) or
+// deliberately periodic across the tile (node, stairs, lattice, bars). No text.
+function glyphLum(kind, x, y, size) {
+  const c = (size - 1) / 2;
+  const w = size * 0.075;
+  let best = 0;
+  const add = (distance) => { best = Math.max(best, strokeCoverage(distance, w)); };
+  const line = (ax, ay, bx, by) => add(wrappedSegmentDistance(x, y, ax, ay, bx, by, size));
+  const ring = (cx, cy, radius) => add(Math.abs(torusDistance(x, y, cx, cy, size) - radius));
+  const dot = (cx, cy, radius) => add(Math.max(0, torusDistance(x, y, cx, cy, size) - radius));
+
+  if (kind === 'ring') {
+    ring(c, c, size * 0.36);
+    ring(c, c, size * 0.18);
+    dot(c, c, size * 0.045);
+  } else if (kind === 'spiral') {
+    let px = 0, py = 0;
+    for (let i = 0; i <= 180; i++) {
+      const t = i / 180;
+      const angle = t * Math.PI * 4;
+      const radius = size * (0.05 + 0.16 * t);
+      const nx = c + Math.cos(angle) * radius, ny = c + Math.sin(angle) * radius;
+      if (i > 0) line(px, py, nx, ny);
+      px = nx; py = ny;
+    }
+  } else if (kind === 'chevrons') {
+    for (let k = 0; k < 2; k++) {
+      const y0 = size * (0.34 + 0.28 * k);
+      line(c - size * 0.24, y0 + size * 0.09, c, y0 - size * 0.05);
+      line(c, y0 - size * 0.05, c + size * 0.24, y0 + size * 0.09);
+    }
+  } else if (kind === 'node') {
+    // Full-width/height bars keep the tile connected in a grid.
+    line(0, c, size, c);
+    line(c, 0, c, size);
+    const h = size * 0.2;
+    line(c - h, c - h, c + h, c - h);
+    line(c + h, c - h, c + h, c + h);
+    line(c + h, c + h, c - h, c + h);
+    line(c - h, c + h, c - h, c - h);
+  } else if (kind === 'triad') {
+    const r = size * 0.3;
+    ring(c, c, size * 0.38);
+    for (let k = 0; k < 3; k++) {
+      const a0 = -Math.PI / 2 + k * (Math.PI * 2 / 3), a1 = a0 + Math.PI * 2 / 3;
+      line(c + Math.cos(a0) * r, c + Math.sin(a0) * r, c + Math.cos(a1) * r, c + Math.sin(a1) * r);
+    }
+    dot(c, c, size * 0.05);
+  } else if (kind === 'orbit') {
+    for (let k = 0; k < 3; k++) {
+      const angle = (k * Math.PI) / 3;
+      let px = 0, py = 0;
+      for (let i = 0; i <= 90; i++) {
+        const t = (i / 90) * Math.PI * 2;
+        const ex = Math.cos(t) * size * 0.32, ey = Math.sin(t) * size * 0.17;
+        const nx = c + ex * Math.cos(angle) - ey * Math.sin(angle);
+        const ny = c + ex * Math.sin(angle) + ey * Math.cos(angle);
+        if (i > 0) line(px, py, nx, ny);
+        px = nx; py = ny;
+      }
+    }
+    dot(c + size * 0.32, c, size * 0.05);
+  } else if (kind === 'stairs') {
+    // Spans the full width so neighbouring tiles continue the staircase.
+    const steps = 4;
+    for (let i = 0; i < steps; i++) {
+      const x0 = (i / steps) * size, x1 = ((i + 1) / steps) * size;
+      const y0 = size * (0.3 + 0.1 * i), y1 = size * (0.4 + 0.1 * i);
+      line(x0, y0, x1 - size * 0.05, y0);
+      line(x1 - size * 0.05, y0, x1, y1);
+    }
+  } else if (kind === 'burst') {
+    dot(c, c, size * 0.05);
+    ring(c, c, size * 0.22);
+    for (let k = 0; k < 8; k++) {
+      const angle = (k / 8) * Math.PI * 2;
+      const inner = size * 0.26, outer = size * (k % 2 ? 0.36 : 0.44);
+      line(c + Math.cos(angle) * inner, c + Math.sin(angle) * inner, c + Math.cos(angle) * outer, c + Math.sin(angle) * outer);
+    }
+  } else if (kind === 'lattice') {
+    // An exact 2x2 periodic diamond lattice tiles infinitely.
+    const period = size / 2;
+    for (let gy = -1; gy <= 2; gy++) for (let gx = -1; gx <= 2; gx++) {
+      const cx = (gx + 0.5) * period, cy = (gy + 0.5) * period;
+      const r = period * 0.24;
+      line(cx, cy - r, cx + r, cy);
+      line(cx + r, cy, cx, cy + r);
+      line(cx, cy + r, cx - r, cy);
+      line(cx - r, cy, cx, cy - r);
+    }
+  } else if (kind === 'bars') {
+    const bars = 6;
+    for (let i = 0; i < bars; i++) {
+      const bx = ((i + 0.5) / bars) * size;
+      const half = size * (0.1 + 0.16 * hash2(i, 3, 977));
+      line(bx, c - half, bx, c + half);
+    }
+    line(0, c + size * 0.3, size, c + size * 0.3);
+  }
+  return Math.max(0, Math.min(1, Math.pow(best, 0.85) * 1.05));
+}
+
+// Bright strokes on a black background; the glyph shapes carry the contrast.
+function makeGlyphArt(width, height, kind) {
+  const size = Math.min(width, height);
+  const rgb = new Uint8Array(width * height * 3);
+  for (let y = 0; y < height; y++) for (let x = 0; x < width; x++) {
+    const value = Math.round(glyphLum(kind, x, y, size) * 255);
+    const i = (y * width + x) * 3;
+    rgb[i] = value; rgb[i + 1] = value; rgb[i + 2] = value;
+  }
+  return encodePng(width, height, rgb);
+}
+
+// The QRC vocabulary bundle: a store-only ZIP of the ten original glyph
+// sources at the archive root, the input `qrc-image-v1` consumes. Deterministic:
+// fixed entry order and a fixed DOS timestamp.
+export function makeQrcVocabulary() {
+  const entries = new Map();
+  for (const name of Object.keys(SOURCE_ART)) {
+    if (SOURCE_ART[name].pattern === 'glyph') entries.set(`${name}.png`, makeSourceArt(name, SOURCE_ART[name]));
+  }
+  return encodeZip(entries);
+}
+
+export function makeSourceArt(name, spec = SOURCE_ART[name] || SOURCE_ART.panel) {
   const base = SOURCE_ART[name] || {};
   const merged = { ...base, ...spec };
   const seed = merged.seed ?? 7;
   const size = merged.size ?? 256;
   const width = merged.wide ? size * merged.wide : size;
   const height = size;
+  if (merged.pattern === 'mask') return makeMaskArt(width, height, merged.mask ?? 'wear', seed);
+  if (merged.pattern === 'glyph') return makeGlyphArt(width, height, merged.glyph ?? 'ring');
+  if (merged.pattern === 'ember') return makeEmberSky(width, height, merged);
   const [pr, pg, pb] = merged.palette || [0.6, 0.6, 0.6];
   const contrast = merged.contrast ?? 0.4;
   const freq = merged.freq ?? 6;
@@ -1655,6 +2061,28 @@ function snowGrid(size, frame = 0, seed = 107) {
     return Math.round(Math.min(1, value) * 1000) / 1000;
   }));
 }
+// Broad, drifting dust/damp patches: a low-frequency wrapping field gated
+// into soft accumulations (blur-core then diffuses it further). Non-negative
+// and bounded to [0,1]; a pure function of `size` and `seed`.
+function dustGrid(size, seed = 149) {
+  return Array.from({ length: size }, (_, y) => Array.from({ length: size }, (_, x) => {
+    const u = x / size, v = y / size;
+    const drift = tileFbm(u, v, seed, 3, 5);
+    const gate = smoothRange(0.34, 0.72, tileFbm(u, v, seed + 61, 2, 3));
+    return Math.round(Math.max(0, Math.min(1, smoothRange(0.28, 0.72, drift) * (0.35 + 0.65 * gate))) * 1000) / 1000;
+  }));
+}
+// Directional wear/flow streaks: anisotropic wrapping noise (quick across the
+// flow, slow along it), shaped into soft lanes that run along +x. Non-negative
+// and bounded to [0,1]; a pure function of `size` and `seed`.
+function flowGrid(size, seed = 173) {
+  return Array.from({ length: size }, (_, y) => Array.from({ length: size }, (_, x) => {
+    const u = x / size, v = y / size;
+    const streak = tileFbmXY(u, v, seed, 2.2, 11, 5);
+    const lane = smoothRange(0.32, 0.68, tileFbmXY(u, v, seed + 31, 1.4, 4.5, 3));
+    return Math.round(Math.max(0, Math.min(1, smoothRange(0.34, 0.72, streak) * (0.4 + 0.6 * lane))) * 1000) / 1000;
+  }));
+}
 export function generateValues(job) {
   const spec = job.generateValues;
   if (!spec || !spec.type) return null;
@@ -1668,6 +2096,8 @@ export function generateValues(job) {
   if (spec.type === 'rise') return riseGrid(spec.size || 32, spec.frame || 0, spec.seed || 71);
   if (spec.type === 'shield') return shieldGrid(spec.size || 32, spec.frame || 0, spec.seed || 89);
   if (spec.type === 'snow') return snowGrid(spec.size || 32, spec.frame || 0, spec.seed || 107);
+  if (spec.type === 'dust') return dustGrid(spec.size || 64, spec.seed ?? 149);
+  if (spec.type === 'flow') return flowGrid(spec.size || 64, spec.seed ?? 173);
   return null;
 }
 
@@ -1722,6 +2152,13 @@ function writeSources(log = console.error) {
     if (wanted.size && !wanted.has(file)) continue;
     const target = path.join(SOURCES_DIR, file);
     fs.writeFileSync(target, makeSourceArt(name, spec));
+    log(`wrote ${path.relative(ROOT, target)}`);
+  }
+  // The QRC vocabulary bundle (store-only ZIP of the ten glyph PNGs at the
+  // archive root) is written only when a job references it, like every source.
+  if (!wanted.size || wanted.has('qrc-vocabulary.zip')) {
+    const target = path.join(SOURCES_DIR, 'qrc-vocabulary.zip');
+    fs.writeFileSync(target, makeQrcVocabulary());
     log(`wrote ${path.relative(ROOT, target)}`);
   }
   if (!wanted.size || wanted.has('motif.mid')) {

@@ -18,46 +18,58 @@ matrix re-ran against production at **5/5 viewports** with a clean tree
 (`commitDirty:false`), zero console/page errors, and the same hit-testing,
 reticle-corridor and overflow assertions as the local run.
 
-**Scope (web presentation and documentation, 2026-09-20).** An opt-in developer
-graphics preview, a global hotkey, a randomizer and a clipboard recipe loop, 23
-stackable effects (three built from baked Moth assets), nine starting recipes,
-plus the first offline Moth material-variety slice. No simulation, server,
-protocol, dependency or paid-bake change; the game server does not need a
-restart. Default rendering is unchanged: the lab is off until a player enables
-it, and every effect is a display-space pass after `OutputPass`/FXAA.
+**Scope (web presentation, data and documentation, 2026-09-20).** An opt-in
+developer graphics preview, a global hotkey, a randomizer and a clipboard recipe
+loop, 23 stackable effects (three built from baked Moth assets with selectable
+sources), nine starting recipes, plus a paid 15-job Moth batch and the material
+variety that consumes it: nine masked surface variants, two reflectance LUTs, an
+ember sky, two quantum scalar fields and a 16-frame QRC glyph animation, wired
+into surface variants, arena skies/LUTs and the lab. No simulation, server,
+protocol or dependency change; the game server does not need a restart. Default
+rendering is unchanged: the lab is off until a player enables it, and every
+effect is a display-space pass after `OutputPass`/FXAA.
 
 - `docs/GRAPHICS-LAB.md` — hotkeys, controls, render contract and limitations.
-- `docs/MOTH.md` — implemented material slice and module map.
+- `docs/MOTH.md` — implemented material slices, the paid batch and module map.
 - `docs/design/MOTH-GRAPHICS-PLAN.md` — Moth API/mothbake audit and the
-  material-variety roadmap, now annotated with what is implemented.
+  material-variety roadmap, annotated with what is implemented.
 - Upstream `mothbake` commit `a35a2e67` — merge-safe, atomic and validated
   publication with `merge: true` emitters, download validation, docs, an example
   and 180 passing offline tests.
 
 **Automated release gate (2026-09-20).**
 
-- `npm test`: pass. Game tests: 2,628 pass, 8 approved skips, 0 fail (2,636
+- `npm test`: pass. Game tests: 2,652 pass, 8 approved skips, 0 fail (2,660
   tests); server tests: 209 pass, 0 fail; TypeScript: pass; verified production
   build: pass; SSR/UI and deployment-contract tests: 82 pass, 0 fail.
 - Moth-focused suites are part of that run: bake-runner integrity
-  (`moth-bake-run.test.mjs`), variant generation/selection
-  (`moth-variants.test.mjs`), texture variant consumption and sampling
-  (`moth-texture-variants.test.mjs`), and the structure-preserving surface
-  policy (`moth-surface.test.mjs`).
+  (`moth-bake-run.test.mjs`), GIF decode / grid-texture / GIF-frame bakers and
+  generated sources (`moth-bake-pixels.test.mjs`), variant generation and mixed
+  generated+baked selection (`moth-variants.test.mjs`), texture variant
+  consumption and sampling (`moth-texture-variants.test.mjs`), and the
+  structure-preserving surface policy (`moth-surface.test.mjs`). The eager
+  `game/moth-baked.mjs` budget test now allows the paid batch's ~1.7 MB under a
+  documented 2 MiB cap.
+- Paid Moth batch record: 15 manifest jobs accepted; one LUT job exceeded the
+  21-qubit budget and the QRC job was rejected for a too-short training
+  sequence, both corrected and retried with `--force` (the hardened runner
+  refused to resubmit silently and left the published registry unchanged each
+  time). Every new record decodes through the runtime accessors, provenance grew
+  80→95 jobs, and the merge preserved every prior key. Total spend: 25 credits.
 - `npm run lint`: 0 errors; warning-level findings only.
 - `npm run test:graphics-lab` (against the running dev preview): **pass**. The
   harness executes the real `GraphicsLabPass` on a headless WebGL renderer with
   a deterministic color/checker input and proves every catalogue layer (23,
-  including the three built from baked Moth assets), every starting recipe (9)
-  and the full stack change pixels; zero-mix and the original half of split mode
-  match the untouched image exactly; and all combinations reuse one shader
-  program. It then drives the real UI: recipe loading, the randomizer, layer
-  stacking, A/B bypass, split comparison, clipboard copy, JSON apply, the
-  backquote toggles, reset, drawer geometry at 1366×768, 1920×1080, 844×390,
-  390×844 and 844×390 at UI scale 1.4, device-local persistence across reload,
-  and opening the lab from a paused match as the single `aria-modal` dialog
-  without losing the pause state. Recorded deltas are in
-  `artifacts/graphics-lab/verification.json` (gitignored).
+  including the three built from baked Moth assets with every non-default asset
+  option) and every starting recipe (9) and the full stack change pixels;
+  zero-mix and the original half of split mode match the untouched image
+  exactly; and all combinations reuse one shader program. It then drives the
+  real UI: recipe loading, the randomizer, layer stacking, A/B bypass, split
+  comparison, clipboard copy, JSON apply, the backquote toggles, reset, drawer
+  geometry at 1366×768, 1920×1080, 844×390, 390×844 and 844×390 at UI scale
+  1.4, device-local persistence across reload, and opening the lab from a paused
+  match as the single `aria-modal` dialog without losing the pause state.
+  Recorded deltas are in `artifacts/graphics-lab/verification.json` (gitignored).
 - `npm run test:browser` (against the running app): **5/5 viewports pass** at
   1366×768, 1920×1080, 844×390, 390×844 and 844×390 at UI scale 1.4, with hit
   testing, reticle-corridor checks, overflow checks and console/page-error

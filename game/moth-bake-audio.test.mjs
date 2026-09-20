@@ -372,5 +372,9 @@ test('committed audio and the generated module stay within budget', async () => 
   const wavBytes = walk(path.join(ROOT, 'public/moth')).filter((file) => file.endsWith('.wav')).reduce((sum, file) => sum + fs.statSync(file).size, 0);
   assert.ok(wavBytes <= 15 * 1024 * 1024, `committed Moth WAVs are ${wavBytes} bytes (budget 15 MiB)`);
   const moduleBytes = fs.statSync(path.join(ROOT, 'game/moth-baked.mjs')).size;
-  assert.ok(moduleBytes < 1.5 * 1024 * 1024, `moth-baked.mjs is ${moduleBytes} bytes (budget 1.5 MiB)`);
+  // Raised from 1.5 MiB for the v8.6 paid Moth batch (nine surface variants, two
+  // LUTs, one sky, two scalar fields and a 16-frame QRC sheet). The next asset
+  // growth must move to URL-backed textures instead of raising this again — see
+  // docs/design/MOTH-GRAPHICS-PLAN.md §9.
+  assert.ok(moduleBytes < 2 * 1024 * 1024, `moth-baked.mjs is ${moduleBytes} bytes (budget 2 MiB)`);
 });

@@ -2562,6 +2562,440 @@
         }
       },
       "jobId": "3b80b014-18da-412a-8c14-06d7fc668593"
+    },
+    {
+      "id": "tex-panel-worn",
+      "engine": "blur-v1",
+      "enabled": true,
+      "credits": 1,
+      "input": {
+        "image": "sources/panel.png",
+        "mask": "sources/mask-wear.png"
+      },
+      "params": {
+        "strength": 0.28,
+        "style": "rx",
+        "reach": 0,
+        "size": 256,
+        "downscale": true,
+        "mask_bin_size": 4,
+        "mask_min_region": 16
+      },
+      "raw": "tex-panel-worn",
+      "bake": {
+        "type": "texture-tile",
+        "name": "weathered_concrete-worn",
+        "size": 64
+      },
+      "jobId": "b150f6a4-05fd-46ca-94db-29754f56e9aa"
+    },
+    {
+      "id": "tex-panel-damp",
+      "engine": "blur-v1",
+      "enabled": true,
+      "credits": 1,
+      "input": {
+        "image": "sources/panel.png",
+        "mask": "sources/mask-damp.png"
+      },
+      "params": {
+        "strength": 0.34,
+        "style": "ry",
+        "reach": 0.1,
+        "size": 256,
+        "downscale": true,
+        "mask_bin_size": 4,
+        "mask_min_region": 16
+      },
+      "raw": "tex-panel-damp",
+      "bake": {
+        "type": "texture-tile",
+        "name": "weathered_concrete-damp",
+        "size": 64
+      },
+      "jobId": "274533a3-8e73-4ef2-b2d6-fbdd21880a3d"
+    },
+    {
+      "id": "tex-metal-oxide",
+      "engine": "deep-fryer-v1",
+      "enabled": true,
+      "credits": 1,
+      "input": {
+        "image": "sources/metal.png",
+        "mask": "sources/mask-corrosion.png"
+      },
+      "params": {
+        "gates": [
+          [
+            "rx",
+            0.35
+          ],
+          [
+            "ry",
+            0.15
+          ]
+        ],
+        "tile_size": 4,
+        "mask_bin_size": 4,
+        "mask_min_region": 16
+      },
+      "raw": "tex-metal-oxide",
+      "bake": {
+        "type": "texture-tile",
+        "name": "metal-oxide",
+        "size": 64
+      },
+      "jobId": "63dae2cd-a6af-4955-a323-d4efb0dfbd7e"
+    },
+    {
+      "id": "tex-riveted-scorched",
+      "engine": "deep-fryer-v1",
+      "enabled": true,
+      "credits": 1,
+      "input": {
+        "image": "sources/riveted.png",
+        "mask": "sources/mask-heat.png"
+      },
+      "params": {
+        "gates": [
+          [
+            "ry",
+            0.3
+          ],
+          [
+            "rx",
+            0.12
+          ]
+        ],
+        "tile_size": 4,
+        "mask_bin_size": 4,
+        "mask_min_region": 16
+      },
+      "raw": "tex-riveted-scorched",
+      "bake": {
+        "type": "texture-tile",
+        "name": "riveted_armor-scorched",
+        "size": 64
+      },
+      "jobId": "88e25e94-8b5e-45f7-870d-519b6183d921"
+    },
+    {
+      "id": "tex-hex-mottle",
+      "engine": "blur-v1",
+      "enabled": true,
+      "credits": 1,
+      "input": {
+        "image": "sources/hull.png",
+        "mask": "sources/mask-wear.png"
+      },
+      "params": {
+        "strength": 0.3,
+        "style": "ry",
+        "reach": 0.15,
+        "size": 256,
+        "downscale": true,
+        "mask_bin_size": 4,
+        "mask_min_region": 16
+      },
+      "raw": "tex-hex-mottle",
+      "bake": {
+        "type": "texture-tile",
+        "name": "hex_paneling-mottle",
+        "size": 64
+      },
+      "jobId": "293e8b26-dc97-4f4c-ae0f-247d1338807a"
+    },
+    {
+      "id": "tex-rock-moss",
+      "engine": "telablur-v1",
+      "enabled": true,
+      "credits": 1,
+      "input": {
+        "image1": "sources/rock.png",
+        "image2": "sources/grass.png",
+        "mask": "sources/mask-moss.png"
+      },
+      "params": {
+        "strength": 0.55,
+        "direction": "full",
+        "size": 256,
+        "downscale": true,
+        "mask_bin_size": 4,
+        "mask_min_region": 16
+      },
+      "raw": "tex-rock-moss",
+      "bake": {
+        "type": "texture-tile",
+        "name": "rock-moss",
+        "size": 64
+      },
+      "jobId": "6d30b225-f052-4f8a-bf3d-ade2e80b0202"
+    },
+    {
+      "id": "tex-ice-cracked",
+      "engine": "blur-v1",
+      "enabled": true,
+      "credits": 1,
+      "input": {
+        "image": "sources/ice.png",
+        "mask": "sources/mask-crack.png"
+      },
+      "params": {
+        "strength": 0.3,
+        "style": "rx",
+        "reach": 0.05,
+        "size": 256,
+        "downscale": true,
+        "mask_bin_size": 4,
+        "mask_min_region": 16
+      },
+      "raw": "tex-ice-cracked",
+      "bake": {
+        "type": "texture-tile",
+        "name": "ice-cracked",
+        "size": 64
+      },
+      "jobId": "6442e7cd-255d-4440-a2c8-1c01c317463e"
+    },
+    {
+      "id": "tex-circuit-etch",
+      "engine": "deep-fryer-v1",
+      "enabled": true,
+      "credits": 1,
+      "input": {
+        "image": "sources/circuit.png",
+        "mask": "sources/mask-corrosion.png"
+      },
+      "params": {
+        "gates": [
+          [
+            "rx",
+            0.3
+          ],
+          [
+            "rz",
+            0.18
+          ]
+        ],
+        "tile_size": 4,
+        "mask_bin_size": 4,
+        "mask_min_region": 16
+      },
+      "raw": "tex-circuit-etch",
+      "bake": {
+        "type": "texture-tile",
+        "name": "circuit_board-etch",
+        "size": 64
+      },
+      "jobId": "92100f38-858d-4d24-9bdc-ae3fed54e3b2"
+    },
+    {
+      "id": "tex-stucco-weathered",
+      "engine": "telablur-v1",
+      "enabled": true,
+      "credits": 1,
+      "input": {
+        "image1": "sources/stucco.png",
+        "image2": "sources/panel.png",
+        "mask": "sources/mask-damp.png"
+      },
+      "params": {
+        "strength": 0.5,
+        "direction": "full",
+        "size": 256,
+        "downscale": true,
+        "mask_bin_size": 4,
+        "mask_min_region": 16
+      },
+      "raw": "tex-stucco-weathered",
+      "bake": {
+        "type": "texture-tile",
+        "name": "rough_stucco-weathered",
+        "size": 64
+      },
+      "jobId": "80f3fbd4-4793-4a8c-9014-9542ceda291c"
+    },
+    {
+      "id": "sky-ember",
+      "engine": "blur-v1",
+      "enabled": true,
+      "credits": 1,
+      "input": {
+        "image": "sources/sky-ember.png"
+      },
+      "params": {
+        "strength": 0.55,
+        "style": "ry",
+        "reach": 0.8,
+        "size": 512,
+        "downscale": true
+      },
+      "raw": "sky-ember",
+      "bake": {
+        "type": "sky",
+        "name": "ember",
+        "width": 128,
+        "height": 64
+      },
+      "jobId": "a5c0ecee-c8bc-464d-93dc-fc6adac92116"
+    },
+    {
+      "id": "entanglement-ceramic",
+      "engine": "entanglement-shader-v1",
+      "enabled": true,
+      "credits": 1,
+      "params": {
+        "style": "constrained",
+        "layers": 4,
+        "resolution": 96,
+        "absorption": 0.72,
+        "reflectance": 0.5,
+        "interaction": 1.5,
+        "incoming_rays": 8
+      },
+      "raw": "entanglement-ceramic",
+      "bake": {
+        "type": "material-lut",
+        "name": "entanglement-ceramic",
+        "size": 32
+      },
+      "jobId": "f302013c-06bb-47c3-a7ef-44f455ed2fc5"
+    },
+    {
+      "id": "entanglement-void",
+      "engine": "entanglement-shader-v1",
+      "enabled": true,
+      "credits": 1,
+      "params": {
+        "style": "frustrated",
+        "layers": 6,
+        "resolution": 96,
+        "absorption": 0.98,
+        "reflectance": 0.22,
+        "interaction": -1.3,
+        "incoming_rays": 6
+      },
+      "raw": "entanglement-void",
+      "bake": {
+        "type": "material-lut",
+        "name": "entanglement-void",
+        "size": 32
+      },
+      "jobId": "22bd3d06-34a2-4bf5-888a-8fc00af5564d"
+    },
+    {
+      "id": "field-dust",
+      "engine": "blur-core-v1",
+      "enabled": true,
+      "credits": 1,
+      "generateValues": {
+        "type": "dust",
+        "size": 64,
+        "seed": 149
+      },
+      "params": {
+        "style": "x",
+        "strength": [
+          0.25,
+          0.25
+        ],
+        "reach": 0.15,
+        "axes": [
+          0,
+          1
+        ],
+        "max_qubits": 20
+      },
+      "raw": "field-dust",
+      "bake": {
+        "type": "grid-texture",
+        "name": "dust-field",
+        "size": 64
+      },
+      "jobId": "b371e612-5f66-4b75-aca8-1493cee19d80"
+    },
+    {
+      "id": "field-flow",
+      "engine": "blur-core-v1",
+      "enabled": true,
+      "credits": 1,
+      "generateValues": {
+        "type": "flow",
+        "size": 64,
+        "seed": 173
+      },
+      "params": {
+        "style": "x",
+        "strength": [
+          0.5,
+          0.5
+        ],
+        "reach": 0.3,
+        "axes": [
+          0,
+          1
+        ],
+        "max_qubits": 20
+      },
+      "raw": "field-flow",
+      "bake": {
+        "type": "grid-texture",
+        "name": "flow-field",
+        "size": 64
+      },
+      "jobId": "476b2e0e-4b9b-4e57-966c-c8160a63ca08"
+    },
+    {
+      "id": "qrc-glyphs",
+      "engine": "qrc-image-v1",
+      "enabled": true,
+      "credits": 5,
+      "input": {
+        "vocabulary": "sources/qrc-vocabulary.zip"
+      },
+      "params": {
+        "fps": 8,
+        "length": 16,
+        "periodic": true,
+        "quality": "moderate",
+        "seed": 7,
+        "variation": 0.7,
+        "training_sequence": [
+          "glyph-01.png",
+          "glyph-02.png",
+          "glyph-03.png",
+          "glyph-04.png",
+          "glyph-05.png",
+          "glyph-06.png",
+          "glyph-07.png",
+          "glyph-08.png",
+          "glyph-09.png",
+          "glyph-10.png",
+          "glyph-05.png",
+          "glyph-06.png",
+          "glyph-07.png",
+          "glyph-08.png",
+          "glyph-09.png",
+          "glyph-10.png",
+          "glyph-08.png",
+          "glyph-09.png",
+          "glyph-10.png",
+          "glyph-01.png",
+          "glyph-02.png",
+          "glyph-03.png",
+          "glyph-04.png",
+          "glyph-05.png"
+        ]
+      },
+      "raw": "qrc-glyphs",
+      "bake": {
+        "type": "gif-frames",
+        "name": "qrc-glyphs",
+        "all": true,
+        "size": 64,
+        "fps": 8
+      },
+      "jobId": "d4135848-b49d-4979-9c32-3308c2f969c0"
     }
   ]
 }

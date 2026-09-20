@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import * as T from 'three';
-import {ArenaView, mothAtmosphereFor, mothSpaceFor, mothEchoFor} from './view.mjs';
+import {ArenaView, mothAtmosphereFor, mothSpaceFor, mothEchoFor, mothLutThemeFor} from './view.mjs';
 import {MAPS} from './maps.mjs';
 import {DEFAULT_DISPLAY} from './config.mjs';
 import {ModelAssets} from './effects-fx.mjs';
@@ -26,10 +26,10 @@ const fixture = () => ({
 });
 
 test('map atmospheres pick the baked sky by theatre and leave the rest procedural', () => {
-  assert.equal(mothAtmosphereFor('ember-caldera'), 'ashen');
-  assert.equal(mothAtmosphereFor('slagworks'), 'ashen');
-  assert.equal(mothAtmosphereFor('forge'), 'ashen');
-  assert.equal(mothAtmosphereFor('ashen-rift'), 'ashen');
+  assert.equal(mothAtmosphereFor('ember-caldera'), 'ember');
+  assert.equal(mothAtmosphereFor('slagworks'), 'ember');
+  assert.equal(mothAtmosphereFor('forge'), 'ember');
+  assert.equal(mothAtmosphereFor('ashen-rift'), 'ember');
   assert.equal(mothAtmosphereFor('frostline'), 'frost');
   assert.equal(mothAtmosphereFor('frost-gate'), 'frost');
   assert.equal(mothAtmosphereFor('neon-vertical'), 'void');
@@ -40,6 +40,17 @@ test('map atmospheres pick the baked sky by theatre and leave the rest procedura
   assert.equal(mothAtmosphereFor('moth-backrooms'), 'void');
   assert.equal(mothAtmosphereFor('exchange'), null, 'unlisted maps keep addSky');
   assert.equal(mothAtmosphereFor(undefined), null);
+});
+
+test('arena families pick between the five baked LUTs', () => {
+  assert.equal(mothLutThemeFor('ember-caldera'), 'entanglement-ember');
+  assert.equal(mothLutThemeFor('ashen-rift'), 'entanglement-ember');
+  assert.equal(mothLutThemeFor('frostline'), 'entanglement-ceramic');
+  assert.equal(mothLutThemeFor('frost-gate'), 'entanglement-ceramic');
+  assert.equal(mothLutThemeFor('neon-vertical'), 'entanglement-void');
+  assert.equal(mothLutThemeFor('moth-backrooms'), 'entanglement-void');
+  assert.equal(mothLutThemeFor('exchange'), 'entanglement-arcane', 'unlisted maps keep the arcane default');
+  assert.equal(mothLutThemeFor(undefined), 'entanglement-arcane');
 });
 
 test('map spaces pick the baked reverb by room and default to open-air', () => {

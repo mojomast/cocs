@@ -4,6 +4,9 @@ export const GRAPHICS_LAB_VERSION = 1;
 // Physical codes, not printed keys, so the shortcut survives layout changes.
 export const GRAPHICS_LAB_HOTKEY = 'Backquote';
 export const GRAPHICS_LAB_HOTKEY_LABEL = '`';
+// A baked asset a layer can choose at runtime. `asset` is the registry key read
+// through moth-assets.mjs; `kind` picks the resolver in the fused pass.
+const assetOption=(id,label,kind,asset=id)=>Object.freeze({id,label,asset,kind});
 export const GRAPHICS_EFFECTS = Object.freeze([
   {id:'pixel', name:'Pixel mosaic', label:'Block size', min:2, max:12, step:1, value:4, unit:'px', cost:'1 sample', description:'Chunky screen-space pixels; pair with dithering for a handheld look.'},
   {id:'hex', name:'Hex mosaic', label:'Cell size', min:3, max:14, step:1, value:7, unit:'px', cost:'1 sample', description:'Honeycomb cells instead of squares; a rounder handheld mosaic.'},
@@ -25,9 +28,22 @@ export const GRAPHICS_EFFECTS = Object.freeze([
   {id:'dither', name:'Ordered dither', label:'Color levels', min:2, max:8, step:1, value:3, unit:'', cost:'arithmetic', description:'A stable 4×4 Bayer pattern trades smooth gradients for a retro texture.'},
   {id:'crt', name:'Phosphor screen', label:'Screen texture', min:.1, max:1, step:.05, value:.45, unit:'×', cost:'arithmetic', description:'Static scanlines and an RGB grille. No screen bend, flashing, or camera distortion.'},
   {id:'grain', name:'Paper grain', label:'Texture', min:.05, max:.5, step:.025, value:.15, unit:'×', cost:'arithmetic', description:'Fine stationary grain gives flat areas a tactile finish without temporal shimmer.'},
-  {id:'mothgrain', name:'Moth grain', label:'Texture', min:.05, max:.5, step:.025, value:.15, unit:'×', cost:'2 samples · baked Moth tile', description:'The baked Moth macro-organic tile read at two screen-space scales as a mean-neutral print field. Static; no clock.'},
-  {id:'mothsignal', name:'Signal glyphs', label:'Glyph strength', min:.1, max:1, step:.05, value:.5, unit:'×', cost:'1 sample · baked Moth effect frame', description:'One baked Moth arc-burst frame stamped in a tiled, row-offset pattern and gated to bright areas. Static frame only; reduced-motion safe.'},
-  {id:'mothcoat', name:'Spectral coat', label:'Coat strength', min:.1, max:1, step:.05, value:.5, unit:'×', cost:'1 sample · baked Moth LUT ramp', description:'Highlights take a mean-neutral iridescent tint from a ramp scanned out of the baked Moth entanglement R/T LUT. Static position-derived phase.'},
+  {id:'mothgrain', name:'Moth grain', assetLabel:'Moth grain asset', label:'Texture', min:.05, max:.5, step:.025, value:.15, unit:'×', cost:'2 samples · baked Moth tile', description:'A baked Moth surface tile read at two screen-space scales as a mean-neutral print field. Static; no clock.', options:Object.freeze([
+    assetOption('macro-organic','Macro organic','surface'),
+    assetOption('dust-field','Dust field','surface'),
+    assetOption('flow-field','Flow field','surface'),
+  ])},
+  {id:'mothsignal', name:'Signal glyphs', assetLabel:'Moth signal asset', label:'Glyph strength', min:.1, max:1, step:.05, value:.5, unit:'×', cost:'1 sample · baked Moth effect frame', description:'One baked Moth effect frame stamped in a tiled, row-offset pattern and gated to bright areas. Static frame only; reduced-motion safe.', options:Object.freeze([
+    assetOption('arc-burst','Arc burst','effect'),
+    assetOption('qrc-glyphs','QRC glyphs','effect'),
+  ])},
+  {id:'mothcoat', name:'Spectral coat', assetLabel:'Moth coat asset', label:'Coat strength', min:.1, max:1, step:.05, value:.5, unit:'×', cost:'1 sample · baked Moth LUT ramp', description:'Highlights take a mean-neutral iridescent tint from a ramp scanned out of a baked Moth entanglement R/T LUT. Static position-derived phase.', options:Object.freeze([
+    assetOption('entanglement','Entanglement','lut'),
+    assetOption('entanglement-arcane','Entanglement arcane','lut'),
+    assetOption('entanglement-ember','Entanglement ember','lut'),
+    assetOption('entanglement-ceramic','Entanglement ceramic','lut'),
+    assetOption('entanglement-void','Entanglement void','lut'),
+  ])},
 ].map(effect=>Object.freeze(effect)));
 export const GRAPHICS_PALETTES = Object.freeze([
   {id:'circuit', name:'Circuit · violet / coral / mint', colors:['#160f32','#e87583','#c2ffe0']},
@@ -58,10 +74,16 @@ export function normalizeGraphicsLab(input={}) {
     version:GRAPHICS_LAB_VERSION, enabled:s.enabled===true, bypass:s.bypass===true,
     mix:clamp(s.mix,0,1,1), split:s.split===true, splitAt:clamp(s.splitAt,.1,.9,.5),
     palette:GRAPHICS_PALETTES.some(p=>p.id===s.palette)?s.palette:'circuit',
-    effects:Object.fromEntries(GRAPHICS_EFFECTS.map(e=>[e.id,{
-      enabled:s.effects?.[e.id]?.enabled===true,
-      value:clamp(s.effects?.[e.id]?.value,e.min,e.max,e.value),
-    }])),
+    effects:Object.fromEntries(GRAPHICS_EFFECTS.map(e=>{
+      const raw=s.effects?.[e.id];
+      return [e.id,{
+        enabled:raw?.enabled===true,
+        value:clamp(raw?.value,e.min,e.max,e.value),
+        // Optioned layers keep a valid catalogue id; older saves without one,
+        // and unknown ids, fall back to the entry's default asset.
+        ...(e.options?.length?{option:e.options.some(o=>o.id===raw?.option)?raw.option:e.options[0].id}:{}),
+      }];
+    })),
   };
 }
 export function graphicsRecipe(id) {
@@ -69,7 +91,7 @@ export function graphicsRecipe(id) {
   const state=normalizeGraphicsLab();
   if(!recipe)return state;
   state.enabled=true;state.palette=recipe.palette;
-  for(const [id,value] of Object.entries(recipe.effects))state.effects[id]={enabled:true,value};
+  for(const [id,value] of Object.entries(recipe.effects))state.effects[id]={...state.effects[id],enabled:true,value};
   return state;
 }
 export function graphicsLabActive(state) {
@@ -103,6 +125,13 @@ export function randomGraphicsLab(random=Math.random) {
   const state=normalizeGraphicsLab();
   state.enabled=true;state.bypass=false;state.split=false;
   const roll=()=>graphicsUnit(random);
+  // Enabled optioned layers may roll another catalogue asset; only valid ids win.
+  const rollOptions=effects=>{
+    for(const e of GRAPHICS_EFFECTS){
+      if(!e.options?.length||!effects[e.id].enabled)continue;
+      if(roll()<.5)effects[e.id].option=e.options[Math.floor(roll()*e.options.length)].id;
+    }
+  };
   if(roll()<.45){
     const recipe=GRAPHICS_RECIPES[Math.min(GRAPHICS_RECIPES.length-1,Math.floor(roll()*GRAPHICS_RECIPES.length))];
     const built=graphicsRecipe(recipe.id);
@@ -112,6 +141,7 @@ export function randomGraphicsLab(random=Math.random) {
       if(!setting.enabled)continue;
       setting.value=snapToStep(e,setting.value+(roll()*2-1)*.12*(e.max-e.min));
     }
+    rollOptions(built.effects);
     built.mix=.75+roll()*.25;
     return normalizeGraphicsLab(built);
   }
@@ -119,8 +149,9 @@ export function randomGraphicsLab(random=Math.random) {
   const pool=[...GRAPHICS_EFFECTS],picked=2+Math.floor(roll()*4);
   for(let i=0;i<picked&&pool.length;i++){
     const e=pool.splice(Math.floor(roll()*pool.length),1)[0];
-    state.effects[e.id]={enabled:true,value:snapToStep(e,e.min+(e.max-e.min)*(.18+roll()*.64))};
+    state.effects[e.id]={...state.effects[e.id],enabled:true,value:snapToStep(e,e.min+(e.max-e.min)*(.18+roll()*.64))};
   }
+  rollOptions(state.effects);
   state.mix=.7+roll()*.3;
   return normalizeGraphicsLab(state);
 }

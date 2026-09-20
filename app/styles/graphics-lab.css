@@ -26,6 +26,8 @@
 .graphics-lab__swatch{height:26px;border-radius:3px;opacity:.9}
 .graphics-lab__palette{display:grid;gap:8px}
 .graphics-lab__palette select{max-width:100%;min-width:0;min-height:44px;background:#132a25;color:#ddf4eb;border:1px solid #3a6054;border-radius:4px;padding:8px}
+.graphics-lab__option{display:grid;gap:4px;font:10px monospace;letter-spacing:.04em;color:#a8c8bd}
+.graphics-lab__option select{width:100%;max-width:100%;min-width:0;min-height:44px;background:#132a25;color:#ddf4eb;border:1px solid #3a6054;border-radius:4px;padding:8px}
 .graphics-lab__layers{display:grid;gap:10px}
 .graphics-lab__layer{border:1px solid #2a3e38;border-radius:6px;background:#101b1a;padding:10px 12px;display:grid;gap:6px}
 .graphics-lab__layer.is-on{border-color:#58947b;background:#142923}

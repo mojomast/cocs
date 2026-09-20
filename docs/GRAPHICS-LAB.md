@@ -41,10 +41,13 @@ independently switchable. The catalogue has 23 layers:
   bands, palette remap.
 - **Print and screen:** halftone dots, crosshatch, ink contours, neon contours,
   ordered dither, phosphor screen, paper grain.
-- **Moth assets:** Moth grain, signal glyphs, spectral coat — built from the
-  baked `macro-organic` tile, an effect frame and the entanglement LUT. They
-  silently no-op when the baked assets are unavailable (for example on a
-  software renderer) and the drawer says so.
+- **Moth assets:** Moth grain, signal glyphs, spectral coat — built from baked
+  Moth assets. Each of the three has an asset picker: grain can use the
+  `macro-organic` tile or the quantum `dust-field`/`flow-field`; signals can use
+  the `arc-burst` frame or the QRC `qrc-glyphs` frame; the spectral coat can use
+  any of the five entanglement LUTs (`entanglement`, `-arcane`, `-ember`,
+  `-ceramic`, `-void`). A missing asset silently no-ops that one layer, and the
+  drawer says so when the baked registry is inactive.
 
 Each layer has its own parameter. The rest of the controls:
 

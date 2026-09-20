@@ -751,13 +751,13 @@ export function applyMothSampling(texture,{mipmaps=true}={}){
  return texture;
 }
 
-// Variant tiles are uploaded once per (kind,id,channel,repeat) and shared by
-// every surface entry that selects the same variant, so changing a seed never
-// re-decodes or re-uploads an identical tile. They live in their own module
-// cache and clearSurfaceTextures releases each one exactly once.
+// Variant tiles are uploaded once per (kind,source,id,channel,repeat) and
+// shared by every surface entry that selects the same variant, so changing a
+// seed never re-decodes or re-uploads an identical tile. They live in their own
+// module cache and clearSurfaceTextures releases each one exactly once.
 const variantCache=new Map();
-function mothVariantTexture(canonical,id,image,channel,repeat){
- const key=`${canonical}|${id}|${channel}|${repeat[0]},${repeat[1]}`;
+function mothVariantTexture(canonical,id,image,channel,repeat,source='generated'){
+ const key=`${canonical}|${source}|${id}|${channel}|${repeat[0]},${repeat[1]}`;
  const cached=variantCache.get(key);
  if(cached)return cached;
  const texture=new T.DataTexture(image.data,image.width,image.height,T.RGBAFormat,T.UnsignedByteType);
@@ -767,7 +767,9 @@ function mothVariantTexture(canonical,id,image,channel,repeat){
  texture.colorSpace=channel===0?T.SRGBColorSpace:T.NoColorSpace;
  texture.userData.surfaceKind=canonical;
  texture.userData.source='moth-variant';
- texture.userData.mothVariant={kind:canonical,id};
+ // Generated records keep the original {kind,id} tag; baked records are marked
+ // so callers (and the lab inspector) can tell where a surface's look came from.
+ texture.userData.mothVariant=source==='baked'?{kind:canonical,id,source:'baked'}:{kind:canonical,id};
  texture.userData.mothShared=true;
  applyMothSampling(texture);
  variantCache.set(key,texture);
@@ -783,36 +785,52 @@ function mothVariantId(canonical,variantKey){
   return id&&id!=='original'?id:null;
  }catch{return null;}
 }
-// Decode the selected payload on first use. The runtime module already
-// survives unknown kinds/ids and malformed base64; this wrapper also treats any
-// unexpected throw as "no variant", because a broken optional payload must
-// never break a surface request.
+// Decode the selected payload on first use. The runtime already validates
+// baked tiles; this wrapper repeats the byte checks because it is the last stop
+// before a GPU upload. Generated variants must carry both maps; baked variants
+// carry an albedo only (their roughness stays procedural). Any unexpected throw
+// degrades to "no variant": a broken optional payload must never break a
+// surface request.
+function validMothImage(image){
+ return Boolean(
+  image&&image.data&&
+  Number.isFinite(image.width)&&Number.isFinite(image.height)&&
+  image.width>0&&image.height>0&&
+  image.data.length===image.width*image.height*4
+ );
+}
 function resolveMothVariant(canonical,id){
  try{
   const record=mothVariantRecord(canonical,id);
-  const albedo=record?.albedo,roughness=record?.roughness;
-  if(!albedo?.data||!roughness?.data)return null;
-  if(!Number.isFinite(albedo.width)||!Number.isFinite(albedo.height)||!Number.isFinite(roughness.width)||!Number.isFinite(roughness.height))return null;
-  if(albedo.data.length!==albedo.width*albedo.height*4||roughness.data.length!==roughness.width*roughness.height*4)return null;
-  return {albedo,roughness};
+  if(!record||!validMothImage(record.albedo))return null;
+  if(record.source==='baked')return {source:'baked',id:record.id,albedo:record.albedo};
+  if(!validMothImage(record.roughness))return null;
+  return {source:'generated',id:record.id,albedo:record.albedo,roughness:record.roughness};
  }catch{return null;}
 }
 
 // `variantKey` defaults to the seed, so existing callers become deterministic
 // per-surface variant selectors; pass an explicit arena/surface key to keep a
 // panel's wear stable across seed changes. Kinds without variants are untouched.
+// Baked variants use the baked albedo tile plus the procedural roughness field,
+// so their shading channels stay coherent with the surrounding surfaces.
 export function surfaceTextures(kind='concrete',{size=96,seed=1,repeat=[1,1],normal=true,roughness=true,bump=false,variantKey=seed}={}){
  const canonical=canonicalTextureKind(kind);
  const variantId=mothVariantId(canonical,variantKey);
  // The resolved id, not the raw key, joins the cache key: distinct keys that
  // select the same variant can share, while a caller-supplied variantKey can
- // never alias two variants into one cached result.
- const key=`${canonical}|${size}|${seed}|${repeat[0]},${repeat[1]}|${normal?1:0}|${roughness?1:0}|${bump?1:0}|v:${variantId||''}`;
+ // never alias two variants into one cached result. `prefix` is also the
+ // no-variant key, reused below so a selected-but-unusable payload falls back
+ // under the plain entry instead of poisoning the variant-keyed one: once the
+ // record lands, a later request still upgrades to the variant.
+ const prefix=`${canonical}|${size}|${seed}|${repeat[0]},${repeat[1]}|${normal?1:0}|${roughness?1:0}|${bump?1:0}|v:`;
+ const key=`${prefix}${variantId||''}`;
  const cached=cache.get(key);
  if(cached)return cached;
  if(typeof document==='undefined'||!document.createElement)return null;
  const layer=LAYERS[canonical]||LAYERS.concrete;
  const patternType=layer.type||(generatePatternPixel(canonical,0,0,seed,0,1/size)?canonical:null);
+ let sharedField=null;
  const make=channel=>{
   const canvas=document.createElement('canvas');
   canvas.width=size;canvas.height=size;
@@ -869,20 +887,27 @@ export function surfaceTextures(kind='concrete',{size=96,seed=1,repeat=[1,1],nor
   map.userData.surfaceKind=canonical;
   return map;
  };
- let sharedField=null;
  let result=null;
+ let usedVariant=false;
  const variant=variantId?resolveMothVariant(canonical,variantId):null;
  if(variant)try{
-  result={map:mothVariantTexture(canonical,variantId,variant.albedo,0,repeat)};
-  if(roughness)result.roughnessMap=mothVariantTexture(canonical,variantId,variant.roughness,1,repeat);
+  result={map:mothVariantTexture(canonical,variantId,variant.albedo,0,repeat,variant.source)};
+  if(roughness){
+   // Generated variants ship a paired roughness tile; baked variants have no
+   // roughness payload of their own, so they keep the procedural field.
+   result.roughnessMap=variant.source==='baked'?make(1):mothVariantTexture(canonical,variantId,variant.roughness,1,repeat,'generated');
+  }
+  usedVariant=true;
  }catch{result=null;}
  if(!result){
+  const fallback=cache.get(prefix);
+  if(fallback)return fallback;
   result={map:bakedAlbedoTexture(canonical,repeat)||make(0)};
   if(roughness)result.roughnessMap=make(1);
  }
  if(normal)result.normalMap=bakedNormalTexture(canonical,repeat)||make(2);
  if(bump)result.bumpMap=make(2);
- cache.set(key,result);
+ cache.set(usedVariant?key:prefix,result);
  return result;
 }
 
