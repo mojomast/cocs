@@ -62,6 +62,16 @@ production at **5/5 viewports** with `commitDirty: false`, including the
 LATTICE short-landscape flow that caught the HUD corridor regression during
 local testing.
 
+**Production update — physics, animation and audio pass (2026-09-20).** Commit
+`d9411c3` was fast-forwarded to `improvement/phase2-audio-visual` and deployed
+with `npm run deploy -- --with-game-server` (sim, vehicles, progression and the
+server-side modules changed). The gate verified matching identities at web
+`d9411c3` `v8.6-d9411c3` protocol 3 and game server `d9411c3` `v8.6-d9411c3`
+protocol 3 after the usual transient 502; the tracked production browser matrix
+ran at **5/5 viewports** with a clean tree, and a ragdoll smoke spawned six
+corpses with zero console errors. Active matches disconnected briefly on the
+restart.
+
 **Production update — quality-of-life and fidelity pass (2026-09-20).** Commit
 `395b1b5` was fast-forwarded to `improvement/phase2-audio-visual` and deployed
 with `npm run deploy -- --with-game-server` (the sim, data and bot modules
