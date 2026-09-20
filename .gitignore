@@ -40,6 +40,8 @@ next-env.d.ts
 /.sites-runtime/
 /outputs/
 /work/
+# browser verification evidence (screenshots, traces, manifests)
+/artifacts/
 
 *.tsbuildinfo
 

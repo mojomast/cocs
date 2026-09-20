@@ -328,6 +328,17 @@ test('the page and components wire the O1c surfaces end to end', async () => {
   for (const token of ['TERMINALS', 'ROLES', 'cocs-terminal']) assert.ok(terminals.includes(token), `CocsTerminalsHud surfaces ${token}`);
 });
 
+test('the board order dispatch QUEUES and never claims acceptance before authority', async () => {
+ const root = new URL('../', import.meta.url);
+ const page = await readFile(new URL('app/page.tsx', root), 'utf8');
+ const start = page.indexOf('const activateCocsBoardCard');
+ const end = page.indexOf('// Returns {ok, reason} so the spend window', start);
+ assert.ok(start >= 0 && end > start, 'the board dispatch is present');
+ const dispatch = page.slice(start, end);
+ assert.match(dispatch, /`\$\{verb\} \$\{card\.targetLabel\} · QUEUED`/, 'dispatch reports the queued state');
+ assert.doesNotMatch(dispatch, /ACCEPTED/, 'no dispatch branch may claim acceptance');
+});
+
 test('the stylesheet keeps the board reduced-motion and small-screen safe', async () => {
   const root = new URL('../', import.meta.url);
   const css = await readFile(new URL('app/globals.css', root), 'utf8');

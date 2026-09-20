@@ -6,7 +6,9 @@ Training (`cocs`) and Operations Training (`cocs-coop`). Both use Lattice Foundr
 rules, and a small bot roster (3 / 1 configured bots respectively). Operations
 also supplies its normal Director forces. Saved mutators, custom objectives,
 weapons and difficulty do not leak into training; only the player name and chosen
-operator/harness loadout carry over.
+operator/harness loadout carry over. The cards and the completion panel state
+that this is a practice match with no XP, challenge or history credit, and the
+protected-scenario guard below keeps an active course from being cut short.
 
 ## Pacing and presentation
 
@@ -63,9 +65,11 @@ team event does not carry local actor attribution.
 ## Exit, match limits and records
 
 END TUTORIAL dismisses guidance at any point and leaves the practice match
-running. KEEP PLAYING does the same after completion. The ordinary pause menu's
-RETURN TO LOADOUT exits the match. Neither skipping nor dismissing the completion
-card claims unearned lessons as completed.
+running. KEEP PLAYING does the same after completion. The completion card also
+offers the next step: RECOMMENDED MATCH starts the clean beginner preset in
+place of the practice match, and LOADOUT returns to selection. The ordinary
+pause menu's RETURN TO LOADOUT exits the match. Neither skipping nor dismissing
+the completion card claims unearned lessons as completed.
 
 Practice matches award **no XP, challenges, achievements or match-history entry**,
 including when played to the end after dismissing the tutorial. The page keeps a
@@ -74,11 +78,49 @@ a recorded match. At a normal victory, defeat or timeout, practice returns to
 selection with an explicit practice-ended/replay notice. Automatic finished-match
 recording is also bypassed for this practice path.
 
-The tutorial is not a protected staged scenario: dominance, the 15-minute limit,
-Director progression and Operations HQ loss conditions still apply. A spend
-lesson can require waiting for the next window. If the operation ends first,
-restart training from Quick Start. A dedicated non-ending lesson arena or staged
-Director remains a separate scenario-design task.
+## Protected scenario
+
+While a course is active (started and not skipped or completed), it runs inside
+an ordinary match but the match cannot end it:
+
+- **No ending beat.** A time limit, dominance/frag score, HQ breach, elimination
+  or even an early operation victory cannot resolve the match while the course
+  runs. The guard reverts the end the same fixed step and removes the suppressed
+  end event, so the HUD and audio never present a phantom result. Nothing is
+  frozen: the clock, waves, dominance meter and combat all keep running.
+- **No permanent elimination.** A death keeps its feedback, kill credit, item
+  drops and score, but the local player's respawn delay is capped at 0.5
+  simulation seconds instead of the mode's 1–5 s. The player is never made
+  invulnerable.
+- **No HQ loss.** The Operations Director's HQ siege is disarmed and every point
+  of HQ integrity it removes in a step is restored to the integrity recorded at
+  the first guarded step. Director waves, pacing, reinforcement pressure and
+  PRESSURE accrual are untouched; only the HQ outcome is held.
+- **Required opportunities.** A SPEND lesson that has no open window is given
+  one through the authored wave machine: a living/pending wave is ended by the
+  shipped overrun withdrawal (the wave is still credited) and its intermission
+  opens; when no wave force remains, the window opens directly. A TERMINAL
+  lesson keeps the first sorted cut/locked HACK or SABOTAGE terminal repaired
+  (and its supply cut cleared), and a RIDE THE ROUTE lesson keeps the first
+  sorted cut/locked authored traversal anchor live. Nothing teleports the
+  player and no target is invented outside the authored lattice; enemy contest
+  still has to be cleared by the player.
+
+Once the course is skipped or completed the guard stops, and the practice match
+resolves normally on the next fixed step. Residual limits, documented honestly:
+
+- The HOLD THE WAVE lesson still needs an authored wave clear to happen while
+  that lesson is active. The guard prevents the operation from ending early, so
+  the remaining waves can be cleared, but it does not fabricate an extra wave
+  after every authored wave has already been cleared.
+- A cut HACK/SABOTAGE terminal or traversal anchor is restored, but a terminal
+  can still be temporarily unusable while enemies contest it; the player clears
+  that contest through normal play.
+- A spend window forced during an already-completed operation may be followed by
+  the wave machine's clamped final-wave plan. This only happens when the spend
+  lesson is still active after the operation was completed.
+- The guard's HQ floor is the integrity at the first guarded step, so entering a
+  course after the HQ was already damaged preserves (not heals) that damage.
 
 ## Engine and UI integration
 
@@ -99,15 +141,31 @@ Director remains a separate scenario-design task.
   progress, completed lessons and overall course progress.
 - `trainingControls(stepId, bindings)` resolves controls from live bindings.
 - `skipTraining(training)` is an honest, idempotent early end.
+- `trainingGuardPlan(match, training)` is the pure, deterministic decision for
+  one fixed step: `active`, whether an end is `blocked`, the `respawn` cap, the
+  `hq` floor/disarm deltas, the `spendWindow` action, a terminal/device `revive`
+  target and the suppressed end beats. It never mutates `match` or `training`.
+- `applyTrainingGuard(match, training)` performs those deltas and returns the
+  plan. The page calls it once per fixed simulation step in the local match
+  loop; with `training` null or skipped/completed it is a no-op.
 
 `app/ui/screens/LatticeTrainingHud.tsx` and its colocated CSS module render the
 tutorial; `PlayingHud.tsx` only mounts it. Tutorial callbacks and practice-match
-lifecycle handling live in narrow sections of `app/page.tsx`.
+lifecycle handling live in narrow sections of `app/page.tsx`. The completion
+card's RECOMMENDED MATCH starts the clean beginner preset through the same page
+launch path, KEEP PLAYING stays in practice, and LOADOUT returns to selection.
 
 ## Focused verification
 
-Run `node --test game/lattice-training.test.mjs`. Coverage includes both complete
-courses, acknowledgement boundaries, stale/duplicate events, local-vs-bot
-attribution, hold interruption/pause, already-captured objectives, remapped copy,
-clean practice presets, skip semantics, and a real Match regression that reaches
-the live nested snapshot supply check after verifying movement and firing.
+Run `node --test game/lattice-training.test.mjs game/lattice-training-guard.test.mjs`.
+`lattice-training.test.mjs` covers both complete courses, acknowledgement
+boundaries, stale/duplicate events, local-vs-bot attribution, hold
+interruption/pause, already-captured objectives, remapped copy, clean practice
+presets, skip semantics, and a real Match regression that reaches the live
+nested snapshot supply check after verifying movement and firing.
+`lattice-training-guard.test.mjs` drives a real match through the guard: the time
+limit, dominance, an armed HQ siege and lethal elimination cannot end an active
+course or consume HQ integrity; a spend lesson opens a usable window through the
+authored wave machine and completes; terminal/device lessons keep an authored
+target; identical seeds and inputs produce identical snapshots; and a skipped or
+completed course leaves normal play byte-for-byte untouched.

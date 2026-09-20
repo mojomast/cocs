@@ -95,6 +95,15 @@ export function checkpointFor(progress, missionId) {
  if (!checkpoint || checkpoint.missionId !== missionId) return null;
  return Math.max(0, Math.round(Number(checkpoint.step) || 0));
 }
+/**
+ * The checkpoint a campaign launch is allowed to carry. Only the explicit
+ * `resume` intent reads the stored step for the target mission; a next-mission,
+ * replay or fresh launch always starts at the opening step, never from whatever
+ * checkpoint a previous match happened to leave in the live config.
+ */
+export function campaignLaunchCheckpoint(progress, missionId, intent = 'fresh') {
+ return intent === 'resume' ? checkpointFor(progress, missionId) : null;
+}
 /** Drops a banked checkpoint once its mission is completed or abandoned. */
 export function clearCheckpoint(progress) {
  return progress?.checkpoint ? {...progress, checkpoint:null, updatedAt:Date.now()} : progress;

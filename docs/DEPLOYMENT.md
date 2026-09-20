@@ -28,11 +28,23 @@ npm run deploy                      # web only
 npm run deploy -- --with-game-server   # web + authoritative game server
 ```
 
-`scripts/deploy.sh` copies the current `dist/` to a temporary backup, builds,
-restarts the service(s), gates on `systemctl --user is-active`, then runs the
-HTML/asset verifier against `DEPLOY_URL`. On any failure it restores the backup,
-restarts the services and exits non-zero. Without a previous `dist/` there is
-nothing to restore, so a first deploy reports the failure only.
+`scripts/deploy.sh` refuses a dirty working tree (override with
+`ALLOW_DIRTY_DEPLOY=1` to test), copies the current `dist/` to a temporary
+backup, records the running commit, builds with `TOKEN_ARENA_*` identity
+variables, restarts the service(s), gates on `systemctl --user is-active`, then
+runs the strict title-footer/asset verifier plus the exact identity check
+against `DEPLOY_URL`. On any failure with `--with-game-server` it restores the
+`dist/` backup, checks out the previous commit, re-imports the previous
+identity, restarts both services and exits non-zero. Without a previous `dist/`
+there is nothing to restore, so a first deploy reports the failure only.
+
+**Rollback covers both services and is not zero-downtime.** The recorded web
+identity (`/api/version`) and game-server identity (HTTP status) publish
+`release`, `codename`, `commit`, `buildId` and `protocol` from one shared
+module. A failing `--with-game-server` deploy returns both services to the
+previously serving commit, and connecting clients must reconnect. To roll back a
+server change manually, check out the previous release commit, re-run the
+deploy, and verify both identities match before declaring success.
 
 Restarting the game server disconnects active multiplayer clients. Only pass
 `--with-game-server` when server code changed.
@@ -47,15 +59,22 @@ commit:
 - `docs/CHANGELOG.md`, the README release list and `docs/VERIFICATION.md`
 
 `game/changelog.test.mjs` fails if the newest digest entry and the footer literal
-disagree, and `scripts/deploy.sh` verifies the served HTML against the footer, so
-a stale or unbumped release cannot pass verification.
+disagree. `scripts/deploy.sh` verifies that the served document's `title-footer`
+span equals the release it built (`vX.Y · CODENAME`) exactly, so a document whose
+footer still names an older release fails the gate even when its assets resolve
+and the new version appears elsewhere in the HTML. The footer is a release label,
+not build identity: it cannot prove which commit is deployed or that the web
+bundle and game server come from the same build. Exposing and matching those
+identities is a WP0.2 requirement.
 
 ## Verifying a deployment
 
 `DEPLOY_VERSION` is optional: the script reads it from the `app/page.tsx`
-`title-footer` via `scripts/read-version.mjs` when unset, and the check rejects a
-stale HTML release even when its assets still work. `DEPLOY_URL` defaults to
-`https://arena.ussyco.de`.
+`title-footer` via `scripts/read-version.mjs` when unset. The verifier extracts
+the `title-footer` release string from the served HTML and requires it to equal
+`vX.Y · CODENAME` exactly, so a footer that still names an older release is
+rejected even when its assets resolve and the current version appears elsewhere
+in the document. `DEPLOY_URL` defaults to `https://arena.ussyco.de`.
 
 To check a running deployment without building or restarting anything:
 
@@ -66,7 +85,9 @@ npm run verify:deployment -- https://arena.ussyco.de
 The verifier requires HTTP 200 **and** the correct content type for every CSS and
 JS asset referenced by the HTML, including `preload`/`modulepreload` and streamed
 RSC references — and it fails if the document itself is cacheable. This catches
-stale-manifest failures that an HTML-only smoke test would miss.
+stale-manifest failures that an HTML-only smoke test would miss. It proves only
+that the public host serves this release label with reachable assets; it does not
+prove a commit SHA, a build identity or a matching web/server pair.
 
 **Document cache policy.** `next.config.ts` sends `Cache-Control: no-cache,
 must-revalidate` for `/` while content-hashed `/assets/*` keep `public,

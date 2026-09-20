@@ -4,7 +4,8 @@ import { WebSocketServer } from 'ws';
 import { RoomRegistry, Matchmaker, ratingFor } from './rooms.mjs';
 import { MatchHistory } from './history.mjs';
 import { ProgressionStore } from './progression.mjs';
-import { MESSAGE } from '../game/protocol.mjs';
+import { MESSAGE, PROTOCOL_VERSION } from '../game/protocol.mjs';
+import { buildIdentity, protocolMajor } from '../game/build-identity.mjs';
 import { normalizeConfig, teamMode } from '../game/config.mjs';
 import { actorWon } from '../game/outcome.mjs';
 import { PLACEMENT_MATCHES, isRankedMode, settleMatch } from '../game/ranked.mjs';
@@ -47,10 +48,11 @@ export function drainEssential(queue, { bufferedAmount = 0, limit = TRAFFIC_BUFF
  return sent;
 }
 
-export function createGameServer({ port = 0, random, tickDt = 1 / 60, tickMs = 1000 / 60, graceMs, snapshotHz, historyPath = null, progressionPath = null, maxClients = MAX_CLIENTS } = {}) {
+export function createGameServer({ port = 0, random, tickDt = 1 / 60, tickMs = 1000 / 60, graceMs, snapshotHz, historyPath = null, progressionPath = null, maxClients = MAX_CLIENTS, identity = null } = {}) {
  const history = new MatchHistory(historyPath);
  const progression = new ProgressionStore(progressionPath);
-  const registry = new RoomRegistry({ random, graceMs, history, progression, snapshotHz, onError: (error, room) => console.error(`room ${room?.id ?? '?'} tick failed`, error) });
+ const serverIdentity = identity ?? buildIdentity(process.env, 'token-arena-game-server');
+ const registry = new RoomRegistry({ random, graceMs, history, progression, snapshotHz, onError: (error, room) => console.error(`room ${room?.id ?? '?'} tick failed`, error) });
   const matchmaker = new Matchmaker({ random });
   // Ranked queue: a second Matchmaker with the same deterministic rules, kept
   // separate so unranked drafting is byte-for-byte the shipped behaviour and a
@@ -66,7 +68,14 @@ export function createGameServer({ port = 0, random, tickDt = 1 / 60, tickMs = 1
   const players = [...registry.rooms.values()].reduce((n, r) => n + r.peers.size, 0);
   let deltaFrames = 0, fullFrames = 0;
   for (const room of registry.rooms.values()) { deltaFrames += room.deltaFrames ?? 0; fullFrames += room.fullFrames ?? 0; }
-  res.end(JSON.stringify({ service: 'token-arena-game-server', rooms: registry.rooms.size, players, port: server.address()?.port ?? port, snapshot: { deltaFrames, fullFrames } }));
+  res.end(JSON.stringify({
+   ...serverIdentity,
+   version: serverIdentity.release,
+   rooms: registry.rooms.size,
+   players,
+   port: server.address()?.port ?? port,
+   snapshot: { deltaFrames, fullFrames },
+  }));
  });
  const wss = new WebSocketServer({ server, maxPayload: 64 * 1024 });
  let nextPeer = 1;
@@ -113,20 +122,51 @@ export function createGameServer({ port = 0, random, tickDt = 1 / 60, tickMs = 1
   const old = peerRoom.get(peerId);
   if (old) { old.leave(peerId); registry.removeIfEmpty(old); }
  }
- function joinPeer(peerId, msg) {
+ // Real JOIN/CREATE protocol negotiation. The frame may carry `v` (the full
+ // wire revision the client speaks). Peers that advertise a different major
+ // revision are refused with a clear error before any room state changes, and
+ // the accepted revision is stored on both the socket and the room peer record
+ // so status, logs and later frames can name the peer's version. Frames without
+ // `v` are legacy clients: they are seated and recorded as an unknown version,
+ // with a previously negotiated socket version reused when one exists.
+ function negotiateProtocol(peerId, ws, value) {
+  const advertised = value === undefined || value === null || value === '' ? ws.advertisedProtocol ?? null : protocolMajor(value);
+  if (value !== undefined && value !== null && value !== '' && advertised === null) {
+   sendTo(peerId, { type: 'error', code: 'protocol-invalid', message: `invalid protocol version: ${String(value).slice(0, 16)}` });
+   return null;
+  }
+  const required = protocolMajor(PROTOCOL_VERSION);
+  if (advertised !== null && advertised !== required) {
+   sendTo(peerId, { type: 'error', code: 'protocol-mismatch', message: `protocol v${advertised} is incompatible; this server requires major v${required} (protocol v${PROTOCOL_VERSION})` });
+   return null;
+  }
+  if (advertised !== null) ws.advertisedProtocol = advertised;
+  return { version: advertised };
+ }
+ function recordPeerProtocol(room, peerId, version) {
+  const peer = room?.peers?.get(peerId);
+  if (peer) peer.protocolVersion = version;
+ }
+ function joinPeer(peerId, msg, ws) {
+  const negotiation = negotiateProtocol(peerId, ws, msg.v);
+  if (!negotiation) return;
   const roomId = typeof msg.roomId === 'string' && msg.roomId ? msg.roomId : 'local';
   const room = registry.get(roomId);
   if (!room) { sendTo(peerId, { type: 'error', message: `room not found: ${roomId}` }); return; }
   room.join(peerId, msg.name, msg.character, msg.harness, msg.token, msg.spectate === true, msg.playerId, msg.progressToken, msg.delta);
   if (!room.peers.has(peerId)) return;
+  recordPeerProtocol(room, peerId, negotiation.version);
   if (peerRoom.get(peerId) !== room) releaseSeat(peerId);
   peerRoom.set(peerId, room);
  }
- function createRoom(peerId, msg) {
+ function createRoom(peerId, msg, ws) {
+  const negotiation = negotiateProtocol(peerId, ws, msg.v);
+  if (!negotiation) return;
   const room = registry.create(msg.name);
   if (!room) { sendTo(peerId, { type: 'error', message: 'server is at the room limit' }); return; }
   room.join(peerId, msg.playerName ?? msg.name, msg.character, msg.harness, msg.token, false, msg.playerId, msg.progressToken, msg.delta);
   if (!room.peers.has(peerId)) return;
+  recordPeerProtocol(room, peerId, negotiation.version);
   releaseSeat(peerId);
   peerRoom.set(peerId, room);
  }
@@ -177,8 +217,8 @@ export function createGameServer({ port = 0, random, tickDt = 1 / 60, tickMs = 1
   switch (msg.type) {
    case MESSAGE.VOICE_STATE: peerRoom.get(peerId)?.voiceState(peerId, msg.enabled, voiceConfig); break;
    case MESSAGE.VOICE_SIGNAL: peerRoom.get(peerId)?.voiceSignal(peerId, msg); break;
-  case MESSAGE.JOIN: joinPeer(peerId, msg); break;
-  case MESSAGE.CREATE: createRoom(peerId, msg); break;
+  case MESSAGE.JOIN: joinPeer(peerId, msg, ws); break;
+  case MESSAGE.CREATE: createRoom(peerId, msg, ws); break;
   case MESSAGE.LIST: sendTo(peerId, { type: 'rooms', rooms: registry.list() }); break;
   case 'ready': peerRoom.get(peerId)?.setReady(peerId, msg.ready !== false); break;
   case 'map-vote': peerRoom.get(peerId)?.mapVote(peerId, msg.mapId); break;

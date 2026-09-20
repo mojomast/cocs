@@ -637,3 +637,66 @@ test('a reconnect racing the old socket reattaches the seat with the newest conn
   await until(b, 'lobby');
  } finally { try { a.close(); } catch {} try { b?.close(); } catch {} close(); }
 });
+
+// WP0.3 — round-scoped idempotency over the real socket dispatch. A duplicate
+// BUY with the same (roundRev, actionSeq) charges once; the same scoped key
+// with a different payload is `id-reuse`; a stale round is refused before any
+// gating or enqueueing.
+test('real-socket duplicate BUY applies once, a reused key and a stale round are refused', async () => {
+ let n = 5;
+ const random = () => ((n = (Math.imul(n, 1664525) + 1013904223) >>> 0) / 4294967296);
+ const { server, close, registry } = createGameServer({ tickDt: 1 / 6, random });
+ await new Promise(resolve => server.listen(0, resolve));
+ const url = `ws://127.0.0.1:${server.address().port}`;
+ let a, b;
+ try {
+  a = await connect(url); b = await connect(url);
+  send(a, { type: 'join', name: 'Alice', character: 'chatgpt', harness: 'openclaw' });
+  send(b, { type: 'join', name: 'Bob', character: 'claude', harness: 'hermes' });
+  await until(a, 'welcome');
+  await until(b, 'welcome');
+  send(a, { type: 'host', config: { mode: 'cocs-coop', botCount: 6, timeLimit: 900 }, mapId: 'warfront' });
+  send(a, { type: 'start' });
+  await until(b, 'start');
+  await until(a, 'snapshot');
+  const room = registry.rooms.get('local');
+  const state = room.match.objectiveState;
+  const front = state.nodes.find(node => node.archetype === 'front');
+  front.owner = 0;
+  const alice = room.match.actors.find(actor => actor.name === 'Alice');
+  alice.req = 200;
+  const rev = room.roundRevision;
+  assert.ok(Number.isInteger(rev) && rev >= 1, 'the authority announced a round revision');
+
+  const buy = { type: 'buy', cardId: 's-buy', itemId: 'field-repair', roundRev: rev, actionSeq: 1 };
+  send(a, buy);
+  send(a, buy);
+  const charged = await new Promise(resolve => {
+   const started = Date.now();
+   const poll = () => {
+    if (alice.reqSpent >= 40) resolve(true);
+    else if (Date.now() - started > 20000) resolve(false);
+    else setTimeout(poll, 50);
+   };
+   poll();
+  });
+  assert.ok(charged, 'the first BUY applied');
+  await new Promise(resolve => setTimeout(resolve, 600));
+  assert.equal(alice.reqSpent, 40, 'the duplicate BUY charged exactly once');
+  assert.equal(alice.reqBuff, 'field-repair');
+
+  send(a, { type: 'buy', cardId: 's-buy', itemId: 'overshield', roundRev: rev, actionSeq: 1 });
+  const reuse = await until(a, 'cocs-reject', 15000);
+  assert.equal(reuse.cardId, 's-buy');
+  assert.equal(reuse.reason, 'id-reuse');
+  assert.equal(reuse.roundRevision, rev);
+
+  send(a, { type: 'order', cardId: 's-stale', verb: 'HOLD', target: front.id, roundRev: rev + 1, actionSeq: 2 });
+  const stale = await until(a, 'cocs-reject', 15000);
+  assert.equal(stale.cardId, 's-stale');
+  assert.equal(stale.reason, 'stale-round');
+  assert.equal(stale.roundRevision, rev, 'the refusal names the current round');
+ } finally {
+  a?.close(); b?.close(); close();
+ }
+});

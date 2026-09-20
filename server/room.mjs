@@ -11,7 +11,8 @@ import {COOP_BIG_SINKS,coopCommandState,coopOrderGate,coopSpendGate,intermission
 import {coopSink} from '../game/cocs-difficulty.mjs';
 import {TERMINAL_KINDS} from '../game/cocs-terminals.mjs';
 import {coopRole} from '../game/cocs-roles.mjs';
-import {SUBAGENTS,reqItem,reqPurchase} from '../game/cocs-economy.mjs';
+import {SUBAGENTS,reqItem,reqItemModes,reqItemSupported,reqPurchase} from '../game/cocs-economy.mjs';
+import {depotPurchaseState} from '../game/cocs-traversal.mjs';
 import {randomUUID} from 'node:crypto';
 import {validPlayerId,sanitizeText,parseInputEnvelope,PROTOCOL_VERSION,SNAPSHOT_DELTA_VERSION,SNAPSHOT_DELTA_MIN_BYTES,snapshotDelta,wireSize,MESSAGE,COCS_REJECT_LIMIT,parseOrderMessage,parseEconomyMessage,parseTerminalMessage,parseCommandMessage,parseBuyMessage} from '../game/protocol.mjs';
 // V2 per-team snapshot filtering (§11.4/§12.7). Applied per peer at this wire
@@ -29,6 +30,11 @@ export const COCS_PLAYER_LIMIT = 32;
 // mode drops to 20 Hz; no actor payload is slimmed, keyframes do not shrink.
 export const COCS_OVERLOAD_ACTORS = 32;
 export const COCS_OVERLOAD_SNAPSHOT_HZ = 20;
+// Round-long dedupe ledger bound. Deliberately far larger than the presentation
+// card map (`COCS_REJECT_LIMIT`, 300): an accepted key must stay idempotent even
+// after hundreds of later cards evict its presentation row. Cleared only by a
+// new round revision, never by card eviction.
+export const COCS_DEDUPE_LIMIT = 8192;
 // Per-peer token-bucket ceilings (§11.2). Mirrors the `setLoadout` anti-flood
 // style: a fixed one-second window with a bounded count per kind.
 export const COCS_RATE_LIMITS = Object.freeze({order: 10, economy: 8, terminal: 6, command: 4, buy: 4});
@@ -119,6 +125,16 @@ export class Room {
   this.pendingCocs = {orders: [], spends: [], terminals: [], commands: [], buys: []};
   this.cocsCards = new Map();
   this.cocsSeq = 0;
+  // Round identity (WP0.3). Every real `start()` — including a rematch — mints a
+  // new revision; a reconnect keeps the current one. `cocsLedger` holds the
+  // round-long idempotency records, keyed by (authenticated seat, round, seq)
+  // and independent of the bounded presentation cards above.
+  this.roundRevision = 0;
+  this.cocsLedger = new Map();
+  // Keys of accepted, not-yet-settled ledger records. The per-step settle walks
+  // only this set, so a long round with thousands of completed records stays
+  // cheap while the ledger itself remains round-long.
+  this.cocsInFlight = new Set();
  }
  send(peerId, msg) { this.out.push({ to: peerId, msg }); }
  broadcast(msg) { this.out.push({ to: null, msg }); }
@@ -152,58 +168,296 @@ export class Room {
  cocsCardList() {
   return [...this.cocsCards.values()].sort((a, b) => String(a.id).localeCompare(String(b.id)));
  }
- // Settle mirrored action cards from the sim's bounded outcome logs. A card is
- // accepted as `running`; `state.orderLog` (orders), `state.spendLog` (PvP role
- // spends) and `state.coop.spendLog` (OPERATIONS sinks) are the sim-side
- // authority for its real outcome, so the board shows `done`/`blocked` instead
- // of a permanent in-flight row. Idempotent and bounded: only running cards are
- // touched, and an entry older than the card is ignored so a reused card id can
- // never inherit a stale outcome.
- settleCocsCards(state) {
-  if (!this.cocsCards.size || !state || state.kind !== 'cocs') return;
-  const settle = (entry, card) => {
-   const ok = entry.ok === true;
-   this.recordCocsCard(card.id, { state: ok ? 'done' : 'blocked', ok, blocker: ok ? null : (entry.reason ?? 'blocked'), reason: ok ? null : (entry.reason ?? 'blocked') });
-  };
-  const settleLogEntry = entry => {
-   if (!entry || entry.cardId === undefined || entry.cardId === null) return;
-   const id = String(entry.cardId);
-   const card = this.cocsCards.get(id);
-   if (!card || card.state !== 'running') return;
-   if (Number.isFinite(entry.tick) && Number.isFinite(card.createdTick) && entry.tick < card.createdTick) return;
-   settle(entry, card);
-  };
-  for (const entry of state.orderLog ?? []) settleLogEntry(entry);
-  for (const entry of state.spendLog ?? []) settleLogEntry(entry);
-  for (const entry of state.coop?.spendLog ?? []) settleLogEntry(entry);
-  // Command cards have no sim log: every command action is a deterministic
-  // state write the room has already validated, so settle them from the same
-  // seat/vote/route/policy state the sim writes. `actorId` is the sim identity.
-  const coop = state.coop;
-  for (const card of [...this.cocsCards.values()]) {
-   if (card.state !== 'running') continue;
-   const team = card.team === 1 ? 1 : 0;
-   const actorId = card.actorId === undefined || card.actorId === null ? null : String(card.actorId);
-   const seat = coop ? coop.commandSeat?.[team] ?? null : state.command?.seat?.[team] ?? null;
-   const value = card.value === undefined || card.value === null ? null : String(card.value);
-   const route = coop ? coop.commandRoute?.[team] ?? null : state.command?.route?.[team] ?? null;
-   const policy = coop ? coop.commandPolicy?.[team] ?? null : state.command?.policy?.[team] ?? null;
-   const votes = coop ? coop.commandVotes?.[team] ?? {} : state.command?.votes?.[team] ?? {};
-   switch (String(card.verb ?? '').toUpperCase()) {
-    case 'TAKE': if (actorId !== null && String(seat ?? '') === actorId) settle({ok: true}, card); break;
-    case 'RELEASE': if (actorId !== null && String(seat ?? '') !== actorId) settle({ok: true}, card); break;
-    case 'SET-ROUTE': if (value !== null && String(route ?? '') === value) settle({ok: true}, card); break;
-    case 'POLICY': if (value !== null && String(policy ?? '') === value) settle({ok: true}, card); break;
-    case 'MUTINY-VOTE': if (actorId !== null && votes[actorId] === true) settle({ok: true}, card); break;
-    case 'OPT-OUT-ORDERS': if (this.match?.actors?.[card.actorId]?.ordersOptOut === true) settle({ok: true}, card); break;
-    default: break;
+ // Round/action identity helpers (WP0.3). The ledger is separate from the card
+ // map, is keyed by the authenticated seat + round + sequence, and is looked up
+ // before rate limiting, gating or enqueueing, so a retry can never apply twice.
+ cocsSeatKey(peer) { return peer?.token ? `t:${peer.token}` : `p:${peer?.id ?? ''}`; }
+ cocsActionKey(peer, parsed) {
+  const seat = this.cocsSeatKey(peer);
+  const round = Number.isInteger(parsed.roundRev) ? parsed.roundRev : this.roundRevision;
+  if (Number.isInteger(parsed.actionSeq)) return `${seat}|r${round}|s${parsed.actionSeq}`;
+  // Transitional v3 adapter: a frame with only the historical `cardId` is
+  // scoped by round + seat so cross-actor identical ids cannot collide and a
+  // same-round retry is still idempotent.
+  const cardId = parsed.cardId === null || parsed.cardId === undefined ? null : String(parsed.cardId);
+  return cardId === null ? null : `${seat}|r${round}|c:${cardId}`;
+ }
+ cocsPayloadKey(kind, parsed) {
+  switch (kind) {
+   case 'order': return `o|${parsed.verb}|${parsed.target}|${parsed.agent ?? ''}`;
+   case 'economy': return `e|${parsed.action}|${parsed.role ?? ''}|${parsed.target ?? ''}|${parsed.actorId ?? ''}`;
+   case 'terminal': return `t|${parsed.terminalId}|${parsed.action}|${parsed.actorId ?? ''}`;
+   case 'command': return `c|${parsed.action}|${parsed.value ?? ''}`;
+   case 'buy': return `b|${parsed.itemId}|${parsed.depotId ?? ''}|${parsed.targetCardId ?? ''}|${parsed.actorId ?? ''}`;
+   default: return String(kind);
+  }
+ }
+ cocsPayload(kind, parsed) {
+  switch (kind) {
+   case 'order': return {verb: parsed.verb, target: parsed.target, agent: parsed.agent ?? null};
+   case 'economy': return {action: parsed.action, role: parsed.role ?? null, target: parsed.target ?? null, actorId: parsed.actorId ?? null};
+   case 'terminal': return {terminalId: parsed.terminalId, action: parsed.action, actorId: parsed.actorId ?? null};
+   case 'command': return {action: parsed.action, value: parsed.value ?? null};
+   case 'buy': return {itemId: parsed.itemId, depotId: parsed.depotId ?? null, targetCardId: parsed.targetCardId ?? null, actorId: parsed.actorId ?? null};
+   default: return {};
+  }
+ }
+ cocsRejectExtra(parsed) {
+  const extra = {roundRevision: this.roundRevision};
+  if (parsed && parsed.actionSeq !== undefined) extra.actionSeq = parsed.actionSeq;
+  if (parsed && parsed.roundRev !== undefined) extra.roundRev = parsed.roundRev;
+  return extra;
+ }
+ // A frame without a client cardId still needs a deterministic presentation id
+ // (the client that omitted it has nothing to reconcile against anyway).
+ cocsFallbackCardId(parsed, peer) {
+  if (Number.isInteger(parsed.actionSeq)) return `r${Number.isInteger(parsed.roundRev) ? parsed.roundRev : this.roundRevision}-p${peer?.id ?? 0}-s${parsed.actionSeq}`;
+  return `cocs-${++this.cocsSeq}`;
+ }
+ // The authoritative peer/match/actor gate. Every failure is a refusal with a
+ // reason, never a silent `false`: a request the authority received always gets
+ // exactly one correlated answer.
+ cocsRoomGate(peer) {
+  if (peer.disconnectedAt !== null) return 'disconnected';
+  if (peer.spectate) return 'spectator';
+  if (!this.match) return 'no-match';
+  if (this.roundOver) return 'round-over';
+  const actor = this.cocsActor(peer);
+  if (!actor) return 'no-actor';
+  if (actor.health <= 0) return 'dead';
+  return null;
+ }
+ // Parse → round check → idempotency lookup → rate limit → room gate. Returns a
+ // refusal (`refuse`), a cached exact retry (`duplicate`) or an opened action to
+ // validate against the sim. The payload is bound to the key: same key with a
+ // different canonical payload is `id-reuse`, never a second effect.
+ cocsBegin(kind, peerId, msg, now, parse) {
+  const peer = this.peers.get(peerId);
+  if (!peer) return {refuse: this.rejectCocs(peerId, msg?.cardId ?? null, 'unknown-peer', {roundRevision: this.roundRevision})};
+  const parsed = parse(msg);
+  if (!parsed) return {refuse: this.rejectCocs(peerId, msg?.cardId ?? null, 'malformed', {roundRevision: this.roundRevision})};
+  const extra = this.cocsRejectExtra(parsed);
+  if (parsed.roundRev !== undefined && parsed.roundRev !== this.roundRevision) {
+   return {refuse: this.rejectCocs(peerId, parsed.cardId, 'stale-round', extra)};
+  }
+  const key = this.cocsActionKey(peer, parsed);
+  const payloadKey = this.cocsPayloadKey(kind, parsed);
+  if (key) {
+   const cached = this.cocsLedger.get(key);
+   if (cached) {
+    if (cached.payloadKey !== payloadKey) return {refuse: this.cocsRejectReply(peerId, parsed.cardId, 'id-reuse', extra)};
+    if (cached.outcome === 'rejected' || cached.outcome === 'blocked' || cached.outcome === 'expired') return {refuse: this.cocsRejectReply(peerId, parsed.cardId, cached.reason ?? cached.outcome, extra)};
+    return {duplicate: true, parsed, peer};
    }
   }
+  if (!this.cocsRate(peer, kind, now)) return {refuse: this.rejectCocs(peerId, parsed.cardId, 'rate-limit', extra)};
+  const gate = this.cocsRoomGate(peer);
+  if (gate) return {refuse: this.rejectCocs(peerId, parsed.cardId, gate, extra)};
+  return {peerId, peer, parsed, key, payloadKey, payload: this.cocsPayload(kind, parsed), cardId: parsed.cardId ?? null};
+ }
+ recordCocsDecision(opened, outcome, reason = null, extra = {}) {
+  if (!opened.key) return null;
+  const record = {
+   key: opened.key, kind: opened.kind, seat: this.cocsSeatKey(opened.peer),
+   roundRevision: Number.isInteger(opened.parsed.roundRev) ? opened.parsed.roundRev : this.roundRevision,
+   actionSeq: opened.parsed.actionSeq ?? null, cardId: opened.cardId,
+   actorId: opened.actorId ?? null, team: opened.team ?? null,
+   payloadKey: opened.payloadKey, payload: opened.payload,
+   outcome, reason, createdTick: this.cocsTick(), acceptedTick: null, terminalTick: null,
+   seenAccepted: false, seenChannel: false, ...extra,
+  };
+  this.cocsLedger.set(opened.key, record);
+  if (outcome === 'accepted') this.cocsInFlight.add(opened.key);
+  while (this.cocsLedger.size > COCS_DEDUPE_LIMIT) {
+   const oldest = this.cocsLedger.keys().next().value;
+   this.cocsLedger.delete(oldest);
+   this.cocsInFlight.delete(oldest);
+  }
+  return record;
+ }
+ cocsRejectAction(opened, reason, extra = {}) {
+  this.recordCocsDecision(opened, 'rejected', reason);
+  return this.rejectCocs(opened.peerId, opened.cardId, reason, {...this.cocsRejectExtra(opened.parsed), ...extra});
+ }
+ // Read-only baseline for terminal/device completion proofs. Captured when the
+ // authority accepts the request, compared afterwards against the sim state that
+ // only changes when the effect actually applies.
+ cocsTerminalBaseline(state, id) {
+  const terminal = state?.terminals?.terminals?.[id] ?? null;
+  if (terminal) return {terminal: true, state: terminal.state, hacks: num(terminal.hacks, 0), deploys: num(terminal.deploys, 0), repairs: num(terminal.repairs, 0), sabotages: num(terminal.sabotages, 0), uses: num(terminal.uses, 0), stores: num(state.terminals?.vault?.stores, 0), pulls: num(state.terminals?.vault?.pulls, 0)};
+  const device = state?.traversal?.devices?.[id] ?? null;
+  if (device) return {device: true, state: device.state, cuts: num(device.cuts, 0), locks: num(device.locks, 0), repairs: num(device.repairs, 0)};
+  return null;
+ }
+ // Settle accepted cards from the sim's own evidence. An accepted HOLD/ATTACK
+ // stays `running` with `accepted:true` until its task completes, expires or is
+ // replaced; one-shot spends/vaults/buys/commands settle when the sim state that
+ // proves the effect exists appears. Refusals always write a reason. Runs after
+ // every step (and once at round end) so a card cannot stick forever.
+ settleCocsCards(state, {ended = false} = {}) {
+  if (!this.cocsInFlight.size || !state || state.kind !== 'cocs') return;
+  for (const key of [...this.cocsInFlight]) {
+   const record = this.cocsLedger.get(key);
+   if (!record || record.outcome !== 'accepted') { this.cocsInFlight.delete(key); continue; }
+   const settled = ended ? {state: 'expired', ok: false, reason: 'round-end'} : this.cocsOutcome(record, state);
+   if (!settled) continue;
+   record.outcome = settled.state === 'done' ? 'done' : settled.state === 'blocked' ? 'blocked' : 'expired';
+   record.reason = settled.reason ?? null;
+   record.terminalTick = this.cocsTick();
+   this.cocsInFlight.delete(key);
+   const card = this.cocsCards.get(record.cardId);
+   if (!card) continue;
+   if (card.actorId !== undefined && card.actorId !== null && record.actorId !== null && String(card.actorId) !== String(record.actorId)) continue;
+   this.recordCocsCard(record.cardId, {
+    state: settled.state, ok: settled.ok,
+    blocker: settled.ok ? null : (settled.reason ?? 'blocked'),
+    reason: settled.reason ?? null, accepted: true, acceptedTick: record.acceptedTick,
+   });
+  }
+ }
+ cocsOutcome(record, state) {
+  switch (record.kind) {
+   case 'order': return this.cocsOrderOutcome(record, state);
+   case 'economy': return this.cocsEconomyOutcome(record, state);
+   case 'terminal': return this.cocsTerminalOutcome(record, state);
+   case 'command': return this.cocsCommandOutcome(record, state);
+   case 'buy': return this.cocsBuyOutcome(record, state);
+   default: return null;
+  }
+ }
+ cocsOrderOutcome(record, state) {
+  const actorKey = record.actorId === null || record.actorId === undefined ? null : String(record.actorId);
+  const log = state.orderLog ?? [];
+  let entry = null;
+  for (let i = log.length - 1; i >= 0; i--) {
+   const candidate = log[i];
+   if (!candidate || String(candidate.cardId) !== record.cardId) continue;
+   if (actorKey !== null && String(candidate.peerId ?? '') !== actorKey) continue;
+   entry = candidate;
+   break;
+  }
+  if (entry) {
+   if (entry.ok !== true) return {state: 'blocked', ok: false, reason: entry.reason ?? 'blocked'};
+   record.seenAccepted = true;
+   if (record.acceptedTick === null) record.acceptedTick = Number.isFinite(entry.tick) ? entry.tick : this.cocsTick();
+  } else if (!record.seenAccepted) {
+   return null;
+  }
+  const verb = String(record.verb ?? '').toUpperCase();
+  if (verb === 'SCAN') return {state: 'done', ok: true, reason: null};
+  const task = state.tasks?.[record.team] ?? null;
+  if (task && String(task.cardId) === record.cardId && (actorKey === null || String(task.peerId ?? '') === actorKey)) {
+   return num(state.tick, 0) > num(task.until, 0) ? {state: 'expired', ok: false, reason: 'ttl'} : null;
+  }
+  // A live task with a different card is a replacement; no task at all means
+  // the capture completed and the sim retired the task (see `captureNode`).
+  if (task) return {state: 'done', ok: true, reason: 'replaced'};
+  return {state: 'done', ok: true, reason: 'complete'};
+ }
+ cocsEconomyOutcome(record, state) {
+  if (record.action === 'opt-out-orders') {
+   const actor = this.match?.actors?.[record.actorId] ?? null;
+   return actor?.ordersOptOut === true ? {state: 'done', ok: true, reason: null} : null;
+  }
+  const logs = [...(state.spendLog ?? []), ...(state.coop?.spendLog ?? [])];
+  let entry = null;
+  for (let i = logs.length - 1; i >= 0; i--) {
+   const candidate = logs[i];
+   if (!candidate || String(candidate.cardId) !== record.cardId) continue;
+   if (String(candidate.peerId ?? '') !== String(record.actorId ?? '')) continue;
+   if (num(candidate.tick, 0) < num(record.createdTick, 0)) continue;
+   entry = candidate;
+   break;
+  }
+  if (!entry) return null;
+  return entry.ok === true ? {state: 'done', ok: true, reason: null} : {state: 'blocked', ok: false, reason: entry.reason ?? 'blocked'};
+ }
+ cocsTerminalOutcome(record, state) {
+  const baseline = record.baseline ?? {};
+  const terminal = state.terminals?.terminals?.[record.terminalId] ?? null;
+  if (terminal) {
+   const channel = terminal.channel;
+   if (channel && String(channel.actor) === String(record.actorId)) record.seenChannel = true;
+   const done = () => ({state: 'done', ok: true, reason: null});
+   const action = record.action;
+   if (action === 'vault-store' && num(state.terminals?.vault?.stores, 0) > num(baseline.stores, 0)) return done();
+   if (action === 'vault-pull' && num(state.terminals?.vault?.pulls, 0) > num(baseline.pulls, 0)) return done();
+   if (action === 'hack' && num(terminal.hacks, 0) > num(baseline.hacks, 0)) return done();
+   if (action === 'deploy' && num(terminal.deploys, 0) > num(baseline.deploys, 0)) return done();
+   if (action === 'cut' && num(terminal.sabotages, 0) > num(baseline.sabotages, 0)) return done();
+   if (action === 'repair' && (num(terminal.repairs, 0) > num(baseline.repairs, 0) || (baseline.state !== 'live' && terminal.state === 'live'))) return done();
+   if (record.seenChannel && !channel) return {state: 'blocked', ok: false, reason: 'interrupted'};
+   return null;
+  }
+  const device = state.traversal?.devices?.[record.terminalId] ?? null;
+  if (device) {
+   if (device.channel && String(device.channel.actor) === String(record.actorId)) record.seenChannel = true;
+   const done = () => ({state: 'done', ok: true, reason: null});
+   const action = record.action;
+   if (action === 'repair' && (num(device.repairs, 0) > num(baseline.repairs, 0) || (baseline.state !== 'live' && device.state === 'live'))) return done();
+   if (action === 'cut' && (num(device.cuts, 0) > num(baseline.cuts, 0) || (baseline.state === 'live' && device.state !== 'live'))) return done();
+   if (action === 'lock' && (num(device.locks, 0) > num(baseline.locks, 0) || (baseline.state === 'live' && device.state === 'locked'))) return done();
+   if (action === 'depot-capture' && device.state !== baseline.state) return done();
+   if (record.seenChannel && !device.channel) return {state: 'blocked', ok: false, reason: 'interrupted'};
+   return null;
+  }
+  return {state: 'blocked', ok: false, reason: 'missing'};
+ }
+ cocsCommandOutcome(record, state) {
+  const team = record.team === 1 ? 1 : 0;
+  const actorId = String(record.actorId ?? '');
+  const coop = state.coop;
+  const seat = coop ? coop.commandSeat?.[team] ?? null : state.command?.seat?.[team] ?? null;
+  const route = coop ? coop.commandRoute?.[team] ?? null : state.command?.route?.[team] ?? null;
+  const policy = coop ? coop.commandPolicy?.[team] ?? null : state.command?.policy?.[team] ?? null;
+  const votes = coop ? coop.commandVotes?.[team] ?? {} : state.command?.votes?.[team] ?? {};
+  const done = {state: 'done', ok: true, reason: null};
+  switch (String(record.action ?? '').toLowerCase()) {
+   case 'take': return String(seat ?? '') === actorId ? done : null;
+   case 'release': return String(seat ?? '') !== actorId ? done : null;
+   case 'set-route': return String(route ?? '') === String(record.value ?? '') ? done : null;
+   case 'policy': return String(policy ?? '') === String(record.value ?? '') ? done : null;
+   case 'mutiny-vote': return votes && votes[actorId] === true ? done : null;
+   case 'opt-out-orders': {
+    const actor = this.match?.actors?.[record.actorId] ?? null;
+    return actor?.ordersOptOut === true ? done : null;
+   }
+   default: return null;
+  }
+ }
+ cocsBuyOutcome(record, state) {
+  const actor = this.match?.actors?.[record.actorId] ?? null;
+  if (!actor) return {state: 'blocked', ok: false, reason: 'missing'};
+  if (state.coop) {
+   const log = state.coop.buyLog ?? [];
+   for (let i = log.length - 1; i >= 0; i--) {
+    const entry = log[i];
+    if (!entry) continue;
+    if (String(entry.actor ?? '') !== String(record.actorId ?? '')) continue;
+    if (String(entry.itemId ?? '') !== String(record.itemId ?? '')) continue;
+    if (num(entry.tick, 0) < num(record.createdTick, 0)) continue;
+    return {state: 'done', ok: true, reason: null};
+   }
+  }
+  // Every successful purchase stamps the item on the actor and debits REQ; the
+  // debit is what distinguishes a fresh effect from an already-active buff.
+  if (String(actor.reqBuff ?? '') === String(record.itemId ?? '') && num(actor.reqSpent, 0) > num(record.baseline?.reqSpent, 0)) {
+   return {state: 'done', ok: true, reason: null};
+  }
+  return null;
  }
  rejectCocs(peerId, cardId, reason, extra = {}) {
   const id = cardId === null || cardId === undefined ? `cocs-${++this.cocsSeq}` : String(cardId);
   this.recordCocsCard(id, { blocker: reason, reason, state: 'blocked', ok: false, ...extra });
-  this.send(peerId, { type: MESSAGE.COCS_REJECT, cardId: id, reason, ...extra });
+  this.send(peerId, { type: MESSAGE.COCS_REJECT, cardId: id, reason, roundRevision: this.roundRevision, ...extra });
+  return false;
+ }
+ // A ledger-level refusal (id-reuse or a cached refusal) answers the sender only.
+ // It must never rewrite the presentation card, because that row may belong to
+ // the accepted action the reused key is colliding with.
+ cocsRejectReply(peerId, cardId, reason, extra = {}) {
+  const id = cardId === null || cardId === undefined ? `cocs-${++this.cocsSeq}` : String(cardId);
+  this.send(peerId, { type: MESSAGE.COCS_REJECT, cardId: id, reason, roundRevision: this.roundRevision, ...extra });
   return false;
  }
  // Mirror a rejected order into the authoritative orderLog so the board's
@@ -215,12 +469,11 @@ export class Room {
   if (log.length > COCS_ORDER_LOG_LIMIT) log.splice(0, log.length - COCS_ORDER_LOG_LIMIT);
  }
  order(peerId, msg, now = Date.now()) {
-  const peer = this.peers.get(peerId);
+  const opened = this.cocsBegin('order', peerId, msg, now, parseOrderMessage);
+  if (opened.refuse !== undefined) return opened.refuse;
+  if (opened.duplicate) return true;
+  const {peer, parsed} = opened;
   const actor = this.cocsActor(peer);
-  if (!peer || peer.disconnectedAt !== null || peer.spectate || !this.match || this.roundOver || !actor || actor.health <= 0) return false;
-  if (!this.cocsRate(peer, 'order', now)) return this.rejectCocs(peerId, msg?.cardId ?? null, 'rate-limit');
-  const parsed = parseOrderMessage(msg);
-  if (!parsed) return this.rejectCocs(peerId, msg?.cardId ?? null, 'malformed');
   const state = this.match.objectiveState;
   const team = actor.team === 1 ? 1 : 0;
   // The sim resolves slices, the executor lease and the command seat against
@@ -228,160 +481,209 @@ export class Room {
   // transport peer id stays on the room side (replies, rate limits, card
   // mirroring) and never enters the simulation.
   const simId = String(actor.id);
-  const record = { tick: this.cocsTick(), peerId: simId, cardId: parsed.cardId, team, verb: parsed.verb, target: parsed.target, agent: parsed.agent ?? null };
-  if (!state || state.kind !== 'cocs') return this.rejectCocs(peerId, parsed.cardId, 'no-objective', { verb: parsed.verb, target: parsed.target });
+  opened.kind = 'order';
+  opened.cardId = parsed.cardId ?? this.cocsFallbackCardId(parsed, peer);
+  opened.actorId = actor.id;
+  opened.team = team;
+  const record = { tick: this.cocsTick(), peerId: simId, cardId: opened.cardId, team, verb: parsed.verb, target: parsed.target, agent: parsed.agent ?? null };
+  if (!state || state.kind !== 'cocs') return this.cocsRejectAction(opened, 'no-objective', { verb: parsed.verb, target: parsed.target });
   const node = nodeById(state, parsed.target);
-  if (!node) { this.noteOrderReject(state, record, 'target'); return this.rejectCocs(peerId, parsed.cardId, 'target', { verb: parsed.verb, target: parsed.target }); }
+  if (!node) { this.noteOrderReject(state, record, 'target'); return this.cocsRejectAction(opened, 'target', { verb: parsed.verb, target: parsed.target }); }
   const owned = node.owner === team;
-  if (parsed.verb === 'ATTACK' && !capturableBy(state, node.id, team)) { this.noteOrderReject(state, record, 'wrong-team'); return this.rejectCocs(peerId, parsed.cardId, 'wrong-team', { verb: parsed.verb, target: parsed.target }); }
-  if (parsed.verb === 'HOLD' && !owned && !capturableBy(state, node.id, team)) { this.noteOrderReject(state, record, 'wrong-team'); return this.rejectCocs(peerId, parsed.cardId, 'wrong-team', { verb: parsed.verb, target: parsed.target }); }
-  if (parsed.verb === 'SCAN' && num(state.flux?.[team], 0) + 1e-9 < COCS_SCAN_COST) { this.noteOrderReject(state, record, 'flux'); return this.rejectCocs(peerId, parsed.cardId, 'flux', { verb: parsed.verb, target: parsed.target }); }
+  if (parsed.verb === 'ATTACK' && !capturableBy(state, node.id, team)) { this.noteOrderReject(state, record, 'wrong-team'); return this.cocsRejectAction(opened, 'wrong-team', { verb: parsed.verb, target: parsed.target }); }
+  if (parsed.verb === 'HOLD' && !owned && !capturableBy(state, node.id, team)) { this.noteOrderReject(state, record, 'wrong-team'); return this.cocsRejectAction(opened, 'wrong-team', { verb: parsed.verb, target: parsed.target }); }
+  if (parsed.verb === 'SCAN' && num(state.flux?.[team], 0) + 1e-9 < COCS_SCAN_COST) { this.noteOrderReject(state, record, 'flux'); return this.cocsRejectAction(opened, 'flux', { verb: parsed.verb, target: parsed.target }); }
   if (state.coop) {
    // The co-op gate keys slices/executor by the in-sim human actor id, not the
    // transport peer id, so pass the authoritative actor identity.
    const gate = coopOrderGate(this.match, state, { team, verb: parsed.verb, peerId: simId });
-   if (!gate.ok) { this.noteOrderReject(state, record, gate.reason ?? 'blocked'); return this.rejectCocs(peerId, parsed.cardId, gate.reason ?? 'blocked', { verb: parsed.verb, target: parsed.target }); }
+   if (!gate.ok) { this.noteOrderReject(state, record, gate.reason ?? 'blocked'); return this.cocsRejectAction(opened, gate.reason ?? 'blocked', { verb: parsed.verb, target: parsed.target }); }
    const command = coopCommandState(this.match, state);
-   if (parsed.verb === 'SCAN' && command && command.threads.used >= command.threads.cap) { this.noteOrderReject(state, record, 'no-thread'); return this.rejectCocs(peerId, parsed.cardId, 'no-thread', { verb: parsed.verb, target: parsed.target }); }
+   if (parsed.verb === 'SCAN' && command && command.threads.used >= command.threads.cap) { this.noteOrderReject(state, record, 'no-thread'); return this.cocsRejectAction(opened, 'no-thread', { verb: parsed.verb, target: parsed.target }); }
   } else if (parsed.verb === 'SCAN') {
    // PvP-1 THREADS gate (the co-op executor lease has no PvP analogue): a SCAN
    // spawns a scout that itself occupies one of the team's threads.
    const cap = num(state.threads?.[team]?.cap, 3);
-   if (cocsThreadsUsed(this.match, state, team) >= cap) { this.noteOrderReject(state, record, 'no-thread'); return this.rejectCocs(peerId, parsed.cardId, 'no-thread', { verb: parsed.verb, target: parsed.target }); }
+   if (cocsThreadsUsed(this.match, state, team) >= cap) { this.noteOrderReject(state, record, 'no-thread'); return this.cocsRejectAction(opened, 'no-thread', { verb: parsed.verb, target: parsed.target }); }
   }
   this.pendingCocs.orders.push(record);
   // The card mirror keeps the transport peer id: it is the client-facing
   // identity for the board, while the sim only ever sees `simId`.
-  this.recordCocsCard(parsed.cardId, { verb: parsed.verb, target: parsed.target, agent: parsed.agent ?? null, team, peerId: String(peerId), state: 'running', blocker: null, reason: null, ok: true });
+  this.recordCocsCard(opened.cardId, { verb: parsed.verb, target: parsed.target, agent: parsed.agent ?? null, team, actorId: actor.id, peerId: String(peerId), state: 'running', accepted: true, acceptedTick: record.tick, blocker: null, reason: null, ok: true });
+  this.recordCocsDecision(opened, 'accepted', null, {verb: parsed.verb, target: parsed.target, agent: parsed.agent ?? null});
   return true;
  }
  economy(peerId, msg, now = Date.now()) {
-  const peer = this.peers.get(peerId);
+  const opened = this.cocsBegin('economy', peerId, msg, now, parseEconomyMessage);
+  if (opened.refuse !== undefined) return opened.refuse;
+  if (opened.duplicate) return true;
+  const {peer, parsed} = opened;
   const actor = this.cocsActor(peer);
-  if (!peer || peer.disconnectedAt !== null || peer.spectate || !this.match || this.roundOver || !actor || actor.health <= 0) return false;
-  if (!this.cocsRate(peer, 'economy', now)) return this.rejectCocs(peerId, msg?.cardId ?? null, 'rate-limit');
-  const parsed = parseEconomyMessage(msg);
-  if (!parsed) return this.rejectCocs(peerId, msg?.cardId ?? null, 'malformed');
   const state = this.match.objectiveState;
-  if (!state || state.kind !== 'cocs') return this.rejectCocs(peerId, parsed.cardId, 'no-objective', { action: parsed.action });
   const team = actor.team === 1 ? 1 : 0;
   const simId = String(actor.id);
+  opened.kind = 'economy';
+  opened.cardId = parsed.cardId ?? this.cocsFallbackCardId(parsed, peer);
+  opened.actorId = actor.id;
+  opened.team = team;
+  if (!state || state.kind !== 'cocs') return this.cocsRejectAction(opened, 'no-objective', { action: parsed.action });
   // PvP-1 role board (§11.2): `spawn`/`reinforce` buys one role from the team's
   // rung allow-list under the same THREADS + FLUX gate the duty Chief uses.
   // Sinks with no PvP implementation are refused, never silently dropped.
   if (!state.coop) {
    if (parsed.action === 'opt-out-orders') {
-    this.pendingCocs.commands.push({ tick: this.cocsTick(), peerId: simId, cardId: parsed.cardId, team, action: 'opt-out-orders', value: null, actorId: actor.id });
-    this.recordCocsCard(parsed.cardId, { verb: 'OPT-OUT-ORDERS', target: null, team, actorId: actor.id, peerId: String(peerId), state: 'running', blocker: null, reason: null, ok: true });
+    this.pendingCocs.commands.push({ tick: this.cocsTick(), peerId: simId, cardId: opened.cardId, team, action: 'opt-out-orders', value: null, actorId: actor.id });
+    this.recordCocsCard(opened.cardId, { verb: 'OPT-OUT-ORDERS', target: null, team, actorId: actor.id, peerId: String(peerId), state: 'running', accepted: true, acceptedTick: this.cocsTick(), blocker: null, reason: null, ok: true });
+    this.recordCocsDecision(opened, 'accepted', null, {action: parsed.action});
     return true;
    }
-   if (parsed.action !== 'spawn' && parsed.action !== 'reinforce') return this.rejectCocs(peerId, parsed.cardId, 'no-sink', { action: parsed.action });
+   if (parsed.action !== 'spawn' && parsed.action !== 'reinforce') return this.cocsRejectAction(opened, 'no-sink', { action: parsed.action });
    const role = String(parsed.role ?? 'fighter').trim().toLowerCase();
-   if (!cocsRoleAllowedOnRung(state, role)) return this.rejectCocs(peerId, parsed.cardId, 'role', { role });
-   if (cocsThreadsUsed(this.match, state, team) >= num(state.threads?.[team]?.cap, 3)) return this.rejectCocs(peerId, parsed.cardId, 'no-thread', { role });
+   if (!cocsRoleAllowedOnRung(state, role)) return this.cocsRejectAction(opened, 'role', { role });
+   if (cocsThreadsUsed(this.match, state, team) >= num(state.threads?.[team]?.cap, 3)) return this.cocsRejectAction(opened, 'no-thread', { role });
    const cost = role === 'scout' ? COCS_SCAN_COST : num(coopRole(role)?.spawnCost, 0);
-   if (num(state.flux?.[team], 0) + 1e-9 < cost) return this.rejectCocs(peerId, parsed.cardId, 'flux', { role });
-   if (role === 'scout' && !nodeById(state, parsed.target)) return this.rejectCocs(peerId, parsed.cardId, 'target', { role });
-   this.pendingCocs.spends.push({ tick: this.cocsTick(), peerId: simId, cardId: parsed.cardId, action: parsed.action, role, target: parsed.target ?? null, team });
-   this.recordCocsCard(parsed.cardId, { verb: role === 'scout' ? 'SCAN' : 'REINFORCE', target: parsed.target ?? null, role, team, peerId: String(peerId), state: 'running', blocker: null, reason: null, ok: true });
+   if (num(state.flux?.[team], 0) + 1e-9 < cost) return this.cocsRejectAction(opened, 'flux', { role });
+   if (role === 'scout' && !nodeById(state, parsed.target)) return this.cocsRejectAction(opened, 'target', { role });
+   this.pendingCocs.spends.push({ tick: this.cocsTick(), peerId: simId, cardId: opened.cardId, action: parsed.action, role, target: parsed.target ?? null, team });
+   this.recordCocsCard(opened.cardId, { verb: role === 'scout' ? 'SCAN' : 'REINFORCE', target: parsed.target ?? null, role, team, actorId: actor.id, peerId: String(peerId), state: 'running', accepted: true, acceptedTick: this.cocsTick(), blocker: null, reason: null, ok: true });
+   this.recordCocsDecision(opened, 'accepted', null, {action: parsed.action, role, target: parsed.target ?? null});
    return true;
   }
   if (parsed.action === 'opt-out-orders') {
-   this.pendingCocs.commands.push({ tick: this.cocsTick(), peerId: simId, cardId: parsed.cardId, team, action: 'opt-out-orders', value: null, actorId: actor.id });
-   this.recordCocsCard(parsed.cardId, { verb: 'OPT-OUT-ORDERS', target: null, team, actorId: actor.id, peerId: String(peerId), state: 'running', blocker: null, reason: null, ok: true });
+   this.pendingCocs.commands.push({ tick: this.cocsTick(), peerId: simId, cardId: opened.cardId, team, action: 'opt-out-orders', value: null, actorId: actor.id });
+   this.recordCocsCard(opened.cardId, { verb: 'OPT-OUT-ORDERS', target: null, team, actorId: actor.id, peerId: String(peerId), state: 'running', accepted: true, acceptedTick: this.cocsTick(), blocker: null, reason: null, ok: true });
+   this.recordCocsDecision(opened, 'accepted', null, {action: parsed.action});
    return true;
   }
   const verb = COCS_SINK_FOR[parsed.action];
-  if (!verb) return this.rejectCocs(peerId, parsed.cardId, 'unknown-action', { action: parsed.action });
-  if (!intermissionOpen(state.coop)) return this.rejectCocs(peerId, parsed.cardId, 'window-closed', { verb });
+  if (!verb) return this.cocsRejectAction(opened, 'unknown-action', { action: parsed.action });
+  if (!intermissionOpen(state.coop)) return this.cocsRejectAction(opened, 'window-closed', { verb });
   const sink = coopSink(verb);
-  if (!sink) return this.rejectCocs(peerId, parsed.cardId, 'unknown-sink', { verb });
-  if (num(state.flux?.[0], 0) + 1e-9 < sink.cost) return this.rejectCocs(peerId, parsed.cardId, 'flux', { verb });
+  if (!sink) return this.cocsRejectAction(opened, 'unknown-sink', { verb });
+  if (num(state.flux?.[0], 0) + 1e-9 < sink.cost) return this.cocsRejectAction(opened, 'flux', { verb });
   const command = coopCommandState(this.match, state);
-  if (COOP_BIG_SINKS.includes(verb) && command && command.threads.used >= command.threads.cap) return this.rejectCocs(peerId, parsed.cardId, 'no-thread', { verb });
+  if (COOP_BIG_SINKS.includes(verb) && command && command.threads.used >= command.threads.cap) return this.cocsRejectAction(opened, 'no-thread', { verb });
   const gate = coopSpendGate(this.match, state, { verb, peerId: simId });
-  if (!gate.ok) return this.rejectCocs(peerId, parsed.cardId, gate.reason ?? 'blocked', { verb });
+  if (!gate.ok) return this.cocsRejectAction(opened, gate.reason ?? 'blocked', { verb });
   if (sink.target === 'node') {
    const node = nodeById(state, parsed.target);
-   if (!node || node.owner !== 0 || !['front', 'economy', 'relay'].includes(node.archetype)) return this.rejectCocs(peerId, parsed.cardId, 'target', { verb });
+   if (!node || node.owner !== 0 || !['front', 'economy', 'relay'].includes(node.archetype)) return this.cocsRejectAction(opened, 'target', { verb });
   }
-  const record = { tick: this.cocsTick(), peerId: simId, cardId: parsed.cardId, verb, target: parsed.target ?? null, role: parsed.role ?? null };
+  const record = { tick: this.cocsTick(), peerId: simId, cardId: opened.cardId, verb, target: parsed.target ?? null, role: parsed.role ?? null };
   this.pendingCocs.spends.push(record);
-  this.recordCocsCard(parsed.cardId, { verb, target: parsed.target ?? null, role: parsed.role ?? null, team, peerId: String(peerId), state: 'running', blocker: null, reason: null, ok: true });
+  this.recordCocsCard(opened.cardId, { verb, target: parsed.target ?? null, role: parsed.role ?? null, team, actorId: actor.id, peerId: String(peerId), state: 'running', accepted: true, acceptedTick: record.tick, blocker: null, reason: null, ok: true });
+  this.recordCocsDecision(opened, 'accepted', null, {action: parsed.action, verb, target: parsed.target ?? null, role: parsed.role ?? null});
   return true;
  }
  terminal(peerId, msg, now = Date.now()) {
-  const peer = this.peers.get(peerId);
+  const opened = this.cocsBegin('terminal', peerId, msg, now, parseTerminalMessage);
+  if (opened.refuse !== undefined) return opened.refuse;
+  if (opened.duplicate) return true;
+  const {peer, parsed} = opened;
   const actor = this.cocsActor(peer);
-  if (!peer || peer.disconnectedAt !== null || peer.spectate || !this.match || this.roundOver || !actor || actor.health <= 0) return false;
-  if (!this.cocsRate(peer, 'terminal', now)) return this.rejectCocs(peerId, msg?.cardId ?? null, 'rate-limit');
-  const parsed = parseTerminalMessage(msg);
-  if (!parsed) return this.rejectCocs(peerId, msg?.cardId ?? null, 'malformed');
   const state = this.match.objectiveState;
+  opened.kind = 'terminal';
+  opened.cardId = parsed.cardId ?? this.cocsFallbackCardId(parsed, peer);
+  opened.actorId = actor.id;
+  opened.action = parsed.action;
+  opened.terminalId = parsed.terminalId;
   // PvPvE `cocs` has no terminals, but it does have the §6A traversal device
   // layer (cut/lock/repair on neutral devices). `cocs-coop` has both. Only
   // refuse when neither exists.
-  if (!state || state.kind !== 'cocs' || (!state.terminals && !state.traversal?.devices)) return this.rejectCocs(peerId, parsed.cardId, 'no-terminals', { action: parsed.action });
+  if (!state || state.kind !== 'cocs' || (!state.terminals && !state.traversal?.devices)) return this.cocsRejectAction(opened, 'no-terminals', { action: parsed.action });
   const actorId = parsed.actorId ?? actor.id;
-  if (actorId !== actor.id) return this.rejectCocs(peerId, parsed.cardId, 'wrong-actor', { action: parsed.action });
+  if (actorId !== actor.id) return this.cocsRejectAction(opened, 'wrong-actor', { action: parsed.action });
   const terminal = state.terminals?.terminals?.[parsed.terminalId] ?? null;
   const device = state.traversal?.devices?.[parsed.terminalId] ?? null;
-  if (!terminal && !device) return this.rejectCocs(peerId, parsed.cardId, 'missing', { action: parsed.action });
+  if (!terminal && !device) return this.cocsRejectAction(opened, 'missing', { action: parsed.action });
   const team = actor.team === 1 ? 1 : 0;
   if (terminal) {
+   // The Board's SABOTAGE card arrives as the protocol `cut`; the sim's terminal
+   // vocabulary calls the same channel SABOTAGE. Refuse an action aimed at the
+   // wrong terminal kind instead of enqueueing a silent no-op.
+   const requiredKind = {hack: 'HACK', deploy: 'DEPLOY', cut: 'SABOTAGE', 'vault-store': 'VAULT', 'vault-pull': 'VAULT'}[parsed.action] ?? null;
+   if (parsed.action === 'depot-capture' || (requiredKind && terminal.kind !== requiredKind)) return this.cocsRejectAction(opened, 'wrong-terminal', { action: parsed.action, terminalId: parsed.terminalId });
    const kind = TERMINAL_KINDS[terminal.kind];
-   if (parsed.action === 'deploy' && terminal.owner !== team) return this.rejectCocs(peerId, parsed.cardId, 'not-owned', { action: parsed.action });
-   if ((parsed.action === 'hack' || parsed.action === 'cut') && terminal.state !== 'live') return this.rejectCocs(peerId, parsed.cardId, 'terminal-state', { action: parsed.action });
-   if (Math.hypot(num(actor.x, 0) - num(terminal.x, 0), num(actor.z, 0) - num(terminal.z, 0)) > num(kind?.reach, 6)) return this.rejectCocs(peerId, parsed.cardId, 'range', { action: parsed.action });
-   if (parsed.action === 'vault-pull' && num(state.flux?.[team], 0) + 1e-9 < num(TERMINAL_KINDS.VAULT?.pullCost, 8)) return this.rejectCocs(peerId, parsed.cardId, 'flux', { action: parsed.action });
+   if (parsed.action === 'deploy' && terminal.owner !== team) return this.cocsRejectAction(opened, 'not-owned', { action: parsed.action });
+   if ((parsed.action === 'hack' || parsed.action === 'cut') && terminal.state !== 'live') return this.cocsRejectAction(opened, 'terminal-state', { action: parsed.action });
+   if (Math.hypot(num(actor.x, 0) - num(terminal.x, 0), num(actor.z, 0) - num(terminal.z, 0)) > num(kind?.reach, 6)) return this.cocsRejectAction(opened, 'range', { action: parsed.action });
+   if (parsed.action === 'vault-pull' && num(state.flux?.[team], 0) + 1e-9 < num(TERMINAL_KINDS.VAULT?.pullCost, 8)) return this.cocsRejectAction(opened, 'flux', { action: parsed.action });
+   opened.baseline = this.cocsTerminalBaseline(state, parsed.terminalId);
   } else if (device) {
    // Traversal devices are neutral: validate the action belongs to the device
    // state and that the actor is within the §6A interact reach.
    const reach = 6;
-   if (Math.hypot(num(actor.x, 0) - num(device.from?.x, 0), num(actor.z, 0) - num(device.from?.z, 0)) > reach + 1e-6) return this.rejectCocs(peerId, parsed.cardId, 'range', { action: parsed.action });
-   if (parsed.action === 'repair' ? device.state === 'live' : device.state !== 'live') return this.rejectCocs(peerId, parsed.cardId, 'device-state', { action: parsed.action });
+   if (!['cut', 'lock', 'repair', 'depot-capture'].includes(parsed.action)) return this.cocsRejectAction(opened, 'wrong-device-action', { action: parsed.action });
+   if (Math.hypot(num(actor.x, 0) - num(device.from?.x, 0), num(actor.z, 0) - num(device.from?.z, 0)) > reach + 1e-6) return this.cocsRejectAction(opened, 'range', { action: parsed.action });
+   if (parsed.action === 'repair' ? device.state === 'live' : device.state !== 'live') return this.cocsRejectAction(opened, 'device-state', { action: parsed.action });
+   opened.baseline = this.cocsTerminalBaseline(state, parsed.terminalId);
   }
-  this.pendingCocs.terminals.push({ tick: this.cocsTick(), peerId: String(actor.id), cardId: parsed.cardId, terminalId: parsed.terminalId, action: parsed.action, actorId: actor.id });
-  this.recordCocsCard(parsed.cardId, { verb: parsed.action.toUpperCase(), target: parsed.terminalId, team, peerId: String(peerId), state: 'running', blocker: null, reason: null, ok: true });
+  this.pendingCocs.terminals.push({ tick: this.cocsTick(), peerId: String(actor.id), cardId: opened.cardId, terminalId: parsed.terminalId, action: parsed.action, actorId: actor.id });
+  this.recordCocsCard(opened.cardId, { verb: parsed.action.toUpperCase(), target: parsed.terminalId, team, actorId: actor.id, peerId: String(peerId), state: 'running', accepted: true, acceptedTick: this.cocsTick(), blocker: null, reason: null, ok: true });
+  this.recordCocsDecision(opened, 'accepted', null, {action: parsed.action, terminalId: parsed.terminalId});
   return true;
  }
  command(peerId, msg, now = Date.now()) {
-  const peer = this.peers.get(peerId);
+  const opened = this.cocsBegin('command', peerId, msg, now, parseCommandMessage);
+  if (opened.refuse !== undefined) return opened.refuse;
+  if (opened.duplicate) return true;
+  const {peer, parsed} = opened;
   const actor = this.cocsActor(peer);
-  if (!peer || peer.disconnectedAt !== null || peer.spectate || !this.match || this.roundOver || !actor) return false;
-  if (!this.cocsRate(peer, 'command', now)) return this.rejectCocs(peerId, msg?.cardId ?? null, 'rate-limit');
-  const parsed = parseCommandMessage(msg);
-  if (!parsed) return this.rejectCocs(peerId, msg?.cardId ?? null, 'malformed');
   const state = this.match.objectiveState;
+  opened.kind = 'command';
+  opened.cardId = parsed.cardId ?? this.cocsFallbackCardId(parsed, peer);
+  opened.actorId = actor.id;
+  opened.team = actor.team === 1 ? 1 : 0;
+  opened.action = parsed.action;
+  opened.value = parsed.value;
   // PvP-1: `cocs` runs a per-team command seat (§5.7); `cocs-coop` keeps its
   // own `state.coop` command surface. Both are team-scoped: a peer can only
   // touch the seat for its own actor's team.
-  if (!state || state.kind !== 'cocs') return this.rejectCocs(peerId, parsed.cardId, 'no-command', { action: parsed.action });
+  if (!state || state.kind !== 'cocs') return this.cocsRejectAction(opened, 'no-command', { action: parsed.action });
   const team = actor.team === 1 ? 1 : 0;
   // The seat itself is an in-sim actor id (the sim writes and reads it), so the
   // room validates `release`/buyer-commander state on the same identity.
   const simId = String(actor.id);
   const seat = state.coop ? state.coop.commandSeat?.[team] ?? null : state.command?.seat?.[team] ?? null;
-  if (parsed.action === 'release' && seat !== simId) return this.rejectCocs(peerId, parsed.cardId, 'not-commander', { action: parsed.action });
-  this.pendingCocs.commands.push({ tick: this.cocsTick(), peerId: simId, cardId: parsed.cardId, team, action: parsed.action, value: parsed.value, actorId: actor.id });
-  this.recordCocsCard(parsed.cardId, { verb: parsed.action.toUpperCase(), target: null, value: parsed.value, team, actorId: actor.id, peerId: String(peerId), state: 'running', blocker: null, reason: null, ok: true });
+  if (parsed.action === 'release' && seat !== simId) return this.cocsRejectAction(opened, 'not-commander', { action: parsed.action });
+  this.pendingCocs.commands.push({ tick: this.cocsTick(), peerId: simId, cardId: opened.cardId, team, action: parsed.action, value: parsed.value, actorId: actor.id });
+  this.recordCocsCard(opened.cardId, { verb: parsed.action.toUpperCase(), target: null, value: parsed.value, team, actorId: actor.id, peerId: String(peerId), state: 'running', accepted: true, acceptedTick: this.cocsTick(), blocker: null, reason: null, ok: true });
+  this.recordCocsDecision(opened, 'accepted', null, {action: parsed.action, value: parsed.value});
   return true;
  }
  buy(peerId, msg, now = Date.now()) {
-  const peer = this.peers.get(peerId);
+  const opened = this.cocsBegin('buy', peerId, msg, now, parseBuyMessage);
+  if (opened.refuse !== undefined) return opened.refuse;
+  if (opened.duplicate) return true;
+  const {peer, parsed} = opened;
   const actor = this.cocsActor(peer);
-  if (!peer || peer.disconnectedAt !== null || peer.spectate || !this.match || this.roundOver || !actor || actor.health <= 0) return false;
-  if (!this.cocsRate(peer, 'buy', now)) return this.rejectCocs(peerId, msg?.cardId ?? null, 'rate-limit');
-  const parsed = parseBuyMessage(msg);
-  if (!parsed) return this.rejectCocs(peerId, msg?.cardId ?? null, 'malformed');
   const state = this.match.objectiveState;
-  if (!state || state.kind !== 'cocs') return this.rejectCocs(peerId, parsed.cardId, 'no-objective', { itemId: parsed.itemId });
+  opened.kind = 'buy';
+  opened.cardId = parsed.cardId ?? this.cocsFallbackCardId(parsed, peer);
+  opened.actorId = actor.id;
+  if (!state || state.kind !== 'cocs') return this.cocsRejectAction(opened, 'no-objective', { itemId: parsed.itemId });
   const actorId = parsed.actorId ?? actor.id;
-  if (actorId !== actor.id) return this.rejectCocs(peerId, parsed.cardId, 'wrong-actor', { itemId: parsed.itemId });
+  if (actorId !== actor.id) return this.cocsRejectAction(opened, 'wrong-actor', { itemId: parsed.itemId });
   const item = reqItem(parsed.itemId);
-  if (!item) return this.rejectCocs(peerId, parsed.cardId, 'unknown-item', { itemId: parsed.itemId });
-  if (item.launch !== true) return this.rejectCocs(peerId, parsed.cardId, 'not-launched', { itemId: parsed.itemId });
+  if (!item) return this.cocsRejectAction(opened, 'unknown-item', { itemId: parsed.itemId });
   const team = actor.team === 1 ? 1 : 0;
+  // WP1.3 launch sets. `launch` items run in both wire modes; `coopLaunch`
+  // items (the depot Puma) only in OPERATIONS. An item launched in the other
+  // mode is `wrong-mode`; a catalogue row with no shipped effect is
+  // `not-launched` and can never be enqueued or debit REQ.
+  const mode = state.coop ? 'cocs-coop' : 'cocs';
+  if (!reqItemSupported(item.id, mode)) {
+   const modes = reqItemModes(item.id);
+   return this.cocsRejectAction(opened, modes.length ? 'wrong-mode' : 'not-launched', { itemId: parsed.itemId });
+  }
+  // The OPERATIONS Puma's spend point is a friendly depot (§6A.7), so refuse an
+  // unusable depot before queueing. `coopBuyAction` re-checks at apply time and
+  // refunds; a refusal here is cached by round identity and never debits.
+  if (item.id === 'puma') {
+   const depot = state.traversal?.depots?.[String(parsed.depotId ?? '')] ?? null;
+   if (!depot || depot.owner !== team) return this.cocsRejectAction(opened, 'depot', { itemId: parsed.itemId, depotId: parsed.depotId ?? null });
+   if (!depotPurchaseState(this.match, depot).available) return this.cocsRejectAction(opened, 'vehicle', { itemId: parsed.itemId, depotId: parsed.depotId ?? null });
+  }
   const simId = String(actor.id);
   const relayOwned = (state.nodes ?? []).some(node => node && node.archetype === 'relay' && node.owner === team);
   // Commander-only items read the PvP command seat in PvP and the co-op seat in
@@ -393,9 +695,13 @@ export class Room {
    activeBuffId: typeof actor.reqBuff === 'string' ? actor.reqBuff : null,
    relayOwned,
   });
-  if (!result.ok) return this.rejectCocs(peerId, parsed.cardId, result.reason ?? 'purchase', { itemId: parsed.itemId });
-  this.pendingCocs.buys.push({ tick: this.cocsTick(), peerId: simId, cardId: parsed.cardId, itemId: parsed.itemId, actorId: actor.id, depotId: parsed.depotId, targetCardId: parsed.targetCardId });
-  this.recordCocsCard(parsed.cardId, { verb: 'BUY', target: parsed.itemId, team, peerId: String(peerId), state: 'running', blocker: null, reason: null, ok: true });
+  if (!result.ok) return this.cocsRejectAction(opened, result.reason ?? 'purchase', { itemId: parsed.itemId });
+  opened.team = team;
+  opened.itemId = parsed.itemId;
+  opened.baseline = {reqSpent: num(actor.reqSpent, 0), req: num(actor.req, 0)};
+  this.pendingCocs.buys.push({ tick: this.cocsTick(), peerId: simId, cardId: opened.cardId, itemId: parsed.itemId, actorId: actor.id, depotId: parsed.depotId, targetCardId: parsed.targetCardId });
+  this.recordCocsCard(opened.cardId, { verb: 'BUY', target: parsed.itemId, itemId: parsed.itemId, team, actorId: actor.id, peerId: String(peerId), state: 'running', accepted: true, acceptedTick: this.cocsTick(), blocker: null, reason: null, ok: true });
+  this.recordCocsDecision(opened, 'accepted', null, {itemId: parsed.itemId, depotId: parsed.depotId ?? null, targetCardId: parsed.targetCardId ?? null});
   return true;
  }
  effectiveSnapshotHz() {
@@ -449,7 +755,10 @@ export class Room {
   // The card board is a room-level projection of the sim's order/blocker state.
   // Attaching it to the same `cocs` subtree means a reconnect full snapshot and
   // every delta carry it for free (id-keyed, so `snapshotDelta` patches it).
-  if (state.cocs && this.cocsCards.size) state.cocs = { ...state.cocs, cards: this.cocsCardList() };
+  // `roundRevision` rides the same subtree (additive v3 field): a same-revision
+  // reconnect hydrates the cards/outcomes it already had, and a new revision
+  // tells the client to clear its optimistic strip.
+  if (state.cocs) state.cocs = { ...state.cocs, roundRevision: this.roundRevision, ...(this.cocsCards.size ? { cards: this.cocsCardList() } : {}) };
   return state;
  }
  // The view a peer's snapshot is filtered by: its actor's team (0/1) or `null`
@@ -518,7 +827,7 @@ export class Room {
  }
  lobby() {
   return { type: 'lobby', roomId: this.id, name: this.name, hostId: this.hostId, started: this.started,
-   config: this.config ? { ...this.config } : null, mapId: this.mapId, lifecycle: this.lifecycle(), cocs: this.cocsLobby(),
+   config: this.config ? { ...this.config } : null, mapId: this.mapId, lifecycle: this.lifecycle(), cocs: this.cocsLobby(), roundRevision: this.roundRevision,
    players: [...this.peers.values()].map(p => ({ peerId: p.id, name: p.name, character: p.character, harness: p.harness, actorId: p.actorId, ready: this.ready.has(p.id) || p.ready, connected: p.disconnectedAt === null, spectate: p.spectate === true, voiceSession: p.voiceSession })) };
  }
  // Mark a player ready for the warmup gate. Ready state is keyed by the stable
@@ -610,7 +919,7 @@ export class Room {
     this.send(peerId, { type: 'welcome', v: PROTOCOL_VERSION, peerId, roomId: this.id, host: peerId === this.hostId, reconnected: true, token: existing.token, spectate: existing.spectate === true, profile: this.progressProfile(existing), progressToken: existing.playerToken ?? null });
     this.broadcast(this.lobby());
     if (this.started && !this.roundOver && this.match) {
-     this.send(peerId, { type: 'start', config: { ...this.match.config }, mapId: this.match.arena.id });
+     this.send(peerId, { type: 'start', config: { ...this.match.config }, mapId: this.match.arena.id, roundRevision: this.roundRevision });
      const state = this.wireStateFor(this.peerCocsView(existing)), seq = ++this.seq;
      existing.snapshotBase = { seq, state };
      this.send(peerId, { type: 'snapshot', seq, acks: { [existing.actorId]: existing.appliedSeq }, state });
@@ -640,7 +949,7 @@ export class Room {
   this.broadcast(this.lobby());
   if (requestedPlayer && active) this.send(peerId, { type: 'error', message: 'Match in progress — you joined as a spectator.' });
   if (isSpectator && this.started && !this.roundOver && this.match) {
-   this.send(peerId, { type: 'start', config: { ...this.match.config }, mapId: this.match.arena.id });
+   this.send(peerId, { type: 'start', config: { ...this.match.config }, mapId: this.match.arena.id, roundRevision: this.roundRevision });
     const state = this.wireStateFor(this.peerCocsView(this.peers.get(peerId))), seq = ++this.seq;
     peer.snapshotBase = { seq, state };
     this.send(peerId, { type: 'snapshot', seq, acks: { [this.peers.get(peerId)?.actorId ?? -1]: 0 }, state });
@@ -714,13 +1023,22 @@ export class Room {
   this.pendingLoadouts.clear();
   this.tickAcc = 0;
   this.broadcastAt = 0;
+  // A real new round mints a fresh identity and clears every per-round COCS
+  // queue, card and dedupe record. A reconnect never reaches this path.
+  this.roundRevision += 1;
+  this.pendingCocs = { orders: [], spends: [], terminals: [], commands: [], buys: [] };
+  this.cocsCards = new Map();
+  this.cocsLedger = new Map();
+  this.cocsInFlight = new Set();
+  this.cocsSeq = 0;
+  for (const p of this.peers.values()) p.cocsRate = null;
   // A new match invalidates every delta chain: the first post-start frame is a
   // full snapshot and each peer's (per-view) base is reset.
   this.lastSnapshot = null;
   this.lastViewSnapshots.clear();
   for (const p of this.peers.values()) p.snapshotBase = null;
   this.broadcast(this.lobby());
-  this.broadcast({ type: 'start', config: { ...this.config }, mapId: this.mapId });
+  this.broadcast({ type: 'start', config: { ...this.config }, mapId: this.mapId, roundRevision: this.roundRevision });
   return true;
  }
  input(peerId, input) {
@@ -955,10 +1273,10 @@ export class Room {
       }
       : null;
      this.match.step(RULES.dt, cocs ? { inputs, cocs } : { inputs });
-     // Settle the cards this step queued from the sim's outcome logs (orders,
-     // PvP role spends, OPERATIONS sinks) plus the command cards, whose
-     // seat/vote/route state is the authoritative outcome.
-     if (cocs) this.settleCocsCards(this.match.objectiveState);
+     // Settle accepted cards from the sim evidence on every step, not only when
+     // a new action was queued: an accepted HOLD/ATTACK must stay `running`
+     // until its task completes/expires and a later one-shot must reach `done`.
+     this.settleCocsCards(this.match.objectiveState);
     for (const p of this.peers.values()) if (p.actorId !== null && p.latest) p.appliedSeq = p.latestSeq;
    this.tickAcc -= RULES.dt;
    steps++;
@@ -1007,6 +1325,9 @@ export class Room {
    this.roundOver = true;
    this.phase = 'results';
    this.lifecycleRevision++;
+   // A settled match expires every still-accepted card so the final board never
+   // shows a permanent in-flight row.
+   this.settleCocsCards(this.match.objectiveState, {ended: true});
    const result = this.match.snapshot();
    this.lastResult = result;
    const mode = this.match.config.mode;

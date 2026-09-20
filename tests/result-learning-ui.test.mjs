@@ -89,7 +89,7 @@ test('the results modal leads with outcome and contribution, then offers the nex
  assert.match(html, /YOUR TEAM OP<\/dt><dd>14/);
  assert.match(html, /ENEMY OP<\/dt><dd>22/);
  assert.match(html, /NODES OWNED<\/dt><dd>1 \/ 3/);
- assert.match(html, /ORDERS COMPLETED<\/dt><dd>5 \/ 9/);
+ assert.match(html, /MATCH ORDERS COMPLETED<\/dt><dd>5 \/ 9/);
  // A support player is credited without a high K/D and never sees a frags column.
  assert.match(html, /3 ordered captures/);
  assert.doesNotMatch(html, /FRAGS/);
@@ -110,6 +110,37 @@ test('repeated results renders are identical and never double-count the award', 
  const second = render(ui);
  assert.equal(second, first, 'a repeated UI visit renders the same summary, not doubled credit');
  assert.equal((first.match(new RegExp(`\\+${reward.gained} XP`, 'g')) || []).length, (second.match(new RegExp(`\\+${reward.gained} XP`, 'g')) || []).length);
+});
+
+test('a spectator render reports match totals only and never actor 0 or a stale reward', () => {
+ const {hud, reward} = latticeFixture();
+ // Network spectator: no seat, actorId null, and a stale reward left over from
+ // a prior screen (the page clears it at round start; the model ignores it too).
+ const spectatorHud = {...hud, actorId: null, net: true, spectate: true};
+ const ui = baseUi({
+  hud: spectatorHud, reward, matchSummary: null,
+  net: {connected: true, isHost: false},
+  history: {entries: [{result: 'loss'}]},
+ });
+ const html = render(ui);
+ assert.doesNotMatch(html, /YOUR CONTRIBUTION/, 'no personal contribution group is exposed');
+ assert.doesNotMatch(html, /ORDERS CONTRIBUTED/, 'actor 0 personal rows are never attributed to the viewer');
+ assert.doesNotMatch(html, /NODE HOLD<\/dt><dd>74\.5s/, 'actor 0 hold time is not presented as the viewer record');
+ assert.doesNotMatch(html, /XP BREAKDOWN/, 'a stale reward is not rendered as the spectator prize');
+ assert.doesNotMatch(html, /\bYou (captured|completed|held|dealt|spent|eliminated|survived|stayed)/);
+ assert.match(html, /MATCH TOTALS/, 'public records are labelled as match totals');
+ assert.match(html, /RED OP<\/dt><dd>14/);
+ assert.match(html, /BLUE OP<\/dt><dd>22/);
+ assert.match(html, /MATCH ORDERS COMPLETED<\/dt><dd>5 \/ 9/);
+ assert.match(html, /BLUE took the lattice/);
+});
+
+test('a local result without an actorId still resolves the actor 0 seat', () => {
+ const {hud, reward, summary} = latticeFixture();
+ const ui = baseUi({hud: {...hud, actorId: undefined}, reward, matchSummary: summary, history: {entries: [{result: 'loss'}]}});
+ const html = render(ui);
+ assert.match(html, /YOUR CONTRIBUTION/, 'the seated local player keeps the personal summary');
+ assert.match(html, /ORDERS CONTRIBUTED<\/dt><dd>3/);
 });
 
 test('a failed campaign renders a real saved-checkpoint next action', () => {
@@ -166,7 +197,24 @@ test('the practice action leaves a rated queue before it starts a local match', 
  assert.ok(practice >= 0 && leave > practice && start > leave, 'cancelQueue runs before quickStart for practice');
  const checkpoint = src.indexOf("case 'resume-checkpoint':");
  const retryHorde = src.indexOf("case 'retry-horde':");
- const campaignStart = src.indexOf("startSinglePlayer?.('campaign')", checkpoint);
+ const campaignStart = src.indexOf("startSinglePlayer?.('campaign',entry.missionId)", checkpoint);
  const hordeStart = src.indexOf("startSinglePlayer?.('horde')", retryHorde);
- assert.ok(campaignStart > checkpoint && hordeStart > retryHorde, 'solo actions resume stored progress instead of a fresh local launch');
+ assert.ok(campaignStart > checkpoint && hordeStart > retryHorde, 'solo actions resume stored progress for the action target instead of a fresh local launch');
+});
+
+test('every round start clears the previous reward through one shared reset', async () => {
+ const page = await readFileSync(new URL('../app/page.tsx', import.meta.url), 'utf8');
+ assert.ok(page.includes('const resetRoundReward=()=>setReward(null);'), 'the shared reset is defined once');
+ const calls = [...page.matchAll(/resetRoundReward\(\)/g)].length;
+ assert.equal(calls, 3, 'network start, local match start and local spectate start all call it');
+ const body = (from, to) => {
+  const start = page.indexOf(from);
+  assert.ok(start >= 0, `page declares ${from}`);
+  const end = page.indexOf(to, start);
+  assert.ok(end > start, `page declares ${to} after ${from}`);
+  return page.slice(start, end);
+ };
+ assert.ok(body('n.onStart=()=>{', 'n.onResults=').includes('resetRoundReward()'), 'a network round start clears the stale award for players and spectators');
+ assert.ok(body('const startSpectate=()=>{', 'const start=(options').includes('resetRoundReward()'), 'a local spectate round start clears the stale award');
+ assert.ok(body('const start=(options', 'const startSinglePlayer=').includes('resetRoundReward()'), 'a local match start clears the stale award');
 });

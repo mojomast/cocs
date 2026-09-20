@@ -40,7 +40,10 @@ test('LATTICE contribution separates personal credit from team totals without a 
  assert.equal(team['team-op'].value, '14');
  assert.equal(team['enemy-op'].value, '22');
  assert.equal(team.nodes.value, '1 / 3');
- assert.equal(team['orders-team'].value, '5 / 9');
+ assert.equal(team['orders-match'].value, '5 / 9');
+ assert.equal(team['orders-match'].label, 'MATCH ORDERS COMPLETED');
+ assert.match(team['orders-match'].hint, /both teams/);
+ assert.equal(summary.team.some(row => row.id === 'orders-team'), false, 'no row implies the global tally is team-scoped');
  assert.equal(team.flux.raw, 120);
  assert.match(summary.headline, /3 ordered captures/, 'a support player is credited before K/D');
  assert.match(summary.endReason, /dominance|took the lattice/i, 'the terminal reason comes from the authoritative result summary');
@@ -250,6 +253,41 @@ test('repeated learning-summary reads are identical and never mutate the profile
  assert.deepEqual(second, first, 'two renders produce identical data');
  assert.equal(JSON.stringify(award.profile), profileBefore, 'the career profile is untouched');
  assert.equal(JSON.stringify(reward), rewardBefore, 'the reward payload is untouched');
+});
+
+test('a spectator summary is actor-neutral: match totals only, no contribution, no reward', () => {
+ const hud = latticeHud();
+ const staleReward = {gained: 999, level: 9, progress: 0.5, toNext: 100, achievementXp: 60};
+ const summary = matchLearningSummary({hud, actor: null, viewer: null, mode: 'cocs', reward: staleReward});
+ assert.equal(summary.viewer, 'spectator');
+ assert.equal(summary.contribution.viewer, 'spectator');
+ assert.equal(summary.contribution.outcome, null, 'no personal win/loss is claimed');
+ assert.deepEqual(summary.contribution.personal, [], 'no personal rows exist for a spectator');
+ assert.deepEqual(summary.contribution.saved, [], 'no personal saved progress is shown');
+ assert.equal(summary.contribution.teamLabel, 'MATCH TOTALS');
+ assert.equal(summary.xp.available, false, 'a stale reward never becomes the spectator prize');
+ assert.equal(summary.xp.total, 0);
+ assert.equal(summary.xp.categories.length, 0);
+ // The public totals still come from the frozen snapshot, not from actor 0.
+ const team = Object.fromEntries(summary.contribution.team.map(row => [row.id, row]));
+ assert.equal(team['team-0-op'].value, '14');
+ assert.equal(team['team-1-op'].value, '22');
+ assert.equal(team['orders-match'].value, '5 / 9');
+ assert.equal(team['nodes'].value, '1 / 2');
+ const text = `${summary.contribution.headline} ${summary.contribution.endReason}`;
+ assert.doesNotMatch(text, /\bYou\b|YOUR|your/, 'spectator copy never addresses the viewer personally');
+ assert.doesNotMatch(text, /No objective credit this round/, 'the player fallback headline is not reused');
+});
+
+test('an actor record is hidden from a viewer that is spectating it', () => {
+ const hud = latticeHud();
+ const spectating = matchLearningSummary({hud, actor: hud.actors[0], viewer: null, mode: 'cocs'});
+ assert.equal(spectating.viewer, 'spectator');
+ assert.deepEqual(spectating.contribution.personal, []);
+ const seated = matchLearningSummary({hud, actor: hud.actors[0], viewer: hud.actors[0], mode: 'cocs'});
+ assert.equal(seated.viewer, 'player');
+ assert.equal(seated.contribution.personal.find(row => row.id === 'orders').value, '3');
+ assert.match(seated.contribution.headline, /You completed 3 ordered captures/);
 });
 
 test('challenge suggestion picks one attainable objective this session advanced', () => {

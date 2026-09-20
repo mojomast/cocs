@@ -21,8 +21,11 @@ register('./tsx-loader.mjs', import.meta.url);
 // fails) keeps the SSR import working without touching app code.
 register(`data:text/javascript,${encodeURIComponent(`export async function resolve(specifier,context,nextResolve){try{return await nextResolve(specifier,context);}catch(error){if(!specifier.startsWith('.'))throw error;for(const ext of ['.tsx','.ts']){try{return await nextResolve(specifier+ext,context);}catch{}}throw error;}}`)}`);
 const {SpendWindowHud} = await import('../app/ui/screens/SpendWindowHud.tsx');
-const {CommandBoardHud} = await import('../app/ui/screens/CommandBoardHud.tsx');
+const {CommandBoardHud,ReqStore} = await import('../app/ui/screens/CommandBoardHud.tsx');
 const {RespawnOverlay} = await import('../app/ui/screens/RespawnOverlay.tsx');
+const {reqPurchaseOptions} = await import('../game/cocs-economy.mjs');
+const {latticeBriefing} = await import('../game/lattice-guide.mjs');
+const {trainingControls} = await import('../game/lattice-training.mjs');
 
 const root = new URL('../', import.meta.url);
 const read = path => readFile(new URL(path, root), 'utf8');
@@ -93,7 +96,7 @@ test('spend window SSR: sinks show cost, effect and affordability in words', () 
 });
 
 test('command board SSR: every interactive affordance is in the markup', () => {
-  const html = render(CommandBoardHud, {command: {boardView: boardView()}, open: true, collapsed: false, pinned: false, activeId: 'card-1', reducedMotion: false, cursorKey: 'ALT', onSelect: () => {}, onActivate: () => {}, onClose: () => {}, onTogglePin: () => {}});
+  const html = render(CommandBoardHud, {command: {boardView: boardView()}, open: true, collapsed: false, pinned: false, activeId: 'card-1', reducedMotion: false, commandKey: 'Y', commandShortcut: 'Y', onSelect: () => {}, onActivate: () => {}, onClose: () => {}, onTogglePin: () => {}});
   assert.match(html, /role="listbox"/, 'keyboard listbox stays intact');
   assert.match(html, /role="option"/, 'rows are options');
   assert.match(html, /aria-selected="true"/, 'the active row is exposed');
@@ -101,21 +104,30 @@ test('command board SSR: every interactive affordance is in the markup', () => {
   assert.match(html, /Unpin command board|Pin the command board open/, 'pin is labelled');
   assert.match(html, /RETRY/, 'blocked card actions are always rendered (never hover-only)');
   assert.match(html, /CHECK/);
-  assert.match(html, /CLICK TO FIGHT/, 'the board says how to return to combat');
+  assert.match(html, /aria-keyshortcuts="Y Escape Enter Space ArrowUp ArrowDown ArrowLeft ArrowRight Home End"/, 'the advertised shortcut is the bound command key');
+  assert.match(html, /COMMAND <kbd>Y<\/kbd> \/ <kbd>ESC<\/kbd> \/ <b>× CLOSE<\/b> RETURNS TO COMBAT/, 'the footer names Command, Escape and CLOSE as the exits');
+  assert.doesNotMatch(html, /CLICK TO FIGHT|CLICK THE ARENA/, 'the board never promises a cursor-key or arena-click exit');
   assert.match(html, /COLLAPSE|\+\d+ MORE|aria-expanded/, 'expand/collapse affordance stays available');
-  assert.match(html, /Mouse input is active; close the board to return to combat./, 'aria label explains pointer behaviour');
+  assert.match(html, /Mouse input is active\. Press Y or Escape, or use CLOSE, to return to combat\./, 'aria label explains pointer behaviour truthfully');
 });
 
-test('command board SSR: a pinned open board renders its persistent controls', () => {
-  const html = render(CommandBoardHud, {command: {boardView: boardView()}, open: true, collapsed: false, pinned: true, activeId: null, reducedMotion: true, cursorKey: 'ALT', onSelect: () => {}, onActivate: () => {}, onClose: () => {}, onTogglePin: () => {}});
+test('command board SSR: exits and pinned copy name the real bound Command key', () => {
+  const html = render(CommandBoardHud, {command: {boardView: boardView()}, open: true, collapsed: false, pinned: true, activeId: null, reducedMotion: true, commandKey: 'Y', commandShortcut: 'Y', onSelect: () => {}, onActivate: () => {}, onClose: () => {}, onTogglePin: () => {}});
   assert.match(html, /aria-pressed="true"/, 'pinned state is exposed');
   assert.match(html, /is-reduced/, 'reduced motion is honoured');
+  assert.match(html, /Unpin command board \(closes with Y or Escape\)/, 'pinned help names the remapped command key');
+  assert.doesNotMatch(html, /closes with B or Escape/, 'the default binding is not claimed after a remap');
 });
 
-test('command board SSR: the collapsed chip is still a labelled mouse target', () => {
-  const html = render(CommandBoardHud, {command: {boardView: boardView()}, open: false, collapsed: false, pinned: false, activeId: null, reducedMotion: false, cursorKey: 'ALT', onSelect: () => {}, onActivate: () => {}, onClose: () => {}, onTogglePin: () => {}});
+test('command board SSR: the collapsed chip names the bound Command key', () => {
+  const html = render(CommandBoardHud, {command: {boardView: boardView()}, open: false, collapsed: false, pinned: false, activeId: null, reducedMotion: false, commandKey: 'Y', commandShortcut: 'Y', onSelect: () => {}, onActivate: () => {}, onClose: () => {}, onTogglePin: () => {}});
   assert.match(html, /cocs-board-chip/);
   assert.match(html, /aria-label="Command board collapsed/, 'the chip explains how to open or pin');
+  assert.match(html, /Press Y to open/, 'the chip names the remapped Command key');
+  assert.match(html, /aria-keyshortcuts="Y"/, 'the chip advertises the remapped shortcut');
+  assert.doesNotMatch(html, /Press B to open/, 'the stale default is not advertised');
+  const fallback = render(CommandBoardHud, {command: {boardView: boardView()}, open: false, collapsed: false, pinned: false, activeId: null, reducedMotion: false, onSelect: () => {}, onActivate: () => {}, onClose: () => {}, onTogglePin: () => {}});
+  assert.match(fallback, /Press B to open/, 'an unwired caller still gets the default binding label');
 });
 
 test('pointer-lock release reaches every interactive surface through the cursor machine', async () => {
@@ -243,4 +255,95 @@ test('the command board opens, peeks and toggles without loosing the pointer mid
   assert.match(page, /if\(hold\.held&&performance\.now\(\)-hold\.at>=BOARD_HOLD_MS\)cocsBoardControlRef\.current\?\.close\(\)/, 'a hold closes on release');
   assert.match(page, /if\(wasOpen\)control\?\.close\(\);else control\?\.open\(true\)/, 'a second press toggles the board');
   assert.match(page, /spendVisible,skipSpend/, 'the page passes SKIP into the board/spend view');
+});
+
+// ---------------------------------------------------------------------------
+// WP1.6 — binding-complete controls and truthful cursor copy. Command, Voice,
+// Interact and the fixed spectator keys must agree across visible prompts,
+// accessible names, aria-keyshortcuts, Help and Training.
+// ---------------------------------------------------------------------------
+const REMAPPED = {command: 'KeyY', voice: 'KeyI', interact: 'KeyL', cursor: 'KeyO'};
+
+test('WP1.6 Help and Training copy agree with the remapped keys', () => {
+  const brief = latticeBriefing('cocs', REMAPPED);
+  assert.match(brief.steps[2].detail, /Hold Y for the command board/, 'Help names the remapped Command key');
+  assert.match(brief.steps[3].detail, /press L when the prompt says RIDE/, 'Help names the remapped Interact key');
+  assert.match(trainingControls('device', REMAPPED), /^L interact when the prompt says RIDE$/, 'Training names the remapped Interact key');
+  assert.doesNotMatch(brief.steps[2].detail, /Hold B for the command board/, 'Help never falls back to the default Command key after a remap');
+});
+
+test('WP1.6 the page and HUD build every key prompt from the live bindings', async () => {
+  const [page, hudSource, play, board] = await Promise.all([
+    read('app/page.tsx'),
+    read('game/hud.mjs'),
+    read('app/ui/screens/PlayingHud.tsx'),
+    read('app/ui/screens/CommandBoardHud.tsx'),
+  ]);
+  assert.match(page, /const voiceKey=keyLabel\(bindings\.voice\?\?DEFAULT_BINDINGS\.voice\)\.toUpperCase\(\)/, 'the page resolves the voice key from the binding');
+  assert.match(page, /PTT \(hold \{voiceKey\}\)/, 'the voice mode option names the bound key');
+  assert.match(page, /Hold to talk, or hold \$\{voiceKey\}/, 'the hold-to-talk accessible name names the bound key');
+  assert.match(page, />Hold to talk \/ \{voiceKey\}</, 'the hold-to-talk button text names the bound key');
+  assert.match(page, /vehicleHud\(player,hud\?\.vehicles,hud\?\.flags,hud\?\.spectate,bindings\)/, 'the vehicle prompt receives the live bindings');
+  assert.match(page, /commandKey:latticeKeys\(bindings\)\.command/, 'the page passes the bound Command key into the board');
+  assert.match(page, /commandShortcut:bindingShortcut\(bindings\.command\?\?DEFAULT_BINDINGS\.command\)/, 'the board shortcut is derived from the same binding');
+  assert.doesNotMatch(page, /hold V|talk \/ V/, 'no literal V voice prompt remains');
+  assert.match(hudSource, /boundLabel\(bindings, 'interact'\)/, 'the vehicle prompt resolves the interact binding');
+  assert.match(hudSource, /SPECTATOR_RESERVED_KEYS/, 'fixed spectator keys live in one labelled table');
+  assert.match(play, /voiceHint\(voiceState\.enabled,voiceState\.mode,ui\.bindings\)/, 'the HUD voice chip uses the live bindings');
+  assert.match(play, /spectatorControls\(\{local:true/, 'spectator copy is built by the pure helper');
+  assert.doesNotMatch(play, /\?\?'[BQ]'/, 'no literal default-key fallback remains in the HUD');
+  assert.doesNotMatch(play, /WASD moves/, 'the pointer hint no longer hardcodes WASD');
+  assert.match(board, /Press \$\{commandKey\} to open/, 'the collapsed chip names the bound Command key');
+  assert.doesNotMatch(board, /CLICK TO FIGHT|cursorKey/, 'the board no longer advertises cursor-key or arena-click exits');
+  assert.match(page, /if\(cursorActive\(current\)&&!cursorBlockingSurfaces\(current\)\.length\)applyCursor\(cursorClear\(current\)\);/, 'an arena click with the board open neither relocks nor clears the surface');
+  assert.match(page, /if\(e\.code==='Escape'\)\{e\.preventDefault\(\);cocsBoardControlRef\.current\.close\(\);return;\}/, 'Escape still closes the board without falling through to Pause');
+  assert.match(page, /if\(result\.effects\?\.unlock\)document\.exitPointerLock/, 'the cursor machine still owns pointer-lock exit after the board closes');
+});
+
+// ---------------------------------------------------------------------------
+// WP1.3 — personal REQ purchase surface. Rendered with the real
+// `reqPurchaseOptions` model so cost, effect copy, affordability, the single
+// disabled reason, the authoritative balance and the pending wording all come
+// from the shipped data layer, not a test-only fixture.
+// ---------------------------------------------------------------------------
+test('REQ store SSR: every row states name, cost, effect, affordability and one reason', async () => {
+  const affordable = reqPurchaseOptions({team: 0, mode: 'cocs', actor: {id: 0, req: 30, reqBuff: null}, state: {command: {seat: [null, null]}, nodes: []}});
+  const html = render(ReqStore, {req: affordable, pending: [], onBuy: () => {}, reducedMotion: false, defaultOpen: true});
+  assert.match(html, /REQ STORE · <b>30<\/b> REQ/, 'the toggle names the authoritative balance');
+  assert.match(html, /AUTHORITATIVE BALANCE <b>30<\/b> REQ/, 'the open store repeats the balance');
+  assert.match(html, /Field Repair/, 'the real catalogue names are rendered');
+  assert.match(html, /COST <b>40<\/b> REQ/, 'cost is written, never colour-only');
+  assert.match(html, /Heal 50 health \(capped at max health\)/, 'effect copy is rendered');
+  assert.match(html, /NEED MORE REQ/, 'the single disable reason is in words');
+  assert.match(html, /WRONG MODE/, 'a mode-unsupported row also names its reason');
+  assert.match(html, /READY · AFFORDABLE/, 'an affordable row states it');
+  assert.match(html, /aria-expanded="true"/, 'the toggle exposes its state to assistive tech');
+  assert.match(html, /aria-label="[^"]*Cost 40 REQ[^"]*Balance 30 REQ[^"]*"/, 'each row accessible name carries cost and balance');
+  assert.match(html, /class="cocs-sink__buy"/, 'rows are real buttons');
+  assert.doesNotMatch(html, /tabindex="-1"/i, 'no purchase row is removed from the tab order');
+  const buffed = reqPurchaseOptions({team: 0, mode: 'cocs', actor: {id: 0, req: 100, reqBuff: 'overshield'}, state: {command: {seat: [null, null]}, nodes: []}});
+  const buffedHtml = render(ReqStore, {req: buffed, pending: [], onBuy: () => {}, reducedMotion: false, defaultOpen: true});
+  assert.match(buffedHtml, /ANOTHER BUFF IS ACTIVE/, 'the active-buff gate is named');
+  const css = await read('app/globals.css');
+  assert.match(css, /\.cocs-sink\{min-height:44px\}/, 'the shared sink row is a 44px target');
+});
+
+test('REQ store SSR: an outstanding buy reads QUEUED/REQUESTED and never CONFIRMED', async () => {
+  const req = reqPurchaseOptions({team: 0, mode: 'cocs', actor: {id: 0, req: 200, reqBuff: null}, state: {command: {seat: [null, null]}, nodes: []}});
+  const queued = render(ReqStore, {req, pending: [{itemId: 'ammo-crate', status: 'queued'}], onBuy: () => {}, reducedMotion: false, defaultOpen: true});
+  assert.match(queued, /QUEUED · AWAITING AUTHORITY/, 'a local dispatch shows the queued state');
+  assert.doesNotMatch(queued, /CONFIRMED/, 'a queued row never claims confirmation');
+  assert.match(queued, /disabled=""/, 'the outstanding row cannot be double-bought');
+  const requested = render(ReqStore, {req, pending: [{itemId: 'ammo-crate', status: 'requested'}], onBuy: () => {}, reducedMotion: false, defaultOpen: true});
+  assert.match(requested, /REQUESTED · AWAITING AUTHORITY/, 'a network dispatch shows the requested state');
+  assert.doesNotMatch(requested, /CONFIRMED/);
+});
+
+test('command board SSR: the REQ store is only rendered when the page provides the catalogue', () => {
+  const req = reqPurchaseOptions({team: 0, mode: 'cocs', actor: {id: 0, req: 90, reqBuff: null}, state: {command: {seat: [null, null]}, nodes: []}});
+  const base = {open: true, collapsed: false, pinned: false, activeId: 'card-1', reducedMotion: false, commandKey: 'B', commandShortcut: 'B', onSelect: () => {}, onActivate: () => {}, onClose: () => {}, onTogglePin: () => {}};
+  const without = render(CommandBoardHud, {...base, command: {boardView: boardView()}});
+  assert.doesNotMatch(without, /REQ STORE/, 'without a catalogue the board is unchanged');
+  const withReq = render(CommandBoardHud, {...base, command: {boardView: boardView(), req, reqPending: [], onBuyReq: () => {}}});
+  assert.match(withReq, /REQ STORE · <b>90<\/b> REQ/, 'the board hosts the store when the page provides it');
 });

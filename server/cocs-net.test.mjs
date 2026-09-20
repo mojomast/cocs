@@ -7,6 +7,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {Room,PLAYER_LIMIT,COCS_PLAYER_LIMIT,playerLimit} from './room.mjs';
 import {RULES} from '../game/data.mjs';
+import {capturableBy,neighbors} from '../game/cocs.mjs';
 
 function seeded(seed = 11) {
  let n = seed;
@@ -26,7 +27,8 @@ function harness(seed = 11, botCount = 6) {
  return room;
 }
 
-// The fixed action schedule both repeats execute, in the same order.
+// The fixed action schedule both repeats execute, in the same order. Every
+// frame carries the round revision and a per-peer action sequence (WP0.3).
 function schedule(room) {
  const state = room.match.objectiveState;
  const front = state.nodes.find(node => node.archetype === 'front');
@@ -42,14 +44,15 @@ function schedule(room) {
  const vault = state.terminals.terminals[vaultId];
  const actor = room.match.actors[0];
  actor.x = vault.x; actor.z = vault.z; actor.y = 0;
+ const rev = room.roundRevision;
  const accepted = {
-  order: room.order(1, { cardId: 'o1', verb: 'HOLD', target: front.id, agent: 'chief' }),
-  economy: room.economy(1, { cardId: 'e1', action: 'fortify', target: front.id }),
-  command: room.command(2, { cardId: 'm1', action: 'take' }),
-  terminal: room.terminal(1, { cardId: 't1', terminalId: vaultId, action: 'vault-store' }),
+  order: room.order(1, { cardId: 'o1', verb: 'HOLD', target: front.id, agent: 'chief', roundRev: rev, actionSeq: 1 }),
+  economy: room.economy(1, { cardId: 'e1', action: 'fortify', target: front.id, roundRev: rev, actionSeq: 2 }),
+  command: room.command(2, { cardId: 'm1', action: 'take', roundRev: rev, actionSeq: 1 }),
+  terminal: room.terminal(1, { cardId: 't1', terminalId: vaultId, action: 'vault-store', roundRev: rev, actionSeq: 3 }),
  };
  actor.req = 100;
- accepted.buy = room.buy(1, { cardId: 'b1', itemId: 'field-repair' });
+ accepted.buy = room.buy(1, { cardId: 'b1', itemId: 'field-repair', roundRev: rev, actionSeq: 4 });
  return { accepted, front, relay, vaultId, actor };
 }
 
@@ -69,9 +72,13 @@ test('two-client OPERATIONS harness applies orders, spends, terminals, commands 
  assert.ok(actor.reqSpent >= 40, 'REQ was debited');
  assert.ok(state.nodes.find(node => node.id === front.id).captureResist > 0, 'fortify wrote node resist');
  // The card board rides the wire so a reconnect can rebuild it, and an accepted
- // order card is settled from the sim outcome instead of sticking at `running`.
+ // order card keeps its acceptance marker and moves monotonically to a terminal
+ // state instead of being settled as `done` the moment it is queued.
  const cards = room.wireState().cocs.cards;
- assert.ok(cards.some(card => card.id === 'o1' && card.state === 'done'), 'the accepted order card reached a terminal state');
+ const hold = cards.find(card => card.id === 'o1');
+ assert.ok(hold, 'the accepted order card is on the board');
+ assert.equal(hold.accepted, true, 'the accepted order carries the acceptance marker');
+ assert.ok(['running', 'done', 'expired'].includes(hold.state), 'the order is in a documented outcome state');
  assert.ok(cards.some(card => card.id === 't1' && card.reason === null));
 });
 
@@ -232,7 +239,8 @@ test('transport peer ids never enter the sim: a uuid peer still orders, spends a
  assert.equal(order?.peerId, '0', 'the queued order resolved to the actor id');
  assert.equal(state.tasks[0]?.peerId, '0', 'the live task is keyed by the actor id');
  const orderCard = room.cocsCardList().find(card => card.id === 'u-order');
- assert.equal(orderCard?.state, 'done', 'the accepted order card left running');
+ assert.equal(orderCard?.state, 'running', 'the accepted order stays running while its task is live');
+ assert.equal(orderCard?.accepted, true, 'the accepted order carries its acceptance marker');
  assert.equal(orderCard?.peerId, A, 'the card mirror keeps the transport peer id');
 
  // Spend: the same uuid peer must pass the slice + executor gate and the sink.
@@ -256,4 +264,427 @@ test('transport peer ids never enter the sim: a uuid peer still orders, spends a
  // A non-commander release is still refused on the transport-facing reply path.
  assert.equal(room.command(A, { cardId: 'u-release', action: 'release' }), false);
  assert.equal(find(room.drain(), 'cocs-reject', A)?.reason, 'not-commander');
+});
+
+// ---------------------------------------------------------------------------
+// WP0.3 — round-scoped idempotent actions and honest outcomes.
+// ---------------------------------------------------------------------------
+
+// Open the OPERATIONS intermission window and put team 0 on owned ground so
+// order/spend/terminal/buy frames pass the room gates. Returns the same handles
+// the N1 harness uses.
+function openCoopWindow(room, {flux = 240, req = 0} = {}) {
+ const state = room.match.objectiveState;
+ const front = state.nodes.find(node => node.archetype === 'front');
+ front.owner = 0;
+ state.flux[0] = flux;
+ state.coop.phase = 'intermission';
+ state.coop.intermission = true;
+ state.coop.intermissionOpen = true;
+ state.coop.intermissionTicks = 99999;
+ const actor = room.match.actors[0];
+ if (req) actor.req = req;
+ return {state, front, actor};
+}
+function vaultIdFor(state) {
+ return Object.keys(state.terminals.terminals).find(id => state.terminals.terminals[id].kind === 'VAULT' && state.terminals.terminals[id].nodeId === 'hq-0');
+}
+
+test('a duplicate BUY charges once and survives presentation-card eviction', () => {
+ const room = harness(11, 4);
+ const {state, actor} = openCoopWindow(room, {req: 100});
+ room.drain();
+ const rev = room.roundRevision;
+ const frame = {cardId: 'dup-buy', itemId: 'field-repair', roundRev: rev, actionSeq: 1};
+ assert.equal(room.buy(1, frame), true, 'the first BUY is accepted');
+ assert.equal(room.buy(1, frame), true, 'the exact retry returns the cached acceptance');
+ assert.equal(room.pendingCocs.buys.length, 1, 'the retry was not enqueued');
+ for (let i = 0; i < 320; i++) room.recordCocsCard(`filler-${i}`, {state: 'done', ok: true, team: 0});
+ assert.equal(room.cocsCards.has('dup-buy'), false, '302 later cards evicted the presentation row');
+ assert.equal(room.buy(1, frame), true, 'the round ledger still answers after card eviction');
+ for (let i = 0; i < 3; i++) room.tick(RULES.dt);
+ assert.equal(actor.reqSpent, 40, 'REQ was debited exactly once');
+ assert.equal(actor.req, 60, 'the second delivery never charged again');
+ assert.equal(actor.reqBuff, 'field-repair');
+ assert.equal(state.coop.buyLog.filter(entry => entry.itemId === 'field-repair').length, 1, 'one sim purchase applied');
+});
+
+test('duplicate ORDER, ECONOMY, TERMINAL and COMMAND frames have one effect', () => {
+ const room = harness(13, 4);
+ const {state, front, actor} = openCoopWindow(room, {flux: 240});
+ const vaultId = vaultIdFor(state);
+ const vault = state.terminals.terminals[vaultId];
+ actor.x = vault.x; actor.z = vault.z; actor.y = 0;
+ room.drain();
+ const rev = room.roundRevision;
+ const order = {cardId: 'dup-order', verb: 'HOLD', target: front.id, agent: 'chief', roundRev: rev, actionSeq: 1};
+ const spend = {cardId: 'dup-spend', action: 'fortify', target: front.id, roundRev: rev, actionSeq: 2};
+ const terminal = {cardId: 'dup-store', terminalId: vaultId, action: 'vault-store', roundRev: rev, actionSeq: 3};
+ const command = {cardId: 'dup-seat', action: 'take', roundRev: rev, actionSeq: 4};
+ assert.equal(room.order(1, order), true);
+ assert.equal(room.order(1, order), true, 'the order retry returns the cached acceptance');
+ assert.equal(room.economy(1, spend), true);
+ assert.equal(room.economy(1, spend), true, 'the spend retry returns the cached acceptance');
+ assert.equal(room.terminal(1, terminal), true);
+ assert.equal(room.terminal(1, terminal), true, 'the terminal retry returns the cached acceptance');
+ assert.equal(room.command(2, command), true);
+ assert.equal(room.command(2, command), true, 'the command retry returns the cached acceptance');
+ assert.equal(room.pendingCocs.orders.length, 1);
+ assert.equal(room.pendingCocs.spends.length, 1);
+ assert.equal(room.pendingCocs.terminals.length, 1);
+ assert.equal(room.pendingCocs.commands.length, 1);
+ for (let i = 0; i < 3; i++) room.tick(RULES.dt);
+ assert.equal(state.orderLog.filter(entry => entry.cardId === 'dup-order').length, 1, 'one order reached the sim');
+ assert.equal(state.coop.spendLog.filter(entry => entry.cardId === 'dup-spend').length, 1, 'one spend reached the sim');
+ assert.equal(state.terminals.vault.stores, 1, 'one vault store applied');
+ assert.equal(state.coop.commandSeat[0], String(room.match.actors[1].id), 'the seat took effect once');
+ assert.equal(state.orderStats.byVerb.HOLD, 1);
+});
+
+test('a reused key with a different payload and a stale round are both refused', () => {
+ const room = harness(17, 4);
+ const {state, front, actor} = openCoopWindow(room, {req: 200, flux: 240});
+ room.drain();
+ const rev = room.roundRevision;
+ assert.equal(room.buy(1, {cardId: 'reuse-buy', itemId: 'field-repair', roundRev: rev, actionSeq: 7}), true);
+ assert.equal(room.buy(1, {cardId: 'reuse-buy', itemId: 'overshield', roundRev: rev, actionSeq: 7}), false);
+ const reuse = find(room.drain(), 'cocs-reject', 1);
+ assert.equal(reuse.reason, 'id-reuse', 'the same scoped key with a different payload is refused');
+ assert.equal(reuse.actionSeq, 7);
+ assert.equal(room.pendingCocs.buys.length, 1, 'the refused reuse never enqueued a second record');
+ assert.equal(room.cocsCardList().find(card => card.id === 'reuse-buy')?.state, 'running', 'the accepted card is not clobbered by the refusal');
+
+ // A definitive gate refusal is cached on its key as well: the world changing
+ // afterwards cannot turn the exact same key into a second, different outcome.
+ state.flux[0] = 0;
+ const fluxFrame = {cardId: 'gate-flux', action: 'fortify', target: front.id, roundRev: rev, actionSeq: 11};
+ assert.equal(room.economy(1, fluxFrame), false);
+ assert.equal(find(room.drain(), 'cocs-reject', 1).reason, 'flux');
+ state.flux[0] = 240;
+ assert.equal(room.economy(1, fluxFrame), false, 'the exact retry returns the cached refusal');
+ assert.equal(find(room.drain(), 'cocs-reject', 1).reason, 'flux');
+ assert.equal(room.economy(1, {...fluxFrame, action: 'reinforce', role: 'fighter'}), false);
+ assert.equal(find(room.drain(), 'cocs-reject', 1).reason, 'id-reuse', 'a different payload on the refused key is id-reuse');
+
+ assert.equal(room.order(1, {cardId: 'stale-order', verb: 'HOLD', target: front.id, roundRev: rev + 1, actionSeq: 8}), false);
+ const stale = find(room.drain(), 'cocs-reject', 1);
+ assert.equal(stale.reason, 'stale-round', 'a future round revision is refused');
+ assert.equal(stale.roundRevision, rev, 'the refusal names the current round');
+
+ assert.equal(room.order(1, {cardId: 'bad-seq', verb: 'HOLD', target: front.id, roundRev: rev, actionSeq: 0}), false);
+ assert.equal(find(room.drain(), 'cocs-reject', 1).reason, 'malformed', 'a present-but-invalid action sequence is malformed');
+
+ assert.equal(room.order(1, {cardId: 'fresh-order', verb: 'HOLD', target: front.id, roundRev: rev, actionSeq: 9}), true, 'the current round keeps accepting fresh keys');
+ assert.equal(actor.reqBuff, undefined, 'no refused frame applied a purchase');
+});
+
+test('cross-actor identical raw cardIds get distinct scoped identities', () => {
+ const room = harness(19, 4);
+ const {state, front} = openCoopWindow(room);
+ room.drain();
+ const rev = room.roundRevision;
+ assert.equal(room.order(1, {cardId: 'shared-id', verb: 'HOLD', target: front.id, roundRev: rev, actionSeq: 1}), true);
+ assert.equal(room.order(2, {cardId: 'shared-id', verb: 'HOLD', target: front.id, roundRev: rev, actionSeq: 1}), true, 'a second actor is not deduped into the first');
+ assert.equal(room.pendingCocs.orders.length, 2, 'both actors enqueued one order');
+ for (let i = 0; i < 3; i++) room.tick(RULES.dt);
+ const entries = state.orderLog.filter(entry => entry.cardId === 'shared-id' && entry.ok === true);
+ assert.equal(entries.length, 2, 'both actors applied exactly once');
+ assert.deepEqual(entries.map(entry => entry.peerId).sort(), ['0', '1']);
+ // Legacy cardId-only frames are scoped by round + seat too.
+ const beforeLegacy = room.pendingCocs.orders.length;
+ assert.equal(room.order(1, {cardId: 'legacy-shared', verb: 'HOLD', target: front.id}), true);
+ assert.equal(room.order(2, {cardId: 'legacy-shared', verb: 'HOLD', target: front.id}), true, 'the legacy path also separates actors');
+ assert.equal(room.pendingCocs.orders.length, beforeLegacy + 2, 'each legacy actor enqueued its own order');
+});
+
+test('a legacy cardId-only frame is idempotent within its round and seat', () => {
+ const room = harness(53, 4);
+ const {front} = openCoopWindow(room);
+ room.drain();
+ assert.equal(room.order(1, {cardId: 'legacy-card', verb: 'HOLD', target: front.id}), true);
+ assert.equal(room.pendingCocs.orders.length, 1);
+ assert.equal(room.order(1, {cardId: 'legacy-card', verb: 'HOLD', target: front.id}), true, 'an exact legacy retry returns the cached acceptance');
+ assert.equal(room.pendingCocs.orders.length, 1, 'the retry was not re-enqueued');
+ assert.equal(room.order(1, {cardId: 'legacy-card', verb: 'ATTACK', target: front.id}), false);
+ assert.equal(find(room.drain(), 'cocs-reject', 1).reason, 'id-reuse', 'a different legacy payload on the same cardId is id-reuse');
+});
+
+test('an accepted HOLD stays running until the task is replaced or expires', () => {
+ const room = harness(23, 4);
+ const {state, front} = openCoopWindow(room);
+ room.drain();
+ const rev = room.roundRevision;
+ assert.equal(room.order(1, {cardId: 'hold-a', verb: 'HOLD', target: front.id, roundRev: rev, actionSeq: 1}), true);
+ for (let i = 0; i < 2; i++) room.tick(RULES.dt);
+ const cardA = room.cocsCardList().find(card => card.id === 'hold-a');
+ assert.equal(cardA?.state, 'running', 'acceptance alone never implies completion');
+ assert.equal(cardA?.accepted, true);
+ assert.ok(Number.isFinite(cardA?.acceptedTick), 'the acceptance tick is recorded');
+
+ assert.equal(room.order(1, {cardId: 'hold-b', verb: 'HOLD', target: front.id, roundRev: rev, actionSeq: 2}), true);
+ for (let i = 0; i < 2; i++) room.tick(RULES.dt);
+ const replaced = room.cocsCardList().find(card => card.id === 'hold-a');
+ assert.equal(replaced?.state, 'done', 'a replaced task settles its card');
+ assert.equal(replaced?.reason, 'replaced');
+ assert.equal(room.cocsCardList().find(card => card.id === 'hold-b')?.state, 'running');
+
+ state.tasks[0].until = state.tick - 1;
+ room.tick(RULES.dt);
+ const expired = room.cocsCardList().find(card => card.id === 'hold-b');
+ assert.equal(expired?.state, 'expired', 'a lapsed task expires its card');
+ assert.equal(expired?.reason, 'ttl');
+});
+
+test('a rematch mints a new round revision and drops the previous board and ledger', () => {
+ const room = harness(29, 4);
+ const {front} = openCoopWindow(room);
+ room.drain();
+ const firstRev = room.roundRevision;
+ assert.equal(room.order(1, {cardId: 'round-1-card', verb: 'HOLD', target: front.id, roundRev: firstRev, actionSeq: 1}), true);
+ for (let i = 0; i < 2; i++) room.tick(RULES.dt);
+ assert.ok(room.cocsCardList().some(card => card.id === 'round-1-card'));
+ assert.ok(room.cocsLedger.size >= 1);
+ assert.equal(room.start(1), true, 'the host starts the next match');
+ assert.equal(room.roundRevision, firstRev + 1, 'every real start mints a new revision');
+ const started = room.drain();
+ assert.equal(find(started, 'lobby', null)?.roundRevision, firstRev + 1, 'the lobby frame carries the round revision');
+ assert.equal(find(started, 'start', null)?.roundRevision, firstRev + 1, 'the start frame carries the round revision');
+ assert.equal(room.lobby().roundRevision, firstRev + 1, 'the lobby projection carries the round revision');
+ assert.equal(room.cocsCardList().length, 0, 'a new round carries no old cards');
+ assert.equal(room.cocsLedger.size, 0, 'the dedupe ledger is round-scoped');
+ assert.equal(room.cocsInFlight.size, 0, 'no in-flight marker survives the round');
+ assert.equal(room.pendingCocs.orders.length, 0, 'no old queue survives the round');
+ assert.equal(room.order(1, {cardId: 'round-1-card', verb: 'HOLD', target: front.id, roundRev: firstRev, actionSeq: 1}), false);
+ assert.equal(find(room.drain(), 'cocs-reject', 1).reason, 'stale-round', 'the old round revision is refused');
+});
+
+test('a same-round reconnect preserves cards and never reapplies a retry', () => {
+ const room = new Room('r', seeded(31), {graceMs: 60000});
+ room.join(1, 'Alice', 'chatgpt', 'openclaw');
+ room.join(2, 'Bob', 'claude', 'hermes');
+ room.host(1, {mode: 'cocs-coop', botCount: 2, timeLimit: 900}, 'warfront');
+ room.start(1);
+ room.drain();
+ const {state, front} = openCoopWindow(room);
+ const token = room.peers.get(1).token;
+ const rev = room.roundRevision;
+ const frame = {cardId: 'reconnect-order', verb: 'HOLD', target: front.id, roundRev: rev, actionSeq: 1};
+ assert.equal(room.order(1, frame), true);
+ for (let i = 0; i < 2; i++) room.tick(RULES.dt);
+ room.disconnect(1);
+ room.drain();
+ room.join(9, 'ignored', 'chatgpt', 'openclaw', token);
+ const messages = room.drain();
+ const snapshot = find(messages, 'snapshot', 9);
+ assert.ok(snapshot, 'the reconnected peer gets a full snapshot');
+ assert.equal(snapshot.state.cocs.roundRevision, rev, 'the same round revision is carried');
+ const card = snapshot.state.cocs.cards.find(entry => entry.id === 'reconnect-order');
+ assert.ok(card && card.state === 'running' && card.accepted === true, 'the accepted card hydrates from the snapshot');
+ assert.equal(room.order(9, frame), true, 'the exact retry returns the cached acceptance');
+ assert.equal(room.pendingCocs.orders.length, 0, 'the retry is not re-enqueued');
+ for (let i = 0; i < 2; i++) room.tick(RULES.dt);
+ assert.equal(state.orderLog.filter(entry => entry.cardId === 'reconnect-order').length, 1, 'one effect after reconnect');
+});
+
+test('the mapped cut action reaches a traversal device and settles its card', () => {
+ const room = new Room('r', seeded(37), {snapshotHz: 30, keyframeEvery: 5});
+ room.join(1, 'Ann', 'chatgpt', 'openclaw');
+ room.join(2, 'Ben', 'claude', 'hermes');
+ room.host(1, {mode: 'cocs', botCount: 4, timeLimit: 300}, 'lattice-slice');
+ room.start(1);
+ room.drain();
+ const state = room.match.objectiveState;
+ const found = Object.entries(state.traversal?.devices ?? {}).find(([, device]) => device.state === 'live');
+ assert.ok(found, 'the map authors a live traversal device');
+ const [deviceId, device] = found;
+ const actor = room.match.actors[0];
+ actor.x = device.from.x; actor.z = device.from.z; actor.y = device.from.y ?? 0;
+ const rev = room.roundRevision;
+ assert.equal(room.terminal(1, {cardId: 'cut-1', terminalId: deviceId, action: 'cut', roundRev: rev, actionSeq: 1}), true, 'the mapped action is accepted');
+ assert.equal(room.pendingCocs.terminals[0]?.action, 'cut', 'the mapped verb is what the sim receives');
+ room.tick(RULES.dt);
+ assert.ok(device.channel, 'the cut channel started inside the fixed step');
+ device.channel.remaining = RULES.dt * 0.5;
+ room.tick(RULES.dt);
+ assert.equal(device.state, 'cut', 'the cut applied through the sim');
+ const card = room.cocsCardList().find(entry => entry.id === 'cut-1');
+ assert.equal(card?.state, 'done', 'the terminal card settled from the device state');
+});
+
+test('an accepted ATTACK completes when the sim retires its task on capture', () => {
+ const room = harness(41, 4);
+ const {state} = openCoopWindow(room);
+ room.drain();
+ const rev = room.roundRevision;
+ // Pick a capturable non-HQ node; force one neighbour to team 0 and take the
+ // node for team 1 so an ordered ATTACK is legal and can genuinely capture it.
+ const target = state.nodes.find(node => node.archetype !== 'hq' && node.live === true && node.owner !== 0 && neighbors(state, node.id).length > 0);
+ assert.ok(target, 'the lattice has a capturable non-HQ node');
+ const neighbor = state.nodes.find(node => node.id === neighbors(state, target.id)[0]);
+ neighbor.owner = 0;
+ target.owner = 1;
+ target.progress = {0: 0, 1: 0};
+ assert.ok(capturableBy(state, target.id, 0), 'the target is adjacent to team 0');
+ assert.equal(room.order(1, {cardId: 'capture-order', verb: 'ATTACK', target: target.id, roundRev: rev, actionSeq: 1}), true);
+ room.tick(RULES.dt);
+ assert.equal(room.cocsCardList().find(card => card.id === 'capture-order')?.state, 'running', 'acceptance alone is not completion');
+ // Accelerate the ordered-only capture; `captureNode` retires the task itself.
+ target.progress[0] = 0.999;
+ for (let i = 0; i < 5 && target.owner !== 0; i++) room.tick(RULES.dt);
+ const card = room.cocsCardList().find(entry => entry.id === 'capture-order');
+ assert.equal(target.owner, 0, 'the ordered team captured the node');
+ assert.equal(card?.state, 'done', 'the capture completed the card');
+ assert.equal(card?.reason, 'complete');
+ assert.equal(state.tasks[0], null, 'the sim retired the task');
+});
+
+test('an interrupted device channel ends the card with an interruption reason', () => {
+ const room = new Room('r', seeded(43), {snapshotHz: 30, keyframeEvery: 5});
+ room.join(1, 'Ann', 'chatgpt', 'openclaw');
+ room.join(2, 'Ben', 'claude', 'hermes');
+ room.host(1, {mode: 'cocs', botCount: 4, timeLimit: 300}, 'lattice-slice');
+ room.start(1);
+ room.drain();
+ const state = room.match.objectiveState;
+ const found = Object.entries(state.traversal?.devices ?? {}).find(([, device]) => device.state === 'live');
+ assert.ok(found, 'the map authors a live traversal device');
+ const [deviceId, device] = found;
+ const actor = room.match.actors[0];
+ actor.x = device.from.x; actor.z = device.from.z; actor.y = device.from.y ?? 0;
+ assert.equal(room.terminal(1, {cardId: 'cut-interrupted', terminalId: deviceId, action: 'cut', roundRev: room.roundRevision, actionSeq: 1}), true);
+ room.tick(RULES.dt);
+ assert.ok(device.channel, 'the cut channel started');
+ actor.x = device.from.x + 500; actor.z = device.from.z + 500;
+ room.tick(RULES.dt);
+ assert.equal(device.channel, null, 'leaving the anchor interrupts the channel');
+ const card = room.cocsCardList().find(entry => entry.id === 'cut-interrupted');
+ assert.equal(card?.state, 'blocked', 'the interrupted card is refused, not left running');
+ assert.equal(card?.reason, 'interrupted');
+});
+
+test('round end expires an accepted in-flight card', () => {
+ const room = harness(47, 4);
+ const {front} = openCoopWindow(room);
+ room.drain();
+ assert.equal(room.order(1, {cardId: 'end-order', verb: 'HOLD', target: front.id, roundRev: room.roundRevision, actionSeq: 1}), true);
+ room.tick(RULES.dt);
+ assert.equal(room.cocsCardList().find(card => card.id === 'end-order')?.state, 'running');
+ room.match.over = true;
+ room.tick(RULES.dt);
+ assert.equal(room.roundOver, true);
+ const card = room.cocsCardList().find(entry => entry.id === 'end-order');
+ assert.equal(card?.state, 'expired', 'a settled round never leaves an in-flight card');
+ assert.equal(card?.reason, 'round-end');
+});
+
+test('dead, ended, disconnected and spectator requests all answer with a reason', () => {
+ const room = harness(59, 4);
+ const {front, actor} = openCoopWindow(room);
+ room.drain();
+ const rev = room.roundRevision;
+ actor.health = 0;
+ assert.equal(room.order(1, {cardId: 'dead-order', verb: 'HOLD', target: front.id, roundRev: rev, actionSeq: 1}), false);
+ assert.equal(find(room.drain(), 'cocs-reject', 1).reason, 'dead');
+ actor.health = 100;
+ room.roundOver = true;
+ assert.equal(room.buy(1, {cardId: 'ended-buy', itemId: 'field-repair', roundRev: rev, actionSeq: 2}), false);
+ assert.equal(find(room.drain(), 'cocs-reject', 1).reason, 'round-over');
+ room.roundOver = false;
+ room.disconnect(1);
+ assert.equal(room.command(1, {cardId: 'gone-seat', action: 'take', roundRev: rev, actionSeq: 3}), false);
+ assert.equal(find(room.drain(), 'cocs-reject', 1).reason, 'disconnected');
+ assert.equal(room.pendingCocs.orders.length + room.pendingCocs.commands.length, 0, 'no refused frame reached a queue');
+
+ const spectator = new Room('spec', seeded(61));
+ spectator.join(1, 'Host');
+ spectator.join(2, 'Spec', 'gemini', 'cline', '', true);
+ spectator.host(1, {mode: 'cocs-coop', botCount: 0, timeLimit: 60}, 'warfront');
+ spectator.start(1);
+ spectator.drain();
+ assert.equal(spectator.order(2, {cardId: 'spec-order', verb: 'HOLD', target: front.id, roundRev: spectator.roundRevision, actionSeq: 1}), false);
+ assert.equal(find(spectator.drain(), 'cocs-reject', 2).reason, 'spectator');
+});
+
+// ---------------------------------------------------------------------------
+// WP1.3 — truthful personal REQ slice: the OPERATIONS Puma and launch-set
+// gates through the real room. Messages carry roundRev/actionSeq (WP0.3), so a
+// retry is idempotent and an effectless catalogue row never reaches a queue.
+// ---------------------------------------------------------------------------
+
+// A PvPvE `cocs` room with bots filling; no rung means a practice match.
+function pvpHarness(seed = 67, botCount = 4) {
+ const room = new Room('rp', seeded(seed), { snapshotHz: 30, keyframeEvery: 5 });
+ room.join(1, 'Alice', 'chatgpt', 'openclaw');
+ room.join(2, 'Bob', 'claude', 'hermes');
+ room.host(1, { mode: 'cocs', botCount, timeLimit: 300 }, 'warfront');
+ room.start(1);
+ room.drain();
+ return room;
+}
+
+test('the OPERATIONS Puma buys through Room.buy and spawns its depot vehicle', () => {
+ const room = harness(23, 4);
+ const { state, actor } = openCoopWindow(room, { req: 150 });
+ const depot = state.traversal.depots['depot-hq-w'];
+ assert.equal(depot.owner, 0, 'the OPERATIONS map authors a friendly depot');
+ room.drain();
+ const rev = room.roundRevision;
+ assert.equal(room.buy(1, { cardId: 'puma-buy', itemId: 'puma', depotId: 'depot-hq-w', roundRev: rev, actionSeq: 1 }), true, 'a coopLaunch item is accepted in OPERATIONS');
+ for (let i = 0; i < 3; i++) room.tick(RULES.dt);
+ assert.equal(actor.req, 0, 'the exact 150 REQ is debited');
+ assert.equal(actor.reqSpent, 150, 'the spend is recorded once');
+ assert.ok(depot.purchaseId, 'the depot records the purchase');
+ const vehicle = room.match.vehicles.find(entry => entry.id === depot.purchaseId);
+ assert.ok(vehicle && vehicle.depotId === 'depot-hq-w', 'the Puma spawned at its depot');
+ assert.equal(state.coop.buyLog.filter(entry => entry.itemId === 'puma').length, 1, 'one sim purchase applied');
+ const card = room.cocsCardList().find(entry => entry.id === 'puma-buy');
+ assert.equal(card?.state, 'done', 'the accepted buy settled from the sim state');
+ assert.equal(card?.ok, true);
+});
+
+test('duplicate Puma frames charge once and one live depot Puma blocks a fresh identity', () => {
+ const room = harness(29, 4);
+ const { state, actor } = openCoopWindow(room, { req: 300 });
+ room.drain();
+ const rev = room.roundRevision;
+ const frame = { cardId: 'puma-dup', itemId: 'puma', depotId: 'depot-hq-w', roundRev: rev, actionSeq: 2 };
+ assert.equal(room.buy(1, frame), true);
+ assert.equal(room.buy(1, frame), true, 'the exact retry returns the cached acceptance');
+ assert.equal(room.pendingCocs.buys.length, 1, 'the retry is not re-enqueued');
+ for (let i = 0; i < 3; i++) room.tick(RULES.dt);
+ assert.equal(actor.req, 150, 'one Puma charged once');
+ assert.equal(actor.reqSpent, 150);
+ assert.equal(state.coop.buyLog.filter(entry => entry.itemId === 'puma').length, 1, 'one authoritative purchase');
+ assert.equal(room.buy(1, { cardId: 'puma-again', itemId: 'puma', depotId: 'depot-hq-w', roundRev: rev, actionSeq: 3 }), false, 'a fresh identity for a live depot Puma is refused');
+ assert.equal(find(room.drain(), 'cocs-reject', 1)?.reason, 'vehicle', 'the room mirrors the sim one-live-Puma rule');
+ assert.equal(actor.req, 150, 'the refused second Puma never debits');
+ assert.equal(room.pendingCocs.buys.length, 0);
+});
+
+test('the room gates coopLaunch to OPERATIONS and effectless catalogue rows out of both modes', () => {
+ const pvp = pvpHarness(31, 4);
+ const pvpActor = pvp.match.actors[0];
+ pvpActor.req = 150;
+ pvp.drain();
+ assert.equal(pvp.buy(1, { cardId: 'pvp-puma', itemId: 'puma', depotId: 'depot-hq-w', roundRev: pvp.roundRevision, actionSeq: 1 }), false, 'PvPvE never accepts the OPERATIONS Puma');
+ assert.equal(find(pvp.drain(), 'cocs-reject', 1)?.reason, 'wrong-mode');
+ assert.equal(pvpActor.req, 150, 'the wrong-mode Puma never debits');
+ assert.equal(pvp.pendingCocs.buys.length, 0, 'a refused Puma never reaches a queue');
+ assert.equal(pvp.buy(1, { cardId: 'pvp-sentry', itemId: 'sentry', roundRev: pvp.roundRevision, actionSeq: 2 }, 5000), false, 'an effectless row is refused in PvPvE too');
+ assert.equal(find(pvp.drain(), 'cocs-reject', 1)?.reason, 'not-launched');
+ assert.equal(pvpActor.req, 150, 'the effectless row never debits');
+
+ const coop = harness(37, 4);
+ const { state, actor } = openCoopWindow(coop, { req: 500 });
+ coop.drain();
+ const unsupported = ['at-mine', 'barrier', 'sentry', 'supply-drop', 'fortify-doctrine', 'oracle-unlock'];
+ unsupported.forEach((itemId, index) => {
+  const now = 1000 + index * 1000; // one request per rate-limit window
+  assert.equal(coop.buy(1, { cardId: `noop-${itemId}`, itemId, roundRev: coop.roundRevision, actionSeq: 10 + index }, now), false, `${itemId} is not purchasable`);
+  assert.equal(find(coop.drain(), 'cocs-reject', 1)?.reason, 'not-launched', `${itemId} is refused as unlaunched`);
+ });
+ assert.equal(actor.req, 500, 'no effectless row debited');
+ assert.equal(actor.reqSpent ?? 0, 0, 'no effectless row recorded a spend');
+ assert.equal(actor.reqBuff, undefined);
+ assert.equal((state.coop.buyLog ?? []).length, 0, 'no effectless row reached the sim');
 });

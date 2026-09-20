@@ -1,6 +1,17 @@
 // First-run coach content. Pure and engine-free so the steps and the
 // show/dismiss decision are unit-testable and shared by the UI.
+//
+// WP2.3: the old key is a single unversioned bit (`'1'`) written by both GOT IT
+// and SKIP. New records live under `ONBOARDING_STATE_KEY` as
+// `{status: 'completed' | 'skipped', version}`; the legacy value is migrated on
+// read and grandfathered so an existing installation is never re-onboarded.
+// `shouldShowOnboarding` additionally requires an explicit arena entry, so the
+// coach can no longer cover the title's primary action on a fresh load.
+import {DEFAULT_BINDINGS, bindingLabel} from './keybinds.mjs';
+
 export const ONBOARDING_STORAGE_KEY = 'token-arena-onboarded';
+export const ONBOARDING_STATE_KEY = 'token-arena-onboarding';
+export const ONBOARDING_CONTENT_VERSION = 2;
 
 export const ONBOARDING_STEPS = Object.freeze([
   Object.freeze({id: 'move', title: 'MOVE', detail: 'WASD to move, Space to jump, Shift to sprint, Ctrl or C to crouch and slide.'}),
@@ -140,5 +151,80 @@ export const HELP_SECTIONS = Object.freeze([
 ]);
 
 export function shouldShowOnboarding(stored, entered) {
-  return stored !== true && stored !== '1' && entered !== true;
+  // Title-first: no explicit arena entry, no coach. The old helper accepted
+  // `entered: false` and still showed the coach over the title.
+  if (entered !== true) return false;
+  const state = normalizeOnboardingState(stored);
+  if (!state) return true;
+  // A skip is an explicit decline and stays declined; a completion re-arms
+  // only when the coach content itself gains a new version.
+  if (state.status === 'skipped') return false;
+  return state.version < ONBOARDING_CONTENT_VERSION;
+}
+
+// --- Versioned storage ------------------------------------------------------
+// `normalizeOnboardingState` accepts the new JSON record, a JSON string or the
+// legacy truthy bit so every historical shape reads without breaking.
+export function normalizeOnboardingState(raw) {
+  if (raw === true || raw === '1' || raw === 'true') return Object.freeze({status: 'completed', version: ONBOARDING_CONTENT_VERSION, legacy: true});
+  let value = raw;
+  if (typeof value === 'string') {
+    try { value = JSON.parse(value); } catch { return null; }
+  }
+  if (!value || typeof value !== 'object') return null;
+  const status = value.status === 'completed' ? 'completed' : value.status === 'skipped' ? 'skipped' : null;
+  if (!status) return null;
+  const version = Math.floor(Number(value.version));
+  return Object.freeze({status, version: Number.isFinite(version) && version > 0 ? version : 1, legacy: value.legacy === true});
+}
+
+/** Read the versioned record, migrating (once) the legacy bit in place. */
+export function readOnboardingState(store) {
+  let current = null, legacy = null;
+  try {
+    current = store?.getItem?.(ONBOARDING_STATE_KEY) ?? null;
+    legacy = store?.getItem?.(ONBOARDING_STORAGE_KEY) ?? null;
+  } catch {
+    return null;
+  }
+  const parsed = normalizeOnboardingState(current);
+  if (parsed) return parsed;
+  if (!normalizeOnboardingState(legacy)) return null;
+  const migrated = Object.freeze({status: 'completed', version: ONBOARDING_CONTENT_VERSION});
+  try {
+    store?.setItem?.(ONBOARDING_STATE_KEY, JSON.stringify({...migrated, migrated: true}));
+    store?.removeItem?.(ONBOARDING_STORAGE_KEY);
+  } catch {}
+  return migrated;
+}
+
+/** Record an explicit completion or skip under the current content version. */
+export function persistOnboardingState(store, status) {
+  const state = Object.freeze({status: status === 'skipped' ? 'skipped' : 'completed', version: ONBOARDING_CONTENT_VERSION});
+  try {
+    store?.setItem?.(ONBOARDING_STATE_KEY, JSON.stringify(state));
+    store?.removeItem?.(ONBOARDING_STORAGE_KEY);
+  } catch {}
+  return state;
+}
+
+// --- Binding-derived control copy -------------------------------------------
+// The first two lessons teach controls, so their detail lines follow the live
+// bindings the input path reads; every other step keeps its authored copy.
+const bound = (bindings, action) => bindingLabel((bindings ?? {})[action] ?? DEFAULT_BINDINGS[action]);
+
+export function onboardingStepDetail(step, bindings = {}) {
+  if (!step) return '';
+  if (step.id === 'move') {
+    const move = ['forward', 'left', 'back', 'right'].map(action => bound(bindings, action)).join('');
+    return `${move} to move, ${bound(bindings, 'jump')} to jump, ${bound(bindings, 'sprint')} to sprint, ${bound(bindings, 'crouch')} to crouch and slide.`;
+  }
+  if (step.id === 'fight') {
+    return `Left mouse fires, right mouse aims, ${bound(bindings, 'reload')} reloads, ${bound(bindings, 'melee')} melees and ${bound(bindings, 'grenade')} throws a frag. Scroll or use 1-0 to switch weapons.`;
+  }
+  return step.detail;
+}
+
+export function onboardingStepView(step, bindings = {}) {
+  return step ? {...step, detail: onboardingStepDetail(step, bindings)} : step;
 }

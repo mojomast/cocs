@@ -15,8 +15,9 @@
 The accompanying implementation resolves F01's live supply-snapshot mismatch,
 adds lesson-scoped/local evidence, explicit current/next progress and acknowledgement,
 pauses the local match and releases the cursor at completion beats, and excludes
-practice matches from progression/history. A protected, staged tutorial scenario
-is still future work. The incorrect duplicate Lattice FRAGS column is removed and
+practice matches from progression/history. The protected, staged tutorial
+scenario that was still future work at v8.3 is now implemented in the v8.5
+candidate (see below). The incorrect duplicate Lattice FRAGS column is removed and
 scoreboard grids now match their real column counts. Spend keyboard handling
 respects native controls and repeat edges; short-screen spend panels are bounded.
 Numeric formatting, compact spectator controls and title-camera continuity are
@@ -30,8 +31,9 @@ level: public dominance and Operations outcome state, shared local/network event
 priority, one navigation-backed legal-target model, passive standings/death
 summaries, effective-rules previews, short-screen objective hierarchy, authored
 Director labels, mode-specific result learning, remapped labels and held touch
-jump. Training remains reward-free and keeps its documented ordinary 15-minute
-Foundry scenario; a protected staged scenario is still deferred.
+jump. Training remains reward-free; the later v8.5 candidate replaces the
+deferred staged scenario with the protected completion-safe course documented
+in [`LATTICE-TRAINING.md`](LATTICE-TRAINING.md).
 
 F10 has deliberately not produced balance changes. The technical viewport/input
 gate and the worksheet below can validate mechanics, but the required five new
@@ -39,6 +41,26 @@ participants plus two experienced comparison players were not available in this
 coding environment. Do not relabel automated or agent-driven checks as human fun
 evidence. Run the First-time player session before changing weapons, bot pressure,
 roster density, rewards or Director tuning. D2-D4 measurement remains deferred.
+
+### Integration status for the v8.5 candidate
+
+The current working-tree candidate is the first-time reliability build the v8.4
+plan called for. `game/lattice-training.mjs` and the page's local match loop now
+run an active course inside a protected scenario: the time limit, dominance, HQ
+breach and elimination cannot resolve the practice match, the local respawn delay
+is capped, practice stays outside XP/challenges/history, and SPEND, TERMINAL and
+RIDE lessons receive an authored opportunity instead of a fabricated one. The
+candidate also carries the truthful QUEUED action feedback, intent-based campaign
+resume, identified build/version reporting and tracked browser harness from the
+same plan, an idempotent round-scoped action lifecycle, a truthful personal REQ
+purchase loop, production-backed route guidance, authored Operations fronts,
+viewer-scoped results, one modal stack, binding-complete prompts and an optional
+device-local study recorder. Current limits: the release-of-record footer
+becomes `v8.5 · HANDOFF` with this release; paired web/server rollback is
+implemented but physical-device, assistive-technology and performance-budget
+gates remain open; and no human session has been run. Do not describe this
+candidate as validated fun, comprehension, comfort or retention evidence, and do
+not tune balance from it. D2-D4 measurement remains deferred.
 
 **Make the existing game easier to understand and respond to before adding more systems.** The repository already has substantial combat variety, mobility, objective tactics, bots, progression and replay support. The largest opportunities are closing the loop between a player's action, its visible consequence, the win condition, and an understandable next decision.
 
@@ -103,6 +125,11 @@ The older audit references `docs/design/COCS-MODE-SPEC.md`, `COCS-OPERATIONS.md`
 Priorities: **P0** blocks a promised core learning path; **P1** materially damages understanding, agency or trust; **P2** improves retention, accessibility or tuning after correctness. Effort is relative: **S** localized adapter/copy work, **M** coordinated model/UI changes, **L** a cross-system feature or measured tuning pass.
 
 ### F01 — P0 / M — Training's live contract and learning guarantees need completion
+
+**Status (v8.5 candidate):** the live training context, authoritative snapshot
+shape, local attribution and protected completion-safe scenario are implemented;
+the acceptance list below now serves as that work's regression criteria. The
+baseline description is kept as the audit record.
 
 **Evidence: CODE + DIAG. Active tutorial owner.**
 
@@ -294,11 +321,15 @@ No broad expensive suite is justified by this documentation change. Implementati
 
 ### First-time player session
 
-Start with **five participants unfamiliar with this build**, plus two experienced arena-shooter players for control/feel comparisons. This is a formative sample, not a statistically powered balance study. At least one real touch session and one keyboard-remapped session are separate accessibility checks.
+Start with **five participants unfamiliar with this build**, plus two experienced arena-shooter players for control/feel comparisons. This is a formative sample, not a statistically powered balance study. At least one real touch session and one keyboard-remapped session are separate accessibility checks. Record the exact release, commit and build ID for every session; the v8.5 candidate is the intended first governed study build.
 
-Use [`reports/playtest-v8.4-template.md`](../reports/playtest-v8.4-template.md)
-to preserve raw task observations, cohort/device settings, distributions,
-verbatim answers and the one-factor decision log. An unfilled worksheet or an
+Use the governed worksheet
+([`reports/playtest-v8.4-template.md`](../reports/playtest-v8.4-template.md))
+to obtain consent, assign scenarios, preserve raw task observations under the
+evidence taxonomy (observed behavior / participant statement / facilitator
+interpretation / telemetry), record the timing anchors and facilitator
+deviations, and build the artifact manifest and findings synthesis. The file
+name is not a build claim. An unfilled worksheet, missing consent or an
 automated-only browser gate is not evidence that the human targets passed.
 
 1. Fresh profile: choose and launch an intended first match without coaching. Record clicks, hesitation and effective rules.

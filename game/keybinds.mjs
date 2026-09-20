@@ -52,6 +52,23 @@ export function bindingLabel(code) {
     .replace('AltLeft', 'Left Alt').replace('AltRight', 'Right Alt');
 }
 
+// `aria-keyshortcuts` wants one canonical key name per token: the DOM key for
+// printable keys and arrows, the bare modifier word for modifiers. They differ
+// from the HUD labels above ("Up" vs "ArrowUp", "Left Alt" vs "Alt"), so screen
+// readers get a shortcut they can actually announce for a remapped binding.
+const SHORTCUT_NAMES = Object.freeze({
+  ArrowUp: 'ArrowUp', ArrowDown: 'ArrowDown', ArrowLeft: 'ArrowLeft', ArrowRight: 'ArrowRight',
+  Space: 'Space', ShiftLeft: 'Shift', ShiftRight: 'Shift',
+  ControlLeft: 'Control', ControlRight: 'Control', AltLeft: 'Alt', AltRight: 'Alt',
+  BracketLeft: '[', BracketRight: ']', Semicolon: ';', Quote: "'", Comma: ',',
+  Period: '.', Slash: '/', Backslash: '\\', Backquote: '`', Minus: '-', Equal: '=',
+});
+
+export function bindingShortcut(code) {
+  const value = String(code || '');
+  return SHORTCUT_NAMES[value] ?? bindingLabel(value);
+}
+
 export function actionBindingLabels(bindings = {}) {
   return Object.fromEntries(KEYBIND_ACTIONS.map(action => [action, bindingLabel(bindings[action] ?? DEFAULT_BINDINGS[action])]));
 }

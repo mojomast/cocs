@@ -5,6 +5,7 @@
 // changing reconciliation.
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import {readFileSync} from 'node:fs';
 import {Match} from './core.mjs';
 import {NetClient, NetHarness} from './net.mjs';
 import {snapshotDelta,applySnapshotDelta} from './protocol.mjs';
@@ -282,6 +283,36 @@ test('team-tagged COCS events are private; public and non-COCS events are shared
  assert.equal(cocsEventVisible({type: 'death', actor: 1}, null), true);
  assert.equal(cocsEventVisible({type: 'zone-progress', team: 1}, 0), true, 'non-COCS feeds are never filtered');
  assert.deepEqual(filterCocsEvents([{type: 'cocs-order', team: 0}, {type: 'cocs-capture', team: 0}, {type: 'death'}], 1).map(e => e.type), ['cocs-capture', 'death']);
+});
+
+test('offline/local order intent obeys the same visibility rule as the network feed', () => {
+ // A local match emits the same `cocs-order*` shapes as the server feed: two
+ // teams of bots plus the local seat. The network path filters each event with
+ // `cocsEventVisible(event, team)`; the local path uses `filterCocsEvents`.
+ const localFeed = [
+  {type: 'cocs-order', team: 0, verb: 'HOLD', node: 'front-0', peerId: 'bot-0', cardId: 'own-order'},
+  {type: 'cocs-order', team: 1, verb: 'ATTACK', node: 'front-0', peerId: 'bot-1', cardId: 'enemy-order'},
+  {type: 'cocs-order-rejected', team: 1, verb: 'ATTACK', node: 'hq-0', reason: 'illegal-target', peerId: 'bot-1', cardId: 'enemy-refusal'},
+  {type: 'cocs-order-complete', team: 1, verb: 'HOLD', node: 'front-1', contributors: [3], teamOP: 20, cardId: 'enemy-complete'},
+  {type: 'cocs-order-complete', team: 0, verb: 'HOLD', node: 'front-0', contributors: [0], teamOP: 20, cardId: 'own-complete'},
+ ];
+ for (const team of [0, 1, null]) {
+  assert.deepEqual(
+   filterCocsEvents(localFeed, team),
+   localFeed.filter(event => cocsEventVisible(event, team)),
+   `team ${team}: the local feed filter is identical to the network per-peer rule`,
+  );
+ }
+ assert.deepEqual(filterCocsEvents(localFeed, 0).map(event => event.cardId), ['own-order', 'own-complete'], 'the offline player sees own-team intent only');
+ assert.deepEqual(filterCocsEvents(localFeed, 1).map(event => event.cardId), ['enemy-order', 'enemy-refusal', 'enemy-complete'], 'the enemy team sees the mirrored set');
+ assert.deepEqual(filterCocsEvents(localFeed, null), [], 'a local spectator sees no private order intent');
+});
+
+test('the page routes its local order feed through the shared event filter', async () => {
+ const page = await readFileSync(new URL('../app/page.tsx', import.meta.url), 'utf8');
+ assert.ok(page.includes('filterCocsEvents('), 'the page imports and calls the shared filter');
+ assert.match(page, /const cocsOrderEvents=filterCocsEvents\(/, 'the strip/board order feed is filtered');
+ assert.match(page, /hud\?\.spectate===true\?null:cocsTeam\(\)/, 'a spectator view has no team');
 });
 
 test('NetClient tolerates redacted sections and reconciliation rules are unchanged', () => {

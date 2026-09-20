@@ -3,24 +3,50 @@ import {WEAPONS} from './data.mjs';
 import {teamMode,isCocsMode} from './config.mjs';
 import {latticeCaption} from './lattice-feedback.mjs';
 import {formatNumber,formatCountdown} from './format-ui.mjs';
+import {DEFAULT_BINDINGS,bindingLabel} from './keybinds.mjs';
 
-export function vehicleHud(player, vehicles = [], flags = [], spectate = false) {
+// Every prompt below is a function of the live bindings, never a literal key.
+// `bindings` is optional so pure callers and tests keep a sensible default.
+const boundLabel = (bindings, action) =>
+  bindingLabel((bindings ?? {})[action] ?? DEFAULT_BINDINGS[action]).toUpperCase();
+
+export function vehicleHud(player, vehicles = [], flags = [], spectate = false, bindings = {}) {
   if (spectate || !player || !(player.health > 0)) return {vehicle: null, prompt: ''};
+  const interact = boundLabel(bindings, 'interact');
   const vehicle = vehicles.find(v => v.id === player.vehicleId && v.health > 0 && (v.driver === player.id || v.gunner === player.id || (Array.isArray(v.passengers) && v.passengers.includes(player.id))));
-  if (vehicle) return {vehicle, prompt: 'E / EXIT PUMA'};
+  if (vehicle) return {vehicle, prompt: `${interact} / EXIT PUMA`};
   const canEnter = player.vehicleId == null && !flags.some(flag => flag.carrier === player.id) && vehicles.some(v =>
     v.health > 0 && v.respawnTimer <= 0 && v.driver === null && Math.hypot(player.x - v.x, player.z - v.z) < 2.4);
-  return {vehicle: null, prompt: canEnter ? 'E / ENTER PUMA' : ''};
+  return {vehicle: null, prompt: canEnter ? `${interact} / ENTER PUMA` : ''};
 }
 
+// Escape is shell-owned and cannot be rebound (`RESERVED_CODES`), so it stays
+// literal in every hint. Vehicle, voice and spectator copy resolve through the
+// binding model instead.
 export const escapeHint = online => online ? 'ESC / LOBBY (MATCH CONTINUES)' : 'ESC / PAUSE';
 
-export const voiceHint = (enabled, mode) => {
+export const voiceHint = (enabled, mode, bindings = {}) => {
   if (!enabled) return null;
-  if (mode === 'ptt') return 'V / TALK';
+  if (mode === 'ptt') return `${boundLabel(bindings, 'voice')} / TALK`;
   if (mode === 'auto') return 'VOICE / AUTO TALK';
   return 'VOICE ON';
 };
+
+// Spectator camera/roster keys are page-owned fixed codes rather than player
+// bindings, so they are rendered through `bindingLabel` and marked RESERVED:
+// a player who remaps `command` (default B) or `melee` (default F) must not
+// read the old default as if it still followed that binding. The free-camera
+// movement line genuinely does follow the movement bindings.
+export const SPECTATOR_RESERVED_KEYS = Object.freeze({camera: 'KeyB', freeCam: 'KeyF', hideHud: 'KeyH', thirdPerson: 'KeyP'});
+
+export function spectatorControls({local = false, cursorKey = 'ALT', bindings = {}} = {}) {
+  const reserved = bindingLabel;
+  if (local) {
+    const movement = ['forward', 'left', 'back', 'right'].map(action => boundLabel(bindings, action)).join('');
+    return `${cursorKey} cursor · RESERVED: [ / ] follow, ${reserved(SPECTATOR_RESERVED_KEYS.camera)} camera, ${reserved(SPECTATOR_RESERVED_KEYS.freeCam)} free cam, ${reserved(SPECTATOR_RESERVED_KEYS.hideHud)} hide HUD · ESC menu. Free cam: ${movement} / ${boundLabel(bindings, 'jump')} / ${boundLabel(bindings, 'sprint')} / ${boundLabel(bindings, 'crouch')}.`;
+  }
+  return `RESERVED: [ / ] follow, ${reserved(SPECTATOR_RESERVED_KEYS.hideHud)} hide HUD, ${reserved(SPECTATOR_RESERVED_KEYS.thirdPerson)} third person · ESC lobby`;
+}
 
 export function reloadProgress(actor) {
   if (!actor?.reloading) return 0;

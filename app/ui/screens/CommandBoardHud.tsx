@@ -10,10 +10,117 @@
 // blocker reason per card. Navigation is a keyboard listbox (arrows/Home/End/
 // Enter — unchanged, driven by the page while the pointer is locked) and every
 // row, action, pin, expand and close control is also a full mouse target with a
-// focus-visible ring, shape + word cues and aria labels. The footer says how to
-// get back to combat. Reduced-motion snaps instead of animating.
+// focus-visible ring, shape + word cues and aria labels. The footer names the
+// bound Command key, Escape and CLOSE as the only ways back to combat.
+// Reduced-motion snaps instead of animating.
 import * as React from 'react';
 import {cocsBoardAnnouncement} from '../../../game/cocs-orders.mjs';
+import {formatResource} from '../../../game/format-ui.mjs';
+import {DEFAULT_BINDINGS,bindingLabel,bindingShortcut} from '../../../game/keybinds.mjs';
+
+const whole = formatResource;
+
+// ---------------------------------------------------------------------------
+// WP1.3 personal REQ slice — truthful purchase surface.
+//
+// The board is the in-play host: it already owns a pointer-lock surface, so an
+// explicit open never steals the cursor by surprise. `ReqStore` renders the
+// real `reqPurchaseOptions` model (page-owned): name, cost, effect copy,
+// affordability, the one disabled reason and the authoritative balance.
+// Dispatch only QUEUES/REQUESTS; `reconcileReqBuys` is what turns authority's
+// reply into CONFIRMED/REJECTED, never the click itself.
+// ---------------------------------------------------------------------------
+export const REQ_REASON_COPY: Record<string, string> = {
+  'wrong-mode': 'WRONG MODE',
+  'requires-depot': 'NO FRIENDLY DEPOT',
+  vehicle: 'DEPOT PUMA ALREADY LIVE',
+  'commander-only': 'COMMANDER ONLY',
+  'one-active-buff': 'ANOTHER BUFF IS ACTIVE',
+  'requires-relay': 'RELAY REQUIRED',
+  'insufficient-req': 'NEED MORE REQ',
+  'not-launched': 'NOT LAUNCHED',
+  'unknown-item': 'UNKNOWN ITEM',
+  eliminated: 'ELIMINATED',
+  'no-match': 'NO MATCH',
+  spectating: 'SPECTATING',
+  queued: 'QUEUED · AWAITING AUTHORITY',
+  'not-applied': 'NOT APPLIED',
+};
+
+/** One vocabulary for a single disabled/refused reason, in words. */
+export function reqReasonCopy(reason: any) {
+  const key = String(reason ?? '').trim().toLowerCase();
+  if (!key) return 'UNAVAILABLE';
+  return REQ_REASON_COPY[key] ?? key.replace(/-/g, ' ').toUpperCase();
+}
+
+// Ticks of authority silence before an unconfirmed dispatch is shown as a
+// refusal instead of a pending row. Generous enough for network latency.
+export const REQ_GRACE_TICKS = 90;
+
+/**
+ * Reconcile optimistic REQ dispatches against authority. Pure.
+ *
+ * A pending buy is CONFIRMED only when the authoritative record exists:
+ * `buys` (co-op `buyLog`) entries, `cocs-buy` `events`, or a `spent` delta
+ * walked in deterministic cardId order. A `refusalReason` (server reject) or a
+ * grace-expired unconfirmed row is REFUSED with a named reason. Never confirms
+ * from intent alone.
+ *
+ * @returns {{confirmed:any[],refused:any[],remaining:any[]}}
+ */
+export function reconcileReqBuys(pending: any[], input: any = {}) {
+  const list = Array.isArray(pending) ? pending : [];
+  const actorId = input.actorId;
+  const tick = Number(input.tick) || 0;
+  const graceTicks = Number.isFinite(Number(input.graceTicks)) ? Number(input.graceTicks) : REQ_GRACE_TICKS;
+  const buys = Array.isArray(input.buys) ? input.buys : [];
+  const events = Array.isArray(input.events) ? input.events : [];
+  const reasonFor = typeof input.reasonFor === 'function' ? input.reasonFor : () => null;
+  const confirmed: any[] = [], refused: any[] = [], unresolved: any[] = [];
+  const claimedBuys = new Set<any>(), claimedEvents = new Set<any>();
+  for (const buy of list) {
+    if (!buy) continue;
+    if (buy.refusalReason) { refused.push({...buy, reason: buy.refusalReason}); continue; }
+    const itemId = String(buy.itemId ?? '');
+    const logMatch = buys.find((entry: any) => entry && !claimedBuys.has(entry)
+      && String(entry.itemId ?? '') === itemId
+      && String(entry.actor ?? entry.actorId ?? '') === String(actorId)
+      && Number(entry.tick ?? 0) >= Number(buy.tick ?? 0));
+    const eventMatch = logMatch ? null : events.find((entry: any) => entry && !claimedEvents.has(entry)
+      && String(entry.type) === 'cocs-buy'
+      && String(entry.itemId ?? '') === itemId
+      && String(entry.actor ?? entry.actorId ?? '') === String(actorId)
+      && Number(entry.id ?? 0) > Number(buy.sinceEventId ?? 0));
+    if (logMatch) { claimedBuys.add(logMatch); confirmed.push(buy); continue; }
+    if (eventMatch) { claimedEvents.add(eventMatch); confirmed.push(buy); continue; }
+    unresolved.push(buy);
+  }
+  // Fallback for paths without a per-item log (PvPvE): the authoritative
+  // `reqSpent` delta only ever confirms REQ that was actually debited.
+  const spent = Number(input.spent);
+  const deltaConfirmed = new Set<any>();
+  if (Number.isFinite(spent) && unresolved.length) {
+    const floor = Math.min(...unresolved.map(buy => Number(buy.baselineSpent) || 0));
+    let delta = Math.max(0, spent - floor);
+    for (const buy of confirmed) if (Number(buy.baselineSpent) <= floor) delta = Math.max(0, delta - (Number(buy.cost) || 0));
+    const walked = [...unresolved].sort((a, b) => String(a.cardId ?? '').localeCompare(String(b.cardId ?? '')));
+    for (const buy of walked) {
+      const cost = Math.max(0, Number(buy.cost) || 0);
+      if (cost > 0 && delta + 1e-9 >= cost) { delta -= cost; deltaConfirmed.add(buy); confirmed.push(buy); }
+    }
+  }
+  const remaining: any[] = [];
+  for (const buy of unresolved) {
+    if (deltaConfirmed.has(buy)) continue;
+    if (tick > Number(buy.tick ?? 0) + graceTicks) refused.push({...buy, reason: reasonFor(buy) ?? 'not-applied'});
+    else remaining.push(buy);
+  }
+  return {confirmed, refused, remaining};
+}
+
+const DEFAULT_COMMAND_KEY = bindingLabel(DEFAULT_BINDINGS.command).toUpperCase();
+const DEFAULT_COMMAND_SHORTCUT = bindingShortcut(DEFAULT_BINDINGS.command);
 
 const SECTION_STATUS: Record<string, string[]> = {
   needs: ['blocked'],
@@ -25,6 +132,69 @@ const pips = (count: any) => {
   const n = Math.max(0, Math.min(5, Math.round(Number(count) || 0)));
   return '●'.repeat(n) + '○'.repeat(5 - n);
 };
+
+/**
+ * Compact REQ purchase list. Real buttons (44px via the shared `.cocs-sink`
+ * rules), never hover-only; every row states name, cost, effect, balance and
+ * its single disabled reason, plus a shape + word for the pending state.
+ */
+export function ReqStore({req, onBuy, pending, reducedMotion, defaultOpen = false}: any) {
+  const reduced = reducedMotion === true;
+  const [open, setOpen] = React.useState(defaultOpen === true);
+  const items: any[] = Array.isArray(req?.items) ? req.items : [];
+  const pendingList: any[] = Array.isArray(pending) ? pending : [];
+  if (!items.length) return null;
+  const balance = whole(req?.balance ?? 0);
+  return (
+    <section className={`cocs-board__req${reduced ? ' is-reduced' : ''}`} aria-label={`Personal REQ store. ${balance} REQ available, ${items.length} items.`}>
+      <button
+        type="button"
+        className="cocs-board__req-toggle"
+        aria-expanded={open}
+        aria-controls="cocs-req-store"
+        style={{minHeight: 44}}
+        onClick={() => setOpen(value => !value)}
+      >
+        <span aria-hidden="true">⇪</span> REQ STORE · <b>{balance}</b> REQ <small>{open ? 'HIDE' : `SHOW ${items.length} ITEMS`}</small>
+      </button>
+      {open && <div id="cocs-req-store" className="cocs-board__req-body">
+        <p className="cocs-board__req-balance" role="status">AUTHORITATIVE BALANCE <b>{balance}</b> REQ · {req?.mode === 'cocs-coop' ? 'OPERATIONS' : 'PVPvE'}</p>
+        <ul className="cocs-spend__sinks" aria-label="Personal REQ catalogue">
+          {items.map((item: any) => {
+            const outstanding = pendingList.find(entry => entry?.itemId === item.id);
+            const pendingWord = outstanding ? (outstanding.status === 'requested' ? 'REQUESTED' : 'QUEUED') : null;
+            const reason = pendingWord ? `${pendingWord} · AWAITING AUTHORITY` : item.disabledReason ? reqReasonCopy(item.disabledReason) : null;
+            const disabled = item.enabled !== true || Boolean(pendingWord);
+            const cost = Math.max(0, Number(item.cost) || 0);
+            return (
+              <li key={item.id}>
+                <div className={`cocs-sink${disabled ? ' is-locked' : ' is-ready'}`}>
+                  <button
+                    type="button"
+                    className="cocs-sink__buy"
+                    disabled={disabled}
+                    aria-label={`${item.name}. ${item.effectCopy ?? 'No effect copy.'} Cost ${whole(cost)} REQ. ${reason ? `Unavailable: ${reason}.` : 'Ready and affordable.'} Balance ${balance} REQ.`}
+                    title={reason ? `${item.name} unavailable: ${reason}` : item.effectCopy}
+                    onClick={() => onBuy?.(item.id, item.target === 'depot' ? {depotId: req?.depotId ?? null} : undefined)}
+                  >
+                    <span className="cocs-sink__label">
+                      <b>{item.name}</b>
+                      <small>COST <b>{whole(cost)}</b> REQ</small>
+                    </span>
+                    <span className="cocs-sink__effect">{item.effectCopy}</span>
+                    {reason
+                      ? <em className="cocs-sink__reason"><i aria-hidden="true">⚠</i> {reason}</em>
+                      : <em className="cocs-sink__ready"><i aria-hidden="true">▶</i> READY · AFFORDABLE</em>}
+                  </button>
+                </div>
+              </li>
+            );
+          })}
+        </ul>
+      </div>}
+    </section>
+  );
+}
 
 const SectionList = ({section, cards, activeId, expanded, onToggleExpand, onSelect, onActivate}: any) => {
   const shown = expanded ? cards : section.cards;
@@ -71,7 +241,7 @@ const SectionList = ({section, cards, activeId, expanded, onToggleExpand, onSele
   );
 };
 
-export function CommandBoardHud({command, open, collapsed, pinned, activeId, reducedMotion, cursorKey = 'ALT', onSelect, onActivate, onClose, onTogglePin}: any) {
+export function CommandBoardHud({command, open, collapsed, pinned, activeId, reducedMotion, commandKey = DEFAULT_COMMAND_KEY, commandShortcut = DEFAULT_COMMAND_SHORTCUT, onSelect, onActivate, onClose, onTogglePin}: any) {
   const view = command?.boardView;
   const [expanded, setExpanded] = React.useState<Record<string, boolean>>({});
   const listRef = React.useRef<HTMLDivElement>(null);
@@ -84,7 +254,8 @@ export function CommandBoardHud({command, open, collapsed, pinned, activeId, red
         <button
           type="button"
           className={`cocs-board-chip${reduced ? ' is-reduced' : ''}`}
-          aria-label={`Command board collapsed. ${summary.needsYou} blocked, ${summary.running} running. Press B to open, or activate to pin open.`}
+          aria-label={`Command board collapsed. ${summary.needsYou} blocked, ${summary.running} running. Press ${commandKey} to open, or activate to pin open.`}
+          aria-keyshortcuts={commandShortcut}
           onClick={onTogglePin}
         >
           <span aria-hidden="true">⚠</span> {summary.chip}
@@ -106,13 +277,13 @@ export function CommandBoardHud({command, open, collapsed, pinned, activeId, red
     <section
       className={`cocs-board${reduced ? ' is-reduced' : ''}`}
       style={{width: `${widthPercent}vw`, maxWidth: `${widthPercent}%`} as any}
-      aria-label={`Command board. ${summary.needsYou} blocked, ${summary.running} running, ${summary.done} done. Mouse input is active; close the board to return to combat.`}
-      aria-keyshortcuts="B Escape Enter ArrowUp ArrowDown Home End"
+      aria-label={`Command board. ${summary.needsYou} blocked, ${summary.running} running, ${summary.done} done. Mouse input is active. Press ${commandKey} or Escape, or use CLOSE, to return to combat.`}
+      aria-keyshortcuts={`${commandShortcut} Escape Enter Space ArrowUp ArrowDown ArrowLeft ArrowRight Home End`}
     >
       <header className="cocs-board__head">
         <span className="eyebrow">COMMAND · LATTICE</span>
         <span className="cocs-board__chip" role="status">{summary.chip}</span>
-        <button type="button" className="cocs-board__pin" aria-label={pinned ? 'Unpin command board (closes with B or Escape)' : 'Pin the command board open'} aria-pressed={pinned === true} onClick={onTogglePin}>{pinned ? 'PINNED' : 'PIN'}</button>
+        <button type="button" className="cocs-board__pin" aria-label={pinned ? `Unpin command board (closes with ${commandKey} or Escape)` : 'Pin the command board open'} aria-pressed={pinned === true} onClick={onTogglePin}>{pinned ? 'PINNED' : 'PIN'}</button>
         <button type="button" className="cocs-board__close" aria-label="Close command board and return to combat" onClick={onClose}>× CLOSE</button>
       </header>
       <p className="visually-hidden" role="status" aria-live="polite">{cocsBoardAnnouncement(view)}</p>
@@ -130,7 +301,8 @@ export function CommandBoardHud({command, open, collapsed, pinned, activeId, red
           />
         ))}
       </div>
-      <p className="cocs-board__hint"><b>CLICK TO FIGHT</b> · <kbd>{cursorKey}</kbd> OR CLICK THE ARENA RETURNS TO COMBAT · <kbd>B</kbd> / <kbd>ESC</kbd> CLOSES</p>
+      {command?.req && <ReqStore req={command.req} pending={command.reqPending} onBuy={command.onBuyReq} reducedMotion={reduced}/>}
+      <p className="cocs-board__hint"><b>MOUSE ACTIVE</b> · COMMAND <kbd>{commandKey}</kbd> / <kbd>ESC</kbd> / <b>× CLOSE</b> RETURNS TO COMBAT</p>
     </section>
   );
 }

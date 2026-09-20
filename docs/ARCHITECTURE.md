@@ -395,9 +395,9 @@ git history) rather than duplicated so it cannot drift.
   `title-footer` span in `app/page.tsx`; this is the release-of-record, not
   `package.json` (which may lag).
 - `scripts/verify-deployment.mjs` — `linkedAssets(html)` deduplicates
-  `/assets/*.css|js`; `verifyDeployment(base, {fetchImpl, version})` asserts
-  HTTP 200 + correct content type for the HTML and every linked asset (and
-  optionally the release string).
+  `/assets/*.css|js`; `verifyDeployment(base, {fetchImpl, version, codename})`
+  asserts HTTP 200 + correct content type for the HTML and every linked asset,
+  and that the `title-footer` span equals `vX.Y · CODENAME` exactly.
 - `scripts/deploy.sh` — backs up `dist/`, builds, restarts
   `token-arena-web.service` (and `token-arena-server.service` with
   `--with-game-server`), gates on `systemctl --user is-active`, verifies the

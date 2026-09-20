@@ -1,4 +1,14 @@
-.panel{position:absolute;left:50%;bottom:calc(var(--safe-bottom,0px) + 126px);transform:translateX(-50%);z-index:var(--z-panel,2);width:min(560px,90vw);max-height:54vh;overflow:auto;display:grid;gap:9px;padding:14px 16px;border:1px solid #4d8f88;border-left:4px solid var(--accent,#78e3c8);border-radius:10px;background:#091c20f5;box-shadow:0 10px 30px #0008;color:#edf6f5;pointer-events:auto;font:14px/1.45 var(--font-ui,sans-serif);font-variant-numeric:tabular-nums;text-shadow:0 1px 2px #000}
+.panel{position:absolute;left:50%;bottom:calc(var(--safe-bottom,0px) + 126px);transform:translateX(-50%);z-index:calc(var(--z-touch,6) + 1);width:min(560px,90vw);max-height:54vh;overflow:auto;display:grid;gap:9px;padding:14px 16px;border:1px solid #4d8f88;border-left:4px solid var(--accent,#78e3c8);border-radius:10px;background:#091c20f5;box-shadow:0 10px 30px #0008;color:#edf6f5;pointer-events:auto;font:14px/1.45 var(--font-ui,sans-serif);font-variant-numeric:tabular-nums;text-shadow:0 1px 2px #000}
+/* Only the lesson's real controls sit above touch capture while the match is
+   live. With a coarse pointer the card background is input-transparent so the
+   thumb zones keep working around it; on the paused completion/done card it
+   becomes a full surface (the page also suspends the touch layer then). */
+.panel :is(button,summary,a,input,select,[role="button"]){pointer-events:auto}
+.panel[data-training-phase="complete"],.panel[data-training-phase="done"],.panel[data-training-phase="skipped"]{pointer-events:auto}
+@media(pointer:coarse){
+ .panel{pointer-events:none}
+ .panel[data-training-phase="complete"],.panel[data-training-phase="done"],.panel[data-training-phase="skipped"]{pointer-events:auto}
+}
 /* Active instructions sit above the sightline. Completion can use the larger
    reading card because the local match is paused and the cursor is released. */
 .panel[data-training-phase="active"]{top:calc(var(--safe-top,0px) + 96px);bottom:auto;max-height:calc(50dvh - var(--safe-top,0px) - 116px);padding:10px 12px;gap:6px;font-size:12px}
@@ -14,7 +24,7 @@
 .progress{display:block;width:100%;height:7px;border:0;border-radius:4px;overflow:hidden;background:#284046;accent-color:#83e8c7}.progress::-webkit-progress-bar{background:#284046}.progress::-webkit-progress-value{background:#83e8c7}.progress::-moz-progress-bar{background:#83e8c7}
 .controls{font:600 12px/1.6 var(--font-mono,monospace);color:#d3e7eb}
 .next{display:grid;gap:2px;border-top:1px solid #476b6c;padding-top:8px;font-size:13px}.next b{font-size:10px;letter-spacing:.08em;color:#adc6c6}.next small{color:#c2d8d8;font-size:12px}
-.footer{display:grid;gap:8px}.footer small{font-size:11px;color:#adc6c6}.actions{display:flex;flex-wrap:wrap;gap:8px}.actions button{min-height:40px;padding:8px 12px;border:1px solid #5f8989;border-radius:5px;background:#152e34;color:#eaf9f8;font:700 11px/1.3 var(--font-mono,monospace);cursor:pointer}.actions button.primary{background:#a8f5dc;color:#06221c;border-color:#a8f5dc}.actions button:focus-visible{outline:3px solid #fff;outline-offset:3px}.actions button:hover{filter:brightness(1.12)}
+.footer{display:grid;gap:8px;position:sticky;bottom:-2px;z-index:1;padding-top:6px;background:linear-gradient(180deg,rgba(9,28,32,0),#091c20f5 22%)}.footer small{font-size:11px;color:#adc6c6}.actions{display:flex;flex-wrap:wrap;gap:8px}.actions button{min-height:40px;padding:8px 12px;border:1px solid #5f8989;border-radius:5px;background:#152e34;color:#eaf9f8;font:700 11px/1.3 var(--font-mono,monospace);cursor:pointer}.actions button.primary{background:#a8f5dc;color:#06221c;border-color:#a8f5dc}.actions button:focus-visible{outline:3px solid #fff;outline-offset:3px}.actions button:hover{filter:brightness(1.12)}
 @media(max-width:760px){.panel{bottom:calc(var(--safe-bottom,0px) + 140px);padding:10px 12px;gap:7px;font-size:13px;max-height:48vh}.panel h2{font-size:17px}.actions button{min-height:44px}.goal{flex-wrap:wrap}}
 @media(max-height:600px){.panel{bottom:calc(var(--safe-bottom,0px) + 80px);max-height:56vh}}
 @media(max-width:760px){.panel[data-training-phase="active"] .actions button{min-height:44px}}

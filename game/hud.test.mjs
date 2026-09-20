@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {vehicleHud, escapeHint, voiceHint, reloadProgress, dynamicCrosshairGap, lowAmmo, postureLabel, hitMarker, projectToScreen, damageNumberStyle, boundList, damageBearing, killBanner, weaponTag, ammoText, commandBrief, isTeamMode, matchStartBanner, modeColumns, modeGoal, modePrimary, modeTargetText, objectiveCopy, suddenDeathBanner, grenadeStatus, killstreakCallout, ladderStatus, streakStatus, audioCaption, scoreAnnouncer, multikillLabel, spreeLabel, recentKills, killCallout, matchAwards, killFeedWeapon, connectionQuality, spectateActor, nextSpectateTarget, spectatorBoard, spectatorTeams, weaponRangeInfo, weaponRangeLabel, scoreStats, cocsDominanceStatus, cocsOperationsStatus, cocsOutcomeView, acceptCocsAnnouncement, cocsAnnouncePriority, cocsAnnouncementTTL, COCS_ANNOUNCE_PRIORITY} from './hud.mjs';
+import {vehicleHud, escapeHint, voiceHint, spectatorControls, SPECTATOR_RESERVED_KEYS, reloadProgress, dynamicCrosshairGap, lowAmmo, postureLabel, hitMarker, projectToScreen, damageNumberStyle, boundList, damageBearing, killBanner, weaponTag, ammoText, commandBrief, isTeamMode, matchStartBanner, modeColumns, modeGoal, modePrimary, modeTargetText, objectiveCopy, suddenDeathBanner, grenadeStatus, killstreakCallout, ladderStatus, streakStatus, audioCaption, scoreAnnouncer, multikillLabel, spreeLabel, recentKills, killCallout, matchAwards, killFeedWeapon, connectionQuality, spectateActor, nextSpectateTarget, spectatorBoard, spectatorTeams, weaponRangeInfo, weaponRangeLabel, scoreStats, cocsDominanceStatus, cocsOperationsStatus, cocsOutcomeView, acceptCocsAnnouncement, cocsAnnouncePriority, cocsAnnouncementTTL, COCS_ANNOUNCE_PRIORITY} from './hud.mjs';
 import {WEAPONS} from './data.mjs';
 import {GAME_MODES,teamMode} from './config.mjs';
 import {soccerDisplay,soccerResult} from './race-ui.mjs';
@@ -37,6 +37,28 @@ test('voice hint exposes PTT and voice activation without implying a silent mic'
   assert.equal(voiceHint(true, 'ptt'), 'V / TALK');
   assert.equal(voiceHint(true, 'auto'), 'VOICE / AUTO TALK');
   assert.equal(voiceHint(true, 'unknown'), 'VOICE ON');
+});
+
+test('vehicle prompts and the PTT hint follow remapped bindings', () => {
+  const bindings = {interact: 'KeyL', voice: 'KeyI'};
+  assert.equal(vehicleHud(player, [ride], [], false, bindings).prompt, 'L / ENTER PUMA');
+  assert.equal(vehicleHud({...player, vehicleId: 0}, [{...ride, driver: 0}], [], false, bindings).prompt, 'L / EXIT PUMA');
+  assert.equal(vehicleHud(player, [ride]).prompt, 'E / ENTER PUMA', 'pure callers keep the default label');
+  assert.equal(voiceHint(true, 'ptt', bindings), 'I / TALK');
+  assert.equal(voiceHint(true, 'auto', bindings), 'VOICE / AUTO TALK', 'auto talk has no key to name');
+});
+
+test('spectator controls label fixed keys as reserved and follow movement bindings', () => {
+  const local = spectatorControls({local: true, cursorKey: 'O'});
+  assert.match(local, /^O cursor/);
+  assert.match(local, /RESERVED: \[ \/ \] follow, B camera, F free cam, H hide HUD/);
+  assert.match(local, /Free cam: WASD \/ SPACE \/ LEFT SHIFT \/ LEFT CTRL\./);
+  const remote = spectatorControls({local: false});
+  assert.match(remote, /^RESERVED: \[ \/ \] follow, H hide HUD, P third person · ESC lobby$/);
+  assert.deepEqual(SPECTATOR_RESERVED_KEYS, {camera: 'KeyB', freeCam: 'KeyF', hideHud: 'KeyH', thirdPerson: 'KeyP'});
+  const remapped = spectatorControls({local: true, cursorKey: 'O', bindings: {forward: 'KeyI', left: 'KeyJ', back: 'KeyK', right: 'KeyL', jump: 'KeyU', sprint: 'ShiftRight', crouch: 'ControlRight'}});
+  assert.match(remapped, /Free cam: IJKL \/ U \/ RIGHT SHIFT \/ RIGHT CTRL\./, 'free-cam copy reads the live movement bindings');
+  assert.match(remapped, /RESERVED: \[ \/ \] follow, B camera/, 'fixed spectator keys stay labelled reserved even after a remap');
 });
 
 test('reloadProgress tracks a countdown timer and clamps to the bar', () => {

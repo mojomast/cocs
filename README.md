@@ -13,7 +13,7 @@ on your machine, and every asset is procedural.
 
 [**Play it live**](https://arena.ussyco.de) · [Source](https://github.com/mojomast/tokenarena)
 
-![version](https://img.shields.io/badge/version-v8.4%20FIELDCRAFT-2dd4bf)
+![version](https://img.shields.io/badge/version-v8.5%20HANDOFF-2dd4bf)
 ![runtime](https://img.shields.io/badge/runtime-Node%2022.13%2B-339933)
 ![engine](https://img.shields.io/badge/engine-Three.js-000000)
 ![tests](https://img.shields.io/badge/tests-game%20%C2%B7%20server%20%C2%B7%20SSR-4c9f70)
@@ -432,12 +432,39 @@ assets. Full procedure and verification: [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md
 | [docs/CHANGELOG.md](docs/CHANGELOG.md) | The complete release history. |
 | [docs/MOTH.md](docs/MOTH.md) | Baking and loading Moth Quantum assets. |
 | [docs/VERIFICATION.md](docs/VERIFICATION.md) | Dated evidence and known gaps. |
+| [docs/V8.4-IMPROVEMENT-PLAN.md](docs/V8.4-IMPROVEMENT-PLAN.md) | Post-v8.4 audit and prioritized improvement roadmap. |
 | [docs/spec/](docs/spec/) | Historical specification and development plan. |
 
 ## Changelog
 
 Recent releases. The full history lives in
 [docs/CHANGELOG.md](docs/CHANGELOG.md).
+
+### v8.5 · HANDOFF — 2026-09-20
+- COCS orders, spends, terminals, commands and REQ purchases are round-scoped
+  and idempotent: duplicates apply once, payload reuse and stale rounds are
+  refused, and accepted hold/attack tasks stay RUNNING until they truly finish.
+- Command Board feedback reads QUEUED until the authoritative simulation
+  confirms; refusals always carry a reason; reconnects reconcile and rematches
+  start clean.
+- Deployments publish release/commit/build/protocol for both services and roll
+  back web and server together; incompatible protocol majors are refused at join.
+- Route advice consumes the real navigation graph, supply cuts, and authority
+  ARRAY legality; Operations executes authored per-wave fronts.
+- Personal REQ offers its four real buffs plus the Operations Puma with honest
+  affordability and confirmation; effectless items cannot be bought.
+- Touch, keyboard, reticle-corridor and portrait layout fixes keep actionable
+  surfaces reachable; prompts and shortcut names resolve through live bindings.
+- Results are viewer-scoped, one modal stack owns focus and Escape, the coach
+  opens after arena entry, and assistive announcements are event-gated.
+- Training is a protected practice scenario that cannot be cut short; cards
+  disclose no-reward status and completion offers a real next step.
+- An optional device-local study recorder supports moderated playtests; it is
+  off by default, bounded, non-identifying and never sent anywhere.
+- No combat or Director-tier balance changed. Human playtesting remains the
+  tuning gate; D2-D4 measurement remains deferred.
+- Scope: game-server and deploy tooling changed, so a server release restarts
+  the game server and briefly disconnects connected clients.
 
 ### v8.4 · FIELDCRAFT — 2026-09-20
 - LATTICE exposes authoritative dominance progress and Operations wave/HQ state;

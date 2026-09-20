@@ -10,6 +10,8 @@
 // the same model so they can never disagree about a legal target.
 import {DEFAULT_BINDINGS, bindingLabel} from './keybinds.mjs';
 import {spawnRouteContext} from './spawn-placement.mjs';
+import {COCS_ENDGAME_FRACTION} from './cocs.mjs';
+import {navigation as buildNavigation} from './core.mjs';
 
 export const isLattice = mode => mode === 'cocs' || mode === 'cocs-coop';
 // Quick-start must fill a real front rather than inherit a three-player FFA.
@@ -203,14 +205,59 @@ function ownedSupplyNodes(graph, team, cuts) {
 }
 
 // `spawnRouteContext` is the existing gameplay path-distance resolver. Maps are
-// deep-frozen, so its bounded source cache lives beside them in a WeakMap rather
-// than being attached to map data during a render.
+// deep-frozen, so the built navigation graph and its bounded source caches live
+// beside them in WeakMaps rather than being attached to map data during a
+// render. `navigation()` is the same deterministic builder `Match` uses, so the
+// authored production shape (`map.navNodes`) resolves real walkability instead
+// of straight-line distance — and it is built at most once per map object.
+const navigationGraphs = new WeakMap();
 const navigationCaches = new WeakMap();
-function navigationRoute(map, player) {
-  if (!map || typeof map !== 'object' || !Array.isArray(map.nav) || !Array.isArray(map.edges) || !player) return null;
-  let cache = navigationCaches.get(map);
-  if (!cache) { cache = new Map(); navigationCaches.set(map, cache); }
-  return spawnRouteContext({nav: map.nav, edges: map.edges, _spawnRouteCache: cache}, player);
+
+function mapNavigationGraph(map) {
+  if (!map || typeof map !== 'object' || !Array.isArray(map.navNodes) || !map.navNodes.length) return null;
+  let graph = navigationGraphs.get(map);
+  if (!graph) {
+    graph = buildNavigation(map);
+    navigationGraphs.set(map, graph);
+  }
+  return graph;
+}
+
+// Route context precedence: an explicit `{nav, navEdges}` pair (the live Match
+// navigation graph the page already built), the legacy `map.nav`/`map.edges`
+// spelling, then the authored production shape (`map.navNodes`) through the
+// real nav builder. Returns null when the player has no finite position or no
+// graph. `navEdges` is deliberately distinct from the topology `edges` option.
+function navigationRoute(map, player, options = {}) {
+  if (!player || !Number.isFinite(player.x) || !Number.isFinite(player.z)) return null;
+  let source = null, nav = null, edges = null;
+  if (Array.isArray(options.nav) && options.nav.length && Array.isArray(options.navEdges)) {
+    source = options.nav; nav = options.nav; edges = options.navEdges;
+  } else if (Array.isArray(map?.nav) && map.nav.length && Array.isArray(map.edges)) {
+    source = map; nav = map.nav; edges = map.edges;
+  } else {
+    const graph = mapNavigationGraph(map);
+    if (!graph?.nodes?.length || !Array.isArray(graph.edges)) return null;
+    source = map; nav = graph.nodes; edges = graph.edges;
+  }
+  let cache = navigationCaches.get(source);
+  if (!cache) { cache = new Map(); navigationCaches.set(source, cache); }
+  return spawnRouteContext({nav, edges, _spawnRouteCache: cache}, player);
+}
+
+// Authority phase parity: `capturableBy` opens ARRAY anchors only while
+// `state.endgame` is true. The sim derives that from the published clock
+// fraction (`cocsPhase`) unless a test sets `forceEndgame`, so the view resolves
+// the same inputs: an explicit option (local match state / tests), a snapshot
+// field if one is published, then the clock fraction. Purely a read of the
+// snapshot; never a sim decision.
+export function latticeEndgameActive(snapshot, options = {}) {
+  if (options.endgame === true) return true;
+  const snap = snapshot?.cocs && typeof snapshot.cocs === 'object' ? snapshot.cocs : snapshot;
+  if (snap?.endgame === true) return true;
+  const limit = Number(snapshot?.config?.timeLimit);
+  const time = Number(snapshot?.time);
+  return limit > 0 && Number.isFinite(time) && time / limit >= COCS_ENDGAME_FRACTION;
 }
 
 function latticePriority(node, siegeActive) {
@@ -232,9 +279,12 @@ function latticePriority(node, siegeActive) {
  * same node list, so adjacency, reachability and siege overrides can never
  * disagree between surfaces.
  *
- * Options: `{graph, adjacency, edges, cuts, route, endgame, siege}`.
- * `route` is either `{travel(point) -> number|null}` (the real navigation
- * route context, e.g. `spawnRouteContext`) or a plain function.
+ * Options: `{graph, adjacency, edges, cuts, endgame, route, nav, navEdges,
+ * siege}`. `route` is either `{travel(point) -> number|null}` (the real
+ * navigation route context, e.g. `spawnRouteContext`) or a plain function;
+ * `nav`/`navEdges` are the live Match navigation graph when the caller already
+ * has it. `cuts` is the team-visible supply-cut list; PvP snapshots also
+ * publish it on `intel[team].cutNodes` and the model consumes both.
  */
 export function latticeTargetModel(snapshot, map, player, options = {}) {
   const snap = snapshot?.cocs && typeof snapshot.cocs === 'object' ? snapshot.cocs : snapshot;
@@ -242,8 +292,16 @@ export function latticeTargetModel(snapshot, map, player, options = {}) {
   const graph = options.graph ?? latticeGraph(snap, map, options);
   if (!graph || !graph.nodes.length) return null;
   const team = player?.team === 0 || player?.team === 1 ? Number(player.team) : null;
-  const endgame = snap.endgame === true || options.endgame === true;
-  const cuts = new Set(Array.isArray(options.cuts) ? options.cuts.map(String) : []);
+  const endgame = latticeEndgameActive(snapshot, options);
+  // Per-team supply cuts are authoritative state: PvP snapshots publish them on
+  // `intel[team].cutNodes` (game/cocs.mjs §11.4), and local/co-op callers may
+  // hand the live sim list in `options.cuts`. Cuts change LINKED/CUT OFF supply
+  // and ranking only — never capture legality.
+  const intelCuts = team === null ? null : snap.intel?.[team]?.cutNodes;
+  const cuts = new Set([
+    ...(Array.isArray(options.cuts) ? options.cuts : []),
+    ...(Array.isArray(intelCuts) ? intelCuts : []),
+  ].map(String));
   const connected = team === null ? new Set() : ownedSupplyNodes(graph, team, cuts);
   const siegeRaw = snap.director?.siege && typeof snap.director.siege === 'object' ? snap.director.siege : null;
   const siegeNode = siegeRaw
@@ -260,7 +318,7 @@ export function latticeTargetModel(snapshot, map, player, options = {}) {
     attackers: num(siegeRaw.attackers, 0),
     defenders: num(siegeRaw.defenders, 0),
   } : null;
-  const mapRoute = navigationRoute(map, player);
+  const mapRoute = navigationRoute(map, player, options);
   const routeFn = typeof options.route === 'function' ? options.route
     : options.route && typeof options.route.travel === 'function' ? point => options.route.travel(point)
       : mapRoute && typeof mapRoute.travel === 'function' ? point => mapRoute.travel(point)
@@ -269,13 +327,20 @@ export function latticeTargetModel(snapshot, map, player, options = {}) {
     const owner = raw.owner === 0 || raw.owner === 1 ? Number(raw.owner) : null;
     const archetype = String(raw.archetype ?? 'front');
     const capturable = capturableArchetype(archetype);
-    const arrayOpen = archetype === 'array' && endgame;
+    const arrayAnchor = archetype === 'array';
+    const arrayOpen = arrayAnchor && endgame;
     const mine = team !== null && owner === team;
     const enemy = team !== null && owner !== null && owner !== team;
     const live = raw.live === true || (capturable && owner !== null);
     const adjacentIds = (graph.adjacency[raw.id] ?? []).filter(id => graph.byId.get(id)?.owner === team);
     const adjacent = adjacentIds.length > 0;
-    const legal = Boolean(team !== null && capturable && (arrayOpen || live) && (mine || adjacent));
+    // `capturableBy` parity (game/cocs.mjs §5.2): HQ anchors are never
+    // capturable, ARRAY anchors open only in the endgame and ignore the live
+    // set, and every other capturable node must be live. Ownership and
+    // adjacency stay the remaining gates. `mine` keeps HOLD/defend actionable on
+    // an owned node — the authority simply never calls that a capture.
+    const captureOpen = capturable ? live : arrayOpen;
+    const legal = Boolean(team !== null && (capturable || arrayAnchor) && captureOpen && (mine || adjacent));
     const attackable = legal && !mine;
     const staging = adjacentIds.some(id => connected.has(id));
     const supplyConnected = mine ? connected.has(raw.id) : attackable ? staging : false;

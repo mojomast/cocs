@@ -27,7 +27,12 @@ export function RespawnOverlay({ui}:ScreenProps){
  const {respawn,killNotice,switchRespawnLoadout,respawnEditor,setRespawnEditor,respawnQueue}=ui;
  const [pick,setPick]=useState<{character:string;harness:string}|null>(null);
  const [error,setError]=useState('');
- const open=respawn?.open===true;
+ // WP2.2: the respawn surface never announces by itself. Death and respawn
+ // each reach assistive tech once through the single PlayingHud channel; this
+ // overlay keeps the countdown visible but non-live and never lets the
+ // team-only loadout editor leak into an FFA death (`respawn.allowed` is the
+ // same team-mode gate `respawnOverlayView` applies).
+ const open=respawn?.open===true&&respawn?.allowed!==false;
  const editorOpen=open&&respawnEditor===true;
  const firstPick=useRef<HTMLButtonElement>(null);
  // The cursor key is the explicit open gesture; land focus on the first
@@ -72,10 +77,10 @@ export function RespawnOverlay({ui}:ScreenProps){
   if(event.shiftKey?document.activeElement===first:document.activeElement===last){event.preventDefault();(event.shiftKey?last:first).focus();}
  };
  const killed=killNotice?.detail?`${killNotice.text} · ${killNotice.detail}`:killNotice?.text??'ELIMINATED';
- if(!editorOpen) return <div className="respawn-overlay" role="region" aria-label="Respawn status" style={{pointerEvents:'none'}}>
+ if(!editorOpen) return <div className="respawn-overlay" role="region" aria-label={`Respawn status. ${killed}. ${respawn.respawnIn!==null?'Respawning soon.':'Awaiting respawn.'}`} style={{pointerEvents:'none'}}>
   <div className="respawn-overlay__head">
    <div className="respawn-overlay__headline">
-    <p className="respawn-overlay__eyebrow">{respawn.respawnIn!==null?`RESPAWN IN ${Math.ceil(respawn.respawnIn)}S`:'AWAITING RESPAWN'}</p>
+    <p className="respawn-overlay__eyebrow" aria-hidden="true">{respawn.respawnIn!==null?`RESPAWN IN ${Math.ceil(respawn.respawnIn)}S`:'AWAITING RESPAWN'}</p>
     <strong className="respawn-overlay__killed">{killed}</strong>
    </div>
    {rider&&<Chip tone="accent">{rider.description}</Chip>}
@@ -89,7 +94,7 @@ export function RespawnOverlay({ui}:ScreenProps){
  return <div className="respawn-overlay" role="dialog" aria-label="Respawn loadout queue" onKeyDown={trapTab}>
   <div className="respawn-overlay__head">
    <div className="respawn-overlay__headline">
-    <p className="respawn-overlay__eyebrow">{respawn.respawnIn!==null?`RESPAWN IN ${Math.ceil(respawn.respawnIn)}S`:'AWAITING RESPAWN'}</p>
+    <p className="respawn-overlay__eyebrow" aria-hidden="true">{respawn.respawnIn!==null?`RESPAWN IN ${Math.ceil(respawn.respawnIn)}S`:'AWAITING RESPAWN'}</p>
     <strong className="respawn-overlay__killed">{killed}</strong>
    </div>
    {rider&&<Chip tone="accent">{rider.description}</Chip>}

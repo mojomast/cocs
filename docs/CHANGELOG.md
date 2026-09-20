@@ -16,6 +16,61 @@ record in [VERIFICATION.md](VERIFICATION.md).
 
 ---
 
+## v8.5 · HANDOFF — 2026-09-20
+
+The reliability handoff: actions that apply exactly once, builds that can be
+rolled back together, routes and waves that match their authored data, and a
+training course that cannot be cut short. Game-server action handling and deploy
+tooling changed, so a server release restarts the game server and connected
+multiplayer clients briefly disconnect.
+
+- **Authoritative actions:** every COCS order, economy action, terminal,
+  command and REQ buy carries a round revision and per-player sequence.
+  Duplicate delivery applies once and returns the cached outcome; reuse with a
+  different payload, stale rounds and cross-actor ID collisions are refused.
+  Accepted hold/attack tasks stay RUNNING until the objective task actually
+  completes, expires or is replaced, and every refusal carries a reason.
+- **Round lifecycle:** rematches start with no inherited cards or cooldowns,
+  while a same-round reconnect reconciles optimistic state from the authoritative
+  snapshot instead of clearing it. The Command Board reads QUEUED until the
+  simulation confirms.
+- **Identified releases:** `game/build-identity.mjs` publishes release, commit,
+  build ID and protocol from both services. The deploy gate refuses a dirty
+  tree, verifies exact web/server identity after restart, rolls back both
+  services to the previous commit on failure, and no longer implies zero
+  downtime. JOIN/CREATE refuse an incompatible protocol major.
+- **Production routes:** the shared target model consumes the real navigation
+  graph, team supply cuts update LINKED/CUT OFF state and ranking without
+  changing legality, ARRAY endgame legality mirrors the authority, and an
+  Operations CUT/SABOTAGE terminal channel applies end to end.
+- **Authored Operations:** each wave and tier runs its published simultaneous
+  fronts, the wave event reports the same count, and retargets preserve
+  deterministic per-front assignments instead of collapsing the force.
+- **Personal REQ:** four launch buffs plus the Operations Puma are offered with
+  cost, effect, affordability and one reason; the Command Board hosts the store,
+  local and online dispatch share the deterministic spend point, and
+  confirmation requires the snapshot or buy log. Effectless catalogue rows can
+  no longer charge REQ.
+- **Input and presentation:** touch suspension while a surface owns input, focus
+  movement on training completion, reticle-corridor and portrait overflow fixes,
+  binding-complete prompts, and a Command Board hint that names its real exits.
+- **Results and onboarding:** spectator results are neutral match totals, local
+  order intent is filtered like the network, one modal stack owns focus and
+  Escape, and the coach opens after arena entry with versioned skip/completion
+  state and binding-derived text.
+- **Assistive output:** one prioritized event-gated announcement channel covers
+  objective, order, spend, training, death and respawn transitions; changing
+  readouts are non-live groups.
+- **Protected training:** active courses cannot end by time, score, dominance or
+  HQ loss; spend windows and terminal/device targets are guaranteed; a lethal
+  hit resolves through a fast deterministic respawn; practice/no-reward status
+  is disclosed and completion offers Recommended Match, free play or Loadout.
+- **Research tooling:** an optional, device-local, off-by-default study recorder
+  stores a bounded non-identifying event log with download/delete controls.
+  The governed worksheet covers consent, withdrawal, retention and evidence
+  taxonomy. No balance changed; human playtesting remains the tuning gate and
+  D2-D4 measurement remains deferred.
+
 ## v8.4 · FIELDCRAFT — 2026-09-20
 
 The fieldwork pass closes the loop from objective truth to a legal next decision,

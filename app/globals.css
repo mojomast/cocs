@@ -793,7 +793,7 @@ a.icon-button.github-link>span{position:absolute;width:1px;height:1px;overflow:h
 @keyframes announceGlow{0%{opacity:0;transform:scale(.6)}40%{opacity:1}100%{opacity:0;transform:scale(1.25)}}
 @keyframes announceSweep{0%{opacity:0;transform:translateX(-50%) scaleX(.2)}35%{opacity:1}100%{opacity:0;transform:translateX(-50%) scaleX(1.1)}}
 @keyframes killPop{0%{opacity:0;transform:translate(-50%,12px) scale(.82)}15%{opacity:1;transform:translate(-50%,0) scale(1.06)}32%{transform:translate(-50%,0) scale(1)}100%{opacity:0;transform:translate(-50%,-10px) scale(1)}}
-@media(max-width:600px){.vitals{min-width:0;padding:10px}.health strong{font-size:clamp(28px,9vw,44px)}.match-clock,.frag-counter strong{font-size:clamp(22px,7vw,34px)}.weapon-hud strong{font-size:clamp(26px,8vw,42px)}.objective-announcer strong{font-size:clamp(30px,11vw,52px)}}
+@media(max-width:600px){.vitals{min-width:0;padding:10px}.health strong{font-size:clamp(28px,9vw,44px)}.match-clock,.frag-counter strong{font-size:clamp(22px,7vw,34px)}.frag-counter strong{white-space:normal;line-height:1.15}.weapon-hud strong{font-size:clamp(26px,8vw,42px)}.objective-announcer strong{font-size:clamp(30px,11vw,52px)}}
 @media(prefers-reduced-motion:reduce){.objective-announcer,.kill-banner,.kill-feed>div,.objective-announcer::before,.objective-announcer::after{animation:none}}
 
 /* Touch controls (mobile): a move stick, a floating look stick and a
@@ -816,6 +816,14 @@ html, body { overscroll-behavior: none; }
 .touch-primary { position: absolute; right: max(18px, env(safe-area-inset-right)); bottom: max(20px, env(safe-area-inset-bottom)); display: flex; gap: 10px; align-items: flex-end; pointer-events: none; }
 .touch-util { position: absolute; top: max(12px, env(safe-area-inset-top)); right: max(14px, env(safe-area-inset-right)); display: flex; gap: 8px; pointer-events: none; }
 .touch-actions > *, .touch-primary > *, .touch-util > * { pointer-events: auto; }
+/* An explicit COCS surface (command board, spend window) or the Training
+   completion beat owns the cursor. The page adds this class while one is up so
+   the move/look capture zones and the action buttons cannot run behind it. */
+.touch-layer--suspended .touch-look,
+.touch-layer--suspended .touch-move-zone,
+.touch-layer--suspended .touch-actions > *,
+.touch-layer--suspended .touch-primary > *,
+.touch-layer--suspended .touch-util > * { pointer-events: none; }
 .touch-button { border: 1px solid #9ff0dd55; background: #0b1c1fd0; color: #dffcf4; font: 700 10px monospace; letter-spacing: .5px; padding: 0; border-radius: 11px; width: 46px; height: 46px; display: grid; place-items: center; user-select: none; -webkit-user-select: none; -webkit-tap-highlight-color: transparent; }
 .touch-button:active, .touch-button:focus { background: #1d4740d9; border-color: #b4f6e2; }
 .touch-primary .touch-button { width: 74px; height: 74px; font-size: 13px; border-radius: 50%; }
@@ -1186,8 +1194,8 @@ html, body { overscroll-behavior: none; }
    image. Appended with the cocs block so the cascade stays local.
    ========================================================================== */
 .cocs-board,.cocs-spend,.cocs-terminals,.cocs-board-chip{font-size:calc(12px * var(--ui-scale,1));pointer-events:auto}
-.cocs-board-chip{position:absolute;left:var(--safe-left);top:calc(var(--safe-top) + 96px);z-index:var(--z-board,5);display:inline-flex;align-items:center;gap:6px;padding:6px 10px;border:1px solid var(--border);border-left:3px solid var(--warn-soft,#ffd166);border-radius:var(--radius-md);background:#0a191ae6;color:#eafff5;font:700 .95em var(--font-mono);letter-spacing:.04em;cursor:pointer}
-.cocs-board{position:absolute;left:var(--safe-left);top:calc(var(--safe-top) + 96px);bottom:calc(var(--safe-bottom) + 120px);max-width:42vw;z-index:var(--z-board,5);display:grid;grid-template-rows:auto 1fr;gap:6px;padding:10px 12px;border:1px solid var(--border-strong,var(--border));border-left:3px solid var(--accent);border-radius:var(--radius-md);background:linear-gradient(110deg,#071617f2,#0c1f1ceb);box-shadow:0 16px 40px #0009;text-shadow:0 1px 3px #000;overflow:auto}
+.cocs-board-chip{position:absolute;left:var(--safe-left);top:calc(var(--safe-top) + 96px);z-index:calc(var(--z-touch,6) + 1);display:inline-flex;align-items:center;gap:6px;padding:6px 10px;border:1px solid var(--border);border-left:3px solid var(--warn-soft,#ffd166);border-radius:var(--radius-md);background:#0a191ae6;color:#eafff5;font:700 .95em var(--font-mono);letter-spacing:.04em;cursor:pointer}
+.cocs-board{position:absolute;left:var(--safe-left);top:calc(var(--safe-top) + 96px);bottom:calc(var(--safe-bottom) + 120px);max-width:42vw;z-index:calc(var(--z-touch,6) + 1);display:grid;grid-template-rows:auto 1fr;gap:6px;padding:10px 12px;border:1px solid var(--border-strong,var(--border));border-left:3px solid var(--accent);border-radius:var(--radius-md);background:linear-gradient(110deg,#071617f2,#0c1f1ceb);box-shadow:0 16px 40px #0009;text-shadow:0 1px 3px #000;overflow:auto;scroll-padding-bottom:52px}
 .cocs-board__head{display:flex;align-items:center;gap:8px}
 .cocs-board__head .eyebrow{font-size:.85em;letter-spacing:.16em;color:var(--text-dim)}
 .cocs-board__chip{margin-left:auto;font:700 .9em var(--font-mono);color:var(--warn-soft,#ffd166)}
@@ -1228,7 +1236,7 @@ html, body { overscroll-behavior: none; }
 .cocs-card__actions button:hover{border-color:var(--accent)}
 .cocs-board__empty{color:var(--text-mute);font-size:.85em}
 
-.cocs-spend{position:absolute;left:50%;top:calc(var(--safe-top) + 96px);transform:translateX(-50%);z-index:var(--z-board,5);width:min(660px,92vw);max-height:calc(100dvh - var(--safe-top) - var(--safe-bottom) - 120px);overflow-y:auto;overscroll-behavior:contain;scrollbar-width:thin;display:grid;gap:6px;padding:12px 14px;border:1px solid var(--border-strong,var(--border));border-top:3px solid var(--accent);border-radius:var(--radius-md);background:linear-gradient(180deg,#08201ff2,#0a1a1ceb);box-shadow:0 16px 40px #0009;text-shadow:0 1px 3px #000}
+.cocs-spend{position:absolute;left:50%;top:calc(var(--safe-top) + 96px);transform:translateX(-50%);z-index:calc(var(--z-touch,6) + 1);width:min(660px,92vw);max-height:calc(100dvh - var(--safe-top) - var(--safe-bottom) - 120px);overflow-y:auto;overscroll-behavior:contain;scrollbar-width:thin;scroll-padding-bottom:68px;display:grid;gap:6px;padding:12px 14px;border:1px solid var(--border-strong,var(--border));border-top:3px solid var(--accent);border-radius:var(--radius-md);background:linear-gradient(180deg,#08201ff2,#0a1a1ceb);box-shadow:0 16px 40px #0009;text-shadow:0 1px 3px #000}
 .cocs-spend__head{display:flex;align-items:baseline;gap:10px}
 .cocs-spend__head .eyebrow{font-size:.86em;letter-spacing:.16em;color:var(--text-dim)}
 .cocs-spend__clock{font:800 1.5em var(--font-mono);color:#eafff5}
@@ -1272,7 +1280,8 @@ html, body { overscroll-behavior: none; }
 .cocs-spend__help{font:600 .78em var(--font-mono);color:var(--text-mute);letter-spacing:.05em}
 .cocs-spend__skip{min-height:44px;display:inline-flex;align-items:center;gap:8px;padding:8px 14px;border:1px solid var(--border);border-radius:var(--radius-sm,4px);background:#0b1a18;color:#eafff5;font:700 .86em var(--font-mono);letter-spacing:.08em;cursor:pointer}
 .cocs-spend__skip:hover,.cocs-spend__skip:focus-visible{border-color:var(--accent)}
-.cocs-spend__footer{position:sticky;bottom:-14px;background:#0a1a1c;padding-block:8px;z-index:1}
+.cocs-spend__footer{position:sticky;bottom:-14px;background:#0a1a1c;padding-block:8px;z-index:1;pointer-events:none}
+.cocs-spend__footer .cocs-spend__skip{pointer-events:auto}
 .cocs-spend select:focus-visible,.director-readout summary:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
 :is(.stats,.config-field output,.cocs-readout__scores,.cocs-flux,.cocs-spend__clock,.cocs-spend__meta,.director-readout,.ability-card .stat-note){font-variant-numeric:tabular-nums}
 .cocs-sink{min-height:44px}
@@ -1287,7 +1296,7 @@ html, body { overscroll-behavior: none; }
 .cocs-board__close{padding:0 10px}
 .cocs-card__actions button{min-height:44px;min-width:64px}
 .cocs-board :is(button,[role='option']):focus-visible,.cocs-spend :is(button,[role='option']):focus-visible{outline:2px solid var(--accent);outline-offset:2px}
-.cocs-board__hint{position:sticky;bottom:0;margin:0;padding:6px 0 2px;border-top:1px solid var(--border);background:linear-gradient(180deg,transparent,#071617f2 30%);font:700 .8em var(--font-mono);letter-spacing:.05em;color:var(--text-mute)}
+.cocs-board__hint{position:sticky;bottom:0;margin:0;padding:6px 0 2px;border-top:1px solid var(--border);background:linear-gradient(180deg,transparent,#071617f2 30%);font:700 .8em var(--font-mono);letter-spacing:.05em;color:var(--text-mute);pointer-events:none}
 .cocs-board__hint b{color:#eafff5}
 /* Cursor mode: the chip names the surface that owns the pointer and the
    CLICK TO FIGHT button is the one obvious way back to combat. */
@@ -1295,12 +1304,12 @@ html, body { overscroll-behavior: none; }
 .cursor-chip kbd{font-size:.95em}
 .cursor-chip.has-surface{border-color:var(--warn-soft,#ffd166)}
 .cursor-chip.has-surface span{color:var(--warn-soft,#ffd166);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-.cursor-resume{position:absolute;inset:0;z-index:6;display:grid;place-items:center;pointer-events:none}
+.cursor-resume{position:absolute;inset:0;z-index:calc(var(--z-touch,6) + 1);display:grid;place-items:center;pointer-events:none}
 .cursor-resume__button{pointer-events:auto;display:grid;gap:5px;justify-items:center;min-width:min(260px,80vw);min-height:64px;padding:14px 24px;border:1px solid var(--accent);border-radius:var(--radius-md);background:#08201fee;color:#eafff5;font:800 15px var(--font-mono);letter-spacing:.14em;text-shadow:0 2px 5px #000;box-shadow:0 14px 40px #000a;cursor:pointer}
 .cursor-resume__button small{font:700 10px var(--font-mono);letter-spacing:.1em;color:var(--text-mute)}
 .cursor-resume__button:hover,.cursor-resume__button:focus-visible{border-color:#eafff5;box-shadow:0 0 0 2px var(--accent),0 14px 40px #000a}
 .cocs-spend.is-reduced .cocs-spend__banner{animation:none}
-.cocs-spend-chip{position:absolute;left:50%;top:calc(var(--safe-top) + 96px);transform:translateX(-50%);z-index:var(--z-board,5);min-height:44px;display:inline-flex;align-items:center;gap:8px;padding:8px 14px;border:1px solid var(--accent);border-radius:var(--radius-md);background:#08201fe6;color:#eafff5;font:800 .86em var(--font-mono);letter-spacing:.08em;cursor:pointer;pointer-events:auto}
+.cocs-spend-chip{position:absolute;left:50%;top:calc(var(--safe-top) + 96px);transform:translateX(-50%);z-index:calc(var(--z-touch,6) + 1);min-height:44px;display:inline-flex;align-items:center;gap:8px;padding:8px 14px;border:1px solid var(--accent);border-radius:var(--radius-md);background:#08201fe6;color:#eafff5;font:800 .86em var(--font-mono);letter-spacing:.08em;cursor:pointer;pointer-events:auto}
 .cocs-spend-chip:hover,.cocs-spend-chip:focus-visible{border-color:#eafff5}
 .cocs-notice{position:absolute;left:50%;top:calc(var(--safe-top) + 140px);transform:translateX(-50%);z-index:7;display:inline-flex;align-items:center;gap:7px;max-width:70vw;padding:7px 12px;border:1px solid var(--accent);border-radius:var(--radius-md);background:#0d2b27ee;color:#eafff5;font:700 .84em var(--font-mono);letter-spacing:.06em;box-shadow:0 10px 30px #0009;pointer-events:none}
 .cocs-notice i{font-style:normal;color:#8dffb0}

@@ -189,37 +189,54 @@ export function reqEarnBreakdown(profile={}){
  return deepFreeze({total,objectiveSeconds,parts});
 }
 
-// §6A.5 launch list. `launch:false` items are the later V1/V1.5 column.
+// §6A.5 purchase catalogue. WP1.3 truth rule: only entries with a concrete,
+// shipped simulation effect are launchable. The four personal buffs and the
+// OPERATIONS depot Puma qualify; every other advertised row has no effect yet,
+// so it carries `modes:[]` and is not in any launch set. The buy paths refuse it
+// with `not-launched` before `reqPurchase` can debit REQ or touch `reqBuff`.
+//   * `launch:true`     accepted by PvPvE `cocs` and OPERATIONS `cocs-coop`.
+//   * `coopLaunch:true` accepted by OPERATIONS only (no PvPvE vehicle seam).
+//   * `modes`           canonical modes a picker may offer the item in.
+//   * `effect`          machine description of the one shipped sim effect.
+//   * `effectCopy`      player-facing copy for that same effect.
+export const REQ_MODE_IDS=deepFreeze({pvp:'cocs',coop:'cocs-coop'});
 export const REQ_ITEMS=deepFreeze([
- {id:'field-repair',name:'Field Repair',category:'buff',cost:40,launch:true,teamWide:false,personalBuff:true},
- {id:'ammo-crate',name:'Ammo Crate',category:'buff',cost:25,launch:true,teamWide:false,personalBuff:true},
- {id:'haste',name:'Haste',category:'buff',cost:35,launch:true,teamWide:false,personalBuff:true},
- {id:'overshield',name:'Overshield',category:'buff',cost:50,launch:true,teamWide:false,personalBuff:true},
- {id:'at-mine',name:'AT Mine',category:'equipment',cost:35,launch:true,teamWide:false,personalBuff:false},
- {id:'smoke',name:'Smoke Marker',category:'equipment',cost:20,launch:true,teamWide:false,personalBuff:false},
- {id:'repair-tool',name:'Repair Tool',category:'equipment',cost:30,launch:true,teamWide:false,personalBuff:false},
- {id:'spot-drone',name:'Spot Drone',category:'equipment',cost:45,launch:true,teamWide:false,personalBuff:false},
- {id:'barrier',name:'Barrier',category:'fortification',cost:30,launch:true,teamWide:false,personalBuff:false},
- {id:'sentry',name:'Sentry',category:'fortification',cost:60,launch:true,teamWide:false,personalBuff:false},
- {id:'forward-depot',name:'Forward Depot',category:'fortification',cost:120,launch:true,teamWide:false,personalBuff:false},
- {id:'supply-drop',name:'Supply Drop',category:'team',cost:80,launch:true,teamWide:true,personalBuff:false,commanderOnly:true},
- {id:'recon-pulse',name:'Recon Pulse',category:'team',cost:60,launch:true,teamWide:true,personalBuff:false,commanderOnly:true},
- {id:'fortify-doctrine',name:'Fortify Doctrine',category:'team',cost:100,launch:true,teamWide:true,personalBuff:false,commanderOnly:true},
+ {id:'field-repair',name:'Field Repair',category:'buff',cost:40,launch:true,teamWide:false,personalBuff:true,target:'self',modes:['cocs','cocs-coop'],
+  effect:{kind:'heal',health:50,target:'self'},effectCopy:'Heal 50 health (capped at max health)'},
+ {id:'ammo-crate',name:'Ammo Crate',category:'buff',cost:25,launch:true,teamWide:false,personalBuff:true,target:'self',modes:['cocs','cocs-coop'],
+  effect:{kind:'resupply',scope:'weapon-magazines',target:'self'},effectCopy:'Refill every finite weapon magazine to capacity'},
+ {id:'haste',name:'Haste',category:'buff',cost:35,launch:true,teamWide:false,personalBuff:true,target:'self',modes:['cocs','cocs-coop'],
+  effect:{kind:'haste',seconds:15,target:'self'},effectCopy:'15 s of Haste speed'},
+ {id:'overshield',name:'Overshield',category:'buff',cost:50,launch:true,teamWide:false,personalBuff:true,target:'self',modes:['cocs','cocs-coop'],
+  effect:{kind:'shield',shield:50,target:'self'},effectCopy:'50-point temporary shield'},
  // The Puma is a launch OPERATIONS purchase (§6A.5: "Puma ... yes (V1)"). It is
  // flagged `coopLaunch` rather than `launch` so the PvPvE buy path (which has no
  // depot vehicle seam) can never charge for a vehicle it cannot spawn; the co-op
- // buy path (`coopBuyAction`) accepts both flags.
- {id:'puma',name:'Puma Light Transport',category:'vehicle',cost:150,launch:false,coopLaunch:true,teamWide:false,personalBuff:false},
- {id:'tier-upgrade',name:'Agent Tier Upgrade',category:'agent',cost:25,launch:false,teamWide:false,personalBuff:false},
- {id:'oracle-unlock',name:'Oracle Unlock',category:'agent',cost:120,launch:false,teamWide:false,personalBuff:false,requiresRelay:true},
+ // buy path (`coopBuyAction`) accepts both flags and the room gate mirrors it.
+ {id:'puma',name:'Puma Light Transport',category:'vehicle',cost:150,launch:false,coopLaunch:true,teamWide:false,personalBuff:false,target:'depot',modes:['cocs-coop'],
+  effect:{kind:'vehicle',vehicle:'puma',depot:true,target:'depot'},effectCopy:'Spawn the depot loaner Puma at an owned depot'},
+ // Catalogue rows with no shipped effect (WP1.3): priced and named for later
+ // waves, but never offered and never purchasable.
+ {id:'at-mine',name:'AT Mine',category:'equipment',cost:35,launch:false,teamWide:false,personalBuff:false,modes:[]},
+ {id:'smoke',name:'Smoke Marker',category:'equipment',cost:20,launch:false,teamWide:false,personalBuff:false,modes:[]},
+ {id:'repair-tool',name:'Repair Tool',category:'equipment',cost:30,launch:false,teamWide:false,personalBuff:false,modes:[]},
+ {id:'spot-drone',name:'Spot Drone',category:'equipment',cost:45,launch:false,teamWide:false,personalBuff:false,modes:[]},
+ {id:'barrier',name:'Barrier',category:'fortification',cost:30,launch:false,teamWide:false,personalBuff:false,modes:[]},
+ {id:'sentry',name:'Sentry',category:'fortification',cost:60,launch:false,teamWide:false,personalBuff:false,modes:[]},
+ {id:'forward-depot',name:'Forward Depot',category:'fortification',cost:120,launch:false,teamWide:false,personalBuff:false,modes:[]},
+ {id:'supply-drop',name:'Supply Drop',category:'team',cost:80,launch:false,teamWide:true,personalBuff:false,commanderOnly:true,modes:[]},
+ {id:'recon-pulse',name:'Recon Pulse',category:'team',cost:60,launch:false,teamWide:true,personalBuff:false,commanderOnly:true,modes:[]},
+ {id:'fortify-doctrine',name:'Fortify Doctrine',category:'team',cost:100,launch:false,teamWide:true,personalBuff:false,commanderOnly:true,modes:[]},
+ {id:'tier-upgrade',name:'Agent Tier Upgrade',category:'agent',cost:25,launch:false,teamWide:false,personalBuff:false,modes:[]},
+ {id:'oracle-unlock',name:'Oracle Unlock',category:'agent',cost:120,launch:false,teamWide:false,personalBuff:false,requiresRelay:true,modes:[]},
 ]);
 
 export const REQ_COSTS=deepFreeze(Object.fromEntries(REQ_ITEMS.map(item=>[item.id,item.cost])));
 export const PERSONAL_BUFF_IDS=deepFreeze(REQ_ITEMS.filter(item=>item.personalBuff).map(item=>item.id));
 export const TEAM_WIDE_REQ_IDS=deepFreeze(REQ_ITEMS.filter(item=>item.teamWide).map(item=>item.id));
 export const LAUNCH_REQ_IDS=deepFreeze(REQ_ITEMS.filter(item=>item.launch).map(item=>item.id));
-// OPERATIONS launch set: the mode-local items that only the co-op buy/depot path
-// may charge for (currently the Puma loaner purchase, §6A.5/§6A.7).
+// OPERATIONS launch set: `launch` items plus the mode-local `coopLaunch` items
+// (currently the Puma loaner purchase, §6A.5/§6A.7).
 export const COOP_LAUNCH_REQ_IDS=deepFreeze(REQ_ITEMS.filter(item=>item.launch===true||item.coopLaunch===true).map(item=>item.id));
 
 // Hard firewall: `REQ` is personal and may never buy a respawn, debit the team
@@ -237,8 +254,42 @@ export function reqItem(id){
  return found?{...found}:null;
 }
 
+// UI/mode aliases. Both wire modes ('cocs' PvPvE, 'cocs-coop' OPERATIONS) are
+// canonical; the friendly spellings are accepted so a picker caller cannot
+// guess wrong, and anything else resolves to null.
+const REQ_MODE_ALIASES=deepFreeze({
+ cocs:'cocs','cocs-pvp':'cocs',pvp:'cocs',pvpve:'cocs',
+ 'cocs-coop':'cocs-coop',coop:'cocs-coop',operations:'cocs-coop',
+});
+
+/** Canonical REQ mode id (`cocs` | `cocs-coop`) for a label, or null. */
+export function reqModeKey(mode){
+ if(typeof mode!=='string')return null;
+ return REQ_MODE_ALIASES[mode.trim().toLowerCase()]||null;
+}
+
+/** The canonical modes an item (or id) is offered in; empty = unsupported. */
+export function reqItemModes(itemOrId){
+ const item=typeof itemOrId==='string'?reqItem(itemOrId):(itemOrId&&typeof itemOrId==='object'?itemOrId:null);
+ if(!item||!Array.isArray(item.modes))return deepFreeze([]);
+ const modes=[];
+ for(const mode of item.modes){
+  const key=reqModeKey(mode);
+  if(key&&!modes.includes(key))modes.push(key);
+ }
+ return deepFreeze(modes);
+}
+
+/** True when `id` is launched in `mode` and has a shipped simulation effect. */
+export function reqItemSupported(itemOrId,mode){
+ const key=reqModeKey(mode);
+ return key!==null&&reqItemModes(itemOrId).includes(key);
+}
+
 /**
  * Validate a `REQ` purchase against the §6A.5 rules. Pure; callers own state.
+ * Unsupported catalogue rows (`launch`/`coopLaunch` both false, i.e. no effect)
+ * refuse with `not-launched`; mode-specific support is the caller's gate.
  * @param {string} itemId
  * @param {{balance?:number,isCommander?:boolean,activeBuffId?:string|null,relayOwned?:boolean}} [state]
  * @returns {{ok:boolean,itemId:string,cost:number|null,balanceAfter:number,reason:string|null}}
@@ -247,10 +298,15 @@ export function reqPurchase(itemId,state={}){
  const item=reqItem(itemId);
  const balance=Math.max(0,num(state.balance,0));
  if(!item)return deepFreeze({ok:false,itemId,cost:null,balanceAfter:balance,reason:'unknown-item'});
+ if(item.launch!==true&&item.coopLaunch!==true)return deepFreeze({ok:false,itemId,cost:item.cost,balanceAfter:balance,reason:'not-launched'});
  if(item.commanderOnly===true&&state.isCommander!==true){
   return deepFreeze({ok:false,itemId,cost:item.cost,balanceAfter:balance,reason:'commander-only'});
  }
- if(item.personalBuff===true&&typeof state.activeBuffId==='string'&&state.activeBuffId&&state.activeBuffId!==itemId){
+ // `reqBuff` semantics are buff-only (WP1.3): a vehicle or legacy id stamped on
+ // the slot by another path never blocks a personal buff. Only a real personal
+ // buff item does, and re-buying that same item refreshes it.
+ const activeBuff=reqItem(state.activeBuffId);
+ if(item.personalBuff===true&&activeBuff?.personalBuff===true&&activeBuff.id!==itemId){
   return deepFreeze({ok:false,itemId,cost:item.cost,balanceAfter:balance,reason:'one-active-buff'});
  }
  if(item.requiresRelay===true&&state.relayOwned!==true){
@@ -258,6 +314,67 @@ export function reqPurchase(itemId,state={}){
  }
  if(balance<item.cost)return deepFreeze({ok:false,itemId,cost:item.cost,balanceAfter:balance,reason:'insufficient-req'});
  return deepFreeze({ok:true,itemId,cost:item.cost,balanceAfter:balance-item.cost,reason:null});
+}
+
+/**
+ * WP1.3 shared purchase surface: one pure, deterministic snapshot of the
+ * supported `REQ` catalogue for a player in a mode. The UI can render it
+ * directly; the same helpers gate the local (`cocsBuyAction`/`coopBuyAction`)
+ * and network (`Room.buy`) spend paths, so offered and accepted agree.
+ *
+ * Pure read: it never reads a clock (the `now` argument is accepted for call
+ * compatibility and deliberately ignored), never mutates `actor`/`state` and
+ * returns a deep-frozen snapshot. `balance` is the authoritative float
+ * `actor.req` — quantization never authorizes a spend. Only rows supported in
+ * at least one mode are listed; a row outside the requested mode is offered
+ * with `enabled:false` and `disabledReason:'wrong-mode'`.
+ *
+ * A single `disabledReason`, in precedence order:
+ * `wrong-mode` → `requires-depot` (Puma with no friendly depot) → the exact
+ * `reqPurchase` reason (`commander-only` → `one-active-buff` →
+ * `requires-relay` → `insufficient-req`) → null.
+ *
+ * @param {{team?:number,mode?:string,actor?:object,state?:object,now?:number}} [input]
+ * @returns {{team:number,mode:string|null,balance:number,balanceSource:string,
+ *   authoritative:boolean,isCommander:boolean,activeBuffId:string|null,
+ *   items:Array<object>}}
+ */
+export function reqPurchaseOptions({team,mode,actor,state,now}={}){
+ const t=team===1?1:0;
+ const key=reqModeKey(mode);
+ const s=state&&typeof state==='object'?state:{};
+ const a=actor&&typeof actor==='object'?actor:{};
+ const balance=Math.max(0,num(a.req,0));
+ const coop=Boolean(s.coop)||s.coopMode===true;
+ const seat=coop?(s.coop?.commandSeat?.[t]??null):(s.command?.seat?.[t]??null);
+ const actorId=a.id===null||a.id===undefined?null:String(a.id);
+ const isCommander=actorId!==null&&seat!==null&&String(seat)===actorId;
+ // Buff-only slot: a vehicle/legacy `reqBuff` value is not an active buff.
+ const activeBuffId=reqItem(a.reqBuff)?.personalBuff===true?String(a.reqBuff):null;
+ const relayOwned=(Array.isArray(s.nodes)?s.nodes:[]).some(node=>node&&node.archetype==='relay'&&node.owner===t);
+ const depots=s.traversal&&typeof s.traversal.depots==='object'?Object.values(s.traversal.depots):[];
+ const friendlyDepot=depots.some(depot=>depot&&depot.owner===t);
+ const items=[];
+ for(const item of REQ_ITEMS){
+  const modes=reqItemModes(item);
+  if(!modes.length)continue; // unsupported rows are never offered
+  let disabledReason=null;
+  if(key===null||!modes.includes(key))disabledReason='wrong-mode';
+  else if(item.id==='puma'&&!friendlyDepot)disabledReason='requires-depot';
+  else disabledReason=reqPurchase(item.id,{balance,isCommander,activeBuffId,relayOwned}).reason;
+  items.push(deepFreeze({
+   id:item.id,name:item.name,category:item.category,cost:item.cost,
+   modes:[...modes],target:item.target??'self',
+   effect:item.effect??null,effectCopy:item.effectCopy??null,
+   affordable:balance>=item.cost,
+   enabled:disabledReason===null,
+   disabledReason,
+  }));
+ }
+ return deepFreeze({
+  team:t,mode:key,balance,balanceSource:'actor.req',authoritative:true,
+  isCommander,activeBuffId,items:deepFreeze(items),
+ });
 }
 
 /** True when a purchase id is outside the `REQ` catalogue entirely. */
@@ -829,14 +946,14 @@ export const COMMENDATION_PACING=deepFreeze({
 
 const cocsEconomy={
  ARCHETYPE_WEIGHTS,SCORE_EVENTS,ORDER_REWARD,SUPPLY_CUT,ARRAY_CAPTURE,
- REQ_EARN,REQ_ITEMS,REQ_COSTS,REQ_FORBIDDEN,COOP_LAUNCH_REQ_IDS,
+ REQ_EARN,REQ_ITEMS,REQ_COSTS,REQ_FORBIDDEN,REQ_MODE_IDS,LAUNCH_REQ_IDS,PERSONAL_BUFF_IDS,TEAM_WIDE_REQ_IDS,COOP_LAUNCH_REQ_IDS,
  FLUX_START,FLUX_CAP,FLUX_PASSIVE_PER_SECOND,SUBAGENT_UPKEEP,SUPPLY_SLOT_MULTIPLIERS,
  HOP_SURCHARGE_PER_HOP,HOP_SURCHARGE_CAP,FOUNDRY_UPKEEP_REDUCTION,FOUNDRY_REDUCTION_CAP,SUBAGENTS,
  NEGLECT,NEGLECT_EFFECTS,
  GEAR_CAPS,REQ_CAPS,COMBINED_CAPS,
  TRAVERSAL,DEVICE_PARAMS,LANE_IDENTITIES,LANE_IDENTITY_KINDS,DEVICE_LANE_KINDS,DEVICE_STATES,TRAVERSAL_KINDS,
  META_DEFAULTS,MATCH_REQ,COMMENDATION_PACING,
- scoreEvent,tallyScores,reqEarn,reqEarnBreakdown,purchaseCost,reqPurchase,
+ scoreEvent,tallyScores,reqEarn,reqEarnBreakdown,purchaseCost,reqItem,reqModeKey,reqItemModes,reqItemSupported,reqPurchase,reqPurchaseOptions,
  supplySlotMultiplier,subagentUpkeep,
  neglectState,neglectTick,neglectEffect,neglectPassiveFlux,
  composeCaps,withinCombinedCaps,resolveSpawnLoadout,

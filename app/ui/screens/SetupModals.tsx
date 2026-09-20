@@ -3,6 +3,7 @@ import type {ScreenProps} from '../contract';
 import {MatchConfiguration,PresetsConfiguration} from '../../game-ui/configuration';
 import {Modal,Btn,Segmented,SelectCard,Panel,Chip,Meter} from '../primitives';
 import {LatticeBriefing} from './LatticeGuide';
+import {onboardingStepView} from '../../../game/onboarding.mjs';
 
 export function SetupModal({ui}:ScreenProps){
  const {setupOpen,closeSetup,config,setConfig,mapId,setMapId,selectableMaps=[],start,presets=[],savePreset,loadPreset,deletePreset,selectedMap,ready,error,MapPlan,mapViewBox,modalRef}=ui;
@@ -78,11 +79,14 @@ export function SinglePlayerModal({ui}:ScreenProps){
 export function OnboardingModal({ui}:ScreenProps){
  const {onboarding,setOnboarding,finishOnboarding,onboardingRef,ONBOARDING_STEPS=[]}=ui;
  if(onboarding===null||onboarding===undefined)return null;
- const step=ONBOARDING_STEPS[onboarding];
- return <Modal open size="sm" onClose={finishOnboarding} panelRef={onboardingRef} eyebrow={`WELCOME · ${onboarding+1}/${ONBOARDING_STEPS.length}`} title={step?.title} footer={<>
+ // GOT IT records a completion; SKIP, Escape and the close affordance record a
+ // skip. The two are stored separately under a content version (WP2.3), and
+ // the copy follows the live bindings so a remap never shows a stale key.
+ const step=onboardingStepView(ONBOARDING_STEPS[onboarding],ui.bindings);
+ return <Modal open size="sm" onClose={()=>finishOnboarding?.('skipped')} panelRef={onboardingRef} eyebrow={`WELCOME · ${onboarding+1}/${ONBOARDING_STEPS.length}`} title={step?.title} footer={<>
   {onboarding>0&&<Btn variant="secondary" onClick={()=>setOnboarding(onboarding-1)}>BACK</Btn>}
-  <Btn variant="primary" className="modal-foot-primary" onClick={()=>onboarding+1>=ONBOARDING_STEPS.length?finishOnboarding():setOnboarding(onboarding+1)}>{onboarding+1>=ONBOARDING_STEPS.length?'GOT IT':'NEXT'}</Btn>
-  <Btn variant="ghost" onClick={finishOnboarding}>SKIP</Btn>
+  <Btn variant="primary" className="modal-foot-primary" onClick={()=>onboarding+1>=ONBOARDING_STEPS.length?finishOnboarding?.('completed'):setOnboarding(onboarding+1)}>{onboarding+1>=ONBOARDING_STEPS.length?'GOT IT':'NEXT'}</Btn>
+  <Btn variant="ghost" onClick={()=>finishOnboarding?.('skipped')}>SKIP</Btn>
  </>}>
   <p>{step?.detail}</p>
  </Modal>;

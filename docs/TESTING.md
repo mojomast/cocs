@@ -1,8 +1,10 @@
 # Testing COCS
 
-How the project is verified and how to run it. The suite is Node's built-in
-test runner (`node:test` + `node:assert/strict`); there is no browser test
-runner and no external test framework.
+How the project is verified and how to run it. The unit/integration suite is
+Node's built-in test runner (`node:test` + `node:assert/strict`); there is no
+external test framework. A separate, optional Playwright harness
+(`scripts/verify-browser.mjs`, `npm run test:browser`) checks the running app in
+a real browser and is documented below.
 
 ---
 
@@ -18,6 +20,8 @@ runner and no external test framework.
 | `build` | `bash scripts/build-verified.sh` | Bounded `vinext build`, required before the SSR test |
 | `lint` | `bash scripts/sites-env.sh -- eslint .` | ESLint over the repo (ignores `dist`, `.next`) |
 | `deploy` | `bash scripts/deploy.sh` | Build + restart + verify + rollback |
+| `test:browser` | `node scripts/verify-browser.mjs` | Browser evidence against an already-running app (not part of `npm test`) |
+| `test:browser:install` | `playwright install chromium` | Install the pinned Chromium build for the browser harness |
 | `test` | `test:game` && `test:server` && `typecheck` && `build` && `node --test tests/*.test.mjs` | Full CI-style gate |
 
 `npm test` deliberately rebuilds `dist/` because the top-level SSR test imports
@@ -74,8 +78,42 @@ Relevant examples: `server/room.test.mjs`, `server/rooms.test.mjs`,
   provides. This is the guard for the loosely typed `UiBag` contract.
 - `tests/deployment-assets.test.mjs` — unit-tests
   `scripts/verify-deployment.mjs`: `linkedAssets` deduplicates asset URLs;
-  `verifyDeployment` rejects missing CSS/JS, a stale release string, and an
-  HTML fallback served with a 200 but the wrong content type.
+  `verifyDeployment` rejects a title footer that is not the exact
+  `vX.Y · CODENAME` release string (even when the new version appears elsewhere
+  in the HTML), missing CSS/JS, and an HTML fallback served with a 200 but the
+  wrong content type.
+
+---
+
+## Optional local study recorder — `game/study-log.test.mjs`
+
+WP3.2 adds `game/study-log.mjs`, a pure, deterministic, device-local recorder
+that stays off until the player switches it on in **Settings → Study**. It is
+inspectable (`DOWNLOAD JSON`) and deletable (`DELETE LOG`); nothing is persisted
+and nothing is sent over the network.
+
+What the tests pin (run `node --test game/study-log.test.mjs`):
+
+- the versioned envelope (`schemaVersion`, `buildCommit`, ephemeral session id,
+  `sequence`, non-decreasing `monotonicMs`, `eventName`, and the coarse
+  `journeyStage` / `inputClass` / `viewportBucket` / `accessibilityFlags`);
+- consent gating: a disabled log ignores every append, enabling starts a fresh
+  ephemeral session, disabling deletes the buffer, and delete breaks
+  linkability by minting a new session id;
+- validation/clamping: unknown event names and payloads over 12 keys / 512
+  bytes are rejected, forbidden identity/chat/voice/key/geometry keys reject
+  the payload, and free text, UUID/IP-like or over-long values are dropped;
+- the 512-event bounded ring buffer and its drop counter;
+- monotonic offsets under a backwards clock (no `Date.now()` anywhere) and
+  byte-identical serialization for equal logs;
+- coverage of the required journey transitions (`surface_viewed` through
+  `second_match_started`).
+
+The page only wires emissions (`appendStudyEvent` no-ops without consent) and
+the settings panel renders the controls. Payloads carry coarse tokens and
+bounded numbers only: no player UUID/progress token, IP, name, chat, voice,
+exact keys, raw input, precise positions or free text. Replays and voice
+capture remain a separate consent decision and are untouched by this recorder.
 
 ---
 
@@ -105,6 +143,76 @@ duplicate "every combat mode completes" loop was removed outright from
 
 ---
 
+## Tracked browser verification harness (`npm run test:browser`)
+
+`scripts/verify-browser.mjs` is a dependency-light Playwright runner tracked for
+the v8.4 improvement plan's cross-cutting browser gate (item 4, required before
+WP1.1 acceptance). It is deliberately **not** wired into `npm test`: it needs an
+already-running app and a Chromium build, and it is slower than the unit suites.
+
+### Run it
+
+```bash
+npm install                        # installs the pinned playwright devDependency
+npx playwright install chromium    # or: npm run test:browser:install
+npm run dev -- --host 127.0.0.1 --port 4173   # in one shell (or npm start)
+BROWSER_BASE_URL=http://127.0.0.1:4173 npm run test:browser
+```
+
+The app must be started separately — the harness never starts or stops the app,
+the web service or the game server. `BROWSER_BASE_URL` defaults to
+`http://127.0.0.1:3000`. When a Playwright cache already exists, the runner
+reuses the first cache that contains the pinned Chromium revision
+(`~/.cache/ms-playwright`, `~/.opencode-v2/cache/ms-playwright`, or an explicit
+`PLAYWRIGHT_BROWSERS_PATH`) instead of downloading it again.
+
+Useful options and environment: `--only=1366x768,844x390` (subset), `--headed`,
+`--trace` (Playwright traces are large and off by default; enable with
+`--trace` or `BROWSER_TRACE=1`), `--out=DIR`, `BROWSER_DPR`,
+`BROWSER_TIMEOUT_MS`, `BROWSER_NAVIGATION_TIMEOUT_MS`, `BROWSER_HUD_TIMEOUT_MS`,
+`BROWSER_LAUNCH_ATTEMPTS`, `BROWSER_SETTLE_MS`, `BROWSER_HEADED`.
+
+### What it proves
+
+For each required viewport — 1366x768, 1920x1080, 844x390, 390x844, and 844x390
+repeated at `--ui-scale:1.4` — the runner starts from a fresh profile
+(`token-arena-onboarded=1`), enters the title, opens the LATTICE / OPERATIONS
+(`cocs-coop`) practice briefing, deploys, and asserts:
+
+- no console or page errors during the flow (a tiny, explicitly listed set of
+  documented preview-only messages is recorded in the manifest but ignored);
+- the HUD is present (`.game-hud`, live match status, player status, LATTICE
+  front readout and the order strip);
+- `documentElement.scrollWidth <= innerWidth` and no visible element extends
+  past the viewport horizontally (`document.scrollWidth` is not a Chromium
+  property; the root scroll width is its portable equivalent);
+- the persistent HUD panels do not intersect a crosshair corridor of at least
+  48 CSS px around the crosshair;
+- on touch viewports, `document.elementsFromPoint()` at the centre of every
+  visible touch action button returns that button — the B1 touch-capture
+  regression class, including jump/fire/interact.
+
+Every run writes `artifacts/browser/<timestamp>-<commit>/<viewport>/hud.png`,
+an optional `trace.zip`, and one `manifest.json` recording the commit and dirty
+state, `/api/version`, browser name/version/launch flags, viewport, DPR, UI
+scale, input mode, renderer, command, per-assertion geometry, console/network
+logs and the result. `artifacts/` is gitignored. Stdout is one line of JSON
+summary; human-readable progress goes to stderr. Exit codes: `0` pass, `1`
+failed assertion or failed manifest write, `2` missing browser setup.
+
+### What it does not prove
+
+This harness is **technical evidence only**. It cannot show that the game is
+fun, readable, comfortable, understandable or worth replaying, and it does not
+replace physical-device or assistive-technology validation: Chromium
+`hasTouch` emulation is not iOS Safari or Android Chrome multi-touch, and
+geometry/hit tests are not human playtests, NVDA/VoiceOver listening or
+hardware pointer-lock checks. An all-green matrix is not a release sign-off.
+A non-zero exit while the correlated B1/C1 layout findings remain open is
+useful evidence, not harness breakage.
+
+---
+
 ## What is pinned / contract-tested
 
 - **SSR strings** — `tests/rendered-html.test.mjs` pins the rendered HTML
@@ -131,36 +239,29 @@ duplicate "every combat mode completes" loop was removed outright from
 
 ## Current counts
 
-Last verified on release v7.2 (2026-09-18), on the `feat/moth-audio-wiring`
-worktree (the Moth audio wiring merged fast-forward into production at
-`4b9862b`):
+Last verified on release v8.5 HANDOFF (2026-09-20); the v8.5 gate recorded:
 
-- `npm run test:game` — **2018 tests: 2011 pass, 0 fail, 7 skipped**, across
-  182 `game/*.test.mjs` files (553 s). The wiring pass adds
-  `moth-audio-wiring` (deferred factory mount/dispose, scene routing, outcome
-  motif selection, echo-map selection, reduced motion and the no-context path)
-  and extends `moth-wiring` with the per-arena echo map, on top of the v7.1
-  audio suites (sampled bank `sampler`, arrangement/leitmotif/form
-  `music-arrangement`, the Moth bank and layer `moth-audio`, the audio bakers
-  `moth-bake-audio` and the pass-3 generators `moth-bake-generators`); the
-  all-arena `route-sweep` and the balance sweep remain opt-in. The production
-  checkout re-ran `changelog` at **3/3**.
-- The 7 skipped tests are long simulations (an exhaustive 8-bot all-modes sweep,
-  an 18k-step 4-bot match, a 10k-step 8-bot race, a 4×1800-step platform-bot
-  sweep, both opt-in `route-sweep` cases over all 41 arenas × 9 verbs and all 39
-  non-race arenas, and an `OfflineAudioContext` soundtrack render that only runs
-  in a browser) that take many minutes on a machine without 3D hardware. They are
-  opt-in: run `npm run test:game:slow` (or `COCS_SLOW_TESTS=1 npm run test:game`)
-  on a machine with the budget. `--test-timeout` is set on every script so a
-  stuck test fails instead of hanging forever. The opt-in `route-sweep` passes
-  all 41 arenas × 9 verbs plus bot navigation on all 39 non-race arenas.
-- `npm run test:server` — **159 pass, 0 fail**, across 16 `server/*.test.mjs`
-  files.
-- `node --test tests/*.test.mjs` — **7 pass, 0 fail** (SSR, UI contract,
-  deployment), re-ran against the v7.2 production build; the v7.2 deploy
-  re-verifies the served assets.
-- `npx tsc --noEmit` — clean; `npm run lint` — 0 errors (488 warnings only);
-  bounded `vinext build` — green.
+- `npm run test:game` — **2,571 pass, 0 fail, 8 skipped** across the
+  `game/*.test.mjs` suite. The eight skips are the opt-in long simulations and
+  the browser-only render: the D1-D4 sampled win-rate sweep, the exhaustive
+  8-bot mode sweep, the 18k-step 4-bot match, the 10k-step 8-bot race, the
+  4×1800-step platform-bot sweep, both `route-sweep` cases (movement verbs over
+  all 41 arenas and bot navigation over all 39 non-race arenas) and the
+  `OfflineAudioContext` soundtrack render. They are opt-in: run
+  `npm run test:game:slow` (or `COCS_SLOW_TESTS=1 npm run test:game`) on a
+  machine with the budget. `--test-timeout` is set on every script so a stuck
+  test fails instead of hanging forever.
+- `npm run test:server` — **209 pass, 0 fail**, across `server/*.test.mjs`.
+- `node --test tests/*.test.mjs` — **82 pass, 0 fail**; SSR, UI contract,
+  deployment assets, browser-harness helpers and the modal-stack DOM checks all
+  green.
+- `npx tsc --noEmit` — clean; `npm run lint` — 0 errors (warning baseline
+  unchanged); bounded `vinext build` — green.
+- `npm run test:browser` (against a running app) — **5/5 viewports pass** at
+  1366×768, 1920×1080, 844×390, 390×844 and 844×390 at UI scale 1.4, with hit
+  testing, reticle-corridor checks, overflow checks and console/page-error
+  checks. The first v8.5 candidate run caught a real post-match crash this way;
+  the harness is a release gate for the surfaces it covers.
 - `game/archive/*.test.mjs` — 2 files, run on demand, not counted above.
   `game/archive/balance-sweep.test.mjs` is the opt-in balance sweep hook
   (`COCS_SLOW_TESTS=1` smoke, `COCS_SWEEP=full` full profile; tier alarms are
@@ -175,10 +276,12 @@ them after changes rather than trusting this table.
 
 ## Honest limitations
 
-- **No browser or GPU verification in this environment.** `view.test.mjs` and
+- **No GPU verification in this environment.** `view.test.mjs` and
   `software.test.mjs` verify geometry, scene-graph wiring, quality-tier logic
-  and the CPU renderer's unit behaviour. They do not verify WebGL output,
-  shader compilation, shadow quality, bloom, or frame rate on real hardware.
+  and the CPU renderer's unit behaviour. The optional `npm run test:browser`
+  harness verifies DOM geometry, hit testing, console cleanliness and the HUD
+  matrix in Chromium, but none of these verify WebGL output, shader
+  compilation, shadow quality, bloom, or frame rate on real hardware.
   A passing suite is not GPU performance evidence.
 - **Visual claims are geometry/unit-verified.** "The model has a muzzle anchor"
   is testable; "it looks correct" is not tested here.

@@ -143,7 +143,7 @@ test('active spectator joins and reconnects receive lobby, targeted start and im
   const msgs=room.drain();
   assert.deepEqual(msgs.map(m=>m.msg.type),['welcome','lobby','start','snapshot']);
   assert.equal(find(msgs,'welcome',id).spectate,true);
-  assert.deepEqual(find(msgs,'start',id),{type:'start',mapId:match.arena.id,config:match.config});
+  assert.deepEqual(find(msgs,'start',id),{type:'start',mapId:match.arena.id,config:match.config,roundRevision:room.roundRevision});
   assert.deepEqual(find(msgs,'snapshot',id).state,quantizeNumbers(structuredClone(match.snapshot())));
   assert.ok(find(msgs,'snapshot',id).seq>seq);
   assert.ok(msgs.filter(m=>['start','snapshot'].includes(m.msg.type)).every(m=>m.to===id));

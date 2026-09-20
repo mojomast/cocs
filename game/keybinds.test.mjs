@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {DEFAULT_BINDINGS, KEYBIND_ACTIONS, KEYBIND_LABELS, KEYBIND_OPTIONS, actionBindingLabels, actionForCode, bindingConflicts, bindingLabel, normalizeBindings, rebindAction} from './keybinds.mjs';
+import {DEFAULT_BINDINGS, KEYBIND_ACTIONS, KEYBIND_LABELS, KEYBIND_OPTIONS, actionBindingLabels, actionForCode, bindingConflicts, bindingLabel, bindingShortcut, normalizeBindings, rebindAction} from './keybinds.mjs';
 
 test('explicit rebinding swaps occupied keys regardless of action order', () => {
   for (const [action, occupied] of [['forward', 'back'], ['back', 'forward']]) {
@@ -81,6 +81,30 @@ test('all player-facing surfaces share readable remapped key labels', () => {
   const labels = actionBindingLabels({...DEFAULT_BINDINGS, power: 'KeyP', grenade: 'KeyZ'});
   assert.equal(labels.power, 'P');
   assert.equal(labels.grenade, 'Z');
+});
+
+test('aria-keyshortcuts tokens name the same key the HUD label shows', () => {
+  assert.equal(bindingShortcut('KeyY'), 'Y');
+  assert.equal(bindingShortcut('Digit7'), '7');
+  assert.equal(bindingShortcut('ArrowUp'), 'ArrowUp', 'screen readers need the DOM arrow name, not the HUD "Up"');
+  assert.equal(bindingShortcut('Space'), 'Space');
+  assert.equal(bindingShortcut('ShiftLeft'), 'Shift');
+  assert.equal(bindingShortcut('ControlRight'), 'Control');
+  assert.equal(bindingShortcut('AltLeft'), 'Alt');
+  assert.equal(bindingShortcut('Escape'), 'Escape');
+  assert.equal(bindingShortcut('BracketLeft'), '[');
+});
+
+test('a remapped command/voice/interact/cursor set carries its real labels and shortcuts', () => {
+  const bindings = normalizeBindings({...DEFAULT_BINDINGS, command: 'KeyY', voice: 'KeyI', interact: 'KeyL', cursor: 'KeyO'});
+  const labels = actionBindingLabels(bindings);
+  assert.equal(labels.command, 'Y');
+  assert.equal(labels.voice, 'I');
+  assert.equal(labels.interact, 'L');
+  assert.equal(labels.cursor, 'O');
+  assert.equal(bindingShortcut(bindings.command), 'Y');
+  assert.equal(bindingShortcut(bindings.cursor), 'O');
+  assert.equal(bindings.commandScan, DEFAULT_BINDINGS.commandScan, 'unrelated orders keep their defaults');
 });
 
 test('normalization never produces duplicate bindings', () => {

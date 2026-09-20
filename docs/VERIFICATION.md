@@ -1,5 +1,39 @@
 # COCS verification report
 
+## Release 8.5 - HANDOFF (pending automated gate)
+
+**Scope.** The post-v8.4 reliability implementation on `feat/fieldwork-plan`:
+round-scoped idempotent COCS actions and honest outcome feedback, identified
+web/server builds with paired rollback, production-backed route guidance,
+authored Operations fronts, a complete personal REQ purchase loop, touch and
+keyboard reachability fixes, binding-complete prompts, viewer-scoped results,
+one modal stack, event-gated assistive announcements, versioned title-first
+onboarding, a protected completion-safe training scenario, a governed playtest
+worksheet and an optional device-local study recorder. No balance was tuned.
+
+**Automated release gate (2026-09-20).**
+
+- `npm test`: pass on the integrated tree. Game tests: 2,571 pass, 8 approved
+  skips, 0 fail; server tests: 209 pass, 0 fail; TypeScript: pass; verified
+  production build: pass; SSR/UI and deployment-contract tests: 82 pass, 0 fail.
+- `npm run test:browser` against the running app: **5/5 viewports pass** at
+  1366×768, 1920×1080, 844×390, 390×844 and 844×390 at UI scale 1.4, including
+  hit testing, reticle-corridor containment, overflow and console/page-error
+  assertions. The first candidate run failed 5/5 with a real post-match crash
+  (`studyOutcomes(r.match.events)` after the match cleared); the guard fix was
+  re-verified with the same harness and the contract layer.
+- The frame-loop guard fix was re-verified with `npx tsc --noEmit`,
+  `node --test tests/*.test.mjs` (82/82) and the full browser matrix; the
+  simulation, game modules and server were untouched by that fix.
+- `npm run lint`: 0 errors at the unchanged warning baseline.
+
+**Human and device evidence boundary.** NVDA/VoiceOver listening, physical
+iOS/Android multi-touch, hardware pointer lock and the five-first-time / two-
+experienced participant protocol remain manual gates. The governed worksheet is
+[`reports/playtest-v8.4-template.md`](../reports/playtest-v8.4-template.md);
+use it with the release-of-record build identity. No balance or fun claim is
+authorized by automated evidence.
+
 ## Release 8.4 - FIELDCRAFT
 
 **Scope.** The fieldwork implementation on `feat/fieldwork-plan` adds public
@@ -25,18 +59,23 @@ changed.
 - The integrated diff adds no `Math.random`, `Date.now` or `performance.now` use
   to deterministic simulation code and adds no project dependency or asset.
 
-**Browser/device gate.** A temporary Playwright Chromium 140 install outside the
-repository exercised a fresh profile, Operations briefing/deploy and live
-LATTICE combat at 1366×768, 1920×1080, 844×390 touch, 390×844 touch and the
-844×390 UI-scale-1.4 stress case. Captures cover effective-rule setup copy,
-objective/command/Director hierarchy, touch movement/actions and contextual
-interaction. Measured bounding boxes confirm that the final HUD leaves the
-reticle clear and keeps objective, HQ/wave truth, vitals, interaction and touch
-actions in the viewport. The pass found and fixed short-landscape objective and
-portrait panel/chip overlap. Generated map-plan coordinates are quantized so
-the local SSR/client pass no longer emits React hydration mismatch warnings.
-The localhost-only absolute favicon CSP warning does not occur on the canonical
-same-origin production host.
+**Browser/device smoke (ephemeral).** A temporary Playwright Chromium 140
+install outside the repository exercised a fresh profile, Operations
+briefing/deploy and live LATTICE combat at 1366×768, 1920×1080, 844×390 touch,
+390×844 touch and the 844×390 UI-scale-1.4 stress case. Captures cover
+effective-rule setup copy, objective/command/Director hierarchy, touch
+movement/actions and contextual interaction. Measured bounding boxes confirm
+that the final HUD leaves the reticle clear and keeps objective, HQ/wave truth,
+vitals, interaction and touch actions in the viewport. The pass found and fixed
+short-landscape objective and portrait panel/chip overlap. Generated map-plan
+coordinates are quantized so the local SSR/client pass no longer emits React
+hydration mismatch warnings. The localhost-only absolute favicon CSP warning
+does not occur on the canonical same-origin production host. This was a one-off
+local run: the runner and captures live outside the repository, no trace or
+screenshot manifest is committed and there is no CI artifact or pinned browser
+matrix, so it is a smoke observation rather than a reproducible browser gate.
+WP1.1's tracked runner and artifact manifest remain required before this release
+can claim browser/input coverage.
 
 **Human evidence boundary.** The five first-time participants, two experienced
 comparison players, real-touch participant and remapped-keyboard participant
@@ -47,14 +86,20 @@ No combat, weapon, reward, roster-pressure or D1-D4 Director balance change was
 made; D2-D4 measurement remains deferred. Complete that protocol before using
 this release as evidence for tuning.
 
-**Production deployment.** Commit `1d292fb` was fast-forwarded to
-`improvement/phase2-audio-visual` and deployed to
+**Production deployment.** The recorded deploy commit `1d292fb` was
+fast-forwarded to `improvement/phase2-audio-visual` and deployed to
 <https://arena.ussyco.de> with `npm run deploy -- --with-game-server` on
 2026-09-20. Both user services reported active. The public deployment verifier
 returned 200 with correct content types for the document and all 13 linked
 CSS/JavaScript assets; `/api/version` returned `v8.4`; rendered HTML contained
-`v8.4 · FIELDCRAFT`; `wss://arena.ussyco.de/ws` accepted a connection; and a
-fresh headless Chromium production load emitted no console or page errors.
+the exact title footer `v8.4 · FIELDCRAFT`; `wss://arena.ussyco.de/ws` accepted a
+connection; and a fresh headless Chromium production load emitted no console or
+page errors. These checks are connectivity and release-label evidence: the host
+serves a v8.4-labelled document with live assets and accepts a WebSocket
+connection. They are not deployed-commit proof — `/api/version` exposes only a
+release string, so the served commit SHA and any web/server build pairing cannot
+be independently verified from the public endpoint. The deploy record above is
+local evidence, not a remote attestation.
 
 ## Release 7.2 - ECHO (the Moth audio assets wired into the game)
 

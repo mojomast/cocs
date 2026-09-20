@@ -7,11 +7,17 @@
 // the same authoritative record the simulation wrote (actor scoreStats, the
 // cocs/coop snapshot, the singleplayer snapshot or the stored campaign
 // progress); missing values read as an honest zero rather than a guess.
+//
+// Viewer model (WP1.5): `actor` is the record being read, `viewer` is the seat
+// allowed to claim it. Only a real seated player resolves to a viewer; a
+// spectator or an actor id that names nobody (viewer null) gets an
+// actor-neutral summary of public match/team totals and no award breakdown.
+// The seated-player path is byte-identical to before.
 import {formatNumber, formatWhole, formatResource} from './format-ui.mjs';
 import {isCocsMode, teamMode} from './config.mjs';
 import {CAMPAIGN_MISSIONS, missionFor} from './campaign-data.mjs';
 import {campaignMissionPar, checkpointFor, isMissionComplete, missionStars, nextMissionId} from './campaign-progress.mjs';
-import {cocsResultSummary, modeColumns, scoreStats} from './hud.mjs';
+import {cocsResultSummary, modeColumns, scoreStats, teamName} from './hud.mjs';
 import {challengeMatches, metricsFor} from './challenges.mjs';
 import {matchXp} from './progression.mjs';
 
@@ -94,7 +100,10 @@ function latticeContribution({hud, cocs, actor, kills, team, outcome, modeId, re
   teamRows.push(statRow('team-op', 'YOUR TEAM OP', score(scores[team]), num(scores[team])));
   teamRows.push(statRow('enemy-op', 'ENEMY OP', score(scores[enemy]), num(scores[enemy])));
   teamRows.push(statRow('nodes', 'NODES OWNED', `${owned[team]} / ${owned[0] + owned[1]}`, owned[team]));
-  teamRows.push(statRow('orders-team', 'ORDERS COMPLETED', `${int(orders.completed)} / ${int(orders.issued)}`, int(orders.completed), 'completed / issued'));
+  // `snapshot.cocs.orderStats` is a single global counter (game/cocs.mjs writes
+  // one tally for both teams) and no per-team field is published, so label the
+  // row as the match-wide scope it really is.
+  teamRows.push(statRow('orders-match', 'MATCH ORDERS COMPLETED', `${int(orders.completed)} / ${int(orders.issued)}`, int(orders.completed), 'completed / issued across both teams'));
   const fluxSpent = num(cocs?.fluxSpent?.[team]);
   if (fluxSpent > 0) teamRows.push(statRow('flux', 'FLUX SPENT', formatResource(fluxSpent), fluxSpent));
  }
@@ -111,6 +120,26 @@ function latticeContribution({hud, cocs, actor, kills, team, outcome, modeId, re
  };
 }
 
+// Neutral "why did this end" for OPERATIONS. Shared by the seated-player and
+// spectator summaries: it never names a viewer or claims credit.
+function operationsEndReason(hud) {
+ const waves = hud?.cocs?.waves ?? {};
+ const director = hud?.cocs?.director ?? {};
+ const cleared = int(waves.cleared);
+ const par = int(waves.par) || int(director.waveCount) || 5;
+ const current = Math.max(1, Math.min(par, int(waves.current) || cleared + 1));
+ const waveLine = `${cleared} of ${par} waves cleared`;
+ const reason = String(hud?.overReason ?? '');
+ return reason === 'operation-complete' ? `All ${par} waves were cleared with the HQ standing.`
+  : reason === 'operation-failed' ? `The operation clock ran out on wave ${current} of ${par} (${waveLine}).`
+   : reason === 'hq-destroyed' ? `The Director siege destroyed the HQ on wave ${current} of ${par} (${waveLine}).`
+    : reason === 'hq-lost' ? `HQ control was lost after ${waveLine}.`
+     : reason === 'team-wipe' ? `The squad ran out of reserve tickets on wave ${current} (${waveLine}).`
+      : reason === 'dominance' ? `The Director claimed lattice dominance after ${waveLine}.`
+       : reason === 'time' ? `The clock ran out after ${waveLine}.`
+        : `The operation ended after ${waveLine}.`;
+}
+
 // ---------------------------------------------------------------------------
 // OPERATIONS (cocs-coop): waves, HQ siege work and intermission spend effects.
 // ---------------------------------------------------------------------------
@@ -120,7 +149,6 @@ function operationsContribution({hud, cocs, actor, kills, outcome, modeId}) {
  const siege = director.siege ?? {};
  const cleared = int(waves.cleared);
  const par = int(waves.par) || int(director.waveCount) || 5;
- const current = Math.max(1, Math.min(par, int(waves.current) || cleared + 1));
  const reqEntry = (Array.isArray(cocs?.req) ? cocs.req : []).find(entry => entry && entry.id === actor?.id) ?? null;
  const reqSpent = int(reqEntry ? reqEntry.spent : actor?.reqSpent);
  const reqEarned = int(reqEntry ? reqEntry.earned : actor?.reqEarned);
@@ -128,16 +156,7 @@ function operationsContribution({hud, cocs, actor, kills, outcome, modeId}) {
  const hold = num(rawStat(actor, 'objectiveTime'));
  const ordersContributed = int(rawStat(actor, 'ordersContributed'));
  const damage = num(rawStat(actor, 'damage'));
- const reason = String(hud?.overReason ?? '');
- const waveLine = `${cleared} of ${par} waves cleared`;
- const endReason = reason === 'operation-complete' ? `All ${par} waves were cleared with the HQ standing.`
-  : reason === 'operation-failed' ? `The operation clock ran out on wave ${current} of ${par} (${waveLine}).`
-   : reason === 'hq-destroyed' ? `The Director siege destroyed the HQ on wave ${current} of ${par} (${waveLine}).`
-    : reason === 'hq-lost' ? `HQ control was lost after ${waveLine}.`
-     : reason === 'team-wipe' ? `The squad ran out of reserve tickets on wave ${current} (${waveLine}).`
-      : reason === 'dominance' ? `The Director claimed lattice dominance after ${waveLine}.`
-       : reason === 'time' ? `The clock ran out after ${waveLine}.`
-        : `The operation ended after ${waveLine}.`;
+ const endReason = operationsEndReason(hud);
  const personal = [
   statRow('captures', 'NODE CAPTURES', score(captures), captures),
   statRow('hold', 'NODE HOLD', `${formatNumber(hold)}s`, hold),
@@ -169,6 +188,96 @@ function operationsContribution({hud, cocs, actor, kills, outcome, modeId}) {
  return {
   kind: 'operations', modeId, title: 'OPERATIONS CONTRIBUTION', outcome,
   endReason, personal, team: teamRows, saved: [], headline: headline.text, headlineSource: headline.source,
+ };
+}
+
+// ---------------------------------------------------------------------------
+// Spectator / unknown viewer (WP1.5): there is no seat, so there is no personal
+// record to claim. The summary reads the same frozen snapshot but reports only
+// public match/team totals: no personal rows, no "you" headline and no award.
+// ---------------------------------------------------------------------------
+function spectatorContribution({hud = null, mode = null} = {}) {
+ const modeId = String(mode ?? hud?.config?.mode ?? '');
+ const modeName = String(hud?.modeName ?? modeId);
+ const kind = kindOf(hud, modeId);
+ const cocs = hud?.cocs ?? null;
+ const winner = cocs?.winner ?? hud?.winner ?? null;
+ const won = winner === 0 || winner === 1 ? Number(winner) : null;
+ const rows = [];
+ let title = 'MATCH TOTALS';
+ let endReason = `${modeName.toUpperCase()} ended.`;
+ let headline = `${modeName.toUpperCase()} ended.`;
+ if (kind === 'lattice') {
+  const scores = {0: num(cocs?.scores?.[0]), 1: num(cocs?.scores?.[1])};
+  const nodes = Array.isArray(cocs?.nodes) ? cocs.nodes : [];
+  const owned = {0: nodes.filter(node => node?.owner === 0).length, 1: nodes.filter(node => node?.owner === 1).length};
+  const orders = cocs?.orderStats ?? {};
+  title = 'LATTICE MATCH TOTALS';
+  rows.push(statRow('team-0-op', `${teamName(0)} OP`, score(scores[0]), scores[0]));
+  rows.push(statRow('team-1-op', `${teamName(1)} OP`, score(scores[1]), scores[1]));
+  rows.push(statRow('nodes', 'NODES OWNED', `${owned[0]} / ${owned[1]}`, owned[0] + owned[1], `${teamName(0)} / ${teamName(1)}`));
+  rows.push(statRow('orders-match', 'MATCH ORDERS COMPLETED', `${int(orders.completed)} / ${int(orders.issued)}`, int(orders.completed), 'completed / issued across both teams'));
+  const fluxSpent = num(cocs?.fluxSpent?.[0]) + num(cocs?.fluxSpent?.[1]);
+  if (fluxSpent > 0) rows.push(statRow('flux', 'MATCH FLUX SPENT', formatResource(fluxSpent), fluxSpent));
+  const reason = String(hud?.overReason ?? '');
+  const why = reason === 'array' ? 'the ARRAY anchor was captured'
+   : reason === 'dominance' ? 'the lattice was held to the dominance timer'
+    : reason === 'time' ? 'the clock ran out on objective score'
+     : 'the lattice was decided';
+  endReason = `${won === null ? 'The lattice was a draw' : `${teamName(won)} took the lattice`}: ${why}. ${teamName(0)} ${score(scores[0])} – ${score(scores[1])} ${teamName(1)} · ${owned[0]}–${owned[1]} nodes.`;
+  headline = won === null ? 'The lattice match ended without a winner.' : `${teamName(won)} took the lattice.`;
+ } else if (kind === 'operations') {
+  const waves = cocs?.waves ?? {};
+  const director = cocs?.director ?? {};
+  const siege = director.siege ?? {};
+  const cleared = int(waves.cleared);
+  const par = int(waves.par) || int(director.waveCount) || 5;
+  const bonusTelemetry = cocs?.bonusTelemetry ?? {};
+  const bonusDone = Array.isArray(bonusTelemetry.done) ? bonusTelemetry.done.length : 0;
+  const bonusFailed = Array.isArray(bonusTelemetry.failed) ? bonusTelemetry.failed.length : 0;
+  title = 'OPERATIONS MATCH TOTALS';
+  rows.push(statRow('waves', 'WAVES CLEARED', `${cleared} / ${par}`, cleared));
+  rows.push(statRow('hq', 'HQ INTEGRITY', `${score(siege.health)} / ${score(siege.max)}`, num(siege.health), int(siege.repairs) > 0 ? `${score(siege.repairs)} repaired` : null));
+  const fluxSpent = num(director?.intermission?.spent ?? director?.stats?.spent);
+  if (fluxSpent > 0) rows.push(statRow('flux', 'FLUX SPENT', formatResource(fluxSpent), fluxSpent));
+  if (bonusDone + bonusFailed > 0) rows.push(statRow('bonus', 'BONUS OBJECTIVES', `${bonusDone} / ${bonusDone + bonusFailed}`, bonusDone, 'secured / attempted'));
+  const reserves = cocs?.reserves;
+  if (reserves?.enabled === true) rows.push(statRow('reserve', 'RESERVE TICKETS', `${score(reserves.tickets)}`, num(reserves.tickets), int(reserves.burns) > 0 ? `${score(reserves.burns)} burned` : null));
+  endReason = operationsEndReason(hud);
+  headline = won === 0 ? 'The squad held the line.' : won === 1 ? 'The Director broke the line.' : 'The operation ended.';
+ } else if (kind === 'solo') {
+  const single = hud?.singleplayer ?? null;
+  const elapsed = Math.round(num(single?.elapsed ?? hud?.time));
+  const soloKind = single?.kind ?? (modeId === 'horde' ? 'horde' : 'campaign');
+  const wave = int(single?.wave);
+  const target = int(single?.waveTarget);
+  if (soloKind === 'horde') {
+   title = 'HORDE RUN TOTALS';
+   rows.push(statRow('waves', 'WAVES CLEARED', target > 0 ? `${Math.max(0, Math.min(target, wave - 1))} / ${target}` : score(wave), wave));
+   rows.push(statRow('time', 'SURVIVAL TIME', `${score(elapsed)}s`, elapsed));
+   endReason = target > 0 ? `The run ended on wave ${Math.max(1, wave)} of ${target}.` : `The run ended on wave ${Math.max(1, wave)}.`;
+  } else {
+   const steps = Array.isArray(single?.steps) ? single.steps : [];
+   const stepsDone = steps.filter(step => step?.done === true).length;
+   const stepTotal = steps.length;
+   title = 'MISSION RUN TOTALS';
+   rows.push(statRow('steps', 'STEPS COMPLETE', stepTotal > 0 ? `${stepsDone} / ${stepTotal}` : score(stepsDone), stepsDone));
+   rows.push(statRow('time', 'MISSION TIME', `${score(elapsed)}s`, elapsed));
+   endReason = `The mission ended at step ${stepsDone}${stepTotal ? ` of ${stepTotal}` : ''}.`;
+  }
+  headline = endReason;
+ } else {
+  const teamScores = hud?.teamScores ?? null;
+  if (teamScores) {
+   rows.push(statRow('team-0-score', `${teamName(0)} SCORE`, score(teamScores[0]), num(teamScores[0])));
+   rows.push(statRow('team-1-score', `${teamName(1)} SCORE`, score(teamScores[1]), num(teamScores[1])));
+  }
+  headline = teamScores && won !== null ? `${teamName(won)} won the match.` : `${modeName.toUpperCase()} ended.`;
+ }
+ return {
+  kind, modeId, title, viewer: 'spectator', outcome: null,
+  endReason, personal: [], team: rows, teamLabel: 'MATCH TOTALS', saved: [],
+  headline, headlineSource: 'match',
  };
 }
 
@@ -277,8 +386,17 @@ function standardContribution({hud, actor, stats, kills, deaths, team, outcome, 
  };
 }
 
-/** Mode-specific contribution summary for the results screen. Pure read. */
-export function contributionSummary({hud = null, actor = null, mode = null, campaign = null, resultSummary = null} = {}) {
+/**
+ * Mode-specific contribution summary for the results screen. Pure read.
+ * `viewer` names the seat allowed to claim the record; it defaults to `actor`,
+ * so existing seated-player callers are unchanged. When no viewer resolves
+ * (spectator or unknown actor id) the summary is actor-neutral and reports
+ * public match/team totals only.
+ * @param {any} [options]
+ */
+export function contributionSummary({hud = null, actor = null, viewer, mode = null, campaign = null, resultSummary = null} = {}) {
+ const viewerActor = viewer === undefined ? actor : viewer;
+ if (viewerActor === null || viewerActor === undefined) return spectatorContribution({hud, mode});
  const modeId = String(mode ?? hud?.config?.mode ?? '');
  const modeName = String(hud?.modeName ?? modeId);
  const stats = scoreStats(actor);
@@ -511,11 +629,27 @@ export function nextMatchPlan({hud = null, actor = null, mode = null, campaign =
  };
 }
 
-/** One composition the results screen can render directly. Pure read. */
-export function matchLearningSummary({hud = null, actor = null, mode = null, reward = null, campaign = null, challenges = [], weeklyChallenges = [], ranked = null, rankedQueued = null, net = null, lastDemo = null, resultSummary = null, mapNameFor = null} = {}) {
- const outcome = resultOutcome(hud, actor);
- const contribution = contributionSummary({hud, actor, mode, campaign, resultSummary});
- const xp = rewardBreakdown({actor, reward, win: outcome === 'win'});
- const next = nextMatchPlan({hud, actor, mode, campaign, challenges, weeklyChallenges, ranked, rankedQueued, net, lastDemo, mapNameFor});
- return {contribution, xp, next, outcome};
+// A viewer with no seat has no award of their own: the card hides the
+// breakdown entirely instead of printing another player's XP.
+const NEUTRAL_REWARD = Object.freeze({available: false, categories: [], total: 0, totalLabel: '+0', objectiveCredit: 0, challenge: 0, sum: 0});
+
+/**
+ * One composition the results screen can render directly. Pure read.
+ * `viewer` defaults to `actor`; pass `viewer: null` (or `actor: null`) when the
+ * screen is spectating so the summary never claims another seat's record or
+ * reward. Returns `viewer: 'player' | 'spectator'` so the card can label its
+ * groups truthfully.
+ * @param {any} [options]
+ */
+export function matchLearningSummary({hud = null, actor = null, viewer, mode = null, reward = null, campaign = null, challenges = [], weeklyChallenges = [], ranked = null, rankedQueued = null, net = null, lastDemo = null, resultSummary = null, mapNameFor = null} = {}) {
+ const viewerActor = viewer === undefined ? actor : viewer;
+ const spectator = viewerActor === null || viewerActor === undefined;
+ const outcome = spectator ? null : resultOutcome(hud, viewerActor);
+ const contribution = spectator
+  ? spectatorContribution({hud, mode})
+  : contributionSummary({hud, actor: viewerActor, mode, campaign, resultSummary});
+ // A spectator has no award payload; a stale local reward must not surface.
+ const xp = spectator ? {...NEUTRAL_REWARD} : rewardBreakdown({actor: viewerActor, reward, win: outcome === 'win'});
+ const next = nextMatchPlan({hud, actor: viewerActor, mode, campaign, challenges, weeklyChallenges, ranked, rankedQueued, net, lastDemo, mapNameFor});
+ return {contribution, xp, next, outcome, viewer: spectator ? 'spectator' : 'player'};
 }

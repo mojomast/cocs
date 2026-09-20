@@ -150,10 +150,17 @@ export class NetClient {
   this.lastError = '';
   this.chatLog = [];
   this.voiceIceServers = [{ urls: 'stun:stun.l.google.com:19302' }];
-  this.cocsRejects = [];
-  this.cocsBlockers = new Map();
-  this.cocsPending = new Map();
-  this.lastCocsReject = null;
+  // COCS round identity + optimistic card state survive `reset()`, because
+  // `connect()` calls it on every reconnect: a same-round reconnect must
+  // reconcile from the authoritative snapshot instead of clearing local state.
+  // `_observeRoundRevision` is the only place these are cleared, and only on a
+  // real new round revision.
+  this.cocsRejects = Array.isArray(this.cocsRejects) ? this.cocsRejects : [];
+  this.cocsBlockers = this.cocsBlockers instanceof Map ? this.cocsBlockers : new Map();
+  this.cocsPending = this.cocsPending instanceof Map ? this.cocsPending : new Map();
+  this.lastCocsReject = this.lastCocsReject ?? null;
+  this.roundRevision = Number.isInteger(this.roundRevision) && this.roundRevision >= 0 ? this.roundRevision : 0;
+  this.actionSeq = Number.isInteger(this.actionSeq) && this.actionSeq >= 0 ? this.actionSeq : 0;
   // Ranked/status surfaces (existing protocol v3 messages the ranked ladder
   // dispatches: `queue`, `leaderboard`, `profile`, `matchmade`). The payloads
   // are stored verbatim so a readout can render before or after a `lobby`
@@ -229,7 +236,30 @@ export class NetClient {
   // -------------------------------------------------------------------
   // LATTICE STRIKE wire actions (§11.2). Each records an optimistic in-flight
   // card so a `cocs-reject` can clear it; the authoritative snapshot reconciles.
+  // Every frame also carries the current round revision and a per-peer monotonic
+  // action sequence (WP0.3). Both are additive/optional v3 fields: before the
+  // authority announces a revision (`roundRevision === 0`, i.e. no round seen)
+  // the frame keeps its historical shape and the server scopes the cardId.
   // -------------------------------------------------------------------
+  _cocsIdentity() {
+   if (!(this.roundRevision > 0)) return null;
+   this.actionSeq += 1;
+   return { roundRev: this.roundRevision, actionSeq: this.actionSeq };
+  }
+  // A new revision is a real new round: reset the sequence and every local
+  // optimistic card. The same revision (a reconnect) keeps all of it so the
+  // snapshot can reconcile, and an exact retry still matches its server key.
+  _observeRoundRevision(rev) {
+   if (!Number.isInteger(rev) || rev < 0) return false;
+   if (rev === this.roundRevision) return false;
+   this.roundRevision = rev;
+   this.actionSeq = 0;
+   this.cocsRejects = [];
+   this.cocsBlockers.clear();
+   this.cocsPending.clear();
+   this.lastCocsReject = null;
+   return true;
+  }
   _trackCocs(cardId, kind) {
    if (cardId === null || cardId === undefined || cardId === '') return null;
    const id = String(cardId);
@@ -238,33 +268,40 @@ export class NetClient {
   }
   order(cardId, verb, target, agent) {
    const id = this._trackCocs(cardId, 'order');
-   return this.send({ type: MESSAGE.ORDER, cardId: id, verb: String(verb ?? '').toUpperCase(), target: String(target ?? ''), ...(agent ? { agent: String(agent) } : {}) });
+   const identity = this._cocsIdentity();
+   return this.send({ type: MESSAGE.ORDER, cardId: id, verb: String(verb ?? '').toUpperCase(), target: String(target ?? ''), ...(agent ? { agent: String(agent) } : {}), ...(identity ?? {}) });
   }
   economy(action, { cardId, role = null, target = null, actorId } = {}) {
    const id = this._trackCocs(cardId, 'economy');
+   const identity = this._cocsIdentity();
    return this.send({
     type: MESSAGE.ECONOMY, cardId: id, action: String(action ?? '').toLowerCase(),
     ...(role ? { role: String(role) } : {}),
     ...(target !== null && target !== undefined ? { target: String(target) } : {}),
     ...(actorId !== undefined ? { actorId } : {}),
+    ...(identity ?? {}),
    });
   }
   terminal(terminalId, action, { cardId, actorId } = {}) {
    const id = this._trackCocs(cardId, 'terminal');
-   return this.send({ type: MESSAGE.TERMINAL, terminalId: String(terminalId ?? ''), action: String(action ?? '').toLowerCase(), ...(id ? { cardId: id } : {}), ...(actorId !== undefined ? { actorId } : {}) });
+   const identity = this._cocsIdentity();
+   return this.send({ type: MESSAGE.TERMINAL, terminalId: String(terminalId ?? ''), action: String(action ?? '').toLowerCase(), ...(id ? { cardId: id } : {}), ...(actorId !== undefined ? { actorId } : {}), ...(identity ?? {}) });
   }
   command(action, value = null, { cardId } = {}) {
    const id = this._trackCocs(cardId, 'command');
-   return this.send({ type: MESSAGE.COMMAND, action: String(action ?? '').toLowerCase(), ...(value !== null && value !== undefined ? { value } : {}), ...(id ? { cardId: id } : {}) });
+   const identity = this._cocsIdentity();
+   return this.send({ type: MESSAGE.COMMAND, action: String(action ?? '').toLowerCase(), ...(value !== null && value !== undefined ? { value } : {}), ...(id ? { cardId: id } : {}), ...(identity ?? {}) });
   }
   buy(itemId, { depotId, targetCardId, cardId, actorId } = {}) {
    const id = this._trackCocs(cardId, 'buy');
+   const identity = this._cocsIdentity();
    return this.send({
     type: MESSAGE.BUY, itemId: String(itemId ?? ''),
     ...(depotId ? { depotId: String(depotId) } : {}),
     ...(targetCardId ? { targetCardId: String(targetCardId) } : {}),
     ...(id ? { cardId: id } : {}),
     ...(actorId !== undefined ? { actorId } : {}),
+    ...(identity ?? {}),
    });
   }
  onMessage(data) {
@@ -299,19 +336,26 @@ export class NetClient {
     this.started = msg.started;
     this.spectate = this.players.find(p => p.peerId === this.peerId)?.spectate === true;
     this.actorId = this.players.find(p => p.peerId === this.peerId)?.actorId ?? null;
+    this._observeRoundRevision(msg.roundRevision);
     this.onLobby?.(msg);
     break;
    case MESSAGE.ROOMS: this.rooms = Array.isArray(msg.rooms) ? msg.rooms : []; this.onRooms?.(msg); break;
    case MESSAGE.HISTORY: this.matches = Array.isArray(msg.matches) ? msg.matches : []; this.onHistory?.(msg); break;
    case MESSAGE.START:
+    // A new round revision clears the local strip/pending state; a same-round
+    // reconnect keeps it and reconciles from the authoritative snapshot.
+    if (!(Number.isInteger(msg.roundRevision) && msg.roundRevision >= 0 && !this._observeRoundRevision(msg.roundRevision))) {
+     this.actionSeq = 0;
+     this.cocsRejects = [];
+     this.cocsBlockers.clear();
+     this.cocsPending.clear();
+     this.lastCocsReject = null;
+    }
     this.started = true;
     this.roundOver = false;
      this.buffer = [];
      this.snapshotSeq = 0;
      this.events = [];
-     this.cocsRejects = [];
-     this.cocsBlockers.clear();
-     this.cocsPending.clear();
      this.state = null;
      this.inputSeq = 0;
      this.pendingInputs = [];
@@ -385,6 +429,10 @@ export class NetClient {
    while (this.buffer.length > this.bufferTarget) this.buffer.shift();
   this.state = msg.state;
    this._rememberBase(msg);
+   // The authoritative snapshot is the reconnect reconciliation source: observe
+   // the round revision before reconciling, so a genuinely new round clears the
+   // optimistic state while the same round keeps it.
+   this._observeRoundRevision(msg.state?.cocs?.roundRevision);
    this._reconcileCocs(msg.state);
    const actors = Array.isArray(msg.state?.actors) ? msg.state.actors.filter(a => a && typeof a === 'object') : [];
    if (msg.state?.race) {
@@ -434,7 +482,13 @@ export class NetClient {
     if (!card || card.id === undefined || card.id === null) continue;
     const id = String(card.id);
     if (!this.cocsPending.has(id)) continue;
-    if (card.state === 'blocked') { this.cocsBlockers.set(id, { cardId: id, reason: card.blocker ?? card.reason ?? 'blocked' }); continue; }
+    // `blocked`/`expired` are authoritative terminal failures: record the reason
+    // and clear the optimistic card so it cannot stay in flight forever.
+    if (card.state === 'blocked' || card.state === 'expired') {
+     this.cocsBlockers.set(id, { cardId: id, reason: card.blocker ?? card.reason ?? card.state });
+     this.cocsPending.delete(id);
+     continue;
+    }
     this.cocsPending.delete(id);
    }
   }

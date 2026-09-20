@@ -184,22 +184,40 @@
 .modal{position:fixed;inset:0;z-index:var(--z-modal);display:grid;place-items:center;
   padding:var(--safe-top) var(--safe-right) var(--safe-bottom) var(--safe-left);
   background:#050e13c2;backdrop-filter:blur(8px);-webkit-backdrop-filter:blur(8px)}
-.modal-panel{display:flex;flex-direction:column;width:min(100%,var(--modal-w,640px));
+.modal-panel{display:flex;flex-direction:column;width:min(100%,var(--modal-w,640px));min-width:0;max-width:100%;
   max-height:calc(100dvh - var(--safe-top) - var(--safe-bottom));border:1px solid var(--ui-line);
   border-radius:var(--radius-lg);background:linear-gradient(180deg,#0b1a1f,#081317);
-  box-shadow:var(--shadow-modal);overflow:hidden}
+  box-shadow:var(--shadow-modal);overflow:hidden;overflow-wrap:anywhere}
 .modal-panel--sm{--modal-w:480px}.modal-panel--md{--modal-w:640px}
 .modal-panel--lg{--modal-w:840px}.modal-panel--xl{--modal-w:1120px}
 .modal-head{display:flex;align-items:flex-start;gap:var(--ui-gap-3);padding:18px 22px;
   border-bottom:1px solid var(--ui-line);flex:none}
 .modal-head .modal-title{margin:6px 0 0;font-size:22px;letter-spacing:-.02em}
 .modal-head .modal-desc{margin:6px 0 0;font-size:13px;color:var(--text-dim)}
-.modal-close{margin-left:auto;flex:none}
-.modal-body{flex:1;min-height:0;overflow-y:auto;overscroll-behavior:contain;padding:22px;scrollbar-gutter:stable}
+.modal-close{margin-left:auto;flex:none;overflow-wrap:normal}
+.modal-body{flex:1;min-height:0;min-width:0;overflow-y:auto;overscroll-behavior:contain;padding:22px;scrollbar-gutter:stable}
 .modal-body--tight{padding:14px}
-.modal-foot{display:flex;align-items:center;gap:var(--ui-gap-3);padding:16px 22px;
-  border-top:1px solid var(--ui-line);flex:none;background:rgba(6,14,18,.4)}
+/* WP2.1 — the footer wraps rather than clipping: it is a wrapping row by
+   default, a single stacked column on phones, and its own scroll region is
+   bounded to the panel so every action stays visible and tappable. */
+.modal-foot{display:flex;flex-wrap:wrap;align-items:center;gap:var(--ui-gap-3);padding:16px 22px;
+  border-top:1px solid var(--ui-line);flex:0 1 auto;min-width:0;min-height:0;max-width:100%;
+  max-height:min(45dvh,260px);overflow:auto;overscroll-behavior:contain;background:rgba(6,14,18,.4)}
+.modal-foot>*{min-width:0;max-width:100%}
+.modal-foot .btn{flex:0 1 auto;white-space:normal;text-align:center}
 .modal-foot .modal-foot-primary{margin-left:auto}
+/* A covered lower dialog keeps its place in the DOM but accepts nothing. */
+.modal--covered{pointer-events:none}
+@media (max-width:600px){
+  .modal-foot{display:grid;grid-template-columns:minmax(0,1fr);align-items:stretch;gap:10px}
+  .modal-foot>*{width:100%}
+  .modal-foot .chip{justify-content:center}
+  .modal-foot .modal-foot-primary{margin-left:0}
+  .modal-body .btn{max-width:100%;height:auto;min-height:44px;padding-block:10px;white-space:normal}
+}
+@media (pointer:coarse){
+  .modal-foot .btn,.modal-foot .chip{min-height:44px}
+}
 
 /* ---------- Action rail composition ---------- */
 .rail-summary{display:flex;align-items:center;gap:10px;flex-wrap:wrap;min-width:0;margin-right:auto}
@@ -393,6 +411,12 @@
 .help-list{margin:0;padding-left:18px;display:grid;gap:8px;color:var(--text-dim);font-size:14px;line-height:1.5}
 .help-list li::marker{color:var(--accent)}
 .help-list li b{color:var(--text)}
+/* WP3.2 — optional local study log: consent scope, download/delete. */
+.study-scope{margin:14px 0 0;padding-left:18px;display:grid;gap:8px;color:var(--text-dim);font-size:13px;line-height:1.5}
+.study-scope li::marker{color:var(--accent)}
+.study-scope li b{color:var(--text)}
+.study-switch{width:18px;height:18px;accent-color:var(--accent)}
+.study-actions{margin-top:14px;gap:10px;flex-wrap:wrap}
 
 @media (max-width:720px){
   .help-sections .panel-body{padding:12px 14px}

@@ -1342,7 +1342,7 @@ export function spawnDirectorGroup(match, state, spec = {}) {
     const actor = actorById(match, id);
     if (!actor) continue;
     actor.isDirectorWave = true;
-    actor.directorNode = spec.nodeId ?? coop.targetNode ?? null;
+    assignDirectorFront(state, actor, spec.nodeId ?? coop.targetNode ?? null);
     actor.npcRole = actor.npcType;
     if (request.boss) {
       actor.isBoss = true;
@@ -1352,8 +1352,6 @@ export function spawnDirectorGroup(match, state, spec = {}) {
       // only — no archetype HP/damage is touched.
       if (actor.npcSummon) actor.npcSummon = coop.tier === 'D1' ? null : {...actor.npcSummon, count: 1, maxAlive: 3, interval: 14};
     }
-    const node = nodeById(state, actor.directorNode);
-    if (node) actor.npcZone = {x: node.x, z: node.z, r: Math.max(num(node.r, 4), 8), leash: 200, kind: 'spawn'};
     coop.waveIds.push(id);
     coop.allWaveIds.push(id);
   }
@@ -1453,13 +1451,16 @@ function refreshTargets(match, state) {
     coop.targetNode = coop.siege.hqId;
     return;
   }
-  let fronts = directorFronts(state, match.actors, {team: 1, count: tier.fronts, tier: coop.tier});
+  // WP1.4: the authored per-wave front count, not the tier-wide general cap.
+  // Before the first wave starts (wave 0) the tier's count is the plan.
+  const frontCount = coop.wave >= 1 ? directorWavePlan(coop.wave, coop.tier).fronts : tier.fronts;
+  let fronts = directorFronts(state, match.actors, {team: 1, count: frontCount, tier: coop.tier});
   if (!fronts.length) {
     const hq0 = nodeById(state, 'hq-0');
     const neutral = capturableNodes(state)
       .filter(node => node.owner === null || node.owner === 0)
       .sort((a, b) => (hq0 ? Math.hypot(a.x - hq0.x, a.z - hq0.z) - Math.hypot(b.x - hq0.x, b.z - hq0.z) : 0) || String(a.id).localeCompare(String(b.id)));
-    fronts = neutral.slice(0, tier.fronts).map(node => ({nodeId: node.id, weakness: 0}));
+    fronts = neutral.slice(0, frontCount).map(node => ({nodeId: node.id, weakness: 0}));
   }
   if (!fronts.length) {
     const all = capturableNodes(state).sort((a, b) => String(a.id).localeCompare(String(b.id)));
@@ -1470,18 +1471,37 @@ function refreshTargets(match, state) {
   retargetWaveActors(match, state);
 }
 
-// Keep the *whole* living wave force on the current front. A straggler left on
-// an old node would stall the wave clear forever; the Director re-points it at
-// the front every retarget (behaviour only, no stat change).
+// Point a Director body at one front: the id the bot brain routes it to
+// (`directorNode`) plus the confinement zone that keeps it fighting there.
+function assignDirectorFront(state, actor, nodeId) {
+  actor.directorNode = nodeId ?? null;
+  const node = nodeById(state, nodeId);
+  if (node) actor.npcZone = {x: node.x, z: node.z, r: Math.max(num(node.r, 4), 8), leash: 200, kind: 'spawn'};
+  return actor;
+}
+
+// Keep the per-front actor assignments: a body holds its front while that node
+// is still one of the current targets, and only a body whose front is gone
+// (captured, invalid or unknown) is redistributed across the surviving fronts,
+// oldest actor first. The force therefore pressures every authored front at
+// once instead of collapsing onto one node. A straggler left on a dead front is
+// always re-pointed at a live one, so the overrun withdrawal remains the wave
+// clear's backstop, never a single stuck body.
 function retargetWaveActors(match, state) {
   const coop = state.coop;
-  if (!coop.targetNode) return;
-  const node = nodeById(state, coop.targetNode);
+  const fronts = coop.fronts ?? [];
+  if (!fronts.length) return;
+  const assigned = new Set(fronts.map(front => front.nodeId));
+  const strays = [];
   for (const id of coop.allWaveIds) {
     const actor = actorById(match, id);
     if (!actor || actor.health <= 0 || actor.isDirectorWave !== true) continue;
-    actor.directorNode = coop.targetNode;
-    if (node) actor.npcZone = {x: node.x, z: node.z, r: Math.max(num(node.r, 4), 8), leash: 200, kind: 'spawn'};
+    if (actor.directorNode && assigned.has(actor.directorNode)) continue;
+    strays.push(actor);
+  }
+  strays.sort((a, b) => num(a.id, 0) - num(b.id, 0));
+  for (let index = 0; index < strays.length; index++) {
+    assignDirectorFront(state, strays[index], fronts[index % fronts.length].nodeId);
   }
 }
 
@@ -1520,12 +1540,15 @@ function startWave(match, state) {
   coop.waveTimerTicks = ticks(plan.timer);
   coop.reinforceOrder = directorReinforcementOrder(plan.composition);
   coop.retargetTick = num(coop.tick, 0) + ticks(COOP_RETARGET_SECONDS);
-  match.emit?.('director-wave', {wave: coop.wave, waveCount: coop.waveCount, label: plan.label, modifier: plan.modifier, fronts: tier.fronts, timer: plan.timer, budget: coop.pressure, composition: {...plan.composition}, boss: Boolean(plan.boss)});
+  match.emit?.('director-wave', {wave: coop.wave, waveCount: coop.waveCount, label: plan.label, modifier: plan.modifier, fronts: plan.fronts, timer: plan.timer, budget: coop.pressure, composition: {...plan.composition}, boss: Boolean(plan.boss)});
   match.emit?.('director-modifier', {wave: coop.wave, id: plan.modifier, name: String(plan.modifier).toUpperCase()});
   // The baseline force is free at wave start and staged with a telegraph.
   const order = directorReinforcementOrder(plan.composition);
-  for (const entry of order) {
-    const nodeId = frontsAt(coop, order.indexOf(entry));
+  for (let index = 0; index < order.length; index++) {
+    // `frontsAt` cycles the authored front list, so the staged baseline is
+    // spread across every current front instead of stacked on one node.
+    const entry = order[index];
+    const nodeId = frontsAt(coop, index);
     scheduleDirectorSpawn(match, state, {type: entry.type, count: entry.count, nodeId}, {nodeId, delayTicks: ticks(COOP_PACING.telegraphSeconds)});
   }
 }
@@ -2220,6 +2243,15 @@ export function coopTerminalAction(match, state, record = {}) {
   if (terminal) {
     if (action === 'hack' || action === 'deploy') {
       const started = terminalInteract(match, state, actor.id, record.terminalId, action.toUpperCase());
+      return {ok: started.ok === true, reason: started.reason ?? null};
+    }
+    // The protocol verb is CUT (`sabotage` is its legacy alias, game/protocol.mjs
+    // COCS_TERMINAL_ALIASES). A terminal cut rides the same SABOTAGE channel the
+    // human interact edge starts, so a local or networked Operations terminal cut
+    // reaches the existing range/contest/state gates instead of the device-only
+    // fall-through.
+    if (action === 'cut' || action === 'sabotage') {
+      const started = terminalInteract(match, state, actor.id, record.terminalId, 'SABOTAGE');
       return {ok: started.ok === true, reason: started.reason ?? null};
     }
     if (action === 'repair') return {ok: repairTerminal(state, terminal) === true, reason: null};

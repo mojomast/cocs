@@ -11,6 +11,7 @@ reference.
 | [TESTING.md](TESTING.md) | How the project is verified and how to run the suites. |
 | [DEPLOYMENT.md](DEPLOYMENT.md) | Hosting, the build/restart rule and deployment verification. |
 | [VERIFICATION.md](VERIFICATION.md) | Dated release evidence and the remaining validation gaps. |
+| [V8.4-IMPROVEMENT-PLAN.md](V8.4-IMPROVEMENT-PLAN.md) | Post-release multi-track audit and prioritized corrective roadmap. |
 | [spec/SPEC.md](spec/SPEC.md) | Historical design specification (kept as a record). |
 | [spec/DEVPLAN.md](spec/DEVPLAN.md) | Historical development plan (kept as a record). |
 | [history/](history/) | Superseded audit and code-review plans. |

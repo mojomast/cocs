@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import {Match,floorAt} from './core.mjs';
 import {GAME_MODES,DIFFICULTIES,normalizeConfig,DEFAULT_CONFIG} from './config.mjs';
 import {CAMPAIGN_MISSIONS,missionFor} from './campaign-data.mjs';
+import {campaignLaunchCheckpoint,defaultCampaignProgress,setCheckpoint} from './campaign-progress.mjs';
 import {ENEMY_TYPES,ENEMY_SPEED_VARIANCE,enemyById,applyEnemyFields,enemyBehavior} from './enemy-types.mjs';
 import {initializeSinglePlayer,hordeWaveSize,hordeWaveComposition,hordeWaveModifier,hordeWavePlan,HORDE_WAVE_MODIFIERS,HORDE_UPGRADES,HORDE_TYPES,hordeUpgradeChoices,resupplyHorde,offerHordeUpgrade,selectHordeUpgrade,resumeSinglePlayer,applyCampaignCheckpoint,isSinglePlayerMode,singlePlayerSnapshot,spawnGroup,SINGLEPLAYER_MODES,hordeWaveScore,hordeBossWave,hordeWaveScoreTotal,HORDE_BOSS_BONUS} from './singleplayer.mjs';
 
@@ -308,6 +309,26 @@ test('campaign checkpoints persist and resume a retry from the saved step',()=>{
  assert.equal(retry.modeState.stepIndex,3,'an unauthored step snaps to the previous authored checkpoint');
  assert.equal(applyCampaignCheckpoint(retry,{missionId:'convoy-run',step:finalCheckpoint}),true);
  assert.equal(retry.modeState.stepIndex,finalCheckpoint);
+});
+
+test('campaign launch intent picks the checkpoint: next mission fresh, resume stored',()=>{
+ const progress=setCheckpoint(defaultCampaignProgress(),'convoy-run',3);
+ assert.equal(campaignLaunchCheckpoint(progress,'convoy-run'),null,'a launch defaults to fresh');
+ assert.equal(campaignLaunchCheckpoint(progress,'convoy-run','fresh'),null,'a next-mission/replay launch carries no step');
+ assert.equal(campaignLaunchCheckpoint(progress,'convoy-run','resume'),3,'an explicit resume keeps the banked step');
+ assert.equal(campaignLaunchCheckpoint(progress,'reactor-run','resume'),null,'another mission\'s checkpoint never carries over');
+ // The page composes the same normalized rules for both intents; a real Match
+ // must open at the intent's step, not at whatever checkpoint the previous
+ // config happened to hold.
+ const stale={...DEFAULT_CONFIG,checkpoint:4,mode:'campaign',botCount:0,mission:'convoy-run',timeLimit:900};
+ const nextRules=normalizeConfig({...stale,checkpoint:campaignLaunchCheckpoint(progress,'convoy-run','fresh')});
+ const next=new Match('chatgpt','openclaw',()=>.5,'convoy-line',nextRules);
+ assert.equal(next.config.checkpoint,null,'NEXT MISSION clears the inherited checkpoint');
+ assert.equal(next.modeState.stepIndex,0,'NEXT MISSION opens at the opening step');
+ const resumeRules=normalizeConfig({...nextRules,checkpoint:campaignLaunchCheckpoint(progress,'convoy-run','resume')});
+ const resumed=new Match('chatgpt','openclaw',()=>.5,'convoy-line',resumeRules);
+ assert.equal(resumed.config.checkpoint,3);
+ assert.equal(resumed.modeState.stepIndex,3,'the resume launch starts at the banked step');
 });
 
 test('boss phases surface as a named, pip-counted snapshot entry',()=>{

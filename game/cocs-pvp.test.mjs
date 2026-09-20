@@ -391,10 +391,12 @@ test('PvP personal REQ buys apply to the buying actor and honour the team seat',
  const state = match.objectiveState;
  const actor = match.actors[0];
  actor.req = 100;
- // A non-commander cannot buy a commander-only item.
+ // WP1.3 narrowed every effectless row, including the team-wide commander
+ // items, out of the launch set: the buy is refused before any REQ moves.
  const gated = cocsBuyAction(match, state, {actorId: actor.id, peerId: 'p1', itemId: 'supply-drop'});
  assert.equal(gated.ok, false);
- assert.equal(gated.reason, 'commander-only');
+ assert.equal(gated.reason, 'not-launched');
+ assert.equal(actor.req, 100, 'the refused commander row never debits');
  state.command.seat[0] = 'p1';
  const bought = cocsBuyAction(match, state, {actorId: actor.id, peerId: 'p1', itemId: 'field-repair'});
  assert.equal(bought.ok, true);

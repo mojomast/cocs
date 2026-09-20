@@ -284,3 +284,33 @@ test('the snapshot exposes director, waves and command for the HUD', () => {
   void createCoopState;
   void cocsDirectorSnapshot;
 });
+
+test('a protocol CUT/SABOTAGE terminal action cuts through the real Match path', () => {
+  // WP1.2/Phase 0.3: the wire verb is `cut` (protocol alias `sabotage`); it must
+  // reach the same SABOTAGE terminal channel a human interact starts, instead of
+  // falling through to the device-only branch.
+  for (const action of ['cut', 'sabotage']) {
+    const m = coopMatch({seed: 37});
+    const state = m.objectiveState;
+    step(m, 1);
+    const terminal = Object.values(state.terminals.terminals).find(entry => entry.kind === 'SABOTAGE');
+    assert.ok(terminal, `${action}: the authored lattice hosts a SABOTAGE terminal`);
+    const actor = m.actors.find(entry => entry.team === 0 && entry.health > 0);
+    actor.bot = null;
+    const pin = () => {
+      actor.x = terminal.x; actor.z = terminal.z; actor.y = 0;
+      actor.vx = 0; actor.vy = 0; actor.vz = 0;
+      for (const other of m.actors) if (other.team === 1) { other.x = 500; other.z = 500; other.y = 0; }
+    };
+    pin();
+    m.step(1 / 60, {inputs: {}, cocs: {terminals: [{
+      tick: 0, peerId: 'p0', cardId: `term-${action}`,
+      actorId: actor.id, terminalId: terminal.id, action,
+    }]}});
+    assert.equal(terminal.channel?.action, 'SABOTAGE', `${action}: the terminal cut channel starts`);
+    assert.equal(state.cuts.includes(terminal.nodeId), false, `${action}: the cut lands when the channel completes`);
+    for (let i = 0; i < 200 && terminal.state !== 'cut'; i++) { pin(); m.step(1 / 60, {inputs: {}}); }
+    assert.equal(terminal.state, 'cut', `${action}: the SABOTAGE channel completes`);
+    assert.ok(state.cuts.includes(terminal.nodeId), `${action}: the cut denies the node link`);
+  }
+});

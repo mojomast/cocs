@@ -60,10 +60,16 @@ export const COCS_ORDER_VERBS = Object.freeze(['HOLD', 'ATTACK', 'SCAN']);
 // economy surface covers both. `spawn` is the wire alias for a REINFORCE squad.
 export const COCS_ECONOMY_ACTIONS = Object.freeze(['spawn', 'recall', 'compact', 'retry', 'escalate', 'pull', 'opt-out-orders', 'fortify', 'repair', 'resupply', 'reinforce']);
 export const COCS_TERMINAL_ACTIONS = Object.freeze(['hack', 'deploy', 'vault-store', 'vault-pull', 'repair', 'lock', 'cut', 'depot-capture']);
+// The Board presents a SABOTAGE card; the wire vocabulary calls that same
+// channel `cut`. The alias is accepted additively so the displayed control and
+// the authoritative action are one vertical slice (WP0.3). It never changes the
+// canonical list, so existing frames stay valid.
+export const COCS_TERMINAL_ALIASES = Object.freeze({sabotage: 'cut'});
 export const COCS_COMMAND_ACTIONS = Object.freeze(['take', 'release', 'mutiny-vote', 'set-route', 'policy']);
 export const COCS_ACTION_ID_MAX = 64;
 export const COCS_ACTION_STRING_MAX = 64;
 export const COCS_AGENT_MAX = 24;
+export const COCS_COUNTER_MAX = 0x7fffffff;
 // Card-failure state and the reject feed share one bound (§11.2/§11.5): keep
 // the newest entries and drop the oldest.
 export const COCS_REJECT_LIMIT = 300;
@@ -81,8 +87,27 @@ const enumValue = (value, list) => {
 };
 const actorIndex = value => (Number.isInteger(value) && value >= 0 && value <= 65535 ? value : null);
 const tickOf = value => (Number.isInteger(value) && value >= 0 && value <= 0x7fffffff ? value : null);
+// Round/action identity for the transitional v3 adapter (WP0.3). Both fields
+// are optional and additive: a frame that omits them still parses and the server
+// scopes its `cardId` by round + authenticated seat. A frame that *carries* them
+// must carry valid bounded safe integers, or it is malformed. They deliberately
+// never bump PROTOCOL_VERSION: an old peer keeps speaking v3 without them.
+const roundRevOf = value => (Number.isInteger(value) && value >= 0 && value <= COCS_COUNTER_MAX ? value : null);
+const actionSeqOf = value => (Number.isInteger(value) && value >= 1 && value <= COCS_COUNTER_MAX ? value : null);
+const identityOf = msg => {
+ const hasRev = msg.roundRev !== undefined && msg.roundRev !== null;
+ const hasSeq = msg.actionSeq !== undefined && msg.actionSeq !== null;
+ const roundRev = hasRev ? roundRevOf(msg.roundRev) : null;
+ const actionSeq = hasSeq ? actionSeqOf(msg.actionSeq) : null;
+ if ((hasRev && roundRev === null) || (hasSeq && actionSeq === null)) return null;
+ return {hasRev, hasSeq, roundRev, actionSeq};
+};
+const identityFields = identity => ({
+ ...(identity.hasRev ? {roundRev: identity.roundRev} : {}),
+ ...(identity.hasSeq ? {actionSeq: identity.actionSeq} : {}),
+});
 
-/** Parse a C→S `order` frame: `{cardId, verb, target, agent}`. */
+/** Parse a C→S `order` frame: `{cardId, verb, target, agent, roundRev?, actionSeq?}`. */
 export function parseOrderMessage(msg) {
  if (!object(msg)) return null;
  const cardId = safeId(msg.cardId);
@@ -90,10 +115,12 @@ export function parseOrderMessage(msg) {
  const target = safeId(msg.target);
  if (!cardId || !verb || !target) return null;
  if (msg.agent !== undefined && msg.agent !== null && !safeId(msg.agent)) return null;
- return {cardId, verb, target, agent: optionalId(msg.agent), tick: tickOf(msg.tick)};
+ const identity = identityOf(msg);
+ if (!identity) return null;
+ return {cardId, verb, target, agent: optionalId(msg.agent), tick: tickOf(msg.tick), ...identityFields(identity)};
 }
 
-/** Parse a C→S `economy` frame: `{action, cardId, role, target, actorId?}`. */
+/** Parse a C→S `economy` frame: `{action, cardId, role, target, actorId?, roundRev?, actionSeq?}`. */
 export function parseEconomyMessage(msg) {
  if (!object(msg)) return null;
  const cardId = safeId(msg.cardId);
@@ -102,28 +129,34 @@ export function parseEconomyMessage(msg) {
  const actorId = msg.actorId === undefined || msg.actorId === null ? null : actorIndex(msg.actorId);
  if (msg.actorId !== undefined && msg.actorId !== null && actorId === null) return null;
  if ((msg.role !== undefined && msg.role !== null && !safeId(msg.role)) || (msg.target !== undefined && msg.target !== null && !safeId(msg.target))) return null;
+ const identity = identityOf(msg);
+ if (!identity) return null;
  return {
   cardId, action,
   role: optionalId(msg.role),
   target: optionalId(msg.target),
   actorId,
   tick: tickOf(msg.tick),
+  ...identityFields(identity),
  };
 }
 
-/** Parse a C→S `terminal` frame: `{terminalId, action}`. */
+/** Parse a C→S `terminal` frame: `{terminalId, action, roundRev?, actionSeq?}`. */
 export function parseTerminalMessage(msg) {
  if (!object(msg)) return null;
  const terminalId = safeId(msg.terminalId);
- const action = enumValue(msg.action, COCS_TERMINAL_ACTIONS);
+ let action = enumValue(msg.action, COCS_TERMINAL_ACTIONS);
+ if (!action && typeof msg.action === 'string') action = COCS_TERMINAL_ALIASES[msg.action.trim().toLowerCase()] ?? null;
  if (!terminalId || !action) return null;
  const actorId = msg.actorId === undefined || msg.actorId === null ? null : actorIndex(msg.actorId);
  if (msg.actorId !== undefined && msg.actorId !== null && actorId === null) return null;
  if (msg.cardId !== undefined && msg.cardId !== null && !safeId(msg.cardId)) return null;
- return {terminalId, action: action.toLowerCase(), cardId: optionalId(msg.cardId), actorId, tick: tickOf(msg.tick)};
+ const identity = identityOf(msg);
+ if (!identity) return null;
+ return {terminalId, action: action.toLowerCase(), cardId: optionalId(msg.cardId), actorId, tick: tickOf(msg.tick), ...identityFields(identity)};
 }
 
-/** Parse a C→S `command` frame: `{action, value}`. */
+/** Parse a C→S `command` frame: `{action, value, roundRev?, actionSeq?}`. */
 export function parseCommandMessage(msg) {
  if (!object(msg)) return null;
  const action = enumValue(msg.action, COCS_COMMAND_ACTIONS);
@@ -133,10 +166,12 @@ export function parseCommandMessage(msg) {
  if (raw !== undefined && raw !== null && !Number.isInteger(raw) && typeof raw !== 'string') return null;
  const value = raw === undefined || raw === null ? null : (typeof raw === 'string' ? safeString(raw) : actorIndex(raw));
  if (raw !== undefined && raw !== null && value === null) return null;
- return {action: action.toLowerCase(), value, cardId: optionalId(msg.cardId), tick: tickOf(msg.tick)};
+ const identity = identityOf(msg);
+ if (!identity) return null;
+ return {action: action.toLowerCase(), value, cardId: optionalId(msg.cardId), tick: tickOf(msg.tick), ...identityFields(identity)};
 }
 
-/** Parse a C→S `buy` frame: `{itemId, depotId?, targetCardId?}`. */
+/** Parse a C→S `buy` frame: `{itemId, depotId?, targetCardId?, roundRev?, actionSeq?}`. */
 export function parseBuyMessage(msg) {
  if (!object(msg)) return null;
  const itemId = safeId(msg.itemId);
@@ -146,6 +181,8 @@ export function parseBuyMessage(msg) {
  }
  const actorId = msg.actorId === undefined || msg.actorId === null ? null : actorIndex(msg.actorId);
  if (msg.actorId !== undefined && msg.actorId !== null && actorId === null) return null;
+ const identity = identityOf(msg);
+ if (!identity) return null;
  return {
   itemId,
   depotId: optionalId(msg.depotId),
@@ -153,6 +190,7 @@ export function parseBuyMessage(msg) {
   cardId: optionalId(msg.cardId),
   actorId,
   tick: tickOf(msg.tick),
+  ...identityFields(identity),
  };
 }
 

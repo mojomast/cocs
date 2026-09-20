@@ -13,19 +13,23 @@ import {
  ARRAY_CAPTURE,
  COMBINED_CAPS,
  COMMENDATION_PACING,
+ COOP_LAUNCH_REQ_IDS,
  DEVICE_PARAMS,
  GEAR_CAPS,
  LANE_IDENTITIES,
  LANE_IDENTITY_KINDS,
+ LAUNCH_REQ_IDS,
  MATCH_REQ,
  META_DEFAULTS,
  NEGLECT,
  ORDER_REWARD,
+ PERSONAL_BUFF_IDS,
  REQ_CAPS,
  REQ_COSTS,
  REQ_EARN,
  REQ_FORBIDDEN,
  REQ_ITEMS,
+ REQ_MODE_IDS,
  SCORE_EVENTS,
  SUPPLY_CUT,
  TEAM_WIDE_REQ_IDS,
@@ -46,7 +50,12 @@ import {
  purchaseCost,
  reqEarn,
  reqEarnBreakdown,
+ reqItem,
+ reqItemModes,
+ reqItemSupported,
+ reqModeKey,
  reqPurchase,
+ reqPurchaseOptions,
  resolveSpawnLoadout,
  scoreEvent,
  tallyScores,
@@ -183,15 +192,155 @@ test('the REQ cost table matches the spec and REQ can never buy a respawn/RESERV
  for(const forbidden of REQ_FORBIDDEN)assert.equal(isReqForbidden(forbidden),true);
  assert.ok(REQ_FORBIDDEN.every(forbidden=>!Object.hasOwn(REQ_COSTS,forbidden)));
  assert.ok(REQ_FORBIDDEN.every(forbidden=>!idsOf(REQ_ITEMS).includes(forbidden)));
- // Team-wide abilities are commander-only; one personal buff at a time.
- assert.ok(TEAM_WIDE_REQ_IDS.every(id=>reqPurchase(id,{balance:1000,isCommander:false}).reason==='commander-only'));
- assert.equal(reqPurchase('supply-drop',{balance:1000,isCommander:true}).ok,true);
+ // WP1.3 truth rule: the team-wide rows have no shipped effect, so they are
+ // out of the launch set and can never debit REQ. The `commander-only` gate
+ // stays in `reqPurchase` for a future launched team item.
+ assert.equal(TEAM_WIDE_REQ_IDS.length,3);
+ assert.ok(TEAM_WIDE_REQ_IDS.every(id=>!LAUNCH_REQ_IDS.includes(id)));
+ assert.ok(TEAM_WIDE_REQ_IDS.every(id=>reqPurchase(id,{balance:1000,isCommander:true}).reason==='not-launched'));
  assert.equal(reqPurchase('haste',{balance:1000,activeBuffId:'overshield'}).reason,'one-active-buff');
+ assert.equal(reqPurchase('haste',{balance:1000,activeBuffId:'puma'}).ok,true,'a vehicle id never occupies the personal buff slot');
  assert.equal(reqPurchase('haste',{balance:20}).reason,'insufficient-req');
  assert.equal(reqPurchase('respawn',{balance:1000}).reason,'unknown-item');
  const purchase=reqPurchase('field-repair',{balance:100});
  assert.equal(purchase.ok,true);assert.equal(purchase.balanceAfter,60);
  assert.ok(!Object.hasOwn(purchase,'flux')&&!Object.hasOwn(purchase,'reserve'),'purchases never touch FLUX/RESERVE');
+});
+
+// ---------------------------------------------------------------------------
+// WP1.3 truthful launch set + shared purchase options
+// ---------------------------------------------------------------------------
+test('only rows with a shipped effect are launchable and every unlaunched row refuses without a debit',()=>{
+ // Truthful launch sets: the four personal buffs in both modes, the Puma in
+ // OPERATIONS only.
+ assert.deepEqual([...LAUNCH_REQ_IDS],['field-repair','ammo-crate','haste','overshield']);
+ assert.deepEqual([...COOP_LAUNCH_REQ_IDS],['field-repair','ammo-crate','haste','overshield','puma']);
+ assert.deepEqual([...PERSONAL_BUFF_IDS],['field-repair','ammo-crate','haste','overshield']);
+ const puma=reqItem('puma');
+ assert.equal(puma.launch,false);
+ assert.equal(puma.coopLaunch,true);
+ assert.deepEqual([...reqItemModes('puma')],[REQ_MODE_IDS.coop]);
+ for(const id of LAUNCH_REQ_IDS){
+  const item=reqItem(id);
+  assert.equal(item.personalBuff,true,`${id} is a personal buff`);
+  assert.ok(item.effect&&typeof item.effect.kind==='string',`${id} names its sim effect`);
+  assert.ok(typeof item.effectCopy==='string'&&item.effectCopy.length>0,`${id} carries effect copy`);
+  assert.deepEqual([...reqItemModes(id)].sort(),[REQ_MODE_IDS.coop,REQ_MODE_IDS.pvp].sort(),`${id} runs in both modes`);
+  assert.equal(reqItemSupported(id,REQ_MODE_IDS.pvp),true);
+  assert.equal(reqItemSupported(id,REQ_MODE_IDS.coop),true);
+ }
+ // No descriptor without a launch flag, and no launch flag without a descriptor.
+ for(const item of REQ_ITEMS){
+  if(item.effect!==undefined)assert.ok(item.launch===true||item.coopLaunch===true,`${item.id} ships an effect only when launched`);
+  if(item.launch===true||item.coopLaunch===true)assert.ok(item.effect!==undefined,`${item.id} is launched only with an effect`);
+ }
+ // Every other catalogue row is unoffered, mode-less and refuses before a debit.
+ const unlaunched=REQ_ITEMS.filter(item=>item.launch!==true&&item.coopLaunch!==true).map(item=>item.id);
+ assert.ok(unlaunched.length>=12,`saw ${unlaunched.length} unlaunched rows`);
+ assert.ok(unlaunched.includes('at-mine')&&unlaunched.includes('sentry')&&unlaunched.includes('supply-drop')&&unlaunched.includes('tier-upgrade'));
+ for(const id of unlaunched){
+  assert.deepEqual([...reqItemModes(id)],[]);
+  assert.equal(reqItemSupported(id,REQ_MODE_IDS.pvp),false);
+  assert.equal(reqItemSupported(id,REQ_MODE_IDS.coop),false);
+  const refused=reqPurchase(id,{balance:1000,isCommander:true});
+  assert.equal(refused.ok,false,`${id} is not purchasable`);
+  assert.equal(refused.reason,'not-launched');
+  assert.equal(refused.balanceAfter,1000,'a refused row never debits');
+ }
+ assert.equal(reqItemSupported('puma',REQ_MODE_IDS.pvp),false,'PvPvE never offers the depot Puma');
+ assert.equal(reqItemSupported('puma',REQ_MODE_IDS.coop),true);
+ assert.equal(reqPurchase('puma',{balance:150}).ok,true,'mode support is the callers gate');
+});
+
+test('REQ mode labels resolve to the two wire modes and unknown labels resolve to nothing',()=>{
+ assert.equal(reqModeKey('cocs'),'cocs');
+ assert.equal(reqModeKey(' COCS '),'cocs');
+ assert.equal(reqModeKey('pvpve'),'cocs');
+ assert.equal(reqModeKey('cocs-coop'),'cocs-coop');
+ assert.equal(reqModeKey('operations'),'cocs-coop');
+ assert.equal(reqModeKey('coop'),'cocs-coop');
+ assert.equal(reqModeKey('deathmatch'),null);
+ assert.equal(reqModeKey(null),null);
+ assert.equal(reqItemSupported('field-repair',null),false);
+ assert.equal(reqItemSupported('field-repair','deathmatch'),false);
+});
+
+test('reqPurchaseOptions reports affordability, mode, buff and depot gates from one pure snapshot',()=>{
+ const nodes=[{id:'relay-c',archetype:'relay',owner:0}];
+ const pvp=reqPurchaseOptions({
+  team:0,mode:'cocs',now:1,
+  actor:{id:0,req:100,reqBuff:null},
+  state:{command:{seat:[null,null]},nodes},
+ });
+ assert.equal(pvp.mode,'cocs');
+ assert.equal(pvp.team,0);
+ assert.equal(pvp.balance,100);
+ assert.equal(pvp.balanceSource,'actor.req','the authoritative float wallet is the source');
+ assert.equal(pvp.authoritative,true);
+ assert.deepEqual(pvp.items.map(item=>item.id),['field-repair','ammo-crate','haste','overshield','puma'],'only supported rows are offered');
+ const haste=pvp.items.find(item=>item.id==='haste');
+ assert.equal(haste.cost,35);
+ assert.equal(haste.category,'buff');
+ assert.equal(haste.target,'self');
+ assert.equal(typeof haste.effectCopy,'string');
+ assert.equal(haste.affordable,true);
+ assert.equal(haste.enabled,true);
+ assert.equal(haste.disabledReason,null);
+ assert.deepEqual([...haste.modes],['cocs','cocs-coop']);
+ const pvpPuma=pvp.items.find(item=>item.id==='puma');
+ assert.equal(pvpPuma.enabled,false);
+ assert.equal(pvpPuma.disabledReason,'wrong-mode','OPERATIONS-only rows are listed but disabled in PvPvE even when unaffordable');
+ assert.equal(pvpPuma.affordable,false,'100 REQ cannot afford a 150 row');
+ assert.equal(pvp.items.some(item=>['at-mine','sentry','supply-drop','oracle-unlock'].includes(item.id)),false,'unsupported rows are never offered');
+
+ // Unaffordable: exactly one reason, and the depot gate precedes affordability.
+ const poor=reqPurchaseOptions({
+  team:0,mode:'cocs-coop',now:2,
+  actor:{id:0,req:20,reqBuff:null},
+  state:{coop:{commandSeat:[null,null]},nodes},
+ });
+ const crate=poor.items.find(item=>item.id==='ammo-crate');
+ assert.equal(crate.affordable,false);
+ assert.equal(crate.enabled,false);
+ assert.equal(crate.disabledReason,'insufficient-req');
+ assert.equal(poor.items.find(item=>item.id==='puma').disabledReason,'requires-depot','OPERATIONS without a friendly depot cannot act on the Puma');
+
+ // A friendly depot opens the Puma; the exact authoritative float decides.
+ const coopState={coop:{commandSeat:[null,null]},nodes,traversal:{depots:{'depot-hq-w':{id:'depot-hq-w',owner:0}}}};
+ const ready=reqPurchaseOptions({team:0,mode:'operations',actor:{id:0,req:150,reqBuff:null},state:coopState,now:3});
+ const readyPuma=ready.items.find(item=>item.id==='puma');
+ assert.equal(ready.mode,'cocs-coop');
+ assert.equal(readyPuma.enabled,true);
+ assert.equal(readyPuma.affordable,true);
+ assert.equal(readyPuma.disabledReason,null);
+ assert.equal(readyPuma.target,'depot');
+ assert.equal(readyPuma.effect.kind,'vehicle');
+ const short=reqPurchaseOptions({team:0,mode:'cocs-coop',actor:{id:0,req:149.999,reqBuff:null},state:coopState});
+ assert.equal(short.balance,149.999,'the wallet is never quantized');
+ assert.equal(short.items.find(item=>item.id==='puma').disabledReason,'insufficient-req','149.999 never buys a 150 row');
+
+ // One active buff: the conflicting row is disabled, its own row may refresh.
+ const buffed=reqPurchaseOptions({team:0,mode:'cocs',actor:{id:0,req:100,reqBuff:'overshield'},state:{command:{seat:[null,null]},nodes}});
+ assert.equal(buffed.activeBuffId,'overshield');
+ assert.equal(buffed.items.find(item=>item.id==='haste').disabledReason,'one-active-buff');
+ assert.equal(buffed.items.find(item=>item.id==='overshield').enabled,true,'re-buying the active buff refreshes it');
+ // A vehicle/legacy `reqBuff` value is not a personal buff and never gates the menu.
+ const stale=reqPurchaseOptions({team:0,mode:'cocs',actor:{id:0,req:100,reqBuff:'puma'},state:{command:{seat:[null,null]},nodes}});
+ assert.equal(stale.activeBuffId,null,'only a personal buff occupies the active slot');
+ assert.equal(stale.items.find(item=>item.id==='haste').disabledReason,null);
+
+ // Command seat reads as a boolean; no launched row needs it today.
+ const seated=reqPurchaseOptions({team:0,mode:'cocs',actor:{id:0,req:0,reqBuff:null},state:{command:{seat:[0,null]},nodes}});
+ assert.equal(seated.isCommander,true);
+
+ // Pure read: frozen inputs cannot be mutated, different `now` values are inert,
+ // and the whole snapshot (including every row) is deep-frozen.
+ const frozenActor=deepFreeze({id:0,req:80,reqBuff:null});
+ const frozenState=deepFreeze({command:{seat:[null,null]},nodes:[]});
+ const first=reqPurchaseOptions({team:0,mode:'cocs',actor:frozenActor,state:frozenState,now:1});
+ const second=reqPurchaseOptions({team:0,mode:'cocs',actor:frozenActor,state:frozenState,now:987654321});
+ assert.deepEqual(first,second,'the clock never changes the snapshot');
+ assert.equal(deepFrozen(first),true,'the whole snapshot is deeply frozen');
 });
 
 // ---------------------------------------------------------------------------
