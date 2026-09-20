@@ -47,7 +47,8 @@ Relevant examples: `game/core.test.mjs`, `game/config.test.mjs`,
 `game/net.test.mjs`, `game/map-layout.test.mjs`, `game/arenas.test.mjs`,
 `game/view.test.mjs`, `game/hud.test.mjs`, `game/software.test.mjs`,
 `game/moth-bake-run.test.mjs`, `game/moth-bake-pixels.test.mjs`,
-`game/moth-variants.test.mjs`, `game/moth-texture-variants.test.mjs`.
+`game/moth-variants.test.mjs`, `game/moth-texture-variants.test.mjs`,
+`game/finish-pass.test.mjs`.
 
 ### 2. Server tests — `server/*.test.mjs`
 
@@ -233,8 +234,9 @@ and the original half of split mode must match the untouched image exactly; and
 all combinations must reuse one shader program (uniform-only reconfiguration, no
 recompilation). Second, the real UI: recipe loading, the SURPRISE ME randomizer,
 independent layer stacking, A/B bypass, split mode, clipboard recipe copy
-(including selected asset options), pasting and applying a recipe JSON, the
-backquote toggles (` and Shift+`), reset-to-off, drawer geometry at the five
+(including selected asset options and target stacks), pasting and applying a
+recipe JSON, the WORLD / WEAPON / BOTS target switcher with per-target masters,
+the backquote toggles (` and Shift+`), reset-to-off, drawer geometry at the five
 standard viewport/UI-scale cases, device-local persistence across reload, and
 that the drawer opens from a paused match as the single modal dialog without
 stealing the pause state.
@@ -274,8 +276,8 @@ those remain human review items.
 
 Last verified on release v8.6 PRISM (2026-09-20); the v8.6 gate recorded:
 
-- `npm run test:game` — **2,652 pass, 0 fail, 8 skipped** across the
-  `game/*.test.mjs` suite (2,660 tests). The eight skips are the opt-in long
+- `npm run test:game` — **2,671 pass, 0 fail, 8 skipped** across the
+  `game/*.test.mjs` suite (2,679 tests). The eight skips are the opt-in long
   simulations and
   the browser-only render: the D1-D4 sampled win-rate sweep, the exhaustive
   8-bot mode sweep, the 18k-step 4-bot match, the 10k-step 8-bot race, the

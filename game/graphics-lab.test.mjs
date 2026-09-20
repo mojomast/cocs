@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {ClampToEdgeWrapping,LinearFilter,RepeatWrapping} from 'three';
-import {GRAPHICS_EFFECTS,GRAPHICS_RECIPES,normalizeGraphicsLab,graphicsRecipe,graphicsLabActive,serializeGraphicsLab,randomGraphicsLab,describeGraphicsLab} from './graphics-lab.mjs';
+import {GRAPHICS_EFFECTS,GRAPHICS_LAB_TARGETS,GRAPHICS_RECIPES,normalizeGraphicsLab,normalizeGraphicsLabTarget,graphicsRecipe,graphicsLabActive,graphicsLabTargetActive,serializeGraphicsLab,randomGraphicsLab,describeGraphicsLab} from './graphics-lab.mjs';
 import {GraphicsLabPass} from './graphics-lab-pass.mjs';
 import {configureMothAssets,resetMothAssets} from './moth-assets.mjs';
 
@@ -36,19 +36,114 @@ test('all recipes are valid independently editable stacks; bypass and zero mix p
  for(const r of GRAPHICS_RECIPES){const s=graphicsRecipe(r.id);assert.deepEqual(s,normalizeGraphicsLab(s));assert.ok(graphicsLabActive(s));assert.ok(Object.values(s.effects).filter(e=>e.enabled).length>=3);assert.equal(graphicsLabActive({...s,bypass:true}),false);assert.equal(graphicsLabActive({...s,mix:0}),false);}
  const a=graphicsRecipe('circuit-print'),b=graphicsRecipe('circuit-print');a.effects.ink.enabled=false;assert.equal(b.effects.ink.enabled,true);
 });
+test('targets default all-off for v1 saves and reject injected or corrupt data',()=>{
+ assert.deepEqual(GRAPHICS_LAB_TARGETS,['world','weapon','bots']);
+ const legacy=normalizeGraphicsLab({version:1,enabled:true,effects:{ink:{enabled:true,value:1}}});
+ assert.deepEqual(Object.keys(legacy.targets),['weapon','bots']);
+ for(const id of ['weapon','bots']){
+  const target=legacy.targets[id];
+  assert.equal(target.enabled,false,`${id} starts off`);
+  assert.equal(target.mix,1,`${id} starts at full mix`);
+  assert.equal(target.palette,'circuit',`${id} starts on the default palette`);
+  assert.deepEqual(Object.keys(target.effects),GRAPHICS_EFFECTS.map(e=>e.id));
+  assert.equal(GRAPHICS_EFFECTS.some(e=>target.effects[e.id].enabled),false,`${id} starts with no layers`);
+ }
+ const corrupt=normalizeGraphicsLab({version:1,targets:{
+  weapon:{enabled:true,mix:Infinity,palette:'bad',effects:{ink:{enabled:true,value:NaN},glow:{enabled:true,value:900},mothcoat:{enabled:true,value:.5,option:'nope'},injected:{enabled:true,value:1}},injected:true},
+  bots:'nope',world:{enabled:true},injected:{enabled:true},
+ }});
+ assert.deepEqual(Object.keys(corrupt.targets),['weapon','bots']);
+ const weapon=corrupt.targets.weapon;
+ assert.equal(weapon.mix,1);assert.equal(weapon.palette,'circuit');assert.equal(weapon.injected,undefined);
+ assert.equal(weapon.effects.ink.value,.9);assert.equal(weapon.effects.glow.value,1.5);
+ assert.equal(weapon.effects.mothcoat.option,'entanglement');assert.equal(weapon.effects.injected,undefined);
+ assert.equal(corrupt.targets.world,undefined);assert.equal(corrupt.targets.injected,undefined);
+ assert.equal(corrupt.targets.bots.enabled,false);assert.equal(corrupt.targets.bots.mix,1);
+ assert.deepEqual(normalizeGraphicsLab(corrupt),corrupt,'corrupt targets normalize stably');
+ const fresh=normalizeGraphicsLabTarget();fresh.effects.ink.enabled=true;
+ assert.equal(normalizeGraphicsLabTarget().effects.ink.enabled,false,'each normalizer call returns a fresh target');
+ assert.equal(normalizeGraphicsLabTarget('weapon').enabled,false);
+ assert.equal(normalizeGraphicsLabTarget({effects:'nope'}).effects.ink.enabled,false);
+});
+test('graphicsLabTargetActive is a pure truth table over master, mix and layers',()=>{
+ const base=normalizeGraphicsLabTarget();
+ assert.equal(graphicsLabTargetActive(undefined),false);
+ assert.equal(graphicsLabTargetActive(null),false);
+ assert.equal(graphicsLabTargetActive('weapon'),false);
+ assert.equal(graphicsLabTargetActive([]),false);
+ assert.equal(graphicsLabTargetActive({...base,enabled:true}),false,'master on but no layers is inactive');
+ assert.equal(graphicsLabTargetActive({...base,enabled:true,effects:{ink:{enabled:false}}}),false);
+ assert.equal(graphicsLabTargetActive({...base,enabled:true,effects:{ink:{enabled:true,value:1}}}),true);
+ assert.equal(graphicsLabTargetActive({...base,enabled:false,effects:{ink:{enabled:true,value:1}}}),false);
+ assert.equal(graphicsLabTargetActive({...base,enabled:true,mix:0,effects:{ink:{enabled:true,value:1}}}),false);
+ assert.equal(graphicsLabTargetActive({...base,enabled:true,mix:-1,effects:{ink:{enabled:true,value:1}}}),false);
+ assert.equal(graphicsLabTargetActive({...base,enabled:true,mix:.25,effects:{ink:{enabled:true,value:1}}}),true);
+ assert.equal(graphicsLabTargetActive({...base,enabled:true,mix:1,effects:null}),false);
+ assert.equal(graphicsLabTargetActive({enabled:true,mix:1,effects:{injected:{enabled:true}}}),false,'unknown effect ids never count');
+ assert.equal(graphicsLabTargetActive({...base,enabled:true,effects:{ink:{enabled:true}}}),true,'only the switch gates a layer, not its value');
+ const normalized=normalizeGraphicsLabTarget({enabled:true,effects:{mothcoat:{enabled:true,value:.5,option:'entanglement-void'}}});
+ assert.equal(normalized.effects.mothcoat.option,'entanglement-void');
+ assert.equal(graphicsLabTargetActive(normalized),true);
+});
+test('export round-trips target stacks and still omits transient comparison state',()=>{
+ const s=graphicsRecipe('ghost-rivals');
+ s.bypass=true;s.split=true;
+ s.targets.weapon.enabled=true;
+ s.targets.weapon.effects.ink={...s.targets.weapon.effects.ink,enabled:true,value:1};
+ const saved=JSON.parse(serializeGraphicsLab(s));
+ assert.equal(saved.bypass,false);assert.equal(saved.split,false);
+ assert.deepEqual(Object.keys(saved.targets),['weapon','bots']);
+ assert.deepEqual(saved.targets,s.targets,'both target stacks round-trip');
+ assert.equal('bypass' in saved.targets.weapon,false);assert.equal('split' in saved.targets.bots,false);
+ assert.equal(serializeGraphicsLab(saved),serializeGraphicsLab(s),'a round-tripped state is stable');
+ const legacy=JSON.parse(serializeGraphicsLab(normalizeGraphicsLab({version:1,enabled:true})));
+ assert.deepEqual(legacy.targets,normalizeGraphicsLab().targets,'old saves export all-off targets');
+});
+test('pocket-ink reproduces the saved roll and ghost-rivals styles bots with a crisp weapon',()=>{
+ const pocket=graphicsRecipe('pocket-ink');
+ assert.equal(pocket.mix,0.7353712838244059,'the stored mix is not rounded');
+ assert.equal(pocket.palette,'pocket');
+ const world={pixel:3,vignette:.5,contrast:1.2,saturate:2,temperature:0,duotone:.15,ink:.9,mothcoat:1};
+ for(const [id,value] of Object.entries(world)){
+  assert.equal(pocket.effects[id].enabled,true,`${id} is enabled`);
+  assert.equal(pocket.effects[id].value,value,`${id} keeps its exact value`);
+ }
+ assert.equal(pocket.effects.mothcoat.option,'entanglement');
+ assert.equal(Object.values(pocket.effects).filter(e=>e.enabled).length,Object.keys(world).length,'only the saved roll is on');
+ assert.deepEqual(pocket,normalizeGraphicsLab(pocket));
+ assert.deepEqual(pocket.targets,normalizeGraphicsLab().targets,'pocket-ink leaves both targets off');
+ const ghost=graphicsRecipe('ghost-rivals');
+ assert.deepEqual(ghost,normalizeGraphicsLab(ghost));
+ assert.equal(ghost.palette,'electric');
+ for(const [id,value] of Object.entries({duotone:.85,crt:.5,chroma:2,grain:.1})){
+  assert.equal(ghost.effects[id].enabled,true,`world ${id} is enabled`);
+  assert.equal(ghost.effects[id].value,value,`world ${id} matches Ghost Signal`);
+ }
+ assert.equal(ghost.targets.weapon.enabled,false,'the weapon stays crisp');
+ assert.equal(ghost.targets.bots.enabled,true);assert.equal(ghost.targets.bots.palette,'ember');
+ for(const [id,value] of Object.entries({neon:1.1,glow:.7,chroma:1.2})){
+  assert.equal(ghost.targets.bots.effects[id].enabled,true,`bots ${id} is enabled`);
+  assert.equal(ghost.targets.bots.effects[id].value,value,`bots ${id} keeps its exact value`);
+ }
+ assert.equal(Object.values(ghost.targets.bots.effects).filter(e=>e.enabled).length,3);
+ assert.equal(graphicsLabTargetActive(ghost.targets.bots),true);
+ assert.equal(graphicsLabTargetActive(ghost.targets.weapon),false);
+});
 test('export is round-trippable, bounded, and omits temporary comparison state',()=>{
  const s={...graphicsRecipe('field-sketch'),bypass:true,split:true};
  const saved=JSON.parse(serializeGraphicsLab(s));assert.equal(saved.bypass,false);assert.equal(saved.split,false);assert.deepEqual(saved.effects,s.effects);assert.equal(serializeGraphicsLab(saved),serializeGraphicsLab(s));
 });
 test('randomizer rolls valid, varied, deterministic stacks from a seeded source',()=>{
  const rng=seeded(7),palettes=new Set(),counts=new Set();
+ // A roll never exceeds the largest starting recipe now that Pocket Ink stacks eight layers.
+ const recipeSized=Math.max(...GRAPHICS_RECIPES.map(r=>Object.keys(r.effects).length));
  for(let i=0;i<60;i++){
   const s=randomGraphicsLab(rng);
   assert.deepEqual(s,normalizeGraphicsLab(s),'roll stays normalized');
   assert.equal(graphicsLabActive(s),true,'roll is an active, enabled mix');
   const layers=GRAPHICS_EFFECTS.filter(e=>s.effects[e.id].enabled).length;
   assert.ok(layers>=2,`roll enables at least two layers (got ${layers})`);
-  assert.ok(layers<=6,'roll stays within a recipe-sized stack');
+  assert.ok(layers<=recipeSized,'roll stays within a recipe-sized stack');
   for(const e of GRAPHICS_EFFECTS){const v=s.effects[e.id].value;assert.ok(v>=e.min&&v<=e.max,`${e.id} stays in range`);}
   palettes.add(s.palette);counts.add(layers);
   assert.ok(s.mix>=.7&&s.mix<=1,'overall mix stays usable');
@@ -231,5 +326,56 @@ test('a missing option asset zeroes only its layer; switching options rebinds fr
  assert.equal(pass.uniforms.mothgrainMap.value,dust,'switching back rebinds the cached texture');
  assert.ok(Math.abs(pass.uniforms.mothgrainMean.value-DUST_MEAN)<1e-9,'the mean follows the option back');
  assert.equal(pass.uniforms.mothsignalMap.value,arc,'the cached frame rebinds too');
+ pass.dispose();
+});
+test('randomizer leaves both target stacks off, exactly like the original world-only rolls',()=>{
+ const rng=seeded(31),defaults=normalizeGraphicsLab().targets;
+ for(let i=0;i<40;i++){
+  const s=randomGraphicsLab(rng);
+  assert.deepEqual(s.targets,defaults,'a roll never enables a target stack');
+  assert.equal(s.targets.weapon.enabled,false);
+  assert.equal(s.targets.bots.enabled,false);
+ }
+});
+test('configure switches layers by options and keeps one program across world, weapon and bots',()=>{
+ configureMothAssets(mothFixture());
+ const pass=new GraphicsLabPass(),material=pass.material;
+ const world=graphicsRecipe('ghost-rivals');
+ pass.configure(world,640,360);
+ assert.equal(pass.enabled,true,'the world stack runs by default');
+ assert.equal(pass.uniforms.keepAlpha.value,0);assert.equal(pass.uniforms.depthTest.value,0);
+ assert.equal(pass.uniforms.depthCompare.value,0);assert.equal(pass.uniforms.tWorldDepth.value,null);
+ pass.configure(world,640,360,{active:false});
+ assert.equal(pass.enabled,false,'an explicit active:false wins over the world stack');
+ const weapon=world.targets.weapon;
+ pass.configure(weapon,640,360,{active:false});
+ assert.equal(pass.enabled,false,'a target stays off even while the world stack is on');
+ pass.configure(weapon,640,360,{active:true});
+ assert.equal(pass.enabled,true,'an explicit active:true enables regardless of the world fields');
+ pass.configure(normalizeGraphicsLab(),640,360,{active:true});
+ assert.equal(pass.enabled,true,'active:true enables an all-off world too');
+ const weaponState={...weapon,enabled:true,mix:.5,effects:{...weapon.effects,ink:{...weapon.effects.ink,enabled:true,value:1}}};
+ pass.configure(weaponState,640,360,{active:graphicsLabTargetActive(weaponState),keepAlpha:true,depthTest:true});
+ assert.equal(pass.enabled,true);
+ assert.equal(pass.uniforms.mixAmount.value,.5,'a target stack uses its own mix');
+ assert.equal(pass.uniforms.ink.value,1);
+ assert.equal(pass.uniforms.keepAlpha.value,1);
+ assert.equal(pass.uniforms.depthTest.value,1);
+ assert.equal(pass.uniforms.depthCompare.value,0,'the compare waits for both depth textures');
+ assert.equal(pass.uniforms.tWorldDepth.value,null);assert.equal(pass.uniforms.tBotDepth.value,null);
+ const worldDepth={isTexture:true},botDepth={isTexture:true};
+ pass.configure(weaponState,640,360,{keepAlpha:true,depthTest:true,worldDepth,botDepth});
+ assert.equal(pass.uniforms.depthCompare.value,1);
+ assert.equal(pass.uniforms.tWorldDepth.value,worldDepth);assert.equal(pass.uniforms.tBotDepth.value,botDepth);
+ const bots=world.targets.bots;
+ assert.equal(graphicsLabTargetActive(bots),true);
+ pass.configure(bots,640,360,{active:graphicsLabTargetActive(bots),keepAlpha:true,depthTest:true,worldDepth,botDepth});
+ assert.equal(pass.enabled,true);
+ assert.equal(pass.uniforms.neon.value,1.1);assert.equal(pass.uniforms.glow.value,.7);assert.equal(pass.uniforms.chroma.value,1.2);
+ assert.ok(Math.abs(pass.uniforms.paperColor.value.z-164/255)<1e-9,'the bots stack uses its own ember palette');
+ pass.configure(bots,640,360,{keepAlpha:false,depthTest:false});
+ assert.equal(pass.uniforms.keepAlpha.value,0);assert.equal(pass.uniforms.depthTest.value,0);
+ assert.equal(pass.uniforms.depthCompare.value,0);assert.equal(pass.uniforms.tBotDepth.value,null);
+ assert.equal(pass.material,material,'world, weapon and bots configurations reuse the one program');
  pass.dispose();
 });

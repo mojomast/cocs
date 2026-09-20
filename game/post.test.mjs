@@ -69,7 +69,7 @@ test('quality budgets are frozen, ordered and scale expensive work monotonically
   for (const tier of [low, medium, high]) {
     assert.ok(Object.isFrozen(tier));
     assert.ok(tier.tier >= 0 && tier.tier <= 2);
-    for (const key of ['particles', 'decals', 'deaths', 'splats', 'shadows', 'shadowMap', 'stars', 'scatter', 'scatterDetail', 'ambientMotes', 'tracers', 'bloom', 'triangleBudget']) {
+    for (const key of ['particles', 'decals', 'deaths', 'splats', 'shadows', 'shadowMap', 'stars', 'scatter', 'scatterDetail', 'ambientMotes', 'tracers', 'bloom', 'triangleBudget', 'dither', 'sharpen', 'environment']) {
       assert.ok(Number.isFinite(tier[key]), `${key} is finite`);
     }
   }
@@ -79,6 +79,9 @@ test('quality budgets are frozen, ordered and scale expensive work monotonically
   assert.ok(low.deaths <= medium.deaths && medium.deaths <= high.deaths, 'death slots never shrink as tier rises');
   assert.ok(low.shadowMap <= medium.shadowMap && medium.shadowMap <= high.shadowMap, 'shadow map resolution tracks tier');
   assert.ok(low.scatter <= medium.scatter && medium.scatter <= high.scatter, 'backdrop density tracks tier');
+  assert.ok(low.sharpen <= medium.sharpen && medium.sharpen <= high.sharpen, 'sharpness tracks tier');
+  assert.ok(low.environment <= medium.environment && medium.environment <= high.environment, 'environment contribution tracks tier');
+  assert.ok(low.dither > 0 && medium.dither > 0 && high.dither > 0, 'banding dither stays on at every tier');
   assert.equal(qualitySettings('low'), low, 'the same tier returns the same frozen table');
 });
 

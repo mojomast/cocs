@@ -26,6 +26,14 @@
 .graphics-lab__swatch{height:26px;border-radius:3px;opacity:.9}
 .graphics-lab__palette{display:grid;gap:8px}
 .graphics-lab__palette select{max-width:100%;min-width:0;min-height:44px;background:#132a25;color:#ddf4eb;border:1px solid #3a6054;border-radius:4px;padding:8px}
+/* Target segmented control: full width, three 44px taps, same tablist pattern
+   as the drawer's own tabs. */
+.graphics-lab .segmented{display:flex;width:100%}
+.graphics-lab .segmented button{flex:1;min-height:44px;justify-content:center;padding:0 10px}
+.graphics-lab__target-master{display:grid;gap:4px;border:1px solid #29483f;border-radius:6px;background:#0d1a18;padding:8px 10px}
+.graphics-lab__target-master label{font-weight:700}
+.graphics-lab__stack{display:grid;gap:16px;min-width:0}
+.graphics-lab__stack.is-dimmed{opacity:.55}
 .graphics-lab__option{display:grid;gap:4px;font:10px monospace;letter-spacing:.04em;color:#a8c8bd}
 .graphics-lab__option select{width:100%;max-width:100%;min-width:0;min-height:44px;background:#132a25;color:#ddf4eb;border:1px solid #3a6054;border-radius:4px;padding:8px}
 .graphics-lab__layers{display:grid;gap:10px}

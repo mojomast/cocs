@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {ArenaView,raceTrackModel,vehicleModel,weaponModel,robotModel,shadowTick,trailEmissions,shadowDue} from './view.mjs';
+import {ArenaView,BOT_LAYER,raceTrackModel,vehicleModel,weaponModel,robotModel,shadowTick,trailEmissions,shadowDue} from './view.mjs';
+import {normalizeGraphicsLab} from './graphics-lab.mjs';
 import {RACE_DEMO_MODE_SECONDS} from './race-camera.mjs';
 import {SoftwareRenderer} from './software.mjs';
 import {ModelAssets,CameraShake,MuzzleLightPool,LowHealthOverlay,DeathPool,DecalPool,killcamPose,KILLCAM_DURATION} from './effects-fx.mjs';
@@ -1699,4 +1700,196 @@ test('trail emission is frame-rate independent and shadows refresh on an elapsed
   assert.equal(shadowDue(0, undefined, 30), true, 'the first frame always schedules a refresh');
   assert.equal(shadowDue(1.01, 1, 30), false, 'a frame sooner than the period does not refresh');
   assert.equal(shadowDue(1.04, 1, 30), true, 'a frame past the period refreshes');
+});
+
+test('match actors render on the bot layer while the camera and shadow camera keep it enabled',t=>{
+ const {view}=fixture(t);
+ view.scene=new T.Scene();view.camera=new T.PerspectiveCamera();view.motionQuery={matches:false};view.display={...DEFAULT_DISPLAY};
+ view.sun={shadow:{camera:new T.OrthographicCamera()}};
+ view._enableBotLayers();
+ assert.ok(view.camera.layers.mask&(1<<BOT_LAYER),'the live camera keeps actors visible for direct draws');
+ assert.ok(view.sun.shadow.camera.layers.mask&(1<<BOT_LAYER),'the shadow camera renders bot shadows');
+ const actor={id:2,character:'claude',team:1,weapon:0,health:100,x:1,y:0,z:2,yaw:0,pitch:0,vx:0,vz:0,vy:0,grounded:true};
+ view.actorModels=new Map();view.pickupModels=[];
+ view.syncActors({actors:[actor]});
+ const model=view.actorModels.get(2);
+ assert.ok(model&&model.parent===view.scene,'syncActors parents the new model into the scene');
+ const masks=[];model.traverse(node=>masks.push(node.layers.mask));
+ assert.ok(masks.length>0&&masks.every(mask=>mask===(1<<BOT_LAYER)),'every actor node renders on the bot layer only');
+ view.mapId='crosswire';
+ view.setMatch({arena:{id:'crosswire'},actors:[actor],pickups:[],serial:0});
+ assert.equal(view.actorModels.get(2).layers.mask,1<<BOT_LAYER,'setMatch assigns the bot layer the same way');
+ view.disposeObject(view.scene);
+});
+
+test('the composer world camera mirrors the live camera and drops only the bot layer',t=>{
+ const {view}=fixture(t);
+ view.camera=new T.PerspectiveCamera(75,1.6,.1,120);
+ view.camera.position.set(1,2,3);view.camera.rotation.set(.2,.4,0,'YXZ');view.camera.updateProjectionMatrix();
+ view._enableBotLayers();
+ const off=view._syncWorldCamera(false);
+ assert.equal(off.layers.mask&1,1,'the world camera keeps layer 0');
+ assert.ok(off.layers.mask&(1<<BOT_LAYER),'bots render in the composer while their stack is off');
+ assert.ok(Math.abs(off.projectionMatrix.elements[0]-view.camera.projectionMatrix.elements[0])<1e-12,'the projection mirrors the live camera exactly');
+ assert.equal(off.position.x,1);assert.equal(off.position.z,3);
+ const on=view._syncWorldCamera(true);
+ assert.equal(on,off,'the same world camera instance is reused');
+ assert.equal(on.layers.mask&(1<<BOT_LAYER),0,'the bot layer is excluded while the bot stack is active');
+ assert.ok(view.camera.layers.mask&(1<<BOT_LAYER),'the live camera is never changed by the layer split');
+});
+
+test('composer depth attachments exist on both ping-pong targets and follow resizes',t=>{
+ const {view}=fixture(t);
+ const composer={renderTarget1:new T.WebGLRenderTarget(16,16),renderTarget2:new T.WebGLRenderTarget(16,16)};
+ view._attachComposerDepth(composer);
+ for(const target of [composer.renderTarget1,composer.renderTarget2]){
+  assert.ok(target.depthTexture?.isDepthTexture,'each composer buffer exposes a sampleable depth texture');
+  assert.equal(target.depthTexture.image.width,16);
+ }
+ composer.renderTarget1.setSize(64,32);
+ view._attachComposerDepth(composer);
+ assert.equal(composer.renderTarget1.depthTexture.image.width,64,'an explicit resize keeps the depth image in sync');
+ assert.equal(composer.renderTarget1.depthTexture.image.height,32);
+ composer.renderTarget1.dispose();composer.renderTarget2.dispose();
+});
+
+test('a scheduled shadow refresh rebuilds casters through the full-layer live camera',t=>{
+ const {view,renderer}=fixture(t);
+ const calls=[];
+ renderer.shadowMap={enabled:true,autoUpdate:false,needsUpdate:false};
+ renderer.getRenderTarget=()=>renderer.target??null;
+ renderer.setRenderTarget=target=>{renderer.target=target;};
+ renderer.render=(scene,camera)=>{calls.push({scene,camera,target:renderer.target});renderer.shadowMap.needsUpdate=false;};
+ view.scene=new T.Scene();view.camera=new T.PerspectiveCamera();view._enableBotLayers();
+ assert.equal(view._refreshBotShadowCasters(),false,'an unscheduled frame never adds a caster pass');
+ renderer.shadowMap.needsUpdate=true;
+ assert.equal(view._refreshBotShadowCasters(),true);
+ assert.equal(calls.length,1);
+ assert.equal(calls[0].camera,view.camera,'the live camera keeps every caster layer');
+ assert.ok(view.camera.layers.mask&(1<<BOT_LAYER));
+ assert.equal(renderer.target,null,'the renderer target is restored');
+ renderer.shadowMap.autoUpdate=true;renderer.shadowMap.needsUpdate=true;
+ assert.equal(view._refreshBotShadowCasters(),false,'auto-update maps refresh during the world pass');
+ assert.equal(calls.length,1);
+ view._labShadowTarget?.dispose();
+});
+
+test('the finish pass amounts follow the tier and accept a test-only override',t=>{
+ const {view}=fixture(t);
+ const low=view._finishAmounts({dither:1,sharpen:0},true),high=view._finishAmounts({dither:1,sharpen:.34},true);
+ assert.equal(low.sharpen,0);assert.equal(high.sharpen,.34);assert.ok(low.dither>0&&high.dither>0);
+ const labOnly=view._finishAmounts({dither:1,sharpen:.34},false);
+ assert.equal(labOnly.sharpen,0,'without the base stage only the banding dither runs');
+ const applied=view.setPolish({sharpen:.1,dither:0});
+ assert.equal(applied.sharpen,.1);assert.equal(applied.dither,0);
+ assert.equal(view._finishAmounts({dither:1,sharpen:.34},true).sharpen,.1,'the override wins while set');
+ view.setPolish(null);
+ assert.equal(view._finishAmounts({dither:1,sharpen:.34},true).sharpen,.34,'clearing restores the tier');
+ view.setPolish({sharpen:NaN});
+ assert.equal(view._finishAmounts({dither:1,sharpen:.34},true).sharpen,.34,'junk is ignored');
+});
+
+test('an inactive target never allocates a lab pass, offscreen target or scratch buffer',t=>{
+ const {view,renderer}=fixture(t);
+ renderer.isWebGLRenderer=true;view.composer={};
+ view.graphicsLab=normalizeGraphicsLab({version:1,enabled:true,targets:{weapon:{enabled:false},bots:{enabled:false}}});
+ view._syncLabTargets();
+ assert.equal(view._weaponLab,null);assert.equal(view._weaponTarget,null);
+ assert.equal(view._botLab,null);assert.equal(view._botTarget,null);
+ assert.equal(view._labDisplayTarget,null);
+ // A target stack with layers on stays off while the lab master is off.
+ view.graphicsLab.enabled=false;
+ view.graphicsLab.targets.weapon={...view.graphicsLab.targets.weapon,enabled:true,effects:{...view.graphicsLab.targets.weapon.effects,ink:{enabled:true,value:1}}};
+ view._syncLabTargets();
+ assert.equal(view._weaponLab,null,'the master switch gates every target stack');
+});
+
+test('enabling a target allocates its lab pass and offscreen targets, and disabling disposes them',t=>{
+ const {view,renderer}=fixture(t);
+ renderer.isWebGLRenderer=true;view.composer={};view.width=640;view.height=360;view.pixelRatio=1;
+ view.graphicsLab=normalizeGraphicsLab({version:1,enabled:true,targets:{
+  weapon:{enabled:true,mix:1,effects:{ink:{enabled:true,value:1}}},
+  bots:{enabled:true,mix:1,palette:'ember',effects:{neon:{enabled:true,value:1}}},
+ }});
+ view._syncLabTargets();
+ assert.ok(view._weaponLab&&view._weaponTarget&&view._labDisplayTarget,'the weapon stack allocates its pass, target and scratch buffer');
+ assert.ok(view._botLab&&view._botTarget,'the bot stack allocates its pass and target');
+ assert.equal(view._botTarget.depthTexture?.isDepthTexture,true,'the bot target exposes its depth texture');
+ assert.equal(view._botTarget.width,640);assert.equal(view._botTarget.height,360);
+ const botTarget=view._botTarget;
+ view.width=1280;view.height=720;view._syncLabTargets();
+ assert.equal(view._botTarget,botTarget,'a resize keeps the allocated target instance');
+ assert.equal(botTarget.width,1280);assert.equal(botTarget.depthTexture.image.width,1280);
+ view.graphicsLab.targets.weapon.enabled=false;view._syncLabTargets();
+ assert.equal(view._weaponLab,null);assert.equal(view._weaponTarget,null);
+ assert.ok(view._botLab&&view._botTarget,'the bot stack survives an unrelated target disable');
+ view.graphicsLab.targets.bots.enabled=false;view._syncLabTargets();
+ assert.equal(view._botLab,null);assert.equal(view._botTarget,null);assert.equal(view._labDisplayTarget,null,'the shared scratch buffer leaves with the last target');
+});
+
+test('the bot pass renders the actor layer to a transparent target and composites with depth rejection',t=>{
+ const {view}=fixture(t);
+ const calls=[];
+ view.renderer=Object.assign(view.renderer,{isWebGLRenderer:true,autoClear:true,target:null,outputColorSpace:T.SRGBColorSpace,toneMapping:T.ACESFilmicToneMapping,toneMappingExposure:1.2,
+  getClearColor(color){return color;},getClearAlpha(){return 1;},setClearColor(){},
+  setRenderTarget(target){this.target=target;},
+  render(scene,camera){calls.push({scene,camera,target:this.target,background:scene.isScene?scene.background:undefined});}});
+ view.width=64;view.height=32;view.pixelRatio=1;
+ view.scene=new T.Scene();view.scene.background=new T.Color('#123456');view.camera=new T.PerspectiveCamera();
+ view.actorModels=new Map([['1',new T.Group()]]);
+ view.graphicsLab=normalizeGraphicsLab({version:1,enabled:true,targets:{bots:{enabled:true,mix:1,palette:'ember',effects:{neon:{enabled:true,value:1}}}}});
+ view.composer={readBuffer:{depthTexture:new T.DepthTexture(64,32)}};
+ view._syncLabTargets();
+ const worldTarget=view.composer.readBuffer,botTarget=view._botTarget;
+ assert.ok(view._renderBotLayer(worldTarget),'the bot layer renders and composites');
+ const sceneCall=calls.find(call=>call.scene===view.scene);
+ assert.ok(sceneCall,'the world scene renders once for the bot layer');
+ assert.equal(sceneCall.target,botTarget,'the actor layer renders into the bot target');
+ assert.equal(sceneCall.background,null,'the world background is parked for a transparent clear');
+ assert.equal(sceneCall.camera.layers.mask,1<<BOT_LAYER,'only the bot layer is drawn');
+ assert.equal(view.scene.background.getHexString(),'123456','the world background is restored');
+ assert.equal(view.renderer.autoClear,true);assert.equal(view.renderer.target,null);
+ const lab=view._botLab;
+ assert.equal(lab.uniforms.keepAlpha.value,1);
+ assert.equal(lab.uniforms.depthTest.value,1);
+ assert.equal(lab.uniforms.depthCompare.value,1,'both depth textures enable the occlusion compare');
+ assert.equal(lab.uniforms.tWorldDepth.value,worldTarget.depthTexture);
+ assert.equal(lab.uniforms.tBotDepth.value,botTarget.depthTexture);
+ assert.equal(lab.material.transparent,true,'the composite blends with normal alpha');
+ assert.equal(lab.material.blending,T.NormalBlending);
+ assert.equal(lab.material.depthTest,false);assert.equal(lab.material.depthWrite,false);
+ view._disposeLabTargets();
+});
+
+test('the weapon pass renders the viewmodel to an offscreen target and composites it without depth rejection',t=>{
+ const {view}=fixture(t);
+ const calls=[];
+ view.renderer=Object.assign(view.renderer,{isWebGLRenderer:true,autoClear:true,target:null,outputColorSpace:T.SRGBColorSpace,toneMapping:T.ACESFilmicToneMapping,toneMappingExposure:1.2,
+  getClearColor(color){return color;},getClearAlpha(){return 1;},setClearColor(){},
+  setRenderTarget(target){this.target=target;},
+  render(scene,camera){calls.push({scene,camera,target:this.target});}});
+ view.width=64;view.height=32;view.pixelRatio=1;
+ view.weaponScene=new T.Scene();view.weaponCamera=new T.PerspectiveCamera();
+ view.graphicsLab=normalizeGraphicsLab({version:1,enabled:true,targets:{weapon:{enabled:true,mix:1,effects:{ink:{enabled:true,value:1}}}}});
+ view.composer={};
+ view._syncLabTargets();
+ assert.ok(view._renderWeaponLayer(view.weaponCamera),'the weapon layer renders and composites');
+ const sceneCall=calls.find(call=>call.scene===view.weaponScene);
+ assert.ok(sceneCall);assert.equal(sceneCall.target,view._weaponTarget,'the viewmodel renders into its own target');
+ assert.equal(view.renderer.autoClear,true);assert.equal(view.renderer.target,null);
+ const lab=view._weaponLab;
+ assert.equal(lab.uniforms.keepAlpha.value,1);
+ assert.equal(lab.uniforms.depthTest.value,0,'the weapon never tests against world depth');
+ assert.equal(lab.material.transparent,true);assert.equal(lab.material.blending,T.NormalBlending);
+ assert.equal(lab.material.depthTest,false);assert.equal(lab.material.depthWrite,false);
+ view._disposeLabTargets();
+});
+
+test('setGraphicsLab accepts target stacks and never allocates them on a non-WebGL renderer',t=>{
+ const {view,renderer}=fixture(t);
+ const state={version:1,enabled:true,effects:{ink:{enabled:true,value:1}},targets:{weapon:{enabled:true,mix:1,effects:{ink:{enabled:true,value:.5}}},bots:{enabled:true,mix:1,palette:'ember',effects:{neon:{enabled:true,value:1.2}}}}};
+ assert.doesNotThrow(()=>view.setGraphicsLab(state));
+ assert.equal(view.graphicsLab.targets.bots.palette,'ember','target stacks survive normalization');
+ assert.equal(renderer.isWebGLRenderer,undefined);
+ assert.equal(view._weaponLab,null);assert.equal(view._botLab,null);assert.equal(view._labDisplayTarget,null,'a non-WebGL renderer keeps today\'s appearance');
 });

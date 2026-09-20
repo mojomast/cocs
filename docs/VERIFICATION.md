@@ -33,15 +33,21 @@ reticle-corridor and overflow assertions. No game-server restart.
 **Scope (web presentation, data and documentation, 2026-09-20).** An opt-in
 developer graphics preview, a global hotkey, a randomizer and a clipboard recipe
 loop, 23 stackable effects (three built from baked Moth assets with selectable
-sources), nine starting recipes, plus a paid 15-job Moth batch and the material
-variety that consumes it: nine masked surface variants, two reflectance LUTs, an
-ember sky, two quantum scalar fields and a 16-frame QRC glyph animation, wired
-into surface variants, arena skies/LUTs and the lab. No simulation, server,
-protocol or dependency change; the game server does not need a restart. Default
-rendering is unchanged: the lab is off until a player enables it, and every
-effect is a display-space pass after `OutputPass`/FXAA.
+sources), eleven starting recipes, per-target WORLD / WEAPON / BOTS stacks with
+depth-tested bot compositing and an isolated weapon pass, a research-backed
+finish pass (static dithering for 8-bit banding, contrast-adaptive sharpening,
+tier-scaled environment reflections), plus a paid 15-job Moth batch and the
+material variety that consumes it: nine masked surface variants, two reflectance
+LUTs, an ember sky, two quantum scalar fields and a 16-frame QRC glyph
+animation, wired into surface variants, arena skies/LUTs and the lab. No
+simulation, server, protocol or dependency change; the game server does not need
+a restart. Default rendering is unchanged: the lab is off until a player enables
+it, post-processing remains opt-in, and target stacks allocate nothing until
+enabled.
 
 - `docs/GRAPHICS-LAB.md` — hotkeys, controls, render contract and limitations.
+- `docs/design/GRAPHICS-EDGE-PLAN.md` — the graphics-edge research notes,
+  audit, applied finish pass and the techniques deliberately rejected.
 - `docs/MOTH.md` — implemented material slices, the paid batch and module map.
 - `docs/design/MOTH-GRAPHICS-PLAN.md` — Moth API/mothbake audit and the
   material-variety roadmap, annotated with what is implemented.
@@ -51,7 +57,7 @@ effect is a display-space pass after `OutputPass`/FXAA.
 
 **Automated release gate (2026-09-20).**
 
-- `npm test`: pass. Game tests: 2,652 pass, 8 approved skips, 0 fail (2,660
+- `npm test`: pass. Game tests: 2,671 pass, 8 approved skips, 0 fail (2,679
   tests); server tests: 209 pass, 0 fail; TypeScript: pass; verified production
   build: pass; SSR/UI and deployment-contract tests: 82 pass, 0 fail.
 - Moth-focused suites are part of that run: bake-runner integrity

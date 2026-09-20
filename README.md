@@ -442,7 +442,15 @@ Recent releases. The full history lives in
 
 ### v8.6 · PRISM — 2026-09-20
 - **Graphics & settings → Graphics lab · Preview:** 23 independent shader
-  layers and nine starting recipes for exploring a distinctive art direction.
+  layers and eleven starting recipes for exploring a distinctive art direction.
+- Per-target stacks: WORLD / WEAPON / BOTS each with their own master, mix,
+  palette and layers. Weapon stays crisp and bots follow the world until
+  enabled; bots are depth-tested so walls occlude them.
+- Graphics-edge pass (research-backed): static dither kills 8-bit banding, a
+  contrast-adaptive sharpen recovers FXAA softness, and environment reflections
+  scale with the tier. Runs whenever post-processing or the graphics lab runs.
+- Pocket Ink ships your saved roll exactly; Ghost Rivals demonstrates a bot
+  stack.
 - Global backquote hotkey toggles the lab from anywhere; Shift plus that key
   opens the drawer. SURPRISE ME rolls a valid random mix, COPY RECIPE copies the
   exact JSON, and PASTE A RECIPE JSON applies one back for tuning.

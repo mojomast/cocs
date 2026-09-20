@@ -78,6 +78,25 @@ try{
  await page.waitForTimeout(150);
  const chosen=await page.evaluate(()=>JSON.parse(localStorage.getItem('token-arena-graphics-lab-v1')).effects.mothcoat.option);
  assert.equal(chosen,'entanglement-void','the chosen Moth asset persists');
+ // Per-target stacks: the weapon and the bots style independently and persist
+ // without the renderer layer needing to change any of this state.
+ await page.getByRole('tab',{name:'WEAPON',exact:true}).click();
+ await page.getByRole('checkbox',{name:'Give the weapon its own stack',exact:true}).check();
+ await page.getByRole('checkbox',{name:'Ink contours',exact:false}).check();
+ await page.waitForTimeout(150);
+ const weaponStack=await page.evaluate(()=>JSON.parse(localStorage.getItem('token-arena-graphics-lab-v1')).targets.weapon);
+ assert.equal(weaponStack.enabled,true,'the weapon stack master persists');
+ assert.equal(weaponStack.effects.ink.enabled,true,'the weapon layer persists under targets.weapon');
+ assert.equal(weaponStack.effects.neon.enabled,false,'the weapon keeps its own layer switches');
+ await page.getByRole('tab',{name:'BOTS',exact:true}).click();
+ await page.getByRole('checkbox',{name:'Style bots separately',exact:true}).check();
+ await page.getByRole('checkbox',{name:'Neon contours',exact:false}).check();
+ await page.waitForTimeout(150);
+ const botStack=await page.evaluate(()=>JSON.parse(localStorage.getItem('token-arena-graphics-lab-v1')).targets.bots);
+ assert.equal(botStack.enabled,true,'the bots stack master persists');
+ assert.equal(botStack.effects.neon.enabled,true,'the bot layer persists under targets.bots');
+ assert.equal(botStack.effects.ink.enabled,false,'the bot stack is separate from the weapon stack');
+ await page.getByRole('tab',{name:'WORLD',exact:true}).click();
  // Copy recipe: the clipboard payload parses and matches the live state.
  await page.getByRole('button',{name:'COPY RECIPE',exact:true}).click();
  await page.waitForTimeout(150);
@@ -87,7 +106,11 @@ try{
  assert.equal(copied.version,1,'copied recipe carries the schema version');
  assert.deepEqual(copied.effects,live.effects,'copied recipe matches the live layers');
  assert.equal(copied.effects.mothcoat.option,'entanglement-void','copied recipe carries the chosen option');
+ assert.deepEqual(copied.targets,live.targets,'copied recipe carries both target stacks');
+ assert.equal(copied.targets.weapon.effects.ink.enabled,true,'copied recipe carries the weapon stack');
+ assert.equal(copied.targets.bots.effects.neon.enabled,true,'copied recipe carries the bot stack');
  assert.equal(copied.bypass,false,'copied recipe omits transient bypass');
+ assert.equal(copied.split,false,'copied recipe omits transient split');
  // Paste a recipe back in and apply it.
  await page.getByText('Paste a recipe JSON').click();
  await page.getByLabel('Recipe JSON').fill(JSON.stringify({version:1,enabled:true,palette:'sodium',mix:.9,effects:{pixel:{enabled:true,value:8},temperature:{enabled:true,value:.6}}}));
@@ -97,6 +120,8 @@ try{
  assert.equal(applied.palette,'sodium','applied recipe changes the palette');
  assert.equal(applied.effects.pixel.enabled,true,'applied recipe enables its layers');
  assert.equal(applied.effects.temperature.value,.6,'applied recipe keeps its exact values');
+ assert.equal(applied.targets.weapon.enabled,false,'a world-only paste clears the weapon stack');
+ assert.equal(applied.targets.bots.enabled,false,'a world-only paste clears the bot stack');
  // Hotkeys: ` toggles from anywhere; Shift+` opens this drawer.
  await page.evaluate(()=>document.activeElement?.blur?.());
  await page.keyboard.press('Backquote');

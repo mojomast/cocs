@@ -37,10 +37,16 @@ export function normalizeQuality(value, { software = false, reduced = false } = 
 // elapsed-time dynamic-shadow refresh rate (20-30 Hz), `shadowMap` resizes the
 // shadow target, and `modelDetail`/`lodDistance` drive geometry LOD. `shadows`
 // is retained as the legacy frame cadence for callers that still read it.
+// `finish` is the display-space tail of the chain: `dither` is a static
+// 1/255 triangular dither that breaks 8-bit gradient banding (nearly free, so
+// every tier keeps it) and `sharpen` is a small contrast-adaptive unsharp that
+// recovers what FXAA softens (kept off the low tier). `environment` scales the
+// PMREM ambient/reflection contribution, which is what makes metal read as
+// metal; it is the cheapest material-quality lever the renderer has.
 const QUALITY_TABLE = Object.freeze({
-  low: Object.freeze({ tier: 0, particles: .4, decals: 8, deaths: 36, splats: 10, shadows: 4, shadowHz: 20, shadowMap: 1024, stars: .45, scatter: .5, scatterDetail: .35, ambientMotes: 3, tracers: .72, bloom: .6, bloomScale: .25, bloomMax: 256, fxaa: false, vignette: false, modelDetail: 0, lodDistance: 26, triangleBudget: 90000 }),
-  medium: Object.freeze({ tier: 1, particles: .7, decals: 14, deaths: 56, splats: 14, shadows: 3, shadowHz: 25, shadowMap: 1536, stars: .8, scatter: .78, scatterDetail: .7, ambientMotes: 5, tracers: .86, bloom: .85, bloomScale: .4, bloomMax: 512, fxaa: true, vignette: true, modelDetail: .6, lodDistance: 34, triangleBudget: 140000 }),
-  high: Object.freeze({ tier: 2, particles: 1, decals: 18, deaths: 72, splats: 16, shadows: 2, shadowHz: 30, shadowMap: 2048, stars: 1, scatter: 1, scatterDetail: 1, ambientMotes: 6, tracers: 1, bloom: 1, bloomScale: .5, bloomMax: 1024, fxaa: true, vignette: true, modelDetail: 1, lodDistance: 46, triangleBudget: 200000 }),
+  low: Object.freeze({ tier: 0, particles: .4, decals: 8, deaths: 36, splats: 10, shadows: 4, shadowHz: 20, shadowMap: 1024, stars: .45, scatter: .5, scatterDetail: .35, ambientMotes: 3, tracers: .72, bloom: .6, bloomScale: .25, bloomMax: 256, fxaa: false, vignette: false, dither: 1, sharpen: 0, environment: .4, modelDetail: 0, lodDistance: 26, triangleBudget: 90000 }),
+  medium: Object.freeze({ tier: 1, particles: .7, decals: 14, deaths: 56, splats: 14, shadows: 3, shadowHz: 25, shadowMap: 1536, stars: .8, scatter: .78, scatterDetail: .7, ambientMotes: 5, tracers: .86, bloom: .85, bloomScale: .4, bloomMax: 512, fxaa: true, vignette: true, dither: 1, sharpen: .28, environment: .5, modelDetail: .6, lodDistance: 34, triangleBudget: 140000 }),
+  high: Object.freeze({ tier: 2, particles: 1, decals: 18, deaths: 72, splats: 16, shadows: 2, shadowHz: 30, shadowMap: 2048, stars: 1, scatter: 1, scatterDetail: 1, ambientMotes: 6, tracers: 1, bloom: 1, bloomScale: .5, bloomMax: 1024, fxaa: true, vignette: true, dither: 1, sharpen: .34, environment: .6, modelDetail: 1, lodDistance: 46, triangleBudget: 200000 }),
 });
 
 // Only the three fixed tiers are a real override. The saved default is the

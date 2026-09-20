@@ -47,8 +47,9 @@ import {RenderPass} from 'three/addons/postprocessing/RenderPass.js';
 import {UnrealBloomPass} from 'three/addons/postprocessing/UnrealBloomPass.js';
 import {ShaderPass} from 'three/addons/postprocessing/ShaderPass.js';
 import {OutputPass} from 'three/addons/postprocessing/OutputPass.js';
-import {normalizeGraphicsLab} from './graphics-lab.mjs';
+import {normalizeGraphicsLab,graphicsLabTargetActive} from './graphics-lab.mjs';
 import {GraphicsLabPass} from './graphics-lab-pass.mjs';
+import {FinishPass} from './finish-pass.mjs';
 import {VignetteShader} from 'three/addons/shaders/VignetteShader.js';
 import {FXAAShader} from 'three/addons/shaders/FXAAShader.js';
 export {SynthAudio} from './feedback.mjs';
@@ -60,6 +61,10 @@ export {WeaponPreviewRig} from './effects-fx.mjs';
 export function createWeaponPreview(options={}){
  return new WeaponPreviewRig({weaponModel,assets:options.assets,background:options.background});
 }
+// Actor models render on a dedicated layer so the world composer can exclude
+// them while a bot stack is active. The live camera and the sun's shadow camera
+// keep the layer enabled, so direct draws and bot shadows are unchanged.
+export const BOT_LAYER=2;
 // Shadows are re-rendered on a fixed cadence instead of every frame; the arena
 // bake still refreshes immediately on build, and moving actors lag at most one step.
 export const SHADOW_REFRESH_INTERVAL=2;
@@ -614,8 +619,13 @@ export class ArenaView{
    // by world depth. A mirrored root keeps muzzle world transforms correct for
    // effects. The CPU renderer keeps the legacy in-camera path.
    this.weaponScene=null;this.weaponRoot=null;this.weaponCamera=null;this.weaponFov=Math.max(45,Number(this.display?.fov)||70);
+   // Per-target lab stacks. `worldCamera` mirrors the live camera for the
+   // composer, `botCamera` renders the actor layer, and the lab passes plus
+   // offscreen targets are created lazily only while a target is active.
+   this.worldCamera=null;this.botCamera=null;this._weaponLab=null;this._weaponTarget=null;this._botLab=null;this._botTarget=null;this._labDisplayTarget=null;this._labEncodePass=null;this._labShadowTarget=null;this._labClearColor=null;
    if(this.renderer.isSoftware===true){this.camera.add(this.hands);}
    else{this.weaponScene=new T.Scene();this.weaponRoot=new T.Group();this.weaponScene.add(this.weaponRoot);this.weaponRoot.add(this.hands);this.weaponCamera=new T.PerspectiveCamera(this.weaponFov,1,.02,4);this.weaponScene.add(new T.HemisphereLight('#cfe9ff','#20262c',2.2));const weaponKey=new T.DirectionalLight('#ffffff',2.6);weaponKey.position.set(-2,4,3);this.weaponScene.add(weaponKey);}
+   this._enableBotLayers();
    this.scene.add(this.camera);this.currentWeapon=-1;this._weaponCache=new Map();this.aim=false;this.lowHealth=false;this.cameraShake=new CameraShake();this.muzzleLights=null;this.lowHealthOverlay=null;this.railPool=null;this.deathPool=null;this.deathContext=new Map();this.payloadModel=null;this.decalPool=null;this.ambientFx=null;this.ambientPool=null;this.ambientConfig=null;this.ambientAnchors=[];this.scatterWind=[];this.killcamEnabled=true;this._killcam=null;this.hitPool=null;this.hitFlinch=new Map();this._lightning=[];this._lightningAt=0;this._flash=0;this._wetSheenApplied=0;this.preview=null;this.showcaseExpected=false;if(this.renderer.isSoftware!==true){this.muzzleLights=new MuzzleLightPool(this.scene,2);this.lowHealthOverlay=new LowHealthOverlay(this.camera);if(typeof document!=='undefined')this.railPool=new RailBeamPool(this.scene,6);this.decalPool=new DecalPool(this.scene,18);const rim=new T.DirectionalLight('#7fd8ff',.55);rim.position.set(-7,6,-9);rim.userData.rimLight=true;this.scene.add(rim);}this.menu=this.makeMenu();this.cinema=false;this.director=null;this._cameraOwner='auto';this._freeCam=false;this._directorLock=false;this.manualFollowId=null;this.freePose={x:0,y:6,z:0,yaw:0,pitch:0};this.freeSpeed=FREE_CAM_DEFAULT_SPEED;this.freeBoost=FREE_CAM_BOOST;this._freeVel=null;this._freeExit=null;this._freeExitPose=null;this._lastMode=null;this.showcaseState=null;this.previewRect=null;this.raycaster=new T.Raycaster();this._occClear=0;this.resize();}
        reduced(){return reducedMotion(this.display?.reducedMotion, Boolean(this.motionQuery?.matches));}
        // Presentation-only quality tier. Lazily resolved so partially constructed
@@ -649,6 +659,10 @@ export class ArenaView{
          if(this._shadowMapSize!==size){this._shadowMapSize=size;if(this.sun.shadow.map){this.sun.shadow.map.dispose?.();this.sun.shadow.map=null;}this.sun.shadow.mapSize.set(size,size);if(this.renderer?.shadowMap)this.renderer.shadowMap.needsUpdate=true;}
         }
         if(this.renderer?.setScreenArea)this.renderer.setScreenArea(q.tier===0?.12:q.tier===1?.09:.06);
+        // Image-based ambient/reflections scale with the tier: this is the
+        // cheapest lever on how metallic surfaces read, and the PMREM texture is
+        // shared, so no extra GPU memory is allocated.
+        if(this.scene&&Number.isFinite(q.environment))this.scene.environmentIntensity=q.environment;
         this._applyEffectsQuality();
         // The CPU renderer gets a hard per-frame triangle ceiling taken from the
         // active tier; WebGL lowers real geometry detail through _applyModelDetail.
@@ -1054,48 +1068,287 @@ export class ArenaView{
     }
     cinemaLook(dy,dp){this.director?.look?.(dy,dp);}
     resize(){const w=Math.max(1,this.renderer.domElement.clientWidth),h=Math.max(1,this.renderer.domElement.clientHeight),ratio=budgetedRatio({width:w,height:h,dpr:window.devicePixelRatio,scale:this.display?.resolutionScale??1,cap:this.display?.resolutionCap??'auto',software:this.renderer.isSoftware===true,dynamic:this._drs?.scale??1});
-     if(this.width===w&&this.height===h&&this.pixelRatio===ratio){this._syncPost?.();return;}
+     if(this.width===w&&this.height===h&&this.pixelRatio===ratio){this._syncPost?.();this._syncLabTargets?.();return;}
      if(this.pixelRatio!==ratio)this.renderer.setPixelRatio(ratio);
      // Keep even tiny/hidden canvases at least one backing pixel without changing CSS size.
      this.renderer.setSize(Math.max(w,1/ratio),Math.max(h,1/ratio),false);this.width=w;this.height=h;this.pixelRatio=ratio;
      // Report the real drawing-buffer dimensions rather than assuming a monitor
      // resolution; a 100% world render is capped by the resolution budget (resolution.mjs).
      if(this.perf){const dom=this.renderer.domElement||{},dpr=window.devicePixelRatio;this.perf.viewport={cssWidth:w,cssHeight:h,devicePixelRatio:Number.isFinite(dpr)?dpr:1,bufferWidth:dom.width??Math.round(w*ratio),bufferHeight:dom.height??Math.round(h*ratio),scale:ratio};}
-     this.camera.aspect=w/h;this.camera.updateProjectionMatrix();this.menu.camera.aspect=w/h;this.menu.camera.updateProjectionMatrix();if(this.weaponCamera){this.weaponCamera.aspect=w/h;this.weaponCamera.updateProjectionMatrix();}this._syncPost?.();}
-     setGraphicsLab(prefs){this.graphicsLab=normalizeGraphicsLab(prefs);this._syncPost();}
+     this.camera.aspect=w/h;this.camera.updateProjectionMatrix();this.menu.camera.aspect=w/h;this.menu.camera.updateProjectionMatrix();if(this.weaponCamera){this.weaponCamera.aspect=w/h;this.weaponCamera.updateProjectionMatrix();}this._syncPost?.();this._syncLabTargets?.();}
+     setGraphicsLab(prefs){this.graphicsLab=normalizeGraphicsLab(prefs);this._syncPost();this._syncLabTargets();}
           _syncPost(){
       const eligible=this.renderer instanceof T.WebGLRenderer,q=this.qualitySettings||this._quality();
+      this._postError=null;
       const base=postStage({eligible,reduced:this.reduced(),postFx:this.display?.postFx});
       const lab=eligible&&this.graphicsLab?.enabled===true;
       const bloomStrength=base?Number(this.display?.bloom)*Number(q.bloom):0;
+      const finish=this._finishAmounts(q,base);
       const want=base||lab;
-      if(!want){if(this.composer){disposeComposer(this.composer);this.composer=null;this.bloomPass=null;this.vignettePass=null;this.aaPass=null;this.graphicsLabPass=null;this._postKey=null;}this._postW=0;this._postH=0;this._postRatio=0;return;}
+      if(!want){if(this.composer){disposeComposer(this.composer);this.composer=null;this.bloomPass=null;this.vignettePass=null;this.aaPass=null;this.graphicsLabPass=null;this.finishPass=null;this._postKey=null;}this._disposeLabTargets();this._postW=0;this._postH=0;this._postRatio=0;return;}
      // A zero-strength bloom used to leave its expensive processing running. The
      // pass is now omitted entirely, and the vignette/FXAA passes follow the
      // quality tier, so the composed path only contains passes that do work.
       const key=`${bloomStrength>0?1:0}|${base&&q.vignette!==false?1:0}|${base&&q.fxaa!==false?1:0}|lab:${lab?1:0}`;
-      if(this.composer&&this._postKey!==key){disposeComposer(this.composer);this.composer=null;this.bloomPass=null;this.vignettePass=null;this.aaPass=null;this.graphicsLabPass=null;}
-     if(!this.composer){try{const composer=new EffectComposer(this.renderer);composer.addPass(new RenderPass(this.scene,this.camera));
+      if(this.composer&&this._postKey!==key){disposeComposer(this.composer);this.composer=null;this.bloomPass=null;this.vignettePass=null;this.aaPass=null;this.graphicsLabPass=null;this.finishPass=null;this._disposeLabTargets();}
+     if(!this.composer){try{const composer=new EffectComposer(this.renderer),worldCamera=this.worldCamera??(this.worldCamera=this._makeMirrorCamera());composer.addPass(new RenderPass(this.scene,worldCamera));
       if(bloomStrength>0){this.bloomPass=new UnrealBloomPass(new T.Vector2(1,1),bloomStrength,.72,.9);composer.addPass(this.bloomPass);}
-       if(base&&q.vignette!==false){const vignette=new ShaderPass(VignetteShader);vignette.uniforms.offset.value=1.05;vignette.uniforms.darkness.value=.92;composer.addPass(vignette);this.vignettePass=vignette;}
-      composer.addPass(new OutputPass());
+       if(base&&q.vignette!==false){const vignette=new ShaderPass(VignetteShader);vignette.uniforms.offset.value=1.05;vignette.uniforms.darkness.value=.92;this._disablePassDepth(vignette);composer.addPass(vignette);this.vignettePass=vignette;}
+      const output=new OutputPass();this._disablePassDepth(output);composer.addPass(output);
       // FXAA follows OutputPass (sRGB). The default framebuffer still requests
       // MSAA for the direct path and the post-composer weapon pass, so this pass
       // only covers the composer's non-MSAA render targets.
-       if(base&&q.fxaa!==false){const aa=new ShaderPass(FXAAShader);aa.name='fxaa';composer.addPass(aa);this.aaPass=aa;}
-       if(lab){this.graphicsLabPass=new GraphicsLabPass();composer.addPass(this.graphicsLabPass);}
-      this.composer=composer;this._postKey=key;this._postW=0;this._postH=0;this._postRatio=0;}catch{this.composer=null;return;}}
+       if(base&&q.fxaa!==false){const aa=new ShaderPass(FXAAShader);aa.name='fxaa';this._disablePassDepth(aa);composer.addPass(aa);this.aaPass=aa;}
+       if(lab){this.graphicsLabPass=new GraphicsLabPass();this._disablePassDepth(this.graphicsLabPass);composer.addPass(this.graphicsLabPass);}
+       // The finish pass is the display-space tail: it runs last (after the lab
+       // when the lab is on) so its dither lands on the final 8-bit values.
+       this.finishPass=new FinishPass();this._disablePassDepth(this.finishPass);composer.addPass(this.finishPass);
+      if(lab)this._attachComposerDepth(composer);
+      this.composer=composer;this._postKey=key;this._postW=0;this._postH=0;this._postRatio=0;}catch(error){this._postError=String(error?.message||error);this.composer=null;this._disposeLabTargets();return;}}
      if(this.bloomPass)this.bloomPass.strength=bloomStrength;
       const w=Math.max(1,this.renderer.domElement.clientWidth),h=Math.max(1,this.renderer.domElement.clientHeight),ratio=this.pixelRatio??1;
       if(this.graphicsLabPass)this.graphicsLabPass.configure(this.graphicsLab,w,h);
+      if(this.finishPass)this.finishPass.configure(finish,w,h);
      if(this._postW!==w||this._postH!==h||this._postRatio!==ratio){
       applyComposerSize(this.composer,w,h,ratio);
+      if(lab)this._attachComposerDepth(this.composer);
       // Independent bloom budget applied after composer resizing, so a resize can
       // never overwrite the cap with the full-resolution target.
       if(this.bloomPass){const budget=bloomResolution(w,h,{scale:q.bloomScale??.5,maxDim:q.bloomMax??1024});this.bloomPass.setSize?.(budget.width,budget.height);}
       if(this.aaPass)this.aaPass.uniforms.resolution.value.set(1/(w*ratio),1/(h*ratio));
       this._postW=w;this._postH=h;this._postRatio=ratio;
      }
+    }
+    // Quality owns the finish amounts; `setPolish` can override them for an A/B
+    // capture (tests and the developer harness), never for gameplay settings.
+    _finishAmounts(q,base){
+     const dither=Number.isFinite(this._polish?.dither)?this._polish.dither:(base?Number(q?.dither??1):1);
+     const sharpen=Number.isFinite(this._polish?.sharpen)?this._polish.sharpen:(base?Number(q?.sharpen??0):0);
+     return {dither,sharpen};
+    }
+    setPolish(polish){
+     if(polish===null||polish===undefined){this._polish=null;}
+     else this._polish={...(this._polish||{}),...(Number.isFinite(polish.dither)?{dither:polish.dither}:{}),...(Number.isFinite(polish.sharpen)?{sharpen:polish.sharpen}:{})};
+     this._syncPost();
+     return this._finishAmounts(this.qualitySettings||this._quality(),postStage({eligible:this.renderer instanceof T.WebGLRenderer,reduced:this.reduced(),postFx:this.display?.postFx}));
+    }
+    // ---- Per-target graphics-lab stacks -------------------------------------
+    // Actor models render on their own layer; the live camera and the shadow
+    // camera keep it enabled, while the composer's world camera drops it only on
+    // frames where a bot stack is active.
+    _enableBotLayers(){
+     if(this.camera?.layers)this.camera.layers.enable(BOT_LAYER);
+     if(this.sun?.shadow?.camera?.layers)this.sun.shadow.camera.layers.enable(BOT_LAYER);
+    }
+    // Actor models join the scene on the bot layer only. The camera-occlusion
+    // raycast operates on `worldGroup`, and every other consumer finds actors
+    // through `actorModels`, so nothing else depends on actor layer 0.
+    _addActorModel(model){
+     model?.traverse?.(node=>node.layers?.set(BOT_LAYER));
+     this.scene?.add(model);
+     return model;
+    }
+    _makeMirrorCamera(){
+     const source=this.camera,camera=new T.PerspectiveCamera(source?.fov??82,source?.aspect??1,source?.near??.08,source?.far??220);
+     camera.rotation.order='YXZ';camera.layers.enable(BOT_LAYER);
+     return camera;
+    }
+    // Mirror the live presentation camera onto the camera the world composer
+    // owns. Copying the projection matrix (not just fov/aspect) keeps custom
+    // zooms exact, and the live camera itself is never touched.
+    _syncWorldCamera(botsActive){
+     const source=this.camera,world=this.worldCamera??(this.worldCamera=this._makeMirrorCamera());
+     if(!source)return world;
+     world.position.copy(source.position);world.quaternion.copy(source.quaternion);
+     if(source.scale)world.scale.copy(source.scale);
+     if(Number.isFinite(source.fov))world.fov=source.fov;
+     if(Number.isFinite(source.aspect))world.aspect=source.aspect;
+     if(Number.isFinite(source.near))world.near=source.near;
+     if(Number.isFinite(source.far))world.far=source.far;
+     if(Number.isFinite(source.zoom))world.zoom=source.zoom;
+     if(Number.isFinite(source.filmOffset))world.filmOffset=source.filmOffset;
+     world.updateProjectionMatrix();world.updateMatrixWorld(true);
+     if(source.projectionMatrix)world.projectionMatrix.copy(source.projectionMatrix);
+     if(source.projectionMatrixInverse)world.projectionMatrixInverse.copy(source.projectionMatrixInverse);
+     if(botsActive)world.layers.disable(BOT_LAYER);else world.layers.enable(BOT_LAYER);
+     return world;
+    }
+    // three r185 culls shadow casters against the *render camera's* layers, so a
+    // world camera that excludes BOT_LAYER would also drop bot shadows from the
+    // map even though `sun.shadow.camera` includes the layer. On a scheduled
+    // refresh, rebuild the map once through the live camera (every caster layer)
+    // into a 1x1 scratch target, then let the culled world pass reuse it.
+    // Auto-update maps refresh during the world pass and need no detour.
+    _refreshBotShadowCasters(){
+     const shadowMap=this.renderer?.shadowMap;
+     if(!shadowMap||shadowMap.enabled===false||shadowMap.autoUpdate!==false||shadowMap.needsUpdate!==true)return false;
+     const target=this._labShadowTarget??(this._labShadowTarget=new T.WebGLRenderTarget(1,1,{format:T.RGBAFormat,depthBuffer:true}));
+     const previousAuto=this.renderer.autoClear,previousTarget=this.renderer.getRenderTarget();
+     this.renderer.autoClear=true;
+     try{this.renderer.setRenderTarget(target);this.renderer.render(this.scene,this.camera);}
+     finally{this.renderer.setRenderTarget(previousTarget);this.renderer.autoClear=previousAuto;}
+     return true;
+    }
+    // Composer passes that only read a full-screen texture must never clear or
+    // write depth: the scene pass's depth texture is sampled by the bot
+    // composite, and a later quad writing into the same ping-pong buffer would
+    // otherwise clobber it.
+    _disablePassDepth(pass){const material=pass?.material;if(material){material.depthTest=false;material.depthWrite=false;}return pass;}
+    // Both EffectComposer ping-pong targets need a sampleable depth texture: the
+    // scene pass renders into whichever buffer is the read buffer at frame
+    // start. three resizes the attached texture from the render target on the
+    // next bind (WebGLTextures.setupDepthTexture), and this sync keeps the image
+    // size correct immediately after a composer resize.
+    _attachComposerDepth(composer){
+     if(!composer)return;
+     for(const target of [composer.renderTarget1,composer.renderTarget2]){
+      if(!target)continue;
+      if(!target.depthTexture){const depth=new T.DepthTexture(target.width,target.height);depth.name='GraphicsLab.worldDepth';target.depthTexture=depth;}
+      const depth=target.depthTexture;
+      if(depth.image.width!==target.width||depth.image.height!==target.height){depth.image.width=target.width;depth.image.height=target.height;depth.needsUpdate=true;}
+     }
+    }
+    _targetState(name){return this.graphicsLab?.targets?.[name]??null;}
+    // A per-target stack only runs while the lab as a whole is on; the target's
+    // own predicate owns its mix/effect checks.
+    _targetActive(target){return this.graphicsLab?.enabled===true&&this.graphicsLab?.bypass!==true&&graphicsLabTargetActive(target)===true;}
+    _labEligible(){return this.renderer?.isSoftware!==true&&this.renderer?.isWebGLRenderer===true;}
+    // Match applyComposerSize exactly: CSS size rounded, then scaled by the pixel
+    // ratio, fractional buffer included, so the bot depth lines up pixel-for-pixel
+    // with the composer's scene depth.
+    _labBufferSize(){
+     const ratio=Number(this.pixelRatio)>0?Number(this.pixelRatio):1;
+     const width=Math.max(1,Math.round(Number(this.width)>0?Number(this.width):1)),height=Math.max(1,Math.round(Number(this.height)>0?Number(this.height):1));
+     return {width:width*ratio,height:height*ratio};
+    }
+    _resizeRenderTarget(target,width,height){
+     if(!target)return target;
+     if(target.width!==width||target.height!==height)target.setSize(width,height);
+     const depth=target.depthTexture;
+     if(depth&&(depth.image.width!==width||depth.image.height!==height)){depth.image.width=width;depth.image.height=height;depth.needsUpdate=true;}
+     return target;
+    }
+    // Lazy per-target resources: nothing is allocated while a target is off, and
+    // every path that can drop the composer or resize the canvas funnels here.
+    _syncLabTargets(){
+     const eligible=this._labEligible(),composer=!!this.composer;
+     const bots=eligible&&composer&&this._targetActive(this._targetState('bots'));
+     const weapon=eligible&&composer&&this._targetActive(this._targetState('weapon'));
+     const size=bots||weapon?this._labBufferSize():null;
+     if(size){
+      if(!this._labDisplayTarget)this._labDisplayTarget=new T.WebGLRenderTarget(size.width,size.height,{format:T.RGBAFormat,depthBuffer:false});
+      else this._resizeRenderTarget(this._labDisplayTarget,size.width,size.height);
+     }
+     if(bots){
+      if(!this._botLab)this._botLab=new GraphicsLabPass();
+      if(!this._botTarget)this._botTarget=new T.WebGLRenderTarget(size.width,size.height,{format:T.RGBAFormat,depthBuffer:true,depthTexture:new T.DepthTexture(size.width,size.height)});
+      else this._resizeRenderTarget(this._botTarget,size.width,size.height);
+     }else{
+      try{this._botLab?.dispose?.();}catch{}
+      try{this._botTarget?.dispose?.();}catch{}
+      try{this._labShadowTarget?.dispose?.();}catch{}
+      this._botLab=null;this._botTarget=null;this._labShadowTarget=null;
+     }
+     if(weapon){
+      if(!this._weaponLab)this._weaponLab=new GraphicsLabPass();
+      if(!this._weaponTarget)this._weaponTarget=new T.WebGLRenderTarget(size.width,size.height,{format:T.RGBAFormat,depthBuffer:true});
+      else this._resizeRenderTarget(this._weaponTarget,size.width,size.height);
+     }else{
+      try{this._weaponLab?.dispose?.();}catch{}
+      try{this._weaponTarget?.dispose?.();}catch{}
+      this._weaponLab=null;this._weaponTarget=null;
+     }
+     if(!bots&&!weapon){try{this._labDisplayTarget?.dispose?.();}catch{}this._labDisplayTarget=null;}
+    }
+    _disposeLabTargets(){
+     for(const pass of [this._weaponLab,this._botLab,this._labEncodePass])try{pass?.dispose?.();}catch{}
+     for(const target of [this._weaponTarget,this._botTarget,this._labDisplayTarget,this._labShadowTarget])try{target?.dispose?.();}catch{}
+     this._weaponLab=null;this._botLab=null;this._labEncodePass=null;
+     this._weaponTarget=null;this._botTarget=null;this._labDisplayTarget=null;this._labShadowTarget=null;
+    }
+    // An offscreen layer render is linear; the fused lab pass is display-referred
+    // like the world output, so run the renderer's tone mapping and color-space
+    // transform into a scratch target first. OutputShader preserves alpha, so
+    // keepAlpha composites are unaffected.
+    _encodeLabSource(source,display){
+     if(!source||!display)return false;
+     const pass=this._labEncodePass??(this._labEncodePass=new OutputPass());
+     pass.renderToScreen=false;
+     pass.render(this.renderer,display,source);
+     return true;
+    }
+    // One full-screen pass draws the styled layer onto the presented frame with
+    // normal alpha blending; the shader itself handles the depth rejection.
+    _compositeLab(lab,state,source,{keepAlpha=true,depthTest=false,worldDepth=null,botDepth=null}={}){
+     if(!lab||!source)return false;
+     const material=lab.material;
+     if(material){
+      if(material.transparent!==true){material.transparent=true;material.needsUpdate=true;}
+      material.blending=T.NormalBlending;material.depthTest=false;material.depthWrite=false;material.toneMapped=false;
+     }
+     const size=this._labBufferSize();
+     lab.configure(state,size.width,size.height,{active:true,keepAlpha,depthTest,worldDepth,botDepth});
+     // FullScreenQuad.render() goes through renderer.render(), which would clear
+     // the presented frame before blending unless autoClear is off.
+     const previousAuto=this.renderer.autoClear;
+     this.renderer.autoClear=false;
+     try{lab.renderToScreen=true;lab.render(this.renderer,null,source);}
+     finally{this.renderer.autoClear=previousAuto;}
+     return true;
+    }
+    // Bot stack: only the actor layer lands on transparent pixels (the world
+    // background is parked for the render), then the composite discards pixels
+    // the world depth already covers.
+    _renderBotLayer(worldTarget){
+     const lab=this._botLab,target=this._botTarget,display=this._labDisplayTarget,renderer=this.renderer,scene=this.scene,camera=this.camera;
+     if(!lab||!target||!display||!scene||!camera)return false;
+     const botCamera=this.botCamera??(this.botCamera=this._makeMirrorCamera());
+     botCamera.layers.set(BOT_LAYER);
+     botCamera.position.copy(camera.position);botCamera.quaternion.copy(camera.quaternion);
+     if(camera.scale)botCamera.scale.copy(camera.scale);
+     if(Number.isFinite(camera.fov))botCamera.fov=camera.fov;
+     if(Number.isFinite(camera.aspect))botCamera.aspect=camera.aspect;
+     if(Number.isFinite(camera.near))botCamera.near=camera.near;
+     if(Number.isFinite(camera.far))botCamera.far=camera.far;
+     if(Number.isFinite(camera.zoom))botCamera.zoom=camera.zoom;
+     if(Number.isFinite(camera.filmOffset))botCamera.filmOffset=camera.filmOffset;
+     botCamera.updateProjectionMatrix();botCamera.updateMatrixWorld(true);
+     if(camera.projectionMatrix)botCamera.projectionMatrix.copy(camera.projectionMatrix);
+     if(camera.projectionMatrixInverse)botCamera.projectionMatrixInverse.copy(camera.projectionMatrixInverse);
+     const previousBackground=scene.background,previousAuto=renderer.autoClear;
+     const clearColor=this._labClearColor??(this._labClearColor=new T.Color());
+     renderer.getClearColor(clearColor);const previousAlpha=renderer.getClearAlpha();
+     try{
+      scene.background=null;renderer.autoClear=true;renderer.setClearColor('#000000',0);
+      renderer.setRenderTarget(target);renderer.render(scene,botCamera);
+     }finally{
+      renderer.setRenderTarget(null);
+      scene.background=previousBackground;renderer.autoClear=previousAuto;renderer.setClearColor(clearColor,previousAlpha);
+     }
+     const worldDepth=worldTarget?.depthTexture??null;
+     this._encodeLabSource(target,display);
+     this._compositeLab(lab,this._targetState('bots'),display,{keepAlpha:true,depthTest:!!worldDepth,worldDepth,botDepth:target.depthTexture??null});
+     return true;
+    }
+    // Weapon stack: the viewmodel renders to its own transparent target and is
+    // composited with normal alpha blending. The direct path stays untouched
+    // while the weapon target is off.
+    _renderWeaponLayer(weaponCamera){
+     const lab=this._weaponLab,target=this._weaponTarget,display=this._labDisplayTarget,renderer=this.renderer,scene=this.weaponScene;
+     if(!lab||!target||!display||!scene||!weaponCamera)return false;
+     const previousAuto=renderer.autoClear;
+     const clearColor=this._labClearColor??(this._labClearColor=new T.Color());
+     renderer.getClearColor(clearColor);const previousAlpha=renderer.getClearAlpha();
+     try{
+      renderer.autoClear=true;renderer.setClearColor('#000000',0);
+      renderer.setRenderTarget(target);renderer.render(scene,weaponCamera);
+     }finally{
+      renderer.setRenderTarget(null);
+      renderer.autoClear=previousAuto;renderer.setClearColor(clearColor,previousAlpha);
+     }
+     this._encodeLabSource(target,display);
+     this._compositeLab(lab,this._targetState('weapon'),display,{keepAlpha:true,depthTest:false});
+     return true;
     }
     buildArena(arena=MAPS[0]){return withAssets(this.arenaAssets??=new ModelAssets(),()=>this._buildArena(arena));}
     _buildArena(arena=MAPS[0]){this._disposeMothSprites();if(this.worldGroup){this.scene.remove(this.worldGroup);this.disposeObject(this.worldGroup);for(const resource of this.renderResources||[])resource.dispose();this.renderResources?.clear();this.flagAssets=null;}this.sky=null;this.mountains=null;this.objectiveModels=new Map();this._mothRift=null;this._mothRiftSheet=null;this.mapId=arena.id;this.viewAudio?.setSpace?.(mothSpaceFor(arena.id));this.viewAudio?.setEchoMap?.(mothEchoFor(arena.id));const world=new T.Group();this.worldGroup=world;this.scene.add(world);this.scene.background=new T.Color(arena.background);this.scene.fog=new T.FogExp2(arena.background,.018);const bounds=arenaBounds(arena),legacy=!arena.bounds,minX=bounds.minX,maxX=bounds.maxX,minZ=bounds.minZ,maxZ=bounds.maxZ,width=maxX-minX,depth=maxZ-minZ;
@@ -1416,10 +1669,10 @@ export class ArenaView{
  for(let i=-4;i<=4;i++){box(scene,.25,9,.5,i*3,4,-6,dark);box(scene,.045,6,.04,i*3+.18,4,-5.72,glow);}
   const model=robotModel('chatgpt',undefined,this.renderer?.isSoftware===true);model.scale.setScalar(2.15);model.position.y=.17;model.rotation.y=.25;scene.add(model);return {scene,camera,model,id:'chatgpt'};}
   setCharacter(id){if(id===this.menu.id)return;this.disposeObject(this.menu.model);this.menu.scene.remove(this.menu.model);this.menu.model=robotModel(id,undefined,this.renderer?.isSoftware===true);this.menu.model.scale.setScalar(2.15);this.menu.model.position.y=.17;this.menu.scene.add(this.menu.model);this.menu.id=id;}
-      setMatch(match){this.clearFreeMotion();this.characterLifecycle?.clear();const arena=match.arena||MAPS.find(a=>a.id===match.mapId)||MAPS[0];this.clearObjectiveMarkers();if(this.payloadModel){this.scene.remove(this.payloadModel);this.disposeObject(this.payloadModel);this.payloadModel=null;}for(const m of [...this.actorModels.values(),...this.pickupModels,...(this.flagModels||new Map()).values()]){this.scene.remove(m);this.disposeObject(m);}this.flagModels=new Map();if(this.mapId!==arena.id)this.buildArena(arena);const assets=this.modelAssets??=new ModelAssets();this.actorModels=new Map((match.actors||[]).map(a=>{const m=robotModel(a.character,assets,this.renderer?.isSoftware===true);this.scene.add(m);return [a.id,m];}));this.pickupModels=(match.pickups||[]).map(p=>{const g=new T.Group(),colors={health:'#77efba',armor:'#6dbfff',rocket:'#ffb164',rail:'#bf9cff',scatter:'#ffde87',plasma:'#72cfff',grenade:'#ff806b',shock:'#8ce8ff',flak:'#ffd166',marksman:'#ffd27a',smg:'#8affc1',haste:'#72f1b8',overcharge:'#ff8f70',overshield:'#75baff',recon:'#7fe7ff',cloak:'#c8b6ff'},pickupColor=colors[p.kind]||'#8ad9d3',mat=this._mothLutMaterial(this._mothLutTheme(arena),{base:{color:pickupColor,metalness:.4,roughness:.3,emissive:pickupColor},phase:.15,intensity:.4})??material(pickupColor,.4,.3,true);if(p.kind==='health'){box(g,.6,.19,.19,0,.65,0,mat);box(g,.19,.6,.19,0,.65,0,mat);}else if(p.kind==='armor'){const m=new T.Mesh(geometry(assets,'pickup-armor-octa',()=>new T.OctahedronGeometry(.4)),mat);m.position.y=.7;g.add(m);}else if(['haste','overcharge','overshield'].includes(p.kind)){const m=new T.Mesh(geometry(assets,'pickup-power-ico',()=>new T.IcosahedronGeometry(.36,1)),mat);m.position.y=.7;g.add(m);ring(g,.55,.022,0,.07,0,mat);}else{const w=simpleWeaponModel(pickupWeapon(p.kind),assets);w.position.y=.75;w.scale.setScalar(.7);g.add(w);}if(!['haste','overcharge','overshield'].includes(p.kind))ring(g,.55,.022,0,.07,0,mat);g.position.set(p.x||0,p.y||0,p.z||0);this.scene.add(g);return g;});this._trackAssets(assets);this.syncVehicles(match);this.updateFlags(match,arena);this.updateObjectives(match,arena);this.effectPool?.clear();this.telegraphPool?.clear();for(const m of this.zipCarriages?.values()||[]){this.scene.remove(m);this.disposeObject(m);}this.zipCarriages?.clear();this._fovPulse=0;this.projectilePool?.clear();this._clearMothSprites();this.railPool?.clear();this.deathContext?.clear();this.deathPool?.clear();this.decalPool?.clear();this.ambientFx?.reset();this.debrisPool?.clear();this.hitFlinch?.clear();this.hitPool?.clear();this._killcam=null;this.feedback?.reset();this.cameraShake?.reset();this.lowHealth=false;this.flashUntil=0;this.lastEvent=match.serial||0;this.currentWeapon=-1;this._adsTransition=0;this._adsController?.reset(this.display?.fov??82);this._nearActionAt=undefined;this._nearAction=0;this._cocsPresentation=null;this.resetPresentation();
+      setMatch(match){this.clearFreeMotion();this.characterLifecycle?.clear();const arena=match.arena||MAPS.find(a=>a.id===match.mapId)||MAPS[0];this.clearObjectiveMarkers();if(this.payloadModel){this.scene.remove(this.payloadModel);this.disposeObject(this.payloadModel);this.payloadModel=null;}for(const m of [...this.actorModels.values(),...this.pickupModels,...(this.flagModels||new Map()).values()]){this.scene.remove(m);this.disposeObject(m);}this.flagModels=new Map();if(this.mapId!==arena.id)this.buildArena(arena);const assets=this.modelAssets??=new ModelAssets();this.actorModels=new Map((match.actors||[]).map(a=>{const m=robotModel(a.character,assets,this.renderer?.isSoftware===true);this._addActorModel(m);return [a.id,m];}));this.pickupModels=(match.pickups||[]).map(p=>{const g=new T.Group(),colors={health:'#77efba',armor:'#6dbfff',rocket:'#ffb164',rail:'#bf9cff',scatter:'#ffde87',plasma:'#72cfff',grenade:'#ff806b',shock:'#8ce8ff',flak:'#ffd166',marksman:'#ffd27a',smg:'#8affc1',haste:'#72f1b8',overcharge:'#ff8f70',overshield:'#75baff',recon:'#7fe7ff',cloak:'#c8b6ff'},pickupColor=colors[p.kind]||'#8ad9d3',mat=this._mothLutMaterial(this._mothLutTheme(arena),{base:{color:pickupColor,metalness:.4,roughness:.3,emissive:pickupColor},phase:.15,intensity:.4})??material(pickupColor,.4,.3,true);if(p.kind==='health'){box(g,.6,.19,.19,0,.65,0,mat);box(g,.19,.6,.19,0,.65,0,mat);}else if(p.kind==='armor'){const m=new T.Mesh(geometry(assets,'pickup-armor-octa',()=>new T.OctahedronGeometry(.4)),mat);m.position.y=.7;g.add(m);}else if(['haste','overcharge','overshield'].includes(p.kind)){const m=new T.Mesh(geometry(assets,'pickup-power-ico',()=>new T.IcosahedronGeometry(.36,1)),mat);m.position.y=.7;g.add(m);ring(g,.55,.022,0,.07,0,mat);}else{const w=simpleWeaponModel(pickupWeapon(p.kind),assets);w.position.y=.75;w.scale.setScalar(.7);g.add(w);}if(!['haste','overcharge','overshield'].includes(p.kind))ring(g,.55,.022,0,.07,0,mat);g.position.set(p.x||0,p.y||0,p.z||0);this.scene.add(g);return g;});this._trackAssets(assets);this.syncVehicles(match);this.updateFlags(match,arena);this.updateObjectives(match,arena);this.effectPool?.clear();this.telegraphPool?.clear();for(const m of this.zipCarriages?.values()||[]){this.scene.remove(m);this.disposeObject(m);}this.zipCarriages?.clear();this._fovPulse=0;this.projectilePool?.clear();this._clearMothSprites();this.railPool?.clear();this.deathContext?.clear();this.deathPool?.clear();this.decalPool?.clear();this.ambientFx?.reset();this.debrisPool?.clear();this.hitFlinch?.clear();this.hitPool?.clear();this._killcam=null;this.feedback?.reset();this.cameraShake?.reset();this.lowHealth=false;this.flashUntil=0;this.lastEvent=match.serial||0;this.currentWeapon=-1;this._adsTransition=0;this._adsController?.reset(this.display?.fov??82);this._nearActionAt=undefined;this._nearAction=0;this._cocsPresentation=null;this.resetPresentation();
   // Per-mode music theme. The audio object retunes its running drone in place.
   const mode=match.config?.mode??match.mode;if(mode)this.viewAudio?.setModeTheme?.(mode);this._modeTheme=mode??this._modeTheme;}
-      syncActors(match){const actors=match?.actors||[];for(const actor of actors)if(!this.actorModels.has(actor.id)){const model=robotModel(actor.character,this.modelAssets??=new ModelAssets(),this.renderer?.isSoftware===true);applyActorTeam(model,actor.team,this.display?.teamPalette);this.scene.add(model);this.actorModels.set(actor.id,model);}const live=new Set(actors.map(actor=>actor.id));for(const [id,model] of this.actorModels)if(!live.has(id)){this.characterLifecycle?.release(model);this.scene.remove(model);this.disposeObject(model);this.actorModels.delete(id);}}
+      syncActors(match){const actors=match?.actors||[];for(const actor of actors)if(!this.actorModels.has(actor.id)){const model=robotModel(actor.character,this.modelAssets??=new ModelAssets(),this.renderer?.isSoftware===true);applyActorTeam(model,actor.team,this.display?.teamPalette);this._addActorModel(model);this.actorModels.set(actor.id,model);}const live=new Set(actors.map(actor=>actor.id));for(const [id,model] of this.actorModels)if(!live.has(id)){this.characterLifecycle?.release(model);this.scene.remove(model);this.disposeObject(model);this.actorModels.delete(id);}}
       styleActor(model,actor,palette){if(this.characterLifecycle?.ownsTransform(model))return;applyActorTeam(model,actor.team,palette);const profile=actor?.npcProfile;if(!profile)return;const data=model.userData||{};if(data.base?.material?.color)data.base.material.color.set(profile.color);if(data.armor?.color)data.armor.color.set(profile.accent||profile.color);model.scale.setScalar(profile.scale??1);}
       updateWaypoint(match,arena){const waypoint=match?.waypoint;if(!waypoint){if(this.waypointModel){this.scene.remove(this.waypointModel);this.disposeObject(this.waypointModel);this.waypointModel=null;this.waypointId=null;}return;}if(!this.waypointModel||this.waypointId!==waypoint.id){if(this.waypointModel){this.scene.remove(this.waypointModel);this.disposeObject(this.waypointModel);}this.waypointId=waypoint.id;this.waypointModel=this.createObjectiveModel({id:'waypoint',x:waypoint.x,y:waypoint.y??0,z:waypoint.z,radius:waypoint.radius??4,label:waypoint.label},arena);this.scene.add(this.waypointModel);}this.waypointModel.position.set(waypoint.x,waypoint.y??0,waypoint.z);}
    createFlagModel(team,arena){const resources=this.renderResources??=new Set(),color=this.objectiveColor(team,arena);const assets=this.flagAssets??={},poleGeo=assets.pole??=new T.CylinderGeometry(.035,.05,1.8,8),bannerGeo=assets.banner??=new T.BoxGeometry(.52,.32,.035),baseGeo=assets.base??=new T.CylinderGeometry(.34,.42,.08,16),mat=this._mothLutMaterial('entanglement',{base:{color,metalness:.35,roughness:.3,emissive:color},phase:.3,intensity:.5})??material(color,.35,.3,true);resources.add(poleGeo);resources.add(bannerGeo);resources.add(baseGeo);const g=new T.Group();const pole=new T.Mesh(poleGeo,mat);pole.position.y=.9;g.add(pole);const banner=new T.Mesh(bannerGeo,mat);banner.position.set(.24,1.55,0);g.add(banner);for(const z of [-.025,.025]){const mark=teamMark();mark.position.set(.24,1.55,z);updateTeamMark(mark,team);g.add(mark);}const base=new T.Mesh(baseGeo,mat);base.position.y=.04;g.add(base);g.userData={team,teamLabel:teamPresentation(team,this.display?.teamPalette)?.label??null,flag:true,banner,material:mat};return g;}
@@ -1567,7 +1820,7 @@ export class ArenaView{
        const mat=new T.MeshBasicMaterial({color:'#ffd166',transparent:true,opacity:.95,depthTest:false,depthWrite:false});
        const ring=new T.Mesh(new T.TorusGeometry(.42,.045,6,28),mat);ring.rotation.x=Math.PI/2;ring.position.y=1.35;group.add(ring);
        const chevron=new T.Mesh(new T.ConeGeometry(.16,.3,4),mat);chevron.rotation.x=Math.PI;chevron.position.y=1.72;group.add(chevron);
-       group.traverse(node=>{node.userData.objective=true;node.userData.noCameraOcclusion=true;node.renderOrder=90;});
+       group.traverse(node=>{node.layers.set(BOT_LAYER);node.userData.objective=true;node.userData.noCameraOcclusion=true;node.renderOrder=90;});
        group.visible=false;model.add(group);model.userData.spotMark=group;return group;
       }
       updateSpots(match){
@@ -2343,15 +2596,33 @@ if(freeCam){this.lowHealthOverlay?.update(false,time,delta,reduced,this.camera);
     if(!cinematic&&!freeCam&&!this._killcam&&follow==null){this.camera.fov=ads.fov+(reduced?0:(this._fovPulse||0)*6);this.camera.updateProjectionMatrix();}
 
     this._animateWeaponParts(this.firstPerson,player,reduced);
-    this.firstPerson.userData.flash.visible=!reduced&&this.hands.visible&&this.flashUntil>performance.now();this.muzzleLights?.update(Math.max(0,delta));if(this.renderer.shadowMap?.autoUpdate===false){const hz=Number(this._quality().shadowHz)||30;if(shadowDue(time,this._shadowAt,hz)){this._shadowAt=time;this.renderer.shadowMap.needsUpdate=true;}}this.updateSky();this._updateWind(time,reduced);this._updateAmbient(match,delta,time,reduced);const spMode=match.config?.mode==='campaign'||match.config?.mode==='horde';if(spMode)this.setWeather(match.weather??null);else if(!cinematic&&this._weatherOverride!==null)this.setWeather(null);this._updateWeather(arena,delta,mode);this._updateWeatherFx(delta,reduced,this._quality());const software=this.renderer?.isSoftware===true;this._updateLightning(delta,reduced,software);this._applyWetSheen(this._weatherState());this.hitPool?.update(Math.max(0,delta));this._updateHitReactions();this._alignLivingCharacters(match);this._updateDebris(delta);this._updateAudio(match,time);this._beginGpu();if(this.composer)this.composer.render();else this.renderer.render(this.scene,this.camera);
+    this.firstPerson.userData.flash.visible=!reduced&&this.hands.visible&&this.flashUntil>performance.now();this.muzzleLights?.update(Math.max(0,delta));if(this.renderer.shadowMap?.autoUpdate===false){const hz=Number(this._quality().shadowHz)||30;if(shadowDue(time,this._shadowAt,hz)){this._shadowAt=time;this.renderer.shadowMap.needsUpdate=true;}}this.updateSky();this._updateWind(time,reduced);this._updateAmbient(match,delta,time,reduced);const spMode=match.config?.mode==='campaign'||match.config?.mode==='horde';if(spMode)this.setWeather(match.weather??null);else if(!cinematic&&this._weatherOverride!==null)this.setWeather(null);this._updateWeather(arena,delta,mode);this._updateWeatherFx(delta,reduced,this._quality());const software=this.renderer?.isSoftware===true;this._updateLightning(delta,reduced,software);this._applyWetSheen(this._weatherState());this.hitPool?.update(Math.max(0,delta));this._updateHitReactions();this._alignLivingCharacters(match);this._updateDebris(delta);this._updateAudio(match,time);this._beginGpu();
+    // Per-target stacks: when bots are styled, the world composer renders
+    // through a camera that excludes the actor layer and the scene depth is
+    // preserved (autoClear off + depth-writing passes disabled) so the bot
+    // composite can reject pixels behind world geometry. Without a composer,
+    // bots and weapons keep the direct path exactly as before.
+    const labTargets=this.graphicsLab?.targets,botWanted=this._targetActive(labTargets?.bots)&&(this.actorModels?.size??0)>0,weaponWanted=this._targetActive(labTargets?.weapon);
+    if(botWanted||weaponWanted)this._syncLabTargets();
+    const botsStyled=botWanted&&!!(this._botLab&&this._botTarget&&this._labDisplayTarget),weaponStyled=weaponWanted&&!!(this._weaponLab&&this._weaponTarget&&this._labDisplayTarget);
+    if(this.composer){
+     const worldTarget=botsStyled?this.composer.readBuffer:null;
+     this._syncWorldCamera(botsStyled);
+     if(botsStyled)this._refreshBotShadowCasters();
+     if(botsStyled){const previousAuto=this.renderer.autoClear;this.renderer.autoClear=false;try{this.composer.render();}finally{this.renderer.autoClear=previousAuto;}}
+     else this.composer.render();
+     if(botsStyled)this._renderBotLayer(worldTarget);
+    }else this.renderer.render(this.scene,this.camera);
   // Isolated first-person pass: mirror the active camera onto a dedicated
   // weapon camera, clear the world depth, then draw the gun with normal depth
   // testing between its parts. The CPU fallback renders in the main camera.
+  // A styled weapon target routes the same scene through its own offscreen
+  // target and a transparent lab composite instead.
   if(this.weaponScene&&this.weaponCamera&&this.hands.visible){
    this._markWeaponSubmitStart();
    const wc=this.weaponCamera;wc.position.copy(this.camera.position);wc.quaternion.copy(this.camera.quaternion);wc.fov=this.weaponFov??this.camera.fov;wc.aspect=this.camera.aspect;wc.updateProjectionMatrix();wc.updateMatrixWorld(true);
    this.weaponRoot.position.copy(wc.position);this.weaponRoot.quaternion.copy(wc.quaternion);this.weaponRoot.updateMatrixWorld(true);
-   const prevAuto=this.renderer.autoClear;this.renderer.autoClear=false;this.renderer.clearDepth?.();this.renderer.render(this.weaponScene,wc);this.renderer.autoClear=prevAuto;
+   if(!weaponStyled||!this._renderWeaponLayer(wc)){const prevAuto=this.renderer.autoClear;this.renderer.autoClear=false;this.renderer.clearDepth?.();this.renderer.render(this.weaponScene,wc);this.renderer.autoClear=prevAuto;}
   }
   // Full-frame GPU query covers world, post and the weapon pass.
   this._endGpu();
@@ -2454,5 +2725,5 @@ if(freeCam){this.lowHealthOverlay?.update(false,time,delta,reduced,this.camera);
       }
       updateRace(match,time){syncRacePresentation(this,match,time);}
      _renderPreview(time,reduced){const rect=this.previewRect;if(!rect||rect.width<12||rect.height<12||!(this.renderer instanceof T.WebGLRenderer))return;const m=this.menu.model;m.rotation.y=Math.PI+.25+(reduced?0:Math.sin(time*.4)*.22);m.position.y=.17;const cam=this.menu.camera;cam.aspect=Math.max(.2,rect.width/rect.height);cam.updateProjectionMatrix();this._renderSceneInto(this.renderer,rect,this.menu.scene,cam);}
-          dispose(){this.characterLifecycle?.clear();this.clearObjectiveMarkers();this.effectPool?.dispose();this.telegraphPool?.dispose();this.projectilePool?.dispose();this.railPool?.dispose();this.deathPool?.dispose();this.decalPool?.dispose();this.debrisPool?.dispose();this.debrisPool=null;this.hitPool?.dispose();this.hitPool=null;this.hitFlinch?.clear();this.ambientPool?.dispose();this.weatherPool?.dispose();this.ambientFx=null;this.weatherFx=null;this._killcam=null;this.preview?.dispose();this.preview=null;this.previewAssets?.dispose?.();this.previewAssets=null;disposeComposer(this.composer);this.composer=null;this.muzzleLights?.dispose();this.lowHealthOverlay?.dispose();this._disposeMothSprites();this.zipCarriages?.clear();this.disposeObject(this.scene);if(this.weaponScene)this.disposeObject(this.weaponScene);this.disposeObject(this.menu.scene);this.environmentRT?.dispose?.();for(const resource of this.renderResources||[])resource.dispose();this.renderResources?.clear();for(const resource of this.sharedResources||[])resource.dispose();this.sharedResources?.clear();this.modelAssets?.materials.clear();this.modelAssets?.geometries.clear();this.modelAssets?.resources.clear();this.arenaAssets?.materials.clear();this.arenaAssets?.geometries.clear();this.arenaAssets?.resources.clear();clearSurfaceTextures();for(const model of this._weaponCache?.values?.()||[])this.disposeObject(model);this._weaponCache?.clear();this._freeCam=false;this._directorLock=false;this.manualFollowId=null;this._cameraOwner='auto';this._freeExit=null;this.clearFreeMotion();this.resetFreeCam();this.renderer.dispose();}
+          dispose(){this.characterLifecycle?.clear();this.clearObjectiveMarkers();this.effectPool?.dispose();this.telegraphPool?.dispose();this.projectilePool?.dispose();this.railPool?.dispose();this.deathPool?.dispose();this.decalPool?.dispose();this.debrisPool?.dispose();this.debrisPool=null;this.hitPool?.dispose();this.hitPool=null;this.hitFlinch?.clear();this.ambientPool?.dispose();this.weatherPool?.dispose();this.ambientFx=null;this.weatherFx=null;this._killcam=null;this.preview?.dispose();this.preview=null;this.previewAssets?.dispose?.();this.previewAssets=null;disposeComposer(this.composer);this.composer=null;this._disposeLabTargets();this.muzzleLights?.dispose();this.lowHealthOverlay?.dispose();this._disposeMothSprites();this.zipCarriages?.clear();this.disposeObject(this.scene);if(this.weaponScene)this.disposeObject(this.weaponScene);this.disposeObject(this.menu.scene);this.environmentRT?.dispose?.();for(const resource of this.renderResources||[])resource.dispose();this.renderResources?.clear();for(const resource of this.sharedResources||[])resource.dispose();this.sharedResources?.clear();this.modelAssets?.materials.clear();this.modelAssets?.geometries.clear();this.modelAssets?.resources.clear();this.arenaAssets?.materials.clear();this.arenaAssets?.geometries.clear();this.arenaAssets?.resources.clear();clearSurfaceTextures();for(const model of this._weaponCache?.values?.()||[])this.disposeObject(model);this._weaponCache?.clear();this._freeCam=false;this._directorLock=false;this.manualFollowId=null;this._cameraOwner='auto';this._freeExit=null;this.clearFreeMotion();this.resetFreeCam();this.renderer.dispose();}
 }

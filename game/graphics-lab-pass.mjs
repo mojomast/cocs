@@ -8,9 +8,11 @@ import {mothEffect,mothMaterialLut,mothSurfaceOverride} from './moth-assets.mjs'
 // toggle. CSS-pixel patterns remain stable across DPR/dynamic-resolution changes.
 const fragmentShader=/* glsl */`
 uniform sampler2D tDiffuse;
+uniform sampler2D tWorldDepth, tBotDepth;
 uniform vec2 resolution;
 uniform vec3 inkColor, midColor, paperColor;
 uniform float mixAmount, splitAt, splitEnabled;
+uniform float depthTest, depthCompare, keepAlpha;
 uniform float pixel, hex, glitch, chroma, glow, vignette, contrast, saturate, temperature, sharpen, solarize, toon, duotone, halftone, hatch, ink, neon, dither, crt, grain, mothgrain, mothsignal, mothcoat;
 uniform sampler2D mothgrainMap, mothsignalMap, mothcoatRamp;
 uniform float mothgrainMean;
@@ -22,7 +24,15 @@ float bayer2(vec2 p){p=mod(floor(p),2.);return 2.*p.x+3.*p.y-4.*p.x*p.y;}
 float bayer4(vec2 p){return (4.*bayer2(p)+bayer2(floor(p/2.))+.5)/16.-.5;}
 float linePattern(float p){float d=abs(fract(p)-.5);float a=max(fwidth(p),.025);return 1.-smoothstep(.10,.10+a,d);}
 void main(){
-  vec3 original=sampleAt(vUv);
+  vec4 source=texture2D(tDiffuse,vUv);
+  // Target layers opt into keeping the source alpha and rejecting fragments the
+  // world already covers. The alpha cut always applies; the depth compare runs
+  // only when configure() saw both depth textures (depthCompare).
+  if(depthTest>.5){
+    if(source.a<.004)discard;
+    if(depthCompare>.5&&texture2D(tBotDepth,vUv).r>texture2D(tWorldDepth,vUv).r+.0008)discard;
+  }
+  vec3 original=source.rgb;
   vec2 pos=vUv*resolution;
   vec2 uv=vUv;
   if(pixel>0.)uv=(floor(pos/pixel)+.5)*pixel/resolution;
@@ -148,14 +158,16 @@ void main(){
     if(vUv.x<splitAt)c=original;
     if(abs(pos.x-resolution.x*splitAt)<1.)c=vec3(.45,1.,.82);
   }
-  gl_FragColor=vec4(c,1.);
+  gl_FragColor=vec4(c,keepAlpha>.5?source.a:1.);
 }`;
 
 export class GraphicsLabPass extends ShaderPass {
   constructor(){
     super({
       name:'GraphicsLab',
-      uniforms:{tDiffuse:{value:null},resolution:{value:new Vector2(1,1)},mixAmount:{value:1},splitAt:{value:.5},splitEnabled:{value:0},
+      uniforms:{tDiffuse:{value:null},tWorldDepth:{value:null},tBotDepth:{value:null},
+        resolution:{value:new Vector2(1,1)},mixAmount:{value:1},splitAt:{value:.5},splitEnabled:{value:0},
+        depthTest:{value:0},depthCompare:{value:0},keepAlpha:{value:0},
         inkColor:{value:new Vector3()},midColor:{value:new Vector3()},paperColor:{value:new Vector3()},
         mothgrainMap:{value:null},mothsignalMap:{value:null},mothcoatRamp:{value:null},
         mothgrainMean:{value:.5},mothcoatMean:{value:new Vector3()},
@@ -166,14 +178,34 @@ export class GraphicsLabPass extends ShaderPass {
     this.name='graphics-lab';
     this.material.toneMapped=false;
   }
-  configure(state,width,height){
-    this.enabled=graphicsLabActive(state);
+  // One fused program serves the world, the weapon and the bots: the caller
+  // passes the stack state plus per-layer options, never a new shader.
+  // `state` is a full lab state or a single target stack (its own mix/palette/
+  // effects). `options.active` overrides the world `graphicsLabActive` rule,
+  // `options.keepAlpha` preserves the source alpha, and `options.depthTest`
+  // rejects empty fragments and (when both textures exist) fragments the world
+  // covers behind it. `options.worldDepth`/`options.botDepth` are textures.
+  /**
+   * @param {object} state
+   * @param {number} width
+   * @param {number} height
+   * @param {{active?:boolean,keepAlpha?:boolean,depthTest?:boolean,worldDepth?:object|null,botDepth?:object|null}} [options]
+   */
+  configure(state,width,height,options={}){
+    this.enabled=options.active===undefined?graphicsLabActive(state):options.active===true;
     const u=this.uniforms;
     u.resolution.value.set(Math.max(1,width),Math.max(1,height));
-    u.mixAmount.value=state.mix;u.splitEnabled.value=state.split?1:0;u.splitAt.value=state.splitAt;
+    u.mixAmount.value=Number.isFinite(state?.mix)?state.mix:1;
+    u.splitEnabled.value=state?.split===true?1:0;
+    u.splitAt.value=Number.isFinite(state?.splitAt)?state.splitAt:.5;
+    u.keepAlpha.value=options.keepAlpha===true?1:0;
+    const depthTest=options.depthTest===true,worldDepth=options.worldDepth??null,botDepth=options.botDepth??null;
+    u.depthTest.value=depthTest?1:0;
+    u.depthCompare.value=depthTest&&worldDepth&&botDepth?1:0;
+    u.tWorldDepth.value=worldDepth;u.tBotDepth.value=botDepth;
     for(const e of GRAPHICS_EFFECTS){
-      const setting=state.effects[e.id];
-      let value=setting.enabled?setting.value:0;
+      const setting=state?.effects?.[e.id];
+      let value=setting?.enabled===true&&Number.isFinite(setting.value)?setting.value:0;
       // A Moth accent with no baked asset is a silent no-op: force just that
       // layer to zero instead of sampling an unbound texture, and let every
       // other layer keep running. The option is always a catalogue id by the
@@ -186,7 +218,7 @@ export class GraphicsLabPass extends ShaderPass {
       u[e.id].value=value;
     }
     // Palette constants are display-space values, not three.Color's linear RGB.
-    const colors=GRAPHICS_PALETTES.find(p=>p.id===state.palette).colors;
+    const colors=(GRAPHICS_PALETTES.find(p=>p.id===state?.palette)??GRAPHICS_PALETTES[0]).colors;
     ['inkColor','midColor','paperColor'].forEach((key,i)=>{
       const hex=Number.parseInt(colors[i].slice(1),16);
       u[key].value.set(((hex>>16)&255)/255,((hex>>8)&255)/255,(hex&255)/255);

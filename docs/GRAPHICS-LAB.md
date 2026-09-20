@@ -31,6 +31,23 @@ Both keys are ignored while a text field, chat or the command board owns input.
 | Blueprint | Navy drafting field, steel ink contours, white margin falloff |
 | Thermal | Infrared recon: hot edges, solarized highlights, video gain |
 | Moth Print | Baked Moth grain, signal glyphs and an iridescent spectral coat |
+| Pocket Ink | Your saved pocket-palette roll: mint pixels, ink contours, faint coat |
+| Ghost Rivals | Ghost-signal world with a separate neon stack for the bots |
+| Blueprint | Navy drafting field, steel ink contours, white margin falloff |
+| Thermal | Infrared recon: hot edges, solarized highlights, video gain |
+| Moth Print | Baked Moth grain, signal glyphs and an iridescent spectral coat |
+
+- **Targets:** the same drawer has a WORLD / WEAPON / BOTS selector. Each target
+  has its own master switch, mix, palette and layer stack. Out of the box the
+  weapon stays crisp and bots take the world styling exactly as before; enable a
+  target to give it its own look. Bots are rendered in their own pass and
+  depth-tested against the world, so they never draw through walls, and the
+  weapon is styled in its own transparent pass. Per-target stacks persist and
+  travel in copied/exported recipes (`targets.weapon`, `targets.bots`).
+- **Your roll (`Pocket Ink`):** the exact saved mix (`pixel 3`, `vignette .5`,
+  `contrast 1.2`, `saturate 2`, `duotone .15`, `ink .9`, `mothcoat 1` on the
+  `entanglement` LUT, pocket palette, `0.735…` overall mix) ships as a starting
+  recipe. `Ghost Rivals` demonstrates a bot stack.
 
 Loading a recipe replaces the current mix. After that, every layer is
 independently switchable. The catalogue has 23 layers:
@@ -71,15 +88,19 @@ unavailable, the drawer says that the mix lasts only for the current visit.
 
 ## Render contract
 
-The existing EffectComposer owns the pipeline. The lab is one fused GLSL
+The existing EffectComposer owns the world pipeline. The lab is one fused GLSL
 ShaderPass after OutputPass and FXAA, operating on display-space RGB. Effect
 switches and sliders change uniforms; switching individual layers does not
-compile extra shaders or render the scene more than once. Ink and neon share
-their Sobel samples. Light bleed uses eight short-radius bright-neighbor reads;
-it is a compact local glow rather than a replacement for multiscale bloom.
-Sharpen and prism split add four and two reads. The three Moth-asset layers
-read up to three small baked textures that are created once, cached for the
-page, and never re-uploaded.
+compile extra shaders or render the scene more than once per target. Ink and
+neon share their Sobel samples. Light bleed uses eight short-radius
+bright-neighbor reads; it is a compact local glow rather than a replacement for
+multiscale bloom. Sharpen and prism split add four and two reads. The three
+Moth-asset layers read up to three small baked textures that are created once,
+cached for the page, and never re-uploaded.
+
+Enabling the WEAPON or BOTS target adds exactly one offscreen render and one
+styling pass for that layer (plus a depth attachment for bots so walls occlude
+them) — nothing runs while a target is off, and the world pipeline is unchanged.
 
 The lab styles the world, including the menu's arena showcase. DOM HUD text,
 reticle, and the isolated first-person weapon remain crisp; the standalone

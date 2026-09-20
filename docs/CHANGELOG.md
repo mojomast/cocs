@@ -26,7 +26,16 @@ paid Moth material pack and the offline variety pipeline behind it.
   bands, palette remap, print dots, crosshatch, ink and neon contours, ordered
   dither, phosphor screen, paper grain, and three baked-Moth-asset layers (grain,
   signal glyphs, spectral coat) with an asset picker each.
-- Nine editable starting recipes, including Blueprint, Thermal, and Moth Print.
+- Nine editable starting recipes, including Blueprint, Thermal, Moth Print,
+  Pocket Ink (a saved player roll) and Ghost Rivals.
+- Per-target stacks: WORLD / WEAPON / BOTS each get their own master, mix,
+  palette and layers. The weapon stays crisp and bots follow the world stack
+  until enabled; bots render in a depth-tested pass so walls occlude them.
+- Graphics-edge research pass: a static dither removes 8-bit gradient banding, a
+  contrast-adaptive sharpen recovers FXAA-softened detail, and environment
+  reflections scale with the quality tier. Active with post-processing or the
+  graphics lab; the direct-render path is unchanged.
+- [Graphics edge research and plan](design/GRAPHICS-EDGE-PLAN.md).
 - Global hotkeys on the backquote key: tap to toggle the lab from anywhere, add
   Shift to open the drawer. SURPRISE ME rolls a valid random mix; COPY RECIPE
   copies the exact JSON and PASTE A RECIPE JSON applies one back for tuning.

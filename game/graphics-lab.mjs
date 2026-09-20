@@ -4,6 +4,11 @@ export const GRAPHICS_LAB_VERSION = 1;
 // Physical codes, not printed keys, so the shortcut survives layout changes.
 export const GRAPHICS_LAB_HOTKEY = 'Backquote';
 export const GRAPHICS_LAB_HOTKEY_LABEL = '`';
+// Styling targets a graphics-lab state can stack independently. `world` keeps
+// the original top-level fields; `weapon` and `bots` live under `targets`.
+/** @typedef {'world'|'weapon'|'bots'} GraphicsLabTargetId */
+/** @type {readonly GraphicsLabTargetId[]} */
+export const GRAPHICS_LAB_TARGETS = Object.freeze(['world','weapon','bots']);
 // A baked asset a layer can choose at runtime. `asset` is the registry key read
 // through moth-assets.mjs; `kind` picks the resolver in the fused pass.
 const assetOption=(id,label,kind,asset=id)=>Object.freeze({id,label,asset,kind});
@@ -65,33 +70,90 @@ export const GRAPHICS_RECIPES = Object.freeze([
   {id:'blueprint', name:'Blueprint', palette:'blueprint', description:'A drafting-table technical readout: navy field, steel lines, white annotations.', effects:{duotone:1,ink:1,sharpen:.8,vignette:.5,grain:.06}},
   {id:'thermal', name:'Thermal', palette:'infrared', description:'A thermal recon image: hot edges, cold shadows, video gain.', effects:{duotone:.9,glow:1.1,solarize:.7,saturate:1.3,temperature:.3,grain:.12}},
   {id:'moth-print', name:'Moth Print', palette:'electric', description:'A pressed quantum plate: baked Moth grain, signal glyphs, and a spectral highlight coat over electric ink.', effects:{duotone:.85,vignette:.45,mothgrain:.2,mothsignal:.5,mothcoat:.6}},
-].map(p=>Object.freeze({...p,effects:Object.freeze(p.effects)})));
+  {id:'pocket-ink', name:'Pocket Ink', palette:'pocket', description:'Your saved roll: chunky mint pixels, ink contours and a faint coat at a 3/4 mix.', mix:0.7353712838244059, effects:{pixel:3,vignette:.5,contrast:1.2,saturate:2,temperature:0,duotone:.15,ink:.9,mothcoat:{value:1,option:'entanglement'}}},
+  {id:'ghost-rivals', name:'Ghost Rivals', palette:'electric', description:'Ghost-signal world, neon rivals, crisp weapon: a demo of per-target stacks.', effects:{duotone:.85,crt:.5,chroma:2,grain:.1}, targets:{bots:{enabled:true,palette:'ember',effects:{neon:1.1,glow:.7,chroma:1.2}}}},
+].map(p=>Object.freeze({...p,effects:Object.freeze(p.effects),...(p.targets?{targets:Object.freeze(p.targets)}:{})})));
 
 const clamp=(v,min,max,fallback)=>typeof v==='number'&&Number.isFinite(v)?Math.min(max,Math.max(min,v)):fallback;
+const isRecord=value=>value!==null&&typeof value==='object'&&!Array.isArray(value);
+const validPalette=id=>GRAPHICS_PALETTES.some(p=>p.id===id)?id:'circuit';
+// One catalogue-shaped effect table; unknown ids are dropped and every slider
+// is clamped. Optioned layers keep a valid catalogue id, falling back to the
+// entry's default asset for older saves and unknown ids.
+function normalizeGraphicsEffects(raw){
+  const s=isRecord(raw)?raw:{};
+  return Object.fromEntries(GRAPHICS_EFFECTS.map(e=>{
+    const setting=s[e.id];
+    return [e.id,{
+      enabled:setting?.enabled===true,
+      value:clamp(setting?.value,e.min,e.max,e.value),
+      ...(e.options?.length?{option:e.options.some(o=>o.id===setting?.option)?setting.option:e.options[0].id}:{}),
+    }];
+  }));
+}
+// A per-target stack carries everything the world has except bypass/split: its
+// own master, mix, palette and effect table. Always returns a fresh object.
+export function normalizeGraphicsLabTarget(input){
+  const s=isRecord(input)?input:{};
+  return {
+    enabled:s.enabled===true,
+    mix:clamp(s.mix,0,1,1),
+    palette:validPalette(s.palette),
+    effects:normalizeGraphicsEffects(s.effects),
+  };
+}
 export function normalizeGraphicsLab(input={}) {
-  const s=input&&typeof input==='object'&&input.version===GRAPHICS_LAB_VERSION?input:{};
+  const s=isRecord(input)&&input.version===GRAPHICS_LAB_VERSION?input:{};
   return {
     version:GRAPHICS_LAB_VERSION, enabled:s.enabled===true, bypass:s.bypass===true,
     mix:clamp(s.mix,0,1,1), split:s.split===true, splitAt:clamp(s.splitAt,.1,.9,.5),
-    palette:GRAPHICS_PALETTES.some(p=>p.id===s.palette)?s.palette:'circuit',
-    effects:Object.fromEntries(GRAPHICS_EFFECTS.map(e=>{
-      const raw=s.effects?.[e.id];
-      return [e.id,{
-        enabled:raw?.enabled===true,
-        value:clamp(raw?.value,e.min,e.max,e.value),
-        // Optioned layers keep a valid catalogue id; older saves without one,
-        // and unknown ids, fall back to the entry's default asset.
-        ...(e.options?.length?{option:e.options.some(o=>o.id===raw?.option)?raw.option:e.options[0].id}:{}),
-      }];
-    })),
+    palette:validPalette(s.palette),
+    effects:normalizeGraphicsEffects(s.effects),
+    // v1 saves without targets hydrate to two all-off stacks; injected target
+    // keys are dropped exactly like injected effect ids.
+    targets:{
+      weapon:normalizeGraphicsLabTarget(s.targets?.weapon),
+      bots:normalizeGraphicsLabTarget(s.targets?.bots),
+    },
   };
+}
+// True when a target would contribute any styling: master on, mix above zero
+// and at least one layer enabled. Pure and tolerant of malformed input.
+export function graphicsLabTargetActive(target){
+  return target?.enabled===true&&target.mix>0&&GRAPHICS_EFFECTS.some(e=>target.effects?.[e.id]?.enabled===true);
+}
+// Recipe effect entries are either the original numeric shorthand or an object
+// with an explicit option; both enable the layer.
+function applyRecipeEffects(settings,raw){
+  if(!isRecord(raw))return;
+  for(const [id,entry] of Object.entries(raw)){
+    if(!settings[id])continue;
+    if(typeof entry==='number'){settings[id]={...settings[id],enabled:true,value:entry};continue;}
+    if(!isRecord(entry))continue;
+    settings[id]={
+      ...settings[id],
+      enabled:entry.enabled!==false,
+      ...(entry.value!==undefined?{value:entry.value}:{}),
+      ...(entry.option!==undefined?{option:entry.option}:{}),
+    };
+  }
 }
 export function graphicsRecipe(id) {
   const recipe=GRAPHICS_RECIPES.find(p=>p.id===id);
   const state=normalizeGraphicsLab();
   if(!recipe)return state;
   state.enabled=true;state.palette=recipe.palette;
-  for(const [id,value] of Object.entries(recipe.effects))state.effects[id]={...state.effects[id],enabled:true,value};
+  if(typeof recipe.mix==='number')state.mix=recipe.mix;
+  applyRecipeEffects(state.effects,recipe.effects);
+  if(isRecord(recipe.targets)){
+    for(const targetId of ['weapon','bots']){
+      const partial=recipe.targets[targetId];
+      if(!isRecord(partial))continue;
+      const effects={...state.targets[targetId].effects};
+      applyRecipeEffects(effects,partial.effects);
+      state.targets[targetId]=normalizeGraphicsLabTarget({...state.targets[targetId],...partial,effects});
+    }
+  }
   return state;
 }
 export function graphicsLabActive(state) {
@@ -143,6 +205,9 @@ export function randomGraphicsLab(random=Math.random) {
     }
     rollOptions(built.effects);
     built.mix=.75+roll()*.25;
+    // Rolls stay world-only so a surprise never silently styles the weapon or
+    // the bots; target stacks are opt-in through the drawer's target controls.
+    built.targets=normalizeGraphicsLab().targets;
     return normalizeGraphicsLab(built);
   }
   state.palette=GRAPHICS_PALETTES[Math.floor(roll()*GRAPHICS_PALETTES.length)].id;
