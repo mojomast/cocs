@@ -222,8 +222,108 @@ function hornetModel(software=false){const g=new T.Group();g.name='hornet';const
  g.traverse(n=>{if(n.isMesh){n.castShadow=true;n.receiveShadow=true;}});
  if(software)addBlobShadow(g,2.3,.32);
  g.userData={kind:'hornet',vehicle:true,wheels:[],turret:null,barrels:engines,guns,flashUntil:0,color:'#5c6b7a'};return g;}
+// Dedicated six-seat APC. Broad bevels and inset panels survive posterization,
+// outlines and bloom without relying on noisy textures or tiny emissive trim.
+function transportModel(software=false){
+ const g=new T.Group();g.name='transport-apc';
+ const armor=material('#657767',.38,.65),edge=material('#a8b49b',.42,.52),dark=material('#26332f',.5,.62),rubber=material('#141b1c',.03,.94),steel=material('#829296',.75,.38),glass=material('#183b49',.55,.24),mark=material('#d4bb76',.22,.65),lamp=material('#ffe1a1',.2,.4,true),red=material('#bd4636',.2,.48,true);
+ // Extruded rounded rectangles give genuine multi-segment edge highlights.
+ const plate=(parent,w,h,d,x,y,z,mat,b=.06)=>{
+  b=Math.min(b,w*.2,h*.2,d*.2);
+  const geo=geometry(undefined,`apc-bevel|${w}|${h}|${d}|${b}`,()=>{
+   const s=new T.Shape(),a=w/2-b,c=h/2-b,r=Math.min(.1,a*.3,c*.3);
+   s.moveTo(-a+r,-c);s.lineTo(a-r,-c);s.quadraticCurveTo(a,-c,a,-c+r);s.lineTo(a,c-r);s.quadraticCurveTo(a,c,a-r,c);s.lineTo(-a+r,c);s.quadraticCurveTo(-a,c,-a,c-r);s.lineTo(-a,-c+r);s.quadraticCurveTo(-a,-c,-a+r,-c);
+   const geo=new T.ExtrudeGeometry(s,{depth:d-2*b,steps:1,bevelEnabled:true,bevelSegments:3,bevelSize:b,bevelThickness:b,curveSegments:6});geo.translate(0,0,-d/2+b);return geo;
+  });
+  const m=new T.Mesh(geo,mat);m.position.set(x,y,z);parent.add(m);return m;
+ };
+ plate(g,2.04,.35,5.65,0,.58,0,dark,.1);
+ plate(g,2.32,.76,5.8,0,1.04,0,armor,.14);
+ plate(g,2.06,.88,4.48,0,1.62,-.52,armor,.14);
+ const nose=plate(g,2.18,.24,1.18,0,1.43,2.24,edge,.07);nose.rotation.x=.23;
+ plate(g,1.96,.13,4.36,0,2.09,-.52,edge,.045);
+ // Armored cab glazing: dark gaskets, thick center mullion, raised brows.
+ for(const side of [-1,1]){
+  const frame=plate(g,.86,.43,.12,side*.5,1.8,1.74,dark,.035);frame.rotation.x=.13;
+  const pane=plate(g,.72,.29,.045,side*.5,1.81,1.815,glass,.012);pane.rotation.x=.13;
+  plate(g,.92,.085,.2,side*.5,2.04,1.76,armor,.025);
+  plate(g,.13,.32,.65,side*1.05,1.79,1.17,dark,.025);
+  plate(g,.035,.22,.49,side*1.125,1.79,1.17,glass,.01);
+  // Three spaced armor sections define the protected passenger volume.
+  for(const z of [-2.12,-.94,.24]){
+   plate(g,.15,.63,.98,side*1.07,1.64,z,dark,.035);
+   plate(g,.13,.51,.87,side*1.16,1.64,z,edge,.035);
+   plate(g,.04,.115,.42,side*1.235,1.76,z,dark,.01);
+   for(const dz of [-.32,.32]){const bolt=cylinder(g,.035,.035,.035,side*1.25,1.48,z+dz,steel,12);bolt.rotation.z=Math.PI/2;}
+  }
+  plate(g,.16,.17,5.45,side*1.18,1.18,0,armor,.035);
+  plate(g,.24,.14,1.14,side*1.17,.7,-2.16,dark,.035);
+  // Front light recesses and short protective brush bars.
+  plate(g,.49,.24,.12,side*.8,1.14,2.93,dark,.035);
+  for(const dx of [-.12,.12]){const l=cylinder(g,.073,.073,.045,side*.8+dx,1.15,3.005,lamp,24);l.rotation.x=Math.PI/2;}
+  tube(g,side*1.02,.82,3.04,side*1.02,1.31,3.04,.04,steel,12);
+  plate(g,.17,.25,.09,side*.98,1.15,-2.96,red,.02);
+  plate(g,.055,.19,.55,side*1.25,1.33,1.65,mark,.012);
+ }
+ plate(g,2.28,.22,.22,0,.8,2.97,dark,.06);
+ plate(g,1.14,.3,.08,0,1.09,2.944,dark,.02);
+ for(let i=0;i<7;i++)box(g,.085,.22,.035,(i-3)*.145,1.09,2.996,steel);
+ // Rear boarding ramp, hydraulic hinges, non-slip steps and grab rails.
+ plate(g,1.68,1.16,.12,0,1.44,-2.86,dark,.04);
+ plate(g,1.48,1.02,.12,0,1.44,-2.95,armor,.05);
+ for(const y of [1.04,1.27,1.5,1.73])plate(g,1.28,.055,.045,0,y,-3.025,edge,.012);
+ for(const x of [-.62,.62]){cylinder(g,.075,.075,.29,x,.86,-2.98,steel,24).rotation.z=Math.PI/2;tube(g,x,1.64,-3.04,x,1.93,-3.04,.028,steel,12);}
+ plate(g,1.78,.11,.27,0,.68,-2.94,dark,.03);
+ // Six high-resolution tires; tread blocks and hubs rotate with existing wheel rig.
+ const wheels=[];
+ for(const side of [-1,1])for(const z of [-2.14,0,2.14]){
+  const wheel=new T.Group();wheel.position.set(side*1.09,.56,z);g.add(wheel);wheels.push(wheel);
+  const tireGeo=geometry(undefined,'apc-tire',()=>new T.TorusGeometry(.405,.145,12,48));
+  const tire=new T.Mesh(tireGeo,rubber);tire.rotation.y=Math.PI/2;wheel.add(tire);
+  cylinder(wheel,.33,.33,.29,0,0,0,rubber,48).rotation.z=Math.PI/2;
+  cylinder(wheel,.267,.267,.34,0,0,0,steel,32).rotation.z=Math.PI/2;
+  cylinder(wheel,.18,.18,.36,0,0,0,dark,32).rotation.z=Math.PI/2;
+  cylinder(wheel,.105,.105,.4,0,0,0,edge,24).rotation.z=Math.PI/2;
+  for(let i=0;i<32;i++)for(const row of [-1,1]){const a=i*Math.PI/16+row*.045;const tread=box(wheel,.145,.055,.085,row*.085,Math.cos(a)*.54,Math.sin(a)*.54,rubber);tread.rotation.x=a;tread.rotation.y=row*.2;}
+  for(let i=0;i<8;i++){const a=i*Math.PI/4;const bolt=cylinder(wheel,.027,.027,.035,side*.192,Math.cos(a)*.217,Math.sin(a)*.217,edge,12);bolt.rotation.z=Math.PI/2;}
+  const arch=new T.Mesh(geometry(undefined,'apc-fender',()=>new T.TorusGeometry(.625,.065,10,40,Math.PI)),armor);arch.rotation.y=Math.PI/2;arch.position.set(side*1.09,.56,z);g.add(arch);
+  tube(g,side*.7,.77,z-.24,side*1.05,.56,z,.075,steel,16);
+ }
+ // Roof escape hatch, cooling louvers, strapped stowage, short communications mast.
+ plate(g,1.12,.085,.88,0,2.18,.74,dark,.025);
+ plate(g,.96,.075,.74,0,2.24,.74,armor,.025);
+ tube(g,-.18,2.3,.73,.18,2.3,.73,.03,steel,12);
+ for(const side of [-1,1]){
+  plate(g,.39,.075,.81,side*.72,2.19,-2.12,dark,.018);
+  for(let i=0;i<6;i++)box(g,.32,.035,.055,side*.72,2.245,-2.43+i*.12,steel);
+  plate(g,.32,.25,.67,side*.79,2.26,-.66,armor,.035);
+  for(const z of [-.87,-.45])box(g,.34,.027,.07,side*.79,2.397,z,dark);
+ }
+ cylinder(g,.075,.09,.15,-.84,2.28,-1.4,dark,24);
+ tube(g,-.84,2.35,-1.4,-.87,2.82,-1.48,.015,steel,12);
+ // Defensive twin gun, not a siege cannon. Preserve turret and flash animation API.
+ const turret=new T.Group();turret.name='transport-defensive-turret';turret.position.set(0,2.16,-1.34);g.add(turret);
+ cylinder(turret,.52,.55,.13,0,.04,0,dark,48);
+ cylinder(turret,.43,.48,.19,0,.16,0,edge,48);
+ plate(turret,.94,.27,.7,0,.32,0,armor,.065);
+ const barrels=[],guns=[];
+ for(const x of [-.31,.31]){
+  const mount=new T.Group();mount.position.set(x,.33,.3);turret.add(mount);
+  plate(mount,.23,.22,.33,0,0,.03,dark,.04);
+  const barrel=cylinder(mount,.058,.073,.83,0,0,.49,steel,32);barrel.rotation.x=Math.PI/2;barrels.push(barrel);
+  for(const z of [.18,.32,.72,.91])cylinder(mount,.083,.083,.055,0,0,z,dark,24).rotation.x=Math.PI/2;
+  cylinder(mount,.044,.044,.012,0,0,.944,rubber,24).rotation.x=Math.PI/2;
+  const flash=new T.Mesh(geometry(undefined,'apc-flash',()=>new T.SphereGeometry(.14,12,8)),lamp);flash.position.set(0,0,.98);flash.visible=false;mount.add(flash);guns.push({mount,barrel,flash});
+ }
+ plate(turret,.23,.18,.24,0,.52,.1,dark,.03);plate(turret,.14,.085,.025,0,.54,.235,glass,.008);
+ g.traverse(n=>{if(n.isMesh){n.castShadow=true;n.receiveShadow=true;}});
+ if(software)addBlobShadow(g,3,.32);
+ g.userData={kind:'transport',vehicle:true,wheels,turret,barrels,guns,flashUntil:0,color:'#657767'};
+ return g;
+}
 export function vehicleModel(kind='puma',assets,software=false){return withAssets(assets,()=>{
  if(kind==='hornet')return hornetModel(software);
+ if(kind==='transport')return transportModel(software);
  const g=new T.Group();g.name='warthog';
  const cache=new Map();
  const matc=(color,metal=.5,rough=.42,emissive=false,opts={})=>{const key=`${color}|${metal}|${rough}|${emissive?1:0}|${opts.transparent?1:0}|${opts.opacity??1}`;let mat=cache.get(key);if(!mat){mat=material(color,metal,rough,emissive);if(opts.transparent){mat.transparent=true;mat.opacity=opts.opacity??.55;}if(opts.flat)mat.flatShading=true;cache.set(key,mat);}return mat;};
