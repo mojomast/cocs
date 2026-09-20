@@ -47,6 +47,15 @@ No combat, weapon, reward, roster-pressure or D1-D4 Director balance change was
 made; D2-D4 measurement remains deferred. Complete that protocol before using
 this release as evidence for tuning.
 
+**Production deployment.** Commit `1d292fb` was fast-forwarded to
+`improvement/phase2-audio-visual` and deployed to
+<https://arena.ussyco.de> with `npm run deploy -- --with-game-server` on
+2026-09-20. Both user services reported active. The public deployment verifier
+returned 200 with correct content types for the document and all 13 linked
+CSS/JavaScript assets; `/api/version` returned `v8.4`; rendered HTML contained
+`v8.4 · FIELDCRAFT`; `wss://arena.ussyco.de/ws` accepted a connection; and a
+fresh headless Chromium production load emitted no console or page errors.
+
 ## Release 7.2 - ECHO (the Moth audio assets wired into the game)
 
 **Scope.** The Moth-audio wiring on `feat/moth-audio-wiring` (tip `4b9862b`),
