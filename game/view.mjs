@@ -222,8 +222,95 @@ function hornetModel(software=false){const g=new T.Group();g.name='hornet';const
  g.traverse(n=>{if(n.isMesh){n.castShadow=true;n.receiveShadow=true;}});
  if(software)addBlobShadow(g,2.3,.32);
  g.userData={kind:'hornet',vehicle:true,wheels:[],turret:null,barrels:engines,guns,flashUntil:0,color:'#5c6b7a'};return g;}
+// Dedicated recon chassis: +Z forward, four animated wheels and one light gun.
+// Scout-only cached geometry leaves the shared ground-vehicle draft untouched.
+function scoutModel(software=false){
+ const g=new T.Group();g.name='scout';
+ const hull=material('#708578',.48,.48),edge=material('#c3cbb3',.45,.4),dark=material('#202c30',.55,.56),rubber=material('#101619',.03,.92),metal=material('#91a5ad',.8,.3),seat=material('#424c43',.05,.86),lens=material('#194655',.65,.19),light=material('#b9e9ed',.2,.35,true),tail=material('#e77b4d',.2,.45,true);
+ // Broad chamfers catch lighting and outlines without relying on tiny textures.
+ const panel=(parent,w,h,d,x,y,z,mat,b=.035)=>{
+  const key=`scout-bevel|${w}|${h}|${d}|${b}`;
+  const geo=geometry(undefined,key,()=>{
+   const s=new T.Shape(),a=w/2-b,c=h/2-b;
+   s.moveTo(-a,-h/2);s.lineTo(a,-h/2);s.quadraticCurveTo(w/2,-h/2,w/2,-c);s.lineTo(w/2,c);s.quadraticCurveTo(w/2,h/2,a,h/2);s.lineTo(-a,h/2);s.quadraticCurveTo(-w/2,h/2,-w/2,c);s.lineTo(-w/2,-c);s.quadraticCurveTo(-w/2,-h/2,-a,-h/2);
+   const result=new T.ExtrudeGeometry(s,{depth:d-2*b,steps:1,bevelEnabled:true,bevelSegments:3,bevelSize:b*.45,bevelThickness:b,curveSegments:8});result.translate(0,0,-d/2+b);return result;
+  });
+  const m=new T.Mesh(geo,mat);m.position.set(x,y,z);parent.add(m);return m;
+ };
+ const torus=(parent,r,t,x,y,z,mat,side=false)=>{const m=new T.Mesh(geometry(undefined,`scout-torus|${r}|${t}`,()=>new T.TorusGeometry(r,t,12,48)),mat);m.position.set(x,y,z);if(side)m.rotation.y=Math.PI/2;parent.add(m);return m;};
+ panel(g,.78,.16,1.77,0,.32,0,dark);
+ panel(g,.72,.22,1.35,0,.44,-.08,hull);
+ const hood=panel(g,.74,.17,.62,0,.58,.64,hull);hood.rotation.x=.12;
+ panel(g,.38,.055,.46,0,.682,.63,edge,.014);
+ panel(g,.82,.1,.13,0,.37,1.01,metal,.02);
+ panel(g,.68,.14,.06,0,.49,.98,dark,.012);
+ for(let i=-3;i<=3;i++)box(g,.025,.09,.015,i*.075,.49,1.018,metal);
+ // Staggered two-place cockpit follows the driver's and passenger's seat layout.
+ for(const [x,z] of [[-.2,.1],[.2,-.5]]){
+  panel(g,.28,.09,.32,x,.52,z,seat,.018);
+  const back=panel(g,.28,.33,.085,x,.7,z-.15,seat,.02);back.rotation.x=-.13;
+  panel(g,.18,.105,.08,x,.91,z-.18,dark,.018);
+  for(const dx of [-.075,.075])box(g,.035,.25,.015,x+dx,.72,z-.093,dark);
+ }
+ panel(g,.62,.12,.13,0,.71,.35,dark,.02);
+ torus(g,.095,.015,-.2,.78,.27,metal).rotation.x=.6;
+ panel(g,.15,.065,.018,-.13,.752,.275,lens,.007);
+ for(const s of [-1,1]){
+  tube(g,s*.34,.47,.48,s*.34,1.04,.24,.023,metal,16);
+  tube(g,s*.34,1.04,.24,s*.34,1.04,-.63,.023,metal,16);
+  tube(g,s*.34,1.04,-.63,s*.36,.49,-.94,.023,metal,16);
+  tube(g,s*.38,.46,.37,s*.38,.46,-.66,.027,dark,16);
+  panel(g,.07,.16,.58,s*.365,.49,-.22,hull,.016);
+  panel(g,.13,.07,.15,s*.27,.61,.965,light,.014);
+  panel(g,.15,.06,.035,s*.27,.52,-.96,tail,.01);
+ }
+ for(const z of [.24,-.63])tube(g,-.34,1.04,z,.34,1.04,z,.023,metal,16);
+ tube(g,-.34,1.04,-.63,.34,.51,-.94,.018,dark,16);
+ // Independent wishbones, dampers, smooth rounded tires and actual tread blocks.
+ const wheels=[];
+ for(const x of [-.45,.45])for(const z of [-.75,.75]){
+  const s=Math.sign(x),wheel=new T.Group();wheel.position.set(x,.245,z);g.add(wheel);wheels.push(wheel);
+  torus(wheel,.174,.071,0,0,0,rubber,true);
+  cylinder(wheel,.132,.132,.137,0,0,0,dark,48).rotation.z=Math.PI/2;
+  cylinder(wheel,.105,.105,.15,0,0,0,metal,32).rotation.z=Math.PI/2;
+  cylinder(wheel,.045,.045,.165,0,0,0,dark,24).rotation.z=Math.PI/2;
+  for(let i=0;i<24;i++)for(const row of [-1,1]){
+   const a=i*Math.PI/12+row*.055;
+   const tread=box(wheel,.064,.024,.051,row*.036,Math.cos(a)*.239,Math.sin(a)*.239,rubber);tread.rotation.x=a;tread.rotation.y=row*.22;
+  }
+  for(let i=0;i<6;i++){const a=i*Math.PI/3;cylinder(wheel,.009,.009,.012,s*.083,Math.cos(a)*.071,Math.sin(a)*.071,dark,12).rotation.z=Math.PI/2;}
+  for(const dz of [-.13,.13])tube(g,s*.2,.34,z+dz,x,.245,z,.018,metal,16);
+  tube(g,s*.26,.51,z-.05,x,.27,z,.026,dark,20);
+  tube(g,s*.29,.45,z-.035,x,.27,z,.012,metal,16);
+  const arch=new T.Mesh(geometry(undefined,'scout-fender',()=>new T.TorusGeometry(.275,.026,10,40,Math.PI)),hull);arch.rotation.y=Math.PI/2;arch.position.set(x,.245,z);g.add(arch);
+ }
+ // Rear powerpack and a compact optics mast communicate scouting, not heavy armor.
+ panel(g,.55,.14,.25,0,.57,-.84,hull,.025);
+ for(let i=-2;i<=2;i++)box(g,.065,.015,.18,i*.087,.648,-.84,dark);
+ tube(g,.29,.65,-.85,.3,1.23,-.89,.009,metal,12);
+ cylinder(g,.055,.07,.08,.3,.69,-.85,dark,24);
+ panel(g,.19,.1,.12,.22,1.08,-.61,dark,.019);
+ cylinder(g,.032,.036,.022,.22,1.08,-.54,lens,32).rotation.x=Math.PI/2;
+ // Single forward barrel; muzzle tip stays at the simulation's (0,.9,.6).
+ const turret=new T.Group();turret.position.set(0,.79,.04);g.add(turret);
+ cylinder(turret,.115,.14,.065,0,0,0,dark,40);
+ panel(turret,.14,.13,.24,0,.11,.05,hull,.02);
+ panel(turret,.09,.12,.14,.115,.09,.025,dark,.015);
+ const mount=new T.Group();mount.position.set(0,.11,.16);turret.add(mount);
+ const barrel=cylinder(mount,.023,.032,.36,0,0,.18,metal,32);barrel.rotation.x=Math.PI/2;
+ for(const z of [.08,.17,.26])torus(mount,.033,.008,0,0,z,dark);
+ cylinder(mount,.038,.038,.04,0,0,.38,dark,32).rotation.x=Math.PI/2;
+ cylinder(mount,.02,.02,.003,0,0,.401,rubber,24).rotation.x=Math.PI/2;
+ const flash=new T.Mesh(geometry(undefined,'scout-flash',()=>new T.SphereGeometry(.07,12,8)),light);flash.position.z=.4;flash.visible=false;mount.add(flash);
+ g.traverse(n=>{if(n.isMesh){n.castShadow=true;n.receiveShadow=true;}});
+ flash.castShadow=false;
+ if(software)addBlobShadow(g,1.05,.3);
+ g.userData={kind:'scout',vehicle:true,wheels,turret,barrels:[barrel],guns:[{mount,barrel,flash}],flashUntil:0,color:'#708578'};
+ return g;
+}
 export function vehicleModel(kind='puma',assets,software=false){return withAssets(assets,()=>{
  if(kind==='hornet')return hornetModel(software);
+ if(kind==='scout')return scoutModel(software);
  const g=new T.Group();g.name='warthog';
  const cache=new Map();
  const matc=(color,metal=.5,rough=.42,emissive=false,opts={})=>{const key=`${color}|${metal}|${rough}|${emissive?1:0}|${opts.transparent?1:0}|${opts.opacity??1}`;let mat=cache.get(key);if(!mat){mat=material(color,metal,rough,emissive);if(opts.transparent){mat.transparent=true;mat.opacity=opts.opacity??.55;}if(opts.flat)mat.flatShading=true;cache.set(key,mat);}return mat;};
