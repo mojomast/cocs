@@ -23,6 +23,23 @@ Numeric formatting, compact spectator controls and title-camera continuity are
 also implemented in this pass. Findings below remain a baseline audit; these
 delivered items should not be reopened as outstanding work.
 
+### Integration status for v8.4 FIELDCRAFT
+
+The implementation now closes F02-F09 and F11 at the code/automated-contract
+level: public dominance and Operations outcome state, shared local/network event
+priority, one navigation-backed legal-target model, passive standings/death
+summaries, effective-rules previews, short-screen objective hierarchy, authored
+Director labels, mode-specific result learning, remapped labels and held touch
+jump. Training remains reward-free and keeps its documented ordinary 15-minute
+Foundry scenario; a protected staged scenario is still deferred.
+
+F10 has deliberately not produced balance changes. The technical viewport/input
+gate and the worksheet below can validate mechanics, but the required five new
+participants plus two experienced comparison players were not available in this
+coding environment. Do not relabel automated or agent-driven checks as human fun
+evidence. Run the First-time player session before changing weapons, bot pressure,
+roster density, rewards or Director tuning. D2-D4 measurement remains deferred.
+
 **Make the existing game easier to understand and respond to before adding more systems.** The repository already has substantial combat variety, mobility, objective tactics, bots, progression and replay support. The largest opportunities are closing the loop between a player's action, its visible consequence, the win condition, and an understandable next decision.
 
 Three immediate discoveries deserve attention:
@@ -278,6 +295,11 @@ No broad expensive suite is justified by this documentation change. Implementati
 ### First-time player session
 
 Start with **five participants unfamiliar with this build**, plus two experienced arena-shooter players for control/feel comparisons. This is a formative sample, not a statistically powered balance study. At least one real touch session and one keyboard-remapped session are separate accessibility checks.
+
+Use [`reports/playtest-v8.4-template.md`](../reports/playtest-v8.4-template.md)
+to preserve raw task observations, cohort/device settings, distributions,
+verbatim answers and the one-factor decision log. An unfilled worksheet or an
+automated-only browser gate is not evidence that the human targets passed.
 
 1. Fresh profile: choose and launch an intended first match without coaching. Record clicks, hesitation and effective rules.
 2. Training: perform movement/fire, capture, supply, command and traversal; include spend/terminal in Operations. Record each instruction shown, action, completion, stall and skip.

@@ -1,7 +1,7 @@
 // Pure, self-paced LATTICE lessons. Only the visible lesson collects evidence;
 // a completed lesson stays visible until the player explicitly continues.
 import {isCocsMode, normalizeConfig} from './config.mjs';
-import {DEFAULT_BINDINGS} from './keybinds.mjs';
+import {DEFAULT_BINDINGS, bindingLabel} from './keybinds.mjs';
 
 const step = (id, title, detail, success) => Object.freeze({id, title, detail, success});
 const shared = [
@@ -167,7 +167,7 @@ export function continueTraining(training, {time = training?.lastTime ?? 0} = {}
 
 /** Copy is resolved from the same remappable bindings used by input. */
 export function trainingControls(id, bindings = {}) {
-  const key = action => String(bindings[action] ?? DEFAULT_BINDINGS[action]).replace(/^Key|^Digit/, '').replace('ShiftLeft', 'Left Shift').replace('ShiftRight', 'Right Shift').replace('ControlLeft', 'Left Ctrl').replace('ControlRight', 'Right Ctrl').replace('AltLeft', 'Left Alt').replace('AltRight', 'Right Alt');
+  const key = action => bindingLabel(bindings[action] ?? DEFAULT_BINDINGS[action]);
   switch (id) {
     case 'move': return `${['forward', 'left', 'back', 'right'].map(key).join(' / ')} move · ${key('sprint')} sprint · ${key('jump')} jump`;
     case 'fire': return `Left mouse fire · Right mouse aim · ${key('reload')} reload`;

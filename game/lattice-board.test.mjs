@@ -10,6 +10,7 @@ import {
   LOCAL_CARD_ACTION, LOCAL_CARD_SOURCE, hqSinkTarget, latticePeerId,
   localBoardCards, mergeLocalBoard, ownedSinkTargets, resolveSinkTarget, withSinkTargets,
 } from './lattice-board.mjs';
+import {latticeTargetModel} from './lattice-guide.mjs';
 
 const node = (id, owner, archetype, extra = {}) => ({id, label: id.toUpperCase(), owner, archetype, ...extra});
 
@@ -138,9 +139,91 @@ test('a real fresh local snapshot produces a non-empty, mergeable board', () => 
   const snap = match.snapshot();
   const player = snap.cocs.actors?.[0] ?? {id: 0, team: 0, peerId: 0};
   const authority = cocsBoardView(cocsBoard(snap.cocs, player), snap.cocs, player);
-  const local = localBoardCards(cocsBoard(snap.cocs, player), snap.cocs, player, {spend: cocsSpendView(snap.cocs, player)});
+  const model = latticeTargetModel(snap.cocs, match.arena, player);
+  const local = localBoardCards(cocsBoard(snap.cocs, player), snap.cocs, player, {spend: cocsSpendView(snap.cocs, player), model});
   const merged = mergeLocalBoard(authority, local);
   assert.ok(local.length > 0, 'a fresh Operations match has locally derivable cards');
   assert.ok(merged.listboxIds.length > 0, 'the board listbox is never empty');
   assert.ok(merged.cards.every(card => card.id && card.statusLabel), 'every card is renderable');
+  for (const card of local.filter(entry => entry.source === LOCAL_CARD_SOURCE.ORDER)) {
+    const node = model.byId[card.target];
+    assert.ok(node, `${card.id} names a model node`);
+    assert.equal(node.legal, true, `${card.id} is legally adjacent`);
+    assert.equal(node.attackable, true, `${card.id} is a capture/retake`);
+    assert.doesNotMatch(card.targetLabel, /^(front|relay|econ|hq)-/, `${card.id} uses an authored label`);
+  }
+});
+
+// ---------------------------------------------------------------------------
+// F04 — legal adjacency, frontier retakes, authored labels and the siege slot.
+// ---------------------------------------------------------------------------
+const f04Map = {
+  nodes: [
+    {id: 'hq-0', x: 0, z: 0, r: 4, archetype: 'hq', label: 'West Command'},
+    {id: 'front-0', x: -40, z: 0, r: 8, archetype: 'front', label: 'West Bastion'},
+    {id: 'relay-0', x: 0, z: -30, r: 8, archetype: 'relay', label: 'Foundry Relay'},
+    {id: 'front-1', x: 40, z: 0, r: 8, archetype: 'front', label: 'East Bastion'},
+    {id: 'econ-x', x: 100, z: 0, r: 8, archetype: 'economy', label: 'Far Siphon'},
+  ],
+  lattice: [['hq-0', 'front-0'], ['hq-0', 'relay-0'], ['relay-0', 'front-1'], ['front-1', 'econ-x']],
+};
+const f04Board = () => ({nodes: [], live: [], front: null});
+const f04Snapshot = ({front0 = null, front1 = 1, relay = 0, siege = null} = {}) => ({
+  tick: 500,
+  nodes: [
+    {id: 'hq-0', owner: 0, archetype: 'hq', live: false, x: 0, z: 0, progress: [0, 0]},
+    {id: 'front-0', owner: front0, archetype: 'front', live: true, x: -40, z: 0, progress: [0, 0], contested: false},
+    {id: 'relay-0', owner: relay, archetype: 'relay', live: true, x: 0, z: -30, progress: [0, 0], contested: false},
+    {id: 'front-1', owner: front1, archetype: 'front', live: true, x: 40, z: 0, progress: [0, 0], contested: false},
+    {id: 'econ-x', owner: null, archetype: 'economy', live: true, x: 100, z: 0, progress: [0, 0], contested: false},
+  ],
+  director: siege ? {siege} : undefined,
+});
+const F04_PLAYER = {id: 0, team: 0, x: -36, z: 0};
+
+test('F04 neutral cards require adjacency and enemy frontier nodes get a retake card', () => {
+  const snapshot = f04Snapshot();
+  const model = latticeTargetModel(snapshot, f04Map, F04_PLAYER);
+  const cards = localBoardCards(f04Board(), snapshot, F04_PLAYER, {model});
+  const capture = cards.find(card => card.id === 'local-node-front-0');
+  assert.ok(capture, 'a neutral node adjacent to owned ground is capturable');
+  assert.equal(capture.targetLabel, 'West Bastion', 'the card uses the authored label');
+  assert.equal(capture.impact, 'CAPTURABLE · ADJACENT');
+  assert.equal(capture.actionLabel, 'ISSUE CAPTURE');
+  const retake = cards.find(card => card.id === 'local-node-front-1');
+  assert.ok(retake, 'an enemy-owned frontier node gets an equivalent attack/retake card');
+  assert.equal(retake.impact, 'ENEMY FRONTIER · RETAKABLE');
+  assert.equal(retake.actionLabel, 'ISSUE RETAK');
+  assert.ok(!cards.some(card => card.id === 'local-node-econ-x'), 'a neutral node with no owned neighbour is not offered');
+  for (const card of cards.filter(entry => entry.source === LOCAL_CARD_SOURCE.ORDER && entry.id !== 'local-siege')) {
+    const node = model.byId[card.target];
+    assert.equal(node.legal, true, `${card.id} is a legal target`);
+    assert.equal(node.reachable, true, `${card.id} has a ground route`);
+  }
+  assert.doesNotMatch(cards.map(card => card.targetLabel).join(' '), /front-0|econ-x/, 'no raw node ids in user copy');
+});
+
+test('F04 enemy recapture options remain when no neutral node exists', () => {
+  const snapshot = f04Snapshot({front0: 1, relay: 0});
+  const cards = localBoardCards(f04Board(), snapshot, F04_PLAYER, {map: f04Map});
+  assert.ok(!cards.some(card => card.id === 'local-node-relay-0'), 'an owned node is never an attack card');
+  const retakes = cards.filter(card => card.id.startsWith('local-node-') && card.actionLabel === 'ISSUE RETAK');
+  assert.ok(retakes.length > 0, 'enemy frontier nodes stay retakeable with no neutral node on the map');
+  assert.ok(retakes.every(card => card.targetLabel && !card.targetLabel.includes('-')), 'retake copy stays authored');
+});
+
+test('F04 an Operations HQ siege overrides and defers optional forward pushes', () => {
+  const snapshot = f04Snapshot({siege: {armed: true, hqId: 'hq-0', health: 55, max: 100, attackers: 3, defenders: 1}});
+  const cards = localBoardCards(f04Board(), snapshot, F04_PLAYER, {map: f04Map});
+  assert.equal(cards[0].id, 'local-siege', 'the HQ defence card leads the board');
+  assert.equal(cards[0].targetLabel, 'West Command');
+  assert.equal(cards[0].actionLabel, 'DEFEND HQ');
+  assert.match(cards[0].impact, /SIEGE · HQ 55%/);
+  const forward = cards.find(card => card.id === 'local-node-front-0');
+  assert.ok(forward, 'the optional push remains available');
+  assert.equal(forward.siegeDeferred, true);
+  assert.equal(forward.impact, 'DEFERRED · SIEGE AT West Command');
+  const lifted = localBoardCards(f04Board(), f04Snapshot(), F04_PLAYER, {map: f04Map});
+  assert.ok(!lifted.some(card => card.id === 'local-siege'), 'a lifted siege removes the override');
+  assert.match(lifted.find(card => card.id === 'local-node-front-0').impact, /^CAPTURABLE/);
 });

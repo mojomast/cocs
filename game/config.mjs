@@ -1,5 +1,6 @@
 import {WEAPONS} from './data.mjs';
 import {CAMPAIGN_MISSION_IDS,DEFAULT_MISSION_ID} from './campaign-data.mjs';
+import {configuredDirectorTier,coopRoster,coopWaveSummary,directorTierCopy,normalizeCocsTier} from './cocs-difficulty.mjs';
 // ---------------------------------------------------------------------------
 // LATTICE STRIKE population ladder (PvP-1). Section 3.1 publishes the 4v4 and
 // 8v8 `cocs` rungs; `cocs-coop` (OPERATIONS) is a single human team and never
@@ -273,13 +274,99 @@ export function normalizeConfig(value={}){
     // The LATTICE `objective` override is an authored seam (node/income tuning +
     // the opt-in `traversalBotUse` flag). It is preserved only when supplied, so
     // `normalizeConfig(null)` still deep-equals `DEFAULT_CONFIG`. Pure data; a
-    // non-object override is dropped like every other malformed field.
-    const objective=c.objective&&typeof c.objective==='object'&&!Array.isArray(c.objective)?{...c.objective}:null;
+    // non-object override is dropped like every other malformed field. For
+    // OPERATIONS the Director tier is validated here: the engine reads
+    // `objective.tier`, `coopTier` stays a legacy fallback, and an absent value
+    // resolves to the new-player D1 default without inventing an override key.
+    let objective=c.objective&&typeof c.objective==='object'&&!Array.isArray(c.objective)?{...c.objective}:null;
+    if(mode==='cocs-coop'&&(objective||c.coopTier!==undefined)){
+     objective=objective??{};
+     objective.tier=normalizeCocsTier(objective.tier??c.coopTier);
+    }
     // The PvPvE rung (section 3.1) rides the config only when explicitly asked
     // for on `cocs`; `cocs-coop` and every other mode stay rung-free, so
     // `normalizeConfig(null)` still deep-equals the frozen default.
     const rung=mode==='cocs'?cocsRung(c.rung)?.id??null:null;
     return {...normalized,...(objective?{objective}:{}),...(rung?{rung}:{}),mutators:Object.freeze(activeMutators(normalized))};
+}
+// ---------------------------------------------------------------------------
+// Launch views (F06). One deterministic description of what a config starts:
+// the selection cards, the setup screen and the launch path all read the same
+// `normalizeConfig` output plus GAME_MODES metadata, so a displayed promise can
+// never drift from the match. Maps are deliberately absent: `arenas.mjs`
+// imports this module, so the screens resolve the arena and pass the same
+// `plan.rules` into `start()`.
+// ---------------------------------------------------------------------------
+const secondsLabel=seconds=>{const total=Math.max(0,Math.round(Number(seconds)||0));const minutes=Math.floor(total/60),rest=total%60;return rest?`${minutes}M ${String(rest).padStart(2,'0')}S`:`${minutes} MIN`;};
+// Continuous mutators carry their resolved multiplier so the preview names the
+// actual value, not only the preset.
+const MUTATOR_VALUE={turbo:config=>`${config.speed}× speed`,lowGravity:config=>`${config.gravity}× gravity`,doubleDamage:config=>`${config.damage}× damage`};
+export function mutatorView(config={}){
+ const c=config&&typeof config==='object'?config:{};
+ return Object.freeze(activeMutators(c).map(id=>{
+  const mutator=MUTATORS.find(entry=>entry.id===id);
+  return Object.freeze({id,name:mutator?.name??id,detail:MUTATOR_VALUE[id]?.(c)??''});
+ }));
+}
+/** The exact rules a quick-start activity composes: saved rules, then the
+ * activity's launch defaults, then explicit overrides — the page's historical
+ * spread order. Kept here so the selection preview and the launch path share
+ * one composition instead of duplicated copy. */
+export function quickStartRules(saved={},activity,defaults={},overrides={}){
+ const base=saved&&typeof saved==='object'?saved:{};
+ const activityDefaults=defaults&&typeof defaults==='object'?defaults:{};
+ const explicit=overrides&&typeof overrides==='object'?overrides:{};
+ return normalizeConfig({...base,mode:activity,...activityDefaults,...explicit});
+}
+// Non-co-op team seats alternate `id % 2` from the human seats (core.mjs
+// seatTeam), so a local roster split is a pure function of the bot count.
+const seatSplit=(humans,bots)=>{let team0=humans,team1=0;for(let id=humans;id<humans+bots;id++)id%2===0?team0++:team1++;return {team0,team1};};
+function rosterLabel(rules,meta,roster){
+ if(meta.rules?.coop===true)return `SQUAD ${roster.allies} · GARRISON ${roster.garrisonBots}`;
+ if(rules.mode==='puma-soccer')return '2 v 2';
+ if(rules.mode==='puma-race')return rules.botCount>0?`1 + ${rules.botCount} RACERS`:'SOLO TIME TRIAL';
+ if(meta.rules?.team===true&&rules.botCount>0){const split=seatSplit(1,rules.botCount);return `${split.team0} v ${split.team1}`;}
+ return rules.botCount>0?`YOU + ${rules.botCount} BOTS`:'SOLO OPERATOR';
+}
+function fillView(rules,meta,roster,waves){
+ if(meta.rules?.coop===true)return Object.freeze({auto:true,note:`Bot seats fill your squad to the ${roster.teamFloor}-operator floor first, then crew the Director garrison. The ${waves.count}-wave operation spawns whether or not you add bots.`});
+ if(rules.mode==='puma-soccer')return Object.freeze({auto:true,note:'Empty seats are always filled by bots: it is 2 v 2 even with 0 bot seats. Combat modifiers, weapons and harness powers are disabled.'});
+ if(rules.mode==='puma-race')return Object.freeze({auto:true,note:'0 rivals is a solo time trial: nothing starts compulsory combat. In online races, human drivers replace excess bots to cap the grid at 8 racers. Combat modifiers, weapons and harness powers are disabled.'});
+ if(rules.mode==='cocs'){const rung=cocsRung(rules.rung);return Object.freeze({auto:true,note:rung?`Bots fill the ${rung.perTeam} v ${rung.perTeam} rung to ${rung.total} seats; online humans take seats first.`:'Bots fill the opposing team seats. At 0 bot seats the opposing team stays empty in local practice.'});}
+ return Object.freeze({auto:false,note:null});
+}
+/** Effective launch description for one config. `humans` is the local human
+ * seat count; `roster`/`tier`/`waves` are OPERATIONS-only. Frozen and
+ * deterministic: the same config always yields the same plan. */
+export function matchPlan(value={},{humans=1}={}){
+ const rules=normalizeConfig(value);
+ const meta=GAME_MODES.find(entry=>entry.id===rules.mode)??GAME_MODES[0];
+ const coop=meta.rules?.coop===true;
+ const humanSeats=Math.max(1,Math.round(Number(humans)||1));
+ const roster=coop?coopRoster({humans:humanSeats,bots:rules.botCount}):null;
+ const tier=coop?directorTierCopy(configuredDirectorTier(rules)):null;
+ const waves=coop?coopWaveSummary(tier.id):null;
+ const modifiers=mutatorView(rules);
+ const difficulty=DIFFICULTIES.find(entry=>entry.id===rules.difficulty);
+ return Object.freeze({
+  mode:Object.freeze({id:meta.id,name:meta.name,description:meta.description,team:meta.rules?.team===true,coop,score:meta.rules?.score??'frags'}),
+  rules,
+  team:meta.rules?.team===true,
+  coop,
+  difficulty:Object.freeze({id:rules.difficulty,name:difficulty?.name??rules.difficulty}),
+  humans:humanSeats,
+  bots:rules.botCount,
+  actors:humanSeats+rules.botCount,
+  seconds:rules.timeLimit,
+  duration:secondsLabel(rules.timeLimit),
+  roster,
+  rosterLabel:rosterLabel(rules,meta,roster),
+  fill:fillView(rules,meta,roster,waves),
+  tier:coop?Object.freeze({id:tier.id,label:tier.label,copy:tier.copy,modifiers:Object.freeze([...tier.modifiers]),band:Object.freeze([...tier.band])}):null,
+  waves,
+  modifiers,
+  modifierLabel:modifiers.length?modifiers.map(entry=>entry.name).join(' · '):'NO MODIFIERS',
+ });
 }
 export function normalizeDisplay(value={}){
  const c=value&&typeof value==='object'?value:{};

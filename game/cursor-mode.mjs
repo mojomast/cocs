@@ -51,6 +51,31 @@ export const CURSOR_SURFACE = Object.freeze({
 
 export const CURSOR_IMPLICIT_SURFACES = Object.freeze([CURSOR_SURFACE.FREE, CURSOR_SURFACE.ESCAPE]);
 
+// Keyboard priority across stacked interactive surfaces (F05). The page routes
+// keys through `cursorKeyboardOwner`/`cursorCombatKeysBlocked` instead of
+// testing individual surface names in a dozen branches: an intermission spend
+// window is modal, the explicitly opened respawn editor outranks the standings
+// drawn under it, and the command-board peek keeps its own keys.
+export const CURSOR_KEYBOARD_ORDER = Object.freeze([
+  CURSOR_SURFACE.SPEND,
+  CURSOR_SURFACE.RESPAWN,
+  CURSOR_SURFACE.SCOREBOARD,
+  CURSOR_SURFACE.BOARD,
+  CURSOR_SURFACE.CHAT,
+  CURSOR_SURFACE.TERMINALS,
+  CURSOR_SURFACE.TRAINING,
+  CURSOR_SURFACE.VOICE,
+  CURSOR_SURFACE.SETTINGS,
+  CURSOR_SURFACE.PAUSE,
+  CURSOR_SURFACE.RESULTS,
+  CURSOR_SURFACE.DEMO,
+]);
+
+// The board is a hold-to-peek affordance: it registers a surface (so the mouse
+// works) but keeps combat movement and order keys live. Every other interactive
+// surface owns the keyboard while it is the owner.
+export const CURSOR_COMBAT_KEY_EXEMPT = Object.freeze([CURSOR_SURFACE.BOARD]);
+
 export const CURSOR_SURFACE_LABELS = Object.freeze({
   [CURSOR_SURFACE.FREE]: 'FREE CURSOR',
   [CURSOR_SURFACE.ESCAPE]: 'MOUSE RELEASED',
@@ -98,6 +123,37 @@ export function cursorBlockingSurfaces(state) {
 }
 
 /**
+ * The single interactive surface that owns keyboard input right now, or null
+ * when only combat/the implicit free cursor reasons are active. Priority comes
+ * from CURSOR_KEYBOARD_ORDER; surfaces outside it fall back to open order.
+ */
+export function cursorKeyboardOwner(state) {
+  const blocking = cursorBlockingSurfaces(state);
+  if (!blocking.length) return null;
+  let owner = null;
+  for (const surface of blocking) {
+    if (owner === null) { owner = surface; continue; }
+    const rank = CURSOR_KEYBOARD_ORDER.indexOf(surface);
+    if (rank === -1) continue;
+    const ownerRank = CURSOR_KEYBOARD_ORDER.indexOf(owner);
+    if (ownerRank === -1 || rank < ownerRank) owner = surface;
+  }
+  return owner;
+}
+
+/**
+ * True when the page's combat key routing (movement, fire, weapon digits,
+ * orders) must not run because an interactive surface owns the keyboard. The
+ * board peek is exempt by default; pass `allow` to override the exemption.
+ */
+export function cursorCombatKeysBlocked(state, options = {}) {
+  const owner = cursorKeyboardOwner(state);
+  if (!owner) return false;
+  const allow = Array.isArray(options.allow) ? options.allow : CURSOR_COMBAT_KEY_EXEMPT;
+  return !allow.includes(owner);
+}
+
+/**
  * Open (or keep) an interactive surface. The first surface releases pointer
  * lock and clears held inputs; opening another one is a no-op transition.
  */
@@ -107,12 +163,17 @@ export function cursorOpen(state, surface, options = {}) {
   if (!id) return {state: current, changed: false, effects: effects()};
   if (current.surfaces.includes(id)) return {state: current, changed: false, effects: effects()};
   const entering = current.mode !== CURSOR_MODE.CURSOR;
+  // The first interactive surface clears held combat input even when the free
+  // cursor was already on (F05): a spend window opening over a held movement
+  // key must not keep driving the actor. Later surfaces in the same stack do
+  // not re-clear, so closing a stack restores input exactly once.
+  const firstBlocking = !CURSOR_IMPLICIT_SURFACES.includes(id) && cursorBlockingSurfaces(current).length === 0;
   const next = {
     mode: CURSOR_MODE.CURSOR,
     surfaces: [...current.surfaces, id],
     escapeAt: id === CURSOR_SURFACE.ESCAPE ? Number(options.at) || 0 : current.escapeAt,
   };
-  return {state: next, changed: true, effects: effects({unlock: entering, clearInput: entering})};
+  return {state: next, changed: true, effects: effects({unlock: entering, clearInput: entering || firstBlocking})};
 }
 
 /**

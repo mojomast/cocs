@@ -8,6 +8,7 @@ import {readFile} from 'node:fs/promises';
 import * as T from 'three';
 import {cocsBoard,cocsArchetypeLabel,cocsArchetypeMark,cocsResultSummary,commandBrief,objectiveCopy,modeTargetText,modeGoal,scoreAnnouncer} from './hud.mjs';
 import {COCS_SCAN_COST,cocsArmVerb,cocsClearStrip,cocsCommandView,cocsDirectorView,cocsEconomyView,cocsIssueOrder,cocsPickTarget,cocsSpotView,cocsStripState,cocsStripView,cocsSyncStrip,cocsTargetableNodes} from './cocs-orders.mjs';
+import {latticeTargetModel} from './lattice-guide.mjs';
 import {GAME_MODES} from './config.mjs';
 import {mapsForMode,resolveMapForMode,arenaSupportsMode,maxBotsFor,recommendedBots} from './arenas.mjs';
 import {radarBlip,radarContacts} from './radar.mjs';
@@ -438,7 +439,9 @@ test('the Operations Director HUD surfaces the O1b spend window, sinks and tier 
       tier: 'D4', tierLabel: 'OVERWATCH', phase: 'intermission', wave: 2, waveCount: 5, waveLabel: 'PRESSURE',
       tierCopy: {label: 'OVERWATCH', copy: 'Three fronts.', modifiers: ['3 FRONTS', 'SUPPLY CUT'], band: [0.12, 0.4]},
       budget: {current: 10, spent: 0, rate: 0, cap: 380, peak: 10}, pressure: 0.02,
-      fronts: [], composition: {}, modifier: 'mixed',
+      fronts: [{nodeId: 'front-0', strength: 2}], composition: {}, modifier: 'mixed',
+      telegraph: {kind: 'reinforce', nodeId: 'front-0', seconds: 8},
+      retarget: {nodeId: 'front-0', reason: 'weakest'},
       intermission: {
         open: true, secondsRemaining: 20, budget: 180, spent: 95, windows: 1,
         byType: {FORTIFY: 1, REPAIR: 0, RESUPPLY: 1, REINFORCE: 0},
@@ -448,6 +451,7 @@ test('the Operations Director HUD surfaces the O1b spend window, sinks and tier 
       siege: {armed: false, health: 1400, max: 1400, percent: 1, attackers: 0, defenders: 0},
       waves: {cleared: 1, par: 5, forceAlive: 0, forceTotal: 5},
     },
+    nodes: [{id: 'hq-0', label: 'West Command'}, {id: 'front-0', label: 'West Bastion'}],
     waves: {cleared: 1, par: 5, forceAlive: 0, forceTotal: 5},
     bonus: [{id: 'hold-all', label: 'HOLD ALL', state: 'open', progress: 3, target: 5}],
     bonusTelemetry: {done: [], failed: [], flux: 0, req: 0, commendations: 0},
@@ -462,6 +466,133 @@ test('the Operations Director HUD surfaces the O1b spend window, sinks and tier 
   assert.equal(view.bonus[0].id, 'hold-all');
   assert.equal(view.bonus[0].progress, 3);
   assert.equal(view.bonus[0].target, 5);
+  assert.equal(view.fronts[0].label, 'West Bastion');
+  assert.equal(view.telegraph.label, 'West Bastion');
+  assert.equal(view.retarget.label, 'West Bastion');
+  assert.equal(view.siege.label, 'West Command');
   // The PvPvE surface stays without an intermission/bonus lane.
   assert.equal(cocsDirectorView({coop: false, director: null}), null);
+});
+
+test('F07/F09 keeps the short-screen combat hierarchy and remapped controls explicit', async () => {
+  const root = new URL('../', import.meta.url);
+  const [page, hud, director, css, touch] = await Promise.all([
+    readFile(new URL('app/page.tsx', root), 'utf8'),
+    readFile(new URL('app/ui/screens/PlayingHud.tsx', root), 'utf8'),
+    readFile(new URL('app/ui/screens/OperationsDirectorHud.tsx', root), 'utf8'),
+    readFile(new URL('app/styles/lattice-guide.css', root), 'utf8'),
+    readFile(new URL('app/game-ui/touch-controls.tsx', root), 'utf8'),
+  ]);
+  assert.ok(page.includes('model:latticeModel') && page.includes('orders:cocsOrderEvents'), 'all live command surfaces receive the shared target and order-result models');
+  assert.ok(hud.includes('TACTICAL VIEW · MAP / ECONOMY / ROUTES'), 'passive diagnostics are behind an intentional tactical disclosure');
+  assert.ok(hud.includes('fragKey') && !hud.includes('<b>G</b>'), 'the grenade card uses the remapped binding');
+  assert.ok(hud.includes('aria-live="off"'), 'the kill feed does not queue over critical combat announcements');
+  assert.ok(director.indexOf('director-readout__hq') < director.indexOf('director-readout__diagnostics'), 'wave/HQ truth precedes diagnostic pressure detail');
+  assert.match(css, /@media\(max-height:620px\)/);
+  assert.match(css, /grid-template-areas:'objective objective' 'left right'/);
+  assert.doesNotMatch(css, /max-height:calc\(100dvh - 390px\)/, 'short landscape no longer receives a zero-height Director panel');
+  assert.ok(touch.includes("lattice&&interactActive") && touch.includes('touch-tactical'), 'Lattice touch exposes a contextual tactical use control');
+});
+
+// ---------------------------------------------------------------------------
+// F04 — the strip reads the shared legal-target model and the authoritative
+// order result: QUEUED until acceptance, then COMPLETE or a refusal + next step.
+// ---------------------------------------------------------------------------
+const f04StripMap = {
+  nodes: [
+    {id: 'hq-0', x: 0, z: 0, r: 4, archetype: 'hq', label: 'West Command'},
+    {id: 'front-0', x: -40, z: 0, r: 8, archetype: 'front', label: 'West Bastion'},
+    {id: 'relay-0', x: 0, z: -30, r: 8, archetype: 'relay', label: 'Foundry Relay'},
+    {id: 'front-1', x: 40, z: 0, r: 8, archetype: 'front', label: 'East Bastion'},
+    {id: 'econ-x', x: 100, z: 0, r: 8, archetype: 'economy', label: 'Far Siphon'},
+  ],
+  lattice: [['hq-0', 'front-0'], ['hq-0', 'relay-0'], ['relay-0', 'front-1'], ['front-1', 'econ-x']],
+};
+const f04StripSnapshot = ({front0 = null, front1 = 1, relay = 0} = {}) => ({
+  tick: 500,
+  nodes: [
+    {id: 'hq-0', owner: 0, archetype: 'hq', live: false, x: 0, z: 0, progress: [0, 0]},
+    {id: 'front-0', owner: front0, archetype: 'front', live: true, x: -40, z: 0, progress: [0, 0], contested: false},
+    {id: 'relay-0', owner: relay, archetype: 'relay', live: true, x: 0, z: -30, progress: [0, 0], contested: false},
+    {id: 'front-1', owner: front1, archetype: 'front', live: true, x: 40, z: 0, progress: [0, 0], contested: false},
+    {id: 'econ-x', owner: null, archetype: 'economy', live: true, x: 100, z: 0, progress: [0, 0], contested: false},
+  ],
+});
+const F04_STRIP_PLAYER = {id: 0, team: 0, x: -30, z: 0, health: 100};
+
+test('F04 the strip only offers adjacent, route-reachable targets from the shared model', () => {
+  const snapshot = f04StripSnapshot();
+  const board = cocsBoard({cocs: snapshot}, F04_STRIP_PLAYER);
+  const model = latticeTargetModel(snapshot, f04StripMap, F04_STRIP_PLAYER);
+  const attack = cocsTargetableNodes(board, 'ATTACK', {model, map: f04StripMap});
+  assert.deepEqual(attack.map(node => node.id).sort(), ['front-0', 'front-1']);
+  assert.equal(attack.find(node => node.id === 'front-0').label, 'West Bastion', 'the picker uses the authored label');
+  assert.ok(!attack.some(node => node.id === 'econ-x'), 'a neutral node with no owned neighbour is never a strip target');
+  const hold = cocsTargetableNodes(board, 'GO', {model, map: f04StripMap});
+  assert.ok(hold.some(node => node.id === 'relay-0'), 'GO still offers your own node');
+  assert.ok(hold.every(node => node.mine || node.attackable), 'GO never offers an illegal capture');
+  assert.ok(hold.every(node => node.reachable !== false));
+  const scan = cocsTargetableNodes(board, 'SCAN', {model, map: f04StripMap});
+  assert.deepEqual(scan.map(node => node.id).sort(), ['econ-x', 'front-0', 'front-1', 'relay-0'], 'SCAN keeps every capturable node');
+  assert.equal(cocsTargetableNodes(board, 'ATTACK').length > 0, true, 'the legacy narrowing still works without a model');
+});
+
+test('F04 orders read QUEUED until accepted, then complete or refuse with a next action', () => {
+  const target = {id: 'front-0', index: 1};
+  const armed = cocsPickTarget(cocsArmVerb(cocsStripState(), 'ATTACK'), target.id, [target]);
+  const issued = cocsIssueOrder(armed, {tick: 100, peerId: 'me', team: 0, flux: 120});
+  assert.ok(issued.order);
+  const cardId = issued.order.cardId;
+  const pendingView = cocsStripView(issued.state, {tick: 100, flux: 120, nodes: [], orders: []});
+  assert.equal(pendingView.pending.statusLabel, 'QUEUED');
+  assert.equal(pendingView.issued, null, 'nothing is accepted before the sim answers');
+  assert.equal(pendingView.pending.targetLabel, 'WEST FRONT', 'queued copy never shows a raw node id');
+  // Still inside the TTL with no answer yet: remains QUEUED.
+  const waiting = cocsSyncStrip(issued.state, {tick: 140, orders: []});
+  assert.equal(waiting.pending.statusLabel ?? 'QUEUED', 'QUEUED');
+  assert.equal(waiting.issued, null);
+  // Refused: never an accepted-success message, always a usable next action.
+  const rejected = [{type: 'cocs-order-rejected', cardId, verb: 'ATTACK', node: 'front-0', peerId: 'me', reason: 'contested', tick: 101}];
+  const refused = cocsSyncStrip(issued.state, {tick: 102, orders: rejected});
+  assert.equal(refused.pending, null);
+  assert.equal(refused.issued, null, 'a rejected order can never file as issued');
+  assert.match(refused.notice, /REJECTED · CONTESTED/);
+  assert.equal(refused.nextAction, 'CLEAR THE NODE, THEN ISSUE AGAIN');
+  const refusedView = cocsStripView(issued.state, {tick: 102, flux: 120, nodes: [], orders: rejected});
+  assert.equal(refusedView.issued, null);
+  assert.match(refusedView.notice, /REJECTED · CONTESTED/);
+  assert.equal(refusedView.lastRejected.targetLabel, 'WEST FRONT');
+  // Accepted, then completed: the same cardId upgrades from ACCEPTED to COMPLETE.
+  const acceptedResult = [{type: 'cocs-order', cardId, verb: 'ATTACK', node: 'front-0', peerId: 'me', tick: 101}];
+  const accepted = cocsSyncStrip(issued.state, {tick: 102, orders: acceptedResult});
+  assert.equal(accepted.issued.statusLabel, 'ACCEPTED');
+  assert.equal(accepted.issued.accepted, true);
+  assert.equal(accepted.nextAction, 'WATCH THE NODE RING');
+  const completed = cocsSyncStrip(accepted, {tick: 140, orders: [...acceptedResult, {type: 'cocs-order-complete', cardId, verb: 'ATTACK', node: 'front-0', tick: 139}]});
+  assert.equal(completed.issued.statusLabel, 'COMPLETE');
+  assert.equal(completed.issued.complete, true);
+  assert.equal(completed.nextAction, 'HOLD THE NODE YOU TOOK');
+  assert.equal(cocsSyncStrip(completed, {tick: 160, orders: []}), completed, 'an unchanged strip keeps its reference');
+  // An unanswered order that outlives its window is never called accepted.
+  const lost = cocsSyncStrip(issued.state, {tick: 400, orders: [{type: 'cocs-order', cardId: 'other', verb: 'ATTACK', node: 'front-0', peerId: 'me', tick: 399}]});
+  assert.equal(lost.issued, null);
+  assert.match(lost.notice, /NO CONFIRMATION/);
+  assert.equal(lost.lastRejected.reason, 'NO-RESPONSE');
+});
+
+test('F04 the command view folds the model and order results into the strip', () => {
+  const snapshot = f04StripSnapshot();
+  const board = cocsBoard({cocs: snapshot}, F04_STRIP_PLAYER);
+  const model = latticeTargetModel(snapshot, f04StripMap, F04_STRIP_PLAYER);
+  const target = {id: 'front-0', index: 1};
+  const issued = cocsIssueOrder(cocsPickTarget(cocsArmVerb(cocsStripState(), 'ATTACK'), target.id, [target]), {tick: 500, peerId: 'me', team: 0, flux: 120});
+  const rejected = [{type: 'cocs-order-rejected', cardId: issued.order.cardId, verb: 'ATTACK', node: 'front-0', peerId: 'me', reason: 'out-of-flux', tick: 501}];
+  const command = cocsCommandView(board, snapshot, F04_STRIP_PLAYER, issued.state, {map: f04StripMap, model, orders: rejected});
+  assert.equal(command.model, model, 'the shared model rides the command bag');
+  assert.equal(command.strip.issued, null);
+  assert.match(command.strip.notice, /REJECTED · OUT-OF-FLUX/);
+  assert.equal(command.strip.nextAction, 'EARN FLUX OR HOLD THE LINE');
+  const queued = cocsCommandView(board, snapshot, F04_STRIP_PLAYER, issued.state, {map: f04StripMap, model, orders: []});
+  assert.equal(queued.strip.pending.statusLabel, 'QUEUED');
+  assert.equal(queued.strip.issued, null);
 });

@@ -2,8 +2,8 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
   CURSOR_MODE, CURSOR_SURFACE, ESCAPE_GUARD_MS,
-  cursorActive, cursorBlockingSurfaces, cursorClear, cursorClose, cursorEscape,
-  cursorHint, cursorLockGained, cursorLockLost, cursorOpen, cursorReset,
+  cursorActive, cursorBlockingSurfaces, cursorClear, cursorClose, cursorCombatKeysBlocked, cursorEscape,
+  cursorHint, cursorKeyboardOwner, cursorLockGained, cursorLockLost, cursorOpen, cursorReset,
   cursorSurfaceText, cursorToggle, initialCursorMode,
 } from './cursor-mode.mjs';
 
@@ -28,6 +28,37 @@ test('opening a second surface keeps the cursor and does not re-clear inputs', (
   assert.equal(second.effects.unlock, false);
   assert.equal(second.effects.clearInput, false);
   assert.equal(cursorOpen(second.state, CURSOR_SURFACE.CHAT).changed, false, 'surface registration is idempotent');
+});
+
+test('the first interactive surface clears held inputs even when the free cursor is already on', () => {
+  const free = cursorToggle(combat()).state;
+  const spend = cursorOpen(free, CURSOR_SURFACE.SPEND);
+  assert.equal(spend.effects.unlock, false, 'the pointer is already free');
+  assert.equal(spend.effects.clearInput, true, 'a held movement key must not drive the actor through the spend window');
+  const chat = cursorOpen(spend.state, CURSOR_SURFACE.CHAT);
+  assert.equal(chat.effects.clearInput, false, 'a second stacked surface does not re-clear');
+});
+
+test('keyboard priority is centralized across stacked interactive surfaces', () => {
+  assert.equal(cursorKeyboardOwner(combat()), null, 'combat has no keyboard owner');
+  assert.equal(cursorKeyboardOwner(cursorToggle(combat()).state), null, 'the free cursor is implicit, not an owner');
+  const spend = cursorOpen(combat(), CURSOR_SURFACE.SPEND).state;
+  assert.equal(cursorKeyboardOwner(spend), CURSOR_SURFACE.SPEND);
+  const stacked = cursorOpen(spend, CURSOR_SURFACE.SCOREBOARD).state;
+  assert.equal(cursorKeyboardOwner(stacked), CURSOR_SURFACE.SPEND, 'the intermission window outranks the standings drawn over it');
+  const boardStandings = cursorOpen(cursorOpen(combat(), CURSOR_SURFACE.BOARD).state, CURSOR_SURFACE.SCOREBOARD).state;
+  assert.equal(cursorKeyboardOwner(boardStandings), CURSOR_SURFACE.SCOREBOARD, 'the explicit standings outrank the board peek');
+});
+
+test('interactive surfaces block combat keys while the board peek stays exempt', () => {
+  assert.equal(cursorCombatKeysBlocked(combat()), false);
+  assert.equal(cursorCombatKeysBlocked(cursorLockLost(combat(), {at: 5}).state), false, 'a released pointer keeps keys live until a surface opens');
+  assert.equal(cursorCombatKeysBlocked(cursorOpen(combat(), CURSOR_SURFACE.SPEND).state), true);
+  assert.equal(cursorCombatKeysBlocked(cursorOpen(combat(), CURSOR_SURFACE.RESPAWN).state), true);
+  assert.equal(cursorCombatKeysBlocked(cursorOpen(combat(), CURSOR_SURFACE.SCOREBOARD).state), true);
+  const board = cursorOpen(combat(), CURSOR_SURFACE.BOARD).state;
+  assert.equal(cursorCombatKeysBlocked(board), false, 'the board peek keeps order and movement keys live');
+  assert.equal(cursorCombatKeysBlocked(board, {allow: []}), true, 'callers can override the exemption');
 });
 
 test('closing the last surface returns to combat and requests lock', () => {

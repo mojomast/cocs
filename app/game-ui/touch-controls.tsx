@@ -15,11 +15,11 @@ const COMBAT_SMALL=['ads','crouch','reload','power','melee','mobility','grenade'
 const CAR_LABELS:Record<string,string>={crouch:'BRAKE',interact:'RESET',power:'BOOST',fire:'USE ITEM'};
 const STICK_RADIUS=66,STICK_KNOB=29,LOOK_TRAVEL=33;
 
-export function TouchControls({runtime,visible,onLook,onSwap,onPause,onFullscreen,fullscreen,mode}:{runtime:any;visible:boolean;onLook:(dx:number,dy:number)=>void;onSwap:()=>void;onPause:()=>void;onFullscreen?:()=>void;fullscreen?:boolean;mode?:string}){
- const race=mode==='puma-race',soccer=mode==='puma-soccer',car=race||soccer;
- const small=car?['crouch','interact']:COMBAT_SMALL;
- const big=car?(soccer?['power']:['power','fire']):['fire','jump'];
- const labels={...LABELS,...(car?CAR_LABELS:{})};
+export function TouchControls({runtime,visible,onLook,onSwap,onPause,onFullscreen,fullscreen,mode,interactActive=false,interactLabel='USE'}:{runtime:any;visible:boolean;onLook:(dx:number,dy:number)=>void;onSwap:()=>void;onPause:()=>void;onFullscreen?:()=>void;fullscreen?:boolean;mode?:string;interactActive?:boolean;interactLabel?:string}){
+ const race=mode==='puma-race',soccer=mode==='puma-soccer',car=race||soccer,lattice=mode==='cocs'||mode==='cocs-coop';
+ const small=car?['crouch','interact']:lattice?['ads','crouch','reload','power','mobility','grenade','swap']:COMBAT_SMALL;
+ const big=car?(soccer?['power']:['power','fire']):lattice&&interactActive?['fire','jump','interact']:['fire','jump'];
+ const labels:Record<string,string>={...LABELS,...(car?CAR_LABELS:{}),...(lattice?{interact:interactLabel}:{})};
  const moveBaseRef=useRef<HTMLDivElement|null>(null),moveKnobRef=useRef<HTMLElement|null>(null),lookBaseRef=useRef<HTMLDivElement|null>(null),lookKnobRef=useRef<HTMLElement|null>(null);
  const moveState=useRef<{id:number|null;origin:{x:number;y:number}}>({id:null,origin:{x:0,y:0}});
  const lookState=useRef<{id:number|null;origin:{x:number;y:number};last:{x:number;y:number}}>({id:null,origin:{x:0,y:0},last:{x:0,y:0}});
@@ -44,7 +44,7 @@ export function TouchControls({runtime,visible,onLook,onSwap,onPause,onFullscree
  const holdProps=(action:string)=>({onPointerDown:(e:ReactPointerEvent<HTMLButtonElement>)=>{e.preventDefault();e.stopPropagation();e.currentTarget.setPointerCapture?.(e.pointerId);press(action);},onPointerUp:(e:ReactPointerEvent<HTMLButtonElement>)=>{e.stopPropagation();release(action);},onPointerCancel:()=>release(action),onLostPointerCapture:()=>release(action)});
 
  if(!visible)return null;
- return <div className={`touch-layer${car?' touch-car':''}`} onContextMenu={e=>e.preventDefault()}>
+ return <div className={`touch-layer${car?' touch-car':''}${lattice?' touch-tactical':''}`} onContextMenu={e=>e.preventDefault()}>
   {!car&&<div className="touch-look" aria-hidden="true" onPointerDown={lookDown} onPointerMove={lookMove} onPointerUp={lookUp} onPointerCancel={lookUp} onLostPointerCapture={lookUp}><span className="touch-hint touch-hint--look"/><div className="touch-look-base" ref={lookBaseRef}><i className="touch-knob" ref={lookKnobRef}/></div></div>}
   <div className="touch-move-zone" aria-hidden="true" onPointerDown={moveDown} onPointerMove={moveMove} onPointerUp={moveUp} onPointerCancel={moveUp} onLostPointerCapture={moveUp}><span className="touch-hint touch-hint--move"/><div className="touch-move-base" ref={moveBaseRef}><i className="touch-knob" ref={moveKnobRef}/></div></div>
   <div className="touch-util">

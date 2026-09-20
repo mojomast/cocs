@@ -106,6 +106,15 @@ export const directorTier = id => DIRECTOR_TIERS[id] ?? DIRECTOR_TIERS[DEFAULT_C
 export const isCocsTier = id => COCS_TIERS.includes(String(id ?? '').toUpperCase());
 export const normalizeCocsTier = id => (isCocsTier(id) ? String(id).toUpperCase() : DEFAULT_COCS_TIER);
 
+// The tier a config launches at. The engine seam is `config.objective.tier`
+// (cocs.mjs); `config.coopTier` stays a documented legacy fallback. Unknown or
+// absent values resolve to the new-player default, so an existing saved config
+// stays valid. Pure, deterministic, no clock.
+export function configuredDirectorTier(config) {
+  const c = config && typeof config === 'object' ? config : {};
+  return normalizeCocsTier(c.objective?.tier ?? c.coopTier);
+}
+
 // The mode is 1–8 humans; the persistent Director garrison is capped so a solo
 // player is never outnumbered 1v7 by the passive AI. Overflow bot seats fill
 // team 0 as AI allies (the "bot-fillable, no queue floor" rule, design §1.2).
@@ -114,6 +123,37 @@ export const COOP_GARRISON_BOTS = 2;
 // to the floor so the operation is winnable without a queue ("bot-fillable, no
 // queue floor").
 export const COOP_TEAM_FLOOR = 4;
+
+// ---------------------------------------------------------------------------
+// OPERATIONS roster view (F06). `core.mjs` seatTeam fills the team floor from
+// the first bot seats, then crews the persistent Director garrison, then sends
+// any overflow back to team 0. This helper mirrors that exact order for the
+// setup/preview screens; a focused test compares it against real Match rosters
+// so the two cannot drift. `enemyBots` is the garrison only — the Director's
+// wave force is spawned separately and is never a bot seat.
+// ---------------------------------------------------------------------------
+export function coopRoster({ humans = 1, bots = 0 } = {}) {
+  const human = Math.max(1, Math.round(Number(humans) || 1));
+  const botCount = Math.max(0, Math.round(Number(bots) || 0));
+  const fill = Math.max(0, COOP_TEAM_FLOOR - human);
+  let alliedBots = 0, garrisonBots = 0;
+  for (let index = 0; index < botCount; index++) {
+    if (index < fill) { alliedBots++; continue; }
+    if (index - fill < COOP_GARRISON_BOTS) { garrisonBots++; continue; }
+    alliedBots++;
+  }
+  return Object.freeze({
+    humans: human,
+    bots: botCount,
+    alliedBots,
+    allies: human + alliedBots,
+    garrisonBots,
+    enemyBots: garrisonBots,
+    teamFloor: COOP_TEAM_FLOOR,
+    garrisonCap: COOP_GARRISON_BOTS,
+    autoFill: true,
+  });
+}
 
 // Generous one-sided economy (design §1.5). Mode-local: `cocs` PvPvE keeps its
 // tighter 80/240 constants.
@@ -345,6 +385,31 @@ export function directorWavePlan(waveIndex, tierId = DEFAULT_COCS_TIER) {
     boss: plan.boss === true,
     intermission: tier.intermissionSeconds,
   };
+}
+
+// Setup-facing wave summary (F06): the same `directorWavePlan` data the engine
+// consumes, reduced to the labels the Operations setup screen promises. Frozen
+// and deterministic so both the preview and the match read one table.
+export function coopWaveSummary(tierId = DEFAULT_COCS_TIER) {
+  const tier = directorTier(tierId);
+  const waves = OPERATIONS_WAVES.map(plan => directorWavePlan(plan.wave, tier.id));
+  const fronts = waves.map(plan => plan.fronts);
+  const timers = waves.map(plan => plan.timer);
+  const clock = seconds => `${Math.floor(seconds / 60)}:${String(Math.round(seconds % 60)).padStart(2, '0')}`;
+  const frontMin = Math.min(...fronts), frontMax = Math.max(...fronts);
+  const timerMin = Math.min(...timers), timerMax = Math.max(...timers);
+  const frontText = frontMin === frontMax ? `${frontMin} ${frontMin === 1 ? 'FRONT' : 'FRONTS'}` : `${frontMin}–${frontMax} FRONTS`;
+  return Object.freeze({
+    tier: tier.id,
+    count: waves.length,
+    frontMin,
+    frontMax,
+    timerMin,
+    timerMax,
+    timerText: `${clock(timerMin)}–${clock(timerMax)}`,
+    copy: `${waves.length} WAVES · ${frontText} · ${clock(timerMin)}–${clock(timerMax)}`,
+    waves: Object.freeze(waves.map(plan => Object.freeze({wave: plan.wave, label: plan.label, fronts: plan.fronts, timer: plan.timer, boss: plan.boss}))),
+  });
 }
 
 // PRESSURE cost of a composition; used to guarantee "no free stats".

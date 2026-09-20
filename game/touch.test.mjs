@@ -63,20 +63,23 @@ test('applyTouchAction tracks held buttons and latches one-shot actions',()=>{
  assert.equal(runtime.touch.crouch,true);
  assert.equal(runtime.touch.mobility,true,'mobility is a held touch button');
  assert.deepEqual(runtime.voice.talking,[true]);
- applyTouchAction(runtime,'jump',true);
+  applyTouchAction(runtime,'jump',true);
  applyTouchAction(runtime,'reload',true);
  applyTouchAction(runtime,'power',true);
  applyTouchAction(runtime,'interact',true);
  applyTouchAction(runtime,'melee',true);
- assert.equal(runtime.jump,true);
+  assert.equal(runtime.jump,true);
+  assert.equal(runtime.touch.jump,true,'jump remains held for landing re-arm');
  assert.equal(runtime.reload,true);
  assert.equal(runtime.power,true);
  assert.equal(runtime.interact,true);
  assert.equal(runtime.melee,true);
- // Releasing one-shots must not re-arm them, and swap is handled by the caller.
- applyTouchAction(runtime,'jump',false);
+  // Releasing jump clears the held state without erasing the unconsumed edge;
+  // other one-shots do not re-arm and swap is handled by the caller.
+  applyTouchAction(runtime,'jump',false);
  applyTouchAction(runtime,'swap',true);
- assert.equal(runtime.jump,true);
+  assert.equal(runtime.jump,true);
+  assert.equal(runtime.touch.jump,false);
  applyTouchAction(runtime,'fire',false);
  applyTouchAction(runtime,'ads',false);
  applyTouchAction(runtime,'crouch',false);

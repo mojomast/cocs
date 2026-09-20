@@ -1,12 +1,23 @@
 // In-game patch notes. The title-screen footer is the running version; this
 // module is the human-readable release digest the Changelog screen renders. The
 // full historical record lives in docs/CHANGELOG.md and is linked from the UI.
-export const RELEASE_VERSION = 'v8.3';
-export const RELEASE_CODENAME = 'CLARITY';
+export const RELEASE_VERSION = 'v8.4';
+export const RELEASE_CODENAME = 'FIELDCRAFT';
 export const REPO_URL = 'https://github.com/mojomast/tokenarena';
 export const FULL_CHANGELOG_URL = `${REPO_URL}/blob/main/docs/CHANGELOG.md`;
 
 export const CHANGELOG = [
+  {version:'v8.4',codename:'FIELDCRAFT',date:'2026-09-20',tag:'Truthful objectives, feasible tactics, uninterrupted controls, predictable setup and results that teach the next match',highlights:[
+    'LATTICE now publishes and presents the actual win condition. PvP snapshots carry the authoritative dominance team, majority, progress, remaining hold time and accelerated state; Operations leads with waves cleared and HQ integrity. These public additive fields survive team filtering and older snapshots remain valid without a protocol-version change.',
+    'Objective feedback is shared across local and online play. Friendly captures, real friendly-point losses, wave clears, HQ siege, order completion and local refusals use relevance rather than ownership alone; bounded priority, deduplication and expiry keep an urgent siege or capture loss above routine traffic while opponent-private actions remain private.',
+    'The coach, command strip and board share one adjacency- and navigation-backed target model. Advice holds through small movement, an HQ siege overrides optional pushes, enemy frontier retakes remain available, authored node labels replace internal ids, and orders read QUEUED until the authoritative simulation accepts, completes or refuses them with a useful recovery action.',
+    'Passive Tab standings and the automatic death summary no longer release pointer lock or clear combat input. An explicit next-spawn editor owns loadout changes, stacked surfaces have one keyboard owner, held purchase keys cannot repeat, and returning to combat restores input once.',
+    'Quick Start is predictable: recommended LATTICE and training entries reset custom rules, every launch card previews effective map, roster, duration and modifiers, Operations explains allied fill versus Director waves, and Director D1-D4 is configured separately from bot aim/reaction difficulty.',
+    'The short-screen LATTICE HUD keeps one objective, vitals, interaction and wave/HQ state in the combat view while economy, route and pressure diagnostics move into a tactical disclosure. Remapped power, mobility, interaction and grenade labels reach selection, training and HUD surfaces; touch jump is a held control and LATTICE touch exposes a contextual use action.',
+    'Results lead with why the match ended and what the player contributed, including connected hold/captures/orders, Operations waves/HQ/spending, campaign checkpoints and Horde progress. XP categories reconcile to the granted award, one attainable challenge is highlighted and the primary retry/rematch/practice action preserves the intended context without duplicating rewards.',
+    'No combat, weapon or Director-tier balance was changed. The documented first-time-player protocol remains the required human evidence gate before tuning; D2-D4 Operations measurement remains deferred.',
+    'Scope: simulation snapshot and server visibility code changed, so this release restarts both the web app and authoritative game server; connected multiplayer clients briefly disconnect.',
+  ]},
   {version:'v8.3',codename:'CLARITY',date:'2026-09-19',tag:'Readable numbers, compact spectating, steadier action cameras and player-paced Field Training',highlights:[
     'Numbers are formatted for a glance: operator stats, settings, objective scores, economy, cooldowns and results lose floating-point tails and unnecessary trailing zeroes. Long countdowns use whole seconds; the last five seconds retain useful tenths. Spendable balances round down so the display cannot promise an unaffordable purchase.',
     'Spectating uses a compact, collapsible side roster with one followed-bot detail area, team alive counts, health and kills. Previous/next and camera controls remain available, inactive actors keep their place, and the selected bot now drives the local camera and HUD together.',

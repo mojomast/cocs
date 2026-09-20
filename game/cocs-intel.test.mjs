@@ -8,7 +8,7 @@ import assert from 'node:assert/strict';
 import {Match} from './core.mjs';
 import {NetClient, NetHarness} from './net.mjs';
 import {snapshotDelta,applySnapshotDelta} from './protocol.mjs';
-import {COCS_FILTER_RULES,COCS_PUBLIC_EVENTS,filterCocsSnapshot,cocsEventVisible,filterCocsEvents} from './cocs-intel.mjs';
+import {COCS_FILTER_RULES,COCS_PUBLIC_EVENTS,COCS_PUBLIC_FIELDS,filterCocsSnapshot,cocsEventVisible,filterCocsEvents} from './cocs-intel.mjs';
 
 const seeded = (seed = 7) => { let n = seed; return () => ((n = (Math.imul(n, 1664525) + 1013904223) >>> 0) / 4294967296); };
 const clone = value => JSON.parse(JSON.stringify(value));
@@ -78,6 +78,8 @@ test('the field table is deep-frozen and documents every rule kind', () => {
  }
  assert.ok(Object.isFrozen(COCS_PUBLIC_EVENTS));
  assert.equal(COCS_PUBLIC_EVENTS.includes('cocs-capture'), true);
+ assert.ok(Object.isFrozen(COCS_PUBLIC_FIELDS));
+ assert.deepEqual([...COCS_PUBLIC_FIELDS], ['dominance', 'outcome']);
 });
 
 test('team 1 never sees team-0 private sections and keeps its own plus shared fields', () => {
@@ -114,7 +116,7 @@ test('team 1 never sees team-0 private sections and keeps its own plus shared fi
  assert.deepEqual(filtered.cocs.req.map(entry => entry.id).sort((a, b) => a - b), [...team1].sort((a, b) => a - b));
 
  // Shared truth arrives unchanged.
- for (const key of ['tick', 'nodes', 'scores', 'liveNodeIds', 'winner', 'fluxCap', 'orderStats', 'scoutCap', 'scanRadius', 'spotSeconds', 'spotBonus', 'traversal', 'rung']) {
+ for (const key of ['tick', 'nodes', 'scores', 'liveNodeIds', 'winner', 'dominance', 'outcome', 'fluxCap', 'orderStats', 'scoutCap', 'scanRadius', 'spotSeconds', 'spotBonus', 'traversal', 'rung']) {
   assert.deepEqual(filtered.cocs[key], snapshot.cocs[key], `${key} passes through`);
  }
  // Enemy actor wallets are stripped; own-team wallets survive.
@@ -163,6 +165,50 @@ test('the spectator view is public-only for both teams', () => {
  // Unknown teams are spectators too.
  assert.deepEqual(filterCocsSnapshot(snapshot, 9).cocs.intel, {});
  assert.deepEqual(filterCocsSnapshot(snapshot, '1').cocs.intel, {});
+});
+
+test('dominance and outcome progress are public: no rule, both teams, spectators', () => {
+ const snapshot = pvpSnapshot();
+ const team0 = filterCocsSnapshot(snapshot, 0);
+ const team1 = filterCocsSnapshot(snapshot, 1);
+ const spectator = filterCocsSnapshot(snapshot, null);
+ for (const field of COCS_PUBLIC_FIELDS) {
+  assert.ok(Object.hasOwn(snapshot.cocs, field), `authoritative snapshot publishes ${field}`);
+  assert.equal(COCS_FILTER_RULES.some(rule => rule.path === field || rule.path.startsWith(`${field}.`)), false, `${field} has no private filter rule`);
+  assert.equal(team0.cocs[field], snapshot.cocs[field], `${field} reaches team 0 by reference`);
+  assert.equal(team1.cocs[field], snapshot.cocs[field], `${field} reaches team 1 by reference`);
+  assert.equal(spectator.cocs[field], snapshot.cocs[field], `${field} reaches spectators by reference`);
+ }
+ // The PvP race publishes the full public contract both teams need.
+ const dominance = snapshot.cocs.dominance;
+ for (const key of ['team', 'progress', 'target', 'remaining', 'fast', 'count', 'fastCount', 'counts', 'breakCount', 'hold', 'fastHold']) {
+  assert.ok(Object.hasOwn(dominance, key), `dominance publishes ${key}`);
+ }
+ assert.equal(dominance.team, null, 'a fresh match has no controlling team');
+ assert.ok(dominance.count > 0, 'the outright-majority requirement is published');
+ assert.ok(dominance.fastCount >= dominance.count, 'the accelerated threshold is published');
+ assert.equal(snapshot.cocs.outcome.mode, 'pvp');
+ assert.equal(snapshot.cocs.outcome.waves, null);
+ assert.equal(snapshot.cocs.outcome.hq, null);
+});
+
+test('a capture event carries previousOwner publicly to both teams and spectators', () => {
+ const capture = {type: 'cocs-capture', team: 1, node: 'front-0', previousOwner: 0, participants: [5], reward: {op: 10, req: 8}};
+ assert.equal(cocsEventVisible(capture, 0), true, 'the losing team keeps the loss cue');
+ assert.equal(cocsEventVisible(capture, 1), true, 'the capturing team keeps the secured cue');
+ assert.equal(cocsEventVisible(capture, null), true, 'spectators keep the public world event');
+ assert.deepEqual(filterCocsEvents([capture], 1)[0].previousOwner, 0, 'the additive field survives filtering');
+});
+
+test('snapshots without the additive outcome fields still filter cleanly', () => {
+ const snapshot = pvpSnapshot();
+ delete snapshot.cocs.dominance;
+ delete snapshot.cocs.outcome;
+ const filtered = filterCocsSnapshot(snapshot, 1);
+ assert.equal('dominance' in filtered.cocs, false, 'absent dominance stays absent (reads neutral in the HUD)');
+ assert.equal('outcome' in filtered.cocs, false);
+ assert.deepEqual(filtered.cocs.nodes, snapshot.cocs.nodes);
+ assert.deepEqual(filterCocsSnapshot(snapshot, null).cocs.scores, snapshot.cocs.scores);
 });
 
 test('the co-op command block is team 0 only and its per-team maps are filtered', () => {
@@ -221,6 +267,8 @@ test('filtered views still round-trip through snapshot deltas', () => {
  const rebuilt = applySnapshotDelta(base, patch);
  assert.deepEqual(rebuilt, next, 'team-1 delta chain rebuilds the filtered state');
  assert.deepEqual(Object.keys(rebuilt.cocs.intel), ['1'], 'the rebuilt state stays redacted');
+ assert.deepEqual(rebuilt.cocs.dominance, next.cocs.dominance, 'the public dominance race survives the delta chain');
+ assert.equal(rebuilt.cocs.outcome.mode, 'pvp');
 });
 
 test('team-tagged COCS events are private; public and non-COCS events are shared', () => {

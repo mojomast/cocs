@@ -43,20 +43,20 @@ export function applyLook(look,dx,dy,sensitivity=1,invert=false){
 }
 export const isTouchDevice=()=>typeof window!=='undefined'&&(window.matchMedia?.('(pointer: coarse)')?.matches===true||(typeof navigator!=='undefined'&&navigator.maxTouchPoints>0));
 // Apply an on-screen button press/release to the imperative runtime. Held actions
-// (fire, ADS, crouch, mobility, voice) track the pointer; one-shot actions (jump,
-// reload, power, interact) only latch on press and are consumed by the
-// simulation loop.
+// (fire, ADS, jump, crouch, mobility, voice) track the pointer; jump is held so
+// touch gets the same landing re-arm/auto-hop semantics as a desktop bind.
+// Reload, power and interact stay one-shot edges consumed by the sim loop.
 export function applyTouchAction(runtime,action,pressed){
  if(!runtime)return null;
  runtime.touch??={};
   if(action==='fire'){runtime.touch.fire=pressed;if(pressed)runtime.fireTap=true;}
   else if(action==='ads')runtime.touch.ads=pressed;
- else if(action==='crouch')runtime.touch.crouch=pressed;
+  else if(action==='jump'){runtime.touch.jump=pressed;if(pressed)runtime.jump=true;}
+  else if(action==='crouch')runtime.touch.crouch=pressed;
  else if(action==='mobility')runtime.touch.mobility=pressed;
  else if(action==='voice')runtime.voice?.setPushToTalk?.(pressed);
  else if(pressed){
-  if(action==='jump')runtime.jump=true;
-  else if(action==='reload')runtime.reload=true;
+   if(action==='reload')runtime.reload=true;
   else if(action==='power')runtime.power=true;
   else if(action==='melee')runtime.melee=true;
   else if(action==='grenade')runtime.grenade=true;

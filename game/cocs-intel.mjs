@@ -89,10 +89,14 @@
 // Kept shared because it is world-observable or a public aggregate (both teams
 // see the same lattice / world truth, so it is not private information):
 // `tick`, `fieldSupport.nodes`, `nodes` (owner/progress/contest/hack/prime),
-// `scores`, `liveNodeIds`, `winner`, `fluxCap`, `orderStats`, `scoutCap`,
-// `scanRadius`, `spotSeconds`, `spotBonus`, `traversal` (devices/depots/
-// arrivals/stats), `rung`, `terminalState`, `terminals`, `primes`, the
-// OPERATIONS `director`/`waves`/`bonus`/`reserves`/`rewards` surface, and the
+// `scores`, `liveNodeIds`, `winner`, `dominance` (F03 public dominance race:
+// controlling team, required majority, authoritative remaining hold time,
+// accelerated state), `outcome` (F03 mode-aware public progress: Operations
+// waves/HQ; PvP keeps its race in `dominance`), `fluxCap`, `orderStats`,
+// `scoutCap`, `scanRadius`, `spotSeconds`, `spotBonus`, `traversal`
+// (devices/depots/arrivals/stats), `rung`, `terminalState`, `terminals`,
+// `primes`, the OPERATIONS
+// `director`/`waves`/`bonus`/`reserves`/`rewards` surface, and the
 // rest of the top-level `actors` array. `actors` still carries enemy positions
 // and gear for every peer — the §11.4/§12.8-acknowledged V1 limitation that true
 // fog (not this filter) is responsible for; this module never makes it worse.
@@ -102,9 +106,10 @@
 // The shared `events` feed carries the same leak (orders, scans, buys, role
 // spawns). Team-tagged `cocs-*` events are private to their team, except a
 // documented allow-list of world-observable events that both teams need for
-// presentation (`cocs-capture` drives the "secured"/"lost" earcons, terminals
-// and traversal are visible world channels). Every non-`cocs-*` event and every
-// event without a numeric `team` passes through unchanged.
+// presentation (`cocs-capture` drives the "secured"/"lost"/"enemy secured"
+// banners and its additive `previousOwner` field is public world truth;
+// terminals and traversal are visible world channels). Every non-`cocs-*` event
+// and every event without a numeric `team` passes through unchanged.
 
 const deepFreeze = value => {
  if (value !== null && typeof value === 'object' && !Object.isFrozen(value)) {
@@ -153,6 +158,14 @@ export const COCS_FILTER_RULES = deepFreeze([
  {path: 'command.route', kind: 'team-map'},
  {path: 'command.policy', kind: 'team-map'},
 ]);
+
+/**
+ * Public additive snapshot fields (F03). They carry no team-private data, so
+ * they deliberately have no filter rule: both teams and spectators receive the
+ * identical object. Kept as an explicit list so the visibility test can prove
+ * every one of them passes through unfiltered.
+ */
+export const COCS_PUBLIC_FIELDS = deepFreeze(['dominance', 'outcome']);
 
 /**
  * COCS events that stay readable by both teams (and spectators) even though

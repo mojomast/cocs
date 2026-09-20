@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {latticeCoach,latticeOrderKey,latticeBriefing} from './lattice-guide.mjs';
+import {latticeCoach,latticeOrderKey,latticeBriefing,latticeTargetModel} from './lattice-guide.mjs';
 
 const map={nodes:[{id:'hq-0',x:0,z:0,r:4,archetype:'hq'},{id:'front-0',x:20,z:0,r:6,archetype:'front'},{id:'relay-0',x:40,z:0,r:6,archetype:'relay'}],lattice:[['hq-0','front-0'],['front-0','relay-0']]};
 const fixture=()=>({config:{mode:'cocs'},cocs:{nodes:map.nodes.map(n=>({...n,owner:n.archetype==='hq'?0:null,live:n.archetype!=='hq'}))}});
@@ -46,4 +46,114 @@ test('briefings honor remaps and distinguish automatic capture from interact act
  assert.match(guide.movement,/L uses/);
  assert.match(guide.objective,/five Director waves/);
  assert.equal(latticeBriefing('deathmatch'),null);
+});
+
+// ---------------------------------------------------------------------------
+// F04 — one shared legal-target model, hysteresis and the siege override.
+// ---------------------------------------------------------------------------
+const labelledMap={
+ nodes:[
+  {id:'hq-0',x:0,z:0,r:4,archetype:'hq',label:'WEST HQ'},
+  {id:'front-0',x:-30,z:0,r:6,archetype:'front',label:'WEST BASTION'},
+  {id:'econ-n',x:30,z:0,r:6,archetype:'front',label:'NORTH SIPHON'},
+  {id:'front-1',x:60,z:0,r:6,archetype:'front',label:'EAST BASTION'},
+ ],
+ lattice:[['hq-0','front-0'],['hq-0','econ-n'],['econ-n','front-1']],
+ bounds:{minX:-80,maxX:80,minZ:-40,maxZ:40},
+};
+const liveNodes=(overrides={})=>({
+ tick:300, coop:true,
+ nodes:labelledMap.nodes.map(node=>({...node,owner:node.archetype==='hq'?0:null,live:node.archetype==='hq'?false:true,progress:[0,0],contested:false})),
+ ...overrides,
+});
+const hudFor=snapshot=>({config:{mode:'cocs-coop'},cocs:snapshot});
+const siege=(extra={})=>({director:{siege:{armed:true,hqId:'hq-0',health:60,max:100,attackers:3,defenders:1,...extra}}});
+const coopPlayer=(x=0)=>({id:0,team:0,x,z:0,health:100});
+
+test('the shared model only calls a neutral node legal when it is adjacent to owned ground',()=>{
+ const model=latticeTargetModel(liveNodes(),labelledMap,coopPlayer(0));
+ const front=model.byId['front-0'],far=model.byId['front-1'];
+ assert.equal(front.legal,true,'front-0 links straight to the owned HQ');
+ assert.equal(front.attackable,true);
+ assert.equal(front.adjacent,true);
+ assert.equal(front.supply,'LINKED');
+ assert.equal(far.legal,false,'front-1 is only linked to a neutral node, not owned ground');
+ assert.equal(model.ranked.some(node=>node.id==='front-1'),false);
+ assert.deepEqual(model.ranked.map(node=>node.id).sort(),['econ-n','front-0']);
+});
+
+test('small positional changes hold advice; an urgent event supersedes it',()=>{
+ const snapshot=liveNodes();
+ const first=latticeCoach(hudFor(snapshot),coopPlayer(-5),labelledMap);
+ assert.equal(first.targetId,'front-0');
+ assert.equal(first.advice.held,false);
+ // Without hysteresis the distance tiebreak flips to econ-n on the east side.
+ const east=latticeCoach(hudFor(snapshot),coopPlayer(5),labelledMap);
+ assert.equal(east.targetId,'econ-n');
+ const held=latticeCoach(hudFor(snapshot),coopPlayer(5),labelledMap,{previous:first});
+ assert.equal(held.targetId,'front-0','a small positional change must not oscillate the advice');
+ assert.equal(held.advice.held,true);
+ assert.equal(held.advice.urgent,false);
+ // An enemy starting a capture on our node is an urgent event and supersedes.
+ const threatened=snapshot.nodes.map(node=>node.id==='hq-0'?{...node,owner:0}:node);
+ const contested=liveNodes({nodes:threatened.map(node=>node.id==='front-0'?{...node,owner:0,contested:true}:node)});
+ const urgent=latticeCoach(hudFor(contested),coopPlayer(5),labelledMap,{previous:first});
+ assert.equal(urgent.targetId,'front-0','the contested hold is the new urgent target');
+ assert.equal(urgent.advice.urgent,true);
+ // Once a held capture target is ours, the old capture advice is invalid.
+ const captured=liveNodes({nodes:threatened.map(node=>node.id==='front-0'?{...node,owner:0}:node)});
+ const advanced=latticeCoach(hudFor(captured),coopPlayer(5),labelledMap,{previous:first});
+ assert.equal(advanced.targetId,'econ-n','a completed capture releases the held target');
+ assert.equal(advanced.advice.held,false);
+});
+
+test('an Operations HQ siege overrides optional forward pushes and defers them',()=>{
+ const snapshot=liveNodes(siege());
+ const model=latticeTargetModel(snapshot,labelledMap,coopPlayer(0));
+ assert.equal(model.siege.active,true);
+ assert.equal(model.siege.nodeId,'hq-0');
+ assert.equal(model.shortlist[0].id,'hq-0','the siege defence leads the shortlist');
+ assert.equal(model.byId['front-0'].deferred,true,'forward pushes are marked optional');
+ const coach=latticeCoach(hudFor(snapshot),coopPlayer(5),labelledMap,{previous:latticeCoach(hudFor(liveNodes()),coopPlayer(5),labelledMap)});
+ assert.equal(coach.targetId,'hq-0','the siege supersedes a held forward push');
+ assert.match(coach.title,/DEFEND WEST HQ/);
+ assert.match(coach.detail,/forward pushes can wait/);
+ assert.equal(coach.advice.kind,'siege');
+ assert.equal(coach.advice.urgent,true);
+ const lifted=latticeCoach(hudFor(liveNodes()),coopPlayer(5),labelledMap,{previous:coach});
+ assert.equal(lifted.targetId,'econ-n','a lifted siege returns the field advice');
+});
+
+test('a capture staging from a cut-off owned node ranks below a linked route',()=>{
+ // front-1 is enemy-held and only retakeable through front-0, which no longer
+ // traces a supply line back to the HQ; econ-n hangs directly off the HQ.
+ const graph={nodes:[
+  {id:'hq-0',x:0,z:0,r:4,archetype:'hq',label:'WEST HQ'},
+  {id:'front-0',x:-20,z:0,r:6,archetype:'front',label:'WEST BASTION'},
+  {id:'front-1',x:-40,z:0,r:6,archetype:'front',label:'EAST BASTION'},
+  {id:'econ-n',x:20,z:0,r:6,archetype:'economy',label:'NORTH SIPHON'},
+ ],lattice:[['hq-0','econ-n'],['hq-0','front-0'],['front-0','front-1']]};
+ const snapshot={tick:300,nodes:graph.nodes.map(node=>({...node,owner:node.id==='front-0'||node.id==='hq-0'?0:node.id==='front-1'?1:null,live:true}))};
+ // CUT front-0 so the owned node (and the retake staged through it) loses its line home.
+ const model=latticeTargetModel(snapshot,graph,coopPlayer(18),{cuts:['front-0']});
+ assert.equal(model.byId['front-0'].connected,false);
+ assert.equal(model.byId['front-0'].supply,'CUT OFF');
+ assert.equal(model.byId['front-1'].connected,false,'the retake staging through a cut node is not linked');
+ assert.equal(model.byId['econ-n'].legal,true);
+ assert.equal(model.byId['econ-n'].connected,true);
+ assert.equal(model.ranked[0].id,'econ-n','a linked route outranks a cut-off push');
+ const coach=latticeCoach({config:{mode:'cocs'},cocs:snapshot},coopPlayer(18),graph,{cuts:['front-0']});
+ assert.match(coach.title,/NORTH SIPHON/);
+ assert.doesNotMatch(coach.title,/front-/i);
+});
+
+test('a node without a navigation route is never recommended',()=>{
+ const snapshot=liveNodes();
+ const model=latticeTargetModel(snapshot,labelledMap,coopPlayer(0),{route:point=>point.x>0?null:42});
+ assert.equal(model.routeSource,'navigation');
+ assert.equal(model.byId['econ-n'].legal,true,'adjacency alone does not certify a ground route');
+ assert.equal(model.byId['econ-n'].reachable,false,'no navigation route to the north siphon');
+ assert.deepEqual(model.ranked.map(node=>node.id),['front-0']);
+ const coach=latticeCoach(hudFor(snapshot),coopPlayer(0),labelledMap,{route:point=>point.x>0?null:42});
+ assert.equal(coach.targetId,'front-0','only the routed node is suggested');
 });

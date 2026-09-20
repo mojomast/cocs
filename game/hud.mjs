@@ -246,7 +246,65 @@ export function scoreAnnouncer(hud, prevScores) {
 // event to the banner/announcer model the match page renders. Kept separate
 // from `scoreAnnouncer` because OP income is continuous while these beats are
 // event-driven: a capture, an order completing, a refusal, a terminal.
+//
+// `mine` reports friendly ownership only; it is deliberately NOT the banner
+// filter (F02). An enemy capture of a friendly node ("lost") and of a neutral
+// node ("taken") both have to reach the HUD, and the teamless Operations
+// wave/siege beats describe the player's own mission. Relevance is explicit in
+// `relevance`; replacement is the bounded policy in `acceptCocsAnnouncement`.
 const reasonWords = value => String(value ?? 'blocked').replace(/-/g, ' ').toUpperCase();
+
+// Bounded announcement ranks. A strictly higher rank replaces what is showing;
+// equal rank replaces on a different dedupe key; identical keys are absorbed
+// while live; anything lower cannot displace an urgent siege or capture-loss
+// banner before its TTL expires.
+export const COCS_ANNOUNCE_PRIORITY = Object.freeze({
+  siegeLifted: 110,
+  siege: 100,
+  loss: 90,
+  secure: 75,
+  neutral: 60,
+  wave: 55,
+  order: 45,
+  terminal: 40,
+  refused: 35,
+  issued: 15,
+});
+
+// Per-beat display lifetime: urgent objective changes hold longer than a
+// routine order beat, then expire so a stale banner never outlives the moment.
+const COCS_ANNOUNCE_TTL = Object.freeze({siege: 6, loss: 5, secure: 4, neutral: 3.5, wave: 3.5, order: 3, terminal: 3, refused: 3, issued: 1.6});
+
+export const cocsAnnouncePriority = beat => {
+  const value = Number(beat?.priority);
+  return Number.isFinite(value) ? value : 0;
+};
+
+export const cocsAnnouncementTTL = beat => {
+  const value = Number(beat?.ttl);
+  return Number.isFinite(value) && value > 0 ? value : 1.6;
+};
+
+// The single-cue replacement policy. Pure: returns `{cue, at}` when the new
+// beat takes the banner, or null when the showing cue survives. `at` is the
+// caller's authoritative match/snapshot time, never a wall clock.
+export function acceptCocsAnnouncement(current, currentAt, beat, at) {
+  if (!beat || typeof beat !== 'object') return null;
+  const time = Number(at);
+  const when = Number.isFinite(time) ? time : 0;
+  if (!current || typeof current !== 'object') return {cue: beat, at: when};
+  const shownAt = Number(currentAt);
+  const age = Number.isFinite(shownAt) ? when - shownAt : Infinity;
+  // A stale cue never blocks: notifications expire on their own TTL.
+  if (!(age >= 0) || age >= cocsAnnouncementTTL(current)) return {cue: beat, at: when};
+  // The same event replayed or repeated does not double-fire.
+  if (beat.dedupeKey && beat.dedupeKey === current.dedupeKey) return null;
+  const rank = cocsAnnouncePriority(beat), shown = cocsAnnouncePriority(current);
+  if (rank > shown) return {cue: beat, at: when};
+  if (rank === shown) return {cue: beat, at: when};
+  return null;
+}
+
 export function cocsAnnouncement(event, player) {
   if (!event || typeof event !== 'object') return null;
   const team = player?.team === 1 ? 1 : 0;
@@ -255,38 +313,81 @@ export function cocsAnnouncement(event, player) {
   switch (event.type) {
     case 'cocs-capture': {
       const label = String(event.label ?? event.node ?? 'NODE').toUpperCase();
+      const previousOwner = event.previousOwner === 0 || event.previousOwner === 1 ? Number(event.previousOwner) : null;
       const parts = [];
       if (Number(event.reward?.op) > 0) parts.push(`+${Number(event.reward.op)} OP`);
       if (paid && Number(event.reward?.req) > 0) parts.push(`+${Number(event.reward.req)} REQ`);
       if (event.orderCompleted === true) parts.push('ORDER COMPLETE');
-      return {kind: 'capture', team: event.team, mine, text: `${mine ? 'OBJECTIVE SECURED' : 'OBJECTIVE LOST'} · ${label}`, detail: parts.join(' · ')};
+      if (mine && previousOwner !== null && previousOwner !== team) parts.push(`TAKEN FROM ${teamName(previousOwner)}`);
+      const common = {kind: 'capture', team: event.team, previousOwner,
+        dedupeKey: `capture:${event.team}:${event.node ?? event.label ?? ''}`};
+      if (mine) return {...common, mine: true, relevance: 'friendly', priority: COCS_ANNOUNCE_PRIORITY.secure, ttl: COCS_ANNOUNCE_TTL.secure,
+        text: `OBJECTIVE SECURED · ${label}`, detail: parts.join(' · ')};
+      // Losing a friendly node and an enemy taking a neutral point are
+      // different beats: only the first one is "lost" to this team.
+      if (previousOwner === team) return {...common, mine: false, relevance: 'enemy', priority: COCS_ANNOUNCE_PRIORITY.loss, ttl: COCS_ANNOUNCE_TTL.loss,
+        text: `OBJECTIVE LOST · ${label}`, detail: parts.join(' · ')};
+      return {...common, mine: false, relevance: 'enemy', priority: COCS_ANNOUNCE_PRIORITY.neutral, ttl: COCS_ANNOUNCE_TTL.neutral,
+        text: `ENEMY SECURED · ${label}`, detail: [...parts, 'NEUTRAL NODE'].join(' · ')};
     }
     case 'cocs-order-complete': {
+      if (event.team !== team) return null; // team-private order feed
       const label = String(event.label ?? event.node ?? 'NODE').toUpperCase();
       const contributed = Array.isArray(event.contributors) && event.contributors.includes(player?.id);
-      return {kind: 'order', team: event.team, mine, text: `ORDER COMPLETE · ${label}`,
+      return {kind: 'order', team: event.team, mine: true, relevance: 'friendly', previousOwner: null,
+        priority: COCS_ANNOUNCE_PRIORITY.order, ttl: COCS_ANNOUNCE_TTL.order,
+        dedupeKey: `order:${event.team}:${event.node ?? ''}:${event.verb ?? ''}`,
+        text: `ORDER COMPLETE · ${label}`,
         detail: [contributed ? 'YOUR SQUAD PAID' : 'TEAM PAID', Number(event.teamOP) > 0 ? `+${Number(event.teamOP)} TEAM OP` : ''].filter(Boolean).join(' · ')};
     }
     case 'cocs-order-rejected':
-      return {kind: 'refused', team: event.team, mine, text: `ORDER REFUSED · ${reasonWords(event.reason)}`,
+      if (event.team !== team) return null; // team-private order feed
+      return {kind: 'refused', team: event.team, mine: true, relevance: 'friendly', previousOwner: null,
+        priority: COCS_ANNOUNCE_PRIORITY.refused, ttl: COCS_ANNOUNCE_TTL.refused,
+        dedupeKey: `refused:order:${event.team}:${event.reason ?? ''}:${event.verb ?? ''}`,
+        text: `ORDER REFUSED · ${reasonWords(event.reason)}`,
         detail: [event.verb, event.label ?? event.node].filter(Boolean).join(' · ').toUpperCase()};
     case 'coop-spend-rejected':
-      return {kind: 'refused', team, mine: true, text: `SPEND REFUSED · ${reasonWords(event.reason)}`, detail: String(event.verb ?? '').toUpperCase()};
+      return {kind: 'refused', team, mine: true, relevance: 'friendly', previousOwner: null,
+        priority: COCS_ANNOUNCE_PRIORITY.refused, ttl: COCS_ANNOUNCE_TTL.refused,
+        dedupeKey: `refused:spend:${event.reason ?? ''}:${event.verb ?? ''}`,
+        text: `SPEND REFUSED · ${reasonWords(event.reason)}`, detail: String(event.verb ?? '').toUpperCase()};
     case 'cocs-order':
-      return {kind: 'order-issued', team: event.team, mine, text: `${String(event.verb ?? 'ORDER').toUpperCase()} · ${String(event.label ?? event.node ?? '').toUpperCase()}`,
-        detail: mine ? 'ORDER SENT' : 'TEAM ORDER'};
+      if (event.team !== team) return null; // team-private order feed
+      return {kind: 'order-issued', team: event.team, mine: true, relevance: 'friendly', previousOwner: null,
+        priority: COCS_ANNOUNCE_PRIORITY.issued, ttl: COCS_ANNOUNCE_TTL.issued,
+        dedupeKey: `issued:${event.team}:${event.node ?? ''}:${event.verb ?? ''}`,
+        text: `${String(event.verb ?? 'ORDER').toUpperCase()} · ${String(event.label ?? event.node ?? '').toUpperCase()}`,
+        detail: 'ORDER SENT'};
     case 'cocs-terminal-hack':
     case 'cocs-terminal-deploy':
     case 'cocs-terminal-vault': {
       if (event.team !== team) return null;
-      return {kind: 'terminal', team, mine, text: `${String(event.type.split('-')[2] ?? 'TERMINAL').toUpperCase()} COMPLETE`, detail: String(event.terminal ?? '').toUpperCase()};
+      return {kind: 'terminal', team, mine: true, relevance: 'friendly', previousOwner: null,
+        priority: COCS_ANNOUNCE_PRIORITY.terminal, ttl: COCS_ANNOUNCE_TTL.terminal,
+        dedupeKey: `terminal:${event.type}:${event.terminal ?? ''}`,
+        text: `${String(event.type.split('-')[2] ?? 'TERMINAL').toUpperCase()} COMPLETE`, detail: String(event.terminal ?? '').toUpperCase()};
     }
-    case 'director-wave-cleared':
-      return {kind: 'wave', team, mine, text: `WAVE ${event.wave ?? ''} CLEARED`.trim(), detail: ''};
+    case 'director-wave-cleared': {
+      // Teamless in its normal shape: the Operations Director never clears a
+      // wave, so this is always the player's own mission beat.
+      const wave = Number(event.wave);
+      const cleared = Number(event.cleared), total = Number(event.waveCount);
+      const detail = Number.isFinite(cleared) && Number.isFinite(total) && total > 0
+        ? `WAVES ${formatNumber(cleared, 0)}/${formatNumber(total, 0)}` : '';
+      return {kind: 'wave', team, mine: true, relevance: 'friendly', previousOwner: null,
+        priority: COCS_ANNOUNCE_PRIORITY.wave, ttl: COCS_ANNOUNCE_TTL.wave,
+        dedupeKey: `wave:${Number.isFinite(wave) ? wave : ''}`,
+        text: `WAVE ${Number.isFinite(wave) ? wave : ''} CLEARED`.trim(), detail};
+    }
     case 'director-siege':
-      return {kind: 'siege', team, mine: true, text: 'HQ UNDER SIEGE', detail: 'FALL BACK AND CLEAR THE BREACH'};
+      return {kind: 'siege', team, mine: true, relevance: 'friendly', previousOwner: null,
+        priority: COCS_ANNOUNCE_PRIORITY.siege, ttl: COCS_ANNOUNCE_TTL.siege,
+        dedupeKey: `siege:${event.wave ?? ''}`, text: 'HQ UNDER SIEGE', detail: 'FALL BACK AND CLEAR THE BREACH'};
     case 'director-siege-lifted':
-      return {kind: 'siege', team, mine: true, text: 'HQ SECURE', detail: 'SIEGE LIFTED'};
+      return {kind: 'siege', team, mine: true, relevance: 'friendly', previousOwner: null,
+        priority: COCS_ANNOUNCE_PRIORITY.siegeLifted, ttl: COCS_ANNOUNCE_TTL.siege,
+        dedupeKey: `siege-lifted:${event.wave ?? ''}`, text: 'HQ SECURE', detail: 'SIEGE LIFTED'};
     default:
       return null;
   }
@@ -452,7 +553,7 @@ export const modeTargetText = (mode, target) => {
   if (mode?.id === 'holdout') return 'HOLD A QUORUM';
   if (mode?.id === 'uplink') return 'RUN THE RELAY';
   if (mode?.id === 'vip-escort') return 'ESCORT THE VIP';
-  if (isCocsMode(mode?.id)) return 'HOLD THE LATTICE';
+  if (isCocsMode(mode?.id)) return mode?.id === 'cocs-coop' ? 'CLEAR EVERY WAVE · KEEP THE HQ' : 'HOLD THE LATTICE';
   const goal = modeGoal(mode);
   return Number.isFinite(limit) ? `FIRST TO ${limit} ${goal}` : goal;
 };
@@ -605,6 +706,117 @@ export function cocsBoard(hud, player) {
   };
 }
 
+// ---------------------------------------------------------------------------
+// F03 public outcome progress. `snapshot.cocs.dominance` (PvP) and
+// `snapshot.cocs.outcome` (Operations waves/HQ) are authoritative; these views
+// only format them. Every field tolerates absence: an older or redacted
+// snapshot reads as a neutral "no live race" state and never throws, and the
+// remaining hold time is the sim's own `target - progress`, never a client
+// countdown.
+// ---------------------------------------------------------------------------
+const cocsWhole = value => Math.max(0, Math.floor(Number(value) || 0));
+
+export function cocsDominanceStatus(hud, player) {
+  const state = hud?.cocs?.dominance ?? hud?.cocs?.outcome?.dominance;
+  const viewer = player?.team === 0 || player?.team === 1 ? Number(player.team) : null;
+  const team = state?.team === 0 || state?.team === 1 ? Number(state.team) : null;
+  const target = Math.max(0, Number(state?.target) || 0);
+  const progress = Math.max(0, Number(state?.progress) || 0);
+  const remaining = Math.max(0, target - progress);
+  const counts = {0: cocsWhole(state?.counts?.[0]), 1: cocsWhole(state?.counts?.[1])};
+  const count = cocsWhole(state?.count);
+  const leader = counts[0] === counts[1] ? null : counts[0] > counts[1] ? 0 : 1;
+  const holding = team !== null;
+  return {
+    team, holding,
+    mine: holding && viewer !== null && team === viewer,
+    progress, target, remaining,
+    fast: state?.fast === true,
+    count, fastCount: Math.max(count, cocsWhole(state?.fastCount)),
+    counts, leader,
+    // Nodes the other side must take to break the outright majority and reset
+    // the ratchet; and nodes the current leader still needs to arm it.
+    breakCount: holding && count > 0 ? Math.max(0, counts[team] - count + 1) : 0,
+    needed: count > 0 && leader !== null ? Math.max(0, count - counts[leader]) : 0,
+    timeText: holding ? `${formatCountdown(remaining)}s` : null,
+  };
+}
+
+export function cocsOperationsStatus(hud) {
+  const cocs = hud?.cocs;
+  const waves = cocs?.outcome?.waves ?? cocs?.waves;
+  const hq = cocs?.outcome?.hq ?? cocs?.director?.siege;
+  const cleared = cocsWhole(waves?.cleared);
+  const total = cocsWhole(waves?.par ?? waves?.total);
+  const max = Math.max(0, Number(hq?.max) || 0);
+  const health = Math.max(0, Number(hq?.health) || 0);
+  const percent = Number.isFinite(Number(hq?.percent)) && Number(hq.percent) >= 0
+    ? Math.max(0, Math.min(1, Number(hq.percent)))
+    : max > 0 ? health / max : 0;
+  const known = max > 0 || total > 0;
+  return {
+    waves: {cleared, total},
+    waveText: total > 0 ? `${formatNumber(cleared, 0)} / ${formatNumber(total, 0)}` : 'UNKNOWN',
+    hq: {id: hq?.hqId ?? hq?.id ?? null, health: Math.round(health), max: Math.round(max), percent, armed: hq?.armed === true},
+    known,
+    hqText: known ? `HQ ${formatNumber(percent * 100, 0)}%` : 'HQ STATUS UNKNOWN',
+    siege: hq?.armed === true,
+  };
+}
+
+// Mode-specific primary status for the objective bar. Operations leads with
+// waves and HQ integrity (siege above the OP economy score); PvP leads with the
+// dominance race and what resets it. Reads only the public snapshot.
+export function cocsOutcomeView(hud, player, mode) {
+  const id = mode?.id ?? hud?.config?.mode;
+  const board = cocsBoard(hud, player);
+  const team = teamName(player?.team);
+  if (id === 'cocs-coop' || hud?.cocs?.coop === true || hud?.cocs?.outcome?.mode === 'operations') {
+    const ops = cocsOperationsStatus(hud);
+    const complete = ops.waves.total > 0 && ops.waves.cleared >= ops.waves.total;
+    const economy = `${formatNumber(board.myScore ?? 0, 0)} OP SCORE · ${formatNumber(board.myNodes ?? 0, 0)} NODES`;
+    return {
+      mode: 'operations',
+      title: ops.siege ? 'DEFEND THE HQ' : complete ? 'OPERATION COMPLETE' : 'CLEAR THE WAVES',
+      action: ops.siege
+        ? 'Fall back and clear the Director force from the HQ perimeter. Retake a node to lift the siege.'
+        : complete
+          ? 'All waves are down. Hold the field until the operation records.'
+          : 'Clear every Director wave and keep the HQ standing. OP is the economy score, not the win condition.',
+      detail: `WAVES ${ops.waveText} · ${ops.hqText} · ${economy}`,
+      status: ops.siege
+        ? `HQ UNDER SIEGE · ${ops.hqText} · WAVES ${ops.waveText}`
+        : `${ops.hqText} · WAVES ${ops.waveText} · ${formatNumber(board.myNodes ?? 0, 0)} NODES`,
+      operations: ops,
+    };
+  }
+  const dom = cocsDominanceStatus(hud, player);
+  const detail = `${team} ${scoreText(board.myScore ?? 0)} OP · ${board.myNodes ?? 0} NODES · ${board.liveCount} LIVE`;
+  if (dom.holding) {
+    const reset = dom.breakCount === 1 ? '1 NODE' : `${formatNumber(dom.breakCount, 0)} NODES`;
+    return {
+      mode: 'pvp',
+      title: dom.mine ? 'HOLD THE LATTICE' : 'BREAK THE DOMINANCE',
+      action: dom.mine
+        ? 'Keep the outright majority; the dominance timer resets the moment you drop below it.'
+        : `Break ${teamName(dom.team)}'s outright majority: ${dom.breakCount === 1 ? 'take a node' : `take ${formatNumber(dom.breakCount, 0)} nodes`} and the dominance timer resets.`,
+      detail,
+      status: dom.mine
+        ? `${teamName(dom.team)} DOMINANCE · ${dom.timeText} LEFT${dom.fast ? ' · FAST' : ''} · KEEP ${formatNumber(dom.counts[dom.team], 0)} NODES`
+        : `${teamName(dom.team)} DOMINANCE ${formatNumber(dom.counts[dom.team], 0)} NODES · ${dom.timeText} LEFT${dom.fast ? ' · FAST' : ''} · TAKE ${reset} TO RESET`,
+      dominance: dom,
+    };
+  }
+  return {
+    mode: 'pvp',
+    title: board.contestedCount ? 'BREAK THE LATTICE' : board.myNodes > 0 ? 'HOLD THE LATTICE' : 'TAKE THE LATTICE',
+    action: 'Capture a node next to one you already own. A node only pays while a supply line links it back to your HQ.',
+    detail,
+    status: board.contestedCount ? `${board.contestedCount} CONTESTED · ${board.hint}` : board.front ? `${board.front.label} FRONT · ${board.hint}` : 'HOLD THE LATTICE',
+    dominance: dom,
+  };
+}
+
 // One-line "why did this end" for the results screen. Reads only the frozen
 // snapshot plus `overReason` (which `Match.snapshot` already carries).
 export function cocsResultSummary(hud, player) {
@@ -640,13 +852,8 @@ export function commandBrief(hud, player, mode) {
   }
   if (id === 'ctf') return {title: carrying ? 'RETURN THE FLAG' : 'BREAK THEIR LINE', action: carrying ? 'Reach your base to capture.' : enemyFlag?.state === 'carried' ? 'Escort the carrier home.' : ownFlag?.state === 'dropped' ? 'Recover your flag.' : 'Take the enemy flag.', detail: `${team} ${carrying ? 'CARRIER' : 'DEFENSE'} · ${flagText(hud)}`, status: `${teamScore(hud, player?.team)} / ${target} CAPTURES`};
   if (isCocsMode(id)) {
-    const board = cocsBoard(hud, player), front = board.front;
-    return {
-      title: board.contestedCount ? 'BREAK THE LATTICE' : board.myNodes > 0 ? 'HOLD THE LATTICE' : 'TAKE THE LATTICE',
-      action: 'Capture a node next to one you already own. A node only pays while a supply line links it back to your HQ.',
-      detail: `${team} ${scoreText(board.myScore ?? 0)} OP · ${board.myNodes ?? 0} NODES · ${board.liveCount} LIVE`,
-      status: board.contestedCount ? `${board.contestedCount} CONTESTED · ${board.hint}` : front ? `${front.label} FRONT · ${board.hint}` : 'HOLD THE LATTICE',
-    };
+    const outcome = cocsOutcomeView(hud, player, mode);
+    return {title: outcome.title, action: outcome.action, detail: outcome.detail, status: outcome.status};
   }
   if (id === 'armsrace') {
     const ladder = ladderStatus(player, WEAPONS.length);

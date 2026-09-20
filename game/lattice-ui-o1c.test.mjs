@@ -47,6 +47,7 @@ test('the spend window renders the four FLUX sinks with cost, effect and one dis
   assert.ok(view);
   assert.equal(view.open, true);
   assert.equal(view.secondsRemaining, 12.5);
+  assert.equal(view.totalSeconds, 30, 'the progress bar uses the configured D1 window, not its first render');
   assert.equal(view.budget, 210);
   assert.equal(view.spent, 95);
   assert.deepEqual(view.sinks.map(sink => sink.verb), ['RESUPPLY', 'REPAIR', 'FORTIFY', 'REINFORCE']);
@@ -186,7 +187,14 @@ test('the board synthesises the exception list from the live signals', () => {
   assert.ok(blockers.includes('contested'), 'a contested front is a NEEDS YOU blocker');
   assert.ok(view.cards.some(card => card.verb === 'SCAN' && card.status === 'blocked' && card.blocker === 'out-of-flux'), 'an idle scout reads as blocked');
   assert.ok(view.cards.some(card => card.verb === 'DEPLOY' && card.status === 'running'), 'the active terminal reads as running');
-  assert.equal(view.cards.filter(card => card.status === 'done').length, 3, 'two completed orders plus the ok log entry');
+  assert.equal(view.cards.filter(card => card.status === 'done').length, 2, 'completion, not acceptance, is DONE');
+  const accepted = view.cards.find(card => card.id === 'order-o1');
+  assert.equal(accepted.status, 'running', 'an accepted order is RUNNING until a completion event');
+  assert.equal(accepted.impact, 'ACCEPTED · IN PROGRESS');
+  assert.ok(accepted.nextAction, 'an accepted order carries a next action');
+  const refusedOrder = view.cards.find(card => card.id === 'order-o2');
+  assert.equal(refusedOrder.status, 'blocked');
+  assert.equal(refusedOrder.nextAction, 'WAIT FOR THE NEXT SLICE OR LET THE CHIEF SPEND');
   assert.ok(view.summary.blocked >= 3);
 });
 
@@ -208,7 +216,7 @@ test('the board listbox moves, wraps and exposes an aria-live Needs you sentence
   assert.equal(wrapped.index, 0, 'navigation wraps');
   const clamped = cocsBoardSetActive(listbox, 99, listbox.count);
   assert.equal(clamped.index, 2);
-  assert.equal(cocsBoardAnnouncement(view), 'Needs you: 1. HOLD front-0 blocked: CONTESTED.');
+  assert.equal(cocsBoardAnnouncement(view), 'Needs you: 1. HOLD WEST FRONT blocked: CONTESTED.');
   assert.equal(cocsBoardAnnouncement(null), '');
 });
 

@@ -12,6 +12,15 @@
 // Everything here is pure: plain snapshot/board in, plain card/view out. The
 // page owns dispatch; each actionable card carries `source` + `action` so both
 // the keyboard Enter path and the mouse ACT/RETRY/CHECK buttons can route it.
+//
+// F04: attack/retake cards come from the shared `latticeTargetModel`, so a
+// neutral live node is only CAPTURABLE when it is legally adjacent to owned
+// ground and ground-route reachable, an enemy-owned frontier node gets the
+// equivalent attack/retake card, and an Operations HQ siege takes the top slot
+// over optional forward pushes. Without graph data the board keeps its previous
+// never-empty behaviour.
+import {latticeNodeLabel, latticeTargetModel} from './lattice-guide.mjs';
+
 const ARCHETYPE_RANK = Object.freeze({front: 0, economy: 1, relay: 2});
 const CAPTURABLE_ARCHETYPES = Object.freeze(['front', 'economy', 'relay']);
 
@@ -44,8 +53,9 @@ const num = (value, fallback = 0) => {
 };
 const teamOf = player => (player?.team === 1 ? 1 : 0);
 const nodeLabel = (board, id) => {
+  if (id === null || id === undefined) return 'TEAM';
   const node = (board?.nodes ?? []).find(entry => String(entry?.id) === String(id));
-  return String(node?.label ?? id ?? 'TEAM');
+  return String(node?.label ?? latticeNodeLabel({id}, null));
 };
 
 /**
@@ -75,14 +85,14 @@ export function ownedSinkTargets(snapshot, player) {
   const team = teamOf(player);
   return rankTargets((snapshot?.nodes ?? [])
     .filter(node => node && node.owner === team && CAPTURABLE_ARCHETYPES.includes(String(node.archetype)))
-    .map(node => ({id: String(node.id), label: String(node.label ?? node.id), archetype: String(node.archetype)})));
+    .map(node => ({id: String(node.id), label: nodeLabel({nodes: [node]}, node.id), archetype: String(node.archetype)})));
 }
 
 /** The team HQ id for `target: 'hq'` sinks (REPAIR). */
 export function hqSinkTarget(snapshot, player) {
   const team = teamOf(player);
   const hq = (snapshot?.nodes ?? []).find(node => node && node.owner === team && String(node.archetype) === 'hq');
-  return hq ? {id: String(hq.id), label: String(hq.label ?? 'HQ'), archetype: 'hq'} : null;
+  return hq ? {id: String(hq.id), label: hq.label ?? latticeNodeLabel(hq, null), archetype: 'hq'} : null;
 }
 
 /**
@@ -149,6 +159,7 @@ function baseCard(input) {
     blocker,
     blockerLabel: blocker ? BLOCKER_LABELS[blocker] : null,
     reason: input.reason ? String(input.reason).toUpperCase() : blocker ? BLOCKER_LABELS[blocker] : null,
+    nextAction: input.nextAction ? String(input.nextAction) : null,
     etaSeconds: num(input.etaSeconds, 0),
     owner: input.owner ?? null,
     repeat: 0,
@@ -160,14 +171,18 @@ function baseCard(input) {
     action: input.action ?? null,
     actionLabel: input.actionLabel ?? null,
     local: input.local === true,
+    siegeDeferred: input.siegeDeferred === true,
   };
 }
 
 /**
- * Cards derived from what exists locally. Actionable first: neutral live nodes
- * (ATTACK), the intermission sinks (BUY), live terminals (CHECK), then status
- * rows (front, threads, executor, slice, in-flight orders) so the board is
- * never empty even in the opening lull.
+ * Cards derived from what exists locally. Actionable first: legally adjacent
+ * neutral nodes as CAPTURE cards, enemy frontier nodes as the equivalent
+ * attack/retake card (through the shared legal-target model), an Operations HQ
+ * siege defence card above optional forward pushes, the intermission sinks
+ * (BUY), live terminals (CHECK), then status rows (front, threads, executor,
+ * slice, in-flight orders) so the board is never empty even in the opening
+ * lull. Without graph data the attack list falls back to live non-owned nodes.
  */
 export function localBoardCards(board, snapshot, player, options = {}) {
   if (!snapshot || typeof snapshot !== 'object') return [];
@@ -177,14 +192,43 @@ export function localBoardCards(board, snapshot, player, options = {}) {
   const live = Array.isArray(board?.live) ? board.live : nodes.filter(node => node.live === true);
   const front = board?.front ?? null;
   const spend = options.spend ?? null;
+  const hasGraph = Boolean(options.model || options.map || options.graph || options.adjacency || options.edges
+    || snapshot.adjacency || snapshot.edges);
+  const model = options.model ?? (hasGraph ? latticeTargetModel(snapshot, options.map, player, options) : null);
 
-  // 1. Attackable neutral nodes (the mode's core verb).
-  const attackable = live.filter(node => !node.mine && !node.enemy).slice(0, 4);
+  // 0. Operations HQ siege: the defence card outranks every optional push.
+  const siege = model?.siege ?? null;
+  if (siege?.active && siege.nodeId) {
+    const hqCard = {
+      id: 'local-siege', verb: 'HOLD', target: siege.nodeId, targetLabel: siege.label,
+      agent: 'chief', status: 'queued', source: LOCAL_CARD_SOURCE.ORDER, action: LOCAL_CARD_ACTION.ISSUE,
+      actionLabel: 'DEFEND HQ', local: true,
+      impact: `SIEGE · HQ ${siege.percent}% · ${siege.attackers} ATTACKERS`,
+    };
+    cards.push(baseCard(hqCard));
+  }
+
+  // 1. Legally adjacent neutral nodes first, then enemy frontier retakes. In
+  // Operations, a siege defers the optional forward pushes but never hides them.
+  const ranked = model?.ranked ?? null;
+  const attackable = ranked
+    ? [...ranked.filter(node => node.attackable && node.reachable !== false && !node.enemy),
+       ...ranked.filter(node => node.attackable && node.reachable !== false && node.enemy)]
+    : live.filter(node => !node.mine && !node.enemy).slice(0, 4).map(node => ({...node, enemy: false}));
+  const seenTargets = new Set();
   for (const node of attackable) {
+    if (seenTargets.has(node.id) || seenTargets.size >= 4) continue;
+    seenTargets.add(node.id);
+    const enemyFrontier = node.enemy === true;
+    const label = node.label ?? nodeLabel(board, node.id);
+    const impact = node.deferred ? `DEFERRED · SIEGE AT ${siege?.label ?? 'HQ'}`
+      : node.contested ? `${node.progressPercent ?? 0}% CONTESTED`
+        : enemyFrontier ? 'ENEMY FRONTIER · RETAKABLE' : node.adjacent ? 'CAPTURABLE · ADJACENT' : 'CAPTURABLE';
     cards.push(baseCard({
-      id: `local-node-${node.id}`, verb: 'ATTACK', target: node.id, targetLabel: node.label,
+      id: `local-node-${node.id}`, verb: 'ATTACK', target: node.id, targetLabel: label,
       agent: 'fighter', status: 'queued', source: LOCAL_CARD_SOURCE.ORDER, action: LOCAL_CARD_ACTION.ISSUE,
-      actionLabel: 'ISSUE ATTACK', local: true, impact: node.contested ? `${node.progressPercent}% CONTESTED` : 'CAPTURABLE',
+      actionLabel: enemyFrontier ? 'ISSUE RETAK' : 'ISSUE CAPTURE', local: true,
+      impact, siegeDeferred: node.deferred === true,
     }));
   }
 
@@ -209,7 +253,7 @@ export function localBoardCards(board, snapshot, player, options = {}) {
     const blocked = terminal.state === 'blocked' || terminal.state === 'contested';
     cards.push(baseCard({
       id: `local-terminal-${terminal.id}`, verb: terminal.kind ?? 'HACK', target: terminal.id,
-      targetLabel: terminal.label ?? terminal.id, agent: 'adept',
+      targetLabel: terminal.label ?? latticeNodeLabel({id: terminal.id}, null), agent: 'adept',
       status: terminal.state === 'active' || terminal.state === 'complete' ? 'running' : blocked ? 'blocked' : 'queued',
       blocker: blocked ? (terminal.state === 'contested' ? 'contested' : 'dependency') : null,
       reason: blocked ? (terminal.stateLabel ?? terminal.state) : null,

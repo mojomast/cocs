@@ -1,5 +1,52 @@
 # COCS verification report
 
+## Release 8.4 - FIELDCRAFT
+
+**Scope.** The fieldwork implementation on `feat/fieldwork-plan` adds public
+dominance/Operations outcome state, relevant prioritized objective feedback, one
+navigation-backed target model, passive standings and death summaries,
+effective-rules launch previews, objective-first short-screen HUDs, remapped and
+touch task controls, contribution/reward explanations and focused next-match
+actions. Public snapshot fields are additive and backward-tolerant;
+`PROTOCOL_VERSION` is unchanged. The game-server process still requires a
+restart because its imported authoritative simulation and visibility behavior
+changed.
+
+**Automated release gate (2026-09-20).**
+
+- `npm test`: pass. Game tests: 2,507 pass, 8 skipped, 0 fail; server tests:
+  192 pass, 0 fail; TypeScript: pass; verified production build: pass; SSR/UI and
+  deployment-contract tests: 31 pass, 0 fail.
+- Focused release rerun: 43 changelog, spend/board, cursor/input and results SSR
+  tests pass; `npx tsc --noEmit --pretty false` and `git diff --check` pass.
+- `npm run lint`: 0 errors. The repository retains 604 pre-existing warning-level
+  findings; the release-critical React-hook errors found in the spend panel were
+  fixed rather than waived.
+- The integrated diff adds no `Math.random`, `Date.now` or `performance.now` use
+  to deterministic simulation code and adds no project dependency or asset.
+
+**Browser/device gate.** A temporary Playwright Chromium 140 install outside the
+repository exercised a fresh profile, Operations briefing/deploy and live
+LATTICE combat at 1366×768, 1920×1080, 844×390 touch, 390×844 touch and the
+844×390 UI-scale-1.4 stress case. Captures cover effective-rule setup copy,
+objective/command/Director hierarchy, touch movement/actions and contextual
+interaction. Measured bounding boxes confirm that the final HUD leaves the
+reticle clear and keeps objective, HQ/wave truth, vitals, interaction and touch
+actions in the viewport. The pass found and fixed short-landscape objective and
+portrait panel/chip overlap. Generated map-plan coordinates are quantized so
+the local SSR/client pass no longer emits React hydration mismatch warnings.
+The localhost-only absolute favicon CSP warning does not occur on the canonical
+same-origin production host.
+
+**Human evidence boundary.** The five first-time participants, two experienced
+comparison players, real-touch participant and remapped-keyboard participant
+required by F10 were not available in this coding environment. Automated checks
+are not relabelled as human fun evidence. The raw-observation worksheet is
+[`reports/playtest-v8.4-template.md`](../reports/playtest-v8.4-template.md).
+No combat, weapon, reward, roster-pressure or D1-D4 Director balance change was
+made; D2-D4 measurement remains deferred. Complete that protocol before using
+this release as evidence for tuning.
+
 ## Release 7.2 - ECHO (the Moth audio assets wired into the game)
 
 **Scope.** The Moth-audio wiring on `feat/moth-audio-wiring` (tip `4b9862b`),

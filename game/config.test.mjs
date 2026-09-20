@@ -2,7 +2,8 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {Match,moveActor} from './core.mjs';
 import {resolveMapForMode} from './arenas.mjs';
-import {DEFAULT_CONFIG,DEFAULT_DISPLAY,normalizeConfig,normalizeDisplay,GAME_MODES,DIFFICULTIES,modeRule,MUTATORS,MUTATOR_IDS,activeMutators,mutatorEffects,applyMutators,loadoutFor,loadoutRule,loadoutAllows,loadoutStart,spawnInventory,spawnLoadout,LOADOUT_PRESETS} from './config.mjs';
+import {DEFAULT_CONFIG,DEFAULT_DISPLAY,normalizeConfig,normalizeDisplay,GAME_MODES,DIFFICULTIES,modeRule,MUTATORS,MUTATOR_IDS,activeMutators,mutatorEffects,applyMutators,loadoutFor,loadoutRule,loadoutAllows,loadoutStart,spawnInventory,spawnLoadout,LOADOUT_PRESETS,matchPlan,mutatorView,quickStartRules} from './config.mjs';
+import {COOP_GARRISON_BOTS,COOP_TEAM_FLOOR,DEFAULT_COCS_TIER,OPERATIONS_WAVE_COUNT,configuredDirectorTier,coopRoster,coopWaveSummary} from './cocs-difficulty.mjs';
 import {slowSkip} from './test-support.mjs';
 import {CAMPAIGN_MISSIONS} from './campaign-data.mjs';
 const rng=()=>{let n=123;return()=>((n=(Math.imul(n,1664525)+1013904223)>>>0)/4294967296);};
@@ -306,4 +307,128 @@ test('big head enlarges hitboxes and no recoil removes kick and bloom',()=>{
  c.shotWait=0;c.weapon=0;c.ammo[0]=Infinity;n.fire(c);
  assert.equal(c.punchPitch,0,'no recoil leaves no vertical kick');
  assert.equal(c.spread,0,'no recoil leaves no bloom');
+});
+
+// ---------------------------------------------------------------------------
+// F06: setup promises must match effective rules and roster.
+// ---------------------------------------------------------------------------
+test('matchPlan derives duration, roster, fill and modifiers from normalizeConfig',()=>{
+ const saved=normalizeConfig({...DEFAULT_CONFIG,mutators:['turbo','bounty'],botCount:2});
+ const plan=matchPlan(saved);
+ assert.equal(plan.mode.id,'deathmatch');
+ assert.equal(plan.mode.name,'Deathmatch');
+ assert.equal(plan.team,false);
+ assert.equal(plan.coop,false);
+ assert.deepEqual(plan.rules,normalizeConfig(saved),'the plan carries the launchable normalized config');
+ assert.equal(plan.duration,'5 MIN');
+ assert.deepEqual(plan.difficulty,{id:'easy',name:'Easy'});
+ assert.equal(plan.rosterLabel,'YOU + 2 BOTS');
+ assert.equal(plan.roster,null,'only OPERATIONS carries the co-op roster');
+ assert.equal(plan.tier,null);
+ assert.equal(plan.fill.auto,false);
+ assert.equal(plan.fill.note,null);
+ assert.deepEqual(plan.modifiers.map(entry=>entry.id),['turbo','bounty']);
+ assert.equal(plan.modifiers[0].name,'Turbo');
+ assert.equal(plan.modifiers[0].detail,'1.25× speed','the preview names the resolved value');
+ assert.equal(plan.modifierLabel,'Turbo · Bounty');
+ // Derived from the shared normalizer: a saved mode can never keep a stale name.
+ const dm=GAME_MODES.find(entry=>entry.id==='deathmatch');
+ assert.equal(plan.mode.name,dm.name);
+ assert.equal(plan.mode.description,dm.description);
+ assert.deepEqual(matchPlan(saved),matchPlan(saved),'the plan is deterministic');
+ assert.ok(Object.isFrozen(plan));
+});
+
+test('soccer, race and lattice PvP explain their automatic fill instead of promising solo combat',()=>{
+ const soccer=matchPlan({mode:'puma-soccer',botCount:0});
+ assert.equal(soccer.rosterLabel,'2 v 2');
+ assert.equal(soccer.fill.auto,true);
+ assert.match(soccer.fill.note,/always filled by bots/);
+ const race=matchPlan({mode:'puma-race',botCount:0});
+ assert.equal(race.rosterLabel,'SOLO TIME TRIAL');
+ assert.equal(race.fill.auto,true);
+ assert.match(race.fill.note,/human drivers replace excess bots/);
+ assert.match(race.fill.note,/solo time trial/i);
+ const cocs=matchPlan({mode:'cocs',botCount:0});
+ assert.equal(cocs.rosterLabel,'SOLO OPERATOR');
+ assert.equal(cocs.fill.auto,true);
+ assert.match(cocs.fill.note,/opposing team stays empty/);
+ const filled=matchPlan({mode:'cocs',botCount:7,rung:'4v4'});
+ assert.equal(filled.rosterLabel,'4 v 4');
+ assert.match(filled.fill.note,/rung to 8 seats/);
+ const teams=matchPlan({mode:'teamdeathmatch',botCount:3});
+ assert.equal(teams.rosterLabel,'2 v 2','team seats read the real alternating split');
+});
+
+test('operations plan mirrors allied fill, Director garrison, waves and tier',()=>{
+ const plan=matchPlan({mode:'cocs-coop',botCount:3});
+ assert.equal(plan.coop,true);
+ assert.equal(plan.tier.id,DEFAULT_COCS_TIER,'new players default to the tutorial tier');
+ assert.equal(plan.tier.label,'STANDARD');
+ assert.deepEqual(plan.tier.modifiers,['1 FRONT','NO MODIFIER']);
+ assert.equal(plan.roster.allies,COOP_TEAM_FLOOR);
+ assert.equal(plan.roster.garrisonBots,0);
+ assert.equal(plan.waves.count,OPERATIONS_WAVE_COUNT);
+ assert.match(plan.fill.note,new RegExp(`${COOP_TEAM_FLOOR}-operator floor`));
+ assert.match(plan.fill.note,new RegExp(`${OPERATIONS_WAVE_COUNT}-wave`));
+ const five=matchPlan({mode:'cocs-coop',botCount:5});
+ assert.equal(five.roster.allies,4);
+ assert.equal(five.roster.garrisonBots,COOP_GARRISON_BOTS);
+ assert.equal(five.roster.alliedBots+five.roster.garrisonBots,5,'every bot seat is either an ally or the garrison');
+ const seven=matchPlan({mode:'cocs-coop',botCount:7});
+ assert.equal(seven.roster.allies,6);
+ assert.equal(seven.roster.garrisonBots,2);
+ // The pure helper matches real Match seating for every local bot count, so
+ // the setup copy cannot drift from core.mjs seatTeam.
+ for(const bots of [0,1,2,3,4,5,7]){
+  const match=new Match('chatgpt','hermes',()=>.5,'lattice-slice',{mode:'cocs-coop',botCount:bots,timeLimit:900});
+  const roster=coopRoster({humans:1,bots});
+  assert.equal(match.actors.filter(actor=>actor.team===0).length,roster.allies,`team 0 at ${bots} bot seats`);
+  assert.equal(match.actors.filter(actor=>actor.team===1).length,roster.garrisonBots,`garrison at ${bots} bot seats`);
+ }
+ assert.match(coopWaveSummary('D1').copy,/^5 WAVES · 1–2 FRONTS · 2:00–3:00$/);
+ assert.ok(coopWaveSummary('D4').frontMax>coopWaveSummary('D1').frontMax);
+ assert.ok(coopWaveSummary('D4').timerMax<coopWaveSummary('D1').timerMax,'higher tiers compress the wave clock');
+});
+
+test('the Director tier reads config.objective.tier with the legacy coopTier fallback',()=>{
+ assert.equal(configuredDirectorTier({}),DEFAULT_COCS_TIER);
+ assert.equal(configuredDirectorTier({objective:{tier:'d3'}}),'D3');
+ assert.equal(configuredDirectorTier({coopTier:'D2'}),'D2');
+ assert.equal(configuredDirectorTier({objective:{tier:'nope'}}),DEFAULT_COCS_TIER,'unknown tiers fall back');
+ assert.equal(configuredDirectorTier({objective:{tier:'d4'},coopTier:'D1'}),'D4','the engine seam wins over the legacy fallback');
+ const normalized=normalizeConfig({mode:'cocs-coop',objective:{tier:'d4',holdCount:3}});
+ assert.equal(normalized.objective.tier,'D4');
+ assert.equal(normalized.objective.holdCount,3,'unrelated objective overrides survive');
+ assert.equal(normalizeConfig({mode:'cocs-coop',coopTier:'d2'}).objective.tier,'D2');
+ assert.equal(normalizeConfig({mode:'cocs-coop'}).objective,undefined,'no override key when the saved config had none');
+ assert.equal(normalizeConfig({mode:'cocs'}).objective,undefined,'PvPvE stays untouched');
+ const match=new Match('chatgpt','hermes',()=>.5,'lattice-slice',{mode:'cocs-coop',botCount:3,timeLimit:900,objective:{tier:'D3'}});
+ assert.equal(match.objectiveState.coopTier,'D3','the engine launches the tier the UI showed');
+ assert.equal(matchPlan({mode:'cocs-coop',objective:{tier:'d3'}}).tier.id,'D3');
+});
+
+test('quick-start composition keeps saved rules, activity defaults and explicit overrides in order',()=>{
+ const saved=normalizeConfig({...DEFAULT_CONFIG,mutators:['instagib','turbo'],botCount:4,objective:{tier:'D4'}});
+ const activity=quickStartRules(saved,'cocs',{botCount:7,timeLimit:900,difficulty:'normal',rung:'4v4'});
+ assert.equal(activity.mode,'cocs');
+ assert.equal(activity.botCount,7,'activity defaults beat the saved roster');
+ assert.equal(activity.timeLimit,900);
+ assert.equal(activity.rung,'4v4');
+ assert.equal(activity.instagib,true,'a plain quick start inherits saved modifiers');
+ assert.deepEqual(matchPlan(activity).modifiers.map(entry=>entry.id),['turbo','instagib']);
+ const overridden=quickStartRules(saved,'cocs',{botCount:7},{botCount:3,difficulty:'hard'});
+ assert.equal(overridden.botCount,3,'explicit overrides beat activity defaults');
+ assert.equal(overridden.difficulty,'hard');
+ // The recommended beginner route rebuilds from the frozen default instead of
+ // spreading saved rules: no saved mutator or Director tier can leak in.
+ const beginner=normalizeConfig({...DEFAULT_CONFIG,playerName:saved.playerName});
+ assert.deepEqual(beginner,matchPlan(beginner).rules);
+ assert.equal(beginner.mutators.length,0);
+ assert.equal(beginner.objective,undefined);
+ assert.equal(beginner.botCount,DEFAULT_CONFIG.botCount);
+ assert.equal(beginner.difficulty,DEFAULT_CONFIG.difficulty);
+ assert.equal(beginner.instagib,false);
+ assert.equal(matchPlan(beginner).modifierLabel,'NO MODIFIERS');
+ assert.equal(mutatorView(beginner).length,0);
 });

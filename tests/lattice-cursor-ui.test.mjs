@@ -15,8 +15,14 @@ import * as React from 'react';
 import {renderToStaticMarkup} from 'react-dom/server';
 
 register('./tsx-loader.mjs', import.meta.url);
+// RespawnOverlay imports the shared primitives without an extension and Node's
+// ESM resolver has no extension probing. A tiny resolve fallback (registered
+// after the tsx loader, so it runs first and only fires when the bare specifier
+// fails) keeps the SSR import working without touching app code.
+register(`data:text/javascript,${encodeURIComponent(`export async function resolve(specifier,context,nextResolve){try{return await nextResolve(specifier,context);}catch(error){if(!specifier.startsWith('.'))throw error;for(const ext of ['.tsx','.ts']){try{return await nextResolve(specifier+ext,context);}catch{}}throw error;}}`)}`);
 const {SpendWindowHud} = await import('../app/ui/screens/SpendWindowHud.tsx');
 const {CommandBoardHud} = await import('../app/ui/screens/CommandBoardHud.tsx');
+const {RespawnOverlay} = await import('../app/ui/screens/RespawnOverlay.tsx');
 
 const root = new URL('../', import.meta.url);
 const read = path => readFile(new URL(path, root), 'utf8');
@@ -119,16 +125,56 @@ test('pointer-lock release reaches every interactive surface through the cursor 
     ['SPEND', 'syncCursorSurface(CURSOR_SURFACE.SPEND,spendVisible)'],
     ['BOARD', 'syncCursorSurface(CURSOR_SURFACE.BOARD,cocsBoard.open===true&&!boardCollapsed)'],
     ['CHAT', 'syncCursorSurface(CURSOR_SURFACE.CHAT,chatOpen)'],
-    ['SCOREBOARD', 'syncCursorSurface(CURSOR_SURFACE.SCOREBOARD,scores)'],
+    ['SCOREBOARD', 'syncCursorSurface(CURSOR_SURFACE.SCOREBOARD,scoresInteractive)'],
     ['SETTINGS', 'syncCursorSurface(CURSOR_SURFACE.SETTINGS,settings)'],
     ['PAUSE', "syncCursorSurface(CURSOR_SURFACE.PAUSE,mode==='paused')"],
     ['RESULTS', "syncCursorSurface(CURSOR_SURFACE.RESULTS,mode==='results')"],
-    ['RESPAWN', 'syncCursorSurface(CURSOR_SURFACE.RESPAWN,respawn.open===true)'],
+    ['RESPAWN', 'syncCursorSurface(CURSOR_SURFACE.RESPAWN,respawn.open===true&&respawnEditor)'],
   ]) assert.ok(page.includes(needle), `${surface} surface releases the pointer`);
   assert.match(page, /cursorLockLost\(cursorRef\.current/, 'the pointerlockchange path enters cursor mode');
   assert.match(page, /cursorLockGained\(cursorRef\.current/, 're-acquiring lock clears surfaces');
   assert.match(page, /if\(result\.effects\?\.unlock\)document\.exitPointerLock/, 'the machine owns exitPointerLock');
   assert.match(page, /if\(result\.effects\?\.clearInput\)clearInput\(\)/, 'held inputs clear on every cursor transition');
+});
+
+test('passive watching stays passive: the Tab glance never registers a surface', async () => {
+  const page = await read('app/page.tsx');
+  assert.doesNotMatch(page, /syncCursorSurface\(CURSOR_SURFACE\.SCOREBOARD,scores\)/, 'holding Tab no longer releases the pointer');
+  assert.doesNotMatch(page, /syncCursorSurface\(CURSOR_SURFACE\.RESPAWN,respawn\.open===true\)/, 'the automatic death summary no longer releases the pointer');
+  assert.match(page, /if\(cursorActive\(cursorRef\.current\)\)\{e\.preventDefault\(\);setScores\(true\);setScoresInteractiveOpen\(true\);return;\}/, 'a Tab with the cursor already free pins the interactive standings');
+  assert.match(page, /if\(owner===CURSOR_SURFACE\.SCOREBOARD\)\{e\.preventDefault\(\);setScoresInteractiveOpen\(false\);setScores\(false\);return;\}/, 'Tab closes the pinned standings');
+  assert.match(page, /if\(e\.code==='Tab'&&!scoresInteractiveRef\.current\)setScores\(false\)/, 'releasing Tab only hides the passive glance');
+  assert.match(page, /if\(cursorKeyboardOwner\(current\)===CURSOR_SURFACE\.SCOREBOARD\)\{setScoresInteractiveOpen\(false\);setScores\(false\);return;\}/, 'a click dismisses the pinned standings');
+  assert.match(page, /if\(scoresInteractiveRef\.current\)\{setScoresInteractiveOpen\(false\);setScores\(false\);return;\}/, 'the cursor key also closes it');
+  const passive = render(RespawnOverlay, {ui: {respawn: {open: true, respawnIn: 2.4, character: 'chatgpt', harness: 'openclaw'}, killNotice: {text: 'ELIMINATED BY BOT'}, cursor: {key: 'ALT'}, switchRespawnLoadout: () => {}}});
+  assert.match(passive, /RESPAWN IN 3S/, 'the countdown is visible without a click');
+  assert.match(passive, /pointer-events:none/, 'the passive summary cannot intercept input');
+  assert.match(passive, /ALT TO CHANGE LOADOUT/, 'the explicit path is advertised');
+  assert.doesNotMatch(passive, /LOCK IN/, 'the passive summary has no interactive controls');
+});
+
+test('the explicit respawn editor queues a next-spawn switch with truthful feedback', async () => {
+  const page = await read('app/page.tsx');
+  assert.match(page, /if\(respawnOpenRef\.current\)\{setRespawnEditorOpen\(true\);return;\}/, 'the cursor key opens the editor while dead');
+  assert.match(page, /if\(respawnEditorRef\.current\)\{setRespawnEditorOpen\(false\);return;\}/, 'the cursor key closes it again');
+  assert.match(page, /setRespawnQueue\(\{character:loadout\.character,harness:loadout\.harness,status:/, 'the accepted request records next-spawn feedback');
+  assert.match(page, /if\(!respawn\.open\)\{if\(respawnEditorRef\.current\)setRespawnEditorOpen\(false\);if\(respawnQueue\)setRespawnQueue\(null\);\}/, 'the request record clears when the respawn boundary passes');
+  const html = render(RespawnOverlay, {ui: {respawn: {open: true, respawnIn: 1.2, character: 'chatgpt', harness: 'openclaw'}, killNotice: {text: 'ELIMINATED'}, cursor: {key: 'ALT'}, respawnEditor: true, setRespawnEditor: () => {}, respawnQueue: {character: 'claude', harness: 'claudecode', status: 'pending'}, switchRespawnLoadout: () => ({ok: true})}});
+  assert.match(html, /OPERATOR/, 'the editor offers the operator pick');
+  assert.match(html, /LOCK IN · NEXT SPAWN/, 'the action states its next-spawn semantics');
+  assert.match(html, /NEXT SPAWN · <b>Claude \/ Claude Code<\/b> · PENDING/, 'the queued pair and its pending state are explicit');
+  assert.match(html, /CLOSE · KEEP FIGHTING/, 'closing restores the quick respawn');
+});
+
+test('combat key routing is centralized and the board peek stays exempt', async () => {
+  const page = await read('app/page.tsx');
+  assert.match(page, /import \{[^}]*cursorCombatKeysBlocked[^}]*\} from '\.\.\/game\/cursor-mode\.mjs'/, 'the page consults the machine priority helper');
+  const guard = page.indexOf('if(cursorCombatKeysBlocked(cursorRef.current))return;');
+  const held = page.indexOf('keys.add(e.code)');
+  assert.ok(guard > 0 && guard < held, 'the guard rejects held combat keys before they accumulate');
+  assert.match(page, /if\(\(e\.code==='KeyT'\|\|e\.code==='Enter'\)&&r\.net\?\.started&&!cursorCombatKeysBlocked\(cursorRef\.current\)\)/, 'chat cannot open from an Enter press inside an owned surface');
+  const hud = await read('app/ui/screens/SpendWindowHud.tsx');
+  assert.match(hud, /event\.repeat && \/\^\(Enter\|Space\|Digit\[1-4\]\|KeyS\|Escape\)\$\//, 'the v8.3 repeat guard still owns spend shortcuts');
 });
 
 test('the arena never fires while a surface owns the cursor', async () => {
@@ -165,7 +211,7 @@ test('local identity is the actor id, and refusals are pre-flighted and visible'
 test('the local board is derived from real snapshot data and stays actionable', async () => {
   const page = await read('app/page.tsx');
   assert.match(page, /import \{LOCAL_CARD_ACTION,LOCAL_CARD_SOURCE,latticePeerId,localBoardCards,mergeLocalBoard,withSinkTargets\} from '\.\.\/game\/lattice-board\.mjs'/, 'the local board module is wired');
-  assert.match(page, /localBoardCards\(latticeBoard,hud\?\.cocs,player,\{spend:cocsSpendView,economy:cocsView\.economy\}\)/, 'cards come from nodes/sinks/roles/orderStats');
+  assert.match(page, /localBoardCards\(latticeBoard,hud\?\.cocs,player,\{spend:cocsSpendView,economy:cocsView\.economy,model:latticeModel,map:latticeMap\}\)/, 'cards come from nodes/sinks/roles/orderStats and the shared legal-target model');
   assert.match(page, /mergeLocalBoard\(cocsView\.boardView,localCards\)/, 'derived cards merge into the board view');
   assert.match(page, /boardView:mergedBoard\?\?cocsView\.boardView/, 'the merged board is what renders');
   assert.match(page, /withSinkTargets\(cocsView\?\.spend\?\?null,hud\?\.cocs,player\)/, 'sink targets are resolved against the snapshot');

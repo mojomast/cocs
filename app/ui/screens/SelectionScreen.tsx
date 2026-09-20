@@ -8,6 +8,30 @@ import {LatticeBriefing} from './LatticeGuide';
 import {isLattice,latticePracticeDefaults} from '../../../game/lattice-guide.mjs';
 import {latticeLoadoutRoles} from '../../../game/lattice-roles.mjs';
 import {formatNumber,formatWhole} from '../../../game/format-ui.mjs';
+import {DEFAULT_CONFIG,GAME_MODES,MUTATORS,matchPlan,normalizeConfig,quickStartRules} from '../../../game/config.mjs';
+import {COCS_TIERS} from '../../../game/cocs-difficulty.mjs';
+import {mapsForMode} from '../../../game/arenas.mjs';
+import {getMap} from '../../../game/maps.mjs';
+import {modeTargetText} from '../../../game/hud.mjs';
+import {TRAINING_STEPS,TRAINING_TITLES,trainingConfig} from '../../../game/lattice-training.mjs';
+import {DEFAULT_BINDINGS,bindingLabel} from '../../../game/keybinds.mjs';
+
+const cap=(value:any)=>String(value??'').toUpperCase();
+// F06 effective-rules preview: every chip is derived from the same plan the
+// launch path uses, so map substitution, automatic fill, the clock and the
+// inherited modifiers cannot disagree with the match that starts.
+function planChips(plan:any,map:any,{reset=false}:any={}){
+ const chips:any[]=[
+  <span className="card-chip" key="map">{map?.id==null?'MAP · MISSION SELECT':map?.auto?`AUTO MAP · ${cap(map.name)} · SUBSTITUTED`:`MAP · ${cap(map?.name)}`}</span>,
+  <span className="card-chip" key="roster">{cap(plan.rosterLabel)}</span>,
+  <span className="card-chip" key="time">{plan.duration}</span>,
+  ...(plan.mode.id==='puma-race'||plan.mode.id==='puma-soccer'?[]:[<span className="card-chip" key="ai">AI {cap(plan.difficulty.name)}</span>]),
+  <span className="card-chip" key="rules">{reset?'RULES RESET · NO MODIFIERS':plan.modifiers.length?`INHERITS ${cap(plan.modifierLabel)}`:'NO SAVED MODIFIERS'}</span>,
+ ];
+ if(plan.coop)chips.push(<span className="card-chip card-chip--accent" key="tier">DIRECTOR {plan.tier.id} · {plan.tier.label}</span>);
+ if(plan.coop)chips.push(<span className="card-chip" key="waves">{plan.waves.copy}</span>);
+ return chips;
+}
 
 export function SelectionScreen({ui}:ScreenProps){
   const {entered,showcaseLive,character,chooseCharacter,CHARACTERS=[],selected,harness,setHarness,HARNESSES=[],power,powerIcon,config,start,startSpectate,quickStart,setSetupOpen,setSingleOpen,changeMode,connectNet,openBrowser,netConnected,profile,demos=[],previewRef,headActions,backToDemo,notice,challenges=[],presets=[],loadPreset,deletePreset,openSettings}=ui;
@@ -23,23 +47,63 @@ export function SelectionScreen({ui}:ScreenProps){
   const spec=specSheet(harness);
   const kit=kitView(character,harness);
   const rider=kit?.rider??null;
+  const powerKey=bindingLabel(ui.bindings?.power??DEFAULT_BINDINGS.power).toUpperCase();
   const previewIndex=String((CHARACTERS.indexOf(selected)>=0?CHARACTERS.indexOf(selected):0)+1).padStart(2,'0');
-  const activities=[
-   {id:'deathmatch',name:'Quick Match',tag:'Free-for-all · first to the frag limit',icon:<Zap size={20}/>},
-   {id:'teamdeathmatch',name:'Team Deathmatch',tag:'Shared score · friendly fire off',icon:<Users size={20}/>},
-   {id:'ctf',name:'Capture the Flag',tag:'Steal the enemy flag and run it home',icon:<Flag size={20}/>},
-   {id:'koth',name:'King of the Hill',tag:'Hold the hill and freeze their clock',icon:<Target size={20}/>},
-   {id:'rockets',name:'Rocket Arena',tag:'Unlimited rockets for everyone',icon:<Rocket size={20}/>},
-   {id:'instagib',name:'Instagib',tag:'Rail only · one unprotected hit kills',icon:<Crosshair size={20}/>},
-   {id:'armsrace',name:'Arms Race',tag:'Every kill promotes you up the rack',icon:<Swords size={20}/>},
-   {id:'field-training',training:'cocs',name:'Field Training',tag:'Guided first match · capture, supply, orders, devices',icon:<GraduationCap size={20}/>},
-   {id:'operations-training',training:'cocs-coop',name:'Operations Training',tag:'Guided co-op · spend window, terminals, waves',icon:<GraduationCap size={20}/>},
-    {id:'cocs',name:'Lattice Strike',tag:'Team territory war · briefing & deployment',icon:<Hexagon size={20}/>},
-    {id:'cocs-coop',name:'Lattice Strike: Operations',tag:'Co-op · defend your HQ against five Director waves',icon:<Hexagon size={20}/>},
-   {id:'horde',name:'Horde',tag:'Solo survival against escalating waves',icon:<Skull size={20}/>},
-   {id:'campaign',name:'Campaign',tag:'Scripted solo missions with objectives',icon:<Play size={20}/>},
-   {id:'spectate',name:'Spectate',tag:'Watch a cinematic AI match',icon:<Film size={20}/>},
-  ];
+  // F06: every quick-start label comes from normalizeConfig + GAME_MODES
+  // metadata (matchPlan) and the same mode defaults the page spreads, so a card
+  // can never promise a different arena, roster, clock or modifier set.
+  const mapChoice=(modeId:string)=>{
+   const allowed=mapsForMode(modeId,{legacy:!!ui.legacyMaps});
+   const current=allowed.find((entry:any)=>entry.id===ui.mapId);
+   const pick=current??allowed[0];
+   return {id:pick?.id??ui.mapId,name:pick?.name??getMap(ui.mapId)?.name??'AUTO',auto:!current&&!!pick};
+  };
+  const modeCard=(activity:any)=>({...activity,plan:matchPlan(quickStartRules(config,activity.id,latticePracticeDefaults(activity.id))),map:mapChoice(activity.id)});
+  const modeCards=[
+   {id:'deathmatch',icon:<Zap size={20}/>},
+   {id:'teamdeathmatch',icon:<Users size={20}/>},
+   {id:'ctf',icon:<Flag size={20}/>},
+   {id:'koth',icon:<Target size={20}/>},
+   {id:'rockets',icon:<Rocket size={20}/>},
+   {id:'instagib',icon:<Crosshair size={20}/>},
+   {id:'armsrace',icon:<Swords size={20}/>},
+  ].map(modeCard);
+  // Lattice presets reset saved rules: a custom mutator, rung or Director tier
+  // must not silently ride into the recommended briefing.
+  const latticeCards=[
+   {id:'cocs',icon:<Hexagon size={20}/>},
+   {id:'cocs-coop',icon:<Hexagon size={20}/>},
+  ].map(activity=>{const rules=quickStartRules({},activity.id,latticePracticeDefaults(activity.id),{playerName:config?.playerName});return {...activity,rules,plan:matchPlan(rules),map:{id:'lattice-slice',name:getMap('lattice-slice').name,auto:false}};});
+  const trainingCards=[
+   {id:'field-training',training:'cocs',icon:<GraduationCap size={20}/>},
+   {id:'operations-training',training:'cocs-coop',icon:<GraduationCap size={20}/>},
+  ].map(activity=>({...activity,plan:matchPlan(trainingConfig(activity.training,{playerName:config?.playerName})??{}),map:{id:'lattice-slice',name:getMap('lattice-slice').name,auto:false}}));
+  const singleCards=[
+   {id:'horde',icon:<Skull size={20}/>},
+   {id:'campaign',icon:<Play size={20}/>},
+  ].map(activity=>({...activity,plan:matchPlan({...config,mode:activity.id,botCount:0,timeLimit:900}),map:activity.id==='campaign'?{id:null,name:'MISSION SELECT',auto:false}:mapChoice(activity.id)}));
+  const spectateCard={id:'spectate',icon:<Film size={20}/>,plan:matchPlan(config),map:mapChoice(config?.mode??'deathmatch')};
+  const beginnerRules=normalizeConfig({...DEFAULT_CONFIG,playerName:config?.playerName});
+  const beginnerPlan=matchPlan(beginnerRules);
+  const beginnerMap=mapChoice(beginnerPlan.mode.id);
+  const beginnerMode=GAME_MODES.find(entry=>entry.id===beginnerPlan.mode.id);
+  const railPlan=matchPlan(config);
+  // Criterion 3: the fill rule for every auto-filling mode is the same plan
+  // copy the setup screen and the launch path use, never a second hand-written
+  // sentence that could drift.
+  const autoFillNotes=[matchPlan({mode:'cocs-coop',botCount:config?.botCount??0}),matchPlan({mode:'puma-soccer'}),matchPlan({mode:'puma-race',botCount:config?.botCount??0})].map(plan=>plan.fill.note);
+  const scrollSetupTop=()=>{const body=document.querySelector('.shell-body');if(body)body.scrollTo({top:0,behavior:'instant'});};
+  const launchRules=(rules:any,map:any)=>{ui.setConfig?.(rules);ui.setMapId?.(map.id);ui.start?.({character,harness,mapId:map.id,config:rules});};
+  const launchBeginner=()=>launchRules(beginnerRules,beginnerMap);
+  const launchInstant=(card:any)=>{
+   // Single-player and spectate own bespoke routing on the page; everything
+   // else composes the shared quick-start rules and starts them.
+   if(card.id==='spectate'||card.id==='horde'||card.id==='campaign'){ui.quickStart?.(card.id);return;}
+   launchRules(quickStartRules(config,card.id,latticePracticeDefaults(card.id)),mapChoice(card.id));
+  };
+  const launchTraining=(card:any)=>ui.startTraining?.(card.training);
+  const openLattice=(card:any)=>{ui.setConfig?.(card.rules);setLatticeIntro(card.id);scrollSetupTop();};
+  const openCustom=()=>ui.setSetupOpen?.(true);
   // Secondary rail actions collapse behind MORE ▾ on phones (audit C5);
   // MATCH SETUP and ENTER ARENA stay reachable at every size.
   const railSecondary=netConnected
@@ -50,7 +114,9 @@ export function SelectionScreen({ui}:ScreenProps){
    {wing&&<span className="chip chip--wing" style={{color:wing.color,borderColor:`${wing.color}80`}}><i/>{wing.label}</span>}
    <span className="chip">{power?.name}</span>
    <span className="chip">{ui.selectedMap?.name}</span>
-   <span className="chip">{ui.selectedMode?.name?.toUpperCase()} · {config?.botCount} BOTS</span>
+   <span className="chip">{ui.selectedMode?.name?.toUpperCase()} · {cap(railPlan.rosterLabel)}</span>
+    {railPlan.coop&&railPlan.tier&&<span className="chip chip--accent">DIRECTOR {railPlan.tier.id} · {railPlan.tier.label}</span>}
+   <span className="chip">{railPlan.modifierLabel}</span>
    {ui.nextUnlock&&<span className="chip">NEXT UNLOCK · {ui.nextUnlock.name} · LV {ui.nextUnlock.level}</span>}
    {netConnected&&<span className="chip chip--accent"><i/>ONLINE</span>}
   </>}>
@@ -94,7 +160,7 @@ export function SelectionScreen({ui}:ScreenProps){
      <Panel className="panel--dense panel--harness" label="02 / HARNESS" meta={spec?`${spec.kindLabel} ACTIVE`:'ACTIVE ABILITY'}>
       <div className="grid-cards">{HARNESSES.map((h:any)=>{const locked=character==='claude'&&h.id!=='claudecode';const hSpec=specSheet(h.id);return <SelectCard key={h.id} selected={harness===h.id} disabled={locked} onClick={()=>{setHarness(h.id);ui.setNotice?.('');}} ariaLabel={`${h.name}: ${h.power}${hSpec?` · ${hSpec.tradeoff.name} — ${hSpec.tradeoff.description}`:''}`} icon={powerIcon?powerIcon(h.id,20):<Shield size={20}/>} name={h.name} tag={h.power} meta={locked?<LockKeyhole size={15}/>:harness===h.id?<Check size={17}/>:h.key}/>;})}</div>
       <div className="panel-body--tight harness-detail">
-       <p className="eyebrow"><i/>{power?.power} <span className="chip">Q</span></p>
+        <p className="eyebrow"><i/>{power?.power} <span className="chip">{powerKey}</span></p>
        <p className="field-note">{power?.description}</p>
         <div className="row"><span className="chip">{power?.stat}</span><span className="chip">{formatNumber(power?.cooldown)}s COOLDOWN</span>{spec&&<span className="chip chip--accent">{spec.kindLabel}</span>}{spec?.hookLabel&&<span className="chip">{spec.hookLabel} HOOK</span>}</div>
        {spec&&<p className="field-note"><b>TRADEOFF · {spec.tradeoff.name} · {spec.passive.triggerLabel}</b> {spec.tradeoff.description}</p>}
@@ -124,10 +190,23 @@ export function SelectionScreen({ui}:ScreenProps){
         </div>
        </div>}
      </div>
-      <Panel label="03 / QUICK START" meta="PICK A MODE">
-        <div className="grid-cards">{activities.map((a)=><SelectCard key={a.id} onClick={()=>{if(a.training){ui.startTraining?.(a.training);return;}if(isLattice(a.id)){setLatticeIntro(a.id);ui.setConfig?.({...config,mode:a.id,...latticePracticeDefaults(a.id)});document.querySelector('.shell-body')?.scrollTo({top:0,behavior:'instant'});}else quickStart?.(a.id);}} ariaLabel={`${a.name}: ${a.tag}`} icon={a.icon} name={a.name} tag={a.tag} meta={<Play size={15}/>}/>)}</div>
-       <p className="field-note">Starts now with <b>{selected?.name}</b>, the <b>{power?.name}</b> harness and your current rules on a {ui.selectedMode?.name} arena. Fine-tune everything under MATCH SETUP, or pick a specific arena there. New objective modes — Juggernaut, Team Elimination, VIP Escort, Payload and Assault — live there too; the full legend is under Graphics &amp; settings → Help.</p>
-     </Panel>
+      <Panel label="03 / QUICK START" meta="RECOMMENDED · TRAINING · CUSTOM">
+        <p className="eyebrow">START HERE</p>
+        <div className="grid-cards">
+         <SelectCard onClick={launchBeginner} icon={<Play size={20}/>} name="RECOMMENDED FIRST MATCH" tag={beginnerMode?`${beginnerPlan.mode.name} · ${modeTargetText(beginnerMode,beginnerPlan.rules.fragLimit)}`:'Deathmatch'} stats={planChips(beginnerPlan,beginnerMap,{reset:true})} ariaLabel={`Recommended first match: ${beginnerPlan.mode.name}, clean beginner rules, ${cap(beginnerPlan.rosterLabel)}, ${beginnerPlan.duration}, map ${beginnerMap.name}`} meta={<Play size={15}/>}/>
+         {trainingCards.map(card=><SelectCard key={card.id} onClick={()=>launchTraining(card)} icon={card.icon} name={TRAINING_TITLES[card.training as keyof typeof TRAINING_TITLES]} tag={`Guided first match · ${TRAINING_STEPS[card.training as keyof typeof TRAINING_STEPS].length} lessons`} stats={planChips(card.plan,card.map,{reset:true})} ariaLabel={`${TRAINING_TITLES[card.training as keyof typeof TRAINING_TITLES]}: guided tutorial, ${cap(card.plan.rosterLabel)}, ${card.plan.duration}`} meta={<Play size={15}/>}/>)}
+         <SelectCard onClick={openCustom} icon={<Sparkles size={20}/>} name="CUSTOM RULES" tag="Every mode and rule stays reachable here" stats={[<span className="card-chip" key="modes">{GAME_MODES.length} MODES</span>,<span className="card-chip" key="mutators">{MUTATORS.length} MUTATORS</span>,<span className="card-chip" key="tiers">{COCS_TIERS.length} DIRECTOR TIERS</span>,<span className="card-chip" key="saves">SAVED RULES STAY SAVED</span>]} ariaLabel="Custom rules: open match setup for every mode, arena, mutator and Director tier" meta={<ChevronRight size={15}/>}/>
+        </div>
+        <p className="field-note">The recommended match and the training entries rebuild clean rules — a saved mutator or Director tier cannot leak into them. Every other card shows its effective rules before you click: inherited modifiers are named, and an unsupported arena is labelled as a substitution.</p>
+        <p className="eyebrow">ALL QUICK STARTS / EFFECTIVE RULES SHOWN PER CARD</p>
+        <div className="grid-cards">
+         {modeCards.map(card=><SelectCard key={card.id} onClick={()=>launchInstant(card)} icon={card.icon} name={cap(card.plan.mode.name)} tag={card.plan.mode.description} stats={planChips(card.plan,card.map)} ariaLabel={`${card.plan.mode.name}: ${cap(card.plan.rosterLabel)}, ${card.plan.duration}, ${card.plan.fill.auto?card.plan.fill.note:card.plan.modifiers.length?`inherits ${card.plan.modifierLabel}`:'no saved modifiers'}`} meta={<Play size={15}/>}/>)}
+         {latticeCards.map(card=><SelectCard key={card.id} onClick={()=>openLattice(card)} icon={card.icon} name={cap(card.plan.mode.name)} tag={`Briefing first · ${card.plan.mode.coop?'co-op against the Director':'team territory war'}`} stats={planChips(card.plan,card.map,{reset:true})} ariaLabel={`${card.plan.mode.name}: deployment briefing, ${cap(card.plan.rosterLabel)}, ${card.plan.duration}`} meta={<ChevronRight size={15}/>}/>)}
+         {singleCards.map(card=><SelectCard key={card.id} onClick={()=>launchInstant(card)} icon={card.icon} name={cap(card.plan.mode.name)} tag={card.plan.mode.description} stats={planChips(card.plan,card.map)} ariaLabel={`${card.plan.mode.name}: solo start, ${card.plan.duration}`} meta={<Play size={15}/>}/>)}
+         <SelectCard onClick={()=>launchInstant(spectateCard)} icon={spectateCard.icon} name={cap(spectateCard.plan.mode.name)} tag="Cinematic AI match on the current rules" stats={planChips(spectateCard.plan,spectateCard.map)} ariaLabel={`Spectate: cinematic AI match on ${spectateCard.plan.mode.name}`} meta={<Film size={15}/>}/>
+        </div>
+        <p className="field-note">Starts use <b>{selected?.name}</b> and the <b>{power?.name}</b> harness. Modes that auto-fill say so on the card: Operations crews your squad and its garrison from the bot seats, soccer always fills to 2 v 2, and a 0-rival race is a solo time trial. Full rules, arenas and the Help legend live under MATCH SETUP or Graphics &amp; settings → Help.</p>
+      </Panel>
      <Panel label="LOADOUT PRESETS" meta={`${presets.length} SAVED`} actions={<Btn size="sm" variant="ghost" onClick={()=>setSetupOpen(true)}>MANAGE</Btn>}>
       {presets.length?<div className="row" role="group" aria-label="Saved loadout presets">{presets.map((p:any)=><span key={p.id} className="chip preset-chip" title={`${p.character} / ${p.harness}${p.mapId?` · ${p.mapId}`:''}`}>
        <button type="button" className="text-button" aria-label={`Load preset ${p.name}`} onClick={()=>loadPreset?.(p)}>{p.name}</button>

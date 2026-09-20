@@ -25,17 +25,10 @@ export function SpendWindowHud({spend, onSpend, onSkip, cursorKey = 'ALT', reduc
   const sinks: any[] = Array.isArray(spend?.sinks) ? spend.sinks : [];
   const [active, setActive] = React.useState(0);
   const [confirm, setConfirm] = React.useState<any>(null);
-  const [announce, setAnnounce] = React.useState(true);
   // Node-targeted sinks (FORTIFY) let the player choose between held nodes; the
   // page resolved the legal options, so the select can never offer a bad id.
   const [targets, setTargets] = React.useState<Record<string, string>>({});
   const buyButtons = React.useRef<(HTMLButtonElement | null)[]>([]);
-  // The window only publishes the remaining time, so the bar is proportioned
-  // against the first value seen on open. The clock and the seconds text remain
-  // the authoritative read; the bar is a second, shape-based cue.
-  const totalRef = React.useRef(0);
-  if (spend?.open && totalRef.current <= 0) totalRef.current = Math.max(1, Number(spend.secondsRemaining) || 1);
-
   const buy = (sink: any) => {
     if (!sink || !spend?.open) return;
     if (!sink.enabled) {
@@ -89,11 +82,6 @@ export function SpendWindowHud({spend, onSpend, onSkip, cursorKey = 'ALT', reduc
     return () => document.removeEventListener('keydown', onKey);
   }, []);
   React.useEffect(() => {
-    setAnnounce(true);
-    const timer = setTimeout(() => setAnnounce(false), 3600);
-    return () => clearTimeout(timer);
-  }, [spend?.windows]);
-  React.useEffect(() => {
     if (!confirm) return;
     const timer = setTimeout(() => setConfirm(null), 3200);
     return () => clearTimeout(timer);
@@ -104,7 +92,7 @@ export function SpendWindowHud({spend, onSpend, onSkip, cursorKey = 'ALT', reduc
   const threads = spend.threads ?? {used: 0, cap: 0, perPlayer: 0};
   const executor = spend.executor ?? {label: 'CHIEF', secondsRemaining: 0};
   const remaining = Math.max(0, Number(spend.secondsRemaining) || 0);
-  const total = Math.max(1, totalRef.current);
+  const total = Math.max(1, Number(spend.totalSeconds) || remaining || 1);
   const ratio = Math.max(0, Math.min(1, remaining / total));
   return (
     <section
@@ -121,13 +109,12 @@ export function SpendWindowHud({spend, onSpend, onSkip, cursorKey = 'ALT', reduc
       <div className="cocs-spend__timer" role="progressbar" aria-label={`${countdown(remaining)} seconds left in the spend window`} aria-valuemin={0} aria-valuemax={Math.round(total)} aria-valuenow={Math.round(remaining)}>
         <i style={{width: `${Math.round(ratio * 100)}%`}} />
       </div>
-      {announce && (
-        <p className="cocs-spend__banner" role="status">
-          <b>SPEND WINDOW OPEN</b>
-          <span>{whole(spend.budget)} FLUX · {countdown(remaining)}s TO SPEND</span>
-          <small>CLICK A SINK OR PRESS 1–4 · {cursorKey} FREES THE MOUSE · S SKIPS</small>
+        <p className="cocs-spend__banner" role="status" key={spend.windows}>
+          <span className="sr-only">Spend window open. Press 1 to 4 to buy, or S to skip.</span>
+          <b aria-hidden="true">SPEND WINDOW OPEN</b>
+          <span aria-hidden="true">{whole(spend.budget)} FLUX · {countdown(remaining)}s TO SPEND</span>
+          <small aria-hidden="true">CLICK A SINK OR PRESS 1–4 · {cursorKey} FREES THE MOUSE · S SKIPS</small>
         </p>
-      )}
       <div className="cocs-spend__meta">
         <span aria-label={`Your flux slice: ${whole(allowance.remaining)} of ${whole(allowance.allowance)} remaining`}>SLICE <b>{whole(allowance.remaining)}</b> LEFT</span>
         <span className={executor.you ? 'is-you' : ''} aria-label={`Executor lease ${executor.label}, ${countdown(executor.secondsRemaining)} seconds remaining${executor.you ? ', you hold it' : ''}`}>EXECUTOR <b>▸ {executor.label}</b>{executor.you ? ' (YOU)' : ''} · {countdown(executor.secondsRemaining)}s</span>

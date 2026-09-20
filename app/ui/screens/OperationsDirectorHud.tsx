@@ -24,8 +24,8 @@ export function OperationsDirectorHud({director}: {director: any}) {
   const phase = PHASE_LABEL[director.phase] ?? String(director.phase ?? '').toUpperCase();
   const siege = director.siege ?? {armed: false, percent: 1, health: 0, max: 0, attackers: 0, defenders: 0};
   const fronts = Array.isArray(director.fronts) ? director.fronts : [];
-  const frontText = fronts.length ? fronts.map((front: any) => front.nodeId).join(' + ') : 'STAGING';
-  const telegraph = director.telegraph ? `TELEGRAPH ${String(director.telegraph.kind).toUpperCase()} ${director.telegraph.nodeId ?? ''} ${countdown(director.telegraph.seconds)}s` : 'NO SPAWN SIGNAL';
+  const frontText = fronts.length ? fronts.map((front: any) => front.label ?? front.nodeId).join(' + ') : 'STAGING';
+  const telegraph = director.telegraph ? `TELEGRAPH ${String(director.telegraph.kind).toUpperCase()} ${director.telegraph.label ?? director.telegraph.nodeId ?? ''} ${countdown(director.telegraph.seconds)}s` : 'NO SPAWN SIGNAL';
   const boss = director.boss ? `BOSS ${String(director.boss.type).toUpperCase()} P${director.boss.phase}` : null;
   const executor = director.command?.executor;
   const tierCopy = director.tierCopy ?? null;
@@ -39,21 +39,23 @@ export function OperationsDirectorHud({director}: {director: any}) {
         <span className="eyebrow">OPERATIONS DIRECTOR · {director.tier}</span>
         <span className="director-readout__wave">WAVE {director.wave}/{director.waveCount} · {director.waveLabel || '—'}</span>
       </div>
+      <div className={`director-readout__hq${siege.armed ? ' is-siege' : ''}`} role="group" aria-label={`${siege.label ?? 'Headquarters'} ${whole(siege.health)} of ${whole(siege.max)}${siege.armed ? ' under siege' : ''}`}>
+        <span className="eyebrow">{siege.armed ? `${siege.label ?? 'HQ'} UNDER SIEGE` : `${siege.label ?? 'HQ'} SECURE`}</span>
+        <span className="director-readout__hq-track" aria-hidden="true"><i style={{width: pct(siege.percent)}}/></span>
+        <span className="director-readout__hq-value">{whole(siege.health)}/{whole(siege.max)}</span>
+        {siege.armed && <small>{siege.attackers} ATK · {siege.defenders} DEF</small>}
+      </div>
+      <div className="director-readout__diagnostics">
       <div className="director-readout__meter" aria-hidden="true">
         <i className={`director-readout__phase director-readout__phase--${director.phase}`} style={{width: pct(director.pressure)}}/>
       </div>
       <p className="director-readout__line"><span className="director-readout__phase-label">{phase}</span> · PRESSURE <b>{whole(director.budget.current)}</b>/{whole(director.budget.cap)} <small>+{formatNumber(director.budget.rate)}/s</small></p>
       <p className="director-readout__line">FRONT <b>{frontText}</b> · FORCE <b>{director.waves.forceAlive}</b>/{director.waves.forceTotal} · {director.secondsRemaining > 0 ? `${countdown(director.secondsRemaining)}s` : '—'}</p>
       <p className={`director-readout__telegraph${director.telegraph ? ' is-live' : ''}`}>{telegraph}{boss ? ` · ${boss}` : ''}</p>
-      <div className={`director-readout__hq${siege.armed ? ' is-siege' : ''}`} role="group" aria-label={`Headquarters ${siege.hqId} ${whole(siege.health)} of ${whole(siege.max)}${siege.armed ? ' under siege' : ''}`}>
-        <span className="eyebrow">{siege.armed ? 'HQ UNDER SIEGE' : 'HQ SECURE'}</span>
-        <span className="director-readout__hq-track" aria-hidden="true"><i style={{width: pct(siege.percent)}}/></span>
-        <span className="director-readout__hq-value">{whole(siege.health)}/{whole(siege.max)}</span>
-        {siege.armed && <small>{siege.attackers} ATK · {siege.defenders} DEF</small>}
       </div>
       <details><summary>WAVE DETAILS &amp; MODIFIERS</summary>
       {(director.command || director.retarget) && <p className="director-readout__aux">
-        {director.retarget ? `TARGET ${director.retarget.nodeId} · ` : ''}
+        {director.retarget ? `TARGET ${director.retarget.label ?? director.retarget.nodeId} · ` : ''}
         {executor !== undefined && executor !== null ? `EXECUTOR ${executor} · ` : ''}
         {director.command ? `THREADS ${director.command.threads.used}/${director.command.threads.cap} · SLICE ${director.command.slicePerPlayer}` : ''}
       </p>}

@@ -50,7 +50,7 @@ export function controlsFromState(state = {}) {
   if (state.ads || state.touch?.ads === true) controls.ads = true;
   if (state.reload) controls.reload = true;
   // Holding jump auto-hops: the buffer re-arms on every landing frame.
-  if (state.jump || held('jump')) controls.jump = true;
+  if (state.jump || state.touch?.jump === true || held('jump')) controls.jump = true;
   if (state.power) controls.power = true;
   // The class movement verb (grapple / blink step / deployable rope) is a held
   // input: the engine derives its press and release edges from the held state.

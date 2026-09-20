@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {DEFAULT_BINDINGS, KEYBIND_ACTIONS, KEYBIND_LABELS, KEYBIND_OPTIONS, actionForCode, bindingConflicts, normalizeBindings, rebindAction} from './keybinds.mjs';
+import {DEFAULT_BINDINGS, KEYBIND_ACTIONS, KEYBIND_LABELS, KEYBIND_OPTIONS, actionBindingLabels, actionForCode, bindingConflicts, bindingLabel, normalizeBindings, rebindAction} from './keybinds.mjs';
 
 test('explicit rebinding swaps occupied keys regardless of action order', () => {
   for (const [action, occupied] of [['forward', 'back'], ['back', 'forward']]) {
@@ -72,6 +72,15 @@ test('every bindable action has a human label for the settings grid', () => {
   for (const action of KEYBIND_ACTIONS) assert.ok(KEYBIND_LABELS[action], `${action} has a label`);
   assert.match(KEYBIND_LABELS.cursor, /cursor/i);
   assert.match(KEYBIND_LABELS.command, /command board/i);
+});
+
+test('all player-facing surfaces share readable remapped key labels', () => {
+  assert.equal(bindingLabel('KeyZ'), 'Z');
+  assert.equal(bindingLabel('ShiftLeft'), 'Left Shift');
+  assert.equal(bindingLabel('ArrowUp'), 'Up');
+  const labels = actionBindingLabels({...DEFAULT_BINDINGS, power: 'KeyP', grenade: 'KeyZ'});
+  assert.equal(labels.power, 'P');
+  assert.equal(labels.grenade, 'Z');
 });
 
 test('normalization never produces duplicate bindings', () => {

@@ -413,3 +413,69 @@ test('a seeded co-op run with role agents is byte-identical across two processes
   assert.equal(first, second, 'same seed, same snapshot');
   assert.notEqual(run(0xC0DF), first, 'a different seed diverges');
 });
+
+// ---------------------------------------------------------------------------
+// F03 public outcome progress in the authoritative snapshot.
+// ---------------------------------------------------------------------------
+test('the public snapshot publishes dominance start, acceleration and reset', () => {
+  const m = new Match('chatgpt', 'openclaw', mulberry32(41), 'lattice-slice', {
+    mode: 'cocs', humanCount: 1, botCount: 0, timeLimit: 300, cocsPolicy: () => [],
+  });
+  const state = m.objectiveState;
+  const before = cocsSnapshot(m).dominance;
+  assert.equal(before.team, null);
+  assert.equal(before.progress, 0);
+  assert.equal(before.remaining, before.target, 'with no holder the full window remains');
+  assert.equal(before.count, state.dominanceCount);
+  assert.equal(before.fastCount, state.dominanceFastCount);
+  assert.equal(before.counts[0] + before.counts[1], 0, 'counts are the capturable ownership tally');
+  assert.equal(cocsSnapshot(m).outcome.mode, 'pvp');
+  assert.equal(cocsSnapshot(m).outcome.waves, null);
+  // Three of five arms the bare-majority ratchet.
+  node(state, 'front-0').owner = 0;
+  node(state, 'front-1').owner = 0;
+  node(state, 'relay-0').owner = 0;
+  step(m, 30);
+  const armed = cocsSnapshot(m).dominance;
+  assert.equal(armed.team, 0);
+  assert.ok(armed.progress > 0, 'the hold accumulates on the authoritative sim clock');
+  assert.ok(armed.remaining < armed.target);
+  assert.equal(armed.remaining, armed.target - armed.progress);
+  assert.equal(armed.fast, false);
+  assert.equal(armed.breakCount, 1, 'one enemy capture breaks a bare majority');
+  // A fourth node accelerates to the fast hold; breaking the majority resets.
+  node(state, 'econ-n').owner = 0;
+  step(m, 1);
+  const fast = cocsSnapshot(m).dominance;
+  assert.equal(fast.fast, true);
+  assert.equal(fast.target, state.dominanceFast);
+  assert.equal(fast.breakCount, 2, 'a fast hold needs two enemy captures');
+  node(state, 'front-1').owner = 1;
+  node(state, 'econ-n').owner = 1;
+  step(m, 1);
+  const reset = cocsSnapshot(m).dominance;
+  assert.equal(reset.team, null);
+  assert.equal(reset.progress, 0);
+  assert.equal(reset.remaining, reset.target, 'a broken majority clears the timer back to the full window');
+  assert.equal(reset.fast, false);
+});
+
+test('the operations outcome publishes waves cleared/total and HQ integrity', () => {
+  const m = coopMatch({seed: 37, timeLimit: 60});
+  const snap = cocsSnapshot(m);
+  assert.equal(snap.outcome.mode, 'operations');
+  assert.deepEqual(snap.outcome.waves, {cleared: 0, total: 5});
+  assert.equal(snap.outcome.hq.id, 'hq-0');
+  assert.equal(snap.outcome.hq.max, snap.director.siege.max);
+  assert.equal(snap.outcome.hq.percent, 1);
+  assert.equal(snap.outcome.hq.armed, false);
+  assert.equal(snap.dominance.team, null, 'the raw Director dominance timer stays published alongside');
+  const state = m.objectiveState;
+  state.coop.siege.health = state.coop.siege.max * .5;
+  state.coop.siege.armed = true;
+  const hurt = cocsSnapshot(m);
+  assert.equal(hurt.outcome.hq.percent, .5);
+  assert.equal(hurt.outcome.hq.armed, true);
+  assert.equal(hurt.outcome.hq.health, Math.round(state.coop.siege.max * .5));
+  assert.equal(hurt.director.siege.percent, .5, 'the primary status and the Director panel agree');
+});

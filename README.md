@@ -13,7 +13,7 @@ on your machine, and every asset is procedural.
 
 [**Play it live**](https://arena.ussyco.de) · [Source](https://github.com/mojomast/tokenarena)
 
-![version](https://img.shields.io/badge/version-v8.3%20CLARITY-2dd4bf)
+![version](https://img.shields.io/badge/version-v8.4%20FIELDCRAFT-2dd4bf)
 ![runtime](https://img.shields.io/badge/runtime-Node%2022.13%2B-339933)
 ![engine](https://img.shields.io/badge/engine-Three.js-000000)
 ![tests](https://img.shields.io/badge/tests-game%20%C2%B7%20server%20%C2%B7%20SSR-4c9f70)
@@ -438,6 +438,26 @@ assets. Full procedure and verification: [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md
 
 Recent releases. The full history lives in
 [docs/CHANGELOG.md](docs/CHANGELOG.md).
+
+### v8.4 · FIELDCRAFT — 2026-09-20
+- LATTICE exposes authoritative dominance progress and Operations wave/HQ state;
+  local and network objective notices share priority, deduplication and privacy
+  rules so urgent losses and sieges cannot be displaced by routine events.
+- Coach, order strip and board share one legal navigation-backed target model,
+  preserve stable advice, prefer HQ defence during a siege and show authoritative
+  queued/accepted/completed/refused order outcomes with authored node names.
+- Passive standings and death summaries preserve combat control. Recommended
+  starts reset custom rules and preview their effective map, roster, clock and
+  modifiers; Operations separates Director tier from AI aim/reaction difficulty.
+- Short-screen HUDs lead with objective, vitals, interaction and wave/HQ state;
+  tactical diagnostics are disclosed on demand. Remapped labels and held touch
+  jump reach the live interfaces, with a contextual LATTICE touch-use action.
+- Result screens explain the outcome, personal objective/support contribution,
+  exact XP categories and one mode-appropriate next action before progression.
+  No combat or Operations balance changed; human playtesting remains the gate
+  before tuning, and D2-D4 measurement remains deferred.
+- Scope: snapshot/server visibility code changed, so web and game-server services
+  restart and connected multiplayer clients briefly disconnect.
 
 ### v7.2 · ECHO — 2026-09-18
 - The Moth audio assets are wired into the game. `app/page.tsx` registers a

@@ -74,6 +74,8 @@ test('controlsFromState builds movement and only sets active flags', () => {
 test('holding jump produces autohop while a one-shot tap still jumps', () => {
   assert.equal(controlsFromState({keys:['Space']}).jump, true);
   assert.equal(controlsFromState({keys:['KeyW'],jump:true}).jump, true);
+  assert.equal(controlsFromState({touch:{jump:true}}).jump, true);
+  assert.equal(controlsFromState({touch:{jump:false}}).jump, undefined);
   assert.equal(controlsFromState({keys:['KeyW']}).jump, undefined);
 });
 

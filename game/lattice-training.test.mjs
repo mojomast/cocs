@@ -142,7 +142,7 @@ test('movement never falls back to a different actor or invalid coordinates',()=
 });
 
 test('instructions resolve remapped controls, distinguish firing from hits and terminal start from completion',()=>{
- assert.match(trainingControls('move',{forward:'ArrowUp',sprint:'ShiftRight'}),/ArrowUp.*Right Shift/);
+ assert.match(trainingControls('move',{forward:'ArrowUp',sprint:'ShiftRight'}),/Up.*Right Shift/);
  assert.match(trainingControls('fire',{reload:'KeyL'}),/L reload/);
  assert.match(trainingControls('order',{commandScan:'KeyY',commandGo:'KeyJ',commandAttack:'KeyO'}),/Y SCAN \/ J GO \/ O ATTACK → 1–9 target → Enter/);
  assert.match(trainingControls('device',{interact:'KeyI'}),/I interact.*RIDE/);

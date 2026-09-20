@@ -228,7 +228,7 @@ test('career panels expose prestige/achievement aria and the page provides every
  for(const src of [screen,results]){
   const names=new Set();
   for(const m of src.matchAll(/const \{([^}]*)\}\s*=\s*ui;/g))for(const part of m[1].split(',')){const name=part.trim().split(':').pop().trim();if(name&&!name.includes('='))names.add(name);}
-  for(const m of src.matchAll(/\bui\.([A-Za-z0-9_]+)/g))names.add(m[1]);
+  for(const m of src.matchAll(/(?<![-\w])ui\.([A-Za-z0-9_]+)/g))names.add(m[1]);
   const missing=[...names].filter(name=>!has(name));
   assert.deepEqual(missing,[],`page ui bag is missing: ${missing.join(', ')}`);
  }

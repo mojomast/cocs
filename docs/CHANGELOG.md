@@ -16,6 +16,49 @@ record in [VERIFICATION.md](VERIFICATION.md).
 
 ---
 
+## v8.4 · FIELDCRAFT — 2026-09-20
+
+The fieldwork pass closes the loop from objective truth to a legal next decision,
+keeps passive HUD use from stealing control, and turns setup and results into
+clear promises. Snapshot and server visibility code changed, so both production
+services restart and connected multiplayer clients briefly disconnect.
+
+- **Authoritative objective truth:** PvP snapshots publish dominance owner,
+  required majority, progress, remaining hold time and accelerated state;
+  Operations publishes waves cleared/total and HQ integrity. The fields are
+  public, additive and tolerated when absent, so `PROTOCOL_VERSION` is unchanged.
+- **Relevant feedback:** local and online events use the same objective adapter.
+  Friendly captures, actual friendly-point losses, wave clear, siege, completed
+  orders and local refusals display once; priority and expiry keep urgent events
+  over routine ones, while team-private orders and spends remain filtered.
+- **Feasible tactics:** coach, SCAN/GO/ATTACK picker and command board consume one
+  adjacency- and navigation-backed legal-target model. It provides reachable
+  neutral pushes and enemy retakes, target hysteresis, HQ-siege override and
+  authored labels. Orders stay QUEUED until simulation acceptance, then report
+  acceptance, completion or refusal with a useful next action.
+- **Control continuity:** holding Tab is a passive standings glance, and the
+  automatic respawn summary is passive. An explicit next-spawn editor owns
+  loadout changes; stacked overlays have one keyboard owner; purchase repeats
+  are blocked; restoring combat input happens once.
+- **Predictable entry:** recommended LATTICE/training starts use fresh rules and
+  every instant-start card previews effective map, roster, duration and modifiers.
+  Operations explains squad fill versus compulsory Director waves and exposes
+  D1-D4 separately from bot aim/reaction difficulty. Custom setup remains.
+- **Objective-first HUD and device controls:** short screens retain objective,
+  vitals, current interaction and wave/HQ truth without scrolling the combat
+  view; pressure/economy/routes live in an intentional tactical disclosure.
+  Director copy uses authored node labels. Selection, training and HUD controls
+  resolve remapped labels; touch jump is held and LATTICE adds contextual USE.
+- **Results that teach:** mode-specific contribution summaries cover connected
+  hold, captures, orders, Operations waves/HQ/spends, campaign checkpoints and
+  Horde progress. XP categories sum to the award, one attainable challenge is
+  surfaced and one primary retry/rematch/practice action preserves context and
+  queue safety. Re-rendering never grants credit.
+- **Balance discipline:** no weapon, combat, roster-pressure or Director-tier
+  tuning ships here. The first-time-player protocol in
+  [GAMEPLAY-UX-FUN-PLAN.md](GAMEPLAY-UX-FUN-PLAN.md) remains the human evidence
+  gate before tuning; D2-D4 Operations measurement remains deferred.
+
 ## v8.3 · CLARITY — 2026-09-19
 
 An interface and presentation pass based on playtest feedback.

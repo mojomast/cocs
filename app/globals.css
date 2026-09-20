@@ -823,6 +823,8 @@ html, body { overscroll-behavior: none; }
 .touch-primary .touch-fire:active { background: #6a2226e6; }
 .touch-primary .touch-jump { background: #12283acc; border-color: #8fd0ff66; color: #dff1ff; }
 .touch-primary .touch-jump:active { background: #1d4a6ae6; }
+.touch-tactical .touch-primary .touch-interact{width:64px;height:52px;border-radius:12px;background:#153a2ecc;border-color:#8dffb088;color:#eafff5}
+.touch-tactical .touch-actions{grid-template-columns:repeat(4,auto)}
 .touch-voice { border-color: #8fd0ff66; color: #dff1ff; }
 .touch-voice:active, .touch-voice:focus { background: #123a52d9; border-color: #a9dcff; }
 .touch-util .touch-button { width: 42px; height: 42px; border-radius: 10px; }

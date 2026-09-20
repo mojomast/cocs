@@ -22,8 +22,9 @@
 .lattice-loadout-role b{font-size:14px;color:var(--accent-soft)}.lattice-loadout-role p,.lattice-kit-details p{margin:4px 0;font:12px/1.5 var(--font-ui);color:var(--text-dim)}
 .lattice-kit-details b{font:700 11px var(--font-mono);color:var(--accent-soft)}
 .lattice-hud .lattice-terminal-details .cocs-terminals{position:static;width:100%;padding:6px 0;box-shadow:none;border:0;background:none}
-.lattice-hud .director-readout{position:absolute;top:calc(var(--safe-top) + 290px);right:var(--safe-right);width:min(270px,32vw);max-height:calc(100dvh - 455px);overflow:auto;pointer-events:auto;padding:12px;border:1px solid var(--border);border-right:3px solid var(--warn);border-radius:8px;background:#07171eef;color:var(--text);font:11px/1.5 var(--font-mono);scrollbar-width:thin}
+.lattice-hud .director-readout{position:absolute;top:calc(var(--safe-top) + 290px);right:var(--safe-right);width:min(270px,32vw);max-height:calc(100dvh - 430px);overflow:auto;pointer-events:auto;padding:12px;border:1px solid var(--border);border-right:3px solid var(--warn);border-radius:8px;background:#07171eef;color:var(--text);font:11px/1.5 var(--font-mono);scrollbar-width:thin}
 .director-readout__head{display:grid;gap:5px}
+.director-readout__diagnostics{display:grid}
 .director-readout__head .eyebrow{font-size:10px;letter-spacing:.08em}
 .director-readout__wave{font-size:14px;font-weight:800;color:var(--warn)}
 .director-readout p{margin:6px 0;color:var(--text-dim)}
@@ -35,7 +36,7 @@
 .director-readout summary{cursor:pointer;min-height:36px;align-content:center;font-size:10px;color:var(--accent-soft)}
 .director-readout__copy small{display:block}
 .director-readout__sinks{padding-left:16px}
-@media(max-width:760px){.lattice-hud .director-readout{top:calc(var(--safe-top) + 205px);width:calc(100vw - 230px);min-width:135px;padding:7px;font-size:9px;max-height:calc(100dvh - 390px)}.director-readout__wave{font-size:11px}}
+@media(max-width:760px){.lattice-hud .director-readout{top:calc(var(--safe-top) + 205px);width:calc(100vw - 230px);min-width:135px;padding:7px;font-size:9px;max-height:calc(100dvh - 330px)}.director-readout__wave{font-size:11px}}
 .cocs-readout{max-height:calc(100dvh - 270px);overflow:auto;overscroll-behavior:contain;scrollbar-width:thin;pointer-events:auto}
 .cocs-readout .cocs-readout__own,.cocs-readout .cocs-readout__hint{display:none}
 .cocs-readout .cocs-readout__rung{font-size:10px}
@@ -52,7 +53,7 @@
 .lattice-hud .ability-card{flex-shrink:0;padding:7px;min-width:72px;max-width:100px}
 .lattice-hud .ability-card .stat-label{font:700 10px/1.4 var(--font-mono);text-align:center;overflow-wrap:normal}
 .lattice-hud .ability-card .stat-note{font:10px var(--font-mono)}
-@media(max-width:1050px){.lattice-hud .hud-bottom{grid-template-columns:1fr auto}.lattice-hud .objective-bar{display:none}}
+@media(max-width:1050px){.lattice-hud .hud-bottom{grid-template-columns:minmax(0,1fr) auto;grid-template-areas:'objective objective' 'left right';gap:8px}.lattice-hud .objective-bar{grid-area:objective;display:grid;max-width:96vw}.lattice-hud .hud-corner--left{grid-area:left}.lattice-hud .hud-corner--right{grid-area:right}}
 .lattice-tactical{padding:8px 0;color:var(--text-dim)}
 .lattice-tactical__head{display:flex;justify-content:space-between;font:8px var(--font-mono)}
 .lattice-tactical svg{display:block;width:100%;max-height:150px;margin-top:8px;background:#041218;border-radius:5px;overflow:visible}
@@ -67,6 +68,50 @@
 .lattice-tactical p{margin:6px 0 0;font:9px var(--font-mono)}
 .lattice-guide summary:focus-visible,.cocs-readout summary:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
 @media(max-width:760px){.lattice-guide__steps,.lattice-guide__legend{grid-template-columns:1fr}.lattice-guide{padding:12px}.cocs-readout{max-height:calc(100dvh - 250px)}}
+/* F07: short screens keep one objective, the urgent Director/HQ state and the
+   order controls visible. Diagnostics live behind the tactical disclosure;
+   the side panels stay outside the central reticle corridor. */
+.lattice-tactical-details>summary{color:var(--accent-soft)}
+@media(max-height:620px){
+ .lattice-hud .cocs-readout{top:calc(var(--safe-top) + 66px);max-height:calc(100dvh - var(--safe-top) - var(--safe-bottom) - 150px)}
+ .lattice-hud .director-readout{top:calc(var(--safe-top) + 66px);max-height:none;overflow:visible}
+ .lattice-hud .director-readout__diagnostics,.lattice-hud .director-readout>details,.lattice-hud .kill-feed{display:none}
+ .lattice-hud .hud-bottom{grid-template-columns:minmax(0,1fr) minmax(0,1fr);grid-template-areas:'left right';bottom:calc(var(--safe-bottom) + 18px)}
+ .lattice-hud .objective-bar{position:fixed;z-index:var(--z-panel,2);left:50%;top:calc(var(--safe-top) + 66px);width:min(260px,31vw);max-width:260px;min-height:0;transform:translateX(-50%);display:block;padding:6px 10px;border:1px solid var(--border);border-radius:var(--radius-md);background:#081a1be6}
+ .lattice-hud .objective-bar .compass,.lattice-hud .objective-copy small,.lattice-hud .objective-tags{display:none}
+ .lattice-hud .objective-copy strong{font-size:12px;white-space:nowrap}
+ .lattice-hud .lattice-interaction-hint{top:calc(50% + 32px)}
+}
+@media(max-width:760px){
+ .lattice-hud .ability-card{min-width:46px;max-width:52px;padding:4px}
+ .lattice-hud .ability-ring{width:32px;height:32px}
+ .lattice-hud .ability-card .stat-label{display:none}
+ .lattice-hud .ability-card .stat-note{max-width:48px;font-size:8px;overflow:hidden;text-overflow:ellipsis}
+}
+@media(max-width:760px) and (max-height:620px){
+ .lattice-hud .director-readout{width:min(250px,34vw);min-width:145px}
+ .lattice-hud .cocs-readout{width:min(252px,31vw);min-width:220px}
+ .lattice-hud .lattice-coach p,.lattice-hud .cocs-strip__help{display:none}
+}
+@media(max-height:620px){
+ .lattice-hud.touch-mode .ability-card{display:none}
+ .lattice-hud.touch-mode .hud-corner--left{padding-left:150px}
+ .lattice-hud.touch-mode .hud-corner--right{padding-right:220px}
+ .lattice-hud.touch-mode .hud-bottom-note{display:none}
+}
+@media(max-width:520px) and (orientation:portrait){
+ /* Keep the portrait reticle corridor clear. The LATTICE panel remains
+    scrollable; the Director retains wave and HQ truth without expanding its
+    lower-priority diagnostics across the fight. */
+ .lattice-hud .cocs-readout{top:calc(var(--safe-top) + 74px);width:min(200px,54vw);max-height:min(300px,35dvh)}
+ .lattice-hud .director-readout{top:calc(var(--safe-top) + 74px);width:min(160px,42vw);max-height:150px;overflow:hidden}
+ .lattice-hud .director-readout__diagnostics,.lattice-hud .director-readout>details{display:none}
+ .lattice-hud.touch-mode .objective-bar{position:fixed;z-index:var(--z-panel,2);left:auto;right:var(--safe-right);top:calc(var(--safe-top) + 233px);width:min(160px,42vw);max-width:none;min-height:0;transform:none;display:block;padding:6px 10px;border:1px solid var(--border);border-radius:var(--radius-md);background:#081a1be6}
+ .lattice-hud.touch-mode .objective-bar .compass,.lattice-hud.touch-mode .objective-copy small,.lattice-hud.touch-mode .objective-tags{display:none}
+ .lattice-hud.touch-mode .objective-copy strong{font-size:12px;white-space:nowrap}
+ .lattice-hud.touch-mode .ability-card{display:none}
+ .lattice-hud.touch-mode .cocs-spend-chip{left:auto;right:var(--safe-right);top:calc(var(--safe-top) + 269px);width:min(160px,42vw);min-height:38px;transform:none;justify-content:center;padding:6px 8px;font-size:.7em}
+}
 /* Field Training banner: bottom-centre, above the ability ring, never blocking
    the reticle or the interaction prompt. */
 .lattice-training-banner{position:absolute;left:50%;bottom:calc(var(--safe-bottom) + 118px);transform:translateX(-50%);z-index:var(--z-panel,2);width:min(520px,86vw);display:grid;gap:4px;padding:10px 14px 12px;border:1px solid var(--border-strong);border-left:3px solid var(--accent);border-radius:var(--radius-md);background:linear-gradient(120deg,#08201ff2,#0a1a1ce8);box-shadow:0 12px 30px #0008;text-shadow:0 1px 3px #000;pointer-events:none}

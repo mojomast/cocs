@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {vehicleHud, escapeHint, voiceHint, reloadProgress, dynamicCrosshairGap, lowAmmo, postureLabel, hitMarker, projectToScreen, damageNumberStyle, boundList, damageBearing, killBanner, weaponTag, ammoText, commandBrief, isTeamMode, matchStartBanner, modeColumns, modeGoal, modePrimary, modeTargetText, objectiveCopy, suddenDeathBanner, grenadeStatus, killstreakCallout, ladderStatus, streakStatus, audioCaption, scoreAnnouncer, multikillLabel, spreeLabel, recentKills, killCallout, matchAwards, killFeedWeapon, connectionQuality, spectateActor, nextSpectateTarget, spectatorBoard, spectatorTeams, weaponRangeInfo, weaponRangeLabel, scoreStats} from './hud.mjs';
+import {vehicleHud, escapeHint, voiceHint, reloadProgress, dynamicCrosshairGap, lowAmmo, postureLabel, hitMarker, projectToScreen, damageNumberStyle, boundList, damageBearing, killBanner, weaponTag, ammoText, commandBrief, isTeamMode, matchStartBanner, modeColumns, modeGoal, modePrimary, modeTargetText, objectiveCopy, suddenDeathBanner, grenadeStatus, killstreakCallout, ladderStatus, streakStatus, audioCaption, scoreAnnouncer, multikillLabel, spreeLabel, recentKills, killCallout, matchAwards, killFeedWeapon, connectionQuality, spectateActor, nextSpectateTarget, spectatorBoard, spectatorTeams, weaponRangeInfo, weaponRangeLabel, scoreStats, cocsDominanceStatus, cocsOperationsStatus, cocsOutcomeView, acceptCocsAnnouncement, cocsAnnouncePriority, cocsAnnouncementTTL, COCS_ANNOUNCE_PRIORITY} from './hud.mjs';
 import {WEAPONS} from './data.mjs';
 import {GAME_MODES,teamMode} from './config.mjs';
 import {soccerDisplay,soccerResult} from './race-ui.mjs';
@@ -624,4 +624,123 @@ test('a gunner or passenger also receives their PUMA card and exit prompt', () =
   assert.equal(vehicleHud({...player, vehicleId:0}, [{...ride, driver:1, gunner:0}]).prompt, 'E / EXIT PUMA');
   assert.equal(vehicleHud({...player, vehicleId:0}, [{...ride, driver:1, passengers:[0]}]).prompt, 'E / EXIT PUMA');
   assert.equal(vehicleHud({...player, vehicleId:0}, [{...ride, driver:1, passengers:[2]}]).vehicle, null);
+});
+
+// ---------------------------------------------------------------------------
+// F03 public outcome progress: the primary status reads authoritative
+// snapshot numbers, never a client clock, and tolerates absence.
+// ---------------------------------------------------------------------------
+const dominanceHud = over => ({
+  config: {mode: 'cocs'},
+  cocs: {
+    nodes: [
+      {id: 'hq-0', x: -108, z: 0, archetype: 'hq', owner: 0, progress: [0, 0], contested: false, live: false},
+      {id: 'front-0', x: -54, z: 0, archetype: 'front', owner: 0, progress: [0, 0], contested: false, live: true},
+      {id: 'relay-0', x: 0, z: 0, archetype: 'relay', owner: 1, progress: [0.2, 0.4], contested: false, live: true},
+      {id: 'front-1', x: 54, z: 0, archetype: 'front', owner: 1, progress: [0, 0], contested: false, live: true},
+    ],
+    scores: {0: 25, 1: 40},
+    liveNodeIds: ['front-0', 'relay-0', 'front-1'],
+    winner: null,
+    dominance: {
+      team: 1, progress: 30, target: 45, remaining: 15, fast: true,
+      count: 3, fastCount: 4, counts: {0: 1, 1: 4}, breakCount: 2, hold: 90, fastHold: 45,
+    },
+    ...over,
+  },
+});
+
+test('cocsDominanceStatus formats the authoritative race and never counts down by itself', () => {
+  const view = cocsDominanceStatus(dominanceHud(), {team: 0});
+  assert.equal(view.team, 1);
+  assert.equal(view.mine, false);
+  assert.equal(view.holding, true);
+  assert.equal(view.remaining, 15);
+  assert.equal(view.timeText, '15s');
+  assert.equal(view.fast, true);
+  assert.equal(view.count, 3);
+  assert.equal(view.counts[1], 4);
+  assert.equal(view.breakCount, 2);
+  assert.equal(cocsDominanceStatus(dominanceHud(), {team: 1}).mine, true);
+  // A sub-five-second hold keeps a decimal and never promises zero early.
+  const close = cocsDominanceStatus({cocs: {dominance: {team: 0, progress: 87.5, target: 90, remaining: 2.5, counts: {0: 3, 1: 0}, count: 3}}}, {team: 0});
+  assert.equal(close.timeText, '2.5s');
+  // Absent fields read neutral and never throw.
+  const empty = cocsDominanceStatus({}, {team: 0});
+  assert.equal(empty.holding, false);
+  assert.equal(empty.team, null);
+  assert.equal(empty.timeText, null);
+  assert.deepEqual(empty.counts, {0: 0, 1: 0});
+  assert.equal(cocsDominanceStatus(null, null).count, 0);
+});
+
+test('cocsOperationsStatus leads with waves and HQ integrity and tolerates absence', () => {
+  const ops = cocsOperationsStatus({cocs: {outcome: {mode: 'operations', waves: {cleared: 2, total: 5}, hq: {id: 'hq-0', health: 840, max: 1400, percent: .6, armed: true}}}});
+  assert.deepEqual(ops.waves, {cleared: 2, total: 5});
+  assert.equal(ops.waveText, '2 / 5');
+  assert.equal(ops.hqText, 'HQ 60%');
+  assert.equal(ops.siege, true);
+  // The pre-F03 surfaces (`waves` + `director.siege`) read the same way.
+  const legacy = cocsOperationsStatus({cocs: {waves: {cleared: 1, par: 5}, director: {siege: {hqId: 'hq-0', health: 700, max: 1400, percent: .5, armed: false}}}});
+  assert.equal(legacy.waveText, '1 / 5');
+  assert.equal(legacy.hqText, 'HQ 50%');
+  assert.equal(legacy.siege, false);
+  const empty = cocsOperationsStatus({});
+  assert.equal(empty.waveText, 'UNKNOWN');
+  assert.equal(empty.hqText, 'HQ STATUS UNKNOWN');
+  assert.equal(empty.siege, false);
+});
+
+test('cocsOutcomeView gives PvP and Operations distinct primary status copy', () => {
+  const pvp = cocsOutcomeView(dominanceHud(), {team: 0}, modeById('cocs'));
+  assert.equal(pvp.mode, 'pvp');
+  assert.equal(pvp.title, 'BREAK THE DOMINANCE');
+  assert.match(pvp.status, /BLUE DOMINANCE 4 NODES/);
+  assert.match(pvp.status, /15s LEFT/);
+  assert.match(pvp.status, /FAST/);
+  assert.match(pvp.status, /TAKE 2 NODES TO RESET/);
+  assert.match(pvp.action, /take 2 nodes/);
+  assert.match(pvp.detail, /RED 25 OP/);
+  const own = cocsOutcomeView(dominanceHud({dominance: {team: 0, progress: 10, target: 90, remaining: 80, fast: false, count: 3, fastCount: 4, counts: {0: 3, 1: 1}, breakCount: 1, hold: 90, fastHold: 45}}), {team: 0}, modeById('cocs'));
+  assert.equal(own.title, 'HOLD THE LATTICE');
+  assert.match(own.status, /KEEP 3 NODES/);
+  assert.doesNotMatch(own.status, /TO RESET/);
+
+  const opsHud = {config: {mode: 'cocs-coop'}, cocs: {coop: true, nodes: [], scores: {0: 35, 1: 0}, waves: {cleared: 2, par: 5}, director: {siege: {armed: true, hqId: 'hq-0', health: 840, max: 1400, percent: .6}}}};
+  const ops = cocsOutcomeView(opsHud, {team: 0}, modeById('cocs-coop'));
+  assert.equal(ops.mode, 'operations');
+  assert.equal(ops.title, 'DEFEND THE HQ');
+  assert.ok(ops.status.startsWith('HQ UNDER SIEGE'), ops.status);
+  assert.match(ops.detail, /WAVES 2 \/ 5/);
+  assert.match(ops.detail, /OP SCORE/);
+  const calm = cocsOutcomeView({config: {mode: 'cocs-coop'}, cocs: {coop: true, nodes: [], scores: {0: 0, 1: 0}, waves: {cleared: 0, par: 5}, director: {siege: {armed: false, hqId: 'hq-0', health: 1400, max: 1400, percent: 1}}}}, {team: 0}, modeById('cocs-coop'));
+  assert.equal(calm.title, 'CLEAR THE WAVES');
+  assert.ok(calm.status.startsWith('HQ 100%'), calm.status);
+  assert.match(calm.action, /win condition/);
+});
+
+test('commandBrief and modeTargetText label the Operations win condition, not the OP score', () => {
+  const target = modeTargetText(modeById('cocs-coop'));
+  assert.match(target, /WAVE/);
+  assert.notEqual(target, 'HOLD THE LATTICE');
+  assert.equal(modeTargetText(modeById('cocs')), 'HOLD THE LATTICE');
+  const brief = commandBrief({config: {mode: 'cocs-coop'}, cocs: {coop: true, nodes: [], scores: {0: 12, 1: 0}, waves: {cleared: 1, par: 5}, director: {siege: {armed: false, hqId: 'hq-0', health: 1400, max: 1400, percent: 1}}}}, {team: 0}, modeById('cocs-coop'));
+  assert.equal(brief.title, 'CLEAR THE WAVES');
+  assert.match(brief.detail, /WAVES 1 \/ 5/);
+  assert.match(brief.detail, /HQ 100%/);
+  // PvP without a published race keeps the pre-F03 lattice copy.
+  const plain = commandBrief({config: {mode: 'cocs'}, cocs: {nodes: [{id: 'front-0', x: 0, z: 0, archetype: 'front', owner: 0, progress: [0, 0], contested: false, live: true}], scores: {0: 5, 1: 0}, liveNodeIds: ['front-0']}}, {team: 0}, modeById('cocs'));
+  assert.equal(plain.title, 'HOLD THE LATTICE');
+  assert.match(plain.detail, /5 OP/);
+});
+
+test('the announcement priority policy is bounded, deduped and expiry-aware', () => {
+  const ranks = Object.values(COCS_ANNOUNCE_PRIORITY);
+  assert.ok(ranks.every(rank => Number.isFinite(rank) && rank >= 0));
+  assert.equal(new Set(ranks).size, ranks.length, 'every bounded rank is distinct');
+  assert.ok(COCS_ANNOUNCE_PRIORITY.siegeLifted > COCS_ANNOUNCE_PRIORITY.siege);
+  assert.ok(COCS_ANNOUNCE_PRIORITY.siege > COCS_ANNOUNCE_PRIORITY.loss);
+  assert.ok(COCS_ANNOUNCE_PRIORITY.loss > COCS_ANNOUNCE_PRIORITY.secure);
+  assert.ok(COCS_ANNOUNCE_PRIORITY.wave > COCS_ANNOUNCE_PRIORITY.order);
+  assert.ok(cocsAnnouncementTTL({ttl: 5}) > cocsAnnouncementTTL({}), 'an explicit TTL wins; unknown beats default short');
 });

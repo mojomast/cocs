@@ -662,7 +662,7 @@ export function processCocsOrder(match, state, order) {
     trimOrderLog(state);
     // Local matches have no wire `cocs-reject`; the sim event is what makes a
     // refused order visible (and it reaches the wire as a normal match event).
-    match?.emit?.('cocs-order-rejected', {team, verb, node: entry.target, reason, peerId: entry.peerId, cardId: entry.cardId});
+    match?.emit?.('cocs-order-rejected', {team, verb, node: entry.target, label: nodeById(state, entry.target)?.label ?? null, reason, peerId: entry.peerId, cardId: entry.cardId});
     return false;
   };
   if ((team !== 0 && team !== 1) || !COCS_ORDER_VERBS.includes(verb) || target === null) return reject();
@@ -1612,6 +1612,10 @@ function nodeOrderTeams(state, node) {
 }
 
 function captureNode(match, state, node, team, actors) {
+  // Who held the node before this capture: `null` means it was neutral. The
+  // HUD needs it to read "node lost" apart from "enemy took a neutral point"
+  // (F02), and it is additive on the public capture event.
+  const previousOwner = node.owner === 0 || node.owner === 1 ? node.owner : null;
   node.owner = team;
   node.progress = {0: 0, 1: 0};
   node.contested = false;
@@ -1630,9 +1634,10 @@ function captureNode(match, state, node, team, actors) {
   // whole team cannot farm one order. The issuer's extra personal OP needs a
   // seat id; the V0b duty Chief is not a player, so only contributors are paid.
   const orderTeam = nodeOrderTeams(state, node)[team];
+  const orderTask = state.tasks?.[team] ?? null;
   let orderCompleted = false, orderVerb = null, contributors = [];
-  if (orderTeam && state.tasks?.[team]) {
-    orderVerb = state.tasks[team].verb ?? null;
+  if (orderTeam && orderTask) {
+    orderVerb = orderTask.verb ?? null;
     state.tasks[team] = null;
     state.scores[team] = num(state.scores[team], 0) + ORDER_REWARD.teamOP;
     state.orderStats.completed = num(state.orderStats.completed, 0) + 1;
@@ -1645,7 +1650,7 @@ function captureNode(match, state, node, team, actors) {
       actor.ordersContributed = num(actor.ordersContributed, 0) + 1;
     }
     orderCompleted = true;
-    match?.emit?.('cocs-order-complete', {team, node: node.id, label: node.label, verb: orderVerb, contributors: contributors.map(actor => actor.id), teamOP: ORDER_REWARD.teamOP});
+    match?.emit?.('cocs-order-complete', {team, node: node.id, label: node.label, verb: orderVerb, peerId: orderTask.peerId ?? null, cardId: orderTask.cardId ?? null, contributors: contributors.map(actor => actor.id), teamOP: ORDER_REWARD.teamOP});
   }
   if (node.archetype === 'array') state.arrayWinner = team;
   // The objective beat carries everything the presentation needs to celebrate
@@ -1653,6 +1658,7 @@ function captureNode(match, state, node, team, actors) {
   // label, the exact OP/REQ paid to participants and whether a live order paid.
   match?.emit?.('cocs-capture', {
     node: node.id, label: node.label, team, archetype: node.archetype, score: state.scores[team],
+    previousOwner,
     reward: {op: COCS_CAPTURE_POINTS[node.archetype] ?? 0, req: capture.req, personalOP: capture.personalOP},
     participants: participants.map(actor => actor.id),
     orderCompleted, orderVerb, teamOP: orderCompleted ? ORDER_REWARD.teamOP : 0,
@@ -1699,10 +1705,16 @@ function captureNodeStep(match, state, node, dt, rate) {
   if (node.progress[team] >= 1 - EPSILON) captureNode(match, state, node, team, actors[team]);
 }
 
-function updateDominance(state, dt) {
-  const capturable = capturableNodes(state);
+// Capturable-node ownership tally. Shared by the dominance ratchet and the
+// public snapshot view so both always agree on "how close" each team is.
+function capturableCounts(state) {
   const counts = {0: 0, 1: 0};
-  for (const node of capturable) if (node.owner === 0 || node.owner === 1) counts[node.owner]++;
+  for (const node of capturableNodes(state)) if (node.owner === 0 || node.owner === 1) counts[node.owner]++;
+  return counts;
+}
+
+function updateDominance(state, dt) {
+  const counts = capturableCounts(state);
   const team = counts[0] > counts[1] ? 0 : counts[1] > counts[0] ? 1 : null;
   const dominance = state.dominance;
   if (team === null || counts[team] < state.dominanceCount) {
@@ -1717,6 +1729,61 @@ function updateDominance(state, dt) {
   else { dominance.team = team; dominance.progress = dt; }
   dominance.target = fast ? state.dominanceFast : state.dominanceHold;
   dominance.fast = fast;
+}
+
+// ---------------------------------------------------------------------------
+// F03 public outcome progress. A pure projection of authoritative state that
+// both teams (and spectators) read through the same snapshot. The HUD never
+// reconstructs a timer from client elapsed time; `remaining` is the sim's
+// `target - progress`, `counts` answers "how close", and `breakCount` is how
+// many capturable nodes the other side must take to drop the holder below the
+// outright majority and reset the ratchet. Absent state reads neutral.
+// ---------------------------------------------------------------------------
+export function cocsDominanceView(state) {
+  const dominance = state?.dominance;
+  const counts = capturableCounts(state);
+  const team = dominance?.team === 0 || dominance?.team === 1 ? Number(dominance.team) : null;
+  const target = Math.max(0, num(dominance?.target, 0));
+  const progress = Math.max(0, num(dominance?.progress, 0));
+  const count = Math.max(0, Math.round(num(state?.dominanceCount, 0)));
+  const fastCount = Math.max(count, Math.round(num(state?.dominanceFastCount, 0)));
+  return {
+    team,
+    progress,
+    target,
+    remaining: Math.max(0, target - progress),
+    fast: dominance?.fast === true,
+    count,
+    fastCount,
+    counts,
+    breakCount: team === null || count <= 0 ? 0 : Math.max(0, counts[team] - count + 1),
+    hold: Math.max(0, num(state?.dominanceHold, 0)),
+    fastHold: Math.max(0, num(state?.dominanceFast, 0)),
+  };
+}
+
+// Mode-aware wrapper over the same public facts: PvP is the dominance race
+// (`snapshot.cocs.dominance`); OPERATIONS publishes its wave clear and HQ
+// integrity (the Director's dominance, when armed, is a loss condition already
+// surfaced by the siege state). Additive and null-safe.
+export function cocsOutcomeSnapshot(state) {
+  if (!state || state.kind !== COCS_KIND) return null;
+  const coop = state.coop;
+  if (!coop) return {mode: 'pvp', waves: null, hq: null};
+  const siege = coop.siege ?? {};
+  const max = Math.max(0, num(siege.max, 0));
+  const health = Math.max(0, num(siege.health, 0));
+  return {
+    mode: 'operations',
+    waves: {cleared: Math.max(0, Math.round(num(coop.wavesCleared, 0))), total: Math.max(0, Math.round(num(coop.waveCount, 0)))},
+    hq: {
+      id: siege.hqId ?? null,
+      health: Math.round(health),
+      max: Math.round(max),
+      percent: max > 0 ? Math.round(clamp01(health / max) * 1000) / 1000 : 0,
+      armed: siege.armed === true,
+    },
+  };
 }
 
 // ---------------------------------------------------------------------------
@@ -1796,6 +1863,12 @@ export function cocsSnapshot(match) {
     scores: {0: num(state.scores?.[0], 0), 1: num(state.scores?.[1], 0)},
     liveNodeIds: [...(state.liveNodeIds ?? [])],
     winner: state.winner ?? null,
+    // --- F03 public outcome progress (additive) -----------------------------
+    // The authoritative dominance race / operations mission state. Both teams
+    // and spectators read the same numbers; nothing here is reconstructed from
+    // client elapsed time. A snapshot without these keys reads neutral.
+    dominance: cocsDominanceView(state),
+    outcome: cocsOutcomeSnapshot(state),
     // --- V0b economy / subagent surface (UI: exact field names) ------------
     flux: {0: num(state.flux?.[0], 0), 1: num(state.flux?.[1], 0)},
     fluxCap: num(state.fluxCap, FLUX_CAP),

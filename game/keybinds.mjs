@@ -43,6 +43,19 @@ const CODE = /^(Key[A-Z]|Digit[0-9]|Arrow(Up|Down|Left|Right)|Space|ShiftLeft|Sh
 const EXTRA_CODES = ['KeyB','KeyH', 'KeyI', 'KeyJ', 'KeyK', 'KeyL', 'KeyM', 'KeyN', 'KeyO', 'KeyP', 'KeyU', 'KeyY', 'KeyZ', 'ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', 'ShiftRight', 'ControlRight', 'AltLeft', 'AltRight', 'Semicolon', 'Quote', 'Comma', 'Period', 'Slash', 'Backquote', 'Minus', 'Equal'];
 export const KEYBIND_OPTIONS = Object.freeze([...new Set([...Object.values(DEFAULT_BINDINGS), ...EXTRA_CODES])].filter(code => !RESERVED.has(code)));
 
+// One player-facing label for every input surface (setup, HUD and training).
+// Keeping code prettification here prevents remapped labels from drifting.
+export function bindingLabel(code) {
+  return String(code || '?').replace(/^Key/, '').replace(/^Digit/, '').replace(/^Arrow/, '')
+    .replace('ShiftLeft', 'Left Shift').replace('ShiftRight', 'Right Shift')
+    .replace('ControlLeft', 'Left Ctrl').replace('ControlRight', 'Right Ctrl')
+    .replace('AltLeft', 'Left Alt').replace('AltRight', 'Right Alt');
+}
+
+export function actionBindingLabels(bindings = {}) {
+  return Object.fromEntries(KEYBIND_ACTIONS.map(action => [action, bindingLabel(bindings[action] ?? DEFAULT_BINDINGS[action])]));
+}
+
 export const isKeybindCode = value => typeof value === 'string' && CODE.test(value) && !RESERVED.has(value);
 
 export function normalizeBindings(value) {

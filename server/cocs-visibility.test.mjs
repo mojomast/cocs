@@ -9,7 +9,8 @@ import assert from 'node:assert/strict';
 import {Room} from './room.mjs';
 import {RULES} from '../game/data.mjs';
 import {SNAPSHOT_DELTA_VERSION,SNAPSHOT_DELTA_MIN_BYTES,snapshotDelta,applySnapshotDelta,wireSize,MESSAGE} from '../game/protocol.mjs';
-import {filterCocsSnapshot} from '../game/cocs-intel.mjs';
+import {filterCocsSnapshot,COCS_FILTER_RULES,COCS_PUBLIC_FIELDS} from '../game/cocs-intel.mjs';
+import {cocsAnnouncement,acceptCocsAnnouncement} from '../game/hud.mjs';
 
 function seeded(seed = 11) {
  let n = seed;
@@ -177,6 +178,91 @@ test('team-private COCS events never cross teams; world events reach both', () =
  assert.ok(peer1.some(event => event.type === 'cocs-capture'), 'world capture event reaches the other team (lost cue)');
  // The raw sim feed is untouched.
  assert.ok(room.match.events.some(event => event.type === 'cocs-order'));
+});
+
+test('dominance and operations outcome are public to both peers and spectators', () => {
+ const room = harness({spectator: true});
+ seedPrivate(room);
+ const state = room.match.objectiveState;
+ const caps = state.nodes.filter(node => ['front', 'economy', 'relay'].includes(node.archetype));
+ for (const node of caps.slice(0, 3)) node.owner = 0;
+ const msgs = tickFrames(room, 4);
+ const snap0 = lastTo(msgs, 'snapshot', 1).state; // peer 1 owns team 0
+ const snap1 = lastTo(msgs, 'snapshot', 2).state; // peer 2 owns team 1
+ const spec = lastTo(msgs, 'snapshot', 3).state;
+ const raw = room.wireState().cocs;
+ assert.ok(raw.dominance && raw.outcome, 'the authoritative seam publishes the outcome progress');
+ assert.equal(raw.dominance.team, 0, 'three of five capturable nodes arms the public race');
+ assert.ok(raw.dominance.progress >= 0);
+ assert.ok(raw.dominance.remaining > 0);
+ for (const field of COCS_PUBLIC_FIELDS) {
+  assert.equal(COCS_FILTER_RULES.some(rule => rule.path === field || rule.path.startsWith(`${field}.`)), false, `${field} has no private rule`);
+  assert.deepEqual(snap0.cocs[field], raw[field], `team 0 receives ${field}`);
+  assert.deepEqual(snap1.cocs[field], raw[field], `team 1 receives ${field}`);
+  assert.deepEqual(spec.cocs[field], raw[field], `spectators receive ${field}`);
+ }
+ assert.deepEqual(snap0.cocs.dominance, snap1.cocs.dominance, 'both teams read the same public timer');
+ assert.deepEqual(snap0.cocs.dominance, spec.cocs.dominance, 'the spectator view is not an oracle, it is the same public race');
+ assert.equal(snap0.cocs.outcome.mode, 'pvp');
+ assert.equal(snap0.cocs.outcome.waves, null);
+ assert.equal(snap1.cocs.outcome.mode, 'pvp');
+});
+
+test('both peers resolve the permitted objective stream through the shared beat adapter', () => {
+ const room = harness();
+ const {team0Node} = seedPrivate(room);
+ room.drain();
+ const actor0 = room.match.actors.find(actor => actor.team === 0);
+ const actor1 = room.match.actors.find(actor => actor.team === 1);
+ const label = String(team0Node.label).toUpperCase();
+ for (const event of [
+  {type: 'cocs-capture', team: 0, node: team0Node.id, label: team0Node.label, previousOwner: null, participants: [actor0.id], reward: {op: 10, req: 8}},
+  {type: 'cocs-capture', team: 1, node: team0Node.id, label: team0Node.label, previousOwner: 0, participants: [actor1.id], reward: {op: 10, req: 8}},
+  {type: 'director-wave-cleared', wave: 2, cleared: 2, waveCount: 5},
+  {type: 'director-siege', wave: 2, hq: 'hq-0'},
+  {type: 'cocs-order-complete', team: 0, node: team0Node.id, verb: 'HOLD', contributors: [actor0.id], teamOP: 20},
+  {type: 'cocs-order-rejected', team: 0, verb: 'ATTACK', node: 'hq-1', reason: 'illegal-target'},
+  {type: 'coop-spend-rejected', verb: 'FORTIFY', reason: 'window-closed'},
+  {type: 'cocs-order', team: 0, verb: 'HOLD', node: team0Node.id, peerId: '1', cardId: 'ev-order'},
+  {type: 'cocs-buy', team: 0, actor: actor0.id, itemId: 'haste', cost: 10, req: 50},
+ ]) room.match.emit(event.type, {...event});
+ for (let i = 0; i < 2; i++) room.tick(RULES.dt);
+ const msgs = room.drain();
+ const itemsTo = to => msgs.filter(m => m.to === to && m.msg.type === 'events').flatMap(m => m.msg.items);
+ const beatsFor = (to, team, actorId) => itemsTo(to).map(event => cocsAnnouncement(event, {id: actorId, team})).filter(Boolean);
+ const texts = beats => beats.map(beat => beat.text);
+ const team0Beats = beatsFor(1, 0, actor0.id);
+ const team1Beats = beatsFor(2, 1, actor1.id);
+ // Local team: secured neutral, lost a friendly node, wave, siege, its own order beat and refusal.
+ assert.ok(texts(team0Beats).includes(`OBJECTIVE SECURED · ${label}`), 'friendly capture');
+ assert.ok(texts(team0Beats).includes(`OBJECTIVE LOST · ${label}`), 'actual friendly-point loss');
+ assert.ok(!texts(team0Beats).includes(`ENEMY SECURED · ${label}`), 'a real loss is never reported as a neutral take');
+ assert.ok(texts(team0Beats).includes('WAVE 2 CLEARED'), 'wave clear reaches the HUD');
+ assert.ok(texts(team0Beats).includes('HQ UNDER SIEGE'), 'siege reaches the HUD');
+ assert.ok(texts(team0Beats).some(text => text.startsWith('ORDER COMPLETE')), 'the local order completion shows');
+ assert.equal(texts(team0Beats).filter(text => text === 'SPEND REFUSED · WINDOW CLOSED').length, 1, 'the local refusal shows exactly once');
+ // Enemy team: the same public world beats, never the opposing order/spend feed.
+ assert.ok(texts(team1Beats).includes(`ENEMY SECURED · ${label}`), 'team 0 taking neutral reads as an enemy take for team 1');
+ assert.ok(texts(team1Beats).includes(`OBJECTIVE SECURED · ${label}`), 'team 1 recapturing reads as secured');
+ assert.ok(texts(team1Beats).includes('WAVE 2 CLEARED'));
+ assert.ok(texts(team1Beats).includes('HQ UNDER SIEGE'));
+ assert.ok(!texts(team1Beats).some(text => text.startsWith('ORDER COMPLETE')), 'the enemy order board stays private');
+ assert.ok(!texts(team1Beats).some(text => text.startsWith('ORDER REFUSED')), 'the enemy refusal stays private');
+ assert.ok(!texts(team1Beats).includes(`HOLD · ${label}`), 'the enemy issued order stays private');
+ assert.ok(!itemsTo(2).some(event => event.type === 'cocs-buy' && event.team === 0), 'the enemy wallet event never crosses the wire');
+ // The banner policy keeps the siege over the simultaneous routine beats.
+ const fold = (events, team, actorId) => {
+  let cue = null, at = -10;
+  for (const event of events) {
+   const next = acceptCocsAnnouncement(cue, at, cocsAnnouncement(event, {id: actorId, team}), at + .25);
+   if (next) { cue = next.cue; at = next.at; }
+  }
+  return cue;
+ };
+ const banner0 = fold(itemsTo(1), 0, actor0.id);
+ const banner1 = fold(itemsTo(2), 1, actor1.id);
+ assert.equal(banner0?.text, 'HQ UNDER SIEGE', 'the siege outlives the routine beats on team 0');
+ assert.equal(banner1?.text, 'HQ UNDER SIEGE', 'the siege outlives the routine beats on team 1');
 });
 
 test('delta chains stay isolated per team, apply cleanly, and rebuild redacted states', () => {

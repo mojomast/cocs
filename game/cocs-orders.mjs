@@ -14,7 +14,9 @@
 // `{tick, peerId, cardId, team, verb, target}` object `Match.step(dt,{cocs})`
 // consumes.
 import {SUBAGENTS, TRAVERSAL} from './cocs-economy.mjs';
+import {directorTier} from './cocs-difficulty.mjs';
 import {RULES} from './data.mjs';
+import {latticeNodeLabel, latticeTargetModel} from './lattice-guide.mjs';
 
 const TICK_SECONDS = Number.isFinite(RULES?.dt) && RULES.dt > 0 ? RULES.dt : 1 / 60;
 const finite = value => typeof value === 'number' && Number.isFinite(value);
@@ -87,15 +89,37 @@ export const cocsStripArmed = state => baseOf(state).armed !== null && BUTTON_BY
 
 /**
  * The live node picker for the armed verb. Returns `{id,label,mark,ownerLabel,
- * index,...}` entries (1-based `index` = the number key). `HOLD` accepts your
- * own node or any live capturable; `ATTACK` only live capturable nodes you do
- * not own; `SCAN` accepts any capturable node. Snapshot nodes carry no
- * adjacency, so legality stays the engine's call and the strip only narrows to
- * targets that can plausibly work.
+ * index,...}` entries (1-based `index` = the number key). With an F04
+ * `options.model` (or an authoritative adjacency via `options.adjacency` /
+ * `options.graph`) every entry is a node the shared legal-target model already
+ * certified as adjacent and ground-route reachable: `HOLD` accepts your own
+ * node or any legal capture; `ATTACK` only legal captures/retakes you do not
+ * own; `SCAN` accepts any capturable node (the scout flies its own route).
+ * Without a model the picker narrows to targets that can plausibly work and
+ * legality stays the engine's call, exactly as before.
  */
-export function cocsTargetableNodes(board, id) {
+export function cocsTargetableNodes(board, id, options = {}) {
   const button = cocsStripButton(id);
   if (!button || !board) return [];
+  if (options.model?.nodes?.length) {
+    const list = [];
+    const ordered = [];
+    const push = node => { if (node && !ordered.includes(node)) ordered.push(node); };
+    if (options.model.siege?.active) push(options.model.byId?.[options.model.siege.nodeId] ?? null);
+    for (const node of options.model.ranked ?? []) push(node);
+    for (const node of options.model.nodes) push(node);
+    for (const node of ordered) {
+      let eligible = false;
+      if (button.verb === 'SCAN') eligible = node.capturable === true;
+      else if (button.verb === 'HOLD') eligible = node.mine === true || node.attackable === true;
+      else eligible = node.attackable === true;
+      if (!eligible) continue;
+      if (button.verb !== 'SCAN' && node.reachable === false) continue;
+      list.push({...node, label: node.label ?? latticeNodeLabel(node, options.map), index: list.length + 1, verb: button.verb});
+      if (list.length >= COCS_STRIP_MAX_TARGETS) break;
+    }
+    return list;
+  }
   const nodes = Array.isArray(board.nodes) ? board.nodes : [];
   const list = [];
   for (const node of nodes) {
@@ -174,12 +198,141 @@ export function cocsIssueOrder(state, ctx = {}) {
   };
 }
 
-/** Advance the strip clock: a pending order files as issued once its window ends. */
+// --- F04 order truth: QUEUED until the sim confirms, then completion/refusal.
+// The engine emits `cocs-order` (accepted), `cocs-order-rejected` and
+// `cocs-order-complete`; local matches also keep `state.orderLog`. Both shapes
+// normalize here so the strip and the board read one vocabulary.
+export const COCS_ORDER_RESULT_STATUS = Object.freeze(['queued', 'accepted', 'complete', 'refused']);
+const COCS_REFUSAL_NEXT_ACTIONS = Object.freeze({
+  contested: 'CLEAR THE NODE, THEN ISSUE AGAIN',
+  'no-relay': 'PICK A NODE NEXT TO GROUND YOU OWN',
+  flux: 'EARN FLUX OR HOLD THE LINE',
+  'out-of-flux': 'EARN FLUX OR HOLD THE LINE',
+  slice: 'WAIT FOR THE NEXT SLICE OR LET THE CHIEF SPEND',
+  executor: 'TAKE THE COMMAND LEASE, THEN REISSUE',
+  thread: 'FREE A THREAD OR PICK A NODE WITHIN REACH',
+  'no-thread': 'FREE A THREAD OR PICK A NODE WITHIN REACH',
+  dependency: 'PICK A LEGAL ADJACENT NODE',
+  target: 'PICK A LEGAL ADJACENT NODE',
+  'no-response': 'RETRY OR PICK A NODE NEXT TO GROUND YOU OWN',
+  blocked: 'CHECK THE COMMAND BOARD FOR A LEGAL TARGET',
+});
+
+/** The single "useful next action" sentence for an accepted, complete or refused order. */
+export function cocsOrderNextAction(reason = null, verb = null, status = null) {
+  const key = String(reason ?? '').toLowerCase();
+  const action = String(verb ?? '').toUpperCase();
+  if (status === 'complete' || key === 'complete') {
+    return action === 'SCAN' ? 'WATCH THE SCOUT REPORT' : action === 'HOLD' ? 'KEEP THE LINE LINKED' : 'HOLD THE NODE YOU TOOK';
+  }
+  if (status === 'accepted') return action === 'SCAN' ? 'WATCH FOR THE SCAN MARK' : 'WATCH THE NODE RING';
+  return COCS_REFUSAL_NEXT_ACTIONS[key] ?? 'CHECK THE COMMAND BOARD FOR A LEGAL TARGET';
+}
+
+/** Normalize engine events and `orderLog` entries into one result vocabulary. */
+export function cocsOrderResults(orders) {
+  return (Array.isArray(orders) ? orders : []).filter(Boolean).map(entry => {
+    const type = String(entry.type ?? '');
+    const refused = entry.ok === false || entry.status === 'refused' || type === 'cocs-order-rejected';
+    const complete = !refused && (entry.complete === true || entry.status === 'complete' || type === 'cocs-order-complete');
+    const status = refused ? 'refused' : complete ? 'complete' : entry.status === 'queued' ? 'queued' : 'accepted';
+    return {
+      status,
+      cardId: entry.cardId === null || entry.cardId === undefined ? null : String(entry.cardId),
+      peerId: entry.peerId === null || entry.peerId === undefined ? null : String(entry.peerId),
+      verb: entry.verb === null || entry.verb === undefined ? null : String(entry.verb).toUpperCase(),
+      target: entry.target ?? entry.node ?? null,
+      targetLabel: entry.targetLabel ?? null,
+      reason: entry.reason ?? null,
+      tick: num(entry.tick, 0),
+    };
+  });
+}
+
+function sameOrder(result, order) {
+  const cardId = order?.cardId === null || order?.cardId === undefined ? null : String(order.cardId);
+  if (cardId && result.cardId) return cardId === result.cardId;
+  if (result.verb && order?.verb && String(order.verb).toUpperCase() !== result.verb) return false;
+  if (result.target !== null && order?.target !== null && order?.target !== undefined && String(order.target) !== String(result.target)) return false;
+  if (result.peerId && order?.peerId) return result.peerId === String(order.peerId);
+  return true;
+}
+
+function findOrderResult(results, order) {
+  for (let index = results.length - 1; index >= 0; index--) if (sameOrder(results[index], order)) return results[index];
+  return null;
+}
+
+function acceptedOrder(order, result) {
+  return {
+    ...order,
+    pending: undefined,
+    accepted: true,
+    complete: result.status === 'complete',
+    unconfirmed: false,
+    resultAt: num(result.tick, 0),
+    resultReason: result.reason ?? null,
+    statusLabel: result.status === 'complete' ? 'COMPLETE' : 'ACCEPTED',
+  };
+}
+
+function refusalNotice(result, tick) {
+  const reason = String(result.reason ?? 'blocked').toLowerCase();
+  const nextAction = cocsOrderNextAction(reason, result.verb);
+  const targetLabel = result.targetLabel ?? latticeNodeLabel({id: result.target}, null);
+  return {
+    nextAction,
+    lastRejected: {
+      verb: result.verb ?? null,
+      target: result.target ?? null,
+      targetLabel,
+      reason: reason.toUpperCase(),
+      nextAction,
+      tick: num(result.tick, tick),
+    },
+    notice: reason === 'no-response' ? `NO CONFIRMATION · ${nextAction}` : `REJECTED · ${reason.toUpperCase()} · ${nextAction}`,
+  };
+}
+
+/**
+ * Advance the strip clock against authoritative order results. With
+ * `ctx.orders` supplied (engine `cocs-order*` events or `orderLog` entries) the
+ * pending order stays QUEUED until the sim accepts it, only then files as
+ * ACCEPTED/COMPLETE, and a refusal clears both pending and issued so a rejected
+ * order can never leave an accepted-success message behind. Without an
+ * authoritative list the legacy TTL filing is kept, but the filed order is
+ * flagged `unconfirmed`. Reference-stable when nothing changed.
+ */
 export function cocsSyncStrip(state, ctx = {}) {
   const base = baseOf(state);
   const tick = num(ctx.tick, 0);
-  if (base.pending && tick >= num(base.pendingUntil, 0)) {
-    return {...base, issued: base.pending, pending: null};
+  const results = cocsOrderResults(ctx.orders);
+  if (!results.length) {
+    if (base.pending && tick >= num(base.pendingUntil, 0)) {
+      return {...base, issued: {...base.pending, unconfirmed: true}, pending: null};
+    }
+    return base;
+  }
+  if (base.pending) {
+    const result = findOrderResult(results, base.pending);
+    if (result?.status === 'refused') return {...base, pending: null, issued: null, ...refusalNotice(result, tick)};
+    if (result?.status === 'accepted' || result?.status === 'complete') {
+      return {...base, pending: null, issued: acceptedOrder(base.pending, result), notice: null, nextAction: cocsOrderNextAction(null, base.pending.verb, result.status)};
+    }
+    if (tick >= num(base.pendingUntil, 0)) {
+      return {...base, pending: null, issued: null, ...refusalNotice({status: 'refused', reason: 'no-response', verb: base.pending.verb, target: base.pending.target, tick}, tick)};
+    }
+    return base;
+  }
+  if (base.issued) {
+    const result = findOrderResult(results, base.issued);
+    if (result?.status === 'refused') return {...base, pending: null, issued: null, ...refusalNotice(result, tick)};
+    if (result?.status === 'complete' && base.issued.complete !== true) {
+      return {...base, issued: acceptedOrder(base.issued, result), notice: null, nextAction: cocsOrderNextAction(null, base.issued.verb, 'complete')};
+    }
+    if (result?.status === 'accepted' && base.issued.unconfirmed === true) {
+      return {...base, issued: acceptedOrder(base.issued, result), notice: null, nextAction: cocsOrderNextAction(null, base.issued.verb, 'accepted')};
+    }
   }
   return base;
 }
@@ -188,28 +341,38 @@ const orderView = (order, nodeLabels = {}) => {
   if (!order) return null;
   const button = cocsStripButton(order.verb);
   const node = nodeLabels[String(order.target)] ?? null;
+  const targetLabel = node?.label ?? latticeNodeLabel({id: order.target}, null);
+  const statusLabel = order.complete === true ? 'COMPLETE' : order.accepted === true ? 'ACCEPTED' : order.unconfirmed === true ? 'UNCONFIRMED' : 'QUEUED';
   return {
     verb: order.verb,
     label: button?.label ?? order.verb,
     target: order.target,
-    targetLabel: node?.label ?? String(order.target),
+    targetLabel,
     targetMark: node?.mark ?? '●',
-    text: `${button?.label ?? order.verb} · ${node?.label ?? order.target}`,
+    text: `${button?.label ?? order.verb} · ${targetLabel}`,
+    statusLabel,
+    statusMark: statusLabel === 'COMPLETE' ? '✔' : statusLabel === 'ACCEPTED' ? '▶' : statusLabel === 'UNCONFIRMED' ? '⚠' : '◷',
+    queued: statusLabel === 'QUEUED',
+    accepted: order.accepted === true,
+    complete: order.complete === true,
+    unconfirmed: order.unconfirmed === true,
   };
 };
 
 /**
  * The render model for the strip. `ctx`: `{tick, flux, scanCost, nodes,
- * nodeLabels, teamName}`. `disabled` is why a verb cannot be used; `canIssue`
+ * nodeLabels, teamName, orders}`. `orders` are the authoritative engine
+ * results: with them a pending order reads QUEUED until the sim accepts it,
+ * then ACCEPTED/COMPLETE, and a refusal is shown with a next action. `canIssue`
  * is the single gate the confirm button reads.
  */
 export function cocsStripView(state, ctx = {}) {
-  const base = baseOf(state);
   const tick = num(ctx.tick, 0);
   const flux = num(ctx.flux, 0);
   const scanCost = num(ctx.scanCost, COCS_SCAN_COST);
   const nodes = Array.isArray(ctx.nodes) ? ctx.nodes : [];
   const nodeLabels = ctx.nodeLabels && typeof ctx.nodeLabels === 'object' ? ctx.nodeLabels : {};
+  const base = Array.isArray(ctx.orders) ? cocsSyncStrip(state, {tick, orders: ctx.orders}) : baseOf(state);
   const cooldown = Math.max(0, num(base.cooldownUntil, 0) - tick);
   const button = cocsStripButton(base.armed);
   const targetNode = base.target === null || base.target === undefined ? null : nodes.find(node => String(node.id) === String(base.target)) ?? null;
@@ -233,15 +396,18 @@ export function cocsStripView(state, ctx = {}) {
     armedLabel: button?.label ?? null,
     target: base.target,
     targetNode,
-    targetLabel: targetNode?.label ?? (base.target === null || base.target === undefined ? null : String(base.target)),
+    targetLabel: targetNode?.label ?? (base.target === null || base.target === undefined ? null : latticeNodeLabel({id: base.target}, null)),
     buttons,
     nodes,
     maxTargets: COCS_STRIP_MAX_TARGETS,
     cooldown,
     cooldownSeconds: round(cooldown * TICK_SECONDS, 1),
     pending,
+    pendingLabel: pending ? 'QUEUED' : null,
     issued,
     notice: base.notice ?? null,
+    nextAction: base.nextAction ?? null,
+    lastRejected: base.lastRejected ?? null,
     canIssue: Boolean(button) && Boolean(targetNode) && cooldown <= 0 && !scanLow,
     scanCost,
   };
@@ -346,6 +512,8 @@ export function cocsDirectorView(snapshot) {
   const waves = snapshot.waves ?? {};
   const command = snapshot.command ?? null;
   const fronts = Array.isArray(director.fronts) ? director.fronts : [];
+  const nodeLabels = new Map((Array.isArray(snapshot.nodes) ? snapshot.nodes : []).map(node => [String(node?.id), String(node?.label ?? latticeNodeLabel(node, null))]));
+  const labelledNode = id => id === null || id === undefined ? null : nodeLabels.get(String(id)) ?? latticeNodeLabel({id}, null);
   const tierCopy = director.tierCopy ?? {};
   const intermission = director.intermission ?? null;
   const bonus = Array.isArray(snapshot.bonus) ? snapshot.bonus : [];
@@ -372,14 +540,15 @@ export function cocsDirectorView(snapshot) {
       peak: num(director.budget?.peak, 0),
     },
     pressure: num(director.pressure, 0),
-    fronts: fronts.map(front => ({nodeId: front.nodeId, strength: num(front.strength, 0)})),
-    telegraph: director.telegraph ? {kind: director.telegraph.kind, nodeId: director.telegraph.nodeId ?? null, seconds: num(director.telegraph.seconds, 0)} : null,
+    fronts: fronts.map(front => ({nodeId: front.nodeId, label: labelledNode(front.nodeId), strength: num(front.strength, 0)})),
+    telegraph: director.telegraph ? {kind: director.telegraph.kind, nodeId: director.telegraph.nodeId ?? null, label: labelledNode(director.telegraph.nodeId), seconds: num(director.telegraph.seconds, 0)} : null,
     boss: director.boss ? {actorId: director.boss.actorId, type: director.boss.type, phase: num(director.boss.phase, 1)} : null,
-    retarget: director.retarget ? {nodeId: director.retarget.nodeId, reason: director.retarget.reason} : null,
+    retarget: director.retarget ? {nodeId: director.retarget.nodeId, label: labelledNode(director.retarget.nodeId), reason: director.retarget.reason} : null,
     secondsRemaining: num(director.secondsRemaining, 0),
     siege: {
       armed: siege.armed === true,
       hqId: siege.hqId ?? 'hq-0',
+      label: labelledNode(siege.hqId ?? 'hq-0'),
       health: num(siege.health, 0),
       max: num(siege.max, 1),
       percent: Math.max(0, Math.min(1, num(siege.percent, siege.max ? num(siege.health, 0) / siege.max : 0))),
@@ -747,7 +916,7 @@ function cocsBoardCard(input, ctx = {}) {
     verb,
     verbMark: COCS_BOARD_VERB_MARKS[verb] ?? '●',
     target,
-    targetLabel: String(source.targetLabel ?? source.label ?? target ?? 'TEAM'),
+    targetLabel: String(source.targetLabel ?? source.label ?? (target === null ? 'TEAM' : latticeNodeLabel({id: target}, null))),
     agent: String(source.agent ?? 'chief').toLowerCase(),
     agentLabel: source.agentLabel ?? COCS_AGENT_LABELS[String(source.agent ?? 'chief').toLowerCase()] ?? String(source.agent ?? 'CHIEF').toUpperCase(),
     cost,
@@ -758,6 +927,7 @@ function cocsBoardCard(input, ctx = {}) {
     blocker,
     blockerLabel: blocker ? COCS_BLOCKER_LABELS[blocker] : null,
     reason: source.reason ?? (blocker ? COCS_BLOCKER_LABELS[blocker] : null),
+    nextAction: source.nextAction ? String(source.nextAction) : null,
     etaSeconds: round(num(source.etaSeconds ?? source.eta, 0), 1),
     owner: source.owner ?? null,
     repeat: Math.max(0, Math.floor(num(source.repeat, 0))),
@@ -775,8 +945,9 @@ const COCS_ORDER_FAIL_REASONS = Object.freeze({
 });
 
 const cocsNodeLabel = (board, id) => {
+  if (id === null || id === undefined) return 'TEAM';
   const node = (board?.nodes ?? []).find(entry => String(entry?.id) === String(id));
-  return node?.label ?? (id === null || id === undefined ? 'TEAM' : String(id));
+  return node?.label ?? latticeNodeLabel({id}, null);
 };
 
 /** Pull an explicit card array from any of the places a wave may expose it. */
@@ -787,22 +958,34 @@ function cocsExplicitCards(snapshot, options) {
   return null;
 }
 
-function cocsOrderCards(snapshot, board) {
-  const log = Array.isArray(snapshot?.orderLog) ? snapshot.orderLog
-    : Array.isArray(snapshot?.command?.orderLog) ? snapshot.command.orderLog : [];
-  return log.filter(Boolean).slice(-8).map((entry, index) => {
-    const ok = entry.ok === true;
+// `options.orders` carries the same event/log shapes the strip consumes, so a
+// local match whose snapshot publishes only `orderStats` can still show the
+// authoritative queue. An accepted order reads RUNNING (never DONE) until a
+// completion event arrives; a refusal reads BLOCKED with its next action.
+function cocsOrderCards(snapshot, board, options = {}) {
+  const candidate = Array.isArray(options?.orders) ? options.orders
+    : Array.isArray(snapshot?.orderLog) ? snapshot.orderLog
+      : Array.isArray(snapshot?.command?.orderLog) ? snapshot.command.orderLog : [];
+  return candidate.filter(Boolean).slice(-8).map((entry, index) => {
+    const type = String(entry.type ?? '');
+    const refused = entry.ok === false || entry.status === 'refused' || type === 'cocs-order-rejected';
+    const complete = !refused && (entry.complete === true || entry.status === 'complete' || type === 'cocs-order-complete');
+    const verb = String(entry.verb ?? 'HOLD').toUpperCase();
+    const target = entry.target ?? entry.node ?? null;
     const reason = String(entry.reason ?? '');
-    const blocker = ok ? null : (COCS_ORDER_FAIL_REASONS[reason] ?? 'dependency');
+    const blocker = refused ? (COCS_ORDER_FAIL_REASONS[reason] ?? 'dependency') : null;
+    const status = complete ? 'done' : refused ? 'blocked' : 'running';
     return {
-      id: `order-${entry.cardId ?? `${entry.verb}-${entry.target}-${index}`}`,
-      verb: String(entry.verb ?? 'HOLD').toUpperCase(),
-      target: entry.target ?? null,
-      targetLabel: cocsNodeLabel(board, entry.target),
-      agent: String(entry.verb) === 'SCAN' ? 'scout' : 'chief',
-      status: ok ? 'done' : 'blocked',
+      id: `order-${entry.cardId ?? `${verb}-${target}-${index}`}`,
+      verb,
+      target,
+      targetLabel: cocsNodeLabel(board, target),
+      agent: verb === 'SCAN' ? 'scout' : 'chief',
+      status,
       blocker,
-      reason: reason ? String(reason).toUpperCase() : null,
+      reason: refused && reason ? reason.toUpperCase() : refused ? COCS_BLOCKER_LABELS[blocker] : null,
+      nextAction: cocsOrderNextAction(reason, verb, complete ? 'complete' : refused ? 'refused' : 'accepted'),
+      impact: complete ? 'COMPLETE' : refused ? 'REFUSED' : 'ACCEPTED · IN PROGRESS',
       owner: entry.peerId ?? null,
     };
   });
@@ -822,7 +1005,7 @@ export function cocsBoardView(board, snapshot, player, options = {}) {
   const command = snapshot.command && typeof snapshot.command === 'object' ? snapshot.command : null;
   const ctx = {flux};
   const explicit = cocsExplicitCards(snapshot, options);
-  const raw = explicit ? [...explicit] : [...cocsOrderCards(snapshot, board)];
+  const raw = explicit ? [...explicit] : [...cocsOrderCards(snapshot, board, options)];
 
   if (!explicit) {
     // RUNNING: the live scout and any traversal channel.
@@ -1034,6 +1217,7 @@ export function cocsSpendView(snapshot, player) {
   return {
     open,
     secondsRemaining: round(num(intermission.secondsRemaining, 0), 1),
+    totalSeconds: Math.max(1, num(intermission.totalSeconds, directorTier(snapshot?.director?.tier).intermissionSeconds)),
     budget: round(budget, 1),
     spent: round(num(intermission.spent, 0), 1),
     windows: num(intermission.windows, 0),
@@ -1237,19 +1421,28 @@ export function cocsTerminalView(snapshot, player, board, options = {}) {
 export function cocsCommandView(board, snapshot, player, strip, options = {}) {
   if (!board || !snapshot || typeof snapshot !== 'object') return null;
   const economy = cocsEconomyView(snapshot, player);
+  // F04: the strip uses the same legal-target model as the coach and board when
+  // the caller has the graph (map/model/adjacency). Without it the picker keeps
+  // its previous plausible-target narrowing, so existing callers are unchanged.
+  const hasGraph = Boolean(options.model || options.map || options.graph || options.adjacency || options.edges
+    || snapshot.adjacency || snapshot.edges || snapshot.cocs?.adjacency);
+  const model = options.model ?? (hasGraph ? latticeTargetModel(snapshot, options.map, player, options) : null);
   const armed = strip?.armed ?? null;
-  const nodes = cocsTargetableNodes(board, armed);
+  const nodes = cocsTargetableNodes(board, armed, {model, map: options.map});
   const nodeLabels = {};
-  for (const node of board.nodes ?? []) nodeLabels[String(node.id)] = {label: node.label, mark: node.mark, ownerLabel: node.ownerLabel};
+  for (const node of (model?.nodes?.length ? model.nodes : board.nodes ?? [])) {
+    nodeLabels[String(node.id)] = {label: node.label ?? latticeNodeLabel({id: node.id}, options.map), mark: node.mark, ownerLabel: node.ownerLabel};
+  }
   const view = cocsStripView(strip, {
     tick: num(snapshot.tick, 0),
     flux: economy?.flux ?? 0,
     scanCost: COCS_SCAN_COST,
     nodes,
     nodeLabels,
+    orders: options.orders,
   });
   const scanNode = economy?.scan?.nodeId ?? null;
-  const scanLabel = scanNode === null || scanNode === undefined ? null : nodeLabels[String(scanNode)]?.label ?? String(scanNode);
+  const scanLabel = scanNode === null || scanNode === undefined ? null : nodeLabels[String(scanNode)]?.label ?? latticeNodeLabel({id: scanNode}, options.map);
   const traversal = cocsTraversalView(snapshot, player, options);
   const terminals = cocsTerminalView(snapshot, player, board, options);
   // PvP-1 rung + own-team role board (section 3.1/§11.3). Null for co-op and
@@ -1258,6 +1451,7 @@ export function cocsCommandView(board, snapshot, player, strip, options = {}) {
   const roleBoard = snapshot.roleBoard?.[team] ?? null;
   return {
     board,
+    model,
     economy,
     rung: snapshot.rung ?? null,
     roleBoard,
@@ -1268,7 +1462,7 @@ export function cocsCommandView(board, snapshot, player, strip, options = {}) {
     traversal,
     director: cocsDirectorView(snapshot),
     spend: cocsSpendView(snapshot, player),
-    boardView: cocsBoardView(board, snapshot, player, {economy, traversal, terminals}),
+    boardView: cocsBoardView(board, snapshot, player, {economy, traversal, terminals, orders: options.orders}),
     terminals,
     // The single nearest thing the `interact` bind would use: a §6A device
     // first, else an O1c terminal. `depotPrompt` is the separate capture/enter

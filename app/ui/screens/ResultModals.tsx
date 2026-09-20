@@ -5,6 +5,7 @@ import {Modal,Panel,Btn,Stats,Tabs,Chip,Meter} from '../primitives';
 import type {ScreenProps} from '../contract';
 import {LatticeBriefing} from './LatticeGuide';
 import {formatNumber} from '../../../game/format-ui.mjs';
+import {matchLearningSummary} from '../../../game/result-learning.mjs';
 
 const MEDAL_ICONS:any={mvp:Trophy,objective:Target,flag:Flag,captures:Flag,accuracy:Crosshair,damage:Zap,flawless:Shield,ratio:Crosshair,deaths:Skull};
 const medalIcon=(id:string)=>{const Icon=MEDAL_ICONS[id]||Award;return <Icon size={16}/>;};
@@ -86,8 +87,55 @@ export function MatchSummaryCard({summary}:any){
  </section>;
 }
 
+// F08 — why the match ended, what this player actually contributed and how the
+// award was built. Rendered above the career tracks so an objective/support
+// player sees their credit before any long-term progression. Every value is a
+// pure read of the final snapshot and the award payload; nothing here grants or
+// records XP, so repeated visits cannot duplicate credit.
+export function LearningSummaryCard({learning}:any){
+ const contribution=learning?.contribution,xp=learning?.xp;
+ if(!contribution)return null;
+ const group=(label:string,rows:any[])=>rows.length?<div className="stack stack--tight">
+  <span className="label">{label}</span>
+  <Stats items={rows.map((row:any)=>({label:row.label,value:row.value,hint:row.hint||undefined}))}/>
+ </div>:null;
+ return <section className="stack stack--tight" role="group" aria-label="Why the match ended and what you contributed">
+  <div className="row row--between"><span className="eyebrow">WHY IT ENDED</span><span className="label">{String(contribution.kind).toUpperCase()}</span></div>
+  <p className="field-note">{contribution.endReason}</p>
+  <p className="learning-headline"><b>{contribution.headline}</b></p>
+  {group('YOUR CONTRIBUTION',contribution.personal)}
+  {group('TEAM TOTALS',contribution.team)}
+  {group('SAVED PROGRESS',contribution.saved)}
+  {xp?.available&&<div className="stack stack--tight">
+   <span className="label">XP BREAKDOWN</span>
+   <Stats items={xp.categories.map((entry:any)=>({label:entry.label,value:String(entry.value).startsWith('-')?entry.value:`+${entry.value}`}))}/>
+   <p className="field-note">CATEGORIES SUM TO <b>{xp.totalLabel} XP</b> · the match record grants this award exactly once.</p>
+  </div>}
+ </section>;
+}
+
+// F11 — one focused invitation: a mode-appropriate primary action with its
+// map/mode/duration, a deliberate new-loadout option, one attainable challenge
+// and an explicit leave-queue/practice path for empty or repeated online
+// searches. The plan is a pure read; the page handlers do the starting.
+export function NextMatchPanel({plan,onAction}:any){
+ if(!plan?.primary)return null;
+ return <section className="stack stack--tight" role="group" aria-label="Next match">
+  <div className="row row--between"><span className="eyebrow">NEXT MATCH</span><span className="label">{plan.context}</span></div>
+  <p className="field-note">{plan.primary.detail}</p>
+  <div className="row">
+   <Btn variant="primary" onClick={()=>onAction(plan.primary)}>{plan.primary.label}</Btn>
+   {plan.options.map((option:any)=><Btn key={option.id} onClick={()=>onAction(option)}>{option.label}</Btn>)}
+   {plan.replay&&<Btn onClick={()=>onAction(plan.replay)}>{plan.replay.label}</Btn>}
+  </div>
+  {plan.queue?.active&&<p className="field-note" role="status">{plan.queue.label} · {plan.queue.detail}</p>}
+  {plan.practice&&<p className="field-note">{plan.practice.detail} · <Btn size="sm" onClick={()=>onAction(plan.practice)}>{plan.practice.label}</Btn></p>}
+  {plan.challenge&&<p className="field-note">CHALLENGE · {plan.challenge.label} · {plan.challenge.detail}</p>}
+ </section>;
+}
+
 export function ResultsModal({ui}:ScreenProps){
- const {hud,awards,scoreboard,resultTitle,resultDescription,start,nextArena,surpriseMe,playDemo,disconnectNet,changeMode,lastDemo,net,modalRef,player,mode,reward,matchSummary}=ui;
+ const {hud,awards,scoreboard,resultTitle,resultDescription,start,nextArena,surpriseMe,playDemo,disconnectNet,changeMode,lastDemo,net,modalRef,player,mode,reward,matchSummary,campaign,challenges,weeklyChallenges,ranked,rankedQueued,startSinglePlayer,startCampaignMission,queueRanked,cancelQueue,quickStart,getMap}=ui;
  const [tab,setTab]=useState('summary');
  const list=Array.isArray(hud?.actors)?hud.actors:[];
  const localActor=list.find((a:any)=>a&&a.id===(hud?.actorId??0))||player;
@@ -102,6 +150,40 @@ export function ResultsModal({ui}:ScreenProps){
   ?awards.map((a:any)=><div key={a.id} className={a.name===player?.name?'you':''}><small>{a.label}</small><strong>{a.name}</strong><em>{a.value}</em></div>)
   :awards;
  const connected=!!net?.connected,isHost=!!net?.isHost;
+ // F08/F11 view model: a pure read of the frozen snapshot, the award payload
+ // and saved progress. Recomputing on every render cannot grant or duplicate
+ // anything because it only formats existing records.
+ const learning=matchLearningSummary({
+  hud,actor:localActor,mode:hud?.config?.mode,reward,campaign,
+  challenges,weeklyChallenges,ranked,rankedQueued,net,
+  lastDemo,
+  resultSummary:hud&&resultDescription?resultDescription(hud,player):null,
+  mapNameFor:getMap,
+ });
+ // F11 actions only call page handlers; the plan never changes rules by
+ // itself. A retry keeps the finished rules/map because the page still holds
+ // them, a checkpoint resume reads the stored campaign checkpoint, and a
+ // practice start leaves any rated queue first.
+ const runNextAction=(entry:any)=>{
+  if(!entry?.id)return;
+  switch(entry.id){
+   case 'next-mission':return startCampaignMission?.(entry.missionId);
+   case 'resume-checkpoint':
+   case 'retry-campaign':return startSinglePlayer?.('campaign');
+   case 'retry-horde':return startSinglePlayer?.('horde');
+   case 'mission-select':return changeMode?.('selection');
+   case 'return-lobby':return changeMode?.('lobby');
+   case 'ranked-again':queueRanked?.();return changeMode?.('lobby');
+   case 'practice':
+    if(entry.requiresQueueLeave)cancelQueue?.();
+    return quickStart?.(entry.modeId??'deathmatch',{botCount:Number(entry.botCount)||3,difficulty:entry.difficulty??'normal'});
+   case 'change-loadout':return changeMode?.('selection');
+   case 'watch-replay':return playDemo?.(entry.demoId);
+   case 'retry-operation':
+   case 'rematch':
+   default:return start?.();
+  }
+ };
  const rewardStrip=reward?<div className="reward-strip row" role="group" aria-label="Match rewards">
   <strong className="reward-xp">+{Math.max(0,Number(reward.gained)||0)} XP</strong>
   <Chip tone="accent">LEVEL {Number(reward.level)||1}</Chip>
@@ -126,6 +208,8 @@ export function ResultsModal({ui}:ScreenProps){
   {connected&&<Btn variant="danger" onClick={disconnectNet}>LEAVE SERVER</Btn>}
  </>;
  return <Modal open={!!hud&&mode==='results'} onClose={()=>changeMode('selection')} size="lg" eyebrow="MATCH COMPLETE" title={hud?resultTitle(hud,player):undefined} description={hud?resultDescription(hud,player):undefined} panelRef={modalRef} footer={footer}>
+  <LearningSummaryCard learning={learning}/>
+  <NextMatchPanel plan={learning.next} onAction={runNextAction}/>
   {rewardStrip}
   <Tabs value={tab} onChange={setTab} ariaLabel="Match results" tabs={[{value:'summary',label:'Summary'},{value:'scoreboard',label:'Scoreboard'},{value:'stats',label:'Your stats'},{value:'awards',label:`Awards${awardCount?` · ${awardCount}`:''}`}]}/>
   <div className="stack">

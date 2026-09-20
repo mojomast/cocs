@@ -14,8 +14,8 @@ import {VoiceChat} from '../game/voice.mjs';
 import {DEFAULT_CONFIG,DEFAULT_DISPLAY,DIFFICULTIES,normalizeConfig,normalizeDisplay,GAME_MODES,isCocsMode} from '../game/config.mjs';
 import {HELP_SECTIONS,ONBOARDING_STEPS,ONBOARDING_STORAGE_KEY,shouldShowOnboarding} from '../game/onboarding.mjs';
 import {ACCESSIBILITY_STORAGE_KEY,PRESET_STORAGE_KEY,addPreset,defaultAccessibility,enginePaletteFor,normalizeAccessibility,normalizePreset,normalizePresets,radarPaletteFor,removePreset} from '../game/presets.mjs';
-import {DEFAULT_BINDINGS,KEYBIND_STORAGE_KEY,actionForCode,bindingConflicts,normalizeBindings} from '../game/keybinds.mjs';
-import {CURSOR_SURFACE,cursorActive,cursorBlockingSurfaces,cursorClear,cursorClose,cursorEscape,cursorHint,cursorLockGained,cursorLockLost,cursorOpen,cursorReset,cursorSurfaceText,cursorToggle,initialCursorMode} from '../game/cursor-mode.mjs';
+import {DEFAULT_BINDINGS,KEYBIND_STORAGE_KEY,actionForCode,bindingConflicts,bindingLabel,normalizeBindings} from '../game/keybinds.mjs';
+import {CURSOR_SURFACE,cursorActive,cursorBlockingSurfaces,cursorClear,cursorClose,cursorCombatKeysBlocked,cursorEscape,cursorHint,cursorKeyboardOwner,cursorLockGained,cursorLockLost,cursorOpen,cursorReset,cursorSurfaceText,cursorToggle,initialCursorMode} from '../game/cursor-mode.mjs';
 import {LOCAL_CARD_ACTION,LOCAL_CARD_SOURCE,latticePeerId,localBoardCards,mergeLocalBoard,withSinkTargets} from '../game/lattice-board.mjs';
 import {coopOrderGate,coopSpendGate} from '../game/cocs-coop.mjs';
 import {MatchConfiguration,DisplayConfiguration,PresetsConfiguration,KeybindsConfiguration,AccessibilityConfiguration} from './game-ui/configuration';
@@ -72,10 +72,10 @@ import {CAMPAIGN_STORAGE_KEY,checkpointFor,clearCheckpoint,defaultCampaignProgre
 import {reducedMotion as combineReducedMotion} from '../game/post.mjs';
 import {terrainSupportAt} from '../game/terrain.mjs';
 import {PerfTracker,BENCHMARK_PRESET,benchmarkReport,benchmarkDisplay} from '../game/perf.mjs';
-import {ammoText,boundList,cocsResultSummary,cocsBoard,commandBrief,damageBearing,damageNumberStyle,dynamicCrosshairGap,escapeHint,flagText,hitMarker,isTeamMode,killBanner,killCallout,connectionQuality,modeGoal,modePrimary,nextSpectateTarget,spectatorBoard,spectatorTeams,killFeedWeapon,lowAmmo,matchAwards,matchStartBanner,scoreText,suddenDeathBanner,grenadeStatus,killstreakCallout,ladderStatus,streakStatus,audioCaption,cocsAnnouncement,postureLabel,projectToScreen,reloadProgress,scoreAnnouncer,teamName,teamScoreText,vehicleHud,voiceHint,weaponRangeLabel,weaponTag} from '../game/hud.mjs';
+import {ammoText,boundList,cocsResultSummary,cocsBoard,commandBrief,damageBearing,damageNumberStyle,dynamicCrosshairGap,escapeHint,flagText,hitMarker,isTeamMode,killBanner,killCallout,connectionQuality,modeGoal,modePrimary,nextSpectateTarget,spectatorBoard,spectatorTeams,killFeedWeapon,lowAmmo,matchAwards,matchStartBanner,scoreText,suddenDeathBanner,grenadeStatus,killstreakCallout,ladderStatus,streakStatus,audioCaption,cocsAnnouncement,acceptCocsAnnouncement,postureLabel,projectToScreen,reloadProgress,scoreAnnouncer,teamName,teamScoreText,vehicleHud,voiceHint,weaponRangeLabel,weaponTag} from '../game/hud.mjs';
 import {cocsArmVerb,cocsClearStrip,cocsCommandView,cocsIssueOrder,cocsPickTarget,cocsStripState,cocsTargetableNodes} from '../game/cocs-orders.mjs';
 import {cocsBoard as latticeBoardView} from '../game/hud.mjs';
-import {latticeCoach,latticeKeys,latticeNodeLabel,latticeOrderKey,latticePracticeDefaults} from '../game/lattice-guide.mjs';
+import {latticeCoach,latticeKeys,latticeNodeLabel,latticeOrderKey,latticePracticeDefaults,latticeTargetModel} from '../game/lattice-guide.mjs';
 import {createTraining,evaluateTraining,trainingView,continueTraining,skipTraining,trainingConfig} from '../game/lattice-training.mjs';
 import {configureMothAssets,mothIr,mothMotif} from '../game/moth-assets.mjs';
 import {MothAudioBank,MothAudio} from '../game/moth-audio.mjs';
@@ -100,7 +100,11 @@ const BRAND={name:'Colosseum Of Competitive Slop',abbr:'COCS',tagline:'Nine lang
 const ACRONYM=[{letter:'C',word:'COLOSSEUM'},{letter:'O',word:'OF'},{letter:'C',word:'COMPETITIVE'},{letter:'S',word:'SLOP'}];
 const UNLOCK_GROUPS=[{kind:'gear',label:'GEAR'},{kind:'attachment',label:'WEAPON MODS'},{kind:'finish',label:'WEAPON FINISHES'},{kind:'crosshair',label:'RETICLES'}];
 const Wordmark=({sub}:{sub:string})=><div className="wordmark"><Crosshair size={25}/><span>COCS<em className="wordmark-full">Colosseum Of Competitive Slop</em></span><small>{sub}</small></div>;
-const MapPlan=({map,viewBox}:{map:any;viewBox:string})=><svg className="map-plan" viewBox={viewBox} aria-hidden="true"><rect x={map.bounds?.minX??-15} y={map.bounds?.minZ??-15} width={map.bounds?map.bounds.maxX-map.bounds.minX:30} height={map.bounds?map.bounds.maxZ-map.bounds.minZ:30} fill="#0a1218"/>{(map.platforms||[]).map((p:any,i:number)=><rect key={`platform-${i}`} x={p.x-p.w/2} y={p.z-p.d/2} width={p.w} height={p.d} fill={p.route==='north'?'#d5a45c':p.route==='south'?'#b28cff':map.color} opacity=".35"/>)}{(map.jumpLinks||[]).map((link:any,i:number)=><line key={`link-${i}`} x1={link.source.x} y1={link.source.z} x2={link.target.x} y2={link.target.z} stroke={map.color} strokeWidth=".35" opacity=".8"/>)}{map.blocks.map((b:any,i:number)=><rect key={`block-${i}`} x={b.x-b.w/2} y={b.z-b.d/2} width={b.w} height={b.d} fill={b.kind==='wall'?'#4c6469':map.color} opacity={b.kind==='deck'?.25:.8}/> )}</svg>;
+// SVG attributes are stringified by different code paths during SSR and DOM
+// hydration. Quantizing generated map geometry prevents harmless last-bit float
+// differences from becoming React hydration warnings.
+const svgNumber=(value:unknown)=>Math.round(Number(value)*1e6)/1e6;
+const MapPlan=({map,viewBox}:{map:any;viewBox:string})=><svg className="map-plan" viewBox={viewBox} aria-hidden="true"><rect x={svgNumber(map.bounds?.minX??-15)} y={svgNumber(map.bounds?.minZ??-15)} width={svgNumber(map.bounds?map.bounds.maxX-map.bounds.minX:30)} height={svgNumber(map.bounds?map.bounds.maxZ-map.bounds.minZ:30)} fill="#0a1218"/>{(map.platforms||[]).map((p:any,i:number)=><rect key={`platform-${i}`} x={svgNumber(p.x-p.w/2)} y={svgNumber(p.z-p.d/2)} width={svgNumber(p.w)} height={svgNumber(p.d)} fill={p.route==='north'?'#d5a45c':p.route==='south'?'#b28cff':map.color} opacity=".35"/>)}{(map.jumpLinks||[]).map((link:any,i:number)=><line key={`link-${i}`} x1={svgNumber(link.source.x)} y1={svgNumber(link.source.z)} x2={svgNumber(link.target.x)} y2={svgNumber(link.target.z)} stroke={map.color} strokeWidth=".35" opacity=".8"/>)}{map.blocks.map((b:any,i:number)=><rect key={`block-${i}`} x={svgNumber(b.x-b.w/2)} y={svgNumber(b.z-b.d/2)} width={svgNumber(b.w)} height={svgNumber(b.d)} fill={b.kind==='wall'?'#4c6469':map.color} opacity={b.kind==='deck'?.25:.8}/> )}</svg>;
 const matchPhase=(hud:any)=>{const ratio=hud?.config?.timeLimit?hud.time/hud.config.timeLimit:0;return ratio<.2?'OPENING':ratio<.72?'CONTESTED':'CLOSING';};
 export const routeContext=(map:any,player:any)=>{const platforms=map?.platforms??[];if(platforms.length&&player){const nearest=platforms.reduce((best:any,p:any)=>{const distance=Math.hypot((player.x??0)-p.x,(player.z??0)-p.z);return !best||distance<best.distance?{distance,route:p.route}:best},null);if(nearest?.route)return `${nearest.route.toUpperCase()} ROUTE`;}const tag=String(map?.tag??'').toUpperCase();return tag.includes('CANYON')?'CANYON':tag.includes('OUTDOOR')?'OUTDOOR':'ARENA';};
 const resultTitle=(hud:any,player:any)=>{const mode=GAME_MODES.find((m:any)=>m.id===hud?.config?.mode);if(isTeamMode(mode)){if(hud?.winner!==null&&hud?.winner!==undefined)return `${teamName(hud.winner)} TEAM WINS.`;const scores=hud?.teamScores||{},max=Math.max(...Object.values(scores).map(Number)),leaders=[0,1].filter(team=>Number(scores[team]??0)===max);return leaders.length>1?'DEAD HEAT.':`${teamName(leaders[0])} LEADS.`;}if(hud?.config?.botCount===0)return 'PRACTICE COMPLETE.';return hud?.leaders?.length>1?'DEAD HEAT.':player?.frags===Math.max(...(hud?.actors||[]).map((a:any)=>a.frags))?'YOU OWN THE ARENA.':`${hud?.leaders?.[0]||'ARENA'} WINS.`;};
@@ -137,18 +141,25 @@ export default function Home(){
   const [cocsStrip,setCocsStrip]=useState<any>(()=>cocsStripState());
   const [cocsBoard,setCocsBoard]=useState<any>({open:false,pinned:false,active:0});
   const [cocsNotice,setCocsNotice]=useState<any>(null);
-  const cocsStripRef=useRef<any>(null),cocsControlRef=useRef<any>(null),cocsBoardRef=useRef<any>({open:false,pinned:false,active:0,ids:[],cards:[],count:0,collapsed:false}),cocsBoardControlRef=useRef<any>(null),boardHoldRef=useRef<{at:number,held:boolean}>({at:0,held:false});
+  const cocsStripRef=useRef<any>(null),cocsControlRef=useRef<any>(null),cocsCoachRef=useRef<any>(null),cocsBoardRef=useRef<any>({open:false,pinned:false,active:0,ids:[],cards:[],count:0,collapsed:false}),cocsBoardControlRef=useRef<any>(null),boardHoldRef=useRef<{at:number,held:boolean}>({at:0,held:false});
   // Cursor mode owns pointer lock intent for every interactive surface. The
   // machine state lives in a ref so the global key handlers (registered once)
   // and the pointer-lock listener read the live value; a mirror in React state
   // drives the HUD chip and the CLICK TO FIGHT affordance.
   const [cursorUi,setCursorUi]=useState<any>(()=>initialCursorMode());
   const cursorRef=useRef<any>(cursorUi),lockChangeAtRef=useRef(0),requestLockRef=useRef<()=>void>(()=>{});
+  // F05: passive watching stays out of the cursor machine. The Tab glance and
+  // the automatic death summary never register a surface; only the explicitly
+  // opened variants below release the pointer.
+  const [scoresInteractive,setScoresInteractive]=useState(false),[respawnEditor,setRespawnEditor]=useState(false),[respawnQueue,setRespawnQueue]=useState<any>(null);
+  const scoresInteractiveRef=useRef(false),respawnEditorRef=useRef(false),respawnOpenRef=useRef(false);
+  const setScoresInteractiveOpen=(open:boolean)=>{scoresInteractiveRef.current=open;setScoresInteractive(open);};
+  const setRespawnEditorOpen=(open:boolean)=>{respawnEditorRef.current=open;setRespawnEditor(open);};
   // Intermission spend: a per-window local dismissal so SKIP returns to combat
   // without touching the deterministic sim (the window still closes itself).
   const [spendDismissed,setSpendDismissed]=useState<number|null>(null);
   const readoutPanelsRef=useRef<Set<string>>(new Set());
-  const keyLabel=(code:string)=>String(code||'?').replace(/^Key/,'').replace(/^Digit/,'').replace(/^Arrow/,'').replace('ShiftLeft','Shift').replace('ShiftRight','ShiftR').replace('ControlLeft','Ctrl').replace('ControlRight','CtrlR').replace('AltLeft','Alt').replace('AltRight','AltR');
+  const keyLabel=(code:string)=>bindingLabel(code);
   const moveKeys=[bindings.forward,bindings.back,bindings.left,bindings.right].map(keyLabel).join('');
   const presetOptions={characters:CHARACTERS.map((c:any)=>c.id),harnesses:HARNESSES.map((h:any)=>h.id),maps:MAPS.map((m:any)=>m.id),gearSlots:GEAR_SLOTS.map((s:any)=>s.id),gearIds:GEAR.map((g:any)=>g.id),attachmentSlots:ATTACHMENT_SLOTS.map((s:any)=>s.id),attachmentIds:ATTACHMENTS.map((a:any)=>a.id),finishes:FINISH_IDS,crosshairs:CROSSHAIR_IDS};
   useEffect(()=>{let stored:any=null;try{stored=localStorage.getItem(ONBOARDING_STORAGE_KEY);}catch{}if(shouldShowOnboarding(stored,false))setOnboarding(0);},[]);
@@ -202,7 +213,7 @@ export default function Home(){
   const mapViewBox=(map:any)=>{const b=map.bounds;if(!b)return '-15 -15 30 30';const width=b.maxX-b.minX,depth=b.maxZ-b.minZ,p=Math.max(2,Math.max(width,depth)*.04);return `${b.minX-p} ${b.minZ-p} ${width+p*2} ${depth+p*2}`;};
  const selected=CHARACTERS.find((c:any)=>c.id===character)!,power=HARNESSES.find((h:any)=>h.id===harness)!;
  const myPeerId=runtime.current?.net?.peerId;
-   const clearInput=()=>{setScores(false);const r=runtime.current;if(!r)return;r.keys.clear();r.fire=r.fireTap=r.jump=r.power=r.interact=r.drag=r.ads=r.reload=r.melee=false;r.grenade=false;if(r.touch){r.touch.moveX=0;r.touch.moveY=0;r.touch.sprint=false;r.touch.crouch=false;r.touch.fire=false;r.touch.ads=false;r.touch.mobility=false;}r.voice?.setPushToTalk(false);r.inputWeapon=-1;r.acc=0;if(r.net?.connected&&r.net.started&&!r.net.spectate)r.net.input({x:0,z:0,fire:false,jump:false,power:false,interact:false,sprint:false,crouch:false,ads:false,mobility:false,reload:false,melee:false,grenade:false});};
+   const clearInput=()=>{if(!scoresInteractiveRef.current)setScores(false);const r=runtime.current;if(!r)return;r.keys.clear();r.fire=r.fireTap=r.jump=r.power=r.interact=r.drag=r.ads=r.reload=r.melee=false;r.grenade=false;if(r.touch){r.touch.moveX=0;r.touch.moveY=0;r.touch.sprint=false;r.touch.jump=false;r.touch.crouch=false;r.touch.fire=false;r.touch.ads=false;r.touch.mobility=false;}r.voice?.setPushToTalk(false);r.inputWeapon=-1;r.acc=0;if(r.net?.connected&&r.net.started&&!r.net.spectate)r.net.input({x:0,z:0,fire:false,jump:false,power:false,interact:false,sprint:false,crouch:false,ads:false,mobility:false,reload:false,melee:false,grenade:false});};
    // --- Cursor mode ---------------------------------------------------------
    // `game/cursor-mode.mjs` decides when the pointer must be free; this adapter
    // performs the browser side effects (exit/request lock, clear combat inputs)
@@ -223,9 +234,12 @@ export default function Home(){
    };
    const resetCursorMode=()=>{const next=cursorReset(cursorRef.current);if(next.changed){cursorRef.current=next.state;setCursorUi(next.state);}};
    const toggleCursorMode=()=>{if(modeRef.current!=='playing'||demoOnlyRef.current)return false;const result=cursorToggle(cursorRef.current,CURSOR_SURFACE.FREE);if(!result.changed)return false;applyCursor(result);return true;};
-   // One obvious way back: only when no explicit surface holds the cursor.
+   // One obvious way back: only when no explicit surface holds the cursor. The
+   // pinned standings has no close control of its own, so a click dismisses it
+   // and keeps the free cursor where it was (F05).
    const cursorResumeCombat=()=>{
     const current=cursorRef.current;
+    if(cursorKeyboardOwner(current)===CURSOR_SURFACE.SCOREBOARD){setScoresInteractiveOpen(false);setScores(false);return;}
     if(cursorActive(current)&&!cursorBlockingSurfaces(current).length)applyCursor(cursorClear(current));
     else if(!cursorActive(current))requestLockRef.current?.();
    };
@@ -235,7 +249,7 @@ export default function Home(){
     const has=set.size>0;
     if(has!==had)syncCursorSurface(CURSOR_SURFACE.TERMINALS,has);
    };
-   const changeMode=(m:Mode)=>{runtime.current?.voice?.setPushToTalk(false);runtime.current?.voice?.setSuppressed(true);if(runtime.current)runtime.current.voiceSuppressed=true;modeRef.current=m;setMode(m);setChatOpen(false);setSetupOpen(false);setSettings(false);clearInput();resetCursorMode();if(m!=='playing'){document.exitPointerLock?.();setPointerHint(false);}setScores(false);};
+   const changeMode=(m:Mode)=>{runtime.current?.voice?.setPushToTalk(false);runtime.current?.voice?.setSuppressed(true);if(runtime.current)runtime.current.voiceSuppressed=true;cocsCoachRef.current=null;modeRef.current=m;setMode(m);setChatOpen(false);setSetupOpen(false);setSettings(false);clearInput();resetCursorMode();if(m!=='playing'){document.exitPointerLock?.();setPointerHint(false);}setScores(false);setScoresInteractiveOpen(false);setRespawnEditorOpen(false);};
     const enterMenu=()=>{enteredRef.current=true;setEntered(true);setDemoOnly(false);runtime.current?.audio?.start?.();};
     const exitToTitle=()=>{runtime.current?.voice?.setPushToTalk(false);if(modeRef.current!=='selection')changeMode('selection');enteredRef.current=false;setEntered(false);setDemoOnly(false);setHud(null);setSetupOpen(false);setSettings(false);document.exitPointerLock?.();};
   const touchLook=(dx:number,dy:number)=>{const r=runtime.current;if(!r)return;if(demoOnlyRef.current&&demoSessionRef.current.state==='free'){const d=r.display||{},scale=.004*(r.lookSensitivity||1);demoFreeAdapter(r.view).look(-dx*scale,(d.invertY?1:-1)*dy*scale);return;}if(modeRef.current!=='playing'||chatOpenRef.current||r.net?.spectate||r.spectateLocal)return;const look=r.net?.started?r.look:r.match?.actors?.[0],d=r.display||{};if(look)applyLook(look,dx,dy,r.lookSensitivity*(d.touchSensitivity??1)*((r.ads||r.touch?.ads)?(d.adsSensitivity??1):1),d.invertY===true);};
@@ -264,7 +278,7 @@ export default function Home(){
     reset:()=>{api.resetFreeCam?.();},
    };
   };
-  const clearDemoInputs=()=>{const r=runtime.current;if(!r)return;demoLiftRef.current=0;r.keys?.clear?.();r.fire=r.fireTap=r.jump=r.power=r.interact=r.ads=r.reload=r.melee=r.grenade=r.drag=false;if(r.touch){r.touch.moveX=0;r.touch.moveY=0;r.touch.sprint=false;r.touch.crouch=false;r.touch.ads=false;r.touch.fire=false;r.touch.mobility=false;}};
+   const clearDemoInputs=()=>{const r=runtime.current;if(!r)return;demoLiftRef.current=0;r.keys?.clear?.();r.fire=r.fireTap=r.jump=r.power=r.interact=r.ads=r.reload=r.melee=r.grenade=r.drag=false;if(r.touch){r.touch.moveX=0;r.touch.moveY=0;r.touch.sprint=false;r.touch.jump=false;r.touch.crouch=false;r.touch.ads=false;r.touch.fire=false;r.touch.mobility=false;}};
   const demoFreeInput=()=>{
    const r=runtime.current,session=demoSessionRef.current;
    if(!r)return {forward:0,right:0,up:0,boost:false,speed:session.freeSpeed};
@@ -411,7 +425,7 @@ export default function Home(){
     if(e.actor===localId){const source=e.pos??actors.find((a:any)=>a.id===e.source),bearing=local&&source?damageBearing(local,source):null;r.damageDir=bearing?{angle:bearing.angle,hasSource:true}:{angle:0,hasSource:false};r.damageDirAt=Number(snap?.time)||0;}
     if(e.source===localId&&e.actor!==localId){const victim=actors.find((a:any)=>a.id===e.actor);if(victim&&view?.camera&&canvas.current){const rect=canvas.current.getBoundingClientRect(),screen=projectToScreen(view.camera,rect,{x:victim.x,y:(victim.y??0)+1.1,z:victim.z});if(screen)r.damageNumbers=boundList(r.damageNumbers,{id:++r.damageSerial,x:screen.x,y:screen.y,amount:Math.max(1,Math.round(Number(e.amount)||0)),critical:Boolean(e.critical||e.headshot||Number(e.amount)>=48),kill:victim.health<=0,born:performance.now()},12);}}};
     const noteKill=(e:any,localId:number,time:number)=>{if(e.type==='killstreak'){if(e.actor===localId){const cue=killstreakCallout(e);if(cue){r.killCue=cue;r.killCueAt=time;audio?.announcerCue?.('killstreak');}}return;}if(e.type!=='death')return;if(e.actor===localId){r.killTimes=[];return;}if(!e.self&&e.killer===localId&&e.actor!==localId){r.lastKill=time;r.killTimes.push(time);if(r.killTimes.length>99)r.killTimes.shift();const cue=killCallout(r.killTimes,time);if(cue){r.killCue=cue;r.killCueAt=time;audio?.announcerCue?.(cue.kind==='spree'?'spree':'multikill');}}};
-   const decorate=(snap:any,extra:any,stamp:number)=>{const cue=scoreAnnouncer(snap,r.prevScores);if(cue){r.announceCue=cue;r.announceAt=Number(snap?.time)||0;audio?.announcerCue?.(cue.kind);}if(snap?.teamScores)r.prevScores={0:Number(snap.teamScores[0])||0,1:Number(snap.teamScores[1])||0};const time=Number(snap?.time)||0;r.damageNumbers=r.damageNumbers.filter((n:any)=>stamp-n.born<700);return {...snap,damageDir:r.damageDir,damageDirAt:r.damageDirAt,damageNumbers:r.damageNumbers.slice(),scoreCue:r.announceCue&&time-r.announceAt<1.6?{...r.announceCue,age:time-r.announceAt}:null,killCue:r.killCue&&time-r.killCueAt<2?{...r.killCue,age:time-r.killCueAt}:null,caption:r.caption&&time-r.captionAt<2.2?r.caption:null,preparing:r.preparing===true,...extra};};
+   const decorate=(snap:any,extra:any,stamp:number)=>{const cue=scoreAnnouncer(snap,r.prevScores);if(cue){r.announceCue=cue;r.announceAt=Number(snap?.time)||0;audio?.announcerCue?.(cue.kind);}if(snap?.teamScores)r.prevScores={0:Number(snap.teamScores[0])||0,1:Number(snap.teamScores[1])||0};const time=Number(snap?.time)||0;r.damageNumbers=r.damageNumbers.filter((n:any)=>stamp-n.born<700);return {...snap,damageDir:r.damageDir,damageDirAt:r.damageDirAt,damageNumbers:r.damageNumbers.slice(),scoreCue:r.announceCue&&time-r.announceAt<(Number(r.announceCue?.ttl)>0?Number(r.announceCue.ttl):1.6)?{...r.announceCue,age:time-r.announceAt}:null,killCue:r.killCue&&time-r.killCueAt<2?{...r.killCue,age:time-r.killCueAt}:null,caption:r.caption&&time-r.captionAt<2.2?r.caption:null,preparing:r.preparing===true,...extra};};
      r.applySpectateCamera=(dt:number)=>{const mode=r.cameraMode||'auto';if(mode==='free'){r.view.setFreeCam(true);const forward=(keys.has(bindings.forward)?1:0)-(keys.has(bindings.back)?1:0),right=(keys.has(bindings.right)?1:0)-(keys.has(bindings.left)?1:0),up=(keys.has(bindings.jump)?1:0)-(keys.has(bindings.crouch)?1:0),boost=keys.has(bindings.sprint);r.view.updateFreeCam(dt,{forward,right,up,boost});}else{r.view.setFreeCam(false);const rig=cameraModeRig(mode);if(rig){r.spectateDirector?.setAutoCut(false);r.spectateDirector?.setRig(rig);}else r.spectateDirector?.setAutoCut(true);}};
    const loop=(now:number)=>{if(cancelled)return;try{if(r.benchmarking){last=now;raf=requestAnimationFrame(loop);return;}const elapsed=Math.max(0,Math.min(.1,(now-last)/1000));last=now;r.frames++;if(now-r.sample>=1000){r.fps=Math.round(r.frames*1000/(now-r.sample));r.frames=0;r.sample=now;}
     // Drive the soundtrack every frame regardless of mode so menu music keeps
@@ -429,7 +443,7 @@ export default function Home(){
   const s=r.net.renderState(performance.now());
     if(s){if(!r.netViewReady){r.view.setMatch(r.net.viewMatch());r.view.lastEvent=r.lastAudio;r.view.setSpectator(r.net.spectate);r.view.setPlayerId(r.net.actorId??-1);r.netViewReady=true;}r.renderState=s;r.view.setSpectatorTarget(r.spectateTarget);if(r.recorder)r.recorder.frame(s,r.net.events);
     const me=(s.actors??[]).find((a:any)=>a.id===r.net.actorId)||(s.actors??[])[0];
-    for(const e of r.net.events)if(e.id>r.lastAudio){audio.event(e,me);noteDamage(e,s,r.net.actorId);noteKill(e,r.net.actorId,s.time);if(r.display?.captions===true){const cap=audioCaption(e);if(cap){r.caption=cap.text;r.captionAt=s.time;}}if(e.type==='damage'&&e.actor===r.net.actorId)r.lastDamage=s.time;if(e.type==='damage'&&e.source===r.net.actorId&&e.actor!==r.net.actorId){r.lastHit=s.time;if(e.critical||e.headshot||Number(e.amount)>=48)r.lastCritical=s.time;}if((e.type==='pickup'||e.type==='powerup')&&e.actor===r.net.actorId){r.pickupText=e.type==='powerup'?`${e.kind.toUpperCase()} ACTIVE`:`${e.kind.toUpperCase()} ACQUIRED`;r.pickupAt=s.time;}r.lastAudio=e.id;}
+    for(const e of r.net.events)if(e.id>r.lastAudio){audio.event(e,me);noteDamage(e,s,r.net.actorId);noteKill(e,r.net.actorId,s.time);if(r.display?.captions===true){const cap=audioCaption(e);if(cap){r.caption=cap.text;r.captionAt=s.time;}}if(e.type==='damage'&&e.actor===r.net.actorId)r.lastDamage=s.time;if(e.type==='damage'&&e.source===r.net.actorId&&e.actor!==r.net.actorId){r.lastHit=s.time;if(e.critical||e.headshot||Number(e.amount)>=48)r.lastCritical=s.time;}if((e.type==='pickup'||e.type==='powerup')&&e.actor===r.net.actorId){r.pickupText=e.type==='powerup'?`${e.kind.toUpperCase()} ACTIVE`:`${e.kind.toUpperCase()} ACQUIRED`;r.pickupAt=s.time;}if(isCocsMode(r.net?.state?.config?.mode)){const beat=cocsAnnouncement(e,{id:me?.id,team:me?.team??0});const next=acceptCocsAnnouncement(r.announceCue,r.announceAt,beat,s.time);if(next){r.announceCue=next.cue;r.announceAt=next.at;}}r.lastAudio=e.id;}
     r.voice?.updateSpatial(s);audio.update(me,s.vehicles,elapsed);view.setInterpolation({enabled:false});r.perf?.time('render',()=>view.render(modeRef.current,s,elapsed,now/1000));r.perf?.frame(now);
      if(now-hudAt>80){setHud(decorate(s,{net:true,actorId:r.net.spectate?(r.spectateTarget??r.net.actorId):r.net.actorId,spectate:r.net.spectate,damage:s.time-r.lastDamage<.25,hit:s.time-r.lastHit<.12,critical:s.time-(r.lastCritical??-10)<.14,kill:s.time-(r.lastKill??-10)<.24,pickup:s.time-r.pickupAt<1.5?r.pickupText:'',fps:r.fps,renderer:view.renderer.isSoftware?'software':'webgl',pointerLocked:!!document.pointerLockElement,quality:connectionQuality(r.net)},now));hudAt=now;}
    }
@@ -444,7 +458,7 @@ export default function Home(){
    // Only build the (expensive) snapshot when a recorder keyframe is actually
   // due; event ingestion still runs every frame through the lightweight frame.
   if(r.recorder){const recordTime=r.match.time;if(r.recorder.due(recordTime))r.perf?.time('snapshot',()=>r.recorder.frame(r.match.snapshot(),r.match.events));else r.perf?.time('snapshot',()=>r.recorder.frame({time:recordTime},r.match.events));}
-  for(const e of r.match.events)if(e.id>r.lastAudio){audio.event(e,r.match.actors[0]);noteDamage(e,r.match,0);noteKill(e,0,r.match.time);if(r.display?.captions===true){const cap=audioCaption(e);if(cap){r.caption=cap.text;r.captionAt=r.match.time;}}if(e.type==='damage'&&e.actor===0)r.lastDamage=r.match.time;if(e.type==='damage'&&e.source===0&&e.actor!==0){r.lastHit=r.match.time;if(e.critical||e.headshot||Number(e.amount)>=48)r.lastCritical=r.match.time;}if((e.type==='pickup'||e.type==='powerup')&&e.actor===0){r.pickupText=e.type==='powerup'?`${e.kind.toUpperCase()} ACTIVE`:`${e.kind.toUpperCase()} ACQUIRED`;r.pickupAt=r.match.time;}if(e.type==='horde-resupply')r.singleNotice={type:e.type,text:`RESUPPLIED · WAVE ${e.wave??''}`.trim(),at:r.match.time};else if(e.type==='enemy-detonate')r.singleNotice={type:e.type,text:'SAPPER DETONATION',at:r.match.time};else if(e.type==='boss-phase'){r.singleNotice={type:e.type,text:`PHASE ${e.phase}${e.name?` · ${e.name}`:''}`,at:r.match.time};audio.announcerCue?.('boss');}else if(e.type==='mission-message')r.singleNotice={type:e.type,text:String(e.text??''),at:r.match.time};else if(e.type==='story-line'||e.type==='npc-bark')audio.announcerCue?.('objective');else if(e.type==='singleplayer-checkpoint'&&r.match.config.mode==='campaign'){setCampaign((p:any)=>setCheckpoint(p,e.missionId??r.match.config.mission,e.step));}if(isCocsMode(r.match.config.mode)){const beat=cocsAnnouncement(e,{id:0,team:r.match.actors[0]?.team??0});if(beat&&beat.mine){r.announceCue=beat;r.announceAt=r.match.time;}}if(r.training){r.trainingEvents.push(e);if(r.trainingEvents.length>200)r.trainingEvents.splice(0,r.trainingEvents.length-200);}r.lastAudio=e.id;}}
+  for(const e of r.match.events)if(e.id>r.lastAudio){audio.event(e,r.match.actors[0]);noteDamage(e,r.match,0);noteKill(e,0,r.match.time);if(r.display?.captions===true){const cap=audioCaption(e);if(cap){r.caption=cap.text;r.captionAt=r.match.time;}}if(e.type==='damage'&&e.actor===0)r.lastDamage=r.match.time;if(e.type==='damage'&&e.source===0&&e.actor!==0){r.lastHit=r.match.time;if(e.critical||e.headshot||Number(e.amount)>=48)r.lastCritical=r.match.time;}if((e.type==='pickup'||e.type==='powerup')&&e.actor===0){r.pickupText=e.type==='powerup'?`${e.kind.toUpperCase()} ACTIVE`:`${e.kind.toUpperCase()} ACQUIRED`;r.pickupAt=r.match.time;}if(e.type==='horde-resupply')r.singleNotice={type:e.type,text:`RESUPPLIED · WAVE ${e.wave??''}`.trim(),at:r.match.time};else if(e.type==='enemy-detonate')r.singleNotice={type:e.type,text:'SAPPER DETONATION',at:r.match.time};else if(e.type==='boss-phase'){r.singleNotice={type:e.type,text:`PHASE ${e.phase}${e.name?` · ${e.name}`:''}`,at:r.match.time};audio.announcerCue?.('boss');}else if(e.type==='mission-message')r.singleNotice={type:e.type,text:String(e.text??''),at:r.match.time};else if(e.type==='story-line'||e.type==='npc-bark')audio.announcerCue?.('objective');else if(e.type==='singleplayer-checkpoint'&&r.match.config.mode==='campaign'){setCampaign((p:any)=>setCheckpoint(p,e.missionId??r.match.config.mission,e.step));}if(isCocsMode(r.match.config.mode)){const beat=cocsAnnouncement(e,{id:0,team:r.match.actors[0]?.team??0});const next=acceptCocsAnnouncement(r.announceCue,r.announceAt,beat,r.match.time);if(next){r.announceCue=next.cue;r.announceAt=next.at;}}if(r.training){r.trainingEvents.push(e);if(r.trainingEvents.length>200)r.trainingEvents.splice(0,r.trainingEvents.length-200);}r.lastAudio=e.id;}}
     const cinematicMode=r.showcase&&(['selection','browse','lobby','progression','changelog'].includes(modeRef.current)||(modeRef.current==='theater'&&!r.demo));
     if(cinematicMode){const sc=r.showcase;const demoActive=demoOnlyRef.current;const plan=demoScenarioState(demoSessionRef.current,{elapsed:sc.time,limit:sc.seconds??SHOWCASE_MAX_SECONDS,over:sc.match.over===true,active:demoActive});if(r.showcaseMatchedId!==sc.mapId){view.setMatch(sc.match.snapshot());view.lastEvent=sc.match.serial;view.setPlayerId(-1);view.setDirector(sc.director);view.setCinema(true);r.showcaseMatchedId=sc.mapId;view.setShowcase(sc.match.snapshot());}if(!plan.paused){sc.acc=Math.min(sc.acc+elapsed,RULES.dt*4);let showcaseGuard=0;while(sc.acc>=RULES.dt&&showcaseGuard<4){sc.acc-=RULES.dt;showcaseGuard++;sc.match.step(RULES.dt,{inputs:{}});}sc.time+=elapsed;}
      // Rebuild only on a false->true pacing decision, so even a stale plan can
@@ -546,7 +560,13 @@ pauseRender:(on:boolean)=>{const previous=r.benchmarking===true;r.benchmarking=o
      // Free-cursor toggle (default AltLeft): one remappable control that releases
      // the pointer in place — no pause, no menu — and toggles combat back on.
      const cursorBound=actionForCode(r?.bindings||bindings,e.code)==='cursor';
-     if(cursorBound&&!e.repeat&&modeRef.current==='playing'&&!demoOnlyRef.current&&!chatOpenRef.current&&!isEditable(e.target)&&!isEditable(document.activeElement)){e.preventDefault();toggleCursorMode();return;}
+     if(cursorBound&&!e.repeat&&modeRef.current==='playing'&&!demoOnlyRef.current&&!chatOpenRef.current&&!isEditable(e.target)&&!isEditable(document.activeElement)){e.preventDefault();
+      // F05: while dead the cursor key opens the explicit loadout queue instead
+      // of the bare free cursor, so an unchanged kit never pauses combat.
+      if(respawnEditorRef.current){setRespawnEditorOpen(false);return;}
+      if(scoresInteractiveRef.current){setScoresInteractiveOpen(false);setScores(false);return;}
+      if(respawnOpenRef.current){setRespawnEditorOpen(true);return;}
+      toggleCursorMode();return;}
      if(r?.spectateLocal&&modeRef.current==='playing'&&!isEditable(e.target)&&!isEditable(document.activeElement)&&!chatOpenRef.current&&['KeyB','KeyF','KeyH','BracketLeft','BracketRight'].includes(e.code)){
       e.preventDefault();if(e.repeat)return;
       if(e.code==='KeyB')r.cameraMode=cycleCameraMode(r.cameraMode,1);
@@ -588,8 +608,11 @@ pauseRender:(on:boolean)=>{const previous=r.benchmarking===true;r.benchmarking=o
     }
      const orderKey=latticeOrderKey({mode:latticeMode,spectate:r.net?.spectate||r.spectateLocal,code:e.code,action:cocsBoardBound??'',armed:cocsControlRef.current?.armed(),repeat:e.repeat});
      if(orderKey){e.preventDefault();if(orderKey.type==='arm')cocsControlRef.current?.arm(orderKey.verb);else if(orderKey.type==='pick')cocsControlRef.current?.pickIndex(orderKey.index);else if(orderKey.type==='issue')cocsControlRef.current?.issue();else cocsControlRef.current?.cancel();return;}
-     if((e.code==='KeyT'||e.code==='Enter')&&r.net?.started){chatOpenRef.current=true;syncVoice();clearInput();setChatOpen(true);e.preventDefault();return;}
+     if((e.code==='KeyT'||e.code==='Enter')&&r.net?.started&&!cursorCombatKeysBlocked(cursorRef.current)){chatOpenRef.current=true;syncVoice();clearInput();setChatOpen(true);e.preventDefault();return;}
     if(e.code==='Escape'){
+     // F05: an explicitly opened respawn editor or pinned standings closes on
+     // Escape before the cursor machine routes the key anywhere else.
+     if(respawnEditorRef.current||scoresInteractiveRef.current){e.preventDefault();if(respawnEditorRef.current)setRespawnEditorOpen(false);else{setScoresInteractiveOpen(false);setScores(false);}return;}
      const escaped=cursorEscape(cursorRef.current,{at:performance.now()});
      if(cursorActive(cursorRef.current)){
       e.preventDefault();
@@ -605,8 +628,19 @@ pauseRender:(on:boolean)=>{const previous=r.benchmarking===true;r.benchmarking=o
      if(document.pointerLockElement===canvas.current||performance.now()-lockChangeAtRef.current<400)return;
      e.preventDefault();changeMode(r.net?.started?'lobby':'paused');return;
     }
-    if(e.code==='Tab'){e.preventDefault();setScores(true);return;}
+    if(e.code==='Tab'){
+     if(respawnEditorRef.current)return; // the editor traps its own Tab cycle
+     const owner=cursorKeyboardOwner(cursorRef.current);
+     if(owner===CURSOR_SURFACE.SCOREBOARD){e.preventDefault();setScoresInteractiveOpen(false);setScores(false);return;}
+     if(owner){e.preventDefault();return;} // the active surface owns its keys
+     if(cursorActive(cursorRef.current)){e.preventDefault();setScores(true);setScoresInteractiveOpen(true);return;}
+     e.preventDefault();setScores(true);return;
+    }
     if(r.net?.spectate)return;
+     // F05: one centralized priority check owns combat key routing — a spend
+     // window, the respawn editor or the pinned standings must not re-seed held
+     // movement/fire input. The board peek is the deliberate exemption.
+     if(cursorCombatKeysBlocked(cursorRef.current))return;
      const bound=Object.values(r.bindings||bindings);if(bound.includes(e.code)||e.code==='KeyC'||e.code==='Tab')e.preventDefault();keys.add(e.code);
      const boundAction=actionForCode(r.bindings||bindings,e.code);if(!e.repeat){if(boundAction==='jump')r.jump=true;else if(boundAction==='power')r.power=true;else if(boundAction==='interact')r.interact=true;else if(boundAction==='reload')r.reload=true;else if(boundAction==='melee')r.melee=true;else if(boundAction==='grenade')r.grenade=true;}
     if(!e.repeat&&!cursorRef.current.surfaces.includes(CURSOR_SURFACE.SPEND)&&(/^Digit[1-9]$/.test(e.code)||e.code==='Digit0')){const n=e.code==='Digit0'?9:Number(e.code.slice(-1))-1;if(n>=WEAPONS.length)return;if(r.net?.started||(r.match&&hasAmmo(r.match.actors[0].ammo[n])))r.inputWeapon=n;}
@@ -616,7 +650,7 @@ pauseRender:(on:boolean)=>{const previous=r.benchmarking===true;r.benchmarking=o
     const hold=boardHoldRef.current;boardHoldRef.current={at:0,held:false};
     // Short tap = toggle open; held longer = peek that closes on release.
     if(hold.held&&performance.now()-hold.at>=BOARD_HOLD_MS)cocsBoardControlRef.current?.close();
-   }if(actionForCode(r?.bindings||bindings,e.code)==='voice')r?.voice?.setPushToTalk(false);keys.delete(e.code);if(e.code==='Tab')setScores(false);};
+   }if(actionForCode(r?.bindings||bindings,e.code)==='voice')r?.voice?.setPushToTalk(false);keys.delete(e.code);if(e.code==='Tab'&&!scoresInteractiveRef.current)setScores(false);};
   const move=(e:MouseEvent)=>{const r=runtime.current;if(demoOnlyRef.current&&demoSessionRef.current.state==='free'&&(document.pointerLockElement===canvas.current||r?.drag)){const d=r?.display||{},gain=(r?.lookSensitivity||1)*(d.adsSensitivity??1);demoFreeAdapter(r?.view).look(-e.movementX*.002*gain,-(d.invertY?-1:1)*e.movementY*.002*gain);return;}if(modeRef.current!=='playing'||chatOpenRef.current||r?.net?.spectate||!r?.match&&!r?.net?.started||(document.pointerLockElement!==canvas.current&&!r.drag))return;if(r.spectateLocal){const d=r.display||{},gain=r.lookSensitivity*((r.ads||r.touch?.ads)?(d.adsSensitivity??1):1),inv=d.invertY?-1:1;if(r.view?.freeCam)r.view.freeLook(-e.movementX*.002*gain,-inv*e.movementY*.002*gain);else r.spectateDirector?.look?.(-e.movementX*.002*gain,-inv*e.movementY*.002*gain);return;}const look=r.net?.started?r.look:r.match.actors[0],d=r.display||{},gain=r.lookSensitivity*((r.ads||r.touch?.ads)?(d.adsSensitivity??1):1);look.yaw-=e.movementX*.002*gain;look.pitch=Math.max(-1.45,Math.min(1.45,look.pitch-(d.invertY?-1:1)*e.movementY*.002*gain));};
   const down=(e:MouseEvent)=>{
    if(e.target!==canvas.current)return;
@@ -753,13 +787,19 @@ pauseRender:(on:boolean)=>{const previous=r.benchmarking===true;r.benchmarking=o
   // Team-mode respawn switch (§3.7). Online goes through the validated server
   // message; a local match records the pending pair on the authoritative match.
   // Both land on the actor's next spawn — the overlay only appears while dead.
-  const switchRespawnLoadout=(nextCharacter:string,nextHarness:string)=>{const loadout=resolveLoadout(nextCharacter,nextHarness);const r=runtime.current;if(!r)return;
+  const switchRespawnLoadout=(nextCharacter:string,nextHarness:string)=>{
+   const loadout=resolveLoadout(nextCharacter,nextHarness);const r=runtime.current;
+   if(!r)return {ok:false,reason:'NO MATCH RUNNING',character:loadout.character,harness:loadout.harness};
    // Hold the pick in the page state too so a reconnect re-seats the latest pair
    // (NetClient.join writes seatLoadout) instead of the selection-screen pair.
    if(character!==loadout.character)setCharacter(loadout.character);
    if(harness!==loadout.harness)setHarness(loadout.harness);
-   if(r.net?.connected){r.net.loadout(loadout.character,loadout.harness);return;}
-   if(r.match?.setLoadout)r.match.setLoadout(r.view?.playerId??0,{character:loadout.character,harness:loadout.harness});};
+   if(r.net?.connected){r.net.loadout(loadout.character,loadout.harness);setRespawnQueue({character:loadout.character,harness:loadout.harness,status:'requested'});return {ok:true,pending:true,status:'requested',character:loadout.character,harness:loadout.harness};}
+   const queued=Boolean(r.match?.setLoadout?.(r.view?.playerId??0,{character:loadout.character,harness:loadout.harness}));
+   if(!queued)return {ok:false,reason:'LOADOUT UNCHANGED OR LOCKED',character:loadout.character,harness:loadout.harness};
+   setRespawnQueue({character:loadout.character,harness:loadout.harness,status:'pending'});
+   return {ok:true,pending:true,status:'pending',character:loadout.character,harness:loadout.harness};
+  };
   const chooseGear=(slot:string,item:string)=>{const current=profileRef.current.gear||{},next={...current,[slot]:current[slot]===item?undefined:item};const saved=saveProgression({...profileRef.current,gear:next});runtime.current?.net?.gear(saved.gear,saved.attachments);setNotice('');};
   const chooseAttachment=(slot:string,item:string)=>{const current=profileRef.current.attachments||{},next={...current,[slot]:current[slot]===item?undefined:item};const saved=saveProgression({...profileRef.current,attachments:next});runtime.current?.net?.gear(saved.gear,saved.attachments);setNotice('');};
   const chooseFinish=(id:string)=>{const saved=saveProgression({...profileRef.current,finish:profileRef.current.finish===id?null:id});runtime.current?.net?.gear(saved.gear,saved.attachments,saved.finish);};
@@ -783,11 +823,19 @@ pauseRender:(on:boolean)=>{const previous=r.benchmarking===true;r.benchmarking=o
    // single-player or onto the authoritative wire in a networked match.
    cocsStripRef.current=cocsStrip;
    const applyCocsStrip=(next:any)=>{cocsStripRef.current=next;setCocsStrip(next);};
-   const cocsNow=()=>cocsStripRef.current??cocsStripState();
-   const cocsTeam=()=>player?.team===0||player?.team===1?Number(player.team):0;
-   const armCocsVerb=(id:string)=>applyCocsStrip(cocsArmVerb(cocsNow(),id));
-    const pickCocsTarget=(target:any)=>{const nodes=cocsTargetableNodes(latticeBoardView(hud,player),cocsNow().armed);applyCocsStrip(cocsPickTarget(cocsNow(),target,nodes));};
-    const pickCocsIndex=(index:number)=>{const nodes=cocsTargetableNodes(latticeBoardView(hud,player),cocsNow().armed);const node=nodes.find((entry:any)=>entry.index===index);if(node)pickCocsTarget(node.id);};
+    const cocsNow=()=>cocsStripRef.current??cocsStripState();
+    const cocsTeam=()=>player?.team===0||player?.team===1?Number(player.team):0;
+    const latticeMap=isCocsMode(hudMode)?getMap(hud?.mapId??mapId):null;
+    const latticeBoard=latticeBoardView(hud,player);
+    for(const node of latticeBoard.nodes)node.label=latticeNodeLabel({id:node.id},latticeMap);
+    // F04 integration: coach, strip and board all receive this exact model.
+    // The model derives ground reachability from the authored navigation graph,
+    // while the authoritative sim still makes the final order decision.
+    const latticeModel=isCocsMode(hudMode)?latticeTargetModel(hud,latticeMap,player):null;
+    const cocsOrderEvents=((runtime.current?.net?.started?runtime.current?.net?.events:runtime.current?.match?.events)??[]).filter((event:any)=>['cocs-order','cocs-order-rejected','cocs-order-complete'].includes(String(event?.type)));
+    const armCocsVerb=(id:string)=>applyCocsStrip(cocsArmVerb(cocsNow(),id));
+     const pickCocsTarget=(target:any)=>{const nodes=cocsTargetableNodes(latticeBoard,cocsNow().armed,{model:latticeModel,map:latticeMap});applyCocsStrip(cocsPickTarget(cocsNow(),target,nodes));};
+     const pickCocsIndex=(index:number)=>{const nodes=cocsTargetableNodes(latticeBoard,cocsNow().armed,{model:latticeModel,map:latticeMap});const node=nodes.find((entry:any)=>entry.index===index);if(node)pickCocsTarget(node.id);};
    const issueCocsOrder=()=>{const r=runtime.current,state=cocsNow(),snapshot=hud?.cocs,team=cocsTeam(),tick=Number(snapshot?.tick)||0,cardId=`cocs-${team}-${tick}-${Number(state.seq)||0}`,peerId=latticePeerId(r?.net,r?.match);
     const result=cocsIssueOrder(state,{tick,peerId,cardId,team,flux:snapshot?.flux?.[team]??0});
     if(!result.order){applyCocsStrip(result.state);return;}
@@ -798,11 +846,8 @@ pauseRender:(on:boolean)=>{const previous=r.benchmarking===true;r.benchmarking=o
     (r.cocsOrders??=[]).push(result.order);};
    const cancelCocsStrip=()=>applyCocsStrip(cocsClearStrip(cocsNow()));
    cocsControlRef.current={arm:armCocsVerb,pickIndex:pickCocsIndex,issue:issueCocsOrder,cancel:cancelCocsStrip,armed:()=>Boolean(cocsNow().armed)};
-    const latticeMap=isCocsMode(hudMode)?getMap(hud?.mapId??mapId):null;
-    const latticeBoard=latticeBoardView(hud,player);
-    for(const node of latticeBoard.nodes)node.label=latticeNodeLabel({id:node.id},latticeMap);
-    const cocsView:any=isCocsMode(hudMode)?cocsCommandView(latticeBoard,hud?.cocs,player,cocsStrip,{interactKey:keyLabel(bindings.interact)}):null;
-    if(cocsView){cocsView.coach=latticeCoach(hud,player,latticeMap);cocsView.keys=latticeKeys(bindings);}
+     const cocsView:any=isCocsMode(hudMode)?cocsCommandView(latticeBoard,hud?.cocs,player,cocsStrip,{interactKey:keyLabel(bindings.interact),model:latticeModel,map:latticeMap,orders:cocsOrderEvents}):null;
+     if(cocsView){const coach=latticeCoach(hud,player,latticeMap,{model:latticeModel,previous:cocsCoachRef.current});cocsCoachRef.current=coach;cocsView.coach=coach;cocsView.keys=latticeKeys(bindings);}else cocsCoachRef.current=null;
    // O1c — the board is a client-side overlay. State (open/pinned/active) lives
    // here so the global keydown can drive hold-to-peek, pointer-locked listbox
    // navigation and the damage auto-collapse. The board is never opened outside
@@ -811,7 +856,7 @@ pauseRender:(on:boolean)=>{const previous=r.benchmarking===true;r.benchmarking=o
    // from nodes/sinks/terminals/roles/orderStats and resolve every sink target
    // to a real node id (the sim rejects the literal 'node').
    const cocsSpendView=withSinkTargets(cocsView?.spend??null,hud?.cocs,player);
-   const localCards=cocsView?.boardView?localBoardCards(latticeBoard,hud?.cocs,player,{spend:cocsSpendView,economy:cocsView.economy}):[];
+    const localCards=cocsView?.boardView?localBoardCards(latticeBoard,hud?.cocs,player,{spend:cocsSpendView,economy:cocsView.economy,model:latticeModel,map:latticeMap}):[];
    const mergedBoard=cocsView?.boardView?mergeLocalBoard(cocsView.boardView,localCards):cocsView?.boardView??null;
    const cocsBoardIds=mergedBoard?.listboxIds??[];
    const cocsBoardCards=mergedBoard?.cards??[];
@@ -878,8 +923,8 @@ pauseRender:(on:boolean)=>{const previous=r.benchmarking===true;r.benchmarking=o
     const reopenSpend=()=>setSpendDismissed(null);
 const cocsCommand=cocsView?{...cocsView,boardView:mergedBoard??cocsView.boardView,spend:cocsSpendView??cocsView.spend,armCocsVerb,pickCocsTarget,issueCocsOrder,cancelCocsStrip,spendCocs,spendVisible,skipSpend,reopenSpend,notice:cocsNotice,onReadoutPanel:toggleReadoutPanel,cursorKey:keyLabel(bindings.cursor??DEFAULT_BINDINGS.cursor),selectBoardCard:selectCocsBoardCard,activateBoardCard:activateCocsBoardCard,closeBoard:closeCocsBoard,toggleBoardPin:toggleCocsBoardPin,boardOpen:cocsBoard.open===true&&!boardCollapsed,boardCollapsed,boardPinned:cocsBoard.pinned===true,boardActive:cocsBoardIds[cocsBoard.active??0]??cocsBoardIds[0]??null}:null;
    const aimActor=player||hud?.actors?.[0],aimWeapon=aimActor?WEAPONS[aimActor.weapon??0]||WEAPONS[0]:null,aimSpread=aimActor?effectiveSpread(aimActor,aimWeapon,{handling:harnessWeaponHandling(aimActor.harness,aimActor.weapon)}):0,crosshairGap=dynamicCrosshairGap(aimSpread,display.size),reloadFill=reloadProgress(aimActor),reloading=Boolean(aimActor?.reloading),posture=postureLabel(aimActor),marker=hitMarker(hud,player),ammoEmpty=Boolean(player&&typeof player.ammo?.[player.weapon]==='number'&&player.ammo[player.weapon]===0),ammoLow=lowAmmo(player,WEAPONS);
-    const killNotice=killBanner(hud,player),suddenBanner=suddenDeathBanner(hud),startBanner=matchStartBanner(hud,undefined,hudMode),scoreCue=hud?.scoreCue&&hud.scoreCue.age<1.6?hud.scoreCue:null,damageIndicator=hud?.damageDir&&hud.time-hud.damageDirAt<.8?hud.damageDir:null,awards=matchAwards(hud),radar=radarContacts(hud,player),radarCols=radarPaletteFor(accessibility.palette);
-    const respawn=respawnOverlayView(hud,player);
+    const killNotice=killBanner(hud,player),suddenBanner=suddenDeathBanner(hud),startBanner=matchStartBanner(hud,undefined,hudMode),scoreCue=hud?.scoreCue??null,damageIndicator=hud?.damageDir&&hud.time-hud.damageDirAt<.8?hud.damageDir:null,awards=matchAwards(hud),radar=radarContacts(hud,player),radarCols=radarPaletteFor(accessibility.palette);
+    const respawn=respawnOverlayView(hud,player);respawnOpenRef.current=respawn.open===true;
     // --- Cursor surfaces ----------------------------------------------------
     // Every interactive overlay registers here. The first one releases the
     // pointer and clears combat inputs; the last one to close asks for combat
@@ -888,12 +933,18 @@ const cocsCommand=cocsView?{...cocsView,boardView:mergedBoard??cocsView.boardVie
     useEffect(()=>{if(!cocsNotice)return;const timer=setTimeout(()=>setCocsNotice(null),4200);return()=>clearTimeout(timer);},[cocsNotice?.id]);
     useEffect(()=>{syncCursorSurface(CURSOR_SURFACE.SPEND,spendVisible);},[spendVisible]);
     useEffect(()=>{syncCursorSurface(CURSOR_SURFACE.BOARD,cocsBoard.open===true&&!boardCollapsed);},[cocsBoard.open,boardCollapsed]);
-    useEffect(()=>{syncCursorSurface(CURSOR_SURFACE.SCOREBOARD,scores);},[scores]);
+    // F05: the Tab glance is passive and never registers here; only the
+    // explicitly pinned standings surface releases the pointer.
+    useEffect(()=>{syncCursorSurface(CURSOR_SURFACE.SCOREBOARD,scoresInteractive);},[scoresInteractive]);
     useEffect(()=>{syncCursorSurface(CURSOR_SURFACE.SETTINGS,settings);},[settings]);
     useEffect(()=>{syncCursorSurface(CURSOR_SURFACE.PAUSE,mode==='paused');},[mode]);
     useEffect(()=>{syncCursorSurface(CURSOR_SURFACE.RESULTS,mode==='results');},[mode]);
     useEffect(()=>{syncCursorSurface(CURSOR_SURFACE.DEMO,demoSession.state==='options');},[demoSession.state]);
-    useEffect(()=>{syncCursorSurface(CURSOR_SURFACE.RESPAWN,respawn.open===true);},[respawn.open]);
+    // F05: the automatic death summary is passive. The RESPAWN surface only
+    // registers for the explicitly opened editor, and it is torn down when the
+    // respawn ends so a later death starts from the same passive state.
+    useEffect(()=>{syncCursorSurface(CURSOR_SURFACE.RESPAWN,respawn.open===true&&respawnEditor);},[respawn.open,respawnEditor]);
+    useEffect(()=>{if(!respawn.open){if(respawnEditorRef.current)setRespawnEditorOpen(false);if(respawnQueue)setRespawnQueue(null);}},[respawn.open,respawnQueue]);
     useEffect(()=>{syncCursorSurface(CURSOR_SURFACE.TRAINING,mode==='playing'&&(hud?.training?.phase==='complete'||hud?.training?.done===true));},[mode,hud?.training?.phase,hud?.training?.done]);
     // A new spend window clears a previous SKIP and announces itself once: a
     // HUD caption (when captions are on) plus the objective announcer motif.
@@ -936,13 +987,13 @@ const cocsCommand=cocsView?{...cocsView,boardView:mergedBoard??cocsView.boardVie
    ranked:netRanked,rankedQueued:netQueued,queueRanked,cancelQueue,
    net:netInfo,netPlayers,myPeerId,netRoomId,netConnected:netInfo.connected,chatLog,chatDraft,setChatDraft,sendChat,newMessages,setNewMessages,lobbyInputRef,lobbyChatRef,chatAtBottom,voicePanel,voiceState,hostAndStart,reconnectNet,resumeNet,disconnectNet,
    demos,demoPlaying,refreshDemos:()=>runtime.current?.refreshDemos?.(),start:()=>start(),ready,error,previewRef,headActions,backToDemo,BRAND,showcaseLive,CHANGELOG,RELEASE_VERSION,RELEASE_CODENAME,FULL_CHANGELOG_URL,exportDemo:(id:any)=>runtime.current?.exportDemoFile?.(id),importDemo:(file:any)=>runtime.current?.importDemoFile?.(file),
-   player,awards,scoreboard,respawn,switchRespawnLoadout,resultTitle,resultDescription,resume,nextArena,campaignNext,isSingle,single,selectHordeUpgrade:chooseHordeUpgrade,resumeSingleplayer,lastDemo,prefs,pauseQuick,toggleCaptions,toggleReducedMotion,ONBOARDING_STEPS,helpSections:HELP_SECTIONS,onboarding,setOnboarding,finishOnboarding,modalRef,singleRef,settingsRef,onboardingRef,runtime,
+   player,awards,scoreboard,respawn,switchRespawnLoadout,respawnEditor,setRespawnEditor:setRespawnEditorOpen,respawnQueue,resultTitle,resultDescription,resume,nextArena,campaignNext,isSingle,single,selectHordeUpgrade:chooseHordeUpgrade,resumeSingleplayer,lastDemo,prefs,pauseQuick,toggleCaptions,toggleReducedMotion,ONBOARDING_STEPS,helpSections:HELP_SECTIONS,onboarding,setOnboarding,finishOnboarding,modalRef,singleRef,settingsRef,onboardingRef,runtime,
    demoNotice,demoPaused,demoTime,demoSpeed,demoRig,demoInfo,stopDemo:()=>runtime.current?.stopDemo?.(),removeDemo:(id:any)=>runtime.current?.removeDemo?.(id),playDemo:(id:any)=>runtime.current?.playDemo?.(id),setDemoPaused,setDemoTime,setDemoSpeed,setDemoRig,CAMERA_RIGS,clock,
    hud,brief,phase,hudRoute,hudMap,hudMode,isTeamMode,modeGoal,ladderStatus,flagText,armsrace,WEAPONS,activePower,radar,radarCols,radarBlip,crosshairGap,marker,reloadFill,reloading,posture,killNotice,suddenBanner,startBanner,scoreCue,damageIndicator,damageNumberStyle,reducedMotion,vehiclePrompt,vehicle,ammoEmpty,ammoLow,hideHud,pointerHint,requestLock,chatOpen,cursor:{active:cursorActive(cursorUi),surfaces:cursorUi.surfaces,label:cursorSurfaceText(cursorUi),hint:cursorHint(cursorUi,{key:bindings.cursor??DEFAULT_BINDINGS.cursor}),key:String(keyLabel(bindings.cursor??DEFAULT_BINDINGS.cursor)).toUpperCase(),blocked:cursorBlockingSurfaces(cursorUi).length>0,resume:cursorResumeCombat},spectatorBoard,spectatorTeams,CAMERA_MODE_LABELS,grenadeStatus,streakStatus,killFeedWeapon,voiceHint,escapeHint,teamScoreText,ammoText,weaponTag,REPO_URL,weaponRangeLabel,cocsCommand,
   };
   return <><main style={{'--ui-scale':display.uiScale??1} as any} className={`arena-app mode-${mode}${(config.mode==='puma-race'||config.mode==='puma-soccer')?' race-setup':''}${(isRace||isSoccer)?' race-active':''} palette-${accessibility.palette}${accessibility.palette!=='default'?' palette-colorblind':''}${accessibility.highContrast?' ui-contrast':''}`}>
   <canvas ref={canvas} tabIndex={-1} role="img" className="arena-canvas" aria-label="Colosseum Of Competitive Slop 3D game"/>
-  {!entered&&!demoOnly&&<><TitleScreen ui={ui}/><div className="title-footer"><span>v8.3 · CLARITY</span>{githubLink}</div></>}
+  {!entered&&!demoOnly&&<><TitleScreen ui={ui}/><div className="title-footer"><span>v8.4 · FIELDCRAFT</span>{githubLink}</div></>}
   {!entered&&demoOnly&&<DemoControls state={demoSession.state} labels={demoLabels} subjects={broadcast?.subjects??[]} cameraStyle={demoSession.cameraStyle} hudVisible={demoSession.hudVisible} pinned={demoPinned(demoSession)} freeSpeed={demoSession.freeSpeed} running={demoRunning} notice={demoSession.notice} error={demoSession.error}
     onEnterArena={enterArenaFromDemo} onPrevScenario={()=>skipDemoScenario(-1)} onNextScenario={()=>skipDemoScenario(1)}
     onAuto={()=>demoTransition({type:'auto'})} onFollow={demoFollow} onFree={demoToggleFree} onStyle={demoCycleStyle} onResetView={demoResetView}
@@ -967,7 +1018,7 @@ const cocsCommand=cocsView?{...cocsView,boardView:mergedBoard??cocsView.boardVie
   {(mode==='playing'||mode==='paused')&&player&&<>
    {isSoccer?<SoccerHud soccer={soccer} state={soccerState} actorId={player?.id} touchControls={touchControls} controls={soccerControls}/>:isRace?<RaceHud race={race} touchControls={touchControls} raceControls={raceControls}/>:<PlayingHud ui={ui}/>}
    {hud.net&&<GameChat hud={hud} chatOpen={chatOpen} chatLog={chatLog} chatInputRef={chatInputRef} chatDraft={chatDraft} sendChat={sendChat} setChatOpen={setChatOpen} setChatDraft={setChatDraft}/>}
-   {mode==='playing'&&<TouchControls runtime={runtime} mode={hud?.config?.mode} visible={touchControls&&!hud?.spectate} onLook={touchLook} onSwap={touchSwap} onPause={touchPause} onFullscreen={toggleFullscreen} fullscreen={fullscreen}/>}
+    {mode==='playing'&&<TouchControls runtime={runtime} mode={hud?.config?.mode} visible={touchControls&&!hud?.spectate} interactActive={Boolean(cocsCommand?.interactPrompt||vehiclePrompt)} interactLabel={cocsCommand?.interactPrompt?.verb??'USE'} onLook={touchLook} onSwap={touchSwap} onPause={touchPause} onFullscreen={toggleFullscreen} fullscreen={fullscreen}/>}
    {!entered&&demoOnly&&demoSession.state==='free'&&touchControls&&<TouchControls runtime={runtime} visible onLook={touchLook} onSwap={()=>{}} onPause={demoTogglePause} onFullscreen={toggleFullscreen} fullscreen={fullscreen}/>}
    {scores&&mode==='playing'&&<div className="scores-overlay"><p className="eyebrow">LIVE STANDINGS</p>{scoreboard}</div>}
    {mode==='playing'&&respawn.open&&<RespawnOverlay ui={ui}/>}
