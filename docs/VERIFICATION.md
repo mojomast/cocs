@@ -1,6 +1,19 @@
 # COCS verification report
 
-## Release 8.5 - HANDOFF (pending automated gate)
+## Release 8.5 - HANDOFF
+
+**Production deployment (2026-09-20).** Commit `b9c7a0a` was fast-forwarded to
+`improvement/phase2-audio-visual` (pushed to origin) and deployed to
+<https://arena.ussyco.de> with
+`PREVIOUS_SERVER_COMMIT=1d292fb npm run deploy -- --with-game-server`. This is
+the first identified deploy: both services reported `release v8.5`,
+`codename HANDOFF`, `commit b9c7a0a`, `buildId v8.5-b9c7a0a`, `protocol 3`;
+the deploy gate verified exact web/server identities after restart. The public
+verifier returned 200 for the strict title footer and all 13 linked assets;
+`wss://arena.ussyco.de/ws` accepted a connection; the tracked browser matrix
+re-ran against production at 5/5 viewports with zero console/page errors.
+The deploy recorded `1d292fb` as the rollback target and the rollback path is
+web+server with an announced reconnect, not zero-downtime.
 
 **Scope.** The post-v8.4 reliability implementation on `feat/fieldwork-plan`:
 round-scoped idempotent COCS actions and honest outcome feedback, identified
