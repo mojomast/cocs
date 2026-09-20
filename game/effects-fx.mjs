@@ -148,7 +148,7 @@ export class DecalPool{
   if(this.slots.length>=this.limit){this.slots.sort((a,b)=>a.serial-b.serial);return this.slots[0];}
   const material=new T.MeshBasicMaterial({transparent:true,depthWrite:false,side:T.DoubleSide,map:this.mask??null});
   const obj=new T.Mesh(this.geometry,material);obj.visible=false;obj.frustumCulled=false;obj.renderOrder=3;
-  obj.userData.decal=true;this.scene.add(obj);slot={obj,material,active:false,serial:0,size:1};this.slots.push(slot);return slot;
+  obj.userData.decal=true;this.scene.add(obj);slot={obj,material,active:false,serial:0,size:1,opacity:.58};this.slots.push(slot);return slot;
  }
  spawn(pos,{color='#171310',size=.32,life=5.5,reduced=false,seed=0,dir=null,flat=false}={}){
   if(!pos)return false;
@@ -166,7 +166,8 @@ export class DecalPool{
   // quad normal stays exactly on the surface for both wall and floor hits.
   slot.obj.quaternion.copy(this.roll).multiply(this.tilt);
   slot.obj.material.color.set(color);
-  slot.obj.material.opacity=reduced?.46:.58;
+  slot.opacity=reduced?.46:.58;
+  slot.obj.material.opacity=slot.opacity;
   slot.obj.visible=true;
   const lift=vertical?.025:.02;
   slot.obj.position.set((pos.x||0)+this.normal.x*lift,(pos.y||0)+this.normal.y*lift,(pos.z||0)+this.normal.z*lift);
@@ -187,7 +188,11 @@ export class DecalPool{
    slot.life-=dt;
    if(slot.life<=0){slot.active=false;slot.obj.visible=false;continue;}
    const t=1-slot.life/slot.total;
-   slot.obj.material.opacity=Math.min(.58,slot.life/slot.total*.75);
+   // Hold the stamp at full strength for the first 60% of its life, then fade
+   // through the tail. The pool cap, slot count and stored lifetime are
+   // unchanged; only the opacity curve moves.
+   const hold=.6,held=t<=hold?1:Math.max(0,1-(t-hold)/(1-hold));
+   slot.obj.material.opacity=(slot.opacity??.58)*held;
    slot.obj.scale.setScalar(slot.size*(1+t*.14));
   }
  }

@@ -178,6 +178,14 @@
 .config-field [data-slot=select-value] { min-width: 0; white-space: normal; text-align: left; }
 .crosshair-editor, .crosshair-editor > label { flex-wrap: wrap; }
 .crosshair-preview { flex-shrink: 0; }
+/* Crosshair depth controls (Video tab): every new control keeps a 44 px touch
+   row, and the preview renders the live outline/dot/thickness. */
+.crosshair-advanced { display: grid; gap: 2px; margin: 6px 0 14px; padding: 10px 12px; border: 1px solid #66867444; border-radius: var(--radius-md); }
+.crosshair-advanced .config-field { margin-bottom: 10px; }
+.crosshair-advanced .config-toggle { min-height: 44px; margin: 6px 0; }
+.crosshair-advanced [data-slot=slider] { min-height: 44px; }
+.crosshair-preview--ads { display: grid; place-items: center; }
+.crosshair-preview--ads .ads-reticle { display: block; position: static; transform: scale(var(--crosshair-size,1)); }
 .arena-select { max-width: calc(100vw - 24px); }
 @container (max-width: 480px) {
   .config-grid, .mode-options, .map-options { grid-template-columns: minmax(0, 1fr); }
@@ -531,10 +539,17 @@
 }
 
 /* Aim feedback: dynamic crosshair gap, hitmarkers, reload bar and posture chip. */
-.crosshair:not(.shape-dot):not(.shape-chevron):not(.shape-split) span:nth-child(1) { transform: translateY(calc(-1 * var(--crosshair-gap, 0px))); }
-.crosshair:not(.shape-dot):not(.shape-chevron):not(.shape-split) span:nth-child(2) { transform: translateY(var(--crosshair-gap, 0px)); }
-.crosshair:not(.shape-dot):not(.shape-chevron):not(.shape-split) span:nth-child(3) { transform: translateX(calc(-1 * var(--crosshair-gap, 0px))); }
-.crosshair:not(.shape-dot):not(.shape-chevron):not(.shape-split) span:nth-child(4) { transform: translateX(var(--crosshair-gap, 0px)); }
+.crosshair:not(.shape-dot):not(.shape-chevron):not(.shape-split) span:nth-child(1) { transform: translateY(calc(-1 * (var(--crosshair-gap, 0px) + var(--crosshair-base-gap, 0px)))); }
+.crosshair:not(.shape-dot):not(.shape-chevron):not(.shape-split) span:nth-child(2) { transform: translateY(calc(var(--crosshair-gap, 0px) + var(--crosshair-base-gap, 0px))); }
+.crosshair:not(.shape-dot):not(.shape-chevron):not(.shape-split) span:nth-child(3) { transform: translateX(calc(-1 * (var(--crosshair-gap, 0px) + var(--crosshair-base-gap, 0px)))); }
+.crosshair:not(.shape-dot):not(.shape-chevron):not(.shape-split) span:nth-child(4) { transform: translateX(calc(var(--crosshair-gap, 0px) + var(--crosshair-base-gap, 0px))); }
+/* Crosshair depth (Video tab). The defaults reproduce the shipped reticle: a
+   2×6 px arm pair, no outline, no dot, no base gap. */
+.crosshair { --crosshair-arm: calc(2px * var(--crosshair-thickness, 1)); --crosshair-arm-long: calc(6px * var(--crosshair-thickness, 1)); }
+.crosshair span:nth-child(1), .crosshair span:nth-child(2) { width: var(--crosshair-arm); height: var(--crosshair-arm-long); }
+.crosshair span:nth-child(3), .crosshair span:nth-child(4) { width: var(--crosshair-arm-long); height: var(--crosshair-arm); }
+.crosshair.has-outline span { box-shadow: 0 0 0 1px #04070ae0; }
+.crosshair.has-dot::after { content: ''; position: absolute; left: 50%; top: 50%; width: 2px; height: 2px; transform: translate(-50%, -50%); border-radius: 50%; background: var(--crosshair-color, #c2ffea); box-shadow: 0 0 0 1px #000b; }
 
 /* ADS reticle: one small, high-contrast centre reference while aiming. The hip
    crosshair is hidden in ADS so it never competes with the sight or optic, and
@@ -547,7 +562,7 @@
 .aim-layer.is-ads .crosshair{display:none}
 .aim-layer.is-ads.is-scope .ads-reticle.dot{display:none}
 .aim-layer.is-ads.is-scope .ads-reticle.scope{display:block}
-.ads-reticle{position:absolute;left:50%;top:50%;width:7px;height:7px;transform:translate(-50%,-50%) scale(var(--crosshair-size,1));border-radius:50%;background:var(--crosshair-color,#c2ffea);box-shadow:0 0 0 1px #000b,0 0 4px #000,0 0 2px #000;pointer-events:none}
+.ads-reticle{position:absolute;left:50%;top:50%;width:7px;height:7px;transform:translate(-50%,-50%) scale(var(--crosshair-size,1));border-radius:50%;background:var(--ads-color,var(--crosshair-color,#c2ffea));box-shadow:0 0 0 1px #000b,0 0 4px #000,0 0 2px #000;pointer-events:none}
 .ads-reticle::after{content:'';position:absolute;left:50%;top:50%;width:2px;height:2px;transform:translate(-50%,-50%);border-radius:50%;background:#04070a}
 /* Magnified scope: a full-bleed reticle SVG with a barrel-warp bow and fine
    tick lines, plus a small bounded CSS-pixel centre dot that is always
@@ -555,9 +570,9 @@
 .ads-reticle.scope{left:0;top:0;width:100%;height:100%;transform:none;border-radius:0;background:none;box-shadow:none}
 .ads-reticle.scope::after{display:none}
 .scope-reticle{position:absolute;inset:0;width:100%;height:100%;display:block}
-.scope-line{fill:none;stroke:var(--crosshair-color,#c2ffea);stroke-width:1.2px;stroke-linecap:round;opacity:.9}
-.scope-tick{stroke:var(--crosshair-color,#c2ffea);stroke-width:1.2px;opacity:.7}
-.scope-dot{position:absolute;left:50%;top:50%;width:3px;height:3px;transform:translate(-50%,-50%);border-radius:50%;background:var(--crosshair-color,#c2ffea);box-shadow:0 0 0 1px #000b,0 0 3px #000;pointer-events:none}
+.scope-line{fill:none;stroke:var(--ads-color,var(--crosshair-color,#c2ffea));stroke-width:1.2px;stroke-linecap:round;opacity:.9}
+.scope-tick{stroke:var(--ads-color,var(--crosshair-color,#c2ffea));stroke-width:1.2px;opacity:.7}
+.scope-dot{position:absolute;left:50%;top:50%;width:3px;height:3px;transform:translate(-50%,-50%);border-radius:50%;background:var(--ads-color,var(--crosshair-color,#c2ffea));box-shadow:0 0 0 1px #000b,0 0 3px #000;pointer-events:none}
 .scope-lens{position:absolute;inset:0;pointer-events:none;background:
   radial-gradient(circle at 50% 50%, transparent 0 54%, #0002 68%, #000b 100%);
   box-shadow:inset 0 0 150px #0009, inset 0 0 36px #0005}
@@ -570,7 +585,12 @@
 .hitmarker span:last-child { transform: translate(-50%, -50%) rotate(-45deg); }
 .hitmarker.kill span { width: 21px; background: #ff6b6b; box-shadow: 0 0 9px #ff6b6bcc; }
 .hitmarker.critical span { width: 20px; background: #ffd166; box-shadow: 0 0 10px #ffd166dd; }
-.hitmarker.hit, .hitmarker.critical, .hitmarker.kill { animation: hitmarker-in .12s ease-out; }
+.hitmarker.hit, .hitmarker.critical, .hitmarker.kill, .hitmarker.shieldbreak { animation: hitmarker-in .12s ease-out; }
+/* Shield break: a diamond frame plus the word BREAK, so the beat reads by
+   shape and text rather than colour alone. */
+.hitmarker.shieldbreak::before { content: ''; position: absolute; inset: 22%; border: 2px solid #9fe3ffcc; transform: rotate(45deg); box-shadow: 0 0 8px #9fe3ff88; }
+.hitmarker.shieldbreak::after { content: 'BREAK'; position: absolute; left: 50%; top: calc(100% + 4px); transform: translateX(-50%); font: 700 9px monospace; letter-spacing: .18em; color: #cdeeff; text-shadow: 0 1px 3px #000; }
+.hitmarker.shieldbreak span { width: 14px; background: #9fe3ff; box-shadow: 0 0 9px #9fe3ffcc; }
 .reload-indicator { position: absolute; left: 50%; top: calc(50% + 26px); transform: translateX(-50%); display: grid; gap: 5px; justify-items: center; pointer-events: none; text-shadow: 0 1px 3px #000; }
 .reload-label { color: #ffd9a0; font: 11px monospace; letter-spacing: 2px; }
 .reload-track { display: block; width: 74px; height: 4px; background: #0a1717d9; border: 1px solid #ffd9a066; overflow: hidden; }
@@ -580,11 +600,11 @@
 @keyframes hitmarker-in { from { opacity: .35; transform: translate(-50%, -50%) scale(1.35); } to { opacity: 1; transform: translate(-50%, -50%) scale(1); } }
 @keyframes ammo-pulse { 0%, 100% { opacity: 1; } 50% { opacity: .45; } }
 @media (prefers-reduced-motion: reduce) {
-  .hitmarker.hit, .hitmarker.critical, .hitmarker.kill { animation: none; }
+  .hitmarker.hit, .hitmarker.critical, .hitmarker.kill, .hitmarker.shieldbreak { animation: none; }
   .ammo-warning.pulse { animation: none; }
   .reload-track > i { transition: none; }
 }
-.motion-reduced .hitmarker.hit, .motion-reduced .hitmarker.critical, .motion-reduced .hitmarker.kill { animation: none; }
+.motion-reduced .hitmarker.hit, .motion-reduced .hitmarker.critical, .motion-reduced .hitmarker.kill, .motion-reduced .hitmarker.shieldbreak { animation: none; }
 .motion-reduced .ammo-warning.pulse { animation: none; }
 .motion-reduced .reload-track > i { transition: none; }
 
@@ -593,6 +613,8 @@
 .damage-number { position: absolute; font: 700 20px monospace; color: #ffe9b0; text-shadow: 0 2px 6px #000; transition: opacity .08s linear, transform .08s linear; will-change: opacity, transform; }
 .damage-number.kill { color: #ff6b6b; font-size: 24px; text-shadow: 0 0 10px #ff6b6baa, 0 2px 6px #000; }
 .damage-number.critical { color: #ffd166; font-size: 23px; text-shadow: 0 0 12px #ffd166cc, 0 2px 6px #000; font-weight: 800; }
+/* Shield-break tint on the floating number. A kill keeps its own red beat. */
+.damage-number.shieldbreak:not(.kill) { color: #8fe0ff; text-shadow: 0 0 12px #8fe0ffcc, 0 2px 6px #000; }
 .damage-direction { position: absolute; left: 50%; top: 50%; width: 0; height: 0; transform: rotate(var(--damage-angle, 0deg)); pointer-events: none; animation: damage-direction 0.8s ease-out forwards; }
 .damage-direction i { position: absolute; left: -14px; top: calc(-1 * min(34vh, 230px)); width: 0; height: 0; border-left: 14px solid transparent; border-right: 14px solid transparent; border-bottom: 18px solid #ff6b6b; filter: drop-shadow(0 0 6px #ff6b6baa); opacity: .92; }
 .damage-flash { position: absolute; inset: 0; pointer-events: none; background: radial-gradient(circle at 50% 50%, #ff6b6b44, transparent 62%); animation: damage-flash 0.8s ease-out forwards; }
@@ -793,6 +815,14 @@ a.icon-button.github-link>span{position:absolute;width:1px;height:1px;overflow:h
 .kill-feed>div{font-size:clamp(12px,.95vw,16px);padding:10px 14px;border-left:3px solid #83f4d5;background:#071718e6;backdrop-filter:blur(6px);box-shadow:0 6px 18px #0007;animation:feedSlide .22s ease-out}
 .kill-feed span:first-child{font-weight:700}
 .kill-feed small{color:#ffcf9a}
+/* Kill-feed richness badges. Word-first (never colour-only), each with its own
+   border shape: double for an ended streak, solid for overkill, dashed for an
+   assist, an overline for the killer's live streak. No new animation. */
+.kill-feed .kill-feed-badge{border:1px solid #ffffff2e;border-radius:4px;padding:1px 5px;background:#00000040;letter-spacing:.08em;color:#d9fff0;white-space:nowrap}
+.kill-feed .kill-feed-badge--streak-ended{border-style:double;border-width:3px}
+.kill-feed .kill-feed-badge--overkill{border-width:2px;font-weight:700}
+.kill-feed .kill-feed-badge--assist{border-style:dashed}
+.kill-feed .kill-feed-badge--killer-streak{text-decoration:overline}
 .command-panel{width:min(780px,calc(100% - 24px));padding:clamp(14px,1.4vw,22px) clamp(18px,2vw,30px);box-shadow:0 16px 44px #0009,inset 0 0 40px #0b2b2414}
 .command-panel h2{font-size:clamp(19px,2vw,34px);letter-spacing:.02em}
 .command-panel p{font-size:clamp(13px,1vw,17px)}
@@ -812,6 +842,7 @@ a.icon-button.github-link>span{position:absolute;width:1px;height:1px;overflow:h
 .damage-number{font-size:clamp(22px,1.9vw,34px)}
 .damage-number.kill{font-size:clamp(26px,2.3vw,42px)}
 .damage-number.critical{font-size:clamp(25px,2.1vw,38px);color:#ffd166;text-shadow:0 0 12px #ffd166cc,0 2px 6px #000;font-weight:800}
+.damage-number.shieldbreak:not(.kill){font-size:clamp(23px,2vw,36px);color:#8fe0ff;text-shadow:0 0 12px #8fe0ffcc,0 2px 6px #000}
 .posture-chip{font-size:clamp(10px,.85vw,13px);padding:5px 13px}
 @keyframes feedSlide{from{opacity:0;transform:translateX(26px)}to{opacity:1;transform:none}}
 @keyframes announceGlow{0%{opacity:0;transform:scale(.6)}40%{opacity:1}100%{opacity:0;transform:scale(1.25)}}
@@ -1727,6 +1758,13 @@ html, body { overscroll-behavior: none; }
 .damage-source{justify-self:center;display:inline-flex;align-items:center;gap:7px;max-width:100%;padding:5px 12px;border:1px solid #ff8f8f70;border-left:3px solid #ff6b6b;border-radius:var(--radius-md);background:#241013ed;color:#ffd9d9;font:700 11px var(--font-mono);letter-spacing:.08em;line-height:1.4;text-align:center;text-shadow:0 2px 4px #000}
 .game-hud.hide-hud .damage-source{display:none}
 .death-attribution{margin:10px 0 0;font:700 13px var(--font-mono);letter-spacing:.1em;color:#ffb4b4}
+/* Non-live damage recap on the death card and the passive respawn summary. */
+.death-recap{list-style:none;margin:12px 0 0;padding:0;display:grid;gap:4px;justify-items:center;font:600 11px var(--font-mono);letter-spacing:.06em;color:#ffd9d9;text-shadow:0 1px 3px #000}
+.death-recap li{display:flex;align-items:baseline;justify-content:center;gap:8px;max-width:100%}
+.death-recap__source{color:#ffd9d9}
+.death-recap__weapon{color:#ffb4b4;font-weight:700}
+.death-recap__amount{color:#ff9f9f;font-style:normal}
+.death-recap--respawn{margin-top:10px}
 
 /* Settings information architecture: one heading per section, with a stable
    anchor id each surface can open. */

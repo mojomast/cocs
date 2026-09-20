@@ -361,3 +361,51 @@ test('clearing an outcome releases the results take without stranding the scene'
  assert.equal(e.outcome,null,'an unknown outcome never latches');
  e.dispose();
 });
+
+test('a late frame advances past-due steps silently instead of stacking them',()=>{
+ const {e,ctx}=engine();
+ e.setScene('menu');
+ e.tick();
+ // Simulate a frame arriving late enough that several steps are already due.
+ const times=[];
+ const original=e._scheduleStep.bind(e);
+ e._scheduleStep=(time,scene,step)=>{times.push(time);return original(time,scene,step);};
+ const due=ctx.currentTime+0.02;
+ e.nextTime=ctx.currentTime-0.3;
+ ctx.currentTime=due;
+ e.tick();
+ assert.ok(times.length>=1,'the transport keeps moving forward');
+ assert.ok(times.length<=2,`a late frame does not stack the missed run (${times.length})`);
+ // Without the clamp this tick would have fired all four due steps at once
+ // (-0.30, -0.14, +0.02, +0.18); the skipped two must never reach Web Audio.
+ assert.ok(times.length<4,'the missed run is dropped, not replayed');
+ for(const time of times)assert.ok(time>=due-0.02,`no step starts in the past (${time} < ${due})`);
+ e.dispose();
+});
+
+test('auto tick is opt-in, idempotent and released on dispose',()=>{
+ const {e}=engine();
+ assert.equal(e._autoTickTimer,null,'no fallback clock until the host asks');
+ assert.equal(e.setAutoTick(true),true);
+ const first=e._autoTickTimer;
+ assert.ok(first,'a fallback clock exists');
+ e.setAutoTick(true);
+ assert.equal(e._autoTickTimer,first,'enabling twice keeps one clock');
+ e.setAutoTick(false);
+ assert.equal(e._autoTickTimer,null,'disabling clears the clock');
+ e.setAutoTick(true);
+ e.dispose();
+ assert.equal(e._autoTickTimer,null,'dispose clears the fallback clock');
+});
+
+test('the fallback clock schedules without a host frame',(t)=>{
+ t.mock.timers.enable({apis:['setInterval']});
+ const {e,ctx}=engine();
+ e.setScene('menu');
+ e.setAutoTick(true);
+ ctx.currentTime+=4; // a throttled tab leaves the clock behind the context
+ const before=e.notesScheduled;
+ t.mock.timers.tick(150);
+ assert.ok(e.notesScheduled>before,`the fallback clock scheduled ${e.notesScheduled-before} notes`);
+ e.dispose();
+});

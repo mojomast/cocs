@@ -143,7 +143,7 @@ test('muzzles remain paired and mounted on distinct sides', () => {
   assert.equal(muzzles[0].heading, vehicle.heading);
 });
 
-test('chaingun alternates muzzles and fires continuously without overheating', () => {
+test('chaingun alternates muzzles, builds heat and locks out on a sustained burst', () => {
   const vehicle = createVehicle();
   stepVehicle(vehicle, { fire: true }, 0.01);
   assert.equal(vehicle.lastStep.fired, true);
@@ -152,8 +152,20 @@ test('chaingun alternates muzzles and fires continuously without overheating', (
   let fired = 0;
   for (let i = 0; i < 40; i++) { stepVehicle(vehicle, { fire: true }, 0.045); if (vehicle.lastStep.fired) fired++; }
   assert.ok(fired >= 39, `kept firing (${fired}/40)`);
-  assert.equal(vehicle.heat, 0);
-  assert.equal(vehicle.overheated, false);
+  assert.ok(vehicle.heat > 0, `the chaingun builds heat (${vehicle.heat})`);
+  assert.equal(vehicle.overheated, false, 'a 1.8 s burst never overheats');
+  // `heatPerShot > coolRate * interval` means sustained fire eventually locks
+  // out for the authored cooldown, then cools back under the threshold.
+  let lockout = 0;
+  while (!vehicle.overheated && lockout++ < 400) stepVehicle(vehicle, { fire: true }, 0.045);
+  assert.equal(vehicle.overheated, true, 'a long burst overheats');
+  assert.equal(vehicle.heat, 1);
+  assert.equal(vehicle.overheatTimer, GUNTRUCK.mountedChaingun.overheatCooldown);
+  stepVehicle(vehicle, { fire: true }, 0.045);
+  assert.equal(vehicle.lastStep.fired, false, 'the lockout blocks the trigger');
+  for (let i = 0; i < Math.ceil(GUNTRUCK.mountedChaingun.overheatCooldown / 0.045) + 1; i++) stepVehicle(vehicle, { fire: true }, 0.045);
+  assert.equal(vehicle.overheated, false, 'the lockout expires');
+  assert.equal(vehicle.lastStep.fired, true, 'fire resumes after the lockout');
 });
 
 test('respawnVehicle restores clean spawn state including arcade fields', () => {
@@ -174,6 +186,7 @@ test('respawnVehicle restores clean spawn state including arcade fields', () => 
   assert.deepEqual(vehicle.position, { x: 3, y: 1, z: -2 });
   assert.equal(vehicle.health, GUNTRUCK.health);
   assert.equal(vehicle.respawnTimer, 0);
+  assert.equal(vehicle.spawnYaw, 0);
   assert.equal(vehicle.heat, 0);
   assert.deepEqual(vehicle.velocity, { x: 0, z: 0 });
   assert.equal(vehicle.turretYaw, 0);
@@ -241,8 +254,13 @@ test('mounted weapons are type-aware: barrels, damage and overheat differ', () =
   assert.equal(titan.overheated, true, 'sustained cannon fire overheats');
   const scout = createVehicle(SCOUT);
   for (let i = 0; i < 30; i++) stepVehicle(scout, { fire: true }, 0.06);
-  assert.equal(scout.overheated, false, 'the light gun never overheats');
-  assert.equal(scout.heat, 0);
+  assert.equal(scout.overheated, false, 'a 1.8 s light-gun burst stays under the threshold');
+  assert.ok(scout.heat > 0, `the light gun builds heat (${scout.heat})`);
+  let lockout = 0;
+  while (!scout.overheated && lockout++ < 400) stepVehicle(scout, { fire: true }, 0.06);
+  assert.equal(scout.overheated, true, 'sustained light-gun fire overheats per its table');
+  assert.equal(scout.overheatTimer, SCOUT.mountedChaingun.overheatCooldown);
+  assert.ok(scout.heat <= SCOUT.mountedChaingun.maxHeat);
 });
 
 test('transport carries six seats and the scout carries two', () => {
@@ -302,7 +320,26 @@ test('weak-point bearing pays rear and flank premiums but never for splash calle
   assert.equal(vehicleWeakPointMultiplier(vehicle, { bearing: Math.PI / 2 }), VEHICLE_WEAKPOINT.flank);
   assert.equal(vehicleWeakPointMultiplier(vehicle, { bearing: 0 }), 1);
   assert.equal(vehicleWeakPointMultiplier(vehicle, { from: { x: 0, z: 0 } }), 1, 'a co-located attacker has no bearing');
+  // The oriented hitbox reports the actual struck face, which wins over the
+  // attacker-bearing fallback when present.
+  assert.equal(vehicleWeakPointMultiplier(vehicle, { face: 'rear' }), VEHICLE_WEAKPOINT.rear);
+  assert.equal(vehicleWeakPointMultiplier(vehicle, { face: 'left' }), VEHICLE_WEAKPOINT.flank);
+  assert.equal(vehicleWeakPointMultiplier(vehicle, { face: 'right' }), VEHICLE_WEAKPOINT.flank);
+  assert.equal(vehicleWeakPointMultiplier(vehicle, { face: 'front' }), 1);
+  assert.equal(vehicleWeakPointMultiplier(vehicle, { face: 'top' }), 1);
+  assert.equal(vehicleWeakPointMultiplier(vehicle, { face: 'nonsense', from: { x: 0, z: -6 } }), VEHICLE_WEAKPOINT.rear, 'an unknown face falls back to bearing');
   assert.ok(VEHICLE_WEAKPOINT.rear > VEHICLE_WEAKPOINT.flank && VEHICLE_WEAKPOINT.flank > 1);
+});
+
+test('every mounted gun authors a real sustained output and a reachable overheat', () => {
+  for (const template of [PUMA, HORNET, TITAN, SCOUT, TRANSPORT]) {
+    const gun = template.mountedChaingun;
+    assert.ok(Math.abs(gun.sustainedDps - gun.damage / gun.interval) < 1e-6, `${template.id} sustainedDps matches damage/interval`);
+    assert.ok(gun.range > 0 && gun.barrels >= 1);
+    assert.ok(gun.maxHeat > 0 && gun.coolRate >= 0 && gun.heatPerShot > 0, `${template.id} builds heat`);
+    assert.ok(gun.heatPerShot > gun.coolRate * gun.interval, `${template.id} can outpace its cooling`);
+    assert.ok(gun.overheatCooldown > 0, `${template.id} authors a lockout`);
+  }
 });
 
 test('dismount stun scales with exit speed, ignores respawns and counts flight vertical speed', () => {

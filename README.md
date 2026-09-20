@@ -468,6 +468,15 @@ Recent releases. The full history lives in
   per-kind vehicle kits, staged prop damage, vehicle weak points and passenger
   fire, and team-status/economy HUD. See
   [Physics, animation and audio pass](design/PHYSICS-AND-AUDIO-PASS.md).
+- Depth and dynamics pass: per-chassis vehicle guns, driver repair, oriented
+  weak points, damageable/repairable sentries and ramming; audible enemy
+  telegraphs, ducking/low-health/killcam mix, casing/engine/skid foley; a
+  percussion kit and palette for every mode plus race/soccer grooves; rendered
+  sentries, interior fog, damage readability, barrel heat and surface-aware
+  impacts; killfeed/assist/death-recap HUD depth and lobby chat/diagnostics
+  UX. Fixes the intermittent soundtrack regression (late steps no longer burst,
+  the music clock is independent of the render frame, and the results take is
+  preserved). See [Depth and dynamics pass](design/DEPTH-PASS.md).
 - Graphics-edge pass (research-backed): static dither kills 8-bit banding, a
   contrast-adaptive sharpen recovers FXAA softness, and environment reflections
   scale with the tier. Runs whenever post-processing or the graphics lab runs.

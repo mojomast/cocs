@@ -278,7 +278,7 @@ test('a ghost-16th ornament adds a quiet hat only off the authored grid', () => 
 // --- harmonic responses ------------------------------------------------------
 
 test('responses are bounded, drained on the next step and dropped when stale', () => {
-  assert.deepEqual([...MUSIC_RESPONSES], ['capture', 'loss', 'accent', 'final']);
+  assert.deepEqual([...MUSIC_RESPONSES], ['capture', 'loss', 'accent', 'final', 'award']);
   const ctx = audioContext();
   const e = new MusicEngine({ ctx, destination: ctx.destination, theme });
   assert.equal(e.requestResponse('capture'), true);
@@ -299,6 +299,15 @@ test('responses are bounded, drained on the next step and dropped when stale', (
   assert.equal(e.notesBy.response, 1, 'the stale response is dropped, not voiced');
   assert.equal(e.clearResponses(), 2);
   assert.equal(e.pendingResponses.length, 0);
+  // The award hook is a normal response kind: one voice, drained on the next
+  // step, and it never fires without a live graph.
+  assert.equal(e.requestResponse('award', { vol: 1 }), true);
+  e._scheduleStep(0.3, 'results', 0);
+  assert.equal(e.notesBy.response, 2, 'the award sting is voiced on the next step');
+  assert.ok(e.notesBy.accent > 0, 'the award sting counts as a bright accent');
+  assert.equal(e.requestResponse('award', { vol: 0 }), true);
+  e._scheduleStep(0.4, 'results', 0);
+  assert.equal(e.notesBy.response, 2, 'a zero-volume award never spends a voice');
   e.setMuted(true);
   e.requestResponse('capture');
   assert.equal(e.pendingResponses.length, 0);

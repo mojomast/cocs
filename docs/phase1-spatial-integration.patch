@@ -67,4 +67,12 @@
      const shell=cavernShell(s.radius??12,s.height??8,undefined,s.openSegments),base=s.y??0,dome=geo(`cavdome|${shell.radius}`,()=>new T.SphereGeometry(shell.radius,28,12,0,Math.PI*2,0,Math.PI/2));
      for(const arc of shell.renderArcs){const key=`cavarc|${shell.radius}|${arc.thetaStart.toFixed(3)}|${arc.thetaLength.toFixed(3)}`,wg=geo(key,()=>new T.CylinderGeometry(shell.radius,shell.radius,1,28,1,true,arc.thetaStart,arc.thetaLength));const m=mesh(wg,caveMat,s.x,base+shell.wallHeight/2,s.z);m.scale.set(1,shell.wallHeight,1);}
      const roof=mesh(dome,caveMat,s.x,base+shell.wallHeight,s.z);roof.scale.set(1,shell.domeHeight/shell.radius,1);
+     // Static additive dust shafts where daylight falls through the opening.
+     // WebGL-only (they need additive blending), motionless by construction and
+     // owned by the shared-resource disposal path like the cavern shell itself.
+     if(this.renderer?.isSoftware!==true){
+      const shaftHeight=Math.max(2,shell.wallHeight+shell.domeHeight*.55),shaftGeo=geo(`cavshaft|${shell.radius}`,()=>new T.ConeGeometry(shell.radius*.34,1,10,1,true)),shaftMat=new T.MeshBasicMaterial({color:arena.color,transparent:true,opacity:.05,depthWrite:false,blending:T.AdditiveBlending,side:T.DoubleSide});
+      shared.add(shaftMat);
+      for(const side of[-1,1]){const beam=new T.Mesh(shaftGeo,shaftMat);beam.position.set(s.x+side*shell.radius*.3,base+shaftHeight/2,s.z);beam.scale.set(1,shaftHeight,1);beam.rotation.z=side*.12;beam.userData.dustShaft=true;world.add(beam);}
+     }
     }else if(s.type==='bridge'){

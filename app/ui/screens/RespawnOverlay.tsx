@@ -24,7 +24,7 @@ const lockedPair=(character:string,harness:string)=>character==='claude'?harness
 //             into the passive summary and reports the queued pair until the
 //             next spawn.
 export function RespawnOverlay({ui}:ScreenProps){
- const {respawn,killNotice,switchRespawnLoadout,respawnEditor,setRespawnEditor,respawnQueue}=ui;
+ const {respawn,killNotice,switchRespawnLoadout,respawnEditor,setRespawnEditor,respawnQueue,damageLog}=ui;
  const [pick,setPick]=useState<{character:string;harness:string}|null>(null);
  const [error,setError]=useState('');
  // WP2.2: the respawn surface never announces by itself. Death and respawn
@@ -77,6 +77,9 @@ export function RespawnOverlay({ui}:ScreenProps){
   if(event.shiftKey?document.activeElement===first:document.activeElement===last){event.preventDefault();(event.shiftKey?last:first).focus();}
  };
  const killed=killNotice?.detail?`${killNotice.text} · ${killNotice.detail}`:killNotice?.text??'ELIMINATED';
+ // Passive death recap: the page's bounded ledger of the last incoming hits,
+ // rendered as an on-demand, non-live list (attacker + weapon/ability per row).
+ const recap=(Array.isArray(damageLog)?damageLog:[]).filter((row:any)=>!(Number(row?.age)>12)).slice(0,3);
  if(!editorOpen) return <div className="respawn-overlay" role="region" aria-label={`Respawn status. ${killed}. ${respawn.respawnIn!==null?'Respawning soon.':'Awaiting respawn.'}`} style={{pointerEvents:'none'}}>
   <div className="respawn-overlay__head">
    <div className="respawn-overlay__headline">
@@ -85,6 +88,7 @@ export function RespawnOverlay({ui}:ScreenProps){
    </div>
    {rider&&<Chip tone="accent">{rider.description}</Chip>}
   </div>
+  {recap.length>0&&<ul className="death-recap death-recap--respawn" aria-label="Damage recap">{recap.map((row:any,index:number)=><li key={`${row?.at??index}-${index}`} title={Number.isFinite(row?.age)?`${Math.round(row.age)}s before the kill`:undefined}><span className="death-recap__source">{row?.name?`HIT BY ${String(row.name).toUpperCase()}`:'HIT'}</span>{row?.detail&&<b className="death-recap__weapon">{String(row.detail).toUpperCase()}</b>}<em className="death-recap__amount">{Math.max(0,Math.round(Number(row?.amount)||0))}</em></li>)}</ul>}
   <div className="respawn-overlay__foot">
    {queue
     ?<span className="field-note" role="status">NEXT SPAWN · <b>{queueNames}</b> · {queueState}</span>

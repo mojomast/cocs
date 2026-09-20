@@ -188,7 +188,7 @@ const REPORTS=[[320,.075,'square',65],[110,.2,'sawtooth',28],[1500,.16,'sine',18
 const GUN_STYLES=['rifle','heavy','zap','burst','plasma','heavy','zap','burst','sharp','rapid'];
 // Optional announcer motifs keyed by mode event. Two-note rising/falling pairs
 // keep the callouts distinct without a speech asset.
-const ANNOUNCE_CUES=Object.freeze({
+export const ANNOUNCE_CUES=Object.freeze({
  capture:Object.freeze({id:'capture',freq:520,mid:780,end:1040,length:.3}),
  'flag-pickup':Object.freeze({id:'flag-pickup',freq:640,mid:760,end:880,length:.24}),
  'flag-return':Object.freeze({id:'flag-return',freq:720,mid:640,end:560,length:.22}),
@@ -215,6 +215,39 @@ const ANNOUNCE_CUES=Object.freeze({
  grapple:Object.freeze({id:'grapple',freq:700,mid:1050,end:1400,length:.2}),
  'blink-step':Object.freeze({id:'blink-step',freq:880,mid:1320,end:1760,length:.16}),
  'deployable-rope':Object.freeze({id:'deployable-rope',freq:500,mid:750,end:1120,length:.26}),
+ // High-value match beats (§announcer coverage). Each is a distinct two/three
+ // note callout; the global cadence guard below keeps a cluster of beats from
+ // stacking callouts.
+ 'zone-capture':Object.freeze({id:'zone-capture',freq:540,mid:810,end:1080,length:.32}),
+ 'objective-win':Object.freeze({id:'objective-win',freq:600,mid:900,end:1200,length:.44}),
+ 'sudden-death':Object.freeze({id:'sudden-death',freq:300,mid:260,end:200,length:.46}),
+ 'mission-won':Object.freeze({id:'mission-won',freq:660,mid:990,end:1320,length:.5}),
+ 'mission-lost':Object.freeze({id:'mission-lost',freq:520,mid:390,end:280,length:.5}),
+ 'horde-wave':Object.freeze({id:'horde-wave',freq:250,mid:330,end:440,length:.4}),
+ 'boss-phase':Object.freeze({id:'boss-phase',freq:210,mid:160,end:110,length:.5}),
+ 'vip-down':Object.freeze({id:'vip-down',freq:560,mid:420,end:300,length:.38}),
+ 'vip-extracted':Object.freeze({id:'vip-extracted',freq:620,mid:880,end:1180,length:.36}),
+ 'payload-delivered':Object.freeze({id:'payload-delivered',freq:480,mid:720,end:1080,length:.44}),
+ 'juggernaut-transfer':Object.freeze({id:'juggernaut-transfer',freq:380,mid:540,end:760,length:.42}),
+ 'armsrace-promote':Object.freeze({id:'armsrace-promote',freq:640,mid:960,end:1280,length:.28}),
+ 'armsrace-demote':Object.freeze({id:'armsrace-demote',freq:700,mid:520,end:360,length:.28}),
+ 'weapon-upgrade':Object.freeze({id:'weapon-upgrade',freq:760,mid:1140,end:1520,length:.24}),
+ bounty:Object.freeze({id:'bounty',freq:580,mid:870,end:1160,length:.26}),
+ 'enemy-flank':Object.freeze({id:'enemy-flank',freq:940,mid:660,end:420,length:.22}),
+ 'enemy-artillery':Object.freeze({id:'enemy-artillery',freq:340,mid:280,end:220,length:.34}),
+});
+// Global cadence guard for the high-value announcer dispatch: after one callout
+// lands, no other high-value callout may start within this window. The
+// per-cue cooldown in announcerCue still dedupes duplicate reports of one beat.
+export const ANNOUNCE_CADENCE=1.2;
+// The high-value event types routed through announcerEvent(). Types that are
+// actor-scoped are announced for the local player only so a remote enemy's
+// upgrade/bounty never reads as the local player's beat.
+const HIGH_VALUE_ANNOUNCE=Object.freeze({
+ 'zone-capture':false,'objective-win':false,'sudden-death':false,'mission-won':false,'mission-lost':false,
+ 'horde-wave':false,'boss-phase':false,'vip-down':false,'vip-extracted':false,'payload-delivered':false,
+ 'juggernaut-transfer':false,'enemy-flank':false,'enemy-artillery':false,
+ 'armsrace-promote':true,'armsrace-demote':true,'weapon-upgrade':true,bounty:true,
 });
 const cl=(n,a,b)=>Math.max(a,Math.min(b,n));
 
@@ -317,6 +350,23 @@ export const POWER_CUES=Object.freeze({
  roo:activation([0,-1,-5],.07,.24,.08,motifTail(240,.05,{end:120,type:'sawtooth',delay:.08,noise:700,noiseGain:.032}),true),
 });
 
+// Per-kind enemy telegraph motifs. The sim's `enemy-telegraph` events carry the
+// unit `kind` (overseer/mender/flanker/phalanx/sapper/artillery/boss) plus the
+// world position as `x`/`z`, so each windup reads as a distinct one-voice motif
+// instead of a generic blip; an unknown or missing kind keeps the generic
+// fallback (the historical two-note square voice, now a motif). One cue is one
+// `_play` token, retuned to the active mode root like the other match beats.
+export const TELEGRAPH_CUES=Object.freeze({
+ overseer:objective([0,-3,2],.07,.2,.07,true),
+ mender:objective([0,4],.06,.18,.06),
+ flanker:objective([12,5,9],.06,.16,.065),
+ phalanx:objective([0,-5],.09,.22,.075),
+ sapper:objective([-12,-7,0],.08,.2,.08),
+ artillery:objective([12,11],.1,.24,.075),
+ boss:objective([0,-7,-12],.11,.28,.085,true),
+ generic:objective([0,-2],.08,.2,.065),
+});
+
 // The movement module's shared event vocabulary (§3.6). Movement foley is
 // local-only: these are the verbs the local player is driving, not world beats.
 const MOVEMENT_EVENTS=new Set(['move-start','move-end','move-miss','move-blocked','windup-start','windup-end','windup-interrupt','charge-start','charge-release','charge-cancel','slam-launch','slam-impact','grapple-hook','grapple-release','rope-place','rope-miss','rope-expire','fuel-empty','no-lift','chain-cancel','landing-recovery']);
@@ -374,6 +424,17 @@ const EVENT_CUES=Object.freeze({
  'threat-ping':objective([12,19],.04,.12,.06,true),
  'mission-won':objective([0,4,7,12],.09,.3,.085,true),
  'mission-lost':objective([0,-3,-7],.1,.3,.075),
+ // Beats that previously fell through the cue table: the overseer's aura pulse,
+ // the LATTICE support tick, weather/time onset cues and the new gameplay
+ // repair/destroy events (all emitted with x/z or no position at all).
+ 'overseer-aura':objective([0,-5,2],.06,.2,.065,true),
+ 'lattice-support':objective([0,5,7],.05,.18,.06,true),
+ 'weather-change':objective([0,-5,7],.07,.24,.065,true),
+ 'time-change':objective([0,5,12],.08,.26,.06),
+ 'vehicle-repair':objective([0,5,7],.05,.18,.055),
+ 'deployable-destroyed':objective([7,3,-2],.07,.2,.065),
+ 'deployable-repaired':objective([0,4,7],.05,.16,.05),
+ 'deployable-fire':objective([12,7],.04,.1,.045),
 });
 
 // Layered Web Audio synth: filtered noise transients + tonal bodies, distance
@@ -396,6 +457,57 @@ const PRECIP_BEDS=Object.freeze({
  ash:Object.freeze({kind:'ash',type:'lowpass',freq:640,q:.6,gain:.012}),
  snow:Object.freeze({kind:'snow',type:'highpass',freq:900,q:.4,gain:.007}),
 });
+
+// Continuous engine timbres keyed by the snapshot vehicle `kind`. Every profile
+// keeps the same bounded parameter surface (two-oscillator body plus a filtered
+// boost overtone) so the graph stays one long-lived node set per vehicle, never
+// one node per frame. `default` reproduces the historical engine numbers
+// exactly (no gear banding) so an unknown kind keeps the legacy voice; the
+// authored kinds add gear-shift banding (`gearBand` per gear, `gearSpan`
+// inside it) and raise/lower the body. `skid` marks the chassis that owns the
+// eased lateral-slip loop (Puma).
+const engine=(o)=>Object.freeze(o);
+export const ENGINE_PROFILES=Object.freeze({
+ default:engine({osc:'sawtooth',sub:'triangle',base:55,span:120,subBase:28,subSpan:40,filter:500,filterSpan:1200,gain:.022,gainSpan:.05,gears:1,gearBand:0,gearSpan:0,boostPitch:1.35,boostGain:1.2,boostFilter:1.4,skid:false}),
+ puma:engine({osc:'sawtooth',sub:'triangle',base:58,span:128,subBase:29,subSpan:42,filter:540,filterSpan:1150,gain:.023,gainSpan:.052,gears:4,gearBand:.22,gearSpan:.5,boostPitch:1.32,boostGain:1.18,boostFilter:1.45,skid:true}),
+ hornet:engine({osc:'square',sub:'sawtooth',base:74,span:150,subBase:38,subSpan:52,filter:760,filterSpan:1500,gain:.02,gainSpan:.046,gears:5,gearBand:.18,gearSpan:.42,boostPitch:1.4,boostGain:1.16,boostFilter:1.55,skid:false}),
+ titan:engine({osc:'sawtooth',sub:'triangle',base:42,span:88,subBase:21,subSpan:30,filter:380,filterSpan:860,gain:.027,gainSpan:.06,gears:3,gearBand:.3,gearSpan:.6,boostPitch:1.24,boostGain:1.24,boostFilter:1.32,skid:false}),
+ scout:engine({osc:'triangle',sub:'sine',base:88,span:170,subBase:44,subSpan:60,filter:880,filterSpan:1800,gain:.017,gainSpan:.04,gears:5,gearBand:.16,gearSpan:.38,boostPitch:1.45,boostGain:1.14,boostFilter:1.6,skid:false}),
+ transport:engine({osc:'square',sub:'triangle',base:48,span:96,subBase:24,subSpan:34,filter:430,filterSpan:940,gain:.025,gainSpan:.055,gears:4,gearBand:.26,gearSpan:.54,boostPitch:1.28,boostGain:1.2,boostFilter:1.38,skid:false}),
+});
+// Pure engine voice resolver: deterministic in (kind, speed, boosting) with no
+// nodes, so tests and replays can pin the gear banding without a context.
+export function engineVoice(kind,speed,boosting=false){
+ const profile=ENGINE_PROFILES[kind]||ENGINE_PROFILES.default;
+ const s=cl((Number(speed)||0)/20,0,1),gears=Math.max(1,Math.round(profile.gears||1));
+ const gear=Math.min(gears-1,Math.floor(s*gears)),within=gears>1?cl(s*gears-gear,0,1):0;
+ const band=1+gear*(profile.gearBand||0)+within*(profile.gearSpan||0),boost=boosting===true;
+ return Object.freeze({
+  kind:ENGINE_PROFILES[kind]?kind:'default',profile,gear,gears,speed:s,
+  oscFreq:cl((profile.base+s*profile.span)*band*(boost?profile.boostPitch:1),20,6000),
+  subFreq:cl((profile.subBase+s*profile.subSpan)*band*(boost?profile.boostPitch:1),15,3000),
+  filterFreq:cl((profile.filter+s*profile.filterSpan)*(boost?profile.boostFilter:1),60,16000),
+  gain:Math.max(.0004,(profile.gain+s*profile.gainSpan)*(boost?profile.boostGain:1)),
+ });
+}
+// Distant thunder recipes. Recipe 0 is the historical roll, kept bit-for-bit, so
+// a caller that supplies no seed hears exactly the old strike. A seed picks one
+// of the frozen variants deterministically through mixUnit; all three keep the
+// same layer roles, only their frequencies/sweeps/levels move.
+const thunderRecipe=(o)=>Object.freeze(o);
+export const THUNDER_RECIPES=Object.freeze([
+ thunderRecipe({crack:.45,bodyFreq:420,bodyDrop:220,bodySweep:70,bodyRise:40,bodyGain:.42,rollFreq:180,rollSweep:60,rollGain:.2,tailFreq:300,tailDrop:80,tailSweep:120,tailGain:.12,lowFreq:52,lowDrop:12,lowGain:.3,highFreq:38,highDrop:8,highGain:.14,durScale:.5}),
+ thunderRecipe({crack:.32,bodyFreq:300,bodyDrop:160,bodySweep:52,bodyRise:30,bodyGain:.5,rollFreq:150,rollSweep:48,rollGain:.22,tailFreq:220,tailDrop:60,tailSweep:86,tailGain:.14,lowFreq:44,lowDrop:9,lowGain:.32,highFreq:31,highDrop:6,highGain:.15,durScale:.55}),
+ thunderRecipe({crack:.6,bodyFreq:560,bodyDrop:300,bodySweep:96,bodyRise:52,bodyGain:.36,rollFreq:230,rollSweep:78,rollGain:.16,tailFreq:380,tailDrop:110,tailSweep:150,tailGain:.1,lowFreq:62,lowDrop:15,lowGain:.26,highFreq:46,highDrop:11,highGain:.12,durScale:.42}),
+]);
+export function thunderRecipeFor(seed){
+ if(seed==null)return THUNDER_RECIPES[0];
+ const n=Number(seed);
+ if(!Number.isFinite(n))return THUNDER_RECIPES[0];
+ // A multiplicative step first: mixUnit alone keeps the near-identical high
+ // bits of sequential small seeds, which would starve the later recipes.
+ return THUNDER_RECIPES[Math.floor(mixUnit(Math.imul(n>>>0,2654435761)>>>0)*THUNDER_RECIPES.length)%THUNDER_RECIPES.length];
+}
 
 // ---- Death sound families --------------------------------------------------
 //
@@ -506,8 +618,21 @@ export class SynthAudio{
   // have their own bus for independent volume control. Voice chat lives in
   // game/voice.mjs and is deliberately outside this graph.
   this.musicEngine=null;this.musicBus=null;this.effectsBus=null;this.ambienceBus=null;this.muteGain=null;
+  // Optional master tone stage: a biquad plus a mix gain inserted between the
+  // master gain and the mute gain. Neutral by default (wide-open cutoff, unity
+  // level) so a context that builds it sounds identical to the legacy graph;
+  // health, killcam and spectating ease it. When the context cannot build a
+  // biquad the chain falls back to master -> mixGain -> muteGain; when even
+  // that fails, the historical master -> muteGain link is kept.
+  this.masterFilter=null;this.mixGain=null;this._mixCutoff=20000;this._mixLevel=1;this.healthMix=1;
+  this.killcam=false;this.spectating=false;
   this.volumes={master:.9,music:.7,effects:1,ambience:.8};
   this.status='off';this.scene='menu';this._announceAt=new Map();this._stingDuckTimer=null;
+  // Bounded dynamic-mix state: the music duck level/timer, the high-value
+  // announcer cadence stamp, the weather/time onset dedupe keys and the shell
+  // casing cadence stamp. All reset on dispose.
+  this._musicDuck=0;this._musicDuckTimer=null;this._announceCadence=null;
+  this._weatherCueKind=null;this._timeCuePhase=null;this._shellAt=null;this.skidLoop=null;
   // Last held alt-fire state per actor, so an alt-state stream that repeats the
   // current state cannot re-trigger the transform foley. Bounded like the
   // announcer dedupe map; the sim only emits on flips, this is belt-and-braces.
@@ -592,6 +717,9 @@ export class SynthAudio{
    const Context=globalThis.AudioContext||globalThis.webkitAudioContext;if(!Context)return Promise.resolve(false);
    this.ctx??=new Context();
    this._ensureBuses();
+   // Keep the musical clock off the frame path: RAF can be throttled in a
+   // hidden/heavy tab, and a later frame would otherwise replay missed steps.
+   this.musicEngine?.setAutoTick?.(true);
    this.noiseBuffer??=this._makeNoise();
    if(this.ambientBed!==false)this._bed(true);
    this._precip(this.weather);
@@ -706,7 +834,24 @@ export class SynthAudio{
   const ctx=this.ctx;
   this.master=ctx.createGain();this.master.gain.value=this.volumes.master;
   this.muteGain=ctx.createGain();this.muteGain.gain.value=this.muted?0:1;
-  this.master.connect(this.muteGain);this.muteGain.connect(ctx.destination);
+  // Optional master tone stage. A biquad is inserted between the master gain
+  // and the mute gain only when the context can build one; the mix gain carries
+  // the level half of the health/killcam/spectating profile. Any construction
+  // failure falls back to the legacy direct link so a partial context can never
+  // silence the mix.
+  this.masterFilter=null;this.mixGain=null;
+  try{
+   this.mixGain=ctx.createGain();this.mixGain.gain.value=this._mixLevel??1;
+   if(typeof ctx.createBiquadFilter==='function'){
+    const f=ctx.createBiquadFilter();f.type='lowpass';f.frequency.value=this._mixCutoff??20000;f.Q.value=.5;
+    this.master.connect(f);f.connect(this.mixGain);this.masterFilter=f;
+   }else this.master.connect(this.mixGain);
+   this.mixGain.connect(this.muteGain);
+  }catch{
+   try{this.master.connect(this.muteGain);}catch{}
+   this.masterFilter=null;this.mixGain=null;
+  }
+  this.muteGain.connect(ctx.destination);
   this.effectsBus=ctx.createGain();this.effectsBus.gain.value=this.volumes.effects;
   // Shared effects glue: a compressor plus a soft-clip ceiling inserted between
   // the effects bus and the master, so layered explosions and chaingun volleys
@@ -768,6 +913,88 @@ export class SynthAudio{
   return this.volumes[key];
  }
  getVolume(kind){return this.volumes[kind]??null;}
+ // ---- Dynamic mix -----------------------------------------------------------
+ //
+ // Master tone stage and ducking. Defaults are neutral: the biquad sits wide
+ // open at 20 kHz and the mix gain at unity, so every existing graph and voice
+ // sounds exactly as before until health/killcam/spectating move it. All easing
+ // is setTargetAtTime (with a direct value fallback) on long-lived nodes.
+ _applyMix(cutoff,level,smoothing=.3){
+  const c=cl(Number(cutoff)||0,300,20000),l=cl(Number(level)||0,0,1.2);
+  if(Math.abs(c-(this._mixCutoff??20000))<1&&Math.abs(l-(this._mixLevel??1))<.005)return false;
+  this._mixCutoff=c;this._mixLevel=l;
+  if(!this.ctx)return true;
+  const t=Number.isFinite(this.ctx.currentTime)?this.ctx.currentTime:0;
+  try{const f=this.masterFilter?.frequency;if(f){if(f.setTargetAtTime)f.setTargetAtTime(c,t,smoothing);else f.value=c;}}catch{}
+  try{const g=this.mixGain?.gain;if(g){if(g.setTargetAtTime)g.setTargetAtTime(l,t,smoothing);else g.value=l;}}catch{}
+  return true;
+ }
+ // Resolve the cutoff/level target from the active state machine. Killcam wins,
+ // then spectating, then the health-derived profile (full health is neutral).
+ _mixTargets(){
+  if(this.killcam)return {cutoff:650,level:.7};
+  if(this.spectating)return {cutoff:6000,level:.86};
+  const f=Number.isFinite(this.healthMix)?this.healthMix:1;
+  return {cutoff:cl(20000*(.32+.68*f),2400,20000),level:cl(.84+.16*f,.84,1)};
+ }
+ // Health-driven ease. A missing/non-finite health pair is treated as full
+ // health, so fixtures and menu updates keep the mix neutral.
+ _applyHealthMix(fraction){
+  this.healthMix=Number.isFinite(fraction)?cl(fraction,0,1):1;
+  const {cutoff,level}=this._mixTargets();
+  return this._applyMix(cutoff,level,.6);
+ }
+ // Bounded soundtrack duck: amount 0..1, duration 60..4000 ms. Reuses the
+ // sting's timer pattern, and a new duck always replaces the pending release so
+ // overlapping calls cannot strand the soundtrack quiet.
+ _duckMusic(amount=.4,ms=600){
+  const level=cl(Number(amount)||0,0,1),duration=cl(Number(ms)||600,60,4000);
+  this._musicDuck=level;
+  this.musicEngine?.setDuck?.(level);
+  if(this._musicDuckTimer)clearTimeout(this._musicDuckTimer);
+  this._musicDuckTimer=setTimeout(()=>{
+   this._musicDuckTimer=null;this._musicDuck=0;
+   try{this.musicEngine?.setDuck?.(0);}catch{}
+  },duration);
+  if(this._musicDuckTimer&&typeof this._musicDuckTimer.unref==='function')this._musicDuckTimer.unref();
+  return level;
+ }
+ // One-voice sub drop for the killcam take: a short 120->34 Hz sine with a
+ // muffled low transient. Inherits the voice cap, mute gate and disposal.
+ _subDrop(){
+  if(!this.ctx||this.muted)return false;
+  this._play(.34,0,(t,out,nodes)=>{
+   this._tone(t,out,nodes,{freq:120,duration:.3,type:'sine',gain:.16,end:34});
+   this._noise(t,out,nodes,{duration:.05,attack:.001,gain:.1,type:'lowpass',freq:420,sweep:120,q:.8});
+  },{send:.2});
+  return true;
+ }
+ // Killcam mix: duck the soundtrack, low-pass the master and drop a short sub
+ // under the camera takeover. Idempotent: a repeated state makes no new voice.
+ setKillcam(on){
+  const next=on===true;
+  if(next===this.killcam)return this.killcam;
+  this.killcam=next;
+  if(next){
+   this._duckMusic(.6,1400);
+   this._applyMix(650,.7,.18);
+   this._subDrop();
+  }else{
+   const {cutoff,level}=this._mixTargets();
+   this._applyMix(cutoff,level,.5);
+  }
+  return this.killcam;
+ }
+ // Spectator gain profile: a slightly darker, slightly quieter mix while
+ // watching another actor. Idempotent and superseded by an active killcam.
+ setSpectating(on){
+  const next=on===true;
+  if(next===this.spectating)return this.spectating;
+  this.spectating=next;
+  const {cutoff,level}=this._mixTargets();
+  this._applyMix(cutoff,level,.8);
+  return this.spectating;
+ }
  // Scene drives the soundtrack arrangement: menus get the menu theme, matches
  // get exploration/combat layered by intensity. Returning to the menu releases
  // a victory/defeat outcome (and its baked motif) so the menu motif is restored
@@ -926,7 +1153,7 @@ export class SynthAudio{
    return this.musicEngine.setReverb(buffer,opts);
   }catch{return false;}
  }
- audioStatus(){return {state:this.ctx?(this.ctx.state||'suspended'):'unavailable',status:this.status,enabled:this.musicEnabled,muted:this.muted,scene:this.scene,intensity:this.intensity,tension:this.tension,escalation:this.escalation,variation:this.musicEngine?.variation??0,palette:this.musicEngine?.paletteName??'default',voices:this.voices.size,notes:this.musicEngine?.notesScheduled??0,music:this.musicEngine?.status?.()??'off',reverb:this.reverbLoaded?'ready':(this._reverbPending?'loading':(this.reverbUrl?'pending':'off')),space:this.reverbSpace,echo:this.echoMap,weather:this.weather,biome:this.biomeMood,glue:this.effectsGlue?'on':'off',moth:this.mothAudio?.status?.()??null,samples:this.musicEngine?.sampleStatus?.()??null};}
+ audioStatus(){return {state:this.ctx?(this.ctx.state||'suspended'):'unavailable',status:this.status,enabled:this.musicEnabled,muted:this.muted,scene:this.scene,intensity:this.intensity,tension:this.tension,escalation:this.escalation,variation:this.musicEngine?.variation??0,palette:this.musicEngine?.paletteName??'default',kit:this.musicEngine?.kitName??'default',voices:this.voices.size,notes:this.musicEngine?.notesScheduled??0,music:this.musicEngine?.status?.()??'off',musicVoices:this.musicEngine?.voices?.length??0,sustainVoices:this.musicEngine?.sustainVoices??0,sustainBudget:this.musicEngine?.sustainBudget??0,peakVoices:this.musicEngine?.peakVoices??0,layers:this.musicEngine?.layers?{...this.musicEngine.layers}:null,transitions:this.musicEngine?.transitions??0,pendingResponses:this.musicEngine?.pendingResponses?.length??0,reverb:this.reverbLoaded?'ready':(this._reverbPending?'loading':(this.reverbUrl?'pending':'off')),space:this.reverbSpace,echo:this.echoMap,weather:this.weather,biome:this.biomeMood,glue:this.effectsGlue?'on':'off',filter:this.masterFilter?'on':'off',duck:this._musicDuck??0,cutoff:this._mixCutoff??20000,mixLevel:this._mixLevel??1,killcam:this.killcam===true,spectating:this.spectating===true,moth:this.mothAudio?.status?.()??null,samples:this.musicEngine?.sampleStatus?.()??null};}
  // Low, continuous ambience bed: filtered noise hiss plus a sub tone, faded in
  // through the master gain. Owned by the audio instance and torn down in dispose.
  _bed(on){
@@ -1096,7 +1323,9 @@ export class SynthAudio{
  setIntensity(value){
   const next=cl(Number(value)||0,0,1);this.intensity=next;
   this.musicEngine?.setIntensity(next);
-  this.musicEngine?.setScene(this.scene==='menu'?'menu':(next>=.34?'combat':'explore'));
+  // Results must hold the outcome arrangement; only the live scene resolves
+  // between exploration and combat from intensity.
+  this.musicEngine?.setScene(this.scene==='menu'?'menu':this.scene==='results'?'results':(next>=.34?'combat':'explore'));
   this.mothAudio?.setIntensity?.(next);
   this.bedScale=.55+next*.55;
   if(this.ctx&&this.bed){const profile=BED_MOODS[this.bedMood]||BED_MOODS.default,t=this.ctx.currentTime;try{this.bed.g.gain.setTargetAtTime(profile.gain*this.bedScale,t,.5);this.bed.og.gain.setTargetAtTime(profile.sub*this.bedScale,t,.55);}catch{}try{if(this.bed.windG)this.bed.windG.gain.setTargetAtTime((profile.air||0)*this._windScale(profile)*(.5+this.bedScale*.5),t,.6);if(this.bed.tenseG)this.bed.tenseG.gain.setTargetAtTime((profile.tense||0)*next*next,t,.7);}catch{}}
@@ -1208,8 +1437,32 @@ export class SynthAudio{
   if(Number.isFinite(last)&&now-last<.25)return {cue:cue.id,played:false,deduped:true};
   this._announceAt.set(cue.id,now);
   const mid=cue.mid??cue.end;
+  // The callout owns the front of the mix: one short, bounded duck under it.
+  this._duckMusic(.32,.45);
   this._play(cue.length+.1,0,(t,out,nodes)=>{this._tone(t,out,nodes,{freq:cue.freq,duration:cue.length*.45,type:'triangle',gain:.06,end:mid});this._tone(t+cue.length*.5,out,nodes,{freq:mid,duration:cue.length*.45,type:'triangle',gain:.05,end:cue.end});this._tone(t+cue.length*.82,out,nodes,{freq:cue.end,duration:cue.length*.32,type:'sine',gain:.035,end:cue.end*1.06});});
   this.lastCue=cue.id;return {cue:cue.id,played:true};
+ }
+ // High-value announcer dispatch: the per-cue cooldown plus a global cadence
+ // guard, so a cluster of match beats (a wave, a boss phase and a capture in
+ // the same second) makes one callout rather than three. One token per cue.
+ announcerEvent(type){
+  const cue=ANNOUNCE_CUES[type];if(!cue)return null;
+  if(!this.announcer||!this.ctx||this.muted)return {cue:cue.id,played:false};
+  const now=this.ctx.currentTime||0;
+  if(Number.isFinite(this._announceCadence)&&now-this._announceCadence<ANNOUNCE_CADENCE-1e-6)return {cue:cue.id,played:false,cadence:true};
+  const result=this.announcerCue(type);
+  if(result&&result.played===true)this._announceCadence=now;
+  return result;
+ }
+ // Event-stream dispatch for the high-value table. Actor-scoped beats (a
+ // promotion, an upgrade, a bounty) are announced for the local player only;
+ // world beats are announced for every player.
+ _announceHighValue(e,local){
+  if(this.announcer!==true||!e||typeof e.type!=='string')return false;
+  const actorScoped=HIGH_VALUE_ANNOUNCE[e.type];
+  if(actorScoped===undefined)return false;
+  if(actorScoped===true&&!local)return false;
+  return this.announcerEvent(e.type)?.played===true;
  }
   // Spectator audio follows the watched actor as well as the local player.
   _isLocal(e,player){if(!e||!player)return false;if(e.actor===player.id||e.actorId===player.id||e.driver===player.id||Boolean(e.occupants?.includes(player.id)))return true;return Boolean(player.spectator===true&&player.spectatorTarget!=null&&(e.actor===player.spectatorTarget||e.actorId===player.spectatorTarget||e.driver===player.spectatorTarget||e.occupants?.includes(player.spectatorTarget)));}
@@ -1274,7 +1527,7 @@ export class SynthAudio{
   _makeNoise(){const ctx=this.ctx,length=Math.max(1,Math.floor(ctx.sampleRate)),buffer=ctx.createBuffer(1,length,ctx.sampleRate),data=buffer.getChannelData(0);let last=0;for(let i=0;i<length;i++){const white=Math.random()*2-1;last=(last+.02*white)/1.02;data[i]=white*.75+last*.5;}return buffer;}
   _dest(pan){const out=this.ctx.createStereoPanner?this.ctx.createStereoPanner():this.ctx.createGain();if(out.pan)out.pan.value=cl(pan||0,-1,1);out.connect(this.effectsBus||this.master);return out;}
   _play(duration,pan,build,opts){if(!this.ctx||this.muted||this.voices.size>=30)return;const t=this.ctx.currentTime,out=this._dest(pan),nodes=[out],token={nodes};if(opts&&opts.send>0&&this.space){try{const snd=this.ctx.createGain();snd.gain.value=cl(Number(opts.send)||0,0,1);out.connect(snd);snd.connect(this.space.send);nodes.push(snd);}catch{}}build(t,out,nodes);this.voices.add(token);token.timer=setTimeout(()=>{for(const n of nodes){try{n.disconnect();}catch{}}this.voices.delete(token);},Math.max(30,(duration+.15)*1000));}
-  _noise(t,out,nodes,{duration=.08,gain=.1,type='bandpass',freq=800,q=1,sweep=null,attack=.002}){if(!this.ctx||!this.ctx.createBufferSource)return;const src=this.ctx.createBufferSource();src.buffer=this.noiseBuffer;src.loop=true;const f=this.ctx.createBiquadFilter();f.type=type;f.frequency.setValueAtTime(Math.max(30,freq),t);f.Q.value=q;if(sweep)f.frequency.exponentialRampToValueAtTime(Math.max(30,sweep),t+duration);const g=this.ctx.createGain();g.gain.setValueAtTime(.0001,t);g.gain.linearRampToValueAtTime(Math.max(.0002,gain),t+attack);g.gain.exponentialRampToValueAtTime(.0001,t+duration);src.connect(f);f.connect(g);g.connect(out);src.start(t);src.stop(t+duration+.03);nodes.push(src,f,g);}
+  _noise(t,out,nodes,{duration=.08,gain=.1,type='bandpass',freq=800,q=1,sweep=null,attack=.002}){if(!this.ctx||!this.ctx.createBufferSource||typeof this.ctx.createBiquadFilter!=='function')return;const src=this.ctx.createBufferSource();src.buffer=this.noiseBuffer;src.loop=true;const f=this.ctx.createBiquadFilter();f.type=type;f.frequency.setValueAtTime(Math.max(30,freq),t);f.Q.value=q;if(sweep)f.frequency.exponentialRampToValueAtTime(Math.max(30,sweep),t+duration);const g=this.ctx.createGain();g.gain.setValueAtTime(.0001,t);g.gain.linearRampToValueAtTime(Math.max(.0002,gain),t+attack);g.gain.exponentialRampToValueAtTime(.0001,t+duration);src.connect(f);f.connect(g);g.connect(out);src.start(t);src.stop(t+duration+.03);nodes.push(src,f,g);}
   _tone(t,out,nodes,{freq,duration=.08,type='sine',gain=.05,end=0,attack=.003}){const o=this.ctx.createOscillator();o.type=type;o.frequency.setValueAtTime(Math.max(20,freq),t);if(end)o.frequency.exponentialRampToValueAtTime(Math.max(20,end),t+duration);const g=this.ctx.createGain();g.gain.setValueAtTime(.0001,t);g.gain.linearRampToValueAtTime(Math.max(.0002,gain),t+attack);g.gain.exponentialRampToValueAtTime(.0001,t+duration);o.connect(g);g.connect(out);o.start(t);o.stop(t+duration+.03);nodes.push(o,g);}
  tone(freq,duration=.08,type='sine',gain=.04,end=0){this._play(duration,0,(t,out,nodes)=>this._tone(t,out,nodes,{freq,duration,type,gain,end,attack:.006}));}
   _panFor(pos,player){if(!pos||!player||!Number.isFinite(pos.x)||!Number.isFinite(player.x))return 0;const dx=pos.x-(player.x||0),dz=pos.z-(player.z||0),dist=Math.hypot(dx,dz)||1,rx=Math.cos(player.yaw||0),rz=-Math.sin(player.yaw||0);return cl((dx*rx+dz*rz)/dist*.9,-1,1);}
@@ -1541,20 +1794,25 @@ export class SynthAudio{
   // Distant thunder: a low, filtered rumble with a delayed onset and stereo
   // pan. Distance (0..1) controls the delay, brightness and gain so a close
   // strike cracks and a far one rolls. Reuses the shared voice cap/disposal.
-  thunder({distance=.6,pan=0,intensity=1}={}){
+  // Accepts the historical `{distance,pan,intensity}` object or the positional
+  // `(pan,distance,intensity,seed?)` form; an optional seed deterministically
+  // selects one of the frozen recipes, while no seed keeps the historical roll.
+  thunder(a,distance,intensity,seed){
+   const opts=a&&typeof a==='object'?a:{pan:a,distance,intensity,seed};
+   const {distance:d0=.6,pan:p0=0,intensity:i0=1,seed:s0=null}=opts||{};
    if(!this.ctx||this.muted)return false;
-   const d=cl(Number(distance)||0,0,1),vol=cl(Number(intensity)||0,0,1)*(1-d*.55);
+   const d=cl(Number(d0)||0,0,1),vol=cl(Number(i0)||0,0,1)*(1-d*.55);
    if(vol<=.02)return false;
-   const delay=.06+d*1.5;
+   const recipe=thunderRecipeFor(s0),delay=.06+d*1.5,pan=cl(Number(p0)||0,-1,1);
    setTimeout(()=>{if(!this.ctx||this.muted)return;this._play(.9+d*.7,pan,(t,out,nodes)=>{
     // Close strikes get a supersonic crack before the body; the tail rolls into
     // the shared space delay so far thunder trails across the arena.
-    if(d<.45)this._noise(t,out,nodes,{duration:.08,attack:.001,gain:.34*vol*(1-d*2),type:'highpass',freq:1800,sweep:500});
-    this._noise(t,out,nodes,{duration:.55+d*.5,gain:.42*vol,type:'lowpass',freq:420-d*220,sweep:70+d*40,q:.7,attack:.02});
-    this._noise(t+.08,out,nodes,{duration:.3,gain:.2*vol,type:'lowpass',freq:180,sweep:60,q:.8,attack:.03});
-    this._noise(t+.3,out,nodes,{duration:.5+d*.4,gain:.12*vol,type:'bandpass',freq:300-d*80,sweep:120,q:.5,attack:.05});
-    this._tone(t,out,nodes,{freq:52-d*12,duration:.7+d*.5,type:'sine',gain:.3*vol,end:26});
-    this._tone(t,out,nodes,{freq:38-d*8,duration:.85+d*.5,type:'sine',gain:.14*vol,end:22});
+    if(d<recipe.crack)this._noise(t,out,nodes,{duration:.08,attack:.001,gain:.34*vol*(1-d*2),type:'highpass',freq:1800,sweep:500});
+    this._noise(t,out,nodes,{duration:.55+d*recipe.durScale,gain:recipe.bodyGain*vol,type:'lowpass',freq:recipe.bodyFreq-d*recipe.bodyDrop,sweep:recipe.bodySweep+d*recipe.bodyRise,q:.7,attack:.02});
+    this._noise(t+.08,out,nodes,{duration:.3,gain:recipe.rollGain*vol,type:'lowpass',freq:recipe.rollFreq,sweep:recipe.rollSweep,q:.8,attack:.03});
+    this._noise(t+.3,out,nodes,{duration:.5+d*recipe.durScale,gain:recipe.tailGain*vol,type:'bandpass',freq:recipe.tailFreq-d*recipe.tailDrop,sweep:recipe.tailSweep,q:.5,attack:.05});
+    this._tone(t,out,nodes,{freq:recipe.lowFreq-d*recipe.lowDrop,duration:.7+d*recipe.durScale,type:'sine',gain:recipe.lowGain*vol,end:26});
+    this._tone(t,out,nodes,{freq:recipe.highFreq-d*recipe.highDrop,duration:.85+d*recipe.durScale,type:'sine',gain:recipe.highGain*vol,end:22});
    },{send:.4*vol});},Math.round(delay*1000));
    return true;
   }
@@ -1601,6 +1859,26 @@ export class SynthAudio{
    if(sp.ring)this._tone(t,out,nodes,{freq:sp.ring*.6,duration:.08,type:'triangle',gain:.02*vol,end:sp.ring*.3});
    if(sp.scatter)this._noise(t+.04,out,nodes,{duration:.05,gain:.06*vol,type:'bandpass',freq:1200,sweep:420,q:.9});
   });
+ }
+ // Ejected shell casing: a short metallic tinkle with a surface-tinted decay
+ // and a seeded spin pitch. One voice token per casing and a small cadence
+ // throttle so a full-auto burst (or a second view callback) cannot stack a
+ // per-shot coin drop. The view calls this next to its casing spawn; a muted
+ // mix returns false before the throttle so unmuting is never blocked.
+ shellCasing(pan=0,seed=0,surface=null){
+  if(!this.ctx||this.muted)return false;
+  const now=Number.isFinite(this.ctx.currentTime)?this.ctx.currentTime:0;
+  if(this._shellAt!=null&&now-this._shellAt<.045)return false;
+  this._shellAt=now;
+  const hit=impactProfile(surface),bright=cl((hit.freq||1600)/1600,.5,2),decay=cl(hit.decay??1,.6,1.4),u=mixUnit((Number(seed)||0)>>>0);
+  const spin=1+(u-.5)*.16;
+  this._play(.2,cl(Number(pan)||0,-1,1),(t,out,nodes)=>{
+   this._noise(t,out,nodes,{duration:.03*decay,attack:.0007,gain:.14,type:'highpass',freq:3200*bright,sweep:1800*bright});
+   this._tone(t,out,nodes,{freq:2150*spin*bright,duration:.06,type:'triangle',gain:.055,end:1450*spin});
+   this._tone(t+.045,out,nodes,{freq:2960*spin,duration:.05,type:'sine',gain:.038,end:2380});
+   this._tone(t+.095,out,nodes,{freq:1650*spin,duration:.07,type:'triangle',gain:.026,end:980});
+  },{send:.12});
+  return true;
  }
  // Bounded debris tail for explosions: up to `cap` deterministic chips.
  _debris(t,out,nodes,{vol=1,seed=0,cap=4}={}){
@@ -1742,9 +2020,15 @@ export class SynthAudio{
    this._noise(t,out,nodes,{duration:.3,gain:.08,type:'lowpass',freq:600,sweep:200,q:.6,attack:.02});
   });
  }
-  event(e,player){if(!this.ctx||!e||!player)return;const local=this._isLocal(e,player),pos=e.from??e.pos,pan=this._panFor(pos,player);
+  event(e,player){if(!this.ctx||!e||!player)return;const local=this._isLocal(e,player),
+   // Position normalizer: streams carry `from`/`pos`, while the sim's telegraph
+   // and ordnance beats carry the raw world x/z. Without this an event with
+   // only x/z resolves no position, `_falloff` returns 0 and the beat is silent
+   // for every player — the enemy telegraph bug this pass fixes.
+   pos=e.from??e.pos??(Number.isFinite(e.x)?{x:e.x,y:Number.isFinite(e.y)?e.y:0,z:e.z}:null),pan=this._panFor(pos,player);
   this._maybeMatchStart(e);
   this._musicEventState(e,local);
+  this._announceHighValue(e,local);
   const latticeCue=latticeSoundCue(e,player,this._latticeAudioState);if(latticeCue){this._beat(latticeCue,0,1,.2);return;}
    // Traversal accents ride the shared synth/voice cap. A cocs device-use
    // keeps its lattice earcon above; these are the mechanical beats at the
@@ -1773,8 +2057,12 @@ export class SynthAudio{
   }
   if(e.type==='dryfire'){if(local)this._dryfire(pan);return;}
   if(e.type==='grenade'){const vol=local?1:this._falloff(pos,player,24);if(vol>.02)this._play(.18,pan,(t,out,nodes)=>{this._click(pan,vol,.06,1400);this._noise(t+.02,out,nodes,{duration:.12,gain:.22*vol,type:'bandpass',freq:800,sweep:300,q:.8});this._tone(t+.03,out,nodes,{freq:280,duration:.1,type:'triangle',gain:.08*vol,end:140});});return;}
-  if(e.type==='explosion'){const vol=this._falloff(pos,player,42);if(vol>.02){const seed=eventSeed(e);this._play(.85,pan,(t,out,nodes)=>{this._noise(t,out,nodes,{duration:.5,gain:.8*vol,type:'lowpass',freq:900,sweep:60,q:.8});this._noise(t,out,nodes,{duration:.05,attack:.001,gain:.5*vol,type:'highpass',freq:2400,sweep:600});this._tone(t,out,nodes,{freq:120,duration:.5,type:'sine',gain:.35*vol,end:34});this._tone(t,out,nodes,{freq:60,duration:.75,type:'sine',gain:.3*vol,end:28});this._debris(t,out,nodes,{vol,seed,cap:Math.round(vol*3.4)});},{send:.45*vol});}return;}
-  if(e.type==='damage'){this.lastDamage=e;if(this._isLocal(e,player)){this._lastLocalDamageAt=Number.isFinite(this.ctx.currentTime)?this.ctx.currentTime:null;const hitPan=this._damagePan(e);this._play(e.shieldBreak?.24:.18,hitPan,(t,out,nodes)=>{this._noise(t,out,nodes,{duration:.14,gain:.4,type:'lowpass',freq:700,sweep:200,q:.7});this._tone(t,out,nodes,{freq:150,duration:.14,type:'triangle',gain:.18,end:60});if(e.shieldBreak){this._noise(t,out,nodes,{duration:.2,gain:.42,type:'bandpass',freq:1800,sweep:300,q:1.2});this._tone(t+.02,out,nodes,{freq:260,duration:.18,type:'sawtooth',gain:.2,end:55});this._tone(t+.03,out,nodes,{freq:2100,duration:.16,type:'triangle',gain:.14,end:620});this._noise(t+.04,out,nodes,{duration:.12,gain:.2,type:'highpass',freq:3200,sweep:900,q:.8});}if(e.critical||e.headshot)this._noise(t+.01,out,nodes,{duration:.03,gain:.2,type:'highpass',freq:2600,sweep:4200});});}else if(this._isScorer(e.source,player)&&e.amount>0){const stamp=this.ctx.currentTime;if(stamp-this.lastHit>=.045){this.lastHit=stamp;const crit=Boolean(e.critical||e.headshot||Number(e.amount)>=48);this._play(crit?.16:.12,0,(t,out,nodes)=>{if(crit){this._noise(t,out,nodes,{duration:.04,gain:.28,type:'highpass',freq:2200,sweep:3600});this._tone(t,out,nodes,{freq:1950,duration:.11,type:'triangle',gain:.16,end:2600});this._tone(t+.02,out,nodes,{freq:2900,duration:.09,type:'sine',gain:.11,end:3400});this._tone(t+.04,out,nodes,{freq:140,duration:.11,type:'sine',gain:.09,end:70});}else{this._noise(t,out,nodes,{duration:.05,gain:.26,type:'highpass',freq:1600,sweep:2600});this._tone(t,out,nodes,{freq:1250,duration:.07,type:'sine',gain:.11,end:1800});this._tone(t+.02,out,nodes,{freq:180,duration:.07,type:'sine',gain:.06,end:90});}if(e.shieldBreak){this._noise(t,out,nodes,{duration:.12,gain:.32,type:'bandpass',freq:2400,sweep:600,q:1.4});this._tone(t+.01,out,nodes,{freq:1600,duration:.1,type:'sawtooth',gain:.12,end:400});this._tone(t+.03,out,nodes,{freq:900,duration:.14,type:'triangle',gain:.1,end:1800});}if(crit)this._hitBell(t,out,nodes,{amount:e.amount,precision:Boolean(e.critical||e.headshot)});});} }return;}
+  if(e.type==='explosion'){const vol=this._falloff(pos,player,42);if(vol>.02){const seed=eventSeed(e);if(local)this._duckMusic(.5,.6);this._play(.85,pan,(t,out,nodes)=>{this._noise(t,out,nodes,{duration:.5,gain:.8*vol,type:'lowpass',freq:900,sweep:60,q:.8});this._noise(t,out,nodes,{duration:.05,attack:.001,gain:.5*vol,type:'highpass',freq:2400,sweep:600});this._tone(t,out,nodes,{freq:120,duration:.5,type:'sine',gain:.35*vol,end:34});this._tone(t,out,nodes,{freq:60,duration:.75,type:'sine',gain:.3*vol,end:28});this._debris(t,out,nodes,{vol,seed,cap:Math.round(vol*3.4)});},{send:.45*vol});}return;}
+  if(e.type==='damage'){this.lastDamage=e;if(this._isLocal(e,player)){this._lastLocalDamageAt=Number.isFinite(this.ctx.currentTime)?this.ctx.currentTime:null;const hitPan=this._damagePan(e);this._play(e.shieldBreak?.24:.18,hitPan,(t,out,nodes)=>{this._noise(t,out,nodes,{duration:.14,gain:.4,type:'lowpass',freq:700,sweep:200,q:.7});this._tone(t,out,nodes,{freq:150,duration:.14,type:'triangle',gain:.18,end:60});if(e.shieldBreak){this._noise(t,out,nodes,{duration:.2,gain:.42,type:'bandpass',freq:1800,sweep:300,q:1.2});this._tone(t+.02,out,nodes,{freq:260,duration:.18,type:'sawtooth',gain:.2,end:55});this._tone(t+.03,out,nodes,{freq:2100,duration:.16,type:'triangle',gain:.14,end:620});this._noise(t+.04,out,nodes,{duration:.12,gain:.2,type:'highpass',freq:3200,sweep:900,q:.8});}
+   // Shield absorb: a shielded hit that did not break reads as a short glass
+   // tick inside the same damage token, so one hit is still one voice.
+   if(!e.shieldBreak&&Number(e.shield)>0){const shield=cl(Number(e.shield)/40,0,1);this._noise(t+.005,out,nodes,{duration:.05,attack:.0008,gain:.12+.1*shield,type:'bandpass',freq:2300+900*shield,sweep:1200,q:1.5});this._tone(t+.01,out,nodes,{freq:640+260*shield,duration:.09,type:'triangle',gain:.05+.03*shield,end:190});}
+   if(e.critical||e.headshot)this._noise(t+.01,out,nodes,{duration:.03,gain:.2,type:'highpass',freq:2600,sweep:4200});});}else if(this._isScorer(e.source,player)&&e.amount>0){const stamp=this.ctx.currentTime;if(stamp-this.lastHit>=.045){this.lastHit=stamp;const crit=Boolean(e.critical||e.headshot||Number(e.amount)>=48);this._play(crit?.16:.12,0,(t,out,nodes)=>{if(crit){this._noise(t,out,nodes,{duration:.04,gain:.28,type:'highpass',freq:2200,sweep:3600});this._tone(t,out,nodes,{freq:1950,duration:.11,type:'triangle',gain:.16,end:2600});this._tone(t+.02,out,nodes,{freq:2900,duration:.09,type:'sine',gain:.11,end:3400});this._tone(t+.04,out,nodes,{freq:140,duration:.11,type:'sine',gain:.09,end:70});}else{this._noise(t,out,nodes,{duration:.05,gain:.26,type:'highpass',freq:1600,sweep:2600});this._tone(t,out,nodes,{freq:1250,duration:.07,type:'sine',gain:.11,end:1800});this._tone(t+.02,out,nodes,{freq:180,duration:.07,type:'sine',gain:.06,end:90});}if(e.shieldBreak){this._noise(t,out,nodes,{duration:.12,gain:.32,type:'bandpass',freq:2400,sweep:600,q:1.4});this._tone(t+.01,out,nodes,{freq:1600,duration:.1,type:'sawtooth',gain:.12,end:400});this._tone(t+.03,out,nodes,{freq:900,duration:.14,type:'triangle',gain:.1,end:1800});}if(crit)this._hitBell(t,out,nodes,{amount:e.amount,precision:Boolean(e.critical||e.headshot)});});} }return;}
   if(e.type==='death'){const vol=local?1:this._falloff(pos,player,32);if(vol>.02){const sound=deathSoundFor(e),seed=Number.isFinite(Number(e.seed))?Number(e.seed)>>>0:eventSeed(e),scorer=e.source??e.killer;this._play(DEATH_VOICE_DURATIONS[sound]??.6,pan,(t,out,nodes)=>{this._deathVoice(t,out,nodes,{sound,vol,local,seed});if(this._isScorer(scorer,player)&&scorer!==e.actor&&e.actor!==player.id)this._killConfirm(t,out,nodes,vol);},{send:.3*vol});}return;}
   if(e.type==='fall'){const vol=local?1:this._falloff(pos,player,26);if(vol>.03)this._play(.34,pan,(t,out,nodes)=>{this._noise(t,out,nodes,{duration:.28,gain:.26*vol,type:'lowpass',freq:600,sweep:120,q:.7,attack:.03});this._tone(t,out,nodes,{freq:74,duration:.3,type:'sine',gain:.14*vol,end:30});});return;}
   if(e.type==='reload'){if(e.actor===player.id)this._reload(e.weapon??player.weapon,e.state,e.duration);return;}
@@ -1792,8 +2080,30 @@ export class SynthAudio{
   if(e.type==='race-item'){const vol=local?1:this._falloff(pos,player,28);if(vol>.05){this._play(.25,pan,(t,out,nodes)=>{if(e.item==='turbo'||e.item==='star'){this._noise(t,out,nodes,{duration:.22,gain:.4*vol,type:'bandpass',freq:1200,sweep:2400,q:.9});this._tone(t,out,nodes,{freq:240,duration:.2,type:'sawtooth',gain:.14*vol,end:580});}else if(e.item==='shield'){this._tone(t,out,nodes,{freq:440,duration:.24,type:'sine',gain:.12*vol,end:660});this._tone(t+.05,out,nodes,{freq:660,duration:.2,type:'triangle',gain:.08*vol,end:880});}else if(e.item==='pulse'||e.item==='triple'||e.item==='bolt'){this._noise(t,out,nodes,{duration:.15,gain:.3*vol,type:'highpass',freq:1800,sweep:3200});this._tone(t,out,nodes,{freq:720,duration:.18,type:'square',gain:.1*vol,end:1440});}else{this._noise(t,out,nodes,{duration:.18,gain:.35*vol,type:'lowpass',freq:600,sweep:120,q:.8});this._tone(t,out,nodes,{freq:140,duration:.15,type:'triangle',gain:.12*vol,end:50});}});}return;}
   if(e.type==='race-hazard-hit'){const vol=local?1:this._falloff(pos,player,26);if(vol>.05){this._play(.32,pan,(t,out,nodes)=>{this._noise(t,out,nodes,{duration:.28,gain:.4*vol,type:'bandpass',freq:1400,sweep:400,q:.6});this._tone(t,out,nodes,{freq:340,duration:.25,type:'sawtooth',gain:.15*vol,end:80});});}return;}
   if(e.type==='race-lap'){if(local){this._play(.4,0,(t,out,nodes)=>{this._tone(t,out,nodes,{freq:523,duration:.18,type:'triangle',gain:.09,end:659});this._tone(t+.1,out,nodes,{freq:659,duration:.22,type:'triangle',gain:.09,end:784});this._tone(t+.2,out,nodes,{freq:1046,duration:.25,type:'sine',gain:.08,end:1046});});}return;}
-  if(e.type==='enemy-telegraph'){const vol=local?1:this._falloff(pos,player,30);if(vol>.03)this._play(.5,pan,(t,out,nodes)=>{this._tone(t,out,nodes,{freq:300,duration:.16,type:'square',gain:.07*vol,end:150});this._tone(t+.18,out,nodes,{freq:240,duration:.22,type:'square',gain:.06*vol,end:120});});return;}
+  // Enemy windup telegraphs. The sim stamps the unit `kind` onto the event and
+  // carries the world x/z (normalized above), so every telegraph is audible and
+  // each unit kind reads as its own motif; an unknown kind keeps the generic
+  // fallback. One token per event.
+  if(e.type==='enemy-telegraph'){const vol=local?1:this._falloff(pos,player,30);if(vol>.03)this._beat(TELEGRAPH_CUES[e.kind]||TELEGRAPH_CUES.generic,pan,vol,.22);return;}
   if(e.type==='race-finish'){if(local){this._play(.6,0,(t,out,nodes)=>{this._tone(t,out,nodes,{freq:440,duration:.2,type:'triangle',gain:.1,end:554});this._tone(t+.12,out,nodes,{freq:554,duration:.2,type:'triangle',gain:.1,end:659});this._tone(t+.24,out,nodes,{freq:880,duration:.35,type:'sine',gain:.12,end:880});});}return;}
+  // Weather/time onset cues: the sim emits these only when a script flips the
+  // state, but a replay can repeat the current kind. The stored key makes the
+  // cue an actual onset — the first report or a real change — never a repeat.
+  if(e.type==='weather-change'){
+   const kind=e.kind==null?null:String(e.kind);
+   if(kind===this._weatherCueKind)return;
+   this._weatherCueKind=kind;
+   const vol=local?1:(pos?Math.max(.25,this._falloff(pos,player,40)):.9);
+   this._beat(EVENT_CUES['weather-change'],pan,vol,.3);
+   return;
+  }
+  if(e.type==='time-change'){
+   const phase=e.phase==null?null:String(e.phase);
+   if(phase===this._timeCuePhase)return;
+   this._timeCuePhase=phase;
+   this._beat(EVENT_CUES['time-change'],pan,local?1:.9,.3);
+   return;
+  }
   // Event-driven music: a capture/loss beat the running soundtrack can answer is
   // a harmonic response quantised to the next music step and owns the beat
   // outright. With music off (or the response queue full) the motif table below
@@ -2116,12 +2426,57 @@ export class SynthAudio{
     }
   }
   this.wasLowHealth=isLowHealth;
+  // Health-driven master tone: full health is neutral, falling health eases the
+  // cutoff/level down. No-op without the optional master stage.
+  const healthFraction=Number.isFinite(player.health)&&Number.isFinite(player.maxHealth)&&player.maxHealth>0?cl(player.health/player.maxHealth,0,1):1;
+  this._applyHealthMix(healthFraction);
   const vehicle=(vehicles||[]).find(v=>v.id===player.vehicleId||v.driver===player.id),vx=vehicle?(vehicle.vx??vehicle.velocity?.x??0):0,vz=vehicle?(vehicle.vz??vehicle.velocity?.z??0):0,boosting=Boolean(vehicle&&(vehicle.boosting===true||(vehicle.boostCooldown??0)>0||(vehicle.effects?.turbo>0)));
-  this._engine(vehicle?Math.hypot(vx,vz):0,Boolean(vehicle),boosting);
+  // Snapshot vehicle kind selects the engine timbre; the same snapshot's lateral
+  // velocity (relative to the chassis heading) drives the Puma skid loop.
+  const engineKind=vehicle?(vehicle.kind??vehicle.config?.kind??null):null;
+  const vyaw=vehicle&&Number.isFinite(vehicle.yaw)?vehicle.yaw:(vehicle&&Number.isFinite(vehicle.heading)?vehicle.heading:0);
+  const lateral=vehicle?vx*Math.cos(vyaw)-vz*Math.sin(vyaw):0;
+  this._engine(vehicle?Math.hypot(vx,vz):0,Boolean(vehicle),boosting,engineKind);
+  this._skidLoop(Boolean(vehicle&&engineKind==='puma'&&Math.abs(lateral)>1.1),Math.abs(lateral),engineKind);
   const ride=player.zipRide;
   this._zipLoop(Boolean(ride&&player.vehicleId==null&&player.health>0),ride?Math.max(1,Number(ride.speed)||9):9);}
- _engine(speed,active,boosting=false){if(!this.ctx)return;if(active&&!this.muted){if(!this.engine){const osc=this.ctx.createOscillator(),sub=this.ctx.createOscillator(),f=this.ctx.createBiquadFilter(),g=this.ctx.createGain();osc.type='sawtooth';sub.type='triangle';f.type='lowpass';f.frequency.value=700;g.gain.value=.0001;osc.connect(f);sub.connect(f);f.connect(g);g.connect(this.effectsBus||this.master);osc.start();sub.start();this.engine={osc,sub,f,g};}const s=cl(speed/20,0,1),boostMult=boosting?1.35:1,t=this.ctx.currentTime;this.engine.osc.frequency.setTargetAtTime((55+s*120)*boostMult,t,.1);this.engine.sub.frequency.setTargetAtTime((28+s*40)*boostMult,t,.1);this.engine.g.gain.setTargetAtTime((.022+s*.05)*(boosting?1.2:1),t,.12);this.engine.f.frequency.setTargetAtTime((500+s*1200)*(boosting?1.4:1),t,.15);}else if(this.engine){const {osc,sub,g}=this.engine,t=this.ctx.currentTime;g.gain.setTargetAtTime(.0001,t,.08);this.engine=null;setTimeout(()=>{try{osc.stop();sub.stop();}catch{}},300);}}
+ _engine(speed,active,boosting=false,kind=null){if(!this.ctx)return;if(active&&!this.muted){const voice=engineVoice(kind,speed,boosting),profile=voice.profile;if(!this.engine){const osc=this.ctx.createOscillator(),sub=this.ctx.createOscillator(),boost=this.ctx.createOscillator(),bg=this.ctx.createGain(),f=this.ctx.createBiquadFilter(),g=this.ctx.createGain();osc.type=profile.osc;sub.type=profile.sub;boost.type=profile.osc;f.type='lowpass';f.frequency.value=700;g.gain.value=.0001;bg.gain.value=.0001;osc.connect(f);sub.connect(f);boost.connect(bg);bg.connect(f);f.connect(g);g.connect(this.effectsBus||this.master);osc.start();sub.start();boost.start();this.engine={osc,sub,boost,bg,f,g,kind:voice.kind};}
+   if(this.engine.kind!==voice.kind){this.engine.kind=voice.kind;try{this.engine.osc.type=profile.osc;this.engine.boost.type=profile.osc;this.engine.sub.type=profile.sub;}catch{}}
+   const t=this.ctx.currentTime;this.engine.osc.frequency.setTargetAtTime(voice.oscFreq,t,.1);this.engine.sub.frequency.setTargetAtTime(voice.subFreq,t,.1);this.engine.g.gain.setTargetAtTime(voice.gain,t,.12);this.engine.f.frequency.setTargetAtTime(voice.filterFreq,t,.15);
+   // Boost layer: a second overtone that only opens while boosting, inside the
+   // same long-lived engine node set (no extra node per frame).
+   this.engine.boost.frequency.setTargetAtTime(voice.oscFreq*2,t,.1);this.engine.bg.gain.setTargetAtTime(boosting?voice.gain*.55:.0001,t,.12);
+  }else if(this.engine){const {osc,sub,boost,g}=this.engine,t=this.ctx.currentTime;g.gain.setTargetAtTime(.0001,t,.08);this.engine=null;setTimeout(()=>{try{osc.stop();sub.stop();boost.stop();}catch{}},300);}}
  _zipLoop(active,speed=9){if(!this.ctx)return;const on=active===true&&!this.muted;if(on){if(!this.zipLoop){const osc=this.ctx.createOscillator(),hum=this.ctx.createOscillator(),f=this.ctx.createBiquadFilter(),g=this.ctx.createGain();osc.type='sawtooth';hum.type='triangle';f.type='bandpass';f.frequency.value=1100;f.Q.value=.7;g.gain.value=.0001;osc.connect(f);hum.connect(f);f.connect(g);g.connect(this.effectsBus||this.master);osc.start();hum.start();this.zipLoop={osc,hum,f,g};}const t=this.ctx.currentTime,s=cl(speed/14,0,1);this.zipLoop.osc.frequency.setTargetAtTime(120+s*90,t,.15);this.zipLoop.hum.frequency.setTargetAtTime(60+s*45,t,.15);this.zipLoop.f.frequency.setTargetAtTime(900+s*800,t,.15);this.zipLoop.g.gain.setTargetAtTime(.012+s*.02,t,.12);}else if(this.zipLoop){const {osc,hum,g}=this.zipLoop,t=this.ctx.currentTime;g.gain.setTargetAtTime(.0001,t,.08);this.zipLoop=null;setTimeout(()=>{try{osc.stop();hum.stop();}catch{}},300);}}
+ // Puma skid loop: the same long-lived eased-node pattern as the zip loop, but
+ // driven by lateral slip instead of ride speed. It never spends a `_play`
+ // token per frame; the caller flips `active` and the loop eases in/out. Only
+ // chassis marked `skid` in ENGINE_PROFILES build it, so a Titan/Scout produces
+ // no skid nodes at all.
+ _skidLoop(active,slip=0,kind=null){
+  if(!this.ctx)return false;
+  const profile=ENGINE_PROFILES[kind]||ENGINE_PROFILES.default;
+  const on=active===true&&profile.skid===true&&!this.muted;
+  if(on){
+   if(!this.skidLoop){
+    const osc=this.ctx.createOscillator(),hum=this.ctx.createOscillator(),f=this.ctx.createBiquadFilter(),g=this.ctx.createGain();
+    osc.type='sawtooth';hum.type='triangle';f.type='bandpass';f.frequency.value=1800;f.Q.value=2.2;g.gain.value=.0001;
+    osc.connect(f);hum.connect(f);f.connect(g);g.connect(this.effectsBus||this.master);osc.start();hum.start();this.skidLoop={osc,hum,f,g};
+   }
+   const t=this.ctx.currentTime,s=cl(Number(slip)||0,0,14)/14;
+   this.skidLoop.osc.frequency.setTargetAtTime(320+s*520,t,.12);
+   this.skidLoop.hum.frequency.setTargetAtTime(90+s*120,t,.12);
+   this.skidLoop.f.frequency.setTargetAtTime(900+s*2200,t,.12);
+   this.skidLoop.g.gain.setTargetAtTime(.006+s*.028,t,.1);
+   return true;
+  }
+  if(this.skidLoop){
+   const {osc,hum,g}=this.skidLoop,t=this.ctx.currentTime;
+   g.gain.setTargetAtTime(.0001,t,.08);this.skidLoop=null;
+   setTimeout(()=>{try{osc.stop();hum.stop();}catch{}},300);
+  }
+  return false;
+ }
  // Teleporter charge/whoosh/arrival shimmer. One voice token per event.
  _teleport(pan,vol,local){this._play(.52,pan,(t,out,nodes)=>{
   this._tone(t,out,nodes,{freq:150,duration:.22,type:'sawtooth',gain:.1*vol,end:720});
@@ -2149,7 +2504,7 @@ export class SynthAudio{
   this._tone(t,out,nodes,{freq:120,duration:.3,type:'sawtooth',gain:.14*vol,end:520});
   this._tone(t+.04,out,nodes,{freq:240,duration:.24,type:'triangle',gain:.08*vol,end:660});
  },{send:.3*vol});}
- dispose(){if(this._stingDuckTimer){clearTimeout(this._stingDuckTimer);this._stingDuckTimer=null;}try{this.musicEngine?.dispose();}catch{}this.musicEngine=null;this._musicBeats.clear();try{this.mothAudio?.dispose?.();}catch{}this.mothAudio=null;if(this.engine){try{this.engine.osc.stop();this.engine.sub.stop();}catch{}this.engine=null;}if(this.zipLoop){try{this.zipLoop.osc.stop();this.zipLoop.hum.stop();}catch{}this.zipLoop=null;}if(this.bed){for(const node of Object.values(this.bed)){if(node&&typeof node.stop==='function')try{node.stop();}catch{}if(node&&typeof node.disconnect==='function')try{node.disconnect();}catch{}}this.bed=null;}for(const token of this.voices){clearTimeout(token.timer);for(const n of token.nodes){try{n.disconnect();}catch{}}}this.voices.clear();this._announceAt?.clear?.();this._altStates?.clear?.();this.lastSting=null;
+ dispose(){if(this._stingDuckTimer){clearTimeout(this._stingDuckTimer);this._stingDuckTimer=null;}if(this._musicDuckTimer){clearTimeout(this._musicDuckTimer);this._musicDuckTimer=null;}this._musicDuck=0;this.killcam=false;this.spectating=false;try{this.musicEngine?.dispose();}catch{}this.musicEngine=null;this._musicBeats.clear();try{this.mothAudio?.dispose?.();}catch{}this.mothAudio=null;if(this.engine){try{this.engine.osc.stop();this.engine.sub.stop();this.engine.boost?.stop();}catch{}this.engine=null;}if(this.zipLoop){try{this.zipLoop.osc.stop();this.zipLoop.hum.stop();}catch{}this.zipLoop=null;}if(this.skidLoop){try{this.skidLoop.osc.stop();this.skidLoop.hum.stop();}catch{}this.skidLoop=null;}if(this.bed){for(const node of Object.values(this.bed)){if(node&&typeof node.stop==='function')try{node.stop();}catch{}if(node&&typeof node.disconnect==='function')try{node.disconnect();}catch{}}this.bed=null;}for(const token of this.voices){clearTimeout(token.timer);for(const n of token.nodes){try{n.disconnect();}catch{}}}this.voices.clear();this._announceAt?.clear?.();this._altStates?.clear?.();this.lastSting=null;
  // Release the precipitation presence, the pending mag-in timers and every
  // bounded edge-state map so a disposed engine cannot retain a timer or a zone.
  if(this.precip){for(const node of Object.values(this.precip)){if(node&&typeof node.stop==='function')try{node.stop();}catch{}if(node&&typeof node.disconnect==='function')try{node.disconnect();}catch{}}this.precip=null;}
@@ -2157,5 +2512,5 @@ export class SynthAudio{
  this._reloadPending.clear();this._zoneAudio.clear();this._vehicleHitAt.clear();this._latticeAudioState?.hq?.clear?.();this._motifBeforeOutcome=null;this._lastLocalDamageAt=null;
  if(this.effectsGlue){for(const node of this.effectsGlue){try{node.disconnect();}catch{}}this.effectsGlue=null;}
  if(this.space){for(const node of Object.values(this.space)){try{node.disconnect();}catch{}}this.space=null;}
- for(const bus of [this.effectsBus,this.ambienceBus,this.musicBus,this.master,this.muteGain]){try{bus?.disconnect();}catch{}}this.effectsBus=null;this.ambienceBus=null;this.musicBus=null;this.master=null;this.muteGain=null;this.ctx?.close();this.ctx=null;this.status='off';}
+ for(const bus of [this.effectsBus,this.ambienceBus,this.musicBus,this.master,this.masterFilter,this.mixGain,this.muteGain]){try{bus?.disconnect();}catch{}}this.effectsBus=null;this.ambienceBus=null;this.musicBus=null;this.master=null;this.masterFilter=null;this.mixGain=null;this.muteGain=null;this._mixCutoff=20000;this._mixLevel=1;this.healthMix=1;this._shellAt=null;this._weatherCueKind=null;this._timeCuePhase=null;this._announceCadence=null;this.ctx?.close();this.ctx=null;this.status='off';}
 }

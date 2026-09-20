@@ -878,3 +878,28 @@
 .motion-reduced .unlock-toast,.motion-reduced .achievement-toast,.motion-reduced .graphics-hotkey-notice,
 .motion-reduced .cocs-notice,.motion-reduced .cocs-notice.is-leaving,.motion-reduced .sp-notice,
 .motion-reduced .title-stage,.motion-reduced .shell--showcase:not(.shell--awaiting){animation:none}
+
+/* ==========================================================================
+   Online lobby / chat UX wave (v8.6). Additive only: chat stamps + mentions,
+   the non-live connection diagnostics block, per-map vote bars, room-search
+   controls and the invite confirmation. The only motion here (vote bars) is
+   the shared `.meter > i` transition, already disabled by both reduced-motion
+   gates below the theater-filters section.
+   ========================================================================== */
+.chat-log{gap:var(--ui-gap-2)}
+.chat-line{display:grid;gap:2px;padding:6px 9px;border-left:2px solid var(--ui-line);
+  background:rgba(10,22,26,.45);border-radius:0 var(--radius-sm) var(--radius-sm) 0}
+.chat-line-head{display:flex;align-items:baseline;gap:8px;min-width:0}
+.chat-time{flex:none;font:11px var(--font-mono);letter-spacing:.06em;color:var(--text-mute);font-variant-numeric:tabular-nums}
+.chat-name{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:13px;color:var(--accent)}
+.chat-lines .chat-name{margin-right:0}
+.chat-text{font-size:14px;line-height:1.45;color:var(--text-dim);overflow-wrap:anywhere}
+.chat-mention{background:none;color:var(--text);font-weight:700;text-decoration:underline;
+  text-decoration-thickness:2px;text-underline-offset:2px}
+.chat-mention--self{color:var(--accent);text-decoration-style:double;outline:1px solid var(--border-strong);outline-offset:1px;border-radius:3px}
+.room-code{color:var(--accent);letter-spacing:.14em}
+.diag-rows{display:grid;gap:4px}
+.diag-rows b{font-variant-numeric:tabular-nums}
+.vote-rows{display:grid;gap:8px}
+.vote-row{display:grid;gap:5px;padding:8px 10px;border:1px solid var(--ui-line);border-radius:var(--radius-md);background:rgba(10,22,26,.45)}
+.vote-row .meter{min-height:8px}

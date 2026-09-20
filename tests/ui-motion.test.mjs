@@ -57,7 +57,7 @@ test('the app root carries motion-reduced for the in-game toggle and the OS quer
 test('every OS animation gate has an in-game motion-reduced twin', async () => {
   const [ui, globals] = await Promise.all([read(UI_CSS), read(GLOBALS_CSS)]);
   const matrix = [
-    [globals, ['radar-sweep', 'hitmarker.hit', 'ammo-warning.pulse', 'damage-direction', 'damage-flash', 'kill-banner', 'kill-callout', 'objective-announcer', 'title-pulse', 'title-screen', 'title-letter', 'kill-feed>div', 'stat-card--vitals.is-low', 'ability-card.is-ready']],
+    [globals, ['radar-sweep', 'hitmarker.hit', 'hitmarker.shieldbreak', 'ammo-warning.pulse', 'damage-direction', 'damage-flash', 'kill-banner', 'kill-callout', 'objective-announcer', 'title-pulse', 'title-screen', 'title-letter', 'kill-feed>div', 'stat-card--vitals.is-low', 'ability-card.is-ready']],
     [ui, ['logo-letter', 'logo-glyph::after', 'spin-slow', 'demo-broadcast', 'demo-broadcast__track']],
   ];
   for (const [css, selectors] of matrix) {
@@ -66,6 +66,11 @@ test('every OS animation gate has an in-game motion-reduced twin', async () => {
       assert.ok(classGate(css, selector), `${selector} is disabled by the in-game toggle too`);
     }
   }
+  // The shield-break marker pairs a shape and a word with the tint, and the
+  // floating-number tint never overrides a kill.
+  assert.match(globals, /\.hitmarker\.shieldbreak::before/, 'the break marker owns a shape');
+  assert.match(globals, /\.hitmarker\.shieldbreak::after \{ content: 'BREAK'/, 'the break marker owns a word');
+  assert.match(globals, /\.damage-number\.shieldbreak:not\(\.kill\)/, 'the number tint yields to a kill');
   // The spend banner rides the whole-surface wildcard gate in both paths.
   assert.ok(motionMediaBlocks(globals).some(block => /\.cocs-spend\s*\*[^{}]*\{[^}]*animation:\s*none!important/.test(block)), 'the OS query disables the whole spend surface');
   assert.match(globals, /\.motion-reduced \.cocs-spend[^{}]*\{[^}]*animation:none!important/, 'the in-game toggle disables the whole spend surface');

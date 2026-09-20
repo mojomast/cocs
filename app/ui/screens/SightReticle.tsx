@@ -65,8 +65,11 @@ export function SightReticle({ui}:{ui:any}){
     return ()=>cancelAnimationFrame(raf);
   },[runtime,player,reduced]);
   const ticks=[.16,.32,.48];
-  return <div ref={layerRef} className={`aim-layer${reduced?' no-warp':''}`} role="presentation" style={{'--crosshair-color':display.color,'--crosshair-size':display.size,'--crosshair-gap':`${crosshairGap}px`} as any}>
-    <div className={`crosshair shape-${display.crosshair}`}><span/><span/><span/><span/></div>
+  // The shipped CSS-var contract stays: colour, size and the dynamic
+  // (spread-driven) gap keep their names. The depth knobs are additive vars
+  // with defaults that reproduce the old reticle exactly.
+  return <div ref={layerRef} className={`aim-layer${reduced?' no-warp':''}`} role="presentation" style={{'--crosshair-color':display.color,'--crosshair-size':display.size,'--crosshair-gap':`${crosshairGap}px`,'--crosshair-base-gap':`${Number(display.crosshairGap)||0}px`,'--crosshair-thickness':display.crosshairThickness??1,'--ads-color':display.adsColor??display.color} as any}>
+    <div className={`crosshair shape-${display.crosshair}${display.crosshairOutline!==false?' has-outline':''}${display.crosshairDot===true?' has-dot':''}`}><span/><span/><span/><span/></div>
     <div className="ads-reticle dot"/>
     <div className="ads-reticle scope">
       <div className="scope-lens"/>

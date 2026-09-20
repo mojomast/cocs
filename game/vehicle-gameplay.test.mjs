@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import {Match, floorAt, obstructed} from './core.mjs';
-import {GUNTRUCK, VEHICLE_DISMOUNT, vehicleSeatFor, takeVehicleSeat} from './vehicles.mjs';
+import {GUNTRUCK, PUMA, TITAN, SCOUT, TRANSPORT, VEHICLE_DISMOUNT, VEHICLE_WEAKPOINT, createVehicle, vehicleConfig, vehicleSeatFor, takeVehicleSeat} from './vehicles.mjs';
 
 const match=()=>new Match('chatgpt','openclaw',()=>.5,'blood-gulch',{mode:'ctf',botCount:0,respawn:1});
 
@@ -24,7 +24,8 @@ test('Puma enter, drive, paired chainguns, turret tracking and exit remain autho
   assert.equal(a.vehicleId,m.vehicles[0].id);
   for(let i=0;i<60;i++)m.step(1/60,{inputs:{0:{x:1,z:0,yaw:-Math.PI/2,pitch:0,fire:true}}});
   assert.ok(a.x>-42);
-  assert.equal(m.vehicles[0].heat,0,'unlimited chaingun never builds heat');
+  assert.ok(m.vehicles[0].heat>0&&m.vehicles[0].heat<1,'a one-second chaingun burst builds heat without locking out');
+  assert.equal(m.vehicles[0].overheated,false);
   const shots=m.events.filter(e=>e.type==='vehicle-shot').length;
   assert.ok(shots>=38&&shots<=48,`rapid chaingun fire produced ${shots} barrel shots`);
   assert.equal(shots%2,0,'both barrels fire per cycle');
@@ -196,4 +197,103 @@ test('bailing out of a moving Puma stuns briefly, parked exits do not, and the w
   b.slow=0;
   m.releaseVehicle(b,parked,'respawn');
   assert.equal(b.slow,0,'respawn releases never stun');
+});
+
+test('every chassis fires its own mounted gun for the authored per-volley damage',()=>{
+ const volley=(template)=>{
+  const m=new Match('chatgpt','hermes',()=>.5,'blood-gulch',{mode:'deathmatch',botCount:0,respawn:1}),a=m.actors[0];
+  const shooter=createVehicle(template),target=createVehicle(template);
+  shooter.id=`shooter-${template.id}`;shooter.kind=template.id;target.id=`target-${template.id}`;target.kind=template.id;
+  Object.assign(shooter.position,{x:0,y:20,z:0});Object.assign(target.position,{x:0,y:20,z:-30});
+  shooter.heading=0;target.heading=0;target.velocity={x:0,z:0};target.health=target.maxHealth;
+  shooter.lastStep={fired:true,muzzles:Array.from({length:shooter.barrelCount},(_,i)=>i)};
+  m.vehicles=[shooter,target];
+  const before=target.health;
+  m.fireVehicle(shooter,a,0,0);
+  return {gun:vehicleConfig(shooter).mountedChaingun,dealt:before-target.health,shots:m.events.filter(event=>event.type==='vehicle-shot').length};
+ };
+ for(const template of [PUMA,TITAN,SCOUT,TRANSPORT]){
+  const {gun,dealt,shots}=volley(template);
+  assert.equal(shots,gun.barrels,`${template.id} fires every authored barrel per volley`);
+  assert.ok(Math.abs(dealt-gun.damage)<1e-9,`${template.id} volley deals ${gun.damage} hull damage (dealt ${dealt})`);
+ }
+});
+
+test('the oriented chassis hitbox resolves side-on fire and reports the struck face',()=>{
+ const m=new Match('chatgpt','claudecode',()=>.5,'blood-gulch',{mode:'deathmatch',botCount:0,humanCount:1,respawn:1});
+ const a=m.actors[0],v=m.vehicles[0];
+ v.driver=null;v.health=v.maxHealth;v.velocity={x:0,z:0};v.position={x:0,y:20,z:0};v.heading=Math.PI/2;
+ a.weapon=0;a.ammo[0]=Infinity;a.shotWait=0;a.spread=0;a.punchYaw=0;a.punchPitch=0;a.reloading=false;a.weaponSwitch=0;a.protection=0;
+ const shoot=(from,to)=>{
+  Object.assign(a,{x:from.x,z:from.z,y:v.position.y,grounded:true});
+  a.yaw=Math.atan2(-(to.x-a.x),-(to.z-a.z));a.pitch=0;a.shotWait=0;a.punchYaw=0;a.punchPitch=0;a.spread=0;
+  v.health=v.maxHealth;
+  assert.ok(m.fire(a),'the aimed shot fires');
+  return v.maxHealth-v.health;
+ };
+ const side=shoot({x:1.5,z:5},{x:1.5,z:0});
+ const front=shoot({x:5,z:0},{x:0,z:0});
+ assert.ok(front>=11-1e-9,`the nose takes the base hit (${front})`);
+ // The side line at x=1.5 only exists once the ray is rotated into the
+ // chassis frame (world-axis width was 2.1/2 = 1.05); it pays the flank 1.2x.
+ assert.ok(Math.abs(side-front*VEHICLE_WEAKPOINT.flank)<1e-6,`the flank pays ${VEHICLE_WEAKPOINT.flank}x (${side} vs ${front})`);
+ const rear=shoot({x:-6,z:0},{x:0,z:0});
+ assert.ok(Math.abs(rear-front*VEHICLE_WEAKPOINT.rear)<1e-6,`the rear pays ${VEHICLE_WEAKPOINT.rear}x (${rear} vs ${front})`);
+ const events=m.events.filter(event=>event.type==='shot'&&event.hit===v.id);
+ assert.ok(events.length>=3,'all three aimed shots connected with the chassis');
+ assert.ok(m.events.some(event=>event.type==='vehicle-damage'&&Math.abs(event.amount-rear)<1e-9),'the struck face pays through damageVehicle');
+});
+
+test('driver field repair applies the authored harness/class rates with a throttled heartbeat',()=>{
+ const drive=(character,harness)=>{
+  const m=new Match(character,harness,()=>.5,'blood-gulch',{mode:'ctf',botCount:0,respawn:1});
+  const a=m.actors[0],v=m.vehicles[0];
+  Object.assign(a,{x:v.position.x,y:v.position.y,z:v.position.z,grounded:true,protection:0});
+  m.step(1/60,{inputs:{0:{interact:true}}});
+  assert.equal(a.vehicleSeat,'driver');
+  v.health=v.maxHealth/2;
+  return {m,a,v};
+ };
+ const codex=drive('chatgpt','codex');
+ const half=codex.v.maxHealth/2;
+ for(let i=0;i<30;i++)codex.m.step(1/60,{inputs:{0:{}}});
+ assert.ok(Math.abs(codex.v.health-(half+6))<1e-9,`codex repairs 12/s (${codex.v.health})`);
+ const heartbeats=codex.m.events.filter(event=>event.type==='vehicle-repair');
+ assert.equal(heartbeats.length,1,'0.5 s of repair emits one heartbeat');
+ const beat=heartbeats[0];
+ assert.equal(beat.vehicleId,codex.v.id);assert.equal(beat.kind,'puma');
+ assert.ok(Number.isFinite(beat.x)&&Number.isFinite(beat.z)&&beat.amount>0);
+ const qwen=drive('qwen','hermes');
+ const qhalf=qwen.v.maxHealth/2;
+ for(let i=0;i<30;i++)qwen.m.step(1/60,{inputs:{0:{}}});
+ assert.ok(Math.abs(qwen.v.health-(qhalf+2))<1e-9,`tool use repairs 4/s (${qwen.v.health})`);
+ // Guards: a full chassis, a parked empty seat and a wreck never repair.
+ codex.v.health=codex.v.maxHealth;
+ for(let i=0;i<30;i++)codex.m.step(1/60,{inputs:{0:{}}});
+ assert.equal(codex.v.health,codex.v.maxHealth,'a full chassis never over-heals');
+ codex.m.releaseVehicle(codex.a);
+ codex.v.health=codex.v.health-40;
+ const empty=codex.v.health;
+ for(let i=0;i<30;i++)codex.m.step(1/60,{inputs:{0:{}}});
+ assert.equal(codex.v.health,empty,'an empty seat never repairs');
+ codex.v.driver=codex.a.id;codex.a.vehicleId=codex.v.id;codex.a.vehicleSeat='driver';
+ codex.v.health=0;codex.v.respawnTimer=codex.v.config.respawn;
+ for(let i=0;i<30;i++)codex.m.step(1/60,{inputs:{0:{}}});
+ assert.equal(codex.v.health,0,'a respawning wreck never repairs');
+});
+
+test('a destroyed chassis respawns on its authored yaw and announces the respawn',()=>{
+ const m=match(),a=m.actors[0],v=m.vehicles[0];
+ assert.ok(Math.abs(v.spawnYaw-Math.PI/2)<1e-9,`spawn yaw stored (${v.spawnYaw})`);
+ Object.assign(a,{x:v.position.x,y:v.position.y,z:v.position.z,grounded:true,protection:0});
+ m.enterVehicle(a);
+ v.heading=-2.1;
+ m.damageVehicle(v,v.maxHealth+1,a);
+ assert.equal(v.health,0);
+ for(let i=0;i<Math.ceil(v.config.respawn/(1/60))+2;i++)m.step(1/60,{inputs:{}});
+ assert.ok(Math.abs(v.heading-Math.PI/2)<1e-9,`respawn restores the authored yaw (${v.heading})`);
+ const event=m.events.find(candidate=>candidate.type==='vehicle-respawn');
+ assert.equal(event.vehicleId,v.id);
+ assert.equal(event.kind,'puma');
+ assert.ok(Number.isFinite(event.x)&&Number.isFinite(event.z));
 });

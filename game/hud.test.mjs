@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {vehicleHud, escapeHint, voiceHint, spectatorControls, SPECTATOR_RESERVED_KEYS, reloadProgress, dynamicCrosshairGap, lowAmmo, postureLabel, hitMarker, projectToScreen, damageNumberStyle, boundList, damageBearing, killBanner, weaponTag, ammoText, commandBrief, isTeamMode, matchStartBanner, modeColumns, modeGoal, modePrimary, modeTargetText, objectiveCopy, suddenDeathBanner, grenadeStatus, killstreakCallout, ladderStatus, streakStatus, audioCaption, altFireLabel, scoreAnnouncer, multikillLabel, spreeLabel, recentKills, killCallout, matchAwards, killFeedWeapon, connectionQuality, spectateActor, nextSpectateTarget, spectatorBoard, spectatorTeams, weaponRangeInfo, weaponRangeLabel, scoreStats, cocsDominanceStatus, cocsOperationsStatus, cocsOutcomeView, acceptCocsAnnouncement, cocsAnnouncePriority, cocsAnnouncementTTL, COCS_ANNOUNCE_PRIORITY, damageHitText, captionPriority, acceptCaption, CAPTION_TTL, teamStatusHud, economyHud} from './hud.mjs';
+import {vehicleHud, escapeHint, voiceHint, spectatorControls, SPECTATOR_RESERVED_KEYS, reloadProgress, dynamicCrosshairGap, lowAmmo, postureLabel, hitMarker, projectToScreen, damageNumberStyle, boundList, damageBearing, killBanner, weaponTag, ammoText, commandBrief, isTeamMode, matchStartBanner, modeColumns, modeGoal, modePrimary, modeTargetText, objectiveCopy, suddenDeathBanner, grenadeStatus, killstreakCallout, ladderStatus, streakStatus, audioCaption, altFireLabel, scoreAnnouncer, multikillLabel, spreeLabel, recentKills, killCallout, matchAwards, killFeedWeapon, killFeedBadges, connectionQuality, qualityNote, damageLogEntry, damageRecap, assistCredit, DAMAGE_LOG_LIMIT, spectateActor, nextSpectateTarget, spectatorBoard, spectatorTeams, weaponRangeInfo, weaponRangeLabel, scoreStats, cocsDominanceStatus, cocsOperationsStatus, cocsOutcomeView, acceptCocsAnnouncement, cocsAnnouncePriority, cocsAnnouncementTTL, COCS_ANNOUNCE_PRIORITY, damageHitText, captionPriority, acceptCaption, CAPTION_TTL, teamStatusHud, economyHud} from './hud.mjs';
 import {WEAPONS} from './data.mjs';
 import {GAME_MODES,teamMode} from './config.mjs';
 import {soccerDisplay,soccerResult} from './race-ui.mjs';
@@ -957,4 +957,134 @@ test('deployable and weapon-upgrade beats have readable captions', () => {
  assert.equal(audioCaption({type: 'deployable-fire'}).text, 'Sentry firing');
  assert.equal(audioCaption({type: 'deployable-expire'}).text, 'Sentry expired');
  assert.equal(audioCaption({type: 'weapon-upgrade'}).text, 'Weapon upgrade');
+});
+
+// ---------------------------------------------------------------------------
+// Combat HUD wave: threaded kill-feed badges, shield-break feedback, the
+// bounded damage ledger with assist credit, and the connection note.
+// ---------------------------------------------------------------------------
+test('hitMarker promotes a shield break above a plain hit without touching kill', () => {
+ const player = {name: 'CHATGPT'};
+ assert.equal(hitMarker({hit: true, shieldBreak: true, time: 10}, player), 'shieldbreak');
+ assert.equal(hitMarker({hit: true, critical: true, shieldBreak: true, time: 10}, player), 'critical', 'a critical still outranks a break');
+ assert.equal(hitMarker({hit: true, kill: true, shieldBreak: true, time: 10}, player), 'kill');
+ assert.equal(hitMarker({shieldBreak: true, time: 10}, player), 'shieldbreak', 'a break shows in its own longer window');
+ assert.equal(hitMarker({hit: true, time: 10}, player), 'hit');
+ assert.equal(hitMarker({}, player), null);
+ assert.equal(hitMarker({shieldBreak: false, fall: true}, player), null);
+});
+
+test('kill feed badges word overkill, an ended streak, a killer streak and an assist', () => {
+ const base = {killer: 'Mistral', victim: 'ChatGPT', self: false, time: 9.4, weapon: 2, ability: false};
+ assert.deepEqual(killFeedBadges(base), []);
+ const rich = killFeedBadges({...base, overkill: 60, victimStreak: 5, killerStreak: 3});
+ assert.deepEqual(rich.map(badge => badge.id), ['streak-ended', 'overkill', 'killer-streak']);
+ assert.equal(rich[0].label, 'STREAK ENDED');
+ assert.equal(rich[1].label, 'OVERKILL');
+ assert.equal(rich[2].label, '×3 STREAK');
+ assert.ok(rich.every(badge => typeof badge.title === 'string' && badge.title.length > 0), 'every badge carries an on-demand description');
+ assert.deepEqual(killFeedBadges({...base, assist: true}).map(badge => badge.label), ['ASSIST']);
+ assert.deepEqual(killFeedBadges({...base, victimStreak: 1, overkill: 54}), [], 'below a named streak and below the shared overkill line');
+ assert.deepEqual(killFeedBadges({...base, self: true, overkill: 200, victimStreak: 9}), [], 'a suicide never badges');
+ assert.deepEqual(killFeedBadges({...base, fall: true}), [], 'an environment kill never badges');
+ assert.deepEqual(killFeedBadges(null), []);
+ assert.equal(killFeedBadges({...base, overkill: 30}, {overkillThreshold: 25}).some(badge => badge.id === 'overkill'), true, 'the escalation line is overridable');
+ assert.equal(killFeedBadges({...base, overkill: 30}, {overkillThreshold: 0}).some(badge => badge.id === 'overkill'), false, 'an invalid threshold falls back to the shared constant');
+});
+
+test('killFeedWeapon accepts an enriched ability name as an additive fallback', () => {
+ assert.equal(killFeedWeapon({ability: true, weapon: 2}, WEAPONS, 'Claw Burst'), 'CLAW BURST', 'the threaded ability name names the lethal blow');
+ assert.equal(killFeedWeapon({ability: false, weapon: 2}, WEAPONS, 'Claw Burst'), 'RAIL', 'a weapon kill keeps the weapon label');
+ assert.equal(killFeedWeapon({weapon: 2}, WEAPONS), 'RAIL', 'the historical two-argument call is unchanged');
+ assert.equal(killFeedWeapon({ability: true}, WEAPONS), null);
+});
+
+test('damage ledger entries bound to three, age against the snapshot and clamp', () => {
+ assert.equal(DAMAGE_LOG_LIMIT, 3);
+ assert.deepEqual(damageLogEntry({name: ' Grok ', weapon: 2, amount: 42.4}, 10), {name: 'Grok', weapon: 2, detail: null, amount: 42, at: 10, source: null});
+ assert.equal(damageLogEntry({abilityName: 'Claw Burst', amount: 12.6}, 4).detail, 'Claw Burst');
+ assert.equal(damageLogEntry({ability: 'Openclaw', amount: 1}, 0).detail, 'Openclaw');
+ assert.equal(damageLogEntry(null, 0), null);
+ assert.equal(damageLogEntry('nope'), null);
+ const ledger = [1, 2, 3, 4].map(index => damageLogEntry({name: `A${index}`, amount: index}, index));
+ const rows = damageRecap(ledger, 6);
+ assert.deepEqual(rows.map(row => row.name), ['A4', 'A3', 'A2'], 'the last three hits read newest first');
+ assert.deepEqual(rows.map(row => row.age), [2, 3, 4]);
+ assert.deepEqual(damageRecap(null, 5), []);
+ assert.deepEqual(damageRecap([{name: 'X', at: 9}], 4)[0].age, 0, 'a future mark clamps to zero');
+ assert.equal(damageRecap(ledger, 6, {limit: 1}).length, 1);
+});
+
+test('assistCredit honours the five second window on snapshot time', () => {
+ assert.equal(assistCredit({5: 10}, 5, 15), true, 'inside the default window');
+ assert.equal(assistCredit({5: 10}, 5, 15.01), false, 'outside the default window');
+ assert.equal(assistCredit({5: 10}, '5', 12, 5), true, 'a numeric string key still matches');
+ assert.equal(assistCredit({5: 10}, 6, 12), false, 'another victim never credits');
+ assert.equal(assistCredit({5: 10}, 5, 9), false, 'a mark in the future never credits');
+ assert.equal(assistCredit({5: 10}, 5, 10, 0), true, 'a zero window still credits the same instant');
+ assert.equal(assistCredit(null, 5, 10), false);
+ assert.equal(assistCredit({5: 10}, null, 10), false);
+});
+
+test('qualityNote renders the round trip plus jitter and loss with one spoken line', () => {
+ const note = qualityNote(connectionQuality({jitter: 5, lossRate: 0, renderDelay: .1}));
+ assert.equal(note.text, '100MS · J5MS · L0%');
+ assert.equal(note.label, 'GOOD');
+ assert.match(note.spoken, /^Connection good\. 100 milliseconds round trip, 5 milliseconds jitter, 0 percent packet loss\.$/);
+ const poor = qualityNote(connectionQuality({jitter: 90, lossRate: .2, renderDelay: .05}));
+ assert.equal(poor.text, '50MS · J90MS · L20%');
+ assert.equal(poor.tone, 'poor');
+ assert.equal(qualityNote(null), null);
+ assert.equal(qualityNote({}).text, '0MS · J0MS · L0%');
+});
+
+test('wave-force, support, economy and atmosphere beats have named captions', () => {
+ const telegraphs = {
+  overseer: 'Incoming attack · overseer aura',
+  mender: 'Incoming attack · mender pulse',
+  flanker: 'Incoming attack · flanker push',
+  phalanx: 'Incoming attack · phalanx shield',
+  sapper: 'Incoming attack · sapper charge',
+  artillery: 'Incoming attack · artillery',
+  boss: 'Incoming attack · boss slam',
+ };
+ for (const [kind, text] of Object.entries(telegraphs)) assert.equal(audioCaption({type: 'enemy-telegraph', kind}).text, text, kind);
+ assert.equal(audioCaption({type: 'enemy-telegraph'}).text, 'Incoming attack', 'an absent kind keeps the generic line');
+ assert.equal(audioCaption({type: 'enemy-telegraph', kind: 'unknown'}).text, 'Incoming attack');
+ assert.equal(audioCaption({type: 'charge', state: 'start'}).text, 'Charging shot');
+ assert.equal(audioCaption({type: 'charge', state: 'ready'}).text, 'Charged shot ready');
+ assert.equal(audioCaption({type: 'weather-change', kind: 'storm'}).text, 'Weather · storm');
+ assert.equal(audioCaption({type: 'weather-change'}).text, 'Weather change');
+ assert.equal(audioCaption({type: 'time-change', phase: 'night'}).text, 'Time of day · night');
+ assert.equal(audioCaption({type: 'time-change'}).text, 'Time of day change');
+ for (const [type, text] of Object.entries({
+  'lattice-support': 'Lattice support',
+  'vehicle-repair': 'Vehicle repaired',
+  'deployable-destroyed': 'Sentry destroyed',
+  'deployable-repaired': 'Sentry repaired',
+  'objective-tiebreak': 'Objective tiebreak',
+  'sudden-death': 'Sudden death',
+  bounty: 'Bounty claimed',
+  'horde-summary': 'Horde summary',
+  'overseer-aura': 'Overseer aura',
+  'weapon-upgrade': 'Weapon upgrade',
+ })) assert.equal(audioCaption({type}).text, text, type);
+});
+
+test('caption priority protects the objective and callout bands', () => {
+ assert.equal(captionPriority({type: 'sudden-death'}), 120);
+ assert.equal(captionPriority({type: 'objective-tiebreak'}), 100);
+ assert.equal(captionPriority({type: 'horde-summary'}), 100);
+ for (const type of ['overseer-aura', 'phalanx-shield', 'enemy-artillery', 'enemy-flank', 'boss-slam', 'boss-summon', 'deployable-destroyed', 'bounty']) assert.equal(captionPriority({type}), 109, type);
+ for (const type of ['lattice-support', 'vehicle-repair', 'deployable-repaired', 'weapon-upgrade', 'charge', 'weather-change', 'time-change']) assert.equal(captionPriority({type}), 85, type);
+ // A protected beat holds the band against routine chatter, and a higher beat still pre-empts.
+ const sudden = acceptCaption(null, 0, {text: 'SUDDEN DEATH', priority: captionPriority({type: 'sudden-death'})}, 10);
+ assert.equal(acceptCaption(sudden, 10, {text: 'Gunfire', priority: captionPriority({type: 'shot'})}, 11), null, 'sudden death cannot be clobbered by gunfire');
+ const aura = acceptCaption(null, 0, {text: 'Overseer aura', priority: captionPriority({type: 'overseer-aura'})}, 10);
+ assert.equal(acceptCaption(aura, 10, {text: 'Weather change', priority: captionPriority({type: 'weather-change'})}, 11), null, 'a notice cannot displace an aura callout');
+ assert.equal(acceptCaption(aura, 10, {text: 'Objective tiebreak', priority: captionPriority({type: 'objective-tiebreak'})}, 11), null, 'an objective beat cannot pre-empt a live callout beat');
+ const tiebreak = acceptCaption(null, 0, {text: 'Objective tiebreak', priority: captionPriority({type: 'objective-tiebreak'})}, 11);
+ assert.equal(tiebreak.text, 'Objective tiebreak');
+ const preempt = acceptCaption(aura, 10, {text: 'SUDDEN DEATH', priority: captionPriority({type: 'sudden-death'})}, 11);
+ assert.equal(preempt.text, 'SUDDEN DEATH', 'the sudden band still pre-empts a callout');
 });

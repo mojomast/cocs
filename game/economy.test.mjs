@@ -87,3 +87,96 @@ test('next-gen maps carry the economy pickups and every map pickup kind is known
  assert.ok(withEconomy.length>=3,'the economy pickups appear on the active rotation');
  for(const map of MAPS)for(const [kind] of map.pickups)assert.ok(known.has(kind),`${map.id} pickup kind ${kind}`);
 });
+
+const aimAt=(actor,target,height)=>{
+ const dx=target.x-actor.x,dz=target.z-actor.z,dy=(target.y??0)+height-(actor.y+1.45),flat=Math.hypot(dx,dz);
+ actor.yaw=Math.atan2(-dx,-dz);
+ actor.pitch=flat>1e-6?Math.asin(Math.max(-1,Math.min(1,dy/flat))):0;
+};
+
+test('enemy fire damages, serializes and destroys a deployed sentry',()=>{
+ const m=new Match('chatgpt','openclaw',seeded(),'crosswire',{mode:'teamdeathmatch',botCount:0,humanCount:2,timeLimit:60});
+ const [a,b]=m.actors;a.team=0;b.team=1;
+ assert.equal(m.collect(a,{kind:'deployable',x:a.x,z:a.z,y:a.y,wait:0}),true);
+ const sentry=m.deployables[0];
+ assert.deepEqual(Object.keys(m.snapshot().deployables[0]).sort(),['cooldown','damage','health','id','interval','life','owner','range','team','x','y','z'],'the sentry snapshot shape is unchanged');
+ Object.assign(a,{x:sentry.x+9,z:sentry.z+9});
+ Object.assign(b,{x:sentry.x+6,z:sentry.z,y:sentry.y,grounded:true,protection:0,weapon:0,ammo:[Infinity],shotWait:0,punchYaw:0,punchPitch:0,spread:0,reloading:false,weaponSwitch:0,health:100});
+ aimAt(b,sentry,.7);
+ const before=sentry.health;
+ assert.equal(m.fire(b),true);
+ assert.ok(Math.abs(sentry.health-(before-11))<1e-9,`a pulse-rifle hit takes 11 (${before} -> ${sentry.health})`);
+ assert.ok(m.events.some(event=>event.type==='deployable-damage'&&event.sentry===sentry.id));
+ for(let i=0;i<8&&m.deployables.length;i++){b.shotWait=0;m.fire(b);}
+ assert.equal(m.deployables.length,0,'the sentry is removed at zero health');
+ const destroyed=m.events.find(event=>event.type==='deployable-destroyed');
+ assert.equal(destroyed.id,sentry.id);assert.equal(destroyed.kind,'sentry');
+ assert.ok(Number.isFinite(destroyed.x)&&Number.isFinite(destroyed.z));
+ assert.equal(m.snapshot().deployables.length,0);
+});
+
+test('a sentry is immune to owner and teammate fire but not to enemy fire',()=>{
+ const m=new Match('chatgpt','openclaw',seeded(),'crosswire',{mode:'teamdeathmatch',botCount:0,humanCount:3,timeLimit:60});
+ const [a,b,c]=m.actors;a.team=0;b.team=1;c.team=0;
+ m.collect(a,{kind:'deployable',x:a.x,z:a.z,y:a.y,wait:0});
+ const sentry=m.deployables[0];
+ assert.equal(m.damageDeployable(sentry,20,a),0,'the owner cannot damage the sentry');
+ assert.equal(m.damageDeployable(sentry,20,c),0,'a teammate cannot damage the sentry');
+ assert.equal(sentry.health,80);
+ assert.equal(m.damageDeployable(sentry,20,b),20,'an enemy damages the sentry');
+ assert.equal(sentry.health,60);
+ Object.assign(a,{x:sentry.x+4,z:sentry.z,y:sentry.y,grounded:true,protection:0,weapon:0,ammo:[Infinity],shotWait:0,punchYaw:0,punchPitch:0,spread:0,reloading:false,weaponSwitch:0});
+ aimAt(a,sentry,.7);
+ assert.equal(m.fire(a),true);
+ assert.equal(sentry.health,60,'owner fire never scratches its own sentry');
+});
+
+test('owner and allies repair a damaged sentry inside the ring, enemies cannot',()=>{
+ const m=new Match('chatgpt','openclaw',seeded(),'crosswire',{mode:'teamdeathmatch',botCount:0,humanCount:3,timeLimit:60});
+ const [a,b,c]=m.actors;a.team=0;b.team=1;c.team=0;
+ m.collect(a,{kind:'deployable',x:a.x,z:a.z,y:a.y,wait:0});
+ const sentry=m.deployables[0];
+ assert.equal(m.damageDeployable(sentry,40,b),40);
+ assert.equal(sentry.health,40);
+ Object.assign(b,{x:sentry.x+40,z:sentry.z+40});
+ Object.assign(c,{x:sentry.x+.6,z:sentry.z+.6,y:sentry.y,grounded:true,protection:0});
+ for(let i=0;i<60;i++)m.step(1/60,{inputs:{[c.id]:{interact:true}}});
+ assert.ok(Math.abs(sentry.health-50)<1e-6,`the ally repairs 10/s (${sentry.health})`);
+ const beats=m.events.filter(event=>event.type==='deployable-repaired');
+ assert.ok(beats.length>=2,`the heartbeat repeats (${beats.length})`);
+ for(const beat of beats){assert.equal(beat.id,sentry.id);assert.equal(beat.kind,'sentry');assert.ok(Number.isFinite(beat.x)&&Number.isFinite(beat.z)&&beat.amount>0);}
+ for(let i=1;i<beats.length;i++)assert.ok(beats[i].time-beats[i-1].time>=.8-1e-9,'heartbeats are throttled to >= 0.8 s');
+ Object.assign(c,{x:sentry.x+40,z:sentry.z+40});
+ Object.assign(a,{x:sentry.x+.6,z:sentry.z+.6,y:sentry.y,grounded:true,protection:0});
+ sentry.health=40;
+ for(let i=0;i<60;i++)m.step(1/60,{inputs:{[a.id]:{interact:true}}});
+ assert.ok(Math.abs(sentry.health-50)<1e-6,`the owner repairs 10/s (${sentry.health})`);
+ sentry.health=40;
+ Object.assign(a,{x:sentry.x+40,z:sentry.z+40});
+ Object.assign(b,{x:sentry.x+.6,z:sentry.z+.6,y:sentry.y,grounded:true,protection:0});
+ for(let i=0;i<30;i++)m.step(1/60,{inputs:{[b.id]:{interact:true}}});
+ assert.equal(sentry.health,40,'an enemy cannot repair a hostile sentry');
+ sentry.health=79;
+ Object.assign(b,{x:sentry.x+40,z:sentry.z+40});
+ Object.assign(a,{x:sentry.x+.6,z:sentry.z+.6,y:sentry.y,grounded:true,protection:0});
+ for(let i=0;i<30;i++)m.step(1/60,{inputs:{[a.id]:{interact:true}}});
+ assert.equal(sentry.health,80,'repair caps at the authored sentry health');
+});
+
+test('vehicle enter keeps precedence over sentry repair on the shared interact edge',()=>{
+ const m=new Match('chatgpt','openclaw',seeded(),'blood-gulch',{mode:'ctf',botCount:0,humanCount:1,respawn:1});
+ const [a]=m.actors,v=m.vehicles[0];
+ Object.assign(a,{x:v.position.x,y:v.position.y,z:v.position.z,grounded:true,protection:0});
+ m.collect(a,{kind:'deployable',x:a.x,z:a.z,y:a.y,wait:0});
+ const sentry=m.deployables[0];
+ sentry.health=40;
+ m.step(1/60,{inputs:{0:{interact:true}}});
+ assert.equal(a.vehicleId,v.id,'the vehicle wins the interact edge');
+ assert.equal(sentry.health,40,'no sentry repair happens while boarding');
+ m.step(1/60,{inputs:{0:{interact:true}}});
+ assert.equal(a.vehicleId,null,'the held interact exits the seat');
+ v.position={x:200,y:0,z:200};
+ Object.assign(a,{x:sentry.x+.6,z:sentry.z+.6,y:sentry.y,grounded:true,protection:0});
+ for(let i=0;i<30;i++)m.step(1/60,{inputs:{0:{interact:true}}});
+ assert.ok(sentry.health>40,'with no vehicle in reach the same edge repairs the sentry');
+});

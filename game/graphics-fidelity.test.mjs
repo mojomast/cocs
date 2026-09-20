@@ -216,3 +216,182 @@ test('the explosion kit is pooled, deterministic and drops animated parts under 
 test('the shadow fit constant is the promised view-tight box',()=>{
  assert.ok(SHADOW_FIT_EXTENT>=17.5&&SHADOW_FIT_EXTENT<=20,'a 35-40 m box');
 });
+
+test('deployable sentries build one shared-geometry model per id, aim and dispose by id',()=>{
+ const view=viewHarness({mapId:'crosswire'});
+ const match={time:1,arena:{id:'crosswire',color:'#55ddcc'},deployables:[
+  {id:1,team:0,x:2,y:0,z:3,life:10,range:22},
+  {id:2,team:1,x:-4,y:0,z:1,life:5,range:22},
+ ],actors:[{id:9,team:1,health:100,x:3,y:0,z:3}]};
+ assert.equal(view.updateDeployables(match,false),2,'one model per live deployable');
+ const first=view.deployableModels.get(1),second=view.deployableModels.get(2);
+ assert.ok(first&&second,'models are keyed by sentry id');
+ assert.deepEqual(first.position.toArray(),[2,0,3]);
+ assert.equal(first.parent,view.scene,'the sentry joins the scene');
+ assert.notEqual(first.userData.head.rotation.y,0,'the turret head tracks the nearest enemy');
+ assert.ok(Math.abs(first.userData.eye.material.emissiveIntensity-.85)<.26,'the eye carries a bounded idle glow');
+ view.updateDeployables(match,false);
+ assert.equal(view.deployableModels.get(1),first,'the same id reuses its model');
+ let eyeDisposed=0;
+ first.userData.eye.material.addEventListener('dispose',()=>eyeDisposed++);
+ view.updateDeployables({...match,deployables:[match.deployables[1]]},false);
+ assert.equal(view.deployableModels.size,1,'an expired sentry leaves the map');
+ assert.equal(eyeDisposed,1,'the removed sentry material disposes exactly once');
+ assert.equal(second.parent,view.scene,'the sibling sentry stays in the scene');
+ const many=Array.from({length:7},(_,i)=>({id:i+10,team:0,x:i,y:0,z:0,life:5,range:22,owner:0}));
+ view.updateDeployables({...match,deployables:many},false);
+ assert.equal(view.deployableModels.size,4,'the sentry budget is four');
+ const headGeometry=view.deployableModels.get(10).userData.head.children[0].geometry;
+ assert.equal(view.deployableModels.get(11).userData.head.children[0].geometry,headGeometry,'sentries share cached primitives');
+ assert.ok(view.sharedResources?.has(headGeometry),'shared sentry geometry is tracked once for view disposal');
+ view.disposeObject(view.scene);for(const resource of view.sharedResources??[])resource.dispose();
+});
+
+test('deployable events spawn a ring, tracer and smoke, and reduced motion keeps them quiet',()=>{
+ const match={time:1,arena:{id:'crosswire',color:'#55ddcc'},deployables:[{id:2,team:1,x:-4,y:0,z:1,life:5,range:22}],actors:[{id:9,team:1,health:100,x:3,y:0,z:3}]};
+ const view=viewHarness({mapId:'crosswire'});
+ view._matchRef=match;
+ view.updateDeployables(match,false);
+ view.effect({type:'deployable',sentry:2,x:-4,y:0,z:1});
+ assert.equal(view.telegraphPool?.slots.filter(slot=>slot.active).length,1,'the spawn cue draws one pooled ring');
+ assert.ok(view.effectPool.slots.some(slot=>slot.active),'the spawn cue adds the burst cue');
+ view.effect({type:'deployable-fire',sentry:2,actor:3,target:9});
+ assert.ok(view.effectPool.slots.some(slot=>slot.active&&slot.line),'the fire cue adds a pooled tracer to the target');
+ const smokeBefore=view.effectPool.slots.filter(slot=>slot.active&&!slot.line).length;
+ view.effect({type:'deployable-expire',sentry:2,actor:3});
+ const expired=view.effectPool.slots.filter(slot=>slot.active&&!slot.line).length-smokeBefore;
+ assert.ok(expired>0,'the expire cue emits pooled smoke');
+ assert.ok(expired<=2,'the expire cue stays bounded');
+ view.effect({type:'deployable-destroyed',sentry:2,actor:3});
+ const destroyed=view.effectPool.slots.filter(slot=>slot.active&&!slot.line).length-smokeBefore;
+ assert.ok(destroyed>expired,'a destroyed sentry smokes harder than an expired one');
+ const reduced=viewHarness({mapId:'crosswire',motionQuery:{matches:true}});
+ reduced._matchRef=match;
+ reduced.updateDeployables(match,true);
+ const head=reduced.deployableModels.get(2).userData.head,rotation=head.rotation.y,eye=reduced.deployableModels.get(2).userData.eye,intensity=eye.material.emissiveIntensity;
+ reduced.updateDeployables({...match,time:2},true);
+ assert.equal(head.rotation.y,rotation,'reduced motion freezes the sentry head');
+ assert.equal(eye.material.emissiveIntensity,intensity,'reduced motion holds the eye glow');
+ reduced.effect({type:'deployable',sentry:2,x:-4,y:0,z:1});
+ reduced.effect({type:'deployable-fire',sentry:2,actor:3,target:9});
+ reduced.effect({type:'deployable-expire',sentry:2,actor:3});
+ assert.ok(!reduced.telegraphPool||reduced.telegraphPool.slots.every(slot=>!slot.active),'no spawn ring under reduced motion');
+ assert.ok(reduced.effectPool.slots.every(slot=>!slot.active),'no tracer or smoke under reduced motion');
+ view.effectPool.dispose();view.telegraphPool?.dispose();
+ reduced.effectPool.dispose();
+});
+
+test('lightning thunder forwards the deterministic weather seed',()=>{
+ const calls=[];
+ const view=viewHarness({camera:new T.PerspectiveCamera(),viewAudio:{thunder:payload=>{calls.push(payload);return true;}},_weatherSeed:99});
+ view._spawnMothSprite=()=>null;
+ view._onLightningStrike({time:1,distance:.4,intensity:.8,thunderGain:1,pan:-.2},false);
+ assert.equal(calls.length,1,'a WebGL strike rings the thunder voice once');
+ assert.equal(calls[0].seed,99,'the weather seed rides along for deterministic thunder variants');
+ assert.equal(calls[0].distance,.4);
+ assert.equal(calls[0].intensity,.8);
+ view._lightningScheduleSeed=123;
+ view._onLightningStrike({distance:.5,intensity:.5},false);
+ assert.equal(calls[1].seed,123,'a live schedule seed wins over the base weather seed');
+ const software=viewHarness({camera:new T.PerspectiveCamera(),viewAudio:{thunder:()=>{calls.push({software:true});return true;}}});
+ software._onLightningStrike({distance:.4,intensity:.8},true);
+ assert.equal(calls.length,2,'the CPU renderer stays silent');
+});
+
+test('software sentries carry a flat blob shadow and still build from the snapshot',()=>{
+ const view=viewHarness({mapId:'crosswire',renderer:{isSoftware:true}});
+ const match={time:1,arena:{id:'crosswire',color:'#55ddcc'},deployables:[{id:4,team:0,x:1,y:0,z:-2,life:5,range:22}],actors:[]};
+ view.updateDeployables(match,false);
+ const model=view.deployableModels.get(4);
+ let blobs=0;model.traverse(node=>{if(node.userData.blobShadow)blobs++;});
+ assert.equal(blobs,1,'software sentries get one flat contact shadow');
+ assert.ok(model.userData.head.children.length>=3,'the shared turret kit still builds on the CPU renderer');
+ view.disposeObject(view.scene);for(const resource of view.sharedResources??[])resource.dispose();
+});
+
+test('interior volumes thicken the fog and damp the key lights from stored base values',()=>{
+ const scene=new T.Scene();scene.fog=new T.FogExp2('#090f17',.018);
+ const hemi=new T.HemisphereLight('#8da5b1','#20364f',1.8),sun=new T.DirectionalLight('#8da5b1',2.4),rim=new T.DirectionalLight('#7fd8ff',.55);
+ rim.userData.rimLight=true;scene.add(hemi,sun,rim);
+ const camera=new T.PerspectiveCamera();camera.position.set(0,1.5,0);
+ const view=Object.assign(Object.create(ArenaView.prototype),{
+  scene,camera,renderer:{isSoftware:false},motionQuery:{matches:false},display:{...DEFAULT_DISPLAY},
+  _arenaLook:{fogDensity:.018},_arenaLight:{hemi:1.8,sun:2.4},
+  interiors:[{kind:'box',x:0,z:0,base:0,height:6,hw:5,hd:5}],
+  weatherState:{clock:0,kind:'clear',preset:{density:1,material:{}},wetness:0,phase:'day'},
+ });
+ assert.equal(view._updateInteriorAmbience(1,true),1,'the camera inside a volume blends fully');
+ assert.ok(Math.abs(scene.fog.density-.018*1.55)<1e-9,'interior fog is the weather density times the bounded multiplier');
+ assert.ok(Math.abs(hemi.intensity-1.8*(1-.18))<1e-9,'hemisphere damp is bounded and recomputed from base');
+ assert.ok(Math.abs(sun.intensity-2.4*(1-.22))<1e-9,'sun damp is bounded and recomputed from base');
+ assert.equal(rim.intensity,.55,'the rim light is never damped');
+ camera.position.set(50,1.5,0);
+ assert.equal(view._updateInteriorAmbience(1,true),0);
+ assert.ok(Math.abs(scene.fog.density-.018)<1e-9,'leaving the volume restores the arena density');
+ assert.ok(Math.abs(hemi.intensity-1.8)<1e-9&&Math.abs(sun.intensity-2.4)<1e-9,'lights return to the stored base');
+ view.weatherState={clock:0,kind:'storm',preset:{density:1.8,material:{dark:.2,wet:.5}},wetness:.5,phase:'day'};
+ camera.position.set(0,1.5,0);
+ view._updateInteriorAmbience(1,true);
+ assert.ok(Math.abs(scene.fog.density-.018*1.8*1.55)<1e-9,'the weather scale survives the interior multiplier');
+ const software=Object.assign(Object.create(ArenaView.prototype),{scene,camera,renderer:{isSoftware:true},motionQuery:{matches:false},display:{...DEFAULT_DISPLAY},interiors:view.interiors});
+ assert.equal(software._updateInteriorAmbience(1,false),0,'the CPU renderer never touches scene.fog');
+ assert.ok(Math.abs(scene.fog.density-.018*1.8*1.55)<1e-9,'the software pass leaves the density alone');
+});
+
+test('objective beacons grow with capture progress without breaking the thin always-on cue',()=>{
+ const view=viewHarness({worldGroup:new T.Group(),objectiveModels:new Map()});
+ const arena={id:'crosswire',color:'#55ddcc'};
+ view.updateObjectives({time:1,objectives:{kind:'koth',zones:[{id:'hill',x:0,y:0,z:0,radius:4,owner:0,captureTeam:0,progress:0}]}},arena);
+ const hill=view.objectiveModels.get('hill');
+ assert.equal(hill.userData.beacon.scale.y,1,'an empty zone keeps the authored beam height');
+ assert.equal(hill.userData.beaconMat.emissiveIntensity,.6,'an empty zone keeps the authored beam intensity');
+ view.updateObjectives({time:1,objectives:{kind:'koth',zones:[{id:'hill',x:0,y:0,z:0,radius:4,owner:0,captureTeam:0,progress:100}]}},arena);
+ assert.ok(hill.userData.beacon.scale.y>1.5,'the beacon grows with captured progress');
+ assert.ok(Math.abs(hill.userData.beacon.position.y-1.2*hill.userData.beacon.scale.y)<1e-9,'the beam stays rooted at the zone');
+ assert.ok(hill.userData.beaconMat.emissiveIntensity>.6,'the beam brightens with progress');
+ assert.equal(hill.userData.beacon.geometry.parameters.height,2.4,'the thin beacon geometry is untouched');
+ assert.equal(hill.userData.beaconMat.depthTest,false,'the beacon stays visible through geometry');
+ assert.equal(hill.userData.beaconMat.color.getHexString(),hill.userData.baseMat.color.getHexString(),'the beacon colour still matches the zone');
+ assert.equal(hill.userData.beacon.renderOrder,100);
+ assert.ok(hill.scale.y>=1&&hill.scale.y<=1.1,'the zone group keeps its own bounded pulse');
+ view.updateCocsObjectives({time:1,objectives:{kind:'cocs',nodes:[{id:'n1',archetype:'front',x:5,y:0,z:5,r:6,live:true,contested:false,owner:0,progress:[1,0]}]}},arena);
+ const node=view.objectiveModels.get('n1');
+ assert.ok(node.userData.beacon.scale.y>1.5,'a captured Lattice node also beams its progress');
+ assert.equal(node.userData.beacon.geometry.parameters.height,2.4,'the Lattice beam keeps its thin geometry');
+ view.disposeObject(view.scene);
+});
+
+test('shield hits pulse the shell without touching its colour and low health emits bounded smoke',()=>{
+ const view=viewHarness({actorModels:new Map()});
+ const model=new T.Group();model.position.set(1,0,2);
+ model.userData.shield=new T.Mesh(new T.SphereGeometry(1.15,8,6),new T.MeshBasicMaterial({color:'#70ffe6',transparent:true,opacity:.24,wireframe:true}));
+ model.userData.shield.scale.set(.7,1,.7);
+ view.actorModels.set(5,model);
+ view._matchRef={actors:[{id:5,health:20,maxHealth:100}]};
+ assert.equal(view._damageReadability({actor:5,shield:4,shieldBreak:false,amount:10},false),2,'a low-health absorbing hit smokes and sparks');
+ const pulse=view._pulseShield(model,true);
+ assert.ok(pulse>0&&pulse<=1,'a shield hit leaves a decaying pulse');
+ assert.ok(model.userData.shield.scale.x>.7,'the shell pulses outward');
+ assert.equal(model.userData.shield.material.color.getHexString(),'70ffe6','the pulse never recolours the shell');
+ assert.equal(model.scale.x,1,'the actor transform is untouched');
+ assert.equal(view._damageReadability({actor:5,shield:4,shieldBreak:false,amount:10},false),0,'the next hit is throttled');
+ assert.ok(view.effectPool.slots.filter(slot=>slot.active&&!slot.line).length<=2,'each damage event emits at most a smoke mote and a spark');
+ model.userData.lowHealthSmokeAt=-Infinity;model.userData.lowHealthSparkAt=-Infinity;
+ assert.equal(view._damageReadability({actor:5,shield:0,shieldBreak:false,amount:10},false),2,'the throttle window re-opens');
+ model.userData.shieldPulseUntil=0;
+ view._matchRef.actors[0].health=100;
+ assert.equal(view._damageReadability({actor:5,shield:4,shieldBreak:false,amount:10},false),0,'a healthy actor emits no low-health smoke');
+ assert.ok(model.userData.shieldPulseUntil>0,'an absorbing shield hit still leaves its pulse');
+ assert.equal(view._pulseShield(model,false,performance.now()+1000),0,'the pulse expires');
+ assert.equal(model.userData.shield.scale.x,.7,'the shell returns to its authored scale');
+ assert.equal(model.userData.shield.material.opacity,.13,'the shell returns to its authored opacity');
+ const reduced=viewHarness({actorModels:new Map(),motionQuery:{matches:true}});
+ const reducedModel=new T.Group();reducedModel.userData.shield=new T.Mesh(new T.SphereGeometry(1,4,3),new T.MeshBasicMaterial({color:'#70ffe6'}));
+ reduced.actorModels.set(5,reducedModel);reduced._matchRef={actors:[{id:5,health:10,maxHealth:100}]};
+ assert.equal(reduced._damageReadability({actor:5,shield:4},true),0,'reduced motion suppresses the damage reads');
+ assert.equal(reducedModel.userData.shieldPulseUntil,undefined);
+ const software=viewHarness({actorModels:new Map(),renderer:{isSoftware:true}});
+ software.actorModels.set(5,reducedModel);software._matchRef={actors:[{id:5,health:10,maxHealth:100}]};
+ assert.equal(software._damageReadability({actor:5,shield:4},false),0,'the CPU renderer suppresses the damage reads');
+ view.effectPool.dispose();
+});

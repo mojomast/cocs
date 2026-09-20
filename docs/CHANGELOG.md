@@ -58,6 +58,20 @@ paid Moth material pack and the offline variety pipeline behind it.
   stage damage before breaking, vehicles get rear/flank weak points and
   passenger fire, and the HUD gains team status and economy readouts. See
   [Physics, animation and audio pass](design/PHYSICS-AND-AUDIO-PASS.md).
+- Depth and dynamics pass: every chassis fires its own mounted gun (the Titan
+  was firing a Puma gun at a fraction of its DPS), driver repair actually
+  heals, vehicles take rear/flank weak-point hits from the face that was struck,
+  sentries are renderable, damageable and repairable, and vehicles can ram.
+  Enemy telegraphs are no longer silent, the mix gains ducking/low-health/
+  killcam treatments plus casing, engine and skid foley, every mode gets a
+  percussion kit and palette, and race/soccer get their own grooves. Sentries
+  are visible in the world, interiors fog, actors show damage, weapons glow
+  when hot, impacts read by surface, the killfeed gains streak/overkill/assist
+  detail with a death recap, and the lobby gains chat timestamps, diagnostics
+  and filters. Also fixes the intermittent soundtrack regression: late steps
+  are dropped instead of bursting, the music clock no longer depends on the
+  render frame, and the results arrangement is no longer overwritten. See
+  [Depth and dynamics pass](design/DEPTH-PASS.md).
 - Animation pass: restored death variety (killing-direction topple, per-pose
   fall arcs, seeded limb silhouettes, style treatments), strength-scaled hit
   flinches, a melee swing, shell casings, style-aware death audio, and UI

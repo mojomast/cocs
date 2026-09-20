@@ -6,6 +6,12 @@ const freeze = value => {
   return value;
 };
 
+// Mounted-gun tables are authored per *volley*: one trigger pull fires every
+// authored barrel and the weapon step splits `damage` evenly across them, so
+// the real sustained output is `damage / interval` — exactly `sustainedDps`.
+// `heatPerShot` accrues once per volley; `heatPerShot > coolRate * interval`
+// is what lets a long burst overheat (the chainguns used to author 0 and could
+// never lock out).
 const CHAINGUN = freeze({
   id: 'mounted-chaingun',
   name: 'Mounted Chaingun',
@@ -14,10 +20,10 @@ const CHAINGUN = freeze({
   sustainedDps: 111.1111111111,
   barrels: 2,
   range: 55,
-  heatPerShot: 0,
+  heatPerShot: 0.035,
   maxHeat: 1,
-  coolRate: 1,
-  overheatCooldown: 0
+  coolRate: 0.4,
+  overheatCooldown: 1.6
 });
 
 export const PUMA = freeze({
@@ -132,10 +138,10 @@ const LIGHT_GUN = freeze({
   sustainedDps: 50,
   barrels: 1,
   range: 45,
-  heatPerShot: 0,
+  heatPerShot: 0.042,
   maxHeat: 1,
-  coolRate: 1,
-  overheatCooldown: 0
+  coolRate: 0.3,
+  overheatCooldown: 1.8
 });
 
 // Heavy siege chassis: slow, heavily armoured, single high-calibre barrel.
@@ -340,6 +346,7 @@ export function createVehicle(template = PUMA) {
     config,
     position: { x: 0, y: 0, z: 0 },
     heading: 0,
+    spawnYaw: 0,
     velocity: { x: 0, z: 0 },
     vy: 0,
     driver: null,
@@ -487,13 +494,20 @@ export const VEHICLE_DISMOUNT = freeze({
 export const VEHICLE_PASSENGER_FIRE = freeze({ spread: 1.35, recoil: 1.25 });
 export const VEHICLE_PASSENGER_FIRE_NEUTRAL = freeze({ spread: 1, recoil: 1 });
 
-// Bearing-aware weak point for direct vehicle fire. `opts.from` is the
-// attacker's world position; `opts.bearing` may instead name the angle (radians)
-// between the chassis forward face (+z at heading 0) and the incoming shot.
-// Callers that pass neither (every splash path) get the neutral 1x, so only
-// aimed direct hits can exploit the rear/flank cones. Pure and deterministic.
+// Bearing-aware weak point for direct vehicle fire. `opts.face` is the actual
+// struck chassis face reported by the oriented hitbox (front/rear/left/right/
+// top) and wins when present; otherwise `opts.from` is the attacker's world
+// position and `opts.bearing` may instead name the angle (radians) between the
+// chassis forward face (+z at heading 0) and the incoming shot. Callers that
+// pass none of them (every splash path) get the neutral 1x, so only aimed
+// direct hits can exploit the rear/flank cones. Pure and deterministic.
 export function vehicleWeakPointMultiplier(vehicle, opts = null) {
   if (!opts || typeof opts !== 'object') return 1;
+  if (typeof opts.face === 'string') {
+    if (opts.face === 'rear') return VEHICLE_WEAKPOINT.rear;
+    if (opts.face === 'left' || opts.face === 'right') return VEHICLE_WEAKPOINT.flank;
+    if (opts.face === 'front' || opts.face === 'top') return 1;
+  }
   let bearing = Number.isFinite(opts.bearing) ? opts.bearing : null;
   if (bearing === null) {
     const from = opts.from ?? opts.source ?? null;

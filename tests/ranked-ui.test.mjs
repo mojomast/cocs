@@ -71,3 +71,21 @@ test('leaving a live or rated room asks first and surfaces the seat-hold window'
  assert.ok(modals.includes('title="Leave the server?"'), 'the results confirm dialog exists');
  assert.ok(modals.includes('disconnectNet:requestLeave'), 'the leave-server action routes through the gate');
 });
+
+// v8.6 online-lobby wave: the room filters, the non-live diagnostics, the
+// proportional vote rows and the host rematch gate are additive on the same
+// surfaces and must not introduce a second live region.
+test('the online-lobby wave stays labelled, worded and free of new live regions', async () => {
+ const src = await readFile(new URL('app/ui/screens/NetScreens.tsx', root), 'utf8');
+ assert.match(src, /role="group" aria-label="Room filters"/, 'the room filter group keeps its label');
+ assert.match(src, /aria-label="Search rooms"/, 'room search is labelled');
+ assert.match(src, /aria-label="Sort rooms"/, 'room sort is labelled');
+ assert.match(src, /aria-pressed=\{hideStarted\}/, 'the hide-in-progress toggle exposes its pressed state');
+ assert.match(src, /aria-label="Connection diagnostics"/, 'diagnostics are a named group');
+ assert.match(src, /<Meter ratio=\{voteMax>0\?row\.votes\/voteMax:0\}\/>/, 'vote rows use proportional bars');
+ assert.match(src, /Number\.isFinite\(Number\(voteCloseRaw\)\)/, 'the vote countdown is server-gated, never invented');
+ assert.match(src, /REMATCH NOW/, 'the host rematch affordance is named');
+ assert.ok(!src.includes('aria-live'), 'the wave adds no live region');
+ const css = await readFile(new URL('app/styles/ui.css', root), 'utf8');
+ assert.match(css, /\.theater-filters select\{min-height:44px/, 'filter selects keep 44 px targets');
+});

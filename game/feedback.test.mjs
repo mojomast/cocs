@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import * as T from 'three';
-import {WeaponFeedback,EffectPool,SynthAudio,AmbientFX,WeatherFX,EMPTY_CHANNELS,MODE_THEMES,DEATH_SOUND_FAMILIES,DEATH_STYLE_SOUNDS,deathSoundFor,altVoiceFor,ALT_VOICE_IDS,POWER_CUES,PICKUP_CUES,pickupCue} from './feedback.mjs';
+import {WeaponFeedback,EffectPool,SynthAudio,AmbientFX,WeatherFX,EMPTY_CHANNELS,MODE_THEMES,DEATH_SOUND_FAMILIES,DEATH_STYLE_SOUNDS,deathSoundFor,altVoiceFor,ALT_VOICE_IDS,POWER_CUES,PICKUP_CUES,pickupCue,TELEGRAPH_CUES,ANNOUNCE_CUES,ANNOUNCE_CADENCE} from './feedback.mjs';
 import {HALO_THEME,HALO_ARRANGEMENTS,MUSIC_PALETTES} from './music.mjs';
 import {ALT_FIRE} from './alt-fire.mjs';
 import {deathPlan,DEATH_STYLES} from './deaths.mjs';
@@ -1648,5 +1648,187 @@ test('the halo pack keeps its modal centre and arrangements under mode and biome
  assert.equal(audio.setArenaBiome('frostbite'),'cold');
  assert.equal(audio.musicEngine.palette.pluck,true,'the biome palette overlays the mode palette');
  assert.ok(MUSIC_PALETTES.horde&&MUSIC_PALETTES.cold&&Object.isFrozen(MUSIC_PALETTES.default));
+ audio.dispose();
+});
+
+// ---------------------------------------------------------------------------
+// Audio dynamics pass: x/z telegraph audibility, shield absorb and the
+// high-value announcer cadence.
+// ---------------------------------------------------------------------------
+
+test('enemy telegraphs normalize x/z, stay audible and voice a distinct motif per kind',()=>{
+ const kinds=['overseer','mender','flanker','phalanx','sapper','artillery','boss'];
+ assert.equal(Object.keys(TELEGRAPH_CUES).length,kinds.length+1,'one motif per sim kind plus the generic fallback');
+ for(const cue of Object.values(TELEGRAPH_CUES))assert.ok(Object.isFrozen(cue)&&Object.isFrozen(cue.notes)&&cue.notes.length>=2,'telegraph cues are frozen motifs');
+ const seen=new Map();
+ for(const kind of kinds){
+  const {audio,plays,layers}=voiceCapture();
+  audio.event({type:'enemy-telegraph',id:1,time:1,actor:9,kind,x:6,z:0,duration:.5},player);
+  assert.equal(plays.length,1,`${kind} telegraph spends exactly one voice`);
+  assert.ok(plays[0].pan>.5,`${kind} telegraph pans toward the source`); // x=6 with a zero yaw sits left
+  const notes=layers.filter(layer=>layer.kind==='tone').map(layer=>layer.freq);
+  assert.ok(notes.length>=2,`${kind} plays a motif`);
+  seen.set(kind,JSON.stringify(notes));
+  audio.dispose();
+ }
+ assert.equal(new Set(seen.values()).size,kinds.length,'every telegraph kind has its own motif');
+ for(const extra of [{kind:'not-a-kind'},{}]){
+  const {audio,plays}=voiceCapture();
+  audio.event({type:'enemy-telegraph',id:1,time:1,actor:9,x:6,z:0,...extra},player);
+  assert.equal(plays.length,1,'unknown and missing kinds keep the generic fallback voice');
+  audio.dispose();
+ }
+ const far=voiceCapture();
+ far.audio.event({type:'enemy-telegraph',id:1,time:1,actor:9,kind:'boss',x:400,z:0,duration:.5},player);
+ assert.equal(far.plays.length,0,'an out-of-range telegraph falls off to silence');
+ far.audio.dispose();
+ const {audio,nodes}=audioFixture2();
+ audio.muted=true;const before=nodes.length;
+ audio.event({type:'enemy-telegraph',id:1,time:1,actor:9,kind:'sapper',x:6,z:0},player);
+ assert.equal(nodes.length,before,'muting silences every telegraph kind');
+ audio.muted=false;
+ audio.event({type:'enemy-telegraph',id:2,time:2,actor:9,kind:'sapper',x:6,z:0},{...player,reduced:true});
+ assert.ok(nodes.length>before,'sound is not motion-gated: reduced players still hear the telegraph');
+ audio.dispose();
+});
+
+test('enemy ordnance and support beats carrying only x/z are audible now',()=>{
+ for(const type of ['enemy-detonate','enemy-artillery','phalanx-shield','enemy-flank','overseer-aura','lattice-support']){
+  const {audio,plays}=voiceCapture();
+  audio.event({type,id:1,time:1,actor:9,x:6,z:0},player);
+  assert.equal(plays.length,1,`${type} spends one voice from its x/z position`);
+  audio.dispose();
+ }
+ const far=voiceCapture();
+ for(const type of ['enemy-detonate','phalanx-shield','enemy-artillery']){
+  far.audio.event({type,id:1,time:1,actor:9,x:600,z:0},player);
+ }
+ assert.equal(far.plays.length,0,'a far ordnance beat with a distance gate stays silent');
+ far.audio.dispose();
+ const flank=voiceCapture();
+ flank.audio.event({type:'enemy-flank',id:1,time:1,actor:9,x:600,z:0},player);
+ assert.equal(flank.plays.length,1,'the flank match beat keeps its audible distance floor');
+ flank.audio.dispose();
+});
+
+test('repair and deployable beats have cue rows and spend one voice each',()=>{
+ for(const type of ['vehicle-repair','deployable-destroyed','deployable-repaired','deployable-fire']){
+  const {audio,plays}=voiceCapture();
+  audio.event({type,id:1,time:1,actor:9,x:8,z:0},player);
+  assert.equal(plays.length,1,`${type} spends one voice from its x/z position`);
+  audio.dispose();
+ }
+});
+
+test('shielded damage layers a bounded absorb tick inside the unchanged damage token',()=>{
+ const capture=()=>{const {audio}=audioFixture2(),plays=[],noises=[],tones=[];
+  audio._play=(duration,pan,build)=>{plays.push({duration,pan});build(0,{},[]);};
+  audio._noise=(t,out,nodes,options)=>noises.push(options);
+  audio._tone=(t,out,nodes,options)=>tones.push(options);
+  return {audio,plays,noises,tones};
+ };
+ const isTick=layer=>layer.type==='bandpass'&&layer.sweep===1200;
+ const absorbed=capture();
+ absorbed.audio.event({type:'damage',id:1,time:1,actor:7,source:9,amount:12,shield:25},player);
+ assert.equal(absorbed.plays.length,1,'the absorb stays inside the single damage token');
+ assert.equal(absorbed.plays[0].duration,.18,'a non-breaking shield hit keeps the normal token length');
+ assert.equal(absorbed.noises.filter(isTick).length,1,'a shielded hit layers exactly one absorb tick');
+ assert.ok(absorbed.tones.some(tone=>tone.freq>=640&&tone.freq<=900),'the tick carries a low glass body');
+ const plain=capture();
+ plain.audio.event({type:'damage',id:2,time:2,actor:7,source:9,amount:12},player);
+ assert.equal(plain.noises.filter(isTick).length,0,'an unshielded hit adds no tick');
+ const broken=capture();
+ broken.audio.event({type:'damage',id:3,time:3,actor:7,source:9,amount:40,shield:5,shieldBreak:true},player);
+ assert.equal(broken.plays[0].duration,.24,'the shield-break token length is unchanged');
+ assert.equal(broken.noises.filter(isTick).length,0,'a break keeps its own shatter layer, not the absorb tick');
+ const incoming=capture();
+ incoming.audio.event({type:'damage',id:4,time:4,actor:3,source:7,amount:12,shield:25},player);
+ assert.equal(incoming.noises.filter(isTick).length,0,'the scorer hit confirm does not stack the local absorb tick');
+ absorbed.audio.dispose();plain.audio.dispose();broken.audio.dispose();incoming.audio.dispose();
+});
+
+test('high-value announcer cues are opt-in, one voice each and share a global cadence guard',()=>{
+ const {audio}=audioFixture2(),plays=[];
+ audio._play=(duration,pan,build)=>{plays.push({duration,pan});build(0,{},[]);};
+ audio.ctx.currentTime=10;
+ assert.equal(audio.announcerEvent('horde-wave').played,false,'the announcer stays opt-in');
+ assert.equal(audio.announcerEvent('not-a-cue'),null,'an unknown event has no cue');
+ audio.setAnnouncer(true);
+ assert.equal(audio.announcerEvent('horde-wave').played,true);
+ assert.equal(audio.lastCue,'horde-wave');
+ assert.equal(plays.length,1,'one cue is one voice token');
+ const blocked=audio.announcerEvent('objective-win');
+ assert.equal(blocked.played,false);
+ assert.equal(blocked.cadence,true,'the global cadence guard blocks a second callout inside the window');
+ assert.equal(plays.length,1);
+ audio.ctx.currentTime=10+ANNOUNCE_CADENCE;
+ assert.equal(audio.announcerEvent('objective-win').played,true,'the cadence window releases');
+ assert.equal(plays.length,2);
+ assert.equal(audio.announcerCue('capture').played,true,'the direct announcer path still plays');
+ assert.equal(audio.announcerCue('capture').deduped,true,'the per-cue cooldown is unchanged');
+ // Event-stream dispatch: world beats announce for everyone, actor-scoped
+ // beats only for the local player, and a cluster makes exactly one callout.
+ const beats=[];audio._beat=(...args)=>beats.push(args);
+ audio._announceCadence=null;audio.ctx.currentTime+=10;
+ audio.event({type:'zone-capture',id:1,time:1,actor:9,x:4,z:0},player);
+ assert.equal(audio.lastCue,'zone-capture','a world beat announces for remote events');
+ assert.equal(beats.length,1,'the motif still owns its own voice');
+ const cuePlays=plays.length;
+ audio.event({type:'objective-win',id:2,time:2,actor:9,x:4,z:0},player);
+ assert.equal(beats.length,2);
+ assert.equal(plays.length,cuePlays,'a second world beat inside the cadence window is silent');
+ audio._announceCadence=null;audio.ctx.currentTime+=10;
+ audio.event({type:'weapon-upgrade',id:3,time:3,actor:9,x:4,z:0},player);
+ assert.equal(audio.lastCue,'zone-capture','a remote actor-scoped beat is not announced locally');
+ audio.event({type:'weapon-upgrade',id:4,time:4,actor:7,x:0,z:0},player);
+ assert.equal(audio.lastCue,'weapon-upgrade','the local actor-scoped beat is announced');
+ audio._announceCadence=null;audio.ctx.currentTime+=10;
+ audio.event({type:'enemy-artillery',id:5,time:5,actor:9,x:8,z:0},player);
+ assert.equal(audio.lastCue,'enemy-artillery','an enemy world beat announces for everyone');
+ audio.setAnnouncer(false);
+ audio._announceCadence=null;audio.ctx.currentTime+=10;
+ audio.event({type:'mission-won',id:6,time:6},player);
+ assert.equal(audio.lastCue,'enemy-artillery','a disabled announcer never cues');
+ // Every table row is a frozen motif shape with a distinct id.
+ for(const [type,cue] of Object.entries(ANNOUNCE_CUES)){
+  assert.equal(cue.id,type,`${type} id matches its key`);
+  assert.ok(Number.isFinite(cue.freq)&&Number.isFinite(cue.mid)&&Number.isFinite(cue.end)&&cue.length>0,`${type} is a complete cue`);
+ }
+ audio.dispose();
+});
+
+test('weather and time onsets cue only on a real change',()=>{
+ const {audio}=audioFixture2(),beats=[];
+ audio._beat=(...args)=>beats.push(args);
+ audio.event({type:'weather-change',id:1,time:1,kind:'rain'},player);
+ assert.equal(beats.length,1,'the first weather report is an onset');
+ audio.event({type:'weather-change',id:2,time:2,kind:'rain'},player);
+ assert.equal(beats.length,1,'a repeated kind stays silent');
+ audio.event({type:'weather-change',id:3,time:3,kind:'storm'},player);
+ assert.equal(beats.length,2,'a real kind change cues');
+ audio.event({type:'time-change',id:4,time:4,phase:'dusk'},player);
+ assert.equal(beats.length,3);
+ audio.event({type:'time-change',id:5,time:5,phase:'dusk'},player);
+ assert.equal(beats.length,3);
+ audio.event({type:'time-change',id:6,time:6,phase:'night'},player);
+ assert.equal(beats.length,4);
+ audio.dispose();
+});
+
+test('combat intensity never overrides the menu or results arrangement',()=>{
+ const audio=new SynthAudio();
+ const scenes=[];
+ audio.musicEngine={setScene:(value)=>scenes.push(value),setIntensity(){},setDuck(){},clearResponses(){},requestResponse(){return false;},setEnabled(){},setMuted(){}};
+ audio.scene='results';
+ audio.setIntensity(.9);
+ assert.equal(scenes.at(-1),'results','the results take holds through a loud frame');
+ audio.scene='game';
+ audio.setIntensity(.9);
+ assert.equal(scenes.at(-1),'combat');
+ audio.setIntensity(.1);
+ assert.equal(scenes.at(-1),'explore');
+ audio.scene='menu';
+ audio.setIntensity(1);
+ assert.equal(scenes.at(-1),'menu','the menu never flips to combat');
  audio.dispose();
 });

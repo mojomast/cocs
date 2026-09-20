@@ -22,6 +22,7 @@ import {refineOperatorCharacter} from './models.mjs';
 import {terrainTriangles,terrainWallTriangles} from './terrain.mjs';
 import {foundryDetails,styleFoundryObjective} from './lattice-foundry-view.mjs';
 import {latticePresentationChanges} from './lattice-feedback.mjs';
+import {buildInteriors,interiorAt} from './interiors.mjs';
 import {smoothNormals,positionColors} from './terrain-normals.mjs';
 import {TEAM_PALETTE,teamPresentation,teamMark,updateTeamMark,applyActorTeam} from './team-presentation.mjs';
 import {spectateActor,latticeAnnounceCue} from './hud.mjs';
@@ -112,6 +113,30 @@ export function bloomTuning(tier=0){
  if(level<=0)return {threshold:.9,radius:.72};
  if(level===1)return {threshold:.86,radius:.66};
  return {threshold:.82,radius:.6};
+}
+// Surface-aware impact presentation. `dir` is the authoritative shot direction
+// (pointing into the surface) and `ground` the presentation support sample at
+// the impact height `y`, so a downward hit only reads as a terrain floor when
+// the sampled support actually matches. Wall hits use metal sparks and a cool
+// soot tint; terrain floors use dust and a warm dirt tint. Pure: the simulation
+// never reads it.
+export function impactSurfaceStyle(dir,{ground=null,y=0}={}){
+ const dy=Number(dir?.y)||0,steep=!!dir&&Math.abs(dy)>=.6,floor=steep&&dy<0;
+ if(!floor)return {floor:false,terrain:false,wall:!!dir,dust:'#6b7681',spark:'#ffcf9a',decal:'#14161c'};
+ const terrain=Number.isFinite(ground)&&Math.abs(Number(ground)-(Number(y)||0))<=.3;
+ return {floor:true,terrain,wall:false,dust:terrain?'#8a7f6b':'#7d858c',spark:terrain?'#d8c39a':'#ffcf9a',decal:terrain?'#241d14':'#181513'};
+}
+// Sustained-fire muzzle smoke cadence: one slow grey mote every Nth local shot.
+// The period follows the tier particle budget and the effects-quality slider,
+// so denser settings read a puff sooner; reduced motion never emits. Zero means
+// smoke is disabled for this tier.
+export function muzzleSmokePeriod(particles=1,effectsScale=1,reduced=false){
+ if(reduced)return 0;
+ const scale=Math.max(0,Number(particles)||0)*Math.max(0,Number(effectsScale)||0);
+ if(scale>=1)return 3;
+ if(scale>=.6)return 4;
+ if(scale>=.3)return 6;
+ return 0;
 }
 // Planar distance from a presentation node to the active camera, for model LOD.
 export function distanceOf(node,camera){if(!node||!camera)return 0;const dx=(node.position?.x||0)-camera.position.x,dz=(node.position?.z||0)-camera.position.z;return Math.hypot(dx,dz);}
@@ -349,6 +374,17 @@ function assembleWeapon(type,assets,visual,finish,body){return withAssets(assets
   // child (weapon-presentation contract) and append detail bursts afterwards.
   for(const point of points){const origin=V(point[0],point[1],point[2]),burst=new T.Group();burst.name='muzzle-flash';burst.userData.muzzleFlash=true;burst.position.copy(origin);const cone=new T.Mesh(new T.ConeGeometry(muzzle[0]*.8,muzzle[0]*2.2,5),new T.MeshBasicMaterial({color:info.color,transparent:true,opacity:.9,depthWrite:false,blending:T.AdditiveBlending}));cone.name='flash-cone';cone.rotation.x=-Math.PI/2;cone.position.z=-muzzle[0]*1.2;burst.add(cone);for(const angle of [0,Math.PI/2]){const petal=new T.Mesh(new T.PlaneGeometry(muzzle[0]*3.2,muzzle[0]*.55),new T.MeshBasicMaterial({color:info.color,transparent:true,opacity:.7,depthWrite:false,side:T.DoubleSide,blending:T.AdditiveBlending}));petal.name='flash-petal';petal.rotation.z=angle;burst.add(petal);}flash.add(burst);}
   flash.visible=false;g.add(flash);g.userData.flash=flash;g.userData.muzzles=anchors;g.userData.muzzle=anchors[0];g.userData.feel=info.feel;g.userData.anchors.muzzle=anchors[0];g.userData.anchors.muzzles=anchors;
+  // Sustained-fire barrel heat: one additive sleeve behind the muzzle with its
+  // own material, so the per-weapon shot counter can drive it independently of
+  // the accent glow. Hidden at rest; the per-frame viewmodel update owns the
+  // exponential decay. Reduced motion and the low tier never show it.
+  const heatMat=assets?assets.material('weapon-heat-glow',()=>new T.MeshBasicMaterial({color:'#ff5a1f',transparent:true,opacity:0,depthWrite:false,blending:T.AdditiveBlending})):new T.MeshBasicMaterial({color:'#ff5a1f',transparent:true,opacity:0,depthWrite:false,blending:T.AdditiveBlending});
+  const heat=new T.Mesh(geometry(assets,'weapon-heat-glow',()=>new T.CylinderGeometry(1,1,1,10,1,true)),heatMat);
+  heat.name='heat-glow';heat.rotation.x=Math.PI/2;heat.visible=false;
+  const muzzlePoint=anchors[0]?.position??V(0,0,-.83),heatRadius=Math.max(.05,(Number(muzzle[0])||.1)*.8);
+  heat.position.set(0,muzzlePoint.y??0,(muzzlePoint.z??0)+.16);
+  heat.scale.set(heatRadius,.3,heatRadius);
+  g.add(heat);g.userData.heatGlow=heat;g.userData.heat=0;g.userData.heatShots=0;
   if(visual){const acc=material(visual.color||'#8affc1',.4,.3,true),mod=material('#161d22',.6,.5);
    // Attachments mount on the weapon's own sight line (interpolated between the
    // real rear and front anchors), so the optic aperture sits on the aim axis and
@@ -881,11 +917,23 @@ export class ArenaView{
        _applyEffectsQuality(){
         const s=this._effectsScaleValue(),q=this.qualitySettings||{};
         this._effectsScale=s;
+        // Combat particle budgets fold the tier and the effects slider together.
+        // The default `auto` slider keeps s=1, so high-tier output is unchanged.
+        this._combatParticleScale=Math.max(.2,Math.min(2,(q.particles??1)*s));
         if(this.ambientFx)this.ambientFx.moteCap=Math.max(1,Math.round((q.ambientMotes??3)*s));
         // The precipitation cap follows the preset's own particle budget, so a
         // heavier storm reads denser than an overcast drizzle on the same tier.
         if(this.weatherFx)this.weatherFx.cap=weatherParticleCap(this.weatherState?.preset,q,s,44);
        }
+       // Shared combat-particle multiplier for impact sparks, death bursts and
+       // shield shatter. Falls back to the live tier when a partially
+       // constructed view never ran _applyEffectsQuality.
+       _particleScale(){
+        if(Number.isFinite(this._combatParticleScale))return this._combatParticleScale;
+        const q=this._quality()||{};
+        return Math.max(.2,Math.min(2,(q.particles??1)*(Number.isFinite(this._effectsScale)?this._effectsScale:1)));
+       }
+       _impactSparkCount(base=4){return Math.max(1,Math.round(base*this._particleScale()));}
        // Enable/disable whole post passes and set the independent bloom budget
        // without touching the world render resolution.
        _applyPostQuality(){
@@ -1564,7 +1612,7 @@ export class ArenaView{
      return true;
     }
     buildArena(arena=MAPS[0]){return withAssets(this.arenaAssets??=new ModelAssets(),()=>this._buildArena(arena));}
-    _buildArena(arena=MAPS[0]){this._disposeMothSprites();if(this.worldGroup){this.scene.remove(this.worldGroup);this.disposeObject(this.worldGroup);for(const resource of this.renderResources||[])resource.dispose();this.renderResources?.clear();this.flagAssets=null;}this.sky=null;this.mountains=null;this.backdrop=null;this.objectiveModels=new Map();this._mothRift=null;this._mothRiftSheet=null;this.mapId=arena.id;this.viewAudio?.setSpace?.(mothSpaceFor(arena.id));this.viewAudio?.setEchoMap?.(mothEchoFor(arena.id));applyArenaBiomePalette(this.viewAudio,arena);const world=new T.Group();this.worldGroup=world;this.scene.add(world);this.scene.background=new T.Color(arena.background);this.scene.fog=new T.FogExp2(arena.background,.018);const bounds=arenaBounds(arena),legacy=!arena.bounds,minX=bounds.minX,maxX=bounds.maxX,minZ=bounds.minZ,maxZ=bounds.maxZ,width=maxX-minX,depth=maxZ-minZ;
+    _buildArena(arena=MAPS[0]){this._disposeMothSprites();if(this.worldGroup){this.scene.remove(this.worldGroup);this.disposeObject(this.worldGroup);for(const resource of this.renderResources||[])resource.dispose();this.renderResources?.clear();this.flagAssets=null;}this.sky=null;this.mountains=null;this.backdrop=null;this.objectiveModels=new Map();this.interiors=buildInteriors(arena.structures||[]);this._interiorBlend=0;this._mothRift=null;this._mothRiftSheet=null;this.mapId=arena.id;this.viewAudio?.setSpace?.(mothSpaceFor(arena.id));this.viewAudio?.setEchoMap?.(mothEchoFor(arena.id));applyArenaBiomePalette(this.viewAudio,arena);const world=new T.Group();this.worldGroup=world;this.scene.add(world);this.scene.background=new T.Color(arena.background);this.scene.fog=new T.FogExp2(arena.background,.018);const bounds=arenaBounds(arena),legacy=!arena.bounds,minX=bounds.minX,maxX=bounds.maxX,minZ=bounds.minZ,maxZ=bounds.maxZ,width=maxX-minX,depth=maxZ-minZ;
     const look=arenaLooks[arena.id]||arenaLooks.exchange,[floorColor,wallColor,trimColor,skyColor,groundColor,fogDensity,metal]=look;
     this.scene.fog.density=fogDensity;world.userData.look=arena.id;
     for(const light of this.scene.children){if(light.userData?.rimLight)continue;if(light.isHemisphereLight){light.color.set(skyColor);light.groundColor.set(groundColor);light.intensity=arena.terrain?2.5:1.8;}if(light.isDirectionalLight){light.color.set(skyColor);light.intensity=arena.terrain?3.1:2.4;light.position.set(arena.id==='aether'?-18:18,24,arena.id==='foundry'?-12:10);}}
@@ -1828,6 +1876,14 @@ export class ArenaView{
     const shell=cavernShell(s.radius??12,s.height??8,undefined,s.openSegments),base=s.y??0,dome=geo(`cavdome|${shell.radius}`,()=>new T.SphereGeometry(shell.radius,28,12,0,Math.PI*2,0,Math.PI/2));
     for(const arc of shell.renderArcs){const key=`cavarc|${shell.radius}|${arc.thetaStart.toFixed(3)}|${arc.thetaLength.toFixed(3)}`,wg=geo(key,()=>new T.CylinderGeometry(shell.radius,shell.radius,1,28,1,true,arc.thetaStart,arc.thetaLength));const m=mesh(wg,caveMat,s.x,base+shell.wallHeight/2,s.z);m.scale.set(1,shell.wallHeight,1);}
     const roof=mesh(dome,caveMat,s.x,base+shell.wallHeight,s.z);roof.scale.set(1,shell.domeHeight/shell.radius,1);
+    // Static additive dust shafts where daylight falls through the opening.
+    // WebGL-only (they need additive blending), motionless by construction and
+    // owned by the shared-resource disposal path like the cavern shell itself.
+    if(this.renderer?.isSoftware!==true){
+     const shaftHeight=Math.max(2,shell.wallHeight+shell.domeHeight*.55),shaftGeo=geo(`cavshaft|${shell.radius}`,()=>new T.ConeGeometry(shell.radius*.34,1,10,1,true)),shaftMat=new T.MeshBasicMaterial({color:arena.color,transparent:true,opacity:.05,depthWrite:false,blending:T.AdditiveBlending,side:T.DoubleSide});
+     shared.add(shaftMat);
+     for(const side of[-1,1]){const beam=new T.Mesh(shaftGeo,shaftMat);beam.position.set(s.x+side*shell.radius*.3,base+shaftHeight/2,s.z);beam.scale.set(1,shaftHeight,1);beam.rotation.z=side*.12;beam.userData.dustShaft=true;world.add(beam);}
+    }
    }else if(s.type==='bridge'){
     const q=((Math.round((s.rot||0)/(Math.PI/2))%4)+4)%4,along=q%2?'z':'x',len=q%2?(s.d??s.w):(s.w??s.d),wid=q%2?(s.w??s.d):(s.d??s.w),rail=gx=>geo(gx,()=>(gx==='rail-x'?new T.BoxGeometry(1,.12,.12):new T.BoxGeometry(.12,.12,1)));
     for(const side of[-1,1]){const m=mesh(along==='x'?rail('rail-x'):rail('rail-z'),metal,s.x,s.y+(s.thickness??.5)+.45,s.z+(along==='x'?side*(wid/2-.1):0));m.rotation.y=(s.rot||0);m.scale.set(along==='x'?len:1,1,along==='x'?1:len);}
@@ -1931,7 +1987,7 @@ export class ArenaView{
  for(let i=-4;i<=4;i++){box(scene,.25,9,.5,i*3,4,-6,dark);box(scene,.045,6,.04,i*3+.18,4,-5.72,glow);}
   const model=robotModel('chatgpt',undefined,this.renderer?.isSoftware===true);model.scale.setScalar(2.15);model.position.y=.17;model.rotation.y=.25;scene.add(model);return {scene,camera,model,id:'chatgpt'};}
   setCharacter(id){if(id===this.menu.id)return;this.disposeObject(this.menu.model);this.menu.scene.remove(this.menu.model);this.menu.model=robotModel(id,undefined,this.renderer?.isSoftware===true);this.menu.model.scale.setScalar(2.15);this.menu.model.position.y=.17;this.menu.scene.add(this.menu.model);this.menu.id=id;}
-      setMatch(match){this.clearFreeMotion();this.characterLifecycle?.clear();this.deathContext?.clear();this.deathPool?.clear();this.hitPool?.clear();this.hitFlinch?.clear();this.shellPool?.clear();this.ripplePool?.clear?.();this.contactShadows?.clear?.();this.abilityVfx?.reset();this._clearDebugDeaths?.();const arena=match.arena||MAPS.find(a=>a.id===match.mapId)||MAPS[0];this.clearObjectiveMarkers();if(this.payloadModel){this.scene.remove(this.payloadModel);this.disposeObject(this.payloadModel);this.payloadModel=null;}for(const m of [...this.actorModels.values(),...this.pickupModels,...(this.flagModels||new Map()).values()]){this.scene.remove(m);this.disposeObject(m);}this.flagModels=new Map();if(this.mapId!==arena.id)this.buildArena(arena);const assets=this.modelAssets??=new ModelAssets();this.actorModels=new Map((match.actors||[]).map(a=>{const m=robotModel(a.character,assets,this.renderer?.isSoftware===true);this._addActorModel(m);return [a.id,m];}));this.pickupModels=(match.pickups||[]).map(p=>{const g=new T.Group(),colors=PICKUP_COLORS,pickupColor=colors[p.kind]||'#8ad9d3',mat=this._mothLutMaterial(this._mothLutTheme(arena),{base:{color:pickupColor,metalness:.4,roughness:.3,emissive:pickupColor},phase:.15,intensity:.4})??material(pickupColor,.4,.3,true);if(p.kind==='health'){box(g,.6,.19,.19,0,.65,0,mat);box(g,.19,.6,.19,0,.65,0,mat);}else if(p.kind==='armor'){const m=new T.Mesh(geometry(assets,'pickup-armor-octa',()=>new T.OctahedronGeometry(.4)),mat);m.position.y=.7;g.add(m);}else if(['haste','overcharge','overshield'].includes(p.kind)){const m=new T.Mesh(geometry(assets,'pickup-power-ico',()=>new T.IcosahedronGeometry(.36,1)),mat);m.position.y=.7;g.add(m);ring(g,.55,.022,0,.07,0,mat);}else{const w=simpleWeaponModel(pickupWeapon(p.kind),assets);w.position.y=.75;w.scale.setScalar(.7);g.add(w);}if(!['haste','overcharge','overshield'].includes(p.kind))ring(g,.55,.022,0,.07,0,mat);g.position.set(p.x||0,p.y||0,p.z||0);this.scene.add(g);return g;});this._trackAssets(assets);this.syncVehicles(match);this.updateFlags(match,arena);this.updateObjectives(match,arena);this.effectPool?.clear();this.telegraphPool?.clear();for(const m of this.zipCarriages?.values()||[]){this.scene.remove(m);this.disposeObject(m);}this.zipCarriages?.clear();this._fovPulse=0;this.projectilePool?.clear();this.altProjectiles?.clear();this._clearMothSprites();this.railPool?.clear();this.deathContext?.clear();this.deathPool?.clear();this.decalPool?.clear();this.ambientFx?.reset();this.debrisPool?.clear();this.hitFlinch?.clear();this.hitPool?.clear();this._killcam=null;this.feedback?.reset();this.cameraShake?.reset();this.lowHealth=false;this.flashUntil=0;this.lastEvent=match.serial||0;this.currentWeapon=-1;this._adsTransition=0;this._adsController?.reset(this.display?.fov??82);this._nearActionAt=undefined;this._nearAction=0;this._cocsPresentation=null;this.resetPresentation();
+      setMatch(match){this.clearFreeMotion();this.characterLifecycle?.clear();this.deathContext?.clear();this.deathPool?.clear();this.hitPool?.clear();this.hitFlinch?.clear();this.shellPool?.clear();this.ripplePool?.clear?.();this.contactShadows?.clear?.();this.abilityVfx?.reset();this._clearDebugDeaths?.();const arena=match.arena||MAPS.find(a=>a.id===match.mapId)||MAPS[0];this.clearObjectiveMarkers();if(this.payloadModel){this.scene.remove(this.payloadModel);this.disposeObject(this.payloadModel);this.payloadModel=null;}for(const m of [...this.actorModels.values(),...this.pickupModels,...(this.flagModels||new Map()).values(),...(this.deployableModels||new Map()).values()]){this.scene.remove(m);this.disposeObject(m);}this.flagModels=new Map();this.deployableModels=new Map();if(this.mapId!==arena.id)this.buildArena(arena);const assets=this.modelAssets??=new ModelAssets();this.actorModels=new Map((match.actors||[]).map(a=>{const m=robotModel(a.character,assets,this.renderer?.isSoftware===true);this._addActorModel(m);return [a.id,m];}));this.pickupModels=(match.pickups||[]).map(p=>{const g=new T.Group(),colors=PICKUP_COLORS,pickupColor=colors[p.kind]||'#8ad9d3',mat=this._mothLutMaterial(this._mothLutTheme(arena),{base:{color:pickupColor,metalness:.4,roughness:.3,emissive:pickupColor},phase:.15,intensity:.4})??material(pickupColor,.4,.3,true);if(p.kind==='health'){box(g,.6,.19,.19,0,.65,0,mat);box(g,.19,.6,.19,0,.65,0,mat);}else if(p.kind==='armor'){const m=new T.Mesh(geometry(assets,'pickup-armor-octa',()=>new T.OctahedronGeometry(.4)),mat);m.position.y=.7;g.add(m);}else if(['haste','overcharge','overshield'].includes(p.kind)){const m=new T.Mesh(geometry(assets,'pickup-power-ico',()=>new T.IcosahedronGeometry(.36,1)),mat);m.position.y=.7;g.add(m);ring(g,.55,.022,0,.07,0,mat);}else{const w=simpleWeaponModel(pickupWeapon(p.kind),assets);w.position.y=.75;w.scale.setScalar(.7);g.add(w);}if(!['haste','overcharge','overshield'].includes(p.kind))ring(g,.55,.022,0,.07,0,mat);g.position.set(p.x||0,p.y||0,p.z||0);this.scene.add(g);return g;});this._trackAssets(assets);this.syncVehicles(match);this.updateFlags(match,arena);this.updateObjectives(match,arena);this.effectPool?.clear();this.telegraphPool?.clear();for(const m of this.zipCarriages?.values()||[]){this.scene.remove(m);this.disposeObject(m);}this.zipCarriages?.clear();this._fovPulse=0;this.projectilePool?.clear();this.altProjectiles?.clear();this._clearMothSprites();this.railPool?.clear();this.deathContext?.clear();this.deathPool?.clear();this.decalPool?.clear();this.ambientFx?.reset();this.debrisPool?.clear();this.hitFlinch?.clear();this.hitPool?.clear();this._killcam=null;this.feedback?.reset();this.cameraShake?.reset();this.lowHealth=false;this.flashUntil=0;this.lastEvent=match.serial||0;this.currentWeapon=-1;this._adsTransition=0;this._adsController?.reset(this.display?.fov??82);this._nearActionAt=undefined;this._nearAction=0;this._cocsPresentation=null;this.resetPresentation();
   // Per-mode music theme. The audio object retunes its running drone in place.
   const mode=match.config?.mode??match.mode;if(mode)this.viewAudio?.setModeTheme?.(mode);this._modeTheme=mode??this._modeTheme;}
       syncActors(match){const actors=match?.actors||[];for(const actor of actors)if(!this.actorModels.has(actor.id)){const model=robotModel(actor.character,this.modelAssets??=new ModelAssets(),this.renderer?.isSoftware===true);applyActorTeam(model,actor.team,this.display?.teamPalette);this._addActorModel(model);this.actorModels.set(actor.id,model);}const live=new Set(actors.map(actor=>actor.id));for(const [id,model] of this.actorModels)if(!live.has(id)){this.characterLifecycle?.release(model);this.scene.remove(model);this.disposeObject(model);this.actorModels.delete(id);}}
@@ -2038,6 +2094,84 @@ export class ArenaView{
       if(beacon)beacon.material.emissiveIntensity=reduced?1:1+.6*Math.sin(t*4);
       if(halo)halo.scale.setScalar(reduced?1:1+.08*Math.sin(t*4));
      }
+      // DEPLOYABLE SENTRIES. The sim fires from them while the renderer never
+      // drew one; this mirrors the pickup lifecycle: one shared-geometry model
+      // per live deployable id, rebuilt from the snapshot on first sight and
+      // disposed when the sentry leaves it. Software gets a flat blob shadow,
+      // WebGL reuses the contact-shadow pool through the `d:` keys.
+      updateDeployables(match,reduced=this.reduced()){
+       const list=Array.isArray(match?.deployables)?match.deployables.slice(0,4):[];
+       this.deployableModels??=new Map();
+       const active=new Set(),software=this.renderer?.isSoftware===true,arena=match?.arena||MAPS.find(map=>map.id===match?.mapId)||MAPS[0],time=Number(match?.time)||0;
+       for(const sentry of list){
+        if(!sentry||sentry.id===undefined||sentry.id===null)continue;
+        const id=sentry.id;active.add(id);
+        let g=this.deployableModels.get(id);
+        if(!g){g=this._buildDeployableModel(sentry.team,arena,software);this.deployableModels.set(id,g);this.scene.add(g);}
+        g.position.set(Number(sentry.x)||0,Number(sentry.y)||0,Number(sentry.z)||0);
+        // Aim the head at the nearest enemy in range. The sim owns targeting;
+        // this only re-reads the same actor list for presentation and freezes
+        // under reduced motion.
+        const head=g.userData.head;
+        if(head){
+         if(reduced)head.rotation.y=0;
+         else{const target=this._sentryTarget(sentry,match);head.rotation.y=target?Math.atan2(-((Number(target.x)||0)-(Number(sentry.x)||0)),-((Number(target.z)||0)-(Number(sentry.z)||0))):0;}
+        }
+        const eye=g.userData.eye;
+        if(eye?.material)eye.material.emissiveIntensity=reduced ? .85 : .85+.25*Math.sin(time*3+(Number(id)||0));
+       }
+       for(const [id,g] of this.deployableModels)if(!active.has(id)){this.scene.remove(g);this.disposeObject(g);this.deployableModels.delete(id);}
+       return this.deployableModels.size;
+      }
+      _sentryTarget(sentry,match){
+       const sx=Number(sentry?.x)||0,sz=Number(sentry?.z)||0,range=Math.max(1,Number(sentry?.range)||22);
+       let best=null,bestDistance=Infinity;
+       for(const actor of match?.actors||[]){
+        if(!actor||actor.health<=0||actor.id===sentry?.owner)continue;
+        if(Number.isFinite(sentry?.team)&&actor.team===sentry.team)continue;
+        const distance=Math.hypot((Number(actor.x)||0)-sx,(Number(actor.z)||0)-sz);
+        if(distance<=range&&distance<bestDistance){bestDistance=distance;best=actor;}
+       }
+       return best;
+      }
+      // Small team-tinted turret from the same shared-primitive kit as the other
+      // models: base + column + head + barrel + emissive eye. Geometry and
+      // materials are cached on a view-owned ModelAssets and tracked as shared,
+      // so removing one model never frees a sibling's geometry.
+      _buildDeployableModel(team,arena,software=false){
+       const assets=this._deployableAssets??=new ModelAssets();
+       const model=withAssets(assets,()=>{
+        const tint=this.objectiveColor(team,arena),accent=material(tint,.35,.3,true),dark=material('#20262b',.62,.42),metal=material('#5c666f',.7,.35),g=new T.Group();
+        cylinder(g,.42,.5,.16,0,.08,0,accent,12,assets);
+        box(g,.42,.3,.5,0,.3,0,dark,assets);
+        cylinder(g,.16,.2,.34,0,.55,0,metal,10,assets);
+        ring(g,.5,.03,0,.17,0,accent,Math.PI/2,assets);
+        const head=new T.Group();head.position.y=.74;g.add(head);
+        box(head,.46,.34,.44,0,0,0,dark,assets);
+        box(head,.09,.09,.66,0,-.02,-.42,metal,assets);
+        const eye=box(head,.2,.09,.05,0,.03,-.24,accent,assets);
+        // The eye owns a cloned emissive material so its idle pulse never
+        // brightens a sibling turret sharing the cached accent material.
+        eye.material=eye.material.clone();
+        if(software)addBlobShadow(g,.5,.32);
+        g.userData={sentry:true,head,eye};
+        return g;
+       });
+       this._trackAssets(assets);
+       return model;
+      }
+      // Objective beacons grow with captured progress so a distant zone reads
+      // its capture state from silhouette alone. Only scale/emissive change:
+      // the thin, never-occluded geometry contract stays untouched.
+      _applyBeaconProgress(g,progress){
+       const beacon=g?.userData?.beacon;if(!beacon)return 0;
+       const p=Math.max(0,Math.min(1,(Number(progress)||0)/100)),height=1+p*.9;
+       beacon.scale.y=height;
+       beacon.position.y=(Number(beacon.userData.baseY)||1.2)*height;
+       const mat=g.userData.beaconMat;
+       if(mat&&'emissiveIntensity' in mat)mat.emissiveIntensity=.6*(1+p*.9);
+       return p;
+      }
       // LATTICE STRIKE (`cocs`) world markers. A node is an objective area with
       // its archetype emblem (front cone / economy cube / relay octahedron /
       // array icosahedron / HQ hex pillar), tinted by owner and labelled in
@@ -2139,6 +2273,7 @@ export class ArenaView{
          g.userData.progressValue=progress;
         }
         g.userData.progress.visible=progress>0;
+        this._applyBeaconProgress(g,progress);
         const dim=!anchor&&!live,alpha=dim?.38:1;
         for(const mat of [g.userData.baseMat,g.userData.areaMat]){mat.opacity=alpha;mat.transparent=true;}
         if(g.userData.foundryRing)g.userData.areaMat.opacity=alpha*.36;
@@ -2219,7 +2354,7 @@ export class ArenaView{
        }
        for(const [key,g] of this.objectiveModels)if(!active.has(key)){this.worldGroup?.remove(g);this.disposeObject(g);this.objectiveModels.delete(key);}
       }
-        updateObjectives(match,arena=MAPS[0]){const input=match?.objectives??match?.objectiveState;if(input?.kind==='cocs'){this.updateCocsObjectives(match,arena);return;}if(!input||!['koth','domination','assault','payload','extraction'].includes(input.kind)){this.clearObjectiveMarkers();return;}this.objectiveModels??=new Map();const active=new Set(),reduced=this.reduced(),software=this.renderer?.isSoftware===true,assaultActive=input.kind==='assault'&&Number.isFinite(input.active)?input.active:-1;for(const [zoneIndex,zone] of (input.kind==='extraction'?[{id:'extract',x:input.extract?.x,z:input.extract?.z,radius:input.escortRadius??6,progress:input.captureSeconds>0?Math.max(0,Math.min(100,(Number(input.progress)||0)/Number(input.captureSeconds)*100)):0,owner:Number.isInteger(input.escortTeam)?input.escortTeam:null,captureTeam:null,contested:false}]:input.zones||[]).entries()){if(!zone)continue;const key=String(zone.id??active.size),p=pointOf(zone),owner=zone.contested?'contested':zone.owner,capture=zone.captureTeam??zone.owner,progress=Math.max(0,Math.min(100,Number(zone.progress)||0)),radius=Math.max(.8,Number(zone.radius)||3.5);let g=this.objectiveModels.get(key);if(!g){g=this.createObjectiveModel(zone,arena);this.objectiveModels.set(key,g);this.worldGroup?.add(g);}active.add(key);const color=zone.contested?'#ffd166':this.objectiveColor(owner,arena),progressColor=zone.contested?'#ffd166':this.objectiveColor(capture,arena);g.position.set(p.x||0,p.y||0,p.z||0);g.userData.baseMat.color.set(color);g.userData.baseMat.emissive.set(color);g.userData.areaMat.color.set(color);g.userData.areaMat.emissive.set(color);g.userData.beaconMat.color.set(color);g.userData.beaconMat.emissive.set(color);g.userData.progressMat.color.set(progressColor);g.userData.progressMat.emissive.set(progressColor);g.userData.progressMat.opacity=progress>0?1:0;g.userData.progressMat.transparent=true;if(g.userData.radius!==radius){g.userData.area.geometry.dispose();g.userData.area.geometry=new T.CylinderGeometry(radius,radius,.035,32);g.userData.base.geometry.dispose();g.userData.base.geometry=new T.TorusGeometry(radius,.11,6,32);g.userData.progress.geometry.dispose();g.userData.progress.geometry=software?new T.RingGeometry(radius-.2,radius+.2,32,1,0,Math.PI*2*progress/100):new T.RingGeometry(radius-.2,radius+.2,32);if(!software)g.userData.progress.geometry.setDrawRange(0,Math.ceil(progress/100*32)*6);g.userData.radius=radius;}if(g.userData.progressValue!==progress){if(software){g.userData.progress.geometry.dispose();g.userData.progress.geometry=new T.RingGeometry(radius-.2,radius+.2,32,1,0,Math.PI*2*progress/100);}else g.userData.progress.geometry.setDrawRange(0,Math.ceil(progress/100*32)*6);g.userData.progressValue=progress;}g.userData.progress.visible=progress>0;g.userData.identifier=String(zone.id??'zone');g.userData.emblem.material=g.userData.progressMat;const sectorActive=input.kind==='assault'&&zoneIndex===assaultActive,sectorDim=input.kind==='assault'&&!sectorActive;g.userData.assaultActive=sectorActive;if(input.kind==='assault'){g.userData.areaMat.opacity=sectorDim?.16:1;g.userData.areaMat.transparent=true;g.userData.baseMat.opacity=sectorDim?.32:1;g.userData.baseMat.transparent=true;g.userData.areaMat.emissiveIntensity=sectorActive?1.9:sectorDim?.3:1.25;g.userData.baseMat.emissiveIntensity=sectorActive?2:sectorDim?.35:1.25;if(!g.userData.assaultLabel&&typeof document!=='undefined'&&typeof document.createElement==='function'){const assaultLabel=textLabel(g,String(zone.id??'sector').toUpperCase(),0,2.7,0,.5,sectorActive?'#ffffff':'#95a3ac');assaultLabel.userData.objective=true;assaultLabel.userData.noCameraOcclusion=true;g.userData.assaultLabel=assaultLabel;}if(g.userData.assaultLabel)g.userData.assaultLabel.visible=sectorActive;}g.scale.y=reduced?1:sectorActive?1.04+.1*Math.sin((match.time||0)*5):sectorDim?1:1+.06*Math.sin((match.time||0)*4+(zone.id?.length||0));}for(const [key,g] of this.objectiveModels)if(!active.has(key)){this.worldGroup?.remove(g);this.disposeObject(g);this.objectiveModels.delete(key);}}
+        updateObjectives(match,arena=MAPS[0]){const input=match?.objectives??match?.objectiveState;if(input?.kind==='cocs'){this.updateCocsObjectives(match,arena);return;}if(!input||!['koth','domination','assault','payload','extraction'].includes(input.kind)){this.clearObjectiveMarkers();return;}this.objectiveModels??=new Map();const active=new Set(),reduced=this.reduced(),software=this.renderer?.isSoftware===true,assaultActive=input.kind==='assault'&&Number.isFinite(input.active)?input.active:-1;for(const [zoneIndex,zone] of (input.kind==='extraction'?[{id:'extract',x:input.extract?.x,z:input.extract?.z,radius:input.escortRadius??6,progress:input.captureSeconds>0?Math.max(0,Math.min(100,(Number(input.progress)||0)/Number(input.captureSeconds)*100)):0,owner:Number.isInteger(input.escortTeam)?input.escortTeam:null,captureTeam:null,contested:false}]:input.zones||[]).entries()){if(!zone)continue;const key=String(zone.id??active.size),p=pointOf(zone),owner=zone.contested?'contested':zone.owner,capture=zone.captureTeam??zone.owner,progress=Math.max(0,Math.min(100,Number(zone.progress)||0)),radius=Math.max(.8,Number(zone.radius)||3.5);let g=this.objectiveModels.get(key);if(!g){g=this.createObjectiveModel(zone,arena);this.objectiveModels.set(key,g);this.worldGroup?.add(g);}active.add(key);const color=zone.contested?'#ffd166':this.objectiveColor(owner,arena),progressColor=zone.contested?'#ffd166':this.objectiveColor(capture,arena);g.position.set(p.x||0,p.y||0,p.z||0);g.userData.baseMat.color.set(color);g.userData.baseMat.emissive.set(color);g.userData.areaMat.color.set(color);g.userData.areaMat.emissive.set(color);g.userData.beaconMat.color.set(color);g.userData.beaconMat.emissive.set(color);g.userData.progressMat.color.set(progressColor);g.userData.progressMat.emissive.set(progressColor);g.userData.progressMat.opacity=progress>0?1:0;g.userData.progressMat.transparent=true;if(g.userData.radius!==radius){g.userData.area.geometry.dispose();g.userData.area.geometry=new T.CylinderGeometry(radius,radius,.035,32);g.userData.base.geometry.dispose();g.userData.base.geometry=new T.TorusGeometry(radius,.11,6,32);g.userData.progress.geometry.dispose();g.userData.progress.geometry=software?new T.RingGeometry(radius-.2,radius+.2,32,1,0,Math.PI*2*progress/100):new T.RingGeometry(radius-.2,radius+.2,32);if(!software)g.userData.progress.geometry.setDrawRange(0,Math.ceil(progress/100*32)*6);g.userData.radius=radius;}if(g.userData.progressValue!==progress){if(software){g.userData.progress.geometry.dispose();g.userData.progress.geometry=new T.RingGeometry(radius-.2,radius+.2,32,1,0,Math.PI*2*progress/100);}else g.userData.progress.geometry.setDrawRange(0,Math.ceil(progress/100*32)*6);g.userData.progressValue=progress;}g.userData.progress.visible=progress>0;this._applyBeaconProgress(g,progress);g.userData.identifier=String(zone.id??'zone');g.userData.emblem.material=g.userData.progressMat;const sectorActive=input.kind==='assault'&&zoneIndex===assaultActive,sectorDim=input.kind==='assault'&&!sectorActive;g.userData.assaultActive=sectorActive;if(input.kind==='assault'){g.userData.areaMat.opacity=sectorDim?.16:1;g.userData.areaMat.transparent=true;g.userData.baseMat.opacity=sectorDim?.32:1;g.userData.baseMat.transparent=true;g.userData.areaMat.emissiveIntensity=sectorActive?1.9:sectorDim?.3:1.25;g.userData.baseMat.emissiveIntensity=sectorActive?2:sectorDim?.35:1.25;if(!g.userData.assaultLabel&&typeof document!=='undefined'&&typeof document.createElement==='function'){const assaultLabel=textLabel(g,String(zone.id??'sector').toUpperCase(),0,2.7,0,.5,sectorActive?'#ffffff':'#95a3ac');assaultLabel.userData.objective=true;assaultLabel.userData.noCameraOcclusion=true;g.userData.assaultLabel=assaultLabel;}if(g.userData.assaultLabel)g.userData.assaultLabel.visible=sectorActive;}g.scale.y=reduced?1:sectorActive?1.04+.1*Math.sin((match.time||0)*5):sectorDim?1:1+.06*Math.sin((match.time||0)*4+(zone.id?.length||0));}for(const [key,g] of this.objectiveModels)if(!active.has(key)){this.worldGroup?.remove(g);this.disposeObject(g);this.objectiveModels.delete(key);}}
      updateVehicleModels(match){const reduced=this.reduced(),now=typeof performance!=='undefined'?performance.now():0;for(const vehicle of match.vehicles||[]){const model=this.vehicleModels?.get(vehicle.id);if(!model)continue;const p=vehicle.position||vehicle,x=p.x??0,y=p.y??0,z=p.z??0,yaw=vehicle.yaw??vehicle.heading??0,health=vehicle.health??1,respawn=vehicle.respawnTimer??0,vehiclePres=this._interpEnabled?this._presentVehicle(vehicle.id):null;model.visible=health>0&&respawn<=0;model.position.set(x,y,z);model.rotation.y=yaw;model.rotation.z=vehicle.roll??0;model.rotation.x=vehicle.pitchBody??vehicle.pitch??0;if(vehiclePres&&!vehiclePres.snapped){model.position.set(vehiclePres.x,vehiclePres.y,vehiclePres.z);model.rotation.y=vehiclePres.yaw;}const speed=Math.hypot(vehicle.vx??0,vehicle.vz??0),stamp=Number.isFinite(match.time)?match.time:now/1000,dt=Math.max(0,Math.min(.1,stamp-(model.userData.spinTime??stamp)));model.userData.spinTime=stamp;const odometer=(model.userData.odometer??0)+speed*dt;model.userData.odometer=odometer;for(const wheel of model.userData.wheels||[])wheel.rotation.x=odometer/.42;const turret=model.userData.turret;if(turret)turret.rotation.y=Number.isFinite(vehicle.turretYaw)?vehicle.turretYaw:0;const heat=vehicle.heat??0,flash=(model.userData.flashUntil??0)>now;for(const gun of model.userData.guns||[]){gun.mount.scale.setScalar(1+heat*.08);gun.flash.visible=!reduced&&flash;}if(!reduced&&(vehicle.boosting===true||((vehicle.boostCooldown??0)>0&&speed>11)||(vehicle.effects?.turbo>0))){if(stamp-(model.userData.lastExhaust??0)>=.04){model.userData.lastExhaust=stamp;this.effectPool??=new EffectPool(this.scene);const backDist=1.35,exX=x+Math.sin(yaw)*backDist,exY=y+.32,exZ=z+Math.cos(yaw)*backDist;this.effectPool.add({pos:V(exX,exY,exZ),color:(vehicle.effects?.turbo>0)?'#ff6622':'#00e5ff',endColor:(vehicle.effects?.turbo>0)?'#ff2200':'#0055ff',fade:'smooth',damping:1.2,size:.14,life:.22,expand:1.5,velocity:V(Math.sin(yaw)*2.5+(Math.random()-.5)*.4,Math.random()*.3,Math.cos(yaw)*2.5+(Math.random()-.5)*.4)});}}
    // Damaged-vehicle readability: below ~40% health a pooled smoke plume and
    // occasional sparks mark the wreck before it dies. Quality-scaled, WebGL
@@ -2284,7 +2419,8 @@ export class ArenaView{
         }
        }
      if(e.type==='shot'||e.type==='vehicle-shot'||e.type==='launch'||e.type==='dash')this.shotEffect(e,info,reduced);
-      if(['explosion','death','power','powerup','spawn','jam','flag-pickup','flag-drop','flag-return','capture','vehicle-destroyed'].includes(e.type)){const color=e.type==='explosion'?info.color:e.type==='vehicle-destroyed'?'#ff9944':e.type==='jam'?'#c99aff':e.type==='powerup'?'#ffcf70':e.type.startsWith('flag')||e.type==='capture'?(teamPresentation(e.team,this.display?.teamPalette)?.color??NEUTRAL):e.type==='death'?(CHARACTERS.find(c=>c.id===e.character)?.color??'#fff2ce'):'#74f4de';const impact=info.feel?.impactVisual,particleScale=this._quality().particles,count=(e.type==='death'||e.type==='vehicle-destroyed')&&!reduced?Math.max(1,Math.round(8*particleScale)):1,size=e.type==='death'?.12:e.type==='vehicle-destroyed'?.22:impact==='wide'?.42:impact==='burst'?.34:impact==='ring'?.22:.3;if(e.pos)for(let i=0;i<count;i++)this.effectPool.add({pos:e.pos,color,endColor:e.type==='vehicle-destroyed'?'#441800':e.type==='death'?'#553311':null,fade:'smooth',size,life:e.type==='death'?.5:e.type==='vehicle-destroyed'?.65:impact==='ring'?.4:.3,expand:reduced||e.type==='death'?0:impact==='ring'?1.5:3,wireframe:e.type==='power'||e.type==='powerup'||e.type==='spawn',velocity:(e.type==='death'||e.type==='vehicle-destroyed')&&!reduced?V((Math.random()-.5)*5,Math.random()*4+1,(Math.random()-.5)*5):null});if(e.type==='spawn'&&e.pos)this.effectPool.add({from:{x:e.pos.x,y:e.pos.y,z:e.pos.z},to:{x:e.pos.x,y:(e.pos.y||0)+2.2,z:e.pos.z},color,life:.4,size:.05,additive:true});if(!reduced&&e.pos){if(e.type==='spawn')this._spawnMothSprite('arc-burst',e.pos,{size:1.6,opacity:.55,life:.42,slots:3});else if(e.type==='capture'||e.type==='zone-capture')this._mothFx('effect-capture-ring','arc-burst',e.pos,{size:2.4,opacity:.65,life:.5,slots:3});}}
+       if(e.type==='shot'&&e.actor===this.playerId&&e.muzzleFrom&&!reduced)this._muzzleSmoke(e.muzzleFrom,((Number.isFinite(e.id)?e.id:0)*31+(e.weapon??0)*17)>>>0);
+      if(['explosion','death','power','powerup','spawn','jam','flag-pickup','flag-drop','flag-return','capture','vehicle-destroyed'].includes(e.type)){const color=e.type==='explosion'?info.color:e.type==='vehicle-destroyed'?'#ff9944':e.type==='jam'?'#c99aff':e.type==='powerup'?'#ffcf70':e.type.startsWith('flag')||e.type==='capture'?(teamPresentation(e.team,this.display?.teamPalette)?.color??NEUTRAL):e.type==='death'?(CHARACTERS.find(c=>c.id===e.character)?.color??'#fff2ce'):'#74f4de';const impact=info.feel?.impactVisual,particleScale=this._particleScale(),count=(e.type==='death'||e.type==='vehicle-destroyed')&&!reduced?Math.max(1,Math.round(8*particleScale)):1,size=e.type==='death'?.12:e.type==='vehicle-destroyed'?.22:impact==='wide'?.42:impact==='burst'?.34:impact==='ring'?.22:.3;if(e.pos)for(let i=0;i<count;i++)this.effectPool.add({pos:e.pos,color,endColor:e.type==='vehicle-destroyed'?'#441800':e.type==='death'?'#553311':null,fade:'smooth',size,life:e.type==='death'?.5:e.type==='vehicle-destroyed'?.65:impact==='ring'?.4:.3,expand:reduced||e.type==='death'?0:impact==='ring'?1.5:3,wireframe:e.type==='power'||e.type==='powerup'||e.type==='spawn',velocity:(e.type==='death'||e.type==='vehicle-destroyed')&&!reduced?V((Math.random()-.5)*5,Math.random()*4+1,(Math.random()-.5)*5):null});if(e.type==='spawn'&&e.pos)this.effectPool.add({from:{x:e.pos.x,y:e.pos.y,z:e.pos.z},to:{x:e.pos.x,y:(e.pos.y||0)+2.2,z:e.pos.z},color,life:.4,size:.05,additive:true});if(!reduced&&e.pos){if(e.type==='spawn')this._spawnMothSprite('arc-burst',e.pos,{size:1.6,opacity:.55,life:.42,slots:3});else if(e.type==='capture'||e.type==='zone-capture')this._mothFx('effect-capture-ring','arc-burst',e.pos,{size:2.4,opacity:.65,life:.5,slots:3});}}
         if(e.type==='explosion'||e.type==='vehicle-destroyed'){const w=e.weapon??1,fragments=this._quality().particles;if(e.type==='vehicle-destroyed'){if(!reduced)for(let i=0;i<Math.max(1,Math.round(8*fragments));i++)this.effectPool.add({pos:e.pos,color:'#ff9944',endColor:'#331100',fade:'smooth',damping:1.5,gravity:9.8,spin:V((Math.random()-.5)*8,(Math.random()-.5)*8,(Math.random()-.5)*8),size:.14,life:.6,velocity:V((Math.random()-.5)*10,Math.random()*6+2,(Math.random()-.5)*10)});if(e.pos)this.breakPropsAt(e.pos,{radius:5.5,amount:60,serial:(e.id??0)+1,reduced});}else if(w===4){this.effectPool.add({pos:e.pos,color:'#bff4ff',endColor:'#1155aa',fade:'smooth',size:.3,life:.35,expand:reduced?0:1.8});this.effectPool.add({pos:e.pos,color:'#72cfff',endColor:'#002266',fade:'smooth',size:.5,life:.42,expand:reduced?0:2.4});}else if(w===5){if(!reduced)for(let i=0;i<Math.max(1,Math.round(7*fragments));i++)this.effectPool.add({pos:e.pos,color:'#ffb27a',endColor:'#661100',fade:'exp',damping:1.8,gravity:8,spin:V((Math.random()-.5)*6,(Math.random()-.5)*6,(Math.random()-.5)*6),size:.06,life:.5,velocity:V((Math.random()-.5)*9,Math.random()*6,(Math.random()-.5)*9),wireframe:true});}else if(w===1&&!reduced){for(let i=0;i<Math.max(1,Math.round(6*fragments));i++)this.effectPool.add({pos:e.pos,color:'#ffcf9a',endColor:'#ff3300',fade:'smooth',damping:1.6,gravity:9.8,spin:V((Math.random()-.5)*5,(Math.random()-.5)*5,(Math.random()-.5)*5),size:.07,life:.45,velocity:V((Math.random()-.5)*8,Math.random()*5,(Math.random()-.5)*8)});}
          // Blasts shatter nearby crates/barrels. Presentation-only and pooled.
          if(e.pos&&!reduced)this._mothFx('effect-explosion','arc-burst',e.pos,{size:e.type==='vehicle-destroyed'?4.4:3,opacity:.8,life:.5,grow:.6,slots:3});
@@ -2297,6 +2433,7 @@ export class ArenaView{
       if(e.type==='launch'&&(e.alt===true||e.altId!=null))this._altLaunch(e,reduced);
       if(e.type==='explosion'&&(e.alt===true||e.altId!=null||this.altProjectiles))this._altExplosion(e,reduced);
      if(e.type==='shot'||e.type==='launch'){const until=performance.now()+(info.feel?.muzzle?.[1]??.06)*1000,model=this.actorModels?.get(e.actor);if(model)model.userData.flashUntil=until;if(e.actor===this.playerId){this.feedback.shot(e.weapon,e.time);this.flashUntil=until;}if(e.type==='shot'&&!reduced)this._ejectShell(e);}if(e.type==='vehicle-shot'){const model=this.vehicleModels?.get(e.vehicle);if(model)model.userData.flashUntil=performance.now()+45;if(e.actor===this.playerId&&e.barrel===0){this.feedback.shot(0,e.time);this.flashUntil=performance.now()+45;}}
+       if(e.type==='shot')this._heatShot(e,this.actorModels?.get(e.actor));
        if((e.type==='shot'||e.type==='vehicle-shot')&&!reduced&&this.muzzleLights){const muzzleColor=e.type==='vehicle-shot'?'#ffd166':(e.alt===true?altSpecFor(e.weapon)?.tracer:null)||info.color,muzzleLife=info.feel?.muzzle?.[1]??.06;this.muzzleLights.flash(muzzleColor,e.muzzleFrom??e.from??e.pos,muzzleLife);}
        // Baked sprite accents: traversal teleports flash a portal ring at both
        // ends, and remote muzzle flashes reuse the spark impact sheet so distant
@@ -2305,7 +2442,8 @@ export class ArenaView{
        if(e.type==='zipline'||e.type==='zipline-arrival'||e.type==='zipline-jump')this.ziplineEffect(e,reduced);
        if(e.type==='launcher'||e.type==='launcher-arrival'||e.type==='jump-pad')this.launchEffect(e,reduced);
        if((e.type==='shot'||e.type==='vehicle-shot')&&!reduced&&e.actor!==this.playerId){const muzzle=e.muzzleFrom??e.from;if(muzzle)this._spawnMothSprite('spark-impact',muzzle,{size:e.type==='vehicle-shot'?1.1:.55,opacity:.5,life:.16,slots:3});}
-       if(e.type==='damage'){this.applyHitReaction(e,reduced);if(e.shieldBreak){const targetModel=this.actorModels?.get(e.actor),pos=targetModel?targetModel.position:e.pos;if(pos){if(!reduced)this._mothFx('effect-shield',null,{x:pos.x,y:(pos.y||0)+1,z:pos.z},{size:1.5,opacity:.6,life:.4,slots:3});const count=reduced?2:Math.max(4,Math.round(6*this._quality().particles));for(let i=0;i<count;i++)this.effectPool.add({pos:V(pos.x,pos.y+1,pos.z),color:'#70ffe6',endColor:'#104466',fade:'smooth',damping:1.4,gravity:7,spin:V((Math.random()-.5)*10,(Math.random()-.5)*10,(Math.random()-.5)*10),size:.12,life:.32,wireframe:true,velocity:!reduced?V((Math.random()-.5)*5,Math.random()*3+1,(Math.random()-.5)*5):null});}}}
+       if(e.type==='damage'){this.applyHitReaction(e,reduced);this._damageReadability(e,reduced);if(e.shieldBreak){const targetModel=this.actorModels?.get(e.actor),pos=targetModel?targetModel.position:e.pos;if(pos){if(!reduced)this._mothFx('effect-shield',null,{x:pos.x,y:(pos.y||0)+1,z:pos.z},{size:1.5,opacity:.6,life:.4,slots:3});const count=reduced?2:Math.max(4,Math.round(6*this._particleScale()));for(let i=0;i<count;i++)this.effectPool.add({pos:V(pos.x,pos.y+1,pos.z),color:'#70ffe6',endColor:'#104466',fade:'smooth',damping:1.4,gravity:7,spin:V((Math.random()-.5)*10,(Math.random()-.5)*10,(Math.random()-.5)*10),size:.12,life:.32,wireframe:true,velocity:!reduced?V((Math.random()-.5)*5,Math.random()*3+1,(Math.random()-.5)*5):null});}}}
+       if(e.type==='deployable'||e.type==='deployable-fire'||e.type==='deployable-expire'||e.type==='deployable-destroyed')this._deployableEvent(e,reduced);
       if(e.type==='mender-heal'&&!reduced)this._mothFx('effect-heal',null,{x:e.x||0,y:(e.y||0)+1,z:e.z||0},{size:Math.max(2,Number(e.radius)||3),opacity:.5,life:.6,slots:3});
        if(e.type==='phalanx-shield'&&!reduced)this._mothFx('effect-shield',null,{x:e.x||0,y:(e.y||0)+1,z:e.z||0},{size:Math.max(2,Number(e.radius)||3),opacity:.55,life:.5,slots:3});
        if(e.type==='pickup'&&!reduced&&['health','megahealth'].includes(e.kind)&&actorModel)this._mothFx('effect-heal',null,actorModel.position,{size:1.1,opacity:.45,life:.4,slots:3});
@@ -2503,15 +2641,57 @@ export class ArenaView{
    }
    lightning(from,to,color,reduced){const segments=reduced?5:9,dx=(to.x-from.x)/segments,dy=(to.y-from.y)/segments,dz=(to.z-from.z)/segments,amp=reduced?.05:.16;let px=from.x,py=from.y,pz=from.z;for(let i=0;i<segments;i++){const last=i===segments-1,jitter=last?0:amp,ox=(Math.random()-.5)*jitter,oy=(Math.random()-.5)*jitter,oz=(Math.random()-.5)*jitter,nx=px+dx+ox,ny=py+dy+oy,nz=pz+dz+oz;this.effectPool.add({from:{x:px,y:py,z:pz},to:{x:nx,y:ny,z:nz},color,life:.07,size:.03});this.effectPool.add({from:{x:px,y:py,z:pz},to:{x:nx,y:ny,z:nz},color:'#ffffff',life:.04,size:.012});px=nx;py=ny;pz=nz;}}
     railImpact(pos,color,reduced){this.effectPool.add({pos,color:'#e8f7ff',size:.2,life:.22,expand:reduced?0:.7,wireframe:!reduced});this.effectPool.add({pos,color,size:.12,life:.3,expand:reduced?0:.4});if(!reduced)for(let i=0;i<6;i++)this.effectPool.add({pos,color:'#ffffff',endColor:color,fade:'smooth',damping:2.5,gravity:6,size:.05,life:.24,velocity:V((Math.random()-.5)*7,(Math.random()-.2)*7,(Math.random()-.5)*7)});}
+        // Branch a world impact on the shot direction: steep downward rays are
+        // floor hits (terrain only when the presentation support sample matches
+        // the impact height), everything else reads as wall/prop. Actor hits
+        // skip this and keep the legacy path.
+        _impactStyle(pos,dir){
+         if(!dir)return null;
+         const ground=dir.y<-.6?this._groundSample()(pos.x||0,pos.z||0,pos.y??0):null;
+         return impactSurfaceStyle(dir,{ground,y:pos.y});
+        }
+        // Terrain-floor dust: a couple of slow grey motes lifted by the hit.
+        _impactDust(pos,style){
+         for(let i=0;i<this._impactSparkCount(2);i++)this.effectPool.add({pos,color:style?.dust||'#8a7f6b',endColor:'#2b2925',fade:'smooth',size:.05,life:.42,expand:.18,gravity:.6,damping:1.4,startOpacity:.4,velocity:V((Math.random()-.5)*2.2,Math.random()*1.6,(Math.random()-.5)*2.2)});
+        }
+        // Sustained-fire muzzle smoke: the pooled explosion smoke recipe at a
+        // smaller scale, emitted every Nth local shot by the tier cadence.
+        _muzzleSmoke(muzzle,seed=0){
+         if(!muzzle||this.reduced()===true)return null;
+         const period=muzzleSmokePeriod(this._quality().particles,this._effectsScale??1,false);
+         if(period<=0)return null;
+         this._muzzleSmokeCount=(this._muzzleSmokeCount??0)+1;
+         if(this._muzzleSmokeCount%period!==0)return null;
+         this.effectPool??=new EffectPool(this.scene);
+         return this.effectPool.add({pos:V(muzzle.x||0,muzzle.y||0,muzzle.z||0),color:'#4a4d52',endColor:'#14161a',fade:'smooth',size:.07,life:1+hashUnit(seed,1)*.5,expand:.2,gravity:-.3,damping:1.2,startOpacity:.22,velocity:V((hashUnit(seed,2)-.5)*.4,.35+hashUnit(seed,3)*.35,(hashUnit(seed,4)-.5)*.4)});
+        }
         // `dir` is the shot direction: the decal lies on the surface the ray hit
         // so wall/ceiling impacts stop drawing a floating ground square. A
         // missing direction keeps the legacy ground-parallel stamp.
-        _spawnImpactDecal(pos,reduced,weapon,dir=null){if(this.renderer?.isSoftware===true||!pos)return;const limits=this._quality();if(!limits.decals)return;this.decalPool??=new DecalPool(this.scene,limits.decals);const seed=((this._decalSerial=(this._decalSerial??0)+1)*131+(weapon|0)*17)>>>0;this.decalPool.spawn(pos,{color:reduced?'#201a15':'#171310',size:reduced?.24:.32,life:reduced?3.5:6,reduced,seed,dir});}
+        _spawnImpactDecal(pos,reduced,weapon,dir=null,style=null){if(this.renderer?.isSoftware===true||!pos)return;const limits=this._quality();if(!limits.decals)return;this.decalPool??=new DecalPool(this.scene,limits.decals);const seed=((this._decalSerial=(this._decalSerial??0)+1)*131+(weapon|0)*17)>>>0;this.decalPool.spawn(pos,{color:reduced?'#201a15':style?.decal??'#171310',size:reduced?.24:.32,life:reduced?3.5:6,reduced,seed,dir});}
         // Blast scorch: a broad soot ring plus a denser core at the impact
         // point, grounded on the sampled support so a mid-air blast does not
         // leave a floating square. Reduced motion keeps the mark static.
         _spawnScorchDecal(pos,reduced,size=.9,seed=0){if(this.renderer?.isSoftware===true||!pos)return null;const limits=this._quality();if(!limits.decals)return null;this.decalPool??=new DecalPool(this.scene,limits.decals);const ground=this._groundSample()(pos.x||0,pos.z||0,pos.y??0),y=Number.isFinite(ground)&&ground<=(pos.y??0)+.45?ground:(pos.y||0);const markSeed=((this._decalSerial=(this._decalSerial??0)+1)*131+(seed|0)*17+7)>>>0;return this.decalPool.scorch({x:pos.x,y,z:pos.z},{color:reduced?'#1c1713':'#120e0b',size:reduced?size*.75:size,life:reduced?5:8,reduced,seed:markSeed});}
-         impact(weapon,pos,color,reduced,hit,from=null){if(!pos)return;const base=hit?'#fff2ce':color;if(from){const dir=this._shotDir??=new T.Vector3();dir.set((pos.x||0)-(from.x||0),(pos.y||0)-(from.y||0),(pos.z||0)-(from.z||0));this._spawnImpactDecal(pos,reduced,weapon,dir);}else this._spawnImpactDecal(pos,reduced,weapon);if(!reduced)this._spawnMothSprite('spark-impact',pos,{size:hit?.5:.34,opacity:.55,life:.24,slots:3});this.effectPool.add({pos,color:'#fff2ce',size:.055,life:.07,additive:true});if(!reduced)this.effectPool.add({from:{x:pos.x,y:pos.y,z:pos.z},to:{x:pos.x,y:(pos.y||0)+.3,z:pos.z},color:base,life:.1,size:.026,additive:true});if(weapon===3||weapon===7){this.effectPool.add({pos,color:base,size:weapon===7?.13:.1,life:.14,expand:reduced?0:.5});if(!reduced)for(let i=0;i<4;i++)this.effectPool.add({pos,color:'#6b7681',size:.045,life:.3,velocity:V((Math.random()-.5)*6,Math.random()*3,(Math.random()-.5)*6)});return;}if(weapon===6){this.effectPool.add({pos,color:'#dff6ff',size:.11,life:.14,expand:reduced?0:.6});if(!reduced)for(let i=0;i<5;i++)this.effectPool.add({pos,color,size:.04,life:.2,velocity:V((Math.random()-.5)*8,(Math.random()-.5)*8,(Math.random()-.5)*8),wireframe:true});return;}if(weapon===4){this.effectPool.add({pos,color,size:.14,life:.2,expand:reduced?0:1.1});this.effectPool.add({pos,color:'#ffffff',size:.07,life:.14});return;}this.effectPool.add({pos,color:base,size:hit?.09:.055,life:hit?.16:.1,expand:reduced?0:.25});}
+         impact(weapon,pos,color,reduced,hit,from=null){
+          if(!pos)return;
+          // The authoritative shot direction branches floor vs wall before any
+          // accent spawns. Actor hits (`hit`) keep the legacy gore path; only
+          // world surfaces pick a style.
+          const dir=from?this._shotDir??=new T.Vector3():null;
+          if(dir)dir.set((pos.x||0)-(from.x||0),(pos.y||0)-(from.y||0),(pos.z||0)-(from.z||0));
+          const surface=hit?null:this._impactStyle(pos,dir),base=hit?'#fff2ce':color;
+          this._spawnImpactDecal(pos,reduced,weapon,dir,surface);
+          if(!reduced)this._spawnMothSprite('spark-impact',pos,{size:hit?.5:.34,opacity:.55,life:.24,slots:3});
+          this.effectPool.add({pos,color:'#fff2ce',size:.055,life:.07,additive:true});
+          if(!reduced)this.effectPool.add({from:{x:pos.x,y:pos.y,z:pos.z},to:{x:pos.x,y:(pos.y||0)+.3,z:pos.z},color:base,life:.1,size:.026,additive:true});
+          if(surface?.terrain&&!reduced)this._impactDust(pos,surface);
+          if(weapon===3||weapon===7){this.effectPool.add({pos,color:base,size:weapon===7?.13:.1,life:.14,expand:reduced?0:.5});if(!reduced)for(let i=0;i<this._impactSparkCount(4);i++)this.effectPool.add({pos,color:surface?.dust||'#6b7681',size:.045,life:.3,velocity:V((Math.random()-.5)*6,Math.random()*3,(Math.random()-.5)*6)});return;}
+          if(weapon===6){this.effectPool.add({pos,color:'#dff6ff',size:.11,life:.14,expand:reduced?0:.6});if(!reduced)for(let i=0;i<this._impactSparkCount(5);i++)this.effectPool.add({pos,color,size:.04,life:.2,velocity:V((Math.random()-.5)*8,(Math.random()-.5)*8,(Math.random()-.5)*8),wireframe:true});return;}
+          if(weapon===4){this.effectPool.add({pos,color,size:.14,life:.2,expand:reduced?0:1.1});this.effectPool.add({pos,color:'#ffffff',size:.07,life:.14});return;}
+          this.effectPool.add({pos,color:base,size:hit?.09:.055,life:hit?.16:.1,expand:reduced?0:.25});
+          if(!reduced&&surface?.wall)for(let i=0;i<this._impactSparkCount(2);i++)this.effectPool.add({pos,color:surface.spark,size:.03,life:.22,additive:true,velocity:V((Math.random()-.5)*4,Math.random()*2.6,(Math.random()-.5)*4)});
+         }
   // ---- Alt-fire shot + projectile presentation (v8.6) ----------------------
   // Hitscan alt styles. The base `shotEffect` table is untouched: only events
   // tagged `alt`/`altId` route here. `muzzleSide` (twin) and `pellet` decide
@@ -2699,7 +2879,17 @@ export class ArenaView{
    pos.set(.085,.02,-.05);this.hands.localToWorld(pos);
    this.hands.getWorldQuaternion(quat);
    vel.set(1,1.1,.15).applyQuaternion(quat).multiplyScalar(1.4+hashUnit(seed,1)*.5);
-   return this.shellFx().spawn(pos,{velocity:vel,color:'#d9b45b',seed,life:.85});
+   const slot=this.shellFx().spawn(pos,{velocity:vel,color:'#d9b45b',seed,life:.85});
+   // Optional casing foley, fired at the same ejection cadence as the case
+   // itself. Guarded: audio implementations without the hook are untouched.
+   const audio=this.audio??this.viewAudio;
+   if(slot&&audio?.shellCasing){
+    const rel=this._shellAudioRel??=new T.Vector3(),right=this._shellAudioRight??=new T.Vector3();
+    rel.copy(pos);if(this.camera?.position)rel.sub(this.camera.position);
+    right.set(1,0,0).applyQuaternion(this.camera?.quaternion??quat);
+    audio.shellCasing(Math.max(-1,Math.min(1,rel.dot(right)/3)),seed,e.surface??e.material??null);
+   }
+   return slot;
   }
   // ---- Debug death hook ---------------------------------------------------
   // Test/screenshot-only: builds one deterministic corpse for an explicit
@@ -2803,6 +2993,84 @@ export class ArenaView{
     }
    }
   }
+  // Deployable sentry event beats, called from the `effect` dispatch. Spawn
+  // rings, muzzle flashes/tracers and death smoke reuse the existing pooled
+  // effects; every branch is suppressed under reduced motion so the sentry
+  // itself stays a static model.
+  _deployableEvent(e,reduced){
+   const type=e?.type;
+   if(reduced||!this.scene)return 0;
+   const arena=this._matchRef?.arena||MAPS.find(map=>map.id===this._matchRef?.mapId)||MAPS[0];
+   const sentry=this._matchRef?.deployables?.find?.(d=>d?.id===e.sentry);
+   if(type==='deployable'){
+    const pos={x:Number(e.x)||0,y:(Number(e.y)||0)+.08,z:Number(e.z)||0},color=this.objectiveColor(sentry?.team??null,arena);
+    const pool=this.telegraphPool??=new TelegraphPool(this.scene,20);
+    pool.spawn({kind:'ring',pos,color,radius:.6,life:.45,grow:1.1,opacity:.55});
+    // Pooled fallback beats keep the cue readable when the baked Moth sheet is
+    // unavailable (and on the CPU renderer, which has no sprite player).
+    this.effectPool??=new EffectPool(this.scene);
+    for(let i=0;i<3;i++)this.effectPool.add({pos:V(pos.x+(Math.random()-.5)*.4,pos.y+.2+i*.22,pos.z+(Math.random()-.5)*.4),color,size:.07,life:.34,wireframe:true,velocity:V((Math.random()-.5)*.6,1.2+Math.random()*.8,(Math.random()-.5)*.6)});
+    this.effectPool.add({from:{x:pos.x,y:pos.y,z:pos.z},to:{x:pos.x,y:pos.y+1.9,z:pos.z},color,life:.4,size:.05,additive:true});
+    this._mothFx('effect-deployable','arc-burst',pos,{size:1.5,opacity:.55,life:.4,grow:.5,slots:3});
+    return 1;
+   }
+   if(type==='deployable-fire'){
+    const base=this.deployableModels?.get(e.sentry)?.position,from=base?{x:base.x,y:base.y+.72,z:base.z}:(sentry?{x:Number(sentry.x)||0,y:(Number(sentry.y)||0)+.72,z:Number(sentry.z)||0}:null);
+    const actor=this._matchRef?.actors?.find?.(a=>a?.id===e.target),target=this.actorModels?.get(e.target)?.position||(actor?{x:actor.x,y:actor.y,z:actor.z}:null);
+    if(!from||!target)return 0;
+    const color=this.objectiveColor(sentry?.team??null,arena);
+    this.effectPool??=new EffectPool(this.scene);
+    this.effectPool.add({from,to:{x:target.x||0,y:(target.y||0)+1,z:target.z||0},color,life:.07,size:.045,additive:true});
+    this.muzzleLights?.flash(color,from,.06,3.2);
+    return 1;
+   }
+   if(type==='deployable-expire'||type==='deployable-destroyed'){
+    const model=this.deployableModels?.get(e.sentry)?.position,pos=model?{x:model.x,y:model.y,z:model.z}:(sentry?{x:Number(sentry.x)||0,y:Number(sentry.y)||0,z:Number(sentry.z)||0}:null);
+    if(!pos)return 0;
+    this.effectPool??=new EffectPool(this.scene);
+    const count=type==='deployable-destroyed'?4:2;
+    for(let i=0;i<count;i++)this.effectPool.add({pos:V((pos.x||0)+(Math.random()-.5)*.5,(pos.y||0)+.45+Math.random()*.4,(pos.z||0)+(Math.random()-.5)*.5),color:'#33302c',endColor:'#12100e',fade:'exp',damping:.9,size:.14,life:.75,expand:.4,velocity:V((Math.random()-.5)*.5,.7+Math.random()*.5,(Math.random()-.5)*.5)});
+    return count;
+   }
+   return 0;
+  }
+  // Damage readability for actor models, called from the `damage` event branch.
+  // A non-breaking shield hit pulses the existing per-model shield mesh through
+  // the timestamp consumed by `_pulseShield` (scale/opacity only; the material
+  // colour is owned by the actor pass). A low-health actor emits a throttled
+  // pooled smoke wisp and an occasional spark, mirroring the damaged-vehicle
+  // code. WebGL-only and suppressed under reduced motion; each emission is
+  // bounded per actor by its own timestamp.
+  _damageReadability(e,reduced){
+   if(!e||reduced||this.renderer?.isSoftware===true)return 0;
+   const model=this.actorModels?.get?.(e.actor);if(!model)return 0;
+   const now=typeof performance!=='undefined'&&performance.now?performance.now():Date.now(),shield=model.userData?.shield;
+   if(shield&&!e.shieldBreak&&Number(e.shield)>0)model.userData.shieldPulseUntil=now+260;
+   const victim=this._matchRef?.actors?.find?.(actor=>actor?.id===e.actor),maxHealth=Number(victim?.maxHealth)||0,health=Number(victim?.health)||0;
+   if(!victim||!(maxHealth>0)||!(health>0)||health/maxHealth>.35)return 0;
+   const p=model.position||{};let spawned=0;
+   if(now-(model.userData.lowHealthSmokeAt??-Infinity)>=320){
+    model.userData.lowHealthSmokeAt=now;this.effectPool??=new EffectPool(this.scene);
+    this.effectPool.add({pos:V(p.x||0,(p.y||0)+1.05,p.z||0),color:'#3d3a36',endColor:'#141210',fade:'exp',damping:.9,size:.16,life:.85,expand:.45,velocity:V((Math.random()-.5)*.4,.8+Math.random()*.6,(Math.random()-.5)*.4)});
+    spawned++;
+   }
+   if(now-(model.userData.lowHealthSparkAt??-Infinity)>=700){
+    model.userData.lowHealthSparkAt=now;this.effectPool??=new EffectPool(this.scene);
+    this.effectPool.add({pos:V((p.x||0)+(Math.random()-.5)*.6,(p.y||0)+.9,(p.z||0)+(Math.random()-.5)*.6),color:'#ffcf7a',endColor:'#7a2200',fade:'exp',damping:1.6,gravity:8,size:.05,life:.4,additive:true,velocity:V((Math.random()-.5)*3,Math.random()*2+.5,(Math.random()-.5)*3)});
+    spawned++;
+   }
+   return spawned;
+  }
+  // Consume the shield-pulse timestamp set by `_damageReadability`. Scale and
+  // opacity only: the colour assignment stays in the actor pass and the exact
+  // hex assertions keep passing. Always restores the authored .7/1/.7 shell.
+  _pulseShield(m,hasEnergyShield,now=typeof performance!=='undefined'&&performance.now?performance.now():Date.now()){
+   const shield=m?.userData?.shield;if(!shield?.scale)return 0;
+   const until=Number(m.userData.shieldPulseUntil)||0,pulse=until>now?Math.max(0,Math.min(1,(until-now)/260)):0,scale=.7*(1+.22*pulse);
+   shield.scale.set(scale,1+.22*pulse,scale);
+   if(shield.material)shield.material.opacity=(hasEnergyShield?.24:.13)+.34*pulse;
+   return pulse;
+  }
   // WebGL contact shadows under living actors and vehicles. WebGL-only and
   // reduced-motion suppressed (the CPU renderer keeps its per-model blob
   // shadows); the pool follows presentation transforms after interpolation so
@@ -2829,6 +3097,13 @@ export class ArenaView{
     if(!Number.isFinite(ground))continue;
     const radius=vehicle.kind==='hornet'?1.6:1.25;
     if(pool.place(`v:${vehicle.id}`,x,ground+.04,z,{radius,opacity:.34}))placed++;
+   }
+   for(const sentry of (match?.deployables||[]).slice(0,4)){
+    const model=this.deployableModels?.get(sentry?.id);
+    if(!model?.visible)continue;
+    const x=model.position.x,z=model.position.z,ground=sample(x,z,model.position.y);
+    if(!Number.isFinite(ground))continue;
+    if(pool.place(`d:${sentry.id}`,x,ground+.035,z,{radius:.5,opacity:.32}))placed++;
    }
    pool.end();
    return placed;
@@ -2969,6 +3244,31 @@ export class ArenaView{
     if('toneMappingExposure' in this.renderer)this.renderer.toneMappingExposure=base.exposure*(1+(Number(state.preset?.exposure??1)-1)*.85);
    }
    _applyLookLighting(wet,dark){const base=this._arenaLight;if(!base)return;const tint=new T.Color(base.dark||'#000000');for(const light of this.scene?.children||[]){if(light.isHemisphereLight){light.intensity=base.hemi*(1-dark*.22);if(light.color)light.color.copy(base.hemiColor).lerp(tint,wet*.2+dark*.3);if(light.groundColor)light.groundColor.copy(base.groundColor);}else if(light.isDirectionalLight&&!light.userData?.rimLight){light.intensity=base.sun*(1-dark*.5);if(light.color)light.color.copy(base.sunColor).lerp(tint,wet*.3+dark*.55);}}}
+   // Interior ambience: while the presented camera sits inside an authored
+   // building/cavern/tunnel volume the fog thickens and the key light dampens,
+   // and both ease back to the stored arena base as the camera leaves. Runs
+   // after the weather pass as its own step so `_applyArenaLook` and
+   // `_updateWeather` keep their exact density contract; WebGL only, because
+   // the CPU renderer ignores scene.fog and shades from its own tables.
+   _updateInteriorAmbience(delta,reduced=this.reduced?.()===true){
+    const fog=this.scene?.fog;
+    if(this.renderer?.isSoftware===true||!fog||!(Number(fog.density)>=0))return 0;
+    const point=this.camera?.position,inside=point&&this.interiors?.length&&interiorAt(this.interiors,point)?1:0;
+    const blend=this._interiorBlend??0,dt=Math.max(0,Math.min(Number(delta)||0,.25));
+    const next=reduced?inside:blend+(inside-blend)*(1-Math.exp(-1.1*dt));
+    this._interiorBlend=Math.abs(next-inside)<.001?inside:next;
+    const state=this._weatherState(),look=this._arenaLook;
+    if(look)fog.density=(Number(look.fogDensity)||0)*(Number(state?.preset?.density)||1)*(1+.55*this._interiorBlend);
+    const lights=this._arenaLight;
+    if(lights){
+     const material=state?.preset?.material||{},dark=Math.max(0,Math.min(1,Number(material.dark)||0)),flash=Math.max(0,Number(this._flash)||0),damp=this._interiorBlend;
+     for(const light of this.scene.children||[]){
+      if(light.isHemisphereLight)light.intensity=(Number(lights.hemi)||light.intensity)*(1-dark*.22)*(1+flash*.5)*(1-.18*damp);
+      else if(light.isDirectionalLight&&!light.userData?.rimLight)light.intensity=(Number(lights.sun)||light.intensity)*(1-dark*.5)*(1+flash*.8)*(1-.22*damp);
+     }
+    }
+    return this._interiorBlend;
+   }
    _blendedSkyPalette(blend){const background=this._arenaLook?.background||'#0a0f1e',from=blend?.from||blend?.phase||'day',to=blend?.to||from,k=Number.isFinite(blend?.blend)?Math.max(0,Math.min(1,blend.blend)):0,a=skyPalette(background,from),b=skyPalette(background,to),out={};for(const key of Object.keys(a))out[key]='#'+new T.Color(a[key]).lerp(new T.Color(b[key]),k).getHexString();return out;}
    _tintSky(sky,palette,blend,darken){if(!sky)return;const blended=this._blendedSkyPalette(blend),from=blend?.from||blend?.phase||'day',to=blend?.to||from,k=Number.isFinite(blend?.blend)?Math.max(0,Math.min(1,blend.blend)):0;
     if(sky.userData.stars){const stars=sky.children?.find(child=>child.userData?.stars);if(stars){const nightWeight=g=>g==='night'?1:g==='dusk'?.4:0;const visibility=1-(nightWeight(from)*(1-k)+nightWeight(to)*k);stars.visible=visibility>.4;if(stars.material)stars.material.opacity=Math.max(0,visibility);}}
@@ -3060,7 +3360,7 @@ export class ArenaView{
    // preset changes so the strikes stay phase-locked across frames.
    _lightningSchedule(preset=this._weatherState().preset){
     const profile=preset?.lightning;if(!profile)return [];
-    if(this._lightningPreset!==preset){this._lightningPreset=preset;this._lightningWindow=90;this._lightning=lightningSchedule(preset,{seed:this._weatherSeed??1,window:this._lightningWindow,count:8});this._lightningAt=0;this._lightningFired=new Set();}
+    if(this._lightningPreset!==preset){this._lightningPreset=preset;this._lightningWindow=90;this._lightningScheduleSeed=this._weatherSeed??1;this._lightning=lightningSchedule(preset,{seed:this._lightningScheduleSeed,window:this._lightningWindow,count:8});this._lightningAt=0;this._lightningFired=new Set();}
     return this._lightning;
    }
    // Advance the storm clock, fire due strikes and expose the current flash
@@ -3076,7 +3376,7 @@ export class ArenaView{
     if(!schedule.length){this._flash=0;state.flash=0;return 0;}
     this._lightningAt=(this._lightningAt||0)+Math.max(0,Math.min(Number(delta)||0,.25));
     // Loop the deterministic schedule so a long storm never runs silent.
-    if(this._lightningAt>(this._lightningWindow??90)){this._lightningAt=0;this._lightningFired=new Set();this._lightning=lightningSchedule(preset,{seed:(this._weatherSeed??1)+((this._lightningCycle=(this._lightningCycle??0)+1)>>>0),window:this._lightningWindow,count:8});}
+    if(this._lightningAt>(this._lightningWindow??90)){this._lightningAt=0;this._lightningFired=new Set();this._lightningScheduleSeed=(this._weatherSeed??1)+((this._lightningCycle=(this._lightningCycle??0)+1)>>>0);this._lightning=lightningSchedule(preset,{seed:this._lightningScheduleSeed,window:this._lightningWindow,count:8});}
     const firedSet=this._lightningFired??=new Set();
     let fired=0,flash=0;
     for(const strike of schedule){
@@ -3093,7 +3393,7 @@ export class ArenaView{
    }
    _onLightningStrike(strike,software){
     if(software)return;
-    if(this.viewAudio?.thunder)this.viewAudio.thunder({distance:strike.distance,pan:strike.pan,intensity:strike.intensity*(strike.thunderGain??1)});
+    if(this.viewAudio?.thunder)this.viewAudio.thunder({distance:strike.distance,pan:strike.pan,intensity:strike.intensity*(strike.thunderGain??1),seed:this._lightningScheduleSeed??this._weatherSeed??1});
     // Baked arc burst in the sky: the schedule only carries a normalized
     // distance and stereo pan, so place it on the camera's forward/right axes.
     if(this.renderer?.isSoftware!==true&&this.camera){
@@ -3194,13 +3494,13 @@ export class ArenaView{
     // `time` (the module is a deterministic function of its argument) and pinned
     // so reduced motion holds a still phase; the Moth rift material reads it.
     this._mothPhase=updateMoth(reduced?0:(Number.isFinite(time)?time:0));if(mode!==this._lastMode){this._lastMode=mode;this.clearFreeMotion();}if((mode==='selection'||mode==='progression')&&!this.showcaseState){if(this.showcaseExpected){this.renderer.render(this.scene,this.camera);return;}const m=this.menu.model;m.rotation.y=Math.PI+.25+(reduced?0:Math.sin(time*.25)*.2);m.position.y=.17+(reduced?0:Math.sin(time)*.025);m.userData.rig?.update({dt:Math.max(0,Math.min(.1,delta||0)),time,speed:0,maxSpeed:8,grounded:true});this.renderer.render(this.menu.scene,this.menu.camera);return;}if((mode==='selection'||mode==='theater'||mode==='progression'||mode==='changelog'||mode==='browse'||mode==='lobby')&&!match)match=this.showcaseState;
-      if(!match)return;this._matchRef=match;const owner=this.cameraOwner,actors=match.actors||[],follow=owner==='manual'&&this.manualFollowId!=null?this.manualFollowId:null,freeCam=owner==='free'&&this._freeCam===true,cinematic=this.cinema===true&&!!this.director&&!freeCam,raceActive=cameraOwnerAllowsRace(owner)&&!this.directorLock&&!!match.race;let player=cinematic?actors[0]:(actors.find(a=>a.id===this.playerId)||actors[0]);if(follow!=null)player=actors.find(a=>a.id===follow)||player;if(!cinematic&&(this.spectator||follow!=null))player=spectateActor(actors,follow??this.spectatorTarget)||player;if(!player)return;this._audioFocusId=Number.isInteger(player.id)?player.id:this.playerId;const arena=match.arena||MAPS.find(a=>a.id===match.mapId)||MAPS[0];const savedPlayerId=this.playerId;this.updateFlags(match,arena);this.updateObjectives(match,arena);this.updateSpots(match);this.updateWaypoint(match,arena);this.updatePayloadModel(match,arena,time);this.updateMothRift(time,reduced);if(!reduced)this._mothRift?.material?.userData?.setMothPhase?.(this._mothPhase??0);this.updateZipRides(match,Math.max(0,delta),reduced);if(cinematic)this.playerId=-1;const cinemaPose=cinematic?this.director.update(match,Math.max(0,delta),match.events||[]):null;if(freeCam){this.camera.position.set(this.freePose.x,this.freePose.y,this.freePose.z);this.camera.rotation.set(this.freePose.pitch,this.freePose.yaw,0,'YXZ');}else if(cinemaPose&&!raceActive){this.camera.position.set(cinemaPose.x,cinemaPose.y,cinemaPose.z);this.camera.rotation.set(cinemaPose.pitch,cinemaPose.yaw,cinemaPose.roll||0,'YXZ');this._clearCamera(player,delta,cinemaPose.cut);this._applyFreeExitBlend(delta,reduced);}else{const pres=this._interpEnabled?this._presentActor(player.id):null,px=pres&&!pres.snapped?pres.x:(player.x||0),py=pres&&!pres.snapped?pres.y:(player.y||0),pz=pres&&!pres.snapped?pres.z:(player.z||0);const eyeY=py+(player.health>0?(player.eyeHeight??1.45):.65),yaw=(player.yaw||0)+(player.punchYaw||0),pitch=(player.pitch||0)+(player.punchPitch||0);if(this.spectator&&this.spectatorThird===true){const dist=4.6,cos=Math.cos(pitch);this.camera.position.set(px+Math.sin(yaw)*dist*cos,eyeY+1.1-Math.sin(pitch)*dist,pz+Math.cos(yaw)*dist*cos);}else this.camera.position.set(px,eyeY,pz);this.camera.rotation.set(pitch,yaw,0,'YXZ');this._applyFreeExitBlend(delta,reduced);}this.cameraShake??=new CameraShake();const aiming=this.aim===true||player.ads===true,baseFov=this.display?.fov??82;
+      if(!match)return;this._matchRef=match;const owner=this.cameraOwner,actors=match.actors||[],follow=owner==='manual'&&this.manualFollowId!=null?this.manualFollowId:null,freeCam=owner==='free'&&this._freeCam===true,cinematic=this.cinema===true&&!!this.director&&!freeCam,raceActive=cameraOwnerAllowsRace(owner)&&!this.directorLock&&!!match.race;let player=cinematic?actors[0]:(actors.find(a=>a.id===this.playerId)||actors[0]);if(follow!=null)player=actors.find(a=>a.id===follow)||player;if(!cinematic&&(this.spectator||follow!=null))player=spectateActor(actors,follow??this.spectatorTarget)||player;if(!player)return;this._audioFocusId=Number.isInteger(player.id)?player.id:this.playerId;const arena=match.arena||MAPS.find(a=>a.id===match.mapId)||MAPS[0];const savedPlayerId=this.playerId;this.updateFlags(match,arena);this.updateObjectives(match,arena);this.updateSpots(match);this.updateWaypoint(match,arena);this.updatePayloadModel(match,arena,time);this.updateDeployables(match,reduced);this.updateMothRift(time,reduced);if(!reduced)this._mothRift?.material?.userData?.setMothPhase?.(this._mothPhase??0);this.updateZipRides(match,Math.max(0,delta),reduced);if(cinematic)this.playerId=-1;const cinemaPose=cinematic?this.director.update(match,Math.max(0,delta),match.events||[]):null;if(freeCam){this.camera.position.set(this.freePose.x,this.freePose.y,this.freePose.z);this.camera.rotation.set(this.freePose.pitch,this.freePose.yaw,0,'YXZ');}else if(cinemaPose&&!raceActive){this.camera.position.set(cinemaPose.x,cinemaPose.y,cinemaPose.z);this.camera.rotation.set(cinemaPose.pitch,cinemaPose.yaw,cinemaPose.roll||0,'YXZ');this._clearCamera(player,delta,cinemaPose.cut);this._applyFreeExitBlend(delta,reduced);}else{const pres=this._interpEnabled?this._presentActor(player.id):null,px=pres&&!pres.snapped?pres.x:(player.x||0),py=pres&&!pres.snapped?pres.y:(player.y||0),pz=pres&&!pres.snapped?pres.z:(player.z||0);const eyeY=py+(player.health>0?(player.eyeHeight??1.45):.65),yaw=(player.yaw||0)+(player.punchYaw||0),pitch=(player.pitch||0)+(player.punchPitch||0);if(this.spectator&&this.spectatorThird===true){const dist=4.6,cos=Math.cos(pitch);this.camera.position.set(px+Math.sin(yaw)*dist*cos,eyeY+1.1-Math.sin(pitch)*dist,pz+Math.cos(yaw)*dist*cos);}else this.camera.position.set(px,eyeY,pz);this.camera.rotation.set(pitch,yaw,0,'YXZ');this._applyFreeExitBlend(delta,reduced);}this.cameraShake??=new CameraShake();const aiming=this.aim===true||player.ads===true,baseFov=this.display?.fov??82;
 const activeSight=this._activeSight=resolveActiveSight({weapon:player.weapon,optic:player.attachments?.visual?.optic,aiming});
 // Player FOV is updated with the weapon pose below; director/free camera keep ownership here.
 if(cinemaPose)this.camera.fov=Math.max(50,Math.min(100,cinemaPose.fov||this.camera.fov));if(freeCam)this.camera.fov=Math.max(50,Math.min(100,this.display?.fov??82));this.camera.updateProjectionMatrix();
 if(this._killcam&&!freeCam&&!cinematic&&cameraOwnerAllowsRace(owner)){const elapsed=(Number.isFinite(time)?time:0)-this._killcam.start,kc=killcamPose({elapsed,duration:this._killcam.duration,focus:this._killcam.focus,killer:this._killcam.killer,seed:this._killcam.seed,reduced});if(kc.phase>=1){this._killcam=null;}else{this.camera.position.set(kc.x,kc.y,kc.z);this.camera.lookAt(kc.lookX,kc.lookY,kc.lookZ);this.camera.fov=Math.max(50,Math.min(100,kc.fov));this.camera.updateProjectionMatrix();}}
 if(freeCam){this.lowHealthOverlay?.update(false,time,delta,reduced,this.camera);}else if(!cinematic&&cameraOwnerAllowsRace(owner)){this.cameraShake.apply(this.camera,time,reduced,this.display?.cameraShake??1);this.cameraShake.update(Math.max(0,delta));this.lowHealth=player.health>0&&player.health<=(player.maxHealth??100)*.35;this.lowHealthOverlay?.update(this.lowHealth,time,delta,reduced,this.camera);}else this.lowHealthOverlay?.update(false,time,delta,reduced,this.camera);
-      actors.forEach((a,i)=>{const m=this.actorModels.get(a.id);if(!m)return;const mounted=a.vehicleId!=null;if(a.health<=0){this.poseCorpse(m,a,match);return;}this.deathContext?.delete(a.id);this.reviveCorpse(m,a,match);m.visible=a.id!==this.playerId;m.position.set(a.x||0,a.y||0,a.z||0);if(mounted){const rider=match.vehicles?.find(v=>v.id===a.vehicleId),chassis=Number.isFinite(rider?.yaw)?rider.yaw:Number.isFinite(rider?.heading)?rider.heading:a.yaw;m.rotation.y=(Number.isFinite(chassis)?chassis:0)-Math.PI;}else m.rotation.y=Number.isFinite(a.bodyYaw)?a.bodyYaw:(a.yaw||0);const bodyYaw=Number.isFinite(a.bodyYaw)?a.bodyYaw:(a.yaw||0),speed=Math.hypot(a.vx||0,a.vz||0),localX=(a.vx||0)*Math.cos(bodyYaw)-(a.vz||0)*Math.sin(bodyYaw),localZ=-((a.vx||0)*Math.sin(bodyYaw)+(a.vz||0)*Math.cos(bodyYaw));m.userData.rig?.update({dt:Math.max(0,Math.min(.1,delta||0)),time,reduced,speed:mounted?0:speed,maxSpeed:a.moveSpeed||8,grounded:mounted?true:a.grounded!==false,crouch:!mounted&&a.crouching===true,ads:!mounted&&a.ads===true,reload:!mounted&&a.reloading?1:0,strafe:mounted?0:Math.max(-1,Math.min(1,localX/3)),forward:mounted?0:Math.max(-1,Math.min(1,localZ/3)),focusYaw:Math.atan2(Math.sin((a.yaw||0)-bodyYaw),Math.cos((a.yaw||0)-bodyYaw)),focusPitch:-(a.pitch||0),bank:reduced?0:Math.max(-1,Math.min(1,((a.yaw||0)-bodyYaw)*1.1)),hit:(!reduced&&(m.userData.hitUntil??0)>performance.now())?(m.userData.hitStrength??1):0});if(m.userData.gunAnchor){const aimYaw=Math.atan2(Math.sin((a.yaw||0)-bodyYaw),Math.cos((a.yaw||0)-bodyYaw));m.userData.gunAnchor.rotation.x=reduced?0:Math.max(-.7,Math.min(.7,a.pitch||0));m.userData.gunAnchor.rotation.y=reduced?0:Math.max(-.9,Math.min(.9,aimYaw));}if(!reduced&&a.health>0&&a.active>0&&a.harness==='hermes'&&(match.time||0)-(m.userData.trailAt||0)>.1){m.userData.trailAt=match.time;this.effectPool??=new EffectPool(this.scene);this.effectPool.add({pos:V(a.x,a.y+.4,a.z),color:m.userData.color,size:.11,life:.3});}m.userData.torso.material.emissive.set(a.active>0&&['opencode','codex','cline','roo'].includes(a.harness)?m.userData.color:'#000000');m.userData.torso.material.emissiveIntensity=a.active>0?.7:0;const hasEnergyShield=(a.temporaryShield||0)>0||(a.juggernautShield||0)>0;m.userData.shield.material.color.set(a.slow>0?'#d89aff':(a.juggernautShield||0)>0?'#ffd166':hasEnergyShield?'#70ffe6':m.userData.color);m.userData.shield.material.opacity=hasEnergyShield?.24:.13;m.userData.shield.visible=a.slow>0||a.protection>0||(a.harness==='claudecode'&&a.active>0)||hasEnergyShield;if(m.userData.weapon.userData.type!==a.weapon){m.userData.gunAnchor.remove(m.userData.weapon);this.disposeObject(m.userData.weapon);m.userData.weapon=simpleWeaponModel(a.weapon,this.modelAssets,a.attachments?.visual,a.finish);this._trackAssets();m.userData.gunAnchor.add(m.userData.weapon);}m.userData.weapon.userData.flash.visible=!reduced&&(m.userData.flashUntil??0)>performance.now();});
+      actors.forEach((a,i)=>{const m=this.actorModels.get(a.id);if(!m)return;const mounted=a.vehicleId!=null;if(a.health<=0){this.poseCorpse(m,a,match);return;}this.deathContext?.delete(a.id);this.reviveCorpse(m,a,match);m.visible=a.id!==this.playerId;m.position.set(a.x||0,a.y||0,a.z||0);if(mounted){const rider=match.vehicles?.find(v=>v.id===a.vehicleId),chassis=Number.isFinite(rider?.yaw)?rider.yaw:Number.isFinite(rider?.heading)?rider.heading:a.yaw;m.rotation.y=(Number.isFinite(chassis)?chassis:0)-Math.PI;}else m.rotation.y=Number.isFinite(a.bodyYaw)?a.bodyYaw:(a.yaw||0);const bodyYaw=Number.isFinite(a.bodyYaw)?a.bodyYaw:(a.yaw||0),speed=Math.hypot(a.vx||0,a.vz||0),localX=(a.vx||0)*Math.cos(bodyYaw)-(a.vz||0)*Math.sin(bodyYaw),localZ=-((a.vx||0)*Math.sin(bodyYaw)+(a.vz||0)*Math.cos(bodyYaw));m.userData.rig?.update({dt:Math.max(0,Math.min(.1,delta||0)),time,reduced,speed:mounted?0:speed,maxSpeed:a.moveSpeed||8,grounded:mounted?true:a.grounded!==false,crouch:!mounted&&a.crouching===true,ads:!mounted&&a.ads===true,reload:!mounted&&a.reloading?1:0,strafe:mounted?0:Math.max(-1,Math.min(1,localX/3)),forward:mounted?0:Math.max(-1,Math.min(1,localZ/3)),focusYaw:Math.atan2(Math.sin((a.yaw||0)-bodyYaw),Math.cos((a.yaw||0)-bodyYaw)),focusPitch:-(a.pitch||0),bank:reduced?0:Math.max(-1,Math.min(1,((a.yaw||0)-bodyYaw)*1.1)),hit:(!reduced&&(m.userData.hitUntil??0)>performance.now())?(m.userData.hitStrength??1):0});if(m.userData.gunAnchor){const aimYaw=Math.atan2(Math.sin((a.yaw||0)-bodyYaw),Math.cos((a.yaw||0)-bodyYaw));m.userData.gunAnchor.rotation.x=reduced?0:Math.max(-.7,Math.min(.7,a.pitch||0));m.userData.gunAnchor.rotation.y=reduced?0:Math.max(-.9,Math.min(.9,aimYaw));}if(!reduced&&a.health>0&&a.active>0&&a.harness==='hermes'&&(match.time||0)-(m.userData.trailAt||0)>.1){m.userData.trailAt=match.time;this.effectPool??=new EffectPool(this.scene);this.effectPool.add({pos:V(a.x,a.y+.4,a.z),color:m.userData.color,size:.11,life:.3});}m.userData.torso.material.emissive.set(a.active>0&&['opencode','codex','cline','roo'].includes(a.harness)?m.userData.color:'#000000');m.userData.torso.material.emissiveIntensity=a.active>0?.7:0;const hasEnergyShield=(a.temporaryShield||0)>0||(a.juggernautShield||0)>0;m.userData.shield.material.color.set(a.slow>0?'#d89aff':(a.juggernautShield||0)>0?'#ffd166':hasEnergyShield?'#70ffe6':m.userData.color);this._pulseShield(m,hasEnergyShield);m.userData.shield.visible=a.slow>0||a.protection>0||(a.harness==='claudecode'&&a.active>0)||hasEnergyShield;if(m.userData.weapon.userData.type!==a.weapon){m.userData.gunAnchor.remove(m.userData.weapon);this.disposeObject(m.userData.weapon);m.userData.weapon=simpleWeaponModel(a.weapon,this.modelAssets,a.attachments?.visual,a.finish);this._trackAssets();m.userData.gunAnchor.add(m.userData.weapon);}m.userData.weapon.userData.flash.visible=!reduced&&(m.userData.flashUntil??0)>performance.now();});
    // Presentation interpolation (opt-in). The host captures a presentation
    // snapshot around every fixed simulation step (including catch-up steps), so
    // the previous/current transforms are the two surrounding ticks rather than
@@ -3271,7 +3571,8 @@ if(freeCam){this.lowHealthOverlay?.update(false,time,delta,reduced,this.camera);
 
     this._animateWeaponParts(this.firstPerson,player,reduced,delta);
     this._animateWeaponAlt(this.firstPerson,player,reduced,delta,time);
-    this.firstPerson.userData.flash.visible=!reduced&&this.hands.visible&&this.flashUntil>performance.now();this.muzzleLights?.update(Math.max(0,delta));if(this.sun?.castShadow!==false&&this.renderer.shadowMap?.autoUpdate===false){const hz=Number(this._quality().shadowHz)||30;if(shadowDue(time,this._shadowAt,hz)){this._shadowAt=time;const focus=this.camera?.position;this._fitShadowFrustum(focus?.x??0,focus?.z??0,SHADOW_FIT_EXTENT);this.renderer.shadowMap.needsUpdate=true;}}this.updateSky();this._updateWind(time,reduced);this._updateAmbient(match,delta,time,reduced);const spMode=match.config?.mode==='campaign'||match.config?.mode==='horde';if(spMode)this.setWeather(match.weather??null);else if(!cinematic&&this._weatherOverride!==null)this.setWeather(null);this._updateWeather(arena,delta,mode);this._updateWeatherFx(delta,reduced,this._quality(),arena);const software=this.renderer?.isSoftware===true;this._updateLightning(delta,reduced,software);this._applyWetSheen(this._weatherState());this.hitPool?.update(Math.max(0,delta));this.shellPool?.update(Math.max(0,delta));this._updateHitReactions();this._alignLivingCharacters(match);this._updateDebris(delta);this._updateAudio(match,time);this._beginGpu();
+    this._updateWeaponHeat(this.firstPerson,reduced,delta);
+    this.firstPerson.userData.flash.visible=!reduced&&this.hands.visible&&this.flashUntil>performance.now();this.muzzleLights?.update(Math.max(0,delta));if(this.sun?.castShadow!==false&&this.renderer.shadowMap?.autoUpdate===false){const hz=Number(this._quality().shadowHz)||30;if(shadowDue(time,this._shadowAt,hz)){this._shadowAt=time;const focus=this.camera?.position;this._fitShadowFrustum(focus?.x??0,focus?.z??0,SHADOW_FIT_EXTENT);this.renderer.shadowMap.needsUpdate=true;}}this.updateSky();this._updateWind(time,reduced);this._updateAmbient(match,delta,time,reduced);const spMode=match.config?.mode==='campaign'||match.config?.mode==='horde';if(spMode)this.setWeather(match.weather??null);else if(!cinematic&&this._weatherOverride!==null)this.setWeather(null);this._updateWeather(arena,delta,mode);this._updateWeatherFx(delta,reduced,this._quality(),arena);const software=this.renderer?.isSoftware===true;this._updateLightning(delta,reduced,software);this._updateInteriorAmbience(delta,reduced);this._applyWetSheen(this._weatherState());this.hitPool?.update(Math.max(0,delta));this.shellPool?.update(Math.max(0,delta));this._updateHitReactions();this._alignLivingCharacters(match);this._updateDebris(delta);this._updateAudio(match,time);this._beginGpu();
     // Per-target stacks: when bots are styled, the world composer renders
     // through a camera that excludes the actor layer and the scene depth is
     // preserved (autoClear off + depth-writing passes disabled) so the bot
@@ -3381,6 +3682,29 @@ if(freeCam){this.lowHealthOverlay?.update(false,time,delta,reduced,this.camera);
        if(memory){this.perf.geometries=memory.geometries||0;this.perf.textures=memory.textures||0;}
        this.perf.passes=this.composer?.passes?.filter(p=>p.enabled!==false).map(p=>p.name||p.constructor?.name||'pass')||[];
       }
+      // ---- Sustained-fire barrel heat --------------------------------------
+      // Per-weapon shot counter feeding the `heat-glow` sleeve assembled on
+      // every detailed model. Heat rises per shot and decays exponentially in
+      // the per-frame viewmodel update; reduced motion and the low tier never
+      // show the mesh, so this stays presentation-only.
+      _heatShot(e,actorModel=null){
+       const local=e?.actor===this.playerId,model=local?this.firstPerson:actorModel?.userData?.weapon;
+       if(!model?.userData?.heatGlow)return 0;
+       model.userData.heatShots=(model.userData.heatShots||0)+1;
+       model.userData.heat=Math.min(1,(model.userData.heat||0)+.17);
+       return model.userData.heat;
+      }
+      _updateWeaponHeat(weapon,reduced,delta){
+       const data=weapon?.userData,glow=data?.heatGlow;
+       if(!glow)return 0;
+       const step=Math.max(0,Math.min(.25,Number(delta)||0)),tier=this._quality?.().tier??0;
+       data.heat=(data.heat||0)*Math.exp(-step/.55);
+       if(data.heat<.004)data.heat=0;
+       const level=data.heat,on=reduced!==true&&tier>=1&&level>0;
+       glow.visible=on;
+       if(glow.material)glow.material.opacity=on?Math.min(.85,level*.85):0;
+       return level;
+      }
       _animateWeaponParts(weapon,player,reduced,delta){
        if(!weapon)return;
        const parts=weapon.userData.parts||{},anchors=weapon.userData.anchors||{};
@@ -3459,5 +3783,5 @@ if(freeCam){this.lowHealthOverlay?.update(false,time,delta,reduced,this.camera);
       }
       updateRace(match,time){syncRacePresentation(this,match,time);}
      _renderPreview(time,reduced){const rect=this.previewRect;if(!rect||rect.width<12||rect.height<12||!(this.renderer instanceof T.WebGLRenderer))return;const m=this.menu.model;m.rotation.y=Math.PI+.25+(reduced?0:Math.sin(time*.4)*.22);m.position.y=.17;const cam=this.menu.camera;cam.aspect=Math.max(.2,rect.width/rect.height);cam.updateProjectionMatrix();this._renderSceneInto(this.renderer,rect,this.menu.scene,cam);}
-          dispose(){this.characterLifecycle?.dispose?.();this.clearObjectiveMarkers();this.effectPool?.dispose();this.telegraphPool?.dispose();this.projectilePool?.dispose();this.railPool?.dispose();this.deathPool?.dispose();this.decalPool?.dispose();this.ripplePool?.dispose();this.ripplePool=null;this.contactShadows?.dispose();this.contactShadows=null;this.debrisPool?.dispose();this.debrisPool=null;this.hitPool?.dispose();this.hitPool=null;this.abilityVfx?.dispose();this.abilityVfx=null;this.hitFlinch?.clear();this.shellPool?.dispose();this.shellPool=null;this.altProjectiles?.dispose();this.altProjectiles=null;this._clearDebugDeaths();this.ambientPool?.dispose();this.weatherPool?.dispose();this.ambientFx=null;this.weatherFx=null;this._killcam=null;this.preview?.dispose();this.preview=null;this.previewAssets?.dispose?.();this.previewAssets=null;disposeComposer(this.composer);this.composer=null;this._disposeLabTargets();this.muzzleLights?.dispose();this.lowHealthOverlay?.dispose();this._disposeMothSprites();this.zipCarriages?.clear();this.disposeObject(this.scene);if(this.weaponScene)this.disposeObject(this.weaponScene);this.disposeObject(this.menu.scene);this.environmentRT?.dispose?.();for(const resource of this.renderResources||[])resource.dispose();this.renderResources?.clear();for(const resource of this.sharedResources||[])resource.dispose();this.sharedResources?.clear();this.modelAssets?.materials.clear();this.modelAssets?.geometries.clear();this.modelAssets?.resources.clear();this.arenaAssets?.materials.clear();this.arenaAssets?.geometries.clear();this.arenaAssets?.resources.clear();clearSurfaceTextures();for(const model of this._weaponCache?.values?.()||[])this.disposeObject(model);this._weaponCache?.clear();this._freeCam=false;this._directorLock=false;this.manualFollowId=null;this._cameraOwner='auto';this._freeExit=null;this.clearFreeMotion();this.resetFreeCam();this.renderer.dispose();}
+          dispose(){this.characterLifecycle?.dispose?.();this.clearObjectiveMarkers();this.effectPool?.dispose();this.telegraphPool?.dispose();this.projectilePool?.dispose();this.railPool?.dispose();this.deathPool?.dispose();this.decalPool?.dispose();this.ripplePool?.dispose();this.ripplePool=null;this.contactShadows?.dispose();this.contactShadows=null;this.debrisPool?.dispose();this.debrisPool=null;this.hitPool?.dispose();this.hitPool=null;this.abilityVfx?.dispose();this.abilityVfx=null;this.hitFlinch?.clear();this.shellPool?.dispose();this.shellPool=null;this.altProjectiles?.dispose();this.altProjectiles=null;this._clearDebugDeaths();this.ambientPool?.dispose();this.weatherPool?.dispose();this.ambientFx=null;this.weatherFx=null;this._killcam=null;this.preview?.dispose();this.preview=null;this.previewAssets?.dispose?.();this.previewAssets=null;disposeComposer(this.composer);this.composer=null;this._disposeLabTargets();this.muzzleLights?.dispose();this.lowHealthOverlay?.dispose();this._disposeMothSprites();this.zipCarriages?.clear();this.deployableModels?.clear();this.disposeObject(this.scene);if(this.weaponScene)this.disposeObject(this.weaponScene);this.disposeObject(this.menu.scene);this.environmentRT?.dispose?.();for(const resource of this.renderResources||[])resource.dispose();this.renderResources?.clear();for(const resource of this.sharedResources||[])resource.dispose();this.sharedResources?.clear();this.modelAssets?.materials.clear();this.modelAssets?.geometries.clear();this.modelAssets?.resources.clear();this.arenaAssets?.materials.clear();this.arenaAssets?.geometries.clear();this.arenaAssets?.resources.clear();clearSurfaceTextures();for(const model of this._weaponCache?.values?.()||[])this.disposeObject(model);this._weaponCache?.clear();this._freeCam=false;this._directorLock=false;this.manualFollowId=null;this._cameraOwner='auto';this._freeExit=null;this.clearFreeMotion();this.resetFreeCam();this.renderer.dispose();}
 }

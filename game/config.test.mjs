@@ -205,6 +205,36 @@ test('touch layout, frame cap and shadow fields normalize deliberately', () => {
  assert.equal(normalizeDisplay(legacy.display).touchScale, 1);
 });
 
+test('crosshair depth fields normalize additively with bounded clamps',()=>{
+ const d = normalizeDisplay({});
+ assert.equal(d.crosshairOutline, true, 'the shipped reticle keeps its outline default');
+ assert.equal(d.crosshairGap, 0);
+ assert.equal(d.crosshairThickness, 1);
+ assert.equal(d.crosshairDot, false);
+ assert.equal(d.adsColor, '#c2ffea');
+ const clamped = normalizeDisplay({crosshairOutline:false,crosshairGap:9,crosshairThickness:.1,crosshairDot:true,adsColor:'#FF00AA'});
+ assert.equal(clamped.crosshairOutline, false, 'an explicit off is preserved');
+ assert.equal(clamped.crosshairGap, 4, 'the base gap is clamped to 4 px');
+ assert.equal(clamped.crosshairThickness, .6, 'thickness is clamped to the low bound');
+ assert.equal(clamped.crosshairDot, true);
+ assert.equal(clamped.adsColor, '#FF00AA');
+ const bad = normalizeDisplay({crosshairOutline:'yes',crosshairGap:NaN,crosshairThickness:Infinity,crosshairDot:'on',adsColor:'red'});
+ assert.equal(bad.crosshairOutline, true);
+ assert.equal(bad.crosshairGap, 0);
+ assert.equal(bad.crosshairThickness, 1);
+ assert.equal(bad.crosshairDot, false);
+ assert.equal(bad.adsColor, '#c2ffea');
+ // A legacy display without the keys keeps the exact shipped reticle, and a
+ // saved JSON copy round-trips without drift.
+ const legacy = normalizeDisplay({fov:90,crosshair:'dot',size:1.2});
+ assert.equal(legacy.crosshairOutline, true);
+ assert.equal(legacy.crosshairGap, 0);
+ assert.equal(legacy.crosshairThickness, 1);
+ assert.equal(legacy.crosshairDot, false);
+ const saved = JSON.parse(JSON.stringify({...DEFAULT_DISPLAY,crosshairGap:2,crosshairThickness:1.4,crosshairDot:true,adsColor:'#123456'}));
+ assert.deepEqual(normalizeDisplay(saved), saved);
+});
+
 test('mutators unify the legacy flags into one canonical, ordered set',()=>{
  const c=normalizeConfig({mutators:['noRecoil','turbo','oneShot','bigHead','lowGravity']});
  assert.equal(c.speed,1.25);

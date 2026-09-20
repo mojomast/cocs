@@ -6,6 +6,7 @@ import {latticeCaption} from './lattice-feedback.mjs';
 import {formatNumber,formatCountdown} from './format-ui.mjs';
 import {DEFAULT_BINDINGS,bindingLabel} from './keybinds.mjs';
 import {ASSISTIVE_PRIORITY} from './assistive-announce.mjs';
+import {OVERKILL_GIB} from './deaths.mjs';
 
 // Every prompt below is a function of the live bindings, never a literal key.
 // `bindings` is optional so pure callers and tests keep a sensible default.
@@ -81,11 +82,14 @@ export function postureLabel(actor) {
 }
 
 export function hitMarker(hud, player) {
-  if (!hud?.hit && !hud?.kill) return null;
+  if (!hud?.hit && !hud?.kill && !hud?.shieldBreak) return null;
   const latest = hud?.feed?.[0], when = Number(hud?.time), at = Number(latest?.time);
   const killed = Boolean(hud?.kill || (latest && player && latest.killer === player.name && !latest.self && (!Number.isFinite(when) || !Number.isFinite(at) || when - at < 0.6)));
   if (killed) return 'kill';
   if (hud?.critical) return 'critical';
+  // A shield break is its own parry beat: a distinct marker shape plus the
+  // BREAK word, so it never reads as a stronger normal hit alone.
+  if (hud?.shieldBreak) return 'shieldbreak';
   return hud?.hit ? 'hit' : null;
 }
 
@@ -164,13 +168,39 @@ export function ammoText(value) {
 
 // Short weapon name for a kill-feed entry, or the harness ability when the
 // killing blow was ability-tagged (§6.2/§6.4). Null for environment kills.
-export function killFeedWeapon(entry, weapons = []) {
+// `fallbackAbility` is the enriched kill metadata's ability name: the page
+// threads the authoritative death event onto the feed copy, so a caller can
+// still name the lethal ability when the frozen feed entry itself carries no
+// name. Passing nothing keeps the historical two-argument behavior exactly.
+export function killFeedWeapon(entry, weapons = [], fallbackAbility = null) {
   if (!entry) return null;
-  if (entry.ability === true && typeof entry.abilityName === 'string' && entry.abilityName.length > 0) {
-    return entry.abilityName.toUpperCase();
+  const abilityName = typeof entry.abilityName === 'string' && entry.abilityName.length > 0
+    ? entry.abilityName
+    : typeof fallbackAbility === 'string' && fallbackAbility.length > 0 ? fallbackAbility : '';
+  if (entry.ability === true && abilityName) {
+    return abilityName.toUpperCase();
   }
   if (!Number.isInteger(entry.weapon)) return null;
   return weapons[entry.weapon]?.short ?? null;
+}
+
+// Non-color kill-feed badges. The simulation computes overkill, the victim's
+// streak at death and the freshly credited killer streak; the page threads
+// them (plus the client-side ASSIST credit) onto each feed entry. Every badge
+// is a word or a worded marker, so the feed reads without color, and none of
+// them are live regions.
+export function killFeedBadges(entry, {overkillThreshold = OVERKILL_GIB} = {}) {
+  if (!entry || entry.self === true || entry.fall === true) return [];
+  const badges = [];
+  if (entry.assist === true) badges.push({id: 'assist', label: 'ASSIST', title: 'You damaged this victim before the kill'});
+  const victimStreak = Math.max(0, Math.floor(Number(entry.victimStreak) || 0));
+  if (victimStreak >= 2) badges.push({id: 'streak-ended', label: 'STREAK ENDED', title: `Ended a ${victimStreak} kill streak`});
+  const overkill = Math.max(0, Math.round(Number(entry.overkill) || 0));
+  const threshold = Number.isFinite(Number(overkillThreshold)) && Number(overkillThreshold) > 0 ? Number(overkillThreshold) : OVERKILL_GIB;
+  if (overkill >= threshold) badges.push({id: 'overkill', label: 'OVERKILL', title: `Overkill by ${overkill} damage`});
+  const killerStreak = Math.max(0, Math.floor(Number(entry.killerStreak) || 0));
+  if (killerStreak >= 2) badges.push({id: 'killer-streak', label: `×${killerStreak} STREAK`, title: `${entry.killer ?? 'The killer'} is on a ${killerStreak} kill streak`});
+  return badges;
 }
 
 export const teamName = team => Number(team) === 0 ? 'RED' : Number(team) === 1 ? 'BLUE' : `TEAM ${team}`;
@@ -318,7 +348,7 @@ export function suddenDeathBanner(hud) {
   return (hud?.suddenDeath === true || hud?.objectives?.suddenDeath === true) && hud?.over !== true ? { text: 'SUDDEN DEATH', detail: 'NEXT SCORE WINS' } : null;
 }
 
-const CAPTION_EVENTS = Object.freeze({shot:'Gunfire',explosion:'Explosion','vehicle-shot':'Vehicle gunfire',grenade:'Grenade out',melee:'Melee',reload:'Reloading',pickup:'Pickup',powerup:'Powerup','vehicle-enter':'Mounted vehicle','vehicle-exit':'Dismounted vehicle','vehicle-destroyed':'Vehicle destroyed','vehicle-splatter':'Vehicle splatter','zone-capture':'Zone captured','zone-score':'Objective scoring','zone-neutralized':'Zone neutralized','flag-pickup':'Flag taken','flag-return':'Flag returned','flag-drop':'Flag dropped',capture:'Flag captured','assault-sector-captured':'Sector captured','assault-sector-lost':'Sector lost','assault-breach':'Sector breached','payload-checkpoint':'Checkpoint reached','payload-delivered':'Payload delivered','soccer-goal':'Goal','killstreak':'Killstreak',death:'Elimination','mission-message':'Mission update','mission-won':'Mission complete','mission-lost':'Mission failed','horde-wave':'Wave incoming','horde-wave-cleared':'Wave cleared','horde-resupply':'Resupplied','horde-upgrade':'Upgrade available','horde-upgrade-selected':'Upgrade acquired','enemy-detonate':'Sapper detonation','singleplayer-checkpoint':'Checkpoint saved','npc-deploy':'Contacts','story-line':'Mission briefing','npc-bark':'Transmission','boss-phase':'Boss phase','armsrace-promote':'Ladder up','armsrace-demote':'Ladder down','juggernaut-transfer':'Crown taken','elimination-life':'Team life lost','vip-deploy':'VIP deployed','vip-down':'VIP down','vip-extracted':'VIP extracted','holdout-progress':'Holdout progress','holdout-win':'Holdout won','uplink-capture':'Uplink captured','uplink-stage':'Uplink advanced','uplink-win':'Uplink won','objective-win':'Objective secured','enemy-telegraph':'Incoming attack','boss-slam':'Boss slam','boss-summon':'Boss summon','mender-heal':'Ally healed','overseer-aura':'Overseer aura','phalanx-shield':'Phalanx shield','enemy-flank':'Flanking','enemy-artillery':'Artillery incoming','race-coin':'Coin collected','race-box':'Item box','race-boost':'Speed boost','race-item':'Item deployed','race-hazard-hit':'Hazard hit','race-lap':'Lap complete','race-finish':'Race finish',power:'Ability activated','threat-ping':'Threat ping',feint:'Radar feint','move-start':'Movement ability','move-end':'Movement ended','windup-start':'Movement wind-up','windup-end':'Movement wind-up ended','charge-start':'Movement charge','charge-release':'Movement released','charge-cancel':'Movement charge cancelled','slam-launch':'Slam launch','slam-impact':'Slam impact','grapple-hook':'Grapple hooked','grapple-release':'Grapple released','rope-place':'Rope deployed','rope-expire':'Rope expired','move-miss':'Movement missed','rope-miss':'Rope missed','move-blocked':'Movement blocked','fuel-empty':'Fuel empty','no-lift':'Movement blocked','chain-cancel':'Movement chained','landing-recovery':'Landing recovery','vehicle-damage':'Vehicle damaged','deployable':'Sentry deployed','deployable-fire':'Sentry firing','deployable-expire':'Sentry expired','weapon-upgrade':'Weapon upgrade',dryfire:'Empty magazine','weapon-switch':'Weapon switch','loadout-switch':'Loadout changed','horde-modifier':'Wave modifier'});
+const CAPTION_EVENTS = Object.freeze({shot:'Gunfire',explosion:'Explosion','vehicle-shot':'Vehicle gunfire',grenade:'Grenade out',melee:'Melee',reload:'Reloading',pickup:'Pickup',powerup:'Powerup','vehicle-enter':'Mounted vehicle','vehicle-exit':'Dismounted vehicle','vehicle-destroyed':'Vehicle destroyed','vehicle-splatter':'Vehicle splatter','zone-capture':'Zone captured','zone-score':'Objective scoring','zone-neutralized':'Zone neutralized','flag-pickup':'Flag taken','flag-return':'Flag returned','flag-drop':'Flag dropped',capture:'Flag captured','assault-sector-captured':'Sector captured','assault-sector-lost':'Sector lost','assault-breach':'Sector breached','payload-checkpoint':'Checkpoint reached','payload-delivered':'Payload delivered','soccer-goal':'Goal','killstreak':'Killstreak',death:'Elimination','mission-message':'Mission update','mission-won':'Mission complete','mission-lost':'Mission failed','horde-wave':'Wave incoming','horde-wave-cleared':'Wave cleared','horde-resupply':'Resupplied','horde-upgrade':'Upgrade available','horde-upgrade-selected':'Upgrade acquired','enemy-detonate':'Sapper detonation','singleplayer-checkpoint':'Checkpoint saved','npc-deploy':'Contacts','story-line':'Mission briefing','npc-bark':'Transmission','boss-phase':'Boss phase','armsrace-promote':'Ladder up','armsrace-demote':'Ladder down','juggernaut-transfer':'Crown taken','elimination-life':'Team life lost','vip-deploy':'VIP deployed','vip-down':'VIP down','vip-extracted':'VIP extracted','holdout-progress':'Holdout progress','holdout-win':'Holdout won','uplink-capture':'Uplink captured','uplink-stage':'Uplink advanced','uplink-win':'Uplink won','objective-win':'Objective secured','enemy-telegraph':'Incoming attack','boss-slam':'Boss slam','boss-summon':'Boss summon','mender-heal':'Ally healed','overseer-aura':'Overseer aura','phalanx-shield':'Phalanx shield','enemy-flank':'Flanking','enemy-artillery':'Artillery incoming','race-coin':'Coin collected','race-box':'Item box','race-boost':'Speed boost','race-item':'Item deployed','race-hazard-hit':'Hazard hit','race-lap':'Lap complete','race-finish':'Race finish',power:'Ability activated','threat-ping':'Threat ping',feint:'Radar feint','move-start':'Movement ability','move-end':'Movement ended','windup-start':'Movement wind-up','windup-end':'Movement wind-up ended','charge-start':'Movement charge','charge-release':'Movement released','charge-cancel':'Movement charge cancelled','slam-launch':'Slam launch','slam-impact':'Slam impact','grapple-hook':'Grapple hooked','grapple-release':'Grapple released','rope-place':'Rope deployed','rope-expire':'Rope expired','move-miss':'Movement missed','rope-miss':'Rope missed','move-blocked':'Movement blocked','fuel-empty':'Fuel empty','no-lift':'Movement blocked','chain-cancel':'Movement chained','landing-recovery':'Landing recovery','vehicle-damage':'Vehicle damaged','deployable':'Sentry deployed','deployable-fire':'Sentry firing','deployable-expire':'Sentry expired','weapon-upgrade':'Weapon upgrade',dryfire:'Empty magazine','weapon-switch':'Weapon switch','loadout-switch':'Loadout changed','horde-modifier':'Wave modifier','lattice-support':'Lattice support','vehicle-repair':'Vehicle repaired','deployable-destroyed':'Sentry destroyed','deployable-repaired':'Sentry repaired','objective-tiebreak':'Objective tiebreak','sudden-death':'Sudden death','weather-change':'Weather change','time-change':'Time of day change','bounty':'Bounty claimed','charge':'Charge','horde-summary':'Horde summary'});
 export function ladderStatus(player, total = 10) {
   const rung = Math.max(0, Math.floor(Number(player?.ladder) || 0));
   const size = Math.max(1, Math.floor(Number(total) || 10));
@@ -352,6 +382,19 @@ export function bearingWord(angle) {
   const sector = Math.round(a / (Math.PI / 4));
   return BEARING_WORDS[((sector % 8) + 8) % 8];
 }
+
+// Per-kind telegraph wording. The kinds are the sim's wave-force identities
+// (game/singleplayer.mjs); the map is frozen so a caption can never drift from
+// the voice table it describes.
+const TELEGRAPH_CAPTIONS = Object.freeze({
+  overseer: 'overseer aura',
+  mender: 'mender pulse',
+  flanker: 'flanker push',
+  phalanx: 'phalanx shield',
+  sapper: 'sapper charge',
+  artillery: 'artillery',
+  boss: 'boss slam',
+});
 
 export function audioCaption(event) {
   const type = event?.type;
@@ -395,6 +438,24 @@ export function audioCaption(event) {
     const word = bearingWord(event?.angle ?? event?.bearing);
     return { text: word ? `Damage taken · ${word}` : 'Damage taken' };
   }
+  // Per-kind enemy telegraphs: the wave force carries a `kind` (feedback.mjs
+  // voices a distinct motif per kind), so the caption names the threat without
+  // waiting for the hit. Unknown/absent kinds keep the generic table line.
+  if (type === 'enemy-telegraph') {
+    const named = TELEGRAPH_CAPTIONS[String(event?.kind ?? '').toLowerCase()];
+    return { text: named ? `Incoming attack · ${named}` : 'Incoming attack' };
+  }
+  // Charge-coil wind-up and release are weapon beats, not a generic row.
+  if (type === 'charge') return { text: event?.state === 'ready' ? 'Charged shot ready' : 'Charging shot' };
+  // Weather and time-of-day onsets name the new state when the event carries it.
+  if (type === 'weather-change') {
+    const kind = String(event?.kind ?? '').trim();
+    return { text: kind ? `Weather · ${kind}` : 'Weather change' };
+  }
+  if (type === 'time-change') {
+    const phase = String(event?.phase ?? '').trim();
+    return { text: phase ? `Time of day · ${phase}` : 'Time of day change' };
+  }
   const text = CAPTION_EVENTS[type];
   return text ? { text } : null;
 }
@@ -423,6 +484,54 @@ export function damageHitText(info, weapons = []) {
 }
 
 // ---------------------------------------------------------------------------
+// Client-side damage ledger (§WP2 death recap). The page keeps the last three
+// incoming hits straight from the authoritative `damage` events; these pure
+// helpers normalize one event into a ledger row, bound the ledger, age it
+// against the snapshot clock and decide assist credit. No protocol change and
+// no new live region: the recap is a non-live list on the death surface.
+// ---------------------------------------------------------------------------
+export const DAMAGE_LOG_LIMIT = 3;
+
+export function damageLogEntry(info, at) {
+  if (!info || typeof info !== 'object') return null;
+  const clean = value => typeof value === 'string' ? value.replace(/\s+/g, ' ').trim() : '';
+  const name = clean(info.name);
+  const ability = clean(info.abilityName) || clean(info.ability);
+  const index = Number.isInteger(info.weapon) ? info.weapon : null;
+  const amount = Math.max(0, Math.round(Number(info.amount) || 0));
+  const when = Number.isFinite(Number(at)) ? Math.max(0, Number(at)) : 0;
+  return {name, weapon: index, detail: ability || null, amount, at: when, source: clean(info.source) || null};
+}
+
+// Newest hit first, aged against the snapshot clock and bounded to `limit`.
+// Rows for a readout are plain data: `{name, detail, amount, age}` plus the raw
+// keys so a caller can render exactly what it needs.
+export function damageRecap(log, now, {limit = DAMAGE_LOG_LIMIT} = {}) {
+  const time = Number.isFinite(Number(now)) ? Number(now) : 0;
+  const cap = Number.isFinite(Number(limit)) && Number(limit) > 0 ? Math.floor(Number(limit)) : DAMAGE_LOG_LIMIT;
+  const rows = (Array.isArray(log) ? log : []).filter(row => row && typeof row === 'object');
+  return rows.slice(Math.max(0, rows.length - cap)).reverse().map(row => {
+    const at = Number.isFinite(Number(row.at)) ? Number(row.at) : 0;
+    return {...row, age: Math.max(0, time - at)};
+  });
+}
+
+// Assist credit: true when the victim took local damage no more than `window`
+// seconds before the death, judged on the caller's authoritative sim time (the
+// page records the damage mark and reads the death from the same clock). A
+// missing, future or stale mark never credits.
+export function assistCredit(marks, victim, time, window = 5) {
+  const id = victim === null || victim === undefined ? null : String(victim);
+  if (id === null || !marks || typeof marks !== 'object') return false;
+  const at = Number(marks[id] ?? marks[victim]);
+  const when = Number(time);
+  const span = Number(window) > 0 ? Number(window) : 5;
+  if (!Number.isFinite(at) || !Number.isFinite(when)) return false;
+  const age = when - at;
+  return age >= 0 && age <= span;
+}
+
+// ---------------------------------------------------------------------------
 // Caption replacement policy. Captions arrive event-by-event and are normally
 // last-write-wins, but a burst of routine lines (gunfire, reloads, pickups)
 // must not clobber an important beat (a mission failure, a boss phase, a
@@ -443,11 +552,34 @@ const CAPTION_PRIORITY_BY_TYPE = Object.freeze({
   'assault-breach': ASSISTIVE_PRIORITY.objective,
   'boss-phase': ASSISTIVE_PRIORITY.sudden,
   'director-siege': ASSISTIVE_PRIORITY.sudden,
+  // Sudden death and the time-limit tiebreak are objective-ending beats: they
+  // own the sudden band, above every callout.
+  'sudden-death': ASSISTIVE_PRIORITY.sudden,
+  'objective-tiebreak': ASSISTIVE_PRIORITY.objective,
   'enemy-telegraph': ASSISTIVE_PRIORITY.callout,
   killstreak: ASSISTIVE_PRIORITY.callout,
   'vehicle-destroyed': ASSISTIVE_PRIORITY.callout,
   'horde-wave': ASSISTIVE_PRIORITY.callout,
   'horde-wave-cleared': ASSISTIVE_PRIORITY.callout,
+  // Objective and threat beats keep the callout band: a wave-force aura, a
+  // flank, an artillery warning or a lost sentry must hold its window.
+  'overseer-aura': ASSISTIVE_PRIORITY.callout,
+  'phalanx-shield': ASSISTIVE_PRIORITY.callout,
+  'enemy-artillery': ASSISTIVE_PRIORITY.callout,
+  'enemy-flank': ASSISTIVE_PRIORITY.callout,
+  'boss-slam': ASSISTIVE_PRIORITY.callout,
+  'boss-summon': ASSISTIVE_PRIORITY.callout,
+  'deployable-destroyed': ASSISTIVE_PRIORITY.callout,
+  bounty: ASSISTIVE_PRIORITY.callout,
+  'horde-summary': ASSISTIVE_PRIORITY.objective,
+  // Support and economy beats sit in the notice band.
+  'lattice-support': ASSISTIVE_PRIORITY.notice,
+  'vehicle-repair': ASSISTIVE_PRIORITY.notice,
+  'deployable-repaired': ASSISTIVE_PRIORITY.notice,
+  'weapon-upgrade': ASSISTIVE_PRIORITY.notice,
+  charge: ASSISTIVE_PRIORITY.notice,
+  'weather-change': ASSISTIVE_PRIORITY.notice,
+  'time-change': ASSISTIVE_PRIORITY.notice,
   'mission-message': ASSISTIVE_PRIORITY.notice,
   'director-intermission': ASSISTIVE_PRIORITY.notice,
   'singleplayer-checkpoint': ASSISTIVE_PRIORITY.notice,
@@ -800,6 +932,22 @@ export function connectionQuality(state) {
   const ms = Math.max(0, Math.round((Number(state?.renderDelay) || 0) * 1000));
   const label = loss >= .15 || jitter >= 80 ? 'POOR' : loss >= .04 || jitter >= 35 ? 'FAIR' : 'GOOD';
   return { label, tone: label === 'GOOD' ? 'good' : label === 'FAIR' ? 'fair' : 'poor', ms, jitter: Math.round(jitter), loss: Math.round(loss * 100) };
+}
+
+// The HUD note text for `connectionQuality`. Renders the measured round trip
+// plus the estimator's jitter and loss, with one spoken sentence for on-demand
+// reading; it is a plain non-live readout at the call site.
+export function qualityNote(quality) {
+  if (!quality || typeof quality !== 'object') return null;
+  const label = typeof quality.label === 'string' && quality.label ? quality.label : 'GOOD';
+  const ms = Math.max(0, Math.round(Number(quality.ms) || 0));
+  const jitter = Math.max(0, Math.round(Number(quality.jitter) || 0));
+  const loss = Math.max(0, Math.round(Number(quality.loss) || 0));
+  return {
+    label, tone: quality.tone ?? 'good', ms, jitter, loss,
+    text: `${ms}MS · J${jitter}MS · L${loss}%`,
+    spoken: `Connection ${label.toLowerCase()}. ${ms} milliseconds round trip, ${jitter} milliseconds jitter, ${loss} percent packet loss.`,
+  };
 }
 
 // Spectator follow helpers: resolve a watched actor and cycle to the next live one.

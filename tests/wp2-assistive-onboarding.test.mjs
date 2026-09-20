@@ -198,6 +198,79 @@ test('PlayingHud: the FFA death card names the killer and weapon without a new l
   assert.equal(announcer(html), '', 'the attribution is not a new announcement');
 });
 
+test('PlayingHud: kill-feed richness badges read as words without a new live region', async () => {
+  const html = render(PlayingHud, {ui: ui({
+    hud: hud({killFeed: [
+      {killer: 'MISTRAL', victim: 'CHATGPT', self: false, time: 11.9, weapon: 2, ability: false, overkill: 70, victimStreak: 4, killerStreak: 3, assist: true},
+      {killer: 'GROK', victim: 'LLAMA', self: false, time: 11.4, weapon: 0, ability: false},
+    ]}),
+  })});
+  assert.match(html, /class="kill-feed" role="log" aria-live="off"/, 'the feed stays silent but present');
+  assert.match(html, /kill-feed-badge--streak-ended[^>]*>STREAK ENDED</, 'an ended streak is a word badge');
+  assert.match(html, /kill-feed-badge--overkill[^>]*>OVERKILL</, 'overkill is a word badge');
+  assert.match(html, /kill-feed-badge--assist[^>]*>ASSIST</, 'assist credit is a word badge');
+  assert.match(html, /kill-feed-badge--killer-streak[^>]*>×3 STREAK</, 'the killer streak is a worded marker');
+  assert.match(html, /title="You damaged this victim before the kill · Ended a 4 kill streak · Overkill by 70 damage/, 'the entry title carries the on-demand detail');
+  assert.equal(liveCount(html), 1, 'the badges add no live region');
+  assert.equal(politeCount(html), 1);
+  assert.equal(announcer(html), '', 'the badges never churn the announcement channel');
+  const source = await read('app/ui/screens/PlayingHud.tsx');
+  assert.match(source, /killFeedBadges\(e\)/, 'badges come from the pure helper');
+  assert.match(source, /hud\.killFeed\?\?hud\.feed/, 'the enriched feed copy falls back to the snapshot feed');
+  assert.doesNotMatch(source, /kill-feed[^>]*role="status"/, 'the rich feed never becomes a live region');
+});
+
+test('PlayingHud: the shield-break marker and damage tint are shape and word, not colour alone', () => {
+  const born = performance.now();
+  const html = render(PlayingHud, {ui: ui({
+    marker: 'shieldbreak',
+    hud: hud({damageNumbers: [{id: 'break-1', amount: 24, x: 100, y: 120, born, critical: false, kill: false, shieldBreak: true}]}),
+  })});
+  assert.match(html, /class="hitmarker shieldbreak" aria-hidden="true"/, 'the shield break owns a marker class');
+  assert.match(html, /class="damage-number hit shieldbreak"/, 'the floating number carries the break tint');
+  assert.equal(liveCount(html), 1, 'the marker adds no live region');
+});
+
+test('PlayingHud: the FFA death card carries a non-live attacker/weapon recap', () => {
+  const html = render(PlayingHud, {ui: ui({
+    player: player({health: 0, dead: 2.6}),
+    killNotice: {kind: 'death', text: 'GROK ELIMINATED YOU', detail: 'RAIL', age: .3},
+    damageLog: [{name: 'GROK', detail: 'RAIL', weapon: 2, amount: 42, age: 1.2, at: 9.5}],
+  })});
+  assert.match(html, /class="death-recap" aria-label="Damage recap"/, 'the recap is one named, non-live list');
+  assert.match(html, /HIT BY GROK/, 'each row names the attacker');
+  assert.match(html, /class="death-recap__weapon">RAIL</, 'each row names the weapon or ability');
+  assert.match(html, /aria-label="Eliminated\. Respawning\."/, 'the pinned death label is untouched');
+  assert.equal(liveCount(html), 1, 'the recap adds no live region');
+  assert.equal(announcer(html), '', 'the recap is not announced');
+  const stale = render(PlayingHud, {ui: ui({
+    player: player({health: 0, dead: 2.6}),
+    damageLog: [{name: 'GROK', detail: 'RAIL', weapon: 2, amount: 42, age: 13, at: 9.5}],
+  })});
+  assert.doesNotMatch(stale, /death-recap/, 'a stale hit never fabricates a death recap');
+});
+
+test('PlayingHud: ability, movement and frag cards carry on-demand tooltips', () => {
+  const html = render(PlayingHud, {ui: ui({
+    activePower: {power: 'CLAW BURST', stat: '6m radius · 30 damage', description: 'A radial claw pulse.'},
+    player: player({cooldown: 0, grenadeCooldown: 2.4, movement: {verb: 'air-dash', phase: 'ready', charges: 1, maxCharges: 1, cooldown: 0, fuel: 0, maxFuel: 0, enabled: true}}),
+  })});
+  assert.match(html, /title="CLAW BURST · READY · 10s cooldown · 6m radius · 30 damage · A radial claw pulse\."/, 'the ability tooltip reads the harness profile and ring');
+  assert.match(html, /aria-description="CLAW BURST · READY · 10s cooldown/, 'the description is exposed to assistive tech');
+  assert.match(html, /title="Air Dash · 1\/1 · 1 charge"/, 'the movement tooltip reads the movement budget');
+  assert.match(html, /title="G · FRAG · FRAG READY"/, 'the frag tooltip names the key and the timer label');
+  assert.equal(liveCount(html), 1, 'tooltips add no live region');
+});
+
+test('PlayingHud: the network note reads RTT, jitter and loss without becoming live', () => {
+  const html = render(PlayingHud, {ui: ui({
+    hud: hud({net: true, quality: {label: 'FAIR', tone: 'fair', ms: 120, jitter: 40, loss: 3}}),
+  })});
+  assert.match(html, /class="net-quality fair" role="group" aria-label="Connection\. Connection fair\./, 'the note is a labelled non-live group');
+  assert.match(html, /120MS · J40MS · L3%/, 'the note renders the round trip, jitter and loss');
+  assert.equal(liveCount(html), 1, 'the note adds no live region');
+});
+
 test('RespawnOverlay: passive team summary stays non-live and FFA never mounts the editor', () => {
   const passive = render(RespawnOverlay, {ui: {respawn: {open: true, allowed: true, respawnIn: 2.4, character: 'chatgpt', harness: 'openclaw'}, killNotice: {text: 'BOT 3 ELIMINATED YOU', detail: 'RAIL'}, cursor: {key: 'ALT'}, switchRespawnLoadout: () => {}}});
   assert.match(passive, /role="region"/, 'the passive summary is a region');
@@ -215,6 +288,14 @@ test('RespawnOverlay: passive team summary stays non-live and FFA never mounts t
   assert.match(editor, /aria-hidden="true">RESPAWN IN 2S</, 'the editor countdown is visual only');
   assert.match(editor, /LOCK IN · NEXT SPAWN/, 'the team-only lock-in remains');
   assert.match(editor, /NEXT SPAWN · <b>Claude \/ Claude Code<\/b> · PENDING/, 'queue feedback is event-gated, not per tick');
+});
+
+test('RespawnOverlay: the passive recap names attacker and weapon and adds no live region', () => {
+  const html = render(RespawnOverlay, {ui: {respawn: {open: true, allowed: true, respawnIn: 2.4, character: 'chatgpt', harness: 'openclaw'}, killNotice: {text: 'BOT 3 ELIMINATED YOU', detail: 'RAIL'}, damageLog: [{name: 'BOT 3', detail: 'RAIL', weapon: 2, amount: 40, age: 1}], cursor: {key: 'ALT'}, switchRespawnLoadout: () => {}}});
+  assert.match(html, /class="death-recap death-recap--respawn" aria-label="Damage recap"/, 'the passive summary gains the named, non-live recap');
+  assert.match(html, /HIT BY BOT 3/, 'the row names the attacker');
+  assert.match(html, /class="death-recap__weapon">RAIL</, 'the row names the weapon');
+  assert.equal(liveCount(html), 0, 'the passive summary is still not a live region');
 });
 
 test('spend and training beats sit on event-gated live regions, not countdown ticks', () => {
