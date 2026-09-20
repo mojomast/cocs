@@ -2,6 +2,22 @@
 
 ## Release 8.6 - PRISM
 
+**Production deployment (2026-09-20).** Commit `f030685` was fast-forwarded to
+`improvement/phase2-audio-visual` (pushed to origin) and deployed to
+<https://arena.ussyco.de> with a web-only `npm run deploy`; no game-server code
+changed, so the game server was not restarted and connected clients were not
+disconnected. The first attempt failed the HTML gate with a transient
+`502`/stale-footer window during the restart and rolled back to the previous
+web bundle automatically; a retry deployed cleanly. The deploy gate then
+verified the served footer `v8.6 · PRISM`, all 13 linked stylesheet/script
+assets returning 200, and the compatible identity pair: web `f030685`
+`v8.6-f030685`, game server `b9c7a0a` `v8.5-b9c7a0a`, protocol 3.
+`https://arena.ussyco.de/api/version` reports the same web identity, and the
+public document carries the exact `v8.6 · PRISM` footer. The tracked browser
+matrix re-ran against production at **5/5 viewports** with a clean tree
+(`commitDirty:false`), zero console/page errors, and the same hit-testing,
+reticle-corridor and overflow assertions as the local run.
+
 **Scope (web presentation and documentation, 2026-09-20).** An opt-in developer
 graphics preview, a global hotkey, a randomizer and a clipboard recipe loop, 23
 stackable effects (three built from baked Moth assets), nine starting recipes,
