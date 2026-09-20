@@ -405,6 +405,12 @@ export function cocsTemplate(mode, arena, config = {}) {
     fluxUpkeep: {0: 0, 1: 0},
     fluxIncome: {0: 0, 1: 0},
     neglect: {0: neglectState(), 1: neglectState()},
+    // §6A.6 NEGLECT order-contribution telemetry. Plain state (never
+    // snapshotted): `neglectEvents` records the authoritative completion
+    // transition so the next economy tick can reset the meter, while a task
+    // whose `until` has passed without completion expires. Both are read and
+    // drained by `cocsNeglectContext` in `stepCocs`.
+    neglectEvents: {0: {completed: false, cancelled: false}, 1: {completed: false, cancelled: false}},
     // --- §8 SCOUT subagent ---------------------------------------------------
     scoutCap: Math.max(1, Math.round(num(config?.objective?.scoutCap, COCS_SCOUT.cap))),
     scanRadius: COCS_SCAN_RADIUS,
@@ -1371,7 +1377,7 @@ export function cocsEconomyAction(match, state, record = {}) {
   const log = state.spendLog ?? (state.spendLog = []);
   log.push({
    tick: num(record.tick, state.tick), peerId: String(record.peerId ?? ''), cardId: String(record.cardId ?? ''),
-   team: record.team === 1 ? 1 : 0, verb: String(record.action ?? '').toLowerCase(),
+   team: record.team === 1 ? 1 : 0, verb: String(record.action ?? record.verb ?? '').toLowerCase(),
    role: record.role ?? null, target: record.target ?? null,
    ok: result.ok === true, reason: result.reason ?? null,
   });
@@ -1388,7 +1394,10 @@ function trimSpendLog(state) {
 function applyCocsEconomyAction(match, state, record = {}) {
   if (!match || !state || state.kind !== COCS_KIND || state.coopMode === true) return {ok: false, reason: 'no-economy'};
   const team = record.team === 1 ? 1 : 0;
-  const action = String(record.action ?? '').toLowerCase();
+  // Local practice queues the page's `{verb}` record shape; the wire and the
+  // room queue `{action}`. Both are the same action id, so accept either and
+  // normalise case (a local REINFORCE is never silently dropped).
+  const action = String(record.action ?? record.verb ?? '').toLowerCase();
   if (action === 'opt-out-orders') {
     const actor = match.actors?.[record.actorId];
     if (!actor || actor.team !== team) return {ok: false, reason: 'missing'};
@@ -1650,6 +1659,10 @@ function captureNode(match, state, node, team, actors) {
       actor.ordersContributed = num(actor.ordersContributed, 0) + 1;
     }
     orderCompleted = true;
+    // §6A.6: the authoritative completion transition resets NEGLECT on the
+    // next economy tick (`cocsNeglectContext` drains this flag).
+    const neglectSignals = state.neglectEvents?.[team];
+    if (neglectSignals) neglectSignals.completed = true;
     match?.emit?.('cocs-order-complete', {team, node: node.id, label: node.label, verb: orderVerb, peerId: orderTask.peerId ?? null, cardId: orderTask.cardId ?? null, contributors: contributors.map(actor => actor.id), teamOP: ORDER_REWARD.teamOP});
   }
   if (node.archetype === 'array') state.arrayWinner = team;
@@ -1943,6 +1956,46 @@ export function cocsHumanInteract(match, state, actorId) {
 }
 
 // ---------------------------------------------------------------------------
+// §6A.6 NEGLECT order/command context. The anti-grief meter only ever moves
+// for a team with a human commander: a seated peer, or — when the seat is
+// empty (local practice has no wire identity) — living humans on the team.
+// Order contribution is read from the authoritative order state: an active
+// task keeps the meter ticking, a completion recorded by `captureNode` is the
+// contribution that resets it, and a task whose `until` passed without
+// completing expires. A task replaced by a new order is not a cancel: the duty
+// Chief re-issues continuously, and only an explicit future cancel verb would
+// set `neglectEvents[t].cancelled`. OPERATIONS keeps NEGLECT inert exactly as
+// before (`coopMode` => all false). Pure: reads `state.tick`/`tasks`/
+// `command`/`neglectEvents` and the roster, nothing else.
+// ---------------------------------------------------------------------------
+export function cocsNeglectContext(match, state, team) {
+  const t = team === 1 ? 1 : 0;
+  if (!state || state.kind !== COCS_KIND || state.coopMode === true) {
+    return {humanCommander: false, activeOrder: false, contributed: false, completed: false, expired: false, cancelled: false};
+  }
+  const now = num(state.tick, 0);
+  const task = state.tasks?.[t] ?? null;
+  const events = state.neglectEvents?.[t] ?? null;
+  const completed = events?.completed === true;
+  const cancelled = events?.cancelled === true;
+  if (events) { events.completed = false; events.cancelled = false; }
+  const activeOrder = Boolean(task && now <= num(task.until, 0));
+  const expired = Boolean(task && now > num(task.until, 0) && !completed);
+  const seat = state.command?.seat?.[t];
+  const seated = seat !== null && seat !== undefined && String(seat) !== '';
+  let humans = false;
+  if (!seated) {
+    for (const actor of match?.actors ?? []) {
+      if (!actor || actor.health <= 0 || actor.team !== t) continue;
+      if (actor.bot || actor.isNpc === true || actor.isSubagent === true || actor.isScout === true) continue;
+      humans = true;
+      break;
+    }
+  }
+  return {humanCommander: seated || humans, activeOrder, contributed: completed, completed, expired, cancelled};
+}
+
+// ---------------------------------------------------------------------------
 // Update. Runs once per step from updateObjectives, after the actor loop.
 // ---------------------------------------------------------------------------
 export function stepCocs(match, dt = RULES.dt) {
@@ -1993,9 +2046,10 @@ export function stepCocs(match, dt = RULES.dt) {
 
   // 4b. §6.5 team `FLUX`: passive + connected-node income, then the §6.5
   //     supply-load upkeep of every active subagent. `NEGLECT` only ever scales
-  //     the passive term and is inert without a seated human commander.
+  //     the passive term and is inert without a human commander; the order
+  //     state supplies the active/contributed/completed/expired signal.
   for (const team of [0, 1]) {
-    const neglect = neglectTick(state.neglect?.[team] ?? neglectState(), dt, {humanCommander: false, activeOrder: false, contributed: false});
+    const neglect = neglectTick(state.neglect?.[team] ?? neglectState(), dt, cocsNeglectContext(match, state, team));
     state.neglect[team] = neglect;
     const passive = neglectPassiveFlux(num(state.fluxPassive, FLUX_PASSIVE_PER_SECOND), neglect);
     const rate = passive + income[team];

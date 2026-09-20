@@ -442,10 +442,12 @@ Recent releases. The full history lives in
 
 ### v8.6 · PRISM — 2026-09-20
 - **Graphics & settings → Graphics lab · Preview:** 23 independent shader
-  layers and eleven starting recipes for exploring a distinctive art direction.
+  layers, eleven starting recipes, and a shipped default look (electric world,
+  circuit weapon stack, ink bots) that RESTORE DEFAULT LOOK re-applies.
 - Per-target stacks: WORLD / WEAPON / BOTS each with their own master, mix,
-  palette and layers. Weapon stays crisp and bots follow the world until
-  enabled; bots are depth-tested so walls occlude them.
+  palette and layers, all three enabled by the default look. Cleared, the
+  weapon stays crisp and bots follow the world until enabled; bots are
+  depth-tested so walls occlude them.
 - Animation pass: death variety restored (direction topple, per-pose arcs,
   seeded silhouettes, style treatments), stronger hit flinches, a melee swing,
   shell casings, style-aware death audio, and UI entrance motion with an
@@ -495,6 +497,10 @@ Recent releases. The full history lives in
   `asset-workshop` vehicle PRs (high-detail Hornet, Titan, Scout, Transport on
   WebGL; batched; software keeps the compact hull). See
   [Depth II pass](docs/design/DEPTH-II-PASS.md).
+- LATTICE fixes: depot loaner Pumas render (runtime spawns were never synced),
+  the depot/target/prime loop gained sound/captions/banners, team FLUX has a
+  REINFORCE/SCAN purchase strip, NEGLECT is a live comeback meter, spectators
+  cannot queue orders, and the Graphics Lab ships an authored default look.
 - Graphics-edge pass (research-backed): static dither kills 8-bit banding, a
   contrast-adaptive sharpen recovers FXAA softness, and environment reflections
   scale with the tier. Runs whenever post-processing or the graphics lab runs.

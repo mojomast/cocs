@@ -88,6 +88,7 @@ function CocsReadout({command,teamName,player,reducedMotion}:{command:any;teamNa
     <span className="cocs-chip" aria-label={`Orders issued ${orders.issued}, completed ${orders.completed}`}>ORD <b>{orders.issued}</b>/<b>{orders.completed}</b></span>
     <span className="cocs-chip" aria-label={`Scout ${scoutState}. ${stats.spawned} spawned, ${stats.killed} killed, ${stats.scans} scans`}>SCOUT <b>{scoutState}</b><small>{stats.spawned}S · {stats.killed}K · {stats.scans}SCAN</small></span>
     <span className="cocs-chip" aria-label={scanTarget?.nodeId?`Chief scan target ${scanTarget.label}`:'No chief scan target'}>CHIEF SCAN <b>{scanTarget?.nodeId?scanTarget.label:'NONE'}</b></span>
+    {command.roleBoard&&economy?.neglect&&<span className={`cocs-chip cocs-chip--neglect is-${economy.neglect.tier}`} aria-label={`Neglect ${whole(economy.neglect.value)} of 100, ${String(economy.neglect.label).toLowerCase()}. Passive flux ${Math.round(economy.neglect.multiplier*100)} percent.`}>NEGLECT <b>{whole(economy.neglect.value)}</b><small>{economy.neglect.label}</small></span>}
    </div>
     {spots.length>0&&<div className="cocs-spots" role="group" aria-label={`${spots.length} enemies spotted`}><span className="eyebrow">SPOTTED</span>{spots.map((spot:any)=><span key={spot.id} className="cocs-spot-chip" aria-label={`Enemy ${spot.id} spotted for ${formatCountdown(spot.remainingSeconds)} seconds`}>◈ {formatCountdown(spot.remainingSeconds)}s</span>)}</div>}
   </div>
@@ -100,18 +101,22 @@ function CocsReadout({command,teamName,player,reducedMotion}:{command:any;teamNa
     {traversal.depots.map((depot:any)=><li key={depot.id} className={`cocs-depot${depot.mine?' is-mine':''}${depot.enemy?' is-enemy':''}${depot.contested?' is-contested':''}`} aria-label={`${depot.label} ${depot.ownerLabel}${depot.capturePercent>0?`, ${depot.capturePercent} percent captured`:''}. Loaner ${depot.vehicle.state}`}><span className="cocs-depot__mark" aria-hidden="true">{depot.mark}</span> {depot.ownerLabel}{depot.capturePercent>0?` ${depot.capturePercent}%`:''} <small>LOANER {depot.vehicle.state}</small></li>)}
    </ul>}
      </details>{traversal.arrivalActive&&<p className="cocs-traversal__arrival" role="group" aria-label={`Arrival protection, ${formatCountdown(traversal.arrivalSeconds)} seconds remaining`}>ARRIVAL PROTECTION · {formatCountdown(traversal.arrivalSeconds)}s</p>}
-   {command.interactPrompt&&<p className={`cocs-interact cocs-interact--${command.interactPrompt.source}`} role="group" aria-label={`${command.interactPrompt.verb} ${command.interactPrompt.label}. Press ${command.interactPrompt.key}. ${command.interactPrompt.anchored?'At the anchor':`${command.interactPrompt.distanceMeters} meters away`}${command.interactPrompt.channelPercent>0?`, ${command.interactPrompt.channelPercent} percent channelled`:''}`}>
+   {!command.spectate&&command.interactPrompt&&<p className={`cocs-interact cocs-interact--${command.interactPrompt.source}`} role="group" aria-label={`${command.interactPrompt.verb} ${command.interactPrompt.label}. Press ${command.interactPrompt.key}. ${command.interactPrompt.anchored?'At the anchor':`${command.interactPrompt.distanceMeters} meters away`}${command.interactPrompt.channelPercent>0?`, ${command.interactPrompt.channelPercent} percent channelled`:''}`}>
     <span className="cocs-interact__mark" aria-hidden="true">{command.interactPrompt.mark}</span>
     <b className="cocs-interact__verb">{command.interactPrompt.verb}</b>
     <span className="cocs-interact__label">{command.interactPrompt.label}</span>
     <kbd className="cocs-interact__key">{command.interactPrompt.key}</kbd>
      <small className="cocs-interact__state">{command.interactPrompt.anchored?'ANCHORED':`${formatNumber(command.interactPrompt.distanceMeters)}m`}{command.interactPrompt.channelPercent>0?` · ${command.interactPrompt.channelPercent}%`:''}</small>
    </p>}
-   {!command.interactPrompt&&traversal.deviceCount>0&&<p className="cocs-interact cocs-interact--idle" role="group"><span aria-hidden="true">⇢</span> STAND ON AN ANCHOR · <kbd>{traversal.interactKey}</kbd> RIDE · CUT · REPAIR</p>}
+   {!command.spectate&&!command.interactPrompt&&traversal.deviceCount>0&&<p className="cocs-interact cocs-interact--idle" role="group"><span aria-hidden="true">⇢</span> STAND ON AN ANCHOR · <kbd>{traversal.interactKey}</kbd> RIDE · CUT · REPAIR</p>}
    {command.depotPrompt&&<p className="cocs-interact cocs-interact--depot" role="group"><span aria-hidden="true">{command.depotPrompt.mark}</span> {command.depotPrompt.hint} <small>{command.depotPrompt.ownerLabel}{command.depotPrompt.capturePercent>0?` · ${command.depotPrompt.capturePercent}%`:''}</small></p>}
    </div>}
    </details>
-   <div className="cocs-strip" role="group" aria-label="Order strip. Arm a verb, pick a node, then issue.">
+   {!command.spectate&&command.purchases?.visible&&command.purchases.cards?.length>0&&<div className="cocs-buys" role="group" aria-label={`Team flux purchases. ${whole(command.purchases.flux)} flux, threads ${command.purchases.threads?.used??0} of ${command.purchases.threads?.cap??0}.`}>
+    <span className="eyebrow">TEAM FLUX <small>{command.purchases.threads?.used??0}/{command.purchases.threads?.cap??0} THREADS</small></span>
+    {command.purchases.cards.map((card:any)=><button key={card.id} type="button" className={`cocs-buy${card.enabled?'':' is-disabled'}`} disabled={!card.enabled} aria-label={`${card.verb} ${card.label}${card.targetLabel?` at ${card.targetLabel}`:''}. Cost ${whole(card.cost)} flux. ${card.reason?`Unavailable: ${String(card.reason).replace(/-/g,' ')}.`:'Ready.'}`} title={card.reason?`${card.label} unavailable: ${String(card.reason).replace(/-/g,' ')}`:`${card.verb}${card.targetLabel?` → ${card.targetLabel}`:''} · ${whole(card.cost)} FLUX`} onClick={()=>command.onPurchaseCocs?.(card)}><span aria-hidden="true">{card.mark}</span><b>{card.label}</b><small>{card.verb} · {whole(card.cost)}F</small>{!card.enabled&&<em>{String(card.reason??'').replace(/-/g,' ')}</em>}</button>)}
+   </div>}
+   {!command.spectate&&<div className="cocs-strip" role="group" aria-label="Order strip. Arm a verb, pick a node, then issue.">
    <div className="cocs-strip__verbs">
      {strip.buttons.map((button:any)=><button key={button.id} type="button" className={`cocs-verb${button.armed?' is-armed':''}${button.disabled?' is-disabled':''}`} aria-pressed={button.armed} disabled={button.disabled} title={button.disabled?`${button.label} unavailable: ${button.reason}`:button.hint} onClick={()=>command.armCocsVerb(button.id)}>{button.label} <kbd>{command.keys?.[button.id==='SCAN'?'commandScan':button.id==='GO'?'commandGo':'commandAttack']}</kbd></button>)}
    </div>
@@ -123,7 +128,7 @@ function CocsReadout({command,teamName,player,reducedMotion}:{command:any;teamNa
    {strip.pending&&<p className="cocs-strip__pending" role="group">SENDING {strip.pending.text}…</p>}
     {strip.issued&&!strip.pending&&<p className="cocs-strip__issued" role="group">LAST {strip.issued.text}</p>}
     <button type="button" className="cocs-board-inline" onClick={command.toggleBoardPin}>{command.keys?.command??fallbackKey('command')} · COMMAND BOARD <small>{command.boardView?.summary?.needsYou??0} NEED YOU</small></button>
-  </div>
+  </div>}
  </div>;
 }
 
@@ -238,7 +243,7 @@ export function PlayingHud({ui}:ScreenProps){
    {cursor?.active&&<div className={`cursor-chip${cursor.blocked?' has-surface':''}`} role="group" aria-label="Cursor released. Mouse input reaches the interface."><kbd>{cursor.key}</kbd> · CURSOR{cursor.blocked&&cursor.label?<span>{cursor.label}</span>:null}</div>}
    {!hud.spectate&&cursor?.active&&!cursor.blocked&&<div className="cursor-resume" role="group" aria-label="Return to combat"><button type="button" className="cursor-resume__button" onClick={cursor.resume}><b>CLICK TO FIGHT</b><small>{cursor.key} OR CLICK · MOUSE CAPTURED</small></button></div>}
 
-   {cocsCommand&&!hud.spectate&&<CocsReadout command={cocsCommand} teamName={teamName} player={player} reducedMotion={reducedMotion()}/>}
+   {cocsCommand&&<CocsReadout command={cocsCommand} teamName={teamName} player={player} reducedMotion={reducedMotion()}/>}
    {cocsCommand?.interactPrompt&&!hud.spectate&&player.health>0&&<div className="lattice-interaction-hint" aria-hidden="true"><kbd>{cocsCommand.interactPrompt.key}</kbd><span><b>{cocsCommand.interactPrompt.verb} · {cocsCommand.interactPrompt.label}</b><small>{cocsCommand.interactPrompt.channelPercent>0?`${cocsCommand.interactPrompt.channelPercent}% · KEEP THE AREA CLEAR`:cocsCommand.interactPrompt.anchored?'AT THE ANCHOR':`${cocsCommand.interactPrompt.distanceMeters} m · READ THE ACTION BEFORE USING`}</small></span></div>}
   {cocsCommand?.spend&&cocsCommand.spendVisible===false&&!hud.spectate&&<button type="button" className="cocs-spend-chip" aria-label={`Spend window open, ${Math.round(cocsCommand.spend.secondsRemaining)} seconds left. Activate to reopen.`} onClick={cocsCommand.reopenSpend}><span aria-hidden="true">▦</span> SPEND WINDOW · {Math.round(Number(cocsCommand.spend.secondsRemaining)||0)}s · OPEN</button>}
    {cocsCommand?.notice&&<div className={`cocs-notice${cocsCommand.notice.ok?'':' is-failed'}${cocsCommand.notice.leaving?' is-leaving':''}`} role="group" aria-label={`Action notice: ${cocsCommand.notice.text}`}><i aria-hidden="true">{cocsCommand.notice.ok?'✓':'✕'}</i> {cocsCommand.notice.text}</div>}

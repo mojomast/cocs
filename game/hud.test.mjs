@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {readFile} from 'node:fs/promises';
-import {vehicleHud, escapeHint, voiceHint, spectatorControls, SPECTATOR_RESERVED_KEYS, reloadProgress, dynamicCrosshairGap, lowAmmo, postureLabel, hitMarker, projectToScreen, damageNumberStyle, boundList, damageBearing, killBanner, weaponTag, ammoText, commandBrief, isTeamMode, matchStartBanner, modeColumns, modeGoal, modePrimary, modeTargetText, objectiveCopy, suddenDeathBanner, grenadeStatus, killstreakCallout, ladderStatus, streakStatus, audioCaption, altFireLabel, scoreAnnouncer, multikillLabel, spreeLabel, recentKills, killCallout, matchAwards, killFeedWeapon, killFeedBadges, connectionQuality, qualityNote, damageLogEntry, damageRecap, assistCredit, DAMAGE_LOG_LIMIT, spectateActor, nextSpectateTarget, spectatorBoard, spectatorTeams, weaponRangeInfo, weaponRangeLabel, scoreStats, cocsDominanceStatus, cocsOperationsStatus, cocsOutcomeView, acceptCocsAnnouncement, cocsAnnouncePriority, cocsAnnouncementTTL, COCS_ANNOUNCE_PRIORITY, damageHitText, captionPriority, acceptCaption, CAPTION_TTL, teamStatusHud, economyHud, flagStatus, flagText, recordBadges} from './hud.mjs';
+import {vehicleHud, escapeHint, voiceHint, spectatorControls, SPECTATOR_RESERVED_KEYS, reloadProgress, dynamicCrosshairGap, lowAmmo, postureLabel, hitMarker, projectToScreen, damageNumberStyle, boundList, damageBearing, killBanner, weaponTag, ammoText, commandBrief, isTeamMode, matchStartBanner, modeColumns, modeGoal, modePrimary, modeTargetText, objectiveCopy, suddenDeathBanner, grenadeStatus, killstreakCallout, ladderStatus, streakStatus, audioCaption, altFireLabel, scoreAnnouncer, multikillLabel, spreeLabel, recentKills, killCallout, matchAwards, killFeedWeapon, killFeedBadges, connectionQuality, qualityNote, damageLogEntry, damageRecap, assistCredit, DAMAGE_LOG_LIMIT, spectateActor, nextSpectateTarget, spectatorBoard, spectatorTeams, weaponRangeInfo, weaponRangeLabel, scoreStats, cocsDominanceStatus, cocsOperationsStatus, cocsOutcomeView, acceptCocsAnnouncement, cocsAnnouncement, latticeAnnounceCue, cocsAnnouncePriority, cocsAnnouncementTTL, COCS_ANNOUNCE_PRIORITY, damageHitText, captionPriority, acceptCaption, CAPTION_TTL, teamStatusHud, economyHud, flagStatus, flagText, recordBadges} from './hud.mjs';
 import {WEAPONS} from './data.mjs';
 import {GAME_MODES,teamMode} from './config.mjs';
 import {soccerDisplay,soccerResult} from './race-ui.mjs';
@@ -930,6 +930,84 @@ test('the announcement priority policy is bounded, deduped and expiry-aware', ()
   assert.ok(COCS_ANNOUNCE_PRIORITY.loss > COCS_ANNOUNCE_PRIORITY.secure);
   assert.ok(COCS_ANNOUNCE_PRIORITY.wave > COCS_ANNOUNCE_PRIORITY.order);
   assert.ok(cocsAnnouncementTTL({ttl: 5}) > cocsAnnouncementTTL({}), 'an explicit TTL wins; unknown beats default short');
+});
+
+test('depot loaners, role agents and prime beats carry banners, ranks and announcer cues', () => {
+  const player = {id: 0, team: 0};
+  const loaner = cocsAnnouncement({type: 'cocs-depot-vehicle-spawn', team: 0, depot: 'depot-0', vehicle: 'depot-depot-0'}, player);
+  assert.equal(loaner.kind, 'loaner');
+  assert.equal(loaner.text, 'LOANER READY · DEPOT 0');
+  assert.equal(loaner.detail, 'PUMA ON THE DEPOT PAD');
+  assert.equal(loaner.mine, true);
+  assert.equal(loaner.relevance, 'friendly');
+  assert.equal(cocsAnnouncePriority(loaner), COCS_ANNOUNCE_PRIORITY.loaner);
+  assert.equal(cocsAnnouncementTTL(loaner), 4);
+  // The same world event reads as a warning for the other side.
+  const enemy = cocsAnnouncement({type: 'cocs-depot-vehicle-spawn', team: 1, depot: 'depot-1'}, player);
+  assert.equal(enemy.text, 'ENEMY LOANER · DEPOT 1');
+  assert.equal(enemy.mine, false);
+  assert.equal(enemy.relevance, 'enemy');
+  // A beat without a stamped team reads as the local side, never an enemy call.
+  assert.equal(cocsAnnouncement({type: 'cocs-depot-vehicle-spawn', depot: 'depot-2'}, player).text, 'LOANER READY · DEPOT 2');
+  // Team-private economy beats stay off the enemy feed.
+  assert.equal(cocsAnnouncement({type: 'cocs-depot-purchase', team: 1, depot: 'depot-1', item: 'puma'}, player), null);
+  const buy = cocsAnnouncement({type: 'cocs-depot-purchase', team: 0, depot: 'depot-0', item: 'puma', actor: 0}, player);
+  assert.equal(buy.text, 'PUMA REQUISITIONED');
+  assert.equal(buy.detail, 'DEPOT 0');
+  assert.equal(buy.kind, 'requisition');
+  // Saboteur/scout kit, role agents and the prime channel each get a banner.
+  const beats = [
+    [{type: 'cocs-terminal-sabotage', team: 0, terminal: 'terminal-1', node: 'relay-1'}, /SABOTAGE COMPLETE/],
+    [{type: 'cocs-sapper', team: 0, node: 'relay-1', denied: 3, bounty: 24}, /^LINK CUT/],
+    [{type: 'cocs-siphon', team: 0, node: 'siphon-0', flux: 12}, /^FLUX SIPHONED/],
+    [{type: 'cocs-scan', team: 0, marked: 4, actor: 2}, /^SCAN SWEEP/],
+    [{type: 'cocs-role-spawn', team: 0, role: 'saboteur', actor: 5}, /^AGENT DEPLOYED · SABOTEUR/],
+    [{type: 'cocs-role-killed', team: 0, role: 'saboteur', actor: 5, bounty: 24}, /^AGENT LOST/],
+    [{type: 'cocs-role-expire', team: 0, role: 'scout', actor: 6, refund: 16}, /^AGENT RETIRED/],
+    [{type: 'cocs-role-rally', actor: 7, targets: [0, 1], shield: 40}, /^RALLY · 2 LINKED/],
+    [{type: 'cocs-role-repair', actor: 7, repaired: ['device:a']}, /^REPAIRS DONE/],
+    [{type: 'cocs-role-spot', actor: 8, targets: [3, 4]}, /^SPOT · 2 MARKED/],
+    [{type: 'cocs-prime-start', node: 'siphon-0', actor: 9, seconds: 8}, /^PRIME STARTED/],
+    [{type: 'cocs-prime', node: 'siphon-0', team: 0, seconds: 30}, /^NODE PRIMED/],
+    [{type: 'cocs-prime-interrupt', node: 'siphon-0', actor: 9}, /^PRIME INTERRUPTED/],
+  ];
+  for (const [event, pattern] of beats) {
+    const beat = cocsAnnouncement(event, player);
+    assert.ok(beat, `${event.type} becomes a banner`);
+    assert.match(beat.text, pattern);
+    assert.ok(cocsAnnouncePriority(beat) > 0 && cocsAnnouncementTTL(beat) > 0);
+    assert.ok(latticeAnnounceCue(event, player.id), `${event.type} has an announcer cue`);
+  }
+  // The new ranks stay distinct and ordered inside the existing policy.
+  const ranks = Object.values(COCS_ANNOUNCE_PRIORITY);
+  assert.equal(new Set(ranks).size, ranks.length, 'every bounded rank stays distinct');
+  assert.ok(COCS_ANNOUNCE_PRIORITY.prime > COCS_ANNOUNCE_PRIORITY.loaner);
+  assert.ok(COCS_ANNOUNCE_PRIORITY.loaner > COCS_ANNOUNCE_PRIORITY.sabotage);
+  assert.ok(COCS_ANNOUNCE_PRIORITY.sabotage > COCS_ANNOUNCE_PRIORITY.neutral);
+  assert.ok(COCS_ANNOUNCE_PRIORITY.sapper > COCS_ANNOUNCE_PRIORITY.support);
+  assert.ok(COCS_ANNOUNCE_PRIORITY.support > COCS_ANNOUNCE_PRIORITY.scan);
+  assert.ok(COCS_ANNOUNCE_PRIORITY.scan > COCS_ANNOUNCE_PRIORITY.issued);
+  // One voice: the loaner banner holds its window against routine beats and
+  // only a genuine loss can displace it.
+  const taken = acceptCocsAnnouncement(null, -1, loaner, 10);
+  assert.equal(taken.cue, loaner);
+  const scan = cocsAnnouncement({type: 'cocs-scan', team: 0, marked: 2, actor: 2}, player);
+  assert.equal(acceptCocsAnnouncement(taken.cue, taken.at, scan, 10.4), null, 'a routine scan is absorbed by the loaner banner');
+  const kill = cocsAnnouncement({type: 'cocs-role-killed', team: 0, role: 'saboteur', actor: 5}, player);
+  assert.equal(acceptCocsAnnouncement(taken.cue, taken.at, kill, 10.6), null, 'losing an agent is below the loaner banner');
+  const loss = cocsAnnouncement({type: 'cocs-capture', team: 1, node: 'front-0', previousOwner: 0, reward: {op: 10}, participants: [3]}, player);
+  assert.equal(acceptCocsAnnouncement(taken.cue, taken.at, loss, 11).cue, loss, 'a real capture loss still outranks it');
+});
+
+test('the new depot and role captions carry their own priority bands', () => {
+  assert.equal(captionPriority({type: 'cocs-depot-vehicle-spawn'}), 100);
+  assert.equal(captionPriority({type: 'cocs-prime'}), 100);
+  assert.equal(captionPriority({type: 'cocs-role-killed'}), 109);
+  assert.equal(captionPriority({type: 'cocs-prime-interrupt'}), 109);
+  assert.equal(captionPriority({type: 'cocs-depot-purchase'}), 85);
+  assert.equal(captionPriority({type: 'cocs-scan'}), 85);
+  assert.ok(captionPriority({type: 'cocs-role-killed'}) > captionPriority({type: 'cocs-depot-purchase'}));
+  assert.equal(audioCaption({type: 'cocs-role-killed', role: 'saboteur'}).text, 'Role killed · SABOTEUR');
 });
 
 // ---------------------------------------------------------------------------

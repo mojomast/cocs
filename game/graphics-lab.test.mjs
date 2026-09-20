@@ -1,7 +1,8 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import {readFile} from 'node:fs/promises';
 import {ClampToEdgeWrapping,LinearFilter,RepeatWrapping} from 'three';
-import {GRAPHICS_EFFECTS,GRAPHICS_LAB_TARGETS,GRAPHICS_RECIPES,normalizeGraphicsLab,normalizeGraphicsLabTarget,graphicsRecipe,graphicsLabActive,graphicsLabTargetActive,serializeGraphicsLab,randomGraphicsLab,describeGraphicsLab} from './graphics-lab.mjs';
+import {GRAPHICS_EFFECTS,GRAPHICS_LAB_DEFAULT,GRAPHICS_LAB_TARGETS,GRAPHICS_LAB_VERSION,GRAPHICS_RECIPES,defaultGraphicsLab,normalizeGraphicsLab,normalizeGraphicsLabTarget,graphicsRecipe,graphicsLabActive,graphicsLabTargetActive,serializeGraphicsLab,randomGraphicsLab,describeGraphicsLab} from './graphics-lab.mjs';
 import {GraphicsLabPass} from './graphics-lab-pass.mjs';
 import {configureMothAssets,resetMothAssets} from './moth-assets.mjs';
 
@@ -27,10 +28,92 @@ function mothFixture({lut=true,fields=false,qrc=false,voidLut=false}={}){
 // measures each selected asset rather than assuming the default.
 const DUST_MEAN=447/1020,FLOW_MEAN=480/1020;
 
-test('preview defaults off; stale/corrupt settings cannot turn it on or inject shader values',()=>{
+test('the normalizer still defaults stale/corrupt saves off and cannot inject shader values',()=>{
  for(const raw of [undefined,null,[],{version:99,enabled:true},{enabled:true}])assert.equal(graphicsLabActive(normalizeGraphicsLab(raw)),false);
  const s=normalizeGraphicsLab({version:1,enabled:true,mix:Infinity,splitAt:9,palette:'bad',effects:{ink:{enabled:true,value:NaN},glow:{enabled:true,value:900},injected:{enabled:true}}});
  assert.equal(s.mix,1);assert.equal(s.splitAt,.9);assert.equal(s.palette,'circuit');assert.equal(s.effects.glow.value,1.5);assert.equal(s.effects.ink.value,.9);assert.equal(s.effects.injected,undefined);
+});
+// The shipped look: an empty save hydrates to exactly this recipe, so pin its
+// shape, its exact values and the targets it styles.
+test('the shipped default is the electric contrast/hatch world with a circuit weapon and ink bots',()=>{
+ const d=defaultGraphicsLab();
+ assert.equal(d.version,GRAPHICS_LAB_VERSION);
+ assert.equal(d.enabled,true);assert.equal(d.bypass,false);assert.equal(d.split,false);assert.equal(d.splitAt,.5);
+ assert.equal(d.palette,'electric');
+ assert.equal(d.mix,0.825057562220778,'the shipped mix keeps its exact saved value');
+ assert.deepEqual(d,GRAPHICS_LAB_DEFAULT,'the shipped constant is already a normalized state');
+ assert.notEqual(d,GRAPHICS_LAB_DEFAULT,'the helper hands out a fresh copy, not the frozen constant');
+ const on=settings=>Object.entries(settings).filter(([,setting])=>setting.enabled).map(([id])=>id);
+ // World: exactly three layers at their exact recipe values.
+ assert.deepEqual(on(d.effects),['contrast','saturate','hatch']);
+ assert.equal(d.effects.contrast.value,1.6);assert.equal(d.effects.saturate.value,.6);assert.equal(d.effects.hatch.value,.3);
+ for(const e of GRAPHICS_EFFECTS){
+  if(['contrast','saturate','hatch'].includes(e.id))continue;
+  assert.equal(d.effects[e.id].enabled,false,`world ${e.id} ships off`);
+  assert.equal(d.effects[e.id].value,e.value,`world ${e.id} keeps the catalogue value`);
+ }
+ // Weapon: a circuit stack with ink contours, halftone, phosphor screen and grain.
+ const weapon=d.targets.weapon;
+ assert.equal(weapon.enabled,true);assert.equal(weapon.mix,1);assert.equal(weapon.palette,'circuit');
+ assert.deepEqual(on(weapon.effects),['pixel','hex','contrast','sharpen','halftone','ink','neon','crt','grain']);
+ for(const [id,value] of Object.entries({pixel:2,hex:4,contrast:1.15,sharpen:1.5,halftone:3,ink:.5,neon:.1,crt:.45,grain:.05}))assert.equal(weapon.effects[id].value,value,`weapon ${id} keeps its exact value`);
+ assert.deepEqual(weapon.effects.mothcoat,{enabled:false,value:1,option:'entanglement'},'the weapon coat slider remembers 1 while off');
+ // Bots: one ink layer over the all-off stack.
+ const bots=d.targets.bots;
+ assert.equal(bots.enabled,true);assert.equal(bots.mix,1);assert.equal(bots.palette,'circuit');
+ assert.deepEqual(on(bots.effects),['ink']);
+ assert.equal(bots.effects.ink.value,1.5);
+ for(const e of GRAPHICS_EFFECTS){
+  if(e.id==='ink')continue;
+  assert.equal(bots.effects[e.id].enabled,false,`bots ${e.id} ships off`);
+  assert.equal(bots.effects[e.id].value,e.value,`bots ${e.id} keeps the catalogue value`);
+ }
+ assert.ok(graphicsLabActive(d));assert.ok(graphicsLabTargetActive(weapon));assert.ok(graphicsLabTargetActive(bots));
+ // Only catalogue ids survive in the shipped state.
+ assert.deepEqual(Object.keys(d.effects),GRAPHICS_EFFECTS.map(e=>e.id));
+ assert.deepEqual(Object.keys(d.targets),['weapon','bots']);
+ assert.deepEqual(Object.keys(weapon.effects),GRAPHICS_EFFECTS.map(e=>e.id));
+ const injected=JSON.parse(JSON.stringify(GRAPHICS_LAB_DEFAULT));
+ injected.effects.injected={enabled:true,value:1};
+ injected.targets.injected={enabled:true};
+ injected.targets.weapon.effects.injected={enabled:true,value:1};
+ assert.deepEqual(normalizeGraphicsLab(injected),d,'injected effect and target ids are dropped');
+ assert.deepEqual(normalizeGraphicsLab(JSON.parse(serializeGraphicsLab(d))),d,'the shipped default round-trips through the v1 export');
+ // The constant is deeply frozen; the helper returns editable copies.
+ assert.ok(Object.isFrozen(GRAPHICS_LAB_DEFAULT)&&Object.isFrozen(GRAPHICS_LAB_DEFAULT.effects)&&Object.isFrozen(GRAPHICS_LAB_DEFAULT.effects.ink));
+ assert.ok(Object.isFrozen(GRAPHICS_LAB_DEFAULT.targets)&&Object.isFrozen(GRAPHICS_LAB_DEFAULT.targets.weapon.effects.mothcoat));
+ d.effects.ink.enabled=true;d.targets.weapon.enabled=false;
+ assert.equal(GRAPHICS_LAB_DEFAULT.effects.ink.enabled,false,'editing a copy never touches the frozen constant');
+ assert.equal(defaultGraphicsLab().targets.weapon.enabled,true,'each call starts from the shipped state');
+});
+test('normalizeGraphicsLab({}) still hydrates to the all-off state RESET ALL / OFF restores',()=>{
+ const s=normalizeGraphicsLab();
+ assert.equal(s.enabled,false);assert.equal(s.bypass,false);assert.equal(s.split,false);assert.equal(s.mix,1);assert.equal(s.splitAt,.5);assert.equal(s.palette,'circuit');
+ for(const e of GRAPHICS_EFFECTS)assert.equal(s.effects[e.id].enabled,false,`${e.id} stays off`);
+ for(const id of ['weapon','bots'])assert.equal(s.targets[id].enabled,false,`${id} stays off`);
+ assert.notDeepEqual(s,defaultGraphicsLab(),'the all-off state is not the shipped look');
+ assert.deepEqual(normalizeGraphicsLab(GRAPHICS_LAB_DEFAULT),defaultGraphicsLab(),'the shipped default is a valid v1 save');
+});
+// The hook hydrates browser storage after SSR; a DOM test cannot run effects in
+// this suite, so pin the empty/unreadable-save path at the source level.
+test('useGraphicsLab hydrates an empty or unreadable save to the shipped default, not all-off',async()=>{
+ const source=await readFile(new URL('../app/ui/useGraphicsLab.ts',import.meta.url),'utf8');
+ assert.ok(source.includes("import {GRAPHICS_LAB_KEY,defaultGraphicsLab,normalizeGraphicsLab,serializeGraphicsLab} from '../../game/graphics-lab.mjs'"),'the hook imports the default helper');
+ assert.ok(source.includes('useState(()=>defaultGraphicsLab())'),'the first render already shows the shipped default');
+ assert.ok(source.includes('const parsed=stored===null?null:JSON.parse(stored);'),'empty storage is not parsed as the string "null"');
+ assert.ok(source.includes('parsed===null||parsed===undefined?defaultGraphicsLab():normalizeGraphicsLab(parsed)'),'empty saves hydrate to the default while readable saves still win');
+ assert.ok(source.includes('catch{return defaultGraphicsLab();}'),'an unreadable save falls back to the default');
+ assert.ok(source.includes('localStorage.getItem(GRAPHICS_LAB_KEY)'),'storage is still read through the shared key');
+ assert.ok(source.includes('localStorage.setItem(GRAPHICS_LAB_KEY,serializeGraphicsLab(value))'),'the save path is unchanged');
+ assert.ok(source.includes('storageNotice'),'the storage notice behavior stays');
+});
+test('the drawer restores the shipped default through the existing message line',async()=>{
+ const panel=await readFile(new URL('../app/ui/screens/GraphicsLabPanel.tsx',import.meta.url),'utf8');
+ assert.ok(panel.includes('defaultGraphicsLab')&&panel.includes('update(defaultGraphicsLab())'),'RESTORE DEFAULT LOOK applies the shipped state');
+ assert.ok(panel.includes('>RESTORE DEFAULT LOOK</Btn>'),'the restore action sits in the actions row beside RESET ALL / OFF');
+ assert.ok(panel.includes("setMessage('Default look restored: electric world with contrast and crosshatch, circuit weapon, ink bots.')"),'the confirmation is worded copy, not a bare reset');
+ assert.ok(panel.includes('electric world with contrast and crosshatch, a circuit weapon stack, and ink-styled bots'),'the drawer names the shipped default stack');
+ assert.equal((panel.match(/role="status"/g)||[]).length,1,'the confirmation reuses the one existing live region');
 });
 test('all recipes are valid independently editable stacks; bypass and zero mix preserve the recipe',()=>{
  for(const r of GRAPHICS_RECIPES){const s=graphicsRecipe(r.id);assert.deepEqual(s,normalizeGraphicsLab(s));assert.ok(graphicsLabActive(s));assert.ok(Object.values(s.effects).filter(e=>e.enabled).length>=3);assert.equal(graphicsLabActive({...s,bypass:true}),false);assert.equal(graphicsLabActive({...s,mix:0}),false);}

@@ -77,3 +77,20 @@ test('unknown caption types stay null and existing captions are untouched',()=>{
  assert.equal(audioCaption({type:'shot',alt:true,weapon:2}).text,'Alt fire · OVERLOAD');
  assert.equal(audioCaption({type:'launch',weapon:4}),null,'a normal rocket launch keeps its silent caption');
 });
+
+test('depot loaners, role agents and the prime channel caption through the lattice table',()=>{
+ assert.equal(audioCaption({type:'cocs-depot-vehicle-spawn',depot:'depot-0',vehicle:'depot-depot-0'}).text,'LOANER READY · DEPOT 0');
+ assert.equal(audioCaption({type:'cocs-depot-purchase',depot:'depot-0',item:'puma'}).text,'PUMA REQUISITIONED · DEPOT 0');
+ assert.match(audioCaption({type:'cocs-terminal-sabotage',terminal:'terminal-1'}).text,/Terminal sabotage/);
+ assert.match(audioCaption({type:'cocs-sapper',node:'relay-1',denied:2}).text,/Link cut · RELAY 1 · 2 DENIED/);
+ assert.match(audioCaption({type:'cocs-siphon',node:'siphon-0',flux:9}).text,/Flux siphoned · 9 FLUX/);
+ assert.equal(audioCaption({type:'cocs-scan',marked:3}).text,'Scan sweep · 3 MARKED');
+ assert.equal(audioCaption({type:'cocs-scan',marked:0}).text,'Scan sweep');
+ assert.equal(audioCaption({type:'cocs-role-spawn',role:'saboteur'}).text,'Role deployed · SABOTEUR');
+ assert.equal(audioCaption({type:'cocs-role-rally',targets:[0,1]}).text,'Rally · 2 LINKED');
+ assert.equal(audioCaption({type:'cocs-role-repair',repaired:['device:a','terminal:b']}).text,'Repairs done · 2 RESTORED');
+ assert.equal(audioCaption({type:'cocs-role-spot',targets:[3,4,5]}).text,'Spot · 3 MARKED');
+ assert.equal(audioCaption({type:'cocs-prime-start',node:'siphon-0'}).text,'Prime started · SIPHON 0');
+ assert.equal(audioCaption({type:'cocs-prime',node:'siphon-0'}).text,'Node primed · SIPHON 0');
+ assert.equal(audioCaption({type:'cocs-prime-interrupt',node:'siphon-0'}).text,'Prime interrupted · SIPHON 0');
+});

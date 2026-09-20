@@ -117,6 +117,32 @@ export function normalizeGraphicsLab(input={}) {
     },
   };
 }
+// The look the lab ships with. It loads on a device with no saved recipe, so a
+// first visit already shows the intended identity. RESET ALL / OFF still clears
+// everything, and normalizeGraphicsLab({}) still returns the all-off state that
+// recipe building and compare controls rely on. Values not listed keep the
+// catalogue defaults from GRAPHICS_EFFECTS.
+const defaultLabEffects=overrides=>Object.freeze(Object.fromEntries(GRAPHICS_EFFECTS.map(e=>{
+  const setting=overrides[e.id];
+  return [e.id,Object.freeze({
+    enabled:setting?.enabled===true,
+    value:clamp(setting?.value,e.min,e.max,e.value),
+    ...(e.options?.length?{option:e.options.some(o=>o.id===setting?.option)?setting.option:e.options[0].id}:{}),
+  })];
+})));
+const defaultLabTarget=overrides=>Object.freeze({enabled:true,mix:1,palette:'circuit',effects:defaultLabEffects(overrides)});
+export const GRAPHICS_LAB_DEFAULT=Object.freeze({
+  version:GRAPHICS_LAB_VERSION,enabled:true,bypass:false,
+  // The overall blend keeps its exact saved value rather than a rounded one.
+  mix:0.825057562220778,split:false,splitAt:.5,palette:'electric',
+  effects:defaultLabEffects({contrast:{enabled:true,value:1.6},saturate:{enabled:true,value:.6},hatch:{enabled:true,value:.3}}),
+  targets:Object.freeze({
+    weapon:defaultLabTarget({pixel:{enabled:true,value:2},hex:{enabled:true,value:4},contrast:{enabled:true,value:1.15},sharpen:{enabled:true,value:1.5},halftone:{enabled:true,value:3},ink:{enabled:true,value:.5},neon:{enabled:true,value:.1},crt:{enabled:true,value:.45},grain:{enabled:true,value:.05},mothcoat:{value:1}}),
+    bots:defaultLabTarget({ink:{enabled:true,value:1.5}}),
+  }),
+});
+// A fresh, normalized copy of the shipped look; callers edit it like any recipe.
+export function defaultGraphicsLab(){return normalizeGraphicsLab(GRAPHICS_LAB_DEFAULT);}
 // True when a target would contribute any styling: master on, mix above zero
 // and at least one layer enabled. Pure and tolerant of malformed input.
 export function graphicsLabTargetActive(target){

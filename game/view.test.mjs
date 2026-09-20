@@ -2251,6 +2251,61 @@ test('damaged vehicles smoke and spark below forty percent while healthy ones st
  view.disposeObject(model);view.disposeObject(wreck);
 });
 
+test('LATTICE depot loaners spawned after setMatch are modeled on the next update and disposed when recalled',t=>{
+ const {view}=playable(t);
+ view.mapId='crosswire';
+ const match={arena:{id:'crosswire'},actors:[],pickups:[],flags:[],objectives:null,serial:0,time:0,vehicles:[]};
+ view.setMatch(match);
+ assert.equal(view.vehicleModels.size,0,'the opening roster has no vehicles');
+ // The `spawnDepotVehicle` shape: a puma keyed by its depot, added to the live
+ // fleet long after match start.
+ const loaner={id:'depot-depot-0',kind:'puma',position:{x:8,y:0,z:-4},yaw:.5,health:1000,respawnTimer:0,vx:0,vz:0,depotId:'depot-0',ownerTeam:0,spawnImmunity:3,lastTeam:0};
+ match.vehicles.push(loaner);
+ match.time=1;
+ view.updateVehicleModels(match);
+ const model=view.vehicleModels.get('depot-depot-0');
+ assert.ok(model,'the late loaner gets a model keyed by its vehicle id');
+ assert.ok(view.scene.children.includes(model),'the loaner model is added to the scene');
+ assert.equal(model.visible,true,'a live loaner is visible');
+ assert.deepEqual(model.position.toArray(),[8,0,-4],'the first update places the loaner on its pad');
+ // Recalling the loaner disposes the model instead of leaving a ghost.
+ let disposed=0;const originalDispose=view.disposeObject.bind(view);
+ view.disposeObject=object=>{disposed++;return originalDispose(object);};
+ match.vehicles.length=0;
+ match.time=2;
+ view.updateVehicleModels(match);
+ assert.equal(disposed,1,'the removed loaner model is disposed');
+ assert.equal(view.vehicleModels.has('depot-depot-0'),false);
+ assert.ok(!view.scene.children.includes(model),'the removed loaner leaves the scene');
+ view.disposeObject=originalDispose;
+});
+
+test('an unchanged vehicle roster never re-syncs or rebuilds the fleet',t=>{
+ const {view}=playable(t);
+ view.mapId='crosswire';
+ const match={arena:{id:'crosswire'},actors:[],pickups:[],flags:[],objectives:null,serial:0,time:0,
+  vehicles:[{id:'veh-a',kind:'puma',position:{x:1,y:0,z:1},yaw:0,health:1000,respawnTimer:0}]};
+ let syncs=0;const realSync=view.syncVehicles;
+ view.syncVehicles=function(...args){syncs++;return realSync.apply(this,args);};
+ view.setMatch(match);
+ assert.equal(syncs,1,'setMatch still builds the opening fleet once');
+ const opening=view.vehicleModels.get('veh-a');
+ assert.ok(opening&&view.scene.children.includes(opening));
+ view.updateVehicleModels(match);
+ view.updateVehicleModels(match);
+ assert.equal(syncs,1,'an unchanged roster never re-syncs');
+ assert.equal(view.vehicleModels.get('veh-a'),opening,'the same model instance survives the frame');
+ // A depot loaner joining the fleet is the only thing that triggers a rebuild.
+ const children=view.scene.children.length;
+ match.vehicles.push({id:'depot-depot-0',kind:'puma',position:{x:4,y:0,z:4},yaw:0,health:1000,respawnTimer:0});
+ view.updateVehicleModels(match);
+ assert.equal(syncs,2,'a late-spawned loaner triggers exactly one re-sync');
+ assert.ok(view.vehicleModels.get('depot-depot-0'),'the loaner is modeled');
+ assert.equal(view.vehicleModels.get('veh-a'),opening,'the existing vehicle keeps its model');
+ assert.equal(view.scene.children.length,children+1,'only the new model is added to the scene');
+ view.syncVehicles=realSync;
+});
+
 test('the display frame cap gates the presented frame and carries skipped time',t=>{
  assert.equal(frameDue(1000,undefined,60),true,'the first frame is always due');
  assert.equal(frameDue(1000,1000-12,60),false,'a 12 ms gap misses a 60 cap');

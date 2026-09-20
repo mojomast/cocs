@@ -18,8 +18,9 @@ record in [VERIFICATION.md](VERIFICATION.md).
 
 ## v8.6 · PRISM — 2026-09-20
 
-An opt-in developer graphics lab for choosing the game's visual flavor, plus a
-paid Moth material pack and the offline variety pipeline behind it.
+An opt-in developer graphics lab for choosing the game's visual flavor — with a
+shipped default look — plus a paid Moth material pack and the offline variety
+pipeline behind it.
 
 - 23 stackable effects: pixel and hex mosaic, row glitch, prism split, light
   bleed, vignette, contrast, saturation, white balance, sharpen, solarize, color
@@ -28,9 +29,14 @@ paid Moth material pack and the offline variety pipeline behind it.
   signal glyphs, spectral coat) with an asset picker each.
 - Eleven editable starting recipes, including Blueprint, Thermal, Moth Print,
   Pocket Ink (a saved player roll) and Ghost Rivals.
+- The lab ships enabled with a default look on a device with no saved recipe: an
+  electric world (contrast, saturation, crosshatch), a circuit weapon stack and
+  an ink-styled bots stack. RESTORE DEFAULT LOOK re-applies it; RESET ALL / OFF
+  clears everything, and any saved recipe still wins on reload.
 - Per-target stacks: WORLD / WEAPON / BOTS each get their own master, mix,
-  palette and layers. The weapon stays crisp and bots follow the world stack
-  until enabled; bots render in a depth-tested pass so walls occlude them.
+  palette and layers. The shipped default enables all three; cleared, the weapon
+  stays crisp and bots follow the world stack until a target is enabled. Bots
+  render in a depth-tested pass so walls occlude them.
 - Combat pass: every weapon gains a held alt-fire mode (KeyZ / middle mouse /
   touch ALT) that transforms the model and changes the behaviour — salvo, cluster,
   overload, slug, mortar, proximity mine, chain, flak bomb, double tap and twin —
@@ -103,6 +109,12 @@ paid Moth material pack and the offline variety pipeline behind it.
   out. The four `asset-workshop` PRs add dedicated high-detail Hornet, Titan,
   Scout and Transport models on WebGL (batched, software keeps the compact
   hull). See [Depth II pass](design/DEPTH-II-PASS.md).
+- LATTICE fixes: depot loaner vehicles now render (late runtime spawns were
+  never synced), the depot/target/prime event loop gained sound, captions and
+  banners, team FLUX has a real REINFORCE/SCAN purchase strip, NEGLECT is live
+  as the comeback meter, and spectators can no longer queue orders. The
+  Graphics Lab now ships an authored default look (electric/contrast/hatch
+  world, circuit weapon pixels, ink bots) with a restore action.
 - Animation pass: restored death variety (killing-direction topple, per-pose
   fall arcs, seeded limb silhouettes, style treatments), strength-scaled hit
   flinches, a melee swing, shell casings, style-aware death audio, and UI

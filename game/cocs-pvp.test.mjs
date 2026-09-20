@@ -11,11 +11,11 @@ import {
   DEFAULT_CONFIG, GAME_MODES, COCS_RUNGS, COCS_RUNG_IDS, cocsRung, cocsRungForPlayers,
   cocsRungOf, cocsRoleAllowed, cocsRungRoles, normalizeConfig, cocsRungFill, cocsRungMeetsMinimum,
 } from './config.mjs';
-import {FLUX_CAP, FLUX_START} from './cocs-economy.mjs';
+import {FLUX_CAP, FLUX_START, NEGLECT} from './cocs-economy.mjs';
 import {COOP_ROLE_IDS, PVP_ROLE_IDS, ROLE_ABILITIES, coopRole, roleAbility} from './cocs-roles.mjs';
 import {
   COCS_ROLE_TARGET_CONCURRENCY, COCS_SIPHON_FLUX, cocsBuyAction, cocsCommandAction,
-  cocsDutyRolePolicy, cocsEconomyAction, cocsRoleActors,
+  cocsDutyRolePolicy, cocsEconomyAction, cocsNeglectContext, cocsRoleActors,
   cocsRoleAllowedOnRung, cocsRoleBoardSnapshot, cocsRoleSpawn, cocsSaboteurAct, cocsSapper,
   cocsSiphon, cocsSnapshot, cocsTeamCommand, cocsTeamVisibility, cocsThreadsUsed, spawnScout,
 } from './cocs.mjs';
@@ -403,6 +403,75 @@ test('PvP personal REQ buys apply to the buying actor and honour the team seat',
  assert.equal(actor.reqBuff, 'field-repair');
  assert.ok(actor.reqSpent >= 40);
  assert.equal(state.command.seat[1], null, 'the buy never seats the enemy team');
+});
+
+// ---------------------------------------------------------------------------
+// Local team-FLUX spend dispatch + §6A.6 NEGLECT activation (fieldwork v8.6).
+// ---------------------------------------------------------------------------
+test('a local page-shaped {verb} spend reaches the sim through Match.step', () => {
+  // The page queues `{verb}` for local practice; the sim must accept it exactly
+  // like the wire/room `{action}` shape, case-insensitively.
+  const local = pvpMatch('8v8');
+  const localState = local.objectiveState;
+  localState.flux[0] = 240;
+  local.step(DT, {cocs: {spends: [{tick: 0, peerId: '0', cardId: 'local-1', team: 0, verb: 'reinforce', role: 'fighter', target: null}]}});
+  assert.equal(localState.roleSpawns[0].length, 1, 'the local {verb} record applies');
+  assert.equal(localState.spendLog.at(-1).verb, 'reinforce', 'the spend log normalises the verb');
+  assert.equal(localState.spendLog.at(-1).ok, true);
+  assert.ok(localState.flux[0] < 240, 'the role cost came out of team FLUX');
+
+  const wire = pvpMatch('8v8');
+  wire.objectiveState.flux[0] = 240;
+  wire.step(DT, {cocs: {spends: [{tick: 0, peerId: 'p1', cardId: 'wire-1', team: 0, action: 'SPAWN', role: 'fighter'}]}});
+  assert.equal(wire.objectiveState.roleSpawns[0].length, 1, 'the wire {action} shape still applies');
+
+  // The SCAN purchase is the same economy call as the room's `spawn`+scout,
+  // and it needs (and gets) a legal target node.
+  const scan = pvpMatch('8v8');
+  scan.objectiveState.flux[0] = 240;
+  scan.step(DT, {cocs: {spends: [{tick: 0, peerId: '0', cardId: 'local-scan', team: 0, verb: 'spawn', role: 'scout', target: 'front-e'}]}});
+  assert.ok(scan.objectiveState.scouts[0] !== null && scan.objectiveState.scouts[0] !== undefined, 'local SCAN spends spawn the scout');
+  assert.ok(scan.objectiveState.flux[0] < 239, 'the scout cost came out of team FLUX');
+});
+
+test('NEGLECT accrues for a trailing human team and stays zero without a human commander', () => {
+  // (a) Seated commander + a live order nobody is working: the meter rises
+  // after the 45 s grace on the authored +1/s and stays inside the cap.
+  const match = pvpMatch('8v8', {cocsPolicy: () => []});
+  const state = match.objectiveState;
+  match.step(DT, {inputs: {}});
+  const human = match.actors.find(actor => actor.bot == null && actor.isNpc !== true);
+  assert.ok(human, 'the practice roster fields a human seat');
+  human.x = 500; human.z = 500;
+  const hq = state.nodes.find(node => node.archetype === 'hq' && node.owner === 0);
+  assert.ok(hq, 'team 0 starts with an HQ (an order there can never complete)');
+  assert.equal(cocsCommandAction(match, state, {team: 0, peerId: 'commander', action: 'take'}).ok, true);
+  state.scores[1] = 80;
+  for (let i = 0; i < 70 * 60 && !match.over; i++) {
+    if (i % 90 === 0) match.step(DT, {cocs: {orders: [{tick: 0, peerId: 'commander', cardId: `hold-${i}`, team: 0, verb: 'HOLD', target: hq.id}]}});
+    else match.step(DT, {inputs: {}});
+  }
+  assert.ok(state.neglect[0].value > 5, `expected NEGLECT to accrue, got ${state.neglect[0].value}`);
+  assert.ok(state.neglect[0].value <= NEGLECT.max, 'the meter stays inside its authored cap');
+
+  // (b) No human anywhere on the team: the same order pressure never moves it.
+  const bots = pvpMatch('8v8', {cocsPolicy: () => []});
+  const botState = bots.objectiveState;
+  for (const actor of bots.actors) actor.bot = actor.bot ?? {route: [], think: 0, target: -1, memory: 0, reaction: 0, stuck: 0, last: {x: 0, y: 0, z: 0}, state: 'roam', patrol: 0, flank: null, flankDone: false, recover: 0, suppressed: 0, threat: -1, standoff: null, strafeReverse: -99};
+  const botHq = botState.nodes.find(node => node.archetype === 'hq' && node.owner === 0);
+  for (let i = 0; i < 70 * 60 && !bots.over; i++) {
+    if (i % 90 === 0) bots.step(DT, {cocs: {orders: [{tick: 0, peerId: 'chief-0', cardId: `hold-${i}`, team: 0, verb: 'HOLD', target: botHq.id}]}});
+    else bots.step(DT, {inputs: {}});
+  }
+  assert.equal(botState.neglect[0].value, 0, 'without a human commander NEGLECT stays zero');
+
+  // (c) OPERATIONS stays inert exactly as before: co-op never reads the PvP
+  // command seat or the order signal, so its neglect meter cannot move.
+  const coop = coopMatch();
+  coop.step(DT, {cocs: {orders: [{tick: 0, peerId: 'human-0', cardId: 'coop-1', team: 0, verb: 'HOLD', target: coop.objectiveState.nodes[0].id}]}});
+  const context = cocsNeglectContext(coop, coop.objectiveState, 0);
+  assert.equal(context.humanCommander, false, 'co-op keeps NEGLECT inert');
+  assert.equal(context.activeOrder, false);
 });
 
 // ---------------------------------------------------------------------------

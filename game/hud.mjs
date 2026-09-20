@@ -587,6 +587,24 @@ const CAPTION_PRIORITY_BY_TYPE = Object.freeze({
   // every five seconds of held time, so it reads as notice-band progress and
   // never claims the protection a discrete objective beat holds.
   'lattice-support': ASSISTIVE_PRIORITY.notice,
+  // Depot logistics, role agents and the prime channel: a loaner rolling out, a
+  // primed node and a cut link are discrete objective beats; the cadence role
+  // beats stay notice-band so a siege or a capture loss still owns the channel.
+  'cocs-depot-vehicle-spawn': ASSISTIVE_PRIORITY.objective,
+  'cocs-depot-purchase': ASSISTIVE_PRIORITY.notice,
+  'cocs-terminal-sabotage': ASSISTIVE_PRIORITY.objective,
+  'cocs-sapper': ASSISTIVE_PRIORITY.objective,
+  'cocs-siphon': ASSISTIVE_PRIORITY.notice,
+  'cocs-scan': ASSISTIVE_PRIORITY.notice,
+  'cocs-role-spawn': ASSISTIVE_PRIORITY.notice,
+  'cocs-role-killed': ASSISTIVE_PRIORITY.callout,
+  'cocs-role-expire': ASSISTIVE_PRIORITY.notice,
+  'cocs-role-rally': ASSISTIVE_PRIORITY.notice,
+  'cocs-role-repair': ASSISTIVE_PRIORITY.notice,
+  'cocs-role-spot': ASSISTIVE_PRIORITY.notice,
+  'cocs-prime-start': ASSISTIVE_PRIORITY.notice,
+  'cocs-prime': ASSISTIVE_PRIORITY.objective,
+  'cocs-prime-interrupt': ASSISTIVE_PRIORITY.callout,
   'holdout-progress': ASSISTIVE_PRIORITY.notice,
   'vehicle-repair': ASSISTIVE_PRIORITY.notice,
   'deployable-repaired': ASSISTIVE_PRIORITY.notice,
@@ -710,6 +728,9 @@ export function scoreAnnouncer(hud, prevScores) {
 // wave/siege beats describe the player's own mission. Relevance is explicit in
 // `relevance`; replacement is the bounded policy in `acceptCocsAnnouncement`.
 const reasonWords = value => String(value ?? 'blocked').replace(/-/g, ' ').toUpperCase();
+// Role-agent names (`saboteur`, `harvester`, ...) share the same dash-to-space
+// wording so a banner and a caption never spell one role two ways.
+const roleWords = value => String(value ?? 'agent').replace(/-/g, ' ').toUpperCase();
 
 // Bounded announcement ranks. A strictly higher rank replaces what is showing;
 // equal rank replaces on a different dedupe key; identical keys are absorbed
@@ -720,17 +741,30 @@ export const COCS_ANNOUNCE_PRIORITY = Object.freeze({
   siege: 100,
   loss: 90,
   secure: 75,
+  // Depot/role economy beats: a primed node and a loaner leaving the pad
+  // outrank a neutral take but never a capture loss. Sabotage and a cut link
+  // sit just below them; role agents, requisition and the cadence support
+  // beats follow, and a scan sweep is the quietest of the family.
+  prime: 68,
+  loaner: 65,
+  sabotage: 62,
   neutral: 60,
   wave: 55,
+  sapper: 54,
+  role: 52,
+  requisition: 50,
+  support: 46,
   order: 45,
+  siphon: 44,
   terminal: 40,
+  scan: 38,
   refused: 35,
   issued: 15,
 });
 
 // Per-beat display lifetime: urgent objective changes hold longer than a
 // routine order beat, then expire so a stale banner never outlives the moment.
-const COCS_ANNOUNCE_TTL = Object.freeze({siege: 6, loss: 5, secure: 4, neutral: 3.5, wave: 3.5, order: 3, terminal: 3, refused: 3, issued: 1.6});
+const COCS_ANNOUNCE_TTL = Object.freeze({siege: 6, loss: 5, secure: 4, loaner: 4, prime: 4, neutral: 3.5, wave: 3.5, sabotage: 3.5, sapper: 3.5, role: 3, requisition: 3, order: 3, support: 3, siphon: 3, terminal: 3, scan: 2.5, refused: 3, issued: 1.6});
 
 export const cocsAnnouncePriority = beat => {
   const value = Number(beat?.priority);
@@ -825,6 +859,125 @@ export function cocsAnnouncement(event, player) {
         dedupeKey: `terminal:${event.type}:${event.terminal ?? ''}`,
         text: `${String(event.type.split('-')[2] ?? 'TERMINAL').toUpperCase()} COMPLETE`, detail: String(event.terminal ?? '').toUpperCase()};
     }
+    // Depot logistics. The loaner spawn is world-visible: the owning team reads
+    // LOANER READY, the other side reads ENEMY LOANER off the same event. The
+    // REQ purchase is team-private like the order feed.
+    case 'cocs-depot-vehicle-spawn': {
+      const label = String(event.label ?? event.depot ?? event.vehicle ?? 'DEPOT').replace(/-/g, ' ').toUpperCase();
+      // The sim always stamps the owning team; a hand-built beat without one
+      // reads as the local side rather than inventing an enemy deployment.
+      const owner = event.team === 0 || event.team === 1 ? Number(event.team) : team;
+      const common = {kind: 'loaner', team: owner, previousOwner: null,
+        dedupeKey: `loaner:${owner}:${event.depot ?? event.vehicle ?? ''}`};
+      if (owner === team) return {...common, mine: true, relevance: 'friendly', priority: COCS_ANNOUNCE_PRIORITY.loaner, ttl: COCS_ANNOUNCE_TTL.loaner,
+        text: `LOANER READY · ${label}`, detail: 'PUMA ON THE DEPOT PAD'};
+      return {...common, mine: false, relevance: 'enemy', priority: COCS_ANNOUNCE_PRIORITY.loaner, ttl: COCS_ANNOUNCE_TTL.loaner,
+        text: `ENEMY LOANER · ${label}`, detail: 'HOSTILE PUMA DEPLOYED'};
+    }
+    case 'cocs-depot-purchase':
+      if (event.team !== team) return null;
+      return {kind: 'requisition', team, mine: true, relevance: 'friendly', previousOwner: null,
+        priority: COCS_ANNOUNCE_PRIORITY.requisition, ttl: COCS_ANNOUNCE_TTL.requisition,
+        dedupeKey: `requisition:${event.depot ?? ''}:${event.vehicle ?? ''}`,
+        text: `${String(event.item ?? 'PUMA').toUpperCase()} REQUISITIONED`,
+        detail: String(event.depot ?? '').replace(/-/g, ' ').toUpperCase()};
+    // Saboteur and scout kit. Team-private: only the acting side gets a banner.
+    case 'cocs-terminal-sabotage':
+      if (event.team !== team) return null;
+      return {kind: 'sabotage', team, mine: true, relevance: 'friendly', previousOwner: null,
+        priority: COCS_ANNOUNCE_PRIORITY.sabotage, ttl: COCS_ANNOUNCE_TTL.sabotage,
+        dedupeKey: `sabotage:${event.terminal ?? ''}`,
+        text: `SABOTAGE COMPLETE · ${String(event.terminal ?? 'TERMINAL').replace(/-/g, ' ').toUpperCase()}`,
+        detail: event.node ? String(event.node).replace(/-/g, ' ').toUpperCase() : ''};
+    case 'cocs-sapper': {
+      if (event.team !== team) return null;
+      const denied = Math.max(0, Math.round(Number(event.denied) || 0));
+      return {kind: 'cut', team, mine: true, relevance: 'friendly', previousOwner: null,
+        priority: COCS_ANNOUNCE_PRIORITY.sapper, ttl: COCS_ANNOUNCE_TTL.sapper,
+        dedupeKey: `cut:${event.node ?? ''}:${event.until ?? ''}`,
+        text: `LINK CUT · ${String(event.node ?? 'NODE').replace(/-/g, ' ').toUpperCase()}`,
+        detail: [denied > 0 ? `${denied} NODE DENIED` : '', Number(event.bounty) > 0 ? `+${Math.round(Number(event.bounty))} FLUX` : ''].filter(Boolean).join(' · ')};
+    }
+    case 'cocs-siphon': {
+      if (event.team !== team) return null;
+      const flux = Math.max(0, Math.round(Number(event.flux) || 0));
+      return {kind: 'siphon', team, mine: true, relevance: 'friendly', previousOwner: null,
+        priority: COCS_ANNOUNCE_PRIORITY.siphon, ttl: COCS_ANNOUNCE_TTL.siphon,
+        dedupeKey: `siphon:${event.node ?? ''}`,
+        text: `FLUX SIPHONED · ${flux}`, detail: String(event.node ?? '').replace(/-/g, ' ').toUpperCase()};
+    }
+    case 'cocs-scan': {
+      if (event.team !== team) return null;
+      const marked = Math.max(0, Math.round(Number(event.marked) || 0));
+      return {kind: 'scan', team, mine: true, relevance: 'friendly', previousOwner: null,
+        priority: COCS_ANNOUNCE_PRIORITY.scan, ttl: COCS_ANNOUNCE_TTL.scan,
+        dedupeKey: `scan:${event.actor ?? ''}:${event.until ?? ''}`,
+        text: `SCAN SWEEP · ${marked} MARKED`, detail: ''};
+    }
+    // Role agents. Spawns, losses and expirations belong to the owning team.
+    case 'cocs-role-spawn':
+      if (event.team !== team) return null;
+      return {kind: 'role', team, mine: true, relevance: 'friendly', previousOwner: null,
+        priority: COCS_ANNOUNCE_PRIORITY.role, ttl: COCS_ANNOUNCE_TTL.role,
+        dedupeKey: `role:spawn:${event.team}:${event.role ?? ''}:${event.actor ?? ''}`,
+        text: `AGENT DEPLOYED · ${roleWords(event.role)}`,
+        detail: event.node ? String(event.node).replace(/-/g, ' ').toUpperCase() : ''};
+    case 'cocs-role-killed':
+      if (event.team !== team) return null;
+      return {kind: 'role', team, mine: true, relevance: 'friendly', previousOwner: null,
+        priority: COCS_ANNOUNCE_PRIORITY.role, ttl: COCS_ANNOUNCE_TTL.role,
+        dedupeKey: `role:killed:${event.team}:${event.role ?? ''}:${event.actor ?? ''}`,
+        text: `AGENT LOST · ${roleWords(event.role)}`,
+        detail: Number(event.bounty) > 0 ? `+${Math.round(Number(event.bounty))} FLUX TO THE KILLER` : ''};
+    case 'cocs-role-expire':
+      if (event.team !== team) return null;
+      return {kind: 'role', team, mine: true, relevance: 'friendly', previousOwner: null,
+        priority: COCS_ANNOUNCE_PRIORITY.role, ttl: COCS_ANNOUNCE_TTL.role,
+        dedupeKey: `role:expire:${event.team}:${event.role ?? ''}:${event.actor ?? ''}`,
+        text: `AGENT RETIRED · ${roleWords(event.role)}`,
+        detail: Number(event.refund) > 0 ? `+${Math.round(Number(event.refund))} FLUX REFUNDED` : ''};
+    // Teamless ally support beats: in OPERATIONS they are always the player's
+    // own side, so they read mine/friendly without a team filter.
+    case 'cocs-role-rally': {
+      const targets = Array.isArray(event.targets) ? event.targets.length : 0;
+      return {kind: 'role', team, mine: true, relevance: 'friendly', previousOwner: null,
+        priority: COCS_ANNOUNCE_PRIORITY.role, ttl: COCS_ANNOUNCE_TTL.role,
+        dedupeKey: `rally:${event.actor ?? ''}:${targets}`,
+        text: `RALLY · ${targets} LINKED`, detail: Number(event.shield) > 0 ? `+${Math.round(Number(event.shield))} SHIELD` : ''};
+    }
+    case 'cocs-role-repair': {
+      const repaired = Array.isArray(event.repaired) ? event.repaired.length : 0;
+      return {kind: 'role', team, mine: true, relevance: 'friendly', previousOwner: null,
+        priority: COCS_ANNOUNCE_PRIORITY.support, ttl: COCS_ANNOUNCE_TTL.support,
+        dedupeKey: `repair:${event.actor ?? ''}:${repaired}`,
+        text: `REPAIRS DONE · ${repaired} RESTORED`, detail: ''};
+    }
+    case 'cocs-role-spot': {
+      const targets = Array.isArray(event.targets) ? event.targets.length : 0;
+      return {kind: 'role', team, mine: true, relevance: 'friendly', previousOwner: null,
+        priority: COCS_ANNOUNCE_PRIORITY.support, ttl: COCS_ANNOUNCE_TTL.support,
+        dedupeKey: `spot:${event.actor ?? ''}:${targets}`,
+        text: `SPOT · ${targets} MARKED`, detail: ''};
+    }
+    // The prime channel is world-visible: both sides watch a node come online.
+    case 'cocs-prime-start':
+      return {kind: 'prime', team, mine: true, relevance: 'friendly', previousOwner: null,
+        priority: COCS_ANNOUNCE_PRIORITY.role, ttl: COCS_ANNOUNCE_TTL.role,
+        dedupeKey: `prime-start:${event.node ?? ''}:${event.actor ?? ''}`,
+        text: `PRIME STARTED · ${String(event.node ?? 'NODE').replace(/-/g, ' ').toUpperCase()}`,
+        detail: Number(event.seconds) > 0 ? `${Math.round(Number(event.seconds))}s CHANNEL` : ''};
+    case 'cocs-prime':
+      return {kind: 'prime', team, mine: event.team === team || event.team === undefined, relevance: event.team === team || event.team === undefined ? 'friendly' : 'enemy', previousOwner: null,
+        priority: COCS_ANNOUNCE_PRIORITY.prime, ttl: COCS_ANNOUNCE_TTL.prime,
+        dedupeKey: `prime:${event.node ?? ''}:${event.seconds ?? ''}`,
+        text: `NODE PRIMED · ${String(event.node ?? 'NODE').replace(/-/g, ' ').toUpperCase()}`,
+        detail: Number(event.seconds) > 0 ? `${Math.round(Number(event.seconds))}s FLUX WINDOW` : ''};
+    case 'cocs-prime-interrupt':
+      return {kind: 'prime', team, mine: true, relevance: 'friendly', previousOwner: null,
+        priority: COCS_ANNOUNCE_PRIORITY.support, ttl: COCS_ANNOUNCE_TTL.support,
+        dedupeKey: `prime-interrupt:${event.node ?? ''}:${event.actor ?? ''}`,
+        text: `PRIME INTERRUPTED · ${String(event.node ?? 'NODE').replace(/-/g, ' ').toUpperCase()}`,
+        detail: 'CHANNEL BROKEN'};
     case 'director-wave-cleared': {
       // Teamless in its normal shape: the Operations Director never clears a
       // wave, so this is always the player's own mission beat.
@@ -861,10 +1014,27 @@ export function latticeAnnounceCue(event, playerId) {
     case 'cocs-terminal-hack':
     case 'cocs-terminal-deploy':
     case 'cocs-terminal-vault':
+    // Depot loaners, the saboteur/scout kit, role agents and the prime beam are
+    // completed friendly beats: the objective callout, not a warning.
+    case 'cocs-depot-vehicle-spawn':
+    case 'cocs-depot-purchase':
+    case 'cocs-terminal-sabotage':
+    case 'cocs-sapper':
+    case 'cocs-siphon':
+    case 'cocs-scan':
+    case 'cocs-role-spawn':
+    case 'cocs-role-rally':
+    case 'cocs-role-repair':
+    case 'cocs-role-spot':
+    case 'cocs-prime-start':
+    case 'cocs-prime':
     case 'director-wave-cleared':
     case 'director-siege-lifted':
       return 'objective';
     case 'cocs-order-rejected':
+    case 'cocs-role-killed':
+    case 'cocs-role-expire':
+    case 'cocs-prime-interrupt':
     case 'coop-spend-rejected':
       return 'feint';
     case 'director-siege':

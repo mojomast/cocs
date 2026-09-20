@@ -36,6 +36,18 @@ const cues=Object.freeze({
  reserve:motif([0,-3],.12,.26,.07),
  orderComplete:motif([0,7],.06,.18,.065), buy:motif([0,5],.05,.14,.055),
  summary:motif([0,4,7],.08,.26,.07),
+ // Depot logistics, role agents and the prime channel. Deployment and purchases
+ // rise; sabotage/siphon/scan pivot around the existing terminal and economy
+ // voices. Every family stays as short and quiet as the ones above.
+ loaner:motif([0,5,12],.055,.2,.07,true), loanerWarn:motif([12,5],.06,.16,.055),
+ depotPurchase:motif([5,12,19],.05,.16,.065,true),
+ sabotage:motif([12,6,0],.06,.18,.068), sapper:motif([12,7,3],.065,.17,.07),
+ siphon:motif([7,0,-5],.06,.16,.06), scan:motif([19,12],.05,.14,.055),
+ roleSpawn:motif([0,3,7],.055,.16,.06), roleKilled:motif([7,2,-3],.08,.2,.07),
+ roleExpire:motif([7,0],.09,.2,.055), roleRally:motif([0,7,12,19],.05,.22,.07,true),
+ roleRepair:motif([0,4,7,11],.05,.18,.065), roleSpot:motif([12,19,24],.045,.14,.06),
+ primeStart:motif([0,-7,0],.09,.22,.07), prime:motif([0,-7,-12],.1,.26,.075,true),
+ primeInterrupt:motif([9,2,-1],.07,.16,.07),
 });
 
 // Bounded per-HQ state for the periodic `director-hq-damage` warning. The
@@ -44,7 +56,7 @@ const cues=Object.freeze({
 // health keeps falling re-arm at most once per loop window, and a repair (or a
 // quiet tick) stays silent and re-arms the next hit immediately.
 export const HQ_DAMAGE_LOOP=3;
-export function createLatticeAudioState(){return {hq:new Map()};}
+export function createLatticeAudioState(){return {hq:new Map(),cues:new Map()};}
 const HQ_STATE_CAP=32;
 function hqDamageCue(event,state){
  if(event?.armed===false)return null;
@@ -70,6 +82,26 @@ function hqDamageCue(event,state){
  return fire?cue:null;
 }
 
+// Repeat buckets for the ambient role beats that fire on a cadence (scan
+// sweeps, ally rallies/repairs/spots). Keyed per team or actor and bounded like
+// the HQ map, so a long Operations round cannot grow the state. Events without
+// an authoritative `time` always voice: only the sim stream is bucketed.
+export const LATTICE_REPEAT_WINDOW=Object.freeze({scan:1.5,rally:3,repair:3,spot:3});
+const REPEAT_STATE_CAP=32;
+function repeatCue(event,state,key,cue,window){
+ if(!state||!(state.cues instanceof Map))return cue;
+ const time=Number(event?.time);
+ if(!Number.isFinite(time))return cue;
+ const last=state.cues.get(key);
+ // Silent repeats do not re-arm the bucket: a stream that keeps reporting the
+ // same beat still voices once per window instead of never.
+ if(Number.isFinite(last)&&time-last<window)return null;
+ state.cues.delete(key);
+ state.cues.set(key,time);
+ if(state.cues.size>REPEAT_STATE_CAP)state.cues.delete(state.cues.keys().next().value);
+ return cue;
+}
+
 export function latticeSoundCue(event,player,state=null){
  if(!event||!player)return null;
  if(event.type==='cocs-capture'||event.type==='cocs-depot-capture')return event.team===player.team?cues.secured:cues.lost;
@@ -78,7 +110,28 @@ export function latticeSoundCue(event,player,state=null){
   return event.kind==='zipline'?cues.zipline:event.kind==='teleporter'?cues.teleporter:cues.launch;
  }
  if(event.type==='cocs-terminal-vault')return event.team===player.team?cues.vault:null;
- if(['cocs-terminal-hack','cocs-terminal-deploy','cocs-terminal-sabotage'].includes(event.type))return event.team===player.team?cues.terminal:null;
+ if(event.type==='cocs-terminal-sabotage')return event.team===player.team?cues.sabotage:null;
+ if(['cocs-terminal-hack','cocs-terminal-deploy'].includes(event.type))return event.team===player.team?cues.terminal:null;
+ // Depot logistics. A loaner rolls out for everyone watching the pad (the
+ // friendly team gets the rise, the enemy a short warning); the REQ purchase is
+ // a team-private economy beat.
+ if(event.type==='cocs-depot-vehicle-spawn')return event.team===player.team||event.team===undefined||event.team===null?cues.loaner:cues.loanerWarn;
+ if(event.type==='cocs-depot-purchase')return event.team===player.team?cues.depotPurchase:null;
+ // Saboteur, scout and role-agent beats. Only the acting team is voiced; the
+ // cadence beats are bucketed so a long round stays one voice per moment.
+ if(event.type==='cocs-sapper')return event.team===player.team?cues.sapper:null;
+ if(event.type==='cocs-siphon')return event.team===player.team?cues.siphon:null;
+ if(event.type==='cocs-scan')return event.team===player.team?repeatCue(event,state,`scan:${event.team}`,cues.scan,LATTICE_REPEAT_WINDOW.scan):null;
+ if(event.type==='cocs-role-spawn')return event.team===player.team?cues.roleSpawn:null;
+ if(event.type==='cocs-role-killed')return event.team===player.team?cues.roleKilled:null;
+ if(event.type==='cocs-role-expire')return event.team===player.team?cues.roleExpire:null;
+ if(event.type==='cocs-role-rally')return repeatCue(event,state,`rally:${event.actor}`,cues.roleRally,LATTICE_REPEAT_WINDOW.rally);
+ if(event.type==='cocs-role-repair')return Array.isArray(event.repaired)&&event.repaired.length?repeatCue(event,state,`repair:${event.actor}`,cues.roleRepair,LATTICE_REPEAT_WINDOW.repair):null;
+ if(event.type==='cocs-role-spot')return Array.isArray(event.targets)&&event.targets.length?repeatCue(event,state,`spot:${event.actor}`,cues.roleSpot,LATTICE_REPEAT_WINDOW.spot):null;
+ // The prime channel is world-visible: both sides hear a node come online.
+ if(event.type==='cocs-prime-start')return cues.primeStart;
+ if(event.type==='cocs-prime')return cues.prime;
+ if(event.type==='cocs-prime-interrupt')return cues.primeInterrupt;
  // Team-private command beats only voice for the issuing team; a buy is the
  // local commander's own beat.
  if(event.type==='cocs-order-complete')return event.team===player.team?cues.orderComplete:null;
@@ -109,8 +162,12 @@ export function latticeSoundCue(event,player,state=null){
 
 export function latticeCaption(event){
  const label=String(event?.node??event?.depot??'').replace(/-/g,' ').toUpperCase();
+ const roleWord=String(event?.role??'role').replace(/-/g,' ').toUpperCase();
  if(event?.type==='cocs-capture')return `Node captured · ${label}`;
  if(event?.type==='cocs-depot-capture')return `Depot captured · ${label}`;
+ // The depot headline: a loaner rolling off the pad, and the REQ purchase.
+ if(event?.type==='cocs-depot-vehicle-spawn')return label?`LOANER READY · ${label}`:'LOANER READY';
+ if(event?.type==='cocs-depot-purchase')return `${String(event.item??'puma').toUpperCase()} REQUISITIONED${label?` · ${label}`:''}`;
  if(event?.type==='cocs-device-use')return `Route engaged · ${String(event.kind??'device').replace(/-/g,' ')}`;
  if(event?.type==='director-wave')return `Director wave ${event.wave} approaching`;
  if(event?.type==='director-wave-cleared')return `Wave ${event.wave} cleared`;
@@ -135,6 +192,21 @@ export function latticeCaption(event){
  if(event?.type==='coop-bonus')return `Bonus ${String(event.state??'open')}${event.label?` · ${event.label}`:''}`;
  if(event?.type==='coop-spend-rejected')return `Spend rejected · ${String(event.verb??'').toUpperCase()}`.trim();
  if(event?.type==='coop-subagent-retire')return 'Subagent retired';
+ // Saboteur, scout and role-agent beats, then the prime channel. The terminal
+ // sabotage names its own terminal instead of the generic completion line.
+ if(event?.type==='cocs-terminal-sabotage')return `Terminal sabotage${event.terminal?` · ${String(event.terminal).replace(/-/g,' ').toUpperCase()}`:''}`;
+ if(event?.type==='cocs-sapper')return `Link cut${label?` · ${label}`:''}${Number(event.denied)>0?` · ${Number(event.denied)} DENIED`:''}`;
+ if(event?.type==='cocs-siphon')return `Flux siphoned${Number(event.flux)>0?` · ${Math.round(Number(event.flux))} FLUX`:''}`;
+ if(event?.type==='cocs-scan')return `Scan sweep${Number(event.marked)>0?` · ${Number(event.marked)} MARKED`:''}`;
+ if(event?.type==='cocs-role-spawn')return `Role deployed · ${roleWord}`;
+ if(event?.type==='cocs-role-killed')return `Role killed · ${roleWord}`;
+ if(event?.type==='cocs-role-expire')return `Role retired · ${roleWord}${Number(event.refund)>0?` · +${Math.round(Number(event.refund))} FLUX`:''}`;
+ if(event?.type==='cocs-role-rally')return `Rally${event.targets?.length?` · ${event.targets.length} LINKED`:''}`;
+ if(event?.type==='cocs-role-repair')return `Repairs done${event.repaired?.length?` · ${event.repaired.length} RESTORED`:''}`;
+ if(event?.type==='cocs-role-spot')return `Spot${event.targets?.length?` · ${event.targets.length} MARKED`:''}`;
+ if(event?.type==='cocs-prime-start')return `Prime started${label?` · ${label}`:''}`;
+ if(event?.type==='cocs-prime')return `Node primed${label?` · ${label}`:''}`;
+ if(event?.type==='cocs-prime-interrupt')return `Prime interrupted${label?` · ${label}`:''}`;
  if(event?.type?.startsWith('cocs-terminal-'))return `Terminal ${event.type.slice('cocs-terminal-'.length)} complete`;
  return null;
 }

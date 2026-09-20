@@ -1029,7 +1029,7 @@ pauseRender:(on:boolean)=>{const previous=r.benchmarking===true;r.benchmarking=o
   const netMapVote=(mapId:string)=>runtime.current?.net?.mapVote(mapId);
   const netRematch=()=>runtime.current?.net?.rematch();
   const netWarmup=(cancel:boolean=false)=>runtime.current?.net?.warmup(cancel===true);
-      const startSpectate=()=>{const r=runtime.current;if(!r)return;disposeVoice();resetChat();resetRoundReward();try{setError('');if(r.net){const n=r.net;r.net=null;n.leave();n.close();setNetPlayers([]);}r.renderState=null;r.netViewReady=false;const startConfig=config,startMap=resolveMapForMode(mapId,startConfig.mode,{legacy:legacyMaps}),random=r.makeRng?r.makeRng():Math.random,{match}=buildSpectateMatch({character,harness,random,mapId:startMap,config:startConfig,humanCount:1}),director=new CinematicDirector({random:r.makeRng?r.makeRng():Math.random,center:match.center,radius:11,cutEvery:3.2,tour:false,structures:match.arena.structures});r.match=match;studyMatchStart(String(startConfig.mode),'spectate');r.warmScene?.(match.actors[0]?.weapon??0);r.spectateLocal=true;r.cameraMode='auto';r.spectateDirector=director;r.view.setPlayerId(-1);r.view.setSpectator(false);r.view.setShowcase(null);r.view.setCinema(true);r.view.setDirector(director);r.view.setDirectorLock(true);r.view.setFreeCam(false);r.view.setMatch(match);r.recorder=null;r.lastAudio=0;r.lastDamage=r.lastHit=r.lastCritical=r.lastKill=r.pickupAt=-10;r.damageNumbers=[];r.damageLog=[];r.assistAt={};r.killMeta=[];r.streakByActor={};r.pendingStreak={};r.lastShieldBreak=-10;r.damageDir=null;r.damageDirAt=-10;r.prevScores=null;r.announceCue=null;r.announceAt=-10;r.killTimes=[];r.killCue=null;r.killCueAt=-10;r.acc=0;director.setAutoCut(true);r.audio.start();r.audio.setModeTheme?.(startConfig.mode);setHud({...match.snapshot(),spectate:true,spectateLocal:true});changeMode('playing');requestLock();}catch(e:any){console.error('COCS spectate failed',e);r.match=null;r.spectateLocal=false;r.spectateDirector=null;setHud(null);setError(`The spectate match could not start: ${String(e?.message||e)}. Try again.`);changeMode('selection');}};
+      const startSpectate=()=>{const r=runtime.current;if(!r)return;disposeVoice();resetChat();resetRoundReward();try{setError('');if(r.net){const n=r.net;r.net=null;n.leave();n.close();setNetPlayers([]);}r.renderState=null;r.netViewReady=false;const startConfig=config,startMap=resolveMapForMode(mapId,startConfig.mode,{legacy:legacyMaps}),random=r.makeRng?r.makeRng():Math.random,{match}=buildSpectateMatch({character,harness,random,mapId:startMap,config:startConfig,humanCount:1}),director=new CinematicDirector({random:r.makeRng?r.makeRng():Math.random,center:match.center,radius:11,cutEvery:3.2,tour:false,structures:match.arena.structures});r.match=match;studyMatchStart(String(startConfig.mode),'spectate');r.warmScene?.(match.actors[0]?.weapon??0);r.spectateLocal=true;r.cameraMode='auto';r.spectateDirector=director;r.view.setPlayerId(-1);r.view.setSpectator(false);r.view.setShowcase(null);r.view.setCinema(true);r.view.setDirector(director);r.view.setDirectorLock(true);r.view.setFreeCam(false);r.view.setMatch(match);r.recorder=null;r.lastAudio=0;r.lastDamage=r.lastHit=r.lastCritical=r.lastKill=r.pickupAt=-10;r.damageNumbers=[];r.damageLog=[];r.assistAt={};r.killMeta=[];r.streakByActor={};r.pendingStreak={};r.lastShieldBreak=-10;r.damageDir=null;r.damageDirAt=-10;r.prevScores=null;r.announceCue=null;r.announceAt=-10;r.killTimes=[];r.killCue=null;r.killCueAt=-10;r.acc=0;r.cocsOrders=[];r.cocsSpends=[];r.cocsSpendSeq=0;r.cocsBuys=[];r.cocsBuySeq=0;r.cocsBuysPending=[];setCocsReqPending([]);cocsBoardRef.current={...cocsBoardRef.current,open:false,pinned:false,active:0,collapsed:false};setCocsBoard({open:false,pinned:false,active:0});director.setAutoCut(true);r.audio.start();r.audio.setModeTheme?.(startConfig.mode);setHud({...match.snapshot(),spectate:true,spectateLocal:true});changeMode('playing');requestLock();}catch(e:any){console.error('COCS spectate failed',e);r.match=null;r.spectateLocal=false;r.spectateDirector=null;setHud(null);setError(`The spectate match could not start: ${String(e?.message||e)}. Try again.`);changeMode('selection');}};
       const start=(options?:{character:string;harness:string;mapId:string;config:any;training?:string})=>{const r=runtime.current;if(!r)return;if(modeRef.current==='results'){studyEmit('result_action_selected',{action:studyResultIntentRef.current||'rematch'});studyResultIntentRef.current=null;}disposeVoice();resetChat();resetRoundReward();try{setError('');if(r.net){const n=r.net;r.net=null;n.leave();n.close();setNetPlayers([]);}r.renderState=null;r.netViewReady=false;r.spectateLocal=false;r.spectateDirector=null;r.view.setDirectorLock?.(false);r.view.setFreeCam?.(false);r.cocsOrders=[];r.cocsSpends=[];r.cocsSpendSeq=0;r.cocsBuys=[];r.cocsBuySeq=0;r.cocsBuysPending=[];setCocsReqPending([]);const freshStrip=cocsStripState();r.cocsStrip=freshStrip;setCocsStrip(freshStrip);cocsStripRef.current=freshStrip;const loadout=resolveLoadout(options?.character??character,options?.harness??harness),startConfig=options?.config??config,startMap=resolveMapForMode(options?.mapId??mapId,startConfig.mode,{legacy:legacyMaps}),match=new Match(loadout.character,loadout.harness,Math.random,startMap,{...startConfig,loadouts:{0:{character:loadout.character,harness:loadout.harness,gear:profileRef.current.gear,attachments:profileRef.current.attachments,finish:profileRef.current.finish}}});r.view.setPlayerId(0);r.view.setSpectator(false);r.view.setMatch(match);r.view.setShowcase(null);r.view.setCinema(false);r.view.setDirector(null);r.showcaseMatchedId=null;r.match=match;r.training=(options?.training?createTraining(options.training,{start:match.actors[0]?{x:match.actors[0].x,z:match.actors[0].z}:null}):null) as any;r.trainingEvents=[];if(options?.training)studyEmit('training_step_shown',{lesson:String(options.training),index:0});if(match.objectiveState?.coop)match.objectiveState.coop.autoSpend=false;r.warmScene?.(match.actors[0]?.weapon??startConfig.startingWeapon??0);studyMatchStart(String(match.config.mode),'local',options?.training?'training':undefined);r.recorder=new DemoRecorder({state:match.snapshot(),recordHz:18,meta:{mapId:match.arena.id,mode:match.config.mode,player:loadout.character}});r.lastAudio=0;r.lastDamage=r.lastHit=r.lastCritical=r.lastKill=r.pickupAt=-10;r.damageNumbers=[];r.damageLog=[];r.assistAt={};r.killMeta=[];r.streakByActor={};r.pendingStreak={};r.lastShieldBreak=-10;r.damageDir=null;r.damageDirAt=-10;r.prevScores=null;r.announceCue=null;r.announceAt=-10;r.killTimes=[];r.killCue=null;r.killCueAt=-10;r.singleNotice=null;r.audio.start();r.audio.setModeTheme?.(startConfig.mode);setHud(match.snapshot());changeMode('playing');requestLock();}catch(e:any){console.error('COCS arena start failed',e);r.match=null;r.renderState=null;r.netViewReady=false;setHud(null);setError(`The arena could not render: ${String(e?.message||e)}. Try entering again.`);changeMode('selection');}};
   // The checkpoint a campaign launch carries comes from launch intent, never
   // from the live config: NEXT MISSION and REPLAY start fresh, and only this
@@ -1125,17 +1125,17 @@ pauseRender:(on:boolean)=>{const previous=r.benchmarking===true;r.benchmarking=o
     const armCocsVerb=(id:string)=>applyCocsStrip(cocsArmVerb(cocsNow(),id));
      const pickCocsTarget=(target:any)=>{const nodes=cocsTargetableNodes(latticeBoard,cocsNow().armed,{model:latticeModel,map:latticeMap});applyCocsStrip(cocsPickTarget(cocsNow(),target,nodes));};
      const pickCocsIndex=(index:number)=>{const nodes=cocsTargetableNodes(latticeBoard,cocsNow().armed,{model:latticeModel,map:latticeMap});const node=nodes.find((entry:any)=>entry.index===index);if(node)pickCocsTarget(node.id);};
-   const issueCocsOrder=()=>{const r=runtime.current,state=cocsNow(),snapshot=hud?.cocs,team=cocsTeam(),tick=Number(snapshot?.tick)||0,cardId=`cocs-${team}-${tick}-${Number(state.seq)||0}`,peerId=latticePeerId(r?.net,r?.match);
+   const issueCocsOrder=()=>{const r=runtime.current;if(!r||hud?.spectate===true||r.net?.spectate===true||r.spectateLocal===true)return;const state=cocsNow(),snapshot=hud?.cocs,team=cocsTeam(),tick=Number(snapshot?.tick)||0,cardId=`cocs-${team}-${tick}-${Number(state.seq)||0}`,peerId=latticePeerId(r?.net,r?.match);
     const result=cocsIssueOrder(state,{tick,peerId,cardId,team,flux:snapshot?.flux?.[team]??0});
     if(!result.order){applyCocsStrip(result.state);return;}
     const gate=r?.match?.objectiveState?.coop?coopOrderGate(r.match,r.match.objectiveState,{verb:result.order.verb,peerId}):null;
     if(gate&&gate.ok!==true){studyEmit('order_rejected',{order:String(result.order.verb),source:'strip'},{journeyStage:'playing'});applyCocsStrip({...result.state,pending:null,issued:null,notice:`REJECTED · ${String(gate.reason).toUpperCase()}`});return;}
     applyCocsStrip(result.state);studyEmit('order_queued',{order:String(result.order.verb),source:'strip'},{journeyStage:'playing'});if(!r)return;
-    if(r.net?.started&&!r.net.spectate){r.net.order(result.order.cardId,result.order.verb,result.order.target,'chief');return;}
+    if(r.net?.started){if(r.net.spectate===true)return;r.net.order(result.order.cardId,result.order.verb,result.order.target,'chief');return;}
     (r.cocsOrders??=[]).push(result.order);};
    const cancelCocsStrip=()=>applyCocsStrip(cocsClearStrip(cocsNow()));
    cocsControlRef.current={arm:armCocsVerb,pickIndex:pickCocsIndex,issue:issueCocsOrder,cancel:cancelCocsStrip,armed:()=>Boolean(cocsNow().armed)};
-     const cocsView:any=isCocsMode(hudMode)?cocsCommandView(latticeBoard,hud?.cocs,player,cocsStrip,{interactKey:keyLabel(bindings.interact),model:latticeModel,map:latticeMap,orders:cocsOrderEvents}):null;
+     const cocsView:any=isCocsMode(hudMode)?cocsCommandView(latticeBoard,hud?.cocs,player,cocsStrip,{interactKey:keyLabel(bindings.interact),model:latticeModel,map:latticeMap,orders:cocsOrderEvents,spectate:hud?.spectate===true}):null;
      if(cocsView){const coach=latticeCoach(hud,player,latticeMap,{model:latticeModel,previous:cocsCoachRef.current});cocsCoachRef.current=coach;cocsView.coach=coach;cocsView.keys=latticeKeys(bindings);}else cocsCoachRef.current=null;
    // O1c — the board is a client-side overlay. State (open/pinned/active) lives
    // here so the global keydown can drive hold-to-peek, pointer-locked listbox
@@ -1164,6 +1164,7 @@ pauseRender:(on:boolean)=>{const previous=r.benchmarking===true;r.benchmarking=o
    // matching authoritative cardId result, never from this handler.
    const activateCocsBoardCard=(card:any,action:string)=>{
     const r=runtime.current;if(!r||!card)return {ok:false,reason:'NO MATCH'};
+    if(hud?.spectate===true||r.net?.spectate===true||r.spectateLocal===true)return {ok:false,reason:'SPECTATING'};
     const peerId=latticePeerId(r.net,r.match),verb=String(card.verb??'').toUpperCase(),tick=Number(hud?.cocs?.tick)||0,team=cocsTeam();
     const notify=(ok:boolean,text:string)=>setCocsNotice({ok,text,id:Date.now()});
     if(card.source===LOCAL_CARD_SOURCE.ORDER||action===LOCAL_CARD_ACTION.ISSUE){
@@ -1186,15 +1187,34 @@ pauseRender:(on:boolean)=>{const previous=r.benchmarking===true;r.benchmarking=o
    // Returns {ok, reason} so the spend window and board can confirm or refuse
    // visibly. Local matches are pre-flighted against the authoritative gates;
    // online matches let the server decide and report through the snapshot log.
-   const spendCocs=(verb:string,target:any)=>{
+   const spectatingCocs=()=>{const r=runtime.current;return hud?.spectate===true||r?.net?.spectate===true||r?.spectateLocal===true;};
+   const spendCocs=(verb:string,target:any,options?:{role?:string|null})=>{
+    if(spectatingCocs())return {ok:false,reason:'SPECTATING'};
     const r=runtime.current,snapshot=hud?.cocs,tick=Number(snapshot?.tick)||0,team=cocsTeam(),seq=(Number(r?.cocsSpendSeq)||0)+1,peerId=latticePeerId(r?.net,r?.match);
     if(!r)return {ok:false,reason:'NO MATCH'};
-    const verbId=String(verb).toUpperCase();
+    const verbId=String(verb).toUpperCase(),role=options?.role?String(options.role).toLowerCase():null;
     if((verbId==='FORTIFY'||verbId==='REPAIR')&&(target===null||target===undefined||target==='node'||target==='hq'))return {ok:false,reason:'PICK A TARGET'};
     if(r.match?.objectiveState?.coop&&!(r.net?.started)){const gate=coopSpendGate(r.match,r.match.objectiveState,{verb:verbId,peerId});if(gate.ok!==true)return {ok:false,reason:String(gate.reason).toUpperCase()};}
     r.cocsSpendSeq=seq;studyEmit('spend_attempted',{verb:verbId,source:r.net?.started&&!r.net.spectate?'network':'local'},{journeyStage:'playing'});const cardId=`spend-${team}-${tick}-${seq}`;
+    // PvP-1 role purchases carry the chosen role (REINFORCE) or the role the
+    // SCAN card buys; the co-op sink path keeps its exact historic shape.
+    if(role){
+     if(r.net?.started&&!r.net.spectate){r.net.economy(verbId.toLowerCase(),{cardId,target:target??null,role});return {ok:true,reason:null,cardId};}
+     (r.cocsSpends??=[]).push({tick,peerId,cardId,team,verb:verbId,target:target??null,role});return {ok:true,reason:null,cardId};
+    }
     if(r.net?.started&&!r.net.spectate){r.net.economy(verbId.toLowerCase(),{cardId,target:target??null});return {ok:true,reason:null,cardId};}
     (r.cocsSpends??=[]).push({tick,peerId,cardId,team,verb:verbId,target:target??null});return {ok:true,reason:null,cardId};
+   };
+   // PvP-1 team FLUX purchase cards. The card view (`cocsPurchaseView`) is the
+   // only gate the UI adds; the rung/THREADS/FLUX checks remain authoritative in
+   // the sim and the room. Online rides `net.economy`, local practice queues the
+   // same record shape through `spendCocs` — a refusal is always named.
+   const purchaseCocs=(card:any)=>{
+    if(!card)return {ok:false,reason:'UNAVAILABLE'};
+    if(card.enabled!==true){setCocsNotice({ok:false,text:`${card.label} · ${String(card.reason??'UNAVAILABLE').replace(/-/g,' ')}`,id:Date.now()});return {ok:false,reason:String(card.reason??'UNAVAILABLE')};}
+    const result=spendCocs(card.action??card.verb,card.target??null,{role:card.role??null});
+    setCocsNotice({ok:result?.ok===true,text:result?.ok===true?`${card.label} · QUEUED`:`${card.label} · ${String(result?.reason??'UNAVAILABLE').replace(/-/g,' ')}`,id:Date.now()});
+    return result;
    };
    // --- WP1.3 personal REQ purchases ----------------------------------------
    // One snapshot of the supported catalogue (`reqPurchaseOptions`) drives both
@@ -1223,7 +1243,7 @@ pauseRender:(on:boolean)=>{const previous=r.benchmarking===true;r.benchmarking=o
    const buyCocs=(itemId:string,options?:{depotId?:string})=>{
     const r=runtime.current,store=reqStore;
     if(!r||!store)return {ok:false,reason:'NO MATCH'};
-    if(r.net?.spectate||r.spectateLocal)return {ok:false,reason:'SPECTATING'};
+    if(r.net?.spectate||r.spectateLocal||hud.spectate)return {ok:false,reason:'SPECTATING'};
     if(player&&Number(player.health)<=0)return {ok:false,reason:'ELIMINATED'};
     const item=store.items.find((entry:any)=>entry.id===itemId);
     if(!item)return {ok:false,reason:'NOT AVAILABLE'};
@@ -1257,7 +1277,7 @@ pauseRender:(on:boolean)=>{const previous=r.benchmarking===true;r.benchmarking=o
     const spendVisible=spendOpen&&spendDismissed!==spendWindow;
     const skipSpend=()=>{if(spendOpen)setSpendDismissed(spendWindow);};
     const reopenSpend=()=>setSpendDismissed(null);
-const cocsCommand=cocsView?{...cocsView,boardView:mergedBoard??cocsView.boardView,spend:cocsSpendView??cocsView.spend,armCocsVerb,pickCocsTarget,issueCocsOrder,cancelCocsStrip,spendCocs,spendVisible,skipSpend,reopenSpend,notice:cocsNotice,req:reqStore,onBuyReq:buyCocs,reqPending:cocsReqPending,onReadoutPanel:toggleReadoutPanel,cursorKey:keyLabel(bindings.cursor??DEFAULT_BINDINGS.cursor),commandKey:latticeKeys(bindings).command,commandShortcut:bindingShortcut(bindings.command??DEFAULT_BINDINGS.command),selectBoardCard:selectCocsBoardCard,activateBoardCard:activateCocsBoardCard,closeBoard:closeCocsBoard,toggleBoardPin:toggleCocsBoardPin,boardOpen:cocsBoard.open===true&&!boardCollapsed,boardCollapsed,boardPinned:cocsBoard.pinned===true,boardActive:cocsBoardIds[cocsBoard.active??0]??cocsBoardIds[0]??null}:null;
+const cocsCommand=cocsView?{...cocsView,boardView:mergedBoard??cocsView.boardView,spend:cocsSpendView??cocsView.spend,armCocsVerb,pickCocsTarget,issueCocsOrder,cancelCocsStrip,spendCocs,onPurchaseCocs:purchaseCocs,spectate:hud?.spectate===true,spendVisible,skipSpend,reopenSpend,notice:cocsNotice,req:reqStore,onBuyReq:buyCocs,reqPending:cocsReqPending,onReadoutPanel:toggleReadoutPanel,cursorKey:keyLabel(bindings.cursor??DEFAULT_BINDINGS.cursor),commandKey:latticeKeys(bindings).command,commandShortcut:bindingShortcut(bindings.command??DEFAULT_BINDINGS.command),selectBoardCard:selectCocsBoardCard,activateBoardCard:activateCocsBoardCard,closeBoard:closeCocsBoard,toggleBoardPin:toggleCocsBoardPin,boardOpen:cocsBoard.open===true&&!boardCollapsed,boardCollapsed,boardPinned:cocsBoard.pinned===true,boardActive:cocsBoardIds[cocsBoard.active??0]??cocsBoardIds[0]??null}:null;
     // WP1.1: an explicit COCS surface (open command board, visible spend
     // window) or the paused Training completion beat owns the cursor. While one
     // is up the touch layer is suspended so move/look/fire capture cannot run

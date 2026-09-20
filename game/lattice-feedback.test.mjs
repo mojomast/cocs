@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {latticeSoundCue,latticeCaption,createLatticeAudioState,latticePresentationChanges,HQ_DAMAGE_LOOP} from './lattice-feedback.mjs';
+import {latticeSoundCue,latticeCaption,createLatticeAudioState,latticePresentationChanges,HQ_DAMAGE_LOOP,LATTICE_REPEAT_WINDOW} from './lattice-feedback.mjs';
 import {SynthAudio} from './feedback.mjs';
 test('LATTICE event audio is bounded and distinguishes secured ground from loss',()=>{
  const player={id:0,team:0};
@@ -99,4 +99,72 @@ test('world-marker transitions fire once per flip and seed without a burst',()=>
  assert.equal(routed.captures[0].depot,true);
  assert.deepEqual(routed.deviceChanges.map(change=>[change.from,change.to]),[['live','cut']]);
  assert.equal(nodes[0].owner,0,'the authoritative node list is never mutated');
+});
+
+test('depot, role and prime beats each have a short bounded motif and stay team-private',()=>{
+ const player={id:0,team:0};
+ const beats=['cocs-depot-vehicle-spawn','cocs-depot-purchase','cocs-terminal-sabotage','cocs-sapper','cocs-siphon','cocs-scan','cocs-role-spawn','cocs-role-killed','cocs-role-expire','cocs-role-rally','cocs-role-repair','cocs-role-spot','cocs-prime-start','cocs-prime','cocs-prime-interrupt'];
+ const seen=new Map();
+ for(const type of beats){
+  const cue=latticeSoundCue({type,team:0,actor:0,time:10,repaired:['device:a'],targets:[1,2],marked:3},player);
+  assert.ok(cue,`${type} resolves to a cue`);
+  assert.ok(cue.notes.length<=4&&cue.notes.length>=1,`${type} stays short`);
+  assert.ok(cue.gain<=.08&&cue.length<=.3,`${type} stays quiet and short`);
+  seen.set(type,cue);
+ }
+ assert.notDeepEqual(seen.get('cocs-depot-vehicle-spawn'),seen.get('cocs-role-expire'));
+ assert.notDeepEqual(seen.get('cocs-role-rally'),seen.get('cocs-role-repair'));
+ assert.notDeepEqual(seen.get('cocs-prime'),seen.get('cocs-prime-interrupt'));
+ // The loaner headline: the owning team hears the rise, the enemy a warning.
+ const friendly=latticeSoundCue({type:'cocs-depot-vehicle-spawn',team:0},player);
+ const enemy=latticeSoundCue({type:'cocs-depot-vehicle-spawn',team:1},player);
+ assert.ok(friendly&&enemy);
+ assert.notDeepEqual(friendly,enemy,'the enemy loaner is a different call');
+ assert.deepEqual(latticeSoundCue({type:'cocs-depot-vehicle-spawn'},player),friendly,'an unstamped loaner reads as friendly');
+ // Team-private economy, saboteur, scout and role beats stay off the enemy feed.
+ for(const type of ['cocs-depot-purchase','cocs-terminal-sabotage','cocs-sapper','cocs-siphon','cocs-scan','cocs-role-spawn','cocs-role-killed','cocs-role-expire']){
+  assert.equal(latticeSoundCue({type,team:1,actor:0,marked:1,repaired:['x']},player),null,`${type} is team private`);
+ }
+ // An empty role beat is not a beat.
+ assert.equal(latticeSoundCue({type:'cocs-role-repair',team:0,actor:0,repaired:[]},player),null);
+ assert.equal(latticeSoundCue({type:'cocs-role-spot',actor:0,targets:[]},player),null);
+});
+
+test('cadence role and scan beats are repeat-bucketed and the state stays bounded',()=>{
+ const player={id:0,team:0};
+ const state=createLatticeAudioState();
+ const scan=time=>latticeSoundCue({type:'cocs-scan',team:0,time,marked:2},player,state);
+ assert.ok(scan(10),'the first scan voices');
+ assert.equal(scan(10.5),null,'a scan inside the bucket window is silent');
+ assert.equal(scan(10+LATTICE_REPEAT_WINDOW.scan-.01),null);
+ assert.ok(scan(10+LATTICE_REPEAT_WINDOW.scan),'a later scan re-arms the voice');
+ const rally=time=>latticeSoundCue({type:'cocs-role-rally',actor:4,time,targets:[0,1]},player,state);
+ assert.ok(rally(20));
+ assert.equal(rally(21),null);
+ assert.ok(rally(20+LATTICE_REPEAT_WINDOW.rally));
+ // Without an authoritative clock (older streams, pure callers) every beat voices.
+ assert.ok(latticeSoundCue({type:'cocs-scan',team:0,marked:2},player,state));
+ assert.ok(latticeSoundCue({type:'cocs-scan',team:0,marked:2},player,state));
+ // Many distinct actors cannot grow the bucket map without limit.
+ for(let i=0;i<80;i++)latticeSoundCue({type:'cocs-role-spot',actor:i*7+1,time:100+i,targets:[3]},player,state);
+ assert.ok(state.cues.size<=32,'the repeat bucket state stays bounded');
+});
+
+test('depot, role and prime captions name the beat in one line',()=>{
+ assert.match(latticeCaption({type:'cocs-depot-vehicle-spawn',depot:'depot-0',vehicle:'depot-depot-0'}),/^LOANER READY · DEPOT 0$/);
+ assert.match(latticeCaption({type:'cocs-depot-purchase',depot:'depot-0',item:'puma'}),/^PUMA REQUISITIONED · DEPOT 0$/);
+ assert.match(latticeCaption({type:'cocs-terminal-sabotage',terminal:'terminal-1',node:'relay-1'}),/^Terminal sabotage · TERMINAL 1$/);
+ assert.match(latticeCaption({type:'cocs-sapper',node:'relay-1',denied:3}),/^Link cut · RELAY 1 · 3 DENIED$/);
+ assert.match(latticeCaption({type:'cocs-siphon',node:'siphon-0',flux:12.4}),/^Flux siphoned · 12 FLUX$/);
+ assert.match(latticeCaption({type:'cocs-scan',marked:4}),/^Scan sweep · 4 MARKED$/);
+ assert.equal(latticeCaption({type:'cocs-scan',marked:0}),'Scan sweep');
+ assert.match(latticeCaption({type:'cocs-role-spawn',role:'saboteur'}),/^Role deployed · SABOTEUR$/);
+ assert.match(latticeCaption({type:'cocs-role-killed',role:'saboteur'}),/^Role killed · SABOTEUR$/);
+ assert.match(latticeCaption({type:'cocs-role-expire',role:'scout',refund:16}),/^Role retired · SCOUT · \+16 FLUX$/);
+ assert.match(latticeCaption({type:'cocs-role-rally',targets:[0,1,2]}),/^Rally · 3 LINKED$/);
+ assert.match(latticeCaption({type:'cocs-role-repair',repaired:['device:a']}),/^Repairs done · 1 RESTORED$/);
+ assert.match(latticeCaption({type:'cocs-role-spot',targets:[3,4]}),/^Spot · 2 MARKED$/);
+ assert.match(latticeCaption({type:'cocs-prime-start',node:'siphon-0'}),/^Prime started · SIPHON 0$/);
+ assert.match(latticeCaption({type:'cocs-prime',node:'siphon-0'}),/^Node primed · SIPHON 0$/);
+ assert.match(latticeCaption({type:'cocs-prime-interrupt',node:'siphon-0'}),/^Prime interrupted · SIPHON 0$/);
 });

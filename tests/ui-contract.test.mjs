@@ -259,3 +259,58 @@ test('the title logo is a particle canvas with the DOM mark kept as the fallback
   assert.match(css, /@media \(prefers-reduced-motion:reduce\)\{\.particle-logo-canvas,\.logo-shell::before\{transition:none\}\}/, 'the canvas fade has an OS gate');
   assert.match(css, /\.motion-reduced \.particle-logo-canvas,\.motion-reduced \.logo-shell::before\{transition:none\}/, 'and an in-game twin');
 });
+
+// Fieldwork v8.6 — the PvP team-FLUX purchase cards and the NEGLECT meter are
+// additive, non-live readouts. They keep the HUD's single live channel
+// untouched, every control keeps a 44px row, and no new snapshot field is
+// introduced: the cards read roleBoard/FLUX/threads and the meter reads the
+// existing `neglect` number.
+test('the team-FLUX purchase cards and NEGLECT chip are non-live, 44px and snapshot-driven', async () => {
+  const [hud, board, css, page] = await Promise.all([
+    readFile(new URL('app/ui/screens/PlayingHud.tsx', root), 'utf8'),
+    readFile(new URL('app/ui/screens/CommandBoardHud.tsx', root), 'utf8'),
+    readFile(new URL('app/globals.css', root), 'utf8'),
+    readFile(new URL('app/page.tsx', root), 'utf8'),
+  ]);
+  const lineWith = (source, needle) => source.split('\n').find(line => line.includes(needle)) ?? '';
+  const buys = lineWith(hud, 'className="cocs-buys"');
+  assert.ok(buys.includes('role="group"') && !buys.includes('aria-live'), 'the purchase strip is one non-live group');
+  assert.match(hud, /TEAM FLUX <small>/, 'the strip names the team FLUX pool and THREADS');
+  assert.match(hud, /command\.purchases\.cards\.map/, 'the cards render the pure purchase view');
+  assert.match(hud, /command\.onPurchaseCocs\?\.\(card\)/, 'the cards dispatch through the page handler');
+  const neglect = lineWith(hud, 'cocs-chip--neglect');
+  assert.ok(neglect.includes('NEGLECT <b>') && !neglect.includes('aria-live'), 'NEGLECT is a word + number, never a live region');
+  assert.match(hud, /economy\.neglect\.label/, 'the tier word rides the readout');
+  assert.match(hud, /economy\.neglect\.multiplier/, 'the passive multiplier is spoken on demand');
+  assert.match(board, /export function TeamFluxStore/, 'the board hosts the same purchase model');
+  assert.match(board, /cocs-board__flux/, 'the board store has its own compact class');
+  assert.match(board, /onPurchase=\{command\.onPurchaseCocs\}/, 'the board dispatches through the same handler');
+  assert.doesNotMatch(lineWith(board, 'cocs-board__flux-toggle'), /aria-live/, 'the board store is not a live region');
+  assert.match(page, /onPurchaseCocs:purchaseCocs/, 'the page folds the handler into the command bag');
+  assert.match(page, /const purchaseCocs=\(card:any\)=>/, 'the page has one purchase entry point');
+  assert.match(page, /spendCocs\(card\.action\?\?card\.verb,card\.target\?\?null,\{role:card\.role\?\?null\}\)/, 'purchases ride the existing spendCocs queue');
+  assert.match(hud, /\{!command\.spectate&&command\.purchases\?\.visible/, 'the purchase strip is hidden for spectators');
+  assert.match(hud, /\{!command\.spectate&&<div className="cocs-strip"/, 'the order strip hides for spectators');
+  assert.match(hud, /\{cocsCommand&&<CocsReadout /, 'the read-only cocs info still renders for spectators');
+  assert.match(hud, /\{!command\.spectate&&command\.interactPrompt/, 'spectators get no act-now interact prompt');
+  assert.match(css, /\.cocs-buy\{[^}]*min-height:44px/, 'every purchase card keeps a 44 px row');
+  assert.match(css, /\.cocs-board__flux-toggle\{[^}]*min-height:44px/, 'the board store toggle keeps a 44 px row');
+});
+
+// Spectators must never accumulate a silent local queue. Every dispatch path
+// (strip issue, board activation, spend, purchase) refuses before it can push
+// `r.cocsOrders`/`r.cocsSpends`, and entering spectate drains the queues.
+test('spectator dispatch can never queue COCS orders or spends', async () => {
+  const [page, view] = await Promise.all([
+    readFile(new URL('app/page.tsx', root), 'utf8'),
+    readFile(new URL('game/cocs-orders.mjs', root), 'utf8'),
+  ]);
+  assert.match(page, /const spectatingCocs=\(\)=>\{const r=runtime\.current;return hud\?\.spectate===true\|\|r\?\.net\?\.spectate===true\|\|r\?\.spectateLocal===true;\}/, 'one spectator predicate covers local and network viewing');
+  assert.match(page, /const spendCocs=\(verb:string,target:any,options\?:\{role\?:string\|null\}\)=>\{\s*if\(spectatingCocs\(\)\)return \{ok:false,reason:'SPECTATING'\};/, 'a spectator spend refuses before queueing');
+  assert.match(page, /const issueCocsOrder=\(\)=>\{const r=runtime\.current;if\(!r\|\|hud\?\.spectate===true\|\|r\.net\?\.spectate===true\|\|r\.spectateLocal===true\)return;/, 'a spectator strip issue refuses before queueing');
+  assert.match(page, /if\(hud\?\.spectate===true\|\|r\.net\?\.spectate===true\|\|r\.spectateLocal===true\)return \{ok:false,reason:'SPECTATING'\};/, 'a spectator board activation refuses before queueing');
+  assert.match(page, /if\(r\.net\?\.spectate\|\|r\.spectateLocal\|\|hud\.spectate\)return \{ok:false,reason:'SPECTATING'\};/, 'a spectator REQ buy refuses before queueing');
+  assert.match(page, /r\.cocsOrders=\[\];r\.cocsSpends=\[\];r\.cocsSpendSeq=0;r\.cocsBuys=\[\];r\.cocsBuySeq=0;r\.cocsBuysPending=\[\];setCocsReqPending\(\[\]\);/, 'entering spectate drains the local queues');
+  assert.match(page, /cocsBoardRef\.current=\{\.\.\.cocsBoardRef\.current,open:false,pinned:false,active:0,collapsed:false\};setCocsBoard\(\{open:false,pinned:false,active:0\}\);/, 'entering spectate closes the command board');
+  assert.match(view, /visible: !spectate && cards\.some/, 'the purchase view is inherently hidden for spectators');
+});

@@ -2,7 +2,7 @@
 import {memo,useRef,useState} from 'react';
 import {Btn,Segmented} from '../primitives';
 import type {useGraphicsLab,GraphicsLabSettings} from '../useGraphicsLab';
-import {GRAPHICS_EFFECTS,GRAPHICS_LAB_HOTKEY_LABEL,GRAPHICS_LAB_TARGETS,GRAPHICS_LAB_VERSION,GRAPHICS_PALETTES,GRAPHICS_RECIPES,graphicsRecipe,normalizeGraphicsLab,randomGraphicsLab,serializeGraphicsLab} from '../../../game/graphics-lab.mjs';
+import {GRAPHICS_EFFECTS,GRAPHICS_LAB_HOTKEY_LABEL,GRAPHICS_LAB_TARGETS,GRAPHICS_LAB_VERSION,GRAPHICS_PALETTES,GRAPHICS_RECIPES,defaultGraphicsLab,graphicsRecipe,normalizeGraphicsLab,randomGraphicsLab,serializeGraphicsLab} from '../../../game/graphics-lab.mjs';
 import {mothAssetsStatus} from '../../../game/moth-assets.mjs';
 
 type TargetId='world'|'weapon'|'bots';
@@ -102,6 +102,7 @@ function GraphicsLabPanelView({lab}:{lab?:ReturnType<typeof useGraphicsLab>}){
    update(normalizeGraphicsLab(parsed));setRecipeIndex(-1);setMessage('Recipe applied from JSON.');
   }catch{setMessage('That is not a readable graphics-lab recipe.');}
  };
+ const restoreDefault=()=>{update(defaultGraphicsLab());setRecipeIndex(-1);setTarget('world');setMessage('Default look restored: electric world with contrast and crosshatch, circuit weapon, ink bots.');};
  return <div className="graphics-lab" data-graphics-lab>
   <div className="graphics-lab__intro"><span className="graphics-lab__badge">DEVELOPER PREVIEW / 01</span><p>Art direction, live. Stack effects, find a flavor, then take it into the arena.</p></div>
   <div className="graphics-lab__master">
@@ -157,7 +158,8 @@ function GraphicsLabPanelView({lab}:{lab?:ReturnType<typeof useGraphicsLab>}){
    <textarea ref={importRef} aria-label="Recipe JSON" value={importText} onChange={e=>setImportText(e.target.value)} rows={5} spellCheck={false}/>
    <Btn onClick={applyJson}>APPLY JSON</Btn>
   </details>
-  <div className="graphics-lab__actions"><Btn onClick={exportRecipe}>EXPORT RECIPE</Btn><Btn onClick={()=>{update(normalizeGraphicsLab());setRecipeIndex(-1);setTarget('world');setMessage('Reset to the original look. All preview layers are off.');}}>RESET ALL / OFF</Btn></div>
+  <p className="field-note">The shipped default look is an electric world with contrast and crosshatch, a circuit weapon stack, and ink-styled bots. RESTORE DEFAULT LOOK brings it back; RESET ALL / OFF clears every layer and target.</p>
+  <div className="graphics-lab__actions"><Btn onClick={exportRecipe}>EXPORT RECIPE</Btn><Btn onClick={restoreDefault}>RESTORE DEFAULT LOOK</Btn><Btn onClick={()=>{update(normalizeGraphicsLab());setRecipeIndex(-1);setTarget('world');setMessage('Reset to the original look. All preview layers are off.');}}>RESET ALL / OFF</Btn></div>
   <p role="status" className="field-note">{message}</p>
   <p className="field-note">Saved on this device. Effects style the 3D world; enable the WEAPON or BOTS stack to style those layers too. The HUD stays crisp. Static patterns respect reduced motion. One combined shader pass; glow, sharpen and contours add texture reads.</p>
  </div>;

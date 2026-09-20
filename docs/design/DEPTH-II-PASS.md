@@ -94,9 +94,50 @@ a six-wheel Transport APC with a twin turret. Integration notes:
   a filter. Personal bests (`newPersonalBests`) produce `NEW RECORD` award chips
   and captions cover the new objective beats.
 
+## LATTICE wiring
+
+A player report ("LATTICE vehicles are invisible, and other things feel
+unwired") led to a full audit and three fixes:
+
+- **Depot loaners now get models.** LATTICE spawns its vehicles at runtime from
+  the depot traversal layer, after `setMatch`; `updateVehicleModels` now runs a
+  cheap roster gate and calls `syncVehicles` only when a live vehicle id is
+  missing a model (or stale models remain), so late loaner spawns appear,
+  recalls are disposed, and unchanged frames never rebuild.
+- **The silent depot loop now talks.** `cocs-depot-vehicle-spawn` gets a
+  `LOANER READY` banner plus friend/enemy earcon variants, and depot purchases,
+  terminal sabotage, sapper cuts, siphons, scans, role deploy/loss/retire/rally/
+  repair/spot and the prime beats all gained bounded sound + caption + banner
+  rows (one voice per event, per-team repeat windows, distinct priorities).
+- **Team FLUX is a player lever.** The PvP command readout now renders
+  REINFORCE cards for the rung-legal roles and a SCAN card, with cost and a
+  single disabled reason each, dispatched through the authoritative
+  `spendCocs`/`net.economy` paths (and local practice now accepts the page's
+  `verb` shape). NEGLECT — the authored comeback meter — is fed real
+  commander/order-contribution signals instead of `false`, is exposed through
+  the economy view, and renders as a `NEGLECT n · NOMINAL/DEGRADED/CAPPED`
+  chip. Spectators get the read-only readout only: the order strip, board
+  button and purchase strip are hidden and spectator queues are drained, so
+  spectating can no longer swallow input or grow unbounded.
+
+## Default graphics recipe
+
+The Graphics Lab ships an authored default look instead of all-off: the
+player's electric/contrast/hatch world stack plus a circuit-pixel weapon stack
+and an ink-contour bot stack (mix 0.825057562220778, palette `electric`,
+enabled). `game/graphics-lab.mjs` exports the frozen `GRAPHICS_LAB_DEFAULT` and
+`defaultGraphicsLab()`; `useGraphicsLab` hydrates from it when storage is empty
+or unreadable (saved recipes still win), and the lab panel gained a `RESTORE
+DEFAULT LOOK` action alongside `RESET ALL / OFF`. `normalizeGraphicsLab({})`
+stays all-off so the normalizer pins are unchanged.
+
 ## Verification
 
 Counts and deployment records are in `docs/VERIFICATION.md`; focused suites:
 `game/particle-logo.test.mjs`, `game/follow-marker.test.mjs`,
-`game/feedback-remote.test.mjs`, the extended vehicle/economy/mode/bot suites,
-and the new scoreboard/config/captions/records pins.
+`game/feedback-remote.test.mjs`, `game/cocs-spend-surface.test.mjs`, the
+extended vehicle/economy/mode/bot suites, the new scoreboard/config/captions/
+records pins, and the graphics-lab default-recipe tests, plus a LATTICE
+browser check confirming depot loaners exist in the sim and the FLUX/NEGLECT
+surface renders.
+

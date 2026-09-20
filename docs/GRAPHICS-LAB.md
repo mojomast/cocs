@@ -4,8 +4,13 @@ Open **Graphics & settings → Graphics lab · Preview**. During a match, pause
 first, then open Graphics & settings. The side drawer exposes the live world;
 on portrait screens it becomes a bottom sheet. Closing it keeps the effects on.
 
-This is an opt-in art-direction preview, off by default. Preferences are saved
-on this device under `token-arena-graphics-lab-v1`.
+The lab ships with a default look: an **electric** world (overall mix `0.825…`,
+contrast `1.6`, saturation `0.6`, crosshatch `0.3`), a **circuit** weapon stack
+(pixel `2`, hex `4`, contrast `1.15`, sharpen `1.5`, halftone `3`, ink `0.5`,
+neon `0.1`, phosphor `0.45`, grain `0.05`) and a **circuit** bots stack (ink
+`1.5`). A device with no saved recipe loads that look already on; any saved
+recipe, including an all-off reset, wins on the next visit. Preferences are
+saved on this device under `token-arena-graphics-lab-v1`.
 
 ## Hotkeys
 
@@ -80,6 +85,8 @@ Each layer has its own parameter. The rest of the controls:
   a note. **Paste a recipe JSON:** apply a recipe back verbatim — this is the
   tuning loop.
 - **Export recipe:** download JSON to keep or share your preferred settings.
+- **Restore default look:** re-apply the shipped electric world + circuit weapon
+  + ink bots stack described above; the status line confirms it.
 - **Reset all / off:** restore the original world and clear the layer choices.
 
 Bypass and split comparison are transient and do not persist on reload. Recipe

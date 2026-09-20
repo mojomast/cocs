@@ -13,7 +13,8 @@
 // order. One verb per arm; a target is a node id; an order is the exact
 // `{tick, peerId, cardId, team, verb, target}` object `Match.step(dt,{cocs})`
 // consumes.
-import {SUBAGENTS, TRAVERSAL} from './cocs-economy.mjs';
+import {SUBAGENTS, TRAVERSAL, neglectEffect} from './cocs-economy.mjs';
+import {coopRole} from './cocs-roles.mjs';
 import {directorTier} from './cocs-difficulty.mjs';
 import {RULES} from './data.mjs';
 import {latticeNodeLabel, latticeTargetModel} from './lattice-guide.mjs';
@@ -443,10 +444,17 @@ export function cocsSpotView(snapshot, team) {
   return spots;
 }
 
+// §6A.6 NEGLECT words, one per tier. The effect's `tier` is the machine value;
+// the label is what the readout shows beside the number.
+const COCS_NEGLECT_LABELS = Object.freeze({none: 'NOMINAL', degrade: 'DEGRADED', cap: 'CAPPED'});
+
 /**
- * The team FLUX bar, personal REQ chip, order tally, scout card and scan target
- * as a pure view of `snapshot.cocs`. Null when the subtree is absent (every
- * non-cocs mode), which is what keeps the readout mode-isolated.
+ * The team FLUX bar, personal REQ chip, order tally, scout card, scan target
+ * and the §6A.6 NEGLECT meter as a pure view of `snapshot.cocs`. Null when the
+ * subtree is absent (every non-cocs mode), which is what keeps the readout
+ * mode-isolated. `neglect` pairs the number with a word (`NOMINAL`,
+ * `DEGRADED`, `CAPPED`) and the passive-income multiplier so the readout never
+ * leans on colour.
  */
 export function cocsEconomyView(snapshot, player) {
   if (!snapshot || typeof snapshot !== 'object') return null;
@@ -456,6 +464,9 @@ export function cocsEconomyView(snapshot, player) {
   const income = team === null ? 0 : num(snapshot.fluxIncome?.[team], 0);
   const upkeep = team === null ? 0 : num(snapshot.fluxUpkeep?.[team], 0);
   const spent = team === null ? 0 : num(snapshot.fluxSpent?.[team], 0);
+  const rawNeglect = team === null ? 0 : snapshot.neglect?.[team];
+  const neglectValue = num(rawNeglect && typeof rawNeglect === 'object' ? rawNeglect.value : rawNeglect, 0);
+  const neglect = neglectEffect({value: neglectValue});
   const reqEntry = Array.isArray(snapshot.req) ? snapshot.req.find(entry => entry && entry.id === player?.id) ?? null : null;
   const stats = snapshot.scoutStats?.[team] ?? {spawned: 0, killed: 0, expired: 0, scans: 0};
   const scout = team === null ? null : (Array.isArray(snapshot.scouts) ? snapshot.scouts.find(entry => entry && entry.team === team) ?? null : null);
@@ -470,6 +481,15 @@ export function cocsEconomyView(snapshot, player) {
     upkeep,
     net: round(income - upkeep, 3),
     spent,
+    neglect: {
+      value: round(neglectValue, 1),
+      tier: neglect.tier,
+      label: COCS_NEGLECT_LABELS[neglect.tier] ?? 'NOMINAL',
+      multiplier: neglect.multiplier,
+      reduction: neglect.reduction,
+      capped: neglect.capped,
+      percent: Math.max(0, Math.min(1, neglectValue / 100)),
+    },
     req: reqEntry ? {value: num(reqEntry.req, 0), earned: num(reqEntry.earned, 0), spent: num(reqEntry.spent, 0)} : {value: 0, earned: 0, spent: 0},
     orders: {
       issued: num(snapshot.orderStats?.issued, 0),
@@ -496,6 +516,116 @@ export function cocsEconomyView(snapshot, player) {
     spotBonus: num(snapshot.spotBonus, 0.15),
     scanRadius: num(snapshot.scanRadius, 12),
     spotSeconds: num(snapshot.spotSeconds, 8),
+  };
+}
+
+// ---------------------------------------------------------------------------
+// PvP-1 team FLUX purchase strip (§5.3/§11.2). The room/sim are the authority:
+// this view only decides what the local team *can ask for* from the frozen
+// snapshot (`roleBoard.allow`, `roleBoard.threads`, team FLUX, rung). Cards are
+// REINFORCE (one per rung-legal role) and SCAN (the SCOUT; the fresh spawn
+// needs a live node, so the view suggests one). Null outside a two-team role
+// board, so co-op and every non-cocs mode stay dark. Spectators get
+// `visible:false` and every card disabled — no purchase surface for them.
+// ---------------------------------------------------------------------------
+const COCS_PURCHASE_ROLE_MARKS = Object.freeze({fighter: '⚔', harvester: '⛏', builder: '⚒', scout: '⌖', saboteur: '✧'});
+const COCS_PURCHASE_REASONS = Object.freeze({
+  SPECTATING: 'SPECTATING',
+  'NO-THREAD': 'NO THREAD',
+  'FLUX-LOW': 'FLUX LOW',
+  'ROLE-LOCKED': 'RUNG LOCKED',
+  'NO-TARGET': 'NO TARGET',
+});
+/** Human words for a purchase blocker; null means the card is ready. */
+export function cocsPurchaseReason(value) {
+  if (!value) return null;
+  return COCS_PURCHASE_REASONS[value] ?? String(value);
+}
+
+/** The SCAN suggestion: an enemy/contested/neutral live capturable node, id-sorted. */
+function cocsScanHint(snapshot, team) {
+  const nodes = (Array.isArray(snapshot?.nodes) ? snapshot.nodes : [])
+    .filter(node => node && ['front', 'economy', 'relay'].includes(String(node.archetype)))
+    .filter(node => node.live !== false)
+    .sort((a, b) => String(a.id).localeCompare(String(b.id)));
+  const pick = nodes.find(node => node.owner === (1 - team))
+    ?? nodes.find(node => node.contested === true)
+    ?? nodes.find(node => node.owner === null || node.owner === undefined)
+    ?? nodes.find(node => node.owner === team)
+    ?? null;
+  return pick ? {nodeId: String(pick.id), label: pick.label ?? latticeNodeLabel({id: pick.id}, null)} : null;
+}
+
+/**
+ * The local team's REINFORCE / SCAN purchase cards as a pure read of the
+ * frozen snapshot plus the caller's derived FLUX. The rung allow-list,
+ * THREADS cap and team FLUX are the same gates the sim and the room apply, so
+ * a disabled card is never a doomed request; the sim still decides.
+ */
+export function cocsPurchaseView(snapshot, player, options = {}) {
+  if (!snapshot || typeof snapshot !== 'object') return null;
+  const team = player?.team === 0 || player?.team === 1 ? Number(player.team) : null;
+  if (team === null) return null;
+  const board = snapshot.roleBoard?.[team];
+  const allow = Array.isArray(board?.allow) ? board.allow.map(role => String(role)) : null;
+  if (!allow) return null;
+  const spectate = options.spectate === true || player?.spectate === true;
+  const threads = {used: num(board?.threads?.used, 0), cap: num(board?.threads?.cap, 0)};
+  const threadFree = threads.cap > 0 ? threads.used < threads.cap : true;
+  const flux = options.flux !== undefined ? num(options.flux, 0) : num(snapshot.flux?.[team], 0);
+  const cards = [];
+  for (const role of allow) {
+    if (role === 'scout') continue;
+    const def = coopRole(role);
+    if (!def) continue;
+    const cost = num(def.spawnCost, 0);
+    const affordable = flux + 1e-9 >= cost;
+    const reason = spectate ? 'SPECTATING' : !threadFree ? 'NO-THREAD' : !affordable ? 'FLUX-LOW' : null;
+    cards.push({
+      id: `reinforce-${role}`,
+      verb: 'REINFORCE',
+      action: 'reinforce',
+      role,
+      label: String(def.name ?? role).toUpperCase(),
+      mark: COCS_PURCHASE_ROLE_MARKS[role] ?? '◆',
+      cost,
+      target: null,
+      targetLabel: null,
+      enabled: reason === null,
+      reason,
+    });
+  }
+  const scanAllowed = allow.includes('scout');
+  const scan = cocsScanHint(snapshot, team);
+  const scanAffordable = flux + 1e-9 >= COCS_SCAN_COST;
+  const scanReason = spectate ? 'SPECTATING'
+    : !scanAllowed ? 'ROLE-LOCKED'
+      : !threadFree ? 'NO-THREAD'
+        : !scanAffordable ? 'FLUX-LOW'
+          : !scan ? 'NO-TARGET' : null;
+  cards.push({
+    id: 'scan-scout',
+    verb: 'SCAN',
+    action: 'spawn',
+    role: 'scout',
+    label: 'SCAN',
+    mark: COCS_PURCHASE_ROLE_MARKS.scout,
+    cost: COCS_SCAN_COST,
+    target: scan?.nodeId ?? null,
+    targetLabel: scan?.label ?? null,
+    enabled: scanReason === null,
+    reason: scanReason,
+  });
+  return {
+    team,
+    rung: snapshot.rung ?? null,
+    flux: round(flux, 1),
+    threads,
+    threadFree,
+    spectate,
+    visible: !spectate && cards.some(card => card.role !== 'scout' || scanAllowed),
+    cards,
+    canSpend: !spectate && cards.some(card => card.enabled),
   };
 }
 
@@ -1462,6 +1592,9 @@ export function cocsCommandView(board, snapshot, player, strip, options = {}) {
     traversal,
     director: cocsDirectorView(snapshot),
     spend: cocsSpendView(snapshot, player),
+    // PvP-1 team FLUX purchases. Null for co-op (no role board) and for a
+    // caller with no team; `spectate` hides the whole strip from viewers.
+    purchases: cocsPurchaseView(snapshot, player, {flux: economy?.flux, spectate: options.spectate === true}),
     boardView: cocsBoardView(board, snapshot, player, {economy, traversal, terminals, orders: options.orders}),
     terminals,
     // The single nearest thing the `interact` bind would use: a §6A device

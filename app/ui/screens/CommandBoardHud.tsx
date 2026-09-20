@@ -14,7 +14,7 @@
 // bound Command key, Escape and CLOSE as the only ways back to combat.
 // Reduced-motion snaps instead of animating.
 import * as React from 'react';
-import {cocsBoardAnnouncement} from '../../../game/cocs-orders.mjs';
+import {cocsBoardAnnouncement,cocsPurchaseReason} from '../../../game/cocs-orders.mjs';
 import {formatResource} from '../../../game/format-ui.mjs';
 import {DEFAULT_BINDINGS,bindingLabel,bindingShortcut} from '../../../game/keybinds.mjs';
 
@@ -196,6 +196,54 @@ export function ReqStore({req, onBuy, pending, reducedMotion, defaultOpen = fals
   );
 }
 
+/**
+ * PvP-1 team FLUX purchase list (§5.3/§11.2). Driven by the pure
+ * `cocsPurchaseView` folded into `command.purchases`: REINFORCE for every role
+ * the rung allows plus SCAN when the rung fields a SCOUT. The sim/room remain
+ * the authority; a disabled row always names its one reason. Compact and
+ * collapsed by default so the board keeps its exception-list priority, and
+ * every actionable row is a real 44px mouse target.
+ */
+export function TeamFluxStore({purchases, onPurchase, reducedMotion}: any) {
+  const reduced = reducedMotion === true;
+  const [open, setOpen] = React.useState(false);
+  if (!purchases?.visible) return null;
+  const cards: any[] = Array.isArray(purchases.cards) ? purchases.cards : [];
+  if (!cards.length) return null;
+  const threads = purchases.threads ?? {used: 0, cap: 0};
+  return (
+    <section className={`cocs-board__flux${reduced ? ' is-reduced' : ''}`} aria-label={`Team flux store. ${whole(purchases.flux)} flux, ${threads.used} of ${threads.cap} threads committed.`}>
+      <button type="button" className="cocs-board__flux-toggle" aria-expanded={open} aria-controls="cocs-team-flux" style={{minHeight: 44}} onClick={() => setOpen(value => !value)}>
+        <span aria-hidden="true">✦</span> TEAM FLUX · <b>{whole(purchases.flux)}</b> FLUX <small>{open ? 'HIDE' : `${threads.used}/${threads.cap} THREADS`}</small>
+      </button>
+      {open && <ul id="cocs-team-flux" className="cocs-spend__sinks" aria-label="Team flux purchases">
+        {cards.map((card: any) => {
+          const reason = cocsPurchaseReason(card.reason);
+          return (
+            <li key={card.id}>
+              <div className={`cocs-sink${card.enabled ? ' is-ready' : ' is-locked'}`}>
+                <button
+                  type="button"
+                  className="cocs-sink__buy"
+                  disabled={card.enabled !== true}
+                  aria-label={`${card.verb} ${card.label}${card.targetLabel ? ` at ${card.targetLabel}` : ''}. Cost ${whole(card.cost)} flux. ${reason ? `Unavailable: ${reason}.` : 'Ready and affordable.'} Flux ${whole(purchases.flux)}, threads ${threads.used} of ${threads.cap}.`}
+                  title={reason ? `${card.label} unavailable: ${reason}` : card.targetLabel ? `${card.verb} → ${card.targetLabel}` : card.verb}
+                  onClick={() => onPurchase?.(card)}
+                >
+                  <span className="cocs-sink__label"><b><span aria-hidden="true">{card.mark}</span> {card.label}</b><small>COST <b>{whole(card.cost)}</b> F</small></span>
+                  {reason
+                    ? <em className="cocs-sink__reason"><i aria-hidden="true">⚠</i> {reason}</em>
+                    : <em className="cocs-sink__ready"><i aria-hidden="true">▶</i> READY · AFFORDABLE</em>}
+                </button>
+              </div>
+            </li>
+          );
+        })}
+      </ul>}
+    </section>
+  );
+}
+
 const SectionList = ({section, cards, activeId, expanded, onToggleExpand, onSelect, onActivate}: any) => {
   const shown = expanded ? cards : section.cards;
   return (
@@ -301,6 +349,7 @@ export function CommandBoardHud({command, open, collapsed, pinned, activeId, red
           />
         ))}
       </div>
+      {command?.purchases?.visible && <TeamFluxStore purchases={command.purchases} onPurchase={command.onPurchaseCocs} reducedMotion={reduced}/>}
       {command?.req && <ReqStore req={command.req} pending={command.reqPending} onBuy={command.onBuyReq} reducedMotion={reduced}/>}
       <p className="cocs-board__hint"><b>MOUSE ACTIVE</b> · COMMAND <kbd>{commandKey}</kbd> / <kbd>ESC</kbd> / <b>× CLOSE</b> RETURNS TO COMBAT</p>
     </section>
