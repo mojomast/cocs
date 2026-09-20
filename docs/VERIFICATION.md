@@ -40,6 +40,15 @@ against production at **5/5 viewports** with a clean tree
 (`commitDirty:false`), zero console/page errors, and the usual hit-testing,
 reticle-corridor and overflow assertions. No game-server restart.
 
+**Production update — animation pass (2026-09-20).** Commit `68bba94` was
+fast-forwarded to `improvement/phase2-audio-visual` and deployed web-only,
+publishing the death/hit/viewmodel/UI animation pass and its documentation
+(`docs/design/ANIMATION-PASS.md`). The gate saw the usual transient 502 and
+passed on retry; the tracked browser matrix re-ran against production at
+**5/5 viewports**. The runner's `commitDirty` flag reflects documentation edits
+pending in the local checkout, not the served bundle, whose identity the deploy
+gate verified as `68bba94` `v8.6-68bba94`. No game-server restart.
+
 **Scope (web presentation, data and documentation, 2026-09-20).** An opt-in
 developer graphics preview, a global hotkey, a randomizer and a clipboard recipe
 loop, 23 stackable effects (three built from baked Moth assets with selectable
