@@ -49,6 +49,19 @@ passed on retry; the tracked browser matrix re-ran against production at
 pending in the local checkout, not the served bundle, whose identity the deploy
 gate verified as `68bba94` `v8.6-68bba94`. No game-server restart.
 
+**Production update — combat pass (2026-09-20).** Commit `c5c0187` was
+fast-forwarded to `improvement/phase2-audio-visual` and deployed with
+`npm run deploy -- --with-game-server`: both `token-arena-web.service` and
+`token-arena-server.service` restarted on the same build, so active matches
+disconnected briefly and clients reconnected. The previous game server was
+`b9c7a0a` `v8.5-b9c7a0a`; the deploy gate verified **matching identities** at
+web `c5c0187` `v8.6-c5c0187` protocol 3 and game server `c5c0187`
+`v8.6-c5c0187` protocol 3 (the fixed 502-on-first-verification transient was
+seen and passed on retry). The tracked browser matrix then ran against
+production at **5/5 viewports** with `commitDirty: false`, including the
+LATTICE short-landscape flow that caught the HUD corridor regression during
+local testing.
+
 **Scope (web presentation, data and documentation, 2026-09-20).** An opt-in
 developer graphics preview, a global hotkey, a randomizer and a clipboard recipe
 loop, 23 stackable effects (three built from baked Moth assets with selectable
