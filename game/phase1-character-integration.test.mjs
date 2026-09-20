@@ -46,6 +46,22 @@ test('unapplied integration handles corpse -> respawn using real view/model meth
  assert.equal(view.characterLifecycle.state(model),'respawning');assert.equal(model.position.x,8);assert.equal(model.rotation.x,0);assert.equal(model.visible,true);
  ArenaView.prototype.reviveCorpse.call(view,model,{...actor,health:100},{time:.2});assert.equal(view.characterLifecycle.state(model),'alive');
 });
+test('poseCorpse acquires presentation ragdolls on WebGL and gates the CPU renderer',async()=>{
+ const {ArenaView,robotModel}=await integrated();
+ const view={deathContext:new Map(),hitFlinch:new Map(),playerId:99,reduced:()=>false,renderer:{isSoftware:false},characterGroundAt:()=>0};
+ const model=robotModel('chatgpt'),actor={id:1,x:0,y:2,z:0,yaw:0,bodyYaw:0,health:0,vx:2,vz:-1};
+ ArenaView.prototype.poseCorpse.call(view,model,actor,{time:0});
+ const record=view.characterLifecycle.records.get(model);
+ assert.ok(record.ragdoll,'the live view acquires presentation ragdolls');
+ assert.equal(record.ragdoll.awake,true);
+ ArenaView.prototype.poseCorpse.call(view,model,actor,{time:1/60});
+ assert.ok(record.ragdoll.steps>0,'physics follows the match clock');
+ const softwareView={deathContext:new Map(),hitFlinch:new Map(),playerId:99,reduced:()=>false,renderer:{isSoftware:true},characterGroundAt:()=>0};
+ const softwareModel=robotModel('chatgpt');
+ ArenaView.prototype.poseCorpse.call(softwareView,softwareModel,{...actor,id:2},{time:0});
+ assert.equal(softwareView.characterLifecycle.records.get(softwareModel).ragdoll,null,'the CPU renderer keeps the authored fallback');
+ assert.equal(softwareView.characterLifecycle.ragdolls.activeCount,0);
+});
 test('live poseCorpse orients the fall from the stored kill direction',async()=>{
  const {ArenaView,robotModel}=await integrated();
  const view={deathContext:new Map(),hitFlinch:new Map(),playerId:99,reduced:()=>false,characterGroundAt:()=>2};

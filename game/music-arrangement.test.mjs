@@ -196,6 +196,31 @@ test('sampled round-robin selection is seeded and folded into the checksum', () 
   assert.notEqual(a.scheduleChecksum, c.scheduleChecksum, 'a different seed humanises the round-robin');
 });
 
+test('the halo pack authors the optional colour layers and keeps its modal centre under a palette', () => {
+  for (const scene of MUSIC_SCENES) {
+    const arr = HALO_ARRANGEMENTS[scene];
+    assert.ok(arr, `${scene} exists`);
+    assert.ok(arr.keys || arr.pluck || arr.pizz || arr.shaker, `${scene} authors an optional colour layer`);
+  }
+  const ctx = audioContext();
+  const e = new MusicEngine({ ctx, destination: ctx.destination, theme: HALO_THEME, seed: 7 });
+  e.setSoundtrack('halo');
+  e.setPalette('horde');
+  assert.equal(e.arrangements, HALO_ARRANGEMENTS, 'a palette never swaps the pack');
+  assert.deepEqual([...e.theme.scale], [0, 2, 3, 5, 7, 8, 10], 'the Halo modal centre is untouched');
+  assert.equal(e.palette.shaker, true, 'the palette selects the authored shaker');
+  e.setScene('combat');
+  e.setIntensity(1);
+  e.setVariation('ironman');
+  e.setTension(1);
+  e.setEscalation(2);
+  for (let i = 0; i < 600; i++) { ctx.currentTime += 0.05; e.tick(); assert.ok(e.voices.length <= 44, `voice cap at tick ${i}`); }
+  assert.ok(e.notesBy.shaker > 0, 'the halo shaker grid sounds through the palette');
+  assert.ok(e.notesBy.pizz > 0, 'halo combat voices pizzicato when the palette allows it');
+  assert.ok(e.notesBy.tremolo > 0, 'the tension layer runs on the halo pack too');
+  assert.ok(e.sustainVoices <= e.sustainBudget, 'the sustained budget still holds');
+});
+
 test('missing M1 instruments fall back to the synth without throwing', () => {
   const ctx = audioContext();
   const bank = stubBank(['strings-pad']); // no choir, cymbals, marcato, trumpet, gong...

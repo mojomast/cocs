@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import * as T from 'three';
-import {CAVERN_SEGMENTS,cavernArcs,cavernOpening,cavernShell,cavernRenderArcs,BREAK_KINDS,BREAKABLE_PROPS,breakProfile,isBreakable,propId,propHash,applyPropDamage,propBreakPlan,weaponPose,weaponInspect} from './structures.mjs';
+import {CAVERN_SEGMENTS,cavernArcs,cavernOpening,cavernShell,cavernRenderArcs,BREAK_KINDS,BREAKABLE_PROPS,breakProfile,isBreakable,propId,propHash,applyPropDamage,propDamageStage,propBreakPlan,weaponPose,weaponInspect} from './structures.mjs';
 
 test('a cavern leaves two opposite entrances open', () => {
   assert.equal(CAVERN_SEGMENTS, 16);
@@ -76,6 +76,25 @@ test('prop damage breaks exactly once at the threshold and never mutates the pro
   assert.equal(JSON.stringify(prop), before, 'damage state lives outside the prop');
   assert.equal(applyPropDamage(state, id, 'rock', 999), null, 'unbreakable props are ignored');
   assert.equal(applyPropDamage(state, id, 'crate', 0), null, 'zero damage is ignored');
+});
+
+test('prop damage staging is pure, bounded and reaches its strongest read at the break', () => {
+  const profile = breakProfile('crate');
+  const pristine = propDamageStage(profile.threshold, profile);
+  assert.deepEqual(pristine, {progress: 0, scale: .92, shade: 1});
+  const broken = propDamageStage(0, profile);
+  assert.deepEqual(broken, {progress: 1, scale: .86, shade: .62});
+  assert.deepEqual(propDamageStage(profile.threshold / 2, profile), propDamageStage(profile.threshold / 2, profile), 'the stage is a pure function');
+  for (let hp = 0; hp <= profile.threshold; hp += 3) {
+    const stage = propDamageStage(hp, profile);
+    assert.ok(stage.progress >= 0 && stage.progress <= 1, `progress ${stage.progress}`);
+    assert.ok(stage.scale >= .86 && stage.scale <= .92, `scale ${stage.scale}`);
+    assert.ok(stage.shade >= .62 && stage.shade <= 1, `shade ${stage.shade}`);
+    assert.ok(Object.isFrozen(stage));
+  }
+  assert.equal(propDamageStage(profile.threshold, null).progress, 0, 'a missing profile reads pristine');
+  assert.equal(propDamageStage(Number.NaN, profile).progress, 0, 'non-finite hp reads pristine');
+  assert.equal(propDamageStage(-50, profile).scale, .86, 'overkill clamps to the strongest stage');
 });
 
 test('the break plan is deterministic, bounded and reduced-motion aware', () => {

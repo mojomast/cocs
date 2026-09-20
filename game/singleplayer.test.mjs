@@ -6,6 +6,7 @@ import {CAMPAIGN_MISSIONS,missionFor} from './campaign-data.mjs';
 import {campaignLaunchCheckpoint,defaultCampaignProgress,setCheckpoint} from './campaign-progress.mjs';
 import {ENEMY_TYPES,ENEMY_SPEED_VARIANCE,enemyById,applyEnemyFields,enemyBehavior} from './enemy-types.mjs';
 import {initializeSinglePlayer,hordeWaveSize,hordeWaveComposition,hordeWaveModifier,hordeWavePlan,HORDE_WAVE_MODIFIERS,HORDE_UPGRADES,HORDE_TYPES,hordeUpgradeChoices,resupplyHorde,offerHordeUpgrade,selectHordeUpgrade,resumeSinglePlayer,applyCampaignCheckpoint,isSinglePlayerMode,singlePlayerSnapshot,spawnGroup,SINGLEPLAYER_MODES,hordeWaveScore,hordeBossWave,hordeWaveScoreTotal,HORDE_BOSS_BONUS} from './singleplayer.mjs';
+import {HORDE_XP_CAP,hordeMatchXp} from './progression.mjs';
 
 const make=(mode,options={})=>new Match('chatgpt','openclaw',()=>.5,options.mapId||'convoy-line',{mode,botCount:3,humanCount:1,timeLimit:300,...options});
 const firstEnemies=(match)=>match.actors.filter(actor=>actor.isNpc&&actor.team===1);
@@ -653,6 +654,10 @@ test('a bounded horde run still ends at its wave target and banks a won summary'
  assert.ok(summary&&summary.outcome==='won'&&summary.endless===false,'a bounded win banks a won summary');
  assert.equal(summary.target,3);
  assert.ok(summary.score>0,'a bounded win still banks score');
+ const single=match.snapshot().singleplayer;
+ assert.equal(hordeMatchXp(single),hordeMatchXp({score:summary.score,bestWave:summary.bestWave}),'the recorded run and the live snapshot agree');
+ assert.ok(hordeMatchXp(single)>0&&hordeMatchXp(single)<=HORDE_XP_CAP,'the run pays a bounded horde XP rider');
+ assert.ok(hordeMatchXp({score:summary.score*2,bestWave:summary.bestWave+1})>hordeMatchXp(single),'the rider is monotonic in the recorded run');
 });
 
 test('horde modifiers inject flankers, shield-bearers and a champion boss',()=>{

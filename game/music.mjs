@@ -28,7 +28,22 @@
 //   pad / choir / drone     sustained ensemble toggles
 //   taiko / bell            optional percussion and accent grids
 //   brass / timpani         optional low-brass and timpani lines
+//   shaker                  optional filtered-noise tick/ride grid
+//   keys / pluck / pizz     optional FM keys and plucked-string colours
 //   swell                   0..1 phrase-swell depth on the final bar
+//
+// New colour layers are opt-in twice: the arrangement authors the material (a
+// grid or a flag) and a palette (MUSIC_PALETTES, selected by mode/biome) decides
+// whether the layer is allowed to sound. The default palette leaves every new
+// flag off, so the baseline take is bit-identical until a host asks otherwise.
+//
+// Dynamic state: `setTension(0..1)` adds a low-string tremolo danger layer and
+// `setEscalation(0..3)` selects a faster, shorter form, while `setVariation`
+// seeds per-bar ornaments (fills, ghost 16ths, counter octave, arp direction,
+// lead turns, instrument rotation) from a pure hash of (seed, scene, bar,
+// variation). Every new musical decision is either gated by one of those setters
+// or derived from the frozen tables below; nothing consumes the engine RNG when
+// a feature is off, so one seed still reproduces one take.
 //
 // Orchestral voices (pad/brass/taiko/bells/timpani) are served by the baked CC0
 // sample set (game/sampler.mjs, streamed from /music/*) when it has decoded, and
@@ -42,6 +57,8 @@
 // every voice is pruned by schedule time, so one seed reproduces one take.
 
 import { MUSIC_BASE, SampleBank, loopWindow, sampleRateFor, selectSample } from './sampler.mjs';
+// Pure, dependency-free string/number hash used for variation and ornaments.
+import { hashUnit } from './deaths.mjs';
 
 const clamp = (n, a, b) => Math.max(a, Math.min(b, n));
 
@@ -114,7 +131,7 @@ export const ARRANGEMENTS = frozen({
     arp: [0, 2, 4, 2, 3, 5, 4, 2],
     counter: [4, 2, 0, 2, 3, 2, 0, 2], counterShift: -12,
     lead: [0, 2, 4, 2, 3, 4, 5, 4, 2, 0, 2, 3, 2, 0, 2, 0], leadType: 'triangle', leadGain: 0.02,
-    pad: true, swell: 0.35,
+    pad: true, keys: true, pluck: true, swell: 0.35,
   },
   explore: {
     bpm: 112, steps: 16, gain: 0.42,
@@ -123,7 +140,7 @@ export const ARRANGEMENTS = frozen({
     arp: [0, 4, 7, 4, 3, 5, 8, 5],
     counter: [5, 4, 3, 4, 5, 7, 5, 4], counterShift: -12,
     lead: [4, 2, 0, 2, 4, 5, 7, 5], leadType: 'triangle', leadGain: 0.026,
-    pad: true, swell: 0.55,
+    pad: true, keys: true, pluck: true, swell: 0.55,
   },
   combat: {
     bpm: 128, steps: 16, gain: 0.55,
@@ -132,7 +149,7 @@ export const ARRANGEMENTS = frozen({
     arp: [0, 2, 4, 6, 4, 2, 0, 2],
     counter: [7, 6, 4, 2, 0, 2, 4, 6], counterShift: -12,
     lead: [4, 2, 0, 2, 4, 5, 4, 2, 4, 7, 5, 4, 2, 0, 2, 4], leadType: 'square', leadGain: 0.034,
-    pad: false, swell: 0.8,
+    pad: false, shaker: [2, 6, 10, 14], pluck: true, keys: true, swell: 0.8,
   },
   results: {
     bpm: 84, steps: 16, gain: 0.46,
@@ -141,7 +158,7 @@ export const ARRANGEMENTS = frozen({
     arp: [0, 2, 4, 2, 3, 5, 4, 2],
     counter: [4, 2, 0, 2, 3, 2, 0, 2], counterShift: -12,
     lead: [0, 2, 4, 2, 3, 4, 5, 4, 2, 0, 2, 3, 2, 0, 2, 0], leadType: 'triangle', leadGain: 0.02,
-    pad: true, swell: 0.3,
+    pad: true, keys: true, swell: 0.3,
   },
 });
 
@@ -190,7 +207,7 @@ export const HALO_ARRANGEMENTS = frozen({
     // bars), sequenced up a third in the second half of the phrase.
     lead: COCS_MOTIF.slice(0, 4), leadRate: 2, leadSequence: 2, leadOctave: 1,
     leadType: 'triangle', leadGain: 0.02,
-    strings: true, pad: true, swell: 0.4,
+    strings: true, pad: true, keys: true, pluck: true, swell: 0.4,
   },
   explore: {
     bpm: 72, steps: 16, gain: 0.44,
@@ -203,7 +220,7 @@ export const HALO_ARRANGEMENTS = frozen({
     // Statement + sequence: the full motif, raised a third in bars 5–8.
     lead: 'cocs', leadRate: 1, leadSequence: 2, leadOctave: 1,
     leadType: 'triangle', leadGain: 0.024,
-    strings: true, pad: true, swell: 0.5,
+    strings: true, pad: true, shaker: [4, 12], pluck: true, swell: 0.5,
   },
   combat: {
     bpm: 96, steps: 16, gain: 0.55,
@@ -218,7 +235,7 @@ export const HALO_ARRANGEMENTS = frozen({
     lead: 'cocs', leadRate: 1, leadSequence: 2, leadInvertSecondHalf: true, leadOctave: 1,
     leadFallback: [0, 2, 4, 3, 2, 4, 6, 4, 5, 4, 3, 2, 1, 2, 0, 0],
     leadType: 'square', leadGain: 0.024,
-    strings: true, pad: false, swell: 0.85,
+    strings: true, pad: false, shaker: [1, 5, 9, 13], pizz: true, swell: 0.85,
   },
   results: {
     bpm: 84, steps: 16, gain: 0.5,
@@ -233,7 +250,7 @@ export const HALO_ARRANGEMENTS = frozen({
     // victory/defeat motif, when one is loaded, replaces the built-in line here.
     lead: 'cocs', leadMotif: true, leadRate: 1, leadMajor: true, leadOctave: 1,
     leadType: 'triangle', leadGain: 0.024,
-    strings: true, pad: true, swell: 0.35,
+    strings: true, pad: true, keys: true, pluck: true, swell: 0.35,
   },
 });
 
@@ -265,10 +282,73 @@ export const MUSIC_SCENES = Object.freeze(['menu', 'explore', 'combat', 'results
 // transition (sequence) and a four-bar outro that resolves back into the loop.
 export const FORM_BARS = Object.freeze({ intro: 8, build: 8, climax: 8, transition: 4, outro: 4 });
 
+// Precomputed short forms for escalation levels 1..3 (24 / 16 / 8 bars), so the
+// scheduler never allocates a form object per step. Level 0 is the shared form.
+const escalatedForm = (scale) => {
+  const out = {};
+  for (const [key, len] of Object.entries(FORM_BARS)) out[key] = Math.max(1, Math.round(len * scale));
+  return Object.freeze(out);
+};
+const ESCALATED_FORMS = Object.freeze([FORM_BARS, escalatedForm(0.75), escalatedForm(0.5), escalatedForm(0.25)]);
+
+// Mode/biome palettes. A palette only toggles optional layers the arrangements
+// already author (flags), never invents material and never touches the theme, so
+// the Halo pack keeps its single modal centre. `default` is deliberately
+// all-off: the baseline take is unchanged until a host selects another palette.
+// Mode names and biome mood names share one namespace; unknown keys resolve to
+// `default`. A mode palette and a biome palette may be set independently and are
+// merged (default < mode < biome) so a horde fight in a storm keeps both.
+export const MUSIC_PALETTES = frozen({
+  default: { shaker: false, keys: false, pluck: false },
+  // Mode colours (setModeTheme).
+  horde: { shaker: true, pluck: true },
+  ctf: { keys: true },
+  'team-elimination': { keys: true, shaker: true },
+  juggernaut: { shaker: true },
+  campaign: { pluck: true },
+  cocs: { keys: true, pluck: true },
+  'cocs-coop': { keys: true, pluck: true, shaker: true },
+  // Biome colours (setBedMood/setArenaBiome).
+  night: { keys: true },
+  cold: { pluck: true },
+  hot: { shaker: true },
+  storm: { shaker: true, keys: true },
+});
+
+// Frozen ornament table for `setVariation`. Each per-bar plan is drawn from one
+// of these lists by a pure hash of (seed, scene, bar, variation), so two engines
+// with the same seed and variation id produce the same ornaments without ever
+// touching the engine RNG.
+export const MUSIC_ORNAMENTS = frozen({
+  // Rotations of the fill arpeggio on phrase-landmark bars.
+  fillTurns: [0, 1, 2, 3],
+  // Extra quiet 16th hats on steps the authored grid leaves empty.
+  ghosts: [[2, 6, 10, 14], [3, 7, 11, 15], [6, 14], [1, 5, 9, 13]],
+  // Per-bar transposition of the counter-line.
+  counterOctaves: [0, -12, 12],
+  // Order the arpeggio is read in.
+  arpDirections: ['written', 'reverse', 'updown', 'octave'],
+  // Scale-degree turn applied to the lead on its third beat.
+  leadTurns: [2, -2, 4, -4],
+  // Instrument rotation: register/timbre the arpeggio is voiced with.
+  rotations: [
+    { ratio: 1, timbre: 'triangle' },
+    { ratio: 0.5, timbre: 'sine' },
+    { ratio: 2, timbre: 'triangle' },
+    { ratio: 1, timbre: 'sine' },
+  ],
+});
+
+// Response kinds the engine can voice on the next scheduled step. Kept as a
+// frozen vocabulary so SynthAudio and the tests share one set of names.
+export const MUSIC_RESPONSES = Object.freeze(['capture', 'loss', 'accent', 'final']);
+
 // Dynamic-layer entry points. Combat percussion, melodies and accents come in
 // stages as the layer rises; on the way down the same thresholds gate them out
-// after the eased release has had time to breathe.
-const LAYER_THRESHOLDS = Object.freeze({ snare: 0.22, hat: 0.4, taiko: 0.32, bell: 0.45, counter: 0.28, lead: 0.42, choir: 0.12, ostinato: 0.25, marcato: 0.32, highBrass: 0.55, timpaniRoll: 0.6, cymbal: 0.5 });
+// after the eased release has had time to breathe. The colour layers (shaker,
+// keys, pluck/pizz) sit above the core parts and are scheduled last, so a voice
+// budget shortfall drops them first.
+export const LAYER_THRESHOLDS = Object.freeze({ snare: 0.22, hat: 0.4, taiko: 0.32, bell: 0.45, counter: 0.28, lead: 0.42, choir: 0.12, ostinato: 0.25, marcato: 0.32, highBrass: 0.55, timpaniRoll: 0.6, cymbal: 0.5, shaker: 0.3, keys: 0.36, pluck: 0.26, pizz: 0.3 });
 
 export class MusicEngine {
   constructor({ ctx, destination, theme = null, noiseBuffer = null, seed = 1, maxVoices = 44, lookahead = 0.24, samples = true, sampleBaseUrl = MUSIC_BASE, sampleManifestUrl = null, sampleFetch = null, sampleBank = null } = {}) {
@@ -282,6 +362,12 @@ export class MusicEngine {
     this.scene = 'menu';
     this.intensity = 0;
     this.duck = 0;
+    // Dynamic danger state: tension 0..1 drives the low-string tremolo layer and
+    // a bounded mix lift; escalation 0..3 selects a faster, shortened form.
+    // Both are pure setters and both default to 0, so the baseline take never
+    // reads them until a host asks.
+    this.tension = 0;
+    this.escalation = 0;
     this.maxVoices = Math.max(6, maxVoices | 0);
     // Sustained voices (pad/choir/drone/strings) get their own budget so a long
     // string bed can never starve the short melodic and percussive notes. Four
@@ -303,7 +389,7 @@ export class MusicEngine {
     // tests to prove seeded determinism without rendering audio. Sampled voices
     // fold their selected (midi, velocity, playbackRate) into the same stream.
     this.scheduleChecksum = 0;
-    this.notesBy = { kick: 0, snare: 0, hat: 0, taiko: 0, bell: 0, bass: 0, arp: 0, counter: 0, lead: 0, pad: 0, choir: 0, drone: 0, swell: 0, riser: 0, roll: 0, impact: 0, brass: 0, timpani: 0, ostinato: 0, marcato: 0, trumpet: 0, cymbal: 0, toll: 0, gong: 0 };
+    this.notesBy = { kick: 0, snare: 0, hat: 0, taiko: 0, bell: 0, bass: 0, arp: 0, counter: 0, lead: 0, pad: 0, choir: 0, drone: 0, swell: 0, riser: 0, roll: 0, impact: 0, brass: 0, timpani: 0, ostinato: 0, marcato: 0, trumpet: 0, cymbal: 0, toll: 0, gong: 0, shaker: 0, keys: 0, pluck: 0, pizz: 0, tremolo: 0, response: 0, accent: 0 };
     // Sampled-instrument bank: lazy, optional and inert without a decodable
     // context, so Node tests keep the deterministic oscillator path.
     this.samplesEnabled = samples !== false;
@@ -322,6 +408,22 @@ export class MusicEngine {
     this.fills = FILLS;
     this.soundtrackName = 'default';
     this.outcome = null;
+    // Mode and biome palettes are stored separately and merged into `palette`
+    // (default < mode < biome). `default` is all-off, so no optional colour is
+    // voiced until setModeTheme/setBedMood selects a palette that authors one.
+    this._paletteMode = 'default';
+    this._paletteBiome = 'default';
+    this.paletteName = 'default';
+    this.palette = MUSIC_PALETTES.default;
+    // Seeded variation: 0 disables every ornament, any other id seeds the
+    // per-bar plan via a pure hash. The key form (`setVariation('ironman')`)
+    // resolves to a stable positive id from the engine seed.
+    this.variation = 0;
+    this.variationKey = null;
+    this._ornCache = null;
+    // Bounded queue of harmonic responses (capture/loss/accent/final) voiced on
+    // the next scheduled step. Requests never voice anything by themselves.
+    this.pendingResponses = [];
     this.motif = null;
     this.motifLead = null;
     this.reverbSend = null;
@@ -780,8 +882,8 @@ export class MusicEngine {
       return true;
     } catch { return false; }
   }
-  setEnabled(on) { this.enabled = on !== false; return this.enabled; }
-  setMuted(on) { this.muted = on === true; return this.muted; }
+  setEnabled(on) { this.enabled = on !== false; if (!this.enabled) this.pendingResponses.length = 0; return this.enabled; }
+  setMuted(on) { this.muted = on === true; if (this.muted) this.pendingResponses.length = 0; return this.muted; }
   // Scene selection keeps the transport running (see setSoundtrack); the
   // layer crossfade and transition machine handle the musical hand-over.
   setScene(scene) {
@@ -797,6 +899,70 @@ export class MusicEngine {
   }
   setIntensity(value) { this.intensity = clamp(Number(value) || 0, 0, 1); return this.intensity; }
   setDuck(value) { this.duck = clamp(Number(value) || 0, 0, 1); return this.duck; }
+  // Danger state. Pure setters: they never touch the transport, the RNG or any
+  // node. `_applyGains` reads the tension lift and `_scheduleStep` reads both to
+  // place the tremolo layer and the escalated form.
+  setTension(value) { this.tension = clamp(Number(value) || 0, 0, 1); return this.tension; }
+  setEscalation(value) {
+    const n = Number(value);
+    this.escalation = Number.isFinite(n) ? clamp(Math.round(n), 0, 3) : 0;
+    return this.escalation;
+  }
+  // Select a mode palette; an unknown key falls back to the all-off default.
+  setPalette(name) {
+    this._paletteMode = typeof name === 'string' && MUSIC_PALETTES[name] ? name : 'default';
+    this._refreshPalette();
+    return this._paletteMode;
+  }
+  // Select a biome palette. Kept in its own slot so a biome mood cannot erase a
+  // mode's colour; the two are merged with the biome winning on shared flags.
+  setBiomePalette(name) {
+    this._paletteBiome = typeof name === 'string' && MUSIC_PALETTES[name] ? name : 'default';
+    this._refreshPalette();
+    return this._paletteBiome;
+  }
+  _refreshPalette() {
+    const mode = MUSIC_PALETTES[this._paletteMode] || MUSIC_PALETTES.default;
+    const out = { ...MUSIC_PALETTES.default, ...mode };
+    // A selected biome palette overlays only the flags it authors; an unselected
+    // biome (or `default`) never turns a mode's colour back off.
+    if (this._paletteBiome !== 'default') {
+      const biome = MUSIC_PALETTES[this._paletteBiome] || MUSIC_PALETTES.default;
+      for (const [key, value] of Object.entries(biome)) out[key] = value;
+    }
+    this.palette = Object.freeze(out);
+    this.paletteName = this._paletteMode;
+    return this.palette;
+  }
+  // Seeded variation. `0`, null or an invalid value turns every ornament off and
+  // leaves the current take bit-identical; a positive integer or a string key
+  // seeds a per-bar ornament plan through a pure hash. Returns the active id.
+  setVariation(value) {
+    if (typeof value === 'string' && value.length) {
+      let h = 0;
+      for (let i = 0; i < value.length; i++) h = (Math.imul(h, 31) + value.charCodeAt(i)) | 0;
+      this.variationKey = value;
+      this.variation = 1 + Math.floor(hashUnit(this.seed, h >>> 0, 0x5ea5ed) * 0xffffff);
+    } else {
+      const n = Number(value);
+      this.variationKey = null;
+      this.variation = Number.isFinite(n) && n > 0 ? Math.floor(n) >>> 0 : 0;
+    }
+    this._ornCache = null;
+    return this.variation;
+  }
+  // Queue a musical response for the next scheduled step. Bounded (4 pending)
+  // and inert without a live graph; returns false so a caller can fall back to
+  // its own motif (the single-owner rule keeps one voice per beat).
+  requestResponse(kind, { vol = 1, at = null } = {}) {
+    if (!this.ctx || !this.buses || !this.enabled || this.muted) return false;
+    if (typeof kind !== 'string' || !MUSIC_RESPONSES.includes(kind)) return false;
+    if (this.pendingResponses.length >= 4) return false;
+    this.pendingResponses.push({ kind, vol: clamp(Number(vol) || 0, 0, 1), at: Number.isFinite(Number(at)) ? Number(at) : this._time() });
+    return true;
+  }
+  // Drop every queued response (a match ended before its accent could land).
+  clearResponses() { const n = this.pendingResponses.length; this.pendingResponses.length = 0; return n; }
   preview(scene = 'menu', seconds = 8) {
     this.previewUntil = (this.ctx?.currentTime || 0) + Math.max(0, seconds);
     this.previewScene = MUSIC_SCENES.includes(scene) ? scene : 'menu';
@@ -814,6 +980,8 @@ export class MusicEngine {
     this.bar = 0;
     this.nextTime = null;
     this.rng = mulberry32(this.seed);
+    this.pendingResponses.length = 0;
+    this._ornCache = null;
   }
   // The active scene honours a running preview, then the engine scene with a
   // combat crossfade from intensity.
@@ -829,7 +997,12 @@ export class MusicEngine {
     if (this.currentBpm == null || scene !== this._activeScene()) return target;
     return this.currentBpm;
   }
-  _stepDur(scene) { return 60 / (this._bpm(scene) * 4); }
+  // Escalation shortens the 16th grid: each level is ~6% faster, so a level-3
+  // fight drives noticeably harder. Level 0 keeps the exact baseline duration.
+  _stepDur(scene) {
+    const base = 60 / (this._bpm(scene) * 4);
+    return this.escalation > 0 ? base / (1 + 0.06 * this.escalation) : base;
+  }
   // Ease the tempo toward the active scene's target over roughly four bars. A
   // scene change therefore accelerates/decelerates instead of jumping.
   _approachTempo(dt) {
@@ -844,14 +1017,25 @@ export class MusicEngine {
     }
     return this.currentBpm;
   }
-  // Position in the shared 32-bar form: intro 8 / build 8 / climax 8 /
-  // transition 4 / outro 4. Used for fills and the extra orchestral colours.
+  // Section lengths for the active form. Escalation compresses the 32-bar form
+  // to 24/16/8 bars so a hard fight cycles its build/climax landmarks sooner;
+  // level 0 returns the shared FORM_BARS object unchanged.
+  _formBars() {
+    const level = this.escalation | 0;
+    if (level <= 0) return FORM_BARS;
+    return ESCALATED_FORMS[Math.min(3, level)];
+  }
+  // Position in the shared form: intro 8 / build 8 / climax 8 / transition 4 /
+  // outro 4 at rest, compressed under escalation. Used for fills and the extra
+  // orchestral colours.
   _formSection() {
-    const b = ((this.bar % 32) + 32) % 32;
-    if (b < FORM_BARS.intro) return 'intro';
-    if (b < FORM_BARS.intro + FORM_BARS.build) return 'build';
-    if (b < FORM_BARS.intro + FORM_BARS.build + FORM_BARS.climax) return 'climax';
-    if (b < FORM_BARS.intro + FORM_BARS.build + FORM_BARS.climax + FORM_BARS.transition) return 'transition';
+    const bars = this._formBars();
+    const total = bars.intro + bars.build + bars.climax + bars.transition + bars.outro;
+    const b = ((this.bar % total) + total) % total;
+    if (b < bars.intro) return 'intro';
+    if (b < bars.intro + bars.build) return 'build';
+    if (b < bars.intro + bars.build + bars.climax) return 'climax';
+    if (b < bars.intro + bars.build + bars.climax + bars.transition) return 'transition';
     return 'outro';
   }
   // A gentle loudness curve over the 32-bar form: the intro is held back, the
@@ -929,10 +1113,14 @@ export class MusicEngine {
       }
     }
     const duck = 1 - this.duck * 0.62;
+    // Danger lift: tension opens the mix slightly and escalation pushes a touch
+    // harder, both bounded so the limiter never sees a new peak. Exactly 1 when
+    // both states are at rest, which keeps the baseline gains bit-identical.
+    const lift = this.tension > 0 || this.escalation > 0 ? 1 + 0.1 * this.tension + 0.04 * this.escalation : 1;
     const driveHold = scene === 'combat' ? this.layers.combat : scene === 'explore' ? this.layers.explore : scene === 'results' ? this.layers.results : this.layers.menu;
     for (const [key, bus] of Object.entries(this.buses)) {
-      if (key === 'drums') { try { bus.gain.setTargetAtTime(on ? 0.36 * duck * (0.7 + 0.3 * driveHold) * form : 0.0001, t, 0.14); } catch {} continue; }
-      try { bus.gain.setTargetAtTime((target[key] || 0.0001) * duck, t, 0.25); } catch {}
+      if (key === 'drums') { try { bus.gain.setTargetAtTime(on ? 0.36 * duck * lift * (0.7 + 0.3 * driveHold) * form : 0.0001, t, 0.14); } catch {} continue; }
+      try { bus.gain.setTargetAtTime((target[key] || 0.0001) * duck * lift, t, 0.25); } catch {}
     }
     try { this.musicBus.gain.setTargetAtTime(on ? 1.5 : 0.0001, t, 0.3); } catch {}
   }
@@ -1285,6 +1473,213 @@ export class MusicEngine {
     transition.accents++;
   }
 
+  // ---- Seeded variation (ornaments) -----------------------------------------
+  //
+  // The per-bar ornament plan is a pure function of (seed, scene index, bar,
+  // variation id): no RNG draws, so one seed and one variation id reproduce the
+  // exact same performance. Variation 0 never calls this at all, which leaves
+  // the baseline take bit-identical.
+  _ornament(scene) {
+    const bar = this.bar;
+    const cached = this._ornCache;
+    if (cached && cached.bar === bar && cached.scene === scene && cached.variation === this.variation) return cached.value;
+    const index = Math.max(0, MUSIC_SCENES.indexOf(scene));
+    const unit = (salt) => hashUnit(this.seed, index, bar, this.variation, salt);
+    const pick = (list, salt) => list[Math.min(list.length - 1, Math.floor(unit(salt) * list.length))];
+    const value = {
+      fillTurn: pick(MUSIC_ORNAMENTS.fillTurns, 1),
+      ghostSteps: pick(MUSIC_ORNAMENTS.ghosts, 2),
+      counterOctave: pick(MUSIC_ORNAMENTS.counterOctaves, 3),
+      arpDirection: pick(MUSIC_ORNAMENTS.arpDirections, 4),
+      leadTurn: pick(MUSIC_ORNAMENTS.leadTurns, 5),
+      rotation: pick(MUSIC_ORNAMENTS.rotations, 6),
+      fingerprint: (unit(7) * 0xffffffff) | 0,
+    };
+    this._ornCache = { bar, scene, variation: this.variation, value };
+    return value;
+  }
+  // Read the arpeggio in the ornament's direction. Returns the input list
+  // untouched for the default 'written' direction (no allocation).
+  _ornamentArp(list, orn) {
+    if (!Array.isArray(list) || !list.length || !orn) return list;
+    const dir = orn.arpDirection;
+    if (dir === 'reverse') return [...list].reverse();
+    if (dir === 'updown') return [...list, ...[...list].reverse()];
+    if (dir === 'octave') return list.map((d, i) => (i % 2 ? d + 7 : d));
+    return list;
+  }
+  // Colour layers are deliberately the first to be dropped under voice pressure:
+  // they are scheduled after every core part and skipped once only two slots are
+  // left, so the groove never loses a core voice to a decoration.
+  _colorRoom() { return this.voices.length + 2 < this.maxVoices; }
+
+  // ---- Optional colour voices ------------------------------------------------
+  //
+  // Filtered-noise shaker tick (short) or ride (long). One voice slot; falls
+  // back to a very short high square tick in contexts without buffer sources.
+  _shaker(time, bus, gain = 0.03, opts = null) {
+    if (!this.ctx || !bus) return false;
+    const g = clamp(Number(gain) || 0, 0, 0.2);
+    if (g <= 0) return false;
+    const pan = Number(opts?.pan) || 0;
+    const ride = opts?.ride === true;
+    if (this._scheduleNoise(time, bus, { dur: ride ? 0.13 : 0.05, gain: g, type: 'highpass', freq: ride ? 5200 : 7200, q: 0.6, sweep: ride ? 4200 : 9600, attack: 0.001, pan })) { this.notesBy.shaker++; return true; }
+    if (this._scheduleNote(time, bus, 8200, 0.03, 'square', g * 0.5, 6200, 0.001, 0, pan)) { this.notesBy.shaker++; return true; }
+    return false;
+  }
+  // 2-op FM electric piano/bell: a carrier and its modulator live inside ONE
+  // voice record, so a keys note costs one slot. `opts.bell` picks a metallic
+  // ratio and a brighter index; the fallback is the plain triangle pluck when a
+  // context cannot build oscillators.
+  _keys(time, bus, freq, dur, gain, opts = null) {
+    if (!this.ctx || !bus || !this._canVoice(false)) return false;
+    const f0 = Math.max(20, Number(freq) || 440);
+    const g0 = Math.max(0.0002, Number(gain) || 0.04);
+    const ctx = this.ctx;
+    const reverb = Number(opts?.reverb) || 0.2, pan = Number(opts?.pan) || 0;
+    if (typeof ctx.createOscillator !== 'function' || typeof ctx.createGain !== 'function') {
+      return this._scheduleNote(time, bus, f0, dur, 'triangle', g0, 0, 0.004, reverb, pan);
+    }
+    try {
+      const bell = opts?.bell === true;
+      const ratio = Math.max(0.25, Number(opts?.ratio) || (bell ? 2.76 : 1));
+      const index = Math.max(0, Number(opts?.index) || (bell ? 2.2 : 1.1));
+      const carrier = ctx.createOscillator();
+      carrier.type = opts?.carrierType || 'sine';
+      carrier.frequency.setValueAtTime(f0, time);
+      const mod = ctx.createOscillator();
+      mod.type = opts?.modType || 'sine';
+      mod.frequency.setValueAtTime(Math.max(20, f0 * ratio), time);
+      const modGain = ctx.createGain();
+      const dev = Math.max(1, f0 * index);
+      modGain.gain.setValueAtTime(dev, time);
+      modGain.gain.exponentialRampToValueAtTime(Math.max(0.5, dev * 0.02), time + Math.min(Math.max(0.05, dur) * 0.8, 0.6));
+      mod.connect(modGain);
+      modGain.connect(carrier.frequency);
+      const g = ctx.createGain();
+      const attack = Math.max(0.001, Number(opts?.attack) || 0.004);
+      const span = Math.max(0.06, Number(dur) || 0.3);
+      g.gain.setValueAtTime(0.0001, time);
+      g.gain.linearRampToValueAtTime(g0, time + attack);
+      g.gain.exponentialRampToValueAtTime(0.0001, time + span);
+      const extra = [modGain];
+      carrier.connect(g);
+      this._route(g, bus, pan, reverb, Number(opts?.chorus) || 0.08, extra);
+      carrier.start(time); carrier.stop(time + span + 0.05);
+      mod.start(time); mod.stop(time + span + 0.05);
+      const rec = { o: carrier, oscs: [carrier, mod], g, extra, end: time + span + 0.06 };
+      const cleanup = () => { try { carrier.disconnect(); } catch {} try { mod.disconnect(); } catch {} try { g.disconnect(); } catch {} for (const n of extra) { try { n.disconnect(); } catch {} } };
+      try { carrier.onended = cleanup; } catch {}
+      this._commitVoice(rec, false);
+      this.notesBy.keys++;
+      this.scheduleChecksum = (Math.imul(this.scheduleChecksum, 31) + ((Math.round(f0) ^ Math.round(g0 * 4096) ^ (bell ? 1 : 0)) | 0)) | 0;
+      return true;
+    } catch {
+      return this._scheduleNote(time, bus, f0, dur, 'triangle', g0, 0, 0.004, reverb, pan);
+    }
+  }
+  // Plucked string. The baked `low-strings-stacc` spiccato slice wins when it is
+  // decoded; otherwise a Karplus-Strong delay loop excited by the seeded noise
+  // buffer; otherwise a short triangle pluck. One voice slot either way.
+  _pluck(time, bus, freq, dur, gain, pan = 0, opts = null) {
+    if (!this.ctx || !bus) return false;
+    const f0 = Math.max(20, Number(freq) || 440);
+    const g0 = Math.max(0.0002, Number(gain) || 0.04);
+    const pizz = opts?.pizz === true;
+    const counter = pizz ? 'pizz' : 'pluck';
+    if (opts?.sampled !== false && this._scheduleSampled(time, bus, 'low-strings-stacc', f0, Math.max(0.08, dur), g0, Number(opts?.reverb) || 0.16, pan, { velocity: pizz ? 2 : 1, attack: 0.005 })) { this.notesBy[counter]++; return true; }
+    const ctx = this.ctx;
+    if (typeof ctx.createDelay === 'function' && typeof ctx.createBufferSource === 'function' && typeof ctx.createGain === 'function') {
+      const buffer = this._noise();
+      if (buffer && this._canVoice(false)) {
+        try {
+          const src = ctx.createBufferSource();
+          src.buffer = buffer;
+          const delay = ctx.createDelay(0.05);
+          delay.delayTime.setValueAtTime(clamp(1 / f0, 0.0005, 0.05), time);
+          const fb = ctx.createGain();
+          fb.gain.setValueAtTime(0.9, time);
+          const damp = typeof ctx.createBiquadFilter === 'function' ? ctx.createBiquadFilter() : null;
+          if (damp) { damp.type = 'lowpass'; damp.frequency.setValueAtTime(Math.min(9000, f0 * 8), time); }
+          const span = clamp(Math.max(0.1, Number(dur) || 0.3), 0.1, 1.2);
+          const g = ctx.createGain();
+          g.gain.setValueAtTime(0.0001, time);
+          g.gain.linearRampToValueAtTime(g0, time + 0.003);
+          g.gain.exponentialRampToValueAtTime(0.0001, time + span);
+          const extra = [delay, fb];
+          src.connect(delay);
+          if (damp) { delay.connect(damp); damp.connect(fb); extra.push(damp); } else delay.connect(fb);
+          fb.connect(delay);
+          delay.connect(g);
+          this._route(g, bus, pan, Number(opts?.reverb) || 0.14, 0.05, extra);
+          src.start(time, 0);
+          src.stop(time + 0.02);
+          const rec = { o: src, g, extra, end: time + span + 0.05 };
+          const cleanup = () => { try { src.disconnect(); } catch {} try { g.disconnect(); } catch {} for (const n of extra) { try { n.disconnect(); } catch {} } };
+          // The excitation is only 20 ms long, so the delay loop must ring until
+          // the voice's own end before the graph is released; a timer (rather
+          // than the source's `onended`) is what keeps the plucked tail audible.
+          const timer = setTimeout(cleanup, Math.max(60, (span + 0.12) * 1000));
+          if (timer && typeof timer.unref === 'function') timer.unref();
+          rec.timer = timer;
+          this._commitVoice(rec, false);
+          this.notesBy[counter]++;
+          this.scheduleChecksum = (Math.imul(this.scheduleChecksum, 31) + ((Math.round(f0) ^ Math.round(g0 * 4096)) | 0)) | 0;
+          return true;
+        } catch { /* fall through to the synth pluck */ }
+      }
+    }
+    if (this._scheduleNote(time, bus, f0, Math.max(0.06, dur), 'triangle', g0, 0, 0.004, Number(opts?.reverb) || 0.14, pan, { filter: Math.min(6000, f0 * 8), filterEnd: Math.max(700, f0 * 2), q: 0.9 })) { this.notesBy[counter]++; return true; }
+    return false;
+  }
+  // Pizzicato is the same voice with the short spiccato defaults; kept as its
+  // own name so arrangements can ask for "pizz" and tests can count it.
+  _pizz(time, bus, freq, dur, gain, pan = 0, opts = null) {
+    return this._pluck(time, bus, freq, dur, gain, pan, { ...(opts || {}), pizz: true });
+  }
+  // Low-string danger tremolo. Sampled spiccato when the bank is warm, else a
+  // short filtered saw stroke; one voice per stroke, so the tremolo rate is a
+  // direct bound on its voice cost.
+  _tremolo(time, bus, freq, dur, gain, pan = 0) {
+    const f0 = Math.max(20, Number(freq) || 110);
+    const g0 = clamp(Number(gain) || 0, 0.0002, 0.12);
+    if (this._scheduleSampled(time, bus, 'low-strings-stacc', f0, dur, g0, 0.18, pan, { velocity: 2, attack: 0.004 })) { this.notesBy.tremolo++; return true; }
+    const cut = 420 + 520 * Math.min(1, g0 * 24);
+    if (this._scheduleNote(time, bus, f0, dur, 'sawtooth', g0, 0, 0.004, 0.18, pan, { count: 2, detune: 6, filter: cut, filterEnd: cut * 0.7, q: 0.9, chorus: 0.08 })) { this.notesBy.tremolo++; return true; }
+    return false;
+  }
+  // ---- Harmonic responses ----------------------------------------------------
+  //
+  // One pending response per scheduled step, at most. A request older than two
+  // seconds (the soundtrack was paused) is dropped instead of fired late.
+  _drainResponses(time, bus, root, scale, chord, quality, stepDur) {
+    if (!this.pendingResponses.length) return false;
+    const request = this.pendingResponses.shift();
+    if (time - request.at > 2) return false;
+    return this._responseVoice(time, bus, request.kind, request.vol, root, scale, chord, quality, stepDur);
+  }
+  _responseVoice(time, bus, kind, vol, root, scale, chord, quality, stepDur) {
+    const gain = clamp(Number(vol) || 0, 0, 1);
+    if (gain <= 0.02) return false;
+    if (kind === 'capture') {
+      const f = root * Math.pow(2, this._chordTone(scale, chord, quality, 0, 1) / 12);
+      const end = root * Math.pow(2, this._chordTone(scale, chord, quality, 2, 1) / 12);
+      if (this._scheduleNote(time, bus, f, stepDur * 6, 'triangle', 0.05 * gain, end, 0.012, 0.4, 0.15, { count: 2, detune: 6, filter: 2400, filterEnd: 5200, q: 1.0, chorus: 0.12 })) { this.notesBy.response++; return true; }
+    } else if (kind === 'loss') {
+      const f = root * Math.pow(2, this._chordTone(scale, chord, quality, 2, 1) / 12);
+      const end = root * Math.pow(2, this._chordTone(scale, chord, quality, 0, 0) / 12);
+      if (this._scheduleNote(time, bus, f, stepDur * 7, 'sawtooth', 0.045 * gain, end, 0.02, 0.4, -0.12, { count: 2, detune: 8, filter: 1800, filterEnd: 420, q: 0.9, chorus: 0.1 })) { this.notesBy.response++; return true; }
+    } else if (kind === 'accent') {
+      const tone = quality ? 1 : 4;
+      const f = root * Math.pow(2, this._chordTone(scale, chord, quality, tone, 2) / 12);
+      if (this._scheduleNote(time, bus, f, stepDur * 3, 'triangle', 0.045 * gain, f * 1.5, 0.006, 0.3, 0.2, { count: 2, detune: 4, filter: 3600, filterEnd: 1800, q: 1.1, chorus: 0.1 })) { this.notesBy.response++; this.notesBy.accent++; return true; }
+    } else if (kind === 'final') {
+      const f = noteFreq(root / 2, scale, chord);
+      if (this._scheduleNote(time, bus, f, stepDur * 8, 'sawtooth', 0.04 * gain, 0, 0.4, 0.25, 0, { filter: 520, filterEnd: 240, q: 0.8, chorus: 0.1 })) { this.notesBy.response++; return true; }
+    }
+    return false;
+  }
+
   _prune(time) {
     if (!this.voices.length) return;
     const kept = [];
@@ -1295,12 +1690,27 @@ export class MusicEngine {
   }
 
   // Phrase/forms position: the fourth bar of each half-phrase is a small fill;
-  // bars 8/16/24/28/32 (1-based) are the big section-landmark fills.
+  // bars 8/16/24/28/32 (1-based) are the big section-landmark fills. Under
+  // escalation the landmarks follow the compressed form: every section's last
+  // bar is a big fill and every fourth bar inside it is a small one. Level 0
+  // keeps the exact historical bar numbers.
   _fillLevel() {
-    const b = ((this.bar % 32) + 32) % 32;
-    if (b === 7 || b === 15 || b === 23 || b === 27 || b === 31) return 2;
-    if (b % 4 === 3) return 1;
-    return 0;
+    const level = this.escalation | 0;
+    if (level <= 0) {
+      const b = ((this.bar % 32) + 32) % 32;
+      if (b === 7 || b === 15 || b === 23 || b === 27 || b === 31) return 2;
+      if (b % 4 === 3) return 1;
+      return 0;
+    }
+    const bars = this._formBars();
+    const total = bars.intro + bars.build + bars.climax + bars.transition + bars.outro;
+    const b = ((this.bar % total) + total) % total;
+    let at = 0;
+    for (const len of [bars.intro, bars.build, bars.climax, bars.transition, bars.outro]) {
+      at += len;
+      if (b === at - 1) return 2;
+    }
+    return (b + 1) % 4 === 0 ? 1 : 0;
   }
 
   _scheduleStep(time, scene, step) {
@@ -1320,6 +1730,11 @@ export class MusicEngine {
     const fill = fillLevel > 0 ? (this.fills[scene] || null) : null;
     const stepsLeft = Math.max(1, arr.steps - step);
     const bar = this.bar;
+    // Optional colour is armed only by a palette that turns it on; the seeded
+    // variation plan is null (and allocation-free) while variation is 0.
+    const palette = this.palette || MUSIC_PALETTES.default;
+    const orn = this.variation ? this._ornament(scene) : null;
+    if (orn && step === 0) this.scheduleChecksum = (Math.imul(this.scheduleChecksum, 31) + orn.fingerprint) | 0;
     // Drums: the combat grid enters in stages (kick -> snare -> hats) as the
     // layer rises, so a fight builds instead of slamming in.
     const drumGrid = (list, kind) => { if (!list) return; for (const s of list) if ((s + arr.steps) % arr.steps === step) kind(); };
@@ -1360,6 +1775,12 @@ export class MusicEngine {
     if (fill && (scene !== 'combat' || boosted || hold >= LAYER_THRESHOLDS.snare)) {
       if (fill.hat) drumGrid(fill.hat, () => this._hat(time, drumBus, 0.05));
       if (fill.snare) drumGrid(fill.snare, () => this._snare(time, drumBus, fillLevel === 2 ? 0.2 : 0.16));
+    }
+    // Seeded ghost 16ths: quiet hats on the steps the authored grid leaves empty.
+    // They belong to the drum layer, so they never double a hat or fill hat.
+    const onGrid = (list) => Boolean(list && list.some((s) => ((s + arr.steps) % arr.steps) === step));
+    if (orn && orn.ghostSteps.includes(step) && !onGrid(arr.hat) && !onGrid(fill?.hat) && (scene !== 'combat' || boosted || hold >= LAYER_THRESHOLDS.hat)) {
+      this._hat(time, drumBus, scene === 'combat' ? 0.02 : 0.015);
     }
 
     // 3. Tribal and bell accents. Bells sit an octave-plus above the strings so
@@ -1454,7 +1875,9 @@ export class MusicEngine {
     const leadEvery = Math.max(1, Math.round(leadRate * 4));
     if (lead && step % leadEvery === 0 && hold >= LAYER_THRESHOLDS.lead) {
       const idx = this._leadIndex(arr, step);
-      const semi = this._leadTone(arr, lead[idx], chord);
+      // A seeded turn ornaments the third beat of each bar when variation is on.
+      const turn = orn && step === Math.floor(arr.steps / 2) ? orn.leadTurn : 0;
+      const semi = this._leadTone(arr, lead[idx] + turn, chord);
       const f = root * Math.pow(2, semi / 12) * Math.pow(2, Number(arr.leadOctave) || 0) * Math.pow(2, (Number(arr.leadShift) || 0) / 12);
       const type = arr.leadType || 'square';
       const gain = (Number(arr.leadGain) || 0.024) * this._vel();
@@ -1467,19 +1890,26 @@ export class MusicEngine {
     //    against the sampled strings.
     if (arr.counter && step % 2 === 1 && hold >= LAYER_THRESHOLDS.counter) {
       const i = (step - 1) / 2;
-      const f = noteFreq(root, scale, arr.counter[i % arr.counter.length] + chord) * Math.pow(2, (Number(arr.counterShift) || 0) / 12);
+      const octave = orn ? orn.counterOctave : 0;
+      const f = noteFreq(root, scale, arr.counter[i % arr.counter.length] + chord) * Math.pow(2, ((Number(arr.counterShift) || 0) + octave) / 12);
       const pan = step % 4 === 1 ? 0.12 : -0.12;
       if (this._scheduleNote(time, bus, f, stepDur * 1.6, 'triangle', 0.014 * this._vel(), 0, 0.012, 0.2, pan, { count: 2, detune: 5, chorus: 0.1 })) this.notesBy.counter++;
     }
 
     // 7. Arpeggio: one degree per eighth note with a soft octave shimmer off the
-    //    menu, spread gently across the stereo field and chorused for width.
-    const arp = fill?.arp || arr.arp;
+    //    menu, spread gently across the stereo field and chorused for width. A
+    //    variation may rotate the fill, re-read the line in another direction and
+    //    rotate the instrument/register it is voiced with.
+    const arpSource = fill?.arp
+      ? (orn ? [...fill.arp.slice(orn.fillTurn), ...fill.arp.slice(0, orn.fillTurn)] : fill.arp)
+      : arr.arp;
+    const arp = orn ? this._ornamentArp(arpSource, orn) : arpSource;
     if (arp && step % 2 === 0) {
       const i = step / 2;
-      const f = noteFreq(root, scale, arp[i % arp.length] + chord);
+      const rot = orn ? orn.rotation : null;
+      const f = noteFreq(root, scale, arp[i % arp.length] + chord) * (rot ? rot.ratio : 1);
       const pan = i % 2 ? -0.12 : 0.12;
-      if (this._scheduleNote(time, bus, f, stepDur * 1.7, 'triangle', (scene === 'combat' ? 0.034 : 0.028) * this._vel(), 0, 0.01, 0.12, pan, { count: 2, detune: 4, chorus: 0.08 })) this.notesBy.arp++;
+      if (this._scheduleNote(time, bus, f, stepDur * 1.7, rot ? rot.timbre : 'triangle', (scene === 'combat' ? 0.034 : 0.028) * this._vel(), 0, 0.01, 0.12, pan, { count: 2, detune: 4, chorus: 0.08 })) this.notesBy.arp++;
       if (scene !== 'menu' && this._scheduleNote(time, bus, f * 2, stepDur * 1.1, 'sine', 0.014 * this._vel(), 0, 0.012, 0.2, -pan)) this.notesBy.arp++;
     }
 
@@ -1522,6 +1952,49 @@ export class MusicEngine {
       if (this._scheduleNote(time, bus, noteFreq(root / 2, scale, 4), droneDur, 'sine', 0.034 * this._vel(), 0, 0.5, 0.08, 0.1, { sustain: true })) this.notesBy.drone++;
       if (bar % 4 === 0) this._brass(time, bus, noteFreq(root / 2, scale, 0), droneDur * 0.9, 0.13, -0.05, { velocity: 1 });
     }
+
+    // 10. Harmonic responses. A queued capture/loss/accent/final lands on this
+    //     step and owns the beat outright: SynthAudio only suppresses its motif
+    //     when the response was accepted, so the two can never double-layer.
+    if (this.pendingResponses.length) {
+      this._drainResponses(time, bus, root, scale, chord, quality, stepDur);
+    }
+    // 11. Tension danger layer: a low-string tremolo alternating root and fifth,
+    //     doubling its rate once tension passes the top of the scale. Silent at
+    //     rest, so the baseline take never sees it.
+    if (this.tension > 0.12 && (scene === 'combat' || scene === 'explore') && this._colorRoom()) {
+      const rate = this.tension >= 0.62 ? 1 : 2;
+      if (step % rate === 0) {
+        const i = step / rate;
+        const semi = i % 2 ? this._chordTone(scale, chord, quality, 2, 0) : this._chordTone(scale, chord, quality, 0, 0);
+        const f = (root / 2) * Math.pow(2, semi / 12);
+        this._tremolo(time, bus, f, stepDur * (rate === 1 ? 0.8 : 1.6), 0.012 + 0.03 * this.tension, i % 2 ? -0.28 : 0.28);
+      }
+    }
+    // 12. Palette colour (dropped first under pressure): shaker ticks/rides, FM
+    //     keys stabs and plucked-string answers. Each layer needs an authored
+    //     arrangement flag AND the active palette, and is also section/layer
+    //     gated so it stays a colour rather than a part.
+    if (this._colorRoom()) {
+      const coloredSection = section !== 'outro' || scene === 'results';
+      if (palette.shaker && arr.shaker && coloredSection && (scene !== 'combat' || boosted || hold >= LAYER_THRESHOLDS.shaker)) {
+        drumGrid(arr.shaker, () => this._shaker(time, drumBus, scene === 'combat' ? 0.026 : 0.02, { pan: step % 4 === 2 ? 0.2 : -0.2 }));
+      }
+      if (palette.keys && arr.keys && coloredSection && hold >= LAYER_THRESHOLDS.keys && step === (bar % 2 === 0 ? 0 : Math.floor(arr.steps / 2))) {
+        const tone = this._chordTone(scale, chord, quality, bar % 2 === 0 ? 1 : 2, 1);
+        this._keys(time, bus, root * Math.pow(2, tone / 12), stepDur * 5, 0.04, { pan: bar % 2 === 0 ? 0.18 : -0.18, bell: true });
+      }
+      if (palette.pluck && step % 4 === 3 && (section === 'build' || section === 'climax' || section === 'transition' || scene === 'menu' || scene === 'results')) {
+        const wantPizz = Boolean(arr.pizz) && !arr.pluck;
+        if ((arr.pluck || arr.pizz) && hold >= (wantPizz ? LAYER_THRESHOLDS.pizz : LAYER_THRESHOLDS.pluck)) {
+          const tone = this._chordTone(scale, chord, quality, (step / 4 + bar) % 3, 0);
+          const f = root * Math.pow(2, tone / 12);
+          const pan = step % 8 === 3 ? 0.22 : -0.22;
+          if (wantPizz) this._pizz(time, bus, f, stepDur * 1.4, 0.03, pan);
+          else this._pluck(time, bus, f, stepDur * 1.6, 0.03, pan);
+        }
+      }
+    }
   }
 
   // Advance the 16th-note grid by one step and roll the bar counter. Called
@@ -1554,6 +2027,7 @@ export class MusicEngine {
   }
 
   _stopVoice(rec) {
+    if (rec.timer) { try { clearTimeout(rec.timer); } catch {} rec.timer = null; }
     const sources = rec.oscs?.length ? rec.oscs : [rec.o];
     for (const o of sources) {
       try { o.onended = null; } catch {}
@@ -1586,8 +2060,10 @@ export class MusicEngine {
     this.musicBus = null;
     this.transition = null;
     this._lastTime = null;
+    this.pendingResponses.length = 0;
+    this._ornCache = null;
     this.ctx = null;
   }
 }
 
-export const MUSIC_EXPORTS = Object.freeze(['MusicEngine', 'MUSIC_SCENES', 'CHORD_PROGRESSIONS', 'ARRANGEMENTS', 'SOUNDTRACKS', 'HALO_THEME', 'HALO_ARRANGEMENTS', 'HALO_PROGRESSIONS', 'HALO_QUALITIES', 'COCS_MOTIF', 'CHORD_TONES', 'FORM_BARS']);
+export const MUSIC_EXPORTS = Object.freeze(['MusicEngine', 'MUSIC_SCENES', 'CHORD_PROGRESSIONS', 'ARRANGEMENTS', 'SOUNDTRACKS', 'HALO_THEME', 'HALO_ARRANGEMENTS', 'HALO_PROGRESSIONS', 'HALO_QUALITIES', 'COCS_MOTIF', 'CHORD_TONES', 'FORM_BARS', 'MUSIC_PALETTES', 'MUSIC_ORNAMENTS', 'MUSIC_RESPONSES', 'LAYER_THRESHOLDS']);

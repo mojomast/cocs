@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { GUNTRUCK, PUMA, HORNET, TITAN, SCOUT, TRANSPORT, VEHICLE_TYPES, VEHICLE_KIND_IDS, createVehicle, respawnVehicle, stepVehicle, vehicleCanEnter, vehicleMuzzles, vehicleMuzzleCount, vehicleStats, vehicleCapacity, vehicleSeatFor } from './vehicles.mjs';
+import { GUNTRUCK, PUMA, HORNET, TITAN, SCOUT, TRANSPORT, VEHICLE_TYPES, VEHICLE_KIND_IDS, VEHICLE_WEAKPOINT, VEHICLE_DISMOUNT, VEHICLE_PASSENGER_FIRE, createVehicle, respawnVehicle, stepVehicle, vehicleCanEnter, vehicleMuzzles, vehicleMuzzleCount, vehicleStats, vehicleCapacity, vehicleSeatFor, vehicleWeakPointMultiplier, vehicleDismountStun, passengerFireScale } from './vehicles.mjs';
 
 const flat = () => ({ y: 0, normal: { x: 0, y: 1, z: 0 } });
 const lateralOf = vehicle => vehicle.velocity.x * Math.cos(vehicle.heading) - vehicle.velocity.z * Math.sin(vehicle.heading);
@@ -288,4 +288,51 @@ test('every new chassis is placed on maps that can actually use it', async () =>
   const hosts = MAPS.filter(arena => (arena.vehicles || []).some(vehicle => (vehicle.kind || 'puma') === kind));
   assert.ok(hosts.length >= 3, `${kind} should be reachable on several maps (${hosts.length})`);
  }
+});
+
+test('weak-point bearing pays rear and flank premiums but never for splash callers', () => {
+  const vehicle = createVehicle();
+  vehicle.heading = 0; // forward is +z at heading 0
+  vehicle.position = { x: 0, y: 0, z: 0 };
+  assert.equal(vehicleWeakPointMultiplier(vehicle, { from: { x: 0, z: -6 } }), VEHICLE_WEAKPOINT.rear);
+  assert.equal(vehicleWeakPointMultiplier(vehicle, { from: { x: 6, z: 0 } }), VEHICLE_WEAKPOINT.flank);
+  assert.equal(vehicleWeakPointMultiplier(vehicle, { from: { x: 0, z: 6 } }), 1);
+  assert.equal(vehicleWeakPointMultiplier(vehicle), 1, 'splash and old call sites stay neutral');
+  assert.equal(vehicleWeakPointMultiplier(vehicle, { bearing: Math.PI }), VEHICLE_WEAKPOINT.rear);
+  assert.equal(vehicleWeakPointMultiplier(vehicle, { bearing: Math.PI / 2 }), VEHICLE_WEAKPOINT.flank);
+  assert.equal(vehicleWeakPointMultiplier(vehicle, { bearing: 0 }), 1);
+  assert.equal(vehicleWeakPointMultiplier(vehicle, { from: { x: 0, z: 0 } }), 1, 'a co-located attacker has no bearing');
+  assert.ok(VEHICLE_WEAKPOINT.rear > VEHICLE_WEAKPOINT.flank && VEHICLE_WEAKPOINT.flank > 1);
+});
+
+test('dismount stun scales with exit speed, ignores respawns and counts flight vertical speed', () => {
+  const ground = createVehicle();
+  ground.velocity = { x: 0, z: VEHICLE_DISMOUNT.maxSpeed };
+  const maxed = vehicleDismountStun(ground, 'exit');
+  assert.equal(maxed.duration, VEHICLE_DISMOUNT.maxDuration);
+  assert.equal(maxed.multiplier, VEHICLE_DISMOUNT.slowMultiplier);
+  ground.velocity = { x: 0, z: VEHICLE_DISMOUNT.minSpeed };
+  assert.equal(vehicleDismountStun(ground, 'exit').duration, VEHICLE_DISMOUNT.minDuration);
+  ground.velocity = { x: 0, z: VEHICLE_DISMOUNT.minSpeed - 1 };
+  assert.deepEqual(vehicleDismountStun(ground, 'exit'), { duration: 0, multiplier: 1 });
+  ground.velocity = { x: VEHICLE_DISMOUNT.maxSpeed, z: 0 };
+  assert.deepEqual(vehicleDismountStun(ground, 'respawn'), { duration: 0, multiplier: 1 }, 'respawn never stuns');
+  const flight = createVehicle(HORNET);
+  flight.velocity = { x: 0, z: 0 };
+  flight.vy = 12;
+  assert.ok(vehicleDismountStun(flight, 'exit').duration >= VEHICLE_DISMOUNT.minDuration, 'flight counts vertical speed');
+  assert.ok(vehicleDismountStun(flight, 'exit').duration <= VEHICLE_DISMOUNT.maxDuration);
+});
+
+test('passenger personal fire pays a bounded scale that no other seat pays', () => {
+  const foot = { vehicleId: null, vehicleSeat: null };
+  const driver = { vehicleId: 1, vehicleSeat: 'driver' };
+  const gunner = { vehicleId: 1, vehicleSeat: 'gunner' };
+  const passenger = { vehicleId: 1, vehicleSeat: 'passenger' };
+  assert.equal(passengerFireScale(passenger), VEHICLE_PASSENGER_FIRE);
+  assert.equal(passengerFireScale(foot).spread, 1);
+  assert.equal(passengerFireScale(driver).recoil, 1);
+  assert.equal(passengerFireScale(gunner).spread, 1);
+  assert.ok(VEHICLE_PASSENGER_FIRE.spread > 1 && VEHICLE_PASSENGER_FIRE.recoil > 1);
+  assert.ok(Object.isFrozen(VEHICLE_WEAKPOINT) && Object.isFrozen(VEHICLE_DISMOUNT) && Object.isFrozen(VEHICLE_PASSENGER_FIRE));
 });

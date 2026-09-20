@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import * as T from 'three';
-import {addSky,addMountains,addScatter,updateScatterSway,ambientProfile,smokeAnchors,AMBIENT_KINDS,skyPalette,skyGradientAt,skyPhase,WEATHER_KINDS,PRECIP_KINDS,selectWeather,weatherPreset,timeOfDayAt,biomeAmbience,precipParticleAdds,BIOME_PROP_FAMILIES,SCATTER_TRIANGLE_BUDGET,biomePropFamilies,scatterTriangles,lightningSchedule,windGustAt,wetSheen} from './environment.mjs';
+import {addSky,addMountains,addBackdrop,backdropKitFor,backdropScale,BACKDROP_BIOMES,BACKDROP_TRIANGLE_BUDGET,addScatter,updateScatterSway,ambientProfile,smokeAnchors,AMBIENT_KINDS,skyPalette,skyGradientAt,skyPhase,WEATHER_KINDS,PRECIP_KINDS,selectWeather,weatherPreset,timeOfDayAt,biomeAmbience,precipParticleAdds,BIOME_PROP_FAMILIES,SCATTER_TRIANGLE_BUDGET,biomePropFamilies,scatterTriangles,lightningSchedule,windGustAt,wetSheen} from './environment.mjs';
 import {ArenaView} from './view.mjs';
 
 const bounds={minX:-40,maxX:40,minZ:-40,maxZ:40};
@@ -395,3 +395,73 @@ test('mountain detail scales the cone shell resolution',()=>{
  assert.ok(triangleCount(coarse)<triangleCount(fine),'coarse mountains use fewer segments');
  assert.ok(coarse.geometry.attributes.position.count<fine.geometry.attributes.position.count);
 });
+
+test('the backdrop kit resolves a pure per-biome descriptor',()=>{
+ assert.deepEqual([...BACKDROP_BIOMES],['city','canyon','snow','foundry','void']);
+ const cases=[[{id:'neon-vertical'},'city'],[{id:'sunscar-canyon'},'foundry'],[{id:'frostline'},'snow'],[{id:'foundry'},'foundry'],[{id:'aether'},'void'],[{id:'skyfall-basin'},'void'],[{id:'custom-map'},'canyon']];
+ for(const [arena,biome] of cases){
+  const kit=backdropKitFor(arena);
+  assert.equal(kit.biome,biome,`${JSON.stringify(arena)} resolves to ${biome}`);
+  assert.deepEqual(kit,backdropKitFor(arena),'the descriptor is a pure function');
+  assert.ok(Object.isFrozen(kit)&&Object.isFrozen(kit.families));
+  assert.ok(kit.families.length>0);
+  for(const family of kit.families){
+   assert.equal(typeof family.kind,'string');
+   assert.ok(family.count>0);
+   assert.match(family.color,/^#[0-9a-f]{6}$/i);
+   if(family.emissive)assert.match(family.emissive,/^#[0-9a-f]{6}$/i);
+  }
+ }
+ assert.equal(backdropKitFor('snow').biome,'snow','a bare biome name resolves too');
+ assert.deepEqual(backdropKitFor('not-a-biome'),backdropKitFor({id:'custom-map'}),'an unknown biome falls back to the canyon drums');
+ assert.ok(backdropKitFor({id:'aether'}).ring,'the void kit carries the orbital ring');
+ assert.equal(backdropKitFor({id:'frostline'}).ring,null,'ground kits carry no ring');
+});
+
+test('addBackdrop builds instanced families with fresh, finite geometry',()=>{
+ for(const biome of BACKDROP_BIOMES){
+  const world=new T.Group(),meshes=addBackdrop(world,{biome,seed:7,quality:{scatter:1,scatterDetail:1}});
+  assert.ok(meshes.length>0,`${biome} builds nodes`);
+  assert.ok(world.children.length===meshes.length);
+  for(const mesh of meshes){
+   assert.equal(mesh.userData.environment,true);
+   assert.equal(mesh.userData.backdrop,true);
+   assert.equal(mesh.userData.backdropKind,biome);
+   assert.equal(mesh.frustumCulled,false);
+   if(mesh.isInstancedMesh){
+    assert.ok(mesh.count>0);
+    assert.ok(mesh.instanceColor&&mesh.instanceColor.count>=mesh.count,'instances carry a deterministic tint');
+    const at=decomposed(mesh);
+    for(let i=0;i<mesh.count;i++){
+     const {position,scale}=at(i);
+     assert.ok([position.x,position.y,position.z].every(Number.isFinite),`${biome}: finite instance position`);
+     assert.ok(scale.x>0&&scale.y>0&&scale.z>0,`${biome}: positive instance scale`);
+     assert.ok(Math.hypot(position.x,position.z)>20,`${biome}: backdrop instances sit outside the play space`);
+    }
+   }else assert.equal(mesh.userData.backdropRing,true,`${biome}: only the orbital ring is a plain mesh`);
+  }
+  assert.ok(scatterTriangles(meshes)<=BACKDROP_TRIANGLE_BUDGET,`${biome}: ${scatterTriangles(meshes)} triangles within ${BACKDROP_TRIANGLE_BUDGET}`);
+  const first=meshes.map(mesh=>mesh.geometry),replay=addBackdrop(world,{biome,seed:7,quality:{scatter:1,scatterDetail:1}});
+  for(const mesh of replay)assert.ok(!first.includes(mesh.geometry),`${biome}: a rebuild uses fresh geometry for the exactly-once disposal pin`);
+  for(const mesh of meshes.concat(replay)){mesh.geometry.dispose();mesh.material.dispose();}
+ }
+ const empty=backdropKitFor('canyon'),world=new T.Group();
+ assert.deepEqual(addBackdrop(null,{biome:'canyon'}),[]);
+ assert.ok(empty.families.length>0);
+});
+
+test('backdrop density and detail scale with the quality tier',()=>{
+ const instances=meshes=>meshes.reduce((sum,mesh)=>sum+(mesh.isInstancedMesh?mesh.count:0),0);
+ const high=addBackdrop(new T.Group(),{biome:'city',seed:11,quality:{scatter:1,scatterDetail:1}});
+ const low=addBackdrop(new T.Group(),{biome:'city',seed:11,quality:{scatter:.4,scatterDetail:.3}});
+ assert.ok(instances(low)>0&&instances(low)<instances(high),`low ${instances(low)} < high ${instances(high)}`);
+ assert.ok(scatterTriangles(low)<scatterTriangles(high),'the low tier draws fewer triangles');
+ const tiered=addBackdrop(new T.Group(),{biome:'snow',seed:3,quality:0});
+ const rich=addBackdrop(new T.Group(),{biome:'snow',seed:3,quality:2});
+ assert.ok(instances(tiered)<instances(rich),'a numeric tier scales the same way');
+ assert.deepEqual(backdropScale(2),{density:1,detail:1});
+ assert.deepEqual(backdropScale(0),{density:.5,detail:.35});
+ assert.deepEqual(backdropScale(null),{density:1,detail:1});
+ for(const mesh of [...high,...low,...tiered,...rich]){mesh.geometry.dispose();mesh.material.dispose();}
+});
+

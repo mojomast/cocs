@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import {Match, floorAt, obstructed} from './core.mjs';
-import {GUNTRUCK, vehicleSeatFor, takeVehicleSeat} from './vehicles.mjs';
+import {GUNTRUCK, VEHICLE_DISMOUNT, vehicleSeatFor, takeVehicleSeat} from './vehicles.mjs';
 
 const match=()=>new Match('chatgpt','openclaw',()=>.5,'blood-gulch',{mode:'ctf',botCount:0,respawn:1});
 
@@ -141,4 +141,59 @@ test('destroyed or respawning vehicles reject entry until they respawn',()=>{
   v.health=v.maxHealth;v.respawnTimer=0;
   assert.ok(vehicleSeatFor(v));
   assert.equal(m.enterVehicle(a),true);
+});
+
+test('direct vehicle hits read the attacker bearing while splash stays neutral',()=>{
+  const m=new Match('chatgpt','openclaw',()=>.5,'blood-gulch',{mode:'deathmatch',botCount:1,respawn:1});
+  const [attacker]=m.actors,v=m.vehicles[0];
+  v.driver=null;v.position={x:0,y:0,z:0};v.heading=0;
+  const hit=opts=>{v.health=v.maxHealth;return m.damageVehicle(v,100,attacker,opts);};
+  const front=hit({from:{x:0,y:0,z:6}});
+  const flank=hit({from:{x:6,y:0,z:0}});
+  const rear=hit({from:{x:0,y:0,z:-6}});
+  assert.ok(Math.abs(front-100)<1e-9,`front keeps the base (${front})`);
+  assert.ok(Math.abs(flank-120)<1e-9,`flank pays 1.2x (${flank})`);
+  assert.ok(Math.abs(rear-135)<1e-9,`rear pays 1.35x (${rear})`);
+  // Splash call sites never pass a bearing: a rear-facing blast still pays base.
+  v.health=v.maxHealth;
+  m.detonate({x:0,y:0,z:0},8,100,attacker);
+  assert.ok(Math.abs((v.maxHealth-v.health)-100)<1e-9,`splash stays neutral (${v.maxHealth-v.health})`);
+});
+
+test('team friendly-fire guards still ignore even a rear-bearing hit',()=>{
+  const m=new Match('chatgpt','openclaw',()=>.5,'blood-gulch',{mode:'ctf',botCount:0,humanCount:2,respawn:1});
+  const [a,b]=m.actors,v=m.vehicles[0];
+  a.team=0;b.team=0;v.driver=a.id;
+  const before=v.health;
+  assert.equal(m.damageVehicle(v,50,b,{from:{x:0,y:0,z:-6},bearing:Math.PI}),0,'friendly rear shots stay ignored');
+  assert.equal(v.health,before);
+});
+
+test('bailing out of a moving Puma stuns briefly, parked exits do not, and the window expires',()=>{
+  const m=new Match('chatgpt','openclaw',()=>.5,'blood-gulch',{mode:'deathmatch',botCount:1,respawn:1});
+  const [a,b]=m.actors,v=m.vehicles[0];
+  Object.assign(a,{x:v.position.x,y:v.position.y,z:v.position.z,grounded:true,protection:0,slow:0,slowMultiplier:.55});
+  assert.ok(m.enterVehicle(a));
+  v.velocity.x=0;v.velocity.z=VEHICLE_DISMOUNT.maxSpeed;
+  assert.ok(m.releaseVehicle(a,v,'exit'));
+  assert.ok(a.slow>=VEHICLE_DISMOUNT.minDuration&&a.slow<=VEHICLE_DISMOUNT.maxDuration,`moving exit stun ${a.slow}`);
+  assert.equal(a.slowMultiplier,VEHICLE_DISMOUNT.slowMultiplier);
+  const stun=a.slow;
+  for(let i=0;i<Math.ceil((stun+.2)*60);i++)m.step(1/60);
+  assert.equal(a.slow,0,'the dismount stun expires');
+  // A parked bail-out is free.
+  const parked=m.vehicles[1];
+  Object.assign(b,{x:parked.position.x,y:parked.position.y,z:parked.position.z,grounded:true,protection:0,slow:0});
+  assert.ok(m.enterVehicle(b));
+  parked.velocity.x=parked.velocity.z=0;
+  m.releaseVehicle(b,parked,'exit');
+  assert.equal(b.slow,0,'a parked exit never stuns');
+  // The destroy path releases the crew before zeroing velocity, so a moving
+  // wreck still stuns while a respawn release never does.
+  parked.velocity.z=12;parked.driver=b.id;
+  m.releaseVehicle(b,parked,'destroyed');
+  assert.ok(b.slow>0,'a moving wreck stuns its crew');
+  b.slow=0;
+  m.releaseVehicle(b,parked,'respawn');
+  assert.equal(b.slow,0,'respawn releases never stun');
 });

@@ -827,19 +827,30 @@ a.icon-button.github-link>span{position:absolute;width:1px;height:1px;overflow:h
    pointer id for multi-touch. */
 html, body { overscroll-behavior: none; }
 .touch-layer { position: absolute; inset: 0; z-index: 6; pointer-events: none; touch-action: none; user-select: none; -webkit-user-select: none; -webkit-tap-highlight-color: transparent; }
+/* Player-tuned opacity. Kept a separate rule so the pinned capture-layer token
+   above stays byte-identical. */
+.touch-layer { opacity: var(--touch-opacity,1); }
 .touch-layer * { touch-action: none; user-select: none; -webkit-user-select: none; }
 .touch-move-zone { position: absolute; left: 0; bottom: 0; width: 48%; height: 54%; pointer-events: auto; }
-.touch-hint { position: absolute; width: 132px; height: 132px; border-radius: 50%; border: 2px dashed #7fe3d055; background: #08181a33; pointer-events: none; }
+.touch-hint { position: absolute; width: calc(132px * var(--touch-scale,1)); height: calc(132px * var(--touch-scale,1)); border-radius: 50%; border: 2px dashed #7fe3d055; background: #08181a33; pointer-events: none; }
 .touch-hint--move { left: max(18px, env(safe-area-inset-left)); bottom: max(20px, env(safe-area-inset-bottom)); }
 .touch-hint--look { left: 50%; bottom: max(18px, env(safe-area-inset-bottom)); transform: translateX(-50%); }
-.touch-knob { position: absolute; left: 50%; top: 50%; width: 58px; height: 58px; margin: -29px 0 0 -29px; border-radius: 50%; background: #9ff0dd44; border: 2px solid #a9f7e2aa; transition: transform .04s linear; }
+.touch-knob { position: absolute; left: 50%; top: 50%; width: calc(58px * var(--touch-scale,1)); height: calc(58px * var(--touch-scale,1)); margin: calc(-29px * var(--touch-scale,1)) 0 0 calc(-29px * var(--touch-scale,1)); border-radius: 50%; background: #9ff0dd44; border: 2px solid #a9f7e2aa; transition: transform .04s linear; }
 .touch-look { position: absolute; left: 50%; right: 0; top: 0; bottom: 220px; pointer-events: auto; }
-.touch-move-base, .touch-look-base { position: fixed; width: 132px; height: 132px; margin: -66px 0 0 -66px; border-radius: 50%; background: #08181a66; border: 2px solid #7fe3d0aa; box-shadow: 0 0 0 1px #0006 inset; opacity: 0; transition: opacity .12s ease; pointer-events: none; }
-.touch-look-base { width: 120px; height: 120px; margin: -60px 0 0 -60px; border-style: dashed; }
-.touch-look-base .touch-knob { width: 54px; height: 54px; margin: -27px 0 0 -27px; }
+.touch-move-base, .touch-look-base { position: fixed; width: calc(132px * var(--touch-scale,1)); height: calc(132px * var(--touch-scale,1)); margin: calc(-66px * var(--touch-scale,1)) 0 0 calc(-66px * var(--touch-scale,1)); border-radius: 50%; background: #08181a66; border: 2px solid #7fe3d0aa; box-shadow: 0 0 0 1px #0006 inset; opacity: 0; transition: opacity .12s ease; pointer-events: none; }
+.touch-look-base { width: calc(120px * var(--touch-scale,1)); height: calc(120px * var(--touch-scale,1)); margin: calc(-60px * var(--touch-scale,1)) 0 0 calc(-60px * var(--touch-scale,1)); border-style: dashed; }
+.touch-look-base .touch-knob { width: calc(54px * var(--touch-scale,1)); height: calc(54px * var(--touch-scale,1)); margin: calc(-27px * var(--touch-scale,1)) 0 0 calc(-27px * var(--touch-scale,1)); }
 .touch-actions { position: absolute; right: max(18px, env(safe-area-inset-right)); bottom: calc(max(20px, env(safe-area-inset-bottom)) + 92px); display: grid; grid-template-columns: repeat(5, auto); gap: 7px; justify-items: end; pointer-events: none; }
 .touch-primary { position: absolute; right: max(18px, env(safe-area-inset-right)); bottom: max(20px, env(safe-area-inset-bottom)); display: flex; gap: 10px; align-items: flex-end; pointer-events: none; }
 .touch-util { position: absolute; top: max(12px, env(safe-area-inset-top)); right: max(14px, env(safe-area-inset-right)); display: flex; gap: 8px; pointer-events: none; }
+/* Left-handed layout: both sticks and every action cluster mirror to the other
+   thumbs. Only anchor edges swap; pointer math is unchanged. */
+.touch-layer--left-hand .touch-move-zone { left: auto; right: 0; }
+.touch-layer--left-hand .touch-look { left: 0; right: 50%; }
+.touch-layer--left-hand .touch-hint--move { left: auto; right: max(18px, env(safe-area-inset-right)); }
+.touch-layer--left-hand .touch-actions { right: auto; left: max(18px, env(safe-area-inset-left)); justify-items: start; }
+.touch-layer--left-hand .touch-primary { right: auto; left: max(18px, env(safe-area-inset-left)); }
+.touch-layer--left-hand .touch-util { right: auto; left: max(14px, env(safe-area-inset-left)); }
 .touch-actions > *, .touch-primary > *, .touch-util > * { pointer-events: auto; }
 /* An explicit COCS surface (command board, spend window) or the Training
    completion beat owns the cursor. The page adds this class while one is up so
@@ -849,36 +860,37 @@ html, body { overscroll-behavior: none; }
 .touch-layer--suspended .touch-actions > *,
 .touch-layer--suspended .touch-primary > *,
 .touch-layer--suspended .touch-util > * { pointer-events: none; }
-.touch-button { border: 1px solid #9ff0dd55; background: #0b1c1fd0; color: #dffcf4; font: 700 10px monospace; letter-spacing: .5px; padding: 0; border-radius: 11px; width: 46px; height: 46px; display: grid; place-items: center; user-select: none; -webkit-user-select: none; -webkit-tap-highlight-color: transparent; }
+/* Every touch target keeps a hard 44px floor at the 0.8x scale stop. */
+.touch-button { border: 1px solid #9ff0dd55; background: #0b1c1fd0; color: #dffcf4; font: 700 10px monospace; letter-spacing: .5px; padding: 0; border-radius: 11px; width: max(44px, calc(46px * var(--touch-scale,1))); height: max(44px, calc(46px * var(--touch-scale,1))); display: grid; place-items: center; user-select: none; -webkit-user-select: none; -webkit-tap-highlight-color: transparent; }
 .touch-button:active, .touch-button:focus { background: #1d4740d9; border-color: #b4f6e2; }
-.touch-primary .touch-button { width: 74px; height: 74px; font-size: 13px; border-radius: 50%; }
+.touch-primary .touch-button { width: max(56px, calc(74px * var(--touch-scale,1))); height: max(56px, calc(74px * var(--touch-scale,1))); font-size: 13px; border-radius: 50%; }
 .touch-primary .touch-fire { background: #3a1517cc; border-color: #ff8f8f66; color: #ffe2e2; }
 .touch-primary .touch-fire:active { background: #6a2226e6; }
 .touch-primary .touch-jump { background: #12283acc; border-color: #8fd0ff66; color: #dff1ff; }
 .touch-primary .touch-jump:active { background: #1d4a6ae6; }
-.touch-tactical .touch-primary .touch-interact{width:64px;height:52px;border-radius:12px;background:#153a2ecc;border-color:#8dffb088;color:#eafff5}
+.touch-tactical .touch-primary .touch-interact{width:max(52px,calc(64px * var(--touch-scale,1)));height:max(44px,calc(52px * var(--touch-scale,1)));border-radius:12px;background:#153a2ecc;border-color:#8dffb088;color:#eafff5}
 .touch-tactical .touch-actions{grid-template-columns:repeat(4,auto)}
 .touch-voice { border-color: #8fd0ff66; color: #dff1ff; }
 .touch-voice:active, .touch-voice:focus { background: #123a52d9; border-color: #a9dcff; }
 /* Held alt-fire: the touch twin of the KeyZ / middle-mouse path. */
 .touch-alt { border-color: #ffd16666; color: #ffe6b0; }
 .touch-alt:active, .touch-alt:focus { background: #3a2c12d9; border-color: #ffd166; }
-.touch-util .touch-button { width: 42px; height: 42px; border-radius: 10px; }
+.touch-util .touch-button { width: max(44px, calc(42px * var(--touch-scale,1))); height: max(44px, calc(42px * var(--touch-scale,1))); border-radius: 10px; }
 .touch-car .touch-actions { grid-template-columns: repeat(3, auto); }
-.touch-car .touch-primary .touch-button { width: 82px; height: 82px; }
+.touch-car .touch-primary .touch-button { width: max(60px, calc(82px * var(--touch-scale,1))); height: max(60px, calc(82px * var(--touch-scale,1))); }
 @media (max-width: 420px) {
-  .touch-hint { width: 112px; height: 112px; }
-  .touch-knob { width: 50px; height: 50px; margin: -25px 0 0 -25px; }
-  .touch-button { width: 42px; height: 42px; }
-  .touch-primary .touch-button { width: 66px; height: 66px; }
+  .touch-hint { width: calc(112px * var(--touch-scale,1)); height: calc(112px * var(--touch-scale,1)); }
+  .touch-knob { width: calc(50px * var(--touch-scale,1)); height: calc(50px * var(--touch-scale,1)); margin: calc(-25px * var(--touch-scale,1)) 0 0 calc(-25px * var(--touch-scale,1)); }
+  .touch-button { width: max(44px, calc(42px * var(--touch-scale,1))); height: max(44px, calc(42px * var(--touch-scale,1))); }
+  .touch-primary .touch-button { width: max(48px, calc(66px * var(--touch-scale,1))); height: max(48px, calc(66px * var(--touch-scale,1))); }
 }
 @media (max-height: 480px) {
   .touch-look { bottom: 190px; }
   .touch-actions { bottom: calc(max(18px, env(safe-area-inset-bottom)) + 82px); }
-  .touch-hint { width: 112px; height: 112px; }
-  .touch-knob { width: 50px; height: 50px; margin: -25px 0 0 -25px; }
-  .touch-button { width: 40px; height: 40px; }
-  .touch-primary .touch-button { width: 62px; height: 62px; }
+  .touch-hint { width: calc(112px * var(--touch-scale,1)); height: calc(112px * var(--touch-scale,1)); }
+  .touch-knob { width: calc(50px * var(--touch-scale,1)); height: calc(50px * var(--touch-scale,1)); margin: calc(-25px * var(--touch-scale,1)) 0 0 calc(-25px * var(--touch-scale,1)); }
+  .touch-button { width: max(44px, calc(40px * var(--touch-scale,1))); height: max(44px, calc(40px * var(--touch-scale,1))); }
+  .touch-primary .touch-button { width: max(46px, calc(62px * var(--touch-scale,1))); height: max(46px, calc(62px * var(--touch-scale,1))); }
 }
 .arsenal-list em{display:inline-block;font-style:normal;font-size:10px;letter-spacing:.5px;color:#9ad9c4;margin:2px 0 0 8px;border:1px solid #4f7d6c66;border-radius:4px;padding:1px 5px}
 .net-quality{border:1px solid #6fa89a55;border-radius:4px;padding:2px 7px;letter-spacing:1px}
@@ -1065,6 +1077,19 @@ html, body { overscroll-behavior: none; }
 .hud-corner--left{justify-content:flex-start}
 .hud-corner--right{justify-content:flex-end}
 .hud-pills{display:flex;flex-direction:column;gap:4px}
+/* Team status / economy strip: one compact non-live group of existing pill
+   tokens in the left HUD column. Wrap, never a tall stack, so the reticle
+   corridor stays clear. No animation or transition, so the reduced-motion
+   paths need no extra gate. */
+.team-status{display:flex;flex-direction:row;flex-wrap:wrap;align-items:flex-end;justify-content:flex-start;gap:4px;max-width:min(300px,30vw)}
+.team-status .hud-pill{gap:5px;letter-spacing:.04em}
+.team-status__lives{color:#ffd9d9;border-color:rgba(255,143,143,.45)}
+.team-status__objective{color:#dff7ee}
+.team-status__vip{color:#ffe6b0;border-color:rgba(255,209,102,.5)}
+.team-status__vip.is-down{color:#ffb4b4;border-color:rgba(255,107,107,.55)}
+.team-status__upgrade{color:#caffeb;border-color:var(--border-strong)}
+.team-status__sentry{color:#bfe3ff;border-color:rgba(143,208,255,.4)}
+.team-status__ally.is-down{opacity:.6;color:var(--text-mute)}
 .hud-pill{display:inline-flex;align-items:center;gap:7px;padding:5px 10px;border:1px solid var(--border);border-radius:999px;
   background:#0a1b1acc;font:600 11px var(--font-mono);color:var(--text-dim);white-space:nowrap}
 .hud-pill b{color:var(--accent-soft)}
@@ -1449,10 +1474,14 @@ html, body { overscroll-behavior: none; }
   .frag-card .ability-ring>b{font-size:13px}
   .movement-card .stat-label,.movement-card .stat-note{max-width:72px}
   .game-hud.lattice-hud.touch-mode .hud-corner--right{padding-right:244px}
+  .game-hud.lattice-hud.touch-mode.touch-left-hand .hud-corner--right{padding-right:0}
+  .game-hud.lattice-hud.touch-mode.touch-left-hand .hud-corner--left{padding-left:244px}
 }
 @media (max-width:760px){
   .game-hud.touch-mode .hud-bottom{bottom:calc(var(--safe-bottom) + 188px)}
   .game-hud.touch-mode .hud-lower{bottom:calc(var(--safe-bottom) + 320px)}
+  .hud-corner--left{flex-wrap:wrap}
+  .team-status{max-width:min(220px,56vw)}
 }
 
 /* Translucent selection shell so the live 3D operator preview (rendered on the

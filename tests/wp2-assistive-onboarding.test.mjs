@@ -164,6 +164,29 @@ test('PlayingHud: captions and the hit chip stay non-live and add no announcemen
   });
 });
 
+test('PlayingHud: team status and economy chips stay in one non-live group', () => {
+  const html = render(PlayingHud, {ui: ui({
+    hud: hud({time: 30, actors: [
+      player(),
+      player({id: 1, name: 'BOT 1', team: 0, health: 0, armor: 0}),
+      player({id: 2, name: 'BOT 2', team: 0, health: 64, armor: 25}),
+    ], objectives: {kind: 'elimination', lives: {0: 4, 1: 7}, livesPerTeam: 10, eliminations: {0: 6, 1: 3}, attrition: {0: 0, 1: 1}, suddenDeath: false}, deployables: [{id: 9, owner: 0, team: 0, health: 80, life: 11.2, cooldown: 0}]}),
+    player: player({upgradeTimer: 6.4, upgradeWeapon: 0}),
+  })});
+  assert.match(html, /class="hud-pills team-status" role="group"/, 'the strip is one non-live group');
+  assert.match(html, /RED 4 · BLUE 7/, 'elimination lives are visible');
+  assert.match(html, /BOT 2 64HP 25A/, 'an ally chip carries health and armor');
+  assert.match(html, /BOT 1 DOWN/, 'a downed ally is marked');
+  assert.match(html, /UPGRADE RAIL · 7s/, 'the weapon-upgrade window is visible');
+  assert.match(html, /SENTRY 80 HP · 12s/, 'the sentry is visible with health and life');
+  assert.equal(liveCount(html), 1, 'the strip adds no live region');
+  assert.equal(politeCount(html), 1, 'the single polite channel is untouched');
+  return read('app/ui/screens/PlayingHud.tsx').then(source => {
+    assert.match(source, /role="group" aria-label=\{\[squad\?\.label,economy\?\.label\]/, 'the strip has one computed label');
+    assert.doesNotMatch(source, /team-status[^>]*role="status"/, 'the strip never becomes a live region');
+  });
+});
+
 test('PlayingHud: the FFA death card names the killer and weapon without a new live region', () => {
   const html = render(PlayingHud, {ui: ui({
     player: player({health: 0, dead: 2.6}),

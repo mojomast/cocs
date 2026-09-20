@@ -4,6 +4,9 @@ import {readFile} from 'node:fs/promises';
 import {
  ACHIEVEMENTS,
  GEAR,
+ HORDE_XP_CAP,
+ HORDE_XP_PER_WAVE,
+ HORDE_XP_SCORE_DIVISOR,
  MAX_LEVEL,
  PRESTIGE_MAX_TIER,
  PRESTIGE_TIERS,
@@ -13,6 +16,7 @@ import {
  awardMatch,
  defaultProgression,
  gearById,
+ hordeMatchXp,
  levelFromXp,
  matchRewardSummary,
  matchSummaryCard,
@@ -273,4 +277,32 @@ test('normalizeProgression clamps, recomputes level and re-validates gear',()=>{
  assert.equal(profile.gear.utility,undefined);
  assert.ok(profile.unlocks['gear-scope']);
  assert.deepEqual(defaultProgression(),normalizeProgression(null));
+});
+test('horde/campaign score pays a bounded, monotonic XP rider',()=>{
+ assert.equal(hordeMatchXp(),0);
+ assert.equal(hordeMatchXp(null),0);
+ assert.equal(hordeMatchXp({score:0,bestWave:0}),0);
+ assert.equal(hordeMatchXp({score:'nope',bestWave:-4}),0);
+ const five=hordeMatchXp({score:1000,bestWave:5});
+ assert.equal(five,Math.round(1000/HORDE_XP_SCORE_DIVISOR)+5*HORDE_XP_PER_WAVE);
+ assert.ok(hordeMatchXp({score:1200,bestWave:6})>five,'monotonic in score and wave');
+ assert.ok(hordeMatchXp({score:1000,bestWave:6})>five,'the wave rider alone raises the term');
+ assert.equal(hordeMatchXp({score:1e9,bestWave:1e9}),HORDE_XP_CAP,'the cap cannot be exceeded');
+ assert.equal(hordeMatchXp({wave:3}),3*HORDE_XP_PER_WAVE,'a live wave stands in before bestWave is banked');
+ assert.ok(HORDE_XP_CAP<=300,'the rider never dwarfs a normal match reward');
+});
+test('matchXp folds the singleplayer snapshot rider without changing other rewards',()=>{
+ const base=matchXp({win:false,actor:{frags:5,scoreStats:{}}});
+ const single={kind:'horde',phase:'lost',score:1000,bestWave:5};
+ const rider=hordeMatchXp(single);
+ assert.equal(matchXp({win:false,actor:{frags:5,scoreStats:{}},singleplayer:single}),base+rider);
+ assert.equal(matchXp({win:false,actor:{frags:5,scoreStats:{}},horde:single}),base+rider);
+ assert.equal(matchXp({win:false,actor:{frags:5,scoreStats:{}},singleplayer:{score:0,bestWave:0}}),base,'an empty snapshot is neutral');
+ // Direct score fields only ride for the single-player modes.
+ assert.equal(matchXp({win:false,mode:'deathmatch',actor:{frags:5,scoreStats:{}},score:1000,bestWave:5}),base);
+ assert.equal(matchXp({win:false,mode:'horde',actor:{frags:5,scoreStats:{}},score:1000,bestWave:5}),base+rider);
+ assert.equal(matchXp({win:false,mode:'campaign',actor:{frags:5,scoreStats:{}},score:1000,bestWave:5}),base+rider);
+ const award=awardMatch(defaultProgression(),{win:false,mode:'horde',actor:{frags:5,scoreStats:{}},singleplayer:single});
+ assert.equal(award.baseGained,base+rider);
+ assert.equal(award.profile.byMode.horde.matches,1);
 });

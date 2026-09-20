@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import * as T from 'three';
 import * as rigs from './rig.mjs';
-import {CharacterRig,characterPose} from './character-anim.mjs';
+import {CharacterRig,characterPose,deathLimbPose} from './character-anim.mjs';
 import * as models from './models.mjs';
 import {corpseRotation} from './deaths.mjs';
 
@@ -43,7 +43,11 @@ for(const terrain of [()=>2,(x,z)=>2+.18*x-.12*z,(x,z)=>z>.65?2.35:2]) {
    v.fromBufferAttribute(body.geometry.attributes.position,i).applyMatrix4(body.matrixWorld);
    const clearance=v.y-terrain(v.x,v.z);assert.ok(clearance>=-1e-6,`penetration ${clearance}`);gap=Math.min(gap,clearance);
   }
-  assert.ok(gap<.15,`floating ${gap}`);assert.ok(calls>2&&calls<=70,`bounded samples ${calls}`);
+  // Two frames of 31 envelope probes plus the ragdoll's bounded seek pre-roll:
+  // at most 16 contact passes of 16 ground samples each (the AABB probes after
+  // them never touch the ground adapter). The reduced fallback case above still
+  // pins the exact 31 samples/frame contract.
+  assert.ok(gap<.15,`floating ${gap}`);assert.ok(calls>2&&calls<=480,`bounded samples ${calls}`);
  });
 }
 test('all corpse poses finish horizontally, reduced motion included',()=>{
@@ -125,7 +129,10 @@ test('per-pose fall arcs settle at distinct times and a settled corpse is never 
  }
  assert.ok(silhouettes.size>=6,`seeded corpse silhouettes, got ${silhouettes.size}`);
  const m=limbModel(),life=new rigs.CharacterLifecycle(),plan={pose:'sprawl',style:'spinout',seed:6,splay:.6,duration:3};
- let writes=0;const rig=m.userData.rig,write=rig.applyCorpse.bind(rig);rig.applyCorpse=pose=>{writes++;return write(pose);};
+ // Both corpse channels count: the authored fallback and the ragdoll joint
+ // adapter. The settled corpse must stop writing either way.
+ let writes=0;const rig=m.userData.rig,write=rig.applyCorpse.bind(rig),rag=rig.applyRagdoll.bind(rig);
+ rig.applyCorpse=pose=>{writes++;return write(pose);};rig.applyRagdoll=(pose,blend,live)=>{writes++;return rag(pose,blend,live);};
  life.update(m,actor,{time:0,plan,sampleGround:()=>3});
  life.update(m,actor,{time:1,plan,sampleGround:()=>3});
  const settled=m.userData.joints.armUpperL.rotation.z,atSettle=writes;
@@ -205,4 +212,20 @@ test('hidden death bodies do no ground sampling and suppress shield/base until r
 test('removed models release active lifecycle storage and reset ownership',()=>{
  const m=actorModel(),life=new rigs.CharacterLifecycle();life.update(m,actor,{time:0});
  assert.equal(typeof life.release,'function');life.release(m);assert.equal(life.active.size,0);assert.equal(life.state(m),'alive');
+});
+test('ragdoll corpses write joints only and a seek settles once on the authored pose',()=>{
+ const m=actorModel(),life=new rigs.CharacterLifecycle(),plan={pose:'forward',style:'ragdoll',seed:9,splay:.8,roll:.3,spin:.5,duration:3};
+ let snapped=null;const rig=m.userData.rig,write=rig.applyCorpse.bind(rig);rig.applyCorpse=pose=>{snapped=pose;return write(pose);};
+ life.update(m,actor,{time:0,plan,sampleGround:()=>3});
+ const record=life.records.get(m);
+ assert.ok(record.ragdoll,'full-motion corpses acquire the physics channel');
+ assert.equal(m.userData.joints.root.position.y,0,'the kinematic root stays untouched');
+ // A void seek cannot settle by contact, so the ragdoll snaps to the authored
+ // settled silhouette exactly once and then never samples or writes again.
+ life.update(m,actor,{time:2,plan,sampleGround:()=>null});
+ assert.equal(record.ragdoll.awake,false);
+ assert.equal(record.ragdoll.snapped,true,'the seek settles on the authored pose');
+ assert.deepEqual(snapped,deathLimbPose({pose:'forward',style:'ragdoll',seed:9,splay:.8,roll:.3,spin:.5,progress:1,reduced:false}));
+ life.update(m,actor,{time:2.5,plan,sampleGround:()=>null});
+ assert.equal(record.ragdoll.dirty,false,'the settled corpse never writes again');
 });

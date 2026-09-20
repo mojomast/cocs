@@ -175,11 +175,150 @@ export function killFeedWeapon(entry, weapons = []) {
 
 export const teamName = team => Number(team) === 0 ? 'RED' : Number(team) === 1 ? 'BLUE' : `TEAM ${team}`;
 
+// ---------------------------------------------------------------------------
+// Team status + economy HUD models (QoL wave). Both are pure reads of the
+// frozen snapshot: `teamScores`, the elimination/extraction objective fields,
+// actor health/team, the payload's distance/contested flags and the snapshot's
+// `deployables`/`upgradeTimer`/`upgradeWeapon`. The match page renders them as
+// one non-live `role="group"` strip, so the single polite live region contract
+// is untouched. Every helper tolerates absence and returns null when there is
+// nothing worth reading.
+// ---------------------------------------------------------------------------
+const hudTeam = value => value === 0 || value === 1 ? Number(value) : null;
+const hudWhole = value => Math.max(0, Math.round(Number(value) || 0));
+const hudPercent = value => Math.max(0, Math.min(100, Math.round(Number(value) || 0)));
+const hudMeters = value => { const n = Math.max(0, Number(value) || 0); return formatNumber(n, n < 10 ? 1 : 0); };
+const cleanLabel = parts => parts.filter(Boolean).join(' ');
+const spoken = text => text.replace(/\s*·\s*/g, ', ');
+
+export function teamStatusHud(player, hud) {
+ if (!player || !hud || hud.spectate === true) return null;
+ const team = hudTeam(player.team), enemy = team === null ? null : team === 0 ? 1 : 0;
+ const actors = Array.isArray(hud.actors) ? hud.actors : [];
+ const objectives = hud.objectives && typeof hud.objectives === 'object' ? hud.objectives : null;
+ const kind = objectives?.kind ?? null;
+ // Elimination is a shared-ticket race: show each side's remaining lives and
+ // the bleed that forced them down (deaths burn tickets, attrition eats them).
+ let lives = null;
+ if (objectives && kind === 'elimination') {
+  const teams = [0, 1].map(t => {
+   const count = hudWhole(objectives.lives?.[t]);
+   return {team: t, name: teamName(t), lives: count, max: hudWhole(objectives.livesPerTeam),
+    eliminations: hudWhole(objectives.eliminations?.[t]), attrition: hudWhole(objectives.attrition?.[t]),
+    mine: t === team, out: count <= 0};
+  });
+  lives = {teams, suddenDeath: objectives.suddenDeath === true, text: teams.map(t => `${t.name} ${t.lives}`).join(' · ')};
+ }
+ // Ally chips: same side, local player excluded, dead allies kept as DOWN so a
+ // wipe is visible at a glance. Capped so the strip stays compact.
+ const allies = team === null ? [] : actors
+  .filter(a => a && a.id !== player.id && hudTeam(a.team) === team)
+  .sort((a, b) => (Number(a.id) || 0) - (Number(b.id) || 0))
+  .slice(0, 6)
+  .map(a => ({id: a.id, name: a.name || `A${a.id}`, health: hudWhole(a.health), armor: hudWhole(a.armor), down: !(Number(a.health) > 0)}));
+ // One objective readout per mode family, all from the authoritative snapshot.
+ const rows = Array.isArray(objectives?.zones) ? objectives.zones.map((zone, index) => {
+  const owner = hudTeam(zone?.owner), captureTeam = hudTeam(zone?.captureTeam);
+  return {id: String(zone?.id ?? index), label: String(zone?.id ?? index).toUpperCase(), owner, captureTeam,
+   contested: zone?.contested === true, progress: hudPercent(zone?.progress),
+   mine: owner !== null && owner === team, enemy: owner !== null && owner !== team};
+ }) : null;
+ let zones = null, hold = null, payload = null, vip = null, stages = null, assault = null;
+ if (objectives) {
+  if (kind === 'extraction') {
+   const vipActor = objectives.vipId == null ? null : actors.find(a => a && a.id === objectives.vipId) || null;
+   const dead = objectives.vipDead === true || (vipActor ? !(Number(vipActor.health) > 0) : false);
+   vip = {id: objectives.vipId ?? null, name: vipActor?.name || 'VIP', health: vipActor ? hudWhole(vipActor.health) : 0,
+    maxHealth: vipActor ? hudWhole(vipActor.maxHealth) : 0, dead, mine: team !== null && objectives.escortTeam === team,
+    progress: hudWhole(objectives.progress), captureSeconds: hudWhole(objectives.captureSeconds),
+    text: dead ? 'VIP DOWN' : `VIP ${vipActor ? hudWhole(vipActor.health) : 0} HP`};
+  } else if (objectives.payload && typeof objectives.payload === 'object') {
+   const state = objectives.payload, total = Math.max(0, Number(state.total) || 0), distance = Math.max(0, Number(state.distance) || 0);
+   const pushing = hudTeam(state.pushing), percent = hudPercent(state.progress);
+   const contested = state.contested === true, delivered = state.delivered === true, mine = pushing !== null && pushing === team;
+   payload = {percent, distance, total, contested, delivered, pushing, mine,
+    checkpointsReached: hudWhole(state.checkpointsReached), checkpointCount: hudWhole(state.checkpointCount),
+    text: `PAYLOAD ${percent}% · ${hudMeters(distance)}/${hudMeters(total)}m${contested ? ' · CONTESTED' : delivered ? ' · DELIVERED' : mine ? ' · MOVING' : ''}`};
+  } else if (kind === 'assault' && rows) {
+   const index = Math.max(0, Math.min(rows.length - 1, hudWhole(objectives.active))), active = rows[index] ?? null;
+   const attacker = hudTeam(objectives.attacker);
+   assault = {index, total: rows.length, breached: objectives.breached === true, progress: active ? active.progress : 0,
+    owner: active ? active.owner : null, attacker,
+    text: `${objectives.breached === true ? 'BREACHED' : `SECTOR ${index + 1}/${rows.length}`} · ${active ? active.progress : 0}%${attacker !== null && attacker === team ? ' · ATTACK' : ' · DEFEND'}`};
+  } else if (hudWhole(objectives.stageCount) > 0) {
+   const captures = {0: hudWhole(objectives.stageCaptures?.[0]), 1: hudWhole(objectives.stageCaptures?.[1])};
+   const count = Math.max(1, hudWhole(objectives.stageCount)), stage = hudWhole(objectives.stage);
+   stages = {index: stage, count, captures, mine: team === null ? null : captures[team],
+    text: `RELAY ${Math.min(stage + 1, count)}/${count}${team === null ? '' : ` · YOU ${captures[team]}`}`};
+  } else if (rows && (kind === 'domination' || kind === 'koth')) {
+   const owned = rows.filter(zone => zone.mine).length, enemyOwned = rows.filter(zone => zone.enemy).length, contested = rows.filter(zone => zone.contested).length;
+   // The capture the player should read first: their own attempt, then any
+   // contest, then the enemy's push.
+   const focus = rows.find(zone => !zone.mine && zone.captureTeam === team && zone.progress > 0)
+    ?? rows.find(zone => zone.contested)
+    ?? rows.find(zone => zone.enemy && zone.progress > 0) ?? null;
+   const focusText = !focus ? '' : focus.contested ? `${focus.label} CONTESTED`
+    : focus.captureTeam === team ? `TAKING ${focus.label} ${focus.progress}%`
+    : focus.captureTeam === enemy ? `${focus.label} ENEMY ${focus.progress}%` : `${focus.label} ${focus.progress}%`;
+   zones = {rows, owned, enemyOwned, contested, total: rows.length, focus, focusText, text: `${owned}/${rows.length} ZONES · ${contested} CONTESTED`};
+   if (hudWhole(objectives.holdCount) > 0) {
+    const quota = hudWhole(objectives.holdCount), window = hudWhole(objectives.holdSeconds);
+    const progress = {0: hudWhole(objectives.holdProgress?.[0]), 1: hudWhole(objectives.holdProgress?.[1])};
+    const holder = hudTeam(objectives.holdTeam);
+    hold = {quorum: quota, seconds: window, progress, team: holder, mine: holder !== null && holder === team,
+     text: `HOLD ${team === null ? Math.max(progress[0], progress[1]) : progress[team]}s / ${window}s`};
+   }
+  }
+ }
+ const label = cleanLabel([
+  lives && `Team lives: ${lives.teams.map(t => `${t.name} ${t.lives} of ${t.max}`).join(', ')}${lives.suddenDeath ? '. Sudden death' : ''}.`,
+  allies.length && `Allies: ${allies.map(a => `${a.name} ${a.down ? 'down' : `${a.health} health ${a.armor} armor`}`).join(', ')}.`,
+  vip && (vip.dead ? 'VIP down.' : `VIP ${vip.health} health.`),
+  payload && `${spoken(payload.text)}.`,
+  zones && `${spoken(zones.text)}${zones.focusText ? `, ${spoken(zones.focusText)}` : ''}.`,
+  hold && `${spoken(hold.text)}.`,
+  stages && `${spoken(stages.text)}.`,
+  assault && `${spoken(assault.text)}.`,
+ ]);
+ if (!label) return null;
+ return {team, kind, lives, allies, vip, payload, zones, hold, stages, assault, label};
+}
+
+// Economy feedback: the held weapon-upgrade window and any sentries the local
+// team actually owns. `alive` follows the snapshot's own life/health fields;
+// an expired sentry is reported down rather than silently dropped.
+export function economyHud(player, hud, weapons = WEAPONS) {
+ if (!player || !hud) return null;
+ const timer = Number(player.upgradeTimer) || 0;
+ const index = Number.isInteger(player.upgradeWeapon) ? player.upgradeWeapon : null;
+ const weapon = index !== null ? weapons?.[index] : null;
+ const upgrade = timer > 0 && index !== null ? {index, timer, weapon: weapon?.short ?? weapon?.name ?? null,
+  text: `UPGRADE ${weapon?.short ?? weapon?.name ?? `#${index}`} · ${formatCountdown(timer)}s`} : null;
+ const deployables = (Array.isArray(hud.deployables) ? hud.deployables : []).filter(s => s && typeof s === 'object').map(s => {
+  const life = Math.max(0, Number(s.life) || 0), health = hudWhole(s.health);
+  const owner = Number.isInteger(s.owner) ? s.owner : null;
+  const mine = owner !== null && owner === player.id;
+  const sameTeam = (player.team === 0 || player.team === 1) && hudTeam(s.team) === hudTeam(player.team);
+  const friendly = mine || sameTeam;
+  const alive = life > 0 && health > 0;
+  return {id: s.id ?? null, owner, team: hudTeam(s.team), health, life, cooldown: Math.max(0, Number(s.cooldown) || 0),
+   mine, friendly, alive, text: alive ? `SENTRY ${health} HP · ${formatCountdown(life)}s` : 'SENTRY DOWN'};
+ }).sort((a, b) => (Number(b.mine) - Number(a.mine)) || (Number(b.friendly) - Number(a.friendly)) || ((Number(a.id) || 0) - (Number(b.id) || 0)));
+ if (!upgrade && !deployables.length) return null;
+ const label = cleanLabel([
+  upgrade && `Weapon upgrade ${upgrade.weapon ?? ''} ${formatCountdown(upgrade.timer)} seconds.`.replace(/\s+/g, ' '),
+  ...deployables.map(s => s.mine ? `Your sentry ${s.alive ? `at ${s.health} health, ${formatCountdown(s.life)} seconds left` : 'is down'}.`
+   : s.friendly ? `Friendly sentry ${s.alive ? `at ${s.health} health` : 'down'}.` : 'Enemy sentry.'),
+ ]);
+ return {upgrade, deployables, mine: deployables.filter(s => s.mine), friendly: deployables.filter(s => s.friendly && !s.mine),
+  enemy: deployables.filter(s => !s.friendly), label};
+}
+
 export function suddenDeathBanner(hud) {
   return (hud?.suddenDeath === true || hud?.objectives?.suddenDeath === true) && hud?.over !== true ? { text: 'SUDDEN DEATH', detail: 'NEXT SCORE WINS' } : null;
 }
 
-const CAPTION_EVENTS = Object.freeze({shot:'Gunfire',explosion:'Explosion','vehicle-shot':'Vehicle gunfire',grenade:'Grenade out',melee:'Melee',reload:'Reloading',pickup:'Pickup',powerup:'Powerup','vehicle-enter':'Mounted vehicle','vehicle-exit':'Dismounted vehicle','vehicle-destroyed':'Vehicle destroyed','vehicle-splatter':'Vehicle splatter','zone-capture':'Zone captured','zone-score':'Objective scoring','zone-neutralized':'Zone neutralized','flag-pickup':'Flag taken','flag-return':'Flag returned','flag-drop':'Flag dropped',capture:'Flag captured','assault-sector-captured':'Sector captured','assault-sector-lost':'Sector lost','assault-breach':'Sector breached','payload-checkpoint':'Checkpoint reached','payload-delivered':'Payload delivered','soccer-goal':'Goal','killstreak':'Killstreak',death:'Elimination','mission-message':'Mission update','mission-won':'Mission complete','mission-lost':'Mission failed','horde-wave':'Wave incoming','horde-wave-cleared':'Wave cleared','horde-resupply':'Resupplied','horde-upgrade':'Upgrade available','horde-upgrade-selected':'Upgrade acquired','enemy-detonate':'Sapper detonation','singleplayer-checkpoint':'Checkpoint saved','npc-deploy':'Contacts','story-line':'Mission briefing','npc-bark':'Transmission','boss-phase':'Boss phase','armsrace-promote':'Ladder up','armsrace-demote':'Ladder down','juggernaut-transfer':'Crown taken','elimination-life':'Team life lost','vip-deploy':'VIP deployed','vip-down':'VIP down','vip-extracted':'VIP extracted','holdout-progress':'Holdout progress','holdout-win':'Holdout won','uplink-capture':'Uplink captured','uplink-stage':'Uplink advanced','uplink-win':'Uplink won','objective-win':'Objective secured','enemy-telegraph':'Incoming attack','boss-slam':'Boss slam','boss-summon':'Boss summon','mender-heal':'Ally healed','overseer-aura':'Overseer aura','phalanx-shield':'Phalanx shield','enemy-flank':'Flanking','enemy-artillery':'Artillery incoming','race-coin':'Coin collected','race-box':'Item box','race-boost':'Speed boost','race-item':'Item deployed','race-hazard-hit':'Hazard hit','race-lap':'Lap complete','race-finish':'Race finish',power:'Ability activated','threat-ping':'Threat ping',feint:'Radar feint','move-start':'Movement ability','move-end':'Movement ended','windup-start':'Movement wind-up','windup-end':'Movement wind-up ended','charge-start':'Movement charge','charge-release':'Movement released','charge-cancel':'Movement charge cancelled','slam-launch':'Slam launch','slam-impact':'Slam impact','grapple-hook':'Grapple hooked','grapple-release':'Grapple released','rope-place':'Rope deployed','rope-expire':'Rope expired','move-miss':'Movement missed','rope-miss':'Rope missed','move-blocked':'Movement blocked','fuel-empty':'Fuel empty','no-lift':'Movement blocked','chain-cancel':'Movement chained','landing-recovery':'Landing recovery','vehicle-damage':'Vehicle damaged',dryfire:'Empty magazine','weapon-switch':'Weapon switch','loadout-switch':'Loadout changed','horde-modifier':'Wave modifier'});
+const CAPTION_EVENTS = Object.freeze({shot:'Gunfire',explosion:'Explosion','vehicle-shot':'Vehicle gunfire',grenade:'Grenade out',melee:'Melee',reload:'Reloading',pickup:'Pickup',powerup:'Powerup','vehicle-enter':'Mounted vehicle','vehicle-exit':'Dismounted vehicle','vehicle-destroyed':'Vehicle destroyed','vehicle-splatter':'Vehicle splatter','zone-capture':'Zone captured','zone-score':'Objective scoring','zone-neutralized':'Zone neutralized','flag-pickup':'Flag taken','flag-return':'Flag returned','flag-drop':'Flag dropped',capture:'Flag captured','assault-sector-captured':'Sector captured','assault-sector-lost':'Sector lost','assault-breach':'Sector breached','payload-checkpoint':'Checkpoint reached','payload-delivered':'Payload delivered','soccer-goal':'Goal','killstreak':'Killstreak',death:'Elimination','mission-message':'Mission update','mission-won':'Mission complete','mission-lost':'Mission failed','horde-wave':'Wave incoming','horde-wave-cleared':'Wave cleared','horde-resupply':'Resupplied','horde-upgrade':'Upgrade available','horde-upgrade-selected':'Upgrade acquired','enemy-detonate':'Sapper detonation','singleplayer-checkpoint':'Checkpoint saved','npc-deploy':'Contacts','story-line':'Mission briefing','npc-bark':'Transmission','boss-phase':'Boss phase','armsrace-promote':'Ladder up','armsrace-demote':'Ladder down','juggernaut-transfer':'Crown taken','elimination-life':'Team life lost','vip-deploy':'VIP deployed','vip-down':'VIP down','vip-extracted':'VIP extracted','holdout-progress':'Holdout progress','holdout-win':'Holdout won','uplink-capture':'Uplink captured','uplink-stage':'Uplink advanced','uplink-win':'Uplink won','objective-win':'Objective secured','enemy-telegraph':'Incoming attack','boss-slam':'Boss slam','boss-summon':'Boss summon','mender-heal':'Ally healed','overseer-aura':'Overseer aura','phalanx-shield':'Phalanx shield','enemy-flank':'Flanking','enemy-artillery':'Artillery incoming','race-coin':'Coin collected','race-box':'Item box','race-boost':'Speed boost','race-item':'Item deployed','race-hazard-hit':'Hazard hit','race-lap':'Lap complete','race-finish':'Race finish',power:'Ability activated','threat-ping':'Threat ping',feint:'Radar feint','move-start':'Movement ability','move-end':'Movement ended','windup-start':'Movement wind-up','windup-end':'Movement wind-up ended','charge-start':'Movement charge','charge-release':'Movement released','charge-cancel':'Movement charge cancelled','slam-launch':'Slam launch','slam-impact':'Slam impact','grapple-hook':'Grapple hooked','grapple-release':'Grapple released','rope-place':'Rope deployed','rope-expire':'Rope expired','move-miss':'Movement missed','rope-miss':'Rope missed','move-blocked':'Movement blocked','fuel-empty':'Fuel empty','no-lift':'Movement blocked','chain-cancel':'Movement chained','landing-recovery':'Landing recovery','vehicle-damage':'Vehicle damaged','deployable':'Sentry deployed','deployable-fire':'Sentry firing','deployable-expire':'Sentry expired','weapon-upgrade':'Weapon upgrade',dryfire:'Empty magazine','weapon-switch':'Weapon switch','loadout-switch':'Loadout changed','horde-modifier':'Wave modifier'});
 export function ladderStatus(player, total = 10) {
   const rung = Math.max(0, Math.floor(Number(player?.ladder) || 0));
   const size = Math.max(1, Math.floor(Number(total) || 10));

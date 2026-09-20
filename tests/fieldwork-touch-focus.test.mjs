@@ -124,3 +124,20 @@ test('portrait and short-landscape HUD clears the reticle corridor without hidin
   assert.match(css, /\.frag-counter strong\{white-space:normal;line-height:1\.15\}/, 'narrow match headers can wrap their score');
   assert.match(css, /\.cocs-board\{[^}]*scroll-padding-bottom:52px/, 'keyboard focus scrolling clears the board hint');
 });
+
+test('touch display settings keep the 44px floor and the capture-layer token', async () => {
+  const css = await read('app/globals.css');
+  assert.match(css, /\.touch-layer\{z-index:var\(--z-touch\)\}/, 'the pinned capture-layer token is byte-identical');
+  assert.match(css, /\.touch-layer\s*\{[^}]*opacity: var\(--touch-opacity,1\)/, 'opacity stays a layer variable');
+  assert.match(css, /width: max\(44px, calc\(46px \* var\(--touch-scale,1\)\)\)/, 'the base button keeps the 44px floor');
+  assert.match(css, /width: max\(44px, calc\(40px \* var\(--touch-scale,1\)\)\)/, 'the short-landscape button keeps the 44px floor');
+  const compact = css.replace(/\s+/g, ' ');
+  for (const selector of ['.touch-layer--left-hand .touch-move-zone { left: auto; right: 0;', '.touch-layer--left-hand .touch-look { left: 0; right: 50%;', '.touch-layer--left-hand .touch-actions { right: auto; left: max(18px, env(safe-area-inset-left));', '.touch-layer--left-hand .touch-primary { right: auto; left: max(18px, env(safe-area-inset-left));', '.touch-layer--left-hand .touch-util { right: auto; left: max(14px, env(safe-area-inset-left));']) {
+    assert.ok(compact.includes(selector), `${selector} mirrors the layout`);
+  }
+  const hud = await read('app/ui/screens/PlayingHud.tsx');
+  assert.match(hud, /teamStatusHud\(player,hud\)/, 'the team strip is fed by the pure helper');
+  assert.match(hud, /economyHud\(player,hud,WEAPONS\)/, 'the economy chips are fed by the pure helper');
+  assert.match(hud, /className="hud-pills team-status" role="group"/, 'the strip is one non-live group');
+  assert.doesNotMatch(hud, /team-status[^>]*role="status"/, 'the strip never becomes a live region');
+});

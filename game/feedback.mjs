@@ -463,6 +463,42 @@ function altVariation(seed){
  return Object.freeze({pitch:1+(mixUnit(s^0x9e3779b9)-.5)*.12,level:.94+mixUnit(s^0x85ebca6b)*.08});
 }
 
+// ---- Event-driven music -----------------------------------------------------
+//
+// The soundtrack reacts to beats the simulation already emits. Every hook is
+// either pure state (tension/escalation) or a queued harmonic response, so the
+// single-owner rule holds: one beat is voiced by exactly one of the motif
+// (`_beat`), the announcer, or the music. `_claimMusicBeat` makes each event id
+// idempotent across replays and repeated frames. Unknown event types are
+// ignored, and with music off/muted every hook falls back to the historical
+// motif voice untouched.
+//
+// Escalation floors: a horde wave steps the level up by one, boss beats jump to
+// at least 2/3 and sudden death pins 3. The LATTICE Operations director's own
+// escalation/boss/phase beats map to the same ladder. Clears release back to 0.
+const ESCALATION_EVENTS=Object.freeze({
+ 'horde-wave':Object.freeze({step:1,floor:1}),
+ 'director-escalation':Object.freeze({step:1,floor:1}),
+ 'boss-summon':Object.freeze({step:0,floor:2}),
+ 'boss-slam':Object.freeze({step:0,floor:2}),
+ 'director-boss':Object.freeze({step:0,floor:2}),
+ 'boss-phase':Object.freeze({step:0,floor:3}),
+ 'director-phase':Object.freeze({step:0,floor:3}),
+ 'director-overrun':Object.freeze({step:0,floor:3}),
+ 'sudden-death':Object.freeze({step:0,floor:3}),
+});
+const ESCALATION_CLEARS=Object.freeze(['horde-wave-cleared','director-wave-cleared','objective-win','mission-won','holdout-win','uplink-win']);
+// Killstreak-family moments: the music accent only fills in when the optional
+// announcer is off, because the announcer callout owns that beat otherwise.
+const ACCENT_EVENTS=Object.freeze(['killstreak','multikill','spree']);
+// Objective beats the soundtrack can answer harmonically. Capture-family beats
+// resolve upward, loss-family beats downward; each is quantised to the next
+// music step by the engine's response queue.
+const HARMONIC_RESPONSES=Object.freeze({
+ capture:'capture','zone-capture':'capture','assault-sector-captured':'capture','payload-delivered':'capture','uplink-capture':'capture','objective-win':'capture','flag-return':'capture',
+ 'assault-sector-lost':'loss','vip-down':'loss','mission-lost':'loss','elimination-life':'loss',
+});
+
 export class SynthAudio{
  constructor({announcer=false}={}){this.ctx=null;this.muted=false;this.voices=new Set();this.noiseBuffer=null;this.master=null;this.lastDamage=null;this.lastReport=null;this.lastHit=-Infinity;this.footPhase=0;this.wasGrounded=undefined;this.lastVy=0;this.engine=null;this.zipLoop=null;this.bed=null;this.bedMood='default';this.ambientBed=true;this.stepVariant=0;this.landVariant=0;this.reloadVariant=0;this.intensity=0;this.bedScale=.75;this.musicEnabled=true;this.announcer=announcer===true;this.announced=new Set();this.lastCue=null;this.mode='default';this.theme=MODE_THEMES.default;this.soundtrack='default';this.reverbUrl=null;this.reverbWet=0.30;this.reverbLoaded=false;this.reverbSpace=null;this.lastSting=null;this.heartbeatTimer=0;this.reportSerial=0;this.space=null;this.surfaceResolver=null;this.windScale=null;this._reverbPending=false;this.jumpVariant=0;
   // Gain buses. `muteGain` sits between the master and the destination so a
@@ -506,6 +542,16 @@ export class SynthAudio{
   // The motif that was active before a victory/defeat take, restored when the
   // outcome clears.
   this._motifBeforeOutcome=null;
+  // Dynamic music state forwarded to the soundtrack: tension 0..1 (low-string
+  // danger layer), escalation 0..3 (short-form/faster mode) and the last mode
+  // palette selected. Pure state, applied by the engine's scheduler only.
+  this.tension=0;this.escalation=0;this._lowHealthTension=0;
+  // Last seeded-variation request (string key or integer id); re-applied when a
+  // deferred music engine is built on the first user gesture.
+  this.variationKey=null;
+  // Bounded per-event-id dedupe for the event-driven music hooks, so a replayed
+  // or repeated event can never fire the accent/escalation twice.
+  this._musicBeats=new Set();
  }
  // Attach (or clear) a MothAudio instance and seed it with the current state.
  // Additive and inert without an instance; returns the layer for chaining.
@@ -689,7 +735,7 @@ export class SynthAudio{
   this._applyEchoMap();
   try{this.musicEngine=new MusicEngine({ctx,destination:this.musicBus,theme:this.theme,noiseBuffer:this.noiseBuffer,seed:(Date.now()&0xffff)||1});}
   catch{this.musicEngine=null;}
-  if(this.musicEngine){this.musicEngine.setEnabled(this.musicEnabled);this.musicEngine.setMuted(this.muted);this.musicEngine.setScene(this.scene);this.musicEngine.setSoundtrack(this.soundtrack||'default');}
+  if(this.musicEngine){this.musicEngine.setEnabled(this.musicEnabled);this.musicEngine.setMuted(this.muted);this.musicEngine.setScene(this.scene);this.musicEngine.setSoundtrack(this.soundtrack||'default');this.musicEngine.setPalette?.(this.mode);this.musicEngine.setBiomePalette?.(this.bedMood);this.musicEngine.setTension?.(this.tension);this.musicEngine.setEscalation?.(this.escalation);if(this.variationKey!=null)this.musicEngine.setVariation?.(this.variationKey);}
   // The context and buses now exist, so a deferred Moth layer can be built and
   // attached. Idempotent: the factory is consumed on first success.
   this._ensureMothAudio();
@@ -763,14 +809,21 @@ export class SynthAudio{
   // starts from the mode motif instead of the previous round's take.
   if(this.musicEngine?.outcome)this.setOutcome(null);
   this._matchLive=true;this._matchKey=key;this._finalWarned=false;this._countdown={phase:null,beat:0};
+  // A fresh match starts from rest: release any danger/escalation state and the
+  // per-event music dedupe so a rematch can voice its hooks again.
+  this.setTension(0);this.setEscalation(0);this._musicBeats.clear();
   this._fightSting();
   return {played:true,key};
  }
  // End the live match so the next start can voice its FIGHT sting. Called by the
- // outcome sting and whenever the host returns to the menu.
+ // outcome sting and whenever the host returns to the menu. The soundtrack's
+ // danger/escalation state is released with it.
  matchEnd(){
   const wasLive=this._matchLive;
   this._matchLive=false;this._matchKey=null;
+  this.setTension(0);this.setEscalation(0);
+  // Drop a queued response that no longer belongs to a live match.
+  try{this.musicEngine?.clearResponses?.();}catch{}
   return wasLive;
  }
  // FIGHT sting: a three-note fanfare over a short low impact body. One voice.
@@ -796,10 +849,15 @@ export class SynthAudio{
   const beat=active&&Number.isFinite(value)?Math.max(1,Math.ceil(value)):0;
   this._countdown={phase,beat};
   if(running&&(previous.phase==='countdown'||previous.phase==='kickoff')){
+   // The GO releases the countdown tension; the beep already owns the beat.
+   this.setTension(0);
    this._countdownBeep(0,true);
    return {played:true,go:true,beat:0};
   }
   if(active&&(beat!==previous.beat||phase!==previous.phase)&&beat>=1&&beat<=3){
+   // Each countdown number tightens the danger layer a step further (state only,
+   // never a second voice on top of the beep).
+   this.setTension(cl(.2+(3-beat)*.25,0,1));
    this._countdownBeep(beat,false);
    return {played:true,go:false,beat};
   }
@@ -824,8 +882,13 @@ export class SynthAudio{
   if(!Number.isFinite(s))return {warned:false};
   if(s>10||s<=0||this._finalWarned)return {warned:false,deduped:Boolean(this._finalWarned)};
   this._finalWarned=true;
-  this._beat(FINAL_CUE,0,1,.26);
-  return {warned:true};
+  // The soundtrack owns the final call when it is running: a tension pulse plus
+  // a low response on the next music step, with no motif stacked on top. With
+  // music off the historical FINAL_CUE keeps the beat.
+  this.setTension(1);
+  const owned=this._musicResponse('final',{vol:1});
+  if(!owned)this._beat(FINAL_CUE,0,1,.26);
+  return {warned:true,music:owned};
  }
  // One entry point for the live match snapshot: mode theme, FIGHT sting,
  // race/soccer countdown and the final warning. Callable every frame; every
@@ -863,7 +926,7 @@ export class SynthAudio{
    return this.musicEngine.setReverb(buffer,opts);
   }catch{return false;}
  }
- audioStatus(){return {state:this.ctx?(this.ctx.state||'suspended'):'unavailable',status:this.status,enabled:this.musicEnabled,muted:this.muted,scene:this.scene,intensity:this.intensity,voices:this.voices.size,notes:this.musicEngine?.notesScheduled??0,music:this.musicEngine?.status?.()??'off',reverb:this.reverbLoaded?'ready':(this._reverbPending?'loading':(this.reverbUrl?'pending':'off')),space:this.reverbSpace,echo:this.echoMap,weather:this.weather,biome:this.biomeMood,glue:this.effectsGlue?'on':'off',moth:this.mothAudio?.status?.()??null,samples:this.musicEngine?.sampleStatus?.()??null};}
+ audioStatus(){return {state:this.ctx?(this.ctx.state||'suspended'):'unavailable',status:this.status,enabled:this.musicEnabled,muted:this.muted,scene:this.scene,intensity:this.intensity,tension:this.tension,escalation:this.escalation,variation:this.musicEngine?.variation??0,palette:this.musicEngine?.paletteName??'default',voices:this.voices.size,notes:this.musicEngine?.notesScheduled??0,music:this.musicEngine?.status?.()??'off',reverb:this.reverbLoaded?'ready':(this._reverbPending?'loading':(this.reverbUrl?'pending':'off')),space:this.reverbSpace,echo:this.echoMap,weather:this.weather,biome:this.biomeMood,glue:this.effectsGlue?'on':'off',moth:this.mothAudio?.status?.()??null,samples:this.musicEngine?.sampleStatus?.()??null};}
  // Low, continuous ambience bed: filtered noise hiss plus a sub tone, faded in
  // through the master gain. Owned by the audio instance and torn down in dispose.
  _bed(on){
@@ -945,6 +1008,9 @@ export class SynthAudio{
   if(key==='default'&&noWeatherOverride&&this.biomeMood&&this.biomeMood!=='default'&&BED_MOODS[this.biomeMood])key=this.biomeMood;
   this.bedMood=key;
   this.mothAudio?.setBedMood?.(this.bedMood);
+  // The resolved bed mood doubles as the biome palette selection (unknown moods
+  // fall back to the all-off default inside the engine).
+  this.musicEngine?.setBiomePalette?.(key);
   // Without an explicit weather override, the weather-driven bed mood doubles as
   // the precipitation signal the host already sends: a storm mood means rain or
   // storm, so the synth presence and the Moth weather bed follow it. Ash and
@@ -971,6 +1037,7 @@ export class SynthAudio{
  setBiomeMood(mood){
   this.biomeMood=BED_MOODS[mood]?mood:'default';
   if(this.weather==null||this.weather==='clear')this.setBedMood(this.biomeMood);
+  else this.musicEngine?.setBiomePalette?.(this.biomeMood);
   return this.biomeMood;
  }
  // Convenience for a host holding the arena (or just its id): compute the mood
@@ -1035,6 +1102,45 @@ export class SynthAudio{
   if(this.ctx&&this.bed){const profile=BED_MOODS[this.bedMood]||BED_MOODS.default,t=this.ctx.currentTime;try{this.bed.g.gain.setTargetAtTime(profile.gain*this.bedScale,t,.5);this.bed.og.gain.setTargetAtTime(profile.sub*this.bedScale,t,.55);}catch{}try{if(this.bed.windG)this.bed.windG.gain.setTargetAtTime((profile.air||0)*this._windScale(profile)*(.5+this.bedScale*.5),t,.6);if(this.bed.tenseG)this.bed.tenseG.gain.setTargetAtTime((profile.tense||0)*next*next,t,.7);}catch{}}
   return this.intensity;
  }
+ // Dynamic music state (forwarded to the soundtrack and applied only by the
+ // engine's scheduler). Tension 0..1 adds the low-string tremolo danger layer;
+ // escalation 0..3 selects the short-form/faster mode. Both are pure setters:
+ // no voice is spent and the transport is never restarted.
+ setTension(value){
+  const next=cl(Number(value)||0,0,1);this.tension=next;
+  this.musicEngine?.setTension?.(next);
+  this.mothAudio?.setTension?.(next);
+  return next;
+ }
+ setEscalation(value){
+  const n=Number(value);const next=cl(Number.isFinite(n)?Math.round(n):0,0,3);this.escalation=next;
+  this.musicEngine?.setEscalation?.(next);
+  this.mothAudio?.setEscalation?.(next);
+  return next;
+ }
+ // Seeded performance variation: a string key or a positive integer id selects
+ // the per-bar ornaments; 0/null restores the untouched baseline take. Returns
+ // the resolved variation id (0 when off).
+ setVariation(key){
+  this.variationKey=key==null?null:key;
+  return this.musicEngine?.setVariation?.(key)??0;
+ }
+ // True when the soundtrack can answer a beat right now (built, enabled and
+ // unmuted). The single-owner rule routes a beat to the music only when this is
+ // true; otherwise the caller keeps its motif or announcer voice.
+ _musicAvailable(){return Boolean(this.ctx&&this.musicEngine&&this.musicEnabled!==false&&!this.muted&&this.musicEngine.enabled!==false&&this.musicEngine.muted!==true);}
+ _musicResponse(kind,opts=null){return this._musicAvailable()&&this.musicEngine.requestResponse?.(kind,opts||undefined)===true;}
+ // Per-event-id dedupe for the music hooks, so a replayed or repeated event can
+ // never fire an accent/escalation twice. An event without an id is not deduped
+ // (the live stream always carries one); the map is bounded to 128 keys.
+ _claimMusicBeat(id,tag){
+  if(id==null)return true;
+  const key=`${tag}:${id}`;
+  if(this._musicBeats.has(key))return false;
+  if(this._musicBeats.size>=128)this._musicBeats.delete(this._musicBeats.keys().next().value);
+  this._musicBeats.add(key);
+  return true;
+ }
  // Select the tonal centre for a game mode. Every soundtrack layer reads the
  // shared theme, so switching modes retunes the music without restarting nodes.
  setModeTheme(mode){
@@ -1044,6 +1150,9 @@ export class SynthAudio{
   // apply to the baseline soundtrack and to outcome stings.
   this.theme=(this.soundtrack==='halo')?HALO_THEME:MODE_THEMES[key];
   if(this.soundtrack==='halo')this.musicEngine?.setSoundtrack('halo');else this.musicEngine?.setTheme(this.theme);
+  // Mode palettes only toggle optional authored colour; they never touch the
+  // theme, so the Halo pack keeps its single modal centre.
+  this.musicEngine?.setPalette?.(key);
   return key;
  }
  // Advance the soundtrack scheduler. Called once per rendered frame from the
@@ -1511,6 +1620,28 @@ export class SynthAudio{
   if(!Number.isFinite(t)||t<0||t>2.5)return false;
   return this.matchStart().played===true;
  }
+ // Dynamic-music state hooks for the event stream: escalation/de-escalation and
+ // the killstreak accent. Runs once per event id; pure state or a queued
+ // response, so it never stacks a voice on the event's own motif.
+ _musicEventState(e,local){
+  const type=e?.type;
+  if(typeof type!=='string')return;
+  const up=ESCALATION_EVENTS[type];
+  if(up){
+   if(!this._claimMusicBeat(e.id,`esc:${type}`))return;
+   this.setEscalation(Math.max(this.escalation+up.step,up.floor));
+   return;
+  }
+  if(ESCALATION_CLEARS.includes(type)){
+   if(!this._claimMusicBeat(e.id,`esc:${type}`))return;
+   this.setEscalation(0);
+   return;
+  }
+  if(ACCENT_EVENTS.includes(type)&&local){
+   if(!this._claimMusicBeat(e.id,`accent:${type}`))return;
+   if(this.announcer!==true)this._musicResponse('accent',{vol:1});
+  }
+ }
  // Bounded per-zone quantizer for the generic KOTH/domination `zone-progress`
  // stream, which otherwise fires on every integer percent. Only a quarter-step
  // bucket (25/50/75%), a contested flip or an owner/capture-team flip is a
@@ -1613,6 +1744,7 @@ export class SynthAudio{
  }
   event(e,player){if(!this.ctx||!e||!player)return;const local=this._isLocal(e,player),pos=e.from??e.pos,pan=this._panFor(pos,player);
   this._maybeMatchStart(e);
+  this._musicEventState(e,local);
   const latticeCue=latticeSoundCue(e,player,this._latticeAudioState);if(latticeCue){this._beat(latticeCue,0,1,.2);return;}
    // Traversal accents ride the shared synth/voice cap. A cocs device-use
    // keeps its lattice earcon above; these are the mechanical beats at the
@@ -1662,6 +1794,18 @@ export class SynthAudio{
   if(e.type==='race-lap'){if(local){this._play(.4,0,(t,out,nodes)=>{this._tone(t,out,nodes,{freq:523,duration:.18,type:'triangle',gain:.09,end:659});this._tone(t+.1,out,nodes,{freq:659,duration:.22,type:'triangle',gain:.09,end:784});this._tone(t+.2,out,nodes,{freq:1046,duration:.25,type:'sine',gain:.08,end:1046});});}return;}
   if(e.type==='enemy-telegraph'){const vol=local?1:this._falloff(pos,player,30);if(vol>.03)this._play(.5,pan,(t,out,nodes)=>{this._tone(t,out,nodes,{freq:300,duration:.16,type:'square',gain:.07*vol,end:150});this._tone(t+.18,out,nodes,{freq:240,duration:.22,type:'square',gain:.06*vol,end:120});});return;}
   if(e.type==='race-finish'){if(local){this._play(.6,0,(t,out,nodes)=>{this._tone(t,out,nodes,{freq:440,duration:.2,type:'triangle',gain:.1,end:554});this._tone(t+.12,out,nodes,{freq:554,duration:.2,type:'triangle',gain:.1,end:659});this._tone(t+.24,out,nodes,{freq:880,duration:.35,type:'sine',gain:.12,end:880});});}return;}
+  // Event-driven music: a capture/loss beat the running soundtrack can answer is
+  // a harmonic response quantised to the next music step and owns the beat
+  // outright. With music off (or the response queue full) the motif table below
+  // keeps exactly its historical voice, so the two never double-layer.
+  const harmonic=HARMONIC_RESPONSES[e.type];
+  if(harmonic){
+   // A replayed event id is swallowed: the beat was already owned by whichever
+   // voice (music or motif) claimed it the first time.
+   if(!this._claimMusicBeat(e.id,`harm:${harmonic}`))return;
+   const vol=local?1:(pos?Math.max(.2,this._falloff(pos,player,48)):.9);
+   if(this._musicResponse(harmonic,{vol}))return;
+  }
   // Objective / pickup motifs. Flag and capture cues are deliberately audible
   // for every player (they are match beats); ordinary pickups stay local.
   if(e.type==='power'){if(!local)return;this._beat(POWER_CUES[e.harness]||objectiveCue('power'),pan,1,.25);if(this.announcer)this.announcerCue('power');return;}
@@ -1946,6 +2090,14 @@ export class SynthAudio{
   const isLowHealth=Boolean(player.health>0&&player.health<=(player.maxHealth??100)*.28&&player.vehicleId==null&&!this.muted);
   if(isLowHealth){
     const entry=!this.wasLowHealth;
+    // The entry edge opens the soundtrack's danger layer (state only), scaled by
+    // how far under the threshold the player fell; recovery releases exactly the
+    // contribution this edge added so any other tension source survives.
+    if(entry){
+      const depth=cl(player.health/((player.maxHealth??100)*.28),0,1);
+      this._lowHealthTension=cl(.45+.55*(1-depth),0,1);
+      this.setTension(cl((this.tension||0)+this._lowHealthTension,0,1));
+    }
     this.heartbeatTimer=(this.heartbeatTimer||0)+dt;
     if(entry||this.heartbeatTimer>=1.15){
       this.heartbeatTimer=0;
@@ -1957,6 +2109,11 @@ export class SynthAudio{
     }
   }else{
     this.heartbeatTimer=0;
+    if(this._lowHealthTension){
+      const contribution=this._lowHealthTension;
+      this._lowHealthTension=0;
+      this.setTension(cl((this.tension||0)-contribution,0,1));
+    }
   }
   this.wasLowHealth=isLowHealth;
   const vehicle=(vehicles||[]).find(v=>v.id===player.vehicleId||v.driver===player.id),vx=vehicle?(vehicle.vx??vehicle.velocity?.x??0):0,vz=vehicle?(vehicle.vz??vehicle.velocity?.z??0):0,boosting=Boolean(vehicle&&(vehicle.boosting===true||(vehicle.boostCooldown??0)>0||(vehicle.effects?.turbo>0)));
@@ -1992,7 +2149,7 @@ export class SynthAudio{
   this._tone(t,out,nodes,{freq:120,duration:.3,type:'sawtooth',gain:.14*vol,end:520});
   this._tone(t+.04,out,nodes,{freq:240,duration:.24,type:'triangle',gain:.08*vol,end:660});
  },{send:.3*vol});}
- dispose(){if(this._stingDuckTimer){clearTimeout(this._stingDuckTimer);this._stingDuckTimer=null;}try{this.musicEngine?.dispose();}catch{}this.musicEngine=null;try{this.mothAudio?.dispose?.();}catch{}this.mothAudio=null;if(this.engine){try{this.engine.osc.stop();this.engine.sub.stop();}catch{}this.engine=null;}if(this.zipLoop){try{this.zipLoop.osc.stop();this.zipLoop.hum.stop();}catch{}this.zipLoop=null;}if(this.bed){for(const node of Object.values(this.bed)){if(node&&typeof node.stop==='function')try{node.stop();}catch{}if(node&&typeof node.disconnect==='function')try{node.disconnect();}catch{}}this.bed=null;}for(const token of this.voices){clearTimeout(token.timer);for(const n of token.nodes){try{n.disconnect();}catch{}}}this.voices.clear();this._announceAt?.clear?.();this._altStates?.clear?.();this.lastSting=null;
+ dispose(){if(this._stingDuckTimer){clearTimeout(this._stingDuckTimer);this._stingDuckTimer=null;}try{this.musicEngine?.dispose();}catch{}this.musicEngine=null;this._musicBeats.clear();try{this.mothAudio?.dispose?.();}catch{}this.mothAudio=null;if(this.engine){try{this.engine.osc.stop();this.engine.sub.stop();}catch{}this.engine=null;}if(this.zipLoop){try{this.zipLoop.osc.stop();this.zipLoop.hum.stop();}catch{}this.zipLoop=null;}if(this.bed){for(const node of Object.values(this.bed)){if(node&&typeof node.stop==='function')try{node.stop();}catch{}if(node&&typeof node.disconnect==='function')try{node.disconnect();}catch{}}this.bed=null;}for(const token of this.voices){clearTimeout(token.timer);for(const n of token.nodes){try{n.disconnect();}catch{}}}this.voices.clear();this._announceAt?.clear?.();this._altStates?.clear?.();this.lastSting=null;
  // Release the precipitation presence, the pending mag-in timers and every
  // bounded edge-state map so a disposed engine cannot retain a timer or a zone.
  if(this.precip){for(const node of Object.values(this.precip)){if(node&&typeof node.stop==='function')try{node.stop();}catch{}if(node&&typeof node.disconnect==='function')try{node.disconnect();}catch{}}this.precip=null;}

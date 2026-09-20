@@ -5,7 +5,8 @@ import { clamp, lerp } from './math.mjs';
 import * as T from 'three';
 import {corpseRotation,corpseTreatment,fallDuration} from './deaths.mjs';
 import {chassisFor} from './weapon-models/chassis.mjs';
-import { CharacterRig, characterPose, deathLimbPose, advancePhase, strideFrequency, TAU } from './character-anim.mjs';
+import { CharacterRig, characterPose, deathLimbPose, advancePhase, strideFrequency, TAU, SECONDARY_BOUNDS, SECONDARY_REST, secondaryChannel, angleDelta } from './character-anim.mjs';
+import { RagdollPool, RAGDOLL_CHAIN, RAGDOLL_JOINT_NAMES, RAGDOLL_PARTICLES, RAGDOLL_REST, RAGDOLL_BLEND, RAGDOLL_MAX_AWAKE } from './ragdoll.mjs';
 
 export { CharacterRig, characterPose, advancePhase, strideFrequency, TAU };
 
@@ -215,6 +216,163 @@ export function solveTwoBoneIK(rootPos, targetPos, upperLength, lowerLength, pol
   };
 }
 
+// ---- Living secondary motion ----------------------------------------------
+//
+// Deterministic, allocation-free spring layer for living actors. One
+// SecondaryMotion instance per model owns scalar ProceduralSprings for head
+// lag, antenna/backpack flex, wing-fin beat and crest sway; the pass advances
+// them from the actor's own smoothed speed/turn/acceleration reads and writes:
+//   - a bounded `secondary` channel on the rig (head/chest lag), and
+//   - the tagged ancillary nodes (see node tags in view.mjs/models.mjs).
+// Reduced motion and the cheap software path snap every spring to rest and
+// write the rest pose once, so those modes cost a constant few assignments.
+// Dead rigs are never written, which keeps `applyRagdoll` ownership intact.
+export class SecondaryMotion {
+  constructor() {
+    // Frequencies are deliberately underdamped relative to the rig damping so
+    // the parts trail the body; each is bounded again at channel write time.
+    this.headYaw = new ProceduralSpring({ frequency: 3.4, damping: .78 });
+    this.headPitch = new ProceduralSpring({ frequency: 3.8, damping: .8 });
+    this.flexX = new ProceduralSpring({ frequency: 5.2, damping: .62 });
+    this.flexZ = new ProceduralSpring({ frequency: 4.6, damping: .66 });
+    this.finL = new ProceduralSpring({ frequency: 6.0, damping: .7 });
+    this.finR = new ProceduralSpring({ frequency: 6.0, damping: .7 });
+    this.crestX = new ProceduralSpring({ frequency: 4.4, damping: .6 });
+    this.crestZ = new ProceduralSpring({ frequency: 4.0, damping: .62 });
+    this.packX = new ProceduralSpring({ frequency: 3.2, damping: .85 });
+    this.packZ = new ProceduralSpring({ frequency: 3.0, damping: .85 });
+    this.channels = secondaryChannel(null);
+    this.lastYaw = null;
+    this.lastSpeed = 0;
+  }
+
+  // Every spring back to its rest value (and every channel zeroed) in place.
+  snap() {
+    this.headYaw.snapTo(0); this.headPitch.snapTo(0);
+    this.flexX.snapTo(0); this.flexZ.snapTo(0);
+    this.finL.snapTo(0); this.finR.snapTo(0);
+    this.crestX.snapTo(0); this.crestZ.snapTo(0);
+    this.packX.snapTo(0); this.packZ.snapTo(0);
+    secondaryChannel(null, this.channels);
+    this.lastSpeed = 0;
+    return this.channels;
+  }
+
+  step({ dt = 0, speedNorm = 0, yaw = 0, turnRate = null, hit = 0, reduced = false, cheap = false } = {}) {
+    const seconds = clamp(Number(dt) || 0, 0, .1);
+    const speed = clamp(Number(speedNorm) || 0, 0, 1);
+    const yawValue = Number.isFinite(yaw) ? yaw : 0;
+    if (reduced || cheap) {
+      this.snap();
+      // Keep the input history current so leaving reduced motion cannot read a
+      // stale yaw/speed delta as a one-frame whip.
+      this.lastYaw = yawValue;
+      this.lastSpeed = speed;
+      return this.channels;
+    }
+    const impact = clamp(Number(hit) || 0, 0, 1);
+    const turn = Number.isFinite(turnRate)
+      ? clamp(turnRate, -8, 8)
+      : (seconds > 1e-4 && this.lastYaw !== null ? clamp(angleDelta(this.lastYaw, yawValue) / seconds, -8, 8) : 0);
+    const accel = seconds > 1e-4
+      ? clamp((speed - this.lastSpeed) / seconds / 6, -1, 1)
+      : 0;
+    this.lastYaw = yawValue;
+    this.lastSpeed = speed;
+    const turnRead = clamp(turn / 6, -1, 1);
+    const B = SECONDARY_BOUNDS;
+    this.headYaw.setTarget(clamp(-turnRead * .42, -B.headYaw, B.headYaw));
+    this.headPitch.setTarget(clamp(-accel * .26 - impact * .16, -B.headPitch, B.headPitch));
+    this.flexX.setTarget(clamp(accel * .5 + impact * .42, -B.flexX, B.flexX));
+    this.flexZ.setTarget(clamp(turnRead * .5, -B.flexZ, B.flexZ));
+    this.finL.setTarget(clamp(speed * .24 + turnRead * .16, -B.finL, B.finL));
+    this.finR.setTarget(clamp(speed * .24 - turnRead * .16, -B.finR, B.finR));
+    this.crestX.setTarget(clamp(accel * .4, -B.crestX, B.crestX));
+    this.crestZ.setTarget(clamp(turnRead * .42, -B.crestZ, B.crestZ));
+    this.packX.setTarget(clamp(accel * .3, -B.packX, B.packX));
+    this.packZ.setTarget(clamp(turnRead * .3, -B.packZ, B.packZ));
+    const channels = this.channels;
+    // Springs may overshoot their target slightly; every written channel is
+    // clamped so the bounded contract holds for consumers.
+    channels.headYaw = clamp(this.headYaw.update(seconds), -B.headYaw, B.headYaw);
+    channels.headPitch = clamp(this.headPitch.update(seconds), -B.headPitch, B.headPitch);
+    channels.flexX = clamp(this.flexX.update(seconds), -B.flexX, B.flexX);
+    channels.flexZ = clamp(this.flexZ.update(seconds), -B.flexZ, B.flexZ);
+    channels.finL = clamp(this.finL.update(seconds), -B.finL, B.finL);
+    channels.finR = clamp(this.finR.update(seconds), -B.finR, B.finR);
+    channels.crestX = clamp(this.crestX.update(seconds), -B.crestX, B.crestX);
+    channels.crestZ = clamp(this.crestZ.update(seconds), -B.crestZ, B.crestZ);
+    channels.packX = clamp(this.packX.update(seconds), -B.packX, B.packX);
+    channels.packZ = clamp(this.packZ.update(seconds), -B.packZ, B.packZ);
+    // Torso lag is derived from the head channel so the chest never leads the
+    // head; both stay inside the shared bounds.
+    channels.chestYaw = clamp(channels.headYaw * .45, -B.chestYaw, B.chestYaw);
+    channels.chestRoll = clamp(-channels.flexZ * .3, -B.chestRoll, B.chestRoll);
+    return channels;
+  }
+}
+
+// Role -> flex gains for the tagged ancillary nodes. A tag may name several
+// nodes; the pass caches the node list and its rest rotation on first sight.
+const SECONDARY_ROLE_GAINS = Object.freeze({
+  antenna: Object.freeze({ x: .55, z: .55 }),
+  sensor: Object.freeze({ x: .35, z: .4 }),
+  pack: Object.freeze({ x: .12, z: .12 }),
+  crest: Object.freeze({ x: .5, z: .45 }),
+  finL: Object.freeze({ x: .05, z: .32 }),
+  finR: Object.freeze({ x: .05, z: -.32 }),
+});
+function secondaryNodes(model) {
+  const data = model.userData;
+  if (data.secondaryNodes) return data.secondaryNodes;
+  const lists = { antenna: [], sensor: [], pack: [], crest: [], finL: [], finR: [] };
+  model.traverse(node => {
+    const role = node.userData?.secondary;
+    if (!role || !lists[role] || !node.rotation) return;
+    if (!node.userData.secondaryBase) node.userData.secondaryBase = { rx: node.rotation.x, ry: node.rotation.y, rz: node.rotation.z };
+    lists[role].push(node);
+  });
+  data.secondaryNodes = lists;
+  return lists;
+}
+function applySecondaryNodes(model, channels) {
+  const lists = secondaryNodes(model);
+  for (const role in lists) {
+    const list = lists[role], gain = SECONDARY_ROLE_GAINS[role];
+    if (!list.length) continue;
+    const x = (role === 'finL' ? channels.finL : role === 'finR' ? channels.finR : role === 'pack' ? channels.packX : role === 'crest' ? channels.crestX : channels.flexX) * gain.x;
+    const z = (role === 'finL' ? channels.finL : role === 'finR' ? channels.finR : role === 'pack' ? channels.packZ : role === 'crest' ? channels.crestZ : channels.flexZ) * gain.z;
+    for (let i = 0; i < list.length; i++) {
+      const node = list[i], base = node.userData.secondaryBase;
+      node.rotation.x = base.rx + x;
+      node.rotation.z = base.rz + z;
+    }
+  }
+}
+
+// Advances one living model's secondary pass after `CharacterRig.update` and
+// the final alignment. `yaw` defaults to the model's own yaw; `turnRate` can be
+// supplied by a host that already has it. Returns the live channel (never a
+// fresh object) or null when the model has no rig or is no longer alive.
+export function applyLivingSecondary(model, { dt = 0, reduced = false, cheap = false, speed = 0, maxSpeed = 8, hit = 0, yaw = null, turnRate = null } = {}) {
+  const data = model?.userData, rig = data?.rig, joints = data?.joints;
+  if (!model || !rig || !joints || data.corpse) return null;
+  // Secondary motion is a living-only channel; the lifecycle owns joints once
+  // a death record exists, so never write on a dying/settled rig.
+  if (rig.lifecycle && rig.lifecycle !== 'alive') return null;
+  const motion = data.secondaryRig ?? (data.secondaryRig = new SecondaryMotion());
+  const speedNorm = clamp((Number(speed) || 0) / Math.max(.001, Number(maxSpeed) || 8), 0, 1);
+  const yawValue = Number.isFinite(yaw) ? yaw : (Number.isFinite(model.rotation?.y) ? model.rotation.y : 0);
+  motion.step({ dt, speedNorm, yaw: yawValue, turnRate, hit, reduced: reduced === true, cheap: cheap === true });
+  // Cheap/reduced passes leave the channel at rest; the rig and the tagged
+  // nodes are written with that rest pose, which is the same constant cost as
+  // any other frame.
+  rig.setSecondary(motion.channels);
+  rig.writeSecondary();
+  applySecondaryNodes(model, motion.channels);
+  return motion.channels;
+}
+
 
 // Character presentation ownership; never writes authoritative actor state.
 // World transforms belong to the view while alive, exclusively here while dead.
@@ -282,6 +440,10 @@ function placeLimb(upper, lower, end, target, orientation, pole) {
 // Post-pose pass: call AFTER rig.update, gun aim and weapon replacement.
 // Existing distinct authored anchors win. Legacy coincident defaults are only
 // read as the frame for chassis-derived contact offsets, never edited.
+// Max world distance an ankle may drift before the foot is replanted, and the
+// vertical window that also forces a replant (a teleport/platform step).
+const FOOT_PLANT_STEP=.25;
+const FOOT_PLANT_DROP=.3;
 export function alignLivingCharacter(model, {grounded=true, sampleGround} = {}) {
   const result={hands:[],feet:[]},d=model?.userData,j=d?.joints;
   if(!j?.contactGait || d.corpse || (d.rig?.lifecycle && d.rig.lifecycle!=='alive')) return result;
@@ -312,17 +474,75 @@ export function alignLivingCharacter(model, {grounded=true, sampleGround} = {}) 
     const origin=model.getWorldPosition(new T.Vector3());
     const scale=model.getWorldScale(new T.Vector3());
     const upright=model.getWorldQuaternion(new T.Quaternion());
+    const plants=d.footPlantRig??(d.footPlantRig={L:{x:0,z:0,y:0,top:0,set:false},R:{x:0,z:0,y:0,top:0,set:false}});
+    const samples=[];
+    // World-space foot planting. Exactly one ground query per foot, in L/R
+    // order (the phase1-grips budget is pinned at two samples per eligible
+    // living model). A foot keeps its planted world target until the ankle
+    // walks more than FOOT_PLANT_STEP past it; slope stance derives its
+    // toe/heel gradient from the two planted heights instead of extra probes.
     for(const side of ['L','R']) {
       const upper=j[`legUpper${side}`],lower=j[`legLower${side}`],foot=j[`foot${side}`];
-      if(!upper||!lower||!foot) continue;
-      const target=foot.getWorldPosition(new T.Vector3());
-      const floor=sampleGround(target.x,target.z,origin.y);
+      if(!upper||!lower||!foot){samples.push(null);continue;}
+      const current=foot.getWorldPosition(new T.Vector3());
+      const plant=plants[side];
+      const stepped=!plant.set||Math.hypot(current.x-plant.x,current.z-plant.z)>FOOT_PLANT_STEP||Math.abs(current.y-plant.top)>FOOT_PLANT_DROP;
+      if(stepped){plant.x=current.x;plant.z=current.z;plant.top=current.y;plant.set=true;}
+      const floor=sampleGround(plant.x,plant.z,origin.y);
       // null/NaN/void or another floor: leave procedural gait untouched.
-      if(!Number.isFinite(floor)||Math.abs(floor-origin.y)>.12*scale.y) continue;
+      if(!Number.isFinite(floor)||Math.abs(floor-origin.y)>.12*scale.y){samples.push(null);continue;}
+      plant.y=floor;
+      samples.push({side,upper,lower,foot,plant,stepped,floor});
+    }
+    const left=samples[0],right=samples[1],scratch=d.alignScratch??(d.alignScratch={gradient:new T.Vector3(),orientation:new T.Quaternion(),axisX:new T.Vector3(1,0,0),axisZ:new T.Vector3(0,0,1),tilt:new T.Quaternion(),forward:new T.Vector3(),right:new T.Vector3(),hip:new T.Vector3()});
+    // Toe/heel + cross-slope stance from the planted pair: the gradient's
+    // forward component pitches the foot and its lateral component rolls it.
+    let slopePitch=0,slopeRoll=0;
+    if(left&&right){
+      const dx=left.plant.x-right.plant.x,dz=left.plant.z-right.plant.z,span=Math.hypot(dx,dz);
+      if(span>1e-4){
+        scratch.gradient.set((left.floor-right.floor)*dx/(span*span),0,(left.floor-right.floor)*dz/(span*span));
+        scratch.forward.set(0,0,-1).applyQuaternion(upright).setY(0);
+        if(scratch.forward.lengthSq()>1e-6){slopePitch=clamp(Math.atan(scratch.gradient.dot(scratch.forward.normalize())),-.32,.32);}
+        scratch.right.set(1,0,0).applyQuaternion(upright).setY(0);
+        if(scratch.right.lengthSq()>1e-6){slopeRoll=clamp(Math.atan(scratch.gradient.dot(scratch.right.normalize())),-.28,.28);}
+      }
+    }
+    // Pelvis compensation runs before the IK placement so the solved ankle
+    // targets stay exact: the root follows the mean support height, clamped to
+    // the reach slack of the most distant foot so raising the pelvis can never
+    // over-extend a leg (a clamped leg would otherwise miss its floor target).
+    if(left&&right&&j.root&&d.rig?.pose){
+      const mean=(left.floor+right.floor)/2;
+      let comp=clamp(mean-origin.y,-.14,.14)*.5;
+      if(comp>0){
+        let slack=Infinity;
+        for(const entry of [left,right]){
+          const reach=(entry.lower.parent.position.length()+entry.foot.position.length())*scale.y*.9999;
+          entry.upper.getWorldPosition(scratch.hip);
+          const distance=Math.hypot(entry.plant.x-scratch.hip.x,entry.floor+.0935*scale.y-scratch.hip.y,entry.plant.z-scratch.hip.z);
+          slack=Math.min(slack,reach-distance);
+        }
+        // `slack` is world-space; the root offset is model-space.
+        comp=Math.max(0,Math.min(comp,Number.isFinite(slack)?slack/scale.y:0));
+      }
+      j.root.position.y=(j.rootBaseY??0)+d.rig.pose.rootY+comp;
+      j.root.updateWorldMatrix(true,false);
+    }
+    for(const entry of samples) {
+      if(!entry) continue;
+      const {side,upper,lower,foot,plant,stepped,floor}=entry;
       const lift=d.rig?.pose?.[`leg${side}`]?.contactLift ?? 0;
-      target.y=floor+(.0935+lift)*scale.y;
-      placeLimb(upper,lower,foot,target,upright,new T.Vector3(0,0,-1));
-      result.feet.push({side,target:target.toArray(),error:foot.getWorldPosition(new T.Vector3()).distanceTo(target)});
+      // The ankle target sits on the planted world spot, never below the
+      // sampled floor (no penetration) and never above floor + sole + lift.
+      const target=new T.Vector3(plant.x,floor+(.0935+lift)*scale.y,plant.z);
+      const footOrientation=scratch.orientation.copy(upright);
+      if(slopePitch||slopeRoll){
+        footOrientation.multiply(scratch.tilt.setFromAxisAngle(scratch.axisX,slopePitch));
+        footOrientation.multiply(scratch.tilt.setFromAxisAngle(scratch.axisZ,slopeRoll));
+      }
+      placeLimb(upper,lower,foot,target,footOrientation,new T.Vector3(0,0,-1));
+      result.feet.push({side,target:target.toArray(),error:foot.getWorldPosition(new T.Vector3()).distanceTo(target),replanted:stepped===true,slope:{pitch:slopePitch,roll:slopeRoll}});
     }
   }
   return result;
@@ -338,10 +558,82 @@ export class CharacterLifecycle {
     this.normal = new T.Vector3();
     this.up = new T.Vector3(0,1,0);
     this.slope = new T.Quaternion();
+    // Presentation-only ragdoll pool. Capacity follows the corpse budget and
+    // at most six corpses run physics at once; slots are reused across deaths.
+    this.ragdolls = new RagdollPool({capacity:this.maxCorpses,maxAwake:RAGDOLL_MAX_AWAKE});
+    this.ragdollFrame = {matrix:null,invMatrix:null,sampleGround:null,fallbackGround:0,blocks:null};
+    this.inverseMatrix = new T.Matrix4();
+    this.liveMatrix = new T.Matrix4();
+    this.livePoint = new T.Vector3();
+    this.ragdollLive = new Float64Array(RAGDOLL_PARTICLES*3);
+    this.ragdollQuats = new Float64Array(RAGDOLL_CHAIN.length*4);
+  }
+  // A ragdoll is presentation sugar: reduced motion, the CPU renderer, hidden
+  // bodies and the hidden local corpse all keep the authored fallback byte for
+  // byte (including the 31-sample settled contract). An explicit option can
+  // only tighten that gate, never widen it.
+  _ragdollWanted(plan, {reduced=false,software=false,hidden=false,ragdoll=null}={}) {
+    if(reduced===true||software===true||hidden===true)return false;
+    if(plan?.hideBody===true)return false;
+    return ragdoll!==false;
+  }
+  _ragdollBlend(age) {
+    return Math.max(0,Math.min(1,1-finite(age,0)/RAGDOLL_BLEND));
+  }
+  // Model-local particle field of the living pose, captured before the rig is
+  // reset. Joints that are missing (or implausibly far from their rest slot on
+  // simple test rigs) fall back to the authored rest position.
+  _captureLive(model, rig) {
+    model.updateWorldMatrix(true,true);
+    this.liveMatrix.copy(model.matrixWorld).invert();
+    const live=this.ragdollLive,point=this.livePoint,joints=rig?.joints;
+    for(let i=0;i<RAGDOLL_PARTICLES;i++){
+      let x=RAGDOLL_REST[i*3],y=RAGDOLL_REST[i*3+1],z=RAGDOLL_REST[i*3+2];
+      const node=joints?.[RAGDOLL_JOINT_NAMES[i]];
+      if(typeof node?.getWorldPosition==='function'){
+        node.getWorldPosition(point).applyMatrix4(this.liveMatrix);
+        const dx=point.x-x,dy=point.y-y,dz=point.z-z;
+        if(Number.isFinite(point.x)&&Number.isFinite(point.y)&&Number.isFinite(point.z)&&dx*dx+dy*dy+dz*dz<.5625){x=point.x;y=point.y;z=point.z;}
+      }
+      live[i*3]=x;live[i*3+1]=y;live[i*3+2]=z;
+    }
+    return live;
+  }
+  // Killed-actor context for the pool: killing direction and actor velocity are
+  // rotated into the corpse's model-local frame, and the live rig channels/hit
+  // envelope are folded into the deterministic seed.
+  _ragdollSeed(model, record, actor, direction, hit, slot = null) {
+    const yaw=finite(record.yaw,0),c=Math.cos(yaw),s=Math.sin(yaw);
+    const dx=Number.isFinite(direction?.x)?direction.x:0,dz=Number.isFinite(direction?.z)?direction.z:0;
+    let localDirection=null;
+    if(Math.hypot(dx,dz)>1e-6)localDirection={x:dx*c-dz*s,z:dx*s+dz*c};
+    const vx=finite(actor?.vx,0),vy=finite(actor?.vy,0),vz=finite(actor?.vz,0);
+    const rig=model.userData.rig;
+    // A reseed must reuse the original hand-off snapshot: by then the joints
+    // already hold physics, not the living pose.
+    return {
+      seed:record.plan.seed,
+      plan:record.plan,
+      direction:localDirection,
+      velocity:{x:vx*c-vz*s,y:vy,z:vx*s+vz*c},
+      live:slot?slot.live:this._captureLive(model,rig),
+      liveQuats:slot?slot.liveQuats:(rig?.captureRagdollQuats?rig.captureRagdollQuats(this.ragdollQuats):null),
+      hit,
+    };
+  }
+  _ragdollFrame(model, sampleGround, blocks, fallbackY) {
+    const frame=this.ragdollFrame;
+    frame.matrix=model.matrixWorld.elements;
+    this.inverseMatrix.copy(model.matrixWorld).invert();
+    frame.invMatrix=this.inverseMatrix.elements;
+    frame.sampleGround=typeof sampleGround==='function'?sampleGround:null;
+    frame.fallbackGround=Number.isFinite(fallbackY)?fallbackY:0;
+    frame.blocks=Array.isArray(blocks)?blocks:null;
+    return frame;
   }
   state(model) { return this.records.get(model)?.state ?? 'alive'; }
   ownsTransform(model) { return ['dying', 'settled'].includes(this.state(model)); }
-  update(model, actor, {time = 0, plan = {}, reduced = false, sampleGround, hidden = false, direction = null, authoritative = false} = {}) {
+  update(model, actor, {time = 0, plan = {}, reduced = false, sampleGround, hidden = false, direction = null, authoritative = false, software = false, ragdoll = null, arena = null, blocks = null} = {}) {
     time = finite(time);
     let record = this.records.get(model);
     if (actor.health > 0) {
@@ -352,6 +644,7 @@ export class CharacterLifecycle {
         }
         model.position.set(finite(actor.x),finite(actor.y),finite(actor.z));
         model.rotation.set(0,finite(actor.bodyYaw,finite(actor.yaw)),0,'XYZ');
+        if(record.ragdoll){this.ragdolls.release(record.ragdoll);record.ragdoll=null;}
         model.userData.rig?.reset();
         model.userData.corpse = false;
         model.userData.hitUntil = 0;
@@ -364,17 +657,39 @@ export class CharacterLifecycle {
       const bind = [];
       model.traverse(node => bind.push({node,position:node.position.clone(),quaternion:node.quaternion.clone(),scale:node.scale.clone(),order:node.rotation.order,visible:node.visible}));
       const directed = deathYaw(direction);
-      record = {state:'dying',start:time,age:0,bind,plan:{...plan},planLocked:authoritative===true,x:finite(actor.x),y:finite(actor.y),z:finite(actor.z),yaw:directed ?? finite(actor.bodyYaw,finite(actor.yaw)),yawLocked:directed !== null,expired:false,limbed:false,baseScale:{x:finite(model.scale?.x,1),y:finite(model.scale?.y,1),z:finite(model.scale?.z,1)}};
+      record = {state:'dying',start:time,age:0,bind,plan:{...plan},planLocked:authoritative===true,x:finite(actor.x),y:finite(actor.y),z:finite(actor.z),yaw:directed ?? finite(actor.bodyYaw,finite(actor.yaw)),yawLocked:directed !== null,expired:false,limbed:false,ragdoll:null,leanX:0,leanZ:0,baseScale:{x:finite(model.scale?.x,1),y:finite(model.scale?.y,1),z:finite(model.scale?.z,1)}};
       this.records.set(model,record);this.active.set(model,record);
-      model.userData.rig?.reset();
-      model.userData.rig?.apply(characterPose({}));
-      if (model.userData.rig) model.userData.rig.lifecycle = 'dying';
-      record.head = model.userData.head ?? null;
-      record.contacts = bodyEnvelope(model);
+      // Evict before acquiring so the oldest corpse's pool slot is free for the
+      // new one when the corpse budget is already full.
       while (this.active.size > this.maxCorpses) {
         const [old,entry] = this.active.entries().next().value;
-        entry.expired = true; entry.state = 'settled'; old.visible = false; this.active.delete(old);
+        entry.expired = true; entry.state = 'settled'; old.visible = false;
+        if (entry.ragdoll) { this.ragdolls.release(entry.ragdoll); entry.ragdoll = null; }
+        this.active.delete(old);
       }
+      // Capture the living pose and the final hit lean before the rig settles,
+      // so a ragdoll corpse continues out of the kill frame instead of snapping
+      // through rig.reset(). Reduced motion, the CPU renderer, hidden bodies and
+      // the hidden local corpse keep the authored fallback path untouched.
+      const wantRagdoll = this._ragdollWanted(record.plan,{reduced,software,hidden,ragdoll}) && typeof model.userData.rig?.applyRagdoll === 'function';
+      record.leanX = clamp(finite(model.rotation.x,0),-.4,.4);
+      record.leanZ = clamp(finite(model.rotation.z,0),-.4,.4);
+      if (wantRagdoll) {
+        const hit = Math.max(finite(model.userData.hitStrength,0),finite(model.userData.rig?.hit,0));
+        const slot = this.ragdolls.acquire(this._ragdollSeed(model,record,actor,direction,hit));
+        if (slot) record.ragdoll = slot;
+      }
+      if (record.ragdoll) {
+        // Keep the live rig channels for the hand-off; the lifecycle flag is
+        // what stops the living path from writing again.
+        model.userData.rig.lifecycle = 'dying';
+      } else {
+        model.userData.rig?.reset();
+        model.userData.rig?.apply(characterPose({}));
+        if (model.userData.rig) model.userData.rig.lifecycle = 'dying';
+      }
+      record.head = model.userData.head ?? null;
+      record.contacts = bodyEnvelope(model);
     }
     // The view poses the corpse in the actor pass before the death event is
     // dispatched, so the authoritative plan and the killing direction can both
@@ -387,6 +702,19 @@ export class CharacterLifecycle {
       record.start = time;
       record.age = 0;
       record.limbed = false;
+      // The view can learn the authoritative plan one frame late. Reseed the
+      // ragdoll from the captured hand-off pose (zeroing its accumulator so the
+      // whole fall replays from the new context), or acquire one now when the
+      // fallback plan had no body. A body-hiding plan releases physics.
+      const lateHit = Math.max(finite(model.userData.hitStrength,0),finite(model.userData.rig?.hit,0));
+      if (record.plan.hideBody === true || hidden === true) {
+        if (record.ragdoll) { this.ragdolls.release(record.ragdoll); record.ragdoll = null; }
+      } else if (record.ragdoll) {
+        this.ragdolls.reseed(record.ragdoll,this._ragdollSeed(model,record,actor,direction,lateHit,record.ragdoll));
+      } else if (this._ragdollWanted(record.plan,{reduced,software,hidden,ragdoll}) && model.userData.rig) {
+        const slot = this.ragdolls.acquire(this._ragdollSeed(model,record,actor,direction,lateHit));
+        if (slot) record.ragdoll = slot;
+      }
     }
     if (!record.yawLocked) {
       const late = deathYaw(direction);
@@ -403,6 +731,7 @@ export class CharacterLifecycle {
     if (record.baseScale) model.scale.set(record.baseScale.x*treatment.scale.x,record.baseScale.y*treatment.scale.y,record.baseScale.z*treatment.scale.z);
     if (record.age >= Math.min(this.maxLifetime,Math.max(.1,finite(record.plan.duration,this.maxLifetime)))) {
       record.expired = true; this.active.delete(model);
+      if (record.ragdoll) { this.ragdolls.release(record.ragdoll); record.ragdoll = null; }
     }
     model.visible = !hidden && !treatment.hideBody && !record.expired;
     // Expired/evicted bodies never resume work or become visible before respawn.
@@ -410,7 +739,10 @@ export class CharacterLifecycle {
     if (!model.visible) return record.state;
     model.position.set(record.x,record.y,record.z);
     const rotation=corpseRotation(record.plan,fall,record.yaw,reduced);
-    model.rotation.set(rotation.x,rotation.y,rotation.z,'YXZ');
+    // The final hit lean decays into the fall over the ragdoll hand-off window
+    // instead of being cleared the instant the corpse record appears.
+    const handoff=record.ragdoll?this._ragdollBlend(record.age):0;
+    model.rotation.set(rotation.x+record.leanX*handoff,rotation.y,rotation.z+record.leanZ*handoff,'YXZ');
     // Caller supplies authoritative floor/platform selection. null means void;
     // referenceY lets stacked-platform queries choose the actual supporting layer.
     const ground = (x,z) => {
@@ -434,15 +766,37 @@ export class CharacterLifecycle {
     // No fake floor in voids; bounded gravity until the lifetime cap hides it.
     model.position.y += Number.isFinite(lift) ? lift : -Math.min(20,4.9*record.age*record.age);
     model.updateWorldMatrix(true,true);
+    // Ragdoll pass: particle physics in model-local space writes joint
+    // rotations only. It stops writing the frame the corpse sleeps; a seeked
+    // corpse settles on the authored silhouette once and then never samples.
+    const slot = record.ragdoll;
+    const ragdollRig = slot ? model.userData.rig : null;
+    if (slot && ragdollRig) {
+      if (slot.awake) {
+        this.ragdolls.advance(slot,record.age,this._ragdollFrame(model,sampleGround,blocks ?? arena?.blocks ?? null,record.y));
+        if (slot.awake) ragdollRig.applyRagdoll(slot.pose,this._ragdollBlend(record.age),slot.liveQuats);
+      }
+      if (!slot.awake && slot.dirty) {
+        if (slot.snapped) ragdollRig.applyCorpse(deathLimbPose({pose:record.plan.pose,style:record.plan.style,seed:record.plan.seed??0,splay:record.plan.splay,roll:record.plan.roll,spin:record.plan.spin,progress:1,reduced:false}));
+        else ragdollRig.applyRagdoll(slot.pose,this._ragdollBlend(record.age),null);
+        slot.dirty = false;
+      }
+    }
     // Seeded limb splay while the fall advances; the frame that reaches the
     // settled pose writes once more and then the corpse is left untouched.
-    if (model.userData.rig && !record.limbed) {
+    if (model.userData.rig && !record.limbed && !slot) {
       model.userData.rig.applyCorpse(deathLimbPose({pose:record.plan.pose,style:record.plan.style,seed:record.plan.seed??0,splay:record.plan.splay,roll:record.plan.roll,spin:record.plan.spin,progress:fall,reduced}));
       if (fall >= 1) record.limbed = true;
     }
     return record.state;
   }
   // Removal is a disposal hook, not a revive; callers discard the model.
-  release(model) { this.active.delete(model); this.records.delete(model); }
-  clear() { this.active.clear(); this.records = new WeakMap(); }
+  release(model) {
+    const record = this.records.get(model);
+    if (record?.ragdoll) { this.ragdolls.release(record.ragdoll); record.ragdoll = null; }
+    this.active.delete(model); this.records.delete(model);
+  }
+  // Match replacement reuses the pool scratch; dispose drops it entirely.
+  clear() { this.active.clear(); this.records = new WeakMap(); this.ragdolls.clear(); }
+  dispose() { this.clear(); this.ragdolls.dispose(); }
 }

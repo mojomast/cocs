@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {Match,moveActor} from './core.mjs';
 import {resolveMapForMode} from './arenas.mjs';
-import {DEFAULT_CONFIG,DEFAULT_DISPLAY,normalizeConfig,normalizeDisplay,GAME_MODES,DIFFICULTIES,modeRule,MUTATORS,MUTATOR_IDS,activeMutators,mutatorEffects,applyMutators,loadoutFor,loadoutRule,loadoutAllows,loadoutStart,spawnInventory,spawnLoadout,LOADOUT_PRESETS,matchPlan,mutatorView,quickStartRules} from './config.mjs';
+import {DEFAULT_CONFIG,DEFAULT_DISPLAY,normalizeConfig,normalizeDisplay,GAME_MODES,DIFFICULTIES,modeRule,MUTATORS,MUTATOR_IDS,activeMutators,mutatorEffects,applyMutators,loadoutFor,loadoutRule,loadoutAllows,loadoutStart,spawnInventory,spawnLoadout,LOADOUT_PRESETS,matchPlan,mutatorView,quickStartRules,FPS_CAPS,SHADOW_LEVELS} from './config.mjs';
 import {COOP_GARRISON_BOTS,COOP_TEAM_FLOOR,DEFAULT_COCS_TIER,OPERATIONS_WAVE_COUNT,configuredDirectorTier,coopRoster,coopWaveSummary} from './cocs-difficulty.mjs';
 import {slowSkip} from './test-support.mjs';
 import {CAMPAIGN_MISSIONS} from './campaign-data.mjs';
@@ -173,6 +173,36 @@ test('display clarity and caption preferences default safely',()=>{
   assert.equal(on.showKillFeed,false);
   assert.equal(on.showDamageNumbers,false);
   assert.equal(on.showRadar,false);
+});
+
+test('touch layout, frame cap and shadow fields normalize deliberately', () => {
+ const d = normalizeDisplay({});
+ assert.equal(d.touchScale, 1);
+ assert.equal(d.touchOpacity, 1);
+ assert.equal(d.touchLeftHanded, false);
+ assert.equal(d.fpsCap, 0, '0 is the documented uncapped default');
+ assert.equal(d.shadows, 'high');
+ assert.deepEqual([...FPS_CAPS], [0, 30, 60, 120]);
+ assert.deepEqual([...SHADOW_LEVELS], ['high', 'low', 'off']);
+ const clamped = normalizeDisplay({touchScale: 9, touchOpacity: 0, touchLeftHanded: 'yes', fpsCap: 90, shadows: 'ultra'});
+ assert.equal(clamped.touchScale, 1.3);
+ assert.equal(clamped.touchOpacity, .4);
+ assert.equal(clamped.touchLeftHanded, false);
+ assert.equal(clamped.fpsCap, 0, 'an unpublished cap falls back to uncapped');
+ assert.equal(clamped.shadows, 'high', 'an unknown shadow level falls back to high');
+ // Saved JSON round-trips through the same normalizer without drift.
+ const saved = JSON.parse(JSON.stringify({...DEFAULT_DISPLAY, touchScale: .85, touchOpacity: .5, touchLeftHanded: true, fpsCap: 60, shadows: 'off'}));
+ const round = normalizeDisplay(saved);
+ assert.equal(round.touchScale, .85);
+ assert.equal(round.touchOpacity, .5);
+ assert.equal(round.touchLeftHanded, true);
+ assert.equal(round.fpsCap, 60);
+ assert.equal(round.shadows, 'off');
+ // Legacy saves without the new fields keep the documented defaults.
+ const legacy = JSON.parse('{"display":{"fov":90}}');
+ assert.equal(normalizeDisplay(legacy.display).fpsCap, 0);
+ assert.equal(normalizeDisplay(legacy.display).touchLeftHanded, false);
+ assert.equal(normalizeDisplay(legacy.display).touchScale, 1);
 });
 
 test('mutators unify the legacy flags into one canonical, ordered set',()=>{

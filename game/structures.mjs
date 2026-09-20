@@ -161,6 +161,20 @@ export function applyPropDamage(state, id, kind, amount) {
   return { id, kind, broken: true, wasBroken: false, hp: 0, profile };
 }
 
+// Presentation-only staging for a partially damaged prop. Pure and
+// deterministic: the same hp and profile always yield the same shrink/darken,
+// so the instanced crate or barrel can read "about to break" before the shatter
+// without the renderer touching break state or collision. `progress` reaches 1
+// exactly at the break threshold and `scale` stays inside ~0.86..0.92.
+export function propDamageStage(hp, profile) {
+  const threshold = Number.isFinite(profile?.threshold) && profile.threshold > 0 ? profile.threshold : 1;
+  const remaining = Number.isFinite(hp) ? Math.max(0, Math.min(threshold, hp)) : threshold;
+  const progress = 1 - remaining / threshold;
+  const scale = Number((.92 - .06 * progress).toFixed(4));
+  const shade = Number((1 - .38 * progress).toFixed(4));
+  return Object.freeze({ progress, scale, shade });
+}
+
 // Deterministic debris plan for a shattered prop. Pure: same prop, same hit
 // origin and same serial always yield the same chunks. Each chunk has a bounded
 // velocity and spin so the pooled debris cannot escape its lifetime budget.

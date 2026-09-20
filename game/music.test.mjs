@@ -114,6 +114,28 @@ test('offline render produces non-silent, non-clipping output when Web Audio is 
  e.dispose();
 });
 
+// The same render check with every expansion armed (tension tremolo, escalated
+// short form, palette colour and a seeded variation). Skipped in Node for the
+// same reason as the baseline check; in a browser it proves the added layers
+// still render non-silent and inside the soft ceiling.
+test('an expanded take renders non-silent and non-clipping when Web Audio is available',async t=>{
+ if(typeof globalThis.OfflineAudioContext!=='function'){t.skip('OfflineAudioContext unavailable in this environment');return;}
+ const ctx=new globalThis.OfflineAudioContext(1,44100,44100);
+ const e=new MusicEngine({ctx,destination:ctx.destination,theme,seed:11});
+ e.setScene('combat');e.setIntensity(1);
+ e.setTension(1);e.setEscalation(3);e.setPalette('horde');e.setVariation('ironman');
+ const renderPromise=ctx.startRendering();
+ for(let i=0;i<40;i++){await new Promise(r=>setTimeout(r,5));e.tick();}
+ const buffer=await renderPromise;
+ const data=buffer.getChannelData(0);
+ let peak=0,energy=0;
+ for(let i=0;i<data.length;i++){const v=Math.abs(data[i]);if(v>peak)peak=v;energy+=data[i]*data[i];}
+ assert.ok(energy>1e-6,'the expanded soundtrack is not silent');
+ assert.ok(peak<=1.5,'the expanded soundtrack does not grossly clip');
+ assert.ok(e.voices.length<=e.maxVoices);
+ e.dispose();
+});
+
 test('the halo soundtrack pack is original modal material and swaps cleanly',()=>{
  const {e,ctx}=engine();
  assert.equal(e.arrangements,ARRANGEMENTS,'the baseline pack is the default');

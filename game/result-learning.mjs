@@ -417,7 +417,7 @@ export function contributionSummary({hud = null, actor = null, viewer, mode = nu
 // share is the difference between the recorded base and that match formula,
 // and any payload the model cannot itemize lands in a labelled adjustment.
 // ---------------------------------------------------------------------------
-export function rewardBreakdown({actor = null, reward = null, win = false} = {}) {
+export function rewardBreakdown({actor = null, reward = null, win = false, singleplayer = null} = {}) {
  const stats = scoreStats(actor);
  const frags = int(actor?.frags);
  const combat = frags * 12;
@@ -429,7 +429,7 @@ export function rewardBreakdown({actor = null, reward = null, win = false} = {})
   + int(stats.flagReturns) * 10,
  );
  const victory = win === true ? 80 : 0;
- const base = matchXp({win: win === true, actor});
+ const base = matchXp({win: win === true, actor, singleplayer: singleplayer ?? undefined});
  const baseFloor = Math.max(0, base - (40 + combat + objective + victory));
  const objectiveCredit = Math.max(0, base - combat - victory - 40 - baseFloor);
  const baseGained = int(reward?.baseGained);
@@ -649,7 +649,7 @@ export function matchLearningSummary({hud = null, actor = null, viewer, mode = n
   ? spectatorContribution({hud, mode})
   : contributionSummary({hud, actor: viewerActor, mode, campaign, resultSummary});
  // A spectator has no award payload; a stale local reward must not surface.
- const xp = spectator ? {...NEUTRAL_REWARD} : rewardBreakdown({actor: viewerActor, reward, win: outcome === 'win'});
+ const xp = spectator ? {...NEUTRAL_REWARD} : rewardBreakdown({actor: viewerActor, reward, win: outcome === 'win', singleplayer: hud?.singleplayer ?? null});
  const next = nextMatchPlan({hud, actor: viewerActor, mode, campaign, challenges, weeklyChallenges, ranked, rankedQueued, net, lastDemo, mapNameFor});
  return {contribution, xp, next, outcome, viewer: spectator ? 'spectator' : 'player'};
 }

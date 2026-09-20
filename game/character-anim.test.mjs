@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {advancePhase, angleDelta, characterPose, CharacterRig, deathLimbPose, clamp, damp, dampAngle, strideFrequency, turnToward, TAU} from './character-anim.mjs';
+import {advancePhase, angleDelta, characterPose, CharacterRig, deathLimbPose, clamp, damp, dampAngle, strideFrequency, turnToward, TAU, SECONDARY_BOUNDS, SECONDARY_REST} from './character-anim.mjs';
+import {RAGDOLL_CHAIN, RAGDOLL_REST} from './ragdoll.mjs';
 
 const allAngles = pose => {
   const out = [];
@@ -163,6 +164,36 @@ test('corpse posing is lifecycle-only while apply keeps refusing dead writes', (
  assert.ok(Math.abs(joints.armUpperL.rotation.z) > 0, 'the corpse channel writes the limbs');
 });
 
+test('the ragdoll channel writes only dead joints and blends the live pose out', () => {
+ const node = () => ({position: {x: 0, y: 0, z: 0, set() {}}, rotation: {x: 0, y: 0, z: 0, order: 'XYZ', set(x, y, z) { this.x = x; this.y = y; this.z = z; }}});
+ const joints = {};
+ for (const key of ['root', 'hips', 'torso', 'chest', 'head', 'armUpperL', 'armUpperR', 'forearmL', 'forearmR', 'legUpperL', 'legUpperR', 'legLowerL', 'legLowerR', 'footL', 'footR']) joints[key] = node();
+ const rig = new CharacterRig(joints);
+ const particles = new Float64Array(RAGDOLL_REST);
+ particles[6 * 3] -= .28; particles[6 * 3 + 1] -= .18;
+ const pose = {particles};
+ rig.applyRagdoll(pose);
+ assert.ok(!rig.pose, 'a living rig refuses ragdoll writes');
+ rig.lifecycle = 'dying';
+ // A posed live rig captured right before death is restored exactly at blend 1.
+ joints.chest.rotation.set(.1, .2, .05);
+ joints.armUpperL.rotation.set(-.2, 0, .3);
+ const live = rig.captureRagdollQuats(new Float64Array(RAGDOLL_CHAIN.length * 4));
+ assert.ok(live.some((value, index) => index % 4 === 3 ? value !== 1 : value !== 0), 'live joint quats were captured');
+ rig.applyRagdoll(pose, 1, live);
+ assert.ok(Math.abs(joints.chest.rotation.x - .1) < 1e-9 && Math.abs(joints.chest.rotation.y - .2) < 1e-9, 'the kill frame keeps the living chest');
+ assert.ok(Math.abs(joints.armUpperL.rotation.z - .3) < 1e-9, 'the killing hit lean/pose survives frame zero');
+ // At blend 0 the dropped hand bends the elbow and every joint stays finite.
+ rig.applyRagdoll(pose, 0, null);
+ assert.ok(Math.abs(joints.forearmL.rotation.x) + Math.abs(joints.forearmL.rotation.z) > 1e-6, 'the particle field drives the elbow');
+ for (const key of ['hips', 'torso', 'chest', 'head', 'armUpperL', 'armUpperR', 'forearmL', 'forearmR', 'legUpperL', 'legUpperR', 'legLowerL', 'legLowerR', 'footL', 'footR'])
+  for (const axis of ['x', 'y', 'z']) assert.ok(Number.isFinite(joints[key].rotation[axis]), `${key}.${axis}`);
+ const first = [joints.forearmL.rotation.x, joints.forearmL.rotation.z];
+ rig.applyRagdoll(pose, 0, null);
+ assert.deepEqual([joints.forearmL.rotation.x, joints.forearmL.rotation.z], first, 'the adapter is deterministic');
+ assert.equal(rig.pose, pose);
+});
+
 test('reduced motion plants the refined contact gait while full motion lifts the stride', () => {
   // The app intentionally keeps reduce-motion semantics: legs stay planted and
   // the arms/torso keep their readable pose. This pins that contract so a
@@ -174,5 +205,86 @@ test('reduced motion plants the refined contact gait while full motion lifts the
   assert.equal(reduced.legL.contactLift, 0, 'reduced motion keeps the foot planted');
   assert.notEqual(reduced.legL.hipX, running.legL.hipX, 'the reduced stride angle differs from the running angle');
   assert.notEqual(reduced.legL.kneeX, running.legL.kneeX, 'the reduced knee angle differs from the running angle');
+});
+
+test('secondary channel is bounded, allocation-free under reduced motion and rest by default', () => {
+  const over = characterPose({secondary: {headYaw: 99, headPitch: -99, chestYaw: 99, chestRoll: 99, flexX: 99, flexZ: -99, finL: 99, finR: -99, crestX: 99, crestZ: 99, packX: 99, packZ: -99}});
+  for (const key in SECONDARY_BOUNDS) {
+    assert.ok(Math.abs(over.secondary[key]) <= SECONDARY_BOUNDS[key] + 1e-12, `${key} clamped`);
+  }
+  assert.equal(over.secondary.headYaw, SECONDARY_BOUNDS.headYaw);
+  assert.equal(characterPose({}).secondary, SECONDARY_REST, 'a missing channel resolves to the shared rest object');
+  const reduced = characterPose({secondary: {headYaw: 1}, reduced: true});
+  assert.equal(reduced.secondary, SECONDARY_REST, 'reduced motion snaps the channel to rest');
+  const nan = characterPose({secondary: {headYaw: NaN, flexZ: 'nope'}});
+  assert.ok(Number.isFinite(nan.secondary.headYaw) && Number.isFinite(nan.secondary.flexZ));
+});
+
+test('rig smooths bank, acceleration, slide and asymmetric landing roll', () => {
+  const node = () => ({position: {x: 0, y: 0, z: 0}, rotation: {x: 0, y: 0, z: 0, set(x, y, z) { this.x = x; this.y = y; this.z = z; }}});
+  const joints = () => ({root: node(), hips: node(), torso: node(), chest: node(), head: node(), armUpperL: node(), armUpperR: node(), forearmL: node(), forearmR: node(), legUpperL: node(), legUpperR: node(), legLowerL: node(), legLowerR: node(), footL: node(), footR: node()});
+
+  // Bank is no longer passed raw: the rig ramps toward the snapshot value.
+  const bankRig = new CharacterRig(joints());
+  bankRig.update({dt: 1 / 60, bank: 1, grounded: true});
+  assert.ok(bankRig.bank > 0 && bankRig.bank < 1, 'bank leans in, it does not snap');
+  for (let i = 0; i < 180; i++) bankRig.update({dt: 1 / 60, bank: 1, grounded: true});
+  assert.ok(bankRig.bank > .95, 'bank converges to the snapshot value');
+
+  // Acceleration lean: the first accelerating frame leans further forward than
+  // the same pose without the acceleration read.
+  const steady = new CharacterRig(joints());
+  for (let i = 0; i < 240; i++) steady.update({dt: 1 / 60, speed: 8, maxSpeed: 8, grounded: true});
+  const launching = new CharacterRig(joints());
+  launching.update({dt: 1 / 60, speed: 8, maxSpeed: 8, grounded: true});
+  assert.ok(launching.accel > steady.accel, 'a launch reads as positive acceleration');
+  const sharedPose = {speedNorm: .5, grounded: true};
+  assert.ok(characterPose({...sharedPose, accel: 1}).torso.x > characterPose(sharedPose).torso.x, 'acceleration leans the torso forward');
+  assert.ok(characterPose({...sharedPose, accel: -1}).torso.x < characterPose(sharedPose).torso.x, 'braking leans the torso back');
+  for (let i = 0; i < 240; i++) launching.update({dt: 1 / 60, speed: 8, maxSpeed: 8, grounded: true});
+  assert.ok(Math.abs(launching.accel - steady.accel) < 1e-6, 'the lean decays once speed is steady');
+
+  // Slide stance: lower root, torso leans back, legs shoot forward.
+  const stood = characterPose({speedNorm: 0, grounded: true});
+  const slide = characterPose({speedNorm: 0, grounded: true, slide: 1});
+  assert.ok(slide.rootY < stood.rootY, 'a slide drops the root');
+  assert.ok(slide.torso.x < stood.torso.x, 'a slide leans the torso back');
+  assert.ok(slide.legL.hipX > stood.legL.hipX && slide.legR.hipX < stood.legR.hipX, 'the legs shoot forward asymmetrically');
+  const slideRig = new CharacterRig(joints());
+  slideRig.update({dt: 1 / 60, sliding: true, grounded: true});
+  assert.ok(slideRig.slide > 0 && slideRig.slide < 1, 'the slide stance ramps in');
+
+  // Landing roll is asymmetric: the positive side lingers longer.
+  const left = new CharacterRig(joints());
+  for (let i = 0; i < 30; i++) left.update({dt: 1 / 60, grounded: false, strafe: 1});
+  left.update({dt: 1 / 60, grounded: true, strafe: 1});
+  const right = new CharacterRig(joints());
+  for (let i = 0; i < 30; i++) right.update({dt: 1 / 60, grounded: false, strafe: -1});
+  right.update({dt: 1 / 60, grounded: true, strafe: -1});
+  assert.ok(left.landRoll < 0 && right.landRoll > 0, 'touchdown rolls away from the lateral input');
+  for (let i = 0; i < 20; i++) { left.update({dt: 1 / 60, grounded: true, strafe: 1}); right.update({dt: 1 / 60, grounded: true, strafe: -1}); }
+  assert.ok(Math.abs(right.landRoll) > Math.abs(left.landRoll) + .05, 'the positive landing roll decays slower');
+});
+
+test('hit direction pitches the rig channel within bounds and never writes a corpse', () => {
+  const node = () => ({position: {x: 0, y: 0, z: 0}, rotation: {x: 0, y: 0, z: 0, set(x, y, z) { this.x = x; this.y = y; this.z = z; }}});
+  const joints = {root: node(), hips: node(), torso: node(), chest: node(), head: node(), armUpperL: node(), armUpperR: node(), forearmL: node(), forearmR: node(), legUpperL: node(), legUpperR: node(), legLowerL: node(), legLowerR: node(), footL: node(), footR: node()};
+  const rig = new CharacterRig(joints);
+  rig.update({dt: 1 / 60, hit: 1, grounded: true});
+  rig.setHitDirection(0, 1, 1);
+  assert.ok(rig.hitPitch > 0, 'a shot from the front pitches the spine');
+  assert.ok(Math.abs(rig.hitRoll) < 1e-9);
+  rig.setHitDirection(1000, -1000, 1);
+  assert.ok(Math.abs(rig.hitPitch) <= .4 + 1e-9 && Math.abs(rig.hitRoll) <= .35 + 1e-9, 'the hit channel is bounded');
+  rig.setHitDirection(0, 1, 1);
+  const chestBefore = joints.chest.rotation.x;
+  assert.ok(rig.writeHitLean(), 'the living hit lean writes');
+  assert.notEqual(joints.chest.rotation.x, chestBefore);
+  assert.equal(rig.writeHitLean(), true);
+  rig.lifecycle = 'dying';
+  const frozen = joints.chest.rotation.x;
+  rig.setHitDirection(1, 0, 1);
+  assert.equal(rig.writeHitLean(), false, 'the corpse channel refuses the living hit lean');
+  assert.equal(joints.chest.rotation.x, frozen);
 });
 

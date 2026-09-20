@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import {Match} from './core.mjs';
-import {vehicleSeatFor, vehicleMounted, vehicleCapacity} from './vehicles.mjs';
+import {vehicleSeatFor, vehicleMounted, vehicleCapacity, VEHICLE_PASSENGER_FIRE, passengerFireScale} from './vehicles.mjs';
 
 const rig = (options = {}) => new Match('chatgpt', 'openclaw', () => .5, 'blood-gulch', {mode: 'ctf', botCount: 0, humanCount: 2, respawn: 1, ...options});
 
@@ -103,4 +103,40 @@ test('seat sync still orients passengers to the chassis', () => {
   assert.equal(passenger.vehicleSeat, 'passenger');
   m.syncVehicleActor(passenger, v);
   assert.equal(passenger.yaw, v.heading - Math.PI, 'passengers keep the seat yaw');
+});
+
+test('passengers fire personal weapons while the driver and gunner keep the mounted gun', () => {
+  const m = new Match('chatgpt', 'openclaw', () => .5, 'blood-gulch', {mode: 'ctf', botCount: 0, humanCount: 4, respawn: 1});
+  const [driver, gunner, passenger, enemy] = m.actors, v = m.vehicles[0];
+  for (const a of [driver, gunner, passenger]) Object.assign(a, {x: v.position.x, y: v.position.y, z: v.position.z, grounded: true, protection: 0, shotWait: 0, slow: 0});
+  assert.ok(m.enterVehicle(driver));
+  assert.ok(m.enterVehicle(gunner));
+  assert.ok(m.enterVehicle(passenger));
+  v.heading = Math.PI / 2; v.turretYaw = 0; v.velocity = {x: 0, z: 0};
+  m.syncVehicleActor(passenger, v);
+  // The seat faces the chassis forward; put the enemy on that firing line.
+  const dir = {x: Math.sin(v.heading), z: Math.cos(v.heading)};
+  Object.assign(enemy, {x: passenger.x + dir.x * 9, y: passenger.y, z: passenger.z + dir.z * 9, health: 600, armor: 0, protection: 0, grounded: true, shotWait: 999, team: 1});
+  for (const a of [driver, gunner, passenger]) { a.team = 0; a.weapon = 0; a.ammo[0] = 200; a.reloading = false; a.weaponSwitch = 0; a.spread = 0; }
+  const pitch = Math.asin(((enemy.y + .9) - (passenger.y + 1.45)) / 9);
+  for (let i = 0; i < 90; i++) m.step(1 / 60, {inputs: {[driver.id]: {fire: true, yaw: -Math.PI, pitch}, [gunner.id]: {fire: true, yaw: -Math.PI, pitch}, [passenger.id]: {fire: true, pitch}}});
+  assert.ok(m.events.some(event => event.type === 'shot' && event.actor === passenger.id), 'the passenger fires a personal weapon');
+  assert.equal(m.events.some(event => event.type === 'shot' && (event.actor === driver.id || event.actor === gunner.id)), false, 'driver and gunner never fire a personal weapon');
+  assert.ok(enemy.health < 600 || enemy.deaths > 0, 'passenger fire connects');
+  assert.equal(m.fire(driver), false, 'a mounted driver cannot fire a personal weapon');
+  assert.equal(m.fire(gunner), false, 'a mounted gunner cannot fire a personal weapon');
+  assert.deepEqual(passengerFireScale(passenger), VEHICLE_PASSENGER_FIRE, 'the passenger pays the handling penalty');
+  assert.equal(passengerFireScale(driver).spread, 1, 'the driver pays nothing');
+  // Recoil evidence is deterministic: the passenger punch outruns the boot punch.
+  Object.assign(passenger, {shotWait: 0, punchYaw: 0, punchPitch: 0, punchVelYaw: 0, punchVelPitch: 0});
+  Object.assign(enemy, {shotWait: 0, punchYaw: 0, punchPitch: 0, punchVelYaw: 0, punchVelPitch: 0});
+  assert.equal(m.fire(passenger), true);
+  assert.equal(m.fire(enemy), true);
+  assert.ok(passenger.punchVelPitch > enemy.punchVelPitch, `passenger kick ${passenger.punchVelPitch} > boot kick ${enemy.punchVelPitch}`);
+  assert.ok(Math.abs(passenger.punchVelPitch - enemy.punchVelPitch * VEHICLE_PASSENGER_FIRE.recoil) < 1e-9, 'the kick scales by exactly the passenger recoil factor');
+  // Reloading and weapon swaps suppress the personal trigger.
+  passenger.shotWait = 0; passenger.reloading = true;
+  assert.equal(m.fire(passenger), false, 'no passenger fire mid-reload');
+  passenger.reloading = false; passenger.weaponSwitch = .2;
+  assert.equal(m.fire(passenger), false, 'no passenger fire mid-swap');
 });

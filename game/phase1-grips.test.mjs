@@ -154,3 +154,50 @@ test('all ten living weapons align both hand sockets without moving weapon or ac
   assert.deepEqual(m.position.toArray(),[4,2,-3]);assert.equal(m.rotation.y,.7);
  }
 });
+
+test('world-space foot planting holds its plant inside the step budget and replants beyond it',()=>{
+ const m=modelFor(),d=m.userData,calls=[];
+ const sample=(x,z)=>{calls.push([x,z]);return 0;};
+ let result=rigs.alignLivingCharacter(m,{sampleGround:sample});
+ assert.equal(calls.length,2,'one query per grounded foot, no extra probes');
+ const planted=result.feet.map(f=>f.target.slice());
+ assert.deepEqual(calls.map(c=>[c[0],c[1]]),planted.map(t=>[t[0],t[2]]),'a fresh plant samples its own foot');
+ assert.ok(result.feet.every(f=>f.replanted===true),'the first frame replants both feet');
+ assert.ok(result.feet.every(f=>f.target[1]>=.0935-1e-9),'no foot target sinks below the floor');
+ // A step inside the budget keeps the world-space plant; the sample stays at
+ // the planted spot even though the actor slid forward.
+ m.position.x+=.2;d.rig.update({dt:.05,grounded:true});
+ result=rigs.alignLivingCharacter(m,{sampleGround:sample});
+ assert.equal(calls.length,4);
+ assert.deepEqual(calls.slice(2).map(c=>[c[0],c[1]]),planted.map(t=>[t[0],t[2]]),'inside .25 m the sample stays planted');
+ assert.ok(result.feet.every(f=>f.replanted===false));
+ // Beyond the budget every foot replants at its new world position.
+ m.position.x+=.5;d.rig.update({dt:.05,grounded:true});
+ result=rigs.alignLivingCharacter(m,{sampleGround:sample});
+ assert.equal(calls.length,6,'the query budget stays exactly two per grounded model');
+ assert.ok(result.feet.some(f=>f.replanted===true),'a step beyond .25 m replants');
+ for(let i=0;i<2;i++)assert.ok(Math.abs(calls[4+i][0]-result.feet[i].target[0])<1e-6,'a replant samples the new foot position');
+});
+
+test('slopes roll and pitch the planted feet and pelvis compensation stays reach-aware',()=>{
+ const m=modelFor(),d=m.userData;
+ const sample=(x,z)=>x*.25+.06; // uphill to the model right, lifted platform
+ const result=rigs.alignLivingCharacter(m,{sampleGround:sample});
+ assert.equal(result.feet.length,2);
+ assert.ok(result.feet.some(f=>Math.abs(f.slope.roll)>.01),'a cross slope rolls the planted feet');
+ for(const f of result.feet){
+  assert.ok(Math.abs(f.slope.roll)<=.28+1e-9&&Math.abs(f.slope.pitch)<=.32+1e-9,'the slope stance is bounded');
+  assert.ok(f.error<1e-5,'the reach-aware pelvis keeps the ankle on its floor target');
+ }
+ const foot=d.joints.footL,worldQ=foot.getWorldQuaternion(new T.Quaternion()),upright=m.getWorldQuaternion(new T.Quaternion());
+ assert.ok(Math.abs(worldQ.angleTo(upright))>.01,'the foot follows the slope instead of staying upright');
+ // The compensated root followed the mean support height, but only within its
+ // reach slack: both ankles still sit exactly on floor + sole.
+ const base=(d.joints.rootBaseY??0)+d.rig.pose.rootY;
+ assert.ok(Math.abs(d.joints.root.position.y-base)<=.07+1e-9,'pelvis compensation is bounded');
+ for(const side of ['L','R']){
+  const ankle=d.joints[`foot${side}`].getWorldPosition(new T.Vector3());
+  assert.ok(Math.abs(ankle.y-(sample(ankle.x,ankle.z)+.0935))<1e-5,'no penetration after compensation');
+ }
+});
+

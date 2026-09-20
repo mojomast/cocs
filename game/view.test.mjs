@@ -1,18 +1,18 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {ArenaView,BOT_LAYER,raceTrackModel,vehicleModel,weaponModel,robotModel,shadowTick,trailEmissions,shadowDue} from './view.mjs';
+import {ArenaView,BOT_LAYER,raceTrackModel,vehicleModel,vehicleKitKind,weaponModel,robotModel,shadowTick,trailEmissions,shadowDue,frameDue,PICKUP_COLORS} from './view.mjs';
 import {normalizeGraphicsLab} from './graphics-lab.mjs';
 import {RACE_DEMO_MODE_SECONDS} from './race-camera.mjs';
 import {SoftwareRenderer} from './software.mjs';
 import {ModelAssets,CameraShake,MuzzleLightPool,LowHealthOverlay,DeathPool,DecalPool,killcamPose,KILLCAM_DURATION} from './effects-fx.mjs';
-import {ambientProfile} from './environment.mjs';
+import {ambientProfile,biomeAmbience} from './environment.mjs';
 import {DEFAULT_DISPLAY} from './config.mjs';
 import * as T from 'three';
 import BLOOD_GULCH from './blood-gulch.mjs';
 import {MAPS} from './maps.mjs';
 import {terrainTriangles,terrainWallTriangles} from './terrain.mjs';
 import {resolveAttachments} from './attachments.mjs';
-import {corpseRotation,deathStyleFor} from './deaths.mjs';
+import {corpseRotation,deathStyleFor,fallDuration} from './deaths.mjs';
 import {surfaceTextures,clearSurfaceTextures} from './textures.mjs';
 
 function fixture(t,{dpr=1,software=false,width=800,height=450}={}){
@@ -2093,4 +2093,306 @@ test('alt-fire morph follows the snapshot flag and clears the projectile pool pe
  view.setMatch({arena:MAPS[0],actors:[],pickups:[],serial:5});
  assert.equal(pool.activeCount(),0,'a new match clears the alt projectile pool');
  view.effectPool?.dispose();view.altProjectiles?.dispose();view.disposeObject(view.scene);
+});
+
+test('debugDeath exposes the ragdoll channel and gates it on renderer and motion',t=>{
+ const {view}=playable(t);
+ view.scene=new T.Scene();view.characterGroundAt=()=>0;
+ const full=view.debugDeath({actor:80,style:'ragdoll',seed:2,x:0,y:2,z:0,settle:false});
+ assert.equal(full.ragdoll,true,'the default path acquires a presentation ragdoll');
+ assert.ok(view.characterLifecycle.records.get(full.model).ragdoll);
+ const off=view.debugDeath({actor:81,style:'ragdoll',seed:2,ragdoll:false,settle:false});
+ assert.equal(off.ragdoll,false,'an explicit opt-out keeps the authored fallback');
+ view.renderer.isSoftware=true;
+ const software=view.debugDeath({actor:82,style:'ragdoll',seed:2,settle:false});
+ assert.equal(software.ragdoll,false,'the CPU renderer keeps the authored fallback');
+ view.renderer.isSoftware=false;
+ const reduced=view.debugDeath({actor:83,style:'ragdoll',seed:2,reduced:true,settle:false});
+ assert.equal(reduced.ragdoll,false,'reduced motion keeps the authored fallback');
+ assert.equal(view.characterLifecycle.records.get(reduced.model).ragdoll,null);
+ assert.ok(view._clearDebugDeaths()<=8);
+ assert.equal(view.characterLifecycle.ragdolls.activeCount,0,'clearing debug corpses releases their slots');
+ view.deathPool?.dispose();view.effectPool?.dispose();
+});
+
+test('a final hit lean decays into the ragdoll fall instead of snapping away',t=>{
+ const {view}=playable(t);
+ view.scene=new T.Scene();view.actorModels=new Map();view.characterGroundAt=()=>0;view.deathContext=new Map();
+ const plan={pose:'forward',style:'ragdoll',seed:4,spin:0,roll:0,force:3,duration:3};
+ view.deathContext.set(8,{plan,direction:null});
+ const model=robotModel('chatgpt');view.actorModels.set(8,model);
+ // The living frame carries both a hit lean and a posed chest. The actor is
+ // not the (hidden) local player so the corpse keeps its ragdoll.
+ model.userData.hitStrength=1;model.rotation.x=.24;model.rotation.z=.12;
+ model.userData.joints.chest.rotation.x=.2;
+ const actor={id:8,x:0,y:2,z:0,yaw:0,bodyYaw:0,health:0,vx:2,vy:0,vz:1};
+ view.poseCorpse(model,actor,{time:0});
+ const record=view.characterLifecycle.records.get(model);
+ assert.ok(record.ragdoll,'the ragdoll takes the corpse');
+ assert.ok(Math.abs(record.leanX-.24)<1e-9&&Math.abs(record.leanZ-.12)<1e-9,'the final hit lean is captured');
+ const first=corpseRotation(plan,0,record.yaw,false);
+ assert.ok(Math.abs(model.rotation.x-(first.x+record.leanX))<1e-9,'frame zero still shows the live lean');
+ assert.ok(Math.abs(model.userData.joints.chest.rotation.x-.2)<1e-9,'frame zero keeps the posed living chest');
+ assert.ok(record.ragdoll.liveQuats.some((value,index)=>index%4===3?value!==1:value!==0),'the living joints were captured for the hand-off');
+ for(let f=1;f<=12;f++)view.poseCorpse(model,actor,{time:f/60});
+ const fall=Math.max(0,Math.min(1,(12/60)/fallDuration(plan)));
+ const expected=corpseRotation(plan,fall,record.yaw,false);
+ assert.ok(Math.abs(model.rotation.x-expected.x)<1e-9,'the lean has decayed out by the end of the hand-off');
+ assert.ok(Math.abs(model.rotation.z-expected.z)<1e-9);
+ assert.ok(record.ragdoll.steps>0,'physics advanced with the match clock');
+ view.deathPool?.dispose();view.effectPool?.dispose();
+});
+
+test('per-kind vehicles layer a silhouette kit over the shared Puma hull',t=>{
+ const puma=vehicleModel('puma');
+ assert.equal(vehicleKitKind('puma'),null);
+ assert.equal(puma.userData.kit,undefined,'the Puma keeps its pinned userData');
+ let pumaParts=0;puma.traverse(n=>{if(n.userData?.vehicleKit)pumaParts++;});
+ assert.equal(pumaParts,0,'the Puma hull carries no kit parts');
+ const baseline=puma.children.length;
+ for(const kind of ['titan','scout','transport']){
+  const model=vehicleModel(kind);
+  assert.equal(model.userData.kind,kind);
+  assert.equal(model.userData.kit,kind);
+  assert.equal(model.scale.x,1,'the shared hull is never scaled: seat offsets stay authoritative');
+  assert.equal(model.userData.guns.length,2,'the kit keeps both guns');
+  assert.deepEqual(Object.keys(model.userData.accessories),['spareTire','jerryCan','winch','towHook','splitter']);
+  const parts=[];model.traverse(n=>{if(n.userData?.vehicleKit===kind)parts.push(n);});
+  assert.ok(parts.length>=8,`${kind} adds a readable kit (${parts.length} parts)`);
+  assert.ok(parts.some(n=>n.material?.emissive&&n.material.emissive.getHex()!==0),`${kind} carries emissive accents`);
+  assert.equal(model.children.length,baseline+parts.length,`${kind} only adds kit parts to the hull`);
+  const geometries=new Set(),materials=new Set();
+  model.traverse(n=>{if(n.geometry)geometries.add(n.geometry);if(n.material)for(const m of Array.isArray(n.material)?n.material:[n.material])materials.add(m);});
+  for(const g of geometries)g.dispose();for(const m of materials)m.dispose();
+ }
+ const geometries=new Set(),materials=new Set();
+ puma.traverse(n=>{if(n.geometry)geometries.add(n.geometry);if(n.material)for(const m of Array.isArray(n.material)?n.material:[n.material])materials.add(m);});
+ for(const g of geometries)g.dispose();for(const m of materials)m.dispose();
+});
+
+test('partial prop damage stages the intact instance before the break',t=>{
+ const build=()=>{
+  const view=Object.assign(Object.create(ArenaView.prototype),{renderResources:new Set(),renderer:{isSoftware:false},scene:new T.Scene(),motionQuery:{matches:false},display:{...DEFAULT_DISPLAY}});
+  view.qualitySettings={tier:2,deaths:72};
+  const world=new T.Group();view.worldGroup=world;view.scene.add(world);
+  view.buildNextGen(world,{color:'#55ddcc',terrain:{height:()=>0},structures:[],props:[{type:'crate',x:0,z:0,y:0,seed:1},{type:'barrel',x:3,z:0,y:0,seed:2}]});
+  return {view,world,entry:world.userData.breakables.entries[0]};
+ };
+ const stageOf=entry=>{const matrix=new T.Matrix4();entry.mesh.getMatrixAt(entry.index,matrix);const position=new T.Vector3(),quaternion=new T.Quaternion(),scale=new T.Vector3();matrix.decompose(position,quaternion,scale);return {scale,position};};
+ const matrixArray=entry=>{const matrix=new T.Matrix4();entry.mesh.getMatrixAt(entry.index,matrix);return Array.from(matrix.elements);};
+ const colorArray=entry=>Array.from((entry.mesh.instanceColor?.array??[]).slice(entry.index*3,entry.index*3+3));
+ const first=build(),second=build();
+ assert.equal(first.view.breakPropsAt({x:0,y:0,z:0},{radius:1,amount:10,serial:1}),0,'partial damage never breaks');
+ const staged=stageOf(first.entry);
+ assert.ok(staged.scale.x<1&&staged.scale.x>=.86&&staged.scale.x<=.92,`staged scale ${staged.scale.x}`);
+ assert.ok(Math.abs(staged.scale.y-staged.scale.x)<1e-6&&Math.abs(staged.scale.z-staged.scale.x)<1e-6,'staging scales uniformly');
+ assert.ok(Math.abs(staged.position.x-0)<1e-9&&Math.abs(staged.position.z-0)<1e-9,'staging keeps the base position');
+ assert.ok(first.entry.mesh.instanceColor,'staging allocates the instance tint buffer');
+ const tint=first.entry.mesh.getColorAt(first.entry.index,new T.Color());
+ assert.ok(tint.r<1&&tint.g<1&&tint.b<1,'the staged instance darkens');
+ second.view.breakPropsAt({x:0,y:0,z:0},{radius:1,amount:10,serial:1});
+ assert.deepEqual(matrixArray(first.entry),matrixArray(second.entry),'staging transforms are deterministic');
+ assert.deepEqual(colorArray(first.entry),colorArray(second.entry),'staging tints are deterministic');
+ first.view.breakPropsAt({x:0,y:0,z:0},{radius:1,amount:10,serial:2});
+ const deeper=stageOf(first.entry);
+ assert.ok(deeper.scale.x<staged.scale.x,`a deeper hit shrinks further (${deeper.scale.x} < ${staged.scale.x})`);
+ assert.equal(first.view.breakPropsAt({x:0,y:0,z:0},{radius:1,amount:99,serial:3}),1,'the final hit still breaks');
+ assert.ok(matrixArray(first.entry).every((value,index)=>index===15||value===0),'a broken instance is zeroed, not staged');
+ assert.equal(first.view.breakPropsAt({x:0,y:0,z:0},{radius:1,amount:99,serial:4}),0,'a broken prop never re-breaks');
+ assert.ok(first.view.debrisPool,'the break still pools debris');
+ first.view.disposeObject(first.world);first.view.debrisPool.dispose();
+ second.view.disposeObject(second.world);
+});
+
+test('weapon and ammo pickups emit a coloured activation burst on WebGL only',t=>{
+ const {view}=playable(t);
+ view.scene=new T.Scene();view.actorModels=new Map();
+ const model=robotModel('chatgpt');model.position.set(2,0,3);view.actorModels.set(7,model);
+ view.effect({type:'pickup',actor:7,kind:'rail'});
+ const active=()=>view.effectPool?.slots.filter(slot=>slot.active)??[];
+ assert.ok(active().length>0,'the rail pickup bursts');
+ assert.ok(active().some(slot=>slot.obj.material.color.getHexString()===PICKUP_COLORS.rail.slice(1)),'the burst reuses the pickup colour table');
+ assert.equal(active().filter(slot=>slot.obj.material.color.getHexString()===PICKUP_COLORS.health.slice(1)).length,0,'other pickup colours are not mixed in');
+ view.effectPool.dispose();view.effectPool=null;
+ const software=Object.assign(Object.create(ArenaView.prototype),{renderer:{isSoftware:true},scene:new T.Scene(),motionQuery:{matches:false},display:{...DEFAULT_DISPLAY},actorModels:new Map([[7,model]])});
+ software.effect({type:'pickup',actor:7,kind:'rail'});
+ assert.ok((software.effectPool?.slots??[]).every(slot=>!slot.active),'the CPU renderer emits no activation burst');
+ software.effectPool?.dispose();
+ view.disposeObject(model);
+});
+
+test('damaged vehicles smoke and spark below forty percent while healthy ones stay clean',t=>{
+ const {view}=fixture(t);view.scene=new T.Scene();view.motionQuery={matches:false};view.vehicleModels=new Map();
+ const model=new T.Group();model.userData={wheels:[],guns:[]};view.vehicleModels.set('veh-1',model);
+ const vehicle=health=>({id:'veh-1',position:{x:0,y:0,z:0},yaw:0,health,maxHealth:300,vx:0,vz:0});
+ view.updateVehicleModels({vehicles:[vehicle(290)],time:1});
+ assert.ok(!view.effectPool,'a healthy vehicle emits nothing');
+ view.updateVehicleModels({vehicles:[vehicle(90)],time:1.3});
+ assert.ok(view.effectPool&&view.effectPool.slots.some(slot=>slot.active),'a damaged vehicle smokes');
+ view.effectPool.clear();view.motionQuery.matches=true;
+ view.updateVehicleModels({vehicles:[vehicle(30)],time:1.6});
+ assert.ok(view.effectPool.slots.every(slot=>!slot.active),'reduced motion suppresses damage smoke');
+ view.effectPool.dispose();
+ const software=Object.assign(Object.create(ArenaView.prototype),{renderer:{isSoftware:true},motionQuery:{matches:false},display:{...DEFAULT_DISPLAY},vehicleModels:new Map()});
+ const wreck=new T.Group();wreck.userData={wheels:[],guns:[]};software.vehicleModels.set('v',wreck);
+ software.updateVehicleModels({vehicles:[{...vehicle(30),id:'v'}],time:1});
+ assert.equal(software.effectPool,undefined,'the CPU renderer never allocates damage smoke');
+ view.disposeObject(model);view.disposeObject(wreck);
+});
+
+test('the display frame cap gates the presented frame and carries skipped time',t=>{
+ assert.equal(frameDue(1000,undefined,60),true,'the first frame is always due');
+ assert.equal(frameDue(1000,1000-12,60),false,'a 12 ms gap misses a 60 cap');
+ assert.equal(frameDue(1000,1000-34,60),true,'a 34 ms gap meets a 60 cap');
+ assert.equal(frameDue(1000,999,120),false,'a 120 cap needs ~8.3 ms');
+ assert.equal(frameDue(1000,900,0),true,'an uncapped fence never skips');
+ const {view}=fixture(t);view.motionQuery={matches:false};
+ let captured=null;view._renderFrame=(mode,match,delta,time)=>{captured={mode,delta,time};return true;};
+ view.display={...DEFAULT_DISPLAY,fpsCap:60};
+ view._renderAt=1e15;
+ assert.equal(view.render('playing',null,.05,1),false,'a capped frame is skipped');
+ assert.ok(Math.abs(view._renderCarry-.05)<1e-9,'the skipped delta is carried');
+ assert.equal(captured,null,'a skipped frame never reaches the scene');
+ view._renderAt=0;
+ assert.equal(view.render('playing',null,.05,2),true);
+ assert.ok(Math.abs(captured.delta-.1)<1e-9,`the carried delta folds into the drawn frame (${captured.delta})`);
+ assert.equal(view._renderCarry,0,'the carry resets after a drawn frame');
+ view.display={...DEFAULT_DISPLAY,fpsCap:0};
+ assert.equal(view.render('playing',null,.05,3),true,'an uncapped display never skips');
+ assert.ok(Math.abs(captured.delta-.05)<1e-9,'with no cap the frame delta is untouched');
+});
+
+test('the display shadow level drives the WebGL shadow map and live-updates',t=>{
+ const {view,renderer}=fixture(t);
+ let disposed=0;
+ view.sun={castShadow:true,shadow:{map:{dispose(){disposed++;}},mapSize:new T.Vector2(2048,2048)}};
+ renderer.shadowMap={enabled:true,needsUpdate:false};
+ view.qualitySettings={tier:2,shadowMap:2048};
+ assert.equal(view._applyShadows(),true);
+ assert.equal(view.sun.castShadow,true);
+ assert.deepEqual(view.sun.shadow.mapSize.toArray(),[2048,2048]);
+ view.setDisplay({...DEFAULT_DISPLAY,shadows:'low'});
+ assert.equal(view.sun.castShadow,true);
+ assert.deepEqual(view.sun.shadow.mapSize.toArray(),[1024,1024],'low clamps the map to the smaller tier');
+ view.setDisplay({...DEFAULT_DISPLAY,shadows:'off'});
+ assert.equal(view.sun.castShadow,false,'off stops casting');
+ assert.equal(renderer.shadowMap.enabled,false,'off disables the shadow map');
+ view.setDisplay({...DEFAULT_DISPLAY,shadows:'high'});
+ assert.equal(view.sun.castShadow,true);
+ assert.equal(renderer.shadowMap.enabled,true);
+ assert.deepEqual(view.sun.shadow.mapSize.toArray(),[2048,2048],'high restores the tier map');
+ assert.ok(disposed>=1,'an in-place size change releases the old shadow target');
+});
+
+test('spectating moves the music intensity origin to the spectated actor',t=>{
+ const {view}=playable(t);
+ view.scene=new T.Scene();view.actorModels=new Map();
+ const local=robotModel('chatgpt'),target=robotModel('claude');
+ local.position.set(0,0,0);target.position.set(40,0,40);
+ view.actorModels.set(7,local);view.actorModels.set(2,target);
+ view.playerId=7;view.spectator=true;view.setSpectatorTarget(2);
+ const actors=[
+  {id:7,character:'chatgpt',weapon:0,health:100,x:0,y:0,z:0,yaw:0,pitch:0,vx:0,vy:0,vz:0,grounded:true},
+  {id:2,character:'claude',weapon:0,health:100,x:40,y:0,z:40,yaw:0,pitch:0,vx:0,vy:0,vz:0,grounded:true},
+ ];
+ const match={actors,pickups:[],rockets:[],time:1,events:[{id:1,type:'shot',actor:2,weapon:0,time:1,from:{x:41,y:1,z:41},to:{x:45,y:1,z:45}}]};
+ view.render('playing',match,.016,1);
+ assert.equal(view._audioFocusId,2,'the presented actor becomes the audio origin');
+ assert.ok(view.audioIntensity(1)>0,'the spectated firefight drives the soundtrack');
+ assert.equal(view._nearActionAt,1);
+ // The same event near the hidden local player is still accepted when not spectating.
+ view.spectator=false;view.lastEvent=0;view._nearActionAt=undefined;view._nearAction=0;
+ const localMatch={actors,pickups:[],rockets:[],time:2,events:[{id:1,type:'shot',actor:7,weapon:0,time:2,from:{x:1,y:1,z:1},to:{x:5,y:1,z:5}}]};
+ view.render('playing',localMatch,.016,2);
+ assert.equal(view._audioFocusId,7);
+ assert.ok(view.audioIntensity(2)>0);
+ view.effectPool?.dispose();view.disposeObject(view.scene);
+ for(const model of [local,target])view.disposeObject(model);
+});
+
+test('WebGL builds a per-biome backdrop, follows the camera and disposes once',t=>{
+ const previous=Object.getOwnPropertyDescriptor(globalThis,'document');
+ const ctx={createImageData:(w,h)=>({data:new Uint8ClampedArray(w*h*4)}),putImageData(){},fillText(){},strokeText(){},fillRect(){}};
+ Object.defineProperty(globalThis,'document',{configurable:true,value:{createElement:()=>({width:0,height:0,getContext:()=>ctx})}});
+ t.after(()=>{if(previous)Object.defineProperty(globalThis,'document',previous);else delete globalThis.document;});
+ const make=renderer=>Object.assign(Object.create(ArenaView.prototype),{scene:new T.Scene(),camera:new T.PerspectiveCamera(),renderResources:new Set(),sharedResources:new Set(),renderer,display:{...DEFAULT_DISPLAY},menu:{scene:new T.Scene()}});
+ const webgl=make({isSoftware:false,dispose(){}}),audio={mood:null,arena:undefined,setSpace(){},setEchoMap(){},setArenaBiome(arena){this.arena=arena;},setBiomePalette(mood){this.mood=mood;},setWeather(){}};
+ webgl.viewAudio=audio;webgl.mapId='neon-vertical';
+ for(const [id,kit,biome] of [['neon-vertical','city','urban'],['frostline','snow','snow'],['foundry','foundry','volcanic'],['aether','void','urban']]){
+  const arena=MAPS.find(map=>map.id===id);assert.ok(arena,`${id} is a canonical map`);
+  const before=JSON.stringify(arena);
+  webgl.buildArena(arena);
+  assert.equal(JSON.stringify(arena),before,`${id}: building the backdrop never mutates the authored arena`);
+  const backdrop=(webgl.worldGroup.children||[]).filter(n=>n.userData.backdrop);
+  assert.ok(backdrop.length>0,`${id} builds a backdrop`);
+  assert.ok(backdrop.every(n=>n.userData.backdropKind===kit),`${id} uses the ${kit} kit`);
+  assert.equal(webgl.backdrop.length,backdrop.length,'the view keeps the built nodes for camera-follow');
+  assert.ok(backdrop.some(n=>n.material?.emissive&&n.material.emissive.getHex()!==0),`${id} carries an emissive accent`);
+  if(kit==='void')assert.ok(backdrop.some(n=>n.userData.backdropRing),'the void kit builds the tilted orbital ring');
+  assert.ok(webgl.mountains,'the mountain ring is still built');
+  assert.equal(audio.mood,biomeAmbience({id}).mood,`${id} drives the music biome palette`);
+  assert.equal(audio.arena,arena,'the high-level arena biome hook still receives the arena');
+  const resources=new Set();
+  webgl.worldGroup.traverse(n=>{if(n.geometry)resources.add(n.geometry);if(n.material)resources.add(n.material);});
+  for(const resource of webgl.renderResources)resources.add(resource);
+  const counts=new Map();for(const resource of resources){counts.set(resource,0);resource.addEventListener('dispose',()=>counts.set(resource,counts.get(resource)+1));}
+  webgl.buildArena(arena);
+  assert.ok([...counts.values()].every(count=>count===1),`${id}: a map rebuild disposes the backdrop exactly once`);
+ }
+ const camera=webgl.camera;camera.position.set(12,3,-8);
+ webgl.updateSky();
+ for(const mesh of webgl.backdrop??[])assert.deepEqual(mesh.position.toArray(),[12,3,-8],'the backdrop follows the camera so it stays distant');
+ const software=make({isSoftware:true,dispose(){}});
+ software.buildArena(MAPS.find(map=>map.id==='neon-vertical'));
+ assert.equal((software.worldGroup.children||[]).filter(n=>n.userData.backdrop).length,0,'the CPU renderer builds no backdrop');
+ assert.equal(software.backdrop,null);
+ clearSurfaceTextures();
+ for(const view of [webgl,software]){view.disposeObject(view.worldGroup);for(const resource of view.renderResources)resource.dispose();}
+});
+
+test('the living pass advances deterministic secondary motion and pitches the rig hit channel',t=>{
+ const view=Object.create(ArenaView.prototype);
+ view.actorModels=new Map();view.characterLifecycle={state:()=> 'alive'};view.reduced=()=>false;view.renderer={isSoftware:false};view.characterGroundAt=()=>0;
+ const model=robotModel('chatgpt');view.actorModels.set(0,model);
+ const rig=model.userData.rig;
+ // The real render loop poses the rig before the living pass; the test does it once.
+ rig.update({dt:1/60,speed:6,maxSpeed:8,grounded:true});
+ const antenna=[];
+ model.traverse(node=>{if(node.userData?.secondary==='antenna')antenna.push(node);});
+ assert.equal(antenna.length,1,'the operator carries one tagged antenna');
+ const actor={id:0,health:100,x:0,y:0,z:0,yaw:0,bodyYaw:0,grounded:true,vx:6,vz:0,moveSpeed:8};
+ const match={time:1,actors:[actor]};
+ view._alignLivingCharacters(match);
+ for(let i=0;i<40;i++){model.rotation.y+=.05;match.time+=1/60;view._alignLivingCharacters(match);}
+ assert.ok(Math.abs(rig.secondary.headYaw)>1e-3,'the head-lag channel is filled while turning');
+ assert.ok(Math.abs(antenna[0].rotation.z-antenna[0].userData.secondaryBase.rz)>.001,'the antenna flexes with the turn');
+ // A live hit direction reaches the rig pitch channel (the model rotation
+ // alone used to carry it).
+ model.userData.hitStrength=1;model.userData.hitDirX=0;model.userData.hitDirZ=1;rig.hit=1;
+ const chestBefore=model.userData.joints.chest.rotation.x;
+ match.time+=1/60;
+ view._alignLivingCharacters(match);
+ assert.ok(rig.hitPitch>0,'the hit direction pitches the rig channel');
+ assert.notEqual(model.userData.joints.chest.rotation.x,chestBefore);
+ // Reduced motion snaps the secondary pass and its tagged nodes back to rest.
+ view.reduced=()=>true;
+ match.time+=1/60;
+ view._alignLivingCharacters(match);
+ assert.equal(antenna[0].rotation.z,antenna[0].userData.secondaryBase.rz,'reduced motion snaps the antenna');
+ assert.equal(antenna[0].rotation.x,antenna[0].userData.secondaryBase.rx);
+ assert.equal(rig.secondary.headYaw,0);
+ // The slide stance is fed from the actor's own sliding flag.
+ actor.sliding=true;match.time+=1/60;
+ view._alignLivingCharacters(match);
+ assert.equal(rig.slideTarget,1,'the living pass feeds the slide stance');
+ actor.sliding=false;match.time+=1/60;
+ view._alignLivingCharacters(match);
+ assert.equal(rig.slideTarget,0);
+ // A corpse is skipped by the whole pass.
+ actor.health=0;
+ const dead=JSON.stringify([...antenna[0].rotation.toArray?.()??[antenna[0].rotation.x,antenna[0].rotation.z]]);
+ match.time+=1/60;
+ view._alignLivingCharacters(match);
+ assert.equal(JSON.stringify([...antenna[0].rotation.toArray?.()??[antenna[0].rotation.x,antenna[0].rotation.z]]),dead,'a dead actor is never re-posed');
+ view.disposeObject(model);
 });

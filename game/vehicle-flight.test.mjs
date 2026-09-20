@@ -45,3 +45,19 @@ test('a mounted Hornet climbs with the jump input and reports flight altitude',(
  assert.ok(Number.isFinite(snap.vy));
  assert.equal(a.vehicleId,hornet.id);
 });
+test('bailing out of a moving Hornet applies the flight-speed dismount stun', () => {
+ const m=new Match('chatgpt','openclaw',()=>.37,'skyfall-basin',{mode:'combined-arms',botCount:0});
+ const hornet=m.vehicles.find(v=>v.kind==='hornet'),a=m.actors[0];
+ Object.assign(a,{x:hornet.spawn.x,z:hornet.spawn.z,y:0,vx:0,vy:0,vz:0,grounded:true,vehicleId:null,traversalCooldown:9,slow:0,slowMultiplier:.55});
+ assert.equal(m.enterVehicle(a),true);
+ hornet.velocity={x:8,z:0};hornet.vy=8;
+ assert.equal(m.releaseVehicle(a,hornet),true);
+ assert.ok(a.slow>=.6&&a.slow<=1.2,`flight dismount stun ${a.slow}`);
+ assert.equal(a.slowMultiplier,.55);
+ assert.equal(a.vehicleId,null);
+ hornet.velocity={x:0,z:0};hornet.vy=0;
+ a.slow=0;a.slowMultiplier=.55;
+ assert.equal(m.enterVehicle(a),true);
+ assert.equal(m.releaseVehicle(a,hornet),true);
+ assert.equal(a.slow,0,'a hovering bail-out never stuns');
+});

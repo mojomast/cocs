@@ -9,6 +9,32 @@ export const TOUCH_LOOK_SCALE=.004;
 // radius and derive the visible knob travel from it.
 export const TOUCH_STICK_RADIUS_MIN=28;
 export const TOUCH_STICK_RADIUS_MAX=96;
+// Player-tunable touch layout, persisted on the display object
+// (`touchScale`/`touchOpacity`/`touchLeftHanded`). The 44px minimum target is a
+// hard floor: scaling down never shrinks an actionable control below it.
+export const TOUCH_SCALE_MIN=.8;
+export const TOUCH_SCALE_MAX=1.3;
+export const TOUCH_OPACITY_MIN=.4;
+export const TOUCH_OPACITY_MAX=1;
+export const TOUCH_TARGET_MIN=44;
+const touchRange=(value,min,max,fallback)=>{const n=Number(value);return Number.isFinite(n)?Math.max(min,Math.min(max,n)):fallback;};
+// One pure interpretation of the display values shared by the layer and the
+// stylesheet: the layer writes the CSS variables/class, the CSS reads them, and
+// the JS stick math scales with the same factor so the knob travel matches the
+// rendered base. `style` keys are the exact custom properties globals.css reads.
+export function touchDisplay(value={}){
+ const scale=touchRange(value?.touchScale,TOUCH_SCALE_MIN,TOUCH_SCALE_MAX,1);
+ const opacity=touchRange(value?.touchOpacity,TOUCH_OPACITY_MIN,TOUCH_OPACITY_MAX,1);
+ const leftHanded=value?.touchLeftHanded===true;
+ return {
+  scale,opacity,leftHanded,
+  className:leftHanded?'touch-layer--left-hand':'',
+  style:{'--touch-scale':String(scale),'--touch-opacity':String(opacity)},
+  metrics:{stickRadius:Math.round(66*scale),knobRadius:Math.max(20,Math.round(29*scale)),lookTravel:Math.round(33*scale),targetMin:TOUCH_TARGET_MIN},
+ };
+}
+// Effective on-screen target in px for a base size. Never below the 44px floor.
+export const touchTargetSize=(base,scale=1)=>Math.max(TOUCH_TARGET_MIN,Math.round((Number(base)||0)*(Number.isFinite(Number(scale))?Number(scale):1)));
 // Convert a pointer offset into a movement axis plus a clamped knob offset.
 export function stickAxis(dx,dy,radius,knobRadius=24){
  const r=Math.max(TOUCH_STICK_RADIUS_MIN,Math.min(TOUCH_STICK_RADIUS_MAX,Number(radius)||0));

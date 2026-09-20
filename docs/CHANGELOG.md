@@ -48,6 +48,16 @@ paid Moth material pack and the offline variety pipeline behind it.
   lobbies surface READY/warmup/map-vote/rematch plus a real RTT ping, and the
   HUD gains hit attribution, a global text scale, settings sections and undo
   safety. See [Quality-of-life pass](design/QOL-PASS.md).
+- Physics, animation and audio pass: deaths are now deterministic ragdoll
+  physics (presentation-side Verlet skeleton seeded from the death event, with
+  sleep/seek and reduced/software fallbacks), living actors gain secondary
+  motion, foot planting, lean/landing roll and viewmodel inertia plus reload
+  choreography, the score gains tension/escalation layers, four new instrument
+  voices, mode/biome palettes and seeded ornament variation with event-driven
+  music, backdrops get per-biome kits, vehicles get per-kind silhouettes, props
+  stage damage before breaking, vehicles get rear/flank weak points and
+  passenger fire, and the HUD gains team status and economy readouts. See
+  [Physics, animation and audio pass](design/PHYSICS-AND-AUDIO-PASS.md).
 - Animation pass: restored death variety (killing-direction topple, per-pose
   fall arcs, seeded limb silhouettes, style treatments), strength-scaled hit
   flinches, a melee swing, shell casings, style-aware death audio, and UI

@@ -13,11 +13,11 @@ import {resolveFinish} from './cosmetics.mjs';
 import {buildWeaponBody} from './weapon-models/index.mjs';
 import {buildAltParts,applyAltMorph} from './weapon-models/alt-parts.mjs';
 import {ALT_FIRE,altSpecFor} from './alt-fire.mjs';
-import {buildSimpleWeaponBody} from './weapon-models/chassis.mjs';
+import {buildSimpleWeaponBody,chassisFor} from './weapon-models/chassis.mjs';
 import {AdsController} from './weapon-ads.mjs';
 import {legacyWeaponBody} from './weapon-models/legacy.mjs';
 import {CharacterRig} from './character-anim.mjs';
-import {CharacterLifecycle,alignLivingCharacter} from './rig.mjs';
+import {CharacterLifecycle,alignLivingCharacter,applyLivingSecondary,ProceduralSpring} from './rig.mjs';
 import {refineOperatorCharacter} from './models.mjs';
 import {terrainTriangles,terrainWallTriangles} from './terrain.mjs';
 import {foundryDetails,styleFoundryObjective} from './lattice-foundry-view.mjs';
@@ -26,7 +26,7 @@ import {smoothNormals,positionColors} from './terrain-normals.mjs';
 import {TEAM_PALETTE,teamPresentation,teamMark,updateTeamMark,applyActorTeam} from './team-presentation.mjs';
 import {spectateActor,latticeAnnounceCue} from './hud.mjs';
 import {NEUTRAL} from './radar.mjs';
-import {cavernShell,facadeDetails,tunnelRenderPaths,propId,applyPropDamage,propBreakPlan,isBreakable} from './structures.mjs';
+import {cavernShell,facadeDetails,tunnelRenderPaths,propId,applyPropDamage,propDamageStage,propBreakPlan,isBreakable} from './structures.mjs';
 import {raceDemoMode,raceDemoPose,RACE_DEMO_MODE_SECONDS} from './race-camera.mjs';
 import {occlusionDistance} from './camera.mjs';
 import {smoothAngle,smoothTowards,smoothFactor,normalizeCameraOwner,cameraOwnerAllowsRace,integrateFreeMove,FREE_CAM_DEFAULT_SPEED,FREE_CAM_BOOST,FREE_CAM_MIN_SPEED,FREE_CAM_MAX_BASE_SPEED} from './camera-modes.mjs';
@@ -40,7 +40,7 @@ import {surfaceTextures,clearSurfaceTextures,wetSheenTexture,mothMacroTexture,mo
 import {enhanceMothMaterial} from './moth-surface.mjs';
 import {createMothLutMaterial,updateMoth} from './moth-material.mjs';
 import {MothSpritePlayer} from './moth-sprite.mjs';
-import {addSky,addMountains,addScatter,updateScatterSway,ambientProfile,smokeAnchors,skyPhase,HALO_MAPS,skyPalette,biomeAmbience,selectWeather,timeOfDayAt,weatherPreset,WEATHER_KINDS,lightningSchedule,windGustAt,wetSheen} from './environment.mjs';
+import {addSky,addMountains,addBackdrop,backdropKitFor,addScatter,updateScatterSway,ambientProfile,smokeAnchors,skyPhase,HALO_MAPS,skyPalette,biomeAmbience,selectWeather,timeOfDayAt,weatherPreset,WEATHER_KINDS,lightningSchedule,windGustAt,wetSheen} from './environment.mjs';
 import {raceTrackModel,updateRace as syncRacePresentation} from './race-presentation.mjs';
 export {raceTrackModel};
 import {RoomEnvironment} from 'three/addons/environments/RoomEnvironment.js';
@@ -76,6 +76,17 @@ export function shadowTick(previous,interval=SHADOW_REFRESH_INTERVAL){const step
 // more expensive as the refresh rate rises; a fixed Hz budget keeps the cost
 // roughly constant across 60/144 Hz.
 export function shadowDue(now,last,hz){const period=1/Math.max(1,Number(hz)||30);return !Number.isFinite(last)||now-last>=period;}
+// Frame-rate cap for the render loop. `cap` is frames per second and 0 means
+// uncapped. This gates presentation only: the host keeps stepping the fixed-dt
+// simulation (and the view carries the skipped time into the next drawn frame),
+// so gameplay is untouched at 30/60/120. The half-millisecond tolerance absorbs
+// rAF jitter without letting a 60 Hz loop through a 120 cap.
+export function frameDue(now,last,cap){
+ const limit=Number(cap)||0;
+ if(!(limit>0))return true;
+ if(!Number.isFinite(last))return true;
+ return Number(now)-last>=1000/limit-.5;
+}
 // Camera-following shadow frustum. The arena bake keeps the full-extent fit for
 // the first map; in play the ortho camera re-centres on a quantized focus so the
 // map spends its texels on a ~40 m view box instead of the whole footprint.
@@ -151,6 +162,16 @@ function addBlobShadow(parent,radius,opacity=.34){
  parent.add(shadow);return shadow;
 }
 const arenaSeedOf=arena=>String(arena?.id||'arena').split('').reduce((hash,char)=>(Math.imul(hash,31)+char.charCodeAt(0))>>>0,7);
+// Drive whichever biome hook the connected audio facade exposes. `SynthAudio`
+// owns the high-level `setArenaBiome`; a bare music engine owns the palette
+// name, so both are optional calls with the same resolved mood.
+function applyArenaBiomePalette(audio,arena){
+ if(!audio)return null;
+ const mood=biomeAmbience(typeof arena==='string'?{id:arena}:(arena||{})).mood;
+ audio.setArenaBiome?.(arena??null);
+ if(typeof audio.setBiomePalette==='function')audio.setBiomePalette(mood);
+ return mood;
+}
 // Baked Moth atmosphere per map, applied to the standard sky dome. Maps that are
 // not listed keep the procedural addSky gradient. `nebula` is deliberately
 // unused: the bake decodes to a fully black equirect (mean/max 0), so wiring it
@@ -192,6 +213,9 @@ export function mothEchoFor(arenaId){return MOTH_ECHO_MAPS[String(arenaId)]||'ar
 const terrainTextureKind=key=>({grass:'grass',dirt:'sand',rock:'rock',cliff:'rock',concrete:'weathered_concrete',metal:'industrial_mesh',ice:'ice',sand:'sand',snow:'ice',ash:'weathered_concrete',stone:'rough_stucco',lava:'corrugated_metal'}[key]||'rock');
 // Collision proxies that next-gen maps render as smooth geometry instead of a box.
 const NEXTGEN_PROXY=new Set(['cave','tunnel','rock','tree','crate','column']);
+// Pickup activation colours. Shared by the spawn models in `setMatch` and the
+// activation burst, so a pickup always flashes the colour it is built from.
+export const PICKUP_COLORS=Object.freeze({health:'#77efba',armor:'#6dbfff',rocket:'#ffb164',rail:'#bf9cff',scatter:'#ffde87',plasma:'#72cfff',grenade:'#ff806b',shock:'#8ce8ff',flak:'#ffd166',marksman:'#ffd27a',smg:'#8affc1',haste:'#72f1b8',overcharge:'#ff8f70',overshield:'#75baff',recon:'#7fe7ff',cloak:'#c8b6ff'});
 // One floor tile is 5 m. The material repeat is anchored to that tile instead of
 // the arena footprint, so floor texel density (~0.2 tiles/m, matching the terrain
 // UV scale) is the same on every map. The repeat stays an integer so neighbouring
@@ -223,6 +247,63 @@ const WEAPON_PART_DEFAULTS={leftGrip:[0,-.14,-.05],rightGrip:[0,-.14,-.05],magaz
 // weapon framed consistently and in front of the near plane.
 export const VIEWMODEL_SCALE=1.1;
 export const VIEWMODEL_GUN_DISTANCE=.82;
+// Per-weapon reload choreography. Every type drives the same named parts
+// (magazine/barrel/cell/bolt) but through its own windows so a rocket breech,
+// a scattergun break-action and an energy-cell swap do not share one sine.
+//   start/end  reload progress window the part travels over
+//   travel     peak part travel in model units (mag drop / barrel lift)
+//   inspect    progress where the support hand lifts the weapon to inspect
+//   bolt       peak carrier stroke from the reload cycle
+//   cell       full cell revolutions over the reload
+export const RELOAD_TIMING=Object.freeze([
+ Object.freeze({start:.12,end:.62,travel:.12,inspect:.68,bolt:.02,cell:0}),  // 0 pulse
+ Object.freeze({start:.18,end:.7,travel:.16,inspect:.74,bolt:0,cell:0}),    // 1 rocket breech
+ Object.freeze({start:.1,end:.6,travel:.1,inspect:.66,bolt:.025,cell:2}),   // 2 rail cell
+ Object.freeze({start:.14,end:.58,travel:.1,inspect:.6,bolt:0,cell:0}),     // 3 scatter break
+ Object.freeze({start:.12,end:.62,travel:.14,inspect:.7,bolt:.02,cell:1}),  // 4 plasma pack
+ Object.freeze({start:.16,end:.66,travel:.1,inspect:.72,bolt:0,cell:0}),    // 5 grenade drum
+ Object.freeze({start:.1,end:.56,travel:.09,inspect:.64,bolt:.03,cell:1}),  // 6 shock capacitor
+ Object.freeze({start:.14,end:.64,travel:.12,inspect:.7,bolt:.02,cell:0}),  // 7 flak box
+ Object.freeze({start:.1,end:.6,travel:.13,inspect:.74,bolt:.05,cell:0}),   // 8 marksman bolt
+ Object.freeze({start:.08,end:.54,travel:.11,inspect:.6,bolt:.03,cell:0}),  // 9 SMG mag
+]);
+// Frame-time independent window helper: 0 before/after, a single smooth hump
+// across [start,end], so a snapshot hitch cannot pop a part.
+const reloadWindow=(progress,start,end)=>{
+ const t=Math.max(0,Math.min(1,(progress-start)/Math.max(1e-4,end-start)));
+ return Math.sin(t*Math.PI);
+};
+// Weapon-inertia lag. Two scalar springs trail the player's look yaw/pitch and
+// are composed on top of the ADS/feedback pose (never into the aim camera).
+// Reduced motion snaps to rest; the composed rotation and translation are hard
+// bounded so a snapshot teleport cannot swing the viewmodel.
+export class WeaponInertia {
+ constructor(){
+  this.yaw=new ProceduralSpring({frequency:6,damping:.72});
+  this.pitch=new ProceduralSpring({frequency:7,damping:.72});
+  this.lastYaw=null;this.lastPitch=null;
+  this.frame={yaw:0,pitch:0,offsetX:0,offsetY:0,offsetZ:0};
+ }
+ reset(){this.yaw.snapTo(0);this.pitch.snapTo(0);this.lastYaw=null;this.lastPitch=null;return this.frame;}
+ update({dt=0,yaw=0,pitch=0,reduced=false,ads=0,visible=true}={}){
+  const frame=this.frame;
+  if(reduced||!visible){this.yaw.snapTo(0);this.pitch.snapTo(0);frame.yaw=frame.pitch=frame.offsetX=frame.offsetY=frame.offsetZ=0;this.lastYaw=Number.isFinite(yaw)?yaw:this.lastYaw;this.lastPitch=Number.isFinite(pitch)?pitch:this.lastPitch;return frame;}
+  const seconds=Math.max(0,Math.min(.1,Number(dt)||0));
+  const yawValue=Number.isFinite(yaw)?yaw:(this.lastYaw??0),pitchValue=Number.isFinite(pitch)?pitch:(this.lastPitch??0);
+  const yawRate=seconds>1e-4&&this.lastYaw!==null?clampRate((yawValue-this.lastYaw)/seconds):0;
+  const pitchRate=seconds>1e-4&&this.lastPitch!==null?clampRate((pitchValue-this.lastPitch)/seconds):0;
+  this.lastYaw=yawValue;this.lastPitch=pitchValue;
+  const brace=1-.55*Math.max(0,Math.min(1,Number(ads)||0));
+  this.yaw.setTarget(-Math.max(-.06,Math.min(.06,yawRate*.012))*brace);
+  this.pitch.setTarget(-Math.max(-.05,Math.min(.05,pitchRate*.01))*brace);
+  frame.yaw=Math.max(-.06,Math.min(.06,this.yaw.update(seconds)));
+  frame.pitch=Math.max(-.05,Math.min(.05,this.pitch.update(seconds)));
+  frame.offsetX=-frame.yaw*.22;frame.offsetY=-frame.pitch*.2;frame.offsetZ=Math.abs(frame.pitch)*.1;
+  return frame;
+ }
+}
+const clampRate=rate=>Math.max(-14,Math.min(14,Number.isFinite(rate)?rate:0));
+
 const buildSightError=(rear,front,aim)=>sightAlignmentError(rear,front,aim,VIEWMODEL_SCALE);
 function assembleWeapon(type,assets,visual,finish,body){return withAssets(assets,()=>{type=Number.isInteger(type)&&type>=0?type:0;const info=weaponInfo(type),finishColors=resolveFinish(finish,null),g=new T.Group(),dark=material(finishColors?.secondary||'#222f37'),light=material(finishColors?.accent||'#73848a'),glow=material(finishColors?.primary||info.color,.3,.3,true);g.userData.type=type;const ctx={T,info,material,box,cylinder,ring,geo:(key,make)=>geometry(assets,key,make),palette:{dark,light,glow}};body(type,g,ctx);
   // Alt-fire parts are authored hidden and blended in by the view while the
@@ -242,6 +323,18 @@ function assembleWeapon(type,assets,visual,finish,body){return withAssets(assets
   const partAnchors={rearSight,frontSight,leftGrip:makeAnchor('leftGrip',WEAPON_PART_DEFAULTS.leftGrip),rightGrip:makeAnchor('rightGrip',WEAPON_PART_DEFAULTS.rightGrip),magazine:makeAnchor('magazine',WEAPON_PART_DEFAULTS.magazine),bolt:makeAnchor('bolt',WEAPON_PART_DEFAULTS.bolt),hinge:makeAnchor('hinge',WEAPON_PART_DEFAULTS.hinge)};
   const sightDZ=frontSight.position.z-rearSight.position.z,sightDY=frontSight.position.y-rearSight.position.y;
   g.userData.anchors=partAnchors;g.userData.parts=parts;
+  // First-person support hand. Hidden at rest and during ADS; the reload
+  // choreography brings it to the foregrip, travels it with the magazine (or
+  // barrel/cell) and lifts the weapon into the inspection tilt. It owns no
+  // gameplay anchors, so the ADS solver and grip IK contracts stay untouched.
+  {
+   const [handWidth,handHeight,handLength,,handY]=chassisFor(type);
+   const support=new T.Group();support.name='support-hand';
+   support.position.set(-handWidth*.34,handY-handHeight*.82,-handLength*.42);
+   const palm=box(support,.072,.088,.076,0,0,0,dark);palm.name='support-palm';
+   palm.castShadow=false;palm.receiveShadow=false;
+   support.visible=false;g.add(support);g.userData.supportHand=support;
+  }
   // Derive the ADS pose from the real anchors after model scale is known: the
   // solver aligns the rear aperture to the weapon-camera center ray at a fixed
   // eye relief and rotates the bore onto the camera forward axis (accounting for
@@ -320,6 +413,55 @@ function hornetModel(software=false){const g=new T.Group();g.name='hornet';const
  g.traverse(n=>{if(n.isMesh){n.castShadow=true;n.receiveShadow=true;}});
  if(software)addBlobShadow(g,2.3,.32);
  g.userData={kind:'hornet',vehicle:true,wheels:[],turret:null,barrels:engines,guns,flashUntil:0,color:'#5c6b7a'};return g;}
+// ---- Per-kind vehicle silhouettes -----------------------------------------
+// Titan, Scout and Transport share the Puma hull. These additive kits layer a
+// readable silhouette (armour skirts, a stripped recon frame, a troop cage) and
+// two or three emissive accents on top of it without scaling the model, so the
+// shared hull stays the seat-offset reference. Puma never enters this path, so
+// its pinned meshes, accessories and guns are untouched.
+const VEHICLE_KIT_KINDS=Object.freeze(new Set(['titan','scout','transport']));
+export function vehicleKitKind(kind){const id=String(kind||'').toLowerCase();return VEHICLE_KIT_KINDS.has(id)?id:null;}
+function buildVehicleKit(g,kit,matc){
+ let parts=0;
+ const part=node=>{if(node){node.userData.vehicleKit=kit;parts++;}return node;};
+ if(kit==='titan'){
+  const plate=matc('#454b36',.42,.68),rivet=matc('#8d9583',.7,.4),glow=matc('#ffb35c',.3,.3,true);
+  // Armour skirts down both flanks plus a front ram plate. The skirts sit
+  // outboard of the tyres so the bolt-on armour never clips the wheels.
+  for(const x of [-1.22,1.22]){part(box(g,.14,.5,3.0,x,.55,-.05,plate));
+   for(let i=-1;i<=1;i++)part(box(g,.06,.06,.06,x>0?1.28:-1.28,.55,i*1.05,rivet));}
+  part(box(g,1.98,.34,.24,0,.5,1.82,plate));
+  part(box(g,1.5,.08,1.2,0,1.66,-.2,plate));
+  for(const x of [-.62,.62])part(tube(g,x,1.02,-.85,x*1.28,1.62,-1.6,.04,plate,6));
+  for(const x of [-1.04,1.04])part(box(g,.34,.2,.7,x,.94,-1.15,plate));
+  // Emissive accents: headlight pods, roof rack marker and flank lamps.
+  for(const x of [-.42,.42])part(box(g,.2,.12,.12,x,.98,1.66,glow));
+  part(box(g,.34,.08,.08,0,1.74,-.78,glow));
+  for(const x of [-1.31,1.31])part(box(g,.06,.16,.5,x,.74,-.05,glow));
+ }else if(kit==='scout'){
+  const frame=matc('#3c444c',.6,.5),trim=matc('#242a30',.45,.6),sensor=matc('#8affc1',.25,.3,true);
+  // Stripped frame rails replace the cargo read, with a tall sensor mast.
+  for(const x of [-.8,.8])part(box(g,.06,.12,2.2,x,.92,-.2,frame));
+  part(tube(g,-.62,.98,.6,.62,.98,.6,.03,trim,6));
+  part(tube(g,-.5,1.5,.3,.5,1.5,.3,.03,frame,6));
+  part(tube(g,0,1.5,.3,0,2.12,.52,.028,frame,6));
+  const dish=new T.Mesh(new T.SphereGeometry(.17,10,6,0,Math.PI*2,0,Math.PI*.5),frame);dish.position.set(0,2.16,.6);dish.rotation.x=Math.PI*.5;dish.userData.vehicleKit=kit;g.add(dish);parts++;
+  part(box(g,.1,.07,.1,0,2.3,.6,sensor));
+  for(const x of [-.74,.74])part(box(g,.08,.3,.08,x,1.2,-1.2,sensor));
+ }else if(kit==='transport'){
+  const cage=matc('#4b4f3a',.5,.6),panel=matc('#6d7460',.32,.72),glow=matc('#7fe7ff',.3,.3,true);
+  // Rear troop cage over the bed plus full side panels.
+  for(const x of [-.72,.72]){part(box(g,.1,.66,1.6,x,.99,-.95,cage));
+   for(const z of [-.4,-.95,-1.5])part(box(g,.08,.6,.08,x,.98,z,cage));}
+  part(box(g,1.56,.1,1.6,0,1.32,-.95,cage));
+  for(const z of [-.4,-.95,-1.5])part(box(g,1.44,.05,.08,0,1.3,z,cage));
+  for(const x of [-1.14,1.14])part(box(g,.08,.44,2.0,x,.72,-.35,panel));
+  // Emissive accents: cage corner markers and side strips.
+  for(const x of [-.72,.72])part(box(g,.16,.08,.4,x,1.4,-.95,glow));
+  for(const x of [-1.19,1.19])part(box(g,.06,.08,.9,x,.92,-.5,glow));
+ }
+ return parts;
+}
 export function vehicleModel(kind='puma',assets,software=false){return withAssets(assets,()=>{
  if(kind==='hornet')return hornetModel(software);
  const g=new T.Group();g.name='warthog';
@@ -383,9 +525,10 @@ export function vehicleModel(kind='puma',assets,software=false){return withAsset
   for(const sign of [-1,1]){const pipe=cylinder(g,.04,.04,.42,sign*.95,.24,-.6,steel,8);pipe.rotation.z=Math.PI/2;}
   box(g,1.2,.04,.08,0,1.62,.32,dark);
   for(let i=-2;i<=2;i++){if(i===0)continue;const lamp=cylinder(g,.032,.032,.025,i*.24,1.62,.36,amber,8);lamp.rotation.x=Math.PI/2;}
+  const kit=vehicleKitKind(kind);if(kit)buildVehicleKit(g,kit,matc);
   g.traverse(node=>{if(node.isMesh){node.castShadow=true;node.receiveShadow=true;}});
     if(software)addBlobShadow(g,2.1,.32);
-    g.userData={kind,vehicle:true,wheels,turret,barrels,guns,accessories:{spareTire,jerryCan,winch,towHook,splitter},flashUntil:0,color:'#5f6338'};
+    g.userData={kind,vehicle:true,wheels,turret,barrels,guns,accessories:{spareTire,jerryCan,winch,towHook,splitter},flashUntil:0,color:'#5f6338',...(kit?{kit}:{})};
    return g;
 });}
 // Wing silhouette language (§6.6): additive, cached geometry/materials layered
@@ -403,10 +546,10 @@ function buildWingSilhouette(parts,wing,{accent,dark}){
   // Swept fins lean the read forward over the shoulders; the torso is pulled
   // slightly leaner than the base operator body.
   for(const side of [-1,1]){
-   const key=side<0?'L':'R',fin=box(backpack,.055,.34,.18,side*.17,.12,.05,accent);
-   fin.name=`wing-fin-${key}`;fin.rotation.x=-.6;fin.rotation.z=side*.22;
+   const key=side<0?'L':'R',role=side<0?'finL':'finR',fin=box(backpack,.055,.34,.18,side*.17,.12,.05,accent);
+   fin.name=`wing-fin-${key}`;fin.rotation.x=-.6;fin.rotation.z=side*.22;fin.userData.secondary=role;
    const spar=tag(cylinder(backpack,.014,.014,.24,side*.17,.27,.01,dark,6));
-   spar.name=`wing-fin-spar-${key}`;spar.rotation.x=-.6;spar.rotation.z=side*.22;
+   spar.name=`wing-fin-spar-${key}`;spar.rotation.x=-.6;spar.rotation.z=side*.22;spar.userData.secondary=role;
   }
   const collar=tag(box(chest,.34,.05,.26,0,.16,.03,accent));collar.name='wing-collar';collar.rotation.x=.12;
   torsoMesh.scale.set(.97,1.36,.66);
@@ -425,11 +568,11 @@ function buildWingSilhouette(parts,wing,{accent,dark}){
  else{
   // Tactician sensor mast plus toolkit greebles; the boom stays in the default
   // LOD so the slighter silhouette still reads at distance.
-  const mast=cylinder(head,.01,.01,.26,-.14,.2,.01,dark,6);mast.name='wing-sensor-mast';mast.rotation.z=.24;
+  const mast=cylinder(head,.01,.01,.26,-.14,.2,.01,dark,6);mast.name='wing-sensor-mast';mast.rotation.z=.24;mast.userData.secondary='sensor';
   const bulb=tag(new T.Mesh(geometry(undefined,'wing-sensor-bulb',()=>new T.SphereGeometry(.052,8,6)),accent));
-  bulb.name='wing-sensor-bulb';bulb.position.set(-.17,.32,.01);head.add(bulb);
+  bulb.name='wing-sensor-bulb';bulb.position.set(-.17,.32,.01);bulb.userData.secondary='sensor';head.add(bulb);
   const dish=tag(new T.Mesh(geometry(undefined,'wing-dish',()=>new T.ConeGeometry(.07,.05,10)),accent));
-  dish.name='wing-sensor-dish';dish.position.set(.12,.17,-.05);dish.rotation.x=Math.PI*.46;head.add(dish);
+  dish.name='wing-sensor-dish';dish.position.set(.12,.17,-.05);dish.rotation.x=Math.PI*.46;dish.userData.secondary='sensor';head.add(dish);
   tag(box(chest,.17,.14,.07,-.24,-.09,.16,dark)).name='wing-toolkit';
   tag(box(chest,.075,.16,.1,-.3,-.01,.1,accent)).name='wing-tool-module';
   tag(box(hips,.16,.12,.12,.19,-.02,-.05,dark)).name='wing-tool-pouch';
@@ -449,11 +592,11 @@ export function robotModel(id,assets,software=false){return withAssets(assets,()
   const emblem=ball(chest,.085,glow,10);emblem.position.set(0,0,-.2);emblem.scale.set(1,.5,.35);
    box(chest,.08,.2,.025,0,-.04,-.21,dark);
   // Backpack greebles: a low core, twin canisters, a vent and a whip antenna.
-  const backpack=new T.Group();backpack.name='backpack';backpack.position.set(0,.02,.22);chest.add(backpack);
+  const backpack=new T.Group();backpack.name='backpack';backpack.position.set(0,.02,.22);backpack.userData.secondary='pack';chest.add(backpack);
   ball(backpack,.15,dark,10).scale.set(1.15,.95,.55);
   for(const x of [-.075,.075]){const tank=cylinder(backpack,.045,.045,.26,x,.02,.05,color,8);tank.rotation.x=Math.PI/2;}
   const vent=box(backpack,.2,.06,.06,0,.11,-.06,glow);vent.rotation.x=.2;
-  const antenna=cylinder(backpack,.012,.012,.34,.12,.16,.05,dark,6);antenna.rotation.z=-.16;
+  const antenna=cylinder(backpack,.012,.012,.34,.12,.16,.05,dark,6);antenna.rotation.z=-.16;antenna.userData.secondary='antenna';
   const head=new T.Group();head.position.y=.34;chest.add(head);
   ball(head,.19,armor,16).scale.set(.96,1.04,.98);
   const visor=ball(head,.14,dark,12);visor.position.set(0,.01,-.09);visor.scale.set(1.02,.46,.6);
@@ -462,12 +605,12 @@ export function robotModel(id,assets,software=false){return withAssets(assets,()
   const brow=ball(head,.155,armor,12);brow.position.set(0,.075,-.075);brow.scale.set(1.04,.16,.62);brow.name='visor-brow';
   const nub=ball(head,.028,glow,8);nub.position.set(0,-.045,-.205);nub.name='visor-nub';
  if(id==='chatgpt')ring(head,.17,.018,0,.02,0,glow,Math.PI/2);
- if(id==='claude'){for(const x of [-.2,.2]){const fin=ball(head,.07,color,8);fin.position.set(x,.05,.02);fin.scale.set(.6,1.7,.9);}const crest=ball(chest,.06,color,8);crest.position.set(0,.16,-.22);crest.scale.set(.5,1.6,.5);}
- if(id==='grok'){const ant=cylinder(head,.012,.012,.34,0,.28,.02,dark,6);const tip=ball(head,.035,glow,8);tip.position.set(.16,.3,.02);}
+ if(id==='claude'){for(const x of [-.2,.2]){const fin=ball(head,.07,color,8);fin.position.set(x,.05,.02);fin.scale.set(.6,1.7,.9);fin.userData.secondary='crest';}const crest=ball(chest,.06,color,8);crest.position.set(0,.16,-.22);crest.scale.set(.5,1.6,.5);crest.userData.secondary='crest';}
+ if(id==='grok'){const ant=cylinder(head,.012,.012,.34,0,.28,.02,dark,6);ant.userData.secondary='antenna';const tip=ball(head,.035,glow,8);tip.position.set(.16,.3,.02);tip.userData.secondary='antenna';}
  if(id==='meta'){for(const x of [-.13,.13])ring(chest,.11,.02,x,.05,-.19,glow,0);}
- if(id==='gemini'){for(const x of [-.11,.11]){const star=ball(head,.055,glow,8);star.position.set(x,.01,-.2);}const spine=ball(chest,.05,color,8);spine.position.set(0,.05,-.24);spine.scale.set(.5,2.4,.5);}
- if(id==='deepseek'){const crest=ball(head,.06,color,8);crest.position.set(0,.2,.02);crest.scale.set(.6,1.8,.8);}
- if(id==='mistral'){for(let i=0;i<3;i++){const fin=ball(head,.05,color,8);fin.position.set(.08-i*.08,.16+i*.03,0);fin.scale.set(1.4,.5,.7);}}
+ if(id==='gemini'){for(const x of [-.11,.11]){const star=ball(head,.055,glow,8);star.position.set(x,.01,-.2);}const spine=ball(chest,.05,color,8);spine.position.set(0,.05,-.24);spine.scale.set(.5,2.4,.5);spine.userData.secondary='crest';}
+ if(id==='deepseek'){const crest=ball(head,.06,color,8);crest.position.set(0,.2,.02);crest.scale.set(.6,1.8,.8);crest.userData.secondary='crest';}
+ if(id==='mistral'){for(let i=0;i<3;i++){const fin=ball(head,.05,color,8);fin.position.set(.08-i*.08,.16+i*.03,0);fin.scale.set(1.4,.5,.7);fin.userData.secondary='crest';}}
  if(id==='kimi')ring(head,.2,.02,0,.03,0,glow,Math.PI/3);
  if(id==='qwen'){for(let i=0;i<3;i++){const plate=ball(chest,.2-i*.03,color,12);plate.position.set(0,.02+i*.08,-.05);plate.scale.set(1.05,.3,.5);}}
   const arms={},legs={},shoulderPads=[];
@@ -695,13 +838,12 @@ export class ArenaView{
        }
        _onQualityChange(){
         const q=this.qualitySettings||qualitySettings(this.quality??'high'),software=this.renderer?.isSoftware===true;
-        // Changing shadow.mapSize alone does not resize an already-created render
-        // target in this three revision: dispose it so three allocates the new
-        // size on the next shadow pass, and request exactly one shadow refresh.
-        if(this.sun?.shadow){
-         const size=q.shadowMap??2048;
-         if(this._shadowMapSize!==size){this._shadowMapSize=size;if(this.sun.shadow.map){this.sun.shadow.map.dispose?.();this.sun.shadow.map=null;}this.sun.shadow.mapSize.set(size,size);if(this.renderer?.shadowMap)this.renderer.shadowMap.needsUpdate=true;}
-        }
+        // Shadow level + map size follow the display option first, then the
+        // quality tier's own shadow budget. Changing shadow.mapSize alone does
+        // not resize an already-created render target in this three revision:
+        // dispose it so three allocates the new size on the next shadow pass,
+        // and request exactly one shadow refresh.
+        this._applyShadows();
         if(this.renderer?.setScreenArea)this.renderer.setScreenArea(q.tier===0?.12:q.tier===1?.09:.06);
         // Image-based ambient/reflections scale with the tier: this is the
         // cheapest lever on how metallic surfaces read, and the PMREM texture is
@@ -713,6 +855,25 @@ export class ArenaView{
         if(software&&this.renderer.setTriangleBudget)this.renderer.setTriangleBudget(frameTriangleBudget(this.quality,{software:true}));
         this._applyPostQuality();
         this._applyModelDetail();
+       }
+       // Shadow level from the display option: `off` disables casting entirely,
+       // `low` clamps the map to the smaller tier's size, `high` uses the active
+       // quality tier's map. Live-updatable — setDisplay calls this through
+       // _applyQuality; a map that only changes size is reallocated on the next
+       // shadow pass because three does not resize an existing target.
+       _applyShadows(){
+        const software=this.renderer?.isSoftware===true,level=['high','low','off'].includes(this.display?.shadows)?this.display.shadows:'high';
+        const enabled=!software&&level!=='off';
+        if(this.sun)this.sun.castShadow=enabled;
+        if(this.renderer?.shadowMap)this.renderer.shadowMap.enabled=enabled;
+        if(!enabled){this._shadowMapSize=undefined;return false;}
+        const tierSize=Number(this.qualitySettings?.shadowMap)||2048,size=level==='low'?Math.min(tierSize,1024):tierSize;
+        if(this._shadowMapSize!==size){
+         this._shadowMapSize=size;
+         if(this.sun?.shadow){if(this.sun.shadow.map){this.sun.shadow.map.dispose?.();this.sun.shadow.map=null;}this.sun.shadow.mapSize.set(size,size);}
+         if(this.renderer?.shadowMap)this.renderer.shadowMap.needsUpdate=true;
+        }
+        return true;
        }
        // The separate effects-quality control scales particle/decal budgets on top
        // of the active tier, independent of the overall quality tier.
@@ -764,7 +925,7 @@ export class ArenaView{
         if(this.perf){this.perf.medianFrameMs=median;this.perf.p95FrameMs=p95;this.perf.lastFrameMs=dt*1000;}
         return this.quality;
        }
-        setDisplay(prefs){if(prefs&&typeof prefs==='object'&&'quality' in prefs)this._qualityOverride=normalizeQualityOverride(prefs.quality);const display=normalizeDisplay(prefs),scaleChanged=display.resolutionScale!==this.display?.resolutionScale||display.resolutionCap!==this.display?.resolutionCap;this.display=display;this.camera.fov=display.fov;this.camera.updateProjectionMatrix();this.weaponFov=Math.max(45,Number(display.fov)||this.weaponFov||70);if(this.weaponCamera)this.weaponCamera.fov=this.weaponFov;this.showWeapon=display.showWeapon;if('toneMappingExposure' in this.renderer)this.renderer.toneMappingExposure=Number(display.exposure)||1.15;this._applyQuality();this._applyEffectsQuality?.();if(scaleChanged)this.resize();else this._syncPost?.();}
+        setDisplay(prefs){if(prefs&&typeof prefs==='object'&&'quality' in prefs)this._qualityOverride=normalizeQualityOverride(prefs.quality);const display=normalizeDisplay(prefs),scaleChanged=display.resolutionScale!==this.display?.resolutionScale||display.resolutionCap!==this.display?.resolutionCap;this.display=display;this.camera.fov=display.fov;this.camera.updateProjectionMatrix();this.weaponFov=Math.max(45,Number(display.fov)||this.weaponFov||70);if(this.weaponCamera)this.weaponCamera.fov=this.weaponFov;this.showWeapon=display.showWeapon;if('toneMappingExposure' in this.renderer)this.renderer.toneMappingExposure=Number(display.exposure)||1.15;this._applyQuality();this._applyShadows();this._applyEffectsQuality?.();if(scaleChanged)this.resize();else this._syncPost?.();}
    setPlayerId(id){if(this.playerId!==id){this.feedback?.reset();this.flashUntil=0;this.cameraShake?.reset();this.lowHealth=false;}this.playerId=id;}
    setAim(on){this.aim=on===true;}
    setDynamicResolution(on){this.dynamicResolution=on!==false;this._drs={scale:1,cool:0};this.resize();return this.dynamicResolution;}
@@ -1403,7 +1564,7 @@ export class ArenaView{
      return true;
     }
     buildArena(arena=MAPS[0]){return withAssets(this.arenaAssets??=new ModelAssets(),()=>this._buildArena(arena));}
-    _buildArena(arena=MAPS[0]){this._disposeMothSprites();if(this.worldGroup){this.scene.remove(this.worldGroup);this.disposeObject(this.worldGroup);for(const resource of this.renderResources||[])resource.dispose();this.renderResources?.clear();this.flagAssets=null;}this.sky=null;this.mountains=null;this.objectiveModels=new Map();this._mothRift=null;this._mothRiftSheet=null;this.mapId=arena.id;this.viewAudio?.setSpace?.(mothSpaceFor(arena.id));this.viewAudio?.setEchoMap?.(mothEchoFor(arena.id));this.viewAudio?.setArenaBiome?.(arena);const world=new T.Group();this.worldGroup=world;this.scene.add(world);this.scene.background=new T.Color(arena.background);this.scene.fog=new T.FogExp2(arena.background,.018);const bounds=arenaBounds(arena),legacy=!arena.bounds,minX=bounds.minX,maxX=bounds.maxX,minZ=bounds.minZ,maxZ=bounds.maxZ,width=maxX-minX,depth=maxZ-minZ;
+    _buildArena(arena=MAPS[0]){this._disposeMothSprites();if(this.worldGroup){this.scene.remove(this.worldGroup);this.disposeObject(this.worldGroup);for(const resource of this.renderResources||[])resource.dispose();this.renderResources?.clear();this.flagAssets=null;}this.sky=null;this.mountains=null;this.backdrop=null;this.objectiveModels=new Map();this._mothRift=null;this._mothRiftSheet=null;this.mapId=arena.id;this.viewAudio?.setSpace?.(mothSpaceFor(arena.id));this.viewAudio?.setEchoMap?.(mothEchoFor(arena.id));applyArenaBiomePalette(this.viewAudio,arena);const world=new T.Group();this.worldGroup=world;this.scene.add(world);this.scene.background=new T.Color(arena.background);this.scene.fog=new T.FogExp2(arena.background,.018);const bounds=arenaBounds(arena),legacy=!arena.bounds,minX=bounds.minX,maxX=bounds.maxX,minZ=bounds.minZ,maxZ=bounds.maxZ,width=maxX-minX,depth=maxZ-minZ;
     const look=arenaLooks[arena.id]||arenaLooks.exchange,[floorColor,wallColor,trimColor,skyColor,groundColor,fogDensity,metal]=look;
     this.scene.fog.density=fogDensity;world.userData.look=arena.id;
     for(const light of this.scene.children){if(light.userData?.rimLight)continue;if(light.isHemisphereLight){light.color.set(skyColor);light.groundColor.set(groundColor);light.intensity=arena.terrain?2.5:1.8;}if(light.isDirectionalLight){light.color.set(skyColor);light.intensity=arena.terrain?3.1:2.4;light.position.set(arena.id==='aether'?-18:18,24,arena.id==='foundry'?-12:10);}}
@@ -1539,7 +1700,7 @@ export class ArenaView{
    // the test mock keep individual meshes for predictable depth ordering).
    this._batchArenaBlocks(world);
    // Unused family colors never reach the scene's normal disposal traversal.
-    const usedMaterials=new Set();world.traverse(n=>{if(n.material)usedMaterials.add(n.material);});for(const mat of new Set(palette))if(!usedMaterials.has(mat))mat.dispose();   const skyPhaseName=skyPhase(arena),halo=HALO_MAPS.has(arena.id),sunDir=arena.id==='aether'?[-18,24,-12]:arena.id==='foundry'?[18,24,-12]:[18,24,10],quality=this._quality();this.scene.userData.sky={background:arena.background,phase:skyPhaseName,seed:arenaSeed,halo,sunDir,mood:biomeAmbience(arena).mood,weather:this.weatherState?this.weatherState.kind:'clear'};if(this.renderer?.isSoftware!==true){this.sky=addSky(world,{background:arena.background,radius:185,phase:skyPhaseName,seed:arenaSeed,starCount:Math.round((skyPhaseName==='night'?520:0)*quality.stars),halo,sunDir});this.mountains=addMountains(world,{background:arena.background,seed:arenaSeed,radius:150,count:Math.max(8,Math.round(26*quality.scatter)),base:-12,detail:quality.scatterDetail});if(arena.terrain&&arena.scatter!==false)this.scatterWind=addScatter(world,{terrain:arena.terrain,bounds,seed:arenaSeed,wind:true,density:quality.scatter,detail:quality.scatterDetail,biome:arena.biome})||[];const atmosphere=mothAtmosphereFor(arena.id);if(atmosphere)this._applyMothAtmosphere(atmosphere);}
+    const usedMaterials=new Set();world.traverse(n=>{if(n.material)usedMaterials.add(n.material);});for(const mat of new Set(palette))if(!usedMaterials.has(mat))mat.dispose();   const skyPhaseName=skyPhase(arena),halo=HALO_MAPS.has(arena.id),sunDir=arena.id==='aether'?[-18,24,-12]:arena.id==='foundry'?[18,24,-12]:[18,24,10],quality=this._quality();this.scene.userData.sky={background:arena.background,phase:skyPhaseName,seed:arenaSeed,halo,sunDir,mood:biomeAmbience(arena).mood,weather:this.weatherState?this.weatherState.kind:'clear'};if(this.renderer?.isSoftware!==true){this.sky=addSky(world,{background:arena.background,radius:185,phase:skyPhaseName,seed:arenaSeed,starCount:Math.round((skyPhaseName==='night'?520:0)*quality.stars),halo,sunDir});this.mountains=addMountains(world,{background:arena.background,seed:arenaSeed,radius:150,count:Math.max(8,Math.round(26*quality.scatter)),base:-12,detail:quality.scatterDetail});this.backdrop=addBackdrop(world,{biome:backdropKitFor(arena).biome,seed:arenaSeed,quality});if(arena.terrain&&arena.scatter!==false)this.scatterWind=addScatter(world,{terrain:arena.terrain,bounds,seed:arenaSeed,wind:true,density:quality.scatter,detail:quality.scatterDetail,biome:arena.biome})||[];const atmosphere=mothAtmosphereFor(arena.id);if(atmosphere)this._applyMothAtmosphere(atmosphere);}
     else this.scatterWind=[];
     this.ambientFx=null;this.ambientPool?.dispose?.();this.ambientPool=null;this.ambientConfig=ambientProfile(arena,skyPhaseName);this.ambientSeed=arenaSeed;this.ambientAnchors=smokeAnchors(bounds,arenaSeed,4);
     this.weatherFx=null;this.weatherPool?.dispose?.();this.weatherPool=null;this.ripplePool?.clear?.();this.initWeather(arena);
@@ -1714,7 +1875,12 @@ export class ArenaView{
   for(let i=0;i<props.length;i++){
    const p=props[i];if(!isBreakable(p.type))continue;
    const mesh=meshes[p.type];if(!mesh)continue;
-   entries.push({prop:p,id:propId(p,i),mesh,index:counters[p.type]++});
+   const index=counters[p.type]++,matrix=new T.Matrix4();
+   mesh.getMatrixAt(index,matrix);
+   // Base transform and tint captured once so a partial hit can shrink and
+   // darken the intact instance without ever re-reading a staged matrix.
+   const color=mesh.instanceColor?mesh.getColorAt(index,new T.Color()):null;
+   entries.push({prop:p,id:propId(p,i),mesh,index,matrix,color,stage:0});
   }
   world.userData.breakables={entries,state:new Map(),hidden:new Set()};
  }
@@ -1731,12 +1897,31 @@ export class ArenaView{
    if(data.hidden.has(entry.id))continue;
    const p=entry.prop;if(Math.hypot((p.x||0)-(pos.x||0),(p.z||0)-(pos.z||0))>r)continue;
    const result=applyPropDamage(data.state,entry.id,p.type,damage);
-   if(!result||!result.broken||result.wasBroken)continue;
-   data.hidden.add(entry.id);
-   entry.mesh.setMatrixAt(entry.index,zero);entry.mesh.instanceMatrix.needsUpdate=true;
-   const plan=propBreakPlan({...p,id:entry.id},{origin:pos,serial,reduced});
-   if(plan){this.debrisPool??=new DebrisPool(this.scene,this._quality().deaths);this.debrisPool.spawn(plan);}
-   broken++;
+   if(!result)continue;
+   if(result.broken){
+    if(result.wasBroken)continue;
+    data.hidden.add(entry.id);
+    entry.mesh.setMatrixAt(entry.index,zero);entry.mesh.instanceMatrix.needsUpdate=true;
+    const plan=propBreakPlan({...p,id:entry.id},{origin:pos,serial,reduced});
+    if(plan){this.debrisPool??=new DebrisPool(this.scene,this._quality().deaths);this.debrisPool.spawn(plan);}
+    broken++;
+    continue;
+   }
+   // Partial damage: stage the intact instance (shrink + darken) so the break
+   // reads as a progression instead of pristine -> hidden. WebGL only — the CPU
+   // renderer returns before this point — and monotonic per prop.
+   const stage=propDamageStage(result.hp,result.profile);
+   if(stage.progress<=0||stage.progress<=entry.stage)continue;
+   entry.stage=stage.progress;
+   const scaled=this._stageMatrix??=new T.Matrix4(),tint=this._stageColor??=new T.Color(),stageScale=this._stageScale??=new T.Matrix4();
+   stageScale.makeScale(stage.scale,stage.scale,stage.scale);
+   scaled.copy(entry.matrix).multiply(stageScale);
+   entry.mesh.setMatrixAt(entry.index,scaled);
+   entry.mesh.instanceMatrix.needsUpdate=true;
+   if(entry.color)tint.copy(entry.color);else tint.setScalar(1);
+   tint.multiplyScalar(stage.shade);
+   entry.mesh.setColorAt(entry.index,tint);
+   if(entry.mesh.instanceColor)entry.mesh.instanceColor.needsUpdate=true;
   }
   return broken;
  }
@@ -1746,7 +1931,7 @@ export class ArenaView{
  for(let i=-4;i<=4;i++){box(scene,.25,9,.5,i*3,4,-6,dark);box(scene,.045,6,.04,i*3+.18,4,-5.72,glow);}
   const model=robotModel('chatgpt',undefined,this.renderer?.isSoftware===true);model.scale.setScalar(2.15);model.position.y=.17;model.rotation.y=.25;scene.add(model);return {scene,camera,model,id:'chatgpt'};}
   setCharacter(id){if(id===this.menu.id)return;this.disposeObject(this.menu.model);this.menu.scene.remove(this.menu.model);this.menu.model=robotModel(id,undefined,this.renderer?.isSoftware===true);this.menu.model.scale.setScalar(2.15);this.menu.model.position.y=.17;this.menu.scene.add(this.menu.model);this.menu.id=id;}
-      setMatch(match){this.clearFreeMotion();this.characterLifecycle?.clear();this.deathContext?.clear();this.deathPool?.clear();this.hitPool?.clear();this.hitFlinch?.clear();this.shellPool?.clear();this.ripplePool?.clear?.();this.contactShadows?.clear?.();this.abilityVfx?.reset();this._clearDebugDeaths?.();const arena=match.arena||MAPS.find(a=>a.id===match.mapId)||MAPS[0];this.clearObjectiveMarkers();if(this.payloadModel){this.scene.remove(this.payloadModel);this.disposeObject(this.payloadModel);this.payloadModel=null;}for(const m of [...this.actorModels.values(),...this.pickupModels,...(this.flagModels||new Map()).values()]){this.scene.remove(m);this.disposeObject(m);}this.flagModels=new Map();if(this.mapId!==arena.id)this.buildArena(arena);const assets=this.modelAssets??=new ModelAssets();this.actorModels=new Map((match.actors||[]).map(a=>{const m=robotModel(a.character,assets,this.renderer?.isSoftware===true);this._addActorModel(m);return [a.id,m];}));this.pickupModels=(match.pickups||[]).map(p=>{const g=new T.Group(),colors={health:'#77efba',armor:'#6dbfff',rocket:'#ffb164',rail:'#bf9cff',scatter:'#ffde87',plasma:'#72cfff',grenade:'#ff806b',shock:'#8ce8ff',flak:'#ffd166',marksman:'#ffd27a',smg:'#8affc1',haste:'#72f1b8',overcharge:'#ff8f70',overshield:'#75baff',recon:'#7fe7ff',cloak:'#c8b6ff'},pickupColor=colors[p.kind]||'#8ad9d3',mat=this._mothLutMaterial(this._mothLutTheme(arena),{base:{color:pickupColor,metalness:.4,roughness:.3,emissive:pickupColor},phase:.15,intensity:.4})??material(pickupColor,.4,.3,true);if(p.kind==='health'){box(g,.6,.19,.19,0,.65,0,mat);box(g,.19,.6,.19,0,.65,0,mat);}else if(p.kind==='armor'){const m=new T.Mesh(geometry(assets,'pickup-armor-octa',()=>new T.OctahedronGeometry(.4)),mat);m.position.y=.7;g.add(m);}else if(['haste','overcharge','overshield'].includes(p.kind)){const m=new T.Mesh(geometry(assets,'pickup-power-ico',()=>new T.IcosahedronGeometry(.36,1)),mat);m.position.y=.7;g.add(m);ring(g,.55,.022,0,.07,0,mat);}else{const w=simpleWeaponModel(pickupWeapon(p.kind),assets);w.position.y=.75;w.scale.setScalar(.7);g.add(w);}if(!['haste','overcharge','overshield'].includes(p.kind))ring(g,.55,.022,0,.07,0,mat);g.position.set(p.x||0,p.y||0,p.z||0);this.scene.add(g);return g;});this._trackAssets(assets);this.syncVehicles(match);this.updateFlags(match,arena);this.updateObjectives(match,arena);this.effectPool?.clear();this.telegraphPool?.clear();for(const m of this.zipCarriages?.values()||[]){this.scene.remove(m);this.disposeObject(m);}this.zipCarriages?.clear();this._fovPulse=0;this.projectilePool?.clear();this.altProjectiles?.clear();this._clearMothSprites();this.railPool?.clear();this.deathContext?.clear();this.deathPool?.clear();this.decalPool?.clear();this.ambientFx?.reset();this.debrisPool?.clear();this.hitFlinch?.clear();this.hitPool?.clear();this._killcam=null;this.feedback?.reset();this.cameraShake?.reset();this.lowHealth=false;this.flashUntil=0;this.lastEvent=match.serial||0;this.currentWeapon=-1;this._adsTransition=0;this._adsController?.reset(this.display?.fov??82);this._nearActionAt=undefined;this._nearAction=0;this._cocsPresentation=null;this.resetPresentation();
+      setMatch(match){this.clearFreeMotion();this.characterLifecycle?.clear();this.deathContext?.clear();this.deathPool?.clear();this.hitPool?.clear();this.hitFlinch?.clear();this.shellPool?.clear();this.ripplePool?.clear?.();this.contactShadows?.clear?.();this.abilityVfx?.reset();this._clearDebugDeaths?.();const arena=match.arena||MAPS.find(a=>a.id===match.mapId)||MAPS[0];this.clearObjectiveMarkers();if(this.payloadModel){this.scene.remove(this.payloadModel);this.disposeObject(this.payloadModel);this.payloadModel=null;}for(const m of [...this.actorModels.values(),...this.pickupModels,...(this.flagModels||new Map()).values()]){this.scene.remove(m);this.disposeObject(m);}this.flagModels=new Map();if(this.mapId!==arena.id)this.buildArena(arena);const assets=this.modelAssets??=new ModelAssets();this.actorModels=new Map((match.actors||[]).map(a=>{const m=robotModel(a.character,assets,this.renderer?.isSoftware===true);this._addActorModel(m);return [a.id,m];}));this.pickupModels=(match.pickups||[]).map(p=>{const g=new T.Group(),colors=PICKUP_COLORS,pickupColor=colors[p.kind]||'#8ad9d3',mat=this._mothLutMaterial(this._mothLutTheme(arena),{base:{color:pickupColor,metalness:.4,roughness:.3,emissive:pickupColor},phase:.15,intensity:.4})??material(pickupColor,.4,.3,true);if(p.kind==='health'){box(g,.6,.19,.19,0,.65,0,mat);box(g,.19,.6,.19,0,.65,0,mat);}else if(p.kind==='armor'){const m=new T.Mesh(geometry(assets,'pickup-armor-octa',()=>new T.OctahedronGeometry(.4)),mat);m.position.y=.7;g.add(m);}else if(['haste','overcharge','overshield'].includes(p.kind)){const m=new T.Mesh(geometry(assets,'pickup-power-ico',()=>new T.IcosahedronGeometry(.36,1)),mat);m.position.y=.7;g.add(m);ring(g,.55,.022,0,.07,0,mat);}else{const w=simpleWeaponModel(pickupWeapon(p.kind),assets);w.position.y=.75;w.scale.setScalar(.7);g.add(w);}if(!['haste','overcharge','overshield'].includes(p.kind))ring(g,.55,.022,0,.07,0,mat);g.position.set(p.x||0,p.y||0,p.z||0);this.scene.add(g);return g;});this._trackAssets(assets);this.syncVehicles(match);this.updateFlags(match,arena);this.updateObjectives(match,arena);this.effectPool?.clear();this.telegraphPool?.clear();for(const m of this.zipCarriages?.values()||[]){this.scene.remove(m);this.disposeObject(m);}this.zipCarriages?.clear();this._fovPulse=0;this.projectilePool?.clear();this.altProjectiles?.clear();this._clearMothSprites();this.railPool?.clear();this.deathContext?.clear();this.deathPool?.clear();this.decalPool?.clear();this.ambientFx?.reset();this.debrisPool?.clear();this.hitFlinch?.clear();this.hitPool?.clear();this._killcam=null;this.feedback?.reset();this.cameraShake?.reset();this.lowHealth=false;this.flashUntil=0;this.lastEvent=match.serial||0;this.currentWeapon=-1;this._adsTransition=0;this._adsController?.reset(this.display?.fov??82);this._nearActionAt=undefined;this._nearAction=0;this._cocsPresentation=null;this.resetPresentation();
   // Per-mode music theme. The audio object retunes its running drone in place.
   const mode=match.config?.mode??match.mode;if(mode)this.viewAudio?.setModeTheme?.(mode);this._modeTheme=mode??this._modeTheme;}
       syncActors(match){const actors=match?.actors||[];for(const actor of actors)if(!this.actorModels.has(actor.id)){const model=robotModel(actor.character,this.modelAssets??=new ModelAssets(),this.renderer?.isSoftware===true);applyActorTeam(model,actor.team,this.display?.teamPalette);this._addActorModel(model);this.actorModels.set(actor.id,model);}const live=new Set(actors.map(actor=>actor.id));for(const [id,model] of this.actorModels)if(!live.has(id)){this.characterLifecycle?.release(model);this.scene.remove(model);this.disposeObject(model);this.actorModels.delete(id);}}
@@ -2035,7 +2220,24 @@ export class ArenaView{
        for(const [key,g] of this.objectiveModels)if(!active.has(key)){this.worldGroup?.remove(g);this.disposeObject(g);this.objectiveModels.delete(key);}
       }
         updateObjectives(match,arena=MAPS[0]){const input=match?.objectives??match?.objectiveState;if(input?.kind==='cocs'){this.updateCocsObjectives(match,arena);return;}if(!input||!['koth','domination','assault','payload','extraction'].includes(input.kind)){this.clearObjectiveMarkers();return;}this.objectiveModels??=new Map();const active=new Set(),reduced=this.reduced(),software=this.renderer?.isSoftware===true,assaultActive=input.kind==='assault'&&Number.isFinite(input.active)?input.active:-1;for(const [zoneIndex,zone] of (input.kind==='extraction'?[{id:'extract',x:input.extract?.x,z:input.extract?.z,radius:input.escortRadius??6,progress:input.captureSeconds>0?Math.max(0,Math.min(100,(Number(input.progress)||0)/Number(input.captureSeconds)*100)):0,owner:Number.isInteger(input.escortTeam)?input.escortTeam:null,captureTeam:null,contested:false}]:input.zones||[]).entries()){if(!zone)continue;const key=String(zone.id??active.size),p=pointOf(zone),owner=zone.contested?'contested':zone.owner,capture=zone.captureTeam??zone.owner,progress=Math.max(0,Math.min(100,Number(zone.progress)||0)),radius=Math.max(.8,Number(zone.radius)||3.5);let g=this.objectiveModels.get(key);if(!g){g=this.createObjectiveModel(zone,arena);this.objectiveModels.set(key,g);this.worldGroup?.add(g);}active.add(key);const color=zone.contested?'#ffd166':this.objectiveColor(owner,arena),progressColor=zone.contested?'#ffd166':this.objectiveColor(capture,arena);g.position.set(p.x||0,p.y||0,p.z||0);g.userData.baseMat.color.set(color);g.userData.baseMat.emissive.set(color);g.userData.areaMat.color.set(color);g.userData.areaMat.emissive.set(color);g.userData.beaconMat.color.set(color);g.userData.beaconMat.emissive.set(color);g.userData.progressMat.color.set(progressColor);g.userData.progressMat.emissive.set(progressColor);g.userData.progressMat.opacity=progress>0?1:0;g.userData.progressMat.transparent=true;if(g.userData.radius!==radius){g.userData.area.geometry.dispose();g.userData.area.geometry=new T.CylinderGeometry(radius,radius,.035,32);g.userData.base.geometry.dispose();g.userData.base.geometry=new T.TorusGeometry(radius,.11,6,32);g.userData.progress.geometry.dispose();g.userData.progress.geometry=software?new T.RingGeometry(radius-.2,radius+.2,32,1,0,Math.PI*2*progress/100):new T.RingGeometry(radius-.2,radius+.2,32);if(!software)g.userData.progress.geometry.setDrawRange(0,Math.ceil(progress/100*32)*6);g.userData.radius=radius;}if(g.userData.progressValue!==progress){if(software){g.userData.progress.geometry.dispose();g.userData.progress.geometry=new T.RingGeometry(radius-.2,radius+.2,32,1,0,Math.PI*2*progress/100);}else g.userData.progress.geometry.setDrawRange(0,Math.ceil(progress/100*32)*6);g.userData.progressValue=progress;}g.userData.progress.visible=progress>0;g.userData.identifier=String(zone.id??'zone');g.userData.emblem.material=g.userData.progressMat;const sectorActive=input.kind==='assault'&&zoneIndex===assaultActive,sectorDim=input.kind==='assault'&&!sectorActive;g.userData.assaultActive=sectorActive;if(input.kind==='assault'){g.userData.areaMat.opacity=sectorDim?.16:1;g.userData.areaMat.transparent=true;g.userData.baseMat.opacity=sectorDim?.32:1;g.userData.baseMat.transparent=true;g.userData.areaMat.emissiveIntensity=sectorActive?1.9:sectorDim?.3:1.25;g.userData.baseMat.emissiveIntensity=sectorActive?2:sectorDim?.35:1.25;if(!g.userData.assaultLabel&&typeof document!=='undefined'&&typeof document.createElement==='function'){const assaultLabel=textLabel(g,String(zone.id??'sector').toUpperCase(),0,2.7,0,.5,sectorActive?'#ffffff':'#95a3ac');assaultLabel.userData.objective=true;assaultLabel.userData.noCameraOcclusion=true;g.userData.assaultLabel=assaultLabel;}if(g.userData.assaultLabel)g.userData.assaultLabel.visible=sectorActive;}g.scale.y=reduced?1:sectorActive?1.04+.1*Math.sin((match.time||0)*5):sectorDim?1:1+.06*Math.sin((match.time||0)*4+(zone.id?.length||0));}for(const [key,g] of this.objectiveModels)if(!active.has(key)){this.worldGroup?.remove(g);this.disposeObject(g);this.objectiveModels.delete(key);}}
-     updateVehicleModels(match){const reduced=this.reduced(),now=typeof performance!=='undefined'?performance.now():0;for(const vehicle of match.vehicles||[]){const model=this.vehicleModels?.get(vehicle.id);if(!model)continue;const p=vehicle.position||vehicle,x=p.x??0,y=p.y??0,z=p.z??0,yaw=vehicle.yaw??vehicle.heading??0,health=vehicle.health??1,respawn=vehicle.respawnTimer??0,vehiclePres=this._interpEnabled?this._presentVehicle(vehicle.id):null;model.visible=health>0&&respawn<=0;model.position.set(x,y,z);model.rotation.y=yaw;model.rotation.z=vehicle.roll??0;model.rotation.x=vehicle.pitchBody??vehicle.pitch??0;if(vehiclePres&&!vehiclePres.snapped){model.position.set(vehiclePres.x,vehiclePres.y,vehiclePres.z);model.rotation.y=vehiclePres.yaw;}const speed=Math.hypot(vehicle.vx??0,vehicle.vz??0),stamp=Number.isFinite(match.time)?match.time:now/1000,dt=Math.max(0,Math.min(.1,stamp-(model.userData.spinTime??stamp)));model.userData.spinTime=stamp;const odometer=(model.userData.odometer??0)+speed*dt;model.userData.odometer=odometer;for(const wheel of model.userData.wheels||[])wheel.rotation.x=odometer/.42;const turret=model.userData.turret;if(turret)turret.rotation.y=Number.isFinite(vehicle.turretYaw)?vehicle.turretYaw:0;const heat=vehicle.heat??0,flash=(model.userData.flashUntil??0)>now;for(const gun of model.userData.guns||[]){gun.mount.scale.setScalar(1+heat*.08);gun.flash.visible=!reduced&&flash;}if(!reduced&&(vehicle.boosting===true||((vehicle.boostCooldown??0)>0&&speed>11)||(vehicle.effects?.turbo>0))){if(stamp-(model.userData.lastExhaust??0)>=.04){model.userData.lastExhaust=stamp;this.effectPool??=new EffectPool(this.scene);const backDist=1.35,exX=x+Math.sin(yaw)*backDist,exY=y+.32,exZ=z+Math.cos(yaw)*backDist;this.effectPool.add({pos:V(exX,exY,exZ),color:(vehicle.effects?.turbo>0)?'#ff6622':'#00e5ff',endColor:(vehicle.effects?.turbo>0)?'#ff2200':'#0055ff',fade:'smooth',damping:1.2,size:.14,life:.22,expand:1.5,velocity:V(Math.sin(yaw)*2.5+(Math.random()-.5)*.4,Math.random()*.3,Math.cos(yaw)*2.5+(Math.random()-.5)*.4)});}}}}
+     updateVehicleModels(match){const reduced=this.reduced(),now=typeof performance!=='undefined'?performance.now():0;for(const vehicle of match.vehicles||[]){const model=this.vehicleModels?.get(vehicle.id);if(!model)continue;const p=vehicle.position||vehicle,x=p.x??0,y=p.y??0,z=p.z??0,yaw=vehicle.yaw??vehicle.heading??0,health=vehicle.health??1,respawn=vehicle.respawnTimer??0,vehiclePres=this._interpEnabled?this._presentVehicle(vehicle.id):null;model.visible=health>0&&respawn<=0;model.position.set(x,y,z);model.rotation.y=yaw;model.rotation.z=vehicle.roll??0;model.rotation.x=vehicle.pitchBody??vehicle.pitch??0;if(vehiclePres&&!vehiclePres.snapped){model.position.set(vehiclePres.x,vehiclePres.y,vehiclePres.z);model.rotation.y=vehiclePres.yaw;}const speed=Math.hypot(vehicle.vx??0,vehicle.vz??0),stamp=Number.isFinite(match.time)?match.time:now/1000,dt=Math.max(0,Math.min(.1,stamp-(model.userData.spinTime??stamp)));model.userData.spinTime=stamp;const odometer=(model.userData.odometer??0)+speed*dt;model.userData.odometer=odometer;for(const wheel of model.userData.wheels||[])wheel.rotation.x=odometer/.42;const turret=model.userData.turret;if(turret)turret.rotation.y=Number.isFinite(vehicle.turretYaw)?vehicle.turretYaw:0;const heat=vehicle.heat??0,flash=(model.userData.flashUntil??0)>now;for(const gun of model.userData.guns||[]){gun.mount.scale.setScalar(1+heat*.08);gun.flash.visible=!reduced&&flash;}if(!reduced&&(vehicle.boosting===true||((vehicle.boostCooldown??0)>0&&speed>11)||(vehicle.effects?.turbo>0))){if(stamp-(model.userData.lastExhaust??0)>=.04){model.userData.lastExhaust=stamp;this.effectPool??=new EffectPool(this.scene);const backDist=1.35,exX=x+Math.sin(yaw)*backDist,exY=y+.32,exZ=z+Math.cos(yaw)*backDist;this.effectPool.add({pos:V(exX,exY,exZ),color:(vehicle.effects?.turbo>0)?'#ff6622':'#00e5ff',endColor:(vehicle.effects?.turbo>0)?'#ff2200':'#0055ff',fade:'smooth',damping:1.2,size:.14,life:.22,expand:1.5,velocity:V(Math.sin(yaw)*2.5+(Math.random()-.5)*.4,Math.random()*.3,Math.cos(yaw)*2.5+(Math.random()-.5)*.4)});}}
+   // Damaged-vehicle readability: below ~40% health a pooled smoke plume and
+   // occasional sparks mark the wreck before it dies. Quality-scaled, WebGL
+   // only and skipped under reduced motion, like the other pooled effects.
+   const maxHealth=Number(vehicle.maxHealth)||0,healthFraction=maxHealth>0?health/maxHealth:(health<=1?health:1);
+   if(!reduced&&healthFraction>0&&healthFraction<=.4&&this.renderer?.isSoftware!==true){
+    const effectScale=Math.max(.2,Math.min(1.4,this._quality().particles||1)),noseX=x+Math.sin(yaw)*.55,noseZ=z+Math.cos(yaw)*.55;
+    if(stamp-(model.userData.damageSmokeAt??-Infinity)>=.24){
+     model.userData.damageSmokeAt=stamp;this.effectPool??=new EffectPool(this.scene);
+     this.effectPool.add({pos:V(noseX,y+.6,noseZ),color:'#3d3a36',endColor:'#141210',fade:'exp',damping:.9,size:.18+.08*effectScale,life:.85,expand:.5,velocity:V((Math.random()-.5)*.5,.9+Math.random()*.7,(Math.random()-.5)*.5)});
+    }
+    if(stamp-(model.userData.damageSparkAt??-Infinity)>=.55){
+     model.userData.damageSparkAt=stamp;this.effectPool??=new EffectPool(this.scene);
+     const sparks=Math.max(1,Math.round(3*effectScale));
+     for(let i=0;i<sparks;i++)this.effectPool.add({pos:V(noseX+(Math.random()-.5)*.7,y+.5,noseZ+(Math.random()-.5)*.7),color:'#ffcf7a',endColor:'#7a2200',fade:'exp',damping:1.6,gravity:8,size:.05,life:.4,additive:true,velocity:V((Math.random()-.5)*3.2,Math.random()*2+.5,(Math.random()-.5)*3.2)});
+    }
+   }
+  }}
      // Riders on a live zipline get a pooled carriage (pulley + yoke) and a
      // reduced-motion-aware spark/wind trail. Presentation only: the pose comes
      // from the authoritative actor, so prediction and resync need no state.
@@ -2108,6 +2310,16 @@ export class ArenaView{
        if(e.type==='phalanx-shield'&&!reduced)this._mothFx('effect-shield',null,{x:e.x||0,y:(e.y||0)+1,z:e.z||0},{size:Math.max(2,Number(e.radius)||3),opacity:.55,life:.5,slots:3});
        if(e.type==='pickup'&&!reduced&&['health','megahealth'].includes(e.kind)&&actorModel)this._mothFx('effect-heal',null,actorModel.position,{size:1.1,opacity:.45,life:.4,slots:3});
        if(e.type==='pickup'&&!reduced&&e.kind==='armor'&&actorModel)this._mothFx('effect-shield',null,actorModel.position,{size:1.1,opacity:.45,life:.4,slots:3});
+       // Weapon/ammo and power pickups get the same activation read as health
+       // and armour: a pooled burst in the pickup's own colour. WebGL only, so
+       // the CPU renderer's frame stays byte-identical.
+       if(e.type==='pickup'&&!reduced&&actorModel&&!['health','megahealth','armor'].includes(e.kind)&&this.renderer?.isSoftware!==true){
+        const color=PICKUP_COLORS[e.kind]||'#8ad9d3',baseX=actorModel.position.x,baseY=(actorModel.position.y||0)+1,baseZ=actorModel.position.z,scale=Math.max(.2,Math.min(1.4,this._quality().particles||1));
+        this.effectPool.add({pos:V(baseX,baseY,baseZ),color,endColor:'#0a1d24',fade:'smooth',size:.26,life:.34,expand:1.8+scale});
+        const count=Math.max(2,Math.round(5*scale));
+        for(let i=0;i<count;i++){const a=(i/count)*Math.PI*2;
+         this.effectPool.add({pos:V(baseX,baseY,baseZ),color,endColor:'#0a1d24',fade:'smooth',life:.3,size:.07,velocity:V(Math.cos(a)*1.6,(Math.random()-.35)*1.4,Math.sin(a)*1.6)});}
+       }
        if(e.type==='powerup'&&e.kind==='overshield'&&!reduced&&e.pos)this._mothFx('effect-shield',null,e.pos,{size:1.6,opacity:.5,life:.5,slots:3});
        if(e.type==='damage'&&e.actor===this.playerId&&Number(e.amount)>=10&&!reduced){this.cameraShake??=new CameraShake();this.cameraShake.add(Math.min(1,Number(e.amount)/70));}
        if(e.type==='death'&&!reduced){this.cameraShake??=new CameraShake();if(e.actor===this.playerId)this.cameraShake.add(1);else{const local=this.actorModels?.get(this.playerId),p=e.pos;if(local&&p){const distance=Math.hypot(local.position.x-(p.x||0),local.position.z-(p.z||0));if(distance<8)this.cameraShake.add(.55*(1-distance/8));}}}
@@ -2494,7 +2706,7 @@ export class ArenaView{
   // style/seed/direction without touching the authoritative simulation. The
   // resolved plan is returned so a harness can report what it rendered; normal
   // play never calls this and the vision is disposable.
-  debugDeath({actor=null,character='chatgpt',style=null,weapon=0,overkill=0,fall=false,seed=0,direction=null,x=0,y=0,z=0,yaw=0,time=0,settle=true,reduced=this.reduced?.()===true}={}){
+  debugDeath({actor=null,character='chatgpt',style=null,weapon=0,overkill=0,fall=false,seed=0,direction=null,x=0,y=0,z=0,yaw=0,time=0,settle=true,reduced=this.reduced?.()===true,ragdoll=null}={}){
    const id=Number.isInteger(actor)?actor:-(1+((this._debugDeathSerial=(this._debugDeathSerial??0)+1)));
    const pos={x:Number(x)||0,y:Number(y)||0,z:Number(z)||0};
    const seedValue=Number.isFinite(Number(seed))?Number(seed):0;
@@ -2506,9 +2718,9 @@ export class ArenaView{
    while(this._debugCorpses.size>8){const [old,entry]=this._debugCorpses.entries().next().value;this._debugCorpses.delete(old);this.characterLifecycle?.release(entry);this.scene?.remove(entry);this.disposeObject(entry);}
    const body={id,x:pos.x,y:pos.y,z:pos.z,health:0,yaw:Number(yaw)||0,bodyYaw:Number(yaw)||0,deaths:0};
    const match={time:Number(time)||0,arena:MAPS.find(map=>map.id===this.mapId)??MAPS[0]};
-   this.poseCorpse(model,body,match,{reduced});
-   if(settle!==false)this.poseCorpse(model,body,{...match,time:(Number(time)||0)+fallDuration(plan)+.05},{reduced});
-   return {id,model,plan,style:plan.style,direction:direction??null,position:{...pos},settled:settle!==false};
+   this.poseCorpse(model,body,match,{reduced,ragdoll});
+   if(settle!==false)this.poseCorpse(model,body,{...match,time:(Number(time)||0)+fallDuration(plan)+.05},{reduced,ragdoll});
+   return {id,model,plan,style:plan.style,direction:direction??null,position:{...pos},settled:settle!==false,ragdoll:Boolean(this.characterLifecycle?.records?.get(model)?.ragdoll)};
   }
   _clearDebugDeaths(){
    for(const model of this._debugCorpses?.values()??[]){this.characterLifecycle?.release(model);this.scene?.remove(model);this.disposeObject(model);}
@@ -2551,21 +2763,44 @@ export class ArenaView{
     const lean=Math.min(.3,Math.max(0,Number(state.lean)||0)*.4+Math.min(1,Number(state.strength)||0)*.12);
     model.rotation.x=len>1e-6?-lean*pushZ/len:0;
     model.rotation.z=len>1e-6?lean*pushX/len:0;
+    // Direction on the model data so the final living pass can pitch the rig
+    // hit channel from the same impulse that carries the world-space lean.
+    model.userData.hitDirX=len>1e-6?pushX/len:0;
+    model.userData.hitDirZ=len>1e-6?pushZ/len:0;
     if(pushX||pushZ){model.position.x+=pushX;model.position.z+=pushZ;}
    }
    return live;
   }
-  // Final living-only contact pass: after interpolation, styling, swaps and hit pushes.
+  // Final living-only contact pass: after interpolation, styling, swaps and hit
+  // pushes. Then the deterministic secondary pass advances springs for head lag
+  // and antenna/backpack/fin/crest flex, and pitches the rig hit channel from
+  // the live hit direction. Dead rigs are skipped by both passes.
   _alignLivingCharacters(match){
    const arena=match?.arena??MAPS.find(map=>map.id===match?.mapId)??MAPS[0];
    const sampleGround=(x,z,referenceY)=>typeof this.characterGroundAt==='function'
      ?this.characterGroundAt(x,z,referenceY,match)
      :presentationSupportAt(x,z,arena,referenceY);
+   const reduced=typeof this.reduced==='function'?this.reduced()===true:this.reduced===true;
+   const cheap=this.renderer?.isSoftware===true;
+   // Secondary motion advances on the presentation clock carried by the match
+   // snapshot. A rewind/seek contributes a zero-length step instead of replaying.
+   const time=Number(match?.time);
+   const dt=Number.isFinite(time)&&Number.isFinite(this._secondaryAt)&&time>=this._secondaryAt
+     ?Math.max(0,Math.min(.1,time-this._secondaryAt)):0;
+   if(Number.isFinite(time))this._secondaryAt=time;
    for(const actor of match?.actors??[]){
     const model=this.actorModels?.get(actor.id);
     if(!model||!model.visible||actor.health<=0||actor.vehicleId!=null)continue;
     if(this.characterLifecycle&&this.characterLifecycle.state(model)!=='alive')continue;
     alignLivingCharacter(model,{grounded:actor.grounded!==false,sampleGround});
+    const speed=Math.hypot(Number(actor.vx)||0,Number(actor.vz)||0);
+    applyLivingSecondary(model,{dt,reduced,cheap,speed,maxSpeed:Number(actor.moveSpeed)||8,hit:model.userData.hitStrength||0});
+    const rig=model.userData.rig;
+    if(rig){
+      rig.setSliding(actor.sliding===true);
+      rig.setHitDirection(model.userData.hitDirX||0,model.userData.hitDirZ||0,model.userData.hitStrength||0);
+      rig.writeHitLean();
+    }
    }
   }
   // WebGL contact shadows under living actors and vehicles. WebGL-only and
@@ -2598,17 +2833,21 @@ export class ArenaView{
    pool.end();
    return placed;
   }
-  poseCorpse(m,a,match,{reduced=null}={}){
+  poseCorpse(m,a,match,{reduced=null,ragdoll=null}={}){
    const lifecycle=this.characterLifecycle??=new CharacterLifecycle({maxCorpses:24,maxLifetime:4});
    const ctx=this.deathContext?.get(a.id);
    const plan=ctx?.plan??deathPlan({seed:(a.id*7+(a.deaths??0)*13)>>>0});
    const motion=reduced===null?this.reduced():reduced===true;
+   const arena=match?.arena??MAPS.find(map=>map.id===match?.mapId)??MAPS[0];
    lifecycle.update(m,a,{time:match?.time??0,plan,reduced:motion,hidden:a.id===this.playerId,direction:ctx?.direction??null,authoritative:ctx!==undefined,
+    // Presentation-only ragdoll: the CPU renderer, reduced motion and hidden
+    // bodies keep the authored fallback and the hard gate lives in the lifecycle.
+    software:this.renderer?.isSoftware===true,ragdoll,arena,blocks:arena?.blocks??null,
     // Override with the shared spatial support selector for stacked platforms.
     // A callback returning null is void and MUST NOT fall back to an invented floor.
     sampleGround:(x,z,referenceY)=>typeof this.characterGroundAt==='function'
       ?this.characterGroundAt(x,z,referenceY,match)
-      :presentationSupportAt(x,z,match?.arena??MAPS.find(map=>map.id===match?.mapId)??MAPS[0],referenceY)});
+      :presentationSupportAt(x,z,arena,referenceY)});
    this.hitFlinch?.delete(a.id);
   }
   reviveCorpse(m,a,match){
@@ -2678,7 +2917,7 @@ export class ArenaView{
     this._raceCam={mode,segment,x,y,z,lookX,lookY,lookZ};
     return true;
    }
-   setAudio(audio){this.viewAudio=audio||null;if(audio&&this._modeTheme)audio.setModeTheme?.(this._modeTheme);audio?.setSpace?.(mothSpaceFor(this.mapId));audio?.setEchoMap?.(mothEchoFor(this.mapId));const arena=this.showcaseState?.arena??(typeof this.mapId==='string'?MAPS.find(map=>map.id===this.mapId):null);audio?.setArenaBiome?.(arena??this.mapId??null);const kind=this._weatherState().kind;audio?.setWeather?.(kind);this._audioWeatherKind=kind;return this.viewAudio;}
+   setAudio(audio){this.viewAudio=audio||null;if(audio&&this._modeTheme)audio.setModeTheme?.(this._modeTheme);audio?.setSpace?.(mothSpaceFor(this.mapId));audio?.setEchoMap?.(mothEchoFor(this.mapId));const arena=this.showcaseState?.arena??(typeof this.mapId==='string'?MAPS.find(map=>map.id===this.mapId):null);applyArenaBiomePalette(audio,arena??this.mapId??null);const kind=this._weatherState().kind;audio?.setWeather?.(kind);this._audioWeatherKind=kind;return this.viewAudio;}
    // Victory/defeat sting for the end-of-match screen. The audio object owns the
    // voice cap, mute handling and disposal; the view only forwards the outcome
    // and the active mode theme. Returns the sting result (or null when absent).
@@ -2708,7 +2947,7 @@ export class ArenaView{
     mesh.userData.mothAtmosphere=name;
     return mesh;
    }
-   updateSky(){if(this.sky)this.sky.position.copy(this.camera.position);if(this.mountains)this.mountains.position.copy(this.camera.position);}
+   updateSky(){if(this.sky)this.sky.position.copy(this.camera.position);if(this.mountains)this.mountains.position.copy(this.camera.position);for(const mesh of this.backdrop??[])mesh.position.copy(this.camera.position);}
    // WebGL-only ambient pass: wind sway on tagged vegetation and pooled motes.
    // Both are skipped entirely for the CPU renderer and reduced motion.
    _updateWind(time,reduced){if(this.renderer?.isSoftware===true||reduced||!this.scatterWind?.length)return 0;return updateScatterSway(this.scatterWind,time,{strength:this.windGust(time)});}
@@ -2907,14 +3146,22 @@ export class ArenaView{
     if(!event)return false;
     if(!['shot','vehicle-shot','launch','explosion','death','melee'].includes(event.type))return false;
     const pos=event.pos||event.from;
-    const origin=this.actorModels?.get(this.playerId)?.position;
+    const origin=this._audioFocusPosition();
     if(origin&&pos&&Math.hypot((pos.x||0)-origin.x,(pos.z||0)-origin.z)>34)return false;
     this._nearActionAt=time;
     this._nearAction=event.type==='explosion'||event.type==='death'?1:Math.max(this._nearAction||0,.72);
     return true;
    }
+   // Proximity origin for the dynamic music/bed layer. Spectating or following a
+   // manual subject moves the camera off the local player, so intensity is
+   // measured from the actor the view is actually presenting; a missing model
+   // falls back to the live camera.
+   _audioFocusPosition(){
+    const focusId=Number.isInteger(this._audioFocusId)?this._audioFocusId:this.playerId;
+    return this.actorModels?.get(focusId)?.position||null;
+   }
    _nearbyAction(match,time){
-    const origin=this.actorModels?.get(this.playerId)?.position||this.camera?.position;let proximity=0;
+    const origin=this._audioFocusPosition()||this.camera?.position;let proximity=0;
     if(origin)for(const rocket of (match?.rockets||[])){const position=rocket?.pos;if(position&&Math.hypot((position.x||0)-origin.x,(position.z||0)-origin.z)<18)proximity=Math.max(proximity,.85);}
     return Math.max(this.audioIntensity(time),proximity);
    }
@@ -2923,6 +3170,16 @@ export class ArenaView{
    get killcam(){return this._killcam;}
    killcamActive(){return this._killcam!==null;}
    render(mode,match,delta,time){
+    // Display frame cap. The host keeps stepping the fixed-dt simulation; only
+    // this presentation frame is skipped, and the skipped wall-clock time is
+    // carried into the next drawn frame so pooled effects age correctly.
+    const cap=Number(this.display?.fpsCap)||0,nowFn=(typeof performance!=='undefined'&&performance.now)?performance.now.bind(performance):Date.now,now=nowFn();
+    if(cap>0&&!frameDue(now,this._renderAt,cap)){
+     this._renderCarry=Math.max(0,Math.min(1,(this._renderCarry||0)+Math.max(0,Math.min(Number(delta)||0,.25))));
+     return false;
+    }
+    this._renderAt=cap>0?now:undefined;
+    const frameDelta=(Number(delta)||0)+(this._renderCarry||0);this._renderCarry=0;
     // Reset the (auto-reset-disabled) counters once per presented frame, then
     // account for every pass — world, post and the first-person weapon pass.
     // Optional-chained so a renderer that exposes no reset (or no info at all)
@@ -2930,14 +3187,14 @@ export class ArenaView{
     this.renderer?.info?.reset?.();
     if(this.perf){this.perf.submitMs=0;this.perf.weaponSubmitMs=0;}
     const perfStart=(typeof performance!=='undefined'&&performance.now)?performance.now():Date.now();
-    try{return this._renderFrame(mode,match,delta,time);}finally{this._capturePerf(perfStart);}
+    try{return this._renderFrame(mode,match,frameDelta,time);}finally{this._capturePerf(perfStart);}
    }
    _renderFrame(mode,match,delta,time){this.motionQuery??=window.matchMedia?.('(prefers-reduced-motion: reduce)');this.resize();this._sampleQuality(delta);const reduced=this.reduced();this._fovPulse=Math.max(0,(this._fovPulse||0)-Math.max(0,Number(delta)||0)*2);
     // Advance the shared Moth iridescence phase from the view clock. Pure in
     // `time` (the module is a deterministic function of its argument) and pinned
     // so reduced motion holds a still phase; the Moth rift material reads it.
     this._mothPhase=updateMoth(reduced?0:(Number.isFinite(time)?time:0));if(mode!==this._lastMode){this._lastMode=mode;this.clearFreeMotion();}if((mode==='selection'||mode==='progression')&&!this.showcaseState){if(this.showcaseExpected){this.renderer.render(this.scene,this.camera);return;}const m=this.menu.model;m.rotation.y=Math.PI+.25+(reduced?0:Math.sin(time*.25)*.2);m.position.y=.17+(reduced?0:Math.sin(time)*.025);m.userData.rig?.update({dt:Math.max(0,Math.min(.1,delta||0)),time,speed:0,maxSpeed:8,grounded:true});this.renderer.render(this.menu.scene,this.menu.camera);return;}if((mode==='selection'||mode==='theater'||mode==='progression'||mode==='changelog'||mode==='browse'||mode==='lobby')&&!match)match=this.showcaseState;
-      if(!match)return;this._matchRef=match;const owner=this.cameraOwner,actors=match.actors||[],follow=owner==='manual'&&this.manualFollowId!=null?this.manualFollowId:null,freeCam=owner==='free'&&this._freeCam===true,cinematic=this.cinema===true&&!!this.director&&!freeCam,raceActive=cameraOwnerAllowsRace(owner)&&!this.directorLock&&!!match.race;let player=cinematic?actors[0]:(actors.find(a=>a.id===this.playerId)||actors[0]);if(follow!=null)player=actors.find(a=>a.id===follow)||player;if(!cinematic&&(this.spectator||follow!=null))player=spectateActor(actors,follow??this.spectatorTarget)||player;if(!player)return;const arena=match.arena||MAPS.find(a=>a.id===match.mapId)||MAPS[0];const savedPlayerId=this.playerId;this.updateFlags(match,arena);this.updateObjectives(match,arena);this.updateSpots(match);this.updateWaypoint(match,arena);this.updatePayloadModel(match,arena,time);this.updateMothRift(time,reduced);if(!reduced)this._mothRift?.material?.userData?.setMothPhase?.(this._mothPhase??0);this.updateZipRides(match,Math.max(0,delta),reduced);if(cinematic)this.playerId=-1;const cinemaPose=cinematic?this.director.update(match,Math.max(0,delta),match.events||[]):null;if(freeCam){this.camera.position.set(this.freePose.x,this.freePose.y,this.freePose.z);this.camera.rotation.set(this.freePose.pitch,this.freePose.yaw,0,'YXZ');}else if(cinemaPose&&!raceActive){this.camera.position.set(cinemaPose.x,cinemaPose.y,cinemaPose.z);this.camera.rotation.set(cinemaPose.pitch,cinemaPose.yaw,cinemaPose.roll||0,'YXZ');this._clearCamera(player,delta,cinemaPose.cut);this._applyFreeExitBlend(delta,reduced);}else{const pres=this._interpEnabled?this._presentActor(player.id):null,px=pres&&!pres.snapped?pres.x:(player.x||0),py=pres&&!pres.snapped?pres.y:(player.y||0),pz=pres&&!pres.snapped?pres.z:(player.z||0);const eyeY=py+(player.health>0?(player.eyeHeight??1.45):.65),yaw=(player.yaw||0)+(player.punchYaw||0),pitch=(player.pitch||0)+(player.punchPitch||0);if(this.spectator&&this.spectatorThird===true){const dist=4.6,cos=Math.cos(pitch);this.camera.position.set(px+Math.sin(yaw)*dist*cos,eyeY+1.1-Math.sin(pitch)*dist,pz+Math.cos(yaw)*dist*cos);}else this.camera.position.set(px,eyeY,pz);this.camera.rotation.set(pitch,yaw,0,'YXZ');this._applyFreeExitBlend(delta,reduced);}this.cameraShake??=new CameraShake();const aiming=this.aim===true||player.ads===true,baseFov=this.display?.fov??82;
+      if(!match)return;this._matchRef=match;const owner=this.cameraOwner,actors=match.actors||[],follow=owner==='manual'&&this.manualFollowId!=null?this.manualFollowId:null,freeCam=owner==='free'&&this._freeCam===true,cinematic=this.cinema===true&&!!this.director&&!freeCam,raceActive=cameraOwnerAllowsRace(owner)&&!this.directorLock&&!!match.race;let player=cinematic?actors[0]:(actors.find(a=>a.id===this.playerId)||actors[0]);if(follow!=null)player=actors.find(a=>a.id===follow)||player;if(!cinematic&&(this.spectator||follow!=null))player=spectateActor(actors,follow??this.spectatorTarget)||player;if(!player)return;this._audioFocusId=Number.isInteger(player.id)?player.id:this.playerId;const arena=match.arena||MAPS.find(a=>a.id===match.mapId)||MAPS[0];const savedPlayerId=this.playerId;this.updateFlags(match,arena);this.updateObjectives(match,arena);this.updateSpots(match);this.updateWaypoint(match,arena);this.updatePayloadModel(match,arena,time);this.updateMothRift(time,reduced);if(!reduced)this._mothRift?.material?.userData?.setMothPhase?.(this._mothPhase??0);this.updateZipRides(match,Math.max(0,delta),reduced);if(cinematic)this.playerId=-1;const cinemaPose=cinematic?this.director.update(match,Math.max(0,delta),match.events||[]):null;if(freeCam){this.camera.position.set(this.freePose.x,this.freePose.y,this.freePose.z);this.camera.rotation.set(this.freePose.pitch,this.freePose.yaw,0,'YXZ');}else if(cinemaPose&&!raceActive){this.camera.position.set(cinemaPose.x,cinemaPose.y,cinemaPose.z);this.camera.rotation.set(cinemaPose.pitch,cinemaPose.yaw,cinemaPose.roll||0,'YXZ');this._clearCamera(player,delta,cinemaPose.cut);this._applyFreeExitBlend(delta,reduced);}else{const pres=this._interpEnabled?this._presentActor(player.id):null,px=pres&&!pres.snapped?pres.x:(player.x||0),py=pres&&!pres.snapped?pres.y:(player.y||0),pz=pres&&!pres.snapped?pres.z:(player.z||0);const eyeY=py+(player.health>0?(player.eyeHeight??1.45):.65),yaw=(player.yaw||0)+(player.punchYaw||0),pitch=(player.pitch||0)+(player.punchPitch||0);if(this.spectator&&this.spectatorThird===true){const dist=4.6,cos=Math.cos(pitch);this.camera.position.set(px+Math.sin(yaw)*dist*cos,eyeY+1.1-Math.sin(pitch)*dist,pz+Math.cos(yaw)*dist*cos);}else this.camera.position.set(px,eyeY,pz);this.camera.rotation.set(pitch,yaw,0,'YXZ');this._applyFreeExitBlend(delta,reduced);}this.cameraShake??=new CameraShake();const aiming=this.aim===true||player.ads===true,baseFov=this.display?.fov??82;
 const activeSight=this._activeSight=resolveActiveSight({weapon:player.weapon,optic:player.attachments?.visual?.optic,aiming});
 // Player FOV is updated with the weapon pose below; director/free camera keep ownership here.
 if(cinemaPose)this.camera.fov=Math.max(50,Math.min(100,cinemaPose.fov||this.camera.fov));if(freeCam)this.camera.fov=Math.max(50,Math.min(100,this.display?.fov??82));this.camera.updateProjectionMatrix();
@@ -3012,9 +3269,9 @@ if(freeCam){this.lowHealthOverlay?.update(false,time,delta,reduced,this.camera);
     // Camera yaw/pitch above remain immediate; no extra camera recoil is added.
     if(!cinematic&&!freeCam&&!this._killcam&&follow==null){this.camera.fov=ads.fov+(reduced?0:(this._fovPulse||0)*6);this.camera.updateProjectionMatrix();}
 
-    this._animateWeaponParts(this.firstPerson,player,reduced);
+    this._animateWeaponParts(this.firstPerson,player,reduced,delta);
     this._animateWeaponAlt(this.firstPerson,player,reduced,delta,time);
-    this.firstPerson.userData.flash.visible=!reduced&&this.hands.visible&&this.flashUntil>performance.now();this.muzzleLights?.update(Math.max(0,delta));if(this.renderer.shadowMap?.autoUpdate===false){const hz=Number(this._quality().shadowHz)||30;if(shadowDue(time,this._shadowAt,hz)){this._shadowAt=time;const focus=this.camera?.position;this._fitShadowFrustum(focus?.x??0,focus?.z??0,SHADOW_FIT_EXTENT);this.renderer.shadowMap.needsUpdate=true;}}this.updateSky();this._updateWind(time,reduced);this._updateAmbient(match,delta,time,reduced);const spMode=match.config?.mode==='campaign'||match.config?.mode==='horde';if(spMode)this.setWeather(match.weather??null);else if(!cinematic&&this._weatherOverride!==null)this.setWeather(null);this._updateWeather(arena,delta,mode);this._updateWeatherFx(delta,reduced,this._quality(),arena);const software=this.renderer?.isSoftware===true;this._updateLightning(delta,reduced,software);this._applyWetSheen(this._weatherState());this.hitPool?.update(Math.max(0,delta));this.shellPool?.update(Math.max(0,delta));this._updateHitReactions();this._alignLivingCharacters(match);this._updateDebris(delta);this._updateAudio(match,time);this._beginGpu();
+    this.firstPerson.userData.flash.visible=!reduced&&this.hands.visible&&this.flashUntil>performance.now();this.muzzleLights?.update(Math.max(0,delta));if(this.sun?.castShadow!==false&&this.renderer.shadowMap?.autoUpdate===false){const hz=Number(this._quality().shadowHz)||30;if(shadowDue(time,this._shadowAt,hz)){this._shadowAt=time;const focus=this.camera?.position;this._fitShadowFrustum(focus?.x??0,focus?.z??0,SHADOW_FIT_EXTENT);this.renderer.shadowMap.needsUpdate=true;}}this.updateSky();this._updateWind(time,reduced);this._updateAmbient(match,delta,time,reduced);const spMode=match.config?.mode==='campaign'||match.config?.mode==='horde';if(spMode)this.setWeather(match.weather??null);else if(!cinematic&&this._weatherOverride!==null)this.setWeather(null);this._updateWeather(arena,delta,mode);this._updateWeatherFx(delta,reduced,this._quality(),arena);const software=this.renderer?.isSoftware===true;this._updateLightning(delta,reduced,software);this._applyWetSheen(this._weatherState());this.hitPool?.update(Math.max(0,delta));this.shellPool?.update(Math.max(0,delta));this._updateHitReactions();this._alignLivingCharacters(match);this._updateDebris(delta);this._updateAudio(match,time);this._beginGpu();
     // Per-target stacks: when bots are styled, the world composer renders
     // through a camera that excludes the actor layer and the scene depth is
     // preserved (autoClear off + depth-writing passes disabled) so the bot
@@ -3124,24 +3381,52 @@ if(freeCam){this.lowHealthOverlay?.update(false,time,delta,reduced,this.camera);
        if(memory){this.perf.geometries=memory.geometries||0;this.perf.textures=memory.textures||0;}
        this.perf.passes=this.composer?.passes?.filter(p=>p.enabled!==false).map(p=>p.name||p.constructor?.name||'pass')||[];
       }
-      _animateWeaponParts(weapon,player,reduced){
+      _animateWeaponParts(weapon,player,reduced,delta){
        if(!weapon)return;
        const parts=weapon.userData.parts||{},anchors=weapon.userData.anchors||{};
-       const base=node=>{if(node&&node.userData.baseZ===undefined){node.userData.baseX=node.position.x;node.userData.baseY=node.position.y;node.userData.baseZ=node.position.z;node.userData.baseRX=node.rotation.x;node.userData.baseRZ=node.rotation.z;}return node;};
-       const mag=base(parts.magazine||anchors.magazine),bolt=base(parts.bolt||anchors.bolt),cell=base(parts.cell||anchors.cell),barrel=base(parts.barrel||anchors.barrel);
+       const base=node=>{if(node&&node.userData.baseZ===undefined){node.userData.baseX=node.position.x;node.userData.baseY=node.position.y;node.userData.baseZ=node.position.z;node.userData.baseRX=node.rotation.x;node.userData.baseRY=node.rotation.y;node.userData.baseRZ=node.rotation.z;}return node;};
+       const mag=base(parts.magazine||anchors.magazine),bolt=base(parts.bolt||anchors.bolt),cell=base(parts.cell||anchors.cell),barrel=base(parts.barrel||anchors.barrel),support=base(weapon.userData.supportHand);
        const type=Number.isInteger(player.weapon)?player.weapon:(Number.isInteger(weapon.userData.type)?weapon.userData.type:0);
        if(reduced){
         if(mag)mag.position.set(mag.userData.baseX,mag.userData.baseY,mag.userData.baseZ);
         if(barrel){barrel.position.set(barrel.userData.baseX,barrel.userData.baseY,barrel.userData.baseZ);barrel.rotation.x=barrel.userData.baseRX;}
         if(cell)cell.rotation.z=cell.userData.baseRZ;
         if(bolt)bolt.position.set(bolt.userData.baseX,bolt.userData.baseY,bolt.userData.baseZ);
+        if(support){support.visible=false;support.position.set(support.userData.baseX,support.userData.baseY,support.userData.baseZ);support.rotation.set(support.userData.baseRX,support.userData.baseRY,support.userData.baseRZ);}
+        this._weaponInertia?.reset();
         return;
        }
-       const reloading=player.reloading===true,progress=reloading?Math.max(0,Math.min(1,1-(Number(player.reloadTimer)||0)/(Number(player.reloadDuration)||1))):0,cycle=reloading?Math.sin(progress*Math.PI):0;
-       if(mag&&type!==0&&type!==3)mag.position.y=mag.userData.baseY-cycle*(type===1?.12:.24);
-       if(barrel&&type===3){barrel.position.y=barrel.userData.baseY-cycle*.1;barrel.rotation.x=barrel.userData.baseRX+cycle*.45;}
-       if(cell&&type===2)cell.rotation.z=cell.userData.baseRZ+progress*Math.PI*4;
-       if(bolt){const kick=Math.max(0,Math.min(1,Number(this.feedback?.kick)||0));bolt.position.z=bolt.userData.baseZ+kick*.05;}
+       const timing=RELOAD_TIMING[type]||RELOAD_TIMING[0];
+       const reloading=player.reloading===true,progress=reloading?Math.max(0,Math.min(1,1-(Number(player.reloadTimer)||0)/(Number(player.reloadDuration)||1))):0;
+       // Per-weapon windows: the magazine/barrel/cell each travel over their own
+       // slice of the reload instead of one shared sine, and the support hand
+       // follows whichever part is moving before lifting into the inspection.
+       const travel=reloading?reloadWindow(progress,timing.start,timing.end):0;
+       const inspect=reloading?reloadWindow(progress,timing.inspect,Math.min(.99,timing.inspect+.24)):0;
+       if(mag&&type!==0&&type!==3)mag.position.y=mag.userData.baseY-travel*timing.travel;
+       if(barrel&&type===3){barrel.position.y=barrel.userData.baseY-travel*.1;barrel.rotation.x=barrel.userData.baseRX+travel*.45;}
+       if(cell&&timing.cell)cell.rotation.z=cell.userData.baseRZ+progress*Math.PI*2*timing.cell;
+       if(bolt){const kick=Math.max(0,Math.min(1,Number(this.feedback?.kick)||0));bolt.position.z=bolt.userData.baseZ+kick*.05+travel*timing.bolt;}
+       if(support){
+        const active=reloading&&(travel>0.001||inspect>0.001);
+        support.visible=active;
+        support.position.set(support.userData.baseX-travel*.02,support.userData.baseY-travel*(type===3?.04:.06),support.userData.baseZ+travel*(type===3?.05:.09));
+        support.rotation.set(support.userData.baseRX+inspect*.32,support.userData.baseRY,support.userData.baseRZ-travel*.24);
+       }
+       // Weapon-inertia spring: yaw/pitch lag trails the look and composes on
+       // top of the ADS/feedback pose. Channels are read only to phase-align the
+       // punch; the lag itself is a small bounded rotation/offset.
+       if(this.hands&&this.hands.visible!==false){
+        const inertia=this._weaponInertia??(this._weaponInertia=new WeaponInertia());
+        const frame=inertia.update({dt:delta??0,yaw:player.yaw,pitch:player.pitch,reduced:false,ads:this._adsTransition??0});
+        const punch=Number(this.feedback?.channels?.punch?.pitch)||0;
+        const gain=1+Math.max(-.4,Math.min(.4,punch*4));
+        this.hands.rotateX(frame.pitch*gain);
+        this.hands.rotateY(frame.yaw*gain);
+        this.hands.position.x+=frame.offsetX*.6;
+        this.hands.position.y+=frame.offsetY*.6;
+        this.hands.position.z+=frame.offsetZ*.6;
+       }else this._weaponInertia?.reset();
       }
       // ---- Alt-fire viewmodel morph (v8.6) ---------------------------------
       // Blends the hidden alt parts authored by weapon-models/alt-parts.mjs in
@@ -3174,5 +3459,5 @@ if(freeCam){this.lowHealthOverlay?.update(false,time,delta,reduced,this.camera);
       }
       updateRace(match,time){syncRacePresentation(this,match,time);}
      _renderPreview(time,reduced){const rect=this.previewRect;if(!rect||rect.width<12||rect.height<12||!(this.renderer instanceof T.WebGLRenderer))return;const m=this.menu.model;m.rotation.y=Math.PI+.25+(reduced?0:Math.sin(time*.4)*.22);m.position.y=.17;const cam=this.menu.camera;cam.aspect=Math.max(.2,rect.width/rect.height);cam.updateProjectionMatrix();this._renderSceneInto(this.renderer,rect,this.menu.scene,cam);}
-          dispose(){this.characterLifecycle?.clear();this.clearObjectiveMarkers();this.effectPool?.dispose();this.telegraphPool?.dispose();this.projectilePool?.dispose();this.railPool?.dispose();this.deathPool?.dispose();this.decalPool?.dispose();this.ripplePool?.dispose();this.ripplePool=null;this.contactShadows?.dispose();this.contactShadows=null;this.debrisPool?.dispose();this.debrisPool=null;this.hitPool?.dispose();this.hitPool=null;this.abilityVfx?.dispose();this.abilityVfx=null;this.hitFlinch?.clear();this.shellPool?.dispose();this.shellPool=null;this.altProjectiles?.dispose();this.altProjectiles=null;this._clearDebugDeaths();this.ambientPool?.dispose();this.weatherPool?.dispose();this.ambientFx=null;this.weatherFx=null;this._killcam=null;this.preview?.dispose();this.preview=null;this.previewAssets?.dispose?.();this.previewAssets=null;disposeComposer(this.composer);this.composer=null;this._disposeLabTargets();this.muzzleLights?.dispose();this.lowHealthOverlay?.dispose();this._disposeMothSprites();this.zipCarriages?.clear();this.disposeObject(this.scene);if(this.weaponScene)this.disposeObject(this.weaponScene);this.disposeObject(this.menu.scene);this.environmentRT?.dispose?.();for(const resource of this.renderResources||[])resource.dispose();this.renderResources?.clear();for(const resource of this.sharedResources||[])resource.dispose();this.sharedResources?.clear();this.modelAssets?.materials.clear();this.modelAssets?.geometries.clear();this.modelAssets?.resources.clear();this.arenaAssets?.materials.clear();this.arenaAssets?.geometries.clear();this.arenaAssets?.resources.clear();clearSurfaceTextures();for(const model of this._weaponCache?.values?.()||[])this.disposeObject(model);this._weaponCache?.clear();this._freeCam=false;this._directorLock=false;this.manualFollowId=null;this._cameraOwner='auto';this._freeExit=null;this.clearFreeMotion();this.resetFreeCam();this.renderer.dispose();}
+          dispose(){this.characterLifecycle?.dispose?.();this.clearObjectiveMarkers();this.effectPool?.dispose();this.telegraphPool?.dispose();this.projectilePool?.dispose();this.railPool?.dispose();this.deathPool?.dispose();this.decalPool?.dispose();this.ripplePool?.dispose();this.ripplePool=null;this.contactShadows?.dispose();this.contactShadows=null;this.debrisPool?.dispose();this.debrisPool=null;this.hitPool?.dispose();this.hitPool=null;this.abilityVfx?.dispose();this.abilityVfx=null;this.hitFlinch?.clear();this.shellPool?.dispose();this.shellPool=null;this.altProjectiles?.dispose();this.altProjectiles=null;this._clearDebugDeaths();this.ambientPool?.dispose();this.weatherPool?.dispose();this.ambientFx=null;this.weatherFx=null;this._killcam=null;this.preview?.dispose();this.preview=null;this.previewAssets?.dispose?.();this.previewAssets=null;disposeComposer(this.composer);this.composer=null;this._disposeLabTargets();this.muzzleLights?.dispose();this.lowHealthOverlay?.dispose();this._disposeMothSprites();this.zipCarriages?.clear();this.disposeObject(this.scene);if(this.weaponScene)this.disposeObject(this.weaponScene);this.disposeObject(this.menu.scene);this.environmentRT?.dispose?.();for(const resource of this.renderResources||[])resource.dispose();this.renderResources?.clear();for(const resource of this.sharedResources||[])resource.dispose();this.sharedResources?.clear();this.modelAssets?.materials.clear();this.modelAssets?.geometries.clear();this.modelAssets?.resources.clear();this.arenaAssets?.materials.clear();this.arenaAssets?.geometries.clear();this.arenaAssets?.resources.clear();clearSurfaceTextures();for(const model of this._weaponCache?.values?.()||[])this.disposeObject(model);this._weaponCache?.clear();this._freeCam=false;this._directorLock=false;this.manualFollowId=null;this._cameraOwner='auto';this._freeExit=null;this.clearFreeMotion();this.resetFreeCam();this.renderer.dispose();}
 }

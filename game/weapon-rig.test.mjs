@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {ArenaView,weaponModel} from './view.mjs';
+import * as T from 'three';
+import {ArenaView,weaponModel,WeaponInertia,RELOAD_TIMING} from './view.mjs';
 import {WEAPONS} from './data.mjs';
 
 test('every weapon exposes named anchors and a solved, sight-aligned ADS transform',()=>{
@@ -62,4 +63,56 @@ test('the bolt cycles from the authoritative shot kick and resets under reduced 
  view._animateWeaponParts(model,{weapon:0,reloading:false},true);
  assert.equal(bolt.position.z,baseZ,'reduced motion holds the bolt still');
  ArenaView.prototype.disposeObject.call({},model);
+});
+
+test('viewmodel inertia lags look, is bounded and snaps under reduced motion',()=>{
+ const inertia=new WeaponInertia();
+ inertia.update({dt:1/60,yaw:0,pitch:0});
+ let frame=null;
+ for(let i=0;i<120;i++)frame=inertia.update({dt:1/60,yaw:i*.05,pitch:i*.02});
+ assert.ok(Math.abs(frame.yaw)<=.061&&Math.abs(frame.pitch)<=.051,`bounded lag (${frame.yaw}, ${frame.pitch})`);
+ assert.ok(Math.abs(frame.yaw)>1e-4&&Math.abs(frame.pitch)>1e-4,'a continuous turn produces lag');
+ assert.ok(Math.abs(frame.offsetX)<=.014&&Math.abs(frame.offsetY)<=.011&&frame.offsetZ>=0,'the composed offsets are bounded');
+ const teleport=inertia.update({dt:1/60,yaw:1e6,pitch:-1e6});
+ assert.ok(Math.abs(teleport.yaw)<=.061&&Math.abs(teleport.pitch)<=.051,'a look teleport stays bounded');
+ const snapped=inertia.update({dt:1/60,yaw:2,pitch:1,reduced:true});
+ assert.ok(Object.values(snapped).every(value=>value===0),'reduced motion zeroes every inertia output');
+ assert.equal(inertia.yaw.pos,0);
+ assert.equal(inertia.pitch.pos,0);
+});
+
+test('support hand follows the reload part, per-weapon bolts cycle and reduced motion rests everything',()=>{
+ const view=Object.create(ArenaView.prototype);view.feedback={kick:0,channels:{punch:{pitch:0}}};view.hands=new T.Group();view.hands.visible=true;view._adsTransition=0;
+ const smg=weaponModel(9),support=smg.userData.supportHand,mag=smg.userData.parts.magazine;
+ assert.ok(support,'the viewmodel exposes a support-hand node');
+ assert.equal(support.visible,false,'the support hand waits hidden at rest');
+ view._animateWeaponParts(smg,{weapon:9,reloading:true,reloadTimer:.5,reloadDuration:1,yaw:0,pitch:0},false,.016);
+ assert.equal(support.visible,true,'the support hand appears for the reload');
+ assert.notEqual(support.position.z,support.userData.baseZ,'the support hand travels with the magazine');
+ assert.ok(mag.position.y<mag.userData.baseY,'the magazine still drops');
+ assert.ok(RELOAD_TIMING.length===WEAPONS.length,'every weapon has a reload timing row');
+ // The marksman carrier cycles through its own reload window even with no shot kick.
+ const marksman=weaponModel(8),bolt=marksman.userData.anchors.bolt;
+ view._animateWeaponParts(marksman,{weapon:8,reloading:true,reloadTimer:.5,reloadDuration:1,yaw:0,pitch:0},false,.016);
+ assert.ok(bolt.position.z>bolt.userData.baseZ,'the marksman bolt cycles on the reload');
+ assert.ok(bolt.position.z-bolt.userData.baseZ<=.05,'the reload carrier stroke stays inside its budget');
+ // The rail cell turns through more than one revolution over its own window.
+ const rail=weaponModel(2);
+ view._animateWeaponParts(rail,{weapon:2,reloading:true,reloadTimer:.5,reloadDuration:1,yaw:0,pitch:0},false,.016);
+ assert.ok(rail.userData.parts.cell.rotation.z>Math.PI,'the rail cell spins through the reload');
+ // Inertia composes onto the live hands pose and stays bounded. The ADS
+ // compose resets the base quaternion every frame, so the test emulates that.
+ let yaw=0;
+ for(let i=0;i<60;i++){yaw+=.06;view.hands.quaternion.identity();view._animateWeaponParts(smg,{weapon:9,reloading:false,yaw,pitch:0},false,.016);}
+ assert.ok(view.hands.quaternion.angleTo(new T.Quaternion())>1e-4,'inertia composes onto the hands pose');
+ assert.ok(view.hands.quaternion.angleTo(new T.Quaternion())<.2,'the composed lag is bounded');
+ // Reduced motion: parts rest, the support hand hides and the springs snap.
+ view.hands.quaternion.identity();
+ view._animateWeaponParts(smg,{weapon:9,reloading:true,reloadTimer:.5,reloadDuration:1,yaw:0,pitch:0},true,.016);
+ assert.equal(support.visible,false);
+ assert.equal(support.position.z,support.userData.baseZ);
+ assert.equal(mag.position.y,mag.userData.baseY);
+ assert.equal(view._weaponInertia.yaw.pos,0,'reduced motion snaps the inertia spring');
+ assert.equal(view.hands.quaternion.angleTo(new T.Quaternion()),0,'reduced motion writes no lag');
+ [smg,marksman,rail].forEach(model=>ArenaView.prototype.disposeObject.call({},model));
 });

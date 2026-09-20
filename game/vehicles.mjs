@@ -463,6 +463,81 @@ export function leaveVehicleSeat(vehicle, actorId) {
   return seat;
 }
 
+// ---------------------------------------------------------------------------
+// Vehicle counterplay (v8.6 fieldwork). Three pure tables keep the simulation,
+// the HUD-facing scale and the tests reading the same numbers:
+//  - VEHICLE_WEAKPOINT: direct fire into the rear/flank arcs of a chassis.
+//  - VEHICLE_DISMOUNT: the brief slow window for bailing out at speed.
+//  - VEHICLE_PASSENGER_FIRE: firing a personal weapon over the rail.
+// No new actor/vehicle fields ride along; the dismount reuses `slow` and
+// `slowMultiplier`, which are already snapshotted and honoured by movement.
+export const VEHICLE_WEAKPOINT = freeze({
+  rear: 1.35,
+  flank: 1.2,
+  rearCone: (Math.PI * 2) / 3,
+  flankCone: Math.PI / 2
+});
+export const VEHICLE_DISMOUNT = freeze({
+  minSpeed: 4,
+  maxSpeed: 16,
+  minDuration: 0.6,
+  maxDuration: 1.2,
+  slowMultiplier: 0.55
+});
+export const VEHICLE_PASSENGER_FIRE = freeze({ spread: 1.35, recoil: 1.25 });
+export const VEHICLE_PASSENGER_FIRE_NEUTRAL = freeze({ spread: 1, recoil: 1 });
+
+// Bearing-aware weak point for direct vehicle fire. `opts.from` is the
+// attacker's world position; `opts.bearing` may instead name the angle (radians)
+// between the chassis forward face (+z at heading 0) and the incoming shot.
+// Callers that pass neither (every splash path) get the neutral 1x, so only
+// aimed direct hits can exploit the rear/flank cones. Pure and deterministic.
+export function vehicleWeakPointMultiplier(vehicle, opts = null) {
+  if (!opts || typeof opts !== 'object') return 1;
+  let bearing = Number.isFinite(opts.bearing) ? opts.bearing : null;
+  if (bearing === null) {
+    const from = opts.from ?? opts.source ?? null;
+    if (!from) return 1;
+    const heading = number(vehicle?.heading, 0);
+    const dx = number(from.x, NaN) - number(vehicle?.position?.x, NaN);
+    const dz = number(from.z, NaN) - number(vehicle?.position?.z, NaN);
+    if (!Number.isFinite(dx) || !Number.isFinite(dz)) return 1;
+    const length = Math.hypot(dx, dz);
+    if (!(length > 1e-6)) return 1;
+    bearing = Math.acos(clamp((Math.sin(heading) * dx + Math.cos(heading) * dz) / length, -1, 1));
+  }
+  if (!Number.isFinite(bearing)) return 1;
+  if (bearing >= VEHICLE_WEAKPOINT.rearCone) return VEHICLE_WEAKPOINT.rear;
+  if (bearing >= VEHICLE_WEAKPOINT.flankCone) return VEHICLE_WEAKPOINT.flank;
+  return 1;
+}
+
+// A brief slow window after bailing out of a fast chassis (or a wreck: the
+// destroy path releases the crew before it zeroes velocity). Duration rides the
+// exit speed between the authored bounds; respawns never stun.
+export function vehicleDismountStun(vehicle, reason = 'exit', flight = null) {
+  if (!vehicle || reason === 'respawn') return { duration: 0, multiplier: 1 };
+  const flying = flight === null ? vehicle?.config?.flight === true : flight === true;
+  const speed = flying
+    ? Math.hypot(number(vehicle.velocity?.x, 0), number(vehicle.velocity?.z, 0), number(vehicle.vy, 0))
+    : Math.hypot(number(vehicle.velocity?.x, 0), number(vehicle.velocity?.z, 0));
+  if (!(speed >= VEHICLE_DISMOUNT.minSpeed)) return { duration: 0, multiplier: 1 };
+  const range = Math.max(1e-6, VEHICLE_DISMOUNT.maxSpeed - VEHICLE_DISMOUNT.minSpeed);
+  const t = clamp((speed - VEHICLE_DISMOUNT.minSpeed) / range, 0, 1);
+  return {
+    duration: VEHICLE_DISMOUNT.minDuration + (VEHICLE_DISMOUNT.maxDuration - VEHICLE_DISMOUNT.minDuration) * t,
+    multiplier: VEHICLE_DISMOUNT.slowMultiplier
+  };
+}
+
+// Passenger personal fire pays a handling cost for firing over the rail; every
+// other seat (driver, gunner) and every actor on foot returns the neutral scale.
+export function passengerFireScale(actor) {
+  return actor && actor.vehicleId != null && actor.vehicleSeat === 'passenger'
+    ? VEHICLE_PASSENGER_FIRE
+    : VEHICLE_PASSENGER_FIRE_NEUTRAL;
+}
+
 function stepFlight(vehicle, input, dt, collision, ground, config, gun) {
   // A gunner owns the mounted gun: skip its timers here so the weapon-only
   // step does not advance heat, cooldown and overheat twice per tick.

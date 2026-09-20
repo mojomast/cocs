@@ -159,11 +159,30 @@ export function normalizeGear(value,level=MAX_LEVEL){
  }
  return out;
 }
-export function matchXp({win=false,actor=null,bonusXp=0}={}){
+// Horde/campaign runs bank `score`/`bestWave` in the singleplayer snapshot,
+// which the normal match result never carries. This rider pays a capped XP
+// bounty for that run so a deep endless score cannot dwarf the match reward.
+// Pure, bounded and monotonic in both score and best wave.
+export const HORDE_XP_CAP=250;
+export const HORDE_XP_SCORE_DIVISOR=25;
+export const HORDE_XP_PER_WAVE=5;
+export function hordeMatchXp(record=null){
+ const source=record&&typeof record==='object'?record:null;
+ if(!source)return 0;
+ const score=Math.max(0,Math.floor(Number(source.score)||0)),bestWave=Math.max(0,Math.floor(Number(source.bestWave??source.wave)||0));
+ if(!(score>0)&&!(bestWave>0))return 0;
+ return Math.max(0,Math.min(HORDE_XP_CAP,Math.round(score/HORDE_XP_SCORE_DIVISOR)+bestWave*HORDE_XP_PER_WAVE));
+}
+export function matchXp({win=false,actor=null,bonusXp=0,singleplayer=null,horde=null,...rest}={}){
  const stats=actor?.scoreStats||{},frags=Number(actor?.frags)||0;
  const objective=(Number(stats.objectiveTime)||0)*1.5+(Number(stats.objectiveCaptures)||0)*30+(Number(stats.captures)||0)*120+(Number(stats.flagPickups)||0)*15+(Number(stats.flagReturns)||0)*10;
  const bonus=Math.max(0,Math.round(Number(bonusXp)||0));
- return Math.max(10,Math.round(40+frags*12+objective+(win?80:0)))+bonus;
+ // The award path already hands `matchXp` the whole result object: prefer the
+ // snapshot's `singleplayer` record, accept an explicit `horde` record, and
+ // fall back to flat direct fields only for the single-player modes.
+ const mode=typeof rest.mode==='string'?rest.mode:'';
+ const rider=singleplayer??horde??(mode==='horde'||mode==='campaign'?rest:null);
+ return Math.max(10,Math.round(40+frags*12+objective+(win?80:0)))+hordeMatchXp(rider)+bonus;
 }
 export function modeKey(mode){return typeof mode==='string'&&mode.trim()?mode.trim().slice(0,40):'unknown';}
 const count=value=>Math.max(0,Math.floor(Number(value)||0));

@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {vehicleHud, escapeHint, voiceHint, spectatorControls, SPECTATOR_RESERVED_KEYS, reloadProgress, dynamicCrosshairGap, lowAmmo, postureLabel, hitMarker, projectToScreen, damageNumberStyle, boundList, damageBearing, killBanner, weaponTag, ammoText, commandBrief, isTeamMode, matchStartBanner, modeColumns, modeGoal, modePrimary, modeTargetText, objectiveCopy, suddenDeathBanner, grenadeStatus, killstreakCallout, ladderStatus, streakStatus, audioCaption, altFireLabel, scoreAnnouncer, multikillLabel, spreeLabel, recentKills, killCallout, matchAwards, killFeedWeapon, connectionQuality, spectateActor, nextSpectateTarget, spectatorBoard, spectatorTeams, weaponRangeInfo, weaponRangeLabel, scoreStats, cocsDominanceStatus, cocsOperationsStatus, cocsOutcomeView, acceptCocsAnnouncement, cocsAnnouncePriority, cocsAnnouncementTTL, COCS_ANNOUNCE_PRIORITY, damageHitText, captionPriority, acceptCaption, CAPTION_TTL} from './hud.mjs';
+import {vehicleHud, escapeHint, voiceHint, spectatorControls, SPECTATOR_RESERVED_KEYS, reloadProgress, dynamicCrosshairGap, lowAmmo, postureLabel, hitMarker, projectToScreen, damageNumberStyle, boundList, damageBearing, killBanner, weaponTag, ammoText, commandBrief, isTeamMode, matchStartBanner, modeColumns, modeGoal, modePrimary, modeTargetText, objectiveCopy, suddenDeathBanner, grenadeStatus, killstreakCallout, ladderStatus, streakStatus, audioCaption, altFireLabel, scoreAnnouncer, multikillLabel, spreeLabel, recentKills, killCallout, matchAwards, killFeedWeapon, connectionQuality, spectateActor, nextSpectateTarget, spectatorBoard, spectatorTeams, weaponRangeInfo, weaponRangeLabel, scoreStats, cocsDominanceStatus, cocsOperationsStatus, cocsOutcomeView, acceptCocsAnnouncement, cocsAnnouncePriority, cocsAnnouncementTTL, COCS_ANNOUNCE_PRIORITY, damageHitText, captionPriority, acceptCaption, CAPTION_TTL, teamStatusHud, economyHud} from './hud.mjs';
 import {WEAPONS} from './data.mjs';
 import {GAME_MODES,teamMode} from './config.mjs';
 import {soccerDisplay,soccerResult} from './race-ui.mjs';
@@ -837,4 +837,124 @@ test('the announcement priority policy is bounded, deduped and expiry-aware', ()
   assert.ok(COCS_ANNOUNCE_PRIORITY.loss > COCS_ANNOUNCE_PRIORITY.secure);
   assert.ok(COCS_ANNOUNCE_PRIORITY.wave > COCS_ANNOUNCE_PRIORITY.order);
   assert.ok(cocsAnnouncementTTL({ttl: 5}) > cocsAnnouncementTTL({}), 'an explicit TTL wins; unknown beats default short');
+});
+
+// ---------------------------------------------------------------------------
+// QoL strip: team status and economy readouts are pure snapshot reads. They
+// render in one non-live group in the match page; these tests pin the model.
+// ---------------------------------------------------------------------------
+test('team status models elimination lives, attrition and ally chips', () => {
+ const hud = {
+  teamScores: {0: 4, 1: 7},
+  actors: [
+   {id: 0, name: 'CHATGPT', team: 0, health: 100, armor: 50},
+   {id: 1, name: 'BOT 1', team: 0, health: 0, armor: 0},
+   {id: 2, name: 'BOT 2', team: 0, health: 60, armor: 20},
+   {id: 3, name: 'GROK', team: 1, health: 80, armor: 0},
+  ],
+  objectives: {kind: 'elimination', lives: {0: 4, 1: 7}, livesPerTeam: 10, eliminations: {0: 6, 1: 3}, attrition: {0: 0, 1: 1}, suddenDeath: true},
+ };
+ const view = teamStatusHud({id: 0, team: 0}, hud);
+ assert.equal(view.team, 0);
+ assert.deepEqual(view.lives.teams.map(t => [t.name, t.lives, t.max, t.eliminations, t.attrition, t.mine, t.out]),
+  [['RED', 4, 10, 6, 0, true, false], ['BLUE', 7, 10, 3, 1, false, false]]);
+ assert.equal(view.lives.suddenDeath, true);
+ assert.equal(view.lives.text, 'RED 4 · BLUE 7');
+ assert.deepEqual(view.allies.map(a => [a.name, a.health, a.armor, a.down]), [['BOT 1', 0, 0, true], ['BOT 2', 60, 20, false]]);
+ assert.match(view.label, /Team lives: RED 4 of 10, BLUE 7 of 10\. Sudden death\./);
+ assert.match(view.label, /Allies: BOT 1 down, BOT 2 60 health 20 armor\./);
+ // An out-of-lives team reads as such without inventing a score.
+ assert.equal(teamStatusHud({id: 0, team: 1}, {...hud, objectives: {...hud.objectives, lives: {0: 0, 1: 2}}}).lives.teams[0].out, true);
+ // Nothing to say: solo actor, no objective readout.
+ assert.equal(teamStatusHud({id: 0, team: 0}, {actors: [{id: 0, team: 0, health: 100}], objectives: null}), null);
+ assert.equal(teamStatusHud({id: 0}, {actors: [{id: 0, health: 100}, {id: 1, health: 100}], objectives: null}), null, 'a free-for-all has no team strip');
+ assert.equal(teamStatusHud({id: 0, team: 0}, {...hud, spectate: true}), null, 'spectating keeps the spectator board');
+ assert.equal(teamStatusHud(null, null), null);
+});
+
+test('team status reads control-zone capture, contest and hold windows', () => {
+ const zones = [
+  {id: 'alpha', owner: 0, contested: false, progress: 100, captureTeam: null},
+  {id: 'bravo', owner: null, contested: true, progress: 40, captureTeam: 0},
+  {id: 'charlie', owner: 1, contested: false, progress: 65, captureTeam: 1},
+ ];
+ const hud = {teamScores: {0: 30, 1: 20}, actors: [{id: 0, team: 0, health: 100}, {id: 1, team: 0, health: 90}, {id: 2, team: 1, health: 70}], objectives: {kind: 'domination', zones}};
+ const view = teamStatusHud({id: 0, team: 0}, hud);
+ assert.equal(view.zones.owned, 1);
+ assert.equal(view.zones.enemyOwned, 1);
+ assert.equal(view.zones.contested, 1);
+ assert.equal(view.zones.text, '1/3 ZONES · 1 CONTESTED');
+ assert.equal(view.zones.focus.id, 'bravo');
+ assert.equal(view.zones.focusText, 'BRAVO CONTESTED');
+ assert.equal(view.allies.length, 1);
+ const taking = teamStatusHud({id: 0, team: 0}, {...hud, objectives: {kind: 'domination', zones: [{id: 'alpha', owner: null, contested: false, progress: 45, captureTeam: 0}]}});
+ assert.equal(taking.zones.focusText, 'TAKING ALPHA 45%');
+ const hold = teamStatusHud({id: 0, team: 0}, {...hud, objectives: {kind: 'domination', holdCount: 2, holdSeconds: 30, holdProgress: {0: 12.4, 1: 9}, holdTeam: 0, zones}});
+ assert.equal(hold.hold.quorum, 2);
+ assert.equal(hold.hold.seconds, 30);
+ assert.equal(hold.hold.progress[0], 12);
+ assert.equal(hold.hold.mine, true);
+ assert.equal(hold.hold.text, 'HOLD 12s / 30s');
+});
+
+test('team status reads the uplink relay race, assault sectors and payload distance', () => {
+ const relay = teamStatusHud({id: 0, team: 0}, {actors: [{id: 0, team: 0, health: 100}], objectives: {kind: 'koth', stage: 1, stageCount: 3, stageCaptures: {0: 1, 1: 0}, zones: [{id: 'uplink-2', owner: 0, contested: false, progress: 100}]}});
+ assert.equal(relay.stages.text, 'RELAY 2/3 · YOU 1');
+ assert.equal(relay.stages.mine, 1);
+ assert.equal(relay.zones, null, 'the stage race replaces the generic hill readout');
+ const assault = teamStatusHud({id: 0, team: 0}, {actors: [{id: 0, team: 0, health: 100}], objectives: {kind: 'assault', attacker: 0, defender: 1, breached: false, active: 1, zones: [{id: 'alpha', owner: 0, progress: 100, contested: false}, {id: 'bravo', owner: null, progress: 45.6, contested: true, captureTeam: 0}, {id: 'charlie', owner: null, progress: 0, contested: false}]}});
+ assert.equal(assault.assault.index, 1);
+ assert.equal(assault.assault.progress, 46);
+ assert.equal(assault.assault.text, 'SECTOR 2/3 · 46% · ATTACK');
+ const payload = teamStatusHud({id: 0, team: 1}, {actors: [{id: 0, team: 1, health: 100}], objectives: {kind: 'payload', payload: {progress: 42.6, distance: 84.25, total: 200, contested: true, pushing: 0, delivered: false, checkpointsReached: 1, checkpointCount: 3}}});
+ assert.equal(payload.payload.percent, 43);
+ assert.equal(payload.payload.distance, 84.25);
+ assert.equal(payload.payload.contested, true);
+ assert.equal(payload.payload.mine, false, 'the enemy push does not read as yours');
+ assert.equal(payload.payload.text, 'PAYLOAD 43% · 84/200m · CONTESTED');
+ assert.match(payload.label, /PAYLOAD 43%, 84\/200m, CONTESTED\./);
+});
+
+test('team status badges the VIP with live health or a down state', () => {
+ const base = {teamScores: {0: 0, 1: 0}, actors: [{id: 0, team: 0, health: 100}, {id: 7, name: 'VIP', team: 0, isVip: true, health: 72, maxHealth: 100}], objectives: {kind: 'extraction', vipId: 7, escortTeam: 0, defenderTeam: 1, vipDead: false, progress: 2, captureSeconds: 4}};
+ const view = teamStatusHud({id: 0, team: 0}, base);
+ assert.equal(view.vip.name, 'VIP');
+ assert.equal(view.vip.health, 72);
+ assert.equal(view.vip.mine, true);
+ assert.equal(view.vip.text, 'VIP 72 HP');
+ assert.match(view.label, /VIP 72 health\./);
+ const down = teamStatusHud({id: 0, team: 0}, {...base, actors: [base.actors[0], {...base.actors[1], health: 0}], objectives: {...base.objectives, vipDead: true}});
+ assert.equal(down.vip.dead, true);
+ assert.equal(down.vip.text, 'VIP DOWN');
+ assert.match(down.label, /VIP down\./);
+});
+
+test('economy HUD surfaces the upgrade countdown and sentry status', () => {
+ const view = economyHud({id: 0, team: 0, upgradeTimer: 6.4, upgradeWeapon: 2}, {deployables: [
+  {id: 9, owner: 0, team: 0, health: 80, life: 11.2, cooldown: 0},
+  {id: 4, owner: 1, team: 1, health: 80, life: 8, cooldown: 0},
+ ]}, WEAPONS);
+ assert.equal(view.upgrade.index, 2);
+ assert.equal(view.upgrade.weapon, 'RAIL');
+ assert.equal(view.upgrade.text, 'UPGRADE RAIL · 7s');
+ assert.equal(view.mine.length, 1);
+ assert.equal(view.mine[0].alive, true);
+ assert.equal(view.mine[0].text, 'SENTRY 80 HP · 12s');
+ assert.equal(view.enemy.length, 1);
+ assert.match(view.label, /Weapon upgrade RAIL 7 seconds\./);
+ assert.match(view.label, /Your sentry at 80 health, 12 seconds left\./);
+ // Absence stays invisible, and an enemy sentry never reads as friendly.
+ assert.equal(economyHud({id: 0, team: 0}, {deployables: []}), null);
+ assert.equal(economyHud({id: 0, team: 0, upgradeTimer: 0, upgradeWeapon: 2}, {deployables: [{id: 1, owner: 2, team: 1, health: 80, life: 5}]}).mine.length, 0);
+ const expired = economyHud({id: 0, team: 0}, {deployables: [{id: 3, owner: 0, team: 0, health: 0, life: 0}]});
+ assert.equal(expired.deployables[0].alive, false);
+ assert.equal(expired.deployables[0].text, 'SENTRY DOWN');
+ assert.equal(economyHud(null, null), null);
+});
+
+test('deployable and weapon-upgrade beats have readable captions', () => {
+ assert.equal(audioCaption({type: 'deployable'}).text, 'Sentry deployed');
+ assert.equal(audioCaption({type: 'deployable-fire'}).text, 'Sentry firing');
+ assert.equal(audioCaption({type: 'deployable-expire'}).text, 'Sentry expired');
+ assert.equal(audioCaption({type: 'weapon-upgrade'}).text, 'Weapon upgrade');
 });

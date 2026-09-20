@@ -17,6 +17,7 @@ reference.
 | [design/ANIMATION-PASS.md](design/ANIMATION-PASS.md) | Death variety restoration, hit feedback, viewmodel and UI motion. |
 | [design/COMBAT-PASS.md](design/COMBAT-PASS.md) | Alt-fire modes, ability/movement tuning and their visuals, audio and HUD. |
 | [design/QOL-PASS.md](design/QOL-PASS.md) | Visual fidelity, audio coverage, bot/mode gameplay, online and HUD quality-of-life. |
+| [design/PHYSICS-AND-AUDIO-PASS.md](design/PHYSICS-AND-AUDIO-PASS.md) | Ragdoll physics, animation depth, music expansion and the graphics/gameplay wave. |
 | [V8.4-IMPROVEMENT-PLAN.md](V8.4-IMPROVEMENT-PLAN.md) | Post-release multi-track audit and prioritized corrective roadmap. |
 | [spec/SPEC.md](spec/SPEC.md) | Historical design specification (kept as a record). |
 | [spec/DEVPLAN.md](spec/DEVPLAN.md) | Historical development plan (kept as a record). |

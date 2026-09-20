@@ -62,6 +62,15 @@ production at **5/5 viewports** with `commitDirty: false`, including the
 LATTICE short-landscape flow that caught the HUD corridor regression during
 local testing.
 
+**Production update — quality-of-life and fidelity pass (2026-09-20).** Commit
+`395b1b5` was fast-forwarded to `improvement/phase2-audio-visual` and deployed
+with `npm run deploy -- --with-game-server` (the sim, data and bot modules
+changed, so the game server restarted with the web service). The deploy gate
+verified matching identities at web `395b1b5` `v8.6-395b1b5` protocol 3 and
+game server `395b1b5` `v8.6-395b1b5` protocol 3 (the transient 502 was seen and
+passed on retry); the tracked production browser matrix ran at **5/5
+viewports**. Active matches disconnected briefly on the restart.
+
 **Scope (web presentation, data and documentation, 2026-09-20).** An opt-in
 developer graphics preview, a global hotkey, a randomizer and a clipboard recipe
 loop, 23 stackable effects (three built from baked Moth assets with selectable
@@ -97,9 +106,9 @@ enabled.
 
 **Automated release gate (2026-09-20).**
 
-- `npm test`: pass. Game tests: 2,836 pass, 8 approved skips, 0 fail (2,844
+- `npm test`: pass. Game tests: 2,918 pass, 9 approved skips, 0 fail (2,927
   tests); server tests: 212 pass, 0 fail; TypeScript: pass; verified production
-  build: pass; SSR/UI and deployment-contract tests: 100 pass, 0 fail.
+  build: pass; SSR/UI and deployment-contract tests: 102 pass, 0 fail.
 - Moth-focused suites are part of that run: bake-runner integrity
   (`moth-bake-run.test.mjs`), GIF decode / grid-texture / GIF-frame bakers and
   generated sources (`moth-bake-pixels.test.mjs`), variant generation and mixed

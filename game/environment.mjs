@@ -131,6 +131,184 @@ export function addMountains(world,{background='#090f17',radius=150,count=26,see
  return mesh;
 }
 
+// ---- Per-biome backdrop identity ------------------------------------------
+// The distant skyline beyond the mountain ring. `backdropKitFor` is a pure
+// descriptor (safe for tests and replays) and `addBackdrop` is the WebGL-only
+// builder: one instanced draw per silhouette family, fresh geometry per build
+// (never cached in ModelAssets) so a map rebuild disposes exactly what it made.
+// The CPU renderer never calls the builder, so its scene stays byte-identical.
+export const BACKDROP_BIOMES=Object.freeze(['city','canyon','snow','foundry','void']);
+export const BACKDROP_TRIANGLE_BUDGET=24000;
+
+const BACKDROP_KITS=Object.freeze({
+ city:Object.freeze({
+  biome:'city',accent:'#7fe7ff',
+  families:Object.freeze([
+   Object.freeze({kind:'tower',shape:'tower',count:20,color:'#262e39'}),
+   Object.freeze({kind:'edge',shape:'edge',count:20,color:'#0b1219',emissive:'#78e6ff'}),
+   Object.freeze({kind:'beacon',shape:'beacon',count:8,color:'#141b23',emissive:'#ff8fc7'}),
+  ]),
+  ring:null,
+ }),
+ canyon:Object.freeze({
+  biome:'canyon',accent:'#e7a25e',
+  families:Object.freeze([
+   Object.freeze({kind:'mesa',shape:'mesa',count:16,color:'#a47a4c'}),
+   Object.freeze({kind:'spire',shape:'spire',count:12,color:'#8a6240'}),
+  ]),
+  ring:null,
+ }),
+ snow:Object.freeze({
+  biome:'snow',accent:'#bfe9ff',
+  families:Object.freeze([
+   Object.freeze({kind:'peak',shape:'peak',count:12,color:'#e8f3fb'}),
+   Object.freeze({kind:'shard',shape:'shard',count:18,color:'#bcd8e8'}),
+   Object.freeze({kind:'crystal',shape:'crystal',count:10,color:'#9ccdec',emissive:'#bfe9ff'}),
+  ]),
+  ring:null,
+ }),
+ foundry:Object.freeze({
+  biome:'foundry',accent:'#ff8a3c',
+  families:Object.freeze([
+   Object.freeze({kind:'stack',shape:'stack',count:14,color:'#383d43'}),
+   Object.freeze({kind:'cap',shape:'cap',count:14,color:'#5c2410',emissive:'#ff7a2a'}),
+   Object.freeze({kind:'flue',shape:'flue',count:8,color:'#2b3036',emissive:'#ffb45c'}),
+  ]),
+  ring:null,
+ }),
+ void:Object.freeze({
+  biome:'void',accent:'#8fe6ff',
+  families:Object.freeze([
+   Object.freeze({kind:'satellite',shape:'satellite',count:9,color:'#26313d',emissive:'#8fe6ff'}),
+  ]),
+  ring:Object.freeze({color:'#8fe6ff',radius:170,tube:1.1,opacity:.42,tilt:.46}),
+ }),
+});
+
+// Resolve a map (or a bare biome name) to its backdrop descriptor. Precedence:
+// the sky/orbit ids (their ring reads above any ground biome), then the biome
+// resolved by the shared biomeAmbience table, then the id families. An unknown
+// map falls back to the canyon drums.
+export function backdropKitFor(arena={}){
+ const requested=typeof arena==='string'?arena.trim().toLowerCase():'';
+ let side=requested,biome='';
+ if(!side&&arena&&typeof arena==='object'){
+  const id=String(arena.id||'').toLowerCase();
+  side=id;biome=String(biomeAmbience(arena).biome||'').toLowerCase();
+ }
+ if(BACKDROP_BIOMES.includes(side))return BACKDROP_KITS[side];
+ if(HALO_MAPS.has(side)||/sky|orbit|aether|launch|void|moth/.test(side))return BACKDROP_KITS.void;
+ if(biome==='volcanic')return BACKDROP_KITS.foundry;
+ if(biome==='snow')return BACKDROP_KITS.snow;
+ if(biome==='urban'||/neon|city|exchange|crosswire|substation|ironfall/.test(side))return BACKDROP_KITS.city;
+ return BACKDROP_KITS.canyon;
+}
+
+// Quality scaling for the backdrop. Accepts either a tier index or a quality
+// settings object, so the view can pass `_quality()` directly. Density scales
+// instance counts and detail the shell tessellation.
+export function backdropScale(quality=null){
+ if(Number.isFinite(Number(quality))&&quality!==null){
+  const tier=clamp(Math.round(Number(quality)),0,2);
+  return {density:[.5,.78,1][tier],detail:[.35,.7,1][tier]};
+ }
+ const density=Number.isFinite(quality?.scatter)?quality.scatter:1,detail=Number.isFinite(quality?.scatterDetail)?quality.scatterDetail:1;
+ return {density:clamp(density,0,1.5),detail:clamp(detail,0,1)};
+}
+
+function backdropShape(shape,detail){
+ const segments=clamp(Math.round(3+detail*5),3,8);
+ switch(shape){
+  case 'tower':case 'edge':case 'beacon':case 'satellite':return new T.BoxGeometry(1,1,1);
+  case 'mesa':return new T.CylinderGeometry(.8,1.02,.92,segments+2,1);
+  case 'spire':return new T.ConeGeometry(1,1,segments);
+  case 'peak':return new T.ConeGeometry(1,1,segments+2);
+  case 'shard':return new T.ConeGeometry(1,1,segments);
+  case 'crystal':return new T.OctahedronGeometry(.72,0);
+  case 'stack':return new T.CylinderGeometry(.6,.78,1,segments);
+  case 'cap':return new T.CylinderGeometry(.88,.72,.24,segments);
+  case 'flue':return new T.CylinderGeometry(.18,.24,1,Math.max(4,segments-1));
+  default:return new T.IcosahedronGeometry(.5,0);
+ }
+}
+
+// Build the distant backdrop for a biome. Returns the created nodes (instanced
+// families plus the optional orbital ring) so the caller can tag them for
+// camera-follow and dispose them with the rest of the world group.
+export function addBackdrop(world,{biome='canyon',seed=1,quality=null,radius=150,base=-12}={}){
+ if(!world)return [];
+ const kit=backdropKitFor(biome),{density,detail}=backdropScale(quality),scaled=count=>Math.max(0,Math.round(count*density));
+ const random=rng(((seed>>>0)||1)+7919),meshes=[],dummy=new T.Object3D(),color=new T.Color(),towers=[],stacks=[],ringTilt=kit.ring?.tilt??.4,ringEuler=new T.Euler(ringTilt,0,ringTilt*.35);
+ const ringAt=(i,count,inner=.86,spread=.24)=>{const angle=(i/count)*Math.PI*2+random()*.16,dist=radius*(inner+random()*spread);return {angle,x:Math.cos(angle)*dist,z:Math.sin(angle)*dist,dist};};
+ const build=family=>{
+  const count=scaled(family.count);
+  if(count<=0)return null;
+  const geometry=backdropShape(family.shape,detail);
+  const material=new T.MeshStandardMaterial({color:family.color,roughness:family.emissive?.9:.95,metalness:family.emissive?0:.05,flatShading:true,...(family.emissive?{emissive:family.emissive,emissiveIntensity:1.15}:{})});
+  const mesh=new T.InstancedMesh(geometry,material,count),place=family.shape;
+  let used=0;
+  for(let i=0;i<count;i++){
+   if(place==='tower'){
+    const {angle,x,z}=ringAt(i,count),h=16+random()*36,w=3+random()*4,d=w*(.7+random()*.6);
+    dummy.position.set(x,base+h*.5,z);dummy.rotation.set(0,-angle+Math.PI*.5,0);dummy.scale.set(w,h,d);
+    towers.push({x,z,angle,h,w});
+   }else if(place==='edge'){
+    const t=towers[i]||towers[0];if(!t)continue;
+    const h=t.h*.9,w=Math.max(.28,t.w*.14),side=i%2?1:-1,tangentX=-Math.sin(t.angle)*side,tangentZ=Math.cos(t.angle)*side;
+    dummy.position.set(t.x-Math.cos(t.angle)*(t.w*.5+.05)+tangentX*t.w*.34,base+h*.5,t.z-Math.sin(t.angle)*(t.w*.5+.05)+tangentZ*t.w*.34);
+    dummy.rotation.set(0,-t.angle+Math.PI*.5,0);dummy.scale.set(w,h,.16);
+   }else if(place==='beacon'){
+    const t=towers[i]||towers[towers.length-1];if(!t)continue;
+    dummy.position.set(t.x-Math.cos(t.angle)*(t.w*.5+.05),base+t.h+1.1,t.z-Math.sin(t.angle)*(t.w*.5+.05));
+    dummy.rotation.set(0,-t.angle,0);dummy.scale.set(.85,.6,.85);
+   }else if(place==='mesa'){
+    const {angle,x,z}=ringAt(i,count,1,0),h=7+random()*15,w=6+random()*10;
+    dummy.position.set(x,base+h*.5,z);dummy.rotation.set(0,random()*Math.PI,0);dummy.scale.set(w,h,w*(.72+random()*.5));
+   }else if(place==='spire'){
+    const {x,z}=ringAt(i,count,.78,.34),h=12+random()*20,w=2.4+random()*3;
+    dummy.position.set(x,base+h*.5,z);dummy.rotation.set(0,random()*Math.PI,0);dummy.scale.set(w,h,w);
+   }else if(place==='peak'){
+    const {x,z}=ringAt(i,count,.8,.3),h=24+random()*30,w=10+random()*12;
+    dummy.position.set(x,base+h*.5,z);dummy.rotation.set(0,random()*Math.PI,0);dummy.scale.set(w,h,w);
+   }else if(place==='shard'){
+    const {x,z}=ringAt(i,count,.68,.5),h=6+random()*14,w=1.3+random()*2;
+    dummy.position.set(x,base+h*.55,z);dummy.rotation.set((random()-.5)*.4,random()*Math.PI*2,(random()-.5)*.4);dummy.scale.set(w,h,w);
+   }else if(place==='crystal'){
+    const {x,z}=ringAt(i,count,.72,.44),h=5+random()*11,w=1.1+random()*1.4;
+    dummy.position.set(x,base+h*.5,z);dummy.rotation.set((random()-.5)*.5,random()*Math.PI,(random()-.5)*.5);dummy.scale.set(w,h*.9,w);
+   }else if(place==='stack'){
+    const {angle,x,z}=ringAt(i,count,.82,.24),h=26+random()*30,w=2.6+random()*2;
+    dummy.position.set(x,base+h*.5,z);dummy.rotation.set(0,-angle,0);dummy.scale.set(w,h,w);stacks.push({x,z,angle,h,w});
+   }else if(place==='cap'){
+    const s=stacks[i]||stacks[stacks.length-1];if(!s)continue;
+    dummy.position.set(s.x,base+s.h+.06,s.z);dummy.rotation.set(0,0,0);dummy.scale.set(s.w*1.18,s.w,s.w*1.18);
+   }else if(place==='flue'){
+    const {x,z}=ringAt(i,count,.7,.46),h=16+random()*16;
+    dummy.position.set(x,base+h*.5,z);dummy.rotation.set(0,random()*Math.PI,0);dummy.scale.set(1,h,1);
+   }else if(place==='satellite'){
+    const ring=kit.ring??{radius:radius*1.1},a=(i/count)*Math.PI*2+random()*.3,px=Math.cos(a)*ring.radius,pz=Math.sin(a)*ring.radius;
+    dummy.position.set(px,base+radius*.42,pz).applyEuler(ringEuler);
+    dummy.rotation.set(0,a,0);dummy.scale.set(1.6+random()*1.4,1.2+random()*1.8,2.4+random()*2.2);
+   }
+   dummy.updateMatrix();mesh.setMatrixAt(used,dummy.matrix);
+   color.set(family.color).offsetHSL(0,0,(random()-.5)*.08);mesh.setColorAt(used,color);used++;
+  }
+  mesh.count=used;
+  if(used<=0){geometry.dispose();material.dispose();return null;}
+  mesh.instanceMatrix.needsUpdate=true;if(mesh.instanceColor)mesh.instanceColor.needsUpdate=true;
+  mesh.frustumCulled=false;mesh.userData.environment=true;mesh.userData.backdrop=true;mesh.userData.backdropKind=kit.biome;mesh.userData.backdropFamily=family.kind;
+  world.add(mesh);meshes.push(mesh);return mesh;
+ };
+ for(const family of kit.families)build(family);
+ if(kit.ring){
+  const ring=new T.Mesh(new T.TorusGeometry(kit.ring.radius,kit.ring.tube,8,96),new T.MeshBasicMaterial({color:kit.ring.color,transparent:true,opacity:kit.ring.opacity,depthWrite:false,fog:false,blending:T.AdditiveBlending}));
+  ring.position.y=base+radius*.42;ring.rotation.set(ringTilt,0,ringTilt*.35);
+  ring.frustumCulled=false;ring.userData.environment=true;ring.userData.backdrop=true;ring.userData.backdropKind=kit.biome;ring.userData.backdropRing=true;
+  world.add(ring);meshes.push(ring);
+ }
+ return meshes;
+}
+
 // Per-biome scatter families. These layer richer ground detail (mesas, ice,
 // lava rock, undergrowth, rubble, stalagmites) on top of the shared grass/rock/
 // fern pass. Counts are deliberately small and `addScatter` trims the whole

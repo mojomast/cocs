@@ -21,7 +21,7 @@ import {SpectatorBoard} from './SpectatorBoard';
 export {SpectatorBoard} from './SpectatorBoard';
 import {formatNumber,formatResource,formatCountdown} from '../../../game/format-ui.mjs';
 import {DEFAULT_BINDINGS,bindingLabel} from '../../../game/keybinds.mjs';
-import {spectatorControls} from '../../../game/hud.mjs';
+import {spectatorControls,teamStatusHud,economyHud} from '../../../game/hud.mjs';
 import {assistiveChannelStep,assistiveCueText,createAssistiveChannel} from '../../../game/assistive-announce.mjs';
 
 const FRAG_COOLDOWN=7;
@@ -202,6 +202,12 @@ export function PlayingHud({ui}:ScreenProps){
  const fragKey=bindingLabel(ui.bindings?.grenade??DEFAULT_BINDINGS.grenade).toUpperCase();
  const fragRatio=frag?frag.ready?1:Math.max(0,Math.min(1,1-frag.cooldown/FRAG_COOLDOWN)):0;
  const streak=!hud.spectate?streakStatus(player):null;
+  // QoL strip: team/economy data the snapshot already carries but the HUD never
+  // showed. Both helpers are pure snapshot reads; their chips render in one
+  // non-live role="group" so the single announcement channel is untouched.
+  const squad=!hud.spectate?teamStatusHud(player,hud):null;
+  const economy=!hud.spectate?economyHud(player,hud,WEAPONS):null;
+  const sentryChips=economy?economy.deployables.filter((s:any)=>s.friendly).slice(0,2):[];
   const spectatorTarget=hud.spectateLocal?runtime.current?.spectateDirector?.targetId:((hud.actors??[]).find((actor:any)=>actor.id===runtime.current?.spectateTarget&&actor.health>0)||(hud.actors??[]).find((actor:any)=>actor.health>0))?.id;
   const specGroups=hud.spectate?spectatorTeams(hud.actors,spectatorTarget,{points:hud.objectives?.points,includeInactive:true}).map((group:any)=>({
    key:group.key,
@@ -211,7 +217,7 @@ export function PlayingHud({ui}:ScreenProps){
    lives:hud.objectives?.kind==='elimination'?(Number(hud.objectives.lives?.[group.team])||0):null,
    players:group.players,
   })):[];
-   return <div className={`game-hud${hud.spectate?' spectating-hud':''}${cocsCommand?' lattice-hud':''}${hud.spectate&&hideHud?' hide-hud':''}${touchControls&&!hud.spectate?' touch-mode':''}`}>
+   return <div className={`game-hud${hud.spectate?' spectating-hud':''}${cocsCommand?' lattice-hud':''}${hud.spectate&&hideHud?' hide-hud':''}${touchControls&&!hud.spectate?' touch-mode':''}${touchControls&&!hud.spectate&&display.touchLeftHanded===true?' touch-left-hand':''}`}>
   {/* The one live channel (WP2.2). It is always mounted so a cue can replace a
       cue; only event-gated transitions produce new text. */}
   <div className="visually-hidden" role="status" aria-live="polite" aria-atomic="true">{assistiveText}</div>
@@ -262,7 +268,20 @@ export function PlayingHud({ui}:ScreenProps){
    <div className="hud-corner hud-corner--left">
     <div className={`stat-card stat-card--vitals${healthRatio<=.3&&player.health>0?' is-low':''}`}><span className="vital vital--health"><span className="stat-label">HEALTH</span><strong className="stat-value">{Math.ceil(player.health)}</strong><span className="stat-bar"><i style={{width:`${healthRatio*100}%`}}/></span></span>
     <span className={`vital vital--armor${player.armor<=0?' is-empty':''}`}><span className="stat-label">ARMOR</span><strong className="stat-value">{Math.ceil(player.armor)}</strong><span className="stat-bar"><i style={{width:`${armorRatio*100}%`}}/></span></span></div>
-    {(streak||armsrace)&&<div className="hud-pills">{!hud.spectate&&armsrace&&<span className="hud-pill"><b>ARS</b>{ladderStatus(player,WEAPONS.length).label}</span>}{streak&&<span className="hud-pill hud-pill--warn"><b>×</b>{streak.label}</span>}</div>}
+    {(streak||armsrace||squad||economy)&&<div className="hud-pills team-status" role="group" aria-label={[squad?.label,economy?.label].filter(Boolean).join(' ')||'Match status'}>
+     {squad?.lives&&<span className={`hud-pill team-status__lives${squad.lives.suddenDeath?' hud-pill--warn':''}`}>{squad.lives.text}{squad.lives.suddenDeath?' · SUDDEN DEATH':''}</span>}
+     {squad?.allies.map((ally:any)=><span key={`ally-${ally.id}`} className={`hud-pill team-status__ally${ally.down?' is-down':''}`}>{ally.name} {ally.down?'DOWN':`${ally.health}HP${ally.armor>0?` ${ally.armor}A`:''}`}</span>)}
+     {squad?.vip&&<span className={`hud-pill team-status__vip${squad.vip.dead?' is-down':''}`}>{squad.vip.text}</span>}
+     {squad?.payload&&<span className="hud-pill team-status__objective">{squad.payload.text}</span>}
+     {squad?.zones&&<span className="hud-pill team-status__objective">{squad.zones.text}{squad.zones.focusText?` · ${squad.zones.focusText}`:''}</span>}
+     {squad?.hold&&<span className="hud-pill team-status__objective">{squad.hold.text}</span>}
+     {squad?.stages&&<span className="hud-pill team-status__objective">{squad.stages.text}</span>}
+     {squad?.assault&&<span className="hud-pill team-status__objective">{squad.assault.text}</span>}
+     {economy?.upgrade&&<span className="hud-pill team-status__upgrade">{economy.upgrade.text}</span>}
+     {sentryChips.map((sentry:any)=><span key={`sentry-${sentry.id}`} className={`hud-pill team-status__sentry${sentry.alive?'':' is-down'}`}>{sentry.mine?'':sentry.friendly&&!sentry.mine?'ALLY ':''}{sentry.text}</span>)}
+     {!hud.spectate&&armsrace&&<span className="hud-pill"><b>ARS</b>{ladderStatus(player,WEAPONS.length).label}</span>}
+     {streak&&<span className="hud-pill hud-pill--warn"><b>×</b>{streak.label}</span>}
+    </div>}
    </div>
    {!isSingle&&<div className="objective-bar" aria-label="Current objective">
     {bearing!==null&&<span className="compass" aria-hidden="true"><i style={{'--bearing':`${bearing}rad`} as any}/></span>}

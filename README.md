@@ -461,6 +461,13 @@ Recent releases. The full history lives in
   escort payloads, mode pools spread across the maps, real lobby READY/vote
   flows and RTT ping, hit attribution, a global HUD text scale and settings
   sections. See [Quality-of-life pass](design/QOL-PASS.md).
+- Physics, animation and audio pass: deterministic presentation-side ragdolls,
+  secondary motion and foot planting, viewmodel inertia and reload
+  choreography, a much larger synth palette with tension/escalation layers,
+  palettes and seeded variation plus event-driven music, per-biome backdrops,
+  per-kind vehicle kits, staged prop damage, vehicle weak points and passenger
+  fire, and team-status/economy HUD. See
+  [Physics, animation and audio pass](design/PHYSICS-AND-AUDIO-PASS.md).
 - Graphics-edge pass (research-backed): static dither kills 8-bit banding, a
   contrast-adaptive sharpen recovers FXAA softness, and environment reflections
   scale with the tier. Runs whenever post-processing or the graphics lab runs.
