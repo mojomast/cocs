@@ -343,7 +343,7 @@ async function launchOperations(page, options) {
         if (!(await enterTitle(page, options.timeoutMs))) throw new Error('could not enter the title screen');
       }
       await page.waitForFunction(() => !document.querySelector('.shell--awaiting'), null, {timeout: options.timeoutMs});
-      await page.getByRole('button', {name: /^Lattice Strike: Operations: deployment briefing/}).click({timeout: options.timeoutMs});
+      await page.getByRole('button', {name: 'OPERATIONS · CO-OP', exact:true}).click({timeout: options.timeoutMs});
       await page.getByRole('button', {name: 'DEPLOY OPERATIONS', exact: true}).click({timeout: options.timeoutMs});
       await page.locator('.game-hud').waitFor({state: 'visible', timeout: options.hudTimeoutMs});
       await page.locator('.cocs-strip').waitFor({state: 'visible', timeout: options.hudTimeoutMs});

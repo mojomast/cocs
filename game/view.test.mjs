@@ -1238,7 +1238,12 @@ test('operator model adds shoulder, visor and backpack detail without moving rig
  const assets=new ModelAssets(),first=robotModel('chatgpt',assets),before=assets.resources.size;
  const data=first.userData;
  assert.equal(data.shoulderPads.length,2,'both shoulders get a pad');
- for(const pad of data.shoulderPads)assert.ok(pad.geometry.type.startsWith('SphereGeometry'));
+ for(const pad of data.shoulderPads){
+  assert.ok(pad.geometry.isBufferGeometry,'sculpted shoulder armor has real geometry');
+  pad.geometry.computeBoundingBox();
+  const size=pad.geometry.boundingBox.getSize(new T.Vector3());
+  assert.ok(size.x>0&&size.y>0&&size.z>0,'armor encloses a three-dimensional shoulder');
+ }
  assert.ok(data.backpack&&data.backpack.name==='backpack','a backpack group is tagged');
  assert.ok(data.backpack.children.length>=4,'backpack carries canisters, a vent and an antenna');
  assert.ok(data.visor?.brow&&data.visor?.nub,'visor brow and sensor nub exist');

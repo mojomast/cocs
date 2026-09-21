@@ -1,8 +1,9 @@
 'use client';
-import {useState} from 'react';
-import {ArrowUpRight,Check,ChevronDown,ChevronRight,Crosshair,Flag,GraduationCap,Hexagon,LockKeyhole,Play,Rocket,Shield,Skull,Sparkles,Swords,Target,Film,Users,Zap} from 'lucide-react';
+import {useEffect,useRef,useState} from 'react';
+import {ArrowLeft,ArrowUpRight,BookOpen,Check,ChevronRight,Crosshair,Flag,GraduationCap,Hexagon,LockKeyhole,Play,Rocket,Shield,Skull,Sparkles,Swords,Target,Film,Users,Zap} from 'lucide-react';
 import type {ScreenProps} from '../contract';
-import {ActionRail,Banner,Btn,Meter,PageHead,Panel,Segmented,SelectCard,Shell,Stats,TopBar} from '../primitives';
+import {ActionRail,Banner,Btn,Meter,Panel,Segmented,SelectCard,Shell,Stats,TopBar} from '../primitives';
+import styles from './SelectionScreen.module.css';
 import {kitView,operatorCard,specSheet} from '../../../game/class-ui.mjs';
 import {LatticeBriefing} from './LatticeGuide';
 import {isLattice,latticePracticeDefaults} from '../../../game/lattice-guide.mjs';
@@ -34,10 +35,16 @@ function planChips(plan:any,map:any,{reset=false}:any={}){
 }
 
 export function SelectionScreen({ui}:ScreenProps){
-  const {entered,showcaseLive,character,chooseCharacter,CHARACTERS=[],selected,harness,setHarness,HARNESSES=[],power,powerIcon,config,start,startSpectate,quickStart,setSetupOpen,setSingleOpen,changeMode,connectNet,openBrowser,netConnected,profile,demos=[],previewRef,headActions,backToDemo,notice,challenges=[],presets=[],loadPreset,deletePreset,openSettings,nextUnlocks=[]}=ui;
+  const {entered,character,chooseCharacter,CHARACTERS=[],selected,harness,setHarness,HARNESSES=[],power,powerIcon,config,start,startSpectate,setSetupOpen,setSingleOpen,changeMode,connectNet,openBrowser,netConnected,profile,demos=[],previewRef,headActions,backToDemo,notice,challenges=[],presets=[],loadPreset,deletePreset,openSettings,nextUnlocks=[]}=ui;
+  const [section,setSection]=useState('play');
+  const [route,setRoute]=useState('home');
   const [previewTab,setPreviewTab]=useState('model');
-  const [moreOpen,setMoreOpen]=useState(false);
   const [latticeIntro,setLatticeIntro]=useState<string|null>(null);
+  const contentHeading=useRef<HTMLHeadingElement>(null);
+  const focusContent=useRef(false);
+  const unavailable=!ui.ready||!!ui.error;
+  const navigate=(nextSection:string,nextRoute='home')=>{focusContent.current=true;setSection(nextSection);setRoute(nextRoute);setLatticeIntro(null);};
+  useEffect(()=>{if(focusContent.current){focusContent.current=false;contentHeading.current?.focus({preventScroll:true});document.querySelector('.shell-body')?.scrollTo({top:0,behavior:'instant'});}},[section,route,latticeIntro]);
   const latticeRole=(latticeIntro||isLattice(config?.mode))?latticeLoadoutRoles(character,harness):null;
   const note=character==='claude'?'Enhanced health, armor and speed offset the Claude Code harness lock.':'Each operator trades durability for mobility. Pick the stats that fit your style.';
   // Class/spec identity comes from the kit data directly (never through the
@@ -88,64 +95,85 @@ export function SelectionScreen({ui}:ScreenProps){
   const beginnerMap=mapChoice(beginnerPlan.mode.id);
   const beginnerMode=GAME_MODES.find(entry=>entry.id===beginnerPlan.mode.id);
   const railPlan=matchPlan(config);
-  // Criterion 3: the fill rule for every auto-filling mode is the same plan
-  // copy the setup screen and the launch path use, never a second hand-written
-  // sentence that could drift.
-  const autoFillNotes=[matchPlan({mode:'cocs-coop',botCount:config?.botCount??0}),matchPlan({mode:'puma-soccer'}),matchPlan({mode:'puma-race',botCount:config?.botCount??0})].map(plan=>plan.fill.note);
-  const scrollSetupTop=()=>{const body=document.querySelector('.shell-body');if(body)body.scrollTo({top:0,behavior:'instant'});};
-  const launchRules=(rules:any,map:any)=>{ui.setConfig?.(rules);ui.setMapId?.(map.id);ui.start?.({character,harness,mapId:map.id,config:rules});};
+   // Commit the exact previewed rules and map together; reading page state in
+   // the same event would launch the previous selection before React commits.
+   const launchRules=(rules:any,map:any)=>{if(unavailable)return;ui.setConfig?.(rules);ui.setMapId?.(map.id);ui.start?.({character,harness,mapId:map.id,config:rules});};
   const launchBeginner=()=>launchRules(beginnerRules,beginnerMap);
   const launchInstant=(card:any)=>{
-   // Single-player and spectate own bespoke routing on the page; everything
+    // Single-player owns bespoke routing on the page; everything
    // else composes the shared quick-start rules and starts them.
-   if(card.id==='spectate'||card.id==='horde'||card.id==='campaign'){ui.quickStart?.(card.id);return;}
+    if(card.id==='horde'||card.id==='campaign'){ui.quickStart?.(card.id);return;}
    launchRules(quickStartRules(config,card.id,latticePracticeDefaults(card.id)),mapChoice(card.id));
   };
   const launchTraining=(card:any)=>ui.startTraining?.(card.training);
-  const openLattice=(card:any)=>{ui.setConfig?.(card.rules);setLatticeIntro(card.id);scrollSetupTop();};
-  const openCustom=()=>ui.setSetupOpen?.(true);
-  // Secondary rail actions collapse behind MORE ▾ on phones (audit C5);
-  // MATCH SETUP and ENTER ARENA stay reachable at every size.
-  const railSecondary=netConnected
-   ? <Btn size="sm" variant="ghost" onClick={connectNet} disabled={!ui.ready||!!ui.error}><Users size={14}/>DISCONNECT</Btn>
-   : <Btn size="sm" variant="ghost" onClick={openBrowser} disabled={!ui.ready||!!ui.error}><Users size={14}/>ONLINE</Btn>;
-  const rail=<ActionRail summary={<>
-   <span className="chip chip--accent"><i/>{selected?.name}</span>
-   {wing&&<span className="chip chip--wing" style={{color:wing.color,borderColor:`${wing.color}80`}}><i/>{wing.label}</span>}
-   <span className="chip">{power?.name}</span>
-   <span className="chip">{ui.selectedMap?.name}</span>
-   <span className="chip">{ui.selectedMode?.name?.toUpperCase()} · {cap(railPlan.rosterLabel)}</span>
-    {railPlan.coop&&railPlan.tier&&<span className="chip chip--accent">DIRECTOR {railPlan.tier.id} · {railPlan.tier.label}</span>}
-   <span className="chip">{railPlan.modifierLabel}</span>
-   {ui.nextUnlock&&<span className="chip">NEXT UNLOCK · {ui.nextUnlock.name} · LV {ui.nextUnlock.level}</span>}
-   {netConnected&&<span className="chip chip--accent"><i/>ONLINE</span>}
-  </>}>
-   <div className={`rail-more${moreOpen?' is-open':''}`}>
-    <Btn size="sm" variant="ghost" className="rail-more__toggle" aria-expanded={moreOpen} onClick={()=>setMoreOpen(v=>!v)}>MORE<ChevronDown size={14}/></Btn>
-    <div className="rail-more__body">
-     <Btn size="sm" variant="ghost" onClick={()=>changeMode('progression')} disabled={!ui.ready||!!ui.error}><Sparkles size={14}/>RANK · LV {profile?.level}</Btn>
-     <Btn size="sm" variant="ghost" onClick={()=>changeMode('changelog')} disabled={!ui.ready||!!ui.error}><Sparkles size={14}/>PATCH NOTES</Btn>
-     <Btn size="sm" variant="ghost" onClick={backToDemo} disabled={!ui.ready||!!ui.error}><Film size={14}/>BACK TO DEMO</Btn>
-     <Btn size="sm" variant="ghost" onClick={()=>openSettings?.('arsenal')} disabled={!ui.ready||!!ui.error}><Shield size={14}/>ARSENAL</Btn>
-     <Btn size="sm" variant="ghost" onClick={()=>{changeMode('theater');ui.refreshDemos?.();}} disabled={!ui.ready||!!ui.error}><Film size={14}/>THEATER{demos.length?` ${demos.length}`:''}</Btn>
-     <Btn size="sm" variant="ghost" onClick={startSpectate} disabled={!ui.ready||!!ui.error}><Crosshair size={14}/>SPECTATE</Btn>
-     <Btn size="sm" variant="ghost" onClick={()=>setSingleOpen(true)} disabled={!ui.ready||!!ui.error}><Play size={14}/>SINGLE PLAYER</Btn>
-     {railSecondary}
+   const openLattice=(card:any)=>{focusContent.current=true;setLatticeIntro(card.id);};
+   const openCustom=()=>ui.setSetupOpen?.(true);
+   const activeLattice=latticeCards.find(card=>card.id===latticeIntro);
+   const title=section==='loadout'?'Make it yours.':section==='library'?'The field library.':latticeIntro?(activeLattice?.plan.mode.name??'Deployment briefing'):route==='training'?'Learn by playing.':route==='arena'?'Find your arena.':route==='solo'?'Your next challenge.':'Your next great match.';
+   const subtitle=section==='loadout'?'Choose your intelligence. Pair an operator with a harness that fits your playstyle.':section==='library'?'Your recordings, progress, and everything you need to know.':latticeIntro?'Know your objective. Review your crew. Deploy when you’re ready.':route==='training'?'Protected lessons and a clean first match. Build confidence at your own pace.':route==='arena'?'Classic combat. Each launch shows the exact rules, roster, and arena.':route==='solo'?'Survive the waves or take on a mission.':'A territory war, a quick skirmish, or a session with friends. Start here.';
+   const rail=<ActionRail summary={<div className={styles.currentMatch}>
+    <span className={styles.kicker}>CURRENT MATCH {netConnected?'· ONLINE':''}</span>
+    <strong>{railPlan.mode.name} <span> / {mapChoice(config?.mode??'deathmatch').name}</span></strong>
+    <details className={styles.railDetails}><summary>Review rules</summary><div className={styles.railRules}>{planChips(railPlan,mapChoice(config?.mode??'deathmatch'))}<p>Playing as {selected?.name} · {power?.name}</p></div></details>
+   </div>}>
+    <Btn variant="secondary" data-setup-trigger onClick={()=>setSetupOpen(true)}><span>MATCH SETUP</span><ChevronRight size={14}/></Btn>
+    <Btn variant="primary" onClick={()=>start()} disabled={unavailable}>ENTER ARENA<ArrowUpRight size={20}/></Btn>
+   </ActionRail>;
+   return <Shell className={`shell--showcase ${styles.menu}${entered?'':' shell--awaiting'}`} head={<TopBar sub="MAIN MENU">{headActions}</TopBar>} rail={rail}>
+    <div className={styles.navigation}>
+     <nav aria-label="Main menu" className={styles.navLinks}>
+      {[{id:'play',label:'Play',icon:<Play size={17}/>},{id:'loadout',label:'Loadout',icon:<Shield size={17}/>},{id:'library',label:'Library',icon:<BookOpen size={17}/>}].map(item=><button type="button" key={item.id} aria-current={section===item.id?'page':undefined} onClick={()=>navigate(item.id)}>{item.icon}{item.label}</button>)}
+     </nav>
+     <button type="button" className={styles.helpLink} onClick={()=>openSettings?.('help')}><BookOpen size={16}/>Help &amp; controls<ArrowUpRight size={14}/></button>
     </div>
-   </div>
-   <Btn variant="secondary" data-setup-trigger onClick={()=>setSetupOpen(true)}><span>MATCH SETUP</span><ChevronRight size={14}/></Btn>
-   <Btn variant="primary" onClick={()=>start()} disabled={!ui.ready||!!ui.error}>ENTER ARENA <small>{ui.selectedMode?.name?.toUpperCase()} · {ui.selectedMap?.name?.toUpperCase()}</small><ArrowUpRight size={20}/></Btn>
-  </ActionRail>;
-  return <Shell className={`shell--showcase${entered?'':' shell--awaiting'}`} head={<TopBar sub="CUSTOM MATCH">{headActions}</TopBar>} rail={rail}>
-  <div className="stack">
-   <PageHead eyebrow="COLOSSEUM SETUP" title={<>Choose your intelligence<span>.</span></>} lede="Pick an operator, strap on a harness, then tune the rules. Nine rival models are already talking trash — only one leaves with bragging rights."/>
     {notice&&<Banner>{notice}</Banner>}
-    {(latticeIntro||isLattice(config?.mode))&&<Panel label="LATTICE / DEPLOYMENT BRIEFING" meta="NEW HERE? START WITH YOUR FRONT GATE">
-     <LatticeBriefing mode={latticeIntro??config.mode} bindings={ui.bindings}/>
-     {latticeIntro&&<div className="row"><Btn variant="primary" onClick={()=>{quickStart?.(latticeIntro);setLatticeIntro(null);}}>DEPLOY {latticeIntro==='cocs-coop'?'OPERATIONS':'LATTICE STRIKE'}</Btn><Btn variant="ghost" onClick={()=>setLatticeIntro(null)}>BACK TO LOADOUT</Btn></div>}
-    </Panel>}
-   <div className="layout layout--lead">
-    <div className="stack">
+    <div className={styles.workspace}>
+     <div className={styles.content}>
+      <header className={styles.pageHeading}>
+       {section==='play'&&(route!=='home'||latticeIntro)&&<button type="button" className={styles.backLink} onClick={()=>navigate('play')}><ArrowLeft size={16}/>Back to Play</button>}
+       <p className={styles.kicker}>{section==='play'?'PLAY / '+(latticeIntro?'BRIEFING':route==='home'?'DISCOVER':route.toUpperCase()):section.toUpperCase()}</p>
+       <h1 ref={contentHeading} tabIndex={-1}>{title}</h1><p>{subtitle}</p>
+      </header>
+      {section==='play'&&route==='home'&&!latticeIntro&&<>
+       <section className={styles.feature} aria-labelledby="lattice-feature-title">
+        <div className={styles.latticeArt} aria-hidden="true"><i/><i/><i/><i/><i/><i/><span>LINK / PUSH / HOLD</span></div>
+        <div className={styles.featureCopy}><p className={styles.kicker}><Hexagon size={14}/>FEATURED EXPERIENCE</p><h2 id="lattice-feature-title">LATTICE<span>Every link is a front line.</span></h2><p>Capture the network in Strike. Hold it together against the Director in Operations.</p>
+         <div className={styles.featureActions}><Btn variant="primary" onClick={()=>openLattice(latticeCards[0])}>EXPLORE LATTICE STRIKE<ArrowUpRight size={17}/></Btn><Btn variant="ghost" onClick={()=>openLattice(latticeCards[1])}>OPERATIONS · CO-OP<ChevronRight size={16}/></Btn></div>
+         <span className={styles.featureFootnote}>Briefing before deployment · Clean preset rules</span>
+        </div>
+       </section>
+       <div className={styles.routeGrid}>
+        <button type="button" className={styles.routeCard} onClick={openBrowser} disabled={unavailable}><Users size={22}/><span><strong>Online</strong><small>Browse servers. Find your people.</small></span><ArrowUpRight size={18}/></button>
+        <button type="button" className={styles.routeCard} onClick={()=>navigate('play','training')}><GraduationCap size={22}/><span><strong>Training</strong><small>Your first match, at your pace.</small></span><ChevronRight size={18}/></button>
+        <button type="button" className={styles.routeCard} data-setup-trigger onClick={openCustom}><Sparkles size={22}/><span><strong>Custom match</strong><small>Every mode. Your arena. Your rules.</small></span><ChevronRight size={18}/></button>
+       </div>
+       <section className={styles.moreWays} aria-labelledby="more-ways-title"><h2 id="more-ways-title">More ways to play</h2><div>
+        <button type="button" onClick={()=>navigate('play','arena')}><Crosshair size={18}/><span>Arena quick starts<small>Deathmatch, teams &amp; more</small></span><ChevronRight size={16}/></button>
+        <button type="button" onClick={()=>navigate('play','solo')}><Skull size={18}/><span>Single player<small>Horde &amp; campaign</small></span><ChevronRight size={16}/></button>
+        <button type="button" onClick={()=>navigate('library')}><Film size={18}/><span>Watch &amp; discover<small>Spectate, replays &amp; guides</small></span><ChevronRight size={16}/></button>
+       </div></section>
+       {netConnected&&<Btn variant="ghost" onClick={connectNet} disabled={unavailable}><Users size={16}/>DISCONNECT FROM SERVER</Btn>}
+      </>}
+      {section==='play'&&activeLattice&&<section className={styles.briefing} aria-label="LATTICE deployment briefing">
+       <LatticeBriefing mode={activeLattice.id} bindings={ui.bindings}/>
+       <div className={styles.rulePreview} aria-label="Deployment rules">{planChips(activeLattice.plan,activeLattice.map,{reset:true})}</div>
+       {latticeRole&&<div className={styles.roleSummary}><p><b>{latticeRole.operator.role} · {latticeRole.operator.name}</b>{latticeRole.operator.description}</p><p><b>{latticeRole.harness.role} · {latticeRole.harness.name}</b>{latticeRole.harness.description}</p></div>}
+       <div className="row"><Btn variant="primary" disabled={unavailable} onClick={()=>launchRules(activeLattice.rules,activeLattice.map)}>DEPLOY {activeLattice.id==='cocs-coop'?'OPERATIONS':'LATTICE STRIKE'}<ArrowUpRight size={17}/></Btn><Btn variant="secondary" onClick={()=>navigate('play','training')}><GraduationCap size={17}/>TRAIN FIRST</Btn></div>
+      </section>}
+      {section==='play'&&route==='training'&&!latticeIntro&&<div className={styles.activityList}>
+       <SelectCard disabled={unavailable} onClick={launchBeginner} icon={<Play size={20}/>} name="RECOMMENDED FIRST MATCH" tag={beginnerMode?`${beginnerPlan.mode.name} · ${modeTargetText(beginnerMode,beginnerPlan.rules.fragLimit)}`:'Deathmatch'} stats={planChips(beginnerPlan,beginnerMap,{reset:true})} ariaLabel={`Recommended first match: ${beginnerPlan.mode.name}, clean beginner rules, ${cap(beginnerPlan.rosterLabel)}, ${beginnerPlan.duration}, map ${beginnerMap.name}`} meta={<Play size={15}/>}/>
+       {trainingCards.map(card=><SelectCard disabled={unavailable} key={card.id} onClick={()=>launchTraining(card)} icon={card.icon} name={TRAINING_TITLES[card.training as keyof typeof TRAINING_TITLES]} tag={`Guided first match · ${TRAINING_STEPS[card.training as keyof typeof TRAINING_STEPS].length} lessons · protected practice`} stats={[...planChips(card.plan,card.map,{reset:true}),<span className="card-chip card-chip--accent" key="practice">PRACTICE · NO XP / CHALLENGES / HISTORY</span>]} ariaLabel={`${TRAINING_TITLES[card.training as keyof typeof TRAINING_TITLES]}: guided practice match, ${cap(card.plan.rosterLabel)}, ${card.plan.duration}, no XP, challenges or match history`} meta={<Play size={15}/>}/>)}
+       <p className="field-note">These entries rebuild clean rules. Guided training protects you and your HQ while a lesson is active, and awards no XP, challenges, or match history.</p>
+      </div>}
+      {section==='play'&&route==='arena'&&!latticeIntro&&<div className={styles.activityList}>
+       {modeCards.map(card=><SelectCard disabled={unavailable} key={card.id} onClick={()=>launchInstant(card)} icon={card.icon} name={cap(card.plan.mode.name)} tag={card.plan.mode.description} stats={planChips(card.plan,card.map)} ariaLabel={`${card.plan.mode.name}: ${cap(card.plan.rosterLabel)}, ${card.plan.duration}, ${card.plan.fill.auto?card.plan.fill.note:card.plan.modifiers.length?`inherits ${card.plan.modifierLabel}`:'no saved modifiers'}`} meta={<Play size={15}/>}/>)}
+       <div className={styles.customNote}><span><b>Looking for another mode?</b>{GAME_MODES.length} modes · {MUTATORS.length} mutators · {COCS_TIERS.length} Director tiers. Custom match includes vehicle modes and every advanced rule.</span><Btn data-setup-trigger onClick={openCustom}>CUSTOM RULES<ChevronRight size={16}/></Btn></div>
+      </div>}
+      {section==='play'&&route==='solo'&&!latticeIntro&&<div className={styles.activityList}>
+       {singleCards.map(card=><SelectCard disabled={unavailable} key={card.id} onClick={()=>launchInstant(card)} icon={card.icon} name={cap(card.plan.mode.name)} tag={card.plan.mode.description} stats={planChips(card.plan,card.map)} ariaLabel={`${card.plan.mode.name}: solo start, ${card.plan.duration}`} meta={<Play size={15}/>}/>)}
+       <Btn onClick={()=>setSingleOpen(true)} disabled={unavailable}>SINGLE PLAYER HUB<ChevronRight size={16}/></Btn>
+      </div>}
+      {section==='loadout'&&<div className="stack">
      <Panel className="panel--dense panel--operator" label="01 / OPERATOR" meta={`${CHARACTERS.length} AVAILABLE`} actions={<Btn size="sm" variant="ghost" onClick={ui.shuffle} title="Random compatible operator, harness and arena"><span className="shuffle-long">SHUFFLE LOADOUT / MAP</span><span className="shuffle-short" aria-hidden="true">SHUFFLE</span></Btn>}>
        <div className="grid-cards">{CHARACTERS.map((c:any,i:number)=>{const card=operatorCard(c.id);return <SelectCard key={c.id} selected={character===c.id} onClick={()=>chooseCharacter(c.id)} ariaLabel={`${c.name}: ${card?`${card.roleLabel} · ${card.signature.name}. `:''}${formatWhole(c.stats.health)} health, ${formatWhole(c.stats.armor)} armor, ${formatNumber(c.stats.speed)} meters per second`} icon={<Hexagon size={22} strokeWidth={1.4}/>} name={c.name} tag={c.tag} meta={character===c.id?<Check size={17}/>:String(i+1).padStart(2,'0')} stats={<>
         <span className="card-chip card-chip--stat">{formatWhole(c.stats.health)} HP · {formatWhole(c.stats.armor)} ARM · {formatNumber(c.stats.speed)} m/s</span>
@@ -168,52 +196,27 @@ export function SelectionScreen({ui}:ScreenProps){
         {latticeRole&&<div className="lattice-loadout-role"><span className="eyebrow">LATTICE / {latticeRole.harness.role.toUpperCase()}</span><b>{latticeRole.harness.name}</b><p>{latticeRole.harness.description}</p></div>}
       </div>
      </Panel>
-    </div>
-    <div className="stack stack--sticky">
-     <div ref={previewRef} className="preview-stage" aria-label={`${selected?.name} animated 3D model and kit preview`}>
-      <span className="preview-corner">LIVE {previewTab==='model'?'MODEL':'KIT'} / {previewIndex}</span>
-      <div className="preview-tabs"><Segmented value={previewTab} onChange={setPreviewTab} options={[{value:'model',label:'MODEL'},{value:'kit',label:'KIT'}]} ariaLabel="Preview panel"/></div>
-      {previewTab==='model'
-       ?<div className="preview-caption"><p className="eyebrow" style={{color:selected?.color}}>{selected?.tag}</p><h2 className="h-page">{selected?.name}</h2><p className="lede" style={{fontSize:14}}>{selected?.detail}</p></div>
-       :<div className="preview-caption preview-caption--kit" role="tabpanel" aria-label="Kit preview">
-        <div className="row row--between">
-         {kit?.wing&&<span className="chip chip--wing" style={{color:kit.wing.color,borderColor:`${kit.wing.color}80`}}><i/>{kit.wing.label}</span>}
-         {kit?.roleLabel&&<span className="label">{kit.roleLabel}</span>}
-        </div>
-        {kit?.signature&&<p className="field-note"><b className="preview-kit-verb">{kit.signature.name.toUpperCase()}</b> {kit.signature.line}</p>}
-        {kit?.movement&&<p className="field-note"><b className="preview-kit-verb">{kit.movement.name.toUpperCase()}</b>{kit.movement.inputLabel?` · ${kit.movement.inputLabel}`:''}{kit.movement.budgetLine?` · ${kit.movement.budgetLine}`:''}</p>}
-        {kit?.rider&&<p className="field-note"><b className="preview-kit-verb">{kit.wing?.label} RIDER</b> {kit.rider.description}</p>}
-        {kit?.tradeoff&&<p className="field-note"><b className="preview-kit-verb">TRADEOFF</b> {kit.tradeoff.name} — {kit.tradeoff.description}</p>}
-        <div className="row row--between">
-         <p className="field-note preview-kit-combo">{kit?.combo}</p>
-         {openSettings&&<Btn size="sm" variant="ghost" onClick={()=>openSettings('arsenal')}><Shield size={14}/>OPEN ARSENAL</Btn>}
-        </div>
-       </div>}
-     </div>
-      <Panel label="03 / QUICK START" meta="RECOMMENDED · TRAINING · CUSTOM">
-        <p className="eyebrow">START HERE</p>
-        <div className="grid-cards">
-         <SelectCard onClick={launchBeginner} icon={<Play size={20}/>} name="RECOMMENDED FIRST MATCH" tag={beginnerMode?`${beginnerPlan.mode.name} · ${modeTargetText(beginnerMode,beginnerPlan.rules.fragLimit)}`:'Deathmatch'} stats={planChips(beginnerPlan,beginnerMap,{reset:true})} ariaLabel={`Recommended first match: ${beginnerPlan.mode.name}, clean beginner rules, ${cap(beginnerPlan.rosterLabel)}, ${beginnerPlan.duration}, map ${beginnerMap.name}`} meta={<Play size={15}/>}/>
-         {trainingCards.map(card=><SelectCard key={card.id} onClick={()=>launchTraining(card)} icon={card.icon} name={TRAINING_TITLES[card.training as keyof typeof TRAINING_TITLES]} tag={`Guided first match · ${TRAINING_STEPS[card.training as keyof typeof TRAINING_STEPS].length} lessons · protected practice`} stats={[...planChips(card.plan,card.map,{reset:true}),<span className="card-chip card-chip--accent" key="practice">PRACTICE · NO XP / CHALLENGES / HISTORY</span>]} ariaLabel={`${TRAINING_TITLES[card.training as keyof typeof TRAINING_TITLES]}: guided practice match, ${cap(card.plan.rosterLabel)}, ${card.plan.duration}, no XP, challenges or match history`} meta={<Play size={15}/>}/>)}
-         <SelectCard onClick={openCustom} icon={<Sparkles size={20}/>} name="CUSTOM RULES" tag="Every mode and rule stays reachable here" stats={[<span className="card-chip" key="modes">{GAME_MODES.length} MODES</span>,<span className="card-chip" key="mutators">{MUTATORS.length} MUTATORS</span>,<span className="card-chip" key="tiers">{COCS_TIERS.length} DIRECTOR TIERS</span>,<span className="card-chip" key="saves">SAVED RULES STAY SAVED</span>]} ariaLabel="Custom rules: open match setup for every mode, arena, mutator and Director tier" meta={<ChevronRight size={15}/>}/>
-        </div>
-        <p className="field-note">The recommended match and the training entries rebuild clean rules — a saved mutator or Director tier cannot leak into them. Training runs as a protected practice match: an active lesson cannot end the match, lose the HQ or eliminate you, and it awards no XP, challenges or match history. Every other card shows its effective rules before you click: inherited modifiers are named, and an unsupported arena is labelled as a substitution.</p>
-        <p className="eyebrow">ALL QUICK STARTS / EFFECTIVE RULES SHOWN PER CARD</p>
-        <div className="grid-cards">
-         {modeCards.map(card=><SelectCard key={card.id} onClick={()=>launchInstant(card)} icon={card.icon} name={cap(card.plan.mode.name)} tag={card.plan.mode.description} stats={planChips(card.plan,card.map)} ariaLabel={`${card.plan.mode.name}: ${cap(card.plan.rosterLabel)}, ${card.plan.duration}, ${card.plan.fill.auto?card.plan.fill.note:card.plan.modifiers.length?`inherits ${card.plan.modifierLabel}`:'no saved modifiers'}`} meta={<Play size={15}/>}/>)}
-         {latticeCards.map(card=><SelectCard key={card.id} onClick={()=>openLattice(card)} icon={card.icon} name={cap(card.plan.mode.name)} tag={`Briefing first · ${card.plan.mode.coop?'co-op against the Director':'team territory war'}`} stats={planChips(card.plan,card.map,{reset:true})} ariaLabel={`${card.plan.mode.name}: deployment briefing, ${cap(card.plan.rosterLabel)}, ${card.plan.duration}`} meta={<ChevronRight size={15}/>}/>)}
-         {singleCards.map(card=><SelectCard key={card.id} onClick={()=>launchInstant(card)} icon={card.icon} name={cap(card.plan.mode.name)} tag={card.plan.mode.description} stats={planChips(card.plan,card.map)} ariaLabel={`${card.plan.mode.name}: solo start, ${card.plan.duration}`} meta={<Play size={15}/>}/>)}
-         <SelectCard onClick={()=>launchInstant(spectateCard)} icon={spectateCard.icon} name={cap(spectateCard.plan.mode.name)} tag="Cinematic AI match on the current rules" stats={planChips(spectateCard.plan,spectateCard.map)} ariaLabel={`Spectate: cinematic AI match on ${spectateCard.plan.mode.name}`} meta={<Film size={15}/>}/>
-        </div>
-        <p className="field-note">Starts use <b>{selected?.name}</b> and the <b>{power?.name}</b> harness. Modes that auto-fill say so on the card: Operations crews your squad and its garrison from the bot seats, soccer always fills to 2 v 2, and a 0-rival race is a solo time trial. Full rules, arenas and the Help legend live under MATCH SETUP or Graphics &amp; settings → Help.</p>
-      </Panel>
-     <Panel label="LOADOUT PRESETS" meta={`${presets.length} SAVED`} actions={<Btn size="sm" variant="ghost" onClick={()=>setSetupOpen(true)}>MANAGE</Btn>}>
+      <Panel label="LOADOUT PRESETS" meta={`${presets.length} SAVED`} actions={<Btn size="sm" variant="ghost" onClick={()=>setSetupOpen(true)}>MANAGE</Btn>}>
       {presets.length?<div className="row" role="group" aria-label="Saved loadout presets">{presets.map((p:any)=><span key={p.id} className="chip preset-chip" title={`${p.character} / ${p.harness}${p.mapId?` · ${p.mapId}`:''}`}>
        <button type="button" className="text-button" aria-label={`Load preset ${p.name}`} onClick={()=>loadPreset?.(p)}>{p.name}</button>
        <button type="button" className="text-button" aria-label={`Delete preset ${p.name}`} onClick={()=>deletePreset?.(p.id)}>×</button>
-      </span>)}</div>:<p className="field-note">No presets yet. Save your full loadout — operator, harness, arena, rules, gear, mods, finish and reticle — from MATCH SETUP.</p>}
-     </Panel>
-     <Panel label="NEXT UNLOCKS" meta={nextUnlocks.length?`${nextUnlocks.length} UPCOMING`:'ALL CLAIMED'} actions={<Btn size="sm" variant="ghost" onClick={()=>changeMode('progression')}>TRACK</Btn>}>
+       </span>)}</div>:<p className="field-note">No presets yet. Save your full loadout — operator, harness, arena, rules, gear, mods, finish and reticle — from MATCH SETUP.</p>}
+      </Panel>
+      <Btn onClick={()=>openSettings?.('arsenal')}><Shield size={16}/>ARSENAL · WEAPONS &amp; GEAR<ArrowUpRight size={16}/></Btn>
+     </div>}
+     {section==='library'&&<div className="stack">
+      <div className={styles.libraryGrid}>
+       <button type="button" className={styles.routeCard} onClick={()=>{changeMode('theater');ui.refreshDemos?.();}} disabled={unavailable}><Film size={22}/><span><strong>Theater</strong><small>{demos.length?`${demos.length} saved recordings`:'Replays, highlights & bookmarks'}</small></span><ArrowUpRight size={18}/></button>
+       <button type="button" className={styles.routeCard} onClick={()=>openSettings?.('help')}><BookOpen size={22}/><span><strong>Field guide</strong><small>Controls, objectives &amp; mode rules</small></span><ArrowUpRight size={18}/></button>
+       <button type="button" className={styles.routeCard} onClick={()=>changeMode('progression')} disabled={unavailable}><Sparkles size={22}/><span><strong>Progression</strong><small>Rank {profile?.level??1} · Unlocks &amp; match history</small></span><ArrowUpRight size={18}/></button>
+       <button type="button" className={styles.routeCard} onClick={()=>openSettings?.('arsenal')}><Shield size={22}/><span><strong>Arsenal</strong><small>Compare weapons &amp; build your kit</small></span><ArrowUpRight size={18}/></button>
+      </div>
+      <details className={styles.disclosure}><summary>Spectate &amp; demo<Film size={17}/></summary><div className={styles.activityList}>
+       <SelectCard disabled={unavailable} onClick={startSpectate} icon={spectateCard.icon} name="SPECTATE CURRENT MATCH" tag="Cinematic AI match on the current rules" stats={planChips(spectateCard.plan,spectateCard.map)} ariaLabel={`Spectate: cinematic AI match on ${spectateCard.plan.mode.name}`} meta={<Film size={15}/>}/>
+       <Btn variant="ghost" onClick={backToDemo} disabled={unavailable}>BACK TO DEMO<ArrowUpRight size={16}/></Btn>
+      </div></details>
+      <details className={styles.disclosure}><summary>Next unlocks &amp; daily challenges<span>{challenges.filter((c:any)=>c.done).length} / {challenges.length} complete</span></summary><div className="stack">
+      <Panel label="NEXT UNLOCKS" meta={nextUnlocks.length?`${nextUnlocks.length} UPCOMING`:'ALL CLAIMED'} actions={<Btn size="sm" variant="ghost" onClick={()=>changeMode('progression')}>TRACK</Btn>}>
       {nextUnlocks.length?<ul className="next-unlock-list">{nextUnlocks.map((item:any)=><li key={item.id} className="next-unlock-row">
        <span className="chip chip--accent">LV {item.level}</span>
        <span className="card-main"><span className="card-name">{item.name}<small>{String(item.kind||'').toUpperCase()}{item.description?` · ${item.description}`:''}</small></span></span>
@@ -225,8 +228,38 @@ export function SelectionScreen({ui}:ScreenProps){
        <Meter ratio={c.target?Math.min(1,c.progress/c.target):0}/>
       </div>)}</div>:<p className="field-note">Daily objectives load with the arena. Finish matches to earn bonus XP.</p>}
      </Panel>
+      </div></details>
+      <div className="row"><Btn variant="ghost" onClick={()=>changeMode('changelog')} disabled={unavailable}>PATCH NOTES<ArrowUpRight size={16}/></Btn><Btn variant="ghost" onClick={()=>openSettings?.('game')}>GRAPHICS &amp; SETTINGS<ArrowUpRight size={16}/></Btn></div>
+     </div>}
+     </div>
+     <aside className={styles.loadoutAside} aria-label="Current loadout">
+      <div className={styles.asideHeading}><span className={styles.kicker}>YOUR OPERATOR</span><span className={styles.kicker}>{previewIndex} / {String(CHARACTERS.length).padStart(2,'0')}</span></div>
+      {/* Keep this host mounted across every menu route: the renderer measures it each frame. */}
+      <div ref={previewRef} className={`preview-stage ${styles.preview}`} aria-label={`${selected?.name} animated 3D model and kit preview`}>
+       <span className="preview-corner">LIVE {previewTab==='model'?'MODEL':'KIT'} / {previewIndex}</span>
+       <div className="preview-tabs"><Segmented value={previewTab} onChange={setPreviewTab} options={[{value:'model',label:'MODEL'},{value:'kit',label:'KIT'}]} ariaLabel="Preview panel"/></div>
+       {previewTab==='model'
+        ?<div className="preview-caption"><p className="eyebrow" style={{color:selected?.color}}>{selected?.tag}</p><h2 className="h-page">{selected?.name}</h2><p className="lede" style={{fontSize:14}}>{selected?.detail}</p></div>
+        :<div className="preview-caption preview-caption--kit" role="tabpanel" aria-label="Kit preview">
+         <div className="row row--between">
+          {kit?.wing&&<span className="chip chip--wing" style={{color:kit.wing.color,borderColor:`${kit.wing.color}80`}}><i/>{kit.wing.label}</span>}
+          {kit?.roleLabel&&<span className="label">{kit.roleLabel}</span>}
+         </div>
+         {kit?.signature&&<p className="field-note"><b className="preview-kit-verb">{kit.signature.name.toUpperCase()}</b> {kit.signature.line}</p>}
+         {kit?.movement&&<p className="field-note"><b className="preview-kit-verb">{kit.movement.name.toUpperCase()}</b>{kit.movement.inputLabel?` · ${kit.movement.inputLabel}`:''}{kit.movement.budgetLine?` · ${kit.movement.budgetLine}`:''}</p>}
+         {kit?.rider&&<p className="field-note"><b className="preview-kit-verb">{kit.wing?.label} RIDER</b> {kit.rider.description}</p>}
+         {kit?.tradeoff&&<p className="field-note"><b className="preview-kit-verb">TRADEOFF</b> {kit.tradeoff.name} — {kit.tradeoff.description}</p>}
+         <div className="row row--between"><p className="field-note preview-kit-combo">{kit?.combo}</p>{openSettings&&<Btn size="sm" variant="ghost" onClick={()=>openSettings('arsenal')}><Shield size={14}/>OPEN ARSENAL</Btn>}</div>
+        </div>}
+      </div>
+      <div className={styles.loadoutIdentity}>
+       <div>{wing&&<span className="chip chip--wing" style={{color:wing.color,borderColor:`${wing.color}80`}}>{wing.label}</span>}<span>{selectedCard?.roleLabel}</span></div>
+       <p><Shield size={16}/><strong>{power?.name}</strong><span>{power?.power}</span></p>
+       {latticeRole&&<p className={styles.asideRole}>{latticeRole.operator.role} / {latticeRole.harness.role}</p>}
+       <Btn variant="secondary" onClick={()=>section==='loadout'?openSettings?.('arsenal'):navigate('loadout')}>{section==='loadout'?'OPEN ARSENAL':'EDIT LOADOUT'}<ChevronRight size={16}/></Btn>
+      </div>
+      <p className={styles.asideNote}>Your operator and harness travel with you into every match.</p>
+     </aside>
     </div>
-   </div>
-  </div>
- </Shell>;
+  </Shell>;
 }

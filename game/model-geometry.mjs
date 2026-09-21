@@ -13,15 +13,17 @@ export function beveledBox(width,height,depth,radius=Math.min(width,height,depth
 }
 
 // Y-axis contour with elliptical/squircle sections. Each section is
-// [height, half-width, half-depth, forward-offset]. Repeated narrow sections
+// [height, half-width, half-depth, forward-offset, lateral-offset, crown-rise].
+// Optional crown-rise raises the sides of a section to form split crests.
+// Repeated narrow sections
 // form rolled plate edges instead of an inflated sphere or a stack of boxes.
 export function contourGeometry(sections,{segments=24,power=.8}={}){
  const positions=[],uv=[],indices=[];
  for(let row=0;row<sections.length;row++){
-  const [y,rx,rz,z=0]=sections[row];
+   const [y,rx,rz,z=0,x=0,crown=0]=sections[row];
   for(let i=0;i<=segments;i++){
    const a=i/segments*Math.PI*2,c=Math.cos(a),s=Math.sin(a);
-   positions.push(Math.sign(c)*Math.abs(c)**power*rx,y,Math.sign(s)*Math.abs(s)**power*rz+z);
+    positions.push(Math.sign(c)*Math.abs(c)**power*rx+x,y+crown*c*c,Math.sign(s)*Math.abs(s)**power*rz+z);
    uv.push(i/segments,row/(sections.length-1));
   }
  }
@@ -49,4 +51,27 @@ export function placedGeometry(geometry,position=[0,0,0],rotation=[0,0,0]){
 // Both ends remain open; unlike capped cylinders this has a real visible bore.
 export function barrelGeometry(segments=24){
  return new T.LatheGeometry([[.78,-.5],[1,-.5],[1.07,-.46],[1.07,-.32],[1,-.28],[1,.40],[1.10,.44],[1.10,.5],[.78,.5],[.78,-.5]].map(p=>new T.Vector2(...p)),segments);
+}
+
+// Convex, authored XY armor outline. Rolled edges spend vertices on the rim,
+// while planar faces stay a triangle fan (unlike subdividing an entire box).
+// Outline is counterclockwise; all bevel rings stay INSIDE its exact envelope.
+export function armorPanel(outline,depth,{bevel=.12,steps=2}={}){
+ const positions=[],uv=[],indices=[],n=outline.length;
+ const ring=(scale,z)=>{for(const [x,y] of outline){positions.push(x*scale,y*scale,z);uv.push(x+.5,y+.5);}};
+ const rings=steps*2+2;
+ for(let i=0;i<rings;i++){
+  const t=i/(rings-1),a=t*Math.PI;
+  ring(1-bevel+bevel*Math.sin(a),-Math.cos(a)*depth*.5);
+ }
+ for(let r=0;r<rings-1;r++)for(let i=0;i<n;i++){
+  const a=r*n+i,b=r*n+(i+1)%n;indices.push(a,b,a+n,b,b+n,a+n);
+ }
+ // Duplicate the face vertices to retain a machined, planar normal at the rim.
+ for(const [z,reverse] of [[-depth*.5,true],[depth*.5,false]]){
+  const start=positions.length/3;ring(1-bevel,z);
+  for(let i=1;i<n-1;i++)indices.push(start, start+(reverse?i+1:i), start+(reverse?i:i+1));
+ }
+ const g=new T.BufferGeometry();g.setAttribute('position',new T.Float32BufferAttribute(positions,3));g.setAttribute('uv',new T.Float32BufferAttribute(uv,2));g.setIndex(indices);g.computeVertexNormals();
+ g.type='ArmorPanelGeometry';g.parameters={outline,depth,bevel,steps};return g;
 }

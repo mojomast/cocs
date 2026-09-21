@@ -110,6 +110,7 @@ function repeatCue(event,state,key,cue,window){
 
 export function latticeSoundCue(event,player,state=null){
  if(!event||!player)return null;
+ if(event.type==='cocs-terminal-shard')return event.team===player.team?(event.action==='collect'?cues.coin:cues.burn):null;
  if(event.type==='cocs-capture'||event.type==='cocs-depot-capture')return event.team===player.team?cues.secured:cues.lost;
  if(event.type==='cocs-device-use'){
   if(event.actor!==player.id)return null;
@@ -181,6 +182,7 @@ export function latticeSoundCue(event,player,state=null){
 }
 
 export function latticeCaption(event){
+ if(event?.type==='cocs-terminal-shard')return event.action==='collect'?'Shard secured · return to your HQ vault':'Shard returned · recover it at the relay';
  const label=String(event?.node??event?.depot??'').replace(/-/g,' ').toUpperCase();
  const roleWord=String(event?.role??'role').replace(/-/g,' ').toUpperCase();
  if(event?.type==='cocs-capture')return `Node captured · ${label}`;
@@ -284,4 +286,3 @@ export function latticePresentationChanges(previous, { nodes = [], depots = [], 
  }
  return { next, captures, deviceChanges };
 }
-

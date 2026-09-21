@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {postStage,applyComposerSize,disposeComposer,reducedMotion,QUALITY_LEVELS,normalizeQuality,normalizeQualityOverride,qualitySettings,qualityIndex,nextQualityTier,nextQualityState,nextLabBudget,labBudgetLabel,clampTriangleBudget,frameTriangleBudget,bloomResolution,createFrameWindow,pushFrameTime,framePercentiles} from './post.mjs';
+import {postStage,applyComposerSize,disposeComposer,reducedMotion,QUALITY_LEVELS,normalizeQuality,normalizeQualityOverride,qualitySettings,qualityIndex,nextQualityTier,nextQualityState,nextLabBudget,labBudgetLabel,clampTriangleBudget,frameTriangleBudget,bloomResolution,createFrameWindow,pushFrameTime,framePercentiles,hasLayerContent} from './post.mjs';
 
 const fakeComposer = () => {
   const calls = [];
@@ -209,4 +209,56 @@ test('the lab budget bands leave a dead zone so a frame time near the threshold 
   let state = { level: 1, slow: 0, fast: 0, cool: 0 };
   for (let i = 0; i < 600; i++) state = nextLabBudget(state, 16);
   assert.equal(state.level, 1, 'between slowMs and recoverMs the level holds');
+});
+
+test('failed lab recovery backs off without delaying further shedding or locking out later recovery', () => {
+  const advance = (state, ms, seconds) => {
+    for (let i = 0; i < Math.ceil(seconds * 1000 / ms); i++) state = nextLabBudget(state, ms);
+    return state;
+  };
+  let state = advance({ level: 1 }, 10, 6.1);
+  assert.equal(state.level, 0, 'first recovery remains responsive');
+  state = advance(state, 25, 5.2);
+  assert.equal(state.level, 1);
+  assert.equal(state.failures, 1);
+  assert.ok(state.retry > 29, 'failed trial gets a 30-second backoff');
+  state = advance(state, 10, 20);
+  assert.equal(state.level, 1, 'fast cheap frames do not immediately repeat the failed trial');
+  const worse = advance(state, 25, 2.1);
+  assert.equal(worse.level, 2, 'backoff never blocks emergency shedding');
+  state = advance(state, 10, 20);
+  assert.equal(state.level, 0, 'a later probe can recover');
+  // The second failed probe doubles the wait, bounded at 120 seconds thereafter.
+  for (let i = 0; i < 208 && state.level === 0; i++) state = nextLabBudget(state, 25);
+  assert.equal(state.level, 1);
+  assert.equal(state.failures, 2);
+  assert.ok(state.retry > 59);
+});
+
+test('lab suspend gaps preserve recovery and slow-frame evidence without spending cooldowns', () => {
+  const before = { level: 1, slow: 1.9, fast: 0, cool: 0, trial: 8, retry: 4, failures: 2 };
+  for (const gap of [NaN, 0, -1, 900, 10000]) {
+    const after = nextLabBudget(before, gap);
+    for (const key of Object.keys(before)) assert.equal(after[key], before[key], key);
+    assert.equal(after.changed, false);
+  }
+});
+
+test('layer occupancy respects hierarchy, materials, frustum and explicit uncullable geometry', () => {
+  const mesh = { isMesh: true, layers: { mask: 4 }, material: { visible: true }, visible: true, children: [] };
+  const parent = { layers: { mask: 1 }, children: [mesh] };
+  const frustum = { intersectsObject: () => false };
+  assert.equal(hasLayerContent(parent, 4, frustum), false, 'offscreen meshes do not require a layer');
+  frustum.intersectsObject = () => true;
+  assert.equal(hasLayerContent(parent, 4, frustum), true, 'parent layer does not hide a child layer');
+  parent.visible = false;
+  assert.equal(hasLayerContent(parent, 4, frustum), false);
+  parent.visible = true;
+  mesh.material = [{ visible: false }];
+  assert.equal(hasLayerContent(parent, 4, frustum), false);
+  mesh.material.push({ visible: true });
+  mesh.frustumCulled = false;
+  frustum.intersectsObject = () => { throw new Error('uncullable meshes must not be tested'); };
+  assert.equal(hasLayerContent(parent, 4, frustum), true);
+  assert.equal(hasLayerContent(parent, 2, frustum), false);
 });

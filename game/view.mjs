@@ -22,6 +22,7 @@ import {refineOperatorCharacter} from './models.mjs';
 import {terrainTriangles,terrainWallTriangles} from './terrain.mjs';
 import {foundryDetails,styleFoundryObjective} from './lattice-foundry-view.mjs';
 import {latticePresentationChanges} from './lattice-feedback.mjs';
+import {updateLatticeWorld,clearLatticeWorld} from './lattice-view.mjs';
 import {buildInteriors,interiorAt} from './interiors.mjs';
 import {smoothNormals,positionColors} from './terrain-normals.mjs';
 import {TEAM_PALETTE,teamPresentation,teamMark,updateTeamMark,applyActorTeam} from './team-presentation.mjs';
@@ -31,7 +32,7 @@ import {cavernShell,facadeDetails,tunnelRenderPaths,propId,applyPropDamage,propD
 import {raceDemoMode,raceDemoPose,RACE_DEMO_MODE_SECONDS} from './race-camera.mjs';
 import {occlusionDistance} from './camera.mjs';
 import {smoothAngle,smoothTowards,smoothFactor,normalizeCameraOwner,cameraOwnerAllowsRace,integrateFreeMove,FREE_CAM_DEFAULT_SPEED,FREE_CAM_BOOST,FREE_CAM_MIN_SPEED,FREE_CAM_MAX_BASE_SPEED} from './camera-modes.mjs';
-import {postStage,applyComposerSize,disposeComposer,reducedMotion,normalizeQuality,qualitySettings,qualityIndex,nextQualityTier,QUALITY_LEVELS,frameTriangleBudget,normalizeQualityOverride,bloomResolution,nextQualityState,nextLabBudget,createFrameWindow,pushFrameTime,framePercentiles} from './post.mjs';
+import {postStage,applyComposerSize,disposeComposer,reducedMotion,normalizeQuality,qualitySettings,qualityIndex,nextQualityTier,QUALITY_LEVELS,frameTriangleBudget,normalizeQualityOverride,bloomResolution,nextQualityState,nextLabBudget,createFrameWindow,pushFrameTime,framePercentiles,hasLayerContent} from './post.mjs';
 import {budgetedRatio,nextDynamicScale} from './resolution.mjs';
 import {GpuTimer} from './perf.mjs';
 import {interpolatePose} from './interpolation.mjs';
@@ -1353,23 +1354,26 @@ export class ArenaView{
        // explicit override) disables the controller entirely so a slow machine
        // never fights the player's choice; software stays at low.
        _sampleQuality(delta){
-        if(this._qualityOverride!=null)return this.quality;
         const dt=Number.isFinite(delta)?delta:0;
+        if(dt<=0||dt>.25)return this.quality;
         let sampled=false;
-        if(dt>0){const f=this._fps??(this._fps={frames:0,elapsed:0,value:60});f.frames++;f.elapsed+=Math.min(dt,1);if(f.elapsed>=.5){f.value=f.frames/f.elapsed;f.frames=0;f.elapsed=0;sampled=true;}}
-        if(dt>0&&dt<=.25)pushFrameTime(this._frameWindow,dt*1000);
-        if(sampled&&this.dynamicResolution!==false){const d=this._drs??(this._drs={scale:1,cool:0});const frameMs=this._fps?.value>0?1000/this._fps.value:0;const next=nextDynamicScale(d,{frameMs,elapsedMs:500});const changed=next.scale!==d.scale;this._drs=next;if(changed)this.resize();}
+        const f=this._fps??(this._fps={frames:0,elapsed:0,value:60});f.frames++;f.elapsed+=dt;if(f.elapsed>=.5){f.value=f.frames/f.elapsed;f.frames=0;f.elapsed=0;sampled=true;}
+        pushFrameTime(this._frameWindow,dt*1000);
+        // Sorting 120 samples every frame adds allocation/sort work to the
+        // thing being measured. HUD percentiles need only the 2 Hz sample rate.
+        if(this.perf){this.perf.lastFrameMs=dt*1000;if(sampled){const [median,p95]=framePercentiles(this._frameWindow);this.perf.medianFrameMs=median;this.perf.p95FrameMs=p95;}}
+        if(this._qualityOverride!=null)return this.quality;
+        const cap=Number(this.display?.fpsCap)||0,capMs=cap>0?1000/cap:0;
+        if(sampled&&this.dynamicResolution!==false){const d=this._drs??(this._drs={scale:1,cool:0});const frameMs=this._fps?.value>0?1000/this._fps.value:0;const next=nextDynamicScale(d,{frameMs,elapsedMs:500},{slowMs:Math.max(1000/48,capMs+2.5),fastMs:Math.max(1000/55,capMs+1.5)});const changed=next.scale!==d.scale;this._drs=next;if(changed)this.resize();}
         const software=this.renderer?.isSoftware===true,reduced=this.reduced()===true,ceiling=normalizeQuality(undefined,{software,reduced});
         const state=this._qualityState??(this._qualityState={level:null,bad:0,good:0,cool:0});
         if(!QUALITY_LEVELS.includes(state.level))state.level=this.quality??ceiling;
-        const next=nextQualityState(state,dt*1000,{ceiling,software});
+        const next=nextQualityState(state,dt*1000,{ceiling,software,minFps:1000/Math.max(1000/45,capMs+3),maxFps:1000/Math.max(1000/58,capMs+1.5)});
         state.level=next.level;state.bad=next.bad;state.good=next.good;state.cool=next.cool;
         if(next.changed&&next.level!==this.quality){this.quality=next.level;this.qualitySettings=qualitySettings(next.level,{software,reduced});this._onQualityChange();}
-        const [median,p95]=framePercentiles(this._frameWindow,[.5,.95]);
-        if(this.perf){this.perf.medianFrameMs=median;this.perf.p95FrameMs=p95;this.perf.lastFrameMs=dt*1000;}
         return this.quality;
        }
-        setDisplay(prefs){if(prefs&&typeof prefs==='object'&&'quality' in prefs)this._qualityOverride=normalizeQualityOverride(prefs.quality);const display=normalizeDisplay(prefs),scaleChanged=display.resolutionScale!==this.display?.resolutionScale||display.resolutionCap!==this.display?.resolutionCap;this.display=display;this.camera.fov=display.fov;this.camera.updateProjectionMatrix();this.weaponFov=Math.max(45,Number(display.fov)||this.weaponFov||70);if(this.weaponCamera)this.weaponCamera.fov=this.weaponFov;this.showWeapon=display.showWeapon;if('toneMappingExposure' in this.renderer)this.renderer.toneMappingExposure=Number(display.exposure)||1.15;this._applyQuality();this._applyShadows();this._applyEffectsQuality?.();if(scaleChanged)this.resize();else this._syncPost?.();}
+        setDisplay(prefs){if(prefs&&typeof prefs==='object'&&'quality' in prefs)this._qualityOverride=normalizeQualityOverride(prefs.quality);const display=normalizeDisplay(prefs),scaleChanged=display.resolutionScale!==this.display?.resolutionScale||display.resolutionCap!==this.display?.resolutionCap;this.display=display;this.camera.fov=display.fov;this.camera.updateProjectionMatrix();this.weaponFov=Math.max(45,Number(display.fov)||this.weaponFov||70);if(this.weaponCamera)this.weaponCamera.fov=this.weaponFov;this.showWeapon=display.showWeapon;if('toneMappingExposure' in this.renderer)this.renderer.toneMappingExposure=Number(display.exposure)||1.15;this._applyQuality();this._applyShadows();this._applyEffectsQuality?.();if(scaleChanged)this.resize();this._syncPost?.();this._syncLabTargets?.();}
    setPlayerId(id){if(this.playerId!==id){this.feedback?.reset();this.flashUntil=0;this.cameraShake?.reset();this.lowHealth=false;}this.playerId=id;}
    setAim(on){this.aim=on===true;}
    setDynamicResolution(on){this.dynamicResolution=on!==false;this._drs={scale:1,cool:0};this.resize();return this.dynamicResolution;}
@@ -1701,25 +1705,30 @@ export class ArenaView{
     // there is nothing to draw (no rig, no rect, or a software renderer).
     renderWeaponPreview(){
      const rig=this.preview,rect=this.previewRect;
-     if(!rig||!rect||rect.width<12||rect.height<12)return false;
+     if(!rig||!rig.model||rig.pivot?.visible===false||!rect||rect.width<12||rect.height<12)return false;
      if(this.renderer?.isSoftware===true)return false;
-     rig.resize(rect.width,rect.height);
+     if(rig.camera?.aspect!==rect.width/rect.height)rig.resize(rect.width,rect.height);
      return this._renderSceneInto(this.renderer,rect,rig.scene,rig.camera);
     }
     // Scissor a scene into a CSS-pixel rect on the shared renderer, restoring the
     // full viewport afterwards. Used by both the character and weapon previews.
     _renderSceneInto(renderer,rect,scene,camera){
      const w=this.width,h=this.height;if(!(w>0&&h>0))return false;
-     const x=Math.max(0,Math.round(rect.left)),y=Math.max(0,Math.round(h-rect.bottom)),vw=Math.max(1,Math.round(rect.width)),vh=Math.max(1,Math.round(rect.height));
+     const x=Math.round(rect.left),y=Math.round(h-rect.bottom),vw=Math.max(1,Math.round(rect.width)),vh=Math.max(1,Math.round(rect.height));
+     if(!Number.isFinite(x+y+vw+vh)||x>=w||y>=h||x+vw<=0||y+vh<=0)return false;
      const prevAuto=renderer.autoClear;
      renderer.setScissorTest(true);renderer.setViewport(x,y,vw,vh);renderer.setScissor(x,y,vw,vh);renderer.autoClear=true;
-     renderer.render(scene,camera);
-     renderer.setScissorTest(false);renderer.setViewport(0,0,w,h);renderer.setScissor(0,0,w,h);renderer.autoClear=prevAuto;
+     try{renderer.render(scene,camera);}
+     finally{renderer.setScissorTest(false);renderer.setViewport(0,0,w,h);renderer.setScissor(0,0,w,h);renderer.autoClear=prevAuto;}
      return true;
     }
     cinemaLook(dy,dp){this.director?.look?.(dy,dp);}
     resize(){const w=Math.max(1,this.renderer.domElement.clientWidth),h=Math.max(1,this.renderer.domElement.clientHeight),ratio=budgetedRatio({width:w,height:h,dpr:window.devicePixelRatio,scale:this.display?.resolutionScale??1,cap:this.display?.resolutionCap??'auto',software:this.renderer.isSoftware===true,dynamic:this._drs?.scale??1});
-     if(this.width===w&&this.height===h&&this.pixelRatio===ratio){this._syncPost?.();this._syncLabTargets?.();return;}
+     // Display/quality/lab setters synchronize their own resources. A stable
+     // viewport must not reconfigure every pass and recheck every target each
+     // frame. OS motion preference changes still invalidate post eligibility.
+     const reduced=this.reduced(),motionChanged=this._postReduced!==reduced;this._postReduced=reduced;
+     if(this.width===w&&this.height===h&&this.pixelRatio===ratio){if(motionChanged){this._syncPost?.();this._syncLabTargets?.();}return;}
      if(this.pixelRatio!==ratio)this.renderer.setPixelRatio(ratio);
      // Keep even tiny/hidden canvases at least one backing pixel without changing CSS size.
      this.renderer.setSize(Math.max(w,1/ratio),Math.max(h,1/ratio),false);this.width=w;this.height=h;this.pixelRatio=ratio;
@@ -1730,7 +1739,7 @@ export class ArenaView{
      setGraphicsLab(prefs){this.graphicsLab=normalizeGraphicsLab(prefs);this._labBudget={level:0,slow:0,fast:0,cool:0};this._labLevel=0;this._syncPost();this._syncLabTargets();}
      // Benchmark and screenshot harnesses pin the full look so runs stay
      // comparable; turning adaptivity back on resets the governor.
-     setAdaptiveLab(on){this.adaptiveLab=on!==false;this._labBudget={level:0,slow:0,fast:0,cool:0};if(!this.adaptiveLab&&this._labLevel!==0)this._setLabLevel(0);return this.adaptiveLab;}
+     setAdaptiveLab(on){this.adaptiveLab=on!==false;this._labBudget={level:this.adaptiveLab?(this._labLevel??0):0,slow:0,fast:0,cool:0};if(!this.adaptiveLab&&this._labLevel!==0)this._setLabLevel(0);return this.adaptiveLab;}
      _setLabLevel(level){
       const next=Math.max(0,Math.min(2,Math.round(Number(level)||0)));
       if(next===this._labLevel)return false;
@@ -1750,7 +1759,7 @@ export class ArenaView{
       // not slowness, so both thresholds move with the cap.
       const capMs=(Number(this.display?.fpsCap)||0)>0?1000/Number(this.display.fpsCap):0;
       const next=nextLabBudget(this._labBudget,dt*1000,{slowMs:Math.max(19,capMs+2.5),recoverMs:Math.max(13.5,capMs+1.5)});
-      this._labBudget={level:next.level,slow:next.slow,fast:next.fast,cool:next.cool};
+      this._labBudget=next;
       if(next.changed)this._setLabLevel(next.level);
       return this._labLevel;
      }
@@ -1903,7 +1912,7 @@ export class ArenaView{
      if(Number.isFinite(source.far))world.far=source.far;
      if(Number.isFinite(source.zoom))world.zoom=source.zoom;
      if(Number.isFinite(source.filmOffset))world.filmOffset=source.filmOffset;
-     world.updateProjectionMatrix();world.updateMatrixWorld(true);
+     world.updateMatrixWorld(true);
      if(source.projectionMatrix)world.projectionMatrix.copy(source.projectionMatrix);
      if(source.projectionMatrixInverse)world.projectionMatrixInverse.copy(source.projectionMatrixInverse);
      if(botsActive)world.layers.disable(BOT_LAYER);else world.layers.enable(BOT_LAYER);
@@ -2064,7 +2073,7 @@ export class ArenaView{
      if(Number.isFinite(camera.far))botCamera.far=camera.far;
      if(Number.isFinite(camera.zoom))botCamera.zoom=camera.zoom;
      if(Number.isFinite(camera.filmOffset))botCamera.filmOffset=camera.filmOffset;
-     botCamera.updateProjectionMatrix();botCamera.updateMatrixWorld(true);
+     botCamera.updateMatrixWorld(true);
      if(camera.projectionMatrix)botCamera.projectionMatrix.copy(camera.projectionMatrix);
      if(camera.projectionMatrixInverse)botCamera.projectionMatrixInverse.copy(camera.projectionMatrixInverse);
      const previousBackground=scene.background,previousAuto=renderer.autoClear;
@@ -2080,8 +2089,39 @@ export class ArenaView{
      const worldDepth=worldTarget?.depthTexture??null;
      this._encodeLabSource(target,display);
      this._compositeLab(lab,this._targetState('bots'),display,{keepAlpha:true,depthTest:!!worldDepth,worldDepth,botDepth:target.depthTexture??null});
-     return true;
-    }
+      return true;
+     }
+     _hasVisibleBots(){
+      if(!this.actorModels?.size)return false;
+      const camera=this.camera;
+      camera.updateMatrixWorld();
+      const matrix=this._botFrustumMatrix??(this._botFrustumMatrix=new T.Matrix4()),frustum=this._botFrustum??(this._botFrustum=new T.Frustum());
+      matrix.multiplyMatrices(camera.projectionMatrix,camera.matrixWorldInverse);
+      frustum.setFromProjectionMatrix(matrix,camera.coordinateSystem,camera.reversedDepth);
+      for(const model of this.actorModels.values())if(hasLayerContent(model,1<<BOT_LAYER,frustum))return true;
+      return false;
+     }
+     _renderWorldLayers(botWanted){
+      if(this.perf)this.perf.botLayer=false;
+      if(!this.composer){this.renderer.render(this.scene,this.camera);return;}
+      const scene=this.scene,previousMatrices=scene.matrixWorldAutoUpdate;
+      // A styled frame renders the SAME transforms for shadow refresh, world,
+      // and bots. Update once, then reuse them across all three traversals.
+      // This also lets the empty-layer check use exact mesh frustum bounds.
+      if(botWanted){if(previousMatrices===true)scene.updateMatrixWorld();scene.matrixWorldAutoUpdate=false;}
+      try{
+       const botsStyled=botWanted&&!!(this._botLab&&this._botTarget&&this._labDisplayTarget)&&this._hasVisibleBots();
+       if(this.perf)this.perf.botLayer=botsStyled;
+       const worldTarget=botsStyled?this.composer.readBuffer:null;
+       this._syncWorldCamera(botsStyled);
+       if(botsStyled){
+        this._refreshBotShadowCasters();
+        const previousAuto=this.renderer.autoClear;this.renderer.autoClear=false;
+        try{this.composer.render();}finally{this.renderer.autoClear=previousAuto;}
+        this._renderBotLayer(worldTarget);
+       }else this.composer.render();
+      }finally{scene.matrixWorldAutoUpdate=previousMatrices;}
+     }
     // Weapon stack: the viewmodel renders to its own transparent target and is
     // composited with normal alpha blending. The direct path stays untouched
     // while the weapon target is off.
@@ -2102,7 +2142,7 @@ export class ArenaView{
      this._compositeLab(lab,this._targetState('weapon'),display,{keepAlpha:true,depthTest:false});
      return true;
     }
-    buildArena(arena=MAPS[0]){return withAssets(this.arenaAssets??=new ModelAssets(),()=>this._buildArena(arena));}
+    buildArena(arena=MAPS[0]){clearLatticeWorld(this);return withAssets(this.arenaAssets??=new ModelAssets(),()=>this._buildArena(arena));}
     _buildArena(arena=MAPS[0]){this._disposeMothSprites();if(this.worldGroup){this.scene.remove(this.worldGroup);this.disposeObject(this.worldGroup);for(const resource of this.renderResources||[])resource.dispose();this.renderResources?.clear();this.flagAssets=null;}this.sky=null;this.mountains=null;this.backdrop=null;this.objectiveModels=new Map();this.interiors=buildInteriors(arena.structures||[]);this._interiorBlend=0;this._mothRift=null;this._mothRiftSheet=null;this.mapId=arena.id;this.viewAudio?.setSpace?.(mothSpaceFor(arena.id));this.viewAudio?.setEchoMap?.(mothEchoFor(arena.id));applyArenaBiomePalette(this.viewAudio,arena);const world=new T.Group();this.worldGroup=world;this.scene.add(world);this.scene.background=new T.Color(arena.background);this.scene.fog=new T.FogExp2(arena.background,.018);const bounds=arenaBounds(arena),legacy=!arena.bounds,minX=bounds.minX,maxX=bounds.maxX,minZ=bounds.minZ,maxZ=bounds.maxZ,width=maxX-minX,depth=maxZ-minZ;
     const look=arenaLooks[arena.id]||arenaLooks.exchange,[floorColor,wallColor,trimColor,skyColor,groundColor,fogDensity,metal]=look;
     this.scene.fog.density=fogDensity;world.userData.look=arena.id;
@@ -2472,7 +2512,7 @@ export class ArenaView{
   }
   return broken;
  }
- _updateDebris(delta){if(this.renderer?.isSoftware===true||!this.debrisPool)return 0;this.debrisPool.update(delta);return this.debrisPool.slots.filter(s=>s.active).length;}
+  _updateDebris(delta){if(this.renderer?.isSoftware===true||!this.debrisPool)return 0;this.debrisPool.update(delta);let active=0;for(const slot of this.debrisPool.slots)if(slot.active)active++;return active;}
  makeMenu(){const scene=new T.Scene();scene.background=new T.Color('#080f13');scene.fog=new T.FogExp2('#080f13',.055);const camera=new T.PerspectiveCamera(38,1,.1,80);camera.position.set(5,3.3,10);camera.lookAt(0,1.4,0);scene.add(new T.HemisphereLight('#bdedee','#233139',2.8));const key=new T.DirectionalLight('#e4fff3',4);key.position.set(-4,6,5);scene.add(key);const rim=new T.PointLight('#52e5cf',80,15);rim.position.set(3,3,-3);scene.add(rim);
  const dark=material('#152128',.8,.4),glow=material('#67e7d3',.4,.2,true),ringGlow=this._mothLutMaterial('entanglement',{base:{color:'#67e7d3',metalness:.4,roughness:.2,emissive:'#67e7d3'},phase:.1,intensity:.45})||glow;if(ringGlow!==glow)this.sharedResources.add(ringGlow);box(scene,50,.3,50,0,-.35,0,dark);const grid=new T.GridHelper(40,40,'#284443','#192c31');grid.position.y=-.19;scene.add(grid);cylinder(scene,1.55,1.8,.3,0,-.02,0,dark,48);ring(scene,1.57,.018,0,.15,0,ringGlow);ring(scene,2.05,.014,0,-.16,0,ringGlow);ring(scene,2.2,.01,0,-.16,0,ringGlow);
  for(let i=-4;i<=4;i++){box(scene,.25,9,.5,i*3,4,-6,dark);box(scene,.045,6,.04,i*3+.18,4,-5.72,glow);}
@@ -2501,7 +2541,7 @@ export class ArenaView{
       return mark;
      }
        createObjectiveModel(zone,arena){const radius=Math.max(.8,Number(zone.radius)||3.5),progressValue=Math.max(0,Math.min(100,Number(zone.progress)||0)),software=this.renderer?.isSoftware===true,g=new T.Group(),tint=this.objectiveColor(zone.owner,arena),lutName=this._mothLutTheme(arena),baseMat=material(tint,.25,.3,true),areaMat=material(tint,.15,.8,true),progressMat=this._mothLutMaterial(lutName,{base:{color:'#ffd166',metalness:.2,roughness:.25,emissive:'#ffd166'},phase:.45,intensity:.7})??material('#ffd166',.2,.25,true),beaconMat=this._mothLutMaterial(lutName,{base:{color:tint,metalness:.25,roughness:.3,emissive:tint},phase:.15,intensity:.6})??material(tint,.25,.3,true),beacon=cylinder(g,.09,.16,2.4,0,1.2,0,beaconMat,10),area=new T.Mesh(new T.CylinderGeometry(radius,radius,.035,32),areaMat),base=ring(g,radius,.11,0,.05,0,baseMat),progress=new T.Mesh(software?new T.RingGeometry(radius-.2,radius+.2,32,1,0,Math.PI*2*progressValue/100):new T.RingGeometry(radius-.2,radius+.2,32),progressMat),emblem=new T.Mesh(new T.CylinderGeometry(.34,.34,.08,8),progressMat);for(const mat of [baseMat,areaMat,progressMat])mat.depthWrite=false;beaconMat.depthTest=false;beaconMat.depthWrite=false;area.position.y=.018;area.renderOrder=1;base.renderOrder=1;progress.rotation.x=-Math.PI/2;progress.position.y=.07;progress.renderOrder=1;emblem.position.y=.13;emblem.renderOrder=1;beacon.renderOrder=100;if(!software)progress.geometry.setDrawRange(0,0);g.add(area,progress,emblem);g.userData={objective:true,area,base,beacon,progress,emblem,areaMat,baseMat,progressMat,beaconMat,radius,identifier:String(zone.id??'zone')};g.traverse(n=>{n.userData.objective=true;n.userData.noCameraOcclusion=true;});return g;}
-     clearObjectiveMarkers(){for(const g of this.objectiveModels?.values()||[]){this.worldGroup?.remove(g);this.disposeObject(g);}this.objectiveModels?.clear();}
+     clearObjectiveMarkers(){clearLatticeWorld(this);for(const g of this.objectiveModels?.values()||[]){this.worldGroup?.remove(g);this.disposeObject(g);}this.objectiveModels?.clear();}
      // --- Moth-baked sprite effects ----------------------------------------
      // One pooled sheet player per baked effect, created lazily on the WebGL
      // renderer. Frames are shared caches owned by textures.mjs, so players are
@@ -2796,13 +2836,14 @@ export class ArenaView{
         const p0=Math.max(0,Math.min(1,Number(node.progress?.[0])||0)),p1=Math.max(0,Math.min(1,Number(node.progress?.[1])||0));
         const capturing=owned?owner:(p0>p1?0:p1>p0?1:null);
         const progress=Math.round((owned?1:Math.max(p0,p1))*100);
-        const radius=Math.max(2.5,Math.min(14,Number(node.r??node.radius)||6));
+        const authoredNode=arena.nodes?.find(entry=>String(entry.id)===key);
+        const radius=Math.max(.5,Number(node.r??node.radius??authoredNode?.r??authoredNode?.radius)||6);
         let g=this.objectiveModels.get(key);
         if(!g){g=this.createObjectiveModel({...node,radius,owner,contested,progress},arena);styleFoundryObjective(g,node,arena);g.userData.cocsNode=true;this.objectiveModels.set(key,g);this.worldGroup?.add(g);}
         active.add(key);this.styleCocsModel(g,node);
         const color=contested?'#ffd166':owned?this.objectiveColor(owner,arena):(COCS_NODE_TINTS[archetype]??NEUTRAL);
         const progressColor=contested?'#ffd166':capturing===0||capturing===1?this.objectiveColor(capturing,arena):'#eafff5';
-        g.position.set(Number(node.x)||0,Number(node.y)||0,Number(node.z)||0);
+        g.position.set(Number(node.x)||0,Number.isFinite(node.y)?node.y:(arena.terrain?.height?.(Number(node.x)||0,Number(node.z)||0)??authoredNode?.y??0),Number(node.z)||0);
         for(const mat of [g.userData.baseMat,g.userData.areaMat,g.userData.beaconMat]){mat.color.set(color);mat.emissive?.set(color);}
         g.userData.progressMat.color.set(progressColor);g.userData.progressMat.emissive?.set(progressColor);
         g.userData.progressMat.opacity=progress>0?1:0;g.userData.progressMat.transparent=true;
@@ -2892,8 +2933,9 @@ export class ArenaView{
         }
        }
        for(const [key,g] of this.objectiveModels)if(!active.has(key)){this.worldGroup?.remove(g);this.disposeObject(g);this.objectiveModels.delete(key);}
+       updateLatticeWorld(this,match,arena);
       }
-        updateObjectives(match,arena=MAPS[0]){const input=match?.objectives??match?.objectiveState;if(input?.kind==='cocs'){this.updateCocsObjectives(match,arena);return;}if(!input||!['koth','domination','assault','payload','extraction'].includes(input.kind)){this.clearObjectiveMarkers();return;}this.objectiveModels??=new Map();const active=new Set(),reduced=this.reduced(),software=this.renderer?.isSoftware===true,assaultActive=input.kind==='assault'&&Number.isFinite(input.active)?input.active:-1;for(const [zoneIndex,zone] of (input.kind==='extraction'?[{id:'extract',x:input.extract?.x,z:input.extract?.z,radius:input.escortRadius??6,progress:input.captureSeconds>0?Math.max(0,Math.min(100,(Number(input.progress)||0)/Number(input.captureSeconds)*100)):0,owner:Number.isInteger(input.escortTeam)?input.escortTeam:null,captureTeam:null,contested:false}]:input.zones||[]).entries()){if(!zone)continue;const key=String(zone.id??active.size),p=pointOf(zone),owner=zone.contested?'contested':zone.owner,capture=zone.captureTeam??zone.owner,progress=Math.max(0,Math.min(100,Number(zone.progress)||0)),radius=Math.max(.8,Number(zone.radius)||3.5);let g=this.objectiveModels.get(key);if(!g){g=this.createObjectiveModel(zone,arena);this.objectiveModels.set(key,g);this.worldGroup?.add(g);}active.add(key);const color=zone.contested?'#ffd166':this.objectiveColor(owner,arena),progressColor=zone.contested?'#ffd166':this.objectiveColor(capture,arena);g.position.set(p.x||0,p.y||0,p.z||0);g.userData.baseMat.color.set(color);g.userData.baseMat.emissive.set(color);g.userData.areaMat.color.set(color);g.userData.areaMat.emissive.set(color);g.userData.beaconMat.color.set(color);g.userData.beaconMat.emissive.set(color);g.userData.progressMat.color.set(progressColor);g.userData.progressMat.emissive.set(progressColor);g.userData.progressMat.opacity=progress>0?1:0;g.userData.progressMat.transparent=true;if(g.userData.radius!==radius){g.userData.area.geometry.dispose();g.userData.area.geometry=new T.CylinderGeometry(radius,radius,.035,32);g.userData.base.geometry.dispose();g.userData.base.geometry=new T.TorusGeometry(radius,.11,6,32);g.userData.progress.geometry.dispose();g.userData.progress.geometry=software?new T.RingGeometry(radius-.2,radius+.2,32,1,0,Math.PI*2*progress/100):new T.RingGeometry(radius-.2,radius+.2,32);if(!software)g.userData.progress.geometry.setDrawRange(0,Math.ceil(progress/100*32)*6);g.userData.radius=radius;}if(g.userData.progressValue!==progress){if(software){g.userData.progress.geometry.dispose();g.userData.progress.geometry=new T.RingGeometry(radius-.2,radius+.2,32,1,0,Math.PI*2*progress/100);}else g.userData.progress.geometry.setDrawRange(0,Math.ceil(progress/100*32)*6);g.userData.progressValue=progress;}g.userData.progress.visible=progress>0;this._applyBeaconProgress(g,progress);g.userData.identifier=String(zone.id??'zone');g.userData.emblem.material=g.userData.progressMat;const sectorActive=input.kind==='assault'&&zoneIndex===assaultActive,sectorDim=input.kind==='assault'&&!sectorActive;g.userData.assaultActive=sectorActive;if(input.kind==='assault'){g.userData.areaMat.opacity=sectorDim?.16:1;g.userData.areaMat.transparent=true;g.userData.baseMat.opacity=sectorDim?.32:1;g.userData.baseMat.transparent=true;g.userData.areaMat.emissiveIntensity=sectorActive?1.9:sectorDim?.3:1.25;g.userData.baseMat.emissiveIntensity=sectorActive?2:sectorDim?.35:1.25;if(!g.userData.assaultLabel&&typeof document!=='undefined'&&typeof document.createElement==='function'){const assaultLabel=textLabel(g,String(zone.id??'sector').toUpperCase(),0,2.7,0,.5,sectorActive?'#ffffff':'#95a3ac');assaultLabel.userData.objective=true;assaultLabel.userData.noCameraOcclusion=true;g.userData.assaultLabel=assaultLabel;}if(g.userData.assaultLabel)g.userData.assaultLabel.visible=sectorActive;}g.scale.y=reduced?1:sectorActive?1.04+.1*Math.sin((match.time||0)*5):sectorDim?1:zone.contested?1.05+.09*Math.sin((match.time||0)*6+(zone.id?.length||0)):1+.06*Math.sin((match.time||0)*4+(zone.id?.length||0));}for(const [key,g] of this.objectiveModels)if(!active.has(key)){this.worldGroup?.remove(g);this.disposeObject(g);this.objectiveModels.delete(key);}}
+        updateObjectives(match,arena=MAPS[0]){const input=match?.objectives??match?.objectiveState;if(input?.kind==='cocs'){this.updateCocsObjectives(match,arena);return;}clearLatticeWorld(this);if(!input||!['koth','domination','assault','payload','extraction'].includes(input.kind)){this.clearObjectiveMarkers();return;}this.objectiveModels??=new Map();const active=new Set(),reduced=this.reduced(),software=this.renderer?.isSoftware===true,assaultActive=input.kind==='assault'&&Number.isFinite(input.active)?input.active:-1;for(const [zoneIndex,zone] of (input.kind==='extraction'?[{id:'extract',x:input.extract?.x,z:input.extract?.z,radius:input.escortRadius??6,progress:input.captureSeconds>0?Math.max(0,Math.min(100,(Number(input.progress)||0)/Number(input.captureSeconds)*100)):0,owner:Number.isInteger(input.escortTeam)?input.escortTeam:null,captureTeam:null,contested:false}]:input.zones||[]).entries()){if(!zone)continue;const key=String(zone.id??active.size),p=pointOf(zone),owner=zone.contested?'contested':zone.owner,capture=zone.captureTeam??zone.owner,progress=Math.max(0,Math.min(100,Number(zone.progress)||0)),radius=Math.max(.8,Number(zone.radius)||3.5);let g=this.objectiveModels.get(key);if(!g){g=this.createObjectiveModel(zone,arena);this.objectiveModels.set(key,g);this.worldGroup?.add(g);}active.add(key);const color=zone.contested?'#ffd166':this.objectiveColor(owner,arena),progressColor=zone.contested?'#ffd166':this.objectiveColor(capture,arena);g.position.set(p.x||0,p.y||0,p.z||0);g.userData.baseMat.color.set(color);g.userData.baseMat.emissive.set(color);g.userData.areaMat.color.set(color);g.userData.areaMat.emissive.set(color);g.userData.beaconMat.color.set(color);g.userData.beaconMat.emissive.set(color);g.userData.progressMat.color.set(progressColor);g.userData.progressMat.emissive.set(progressColor);g.userData.progressMat.opacity=progress>0?1:0;g.userData.progressMat.transparent=true;if(g.userData.radius!==radius){g.userData.area.geometry.dispose();g.userData.area.geometry=new T.CylinderGeometry(radius,radius,.035,32);g.userData.base.geometry.dispose();g.userData.base.geometry=new T.TorusGeometry(radius,.11,6,32);g.userData.progress.geometry.dispose();g.userData.progress.geometry=software?new T.RingGeometry(radius-.2,radius+.2,32,1,0,Math.PI*2*progress/100):new T.RingGeometry(radius-.2,radius+.2,32);if(!software)g.userData.progress.geometry.setDrawRange(0,Math.ceil(progress/100*32)*6);g.userData.radius=radius;}if(g.userData.progressValue!==progress){if(software){g.userData.progress.geometry.dispose();g.userData.progress.geometry=new T.RingGeometry(radius-.2,radius+.2,32,1,0,Math.PI*2*progress/100);}else g.userData.progress.geometry.setDrawRange(0,Math.ceil(progress/100*32)*6);g.userData.progressValue=progress;}g.userData.progress.visible=progress>0;this._applyBeaconProgress(g,progress);g.userData.identifier=String(zone.id??'zone');g.userData.emblem.material=g.userData.progressMat;const sectorActive=input.kind==='assault'&&zoneIndex===assaultActive,sectorDim=input.kind==='assault'&&!sectorActive;g.userData.assaultActive=sectorActive;if(input.kind==='assault'){g.userData.areaMat.opacity=sectorDim?.16:1;g.userData.areaMat.transparent=true;g.userData.baseMat.opacity=sectorDim?.32:1;g.userData.baseMat.transparent=true;g.userData.areaMat.emissiveIntensity=sectorActive?1.9:sectorDim?.3:1.25;g.userData.baseMat.emissiveIntensity=sectorActive?2:sectorDim?.35:1.25;if(!g.userData.assaultLabel&&typeof document!=='undefined'&&typeof document.createElement==='function'){const assaultLabel=textLabel(g,String(zone.id??'sector').toUpperCase(),0,2.7,0,.5,sectorActive?'#ffffff':'#95a3ac');assaultLabel.userData.objective=true;assaultLabel.userData.noCameraOcclusion=true;g.userData.assaultLabel=assaultLabel;}if(g.userData.assaultLabel)g.userData.assaultLabel.visible=sectorActive;}g.scale.y=reduced?1:sectorActive?1.04+.1*Math.sin((match.time||0)*5):sectorDim?1:zone.contested?1.05+.09*Math.sin((match.time||0)*6+(zone.id?.length||0)):1+.06*Math.sin((match.time||0)*4+(zone.id?.length||0));}for(const [key,g] of this.objectiveModels)if(!active.has(key)){this.worldGroup?.remove(g);this.disposeObject(g);this.objectiveModels.delete(key);}}
      // LATTICE depot loaners spawn mid-match (`spawnDepotVehicle`), long after
      // `setMatch` built the opening fleet. Rebuild only when the live roster and
      // the model map disagree (a missing model, or a stale one), so an unchanged
@@ -4067,8 +4109,12 @@ export class ArenaView{
     this._renderAt=cap>0?now:undefined;
     // Adaptive lab budget runs before the frame is described, so a level change
     // rebuilds the composer/targets before this frame's passes are chosen.
-    this._sampleLabBudget(Number(delta)||0);
-    const frameDelta=(Number(delta)||0)+(this._renderCarry||0);this._renderCarry=0;
+     const frameDelta=(Number(delta)||0)+(this._renderCarry||0);this._renderCarry=0;
+     // Menus may draw only a preview, so their cheap frames cannot establish
+     // that the full match look is affordable. Include cap-skipped time when
+     // measuring drawn match frames, just as the quality governor does.
+     if(this._labDrawnLast===true)this._sampleLabBudget(frameDelta);
+     this._labDrawnLast=false;
     // Reset the (auto-reset-disabled) counters once per presented frame, then
     // account for every pass — world, post and the first-person weapon pass.
     // Optional-chained so a renderer that exposes no reset (or no info at all)
@@ -4082,7 +4128,12 @@ export class ArenaView{
     // Advance the shared Moth iridescence phase from the view clock. Pure in
     // `time` (the module is a deterministic function of its argument) and pinned
     // so reduced motion holds a still phase; the Moth rift material reads it.
-    this._mothPhase=updateMoth(reduced?0:(Number.isFinite(time)?time:0));if(mode!==this._lastMode){this._lastMode=mode;this.clearFreeMotion();}if((mode==='selection'||mode==='progression')&&!this.showcaseState){if(this.showcaseExpected){this.renderer.render(this.scene,this.camera);return;}const m=this.menu.model;m.rotation.y=Math.PI+.25+(reduced?0:Math.sin(time*.25)*.2);m.position.y=.17+(reduced?0:Math.sin(time)*.025);m.userData.rig?.update({dt:Math.max(0,Math.min(.1,delta||0)),time,speed:0,maxSpeed:8,grounded:true});this.renderer.render(this.menu.scene,this.menu.camera);return;}if((mode==='selection'||mode==='theater'||mode==='progression'||mode==='changelog'||mode==='browse'||mode==='lobby')&&!match)match=this.showcaseState;
+    this._mothPhase=updateMoth(reduced?0:(Number.isFinite(time)?time:0));if(mode!==this._lastMode){this._lastMode=mode;this.clearFreeMotion();}if((mode==='selection'||mode==='progression')&&!this.showcaseState){if(this.showcaseExpected){this.renderer.render(this.scene,this.camera);return;}const m=this.menu.model;m.rotation.y=Math.PI+.25+(reduced?0:Math.sin(time*.25)*.2);m.position.y=.17+(reduced?0:Math.sin(time)*.025);m.userData.rig?.update({dt:Math.max(0,Math.min(.1,delta||0)),time,reduced,speed:0,maxSpeed:8,grounded:true});
+     // The no-showcase path still owns a real sidebar preview. Keep the backdrop
+     // free of a second full-screen operator and use the same measured viewport.
+     if(this.previewRect&&this.renderer instanceof T.WebGLRenderer){const visible=m.visible;m.visible=false;try{this.renderer.render(this.menu.scene,this.menu.camera);}finally{m.visible=visible;}this._renderPreview(time,reduced);}
+     else this.renderer.render(this.menu.scene,this.menu.camera);
+     return;}if((mode==='selection'||mode==='theater'||mode==='progression'||mode==='changelog'||mode==='browse'||mode==='lobby')&&!match)match=this.showcaseState;
       if(!match)return;this._matchRef=match;const owner=this.cameraOwner,actors=match.actors||[],follow=owner==='manual'&&this.manualFollowId!=null?this.manualFollowId:null,freeCam=owner==='free'&&this._freeCam===true,cinematic=this.cinema===true&&!!this.director&&!freeCam,raceActive=cameraOwnerAllowsRace(owner)&&!this.directorLock&&!!match.race;let player=cinematic?actors[0]:(actors.find(a=>a.id===this.playerId)||actors[0]);if(follow!=null)player=actors.find(a=>a.id===follow)||player;if(!cinematic&&(this.spectator||follow!=null))player=spectateActor(actors,follow??this.spectatorTarget)||player;if(!player)return;this._audioFocusId=Number.isInteger(player.id)?player.id:this.playerId;const arena=match.arena||MAPS.find(a=>a.id===match.mapId)||MAPS[0];const savedPlayerId=this.playerId;this.updateFlags(match,arena);this.updateObjectives(match,arena);this.updateSpots(match);this.updateWaypoint(match,arena);this.updatePayloadModel(match,arena,time);this.updateDeployables(match,reduced);this.updateMothRift(time,reduced);if(!reduced)this._mothRift?.material?.userData?.setMothPhase?.(this._mothPhase??0);this.updateZipRides(match,Math.max(0,delta),reduced);if(cinematic)this.playerId=-1;const cinemaPose=cinematic?this.director.update(match,Math.max(0,delta),match.events||[]):null;if(freeCam){this.camera.position.set(this.freePose.x,this.freePose.y,this.freePose.z);this.camera.rotation.set(this.freePose.pitch,this.freePose.yaw,0,'YXZ');}else if(cinemaPose&&!raceActive){this.camera.position.set(cinemaPose.x,cinemaPose.y,cinemaPose.z);this.camera.rotation.set(cinemaPose.pitch,cinemaPose.yaw,cinemaPose.roll||0,'YXZ');this._clearCamera(player,delta,cinemaPose.cut);this._applyFreeExitBlend(delta,reduced);}else{const pres=this._interpEnabled?this._presentActor(player.id):null,px=pres&&!pres.snapped?pres.x:(player.x||0),py=pres&&!pres.snapped?pres.y:(player.y||0),pz=pres&&!pres.snapped?pres.z:(player.z||0);const eyeY=py+(player.health>0?(player.eyeHeight??1.45):.65),yaw=(player.yaw||0)+(player.punchYaw||0),pitch=(player.pitch||0)+(player.punchPitch||0);if(this.spectator&&this.spectatorThird===true){const dist=4.6,cos=Math.cos(pitch);this.camera.position.set(px+Math.sin(yaw)*dist*cos,eyeY+1.1-Math.sin(pitch)*dist,pz+Math.cos(yaw)*dist*cos);}else this.camera.position.set(px,eyeY,pz);this.camera.rotation.set(pitch,yaw,0,'YXZ');this._applyFreeExitBlend(delta,reduced);}this.cameraShake??=new CameraShake();const aiming=this.aim===true||player.ads===true,baseFov=this.display?.fov??82;
 const activeSight=this._activeSight=resolveActiveSight({weapon:player.weapon,optic:player.attachments?.visual?.optic,aiming});
 // Player FOV is updated with the weapon pose below; director/free camera keep ownership here.
@@ -4167,17 +4218,11 @@ if(freeCam){this.lowHealthOverlay?.update(false,time,delta,reduced,this.camera);
     // preserved (autoClear off + depth-writing passes disabled) so the bot
     // composite can reject pixels behind world geometry. Without a composer,
     // bots and weapons keep the direct path exactly as before.
-    const labTargets=this.graphicsLab?.targets,botWanted=this._targetActive(labTargets?.bots,'bots')&&(this.actorModels?.size??0)>0,weaponWanted=this._targetActive(labTargets?.weapon,'weapon');
-    if(botWanted||weaponWanted)this._syncLabTargets();
-    const botsStyled=botWanted&&!!(this._botLab&&this._botTarget&&this._labDisplayTarget),weaponStyled=weaponWanted&&!!(this._weaponLab&&this._weaponTarget&&this._labDisplayTarget);
-    if(this.composer){
-     const worldTarget=botsStyled?this.composer.readBuffer:null;
-     this._syncWorldCamera(botsStyled);
-     if(botsStyled)this._refreshBotShadowCasters();
-     if(botsStyled){const previousAuto=this.renderer.autoClear;this.renderer.autoClear=false;try{this.composer.render();}finally{this.renderer.autoClear=previousAuto;}}
-     else this.composer.render();
-     if(botsStyled)this._renderBotLayer(worldTarget);
-    }else this.renderer.render(this.scene,this.camera);
+     const labTargets=this.graphicsLab?.targets,botWanted=this._targetActive(labTargets?.bots,'bots')&&(this.actorModels?.size??0)>0,weaponWanted=this.hands.visible&&this._targetActive(labTargets?.weapon,'weapon');
+     if(this.composer&&((botWanted&&!this._botTarget)||(weaponWanted&&!this._weaponTarget)))this._syncLabTargets();
+     const weaponStyled=weaponWanted&&!!(this._weaponLab&&this._weaponTarget&&this._labDisplayTarget);
+     this._renderWorldLayers(botWanted);
+     this._labDrawnLast=this.graphicsLab?.enabled===true&&this.graphicsLab?.bypass!==true;
   // Isolated first-person pass: mirror the active camera onto a dedicated
   // weapon camera, clear the world depth, then draw the gun with normal depth
   // testing between its parts. The CPU fallback renders in the main camera.
@@ -4236,7 +4281,7 @@ if(freeCam){this.lowHealthOverlay?.update(false,time,delta,reduced,this.camera);
        getPerformance(){
         if(!this.perf)return null;
         const info=this.renderer?.info,memory=info?.memory;
-        return {...this.perf,labLevel:this._labLevel,adaptiveLab:this.adaptiveLab!==false,renderer:this.rendererInfo(),viewport:{...this.perf.viewport},calls:info?.render?.calls??this.perf.calls,triangles:info?.render?.triangles??this.perf.triangles,geometries:memory?.geometries??this.perf.geometries,textures:memory?.textures??this.perf.textures,programs:info?.programs?.length??this.perf.programs};
+         return {...this.perf,labLevel:this._labLevel,labRetrySeconds:this._labBudget?.retry??0,adaptiveLab:this.adaptiveLab!==false,renderer:this.rendererInfo(),viewport:{...this.perf.viewport},calls:info?.render?.calls??this.perf.calls,triangles:info?.render?.triangles??this.perf.triangles,geometries:memory?.geometries??this.perf.geometries,textures:memory?.textures??this.perf.textures,programs:info?.programs?.length??this.perf.programs};
        }
        // Backend/GPU identity plus the real drawing-buffer geometry, so a baseline
        // report can name its environment instead of guessing.
@@ -4371,6 +4416,6 @@ if(freeCam){this.lowHealthOverlay?.update(false,time,delta,reduced,this.camera);
        return tinted;
       }
       updateRace(match,time){syncRacePresentation(this,match,time);}
-     _renderPreview(time,reduced){const rect=this.previewRect;if(!rect||rect.width<12||rect.height<12||!(this.renderer instanceof T.WebGLRenderer))return;const m=this.menu.model;m.rotation.y=Math.PI+.25+(reduced?0:Math.sin(time*.4)*.22);m.position.y=.17;const cam=this.menu.camera;cam.aspect=Math.max(.2,rect.width/rect.height);cam.updateProjectionMatrix();this._renderSceneInto(this.renderer,rect,this.menu.scene,cam);}
+      _renderPreview(time,reduced){const rect=this.previewRect;if(!rect||rect.width<12||rect.height<12||!(this.renderer instanceof T.WebGLRenderer))return;const m=this.menu.model;m.rotation.y=Math.PI+.25+(reduced?0:Math.sin(time*.4)*.22);m.position.y=.17;const cam=this.menu.camera,aspect=Math.max(.2,rect.width/rect.height);if(cam.aspect!==aspect){cam.aspect=aspect;cam.updateProjectionMatrix();}this._renderSceneInto(this.renderer,rect,this.menu.scene,cam);}
           dispose(){this.characterLifecycle?.dispose?.();this.clearObjectiveMarkers();this.followMarkers?.dispose();this.followMarkers=null;this.effectPool?.dispose();this.telegraphPool?.dispose();this.projectilePool?.dispose();this.railPool?.dispose();this.deathPool?.dispose();this.decalPool?.dispose();this.ripplePool?.dispose();this.ripplePool=null;this.contactShadows?.dispose();this.contactShadows=null;this.debrisPool?.dispose();this.debrisPool=null;this.hitPool?.dispose();this.hitPool=null;this.abilityVfx?.dispose();this.abilityVfx=null;this.hitFlinch?.clear();this.shellPool?.dispose();this.shellPool=null;this.altProjectiles?.dispose();this.altProjectiles=null;this._clearDebugDeaths();this.ambientPool?.dispose();this.weatherPool?.dispose();this.ambientFx=null;this.weatherFx=null;this._killcam=null;this.preview?.dispose();this.preview=null;this.previewAssets?.dispose?.();this.previewAssets=null;disposeComposer(this.composer);this.composer=null;this._disposeLabTargets();this.muzzleLights?.dispose();this.lowHealthOverlay?.dispose();this._disposeMothSprites();this.zipCarriages?.clear();this.deployableModels?.clear();this.disposeObject(this.scene);if(this.weaponScene)this.disposeObject(this.weaponScene);this.disposeObject(this.menu.scene);this.environmentRT?.dispose?.();for(const resource of this.renderResources||[])resource.dispose();this.renderResources?.clear();for(const resource of this.sharedResources||[])resource.dispose();this.sharedResources?.clear();this.modelAssets?.materials.clear();this.modelAssets?.geometries.clear();this.modelAssets?.resources.clear();this.arenaAssets?.materials.clear();this.arenaAssets?.geometries.clear();this.arenaAssets?.resources.clear();clearSurfaceTextures();for(const model of this._weaponCache?.values?.()||[])this.disposeObject(model);this._weaponCache?.clear();this._freeCam=false;this._directorLock=false;this.manualFollowId=null;this._cameraOwner='auto';this._freeExit=null;this.clearFreeMotion();this.resetFreeCam();this.renderer.dispose();}
 }

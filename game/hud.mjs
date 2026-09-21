@@ -859,11 +859,23 @@ export function cocsAnnouncement(event, player) {
     case 'cocs-terminal-deploy':
     case 'cocs-terminal-vault': {
       if (event.team !== team) return null;
+      const text = event.type==='cocs-terminal-hack'?'RELAY BREACHED'
+        :event.type==='cocs-terminal-deploy'?'ORACLE INSTALLED'
+        :event.action==='store'?'SHARD BANKED':'SHARD WITHDRAWN';
+      const detail = event.type==='cocs-terminal-hack'?'DOUBLE CAPTURE · 6 SECOND WINDOW'
+        :event.type==='cocs-terminal-deploy'?(event.shard==='carried'?'SHARD IN TRANSIT · RETURN TO HQ':event.shard==='banked'||event.shard==='spent'?'LOCAL INTEL ONLINE':'COLLECT THE SHARD AND RETURN TO HQ')
+        :event.action==='store'?'ARCHIVED AT HQ · WITHDRAW FOR 8 FLUX':'6 REQUISITION AWARDED';
       return {kind: 'terminal', team, mine: true, relevance: 'friendly', previousOwner: null,
         priority: COCS_ANNOUNCE_PRIORITY.terminal, ttl: COCS_ANNOUNCE_TTL.terminal,
-        dedupeKey: `terminal:${event.type}:${event.terminal ?? ''}`,
-        text: `${String(event.type.split('-')[2] ?? 'TERMINAL').toUpperCase()} COMPLETE`, detail: String(event.terminal ?? '').toUpperCase()};
+        dedupeKey: `terminal:${event.type}:${event.action??''}:${event.terminal ?? ''}`, text, detail};
     }
+    case 'cocs-terminal-shard':
+      if(event.team!==team)return null;
+      return {kind:'terminal',team,mine:true,relevance:'friendly',previousOwner:null,
+        priority:COCS_ANNOUNCE_PRIORITY.terminal,ttl:COCS_ANNOUNCE_TTL.terminal,
+        dedupeKey:`shard:${event.action}:${event.actor}:${event.terminal}`,
+        text:event.action==='collect'?'SHARD SECURED':'SHARD RETURNED TO RELAY',
+        detail:event.action==='collect'?(event.actor===player.id?'RETURN TO YOUR HQ VAULT':'ESCORT YOUR TEAM’S COURIER'):'RECOVER IT AT THE ORACLE TERMINAL'};
     // Depot logistics. The loaner spawn is world-visible: the owning team reads
     // LOANER READY, the other side reads ENEMY LOANER off the same event. The
     // REQ purchase is team-private like the order feed.
@@ -1050,6 +1062,7 @@ export function latticeAnnounceCue(event, playerId) {
     case 'cocs-terminal-hack':
     case 'cocs-terminal-deploy':
     case 'cocs-terminal-vault':
+    case 'cocs-terminal-shard':
     // Depot loaners, the saboteur/scout kit, role agents and the prime beam are
     // completed friendly beats: the objective callout, not a warning.
     case 'cocs-depot-vehicle-spawn':

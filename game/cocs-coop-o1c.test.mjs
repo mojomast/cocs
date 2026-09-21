@@ -14,7 +14,7 @@ import {
 } from './cocs-coop.mjs';
 import {COOP_ROLES, roleAbility, roleAbilityTargets} from './cocs-roles.mjs';
 import {terminalInteract} from './cocs-terminals.mjs';
-import {connectivityIncome, cocsSnapshot} from './cocs.mjs';
+import {connectivityIncome, cocsSnapshot, updateLiveNodes} from './cocs.mjs';
 import {DIRECTOR_TIERS, directorWavePlan} from './cocs-difficulty.mjs';
 
 const DT = RULES.dt;
@@ -90,6 +90,7 @@ test('PRIME targets owned economy nodes and resolves through the role action', (
   const targets = roleAbilityTargets(m, state, actor, roleAbility('harvester', 'PRIME'));
   assert.deepEqual(targets, econ.map(entry => entry.id).sort(), 'every owned siphon is a target');
   // A node-scoped explicit action starts the 8 s channel.
+  pin(m, actor, econ[0].x, econ[0].z);
   const result = coopRoleAction(m, state, actor.id, 'PRIME', {target: econ[0].id});
   assert.equal(result.ok, true);
   assert.ok(node(state, econ[0].id).primeChannel, 'the prime channel is live');
@@ -108,6 +109,7 @@ test('the prime completes after 8 s and pays +50% FLUX and a faster capture', ()
   const actor = m.actors.find(entry => entry.team === 0 && entry.health > 0);
   actor.bot = null;
   const before = connectivityIncome(state).income[0];
+  pin(m, actor, econ.x, econ.z);
   coopPrimeNode(m, state, actor, econ.id);
   for (let i = 0; i < ticks(8) + 4 && !econ.prime; i++) {
     pin(m, actor, econ.x, econ.z);
@@ -223,6 +225,8 @@ test('terminals expose HACK/DEPLOY/VAULT/SABOTAGE lifecycles and a snapshot', ()
   const actor = m.actors.find(entry => entry.team === 0 && entry.health > 0);
   actor.bot = null;
   const relay = node(state, 'relay-0');
+  node(state, 'front-0').owner = 0; // HACK needs the same legal frontier as capture.
+  updateLiveNodes(state); // Direct fixture ownership edits must refresh derived legality.
   const hackTerminal = terminals.terminals['hack-relay-0'];
   // HACK: a 3 s stable channel sets a 2x, 6 s capture window.
   assert.equal(typeof hackTerminal, 'object');
@@ -235,6 +239,7 @@ test('terminals expose HACK/DEPLOY/VAULT/SABOTAGE lifecycles and a snapshot', ()
   assert.equal(relay.hack.team, 0);
   // DEPLOY: only while owned; enables ORACLE resolution.
   relay.owner = 0;
+  relay.progress = {0: 0, 1: 0}; // Mirror captureNode's ownership transition.
   assert.equal(terminalInteract(m, state, actor.id, 'deploy-relay-0', 'DEPLOY').ok, true);
   for (let i = 0; i < ticks(2) + 3 && !relay.oracle; i++) { pin(m, actor, relay.x, relay.z); m.step(DT, {inputs: {}}); }
   assert.equal(relay.oracle?.active, true, 'DEPLOY enables ORACLE while owned');
@@ -253,6 +258,8 @@ test('terminals expose HACK/DEPLOY/VAULT/SABOTAGE lifecycles and a snapshot', ()
   // SABOTAGE: a cut link denies income until REPAIR.
   const sit = terminals.terminals['sabotage-relay-0'];
   relay.owner = 1;
+  relay.progress = {0: 0, 1: 0}; // No leftover HACK-era capture meter in this phase.
+  relay.hack = null; // Isolate SABOTAGE from the earlier accelerated capture window.
   actor.x = relay.x; actor.z = relay.z; actor.y = 0;
   assert.equal(terminalInteract(m, state, actor.id, sit.id, 'SABOTAGE').ok, true);
   for (let i = 0; i < ticks(3) + 3 && sit.state !== 'cut'; i++) { pin(m, actor, relay.x, relay.z); m.step(DT, {inputs: {}}); }
@@ -275,6 +282,8 @@ test('terminals expose HACK/DEPLOY/VAULT/SABOTAGE lifecycles and a snapshot', ()
   assert.equal(typeof snap.terminalStats, 'object', 'cumulative terminal stats ride the same contract');
   assert.ok(snap.terminalStats.hacks >= 1 && snap.terminalStats.vaultStores >= 1 && snap.terminalStats.vaultPulls >= 1);
   // A running channel surfaces as `active` with live progress on the UI array.
+  relay.hack = null; // Isolate a fresh channel after the prior boost's cooldown.
+  relay.owner = 1;
   assert.equal(terminalInteract(m, state, actor.id, 'hack-relay-0', 'HACK').ok, true);
   pin(m, actor, relay.x, relay.z);
   m.step(DT, {inputs: {}});

@@ -219,12 +219,13 @@ test('subagents retire at the end of their authored lifespan and recycle their s
 // ---------------------------------------------------------------------------
 // Terminal use by allied bots
 // ---------------------------------------------------------------------------
-test('allied bots start HACK/DEPLOY/VAULT on the human rules', () => {
+test('allied bots start legal HACK/DEPLOY channels and cannot fabricate VAULT cargo', () => {
   const m = coopMatch({seed: 21});
   const state = m.objectiveState;
   step(m, 1);
   const actor = team0Bot(m);
   const relay = node(state, 'relay-0');
+  node(state, 'front-0').owner = 0;
   const hack = state.terminals.terminals['hack-relay-0'];
   // HACK on a neutral relay: the same 3 s channel, no enemy inside 6 m.
   for (let i = 0; i < ticks(3) + 8 && !relay.hack; i++) { pin(m, actor, relay.x, relay.z); m.step(DT, {inputs: {}}); }
@@ -238,7 +239,8 @@ test('allied bots start HACK/DEPLOY/VAULT on the human rules', () => {
   hack.channel = null; relay.hack = null;
   actor.bot.terminalAt = -Infinity;
   const enemy = m.actors.find(entry => entry.team === 1 && entry.health > 0);
-  enemy.x = relay.x + 2; enemy.z = relay.z;
+  // Restore the deck as well as X/Z after off-map physics moved this actor.
+  enemy.x = relay.x + 2; enemy.z = relay.z; enemy.y = hack.y;
   assert.equal(botTerminalInteract(m, state, actor), null, 'a contested relay is refused for bots');
   assert.equal(humanTerminalInteract(m, state, actor), null, 'and for humans (same gate)');
   enemy.x = 1000; enemy.z = 1000;
@@ -255,12 +257,12 @@ test('allied bots start HACK/DEPLOY/VAULT on the human rules', () => {
   const humanPick = humanTerminalInteract(m, state, actor);
   assert.equal(humanPick.kind, 'DEPLOY', 'the human edge chooses the same verb');
 
-  // VAULT store at hq-0.
+  // No carried shard means no counterfeit VAULT store at hq-0.
   const hq = node(state, 'hq-0');
   actor.bot.terminalAt = -Infinity;
   pin(m, actor, hq.x, hq.z);
   m.step(DT, {inputs: {}});
-  assert.ok(state.terminals.stats.vaultStores >= 1, 'the bot stores at the HQ vault');
+  assert.equal(state.terminals.stats.vaultStores, 0, 'an empty bot cannot mint a banked shard');
 });
 
 test('terminal actions never leak into PvPvE and stay out of non-coop snapshots', () => {

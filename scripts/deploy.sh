@@ -290,7 +290,7 @@ fi
 # release may retain the previous game server only while it declares the same
 # protocol major (--compatible-server); a server-changing release must match
 # both services exactly.
-verify_args=(--identities --server "${server_base}")
+verify_args=(--identities --server "${server_base}" --assets-dir "${dist_dir}/client")
 if [[ "${with_game_server}" != "--with-game-server" ]]; then
   verify_args+=(--compatible-server)
 fi
@@ -308,16 +308,8 @@ if [[ "${verified}" != "1" ]]; then
   rollback 'Deployment failed HTML/asset/identity verification.'
 fi
 
-# Identities describe the candidate; only the served page bundle proves the
-# running dist is this build. Compare the freshly built index against what the
-# deployment now serves so a stale checkout can never pass on env identity.
-if [[ -f "${dist_dir}/client/index.html" ]]; then
-  expected_asset="$(grep -o 'assets/page-[^"]*\.js' "${dist_dir}/client/index.html" | head -1 || true)"
-  served_asset="$(curl -fsS "${deploy_url}/" | grep -o 'assets/page-[^"]*\.js' | head -1 || true)"
-  if [[ -n "${expected_asset}" && "${served_asset}" != "${expected_asset}" ]]; then
-    rollback "Served page bundle ${served_asset:-none} does not match this build ${expected_asset}."
-  fi
-fi
+# verifyDeployment compares every linked asset against dist/client. SSR builds
+# do not emit client/index.html, so an optional index check silently did nothing.
 
 printf 'Deployed %s (%s) at commit %s.\n' "${deploy_version}" "${TOKEN_ARENA_BUILD_ID}" "${TOKEN_ARENA_COMMIT}"
 exit 0

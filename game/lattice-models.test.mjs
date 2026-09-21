@@ -6,6 +6,8 @@ import {CHARACTERS,WEAPONS} from './data.mjs';
 import {ModelAssets} from './effects-fx.mjs';
 import {applyActorTeam} from './team-presentation.mjs';
 import {modelCost,selectModelLOD,measureLatticeModels} from '../scripts/measure-lattice-models.mjs';
+import {OPERATOR_FORMS,OPERATOR_MODEL_BUDGETS} from './models.mjs';
+import {measureOperatorModels} from '../scripts/measure-operator-models.mjs';
 
 test('nine sculpted identities retain outward-facing visors and team-owned shell materials',()=>{
  const assets=new ModelAssets(),shapes=new Set(),optics=new Set();
@@ -14,7 +16,9 @@ test('nine sculpted identities retain outward-facing visors and team-owned shell
   assert.equal(data.operatorIdentity.id,c.id);
   const shell=head.getObjectByName(`helmet-shell-${c.id}`),visor=head.getObjectByName('inset-visor');
   assert.equal(shell.material,data.armor);shapes.add(JSON.stringify(shell.geometry.parameters));
-  optics.add(head.children.find(n=>n.name.startsWith('optics-')).name);
+  optics.add(head.getObjectByName(`optics-${OPERATOR_FORMS[c.id].eyes}`).name);
+  assert.ok(shell.geometry.index.count/3>=800,'near helmet spends geometry on the focal silhouette');
+  const chest=model.getObjectByName(`chest-${c.id}`);assert.ok(chest.geometry.index.count/3>=600);
   const normal=visor.geometry.attributes.normal;assert.ok(normal.getZ(Math.floor(normal.count/2))<-.9,`${c.id}: visor faces viewer at -Z`);
   const identityColor=data.color;applyActorTeam(model,0);assert.equal(shell.material,data.armor);assert.equal(data.color,identityColor);
   assert.ok(head.getObjectByName('helmet-mandible-and-comms'));assert.ok(data.characterRefinement.gripL&&data.characterRefinement.gripR);
@@ -37,34 +41,31 @@ test('native distance LOD preserves joints, material references and returns to t
  assets.dispose();
 });
 
-test('authored limb dimensions and whole-body bounds survive near, far and software capsule reconstruction',()=>{
- // Independent dimensions from the robot rig's authored upper/forearm/thigh/
- // shin primitives. Three r185 calls the straight middle section `height`;
- // passing an absent parameter silently constructs a one-metre section.
- const authored={armUpper:[.082,.20],forearm:[.068,.19],legUpper:[.10,.25],legLower:[.082,.23]};
+test('mechanical anatomy stays inside the authored limb and standing envelopes at every LOD',()=>{
+ // Independent dimensions from the original rig. Mechanical assemblies may be
+ // slimmer than the original capsules, but may never inflate their envelopes.
+ const authored={armUpper:[.082,.20,'arm'],forearm:[.068,.19,'forearm'],legUpper:[.10,.25,'thigh'],legLower:[.082,.23,'shin']};
  const assets=new ModelAssets();
  for(const c of CHARACTERS)for(const software of [false,true]){
   const model=robotModel(c.id,assets,software),j=model.userData.joints;
   for(const distance of [5,50]){
    selectModelLOD(model,{distance,detail:distance<18?1:0});
-   for(const [limb,[radius,height]] of Object.entries(authored))for(const side of ['L','R']){
-    const joint=j[`${limb}${side}`],lod=joint.children.find(n=>n.isLOD&&n.levels[0].object.geometry.type==='CapsuleGeometry');
-    assert.ok(lod,`${c.id} ${limb}${side}: capsule stays on its articulation joint`);
+   for(const [limb,[radius,height,part]] of Object.entries(authored))for(const side of ['L','R']){
+    const joint=j[`${limb}${side}`],lod=joint.children.find(n=>n.isLOD&&n.levels[0].object.userData.operatorSurface?.part===part);
+    assert.ok(lod,`${c.id} ${limb}${side}: mechanical assembly stays on its articulation joint`);
     assert.equal(lod.levels.filter(level=>level.object.visible).length,1);
     for(const {object:mesh} of lod.levels){
      const g=mesh.geometry;g.computeBoundingBox();const size=g.boundingBox.getSize(new T.Vector3());
-     const label=`${c.id} ${limb}${side}, distance=${distance}, software=${software}, radial=${g.parameters.radialSegments}`;
-     assert.equal(g.parameters.height,height,`${label}: authored straight-section height`);
-     assert.equal(g.parameters.radius,radius,`${label}: authored radius`);
-     assert.ok(Math.abs(size.y-(height+radius*2))<1e-6,`${label}: full capsule bounds include two hemispheres`);
-     assert.ok(Math.abs(size.x-radius*2)<1e-6&&Math.abs(size.z-radius*2)<1e-6,`${label}: subdivision does not inflate limb girth`);
+     const label=`${c.id} ${limb}${side}, distance=${distance}, software=${software}`;
+     assert.ok(Math.abs(size.y-(height+radius*2))<1e-6,`${label}: axle endpoints retain authored limb length`);
+     assert.ok(size.x<=radius*2+1e-6&&size.z<=radius*2+1e-6,`${label}: sculpted surfaces do not inflate limb girth`);
      assert.deepEqual(mesh.scale.toArray(),[1,1,1],`${label}: dimensions are not concealed by corrective scaling`);
     }
    }
    // The upper arm and shin share a radius, but have different heights. Cache
    // keys must distinguish them for both subdivisions, across the whole roster.
-   const capsule=joint=>joint.children.find(n=>n.isLOD&&n.levels[0].object.geometry.type==='CapsuleGeometry');
-   for(let level=0;level<2;level++)assert.notEqual(capsule(j.armUpperL).levels[level].object.geometry,capsule(j.legLowerL).levels[level].object.geometry);
+   const assembly=(joint,part)=>joint.children.find(n=>n.isLOD&&n.levels[0].object.userData.operatorSurface?.part===part);
+   for(let level=0;level<2;level++)assert.notEqual(assembly(j.armUpperL,'arm').levels[level].object.geometry,assembly(j.legLowerL,'shin').levels[level].object.geometry);
    const bounds=new T.Box3().setFromObject(j.root,true);
    assert.ok(bounds.min.y>=-.004,`${c.id}: no body mesh protrudes below the planted soles (${bounds.min.y})`);
    assert.ok(bounds.max.y<2.1,`${c.id}: body and harness remain within the authored standing envelope (${bounds.max.y})`);
@@ -72,6 +73,15 @@ test('authored limb dimensions and whole-body bounds survive near, far and softw
   ArenaView.prototype.disposeObject.call({sharedResources:assets.resources},model);
  }
  assets.dispose();
+});
+
+test('crafted operator near, far and software geometry respect stricter submission budgets',()=>{
+ const report=measureOperatorModels();
+ for(const row of report.operators)for(const tier of ['near','far','software']){
+  for(const metric of ['drawObjects','triangles'])assert.ok(row[tier][metric]<=OPERATOR_MODEL_BUDGETS[tier][metric],`${row.id} ${tier} ${metric}: ${row[tier][metric]}`);
+ }
+ assert.equal(new Set(report.operators.map(r=>r.design)).size,9);
+ assert.ok(report.cacheBytes<2_800_000,'operator-only shared geometry working set');
 });
 
 test('32-actor assembled roster and all weapon bodies stay inside deliberate draw/triangle budgets',()=>{

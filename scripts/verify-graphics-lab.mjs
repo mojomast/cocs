@@ -14,7 +14,7 @@ const errors=[];
 page.on('pageerror',e=>errors.push(e.message));
 page.on('console',e=>{if(e.type()==='error'&&!e.text().includes('favicon.svg'))errors.push(e.text());});
 try{
- await page.addInitScript(()=>{localStorage.setItem('token-arena-onboarded','1');localStorage.setItem('token-arena-settings',JSON.stringify({touch:true}));});
+ await page.addInitScript(()=>{localStorage.setItem('token-arena-onboarded','1');localStorage.setItem('token-arena-settings',JSON.stringify({touch:true,muted:true,showcase:false}));});
  await page.goto(base);
  await page.waitForFunction(()=>typeof window.tokenArenaSnapshot==='function');
  const gpu=await page.evaluate(async()=>{
@@ -56,7 +56,7 @@ try{
  for(const id of ['mothgrain','mothsignal','mothcoat'])assert.ok(gpu.deltas[id]>100,`${id} uses the baked Moth assets`);
  assert.ok(gpu.optionSwitches>=3,'the non-default option render actually swapped all three Moth accents');
  assert.equal(gpu.zeroMixDifference,0);assert.equal(gpu.leftDifference,0);assert.equal(gpu.programCount,1);
- await page.getByRole('button',{name:'Enter the arena',exact:true}).click();
+  await page.getByRole('button',{name:'Enter the arena',exact:true}).click();
  await page.getByRole('button',{name:'Graphics & settings',exact:true}).click();
  await page.getByRole('tab',{name:'Graphics lab · Preview',exact:true}).click();
  // Includes Moth Print, which stacks the three baked Moth accents.
@@ -158,6 +158,7 @@ try{
  assert.equal(await page.evaluate(()=>JSON.parse(localStorage.getItem('token-arena-graphics-lab-v1')).effects.hatch.enabled),true);
  await page.setViewportSize({width:1366,height:768});
  await page.getByRole('button',{name:'Enter the arena',exact:true}).click();
+ await page.getByRole('button',{name:/^Training Your first match/}).click();
  await page.getByRole('button',{name:/^Recommended first match:/}).click();
  await page.waitForFunction(()=>window.tokenArenaSnapshot()?.mode==='playing');
  // Use the real pause control; native Escape-to-unlock is browser chrome behavior

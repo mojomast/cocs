@@ -295,10 +295,12 @@ test('a protocol CUT/SABOTAGE terminal action cuts through the real Match path',
     step(m, 1);
     const terminal = Object.values(state.terminals.terminals).find(entry => entry.kind === 'SABOTAGE');
     assert.ok(terminal, `${action}: the authored lattice hosts a SABOTAGE terminal`);
+    // SABOTAGE denies enemy supply; a neutral relay is not a legal cut target.
+    state.nodes.find(node => node.id === terminal.nodeId).owner = 1;
     const actor = m.actors.find(entry => entry.team === 0 && entry.health > 0);
     actor.bot = null;
     const pin = () => {
-      actor.x = terminal.x; actor.z = terminal.z; actor.y = 0;
+      actor.x = terminal.x; actor.z = terminal.z; actor.y = terminal.y;
       actor.vx = 0; actor.vy = 0; actor.vz = 0;
       for (const other of m.actors) if (other.team === 1) { other.x = 500; other.z = 500; other.y = 0; }
     };

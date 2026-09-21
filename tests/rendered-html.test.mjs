@@ -42,10 +42,12 @@ test("serves the game selection screen without starter metadata", async () => {
   }
   assert.doesNotMatch(html, developmentPreviewMeta);
   assert.match(html, /Colosseum Of Competitive Slop|COCS/);
-  assert.match(html, /Choose your intelligence/);
-  assert.match(html, /Claude Code/);
+  assert.match(html, /Your next great match/);
+  assert.match(html, /aria-label="Main menu"/);
+  for (const label of ['FEATURED EXPERIENCE', 'EXPLORE LATTICE STRIKE', 'Custom match', 'Training', 'Online', 'EDIT LOADOUT', 'Review rules']) assert.ok(html.includes(label), label);
+  assert.doesNotMatch(html, /class="[^"]*panel--operator/, 'the operator grid is disclosed through Loadout, not dumped on the landing');
   assert.match(html, /github\.com\/mojomast\/tokenarena/);
-  for (const label of ["MATCH SETUP", "Bot count", "Bot difficulty", "Your callsign", "Movement speed", "Casual Skirmish", "Warmup", "Rocket Party", "SHUFFLE LOADOUT / MAP"]) assert.ok(html.includes(label), label);
+  for (const label of ["MATCH SETUP", "Bot count", "Bot difficulty", "Your callsign", "Movement speed", "Casual Skirmish", "Warmup", "Rocket Party"]) assert.ok(html.includes(label), label);
   assert.ok(GAME_MODES.filter((mode) => html.includes(mode.name)).length >= 4);
   const soccer = GAME_MODES.find((mode) => mode.id === "puma-soccer");
   if (soccer) assert.ok(html.includes(soccer.name), `${soccer.name} mode is listed`);

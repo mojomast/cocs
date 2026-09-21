@@ -6,6 +6,7 @@ import { CHARACTERS, WEAPONS } from './data.mjs';
 import { surfaceTextures as defaultSurfaceTextures } from './textures.mjs';
 import {currentAssets} from './effects-fx.mjs';
 import {beveledBox,contourGeometry,joinedGeometry,placedGeometry} from './model-geometry.mjs';
+import {OPERATOR_ANATOMY,operatorPartGeometry} from './operator-anatomy.mjs';
 
 export const FIDELITY_PRESETS = Object.freeze({
   LOW: { segments: 8, glowIntensity: 0.5, dynamicShadows: false },
@@ -476,17 +477,51 @@ export function enhanceOperatorModel(robot, { color = '#57e6cd', accent = '#2c35
 export const OPERATOR_FORMS=Object.freeze({
  chatgpt:{name:'Surveyor',width:.184,depth:.174,height:1.00,jaw:.73,power:.86,visor:.064,eyes:'split',cheek:.050},
  claude:{name:'Warden',width:.193,depth:.174,height:1.06,jaw:.88,power:.60,visor:.052,eyes:'bar',cheek:.070},
- grok:{name:'Outrider',width:.169,depth:.182,height:.94,jaw:.58,power:.66,visor:.045,eyes:'mono',cheek:.038},
+ grok:{name:'Outrider',width:.151,depth:.182,height:.94,jaw:.58,power:.66,visor:.045,eyes:'mono',cheek:.038},
  meta:{name:'Bulwark',width:.205,depth:.182,height:.91,jaw:.92,power:.57,visor:.056,eyes:'split',cheek:.077},
- gemini:{name:'Duplex',width:.177,depth:.167,height:1.12,jaw:.67,power:.77,visor:.078,eyes:'dual',cheek:.042},
+ gemini:{name:'Duplex',width:.154,depth:.167,height:1.12,jaw:.67,power:.77,visor:.078,eyes:'dual',cheek:.042},
  deepseek:{name:'Bathys',width:.173,depth:.193,height:1.07,jaw:.62,power:.84,visor:.082,eyes:'diver',cheek:.057},
- mistral:{name:'Slipstream',width:.174,depth:.189,height:.93,jaw:.59,power:.70,visor:.046,eyes:'swept',cheek:.038},
+ mistral:{name:'Slipstream',width:.153,depth:.189,height:.93,jaw:.59,power:.70,visor:.046,eyes:'swept',cheek:.038},
  kimi:{name:'Orbital',width:.188,depth:.182,height:1.04,jaw:.76,power:1.00,visor:.106,eyes:'constellation',cheek:.042},
  qwen:{name:'Lamellar',width:.191,depth:.173,height:1.02,jaw:.81,power:.55,visor:.050,eyes:'triple',cheek:.066},
 });
 
+// Ten rings per helmet keep the existing 864/216 triangle allocation. The
+// silhouettes are independently authored: flat sensor housing, square gorget,
+// low wedge, turret, split ceramic crown, pressure can, aerofoil, orb and kabuto.
+// [Y, width factor, depth factor, Z offset, X offset, split-crown rise].
+const OPERATOR_HEAD_PROFILES={
+ chatgpt:[[-.16,0,0],[-.149,.45,.59],[-.11,.66,.81],[-.035,.98,1],[.055,1,1],[.09,1,.97],[.115,.92,.89],[.147,.67,.68],[.15,.66,.67],[.151,0,0]],
+ claude:[[-.16,0,0],[-.15,.77,.65],[-.12,.95,.88],[-.035,1,1],[.055,1,1],[.083,.84,.91],[.126,.84,.84],[.165,.81,.78],[.184,.75,.73],[.187,0,0]],
+ grok:[[-.15,0,0],[-.141,.27,.61],[-.091,.57,.85],[-.022,.94,1],[.035,1,1],[.065,.96,.96,.008],[.087,.79,.94,.018],[.111,.74,.91,.029],[.124,.64,.70,.035],[.127,0,0,.035]],
+ meta:[[-.16,0,0],[-.153,.80,.74],[-.12,.94,.94],[-.035,1,1],[.043,1,1],[.072,1,.99],[.093,.95,.92],[.114,.91,.86],[.12,.90,.85],[.122,0,0]],
+ gemini:[[-.16,0,0],[-.149,.40,.64],[-.11,.58,.84],[-.035,.92,1],[.044,.94,1],[.091,.89,.91],[.127,.77,.82,0,0,.018],[.145,.72,.68,0,0,.037],[.147,.66,.62,0,0,.04],[.148,0,0]],
+ deepseek:[[-.16,0,0],[-.151,.66,.68],[-.11,.88,.93],[-.035,.92,1],[.06,.92,1],[.112,.91,.99],[.145,.88,.91],[.174,.77,.79],[.185,.50,.58],[.19,0,0]],
+ mistral:[[-.16,0,0],[-.148,.28,.60,-.009],[-.10,.54,.87,-.009],[-.035,.95,1],[.035,1,1],[.065,.94,.97,.012],[.082,.79,.92,.024],[.107,.72,.81,.038],[.12,.62,.67,.045],[.124,0,0,.045]],
+ kimi:[[-.16,0,0],[-.15,.35,.48],[-.107,.72,.77],[-.035,.98,.99],[.038,1,1],[.082,.94,.94],[.119,.80,.81],[.158,.57,.57],[.18,.31,.32],[.19,0,0]],
+ qwen:[[-.16,0,0],[-.151,.62,.61],[-.115,.77,.79],[-.035,.96,1],[.048,1,1],[.086,1,.96],[.106,.83,.83],[.145,.58,.68],[.174,.41,.51],[.19,0,0]],
+};
+
+// Visible, assembled operator INCLUDING the held five-draw weapon; neutral team
+// markers, shield and flash inactive. Shadow passes are additional submissions.
+// Keep these tighter than the existing roster/balance verification gates.
+export const OPERATOR_MODEL_BUDGETS=Object.freeze({
+ near:Object.freeze({drawObjects:64,triangles:12950}),
+ far:Object.freeze({drawObjects:51,triangles:5600}),
+ software:Object.freeze({drawObjects:65,triangles:6500}),
+});
+
 function operatorGeometry(key,make){const assets=currentAssets();return assets?assets.geometry(`lattice-operator-${key}`,make):make();}
 function operatorMaterial(key,make){const assets=currentAssets();return assets?assets.material(`lattice-operator-${key}`,make):make();}
+
+// Identical load-bearing assemblies share buffers across both sides and across
+// industrial/suspension chassis; colors continue to belong to the actor.
+function anatomyGeometry(id,part,side=1,low=false){
+ const limb=['forearm','thigh','shin'].includes(part),family=OPERATOR_ANATOMY[id].limb;
+ const sharedId=part==='hand'?'chatgpt':limb&&family==='suspension'?'chatgpt':limb&&family==='industrial'?'meta':id;
+ const handed=part==='foreplate'||part==='shinplate'||part==='shoulder';
+ return operatorGeometry(`anatomy-${sharedId}-${part}-${handed?side:1}-${low?'far':'near'}`,()=>operatorPartGeometry(sharedId,part,{low,side:handed?side:1}));
+}
 
 // Replacements run before GPU upload. Keep cached originals alive for other
 // actors; unowned originals can be released once no mesh in this actor uses them.
@@ -497,8 +532,8 @@ function replaceOperatorGeometry(robot,node,geometry){
  let used=false;robot.traverse(n=>{if(n.geometry===previous)used=true;});if(!used)previous.dispose();
 }
 
-function faceplateGeometry(form){
- const p=[],uv=[],index=[],segments=20;
+function faceplateGeometry(form,low=false){
+ const p=[],uv=[],index=[],segments=low?8:32;
  for(let row=0;row<3;row++)for(let i=0;i<=segments;i++){
   const a=(i/segments-.5)*2.2;
   p.push(Math.sin(a)*form.width*.87,(row/2-.5)*form.visor+.018-Math.abs(Math.sin(a))*.012,-Math.cos(a)*form.depth*.60-form.depth*.48);
@@ -510,12 +545,12 @@ function faceplateGeometry(form){
  const geo=new T.BufferGeometry();geo.setAttribute('position',new T.Float32BufferAttribute(p,3));geo.setAttribute('uv',new T.Float32BufferAttribute(uv,2));geo.setIndex(index);geo.computeVertexNormals();return geo;
 }
 
-function helmetHardware(form,id){
+function helmetHardware(form,id,low=false){
  const parts=[],plate=(size,p,rotation)=>parts.push(placedGeometry(beveledBox(...size),p,rotation));
  for(const s of [-1,1]){
   // Swept mandibular plates terminate at the visor, leaving a black gasket.
   plate([form.cheek,.103,.104],[s*form.width*.77,-.074,-form.depth*.62],[.16,0,s*.16]);
-  const ear=new T.CylinderGeometry(.042,.046,.025,16);ear.rotateZ(Math.PI/2);ear.translate(s*(form.width+.005),.018,.006);parts.push(ear);
+   const ear=new T.CylinderGeometry(.042,.046,.025,low?8:24);ear.rotateZ(Math.PI/2);ear.translate(s*(form.width+.005),.018,.006);parts.push(ear);
  }
  if(id==='claude'||id==='meta')plate([form.width*1.18,.048,.068],[0,-.135,-form.depth*.61]);
  else if(id==='qwen')for(let i=0;i<3;i++)plate([.15-i*.025,.025,.07],[0,.122+i*.023,-.104+i*.034]);
@@ -526,10 +561,10 @@ function helmetHardware(form,id){
  return joinedGeometry(parts);
 }
 
-function opticGeometry(form){
+function opticGeometry(form,low=false){
  const parts=[],z=-form.depth*1.10;
  const strip=(w,h,x,y,angle=0)=>parts.push(placedGeometry(beveledBox(w,h,.012,.004),[x,y,z],[0,0,angle]));
- const lens=(x,y,r)=>{const g=new T.SphereGeometry(r,16,8);g.scale(1,.83,.25);g.translate(x,y,z);parts.push(g);};
+ const lens=(x,y,r)=>{const g=new T.SphereGeometry(r,low?8:20,low?4:10);g.scale(1,.83,.25);g.translate(x,y,z);parts.push(g);};
  switch(form.eyes){
   case 'dual':lens(-.071,.022,.032);lens(.071,.022,.032);break;
   case 'mono':strip(.142,.016,0,.022,-.08);lens(.093,.016,.021);break;
@@ -550,18 +585,22 @@ function sculptOperator(robot){
  const id=CHARACTERS.find(c=>c.color===data.color)?.id;
  if(!id||!j.head)return;
  const f=OPERATOR_FORMS[id],head=j.head,[shell,visor,eye]=head.children;
- data.operatorIdentity={id,name:f.name};head.name=`operator-head-${id}`;
- replaceOperatorGeometry(robot,shell,operatorGeometry(`helmet-${id}`,()=>contourGeometry([
-  [-.16*f.height,0,0],[-.153*f.height,f.width*f.jaw*.8,f.depth*.63,-.006],
-  [-.115*f.height,f.width*f.jaw,f.depth*.83,-.008],[-.035,f.width*.98,f.depth],
-  [.070,f.width,f.depth],[.125*f.height,f.width*.90,f.depth*.93],
-  [.174*f.height,f.width*.57,f.depth*.62],[.19*f.height,0,0],
- ],{segments:32,power:f.power})));
+ data.operatorIdentity={id,name:f.name,design:OPERATOR_ANATOMY[id].design};head.name=`operator-head-${id}`;
+  replaceOperatorGeometry(robot,shell,operatorGeometry(`helmet-${id}`,()=>contourGeometry(
+   OPERATOR_HEAD_PROFILES[id].map(([y,w,d,z=0,x=0,crown=0])=>[y*f.height,w*f.width,d*f.depth,z,x,crown*f.height]),
+   {segments:48,power:f.power})));
  shell.scale.set(1,1,1);shell.name=`helmet-shell-${id}`;
  replaceOperatorGeometry(robot,visor,operatorGeometry(`visor-${id}`,()=>faceplateGeometry(f)));visor.position.set(0,0,0);visor.scale.set(1,1,1);visor.name='inset-visor';
- replaceOperatorGeometry(robot,eye,operatorGeometry(`optics-${id}`,()=>opticGeometry(f)));eye.position.set(0,0,0);eye.scale.set(1,1,1);eye.name=`optics-${f.eyes}`;
+  replaceOperatorGeometry(robot,eye,operatorGeometry(`optics-${id}`,()=>opticGeometry(f)));eye.position.set(0,0,0);eye.scale.set(1,1,1);eye.name=`optics-${f.eyes}`;
+ visor.userData.operatorSurface={id,part:'visor'};eye.userData.operatorSurface={id,part:'optics'};
  const hardware=new T.Mesh(operatorGeometry(`helmet-hardware-${id}`,()=>helmetHardware(f,id)),data.armor);
- hardware.name='helmet-mandible-and-comms';hardware.castShadow=hardware.receiveShadow=true;head.add(hardware);
+  hardware.name='helmet-mandible-and-comms';hardware.castShadow=hardware.receiveShadow=true;head.add(hardware);
+  hardware.userData.operatorSurface={id,part:'hardware'};
+  // The legacy Duplex bubbles otherwise eclipse its actual inset dual optics.
+  // Keep the existing status-lamp meshes, but recess them above the eye line.
+  if(id==='gemini')for(const node of head.children)if(node.geometry?.type==='SphereGeometry'&&node.geometry.parameters.radius===.055){
+   node.scale.set(.22,.30,.18);node.position.set(Math.sign(node.position.x)*.104,.094,-.175);
+  }
  // Keep public brow/nub handles, but turn the old floating bubbles into a visor
  // seal and a recessed status lamp. They retain the existing low-detail policy.
  if(data.visor?.brow){
@@ -570,35 +609,71 @@ function sculptOperator(robot){
   brow.position.set(0,.026+f.visor*.5,-f.depth*.85);brow.scale.set(1,1,1);
  }
  if(data.visor?.nub){data.visor.nub.position.set(0,-.089,-f.depth*.99);data.visor.nub.scale.set(.46,.3,.28);}
- // Shaped cuirass and abdomen: the team-owned material is retained verbatim.
- const torso=data.torso,chestShell=j.chest.children.find(n=>n.isMesh&&n.material===data.armor);
- for(const [node,key,sections] of [
-  [torso,'abdomen',[[-.26,0,0],[-.235,.14,.11],[-.14,.19,.135],[.035,.235,.158],[.20,.22,.146],[.26,0,0]]],
-  [chestShell,'cuirass',[[-.23,0,0],[-.20,.16,.12],[-.09,.255,.17],[.075,.27,.166],[.15,.235,.14],[.21,.15,.11],[.23,0,0]]],
- ])if(node){replaceOperatorGeometry(robot,node,operatorGeometry(key,()=>contourGeometry(sections,{segments:32,power:.65})));node.scale.set(1,1,1);}
- // Capsule subdivision buys visible elbow/knee contours without increasing
- // articulated objects. Shared primitives remain shared across the whole roster.
- for(const joint of [j.armUpperL,j.armUpperR,j.forearmL,j.forearmR,j.legUpperL,j.legUpperR,j.legLowerL,j.legLowerR]){
-  for(const n of joint?.children||[]){
-   if(n.geometry?.type==='CapsuleGeometry'){
-    const p=n.geometry.parameters;
-    // Three r185 stores the straight section as height, not length. Preserve
-    // it in both construction and the key (upper arm/shin share a radius).
-    replaceOperatorGeometry(robot,n,operatorGeometry(`limb-${p.radius}-${p.height}`,()=>new T.CapsuleGeometry(p.radius,p.height,4,16)));
-   }else if(n.geometry?.type==='BoxGeometry'){
-    const p=n.geometry.parameters;
-    replaceOperatorGeometry(robot,n,operatorGeometry(`plate-${p.width}-${p.height}-${p.depth}`,()=>beveledBox(p.width,p.height,p.depth,.008,2)));
+  // Every anatomy batch remains on its original joint and keeps the exact
+  // team/identity material. No change to grip reach, ragdoll links or hitboxes.
+  const part=(node,kind,side=1)=>{
+   if(!node?.isMesh)return;
+   replaceOperatorGeometry(robot,node,anatomyGeometry(id,kind,side));
+   node.scale.set(1,1,1);node.userData.operatorSurface={id,part:kind,side};node.name=`${kind}-${id}`;
+  };
+  const torso=data.torso,chestShell=j.chest.children.find(n=>n.isMesh&&n.material===data.armor);
+   part(torso,'abdomen');part(chestShell,'chest');
+   const pelvis=j.hips?.children.find(n=>n.geometry?.type==='SphereGeometry');
+   if(pelvis)part(pelvis,'pelvis');
+  const emblem=j.chest.children.find(n=>n.isMesh&&n.userData.lodDetail);
+  if(emblem){part(emblem,'core');emblem.position.set(0,0,0);}
+  const chassis=j.chest.children.find(n=>n.geometry?.type==='BoxGeometry');
+  if(chassis){part(chassis,'chassis');chassis.position.set(0,0,0);}
+  for(const [jointName,kind] of [['armUpper','arm'],['forearm','forearm'],['legUpper','thigh'],['legLower','shin']])for(const side of ['L','R']){
+   const joint=j[`${jointName}${side}`],sign=side==='L'?-1:1;
+   for(const n of joint?.children||[]){
+    if(n.geometry?.type==='CapsuleGeometry')part(n,kind,sign);
+    else if(n.geometry?.type==='BoxGeometry')part(n,kind==='shin'?'shinplate':'foreplate',sign);
    }
   }
- }
- // One merged, optional close-range detail draw for collar clasps and vent slits.
- const seams=new T.Mesh(operatorGeometry('cuirass-seams',()=>joinedGeometry([
-  ...[-1,1].flatMap(s=>[
-   placedGeometry(beveledBox(.038,.11,.018),[s*.183,.071,-.158],[0,0,s*.20]),
-   ...[0,1,2].map(i=>placedGeometry(beveledBox(.064,.009,.015),[s*.12,-.113-i*.019,-.146])),
-  ]),
- ])),operatorMaterial('gasket',()=>new T.MeshStandardMaterial({color:'#17262e',metalness:.5,roughness:.55})));
- seams.name='cuirass-vents';seams.userData.lodDetail=true;seams.castShadow=false;seams.receiveShadow=false;j.chest.add(seams);
+   for(const [i,pad] of (data.shoulderPads||[]).entries()){
+    const name=pad.name;part(pad,'shoulder',i===0?-1:1);pad.name=name;
+    // Small exposed bearings must not reintroduce a common full-width sphere
+    // underneath the narrower pauldron and open orbital/suspension shells.
+    for(const node of pad.parent.children){
+     const radius=node.geometry?.parameters?.radius;
+     if(node.geometry?.type!=='SphereGeometry'||(radius!==.13&&radius!==.16))continue;
+     const girth={chatgpt:.72,claude:.80,grok:.62,meta:1,gemini:.58,deepseek:.77,mistral:.57,kimi:.45,qwen:.74}[id];
+     node.scale.multiplyScalar(girth);
+    }
+   }
+   for(const side of ['L','R']){
+    const hip=j[`legUpper${side}`]?.parent;
+    for(const node of hip?.children||[])if(node.geometry?.type==='SphereGeometry'&&node.geometry.parameters.radius===.115){
+     const girth={chatgpt:.77,claude:.95,grok:.62,meta:1,gemini:.60,deepseek:.91,mistral:.61,kimi:.72,qwen:.90}[id];
+     node.scale.multiplyScalar(girth);
+    }
+   }
+   const harness=j.chest.getObjectByName('wing-chest-plate');
+   if(harness){const name=harness.name;part(harness,'harness');harness.name=name;}
+   for(const side of ['L','R']){
+    const pauldron=j.chest.getObjectByName(`wing-pauldron-${side}`);
+    if(pauldron){const name=pauldron.name;part(pauldron,'pauldron');pauldron.name=name;}
+   }
+  for(const side of ['L','R']){
+   const foot=j[`foot${side}`]?.children.find(n=>n.isMesh);if(foot){part(foot,'foot');foot.position.y=-.046;}
+  }
+  // Exposed revolute bearings, rather than toy-like spherical joints. These
+  // remain mesh leaves: all shoulder/elbow/hip/knee animation groups are intact.
+  const bearings=new Set([j.hips]);
+  for(const side of ['L','R'])for(const name of ['armUpper','forearm','legUpper','legLower']){
+   const joint=j[`${name}${side}`];if(joint?.parent)bearings.add(joint.parent);
+   if(name==='forearm')bearings.add(joint);
+  }
+  for(const joint of bearings)for(const node of joint?.children||[]){
+   const r=node.geometry?.parameters?.radius;
+   if(node.geometry?.type!=='SphereGeometry'||r<.075||r>.17)continue;
+   replaceOperatorGeometry(robot,node,operatorGeometry(`bearing-${r}`,()=>contourGeometry([
+    [-r*.72,0,0],[-r*.72,r*.75,r*.75],[-r*.5,r,r],
+    [r*.5,r,r],[r*.72,r*.75,r*.75],[r*.72,0,0],
+   ],{segments:12,power:1})));
+   node.rotation.z=Math.PI/2;node.name='machined-joint-bearing';
+  }
 }
 
 // Native Three LOD is evaluated per-camera (including preview cameras) without
@@ -608,14 +683,22 @@ function sculptOperator(robot){
 function installOperatorLOD(robot){
  const software=robot.children.some(n=>n.userData.blobShadow===true),nodes=[];
  robot.userData.joints.root.traverse(n=>{
-  if(!n.isMesh||n.userData.lodDetail||n.material?.transparent)return;
+   if(!n.isMesh||n.material?.transparent)return;
   // The five-mesh world weapon already has its own deliberately tiny budget.
   for(let p=n;p&&p!==robot;p=p.parent)if(p.userData.weapon)return;
   const p=n.geometry.parameters,type=n.geometry.type;
   let make,key;
-  if(type==='CapsuleGeometry'){key=`capsule-${p.radius}-${p.height}`;make=()=>new T.CapsuleGeometry(p.radius,p.height,2,8);}
-  else if(type==='SphereGeometry'&&p.widthSegments>8){key=`sphere-${p.radius}`;make=()=>new T.SphereGeometry(p.radius,8,6);}
-  else if(type==='ContourGeometry'){key=`contour-${JSON.stringify(p.sections)}-${p.power}`;make=()=>contourGeometry(p.sections,{segments:12,power:p.power});}
+   const surface=n.userData.operatorSurface;
+   if(surface){
+    const {id,part,side=1}=surface;key=`anatomy-${id}-${part}-${side}`;
+    if(!['visor','optics','hardware'].includes(part)){nodes.push({node:n,geometry:anatomyGeometry(id,part,side,true)});return;}
+    make=()=>part==='visor'?faceplateGeometry(OPERATOR_FORMS[id],true):part==='optics'?opticGeometry(OPERATOR_FORMS[id],true):helmetHardware(OPERATOR_FORMS[id],id,true);
+   }
+   else if(n.userData.lodDetail&&type!=='BeveledBoxGeometry')return;
+   else if(type==='CapsuleGeometry'){key=`capsule-${p.radius}-${p.height}`;make=()=>new T.CapsuleGeometry(p.radius,p.height,2,8);}
+   else if(type==='SphereGeometry'&&p.widthSegments>8){key=`sphere-${p.radius}`;make=()=>new T.SphereGeometry(p.radius,8,6);}
+   else if(type==='TorusGeometry'){key=`torus-${p.radius}-${p.tube}-${p.arc}`;make=()=>new T.TorusGeometry(p.radius,p.tube,4,12,p.arc);}
+   else if(type==='ContourGeometry'){const segments=p.segments<=16?8:12;key=`contour-${JSON.stringify(p.sections)}-${p.power}-${segments}`;make=()=>contourGeometry(p.sections,{segments,power:p.power});}
   else if(type==='BeveledBoxGeometry'&&p.segments>1){key=`bevel-${p.width}-${p.height}-${p.depth}-${p.radius}`;make=()=>beveledBox(p.width,p.height,p.depth,p.radius,1);}
   if(make)nodes.push({node:n,geometry:operatorGeometry(`lod-${key}`,make)});
  });
@@ -625,7 +708,10 @@ function installOperatorLOD(robot){
   lod.name=`detail-${node.name||node.geometry.type}`;
   low.name=`distance-${node.name||node.geometry.type}`;
   low.position.copy(node.position);low.quaternion.copy(node.quaternion);low.scale.copy(node.scale);
-  low.castShadow=node.castShadow;low.receiveShadow=node.receiveShadow;
+   low.castShadow=node.castShadow;low.receiveShadow=node.receiveShadow;
+   // The presentation detail switch targets the wrapper; native LOD owns leaf
+   // visibility. This prevents detail updates accidentally enabling both levels.
+   if(node.userData.lodDetail){lod.userData.lodDetail=true;delete node.userData.lodDetail;}
   parent.add(lod);lod.addLevel(node,0);lod.addLevel(low,18,.15);
   // SoftwareRenderer does not process Three LOD: start and stay on its low mesh.
   lod.autoUpdate=!software;node.visible=!software;low.visible=software;
@@ -650,18 +736,17 @@ export function refineOperatorCharacter(robot) {
   // Aim rotation remains view-owned; weapon geometry/anchors are never rewritten.
   if(data.gunAnchor) { data.gunAnchor.position.set(.04,.06,-.08); j.gunAnchor=data.gunAnchor; }
   const plateMaterial=data.armor ?? new T.MeshStandardMaterial({color:'#2c3540'});
-  const armor=new T.Mesh(operatorGeometry('sternum',()=>joinedGeometry([-1,1].map(s=>placedGeometry(beveledBox(.166,.18,.038,.012,2),[s*.085,0,0],[0,s*.12,s*.13])))),plateMaterial);
+  const id=data.operatorIdentity?.id;
+  const armor=new T.Mesh(id?anatomyGeometry(id,'sternum'):operatorGeometry('sternum',()=>joinedGeometry([-1,1].map(s=>placedGeometry(beveledBox(.166,.18,.038,.012,2),[s*.085,0,0],[0,s*.12,s*.13])))),plateMaterial);
+  if(id)armor.userData.operatorSurface={id,part:'sternum'};
   armor.name='articulated-sternum';armor.position.set(0,-.055,-.19);j.chest?.add(armor);
   const handMaterial=operatorMaterial('glove',()=>new T.MeshStandardMaterial({color:'#18262c',roughness:.65}));
-  const palmGeometry=operatorGeometry('glove',()=>joinedGeometry([
-   beveledBox(.09,.10,.075,.014,2),
-   ...[-.027,0,.027].map(x=>placedGeometry(beveledBox(.024,.045,.045,.009),[x,-.026,-.048])),
-  ]));
+  const palmGeometry=anatomyGeometry('chatgpt','hand');
   const result={armor};
   for(const side of ['L','R']) {
     const fore=j[`forearm${side}`];if(!fore) continue;
     const hand=new T.Group();hand.name=`hand-${side}`;hand.position.set(0,-.275,0);fore.add(hand);
-    const palm=new T.Mesh(palmGeometry,handMaterial);hand.add(palm);
+    const palm=new T.Mesh(palmGeometry,handMaterial);palm.userData.operatorSurface={id:'chatgpt',part:'hand'};hand.add(palm);
     const grip=new T.Group();grip.name=`grip-${side}`;grip.position.set(0,-.015,-.055);hand.add(grip);
     result[`hand${side}`]=hand;result[`grip${side}`]=grip;
     j[`hand${side}`]=hand;

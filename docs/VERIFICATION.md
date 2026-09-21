@@ -1,5 +1,52 @@
 # COCS verification report
 
+## Release 8.7 — FOUNDRY
+
+**Implementation verification (2026-09-21).** All intensive checks were run
+serially, including Node test-file concurrency set to one.
+
+- Full game sweep: 3,136 cases, 3,122 passed, nine intentional skips and five
+  failures. Four fixtures needed valid ownership/live-node/elevation state for
+  the new terminal gates; the fifth still required spherical shoulder geometry.
+  A 354-case focused regression run passed 353; the remaining lifecycle fixture
+  was corrected to clear its previous HACK boost before testing SABOTAGE, and
+  its targeted rerun passed. No simulation or balance gate was relaxed.
+- Server suite: **214/214 passed**. UI/integration suite: **139/139 passed**.
+- Typecheck and production build passed.
+- Local gameplay browser matrix: **5/5 viewports passed**, including portrait,
+  short landscape, enlarged UI, touch hit-testing and crosshair clearance.
+  Evidence: `artifacts/foundry-browser/20260921T163821Z-08e32df/manifest.json`.
+- Graphics Lab browser check passed all effect/recipe pixel-difference gates,
+  zero-mix/split isolation, clipboard/recipe persistence, layout and live-match
+  controls. All option switches reused **one shader program**.
+- Menu route/layout checks passed at 1366×768, 390×844 and 844×390 with the
+  attract demo disabled, including keyboard Loadout activation and destination
+  focus, operator changes, Library disclosures, Setup open/Escape, Online/Back,
+  Training, briefing and exact Operations launch rules. Zero page errors.
+  Visual inspection caught and fixed the disabled-demo operator preview
+  placement; standard desktop Online/Training/Custom routes now fit above the
+  persistent match rail. Evidence: `artifacts/foundry-menu/manifest.json`.
+- After silhouette refinement, **214/214** model/renderer/rig/LOD/material/
+  secondary-motion tests passed. Geometry accounting passed unchanged limits:
+  62–64 near draw objects / 10,388–12,696 triangles; 47–51 far draw objects /
+  4,900–5,472 triangles; 2,720,400 bytes of shared operator geometry. Both
+  operator and machine contact sheets were visually inspected in WebGL.
+- Final typecheck, production rebuild and **139/139 UI tests** passed after
+  preview wiring, responsive-layout refinement and release-footer update.
+
+Browser rendering uses ANGLE/SwiftShader. Geometry/draw budgets and skipped-pass
+tests establish work reduction; these runs are not hardware-GPU FPS claims.
+The bounded 640×360 pre-release/candidate benchmark used the same seed,
+six-second sampling window and one-second warmup. Direct median was 150 ms →
+133.4 ms; postfx median was unchanged at 216.7 ms. Direct p95 worsened slightly
+(216.7 → 233.3 ms); sample counts were only 22–27 frames. Variant buffer scales
+matched across builds (0.475 direct, 0.95 postfx), but this software-renderer
+pilot is too short for a general FPS claim. Both runs had zero page errors.
+Raw evidence: `/tmp/opencode/foundry-benchmark-{baseline,candidate}.json`.
+
+Production deployment evidence will be recorded after the final gate and the
+web + game-server cutover from `/home/mojo/projects/tokenarena`.
+
 ## Release 8.6 - PRISM
 
 **Production deployment (2026-09-20).** Commit `f030685` was fast-forwarded to

@@ -10,7 +10,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {Match,floorAt} from './core.mjs';
 import {LATTICE_MAPS} from './lattice-maps.mjs';
-import {cocsSnapshot} from './cocs.mjs';
+import {cocsSnapshot, updateLiveNodes} from './cocs.mjs';
 import {cocsCommandView, cocsTerminalView, cocsTraversalView} from './cocs-orders.mjs';
 
 const DT = 1 / 60;
@@ -148,7 +148,7 @@ test('bots and non-cocs modes are untouched by the human interact edge', () => {
 // ---------------------------------------------------------------------------
 // Terminals
 // ---------------------------------------------------------------------------
-test('a human actor at a terminal triggers HACK / DEPLOY / VAULT on the interact edge', () => {
+test('a human terminal edge starts legal HACK / DEPLOY and refuses empty VAULT delivery', () => {
   const match = coopMatch();
   const state = match.objectiveState;
   const actor = match.actors[0];
@@ -158,8 +158,10 @@ test('a human actor at a terminal triggers HACK / DEPLOY / VAULT on the interact
   const deploy = terminals['deploy-relay-0'];
   const vault = terminals['vault-hq-0'];
   const node = state.nodes.find(entry => entry.id === hack.nodeId);
+  state.nodes.find(entry => entry.id === 'front-0').owner = 0;
   // Neutral node: DEPLOY is not actionable, HACK wins.
   node.owner = null;
+  updateLiveNodes(state); // Interact runs before the next objective-step live-set refresh.
   pin(actor, hack.x, hack.z);
   interact(match, actor.id, true);
   assert.equal(hack.channel?.action, 'HACK');
@@ -170,11 +172,11 @@ test('a human actor at a terminal triggers HACK / DEPLOY / VAULT on the interact
   interact(match, actor.id, false);
   interact(match, actor.id, true);
   assert.equal(deploy.channel?.action, 'DEPLOY');
-  // VAULT stores a shard.
+  // Leaving an unfinished installation provides no shard to store.
   pin(actor, vault.x, vault.z);
   interact(match, actor.id, false);
   interact(match, actor.id, true);
-  assert.equal(state.terminals.stats.vaultStores, 1);
+  assert.equal(state.terminals.stats.vaultStores, 0);
   assert.ok(state.terminals.stats.interacts >= 2, 'HACK + DEPLOY counted as interacts');
 });
 

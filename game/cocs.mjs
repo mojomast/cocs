@@ -48,7 +48,7 @@ import {PVP_ROLE_IDS, coopRole, roleAbility} from './cocs-roles.mjs';
 import {createTraversalState, stepCocsTraversal, cocsTraversalSnapshot, humanDeviceInteract} from './cocs-traversal.mjs';
 import {createTerminalState, stepCocsTerminals, cocsTerminalsSnapshot, humanTerminalInteract} from './cocs-terminals.mjs';
 import {COOP_ECONOMY} from './cocs-difficulty.mjs';
-import {cocsCoopSnapshot, coopOrderGate, coopOutcome, createCoopState, stepCoop} from './cocs-coop.mjs';
+import {COOP_PRIME_REACH, cocsCoopSnapshot, coopOrderGate, coopOutcome, coopPrimeNode, createCoopState, stepCoop} from './cocs-coop.mjs';
 import {latticeCaptureRate, latticeCaptureResist, latticeSupportSnapshot, stepLatticeSupport} from './lattice-support.mjs';
 
 export const COCS_KIND = 'cocs';
@@ -1922,6 +1922,12 @@ export function cocsSnapshot(match) {
       // O1c terminal windows (co-op only; omitted in PvPvE so its snapshot
       // stays byte-identical).
       ...(node.hack ? {hack: {team: node.hack.team ?? null, until: num(node.hack.until, 0), multiplier: num(node.hack.multiplier, 1)}} : {}),
+      ...(state.coop ? {
+        y: num(node.y, 0), r: num(node.r, 4),
+        ...(node.archetype === 'economy' ? {primeReach: Math.max(num(node.r, 4), COOP_PRIME_REACH)} : {}),
+        primeChannel: node.primeChannel ? {actor: node.primeChannel.actor, remaining: num(node.primeChannel.remaining, 0), total: num(node.primeChannel.total, 0)} : null,
+        oracle: node.oracle ? {team: node.oracle.team, active: node.oracle.active === true, targets: [...(node.oracle.targets ?? [])]} : null,
+      } : {}),
       ...(node.prime ? {prime: {team: node.prime.team ?? null, until: num(node.prime.until, 0), fluxBonus: num(node.prime.fluxBonus, 0), captureUntil: num(node.prime.captureUntil, 0), captureMultiplier: num(node.prime.captureMultiplier, 1)}} : {}),
     })),
     scores: {0: num(state.scores?.[0], 0), 1: num(state.scores?.[1], 0)},
@@ -1997,12 +2003,17 @@ export function cocsSnapshot(match) {
 // ---------------------------------------------------------------------------
 export function cocsHumanInteract(match, state, actorId) {
   if (!state || state.kind !== COCS_KIND) return null;
-  const actor = match?.actors?.[actorId];
+  const actor = (match?.actors ?? []).find(entry => entry?.id === actorId);
   if (!actor || actor.bot) return null;
   const device = humanDeviceInteract(match, state, actor);
   if (device) return {source: 'device', ...device};
   const terminal = humanTerminalInteract(match, state, actor);
   if (terminal) return {source: 'terminal', ...terminal};
+  if (state.coop) {
+    const nodes = state.nodes.filter(node => node.archetype === 'economy' && node.owner === actor.team)
+      .sort((a, b) => Math.hypot(actor.x - a.x, actor.z - a.z) - Math.hypot(actor.x - b.x, actor.z - b.z) || String(a.id).localeCompare(String(b.id)));
+    for (const node of nodes) if (coopPrimeNode(match, state, actor, node.id).ok) return {source: 'node', nodeId: node.id, kind: 'PRIME', action: 'prime'};
+  }
   return null;
 }
 

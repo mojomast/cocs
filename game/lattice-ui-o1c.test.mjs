@@ -276,6 +276,46 @@ test('terminals read as HACK / DEPLOY / VAULT with shape + word prompts and stat
   assert.equal(empty.hasRoles, false);
 });
 
+test('terminal prompts follow authoritative actions, courier cargo and vertical reach', () => {
+  const actor={id:0,team:0,x:0,y:0,z:0};
+  const vault={id:'vault',kind:'VAULT',x:0,y:0,z:0,owner:0,state:'available',actionsByTeam:{0:['vault-store']},banked:{0:0},cargo:[]};
+  const snapshot={terminals:[vault]};
+  const view=()=>cocsTerminalView(snapshot,actor,sampleBoard());
+  assert.equal(view().prompt,null,'an empty vault cannot promise a free deposit');
+  vault.cargo=[{actor:0,team:0,source:'deploy-relay'}];
+  assert.equal(view().prompt.verb,'BANK SHARD');
+  assert.equal(view().cargo.source,'deploy-relay');
+  vault.cargo=[];vault.banked[0]=1;vault.actionsByTeam[0].push('vault-pull');
+  assert.equal(view().prompt.verb,'WITHDRAW · 8 FLUX');
+  vault.y=9;
+  assert.equal(view().prompt,null,'a terminal on another deck is not in reach');
+  const deploy={id:'deploy',kind:'DEPLOY',owner:0,x:0,y:0,z:0,state:'active',shards:{0:'ready'},actionsByTeam:{0:['deploy']}};
+  snapshot.terminals.push(deploy);
+  assert.equal(view().prompt.verb,'COLLECT SHARD');
+  vault.cargo=[{actor:0,team:0,source:'other-relay'}];
+  assert.equal(view().prompt,null,'a courier cannot collect a second shard');
+  vault.cargo=[];deploy.actionsByTeam[0]=[];
+  assert.equal(view().prompt,null,'contested/disconnected actions stay unavailable');
+});
+
+test('economy PRIME exposes its live channel and suppresses unavailable interactions', () => {
+  const player={id:0,team:0,health:100,x:0,y:0,z:0};
+  const node={id:'economy-0',archetype:'economy',owner:0,x:0,y:0,z:0,primeReach:14};
+  const snapshot={nodes:[node],terminals:[]};
+  const prompt=()=>cocsTerminalView(snapshot,player,sampleBoard()).prompt;
+  assert.equal(prompt().verb,'PRIME');
+  node.primeChannel={actor:0,remaining:4,total:8};
+  assert.equal(prompt().channelPercent,50);
+  node.primeChannel.actor=1;
+  assert.equal(prompt(),null);
+  node.primeChannel=null;node.contested=true;
+  assert.equal(prompt(),null);
+  node.contested=false;node.prime={until:900};
+  assert.equal(prompt(),null);
+  node.prime=null;player.y=6;
+  assert.equal(prompt(),null);
+});
+
 test('cocsCommandView folds the board, spend window and terminals together and stays mode-isolated', () => {
   const snapshot = {...spendSnapshot(), terminals: [{id: 't1', kind: 'HACK', state: 'available'}], coop: true};
   const command = cocsCommandView(sampleBoard(), snapshot, {id: 0, team: 0}, null);

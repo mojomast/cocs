@@ -16,6 +16,38 @@ record in [VERIFICATION.md](VERIFICATION.md).
 
 ---
 
+## v8.7 · FOUNDRY — 2026-09-21
+
+- Rebuilt the selection screen into **Play / Loadout / Library**. LATTICE is
+  featured; Online, Training and Custom routes are direct; rules and secondary
+  activities unfold on demand. Keyboard navigation focuses the destination,
+  mobile controls remain touch-sized, and the preview host stays mounted.
+- Quick starts forward their explicit rules/map into the actual launch handler;
+  opening a LATTICE briefing no longer changes saved match rules.
+- Nine distinct procedural operator anatomies, articulated mechanical limbs,
+  richer helmets and armor, and simplified far geometry. Existing collision,
+  animation, ragdoll, team presentation and shared-resource contracts remain.
+- Physical objective machines display authoritative progress and state. HACK
+  doubles legal capture for six seconds; DEPLOY installs connected local ORACLE
+  intel; one shard per source/team can be carried to HQ, banked, and withdrawn
+  for the existing 8 FLUX / 6 REQ exchange. Death returns cargo to its source.
+- SABOTAGE denies supply for 45 seconds and now restores it on expiry; owned
+  links accept a four-second repair. Economy PRIME uses normal interaction and
+  an eight-second channel that interrupts on danger, damage or departure.
+- Terminal prompts and courier callouts explain concrete next actions. Shared
+  server/simulation preflight rejects invalid ownership, range, contest,
+  adjacency and cargo states before accepting an action.
+- Empty/offscreen bot-effect passes and hidden previews are skipped; styled
+  passes share transform updates and avoid repeated viewport configuration.
+  Intentional frame caps no longer trigger false performance shedding; failed
+  restoration probes back off 30/60/120 seconds.
+- Commander ownership follows snapshots, successful mutinies settle, route
+  orders await confirmation and can be cleared, and invalid route/stance
+  requests fail immediately.
+- Deployment verification compares served asset bytes against `dist/client`,
+  including SSR output without a client index. Shared sim/server changes require
+  deploying web and game server together. Protocol remains version 3.
+
 ## v8.6 · PRISM — 2026-09-20
 
 An opt-in developer graphics lab for choosing the game's visual flavor — with a

@@ -921,6 +921,16 @@ test('commandBrief and modeTargetText label the Operations win condition, not th
   assert.match(plain.detail, /5 OP/);
 });
 
+test('terminal callouts explain the next mechanic and courier beats remain team-private', () => {
+  const player={id:0,team:0};
+  assert.match(cocsAnnouncement({type:'cocs-terminal-hack',team:0},player).detail,/DOUBLE CAPTURE/);
+  assert.match(cocsAnnouncement({type:'cocs-terminal-deploy',team:0},player).detail,/RETURN TO HQ/);
+  assert.equal(cocsAnnouncement({type:'cocs-terminal-vault',team:0,action:'store'},player).text,'SHARD BANKED');
+  assert.match(cocsAnnouncement({type:'cocs-terminal-shard',team:0,actor:0,action:'collect'},player).detail,/YOUR HQ VAULT/);
+  assert.match(cocsAnnouncement({type:'cocs-terminal-shard',team:0,actor:1,action:'collect'},player).detail,/ESCORT/);
+  assert.equal(cocsAnnouncement({type:'cocs-terminal-shard',team:1,actor:2,action:'collect'},player),null);
+});
+
 test('the announcement priority policy is bounded, deduped and expiry-aware', () => {
   const ranks = Object.values(COCS_ANNOUNCE_PRIORITY);
   assert.ok(ranks.every(rank => Number.isFinite(rank) && rank >= 0));

@@ -1,5 +1,7 @@
 import assert from 'node:assert/strict';
 import {pathToFileURL} from 'node:url';
+import {readFile} from 'node:fs/promises';
+import {resolve,sep} from 'node:path';
 import {RELEASE_CODENAME,RELEASE_VERSION} from '../game/changelog.mjs';
 import {PROTOCOL_VERSION} from '../game/protocol.mjs';
 import {buildIdentity,protocolMajor} from '../game/build-identity.mjs';
@@ -20,7 +22,7 @@ export function linkedAssets(html) {
  return [...new Set(refs)];
 }
 
-export async function verifyDeployment(base, {fetchImpl = fetch, version = RELEASE_VERSION, codename = RELEASE_CODENAME} = {}) {
+export async function verifyDeployment(base, {fetchImpl = fetch, version = RELEASE_VERSION, codename = RELEASE_CODENAME, assetsDir = null} = {}) {
  const response = await fetchImpl(new URL('/', base), {signal: AbortSignal.timeout(15000), cache: 'no-store'});
  assert.equal(response.status, 200, 'HTML must return 200');
  assert.match(response.headers.get('content-type') || '', /^text\/html\b/i);
@@ -42,6 +44,15 @@ export async function verifyDeployment(base, {fetchImpl = fetch, version = RELEA
   assert.match(asset.headers.get('content-type') || '', css ? /^text\/css\b/i : /^(?:application|text)\/(?:javascript|ecmascript)\b/i, `${path} content type`);
   const body = await asset.text();
   assert.ok(body.length > 0, `${path} must not be empty`);
+  if (assetsDir) {
+   const root = resolve(assetsDir);
+   const localPath = resolve(root, `.${decodeURIComponent(new URL(path, base).pathname)}`);
+   assert.ok(localPath.startsWith(root + sep), `${path} must resolve inside the built client directory`);
+   let built;
+   try { built = await readFile(localPath, 'utf8'); }
+   catch { assert.fail(`${path} is absent from this build; the service may be serving a stale checkout`); }
+   assert.ok(body === built, `${path} must match the freshly built asset bytes`);
+  }
  }));
  return assets;
 }
@@ -112,11 +123,13 @@ export async function verifyIdentities(base, serverBase, {fetchImpl = fetch, exp
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
  const flags = new Set();
  const positional = [];
- let serverBase = process.env.TOKEN_ARENA_SERVER_URL || `http://127.0.0.1:${process.env.GAME_SERVER_PORT || 4000}`;
+  let serverBase = process.env.TOKEN_ARENA_SERVER_URL || `http://127.0.0.1:${process.env.GAME_SERVER_PORT || 4000}`;
+  let assetsDir = null;
  const argv = process.argv.slice(2);
  for (let index = 0; index < argv.length; index++) {
   const arg = argv[index];
-  if (arg === '--server') { serverBase = argv[++index] ?? serverBase; continue; }
+   if (arg === '--server') { serverBase = argv[++index] ?? serverBase; continue; }
+   if (arg === '--assets-dir') { assetsDir = argv[++index]; assert.ok(assetsDir, '--assets-dir requires a directory'); continue; }
   if (arg.startsWith('--server=')) { serverBase = arg.slice('--server='.length); continue; }
   if (arg.startsWith('--')) { flags.add(arg); continue; }
   positional.push(arg);
@@ -126,7 +139,7 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
   const local = buildIdentity(process.env);
   const version = positional[1] || local.release;
   const release = version.includes(' · ') ? version : `${version} · ${local.codename}`;
-  const assets = await verifyDeployment(base, {version, codename: local.codename});
+   const assets = await verifyDeployment(base, {version, codename: local.codename, assetsDir});
   console.log(`Verified ${base}: title footer "${release}" and ${assets.length} linked CSS/JavaScript assets`);
   for (const asset of assets) console.log(`  200 ${asset}`);
   // Identity checks run when the caller can name the expected commit

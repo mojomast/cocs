@@ -628,7 +628,10 @@ test('two WebSocket clients drive an OPERATIONS room: actions apply and refuses 
   const vault = state.terminals.terminals[vaultId];
   const alice = room.match.actors.find(actor => actor.name === 'Alice');
   const bob = room.match.actors.find(actor => actor.name === 'Bob');
-  Object.assign(alice, { x: vault.x, z: vault.z, y: 0 });
+   Object.assign(alice, { x: vault.x, z: vault.z, y: 0 });
+   const source=Object.values(state.terminals.terminals).find(t=>t.kind==='DEPLOY');
+   source.shards[alice.team]='carried';
+   state.terminals.vault.cargo[alice.id]={actor:alice.id,team:alice.team,source:source.id,deaths:alice.deaths};
   alice.req = 100;
 
   send(a, { type: 'order', cardId: 'w-o', verb: 'HOLD', target: front.id, agent: 'chief' });

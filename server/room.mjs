@@ -6,10 +6,10 @@ import {actorWon} from '../game/outcome.mjs';
 import {getMap} from '../game/maps.mjs';
 import {resolveMapForMode} from '../game/arenas.mjs';
 import {CHARACTERS,resolveLoadout,RULES} from '../game/data.mjs';
-import {COCS_ORDER_LOG_LIMIT,capturableBy,nodeById,cocsRoleAllowedOnRung,cocsThreadsUsed} from '../game/cocs.mjs';
+import {COCS_ORDER_LOG_LIMIT,capturableBy,nodeById,cocsRoleAllowedOnRung,cocsThreadsUsed,normalizeCocsPolicy} from '../game/cocs.mjs';
 import {COOP_BIG_SINKS,coopCommandState,coopOrderGate,coopSpendGate,intermissionOpen} from '../game/cocs-coop.mjs';
 import {coopSink} from '../game/cocs-difficulty.mjs';
-import {TERMINAL_KINDS} from '../game/cocs-terminals.mjs';
+import {terminalActionGate} from '../game/cocs-terminals.mjs';
 import {coopRole} from '../game/cocs-roles.mjs';
 import {SUBAGENTS,reqItem,reqItemModes,reqItemSupported,reqPurchase} from '../game/cocs-economy.mjs';
 import {depotPurchaseState} from '../game/cocs-traversal.mjs';
@@ -383,7 +383,8 @@ export class Room {
    if (action === 'vault-store' && num(state.terminals?.vault?.stores, 0) > num(baseline.stores, 0)) return done();
    if (action === 'vault-pull' && num(state.terminals?.vault?.pulls, 0) > num(baseline.pulls, 0)) return done();
    if (action === 'hack' && num(terminal.hacks, 0) > num(baseline.hacks, 0)) return done();
-   if (action === 'deploy' && num(terminal.deploys, 0) > num(baseline.deploys, 0)) return done();
+    if (action === 'deploy' && num(terminal.deploys, 0) > num(baseline.deploys, 0)) return done();
+    if (action === 'deploy' && state.terminals?.vault?.cargo?.[record.actorId]?.source === record.terminalId) return done();
    if (action === 'cut' && num(terminal.sabotages, 0) > num(baseline.sabotages, 0)) return done();
    if (action === 'repair' && (num(terminal.repairs, 0) > num(baseline.repairs, 0) || (baseline.state !== 'live' && terminal.state === 'live'))) return done();
    if (record.seenChannel && !channel) return {state: 'blocked', ok: false, reason: 'interrupted'};
@@ -417,7 +418,7 @@ export class Room {
    case 'release': return String(seat ?? '') !== actorId ? done : null;
    case 'set-route': return String(route ?? '') === String(record.value ?? '') ? done : null;
    case 'policy': return String(policy ?? '') === String(record.value ?? '') ? done : null;
-   case 'mutiny-vote': return votes && votes[actorId] === true ? done : null;
+    case 'mutiny-vote': return String(seat ?? '') === actorId || votes?.[actorId] === true ? done : null;
    case 'opt-out-orders': {
     const actor = this.match?.actors?.[record.actorId] ?? null;
     return actor?.ordersOptOut === true ? done : null;
@@ -598,16 +599,10 @@ export class Room {
   if (!terminal && !device) return this.cocsRejectAction(opened, 'missing', { action: parsed.action });
   const team = actor.team === 1 ? 1 : 0;
   if (terminal) {
-   // The Board's SABOTAGE card arrives as the protocol `cut`; the sim's terminal
-   // vocabulary calls the same channel SABOTAGE. Refuse an action aimed at the
-   // wrong terminal kind instead of enqueueing a silent no-op.
-   const requiredKind = {hack: 'HACK', deploy: 'DEPLOY', cut: 'SABOTAGE', 'vault-store': 'VAULT', 'vault-pull': 'VAULT'}[parsed.action] ?? null;
-   if (parsed.action === 'depot-capture' || (requiredKind && terminal.kind !== requiredKind)) return this.cocsRejectAction(opened, 'wrong-terminal', { action: parsed.action, terminalId: parsed.terminalId });
-   const kind = TERMINAL_KINDS[terminal.kind];
-   if (parsed.action === 'deploy' && terminal.owner !== team) return this.cocsRejectAction(opened, 'not-owned', { action: parsed.action });
-   if ((parsed.action === 'hack' || parsed.action === 'cut') && terminal.state !== 'live') return this.cocsRejectAction(opened, 'terminal-state', { action: parsed.action });
-   if (Math.hypot(num(actor.x, 0) - num(terminal.x, 0), num(actor.z, 0) - num(terminal.z, 0)) > num(kind?.reach, 6)) return this.cocsRejectAction(opened, 'range', { action: parsed.action });
-   if (parsed.action === 'vault-pull' && num(state.flux?.[team], 0) + 1e-9 < num(TERMINAL_KINDS.VAULT?.pullCost, 8)) return this.cocsRejectAction(opened, 'flux', { action: parsed.action });
+   // One read-only gate shared with the authority: adjacency, supply,
+   // elevation, contest and real courier/bank state all decide acceptance.
+   const gate = terminalActionGate(this.match,state,terminal,actor,parsed.action);
+   if (!gate.ok) return this.cocsRejectAction(opened,gate.reason,{action:parsed.action,terminalId:parsed.terminalId});
    opened.baseline = this.cocsTerminalBaseline(state, parsed.terminalId);
   } else if (device) {
    // Traversal devices are neutral: validate the action belongs to the device
@@ -646,9 +641,19 @@ export class Room {
   const simId = String(actor.id);
   const seat = state.coop ? state.coop.commandSeat?.[team] ?? null : state.command?.seat?.[team] ?? null;
   if (parsed.action === 'release' && seat !== simId) return this.cocsRejectAction(opened, 'not-commander', { action: parsed.action });
-  this.pendingCocs.commands.push({ tick: this.cocsTick(), peerId: simId, cardId: opened.cardId, team, action: parsed.action, value: parsed.value, actorId: actor.id });
-  this.recordCocsCard(opened.cardId, { verb: parsed.action.toUpperCase(), target: null, value: parsed.value, team, actorId: actor.id, peerId: String(peerId), state: 'running', accepted: true, acceptedTick: this.cocsTick(), blocker: null, reason: null, ok: true });
-  this.recordCocsDecision(opened, 'accepted', null, {action: parsed.action, value: parsed.value});
+  // Match the sim's vocabulary before issuing an acceptance. Otherwise a bad
+  // route/stance sits RUNNING forever, and a lowercase accepted stance never
+  // matches its uppercase snapshot when the ledger waits for completion.
+  let value = parsed.value == null || parsed.value === '' ? null : parsed.value;
+  if (parsed.action === 'policy' && value !== null) {
+   value = normalizeCocsPolicy(value);
+   if (value === null) return this.cocsRejectAction(opened, 'stance', {action:parsed.action});
+  }
+  if (parsed.action === 'set-route' && value !== null && !nodeById(state, String(value))) return this.cocsRejectAction(opened, 'unknown-node', {action:parsed.action});
+  opened.value = value;
+  this.pendingCocs.commands.push({ tick: this.cocsTick(), peerId: simId, cardId: opened.cardId, team, action: parsed.action, value, actorId: actor.id });
+  this.recordCocsCard(opened.cardId, { verb: parsed.action.toUpperCase(), target: null, value, team, actorId: actor.id, peerId: String(peerId), state: 'running', accepted: true, acceptedTick: this.cocsTick(), blocker: null, reason: null, ok: true });
+  this.recordCocsDecision(opened, 'accepted', null, {action: parsed.action, value});
   return true;
  }
  buy(peerId, msg, now = Date.now()) {

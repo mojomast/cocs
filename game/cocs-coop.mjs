@@ -36,7 +36,7 @@ import {
   directorSpend, siegeShouldArm, siegeShouldLift,
 } from './cocs-director.mjs';
 import {COOP_ROLES, coopRole, roleAbility, roleAbilityTargets} from './cocs-roles.mjs';
-import {TERMINAL_KINDS, repairTerminal, terminalInteract, vaultAction} from './cocs-terminals.mjs';
+import {TERMINAL_KINDS, repairTerminal, terminalInteract, vaultAction, terminalMechanicsSnapshot, startTerminalChannel} from './cocs-terminals.mjs';
 import {latticeInteractionRate} from './lattice-support.mjs';
 
 export const COOP_KIND = 'cocs-coop';
@@ -830,18 +830,22 @@ function subagentUpkeepFor(role, slot, ctx) {
 // HARVESTER never enters a contested zone), `RALLY` is the friendly multi-target
 // ability, `REPAIR` fixes every broken device/terminal.
 // ---------------------------------------------------------------------------
-const PRIME_LEASH = 14;
+export const COOP_PRIME_REACH = 14;
 
 /** Start the active HARVESTER/human prime on one owned economy node. */
 export function coopPrimeNode(match, state, actor, nodeId) {
   const coop = state?.coop;
-  if (!coop || !actor || actor.health <= 0) return {ok: false, reason: 'missing'};
+  if (!coop || !actor || actor.health <= 0 || actor.team !== 0) return {ok: false, reason: 'missing'};
   const node = nodeById(state, nodeId);
   if (!node || node.archetype !== 'economy' || node.owner !== 0) return {ok: false, reason: 'target'};
+  if (Math.hypot(num(actor.x, 0) - node.x, num(actor.z, 0) - node.z) > Math.max(num(node.r, 4), COOP_PRIME_REACH)
+    || Math.abs(num(actor.y, 0) - num(node.y, 0)) > 5) return {ok: false, reason: 'range'};
+  if (node.contested || (match.actors ?? []).some(enemy => enemy?.health > 0 && enemy.team === 1
+    && Math.hypot(enemy.x - node.x, enemy.z - node.z) <= node.r && Math.abs(num(enemy.y, 0) - num(node.y, 0)) <= 5)) return {ok: false, reason: 'contested'};
   if (node.primeChannel || (node.prime && num(state.tick, 0) <= num(node.prime.until, 0))) return {ok: false, reason: 'already-primed'};
   const ability = roleAbility('harvester', 'PRIME');
   const seconds = num(ability?.seconds, 8);
-  node.primeChannel = {actor: actor.id, remaining: seconds, total: seconds};
+  node.primeChannel = {actor: actor.id, remaining: seconds, total: seconds, health: actor.health, armor: num(actor.armor, 0), deaths: num(actor.deaths, 0)};
   actor.subagentNode = node.id;
   coop.roleStats.primes = num(coop.roleStats.primes, 0) + 1;
   match?.emit?.('cocs-prime-start', {node: node.id, actor: actor.id, seconds});
@@ -874,8 +878,16 @@ function stepCoopPrimes(match, state, dt) {
     if (!node?.primeChannel) continue;
     const channel = node.primeChannel;
     const actor = actorById(match, channel.actor);
-    const near = actor && actor.health > 0 && Math.hypot(num(actor.x, 0) - node.x, num(actor.z, 0) - node.z) <= Math.max(num(node.r, 4), PRIME_LEASH);
-    if (!near || node.contested === true) { node.primeChannel = null; match?.emit?.('cocs-prime-interrupt', {node: node.id, actor: channel.actor}); continue; }
+    const near = actor && actor.health > 0 && actor.team === 0 && node.owner === actor.team
+      && num(actor.deaths, 0) === channel.deaths
+      && Math.hypot(num(actor.x, 0) - node.x, num(actor.z, 0) - node.z) <= Math.max(num(node.r, 4), COOP_PRIME_REACH)
+      && Math.abs(num(actor.y, 0) - num(node.y, 0)) <= 5;
+    const damaged = actor && actor.bot == null && (actor.health < channel.health || num(actor.armor, 0) < channel.armor);
+    const hostile = (match.actors ?? []).some(enemy => enemy?.health > 0 && enemy.team === 1
+      && Math.hypot(enemy.x - node.x, enemy.z - node.z) <= node.r && Math.abs(num(enemy.y, 0) - num(node.y, 0)) <= 5);
+    if (!near || damaged || hostile || node.contested === true) { node.primeChannel = null; match?.emit?.('cocs-prime-interrupt', {node: node.id, actor: channel.actor}); continue; }
+    channel.health = actor.health;
+    channel.armor = num(actor.armor, 0);
     channel.remaining = Math.max(0, num(channel.remaining, 0) - dt * latticeInteractionRate(match, actor));
     if (!(channel.remaining > 0)) completePrime(match, state, node);
   }
@@ -901,7 +913,7 @@ function maybeHarvesterPrime(match, state) {
     // stops the start/cancel churn when the channel would be interrupted by the
     // leash on the very next tick.
     if (!harvester) continue;
-    const station = Math.max(num(node.r, 4), PRIME_LEASH);
+    const station = Math.max(num(node.r, 4), COOP_PRIME_REACH);
     if (Math.hypot(num(harvester.x, 0) - node.x, num(harvester.z, 0) - node.z) > station) continue;
     coopPrimeNode(match, state, harvester, node.id);
     return;
@@ -2084,7 +2096,7 @@ export function cocsDirectorSnapshot(match, state) {
 const COCS_TERMINAL_HINTS = Object.freeze({
   HACK: 'HACK THE RELAY',
   DEPLOY: 'DEPLOY THE ORACLE',
-  VAULT: 'CRACK THE VAULT',
+  VAULT: 'DELIVER SHARD / PULL BANKED REQ',
   SABOTAGE: 'CUT THE SUPPLY LINK',
 });
 
@@ -2108,6 +2120,7 @@ export function coopTerminalSnapshot(state) {
     const channel = terminal.channel ? {
       actor: terminal.channel.actor ?? null,
       action: terminal.channel.action ?? null,
+      team: terminal.channel.team ?? null,
       remaining: Math.round(num(terminal.channel.remaining, 0) * 10) / 10,
       total: Math.round(num(terminal.channel.total, 0) * 10) / 10,
     } : null;
@@ -2117,6 +2130,7 @@ export function coopTerminalSnapshot(state) {
       : 0;
     return {
       // --- UI contract -----------------------------------------------------
+      ...terminalMechanicsSnapshot(state, terminal),
       id: String(id),
       kind,
       nodeId: terminal.nodeId ?? null,
@@ -2254,7 +2268,7 @@ export function coopTerminalAction(match, state, record = {}) {
       const started = terminalInteract(match, state, actor.id, record.terminalId, 'SABOTAGE');
       return {ok: started.ok === true, reason: started.reason ?? null};
     }
-    if (action === 'repair') return {ok: repairTerminal(state, terminal) === true, reason: null};
+    if (action === 'repair') return startTerminalChannel(match, state, terminal, actor, 'REPAIR');
     if (action === 'vault-store') return vaultAction(match, state, terminal, actor, 'store');
     if (action === 'vault-pull') return vaultAction(match, state, terminal, actor, 'pull');
   }

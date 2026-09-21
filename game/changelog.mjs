@@ -1,12 +1,20 @@
 // In-game patch notes. The title-screen footer is the running version; this
 // module is the human-readable release digest the Changelog screen renders. The
 // full historical record lives in docs/CHANGELOG.md and is linked from the UI.
-export const RELEASE_VERSION = 'v8.6';
-export const RELEASE_CODENAME = 'PRISM';
+export const RELEASE_VERSION = 'v8.7';
+export const RELEASE_CODENAME = 'FOUNDRY';
 export const REPO_URL = 'https://github.com/mojomast/tokenarena';
 export const FULL_CHANGELOG_URL = `${REPO_URL}/blob/main/docs/CHANGELOG.md`;
 
 export const CHANGELOG = [
+  {version:'v8.7',codename:'FOUNDRY',date:'2026-09-21',tag:'A focused Play hub, nine mechanical identities, and objectives you can see and use',highlights:[
+    'The main menu is rebuilt around Play, Loadout and Library. LATTICE leads a calmer landing page; online play, training and custom matches have clear routes. Rules unfold on demand, the operator preview stays mounted, and quick starts launch the exact configuration shown in their briefing.',
+    'Nine operators gain distinct mechanical anatomy, sculpted armor, articulated limbs, detailed helmets and planted feet. Shared, batched geometry and explicit far-distance models keep the richer close-up roster inside existing draw and triangle budgets.',
+    'LATTICE objectives are physical machines with live ownership, channel, contest and effect states. Breach a legal relay for a short capture boost, install ORACLE for local intel, carry its finite shard to an HQ vault, or cut and repair a supply link. Economy PRIME now works through normal interaction, with an interruptible channel. Couriers get clear delivery prompts and callouts.',
+    'Rendering skips empty/offscreen bot-effect layers and hidden previews, shares transform updates across styled passes, and avoids redundant target configuration. Adaptive graphics respects intentional frame caps and backs off failed quality-restoration probes.',
+    'Commander ownership now follows the authoritative seat through refusals, reconnects and mutinies. Routes wait for confirmation and can be cleared. Invalid routes and stances receive immediate server refusals; terminal commands share the simulation’s full action gate.',
+    'Deployment checks compare actual served JavaScript and CSS against the new build, including SSR builds without a client index. This release includes shared simulation and server changes; deploy both services together. Protocol remains version 3.',
+  ]},
   {version:'v8.6',codename:'PRISM',date:'2026-09-20',tag:'A preview graphics lab, a global hotkey, and a Moth-baked material pack',highlights:[
     'Graphics & settings now includes Graphics lab · Preview, an opt-in developer drawer beside the live arena. 23 effects stack independently: pixels, hex mosaic, row glitch, prism separation, light bleed, vignette, contrast, saturation, white balance, sharpen, solarize, color bands, palette remapping, halftone, crosshatch, ink and neon contours, ordered dithering, phosphor texture, paper grain, plus three layers built from baked Moth assets with an asset picker each (grain: macro tile, dust field or flow field; signals: arc burst or QRC glyph frames; coat: five entanglement LUTs).',
     'Nine starting recipes explore distinct looks, including Blueprint, Thermal, Moth Print, Pocket Ink and Ghost Rivals. Pocket Ink is a saved player roll; Ghost Rivals shows a separate bot stack. Press SURPRISE ME to roll a valid random mix, COPY RECIPE to put the exact JSON on the clipboard, or PASTE A RECIPE JSON to apply one back and keep tuning.',

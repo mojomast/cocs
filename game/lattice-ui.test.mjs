@@ -169,7 +169,8 @@ test('cocs node markers render by archetype and owner on WebGL and software', ()
     const view = markerView(software);
     view.updateObjectives({time: 2, objectiveState: cocsState()}, arena);
     assert.equal(view.objectiveModels.size, 6);
-    assert.equal(view.worldGroup.children.length, 6, 'every node has a world marker');
+    assert.equal(view.worldGroup.children.length, 7, 'six capture markers plus the batched machine layer');
+    assert.equal(view.latticeWorldAssets.root.userData.assetCount, 6);
     const shapes = {front: 'ConeGeometry', economy: 'BoxGeometry', relay: 'OctahedronGeometry', array: 'IcosahedronGeometry', hq: 'CylinderGeometry'};
     for (const [id, archetype] of [['front-0', 'front'], ['econ-0', 'economy'], ['relay-0', 'relay'], ['array-e', 'array'], ['hq-0', 'hq']]) {
       const model = view.objectiveModels.get(id);
@@ -199,7 +200,7 @@ test('cocs markers prune stale nodes and clear on a mode switch', () => {
   stale.userData.area.geometry.addEventListener('dispose', () => disposed[0]++);
   view.updateObjectives({time: 3, objectiveState: {kind: 'cocs', nodes: cocsState().nodes.slice(0, 1)}}, arena);
   assert.equal(view.objectiveModels.size, 1);
-  assert.equal(view.worldGroup.children.length, 1);
+  assert.equal(view.worldGroup.children.length, 2, 'one capture marker and the surviving machine batch');
   assert.equal(disposed[0], 1, 'the removed node disposes its geometry');
   view.updateObjectives({time: 4, objectives: {kind: 'koth', zones: []}}, arena);
   assert.equal(view.objectiveModels.size, 0);
@@ -340,6 +341,37 @@ test('cocsTargetableNodes narrows by verb and the command view is mode-isolated'
   assert.equal(routed.command.value, 'relay-0');
   assert.equal(routed.state.armed, null, 'issuing clears the armed verb');
   assert.equal(cocsIssueRoute(cocsStripState(), {tick: 100, team: 0}).command, null, 'ROUTE must be armed first');
+});
+
+test('commander ownership survives reconnects and follows a mutiny instead of an optimistic local hint', () => {
+  const hud = economyHud(), board = cocsBoard(hud, {team:0});
+  for (const key of ['commander', 'command']) {
+    delete hud.cocs.commander; delete hud.cocs.command;
+    hud.cocs[key] = {seat:{0:'0',1:'7'},votes:{0:[],1:[]},route:{0:null},policy:{0:null}};
+    const view = (options={}) => cocsCommandView(board,hud.cocs,{id:0,team:0},cocsStripState(),options);
+    assert.equal(view().commander.mine,true,'actor zero is recognized after reconnect');
+    assert.equal(view({spectate:true}).commander.mine,false,'spectating never claims a seat');
+    hud.cocs[key].seat[0]='2';
+    assert.equal(view({commandSeatMine:true}).commander.mine,false,'an old click hint cannot override the new commander');
+    hud.cocs[key].seat[0]=null;
+    assert.equal(view({commandSeatMine:true}).commander.mine,false,'a refused take is not ownership');
+  }
+});
+
+test('a route stays queued until the authoritative route agrees and always names its target', () => {
+  const hud=economyHud(), player={id:0,team:0}, board=cocsBoard(hud,player);
+  hud.cocs.commander={route:{0:null},seat:{0:null}};
+  const armed=cocsPickTarget(cocsArmVerb(cocsStripState(),'ROUTE'),'relay-0',cocsTargetableNodes(board,'ROUTE'));
+  const {state}=cocsIssueRoute(armed,{tick:100,team:0});
+  const queued=cocsCommandView(board,hud.cocs,player,state,{orders:[]}).strip;
+  assert.equal(queued.pending.verb,'ROUTE');
+  assert.equal(queued.pending.target,'relay-0');
+  assert.equal(queued.issued,null);
+  hud.cocs.commander.route[0]='relay-0';
+  const accepted=cocsCommandView(board,hud.cocs,player,state,{orders:[]}).strip;
+  assert.equal(accepted.pending,null);
+  assert.equal(accepted.issued.accepted,true);
+  assert.equal(accepted.issued.target,'relay-0');
 });
 
 test('cocsEconomyView reads the FLUX bar, REQ chip, order tally and scout card', () => {

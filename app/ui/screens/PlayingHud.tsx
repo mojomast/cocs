@@ -123,7 +123,7 @@ function CocsReadout({command,teamName,player,reducedMotion}:{command:any;teamNa
    {command.commander&&<div className="cocs-command" role="group" aria-label="Commander controls">
      <span className="cocs-command__group">
        <span className="cocs-command__label">COMMAND</span>
-       <span className={`cocs-command__owner${command.commander.mine?' is-mine':''}`}>{command.commander.seat?String(command.commander.seat).toUpperCase():'OPEN SEAT'}</span>
+       <span className={`cocs-command__owner${command.commander.mine?' is-mine':''}`}>{command.commander.mine?'YOU':command.commander.seat!=null?'TEAM COMMANDER':'OPEN SEAT'}</span>
        {!command.commander.mine&&!command.commander.seat&&<button type="button" className="cocs-command__act" onClick={command.takeCommand}>TAKE COMMAND</button>}
        {command.commander.mine&&<button type="button" className="cocs-command__act" onClick={command.releaseCommand}>STEP DOWN</button>}
        {!command.commander.mine&&Boolean(command.commander.seat)&&<button type="button" className="cocs-command__act" onClick={command.voteCommand} title="A strict majority of living humans replaces the commander">VOTE MUTINY{command.commander.votes>0?` · ${command.commander.votes}`:''}</button>}
@@ -134,7 +134,8 @@ function CocsReadout({command,teamName,player,reducedMotion}:{command:any;teamNa
      </span>
      <span className="cocs-command__group" role="group" aria-label="Squad route">
        <span className="cocs-command__label">ROUTE</span>
-       <span className="cocs-command__owner">{command.commander.route?String(command.commander.route).replace(/-/g,' ').toUpperCase():'AUTO'}</span>
+       <span className="cocs-command__owner">{command.commander.route?command.commander.routeLabel:'AUTO'}</span>
+       {command.commander.route&&<button type="button" className="cocs-command__act" onClick={command.clearCocsRoute} title="Let the squad choose its objectives again">CLEAR ROUTE</button>}
      </span>
    </div>}
    {traversal&&<p className="cocs-strip__context" role="group"><span aria-hidden="true">◈</span> {traversal.context}</p>}
@@ -261,7 +262,7 @@ export function PlayingHud({ui}:ScreenProps){
    {!hud.spectate&&cursor?.active&&!cursor.blocked&&<div className="cursor-resume" role="group" aria-label="Return to combat"><button type="button" className="cursor-resume__button" onClick={cursor.resume}><b>CLICK TO FIGHT</b><small>{cursor.key} OR CLICK · MOUSE CAPTURED</small></button></div>}
 
    {cocsCommand&&<CocsReadout command={cocsCommand} teamName={teamName} player={player} reducedMotion={reducedMotion()}/>}
-   {cocsCommand?.interactPrompt&&!hud.spectate&&player.health>0&&<div className="lattice-interaction-hint" aria-hidden="true"><kbd>{cocsCommand.interactPrompt.key}</kbd><span><b>{cocsCommand.interactPrompt.verb} · {cocsCommand.interactPrompt.label}</b><small>{cocsCommand.interactPrompt.channelPercent>0?`${cocsCommand.interactPrompt.channelPercent}% · KEEP THE AREA CLEAR`:cocsCommand.interactPrompt.anchored?'AT THE ANCHOR':`${cocsCommand.interactPrompt.distanceMeters} m · READ THE ACTION BEFORE USING`}</small></span></div>}
+    {cocsCommand?.interactPrompt&&!hud.spectate&&player.health>0&&<div className="lattice-interaction-hint" aria-hidden="true"><kbd>{cocsCommand.interactPrompt.key}</kbd><span><b>{cocsCommand.interactPrompt.verb} · {cocsCommand.interactPrompt.label}</b><small>{cocsCommand.interactPrompt.channelPercent>0?`${cocsCommand.interactPrompt.channelPercent}% · ${cocsCommand.interactPrompt.detail??'KEEP THE AREA CLEAR'}`:cocsCommand.interactPrompt.detail??(cocsCommand.interactPrompt.anchored?'AT THE ANCHOR':`${cocsCommand.interactPrompt.distanceMeters} m · READ THE ACTION BEFORE USING`)}</small></span></div>}
   {cocsCommand?.spend&&cocsCommand.spendVisible===false&&!hud.spectate&&<button type="button" className="cocs-spend-chip" aria-label={`Spend window open, ${Math.round(cocsCommand.spend.secondsRemaining)} seconds left. Activate to reopen.`} onClick={cocsCommand.reopenSpend}><span aria-hidden="true">▦</span> SPEND WINDOW · {Math.round(Number(cocsCommand.spend.secondsRemaining)||0)}s · OPEN</button>}
    {cocsCommand?.notice&&<div className={`cocs-notice${cocsCommand.notice.ok?'':' is-failed'}${cocsCommand.notice.leaving?' is-leaving':''}`} role="group" aria-label={`Action notice: ${cocsCommand.notice.text}`}><i aria-hidden="true">{cocsCommand.notice.ok?'✓':'✕'}</i> {cocsCommand.notice.text}</div>}
    {cocsCommand?.spend&&cocsCommand.spendVisible!==false&&!hud.spectate&&<SpendWindowHud spend={cocsCommand.spend} onSpend={cocsCommand.spendCocs} onSkip={cocsCommand.skipSpend} cursorKey={cocsCommand.cursorKey} reducedMotion={reducedMotion()}/>}

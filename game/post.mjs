@@ -109,23 +109,51 @@ export function nextQualityState(state, frameMs, { ceiling = 'high', minFps = 45
 // stays past `slowMs`, and only restores them after a long, comfortably fast
 // window, so a machine that cannot hold the full look settles instead of
 // oscillating. Levels: 0 = full look, 1 = world pass only, 2 = lab bypassed.
-export function nextLabBudget(state, frameMs, { slowMs = 19, recoverMs = 13.5, sustain = 2, recoverSustain = 6, cooldown = 3, maxLevel = 2 } = {}) {
+export function nextLabBudget(state, frameMs, { slowMs = 19, recoverMs = 13.5, sustain = 2, recoverSustain = 6, cooldown = 3, maxLevel = 2, trialSeconds = 12, retrySeconds = 30 } = {}) {
   const level = Number.isFinite(state?.level) ? Math.max(0, Math.min(maxLevel, Math.round(state.level))) : 0;
   let slow = Number.isFinite(state?.slow) ? Math.max(0, state.slow) : 0;
   let fast = Number.isFinite(state?.fast) ? Math.max(0, state.fast) : 0;
   let cool = Number.isFinite(state?.cool) ? Math.max(0, state.cool) : 0;
+  let trial = Number.isFinite(state?.trial) ? Math.max(0, state.trial) : 0;
+  let retry = Number.isFinite(state?.retry) ? Math.max(0, state.retry) : 0;
+  let failures = Number.isFinite(state?.failures) ? Math.max(0, Math.min(3, Math.round(state.failures))) : 0;
   const dt = Number.isFinite(frameMs) && frameMs > 0 ? frameMs / 1000 : 0;
-  if (cool > 0) return { level, slow: 0, fast: 0, cool: Math.max(0, cool - dt), changed: false, frameMs };
-  if (dt <= 0) return { level, slow, fast, cool, changed: false, frameMs };
+  // Suspend/tab-resume gaps are not evidence of a sustained rendering load.
+  if (dt <= 0 || dt > .25) return { level, slow, fast, cool, trial, retry, failures, changed: false, frameMs };
+  trial = Math.max(0, trial - dt);
+  retry = Math.max(0, retry - dt);
+  if (cool > 0) return { level, slow: 0, fast: 0, cool: Math.max(0, cool - dt), trial, retry, failures, changed: false, frameMs };
   if (frameMs > slowMs) { slow += dt; fast = 0; } else if (frameMs < recoverMs) { fast += dt; slow = 0; } else { slow = 0; fast = 0; }
+  if (retry > 0) fast = 0;
   let next = level, changed = false;
-  if (slow >= sustain && level < maxLevel) { next = level + 1; changed = true; }
-  else if (fast >= recoverSustain && level > 0) { next = level - 1; changed = true; }
-  if (changed) return { level: next, slow: 0, fast: 0, cool: cooldown, changed: true, frameMs };
-  return { level, slow, fast, cool, changed: false, frameMs };
+  if (slow >= sustain && level < maxLevel) {
+    next = level + 1; changed = true;
+    // A cheap tier can be fast precisely because the expensive layers are gone.
+    // Failed restoration probes back off (30/60/120s), without delaying further
+    // shedding or permanently locking out recovery after the workload changes.
+    if (trial > 0) { failures = Math.min(3, failures + 1); retry = retrySeconds * 2 ** (failures - 1); }
+    trial = 0;
+  }
+  else if (fast >= recoverSustain && level > 0) { next = level - 1; changed = true; trial = trialSeconds; }
+  if (changed) return { level: next, slow: 0, fast: 0, cool: cooldown, trial, retry, failures, changed: true, frameMs };
+  return { level, slow, fast, cool, trial, retry, failures, changed: false, frameMs };
 }
 export function labBudgetLabel(level) {
   return level >= 2 ? 'off' : level === 1 ? 'world only' : 'full';
+}
+
+// Matches renderer visibility/layer/frustum checks, including visible children
+// of a parent on another layer. Matrix updates belong to the caller. Early exit
+// avoids a full actor traversal whenever any styled geometry is on screen.
+export function hasLayerContent(node, mask, frustum) {
+  if (!node || node.visible === false) return false;
+  if ((node.layers?.mask & mask) && (node.isMesh || node.isLine || node.isPoints || node.isSprite)) {
+    const material = node.material;
+    const visible = Array.isArray(material) ? material.some(m => m && m.visible !== false) : material && material.visible !== false;
+    if (visible && (node.frustumCulled === false || !frustum || (node.isSprite ? frustum.intersectsSprite(node) : frustum.intersectsObject(node)))) return true;
+  }
+  for (const child of node.children || []) if (hasLayerContent(child, mask, frustum)) return true;
+  return false;
 }
 
 // Rolling frame-time window with median and p95, used for the debug snapshot.

@@ -27,6 +27,29 @@ function harness(seed = 11, botCount = 6) {
  return room;
 }
 
+test('command preflight refuses impossible routes and stances before claiming acceptance', () => {
+ const room=harness(73,0);
+ assert.equal(room.command(1,{cardId:'bad-policy',action:'policy',value:'BERSERK'}),false);
+ assert.equal(room.command(1,{cardId:'bad-route',action:'set-route',value:'missing-node'}),false);
+ assert.equal(room.pendingCocs.commands.length,0);
+ const messages=room.drain();
+ assert.equal(last(messages,'cocs-reject',1)?.reason,'unknown-node');
+ assert.equal(room.command(1,{cardId:'lower-policy',action:'policy',value:'fortify'}),true);
+ assert.equal(room.pendingCocs.commands[0].value,'FORTIFY');
+ room.tick(RULES.dt);
+ assert.equal(room.cocsCards.get('lower-policy').state,'done','normalized stance also settles the action ledger');
+});
+
+test('a successful mutiny completes even though seating clears its vote list', () => {
+ const room={match:{actors:[]}};
+ const record={team:0,actorId:4,action:'mutiny-vote'};
+ for(const state of [
+  {command:{seat:{0:'4'},votes:{0:{}}}},
+  {coop:{commandSeat:{0:'4'},commandVotes:{0:{}}}},
+ ]) assert.deepEqual(Room.prototype.cocsCommandOutcome.call(room,record,state),{state:'done',ok:true,reason:null});
+ assert.equal(Room.prototype.cocsCommandOutcome.call(room,record,{command:{seat:{0:'2'},votes:{0:{}}}}),null);
+});
+
 // The fixed action schedule both repeats execute, in the same order. Every
 // frame carries the round revision and a per-peer action sequence (WP0.3).
 function schedule(room) {
@@ -43,7 +66,10 @@ function schedule(room) {
  const vaultId = Object.keys(state.terminals.terminals).find(id => state.terminals.terminals[id].kind === 'VAULT' && state.terminals.terminals[id].nodeId === 'hq-0');
  const vault = state.terminals.terminals[vaultId];
  const actor = room.match.actors[0];
- actor.x = vault.x; actor.z = vault.z; actor.y = 0;
+  actor.x = vault.x; actor.z = vault.z; actor.y = 0;
+  const source=Object.values(state.terminals.terminals).find(t=>t.kind==='DEPLOY');
+  source.shards[actor.team]='carried';
+  state.terminals.vault.cargo[actor.id]={actor:actor.id,team:actor.team,source:source.id,deaths:actor.deaths};
  const rev = room.roundRevision;
  const accepted = {
   order: room.order(1, { cardId: 'o1', verb: 'HOLD', target: front.id, agent: 'chief', roundRev: rev, actionSeq: 1 }),
@@ -313,8 +339,11 @@ test('duplicate ORDER, ECONOMY, TERMINAL and COMMAND frames have one effect', ()
  const room = harness(13, 4);
  const {state, front, actor} = openCoopWindow(room, {flux: 240});
  const vaultId = vaultIdFor(state);
- const vault = state.terminals.terminals[vaultId];
- actor.x = vault.x; actor.z = vault.z; actor.y = 0;
+  const vault = state.terminals.terminals[vaultId];
+  actor.x = vault.x; actor.z = vault.z; actor.y = 0;
+  const source=Object.values(state.terminals.terminals).find(t=>t.kind==='DEPLOY');
+  source.shards[actor.team]='carried';
+  state.terminals.vault.cargo[actor.id]={actor:actor.id,team:actor.team,source:source.id,deaths:actor.deaths};
  room.drain();
  const rev = room.roundRevision;
  const order = {cardId: 'dup-order', verb: 'HOLD', target: front.id, agent: 'chief', roundRev: rev, actionSeq: 1};

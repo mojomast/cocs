@@ -243,8 +243,9 @@ export function cocsIssueRoute(state, ctx = {}) {
       ...base,
       armed: null,
       target: null,
-      pending: null,
-      issued: command,
+      pending: {...command, verb:'ROUTE', target:command.value},
+      pendingUntil: tick + pendingTicks,
+      issued: null,
       notice: null,
       lastRejected: null,
       cooldownUntil: tick + cooldownTicks,
@@ -1075,8 +1076,8 @@ const COCS_BOARD_STATUS_IDS = Object.freeze(['queued', 'running', 'blocked', 'do
 const COCS_BOARD_BLOCKER_IDS = Object.freeze(Object.keys(COCS_BLOCKER_LABELS));
 const COCS_TERMINAL_KINDS = Object.freeze({
   HACK: Object.freeze({label: 'HACK', mark: '⌨', prompt: 'HACK THE RELAY'}),
-  DEPLOY: Object.freeze({label: 'DEPLOY', mark: '◱', prompt: 'DEPLOY THE BEACON'}),
-  VAULT: Object.freeze({label: 'VAULT', mark: '▣', prompt: 'CRACK THE VAULT'}),
+  DEPLOY: Object.freeze({label: 'DEPLOY', mark: '◱', prompt: 'INSTALL ORACLE / COLLECT SHARD'}),
+  VAULT: Object.freeze({label: 'VAULT', mark: '▣', prompt: 'BANK / WITHDRAW SHARDS'}),
   SABOTAGE: Object.freeze({label: 'SABOTAGE', mark: '✂', prompt: 'CUT THE SUPPLY LINK'}),
 });
 const COCS_TERMINAL_STATES = Object.freeze({
@@ -1509,6 +1510,7 @@ const cocsTerminalState = state => COCS_TERMINAL_STATES[String(state ?? '').toLo
 // now. Mirrors `humanTerminalInteract`: DEPLOY only on your own node, VAULT
 // (store), HACK/SABOTAGE on a live terminal.
 function cocsTerminalActionable(terminal, verb) {
+  if (terminal.actions !== null) return terminal.actions.length > 0;
   if (verb === 'DEPLOY') return terminal.mine === true;
   if (verb === 'VAULT') return true;
   if (verb === 'HACK' || verb === 'SABOTAGE') return terminal.state === 'available';
@@ -1523,8 +1525,9 @@ function cocsTerminalPrompt(terminals, player, options) {
   for (const terminal of terminals) {
     if (!finite(terminal.x) || !finite(terminal.z)) continue;
     const d = Math.hypot(player.x - terminal.x, player.z - terminal.z);
-    if (!(d <= COCS_INTERACT_REACH_METERS)) continue;
-    if (!cocsTerminalActionable(terminal, terminal.kind)) continue;
+    if (!(d <= terminal.reach)) continue;
+    if (finite(player.y) && finite(terminal.y) && Math.abs(player.y-terminal.y)>5) continue;
+    if (!terminal.channelMine && !cocsTerminalActionable(terminal, terminal.kind)) continue;
     const rank = COCS_TERMINAL_VERB_ORDER.indexOf(terminal.kind);
     if (chosen === null || d < chosenDistance - 1e-9 || (Math.abs(d - chosenDistance) <= 1e-9 && rank < chosenRank)) {
       chosen = terminal;
@@ -1540,7 +1543,7 @@ function cocsTerminalPrompt(terminals, player, options) {
     kind: chosen.kind,
     label: chosen.label,
     mark: chosen.kindMark,
-    verb: chosen.kind,
+    verb: chosen.actionLabel ?? chosen.kind,
     key: cocsInteractKey(options),
     distance,
     distanceMeters: distance,
@@ -1551,7 +1554,7 @@ function cocsTerminalPrompt(terminals, player, options) {
     mine: chosen.mine,
     enemy: chosen.enemy,
     hint: chosen.hint,
-    text: `${chosen.kind} ${chosen.label}`,
+    text: `${chosen.actionLabel ?? chosen.kind} ${chosen.label}`,
   };
 }
 
@@ -1563,25 +1566,43 @@ function cocsTerminalPrompt(terminals, player, options) {
 export function cocsTerminalView(snapshot, player, board, options = {}) {
   if (!snapshot || typeof snapshot !== 'object') return null;
   const team = player?.team === 0 || player?.team === 1 ? Number(player.team) : null;
-  const terminals = cocsTerminalList(snapshot).filter(Boolean).map((raw, index) => {
+  const list = cocsTerminalList(snapshot).filter(Boolean);
+  const cargo = list.flatMap(raw=>Array.isArray(raw.cargo)?raw.cargo:[])
+    .find(entry=>entry.team===team && String(entry.actor)===String(player?.id)) ?? null;
+  const terminals = list.map((raw, index) => {
     const kind = cocsTerminalKind(raw.kind ?? raw.type ?? raw.verb);
-    const stateId = String(raw.state ?? (raw.complete === true ? 'complete' : raw.active === true ? 'active' : raw.locked === true ? 'locked' : 'available')).toLowerCase();
-    const state = cocsTerminalState(stateId);
+    let stateId = String(raw.state ?? (raw.complete === true ? 'complete' : raw.active === true ? 'active' : raw.locked === true ? 'locked' : 'available')).toLowerCase();
     const owner = raw.owner === 0 || raw.owner === 1 ? Number(raw.owner) : null;
     const progress = clamp01(raw.progress ?? (num(raw.total, 0) > 0 ? 1 - num(raw.remaining, 0) / num(raw.total, 0) : 0));
     const id = String(raw.id ?? `${kind.label}-${index}`);
+    const shard = team === null ? null : raw.shards?.[team] ?? null;
+    const banked = team === null ? 0 : num(raw.banked?.[team],0);
+    let actions = raw.actionsByTeam ? [...(raw.actionsByTeam[team] ?? [])] : null;
+    if (actions && kind.label==='VAULT') actions=actions.filter(action=>cargo?action==='vault-store':action==='vault-pull');
+    if (actions && kind.label==='DEPLOY' && shard==='ready' && cargo) actions=[];
+    const blockedReason=team===null?null:raw.blockedReasonByTeam?.[team]??null;
+    if(actions!==null)stateId=raw.contested?'contested':raw.channel||raw.phase==='boosted'||raw.oracleActive?'active':actions.length?'available':'locked';
+    const state=cocsTerminalState(stateId);
+    const action = actions?.[0] ?? null;
+    const actionLabel = action==='repair'?'REPAIR':action==='cut'?'SABOTAGE':action==='vault-store'?'BANK SHARD':action==='vault-pull'?'WITHDRAW · 8 FLUX':action==='deploy'&&shard==='ready'?'COLLECT SHARD':null;
+    const detail = kind.label==='DEPLOY' ? (shard==='ready'?'SHARD READY · COLLECT, THEN RETURN TO HQ':shard==='carried'?'SHARD IN TRANSIT':raw.oracleActive?`ORACLE ONLINE · ${(raw.resolvedTargets??[]).length} CONTACTS`:'')
+      : kind.label==='VAULT' ? `${banked} BANKED${cargo?' · CARRYING A SHARD':banked?' · WITHDRAW 6 REQ FOR 8 FLUX':' · BRING A RELAY SHARD'}`
+      : num(raw.effectRemainingSeconds,0)>0 ? `${raw.phase==='cut'?'SUPPLY CUT':'CAPTURE BOOST'} · ${Math.ceil(raw.effectRemainingSeconds)}s` : '';
     return {
       id, kind: kind.label, kindMark: kind.mark, prompt: kind.prompt,
       label: String(raw.label ?? raw.name ?? `${kind.label} ${index + 1}`),
       nodeId: raw.nodeId ?? raw.node ?? null,
-      x: num(raw.x, NaN), z: num(raw.z, NaN),
-      state: stateId, stateLabel: state.label, stateMark: state.mark,
+      x: num(raw.x, NaN), y:num(raw.y,NaN), z: num(raw.z, NaN), reach:num(raw.reach,COCS_INTERACT_REACH_METERS),
+      state: stateId, stateLabel: stateId==='locked'&&blockedReason?String(blockedReason).replaceAll('-',' ').toUpperCase():state.label, stateMark: state.mark,
       owner, mine: owner !== null && team !== null && owner === team,
       enemy: owner !== null && team !== null && owner !== team,
       progress, progressPercent: Math.round(progress * 100),
       remainingSeconds: round(num(raw.remainingSeconds ?? raw.remaining, 0), 1),
       actor: raw.actor ?? raw.peerId ?? null,
       hint: String(raw.hint ?? kind.prompt),
+      actions, actionLabel, purpose:raw.purpose??null, phase:raw.phase??null, detail,
+      channelMine:raw.channel?.actor!=null && String(raw.channel.actor)===String(player?.id),
+      blockedReason,
       wired: raw.wired !== false,
     };
   });
@@ -1600,14 +1621,29 @@ export function cocsTerminalView(snapshot, player, board, options = {}) {
   const available = terminals.filter(terminal => terminal.state === 'available').length;
   const blocked = terminals.filter(terminal => terminal.state === 'blocked' || terminal.state === 'contested' || terminal.state === 'locked').length;
   const boardHint = board?.front ? `AT ${board.front.label}` : null;
+  // PRIME is an economy-node interaction rather than a terminal protocol verb.
+  // Its authored reach in the snapshot also keeps this surface co-op-only.
+  const primeNode = team===0 && player?.health>0 && options.spectate!==true
+    ? (snapshot.nodes??[]).filter(node=>node.archetype==='economy' && node.owner===team
+      && finite(node.primeReach) && !node.contested && !node.prime
+      && (!node.primeChannel || String(node.primeChannel.actor)===String(player.id))
+      && Math.hypot(player.x-node.x,player.z-node.z)<=node.primeReach
+      && Math.abs(num(player.y,0)-num(node.y,0))<=5)
+      .sort((a,b)=>Math.hypot(player.x-a.x,player.z-a.z)-Math.hypot(player.x-b.x,player.z-b.z))[0] : null;
+  const primePrompt = primeNode ? {id:primeNode.id,kind:'PRIME',verb:'PRIME',
+    label:latticeNodeLabel(primeNode,options.map),key:String(options.interactKey??'E').toUpperCase(),
+    distanceMeters:round(Math.hypot(player.x-primeNode.x,player.z-primeNode.z),1),
+    channelPercent:primeNode.primeChannel?Math.round(clamp01(1-primeNode.primeChannel.remaining/Math.max(.01,primeNode.primeChannel.total))*100):0,
+    detail:primeNode.primeChannel?'HOLD POSITION · AVOID DAMAGE':'8 SECOND CHANNEL · BOOST ECONOMY INCOME'} : null;
   return {
     hasTerminals: terminals.length > 0,
+    cargo,
     count: terminals.length,
     active, available, blocked,
     terminals,
     roles,
     hasRoles: roles.length > 0,
-    prompt: cocsTerminalPrompt(terminals, player, options),
+    prompt: cocsTerminalPrompt(terminals, player, options) ?? primePrompt,
     hint: terminals.length ? `${available} READY · ${active} ACTIVE · ${blocked} LOCKED` : (boardHint ?? 'NO TERMINALS'),
   };
 }
@@ -1638,7 +1674,10 @@ export function cocsCommandView(board, snapshot, player, strip, options = {}) {
     scanCost: COCS_SCAN_COST,
     nodes,
     nodeLabels,
-    orders: options.orders,
+    orders: strip?.pending?.verb === 'ROUTE'
+      && (snapshot.commander ?? snapshot.command)?.route?.[economy?.team ?? player?.team] === strip.pending.target
+      ? [...(options.orders ?? []), {...strip.pending, status:'accepted', tick:snapshot.tick}]
+      : options.orders,
   });
   const scanNode = economy?.scan?.nodeId ?? null;
   const scanLabel = scanNode === null || scanNode === undefined ? null : nodeLabels[String(scanNode)]?.label ?? latticeNodeLabel({id: scanNode}, options.map);
@@ -1650,17 +1689,20 @@ export function cocsCommandView(board, snapshot, player, strip, options = {}) {
   const roleBoard = snapshot.roleBoard?.[team] ?? null;
   // Commander surface. PvP carries `snapshot.commander`; OPERATIONS carries the
   // same seat/votes/route/policy under `snapshot.command`. Both normalize to one
-  // shape so the seat row and the stance row are mode-agnostic. `mine` is a
-  // local hint (the client knows what it last took) — the sim seat itself is an
-  // opaque peer id the client never learns about itself.
+  // shape so the seat row and stance row are mode-agnostic. The authority
+  // stores an actor id, not a transport peer id. Compare against the current
+  // actor so reconnects, refusals and mutinies cannot leave a phantom seat.
   const rawCommand = snapshot.commander ?? snapshot.command ?? null;
   const voteCount = value => Array.isArray(value) ? value.length : Math.max(0, num(value, 0));
   const commander = rawCommand ? {
     seat: rawCommand.seat?.[team] ?? null,
     route: rawCommand.route?.[team] ?? null,
+    routeLabel: nodeLabels[String(rawCommand.route?.[team])]?.label ?? latticeNodeLabel({id:rawCommand.route?.[team]}, options.map),
     policy: rawCommand.policy?.[team] ?? null,
     votes: voteCount(rawCommand.votes?.[team]),
-    mine: options.commandSeatMine === true,
+    mine: options.spectate !== true && player?.id !== null && player?.id !== undefined
+      && rawCommand.seat?.[team] !== null && rawCommand.seat?.[team] !== undefined
+      && String(rawCommand.seat[team]) === String(player.id),
     spectate: options.spectate === true,
   } : null;
   const policies = COCS_POLICY_OPTIONS.map(option => ({...option, active: commander?.policy === option.id}));

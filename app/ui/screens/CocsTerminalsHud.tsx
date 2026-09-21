@@ -17,6 +17,7 @@ export function CocsTerminalsHud({terminals, reducedMotion}: any) {
     <section className={`cocs-terminals${reducedMotion === true ? ' is-reduced' : ''}`} role="region" aria-label={`Terminals. ${terminals.hint}.`}>
       {terminals.hasTerminals && <>
         <p className="cocs-terminals__head"><span className="eyebrow">TERMINALS</span> <small>{terminals.hint}</small></p>
+        {terminals.cargo&&<p className="cocs-terminals__cargo">SHARD SECURED · Return to your HQ vault and press Interact to bank it.</p>}
         <ul className="cocs-terminals__list">
           {list.map((terminal: any) => (
             <li key={terminal.id} className={`cocs-terminal is-${terminal.state}`} aria-label={`${terminal.label}, ${terminal.kind} terminal, ${terminal.stateLabel}, ${ownerWord(terminal)}${terminal.progressPercent > 0 ? `, ${terminal.progressPercent} percent` : ''}`}>
@@ -25,6 +26,8 @@ export function CocsTerminalsHud({terminals, reducedMotion}: any) {
               <span className="cocs-terminal__state"><i aria-hidden="true">{terminal.stateMark}</i> {terminal.stateLabel}</span>
               {terminal.progressPercent > 0 && <span className="cocs-terminal__bar" aria-hidden="true"><i style={{width: `${terminal.progressPercent}%`}}/></span>}
               <span className="cocs-terminal__owner">{ownerWord(terminal)}</span>
+              {terminal.purpose&&<span className="cocs-terminal__purpose">{terminal.purpose}</span>}
+              {terminal.detail&&<span className="cocs-terminal__detail">{terminal.detail}</span>}
             </li>
           ))}
           {!list.length && <li className="cocs-terminals__empty">NO TERMINALS</li>}

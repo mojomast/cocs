@@ -186,6 +186,9 @@ export const COCS_PUBLIC_EVENTS = deepFreeze([
  'cocs-terminal-deploy',
  'cocs-terminal-sabotage',
  'cocs-terminal-vault',
+ 'cocs-terminal-repair',
+ 'cocs-terminal-restored',
+ 'cocs-terminal-offline',
 ]);
 
 const teamOf = value => (value === 0 || value === 1 ? Number(value) : null);

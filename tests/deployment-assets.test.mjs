@@ -1,5 +1,8 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
+import {mkdtemp,mkdir,writeFile,rm} from 'node:fs/promises';
+import {tmpdir} from 'node:os';
+import {join} from 'node:path';
 import {linkedAssets, titleFooter, verifyDeployment, verifyIdentities} from '../scripts/verify-deployment.mjs';
 import {buildIdentity, protocolMajor, IDENTITY_LIMITS, UNKNOWN_COMMIT} from '../game/build-identity.mjs';
 import {RELEASE_CODENAME, RELEASE_VERSION} from '../game/changelog.mjs';
@@ -54,6 +57,21 @@ test('HTML without a title footer is rejected', async () => {
 test('asset HTML fallbacks are rejected even when they return 200', async () => {
   const fallback = async () => new Response(html, {headers: {'content-type': 'text/html', 'cache-control': 'no-cache'}});
   await assert.rejects(verifyDeployment('https://example.test', {fetchImpl: fallback, version: 'v2.62', codename: 'ECHO'}), /content type/);
+});
+
+test('SSR deployments verify actual artifact bytes without needing a client index.html', async () => {
+  const dir = await mkdtemp(join(tmpdir(), 'arena-assets-'));
+  try {
+    await mkdir(join(dir, 'assets'));
+    await writeFile(join(dir, 'assets/index-abc.css'), 'content');
+    await writeFile(join(dir, 'assets/index-xyz.js'), 'content');
+    const options = {fetchImpl: serve(false), version: 'v2.62', codename: 'ECHO', assetsDir: dir};
+    assert.equal((await verifyDeployment('https://example.test', options)).length, 2);
+    await writeFile(join(dir, 'assets/index-xyz.js'), 'new build');
+    await assert.rejects(verifyDeployment('https://example.test', options), /freshly built asset bytes/);
+    await rm(join(dir, 'assets/index-xyz.js'));
+    await assert.rejects(verifyDeployment('https://example.test', options), /absent from this build/);
+  } finally { await rm(dir, {recursive:true, force:true}); }
 });
 
 // --- build identity ----------------------------------------------------------
