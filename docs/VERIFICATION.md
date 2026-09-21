@@ -116,6 +116,27 @@ the compatible identity pair. The tracked production browser matrix ran at
 production browser checks (canvas active, reduced-motion static frame, zero
 console errors). No players were disconnected.
 
+**Production update — lightweight title logo and adaptive lab budget
+(2026-09-21).** Commits `5260463` and `3abef56` were fast-forwarded to
+`improvement/phase2-audio-visual` and deployed web-only (`npm run deploy`); the
+game server stayed on `a1f3b5e` and the gate verified the compatible identity
+pair at web `5260463` `v8.6-5260463` protocol 3 and then `3abef56`
+`v8.6-3abef56` protocol 3. `5260463` replaces the WebGL points title logo with
+a 2D-canvas field: no second WebGL context, 700-2,200 pre-rendered glow
+sprites, a capped 30 fps, a hidden-tab pause and a single-loop resize guard.
+`3abef56` makes the shipped graphics-lab recipe affordable: the styled weapon
+and bot layer targets render at half resolution while the fused shader keeps
+its full CSS-pixel pattern math, and `nextLabBudget` sheds the weapon and bot
+stacks (world pass only) after two seconds past ~52 fps, bypasses the lab pass
+under continued slowness, and restores one level at a time once frames stay
+comfortably fast; thresholds follow an explicit frame cap so a deliberate
+30 fps cap is never mistaken for slowness. A live browser probe confirmed the
+level steps 0 → 1 → 2, the composer dropping the lab pass, the frame median
+falling 433 ms → 217 ms on the software-GPU test box and zero page errors; the
+graphics-lab harness returned `{"ok":true}`. The tracked browser matrix ran at
+**5/5 viewports** locally and against production (`commitDirty:false`). No
+players were disconnected.
+
 **Production update — physics, animation and audio pass (2026-09-20).** Commit
 `d9411c3` was fast-forwarded to `improvement/phase2-audio-visual` and deployed
 with `npm run deploy -- --with-game-server` (sim, vehicles, progression and the
