@@ -486,7 +486,8 @@ Recent releases. The full history lives in
 - Particle title logo: the title mark is a deterministic point cloud over the
   live menu scene (rasterised from the DOM glyphs, with a wake, pointer
   repulsion and reduced-motion static frame), keeping the original DOM logo as
-  the fallback. See
+  the fallback. It renders as a lightweight 2D canvas field (no extra WebGL
+  context, 30 fps cap, ~700-2,200 particles). See
   [Depth and dynamics pass](docs/design/DEPTH-PASS.md#particle-title-logo).
 - Depth II pass: flag relays and contested stands, payload contest credit,
   passenger repair, horde upgrades and VIP escort bots; remote footsteps,

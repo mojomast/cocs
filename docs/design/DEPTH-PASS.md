@@ -169,30 +169,34 @@ Two follow-up defects from player reports:
 
 ## Particle title logo
 
-The title mark is now a point cloud over the live menu/showcase scene, in the
-spirit of the mx.works ship: letters rasterised from the DOM glyphs, sampled
-into 4.5k-9k particle targets, assembled from a loose haze, drifting with
-per-particle noise, pouring a wake off to the lower-left, and shoving away from
-the pointer before settling home. Ambient dust motes drift through the box.
+The title mark is a point cloud over the live menu/showcase scene: letters
+rasterised from the DOM glyphs, sampled into 700-2200 particle targets, assembled
+from a loose haze, drifting with per-particle noise, pouring a wake off to the
+left, and shoving away from the pointer before settling home. Ambient dust motes
+drift through the box. It renders as a **lightweight 2D canvas field**: no extra
+WebGL context, no shader compilation, pre-rendered glow sprites, a 30 fps cap and
+a visibility pause. That keeps the look while cutting the per-frame particle
+count by roughly 4x versus the earlier WebGL points version.
 
 - `game/particle-logo.mjs` is the pure half: deterministic mask sampling
-  (growing stride, deterministic jitter), particle state, the fixed-step
-  simulation with wake/dust shares, and per-particle render alpha. Covered by
-  `game/particle-logo.test.mjs` (sampling bounds, determinism, settling, pointer
-  repulsion, reduced snap, wake fade, PRNG).
+  (single-grid scan with even thinning, deterministic jitter), particle state,
+  the fixed-step simulation with wake/dust shares, and per-particle render
+  alpha. Covered by `game/particle-logo.test.mjs` (sampling bounds,
+  determinism, settling, pointer repulsion, reduced snap, wake fade, PRNG).
 - `app/game-ui/particle-logo.tsx` is the canvas host: it measures the DOM logo
-  shell, rasterises the glyphs from their computed fonts, decodes targets,
-  renders with normal (not additive) blending so the mark stays legible over
-  bright gameplay, and runs fixed 16.6 ms substeps so assembly speed does not
-  depend on frame rate. It owns its renderer, geometry, material, observers and
-  listeners, and disposes all of them on unmount.
+  shell, rasterises the glyphs from their computed fonts, decodes targets into
+  700-2200 particles, pre-renders two glow sprites and draws one `drawImage`
+  per particle on a 2D canvas at a capped 30 fps, pausing while the document is
+  hidden. Fixed 16.6 ms substeps keep assembly speed independent of frame rate,
+  and observers/listeners are removed on unmount.
 - Gates: reduced motion renders one fully assembled static frame (no drift, no
-  pointer); a failed WebGL context, a raster with fewer than 600 targets, or a
+  pointer); a missing 2D context, a raster with fewer than 300 targets, or a
   missing canvas keeps the original DOM logo (the glyphs are hidden only after a
   frame has rendered). The canvas is `aria-hidden`, the `h1` keeps its
   accessible name, and a soft radial vignette behind the mark keeps it readable
   over bright scenery.
 - Budget: no new assets (the raster is generated at runtime from system fonts),
-  and the extra WebGL context exists only while the title screen is mounted.
+  and no second WebGL context is created; the 2D canvas and its sprites exist
+  only while the title screen is mounted.
   `?particleDebug=1` exposes the mask, target histogram and a QA render of the
   targets on the canvas dataset.

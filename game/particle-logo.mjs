@@ -19,26 +19,23 @@ export function logoRandom(seed = 1) {
   };
 }
 
-// Pick particle targets out of an RGBA alpha mask (ImageData.data). Walks pixel
-// grids with a growing stride until the candidate count fits `max`, then thins
-// evenly and jitters inside each cell. Returns centred, +y-up pixel positions.
-export function sampleMaskTargets(data, width, height, { max = 8000, threshold = 140, strideStart = 2, strideMax = 16, seed = 1, rand = null } = {}) {
+// Pick particle targets out of an RGBA alpha mask (ImageData.data). Scans one
+// pixel grid (coarser only for very large masks), then thins the candidates
+// evenly down to `max` and jitters inside each cell. Returns centred, +y-up
+// pixel positions.
+export function sampleMaskTargets(data, width, height, { max = 8000, threshold = 140, seed = 1, rand = null } = {}) {
   const w = Math.max(0, Math.floor(width) || 0), h = Math.max(0, Math.floor(height) || 0);
   const empty = { count: 0, x: new Float32Array(0), y: new Float32Array(0), alpha: new Float32Array(0) };
   if (!data || !w || !h || data.length < w * h * 4) return empty;
   const rng = typeof rand === 'function' ? rand : logoRandom(seed);
   const cap = Math.max(1, Math.floor(max) || 1);
-  let candidates = [];
-  const first = Math.max(1, Math.floor(strideStart) || 2);
-  const last = Math.max(first, Math.floor(strideMax) || 16);
-  let stride = first;
-  for (; stride <= last; stride = stride < 4 ? stride + 1 : stride + 2) {
-    candidates = [];
-    for (let y = 0; y < h; y += stride) for (let x = 0; x < w; x += stride) {
-      const alpha = data[(y * w + x) * 4 + 3];
-      if (alpha >= threshold) candidates.push(x, y, alpha);
-    }
-    if (candidates.length / 3 <= cap) break;
+  // One grid, then thin: a huge mask scans every other pixel to keep the
+  // candidate list bounded, a normal logo box scans every pixel.
+  const stride = w * h > 2_000_000 ? 2 : 1;
+  const candidates = [];
+  for (let y = 0; y < h; y += stride) for (let x = 0; x < w; x += stride) {
+    const alpha = data[(y * w + x) * 4 + 3];
+    if (alpha >= threshold) candidates.push(x, y, alpha);
   }
   const found = candidates.length / 3;
   if (!found) return empty;

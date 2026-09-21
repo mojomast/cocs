@@ -94,7 +94,9 @@ pipeline behind it.
 - Particle title logo: the title mark is rendered as a point cloud over the live
   menu scene — letters rasterised from the DOM glyphs, assembled from a drifting
   haze with a wake and pointer repulsion, deterministic and reduced-motion safe,
-  with the original DOM logo as the fallback. See
+  with the original DOM logo as the fallback. It draws as a lightweight 2D
+  canvas field (no second WebGL context, capped frame rate, ~700-2,200
+  particles). See
   [Depth and dynamics pass](design/DEPTH-PASS.md#particle-title-logo).
 - Depth II pass: flag carriers can relay the flag and captures are blocked while
   the stand is contested, payload defenders earn contest credit, passengers can
