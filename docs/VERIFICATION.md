@@ -99,6 +99,19 @@ triangles. No runtime or page errors. Evidence:
 `artifacts/destination-views/resource-cycles.json`. Typecheck and production build
 passed again after this fix.
 
+**Production deployment (2026-09-21):** runtime commit `226e72b` deployed from
+`/home/mojo/projects/tokenarena` with `npm run deploy -- --with-game-server`.
+The verifier matched the **v8.8 · DESTINATIONS** footer and all 13 linked assets
+against built bytes. Web and game server both report **226e72b /
+v8.8-226e72b / protocol 3**. Served page: `/assets/page-CTgXmn-y.js`.
+The release was fast-forwarded and pushed to `main` without conflicts.
+
+Live production field-interface checks passed at 1366×768, 390×844 and
+844×390: New · Destinations selection, Monsoon Foundry launch, squad creation
+and leaving, commander takeover and actual map-issued orders, bounded panel
+layout and keyboard focus. All three runs recorded zero page errors. Evidence:
+`artifacts/destinations-live-field/manifest.json`.
+
 ## Release 8.7.1 — robot precision pass
 
 Local checks were serialized. **217/217** model, articulation, geometry,
