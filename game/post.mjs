@@ -102,6 +102,32 @@ export function nextQualityState(state, frameMs, { ceiling = 'high', minFps = 45
   return { level, bad, good, cool, changed: false, frameMs };
 }
 
+// Learned-budget governor for the graphics-lab pipelines. The lab's per-target
+// stacks (weapon, bots) add a scene render plus several full-screen passes on
+// top of the world pass, which a mid-range GPU may not afford at the player's
+// resolution. This state machine sheds those heavy layers when the frame time
+// stays past `slowMs`, and only restores them after a long, comfortably fast
+// window, so a machine that cannot hold the full look settles instead of
+// oscillating. Levels: 0 = full look, 1 = world pass only, 2 = lab bypassed.
+export function nextLabBudget(state, frameMs, { slowMs = 19, recoverMs = 13.5, sustain = 2, recoverSustain = 6, cooldown = 3, maxLevel = 2 } = {}) {
+  const level = Number.isFinite(state?.level) ? Math.max(0, Math.min(maxLevel, Math.round(state.level))) : 0;
+  let slow = Number.isFinite(state?.slow) ? Math.max(0, state.slow) : 0;
+  let fast = Number.isFinite(state?.fast) ? Math.max(0, state.fast) : 0;
+  let cool = Number.isFinite(state?.cool) ? Math.max(0, state.cool) : 0;
+  const dt = Number.isFinite(frameMs) && frameMs > 0 ? frameMs / 1000 : 0;
+  if (cool > 0) return { level, slow: 0, fast: 0, cool: Math.max(0, cool - dt), changed: false, frameMs };
+  if (dt <= 0) return { level, slow, fast, cool, changed: false, frameMs };
+  if (frameMs > slowMs) { slow += dt; fast = 0; } else if (frameMs < recoverMs) { fast += dt; slow = 0; } else { slow = 0; fast = 0; }
+  let next = level, changed = false;
+  if (slow >= sustain && level < maxLevel) { next = level + 1; changed = true; }
+  else if (fast >= recoverSustain && level > 0) { next = level - 1; changed = true; }
+  if (changed) return { level: next, slow: 0, fast: 0, cool: cooldown, changed: true, frameMs };
+  return { level, slow, fast, cool, changed: false, frameMs };
+}
+export function labBudgetLabel(level) {
+  return level >= 2 ? 'off' : level === 1 ? 'world only' : 'full';
+}
+
 // Rolling frame-time window with median and p95, used for the debug snapshot.
 // Bounded so the array never grows without limit.
 export function createFrameWindow(capacity = 120) {

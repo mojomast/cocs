@@ -31,7 +31,7 @@ import {cavernShell,facadeDetails,tunnelRenderPaths,propId,applyPropDamage,propD
 import {raceDemoMode,raceDemoPose,RACE_DEMO_MODE_SECONDS} from './race-camera.mjs';
 import {occlusionDistance} from './camera.mjs';
 import {smoothAngle,smoothTowards,smoothFactor,normalizeCameraOwner,cameraOwnerAllowsRace,integrateFreeMove,FREE_CAM_DEFAULT_SPEED,FREE_CAM_BOOST,FREE_CAM_MIN_SPEED,FREE_CAM_MAX_BASE_SPEED} from './camera-modes.mjs';
-import {postStage,applyComposerSize,disposeComposer,reducedMotion,normalizeQuality,qualitySettings,qualityIndex,nextQualityTier,QUALITY_LEVELS,frameTriangleBudget,normalizeQualityOverride,bloomResolution,nextQualityState,createFrameWindow,pushFrameTime,framePercentiles} from './post.mjs';
+import {postStage,applyComposerSize,disposeComposer,reducedMotion,normalizeQuality,qualitySettings,qualityIndex,nextQualityTier,QUALITY_LEVELS,frameTriangleBudget,normalizeQualityOverride,bloomResolution,nextQualityState,nextLabBudget,createFrameWindow,pushFrameTime,framePercentiles} from './post.mjs';
 import {budgetedRatio,nextDynamicScale} from './resolution.mjs';
 import {GpuTimer} from './perf.mjs';
 import {interpolatePose} from './interpolation.mjs';
@@ -1208,6 +1208,11 @@ export class ArenaView{
   // totals after all passes are trustworthy.
   try{if(this.renderer.info)this.renderer.info.autoReset=false;}catch{}
   this._frameWindow=createFrameWindow(120);this._qualityState={level:null,bad:0,good:0,cool:0};
+  // Adaptive graphics-lab budget: the per-target lab stacks are much heavier
+  // than the world pass, so a slow machine sheds them (then the whole lab)
+  // instead of running at single-digit frames. `_labLevel` is the live level,
+  // 0 = full look, 1 = world pass only, 2 = lab bypassed.
+  this._labLevel=0;this._labBudget={level:0,slow:0,fast:0,cool:0};this.adaptiveLab=true;
   // Presentation interpolation state. Off by default so authoritative tests and
   // the multiplayer path are untouched; the host opts in for local play.
   this._interpAlpha=1;this._interpEnabled=false;this._present={cur:new Map(),prev:new Map(),vehicles:{cur:new Map(),prev:new Map()},rockets:{cur:[],prev:[]},time:null};this._warmupChain=Promise.resolve();
@@ -1722,12 +1727,38 @@ export class ArenaView{
      // resolution; a 100% world render is capped by the resolution budget (resolution.mjs).
      if(this.perf){const dom=this.renderer.domElement||{},dpr=window.devicePixelRatio;this.perf.viewport={cssWidth:w,cssHeight:h,devicePixelRatio:Number.isFinite(dpr)?dpr:1,bufferWidth:dom.width??Math.round(w*ratio),bufferHeight:dom.height??Math.round(h*ratio),scale:ratio};}
      this.camera.aspect=w/h;this.camera.updateProjectionMatrix();this.menu.camera.aspect=w/h;this.menu.camera.updateProjectionMatrix();if(this.weaponCamera){this.weaponCamera.aspect=w/h;this.weaponCamera.updateProjectionMatrix();}this._syncPost?.();this._syncLabTargets?.();}
-     setGraphicsLab(prefs){this.graphicsLab=normalizeGraphicsLab(prefs);this._syncPost();this._syncLabTargets();}
-          _syncPost(){
+     setGraphicsLab(prefs){this.graphicsLab=normalizeGraphicsLab(prefs);this._labBudget={level:0,slow:0,fast:0,cool:0};this._labLevel=0;this._syncPost();this._syncLabTargets();}
+     // Benchmark and screenshot harnesses pin the full look so runs stay
+     // comparable; turning adaptivity back on resets the governor.
+     setAdaptiveLab(on){this.adaptiveLab=on!==false;this._labBudget={level:0,slow:0,fast:0,cool:0};if(!this.adaptiveLab&&this._labLevel!==0)this._setLabLevel(0);return this.adaptiveLab;}
+     _setLabLevel(level){
+      const next=Math.max(0,Math.min(2,Math.round(Number(level)||0)));
+      if(next===this._labLevel)return false;
+      this._labLevel=next;
+      this._syncPost();
+      this._syncLabTargets();
+      return true;
+     }
+     // Fed by drawn frames only (the frame cap returns before this runs). Hitches
+     // and tab-resume gaps are ignored so one stall cannot scale the look down.
+     _sampleLabBudget(delta){
+      if(!Number.isFinite(this._labLevel))this._labLevel=0;
+      if(this.adaptiveLab!==true||this.graphicsLab?.enabled!==true||this.renderer?.isSoftware===true)return this._labLevel;
+      const dt=Number.isFinite(delta)?delta:0;
+      if(dt<=0||dt>.25)return this._labLevel;
+      // A deliberate frame cap raises the expected frame time: a 30 fps cap is
+      // not slowness, so both thresholds move with the cap.
+      const capMs=(Number(this.display?.fpsCap)||0)>0?1000/Number(this.display.fpsCap):0;
+      const next=nextLabBudget(this._labBudget,dt*1000,{slowMs:Math.max(19,capMs+2.5),recoverMs:Math.max(13.5,capMs+1.5)});
+      this._labBudget={level:next.level,slow:next.slow,fast:next.fast,cool:next.cool};
+      if(next.changed)this._setLabLevel(next.level);
+      return this._labLevel;
+     }
+     _syncPost(){
       const eligible=this.renderer instanceof T.WebGLRenderer,q=this.qualitySettings||this._quality();
       this._postError=null;
       const base=postStage({eligible,reduced:this.reduced(),postFx:this.display?.postFx});
-      const lab=eligible&&this.graphicsLab?.enabled===true;
+      const lab=eligible&&this.graphicsLab?.enabled===true&&this._labLevel<2;
       const bloomStrength=base?Number(this.display?.bloom)*Number(q.bloom):0;
       const finish=this._finishAmounts(q,base);
       const want=base||lab;
@@ -1915,8 +1946,14 @@ export class ArenaView{
     }
     _targetState(name){return this.graphicsLab?.targets?.[name]??null;}
     // A per-target stack only runs while the lab as a whole is on; the target's
-    // own predicate owns its mix/effect checks.
-    _targetActive(target){return this.graphicsLab?.enabled===true&&this.graphicsLab?.bypass!==true&&graphicsLabTargetActive(target)===true;}
+    // own predicate owns its mix/effect checks. The adaptive budget sheds the
+    // per-target stacks first (level 1) and the remaining world pass last
+    // (level 2), so a slow machine keeps a coherent, cheaper version of the look.
+    _targetActive(target,name){
+     if(this._labLevel>=2)return false;
+     if(this._labLevel>=1&&(name==='weapon'||name==='bots'))return false;
+     return this.graphicsLab?.enabled===true&&this.graphicsLab?.bypass!==true&&graphicsLabTargetActive(target)===true;
+    }
     _labEligible(){return this.renderer?.isSoftware!==true&&this.renderer?.isWebGLRenderer===true;}
     // Match applyComposerSize exactly: CSS size rounded, then scaled by the pixel
     // ratio, fractional buffer included, so the bot depth lines up pixel-for-pixel
@@ -1925,6 +1962,16 @@ export class ArenaView{
      const ratio=Number(this.pixelRatio)>0?Number(this.pixelRatio):1;
      const width=Math.max(1,Math.round(Number(this.width)>0?Number(this.width):1)),height=Math.max(1,Math.round(Number(this.height)>0?Number(this.height):1));
      return {width:width*ratio,height:height*ratio};
+    }
+    // The styled layer targets (bot/weapon source, encode destination) render at
+    // half the display buffer. The fused lab shader is graphic, so patterns stay
+    // the same CSS size and only edge crispness softens, while the offscreen
+    // render, encode and composite all touch a quarter of the pixels. The pass
+    // itself still configures with the full size so pixel/hex/hatch math is
+    // unchanged.
+    _labTargetSize(){
+     const size=this._labBufferSize();
+     return {width:Math.max(1,Math.round(size.width*.5)),height:Math.max(1,Math.round(size.height*.5))};
     }
     _resizeRenderTarget(target,width,height){
      if(!target)return target;
@@ -1937,9 +1984,9 @@ export class ArenaView{
     // every path that can drop the composer or resize the canvas funnels here.
     _syncLabTargets(){
      const eligible=this._labEligible(),composer=!!this.composer;
-     const bots=eligible&&composer&&this._targetActive(this._targetState('bots'));
-     const weapon=eligible&&composer&&this._targetActive(this._targetState('weapon'));
-     const size=bots||weapon?this._labBufferSize():null;
+     const bots=eligible&&composer&&this._targetActive(this._targetState('bots'),'bots');
+     const weapon=eligible&&composer&&this._targetActive(this._targetState('weapon'),'weapon');
+     const size=bots||weapon?this._labTargetSize():null;
      if(size){
       if(!this._labDisplayTarget)this._labDisplayTarget=new T.WebGLRenderTarget(size.width,size.height,{format:T.RGBAFormat,depthBuffer:false});
       else this._resizeRenderTarget(this._labDisplayTarget,size.width,size.height);
@@ -4018,6 +4065,9 @@ export class ArenaView{
      return false;
     }
     this._renderAt=cap>0?now:undefined;
+    // Adaptive lab budget runs before the frame is described, so a level change
+    // rebuilds the composer/targets before this frame's passes are chosen.
+    this._sampleLabBudget(Number(delta)||0);
     const frameDelta=(Number(delta)||0)+(this._renderCarry||0);this._renderCarry=0;
     // Reset the (auto-reset-disabled) counters once per presented frame, then
     // account for every pass — world, post and the first-person weapon pass.
@@ -4117,7 +4167,7 @@ if(freeCam){this.lowHealthOverlay?.update(false,time,delta,reduced,this.camera);
     // preserved (autoClear off + depth-writing passes disabled) so the bot
     // composite can reject pixels behind world geometry. Without a composer,
     // bots and weapons keep the direct path exactly as before.
-    const labTargets=this.graphicsLab?.targets,botWanted=this._targetActive(labTargets?.bots)&&(this.actorModels?.size??0)>0,weaponWanted=this._targetActive(labTargets?.weapon);
+    const labTargets=this.graphicsLab?.targets,botWanted=this._targetActive(labTargets?.bots,'bots')&&(this.actorModels?.size??0)>0,weaponWanted=this._targetActive(labTargets?.weapon,'weapon');
     if(botWanted||weaponWanted)this._syncLabTargets();
     const botsStyled=botWanted&&!!(this._botLab&&this._botTarget&&this._labDisplayTarget),weaponStyled=weaponWanted&&!!(this._weaponLab&&this._weaponTarget&&this._labDisplayTarget);
     if(this.composer){
@@ -4186,7 +4236,7 @@ if(freeCam){this.lowHealthOverlay?.update(false,time,delta,reduced,this.camera);
        getPerformance(){
         if(!this.perf)return null;
         const info=this.renderer?.info,memory=info?.memory;
-        return {...this.perf,renderer:this.rendererInfo(),viewport:{...this.perf.viewport},calls:info?.render?.calls??this.perf.calls,triangles:info?.render?.triangles??this.perf.triangles,geometries:memory?.geometries??this.perf.geometries,textures:memory?.textures??this.perf.textures,programs:info?.programs?.length??this.perf.programs};
+        return {...this.perf,labLevel:this._labLevel,adaptiveLab:this.adaptiveLab!==false,renderer:this.rendererInfo(),viewport:{...this.perf.viewport},calls:info?.render?.calls??this.perf.calls,triangles:info?.render?.triangles??this.perf.triangles,geometries:memory?.geometries??this.perf.geometries,textures:memory?.textures??this.perf.textures,programs:info?.programs?.length??this.perf.programs};
        }
        // Backend/GPU identity plus the real drawing-buffer geometry, so a baseline
        // report can name its environment instead of guessing.

@@ -9,7 +9,7 @@
  import {raceDemoMode,raceDemoPose,RACE_DEMO_MODE_SECONDS} from './race-camera.mjs';
  import {occlusionDistance} from './camera.mjs';
 +import {smoothAngle,smoothTowards,smoothFactor,normalizeCameraOwner,cameraOwnerAllowsRace,integrateFreeMove,FREE_CAM_DEFAULT_SPEED,FREE_CAM_BOOST,FREE_CAM_MIN_SPEED,FREE_CAM_MAX_BASE_SPEED} from './camera-modes.mjs';
- import {postStage,applyComposerSize,disposeComposer,reducedMotion,normalizeQuality,qualitySettings,qualityIndex,nextQualityTier,QUALITY_LEVELS,frameTriangleBudget,normalizeQualityOverride,bloomResolution,nextQualityState,createFrameWindow,pushFrameTime,framePercentiles} from './post.mjs';
+ import {postStage,applyComposerSize,disposeComposer,reducedMotion,normalizeQuality,qualitySettings,qualityIndex,nextQualityTier,QUALITY_LEVELS,frameTriangleBudget,normalizeQualityOverride,bloomResolution,nextQualityState,nextLabBudget,createFrameWindow,pushFrameTime,framePercentiles} from './post.mjs';
 @@ -876,6 +876,13 @@
      // Rails are continuous collision runs of overlapping boxes; render the
      // smooth barrier walls in raceTrackModel instead so they never z-fight.

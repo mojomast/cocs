@@ -707,11 +707,14 @@ pauseRender:(on:boolean)=>{const previous=r.benchmarking===true;r.benchmarking=o
      const frameStats=(times:number[])=>{const dels:number[]=[];for(let i=1;i<times.length;i++)dels.push(times[i]-times[i-1]);dels.sort((a,b)=>a-b);const pick=(p:number)=>dels.length?dels[Math.min(dels.length-1,Math.max(0,Math.round((dels.length-1)*p)))]:0;const median=pick(.5),p95=pick(.95);return {median,p95,frames:dels.length,fps:median>0?1000/median:0};};
      const run=async({durationMs=2500,warmupMs=700}={})=>{
       if(!r?.view)return {error:'no-view'};
-      const target=r,savedDisplay={...target.display},savedFree=view.freeCam===true,savedFreePose={...view.freePose},hadMatch=!!target.match;
+      const target=r,savedDisplay={...target.display},savedFree=view.freeCam===true,savedFreePose={...view.freePose},hadMatch=!!target.match,savedAdaptive=view.adaptiveLab!==false;
       target.benchmarking=true;
       const results=[];
       const makeBench=()=>{const cfg=normalizeConfig({...DEFAULT_CONFIG,mode:BENCHMARK_PRESET.mode,botCount:BENCHMARK_PRESET.botCount,difficulty:BENCHMARK_PRESET.difficulty});const map=resolveMapForMode(BENCHMARK_PRESET.mapId,cfg.mode,{legacy:target.legacyArenas});const loadout=resolveLoadout('chatgpt','openclaw');return new Match(loadout.character,loadout.harness,makeRng(BENCHMARK_PRESET.seed),map,{...cfg,seed:BENCHMARK_PRESET.seed,loadouts:{0:{character:loadout.character,harness:loadout.harness,gear:profileRef.current.gear,attachments:profileRef.current.attachments,finish:profileRef.current.finish}}});};
       try{
+       // The benchmark pins the full look: an adaptive level change mid-run would
+       // make the direct/postfx comparison incomparable.
+       view.setAdaptiveLab(false);
        for(const variant of BENCHMARK_PRESET.variants){
         const bench=makeBench();
         view.setMatch(bench);view.setPlayerId(-1);view.setFreeCam(true);
@@ -727,6 +730,7 @@ pauseRender:(on:boolean)=>{const previous=r.benchmarking===true;r.benchmarking=o
        if(hadMatch)try{view.setMatch(target.match);}catch{}
        else{target.showcaseMatchedId=null;}
        view.setDisplay(savedDisplay);setDisplay(savedDisplay);
+       view.setAdaptiveLab(savedAdaptive);
        target.benchmarking=false;
       }
       const perf=view.getPerformance?.()||{};

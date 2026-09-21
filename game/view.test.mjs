@@ -1817,11 +1817,11 @@ test('enabling a target allocates its lab pass and offscreen targets, and disabl
  assert.ok(view._weaponLab&&view._weaponTarget&&view._labDisplayTarget,'the weapon stack allocates its pass, target and scratch buffer');
  assert.ok(view._botLab&&view._botTarget,'the bot stack allocates its pass and target');
  assert.equal(view._botTarget.depthTexture?.isDepthTexture,true,'the bot target exposes its depth texture');
- assert.equal(view._botTarget.width,640);assert.equal(view._botTarget.height,360);
+ assert.equal(view._botTarget.width,320);assert.equal(view._botTarget.height,180,'styled layer targets render at half the display buffer');
  const botTarget=view._botTarget;
  view.width=1280;view.height=720;view._syncLabTargets();
  assert.equal(view._botTarget,botTarget,'a resize keeps the allocated target instance');
- assert.equal(botTarget.width,1280);assert.equal(botTarget.depthTexture.image.width,1280);
+ assert.equal(botTarget.width,640);assert.equal(botTarget.depthTexture.image.width,640);
  view.graphicsLab.targets.weapon.enabled=false;view._syncLabTargets();
  assert.equal(view._weaponLab,null);assert.equal(view._weaponTarget,null);
  assert.ok(view._botLab&&view._botTarget,'the bot stack survives an unrelated target disable');
@@ -1894,6 +1894,47 @@ test('setGraphicsLab accepts target stacks and never allocates them on a non-Web
  assert.equal(view.graphicsLab.targets.bots.palette,'ember','target stacks survive normalization');
  assert.equal(renderer.isWebGLRenderer,undefined);
  assert.equal(view._weaponLab,null);assert.equal(view._botLab,null);assert.equal(view._labDisplayTarget,null,'a non-WebGL renderer keeps today\'s appearance');
+});
+
+test('the lab budget halves the styled layer targets and sheds the heavy stacks before the world pass',t=>{
+ const {view}=fixture(t);
+ view.width=800;view.height=600;view.pixelRatio=1.5;
+ assert.deepEqual(view._labTargetSize(),{width:600,height:450},'layer targets render at half the display buffer');
+ view.graphicsLab=normalizeGraphicsLab({version:1,enabled:true,targets:{weapon:{enabled:true,mix:1,effects:{ink:{enabled:true}}},bots:{enabled:true,mix:1,effects:{ink:{enabled:true}}}}});
+ assert.equal(view._targetActive(view._targetState('weapon'),'weapon'),true);
+ assert.equal(view._targetActive(view._targetState('bots'),'bots'),true);
+ view._labLevel=1;
+ assert.equal(view._targetActive(view._targetState('weapon'),'weapon'),false,'the weapon stack sheds first');
+ assert.equal(view._targetActive(view._targetState('bots'),'bots'),false,'the bot stack sheds with it');
+ view._labLevel=2;
+ assert.equal(view._targetActive(view._targetState('weapon'),'weapon'),false);
+ view._labLevel=0;
+ assert.equal(view._targetActive(view._targetState('weapon'),'weapon'),true,'resetting the level restores the stacks');
+});
+
+test('the adaptive lab budget steps down under sustained slow frames and only restores when fast',t=>{
+ const {view}=fixture(t);
+ view.graphicsLab=normalizeGraphicsLab({version:1,enabled:true,effects:{ink:{enabled:true}}});
+ view.setAdaptiveLab(true);
+ for(let i=0;i<100;i++)view._sampleLabBudget(.03);
+ assert.equal(view._labLevel,1,'sustained ~33 fps sheds the per-target stacks first');
+ for(let i=0;i<500&&view._labLevel===1;i++)view._sampleLabBudget(.03);
+ assert.equal(view._labLevel,2,'continued slowness bypasses the lab entirely');
+ for(let i=0;i<2400&&view._labLevel>0;i++)view._sampleLabBudget(.01);
+ assert.equal(view._labLevel,0,'a long comfortably fast window restores the full look');
+ view.setAdaptiveLab(false);
+ assert.equal(view.adaptiveLab,false);
+ assert.equal(view._labLevel,0,'turning adaptivity off pins the full look');
+ // A deliberate frame cap is not slowness: a 30 fps cap must never shed the look.
+ const capped=fixture(t).view;
+ capped.graphicsLab=normalizeGraphicsLab({version:1,enabled:true,effects:{ink:{enabled:true}}});
+ capped.display={...capped.display,fpsCap:30};
+ capped.setAdaptiveLab(true);
+ for(let i=0;i<400;i++)capped._sampleLabBudget(1/30);
+ assert.equal(capped._labLevel,0,'a 30 fps cap is not slowness');
+ // A machine missing its own cap by a wide margin still sheds.
+ for(let i=0;i<120&&capped._labLevel===0;i++)capped._sampleLabBudget(.05);
+ assert.equal(capped._labLevel,1,'frames far past the cap still step down');
 });
 
 test('spawnDeath replays the authoritative style and threads the kill direction',t=>{

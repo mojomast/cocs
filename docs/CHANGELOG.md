@@ -116,7 +116,12 @@ pipeline behind it.
   banners, team FLUX has a real REINFORCE/SCAN purchase strip, NEGLECT is live
   as the comeback meter, and spectators can no longer queue orders. The
   Graphics Lab now ships an authored default look (electric/contrast/hatch
-  world, circuit weapon pixels, ink bots) with a restore action.
+  world, circuit weapon pixels, ink bots) with a restore action, and that look
+  now scales itself to the machine: the weapon and bot stacks render into
+  half-resolution targets with the same CSS-pixel pattern math, and an adaptive
+  budget sheds the heavy stacks (then the whole lab pass) when drawn frame times
+  stay slow, restoring the full look one step at a time once frames recover. See
+  [Lab performance budget](design/DEPTH-II-PASS.md#lab-performance-budget).
 - Animation pass: restored death variety (killing-direction topple, per-pose
   fall arcs, seeded limb silhouettes, style treatments), strength-scaled hit
   flinches, a melee swing, shell casings, style-aware death audio, and UI

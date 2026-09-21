@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {postStage,applyComposerSize,disposeComposer,reducedMotion,QUALITY_LEVELS,normalizeQuality,normalizeQualityOverride,qualitySettings,qualityIndex,nextQualityTier,nextQualityState,clampTriangleBudget,frameTriangleBudget,bloomResolution,createFrameWindow,pushFrameTime,framePercentiles} from './post.mjs';
+import {postStage,applyComposerSize,disposeComposer,reducedMotion,QUALITY_LEVELS,normalizeQuality,normalizeQualityOverride,qualitySettings,qualityIndex,nextQualityTier,nextQualityState,nextLabBudget,labBudgetLabel,clampTriangleBudget,frameTriangleBudget,bloomResolution,createFrameWindow,pushFrameTime,framePercentiles} from './post.mjs';
 
 const fakeComposer = () => {
   const calls = [];
@@ -169,4 +169,44 @@ test('the rolling frame window reports bounded median and p95 percentiles', () =
   assert.equal(median, 96);
   assert.ok(p95 >= median && p95 <= 100);
   assert.deepEqual(framePercentiles(createFrameWindow(4), [0.5, 0.95]), [0, 0]);
+});
+
+test('the lab budget stays full on healthy frames and ignores hitches and bad input', () => {
+  let state = { level: 0, slow: 0, fast: 0, cool: 0 };
+  for (let i = 0; i < 600; i++) state = nextLabBudget(state, 16);
+  assert.equal(state.level, 0, '60 fps never sheds styling');
+  assert.equal(labBudgetLabel(state.level), 'full');
+  const hitch = nextLabBudget(state, 900);
+  assert.equal(hitch.level, 0, 'a single long hitch is not sustained slowness');
+  assert.equal(hitch.changed, false);
+  const bad = nextLabBudget(state, NaN);
+  assert.equal(bad.level, 0, 'a non-finite frame time leaves the level alone');
+  assert.equal(nextLabBudget(state, 0).level, 0);
+});
+
+test('the lab budget sheds the heavy layers in order and only restores after a long fast window', () => {
+  let state = { level: 0, slow: 0, fast: 0, cool: 0 };
+  for (let i = 0; i < 120 && state.level === 0; i++) state = nextLabBudget(state, 25);
+  assert.equal(state.level, 1, 'sustained slowness drops the weapon and bot stacks first');
+  assert.equal(labBudgetLabel(state.level), 'world only');
+  assert.ok(state.cool > 0, 'a cooldown follows each step');
+  const during = nextLabBudget(state, 25);
+  assert.equal(during.level, 1, 'no second step during the cooldown');
+  for (let i = 0; i < 300 && state.level === 1; i++) state = nextLabBudget(state, 25);
+  assert.equal(state.level, 2, 'continued slowness bypasses the lab entirely');
+  assert.equal(labBudgetLabel(state.level), 'off');
+  for (let i = 0; i < 300; i++) state = nextLabBudget(state, 25);
+  assert.equal(state.level, 2, 'the governor never exceeds the level ceiling');
+  // Recovery is deliberately much slower than the demotion.
+  let recovering = state;
+  for (let i = 0; i < 200 && recovering.level === 2; i++) recovering = nextLabBudget(recovering, 10);
+  assert.equal(recovering.level, 2, 'two seconds of fast frames is not enough to restore');
+  for (let i = 0; i < 2400 && recovering.level > 0; i++) recovering = nextLabBudget(recovering, 10);
+  assert.equal(recovering.level, 0, 'a long, comfortably fast window restores the full look one step at a time');
+});
+
+test('the lab budget bands leave a dead zone so a frame time near the threshold cannot oscillate', () => {
+  let state = { level: 1, slow: 0, fast: 0, cool: 0 };
+  for (let i = 0; i < 600; i++) state = nextLabBudget(state, 16);
+  assert.equal(state.level, 1, 'between slowMs and recoverMs the level holds');
 });

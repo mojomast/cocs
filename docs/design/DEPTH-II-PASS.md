@@ -131,6 +131,30 @@ or unreadable (saved recipes still win), and the lab panel gained a `RESTORE
 DEFAULT LOOK` action alongside `RESET ALL / OFF`. `normalizeGraphicsLab({})`
 stays all-off so the normalizer pins are unchanged.
 
+## Lab performance budget
+
+The default recipe is much heavier than a single world pass: the weapon and bot
+stacks each add an offscreen layer render, an encode and a fused lab pass, so
+the shipped look could push a mid-range GPU well below 60 fps. Two mechanisms
+keep it affordable without changing the recipe:
+
+- **Half-resolution layer targets.** `_labTargetSize()` renders the bot and
+  weapon source targets (and the shared encode scratch buffer) at half the
+  display buffer in each axis. The fused shader is still configured with the
+  full device-pixel size, so pixel/hex/hatch patterns keep exactly the same size
+  and placement; only the stylised layer's edges soften. The offscreen render,
+  encode and composite all touch a quarter of the pixels.
+- **Adaptive budget.** `nextLabBudget` (in `game/post.mjs`, with the
+  `_sampleLabBudget`/`_setLabLevel` plumbing in `game/view.mjs`) watches drawn
+  frame times: two seconds past ~52 fps sheds the weapon and bot stacks first
+  (level 1, world pass only), further sustained slowness bypasses the lab pass
+  entirely (level 2), and a six-second window comfortably under ~74 fps restores
+  one level at a time. Hitches, tab-resume gaps, software renderers and an
+  explicit `setAdaptiveLab(false)` all pin or skip the governor; the executable
+  benchmark pins the full look so direct/postfx runs stay comparable.
+  `tokenArenaPerf()` / `getPerformance()` report the live `labLevel` so a report
+  can prove which look a run measured.
+
 ## Verification
 
 Counts and deployment records are in `docs/VERIFICATION.md`; focused suites:
