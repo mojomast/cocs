@@ -10,6 +10,19 @@ with_game_server="${1:-}"
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "${repo_root}"
 
+# The web service runs `vinext start` inside its own checkout, so a build made
+# anywhere else leaves the served dist untouched — and the identity gate cannot
+# see that, because the served build ID comes from the environment the deploy
+# exports. Refuse a foreign-tree deploy unless the operator accepts it.
+if command -v systemctl >/dev/null 2>&1; then
+  service_root="$(systemctl --user show -p WorkingDirectory --value token-arena-web.service 2>/dev/null || true)"
+  if [[ -n "${service_root}" && "${service_root}" != "${repo_root}" && "${ALLOW_FOREIGN_DEPLOY:-}" != "1" ]]; then
+    printf 'token-arena-web.service runs from %s, but this deploy would build %s.\n' "${service_root}" "${repo_root}" >&2
+    printf 'Fast-forward the service checkout and run the deploy from there, or set ALLOW_FOREIGN_DEPLOY=1 to build here anyway.\n' >&2
+    exit 1
+  fi
+fi
+
 dist_dir="${repo_root}/dist"
 backup_dir="$(mktemp -d "${TMPDIR:-/tmp}/token-arena-dist.XXXXXX")"
 had_dist=0
@@ -293,6 +306,17 @@ done
 
 if [[ "${verified}" != "1" ]]; then
   rollback 'Deployment failed HTML/asset/identity verification.'
+fi
+
+# Identities describe the candidate; only the served page bundle proves the
+# running dist is this build. Compare the freshly built index against what the
+# deployment now serves so a stale checkout can never pass on env identity.
+if [[ -f "${dist_dir}/client/index.html" ]]; then
+  expected_asset="$(grep -o 'assets/page-[^"]*\.js' "${dist_dir}/client/index.html" | head -1 || true)"
+  served_asset="$(curl -fsS "${deploy_url}/" | grep -o 'assets/page-[^"]*\.js' | head -1 || true)"
+  if [[ -n "${expected_asset}" && "${served_asset}" != "${expected_asset}" ]]; then
+    rollback "Served page bundle ${served_asset:-none} does not match this build ${expected_asset}."
+  fi
 fi
 
 printf 'Deployed %s (%s) at commit %s.\n' "${deploy_version}" "${TOKEN_ARENA_BUILD_ID}" "${TOKEN_ARENA_COMMIT}"

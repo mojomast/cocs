@@ -261,7 +261,11 @@ those remain human review items.
   and may differ.)
 - **Deployment assets** — `tests/deployment-assets.test.mjs` pins the behavior
   of `linkedAssets`/`verifyDeployment`, and `verifyDeployment` is what
-  `deploy.sh` gates the live site on.
+  `deploy.sh` gates the live site on. `deploy.sh` additionally refuses to run
+  when `repo_root` is not the web service's `WorkingDirectory` (the service
+  builds and serves its own checkout) and compares the served
+  `assets/page-*.js` with the freshly built index, so an environment-derived
+  build ID can never mask a stale bundle.
 - **Map layout / schema** — `game/map-layout.test.mjs`, `game/arenas.test.mjs`,
   `game/map-schema.test.mjs` pin registry membership, placement validity,
   navigation round-trips and actor clearance.

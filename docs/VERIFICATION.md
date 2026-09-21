@@ -137,6 +137,33 @@ graphics-lab harness returned `{"ok":true}`. The tracked browser matrix ran at
 **5/5 viewports** locally and against production (`commitDirty:false`). No
 players were disconnected.
 
+**Production update — LATTICE commander orders (2026-09-21).** Commit `681cc44`
+shipped with `npm run deploy -- --with-game-server` because the command
+effects, the bot-plan changes and the result reconciliation touch sim modules
+the server also runs; the gate verified exact identities at web and game
+server `681cc44` `v8.6-681cc44` protocol 3. A live production browser check
+launched the OPERATIONS practice briefing, seated the local player
+(`command.seat[0]`), applied FORTIFY (`command.policy[0]`) and issued a route
+(`command.route[0] === 'front-0'`) with zero page errors. The tracked matrix
+ran at 5/5 viewports with `commitDirty:false`.
+
+**Deployment correction (2026-09-21).** The three commits above were first
+deployed from the development checkout (`tokenarena-world`), which builds a
+`dist/` the running service never serves: `token-arena-web.service` starts
+`vinext start` in the production checkout (`/home/mojo/projects/tokenarena`),
+and the deploy gate read its identities from the environment it exports, so a
+stale checkout passed. Production was in fact still serving the
+`a1f3b5e`-era bundle — the reported graphics-lab slowdown persisted after the
+first fix "shipped" for exactly that reason. The production worktree was
+fast-forwarded to `681cc44`, the deploy was re-run from that checkout, and the
+served `assets/page-DPm4w4Nd.js` now matches the freshly built index; live
+checks then verified the 2D title canvas (1,448 sprites, no second WebGL
+context) and the adaptive lab budget stepping 0 → 1 → 2. `scripts/deploy.sh`
+now refuses a deploy whose `repo_root` differs from the web service's
+`WorkingDirectory` (override `ALLOW_FOREIGN_DEPLOY=1`) and, after the identity
+gate, asserts the served `assets/page-*.js` equals the built one, so identity
+env vars can never mask a stale bundle again.
+
 **Production update — physics, animation and audio pass (2026-09-20).** Commit
 `d9411c3` was fast-forwarded to `improvement/phase2-audio-visual` and deployed
 with `npm run deploy -- --with-game-server` (sim, vehicles, progression and the
