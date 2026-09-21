@@ -33,7 +33,10 @@ record in [VERIFICATION.md](VERIFICATION.md).
   landmarks, elevation, facilities, objective state, friendly positions and only
   revealed enemy intel. Commander orders use legal node targets and the existing
   authoritative command path. Interactive field dialogs release the mouse and
-  suspend combat input, then return control through the shared cursor lifecycle.
+   suspend combat input, then return control through the shared cursor lifecycle.
+- Four-operator player squads support create, join, leave, leadership transfer
+  and member removal. Server-side sender binding, leadership and capacity checks
+  govern every action; squad membership remains separate from AI reinforcements.
 - Opaque architectural detail batches by spatial cell. Per-arena cache ownership
   prevents stale/disposed resource reuse; seeded block painting no longer mutates
   shared primitive geometry. Atmospheric particles age correctly, precipitation

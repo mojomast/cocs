@@ -1,6 +1,6 @@
 # COCS verification report
 
-## Release 8.8 — DESTINATIONS (verification in progress)
+## Release 8.8 — DESTINATIONS
 
 All intensive tests, builds and browser runs are serialized, with Node test-file
 concurrency set to one. The initial map/mode/runtime gates passed **147/148**;
@@ -29,8 +29,7 @@ back to the original baseline. Evidence lives under `artifacts/destination-views
 `artifacts/field-interface` and `artifacts/demo-toolbar`.
 
 Software-rendered browser captures and submission counts do not establish
-hardware GPU frame rates. Final sweep/build/deployment results are recorded below
-once complete.
+hardware GPU frame rates. Final sweep/build results are recorded below.
 
 **Full serialized game sweep:** 3,244 cases: 3,231 passed, nine intentionally
 skipped, four failed. No new-map placement/navigation, race/soccer, mission
@@ -88,6 +87,17 @@ reachable and the 96px aiming corridor stayed clear. Manifest:
 The campaign HUD rerun also passed all three sizes after the compact touch
 layout changes. An earlier port-3000 run covered the old release and is not
 counted as v8.8 evidence.
+
+**Resource-cycle closure:** instrumentation traced the remaining +1 texture per
+cycle to Three's reused shadow depth material: its `map` was null but its cached
+sampler still referenced a disposed worn-metal texture. The submission-boundary
+fix synchronizes depth/distance texture uniforms without recompiling shaders.
+All **10 shadow/arena-resource regressions** passed. Four sequential Aurora →
+Colosseum browser cycles then held exactly steady: Aurora 289 geometries / 31
+textures; Colosseum 227 warmed geometries / 16 textures / 232 calls / 58,823
+triangles. No runtime or page errors. Evidence:
+`artifacts/destination-views/resource-cycles.json`. Typecheck and production build
+passed again after this fix.
 
 ## Release 8.7.1 — robot precision pass
 

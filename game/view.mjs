@@ -36,6 +36,7 @@ import {smoothAngle,smoothTowards,smoothFactor,normalizeCameraOwner,cameraOwnerA
 import {postStage,applyComposerSize,disposeComposer,reducedMotion,normalizeQuality,qualitySettings,qualityIndex,nextQualityTier,QUALITY_LEVELS,frameTriangleBudget,normalizeQualityOverride,bloomResolution,nextQualityState,nextLabBudget,createFrameWindow,pushFrameTime,framePercentiles,hasLayerContent} from './post.mjs';
 import {budgetedRatio,nextDynamicScale} from './resolution.mjs';
 import {GpuTimer} from './perf.mjs';
+import {installShadowTextureSync} from './shadow-resources.mjs';
 import {interpolatePose} from './interpolation.mjs';
 import {solveSightPose,attachOptic,sightAlignmentError} from './sights.mjs';
 import {resolveActiveSight} from './reticle.mjs';
@@ -1214,6 +1215,7 @@ export class DebrisPool{
 }
 export class ArenaView{
  constructor(canvas){const context=canvas.getContext('webgl2',{antialias:true,alpha:false});this.renderer=context?new T.WebGLRenderer({canvas,context,antialias:true,alpha:false,powerPreference:'high-performance'}):new SoftwareRenderer(canvas);this.gpuTimer=context?new GpuTimer(this.renderer):null;this.display=normalizeDisplay();this._qualityOverride=null;this.quality=null;this.qualitySettings=null;this._fps={frames:0,elapsed:0,value:60};this._drs={scale:1,cool:0};this.dynamicResolution=true;
+  installShadowTextureSync(this.renderer);
   // three.js resets renderer.info after every render() call, and the first-person
   // weapon pass is a second render, so the counters read at frame end would only
   // describe the gun. Disable autoReset and reset once per presented frame so the
