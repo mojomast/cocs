@@ -40,22 +40,24 @@ export const DEMO_CATEGORY_BY_MODE=Object.freeze({
 });
 
 // ---------------------------------------------------------------------------
-// Curated catalog. Field-for-field the scenarios the title screen has always
-// shipped plus a coverage `category` and `source`; ids/labels/modes/maps are
-// deliberately frozen so `modeId` lookups and saved pins keep working.
+// The default reel tours DESTINATIONS. Dedicated entries guarantee that a full
+// pass shows all nine maps; existing scenario ids keep saved mode pins useful.
+// The complete rotation still exposes the rest of the compatible map library.
 // ---------------------------------------------------------------------------
 export const CURATED_SCENARIOS=Object.freeze([
- Object.freeze({id:'deathmatch',label:'Deathmatch',category:'infantry',source:'curated',mode:'deathmatch',maps:Object.freeze(['colosseum','forge','substation','dune-ravine','atrium','crosswire']),bots:7,difficulty:'normal',timeLimit:60,fragLimit:10,seatVehicles:0}),
- Object.freeze({id:'teamdeathmatch',label:'Team Deathmatch',category:'infantry',source:'curated',mode:'teamdeathmatch',maps:Object.freeze(['titan-valley','warfront','atrium','riverbend','crosswire']),bots:8,difficulty:'normal',timeLimit:60,fragLimit:20,seatVehicles:0}),
- Object.freeze({id:'ctf',label:'Capture the Flag',category:'objectives',source:'curated',mode:'ctf',maps:Object.freeze(['frost-gate','skybreak','launchpad','citadel','blood-gulch']),bots:8,difficulty:'normal',timeLimit:60,fragLimit:2,seatVehicles:0}),
- Object.freeze({id:'koth',label:'King of the Hill',category:'objectives',source:'curated',mode:'koth',maps:Object.freeze(['colosseum','skyfall-basin','sunken-hill','forge']),bots:7,difficulty:'normal',timeLimit:60,fragLimit:60,seatVehicles:0}),
- Object.freeze({id:'domination',label:'Domination',category:'objectives',source:'curated',mode:'domination',maps:Object.freeze(['warfront','titan-valley','convoy-line','frost-gate']),bots:8,difficulty:'normal',timeLimit:60,fragLimit:100,seatVehicles:0}),
- Object.freeze({id:'combined-arms',label:'Combined Arms',category:'vehicles',source:'curated',mode:'combined-arms',maps:Object.freeze(['warfront','skyfall-basin','titan-valley','trenchline']),bots:12,difficulty:'normal',timeLimit:75,fragLimit:100,seatVehicles:.7}),
- Object.freeze({id:'payload',label:'Payload',category:'objectives',source:'curated',mode:'payload',maps:Object.freeze(['convoy-line','derelict-station','frost-gate','launchpad']),bots:6,difficulty:'normal',timeLimit:60,fragLimit:2,seatVehicles:0}),
- Object.freeze({id:'juggernaut',label:'Juggernaut',category:'infantry',source:'curated',mode:'juggernaut',maps:Object.freeze(['throne']),bots:7,difficulty:'normal',timeLimit:60,fragLimit:30,seatVehicles:0}),
- Object.freeze({id:'team-elimination',label:'Team Elimination',category:'infantry',source:'curated',mode:'team-elimination',maps:Object.freeze(['gauntlet']),bots:8,difficulty:'normal',timeLimit:60,fragLimit:8,seatVehicles:0}),
- Object.freeze({id:'puma-race',label:'Puma Circuit',category:'racing',source:'curated',mode:'puma-race',maps:Object.freeze(['puma-circuit']),bots:7,difficulty:'normal',timeLimit:120,fragLimit:1,seatVehicles:0}),
- Object.freeze({id:'puma-soccer',label:'Puma Soccer',category:'soccer',source:'curated',mode:'puma-soccer',maps:Object.freeze(['puma-pitch']),bots:3,difficulty:'normal',timeLimit:90,fragLimit:2,seatVehicles:0}),
+  Object.freeze({id:'deathmatch',label:'Deathmatch',category:'infantry',source:'curated',mode:'deathmatch',maps:Object.freeze(['meridian-exchange']),bots:5,difficulty:'normal',timeLimit:60,fragLimit:10,seatVehicles:0}),
+  Object.freeze({id:'teamdeathmatch',label:'Team Deathmatch',category:'infantry',source:'curated',mode:'teamdeathmatch',maps:Object.freeze(['ember-crucible']),bots:7,difficulty:'normal',timeLimit:60,fragLimit:20,seatVehicles:0}),
+  Object.freeze({id:'ctf',label:'Capture the Flag',category:'objectives',source:'curated',mode:'ctf',maps:Object.freeze(['tidal-citadel']),bots:7,difficulty:'normal',timeLimit:60,fragLimit:2,seatVehicles:0}),
+  Object.freeze({id:'koth',label:'King of the Hill',category:'objectives',source:'curated',mode:'koth',maps:Object.freeze(['verdant-reliquary']),bots:5,difficulty:'normal',timeLimit:60,fragLimit:60,seatVehicles:0}),
+  Object.freeze({id:'domination',label:'Domination',category:'objectives',source:'curated',mode:'domination',maps:Object.freeze(['meridian-exchange','tidal-citadel']),bots:7,difficulty:'normal',timeLimit:60,fragLimit:100,seatVehicles:0}),
+  Object.freeze({id:'combined-arms',label:'Combined Arms',category:'vehicles',source:'curated',mode:'combined-arms',maps:Object.freeze(['sunscar-convoy']),bots:7,difficulty:'normal',timeLimit:75,fragLimit:100,seatVehicles:.7}),
+  Object.freeze({id:'payload',label:'Payload',category:'objectives',source:'curated',mode:'payload',maps:Object.freeze(['sunscar-convoy']),bots:5,difficulty:'normal',timeLimit:60,fragLimit:2,seatVehicles:0}),
+  Object.freeze({id:'juggernaut',label:'Juggernaut',category:'infantry',source:'curated',mode:'juggernaut',maps:Object.freeze(['ember-crucible']),bots:5,difficulty:'normal',timeLimit:60,fragLimit:30,seatVehicles:0}),
+  Object.freeze({id:'team-elimination',label:'Team Elimination',category:'infantry',source:'curated',mode:'team-elimination',maps:Object.freeze(['tidal-citadel']),bots:7,difficulty:'normal',timeLimit:60,fragLimit:8,seatVehicles:0}),
+  Object.freeze({id:'puma-race',label:'Ion Speedway',category:'racing',source:'curated',mode:'puma-race',maps:Object.freeze(['ion-speedway']),bots:5,difficulty:'normal',timeLimit:120,fragLimit:1,seatVehicles:0}),
+  Object.freeze({id:'puma-soccer',label:'Puma Soccer',category:'soccer',source:'curated',mode:'puma-soccer',maps:Object.freeze(['aurora-stadium']),bots:3,difficulty:'normal',timeLimit:90,fragLimit:2,seatVehicles:0}),
+  Object.freeze({id:'cocs',label:'Lattice · Asterion Relay',category:'objectives',source:'curated',mode:'cocs',maps:Object.freeze(['asterion-relay']),bots:7,difficulty:'normal',timeLimit:75,fragLimit:100,seatVehicles:0}),
+  Object.freeze({id:'cocs-monsoon',label:'Lattice · Monsoon Foundry',category:'objectives',source:'curated',mode:'cocs',maps:Object.freeze(['monsoon-foundry']),bots:7,difficulty:'normal',timeLimit:75,fragLimit:100,seatVehicles:0}),
 ]);
 
 // ---------------------------------------------------------------------------
@@ -414,24 +416,23 @@ function startPass(state,catalog,key,rng){
 
 const scoreOrder=(a,b)=>{const length=Math.max(a.length,b.length);for(let i=0;i<length;i++){const delta=(a[i]??0)-(b[i]??0);if(delta)return delta;}return 0;};
 
-function candidateScore(scenario,passCounts,index,{lastId=null,lastMap=null}={}){
+function candidateScore(scenario,passCounts,index,{lastId=null,lastMap=null,rotation='complete'}={}){
  const maps=scenarioMaps(scenario);
  let mapUse=0;
  if(maps.length){mapUse=Math.min(...maps.map(mapId=>passCounts.maps[mapId]||0));}
  const repeatId=scenario.id===lastId?1:0;
  const repeatMap=maps.length&&lastMap&&maps.every(mapId=>mapId===lastMap)?1:0;
- return [passCounts.modes[scenario.mode]||0,repeatId,repeatMap,mapUse,index];
+  const modeUse=passCounts.modes[scenario.mode]||0;
+  return rotation==='curated'?[repeatId,repeatMap,mapUse,modeUse,index]:[modeUse,repeatId,repeatMap,mapUse,index];
 }
 
-// Coverage-aware choice: least-used mode first, because a pass must show every
-// mode before any repeat (full-pass mode coverage). Within that tier the last
-// scenario and last map are avoided as tie-breaks, then least-used map, then the
-// shuffled pass order. Filtering the avoid-last rules *before* scoring could
-// hide the last unseen mode behind a repeated one, so they stay in the key.
+// The destination tour prioritizes unseen maps and avoids consecutive repeats.
+// Complete rotation instead visits every mode before repeating one, then uses
+// map coverage and shuffled order as tie-breaks within that mode tier.
 function chooseEntry(entries,state){
  let best=null,bestScore=null;
  entries.forEach((entry,index)=>{
-  const score=candidateScore(entry.scenario,state.passCounts,index,{lastId:state.lastId,lastMap:state.lastMap});
+   const score=candidateScore(entry.scenario,state.passCounts,index,{lastId:state.lastId,lastMap:state.lastMap,rotation:state.rotation});
   if(!bestScore||scoreOrder(score,bestScore)<0){best=entry;bestScore=score;}
  });
  return best;

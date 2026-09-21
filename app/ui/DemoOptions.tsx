@@ -47,9 +47,9 @@ export function DemoOptions({
   <div className="config-grid">
    <div className="config-block">
     <h3>Rotation</h3>
-    <Segmented value={draft?.rotation} onChange={(value:string)=>onDraft({rotation:value})} ariaLabel="Demo rotation" options={ROTATIONS.map((rotation:string)=>({value:rotation,label:rotation==='curated'?'Curated':'Complete'}))}/>
+    <Segmented value={draft?.rotation} onChange={(value:string)=>onDraft({rotation:value})} ariaLabel="Demo rotation" options={ROTATIONS.map((rotation:string)=>({value:rotation,label:rotation==='curated'?'Destinations':'Complete'}))}/>
     <div className="config-toggle"><label htmlFor="demo-auto-rotate">Auto-rotate scenarios</label><Switch id="demo-auto-rotate" checked={draft?.autoRotate!==false} onCheckedChange={(value:boolean)=>onDraft({autoRotate:value})}/></div>
-    <p className="field-note">{draft?.rotation==='complete'?'Every demo-eligible mode/map pair, coverage-balanced.':'The hand-picked reel: one scenario per mode, curated maps.'}</p>
+    <p className="field-note">{draft?.rotation==='complete'?'Every demo-eligible mode/map pair, coverage-balanced.':'Tour all nine new destinations before revisiting a map, with infantry, objectives, LATTICE and vehicle sports.'}</p>
     <label className="config-field" htmlFor="demo-duration">Scenario duration <output>{Number(draft?.scenarioSeconds)||0}s</output>
      <Slider id="demo-duration" aria-label="Scenario duration in seconds" value={[Number(draft?.scenarioSeconds)||DEMO_SETTINGS_LIMITS.scenarioSeconds.min]} min={DEMO_SETTINGS_LIMITS.scenarioSeconds.min} max={DEMO_SETTINGS_LIMITS.scenarioSeconds.max} step={5} onValueChange={([value]:number[])=>onDraft({scenarioSeconds:value})}/>
     </label>

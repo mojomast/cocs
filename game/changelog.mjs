@@ -1,12 +1,16 @@
 // In-game patch notes. The title-screen footer is the running version; this
 // module is the human-readable release digest the Changelog screen renders. The
 // full historical record lives in docs/CHANGELOG.md and is linked from the UI.
-export const RELEASE_VERSION = 'v8.8';
+export const RELEASE_VERSION = 'v8.8.1';
 export const RELEASE_CODENAME = 'DESTINATIONS';
 export const REPO_URL = 'https://github.com/mojomast/tokenarena';
 export const FULL_CHANGELOG_URL = `${REPO_URL}/blob/main/docs/CHANGELOG.md`;
 
 export const CHANGELOG = [
+  {version:'v8.8.1',codename:'DESTINATIONS',date:'2026-09-21',tag:'A destination-first demo reel with lighter startup and frame budgets',highlights:[
+    'The default demo tours all nine new destinations before revisiting a map, including both LATTICE theatres, Ion Speedway and Aurora Stadium. Complete rotation still covers the full compatible map library.',
+    'Demo startup uses one scene install and one shared snapshot, with a short pre-roll and immediate sports starts. Autonomous catch-up work is bounded on slow frames; background menus render at up to 30 FPS, full-screen demo at up to 60 FPS, respecting lower display caps. Hidden menu tabs suspend the demo.',
+  ]},
   {version:'v8.8',codename:'DESTINATIONS',date:'2026-09-21',tag:'Nine new worlds, a clearer combat interface, and command at map scale',highlights:[
     'Nine original, authored maps cover every mode: Meridian Exchange, Verdant Reliquary, Ember Crucible, Tidal Citadel, Sunscar Convoy, Asterion Relay, Monsoon Foundry, Ion Speedway and Aurora Stadium. Enterable districts, alternate approaches, real ground ramps, distinctive landmarks and biome-specific materials replace repetitive arena layouts. Find them under New · Destinations in Match Setup.',
     'The Verdant Signal adds a campaign recovery mission through the reliquary, with authored encounters, a relay hold, checkpoints and extraction. Dedicated LATTICE theatres retain the established five-capturable-node strategic rules within richer physical layouts.',

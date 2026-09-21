@@ -18,13 +18,13 @@ test('curated catalog is a deliberate spread of categories, modes and maps', () 
  assert.ok(Object.isFrozen(CURATED_SCENARIOS));
  assert.equal(DEFAULT_SCENARIO_SECONDS,75);
  const modes=new Set(CURATED_SCENARIOS.map(scenario=>scenario.mode));
- assert.equal(modes.size,CURATED_SCENARIOS.length,'one scenario per curated mode');
+  assert.ok(modes.size>=10,'varied modes, including both LATTICE destinations');
  const categories=new Set(CURATED_SCENARIOS.map(scenario=>scenario.category));
  assert.deepEqual([...categories].sort(),[...SCENARIO_CATEGORIES].sort(),'every required category is represented');
  const maps=new Set(CURATED_SCENARIOS.flatMap(mapsOf));
- assert.ok(maps.size>=15,`a visually distinct map spread, got ${maps.size}`);
+  assert.deepEqual([...maps].sort(),MAPS.filter(m=>m.collection==='destinations').map(m=>m.id).sort(),'the reel covers the full destination collection');
  const groups=new Set([...maps].map(mapId=>arenaMeta(mapId)?.group));
- assert.ok(groups.size>=5,`curated maps span several arena groups, got ${groups.size}`);
+  assert.ok(groups.size>=4,`curated maps span several arena groups, got ${groups.size}`);
  for(const mapId of maps)assert.ok(GROUP_IDS.has(arenaMeta(mapId).group),`${mapId} group`);
  for(const scenario of CURATED_SCENARIOS){
   assert.ok(MODE_IDS.includes(scenario.mode),`${scenario.mode} registered`);
@@ -141,7 +141,7 @@ test('curated rotation plays every curated scenario once per pass without repeat
   assert.equal(result.coverage.remaining,catalog.length-1-i);
  }
  assert.deepEqual([...ids].sort(),catalog.map(scenario=>scenario.id).sort(),'a full pass covers the roster');
- assert.equal(new Set(maps).size,maps.length,'the pass spreads over distinct maps');
+  assert.equal(new Set(maps.slice(0,9)).size,9,'all nine destinations precede map repeats');
  for(let i=1;i<maps.length;i++)assert.notEqual(maps[i],maps[i-1],'no immediate map repeat');
  assert.deepEqual([...categories].sort(),[...SCENARIO_CATEGORIES].sort());
  const next=pickNext(state,{rng:seededRng(3),rotation:'curated'});
@@ -155,18 +155,19 @@ test('rotation mode balance and full-pass coverage hold across many seeds', () =
   for(const seed of [1,2,3,5,8,13,21]){
    let state=null;
    const rng=seededRng(seed);
-   const passIds=[],passModes=[];
+    const passIds=[],passModes=[],passMaps=[];
    for(let i=0;i<catalog.length;i++){
     const result=pickNext(state,{rng,rotation,legacy:true,afterEnd:true});
     state=result.state;
     if(passIds.length)assert.notEqual(result.scenario.id,passIds[passIds.length-1],'no back-to-back repeats');
     passIds.push(result.scenario.id);
     passModes.push(result.scenario.mode);
+    passMaps.push(result.scenario.mapId);
    }
    assert.equal(new Set(passIds).size,catalog.length,'every scenario once per pass');
    const firstRepeat=passModes.findIndex((mode,index)=>passModes.indexOf(mode)!==index);
    const distinctModes=new Set(passModes).size;
-   if(rotation==='curated')assert.equal(firstRepeat,-1,'a curated pass never repeats a mode');
+    if(rotation==='curated')assert.equal(new Set(passMaps.slice(0,9)).size,9,'all nine destinations precede repeats across seeds');
    else assert.equal(firstRepeat,distinctModes,'every mode appears before any mode repeats');
   }
  }
@@ -210,7 +211,7 @@ test('manual pins stay pinned until released and recover when they become valid'
   state=result.state;
   assert.equal(result.reason,'pin');
   assert.equal(result.scenario.mode,'puma-race');
-  assert.equal(result.scenario.mapId,'puma-circuit');
+  assert.equal(result.scenario.mapId,'ion-speedway');
   assert.deepEqual(state.pin,{scenarioId:null,mode:'puma-race',mapId:null});
  }
  assert.equal(state.pinPicks,3);
@@ -243,10 +244,10 @@ test('an invalid pin falls back gracefully and reapplies when it becomes eligibl
 
 test('map and mode requests resolve once without consuming the pass', () => {
  const state=createRotationState();
- const request=pickNext(state,{rng:seededRng(1),rotation:'curated',mapId:'puma-pitch'});
+ const request=pickNext(state,{rng:seededRng(1),rotation:'curated',mapId:'aurora-stadium'});
  assert.equal(request.reason,'request');
  assert.equal(request.scenario.mode,'puma-soccer');
- assert.equal(request.scenario.mapId,'puma-pitch');
+ assert.equal(request.scenario.mapId,'aurora-stadium');
  assert.equal(request.state.picks,0,'requests do not advance the pass');
  assert.equal(request.state.pending.length,demoCatalog('curated').length);
  const modeRequest=pickNext(request.state,{rng:seededRng(2),rotation:'curated',mode:'ctf'});
@@ -356,7 +357,7 @@ test('bot-count and difficulty settings stay inside the mode rules', () => {
   if(scenario.mode==='combined-arms')assert.equal(scenario.botCount,16);
   seenModes.add(scenario.mode);
  }
- assert.equal(seenModes.size,CURATED_SCENARIOS.length);
+  assert.equal(seenModes.size,new Set(CURATED_SCENARIOS.map(s=>s.mode)).size);
  const zero=pickNext(null,{rng:seededRng(2),rotation:'curated',settings:{botCount:0,scenarioSeconds:45}});
  assert.equal(zero.scenario.botCount,0);
  assert.equal(zero.scenarioSeconds,45);
@@ -372,6 +373,6 @@ test('bot-count and difficulty settings stay inside the mode rules', () => {
  assert.equal(clamped.botCount,0);
  const fallback=scenarioSpec(CURATED_SCENARIOS[0],()=>.5);
  assert.equal(fallback.botCount,Math.min(maxBotsFor(CURATED_SCENARIOS[0].mode),CURATED_SCENARIOS[0].bots));
- assert.ok(curatedMapPool(CURATED_SCENARIOS[0],{legacy:true}).includes('crosswire'));
- assert.ok(!curatedMapPool(CURATED_SCENARIOS[0],{legacy:false}).includes('crosswire'));
+ assert.ok(curatedMapPool({mode:'deathmatch',maps:['crosswire']},{legacy:true}).includes('crosswire'));
+ assert.ok(!curatedMapPool({mode:'deathmatch',maps:['crosswire']},{legacy:false}).includes('crosswire'));
 });

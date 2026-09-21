@@ -160,7 +160,7 @@ test('invalid selections are rejected and leave the running demo alone', () => {
  assert.equal(validateDemoSelection({mode:'deathmatch',mapId:'exchange'},{rotation:'curated',legacy:true}).ok,false,'curated has no exchange');
  assert.equal(validateDemoSelection({mode:'deathmatch',mapId:'exchange'},{rotation:'complete',legacy:false}).ok,false,'legacy arena needs the legacy flag');
  assert.equal(validateDemoSelection({mode:'deathmatch',mapId:'exchange'},{rotation:'complete',legacy:true}).ok,true);
- assert.equal(validateDemoSelection({mode:'ctf',mapId:'frost-gate'},{rotation:'curated'}).scenarioId,'ctf');
+ assert.equal(validateDemoSelection({mode:'ctf',mapId:'tidal-citadel'},{rotation:'curated'}).scenarioId,'ctf');
  let session=applyDemoEvent(createDemoSession({state:'follow',subjectId:1,subjectName:'Claude'}),{type:'open-options'});
  session=setDemoSelectionDraft(session,{mode:'deathmatch',mapId:'exchange'});
  const failed=applyDemoOptions(session,{legacy:false});

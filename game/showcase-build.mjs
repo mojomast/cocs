@@ -10,6 +10,7 @@
 // or hand an explicit spec to the returned builder; both paths produce the same
 // match-ready spec shape.
 import {shuffleShowcaseReel as defaultShuffleReel,SHOWCASE_MAX_SECONDS} from './showcase.mjs';
+import {SHOWCASE_WARMUP_SECONDS} from './showcase-runtime.mjs';
 
 export function buildShowcase({r,view,showcaseOk,makeRng,pickShowcase,normalizeConfig,DEFAULT_CONFIG,Match,seatShowcaseVehicles,RULES,CinematicDirector,reducedMotion,setShowcaseLive,shuffleShowcaseReel=defaultShuffleReel,selectScenario=/** @type {any} */(null),onError=/** @type {any} */(null)}){
  const clear=()=>{r.showcase=null;r.showcaseMatchedId=null;r.showcaseReel=null;view.setShowcase(null);view.setCinema(false);view.setDirector(null);setShowcaseLive(false);};
@@ -29,22 +30,26 @@ export function buildShowcase({r,view,showcaseOk,makeRng,pickShowcase,normalizeC
    const m=new Match('chatgpt','openclaw',rng,spec.mapId,cfg);
    for(const a of m.actors)if(!a.bot)a.bot={route:[],think:0,target:-1,memory:0,reaction:0,stuck:0,last:{x:0,y:0,z:0},state:'roam',patrol:0,flank:null,flankDone:false,recover:0,suppressed:0,threat:-1,standoff:null,strafeReverse:-99};
    if(spec.seatVehicles)seatShowcaseVehicles(m,spec.seatVehicles);
-   // Clear the countdown and start the cars moving before the first menu frame.
-   for(let tick=0;tick<Math.round(4/RULES.dt);tick++)m.step(RULES.dt,{inputs:{}});
+    // An autonomous reel does not need a human-ready countdown. Start sports
+    // immediately, then warm every mode for just half a second of simulation.
+    if(m.race?.phase==='countdown'){m.race.countdown=0;m.race.phase='racing';}
+    if(m.race?.phase==='kickoff'){m.race.countdown=0;m.race.phase='playing';}
+    for(let tick=0;tick<Math.round(SHOWCASE_WARMUP_SECONDS/RULES.dt);tick++)m.step(RULES.dt,{inputs:{}});
    const bd=m.arena.bounds,arenaR=bd?Math.hypot(bd.maxX-bd.minX,bd.maxZ-bd.minZ)/2:30,director=new CinematicDirector({random:makeRng(),center:m.center,radius:11,minShot:4,cutEvery:8,allowFirstPerson:false,tour:true,reduced:reducedMotion(),tourRadius:Math.min(30,Math.max(16,arenaR*.42)),structures:m.arena.structures,arena:m.arena});
    // Only now that the match exists do we touch the live view, and we reset the
    // cinema camera first so a previous race rig cannot leak into the new scene.
    view.setCinema(false);
-   view.setMatch(m.snapshot());
+    const snapshot=m.snapshot();snapshot.events=m.events;snapshot.serial=m.serial;
+    view.setMatch(snapshot);
    view.lastEvent=m.serial;
    view.setPlayerId(-1);
    view.setDirector(director);
    view.setCinema(true);
-   view.setShowcase(m.snapshot());
+    view.setShowcase(snapshot);
    const seconds=Number.isFinite(spec.scenarioSeconds)&&spec.scenarioSeconds>0?spec.scenarioSeconds:SHOWCASE_MAX_SECONDS;
-   r.showcase={match:m,director,acc:0,time:0,mapId:spec.mapId,mode:spec.mode,modeId:spec.id,seconds,source:spec.source??null,category:spec.category??null};
+    r.showcase={match:m,director,acc:0,time:0,mapId:spec.mapId,mode:spec.mode,modeId:spec.id,seconds,source:spec.source??null,category:spec.category??null,snapshot,snapshotAt:undefined,performance:{steps:0,frames:0,maxSteps:0,snapshots:1}};
    r.showcaseSpec={...spec};
-   r.showcaseMatchedId=null;
+    r.showcaseMatchedId=spec.mapId;
    r.showcaseIndex=(r.showcaseIndex||0)+1;
    setShowcaseLive(true);
    return true;

@@ -1,5 +1,42 @@
 # COCS verification report
 
+## Release 8.8.1 — destination demo tour
+
+The default curated reel now covers all nine DESTINATIONS before repeating a
+map, including separate Asterion and Monsoon LATTICE scenarios. Complete mode
+keeps its registry-wide rotation, pins and user bot/difficulty overrides.
+
+**324/324** demo, rotation, session, renderer, quality, release and UI integration
+tests passed serially; typecheck and production build passed. Browser verification
+observed all nine maps in the first nine picks, with zero page errors, bounded
+two-tick catch-up, a 30 FPS backdrop cap, and a 60 FPS full-screen cap. Auto and
+free camera ownership still work. Evidence: `artifacts/destination-demo/manifest.json`.
+
+The reproducible CPU benchmark (`node scripts/benchmark-showcase.mjs`, seed 44,
+same nine mode/map/roster combinations) measured **4,495 ms before → 2,807 ms
+after** in aggregate scenario construction/pre-roll/first-frame synchronization,
+about **38% lower CPU startup time**. This excludes WebGL allocation and is not
+a hardware FPS claim. Individual before/after milliseconds:
+
+| Map | Before | After |
+| --- | ---: | ---: |
+| Meridian Exchange | 977 | 424 |
+| Verdant Reliquary | 350 | 250 |
+| Ember Crucible | 392 | 276 |
+| Tidal Citadel | 617 | 446 |
+| Sunscar Convoy | 928 | 571 |
+| Asterion Relay | 664 | 429 |
+| Monsoon Foundry | 521 | 377 |
+| Ion Speedway | 33 | 24 |
+| Aurora Stadium | 13 | 10 |
+
+Every row dropped from **240 to 30 warm-up ticks**, **two to one scene installs**,
+and **four to one startup snapshots**. Sports skip their demo-only countdowns;
+normal gameplay initialization stays authoritative. Demo snapshot generation
+is presentation-paced, slow-frame catch-up yields after its CPU budget, and
+intentional menu caps are included in the quality governor's target so they do
+not accidentally degrade visual quality.
+
 ## Release 8.8 — DESTINATIONS
 
 All intensive tests, builds and browser runs are serialized, with Node test-file

@@ -16,6 +16,17 @@ record in [VERIFICATION.md](VERIFICATION.md).
 
 ---
 
+## v8.8.1 · DESTINATIONS — 2026-09-21
+
+- The default demo now tours all nine DESTINATIONS before repeating a map,
+  including Asterion and Monsoon LATTICE matches, Ion Speedway and Aurora Stadium.
+  The Complete rotation retains the full map library and manual settings.
+- Removed duplicate scene installation and startup snapshots. Pre-roll drops
+  from 240 to 30 fixed ticks; race/soccer countdowns are skipped for the demo.
+- Bounded demo catch-up limits slow-frame CPU work. Menu backdrops cap at 30 FPS
+  and full-screen demos at 60 FPS, respecting lower user caps. Snapshots are
+  reused between presentation updates; hidden menu tabs suspend demo work.
+
 ## v8.8 · DESTINATIONS — 2026-09-21
 
 - Nine original authored maps cover every mode, with intentional loops, alternate

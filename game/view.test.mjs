@@ -734,7 +734,9 @@ test('cinematic race demo cycles camera rigs while the non-cinematic chase is un
  view.setShowcase(match);view.setCinema(true);view.setDirector({tour:true,update:()=>({x:0,y:50,z:0,pitch:0,yaw:0,roll:0,fov:70})});
  const positions=[],directions=[],modes=[];
  for(const time of [0,1,RACE_DEMO_MODE_SECONDS,RACE_DEMO_MODE_SECONDS*2,RACE_DEMO_MODE_SECONDS*3,RACE_DEMO_MODE_SECONDS*4]){
-  match.time=time;view.render('selection',null,.05,time);
+  // Synthetic shot times are presented directly; the real-time frame gate has
+  // separate coverage and should not skip this tight-loop camera regression.
+  match.time=time;view._renderFrame('selection',null,.05,time);
   positions.push(view.camera.position.clone());directions.push(view.camera.getWorldDirection(new T.Vector3()));modes.push(view._raceCam.mode);
  }
  assert.deepEqual(modes,['chase','chase','orbit','flyover','trackside','chase']);
@@ -1490,6 +1492,12 @@ test('the quality controller demotes on sustained low FPS, holds a cooldown, and
  for(let i=0;i<400;i++)fast._sampleQuality(.008);
  assert.notEqual(fast.quality,'low','sustained fast frames recover quality');
  assert.ok(fast._qualityOverride==null,'recovery never pins quality');
+});
+
+test('intentional menu-demo pacing does not reduce quality or dynamic resolution',t=>{
+ const {view}=playable(t);view._quality();view._presentationCap=30;
+ for(let i=0;i<240;i++)view._sampleQuality(1/30);
+ assert.equal(view.quality,'high');assert.equal(view._drs.scale,1);
 });
 
 test('the weapon preview mounts a real weapon through ModelAssets and disposes exactly once',()=>{

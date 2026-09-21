@@ -13,7 +13,7 @@ import {buildShowcase as buildShowcaseFactory} from './showcase-build.mjs';
 test('showcase reel cycles through a variety of modes and valid maps', () => {
  assert.ok(SHOWCASES.length >= 6, 'the demo should show a variety of modes');
  assert.ok(SHOWCASE_MAX_SECONDS > 0 && SHOWCASE_MAX_SECONDS <= 90, 'no scenario should hog the menu');
- assert.equal(new Set(SHOWCASES.map(s => s.mode)).size, SHOWCASES.length, 'each scenario demonstrates a distinct mode');
+  assert.equal(new Set(SHOWCASES.map(s => s.id)).size, SHOWCASES.length, 'each scenario has a distinct identity');
  for (const legacy of [false, true]) for (const index of [-10, -1, 0, 1, 20, 999]) {
   const spec = pickShowcase(index, () => .99, {legacy});
   const scenario = SHOWCASES[((Math.round(index) % SHOWCASES.length) + SHOWCASES.length) % SHOWCASES.length];
@@ -58,6 +58,17 @@ const showcaseDeps=()=>{
  return {r,view,deps:{r,view,showcaseOk:()=>true,makeRng:()=>()=>.25,pickShowcase,normalizeConfig,DEFAULT_CONFIG,Match,seatShowcaseVehicles,RULES,CinematicDirector,reducedMotion:()=>false,setShowcaseLive(){}}};
 };
 
+test('scenario startup installs one shared snapshot and a bounded pre-roll',()=>{
+ const {r,view,deps}=showcaseDeps();let installs=0,snapshots=0,steps=0;
+ class CountedMatch extends Match{step(...args){steps++;return super.step(...args)}snapshot(){snapshots++;return super.snapshot()}}
+ view.setMatch=snapshot=>{installs++;view.installed=snapshot;};
+ const build=buildShowcaseFactory({...deps,Match:CountedMatch});
+ assert.equal(build({...specFor(SHOWCASES[0],seededRng(44))}),true);
+ assert.equal(installs,1);assert.equal(snapshots,1);assert.equal(view.showcase,view.installed);
+ assert.equal(r.showcaseMatchedId,r.showcase.mapId,'the next frame does not reinstall the same scene');
+ assert.equal(steps,30);assert.equal(r.showcase.snapshot,view.installed);
+});
+
 test('menu builder produces a valid match for every scenario and rotates modes',()=>{
  const {r,deps}=showcaseDeps();
  const buildShowcase=buildShowcaseFactory(deps);
@@ -89,8 +100,8 @@ test('menu race scenario runs a full race and the next build restarts the reel',
  }
  assert.ok(m,'the reel includes a race scenario');
  assert.equal(m.config.mode,'puma-race');
- assert.equal(m.arena.id,'puma-circuit');
- assert.equal(m.actors.length,8);
+  assert.equal(m.arena.id,'ion-speedway');
+  assert.equal(m.actors.length,6);
  assert.ok(m.actors.every(a=>a.bot));
  assert.equal(m.race.laps,1);
  assert.equal(m.race.phase,'racing');
@@ -128,9 +139,9 @@ test('the reel is the curated rotation catalog with its required coverage', () =
   assert.ok(categories.has(required), `${required} showcase missing`);
  }
  const maps = new Set(SHOWCASES.flatMap(scenario => scenario.maps));
- assert.ok(maps.size >= 15, 'the curated maps are visually distinct');
+  assert.equal(maps.size,9,'the curated reel covers all destinations');
  const groups = new Set([...maps].map(mapId => arenaMeta(mapId).group));
- assert.ok(groups.size >= 5, 'the curated maps span several arena groups');
+  assert.ok(groups.size >= 4, 'the curated maps span several arena groups');
  for (const scenario of SHOWCASES) {
   assert.ok(demoModeEligible(scenario.mode));
   for (const mapId of scenario.maps) assert.ok(arenaSupportsMode(mapId, scenario.mode), `${scenario.mode} on ${mapId}`);

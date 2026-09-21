@@ -22,6 +22,7 @@ import {refineOperatorCharacter} from './models.mjs';
 import {terrainTriangles,terrainWallTriangles} from './terrain.mjs';
 import {foundryDetails,styleFoundryObjective} from './lattice-foundry-view.mjs';
 import {destinationDetails} from './destination-details.mjs';
+import {showcaseFrameCap} from './showcase-runtime.mjs';
 import {latticePresentationChanges} from './lattice-feedback.mjs';
 import {updateLatticeWorld,clearLatticeWorld} from './lattice-view.mjs';
 import {buildInteriors,interiorAt} from './interiors.mjs';
@@ -1376,7 +1377,7 @@ export class ArenaView{
         // thing being measured. HUD percentiles need only the 2 Hz sample rate.
         if(this.perf){this.perf.lastFrameMs=dt*1000;if(sampled){const [median,p95]=framePercentiles(this._frameWindow);this.perf.medianFrameMs=median;this.perf.p95FrameMs=p95;}}
         if(this._qualityOverride!=null)return this.quality;
-        const cap=Number(this.display?.fpsCap)||0,capMs=cap>0?1000/cap:0;
+        const cap=this._presentationCap??(Number(this.display?.fpsCap)||0),capMs=cap>0?1000/cap:0;
         if(sampled&&this.dynamicResolution!==false){const d=this._drs??(this._drs={scale:1,cool:0});const frameMs=this._fps?.value>0?1000/this._fps.value:0;const next=nextDynamicScale(d,{frameMs,elapsedMs:500},{slowMs:Math.max(1000/48,capMs+2.5),fastMs:Math.max(1000/55,capMs+1.5)});const changed=next.scale!==d.scale;this._drs=next;if(changed)this.resize();}
         const software=this.renderer?.isSoftware===true,reduced=this.reduced()===true,ceiling=normalizeQuality(undefined,{software,reduced});
         const state=this._qualityState??(this._qualityState={level:null,bad:0,good:0,cool:0});
@@ -1770,7 +1771,7 @@ export class ArenaView{
       if(dt<=0||dt>.25)return this._labLevel;
       // A deliberate frame cap raises the expected frame time: a 30 fps cap is
       // not slowness, so both thresholds move with the cap.
-      const capMs=(Number(this.display?.fpsCap)||0)>0?1000/Number(this.display.fpsCap):0;
+      const cap=this._presentationCap??(Number(this.display?.fpsCap)||0),capMs=cap>0?1000/cap:0;
       const next=nextLabBudget(this._labBudget,dt*1000,{slowMs:Math.max(19,capMs+2.5),recoverMs:Math.max(13.5,capMs+1.5)});
       this._labBudget=next;
       if(next.changed)this._setLabLevel(next.level);
@@ -4163,7 +4164,9 @@ export class ArenaView{
     // Display frame cap. The host keeps stepping the fixed-dt simulation; only
     // this presentation frame is skipped, and the skipped wall-clock time is
     // carried into the next drawn frame so pooled effects age correctly.
-    const cap=Number(this.display?.fpsCap)||0,nowFn=(typeof performance!=='undefined'&&performance.now)?performance.now.bind(performance):Date.now,now=nowFn();
+    const showcase=!match&&!!this.showcaseState&&['selection','progression','changelog','browse','lobby','theater'].includes(mode);
+    const cap=showcaseFrameCap(this.display?.fpsCap,{showcase,active:this.showcaseActive===true}),nowFn=(typeof performance!=='undefined'&&performance.now)?performance.now.bind(performance):Date.now,now=nowFn();
+    this._presentationCap=cap;
     if(cap>0&&!frameDue(now,this._renderAt,cap)){
      this._renderCarry=Math.max(0,Math.min(1,(this._renderCarry||0)+Math.max(0,Math.min(Number(delta)||0,.25))));
      return false;
@@ -4374,7 +4377,7 @@ if(freeCam){this.lowHealthOverlay?.update(false,time,delta,reduced,this.camera);
         if(!this.perf)return;
         const end=(typeof performance!=='undefined'&&performance.now)?performance.now():Date.now();
         const info=this.renderer?.info,memory=info?.memory;
-        this.perf.frames++;this.perf.renderMs=Math.max(0,end-start);this.perf.sceneMs=Math.max(0,this.perf.renderMs-this.perf.submitMs);
+        this.perf.frames++;this.perf.fpsCap=this._presentationCap??0;this.perf.renderMs=Math.max(0,end-start);this.perf.sceneMs=Math.max(0,this.perf.renderMs-this.perf.submitMs);
        if(info){this.perf.calls=info.render?.calls||0;this.perf.triangles=info.render?.triangles||0;this.perf.lines=info.render?.lines||0;this.perf.points=info.render?.points||0;this.perf.programs=info.programs?.length||0;}
        if(memory){this.perf.geometries=memory.geometries||0;this.perf.textures=memory.textures||0;}
        this.perf.passes=this.composer?.passes?.filter(p=>p.enabled!==false).map(p=>p.name||p.constructor?.name||'pass')||[];
