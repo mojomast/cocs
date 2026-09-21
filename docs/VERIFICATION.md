@@ -44,8 +44,21 @@ matched across builds (0.475 direct, 0.95 postfx), but this software-renderer
 pilot is too short for a general FPS claim. Both runs had zero page errors.
 Raw evidence: `/tmp/opencode/foundry-benchmark-{baseline,candidate}.json`.
 
-Production deployment evidence will be recorded after the final gate and the
-web + game-server cutover from `/home/mojo/projects/tokenarena`.
+**Production deployment (2026-09-21).** Runtime commit `34f5a25` was pushed to
+`feat/fieldwork-plan`, fast-forwarded and pushed to
+`improvement/phase2-audio-visual`, then deployed **from the service checkout**
+`/home/mojo/projects/tokenarena` with `npm run deploy -- --with-game-server`.
+The first post-restart probe saw a transient 502; the automatic retry passed.
+The deployment gate verified footer **v8.7 · FOUNDRY**, all 13 linked assets
+against local built bytes, and exact identities for both services:
+**34f5a25 / v8.7-34f5a25 / protocol 3**. The served page bundle is
+`/assets/page-CPI5WRbW.js`.
+
+Live production menu checks passed all three viewports, including keyboard,
+Setup, Online, Loadout, Library, Training and exact Operations deployment, with
+zero page errors (`artifacts/foundry-menu-production/manifest.json`). The live
+gameplay matrix passed **5/5** with a clean source tree and no failures:
+`artifacts/foundry-production/20260921T170401Z-34f5a25/manifest.json`.
 
 ## Release 8.6 - PRISM
 
