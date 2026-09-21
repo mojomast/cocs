@@ -16,6 +16,23 @@ record in [VERIFICATION.md](VERIFICATION.md).
 
 ---
 
+## v8.7.1 · FOUNDRY — 2026-09-21
+
+- A substantial close-up robot-detail pass across all nine operators: machined
+  face seals and optics, comms hubs, recessed service panels, hex fasteners,
+  cooling vents, reactor fittings, hydraulic lines, spinal laminations,
+  segmented fingers and knuckles, layered wrist/shin guards, tread details and
+  rear radiator packs.
+- Precision geometry is merged into 22 articulation-local batches. It follows
+  the existing animation/ragdoll hierarchy and switches out by distance through
+  hysteretic LOD switching; medium/low world quality hides it entirely. Software
+  models do not allocate it. Existing combat-distance and far geometry remain
+  unchanged. Tiny detail does not cast additional shadows.
+- Normalized-byte vertex colours distinguish painted plates, dark recesses,
+  metal, rubber and copper without a multi-material draw for every component.
+- Closer menu framing and an unobstructed operator preview expose the new
+  construction. Gameplay weapons and grips retain their normal behavior.
+
 ## v8.7 · FOUNDRY — 2026-09-21
 
 - Rebuilt the selection screen into **Play / Loadout / Library**. LATTICE is

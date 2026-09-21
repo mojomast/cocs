@@ -1,12 +1,17 @@
 // In-game patch notes. The title-screen footer is the running version; this
 // module is the human-readable release digest the Changelog screen renders. The
 // full historical record lives in docs/CHANGELOG.md and is linked from the UI.
-export const RELEASE_VERSION = 'v8.7';
+export const RELEASE_VERSION = 'v8.7.1';
 export const RELEASE_CODENAME = 'FOUNDRY';
 export const REPO_URL = 'https://github.com/mojomast/tokenarena';
 export const FULL_CHANGELOG_URL = `${REPO_URL}/blob/main/docs/CHANGELOG.md`;
 
 export const CHANGELOG = [
+  {version:'v8.7.1',codename:'FOUNDRY',date:'2026-09-21',tag:'Precision-machined operators: a dedicated close-up detail tier',highlights:[
+    'All nine robots gain much denser close-up construction: recessed armor panels and gaskets, hex fasteners, layered face seals, comms hubs, cooling grilles, reactor instrumentation, exposed hydraulic lines, spinal laminations, segmented fingers, knuckle rollers, tread details and rear service packs. Faces retain their individual optic arrangements and hardware.',
+    'The menu frames operators more closely and presents the chassis without a weapon obscuring the chest. Precision assemblies remain attached to the real animated joints, including hands and feet.',
+    'Close-up models carry more than twice the previous geometry, with one merged material batch per articulation. Distance and medium/low world-quality settings shed the added detail; the existing combat-distance and software geometry budgets are unchanged. No additional shadow passes or downloaded texture assets.',
+  ]},
   {version:'v8.7',codename:'FOUNDRY',date:'2026-09-21',tag:'A focused Play hub, nine mechanical identities, and objectives you can see and use',highlights:[
     'The main menu is rebuilt around Play, Loadout and Library. LATTICE leads a calmer landing page; online play, training and custom matches have clear routes. Rules unfold on demand, the operator preview stays mounted, and quick starts launch the exact configuration shown in their briefing.',
     'Nine operators gain distinct mechanical anatomy, sculpted armor, articulated limbs, detailed helmets and planted feet. Shared, batched geometry and explicit far-distance models keep the richer close-up roster inside existing draw and triangle budgets.',

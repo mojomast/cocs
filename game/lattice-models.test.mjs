@@ -29,12 +29,13 @@ test('nine sculpted identities retain outward-facing visors and team-owned shell
 
 test('native distance LOD preserves joints, material references and returns to the high model',()=>{
  const assets=new ModelAssets(),m=robotModel('qwen',assets),j=m.userData.joints,rig=m.userData.rig;
+ selectModelLOD(m,{distance:2});
  const near=modelCost(m),head=j.head,grip=m.userData.characterRefinement.gripR;
  selectModelLOD(m,{distance:50,detail:0});const far=modelCost(m);
  assert.ok(far.triangles<near.triangles*.60);assert.ok(far.drawObjects<=near.drawObjects);
  assert.equal(j.head,head);assert.equal(m.userData.rig,rig);assert.equal(m.userData.characterRefinement.gripR,grip);
  for(const lod of m.userData.modelLOD.levels){assert.equal(lod.levels[0].object.material,lod.levels[1].object.material);assert.equal(lod.levels.filter(l=>l.object.visible).length,1);}
- selectModelLOD(m,{distance:5,detail:1});assert.deepEqual(modelCost(m),near);
+ selectModelLOD(m,{distance:2,detail:1});assert.deepEqual(modelCost(m),near);
  const resources=assets.resources.size;robotModel('qwen',assets);assert.equal(assets.resources.size,resources,'both LODs reuse owned geometry and materials');
  const software=robotModel('qwen',assets,true);assert.equal(software.userData.modelLOD.software,true);
  for(const lod of software.userData.modelLOD.levels){assert.equal(lod.autoUpdate,false);assert.equal(lod.levels[1].object.visible,true);}
@@ -77,11 +78,12 @@ test('mechanical anatomy stays inside the authored limb and standing envelopes a
 
 test('crafted operator near, far and software geometry respect stricter submission budgets',()=>{
  const report=measureOperatorModels();
- for(const row of report.operators)for(const tier of ['near','far','software']){
+  for(const row of report.operators)for(const tier of ['close','near','far','software']){
   for(const metric of ['drawObjects','triangles'])assert.ok(row[tier][metric]<=OPERATOR_MODEL_BUDGETS[tier][metric],`${row.id} ${tier} ${metric}: ${row[tier][metric]}`);
  }
  assert.equal(new Set(report.operators.map(r=>r.design)).size,9);
- assert.ok(report.cacheBytes<2_800_000,'operator-only shared geometry working set');
+  assert.ok(report.baseCacheBytes<2_800_000,'existing combat/distance geometry working set remains unchanged');
+  assert.ok(report.cacheBytes<11_000_000,'all nine precision assemblies share a bounded close-up geometry cache');
 });
 
 test('32-actor assembled roster and all weapon bodies stay inside deliberate draw/triangle budgets',()=>{
@@ -90,7 +92,9 @@ test('32-actor assembled roster and all weapon bodies stay inside deliberate dra
  for(const row of report.weapons){assert.equal(row.world.drawObjects,5);assert.ok(row.world.triangles<=800);assert.ok(row.detailed.drawObjects<=40);assert.ok(row.detailed.triangles<6500);}
  assert.ok(report.scene32.near.drawObjects<2200);assert.ok(report.scene32.near.triangles<410000);
  assert.ok(report.scene32.eightNear24Far.triangles<260000);assert.ok(report.scene32.distantLow.drawObjects<1750);
- assert.ok(report.cache.bytes<4_000_000,'shared roster + both weapon levels remain a small geometry working set');
+  assert.ok(report.cache.baseBytes<4_000_000,'existing roster + both weapon levels retain their memory budget');
+  assert.ok(report.cache.bytes<12_000_000,'precision geometry is explicitly accounted for');
+  assert.ok(report.scene32.fourCloseFourNear24Far.triangles<310000,'mixed roster budgets four simultaneous close-ups');
 });
 
 test('turned bores end on actual muzzle anchors and remain open across transformed runtime/preview models',()=>{

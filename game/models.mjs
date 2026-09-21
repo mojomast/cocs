@@ -7,6 +7,7 @@ import { surfaceTextures as defaultSurfaceTextures } from './textures.mjs';
 import {currentAssets} from './effects-fx.mjs';
 import {beveledBox,contourGeometry,joinedGeometry,placedGeometry} from './model-geometry.mjs';
 import {OPERATOR_ANATOMY,operatorPartGeometry} from './operator-anatomy.mjs';
+import {operatorDetailGeometry,OperatorDetailLOD,OPERATOR_DETAIL_DISTANCE} from './operator-detail.mjs';
 
 export const FIDELITY_PRESETS = Object.freeze({
   LOW: { segments: 8, glowIntensity: 0.5, dynamicShadows: false },
@@ -506,6 +507,7 @@ const OPERATOR_HEAD_PROFILES={
 // markers, shield and flash inactive. Shadow passes are additional submissions.
 // Keep these tighter than the existing roster/balance verification gates.
 export const OPERATOR_MODEL_BUDGETS=Object.freeze({
+ close:Object.freeze({drawObjects:88,triangles:35000}),
  near:Object.freeze({drawObjects:64,triangles:12950}),
  far:Object.freeze({drawObjects:51,triangles:5600}),
  software:Object.freeze({drawObjects:65,triangles:6500}),
@@ -717,7 +719,42 @@ function installOperatorLOD(robot){
   lod.autoUpdate=!software;node.visible=!software;low.visible=software;
   levels.push(lod);
  }
- robot.userData.modelLOD={distance:18,hysteresis:.15,levels,software};
+  robot.userData.modelLOD={distance:18,hysteresis:.15,levels,software};
+}
+
+function installPrecisionAssemblies(robot){
+ const data=robot.userData,id=data.operatorIdentity.id,j=data.joints;
+ // Keep the software path's geometry working set unchanged. These sub-pixel
+ // fasteners and recesses are a close-range WebGL tier, not gameplay geometry.
+ if(data.modelLOD.software)return;
+ const material=operatorMaterial('precision-metal',()=>new T.MeshStandardMaterial({color:'#ffffff',vertexColors:true,roughness:.43,metalness:.62}));
+ const accent=CHARACTERS.find(c=>c.id===id)?.accent??'#91b5b2';
+ const details=[];
+ const mount=(parent,part,side=1,position=null,rotation=null)=>{
+  if(!parent)return;
+  const geometry=operatorGeometry(`precision-${id}-${part}-${side}`,()=>operatorDetailGeometry(id,part,{side,form:OPERATOR_FORMS[id],accent}));
+  const mesh=new T.Mesh(geometry,material),lod=new OperatorDetailLOD(),empty=new T.Group();
+  mesh.name=`precision-${part}`;mesh.castShadow=false;mesh.receiveShadow=true;
+  lod.name=`close-detail-${part}`;lod.userData.operatorPrecision=true;
+  if(position)lod.position.fromArray(position);if(rotation)lod.rotation.fromArray(rotation);
+  lod.addLevel(mesh,0);lod.addLevel(empty,OPERATOR_DETAIL_DISTANCE,.15);
+  // Construction is camera-independent. The first render selects the tier.
+  mesh.visible=false;empty.visible=false;parent.add(lod);details.push(lod);
+ };
+ mount(j.head,'head');mount(j.chest,'chest');mount(data.torso,'waist');
+ mount(data.backpack,'back',1,[0,0,.085],[0,Math.PI,0]);
+ for(const [i,pad] of data.shoulderPads.entries())mount(pad,'shoulder',i===0?-1:1);
+ for(const side of ['L','R']){
+  const sign=side==='L'?-1:1;
+  for(const [joint,part] of [['armUpper','arm'],['forearm','forearm'],['legUpper','thigh'],['legLower','shin']]){
+   const node=j[`${joint}${side}`]?.getObjectByName(`${part}-${id}`);
+   mount(node,part,sign);
+   if(part==='forearm'||part==='shin')mount(j[`${joint}${side}`]?.getObjectByName(`${part==='shin'?'shinplate':'foreplate'}-${id}`),'guard',sign);
+  }
+  const foot=j[`foot${side}`]?.getObjectByName(`foot-${id}`);mount(foot,'foot',sign);
+  mount(data.characterRefinement[`hand${side}`],'hand',sign);
+ }
+ data.modelLOD.closeDetails=details;data.modelLOD.closeDistance=OPERATOR_DETAIL_DISTANCE;
 }
 
 // Character-only geometry pass. Invoke once after robotModel installs joints.
@@ -754,7 +791,7 @@ export function refineOperatorCharacter(robot) {
   armor.castShadow=armor.receiveShadow=true;
   for(const hand of [result.handL,result.handR])hand?.traverse(n=>{if(n.isMesh)n.castShadow=n.receiveShadow=true;});
   data.characterRefinement=result;
-  if(data.operatorIdentity)installOperatorLOD(robot);
+  if(data.operatorIdentity){installOperatorLOD(robot);installPrecisionAssemblies(robot);}
   // Capture the revised proportions as bind transforms, not the old floating rig.
   data.rig?.captureBind();
   return result;

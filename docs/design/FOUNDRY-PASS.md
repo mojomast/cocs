@@ -26,6 +26,29 @@ CPU geometry accounting (including pulse weapon, excluding shadow passes):
 Shared operator geometry: 2,720,400 bytes. These are geometry/work counts, not
 hardware FPS claims. `scripts/measure-operator-models.mjs` reproduces the budgets.
 
+### Precision close-up tier — v8.7.1
+
+`operator-detail.mjs` adds 22 articulation-local, vertex-coloured geometry
+batches per WebGL operator. The parts include helmet/optic hardware, gaskets,
+hex fasteners, service panels, grilles, reactor fittings, hydraulic lines,
+spinal laminations, rear cooling packs, wrist/shin guards, segmented fingers
+and foot detailing. Normalized-byte colours distinguish materials inside each
+batch, rather than creating a separate draw for every small component.
+
+The complete close-up models, including held weapon, measure **28,028–31,928
+triangles / 84–86 draw objects** at two metres. The existing table above still
+applies at combat distance (ten metres), far distance and in software mode.
+The close tier switches at 5.8 metres with 15% hysteresis, scales with a menu
+mannequin's world scale and camera zoom, and is disabled at medium/low world
+model detail. Software models never allocate these assemblies. Tiny hardware
+does not cast extra shadows.
+
+All nine operators together use **9,675,456 bytes** of shared geometry,
+including the unchanged 2,720,400-byte base. Tests separately retain the old
+base/roster budgets and bound the deliberate close-tier memory/draw increase.
+Preview framing is closer, using its own camera; the menu mannequin's weapon
+is hidden so its construction is visible, while gameplay weapons remain intact.
+
 ## Objective contract
 
 All timings and rewards reuse published simulation values. ORACLE installation

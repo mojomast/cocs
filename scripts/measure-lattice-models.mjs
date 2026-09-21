@@ -16,26 +16,31 @@ export function modelCost(model){
 
 export function selectModelLOD(model,{distance=0,detail=1}={}){
  const camera=new T.PerspectiveCamera();camera.position.copy(model.position).add(new T.Vector3(0,1,-distance));camera.updateMatrixWorld();model.updateMatrixWorld(true);
- for(const lod of model.userData.modelLOD?.levels||[])if(lod.autoUpdate)lod.update(camera);
+  for(const lod of model.userData.modelLOD?.levels||[])if(lod.autoUpdate)lod.update(camera);
+  for(const lod of model.userData.modelLOD?.closeDetails||[])if(lod.autoUpdate)lod.update(camera);
  ArenaView.prototype._setModelDetail.call({qualitySettings:{lodDistance:46}},model,detail,distance);
 }
 
 export function measureLatticeModels(){
  const assets=new ModelAssets(),models=[],make=m=>{models.push(m);return m;};
  const operators=CHARACTERS.map(c=>{
-  const m=make(robotModel(c.id,assets)),near=modelCost(m);selectModelLOD(m,{distance:50});const distantHigh=modelCost(m);selectModelLOD(m,{distance:50,detail:0});
-  return {id:c.id,near,distantHigh,distantLow:modelCost(m)};
+   const m=make(robotModel(c.id,assets));selectModelLOD(m,{distance:10});const near=modelCost(m);
+   selectModelLOD(m,{distance:2});const close=modelCost(m);selectModelLOD(m,{distance:50});const distantHigh=modelCost(m);selectModelLOD(m,{distance:50,detail:0});
+   return {id:c.id,close,near,distantHigh,distantLow:modelCost(m)};
  });
  const weapons=WEAPONS.map((w,type)=>({name:w.name,type,detailed:modelCost(make(weaponModel(type,assets))),world:modelCost(make(simpleWeaponModel(type,assets)))}));
  const roster=new T.Group();
- for(let i=0;i<32;i++){const m=make(robotModel(CHARACTERS[i%CHARACTERS.length].id,assets));applyActorTeam(m,i%2);roster.add(m);}
+  for(let i=0;i<32;i++){const m=make(robotModel(CHARACTERS[i%CHARACTERS.length].id,assets));applyActorTeam(m,i%2);roster.add(m);selectModelLOD(m,{distance:10});}
  const scene32={near:modelCost(roster)};
  for(const m of roster.children)selectModelLOD(m,{distance:50});scene32.distantHigh=modelCost(roster);
  for(const m of roster.children)selectModelLOD(m,{distance:50,detail:0});scene32.distantLow=modelCost(roster);
- roster.children.forEach((m,i)=>selectModelLOD(m,{distance:i<8?5:50,detail:i<8?1:0}));scene32.eightNear24Far=modelCost(roster);
- const cache={geometries:assets.geometries.size,materials:assets.materials.size,bytes:[...assets.geometries.values()].reduce((sum,g)=>sum+Object.values(g.attributes).reduce((s,a)=>s+a.array.byteLength,0)+(g.index?.array.byteLength??0),0)};
+  roster.children.forEach((m,i)=>selectModelLOD(m,{distance:i<8?10:50,detail:i<8?1:0}));scene32.eightNear24Far=modelCost(roster);
+  roster.children.forEach((m,i)=>selectModelLOD(m,{distance:i<4?2:i<8?10:50,detail:i<8?1:0}));scene32.fourCloseFourNear24Far=modelCost(roster);
+  const cache={geometries:assets.geometries.size,materials:assets.materials.size,bytes:[...assets.geometries.values()].reduce((sum,g)=>sum+Object.values(g.attributes).reduce((s,a)=>s+a.array.byteLength,0)+(g.index?.array.byteLength??0),0)};
+  cache.detailBytes=[...assets.geometries].filter(([key])=>key.startsWith('lattice-operator-precision-')).reduce((sum,[,g])=>sum+Object.values(g.attributes).reduce((s,a)=>s+a.array.byteLength,0)+(g.index?.array.byteLength??0),0);
+  cache.baseBytes=cache.bytes-cache.detailBytes;
  const disposer={sharedResources:assets.resources};for(const m of models)ArenaView.prototype.disposeObject.call(disposer,m);assets.dispose();
- return {method:'Visible geometry submissions, no frustum/occlusion culling; neutral operators include held pulse; 32-actor roster includes team marks/outline. Flash/shield inactive. Shadow/postprocessing passes excluded.',operators,weapons,scene32,cache};
+  return {method:'Visible geometry submissions, no frustum/occlusion culling; close=2m, near=10m, far=50m. Neutral operators include held pulse; 32-actor roster includes team marks/outline. Flash/shield inactive. Shadow/postprocessing passes excluded.',operators,weapons,scene32,cache};
 }
 
 if(process.argv[1]&&import.meta.url===pathToFileURL(process.argv[1]).href)console.log(JSON.stringify(measureLatticeModels(),null,2));

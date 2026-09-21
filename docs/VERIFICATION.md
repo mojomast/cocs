@@ -1,5 +1,26 @@
 # COCS verification report
 
+## Release 8.7.1 — robot precision pass
+
+Local checks were serialized. **217/217** model, articulation, geometry,
+renderer, LOD, software, disposal, grips, bounds, secondary-motion and
+team/class-presentation tests passed. **139/139** UI/integration tests passed;
+typecheck and production build passed.
+
+The new close tier measures 28,028–31,928 triangles / 84–86 draw objects per
+complete operator, including its held weapon. Existing combat-distance, far
+and software geometry budgets still pass unchanged. Total shared geometry for
+all nine operators is 9,675,456 bytes; the existing base is 2,720,400 bytes.
+Tests cover articulation-following hardware, quality shedding, LOD round trips,
+scaled preview activation and avoiding precision allocation in software mode.
+
+Browser menu/navigation/launch checks passed at 1366×768, 390×844 and 844×390
+with zero page errors (`artifacts/precision-menu/manifest.json`). The Graphics
+Lab pixel/effect, recipe, layout and live-match checks also passed. WebGL
+close-up portraits were inspected for face/armor/hand detail and surface
+intersections; raw images are in `/tmp/opencode/precision-portraits/`.
+No hardware FPS claim is inferred from the SwiftShader browser environment.
+
 ## Release 8.7 — FOUNDRY
 
 **Implementation verification (2026-09-21).** All intensive checks were run
