@@ -37,6 +37,16 @@ is presentation-paced, slow-frame catch-up yields after its CPU budget, and
 intentional menu caps are included in the quality governor's target so they do
 not accidentally degrade visual quality.
 
+**Production deployment (2026-09-21):** `d4344d8` was pushed to `main` and
+deployed from the production checkout with `npm run deploy -- --with-game-server`.
+Both services report **d4344d8 / v8.8.1-d4344d8 / protocol 3**. The verifier
+matched the footer and all 13 served assets, including `/assets/page-9pKaD9PH.js`.
+Live browser verification showed all nine maps before any repeat, zero page
+errors, the 30/60 FPS presentation budgets and working free-camera ownership.
+The hidden-document check held both match time and simulation-step counts
+unchanged across eight animation callbacks. Evidence:
+`artifacts/destination-demo-live/manifest.json`.
+
 ## Release 8.8 — DESTINATIONS
 
 All intensive tests, builds and browser runs are serialized, with Node test-file
