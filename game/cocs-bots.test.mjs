@@ -321,3 +321,49 @@ test('a leading team keeps the ordinary value order and spread cap', () => {
   assert.equal(firstAttack.nodeId, cocsAttackTargets(st, 0)[0].node.id, 'leading squads still push the highest-value node');
 });
 
+
+test('a commander stance moves the spread and garrison caps and clearing it restores the plan', () => {
+  const st = state();
+  st.nodes.find(node => node.id === 'front-0').owner = 0;
+  st.nodes.find(node => node.id === 'hub').owner = 0;
+  const roster = bots(0, 8, {x: -30, z: 0});
+  const idle = cocsTeamPlan(matchFor(roster, st), st, 0);
+  assert.equal(idle.policy, null, 'no commander means no stance');
+  assert.equal(idle.maxDefenders, idle.cap);
+  assert.equal(idle.attackCap, idle.cap);
+  st.command.policy[0] = 'ASSAULT';
+  const assault = cocsTeamPlan(matchFor(roster, st), st, 0);
+  assert.equal(assault.policy, 'ASSAULT');
+  assert.equal(assault.attackCap, roster.length, 'assault commits the whole roster forward');
+  assert.equal(assault.maxDefenders, Math.ceil(roster.length * 0.34), 'only a token garrison stays home');
+  st.command.policy[0] = 'FORTIFY';
+  const fortify = cocsTeamPlan(matchFor(roster, st), st, 0);
+  assert.equal(fortify.policy, 'FORTIFY');
+  assert.equal(fortify.attackCap, Math.ceil(roster.length * 0.34), 'fortify keeps a token push');
+  assert.equal(fortify.maxDefenders, roster.length, 'fortify mans the defence with the full roster');
+  st.command.policy[0] = null;
+  const cleared = cocsTeamPlan(matchFor(roster, st), st, 0);
+  assert.equal(cleared.policy, null);
+  assert.equal(cleared.attackCap, idle.attackCap);
+  assert.equal(cleared.maxDefenders, idle.maxDefenders);
+});
+
+test('a commander route leads the attack, mans an owned node and ignores illegal targets', () => {
+  const st = state();
+  const roster = bots(0, 6, {x: -30, z: 0});
+  st.nodes.find(node => node.id === 'hub').owner = 0;
+  const base = cocsTeamPlan(matchFor(roster, st), st, 0);
+  st.command.route[0] = 'front-1';
+  const routed = cocsTeamPlan(matchFor(roster, st), st, 0);
+  assert.equal(routed.route, 'front-1');
+  assert.equal(routed.duties[0].nodeId, 'front-1', 'the route outranks the automatic attack order');
+  assert.equal(routed.duties[0].kind, 'attack');
+  st.nodes.find(node => node.id === 'front-0').owner = 0;
+  st.command.route[0] = 'front-0';
+  const garrison = cocsTeamPlan(matchFor(roster, st), st, 0);
+  assert.ok(garrison.holds.some(hold => hold.nodeId === 'front-0'), 'an owned route is manned');
+  st.command.route[0] = 'hq-0';
+  const ignored = cocsTeamPlan(matchFor(roster, st), st, 0);
+  assert.equal(ignored.route, null, 'an HQ is never a route');
+  assert.equal(ignored.duties[0].nodeId, base.duties[0].nodeId, 'an illegal route leaves the automatic plan intact');
+});

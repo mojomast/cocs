@@ -40,12 +40,15 @@ export const COCS_STRIP_MAX_TARGETS = 9;
 const cooldownTicks = Math.max(1, Math.round(COCS_ORDER_ISSUE_COOLDOWN_SECONDS / TICK_SECONDS));
 const pendingTicks = Math.max(1, Math.round(COCS_ORDER_PENDING_SECONDS / TICK_SECONDS));
 
-// The three tier-0 buttons. `id` is what the UI arms; `verb` is what the engine
-// receives. Kept frozen so a caller can never rename a verb mid-match.
+// The tier-0 buttons. `id` is what the UI arms; `verb` is what the engine
+// receives. Kept frozen so a caller can never rename a verb mid-match. `ROUTE`
+// is the commander's standing push: it issues a `set-route` command instead of
+// an engine order, so `cocsIssueRoute` (not `cocsIssueOrder`) settles it.
 export const COCS_STRIP_BUTTONS = Object.freeze([
   Object.freeze({id: 'SCAN', verb: 'SCAN', label: 'SCAN', hint: 'Send the scout to scan a node'}),
   Object.freeze({id: 'GO', verb: 'HOLD', label: 'GO', hint: 'Hold or reinforce a node'}),
   Object.freeze({id: 'ATTACK', verb: 'ATTACK', label: 'ATTACK', hint: 'Take an enemy or neutral node'}),
+  Object.freeze({id: 'ROUTE', verb: 'ROUTE', label: 'ROUTE', hint: 'Set the squad push route'}),
 ]);
 
 const BUTTON_BY_ID = new Map(COCS_STRIP_BUTTONS.map(button => [button.id, button]));
@@ -113,6 +116,7 @@ export function cocsTargetableNodes(board, id, options = {}) {
       let eligible = false;
       if (button.verb === 'SCAN') eligible = node.capturable === true;
       else if (button.verb === 'HOLD') eligible = node.mine === true || node.attackable === true;
+      else if (button.verb === 'ROUTE') eligible = node.mine === true || node.attackable === true;
       else eligible = node.attackable === true;
       if (!eligible) continue;
       if (button.verb !== 'SCAN' && node.reachable === false) continue;
@@ -133,6 +137,7 @@ export function cocsTargetableNodes(board, id, options = {}) {
     let eligible = false;
     if (button.verb === 'SCAN') eligible = capturable;
     else if (button.verb === 'HOLD') eligible = mine || (capturable && live);
+    else if (button.verb === 'ROUTE') eligible = mine || (capturable && live);
     else eligible = capturable && live && !mine;
     if (!eligible) continue;
     list.push({...node, index: list.length + 1, verb: button.verb});
@@ -197,6 +202,70 @@ export function cocsIssueOrder(state, ctx = {}) {
     },
     order,
   };
+}
+
+// --- Commander surface (PvP-1 §5.7/§11.3 + OPERATIONS command board) -------
+// The three stances the `policy` command accepts. Kept frozen: the sim's
+// normalization table is the authority, this is only the UI vocabulary.
+export const COCS_POLICY_OPTIONS = Object.freeze([
+  Object.freeze({id: 'ASSAULT', label: 'ASSAULT', hint: 'Commit the squad forward; only a token garrison stays home'}),
+  Object.freeze({id: 'HOLD', label: 'HOLD', hint: 'Keep the balanced plan'}),
+  Object.freeze({id: 'FORTIFY', label: 'FORTIFY', hint: 'Man the defence and pull hurt bots out early'}),
+]);
+
+/**
+ * Issue the armed `ROUTE` command. Routes are commander commands (`set-route`),
+ * not engine orders: the sim records them on the command state and the bot plan
+ * reads them. Returns `{state, command}` — `command` is null when the strip is
+ * not ready and `state.notice` explains why. `ctx`:
+ * `{tick, peerId, cardId, team}`.
+ */
+export function cocsIssueRoute(state, ctx = {}) {
+  const base = baseOf(state);
+  const button = cocsStripButton(base.armed);
+  if (!button || button.verb !== 'ROUTE') return {state: {...base, notice: 'ARM ROUTE'}, command: null};
+  const tick = num(ctx.tick, 0);
+  if (tick < num(base.cooldownUntil, 0)) return {state: {...base, notice: 'COOLDOWN'}, command: null};
+  if (base.target === null || base.target === undefined) return {state: {...base, notice: 'PICK A TARGET'}, command: null};
+  const team = ctx.team;
+  if (team !== 0 && team !== 1) return {state: {...base, notice: 'NO TEAM'}, command: null};
+  const seq = num(base.seq, 0) + 1;
+  const command = {
+    tick,
+    peerId: String(ctx.peerId ?? 'human'),
+    cardId: String(ctx.cardId ?? `ROUTE-${team}-${tick}-${seq}`),
+    team,
+    action: 'set-route',
+    value: String(base.target),
+  };
+  return {
+    state: {
+      ...base,
+      armed: null,
+      target: null,
+      pending: null,
+      issued: command,
+      notice: null,
+      lastRejected: null,
+      cooldownUntil: tick + cooldownTicks,
+      seq,
+    },
+    command,
+  };
+}
+
+/**
+ * One commander command record, built with the same `(tick, peerId, cardId)`
+ * envelope as an order so the wire's idempotency bookkeeping works unchanged.
+ * `value` is the stance for `policy`, the node id for `set-route`, and ignored
+ * for `take`/`release`/`mutiny-vote`.
+ * @param {string} action
+ * @param {{tick?:number,peerId?:string,cardId?:string|null,team?:number,value?:any,seq?:number}} [options]
+ */
+export function cocsCommandRecord(action, { tick = 0, peerId = 'human', cardId = null, team = 0, value = null, seq = 0 } = {}) {
+  const act = String(action ?? '').toLowerCase();
+  const id = cardId ?? `${act.toUpperCase()}-${team}-${tick}-${seq}`;
+  return {tick, peerId: String(peerId), cardId: String(id), team: team === 1 ? 1 : 0, action: act, value: value ?? null};
 }
 
 // --- F04 order truth: QUEUED until the sim confirms, then completion/refusal.
@@ -1579,13 +1648,30 @@ export function cocsCommandView(board, snapshot, player, strip, options = {}) {
   // every non-laddered match, so the existing HUD stays mode-isolated.
   const team = economy?.team ?? (player?.team === 1 ? 1 : 0);
   const roleBoard = snapshot.roleBoard?.[team] ?? null;
+  // Commander surface. PvP carries `snapshot.commander`; OPERATIONS carries the
+  // same seat/votes/route/policy under `snapshot.command`. Both normalize to one
+  // shape so the seat row and the stance row are mode-agnostic. `mine` is a
+  // local hint (the client knows what it last took) — the sim seat itself is an
+  // opaque peer id the client never learns about itself.
+  const rawCommand = snapshot.commander ?? snapshot.command ?? null;
+  const voteCount = value => Array.isArray(value) ? value.length : Math.max(0, num(value, 0));
+  const commander = rawCommand ? {
+    seat: rawCommand.seat?.[team] ?? null,
+    route: rawCommand.route?.[team] ?? null,
+    policy: rawCommand.policy?.[team] ?? null,
+    votes: voteCount(rawCommand.votes?.[team]),
+    mine: options.commandSeatMine === true,
+    spectate: options.spectate === true,
+  } : null;
+  const policies = COCS_POLICY_OPTIONS.map(option => ({...option, active: commander?.policy === option.id}));
   return {
     board,
     model,
     economy,
     rung: snapshot.rung ?? null,
     roleBoard,
-    commander: snapshot.commander ?? null,
+    commander,
+    policies,
     spots: economy?.spots ?? [],
     scanTarget: {nodeId: scanNode ?? null, label: scanLabel, active: economy?.scan?.active === true},
     strip: view,

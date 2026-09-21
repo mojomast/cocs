@@ -388,3 +388,35 @@ test('the stub cocsPolicy issues orders and a seeded run is byte-identical', () 
  const other = run(0xC0C6);
  assert.notDeepEqual(other.snapshot, first.snapshot, 'a different seed diverges');
 });
+
+test('a sudden-death cocs match reconciles its winner when the mode layer ends it', () => {
+ const match = cocsMatch();
+ const state = match.objectiveState;
+ const events = [];
+ match.emit = (type, payload) => events.push({type, payload});
+ state.scores[0] = 42;
+ state.scores[1] = 37;
+ state.winner = null;
+ match.overReason = 'sudden-death';
+ match.endMatch('sudden-death');
+ assert.equal(state.winner, 0, 'the leading team owns the result once the sudden-death window decides it');
+ assert.equal(state.tiebreak, 'sudden-death');
+ assert.equal(cocsSnapshot(match).winner, 0, 'the snapshot carries the reconciled winner');
+ assert.ok(events.some(event => event.type === 'objective-tiebreak' && event.payload.team === 0));
+ // Idempotent: a second end never overwrites a decided winner and stays silent.
+ const before = events.length;
+ match.endMatch('time');
+ assert.equal(state.winner, 0);
+ assert.equal(events.length, before);
+});
+
+test('a finalize call on an undecided cocs scoreboard stays a draw and never invents one', () => {
+ const match = cocsMatch();
+ const state = match.objectiveState;
+ state.scores[0] = 10;
+ state.scores[1] = 10;
+ for (const n of state.nodes) if (n.archetype !== 'hq') n.owner = null;
+ state.winner = null;
+ match.endMatch('time');
+ assert.equal(state.winner, null, 'a genuinely tied scoreboard and node count is a draw');
+});

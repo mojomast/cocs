@@ -21,7 +21,7 @@
 
 import {RULES} from './data.mjs';
 import {SUBAGENTS, convertCoopReq, reqItem, reqPurchase} from './cocs-economy.mjs';
-import {addActorReq, capturableNodes, compareCocsOrders, connectivityIncome, cutLink, nodeById, repairLink} from './cocs.mjs';
+import {addActorReq, capturableNodes, compareCocsOrders, connectivityIncome, cutLink, nodeById, normalizeCocsPolicy, repairLink} from './cocs.mjs';
 import {depotPurchaseState, deviceInteract, purchaseDepotVehicle} from './cocs-traversal.mjs';
 import {spawnGroup, updateEnemyRoles} from './singleplayer.mjs';
 import {
@@ -2278,15 +2278,22 @@ export function coopCommandAction(match, state, record = {}) {
   coop.commandRoute ??= {0: null, 1: null};
   coop.commandPolicy ??= {0: null, 1: null};
   const action = String(record.action ?? '').toLowerCase();
+  const tick = num(state.tick, 0);
+  // Mirrors the PvP command handler so the presentation can listen to one
+  // event name in both modes.
+  const announce = (extra = {}) => {
+    match?.emit?.('cocs-command', {team, action, peerId, tick, value: record.value ?? null, ...extra});
+    return {ok: true, reason: null, ...extra};
+  };
   if (action === 'take') {
     coop.commandSeat[team] = peerId || null;
     coop.commandVotes[team] = {};
-    return {ok: true, reason: null};
+    return announce({seat: coop.commandSeat[team]});
   }
   if (action === 'release') {
     if (coop.commandSeat[team] !== peerId) return {ok: false, reason: 'not-commander'};
     coop.commandSeat[team] = null;
-    return {ok: true, reason: null};
+    return announce({seat: null});
   }
   if (action === 'mutiny-vote') {
     coop.commandVotes[team][peerId] = true;
@@ -2297,16 +2304,21 @@ export function coopCommandAction(match, state, record = {}) {
     if (humans.length > 0 && count >= needed && coop.commandSeat[team] !== peerId) {
       coop.commandSeat[team] = peerId;
       coop.commandVotes[team] = {};
+      return announce({votes: count, needed, seat: peerId});
     }
     return {ok: true, reason: null, votes: count, needed};
   }
   if (action === 'set-route') {
-    coop.commandRoute[team] = record.value === null || record.value === undefined ? null : String(record.value);
-    return {ok: true, reason: null};
+    const raw = record.value === null || record.value === undefined || record.value === '' ? null : String(record.value);
+    if (raw !== null && !nodeById(state, raw)) return {ok: false, reason: 'unknown-node'};
+    coop.commandRoute[team] = raw;
+    return announce({route: raw});
   }
   if (action === 'policy') {
-    coop.commandPolicy[team] = record.value === null || record.value === undefined ? null : String(record.value);
-    return {ok: true, reason: null};
+    const raw = record.value === null || record.value === undefined || record.value === '' ? null : normalizeCocsPolicy(record.value);
+    if (record.value !== null && record.value !== undefined && record.value !== '' && raw === null) return {ok: false, reason: 'stance'};
+    coop.commandPolicy[team] = raw;
+    return announce({policy: raw});
   }
   if (action === 'opt-out-orders') {
     // Per-actor personal REQ opt-out (design §6A.6). Lives on the roster so the

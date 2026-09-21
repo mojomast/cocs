@@ -21,7 +21,7 @@ export const latticePracticeDefaults = mode => mode === 'cocs'
   : mode === 'cocs-coop' ? {botCount: 3, timeLimit: 900, difficulty: 'normal'} : {};
 export function latticeKeys(bindings = {}) {
   const label = action => bindingLabel(bindings[action] ?? DEFAULT_BINDINGS[action]).toUpperCase();
-  return Object.fromEntries(['interact', 'mobility', 'power', 'command', 'commandScan', 'commandGo', 'commandAttack'].map(action => [action, label(action)]));
+  return Object.fromEntries(['interact', 'mobility', 'power', 'command', 'commandScan', 'commandGo', 'commandAttack', 'commandRoute'].map(action => [action, label(action)]));
 }
 
 export function latticeBriefing(mode, bindings = {}) {
@@ -35,7 +35,7 @@ export function latticeBriefing(mode, bindings = {}) {
     steps: [
       {title: '01 / TAKE YOUR FRONT', detail: 'Follow the link from your HQ to the front gate. Stand inside its capture ring and clear enemies. Capture is automatic; no interaction key is needed.'},
       {title: '02 / BUILD A SUPPLY LINE', detail: 'Only nodes adjacent to one your team owns can be taken. Push the relay or a side siphon, then defend the link home. Connected nodes earn team FLUX; a cut-off node stops paying.'},
-      {title: '03 / SUPPORT THE PUSH', detail: `${keys.commandScan} SCAN, ${keys.commandGo} GO/HOLD or ${keys.commandAttack} ATTACK → number key for a target → ENTER to issue. SCAN spends team FLUX. Hold ${keys.command} for the command board; release to return to the fight.`},
+      {title: '03 / SUPPORT THE PUSH', detail: `${keys.commandScan} SCAN, ${keys.commandGo} GO/HOLD, ${keys.commandAttack} ATTACK or ${keys.commandRoute} ROUTE → number key for a target → ENTER to issue. SCAN spends team FLUX. Hold ${keys.command} for the command board; release to return to the fight.`},
       {title: '04 / USE THE ROUTES', detail: `At a device anchor, press ${keys.interact} when the prompt says RIDE. Away from the anchor the same key can CUT/LOCK the route; on a broken route it REPAIRS. Depots capture by standing nearby; ${keys.interact} enters the loaner vehicle.`},
       ...(coop ? [{title: '05 / SURVIVE THE DIRECTOR', detail: `Between waves, spend FLUX on fortify, repair, resupply or reinforce. At a terminal, ${keys.interact} starts the displayed HACK, DEPLOY or VAULT action. Watch the HQ alarm and fall back before a siege breaks through.`}] : []),
     ],
@@ -518,7 +518,7 @@ export function latticeCoach(hud, player, map, options = {}) {
 // leaves chat, weapon selection and the ordinary pause handler in control.
 export function latticeOrderKey({mode = '', spectate = false, code = '', action = '', armed = false, repeat = false} = {}) {
   if (!isLattice(mode) || spectate || repeat) return null;
-  const verb = {commandScan: 'SCAN', commandGo: 'GO', commandAttack: 'ATTACK'}[action];
+  const verb = {commandScan: 'SCAN', commandGo: 'GO', commandAttack: 'ATTACK', commandRoute: 'ROUTE'}[action];
   if (verb) return {type: 'arm', verb};
   if (armed && /^Digit[1-9]$/.test(code)) return {type: 'pick', index: Number(code.slice(-1))};
   if (armed && code === 'Enter') return {type: 'issue'};

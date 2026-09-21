@@ -7,7 +7,7 @@ import assert from 'node:assert/strict';
 import {readFile} from 'node:fs/promises';
 import * as T from 'three';
 import {cocsBoard,cocsArchetypeLabel,cocsArchetypeMark,cocsResultSummary,commandBrief,objectiveCopy,modeTargetText,modeGoal,scoreAnnouncer} from './hud.mjs';
-import {COCS_SCAN_COST,cocsArmVerb,cocsClearStrip,cocsCommandView,cocsDirectorView,cocsEconomyView,cocsIssueOrder,cocsPickTarget,cocsSpotView,cocsStripState,cocsStripView,cocsSyncStrip,cocsTargetableNodes} from './cocs-orders.mjs';
+import {COCS_SCAN_COST,cocsArmVerb,cocsClearStrip,cocsCommandView,cocsDirectorView,cocsEconomyView,cocsIssueOrder,cocsIssueRoute,cocsPickTarget,cocsSpotView,cocsStripState,cocsStripView,cocsSyncStrip,cocsTargetableNodes} from './cocs-orders.mjs';
 import {latticeTargetModel} from './lattice-guide.mjs';
 import {GAME_MODES} from './config.mjs';
 import {mapsForMode,resolveMapForMode,arenaSupportsMode,maxBotsFor,recommendedBots} from './arenas.mjs';
@@ -319,9 +319,11 @@ test('cocsTargetableNodes narrows by verb and the command view is mode-isolated'
   const scan = cocsTargetableNodes(board, 'SCAN').map(node => node.id);
   const hold = cocsTargetableNodes(board, 'GO').map(node => node.id);
   const attack = cocsTargetableNodes(board, 'ATTACK').map(node => node.id);
+  const route = cocsTargetableNodes(board, 'ROUTE').map(node => node.id);
   assert.deepEqual(scan, ['front-0', 'relay-0', 'front-1'], 'SCAN lists every capturable node');
   assert.ok(hold.includes('front-0'), 'GO keeps your own nodes');
   assert.equal(attack.includes('front-0'), false, 'ATTACK drops your own nodes');
+  assert.ok(route.includes('front-0') && route.includes('relay-0'), 'ROUTE accepts owned and capturable nodes');
   assert.ok(cocsTargetableNodes(board, 'SCAN').every(node => node.archetype !== 'hq'), 'HQ is never a strip target');
   assert.equal(cocsCommandView(null, hud.cocs, {team: 0}, cocsStripState()), null);
   assert.equal(cocsCommandView(board, null, {team: 0}, cocsStripState()), null);
@@ -329,8 +331,15 @@ test('cocsTargetableNodes narrows by verb and the command view is mode-isolated'
   assert.ok(command);
   assert.equal(command.scanTarget.nodeId, 'relay-0');
   assert.equal(command.scanTarget.label, 'RELAY');
-  assert.deepEqual(command.strip.buttons.map(button => button.label), ['SCAN', 'GO', 'ATTACK']);
+  assert.deepEqual(command.strip.buttons.map(button => button.label), ['SCAN', 'GO', 'ATTACK', 'ROUTE']);
   assert.equal(command.spots.length, 1, 'only the live friendly mark at tick 100');
+  // The route verb issues a `set-route` command, not an engine order.
+  const armed = cocsPickTarget(cocsArmVerb(cocsStripState(), 'ROUTE'), 'relay-0', cocsTargetableNodes(board, 'ROUTE'));
+  const routed = cocsIssueRoute(armed, {tick: 100, team: 0, peerId: 'p1'});
+  assert.equal(routed.command.action, 'set-route');
+  assert.equal(routed.command.value, 'relay-0');
+  assert.equal(routed.state.armed, null, 'issuing clears the armed verb');
+  assert.equal(cocsIssueRoute(cocsStripState(), {tick: 100, team: 0}).command, null, 'ROUTE must be armed first');
 });
 
 test('cocsEconomyView reads the FLUX bar, REQ chip, order tally and scout card', () => {

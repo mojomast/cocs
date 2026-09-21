@@ -502,6 +502,10 @@ Recent releases. The full history lives in
   the depot/target/prime loop gained sound/captions/banners, team FLUX has a
   REINFORCE/SCAN purchase strip, NEGLECT is a live comeback meter, spectators
   cannot queue orders, and the Graphics Lab ships an authored default look.
+- LATTICE commander orders: take the command seat (or vote a mutiny), set a
+  team stance (ASSAULT / HOLD / FORTIFY) and set a squad route with `O`; the bot
+  plan follows the route and stance with team-private banners, subtitles and
+  earcons. See [COMMAND pass](docs/design/COMMAND-PASS.md).
 - Graphics-edge pass (research-backed): static dither kills 8-bit banding, a
   contrast-adaptive sharpen recovers FXAA softness, and environment reflections
   scale with the tier. Runs whenever post-processing or the graphics lab runs.

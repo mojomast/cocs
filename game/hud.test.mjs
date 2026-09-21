@@ -978,6 +978,24 @@ test('depot loaners, role agents and prime beats carry banners, ranks and announ
     assert.ok(cocsAnnouncePriority(beat) > 0 && cocsAnnouncementTTL(beat) > 0);
     assert.ok(latticeAnnounceCue(event, player.id), `${event.type} has an announcer cue`);
   }
+  // Commander command beats: team-private, each action with its own line.
+  const commands = [
+    [{type: 'cocs-command', team: 0, action: 'take'}, /^COMMAND ASSUMED$/],
+    [{type: 'cocs-command', team: 0, action: 'release'}, /^COMMAND RELEASED$/],
+    [{type: 'cocs-command', team: 0, action: 'mutiny-vote', votes: 2, needed: 3}, /^MUTINY VOTE$/],
+    [{type: 'cocs-command', team: 0, action: 'mutiny-vote', votes: 3, needed: 3, seat: 'p2'}, /^MUTINY CARRIED$/],
+    [{type: 'cocs-command', team: 0, action: 'policy', policy: 'FORTIFY'}, /^STANCE · FORTIFY$/],
+    [{type: 'cocs-command', team: 0, action: 'policy', policy: null}, /^STANCE CLEARED$/],
+    [{type: 'cocs-command', team: 0, action: 'set-route', value: 'relay-0'}, /^ROUTE · RELAY 0$/],
+  ];
+  for (const [event, pattern] of commands) {
+    const beat = cocsAnnouncement(event, player);
+    assert.ok(beat, `${event.action} becomes a banner`);
+    assert.match(beat.text, pattern);
+    assert.ok(cocsAnnouncePriority(beat) > 0 && cocsAnnouncementTTL(beat) > 0);
+    assert.ok(latticeAnnounceCue(event, player.id), `${event.action} has an announcer cue`);
+  }
+  assert.equal(cocsAnnouncement({type: 'cocs-command', team: 1, action: 'policy', policy: 'ASSAULT'}, player), null, 'enemy command beats stay private');
   // The new ranks stay distinct and ordered inside the existing policy.
   const ranks = Object.values(COCS_ANNOUNCE_PRIORITY);
   assert.equal(new Set(ranks).size, ranks.length, 'every bounded rank stays distinct');

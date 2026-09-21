@@ -46,7 +46,7 @@ test('codes resolve to actions and conflicts are reported', () => {
 
 test('mobility binds to KeyX and stays remappable like every other action', () => {
   assert.equal(DEFAULT_BINDINGS.mobility, 'KeyX');
-  assert.equal(KEYBIND_ACTIONS.length, 22, '18 historical actions, the free-cursor toggle, the three O1c command surfaces and held alt fire');
+  assert.equal(KEYBIND_ACTIONS.length, 23, '18 historical actions, the free-cursor toggle, the three O1c command surfaces, the route verb and held alt fire');
   assert.ok(KEYBIND_OPTIONS.includes('KeyX'), 'KeyX is offered in the settings dropdown');
   const rebound = rebindAction(DEFAULT_BINDINGS, 'mobility', 'KeyZ');
   assert.equal(rebound.mobility, 'KeyZ');

@@ -122,6 +122,14 @@ pipeline behind it.
   budget sheds the heavy stacks (then the whole lab pass) when drawn frame times
   stay slow, restoring the full look one step at a time once frames recover. See
   [Lab performance budget](design/DEPTH-II-PASS.md#lab-performance-budget).
+- Commander orders: LATTICE's command seat is wired end to end. Take command
+  (or vote a mutiny), set a team stance (ASSAULT commits the roster, FORTIFY
+  mans the defence and retreats wounded bots earlier, HOLD keeps the balanced
+  plan) and set a squad route with the new `O` binding; the bot plan follows the
+  route ahead of its automatic picks, every command announces itself with a
+  team-private banner/subtitle/earcon, and a sudden-death cocs win now always
+  records its winner in the objective result. See
+  [COMMAND pass](design/COMMAND-PASS.md).
 - Animation pass: restored death variety (killing-direction topple, per-pose
   fall arcs, seeded limb silhouettes, style treatments), strength-scaled hit
   flinches, a melee swing, shell casings, style-aware death audio, and UI

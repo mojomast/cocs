@@ -118,8 +118,25 @@ function CocsReadout({command,teamName,player,reducedMotion}:{command:any;teamNa
    </div>}
    {!command.spectate&&<div className="cocs-strip" role="group" aria-label="Order strip. Arm a verb, pick a node, then issue.">
    <div className="cocs-strip__verbs">
-     {strip.buttons.map((button:any)=><button key={button.id} type="button" className={`cocs-verb${button.armed?' is-armed':''}${button.disabled?' is-disabled':''}`} aria-pressed={button.armed} disabled={button.disabled} title={button.disabled?`${button.label} unavailable: ${button.reason}`:button.hint} onClick={()=>command.armCocsVerb(button.id)}>{button.label} <kbd>{command.keys?.[button.id==='SCAN'?'commandScan':button.id==='GO'?'commandGo':'commandAttack']}</kbd></button>)}
+     {strip.buttons.map((button:any)=><button key={button.id} type="button" className={`cocs-verb${button.armed?' is-armed':''}${button.disabled?' is-disabled':''}`} aria-pressed={button.armed} disabled={button.disabled} title={button.disabled?`${button.label} unavailable: ${button.reason}`:button.hint} onClick={()=>command.armCocsVerb(button.id)}>{button.label} <kbd>{command.keys?.[button.id==='SCAN'?'commandScan':button.id==='GO'?'commandGo':button.id==='ROUTE'?'commandRoute':'commandAttack']}</kbd></button>)}
    </div>
+   {command.commander&&<div className="cocs-command" role="group" aria-label="Commander controls">
+     <span className="cocs-command__group">
+       <span className="cocs-command__label">COMMAND</span>
+       <span className={`cocs-command__owner${command.commander.mine?' is-mine':''}`}>{command.commander.seat?String(command.commander.seat).toUpperCase():'OPEN SEAT'}</span>
+       {!command.commander.mine&&!command.commander.seat&&<button type="button" className="cocs-command__act" onClick={command.takeCommand}>TAKE COMMAND</button>}
+       {command.commander.mine&&<button type="button" className="cocs-command__act" onClick={command.releaseCommand}>STEP DOWN</button>}
+       {!command.commander.mine&&Boolean(command.commander.seat)&&<button type="button" className="cocs-command__act" onClick={command.voteCommand} title="A strict majority of living humans replaces the commander">VOTE MUTINY{command.commander.votes>0?` · ${command.commander.votes}`:''}</button>}
+     </span>
+     <span className="cocs-command__group" role="group" aria-label="Squad stance">
+       <span className="cocs-command__label">STANCE</span>
+       {command.policies.map((policy:any)=><button key={policy.id} type="button" className={`cocs-stance${policy.active?' is-active':''}`} aria-pressed={policy.active} title={policy.hint} onClick={()=>policy.active?command.clearCocsPolicy():command.setCocsPolicy(policy.id)}>{policy.label}</button>)}
+     </span>
+     <span className="cocs-command__group" role="group" aria-label="Squad route">
+       <span className="cocs-command__label">ROUTE</span>
+       <span className="cocs-command__owner">{command.commander.route?String(command.commander.route).replace(/-/g,' ').toUpperCase():'AUTO'}</span>
+     </span>
+   </div>}
    {traversal&&<p className="cocs-strip__context" role="group"><span aria-hidden="true">◈</span> {traversal.context}</p>}
    <p className="cocs-strip__prompt" role="group">{strip.armedLabel&&!strip.targetLabel?`${strip.armedLabel} · PICK A NODE`:strip.armedLabel&&strip.targetLabel?`${strip.armedLabel} → ${strip.targetLabel}`:'ARM AN ORDER'}{strip.notice&&<span className="cocs-strip__notice">{strip.notice}</span>}</p>
     {strip.armed&&strip.nodes.length>0&&<ul className="cocs-picker">{strip.nodes.map((node:any)=><li key={node.id}><button type="button" aria-pressed={strip.target===node.id} onClick={()=>command.pickCocsTarget(node.id)}><span className="cocs-picker__index">{node.index}</span><span aria-hidden="true">{node.mark}</span> {node.label} <small>{node.ownerLabel}</small></button></li>)}</ul>}

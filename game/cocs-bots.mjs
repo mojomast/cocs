@@ -51,7 +51,7 @@
 
 import {
   COCS_CAPTURE_POINTS, COCS_INCOME, COCS_KIND, COCS_SCAN_ARRIVE, COCS_SCAN_RADIUS,
-  capturableBy, capturableNodes, nodeById,
+  capturableBy, capturableNodes, cocsCommandState, nodeById,
 } from './cocs.mjs';
 import {SUBAGENTS} from './cocs-economy.mjs';
 
@@ -81,6 +81,14 @@ const POLICY_SCAN_INTERVAL = 900;
 // garrison cannot cover both — that keeps a second front alive and stops the
 // re-concentrate from collapsing into one all-in stack.
 export const COCS_COMEBACK_GARRISON = 1;
+
+// PvP-1/OPERATIONS commander stance (» policy command). ASSAULT commits nearly
+// the whole roster forward and leaves a token garrison; FORTIFY does the
+// reverse and pulls hurt bots out earlier. HOLD (or no commander) keeps the
+// shipped spread exactly.
+export const COCS_ASSAULT_GARRISON = 0.34;
+export const COCS_FORTIFY_PUSH = 0.34;
+export const COCS_POLICY_RETREAT = Object.freeze({ASSAULT: 0.30, HOLD: 0.45, FORTIFY: 0.62});
 // The recapture is mounted once a team is down to its last node (or none).
 export const COCS_COMEBACK_DEEP = 1;
 // Half the roster per comeback node (ceil), i.e. a 2+2 split for a 4-bot squad.
@@ -241,17 +249,29 @@ export function cocsTeamPlan(match, state, team) {
   const targets = cocsAttackTargets(state, team);
   const task = (state.tasks?.[team] && state.tick <= state.tasks[team].until) ? state.tasks[team] : null;
   const defence = cocsDefenceNode(actors, state, team);
+  // Commander stance + route. Both default to null, so an uncommanded match
+  // keeps the shipped plan byte-identical.
+  const command = cocsCommandState(state, team);
+  const policy = command.policy === 'ASSAULT' || command.policy === 'FORTIFY' || command.policy === 'HOLD' ? command.policy : null;
+  const routeNode = command.route ? nodeById(state, command.route) : null;
   const cap = Math.max(1, Math.ceil(roster.length * COCS_SPREAD_FRACTION));
   const deficit = cocsDeficit(state, team);
   const nodeDeficit = cocsNodeDeficit(state, team);
   const comeback = deficit ? cocsComebackTargets(state, actors, team, targets) : [];
   // A defence may reinforce up to the same per-node spread cap, so a front that
   // is genuinely being pushed can be met with numbers instead of fed in piecemeal.
-  const maxDefenders = cap;
+  // The commander stance moves that cap: ASSAULT keeps a token garrison and
+  // commits everyone else, FORTIFY mans the defence with the full roster.
+  const maxDefenders = policy === 'FORTIFY' ? roster.length
+    : policy === 'ASSAULT' ? Math.max(1, Math.ceil(roster.length * COCS_ASSAULT_GARRISON))
+      : cap;
   // Comeback stance balances the attack across the two weakest frontier nodes
   // (half the roster each) instead of leaning on one, so the enemy's single-node
-  // garrison cannot cover both and multi-front pressure survives.
-  const attackCap = deficit ? Math.max(1, Math.ceil(roster.length * COCS_COMEBACK_SPLIT)) : cap;
+  // garrison cannot cover both and multi-front pressure survives. A commander
+  // stance overrides the automatic balance.
+  const attackCap = policy === 'ASSAULT' ? roster.length
+    : policy === 'FORTIFY' ? Math.max(1, Math.ceil(roster.length * COCS_FORTIFY_PUSH))
+      : deficit ? Math.max(1, Math.ceil(roster.length * COCS_COMEBACK_SPLIT)) : cap;
   // Garrison: reinforce the most-threatened owned node to roughly the enemy
   // numbers on it, capped by the spread rule. When the enemy holds a majority
   // (W8) the reaction is only ever *capped* — down to `COCS_COMEBACK_GARRISON`,
@@ -271,7 +291,26 @@ export function cocsTeamPlan(match, state, team) {
     if (existing) existing.count = Math.max(existing.count, count);
     else holds.push({nodeId: defence.node.id, count});
   }
+  // Commander route: a standing destination that outranks the duty Chief's
+  // automatic picks. An owned route is a garrison the roster actually mans; a
+  // capturable one becomes the first attack duty. An HQ/array target or an
+  // unknown node is ignored, and clearing the route restores the automatic plan.
+  let routeDuty = null;
+  let effectiveRoute = null;
+  if (routeNode && routeNode.archetype !== 'hq' && routeNode.archetype !== 'array') {
+    if (routeNode.owner === team) {
+      const count = policy === 'FORTIFY' ? roster.length : Math.max(1, Math.ceil(roster.length * COCS_ASSAULT_GARRISON));
+      const existing = holds.find(hold => hold.nodeId === routeNode.id);
+      if (existing) existing.count = Math.max(existing.count, count);
+      else holds.unshift({nodeId: routeNode.id, count});
+      effectiveRoute = routeNode.id;
+    } else if (capturableBy(state, routeNode.id, team)) {
+      routeDuty = routeNode.id;
+      effectiveRoute = routeNode.id;
+    }
+  }
   const duties = [];
+  if (routeDuty) duties.push({nodeId: routeDuty, kind: 'attack'});
   for (const hold of holds) for (let index = 0; index < hold.count; index++) duties.push({nodeId: hold.nodeId, kind: 'hold'});
   if (deficit && comeback.length) {
     // Weakest frontier first, then the next-weakest, so the squad keeps a second
@@ -339,7 +378,7 @@ export function cocsTeamPlan(match, state, team) {
       }
     }
   }
-  return {roster, duties, slots, cap, maxDefenders, defence, targets, task, holds, deficit, nodeDeficit, comeback, attackCap, depotDuty, vehicleDuty};
+  return {roster, duties, slots, cap, maxDefenders, defence, targets, task, holds, deficit, nodeDeficit, comeback, attackCap, depotDuty, vehicleDuty, policy, route: effectiveRoute};
 }
 
 // Per-actor assignment. Stable: the actor's position in the id-sorted living
@@ -534,7 +573,8 @@ export function cocsTraversalChoice(match, a, destination, state = match?.object
   const actors = match?.actors ?? [];
   const team = a.team;
   const health = num(a.health, 0) / Math.max(1, num(a.maxHealth, 100));
-  const retreating = health <= COCS_DEVICE_RETREAT_HEALTH || num(a.bot?.suppressed, 0) > 0;
+  const retreatAt = COCS_POLICY_RETREAT[cocsCommandState(state, a.team).policy] ?? COCS_DEVICE_RETREAT_HEALTH;
+  const retreating = health <= retreatAt || num(a.bot?.suppressed, 0) > 0;
   const hostilesBefore = nearestHostile(actors, {x: num(a.x, 0), z: num(a.z, 0)}, team);
   let best = null;
   for (const id of Object.keys(traversal.devices ?? {}).sort()) {

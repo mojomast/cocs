@@ -18,6 +18,9 @@ export const DEFAULT_BINDINGS = Object.freeze({
   // three verbs; a node is then picked with the number keys or a click. Bound
   // like every other action so a player can remap them in Settings.
   commandScan: 'KeyN', commandGo: 'KeyM', commandAttack: 'KeyP',
+  // Commander route: the standing squad push. KeyO is free (KeyR is reload,
+  // KeyB the board), so the route verb is reachable without a cursor.
+  commandRoute: 'KeyO',
   // O1c command surfaces (design §13.4): the board hold-to-peek, the ping
   // marker and the order radial. Registered so they are remappable in Settings.
   command: 'KeyB', ping: 'KeyU', radial: 'KeyK',
@@ -34,6 +37,7 @@ export const KEYBIND_LABELS = Object.freeze({
   altFire: 'Alt fire',
   interact: 'Interact / use', voice: 'Push to talk', cursor: 'Free cursor (release mouse)',
   commandScan: 'Order: scan', commandGo: 'Order: go / hold', commandAttack: 'Order: attack',
+  commandRoute: 'Order: route',
   command: 'Command board (hold or toggle)', ping: 'Ping marker', radial: 'Order radial',
 });
 

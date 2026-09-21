@@ -59,6 +59,14 @@ export const COCS_ARCHETYPES = Object.freeze(['front', 'economy', 'relay', 'hq',
 export const COCS_CAPTURABLE = Object.freeze(['front', 'economy', 'relay']);
 export const COCS_ANCHORS = Object.freeze(['hq', 'array']);
 export const COCS_ORDER_VERBS = Object.freeze(['HOLD', 'ATTACK', 'SCAN']);
+// PvP-1 command stances (§5.7/§11.3). The `policy` command accepts exactly
+// these; the bot plan reads them through `cocsCommandState` and biases the
+// team's spread/garrison caps, and the field-support retreat threshold.
+export const COCS_POLICIES = Object.freeze(['ASSAULT', 'HOLD', 'FORTIFY']);
+export function normalizeCocsPolicy(value) {
+  const stance = String(value ?? '').trim().toUpperCase();
+  return COCS_POLICIES.includes(stance) ? stance : null;
+}
 // FLUX/second a connected node pays. Mirrors mode spec §4.2; the §6.5 passive
 // +1/s team term is added on top by `stepCocs`.
 export const COCS_INCOME = Object.freeze({front: 1, economy: 3, relay: 0, hq: 0, array: 0});
@@ -1307,6 +1315,29 @@ export function cocsRoleBoardSnapshot(match, state, team) {
 }
 
 /**
+ * PvP-1/OPERATIONS command read (seat, route policy). PvP records them under
+ * `state.command`; OPERATIONS keeps its own copy under `state.coop`. One
+ * accessor keeps the bot plan, neglect and the presentation reading the same
+ * authoritative record instead of each hard-coding the split.
+ */
+export function cocsCommandState(state, team) {
+  const t = team === 1 ? 1 : 0;
+  if (!state || state.kind !== COCS_KIND) return {seat: null, route: null, policy: null};
+  if (state.coop) {
+    return {
+      seat: state.coop.commandSeat?.[t] ?? null,
+      route: state.coop.commandRoute?.[t] ?? null,
+      policy: state.coop.commandPolicy?.[t] ?? null,
+    };
+  }
+  return {
+    seat: state.command?.seat?.[t] ?? null,
+    route: state.command?.route?.[t] ?? null,
+    policy: state.command?.policy?.[t] ?? null,
+  };
+}
+
+/**
  * PvP-1 command board action (§5.7/§11.2). The room validates the transport
  * peer and the team; this records the seat/route/policy on the authoritative
  * state so a reconnect resync is complete. Pure state mutation, no RNG, no
@@ -1323,15 +1354,22 @@ export function cocsCommandAction(match, state, record = {}) {
   const team = record.team === 1 ? 1 : 0;
   const peerId = String(record.peerId ?? '');
   const action = String(record.action ?? '').toLowerCase();
+  const tick = num(state.tick, 0);
+  // Every successful action is mirrored as one sim event so the presentation
+  // (captions, earcons, board chips) never has to diff the snapshot.
+  const announce = (extra = {}) => {
+    match?.emit?.('cocs-command', {team, action, peerId, tick, value: record.value ?? null, ...extra});
+    return {ok: true, reason: null, ...extra};
+  };
   if (action === 'take') {
     cmd.seat[team] = peerId || null;
     cmd.votes[team] = {};
-    return {ok: true, reason: null};
+    return announce({seat: cmd.seat[team]});
   }
   if (action === 'release') {
     if (cmd.seat[team] !== peerId) return {ok: false, reason: 'not-commander'};
     cmd.seat[team] = null;
-    return {ok: true, reason: null};
+    return announce({seat: null});
   }
   if (action === 'mutiny-vote') {
     cmd.votes[team][peerId] = true;
@@ -1347,11 +1385,24 @@ export function cocsCommandAction(match, state, record = {}) {
     if (humans.length > 0 && count >= needed && cmd.seat[team] !== peerId) {
       cmd.seat[team] = peerId;
       cmd.votes[team] = {};
+      return announce({votes: count, needed, seat: peerId});
     }
     return {ok: true, reason: null, votes: count, needed};
   }
-  if (action === 'set-route') { cmd.route[team] = record.value === null || record.value === undefined ? null : String(record.value); return {ok: true, reason: null}; }
-  if (action === 'policy') { cmd.policy[team] = record.value === null || record.value === undefined ? null : String(record.value); return {ok: true, reason: null}; }
+  if (action === 'set-route') {
+    const raw = record.value === null || record.value === undefined || record.value === '' ? null : String(record.value);
+    // A route must name a real lattice node so every reader (bot plan, board,
+    // reconnect snapshot) agrees on the destination.
+    if (raw !== null && !nodeById(state, raw)) return {ok: false, reason: 'unknown-node'};
+    cmd.route[team] = raw;
+    return announce({route: raw});
+  }
+  if (action === 'policy') {
+    const raw = record.value === null || record.value === undefined || record.value === '' ? null : normalizeCocsPolicy(record.value);
+    if (record.value !== null && record.value !== undefined && record.value !== '' && raw === null) return {ok: false, reason: 'stance'};
+    cmd.policy[team] = raw;
+    return announce({policy: raw});
+  }
   if (action === 'opt-out-orders') {
     const actor = match?.actors?.[record.actorId];
     if (!actor || actor.team !== team) return {ok: false, reason: 'missing'};
@@ -2144,5 +2195,33 @@ export function stepCocs(match, dt = RULES.dt) {
     if (outcome.winner === 0 || outcome.winner === 1) match.emit('objective-win', {team: outcome.winner, score: state.scores[outcome.winner], reason: outcome.reason});
     match.endMatch(outcome.reason);
   }
+  return state;
+}
+
+/**
+ * Reconcile the objective result once the match has ended. The mode layer can
+ * end a cocs match without `cocsOutcome` ever returning (a sudden-death window
+ * broken by the score, a forfeit, a director path), which used to leave
+ * `cocs.winner` null behind a decided scoreboard. Called by `Match.endMatch`;
+ * pure, idempotent, and a no-op for a match with an already-decided winner or
+ * a genuinely tied scoreboard.
+ */
+export function finalizeCocsResult(match) {
+  const state = match?.objectiveState;
+  if (!state || state.kind !== COCS_KIND) return state ?? null;
+  if (state.winner === 0 || state.winner === 1) return state;
+  const scores = state.scores ?? {0: 0, 1: 0};
+  let winner = null;
+  if (num(scores[0], 0) !== num(scores[1], 0)) winner = num(scores[0], 0) > num(scores[1], 0) ? 0 : 1;
+  else {
+    const owned = {0: 0, 1: 0};
+    for (const node of capturableNodes(state)) if (node.owner === 0 || node.owner === 1) owned[node.owner]++;
+    if (owned[0] !== owned[1]) winner = owned[0] > owned[1] ? 0 : 1;
+  }
+  if (winner === null) return state;
+  state.winner = winner;
+  state.tiebreak = state.tiebreak ?? (match.overReason === 'sudden-death' ? 'sudden-death' : 'time');
+  state.winReason = state.winReason ?? match.overReason ?? 'time';
+  match.emit?.('objective-tiebreak', {mode: 'cocs', team: winner, reason: state.tiebreak});
   return state;
 }

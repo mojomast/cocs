@@ -312,7 +312,8 @@ test('spectator dispatch can never queue COCS orders or spends', async () => {
   assert.match(page, /const issueCocsOrder=\(\)=>\{const r=runtime\.current;if\(!r\|\|hud\?\.spectate===true\|\|r\.net\?\.spectate===true\|\|r\.spectateLocal===true\)return;/, 'a spectator strip issue refuses before queueing');
   assert.match(page, /if\(hud\?\.spectate===true\|\|r\.net\?\.spectate===true\|\|r\.spectateLocal===true\)return \{ok:false,reason:'SPECTATING'\};/, 'a spectator board activation refuses before queueing');
   assert.match(page, /if\(r\.net\?\.spectate\|\|r\.spectateLocal\|\|hud\.spectate\)return \{ok:false,reason:'SPECTATING'\};/, 'a spectator REQ buy refuses before queueing');
-  assert.match(page, /r\.cocsOrders=\[\];r\.cocsSpends=\[\];r\.cocsSpendSeq=0;r\.cocsBuys=\[\];r\.cocsBuySeq=0;r\.cocsBuysPending=\[\];setCocsReqPending\(\[\]\);/, 'entering spectate drains the local queues');
+  assert.match(page, /const sendCocsCommand=\(action:string,value:any=null,opts\?:\{cardId\?:string;tick\?:number\}\)=>\{const r=runtime\.current;if\(!r\|\|spectatingCocs\(\)\)return null;/, 'a spectator command refuses before queueing');
+  assert.match(page, /r\.cocsOrders=\[\];r\.cocsSpends=\[\];r\.cocsSpendSeq=0;r\.cocsBuys=\[\];r\.cocsBuySeq=0;r\.cocsBuysPending=\[\];r\.cocsCommands=\[\];r\.cocsCommandSeq=0;r\.cocsCommandSeat=null;setCocsReqPending\(\[\]\);/, 'entering spectate drains the local queues');
   assert.match(page, /cocsBoardRef\.current=\{\.\.\.cocsBoardRef\.current,open:false,pinned:false,active:0,collapsed:false\};setCocsBoard\(\{open:false,pinned:false,active:0\}\);/, 'entering spectate closes the command board');
   assert.match(view, /visible: !spectate && cards\.some/, 'the purchase view is inherently hidden for spectators');
 });

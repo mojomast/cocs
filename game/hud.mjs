@@ -755,6 +755,11 @@ export const COCS_ANNOUNCE_PRIORITY = Object.freeze({
   requisition: 50,
   support: 46,
   order: 45,
+  // Commander intent sits just below the objective beats: a stance or route is
+  // a team-wide plan change, and seating/stepping down is informational.
+  command: 43,
+  policy: 42,
+  route: 41,
   siphon: 44,
   terminal: 40,
   scan: 38,
@@ -764,7 +769,7 @@ export const COCS_ANNOUNCE_PRIORITY = Object.freeze({
 
 // Per-beat display lifetime: urgent objective changes hold longer than a
 // routine order beat, then expire so a stale banner never outlives the moment.
-const COCS_ANNOUNCE_TTL = Object.freeze({siege: 6, loss: 5, secure: 4, loaner: 4, prime: 4, neutral: 3.5, wave: 3.5, sabotage: 3.5, sapper: 3.5, role: 3, requisition: 3, order: 3, support: 3, siphon: 3, terminal: 3, scan: 2.5, refused: 3, issued: 1.6});
+const COCS_ANNOUNCE_TTL = Object.freeze({siege: 6, loss: 5, secure: 4, loaner: 4, prime: 4, neutral: 3.5, wave: 3.5, sabotage: 3.5, sapper: 3.5, role: 3, requisition: 3, order: 3, support: 3, siphon: 3, terminal: 3, scan: 2.5, refused: 3, issued: 1.6, command: 3.5, policy: 3.5, route: 3.5});
 
 export const cocsAnnouncePriority = beat => {
   const value = Number(beat?.priority);
@@ -998,6 +1003,37 @@ export function cocsAnnouncement(event, player) {
       return {kind: 'siege', team, mine: true, relevance: 'friendly', previousOwner: null,
         priority: COCS_ANNOUNCE_PRIORITY.siegeLifted, ttl: COCS_ANNOUNCE_TTL.siege,
         dedupeKey: `siege-lifted:${event.wave ?? ''}`, text: 'HQ SECURE', detail: 'SIEGE LIFTED'};
+    // Commander command beats. Team-private: only the issuing side is voiced,
+    // and every action has its own short line so the strip never needs to diff
+    // the command state to explain itself.
+    case 'cocs-command': {
+      if (event.team !== team) return null;
+      const stance = event.policy ? String(event.policy).toUpperCase() : null;
+      const common = {kind: 'command', team, mine: true, relevance: 'friendly', previousOwner: null};
+      if (event.action === 'take') return {...common, priority: COCS_ANNOUNCE_PRIORITY.command, ttl: COCS_ANNOUNCE_TTL.command,
+        dedupeKey: `command:take:${team}`, text: 'COMMAND ASSUMED', detail: 'ORDERS AND STANCES ARE YOURS'};
+      if (event.action === 'release') return {...common, priority: COCS_ANNOUNCE_PRIORITY.command, ttl: COCS_ANNOUNCE_TTL.command,
+        dedupeKey: `command:release:${team}`, text: 'COMMAND RELEASED', detail: 'THE CHIEF HOLDS THE LINE'};
+      if (event.action === 'mutiny-vote') {
+        if (event.seat) return {...common, priority: COCS_ANNOUNCE_PRIORITY.command, ttl: COCS_ANNOUNCE_TTL.command,
+          dedupeKey: `command:mutiny:${team}`, text: 'MUTINY CARRIED', detail: 'NEW COMMANDER SEATED'};
+        return {...common, priority: COCS_ANNOUNCE_PRIORITY.policy, ttl: COCS_ANNOUNCE_TTL.policy,
+          dedupeKey: `command:vote:${team}`, text: 'MUTINY VOTE', detail: `${Math.max(0, Number(event.votes) || 0)}/${Math.max(1, Number(event.needed) || 1)} VOTES`};
+      }
+      if (event.action === 'policy') {
+        if (!stance) return {...common, priority: COCS_ANNOUNCE_PRIORITY.policy, ttl: COCS_ANNOUNCE_TTL.policy,
+          dedupeKey: `command:policy:${team}`, text: 'STANCE CLEARED', detail: 'BALANCED PLAN'};
+        const detail = stance === 'ASSAULT' ? 'PUSH EVERY NODE' : stance === 'FORTIFY' ? 'FALL BACK AND HOLD' : 'BALANCED PLAN';
+        return {...common, priority: COCS_ANNOUNCE_PRIORITY.policy, ttl: COCS_ANNOUNCE_TTL.policy,
+          dedupeKey: `command:policy:${team}`, text: `STANCE · ${stance}`, detail};
+      }
+      if (event.action === 'set-route') {
+        const label = event.value ? String(event.value).replace(/-/g, ' ').toUpperCase() : 'AUTO';
+        return {...common, priority: COCS_ANNOUNCE_PRIORITY.route, ttl: COCS_ANNOUNCE_TTL.route,
+          dedupeKey: `command:route:${team}`, text: `ROUTE · ${label}`, detail: event.value ? 'THE SQUAD PUSHES IT' : 'ROUTE CLEARED'};
+      }
+      return null;
+    }
     default:
       return null;
   }
@@ -1026,6 +1062,7 @@ export function latticeAnnounceCue(event, playerId) {
     case 'cocs-role-rally':
     case 'cocs-role-repair':
     case 'cocs-role-spot':
+    case 'cocs-command':
     case 'cocs-prime-start':
     case 'cocs-prime':
     case 'director-wave-cleared':

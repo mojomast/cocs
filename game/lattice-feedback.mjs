@@ -48,6 +48,12 @@ const cues=Object.freeze({
  roleRepair:motif([0,4,7,11],.05,.18,.065), roleSpot:motif([12,19,24],.045,.14,.06),
  primeStart:motif([0,-7,0],.09,.22,.07), prime:motif([0,-7,-12],.1,.26,.075,true),
  primeInterrupt:motif([9,2,-1],.07,.16,.07),
+ // Commander beats: taking the seat is a low rise, a stance is a decisive
+ // two-step (up for ASSAULT, flat for HOLD, down for FORTIFY), a route lock is
+ // three descending taps and a mutiny vote is an unresolved tick.
+ command:motif([0,5],.06,.2,.07,true), mutiny:motif([5,0],.06,.16,.06),
+ assault:motif([0,7],.06,.18,.07), holdLine:motif([0,0],.05,.15,.065), fortify:motif([0,-5],.07,.2,.07),
+ route:motif([12,7,0],.05,.16,.065),
 });
 
 // Bounded per-HQ state for the periodic `director-hq-damage` warning. The
@@ -128,6 +134,20 @@ export function latticeSoundCue(event,player,state=null){
  if(event.type==='cocs-role-rally')return repeatCue(event,state,`rally:${event.actor}`,cues.roleRally,LATTICE_REPEAT_WINDOW.rally);
  if(event.type==='cocs-role-repair')return Array.isArray(event.repaired)&&event.repaired.length?repeatCue(event,state,`repair:${event.actor}`,cues.roleRepair,LATTICE_REPEAT_WINDOW.repair):null;
  if(event.type==='cocs-role-spot')return Array.isArray(event.targets)&&event.targets.length?repeatCue(event,state,`spot:${event.actor}`,cues.roleSpot,LATTICE_REPEAT_WINDOW.spot):null;
+ // Commander command beats are team-private intent: only the issuing team is
+ // voiced, and a stance takes its own colour (assault rises, fortify falls).
+ if(event.type==='cocs-command'){
+  if(event.team!==player.team)return null;
+  if(event.action==='take'||event.action==='release')return cues.command;
+  if(event.action==='mutiny-vote')return event.seat?cues.command:cues.mutiny;
+  if(event.action==='policy'){
+   if(event.policy==='ASSAULT')return cues.assault;
+   if(event.policy==='FORTIFY')return cues.fortify;
+   return cues.holdLine;
+  }
+  if(event.action==='set-route')return repeatCue(event,state,`route:${event.team}`,cues.route,LATTICE_REPEAT_WINDOW.scan);
+  return null;
+ }
  // The prime channel is world-visible: both sides hear a node come online.
  if(event.type==='cocs-prime-start')return cues.primeStart;
  if(event.type==='cocs-prime')return cues.prime;
@@ -175,6 +195,15 @@ export function latticeCaption(event){
  if(event?.type==='director-siege-lifted')return 'HQ siege lifted';
  if(event?.type==='cocs-order-complete')return `Order complete · ${String(event.verb??'').toUpperCase()}`.trim();
  if(event?.type==='cocs-order-rejected')return `Order rejected · ${String(event.verb??'').toUpperCase()}`.trim();
+ // Commander intent subtitles, so a stance or route is readable without the HUD.
+ if(event?.type==='cocs-command'){
+  if(event.action==='take')return 'Command assumed';
+  if(event.action==='release')return 'Command released';
+  if(event.action==='mutiny-vote')return event.seat?'Mutiny carried · new commander':`Mutiny vote · ${Math.max(0,Number(event.votes)||0)}/${Math.max(1,Number(event.needed)||1)}`;
+  if(event.action==='policy')return event.policy?`Stance · ${String(event.policy).toUpperCase()}`:'Stance cleared';
+  if(event.action==='set-route')return event.value?`Route set · ${String(event.value).replace(/-/g,' ').toUpperCase()}`:'Route cleared';
+  return 'Command updated';
+ }
  if(event?.type==='director-init')return `Operation online${event.tier?` · tier ${event.tier}`:''}`;
  if(event?.type==='director-spawn-telegraph')return event.kind==='boss'?'Boss telegraph':'Spawn telegraph';
  if(event?.type==='director-spawn')return `Wave ${event.wave} contact`;

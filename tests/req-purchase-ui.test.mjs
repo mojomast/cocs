@@ -165,7 +165,7 @@ test('the page wires buyCocs to the deterministic local queue and net.buy withou
   assert.match(dispatch, /status:'queued'/, 'the dispatch records a pending status');
   assert.doesNotMatch(dispatch, /ACCEPTED|CONFIRMED/, 'the dispatch never claims acceptance');
   assert.match(page, /const cocsBuys=r\.cocsBuys\?\.length\?r\.cocsBuys\.splice\(0,r\.cocsBuys\.length\):null;/, 'the local step drains r.cocsBuys');
-  assert.match(page, /cocs:\{orders:cocsOrders\?\?\[\],spends:cocsSpends\?\?\[\],buys:cocsBuys\?\?\[\]\}/, 'the local step appends buys to the cocs bag');
+  assert.match(page, /cocs:\{orders:cocsOrders\?\?\[\],spends:cocsSpends\?\?\[\],buys:cocsBuys\?\?\[\],commands:cocsCommands\?\?\[\]\}/, 'the local step appends buys and commander commands to the cocs bag');
   assert.match(page, /reconcileReqBuys\(pending,\{actorId/, 'the page reconciles pending buys against the snapshot');
   assert.match(page, /CONFIRMED · \$\{confirmed\.cost\} REQ/, 'confirmation is snapshot-driven');
   assert.match(page, /REJECTED · \$\{reqReasonCopy\(refused\.reason\)\}/, 'a refusal names the reason');

@@ -16,7 +16,7 @@ import {floorHeightAtLattice,makeFloorQuery} from './floor-lattice.mjs';
 import {blockObstructed,blockSupportTop,candidates,collisionHash,NAV_BAKE_VERSION,rayWorldBlockHit} from './spatial.mjs';
 import {createVehicle,GUNTRUCK,respawnVehicle,stepVehicle,stepVehicleWeapon,vehicleCanEnter,vehicleConfig,vehicleMuzzles,vehicleSeatFor,vehicleSeatPosition,vehicleMounted,takeVehicleSeat,leaveVehicleSeat,vehicleSeatOpen,vehicleWeakPointMultiplier,vehicleDismountStun,passengerFireScale} from './vehicles.mjs';
 import {objectiveTemplate,authoredCapturePoints} from './mode-data.mjs';
-import {cocsSnapshot,cocsSpotDamageScale,compareCocsOrders,cocsEconomyAction,cocsCommandAction,cocsBuyAction,cocsHumanInteract} from './cocs.mjs';
+import {cocsSnapshot,cocsSpotDamageScale,compareCocsOrders,cocsEconomyAction,cocsCommandAction,cocsBuyAction,cocsHumanInteract,finalizeCocsResult} from './cocs.mjs';
 import {coopBuyAction,coopCommandAction,coopTerminalAction} from './cocs-coop.mjs';
 import {queueLatticePower,queueLatticeSwap} from './lattice-support.mjs';
 import {arrivalDamageScale,depotApronImmune,noteVehicleUse,applyArrivalProtection} from './cocs-traversal.mjs';
@@ -1172,7 +1172,7 @@ export class Match{
    refreshPowerups(a){a.speedMultiplier=1;a.damageMultiplier=1;a.cooldownMultiplier=1;for(const id of Object.keys(a.powerups)){const p=POWERUPS.find(x=>x.id===id);if(!p||a.powerups[id]<=0){delete a.powerups[id];continue;}const e=p.effect;if(e.speedMultiplier)a.speedMultiplier=Math.max(a.speedMultiplier,e.speedMultiplier);if(e.damageMultiplier)a.damageMultiplier=Math.max(a.damageMultiplier,e.damageMultiplier);if(e.cooldownMultiplier)a.cooldownMultiplier=Math.min(a.cooldownMultiplier,e.cooldownMultiplier);}}
     botInput(a,dt){return bots.botInput(this,a,dt);}
     respawnDelay(){const rule=modeRule(this.config.mode);return Number.isFinite(rule.eliminationRespawn)?rule.eliminationRespawn:this.config.respawn;}
-    endMatch(reason){if(!this.over){this.over=true;this.overReason=reason??null;}}
+    endMatch(reason){if(!this.over){this.over=true;this.overReason=reason??null;try{finalizeCocsResult(this);}catch{}}}
     step(dt,inputs={}){if(this.over)return;if(this.race)return this.race.kind==='soccer'?this.stepSoccer(dt,inputs):this.stepRace(dt,inputs);this.time+=dt;
   const given=inputs.inputs||{0:inputs};
   for(const p of this.pickups)p.wait=Math.max(0,p.wait-dt);

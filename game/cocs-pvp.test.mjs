@@ -328,7 +328,9 @@ test('PvP snapshot exposes rung/intel/contacts/roleBoard and co-op exposes none 
 test('the PvP command seat is team-scoped and round-trips through the snapshot', () => {
  const match = pvpMatch('8v8');
  const state = match.objectiveState;
- assert.deepEqual(cocsCommandAction(match, state, {team: 0, peerId: 'p1', action: 'take'}), {ok: true, reason: null});
+ const take = cocsCommandAction(match, state, {team: 0, peerId: 'p1', action: 'take'});
+ assert.equal(take.ok, true);
+ assert.equal(take.seat, 'p1', 'the seat reply names the seated peer');
  assert.equal(state.command.seat[0], 'p1');
  assert.equal(state.command.seat[1], null, 'a team-0 take never seats team 1');
  assert.equal(cocsCommandAction(match, state, {team: 1, peerId: 'p2', action: 'release'}).reason, 'not-commander');
@@ -494,4 +496,31 @@ test('the PvP sweep reports its rung/gates and alarms only team dominance', asyn
   assert.equal(summary.result.sample, 1);
   assert.ok(summary.economy.rolesByRole, 'the sweep reports the per-role spawn tally');
   assert.deepEqual(summary.gate, {strictContest: '>=35%', fightPoint: '>=60%', trailingHalfWins: '>=25%'});
+});
+
+test('the command policy and route accept only real stances and nodes and announce themselves', () => {
+ const match = pvpMatch('8v8');
+ const state = match.objectiveState;
+ const events = [];
+ match.emit = (type, payload) => events.push({type, payload});
+ const bad = cocsCommandAction(match, state, {team: 0, peerId: 'p1', action: 'policy', value: 'BERSERK'});
+ assert.equal(bad.ok, false);
+ assert.equal(bad.reason, 'stance', 'an unknown stance is refused');
+ assert.equal(state.command.policy[0], null);
+ const set = cocsCommandAction(match, state, {team: 0, peerId: 'p1', action: 'policy', value: 'fortify'});
+ assert.equal(set.ok, true);
+ assert.equal(set.policy, 'FORTIFY', 'the stance is normalized to upper case');
+ assert.equal(state.command.policy[0], 'FORTIFY');
+ const node = state.nodes.find(entry => entry.archetype !== 'hq' && entry.archetype !== 'array');
+ const route = cocsCommandAction(match, state, {team: 0, peerId: 'p1', action: 'set-route', value: node.id});
+ assert.equal(route.ok, true);
+ assert.equal(state.command.route[0], node.id);
+ const missing = cocsCommandAction(match, state, {team: 0, peerId: 'p1', action: 'set-route', value: 'not-a-node'});
+ assert.equal(missing.ok, false);
+ assert.equal(missing.reason, 'unknown-node');
+ const cleared = cocsCommandAction(match, state, {team: 0, peerId: 'p1', action: 'set-route', value: null});
+ assert.equal(cleared.ok, true);
+ assert.equal(state.command.route[0], null);
+ assert.ok(events.some(event => event.type === 'cocs-command' && event.payload.action === 'policy' && event.payload.policy === 'FORTIFY'), 'the stance change is announced');
+ assert.ok(events.some(event => event.type === 'cocs-command' && event.payload.action === 'set-route' && event.payload.route === node.id), 'the route is announced');
 });

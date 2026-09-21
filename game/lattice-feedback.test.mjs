@@ -128,6 +128,20 @@ test('depot, role and prime beats each have a short bounded motif and stay team-
  // An empty role beat is not a beat.
  assert.equal(latticeSoundCue({type:'cocs-role-repair',team:0,actor:0,repaired:[]},player),null);
  assert.equal(latticeSoundCue({type:'cocs-role-spot',actor:0,targets:[]},player),null);
+ // Commander commands are team-private, and each stance keeps its own colour.
+ assert.ok(latticeSoundCue({type:'cocs-command',team:0,action:'take',time:20},player));
+ assert.ok(latticeSoundCue({type:'cocs-command',team:0,action:'set-route',value:'relay-0',time:21},player));
+ assert.notDeepEqual(
+  latticeSoundCue({type:'cocs-command',team:0,action:'policy',policy:'ASSAULT',time:22},player),
+  latticeSoundCue({type:'cocs-command',team:0,action:'policy',policy:'FORTIFY',time:23},player),
+  'assault and fortify do not share a cue');
+ assert.deepEqual(
+  latticeSoundCue({type:'cocs-command',team:0,action:'policy',policy:null,time:24},player),
+  latticeSoundCue({type:'cocs-command',team:0,action:'policy',policy:'HOLD',time:25},player),
+  'clearing a stance is the balanced cue');
+ assert.equal(latticeSoundCue({type:'cocs-command',team:1,action:'policy',policy:'ASSAULT'},player),null,'enemy commands are silent');
+ assert.match(latticeCaption({type:'cocs-command',action:'policy',policy:'FORTIFY'}),/^Stance · FORTIFY$/);
+ assert.match(latticeCaption({type:'cocs-command',action:'set-route',value:'relay-0'}),/^Route set · RELAY 0$/);
 });
 
 test('cadence role and scan beats are repeat-bucketed and the state stays bounded',()=>{
