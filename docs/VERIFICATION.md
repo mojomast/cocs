@@ -21,6 +21,17 @@ close-up portraits were inspected for face/armor/hand detail and surface
 intersections; raw images are in `/tmp/opencode/precision-portraits/`.
 No hardware FPS claim is inferred from the SwiftShader browser environment.
 
+**Production deployment (2026-09-21).** Web runtime `6102861` was deployed from
+`/home/mojo/projects/tokenarena` with `npm run deploy`. The automatic verifier
+retried one transient restart 502, then matched the **v8.7.1 · FOUNDRY** footer
+and all 13 linked assets against built bytes. Served page:
+`/assets/page-kApIESVI.js`; web identity **6102861 / v8.7.1-6102861 / protocol 3**.
+This presentation-only pass retains the compatible game server
+**34f5a25 / v8.7-34f5a25 / protocol 3**. Both development and production branches
+were pushed. Live production menu/operator selection and match-launch checks
+passed all three sizes with zero page errors:
+`artifacts/precision-menu-production/manifest.json`.
+
 ## Release 8.7 — FOUNDRY
 
 **Implementation verification (2026-09-21).** All intensive checks were run
