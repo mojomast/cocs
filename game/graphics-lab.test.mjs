@@ -462,3 +462,20 @@ test('configure switches layers by options and keeps one program across world, w
  assert.equal(pass.material,material,'world, weapon and bots configurations reuse the one program');
  pass.dispose();
 });
+
+test('weapon overlays reject exactly empty alpha before styling without enabling world-depth tests',t=>{
+ const pass=new GraphicsLabPass();t.after(()=>pass.dispose());
+ pass.configure(defaultGraphicsLab().targets.weapon,640,360,{active:true,keepAlpha:true,depthTest:false});
+ assert.equal(pass.uniforms.keepAlpha.value,1);assert.equal(pass.uniforms.depthTest.value,0);assert.equal(pass.uniforms.depthCompare.value,0);
+ // Shader contract: the no-depth weapon path must reach the empty-alpha guard,
+ // while faint nonzero pixels and the existing bot depth rejection survive.
+ const shader=pass.material.fragmentShader,guard='if(keepAlpha>.5&&source.a==0.)discard;';
+ assert.ok(shader.indexOf(guard)>shader.indexOf('vec4 source=texture2D(tDiffuse,vUv);'));
+ assert.ok(shader.indexOf(guard)<shader.indexOf('if(depthTest>.5)'));
+ assert.ok(shader.indexOf(guard)<shader.indexOf('if(glow>0.)'));
+ assert.match(shader,/if\(source\.a<\.004\)discard;/);
+ assert.match(shader,/if\(depthCompare>\.5&&texture2D\(tBotDepth,vUv\)\.r>texture2D\(tWorldDepth,vUv\)\.r\+\.0008\)discard;/);
+ assert.match(shader,/keepAlpha>\.5\?source\.a:1\./);
+ pass.configure(defaultGraphicsLab(),640,360,{keepAlpha:false,depthTest:false});
+ assert.equal(pass.uniforms.keepAlpha.value,0,'the opaque world never takes the new rejection path');
+});

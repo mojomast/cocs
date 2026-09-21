@@ -29,6 +29,8 @@ function harness(seed = 11, botCount = 6) {
 
 test('command preflight refuses impossible routes and stances before claiming acceptance', () => {
  const room=harness(73,0);
+ assert.equal(room.command(1,{cardId:'take-first',action:'take'}),true);
+ room.tick(RULES.dt);
  assert.equal(room.command(1,{cardId:'bad-policy',action:'policy',value:'BERSERK'}),false);
  assert.equal(room.command(1,{cardId:'bad-route',action:'set-route',value:'missing-node'}),false);
  assert.equal(room.pendingCocs.commands.length,0);

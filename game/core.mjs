@@ -18,6 +18,7 @@ import {createVehicle,GUNTRUCK,respawnVehicle,stepVehicle,stepVehicleWeapon,vehi
 import {objectiveTemplate,authoredCapturePoints} from './mode-data.mjs';
 import {cocsSnapshot,cocsSpotDamageScale,compareCocsOrders,cocsEconomyAction,cocsCommandAction,cocsBuyAction,cocsHumanInteract,finalizeCocsResult} from './cocs.mjs';
 import {coopBuyAction,coopCommandAction,coopTerminalAction} from './cocs-coop.mjs';
+import {reconcileCocsSquads} from './cocs-squads.mjs';
 import {queueLatticePower,queueLatticeSwap} from './lattice-support.mjs';
 import {arrivalDamageScale,depotApronImmune,noteVehicleUse,applyArrivalProtection} from './cocs-traversal.mjs';
 import {cocsDutyPolicy} from './cocs-bots.mjs';
@@ -448,7 +449,7 @@ export class Match{
     const humanCap=isCocsMode(this.config)?(rungTable?rungTable.total:COCS_HUMAN_LIMIT):8;
     this.humanCount=Math.max(1,Math.min(Math.round(options.humanCount??1),humanCap));if(this.humanCount+this.config.botCount>MAX_ACTORS)this.config.botCount=Math.max(0,MAX_ACTORS-this.humanCount);this.aiSeats=options.aiSeats===true;this.skipNav=options.skipNav===true;this.botPolicy=options.botPolicy??null;this.cocsPolicy=options.cocsPolicy??(isCocsMode(this.config)?cocsDutyPolicy:null);
     const vehicleMode=this.config.mode==='puma-race'||this.config.mode==='puma-soccer';
-    if(vehicleMode){this.config.botCount=this.config.mode==='puma-soccer'?Math.max(0,Math.min(3,4-this.humanCount)):Math.min(this.config.botCount,8-this.humanCount);if(!getMap(mapId).race)mapId=this.config.mode==='puma-soccer'?'puma-pitch':'puma-circuit';}
+    if(vehicleMode){const soccer=this.config.mode==='puma-soccer';this.config.botCount=soccer?Math.max(0,Math.min(3,4-this.humanCount)):Math.min(this.config.botCount,8-this.humanCount);const track=getMap(mapId).race;if(!track||(track.kind==='soccer')!==soccer)mapId=soccer?'puma-pitch':'puma-circuit';}
     this.difficulty=DIFFICULTIES.find(d=>d.id===this.config.difficulty);this.arena=getMap(mapId);if(this.arena.terrain)bakeFloorQuery(this.arena);const nav=vehicleMode?{nodes:[],edges:[]}:matchNavigation(this.arena,{skipNav:this.skipNav});this.nav=nav.nodes;this.edges=nav.edges;{const arenaBounds=boundsOf(this.arena);this.center={x:(arenaBounds.minX+arenaBounds.maxX)/2,z:(arenaBounds.minZ+arenaBounds.maxZ)/2};}this.spawns=this.arena.spawns.map(([x,z])=>v(x,floorAt(x,z,this.arena),z));this.random=random;this.time=0;this.over=false;this.suddenDeath=false;this.armsraceWinner=null;this.events=[];this.feed=[];this.rockets=[];this.deployables=[];this.ropeLines=[];this.ropeSerial=0;this.pendingLoadouts=new Map();this.stats={shots:0,kills:0,pickups:0,powers:0,respawns:0,falls:0};this.serial=0;this.teamScores={0:0,1:0};this.vehicleHits=new Map();this.spawnHeat=new Map();this.vehicleRepairMarks=new Map();this.deployableRepairMarks=new Map();this.vehicleRams=new Map();
    const defaults={0:this.arena.spawns.filter((_,i)=>i%2===0),1:this.arena.spawns.filter((_,i)=>i%2===1)};
     this.teamSpawns=teamPoints(this.arena.teamSpawns,defaults);
@@ -955,10 +956,16 @@ export class Match{
       for(const record of [...terminals].sort(compareCocsOrders))coopTerminalAction(this,state,record);
      }
      const commands=inputs?.cocs?.commands;
+     reconcileCocsSquads(this,state);
      if(Array.isArray(commands)&&commands.length){
       for(const record of [...commands].sort(compareCocsOrders)){
-       if(state.coop)coopCommandAction(this,state,record);
-       else cocsCommandAction(this,state,record);
+       const result=state.coop?coopCommandAction(this,state,record):cocsCommandAction(this,state,record);
+       const entry={tick:state.tick,team:record.team,peerId:String(record.peerId??''),cardId:record.cardId??null,action:record.action,ok:result.ok,reason:result.reason??null};
+       (state.commandResults??=[]).push(entry);
+       // Keep enough sim evidence to settle a whole room's same-tick burst;
+       // only the latest 32 entries are included in the presentation snapshot.
+       if(state.commandResults.length>256)state.commandResults.splice(0,state.commandResults.length-256);
+       if(!result.ok)this.emit('cocs-command-rejected',entry);
       }
      }
      const buys=inputs?.cocs?.buys;

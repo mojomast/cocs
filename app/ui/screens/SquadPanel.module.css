@@ -1,0 +1,32 @@
+.panel { pointer-events: auto; min-width: 0; padding: 14px; color: #e7f2f6; background: #0c1720f2; border: 1px solid #66889870; border-radius: 8px; font-size: 12px; }
+.heading, .squadHeading { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; }
+.heading { justify-content: space-between; }
+.heading h3 { margin: 0; font-size: 14px; letter-spacing: .12em; }
+.heading p { margin: 4px 0 0; }
+.heading > span, .squadHeading > span, .help { color: #aec3cc; }
+.help { margin: 9px 0; line-height: 1.5; }
+.orders { display: grid; gap: 5px; margin: 12px 0; padding: 9px; border-left: 2px solid #88c7dd; background: #88c7dd0c; }
+.orders b { margin-right: 6px; font-size: 10px; letter-spacing: .06em; }
+.squads, .roster { list-style: none; padding: 0; margin: 0; }
+.squads { display: grid; gap: 8px; }
+.squad { padding: 10px; border: 1px solid #66889850; border-radius: 5px; }
+.mine { border-color: #98d8e9; }
+.squadHeading > b { flex: 1; overflow-wrap: anywhere; }
+.roster > li { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 8px; padding-top: 9px; }
+.roster b { font-weight: 500; overflow-wrap: anywhere; }
+.roster small { display: block; margin-top: 3px; color: #aec3cc; }
+.memberActions { display: flex; flex-wrap: wrap; gap: 5px; }
+.panel button, .panel input, .panel select { min-height: 34px; border: 1px solid #668898; border-radius: 4px; background: #182c38; color: #e7f2f6; font: inherit; }
+.panel button { padding: 5px 9px; cursor: pointer; }
+.panel button:disabled, .panel input:disabled, .panel select:disabled { opacity: .5; cursor: default; }
+.panel button:hover:not(:disabled) { background: #294858; }
+.panel :is(button, input, select):focus-visible { outline: 2px solid #b9f0ff; outline-offset: 3px; }
+.create { display: flex; align-items: center; flex-wrap: wrap; gap: 7px; margin-top: 12px; }
+.create label { flex-basis: 100%; }
+.create input { flex: 1; min-width: 100px; padding: 5px 8px; }
+.command { border-top: 1px solid #66889850; margin-top: 12px; padding-top: 12px; }
+.commandControls { display: grid; gap: 8px; }
+.commandControls label { display: grid; grid-template-columns: 90px minmax(0, 1fr); align-items: center; gap: 8px; }
+.commandControls select { min-width: 0; width: 100%; padding: 4px; }
+.status { margin: 12px 0 0; line-height: 1.5; color: #b9d9e5; overflow-wrap: anywhere; }
+@media (max-width: 480px) { .panel { padding: 10px; } .memberActions { width: 100%; } .panel button { min-height: 40px; } }

@@ -1,0 +1,77 @@
+/* All groups share a single horizontal track, including free-flight controls.
+   Native overflow keeps every button keyboard- and touch-accessible. */
+.toolbar:global(.demo-controls) {
+  top: calc(var(--safe-top) + 8px);
+  left: var(--safe-left);
+  right: var(--safe-right);
+  max-width: none;
+  display: flex;
+  flex-direction: row;
+  flex-wrap: nowrap;
+  align-items: center;
+  gap: 12px;
+  padding: 6px 8px;
+  overflow-x: auto;
+  overscroll-behavior-x: contain;
+  scrollbar-width: thin;
+  scrollbar-color: #54786c #091513;
+  scroll-padding-inline: 12px;
+  white-space: nowrap;
+  background: #081311f5;
+  border: 1px solid #38584e;
+  border-radius: 8px;
+  box-shadow: 0 4px 16px #0005;
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
+}
+.toolbar > * { flex: 0 0 auto; }
+.toolbar :global(.demo-controls__row),
+.toolbar :global(.demo-options) {
+  display: flex;
+  flex-flow: row nowrap;
+  align-items: center;
+  justify-content: flex-start;
+  gap: 6px;
+  margin: 0;
+  padding: 0 12px 0 0;
+  border: 0;
+  border-right: 1px solid #38584e;
+}
+.toolbar :global(.demo-controls__row) > *,
+.toolbar :global(.demo-options) > * { flex-shrink: 0; }
+.toolbar :global(.demo-controls__label) {
+  min-width: 0;
+  max-width: 220px;
+  align-items: flex-start;
+  padding: 0 6px;
+  font-size: 10px;
+  letter-spacing: .06em;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.toolbar :global(.demo-controls__label) em { font-size: 9px; letter-spacing: .04em; }
+.toolbar :global(.demo-option),
+.toolbar :global(.icon-button) {
+  min-width: 44px;
+  min-height: 44px;
+  border-radius: 5px;
+  font-size: 10px;
+  letter-spacing: .05em;
+}
+.toolbar :global(.demo-option) { padding: 8px; }
+.toolbar :global(.demo-controls__enter) {
+  width: max-content;
+  min-width: 0;
+  flex: none;
+  min-height: 44px;
+  margin: 0;
+  padding: 10px 14px;
+  border-radius: 5px;
+  background: var(--accent, #83f4d5);
+  color: #071b15;
+  font-size: 11px;
+}
+.toolbar button:focus-visible { outline: 2px solid #eafff6; outline-offset: -3px; }
+.notice, .help { margin: 0; font: 10px/1.4 var(--font-mono); color: #b4cec2; }
+.notice[role='alert'] { color: #ffaaaa; }
+.help { color: #93afa2; }

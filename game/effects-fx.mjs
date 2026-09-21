@@ -164,8 +164,8 @@ export class DecalPool{
   let slot=this.slots.find(s=>!s.active);
   if(slot)return slot;
   if(this.slots.length>=this.limit){this.slots.sort((a,b)=>a.serial-b.serial);return this.slots[0];}
-  const material=new T.MeshBasicMaterial({transparent:true,depthWrite:false,side:T.DoubleSide,map:this.mask??null});
-  const obj=new T.Mesh(this.geometry,material);obj.visible=false;obj.frustumCulled=false;obj.renderOrder=3;
+  const material=new T.MeshBasicMaterial({transparent:true,depthWrite:false,side:T.DoubleSide,forceSinglePass:true,map:this.mask??null});
+  const obj=new T.Mesh(this.geometry,material);obj.visible=false;obj.renderOrder=3;
   obj.userData.decal=true;this.scene.add(obj);slot={obj,material,active:false,serial:0,size:1,opacity:.58};this.slots.push(slot);return slot;
  }
  spawn(pos,{color='#171310',size=.32,life=5.5,reduced=false,seed=0,dir=null,flat=false}={}){
@@ -232,8 +232,8 @@ export class RipplePool{
   let slot=this.slots.find(s=>!s.active);
   if(slot)return slot;
   if(this.slots.length>=this.limit){this.slots.sort((a,b)=>a.serial-b.serial);return this.slots[0];}
-  const material=new T.MeshBasicMaterial({transparent:true,depthWrite:false,map:this.mask??null,blending:T.AdditiveBlending,side:T.DoubleSide});
-  const obj=new T.Mesh(this.geometry,material);obj.visible=false;obj.frustumCulled=false;obj.renderOrder=2;
+  const material=new T.MeshBasicMaterial({transparent:true,depthWrite:false,map:this.mask??null,blending:T.AdditiveBlending,side:T.DoubleSide,forceSinglePass:true});
+  const obj=new T.Mesh(this.geometry,material);obj.visible=false;obj.renderOrder=2;
   obj.userData.ripple=true;this.scene.add(obj);slot={obj,material,active:false,serial:0,delay:0,life:0,total:1,base:.1,grow:.4,reduced:false};this.slots.push(slot);return slot;
  }
  // `delay` is the deterministic time-to-impact; the slot stays hidden until then
@@ -287,8 +287,8 @@ export class ContactShadowPool{
   let slot=this.slots.find(s=>!s.active);
   if(slot)return slot;
   if(this.slots.length>=this.limit){this.slots.sort((a,b)=>a.serial-b.serial);return this.slots[0];}
-  const material=new T.MeshBasicMaterial({transparent:true,depthWrite:false,side:T.DoubleSide,map:this.mask??null,color:'#05080b'});
-  const obj=new T.Mesh(this.geometry,material);obj.visible=false;obj.frustumCulled=false;obj.renderOrder=2;
+  const material=new T.MeshBasicMaterial({transparent:true,depthWrite:false,side:T.DoubleSide,forceSinglePass:true,map:this.mask??null,color:'#05080b'});
+  const obj=new T.Mesh(this.geometry,material);obj.visible=false;obj.renderOrder=2;
   obj.userData.contactShadow=true;this.scene.add(obj);
   slot={obj,material,active:false,serial:++this.serial,frame:-1};this.slots.push(slot);return slot;
  }

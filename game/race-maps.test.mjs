@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import {MAPS,getMap} from './maps.mjs';
 import {PUMA_CIRCUIT as arena,RACE_MAPS} from './race-maps.mjs';
 import {GAME_MODES} from './config.mjs';
-import {arenaSupportsMode,mapsForMode,maxBotsFor,resolveMapForMode} from './arenas.mjs';
+import {arenaMeta,arenaSupportsMode,mapsForMode,maxBotsFor,resolveMapForMode} from './arenas.mjs';
 import {floorAt,obstructed,navigation,walkEdge} from './core.mjs';
 
 // Mirrors the generator: consecutive collinear boundary points collapse to one
@@ -36,12 +36,23 @@ const closestPair=(points)=>Math.min(...points.flatMap((p,i)=>points.slice(i+1).
 const railBoxes=side=>arena.blocks.filter(b=>b.kind==='race-rail'&&b.side===side);
 
 test('Puma Circuit is immutable and exclusively registered for racing, including fallback metadata',()=>{
- assert.equal(getMap('puma-circuit'),arena);assert.deepEqual(RACE_MAPS,[arena]);
+ assert.equal(getMap('puma-circuit'),arena);assert.ok(RACE_MAPS.includes(arena));
+ assert.equal(new Set(RACE_MAPS.map(map=>map.id)).size,RACE_MAPS.length);
+ for(const map of RACE_MAPS)assert.equal(getMap(map.id),map);
  assert.ok(Object.isFrozen(arena.race.grid[0]));
  assert.ok(Object.isFrozen(arena.race.boundary)&&Object.isFrozen(arena.race.boundary.outer)&&Object.isFrozen(arena.race.boundary.inner[0]));
- assert.deepEqual(mapsForMode('puma-race'),[arena]);assert.equal(maxBotsFor('puma-race'),7);
+ const circuits=mapsForMode('puma-race');
+ assert.equal(circuits[0],arena,'Puma Circuit remains the default');
+ assert.ok(circuits.some(map=>map.id==='ion-speedway'));
+ assert.deepEqual(circuits,MAPS.filter(map=>map.race&&map.race.kind!=='soccer'&&!arenaMeta(map.id).legacy));
+ assert.equal(maxBotsFor('puma-race'),7);
  assert.equal(resolveMapForMode('exchange','puma-race'),'puma-circuit');
- for(const map of MAPS)assert.equal(arenaSupportsMode(map.id,'puma-race'),map===arena);
+ for(const map of MAPS)assert.equal(arenaSupportsMode(map.id,'puma-race'),Boolean(map.race&&map.race.kind!=='soccer'),map.id);
+ for(const map of circuits){
+  assert.ok(arenaMeta(map.id).play.includes('puma-race'));
+  assert.equal(resolveMapForMode(map.id,'puma-race'),map.id);
+  for(const mode of GAME_MODES)assert.equal(arenaSupportsMode(map.id,mode.id),mode.id==='puma-race',`${map.id}/${mode.id}`);
+ }
  for(const mode of GAME_MODES)assert.equal(arenaSupportsMode(arena.id,mode.id),mode.id==='puma-race');
  assert.equal(arenaSupportsMode(arena.id,'puma-soccer'),false);
  assert.equal(arenaSupportsMode('puma-pitch','puma-race'),false);

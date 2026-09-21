@@ -21,6 +21,7 @@ import {CharacterLifecycle,alignLivingCharacter,applyLivingSecondary,ProceduralS
 import {refineOperatorCharacter} from './models.mjs';
 import {terrainTriangles,terrainWallTriangles} from './terrain.mjs';
 import {foundryDetails,styleFoundryObjective} from './lattice-foundry-view.mjs';
+import {destinationDetails} from './destination-details.mjs';
 import {latticePresentationChanges} from './lattice-feedback.mjs';
 import {updateLatticeWorld,clearLatticeWorld} from './lattice-view.mjs';
 import {buildInteriors,interiorAt} from './interiors.mjs';
@@ -1107,6 +1108,16 @@ function traversalItems(arena,name){const t=arena.traversal||arena.traversalMeta
  return arena[name]||[];}
 // Surface palettes remain readable in the CPU renderer, which has no shader lighting.
 const arenaLooks={
+ // DESTINATIONS: material/light identities complement each authored layout.
+ 'meridian-exchange':['#536578','#6b8390','#dfb86c','#d8ecff','#273541',.0045,.38],
+ 'verdant-reliquary':['#526944','#8a9777','#c4bb83','#e8f4c6','#263d30',.005,.12],
+ 'ember-crucible':['#473329','#746359','#d99854','#ffdfb4','#321f23',.006,.48],
+ 'tidal-citadel':['#b0cbd4','#8aa4b2','#dae9ed','#e0f4ff','#3b556a',.0035,.32],
+ 'sunscar-convoy':['#b08a59','#b3946a','#e4b86c','#fff0ca','#534339',.003,.18],
+ 'asterion-relay':['#414a69','#718199','#b3c5ec','#dce8ff','#27233d',.0035,.55],
+ 'monsoon-foundry':['#52665c','#668274','#bba46d','#d3efdf','#243731',.0045,.34],
+ 'ion-speedway':['#333c50','#3b405d','#e4af72','#e7dbff','#262c45',.0025,.42],
+ 'aurora-stadium':['#527664','#647d94','#d3eaf4','#e8f5ff','#2f4960',.003,.26],
  'puma-circuit':['#292d34','#343c49','#b08042','#ffe1af','#17222d',.006,.35],
  exchange:['#253d40','#182b30','#72918b','#c3ffe9','#163d39',.016,.62],
  // Moth Quantum labyrinth: a cold teal graph-lit interior.
@@ -2142,9 +2153,24 @@ export class ArenaView{
      this._compositeLab(lab,this._targetState('weapon'),display,{keepAlpha:true,depthTest:false});
      return true;
     }
-    buildArena(arena=MAPS[0]){clearLatticeWorld(this);return withAssets(this.arenaAssets??=new ModelAssets(),()=>this._buildArena(arena));}
-    _buildArena(arena=MAPS[0]){this._disposeMothSprites();if(this.worldGroup){this.scene.remove(this.worldGroup);this.disposeObject(this.worldGroup);for(const resource of this.renderResources||[])resource.dispose();this.renderResources?.clear();this.flagAssets=null;}this.sky=null;this.mountains=null;this.backdrop=null;this.objectiveModels=new Map();this.interiors=buildInteriors(arena.structures||[]);this._interiorBlend=0;this._mothRift=null;this._mothRiftSheet=null;this.mapId=arena.id;this.viewAudio?.setSpace?.(mothSpaceFor(arena.id));this.viewAudio?.setEchoMap?.(mothEchoFor(arena.id));applyArenaBiomePalette(this.viewAudio,arena);const world=new T.Group();this.worldGroup=world;this.scene.add(world);this.scene.background=new T.Color(arena.background);this.scene.fog=new T.FogExp2(arena.background,.018);const bounds=arenaBounds(arena),legacy=!arena.bounds,minX=bounds.minX,maxX=bounds.maxX,minZ=bounds.minZ,maxZ=bounds.maxZ,width=maxX-minX,depth=maxZ-minZ;
+    buildArena(arena=MAPS[0]){
+     clearLatticeWorld(this);this._disposeMothSprites();
+     if(this.worldGroup){this.scene.remove(this.worldGroup);this.disposeObject(this.worldGroup);this.worldGroup=null;}
+     this._disposeArenaResources();this.flagAssets=null;
+     this.arenaAssets=new ModelAssets();this.renderResources??=new Set();
+     return withAssets(this.arenaAssets,()=>this._buildArena(arena));
+    }
+    // One owner per map, including cached primitives and detached batch sources.
+    _disposeArenaResources(){
+     const cached=this.arenaAssets?.resources;
+     for(const resource of this.renderResources||[])if(!cached?.has(resource)&&!this.sharedResources?.has(resource))resource.dispose();
+     this.renderResources?.clear();this.arenaAssets?.dispose();this.arenaAssets=null;
+    }
+    _buildArena(arena=MAPS[0]){this.sky=null;this.mountains=null;this.backdrop=null;this.objectiveModels=new Map();this.interiors=buildInteriors(arena.structures||[]);this._interiorBlend=0;this._mothRift=null;this._mothRiftSheet=null;this.mapId=arena.id;this.viewAudio?.setSpace?.(mothSpaceFor(arena.id));this.viewAudio?.setEchoMap?.(mothEchoFor(arena.id));applyArenaBiomePalette(this.viewAudio,arena);const world=new T.Group();this.worldGroup=world;this.scene.add(world);this.scene.background=new T.Color(arena.background);this.scene.fog=new T.FogExp2(arena.background,.018);const bounds=arenaBounds(arena),legacy=!arena.bounds,minX=bounds.minX,maxX=bounds.maxX,minZ=bounds.minZ,maxZ=bounds.maxZ,width=maxX-minX,depth=maxZ-minZ;
     const look=arenaLooks[arena.id]||arenaLooks.exchange,[floorColor,wallColor,trimColor,skyColor,groundColor,fogDensity,metal]=look;
+    // Large destination overviews and long ground lanes must not be cut off by
+    // the original compact-arena 220m far plane.
+    if(this.camera){const far=Math.max(220,Math.hypot(width,depth)*2.2);if(this.camera.far!==far){this.camera.far=far;this.camera.updateProjectionMatrix?.();}}
     this.scene.fog.density=fogDensity;world.userData.look=arena.id;
     for(const light of this.scene.children){if(light.userData?.rimLight)continue;if(light.isHemisphereLight){light.color.set(skyColor);light.groundColor.set(groundColor);light.intensity=arena.terrain?2.5:1.8;}if(light.isDirectionalLight){light.color.set(skyColor);light.intensity=arena.terrain?3.1:2.4;light.position.set(arena.id==='aether'?-18:18,24,arena.id==='foundry'?-12:10);}}
     // Snapshot the authored look so weather/time-of-day tinting always lerps
@@ -2225,14 +2251,16 @@ export class ArenaView{
   for(const [index,b] of arena.blocks.entries()){
    const rock=arena.id==='blood-gulch'&&(['cover','landmark','rock','boulder'].includes(b.kind)),bunker=b.kind?.startsWith('base-')||b.kind==='cliff-outpost',raceMat=raceMats?.[b.kind];
    const blockKind=rock?'rock':(b.kind==='reactor'?'hazard_stripes':(bunker?'riveted_armor':(arena.id==='citadel'?'riveted_armor':(['ironfall-megastructure','substation'].includes(arena.id)?'metal_grating':(arena.id==='neon-vertical'||arena.id==='aether'?'hex_paneling':(arena.id==='foundry'?'hazard_stripes':'metal'))))));
-   const blockMat=variant('block',raceMat??(rock?rockMat:wall),{map:textured&&!raceMat,kind:blockKind}),body=box(world,b.w,b.h,b.d,b.x,b.h/2,b.z,blockMat);paintGeometry(body.geometry,arenaSeed+index*13+1,.16);body.userData.block=index;body.castShadow=true;body.receiveShadow=true;
+   const blockMat=variant('block',raceMat??(rock?rockMat:wall),{map:textured&&!raceMat,kind:blockKind}),body=box(world,b.w,b.h,b.d,b.x,b.h/2,b.z,blockMat);
+   // Per-block paint must never mutate the size-keyed primitive shared by the map.
+   body.geometry=body.geometry.clone();paintGeometry(body.geometry,arenaSeed+index*13+1,.16);body.userData.block=index;body.castShadow=true;body.receiveShadow=true;
     // Rails are continuous collision runs of overlapping boxes; render the
     // smooth barrier walls in raceTrackModel instead so they never z-fight.
     if(raceMat){if(b.kind==='race-rail'||b.kind==='soccer-goal'){body.visible=false;body.castShadow=false;body.receiveShadow=false;}continue;}
    // Foundation tops already live in the authoritative terrain mesh. Keep the
    // solid's side skirt, but no coplanar top or unrelated legacy facade trim.
    if(arena.nextGen===true&&b.kind==='foundation'){
-    const g=body.geometry.clone();body.geometry=g;this.renderResources.add(g);const index=g.index,indices=[];
+    const g=body.geometry,index=g.index,indices=[];
     for(let i=0;i<index.count;i+=3)if(g.attributes.normal.getY(index.getX(i))<.5)indices.push(index.getX(i),index.getX(i+1),index.getX(i+2));
     g.setIndex(indices);continue;
    }
@@ -2240,7 +2268,7 @@ export class ArenaView{
    if(arena.nextGen===true&&NEXTGEN_PROXY.has(b.kind)){body.visible=false;continue;}
    // Foundry has its own restrained copper/ceramic kit pass below; stacking the
    // legacy full-height panels over it obscures doors and doubles the art bill.
-   if(arena.foundry)continue;
+    if(arena.foundry||arena.collection==='destinations')continue;
    // Keep the complete collision box visible: rock fractures and armor are surface treatments.
    if(rock){const positions=[];for(const sign of [-1,1])for(let row=1;row<=3;row++){const y=b.h*row/4;positions.push(b.x-b.w/2,y,b.z+sign*(b.d/2+.006),b.x+b.w/2,y+.12,b.z+sign*(b.d/2+.006));positions.push(b.x+sign*(b.w/2+.006),y,b.z-b.d/2,b.x+sign*(b.w/2+.006),y-.08,b.z+b.d/2);}const geometry=new T.BufferGeometry();geometry.setAttribute('position',new T.Float32BufferAttribute(positions,3));const fractures=new T.LineSegments(geometry,new T.LineBasicMaterial({color:'#514e40'}));fractures.userData.rockDetail=true;world.add(fractures);detail(b.w*.72,.014,b.d*.68,b.x,b.h+.008,b.z,trim);continue;}
    const accent=bunker?teamMats[b.x<0?0:1]:glow;
@@ -2265,6 +2293,7 @@ export class ArenaView{
    if(arena.id==='launchpad')for(let x=minX+3;x<maxX-2;x+=3)for(const sign of [-1,1])detail(1.5,.016,.22,x,.024,sign*10,glow);
   }
    foundryDetails(world,arena,{detail,material,textLabel,palette,trim,glow});
+   world.userData.destinationDetails=destinationDetails(world,arena,{detail,material,textLabel,palette,trim,glow});
    for(const [mat,entry] of detailBatches){const geometry=new T.BufferGeometry();geometry.setAttribute('position',new T.Float32BufferAttribute(entry.positions,3));geometry.computeVertexNormals();paintGeometry(geometry,arenaSeed+77,.14);const mesh=new T.Mesh(geometry,mat);mesh.userData.arenaDetail=true;mesh.receiveShadow=true;world.add(mesh);}unit.dispose();
  if(arena.raised){for(const x of [-11.05,11.05]){const length=Math.hypot(12,3.8),ramp=box(world,5.5,.18,length,x,1.83,-3,floor);ramp.rotation.x=Math.atan(3.8/12);for(const sx of [-2.2,2.2]){const strip=box(world,.06,.04,length,x+sx,1.96,-3,glow);strip.rotation.x=Math.atan(3.8/12);}}box(world,27,.06,.07,0,3.84,-9,glow);}
  if(arena.id==='crosswire'){for(const x of [-1.6,1.6])box(world,.055,.03,26,x,.04,0,glow);for(const z of [-1.6,1.6])box(world,26,.03,.055,0,.04,z,glow);ring(world,2,.025,0,6.2,0,glow);}
@@ -2279,7 +2308,18 @@ export class ArenaView{
    // the test mock keep individual meshes for predictable depth ordering).
    this._batchArenaBlocks(world);
    // Unused family colors never reach the scene's normal disposal traversal.
-    const usedMaterials=new Set();world.traverse(n=>{if(n.material)usedMaterials.add(n.material);});for(const mat of new Set(palette))if(!usedMaterials.has(mat))mat.dispose();   const skyPhaseName=skyPhase(arena),halo=HALO_MAPS.has(arena.id),sunDir=arena.id==='aether'?[-18,24,-12]:arena.id==='foundry'?[18,24,-12]:[18,24,10],quality=this._quality();this.scene.userData.sky={background:arena.background,phase:skyPhaseName,seed:arenaSeed,halo,sunDir,mood:biomeAmbience(arena).mood,weather:this.weatherState?this.weatherState.kind:'clear'};if(this.renderer?.isSoftware!==true){this.sky=addSky(world,{background:arena.background,radius:185,phase:skyPhaseName,seed:arenaSeed,starCount:Math.round((skyPhaseName==='night'?520:0)*quality.stars),halo,sunDir});this.mountains=addMountains(world,{background:arena.background,seed:arenaSeed,radius:150,count:Math.max(8,Math.round(26*quality.scatter)),base:-12,detail:quality.scatterDetail});this.backdrop=addBackdrop(world,{biome:backdropKitFor(arena).biome,seed:arenaSeed,quality});if(arena.terrain&&arena.scatter!==false)this.scatterWind=addScatter(world,{terrain:arena.terrain,bounds,seed:arenaSeed,wind:true,density:quality.scatter,detail:quality.scatterDetail,biome:arena.biome})||[];const atmosphere=mothAtmosphereFor(arena.id);if(atmosphere)this._applyMothAtmosphere(atmosphere);}
+    const usedMaterials=new Set();world.traverse(n=>{if(n.material)for(const mat of Array.isArray(n.material)?n.material:[n.material])usedMaterials.add(mat);});for(const mat of new Set(palette))if(!usedMaterials.has(mat)&&!this.arenaAssets?.resources.has(mat)&&!this.renderResources?.has(mat))mat.dispose();
+    const skyPhaseName=skyPhase(arena),halo=HALO_MAPS.has(arena.id),sunDir=arena.id==='aether'?[-18,24,-12]:arena.id==='foundry'?[18,24,-12]:[18,24,10],quality=this._quality();
+    this.scene.userData.sky={background:arena.background,phase:skyPhaseName,seed:arenaSeed,halo,sunDir,mood:biomeAmbience(arena).mood,weather:this.weatherState?this.weatherState.kind:'clear'};
+    if(this.renderer?.isSoftware!==true){
+     this.sky=addSky(world,{background:arena.background,radius:185,phase:skyPhaseName,seed:arenaSeed,starCount:Math.round((skyPhaseName==='night'?520:0)*quality.stars),halo,sunDir});
+     // Authored destination skylines stand on their own: a generic ring of
+     // cones in front would hide the city, orbital and forest silhouettes.
+     this.mountains=arena.collection==='destinations'?null:addMountains(world,{background:arena.background,seed:arenaSeed,radius:150,count:Math.max(8,Math.round(26*quality.scatter)),base:-12,detail:quality.scatterDetail});
+     this.backdrop=addBackdrop(world,{biome:backdropKitFor(arena).biome,seed:arenaSeed,quality,radius:arena.collection==='destinations'?Math.max(150,Math.hypot(width,depth)*.65):150});
+     if(arena.terrain&&arena.scatter!==false)this.scatterWind=addScatter(world,{terrain:arena.terrain,bounds,seed:arenaSeed,wind:true,density:quality.scatter,detail:quality.scatterDetail,biome:arena.biome})||[];
+     const atmosphere=mothAtmosphereFor(arena.id);if(atmosphere)this._applyMothAtmosphere(atmosphere);
+    }
     else this.scatterWind=[];
     this.ambientFx=null;this.ambientPool?.dispose?.();this.ambientPool=null;this.ambientConfig=ambientProfile(arena,skyPhaseName);this.ambientSeed=arenaSeed;this.ambientAnchors=smokeAnchors(bounds,arenaSeed,4);
     this.weatherFx=null;this.weatherPool?.dispose?.();this.weatherPool=null;this.ripplePool?.clear?.();this.initWeather(arena);
@@ -2323,23 +2363,24 @@ export class ArenaView{
     return mesh;
    }catch{return null;}
   }
-  // Group static meshes by material and coarse spatial cell, so each merged batch
-  // stays small enough for the frustum to cull. Pure: returns groups, merges nothing.
+  // Group compatible static meshes by material and spatial cell. Bound source
+  // counts as well as spatial extent; preserve vertex layouts and render flags.
   _groupByMaterialChunk(meshes,chunkSize=24){
    const size=Math.max(4,Number(chunkSize)||24),groups=new Map();
    for(const mesh of meshes||[]){
-    const mat=mesh.material,key=`${mat?.uuid||'none'}|${Math.floor((mesh.position.x||0)/size)},${Math.floor((mesh.position.z||0)/size)}`;
-    let group=groups.get(key);if(!group){group={material:mat,meshes:[]};groups.set(key,group);}group.meshes.push(mesh);
+    const mat=mesh.material,g=mesh.geometry,layout=Object.entries(g.attributes).sort(([a],[b])=>a.localeCompare(b)).map(([key,a])=>`${key}:${a.itemSize}:${a.normalized}:${a.array.constructor.name}`).join(','),kind=Number.isInteger(mesh.userData.block)?'block':'architecture';
+    const key=`${mat?.uuid||'none'}|${Math.floor((mesh.position.x||0)/size)},${Math.floor((mesh.position.z||0)/size)}|${kind}|${!!g.index}|${layout}|${mesh.castShadow}|${mesh.receiveShadow}|${mesh.renderOrder}|${mesh.layers.mask}`;
+    let chunks=groups.get(key);if(!chunks){chunks=[];groups.set(key,chunks);}
+    let group=chunks.at(-1);if(!group||group.meshes.length>=128){group={material:mat,meshes:[]};chunks.push(group);}group.meshes.push(mesh);
    }
-   return [...groups.values()];
+   return [...groups.values()].flat();
   }
-  // Batch visible static block meshes on real WebGL only. Each batch preserves the
-  // block's authored transform and material; the authoritative collision boxes in
-  // `arena.blocks` are untouched and a bounded per-batch block count is recorded.
+  // Batch opaque blocks, facade details and ruins on real WebGL only. These are
+  // direct world children with rigid transforms; collision data stays authoritative.
   _batchArenaBlocks(world){
    if(this.renderer?.isWebGLRenderer!==true||typeof mergeGeometries!=='function'||!world)return 0;
-   const candidates=world.children.filter(n=>n.isMesh&&Number.isInteger(n.userData.block)&&n.visible);
-   let batches=0,merged=0;
+   const candidates=world.children.filter(n=>n.isMesh&&!n.isInstancedMesh&&n.visible&&!Array.isArray(n.material)&&!n.material?.transparent&&(Number.isInteger(n.userData.block)||n.userData.facadeDetail||n.userData.ruinDetail));
+   let batches=0,merged=0,architectureBatches=0,architectureCount=0;
    for(const group of this._groupByMaterialChunk(candidates,24)){
     if(group.meshes.length<2)continue;
     const geoms=[];
@@ -2347,15 +2388,24 @@ export class ArenaView{
     const geometry=mergeGeometries(geoms,false);
     for(const g of geoms)g.dispose();
     if(!geometry)continue;
-    const batch=new T.Mesh(geometry,group.material);
-    batch.castShadow=true;batch.receiveShadow=true;batch.userData.blockBatch=true;batch.userData.blocks=group.meshes.length;
+    const source=group.meshes[0],block=Number.isInteger(source.userData.block),batch=new T.Mesh(geometry,group.material);
+    batch.castShadow=source.castShadow;batch.receiveShadow=source.receiveShadow;batch.renderOrder=source.renderOrder;batch.layers.mask=source.layers.mask;
+    if(block){batch.userData.blockBatch=true;batch.userData.blocks=group.meshes.length;}
+    else{batch.userData.architectureBatch=true;batch.userData.staticMeshes=group.meshes.length;}
     world.add(batch);
-    for(const mesh of group.meshes)world.remove(mesh);
-    batches++;merged+=group.meshes.length;
+    for(const mesh of group.meshes){
+     // Sources can share geometry with unmerged meshes. Retain ownership until
+     // map teardown instead of disposing a still-live primitive or leaking it.
+     if(!this.arenaAssets?.resources.has(mesh.geometry)&&!this.sharedResources?.has(mesh.geometry))(this.renderResources??=new Set()).add(mesh.geometry);
+     world.remove(mesh);
+    }
+    if(block){batches++;merged+=group.meshes.length;}else{architectureBatches++;architectureCount+=group.meshes.length;}
    }
    world.userData.blockBatches=batches;
    world.userData.blockBatchCount=merged;
-   return batches;
+   world.userData.architectureBatches=architectureBatches;
+   world.userData.architectureBatchCount=architectureCount;
+   return batches+architectureBatches;
   }
     addTraversal(world,arena,glow){const pads=[...traversalItems(arena,'trampolines'),...traversalItems(arena,'jumpPads'),...traversalItems(arena,'pads')],launchers=[...traversalItems(arena,'boostLaunchers'),...traversalItems(arena,'launchers')],links=arena.jumpLinks||[];const shared=this.renderResources??=new Set(),padGeo=new T.CylinderGeometry(.7,.7,.12,16),padMat=this._mothLutMaterial('entanglement-arcane',{base:{color:arena.color,metalness:.25,roughness:.25,emissive:arena.color},phase:.2,intensity:.35})??material(arena.color,.25,.25,true),launchGeo=new T.BoxGeometry(.8,.1,1.3),launchMat=material(arena.color,.25,.25,true);shared.add(padGeo).add(padMat).add(launchGeo).add(launchMat);for(const raw of pads){const p=pointOf(raw),y=p.y??0,m=new T.Mesh(padGeo,padMat);m.position.set(p.x,y+.06,p.z);m.userData.traversal='trampoline';world.add(m);ring(world,.78,.035,p.x,y+.13,p.z,padMat); }for(const raw of launchers){const p=pointOf(raw),y=p.y??0,m=new T.Mesh(launchGeo,launchMat),id=raw.id??raw.traversal??raw.traversalId??raw.traversalID,link=links.find(item=>(item.traversal??item.traversalId??item.traversalID)===id),from=link&&pointOf(link.source),to=link&&pointOf(link.target);m.position.set(p.x,y+.05,p.z);m.rotation.y=from&&to?Math.atan2(to.x-from.x,to.z-from.z):raw.rotation??raw.yaw??(Array.isArray(raw.dir)?Math.atan2(raw.dir[0],raw.dir[1]):0);m.userData.traversal='boost-launcher';world.add(m);m.userData.stripes=[-.25,.25].map(x=>box(m,.06,.04,.9,x,.08,0,glow));}for(const link of links){const from=pointOf(link.source),to=pointOf(link.target),mid=V((from.x+to.x)/2,Math.max(from.y??0,to.y??0)+4,(from.z+to.z)/2),geo=new T.BufferGeometry().setFromPoints([V(from.x,(from.y??0)+.14,from.z),mid,V(to.x,(to.y??0)+.14,to.z)]),arc=new T.Line(geo,glow);arc.userData.traversal='jump-link';world.add(arc);}const teleporters=traversalItems(arena,'teleporters');if(teleporters.length){const padGeo2=new T.CylinderGeometry(.9,.9,.16,20),padMat2=this._mothLutMaterial('entanglement-arcane',{base:{color:arena.color,metalness:.3,roughness:.25,emissive:arena.color},phase:.55,intensity:.6})??material(arena.color,.3,.25,true);shared.add(padGeo2).add(padMat2);for(const raw of teleporters){const p=pointOf(raw),y=p.y??0,m=new T.Mesh(padGeo2,padMat2);m.position.set(p.x,y+.08,p.z);m.userData.traversal='teleporter';world.add(m);ring(world,1,.04,p.x,y+.16,p.z,padMat2);ring(world,1.35,.03,p.x,y+.16,p.z,padMat2);}}const ziplines=traversalItems(arena,'ziplines');if(ziplines.length){const cableMat=material('#e7b55b',.55,.32,true),anchorMat=material('#c9d6dd',.85,.3);shared.add(cableMat).add(anchorMat);const groundAt=(x,z)=>arena.terrain?.height?.(x,z)??0;for(const raw of ziplines){const from=pointOf(raw.from??raw.a),to=pointOf(raw.to??raw.b),lift=Number(raw.lift)||0,sag=Math.max(0,Number(raw.sag)||0),ax=from.x,ay=(from.y??groundAt(ax,from.z))+lift,az=from.z,bx=to.x,by=(to.y??groundAt(bx,to.z))+lift,bz=to.z,cableY=y=>y+ZIP_CABLE_HANDLE,control=V((ax+bx)/2,cableY((ay+by)/2-2*sag),(az+bz)/2),curve=new T.QuadraticBezierCurve3(V(ax,cableY(ay),az),control,V(bx,cableY(by),bz)),cable=new T.Mesh(new T.TubeGeometry(curve,14,.07,5,false),cableMat);cable.userData.traversal='zipline';world.add(cable);for(const [x,y,z] of [[ax,cableY(ay),az],[bx,cableY(by),bz]]){const floor=groundAt(x,z),top=Math.max(y,floor+.6),h=top-floor,post=cylinder(world,.06,.09,h,x,floor+h/2,z,anchorMat,8);post.userData.traversal='zipline';ring(world,.2,.028,x,y,z,cableMat,0);}}}}
  // Smooth geometry for next-gen maps: roofs, arches, columns, tunnels, cavern
@@ -2367,6 +2417,7 @@ export class ArenaView{
   const geo=(key,make)=>{let g=cache.get(key);if(!g){g=make();cache.set(key,g);shared.add(g);}return g;};
   const surfaceSeed=arenaSeedOf(arena),wallMat=this._mothSurface(material(arena.color,.35,.5,false),'rough_stucco',1,1,surfaceSeed),stone=this._mothSurface(material('#8a8378',.05,.92),'rock',2,2,surfaceSeed),wood=material('#6b4a2f',.1,.85),leaf=this._mothSurface(material('#4f8f4a',.15,.85),'alien_chitin',2,2,surfaceSeed),metal=this._mothSurface(material('#6b737a',.65,.45),'metal',1,1,surfaceSeed),barrel=this._mothSurface(material('#b0703f',.35,.6),'brushed_metal',2,1,surfaceSeed),dark=material('#20262b',.5,.55),glass=material('#8fd8ff',.2,.15,true),tunnelMat=this._mothSurface(material('#7c756a',.04,.94),'rock',1,1,surfaceSeed),caveMat=this._mothSurface(material('#6a6258',.03,.96),'rock',2,2,surfaceSeed);tunnelMat.side=T.DoubleSide;caveMat.side=T.DoubleSide;
   const hash3=(x,y,z,s)=>{let h=Math.imul(Math.round(x*13)+1,374761393)^Math.imul(Math.round(y*13)+7,668265263)^Math.imul(Math.round(z*13)+3,s|0);h=Math.imul(h^(h>>>13),1274126177);h^=h>>>16;return (h>>>0)/4294967295;};
+  if(arena.collection==='destinations'){glass.color.set(arena.color);glass.emissive.set(arena.color);glass.emissiveIntensity=.3;glass.roughness=.48;glass.metalness=.15;}
   const mesh=(g,m,x,y,z,rx=0,ry=0,rz=0)=>{const o=new T.Mesh(g,m);o.position.set(x,y,z);o.rotation.set(rx,ry,rz);o.castShadow=true;o.receiveShadow=true;world.add(o);return o;};
   for(const s of structures){
    if(s.type==='building'){
@@ -2380,7 +2431,7 @@ export class ArenaView{
      continue;
     }
     const alongX=Math.abs(Math.sin(s.rot))<.5,rows=Math.max(1,s.rows),count=Math.max(2,Math.floor(s.w/3.2)),gx=geo('win-x',()=>new T.BoxGeometry(1.5,1,.14)),gz=geo('win-z',()=>new T.BoxGeometry(.14,1,1.5));
-    for(let r=0;r<rows;r++)for(let i=0;i<count;i++){const off=(i/(count-1||1)-.5)*s.w,px=alongX?s.x+off:s.x,pz=alongX?s.z:s.z+off;mesh(alongX?gx:gz,glass,px,s.y+r*1.7,pz);}
+    for(let r=0;r<rows;r++)for(let i=0;i<count;i++){const off=(i/(count-1||1)-.5)*s.w,px=alongX?s.x+off:s.x,pz=alongX?s.z:s.z+off;mesh(alongX?gx:gz,glass,px,s.y+r*1.7,pz).userData.facadeDetail=true;}
    }else if(s.type==='arch'){
     const half=Math.max(1.5,s.width/2),th=.35,h=s.height??5,g=geo(`arch|${half.toFixed(1)}`,()=>new T.TorusGeometry(half,th,8,22,Math.PI)),cg=geo(`acol|${th}`,()=>new T.CylinderGeometry(th,th,h,10));
     mesh(g,wallMat,s.x,s.y+h,s.z,0,s.rot,0);
@@ -2441,7 +2492,7 @@ export class ArenaView{
    instance(geo('prop-ice',()=>paintGeometry(new T.ConeGeometry(.55,2.2,lowDetail?6:8),29,.14)),iceMat,groups.iceSpike,(p,m)=>{const s=p.scale??1;m.position.set(p.x,p.y+1.1*s,p.z);m.rotation.set(0,(p.seed??0)*.9,0);m.scale.setScalar(s);});
    this._registerBreakables(props,{crate:crateMesh,barrel:barrelMesh});
    const ruinGeo=geo('ruinwall',()=>new T.BoxGeometry(2.6,2.4,.45));
-   for(const p of ruins){const s=p.scale??1,seg=2+((p.seed??0)%3);for(let i=0;i<seg;i++){const a=(p.seed??0)*.7+i*1.05,m=mesh(ruinGeo,stone,p.x+Math.cos(a)*1.3*s,p.y+1.1*s,p.z+Math.sin(a)*1.3*s,(p.seed%7)*.05,a,0);m.scale.set(s,s*(.6+((p.seed+i)%3)*.22),s);}}
+   for(const p of ruins){const s=p.scale??1,seg=2+((p.seed??0)%3);for(let i=0;i<seg;i++){const a=(p.seed??0)*.7+i*1.05,m=mesh(ruinGeo,stone,p.x+Math.cos(a)*1.3*s,p.y+1.1*s,p.z+Math.sin(a)*1.3*s,(p.seed%7)*.05,a,0);m.scale.set(s,s*(.6+((p.seed+i)%3)*.22),s);m.userData.ruinDetail=true;}}
   }
   // Every terrain map should carry at least one batched detail layer (floor seams
   // and route marks) so the world reads with the same polish as the legacy maps.
@@ -2973,7 +3024,7 @@ export class ArenaView{
      _buildZipCarriage(){const g=new T.Group(),metal=material('#39474f',.7,.4),brass=material('#e7b55b',.5,.3,true),wheel=cylinder(g,.075,.075,.05,0,0,0,brass,10),yoke=box(g,.05,.42,.05,0,-.24,0,metal);wheel.rotation.z=Math.PI/2;box(g,.3,.05,.05,0,-.46,0,metal);yoke.userData.zipYoke=true;return g;}
      syncVehicles(match){this.vehicleModels??=new Map();const assets=this.modelAssets??=new ModelAssets();const active=new Set((match.vehicles||[]).map(vehicle=>vehicle.id));for(const [id,model] of this.vehicleModels)if(!active.has(id)){this.scene.remove(model);this.disposeObject(model);this.vehicleModels.delete(id);}for(const vehicle of match.vehicles||[]){if(this.vehicleModels.has(vehicle.id))continue;const model=vehicleModel(vehicle.kind,assets,this.renderer?.isSoftware===true);this.vehicleModels.set(vehicle.id,model);this.scene.add(model);}this._trackAssets(assets);}
     _trackAssets(assets=this.modelAssets){if(!assets)return;const shared=this.sharedResources??=new Set();for(const resource of assets.resources)shared.add(resource);}
-    disposeObject(o){if(!o?.traverse)return;const shared=this.renderResources,modelShared=this.sharedResources,geometries=new Set(),materials=new Set(),textures=new Set();o.traverse(n=>{if(n.geometry&&!shared?.has(n.geometry)&&!modelShared?.has(n.geometry))geometries.add(n.geometry);if(n.material)for(const m of Array.isArray(n.material)?n.material:[n.material])if(!shared?.has(m)&&!modelShared?.has(m)){materials.add(m);for(const key of ['map','normalMap','roughnessMap','metalnessMap','emissiveMap','alphaMap','aoMap','bumpMap','displacementMap','envMap','lightMap','specularMap','gradientMap'])if(m[key]&&!m[key].userData?.surfaceKind&&!m[key].userData?.mothShared)textures.add(m[key]);}});for(const r of [...geometries,...materials,...textures])r.dispose();}
+    disposeObject(o){if(!o?.traverse)return;const owned=r=>this.renderResources?.has(r)||this.sharedResources?.has(r)||this.arenaAssets?.resources.has(r),geometries=new Set(),materials=new Set(),textures=new Set();o.traverse(n=>{if(n.geometry&&!owned(n.geometry))geometries.add(n.geometry);if(n.material)for(const m of Array.isArray(n.material)?n.material:[n.material])if(!owned(m)){materials.add(m);for(const key of ['map','normalMap','roughnessMap','metalnessMap','emissiveMap','alphaMap','aoMap','bumpMap','displacementMap','envMap','lightMap','specularMap','gradientMap'])if(m[key]&&!owned(m[key])&&!m[key].userData?.surfaceKind&&!m[key].userData?.mothShared)textures.add(m[key]);}});for(const r of [...geometries,...materials,...textures])r.dispose();}
    effect(e){if(!e)return;this.effectPool??=new EffectPool(this.scene);this.feedback??=new WeaponFeedback();const reduced=this.reduced(),info=weaponInfo(e.weapon??0);
    if(e.type==='death'){this.spawnDeath(e,reduced);if(this.killcamEnabled!==false&&!reduced&&e.pos&&(e.actor===this.playerId||this.spectator===true)){const focus={x:e.pos.x||0,y:e.pos.y||0,z:e.pos.z||0},killerModel=e.killer!=null?this.actorModels?.get(e.killer):null,killerPos=killerModel?.position;this._killcam={start:Number.isFinite(e.time)?e.time:0,duration:KILLCAM_DURATION,focus,killer:killerPos?{x:killerPos.x,y:killerPos.y,z:killerPos.z}:null,killerId:Number.isInteger(e.killer)?e.killer:null,seed:((Number.isFinite(e.seed)?e.seed:(e.actor??0)*7)>>>0)||1};}}
     // A local melee swing is presentation-only: the sim owns the hit, the view
@@ -3819,7 +3870,15 @@ export class ArenaView{
    // WebGL-only ambient pass: wind sway on tagged vegetation and pooled motes.
    // Both are skipped entirely for the CPU renderer and reduced motion.
    _updateWind(time,reduced){if(this.renderer?.isSoftware===true||reduced||!this.scatterWind?.length)return 0;return updateScatterSway(this.scatterWind,time,{strength:this.windGust(time)});}
-   _updateAmbient(match,delta,time,reduced){if(this.renderer?.isSoftware===true||reduced||!this.ambientConfig)return 0;const origin=this.camera?.position;if(!origin)return 0;if(!this.ambientFx){this.ambientPool??=new EffectPool(this.scene,64);this.ambientFx=new AmbientFX(this.ambientPool,{profile:this.ambientConfig,seed:this.ambientSeed??1,anchors:this.ambientAnchors,moteCap:this._quality().ambientMotes});}return this.ambientFx.update(delta,origin,{radius:9,wind:this.windGust(time),intensity:this._effectsScale??1});}
+   _updateAmbient(match,delta,time,reduced){
+    if(this.renderer?.isSoftware===true||reduced){this.ambientPool?.clear();this.ambientFx?.reset();return 0;}
+    // Age existing slots even when the emitter is disabled or has no origin.
+    this.ambientPool?.update(Number.isFinite(delta)?Math.max(0,delta):0);
+    if(!this.ambientConfig)return 0;
+    const origin=this.camera?.position;if(!origin)return 0;
+    if(!this.ambientFx){this.ambientPool??=new EffectPool(this.scene,64);this.ambientFx=new AmbientFX(this.ambientPool,{profile:this.ambientConfig,seed:this.ambientSeed??1,anchors:this.ambientAnchors,moteCap:this._quality().ambientMotes});}
+    return this.ambientFx.update(delta,origin,{radius:9,wind:this.windGust(time),intensity:this._effectsScale??1});
+   }
    // Deterministic weather + smooth time-of-day. The clock advances by frame
    // delta and is seeded per arena, so repeated runs produce identical phases.
    // Reduced motion and the CPU renderer still get the tint/sway-free sky blend;
@@ -3892,8 +3951,8 @@ export class ArenaView{
    }
    // Weather adds route through a view-owned wrapper: rain/storm drops render as
    // velocity-aligned streaks and schedule pooled ground splashes, while snow/ash
-   // keep the shared ambient pool path. feedback.mjs's WeatherFX is untouched:
-   // the wrapper only reshapes the descriptors the view owns.
+   // keep the shared pooled-mote path. The wrapper reshapes the emitter's
+   // descriptors without changing its elapsed-time cadence or spawn budget.
    _weatherAdd(desc){
     const pool=this.weatherPool;if(!pool||!desc)return null;
     if(!(Number(desc.streak)>1))return pool.add(desc);
@@ -3928,19 +3987,20 @@ export class ArenaView{
     return Boolean(pool.spawn({x:x+vx*delay,y:(Number.isFinite(landing)?landing:ground)+.02,z:z+vz*delay},{color:desc.color||'#cfe0ef',delay,life:.5,size:.3,seed:serial,reduced:false}));
    }
    _updateWeatherFx(delta,reduced,quality,arena){
-    if(this.renderer?.isSoftware===true||reduced){this.ripplePool?.clear();return 0;}
+    if(this.renderer?.isSoftware===true||reduced){this.weatherPool?.clear();this.weatherFx?.reset();this.ripplePool?.clear();return 0;}
+    this.weatherPool?.update(Number.isFinite(delta)?Math.max(0,delta):0);
     const state=this._weatherState();
+    this.weatherFx?.setPreset(state.preset);
     if(!(state.preset?.particles>0)){this.ripplePool?.clear();return 0;}
     const origin=this.camera?.position;if(!origin)return 0;
     this.weatherPool??=new EffectPool(this.scene,48);
     // WeatherFX stores the pool object and calls `pool.add`, so the wrapper is a
     // tiny pool-shaped object rather than a bare function.
     this.weatherAdd??={add:(desc)=>this._weatherAdd(desc)};
-    this.weatherArena=arena??this._matchRef?.arena??MAPS.find(map=>map.id===this.mapId)??MAPS[0];
+    this._weatherArena=arena??this._matchRef?.arena??MAPS.find(map=>map.id===this.mapId)??MAPS[0];
     const effectsScale=Number.isFinite(this._effectsScale)?this._effectsScale:1;
-    if(!this.weatherFx)this.weatherFx=new WeatherFX(this.weatherAdd,{seed:this._weatherSeed??1,cap:weatherParticleCap(state.preset,quality,effectsScale,44)});
+    if(!this.weatherFx)this.weatherFx=new WeatherFX(this.weatherAdd,{seed:this._weatherSeed??1,preset:state.preset,cap:weatherParticleCap(state.preset,quality,effectsScale,44)});
     this.weatherFx.cap=weatherParticleCap(state.preset,quality,effectsScale,44);
-    this.weatherFx.setPreset(state.preset);
     this._weatherSplashUsed=0;
     const active=this.weatherFx.update(delta,origin,{radius:10,quality:(quality?.particles??1)*effectsScale,software:false,reduced:false});
      // A gentle baked snow drift layered over the particle precipitation. Gated
@@ -4418,5 +4478,5 @@ if(freeCam){this.lowHealthOverlay?.update(false,time,delta,reduced,this.camera);
       }
       updateRace(match,time){syncRacePresentation(this,match,time);}
       _renderPreview(time,reduced){const rect=this.previewRect;if(!rect||rect.width<12||rect.height<12||!(this.renderer instanceof T.WebGLRenderer))return;const m=this.menu.model;m.rotation.y=Math.PI+.25+(reduced?0:Math.sin(time*.4)*.22);m.position.y=.17;const cam=this.menu.previewCamera??=this.menu.camera.clone(),aspect=Math.max(.2,rect.width/rect.height);if(cam.aspect!==aspect||cam.zoom!==1.22){cam.aspect=aspect;cam.zoom=1.22;cam.updateProjectionMatrix();}this._renderSceneInto(this.renderer,rect,this.menu.scene,cam);}
-          dispose(){this.characterLifecycle?.dispose?.();this.clearObjectiveMarkers();this.followMarkers?.dispose();this.followMarkers=null;this.effectPool?.dispose();this.telegraphPool?.dispose();this.projectilePool?.dispose();this.railPool?.dispose();this.deathPool?.dispose();this.decalPool?.dispose();this.ripplePool?.dispose();this.ripplePool=null;this.contactShadows?.dispose();this.contactShadows=null;this.debrisPool?.dispose();this.debrisPool=null;this.hitPool?.dispose();this.hitPool=null;this.abilityVfx?.dispose();this.abilityVfx=null;this.hitFlinch?.clear();this.shellPool?.dispose();this.shellPool=null;this.altProjectiles?.dispose();this.altProjectiles=null;this._clearDebugDeaths();this.ambientPool?.dispose();this.weatherPool?.dispose();this.ambientFx=null;this.weatherFx=null;this._killcam=null;this.preview?.dispose();this.preview=null;this.previewAssets?.dispose?.();this.previewAssets=null;disposeComposer(this.composer);this.composer=null;this._disposeLabTargets();this.muzzleLights?.dispose();this.lowHealthOverlay?.dispose();this._disposeMothSprites();this.zipCarriages?.clear();this.deployableModels?.clear();this.disposeObject(this.scene);if(this.weaponScene)this.disposeObject(this.weaponScene);this.disposeObject(this.menu.scene);this.environmentRT?.dispose?.();for(const resource of this.renderResources||[])resource.dispose();this.renderResources?.clear();for(const resource of this.sharedResources||[])resource.dispose();this.sharedResources?.clear();this.modelAssets?.materials.clear();this.modelAssets?.geometries.clear();this.modelAssets?.resources.clear();this.arenaAssets?.materials.clear();this.arenaAssets?.geometries.clear();this.arenaAssets?.resources.clear();clearSurfaceTextures();for(const model of this._weaponCache?.values?.()||[])this.disposeObject(model);this._weaponCache?.clear();this._freeCam=false;this._directorLock=false;this.manualFollowId=null;this._cameraOwner='auto';this._freeExit=null;this.clearFreeMotion();this.resetFreeCam();this.renderer.dispose();}
+          dispose(){this.characterLifecycle?.dispose?.();this.clearObjectiveMarkers();this.followMarkers?.dispose();this.followMarkers=null;this.effectPool?.dispose();this.telegraphPool?.dispose();this.projectilePool?.dispose();this.railPool?.dispose();this.deathPool?.dispose();this.decalPool?.dispose();this.ripplePool?.dispose();this.ripplePool=null;this.contactShadows?.dispose();this.contactShadows=null;this.debrisPool?.dispose();this.debrisPool=null;this.hitPool?.dispose();this.hitPool=null;this.abilityVfx?.dispose();this.abilityVfx=null;this.hitFlinch?.clear();this.shellPool?.dispose();this.shellPool=null;this.altProjectiles?.dispose();this.altProjectiles=null;this._clearDebugDeaths();this.ambientPool?.dispose();this.weatherPool?.dispose();this.ambientFx=null;this.weatherFx=null;this._killcam=null;this.preview?.dispose();this.preview=null;this.previewAssets?.dispose?.();this.previewAssets=null;disposeComposer(this.composer);this.composer=null;this._disposeLabTargets();this.muzzleLights?.dispose();this.lowHealthOverlay?.dispose();this._disposeMothSprites();this.zipCarriages?.clear();this.deployableModels?.clear();this.disposeObject(this.scene);if(this.weaponScene)this.disposeObject(this.weaponScene);this.disposeObject(this.menu.scene);this.environmentRT?.dispose?.();this._disposeArenaResources();for(const resource of this.sharedResources||[])resource.dispose();this.sharedResources?.clear();this.modelAssets?.materials.clear();this.modelAssets?.geometries.clear();this.modelAssets?.resources.clear();clearSurfaceTextures();for(const model of this._weaponCache?.values?.()||[])this.disposeObject(model);this._weaponCache?.clear();this._freeCam=false;this._directorLock=false;this.manualFollowId=null;this._cameraOwner='auto';this._freeExit=null;this.clearFreeMotion();this.resetFreeCam();this.renderer.dispose();}
 }

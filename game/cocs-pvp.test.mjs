@@ -326,19 +326,19 @@ test('PvP snapshot exposes rung/intel/contacts/roleBoard and co-op exposes none 
 // PvP wire action surface (command seat, role economy, personal REQ).
 // ---------------------------------------------------------------------------
 test('the PvP command seat is team-scoped and round-trips through the snapshot', () => {
- const match = pvpMatch('8v8');
+ const match = pvpMatch('8v8', {humanCount: 2});
  const state = match.objectiveState;
- const take = cocsCommandAction(match, state, {team: 0, peerId: 'p1', action: 'take'});
+ const take = cocsCommandAction(match, state, {team: 0, peerId: '0', action: 'take'});
  assert.equal(take.ok, true);
- assert.equal(take.seat, 'p1', 'the seat reply names the seated peer');
- assert.equal(state.command.seat[0], 'p1');
+ assert.equal(take.seat, '0', 'the seat reply names the seated actor');
+ assert.equal(state.command.seat[0], '0');
  assert.equal(state.command.seat[1], null, 'a team-0 take never seats team 1');
- assert.equal(cocsCommandAction(match, state, {team: 1, peerId: 'p2', action: 'release'}).reason, 'not-commander');
- state.command.seat[1] = 'p2';
- assert.equal(cocsCommandAction(match, state, {team: 1, peerId: 'p2', action: 'release'}).ok, true);
+ assert.equal(cocsCommandAction(match, state, {team: 1, peerId: '1', action: 'release'}).reason, 'not-commander');
+ state.command.seat[1] = '1';
+ assert.equal(cocsCommandAction(match, state, {team: 1, peerId: '1', action: 'release'}).ok, true);
  assert.equal(state.command.seat[1], null);
  const snap = cocsSnapshot(match);
- assert.equal(snap.commander.seat[0], 'p1');
+ assert.equal(snap.commander.seat[0], '0');
  assert.equal(snap.commander.seat[1], null);
 });
 
@@ -373,7 +373,7 @@ test('PvP spends reach the sim only through Match.step and are deterministic', (
   const state = match.objectiveState;
   state.flux[0] = 240; state.flux[1] = 240;
   match.step(DT, {cocs: {
-   commands: [{tick: 0, peerId: 'p1', cardId: 'c1', team: 0, action: 'take'}],
+   commands: [{tick: 0, peerId: '0', cardId: 'c1', team: 0, action: 'take'}],
    spends: [{tick: 0, peerId: 'p1', cardId: 's1', team: 0, action: 'reinforce', role: 'fighter'}],
   }});
   for (let i = 0; i < 5; i++) match.step(DT, {inputs: {}});
@@ -447,7 +447,7 @@ test('NEGLECT accrues for a trailing human team and stays zero without a human c
   human.x = 500; human.z = 500;
   const hq = state.nodes.find(node => node.archetype === 'hq' && node.owner === 0);
   assert.ok(hq, 'team 0 starts with an HQ (an order there can never complete)');
-  assert.equal(cocsCommandAction(match, state, {team: 0, peerId: 'commander', action: 'take'}).ok, true);
+  assert.equal(cocsCommandAction(match, state, {team: 0, peerId: String(human.id), action: 'take'}).ok, true);
   state.scores[1] = 80;
   for (let i = 0; i < 70 * 60 && !match.over; i++) {
     if (i % 90 === 0) match.step(DT, {cocs: {orders: [{tick: 0, peerId: 'commander', cardId: `hold-${i}`, team: 0, verb: 'HOLD', target: hq.id}]}});
@@ -503,22 +503,23 @@ test('the command policy and route accept only real stances and nodes and announ
  const state = match.objectiveState;
  const events = [];
  match.emit = (type, payload) => events.push({type, payload});
- const bad = cocsCommandAction(match, state, {team: 0, peerId: 'p1', action: 'policy', value: 'BERSERK'});
+ assert.equal(cocsCommandAction(match, state, {team: 0, peerId: '0', action: 'take'}).ok, true);
+ const bad = cocsCommandAction(match, state, {team: 0, peerId: '0', action: 'policy', value: 'BERSERK'});
  assert.equal(bad.ok, false);
  assert.equal(bad.reason, 'stance', 'an unknown stance is refused');
  assert.equal(state.command.policy[0], null);
- const set = cocsCommandAction(match, state, {team: 0, peerId: 'p1', action: 'policy', value: 'fortify'});
+ const set = cocsCommandAction(match, state, {team: 0, peerId: '0', action: 'policy', value: 'fortify'});
  assert.equal(set.ok, true);
  assert.equal(set.policy, 'FORTIFY', 'the stance is normalized to upper case');
  assert.equal(state.command.policy[0], 'FORTIFY');
  const node = state.nodes.find(entry => entry.archetype !== 'hq' && entry.archetype !== 'array');
- const route = cocsCommandAction(match, state, {team: 0, peerId: 'p1', action: 'set-route', value: node.id});
+ const route = cocsCommandAction(match, state, {team: 0, peerId: '0', action: 'set-route', value: node.id});
  assert.equal(route.ok, true);
  assert.equal(state.command.route[0], node.id);
- const missing = cocsCommandAction(match, state, {team: 0, peerId: 'p1', action: 'set-route', value: 'not-a-node'});
+ const missing = cocsCommandAction(match, state, {team: 0, peerId: '0', action: 'set-route', value: 'not-a-node'});
  assert.equal(missing.ok, false);
  assert.equal(missing.reason, 'unknown-node');
- const cleared = cocsCommandAction(match, state, {team: 0, peerId: 'p1', action: 'set-route', value: null});
+ const cleared = cocsCommandAction(match, state, {team: 0, peerId: '0', action: 'set-route', value: null});
  assert.equal(cleared.ok, true);
  assert.equal(state.command.route[0], null);
  assert.ok(events.some(event => event.type === 'cocs-command' && event.payload.action === 'policy' && event.payload.policy === 'FORTIFY'), 'the stance change is announced');

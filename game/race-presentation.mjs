@@ -36,7 +36,7 @@ export function updateRace(view,match,time){
   const ball=match.race?.ball;
   if(ball&&Number.isFinite(ball.x)&&Number.isFinite(ball.z)){
    const key='soccer-ball',radius=Math.max(.2,Number.isFinite(ball.r)?ball.r:1.1);active.add(key);let model=view.raceModels.get(key);
-   if(!model){model=new T.Group();model.name='soccer-ball';const assets=view.modelAssets??=new ModelAssets(),software=view.renderer?.isSoftware===true,panels=soccerBallPanels(radius,software?6:15);withAssets(assets,()=>{assets.register(panels.pent);assets.register(panels.hex);const white=material('#f3f6fa',.15,.5),black=material('#141922',.3,.6);model.add(new T.Mesh(panels.hex,white),new T.Mesh(panels.pent,black));});view._trackAssets?.(assets);model.userData.rollTime=time;model.traverse(n=>{n.userData.objective=true;n.userData.noCameraOcclusion=true;});view.worldGroup.add(model);view.raceModels.set(key,model);}
+    if(!model){model=new T.Group();model.name='soccer-ball';const assets=view.modelAssets??=new ModelAssets(),software=view.renderer?.isSoftware===true,panels=soccerBallPanels(radius,software?6:15);withAssets(assets,()=>{const white=material('#f3f6fa',.15,.5),black=material('#141922',.3,.6);model.add(new T.Mesh(panels.hex,white),new T.Mesh(panels.pent,black));});view._trackAssets?.(assets);model.userData.rollTime=time;model.traverse(n=>{n.userData.objective=true;n.userData.noCameraOcclusion=true;});view.worldGroup.add(model);view.raceModels.set(key,model);}
     model.position.set(ball.x,Number.isFinite(ball.y)?ball.y:radius,ball.z);
     // Roll without slipping about the horizontal axis perpendicular to travel.
     const lastRoll=model.userData.rollTime,dt=Number.isFinite(lastRoll)?Math.max(0,Math.min(.1,time-lastRoll)):0;model.userData.rollTime=time;

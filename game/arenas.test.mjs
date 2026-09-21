@@ -59,10 +59,13 @@ test('mode map summaries and grouping render valid metadata',()=>{
 });
 
 test('mode filtering hides unsupported maps and honours legacy',()=>{
- const ctf=activeMaps().filter(map=>arenaSupportsMode(map.id,'ctf'));
- assert.ok(ctf.length>0);
- assert.ok(ctf.every(map=>arenaSupportsMode(map.id,'ctf')));
- assert.ok(mapsForMode('deathmatch',{legacy:true}).length>=activeMaps().length);
+  const ctf=activeMaps().filter(map=>arenaSupportsMode(map.id,'ctf'));
+  assert.ok(ctf.length>0);
+  assert.ok(ctf.every(map=>arenaSupportsMode(map.id,'ctf')));
+  const active=mapsForMode('deathmatch'),all=mapsForMode('deathmatch',{legacy:true});
+  assert.deepEqual(active,all.filter(map=>!arenaMeta(map.id).legacy));
+  assert.ok(all.length>active.length,'enabling legacy restores compatible archived arenas');
+  assert.ok(all.every(map=>!map.race&&arenaMeta(map.id).play.includes('deathmatch')));
 });
 
 test('lonely mode pools are spread across compatible arenas',()=>{
@@ -75,10 +78,14 @@ test('lonely mode pools are spread across compatible arenas',()=>{
  assert.ok(arenaSupportsMode('frost-gate','holdout')&&arenaSupportsMode('frost-gate','uplink'),'zone maps host the domination/koth variants');
  assert.ok(arenaSupportsMode('atrium','armsrace'),'connected arenas host Arms Race');
  assert.ok(arenaSupportsMode('warfront','assault'),'sector maps host assault');
- // The moving-hill rotation can now resolve authored/nav points, but LATTICE
- // content stays authored-only: no non-lattice map gains cocs or cocs-coop.
- assert.deepEqual(pool('cocs'),['lattice-slice']);
- assert.deepEqual(pool('cocs-coop'),['lattice-slice']);
+  // New theatres expand the pool without admitting synthesized combat lattices.
+  for(const mode of ['cocs','cocs-coop']){
+   const maps=mapsForMode(mode,{legacy:true});
+   assert.equal(maps[0].id,'lattice-slice','the original theatre remains the default');
+   for(const id of ['lattice-slice','asterion-relay','monsoon-foundry'])assert.ok(pool(mode).includes(id),`${mode} includes ${id}`);
+   assert.deepEqual(maps,MAPS.filter(map=>arenaMeta(map.id).play?.includes(mode)),`${mode} requires explicit eligibility`);
+   for(const map of maps)assert.ok(map.nodes?.length&&map.lattice?.length,`${map.id} authors its lattice`);
+  }
 });
 
 test('legacy gating excludes archived arenas from shuffle and rotation',()=>{
@@ -116,8 +123,15 @@ test('CTF matches place both flags at the authored bases',()=>{
   assert.notDeepEqual(match.flagSpawns[0],match.flagSpawns[1],`${id} distinct bases`);
  }
 });
-test('puma-soccer is confined to its pitch and does not bleed into other vehicle maps',()=>{
- assert.deepEqual(mapsForMode('puma-soccer').map(map=>map.id),['puma-pitch']);
+test('puma-soccer is confined to authored pitches and does not bleed into other vehicle maps',()=>{
+  const pitches=mapsForMode('puma-soccer');
+  assert.equal(pitches[0].id,'puma-pitch','the original pitch remains the default');
+  assert.ok(pitches.some(map=>map.id==='aurora-stadium'));
+  assert.deepEqual(pitches,MAPS.filter(map=>map.race?.kind==='soccer'&&!arenaMeta(map.id).legacy));
+  for(const map of pitches){
+   assert.ok(arenaMeta(map.id).play.includes('puma-soccer'));
+   for(const mode of GAME_MODES)assert.equal(arenaSupportsMode(map.id,mode.id),mode.id==='puma-soccer',`${map.id}/${mode.id}`);
+  }
  assert.equal(arenaSupportsMode('puma-pitch','puma-soccer'),true);
  assert.equal(arenaSupportsMode('puma-circuit','puma-soccer'),false);
  assert.equal(arenaSupportsMode('puma-pitch','puma-race'),false);

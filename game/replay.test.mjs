@@ -1,7 +1,8 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {QUICK_MATCH_PRESETS,presetConfig,shuffleSelection,nextArenaSelection,surpriseSelection} from './replay.mjs';
-import {mapsForMode} from './arenas.mjs';
+import {missionFor,CAMPAIGN_MISSIONS} from './campaign-data.mjs';
+import {arenaMeta,mapsForMode} from './arenas.mjs';
 import {GAME_MODES,normalizeConfig} from './config.mjs';
 import {CHARACTERS,HARNESSES,validLoadout} from './data.mjs';
 
@@ -65,9 +66,26 @@ test('surprise selection randomises mode plus a compatible loadout',()=>{
 });
 
 test('next arena restricts the rotation to maps that support the active mode',()=>{
- for(let k=0;k<40;k++)assert.notEqual(nextArenaSelection('convoy-line',()=>k/40,{legacy:true,mode:'deathmatch'}).mapId,'puma-circuit');
- assert.notEqual(nextArenaSelection('convoy-line',()=>0.5,{legacy:true,mode:'deathmatch'}).mapId,'puma-circuit');
- assert.ok(mapsForMode('deathmatch',{legacy:true}).every(map=>map.id!=='puma-circuit'));
- assert.equal(nextArenaSelection('convoy-line',()=>0.5,{legacy:true,mode:'puma-race'}).mapId,'puma-circuit');
- assert.equal(shuffleSelection(()=>0.5,{legacy:true,mode:'puma-race'}).mapId,'puma-circuit');
+  const combat=mapsForMode('deathmatch',{legacy:true});
+  assert.ok(combat.every(map=>!map.race&&arenaMeta(map.id).play.includes('deathmatch')));
+  for(const mode of ['puma-race','puma-soccer','cocs','cocs-coop']){
+   const options={legacy:true,mode},pool=mapsForMode(mode,options);
+   assert.ok(pool.length>1,`${mode} has an expanded rotation`);
+   for(let i=0;i<pool.length;i++){
+    assert.ok(arenaMeta(pool[i].id).play.includes(mode),`${pool[i].id} explicitly supports ${mode}`);
+    assert.deepEqual(nextArenaSelection(pool[i].id,()=>.5,options),{mapId:pool[(i+1)%pool.length].id});
+    const roll=(i+.5)/pool.length;
+    assert.equal(shuffleSelection(()=>roll,options).mapId,pool[i].id,'every compatible map is selectable');
+   }
+   assert.equal(nextArenaSelection('convoy-line',()=>.5,options).mapId,pool[0].id,'incompatible selections rotate to the default');
+  }
+  assert.equal(nextArenaSelection('convoy-line',()=>.5,{legacy:true,mode:'puma-race'}).mapId,'puma-circuit');
+  assert.equal(nextArenaSelection('convoy-line',()=>.5,{legacy:true,mode:'puma-soccer'}).mapId,'puma-pitch');
+});
+test('surprise campaign launches keep the mission and its authored map together',()=>{
+ for(let i=0;i<CAMPAIGN_MISSIONS.length;i++){
+  const selection=surpriseSelection(()=>(i+.1)/CAMPAIGN_MISSIONS.length,{mode:'campaign'});
+  assert.equal(selection.mission,CAMPAIGN_MISSIONS[i].id);
+  assert.equal(selection.mapId,missionFor(selection.mission).mapId);
+ }
 });

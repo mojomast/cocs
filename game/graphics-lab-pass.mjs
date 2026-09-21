@@ -25,9 +25,10 @@ float bayer4(vec2 p){return (4.*bayer2(p)+bayer2(floor(p/2.))+.5)/16.-.5;}
 float linePattern(float p){float d=abs(fract(p)-.5);float a=max(fwidth(p),.025);return 1.-smoothstep(.10,.10+a,d);}
 void main(){
   vec4 source=texture2D(tDiffuse,vUv);
-  // Target layers opt into keeping the source alpha and rejecting fragments the
-  // world already covers. The alpha cut always applies; the depth compare runs
-  // only when configure() saw both depth textures (depthCompare).
+  // Empty alpha-preserving overlays cannot affect the destination, even when
+  // the weapon opts out of world-depth testing. Keep faint edge pixels intact.
+  if(keepAlpha>.5&&source.a==0.)discard;
+  // The bot layer retains its existing alpha cut and world-depth rejection.
   if(depthTest>.5){
     if(source.a<.004)discard;
     if(depthCompare>.5&&texture2D(tBotDepth,vUv).r>texture2D(tWorldDepth,vUv).r+.0008)discard;

@@ -69,7 +69,7 @@ export const COCS_TERMINAL_ACTIONS = Object.freeze(['hack', 'deploy', 'vault-sto
 // the authoritative action are one vertical slice (WP0.3). It never changes the
 // canonical list, so existing frames stay valid.
 export const COCS_TERMINAL_ALIASES = Object.freeze({sabotage: 'cut'});
-export const COCS_COMMAND_ACTIONS = Object.freeze(['take', 'release', 'mutiny-vote', 'set-route', 'policy']);
+export const COCS_COMMAND_ACTIONS = Object.freeze(['take', 'release', 'mutiny-vote', 'set-route', 'policy', 'squad-create', 'squad-join', 'squad-leave', 'squad-promote', 'squad-remove']);
 export const COCS_ACTION_ID_MAX = 64;
 export const COCS_ACTION_STRING_MAX = 64;
 export const COCS_AGENT_MAX = 24;

@@ -2,7 +2,8 @@
 /* eslint-disable react-hooks/purity -- floating damage numbers fade against the wall clock. */
 import {useEffect,useRef,useState} from 'react';
 import type {ScreenProps} from '../contract';
-import {Shield,Crosshair,Move} from 'lucide-react';
+import {Shield,Crosshair,Move,Heart,Map,Users} from 'lucide-react';
+import styles from './PlayingHud.module.css';
 import {SinglePlayerHud} from '../../game-ui/singleplayer-hud';
 import {SightReticle} from './SightReticle';
 import {abilityRing,movementHud,verbMeters} from '../../../game/hud-class.mjs';
@@ -124,18 +125,18 @@ function CocsReadout({command,teamName,player,reducedMotion}:{command:any;teamNa
      <span className="cocs-command__group">
        <span className="cocs-command__label">COMMAND</span>
        <span className={`cocs-command__owner${command.commander.mine?' is-mine':''}`}>{command.commander.mine?'YOU':command.commander.seat!=null?'TEAM COMMANDER':'OPEN SEAT'}</span>
-       {!command.commander.mine&&!command.commander.seat&&<button type="button" className="cocs-command__act" onClick={command.takeCommand}>TAKE COMMAND</button>}
+        {!command.commander.mine&&command.commander.seat==null&&<button type="button" className="cocs-command__act" onClick={command.takeCommand}>TAKE COMMAND</button>}
        {command.commander.mine&&<button type="button" className="cocs-command__act" onClick={command.releaseCommand}>STEP DOWN</button>}
-       {!command.commander.mine&&Boolean(command.commander.seat)&&<button type="button" className="cocs-command__act" onClick={command.voteCommand} title="A strict majority of living humans replaces the commander">VOTE MUTINY{command.commander.votes>0?` · ${command.commander.votes}`:''}</button>}
+        {!command.commander.mine&&command.commander.seat!=null&&<button type="button" className="cocs-command__act" onClick={command.voteCommand} title="A strict majority of living humans replaces the commander">VOTE MUTINY{command.commander.votes>0?` · ${command.commander.votes}`:''}</button>}
      </span>
      <span className="cocs-command__group" role="group" aria-label="Squad stance">
        <span className="cocs-command__label">STANCE</span>
-       {command.policies.map((policy:any)=><button key={policy.id} type="button" className={`cocs-stance${policy.active?' is-active':''}`} aria-pressed={policy.active} title={policy.hint} onClick={()=>policy.active?command.clearCocsPolicy():command.setCocsPolicy(policy.id)}>{policy.label}</button>)}
+        {command.policies.map((policy:any)=><button key={policy.id} type="button" disabled={!command.commander.mine} className={`cocs-stance${policy.active?' is-active':''}`} aria-pressed={policy.active} title={command.commander.mine?policy.hint:'Only the commander can change team stance'} onClick={()=>policy.active?command.clearCocsPolicy():command.setCocsPolicy(policy.id)}>{policy.label}</button>)}
      </span>
      <span className="cocs-command__group" role="group" aria-label="Squad route">
        <span className="cocs-command__label">ROUTE</span>
        <span className="cocs-command__owner">{command.commander.route?command.commander.routeLabel:'AUTO'}</span>
-       {command.commander.route&&<button type="button" className="cocs-command__act" onClick={command.clearCocsRoute} title="Let the squad choose its objectives again">CLEAR ROUTE</button>}
+        {command.commander.route&&<button type="button" disabled={!command.commander.mine} className="cocs-command__act" onClick={command.clearCocsRoute} title="Let the squad choose its objectives again">CLEAR ROUTE</button>}
      </span>
    </div>}
    {traversal&&<p className="cocs-strip__context" role="group"><span aria-hidden="true">◈</span> {traversal.context}</p>}
@@ -151,6 +152,7 @@ function CocsReadout({command,teamName,player,reducedMotion}:{command:any;teamNa
 }
 
 export function PlayingHud({ui}:ScreenProps){
+ const fieldControls=ui.fieldControls;
  const {hud,player,display,brief,phase,hudRoute,hudMap,hudMode,isTeamMode,teamName,modeGoal,ladderStatus,flagText,armsrace,WEAPONS,activePower,powerIcon,radar,radarCols,radarBlip,marker,reloadFill,reloading,posture,killNotice,suddenBanner,startBanner,scoreCue,damageIndicator,damageNumberStyle,reducedMotion,vehiclePrompt,vehicle,ammoEmpty,ammoLow,hideHud,touchControls,pointerHint,requestLock,chatOpen,isSingle,single,selectHordeUpgrade,resumeSingleplayer,spectatorTeams,CAMERA_MODE_LABELS,runtime,changeMode,grenadeStatus,streakStatus,killFeedWeapon,damageLog,voiceState,voiceHint,escapeHint,clock,teamScoreText,ammoText,weaponTag,cocsCommand,cursor}=ui;
  const assistiveRef=useRef<any>(null);
  const assistiveTextRef=useRef('');
@@ -205,7 +207,9 @@ export function PlayingHud({ui}:ScreenProps){
  const bearing=objectiveContact?Math.atan2(Number(objectiveContact.x)||0,Number(objectiveContact.y)||0):null;
  const weapon=WEAPONS?.[player.weapon]||null;
  const weaponCap=Number(weapon?.cap)||Number(weapon?.ammo)||1;
- const ammoCount=player.ammo?.[player.weapon];
+  // JSON snapshots may encode an infinite ammo count as null. The weapon's
+  // unbounded capacity remains the presentation source for its ∞ readout.
+  const ammoCount=weaponCap===Infinity?Infinity:player.ammo?.[player.weapon];
  const ammoRatio=ammoCount===Infinity?1:Math.max(0,Math.min(1,(Number(ammoCount)||0)/weaponCap));
  const healthRatio=Math.max(0,Math.min(1,(Number(player.health)||0)/(player.maxHealth??100)));
  const armorRatio=Math.max(0,Math.min(1,(Number(player.armor)||0)/100));
@@ -253,21 +257,35 @@ export function PlayingHud({ui}:ScreenProps){
    lives:hud.objectives?.kind==='elimination'?(Number(hud.objectives.lives?.[group.team])||0):null,
    players:group.players,
   })):[];
-   return <div className={`game-hud${hud.spectate?' spectating-hud':''}${cocsCommand?' lattice-hud':''}${hud.spectate&&hideHud?' hide-hud':''}${touchControls&&!hud.spectate?' touch-mode':''}${touchControls&&!hud.spectate&&display.touchLeftHanded===true?' touch-left-hand':''}`}>
+   return <div className={`${styles.hud} game-hud${hud.spectate?' spectating-hud':''}${cocsCommand?' lattice-hud':''}${hud.spectate&&hideHud?' hide-hud':''}${touchControls&&!hud.spectate?' touch-mode':''}${touchControls&&!hud.spectate&&display.touchLeftHanded===true?' touch-left-hand':''}`}>
   {/* The one live channel (WP2.2). It is always mounted so a cue can replace a
       cue; only event-gated transitions produce new text. */}
-  <div className="visually-hidden" role="status" aria-live="polite" aria-atomic="true">{assistiveText}</div>
+   <div className="visually-hidden" role="status" aria-live="polite" aria-atomic="true">{assistiveText}</div>
+   <div className={styles.topFrame}>
   <div className="match-top" role="region" aria-label="Live match status"><div className="match-context"><span className="eyebrow">{hud.mapName?.toUpperCase()} / {hudRoute}</span><strong>{hud.modeName?.toUpperCase()}</strong><small className="phase-label">PHASE / {phase}</small>{isTeamMode(hudMode)&&<small className="team-label">{teamName(player.team)} TEAM · {hud.spectate?'FOLLOWING':'YOU'}</small>}</div><div className="match-clock" aria-label={`${hud.spectate?'Spectating':`${clock(hud.config.timeLimit-hud.time)} remaining`}`}><strong>{hud.spectate?'SPECTATING':clock(hud.config.timeLimit-hud.time)}</strong><small>{hud.net?'NETWORK MATCH':hud.config.botCount===0?'SOLO PRACTICE':isSingle?`FIRST TO ${hud.config.fragLimit} ${modeGoal(hudMode).toLowerCase()}`:''}</small></div><div className="frag-counter"><strong>{armsrace?ladderStatus(player,WEAPONS.length).rung+1:isTeamMode(hudMode)?teamScoreText(hud.teamScores??hud.teams)||player.frags:player.frags}<span>{hud.spectate?'':` / ${armsrace?WEAPONS.length:hud.config.fragLimit}`}</span></strong><small>{hud.spectate?`FOLLOWING ${player.name.toUpperCase()}`:armsrace?'LADDER RUNG':isTeamMode(hudMode)?modeGoal(hudMode):'YOUR FRAGS'}</small></div></div>
-   {cursor?.active&&<div className={`cursor-chip${cursor.blocked?' has-surface':''}`} role="group" aria-label="Cursor released. Mouse input reaches the interface."><kbd>{cursor.key}</kbd> · CURSOR{cursor.blocked&&cursor.label?<span>{cursor.label}</span>:null}</div>}
-   {!hud.spectate&&cursor?.active&&!cursor.blocked&&<div className="cursor-resume" role="group" aria-label="Return to combat"><button type="button" className="cursor-resume__button" onClick={cursor.resume}><b>CLICK TO FIGHT</b><small>{cursor.key} OR CLICK · MOUSE CAPTURED</small></button></div>}
+    <div className={styles.headerTools}>
+     {!isSingle&&<div className="objective-bar" aria-label="Current objective">
+      {bearing!==null&&<span className="compass" aria-hidden="true"><i style={{'--bearing':`${bearing}rad`} as any}/></span>}
+      <span className="objective-copy"><strong>{brief.title}</strong><small>{brief.action}</small></span>
+      <span className="objective-tags"><span className="chip chip--accent">{brief.detail}</span>{hud.captureNotice?<span className="chip chip--warn">{hud.captureNotice}</span>:(isTeamMode(hudMode)||hudMode?.id==='armsrace')&&<span className="chip">{brief.status}</span>}</span>
+     </div>}
+     <div className={styles.headerActions}>
+      {fieldControls&&<div className={styles.fieldControls} role="group" aria-label="Field tools">
+       <button type="button" onClick={fieldControls.openMap} aria-haspopup="dialog" title={`Open tactical map (${fieldControls.mapKey??'J'})`}><Map size={15} aria-hidden="true"/><span>TACTICAL MAP</span><kbd>{fieldControls.mapKey??'J'}</kbd></button>
+       {fieldControls.hasSquads&&<button type="button" onClick={fieldControls.openSquads} aria-haspopup="dialog" title={`Open squads (${fieldControls.squadKey??'L'})`}><Users size={15} aria-hidden="true"/><span>SQUADS</span><kbd>{fieldControls.squadKey??'L'}</kbd></button>}
+      </div>}
+      {cocsCommand?.spend&&cocsCommand.spendVisible===false&&!hud.spectate&&<button type="button" className="cocs-spend-chip" aria-label={`Spend window open, ${Math.round(cocsCommand.spend.secondsRemaining)} seconds left. Activate to reopen.`} onClick={cocsCommand.reopenSpend}><span aria-hidden="true">▦</span> SPEND WINDOW · {Math.round(Number(cocsCommand.spend.secondsRemaining)||0)}s · OPEN</button>}
+      {!fieldControls?.open&&cursor?.active&&<div className={`cursor-chip${cursor.blocked?' has-surface':''}`} role="group" aria-label="Cursor released. Mouse input reaches the interface."><kbd>{cursor.key}</kbd> · CURSOR{cursor.blocked&&cursor.label?<span>{cursor.label}</span>:null}</div>}
+     </div>
+    </div>
+   </div>
+    {!fieldControls?.open&&!hud.spectate&&cursor?.active&&!cursor.blocked&&<div className="cursor-resume" role="group" aria-label="Return to combat"><button type="button" className="cursor-resume__button" onClick={cursor.resume}><b>CLICK TO FIGHT</b><small>{cursor.key} OR CLICK · MOUSE CAPTURED</small></button></div>}
 
    {cocsCommand&&<CocsReadout command={cocsCommand} teamName={teamName} player={player} reducedMotion={reducedMotion()}/>}
     {cocsCommand?.interactPrompt&&!hud.spectate&&player.health>0&&<div className="lattice-interaction-hint" aria-hidden="true"><kbd>{cocsCommand.interactPrompt.key}</kbd><span><b>{cocsCommand.interactPrompt.verb} · {cocsCommand.interactPrompt.label}</b><small>{cocsCommand.interactPrompt.channelPercent>0?`${cocsCommand.interactPrompt.channelPercent}% · ${cocsCommand.interactPrompt.detail??'KEEP THE AREA CLEAR'}`:cocsCommand.interactPrompt.detail??(cocsCommand.interactPrompt.anchored?'AT THE ANCHOR':`${cocsCommand.interactPrompt.distanceMeters} m · READ THE ACTION BEFORE USING`)}</small></span></div>}
-  {cocsCommand?.spend&&cocsCommand.spendVisible===false&&!hud.spectate&&<button type="button" className="cocs-spend-chip" aria-label={`Spend window open, ${Math.round(cocsCommand.spend.secondsRemaining)} seconds left. Activate to reopen.`} onClick={cocsCommand.reopenSpend}><span aria-hidden="true">▦</span> SPEND WINDOW · {Math.round(Number(cocsCommand.spend.secondsRemaining)||0)}s · OPEN</button>}
    {cocsCommand?.notice&&<div className={`cocs-notice${cocsCommand.notice.ok?'':' is-failed'}${cocsCommand.notice.leaving?' is-leaving':''}`} role="group" aria-label={`Action notice: ${cocsCommand.notice.text}`}><i aria-hidden="true">{cocsCommand.notice.ok?'✓':'✕'}</i> {cocsCommand.notice.text}</div>}
    {cocsCommand?.spend&&cocsCommand.spendVisible!==false&&!hud.spectate&&<SpendWindowHud spend={cocsCommand.spend} onSpend={cocsCommand.spendCocs} onSkip={cocsCommand.skipSpend} cursorKey={cocsCommand.cursorKey} reducedMotion={reducedMotion()}/>}
   {cocsCommand?.boardView&&!hud.spectate&&<CommandBoardHud command={cocsCommand} open={cocsCommand.boardOpen===true} collapsed={cocsCommand.boardCollapsed===true} pinned={cocsCommand.boardPinned===true} activeId={cocsCommand.boardActive} reducedMotion={reducedMotion()} commandKey={cocsCommand.commandKey} commandShortcut={cocsCommand.commandShortcut} onSelect={cocsCommand.selectBoardCard} onActivate={cocsCommand.activateBoardCard} onClose={cocsCommand.closeBoard} onTogglePin={cocsCommand.toggleBoardPin}/>}
-  {cocsCommand?.director&&!hud.spectate&&<OperationsDirectorHud director={cocsCommand.director}/>}
   {hud.spectate&&hud.net&&runtime.current&&<button type="button" className="spectator-return" onClick={()=>changeMode('lobby')}>RETURN TO LOBBY</button>}
   {isSingle&&<SinglePlayerHud single={single} onSelectUpgrade={selectHordeUpgrade} onResumeCheckpoint={resumeSingleplayer}/>}
   {announcement==='kill'&&<div className={`kill-banner ${killNotice.kind}`} role="group" aria-label={killNotice.text}>{killNotice.text}{killNotice.detail&&<small className="kill-banner-ability">{killNotice.detail}</small>}</div>}
@@ -278,10 +296,13 @@ export function PlayingHud({ui}:ScreenProps){
   {hud.training&&<LatticeTrainingHud training={hud.training} bindings={ui.bindings} cursorKey={ui.cursor?.key??'ALT'} onContinue={ui.continueTutorial} onEnd={ui.endTutorial}/>}
   <div className="visually-hidden" role="group" aria-label={`Objective: ${brief.title}. ${brief.action}`}>{hud.modeName}. {brief.title}. {brief.action}. {brief.status||brief.detail}</div>
   {hud.preparing&&<div className="preparing-overlay" role="group" aria-label="Preparing arena. Compiling shaders and warming the arena."><span className="eyebrow">PREPARING ARENA</span><small>Compiling shaders and warming the arena…</small></div>}
-  {hud.caption&&<div className="audio-caption" role="group" aria-label={`Caption. ${hud.caption}`} style={{'--caption-scale':String(display.captionScale??1)} as any} data-caption-background={display.captionBackground??'dim'} data-caption-position={display.captionPosition??'bottom'}>{hud.caption}</div>}
+   {hud.caption&&<div className="audio-caption" role="group" aria-label={`Caption. ${hud.caption}`} style={{'--caption-scale':String(display.captionScale??1)} as any} data-caption-background={display.captionBackground??'dim'} data-caption-position={display.captionPosition??'bottom'}>{hud.caption}</div>}
+   <div className={styles.rightRail}>
+   {cocsCommand?.director&&!hud.spectate&&<OperationsDirectorHud director={cocsCommand.director}/>}
    {display.showKillFeed!==false&&<div className="kill-feed" role="log" aria-live="off" aria-label="Kill feed">{(hud.killFeed??hud.feed)?.filter((e:any)=>hud.time-e.time<6).slice(-4).map((e:any,i:number)=>{const feedWing=typeof e.killerCharacter==='string'?wingChip(e.killerCharacter):null;const label=killFeedWeapon(e,WEAPONS,e.abilityName);const badges=killFeedBadges(e);return <div key={`${e.time}-${i}`} title={badges.length?badges.map((badge:any)=>badge.title).join(' · '):undefined}>{feedWing&&<small className="kill-feed-wing" style={{color:feedWing.color,border:`1px solid ${feedWing.color}66`,borderRadius:4,padding:'0 4px'}} title={`${feedWing.name} · ${feedWing.label}`}>{feedWing.label}</small>}<span>{e.killer}</span><Crosshair size={12}/>{label&&<small className={e.ability===true?'kill-feed-ability':''}>{label}</small>}<span>{e.victim}</span>{e.self&&<small>SELF</small>}{badges.map((badge:any)=><small key={badge.id} className={`kill-feed-badge kill-feed-badge--${badge.id}`} title={badge.title}>{badge.label}</small>)}</div>;})}</div>}
   {!hud.spectate&&display.showRadar!==false&&<div className="radar" aria-hidden="true"><svg viewBox="-1.18 -1.18 2.36 2.36" role="presentation"><circle className="radar-ring" r="1"/><circle className="radar-ring" r=".5"/><line className="radar-axis" x1="-1" y1="0" x2="1" y2="0"/><line className="radar-axis" x1="0" y1="-1" x2="0" y2="1"/><polygon className="radar-view" points="0,-.18 -.11,.12 .11,.12"/><line className="radar-sweep" x1="0" y1="0" x2="0" y2="-1"/>{radar.contacts.map((c:any,i:number)=>{const b:any=radarBlip(c,player,radarCols);if(b.shape==='circle')return <g key={`a${c.id}`} className={b.spotted?'radar-spotted':''}>{b.spotted&&<circle className="radar-spotted__ring" cx={b.cx} cy={b.cy} r={b.r*2.4} fill="none" stroke={b.fill} strokeWidth=".018"/>}<circle cx={b.cx} cy={b.cy} r={b.r} fill={b.fill} className={`${b.dead?'radar-dead':''} ${b.revealed?'radar-revealed':''}`}/>{b.spotted&&<polygon className="radar-spotted__mark" points={`${b.cx},${b.cy-.032} ${b.cx-.026},${b.cy+.018} ${b.cx+.026},${b.cy+.018}`} fill={b.fill}/>}</g>;if(b.shape==='rect')return <g key={`z${c.id}`}><rect x={b.rect.x} y={b.rect.y} width={b.rect.width} height={b.rect.height} fill={b.fill}/>{b.label&&<text className="radar-zone-label" x={b.cx} y={b.cy} textAnchor="middle" dominantBaseline="central" fill={b.fill}>{b.label}</text>}</g>;if(b.shape==='payload'){const circ=2*Math.PI*b.ring.r;return <g key="payload"><circle cx={b.cx} cy={b.cy} r={b.ring.r} fill="none" stroke={b.fill} strokeWidth={b.ring.thickness} strokeDasharray={`${(b.progressRatio??0)*circ} ${circ}`} transform={`rotate(-90 ${b.cx} ${b.cy})`} className={b.clamped?'radar-revealed':''}/><rect x={b.cx-.05} y={b.cy-.05} width=".1" height=".1" fill={b.fill}/>{b.delivered&&<circle cx={b.cx} cy={b.cy} r=".026" fill="#fff"/>}</g>;}return <polygon key={`f${b.team??'n'}-${c.index??i}`} points={b.points} fill={b.fill}/>;})}{radar.contacts.map((c:any)=>{const b:any=radarBlip(c,player,radarCols);return b.indicator?<g key={`indicator-${c.id}`} className="radar-indicator"><circle cx={b.cx} cy={b.cy} r={b.indicator.ring.r} fill="none" stroke={b.fill} strokeWidth={b.indicator.ring.thickness}/><polygon points={b.indicator.arrow} fill={b.fill}/></g>:null;})}</svg></div>}
-  {hud.spectate&&<SpectatorBoard groups={specGroups} objective={brief?{title:brief.title,line:brief.detail}:null} camera={hud.spectateLocal?runtime.current?.cameraMode:undefined} cameraModes={hud.spectateLocal?CAMERA_MODE_LABELS:undefined} onCamera={(mode:string)=>{const r=runtime.current;if(!r)return;r.cameraMode=mode;if(mode==='auto')r.spectateDirector?.reframe(r.match?.snapshot());r.applySpectateCamera?.(0);}} controls={hud.spectateLocal?spectatorControls({local:true,cursorKey:cursor?.key??'ALT',bindings:ui.bindings}):spectatorControls({local:false,cursorKey:cursor?.key??'ALT',bindings:ui.bindings})} onFollow={(id:any)=>{const r=runtime.current;if(!r)return;if(hud.spectateLocal){if(r.spectateDirector?.setTarget(id)){if(r.cameraMode==='free')r.cameraMode='chase';r.applySpectateCamera?.(0);}}else{r.spectateTarget=id;r.view.setSpectatorTarget(id);}}}/>}
+   </div>
+   {hud.spectate&&<SpectatorBoard groups={specGroups} objective={brief?{title:brief.title,line:brief.detail}:null} camera={hud.spectateLocal?runtime.current?.cameraMode:undefined} cameraModes={hud.spectateLocal?CAMERA_MODE_LABELS:undefined} onCamera={(mode:string)=>{const r=runtime.current;if(!r)return;r.cameraMode=mode;if(mode==='auto')r.spectateDirector?.reframe(r.match?.snapshot());r.applySpectateCamera?.(0);}} controls={hud.spectateLocal?spectatorControls({local:true,cursorKey:cursor?.key??'ALT',bindings:ui.bindings}):spectatorControls({local:false,cursorKey:cursor?.key??'ALT',bindings:ui.bindings})} onFollow={(id:any)=>{const r=runtime.current;if(!r)return;if(hud.spectateLocal){if(r.spectateDirector?.setTarget(id)){if(r.cameraMode==='free')r.cameraMode='chase';r.applySpectateCamera?.(0);}}else{r.spectateTarget=id;r.view.setSpectatorTarget(id);}}}/>}
   {hud.spectate?null:player.health>0?<><SightReticle ui={ui}/>{marker&&<div className={`hitmarker ${marker}`} aria-hidden="true"><span/><span/></div>}{reloading&&<div className="reload-indicator" aria-hidden="true"><span className="reload-label">RELOADING</span><span className="reload-track"><i style={{width:`${Math.round(reloadFill*100)}%`}}/></span></div>}{posture&&<div className="posture-chip">{posture}</div>}</>:<div className="death-message" role="group" aria-label="Eliminated. Respawning."><span className="eyebrow">CONNECTION LOST</span><h2>RECOMPILING</h2>{killed&&<p className="death-attribution">{killed.text}{killed.detail?` · ${killed.detail}`:''}</p>}{recap.length>0&&<ul className="death-recap" aria-label="Damage recap">{recap.map((row:any,index:number)=><li key={`${row?.at??index}-${index}`} title={Number.isFinite(row?.age)?`${Math.round(row.age)}s before the kill`:undefined}><span className="death-recap__source">{row?.name?`HIT BY ${String(row.name).toUpperCase()}`:'HIT'}</span>{row?.detail&&<b className="death-recap__weapon">{String(row.detail).toUpperCase()}</b>}<em className="death-recap__amount">{Math.max(0,Math.round(Number(row?.amount)||0))}</em></li>)}</ul>}<p aria-hidden="true">Respawning in {Math.max(1,Math.ceil(player.dead))}…</p></div>}
   {hud.damage&&!hud.spectate&&<div className="damage-vignette"/>}
   {display.showDamageNumbers!==false&&hud.damageNumbers?.length?<div className="damage-numbers" aria-hidden="true">{hud.damageNumbers.map((n:any)=>{
@@ -294,16 +315,17 @@ export function PlayingHud({ui}:ScreenProps){
    return <span key={n.id} className={`damage-number ${n.kill?'kill':n.critical?'critical':'hit'}${n.shieldBreak?' shieldbreak':''}`} style={{left:`${n.x}px`,top:`${n.y}px`,opacity:fade.opacity,transform:`translate(-50%,-50%) translateY(${fade.dy*emphasis}px)${pop===1?'':` scale(${pop.toFixed(3)})`}`}}>{n.amount}</span>;
   })}</div>:null}
   {damageIndicator&&!hud.spectate&&(damageIndicator.hasSource?<div className="damage-direction" style={{'--damage-angle':`${-damageIndicator.angle}rad`} as any} aria-hidden="true"><i/></div>:<div className="damage-flash" aria-hidden="true"/>)}
-  <div className="hud-lower"><div className="hud-messages">{damageIndicator?.hasSource&&damageIndicator.text?<div className="damage-source" role="group" aria-label={`Incoming hit. ${damageIndicator.text}`}>{damageIndicator.text}</div>:null}<div className="pickup-message">{player.slow>0?`CONTEXT JAM · ${formatCountdown(player.slow)}s`:Object.entries(player.powerups??{}).filter(([,seconds]:any)=>seconds>0).map(([id,seconds]:any)=>`${id.toUpperCase()} · ${formatCountdown(seconds)}s`).join('  ·  ')||hud.pickup}</div>
+   <div className={styles.bottomFrame}>
+   <div className="hud-lower"><div className="hud-messages">{damageIndicator?.hasSource&&damageIndicator.text?<div className="damage-source" role="group" aria-label={`Incoming hit. ${damageIndicator.text}`}>{damageIndicator.text}</div>:null}<div className="pickup-message">{player.slow>0?`CONTEXT JAM · ${formatCountdown(player.slow)}s`:Object.entries(player.powerups??{}).filter(([,seconds]:any)=>seconds>0).map(([id,seconds]:any)=>`${id.toUpperCase()} · ${formatCountdown(seconds)}s`).join('  ·  ')||hud.pickup}</div>
   {player.protection>0&&player.health>0&&!hud.spectate&&<div className="spawn-protection"><Shield size={15}/> SPAWN PROTECTION</div>}
   {vehiclePrompt&&<div className="vehicle-prompt">{vehiclePrompt}</div>}
   {!vehicle&&!hud.spectate&&player.health>0&&(ammoEmpty||ammoLow)&&<div className={`ammo-warning ${ammoLow&&!ammoEmpty?'pulse':''}`}>{ammoEmpty?'OUT OF AMMO':'LOW AMMO'} / {player.ammo[player.weapon]} LEFT / 1-9/0 OR WHEEL TO SWITCH</div>}
-  {pointerHint&&!cursor?.active&&runtime.current&&!hud.spectate&&!chatOpen&&!touchControls&&<div className="pointer-hint">Click the arena to capture your mouse. {moveKeys} moves; <kbd>{cursor?.key??'ALT'}</kbd> frees the cursor for the interface. <button onClick={requestLock}>Capture mouse</button></div>}
+   {pointerHint&&!fieldControls?.open&&!cursor?.active&&runtime.current&&!hud.spectate&&!chatOpen&&!touchControls&&<div className="pointer-hint">Click the arena to capture your mouse. {moveKeys} moves; <kbd>{cursor?.key??'ALT'}</kbd> frees the cursor for the interface. <button onClick={requestLock}>Capture mouse</button></div>}
   </div></div>
-  <div className="hud-bottom" role="region" aria-label="Player status">
+    <div className="hud-bottom" role="region" aria-label="Player status">
    <div className="hud-corner hud-corner--left">
-    <div className={`stat-card stat-card--vitals${healthRatio<=.3&&player.health>0?' is-low':''}`}><span className="vital vital--health"><span className="stat-label">HEALTH</span><strong className="stat-value">{Math.ceil(player.health)}</strong><span className="stat-bar"><i style={{width:`${healthRatio*100}%`}}/></span></span>
-    <span className={`vital vital--armor${player.armor<=0?' is-empty':''}`}><span className="stat-label">ARMOR</span><strong className="stat-value">{Math.ceil(player.armor)}</strong><span className="stat-bar"><i style={{width:`${armorRatio*100}%`}}/></span></span></div>
+    <div className={`stat-card stat-card--vitals${healthRatio<=.3&&player.health>0?' is-low':''}`} role="group" aria-label={`Health ${Math.ceil(player.health)} of ${player.maxHealth??100}. Armor ${Math.ceil(player.armor)}.`}><span className="vital vital--health"><span className="stat-label"><Heart size={13} aria-hidden="true"/> HEALTH{healthRatio<=.3&&player.health>0&&<b className={styles.critical}>LOW</b>}</span><strong className="stat-value">{Math.ceil(player.health)}<small className={styles.statCapacity}> / {player.maxHealth??100}</small></strong><span className="stat-bar" aria-hidden="true"><i style={{width:`${healthRatio*100}%`}}/></span></span>
+    <span className={`vital vital--armor${player.armor<=0?' is-empty':''}`}><span className="stat-label"><Shield size={12} aria-hidden="true"/> ARMOR</span><strong className="stat-value">{Math.ceil(player.armor)}</strong><span className="stat-bar" aria-hidden="true"><i style={{width:`${armorRatio*100}%`}}/></span></span></div>
     {(streak||armsrace||squad||economy)&&<div className="hud-pills team-status" role="group" aria-label={[squad?.label,economy?.label].filter(Boolean).join(' ')||'Match status'}>
      {squad?.lives&&<span className={`hud-pill team-status__lives${squad.lives.suddenDeath?' hud-pill--warn':''}`}>{squad.lives.text}{squad.lives.suddenDeath?' · SUDDEN DEATH':''}</span>}
      {squad?.allies.map((ally:any)=><span key={`ally-${ally.id}`} className={`hud-pill team-status__ally${ally.down?' is-down':''}`}>{ally.name} {ally.down?'DOWN':`${ally.health}HP${ally.armor>0?` ${ally.armor}A`:''}`}</span>)}
@@ -319,16 +341,13 @@ export function PlayingHud({ui}:ScreenProps){
      {streak&&<span className="hud-pill hud-pill--warn"><b>×</b>{streak.label}</span>}
     </div>}
    </div>
-   {!isSingle&&<div className="objective-bar" aria-label="Current objective">
-    {bearing!==null&&<span className="compass" aria-hidden="true"><i style={{'--bearing':`${bearing}rad`} as any}/></span>}
-    <span className="objective-copy"><strong>{brief.title}</strong><small>{brief.action}</small></span>
-    <span className="objective-tags"><span className="chip chip--accent">{brief.detail}</span>{hud.captureNotice?<span className="chip chip--warn">{hud.captureNotice}</span>:(isTeamMode(hudMode)||hudMode?.id==='armsrace')&&<span className="chip">{brief.status}</span>}</span>
-   </div>}
    <div className="hud-corner hud-corner--right">
     {!hud.spectate&&player.health>0&&<div className="ammo-stack">
      {verbs.length>0&&<div className="verb-meters" role="group" aria-label={`Operator verb: ${verbs.map((meter:any)=>meter.passive?`${meter.label} passive`:`${meter.label} ${meter.text}`).join(', ')}`}>{verbs.map((meter:any)=>meter.passive?<span key={meter.id} className="verb-meter verb-meter--passive" aria-hidden="true">{meter.label}</span>:<span key={meter.id} className="verb-meter" aria-hidden="true"><span className="verb-meter__label">{meter.label}</span><span className="verb-meter__track"><i style={{width:`${Math.round(meter.value*100)}%`}}/></span><span className="verb-meter__text">{meter.text}</span></span>)}</div>}
-     {vehicle?<div className={`stat-card stat-card--ammo${vehicle.overheated?' is-empty':''}`}><span className="stat-label">PUMA</span><strong className="stat-value">{Math.ceil(vehicle.health)}</strong><span className="stat-note">{Math.round(Math.max(0,Math.min(1,vehicle.heat))*100)}% HEAT{vehicle.overheated?' · OVERHEATED':''}</span></div>:<div className={`stat-card stat-card--ammo${ammoEmpty?' is-empty':''}`}><span className="stat-label"><span className="weapon-name">{weapon?.name||'WEAPON'}</span>{weapon&&(altMode?<b className="weapon-tag weapon-tag--alt">{altMode}</b>:weaponTag(weapon)&&<b className="weapon-tag">{weaponTag(weapon)}</b>)}</span><strong className="stat-value">{ammoText(ammoCount)}</strong><span className="stat-bar"><i style={{width:`${ammoRatio*100}%`}}/></span><span className="weapon-alt-row"><kbd className="weapon-alt-hint" title="Alt fire (middle mouse also works)" aria-label={`Alt fire: ${altFireKey} or middle mouse`}>ALT {altFireKey}</kbd></span></div>}
+     {vehicle?<div className={`stat-card stat-card--ammo${vehicle.overheated?' is-empty':''}`}><span className="stat-label">PUMA</span><strong className="stat-value">{Math.ceil(vehicle.health)}</strong><span className="stat-note">{Math.round(Math.max(0,Math.min(1,vehicle.heat))*100)}% HEAT{vehicle.overheated?' · OVERHEATED':''}</span></div>:<div className={`stat-card stat-card--ammo${ammoEmpty?' is-empty':''}${ammoLow?' is-low':''}`} role="group" aria-label={`${weapon?.name||'Weapon'}. ${ammoText(ammoCount)} ammo${reloading?'. Reloading':''}.`}><span className="stat-label"><Crosshair size={14} aria-hidden="true"/><span className="weapon-name">{weapon?.name||'WEAPON'}</span>{weapon&&(altMode?<b className="weapon-tag weapon-tag--alt">{altMode}</b>:weaponTag(weapon)&&<b className="weapon-tag">{weaponTag(weapon)}</b>)}</span><span className={styles.ammoReadout}><strong className="stat-value">{ammoText(ammoCount)}</strong><span className={styles.ammoCaption}>{reloading?'RELOADING':ammoEmpty?'EMPTY':ammoLow?'LOW AMMO':'AMMO'}<small>{ammoCount===Infinity?'UNLIMITED':`CAP ${weaponCap}`}</small></span></span><span className="stat-bar" aria-hidden="true"><i style={{width:`${(reloading?Math.max(0,Math.min(1,reloadFill)):ammoRatio)*100}%`}}/></span><span className="weapon-alt-row"><kbd className="weapon-alt-hint" title="Alt fire (middle mouse also works)" aria-label={`Alt fire: ${altFireKey} or middle mouse`}>ALT {altFireKey}</kbd><span className={styles.weaponSlot}>SLOT {player.weapon===9?'0':Number(player.weapon)+1}</span></span></div>}
     </div>}
+   </div>
+   <div className={styles.equipment} role="group" aria-label="Ability, movement and grenade status">
     {!hud.spectate&&<div className={`ability-card${abilityActive?' is-active':''}${abilityReady?' is-ready':''}${abilityDisabled?' is-disabled':''}`} role="group" aria-label={`Ability ${abilityReady?'ready':abilityDisabled?'unavailable':`recharging ${formatCountdown(player.cooldown)} seconds`}`} title={abilityTooltip} aria-description={abilityTooltip}>
      <span className="ability-ring" style={{'--fill':`${abilityRatio}turn`} as any}>{powerIcon(player.harness,22)}</span>
      <span className="stat-label">{activePower?.power||'ABILITY'}</span>
@@ -342,9 +361,10 @@ export function PlayingHud({ui}:ScreenProps){
     {frag&&<div className={`ability-card frag-card${frag.ready?' is-ready':''}`} role="group" aria-label={frag.label} title={fragTooltip} aria-description={fragTooltip}>
       <span className="ability-ring" style={{'--fill':`${fragRatio}turn`} as any}><b>{fragKey}</b></span>
      <span className="stat-label">FRAG</span>
-     <span className="stat-note">{frag.ready?'READY':`${formatCountdown(frag.cooldown)}s`}</span>
-    </div>}
+      <span className="stat-note">{frag.ready?'READY':`${formatCountdown(frag.cooldown)}s`}</span>
+     </div>}
+    </div>
    </div>
-  </div>
+   </div>
   <div className={`hud-bottom-note${hud.time>60?' is-settled':''}`}><span className="hint-static">TAB / SCOREBOARD</span>{!hud.spectate&&<span className="hint-static"><kbd>{cursor?.key??'ALT'}</kbd> / FREE CURSOR</span>}{hud.spectate&&<span className="hint-static">[ / ] FOLLOW</span>}{netNote&&<span className={`net-quality ${netNote.tone}`} role="group" aria-label={`Connection. ${netNote.spoken}`} title={netNote.spoken}>{netNote.text}</span>}{voiceHint(voiceState.enabled,voiceState.mode,ui.bindings)&&<span>{voiceHint(voiceState.enabled,voiceState.mode,ui.bindings)}</span>}{display.showFps&&<span>{hud.fps||0} FPS · {hud.renderer==='software'?'CPU':'WEBGL'}</span>}<span className="hint-static">{escapeHint(hud.net)}</span>{reducedMotion()&&<span className="motion-note">REDUCED MOTION</span>}</div></div>;
 }

@@ -2,6 +2,7 @@ import {DEFAULT_CONFIG,GAME_MODES,normalizeConfig} from './config.mjs';
 import {CHARACTERS,HARNESSES,validLoadout,resolveLoadout} from './data.mjs';
 import {MAPS} from './maps.mjs';
 import {activeMaps,mapsForMode} from './arenas.mjs';
+import {CAMPAIGN_MISSIONS} from './campaign-data.mjs';
 
 export const QUICK_MATCH_PRESETS = [
  {id:'warmup',name:'Warmup',detail:'0 bots / explore',rules:{mode:'deathmatch',botCount:0,difficulty:'easy'}},
@@ -38,5 +39,9 @@ export function nextArenaSelection(mapId,random=Math.random,{legacy=true,mode='d
 export function surpriseSelection(random=Math.random,{legacy=true,mode=null}={}){
  const modes=mode?[mode]:GAME_MODES.map(item=>item.id);
  const picked=modes[Math.floor(random()*modes.length)];
- return {...shuffleSelection(random,{legacy,mode:picked}),mode:picked};
+  const selection=shuffleSelection(random,{legacy,mode:picked});
+  // Campaign geometry and authored anchors form one contract, including in a
+  // surprise launch. Never pair an arbitrary arena with the saved mission.
+  const mission=picked==='campaign'?CAMPAIGN_MISSIONS[Math.floor(random()*CAMPAIGN_MISSIONS.length)]:null;
+  return {...selection,...(mission?{mapId:mission.mapId,mission:mission.id}:{}),mode:picked};
 }

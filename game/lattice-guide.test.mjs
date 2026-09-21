@@ -10,6 +10,19 @@ const map={nodes:[{id:'hq-0',x:0,z:0,r:4,archetype:'hq'},{id:'front-0',x:20,z:0,
 const fixture=()=>({config:{mode:'cocs'},cocs:{nodes:map.nodes.map(n=>({...n,owner:n.archetype==='hq'?0:null,live:n.archetype!=='hq'}))}});
 const player={id:0,team:0,x:39,z:0,health:100};
 
+test('explicit route resolvers skip navigation fallback and preserve object receiver binding',()=>{
+ const guardedMap={...map,get navNodes(){throw new Error('navigation fallback must stay lazy');}};
+ const route={cost:17,travel(){return this.cost;}};
+ for(const resolver of [()=>17,route]){
+  const model=latticeTargetModel(fixture(),guardedMap,player,{route:resolver});
+  assert.equal(model.byId['front-0'].routeCost,17);
+  assert.equal(model.byId['front-0'].reachable,true);
+ }
+ const blocked=latticeTargetModel(fixture(),guardedMap,player,{route:()=>null});
+ assert.equal(blocked.byId['front-0'].reachable,false);
+ assert.throws(()=>latticeTargetModel(fixture(),guardedMap,player,{route:{}}),/navigation fallback must stay lazy/,'invalid resolvers still use the existing fallback');
+});
+
 test('coach never recommends a nearer node behind an uncaptured link',()=>{
  const hud=fixture();
  const initial=JSON.stringify(hud);

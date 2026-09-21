@@ -32,7 +32,7 @@ const OWNER_BY_VERB = Object.fromEntries(OPERATOR_KITS.map(kit => [kit.movement,
 
 // The race maps have no infantry route; every other arena is the design's
 // non-race combat set.
-const COMBAT_ARENAS = MAPS.filter(arena => arena.id !== 'puma-circuit' && arena.id !== 'puma-pitch');
+const COMBAT_ARENAS = MAPS.filter(arena => !arena.race);
 
 // A deterministic activation script per verb input family.
 function inputAt(verbId, tick) {

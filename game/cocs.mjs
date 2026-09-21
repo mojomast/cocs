@@ -39,6 +39,7 @@
 
 import {modeRule, cocsRung, cocsRungOf} from './config.mjs';
 import {RULES} from './data.mjs';
+import {COCS_SQUAD_ACTIONS, cocsCommandAuthority, cocsSquadAction, cocsSquadSnapshot} from './cocs-squads.mjs';
 import {terrainSupportAt} from './terrain.mjs';
 import {
   FLUX_CAP, FLUX_PASSIVE_PER_SECOND, FLUX_START, ORDER_REWARD, REQ_EARN, SUBAGENTS,
@@ -1345,6 +1346,9 @@ export function cocsCommandState(state, team) {
  */
 export function cocsCommandAction(match, state, record = {}) {
   if (!state || state.kind !== COCS_KIND || state.coopMode === true) return {ok: false, reason: 'no-command'};
+  const authority = cocsCommandAuthority(match, state, record);
+  if (!authority.ok) return {ok: false, reason: authority.reason};
+  if (COCS_SQUAD_ACTIONS.includes(String(record.action).toLowerCase())) return cocsSquadAction(match, state, record);
   const cmd = state.command;
   if (!cmd) return {ok: false, reason: 'no-command'};
   cmd.seat ??= {0: null, 1: null};
@@ -1381,7 +1385,7 @@ export function cocsCommandAction(match, state, record = {}) {
       .sort((a, b) => a - b);
     const needed = Math.max(1, Math.floor(humans.length / 2) + 1);
     const votes = cmd.votes[team];
-    const count = Object.keys(votes).filter(key => votes[key] === true).length;
+    const count = humans.filter(id => votes[String(id)] === true).length;
     if (humans.length > 0 && count >= needed && cmd.seat[team] !== peerId) {
       cmd.seat[team] = peerId;
       cmd.votes[team] = {};
@@ -1404,7 +1408,7 @@ export function cocsCommandAction(match, state, record = {}) {
     return announce({policy: raw});
   }
   if (action === 'opt-out-orders') {
-    const actor = match?.actors?.[record.actorId];
+    const actor = authority.actor;
     if (!actor || actor.team !== team) return {ok: false, reason: 'missing'};
     actor.ordersOptOut = true;
     return {ok: true, reason: null};
@@ -1909,6 +1913,8 @@ export function cocsSnapshot(match) {
     // age the SPOT window without reaching into the live state.
     tick: num(state.tick, 0),
     fieldSupport: latticeSupportSnapshot(state),
+    squadBoard: cocsSquadSnapshot(match, state),
+    commandResults: (state.commandResults ?? []).slice(-32).map(entry => ({...entry})),
     nodes: state.nodes.map(node => ({
       id: node.id,
       x: node.x,

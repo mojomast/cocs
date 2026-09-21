@@ -151,6 +151,78 @@ test('weather FX reuses pooled slots, respects the cap and gates CPU/reduced mot
  pool.dispose();
 });
 
+test('precipitation preserves its 60 Hz stream across presentation cadences and bounds hitch work',()=>{
+ const origin={x:0,y:0,z:0},preset=weatherPreset('rain');
+ const run=hz=>{const adds=[],fx=new WeatherFX({add:add=>adds.push(add)},{preset,cap:30});for(let i=0;i<hz*2;i++){fx.setPreset(preset);fx.update(1/hz,origin);}return {adds,fx};};
+ const reference=run(60);
+ assert.equal(reference.adds.length,120*Math.round(preset.particles/6));
+ for(const hz of [30,120,144]){const result=run(hz);assert.deepEqual(result.adds,reference.adds,`${hz} Hz preserves the spawn sequence`);assert.equal(result.fx.serial,120);}
+ assert.ok(reference.adds.every(add=>add.gravity===0),'terminal precipitation speed agrees with splash trajectories');
+ const fx=new WeatherFX({add(){}},{preset,cap:30});
+ for(const dt of [0,-1,NaN,Infinity])assert.equal(fx.update(dt,origin),0);
+ assert.equal(fx.update(10,origin),30,'a long gap never exceeds the existing update cap');
+ assert.equal(fx.update(0,origin),0,'dropped catch-up work is not retained as a backlog');
+ assert.equal(fx.update(1/60,origin),15);
+ const serial=fx.serial;fx.setPreset(preset);assert.equal(fx.serial,serial);
+ fx.setPreset(weatherPreset('snow'));assert.equal(fx.serial,0);assert.equal(fx.acc,0);
+});
+
+function particleView(t,preset=weatherPreset('rain')){
+ const view=Object.assign(Object.create(ArenaView.prototype),{
+  scene:new T.Scene(),renderer:{isSoftware:false},camera:{position:new T.Vector3(0,5,0)},
+  weatherState:{preset,kind:preset.kind,clock:0},_weatherSplashSerial:0,
+  ambientConfig:{color:'#fff',rate:20,rise:.5,life:1},ambientAnchors:[],
+  _quality:()=>({ambientMotes:3}),windGust:()=>1,_mothFx:()=>null,
+ });
+ t.after(()=>{view.ambientPool?.dispose();view.weatherPool?.dispose();view.ripplePool?.dispose();});
+ return view;
+}
+
+test('the view ages atmospheric pools once, retires them when emission stops and clears reduced motion',t=>{
+ const view=particleView(t),quality={particles:1};
+ view._updateAmbient(null,.1,0,false);
+ const mote=view.ambientPool.slots[0],start=mote.obj.position.y,life=mote.life;
+ view._effectsScale=0;
+ view._updateAmbient(null,.1,.1,false);
+ assert.ok(Math.abs(mote.life-(life-.1))<1e-9);
+ assert.ok(mote.obj.position.y>start);
+ view.ambientConfig=null;view._updateAmbient(null,2,2,false);
+ assert.ok(view.ambientPool.slots.every(slot=>!slot.active&&!slot.obj.visible));
+ view.ambientConfig={color:'#fff',rate:20,life:1};view._effectsScale=1;
+ view._updateAmbient(null,.1,3,false);view._updateAmbient(null,.1,3.1,true);
+ assert.ok(view.ambientPool.slots.every(slot=>!slot.active&&!slot.obj.visible));
+ assert.equal(view.ambientFx.acc,0);
+
+ view._sampleWeatherGround=()=>0;
+ view._updateWeatherFx(1/60,false,quality);
+ const drop=view.weatherPool.slots[0],height=drop.obj.position.y,remaining=drop.life;
+ view._effectsScale=0;view._updateWeatherFx(.1,false,quality);
+ assert.ok(Math.abs(drop.life-(remaining-.1))<1e-9);assert.ok(drop.obj.position.y<height);
+ view.weatherState={preset:weatherPreset('clear'),kind:'clear',clock:0};
+ view._updateWeatherFx(2,false,quality);
+ assert.ok(view.weatherPool.slots.every(slot=>!slot.active&&!slot.obj.visible));
+ view.weatherState={preset:weatherPreset('rain'),kind:'rain',clock:0};view._effectsScale=1;
+ view._updateWeatherFx(1/60,false,quality);view._updateWeatherFx(.1,true,quality);
+ assert.ok(view.weatherPool.slots.every(slot=>!slot.active&&!slot.obj.visible));
+ assert.ok(view.ripplePool.slots.every(slot=>!slot.active&&!slot.obj.visible));
+ assert.equal(view.weatherFx.serial,0);assert.equal(view.weatherFx.acc,0);
+});
+
+test('weather uses the supplied arena for ground contacts and a full rain pool accepts snow',t=>{
+ const view=particleView(t),quality={particles:1};
+ const arena={id:'particle-ground',bounds:{minX:-30,maxX:30,minZ:-30,maxZ:30},blocks:[{x:0,z:0,w:60,d:60,h:3}]};
+ for(let i=0;i<4;i++)view._updateWeatherFx(1/60,false,quality,arena);
+ assert.equal(view.weatherPool.slots.length,48);
+ assert.equal(view._sampleWeatherGround(0,0,10),3);
+ assert.ok(view.ripplePool.slots.some(slot=>Math.abs(slot.obj.position.y-3.02)<1e-9));
+ const serial=view.weatherFx.serial;view._updateWeatherFx(1/60,false,quality,arena);
+ assert.equal(view.weatherFx.serial,serial+1,'view updates do not reset the preset stream');
+ view.weatherState={preset:weatherPreset('snow'),kind:'snow',clock:0};
+ view._updateWeatherFx(1/60,false,quality,arena);
+ assert.ok(view.weatherPool.slots.some(slot=>slot.active&&!slot.line),'snow gets reusable mote slots after rain saturates the pool');
+ assert.equal(view.weatherPool.slots.length,48);
+});
+
 test('the view resolves weather deterministically, tints on WebGL and skips wet work on software',()=>{
  const played=Object.assign(Object.create(ArenaView.prototype),{
   scene:Object.assign(new T.Scene(),{fog:new T.FogExp2("#090f17",.018)}),renderer:{isSoftware:false},motionQuery:{matches:false},display:{...DEFAULT_DISPLAY},

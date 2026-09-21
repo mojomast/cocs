@@ -24,6 +24,7 @@ export const DEFAULT_BINDINGS = Object.freeze({
   // O1c command surfaces (design §13.4): the board hold-to-peek, the ping
   // marker and the order radial. Registered so they are remappable in Settings.
   command: 'KeyB', ping: 'KeyU', radial: 'KeyK',
+  tacticalMap: 'KeyJ', squads: 'KeyL',
 });
 
 export const KEYBIND_ACTIONS = Object.freeze(Object.keys(DEFAULT_BINDINGS));
@@ -39,6 +40,7 @@ export const KEYBIND_LABELS = Object.freeze({
   commandScan: 'Order: scan', commandGo: 'Order: go / hold', commandAttack: 'Order: attack',
   commandRoute: 'Order: route',
   command: 'Command board (hold or toggle)', ping: 'Ping marker', radial: 'Order radial',
+  tacticalMap: 'Tactical map', squads: 'Squad management',
 });
 
 // Keys the shell owns (scoreboard, pause, chat, weapons, digits, crouch-alt).

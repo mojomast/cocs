@@ -397,7 +397,9 @@ test('mountain detail scales the cone shell resolution',()=>{
 });
 
 test('the backdrop kit resolves a pure per-biome descriptor',()=>{
- assert.deepEqual([...BACKDROP_BIOMES],['city','canyon','snow','foundry','void']);
+ assert.deepEqual([...BACKDROP_BIOMES],['city','canyon','snow','foundry','void','forest']);
+ assert.equal(backdropKitFor({id:'monsoon-foundry',biome:'forest',collection:'destinations'}).biome,'forest');
+ assert.equal(backdropKitFor({id:'asterion-relay',collection:'destinations'}).biome,'void');
  const cases=[[{id:'neon-vertical'},'city'],[{id:'sunscar-canyon'},'foundry'],[{id:'frostline'},'snow'],[{id:'foundry'},'foundry'],[{id:'aether'},'void'],[{id:'skyfall-basin'},'void'],[{id:'custom-map'},'canyon']];
  for(const [arena,biome] of cases){
   const kit=backdropKitFor(arena);
@@ -464,4 +466,3 @@ test('backdrop density and detail scale with the quality tier',()=>{
  assert.deepEqual(backdropScale(null),{density:1,detail:1});
  for(const mesh of [...high,...low,...tiered,...rich]){mesh.geometry.dispose();mesh.material.dispose();}
 });
-

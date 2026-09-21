@@ -299,7 +299,7 @@ test('floor tiles merge into one batch and static blocks group by material and c
 
 test('every canonical arena has batched polish, faithful collision boxes and software-readable materials',t=>{
  const previous=Object.getOwnPropertyDescriptor(globalThis,'document');
- const ctx={fillRect(){},fillText(){},beginPath(){},moveTo(x,y){assert.ok(Number.isFinite(x)&&Number.isFinite(y));},lineTo(x,y){assert.ok(Number.isFinite(x)&&Number.isFinite(y));},closePath(){},stroke(){},fill(){}};
+ const ctx={clearRect(){},measureText(text){return {width:String(text).length*40};},fillRect(){},fillText(){},beginPath(){},moveTo(x,y){assert.ok(Number.isFinite(x)&&Number.isFinite(y));},lineTo(x,y){assert.ok(Number.isFinite(x)&&Number.isFinite(y));},closePath(){},stroke(){},fill(){}};
  Object.defineProperty(globalThis,'document',{configurable:true,value:{createElement:()=>({getContext:()=>ctx})}});
  t.after(()=>{if(previous)Object.defineProperty(globalThis,'document',previous);else delete globalThis.document;});
  const renderer=new SoftwareRenderer({width:320,height:180,getContext:()=>ctx}),view=Object.assign(Object.create(ArenaView.prototype),{scene:new T.Scene(),renderResources:new Set(),renderer});
@@ -1036,7 +1036,7 @@ test('soccer presentation renders one keyed ball and skips race pickups',()=>{
  assert.equal(hex.geometry.type,'BufferGeometry');
  assert.ok(hex.geometry.attributes.position.count/3>=1000,'the ball has a high-poly panel shell');
  assert.notEqual(pent.material.color.getHexString(),hex.material.color.getHexString(),'panels use a contrasting colour');
- assert.ok(view.sharedResources.has(hex.geometry)&&view.sharedResources.has(pent.geometry),'ball geometry is shared, not owned by the model');
+  assert.ok(!view.sharedResources.has(hex.geometry)&&!view.sharedResources.has(pent.geometry),'uncached panel geometry belongs to this ball model');
  ball.traverse(node=>{assert.equal(node.userData.objective,true);assert.equal(node.userData.noCameraOcclusion,true);});
  assert.equal(view.raceModels.size,1,'soccer skips race boxes, hazards and coins');
  const before=ball.quaternion.toArray();

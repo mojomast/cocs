@@ -284,7 +284,7 @@ test('the page and respawn traps reuse the shared dialog focus selector', () => 
  const primitives = readFileSync(join(ROOT, 'app/ui/primitives.tsx'), 'utf8');
  assert.match(primitives, /export const MODAL_FOCUS_SELECTOR=/, 'the selector is exported from the primitives');
  for (const control of ['textarea:not(:disabled)', 'a[href]', 'summary']) assert.ok(primitives.includes(control), `the selector covers ${control}`);
- assert.ok(page.includes("import {MODAL_FOCUS_SELECTOR} from './ui/primitives';"), 'the page imports the shared selector');
+ assert.match(page,/import \{[^}]*\bMODAL_FOCUS_SELECTOR\b[^}]*\} from '\.\/ui\/primitives';/, 'the page imports the shared selector');
  assert.ok(page.includes('host.querySelectorAll<HTMLElement>(MODAL_FOCUS_SELECTOR)'), 'the global modal trap uses it');
  assert.ok(respawn.includes('host.querySelectorAll(MODAL_FOCUS_SELECTOR)'), 'the respawn editor uses it too');
  assert.doesNotMatch(page, /'button:not\(:disabled\),input,select,\[tabindex\]/, 'the narrower trap selector is gone');

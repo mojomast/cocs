@@ -83,3 +83,21 @@ test('an empty sheet ignores spawns', () => {
   assert.equal(player.active, 0);
   player.dispose();
 });
+
+test('single-pass billboard bounds include growth and offscreen slots still expire', t => {
+  const frames = fakeFrames(2), player = new MothSpritePlayer({frames, slots:1});
+  t.after(() => { player.dispose();for(const frame of frames)frame.dispose(); });
+  const camera = new T.PerspectiveCamera(60,1,.1,50);
+  camera.updateMatrixWorld();
+  const frustum = new T.Frustum().setFromProjectionMatrix(new T.Matrix4().multiplyMatrices(camera.projectionMatrix,camera.matrixWorldInverse));
+  const slot = player.spawn({x:6,y:0,z:-5},{size:1,grow:100,life:1});
+  assert.equal(slot.material.side,T.DoubleSide);assert.equal(slot.material.forceSinglePass,true);
+  assert.equal(slot.mesh.frustumCulled,true);
+  slot.mesh.updateMatrixWorld(true);assert.equal(frustum.intersectsObject(slot.mesh),false);
+  player.update(.1,{camera});slot.mesh.updateMatrixWorld(true);
+  assert.equal(frustum.intersectsObject(slot.mesh),true,'growth expands the world-space bound');
+  const reused = player.spawn({x:100,y:0,z:-5},{size:1,life:.15});
+  assert.equal(reused,slot);slot.mesh.updateMatrixWorld(true);assert.equal(frustum.intersectsObject(slot.mesh),false);
+  player.update(.1,{camera});player.update(.1,{camera});
+  assert.equal(player.active,0);assert.equal(slot.mesh.visible,false);
+});

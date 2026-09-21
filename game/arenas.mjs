@@ -80,10 +80,10 @@ const derivedScale=arena=>{const width=span(arena);return width<60?'skirmish':wi
 export function arenaMeta(mapOrId){
  const arena=typeof mapOrId==='string'?MAPS.find(map=>map.id===mapOrId):mapOrId;
  if(!arena)return null;
- const author=AUTHOR[arena.id]||{};
+  const author=AUTHOR[arena.id]||arena.arena||{};
  return {id:arena.id,group:author.group??derivedGroup(arena),scale:author.scale??derivedScale(arena),legacy:author.legacy===true,play:author.play??null,scaleBots:ARENA_SCALES[author.scale??derivedScale(arena)].bots};
 }
-export function arenaSupportsMode(mapId,mode){const meta=arenaMeta(mapId);if(!meta)return false;if(mode==='puma-race'||mode==='puma-soccer')return meta.play?.includes(mode)===true;if(mode==='horde'||mode==='campaign')return mapId!=='puma-circuit'&&mapId!=='puma-pitch';return !meta.play||meta.play.includes(mode);}
+export function arenaSupportsMode(mapId,mode){const meta=arenaMeta(mapId);if(!meta)return false;const map=MAPS.find(map=>map.id===mapId);if(mode==='puma-race'||mode==='puma-soccer')return meta.play?.includes(mode)===true;if(map?.race)return false;if(mode==='horde'||mode==='campaign')return map?.arena?.play?meta.play.includes(mode):true;return !meta.play||meta.play.includes(mode);}
 export function maxBotsFor(mode){return modeRule(mode)?.maxBots??DEFAULT_MAX_BOTS;}
 export function recommendedBots(mode,mapId){const meta=arenaMeta(mapId);const cap=maxBotsFor(mode),base=meta?.scaleBots??ARENA_SCALES.skirmish.bots;return Math.max(0,Math.min(cap,base));}
 export function mapsForMode(mode,{legacy=false}={}){return MAPS.filter(map=>arenaSupportsMode(map.id,mode)&&(legacy||!arenaMeta(map.id).legacy));}

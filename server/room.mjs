@@ -15,6 +15,7 @@ import {SUBAGENTS,reqItem,reqItemModes,reqItemSupported,reqPurchase} from '../ga
 import {depotPurchaseState} from '../game/cocs-traversal.mjs';
 import {randomUUID} from 'node:crypto';
 import {validPlayerId,sanitizeText,parseInputEnvelope,PROTOCOL_VERSION,SNAPSHOT_DELTA_VERSION,SNAPSHOT_DELTA_MIN_BYTES,snapshotDelta,wireSize,MESSAGE,COCS_REJECT_LIMIT,parseOrderMessage,parseEconomyMessage,parseTerminalMessage,parseCommandMessage,parseBuyMessage} from '../game/protocol.mjs';
+import {cocsCommandAuthority, reconcileCocsSquads} from '../game/cocs-squads.mjs';
 // V2 per-team snapshot filtering (§11.4/§12.7). Applied per peer at this wire
 // seam only; local/solo play reads `Match.snapshot()` directly and stays
 // byte-identical.
@@ -405,6 +406,8 @@ export class Room {
   return {state: 'blocked', ok: false, reason: 'missing'};
  }
  cocsCommandOutcome(record, state) {
+  const result = (state.commandResults ?? []).findLast(entry => String(entry.cardId) === String(record.cardId) && entry.peerId === String(record.actorId) && entry.tick >= record.createdTick);
+  if (result) return {state: result.ok ? 'done' : 'blocked', ok: result.ok, reason: result.reason};
   const team = record.team === 1 ? 1 : 0;
   const actorId = String(record.actorId ?? '');
   const coop = state.coop;
@@ -639,8 +642,8 @@ export class Room {
   // The seat itself is an in-sim actor id (the sim writes and reads it), so the
   // room validates `release`/buyer-commander state on the same identity.
   const simId = String(actor.id);
-  const seat = state.coop ? state.coop.commandSeat?.[team] ?? null : state.command?.seat?.[team] ?? null;
-  if (parsed.action === 'release' && seat !== simId) return this.cocsRejectAction(opened, 'not-commander', { action: parsed.action });
+  const authority = cocsCommandAuthority(this.match, state, {...parsed, peerId: simId, team, actorId: actor.id});
+  if (!authority.ok) return this.cocsRejectAction(opened, authority.reason, {action: parsed.action});
   // Match the sim's vocabulary before issuing an acceptance. Otherwise a bad
   // route/stance sits RUNNING forever, and a lowercase accepted stance never
   // matches its uppercase snapshot when the ledger waits for completion.
@@ -1197,6 +1200,7 @@ export class Room {
    const a = this.match.actors[peer.actorId];
    a.name = `${a.name} · BOT`;
    a.bot = { route: [], think: 0, target: -1, memory: 0, reaction: 0, stuck: 0, last: { x: a.x, y: a.y, z: a.z }, state: 'roam' };
+   reconcileCocsSquads(this.match, this.match.objectiveState);
   }
   peer.latest = null;
     peer.edgeFire = peer.edgeJump = peer.edgePower = peer.edgeInteract = false;

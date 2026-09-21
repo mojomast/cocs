@@ -46,7 +46,7 @@ test('codes resolve to actions and conflicts are reported', () => {
 
 test('mobility binds to KeyX and stays remappable like every other action', () => {
   assert.equal(DEFAULT_BINDINGS.mobility, 'KeyX');
-  assert.equal(KEYBIND_ACTIONS.length, 23, '18 historical actions, the free-cursor toggle, the three O1c command surfaces, the route verb and held alt fire');
+  assert.equal(KEYBIND_ACTIONS.length, 25, 'combat/order controls plus remappable tactical map and squads');
   assert.ok(KEYBIND_OPTIONS.includes('KeyX'), 'KeyX is offered in the settings dropdown');
   const rebound = rebindAction(DEFAULT_BINDINGS, 'mobility', 'KeyZ');
   assert.equal(rebound.mobility, 'KeyZ');
@@ -66,7 +66,7 @@ test('alt fire binds to KeyZ without colliding with the command board or the HUD
   const rebound = rebindAction(DEFAULT_BINDINGS, 'altFire', 'KeyJ');
   assert.equal(rebound.altFire, 'KeyJ');
   assert.equal(actionForCode(rebound, 'KeyJ'), 'altFire');
-  assert.equal(actionForCode(rebound, 'KeyZ'), null, 'the old key stops resolving after a remap');
+  assert.equal(actionForCode(rebound, 'KeyZ'), 'tacticalMap', 'the displaced tactical map receives the freed key');
   assert.equal(rebound.mobility, 'KeyX', 'unrelated actions keep their defaults');
   assert.deepEqual(bindingConflicts(rebound), []);
 });

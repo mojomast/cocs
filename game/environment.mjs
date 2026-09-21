@@ -137,10 +137,14 @@ export function addMountains(world,{background='#090f17',radius=150,count=26,see
 // builder: one instanced draw per silhouette family, fresh geometry per build
 // (never cached in ModelAssets) so a map rebuild disposes exactly what it made.
 // The CPU renderer never calls the builder, so its scene stays byte-identical.
-export const BACKDROP_BIOMES=Object.freeze(['city','canyon','snow','foundry','void']);
+export const BACKDROP_BIOMES=Object.freeze(['city','canyon','snow','foundry','void','forest']);
 export const BACKDROP_TRIANGLE_BUDGET=24000;
 
 const BACKDROP_KITS=Object.freeze({
+ forest:Object.freeze({biome:'forest',accent:'#90b782',families:Object.freeze([
+  Object.freeze({kind:'trunk',shape:'trunk',count:40,color:'#374b3d'}),
+  Object.freeze({kind:'canopy',shape:'canopy',count:40,color:'#426a50'}),
+ ]),ring:null}),
  city:Object.freeze({
   biome:'city',accent:'#7fe7ff',
   families:Object.freeze([
@@ -192,7 +196,9 @@ const BACKDROP_KITS=Object.freeze({
 export function backdropKitFor(arena={}){
  const requested=typeof arena==='string'?arena.trim().toLowerCase():'';
  let side=requested,biome='';
- if(!side&&arena&&typeof arena==='object'){
+  if(!side&&arena&&typeof arena==='object'){
+   if(arena.collection==='destinations'&&arena.biome==='forest')return BACKDROP_KITS.forest;
+   if(arena.id==='asterion-relay'||arena.id==='ion-speedway')return BACKDROP_KITS.void;
   const id=String(arena.id||'').toLowerCase();
   side=id;biome=String(biomeAmbience(arena).biome||'').toLowerCase();
  }
@@ -219,6 +225,8 @@ export function backdropScale(quality=null){
 function backdropShape(shape,detail){
  const segments=clamp(Math.round(3+detail*5),3,8);
  switch(shape){
+   case 'trunk':return new T.CylinderGeometry(.35,.65,1,6);
+   case 'canopy':return new T.IcosahedronGeometry(1,1);
   case 'tower':case 'edge':case 'beacon':case 'satellite':return new T.BoxGeometry(1,1,1);
   case 'mesa':return new T.CylinderGeometry(.8,1.02,.92,segments+2,1);
   case 'spire':return new T.ConeGeometry(1,1,segments);
@@ -238,7 +246,7 @@ function backdropShape(shape,detail){
 export function addBackdrop(world,{biome='canyon',seed=1,quality=null,radius=150,base=-12}={}){
  if(!world)return [];
  const kit=backdropKitFor(biome),{density,detail}=backdropScale(quality),scaled=count=>Math.max(0,Math.round(count*density));
- const random=rng(((seed>>>0)||1)+7919),meshes=[],dummy=new T.Object3D(),color=new T.Color(),towers=[],stacks=[],ringTilt=kit.ring?.tilt??.4,ringEuler=new T.Euler(ringTilt,0,ringTilt*.35);
+  const random=rng(((seed>>>0)||1)+7919),meshes=[],dummy=new T.Object3D(),color=new T.Color(),towers=[],stacks=[],trees=[],ringTilt=kit.ring?.tilt??.4,ringEuler=new T.Euler(ringTilt,0,ringTilt*.35);
  const ringAt=(i,count,inner=.86,spread=.24)=>{const angle=(i/count)*Math.PI*2+random()*.16,dist=radius*(inner+random()*spread);return {angle,x:Math.cos(angle)*dist,z:Math.sin(angle)*dist,dist};};
  const build=family=>{
   const count=scaled(family.count);
@@ -248,7 +256,13 @@ export function addBackdrop(world,{biome='canyon',seed=1,quality=null,radius=150
   const mesh=new T.InstancedMesh(geometry,material,count),place=family.shape;
   let used=0;
   for(let i=0;i<count;i++){
-   if(place==='tower'){
+   if(place==='trunk'){
+    const {x,z,angle}=ringAt(i,count),h=24+random()*22;trees.push({x,z,angle,h});
+    dummy.position.set(x,base+h*.5,z);dummy.rotation.set(0,angle,0);dummy.scale.set(3,h,3);
+   }else if(place==='canopy'){
+    const tree=trees[i];if(!tree)continue;
+    dummy.position.set(tree.x,base+tree.h,tree.z);dummy.rotation.set(.1,tree.angle,.12);dummy.scale.set(12+random()*7,8+random()*6,12+random()*7);
+   }else if(place==='tower'){
     const {angle,x,z}=ringAt(i,count),h=16+random()*36,w=3+random()*4,d=w*(.7+random()*.6);
     dummy.position.set(x,base+h*.5,z);dummy.rotation.set(0,-angle+Math.PI*.5,0);dummy.scale.set(w,h,d);
     towers.push({x,z,angle,h,w});

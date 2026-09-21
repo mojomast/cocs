@@ -20,6 +20,7 @@
 // ---------------------------------------------------------------------------
 
 import {RULES} from './data.mjs';
+import {COCS_SQUAD_ACTIONS, cocsCommandAuthority, cocsSquadAction} from './cocs-squads.mjs';
 import {SUBAGENTS, convertCoopReq, reqItem, reqPurchase} from './cocs-economy.mjs';
 import {addActorReq, capturableNodes, compareCocsOrders, connectivityIncome, cutLink, nodeById, normalizeCocsPolicy, repairLink} from './cocs.mjs';
 import {depotPurchaseState, deviceInteract, purchaseDepotVehicle} from './cocs-traversal.mjs';
@@ -2285,6 +2286,9 @@ export function coopTerminalAction(match, state, record = {}) {
 export function coopCommandAction(match, state, record = {}) {
   const coop = state?.coop;
   if (!coop) return {ok: false, reason: 'no-command'};
+  const authority = cocsCommandAuthority(match, state, record);
+  if (!authority.ok) return {ok: false, reason: authority.reason};
+  if (COCS_SQUAD_ACTIONS.includes(String(record.action).toLowerCase())) return cocsSquadAction(match, state, record);
   const team = record.team === 1 ? 1 : 0;
   const peerId = String(record.peerId ?? '');
   coop.commandSeat ??= {0: null, 1: null};
@@ -2314,7 +2318,7 @@ export function coopCommandAction(match, state, record = {}) {
     const humans = team === 0 ? coopHumanIds(match) : (match?.actors ?? []).filter(actor => actor && actor.health > 0 && actor.team === 1 && actor.isNpc !== true && actor.bot == null).map(actor => actor.id).sort((a, b) => a - b);
     const needed = Math.max(1, Math.floor(humans.length / 2) + 1);
     const votes = coop.commandVotes[team];
-    const count = Object.keys(votes).filter(key => votes[key] === true).length;
+    const count = humans.filter(id => votes[String(id)] === true).length;
     if (humans.length > 0 && count >= needed && coop.commandSeat[team] !== peerId) {
       coop.commandSeat[team] = peerId;
       coop.commandVotes[team] = {};
@@ -2337,7 +2341,7 @@ export function coopCommandAction(match, state, record = {}) {
   if (action === 'opt-out-orders') {
     // Per-actor personal REQ opt-out (design §6A.6). Lives on the roster so the
     // order-reward path can skip the actor without a parallel wallet.
-    const actor = actorById(match, record.actorId);
+    const actor = authority.actor;
     if (!actor) return {ok: false, reason: 'missing'};
     actor.ordersOptOut = true;
     coop.commandOrdersOptOut[String(actor.id)] = true;

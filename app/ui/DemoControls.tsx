@@ -1,5 +1,6 @@
 'use client';
 import {ArrowDown,ArrowUp,Camera,ChevronLeft,ChevronRight,Eye,EyeOff,Gauge,Pause,Play,Settings,Undo2} from 'lucide-react';
+import styles from './DemoControls.module.css';
 
 // The unobtrusive control dock shown in the "Back to Demo" view. Every
 // capability has a visible button (the hotkeys are accelerators, never the only
@@ -28,7 +29,7 @@ export function DemoControls({
   onKeyDown:(e:any)=>{if(e.key===' '||e.key==='Enter'){e.preventDefault();onLift(value);}},
   onKeyUp:(e:any)=>{if(e.key===' '||e.key==='Enter')onLift(0);},
  });
- return <div className="demo-controls" role="group" aria-label="Back to demo controls" onPointerUp={(e:any)=>{const button=e.target?.closest?.('button');button?.blur?.();}}>
+  return <div className={`demo-controls ${styles.toolbar}`} role="group" aria-label="Back to demo controls" onPointerUp={(e:any)=>{const button=e.target?.closest?.('button');button?.blur?.();}}>
   <div className="demo-controls__row">
    <button type="button" className="icon-button" onClick={onPrevScenario} aria-label="Previous scenario" title="Previous scenario (Left arrow)"><ChevronLeft size={18}/></button>
    <span className="demo-controls__label" aria-live="polite">{running?.modeName||'DEMO'}<em>{running?.mapName||''}</em></span>
@@ -72,8 +73,8 @@ export function DemoControls({
    <button type="button" className="demo-option" aria-pressed={announcer} onClick={()=>onAnnouncer(!announcer)}>ANNOUNCER · {announcer?'ON':'OFF'}</button>
    <button type="button" className="demo-option" aria-pressed={weather!==null} onClick={onWeather}>ENVIRONMENT · {weather?String(weather).toUpperCase():'AUTO'}</button>
   </div>
-  {(notice||error)&&<p role={error?'alert':'status'} style={{margin:0,textAlign:'center',font:'11px var(--font-mono)',letterSpacing:'.08em',color:error?'#ff9a9a':'#9fbcb1'}}>{error||notice}</p>}
-  <p style={{margin:0,textAlign:'center',font:'10px var(--font-mono)',letterSpacing:'.08em',color:'#7fa094'}}>
+   {(notice||error)&&<p className={styles.notice} role={error?'alert':'status'}>{error||notice}</p>}
+   <p className={styles.help}>
    Drag or move the mouse to look · WASD fly (Space/Ctrl rise &amp; fall, Shift boost) · H HUD · B style · F free roam · [ ] subject · R reset · P pause · Esc exits
   </p>
  </div>;

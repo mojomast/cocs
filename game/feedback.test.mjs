@@ -122,6 +122,30 @@ test('pooled effects switch to additive blending per spawn and reset it on reuse
  pool.dispose();
 });
 
+test('a saturated pool can change between streaks and motes without allocating slots',t=>{
+ const pool=new EffectPool(new T.Scene(),1);t.after(()=>pool.dispose());
+ const line=pool.add({from:{x:0,y:3,z:0},to:{x:0,y:2,z:0},color:'#fff',life:1});
+ const material=line.material;
+ const mote=pool.add({pos:{x:1,y:2,z:3},color:'#fff',life:1});
+ assert.equal(mote,line);assert.equal(mote.geometry,pool.sphere);assert.equal(mote.material,material);
+ assert.equal(pool.slots[0].line,false);assert.equal(pool.slots.length,1);
+ pool.clear();
+ const again=pool.add({from:{x:0,y:2,z:0},to:{x:0,y:1,z:0},color:'#fff'});
+ assert.equal(again,line);assert.equal(again.geometry,pool.line);assert.equal(pool.slots[0].line,true);
+});
+
+test('ambient intensity scales emission and drifting motes/smoke keep their authored velocity',t=>{
+ const profile={color:'#fff',rate:20,rise:.5,life:2,smoke:{color:'#888',rate:10,rise:1,life:2}};
+ const run=intensity=>{const adds=[],fx=new AmbientFX({add:add=>adds.push(add)},{profile,anchors:[{x:0,y:0,z:0}]});for(let i=0;i<20;i++)fx.update(.1,{x:0,y:0,z:0},{intensity});return adds;};
+ const full=run(1),half=run(.5);
+ assert.equal(run(0).length,0);assert.equal(full.length,half.length*2);
+ assert.ok(full.every(add=>add.gravity===0));
+ const pool=new EffectPool(new T.Scene(),2);t.after(()=>pool.dispose());
+ const smoke=full.find(add=>add.expand>0),mesh=pool.add(smoke),start=mesh.position.y;
+ pool.update(.1);pool.update(.1);
+ assert.ok(Math.abs(mesh.position.y-start-smoke.velocity.y*.2)<1e-9,'smoke rises without combat-particle gravity');
+});
+
 test('EffectPool supports velocity damping, custom gravity, spin, fade curves and color interpolation',()=>{
  const pool=new EffectPool(new T.Scene(),2),pos=new T.Vector3(0,5,0),vel=new T.Vector3(10,20,0);
  const spark=pool.add({pos,color:'#ffffff',endColor:'#ff4400',life:1,velocity:vel,damping:2,gravity:5,spin:3,fade:'smooth',startOpacity:1});

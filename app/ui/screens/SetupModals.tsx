@@ -1,4 +1,5 @@
 'use client';
+import {useState} from 'react';
 import type {ScreenProps} from '../contract';
 import {MatchConfiguration,PresetsConfiguration} from '../../game-ui/configuration';
 import {Modal,Btn,Segmented,SelectCard,Panel,Chip,Meter} from '../primitives';
@@ -6,14 +7,16 @@ import {LatticeBriefing} from './LatticeGuide';
 import {onboardingStepView} from '../../../game/onboarding.mjs';
 
 export function SetupModal({ui}:ScreenProps){
+ const [collection,setCollection]=useState('all');
  const {setupOpen,closeSetup,config,setConfig,mapId,setMapId,selectableMaps=[],start,presets=[],savePreset,loadPreset,deletePreset,selectedMap,ready,error,MapPlan,mapViewBox,modalRef}=ui;
  return <Modal open={!!setupOpen} keepMounted onClose={closeSetup} size="xl" eyebrow="SOLO MATCH" title="Match setup" panelRef={modalRef} footer={<>
   <Btn variant="primary" size="lg" className="modal-foot-primary" onClick={()=>{closeSetup();start();}} disabled={!ready||!!error}>ENTER ARENA <small>START WITH THIS SETUP</small></Btn>
  </>}>
   <div className="layout layout--lead">
    <div className="stack">
-    <div className="section-label"><span>ARENA</span><span>{selectedMap?.tag}</span></div>
-    <div className="grid-cards">{selectableMaps.map((map:any)=><SelectCard key={map.id} selected={mapId===map.id} onClick={()=>setMapId(map.id)} className="card--arena" icon={MapPlan?<MapPlan map={map} viewBox={mapViewBox?.(map)}/>:undefined} name={map.name} tag={map.description} ariaLabel={map.name}/>)}</div>
+     <div className="section-label"><span>ARENA</span><span>{selectedMap?.tag}</span></div>
+     <Segmented value={collection} onChange={setCollection} ariaLabel="Map collection" options={[{value:'all',label:'All arenas'},{value:'destinations',label:'New · Destinations'}]}/>
+     <div className="grid-cards">{selectableMaps.filter((map:any)=>collection==='all'||map.collection===collection).map((map:any)=><SelectCard key={map.id} selected={mapId===map.id} onClick={()=>setMapId(map.id)} className="card--arena" icon={MapPlan?<MapPlan map={map} viewBox={mapViewBox?.(map)}/>:undefined} name={map.name} meta={map.collection==='destinations'?'NEW · DESTINATIONS':undefined} tag={map.description} ariaLabel={map.name}/>)}</div>
     <PresetsConfiguration presets={presets} onSave={savePreset} onLoad={loadPreset} onDelete={deletePreset}/>
    </div>
    <div className="stack">

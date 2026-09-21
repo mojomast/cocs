@@ -67,7 +67,9 @@ export const CORRIDOR_PANELS = Object.freeze([
   '.cocs-readout',
   '.director-readout',
   '.kill-feed',
-  '.hud-bottom',
+  '.stat-card--vitals',
+  '.ammo-stack',
+  '[aria-label="Ability, movement and grenade status"]',
   '.objective-bar',
   '.cocs-spend-chip',
   '.cocs-notice',
@@ -201,6 +203,17 @@ function probeBrowserState({panels, corridorHalfMin}) {
     const box = element.getBoundingClientRect();
     return {x: box.x, y: box.y, left: box.left, top: box.top, width: box.width, height: box.height, right: box.right, bottom: box.bottom};
   };
+  // Scrollable tracks and bounded side rails expose only their clipped area.
+  // Keep viewport overflow distinct from content reachable by local scrolling.
+  const visibleBoxOf = element => {
+    const box=boxOf(element);
+    for(let parent=element.parentElement;parent&&parent!==document.body;parent=parent.parentElement){
+      const style=getComputedStyle(parent),r=parent.getBoundingClientRect();
+      if(/auto|scroll|hidden|clip/.test(style.overflowX)){box.left=Math.max(box.left,r.left);box.right=Math.min(box.right,r.right);}
+      if(/auto|scroll|hidden|clip/.test(style.overflowY)){box.top=Math.max(box.top,r.top);box.bottom=Math.min(box.bottom,r.bottom);}
+    }
+    return {...box,x:box.left,y:box.top,width:box.right-box.left,height:box.bottom-box.top};
+  };
   const root = document.documentElement;
   const body = document.body;
   const innerWidth = window.innerWidth;
@@ -225,7 +238,7 @@ function probeBrowserState({panels, corridorHalfMin}) {
   const visibleOverflow = [];
   for (const element of document.querySelectorAll('body *')) {
     if (!isRendered(element)) continue;
-    const box = element.getBoundingClientRect();
+    const box = visibleBoxOf(element);
     if (box.width <= 1 || box.height <= 1) continue;
     if (box.right > innerWidth + 1 || box.left < -1) {
       visibleOverflow.push({element: describeElement(element), left: box.left, right: box.right, width: box.width});
@@ -257,7 +270,8 @@ function probeBrowserState({panels, corridorHalfMin}) {
   for (const selector of panels) {
     for (const element of document.querySelectorAll(selector)) {
       if (!visible(element)) continue;
-      const box = boxOf(element);
+      const box = visibleBoxOf(element);
+      if(box.width<=1||box.height<=1)continue;
       const intersects = box.right > corridorBox.left && box.x < corridorBox.right && box.bottom > corridorBox.top && box.y < corridorBox.bottom;
       panelBoxes.push({selector, ...box, intersects});
     }

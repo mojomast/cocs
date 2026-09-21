@@ -1,12 +1,19 @@
 // In-game patch notes. The title-screen footer is the running version; this
 // module is the human-readable release digest the Changelog screen renders. The
 // full historical record lives in docs/CHANGELOG.md and is linked from the UI.
-export const RELEASE_VERSION = 'v8.7.1';
-export const RELEASE_CODENAME = 'FOUNDRY';
+export const RELEASE_VERSION = 'v8.8';
+export const RELEASE_CODENAME = 'DESTINATIONS';
 export const REPO_URL = 'https://github.com/mojomast/tokenarena';
 export const FULL_CHANGELOG_URL = `${REPO_URL}/blob/main/docs/CHANGELOG.md`;
 
 export const CHANGELOG = [
+  {version:'v8.8',codename:'DESTINATIONS',date:'2026-09-21',tag:'Nine new worlds, a clearer combat interface, and command at map scale',highlights:[
+    'Nine original, authored maps cover every mode: Meridian Exchange, Verdant Reliquary, Ember Crucible, Tidal Citadel, Sunscar Convoy, Asterion Relay, Monsoon Foundry, Ion Speedway and Aurora Stadium. Enterable districts, alternate approaches, real ground ramps, distinctive landmarks and biome-specific materials replace repetitive arena layouts. Find them under New · Destinations in Match Setup.',
+    'The Verdant Signal adds a campaign recovery mission through the reliquary, with authored encounters, a relay hold, checkpoints and extraction. Dedicated LATTICE theatres retain the established five-capturable-node strategic rules within richer physical layouts.',
+    'The combat HUD prioritizes match status, segmented health/armor and weapon/ammo. Objective and command panels use bounded edge lanes. The demo toolbar stays on one row, with scrolling access on narrow screens.',
+    'Open the tactical map with J (remappable): inspect elevation, cover, landmarks, facilities, objectives and revealed intel. Commanders can select legal objectives and issue orders through the authoritative command system. Squad management is available through L (remappable).',
+    'Dense architecture is spatially batched, arena resources are released when maps change, and atmospheric particles now drift, fade and expire correctly. Flat transparent effects avoid duplicate submissions, empty weapon-overlay pixels skip styling, and supplied route data avoids redundant pathfinding.',
+  ]},
   {version:'v8.7.1',codename:'FOUNDRY',date:'2026-09-21',tag:'Precision-machined operators: a dedicated close-up detail tier',highlights:[
     'All nine robots gain much denser close-up construction: recessed armor panels and gaskets, hex fasteners, layered face seals, comms hubs, cooling grilles, reactor instrumentation, exposed hydraulic lines, spinal laminations, segmented fingers, knuckle rollers, tread details and rear service packs. Faces retain their individual optic arrangements and hardware.',
     'The menu frames operators more closely and presents the chassis without a weapon obscuring the chest. Precision assemblies remain attached to the real animated joints, including hands and feet.',

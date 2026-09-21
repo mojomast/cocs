@@ -102,9 +102,13 @@ test('campaign missions author checkpoints and named boss phases',()=>{
  assert.ok(named.length>=2,'boss phases carry presentation names');
 });
 
-test('the campaign fields five missions with distinct tags and verbs',()=>{
- assert.equal(CAMPAIGN_MISSIONS.length,5);
- for(const id of ['convoy-run','reactor-run','throne-siege','ghost-wire','crown-duel'])assert.ok(CAMPAIGN_MISSION_IDS.includes(id),`${id} exists`);
+test('the campaign preserves its original sequence and adds the recovery mission with distinct tags and verbs',()=>{
+  const original=['convoy-run','reactor-run','throne-siege','ghost-wire','crown-duel'];
+  assert.ok(CAMPAIGN_MISSIONS.length>=6);
+  assert.deepEqual(campaignOrder().slice(0,6),[...original,'verdant-signal']);
+  for(const id of [...original,'verdant-signal'])assert.ok(CAMPAIGN_MISSION_IDS.includes(id),`${id} exists`);
+  assert.equal(missionFor('verdant-signal').mapId,'verdant-reliquary');
+  assert.equal(missionFor('verdant-signal').tag,'RECOVERY');
  const tags=CAMPAIGN_MISSIONS.map(mission=>mission.tag);
  assert.equal(new Set(tags).size,tags.length,'every mission has a distinct tag');
  const kinds=new Set(CAMPAIGN_MISSIONS.flatMap(mission=>mission.steps.map(step=>step.complete.kind)));

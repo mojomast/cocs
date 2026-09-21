@@ -34,10 +34,12 @@ import {SetupModal,SinglePlayerModal,OnboardingModal} from './ui/screens/SetupMo
 import {PauseModal,ResultsModal} from './ui/screens/ResultModals';
 import {TheaterScreen} from './ui/screens/TheaterScreen';
 import {PlayingHud} from './ui/screens/PlayingHud';
+import {TacticalMap} from './ui/screens/TacticalMap';
+import {SquadPanel} from './ui/screens/SquadPanel';
 import {reconcileReqBuys,reqReasonCopy} from './ui/screens/CommandBoardHud';
 import {RespawnOverlay} from './ui/screens/RespawnOverlay';
 import {SettingsDialog} from './ui/screens/SettingsDialog';
-import {MODAL_FOCUS_SELECTOR} from './ui/primitives';
+import {Modal,MODAL_FOCUS_SELECTOR} from './ui/primitives';
 import {respawnOverlayView} from '../game/respawn-ui.mjs';
 import {shuffleSelection,nextArenaSelection,surpriseSelection} from '../game/replay.mjs';
 import {CinematicDirector,CAMERA_RIGS} from '../game/director.mjs';
@@ -188,6 +190,9 @@ export default function Home(){
   // and the pointer-lock listener read the live value; a mirror in React state
   // drives the HUD chip and the CLICK TO FIGHT affordance.
   const [cursorUi,setCursorUi]=useState<any>(()=>initialCursorMode());
+  const [fieldPanel,setFieldPanel]=useState<'map'|'squads'|null>(null);
+  const fieldPanelRef=useRef<'map'|'squads'|null>(null);
+  useEffect(()=>{if(mode!=='playing'){fieldPanelRef.current=null;setFieldPanel(null);}},[mode]);
   const cursorRef=useRef<any>(cursorUi),lockChangeAtRef=useRef(0),requestLockRef=useRef<()=>void>(()=>{});
   // F05: passive watching stays out of the cursor machine. The Tab glance and
   // the automatic death summary never register a surface; only the explicitly
@@ -311,7 +316,7 @@ export default function Home(){
  const chatInputRef=useRef<HTMLInputElement>(null),chatOpenRef=useRef(false);
   useEffect(()=>{chatOpenRef.current=chatOpen;syncCursorSurface(CURSOR_SURFACE.CHAT,chatOpen);if(chatOpen){clearInput();chatInputRef.current?.focus();}else if(modeRef.current==='playing'){canvas.current?.focus({preventScroll:true});setPointerHint(document.pointerLockElement!==canvas.current);}},[chatOpen]);
   const selectedMode=GAME_MODES.find(m=>m.id===config.mode)!;
-  const selectedMap=getMap(mapId),selectableMaps=[...mapsForMode(config.mode,{legacy:legacyMaps})].sort((a:any,b:any)=>Number(Boolean(b.nextGen))-Number(Boolean(a.nextGen)));
+   const selectedMap=getMap(mapId),selectableMaps=[...mapsForMode(config.mode,{legacy:legacyMaps})].sort((a:any,b:any)=>Number(b.collection==='destinations')-Number(a.collection==='destinations')||Number(Boolean(b.nextGen))-Number(Boolean(a.nextGen)));
   const mapViewBox=(map:any)=>{const b=map.bounds;if(!b)return '-15 -15 30 30';const width=b.maxX-b.minX,depth=b.maxZ-b.minZ,p=Math.max(2,Math.max(width,depth)*.04);return `${b.minX-p} ${b.minZ-p} ${width+p*2} ${depth+p*2}`;};
  const selected=CHARACTERS.find((c:any)=>c.id===character)!,power=HARNESSES.find((h:any)=>h.id===harness)!;
  const myPeerId=runtime.current?.net?.peerId;
@@ -334,13 +339,23 @@ export default function Home(){
     if(active===current.surfaces.includes(surface))return;
     applyCursor(active?cursorOpen(current,surface):cursorClose(current,surface));
    };
-   const resetCursorMode=()=>{const next=cursorReset(cursorRef.current);if(next.changed){cursorRef.current=next.state;setCursorUi(next.state);}};
+    const resetCursorMode=()=>{const next=cursorReset(cursorRef.current);if(next.changed){cursorRef.current=next.state;setCursorUi(next.state);}};
+    const closeFieldPanel=()=>{const current=fieldPanelRef.current;if(!current)return;fieldPanelRef.current=null;setFieldPanel(null);syncCursorSurface(current==='map'?CURSOR_SURFACE.TACTICAL_MAP:CURSOR_SURFACE.SQUADS,false);};
+    const openFieldPanel=(panel:'map'|'squads')=>{
+     if(modeRef.current!=='playing'||demoOnlyRef.current)return;
+     const r=runtime.current;
+     if(panel==='squads'&&(r?.spectateLocal||r?.net?.spectate||!isCocsMode(r?.net?.started?r.renderState?.config?.mode:r?.match?.config?.mode)))return;
+     if(fieldPanelRef.current===panel){closeFieldPanel();return;}
+     const previous=fieldPanelRef.current;fieldPanelRef.current=panel;setFieldPanel(panel);
+     syncCursorSurface(panel==='map'?CURSOR_SURFACE.TACTICAL_MAP:CURSOR_SURFACE.SQUADS,true);
+     if(previous)syncCursorSurface(previous==='map'?CURSOR_SURFACE.TACTICAL_MAP:CURSOR_SURFACE.SQUADS,false);
+    };
    const toggleCursorMode=()=>{if(modeRef.current!=='playing'||demoOnlyRef.current)return false;const result=cursorToggle(cursorRef.current,CURSOR_SURFACE.FREE);if(!result.changed)return false;applyCursor(result);return true;};
    // WP1.1: Tab stays inside the surface that owns the cursor. The command
    // board, spend window and Training card are real DOM panels, so focus can
    // move between their controls without opening standings or seeding combat
    // input. Surfaces without a scoped panel keep the old suppression.
-   const surfaceFocusSelectors:Record<string,string>={[CURSOR_SURFACE.BOARD]:'.cocs-board',[CURSOR_SURFACE.SPEND]:'.cocs-spend',[CURSOR_SURFACE.TRAINING]:'[data-training-phase]'};
+    const surfaceFocusSelectors:Record<string,string>={[CURSOR_SURFACE.BOARD]:'.cocs-board',[CURSOR_SURFACE.SPEND]:'.cocs-spend',[CURSOR_SURFACE.TRAINING]:'[data-training-phase]',[CURSOR_SURFACE.SQUADS]:'.squad-dialog [role="dialog"]'};
    const cycleSurfaceFocus=(surface:string,shift:boolean)=>{
     const selector=surfaceFocusSelectors[surface];if(!selector)return false;
     const host=document.querySelector<HTMLElement>(selector);if(!host)return false;
@@ -741,6 +756,19 @@ pauseRender:(on:boolean)=>{const previous=r.benchmarking===true;r.benchmarking=o
     })();
     }catch(e:any){setError(`The 3D renderer could not start: ${e.message}. Try a desktop browser with WebGL enabled.`);setReady(true);runtime.current=null;}})();
     const keydown=(e:KeyboardEvent)=>{const r=runtime.current;
+     const fieldAction=actionForCode(r?.bindings||bindings,e.code);
+     if(modeRef.current==='playing'&&!demoOnlyRef.current){
+      if(fieldPanelRef.current){
+       if(e.code==='Tab'&&fieldPanelRef.current==='squads'&&cycleSurfaceFocus(CURSOR_SURFACE.SQUADS,e.shiftKey))e.preventDefault();
+       if(e.code==='Escape'||(!isEditable(e.target)&&!isEditable(document.activeElement)&&(fieldAction==='tacticalMap'||fieldAction==='squads'))){e.preventDefault();if(!e.repeat)closeFieldPanel();}
+       // The dialog owns Tab, arrows and native activation; none reach combat.
+       return;
+      }
+      if(!e.repeat&&!chatOpenRef.current&&!isEditable(e.target)&&!isEditable(document.activeElement)&&!cursorCombatKeysBlocked(cursorRef.current)&&(fieldAction==='tacticalMap'||fieldAction==='squads')){
+       const currentMode=r?.net?.started?r.renderState?.config?.mode:r?.match?.config?.mode;
+       if(fieldAction==='tacticalMap'||isCocsMode(currentMode)){e.preventDefault();openFieldPanel(fieldAction==='tacticalMap'?'map':'squads');return;}
+      }
+     }
      // Free-cursor toggle (default AltLeft): one remappable control that releases
      // the pointer in place — no pause, no menu — and toggles combat back on.
      const cursorBound=actionForCode(r?.bindings||bindings,e.code)==='cursor';
@@ -961,7 +989,7 @@ pauseRender:(on:boolean)=>{const previous=r.benchmarking===true;r.benchmarking=o
    const onKey=(e:KeyboardEvent)=>{
     if(e.code!==GRAPHICS_LAB_HOTKEY||e.repeat||e.metaKey||e.ctrlKey||e.altKey)return;
     if(isEditable(e.target)||isEditable(document.activeElement)||chatOpenRef.current)return;
-    if(cocsBoardControlRef.current?.isOpen())return;
+     if(fieldPanelRef.current||cocsBoardControlRef.current?.isOpen())return;
     e.preventDefault();
     if(e.shiftKey){if(settings)setSettings(false);else openSettings('graphics-lab',canvas.current);return;}
     const lab=graphicsLabRef.current;if(!lab)return;
@@ -1057,7 +1085,7 @@ pauseRender:(on:boolean)=>{const previous=r.benchmarking===true;r.benchmarking=o
   const endTutorial=(next?:string)=>{const r=runtime.current;if(!r?.training)return;r.training=skipTraining(r.training);studyEmit('training_step_skipped',{lesson:String(r.training.mode),index:Number(r.training.index)});r.training=null;r.trainingEvents=[];setHud((previous:any)=>previous?{...previous,training:null}:previous);if(next==='recommended'){const allowed=mapsForMode('deathmatch',{legacy:legacyMaps});const pick=allowed.some((m:any)=>m.id===mapId)?mapId:allowed[0]?.id??mapId;const rules=normalizeConfig({...DEFAULT_CONFIG,playerName:config.playerName});r.trainingMatch=null;setConfig(rules);setMapId(pick);start({character,harness,mapId:pick,config:rules});return;}canvas.current?.focus({preventScroll:true});if(next==='loadout'){r.trainingMatch=null;setNotice('LOADOUT · pick your operator and harness, then ENTER ARENA.');changeMode('selection');document.exitPointerLock?.();}};
   const shuffle=()=>{const selection=shuffleSelection(Math.random,{legacy:legacyMaps,mode:config.mode});setCharacter(selection.character);setHarness(selection.harness);setMapId(selection.mapId);setNotice('Loadout and arena shuffled. Match rules unchanged.');};
   const nextArena=()=>{const r=runtime.current;if(modeRef.current!=='results'||hud?.net||r?.net||!r?.match?.over)return;studyResultIntentRef.current='next-arena';const selection=nextArenaSelection(r.match.arena.id,Math.random,{legacy:legacyMaps,mode:config.mode});const rules=normalizeConfig(r.match.config);setMapId(selection.mapId);setConfig(rules);setNotice('Arena rotated. Operator and harness held.');start({character,harness,mapId:selection.mapId,config:rules});};
-  const surpriseMe=()=>{if(modeRef.current==='results')studyResultIntentRef.current='surprise-me';const selection=surpriseSelection(Math.random,{legacy:legacyMaps});const rules=normalizeConfig({...config,mode:selection.mode});setCharacter(selection.character);setHarness(selection.harness);setMapId(selection.mapId);setConfig(rules);setNotice('');start({...selection,config:rules});};
+   const surpriseMe=()=>{if(modeRef.current==='results')studyResultIntentRef.current='surprise-me';const selection=surpriseSelection(Math.random,{legacy:legacyMaps});const rules=normalizeConfig({...config,mode:selection.mode,mission:selection.mission??config.mission,checkpoint:null});setCharacter(selection.character);setHarness(selection.harness);setMapId(selection.mapId);setConfig(rules);setNotice('');start({...selection,config:rules});};
  const resume=()=>{runtime.current?.audio.start();changeMode('playing');requestLock();};
  // WP2.1 Escape chain (Settings -> Pause -> game): the keydown listener is
  // registered once, so it calls the current resume through this ref. Resuming
@@ -1294,9 +1322,9 @@ const cocsCommand=cocsView?{...cocsView,boardView:mergedBoard??cocsView.boardVie
     // window) or the paused Training completion beat owns the cursor. While one
     // is up the touch layer is suspended so move/look/fire capture cannot run
     // behind the surface.
-    const touchSuspended=Boolean(spendVisible||(cocsBoard.open===true&&!boardCollapsed)||hud?.training?.phase==='complete'||hud?.training?.done===true);
+     const touchSuspended=Boolean(fieldPanel||spendVisible||(cocsBoard.open===true&&!boardCollapsed)||hud?.training?.phase==='complete'||hud?.training?.done===true);
    const aimActor=player||hud?.actors?.[0],aimWeapon=aimActor?WEAPONS[aimActor.weapon??0]||WEAPONS[0]:null,aimSpread=aimActor?effectiveSpread(aimActor,aimWeapon,{handling:harnessWeaponHandling(aimActor.harness,aimActor.weapon)}):0,crosshairGap=dynamicCrosshairGap(aimSpread,display.size),reloadFill=reloadProgress(aimActor),reloading=Boolean(aimActor?.reloading),posture=postureLabel(aimActor),marker=hitMarker(hud,player),ammoEmpty=Boolean(player&&typeof player.ammo?.[player.weapon]==='number'&&player.ammo[player.weapon]===0),ammoLow=lowAmmo(player,WEAPONS);
-    const killNotice=killBanner(hud,player,WEAPONS),suddenBanner=suddenDeathBanner(hud),startBanner=matchStartBanner(hud,undefined,hudMode),scoreCue=hud?.scoreCue??null,damageIndicator=hud?.damageDir&&hud.time-hud.damageDirAt<.8?hud.damageDir:null,awards=matchAwards(hud),radar=radarContacts(hud,player),radarCols=radarPaletteFor(accessibility.palette);
+     const killNotice=killBanner(hud,player,WEAPONS),suddenBanner=suddenDeathBanner(hud),startBanner=matchStartBanner(hud,undefined,hudMode),scoreCue=hud?.scoreCue??null,damageIndicator=hud?.damageDir&&hud.time-hud.damageDirAt<.8?hud.damageDir:null,awards=matchAwards(hud),radar=(display.radar!==false||fieldPanel==='map')?radarContacts(hud,player):null,radarCols=radarPaletteFor(accessibility.palette);
     const respawn=respawnOverlayView(hud,player);respawnOpenRef.current=respawn.open===true;
     // --- Cursor surfaces ----------------------------------------------------
     // Every interactive overlay registers here. The first one releases the
@@ -1404,6 +1432,7 @@ const cocsCommand=cocsView?{...cocsView,boardView:mergedBoard??cocsView.boardVie
   ]},...HELP_SECTIONS];
   const ui:UiBag={mode,changeMode,study:{...study,version:studyVersion,onToggle:studyToggle,onDownload:studyDownload,onDelete:studyDelete},enterMenu,exitToTitle,entered,settings,setSettings,setupOpen,setSetupOpen,closeSetup,singleOpen,setSingleOpen,singleSub,setSingleSub,singleMission,setSingleMission,startSinglePlayer,startSpectate,quickStart,startTraining,reward,surpriseMe,nextUnlock,nextUnlocks,matchSummary,accessibility,setAccessibility,
    continueTutorial,endTutorial,
+   fieldControls:{mapKey:keyLabel(bindings.tacticalMap??DEFAULT_BINDINGS.tacticalMap),squadKey:keyLabel(bindings.squads??DEFAULT_BINDINGS.squads),openMap:()=>openFieldPanel('map'),openSquads:()=>openFieldPanel('squads'),hasSquads:isCocsMode(hudMode)&&hud?.spectate!==true,open:Boolean(fieldPanel)},
    character,setCharacter,harness,setHarness,mapId,setMapId,chooseCharacter,chooseGear,chooseAttachment,chooseFinish,chooseCrosshair,shuffle,notice,setNotice,config,setConfig:(v:any)=>setConfig({...normalizeConfig(v),playerName:v.playerName}),display,setDisplay,bindings,setBindings,presets,savePreset,loadPreset,deletePreset,sensitivity,muted,legacyMaps,showcase,touchControls,setTouchPref,saveSettings,connectNet,openBrowser,
    selected,selectedMap,selectedMode,selectableMaps,power,powerIcon,CHARACTERS,HARNESSES,GAME_MODES,DIFFICULTIES,mapsForMode,getMap,missionFor,isMissionUnlocked,CAMPAIGN_MISSIONS,MapPlan,mapViewBox,
    profile,campaign,nextMissionId,isMissionComplete,challenges:challengeStatus(challengeState),weeklyChallenges:weeklyStatus(challengeState),UNLOCKS,UNLOCK_GROUPS,GEAR,GEAR_SLOTS,ATTACHMENTS,ATTACHMENT_SLOTS,WEAPON_FINISHES,CROSSHAIR_STYLES,levelFromXp,rankTitle,rankBlurb,unlockedItems,
@@ -1419,7 +1448,7 @@ const cocsCommand=cocsView?{...cocsView,boardView:mergedBoard??cocsView.boardVie
   };
   return <><main style={{'--ui-scale':display.uiScale??1} as any} className={`arena-app${motionReduced?' motion-reduced':''} mode-${mode}${(config.mode==='puma-race'||config.mode==='puma-soccer')?' race-setup':''}${(isRace||isSoccer)?' race-active':''} palette-${accessibility.palette}${accessibility.palette!=='default'?' palette-colorblind':''}${accessibility.highContrast?' ui-contrast':''}`}>
   <canvas ref={canvas} tabIndex={-1} role="img" className="arena-canvas" aria-label="Colosseum Of Competitive Slop 3D game"/>
-  {!entered&&!demoOnly&&<><TitleScreen ui={ui}/><div className="title-footer"><span>v8.7.1 · FOUNDRY</span>{githubLink}</div></>}
+  {!entered&&!demoOnly&&<><TitleScreen ui={ui}/><div className="title-footer"><span>v8.8 · DESTINATIONS</span>{githubLink}</div></>}
   {!entered&&demoOnly&&<DemoControls state={demoSession.state} labels={demoLabels} subjects={broadcast?.subjects??[]} cameraStyle={demoSession.cameraStyle} hudVisible={demoSession.hudVisible} pinned={demoPinned(demoSession)} freeSpeed={demoSession.freeSpeed} running={demoRunning} notice={demoSession.notice} error={demoSession.error}
     onEnterArena={enterArenaFromDemo} onPrevScenario={()=>skipDemoScenario(-1)} onNextScenario={()=>skipDemoScenario(1)}
     onAuto={()=>demoTransition({type:'auto'})} onFollow={demoFollow} onFree={demoToggleFree} onStyle={demoCycleStyle} onResetView={demoResetView}
@@ -1445,7 +1474,11 @@ const cocsCommand=cocsView?{...cocsView,boardView:mergedBoard??cocsView.boardVie
    {error&&<div className="error-banner" role="alert">{error}<button className="secondary-button" onClick={()=>{setError('');if(runtime.current)start();else window.location.reload();}}>RETRY ARENA</button></div>}
    {updateReady&&<div className="update-banner" role="group" aria-label="Update available"><span>A new version of the arena is available.</span><button type="button" className="secondary-button update-reload" onClick={()=>window.location.reload()}>RELOAD</button></div>}
   {(mode==='playing'||mode==='paused')&&player&&<>
-   {isSoccer?<SoccerHud soccer={soccer} state={soccerState} actorId={player?.id} touchControls={touchControls} controls={soccerControls}/>:isRace?<RaceHud race={race} touchControls={touchControls} raceControls={raceControls}/>:<PlayingHud ui={ui}/>}
+    {isSoccer?<SoccerHud soccer={soccer} state={soccerState} actorId={player?.id} touchControls={touchControls} controls={soccerControls}/>:isRace?<RaceHud race={race} touchControls={touchControls} raceControls={raceControls}/>:<PlayingHud ui={ui}/>}
+    <TacticalMap open={mode==='playing'&&fieldPanel==='map'} map={hudMap} hud={hud} player={player} brief={brief} command={cocsCommand} radar={radar} keyLabel={keyLabel(bindings.tacticalMap??DEFAULT_BINDINGS.tacticalMap)} onClose={closeFieldPanel}/>
+    <Modal open={mode==='playing'&&fieldPanel==='squads'} onClose={closeFieldPanel} title="Squad management" eyebrow="TEAM COMMS" size="lg" className="squad-dialog" closeLabel="Close squad management">
+     <SquadPanel snapshot={hud?.cocs} player={player} spectate={hud?.spectate===true} onCommand={sendCocsCommand} disabled={hud?.over===true||(netInfo.connected===false&&runtime.current?.net?.started===true)} notice={cocsCommand?.notice?.text??null}/>
+    </Modal>
    {hud.net&&<GameChat hud={hud} chatOpen={chatOpen} chatLog={chatLog} chatInputRef={chatInputRef} chatDraft={chatDraft} sendChat={sendChat} setChatOpen={setChatOpen} setChatDraft={setChatDraft} selfName={config.playerName||selected.name}/>}
     {mode==='playing'&&<TouchControls runtime={runtime} mode={hud?.config?.mode} visible={touchControls&&!hud?.spectate} suspended={touchSuspended} interactActive={Boolean(cocsCommand?.interactPrompt||vehiclePrompt)} interactLabel={cocsCommand?.interactPrompt?.verb??'USE'} display={display} onLook={touchLook} onSwap={touchSwap} onPause={touchPause} onFullscreen={toggleFullscreen} fullscreen={fullscreen}/>}
    {!entered&&demoOnly&&demoSession.state==='free'&&touchControls&&<TouchControls runtime={runtime} visible display={display} onLook={touchLook} onSwap={()=>{}} onPause={demoTogglePause} onFullscreen={toggleFullscreen} fullscreen={fullscreen}/>}

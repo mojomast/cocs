@@ -64,6 +64,7 @@ export class EffectPool{
   }
   add({from,to,pos,color,life=.15,size=.08,expand=0,velocity=null,wireframe=false,additive=false,damping=0,gravity=null,spin=null,fade='linear',startOpacity=.8,endColor=null}){
    const line=!!from;let slot=this.slots.find(s=>!s.active&&s.line===line);
+   if(!slot&&this.slots.length>=this.limit)slot=this.slots.find(s=>!s.active);
    if(!slot&&this.slots.length<this.limit){const mat=new T.MeshBasicMaterial({transparent:true,depthWrite:false});const obj=new T.Mesh(line?this.line:this.sphere,mat);slot={obj,line};this.slots.push(slot);this.scene.add(obj);}
    if(!slot){
      let oldest=null;
@@ -71,10 +72,13 @@ export class EffectPool{
        const s=this.slots[i];
        if(s.line===line&&(!oldest||s.serial<oldest.serial))oldest=s;
      }
-     slot=oldest;
+     // A full pool of rain streaks must still accept snow motes after a preset
+     // transition. Both shapes share the same Mesh/material slot resources.
+     slot=oldest||this.slots.reduce((best,s)=>!best||s.serial<best.serial?s:best,null);
      if(!slot)return;
    }
-   const obj=slot.obj;obj.visible=true;obj.material.color.set(color);obj.material.opacity=startOpacity??.8;obj.material.wireframe=wireframe;obj.material.blending=additive?T.AdditiveBlending:T.NormalBlending;obj.rotation.set(0,0,0);
+   slot.line=line;
+   const obj=slot.obj;obj.geometry=line?this.line:this.sphere;obj.visible=true;obj.material.color.set(color);obj.material.opacity=startOpacity??.8;obj.material.wireframe=wireframe;obj.material.blending=additive?T.AdditiveBlending:T.NormalBlending;obj.rotation.set(0,0,0);
    if(line){obj.position.copy(from);this.direction.subVectors(to,from);obj.scale.set(size,size,this.direction.length());obj.quaternion.setFromUnitVectors(this.axis,this.direction.normalize());}
    else{obj.position.copy(pos);obj.scale.setScalar(size);}
    let vel=null;
@@ -146,23 +150,25 @@ export class AmbientFX{
  setProfile(profile){this.profile=profile||null;this.acc=0;this.smokeAcc=0;}
  setAnchors(anchors){this.anchors=Array.isArray(anchors)?anchors:[];}
  reset(){this.acc=0;this.smokeAcc=0;}
- update(dt,origin,{reduced=false,software=false,radius=9,wind=1}={}){
+ update(dt,origin,{reduced=false,software=false,radius=9,wind=1,intensity=1}={}){
   if(reduced||software||!this.pool||!this.profile||!origin)return 0;
-  const step=Math.min(Math.max(Number(dt)||0,0),.1),rate=Math.max(0,Number(this.profile.rate)||0)*this.rateScale;
+  const scale=Math.max(0,Math.min(2,Number(intensity)||0));
+  if(scale<=0)return 0;
+  const step=Math.min(Math.max(Number(dt)||0,0),.1),rate=Math.max(0,Number(this.profile.rate)||0)*this.rateScale*scale;
   this.acc+=step*rate;
   let spawned=0;
   while(this.acc>=1&&spawned<this.moteCap){this.acc-=1;this._mote(origin,radius,wind);spawned++;}
   const smoke=this.profile.smoke;
-  if(smoke&&this.anchors.length){this.smokeAcc+=step*Math.max(1,Number(smoke.rate)||1);while(this.smokeAcc>=1&&spawned<this.moteCap*2){this.smokeAcc-=1;this._smoke(smoke,wind);spawned++;}}
+  if(smoke&&this.anchors.length){this.smokeAcc+=step*Math.max(1,Number(smoke.rate)||1)*scale;while(this.smokeAcc>=1&&spawned<this.moteCap*2){this.smokeAcc-=1;this._smoke(smoke,wind);spawned++;}}
   this.spawned+=spawned;return spawned;
  }
  _mote(origin,radius,wind=1){
   const a=this.random()*Math.PI*2,dist=Math.sqrt(this.random())*Math.max(1,radius),height=this.random()*3.4,g=Number.isFinite(wind)&&wind>0?wind:1,drift=(this.profile.drift||.5)*g,rise=(this.profile.rise||0)*g;
-  this.pool.add({pos:{x:(origin.x||0)+Math.cos(a)*dist,y:(origin.y||0)+height,z:(origin.z||0)+Math.sin(a)*dist},color:this.profile.color||'#c9d8e6',size:this.profile.size||.035,life:this.profile.life||3.5,velocity:{x:(this.random()-.5)*drift,y:rise*(.5+this.random()),z:(this.random()-.5)*drift},additive:this.profile.additive===true});
+  this.pool.add({pos:{x:(origin.x||0)+Math.cos(a)*dist,y:(origin.y||0)+height,z:(origin.z||0)+Math.sin(a)*dist},color:this.profile.color||'#c9d8e6',size:this.profile.size||.035,life:this.profile.life||3.5,gravity:0,velocity:{x:(this.random()-.5)*drift,y:rise*(.5+this.random()),z:(this.random()-.5)*drift},additive:this.profile.additive===true});
  }
  _smoke(smoke,wind=1){
   const anchor=this.anchors[Math.floor(this.random()*this.anchors.length)%this.anchors.length],g=Number.isFinite(wind)&&wind>0?wind:1;
-  this.pool.add({pos:{x:(anchor.x||0)+(this.random()-.5)*1.2,y:(anchor.y||0)+.4,z:(anchor.z||0)+(this.random()-.5)*1.2},color:smoke.color||'#8f9a86',size:smoke.size||.3,life:smoke.life||6,expand:.4,velocity:{x:(this.random()-.5)*.2*g,y:(smoke.rise||.5)*g,z:(this.random()-.5)*.2*g},additive:true});
+  this.pool.add({pos:{x:(anchor.x||0)+(this.random()-.5)*1.2,y:(anchor.y||0)+.4,z:(anchor.z||0)+(this.random()-.5)*1.2},color:smoke.color||'#8f9a86',size:smoke.size||.3,life:smoke.life||6,expand:.4,gravity:0,velocity:{x:(this.random()-.5)*.2*g,y:(smoke.rise||.5)*g,z:(this.random()-.5)*.2*g},additive:true});
  }
 }
 
@@ -170,17 +176,27 @@ export class AmbientFX{
 // ambient motes; the spawn list itself comes from the pure precipParticleAdds
 // helper so replays match and the CPU renderer can skip the pass entirely.
 export class WeatherFX{
- constructor(pool,{seed=1,preset=null,cap=10}={}){this.pool=pool;this.preset=preset;this.seed=(seed>>>0)||1;this.cap=Math.max(1,Math.round(Number(cap)||10));this.serial=0;this.spawned=0;}
- setPreset(preset){this.preset=preset||null;this.serial=0;return this.preset;}
- reset(){this.serial=0;this.spawned=0;}
+ constructor(pool,{seed=1,preset=null,cap=10}={}){this.pool=pool;this.preset=preset;this.seed=(seed>>>0)||1;this.cap=Math.max(1,Math.round(Number(cap)||10));this.serial=0;this.spawned=0;this.acc=0;}
+ setPreset(preset){const next=preset||null;if(next!==this.preset){this.preset=next;this.serial=0;this.acc=0;}return this.preset;}
+ reset(){this.serial=0;this.spawned=0;this.acc=0;}
  update(dt,origin,{reduced=false,software=false,radius=9,intensity=1,quality=1}={}){
   if(reduced||software||!this.pool||!this.preset||!(this.preset.particles>0)||!origin)return 0;
-  this.serial=(this.serial+1)>>>0;
   const scale=Math.max(0,Math.min(1,Number(intensity)||0))*Math.max(0,Math.min(1,Number(quality)||0));
   if(scale<=0)return 0;
-  const adds=precipParticleAdds(this.serial,this.preset.kind,origin,radius,{...this.preset,particles:Math.round(this.preset.particles*scale)});
+  // Preserve the authored 60 Hz density. Only a fractional tick carries over;
+  // hitches are bounded to six ticks and excess spawns beyond cap are dropped.
+  const step=Number.isFinite(dt)?Math.max(0,Math.min(dt,.1)):0;
+  this.acc+=step*60;
+  const ticks=Math.floor(this.acc+1e-9);this.acc=Math.max(0,this.acc-ticks);
+  if(ticks<=0)return 0;
+  const preset={...this.preset,particles:Math.round(this.preset.particles*scale)};
   let spawned=0;
-  for(const add of adds){if(spawned>=this.cap)break;this.pool.add(add);spawned++;}
+  for(let tick=0;tick<ticks;tick++){
+   this.serial=(this.serial+1)>>>0;
+   if(spawned>=this.cap)continue;
+   const adds=precipParticleAdds(this.serial,preset.kind,origin,radius,preset);
+   for(const add of adds){if(spawned>=this.cap)break;this.pool.add({...add,gravity:0});spawned++;}
+  }
   this.spawned+=spawned;return spawned;
  }
 }

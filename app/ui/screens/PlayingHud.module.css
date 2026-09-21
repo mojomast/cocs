@@ -1,0 +1,421 @@
+/* Scoped layout contract: match header, bounded side rails, clear aiming
+   corridor, and a bottom row reserved for the player's essential readouts. */
+.hud:global(.game-hud) {
+  --hud-panel: #081613ed;
+  --hud-line: #52796a80;
+  --hud-bottom-space: calc(var(--safe-bottom) + 30px);
+  --hud-rail-width: min(270px, 27vw);
+  display: grid;
+  min-width: 0;
+  min-height: 0;
+  grid-template-columns: var(--hud-rail-width) minmax(0, 1fr) var(--hud-rail-width);
+  grid-template-rows: auto minmax(0, 1fr) auto;
+  gap: 10px;
+  padding: var(--safe-top) var(--safe-right) var(--hud-bottom-space) var(--safe-left);
+}
+.topFrame { grid-area: 1 / 1 / 2 / -1; display: grid; gap: 8px; min-width: 0; }
+.headerTools { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: start; gap: 12px; min-width: 0; }
+.headerActions { position: relative; z-index: calc(var(--z-touch, 6) + 1); display: flex; align-items: center; gap: 8px; min-width: 0; max-width: 100%; overflow-x: auto; scrollbar-width: thin; overscroll-behavior-x: contain; scroll-padding-inline: 4px; pointer-events: auto; }
+.headerActions > * { flex: none; }
+.bottomFrame { grid-area: 3 / 1 / 4 / -1; display: grid; gap: 8px; min-width: 0; min-height: 0; }
+.hud:global(.game-hud) :global(.match-top) {
+  position: relative;
+  inset: auto;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
+  align-items: center;
+  gap: 20px;
+  min-height: 62px;
+  padding: 8px 14px;
+  border: 1px solid var(--hud-line);
+  border-radius: 7px;
+  background: var(--hud-panel);
+  text-shadow: none;
+}
+.hud:global(.game-hud) :global(.match-context) { min-width: 0; max-width: none; }
+.hud:global(.game-hud) :global(.match-context) > strong {
+  margin: 3px 0 0;
+  font: 700 12px/1.3 var(--font-mono);
+  letter-spacing: .08em;
+}
+.hud:global(.game-hud) :global(.match-top .eyebrow) { font-size: 9px; letter-spacing: .08em; }
+.hud:global(.game-hud) :global(.match-clock) { position: static; transform: none; font: 700 28px/1 var(--font-mono); }
+.hud:global(.game-hud) :global(.match-clock small),
+.hud:global(.game-hud) :global(.frag-counter small) { margin-top: 4px; font: 9px/1.2 var(--font-mono); letter-spacing: .06em; }
+.hud:global(.game-hud) :global(.frag-counter strong) { font: 700 clamp(18px, 2.2vw, 28px)/1 var(--font-mono); white-space: nowrap; }
+.hud:global(.game-hud) :global(.frag-counter strong span) { font-size: 12px; }
+.hud:global(.game-hud) :global(.phase-label) { display: none; }
+.hud:global(.game-hud) :global(.team-label) { margin-top: 3px; font-size: 9px; }
+
+/* Secondary panels share fixed edge lanes. Expanding a command disclosure
+   scrolls its lane rather than growing into health, ammo, or the reticle. */
+.hud:global(.game-hud) :global(.cocs-readout) {
+  position: relative;
+  inset: auto;
+  grid-area: 2 / 1 / 3 / 2;
+  align-self: start;
+  width: 100%;
+  min-width: 0;
+  min-height: 0;
+  max-height: 100%;
+  overflow: auto;
+  scrollbar-width: thin;
+  background: var(--hud-panel);
+  box-shadow: none;
+}
+.rightRail {
+  position: relative;
+  inset: auto;
+  grid-area: 2 / 3 / 3 / 4;
+  align-self: start;
+  width: 100%;
+  min-width: 0;
+  min-height: 0;
+  max-height: 100%;
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 10px;
+  overflow: auto;
+  overscroll-behavior: contain;
+  scrollbar-width: thin;
+  pointer-events: auto;
+}
+.hud:global(.game-hud) .rightRail > :global(.radar) {
+  position: relative;
+  inset: auto;
+  order: 0;
+  flex: none;
+  align-self: flex-end;
+  width: min(144px, 100%);
+  height: auto;
+  aspect-ratio: 1;
+}
+.hud:global(.game-hud) .rightRail > :global(.director-readout) {
+  position: relative;
+  inset: auto;
+  order: 1;
+  flex: none;
+  width: 100%;
+  min-width: 0;
+  max-height: none;
+  margin: 0;
+  overflow: visible;
+  padding: 9px;
+  background: var(--hud-panel);
+  box-shadow: none;
+}
+.hud:global(.game-hud) .rightRail > :global(.kill-feed) {
+  position: relative;
+  inset: auto;
+  order: 2;
+  flex: none;
+  width: 100%;
+  max-height: none;
+  overflow: visible;
+  gap: 4px;
+}
+.hud:global(.game-hud) :global(.kill-feed) > div { flex-wrap: wrap; gap: 4px 6px; padding: 6px 8px; font-size: 10px; }
+.hud:global(.game-hud) :global(.kill-feed small) { font-size: 9px; }
+.hud:global(.game-hud) :global(.objective-bar) {
+  grid-area: auto;
+  position: relative;
+  inset: auto;
+  transform: none;
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: center;
+  justify-items: start;
+  gap: 5px 8px;
+  width: 100%;
+  max-width: 480px;
+  justify-self: start;
+  min-height: 0;
+  max-height: 82px;
+  overflow: hidden;
+  padding: 8px 10px;
+  text-align: left;
+  border: 1px solid var(--hud-line);
+  border-radius: 6px;
+  background: var(--hud-panel);
+}
+.hud:global(.game-hud) :global(.objective-bar .compass) { width: 28px; height: 28px; grid-row: 1 / 3; }
+.hud:global(.game-hud) :global(.objective-copy) { grid-column: 2; min-width: 0; }
+.hud:global(.game-hud) :global(.objective-copy strong) { font-size: 12px; white-space: normal; }
+.hud:global(.game-hud) :global(.objective-copy small) { font-size: 10px; }
+.hud:global(.game-hud) :global(.objective-tags) { grid-column: 2; justify-content: flex-start; gap: 4px; }
+.hud:global(.game-hud) :global(.objective-tags .chip) { font-size: 9px; padding: 2px 5px; }
+.hud:global(.game-hud) :global(.cursor-chip) { position: relative; inset: auto; transform: none; max-width: 200px; padding: 2px 9px; font-size: 9px; }
+.hud:global(.game-hud) .headerActions :global(.cocs-spend-chip) { position: relative; inset: auto; transform: none; width: auto; max-width: none; min-height: 44px; padding: 8px 10px; font: 700 10px/1.3 var(--font-mono); letter-spacing: .04em; white-space: nowrap; background: var(--hud-panel); border-radius: 6px; }
+
+/* Essentials stay in a single bottom band. Utility rings get their own lane,
+   so a weapon name or a long squad readout cannot squeeze another card. */
+.hud:global(.game-hud) :global(.hud-bottom) {
+  position: relative;
+  inset: auto;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
+  grid-template-areas: 'left equipment right';
+  gap: 14px;
+  align-items: end;
+  width: 100%;
+  min-width: 0;
+  max-width: none;
+  min-height: 0;
+}
+.hud:global(.game-hud) :global(.hud-bottom) > :global(.hud-corner) { width: 100%; min-width: 0; max-width: none; min-height: 0; justify-self: stretch; grid-template-columns: none; flex-wrap: nowrap; }
+/* Global lattice touch rules reserve space inside each corner. The scoped
+   bottom frame already reserves that space outside its equal-width columns. */
+.hud:global(.game-hud.touch-mode) :global(.hud-bottom) > :global(.hud-corner:is(.hud-corner--left, .hud-corner--right)) { padding: 0; }
+.hud:global(.game-hud) :global(.hud-corner--left) { grid-area: left; display: flex; flex-direction: column; align-items: flex-start; gap: 7px; padding: 0; }
+.hud:global(.game-hud) :global(.hud-corner--right) { grid-area: right; display: flex; justify-content: flex-end; padding: 0; }
+.hud:global(.game-hud) :global(.team-status) {
+  order: -1;
+  width: 100%;
+  max-width: 290px;
+  max-height: 60px;
+  overflow: auto;
+  scrollbar-width: thin;
+  pointer-events: auto;
+}
+.hud:global(.game-hud) :global(.hud-pill) { border-radius: 4px; padding: 3px 6px; font-size: 9px; }
+.hud:global(.game-hud) :global(.stat-card) {
+  background: var(--hud-panel);
+  border: 1px solid var(--hud-line);
+  border-radius: 7px;
+  box-shadow: none;
+  text-shadow: none;
+  min-width: 0;
+  padding: 11px 13px;
+}
+.hud:global(.game-hud) :global(.stat-card--vitals) { display: grid; grid-template-columns: minmax(0, 1fr) 66px; align-items: end; gap: 16px; width: min(290px, 100%); border-top: 2px solid #83efb7; }
+.hud:global(.game-hud) :global(.vital) { min-width: 0; gap: 7px; }
+.hud:global(.game-hud) :global(.vital--health .stat-value) { font-size: 36px; }
+.hud:global(.game-hud) :global(.vital--armor .stat-value) { font-size: 25px; }
+.hud:global(.game-hud) :global(.stat-card .stat-label) { font-size: 10px; letter-spacing: .07em; color: #b1c9bf; }
+.hud:global(.game-hud) :global(.stat-card .stat-bar) { position: relative; height: 7px; border-radius: 2px; background: #253830; }
+.hud:global(.game-hud) :global(.vital--health .stat-bar)::after { content: ''; position: absolute; inset: 0; background: repeating-linear-gradient(90deg, transparent 0, transparent calc(20% - 2px), #081613 20%); }
+.hud:global(.game-hud) :global(.vital--armor .stat-bar) { height: 4px; }
+.hud:global(.game-hud) :global(.vital--armor.is-empty) { opacity: .8; }
+.hud:global(.game-hud) :global(.stat-card--vitals.is-low) { border-color: #e58080; animation: none; }
+.hud:global(.game-hud) :global(.stat-card--vitals.is-low .stat-bar > i) { box-shadow: none; }
+.statCapacity { font: 11px var(--font-mono); color: #abc1b7; }
+.critical { margin-left: auto; font-size: 9px; color: #ffaaaa; }
+.hud:global(.game-hud) :global(.ammo-stack) { width: min(290px, 100%); min-width: 0; max-width: 100%; grid-column: auto; gap: 7px; }
+.hud:global(.game-hud) :global(.stat-card--ammo) { width: 100%; max-width: none; border-top: 2px solid #edcc85; gap: 7px; }
+.hud:global(.game-hud) :global(.stat-card--ammo .weapon-name) { flex: 1 1 auto; min-width: 0; color: #f8ebce; font-weight: 700; }
+.hud:global(.game-hud) :global(.stat-card--ammo .weapon-tag) { max-width: 45%; font-size: 8px; }
+.hud:global(.game-hud) :global(.stat-card--ammo .stat-value) { font-size: 38px; line-height: 1; }
+.hud:global(.game-hud) :global(.stat-card--ammo.is-low),
+.hud:global(.game-hud) :global(.stat-card--ammo.is-empty) { border-color: #e58080; }
+.ammoReadout { display: flex; align-items: center; gap: 13px; }
+.ammoCaption { display: grid; gap: 3px; color: #f2d39b; font: 10px var(--font-mono); letter-spacing: .1em; }
+.ammoCaption small { color: #afbcaf; font-size: 9px; letter-spacing: .04em; }
+.hud:global(.game-hud) :global(.weapon-alt-row) { display: flex; justify-content: space-between; align-items: center; gap: 6px; margin: 0; }
+.weaponSlot { color: #a7bfb3; font: 9px var(--font-mono); }
+.hud:global(.game-hud) :global(.verb-meters) { width: 100%; min-width: 0; max-width: none; padding: 5px 8px; box-shadow: none; background: var(--hud-panel); }
+.equipment { grid-area: equipment; display: flex; align-items: end; justify-content: center; gap: 6px; min-width: 0; }
+.fieldControls { position: relative; display: flex; gap: 6px; width: max-content; pointer-events: auto; }
+.fieldControls button { display: inline-flex; align-items: center; justify-content: center; gap: 7px; min-height: 44px; min-width: 44px; padding: 8px 11px; background: var(--hud-panel); border: 1px solid var(--hud-line); border-radius: 6px; color: #d8eee2; font: 700 10px var(--font-mono); white-space: nowrap; cursor: pointer; }
+.fieldControls button:hover { border-color: var(--accent); color: #fff; }
+.fieldControls button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.fieldControls kbd { color: var(--accent-soft); font: 9px var(--font-mono); }
+.hud:global(.game-hud) .equipment :global(.ability-card) { width: 80px; min-width: 0; max-width: none; padding: 7px 4px; background: var(--hud-panel); box-shadow: none; border-radius: 6px; animation: none; }
+.hud:global(.game-hud) .equipment :global(.ability-ring) { width: 36px; height: 36px; }
+.hud:global(.game-hud) .equipment :global(.stat-label) { display: block; max-width: 100%; font: 9px/1.3 var(--font-mono); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.hud:global(.game-hud) .equipment :global(.stat-note) { max-width: 100%; font: 9px/1.3 var(--font-mono); overflow: hidden; text-overflow: ellipsis; }
+.hud:global(.game-hud) :global(.hud-lower) { position: relative; inset: auto; transform: none; margin: 0; width: 100%; max-height: 64px; overflow: auto; }
+.hud:global(.game-hud) :global(.hud-messages) { position: relative; inset: auto; transform: none; gap: 5px; margin: 0; }
+.hud:global(.game-hud) :global(.hud-messages) > * { position: relative; inset: auto; transform: none; margin-block: 0; }
+.hud:global(.game-hud) :global(.pickup-message:empty) { display: none; }
+.hud:global(.game-hud) :global(.hud-bottom-note) { flex-wrap: nowrap; white-space: nowrap; overflow: hidden; font-size: 9px; gap: 12px; }
+.hud:global(.game-hud.hide-hud) :is(.topFrame, .bottomFrame, .rightRail, :global(.cocs-readout)) { display: none; }
+.hud:global(.game-hud.touch-mode) :global(.match-top) { padding-right: 110px; }
+.hud:global(.game-hud.touch-mode.touch-left-hand) :global(.match-top) { padding-right: 10px; padding-left: 110px; }
+.hud:global(.game-hud.touch-mode) .rightRail { z-index: calc(var(--z-touch, 6) + 1); }
+
+@media (max-width: 1050px) {
+  .hud:global(.game-hud) .equipment :global(.ability-card) { width: 46px; padding: 5px 3px; }
+  .hud:global(.game-hud) .equipment :global(.stat-label) { display: none; }
+  .hud:global(.game-hud) :global(.stat-card--vitals),
+  .hud:global(.game-hud) :global(.ammo-stack) { width: min(260px, 100%); }
+  .hud:global(.game-hud) :global(.team-status) { max-width: 100%; }
+  .headerTools { gap: 8px; }
+  .headerActions { max-width: 64vw; }
+}
+@media (max-width: 760px) {
+  .hud:global(.game-hud) { --hud-rail-width: min(34vw, calc(50vw - 48px - max(var(--safe-left), var(--safe-right)))); gap: 8px; }
+  .headerTools { grid-template-columns: minmax(0, 1fr); gap: 6px; }
+  .headerActions { width: 100%; max-width: 100%; padding-bottom: 2px; }
+  .hud:global(.game-hud) :global(.match-top) { min-height: 56px; gap: 8px; padding: 6px 8px; }
+  .hud:global(.game-hud) :global(.match-context) > strong { font-size: 10px; letter-spacing: .02em; }
+  .hud:global(.game-hud) :global(.match-top .eyebrow) { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 8px; }
+  .hud:global(.game-hud) :global(.match-clock) { font-size: 22px; }
+  .hud:global(.game-hud) :global(.match-clock small),
+  .hud:global(.game-hud) :global(.team-label) { display: none; }
+  .hud:global(.game-hud) :global(.frag-counter strong) { font-size: 16px; white-space: normal; }
+  .hud:global(.game-hud) :global(.frag-counter small) { font-size: 8px; }
+  .hud:global(.game-hud) :global(.objective-bar) { max-width: none; max-height: 38px; padding: 5px 8px; grid-template-columns: auto 1fr; gap: 6px; }
+  .hud:global(.game-hud) :global(.objective-tags),
+  .hud:global(.game-hud) :global(.objective-copy small) { display: none; }
+  .hud:global(.game-hud) :global(.objective-copy strong) { font-size: 11px; }
+  .hud:global(.game-hud) .rightRail > :global(.radar) { width: 96px; }
+  .hud:global(.game-hud) :global(.hud-bottom) { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); grid-template-areas: 'equipment equipment' 'left right'; gap: 6px 10px; }
+  .equipment { justify-self: center; }
+  .hud:global(.game-hud) .equipment :global(.ability-card) { width: 56px; }
+  .hud:global(.game-hud) :global(.stat-card--vitals),
+  .hud:global(.game-hud) :global(.ammo-stack) { width: 100%; }
+  .hud:global(.game-hud) :global(.stat-card) { padding: 8px; }
+  .hud:global(.game-hud) :global(.stat-card--vitals) { grid-template-columns: minmax(0, 1fr) 45px; gap: 8px; }
+  .hud:global(.game-hud) :global(.vital--health .stat-value) { font-size: 28px; }
+  .hud:global(.game-hud) :global(.vital--armor .stat-value) { font-size: 21px; }
+  .hud:global(.game-hud) :global(.stat-card .stat-label) { font-size: 8px; gap: 3px; }
+  .hud:global(.game-hud) :global(.stat-card--ammo .stat-value) { font-size: 30px; }
+  .hud:global(.game-hud) :global(.team-status) { max-width: 100%; max-height: 28px; flex-wrap: nowrap; }
+  .hud:global(.game-hud) :global(.team-status .hud-pill) { flex: none; }
+  .statCapacity { display: none; }
+  .ammoReadout { gap: 8px; }
+  .ammoCaption { font-size: 8px; }
+  .ammoCaption small { font-size: 8px; }
+  .hud:global(.game-hud.touch-mode) { --hud-bottom-space: calc(var(--safe-bottom) + 276px); }
+  .hud:global(.game-hud.touch-mode) :global(.match-top) { grid-template-columns: minmax(0, 1fr) auto; }
+  .hud:global(.game-hud.touch-mode) :global(.frag-counter) { grid-column: 1 / -1; text-align: left; }
+  .hud:global(.game-hud.touch-mode) :global(.frag-counter strong) { font-size: 13px; white-space: nowrap; }
+  .hud:global(.game-hud.touch-mode) :global(.frag-counter small) { display: none; }
+  .hud:global(.game-hud.touch-mode) .equipment { display: none; }
+  .hud:global(.game-hud.touch-mode) :global(.hud-lower) { max-height: 36px; }
+}
+@media (max-width: 760px) and (orientation: portrait) {
+  /* At 390 × 844 the readout band ends at 556px, above the campaign touch
+     buttons, and has 86px below the 470px edge of the aiming corridor. */
+  .hud:global(.game-hud.touch-mode) .bottomFrame { align-self: end; grid-template-rows: minmax(0, 1fr) auto; max-height: max(0px, calc(50dvh - 48px - var(--hud-bottom-space))); gap: 4px; }
+  .hud:global(.game-hud.touch-mode) :global(.hud-lower) { min-height: 0; }
+  .hud:global(.game-hud.touch-mode) :global(.hud-bottom) { grid-template-areas: 'left right'; align-items: end; }
+  .hud:global(.game-hud.touch-mode) :global(.hud-corner--left) { gap: 4px; }
+  .hud:global(.game-hud.touch-mode) :global(.stat-card) { padding: 4px 8px; gap: 4px; }
+  .hud:global(.game-hud.touch-mode) :global(.vital) { gap: 4px; }
+  .hud:global(.game-hud.touch-mode) :global(.vital--health .stat-value) { font-size: 24px; }
+  .hud:global(.game-hud.touch-mode) :global(.stat-card--ammo .stat-value) { font-size: 26px; }
+  .hud:global(.game-hud.touch-mode) :global(.stat-card .stat-bar) { height: 5px; }
+  .hud:global(.game-hud.touch-mode) :global(.team-status) { max-height: 16px; }
+  .hud:global(.game-hud.touch-mode) :global(.team-status .hud-pill) { padding: 1px 4px; font-size: 8px; line-height: 12px; }
+  .hud:global(.game-hud.touch-mode) :global(.verb-meters),
+  .hud:global(.game-hud.touch-mode) :global(.weapon-alt-row) { display: none; }
+}
+@media (max-height: 620px) and (orientation: landscape) {
+  .hud:global(.game-hud) { --hud-bottom-space: calc(var(--safe-bottom) + 18px); --hud-rail-width: min(230px, 28vw); gap: 6px; }
+  .topFrame { gap: 6px; }
+  .bottomFrame { gap: 5px; }
+  .headerTools { grid-template-columns: minmax(0, 1fr) auto; gap: 8px; }
+  .headerActions { width: auto; max-width: 66vw; padding: 0; }
+  .hud:global(.game-hud) :global(.match-top) { min-height: 50px; padding: 5px 10px; }
+  .hud:global(.game-hud) :global(.match-context) > strong { font-size: 10px; margin-top: 2px; }
+  .hud:global(.game-hud) :global(.team-label) { display: none; }
+  .hud:global(.game-hud) :global(.objective-bar) { width: 100%; max-height: 44px; align-self: center; }
+  .hud:global(.game-hud) :global(.objective-tags),
+  .hud:global(.game-hud) :global(.objective-copy small),
+  .hud:global(.game-hud) :global(.team-status),
+  .hud:global(.game-hud) :global(.verb-meters) { display: none; }
+  .hud:global(.game-hud) :global(.hud-bottom) { grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr); grid-template-areas: 'left equipment right'; gap: 10px; }
+  .hud:global(.game-hud) .rightRail > :global(.radar) { width: 80px; }
+  .hud:global(.game-hud) :global(.stat-card) { padding: 6px 8px; gap: 4px; }
+  .hud:global(.game-hud) :global(.vital--health .stat-value),
+  .hud:global(.game-hud) :global(.stat-card--ammo .stat-value) { font-size: 25px; }
+  .hud:global(.game-hud) :global(.hud-lower) { max-height: 28px; }
+  .hud:global(.game-hud) :global(.spawn-protection) { padding: 4px 8px; font-size: 10px; }
+  .hud:global(.game-hud.touch-mode) { --hud-bottom-space: calc(var(--safe-bottom) + 8px); }
+  .hud:global(.game-hud.touch-mode) :global(.match-top) { grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr); }
+  .hud:global(.game-hud.touch-mode) :global(.frag-counter) { grid-column: auto; text-align: right; }
+  .hud:global(.game-hud.touch-mode) .bottomFrame { margin-left: 140px; margin-right: 214px; }
+  .hud:global(.game-hud.touch-mode.touch-left-hand) .bottomFrame { margin-left: 214px; margin-right: 140px; }
+  .hud:global(.game-hud.touch-mode) :global(.hud-bottom) { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); grid-template-areas: 'left right'; gap: 10px; }
+  .hud:global(.game-hud.touch-mode) :global(.stat-card--vitals),
+  .hud:global(.game-hud.touch-mode) :global(.ammo-stack) { width: 100%; }
+  .hud:global(.game-hud.touch-mode) .equipment { display: none; }
+}
+@media (max-height: 620px) and (orientation: landscape) {
+  .hud:global(.game-hud.touch-mode) .rightRail { max-height: 70px; }
+  .hud:global(.game-hud.touch-mode) .rightRail > :global(.radar) { width: 64px; }
+  .hud:global(.game-hud.touch-mode) :global(.director-readout) { display: none; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .hud :global(.stat-bar > i) { transition: none; }
+}
+:global(.motion-reduced) .hud :global(.stat-bar > i) { transition: none; }
+
+/* Single-player shares the reserved middle-left lane. Only this bounded
+   scroll surface takes pointer input; the main HUD stays click-through. */
+.hud:global(.game-hud) > :global(.sp-hud) {
+  position: relative;
+  inset: auto;
+  grid-area: 2 / 1 / 3 / 2;
+  align-self: start;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  width: 100%;
+  min-width: 0;
+  min-height: 0;
+  max-height: 100%;
+  overflow-x: hidden;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  scrollbar-width: thin;
+  scroll-padding-block: 6px;
+  pointer-events: auto;
+  text-shadow: none;
+}
+.hud:global(.game-hud) > :global(.sp-hud) > * {
+  position: static;
+  inset: auto;
+  transform: none;
+  flex: none;
+  align-self: stretch;
+  width: 100%;
+  min-width: 0;
+  max-width: 100%;
+  min-height: 0;
+  max-height: none;
+  margin: 0;
+  padding: 9px;
+  border-radius: 6px;
+  background: var(--hud-panel);
+  box-shadow: none;
+  white-space: normal;
+  overflow-wrap: anywhere;
+  text-align: left;
+}
+.hud:global(.game-hud) :global(.sp-hud .sp-status) {
+  order: 0;
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+  border: 1px solid var(--hud-line);
+}
+.hud:global(.game-hud) :global(.sp-status > span) { min-width: 0; }
+.hud:global(.game-hud) :global(.sp-status small) { font-size: 9px; letter-spacing: .06em; }
+.hud:global(.game-hud) :global(.sp-status b) { font-size: 14px; line-height: 1.35; }
+.hud:global(.game-hud) :global(.sp-status .sp-waypoint) { grid-column: 1 / -1; }
+.hud:global(.game-hud) :global(.sp-hud .sp-bars) { order: 1; border: 1px solid var(--hud-line); gap: 8px; }
+.hud:global(.game-hud) :global(.sp-boss),
+.hud:global(.game-hud) :global(.sp-hold) { min-width: 0; }
+.hud:global(.game-hud) :global(.sp-boss small),
+.hud:global(.game-hud) :global(.sp-hold small) { line-height: 1.4; letter-spacing: .04em; }
+.hud:global(.game-hud) :global(.sp-boss-phases) { flex-wrap: wrap; }
+.hud:global(.game-hud) :global(.sp-hud .sp-objectives) { order: 2; }
+.hud:global(.game-hud) :global(.sp-kicker) { font-size: 10px; letter-spacing: .06em; }
+.hud:global(.game-hud) :global(.sp-title) { font-size: 15px; line-height: 1.3; }
+.hud:global(.game-hud) :global(.sp-objective) { font-size: 12px; line-height: 1.5; }
+.hud:global(.game-hud) :global(.sp-steps) { display: grid; }
+.hud:global(.game-hud) :global(.sp-steps li span) { min-width: 0; }
+.hud:global(.game-hud) :global(.sp-hud .sp-upgrades) { order: 3; display: grid; gap: 8px; }
+.hud:global(.game-hud) :global(.sp-upgrade-options) { grid-template-columns: minmax(0, 1fr); }
+.hud:global(.game-hud) :global(.sp-upgrade),
+.hud:global(.game-hud) :global(.sp-checkpoint) { min-width: 0; max-width: 100%; min-height: 44px; padding: 8px; white-space: normal; overflow-wrap: anywhere; }
+.hud:global(.game-hud) :global(.sp-upgrade:focus-visible),
+.hud:global(.game-hud) :global(.sp-checkpoint:focus-visible) { outline-offset: -2px; }
+.hud:global(.game-hud) :global(.sp-hud .sp-notice) { order: 4; font-size: 11px; line-height: 1.45; letter-spacing: .04em; }
+.hud:global(.game-hud) :global(.sp-hud .sp-story) { order: 5; font-size: 12px; line-height: 1.5; }
+.hud:global(.game-hud) :global(.sp-story b) { display: block; margin: 0 0 4px; letter-spacing: .04em; }
+.hud:global(.game-hud.touch-mode) > :global(.sp-hud) { z-index: calc(var(--z-touch, 6) + 1); }
+.hud:global(.game-hud.hide-hud) > :global(.sp-hud) { display: none; }

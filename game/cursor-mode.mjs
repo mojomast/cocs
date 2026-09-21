@@ -47,6 +47,8 @@ export const CURSOR_SURFACE = Object.freeze({
   RESPAWN: 'respawn',
   TRAINING: 'training',
   VOICE: 'voice',
+  TACTICAL_MAP: 'tactical-map',
+  SQUADS: 'squads',
 });
 
 export const CURSOR_IMPLICIT_SURFACES = Object.freeze([CURSOR_SURFACE.FREE, CURSOR_SURFACE.ESCAPE]);
@@ -57,6 +59,8 @@ export const CURSOR_IMPLICIT_SURFACES = Object.freeze([CURSOR_SURFACE.FREE, CURS
 // window is modal, the explicitly opened respawn editor outranks the standings
 // drawn under it, and the command-board peek keeps its own keys.
 export const CURSOR_KEYBOARD_ORDER = Object.freeze([
+  CURSOR_SURFACE.TACTICAL_MAP,
+  CURSOR_SURFACE.SQUADS,
   CURSOR_SURFACE.SPEND,
   CURSOR_SURFACE.RESPAWN,
   CURSOR_SURFACE.SCOREBOARD,
@@ -91,6 +95,8 @@ export const CURSOR_SURFACE_LABELS = Object.freeze({
   [CURSOR_SURFACE.RESPAWN]: 'RESPAWN',
   [CURSOR_SURFACE.TRAINING]: 'LESSON COMPLETE',
   [CURSOR_SURFACE.VOICE]: 'VOICE',
+  [CURSOR_SURFACE.TACTICAL_MAP]: 'TACTICAL MAP',
+  [CURSOR_SURFACE.SQUADS]: 'SQUAD MANAGEMENT',
 });
 
 // One physical Escape can both exit pointer lock and arrive as a keydown. Any

@@ -35,11 +35,12 @@ export class MothSpritePlayer {
         blending,
         depthWrite: false,
         side: T.DoubleSide,
+        forceSinglePass: true,
         fog: false,
       });
       const mesh = new T.Mesh(this.geometry, material);
       mesh.visible = false;
-      mesh.frustumCulled = false;
+      mesh.frustumCulled = true;
       mesh.renderOrder = 80;
       mesh.userData.mothSprite = name;
       this.slots.push({

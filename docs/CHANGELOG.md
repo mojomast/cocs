@@ -16,6 +16,30 @@ record in [VERIFICATION.md](VERIFICATION.md).
 
 ---
 
+## v8.8 · DESTINATIONS — 2026-09-21
+
+- Nine original authored maps cover every mode, with intentional loops, alternate
+  approaches, districts, real ramped elevation, terrain materials and landmarks:
+  Meridian Exchange, Verdant Reliquary, Ember Crucible, Tidal Citadel, Sunscar
+  Convoy, Asterion Relay, Monsoon Foundry, Ion Speedway and Aurora Stadium.
+- New campaign mission **The Verdant Signal**: clear the cloister, recover the
+  cavern signal, break the altar patrol and extract. Includes recovery checkpoints.
+- Match Setup exposes a **New · Destinations** collection filter. Race/soccer maps
+  are excluded from combat and single-player pools by capability rather than ID.
+- Redesigned combat HUD with segmented health/armor, prominent weapon/ammo,
+  bounded secondary panels and a clear aiming area. Demo controls stay in one
+  horizontal row with native scrolling on narrow screens.
+- **J — Tactical map**, **L — Squads**, both remappable. Tactical map includes
+  landmarks, elevation, facilities, objective state, friendly positions and only
+  revealed enemy intel. Commander orders use legal node targets and the existing
+  authoritative command path. Interactive field dialogs release the mouse and
+  suspend combat input, then return control through the shared cursor lifecycle.
+- Opaque architectural detail batches by spatial cell. Per-arena cache ownership
+  prevents stale/disposed resource reuse; seeded block painting no longer mutates
+  shared primitive geometry. Atmospheric particles age correctly, precipitation
+  uses elapsed time, flat translucent effects use one pass, and empty weapon
+  overlay pixels avoid unnecessary styling work.
+
 ## v8.7.1 · FOUNDRY — 2026-09-21
 
 - A substantial close-up robot-detail pass across all nine operators: machined

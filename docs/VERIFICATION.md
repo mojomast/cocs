@@ -1,5 +1,94 @@
 # COCS verification report
 
+## Release 8.8 — DESTINATIONS (verification in progress)
+
+All intensive tests, builds and browser runs are serialized, with Node test-file
+concurrency set to one. The initial map/mode/runtime gates passed **147/148**;
+the one failure identified a reactor blocking Monsoon's filter-wing ramp toe.
+The mirrored obstruction was moved and the focused LATTICE/campaign follow-up
+passed. Infantry destinations subsequently received more connected buildings;
+the final sweep also checks their authored district polylines in both directions.
+
+The first renderer/effects/input/tactical helper pass was **342/342**. The squad,
+COCS, protocol and full server pass was **317/317**, including authenticated
+sender binding, enqueue/apply authority changes, capacity, leadership, reconnect
+and team-private snapshots. Typecheck passed after initial UI integration.
+
+Browser review caught real layout defects in the first HUD pass (spend-window
+and landscape utility overlaps), prompting a normal-flow three-row grid with
+bounded side lanes. `scripts/verify-field-interface.mjs` now checks clipped
+panel rectangles, squad create/leave, commander takeover and actual map-issued
+route commands. `scripts/verify-demo-toolbar.mjs` checks every control remains
+on one row, including free-roam extras, with 44px targets and narrow scrolling.
+
+The first map visual review prompted richer infantry districts, thematic shallow
+surface construction, forest/orbital skyline identity, and a map-sized far plane
+to avoid clipping large overviews. `scripts/verify-destination-views.mjs` records
+sequential overview/field images and renderer submissions, including map changes
+back to the original baseline. Evidence lives under `artifacts/destination-views`,
+`artifacts/field-interface` and `artifacts/demo-toolbar`.
+
+Software-rendered browser captures and submission counts do not establish
+hardware GPU frame rates. Final sweep/build/deployment results are recorded below
+once complete.
+
+**Full serialized game sweep:** 3,244 cases: 3,231 passed, nine intentionally
+skipped, four failed. No new-map placement/navigation, race/soccer, mission
+anchor, LATTICE or squad authority gate failed. The failures identified the
+historical patch-version fixture (`v8.7.1`), missing Verdant mission lore, a
+source-text harness still replaying an already-integrated spatial patch, and a
+software canvas mock missing text measurement. They were corrected while
+retaining the renderer's frame/floor/geometry and software-render assertions.
+
+The 220-case focused follow-up cleared all four failures and exposed one new
+assertion failure in the additional authored-polyline sweep: some Sunscar flank
+descriptors cut through gate posts, a ramp side or a building rather than using
+the actual openings. Those descriptors now detour around the posts, approach
+the ramp toe and pass through the warehouse doors. All five destination
+district-route sweeps then passed. This extends the already-passing general
+navigation/placement tests with direct checks of the published route geometry.
+
+Field-interface browser checks passed at 1366×768, 390×844 and 844×390 with
+zero page errors, exercising actual squad create/leave, commander takeover,
+map-issued orders, keyboard focus and clipped persistent-panel bounds. Demo
+toolbar checks passed in auto/free modes at all three sizes, including 44px
+targets, one-row alignment and pairwise label/button non-overlap. The new
+Verdant mission launched through the campaign hub at those sizes and its status
+panels stayed within the bounded middle-left lane. Portrait touch screenshots
+prompted more reserved space above the action-button bank.
+
+**Updated destination gallery:** all nine overview/field pairs rendered without
+page or runtime errors. Overview submissions were Meridian 220 / 41,239 tris;
+Verdant 238 / 49,510; Ember 239 / 48,196; Tidal 585 / 132,413; Sunscar 970 /
+463,718; Asterion 498 / 88,150; Monsoon 474 / 92,414; Ion 697 / 128,802;
+Aurora 725 / 76,242. Ground-view submissions ranged from 133 to 471 calls.
+The vehicle-heavy Sunscar overview is the largest workload in this collection.
+Returning to Colosseum restored its exact original 232 calls / 58,823 triangles.
+Resource review found one genuine accumulation path: fresh soccer-ball panel
+geometries were registered in the lifetime shared cache despite never being
+reused. They now belong to their ball model and are disposed with it. A repeated
+arena-replacement regression confirms disposal, while actor/vehicle/weapon
+keyed caches intentionally stay warm. Contact sheets and per-map views are in
+`artifacts/destination-views`.
+
+**Final code checks:** the expanded 314-case focused sweep passed 313 cases;
+its only failure was the old test asserting the ball's incorrect shared
+ownership. After correcting that assertion, all **146 renderer/resource tests**
+passed, including repeated ball disposal. All **139 UI/integration tests**,
+typecheck and the production build passed. The broader touch matrix exposed a
+legacy corner-padding rule squeezing landscape ammo, then a Director panel
+intercepting action buttons. The scoped layout now clears those legacy rules
+and reserves the short-screen action bank.
+
+**Final responsive browser pass:** all five v8.8 viewports passed on the
+development server at port 4173: 1366×768, 1920×1080, 844×390 touch, 390×844
+touch, and 844×390 touch at 1.4 UI scale. Every visible touch action was hit-test
+reachable and the 96px aiming corridor stayed clear. Manifest:
+`artifacts/destinations-touch-final/20260921T193211Z-6b6368b/manifest.json`.
+The campaign HUD rerun also passed all three sizes after the compact touch
+layout changes. An earlier port-3000 run covered the old release and is not
+counted as v8.8 evidence.
+
 ## Release 8.7.1 — robot precision pass
 
 Local checks were serialized. **217/217** model, articulation, geometry,

@@ -318,11 +318,10 @@ export function latticeTargetModel(snapshot, map, player, options = {}) {
     attackers: num(siegeRaw.attackers, 0),
     defenders: num(siegeRaw.defenders, 0),
   } : null;
-  const mapRoute = navigationRoute(map, player, options);
-  const routeFn = typeof options.route === 'function' ? options.route
-    : options.route && typeof options.route.travel === 'function' ? point => options.route.travel(point)
-      : mapRoute && typeof mapRoute.travel === 'function' ? point => mapRoute.travel(point)
-        : null;
+  const route = typeof options.route === 'function' || typeof options.route?.travel === 'function'
+    ? options.route : navigationRoute(map, player, options);
+  const routeFn = typeof route === 'function' ? route
+    : route && typeof route.travel === 'function' ? point => route.travel(point) : null;
   const nodes = graph.nodes.map(raw => {
     const owner = raw.owner === 0 || raw.owner === 1 ? Number(raw.owner) : null;
     const archetype = String(raw.archetype ?? 'front');

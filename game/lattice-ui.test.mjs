@@ -10,7 +10,7 @@ import {cocsBoard,cocsArchetypeLabel,cocsArchetypeMark,cocsResultSummary,command
 import {COCS_SCAN_COST,cocsArmVerb,cocsClearStrip,cocsCommandView,cocsDirectorView,cocsEconomyView,cocsIssueOrder,cocsIssueRoute,cocsPickTarget,cocsSpotView,cocsStripState,cocsStripView,cocsSyncStrip,cocsTargetableNodes} from './cocs-orders.mjs';
 import {latticeTargetModel} from './lattice-guide.mjs';
 import {GAME_MODES} from './config.mjs';
-import {mapsForMode,resolveMapForMode,arenaSupportsMode,maxBotsFor,recommendedBots} from './arenas.mjs';
+import {arenaMeta,mapsForMode,resolveMapForMode,arenaSupportsMode,maxBotsFor,recommendedBots} from './arenas.mjs';
 import {radarBlip,radarContacts} from './radar.mjs';
 import {Match} from './core.mjs';
 import {ArenaView} from './view.mjs';
@@ -46,9 +46,17 @@ test('lattice strike is registered as a preview mode on the slice map', () => {
   assert.equal(modeTargetText(mode), 'HOLD THE LATTICE');
   assert.ok(objectiveCopy('cocs') && objectiveCopy('cocs').length > 0, 'setup copy explains the lattice');
 
-  // The V0a slice is the only arena advertising cocs, and an incompatible
-  // arena repairs onto it for a one-click local start.
-  assert.deepEqual(mapsForMode('cocs').map(map => map.id), ['lattice-slice']);
+  // Authored theatres expand selection; the slice remains the one-click fallback.
+  for (const id of ['cocs', 'cocs-coop']) {
+    const maps = mapsForMode(id);
+    assert.equal(maps[0].id, 'lattice-slice');
+    for (const mapId of ['lattice-slice', 'asterion-relay', 'monsoon-foundry']) {
+      assert.ok(maps.some(map => map.id === mapId), `${id} offers ${mapId}`);
+      assert.equal(resolveMapForMode(mapId, id), mapId, 'a selected theatre is preserved');
+    }
+    assert.deepEqual(maps, MAPS.filter(map => !arenaMeta(map.id).legacy && arenaMeta(map.id).play?.includes(id)));
+    for (const map of maps) assert.ok(map.nodes?.length && map.lattice?.length, `${map.id} is authored`);
+  }
   assert.equal(arenaSupportsMode('lattice-slice', 'cocs'), true);
   assert.equal(arenaSupportsMode('exchange', 'cocs'), false);
   assert.equal(resolveMapForMode('colosseum', 'cocs'), 'lattice-slice');

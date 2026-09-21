@@ -45,6 +45,18 @@ export const SPEAKERS = Object.freeze({
 });
 
 export const MISSION_LORE = Object.freeze({
+  'verdant-signal': Object.freeze({
+    title:'Operation Root Memory',
+    location:'Verdant Reliquary · Root Cloister / Heart Cavern',
+    intel:'A buried relay has resumed broadcasting after decades of silence. Its archive predates the hostile cluster. Recover the signal before the guardians can erase the surviving route records.',
+    threatLevel:'AMBER · Cloister patrols, cavern guardians and a heavy altar screen',
+    transmissions:[
+      {speaker:'ECHO',text:'The archive passages connect back to the gardens. Keep an exit behind you.',step:'approach',at:1},
+      {speaker:'DISPATCH',text:'Cloister clear. Follow the lower loop into the heart cavern.',step:'signal',at:0},
+      {speaker:'RELAY',text:'Memory recovered. I remember a sky without a lattice.',step:'altar',at:0},
+      {speaker:'DISPATCH',text:'East garden gate is open. Bring that memory home.',step:'extract',at:0},
+    ],
+  }),
   'convoy-run': Object.freeze({
     title: 'Operation Long Haul',
     location: 'Convoy Transit Corridor 07 · Grid Delta-9',

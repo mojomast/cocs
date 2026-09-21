@@ -66,7 +66,7 @@ test('touch capture is suspended while an explicit COCS surface or the Training 
   assert.match(controls, /capture\(e\.currentTarget,e\.pointerId\)/, 'pointer capture failure cannot surface as a page error');
 
   const page = await read('app/page.tsx');
-  assert.match(page, /const touchSuspended=Boolean\(spendVisible\|\|\(cocsBoard\.open===true&&!boardCollapsed\)\|\|hud\?\.training\?\.phase==='complete'\|\|hud\?\.training\?\.done===true\);/, 'suspension is derived from the owning surfaces');
+  assert.match(page, /const touchSuspended=Boolean\(fieldPanel\|\|spendVisible\|\|\(cocsBoard\.open===true&&!boardCollapsed\)\|\|hud\?\.training\?\.phase==='complete'\|\|hud\?\.training\?\.done===true\);/, 'field dialogs and existing owning surfaces suspend touch capture');
   assert.match(page, /suspended=\{touchSuspended\}/, 'the rendered touch layer receives the state');
 
   const css = await read('app/globals.css');
@@ -105,7 +105,7 @@ test('only actionable surfaces outrank touch capture and non-actionable space st
 
 test('Tab stays in the owning Board/Spend/Training surface without opening standings', async () => {
   const page = await read('app/page.tsx');
-  assert.ok(page.includes(`const surfaceFocusSelectors:Record<string,string>={[CURSOR_SURFACE.BOARD]:'.cocs-board',[CURSOR_SURFACE.SPEND]:'.cocs-spend',[CURSOR_SURFACE.TRAINING]:'[data-training-phase]'}`), 'the scoped surfaces are explicit');
+  for(const selector of [`[CURSOR_SURFACE.BOARD]:'.cocs-board'`,`[CURSOR_SURFACE.SPEND]:'.cocs-spend'`,`[CURSOR_SURFACE.TRAINING]:'[data-training-phase]'`,`[CURSOR_SURFACE.SQUADS]:'.squad-dialog [role="dialog"]'`])assert.ok(page.includes(selector),'the scoped surfaces are explicit');
   assert.match(page, /if\(owner&&cycleSurfaceFocus\(owner,e\.shiftKey\)\)\{e\.preventDefault\(\);return;\}/, 'Tab cycles inside the owning panel before standings');
   assert.match(page, /button:not\(:disabled\),input:not\(:disabled\),select:not\(:disabled\)/, 'the Spend target picker and SKIP are reachable');
   assert.ok(page.includes("if((e.code==='Enter'||e.code==='Space')&&(e.target as HTMLElement)?.closest?.('.cocs-board button'))return;"), 'a focused board control keeps native Enter/Space activation');

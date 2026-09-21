@@ -135,7 +135,7 @@ test('PlayingHud: alt mode chip, live ALT hint and non-live operator verb meters
   assert.match(alt, /class="weapon-tag weapon-tag--alt">SALVO<\/b>/, 'the held alt mode replaces the AUTO/SEMI tag');
   assert.match(alt, /class="weapon-alt-hint"[^>]*>ALT J<\/kbd>/, 'the ALT hint follows the live binding');
   assert.match(alt, /class="verb-meters" role="group" aria-label="Operator verb: HEAT \+6%"/, 'the verb row is one labelled, non-live group');
-  assert.match(alt, /class="stat-label"><span class="weapon-name">RAIL<\/span>/, 'the weapon name has its own nowrap element');
+  assert.match(alt, /<span class="weapon-name">RAIL<\/span>/, 'the weapon name has its own element beside the weapon icon');
   assert.ok(alt.indexOf('weapon-alt-row') > alt.indexOf('stat-bar'), 'the ALT hint sits on the note row under the ammo bar');
   assert.ok(alt.indexOf('verb-meters') < alt.indexOf('ability-card'), 'the verb readout is its own card outside the ability card');
   assert.equal(liveCount(alt), 1, 'the meters add no live region');

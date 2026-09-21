@@ -134,6 +134,7 @@ export const COCS_FILTER_RULES = deepFreeze([
  {path: 'intel', kind: 'team-map'},
  {path: 'contacts', kind: 'team-map'},
  {path: 'roleBoard', kind: 'team-map'},
+ {path: 'squadBoard', kind: 'team-map'},
  {path: 'commander.seat', kind: 'team-map'},
  {path: 'commander.votes', kind: 'team-map'},
  {path: 'commander.route', kind: 'team-map'},
@@ -144,6 +145,7 @@ export const COCS_FILTER_RULES = deepFreeze([
  {path: 'scouts', kind: 'team-array'},
  {path: 'sabotage', kind: 'team-array'},
  {path: 'cards', kind: 'team-array'},
+ {path: 'commandResults', kind: 'team-array'},
  {path: 'roles.agents', kind: 'team-array'},
  // Actor-keyed collections: entries outside the recipient's team are removed.
  {path: 'req', kind: 'actor-array'},

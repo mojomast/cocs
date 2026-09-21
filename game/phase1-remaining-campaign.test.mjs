@@ -44,8 +44,9 @@ inspect('reactor-run');
 inspect('throne-siege');
 inspect('ghost-wire');
 inspect('crown-duel');
+inspect('verdant-signal');
 
-for(const id of ['reactor-run','throne-siege','ghost-wire','crown-duel']){
+for(const id of ['reactor-run','throne-siege','ghost-wire','crown-duel','verdant-signal']){
  test(`${id}: controlled position/kills walkthrough respects volumes and required groups`,()=>{
   for(const checkpoint of [undefined,Number(Object.keys(missionFor(id).checkpoints)[0])]){
   const m=make(id,checkpoint),s=m.modeState,p=m.actors[0],count=m.actors.length;p.protection=1e9;
@@ -103,7 +104,7 @@ test('ghost-wire: ridge volume script fires before the enter-zone step advances'
  assert.equal(s.fired['ghost-ambush'],true,'script must not be skipped by same-tick objective completion');
 });
 
-for(const [id,checkpoint] of [['reactor-run',2],['throne-siege',3],['ghost-wire',2],['crown-duel',3]]){
+for(const [id,checkpoint] of [['reactor-run',2],['throne-siege',3],['ghost-wire',2],['crown-duel',3],['verdant-signal',2]]){
  test(`${id}: actual Match.step, 120 protected-player frames from entrance and checkpoint`,()=>{
   for(const cp of [undefined,checkpoint]){
    const m=make(id,cp),s=m.modeState,ids=m.actors.map(a=>a.id);m.actors[0].protection=1e9;

@@ -1,6 +1,7 @@
 import {ArenaView} from './view.mjs';
 import {Match,floorAt,obstructed,visible} from './core.mjs';
 import {MAPS} from './maps.mjs';
+import {arenaMeta} from './arenas.mjs';
 import {WEAPONS} from './data.mjs';
 import {CAMPAIGN_MISSIONS} from './campaign-data.mjs';
 
@@ -24,7 +25,7 @@ export function mountReview(canvas,panel,{runtime,onDisplay}={}){
  let points=[];
  function load(id){
   const arena=MAPS.find(m=>m.id===id)||MAPS[0];rng=seed>>>0;
-  match=new Match('chatgpt','openclaw',random,arena.id,{mode:arena.race?(arena.id==='puma-pitch'?'puma-soccer':'puma-race'):'deathmatch',botCount:1,unlimitedAmmo:true,fragLimit:100});
+  match=new Match('chatgpt','openclaw',random,arena.id,{mode:arena.race?(arena.race.kind==='soccer'?'puma-soccer':'puma-race'):(arenaMeta(arena)?.play?.[0]??'deathmatch'),botCount:1,unlimitedAmmo:true,fragLimit:100});
   for(const a of match.actors){a.bot=false;a.owned=WEAPONS.map(()=>true);a.weapon=Number(weaponSelect.value);}
   view.setMatch(match);view.setCinema(false);view.setFreeCam(false);view.playerId=match.actors[0].id;
   points=arena.spawns.map(([x,z],i)=>({name:`Spawn ${i+1}`,x,z}));
