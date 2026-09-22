@@ -16,6 +16,19 @@ record in [VERIFICATION.md](VERIFICATION.md).
 
 ---
 
+## v8.8.3 · DESTINATIONS — 2026-09-22
+
+- Mobile ADS and crouch are always tap-on/tap-off toggles with visible ON states;
+  keyboard/mouse preferences remain separate and vehicle braking stays held.
+- The resting combat layout keeps Fire, Jump, ADS, Crouch, Reload and More.
+  Contextual Use appears when an interaction is available; Pause stays at the top.
+- Hold More to reveal swap, grenade, melee, power, mobility, alt-fire, use, talk
+  and fullscreen. Slide to a tile and release for one-shot actions; held actions
+  run while your finger rests on their tile. A second finger can also use tiles.
+  Closing the tray releases held secondary inputs.
+- The aim zone now reaches gaps around the bottom controls. The tray mirrors for
+  left-handed play and fits portrait/landscape with enlarged touch targets.
+
 ## v8.8.2 · DESTINATIONS — 2026-09-22
 
 - Touch controls no longer request desktop mouse capture on match launch,

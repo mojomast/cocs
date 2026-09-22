@@ -4,7 +4,7 @@ import {readFile} from 'node:fs/promises';
 import {createElement} from 'react';
 import {renderToStaticMarkup} from 'react-dom/server';
 import ts from 'typescript';
-import {TOUCH_BUTTONS,applyTouchAction,touchDisplay,touchTargetSize,TOUCH_TARGET_MIN} from './touch.mjs';
+import {applyTouchAction,touchDisplay,touchTargetSize,TOUCH_TARGET_MIN} from './touch.mjs';
 
 async function loadTouchControls(){
   const file = new URL('../app/game-ui/touch-controls.tsx', import.meta.url);
@@ -16,21 +16,24 @@ async function loadTouchControls(){
   return import(`data:text/javascript;base64,${Buffer.from(executable).toString('base64')}`);
 }
 
-test('the rendered touch cluster includes every action, including grenade', async () => {
+test('the resting touch cluster keeps essentials visible and secondary actions tucked away', async () => {
   const {TouchControls} = await loadTouchControls();
   const props = {runtime:{current:{}}, visible:true, onLook(){}, onSwap(){}, onPause(){}};
   const html = renderToStaticMarkup(createElement(TouchControls, props));
-  for (const action of TOUCH_BUTTONS) assert.ok(html.includes(`touch-button touch-${action}"`), `${action} is rendered`);
-  assert.match(html, /aria-label="GRENADE"/);
-  assert.match(html, /aria-label="MOBILITY"/);
+  for (const action of ['fire','jump','ads','crouch','reload','more']) assert.ok(html.includes(`touch-button touch-${action}"`), `${action} is rendered`);
+  for (const action of ['grenade','mobility','alt','power','swap','voice','melee','interact','fullscreen']) assert.ok(!html.includes(`touch-button touch-${action}"`), `${action} stays behind MORE`);
+  assert.match(html, /aria-label="Hold for more actions" aria-expanded="false"/);
+  assert.match(html, /aria-label="ADS" aria-pressed="false"/);
+  assert.match(html, /aria-label="CROUCH" aria-pressed="false"/);
   assert.equal(renderToStaticMarkup(createElement(TouchControls, {...props, visible:false})), '');
 });
 
-test('the rendered soccer cluster exposes boost, brake and reset without combat actions', async () => {
+test('soccer keeps boost and held brake visible, with reset behind MORE', async () => {
   const {TouchControls} = await loadTouchControls();
   const props = {runtime:{current:{}}, visible:true, mode:'puma-soccer', onLook(){}, onSwap(){}, onPause(){}};
   const html = renderToStaticMarkup(createElement(TouchControls, props));
-  for (const label of ['BOOST','BRAKE','RESET']) assert.ok(html.includes(label), `${label} is rendered`);
+  for (const label of ['BOOST','BRAKE','HOLD']) assert.ok(html.includes(label), `${label} is rendered`);
+  assert.ok(!html.includes('RESET'));assert.doesNotMatch(html,/aria-label="BRAKE" aria-pressed/);
   for (const action of ['fire','ads','reload','swap','grenade','melee','jump','mobility']) assert.ok(!html.includes(`touch-${action}`), `${action} is hidden`);
 });
 
@@ -72,9 +75,9 @@ test('the rendered touch layer carries the display variables and the left-hand c
   assert.doesNotMatch(clamped, /touch-layer--left-hand/);
 });
 
-test('the touch layer passes the hold-vs-toggle prefs without changing the rendered cluster', async () => {
+test('touch toggles are independent of desktop preferences', async () => {
   const source = await readFile(new URL('../app/game-ui/touch-controls.tsx', import.meta.url), 'utf8');
-  assert.match(source, /const togglePrefs=\{adsToggle:display\?\.adsToggle===true,crouchToggle:display\?\.crouchToggle===true\}/, 'the live display prefs are read once');
+  assert.match(source, /const togglePrefs=\{adsToggle:true,crouchToggle:!car\}/, 'touch toggles are on; vehicle braking remains held');
   assert.match(source, /applyTouchAction\(runtime\.current,action,true,togglePrefs\)/, 'presses latch through the shared handler');
   assert.match(source, /applyTouchAction\(runtime\.current,action,false,togglePrefs\)/, 'releases leave a latch in place');
   const {TouchControls} = await loadTouchControls();

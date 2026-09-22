@@ -150,7 +150,7 @@ export function AccessibilityConfiguration({accessibility,onChange,display,onDis
    <p className="config-note">UI text scale reaches the HUD cards, kill feed, captions, scoreboard and command surfaces (0.8×–1.4×). While Reduce motion is on: ADS snaps in immediately, weapon kick and sway stay still, and character foot stride freezes; camera shake and decorative motion stay off.</p>
   </>}
   {view&&<div className="input-options" role="group" aria-label="Hold or toggle controls">
-   <p className="config-note">Toggle turns a held control into a press-on / press-off latch. Off keeps the shipped hold behavior. Touch controls follow the same setting.</p>
+   <p className="config-note">These settings control keyboard and mouse holds. Mobile ADS and crouch always toggle on tap, with an ON indicator. Vehicle braking stays held. Hold MORE on the touch layout, then slide to a secondary action.</p>
    <Toggle label="ADS toggle" checked={view.adsToggle===true} onChange={(v:boolean)=>patchDisplay({adsToggle:v})}/>
    <Toggle label="Crouch toggle" checked={view.crouchToggle===true} onChange={(v:boolean)=>patchDisplay({crouchToggle:v})}/>
    <Toggle label="Sprint toggle" checked={view.sprintToggle===true} onChange={(v:boolean)=>patchDisplay({sprintToggle:v})}/>

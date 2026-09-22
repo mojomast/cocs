@@ -1,5 +1,30 @@
 # COCS verification report
 
+## Release 8.8.3 — compact mobile controls
+
+The resting infantry layout has Fire, Jump, ADS, Crouch, Reload and More, plus
+Pause and contextual Use when available. Mobile ADS/crouch always toggle on tap
+with an ON state, independently of desktop settings. Vehicle brake remains held.
+Secondary actions appear only while More is held: slide and release for a
+one-shot action, or rest over an alt-fire/mobility/talk tile for a held action.
+Second-finger tile use is supported; closing the tray releases secondary holds.
+
+**191/191** input, touch, cursor, release and UI tests passed serially, followed
+by typecheck and a production build. The browser matrix covers 390×844 and
+844×390 at default settings and both sizes mirrored at 1.3× touch scale, plus
+desktop mouse lock/chords/look. Each mobile case checked tap-on/tap-off with
+desktop toggle settings off, hidden secondary buttons at rest, slide-and-hold
+alt-fire, release-to-throw grenade, second-finger actions, closing-tray cleanup,
+44px minimum targets, in-viewport hit tests, simultaneous move/look/fire,
+cancellation, hidden-tab reset, touch Pause/Resume and tactical-dialog closure.
+All four mobile cases had zero page errors and zero pointer-lock requests.
+Evidence: `artifacts/mobile-input/manifest.json` and `more-*.png` in that folder.
+
+Desktop look verification observes per-event yaw changes: headless Chromium can
+emit an inverse cursor-warp delta immediately after a CDP locked mouse move,
+making net-yaw-only assertions unreliable. Browser checks are emulated Chromium
+touch contacts rather than physical iOS/Android device tests.
+
 ## Release 8.8.2 — mobile input ownership
 
 The pre-fix mobile reproduction used Chromium with `isMobile:true` and

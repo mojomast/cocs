@@ -1,12 +1,17 @@
 // In-game patch notes. The title-screen footer is the running version; this
 // module is the human-readable release digest the Changelog screen renders. The
 // full historical record lives in docs/CHANGELOG.md and is linked from the UI.
-export const RELEASE_VERSION = 'v8.8.2';
+export const RELEASE_VERSION = 'v8.8.3';
 export const RELEASE_CODENAME = 'DESTINATIONS';
 export const REPO_URL = 'https://github.com/mojomast/tokenarena';
 export const FULL_CHANGELOG_URL = `${REPO_URL}/blob/main/docs/CHANGELOG.md`;
 
 export const CHANGELOG = [
+  {version:'v8.8.3',codename:'DESTINATIONS',date:'2026-09-22',tag:'A simpler mobile layout with tap toggles and hold-to-open actions',highlights:[
+    'Mobile ADS and crouch now toggle on tap and show an ON indicator, independently of keyboard/mouse settings. Vehicle braking remains a held control.',
+    'Keep fire, jump, ADS, crouch and reload at your fingertips. Hold MORE, slide to a secondary action and release to use it; alt-fire, mobility and talk stay active while held over their tile. Contextual USE appears when needed, and fullscreen moves into MORE.',
+    'The aim surface reaches the lower-right gaps around buttons. The compact layout and secondary tray mirror for left-handed play and respect enlarged touch targets.',
+  ]},
   {version:'v8.8.2',codename:'DESTINATIONS',date:'2026-09-22',tag:'Mobile sticks keep touch ownership without desktop mouse capture',highlights:[
     'Touch play no longer requests mouse capture on launch, resume or dialog close. Existing mouse locks are released, delayed lock errors are ignored, and touch-generated mouse events cannot start a mouse drag or fire.',
     'Fresh stick contacts start neutral. Move, aim and action buttons retain independent finger ownership; interrupted gestures, hidden tabs and UI transitions reset captures and held touch inputs. Chat and other input-owning dialogs suspend the touch layer.',
