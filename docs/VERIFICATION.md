@@ -25,6 +25,13 @@ emit an inverse cursor-warp delta immediately after a CDP locked mouse move,
 making net-yaw-only assertions unreliable. Browser checks are emulated Chromium
 touch contacts rather than physical iOS/Android device tests.
 
+**Production (2026-09-22):** both services report **f6bbe79 /
+v8.8.3-f6bbe79 / protocol 3**. Deployment verified the footer and all 13 linked
+assets, including `/assets/page-Dz4qqsyd.js`. The live browser run passed all
+four mobile layouts and the desktop input check, with zero mobile page errors
+and zero mobile lock requests. All secondary tiles were visible, hit-testable
+and at least 44px. Evidence: `artifacts/compact-touch-live/manifest.json`.
+
 ## Release 8.8.2 — mobile input ownership
 
 The pre-fix mobile reproduction used Chromium with `isMobile:true` and
