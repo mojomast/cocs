@@ -519,7 +519,18 @@ export default function Home(){
   const setAmbiencePref=(on:boolean)=>{setDemoAmbience(on);runtime.current?.audio?.setAmbient?.(on);saveDemoPrefs({ambience:on});};
   const setAnnouncerPref=(on:boolean)=>{setDemoAnnouncer(on);runtime.current?.audio?.setAnnouncer?.(on);saveDemoPrefs({announcer:on});};
   const cycleWeather=()=>{const list:(string|null)[]=[null,...WEATHER_KINDS];const next=list[(list.indexOf(demoWeather)+1)%list.length]??null;setDemoWeather(next);runtime.current?.view?.setWeather?.(next);saveDemoPrefs({weather:next});};
-  const setTouchPref=(value:boolean)=>{setTouchControls(value);try{const prefs=JSON.parse(localStorage.getItem('token-arena-settings')||'{}');localStorage.setItem('token-arena-settings',JSON.stringify({...prefs,touch:value}));}catch{}};
+  const touchControlsRef=useRef(false);
+  touchControlsRef.current=touchControls;
+  const setTouchPref=(value:boolean)=>{touchControlsRef.current=value;setTouchControls(value);try{const prefs=JSON.parse(localStorage.getItem('token-arena-settings')||'{}');localStorage.setItem('token-arena-settings',JSON.stringify({...prefs,touch:value}));}catch{}};
+  useEffect(()=>{
+   if(!touchControls)return;
+   clearInput();
+   setPointerHint(false);
+   if(runtime.current){runtime.current.lockPending=false;runtime.current.hadLock=false;runtime.current.drag=false;}
+   // Switching to touch releases a desktop lock but preserves open UI owners.
+   if(document.pointerLockElement===canvas.current)document.exitPointerLock?.();
+   if(cursorActive(cursorRef.current)&&!cursorBlockingSurfaces(cursorRef.current).length)applyCursor(cursorClear(cursorRef.current));
+  },[touchControls]);
   const setVoicePref=(patch:{volume?:number;threshold?:number})=>{Object.assign(voicePrefs.current,patch);try{const prefs=JSON.parse(localStorage.getItem('token-arena-settings')||'{}');localStorage.setItem('token-arena-settings',JSON.stringify({...prefs,voiceVolume:voicePrefs.current.volume,voiceThreshold:voicePrefs.current.threshold}));}catch{}};
  useEffect(()=>{let cancelled=false,raf=0;const keys=new Set<string>();let view:any,audio:any;let resize:()=>void=()=>{};
     (async()=>{try{const module=await import('../game/view.mjs');if(cancelled)return;view=new module.ArenaView(canvas.current);audio=new module.SynthAudio({announcer:true});audio.setSoundtrack('halo');
@@ -897,18 +908,20 @@ pauseRender:(on:boolean)=>{const previous=r.benchmarking===true;r.benchmarking=o
     // Short tap = toggle open; held longer = peek that closes on release.
     if(hold.held&&performance.now()-hold.at>=BOARD_HOLD_MS)cocsBoardControlRef.current?.close();
    }if(actionForCode(r?.bindings||bindings,e.code)==='voice')r?.voice?.setPushToTalk(false);keys.delete(e.code);if(e.code==='Tab'&&!scoresInteractiveRef.current)setScores(false);};
-  const move=(e:MouseEvent)=>{const r=runtime.current;if(demoOnlyRef.current&&demoSessionRef.current.state==='free'&&(document.pointerLockElement===canvas.current||r?.drag)){const d=r?.display||{},gain=(r?.lookSensitivity||1)*(d.adsSensitivity??1);demoFreeAdapter(r?.view).look(-e.movementX*.002*gain,-(d.invertY?-1:1)*e.movementY*.002*gain);return;}if(modeRef.current!=='playing'||chatOpenRef.current||r?.net?.spectate||!r?.match&&!r?.net?.started||(document.pointerLockElement!==canvas.current&&!r.drag))return;if(r.spectateLocal){const d=r.display||{},gain=r.lookSensitivity*((r.ads||r.touch?.ads)?(d.adsSensitivity??1)*adsSightGain(r,d):1),inv=d.invertY?-1:1;if(r.view?.freeCam)r.view.freeLook(-e.movementX*.002*gain,-inv*e.movementY*.002*gain);else r.spectateDirector?.look?.(-e.movementX*.002*gain,-inv*e.movementY*.002*gain);return;}const look=r.net?.started?r.look:r.match.actors[0],d=r.display||{},gain=r.lookSensitivity*((r.ads||r.touch?.ads)?(d.adsSensitivity??1)*adsSightGain(r,d):1);look.yaw-=e.movementX*.002*gain;look.pitch=Math.max(-1.45,Math.min(1.45,look.pitch-(d.invertY?-1:1)*e.movementY*.002*gain));};
+  const move=(e:MouseEvent)=>{if((e as any).sourceCapabilities?.firesTouchEvents)return;const r=runtime.current;if(demoOnlyRef.current&&demoSessionRef.current.state==='free'&&(document.pointerLockElement===canvas.current||r?.drag)){const d=r?.display||{},gain=(r?.lookSensitivity||1)*(d.adsSensitivity??1);demoFreeAdapter(r?.view).look(-e.movementX*.002*gain,-(d.invertY?-1:1)*e.movementY*.002*gain);return;}if(modeRef.current!=='playing'||chatOpenRef.current||r?.net?.spectate||!r?.match&&!r?.net?.started||(document.pointerLockElement!==canvas.current&&!r.drag))return;if(r.spectateLocal){const d=r.display||{},gain=r.lookSensitivity*((r.ads||r.touch?.ads)?(d.adsSensitivity??1)*adsSightGain(r,d):1),inv=d.invertY?-1:1;if(r.view?.freeCam)r.view.freeLook(-e.movementX*.002*gain,-inv*e.movementY*.002*gain);else r.spectateDirector?.look?.(-e.movementX*.002*gain,-inv*e.movementY*.002*gain);return;}const look=r.net?.started?r.look:r.match.actors[0],d=r.display||{},gain=r.lookSensitivity*((r.ads||r.touch?.ads)?(d.adsSensitivity??1)*adsSightGain(r,d):1);look.yaw-=e.movementX*.002*gain;look.pitch=Math.max(-1.45,Math.min(1.45,look.pitch-(d.invertY?-1:1)*e.movementY*.002*gain));};
   const down=(e:MouseEvent)=>{
+   if(touchControlsRef.current||(e as any).sourceCapabilities?.firesTouchEvents)return;
    if(e.target!==canvas.current)return;
    const r=runtime.current;if(!r)return;
    // While the cursor is free the canvas never fires: a click is either the
    // one obvious way back to combat or an inert click outside a surface.
    if(cursorActive(cursorRef.current)){cursorResumeCombat();return;}
    if(demoOnlyRef.current&&demoSessionRef.current.state==='free'){canvas.current?.focus({preventScroll:true});if(document.pointerLockElement!==canvas.current)requestLock();return;}if(modeRef.current!=='playing'||chatOpenRef.current)return;if(r.net?.spectate)return;if(r.spectateLocal){canvas.current?.focus({preventScroll:true});if(document.pointerLockElement!==canvas.current)requestLock();return;}canvas.current?.focus({preventScroll:true});if(document.pointerLockElement!==canvas.current)requestLock();if(e.button===0){r.fire=true;r.fireTap=true;r.drag=true;}else if(e.button===1){e.preventDefault();r.altFire=true;}else if(e.button===2){e.preventDefault();if(r.display?.adsToggle===true)r.ads=r.ads!==true;else r.ads=true;}};
- const up=(e:MouseEvent)=>{const r=runtime.current;if(!r)return;if(e.button===0||e.button===undefined){r.fire=false;r.drag=false;}else if(e.button===1)r.altFire=false;else if(e.button===2){if(r.display?.adsToggle!==true)r.ads=false;}};
+ const up=(e:MouseEvent)=>{if((e as any).sourceCapabilities?.firesTouchEvents)return;const r=runtime.current;if(!r)return;if(e.button===0||e.button===undefined){r.fire=false;r.drag=false;}else if(e.button===1)r.altFire=false;else if(e.button===2){if(r.display?.adsToggle!==true)r.ads=false;}};
  const contextmenu=(e:MouseEvent)=>{if(e.target===canvas.current&&modeRef.current==='playing')e.preventDefault();};
    const pause=()=>{voiceGate.current.blurred=true;syncVoice();clearInput();if(demoOnlyRef.current)clearDemoInputs();if(modeRef.current==='playing'){if(runtime.current?.net?.started){setPointerHint(!runtime.current.net.spectate);document.exitPointerLock?.();}else changeMode('paused');}};
   const lock=()=>{const r=runtime.current;if(!r)return;r.lockPending=false;lockChangeAtRef.current=performance.now();const locked=document.pointerLockElement===canvas.current;
+   if(touchControlsRef.current){r.hadLock=false;setPointerHint(false);if(locked)document.exitPointerLock?.();return;}
    if(demoOnlyRef.current){if(locked){r.hadLock=true;canvas.current?.focus({preventScroll:true});setPointerHint(false);}else{r.hadLock=false;clearDemoInputs();}return;}
    if(locked){r.hadLock=true;canvas.current?.focus({preventScroll:true});setPointerHint(false);const gained=cursorLockGained(cursorRef.current);if(gained.changed)applyCursor(gained);return;}
    r.hadLock=false;
@@ -916,19 +929,19 @@ pauseRender:(on:boolean)=>{const previous=r.benchmarking===true;r.benchmarking=o
    // enter cursor mode instead of pausing. Our own surface exits land here
    // too but find the machine already in cursor mode and change nothing.
    if(modeRef.current==='playing'){const lost=cursorLockLost(cursorRef.current,{at:performance.now()});if(lost.changed)applyCursor(lost);}};
-  const lockError=()=>{if(runtime.current)runtime.current.lockPending=false;if(modeRef.current==='playing'){setPointerHint(true);const lost=cursorLockLost(cursorRef.current,{at:performance.now()});if(lost.changed)applyCursor(lost);}};
+  const lockError=()=>{if(runtime.current)runtime.current.lockPending=false;if(touchControlsRef.current)return;if(modeRef.current==='playing'){setPointerHint(true);const lost=cursorLockLost(cursorRef.current,{at:performance.now()});if(lost.changed)applyCursor(lost);}};
   const wheel=(e:WheelEvent)=>{const r=runtime.current;if(cursorActive(cursorRef.current))return;if(modeRef.current!=='playing'||e.target!==canvas.current||blocksGameplay(chatOpenRef.current,r?.net?.spectate,e.target,document.activeElement)||(!r?.match&&!r?.net?.started)||e.deltaY===0)return;const p=r.net?.started?r.renderState?.actors?.find((a:any)=>a.id===r.net.actorId):r.match.actors[0];if(!p)return;e.preventDefault();const n=cycleWeapon(p.ammo,p.weapon,r.inputWeapon,e.deltaY);if(n>=0)r.inputWeapon=n;};
    const focus=(e:FocusEvent)=>{if(modeRef.current==='playing'&&isEditable(e.target))clearInput();syncVoice();};
    const focusOut=()=>{queueMicrotask(()=>{if(!cancelled)syncVoice();});};
    const windowFocus=()=>{voiceGate.current.blurred=false;syncVoice();};
    const visibility=()=>{if(document.hidden){clearInput();if(demoOnlyRef.current)clearDemoInputs();runtime.current?.voice?.setPushToTalk(false);}syncVoice();};
    window.addEventListener('focus',windowFocus);window.addEventListener('focusout',focusOut);document.addEventListener('visibilitychange',visibility);
-  const pointerLost=()=>{const r=runtime.current;if(!r)return;if(r.altFire)r.altFire=false;if(r.drag&&document.pointerLockElement!==canvas.current)clearInput();};
+  const pointerLost=(e:PointerEvent)=>{if(e.pointerType!=='mouse')return;const r=runtime.current;if(!r)return;if(r.altFire)r.altFire=false;if(r.drag&&document.pointerLockElement!==canvas.current)clearInput();};
    window.addEventListener('focusin',focus);window.addEventListener('pointercancel',pointerLost);canvas.current?.addEventListener('pointerleave',pointerLost);
   window.addEventListener('keydown',keydown);window.addEventListener('keyup',keyup);window.addEventListener('mousemove',move);window.addEventListener('mousedown',down);window.addEventListener('mouseup',up);window.addEventListener('contextmenu',contextmenu);window.addEventListener('blur',pause);document.addEventListener('pointerlockchange',lock);document.addEventListener('pointerlockerror',lockError);window.addEventListener('wheel',wheel,{passive:false});
     return()=>{cancelled=true;cancelAnimationFrame(raf);window.removeEventListener('focus',windowFocus);window.removeEventListener('focusout',focusOut);document.removeEventListener('visibilitychange',visibility);window.removeEventListener('focusin',focus);window.removeEventListener('pointercancel',pointerLost);canvas.current?.removeEventListener('pointerleave',pointerLost);window.removeEventListener('resize',resize);window.removeEventListener('keydown',keydown);window.removeEventListener('keyup',keyup);window.removeEventListener('mousemove',move);window.removeEventListener('mousedown',down);window.removeEventListener('mouseup',up);window.removeEventListener('contextmenu',contextmenu);window.removeEventListener('blur',pause);document.removeEventListener('pointerlockchange',lock);document.removeEventListener('pointerlockerror',lockError);window.removeEventListener('wheel',wheel);view?.dispose();audio?.dispose();const r=runtime.current;runtime.current=null;r?.voice?.dispose();r?.net?.close();delete (window as any).tokenArenaSnapshot;delete (window as any).tokenArenaDemo;};
   },[]);
-  useEffect(()=>{let saved;try{saved=JSON.parse(localStorage.getItem('token-arena-settings')||'{}').touch;}catch{}setTouchControls(typeof saved==='boolean'?saved:isTouchDevice());},[]);
+  useEffect(()=>{let saved;try{saved=JSON.parse(localStorage.getItem('token-arena-settings')||'{}').touch;}catch{}const enabled=typeof saved==='boolean'?saved:isTouchDevice();touchControlsRef.current=enabled;setTouchControls(enabled);},[]);
  useEffect(()=>{const sync=()=>setFullscreen(Boolean((document as any).fullscreenElement||(document as any).webkitFullscreenElement));document.addEventListener('fullscreenchange',sync);document.addEventListener('webkitfullscreenchange',sync);return()=>{document.removeEventListener('fullscreenchange',sync);document.removeEventListener('webkitfullscreenchange',sync);};},[]);
   useEffect(()=>{runtime.current?.view.setCharacter(character);},[character,ready]);
  useEffect(()=>{
@@ -1004,7 +1017,7 @@ pauseRender:(on:boolean)=>{const previous=r.benchmarking===true;r.benchmarking=o
    window.addEventListener('keydown',onKey);return()=>window.removeEventListener('keydown',onKey);
   },[settings]);
   const saveSettings=(s:number,m:boolean,show:boolean=showcase,legacy:boolean=legacyMaps)=>{setSensitivity(s);setMuted(m);setShowcase(show);setLegacyMaps(legacy);if(runtime.current){runtime.current.lookSensitivity=s;runtime.current.audio.setMuted(m);runtime.current.showcaseEnabled=show;runtime.current.legacyArenas=legacy;}try{const prefs=JSON.parse(localStorage.getItem('token-arena-settings')||'{}');localStorage.setItem('token-arena-settings',JSON.stringify({...prefs,sensitivity:s,muted:m,showcase:show,legacyArenas:legacy,touch:touchControls,voiceVolume:voicePrefs.current.volume,voiceThreshold:voicePrefs.current.threshold}));}catch{}};
-  const requestLock=()=>{const r=runtime.current;if(!r||r.lockPending||document.pointerLockElement===canvas.current)return;canvas.current?.focus({preventScroll:true});const failed=()=>{r.lockPending=false;if(modeRef.current==='playing')setPointerHint(true);};if(!canvas.current?.requestPointerLock){failed();return;}r.lockPending=true;try{const result=canvas.current.requestPointerLock();result?.catch(failed);}catch{failed();}};
+  const requestLock=()=>{const r=runtime.current;if(touchControlsRef.current){if(r)r.lockPending=false;setPointerHint(false);return;}if(!r||r.lockPending||document.pointerLockElement===canvas.current)return;canvas.current?.focus({preventScroll:true});const failed=()=>{r.lockPending=false;if(!touchControlsRef.current&&modeRef.current==='playing')setPointerHint(true);};if(!canvas.current?.requestPointerLock){failed();return;}r.lockPending=true;try{const result=canvas.current.requestPointerLock();result?.catch(failed);}catch{failed();}};
   requestLockRef.current=requestLock;
   // WP1.5: every round start clears the previous award for every role, so a
   // spectator (or a player entering the next round) can never read a stale
@@ -1325,7 +1338,7 @@ const cocsCommand=cocsView?{...cocsView,boardView:mergedBoard??cocsView.boardVie
     // window) or the paused Training completion beat owns the cursor. While one
     // is up the touch layer is suspended so move/look/fire capture cannot run
     // behind the surface.
-     const touchSuspended=Boolean(fieldPanel||spendVisible||(cocsBoard.open===true&&!boardCollapsed)||hud?.training?.phase==='complete'||hud?.training?.done===true);
+     const touchSuspended=Boolean(fieldPanel||spendVisible||(cocsBoard.open===true&&!boardCollapsed)||hud?.training?.phase==='complete'||hud?.training?.done===true||chatOpen||cursorBlockingSurfaces(cursorUi).length);
    const aimActor=player||hud?.actors?.[0],aimWeapon=aimActor?WEAPONS[aimActor.weapon??0]||WEAPONS[0]:null,aimSpread=aimActor?effectiveSpread(aimActor,aimWeapon,{handling:harnessWeaponHandling(aimActor.harness,aimActor.weapon)}):0,crosshairGap=dynamicCrosshairGap(aimSpread,display.size),reloadFill=reloadProgress(aimActor),reloading=Boolean(aimActor?.reloading),posture=postureLabel(aimActor),marker=hitMarker(hud,player),ammoEmpty=Boolean(player&&typeof player.ammo?.[player.weapon]==='number'&&player.ammo[player.weapon]===0),ammoLow=lowAmmo(player,WEAPONS);
      const killNotice=killBanner(hud,player,WEAPONS),suddenBanner=suddenDeathBanner(hud),startBanner=matchStartBanner(hud,undefined,hudMode),scoreCue=hud?.scoreCue??null,damageIndicator=hud?.damageDir&&hud.time-hud.damageDirAt<.8?hud.damageDir:null,awards=matchAwards(hud),radar=(display.radar!==false||fieldPanel==='map')?radarContacts(hud,player):null,radarCols=radarPaletteFor(accessibility.palette);
     const respawn=respawnOverlayView(hud,player);respawnOpenRef.current=respawn.open===true;
@@ -1451,7 +1464,7 @@ const cocsCommand=cocsView?{...cocsView,boardView:mergedBoard??cocsView.boardVie
   };
   return <><main style={{'--ui-scale':display.uiScale??1} as any} className={`arena-app${motionReduced?' motion-reduced':''} mode-${mode}${(config.mode==='puma-race'||config.mode==='puma-soccer')?' race-setup':''}${(isRace||isSoccer)?' race-active':''} palette-${accessibility.palette}${accessibility.palette!=='default'?' palette-colorblind':''}${accessibility.highContrast?' ui-contrast':''}`}>
   <canvas ref={canvas} tabIndex={-1} role="img" className="arena-canvas" aria-label="Colosseum Of Competitive Slop 3D game"/>
-  {!entered&&!demoOnly&&<><TitleScreen ui={ui}/><div className="title-footer"><span>v8.8.1 · DESTINATIONS</span>{githubLink}</div></>}
+  {!entered&&!demoOnly&&<><TitleScreen ui={ui}/><div className="title-footer"><span>v8.8.2 · DESTINATIONS</span>{githubLink}</div></>}
   {!entered&&demoOnly&&<DemoControls state={demoSession.state} labels={demoLabels} subjects={broadcast?.subjects??[]} cameraStyle={demoSession.cameraStyle} hudVisible={demoSession.hudVisible} pinned={demoPinned(demoSession)} freeSpeed={demoSession.freeSpeed} running={demoRunning} notice={demoSession.notice} error={demoSession.error}
     onEnterArena={enterArenaFromDemo} onPrevScenario={()=>skipDemoScenario(-1)} onNextScenario={()=>skipDemoScenario(1)}
     onAuto={()=>demoTransition({type:'auto'})} onFollow={demoFollow} onFree={demoToggleFree} onStyle={demoCycleStyle} onResetView={demoResetView}

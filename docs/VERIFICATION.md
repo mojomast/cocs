@@ -1,5 +1,31 @@
 # COCS verification report
 
+## Release 8.8.2 — mobile input ownership
+
+The pre-fix mobile reproduction used Chromium with `isMobile:true` and
+`hasTouch:true`, leaving touch auto-detection enabled. Launching a local match
+attempted desktop pointer lock once; a mobile-style rejection entered the cursor
+state and exposed the desktop capture overlay. The regression's zero-lock-request
+assertion failed on the old implementation.
+
+`scripts/verify-mobile-input.mjs` uses CDP touch contacts to exercise browser hit
+testing, implicit/explicit pointer capture, three simultaneous move/look/fire
+contacts, stationary-touch neutrality, independent releases, cancellation,
+visibility loss, pause/resume, delayed pointer-lock events and tactical-dialog
+round trips. It also exercises real desktop pointer lock, mouse-look and
+independent FIRE/ADS releases. Unlike a viewport-only responsive check, this
+drives the actual touch input path.
+
+**188/188** input, touch, cursor and UI tests passed with file concurrency one;
+the three release-metadata checks, typecheck and production build also passed.
+The browser matrix passed at **390×844** and **844×390** with
+zero page errors and **zero pointer-lock requests**, including match launch,
+resume and tactical-dialog closure. **1366×768** desktop verification retained
+actual pointer lock, mouse-look and independent FIRE/ADS releases. Evidence:
+`artifacts/mobile-input/manifest.json`. This is Chromium mobile emulation with
+real browser touch contacts; it does not substitute for physical iOS/Android
+device testing.
+
 ## Release 8.8.1 — destination demo tour
 
 The default curated reel now covers all nine DESTINATIONS before repeating a

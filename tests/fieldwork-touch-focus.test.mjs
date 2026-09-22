@@ -66,7 +66,7 @@ test('touch capture is suspended while an explicit COCS surface or the Training 
   assert.match(controls, /capture\(e\.currentTarget,e\.pointerId\)/, 'pointer capture failure cannot surface as a page error');
 
   const page = await read('app/page.tsx');
-  assert.match(page, /const touchSuspended=Boolean\(fieldPanel\|\|spendVisible\|\|\(cocsBoard\.open===true&&!boardCollapsed\)\|\|hud\?\.training\?\.phase==='complete'\|\|hud\?\.training\?\.done===true\);/, 'field dialogs and existing owning surfaces suspend touch capture');
+  assert.match(page, /const touchSuspended=Boolean\(fieldPanel\|\|spendVisible\|\|\(cocsBoard\.open===true&&!boardCollapsed\)\|\|hud\?\.training\?\.phase==='complete'\|\|hud\?\.training\?\.done===true\|\|chatOpen\|\|cursorBlockingSurfaces\(cursorUi\)\.length\);/, 'field dialogs, chat and existing owning surfaces suspend touch capture');
   assert.match(page, /suspended=\{touchSuspended\}/, 'the rendered touch layer receives the state');
 
   const css = await read('app/globals.css');

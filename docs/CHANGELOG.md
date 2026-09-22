@@ -16,6 +16,17 @@ record in [VERIFICATION.md](VERIFICATION.md).
 
 ---
 
+## v8.8.2 · DESTINATIONS — 2026-09-22
+
+- Touch controls no longer request desktop mouse capture on match launch,
+  resume or closing a field dialog. Touch mode releases an existing mouse lock
+  and ignores delayed lock errors instead of showing the desktop capture overlay.
+- Touch-generated mouse events cannot fire or initiate a mouse drag. Fresh stick
+  contacts start neutral; each action tracks its own finger independently.
+- Hidden tabs, interrupted gestures and UI transitions clear held touch state,
+  release pointer captures and reset stick ownership so the next gesture works.
+  Chat and other input-owning dialogs suspend the touch controls.
+
 ## v8.8.1 · DESTINATIONS — 2026-09-21
 
 - The default demo now tours all nine DESTINATIONS before repeating a map,

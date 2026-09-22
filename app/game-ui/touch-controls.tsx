@@ -32,35 +32,48 @@ export function TouchControls({runtime,visible,onLook,onSwap,onPause,onFullscree
  const moveBaseRef=useRef<HTMLDivElement|null>(null),moveKnobRef=useRef<HTMLElement|null>(null),lookBaseRef=useRef<HTMLDivElement|null>(null),lookKnobRef=useRef<HTMLElement|null>(null);
  const moveState=useRef<{id:number|null;origin:{x:number;y:number}}>({id:null,origin:{x:0,y:0}});
  const lookState=useRef<{id:number|null;origin:{x:number;y:number};last:{x:number;y:number}}>({id:null,origin:{x:0,y:0},last:{x:0,y:0}});
- const cb=useRef({onLook,onSwap});
+  const cb=useRef({onLook,onSwap});
+  const captures=useRef(new Map<number,Element>()),heldActions=useRef(new Map<string,number>());
  useEffect(()=>{cb.current={onLook,onSwap};});
- // A surface opening mid-hold drops every captured stick and both touch axes;
- // the page's cursor transition already clears the runtime copy.
- useEffect(()=>{
-  if(!suspended)return;
-  const knob=(ref:{current:HTMLElement|null},x:number,y:number)=>{const el=ref.current;if(el)el.style.transform=`translate(${x}px, ${y}px)`;};
-  const base=(ref:{current:HTMLElement|null},on:boolean)=>{const el=ref.current;if(el)el.style.opacity=on?'1':'0';};
-  moveState.current.id=null;knob(moveKnobRef,0,0);base(moveBaseRef,false);
-  lookState.current.id=null;knob(lookKnobRef,0,0);base(lookBaseRef,false);
-  const r=runtime.current;if(r?.touch){r.touch.moveX=0;r.touch.moveY=0;r.touch.sprint=false;}
- },[suspended]);
+  // Drop browser capture AND local ownership on interruptions. Clearing only
+  // runtime axes leaves a stick owned by a finger the browser has forgotten.
+  useEffect(()=>{
+   const reset=()=>{
+   const knob=(ref:{current:HTMLElement|null},x:number,y:number)=>{const el=ref.current;if(el)el.style.transform=`translate(${x}px, ${y}px)`;};
+   const base=(ref:{current:HTMLElement|null},on:boolean)=>{const el=ref.current;if(el)el.style.opacity=on?'1':'0';};
+   moveState.current.id=null;knob(moveKnobRef,0,0);base(moveBaseRef,false);
+   lookState.current.id=null;knob(lookKnobRef,0,0);base(lookBaseRef,false);
+   for(const action of heldActions.current.keys())applyTouchAction(runtime.current,action,false,{adsToggle:false,crouchToggle:false});
+   heldActions.current.clear();
+   for(const [id,el] of captures.current){try{if(el.hasPointerCapture?.(id))el.releasePointerCapture(id);}catch{}}
+   captures.current.clear();
+   const r=runtime.current;if(r?.touch){r.touch.moveX=0;r.touch.moveY=0;r.touch.sprint=false;r.touch.fire=r.touch.jump=r.touch.ads=r.touch.altFire=r.touch.crouch=r.touch.mobility=false;}
+   };
+   if(suspended||!visible)reset();
+   const hidden=()=>{if(document.hidden)reset();};
+   window.addEventListener('blur',reset);document.addEventListener('visibilitychange',hidden);
+   return()=>{window.removeEventListener('blur',reset);document.removeEventListener('visibilitychange',hidden);reset();};
+  },[suspended,visible,mode,runtime]);
 
  const setKnob=(ref:{current:HTMLElement|null},x:number,y:number)=>{const el=ref.current;if(el)el.style.transform=`translate(${x}px, ${y}px)`;};
  const placeBase=(ref:{current:HTMLElement|null},x:number,y:number,on:boolean)=>{const el=ref.current;if(!el)return;if(on){el.style.left=`${x}px`;el.style.top=`${y}px`;}el.style.opacity=on?'1':'0';};
  // Synthetic and edge-case pointers can arrive with no active pointer id;
  // setPointerCapture then throws InvalidStateError. Capture is an optimisation
  // (the handlers also track their own pointer id), so failure is non-fatal.
- const capture=(element:Element|null,id:number)=>{try{element?.setPointerCapture?.(id);}catch{}};
+  const capture=(element:Element|null,id:number)=>{if(element)captures.current.set(id,element);try{element?.setPointerCapture?.(id);}catch{}};
+  // Native pointerup/cancel releases capture after dispatch. Only lifecycle
+  // cleanup above releases it explicitly while a contact is still active.
+  const releaseCapture=(id:number)=>{captures.current.delete(id);};
  const move=(x:number,y:number,sprint:boolean)=>{const r=runtime.current;if(!r)return;r.touch??={};r.touch.moveX=x;r.touch.moveY=y;r.touch.sprint=sprint;};
 
  const moveFrom=(x:number,y:number)=>{const v=stickAxis(x-moveState.current.origin.x,y-moveState.current.origin.y,stickRadius,knobRadius);move(v.x,v.y,v.sprint);setKnob(moveKnobRef,v.knobX,v.knobY);};
- const moveDown=(e:ReactPointerEvent<HTMLDivElement>)=>{e.preventDefault();if(suspended)return;if(moveState.current.id!==null)return;moveState.current.id=e.pointerId;moveState.current.origin={x:e.clientX,y:e.clientY};capture(e.currentTarget,e.pointerId);placeBase(moveBaseRef,e.clientX,e.clientY,true);setKnob(moveKnobRef,0,0);};
+  const moveDown=(e:ReactPointerEvent<HTMLDivElement>)=>{e.preventDefault();if(suspended)return;if(moveState.current.id!==null)return;moveState.current.id=e.pointerId;moveState.current.origin={x:e.clientX,y:e.clientY};capture(e.currentTarget,e.pointerId);move(0,0,false);placeBase(moveBaseRef,e.clientX,e.clientY,true);setKnob(moveKnobRef,0,0);};
  const moveMove=(e:ReactPointerEvent<HTMLDivElement>)=>{if(suspended)return;if(moveState.current.id!==e.pointerId)return;e.preventDefault();moveFrom(e.clientX,e.clientY);};
- const moveUp=(e:ReactPointerEvent<HTMLDivElement>)=>{if(moveState.current.id!==e.pointerId)return;moveState.current.id=null;setKnob(moveKnobRef,0,0);move(0,0,false);placeBase(moveBaseRef,0,0,false);};
+  const moveUp=(e:ReactPointerEvent<HTMLDivElement>)=>{if(moveState.current.id!==e.pointerId)return;moveState.current.id=null;releaseCapture(e.pointerId);setKnob(moveKnobRef,0,0);move(0,0,false);placeBase(moveBaseRef,0,0,false);};
 
  const lookDown=(e:ReactPointerEvent<HTMLDivElement>)=>{e.preventDefault();if(suspended)return;if(lookState.current.id!==null)return;lookState.current.id=e.pointerId;lookState.current.origin={x:e.clientX,y:e.clientY};lookState.current.last={x:e.clientX,y:e.clientY};capture(e.currentTarget,e.pointerId);placeBase(lookBaseRef,e.clientX,e.clientY,true);setKnob(lookKnobRef,0,0);};
  const lookMove=(e:ReactPointerEvent<HTMLDivElement>)=>{if(suspended)return;if(lookState.current.id!==e.pointerId)return;const dx=e.clientX-lookState.current.last.x,dy=e.clientY-lookState.current.last.y;lookState.current.last={x:e.clientX,y:e.clientY};if(dx||dy)cb.current.onLook(dx,dy);const kx=e.clientX-lookState.current.origin.x,ky=e.clientY-lookState.current.origin.y,m=Math.hypot(kx,ky),s=m>lookTravel?lookTravel/m:1;setKnob(lookKnobRef,kx*s,ky*s);};
- const lookUp=(e:ReactPointerEvent<HTMLDivElement>)=>{if(lookState.current.id!==e.pointerId)return;lookState.current.id=null;setKnob(lookKnobRef,0,0);placeBase(lookBaseRef,0,0,false);};
+  const lookUp=(e:ReactPointerEvent<HTMLDivElement>)=>{if(lookState.current.id!==e.pointerId)return;lookState.current.id=null;releaseCapture(e.pointerId);setKnob(lookKnobRef,0,0);placeBase(lookBaseRef,0,0,false);};
 
  // Hold-vs-toggle follows the live display: a press latches when the pref is on
  // and release leaves it. The sim input shape is untouched — the same
@@ -68,7 +81,8 @@ export function TouchControls({runtime,visible,onLook,onSwap,onPause,onFullscree
  const togglePrefs={adsToggle:display?.adsToggle===true,crouchToggle:display?.crouchToggle===true};
  const press=(action:string)=>{if(suspended)return;applyTouchAction(runtime.current,action,true,togglePrefs);if(action==='swap')cb.current.onSwap();};
  const release=(action:string)=>{applyTouchAction(runtime.current,action,false,togglePrefs);};
- const holdProps=(action:string)=>({onPointerDown:(e:ReactPointerEvent<HTMLButtonElement>)=>{e.preventDefault();e.stopPropagation();if(suspended)return;capture(e.currentTarget,e.pointerId);press(action);},onPointerUp:(e:ReactPointerEvent<HTMLButtonElement>)=>{e.stopPropagation();release(action);},onPointerCancel:()=>release(action),onLostPointerCapture:()=>release(action)});
+  const releaseAction=(action:string,e:ReactPointerEvent<HTMLButtonElement>)=>{e.stopPropagation();if(heldActions.current.get(action)!==e.pointerId)return;heldActions.current.delete(action);releaseCapture(e.pointerId);release(action);};
+  const holdProps=(action:string)=>({onPointerDown:(e:ReactPointerEvent<HTMLButtonElement>)=>{e.preventDefault();e.stopPropagation();if(suspended)return;if(heldActions.current.has(action))return;heldActions.current.set(action,e.pointerId);capture(e.currentTarget,e.pointerId);press(action);},onPointerUp:(e:ReactPointerEvent<HTMLButtonElement>)=>releaseAction(action,e),onPointerCancel:(e:ReactPointerEvent<HTMLButtonElement>)=>releaseAction(action,e),onLostPointerCapture:(e:ReactPointerEvent<HTMLButtonElement>)=>releaseAction(action,e)});
 
  if(!visible)return null;
  return <div className={`touch-layer${car?' touch-car':''}${lattice?' touch-tactical':''}${suspended?' touch-layer--suspended':''}${touch.leftHanded?' touch-layer--left-hand':''}`} style={touch.style as any} onContextMenu={e=>e.preventDefault()}>

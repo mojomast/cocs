@@ -1,12 +1,16 @@
 // In-game patch notes. The title-screen footer is the running version; this
 // module is the human-readable release digest the Changelog screen renders. The
 // full historical record lives in docs/CHANGELOG.md and is linked from the UI.
-export const RELEASE_VERSION = 'v8.8.1';
+export const RELEASE_VERSION = 'v8.8.2';
 export const RELEASE_CODENAME = 'DESTINATIONS';
 export const REPO_URL = 'https://github.com/mojomast/tokenarena';
 export const FULL_CHANGELOG_URL = `${REPO_URL}/blob/main/docs/CHANGELOG.md`;
 
 export const CHANGELOG = [
+  {version:'v8.8.2',codename:'DESTINATIONS',date:'2026-09-22',tag:'Mobile sticks keep touch ownership without desktop mouse capture',highlights:[
+    'Touch play no longer requests mouse capture on launch, resume or dialog close. Existing mouse locks are released, delayed lock errors are ignored, and touch-generated mouse events cannot start a mouse drag or fire.',
+    'Fresh stick contacts start neutral. Move, aim and action buttons retain independent finger ownership; interrupted gestures, hidden tabs and UI transitions reset captures and held touch inputs. Chat and other input-owning dialogs suspend the touch layer.',
+  ]},
   {version:'v8.8.1',codename:'DESTINATIONS',date:'2026-09-21',tag:'A destination-first demo reel with lighter startup and frame budgets',highlights:[
     'The default demo tours all nine new destinations before revisiting a map, including both LATTICE theatres, Ion Speedway and Aurora Stadium. Complete rotation still covers the full compatible map library.',
     'Demo startup uses one scene install and one shared snapshot, with a short pre-roll and immediate sports starts. Autonomous catch-up work is bounded on slow frames; background menus render at up to 30 FPS, full-screen demo at up to 60 FPS, respecting lower display caps. Hidden menu tabs suspend the demo.',
