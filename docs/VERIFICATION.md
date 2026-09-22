@@ -26,6 +26,16 @@ actual pointer lock, mouse-look and independent FIRE/ADS releases. Evidence:
 real browser touch contacts; it does not substitute for physical iOS/Android
 device testing.
 
+**Production (2026-09-22):** runtime commit **2043664** is deployed on both web
+and game services as **v8.8.2-2043664 / protocol 3**. The deployment verifier
+matched the release footer and all 13 served assets, including
+`/assets/page-DYfXXOT3.js`. The live input matrix passed both mobile orientations
+and the desktop lock/chord/look check with zero mobile lock requests and zero
+mobile page errors (`artifacts/mobile-input-live/manifest.json`). The final
+harness uses an actual second touch on Pause while the move stick is held, then
+a native tap on Resume; synthetic window-blur injection was replaced because
+it intermittently suppressed the next native click in Chromium emulation.
+
 ## Release 8.8.1 — destination demo tour
 
 The default curated reel now covers all nine DESTINATIONS before repeating a

@@ -78,11 +78,14 @@ try{
   // A lifecycle reset while contacts are held must free ownership for the next
   // gesture; losing only the runtime values leaves the old stick id wedged.
   contacts.set(4,move);await send('touchStart');contacts.set(4,{x:move.x,y:move.y-40});await send('touchMove');
-  await page.evaluate(()=>window.dispatchEvent(new Event('blur')));
+  contacts.set(9,await point('.touch-pause-btn'));await send('touchStart');
   await page.getByRole('button',{name:'RESUME MATCH',exact:true}).first().waitFor();
   contacts.clear();await send('touchEnd');
   await page.getByRole('button',{name:'RESUME MATCH',exact:true}).first().tap();
-  await page.locator('.touch-move-zone').waitFor();
+  await page.locator('.touch-move-zone').waitFor({timeout:10000}).catch(async error=>{
+   await page.screenshot({path:`${out}/resume-failure-${width}x${height}.png`});
+   console.log(JSON.stringify(await page.evaluate(()=>({mode:window.tokenArenaSnapshot().mode,trace:window.touchTrace.slice(-12),locked:document.pointerLockElement?.tagName,focus:document.activeElement?.outerHTML}))));throw error;
+  });
   contacts.set(5,move);await send('touchStart');contacts.set(5,{x:move.x+40,y:move.y});await send('touchMove');
   assert.ok((await input()).touch.moveX>.4,'a fresh stick works after pause/resume');
   contacts.clear();await send('touchEnd');
