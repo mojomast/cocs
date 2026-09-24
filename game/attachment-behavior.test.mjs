@@ -27,8 +27,15 @@ test('a charge coil holds a shot until charged then fires it boosted', () => {
   const before = m.stats.shots;
   for (let i = 0; i < 20; i++) m.step(1 / 60, {inputs: {0: {fire: true}}});
   assert.equal(m.stats.shots - before, 0, 'should not fire before the charge completes');
-  for (let i = 0; i < 20; i++) m.step(1 / 60, {inputs: {0: {fire: true}}});
-  assert.ok(m.stats.shots - before >= 1, 'should fire once fully charged');
+  let fired = false;
+  for (let i = 0; i < 20 && !fired; i++) {
+    m.step(1 / 60, {inputs: {0: {fire: true}}});
+    fired = m.stats.shots - before >= 1;
+  }
+  assert.ok(fired, 'should fire once fully charged');
+  // The charged projectile is only guaranteed in flight on the frame it fires:
+  // at the faster launch speed it can already have impacted and despawned in
+  // any later frame of this window.
   assert.ok(m.rockets[0] && m.rockets[0].damageMultiplier > 1.5, 'charged shot should carry bonus damage');
 });
 
