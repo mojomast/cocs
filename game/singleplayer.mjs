@@ -5,6 +5,7 @@ import {CAMPAIGN_MISSIONS,missionFor} from './campaign-data.mjs';
 import {applyEnemyFields,enemyById,enemyLeash,bossPhaseProfile,bossMaxPhase,ENEMY_SPEED_VARIANCE,DEFAULT_ENEMY_ID,NPC_ZONE_KINDS} from './enemy-types.mjs';
 import {coverPoint} from './bots.mjs';
 import {getMissionLore,SPEAKERS} from './story.mjs';
+import {initializeHordeStages,beginHordeTransit,stepHordeStages} from './horde-stages.mjs';
 
 // Single-player simulation. Horde spawns escalating waves of fragile enemies;
 // campaign runs a linear, story-driven sequence of objectives with world
@@ -372,6 +373,7 @@ export function initializeSinglePlayer(match){
   if(player&&mission.start){if(state.anchors)placeActor(player,campaignPoint(state.anchors,mission.start));else placeAt(match,player,mission.start.x,mission.start.z);if(Number.isFinite(mission.start.yaw)){player.yaw=mission.start.yaw;player.bodyYaw=mission.start.yaw;}}
  }
  match.modeState=state;
+ if(mode==='horde')initializeHordeStages(match,state);
  if(state.mission?.predeploy&&resumeStep===null)predeployCampaign(match,state,0);
  if(mode==='campaign'&&resumeStep!==null)resumeSinglePlayer(match,resumeStep);
  match.objectiveState={kind:mode,zones:[],winner:null,singleplayer:true};
@@ -525,9 +527,11 @@ export function selectHordeUpgrade(match,id){
 }
 
 function stepHorde(match,state,dt){
+ const terminalClear=state.stage&&state.phase==='wave'&&!state.endless&&state.wave>=state.waveTarget&&aliveEnemies(match,state)===0;
+ const travelHold=terminalClear?false:stepHordeStages(match,state,dt);
  if(state.phase==='intermission'){
   state.timer=Math.max(0,state.timer-dt);
-  if(state.timer<=0)startWave(match,state);
+  if(state.timer<=0&&!travelHold)startWave(match,state);
   return;
  }
  if(state.phase!=='wave')return;
@@ -536,10 +540,12 @@ function stepHorde(match,state,dt){
  const gained=hordeWaveScore(state.wave,match.config.difficulty)+(bossWave?HORDE_BOSS_BONUS:0);
  state.score=(state.score||0)+gained;
  match.emit('horde-wave-cleared',{wave:state.wave,score:state.score,gained});
+ const clearEventId=match.serial;
  resupplyHorde(match,state);
  if(!state.endless&&state.wave>=state.waveTarget){win(match,state,`You survived ${state.waveTarget} waves.`);return;}
  if(state.wave>=state.nextUpgradeWave)offerHordeUpgrade(match,state);
  state.phase='intermission';state.timer=hordePacing(match.config.difficulty).intermission;releaseDead(match,state);
+ beginHordeTransit(match,state,clearEventId);
 }
 
 // Shared action interpreter for both step actions and mission script events.
@@ -974,6 +980,10 @@ export function updateSinglePlayer(match,dt){
 }
 
 export function singlePlayerSnapshot(state,match){
+ const snapshot=singlePlayerBaseSnapshot(state,match);
+ return state?.stage?{...snapshot,stage:structuredClone(state.stage)}:snapshot;
+}
+function singlePlayerBaseSnapshot(state,match){
  if(!state)return null;
  const enemiesAlive=aliveEnemies(match,state);
  const player=match.actors[0];

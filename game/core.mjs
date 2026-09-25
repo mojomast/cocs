@@ -27,6 +27,7 @@ import {payloadPosition,payloadProgress,payloadTemplate} from './payload.mjs';
 import {initializeRace,stepRace,raceStandings,raceSnapshot} from './race.mjs';
 import {initializeSoccer,stepSoccer,soccerStandings,soccerSnapshot} from './soccer.mjs';
 import {initializeSinglePlayer,updateSinglePlayer,singlePlayerSnapshot} from './singleplayer.mjs';
+import {prepareHordeArena} from './horde-stages.mjs';
 import {rankLeaders} from './outcome.mjs';
 import {spawnRouteContext,contestedPickupPenalty} from './spawn-placement.mjs';
 import * as bots from './bots.mjs';
@@ -428,6 +429,24 @@ export function nearest(p,nodes){let id=0,best=Infinity;nodes.forEach((n,i)=>{co
 function activeBuff(a,stat){if(!a||a.active<=0)return null;const ability=abilityOf(a.harness);if(!ability||ability.kind!=='buff'||ability.buff!==stat)return null;const value=ability[stat]??ability.magnitude;return Number.isFinite(value)?value:null;}
 function applyHarnessProfile(a){a.activeSpeedMultiplier=harnessAbility(a.harness)?.speed??1;}
 export class Match{
+ hordeStageReachable(destination){
+  const points=[...destination.humanSpawns,...destination.enemySpawns],r=destination.arrival;
+  points.push([(r.minX+r.maxX)/2,(r.minZ+r.maxZ)/2]);
+  const indices=points.map(([x,z])=>{const p={x,y:floorAt(x,z,this.arena),z},i=nearest(p,this.nav);return this.nav[i]&&walkEdge(p,this.nav[i],this.arena)?i:-1;});
+  if(indices.includes(-1))return false;
+  const seen=new Set([indices[0]]),todo=[indices[0]];
+  for(let n=0;n<todo.length;n++)for(const i of this.edges[todo[n]]||[])if(!seen.has(i)){seen.add(i);todo.push(i);}
+  return indices.every(i=>seen.has(i));
+ }
+ // Called exclusively by the source Horde stage controller. Fresh arena identity
+ // invalidates arena-keyed block/ray/floor caches. Graphs use collision hashes.
+ applyHordeGateMask(mask){
+  const plan=this.arena.hordeStagePlan,ids=new Set(plan.gates.map(g=>g.id));
+  const arena={...this.arena,blocks:[...this.arena.blocks.filter(b=>!ids.has(b.id)),...plan.gates.filter((g,i)=>!(mask&(1<<i)))]};
+  const graph=matchNavigation(arena,{skipNav:this.skipNav});
+  this.arena=arena;this.nav=graph.nodes;this.edges=graph.edges;
+  for(const actor of this.actors)if(actor.bot){actor.bot.route=[];actor.bot.think=0;}
+ }
  visible(a,b){return visible(a,b,this.arena);}
  rayWorld(o,d,max){return rayWorld(o,d,max,this.arena);}
     constructor(character='chatgpt',harness='openclaw',random=Math.random,mapId='exchange',options={}){
@@ -450,7 +469,7 @@ export class Match{
     this.humanCount=Math.max(1,Math.min(Math.round(options.humanCount??1),humanCap));if(this.humanCount+this.config.botCount>MAX_ACTORS)this.config.botCount=Math.max(0,MAX_ACTORS-this.humanCount);this.aiSeats=options.aiSeats===true;this.skipNav=options.skipNav===true;this.botPolicy=options.botPolicy??null;this.cocsPolicy=options.cocsPolicy??(isCocsMode(this.config)?cocsDutyPolicy:null);
     const vehicleMode=this.config.mode==='puma-race'||this.config.mode==='puma-soccer';
     if(vehicleMode){const soccer=this.config.mode==='puma-soccer';this.config.botCount=soccer?Math.max(0,Math.min(3,4-this.humanCount)):Math.min(this.config.botCount,8-this.humanCount);const track=getMap(mapId).race;if(!track||(track.kind==='soccer')!==soccer)mapId=soccer?'puma-pitch':'puma-circuit';}
-    this.difficulty=DIFFICULTIES.find(d=>d.id===this.config.difficulty);this.arena=getMap(mapId);if(this.arena.terrain)bakeFloorQuery(this.arena);const nav=vehicleMode?{nodes:[],edges:[]}:matchNavigation(this.arena,{skipNav:this.skipNav});this.nav=nav.nodes;this.edges=nav.edges;{const arenaBounds=boundsOf(this.arena);this.center={x:(arenaBounds.minX+arenaBounds.maxX)/2,z:(arenaBounds.minZ+arenaBounds.maxZ)/2};}this.spawns=this.arena.spawns.map(([x,z])=>v(x,floorAt(x,z,this.arena),z));this.random=random;this.time=0;this.over=false;this.suddenDeath=false;this.armsraceWinner=null;this.events=[];this.feed=[];this.rockets=[];this.deployables=[];this.ropeLines=[];this.ropeSerial=0;this.pendingLoadouts=new Map();this.stats={shots:0,kills:0,pickups:0,powers:0,respawns:0,falls:0};this.serial=0;this.teamScores={0:0,1:0};this.vehicleHits=new Map();this.spawnHeat=new Map();this.vehicleRepairMarks=new Map();this.deployableRepairMarks=new Map();this.vehicleRams=new Map();
+    this.difficulty=DIFFICULTIES.find(d=>d.id===this.config.difficulty);this.arena=options.hordeArena?prepareHordeArena(options.hordeArena,this.config):getMap(mapId);if(this.arena.terrain)bakeFloorQuery(this.arena);const nav=vehicleMode?{nodes:[],edges:[]}:matchNavigation(this.arena,{skipNav:this.skipNav});this.nav=nav.nodes;this.edges=nav.edges;{const arenaBounds=boundsOf(this.arena);this.center={x:(arenaBounds.minX+arenaBounds.maxX)/2,z:(arenaBounds.minZ+arenaBounds.maxZ)/2};}this.spawns=this.arena.spawns.map(([x,z])=>v(x,floorAt(x,z,this.arena),z));this.random=random;this.time=0;this.over=false;this.suddenDeath=false;this.armsraceWinner=null;this.events=[];this.feed=[];this.rockets=[];this.deployables=[];this.ropeLines=[];this.ropeSerial=0;this.pendingLoadouts=new Map();this.stats={shots:0,kills:0,pickups:0,powers:0,respawns:0,falls:0};this.serial=0;this.teamScores={0:0,1:0};this.vehicleHits=new Map();this.spawnHeat=new Map();this.vehicleRepairMarks=new Map();this.deployableRepairMarks=new Map();this.vehicleRams=new Map();
    const defaults={0:this.arena.spawns.filter((_,i)=>i%2===0),1:this.arena.spawns.filter((_,i)=>i%2===1)};
     this.teamSpawns=teamPoints(this.arena.teamSpawns,defaults);
     // Team-only maps author no FFA spawn list. Derive one from the navigation
