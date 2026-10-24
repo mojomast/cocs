@@ -11,6 +11,9 @@ bots, or over your own LAN with a self-hosted authoritative game server.
 No accounts. No cloud. No inference service. All match logic and bot decisions run
 on your machine, and every asset is procedural.
 
+A first Roblox Studio port — free-for-all, bots, The Exchange — lives in
+[`roblox/`](roblox/README.md). The browser game is unchanged.
+
 [**Play it live**](https://arena.ussyco.de) · [Source](https://github.com/mojomast/tokenarena)
 
 ![version](https://img.shields.io/badge/version-v8.6%20PRISM-2dd4bf)
@@ -354,6 +357,7 @@ Racing uses **W/S** throttle/reverse, **A/D** steer, **Space/Ctrl** handbrake,
 app/        React UI: the runtime owner (app/page.tsx), screens, design system
 game/       The pure 60 Hz engine plus rendering, audio, netcode and content
 server/     Authoritative multiplayer: rooms, matchmaking, persistence
+roblox/     Rojo/Luau FFA v1 for Roblox Studio (see roblox/README.md)
 scripts/    Build, version, deployment verification, Moth Quantum bake
 assets/moth/ Moth bake manifest and deterministic source art
 tests/      SSR, UI-contract and deployment guards

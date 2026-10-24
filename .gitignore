@@ -48,3 +48,9 @@ next-env.d.ts
 # server runtime state
 /server/history.json
 /server/progression.json
+
+# Roblox place files. The Rojo project under roblox/ is the source of truth.
+*.rbxl
+*.rbxlx
+*.rbxl.lock
+*.rbxlx.lock

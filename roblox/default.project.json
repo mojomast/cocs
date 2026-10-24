@@ -1,0 +1,50 @@
+{
+  "name": "COCS",
+  "tree": {
+    "$className": "DataModel",
+    "ReplicatedStorage": {
+      "Shared": {
+        "$path": "src/shared"
+      }
+    },
+    "ServerScriptService": {
+      "Server": {
+        "$path": "src/server"
+      }
+    },
+    "StarterPlayer": {
+      "StarterPlayerScripts": {
+        "Client": {
+          "$path": "src/client"
+        }
+      }
+    },
+    "Workspace": {
+      "$properties": {
+        "Gravity": 140,
+        "StreamingEnabled": false,
+        "FallenPartsDestroyHeight": -80
+      },
+      "Arena": {
+        "$className": "Folder"
+      }
+    },
+    "Lighting": {
+      "$properties": {
+        "Brightness": 2,
+        "ClockTime": 17.2,
+        "GeographicLatitude": 18,
+        "Ambient": [0.16, 0.18, 0.22],
+        "OutdoorAmbient": [0.22, 0.26, 0.3],
+        "GlobalShadows": true,
+        "EnvironmentDiffuseScale": 0.35,
+        "EnvironmentSpecularScale": 0.45
+      }
+    },
+    "SoundService": {
+      "$properties": {
+        "RespectFilteringEnabled": true
+      }
+    }
+  }
+}
