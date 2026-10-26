@@ -72,9 +72,8 @@ function Hud.mount(player, onDeploy)
 	select.Name = "Select"
 	select.Size = UDim2.fromScale(1, 1)
 	select.BackgroundTransparency = 1
-	-- Sink clicks that would otherwise hit the scriptable orbit camera.
-	-- Descendants (cards, DEPLOY) are still the ones that receive them.
-	select.Active = true
+	-- Inactive so this full-screen frame cannot swallow clicks meant for cards.
+	select.Active = false
 	select.Parent = gui
 
 	local title = label({
@@ -228,6 +227,16 @@ function Hud.mount(player, onDeploy)
 		valign = Enum.TextYAlignment.Top,
 	})
 
+	-- Own ScreenGui so the roster, the detail card, and the full-screen select
+	-- frame cannot sit on top of DEPLOY. DisplayOrder puts it above COCS.
+	local deployGui = Instance.new("ScreenGui")
+	deployGui.Name = "COCSDeploy"
+	deployGui.ResetOnSpawn = false
+	deployGui.IgnoreGuiInset = true
+	deployGui.DisplayOrder = 30
+	deployGui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
+	deployGui.Parent = gui.Parent
+
 	local deploy = Instance.new("TextButton")
 	deploy.Name = "Deploy"
 	deploy.AnchorPoint = Vector2.new(0.5, 1)
@@ -239,17 +248,15 @@ function Hud.mount(player, onDeploy)
 	deploy.TextSize = 18
 	deploy.TextColor3 = Color3.fromRGB(8, 16, 16)
 	deploy.Text = "DEPLOY"
-	-- Above the roster, the detail card, and the hint. The hint used to overlap
-	-- the top of this button and take the click.
-	deploy.ZIndex = 20
 	deploy.Active = true
 	deploy.Selectable = true
-	deploy.Parent = select
+	deploy.AutoButtonColor = true
+	deploy.Parent = deployGui
 	corner(deploy, 6)
 
 	local hint = label({
-		parent = select,
-		text = "Click an operator, then DEPLOY.  1–9 picks a card.  Enter deploys.",
+		parent = deployGui,
+		text = "DEPLOY, Enter, E, or Space.  1–9 picks a card.",
 		textSize = 13,
 		color = THEME.muted,
 		align = Enum.TextXAlignment.Center,
@@ -257,7 +264,7 @@ function Hud.mount(player, onDeploy)
 		size = UDim2.fromOffset(440, 18),
 	})
 	hint.Active = false
-	hint.ZIndex = 1
+	hint.Selectable = false
 
 	-- In-match HUD
 	local hud = Instance.new("Frame")
@@ -608,6 +615,7 @@ function Hud.mount(player, onDeploy)
 		local phase = matchFolder and matchFolder:GetAttribute("Phase") or "warmup"
 		local inMatch = player:GetAttribute("InMatch") == true
 		select.Visible = not inMatch
+		deployGui.Enabled = not inMatch
 		hud.Visible = inMatch
 		fullBoard.Visible = inMatch and boardOpen
 		local showResults = inMatch and phase == "results"

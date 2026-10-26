@@ -95,25 +95,29 @@ Open `COCS.rbxlx` in Studio if you want a place file instead of a live sync. `*.
 ## How to play
 
 1. Play Solo. The camera orbits The Exchange while bots fight.
-2. Pick an operator (or leave the default, ChatGPT). **1–9** highlights a card, **Enter** or **DEPLOY** drops you in. You do not have to click a card first.
-3. You are in first person.
+2. Pick an operator (or leave the default, ChatGPT). **1–9** highlights a card. **DEPLOY**, **Enter**, **E**, or **Space** drops you in. You do not have to click a card first.
+3. You are in first person. Space is jump only after you have spawned.
 
 Output on a successful deploy:
 
 ```
 [COCS] The Exchange is up. Play Solo, pick an operator, fight the bots.
+[COCS] Client input ready. Deploy with the button, Enter, E, or Space.
+[COCS] Key E processed false inMatch false textBox none
+[COCS] Deploy attempt E id chatgpt inMatch false lock false textBox none
 [COCS] Deploy chatgpt
 [COCS] SelectOperator YourName chatgpt
 [COCS] Spawned YourName as chatgpt
 ```
 
-`Deploy` is the client. `SelectOperator` and `Spawned` are the server. If the client line is missing, the click or Enter never left the machine. If the client line is present and the server lines are not, the remote did not arrive. A red `[COCS] Deploy failed` or `[COCS] Spawn failed` is the server rejecting the spawn and leaving you on the select screen so you can try again.
+`Client input ready` means this client script is the one running. A key or click with no `Deploy attempt` line means that input never reached the handler. `Deploy bail:` says why the handler stopped. `Deploy` is the FireServer. `SelectOperator` and `Spawned` are the server. A red `[COCS] Deploy failed` or `[COCS] Spawn failed` is the server rejecting the spawn and leaving you on the select screen so you can try again.
 
 | Input | Action |
 |---|---|
 | WASD | Move |
 | Mouse | Look |
-| Space | Jump |
+| Space | Deploy on the select screen, jump in the match |
+| E | Deploy on the select screen |
 | Shift | Sprint |
 | Click / hold | Fire |
 | 1 / 2 / 3 or wheel | Pulse / rocket / scatter |

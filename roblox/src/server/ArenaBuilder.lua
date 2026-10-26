@@ -9,6 +9,10 @@ local ArenaBuilder = {}
 
 local S = Config.SCALE
 
+-- Solids that rest on the pit used to share the y=0 plane with the floor top.
+-- Undersides sink this far into the slab so those faces are not coplanar.
+local BURY = 0.08
+
 local function studs(metres)
 	return metres * S
 end
@@ -58,13 +62,27 @@ local function metersBox(parent, name, x, y, z, w, h, d, color, material, collid
 	})
 end
 
+-- Keep the walkable top. Drop the bottom to -BURY when it was sitting on y=0.
+local function buryBottom(centerY, height)
+	local top = centerY + height * 0.5
+	local bottom = centerY - height * 0.5
+	if bottom > 0.02 then
+		return centerY, height
+	end
+	bottom = -BURY
+	local newHeight = top - bottom
+	local newCenter = (top + bottom) * 0.5
+	return newCenter, newHeight
+end
+
 local function addRamp(geometry, sign)
 	-- Walkable surface from z = 3 (y = 0) to z = -9 (y = 3.8), |x| centered near 11.1.
 	-- Positive X rotation drops the local +Z end. That end points at world +Z,
 	-- which is the ramp foot; the gantry (-Z) stays high.
 	local rise = studs(3.8)
 	local run = studs(12)
-	local thickness = 1.15
+	-- Extra thickness hangs below the walk line so the foot is not a paper edge on y=0.
+	local thickness = 1.6
 	local width = studs(6.2)
 	local angle = math.atan2(rise, run)
 	local hyp = math.sqrt(rise * rise + run * run) + 1.4
@@ -89,14 +107,14 @@ local function addRamp(geometry, sign)
 	for index, segment in ipairs(segments) do
 		local topMetres = Arena.floorMetres(sign * 11.1, segment.z0) - 0.2
 		if topMetres > 0.35 then
-			local height = topMetres
+			local centerY, height = buryBottom(topMetres * 0.5, topMetres)
 			local depth = segment.z1 - segment.z0
 			local centerZ = (segment.z0 + segment.z1) * 0.5
 			metersBox(
 				geometry,
 				(sign < 0 and "WestFill" or "EastFill") .. index,
 				sign * 11.1,
-				height * 0.5,
+				centerY,
 				centerZ,
 				6.2,
 				height,
@@ -108,14 +126,15 @@ local function addRamp(geometry, sign)
 	end
 
 	-- Side barrier. Stops a jump from the pit straight onto the ramp.
+	local wallY, wallH = buryBottom(2.2, 4.4)
 	metersBox(
 		geometry,
 		sign < 0 and "WestRampWall" or "EastRampWall",
 		sign * 8.05,
-		2.2,
+		wallY,
 		-3,
 		0.28,
-		4.4,
+		wallH,
 		12,
 		PALETTE.hazard,
 		Enum.Material.Concrete
@@ -169,21 +188,30 @@ function ArenaBuilder.build(arenaFolder)
 	cosmetic.Name = "Cosmetic"
 	cosmetic.Parent = arenaFolder
 
-	-- Floor slab. Top sits on y = 0.
-	metersBox(geometry, "Floor", 0, -0.5, 0, 34, 1, 34, PALETTE.floor, Enum.Material.DiamondPlate)
+	-- Collision top stays on y = 0 so floorMetres and spawns do not move.
+	-- The visible slab sits 5cm lower so it is not coplanar with anything resting on y=0.
+	local floorHit = metersBox(geometry, "Floor", 0, -0.5, 0, 34, 1, 34, PALETTE.floor, Enum.Material.SmoothPlastic)
+	floorHit.Transparency = 1
+	floorHit.CanCollide = true
+	floorHit.CanQuery = true
+	local floorVisual = metersBox(geometry, "FloorVisual", 0, -0.55, 0, 34, 1, 34, PALETTE.floor, Enum.Material.DiamondPlate)
+	floorVisual.CanCollide = false
+	floorVisual.CanQuery = false
 
-	-- Shell. Inner faces land on ±14.
-	metersBox(geometry, "WallWest", -14.5, 4.5, 0, 1, 9, 30, PALETTE.wall, Enum.Material.Concrete)
-	metersBox(geometry, "WallEast", 14.5, 4.5, 0, 1, 9, 30, PALETTE.wall, Enum.Material.Concrete)
-	local wallNorth = metersBox(geometry, "WallNorth", 0, 4.5, 14.5, 30, 9, 1, PALETTE.wall, Enum.Material.Concrete)
-	local wallSouth = metersBox(geometry, "WallSouth", 0, 4.5, -14.5, 30, 9, 1, PALETTE.wall, Enum.Material.Concrete)
+	-- Shell. Inner faces land on ±14. Bottoms sink into the slab.
+	local shellY, shellH = buryBottom(4.5, 9)
+	metersBox(geometry, "WallWest", -14.5, shellY, 0, 1, shellH, 30, PALETTE.wall, Enum.Material.Concrete)
+	metersBox(geometry, "WallEast", 14.5, shellY, 0, 1, shellH, 30, PALETTE.wall, Enum.Material.Concrete)
+	local wallNorth = metersBox(geometry, "WallNorth", 0, shellY, 14.5, 30, shellH, 1, PALETTE.wall, Enum.Material.Concrete)
+	local wallSouth = metersBox(geometry, "WallSouth", 0, shellY, -14.5, 30, shellH, 1, PALETTE.wall, Enum.Material.Concrete)
 	addLabel(wallNorth, "PIT", Enum.NormalId.Front)
 	addLabel(wallSouth, "GANTRY", Enum.NormalId.Back)
 	addLabel(geometry.WallWest, "WEST RAMP", Enum.NormalId.Right)
 	addLabel(geometry.WallEast, "EAST RAMP", Enum.NormalId.Left)
 
-	-- Central reactor, line-of-sight blocker.
-	local reactor = metersBox(geometry, "Reactor", 0, 2.7, 0, 4, 5.4, 4, PALETTE.reactor, Enum.Material.Metal)
+	-- Central reactor, line-of-sight blocker. Top stays at 5.4m.
+	local reactorY, reactorH = buryBottom(2.7, 5.4)
+	local reactor = metersBox(geometry, "Reactor", 0, reactorY, 0, 4, reactorH, 4, PALETTE.reactor, Enum.Material.Metal)
 	local light = Instance.new("PointLight")
 	light.Color = PALETTE.trim
 	light.Brightness = 2.4
@@ -193,14 +221,17 @@ function ArenaBuilder.build(arenaFolder)
 	addRing(cosmetic, 2.7, 2.7, "RingMid")
 	addRing(cosmetic, 4.3, 2.45, "RingHigh")
 
-	-- Low cover. Authored sizes from game/maps.mjs cover() calls.
-	metersBox(geometry, "CoverNW", -6, 0.95, 5, 3, 1.9, 1.4, PALETTE.cover, Enum.Material.DiamondPlate)
-	metersBox(geometry, "CoverNE", 6, 0.95, 5, 3, 1.9, 1.4, PALETTE.cover, Enum.Material.DiamondPlate)
-	metersBox(geometry, "CoverSW", -5, 1.05, -5, 2.2, 2.1, 1.4, PALETTE.cover, Enum.Material.DiamondPlate)
-	metersBox(geometry, "CoverSE", 5, 1.05, -5, 2.2, 2.1, 1.4, PALETTE.cover, Enum.Material.DiamondPlate)
+	-- Low cover. Tops match game/maps.mjs. Bottoms are buried in the floor.
+	local coverNY, coverNH = buryBottom(0.95, 1.9)
+	local coverSY, coverSH = buryBottom(1.05, 2.1)
+	metersBox(geometry, "CoverNW", -6, coverNY, 5, 3, coverNH, 1.4, PALETTE.cover, Enum.Material.DiamondPlate)
+	metersBox(geometry, "CoverNE", 6, coverNY, 5, 3, coverNH, 1.4, PALETTE.cover, Enum.Material.DiamondPlate)
+	metersBox(geometry, "CoverSW", -5, coverSY, -5, 2.2, coverSH, 1.4, PALETTE.cover, Enum.Material.DiamondPlate)
+	metersBox(geometry, "CoverSE", 5, coverSY, -5, 2.2, coverSH, 1.4, PALETTE.cover, Enum.Material.DiamondPlate)
 
-	-- Gantry deck. Solid from the floor up (the web map has no underpass).
-	local deck = metersBox(geometry, "Deck", 0, 1.9, -12, 28, 3.8, 6, PALETTE.deck, Enum.Material.DiamondPlate)
+	-- Gantry deck. Walkable top stays at 3.8m. The old bottom sat on y=0.
+	local deckY, deckH = buryBottom(1.9, 3.8)
+	local deck = metersBox(geometry, "Deck", 0, deckY, -12, 28, deckH, 6, PALETTE.deck, Enum.Material.DiamondPlate)
 	addLabel(deck, "HIGH GROUND", Enum.NormalId.Back)
 
 	addRamp(geometry, -1)
