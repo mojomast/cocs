@@ -70,7 +70,12 @@ function Rig.build(displayName, operator, owner)
 		Color = color,
 	})
 	torso.Parent = model
-	weld(hrp, torso, CFrame.new())
+	local root = Instance.new("Motor6D")
+	root.Name = "RootJoint"
+	root.Part0 = hrp
+	root.Part1 = torso
+	root.C0 = CFrame.new()
+	root.Parent = hrp
 
 	local headShape = Enum.PartType.Block
 	local headSize = Vector3.new(1.25, 1.25, 1.25)
@@ -86,7 +91,14 @@ function Rig.build(displayName, operator, owner)
 		Shape = headShape,
 	})
 	head.Parent = model
-	weld(torso, head, CFrame.new(0, 1.65, 0))
+	-- R6 dies on spawn if Head is not jointed to Torso. A plain Weld is not
+	-- always enough once this model is assigned as Player.Character.
+	local neck = Instance.new("Motor6D")
+	neck.Name = "Neck"
+	neck.Part0 = torso
+	neck.Part1 = head
+	neck.C0 = CFrame.new(0, 1.65, 0)
+	neck.Parent = torso
 
 	local function limb(name, size, c0, limbColor, swing)
 		local limbPart = part({
@@ -177,6 +189,7 @@ function Rig.build(displayName, operator, owner)
 	humanoid.MaxHealth = operator.health
 	humanoid.Health = operator.health
 	humanoid.BreakJointsOnDeath = false
+	humanoid.RequiresNeck = false
 	humanoid.DisplayDistanceType = Enum.HumanoidDisplayDistanceType.None
 	humanoid.HealthDisplayType = Enum.HumanoidHealthDisplayType.AlwaysOff
 	humanoid.Parent = model

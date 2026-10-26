@@ -199,6 +199,9 @@ function Match.spawnActor(actor)
 	actor.humanoid = model:FindFirstChildOfClass("Humanoid")
 	actor.hrp = model:FindFirstChild("HumanoidRootPart")
 	actor.head = model:FindFirstChild("Head")
+	if not actor.humanoid or not actor.hrp then
+		error("Rig is missing Humanoid or HumanoidRootPart")
+	end
 	model:SetAttribute("ActorId", actor.id)
 	State.byModel[model] = actor
 
@@ -215,18 +218,30 @@ function Match.spawnActor(actor)
 		end
 	end)
 
+	model:SetAttribute("COCSRig", true)
+	local placed = spawnCFrame(actor)
+	-- Parent before assigning Character. Assigning first lets the engine
+	-- spawn a default avatar and our CharacterAdded hook deletes the rig.
 	model.Parent = workspace
+	model:PivotTo(placed)
 	if actor.player then
 		actor.player.Character = model
+		model:PivotTo(placed)
 	end
-	model:PivotTo(spawnCFrame(actor))
-	pcall(function()
-		if actor.player then
-			actor.hrp:SetNetworkOwner(actor.player)
-		else
-			actor.hrp:SetNetworkOwner(nil)
+	local function claim(owner)
+		if not actor.hrp or actor.hrp.Parent == nil then
+			return
 		end
-	end)
+		actor.hrp:SetNetworkOwner(owner)
+	end
+	if actor.player then
+		local owned, ownErr = pcall(claim, actor.player)
+		if not owned then
+			warn("[COCS] Network owner deferred:", ownErr)
+		end
+	else
+		pcall(claim, nil)
+	end
 
 	local shield = Instance.new("ForceField")
 	shield.Parent = model
@@ -245,15 +260,20 @@ function Match.spawnActor(actor)
 		if not actor.hrp or not actor.hrp.Parent then
 			return
 		end
-		pcall(function()
-			if actor.player and actor.player.Parent then
-				actor.hrp:SetNetworkOwner(actor.player)
-			else
-				actor.hrp:SetNetworkOwner(nil)
-			end
-		end)
+		-- The engine sometimes moves a new character onto a leftover pad
+		-- one frame after Character is assigned.
+		if actor.model and actor.model.Parent then
+			actor.model:PivotTo(placed)
+		end
+		local ok, err = pcall(claim, actor.player and actor.player.Parent and actor.player or nil)
+		if not ok then
+			warn("[COCS] Network owner failed:", err)
+		end
 	end)
 	syncRoster(actor)
+	if actor.player then
+		print("[COCS] Spawned", actor.player.Name, "as", actor.operator.id)
+	end
 end
 
 local function makeActor(operator, player)
@@ -454,22 +474,28 @@ end
 
 local function deploy(player, operator)
 	if player:GetAttribute("InMatch") then
+		warn("[COCS] Deploy ignored: already in match")
 		return
 	end
 	local existing = State.actorForPlayer(player)
 	if existing then
 		removeActor(existing)
 	end
+	-- Results used to return before InMatch was set, so the select screen
+	-- stayed up and a second click did nothing. Spawn them anyway; the
+	-- intermission respawn keeps anyone already flagged in the match.
 	local wasWarmup = State.phase ~= "live"
-	if State.phase == "results" then
-		return
-	end
-	if wasWarmup then
+	if wasWarmup and State.phase ~= "results" then
 		Match.maintainBots()
 		Match.beginLive()
 	end
 	local actor = makeActor(operator, player)
-	Match.spawnActor(actor)
+	local spawned, err = pcall(Match.spawnActor, actor)
+	if not spawned then
+		warn("[COCS] Spawn failed:", err)
+		removeActor(actor)
+		return
+	end
 	Match.maintainBots()
 end
 
@@ -586,14 +612,14 @@ end
 
 local function hookPlayer(player)
 	player:SetAttribute("InMatch", false)
-	-- Drop a default avatar if the place spawned one before this script. Our own
-	-- characters are assigned only after InMatch is true, so they are left alone.
+	-- Drop a default avatar if the place spawned one before this script.
+	-- COCSRig marks a body we built; that one stays.
 	player.CharacterAdded:Connect(function(character)
-		if player:GetAttribute("InMatch") then
+		if character:GetAttribute("COCSRig") or player:GetAttribute("InMatch") then
 			return
 		end
 		task.defer(function()
-			if character.Parent and player.Parent and not player:GetAttribute("InMatch") then
+			if character.Parent and player.Parent and not player:GetAttribute("InMatch") and not character:GetAttribute("COCSRig") then
 				character:Destroy()
 			end
 		end)
@@ -605,6 +631,11 @@ end
 
 function Match.start()
 	Players.CharacterAutoLoads = false
+	-- The default avatar loader replaces a procedural rig when Character is
+	-- assigned, which leaves a dead or missing body after deploy.
+	pcall(function()
+		game:GetService("StarterPlayer").LoadCharacterAppearance = false
+	end)
 	workspace.Gravity = Config.GRAVITY
 	workspace.FallenPartsDestroyHeight = -80
 
@@ -619,14 +650,20 @@ function Match.start()
 	workspace.ChildAdded:Connect(strip)
 
 	State.remotes.SelectOperator.OnServerEvent:Connect(function(player, operatorId)
+		print("[COCS] SelectOperator", player.Name, operatorId)
 		if typeof(operatorId) ~= "string" then
+			warn("[COCS] Deploy ignored: operator id was", typeof(operatorId))
 			return
 		end
 		local operator = Operators.get(operatorId)
 		if not operator then
+			warn("[COCS] Deploy ignored: unknown operator", operatorId)
 			return
 		end
-		deploy(player, operator)
+		local ok, err = pcall(deploy, player, operator)
+		if not ok then
+			warn("[COCS] Deploy failed:", err)
+		end
 	end)
 	State.remotes.ChangeOperator.OnServerEvent:Connect(function(player)
 		changeOperator(player)

@@ -55,7 +55,7 @@ local function label(props)
 	return item
 end
 
-function Hud.mount(player)
+function Hud.mount(player, onDeploy)
 	local gui = Instance.new("ScreenGui")
 	gui.Name = "COCS"
 	gui.ResetOnSpawn = false
@@ -72,6 +72,9 @@ function Hud.mount(player)
 	select.Name = "Select"
 	select.Size = UDim2.fromScale(1, 1)
 	select.BackgroundTransparency = 1
+	-- Sink clicks that would otherwise hit the scriptable orbit camera.
+	-- Descendants (cards, DEPLOY) are still the ones that receive them.
+	select.Active = true
 	select.Parent = gui
 
 	local title = label({
@@ -101,7 +104,8 @@ function Hud.mount(player)
 	list.BackgroundTransparency = 0.12
 	list.BorderSizePixel = 0
 	list.Position = UDim2.fromOffset(24, 84)
-	list.Size = UDim2.new(0, 340, 1, -168)
+	list.Size = UDim2.new(0, 340, 1, -210)
+	list.ZIndex = 2
 	list.ScrollBarThickness = 4
 	list.ScrollBarImageColor3 = THEME.teal
 	list.CanvasSize = UDim2.fromOffset(0, #Operators.all() * 78 + 12)
@@ -235,18 +239,25 @@ function Hud.mount(player)
 	deploy.TextSize = 18
 	deploy.TextColor3 = Color3.fromRGB(8, 16, 16)
 	deploy.Text = "DEPLOY"
+	-- Above the roster, the detail card, and the hint. The hint used to overlap
+	-- the top of this button and take the click.
+	deploy.ZIndex = 20
+	deploy.Active = true
+	deploy.Selectable = true
 	deploy.Parent = select
 	corner(deploy, 6)
 
-	label({
+	local hint = label({
 		parent = select,
 		text = "Click an operator, then DEPLOY.  1–9 picks a card.  Enter deploys.",
 		textSize = 13,
 		color = THEME.muted,
 		align = Enum.TextXAlignment.Center,
-		position = UDim2.new(0.5, -220, 1, -78),
+		position = UDim2.new(0.5, -220, 1, -112),
 		size = UDim2.fromOffset(440, 18),
 	})
+	hint.Active = false
+	hint.ZIndex = 1
 
 	-- In-match HUD
 	local hud = Instance.new("Frame")
@@ -760,10 +771,16 @@ function Hud.mount(player)
 		nextRows = 0
 	end
 
-	deploy.MouseButton1Click:Connect(function()
-		local folder = ReplicatedStorage:WaitForChild("Remotes")
-		folder:WaitForChild("SelectOperator"):FireServer(selected)
-	end)
+	local function emitDeploy()
+		if onDeploy then
+			onDeploy(selected)
+		end
+	end
+	-- Activated covers mouse, touch, and keyboard focus. MouseButton1Click
+	-- covers a plain click if Activated is swallowed by the scriptable camera.
+	deploy.Activated:Connect(emitDeploy)
+	deploy.MouseButton1Click:Connect(emitDeploy)
+	deploy.MouseButton1Down:Connect(emitDeploy)
 	again.MouseButton1Click:Connect(function()
 		local folder = ReplicatedStorage:WaitForChild("Remotes")
 		folder:WaitForChild("ChangeOperator"):FireServer()

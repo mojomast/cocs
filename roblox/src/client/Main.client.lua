@@ -36,7 +36,10 @@ local remotes = {
 	CombatFx = remotesFolder:WaitForChild("CombatFx"),
 	Impulse = remotesFolder:WaitForChild("Impulse"),
 }
-local hud, deploy = Hud.mount(player)
+local requestDeploy
+local hud, deploy = Hud.mount(player, function(operatorId)
+	requestDeploy(operatorId)
+end)
 local view = View.start(player)
 local sprinting = false
 
@@ -68,6 +71,33 @@ local slots = { [1] = "pulse", [2] = "rocket", [3] = "scatter" }
 
 local function inMatch()
 	return player:GetAttribute("InMatch") == true
+end
+
+local deployLock = false
+requestDeploy = function(operatorId)
+	if inMatch() or deployLock then
+		return
+	end
+	if type(operatorId) ~= "string" or operatorId == "" then
+		operatorId = hud.selectedId()
+	end
+	if type(operatorId) ~= "string" or operatorId == "" then
+		operatorId = "chatgpt"
+	end
+	-- Look up the live instance. A remote cached at startup is dead if Rojo
+	-- recreated ReplicatedStorage.Remotes during sync.
+	local folder = ReplicatedStorage:FindFirstChild("Remotes")
+	local remote = folder and folder:FindFirstChild("SelectOperator")
+	if not remote or not remote:IsA("RemoteEvent") or remote.Parent == nil then
+		warn("[COCS] SelectOperator remote is missing. Server script did not publish Remotes.")
+		return
+	end
+	deployLock = true
+	task.delay(0.4, function()
+		deployLock = false
+	end)
+	print("[COCS] Deploy", operatorId)
+	remote:FireServer(operatorId)
 end
 
 local function sendWeapon(weaponId)
@@ -103,6 +133,14 @@ local function tryFire()
 end
 
 UserInputService.InputBegan:Connect(function(input, processed)
+	-- A selected operator card marks Return as game-processed (it activates
+	-- that card). Deploy anyway unless a text box, such as chat, has focus.
+	if input.KeyCode == Enum.KeyCode.Return or input.KeyCode == Enum.KeyCode.KeypadEnter then
+		if not inMatch() and UserInputService:GetFocusedTextBox() == nil then
+			requestDeploy(hud.selectedId())
+		end
+		return
+	end
 	if input.UserInputType == Enum.UserInputType.MouseButton1 then
 		if processed then
 			return
@@ -125,10 +163,6 @@ UserInputService.InputBegan:Connect(function(input, processed)
 		end
 	elseif input.KeyCode == Enum.KeyCode.Tab then
 		hud.toggleBoard(true)
-	elseif input.KeyCode == Enum.KeyCode.Return or input.KeyCode == Enum.KeyCode.KeypadEnter then
-		if not inMatch() then
-			remotes.SelectOperator:FireServer(hud.selectedId())
-		end
 	elseif input.KeyCode == Enum.KeyCode.Backspace then
 		if inMatch() then
 			remotes.ChangeOperator:FireServer()
