@@ -195,6 +195,10 @@ function Rig.build(displayName, operator, owner)
 	humanoid.Parent = model
 	humanoid:SetStateEnabled(Enum.HumanoidStateType.FallingDown, false)
 	humanoid:SetStateEnabled(Enum.HumanoidStateType.Ragdoll, false)
+	-- Physics and PlatformStanding swallow WalkSpeed. A velocity write (jump
+	-- shove, rocket) used to leave the body in that state for good.
+	humanoid:SetStateEnabled(Enum.HumanoidStateType.Physics, false)
+	humanoid:SetStateEnabled(Enum.HumanoidStateType.PlatformStanding, false)
 
 	model.PrimaryPart = hrp
 	model:SetAttribute("Operator", operator.id)

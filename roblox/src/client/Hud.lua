@@ -272,6 +272,9 @@ function Hud.mount(player, onDeploy)
 	hud.Size = UDim2.fromScale(1, 1)
 	hud.BackgroundTransparency = 1
 	hud.Visible = false
+	-- Full-screen and inactive. An Active HUD steals the click, unlocks the
+	-- mouse, and the recenter shows up as a look snap.
+	hud.Active = false
 	hud.Parent = gui
 
 	local top = label({

@@ -125,6 +125,10 @@ local function onDied(actor)
 		end
 	end
 
+	if actor.player then
+		print("[COCS] Down", actor.player.Name, actor.deathCause or "unknown")
+	end
+
 	if State.phase == "live" then
 		local killer = actor.lastAttacker
 		local fresh = killer and (os.clock() - (actor.lastHitTime or 0)) <= Config.ASSIST_WINDOW
@@ -206,12 +210,6 @@ function Match.spawnActor(actor)
 	State.byModel[model] = actor
 
 	local generation = actor.generation
-	actor.humanoid.Died:Connect(function()
-		if actor.generation ~= generation then
-			return
-		end
-		onDied(actor)
-	end)
 	actor.humanoid.HealthChanged:Connect(function()
 		if actor.model and actor.humanoid and actor.humanoid.MaxHealth > 0 then
 			Rig.setHealthBar(actor.model, actor.humanoid.Health / actor.humanoid.MaxHealth)
@@ -257,7 +255,17 @@ function Match.spawnActor(actor)
 	Bots.ensureBrain(actor)
 	Combat.refreshSpeed(actor)
 	task.defer(function()
-		if not actor.hrp or not actor.hrp.Parent then
+		if actor.generation ~= generation then
+			return
+		end
+		if not actor.hrp or not actor.hrp.Parent or not actor.humanoid or not actor.humanoid.Parent then
+			-- Character assignment can drop a procedural rig before Died is bound.
+			-- One retry, otherwise a bad rig respawns forever.
+			if actor.player and not actor._spawnRetried and State.byId[actor.id] then
+				actor._spawnRetried = true
+				warn("[COCS] Spawn rig dropped, retrying")
+				Match.spawnActor(actor)
+			end
 			return
 		end
 		-- The engine sometimes moves a new character onto a leftover pad
@@ -269,6 +277,20 @@ function Match.spawnActor(actor)
 		if not ok then
 			warn("[COCS] Network owner failed:", err)
 		end
+		-- Died during the assign used to schedule a second Spawned while this
+		-- body was still the one on screen. Heal that frame, then listen.
+		if actor.humanoid.Health <= 0 then
+			actor.humanoid.Health = actor.humanoid.MaxHealth
+		end
+		actor.humanoid.PlatformStand = false
+		actor.humanoid:ChangeState(Enum.HumanoidStateType.Running)
+		actor.humanoid.Died:Connect(function()
+			if actor.generation ~= generation then
+				return
+			end
+			onDied(actor)
+		end)
+		actor._spawnRetried = false
 	end)
 	syncRoster(actor)
 	if actor.player then
@@ -544,6 +566,23 @@ local function animate(actor, dt)
 	end
 end
 
+local function keepUpright(actor)
+	local humanoid = actor.humanoid
+	if not actor.player or not humanoid or not humanoid.Parent or humanoid.Health <= 0 then
+		return
+	end
+	-- Do not ChangeState out of Physics every frame. The player owns this
+	-- humanoid, and a server state poke each heartbeat cancels walking.
+	-- Physics itself is disabled on the rig. This only undoes a stuck sit
+	-- or a zero WalkSpeed while the round is still going.
+	if humanoid.PlatformStand then
+		humanoid.PlatformStand = false
+	end
+	if State.phase ~= "results" and humanoid.WalkSpeed < 1 then
+		Combat.refreshSpeed(actor)
+	end
+end
+
 local function boundsCheck(actor)
 	if not actor.alive or not actor.hrp then
 		return
@@ -599,6 +638,7 @@ function Match.step(dt)
 	end
 
 	for _, actor in ipairs(State.actors) do
+		keepUpright(actor)
 		boundsCheck(actor)
 		animate(actor, dt)
 	end

@@ -64,6 +64,10 @@ remotes.Impulse.OnClientEvent:Connect(function(velocity)
 	local hrp = character and character:FindFirstChild("HumanoidRootPart")
 	if hrp then
 		hrp.AssemblyLinearVelocity = hrp.AssemblyLinearVelocity + velocity
+		local humanoid = character:FindFirstChildOfClass("Humanoid")
+		if humanoid and humanoid:GetState() == Enum.HumanoidStateType.Physics then
+			humanoid:ChangeState(Enum.HumanoidStateType.Freefall)
+		end
 	end
 end)
 
@@ -160,7 +164,10 @@ local function tryFire()
 end
 
 UserInputService.InputBegan:Connect(function(input, processed)
-	if isDeployKey(input.KeyCode) then
+	-- Space, E, and Enter deploy only on the select screen. In a match they
+	-- must reach the default controls (Space jumps). Logging them there flooded
+	-- Output and looked like the key was being eaten.
+	if isDeployKey(input.KeyCode) and not inMatch() then
 		local box = UserInputService:GetFocusedTextBox()
 		print(
 			"[COCS] Key",
@@ -172,15 +179,14 @@ UserInputService.InputBegan:Connect(function(input, processed)
 			"textBox",
 			box and box.Name or "none"
 		)
-		if not inMatch() then
-			requestDeploy(hud.selectedId(), input.KeyCode.Name)
-			return
-		end
+		requestDeploy(hud.selectedId(), input.KeyCode.Name)
+		return
 	end
 	if input.UserInputType == Enum.UserInputType.MouseButton1 then
-		if not inMatch() or processed then
+		if not inMatch() then
 			return
 		end
+		-- A locked cursor or the HUD can mark the click processed. It is still a shot.
 		holdingFire = true
 		tryFire()
 		return

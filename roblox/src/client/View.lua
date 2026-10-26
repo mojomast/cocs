@@ -1,5 +1,6 @@
--- First-person camera kick, a block viewmodel, tracers, and a little air steer.
+-- First-person camera kick, a block viewmodel, and tracers.
 -- The server still decides whether the shot hit. Recoil here is presentation.
+-- Kick is a spring: only the frame-to-frame change is applied to the camera.
 
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local RunService = game:GetService("RunService")
@@ -50,10 +51,30 @@ function View.start(player)
 	local camera = workspace.CurrentCamera
 	local recoilPitch = 0
 	local recoilYaw = 0
+	-- What has already been multiplied into camera.CFrame. The camera keeps
+	-- that rotation, so each frame only the change is applied. Multiplying the
+	-- full spring every frame spins the view forever and a click makes it worse.
+	local appliedPitch = 0
+	local appliedYaw = 0
 	local punch = 0
 	local models = {}
 	local currentId = "pulse"
 	local orbit = 0
+	local lockedCharacter = nil
+
+	local function clearRecoil()
+		recoilPitch = 0
+		recoilYaw = 0
+		appliedPitch = 0
+		appliedYaw = 0
+	end
+
+	player.CharacterAdded:Connect(function()
+		-- A respawn builds a new camera subject. Drop the old spring so the
+		-- next frame does not yank look by the previous kick.
+		clearRecoil()
+		lockedCharacter = nil
+	end)
 
 	local function modelFor(weaponId)
 		if not models[weaponId] then
@@ -171,6 +192,14 @@ function View.start(player)
 		local recover = (weapon.recoil and weapon.recoil.recover or 12)
 		recoilPitch = recoilPitch + (0 - recoilPitch) * math.min(1, recover * dt * 0.15)
 		recoilYaw = recoilYaw + (0 - recoilYaw) * math.min(1, recover * dt * 0.15)
+		-- The spring never reaches exact zero. A leftover that is still
+		-- multiplied in every frame becomes a slow spin.
+		if math.abs(recoilPitch) < 1e-4 then
+			recoilPitch = 0
+		end
+		if math.abs(recoilYaw) < 1e-4 then
+			recoilYaw = 0
+		end
 		punch = math.max(0, punch - dt * 2.4)
 
 		-- Local bloom estimate so the crosshair breathes. Damage spread is server-side.
@@ -196,6 +225,7 @@ function View.start(player)
 		api._effective = Weapons.effectiveSpread(weapon, api._spread, speedFrac, sprinting)
 
 		if not inMatch then
+			lockedCharacter = nil
 			player.CameraMode = Enum.CameraMode.Classic
 			camera.CameraType = Enum.CameraType.Scriptable
 			UserInputService.MouseIconEnabled = true
@@ -205,42 +235,44 @@ function View.start(player)
 			local position = Vector3.new(math.cos(orbit) * 86, 48, math.sin(orbit) * 86)
 			camera.CFrame = CFrame.new(position, focus)
 			camera.FieldOfView = 58
+			clearRecoil()
 			for _, model in pairs(models) do
 				model.Parent = nil
 			end
 			return
 		end
 
-		player.CameraMode = Enum.CameraMode.LockFirstPerson
-		if camera.CameraType ~= Enum.CameraType.Custom then
+		-- Lock once per life. Writing CameraMode, MouseBehavior, and the full
+		-- CFrame every frame fights the default first-person camera: the mouse
+		-- recenter is read as look input, the cursor shows, and WASD falls apart.
+		local freshLife = character ~= lockedCharacter
+		if freshLife then
+			lockedCharacter = character
+			clearRecoil()
+		end
+		if freshLife or player.CameraMode ~= Enum.CameraMode.LockFirstPerson then
+			player.CameraMode = Enum.CameraMode.LockFirstPerson
+		end
+		if freshLife or camera.CameraType ~= Enum.CameraType.Custom then
 			camera.CameraType = Enum.CameraType.Custom
 		end
-		camera.FieldOfView = 80
-		UserInputService.MouseIconEnabled = false
-		UserInputService.MouseBehavior = Enum.MouseBehavior.LockCenter
-		camera.CFrame = camera.CFrame * CFrame.Angles(recoilPitch, recoilYaw, 0)
-
-		if humanoid and hrp and humanoid.FloorMaterial == Enum.Material.Air then
-			local move = humanoid.MoveDirection
-			if move.Magnitude > 0.05 then
-				local velocity = hrp.AssemblyLinearVelocity
-				local horizontal = Vector3.new(velocity.X, 0, velocity.Z)
-				local cap = (player:GetAttribute("MoveSpeed") or humanoid.WalkSpeed) * 1.12
-				if cap < 8 then
-					cap = 8
-				end
-				local wish = move.Unit * math.min(cap, humanoid.WalkSpeed > 1 and humanoid.WalkSpeed or cap)
-				local delta = wish - horizontal
-				if delta.Magnitude > 0.05 then
-					local add = delta.Unit * math.min(delta.Magnitude, 24 * dt)
-					local nextHorizontal = horizontal + add
-					if nextHorizontal.Magnitude > cap then
-						nextHorizontal = nextHorizontal.Unit * cap
-					end
-					hrp.AssemblyLinearVelocity = Vector3.new(nextHorizontal.X, velocity.Y, nextHorizontal.Z)
-				end
-			end
+		if humanoid and camera.CameraSubject ~= humanoid then
+			camera.CameraSubject = humanoid
 		end
+		camera.FieldOfView = 80
+		if UserInputService.MouseIconEnabled then
+			UserInputService.MouseIconEnabled = false
+		end
+		if UserInputService.MouseBehavior ~= Enum.MouseBehavior.LockCenter then
+			UserInputService.MouseBehavior = Enum.MouseBehavior.LockCenter
+		end
+		local deltaPitch = recoilPitch - appliedPitch
+		local deltaYaw = recoilYaw - appliedYaw
+		if math.abs(deltaPitch) > 1e-6 or math.abs(deltaYaw) > 1e-6 then
+			camera.CFrame = camera.CFrame * CFrame.Angles(deltaPitch, deltaYaw, 0)
+		end
+		appliedPitch = recoilPitch
+		appliedYaw = recoilYaw
 
 		if currentId ~= weaponId then
 			if models[currentId] then

@@ -112,6 +112,8 @@ Output on a successful deploy:
 
 `Client input ready` means this client script is the one running. A key or click with no `Deploy attempt` line means that input never reached the handler. `Deploy bail:` says why the handler stopped. `Deploy` is the FireServer. `SelectOperator` and `Spawned` are the server. A red `[COCS] Deploy failed` or `[COCS] Spawn failed` is the server rejecting the spawn and leaving you on the select screen so you can try again.
 
+One `Spawned` line is the deploy. A later `Down` line (void, gun, rocket) is a real death, and the next `Spawned` is the respawn two seconds later. Space in a match is jump and does not print. Mouse look stays locked; shots kick the view and settle, they do not spin it.
+
 | Input | Action |
 |---|---|
 | WASD | Move |
