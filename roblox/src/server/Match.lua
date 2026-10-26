@@ -637,7 +637,9 @@ function Match.start()
 		game:GetService("StarterPlayer").LoadCharacterAppearance = false
 	end)
 	workspace.Gravity = Config.GRAVITY
-	workspace.FallenPartsDestroyHeight = -80
+	-- FallenPartsDestroyHeight is not writable from a Script (PluginOrOpenCloud).
+	-- default.project.json sets it on Workspace. Do not assign it here or Match.start aborts
+	-- before SelectOperator is connected.
 
 	local function strip(child)
 		if child:IsA("SpawnLocation") or child.Name == "Baseplate" then

@@ -4,7 +4,6 @@ local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local UserInputService = game:GetService("UserInputService")
 local ContextActionService = game:GetService("ContextActionService")
-local GuiService = game:GetService("GuiService")
 local RunService = game:GetService("RunService")
 local StarterGui = game:GetService("StarterGui")
 local TextChatService = game:GetService("TextChatService")
@@ -128,21 +127,6 @@ local function isDeployKey(key)
 		or key == Enum.KeyCode.Space
 end
 
-local function pointerOverDeploy()
-	if not deploy or not deploy.Visible or not deploy.Parent then
-		return false, nil
-	end
-	local location = UserInputService:GetMouseLocation()
-	local hits = GuiService:GetGuiObjectsAtPosition(location.X, location.Y)
-	local top = hits[1]
-	for _, obj in ipairs(hits) do
-		if obj == deploy or obj:IsDescendantOf(deploy) or obj.Name == "Deploy" then
-			return true, top
-		end
-	end
-	return false, top
-end
-
 local function sendWeapon(weaponId)
 	if not inMatch() then
 		return
@@ -194,28 +178,7 @@ UserInputService.InputBegan:Connect(function(input, processed)
 		end
 	end
 	if input.UserInputType == Enum.UserInputType.MouseButton1 then
-		if not inMatch() then
-			local over, top = pointerOverDeploy()
-			local camera = workspace.CurrentCamera
-			local height = camera and camera.ViewportSize.Y or 0
-			local nearButton = height > 0 and UserInputService:GetMouseLocation().Y > height - 160
-			if over or nearButton then
-				print(
-					"[COCS] Click",
-					"processed",
-					processed,
-					"overDeploy",
-					over,
-					"top",
-					top and top:GetFullName() or "none"
-				)
-			end
-			if over then
-				requestDeploy(hud.selectedId(), "click")
-				return
-			end
-		end
-		if processed then
+		if not inMatch() or processed then
 			return
 		end
 		holdingFire = true

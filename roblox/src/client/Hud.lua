@@ -784,11 +784,8 @@ function Hud.mount(player, onDeploy)
 			onDeploy(selected)
 		end
 	end
-	-- Activated covers mouse, touch, and keyboard focus. MouseButton1Click
-	-- covers a plain click if Activated is swallowed by the scriptable camera.
+	-- One connection. Click, touch, and gamepad all fire Activated.
 	deploy.Activated:Connect(emitDeploy)
-	deploy.MouseButton1Click:Connect(emitDeploy)
-	deploy.MouseButton1Down:Connect(emitDeploy)
 	again.MouseButton1Click:Connect(function()
 		local folder = ReplicatedStorage:WaitForChild("Remotes")
 		folder:WaitForChild("ChangeOperator"):FireServer()
